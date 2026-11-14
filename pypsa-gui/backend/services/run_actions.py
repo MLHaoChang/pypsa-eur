@@ -1638,6 +1638,9 @@ MG_FREQUENCY_LISTS = (
     "bridge_failing_hours",
     "planned_infeasible_hours",
 )
+#: The island hours E1 and the GFM bridge were not judged in, the tie being
+#: open (SH 40): never failing, never passing, never in a count.
+MG_FREQUENCY_TIE_OPEN = "tie_open_hours"
 MG_FREQUENCY_BASIS = (
     "hours of the campus run's year, each (period, hour) once, not weighted"
 )
@@ -1662,7 +1665,9 @@ def _island_newer(project_dir, path) -> bool:
 def mg_frequency(project, task, revision) -> dict:
     """M11: the island hours the run's own campus run fails the frequency
     judge in, `{"hours": [(period, hour), ...]}`, each hour once whichever
-    judges fail it; else `{"state", "reason"}` for no evidence. Current as
+    judges fail it, with `"tie_open_hours"`, the island hours whose solved
+    tie is open, where E1 and the bridge were not judged, and `"note"`, the
+    summary's word when that is every island hour (SH 40); else `{"state", "reason"}` for no evidence. Current as
     the campus contingency read is (B6): the step completed, the published
     run is the one it settled on, and the network is at its revision."""
     from services import campus_electrical_service as ce
@@ -1716,9 +1721,17 @@ def mg_frequency(project, task, revision) -> dict:
         hours = sorted(
             {(int(p), int(h)) for key in MG_FREQUENCY_LISTS for p, h in summary[key]}
         )
-    except (KeyError, TypeError, ValueError):
+        # SH 40: island hours whose solved tie is open, where E1 and the
+        # bridge were not judged; a summary written before them has none.
+        tie_open = sorted(
+            {(int(p), int(h)) for p, h in summary.get(MG_FREQUENCY_TIE_OPEN, [])}
+        )
+        note = summary.get("e1_bridge_note")
+        if note is not None and not isinstance(note, str):
+            raise TypeError(note)
+    except (KeyError, TypeError, ValueError, AttributeError):
         return {
             "state": "unreadable",
             "reason": "the campus run's frequency summary cannot be read",
         }
-    return {"hours": hours}
+    return {"hours": hours, "tie_open_hours": tie_open, "note": note}

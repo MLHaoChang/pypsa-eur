@@ -3,7 +3,7 @@
 
 # Time to power card on the KPI headline strip
 
-Status: ready-for-agent
+Status: done
 Blocked by: `.scratch/datacenter-grid-readiness/issues/27-time-to-power-fact.md`
 Type: feature (follow-up to 03; owner decision TTP-1)
 Reviewer: UX.

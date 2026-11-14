@@ -27,3 +27,9 @@ The LC-D22 share of LC-48's pending rows. No gate is built for these; each row i
 Each row above is covered by a behavioural fixture written the LC-43 way (a public seam, a hand oracle, the exact refusal kind, and `tests/lc43_gates.py::state` unchanged on every refusal), or the owner decides to drop it. Dropping a row is an owner decision (GK B C1). When the last row is covered, update its manifest row and the `r3-uncovered:LC-D22` blocker in `assistant_control_matrix.py`.
 
 ## Comments
+
+### 2026-11-14: built
+
+- `LC-D22.rebind`: covered by `pypsa-gui/backend/tests/test_lc48c_d22_rebind_gates.py`. The switch is the real projects route (the other tab saves as `Elsewhere` with `rebind`). A write after the switch is refused `project_switched_mid_turn` and writes nothing. A delivery built across the switch is 409 `project_changed` and stores no zip. `lc43_gates.state` is unchanged on both refusals.
+- `LC-D22.viewer_role`: DROPPED by owner decision LC48C-ROLE-1 (`docs/agents/owner-decisions.md`). The manifest row is `_unavailable` and points at the decision. The role is filed as a product idea: `.scratch/project-viewer-role/issues/01-read-only-project-viewer-role.md` (needs-triage).
+

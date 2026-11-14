@@ -145,7 +145,7 @@ describe('InvestmentCaseView', () => {
 
   it('a stale report with no named part names every input, the IC G3 ones too', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
-      report: { present: true, stale: true, changed: [], reason: 'hash_differs' } })
+      report: { present: true, stale: true, verdict: { state: 'stale', broken: [] }, changed: [], reason: 'hash_differs' } })
     api.getReport.mockResolvedValue(structuredClone(REPORT))
     renderView()
     await screen.findByTestId('ic-report')
@@ -155,7 +155,7 @@ describe('InvestmentCaseView', () => {
 
   it('names the IC G3 staleness parts as the fallback text does', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
-      report: { present: true, stale: true, changed: ['extra_assets', 'owner_assets'] } })
+      report: { present: true, stale: true, verdict: { state: 'stale', broken: [] }, changed: ['extra_assets', 'owner_assets'] } })
     api.getReport.mockResolvedValue(structuredClone(REPORT))
     renderView()
     await screen.findByTestId('ic-report')
@@ -237,7 +237,7 @@ describe('InvestmentCaseView', () => {
 
   it('renders a report with not-established headlines and the stale marker', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
-      report: { present: true, stale: true, changed: ['finance', 'value_flows'] } })
+      report: { present: true, stale: true, verdict: { state: 'stale', broken: [] }, changed: ['finance', 'value_flows'] } })
     api.getReport.mockResolvedValue(structuredClone(REPORT))
     const { container } = renderView()
     await screen.findByTestId('ic-report')
@@ -402,7 +402,7 @@ describe('InvestmentCaseView', () => {
 
   it('an unconfirmable currency says why, not "changed" (review B4)', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
-      report: { present: true, stale: true, changed: [], reason: 'solve_in_flight' } })
+      report: { present: true, stale: true, verdict: { state: 'stale', broken: [] }, changed: [], reason: 'solve_in_flight' } })
     api.getReport.mockResolvedValue(structuredClone(REPORT))
     renderView()
     await screen.findByTestId('ic-report')
@@ -527,7 +527,7 @@ describe('InvestmentCaseView: campus electrical equipment (campus-IC 02/05)', ()
 
   it('a stale report naming the campus study says so in the report\'s one stale line', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
-      report: { present: true, stale: true, changed: ['extra_assets'] } })
+      report: { present: true, stale: true, verdict: { state: 'stale', broken: [] }, changed: ['extra_assets'] } })
     api.getReport.mockResolvedValue(campusReport({
       extra_assets: [campusAsset('campus:TR_132_33_40#1')],
       campus_study: { study_method: 'least_cost', unresolved: [] } }))

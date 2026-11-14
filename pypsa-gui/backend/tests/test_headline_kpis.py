@@ -492,7 +492,9 @@ def test_an_energy_hub_leads_with_lcoe_and_says_when_the_case_has_not_run(
     solve(windy)
     as_template(monkeypatch, "eh_datacenter")
     kind, by_id, order = cards(client)
-    assert (kind, tuple(order)) == ("energy_hub", hk.ORDER["energy_hub"])
+    # No data-centre load: the time-to-power card is absent, not a tile.
+    expected = tuple(c for c in hk.ORDER["energy_hub"] if c != "time_to_power")
+    assert (kind, tuple(order)) == ("energy_hub", expected)
     assert (by_id["lcoe"]["value"], by_id["lcoe"]["state"]) == (None, "not_run")
     assert by_id["lcoe"]["reason"] == "The investment case has not run on this solve."
     # No value of lost load in the solve: unserved energy was not measured, not zero.
@@ -567,7 +569,9 @@ def test_project_kind(template, kind):
 
 
 def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
-    assert all(len(ids) <= 5 and len(set(ids)) == len(ids) for ids in hk.ORDER.values())
+    # Five, and an energy hub's sixth: time to power, only with a data-centre load.
+    assert all(len(ids) <= 6 and len(set(ids)) == len(ids) for ids in hk.ORDER.values())
+    assert all(len(ids) <= 5 for kind, ids in hk.ORDER.items() if kind != "energy_hub")
     split = [
         hk._UNAVAILABLE,
         hk.SWITCHED_OFF,
@@ -1157,3 +1161,81 @@ def test_a_failed_expansion_compute_is_unavailable_not_a_zero(
         hk.FIGURE_NOT_COMPUTED,
     )
     assert by_id["system_cost"]["state"] != "unavailable"
+
+
+def _ttp_card(monkeypatch, spec, stages, stage_reason=None):
+    """The time-to-power card read from a faked saved-project source."""
+    from services import assurance_records
+
+    raw = {
+        "version": 1,
+        "profile": hk.CHECKED["time_to_power"][0],
+        "entity_id": "network",
+        "index": ["saved project"],
+        "spec": spec,
+        "stages": stages,
+        "stage_reason": stage_reason,
+        "unsaved_edits": False,
+    }
+    monkeypatch.setenv(MODE, "strict")
+    monkeypatch.setenv(GATE, "time-to-power/1")
+    monkeypatch.setattr(assurance_records, "scoped_read", lambda *a, **k: raw)
+    return hk._checked(SimpleNamespace(project_uuid="p"), "time_to_power")
+
+
+def _stage(period, start, end, mw, max_mw=None):
+    return {
+        "period": period,
+        "start": start,
+        "end": end,
+        "energized_mw": mw,
+        "max_mw": mw if max_mw is None else max_mw,
+        "set": True,
+    }
+
+
+SPEC = {
+    "project_start": "2026-01-01",
+    "connection_date": None,
+    "phases": [{"cod": "2027-01-01", "it_mw": 10}],
+}
+
+
+def test_time_to_power_is_in_the_energy_hub_set():
+    assert hk.ORDER["energy_hub"][-1] == "time_to_power"
+    assert hk.CHECKED["time_to_power"][1] == "time_to_power_months"
+
+
+def test_a_data_centre_card_reads_the_months(monkeypatch):
+    card = _ttp_card(
+        monkeypatch, SPEC, [_stage(2027, "2027-01-01", "2030-01-01", 15.0)]
+    )
+    assert (card["value"], card["unit"], card["state"]) == (12, "months", "ready")
+    assert card["formula_id"] == "dc-time-to-power/1" and card["detail"] is None
+
+
+def test_a_card_not_exact_says_how_early_first_power_may_be(monkeypatch):
+    stages = [
+        _stage(2027, "2027-01-01", "2030-01-01", 0.0, max_mw=5.0),
+        _stage(2030, "2030-01-01", "2035-01-01", 15.0),
+    ]
+    card = _ttp_card(monkeypatch, SPEC, stages)
+    assert card["value"] == 48
+    assert card["detail"] == "First power may be as early as 2027-01-01."
+
+
+def test_a_project_without_a_data_centre_load_has_no_tile(monkeypatch):
+    assert _ttp_card(monkeypatch, None, []) is None
+
+
+def test_a_missing_input_is_a_sentence_never_zero(monkeypatch):
+    spec = {**SPEC, "project_start": None}
+    card = _ttp_card(monkeypatch, spec, [])
+    assert (card["value"], card["state"]) == (None, "unavailable")
+    assert card["reason"] == "The project start date is not set."
+
+
+def test_a_switched_off_profile_leaves_no_time_to_power_tile(monkeypatch):
+    _ttp_card(monkeypatch, SPEC, [])
+    monkeypatch.setenv(GATE, "curtailment/1")
+    assert hk._checked(SimpleNamespace(project_uuid="p"), "time_to_power") is None

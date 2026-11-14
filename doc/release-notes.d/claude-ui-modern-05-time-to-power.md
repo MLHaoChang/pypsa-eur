@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Results headline strip shows a Time to power card for data-centre projects, with the checked figure in months and a note when first power may be earlier; projects without a data-centre load show no card.

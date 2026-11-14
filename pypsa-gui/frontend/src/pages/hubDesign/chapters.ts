@@ -10,6 +10,7 @@ import type { InvestmentCaseReportPayload, InvestmentCaseStudy, SimulationStatus
 import { RESULT_GROUPS, type ResultsGroup, type ResultsTab } from '../results/groups'
 import { fmtCurrency } from '../../utils/format'
 import { failureLine, runningLine } from '../campusRunProgress'
+import { studyStale } from '../results/investment/financeModel'
 
 export type ChapterId = Exclude<ResultsGroup, 'summary'>
 
@@ -92,7 +93,7 @@ function investment({ study, report }: ChapterInputs['investment']): Omit<Chapte
     return { label, value: '', state: 'unavailable', open,
       reason: 'The investment case ran, but its NPV is not established; it says why.' }
   }
-  const stale = study?.stale === true || study?.report?.stale === true || report.stale === true
+  const stale = studyStale(study).stale
   return {
     label, value: fmtCurrency(figure), state: stale ? 'stale' : 'ready', open,
     basis: post != null ? 'Net present value at the WACC, after tax'

@@ -705,7 +705,14 @@ VARIANTS: list[dict] = [
              'with the open project (project_uuid), its unsaved G1 edit (20 to 33 MW) and the lc43_gates state kept: each file is parsed into a candidate network before it replaces the open one (LC-43c)',
              'import_uploaded_network',
              B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_import_is_refused_and_keeps_the_open_network'),
-    _pending('LC-D20.delivery_ttl', 'a delivery and its download never expire: no expiry gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _covered('LC-D20.delivery_ttl', 'a delivery lives 7 days (owner decision LC48A-TTL-1): made 604,800 - 60 s ago it is delivered, zipped and downloaded with the same sha256; made 604,800 + 60 s ago '
+             'get_file_delivery, build_delivery and the download are each 410 delivery_expired, with tests/lc43_gates.py state and the file\'s meta.json bytes unchanged; '
+             'the person\'s own upload made 30 days ago still downloads; exporting the same network again keeps the file id and serves it',
+             'export_network_nc get_file_delivery build_delivery',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_a_delivery_inside_seven_days_is_served',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_a_delivery_older_than_seven_days_is_refused_and_nothing_changes',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_the_persons_own_upload_never_expires',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_exporting_the_same_content_again_makes_a_fresh_delivery'),
     _covered('LC-D21.reports', 'exported DOCX read with python-docx: headline table MC LOLE 3.21 h/yr, ENS cap 10.00, unrun sections say not established; scripted 3.2 h/yr audited verified; '
              'regenerated 9.9 h/yr is version 2, unverified and listed in Numbers to check, tables and other sections unchanged, version 1 intact (one stored study report, scripted model)',
              'generate_report get_report_status list_reports get_report get_report_table regenerate_report_section diff_report_versions export_report_docx',
@@ -767,8 +774,16 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d22_concurrency_gates.py::test_another_users_lock_refuses_checkpoint_restore_and_edit',
              B + 'test_lc43_d22_concurrency_gates.py::test_undo_reverts_the_newest_step_even_when_it_is_the_persons',
              B + 'test_lc43_d22_concurrency_gates.py::test_a_missing_checkpoint_restores_nothing_and_the_run_evidence_stays'),
-    _pending('LC-D22.rebind', 'an edit racing a switch of the active project (build_delivery project_changed, a write rebinding mid-turn) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
-    _pending('LC-D22.viewer_role', 'project ACL knows only admin and member: no read-only role refuses an edit, undo or restore (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _covered('LC-D22.rebind', 'the person\'s other tab saves the open network as Elsewhere with rebind while the turn runs (the real projects route): '
+             'the copilot\'s G1 marginal cost 10 -> 50 is refused project_switched_mid_turn (tool error and turn error), G1 stays 10 in the open network and in the baseline '
+             'project\'s saved file; build_delivery with the switch landing while the zip is built is 409 project_changed; tests/lc43_gates.py state of the new active project is '
+             'unchanged and neither project gains a zip',
+             'update_component build_delivery export_network_nc',
+             B + 'test_lc48c_d22_rebind_gates.py::test_a_write_after_the_active_project_switched_mid_turn_writes_nothing',
+             B + 'test_lc48c_d22_rebind_gates.py::test_a_delivery_built_while_the_active_project_switched_is_refused'),
+    _unavailable('LC-D22.viewer_role', 'DROPPED by owner decision LC48C-ROLE-1: project ACL has only admin and member, no read-only role exists to refuse an edit, '
+                 'undo or restore; a read-only project viewer role is filed as a product idea (.scratch/project-viewer-role/issues/01-read-only-project-viewer-role.md)',
+                 'docs/agents/owner-decisions.md LC48C-ROLE-1'),
     _covered('LC-D23.provider_parity', 'one journey on the Claude wire only (LC32-OPEN-1), read from the request bodies: toolset results offers a strict subset without update_component; '
              'the unoffered call is refused tool_not_offered with G1 still 20 MW; toolset all restores the first offer; approved write gives G1 35 MW and a 20 -> 35 receipt, denied leaves 20 MW',
              'use_toolset update_component',
