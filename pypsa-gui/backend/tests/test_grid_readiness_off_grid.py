@@ -262,6 +262,32 @@ def test_off_grid_with_a_grid_generator_at_the_poc_and_no_link_keeps_the_rows(tm
     _kept(G.grid_readiness(_off_grid(tmp_path), n, PROFILE))
 
 
+@pytest.mark.parametrize("unmark", ("none_marked", "no_column"))
+def test_off_grid_with_no_poc_marked_keeps_the_rows(tmp_path, unmark):
+    # An open tie, but no bus is the PoC: nothing shows the PCC open.
+    n = _open_tie(_site())
+    if unmark == "none_marked":
+        n.buses["eh_poc"] = False
+    else:
+        n.buses = n.buses.drop(columns="eh_poc")
+    out = G.grid_readiness(_off_grid(tmp_path), n, PROFILE)
+    assert {"ramp_rate", "oscillation"} <= {r["id"] for r in out["rows"]}
+    assert G.CONN_OFF_GRID not in {e["reason"] for e in out["excluded"]}
+
+
+def test_off_grid_with_a_conducting_import_link_away_from_the_poc_keeps_the_rows(
+    tmp_path,
+):
+    # The PoC's tie is open, but another tagged import Link still conducts.
+    n = _open_tie(_site())
+    n.add("Bus", "grid2", v_nom=20.0)
+    n.add("Link", "import2", bus0="grid2", bus1="mv", p_nom=10.0)
+    n.links["eh_role"] = [
+        "" if x != "import2" else "grid_import" for x in n.links.index
+    ]
+    _kept(G.grid_readiness(_off_grid(tmp_path), n, PROFILE))
+
+
 def test_off_grid_with_no_saved_network_keeps_the_rows(tmp_path):
     out = G.grid_readiness(_off_grid(tmp_path), None, PROFILE)
     rows = {r["id"]: r for r in out["rows"]}

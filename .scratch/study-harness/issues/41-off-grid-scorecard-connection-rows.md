@@ -40,3 +40,7 @@ Owner answered (SH41-OFFGRID-1, `docs/agents/owner-decisions.md`). Status: ready
 - O4: the cards of the four grid-connected templates (eh_datacenter, eh_datacenter_staged, eh_h2_hub, eh_h2_hub_staged) were compared once, byte for byte, with master's: identical. A test on the same four pins that the card with the rule switched off is the same card.
 
 Status: done.
+
+### 2026-11-14: GK A NOT OK @79d7ac2c, fixed
+
+`_tie_open` was `all(_never_conducts(...) for x in inp.links)`: `all([])` excluded an off-grid project with no import Link, and Lines, Transformers and grid generators at the PCC were ignored. The rows now leave only when at least one bus is marked as the PoC, every PoC passes SH 40's structural rule `_open_tie_rating` (joined by Links alone, at least one, every one held at 0 MW, no Line or Transformer), and every tagged import Link is held at 0 MW. Template-free tests, red on 79d7ac2c: no import Link; a Line to the grid; a grid Generator at the PoC with no Link; no PoC marked. Also: a conducting import Link away from the PoC keeps the rows (kills a mutant), and the open tie stays excluded. The "can import" note goes only on a project with an import Link.
