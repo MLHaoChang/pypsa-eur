@@ -219,6 +219,9 @@ describe('the study record', () => {
     expect(studyStale({ status: 'done', stale: true, report: { stale: true, verdict: { state: 'fresh', broken: [] } } })
       .stale).toBe(false)
     expect(studyStale({ status: 'done', report: { present: false, stale: null } }).stale).toBe(false)
+    // a stored report whose block carries no verdict never reads fresh
+    expect(studyStale({ status: 'done', report: { present: true, stale: false } }).stale).toBe(true)
+    expect(studyStale({ status: 'done', report: { stale: true } }).stale).toBe(true)
     expect(studyStale(null).stale).toBe(false)
   })
 

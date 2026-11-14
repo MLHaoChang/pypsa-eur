@@ -80,24 +80,6 @@ export interface StaleVerdict {
   reason: string
 }
 
-/** One broken edge of a report's or the investment case's verdict (`provenance_graph.studies.verdict_wire`, PG-05):
- *  `edge` is the input the edge pins; `needs_run` is true when only running the study again clears it. */
-export interface BrokenEdge {
-  edge: string
-  field: string | null
-  recorded: unknown
-  current_field: string | null
-  current: unknown
-  reason: string
-  needs_run: boolean
-}
-
-/** The provenance graph's verdict on a report or the investment case (PG-05): one state, with the edges that broke. */
-export interface GraphVerdict {
-  state: 'fresh' | 'stale' | 'uncompared' | 'from_memory' | (string & {})
-  broken: BrokenEdge[]
-}
-
 /** One investment part of an asset (`services/asset_schema/access.py` `upfront_parts`): EUR per unit of the
  *  asset's sizing variable (`AssetCostRow.basis`). */
 export interface AssetCostPart {

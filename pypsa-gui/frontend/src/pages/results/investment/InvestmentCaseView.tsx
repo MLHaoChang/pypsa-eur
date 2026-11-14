@@ -441,7 +441,7 @@ export default function InvestmentCaseView() {
   // While a run is under way, the previous report describes other inputs.
   const r = running ? null : (report.data ?? null)
   const staleness = studyStale(s)
-  const stale = !running && (staleness.stale || r?.stale === true)
+  const stale = !running && staleness.stale
   const fraction = progressFraction(studyProgress(s))
   const progress = progressText(studyProgress(s))
   const failure = studyFailure(s)

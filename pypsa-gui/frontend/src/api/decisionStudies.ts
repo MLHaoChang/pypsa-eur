@@ -16,7 +16,8 @@
 // flag).
 import axios from 'axios'
 import client from './client'
-import type { GraphVerdict, StaleVerdict } from './assetSchema'
+import type { StaleVerdict } from './assetSchema'
+import type { GraphVerdict } from './types'
 
 // ── enums and small shapes ────────────────────────────────────────────────
 

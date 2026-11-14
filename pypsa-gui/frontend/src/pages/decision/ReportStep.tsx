@@ -24,7 +24,8 @@ export default function ReportStep({ report, error, assembleError, run, tornado,
   const never = !report && error?.code === 'report_never_assembled'
   // The verdict says which edge broke (PG-05): one that feeds the run needs a re-run (a changed
   // network or engine, an earlier version's run); the report's own edges clear on assembling again.
-  const staleNeedsRun = !!report?.verdict?.broken.some(b => b.needs_run)
+  // No verdict to read: ask for the re-run, which clears every edge.
+  const staleNeedsRun = !report?.verdict || report.verdict.broken.some(b => b.needs_run)
   const newer = reportNeedsReassembly(report, run, tornado)
   return (
     <div className="flex flex-col gap-4">
@@ -54,8 +55,9 @@ export default function ReportStep({ report, error, assembleError, run, tornado,
             {report.stale && (
               <Banner tone="warn" testId="report-stale" title="This report is out of date.">
                 <CodeList codes={report.stale_reasons} tariffHelp={report.honesty_help} />
-                {staleNeedsRun && <span data-testid="report-rerun">Run the study again, then assemble the report.</span>}
-                {!staleNeedsRun && <span data-testid="report-reassemble-hint">Assemble the report again to bring it up to date.</span>}
+                {staleNeedsRun
+                  ? <span data-testid="report-rerun">Run the study again, then assemble the report.</span>
+                  : <span data-testid="report-reassemble-hint">Assemble the report again to bring it up to date.</span>}
               </Banner>
             )}
             <div className="flex flex-wrap gap-2">

@@ -65,6 +65,13 @@ describe('the report step', () => {
     expect(b.textContent).not.toMatch(/needs_run|input:/)
   })
 
+  it('asks for the re-run when the report carries no verdict', () => {
+    render(<ReportStep report={{ ...report, stale: true, stale_reasons: ['report_has_no_findings_hashes'], verdict: undefined }}
+      error={null} assembleError={null} run={run} tornado={tornado} onAssemble={vi.fn()} busy={false} urls={urls} />)
+    expect(screen.getByTestId('report-rerun')).toBeTruthy()
+    expect(screen.queryByTestId('report-reassemble-hint')).toBeNull()
+  })
+
   it('asks for a re-run from the verdict, not from the reason text', () => {
     // neither code reads "changed", "copied" or "earlier": only the network edge says a run is needed
     render(<ReportStep report={{ ...report, stale: true, stale_reasons: ['report_has_no_findings_hashes', 'network_edited'],
