@@ -36,8 +36,15 @@ def _network(*, committable=True, extendable=False, battery=False) -> pypsa.Netw
         n.add("Carrier", c)
     n.add("Bus", "ac", carrier="AC")
     n.add("Load", "site", bus="ac", p_set=LOAD_MW)
-    n.add("Generator", "pv", bus="ac", carrier="solar", p_nom=30.0, marginal_cost=0.0,
-          p_max_pu=pd.Series(PV_PU, index=n.snapshots))
+    n.add(
+        "Generator",
+        "pv",
+        bus="ac",
+        carrier="solar",
+        p_nom=30.0,
+        marginal_cost=0.0,
+        p_max_pu=pd.Series(PV_PU, index=n.snapshots),
+    )
     kw = dict(bus="ac", carrier="diesel", marginal_cost=250.0)
     if committable:
         kw.update(committable=True, p_min_pu=0.3, p_nom=12.0, start_up_cost=10.0)
@@ -47,8 +54,17 @@ def _network(*, committable=True, extendable=False, battery=False) -> pypsa.Netw
         kw.update(p_nom=12.0)
     n.add("Generator", "diesel", **kw)
     if battery:
-        n.add("StorageUnit", "bess", bus="ac", carrier="battery", p_nom=10.0, max_hours=1.0,
-              efficiency_dispatch=0.9, efficiency_store=0.9, cyclic_state_of_charge=True)
+        n.add(
+            "StorageUnit",
+            "bess",
+            bus="ac",
+            carrier="battery",
+            p_nom=10.0,
+            max_hours=1.0,
+            efficiency_dispatch=0.9,
+            efficiency_store=0.9,
+            cyclic_state_of_charge=True,
+        )
     return n
 
 
@@ -72,10 +88,14 @@ ON = {"reserve_share_load": 0.2}
 @pytest.mark.parametrize("off", [None, 0.0])
 def test_off_changes_no_fingerprint_and_adds_no_row(off):
     base = goal_free_config(SolverConfig())
-    cfg = SolverConfig(reserve_share_load=off, reserve_share_pv=off, reserve_share_wind=off)
+    cfg = SolverConfig(
+        reserve_share_load=off, reserve_share_pv=off, reserve_share_wind=off
+    )
     assert goal_free_config(cfg) == base
     assert shares_of(cfg) is None
-    assert _wrap_with_operating_reserve(None, None, cfg) is None  # the user's fn, unchanged
+    assert (
+        _wrap_with_operating_reserve(None, None, cfg) is None
+    )  # the user's fn, unchanged
     n = _network()
     n.optimize.create_model()
     fn = build_lp_chain(n, cfg, queue.SimpleQueue())
@@ -84,7 +104,9 @@ def test_off_changes_no_fingerprint_and_adds_no_row(off):
     assert ROW not in n.model.constraints
 
 
-@pytest.mark.parametrize("key", ["reserve_share_load", "reserve_share_pv", "reserve_share_wind"])
+@pytest.mark.parametrize(
+    "key", ["reserve_share_load", "reserve_share_pv", "reserve_share_wind"]
+)
 def test_on_enters_the_fingerprint(key):
     on = goal_free_config(SolverConfig(**{key: 0.1}))
     assert on != goal_free_config(SolverConfig()) and on[key] == 0.1
@@ -94,13 +116,17 @@ def test_on_enters_the_fingerprint(key):
 
 
 @pytest.mark.parametrize("bad", [-0.1, 1.5, float("nan"), float("inf")])
-@pytest.mark.parametrize("key", ["reserve_share_load", "reserve_share_pv", "reserve_share_wind"])
+@pytest.mark.parametrize(
+    "key", ["reserve_share_load", "reserve_share_pv", "reserve_share_wind"]
+)
 def test_the_schema_refuses_out_of_range_and_non_finite(key, bad):
     with pytest.raises(ValidationError):
         SolverConfigSchema(**{key: bad})
 
 
-@pytest.mark.parametrize("key", ["reserve_share_load", "reserve_share_pv", "reserve_share_wind"])
+@pytest.mark.parametrize(
+    "key", ["reserve_share_load", "reserve_share_pv", "reserve_share_wind"]
+)
 def test_a_load_or_import_names_an_invalid_share(key):
     assert invalid_goal_fields({key: 1.5}) == {key: 1.5}
     assert invalid_goal_fields({key: 0.5}) == {}
@@ -152,7 +178,9 @@ def test_pv_output_raises_the_requirement_by_its_dispatched_output():
     _solve(n, {"reserve_share_pv": 0.1})
     res = operating_reserve_result(n, (0.0, 0.1, 0.0))
     t = n.snapshots[NOON]
-    assert res["per_snapshot"][NOON]["required_mw"] == pytest.approx(0.1 * n.generators_t.p.at[t, "pv"])
+    assert res["per_snapshot"][NOON]["required_mw"] == pytest.approx(
+        0.1 * n.generators_t.p.at[t, "pv"]
+    )
     assert res["per_snapshot"][0]["required_mw"] == 0.0
 
 
@@ -180,13 +208,22 @@ def test_a_battery_carries_the_reserve_in_the_lp():
     assert res["reason"] is None
     assert all(r["held_mw"] >= r["required_mw"] - 1e-6 for r in res["per_snapshot"])
     # at night the diesel serves the full 10 MW (no headroom): the 3 MW are the battery's
-    assert any(r["held_mw"] >= 3.0 - 1e-6 and r["binding"] for r in res["per_snapshot"][:8])
+    assert any(
+        r["held_mw"] >= 3.0 - 1e-6 and r["binding"] for r in res["per_snapshot"][:8]
+    )
 
 
 def test_slacks_and_withdrawing_generators_hold_no_headroom():
     """O3: VoLL slack and a withdrawing Generator are never headroom."""
     n = _network()
-    n.add("Generator", "__voll_ac", bus="ac", carrier="load_shedding", p_nom=100.0, marginal_cost=1e4)
+    n.add(
+        "Generator",
+        "__voll_ac",
+        bus="ac",
+        carrier="load_shedding",
+        p_nom=100.0,
+        marginal_cost=1e4,
+    )
     n.add("Generator", "dump", bus="ac", carrier="diesel", p_nom=5.0, sign=-1.0)
     sel = assets(n)
     assert sel["dispatchable"] == ["diesel"], sel
@@ -208,7 +245,9 @@ def test_binding_is_by_slack_on_a_milp():
     res = operating_reserve_result(n, (0.2, 0.0, 0.0))
     for r in res["per_snapshot"]:
         slack = r["held_mw"] - r["required_mw"]
-        assert r["binding"] == (r["required_mw"] > 0 and slack <= 1e-6 * r["required_mw"] + 1e-6)
+        assert r["binding"] == (
+            r["required_mw"] > 0 and slack <= 1e-6 * r["required_mw"] + 1e-6
+        )
 
 
 def test_a_missing_dispatch_column_is_unknown_not_zero():
@@ -231,11 +270,15 @@ def test_off_result_says_so():
 
 def test_the_infeasible_line_names_the_snapshots_only_when_capacity_cannot_cover_the_load_share():
     n = _network()
-    lines = infeasibility_lines(n, SolverConfig(reserve_share_load=1.0))  # 10 MW reserve > 12 − ... no: 12 ≥ 10
+    lines = infeasibility_lines(
+        n, SolverConfig(reserve_share_load=1.0)
+    )  # 10 MW reserve > 12 − ... no: 12 ≥ 10
     assert lines and "may contribute" in lines[0]
     n.generators.loc["diesel", "p_nom"] = 5.0
     lines = infeasibility_lines(n, SolverConfig(reserve_share_load=1.0))
-    assert "needs 10.0 MW" in lines[0] and "2030-01-01" in lines[0] and ROW in lines[0], lines
+    assert (
+        "needs 10.0 MW" in lines[0] and "2030-01-01" in lines[0] and ROW in lines[0]
+    ), lines
     assert infeasibility_lines(n, SolverConfig()) == []
 
 

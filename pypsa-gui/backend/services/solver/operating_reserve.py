@@ -76,27 +76,42 @@ def assets(n) -> dict[str, list[str]]:
     gens = n.generators
     elec = _electrical_buses(n)
     sign = gens["sign"] if "sign" in gens.columns else pd.Series(1.0, index=gens.index)
-    active = gens["active"] if "active" in gens.columns else pd.Series(True, index=gens.index)
+    active = (
+        gens["active"]
+        if "active" in gens.columns
+        else pd.Series(True, index=gens.index)
+    )
     candidates = cls["nonren_generators"] + cls["renewable_generators"]
     dispatchable = [
         g
         for g in candidates
-        if bool(active[g]) and float(sign[g]) > 0 and not _VRE.search(_carrier(n, g))
+        if bool(active[g])
+        and float(sign[g]) > 0
+        and not _VRE.search(_carrier(n, g))
         and g not in cls["injecting_generators"]
     ]
     vre = [g for g in cls["renewable_generators"] if bool(active[g])]
     su = n.storage_units
-    su_active = su["active"] if "active" in su.columns else pd.Series(True, index=su.index)
+    su_active = (
+        su["active"] if "active" in su.columns else pd.Series(True, index=su.index)
+    )
     stores = n.stores
     return {
         "dispatchable": sorted(dispatchable),
         "pv": sorted(g for g in vre if _PV.search(_carrier(n, g))),
-        "wind": sorted(g for g in vre if _WIND.search(_carrier(n, g)) and not _PV.search(_carrier(n, g))),
+        "wind": sorted(
+            g
+            for g in vre
+            if _WIND.search(_carrier(n, g)) and not _PV.search(_carrier(n, g))
+        ),
         "storage_units": sorted(
             s for s in su.index if bool(su_active[s]) and str(su.at[s, "bus"]) in elec
         ),
         "not_counted": sorted(
-            s for s in stores.index if str(stores.at[s, "bus"]) not in elec and _feeds_elec(n, str(stores.at[s, "bus"]), elec)
+            s
+            for s in stores.index
+            if str(stores.at[s, "bus"]) not in elec
+            and _feeds_elec(n, str(stores.at[s, "bus"]), elec)
         ),
         "loads": cls["loads"],
     }
@@ -106,7 +121,11 @@ def _feeds_elec(n, bus: str, elec: set[str]) -> bool:
     links = n.links
     if not len(links):
         return False
-    return bool(((links["bus0"].astype(str) == bus) & links["bus1"].astype(str).isin(elec)).any())
+    return bool(
+        (
+            (links["bus0"].astype(str) == bus) & links["bus1"].astype(str).isin(elec)
+        ).any()
+    )
 
 
 def _dense(n, comp: str, attr: str, snapshots, names) -> pd.DataFrame:
@@ -140,24 +159,39 @@ def add_rows(n, snapshots, shares, log_queue=None) -> None:
     if coord is None and "StorageUnit-p_dispatch" in m.variables:
         coord = m.variables["StorageUnit-p_dispatch"].coords["snapshot"]
     if coord is None:
-        _safe_log(log_queue, f"{LABEL}: no Generator or StorageUnit in the LP; no row ({ROW}) added.")
+        _safe_log(
+            log_queue,
+            f"{LABEL}: no Generator or StorageUnit in the LP; no row ({ROW}) added.",
+        )
         return
     gnames = set(gvar.indexes["name"]) if gvar is not None else set()
 
     def da(values, names):
         return xr.DataArray(
-            np.asarray(values, dtype=float), dims=["snapshot", "name"], coords={"snapshot": coord, "name": names}
+            np.asarray(values, dtype=float),
+            dims=["snapshot", "name"],
+            coords={"snapshot": coord, "name": names},
         )
 
     def per_t(series):
-        return xr.DataArray(np.asarray(series, dtype=float), dims=["snapshot"], coords={"snapshot": coord})
+        return xr.DataArray(
+            np.asarray(series, dtype=float),
+            dims=["snapshot"],
+            coords={"snapshot": coord},
+        )
 
     gens = n.generators
     disp = [g for g in sel["dispatchable"] if g in gnames]
     status_names = (
-        set(m.variables["Generator-status"].indexes["name"]) if "Generator-status" in m.variables else set()
+        set(m.variables["Generator-status"].indexes["name"])
+        if "Generator-status" in m.variables
+        else set()
     )
-    ext_names = set(m.variables["Generator-p_nom"].indexes["name"]) if "Generator-p_nom" in m.variables else set()
+    ext_names = (
+        set(m.variables["Generator-p_nom"].indexes["name"])
+        if "Generator-p_nom" in m.variables
+        else set()
+    )
     pmax = _dense(n, "Generator", "p_max_pu", snapshots, disp)
 
     lhs = 0
@@ -173,43 +207,69 @@ def add_rows(n, snapshots, shares, log_queue=None) -> None:
                 + ", ".join(g for g in committed if g in ext_names)
                 + " hold headroom only up to p_nom_min while on (status × p_nom is not linear).",
             )
-        p_nom = gens.loc[committed, "p_nom"].where(~gens.loc[committed].index.isin(list(ext_names)),
-                                                   gens.loc[committed, "p_nom_min"])
-        lhs = lhs + (m.variables["Generator-status"].sel(name=committed) * da(pmax[committed].mul(p_nom), committed)).sum("name")
+        p_nom = gens.loc[committed, "p_nom"].where(
+            ~gens.loc[committed].index.isin(list(ext_names)),
+            gens.loc[committed, "p_nom_min"],
+        )
+        lhs = lhs + (
+            m.variables["Generator-status"].sel(name=committed)
+            * da(pmax[committed].mul(p_nom), committed)
+        ).sum("name")
     if extendable:
-        lhs = lhs + (m.variables["Generator-p_nom"].sel(name=extendable) * da(pmax[extendable].values, extendable)).sum("name")
+        lhs = lhs + (
+            m.variables["Generator-p_nom"].sel(name=extendable)
+            * da(pmax[extendable].values, extendable)
+        ).sum("name")
     if fixed:
         const += pmax[fixed].mul(gens.loc[fixed, "p_nom"]).sum(axis=1)
     if disp:
         lhs = lhs - gvar.sel(name=disp).sum("name")
 
-    sus = [s for s in sel["storage_units"] if "StorageUnit-p_dispatch" in m.variables
-           and s in m.variables["StorageUnit-p_dispatch"].indexes["name"]]
+    sus = [
+        s
+        for s in sel["storage_units"]
+        if "StorageUnit-p_dispatch" in m.variables
+        and s in m.variables["StorageUnit-p_dispatch"].indexes["name"]
+    ]
     if sus:
         su = n.storage_units
-        r = m.add_variables(lower=0.0, coords=[coord.to_index(), pd.Index(sus, name="name")], name=_AUX)
+        r = m.add_variables(
+            lower=0.0, coords=[coord.to_index(), pd.Index(sus, name="name")], name=_AUX
+        )
         pd_ = m.variables["StorageUnit-p_dispatch"].sel(name=sus)
         ps = m.variables["StorageUnit-p_store"].sel(name=sus)
         soc = m.variables["StorageUnit-state_of_charge"].sel(name=sus)
         su_pmax = _dense(n, "StorageUnit", "p_max_pu", snapshots, sus)
-        su_ext = set(m.variables["StorageUnit-p_nom"].indexes["name"]) if "StorageUnit-p_nom" in m.variables else set()
+        su_ext = (
+            set(m.variables["StorageUnit-p_nom"].indexes["name"])
+            if "StorageUnit-p_nom" in m.variables
+            else set()
+        )
         ext = [s for s in sus if s in su_ext]
         fix = [s for s in sus if s not in su_ext]
         power = r + pd_ - ps
         if fix:
             m.add_constraints(
-                power.sel(name=fix) <= da(su_pmax[fix].mul(su.loc[fix, "p_nom"]).values, fix),
+                power.sel(name=fix)
+                <= da(su_pmax[fix].mul(su.loc[fix, "p_nom"]).values, fix),
                 name=f"{_AUX}-power-fixed",
             )
         if ext:
             m.add_constraints(
-                power.sel(name=ext) - m.variables["StorageUnit-p_nom"].sel(name=ext) * da(su_pmax[ext].values, ext) <= 0,
+                power.sel(name=ext)
+                - m.variables["StorageUnit-p_nom"].sel(name=ext)
+                * da(su_pmax[ext].values, ext)
+                <= 0,
                 name=f"{_AUX}-power-ext",
             )
         w = n.snapshot_weightings["stores"].reindex(snapshots).astype(float)
         eta = su.loc[sus, "efficiency_dispatch"].astype(float)
-        coef = pd.DataFrame({s: eta[s] / w.where(w > 0, np.inf) for s in sus}, index=snapshots)
-        m.add_constraints(r - ps - soc * da(coef.values, sus) <= 0, name=f"{_AUX}-energy")
+        coef = pd.DataFrame(
+            {s: eta[s] / w.where(w > 0, np.inf) for s in sus}, index=snapshots
+        )
+        m.add_constraints(
+            r - ps - soc * da(coef.values, sus) <= 0, name=f"{_AUX}-energy"
+        )
         lhs = lhs + r.sum("name")
 
     load = _load_mw(n, sel["loads"], snapshots)
@@ -222,7 +282,9 @@ def add_rows(n, snapshots, shares, log_queue=None) -> None:
     if c and wind:
         need = need + c * gvar.sel(name=wind).sum("name")
     if isinstance(lhs, int) and isinstance(need, int):
-        _safe_log(log_queue, f"{LABEL}: nothing to hold or to cover; no row ({ROW}) added.")
+        _safe_log(
+            log_queue, f"{LABEL}: nothing to hold or to cover; no row ({ROW}) added."
+        )
         return
     expr = lhs - need if not isinstance(need, int) else lhs
     m.add_constraints(expr >= per_t(rhs), name=ROW)
@@ -230,7 +292,11 @@ def add_rows(n, snapshots, shares, log_queue=None) -> None:
         log_queue,
         f"{LABEL} (row {ROW}, one per snapshot): headroom of {len(disp)} generator(s) and {len(sus)} storage "
         f"unit(s) ≥ {a:.0%} of load + {b:.0%} of PV + {c:.0%} of wind"
-        + (f"; not counted: {', '.join(sel['not_counted'])} (a Store battery)" if sel["not_counted"] else ""),
+        + (
+            f"; not counted: {', '.join(sel['not_counted'])} (a Store battery)"
+            if sel["not_counted"]
+            else ""
+        ),
     )
 
 
@@ -296,14 +362,25 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
     w = n.snapshot_weightings["stores"].reindex(sns).astype(float)
     su_pmax = _dense(n, "StorageUnit", "p_max_pu", sns, sel["storage_units"])
     for s in sel["storage_units"]:
-        pdis, pst, soc = (need(s, getattr(su_t, k, None)) for k in ("p_dispatch", "p_store", "state_of_charge"))
+        pdis, pst, soc = (
+            need(s, getattr(su_t, k, None))
+            for k in ("p_dispatch", "p_store", "state_of_charge")
+        )
         if pdis is None or pst is None or soc is None:
             continue
         p_nom = _solved_p_nom(su, s)
         power = su_pmax[s] * p_nom - pdis + pst
-        energy = pst + float(su.at[s, "efficiency_dispatch"]) * soc / w.where(w > 0, np.inf)
+        energy = pst + float(su.at[s, "efficiency_dispatch"]) * soc / w.where(
+            w > 0, np.inf
+        )
         held += np.minimum(power, energy).clip(lower=0.0)
-    load = n.loads_t.p[[l for l in sel["loads"] if l in n.loads_t.p.columns]].sum(axis=1).reindex(sns) if sel["loads"] else pd.Series(0.0, index=sns)
+    load = (
+        n.loads_t.p[[l for l in sel["loads"] if l in n.loads_t.p.columns]]
+        .sum(axis=1)
+        .reindex(sns)
+        if sel["loads"]
+        else pd.Series(0.0, index=sns)
+    )
     missing_loads = [l for l in sel["loads"] if l not in n.loads_t.p.columns]
     unknown += missing_loads
     req = a * load.astype(float)
@@ -315,7 +392,9 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
             if p is not None:
                 req = req + share * p
     if unknown:
-        out["reason"] = "the solve has no dispatch for " + ", ".join(sorted(set(map(str, unknown))))
+        out["reason"] = "the solve has no dispatch for " + ", ".join(
+            sorted(set(map(str, unknown)))
+        )
         return out
     if not (np.isfinite(req.to_numpy()).all() and np.isfinite(held.to_numpy()).all()):
         out["reason"] = "the dispatch has missing values (NaN)"
@@ -323,7 +402,9 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
     for t in sns:
         r, h = float(req[t]), float(held[t])
         binds = r > 0 and h - r <= _REL * r + _ABS
-        out["per_snapshot"].append({"snapshot": str(t), "required_mw": r, "held_mw": h, "binding": binds})
+        out["per_snapshot"].append(
+            {"snapshot": str(t), "required_mw": r, "held_mw": h, "binding": binds}
+        )
         if binds:
             out["binding"].append(str(t))
     return out
@@ -344,18 +425,29 @@ def infeasibility_lines(n, cfg) -> list[str]:
         if not names:
             return pd.Series(0.0, index=sns)
         p_nom = pd.Series(
-            {x: float(df.at[x, "p_nom_max"]) if bool(df.at[x, "p_nom_extendable"]) else float(df.at[x, "p_nom"]) for x in names}
+            {
+                x: float(df.at[x, "p_nom_max"])
+                if bool(df.at[x, "p_nom_extendable"])
+                else float(df.at[x, "p_nom"])
+                for x in names
+            }
         )
         return _dense(n, comp, "p_max_pu", sns, names).mul(p_nom).sum(axis=1)
 
-    most = cap(gens, sel["dispatchable"], "Generator") + cap(su, sel["storage_units"], "StorageUnit")
+    most = cap(gens, sel["dispatchable"], "Generator") + cap(
+        su, sel["storage_units"], "StorageUnit"
+    )
     req = a * _load_mw(n, sel["loads"], sns)
     short = [t for t in sns if float(req[t]) > float(most[t]) + _ABS]
     if short:
-        shown = ", ".join(str(t) for t in short[:3]) + (f" and {len(short) - 3} more" if len(short) > 3 else "")
+        shown = ", ".join(str(t) for t in short[:3]) + (
+            f" and {len(short) - 3} more" if len(short) > 3 else ""
+        )
         return [
             f"{LABEL}: at {shown} the reserve needs {float(req[short[0]]):,.1f} MW but the dispatchable units and "
             f"storage can hold at most {float(most[short[0]]):,.1f} MW (row {ROW}). Lower the reserve shares or "
             "add dispatchable capacity."
         ]
-    return [f"{LABEL}: the reserve rows ({ROW}) may contribute; lower the reserve shares to check."]
+    return [
+        f"{LABEL}: the reserve rows ({ROW}) may contribute; lower the reserve shares to check."
+    ]
