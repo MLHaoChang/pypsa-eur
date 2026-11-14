@@ -1763,8 +1763,10 @@ def _tie_open(inp: _Inputs) -> bool:
     n = inp.n
     if n is None or "eh_poc" not in n.buses.columns:
         return False
-    from gridspine.producers.campus import _never_conducts, _open_tie_rating
-
+    try:
+        from gridspine.producers.campus import _never_conducts, _open_tie_rating
+    except ImportError:  # a build without gridspine: the rows stay judged (fail closed)
+        return False
     pocs = [b for b in n.buses.index if _truthy(n.buses.at[b, "eh_poc"])]
     return (bool(pocs) and all(_open_tie_rating(n, b) for b in pocs)
             and all(_never_conducts(n, x) for x in inp.links))

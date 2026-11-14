@@ -385,3 +385,13 @@ def test_a_grid_template_card_is_unchanged_by_the_off_grid_connection_rule(
     assert (
         json.dumps(G.grid_readiness(d, n, PROFILE), sort_keys=True, default=str) == card
     )
+
+
+def test_a_build_without_gridspine_keeps_the_rows_judged(tmp_path, monkeypatch):
+    # gridspine is optional at runtime (test_packaging_requirements): without it, fail closed.
+    import sys
+
+    monkeypatch.setitem(sys.modules, "gridspine.producers.campus", None)
+    out = G.grid_readiness(_off_grid(tmp_path), _open_tie(_site()), PROFILE)
+    assert {"ramp_rate", "oscillation"} <= {r["id"] for r in out["rows"]}
+    assert G.CONN_OFF_GRID not in {e["reason"] for e in out["excluded"]}
