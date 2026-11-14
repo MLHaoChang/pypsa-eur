@@ -53,7 +53,7 @@ import dataclasses
 import json
 import math
 import pathlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -660,12 +660,33 @@ def solved(n, digest=None) -> tuple[pd.DataFrame | None, list[str]]:
     inputs are one read under the network's mutation lock; the inputs and weights
     compare on the provenance graph (`provenance_graph.runs.reserves_verdict`,
     PG-04b). A current value that cannot be read, or a read the lock or an edit
-    interrupts, is stale."""
+    interrupts, is stale. `solved_read` also returns the hours that read saw."""
+    got = solved_read(n, digest)
+    return got.frame, got.flags
+
+
+class Solved(NamedTuple):
+    """One read of the commitments (`solved_read`): the frame and its flags as `solved` returns them, and the hours
+    (`reserve_weights`) read in the same bracket, the ones a settlement line prices the frame at, and ``inputs``, the
+    current `inputs_digest` that read compared (None when it compared none). ``hours`` is read only for a fresh frame;
+    it is None whenever there are flags."""
+
+    frame: pd.DataFrame | None
+    flags: list[str]
+    hours: pd.Series | None
+    inputs: str | None = None
+
+
+def solved_read(n, digest=None) -> Solved:
+    """`solved`, with the hours read under the same bracket (PG-13): a reweighting that lands after the read never
+    prices this read's commitments."""
     from services.provenance_graph import pins, runs
 
     got = runs.locked_read(_context_of(n), lambda: _solved_read(n, digest))
     if got is pins.UNREADABLE:
-        return None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"]
+        return Solved(
+            None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"], None
+        )
     return got
 
 
@@ -680,7 +701,7 @@ def _context_of(n):
     return ctx if getattr(ctx, "network", None) is n else None
 
 
-def _solved_read(n, digest) -> tuple[pd.DataFrame | None, list[str]]:
+def _solved_read(n, digest) -> Solved:
     from services.commercial.settlement_inputs import axis_hash
     from services.provenance_graph import pins, runs
 
@@ -689,22 +710,30 @@ def _solved_read(n, digest) -> tuple[pd.DataFrame | None, list[str]]:
         n.storage_units_t.get(OUT_FRAME) if hasattr(n.storage_units_t, "get") else None
     )
     if not meta or frame is None or frame.empty:
-        return None, ["reserve_not_solved"]
+        return Solved(None, ["reserve_not_solved"], None)
     if meta.get("axis_hash") != axis_hash(n.snapshots):
-        return None, ["reserve_not_solved"]
-    inputs = None
+        return Solved(None, ["reserve_not_solved"], None)
+    inputs, seen = None, []
     if digest is not None:
-        read = digest if callable(digest) else (lambda: digest)
+        current = digest if callable(digest) else (lambda: digest)
+
+        def read():
+            seen.append(current())
+            return seen[-1]
+
         inputs = pins.Pin("reserve inputs", meta.get("inputs"), read)
     weights = pins.Pin(
         "hours and period weights", meta.get("weights"), lambda: weights_key(n)
     )
     if runs.reserves_verdict(inputs, weights).state != "fresh":
-        return None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"]
+        return Solved(
+            None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"], None
+        )
     planned = meta.get("columns")
     if not planned or not set(planned) <= set(map(str, frame.columns)):
-        return None, ["reserve_not_solved"]
-    return frame, []
+        return Solved(None, ["reserve_not_solved"], None)
+    # The hours a line prices this frame at, inside the same bracket (PG-13).
+    return Solved(frame, [], reserve_weights(n)[0], seen[-1] if seen else None)
 
 
 def reserved_energy(

@@ -21,13 +21,14 @@ from __future__ import annotations
 import logging
 import math
 
-from harness import calculations
+from harness import calculations, time_to_power_calculations
 
 logger = logging.getLogger("pypsa_gui.results")
 
 MICROGRID_TEMPLATES = frozenset({"eh_microgrid", "eh_microgrid_staged"})
 
-#: Project type -> card ids, in display order (at most five).
+#: Project type -> card ids, in display order (at most five shown; an energy
+#: hub's sixth, time to power, only appears with a data-centre load).
 ORDER = {
     "energy_hub": (
         "lcoe",
@@ -35,6 +36,10 @@ ORDER = {
         "new_build_capital",
         "curtailed_share",
         "unserved_energy",
+        # A data-centre project's, last (ui-modern 05, DC27-TTP-1). Absent
+        # from the strip, not a tile, where the project has no data-centre
+        # load: the strip then keeps its five cards.
+        "time_to_power",
     ),
     "microgrid": (
         "unserved_energy",
@@ -58,6 +63,7 @@ CHECKED = {
         calculations.branch.NETWORK_PROFILE,
         "max_branch_utilisation",
     ),
+    "time_to_power": (time_to_power_calculations.PROFILE, "time_to_power_months"),
 }
 
 #: A checked formula's refusal -> (ResultState, one plain sentence). No engine
@@ -234,6 +240,31 @@ def _shown(profile):
     return profile_enabled(profile)
 
 
+def _no_tile(card_id, reason=None):
+    """Whether a card with this refusal is left off the strip: time to power
+    where the project has no data-centre load (a card that cannot apply is
+    absent, not a tile saying so)."""
+    return card_id == "time_to_power" and reason == "no_dc_load_spec"
+
+
+def _ttp_words(reason):
+    """A not-available reason as the card's plain sentence."""
+    from services import dc_time_to_power
+
+    words = dc_time_to_power.REASONS.get(reason)
+    if words is None:
+        return _UNAVAILABLE
+    return "unavailable", f"{words[0].upper()}{words[1:]}."
+
+
+def _ttp_detail(raw):
+    """The caveat under a figure that is not exact to its date."""
+    out = time_to_power_calculations.result(raw)
+    if out.get("status") == "available" and out["resolution_months"] > 0:
+        return f"First power may be as early as {out['earliest_first_power']}."
+    return None
+
+
 def _checked(ctx, card_id):
     """One checked fact, read and calculated as a checked answer reads it. A
     failure costs this card only: the same set a checked answer catches
@@ -245,6 +276,9 @@ def _checked(ctx, card_id):
 
     profile, metric = CHECKED[card_id]
     if not _shown(profile):
+        # Whether the project is a data-centre one is unknown while switched off.
+        if card_id == "time_to_power":
+            return None
         return _card(card_id, state=SWITCHED_OFF[0], reason=SWITCHED_OFF[1])
     scope = {
         "project_id": ctx.project_uuid,
@@ -258,6 +292,12 @@ def _checked(ctx, card_id):
             facts, slots = calculations.scoped_calculate(raw, scope)
         fact = next((f for f in facts if f["metric"] == metric), None)
         if fact is None:
+            code = next((s.get("reason") for s in slots if s["metric"] == metric), None)
+            if _no_tile(card_id, code):
+                return None
+            if card_id == "time_to_power":
+                state, why = _ttp_words(code)
+                return _card(card_id, state=state, reason=why)
             return _refused(
                 ctx,
                 card_id,
@@ -266,6 +306,8 @@ def _checked(ctx, card_id):
         detail = (
             _peak_branch(raw, scope, fact["value"])
             if card_id == "peak_line_loading"
+            else _ttp_detail(raw)
+            if card_id == "time_to_power"
             else None
         )
         return _card(
@@ -276,6 +318,8 @@ def _checked(ctx, card_id):
             detail=detail,
         )
     except ValueError as exc:
+        if _no_tile(card_id, str(exc)):
+            return None
         return _refused(ctx, card_id, str(exc))
     except HTTPException:
         return _card(card_id, state=BUSY[0], reason=BUSY[1])
@@ -361,4 +405,5 @@ def headline_kpis(
         "unserved_energy": lambda: _unserved(lost_load),
     }
     cards = [build[c]() if c in build else _checked(ctx, c) for c in ORDER[kind]]
+    cards = [c for c in cards if c is not None]
     return {"kind": kind, "cards": cards}
