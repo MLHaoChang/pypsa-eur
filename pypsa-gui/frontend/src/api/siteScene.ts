@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { client } from './client'
+import { fileNameOf } from './resultsEvidence'
 
 // The Site 3D scene routes (SC-01a, `routers/site_scene.py`): the project's
 // site anchor (compare-and-swap on `expected_revision`), a Site's scene, its
@@ -239,6 +240,29 @@ export const siteSceneApi = {
       { expected_revision: proposal.base_revision, input_hash: proposal.input_hash }, quiet).then(r => r.data),
   cancel: (project: string, siteId: string, proposalId: string) =>
     client.post<unknown>(`${scenePath(project, siteId)}/proposals/${enc(proposalId)}/cancel`, undefined, quiet).then(r => r.data),
+  /** SC-04 "Export for Blender": the GLB + manifest zip of the current revision (a read; writes nothing). */
+  exportScene: (project: string, siteId: string): Promise<SceneExport> =>
+    client.post<Blob>(`${scenePath(project, siteId)}/exports`, { format: 'glb_manifest', media_policy: 'none' },
+      { ...quiet, responseType: 'blob' })
+      .then(r => ({
+        blob: r.data,
+        filename: fileNameOf(r.headers['content-disposition']) ?? `${siteId}-scene.zip`,
+        revision: Number(r.headers['x-scene-revision']) || null,
+      }))
+      .catch(async (err: unknown) => { throw await withJsonDetail(err) }),
+}
+
+export interface SceneExport { blob: Blob; filename: string; revision: number | null }
+
+/** A blob request's refusal carries its `{detail}` JSON as a Blob: parse it so `sceneErrorCopy` reads it. */
+async function withJsonDetail(err: unknown): Promise<unknown> {
+  if (!axios.isAxiosError(err) || !(err.response?.data instanceof Blob)) return err
+  try {
+    err.response.data = JSON.parse(await err.response.data.text())
+  } catch {
+    // Not JSON: leave the Blob, and the copy falls back to its generic sentence.
+  }
+  return err
 }
 
 // ── error copy ──────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import { confirmToast } from '../utils/toasts'
 import { formatHa, type FitReport } from '../site3d/fit'
 import type { Site } from '../site3d/types'
 import { effectiveSizing } from '../site3d/sizing'
+import { exportTitle, type SceneExportControl } from '../site3d/sceneExport'
 
 interface Props {
   sites: Site[]
@@ -33,12 +34,14 @@ interface Props {
   libraryGaps?: string | null
   /** Snapshot (S5): capture the site from the south as its thumbnail now. Absent without a saved project (nowhere to store it). */
   onSnapshot?: () => void
+  /** Export for Blender (SC-04): the GLB + manifest download. A read, so offered read-only too. Absent without a project. */
+  sceneExport?: SceneExportControl
   /** Walk the campus (S5): first-person mode on/off. Absent where the mode is not offered. */
   walking?: boolean
   onToggleWalk?: () => void
 }
 
-export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onArrangeAll, placedCount = 0, onResetPlacement, dispatchFresh = false, libraryGaps = null, onSnapshot, walking = false, onToggleWalk }: Props) {
+export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onArrangeAll, placedCount = 0, onResetPlacement, dispatchFresh = false, libraryGaps = null, onSnapshot, sceneExport, walking = false, onToggleWalk }: Props) {
   const readOnly = useUIStore(s => s.readOnly)
   const siteSizing = useUIStore(s => s.siteSizing)
   const setSiteSizing = useUIStore(s => s.setSiteSizing)
@@ -135,6 +138,20 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
           Snapshot
         </button>
       )}
+      {sceneExport && (
+        // A read (it writes nothing), so read-only and viewers may export too.
+        <button
+          type="button"
+          data-testid="site-export-blender"
+          onClick={sceneExport.onExport}
+          disabled={sceneExport.busy || sceneExport.revision === null}
+          aria-busy={sceneExport.busy}
+          title={sceneExport.reason ?? (sceneExport.revision !== null ? exportTitle(sceneExport.revision) : undefined)}
+          className="px-1.5 py-0.5 rounded border border-border text-text hover:bg-accent/5 disabled:opacity-50"
+        >
+          {sceneExport.busy ? 'Exporting…' : 'Export for Blender'}
+        </button>
+      )}
       {onToggleWalk && (
         // A view mode, not an edit: available read-only too. Escape leaves it.
         <button
@@ -147,6 +164,10 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
         >
           {walking ? 'Walking…' : 'Walk'}
         </button>
+      )}
+      {sceneExport?.reason && (
+        // UX: a disabled reason is visible text, on its own line under the strip, not only a title.
+        <span data-testid="site-export-reason" className="basis-full text-muted">{sceneExport.reason}</span>
       )}
     </div>
   )

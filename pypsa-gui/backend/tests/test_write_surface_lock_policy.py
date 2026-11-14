@@ -189,6 +189,11 @@ _R_STUDY = (
     "(`require_planning`). Whether studies should join the lock is an open "
     "product question, not a gap in a control that exists."
 )
+_R_SCENE_EXPORT = (
+    "SC-04 \"Export for Blender\": a POST only because the body names the format and media policy. "
+    "It READS one scene generation behind `ProjectAccessDep` and returns the zip; it persists nothing "
+    "(test_site_scene_export asserts the project tree is unchanged), so viewers may call it and no lock applies."
+)
 _R_READ_ONLY_PREVIEW = (
     "a POST only to carry a body: it computes and returns, and writes nothing. "
     "`studies.preview_intake` reads the PATH project's uploads behind "
@@ -304,6 +309,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/projects/{name}/intent-comparison"): (NOT_PROJECT_DATA, _R_INTENT_COMPARISON),
     ("POST", "/api/projects/{name}/intent-comparison/abort"): (STOPS_WORK, _R_STOP),
     ("POST", "/api/projects/{name}/studies/preview"): (NOT_PROJECT_DATA, _R_READ_ONLY_PREVIEW),
+    ("POST", "/api/projects/{name}/sites/{site_id}/scene/exports"): (NOT_PROJECT_DATA, _R_SCENE_EXPORT),
     ("POST", "/api/profiles/estimate"): (NOT_PROJECT_DATA,
         "a POST only to carry a body: it generates a SYNTHETIC preview series "
         "in memory and returns it downsampled, writes nothing, resolves no "

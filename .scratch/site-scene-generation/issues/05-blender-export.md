@@ -45,3 +45,23 @@ Was: `needs-triage — specification proposed; not implemented`. Owner question 
 ### 2026-11-14: engine chosen (Q-SS-2)
 
 2026-11-14, owner answer Q-SS-2 (coordinator card): "option 1 (Recommended)". Engines chosen, see [research-engines.md](../research-engines.md) (#1490): Blender-free GLB+manifest by default (trimesh/pygltflib, MIT); Blender 5.2 LTS only as a separate pinned no-network container for optional `.blend` output; photos via OpenDroneMap/NodeODM, out-of-process and unmodified (AGPL). Change: this issue splits into (a) the neutral GLB+manifest bundle written with trimesh/pygltflib, shippable with no Blender and not gated on D09, and (b) an optional worker script that opens the bundle in the pinned Blender 5.2 LTS container and writes the output-only `.blend`; (b) and the pinned Blender import/export fixture stay behind SC-00 B and 06. The unverified items in research-engines.md section 6 (exact 5.2.x patch to pin, `export_extras` option name) are settled in the plan.
+
+### 2026-11-14: plan review (GK B GO with E1–E12, UX GO with 4 conditions)
+
+Plan: neutral bundle only (Q-SS-2 part a). `POST .../scene/exports` (viewer, no lock, writes nothing) returns a deterministic zip of `scene.glb` + `manifest.json`, read from one pointed generation; no persisted artifact, so `GET .../scene/artifacts/{id}` stays deferred to 06. GLB written with stdlib `struct`/`json` (no new dependency; pygltflib not needed); independent oracle is three's GLTFLoader in vitest over a generated fixture. Only `media_policy: "none"` exists before SC-06. V30 (genuine pinned Blender exchange) is not claimed: it needs SC-00 B worker evidence (06), as do the 5.2.x pin and the exporter's custom-properties option name.
+
+GK B conditions:
+- E1 GLB validity: 4-byte aligned chunks (JSON padded 0x20, BIN 0x00), header length = file length, POSITION min/max, index componentType fits, aligned bufferViews; asserted by the test-side reader.
+- E2 the committed `scene-export.glb` fixture is written only by a repo generator; the backend test regenerates and byte-compares it.
+- E3 determinism: fixed zip entry order/date_time/compress_type/external_attr; `exported_at` only outside `semantic_sha256`; two exports at one revision agree.
+- E4 one snapshot: generation and `generation_sha256` are those of the bytes read; a pointer move between read and build never mixes generations.
+- E5 geometry: non-finite values, <3 distinct points, zero area or self-intersection become named omissions; L-shaped building in the metric oracle; holes supported or omitted with a tested reason.
+- E6 axes/sign: world-space corners at heading 30 and 90; north lands at −Z; `frames.enu_to_gltf` signs pinned on one point.
+- E7 limits: counts before build, `MAX_EXPORT_BYTES` after, 4 KiB body cap before parse; just-under/just-over tests, all 413 `resource_limit`.
+- E8 request model: Literal format/media_policy, extra="forbid"; unknown key and non-"none" policy are 422 `invalid_input`.
+- E9 route tables: read-only in the lock policy, viewer in the ACL policy, a chat disposition; policy, golden-coverage, error-kind and parity checks run at the trial merge; new kind in its own `tool-error-kinds.d` fragment.
+- E10 privacy: manifest carries no filesystem path, uploaded filename or EXIF; Content-Disposition through `http_filenames` with quotes/non-ASCII tested.
+- E11 writes nothing: project digest unchanged, no temp file left, also when the build raises.
+- E12 mutants on `export.py`, survivors listed; UX OK needed.
+
+UX conditions: the disabled reason is visible muted text under the strip (title kept); the button sits after Snapshot in Guided and Expert, with shots of enabled, disabled, exporting, error and success; error toasts in plain words; the enabled title says "3D model file (GLB) and a manifest" and keeps the snapshot/not-certified/no-photos caveats; "Generate tab" names the real Site panel tab.

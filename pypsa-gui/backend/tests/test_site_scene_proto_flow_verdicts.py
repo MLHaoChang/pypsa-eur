@@ -63,7 +63,7 @@ def test_save_first_points_at_the_header_save_not_a_panel():
 
 def test_every_reason_uses_a_colon_never_an_em_dash():
     reasons = [getattr(fv, n) for n in dir(fv) if n.startswith("REASON_")]
-    assert len(reasons) == 9
+    assert len(reasons) == 10
     for r in reasons:
         assert "—" not in r and "–" not in r
     assert fv.REASON_NO_TARGETS == "Buildings only: configure model elements to map them"
