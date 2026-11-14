@@ -57,6 +57,30 @@ NOT_SHIPPED = {"tests", "smoke", "tools"}
 # reviewing. A guarded import missing from this map fails the test: adding an
 # optional dependency should be a decision someone wrote down, not a default.
 OPTIONAL_AT_RUNTIME = {
+    # The four entries below became visible when `_collect` learned to see an
+    # import placed directly in a try body (live-voice 01a, GK B on #1482).
+    "defusedxml": (
+        "map_geometry_import._xml_fromstring catches ImportError and parses KML "
+        "with lxml (entities, DTDs and the network off) instead. Pinned in "
+        "gui-requirements.txt, so the frozen app has it."
+    ),
+    "lxml": (
+        "map_geometry_import._xml_fromstring tries it only when defusedxml is "
+        "missing; with neither, a KML upload is refused with `KML can't be read "
+        "here`. Not pinned: the frozen app uses the pinned defusedxml."
+    ),
+    "dotenv": (
+        "app_secrets catches ImportError and skips the backend .env file (debug "
+        "log line); variables from the shell or the settings store still apply. "
+        "Pinned in gui-requirements.txt as python-dotenv."
+    ),
+    "websockets": (
+        "deepgram_stt.default_connect catches ImportError and streaming speech "
+        "recognition answers 503 not_configured `Streaming recognition is not "
+        "installed`. Continuous speech is off unless PYPSA_GUI_LIVE_SPEECH=1 and "
+        "keys are set (live-voice 01), so the frozen app loses nothing it offers "
+        "today. Not pinned: pin it when the hosted speech ships in the bundle."
+    ),
     "gridspine": (
         "gridspine_service catches ImportError and every action answers 503 "
         "`planning → dynamics not available in this build`. Since D5 gridspine "
@@ -160,11 +184,15 @@ def _collect(node: ast.AST, guarded: bool, out: dict[str, set[tuple[str, bool]]]
             protected = guarded or any(
                 _catches_import_error(h) for h in child.handlers
             )
+            # Wrap each statement so the walk visits the statement itself:
+            # `_collect` looks at children, and an import placed directly in a
+            # try body has none.
             for stmt in child.body:
-                _collect(stmt, protected, out, where)
-            for section in (child.handlers, child.orelse, child.finalbody):
-                for stmt in section:
-                    _collect(stmt, guarded, out, where)
+                _collect(ast.Module(body=[stmt], type_ignores=[]), protected, out, where)
+            for stmt in child.orelse + child.finalbody:
+                _collect(ast.Module(body=[stmt], type_ignores=[]), guarded, out, where)
+            for handler in child.handlers:
+                _collect(handler, guarded, out, where)
             continue
 
         if isinstance(child, ast.Import):
@@ -614,3 +642,20 @@ def test_the_spec_names_every_gridspine_module_the_backend_guard_imports():
         f"{missing} — the backend imports them inside the gridspine guard, so "
         "a bundle built without them answers 503 on every gridspine action"
     )
+
+
+def test_collect_sees_an_import_placed_directly_in_a_try_body():
+    tree = ast.parse(
+        "try:\n    import foo\nexcept ImportError:\n    pass\n"
+        "import bar\n"
+        "try:\n    x = 1\nexcept ValueError:\n    import baz\n"
+        "try:\n    import qux\nfinally:\n    pass\n"
+    )
+    out: dict[str, set[tuple[str, bool]]] = {}
+    _collect(tree, False, out, "f.py")
+    assert out == {
+        "foo": {("f.py", True)},
+        "bar": {("f.py", False)},
+        "baz": {("f.py", False)},
+        "qux": {("f.py", False)},
+    }

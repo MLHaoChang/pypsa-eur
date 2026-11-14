@@ -70,6 +70,7 @@
   "fuel": [],
   "opex": 0.0,
   "pcs_statcom_notes": [],
+  "run_hours": [],
   "storage_capex_expansion": 0.0,
   "storage_capex_expansion_lifetime": 0.0,
   "total": 99796.98273

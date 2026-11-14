@@ -1685,9 +1685,14 @@ def _report_record(project: AuthorizedProject, study_id: str):
 def _report_stale(report, study: DecisionStudy, project: AuthorizedProject,
                   db: DBSession) -> list[str]:
     """Live stale reasons: the study's own, the ledger, each option fork (one hash rule)."""
+    return _report_read(report, study, project, db)[1]
+
+
+def _report_read(report, study: DecisionStudy, project: AuthorizedProject, db: DBSession):
+    """The report's verdict on the provenance graph and its reasons (PG-05)."""
     from db.models import Project
+    from services.provenance_graph import studies
     from services.study import findings as study_findings
-    from services.study import report as study_report
 
     def owned(fork_uuid: str):
         try:
@@ -1707,16 +1712,21 @@ def _report_stale(report, study: DecisionStudy, project: AuthorizedProject,
         row = owned(fork_uuid)
         return None if row is None else run_hashes.fork_engine_digest(row)
 
-    return study_report.stale_reasons(report, study, study_findings.study_ledger(study),
-                                      fork_hash_now, fork_engine_now=fork_engine_now)
+    return studies.report_verdict(report, study, study_findings.study_ledger(study),
+                                  fork_hash_now, fork_engine_now=fork_engine_now)
 
 
-def _report_out(report, reasons: list[str]) -> dict:
+def _report_out(report, read) -> dict:
+    """The report as the routes send it: ``stale`` and ``stale_reasons`` as before, and ``verdict`` (its state and
+    broken edges, each with ``needs_run``) so the client never parses the reasons."""
+    from services.provenance_graph import studies
     from services.study import report as study_report
 
+    verdict, reasons = read
     return {"available": study_report.report_available(report),
             **report.model_dump(mode="json", by_alias=True),
-            "stale": bool(reasons), "stale_reasons": reasons}
+            "stale": bool(reasons), "stale_reasons": reasons,
+            "verdict": studies.verdict_wire(verdict)}
 
 
 @router.post("/{study_id}/report")
@@ -1762,7 +1772,7 @@ def assemble_report(study_id: str,
         current = _load(project, study_id)
         _save(project, current.model_copy(update={
             "report_ref": store.aux_ref(study_id, REPORT_AUX), "updated_at": _now()}))
-    return _report_out(report, _report_stale(report, current, project, db))
+    return _report_out(report, _report_read(report, current, project, db))
 
 
 @router.get("/{study_id}/report")
@@ -1776,7 +1786,7 @@ def get_report(study_id: str,
     """
     _refuse_unless_enabled()
     study, report, _cases, _ledger, _cash = _report_record(project, study_id)
-    return _report_out(report, _report_stale(report, study, project, db))
+    return _report_out(report, _report_read(report, study, project, db))
 
 
 def _render_headers(filename: str) -> dict[str, str]:

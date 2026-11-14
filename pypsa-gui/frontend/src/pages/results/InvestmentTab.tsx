@@ -17,12 +17,14 @@ import { CompletenessChips, type CompletenessRow } from '../../components/Comple
 import { fmtAmount } from './investment/valueFlows'
 import ValueFlowsView from './investment/ValueFlowsView'
 import InvestmentCaseView from './investment/InvestmentCaseView'
+import BusinessCaseLines from './investment/BusinessCaseLines'
 import { SiteConnectionNeeded, SiteConnectionSummary } from '../economics/SiteConnectionLink'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
   { id: 'bill', label: 'Bill' },
   { id: 'case', label: 'Investment case' },
+  { id: 'business_case', label: 'Business case' },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
 const isSection = (v: string | null): v is SectionId => SECTIONS.some(s => s.id === v)
@@ -205,6 +207,7 @@ export default function InvestmentTab() {
           </div>
         )}
         {section === 'case' && <InvestmentCaseView />}
+        {section === 'business_case' && <BusinessCaseLines />}
       </div>
     </div>
   )
