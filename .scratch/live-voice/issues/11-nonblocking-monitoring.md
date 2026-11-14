@@ -79,3 +79,15 @@ flakiness). No real solves. Foreground completion now also publishes a run
 (issue 06). Still open: GridSpine/solve-queue family in the same matrix,
 real-worker (not state-flip) multi-family run, D-I2 recovery across families,
 UI/result matching per workload.
+
+2026-11-14: 11a, the neutral job contract. `harness/job_adapters.job_status` gives one
+view for `fg:`, `ad:`, `rpt:` and solve-queue UUIDs (GridSpine included, through the
+queue's own ACL). The view carries identity, status, phase, progress, a per-job cursor
+that moves only on a change, created/started/updated/finished timestamps, the input
+revision (`network_revision` at handoff), the result revision on success, warnings and
+the outcome (succeeded/failed/cancelled/refused/not_met/interrupted/unknown).
+`cancel_job` calls each family's existing abort only while the handle's own worker
+still owns its record, then reports the verified result. Tests:
+`tests/test_lv11a_job_contract.py`. No tool-list change yet. Still open: 11b (the
+`cancel_job` tool, Stop monitoring, plan-step solve handoff) and 11c (versioned SSE,
+snapshot recovery, results refresh).
