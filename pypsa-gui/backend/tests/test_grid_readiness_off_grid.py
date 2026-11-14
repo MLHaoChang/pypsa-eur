@@ -7,6 +7,9 @@ import ast
 import inspect
 import json
 import textwrap
+from types import SimpleNamespace as types_ns
+
+import pytest
 
 from services.adequacy import grid_readiness as G
 from tests.test_grid_readiness import PROFILE
@@ -123,7 +126,7 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
     assert any(i == "motor_start" or i.startswith("motor_start:") for i in sk)
     out = G.grid_readiness(tmp_path, _site(), PROFILE)
     excluded = {e["id"]: e for e in out["excluded"]}
-    assert set(excluded) == sk | set(VS_IDS) | _conn_ids(out)
+    assert set(excluded) == sk | set(VS_IDS)
     assert all(
         excluded[i]["reason"] == G.SK_OFF_GRID and excluded[i]["requirement"]
         for i in sk
@@ -149,26 +152,101 @@ def _conn_ids(card) -> set:
     return {i for i in ids if i in ("ramp_rate", "oscillation") or i.split(":")[0] == "energization_peak"}
 
 
-def test_off_grid_excludes_the_ramp_oscillation_and_peak_rows_with_the_reason(tmp_path):
-    # SH41-OFFGRID-1: the tie is open, so the connection's limits do not judge the island.
+def _open_tie(n):
+    """The site with its import Link held at 0 MW in every hour: a normally open tie."""
+    n.links.at["grid_import", "p_max_pu"] = 0.0
+    return n
+
+
+def _off_grid(tmp_path):
     _template(tmp_path, "off_grid")
     _write(tmp_path)
-    out = G.grid_readiness(tmp_path, _site(), PROFILE)
-    conn = _conn_ids(out)
-    assert {"ramp_rate", "oscillation"} <= conn
-    assert any(i.split(":")[0] == "energization_peak" for i in conn)
+    return tmp_path
+
+
+def _assert_conn_excluded(out, conn):
     excluded = {e["id"]: e for e in out["excluded"]}
     assert conn <= set(excluded)
     assert not conn & {r["id"] for r in out["rows"]}
     assert all(excluded[i]["reason"] == G.CONN_OFF_GRID and excluded[i]["requirement"] for i in conn)
-    assert G.CONN_OFF_GRID == (
-        "off-grid: the tie is open, so the island draws nothing through the connection; "
-        "the connection's ramp, oscillation and import limits do not apply"
-    )
     assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])
     for i in conn:
         fact = G.readiness_fact(out, i)
         assert fact.value == "excluded" and fact.reason == f"excluded: {G.CONN_OFF_GRID}"
+
+
+def test_off_grid_with_an_open_tie_excludes_the_ramp_oscillation_and_peak_rows(tmp_path):
+    # SH41-OFFGRID-1: the tie is open, so the connection's limits do not judge the island.
+    out = G.grid_readiness(_off_grid(tmp_path), _open_tie(_site()), PROFILE)
+    conn = _conn_ids(out)
+    assert {"ramp_rate", "oscillation"} <= conn
+    assert any(i.split(":")[0] == "energization_peak" for i in conn)
+    _assert_conn_excluded(out, conn)
+    assert G.CONN_OFF_GRID == (
+        "off-grid: the tie is open, so the island draws nothing through the connection; "
+        "the connection's ramp, oscillation and import limits do not apply"
+    )
+    # The other rows leave by their own rules, unchanged.
+    reasons = {e["reason"] for e in out["excluded"]}
+    assert reasons == {G.SK_OFF_GRID, G.VS_OFF_GRID, G.CONN_OFF_GRID}
+
+
+def test_off_grid_excludes_every_energization_period_it_emitted(tmp_path, monkeypatch):
+    # GK A O2: the ids are the ones the builders emitted on this project, every period.
+    from services.adequacy import site_peak as SP
+
+    periods = [2030, 2035, 2040]
+    monkeypatch.setattr(SP, "peak_check", lambda n, island, unset=None: [
+        {"period": p, "unset": ["load"], "energized_max_mw": 10.0} for p in periods])
+    out = G.grid_readiness(_off_grid(tmp_path), _open_tie(_site()), PROFILE)
+    peak = {f"energization_peak:{p}" for p in periods}
+    assert {i for i in _conn_ids(out) if i.startswith("energization_peak")} == peak
+    _assert_conn_excluded(out, peak | {"ramp_rate", "oscillation"})
+
+
+def test_a_label_alone_keeps_the_rows_judged_with_a_note(tmp_path):
+    # GK A O1: off-grid by label, but the saved connection can import.
+    out = G.grid_readiness(_off_grid(tmp_path), _site(), PROFILE)
+    rows = {r["id"]: r for r in out["rows"]}
+    conn = _conn_ids(out)
+    assert {"ramp_rate", "oscillation"} <= conn <= set(rows)
+    assert not conn & {e["id"] for e in out["excluded"]}
+    assert all(rows[i]["note"].endswith(G.CONN_LABEL_ONLY) for i in conn)
+    assert G.CONN_LABEL_ONLY == "labelled off-grid, but the connection can import"
+
+
+def test_off_grid_with_no_saved_network_keeps_the_rows(tmp_path):
+    out = G.grid_readiness(_off_grid(tmp_path), None, PROFILE)
+    rows = {r["id"]: r for r in out["rows"]}
+    assert {"ramp_rate", "oscillation", "energization_peak"} <= set(rows)
+    assert G.CONN_OFF_GRID not in {e["reason"] for e in out["excluded"]}
+
+
+def test_a_gate_on_ramp_rate_reads_excluded_never_pass_off_grid(tmp_path):
+    # GK A O3: a rule naming the row (the DC profile's dc.ramp_rate) is not evaluated.
+    from services import run_gates
+
+    import types
+
+    out = G.grid_readiness(_off_grid(tmp_path), _open_tie(_site()), PROFILE)
+    env = types.SimpleNamespace(cache={"scorecard": out})
+    for rid in ("ramp_rate", "oscillation"):
+        fact = run_gates._scorecard_reader(run_gates.SCORECARD + rid)(env)
+        assert isinstance(fact, run_gates.NoEvidence) and fact.value == "excluded", rid
+        assert fact.reason == f"excluded: {G.CONN_OFF_GRID}"
+    # The open tie's one peak row has no period, so the DC block family finds no member.
+    fam = run_gates._scorecard_reader(run_gates.SCORECARD + "energization_peak:")(env)
+    assert isinstance(fam, run_gates.NoEvidence)
+
+
+def test_a_family_with_one_excluded_period_is_never_passed_on_the_rest():
+    from services import run_gates
+
+    card = {"rows": [{"id": "energization_peak:2030", "verdict": "pass", "assumed": False}],
+            "excluded": [{"id": "energization_peak:2035", "requirement": "r", "reason": "why"}]}
+    env = types_ns(cache={"scorecard": card})
+    fact = run_gates._scorecard_reader(run_gates.SCORECARD + "energization_peak:")(env)
+    assert isinstance(fact, run_gates.NoEvidence) and fact.value == "excluded"
 
 
 def test_a_grid_project_judges_ramp_oscillation_and_peak_against_the_connection(tmp_path):
@@ -179,6 +257,7 @@ def test_a_grid_project_judges_ramp_oscillation_and_peak_against_the_connection(
     conn = _conn_ids(out)
     assert {"ramp_rate", "oscillation"} <= conn <= set(rows)
     assert any(i.split(":")[0] == "energization_peak" for i in conn)
+    assert not any(G.CONN_LABEL_ONLY in (rows[i]["note"] or "") for i in conn)
     assert rows["ramp_rate"]["setting"]["item"] == "connection_ramp"
     assert rows["oscillation"]["setting"]["item"] == "oscillation"
 
@@ -198,3 +277,20 @@ def test_a_grid_project_keeps_every_row_in_the_scorecard_order(tmp_path):
     assert [i for i in ids if i not in gone] == [r["id"] for r in island["rows"]]
     assert [i for i in ids if i in gone] == [e["id"] for e in island["excluded"]]
     json.dumps(grid)  # the card stays plain JSON
+
+
+@pytest.mark.parametrize("tid", ("eh_datacenter", "eh_datacenter_staged"))
+def test_a_grid_template_card_is_unchanged_by_the_off_grid_connection_rule(tmp_path, monkeypatch, tid):
+    # GK A O4: on a grid-connected template the SH 41 rule never runs, so the whole card is the
+    # card without it, byte for byte.
+    from tests.test_grid_readiness import _project
+
+    d, n = _project(tmp_path, tid)
+    card = json.dumps(G.grid_readiness(d, n, PROFILE), sort_keys=True, default=str)
+
+    def boom(inp):
+        raise AssertionError("the tie is read on a grid-connected project")
+
+    monkeypatch.setattr(G, "_tie_open", boom)
+    monkeypatch.setattr(G, "CONN_BUILDERS", frozenset())
+    assert json.dumps(G.grid_readiness(d, n, PROFILE), sort_keys=True, default=str) == card

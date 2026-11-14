@@ -1741,6 +1741,26 @@ _BUILDERS = (_scr_rows, _peak_rows, _ramp_row, _oscillation_row, _rvc_row, _rvc_
 #: off-grid scorecard unnoticed).
 SK_BUILDERS = frozenset({_scr_rows, _rvc_row, _rvc_infrequent_row, _harmonic_row, _tdd_row,
                          _flicker_row, _motor_start_rows, _unbalance_row})
+#: Why the ramp, oscillation and energization-peak rows leave the scorecard on
+#: an off-grid project whose connection cannot conduct (SH41-OFFGRID-1).
+CONN_OFF_GRID = ("off-grid: the tie is open, so the island draws nothing through the connection; "
+                 "the connection's ramp, oscillation and import limits do not apply")
+#: The note those rows carry when the project is labelled off-grid but its
+#: saved connection can still import, so they stay judged (GK A, SH 41 O1).
+CONN_LABEL_ONLY = "labelled off-grid, but the connection can import"
+#: The builders whose rows are judged against the grid connection's own limits.
+CONN_BUILDERS = frozenset({_peak_rows, _ramp_row, _oscillation_row})
+
+
+def _tie_open(inp: _Inputs) -> bool:
+    """True when the saved network has no conducting connection: every import
+    Link is held at 0 MW in every hour (SH 40's normally-open-tie rule). No
+    saved network reads False, so the rows stay judged (fail closed)."""
+    if inp.n is None:
+        return False
+    from gridspine.producers.campus import _never_conducts
+
+    return all(_never_conducts(inp.n, x) for x in inp.links)
 
 
 def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
@@ -1753,16 +1773,24 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     whether the network was edited since (``study_state.edited_since``)."""
     profile, error = _load_profile(profile_id, profile_dirs)
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
-    rows, sk_built = [], set()
+    rows, sk_built, conn_built = [], set(), set()
     for build in _BUILDERS:
         out = build(inp)
         out = out if isinstance(out, list) else [out]
         if build in SK_BUILDERS:
             sk_built.update(r["id"] for r in out)
+        if build in CONN_BUILDERS:
+            conn_built.update(r["id"] for r in out)
         rows += out
     excluded = []
     if _archetype(inp) == "off_grid":
         why = {**dict.fromkeys(sk_built, SK_OFF_GRID), **dict.fromkeys(_VS, VS_OFF_GRID)}
+        if _tie_open(inp):
+            why.update(dict.fromkeys(conn_built, CONN_OFF_GRID))
+        else:
+            for r in rows:
+                if r["id"] in conn_built:
+                    r["note"] = f"{r['note']}; {CONN_LABEL_ONLY}" if r.get("note") else CONN_LABEL_ONLY
         excluded = [{"id": r["id"], "requirement": r["requirement"], "reason": why[r["id"]]}
                     for r in rows if r["id"] in why]
         rows = [r for r in rows if r["id"] not in why]

@@ -3,14 +3,14 @@
 
 # 41 — Off-grid scorecard still judges ramp, oscillation and peak rows against the connection
 
-Status: ready-for-agent
+Status: done
 Size: S
 Blocked by: none
 Gated: GK A
 Likely files: pypsa-gui/backend/services/adequacy/grid_readiness.py; pypsa-gui/backend/services/run_profiles.py; pypsa-gui/backend/tests/test_run_action_island_survival.py (nearby)
 Type: task
 Found by: GK A's review of issue 12, slice 12a (#1361)
-Owner decisions: none yet
+Owner decisions: SH41-OFFGRID-1
 
 ## What was seen
 
@@ -31,3 +31,12 @@ the island's own limits instead.
 ### 2026-11-13: owner decision
 
 Owner answered (SH41-OFFGRID-1, `docs/agents/owner-decisions.md`). Status: ready-for-agent.
+
+### 2026-11-14: GK A plan verdict, GO with O1–O4 (build session_01G7qCukKkK9qyiku8SD5Cme)
+
+- O1, not on the label alone: the three rows leave only when the archetype is off_grid **and** the saved network has no conducting connection. That check reuses SH 40's `_never_conducts` (gridspine/producers/campus.py) over every import Link. No saved network, or a tie that can conduct, keeps the rows judged; the conducting case adds the note "labelled off-grid, but the connection can import".
+- O2, exact ids: the ids are whatever `_peak_rows`, `_ramp_row` and `_oscillation_row` emitted on this project (`CONN_BUILDERS`), every `energization_peak:<period>` included; tested on three periods.
+- O3, downstream readers: `readiness_fact` gives NoEvidence("excluded") for single rows. The `energization_peak:` gate family in run_gates read `rows` only, so it now returns NoEvidence("excluded") when any member was excluded. `rows_digest` hashes `excluded`; the scorecard UI lists excluded rows. Not changed here: `ConnectionLimits.tsx` still says "No grid connection is tagged" when these rows are excluded (UI area), and the report chapter and checked-results source do not mention exclusions.
+- O4: the cards of four grid-connected templates are byte-identical to master's; a test pins that the rule never runs on a grid-connected card.
+
+Status: done.
