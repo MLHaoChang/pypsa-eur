@@ -93,7 +93,8 @@ CARD_ONLY_TOOLS: frozenset[str] = frozenset({"site_scene_apply", "confirm_unreco
 # saved rule, task, brief or run envelope stands in for the card.
 # Business case 08b (GK B (54) Q1, #1072): a price is only ever the user's own, bound at
 # their card; no policy, task, brief or run envelope applies one.
-ALWAYS_CARD_TOOLS: frozenset[str] = frozenset({"propose_memory", "set_business_case_lines"})
+ALWAYS_CARD_TOOLS: frozenset[str] = frozenset({"propose_memory", "set_business_case_lines",
+                                               "apply_business_case_preset"})
 
 # Per-tier auto-approve policy (#18). A comma-separated list of safety tiers
 # (intersected with DESTRUCTIVE_TIERS — only destructive/execution tiers are

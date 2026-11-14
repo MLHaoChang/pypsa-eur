@@ -33,11 +33,24 @@ ERROR_KINDS = (
     {"error_kind": "business_case_clear_invalid"},
     {"error_kind": "price_not_from_user"},
     {"error_kind": "business_case_card_too_large"},
+    {"error_kind": "business_case_set_invalid"},
 )
 
 CARD_ROW_CAP = 60
 CARD_CHARS = 24_000
 NAME = "Business case"
+#: What a `set` patch may change on a stored line (business case 14; GK B (56) Q4, S4),
+#: and the pack default (`assumed` column) each one overrides.
+SET_COLUMNS = {
+    "price": "price",
+    "price_by_year": "price",
+    "money_year": "price",
+    "quantity": "quantity",
+    "quantity_by_year": "quantity",
+    "life_years": "life_years",
+}
+#: The run settings a `set` patch may change beside the lines.
+SET_SETTINGS = ("kw_per_gpu", "break_even_line")
 _PRICE = "price"
 _PRICE_BY_YEAR = "price_by_year"
 
@@ -129,7 +142,8 @@ def request(if_match, business_case, clear) -> tuple[dict | None, str]:
     if not clear and business_case is None:
         _refuse(
             "business_case_clear_invalid",
-            "pass the whole `business_case` object, or clear=true to remove every line",
+            "pass `set` (the cells to change), the whole `business_case` object, or "
+            "clear=true to remove every line",
         )
     if business_case is not None and not isinstance(business_case, dict):
         _refuse("business_case_inputs_invalid", "`business_case` is an object")
@@ -237,9 +251,11 @@ def _not_from_user(line: str, year, reason: str, message: str) -> None:
     )
 
 
-def _citation(citations, line: str, year) -> dict | None:
+def _citation(citations, line: str, year, column: str = "price") -> dict | None:
+    """The citation of one cell; a citation that names no `column` is a price's."""
     for c in citations or []:
-        if isinstance(c, dict) and c.get("line") == line and c.get("year") == year:
+        if (isinstance(c, dict) and c.get("line") == line and c.get("year") == year
+                and (c.get("column") or "price") == column):
             return c
     return None
 
@@ -271,28 +287,36 @@ def _cited(
     value,
     citations,
     host: _Host,
-    money: tuple[str, int | None],
+    money: tuple[str, int | None] | None,
+    column: str = "price",
+    unit: str | None = None,
 ) -> dict:
-    """The verified source of one new or changed price, or `price_not_from_user`."""
+    """The verified source of one new or changed price (or, for a cell that replaces a
+    pack default, of that cell in its own unit: GK B (56) S3), or `price_not_from_user`."""
     from services import run_intake
 
-    c = _citation(citations, line_name, year)
+    c = _citation(citations, line_name, year, column)
     if c is None:
         _not_from_user(
-            line_name, year, "no_citation", "it is new or changed and cites no source."
+            line_name, year, "no_citation",
+            ("it is new or changed and cites no source." if column == "price" else
+             f"its {column} replaces a pack default and cites no source."),
         )
-    currency, currency_year = money
-    money_year = line.get("money_year") or currency_year
     field = {
-        "label": f"{line_name} price",
-        "kind": "number",
+        "label": f"{line_name} {column.replace('_', ' ')}",
+        "kind": "year" if column == "money_year" else "number",
         "sources": ["table", "pdf", "text"],
         "editable": True,
-        "native_type": "float",
-        "unit_storage": _price_unit(line, currency),
-        "money": {"currency": currency, "money_year": money_year},
+        "native_type": "int" if column == "money_year" else "float",
     }
-    cite = {k: v for k, v in c.items() if k not in ("line", "year")}
+    if column == "price":
+        currency, currency_year = money
+        field["unit_storage"] = _price_unit(line, currency)
+        field["money"] = {"currency": currency,
+                          "money_year": line.get("money_year") or currency_year}
+    else:
+        field["unit_storage"] = unit or ""
+    cite = {k: v for k, v in c.items() if k not in ("line", "year", "column")}
     cite["param"] = "price"
     try:
         out = run_intake.read([cite], {"price": field}, host.get())
@@ -328,7 +352,12 @@ def _line_rows(
     host: _Host,
     money_reader,
     currency: str | None,
+    claimed: dict[tuple, str] | None = None,
 ) -> list[dict]:
+    """One line's rows. `claimed` (path -> unit) are the cells a `set` patch gave the
+    user in place of a pack default: each needs its citation even when its value equals
+    the default (GK B (56) S3)."""
+    claimed = claimed or {}
     old_l, new_l = _leaves(old), _leaves(new)
     line = new if new is not None else old
     change = "added" if old is None else "removed" if new is None else "changed"
@@ -343,7 +372,8 @@ def _line_rows(
         differs = not _equal(o, n) if (path in old_l and path in new_l) else True
         price = _is_price(path)
         differs = differs or (price and basis_moved)
-        if not differs and not (price and change == "changed"):
+        claim = path in claimed and n is not None
+        if not differs and not (price and change == "changed") and not claim:
             continue  # an unchanged value; a changed line shows its prices
         row = _row(
             name,
@@ -353,7 +383,15 @@ def _line_rows(
             change if differs else "unchanged",
             _unit(line, path, currency),
         )
-        if price:
+        if claim and not price:
+            year = int(path[1]) if len(path) == 2 else None
+            got = _cited(name, line, year, n, citations, host, None,
+                         column=path[0].removesuffix("_by_year"), unit=claimed[path])
+            row.update({"value_source": got["price_source"], "source": got["source"]})
+        elif price and claim and not differs:
+            year = int(path[1]) if path[0] == _PRICE_BY_YEAR else None
+            row.update(_cited(name, line, year, n, citations, host, money_reader()))
+        elif price:
             if not differs:
                 row["price_source"] = _price_source_kept(old, path)
             elif n is None:
@@ -373,8 +411,11 @@ def _currency(stored_finance) -> str | None:
         return None
 
 
-def rows(old: dict | None, new: dict | None, citations, stored_finance) -> list[dict]:
-    """The card's rows: the diff of `old` (stored) against `new` (None: cleared)."""
+def rows(old: dict | None, new: dict | None, citations, stored_finance,
+         claimed: dict[str, dict[tuple, str]] | None = None) -> list[dict]:
+    """The card's rows: the diff of `old` (stored) against `new` (None: cleared).
+    `claimed` maps a line to its cells a `set` patch claimed from a pack default."""
+    claimed = claimed or {}
     host = _Host()
     cache: list = []
 
@@ -398,7 +439,8 @@ def rows(old: dict | None, new: dict | None, citations, stored_finance) -> list[
         o, n = old_lines.get(name), new_lines.get(name)
         if o is not None and n is not None and _equal(o, n):
             continue
-        out.extend(_line_rows(name, o, n, citations, host, money_reader, currency))
+        out.extend(_line_rows(name, o, n, citations, host, money_reader, currency,
+                              claimed.get(name)))
     return out
 
 
@@ -422,6 +464,98 @@ def says(rows_: list[dict]) -> str:
     return "business case: " + (", ".join(parts) or "no change")
 
 
+def _set_invalid(message: str) -> None:
+    _refuse("business_case_set_invalid", message)
+
+
+def _set_number(where: str, v, *, year: bool = False):
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        _set_invalid(f"{where}: a finite number or null, not {str(v)[:40]}")
+    if year and v != int(v):
+        _set_invalid(f"{where}: a whole year")
+    return int(v) if year else float(v)
+
+
+def _set_cell(where: str, col: str, v):
+    if not col.endswith("_by_year"):
+        return _set_number(where, v, year=col == "money_year")
+    if not isinstance(v, dict):
+        _set_invalid(f"{where}: an object {{year: number}}")
+    out = {}
+    for y, x in v.items():
+        if not str(y).isdigit():
+            _set_invalid(f"{where}: year keys, not {str(y)[:20]}")
+        out[str(int(y))] = _set_number(f"{where}.{y}", x)
+        if out[str(int(y))] is None:
+            _set_invalid(f"{where}.{y}: a finite number")
+    return out
+
+
+def apply_set(old: dict | None, patch) -> tuple[dict, dict[str, dict[tuple, str]]]:
+    """`old` (the stored config) with `patch` applied, and the cells it claims from a pack
+    default (business case 14; GK B (56) Q4, S1-S4). `patch` is {line name: {column:
+    value}} with columns from `SET_COLUMNS`, plus `SET_SETTINGS` at the top. A column that
+    overrides a pack default drops that `assumed` entry, so every patched cell of its
+    group becomes the user's and must cite them (S3). Every shape fault is
+    `business_case_set_invalid`; an empty patch is `empty_edit`."""
+    import copy
+
+    if not isinstance(patch, dict):
+        _set_invalid("`set` is an object {line name: {column: value}}")
+    if not patch:
+        _refuse("empty_edit", "`set` names nothing to change")
+    new = copy.deepcopy(old) if old else {"inputs": {"lines": []}}
+    lines = _lines(new)
+    claimed: dict[str, dict[tuple, str]] = {}
+    for key, cells in patch.items():
+        if key in SET_SETTINGS:
+            if key == "kw_per_gpu":
+                new[key] = _set_number(key, cells)
+            elif cells is not None and not isinstance(cells, str):
+                _set_invalid("break_even_line names a revenue line, or null")
+            else:
+                new[key] = cells
+            continue
+        line = lines.get(key)
+        if line is None:
+            _set_invalid(f"no stored line is named {str(key)[:80]!r}; read the names with "
+                         "get_business_case(detail='inputs')")
+        if not isinstance(cells, dict) or not cells:
+            _set_invalid(f"{str(key)[:80]}: an object {{column: value}}")
+        bad = sorted(str(c) for c in cells if c not in SET_COLUMNS)
+        if bad:
+            _set_invalid(f"{str(key)[:80]}: `set` changes only {', '.join(SET_COLUMNS)}; "
+                         f"not {', '.join(bad)[:120]}")
+        assumed = dict(line.get("assumed") or {})
+        dropped = {}
+        for col, v in cells.items():
+            line[col] = _set_cell(f"{key}.{col}", col, v)
+            group = SET_COLUMNS[col]
+            if group in assumed:
+                dropped[group] = assumed.pop(group)
+        line["assumed"] = assumed
+        mine = claimed.setdefault(key, {})
+        for group, d in dropped.items():
+            # Every cell of an overridden default's group is now the user's (S3): the
+            # group's own column (even when kept equal to the default) and each patched
+            # cell of the group.
+            unit = d.get("unit") or line.get("unit") or ""
+            cols = {group} | {c for c in cells if SET_COLUMNS[c] == group}
+            for col in sorted(cols):
+                cell_unit = "year" if col == "money_year" else (
+                    "" if col.startswith("price") else unit)
+                if col.endswith("_by_year"):
+                    for y in line.get(col) or {}:
+                        mine[(col, y)] = cell_unit
+                elif line.get(col) is not None:
+                    mine[(col,)] = cell_unit
+        if not mine:
+            del claimed[key]
+    return new, claimed
+
+
 def plan(args: dict) -> dict:
     """The checked call: `{new, old, tag, rows}`, or a refusal (HTTPException with an
     `error_kind`). Reads the stored inputs; writes nothing."""
@@ -429,9 +563,16 @@ def plan(args: dict) -> dict:
     from routers.simulation import _entity_tag
     from services.business_case.runner import config_digest, config_or_422
 
-    new_raw, tag = request(
-        args.get("if_match"), args.get("business_case"), bool(args.get("clear"))
-    )
+    patch = args.get("set")
+    if patch is not None:
+        if args.get("business_case") is not None or args.get("clear"):
+            _set_invalid("`set` patches the stored lines: pass no `business_case` and no "
+                         "clear=true with it")
+        new_raw, tag = None, request(args.get("if_match"), {}, False)[1]
+    else:
+        new_raw, tag = request(
+            args.get("if_match"), args.get("business_case"), bool(args.get("clear"))
+        )
     citations = args.get("citations")
     if citations is not None and not isinstance(citations, list):
         _refuse(
@@ -444,6 +585,18 @@ def plan(args: dict) -> dict:
             "business-case inputs after it finishes",
             409,
         )
+    claimed: dict[str, dict[tuple, str]] = {}
+    if patch is not None:
+        # S1: the patch applies to the stored copy this digest names, and nothing else.
+        stored = getattr(results._state["solver_config"], "business_case", None)
+        if _entity_tag(tag) != config_digest(stored):
+            _refuse(
+                "business_case_changed",
+                "the business-case inputs changed since they were "
+                "read; read them again (get_business_case detail='inputs') and re-apply",
+                412,
+            )
+        new_raw, claimed = apply_set(stored, patch)
     new = None
     if new_raw is not None:
         try:
@@ -476,7 +629,7 @@ def plan(args: dict) -> dict:
             "empty_edit",
             "no business-case inputs are stored; there is nothing to clear",
         )
-    out = rows(old, new, citations, getattr(cfg, "finance", None))
+    out = rows(old, new, citations, getattr(cfg, "finance", None), claimed)
     if not out:
         _refuse("empty_edit", "the business-case inputs already have these values")
     if len(out) > CARD_ROW_CAP or len(json.dumps(out, default=str)) > CARD_CHARS:

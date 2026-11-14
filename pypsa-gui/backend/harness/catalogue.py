@@ -4691,10 +4691,33 @@ TOOLS: list[dict[str, Any]] = [
         "approves a card showing every line added, changed (old → new) or removed and "
         "each price's source; an edit too large for one card is refused "
         "(business_case_card_too_large): split it. clear=true (no business_case) removes "
-        "every line. The preset is the panel's (Results, Investment tab). Safety: write.",
+        "every line. `set` (instead of business_case) changes named cells of the STORED "
+        "lines without sending them back: {\"<line name>\": {price | price_by_year | "
+        "quantity | quantity_by_year | money_year | life_years: value}, kw_per_gpu?, "
+        "break_even_line?}; a cell that replaces a pack default (assumed) makes the user its "
+        "source, so it cites the user too (citation `column` names a non-price cell), even "
+        "when equal to the default. Unknown names or columns: business_case_set_invalid. "
+        "Safety: write.",
         {"business_case": {"type": "object"}, "if_match": {"type": "string"},
-         "clear": {"type": "boolean"},
+         "clear": {"type": "boolean"}, "set": {"type": "object"},
          "citations": {"type": "array", "maxItems": 60, "items": {"type": "object"}}},
+        ["if_match"],
+    ),
+    _t(
+        "apply_business_case_preset",
+        "Store the open project's template preset as the business-case lines (Guided "
+        "'is this plant worth building?'). The SERVER fills every cost default from the "
+        "preset's pinned pack, marked assumed with its source and year; revenue prices stay "
+        "empty. `variant` picks one of the template's presets; a template with none (the "
+        "generic site, or a template with no preset yet) takes `rows`, the labels of the "
+        "offered rows the user picked. Refusals list the choices: preset_variant_required "
+        "(variants), preset_rows_required (offered). `if_match` is REQUIRED (the digest of "
+        "get_business_case(detail='inputs')); it REPLACES the stored lines, so the card "
+        "shows each removed line. Returns `to_ask` (every empty price, quantity or share: "
+        "ask the user, NEVER invent) and `assumed` (each default with source and year). "
+        "Needs the finance inputs (their currency). Safety: write.",
+        {"if_match": {"type": "string"}, "variant": {"type": "string"},
+         "rows": {"type": "array", "maxItems": 20, "items": {"type": "string"}}},
         ["if_match"],
     ),
     _t(
@@ -5901,6 +5924,8 @@ TOOL_ROUTES: dict[str, list] = {
     "get_business_case": [("GET", "/api/results/business_case"),
                           ("GET", "/api/results/business_case/inputs")],
     "set_business_case_lines": [("PUT", "/api/results/business_case/inputs")],
+    "apply_business_case_preset": [("GET", "/api/results/business_case/preset"),
+                                   ("PUT", "/api/results/business_case/inputs")],
     "abort_business_case": [("POST", "/api/results/business_case/abort")],
     # decision study (6) — U3: `routers/studies.py`, in process through `_route`.
     "start_decision_study": [("POST", "/api/projects/{name}/studies/")],
