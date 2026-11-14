@@ -123,7 +123,7 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
     assert any(i == "motor_start" or i.startswith("motor_start:") for i in sk)
     out = G.grid_readiness(tmp_path, _site(), PROFILE)
     excluded = {e["id"]: e for e in out["excluded"]}
-    assert set(excluded) == sk | set(VS_IDS)
+    assert set(excluded) == sk | set(VS_IDS) | _conn_ids(out)
     assert all(
         excluded[i]["reason"] == G.SK_OFF_GRID and excluded[i]["requirement"]
         for i in sk
@@ -141,6 +141,46 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
     for i in sk:
         fact = G.readiness_fact(out, i)
         assert fact.value == "excluded" and fact.reason == f"excluded: {G.SK_OFF_GRID}"
+
+
+def _conn_ids(card) -> set:
+    """The ramp, oscillation and energization-peak ids on a scorecard, kept or excluded."""
+    ids = {r["id"] for r in card["rows"]} | {e["id"] for e in card["excluded"]}
+    return {i for i in ids if i in ("ramp_rate", "oscillation") or i.split(":")[0] == "energization_peak"}
+
+
+def test_off_grid_excludes_the_ramp_oscillation_and_peak_rows_with_the_reason(tmp_path):
+    # SH41-OFFGRID-1: the tie is open, so the connection's limits do not judge the island.
+    _template(tmp_path, "off_grid")
+    _write(tmp_path)
+    out = G.grid_readiness(tmp_path, _site(), PROFILE)
+    conn = _conn_ids(out)
+    assert {"ramp_rate", "oscillation"} <= conn
+    assert any(i.split(":")[0] == "energization_peak" for i in conn)
+    excluded = {e["id"]: e for e in out["excluded"]}
+    assert conn <= set(excluded)
+    assert not conn & {r["id"] for r in out["rows"]}
+    assert all(excluded[i]["reason"] == G.CONN_OFF_GRID and excluded[i]["requirement"] for i in conn)
+    assert G.CONN_OFF_GRID == (
+        "off-grid: the tie is open, so the island draws nothing through the connection; "
+        "the connection's ramp, oscillation and import limits do not apply"
+    )
+    assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])
+    for i in conn:
+        fact = G.readiness_fact(out, i)
+        assert fact.value == "excluded" and fact.reason == f"excluded: {G.CONN_OFF_GRID}"
+
+
+def test_a_grid_project_judges_ramp_oscillation_and_peak_against_the_connection(tmp_path):
+    _write(tmp_path)
+    out = G.grid_readiness(tmp_path, _site(), PROFILE)
+    assert out["excluded"] == []
+    rows = {r["id"]: r for r in out["rows"]}
+    conn = _conn_ids(out)
+    assert {"ramp_rate", "oscillation"} <= conn <= set(rows)
+    assert any(i.split(":")[0] == "energization_peak" for i in conn)
+    assert rows["ramp_rate"]["setting"]["item"] == "connection_ramp"
+    assert rows["oscillation"]["setting"]["item"] == "oscillation"
 
 
 def test_a_grid_project_keeps_every_row_in_the_scorecard_order(tmp_path):
