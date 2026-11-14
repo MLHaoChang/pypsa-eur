@@ -58,6 +58,44 @@ def test_allowed_units_equal_the_units_the_validator_accepts(kind, source):
     assert list(M.allowed_units(kind, source)) == accepted
 
 
+#: Spec §4 "Units by source", written out by hand so a change to `allowed_units` cannot
+#: move the expected side with it (the parity test above reads the function on both sides).
+_EVERY = tuple(u for u in get_args(M.Unit) if u not in ("share", "lump", "MW"))
+_SPEC_UNITS = {
+    ("revenue", "typed"): _EVERY,
+    ("opex", "typed"): _EVERY,
+    ("capex", "typed"): (*_EVERY, "MW", "lump"),
+    ("revenue", "share_of"): ("share",),
+    ("opex", "share_of"): ("share",),
+    ("capex", "share_of"): ("share",),
+}
+
+
+@pytest.mark.parametrize(("kind", "source"), sorted(_SPEC_UNITS))
+def test_allowed_units_match_the_spec_table(kind, source):
+    assert set(M.allowed_units(kind, source)) == set(_SPEC_UNITS[kind, source])
+
+
+@pytest.mark.parametrize("kind", ["revenue", "opex"])
+def test_lump_is_capex_only(kind):
+    assert "lump" not in M.allowed_units(kind, "typed")
+    assert "lump" not in M.allowed_units(kind, "linked", ("lump", "MWh"))
+    assert "lump" in M.allowed_units("capex", "typed")
+
+
+@pytest.mark.parametrize("kind", ["revenue", "opex", "capex"])
+def test_mw_is_typed_capex_only(kind):
+    assert "MW" not in M.allowed_units(kind, "linked", ("MW", "MWh"))
+    assert ("MW" in M.allowed_units(kind, "typed")) is (kind == "capex")
+
+
+@pytest.mark.parametrize("kind", ["revenue", "opex", "capex"])
+def test_share_only_with_share_of(kind):
+    assert "share" not in M.allowed_units(kind, "typed")
+    assert "share" not in M.allowed_units(kind, "linked", ("share", "MWh"))
+    assert M.allowed_units(kind, "share_of") == ("share",)
+
+
 def test_allowed_units_of_a_linked_line_are_its_outputs_units():
     assert M.allowed_units("revenue", "linked", ("MWh", "t")) == ("MWh", "t")
     assert M.allowed_units("revenue", "linked", ()) == ()
