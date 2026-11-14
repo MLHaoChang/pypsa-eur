@@ -534,6 +534,24 @@ def create_report(body: CreateReportBody,
     return {**meta.model_dump(), "document": stored.model_dump()}
 
 
+def _refuse_stale(project: AuthorizedProject, doc) -> None:
+    """409 `report_stale` when the study changed since this version was written
+    (owner decision LC48B-STALE-1): its stored `evidence_hash` is not the hash of
+    the project's evidence now, the same comparison the viewer shows as
+    "evidence changed since vN". Nothing is rendered or saved; generate the
+    report again, then export."""
+    from services.reports.evidence import evidence_hash
+
+    evidence, _eh_report = _current_evidence(project)
+    if doc.evidence_hash != evidence_hash(evidence):
+        raise HTTPException(409, {
+            "error_kind": "report_stale",
+            "message": f"Version {doc.version} of this report was written before the "
+                       "study changed, so its figures no longer match the project.",
+            "hint": "generate the report again, then export",
+        })
+
+
 @router.post("/{name}/reports/{report_id}/export")
 def export_report(report_id: str, body: ExportReportBody,
                   project: AuthorizedProject = ProjectAccessDep,
@@ -574,6 +592,7 @@ def export_report(report_id: str, body: ExportReportBody,
         doc = store.load_report(project.directory, report_id, body.version)
     except store.ReportStoreError as exc:
         raise _http(exc) from exc
+    _refuse_stale(project, doc)
     figure_bytes: dict[str, bytes] = {}
     for figure_id in doc.figures:
         try:
