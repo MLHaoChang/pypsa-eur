@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The decision report, the investment case and its hub tile now read one provenance-graph verdict. The report asks for a re-run only when a broken edge feeds the run, and otherwise offers assembling the report again; the investment case no longer ORs its old stale flags (provenance-graph PG-05b).

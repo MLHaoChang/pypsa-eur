@@ -20,6 +20,7 @@ import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
 import { costTileLabel, kpiMoney } from '../plainWords'
 import { useQuery } from '@tanstack/react-query'
+import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
 import { networkApi } from '../../../api/network'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
@@ -69,6 +70,8 @@ export function ResultsCard() {
     enabled: !!project && multiPeriod,
   })
   const setStep = useHubDesignStore(s => s.setStep)
+  // Results that came with the project, never checked against its inputs (PG-12): never read as current.
+  const uncheckedKinds = useUncheckedRunKinds()
   // The four category tiles (UX S6, G4/G6), shown whether or not the study ran.
   const summary = review?.summary ?? {}
   const verdict = summary.verdict
@@ -107,6 +110,13 @@ export function ResultsCard() {
         <p data-testid="hub-results-edited"
           className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
           {EDITED_TEXT}
+        </p>
+      )}
+      {uncheckedKinds.length > 0 && (
+        // One visible mark per card, the header tooltip's words (PG-04b).
+        <p data-testid="hub-results-unchecked"
+          className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+          {uncheckedKindsSentence(uncheckedKinds)}
         </p>
       )}
       {stale && (

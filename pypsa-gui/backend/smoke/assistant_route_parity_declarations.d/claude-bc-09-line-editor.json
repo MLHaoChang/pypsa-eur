@@ -1,0 +1,16 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/results/business_case/options",
+   "reason": "held-by-spec",
+   "issue": ".scratch/business-case/issues/16-chat-table-options.md"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/business_case/preset",
+   "reason": "held-by-spec",
+   "issue": ".scratch/business-case/issues/16-chat-table-options.md"
+  }
+ ]
+}
