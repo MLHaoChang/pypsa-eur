@@ -210,3 +210,140 @@ def test_a_task_switch_is_refused_while_one_runs(chat):
     tasks.cancel_task(first["task_id"])
     second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
     assert chat.task_id == second["task_id"] != first["task_id"]
+
+
+# GK B F3 on #1515: the M2 and M11 survivors.
+
+
+def test_only_the_unanswered_call_of_two_gets_the_synthetic_result():
+    """M2: unpaired calls are matched by id, not by how many results follow."""
+    from harness.history import repair_unpaired_tool_use
+
+    first = {"type": "tool_use", "id": "call_a", "name": "get_network", "input": {}}
+    second = {"type": "tool_use", "id": "call_b", "name": "get_network", "input": {}}
+    answer_b = {"type": "tool_result", "tool_use_id": "call_b", "content": "ok"}
+    messages = [
+        {"role": "user", "content": "look"},
+        {"role": "assistant", "content": [first, second]},
+        {"role": "user", "content": [answer_b]},
+    ]
+    repaired = repair_unpaired_tool_use(messages)
+    results = [b for b in repaired[2]["content"] if b.get("type") == "tool_result"]
+    assert [(b["tool_use_id"], b.get("is_error", False)) for b in results] == [
+        ("call_b", False),
+        ("call_a", True),
+    ]
+    assert len(repaired) == 3 and messages[2]["content"] == [answer_b]
+
+
+def test_the_cache_anchor_is_the_last_stored_message_after_a_repair_inserts_one(
+    baseline,
+):
+    """M11: a repair that inserts a user message moves the anchor with it; the
+    breakpoint stays on the last stored message, never on this turn's own."""
+    session = _session()
+    session.append_history_message({"role": "user", "content": "raise G1"})
+    session.append_history_message({"role": "assistant", "content": [LOST]})
+    session.append_history_message({"role": "assistant", "content": "still here"})
+
+    frames, bodies = _turn(session, [])
+
+    assert frames[-1][0] == "turn_done", frames[-3:]
+    sent = bodies[0]["messages"]
+    assert [m["role"] for m in sent] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+    ]
+    marked = [
+        i
+        for i, m in enumerate(sent)
+        if isinstance(m["content"], list)
+        and any(isinstance(b, dict) and "cache_control" in b for b in m["content"])
+    ]
+    assert marked == [3], marked
+
+
+# GK B F2 on #1515: GOAL-1 holds for harness runs and for resume_task too.
+
+
+def _set_stored(task_id, **fields):
+    """Put the stored task in a state a test cannot reach without a job queue."""
+    with tasks._LOCK:
+        path, task = tasks._read(task_id)
+        for key, value in fields.items():
+            task[key] = value
+        tasks._save(path, task)
+
+
+def _switch_refused(call, active_id, status):
+    with pytest.raises(chat_router.HTTPException) as switch:
+        call()
+    assert switch.value.status_code == 409
+    assert switch.value.detail["error_kind"] == "switch_in_progress"
+    assert switch.value.detail["active"]["id"] == active_id
+    assert switch.value.detail["active"]["status"] == status
+
+
+def test_a_waiting_job_task_blocks_a_start_for_another_plan(chat):
+    """M9: `waiting_job` counts as running."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    _set_stored(first["task_id"], status="waiting_job")
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "waiting_job",
+    )
+    assert chat.task_id == first["task_id"]
+
+
+def test_a_running_harness_run_blocks_a_start_for_another_plan(chat):
+    """A run's task stays `ready` while its run executes: the run's status counts."""
+    first = chat_tools.start_task(title="Run", request_id="first", steps=WAIT)
+    _set_stored(first["task_id"], status="ready", run={"status": "running"})
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "running",
+    )
+    assert chat.task_id == first["task_id"]
+
+
+def test_a_run_start_for_another_plan_is_refused_while_a_task_runs(chat, monkeypatch):
+    """`start_task(run=…)` takes `_start_run`, which holds the same guard."""
+    from services import run_profiles
+
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    profile = run_profiles.PROFILES["eh_site@1"]
+    monkeypatch.setattr(tasks, "_check_run", lambda run, steps, brief: (profile, brief))
+    _switch_refused(
+        lambda: chat_tools.start_task(
+            title="Site study",
+            request_id="run-1",
+            steps=[],
+            brief={"objective": "Size it.", "cards": ["capacity"]},
+            run={"profile": "eh_site@1", "mode": "stepwise"},
+        ),
+        first["task_id"],
+        "running",
+    )
+    assert chat.task_id == first["task_id"]
+
+
+def test_resuming_another_task_is_refused_while_one_runs(chat):
+    other = chat_tools.start_task(title="Other", request_id="other", steps=WAIT)
+    tasks.cancel_task(other["task_id"])
+    _set_stored(other["task_id"], status="ready")
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    with tasks._LOCK:
+        kept = tasks._read(other["task_id"])[1]
+    _switch_refused(
+        lambda: tasks.resume_task(other["task_id"]), first["task_id"], "running"
+    )
+    assert chat.task_id == first["task_id"]
+    with tasks._LOCK:
+        assert tasks._read(other["task_id"])[1] == kept

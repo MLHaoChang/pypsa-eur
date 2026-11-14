@@ -6961,7 +6961,11 @@ def _describe_step(wf, step) -> dict:
 def start_workflow(workflow_id: str) -> dict:
     """Start a workflow on this session (issue 06): state is (id, step) on
     the ChatSession; the per-turn addendum carries the step from the next
-    turn on, and this result carries it for the current one."""
+    turn on, and this result carries it for the current one.
+
+    The active-workflow check (LC48D-GOAL-1) takes no lock: it relies on a
+    session's tools running one at a time per turn (`_turn_in_flight`,
+    harness/loop.py), so no second start can interleave with it."""
     from harness import workflows
     key = str(workflow_id or "").strip().lower()
     wf = workflows.registry().get(key)

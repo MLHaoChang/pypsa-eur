@@ -20,6 +20,7 @@ import copy
 import hashlib
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -388,7 +389,8 @@ class ChatSession:
         if ttl_seconds is None:
             ttl_seconds = CONFIRMATION_TTL_SECONDS
         # 32 hex as before; the first 8 name this process (LC48D-APPROVAL-1).
-        token = BOOT_PREFIX + uuid.uuid4().hex[len(BOOT_PREFIX):]
+        # 8 hex of boot prefix + 24 random hex (96 bits; GK B N2 on #1515).
+        token = BOOT_PREFIX + secrets.token_hex(12)
         now = time.monotonic()
         from services.pypsa_service import PyPSAService
         project_id = PyPSAService.get_active_context().project_uuid
