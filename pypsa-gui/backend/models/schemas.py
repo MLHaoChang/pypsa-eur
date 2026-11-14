@@ -705,6 +705,12 @@ class SolverConfigSchema(BaseModel):
     # (`services/solver/renewable_fraction.py`). `allow_inf_nan=False`: a NaN
     # would read as "off" downstream, the same silent coercion as a negative.
     min_renewable_fraction: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    # Operating reserve (homer-parity 01b): dispatchable headroom held every
+    # snapshot of at least these FRACTIONS of the load, the PV output and the
+    # wind output; all None/0 = off (`services/solver/operating_reserve.py`).
+    reserve_share_load: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    reserve_share_pv: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    reserve_share_wind: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     # Island ride-through rows (campus island I2a), opt-in per project (Q5).
     island_constraints: bool = False
     # Peak-coincidence window (snapshots) for must-take VRE credit; None ⇒ the

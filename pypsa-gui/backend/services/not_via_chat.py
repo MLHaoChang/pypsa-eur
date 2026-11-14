@@ -385,6 +385,19 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('POST', '/api/spectrum/trace'),
         }),
     },    {
+        'id': 'operating_reserve_result',
+        'title': 'Operating reserve per hour',
+        'disposition': 'unbuilt',
+        'reason': ('The operating reserve held and required per hour, and the hours where it binds, '
+                   'cannot be read from chat yet. A Results view follows.'),
+        'page': 'Results',
+        'panel': None,
+        'keywords': frozenset({'reserve', 'headroom', 'spinning'}),
+        'routes': frozenset({
+            ('GET', '/api/results/operating_reserve'),
+        }),
+    },
+    {
         'id': 'report_comment_revisions',
         'title': 'Report comments and comment revisions',
         'disposition': 'unbuilt',

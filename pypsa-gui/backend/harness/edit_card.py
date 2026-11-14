@@ -1007,8 +1007,15 @@ _SOLVER_WORDS: dict[str, tuple[str, str, dict | None]] = {
     # homer-parity 01a. Shown in % (a share, below), as the Solver Settings field
     # `MIN_RENEWABLE_FRACTION_LABEL` (pages/solver/OffGridConstraints.tsx) says it.
     "min_renewable_fraction": ("Minimum renewable fraction", "", None),
+    # homer-parity 01b, shown in %, as `RESERVE_LABELS` in the same file says them.
+    "reserve_share_load": ("Reserve for load", "", None),
+    "reserve_share_pv": ("Reserve for solar output", "", None),
+    "reserve_share_wind": ("Reserve for wind output", "", None),
 }
-_SHARES = frozenset({"discount_rate", "inflation_rate", "min_renewable_fraction"})
+_SHARES = frozenset({
+    "discount_rate", "inflation_rate", "min_renewable_fraction",
+    "reserve_share_load", "reserve_share_pv", "reserve_share_wind",
+})
 _ROLLING = frozenset({"rolling_horizon", "rolling_overlap"})
 # Settings with their own route (validation and If-Match): never through this card. The
 # commercial config stays: chat_tools steers the model here for its poc_link and contracts.
