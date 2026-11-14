@@ -144,9 +144,9 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
           type="button"
           data-testid="site-export-blender"
           onClick={sceneExport.onExport}
-          disabled={sceneExport.busy || sceneExport.revision === null}
+          disabled={sceneExport.busy || !sceneExport.available}
           aria-busy={sceneExport.busy}
-          title={sceneExport.reason ?? (sceneExport.revision !== null ? exportTitle(sceneExport.revision) : undefined)}
+          title={sceneExport.reason ?? exportTitle(sceneExport.revision)}
           className="px-1.5 py-0.5 rounded border border-border text-text hover:bg-accent/5 disabled:opacity-50"
         >
           {sceneExport.busy ? 'Exporting…' : 'Export for Blender'}
