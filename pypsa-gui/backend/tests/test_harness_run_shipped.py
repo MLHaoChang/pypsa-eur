@@ -894,6 +894,9 @@ def test_an_invalid_patched_case_is_not_run_at_admission_with_the_reason(
         "Store.bess.capital_cost",  # a Store cost
         "Link.bess.capital_cost",  # a Link cost
         "commercial.some_new_key",
+        "commercial.connection.id",  # the right shape, not a price ref
+        "commercial.x.c1.reference_price.id",  # not under contracts
+        "commercial.x.ppa_wind.price",  # not under contracts
         "commercial.export_price_ref.hash",
         "commercial.contracts.ppa_wind.reference_price.hash",
         "commercial.connection.p_nom",
@@ -1053,3 +1056,37 @@ def test_a_price_ref_case_changes_the_ref_ids_and_nothing_else(project, built, c
     assert {leaf.rsplit(".", 1)[1] for leaf in leaves} <= {"id", "hash"}
     assert any(leaf.endswith("export_price_ref.id") for leaf in leaves)
     assert any(leaf.endswith("import_price_ref.id") for leaf in leaves)
+
+
+def test_check_old_false_does_not_compare_the_old_value(project, built):
+    cfg = _project_cfg(built[0])
+    cfg["commercial"]["contracts"][0]["price"] = 99.0
+    cfg["commercial"]["export_price_ref"] = _ref("someone_elses_series")
+    out, _ = S.apply(
+        cfg,
+        _case_changes(project, "ppa_price_minus_10")
+        + _case_changes(project, "low_price")[:1],
+        _resolver,
+        check_old=False,
+    )
+    assert out["commercial"]["contracts"][0]["price"] == 58.5
+    assert out["commercial"]["export_price_ref"]["id"] == "ipp_da_low"
+
+
+@pytest.mark.parametrize("contracts", [None, ["not a dict", 7]])
+def test_a_contracts_list_that_is_missing_or_malformed_is_stale_not_a_crash(
+    project, built, contracts
+):
+    cfg = _project_cfg(built[0])
+    cfg["commercial"]["contracts"] = contracts
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, _case_changes(project, "ppa_price_minus_10"), _resolver)
+    assert exc.value.kind == "shipped_case_stale"
+
+
+def test_a_missing_current_number_is_stale_not_a_crash(project, built):
+    cfg = _project_cfg(built[0])
+    cfg["commercial"]["contracts"][0]["price"] = None
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, _case_changes(project, "ppa_price_minus_10"), _resolver)
+    assert exc.value.kind == "shipped_case_stale"
