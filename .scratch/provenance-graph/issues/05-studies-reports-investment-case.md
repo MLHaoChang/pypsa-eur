@@ -1,6 +1,6 @@
 # Studies, reports and the investment case on the graph
 
-Status: ready-for-agent (blocked by 04; Opus; GK B, UX for UI parts)
+Status: done
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 
