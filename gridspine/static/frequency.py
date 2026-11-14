@@ -1117,18 +1117,12 @@ def failed(ok) -> bool:
     (a bool, or ``False``/``0`` as a CSV gives it back). None, NaN or an
     empty cell (a row not judged: no e(t−1), the tie open) is never a
     failure, and never a pass (``passed``)."""
-    if ok is None or (isinstance(ok, float) and ok != ok):
-        return False
-    if isinstance(ok, (bool, np.bool_)):
-        return not bool(ok)
     return str(ok).strip().lower() in ("false", "0", "0.0")
 
 
 def passed(ok) -> bool:
     """A judged row's ``ok`` read as a pass: True only for a real True."""
-    if isinstance(ok, (bool, np.bool_)):
-        return bool(ok)
-    return ok is not None and str(ok).strip().lower() in ("true", "1", "1.0")
+    return str(ok).strip().lower() in ("true", "1", "1.0")
 
 
 def _not_applicable(key, event, columns, **extra):
