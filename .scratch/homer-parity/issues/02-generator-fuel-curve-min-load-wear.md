@@ -3,7 +3,7 @@
 
 # 02 — Generator realism: fuel curve, minimum load and run-hour wear
 
-Status: ready-for-agent (02a done #1466; 02b in progress)
+Status: done (#1506) (02a done #1466; 02b in progress)
 Model: Opus
 Reviewer: GK B (GK A only if it touches the adequacy/IC engine)
 Blocked by: none
