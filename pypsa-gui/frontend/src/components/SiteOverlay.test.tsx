@@ -165,4 +165,35 @@ describe('SiteOverlay — Arrange while loading', () => {
       expect(useUIStore.getState().siteSizing).toBe('optimised')
     })
   })
+  it('Export for Blender: enabled with a revision, visible reason when there is no 3D scene, busy while exporting, offered read-only (SC-04)', () => {
+    const base = { sites: [site], site, onPickSite: () => {}, assetCount: 1, fit: { ...fit, over: false, outside: [] }, unplacedMembers: [], selectedPlacedKey: null, canArrange: true, onArrange: () => {}, onResetPlacement: () => {}, onSnapshot: () => {} }
+    const onExport = vi.fn()
+    const { rerender } = render(<SiteOverlay {...base} sceneExport={{ available: true, reason: null, revision: 4, busy: false, onExport }} />)
+    const btn = () => screen.getByTestId('site-export-blender') as HTMLButtonElement
+    // Directly after Snapshot in the strip.
+    expect(screen.getByTestId('site-snapshot').nextElementSibling).toBe(btn())
+    expect(btn().textContent).toBe('Export for Blender')
+    expect(btn().title).toContain('revision 4')
+    expect(btn().title).toContain('3D model file (GLB) and a manifest')
+    expect(btn().title).toMatch(/snapshot.*not a certified model.*No photos/)
+    expect(screen.queryByTestId('site-export-reason')).toBeNull()
+    fireEvent.click(btn())
+    expect(onExport).toHaveBeenCalledTimes(1)
+
+    rerender(<SiteOverlay {...base} sceneExport={{ available: false, reason: 'Generate the 3D buildings first (Generate tab): only a 3D site can be exported', revision: null, busy: false, onExport }} />)
+    expect(btn().disabled).toBe(true)
+    expect(screen.getByTestId('site-export-reason').textContent).toBe('Generate the 3D buildings first (Generate tab): only a 3D site can be exported')
+    expect(btn().title).toBe(screen.getByTestId('site-export-reason').textContent)
+
+    rerender(<SiteOverlay {...base} sceneExport={{ available: true, reason: null, revision: 4, busy: true, onExport }} />)
+    expect(btn().textContent).toBe('Exporting…')
+    expect(btn().disabled).toBe(true)
+
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'solving' })
+    rerender(<SiteOverlay {...base} sceneExport={{ available: true, reason: null, revision: 4, busy: false, onExport }} />)
+    expect(btn().disabled).toBe(false)
+
+    rerender(<SiteOverlay {...base} />)
+    expect(screen.queryByTestId('site-export-blender')).toBeNull()
+  })
 })
