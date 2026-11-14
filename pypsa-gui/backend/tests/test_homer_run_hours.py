@@ -650,7 +650,9 @@ def test_the_case_digest_without_run_hour_columns_is_master_s():
         discount_rate=0.07,
     )
     commercial = {
-        "value_flows": {"asset_owners": [{"component": "Generator", "asset_id": "genset"}]}
+        "value_flows": {
+            "asset_owners": [{"component": "Generator", "asset_id": "genset"}]
+        }
     }
     assert owner_assets_digest(n, commercial) == "188aa0034cd0ec22c9bfc70be2b70987"
 
