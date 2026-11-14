@@ -153,6 +153,7 @@ FIELDS = {
     "terminal",
     "outcome",
     "detail",
+    "input_revision_note",
 }
 
 
@@ -302,35 +303,267 @@ def test_each_study_key_takes_its_own_existing_abort(
         _stop_all(started)
 
 
-@pytest.mark.parametrize("family", ["fg", "ad", "rpt"])
-def test_a_foreign_actor_reads_and_cancels_nothing(baseline, family):
-    ctx, *_ = baseline
-    started = [_start(ctx, family)]
-    try:
-        for call in (ja.job_status, ja.cancel_job):
-            with pytest.raises(HTTPException) as refused:
-                call(started[0][0], actor_id=str(uuid.uuid4()))
-            assert refused.value.status_code == 404
-            assert refused.value.detail["error_kind"] == "job_not_found"
-        assert not started[0][2].is_set()
-    finally:
-        _stop_all(started)
+# ── GK B A1: 4 families x {view, cancel} x {own, foreign actor, foreign project} ──
 
 
-def test_another_projects_handle_reads_project_mismatch(baseline):
-    ctx, *_ = baseline
-    job = ja.register_study_job(
-        study_key="fmea_sweep",
-        tool_name="run_fmea_sweep",
+def _foreign_project_job(ctx, path, family):
+    """A job of a project the acting user is not on."""
+    if family == "sq":
+        solve_queue.pause()
+        job = solve_queue.enqueue(
+            "Elsewhere",
+            project_key=f"{uuid.uuid4()}:{uuid.uuid4()}",
+            storage_dir=str(path),
+        )
+        return str(job.id), None
+    kwargs = dict(
         tool_use_id="tu",
         owner_user_id=chat_tools.acting_user_id(),
         project_uuid=str(uuid.uuid4()),
     )
-    for call in (ja.job_status, ja.cancel_job):
+    if family == "fg":
+        return ja.register_foreground_solve(
+            tool_name="run_simulation", kind="lopf", **kwargs
+        ), None
+    if family == "ad":
+        return ja.register_study_job(
+            study_key="fmea_sweep", tool_name="run_fmea_sweep", **kwargs
+        ), None
+    return ja.register_report_job(
+        tool_name="generate_report", report_id="rep-1", **kwargs
+    ), None
+
+
+FOREIGN_PROJECT_KIND = {
+    "fg": (409, "job_project_mismatch"),
+    "ad": (409, "job_project_mismatch"),
+    "rpt": (409, "job_project_mismatch"),
+    "sq": (404, "job_not_found"),
+}
+
+
+@pytest.mark.parametrize("call", ["view", "cancel"])
+@pytest.mark.parametrize("family", ["fg", "ad", "rpt", "sq"])
+@pytest.mark.parametrize("who", ["own", "foreign_actor", "foreign_project"])
+def test_acl_matrix(baseline, second_identity, family, call, who):
+    ctx, _project_id, path = baseline
+    own = chat_tools.acting_user_id()
+    fn = (
+        ja.job_status
+        if call == "view"
+        else (
+            lambda j, actor_id: ja.cancel_job(j, actor_id=actor_id, settle_seconds=0.5)
+        )
+    )
+    started = []
+    try:
+        if who == "foreign_project":
+            job, _ = _foreign_project_job(ctx, path, family)
+            status, kind = FOREIGN_PROJECT_KIND[family]
+            actor = own
+        else:
+            if family == "sq":
+                job, _ = _queue(ctx, path)
+            else:
+                started.append(_start(ctx, family))
+                job = started[0][0]
+            actor = own if who == "own" else str(second_identity["user_id"])
+            status, kind = (None, None) if who == "own" else (404, "job_not_found")
+        if status is None:
+            out = fn(job, actor_id=actor)
+            view = out if call == "view" else out["job"]
+            assert view["id"] == job
+            if call == "cancel":
+                assert out["cancel"] == "cancelled"
+            return
         with pytest.raises(HTTPException) as refused:
-            call(job, actor_id=chat_tools.acting_user_id())
-        assert refused.value.status_code == 409
-        assert refused.value.detail["error_kind"] == "job_project_mismatch"
+            fn(job, actor_id=actor)
+        assert refused.value.status_code == status
+        assert refused.value.detail["error_kind"] == kind
+        if started:
+            assert not started[0][
+                2
+            ].is_set()  # nothing was sent to a job not the actor's
+        if family == "sq":
+            assert solve_queue.get_job(uuid.UUID(job))["status"] == "queued"
+    finally:
+        _stop_all(started)
+
+
+# ── GK B A2: the ack reports what really happened ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    "family,done", [("fg", "completed"), ("ad", "done"), ("rpt", "done")]
+)
+def test_a_job_that_succeeds_before_the_abort_lands_reads_succeeded(
+    baseline, family, done
+):
+    ctx, *_ = baseline
+    started = [_start(ctx, family, honours_stop=False)]
+    job, thread, stop = started[0]
+
+    def finish_first():
+        # The worker ends on its own the moment the stop is asked for.
+        stop.wait(2)
+        with ctx.solver_state_lock:
+            _record(ctx, family)["status"] = done
+
+    racer = threading.Thread(target=finish_first, daemon=True)
+    racer.start()
+    if family == "fg":
+        # abort_simulation flips a running record to `aborted` itself; the
+        # native worker then finishes first, as a solve past its last iteration does.
+        import routers.simulation as sim
+
+        real = sim.abort
+
+        def abort_lost_race():
+            stop.set()
+            racer.join(2)
+            raise HTTPException(400, "No simulation running")
+
+        sim.abort = abort_lost_race
+    try:
+        out = ja.cancel_job(job, actor_id=chat_tools.acting_user_id(), settle_seconds=2)
+    finally:
+        if family == "fg":
+            sim.abort = real
+        _stop_all(started)
+    assert out["cancel"] == "finished_first"
+    assert (out["job"]["outcome"], out["job"]["status"]) == ("succeeded", done)
+
+
+def test_the_settle_bound_is_a_named_constant_and_a_slow_worker_reads_cancel_requested(
+    baseline, monkeypatch
+):
+    ctx, *_ = baseline
+    monkeypatch.setattr(ja, "CANCEL_SETTLE_SECONDS", 0.1)
+    started = [_start(ctx, "ad", honours_stop=False)]
+    try:
+        t0 = time.monotonic()
+        out = ja.cancel_job(started[0][0], actor_id=chat_tools.acting_user_id())
+        assert out["cancel"] == "cancel_requested" and time.monotonic() - t0 < 1.5
+    finally:
+        _stop_all(started)
+
+
+# ── GK B A3: an unrecognised status fails closed ──────────────────────────
+
+
+@pytest.mark.parametrize("family", ["fg", "ad", "rpt", "sq"])
+def test_an_unrecognised_status_is_never_a_success(baseline, family):
+    ctx, _project_id, path = baseline
+    started = []
+    try:
+        if family == "sq":
+            job, native = _queue(ctx, path)
+            native.status = "half_done"
+        else:
+            started.append(_start(ctx, family))
+            job = started[0][0]
+            with ctx.solver_state_lock:
+                _record(ctx, family)["status"] = "half_done"
+        view = ja.job_status(job, actor_id=chat_tools.acting_user_id())
+        assert view["status"] == "half_done"
+        assert view["outcome"] == "unknown" and view["result_revision"] is None
+    finally:
+        _stop_all(started)
+
+
+# ── GK B A4: the input revision is the one captured at start ──────────────
+
+
+@pytest.mark.parametrize("family", ["fg", "ad", "rpt"])
+def test_an_edit_mid_job_does_not_move_the_input_revision(baseline, family):
+    ctx, *_ = baseline
+    started = [_start(ctx, family)]
+    try:
+        at_start = ctx.network_revision
+        ctx.network_revision += 3  # three edits while the job runs
+        view = ja.job_status(started[0][0], actor_id=chat_tools.acting_user_id())
+        assert view["input_revision"] == at_start
+        assert view["input_revision_note"] == "network_revision at handoff"
+    finally:
+        _stop_all(started)
+
+
+def test_a_queue_job_names_why_it_has_no_input_revision(baseline):
+    ctx, _project_id, path = baseline
+    job, _ = _queue(ctx, path)
+    view = ja.job_status(job, actor_id=chat_tools.acting_user_id())
+    assert (
+        view["input_revision"] is None
+        and "saved project file" in view["input_revision_note"]
+    )
+
+
+# ── GK B A5: wait_for_job outputs are unchanged ───────────────────────────
+
+WAIT_KEYS = {
+    "job",
+    "terminal",
+    "completed",
+    "timed_out",
+    "wait_cancelled",
+    "waited_seconds",
+    "note",
+}
+WAIT_JOB_KEYS = {
+    "fg": {
+        "id",
+        "family",
+        "status",
+        "kind",
+        "tool_name",
+        "tool_use_id",
+        "objective",
+        "condition",
+        "running",
+        "monitor",
+    },
+    "ad": {
+        "id",
+        "family",
+        "study_key",
+        "status",
+        "stage",
+        "progress",
+        "tool_name",
+        "tool_use_id",
+        "error",
+        "running",
+        "monitor",
+    },
+    "rpt": {
+        "id",
+        "family",
+        "status",
+        "report_id",
+        "mode",
+        "section",
+        "version",
+        "tool_name",
+        "tool_use_id",
+        "error",
+        "running",
+        "monitor",
+    },
+}
+
+
+@pytest.mark.parametrize("family", ["fg", "ad", "rpt"])
+def test_wait_for_job_keeps_its_shape(baseline, family):
+    """The keys master's `_job_view` / `_study_job_view` / `_report_job_view` return."""
+    ctx, *_ = baseline
+    started = [_start(ctx, family)]
+    try:
+        out = chat_tools.wait_for_job(started[0][0], 0)
+        assert set(out) - {"triage"} == WAIT_KEYS
+        assert set(out["job"]) == WAIT_JOB_KEYS[family]
+        assert out["timed_out"] and not out["terminal"]
+    finally:
+        _stop_all(started)
 
 
 @pytest.mark.parametrize("kind", ["solve", KIND_GRIDSPINE])

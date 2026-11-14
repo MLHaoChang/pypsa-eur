@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -688,6 +689,13 @@ _OUTCOMES: dict[str, dict[str, str]] = {
                    'interrupted': 'interrupted'},
 }
 OUTCOMES = frozenset(o for table in _OUTCOMES.values() for o in table.values()) | {'unknown'}
+# The only native statuses that read as still running; anything else a family
+# does not map fails closed to `unknown`, never to a success (GK B A3).
+_LIVE = frozenset({'running', 'queued'})
+_NO_INPUT_REVISION = {
+    QUEUE_FAMILY: 'a queued job solves the saved project file; no start revision is recorded',
+    'not_bound': 'the project had no open context when the job started',
+}
 
 # job_id -> [cursor, (status, phase, progress) last seen, updated_at, finished_at]
 _TRACK: OrderedDict[str, list] = OrderedDict()
@@ -715,10 +723,12 @@ def _terminal(family: str, status: str | None) -> bool:
 
 
 def _outcome(family: str, status: str | None) -> str | None:
-    """The neutral terminal outcome; None while the job still runs."""
-    if status == 'unknown':
-        return 'unknown'  # an exited worker or a lost origin proves nothing
-    if not _terminal(family, status):
+    """The neutral terminal outcome; None while the job still runs.
+
+    Fails closed: a status the family does not name (an exited worker, a lost
+    origin, a status added later) is `unknown`, never `succeeded`.
+    """
+    if status in _LIVE and not _terminal(family, status):
         return None
     return _OUTCOMES[family].get(status, 'unknown')
 
@@ -803,7 +813,11 @@ def _native_view(job_id: str, actor_id: str | None) -> dict[str, Any]:
         'started_at': snap.get('started_at'),
         'updated_at': updated,
         'finished_at': snap.get('finished_at') or finished,
+        # Captured when the handle was minted, never read now: a later edit is not this job's input.
         'input_revision': handle.input_revision,
+        'input_revision_note': (
+            'network_revision at handoff' if handle.input_revision is not None
+            else _NO_INPUT_REVISION['not_bound']),
         'result_revision': _result_revision(handle, snap, ctx) if outcome == 'succeeded' else None,
         'warnings': _warnings(handle, snap),
         'terminal': outcome is not None,
@@ -812,16 +826,34 @@ def _native_view(job_id: str, actor_id: str | None) -> dict[str, Any]:
     }
 
 
-def _queue_job(job_id: str) -> dict[str, Any]:
-    """The queue's own ACL: 404 unless the acting user may see the job."""
+@contextmanager
+def _as_actor(actor_id: str | None):
+    """Run a queue call as `actor_id`, through chat_tools' own acting checks."""
+    from services import chat_tools
+    token = chat_tools._ACTING_USER_ID.set(None if actor_id is None else str(actor_id))
+    try:
+        yield
+    finally:
+        chat_tools._ACTING_USER_ID.reset(token)
+
+
+def _queue_job(job_id: str, actor_id: str | None) -> dict[str, Any]:
+    """The queue route's own ACL (`_visible_job_or_404`), as `actor_id`; a job
+    the actor may not see is the neutral 404 `job_not_found`."""
     from routers.solve_queue import _visible_job_or_404
     from services import chat_tools
-    with chat_tools._acting() as (db, user):
-        return _visible_job_or_404(db, user, job_id)
+    with _as_actor(actor_id):
+        try:
+            with chat_tools._acting() as (db, user):
+                return _visible_job_or_404(db, user, job_id)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                _refuse('job_not_found', 'No job is registered for that id.')
+            raise
 
 
-def _queue_view(job_id: str) -> dict[str, Any]:
-    job = _queue_job(job_id)
+def _queue_view(job_id: str, actor_id: str | None) -> dict[str, Any]:
+    job = _queue_job(job_id, actor_id)
     status = job.get('status') or 'unknown'
     outcome = _outcome(QUEUE_FAMILY, status)
     progress = {'position': job['position']} if job.get('position') is not None else None
@@ -842,7 +874,8 @@ def _queue_view(job_id: str) -> dict[str, Any]:
         'started_at': job.get('started_at'),
         'updated_at': updated,
         'finished_at': job.get('finished_at'),
-        'input_revision': None,  # a queued job solves the saved file, not an open-network revision
+        'input_revision': None,
+        'input_revision_note': _NO_INPUT_REVISION[QUEUE_FAMILY],
         'result_revision': (f"queue:{job['id']}@{job.get('finished_at')}"
                             if outcome == 'succeeded' else None),
         'warnings': [],  # the queue records an error, read as `outcome: failed`
@@ -857,7 +890,7 @@ def job_status(job_id: str, *, actor_id: str | None) -> dict[str, Any]:
     if not isinstance(job_id, str) or not job_id:
         _refuse('job_not_found', 'No job is registered for that id.')
     if _family_of(job_id) == QUEUE_FAMILY:
-        return _queue_view(job_id)
+        return _queue_view(job_id, actor_id)
     return _native_view(job_id, actor_id)
 
 
@@ -895,7 +928,7 @@ def cancel_job(
     job_id: str,
     *,
     actor_id: str | None,
-    settle_seconds: float = CANCEL_SETTLE_SECONDS,
+    settle_seconds: float | None = None,
     stop: threading.Event | None = None,
 ) -> dict[str, Any]:
     """
@@ -920,7 +953,8 @@ def cancel_job(
         return {'cancel': 'already_finished', 'job': before}
     if before['family'] == QUEUE_FAMILY:
         from services import chat_tools
-        chat_tools.solve_queue_abort(job_id)
+        with _as_actor(actor_id):
+            chat_tools.solve_queue_abort(job_id)
     else:
         from services.pypsa_service import PyPSAService
         ctx = PyPSAService.get_active_context()
@@ -932,7 +966,10 @@ def cancel_job(
             # The abort found nothing running: re-read below decides what happened.
             if exc.status_code not in (400, 404, 409):
                 raise
-    deadline = time.monotonic() + max(0.0, settle_seconds)
+    # The re-read holds no project lock or turn lease: each read takes the
+    # short solver-state lock once, as every status read does (GK B A2).
+    bound = CANCEL_SETTLE_SECONDS if settle_seconds is None else settle_seconds
+    deadline = time.monotonic() + max(0.0, bound)
     while True:
         after = job_status(job_id, actor_id=actor_id)
         if after['terminal'] or stop.is_set() or time.monotonic() >= deadline:
