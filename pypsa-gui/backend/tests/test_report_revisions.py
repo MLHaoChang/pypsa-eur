@@ -900,7 +900,10 @@ helpers_state = _sealed.helpers_state
 def test_the_sealed_export_names_the_revision_and_an_unrevised_one_does_not(project):
     from services import chat_tools as T
 
-    store.create_report(project, _doc())
+    doc = _doc()
+    # Written from the project's evidence now, so its export is not stale (LC48B-STALE-1).
+    doc.evidence_hash = T.get_report_evidence_hash()["evidence_hash"]
+    store.create_report(project, doc)
     store.write_figure(project, RID, "fig", _PNG)
     first = _sealed._sidecar(project, T.export_report_docx(RID)["file_id"])["manifest"]
     assert "revised_from" not in first["dataset"]

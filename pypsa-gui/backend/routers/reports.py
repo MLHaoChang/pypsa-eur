@@ -534,6 +534,61 @@ def create_report(body: CreateReportBody,
     return {**meta.model_dump(), "document": stored.model_dump()}
 
 
+def _stale(doc, reason: str, message: str) -> HTTPException:
+    return HTTPException(409, {
+        "error_kind": "report_stale",
+        "reason": reason,
+        "version": doc.version,
+        "message": message,
+        "hint": "generate the report again, then export",
+    })
+
+
+def _refuse_stale(project: AuthorizedProject, doc) -> None:
+    """409 `report_stale` when this version cannot be shown to match the study
+    now (owner decision LC48B-STALE-1); nothing is rendered or saved. The
+    `reason` says which:
+
+    - `no_evidence_hash`: the version stored no hash, so it cannot be compared;
+    - `project_not_open`: the evidence is read from the session, which holds
+      another project (or none), so the comparison would be with the wrong
+      project's study (GK B F1 on #1514);
+    - `evidence_unreadable`: reading the evidence now failed;
+    - `study_changed`: its stored `evidence_hash` is not the hash of the
+      project's evidence now, the comparison the viewer shows as "evidence
+      changed since vN".
+
+    The process holds one open project per session, so the session's evidence
+    is the open project's (single-process reading, GK B N2)."""
+    from services.pypsa_service import PyPSAService
+    from services.reports.evidence import evidence_hash
+
+    if not doc.evidence_hash:
+        raise _stale(doc, "no_evidence_hash",
+                     f"Version {doc.version} of this report stored no evidence hash, so it "
+                     "cannot be checked against the study.")
+    try:
+        open_uuid = str(PyPSAService.get_active_context().project_uuid or "")
+    except Exception:                                       # noqa: BLE001 - no session context
+        open_uuid = ""
+    if open_uuid != str(project.uuid):
+        raise _stale(doc, "project_not_open",
+                     f"Version {doc.version} is checked against the open project's study, "
+                     f"and {project.name} is not the open project; open it, then export.")
+    try:
+        evidence, _eh_report = _current_evidence(project)
+        now = evidence_hash(evidence)
+    except Exception as exc:                                # noqa: BLE001 - stated, never a 500
+        logger.warning("reports: evidence not read for the stale check: %s", exc, exc_info=True)
+        raise _stale(doc, "evidence_unreadable",
+                     f"The study's evidence could not be read, so version {doc.version} "
+                     "cannot be checked against it.") from exc
+    if doc.evidence_hash != now:
+        raise _stale(doc, "study_changed",
+                     f"Version {doc.version} of this report was written before the "
+                     "study changed, so its figures no longer match the project.")
+
+
 @router.post("/{name}/reports/{report_id}/export")
 def export_report(report_id: str, body: ExportReportBody,
                   project: AuthorizedProject = ProjectAccessDep,
@@ -574,6 +629,7 @@ def export_report(report_id: str, body: ExportReportBody,
         doc = store.load_report(project.directory, report_id, body.version)
     except store.ReportStoreError as exc:
         raise _http(exc) from exc
+    _refuse_stale(project, doc)
     figure_bytes: dict[str, bytes] = {}
     for figure_id in doc.figures:
         try:

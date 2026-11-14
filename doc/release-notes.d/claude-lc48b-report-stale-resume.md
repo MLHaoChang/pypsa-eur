@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A report written before its study changed is no longer exported: export (route and copilot tools) answers 409 `report_stale` until the report is generated again. A report job that a server restart interrupted now reads `interrupted`: its status is 409 `report_interrupted` with the report id and a "generate the report again" hint, and nothing re-runs by itself.
