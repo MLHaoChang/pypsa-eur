@@ -20,3 +20,13 @@ Say which way efficiency enters, so the slope and the existing per-MWh adder don
 
 - A hand calculation for a committable curve genset with a CO2 price: the no-load CO2 is paid exactly once per committed hour and not at all while the unit is off.
 - With no CO2 price, or a no-load term of 0, results are unchanged.
+
+## Comments
+
+### Plan GO, GK B (58), 2026-11-14
+
+Not option A (the per-MWh term on the user's efficiency): the fuel cost follows the slope, so the CO2 must follow it too.
+- H1, one fuel source: for a curve genset, CO2 = co2_emissions × (slope × p + no_load × p_nom × on), in the LP price adder, `compute_emissions` (and the workbook through it), compare emissions and asset results. A hand oracle checks every site. Built as option B (`fuel_curve.fuel_per_mwh`); a generator without a curve stays bit-identical.
+- H2, CO2 cap: PyPSA's primary-energy cap counts p / efficiency only. A curve genset on an emitting carrier under such a cap is refused before the run (`fuel_curve_co2_cap`, also in `lp_refusals`) rather than let the cap and the reports disagree.
+- H3, transient undo: the uniform and per-period transforms restore `stand_by_cost` and `generators_t` bit-identical, also when the apply raises, tested inside `solving_context`.
+- H7: mutants on fuel_curve.py and the assumptions.py CO2 block. `services/solver/diagnostics.py` (the logged cost decomposition) is a named follow-up, `02j`.

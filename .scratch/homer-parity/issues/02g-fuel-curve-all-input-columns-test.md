@@ -16,3 +16,9 @@ Follow-up from homer-parity 02b (#1506), from its mutant run.
 ## Acceptance
 
 - The two mutants above are killed; no other test changes.
+
+## Comments
+
+### Mutants, 2026-11-14
+
+`mutants.py` was run against the new test, with a synthetic base that marks only lines 314 and 347 as changed. Both `c in` → `c not in` mutants are killed. The survivors on those lines are the `if False:` / BoolOp drops of the early-return guard, which are equivalent: with every column present the loop does the same work.
