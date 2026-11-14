@@ -792,10 +792,23 @@ VARIANTS: list[dict] = [
              'update_component list_components',
              B + 'test_lc43_d23_wire_gates.py::test_a_write_that_outlives_its_budget_is_never_reported_done',
              B + 'test_lc43_d23_wire_gates.py::test_a_read_that_outlives_its_budget_keeps_the_plain_kind'),
-    _pending('LC-D23.history_repair', 'a stored history with an unpaired tool_use is sent as it is: no repair step is built (the harness only avoids writing one) (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
-    _pending('LC-D23.approval_resume', 'a pending approval is not resumed after a restart (it expires or reads unknown_confirmation_token): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
-    _pending('LC-D23.profile_recovery', 'after a refused provider switch or a deleted profile, recovery (a new chat, or picking a profile and resending) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
-    _pending('LC-D23.goal_switch', 'no gate refuses or recovers a workflow, goal or task switch mid-turn: none is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _covered('LC-D23.history_repair', 'owner decision LC48D-REPAIR-1: a stored assistant tool_use lost_1 with no result is sent with a synthetic error tool_result interrupted_tool_call first in the next user message (this turn\'s words after it); '
+             'the stored history still has no result for lost_1; G1 stays 20 MW and tests/lc43_gates.py state is unchanged',
+             'update_component',
+             B + 'test_lc48d_d23_wire_recovery.py::test_an_unpaired_tool_use_is_answered_before_send_and_history_is_kept'),
+    _covered('LC-D23.approval_resume', 'owner decision LC48D-APPROVAL-1: a card minted before a restart, approved after it on a fresh session or through /confirm on the gone session, is 410 confirmation_lost_on_restart with hint "ask again"; '
+             'G1 stays 20 MW and state is unchanged; a token this process minted and does not hold still reads 404 unknown_confirmation_token / unknown_session',
+             'update_component',
+             B + 'test_lc48d_d23_wire_recovery.py::test_an_approval_lost_on_restart_is_410_ask_again'),
+    _covered('LC-D23.profile_recovery', 'after profile_switch_requires_new_chat a new chat sends the turn and G1 reads 35 MW; after unknown_profile_id resending on the same session with its own profile sends the turn and G1 reads 35 MW',
+             'update_component',
+             B + 'test_lc48d_d23_wire_recovery.py::test_after_a_refused_switch_a_new_chat_recovers',
+             B + 'test_lc48d_d23_wire_recovery.py::test_after_a_deleted_profile_picking_one_and_resending_recovers'),
+    _covered('LC-D23.goal_switch', 'owner decision LC48D-GOAL-1: start_workflow while build-network is active is 409 switch_in_progress naming it (step orient) and the session keeps it; after end_workflow the start goes through; '
+             'start_task for another plan while one runs is 409 switch_in_progress naming it (status running), the same plan again is not refused, and after cancel_task the other starts',
+             'start_workflow end_workflow start_task',
+             B + 'test_lc48d_d23_wire_recovery.py::test_a_workflow_switch_is_refused_naming_the_active_one',
+             B + 'test_lc48d_d23_wire_recovery.py::test_a_task_switch_is_refused_while_one_runs'),
     _covered('LC-D24.ui', 'the four ui_* tools only: ui_event frames carry the hand snapshot index (01:00 = 1), asset and panel as asked; an off-axis time, an unknown component opened in the editor, or an unknown panel '
              'moves nothing; frontend uiNavigate.lc06.test.ts drives the store from those frames and drops a frame older than a manual navigation',
              'ui_set_snapshot ui_select_component ui_open_asset_detail ui_open_panel',

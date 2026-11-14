@@ -19,6 +19,7 @@ import collections
 import copy
 import hashlib
 import os
+import re
 import threading
 import time
 import uuid
@@ -53,6 +54,38 @@ SESSION_IDLE_TTL_SECONDS: float = float(
 
 SESSION_MAX_RESIDENT: int = int(os.environ.get("PYPSA_GUI_CHAT_SESSION_MAX", "1000"))
 
+
+
+# LC48D-APPROVAL-1: pending approvals live in this process only. A token's
+# first 8 hex name the process that minted it, so a token from before a
+# restart reads 410 `confirmation_lost_on_restart` ("ask again"), not 404.
+BOOT_PREFIX = uuid.uuid4().hex[:8]
+_TOKEN_SHAPE = re.compile(r"[0-9a-f]{32}")
+
+
+def minted_before_restart(token: object) -> bool:
+    """Whether `token` has the confirmation token's shape but names another process."""
+    return (isinstance(token, str) and _TOKEN_SHAPE.fullmatch(token) is not None
+            and not token.startswith(BOOT_PREFIX))
+
+
+def refuse_if_lost_on_restart(token: object) -> None:
+    """410 `confirmation_lost_on_restart` for a token another process minted:
+    its card was lost with that process, nothing ran; the user asks again."""
+    if not minted_before_restart(token):
+        return
+    from fastapi import HTTPException
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "error_kind": "confirmation_lost_on_restart",
+            "message": (
+                "this approval card was shown before the server restarted; "
+                "approvals are kept in memory only, so nothing ran. Ask again."
+            ),
+            "hint": "ask again",
+        },
+    )
 
 @dataclass
 class PendingConfirmation:
@@ -353,7 +386,8 @@ class ChatSession:
         """
         if ttl_seconds is None:
             ttl_seconds = CONFIRMATION_TTL_SECONDS
-        token = uuid.uuid4().hex
+        # 32 hex as before; the first 8 name this process (LC48D-APPROVAL-1).
+        token = BOOT_PREFIX + uuid.uuid4().hex[len(BOOT_PREFIX):]
         now = time.monotonic()
         from services.pypsa_service import PyPSAService
         project_id = PyPSAService.get_active_context().project_uuid
@@ -390,6 +424,7 @@ class ChatSession:
             pc = self.pending_confirmations.pop(token, None)
             event = self._decision_events.pop(token, None)
             if pc is None:
+                refuse_if_lost_on_restart(token)
                 raise HTTPException(
                     status_code=404,
                     detail={

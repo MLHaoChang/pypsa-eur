@@ -38,6 +38,7 @@ from db.session import get_db
 from deps import current_session, optional_user, require_user
 from harness import loop as chat_service
 from harness import mcp_client
+from harness.session import refuse_if_lost_on_restart
 from services import app_secrets, llm_config
 
 logger = logging.getLogger("pypsa_gui.chat")
@@ -2300,6 +2301,10 @@ def chat_confirm(session_id: str, body: ConfirmRequest,
         _run_call(actor, lambda: run_monitor.confirm(session_id.removeprefix(runner.SESSION_PREFIX)))
     session = _resolve_owned_session(session_id, actor)
     if session is None:
+        # LC48D-APPROVAL-1: a restart drops the session with its cards. The
+        # answer depends on the token alone, so an unknown and a foreign
+        # session still read alike.
+        refuse_if_lost_on_restart(body.token)
         raise HTTPException(
             status_code=404,
             detail={

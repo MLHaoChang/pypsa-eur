@@ -1,0 +1,4 @@
+{"kinds": {
+  "confirmation_lost_on_restart": {"surface": "banner", "why": "POST /chat/{id}/confirm (or record_decision) with a token another server process minted: approval cards live in memory only, so the card was lost with the restart and nothing ran; 410, hint 'ask again' (LC48D-APPROVAL-1)."},
+  "switch_in_progress": {"surface": "inline", "why": "start_workflow while a workflow is active on the session, or start_task for another plan while the session's task runs (status running or waiting_job): 409 naming the active one (kind, id, step or title/status); end_workflow, or waiting for or cancelling the task, comes first (LC48D-GOAL-1)."}
+}}

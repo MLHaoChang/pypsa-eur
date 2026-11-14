@@ -512,6 +512,31 @@ def _check_scene_apply(args, earlier):
         _refuse("invalid_task_reference", "A site_scene_apply step takes all its args from one site_scene_prepare step.", 422)
 
 
+# LC48D-GOAL-1: the task statuses during which its steps execute.
+_RUNNING_TASK = frozenset({"running", "waiting_job"})
+
+
+def _refuse_switch(session, task_id):
+    """409 `switch_in_progress` naming the session's task while it runs and
+    a start names another plan; a repeated start of the same plan is not a switch."""
+    active = getattr(session, "task_id", None)
+    if not active or active == task_id:
+        return
+    try:
+        _, task = _read(active)
+    except HTTPException:
+        return  # gone or unreadable: nothing runs that a switch would cut
+    if task.get("status") not in _RUNNING_TASK:
+        return
+    raise HTTPException(409, {
+        "error_kind": "switch_in_progress",
+        "active": {"kind": "task", "id": active, "title": task.get("title"),
+                   "status": task.get("status")},
+        "message": f"the task \u201c{task.get('title')}\u201d is {task.get('status')}; wait for it, "
+                   "or cancel it, before starting another",
+    })
+
+
 def start_task(title: str, steps: list[dict], request_id: str, brief: dict | None = None,
                run: dict | None = None) -> dict:
     from harness.catalogue import TOOLS
@@ -571,6 +596,7 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
     task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
     path = root / "assistant_tasks" / (task_id + ".json")
     with _LOCK:
+        _refuse_switch(session, task_id)
         if path.exists():
             _, task = _read(task_id)
             original = [{k: s[k] for k in ("id", "tool", "args")} for s in task["steps"]]
