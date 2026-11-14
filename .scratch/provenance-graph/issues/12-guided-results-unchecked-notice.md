@@ -1,6 +1,6 @@
 # Guided Results card: say when results were never checked against the inputs
 
-Status: ready-for-agent
+Status: done
 Model tier: sonnet.
 Size: S.
 Blocked by: 04b (the `uncompared` header count, PR on `claude/provenance-graph-04b-reserves-uncompared`).
