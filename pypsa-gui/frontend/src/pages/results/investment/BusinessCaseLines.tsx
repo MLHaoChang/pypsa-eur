@@ -28,7 +28,7 @@ import {
 const KINDS: LineKind[] = ['revenue', 'opex', 'capex']
 const KIND_WORD: Record<LineKind, string> = { revenue: 'Revenue', opex: 'Operating cost', capex: 'Capital cost' }
 const words = (id: string) => id.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
-const CELL = 'border border-border rounded px-1 py-0.5 bg-surface text-[11px]'
+const CELL = 'border border-border rounded px-1 py-0.5 bg-bg text-[11px]'
 const BAD = ' border-danger'
 
 /** The stream words for the locked rows (the ledger's stream ids, in words). */
@@ -219,7 +219,7 @@ function PriceCell({ line, set, bad, currency }: {
         <p className="text-warn" data-testid="bc-not-established">Not established</p>
       )}
       {line.kind === 'revenue' && line.hint && (
-        <p className="text-muted max-w-[16rem]" data-testid="bc-hint">
+        <p className="text-muted max-w-[12rem]" data-testid="bc-hint">
           Public range {line.hint.low}–{line.hint.high} {hintUnitWords(line.hint.unit)} · {line.hint.source}, {line.hint.year}
         </p>
       )}
@@ -452,7 +452,7 @@ export default function BusinessCaseLines() {
             <table className="text-[11px] w-full" data-testid="bc-table">
               <thead>
                 <tr className="text-left text-muted">
-                  <th className="font-normal px-1 sticky left-0 bg-surface z-10">Name</th>
+                  <th className="font-normal px-1 sticky left-0 bg-bg z-10">Name</th>
                   {['Kind', 'Category', 'Quantity from', 'Quantity', 'Unit', 'Price', 'Escalation', 'Years', 'Basis']
                     .map(h => <th key={h} className="font-normal px-1">{h}</th>)}
                   <th className="font-normal px-1"><span className="sr-only">Remove</span></th>
@@ -471,7 +471,7 @@ export default function BusinessCaseLines() {
                   return (
                     <Fragment key={i}>
                       <tr className="align-top border-t border-border" data-testid="bc-row">
-                        <td className="px-1 sticky left-0 bg-surface z-10 whitespace-nowrap">
+                        <td className="px-1 sticky left-0 bg-bg z-10 whitespace-nowrap border-r border-border">
                           <button type="button" className={ACTION + ' mr-1'} aria-expanded={open.has(i)}
                                   aria-label={`${open.has(i) ? 'Hide' : 'Show'} details of ${ln.name}`}
                                   onClick={() => toggle(i)}>{open.has(i) ? '▾' : '▸'}</button>
