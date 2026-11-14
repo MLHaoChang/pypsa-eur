@@ -1138,8 +1138,12 @@ def _e_min_pu(n, s) -> float:
     if v is None or v != v:
         return 0.0
     v = float(v)
-    if not 0.0 <= v < 1.0:
-        raise IslandRefusal(f"storage unit {s}: e_min_pu {v:g} is not in [0, 1)")
+    if v < 0.0:
+        raise IslandRefusal(f"storage unit {s}: e_min_pu {v:g} is below 0, which would count "
+                            "energy below empty toward the grid-forming bridge")
+    if v >= 1.0:
+        raise IslandRefusal(f"storage unit {s}: e_min_pu {v:g} is 1 or more, which leaves no "
+                            "energy above the floor for the grid-forming bridge")
     return v
 
 

@@ -155,11 +155,53 @@ def test_the_row_reads_the_energy_above_the_floor():
     assert _soc_before(n, "b").min() == pytest.approx(2.0 + B, abs=1e-6)
 
 
-def test_a_floor_outside_zero_to_one_is_refused():
+@pytest.mark.parametrize("floor", [-0.1, -1e-9])
+def test_a_floor_below_zero_is_refused(floor):
+    """A negative floor would count energy below empty (GK A T2)."""
     n = _net()
-    n.storage_units["e_min_pu"] = 1.5
-    with pytest.raises(I.IslandRefusal, match="e_min_pu"):
+    n.storage_units.loc[:, "e_min_pu"] = 0.0
+    n.storage_units.at["b", "e_min_pu"] = floor
+    with pytest.raises(
+        I.IslandRefusal, match=r"storage unit b: e_min_pu .* is below 0"
+    ):
         _solve(n, _sidecar())
+
+
+@pytest.mark.parametrize("floor", [1.0, 1.5])
+def test_a_floor_at_or_above_one_is_refused(floor):
+    """A floor at 1 leaves no energy for the bridge: a stated refusal, not
+    an infeasible LP (GK A T3)."""
+    n = _net()
+    n.storage_units.loc[:, "e_min_pu"] = 0.0
+    n.storage_units.at["b", "e_min_pu"] = floor
+    with pytest.raises(
+        I.IslandRefusal, match=r"storage unit b: e_min_pu .* is 1 or more"
+    ):
+        _solve(n, _sidecar())
+
+
+def test_a_floor_just_under_one_is_held():
+    """e_min_pu 0.998 is accepted: b holds 0.998·8 MWh plus B, which fits
+    under its 8 MWh (GK A T3)."""
+    n = _net()
+    n.storage_units.loc[:, "e_min_pu"] = 0.0
+    n.storage_units.at["b", "e_min_pu"] = 0.998
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert _soc_before(n, "b").min() == pytest.approx(0.998 * 8.0 + B, abs=1e-6)
+
+
+def test_the_row_binds_on_the_soc_before_the_hour_not_after():
+    """Non-cyclic SoC (GK A T1): b starts at B and holding energy costs, so
+    the row at hour t holds e_b(t−1) ≥ B and leaves the last hour's e_b(t)
+    free. b empties in the last hour; read on e(t) it could not."""
+    n = _net()
+    n.storage_units.at["b", "cyclic_state_of_charge"] = False
+    n.storage_units.at["b", "state_of_charge_initial"] = B
+    n.add("Load", "other", bus="site", p_set=1.0)  # a sink for b's last discharge
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    soc = n.storage_units_t.state_of_charge["b"].to_numpy()
+    assert soc[:-1] == pytest.approx([B] * (len(soc) - 1), abs=1e-6)
+    assert soc[-1] == pytest.approx(0.0, abs=TOL)
 
 
 def test_no_step_no_row():
