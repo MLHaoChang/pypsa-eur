@@ -46,3 +46,13 @@ report body), and:
   debt_service in the equity bridge as served.
 - F4 a None row shows its reason, never 0; terminal is hidden only when it is exactly 0,
   a None terminal shows as not established.
+
+### 2026-11-14: data-wiring GO (GK B 57) @59544dc2, W1–W4
+
+F1–F3 and the KPI and break-even wiring were found right. GO with:
+- W1 (F4, client reasons): `ROW_NEEDS` only says what a row is built from ("Not established. It needs EBIT and tax."), never which input is missing. `businessCasePnlRows.json` is the served row list: a backend test pins it to `report_body`'s `pnl.rows`, and a vitest pins `ROW_NEEDS` keys to it. A per-row reason served by the report is a follow-up, to be named in the PR body.
+- W2 (F2): a test that line stream names and ledger stream names are disjoint (`cashflow` also refuses an overlap at import), and that an unknown stream reads energy_model only when it is not a line stream.
+- W3: the display keys move no digest or staleness key. Staleness reads `inputs_digest` and the IC hashes; the workbook and the chat tool read named keys. Run the business-case report, IC and workbook suites at a trial merge with master; name that run in the PR body.
+- W4: vitests for clearing break_even_line on rename, retype and remove, plus one where a save carrying the clear still meets a stale If-Match (412).
+
+Done @7cbe0a2e.
