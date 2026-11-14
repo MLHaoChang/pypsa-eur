@@ -128,7 +128,9 @@ def test_without_the_ai_profile_the_envelope_rows_are_unknown(tmp_path, tid):
     assert bool(gone) is tid.startswith("eh_microgrid")
     for rid in ENVELOPE_ROWS:
         if rid in gone:
-            assert gone[rid] == G.SK_OFF_GRID and rid not in rows, rid
+            # SH 41: the connection's ramp and oscillation limits leave too, the tie being open.
+            want = G.SK_OFF_GRID if rid == "rapid_voltage_change" else G.CONN_OFF_GRID
+            assert gone[rid] == want and rid not in rows, rid
             continue
         assert rows[rid]["verdict"] == "unknown", rid
         if rid != "rapid_voltage_change" or rows[rid]["limit"] is not None:
@@ -349,7 +351,13 @@ def test_scr_without_a_fault_level_is_unknown(tmp_path):
 @pytest.mark.parametrize("tid", TIDS)
 def test_the_peak_row_reads_the_same_check_as_the_create_time_refusal(tmp_path, tid):
     d, n = _project(tmp_path, tid)
-    rows = [r for r in G.grid_readiness(d, n, PROFILE)["rows"] if r["id"].startswith("energization_peak")]
+    out = G.grid_readiness(d, n, PROFILE)
+    rows = [r for r in out["rows"] if r["id"].startswith("energization_peak")]
+    if tid.startswith("eh_microgrid"):
+        # SH 41: the off-grid templates' tie is open, so the peak row is excluded, not judged.
+        gone = {e["id"]: e["reason"] for e in out["excluded"] if e["id"].startswith("energization_peak")}
+        assert not rows and gone and set(gone.values()) == {G.CONN_OFF_GRID}
+        return
     checked = SP.peak_check(n, T.ISLAND_CONFIG.get(tid))
     if all(c["energized_mw"] <= 0 for c in checked):
         assert [r["verdict"] for r in rows] == ["unknown"] and "normally open" in rows[0]["note"]

@@ -64,6 +64,8 @@ SETTINGS_EDITS = frozenset({
     "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
     # Business case 08b: the business-case lines (a diff card with each price's source).
     "set_business_case_lines",
+    # Business case 14: the template's preset, every default filled by the server.
+    "apply_business_case_preset",
     # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
     "import_map_geometry",
     # LV08 B-campus: the campus file, the readiness limits, the study's dispatch, grid-code drafts
