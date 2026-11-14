@@ -34,6 +34,8 @@ export const HEADLINE_WORDS: Record<string, Words> = {
     tab: 'investment', tabLabel: 'Investment case',
   },
   peak_line_loading: { label: 'Peak line loading', tab: 'loadflow', tabLabel: 'Load flow' },
+  // The data-centre fact (DC 27): the strip is its only Results home, so no tab link.
+  time_to_power: { label: 'Time to power', tab: '', tabLabel: '' },
 }
 
 /** The card's figure with its unit, and the line under it saying what it covers. */
@@ -46,6 +48,7 @@ export function headlineFigure(card: HeadlineCard): { value: string; basis?: str
     // the periods: what the solve covered, which is a year only by coincidence.
     case 'currency': return { value: fmtCurrency(v), basis: 'in this solve' }
     case 'MWh': return { value: fmtEnergy(v), basis: 'in this solve' }
+    case 'months': return { value: `${v} ${v === 1 ? 'month' : 'months'}`, basis: card.detail ?? 'from project start' }
     case '%': return { value: `${v.toFixed(1)} %`, basis: card.detail ?? undefined }
     default: {
       const unit = card.unit === 'EUR/MWh' ? '€/MWh' : card.unit ?? ''

@@ -674,14 +674,11 @@ def _stale_hub(hub: HubInputs, vf: ValueFlowConfig) -> bool:
     """The saved hub no longer matches the group (the solver-config route can
     change `group_members` without re-validating `value_flows`): a member
     outside the hub, a hub member outside the group, or fixed shares keyed on
-    other participants (WP3.3a review #1)."""
-    links = sorted(m.link for m in vf.hub_members)
-    if sorted(hub.group_links) != links:
-        return True
-    if vf.allocation.basis == "fixed_shares":
-        keys = sorted(k.strip().casefold() for k in (vf.allocation.shares or {}))
-        return keys != sorted(m.participant.strip().casefold() for m in vf.hub_members)
-    return False
+    other participants (WP3.3a review #1). Read as the hub's verdict on the
+    provenance graph (`provenance_graph.studies.hub_verdict`, PG-05)."""
+    from services.provenance_graph import studies
+
+    return studies.hub_verdict(hub, vf).state != "fresh"  # uncompared is never fresh (V2)
 
 
 def _allocation_sources(shared: list[_Source], inputs: LedgerInputs, vf: ValueFlowConfig,

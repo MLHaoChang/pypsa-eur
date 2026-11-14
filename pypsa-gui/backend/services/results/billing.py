@@ -236,7 +236,8 @@ RESERVE_NOT_MODELLED = ("activation energy and its price, cycling wear and non-d
 
 
 def reserve_lines(n, cfg, site_party: str = "site", *,
-                  backup: tuple[dict, frozenset] | None = None) -> tuple[list[_K.Line], list[str]]:
+                  backup: tuple[dict, frozenset] | None = None,
+                  read=None) -> tuple[list[_K.Line], list[str]]:
     """One capacity-payment line per reserve product and period (DC 06):
     Σ hours × price × committed MW over that period's snapshots, hours from
     `reserve_weights` (the LP's), never the period weight (the investment case
@@ -244,16 +245,25 @@ def reserve_lines(n, cfg, site_party: str = "site", *,
     solve (the products or floors changed since) is an amount of None flagged
     `reserve_not_solved`, never 0; a directional product is flagged
     `activation_not_valued`. ``backup`` defaults to the project's floors.
-    No products: no lines."""
+    ``read`` (`reserve_products.solved_read`) is the caller's read of the
+    commitments, when it has one; the lines price its frame at the hours read
+    in the same bracket, never at a later reweighting (PG-13). No products: no
+    lines."""
     from services.solver import reserve_products as RP
 
     products = RP.products_of(cfg)
     if not products:
         return [], []
     floors, _strings = RP.project_backup(n) if backup is None else backup
-    frame, flags = RP.solved(n, lambda: RP.inputs_digest(products, floors))
-    hours, _period_w = RP.reserve_weights(n)
-    h = hours.to_numpy(dtype=float)
+    if read is None or (not read.flags and read.inputs != _digest_or_none(RP, products, floors)):
+        # A read taken for other products or floors is never priced here: read again (GK B P1).
+        read = RP.solved_read(n, lambda: RP.inputs_digest(products, floors))
+    frame, flags, hours, _inputs = read
+    if hours is None or not hours.index.equals(n.snapshots):
+        # No hours for these snapshots: no price, never 0 or a partial one (GK B P3).
+        frame, hours = None, None
+        flags = sorted({*flags, "reserve_not_solved"})
+    h = np.full(len(n.snapshots), np.nan) if hours is None else hours.to_numpy(dtype=float)
     multi = isinstance(n.snapshots, pd.MultiIndex)
     periods = list(n.snapshots.get_level_values(0).unique()) if multi else [None]
     lines: list[_K.Line] = []
@@ -284,6 +294,14 @@ def reserve_lines(n, cfg, site_party: str = "site", *,
                                  quantity_mwh=None, amount=amount,
                                  flags=sorted(set(base + why))))
     return lines, sorted(set(flags))
+
+
+def _digest_or_none(RP, products, floors) -> str | None:
+    """The current reserve inputs digest, or None when it cannot be read (then no handed read matches)."""
+    try:
+        return RP.inputs_digest(products, floors)
+    except Exception:  # noqa: BLE001 — unreadable reads again, and that read is stale
+        return None
 
 
 def _committed_ppa(n, c, got, sel, w_all, frame) -> list[_K.Line]:

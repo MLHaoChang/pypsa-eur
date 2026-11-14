@@ -147,8 +147,8 @@ describe('InvestmentTab', () => {
     fireEvent.keyDown(first, { key: 'ArrowRight' })
     expect(screen.getByRole('tab', { name: 'Bill' }).getAttribute('aria-selected')).toBe('true')
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Bill' }), { key: 'End' })
-    expect(screen.getByRole('tab', { name: 'Investment case' }).getAttribute('aria-selected')).toBe('true')
-    fireEvent.keyDown(screen.getByRole('tab', { name: 'Investment case' }), { key: 'Home' })
+    expect(screen.getByRole('tab', { name: 'Business case' }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Business case' }), { key: 'Home' })
     expect(first.getAttribute('aria-selected')).toBe('true')
     // aria-controls only on the selected tab: it must point at a panel in the DOM.
     for (const tab of screen.getAllByRole('tab')) {
@@ -239,11 +239,12 @@ describe('InvestmentTab → Economics', () => {
   })
   afterEach(() => useUIStore.setState({ uiMode: 'expert', activeSlidePanel: null }))
 
-  it('holds no input editors: the sections are results, with one link to Commercial & parties', async () => {
+  it('holds no model-input editors: the sections are results and the business case, with one link to Commercial & parties', async () => {
     useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results' })
     renderTab()
     const names = screen.getAllByRole('tab').map(t => t.textContent)
-    expect(names).toEqual(['Participants', 'Bill', 'Investment case'])
+    // The business case's lines are its own inputs, not solve inputs (UX ruling, DCBC Q3).
+    expect(names).toEqual(['Participants', 'Bill', 'Investment case', 'Business case'])
     expect((await screen.findByTestId('ic-edit-in-economics')).textContent)
       .toMatch(/set in Commercial & parties/)
     expect(screen.queryByRole('button', { name: /Define participants/ })).toBeNull()

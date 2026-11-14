@@ -114,7 +114,7 @@ def test_the_chapter_tabulates_gates_ledgers_refusals_and_gaps():
     assert [
         "result_gate",
         "passed",
-        "res.solve.status",
+        "Solution found",
         "pass",
         "solve.status = optimal",
         "",
