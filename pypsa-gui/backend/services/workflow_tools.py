@@ -625,7 +625,6 @@ _SWEEP_LOCK = threading.Lock()
 def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
     """Preflight all cases, then persist/enqueue isolated children. No activation."""
     from models.schemas import CreateScenarioRequest
-    from routers import projects
     from services import chat_tools, dirty_state, gridspine_service as gs, project_registry
     from services.safe_names import fold
     if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
@@ -710,25 +709,12 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         _refuse("baseline_changed", "The saved baseline changed during preparation; inspect saved cases before retrying.", 409)
                     if existing is None:
                         checkpoint('effect_started')
-                        info = projects.create_scenario(str(base.id), request, db=db, user=user)
-                        result["project_id"] = str(info.id)
-                        existing = project_registry.resolve_project(db, user, str(info.id))
+                        # The fork helper (study harness 14, GK B (57)): the steps this block ran inline.
+                        from harness import shipped_fork
+                        existing = shipped_fork.create(db, user, base, request.name, request.description)
+                        result["project_id"] = str(existing.id)
                         checkpoint('child_created', case_project_id=str(existing.id))
-                        ctx.loaded_project = existing.name
-                        ctx.org_id, ctx.project_uuid = str(existing.org_id), str(existing.id)
-                        ctx.storage_dir = str(project_registry.project_dir(existing))
-                        # Invalidate copied dispatch/results; only the new queued solve
-                        # establishes results for the altered inputs.
-                        with _isolated(ctx):
-                            from services.dispatch_status import clear_dispatch
-                            clear_dispatch(ctx.network)
-                            ctx.network._objective = None
-                            ctx.network._objective_constant = None
-                        ctx.solver_state.update(status="idle", objective=None, condition=None)
-                        projects._enforce_project_lock(db, existing, user)
-                        projects._save_context(ctx, existing.name, storage_dir=Path(ctx.storage_dir), db=db, user=user, project_row=existing)
-                        from services.atomic_io import atomic_write_bytes
-                        atomic_write_bytes(Path(ctx.storage_dir) / SENSITIVITY_CASE_FILE, json.dumps(spec, sort_keys=True).encode())
+                        shipped_fork.save(ctx, existing, spec, db=db, user=user)
                         checkpoint('child_saved')
                     result["project_id"] = str(existing.id)
                     saved_ctx = _load_context(existing)
