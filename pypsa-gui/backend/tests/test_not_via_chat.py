@@ -72,6 +72,7 @@ def test_the_issue_rows_are_declared():
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
         'report_comment_revisions': ('unbuilt', None),
+        'operating_reserve_result': ('unbuilt', None),
         'report_chart_snapshots': ('manual', 'results'),
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
