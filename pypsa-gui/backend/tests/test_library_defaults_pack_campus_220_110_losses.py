@@ -62,7 +62,7 @@ def test_the_manifest_changes_only_the_version_the_campus_pin_and_records_why():
     assert cur == prev
 
 
-def test_the_rows_are_2026_11_10s_and_the_new_version_is_pinned_and_the_default():
+def test_the_rows_are_2026_11_10s_and_the_new_version_is_pinned_and_loads():
     from services.library.defaults_pack.loader import load_defaults_pack
 
     new, prev = load_defaults_pack(NEW), load_defaults_pack(PREV)
@@ -80,4 +80,8 @@ def test_the_rows_are_2026_11_10s_and_the_new_version_is_pinned_and_the_default(
         new.hash == pins["generic_defaults"][NEW]
         and prev.hash == pins["generic_defaults"][PREV]
     )
-    assert load_defaults_pack().version == NEW
+    from services.library.defaults_pack.loader import available_versions
+
+    assert NEW in available_versions() and load_defaults_pack().version == max(
+        available_versions()
+    )

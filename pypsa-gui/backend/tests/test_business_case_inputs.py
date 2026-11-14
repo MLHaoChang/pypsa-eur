@@ -1063,7 +1063,7 @@ def test_new_pack_keeps_every_previous_row_byte_equal():
     )["generic_defaults"]
     assert loader.load_defaults_pack(PREV).hash == pins[PREV]
     assert loader.load_defaults_pack(NEW).hash == pins[NEW]
-    assert loader.load_defaults_pack().version == NEW
+    assert loader.load_defaults_pack().version == max(loader.available_versions())   # newest, not NEW
 
 
 def test_new_rows_price_no_part_and_no_revenue():
