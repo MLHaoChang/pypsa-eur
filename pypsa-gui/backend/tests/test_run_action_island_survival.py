@@ -1524,7 +1524,11 @@ def test_frequency_names_tie_open_hours_without_counting_them(hub, monkeypatch):
         _summary(failing_hours=[[2030, 5]], tie_open_hours=[[2030, 9], [2030, 2]]),
     )
     out = run_actions.mg_frequency(hub, task, 7)
-    assert out == {"hours": [(2030, 5)], "tie_open_hours": [(2030, 2), (2030, 9)], "note": None}
+    assert out == {
+        "hours": [(2030, 5)],
+        "tie_open_hours": [(2030, 2), (2030, 9)],
+        "note": None,
+    }
     g = _gate(hub, "mg.island.frequency", op="le", value=0, task=task)
     assert g["facts"][0]["value"] == 1
     assert g["facts"][0]["detail"] == [
@@ -1549,14 +1553,21 @@ def test_frequency_with_every_island_hour_tie_open_says_not_evaluated(hub, monke
     ]
 
 
-def test_frequency_summary_from_before_the_tie_state_reads_no_open_hours(hub, monkeypatch):
+def test_frequency_summary_from_before_the_tie_state_reads_no_open_hours(
+    hub, monkeypatch
+):
     task = _campus_step(hub, monkeypatch, _summary(failing_hours=[[2030, 5]]))
     assert run_actions.mg_frequency(hub, task, 7) == {
-        "hours": [(2030, 5)], "tie_open_hours": [], "note": None}
+        "hours": [(2030, 5)],
+        "tie_open_hours": [],
+        "note": None,
+    }
 
 
-@pytest.mark.parametrize("bad", [{"tie_open_hours": [["x", 1]]}, {"tie_open_hours": 5},
-                                 {"e1_bridge_note": 3}])
+@pytest.mark.parametrize(
+    "bad",
+    [{"tie_open_hours": [["x", 1]]}, {"tie_open_hours": 5}, {"e1_bridge_note": 3}],
+)
 def test_frequency_with_a_malformed_tie_open_entry_is_unreadable(hub, monkeypatch, bad):
     task = _campus_step(hub, monkeypatch, _summary(**bad))
     g = _gate(hub, "mg.island.frequency", op="le", value=0, task=task)

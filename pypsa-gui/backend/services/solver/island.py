@@ -1130,7 +1130,7 @@ def _e_min_pu(n, s) -> float:
     project states), which the bridge never draws below."""
     series = n.storage_units_t.get("e_min_pu") if hasattr(n.storage_units_t, "get") else None
     if series is not None and s in getattr(series, "columns", ()):
-        raise IslandRefusal(f"storage unit {s!r} has a time-varying e_min_pu, which the grid-forming "
+        raise IslandRefusal(f"storage unit {s} has a time-varying e_min_pu, which the grid-forming "
                             "bridge row does not read per hour; state one value")
     if "e_min_pu" not in n.storage_units.columns:
         return 0.0
@@ -1139,7 +1139,7 @@ def _e_min_pu(n, s) -> float:
         return 0.0
     v = float(v)
     if not 0.0 <= v < 1.0:
-        raise IslandRefusal(f"storage unit {s!r}: e_min_pu {v:g} is not in [0, 1)")
+        raise IslandRefusal(f"storage unit {s}: e_min_pu {v:g} is not in [0, 1)")
     return v
 
 

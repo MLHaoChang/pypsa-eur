@@ -311,6 +311,13 @@ def _zero_fleet():
 
 def test_a_time_varying_floor_on_another_unit_is_not_this_rows_business():
     n = _net()
-    n.add("StorageUnit", "other", bus="site", p_nom=1.0, max_hours=1.0, cyclic_state_of_charge=True)
+    n.add(
+        "StorageUnit",
+        "other",
+        bus="site",
+        p_nom=1.0,
+        max_hours=1.0,
+        cyclic_state_of_charge=True,
+    )
     n.storage_units_t["e_min_pu"] = pd.DataFrame({"other": 0.1}, index=n.snapshots)
     assert _solve(n, _sidecar()) == ("ok", "optimal")
