@@ -1,0 +1,365 @@
+"""Each grid-forming battery holds its own share of the seamless bridge
+energy B(t) (study harness 40, owner decision SH40-BRIDGE, GK A P5/P6).
+
+gridspine's frequency screen judges the bridge per battery (the energy each
+GFM gives from the islanding until the cold gensets join, against its own
+e(t−1)). The aggregate row (``Island-gfm-bridge``) only holds the sum, so one
+battery may sit empty while the other holds it all. The per-battery row
+
+    η_s·(e_s(t−1) − e_min_pu·e_nom,s) ≥ share_s·B(t)
+
+closes that: share_s = K_s/ΣK (K = p_nom/(R·f0)) when every grid-forming
+battery is fixed, else 1. Hand networks, a closed tie: ΔP⁺ = 3 MW given, a
+cold genset joining at 10 + 5 s, so B = 3·15/3600 MWh at every hour.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import pypsa
+import pytest
+
+from services.solver import island as I
+from tests.test_island_rows import _BESS, _a, _genset, _island
+
+DP, JOIN = 3.0, 15.0
+B = DP * JOIN / 3600.0
+TOL = 1e-7
+
+
+def _units(droop_a=4.0, droop_b=2.0):
+    return {
+        "crit": {"kind": "load", "critical": True},
+        "a": {**_BESS, "droop_pct": _a(droop_a)},
+        "b": {**_BESS, "droop_pct": _a(droop_b)},
+        "g": _genset(start_s=10.0, sync_s=5.0),
+    }
+
+
+def _net(*, a_ext=True, b_mw=4.0, cost_b=1000.0, hours=6, eta=1.0, b_set=None):
+    """One bus, a grid supply, a cold genset that never runs, and two
+    grid-forming batteries: ``a`` (extendable, or fixed at 6 MW) and ``b``
+    (fixed, ``b_mw``). Holding energy in ``b`` costs ``cost_b`` per MWh·h, so
+    a solve with only the summed row leaves ``b`` empty."""
+    n = pypsa.Network()
+    sns = pd.date_range("2030-01-01", periods=hours, freq="h")
+    n.set_snapshots(sns)
+    n.add("Bus", "site")
+    n.add("Load", "crit", bus="site", p_set=0.0)  # no ride-through window: B alone
+    n.add("Generator", "grid", bus="site", p_nom=100.0, marginal_cost=10.0)
+    n.add("Generator", "g", bus="site", p_nom=0.0, marginal_cost=1000.0)
+    kw_a = dict(p_nom_extendable=True, capital_cost=100.0) if a_ext else dict(p_nom=6.0)
+    n.add(
+        "StorageUnit",
+        "a",
+        bus="site",
+        max_hours=2.0,
+        efficiency_dispatch=eta,
+        cyclic_state_of_charge=True,
+        **kw_a,
+    )
+    n.add(
+        "StorageUnit",
+        "b",
+        bus="site",
+        p_nom=b_mw,
+        max_hours=2.0,
+        efficiency_dispatch=eta,
+        cyclic_state_of_charge=True,
+        marginal_cost_storage=cost_b,
+    )
+    if b_set is not None:
+        n.storage_units_t.state_of_charge_set = pd.DataFrame({"b": b_set}, index=sns)
+    return n
+
+
+def _sidecar(**kw):
+    return _island(
+        units=_units(**kw),
+        k=0,
+        scenarios=("seamless",),
+        rocof=1e6,
+        qss=1e6,
+        sustained_h=1.0,
+        bridge_s=1.0,
+    )
+
+
+def _solve(n, island, check=False):
+    status, cond = n.optimize(
+        solver_name="highs",
+        extra_functionality=I.island_extra_functionality(
+            island, delta_p_plus=DP, check=check
+        ),
+    )
+    return status, cond
+
+
+def _soc_before(n, name):
+    soc = n.storage_units_t.state_of_charge[name]
+    return np.roll(soc.to_numpy(), 1)  # cyclic: e(t−1), the first from the last
+
+
+def test_a_summed_row_alone_leaves_one_battery_empty(monkeypatch):
+    """The red case: without the per-battery rows the cheaper solve holds
+    all of B in ``a`` and leaves ``b`` empty, which the screen fails."""
+    monkeypatch.setattr(
+        I, "_gfm_share_rows", lambda *a, **k: {"rule": "off", "shares": {}}
+    )
+    n = _net()
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert _soc_before(n, "b").max() == pytest.approx(0.0, abs=TOL)
+    assert (_soc_before(n, "a") >= B - TOL).all()
+
+
+def test_the_only_fixed_battery_holds_all_of_b_and_the_extendable_one_none_of_its_own():
+    """R1: ΣK_fixed is b's alone, so b's share is 1; a (extendable) has the
+    aggregate rows only."""
+    n = _net()
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert _soc_before(n, "b").min() == pytest.approx(B, abs=1e-6)  # binds: share 1
+    facts = n._island_facts["gfm_bridge_share"]["None"]
+    assert facts == {
+        "rule": I.GFM_SHARE_RULE,
+        "shares": {"a": "aggregate row only", "b": 1.0},
+    }
+    assert "Island-gfm-bridge-a" not in n.model.constraints
+    assert "Island-gfm-bridge-b" in n.model.constraints
+
+
+def test_every_battery_fixed_holds_its_droop_share():
+    """K_a = 6/0.04 = 150, K_b = 4/0.02 = 200 (per f0): b holds 200/350 of B,
+    not its 4/10 share of the MW."""
+    n = _net(a_ext=False)
+    status, _ = _solve(n, _sidecar(), check=True)
+    assert status == "ok"
+    share = 200.0 / 350.0
+    assert _soc_before(n, "b").min() == pytest.approx(share * B, abs=1e-6)
+    facts = n._island_facts["gfm_bridge_share"]["None"]
+    assert facts["rule"] == I.GFM_SHARE_RULE
+    assert facts["shares"] == pytest.approx({"a": 150.0 / 350.0, "b": share}, rel=1e-12)
+
+
+def test_the_row_reads_the_dispatch_efficiency():
+    n = _net(eta=0.8)
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert _soc_before(n, "b").min() == pytest.approx(B / 0.8, abs=1e-6)
+
+
+def test_the_row_reads_the_energy_above_the_floor():
+    n = _net()
+    n.storage_units["e_min_pu"] = 0.0
+    n.storage_units.at["b", "e_min_pu"] = 0.25  # 0.25·4 MW·2 h = 2 MWh held back
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert _soc_before(n, "b").min() == pytest.approx(2.0 + B, abs=1e-6)
+
+
+@pytest.mark.parametrize("floor", [-0.1, -1e-9])
+def test_a_floor_below_zero_is_refused(floor):
+    """A negative floor would count energy below empty (GK A T2)."""
+    n = _net()
+    n.storage_units.loc[:, "e_min_pu"] = 0.0
+    n.storage_units.at["b", "e_min_pu"] = floor
+    with pytest.raises(
+        I.IslandRefusal, match=r"storage unit b: e_min_pu .* is below 0"
+    ):
+        _solve(n, _sidecar())
+
+
+@pytest.mark.parametrize("floor", [1.0, 1.5])
+def test_a_floor_at_or_above_one_is_refused(floor):
+    """A floor at 1 leaves no energy for the bridge: a stated refusal, not
+    an infeasible LP (GK A T3)."""
+    n = _net()
+    n.storage_units.loc[:, "e_min_pu"] = 0.0
+    n.storage_units.at["b", "e_min_pu"] = floor
+    with pytest.raises(
+        I.IslandRefusal, match=r"storage unit b: e_min_pu .* is 1 or more"
+    ):
+        _solve(n, _sidecar())
+
+
+def test_a_floor_just_under_one_is_held():
+    """e_min_pu 0.998 is accepted: b holds 0.998·8 MWh plus B, which fits
+    under its 8 MWh (GK A T3)."""
+    n = _net()
+    n.storage_units.loc[:, "e_min_pu"] = 0.0
+    n.storage_units.at["b", "e_min_pu"] = 0.998
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert _soc_before(n, "b").min() == pytest.approx(0.998 * 8.0 + B, abs=1e-6)
+
+
+def test_the_row_binds_on_the_soc_before_the_hour_not_after():
+    """Non-cyclic SoC (GK A T1): b starts at B and holding energy costs, so
+    the row at hour t holds e_b(t−1) ≥ B and leaves the last hour's e_b(t)
+    free. b empties in the last hour; read on e(t) it could not."""
+    n = _net()
+    n.storage_units.at["b", "cyclic_state_of_charge"] = False
+    n.storage_units.at["b", "state_of_charge_initial"] = B
+    n.add("Load", "other", bus="site", p_set=1.0)  # a sink for b's last discharge
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    soc = n.storage_units_t.state_of_charge["b"].to_numpy()
+    assert soc[:-1] == pytest.approx([B] * (len(soc) - 1), abs=1e-6)
+    assert soc[-1] == pytest.approx(0.0, abs=TOL)
+
+
+def test_no_step_no_row():
+    """B = 0 (the tie open: no import step): nothing to hold."""
+    n = _net()
+    status, _ = n.optimize(
+        solver_name="highs",
+        extra_functionality=I.island_extra_functionality(_sidecar(), delta_p_plus=0.0),
+    )
+    assert status == "ok"
+    assert n._island_facts["gfm_bridge_share"] == {}
+    assert _soc_before(n, "b").max() == pytest.approx(0.0, abs=TOL)
+
+
+# ── P5: the LP and the screen agree at the share boundary ──────────────────
+
+
+def _screen_bridge_ok(e_b, e_a=10.0, unit="b"):
+    """Gridspine's screen on the same island: the two batteries' droop and
+    τ_f, the cold genset joining at 15 s, E1 = ΔP⁺; b's own e(t−1) = e_b."""
+    from gridspine.static import frequency as F
+
+    units = [
+        F.Unit("a", "gfm_droop", 0.0, 6.0, s_n=6.0 / 0.95, r=0.04, tau_f=0.1),
+        F.Unit("b", "gfm_droop", 0.0, 4.0, s_n=4.0 / 0.95, r=0.02, tau_f=0.1),
+        F.Unit(
+            "g",
+            "genset",
+            0.0,
+            2.0,
+            s_n=2.5,
+            r=0.04,
+            h=1.5,
+            join_s=JOIN,
+            start_s=10.0,
+            sync_s=5.0,
+        ),
+    ]
+    tr = F.e1_islanding(units, DP, t_end=20.0, dt=1e-3)
+    rows = {
+        r["unit"]: r
+        for r in F._gfm_bridge(
+            {"period": 0, "hour": 0}, units, tr, {"a": e_a, "b": e_b}
+        )
+    }
+    return rows[unit]["ok"]
+
+
+@pytest.mark.parametrize("scale, holds", [(1.0 + 1e-6, True), (1.0 - 1e-3, False)])
+def test_the_lp_and_the_screen_agree_at_the_droop_share(scale, holds):
+    share = 200.0 / 350.0
+    e_b = share * B * scale
+    assert _screen_bridge_ok(e_b) is holds
+    n = _net(
+        a_ext=False, cost_b=0.0, b_set=[np.nan] * 5 + [e_b]
+    )  # e_b(t−1) at the first hour
+    status, cond = _solve(n, _sidecar(), check=True)
+    assert (status == "ok") is holds, (status, cond)
+
+
+def test_a_floor_left_empty_on_one_battery_is_no_floor():
+    n = _net()
+    n.storage_units["e_min_pu"] = np.nan
+    n.storage_units.at["a", "e_min_pu"] = 0.1
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert _soc_before(n, "b").min() == pytest.approx(B, abs=1e-6)
+
+
+def test_fixed_batteries_with_no_droop_gain_get_share_zero_and_no_row():
+    """R1-2/R1-3: ΣK_fixed = 0: every fixed share 0, no division, no NaN."""
+    shares = I._gfm_shares(_zero_fleet(), _sidecar()["units"], ["a", "b"], 50.0)
+    assert shares == {"a": 0.0, "b": 0.0}
+    n = _zero_fleet()
+    n.add(
+        "StorageUnit",
+        "c",
+        bus="site",
+        p_nom_extendable=True,
+        capital_cost=100.0,
+        max_hours=2.0,
+        cyclic_state_of_charge=True,
+    )  # something to size
+    status, _ = _solve(n, _sidecar())
+    assert status == "ok"
+    assert not [c for c in n.model.constraints if c.startswith("Island-gfm-bridge-")]
+
+
+def test_a_fixed_battery_at_zero_mw_gets_share_zero_beside_a_built_one():
+    """R1-3: K = 0, share 0 (not NaN), and no row for it."""
+    n = _net(a_ext=False, b_mw=0.0)
+    shares = I._gfm_shares(n, _sidecar()["units"], ["a", "b"], 50.0)
+    assert shares == {"a": 1.0, "b": 0.0}
+    status, _ = _solve(n, _sidecar(), check=True)
+    assert status == "ok"
+    assert "Island-gfm-bridge-b" not in n.model.constraints
+    assert _soc_before(n, "a").min() == pytest.approx(B, abs=1e-6)
+
+
+def test_every_battery_extendable_has_the_aggregate_rows_only():
+    """R1-2: ΣK_fixed = 0 with every battery extendable: no per-battery row."""
+    n = _net()
+    n.storage_units.loc["b", ["p_nom_extendable", "capital_cost"]] = [True, 100.0]
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert n._island_facts["gfm_bridge_share"]["None"]["shares"] == {
+        "a": "aggregate row only",
+        "b": "aggregate row only",
+    }
+    assert not [c for c in n.model.constraints if c.startswith("Island-gfm-bridge-")]
+
+
+def test_an_extendable_candidate_is_not_forced_built():
+    """R1-3 (kills share 1 on the candidate): the fixed b can hold B, so the
+    dear candidate a stays at 0 MW."""
+    n = _net(cost_b=0.0)
+    n.storage_units.at["a", "capital_cost"] = 1e6
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert float(n.storage_units.at["a", "p_nom_opt"]) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_the_gap_a_built_extendable_battery_left_empty_is_failed_by_the_screen():
+    """R1-1: the LP holds B on the aggregate row (b, fixed) and leaves the
+    built extendable a empty; the screen, which asks a for its droop share,
+    fails it (the card test is test_run_action_island_survival's)."""
+    n = _net(cost_b=0.0)
+    n.storage_units.loc["a", ["p_nom_min", "p_nom_max", "marginal_cost_storage"]] = [
+        6.0,
+        6.0,
+        1000.0,
+    ]
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert float(n.storage_units.at["a", "p_nom_opt"]) == pytest.approx(6.0)
+    e_a = float(_soc_before(n, "a").min())
+    assert e_a == pytest.approx(0.0, abs=TOL)
+    assert _screen_bridge_ok(10.0, e_a=e_a, unit="a") is False
+
+
+def test_a_time_varying_floor_is_refused_not_ignored():
+    n = _net()
+    n.storage_units_t["e_min_pu"] = pd.DataFrame({"b": 0.1}, index=n.snapshots)
+    with pytest.raises(I.IslandRefusal, match="time-varying e_min_pu"):
+        _solve(n, _sidecar())
+
+
+def _zero_fleet():
+    n = _net(a_ext=False, b_mw=0.0)
+    n.storage_units.at["a", "p_nom"] = 0.0
+    return n
+
+
+def test_a_time_varying_floor_on_another_unit_is_not_this_rows_business():
+    n = _net()
+    n.add(
+        "StorageUnit",
+        "other",
+        bus="site",
+        p_nom=1.0,
+        max_hours=1.0,
+        cyclic_state_of_charge=True,
+    )
+    n.storage_units_t["e_min_pu"] = pd.DataFrame({"other": 0.1}, index=n.snapshots)
+    assert _solve(n, _sidecar()) == ("ok", "optimal")

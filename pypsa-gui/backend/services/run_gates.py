@@ -1277,8 +1277,14 @@ def _mg_frequency(env):
     out = run_actions.mg_frequency(env.project, env.task, dirty_state.revision(env.ctx))
     if "hours" not in out:
         return NoEvidence(out["state"], out["reason"])
-    return Detailed(len(out["hours"]), [f"period {p} hour {h}" for p, h in out["hours"]],
-                    run_actions.MG_FREQUENCY_BASIS)
+    # SH 40: an island hour with the tie open is named, never counted: E1 and
+    # the bridge were not judged there (neither failing nor passing).
+    detail = [f"period {p} hour {h}" for p, h in out["hours"]]
+    detail += [f"period {p} hour {h}: E1 and bridge not applicable (tie open)"
+               for p, h in out.get("tie_open_hours", [])]
+    if out.get("note"):
+        detail.append(f"E1 and bridge: {out['note']}")
+    return Detailed(len(out["hours"]), detail, run_actions.MG_FREQUENCY_BASIS)
 
 
 FACTS: dict[str, Fact] = {

@@ -1354,10 +1354,28 @@ export interface FinanceState {
   message?: string
 }
 
+/** One broken edge of a report's or the investment case's verdict (`provenance_graph.studies.verdict_wire`, PG-05):
+ *  `edge` is the input the edge pins; `needs_run` is true when only running the study again clears it. */
+export interface BrokenEdge {
+  edge: string
+  field: string | null
+  recorded: unknown
+  current_field: string | null
+  current: unknown
+  reason: string
+  needs_run: boolean
+}
+
+/** The provenance graph's verdict on a report or the investment case (PG-05): one state, with the edges that broke. */
+export interface GraphVerdict {
+  state: 'fresh' | 'stale' | 'uncompared' | 'from_memory' | (string & {})
+  broken: BrokenEdge[]
+}
+
 /** GET /results/investment_case: the study record (IC P4 WP4.6b); 204 when
  *  neither a run nor a report exists. Read defensively: the progress is a
  *  fraction / record (`progress`) or the runner's stages; the staleness is
- *  top-level (`stale`) or the stored report's block (`report.stale`). */
+ *  the stored report's block (`report`), whose `verdict` is the one source (PG-05). */
 export interface InvestmentCaseStudy {
   status: 'idle' | 'running' | 'done' | 'aborted' | 'error' | 'refused' | 'failed' | (string & {})
   study?: string
@@ -1368,7 +1386,8 @@ export interface InvestmentCaseStudy {
   stages_done?: string[]
   /** The stored report's assumptions changed since it was computed. */
   stale?: boolean | null
-  report?: { present?: boolean; stale?: boolean | null; changed?: string[]; reason?: string | null } | null
+  report?: { present?: boolean; stale?: boolean | null; changed?: string[]; reason?: string | null;
+             verdict?: GraphVerdict } | null
   code?: string | null
   message?: string | null
   error?: string | null

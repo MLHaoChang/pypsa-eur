@@ -1,0 +1,8 @@
+{"kinds": {
+  "shipped_cases_missing": {"surface": "inline", "why": "The run's project has no cases.json, so there are no shipped cases to explore. Nothing was admitted; the run reports that this profile has nothing to explore."},
+  "shipped_cases_invalid": {"surface": "inline", "why": "The project's cases.json is not a version 1 file of this template with a non-empty list of cases, each with a unique id, text fields and changes that have a path, a value type and an old and a new value. Nothing was admitted."},
+  "shipped_cases_changed": {"surface": "inline", "why": "The project's cases.json, or a price series a case names, differs from what was approved. The approval covers the whole file and those series, so the run stops until it is approved again."},
+  "shipped_series_unverified": {"surface": "inline", "why": "The template's price series do not check against their meta.json hashes (missing meta.json or hash, a missing, extra or changed file), so no shipped case is admitted."},
+  "shipped_cases_over_budget": {"surface": "inline", "why": "More shipped cases can run than the solve budget allows, or the pick has none or too many. The card asks the user to pick which cases to run; the first few are never taken."},
+  "shipped_case_not_runnable": {"surface": "inline", "why": "A pick named a case that is not in the file or is not run (a change outside what a case may change). Nothing was admitted."}
+}}

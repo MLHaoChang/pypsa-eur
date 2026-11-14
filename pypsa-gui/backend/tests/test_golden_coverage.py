@@ -219,6 +219,8 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_business_case_inputs"):         frozenset(),
     ("routers/results.py", "put_business_case_inputs"):         frozenset(),
     ("routers/results.py", "get_business_case_preset"):         frozenset(),
+    # Business case 09: the line table's select lists and refusals; no figure.
+    ("routers/results.py", "get_business_case_options"):        frozenset(),
     # Results workbook (RW-01): re-reports cost_breakdown / economics_by_carrier
     # and the stored case report in Excel; it computes no figure of its own.
     ("routers/results.py", "get_results_workbook"):            frozenset(),
