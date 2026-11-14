@@ -2093,6 +2093,70 @@ def test_a_source_link_beside_a_net_cluster_is_gross_and_outside_the_net():
     assert kpi["nonrenewable_mwh"] == pytest.approx(90.0 + 0.4 * 5.0 * HOURS)
 
 
+def test_a_conversion_link_touching_a_cluster_is_not_netted_too():
+    """GK B N6 (review): a methanation Link drawing H2 from the cluster and electricity on a negative-efficiency
+    port is a conversion Link; it is never also a cluster Link, so its draw is counted once."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("Bus", "ch4", carrier="gas")
+    n.add("Load", "gas offtake", bus="ch4", p_set=1.0)
+    n.add("Link", "methanation", bus0="h2", bus1="ch4", bus2="ac", p_nom=5.0, efficiency=0.8, efficiency2=-0.5)
+    c = classify(n)
+    assert "methanation" in c["conversion_links"], c
+    assert all("methanation" not in x["links"] for x in c["net_clusters"] + c["open_clusters"]), c
+
+
+@pytest.mark.parametrize(
+    "gen",
+    [
+        pytest.param({"carrier": "load_shedding", "p_nom": 5.0}, id="slack"),
+        pytest.param({"carrier": "solar", "p_nom": 5.0}, id="renewable"),
+    ],
+)
+def test_a_generator_injecting_into_a_cluster_opens_it(gen):
+    """GK B N1 (review): the fuel cell could return what a Generator on the H2 bus injected."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("Generator", "h2 gen", bus="h2", **gen)
+    c = classify(n)
+    assert c["net_clusters"] == [] and any("h2 gen" in o["why"] for o in c["open_clusters"]), c
+    assert renewable_fraction(n)["fraction"] is None
+
+
+def test_a_storage_unit_with_inflow_opens_the_cluster():
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("StorageUnit", "cavern", bus="h2", carrier="H2", p_nom=5.0, max_hours=10.0,
+          cyclic_state_of_charge=True, inflow=3.0)
+    c = classify(n)
+    assert c["net_clusters"] == [] and "inflow" in c["open_clusters"][0]["why"], c
+
+
+def test_a_bridge_link_fed_from_a_fuel_bus_opens_the_cluster():
+    """GK B N1 (review): an SMR with an electrical auxiliary port is a cluster Link, and it brings gas-made H2
+    in; the cluster is open."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Store", "gas tank", bus="gas", carrier="gas", e_nom=100.0, e_initial=100.0)
+    n.add("Link", "smr", bus0="gas", bus1="h2", bus2="ac", p_nom=5.0, efficiency=0.7, efficiency2=-0.05)
+    c = classify(n)
+    assert c["net_clusters"] == [] and any("smr" in o["why"] for o in c["open_clusters"]), c
+
+
+def test_a_link_touching_two_clusters_merges_them():
+    """GK B N6 (review): two H2 buses each with an electrolyser, an offtake and a fuel cell, joined by a
+    two-way pipe, are one cluster, never two with the pipe read as an opening."""
+    n = _dispatched()
+    for b in ("h2a", "h2b"):
+        n.add("Bus", b, carrier="H2")
+        n.add("Load", f"offtake {b}", bus=b, p_set=1.0)
+        n.add("Link", f"el {b}", bus0="ac", bus1=b, p_nom=10.0, efficiency=0.7)
+        n.add("Link", f"fc {b}", bus0=b, bus1="ac", p_nom=5.0, efficiency=0.5)
+    n.add("Link", "pipe", bus0="h2a", bus1="h2b", p_nom=10.0, p_min_pu=-1.0, efficiency=1.0)
+    c = classify(n)
+    assert c["open_clusters"] == [], c
+    assert c["net_clusters"] == [
+        {"buses": ["h2a", "h2b"], "links": ["el h2a", "el h2b", "fc h2a", "fc h2b"]}
+    ], c
+
+
 def test_two_h2_buses_joined_by_a_pipe_are_one_cluster_with_each_link_once():
     """GK B N6: clusters sharing a bus merge; no Link is counted twice."""
     n = _dispatched()
