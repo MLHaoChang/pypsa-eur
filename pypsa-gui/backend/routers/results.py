@@ -2127,7 +2127,14 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
     `campus` (IC G3 R-2) is the request's campus source: its refusal is raised
     here, so it is a refused report like every adapter refusal; its extras go
     to the adapter and its run flags onto the case, as are ``growth_flags``
-    (``_ic_growth_flags``)."""
+    (``_ic_growth_flags``). On a run's own step (`assistant_tasks.RUN_CONTEXT` set,
+    study harness 14) the case never re-solves the baseline: the envelope counts
+    no solve for it, and a kept asset added after its admission is refused here,
+    under the lock that plans it (`baseline_solve`)."""
+    from services import assistant_tasks
+
+    in_run = assistant_tasks.RUN_CONTEXT.get() is not None
+
     def build():
         from models.finance import FinanceInputs
         from services.finance.case import FinanceRefused
@@ -2148,6 +2155,9 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
 
         with PyPSAService.get_lock():
             plan = baseline_plan(n, cfg, owner)
+            if in_run and plan is not None and plan.needed:
+                raise FinanceRefused("baseline_solve", "the case would re-solve the baseline, "
+                                     "which a run's budget does not count")
             snap = _network_copy(n) if plan is not None and plan.needed else None
         base = None
         if snap is not None:

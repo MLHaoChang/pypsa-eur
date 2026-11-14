@@ -5,6 +5,8 @@ provider names are not keywords: switching an existing profile is supported.
 """
 from __future__ import annotations
 
+import re
+
 DISPOSITIONS = ("out of chat", "manual", "unbuilt", "unbuilt; owner to decide later")
 
 NOT_VIA_CHAT: tuple[dict, ...] = (
@@ -220,21 +222,17 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
     },
     {
         'id': 'business_case',
-        'title': 'Business case',
-        'disposition': 'unbuilt',
-        'reason': 'Running the business case and editing its lines is not available from chat yet. Use the Business case view beside the investment case on the Results page.',
+        'title': 'Business case preset',
+        'disposition': 'out of chat',
+        'reason': 'The preset fills cost defaults from a pack, so it is applied in the panel; chat sets the lines only from your figures. Use the Business case view on the Results page.',
         'page': 'Results (Investment tab)',
         'panel': None,
         'keywords': frozenset({
             'business',
+            'preset',
         }),
         'routes': frozenset({
-            ('GET', '/api/results/business_case'),
-            ('GET', '/api/results/business_case/inputs'),
             ('GET', '/api/results/business_case/preset'),
-            ('POST', '/api/results/business_case'),
-            ('POST', '/api/results/business_case/abort'),
-            ('PUT', '/api/results/business_case/inputs'),
         }),
     },
     {
@@ -449,7 +447,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'panel': None,
         # 'saved' and 'reuse' alone are in project, scenario and snapshot asks:
         # `matches` also needs `_asks_for_a_saved_value` (GK B N4).
-        'keywords': frozenset({'reusable', 'chip', 'chips', 'saved', 'save', 'reuse', 'remember'}),
+        'keywords': frozenset({'reusable', 'chip', 'chips', 'saved', 'save', 'reuse', 'remember', 'keep', 'store'}),
         'routes': frozenset({
             ('GET', '/api/memory/suggestions'),
             ('POST', '/api/memory/parameters'),
@@ -486,30 +484,33 @@ _SAVED_ELSEWHERE = frozenset({
     'tariffs', 'project', 'projects',
 })
 _KEEP_VERBS = frozenset({'save', 'remember'})
-_KEPT_FOR_REUSE = frozenset({'later', 'elsewhere', 'reuse'})
-_KEPT_FOR_PLACES = frozenset({'next', 'another', 'other'})
-_REUSE_PLACES = frozenset({'project', 'projects', 'time'})
+# Phrases that say a value is kept for reuse. Single words cannot: "later" and
+# "next time" are also model time and plain workflow.
+_REUSE_PHRASE = re.compile(
+    r'\b(?:for (?:later|next time)|for (?:my |the |our )?(?:next|another|other|future) projects?'
+    r'|to reuse|so i can (?:reuse|use (?:it|this|that) again)|as (?:a|the) default)\b')
+# "Store" is a component, so it counts only as the opening verb, with a project or default phrase.
+_STORE_PHRASE = re.compile(
+    r'\b(?:for (?:my |the |our )?(?:next|another|other|future) projects?|as (?:a|the) default)\b')
 _KEPT_ELSEWHERE = (_SAVED_ELSEWHERE - {'project', 'projects'}) | {
     'table', 'tables', 'network', 'networks', 'report', 'reports', 'result', 'results',
     'csv', 'chart', 'charts', 'series', 'file', 'files',
 }
 
 
-def _kept_for_reuse(words: set[str]) -> bool:
-    return bool(
-        words & _KEPT_FOR_REUSE
-        or (words & _KEPT_FOR_PLACES and words & _REUSE_PLACES)
-    )
-
-
-def _asks_for_a_saved_value(words: set[str]) -> bool:
+def _asks_for_a_saved_value(words: set[str], goal: str = '') -> bool:
     if words & _SAVED_VALUE_NAMES:
         return True
     if not words & _VALUE_WORDS:
         return False
     if words & _USE_WORDS and not words & _SAVED_ELSEWHERE:
         return True
-    return bool(words & _KEEP_VERBS and _kept_for_reuse(words) and not words & _KEPT_ELSEWHERE)
+    if words & _KEPT_ELSEWHERE:
+        return False
+    text = ' '.join(re.findall(r'[a-z0-9]+', goal.lower()))
+    if words & (_KEEP_VERBS | {'keep'}):
+        return bool(_REUSE_PHRASE.search(text))
+    return text.startswith('store ') and bool(_STORE_PHRASE.search(text))
 
 
 # The headline strip entry answers only what the strip itself owns: what it
@@ -528,16 +529,12 @@ def _asks_about_the_strip(words: set[str]) -> bool:
     return bool(words & _STRIP_NAMES and words & _STRIP_ASKS and not words & _STRIP_ELSEWHERE)
 
 
-# The business case answers only an ask that names it ("business case") with what is
-# done to it. EBITDA, break-even and the workbook are also the investment case's and its
-# tools' (`get_investment_case`, `export_results_workbook`), so a bare `ebitda` or
-# `breakeven` must not steer the model away from them (GK B (54) D3).
+# Only the business case's preset is out of chat (GK B (54) Q3, D8): its run, read and
+# lines are tools (`run_business_case`, `get_business_case`, `set_business_case_lines`),
+# so "show the business case for …" must reach them. The entry hits only on "business
+# case" with a preset word.
 _BUSINESS_CASE_NOUN = frozenset({'case', 'cases'})
-_BUSINESS_CASE_ASKS = frozenset({
-    'run', 'rerun', 'edit', 'set', 'change', 'update', 'add', 'remove', 'line', 'lines',
-    'preset', 'abort', 'stop', 'show', 'read', 'what', 'ebitda', 'breakeven', 'break',
-    'even', 'margin', 'kpi', 'kpis',
-})
+_BUSINESS_CASE_ASKS = frozenset({'preset', 'presets', 'template', 'defaults'})
 
 
 # "Business as usual" (BAU) is a scenario, not this feature (GK B (54) D3).
@@ -549,7 +546,7 @@ def _asks_for_the_business_case(words: set[str]) -> bool:
                 and words & _BUSINESS_CASE_ASKS and not words & _BUSINESS_AS_USUAL)
 
 
-def matches(words: set[str], limit: int = 2) -> list[dict]:
+def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
     """Keyword hits, ranked by count then declaration order; return public copies.
 
     A plan/goal pause is supported; do not describe it as an instance queue pause.
@@ -562,7 +559,7 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
             continue
         if entry['id'] == 'report_chart_snapshots' and not words & {'chart', 'charts', 'graph', 'plot'}:
             continue  # bare `pin` also means "pin a bus or a capacity"
-        if entry['id'] == 'memory_parameter_suggestions' and not _asks_for_a_saved_value(words):
+        if entry['id'] == 'memory_parameter_suggestions' and not _asks_for_a_saved_value(words, goal):
             continue
         if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
             continue

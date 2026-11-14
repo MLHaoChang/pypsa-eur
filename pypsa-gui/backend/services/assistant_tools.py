@@ -207,7 +207,7 @@ def find_capabilities(goal: str | None = None, limit: int = 3, overview: bool = 
     if session is not None:
         session.discovered_tools = tuple(item["name"] for item in items)
     from services import not_via_chat
-    refused = not_via_chat.matches(words)
+    refused = not_via_chat.matches(words, goal=goal)
     if refused:
         out["not_via_chat"], out["not_via_chat_note"] = refused, not_via_chat.NOTE
         while len(json.dumps(out)) > 3800 and out["not_via_chat"]:

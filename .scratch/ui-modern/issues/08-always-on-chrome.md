@@ -3,7 +3,7 @@
 
 # Always-on chrome: the floating chat button and the repeating Guided banner
 
-Status: ready-for-agent
+Status: done (#1470)
 Type: feature
 Reviewer: UX.
 

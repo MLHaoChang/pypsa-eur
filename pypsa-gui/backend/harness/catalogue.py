@@ -4647,6 +4647,66 @@ TOOLS: list[dict[str, Any]] = [
         {"detail": {"type": "string", "enum": ["summary", "full"]}},
         [],
     ),
+    # ── Business case (4) — business case 08b (GK B (54) plan GO, D1–D9) ──
+    _t(
+        "run_business_case",
+        "Start the business-case run: the P&L by year, EBITDA, the KPIs (gross and net of "
+        "pass-through) and the break-even, from the stored business-case lines and the "
+        "CURRENT investment case (its own solve). Runs no LP (a campaign logs it at 0 "
+        "solves). Returns {status: 'running', study, ...}; poll get_business_case. "
+        "Refusals: investment_case_missing (run the investment case first, or it is "
+        "stale), business_case_inputs_missing (set the lines first), "
+        "business_case_inputs_invalid, business_case_busy (a solve or a study is "
+        "running). A run refused while it runs names its code and field in "
+        "get_business_case. Safety: execution_long_running.",
+        {},
+        [],
+    ),
+    _t(
+        "get_business_case",
+        "Read the business case. detail='summary' (default): {run: {status, stage, "
+        "error_code, refusal}, report: {present, stale, changed, reason}, kpis, break_even, "
+        "outputs, flags, pnl_years} — an unknown number reads 'not established': NEVER "
+        "report it as 0. A stale report shows no figures and names what changed: call it "
+        "stale. `truncated` lists any section cut to fit. detail='inputs': the stored "
+        "lines {business_case, digest, status, citable_turns} — pass `digest` as "
+        "set_business_case_lines' if_match; `citable_turns` are the user's own messages a "
+        "price may cite. Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "inputs"]}},
+        [],
+    ),
+    _t(
+        "set_business_case_lines",
+        "Replace the business-case inputs (revenue, opex and capex lines, kw_per_gpu, "
+        "capacity, break_even_line) with `business_case`, a whole BusinessCaseConfig: read "
+        "it with get_business_case(detail='inputs'), change what the user asked, send the "
+        "whole object back. `if_match` is REQUIRED (that read's `digest`; '*' is refused; "
+        "stale: business_case_changed). NEVER invent a price: each NEW or CHANGED price "
+        "(`price`, or a year of `price_by_year`) needs one entry in `citations` — {line, "
+        "year? (for price_by_year), then where the user gave it: turn_id + quote + unit "
+        "(a citable_turns message, word for word, unit right after the number), or "
+        "upload_id + sheet + cell, or upload_id + page + quote + unit} — never the value "
+        "itself; otherwise price_not_from_user: ask the user. linked_share is the line's "
+        "SOLD share of its linked series, never a lease-up or volume factor. The user "
+        "approves a card showing every line added, changed (old → new) or removed and "
+        "each price's source; an edit too large for one card is refused "
+        "(business_case_card_too_large): split it. clear=true (no business_case) removes "
+        "every line. The preset is the panel's (Results, Investment tab). Safety: write.",
+        {"business_case": {"type": "object"}, "if_match": {"type": "string"},
+         "clear": {"type": "boolean"},
+         "citations": {"type": "array", "maxItems": 60, "items": {"type": "object"}}},
+        ["if_match"],
+    ),
+    _t(
+        "abort_business_case",
+        "Stop a running business-case run at its next stage; it stores nothing. "
+        "IDEMPOTENT and 200 even when the run has already finished; 404 only when no "
+        "business-case run was recorded in this session. Does NOT stop a solve "
+        "(abort_simulation) or the investment case (abort_investment_case). "
+        "Safety: destructive.",
+        {},
+        [],
+    ),
     # ── Decision study (6) — U3: the guided face's question, by chat ─────
     _t(
         "start_decision_study",
@@ -5190,7 +5250,7 @@ TOOLS.extend([
     _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
     _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
     # The project flow (B1, design §3.4): the same payload GET …/flow serves.
-    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request {optimisation, study, loadflow} (which run kinds the Run includes), verdicts (each included kind's own verdict {ready, blocker}: optimisation, study, loadflow; null when not included), run_verdict (what the header Run itself answers: the optimisation and, with Load flow on, its load flow; never the study), the results row's freshness_by_kind (fresh|stale|not_run|running per kind: optimisation, study, loadflow; the Run button shows how many included kinds are stale), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
+    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request {optimisation, study, loadflow} (which run kinds the Run includes), verdicts (each included kind's own verdict {ready, blocker}: optimisation, study, loadflow; null when not included), run_verdict (what the header Run itself answers: the optimisation and, with Load flow on, its load flow; never the study), the results row's freshness_by_kind (fresh|stale|uncompared|not_run|running per kind: optimisation, study, loadflow; uncompared means nothing recorded the run's inputs to compare with, so it is never current; the Run button shows how many included kinds are stale), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
     _t("get_reliability_goal", "The project's one reliability goal as the EH study, Monte-Carlo, coupling and margin loops resolve it when a call leaves a field out: {target_lole_h (allowed shortfall, h/yr), ens_cap_permyriad (energy strictness, ‱ of demand), mc_draws, site_archetype}, each {value, source: stored|template|default}. Change it with update_solver_config. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
     # ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity ─────────
     # Each calls its GUI route's own handler in-process (TOOL_ROUTES below);
@@ -5836,6 +5896,12 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_ppa_price": [("GET", "/api/simulation/finance")],
     "explain_cashflow": [("GET", "/api/results/investment_case"),
                          ("GET", "/api/results/investment_case/report")],
+    # business case (4) — business case 08b; the preset route stays panel-only (Q3)
+    "run_business_case": [("POST", "/api/results/business_case")],
+    "get_business_case": [("GET", "/api/results/business_case"),
+                          ("GET", "/api/results/business_case/inputs")],
+    "set_business_case_lines": [("PUT", "/api/results/business_case/inputs")],
+    "abort_business_case": [("POST", "/api/results/business_case/abort")],
     # decision study (6) — U3: `routers/studies.py`, in process through `_route`.
     "start_decision_study": [("POST", "/api/projects/{name}/studies/")],
     "set_study_parameter": [("PUT", "/api/projects/{name}/studies/{study_id}/ledger")],

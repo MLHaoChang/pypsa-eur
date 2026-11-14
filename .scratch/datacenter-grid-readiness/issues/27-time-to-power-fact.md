@@ -3,7 +3,7 @@
 
 # A checked "time to power" fact for data-centre projects
 
-Status: ready-for-agent
+Status: done (#1474)
 Size: M
 Blocked by: none
 Gated: GK A
@@ -43,3 +43,5 @@ A checked formula with its own `formula_id`, read through `harness.calculations`
   - G10 Registry, assurance contracts and fact_identity pass at the trial merge; a withheld fact carries its reason like other profiles' refusals.
 - 2026-11-13 GK A plan addendum (registration footprint) covered by the GO, plus G11 (contracts snapshot differs from master only by the new profile's entries; `--check` at the trial merge; an existing profile's fact-identity window pinned) and G12 (opt-in; without it no time-to-power fact and no existing fact changes).
 - 2026-11-13 coordinator: the contracts checker treats a profile-enum member in a returned shape as additive exactly when that profile is new in `$.profiles` (AA-V1-CHANGE-1, option 1). GK B (session_01G7qCunjf3jDjmxM34oyN3Q) co-reviews `breaking_changes`: plan GO with B1 (a mutant computing `added` from one side only dies), B2 (an id the old contract already listed without a profile still reads changed), B3 (reordered existing members read changed; order counts, as on master).
+
+- 2026-11-13 coordinator: done in #1474 (GK A (27) OK and GK B (55) OK for breaking_changes @5ef1b7a6). Follow-ups for ui-modern 05: (3) a headline card in services/results/headline_kpis.py reading harness.time_to_power_calculations.result(...), with the caveat "first power may be as early as earliest_first_power" when resolution_months > 0; (4) a project created from the shipped staged example without a dc_load body reads not available (no_dc_load_spec).

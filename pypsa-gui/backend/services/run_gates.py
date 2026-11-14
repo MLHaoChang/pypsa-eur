@@ -222,8 +222,8 @@ RESTORES = ("base", "final")
 # network's generators may lack outage data, or its outages may sit on Links.
 LOOP_NOTHING_TO_SAMPLE = "loop_nothing_to_sample"
 NOTHING_TO_SAMPLE_DETAIL = ("the loop found no outage to sample: no electrical generator has outage data "
-                            "(unavailability or repair time). Outages carried on Links, as on the H2 hubs, "
-                            "cannot be sampled yet.")
+                            "(unavailability or repair time), and no Link supplying an electrical bus has "
+                            "outage data.")
 # Study harness 12c (GK B (47) Q4): a loop the envelope's cap cut short. It is
 # the engine's own refusal kind (`run_envelope.reserve_engine`), read as not
 # evaluated with words: never met, and its last unconverged value is no result.
@@ -245,7 +245,19 @@ LOOP_FIELDS = ("status", "solves_used", "probe_solves", "restore", "base_restore
                "target_lole_h", "horizon_years", "draws", "basis", "goal_sources", "lever_star", "eps_star", "confident",
                "started_at", "finished_at", "error", "network_revision",
                # Adequacy loops 04 (D3): the goal verdict's numbers.
-               "event_h", "settle_draws", "settle_reason")
+               "event_h", "settle_draws", "settle_reason",
+               # Adequacy loops 02 (AL-2): what the supplying-Link walk decided.
+               "fleet_notes")
+
+FIRM_IMPORT_NOTE = "grid import taken as never failing"
+
+
+def _firm_import_words(loop):
+    """AL-2: the loop's own notes that a grid import was taken as never failing,
+    so the LOLE verdict rests on it; "" when the loop made none."""
+    notes = loop.get("fleet_notes") if isinstance(loop, dict) else None
+    firm = [n for n in (notes or ()) if isinstance(n, str) and n.startswith(FIRM_IMPORT_NOTE)]
+    return ("the verdict rests on an import taken as firm: " + "; ".join(firm)) if firm else ""
 
 # Adequacy loops 04 (D3, GK A (25)): a loop whose nearest plan sits at or
 # below the goal without confidence, within one more sampled draw of it.
@@ -258,7 +270,8 @@ def _not_confident_words(loop):
     from services.adequacy.lole_verdict import settle_text
     return ("the loop's nearest plan estimates LOLE at or below the goal, but not confidently, and one "
             "more sampled draw as heavy as the heaviest seen would put it above, so the rule is not evaluated; "
-            f"it never counts as met; {settle_text(loop)}")
+            f"it never counts as met; {settle_text(loop)}"
+            + (f"; {_firm_import_words(loop)}" if _firm_import_words(loop) else ""))
 
 
 def converged(record) -> bool:
@@ -949,6 +962,88 @@ def _delivery_shortfall(env):
     return _own_solve(env, read, typed=True)
 
 
+# Study harness 14 (design §9.3 "eh_ipp_hybrid"; GK B (52) I3-I5): the IPP
+# hybrid's export through the point of connection and its investment-case
+# figures.
+EXPORT_BASIS = ("the highest export through the commercial config's export link over every snapshot of every "
+                "investment period, minus the link's rating; an import never counts as export")
+
+
+def _export_over_limit(env):
+    """I3: MW by which the peak export exceeds the export link's rating (at
+    most 0 passes). The link is the one the project's commercial config names
+    (`export_link`); export is the flow out of the site's own bus, read from
+    its `p0` with the sign made explicit by the link's wiring (bus0 the site:
+    `p0` is export; bus0 the point of connection: `-p0`). An unnamed, missing
+    or unrated link, an unreadable wiring or a non-finite flow is no
+    evidence, never a pass; no limit is assumed."""
+    import numpy as np
+
+    from harness.calculations import solve_matches_inputs
+
+    def read(ctx):
+        if not solve_matches_inputs(ctx):
+            return STALE_SOLVE
+        n = ctx.network
+        cfg = (getattr(ctx, "solver_state", None) or {}).get("solver_config")
+        commercial = cfg.get("commercial") if isinstance(cfg, dict) else getattr(cfg, "commercial", None)
+        name = commercial.get("export_link") if isinstance(commercial, dict) else getattr(commercial, "export_link", None)
+        if not isinstance(name, str) or not name:
+            return NoEvidence("no_export_link", "the project's commercial settings name no export link")
+        if name not in n.links.index:
+            return NoEvidence("export_link_missing", f"the export link {name} is not in the network")
+        rating = n.links.at[name, "p_nom"]
+        if not _number(rating) or rating <= 0:
+            return NoEvidence("export_link_unrated", f"the export link {name} has no rating to hold the export to")
+        from services.solver.process_uc import flag_column
+
+        # the shared flag rule: NaN and "False" are not tags
+        flags = flag_column(n.buses, "eh_poc") if "eh_poc" in n.buses.columns else None
+        if flags is None:
+            return NoEvidence("no_poc_tag", "no bus is tagged as the point of connection, so the export's "
+                                            "direction is not known")
+        bus0, bus1 = bool(flags.get(n.links.at[name, "bus0"], False)), bool(flags.get(n.links.at[name, "bus1"], False))
+        if bus0 == bus1:
+            return NoEvidence("poc_unreadable", f"the export link {name} does not have the point of connection "
+                                                "on exactly one side")
+        if name not in n.links_t.p0.columns:
+            return NoEvidence("no_dispatch", f"the solve left no flow on the export link {name}")
+        flow = np.asarray(n.links_t.p0[name], dtype=float)
+        if flow.size == 0 or not np.isfinite(flow).all():
+            return NoEvidence("unreadable_dispatch", f"the flow on the export link {name} is missing or not finite")
+        export = flow if bus1 else -flow  # p0 > 0 leaves the site when the point of connection is bus1
+        peak = max(float(export.max()), 0.0)
+        return Detailed(peak - float(rating), [f"peak export {peak:.4g} MW of {float(rating):.4g} MW on {name}"],
+                        EXPORT_BASIS)
+    return _own_solve(env, read, typed=True)
+
+
+def _ic_figure(env, reader, key):
+    """The one figure of a stored investment-case read, else no evidence
+    with the state and the reasons in words."""
+    from services import ic_counterfactual as ic
+    fact = reader(env.ctx, lambda fn: _on(env.ctx, fn))
+    if fact[key] is not None:
+        return fact[key]
+    return NoEvidence(fact["state"], ic.reason_words(fact))
+
+
+def _ic_pre_tax_irr(env):
+    """I5: the stored case's project pre-tax IRR (a current case, an
+    established counterfactual, an IRR the case established), as `{"irr":
+    value}` so the rule asks that it is present, never what it is worth (the
+    gate reports it, as `ic.returns`)."""
+    from services import ic_counterfactual as ic
+    out = _ic_figure(env, ic.read_pre_tax_irr, "irr")
+    return out if isinstance(out, NoEvidence) else {"irr": out}
+
+
+def _ic_min_dscr(env):
+    """I4: the stored case's minimum DSCR over the years with debt service."""
+    from services import ic_counterfactual as ic
+    return _ic_figure(env, ic.read_min_dscr, "min_dscr")
+
+
 def _handoff_kpis_read(env):
     """Issue 07 (C14): every headline KPI read back natively, on the run's context."""
     from harness import run_handoff
@@ -1214,6 +1309,10 @@ FACTS: dict[str, Fact] = {
     "fresh": Fact("services.workflow_tools.solve_freshness", "results_current", None, _fresh),
     "ic.counterfactual": Fact("services.ic_counterfactual.read", "state", None, _ic_counterfactual),
     "ic.returns": Fact("services.ic_counterfactual.read_returns", "returns", None, _ic_returns),
+    # Study harness 14: the IPP hybrid (GK B (52)).
+    "ipp.export.over_limit_mw": Fact("services.run_gates._export_over_limit", "over_limit", "MW", _export_over_limit),
+    "ic.project_pre_tax_irr": Fact("services.ic_counterfactual.read_pre_tax_irr", "irr", None, _ic_pre_tax_irr),
+    "ic.min_dscr": Fact("services.ic_counterfactual.read_min_dscr", "min_dscr", None, _ic_min_dscr),
     "ic.baseline_keeps": Fact("services.ic_counterfactual.read_baseline_keeps", "kept", None,
                               _ic_baseline_keeps),
     LOOP_FACT: Fact("task.steps[engine].result.loop", "status", None, _loop_converged, per_rule=True),
@@ -1488,6 +1587,8 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
             result["facts"][0]["rows"] = scored.rows
         if looped is not None:
             result["facts"][0]["loop"] = looped.record
+            if _firm_import_words(looped.record):
+                result["note"] = _firm_import_words(looped.record)
         if detailed is not None:
             result["facts"][0]["detail"] = list(detailed.detail)
             if detailed.basis:
@@ -1530,12 +1631,9 @@ def passed(results: list[dict]) -> bool:
 
 
 def fingerprint(ctx) -> str | None:
-    """The context's input fingerprint (solver outputs excluded), or None."""
-    from services import workflow_tools
-    try:
-        return workflow_tools._network_input_fingerprint(ctx)
-    except Exception:  # noqa: BLE001 — unreadable inputs are no evidence
-        return None
+    """The context's input fingerprint (solver outputs excluded), or None (`provenance_graph.runs`)."""
+    from services.provenance_graph.runs import input_fingerprint
+    return input_fingerprint(ctx)
 
 
 def _unevaluated(rules, reason):

@@ -394,6 +394,31 @@ def test_a_native_margin_loop_rule_never_starts_an_agent_turn(
     assert "loop" not in run or run["loop"]["kind"] != "L2"
 
 
+def test_the_lole_rule_names_a_grid_import_taken_as_never_failing(
+    granted, ok, loops, monkeypatch
+):
+    """AL 02 (AL-2): the loop's `fleet_notes` reach the gate, and the rule's note
+    names each "grid import taken as never failing" note, on eh_h2_hub with
+    grid_import's outage data cleared."""
+    from project_templates import eh_templates as T
+    from services.adequacy.link_supply import sampled_fleet
+
+    n = T.BUILDERS["eh_h2_hub"]()
+    n.links.loc["grid_import", ["outage_rate_value", "mttr_hours"]] = float("nan")
+    notes = list(sampled_fleet(n, keep_zero_capacity=True).fleet_notes)
+    firm = [x for x in notes if x.startswith("grid import taken as never failing")]
+    assert firm
+    with_rules(monkeypatch, engine_rule())
+    loops.finish_with(status="met", solves_used=2, probe_solves=1, fleet_notes=notes)
+    task, path, _ = granted()
+    record = go(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    row = _engine_row(record)
+    assert row["verdict"] == "pass"
+    assert row["facts"][0]["loop"]["fleet_notes"] == notes
+    for note in firm:
+        assert note in row["note"]
+
+
 @pytest.mark.parametrize(
     "status", ["budget_exhausted", "unreachable", "aborted", "failed"]
 )

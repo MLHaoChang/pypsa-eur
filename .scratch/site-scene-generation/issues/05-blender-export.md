@@ -3,7 +3,7 @@
 
 # SC-04 — export an editable site snapshot for Blender
 
-Status: ready-for-human (parked until a Blender/photo engine is chosen; Q-SS-1)
+Status: ready-for-agent (engine chosen Q-SS-2; blockers: 02 and 03 per the 2026-11-05 note)
 Type: task
 Dependencies: SC-00 N/SC-01 for native export; SC-02 for bindings; SC-00 B before claiming tested Blender compatibility
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -41,3 +41,7 @@ Deliver this slice's in-place explanation, typed proposed action or truthful UI 
 Was: `needs-triage — specification proposed; not implemented`. Owner question Q-SS-1, shared with 06 and 07. The Blender and photo engine milestones (SC-00 B and P) are deferred until a supported Blender or photo engine exists. What now? (1, Recommended) Keep 05, 06 and the photo half of 07 parked until an engine is chosen, and build 07's layout half after SC-01 lands: no unverified Blender claims. (2) Build the native export of 05 now, with Blender compatibility labelled untested: useful early, but leaves a feature that cannot be verified. (3) Choose and provision a Blender engine now, then build 05 and 06 in order. Once answered per (1)/(3): 05 is ready-for-agent, Opus, files the export service and routes, reviewers GK B and UX; blockers: 02 (SC-01) and 03 (SC-02), both in progress.
 
 2026-11-05, owner answer Q-SS-1 (coordinator card): "Park until an engine is chosen (Recommended)". This issue waits for an engine choice.
+
+### 2026-11-14: engine chosen (Q-SS-2)
+
+2026-11-14, owner answer Q-SS-2 (coordinator card): "option 1 (Recommended)". Engines chosen, see [research-engines.md](../research-engines.md) (#1490): Blender-free GLB+manifest by default (trimesh/pygltflib, MIT); Blender 5.2 LTS only as a separate pinned no-network container for optional `.blend` output; photos via OpenDroneMap/NodeODM, out-of-process and unmodified (AGPL). Change: this issue splits into (a) the neutral GLB+manifest bundle written with trimesh/pygltflib, shippable with no Blender and not gated on D09, and (b) an optional worker script that opens the bundle in the pinned Blender 5.2 LTS container and writes the output-only `.blend`; (b) and the pinned Blender import/export fixture stay behind SC-00 B and 06. The unverified items in research-engines.md section 6 (exact 5.2.x patch to pin, `export_extras` option name) are settled in the plan.

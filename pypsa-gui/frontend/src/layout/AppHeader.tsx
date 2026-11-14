@@ -24,7 +24,7 @@ import DecisionRunWatcher from '../pages/decision/DecisionRunWatcher'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 import { useRunGate } from '../hooks/useRunGate'
-import { staleKindsSentence, useStaleRunKinds } from '../hooks/useStaleRunKinds'
+import { staleKindsSentence, uncheckedKindsSentence, useStaleRunKinds, useUncheckedRunKinds } from '../hooks/useStaleRunKinds'
 import { openFlowTarget, openSectionInExpert } from './flowNavigation'
 import { componentLabel } from '../utils/componentLabels'
 
@@ -621,7 +621,12 @@ export default function AppHeader() {
   const runLabel = `Run ${MODE_LABEL[mode] ?? mode.toUpperCase()}`
   const runGate = useRunGate('optimisation')
   const staleKinds = useStaleRunKinds()
-  const staleText = staleKinds.length ? staleKindsSentence(staleKinds) : ''
+  const uncheckedKinds = useUncheckedRunKinds()
+  // "Out of date" and "unchecked" are separate words: an unchecked kind is never read as current (PG-04b).
+  const staleText = [
+    staleKinds.length ? staleKindsSentence(staleKinds) : '',
+    uncheckedKinds.length ? uncheckedKindsSentence(uncheckedKinds) : '',
+  ].filter(Boolean).join(' ')
 
   // SSE cleanup ref — close the stream on Abort / unmount so a long-lived
   // EventSource doesn't leak across re-renders.
@@ -1157,7 +1162,13 @@ export default function AppHeader() {
                 : <>
                     {mode === 'lopf' ? <Zap size={11} /> : <Play size={11} />}
                     {runLabel}
-                    {staleKinds.length > 0 && <span data-testid="run-stale" title={staleText} className="font-normal opacity-90">({staleKinds.length} out of date)</span>}
+                    {(staleKinds.length > 0 || uncheckedKinds.length > 0) && (
+                      <span data-testid="run-stale" title={staleText} className="font-normal opacity-90">
+                        ({staleKinds.length > 0 && `${staleKinds.length} out of date`}
+                        {staleKinds.length > 0 && uncheckedKinds.length > 0 && ' · '}
+                        {uncheckedKinds.length > 0 && <span data-testid="run-unchecked" className="opacity-75">{uncheckedKinds.length} unchecked</span>})
+                      </span>
+                    )}
                   </>}
           </button>
         </>)

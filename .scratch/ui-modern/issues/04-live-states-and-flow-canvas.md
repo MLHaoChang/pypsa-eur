@@ -3,7 +3,7 @@
 
 # Live states and flow canvas
 
-Status: ready-for-agent
+Status: done (#1473; slices 1-3)
 Blocked by: 01
 Type: feature
 Model: Sonnet. Reviewer: UX.
