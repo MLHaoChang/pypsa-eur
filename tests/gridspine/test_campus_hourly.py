@@ -480,3 +480,37 @@ def test_a_status_on_a_link_that_is_not_committable_does_not_open_it():
 def test_the_draft_does_not_call_a_tie_that_can_carry_power_back_normally_open():
     m = _no_flow(_tie(solved_hub(), p_max_pu=0.0, p_min_pu=-1.0))
     assert "tie_normally_open" not in draft_campus(m).spec["campus"]["pcc"]
+
+
+# GK A R2-1: the grid generator decides only when no Link touches the PCC.
+
+
+def test_r2_a_grid_generator_on_the_pcc_beside_an_open_tie_reads_open():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))               # grid_supply sits on the PCC bus
+    assert "grid_supply" in n.generators.index and n.generators.at["grid_supply", "bus"] == "grid"
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc["tie_open"].all()
+
+
+def test_r2_the_same_grid_generator_with_no_link_reads_closed():
+    from gridspine.producers.campus import pcc_tie_open
+
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    campus = draft_campus(n).spec
+    n.remove("Link", "grid_import")
+    n.links_t.p0 = n.links_t.p0.drop(columns="grid_import", errors="ignore")
+    n.links_t.p1 = n.links_t.p1.drop(columns="grid_import", errors="ignore")
+    n.links_t.p_max_pu = n.links_t.p_max_pu.drop(columns="grid_import", errors="ignore")
+    assert not pcc_tie_open(n, "grid").any()
+    _, pcc = campus_hourly(n, campus)
+    assert not pcc["tie_open"].any()
+
+
+def test_r2_an_open_tie_beside_a_conducting_link_reads_closed():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    n.add("Bus", "dc", v_nom=20.0, carrier="DC")
+    n.add("Link", "converter", bus0="grid", bus1="dc", p_nom=2.0)    # a local converter, can conduct
+    n.links_t.p0["converter"] = 0.0
+    n.links_t.p1["converter"] = 0.0
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
