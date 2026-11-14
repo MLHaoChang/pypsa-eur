@@ -58,7 +58,7 @@ function SourceSelect({ line, opts, onChange, invalid, label }: {
   const known = current === 'typed' || current.startsWith('share_of:')
     || outputs.some(o => linkedSource(o.id, opts?.catalogue_version ?? '1') === current)
   return (
-    <select aria-label={label} className={CELL + (invalid ? BAD : '')} value={current}
+    <select aria-label={label} className={CELL + ' max-w-[11rem]' + (invalid ? BAD : '')} value={current}
             aria-invalid={invalid || undefined} onChange={e => onChange(e.target.value)}>
       <option value="typed">Typed</option>
       {outputs.length > 0 && (
@@ -444,8 +444,8 @@ export default function BusinessCaseLines() {
         <p className="text-muted" data-testid="bc-outputs-reason">
           Model outputs are not offered now: {OUTPUTS_REASON_WORDS[opts.outputs_reason] ?? words(opts.outputs_reason)}.</p>
       )}
-      <div className="flex flex-wrap gap-3 items-start">
-        <div className="flex-1 min-w-0 overflow-x-scroll">
+      <div className="space-y-3">
+        <div className="min-w-0 overflow-x-scroll">
           {lines.length === 0 ? (
             <p className="text-muted py-2" data-testid="bc-empty">No lines yet: apply the preset or add a line.</p>
           ) : (
@@ -475,7 +475,7 @@ export default function BusinessCaseLines() {
                           <button type="button" className={ACTION + ' mr-1'} aria-expanded={open.has(i)}
                                   aria-label={`${open.has(i) ? 'Hide' : 'Show'} details of ${ln.name}`}
                                   onClick={() => toggle(i)}>{open.has(i) ? '▾' : '▸'}</button>
-                          <input aria-label={`Name, line ${i + 1}`} className={CELL + ' w-36' + (bad('name') ? BAD : '')}
+                          <input aria-label={`Name, line ${i + 1}`} className={CELL + ' w-32' + (bad('name') ? BAD : '')}
                                  maxLength={80} value={ln.name} aria-invalid={bad('name') ? true : undefined}
                                  onChange={e => setLine(i, { name: e.target.value })} />
                         </td>
@@ -486,7 +486,7 @@ export default function BusinessCaseLines() {
                           </select>
                         </td>
                         <td className="px-1">
-                          <select aria-label={`Category, ${ln.name}`} className={CELL + (bad('category') ? BAD : '')}
+                          <select aria-label={`Category, ${ln.name}`} className={CELL + ' max-w-[8rem]' + (bad('category') ? BAD : '')}
                                   aria-invalid={bad('category') ? true : undefined}
                                   value={ln.category} onChange={e => setLine(i, { category: e.target.value })}>
                             {(opts?.categories[ln.kind] ?? [ln.category]).map(c => <option key={c} value={c}>{words(c)}</option>)}
@@ -550,7 +550,7 @@ export default function BusinessCaseLines() {
                       {shown.length > 0 && (
                         <tr data-testid="bc-row-refusals">
                           <td colSpan={11} className="px-1 pb-1">
-                            <ul className="text-danger">
+                            <ul className="text-danger sticky left-0 max-w-[56rem]">
                               {shown.map((p, k) => (
                                 <li key={k} data-column={p.column}>
                                   {p.message}{' '}
@@ -567,7 +567,9 @@ export default function BusinessCaseLines() {
                       {open.has(i) && (
                         <tr>
                           <td colSpan={11} className="px-1 pb-2">
+                            <div className="sticky left-0 max-w-[56rem]">
                             <Details line={ln} placed={here} years={yearsOf(ln, horizon)} set={p => setLine(i, p)} />
+                            </div>
                           </td>
                         </tr>
                       )}
@@ -592,7 +594,7 @@ export default function BusinessCaseLines() {
           )}
           {dirty && <p className="text-muted" data-testid="bc-unsaved">Unsaved changes: save to check the lines.</p>}
         </div>
-        <div className="w-64 shrink-0">
+        <div className="max-w-xl">
           <LockedRows locked={study.data?.report?.locked ?? null} ran={ran} />
         </div>
       </div>

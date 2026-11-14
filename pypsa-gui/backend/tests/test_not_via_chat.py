@@ -66,6 +66,7 @@ def test_the_issue_rows_are_declared():
         'accept_assumed_defaults': ('unbuilt', None),
         'intent_comparison': ('unbuilt', None),
         'business_case': ('out of chat', None),  # 08b: only the preset (GK B (54) Q3, D8)
+        'business_case_table_options': ('unbuilt', None),  # 09: the line table's options (issue 16)
         'dc_backup': ('unbuilt', None),
         'dc_architecture': ('unbuilt', None),
         'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),
@@ -244,3 +245,13 @@ def test_saved_report_charts_are_human_only_and_found_by_their_goal(discovery):
 def test_a_real_chart_pin_phrase_is_still_refused(discovery):
     out = chat_tools.find_capabilities('Which charts are pinned to the report?')
     assert out['not_via_chat'][0]['title'] == 'Saving a chart for the report'
+
+
+def test_the_line_table_options_hit_only_on_the_business_case():
+    """09: "units" alone is any unit question; the entry hits only with "business case"."""
+    from services.not_via_chat import matches
+
+    titles = lambda words: [m['title'] for m in matches(set(words), limit=5)]
+    assert 'Business case line options' not in titles({'what', 'units', 'is', 'p_nom', 'in'})
+    assert 'Business case line options' in titles({'business', 'case', 'units', 'for', 'line'})
+    assert 'Business case line options' not in titles({'business', 'as', 'usual', 'units'})

@@ -19,8 +19,10 @@ The line table (09) reads two routes no chat tool serves yet:
 
 The assistant fills lines with `set_business_case_lines`, so without these reads it
 cannot offer only the units a source allows or name each refusal the table shows.
-Both are held here in the route-parity declarations until a tool serves them; the
-Guided question (14) may cover the preset.
+Both are held here in the route-parity declarations until a tool serves them. The
+options route is declared `unbuilt` in `services/not_via_chat.py`
+(`business_case_table_options`); the preset stays out of chat there by GK B (54) Q3,
+so this issue settles only its route-parity limitation for the preset.
 
 ## What to build
 
