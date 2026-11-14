@@ -27,7 +27,9 @@ Concurrency contract:
 
 Idempotency:
   * `add_upload(same_bytes)` returns the existing meta with the original
-    `uploaded_at` preserved (first-writer wins).
+    `uploaded_at` preserved (first-writer wins) — except an `agent_export`
+    re-exported as one: that is a fresh delivery, so its `uploaded_at` moves
+    to now (LC48A-TTL-1) and it lists as the newest upload.
   * `delete_upload(missing)` returns success-style no-op via the caller's
     DeleteUploadResponse contract — `add_upload` semantics are dedup,
     `delete_upload` semantics are tombstone.
@@ -42,6 +44,7 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import logging
+import math
 import os
 import pathlib
 import re
@@ -303,6 +306,38 @@ def _upload_not_found(name: str, file_id: str) -> HTTPException:
     )
 
 
+# A copilot delivery (an `agent_export` file and its download link) lives 7 days
+# from when it was made or last re-exported (owner decision LC48A-TTL-1). After
+# that the delivery tools and the download refuse it 410 delivery_expired; the
+# file stays on disk, and exporting the same content again makes a fresh one.
+DELIVERY_TTL_SECONDS = 7 * 24 * 3600
+
+
+def refuse_expired_delivery(meta: UploadMeta, *, now: float | None = None) -> None:
+    """Raise 410 `delivery_expired` for an `agent_export` older than the TTL.
+
+    Other kinds (the person's own uploads, templates, round-trip copies) never
+    expire. Nothing is written or deleted.
+    """
+    if meta.kind != "agent_export":
+        return
+    age = (time.time() if now is None else now) - meta.uploaded_at
+    # A non-finite age (a NaN or infinite recorded time) is not a known-fresh
+    # delivery, so it reads as expired: `NaN > TTL` alone would serve it forever.
+    if not math.isfinite(age) or age > DELIVERY_TTL_SECONDS:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "error_kind": "delivery_expired",
+                "message": (
+                    f"'{meta.filename}' was delivered more than 7 days ago and "
+                    "its download has expired."
+                ),
+                "hint": "export it again for a fresh delivery",
+            },
+        )
+
+
 def _file_id_for(blob_bytes: bytes) -> tuple[str, str]:
     """Return (file_id_short, sha256_full) for `blob_bytes`."""
     h = hashlib.sha256(blob_bytes).hexdigest()
@@ -472,6 +507,11 @@ def add_upload(
                 _atomic_write_meta(meta_path, existing)
             if assurance_sha256 is not None and existing.assurance_sha256 != assurance_sha256:
                 existing = existing.model_copy(update={"assurance_sha256": assurance_sha256})
+                _atomic_write_meta(meta_path, existing)
+            if kind == "agent_export" and existing.kind == "agent_export":
+                # Exporting the same content again is a fresh delivery: its
+                # 7-day clock restarts (LC48A-TTL-1).
+                existing = existing.model_copy(update={"uploaded_at": time.time()})
                 _atomic_write_meta(meta_path, existing)
             _note_upload(existing)
             return existing

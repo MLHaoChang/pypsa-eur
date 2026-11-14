@@ -1339,8 +1339,8 @@ def _mg_single_meta(planning: Planning | None = None) -> dict:
              "note": "eh_staged_hubs._mg_island_single_year (UX review N2, decision F); the "
                      "island checks and the report's islanding chapter read it"},
             {"item": "island unit data",
-             "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 4 %, "
-                      "tau_f 0.1 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), "
+             "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 2 %, "
+                      "tau_f 0.3 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), "
                       "pf 0.95; sustained 24 h, bridge 600 s",
              "source": "assumed",
              "note": "demo values copied from the staged microgrid, not from a datasheet or a "

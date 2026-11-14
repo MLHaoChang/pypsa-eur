@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from harness.gate_words import rule_words
 from services.reports import formatting as F
 
 SECTION_ID = "harness_run"
@@ -57,7 +58,7 @@ def gates_rows(run: dict) -> list[list[str]]:
                 [
                     name,
                     stage.get("status", ""),
-                    r.get("rule", ""),
+                    rule_words(r.get("rule", "")),
                     r.get("verdict", ""),
                     f"{fact.get('fact', '')} = {_text(fact.get('value'))}"
                     + (f" {fact['unit']}" if fact.get("unit") else ""),
