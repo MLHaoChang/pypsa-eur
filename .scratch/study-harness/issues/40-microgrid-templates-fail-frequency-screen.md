@@ -3,7 +3,7 @@
 
 # 40 — The shipped microgrid templates fail the island frequency screen
 
-Status: ready-for-agent
+Status: done (#1486)
 Size: M
 Blocked by: none
 Gated: GK A
