@@ -200,6 +200,9 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - An evidence or probe record that a later gate will trust binds a digest of the exact configuration that gate checks, plus the code version (#1483 F3, GK B (55)).
 - A lock test that wraps lock entry pins only "the read comes after entry". When the property is "held across the whole read-modify-write", a second writer hooked inside the read must be shown to wait (#1479, GK B (55)).
 - A parity or "unchanged vs master" fixture compares exactly (==); a relative tolerance on values that should be bit-equal hides drift (#1466 F1, GK B (55)).
+- A `not_via_chat` word that is also a component name (`store`) counts only in its verb position; the component asks are tested as non-hits (#1480, GK B (56)).
+- A persisted timestamp or number that a gate compares is checked with `isfinite`: `NaN > limit` is False, so the gate fails open (#1505, GK B (56)).
+- A template's committed sidecar hash is written only by its generator, and native byte-identity holds (#1492, GK B (56)).
 - A cache keyed on a revision is safe only if every writer of a hashed input moves the key after its write. A bump before the handler lets a poll cache the pre-edit state (#1464 F1, GK B (53)).
 - A polled freshness read never blocks on the mutation lock, and never reports stale only because the lock was held (#1464 F2, GK B (53)).
 - A typed refusal's status code is pinned by test wherever a manifest row claims it (#1452 I1, GK B (53)).
