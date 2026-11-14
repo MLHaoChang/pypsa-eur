@@ -61,12 +61,12 @@ def _b64url(data: bytes) -> str:
 
 
 def sign_token(
-    *, api_key: str, api_secret: str, identity: str, ttl_s: int, video: dict, now: float
+    *, key_id: str, api_secret: str, identity: str, ttl_s: int, video: dict, now: float
 ) -> str:
     """An HS256 LiveKit access token (the format the LiveKit server SDKs mint)."""
     header = {"alg": "HS256", "typ": "JWT"}
     claims = {
-        "iss": api_key,
+        "iss": key_id,
         "sub": identity,
         "nbf": int(now) - 5,
         "exp": int(now) + int(ttl_s),
@@ -86,7 +86,9 @@ def sign_token(
 @dataclass(frozen=True)
 class LiveKitConfig:
     url: str  # wss://<project>.livekit.cloud, the browser's signalling URL
-    api_key: str
+    # LiveKit's "API key": a public key id that goes into the token's `iss` claim,
+    # not a credential. The credential is `api_secret`, which only keys the HMAC.
+    key_id: str
     api_secret: str
     agent_name: str = ""  # empty: no worker dispatch (connectivity probe only)
 
@@ -119,7 +121,7 @@ class LiveKitTransport:
         client_factory: SyncClientFactory = default_sync_client,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        if not config.api_key or not config.api_secret:
+        if not config.key_id or not config.api_secret:
             raise LiveMediaError(
                 "not_configured", "The media service is not configured.", 503
             )
@@ -139,7 +141,7 @@ class LiveKitTransport:
 
     def _admin_token(self, video: dict) -> str:
         return sign_token(
-            api_key=self._config.api_key,
+            key_id=self._config.key_id,
             api_secret=self._config.api_secret,
             identity="pypsa-gui-server",
             ttl_s=ADMIN_TOKEN_TTL_S,
@@ -162,7 +164,7 @@ class LiveKitTransport:
             "canUpdateOwnMetadata": False,
         }
         token = sign_token(
-            api_key=self._config.api_key,
+            key_id=self._config.key_id,
             api_secret=self._config.api_secret,
             identity=identity,
             ttl_s=ttl,

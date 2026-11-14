@@ -88,9 +88,7 @@ class LiveKitApi:
 
 
 def livekit(api: LiveKitApi, agent: str = "pypsa-audio") -> LiveKitTransport:
-    config = LiveKitConfig(
-        url=WSS, api_key=API_KEY, api_secret=SECRET, agent_name=agent
-    )
+    config = LiveKitConfig(url=WSS, key_id=API_KEY, api_secret=SECRET, agent_name=agent)
     return LiveKitTransport(config, client_factory=api.factory)
 
 
@@ -205,7 +203,7 @@ def test_livekit_timeout_is_typed():
         return httpx.Client(transport=httpx.MockTransport(respond))
 
     transport = LiveKitTransport(
-        LiveKitConfig(url=WSS, api_key=API_KEY, api_secret=SECRET),
+        LiveKitConfig(url=WSS, key_id=API_KEY, api_secret=SECRET),
         client_factory=factory,
     )
     with pytest.raises(lm.LiveMediaError) as err:
@@ -238,7 +236,7 @@ def test_livekit_close_is_idempotent_and_raises_real_failures():
 )
 def test_livekit_refuses_unsafe_urls(url):
     with pytest.raises(lm.LiveMediaError) as err:
-        LiveKitTransport(LiveKitConfig(url=url, api_key=API_KEY, api_secret=SECRET))
+        LiveKitTransport(LiveKitConfig(url=url, key_id=API_KEY, api_secret=SECRET))
     assert err.value.kind == "not_configured"
 
 
@@ -690,7 +688,7 @@ def test_livekit_create_room_timeout_deletes_the_room_best_effort():
         return httpx.Client(transport=httpx.MockTransport(respond))
 
     transport = LiveKitTransport(
-        LiveKitConfig(url=WSS, api_key=API_KEY, api_secret=SECRET),
+        LiveKitConfig(url=WSS, key_id=API_KEY, api_secret=SECRET),
         client_factory=factory,
     )
     with pytest.raises(lm.LiveMediaError) as err:
@@ -710,7 +708,7 @@ def test_livekit_connect_error_is_typed():
         return httpx.Client(transport=httpx.MockTransport(respond))
 
     transport = LiveKitTransport(
-        LiveKitConfig(url=WSS, api_key=API_KEY, api_secret=SECRET),
+        LiveKitConfig(url=WSS, key_id=API_KEY, api_secret=SECRET),
         client_factory=factory,
     )
     with pytest.raises(lm.LiveMediaError) as err:
@@ -754,14 +752,14 @@ def test_livekit_close_and_open_check_names_and_types_before_calling():
 )
 def test_livekit_refuses_credentials_or_fragments_in_the_url(url):
     with pytest.raises(lm.LiveMediaError) as err:
-        LiveKitTransport(LiveKitConfig(url=url, api_key=API_KEY, api_secret=SECRET))
+        LiveKitTransport(LiveKitConfig(url=url, key_id=API_KEY, api_secret=SECRET))
     assert err.value.kind == "not_configured"
 
 
 @pytest.mark.parametrize("key,secret", [("", SECRET), (API_KEY, "")])
 def test_livekit_needs_key_and_secret(key, secret):
     with pytest.raises(lm.LiveMediaError) as err:
-        LiveKitTransport(LiveKitConfig(url=WSS, api_key=key, api_secret=secret))
+        LiveKitTransport(LiveKitConfig(url=WSS, key_id=key, api_secret=secret))
     assert err.value.kind == "not_configured"
 
 
@@ -1077,7 +1075,7 @@ def test_livekit_rejects_an_invalid_agent_name():
     with pytest.raises(lm.LiveMediaError) as err:
         LiveKitTransport(
             LiveKitConfig(
-                url=WSS, api_key=API_KEY, api_secret=SECRET, agent_name="bad name"
+                url=WSS, key_id=API_KEY, api_secret=SECRET, agent_name="bad name"
             )
         )
     assert err.value.kind == "not_configured"
