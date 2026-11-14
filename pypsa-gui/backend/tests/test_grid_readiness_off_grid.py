@@ -231,6 +231,37 @@ def test_a_label_alone_keeps_the_rows_judged_with_a_note(tmp_path):
     assert G.CONN_LABEL_ONLY == "labelled off-grid, but the connection can import"
 
 
+def _no_link(n):
+    n.remove("Link", "grid_import")
+    return n
+
+
+def _kept(out):
+    conn = _conn_ids(out)
+    assert {"ramp_rate", "oscillation"} <= conn <= {r["id"] for r in out["rows"]}
+    assert G.CONN_OFF_GRID not in {e["reason"] for e in out["excluded"]}
+    return {r["id"]: r for r in out["rows"]}, conn
+
+
+def test_off_grid_with_no_import_link_keeps_the_rows(tmp_path):
+    # GK A (#1516): no connection element found is not an open tie.
+    _kept(G.grid_readiness(_off_grid(tmp_path), _no_link(_site()), PROFILE))
+
+
+def test_off_grid_with_a_line_to_the_grid_keeps_the_rows(tmp_path):
+    # The tie Link is open, but a Line joins the PCC to the campus, so the island can import.
+    n = _open_tie(_site())
+    n.add("Line", "grid_line", bus0="grid", bus1="mv", x=0.1, r=0.01, s_nom=60.0)
+    rows, conn = _kept(G.grid_readiness(_off_grid(tmp_path), n, PROFILE))
+    assert all(rows[i]["note"].endswith(G.CONN_LABEL_ONLY) for i in conn)
+
+
+def test_off_grid_with_a_grid_generator_at_the_poc_and_no_link_keeps_the_rows(tmp_path):
+    n = _no_link(_site())
+    n.add("Generator", "grid_supply", bus="grid", carrier="grid", p_nom=60.0)
+    _kept(G.grid_readiness(_off_grid(tmp_path), n, PROFILE))
+
+
 def test_off_grid_with_no_saved_network_keeps_the_rows(tmp_path):
     out = G.grid_readiness(_off_grid(tmp_path), None, PROFILE)
     rows = {r["id"]: r for r in out["rows"]}

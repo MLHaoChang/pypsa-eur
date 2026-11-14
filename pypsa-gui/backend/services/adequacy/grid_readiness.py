@@ -1753,14 +1753,21 @@ CONN_BUILDERS = frozenset({_peak_rows, _ramp_row, _oscillation_row})
 
 
 def _tie_open(inp: _Inputs) -> bool:
-    """True when the saved network has no conducting connection: every import
-    Link is held at 0 MW in every hour (SH 40's normally-open-tie rule). No
-    saved network reads False, so the rows stay judged (fail closed)."""
-    if inp.n is None:
+    """True when the saved network shows the connection open: at least one bus
+    is marked as the PoC, each is joined to the campus by Links alone, with at
+    least one Link, every one held at 0 MW in every hour, and no Line or
+    Transformer at it (SH 40's structural PCC rule, `_open_tie_rating`); and
+    every import Link is held at 0 MW too. No saved network, no PoC, no Link at
+    a PoC, or a conducting path reads False, so the rows stay judged (fail
+    closed, GK A #1516)."""
+    n = inp.n
+    if n is None or "eh_poc" not in n.buses.columns:
         return False
-    from gridspine.producers.campus import _never_conducts
+    from gridspine.producers.campus import _never_conducts, _open_tie_rating
 
-    return all(_never_conducts(inp.n, x) for x in inp.links)
+    pocs = [b for b in n.buses.index if _truthy(n.buses.at[b, "eh_poc"])]
+    return (bool(pocs) and all(_open_tie_rating(n, b) for b in pocs)
+            and all(_never_conducts(n, x) for x in inp.links))
 
 
 def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
@@ -1787,7 +1794,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
         why = {**dict.fromkeys(sk_built, SK_OFF_GRID), **dict.fromkeys(_VS, VS_OFF_GRID)}
         if _tie_open(inp):
             why.update(dict.fromkeys(conn_built, CONN_OFF_GRID))
-        elif inp.n is not None:
+        elif inp.links:
             for r in rows:
                 if r["id"] in conn_built:
                     r["note"] = f"{r['note']}; {CONN_LABEL_ONLY}" if r.get("note") else CONN_LABEL_ONLY
