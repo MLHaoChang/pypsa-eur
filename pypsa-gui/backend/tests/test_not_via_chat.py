@@ -65,7 +65,6 @@ def test_the_issue_rows_are_declared():
         'site_scene': ('unbuilt', 'map'),
         'accept_assumed_defaults': ('unbuilt', None),
         'intent_comparison': ('unbuilt', None),
-        'business_case': ('out of chat', None),  # 08b: only the preset (GK B (54) Q3, D8)
         'dc_backup': ('unbuilt', None),
         'dc_architecture': ('unbuilt', None),
         'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),
@@ -115,8 +114,6 @@ def test_the_issue_rows_are_declared():
     ('Why is the LCOE KPI not shown in the strip?', 'results_headline_strip'), ('Add a KPI to the strip', 'results_headline_strip'),
     ('Hide the headline strip', 'results_headline_strip'), ('What does the headline strip show?', 'results_headline_strip'),
     # BC 08b (GK B (54) D8): only the preset is out of chat.
-    ('Apply the business case preset', 'business_case'),
-    ('Fill the business case from the template preset', 'business_case'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -127,6 +124,8 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
 
 @pytest.mark.parametrize('goal', [
     'get_component_schema', 'run the simulation', 'show the load flow results', 'parameter changes chart delivery',
+    # Business case 14 (GK B (56) B7): the preset is a chat tool now (apply_business_case_preset).
+    'Apply the business case preset', 'Fill the business case from the template preset',
     'Change the storage cost to 150', 'Read the capex from this PDF datasheet', 'Set the coordinates of bus 3',
     'What are the key cost drivers', 'Add a user-defined carrier', 'Attach the TOU tariff to the grid connection',
     'Import a URDB tariff', 'List the tariffs in the library', 'Upload this CSV as the load profile',
