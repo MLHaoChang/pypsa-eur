@@ -575,12 +575,16 @@ CLOSING_MARKER = ".closing"
 # cascade delete closes each target in turn (up to `COPY_LOCK_TIMEOUT_S`
 # each), so the bound leaves room for a large tree of busy scenarios.
 CLOSING_STALE_S = 600
+# A report job's on-disk record while it runs (LC48B-RESUME-1): written when
+# the job starts, removed when it ends, so one left behind marks a job a
+# restart interrupted. Local to this directory: never copied or exported.
+JOB_MARKER = ".job.json"
 
 
 def is_lock_artifact(name: str) -> bool:
-    """Whether a name in `reports/` is a report lock file or the closing
-    marker: never data, never copied (study harness 07e, 07f)."""
-    return name == CLOSING_MARKER or _lock_file_id(name) is not None
+    """Whether a name in `reports/` is a report lock file, the closing marker
+    or the job marker: never data, never copied (study harness 07e, 07f)."""
+    return name in (CLOSING_MARKER, JOB_MARKER) or _lock_file_id(name) is not None
 
 
 def _closing_active(root: pathlib.Path) -> bool:

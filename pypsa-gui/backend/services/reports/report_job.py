@@ -34,6 +34,7 @@ import logging
 import pathlib
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import Any
@@ -134,6 +135,8 @@ class ReportJob:
     strict: bool = False
     # (task path, boot): the run whose lease admits each send (C4, issue 24).
     run_binding: tuple[pathlib.Path, str] | None = None
+    # The token of this job's on-disk marker, set by `_launch` (LC48B-RESUME-1).
+    marker_token: str | None = None
 
 
 # ── preparation ─────────────────────────────────────────────────────────────
@@ -447,6 +450,17 @@ def _publish_report_evidence(record: dict[str, Any]) -> None:
         pass
 
 
+def _finish(job: ReportJob | MappingJob, **updates: Any) -> None:
+    """Publish a terminal status, after the job's on-disk marker is gone: a
+    record that reads finished never has a marker behind it that a restart
+    would read as interrupted (LC48B-RESUME-1)."""
+    with _SLOT_LOCK:
+        _clear_job_marker(job.project_dir, job.marker_token)
+    with job.lock:
+        job.record.update(updates)
+        _publish_report_evidence(job.record)
+
+
 def _set(job: ReportJob, **updates: Any) -> None:
     with job.lock:
         job.record.update(updates)
@@ -692,7 +706,7 @@ def run_report_job(job: ReportJob) -> ReportDocument:
         # Terminal status lets clients consume the generation receipt or
         # start another job, so publish it only after that receipt is saved.
         _write_generation_meta(job, aborted=aborted)
-        _set(job, status="aborted" if aborted else "done", version=version,
+        _finish(job, status="aborted" if aborted else "done", version=version,
              error=None, finished_at=time.time())
         return saved
     except Exception as exc:
@@ -709,7 +723,7 @@ def run_report_job(job: ReportJob) -> ReportDocument:
                            if job.meta_updates else [])]
             error = (f"version {version} was saved, but not all of its "
                      f"{', '.join(unwritten)} were written: {exc}")
-        _set(job, status="failed", error=error, finished_at=time.time(), **fields)
+        _finish(job, status="failed", error=error, finished_at=time.time(), **fields)
         raise
     finally:
         if isinstance(job.provider, RunSends):
@@ -761,6 +775,7 @@ class MappingJob:
     record: dict[str, Any]
     stop_event: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    marker_token: str | None = None
 
 
 def prepare_mapping_job(*, project_name: str, project_dir: pathlib.Path,
@@ -805,10 +820,8 @@ def run_mapping_job(job: MappingJob) -> dict[str, Any] | None:
 
     try:
         if job.stop_event.is_set():
-            with job.lock:
-                job.record.update(status="aborted", finished_at=time.time(),
-                                  progress={"done": 0, "total": 1, "current": None})
-                _publish_report_evidence(job.record)
+            _finish(job, status="aborted", finished_at=time.time(),
+                    progress={"done": 0, "total": 1, "current": None})
             return None
         base = {"model": job.model, "max_tokens": job.max_tokens,
                 "system_blocks": system_blocks()}
@@ -829,15 +842,11 @@ def run_mapping_job(job: MappingJob) -> dict[str, Any] | None:
         raw = proposed.model_dump() if hasattr(proposed, "model_dump") else dict(proposed)
         plan, _notes = templates.sanitise_plan(raw, job.outline, job.document)
         store.update_meta(job.project_dir, job.report_id, mapping_plan=plan)
-        with job.lock:
-            job.record.update(status="done", error=None, finished_at=time.time(),
-                              progress={"done": 1, "total": 1, "current": None})
-            _publish_report_evidence(job.record)
+        _finish(job, status="done", error=None, finished_at=time.time(),
+                progress={"done": 1, "total": 1, "current": None})
         return plan
     except Exception as exc:
-        with job.lock:
-            job.record.update(status="failed", error=str(exc), finished_at=time.time())
-            _publish_report_evidence(job.record)
+        _finish(job, status="failed", error=str(exc), finished_at=time.time())
         raise
 
 
@@ -847,6 +856,70 @@ _SLOT_LOCK = threading.Lock()
 _ACTIVE: dict[str, Any] | None = None
 # The running job's project directory, kept off the wire record (07f).
 _ACTIVE_DIR: pathlib.Path | None = None
+
+
+# ── the job marker (LC48B-RESUME-1) ─────────────────────────────────────────
+
+
+def _marker_path(project_dir: pathlib.Path) -> pathlib.Path:
+    return store.reports_dir(project_dir) / store.JOB_MARKER
+
+
+def _write_job_marker(project_dir: pathlib.Path, record: dict[str, Any]) -> str | None:
+    """Persist the running job's record; returns the token that owns it. A
+    write that fails is logged and the job runs on: only the interrupted
+    reading after a restart is lost."""
+    token = uuid.uuid4().hex
+    path = _marker_path(project_dir)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(path, json.dumps({
+            "status": "running", "report_id": record.get("report_id"),
+            "mode": record.get("mode"), "started_at": record.get("started_at"),
+            "token": token}))
+    except OSError as exc:
+        logger.warning("report job marker not written for %s: %s", project_dir, exc)
+        return None
+    return token
+
+
+def _read_job_marker(project_dir: pathlib.Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(_marker_path(project_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _clear_job_marker(project_dir: pathlib.Path, token: str | None) -> None:
+    """Remove the marker if this job's token still owns it (a later job's is
+    left alone). Called under `_SLOT_LOCK`, the lock `_launch` writes under."""
+    if token is None:
+        return
+    marker = _read_job_marker(project_dir)
+    if marker is None or marker.get("token") != token:
+        return
+    try:
+        _marker_path(project_dir).unlink(missing_ok=True)
+    except OSError as exc:
+        # One left reading `running` would read interrupted after a restart
+        # (GK B N1): mark it ended instead, and log if that fails too.
+        logger.warning("report job marker not removed for %s: %s", project_dir, exc)
+        try:
+            atomic_write_text(_marker_path(project_dir), json.dumps({**marker, "status": "ended"}))
+        except OSError as again:
+            logger.warning("report job marker not marked ended for %s: %s", project_dir, again)
+
+
+def interrupted_job(project_dir: pathlib.Path) -> dict[str, Any] | None:
+    """The job a restart interrupted in `project_dir`: a marker that still
+    reads running while this process runs no job for the directory. The
+    caller asks only when this process has no job record. None otherwise."""
+    marker = _read_job_marker(project_dir)
+    if marker is None or marker.get("status") != "running" or running_for(project_dir):
+        return None
+    return {"status": "interrupted", "report_id": marker.get("report_id"),
+            "mode": marker.get("mode"), "started_at": marker.get("started_at")}
 
 
 def record_is_running(record: dict[str, Any] | None) -> bool:
@@ -906,11 +979,16 @@ def _launch(*, prepare, run, lock: threading.Lock, state: dict[str, Any]) -> str
             if store.reports_closing(job.project_dir):
                 raise store.ReportBusy("the project is being deleted or moved")
 
+            token = job.marker_token = _write_job_marker(job.project_dir, job.record)
+
             def worker() -> None:
                 try:
                     run(job)
                 except Exception:  # noqa: BLE001 — recorded on the job
                     logger.exception("report job %s failed", job.report_id)
+                finally:
+                    with _SLOT_LOCK:
+                        _clear_job_marker(job.project_dir, token)
 
             ctx = contextvars.copy_context()
             thread = threading.Thread(target=lambda: ctx.run(worker),
@@ -926,6 +1004,7 @@ def _launch(*, prepare, run, lock: threading.Lock, state: dict[str, Any]) -> str
                 state["report_job"] = None
                 _ACTIVE = None
                 _ACTIVE_DIR = None
+                _clear_job_marker(job.project_dir, token)
                 raise
     return job.report_id
 
