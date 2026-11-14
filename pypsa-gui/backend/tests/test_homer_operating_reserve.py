@@ -16,6 +16,7 @@ from services.solver.operating_reserve import (
     _AUX,
     _label,
     ROW,
+    SHARES,
     _wrap_with_operating_reserve,
     assets,
     infeasibility_lines,
@@ -833,3 +834,29 @@ def test_wind_is_a_wind_carrier_that_is_not_also_pv():
         n.add("Generator", c, bus="ac", carrier=c, p_nom=5.0)
     sel = assets(n)
     assert sel["wind"] == [] and "solar-wind" in sel["pv"], sel
+
+
+# ── 01b-2 (UX 21 ask 4): the chat edit card and the panel use one label ──
+
+
+def test_the_chat_edit_card_reserve_labels_match_the_panel():
+    import re
+    from pathlib import Path
+
+    from harness.edit_card import _SHARES, _SOLVER_WORDS
+
+    tsx = (
+        Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "src"
+        / "pages"
+        / "solver"
+        / "OffGridConstraints.tsx"
+    ).read_text()
+    block = re.search(r"RESERVE_LABELS = \{(.*?)\} as const", tsx, re.S).group(1)
+    panel = dict(re.findall(r"(reserve_share_\w+): '([^']+)'", block))
+    assert sorted(panel) == sorted(SHARES)
+    for key, shown in panel.items():
+        label, _unit, _words = _SOLVER_WORDS[key]
+        assert key in _SHARES  # the card shows it in %
+        assert shown == f"{label} (%)"
