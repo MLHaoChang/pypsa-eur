@@ -43,9 +43,26 @@ def test_nouns_are_unique_within_a_profile():
 
 
 def test_gates_table_cell_uses_words():
-    run = {"stages": {"result_gate": {"status": "passed", "gate": {"rules": [
-        {"rule": "mg.fuel.autonomy", "verdict": "met", "facts": [{"fact": "f", "value": 1}]},
-        {"rule": "zz.new.rule", "verdict": "met", "facts": [{"fact": "f", "value": 1}]},
-    ]}}}}
+    run = {
+        "stages": {
+            "result_gate": {
+                "status": "passed",
+                "gate": {
+                    "rules": [
+                        {
+                            "rule": "mg.fuel.autonomy",
+                            "verdict": "met",
+                            "facts": [{"fact": "f", "value": 1}],
+                        },
+                        {
+                            "rule": "zz.new.rule",
+                            "verdict": "met",
+                            "facts": [{"fact": "f", "value": 1}],
+                        },
+                    ]
+                },
+            }
+        }
+    }
     cells = [row[2] for row in harness_chapter.gates_rows(run)]
     assert cells == ["Fuel autonomy", "Unnamed check"]
