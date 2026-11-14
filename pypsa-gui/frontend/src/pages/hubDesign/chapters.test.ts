@@ -93,6 +93,10 @@ describe('chapterTiles', () => {
       verdict: { state: 'stale', broken: [] } } } as never,
       report: { npv_at_wacc: 5e6 } as never } })
     expect(stale.investment.state).toBe('stale')
+    // PG-05: the verdict alone decides; the old top-level flag is not OR'd in
+    const fresh = byId({ ...NONE, investment: { study: { status: 'done', stale: true, report: { present: true,
+      stale: false, verdict: { state: 'fresh', broken: [] } } } as never, report: { npv_at_wacc: 5e6 } as never } })
+    expect(fresh.investment.state).toBe('ready')
     const refused = byId({ ...NONE, investment: { study: { status: 'refused',
       message: 'no owner assets' } as never, report: null } })
     expect(refused.investment).toMatchObject({ state: 'unavailable' })
