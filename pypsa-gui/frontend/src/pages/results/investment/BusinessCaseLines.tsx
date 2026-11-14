@@ -17,6 +17,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { openPanel } from '../openPanel'
 import { ACTION } from './actionStyle'
+import BusinessCaseRun from './BusinessCaseRun'
 import { NumInput } from './NumInput'
 import {
   blankLine, edited, hintUnitWords, priceUnitWords, unitWords, linkedSource, OUTPUTS_REASON_WORDS,
@@ -264,7 +265,9 @@ export default function BusinessCaseLines() {
   const optionsKey = nk(project, 'results', 'business_case', 'options')
   const inputs = useQuery({ queryKey: inputsKey, queryFn: () => businessCaseApi.getInputs() })
   const options = useQuery({ queryKey: optionsKey, queryFn: () => businessCaseApi.getOptions() })
-  const study = useQuery({ queryKey: nk(project, 'results', 'business_case'), queryFn: () => businessCaseApi.getStudy() })
+  const studyKey = nk(project, 'results', 'business_case')
+  const study = useQuery({ queryKey: studyKey, queryFn: () => businessCaseApi.getStudy(),
+                           refetchInterval: q => (q.state.data?.status === 'running' ? 2000 : false) })
   const [draft, setDraft] = useState<BusinessCaseConfig | null | undefined>(undefined)
   const [digest, setDigest] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -302,7 +305,14 @@ export default function BusinessCaseLines() {
   const names = lines.map(l => l.name)
   const currency = (study.data?.report?.currency as string | undefined) ?? null
   const setLines = (next: LineItem[]) => {
-    setDraft(d => ({ ...(d ?? {}), inputs: { ...(d?.inputs ?? {}), lines: next } }))
+    // A break-even line must name a revenue line (the validator's rule): one renamed,
+    // retyped or removed leaves the choice empty rather than a refused save.
+    setDraft(d => {
+      const be = d?.break_even_line ?? null
+      const keep = be !== null && next.some(l => l.name === be && l.kind === 'revenue')
+      return { ...(d ?? {}), ...(be !== null && !keep ? { break_even_line: null } : {}),
+               inputs: { ...(d?.inputs ?? {}), lines: next } }
+    })
     setDirty(true); setRejected([]); setMessage(null)
   }
   const setLine = (i: number, patch: Partial<LineItem>) =>
@@ -618,7 +628,24 @@ export default function BusinessCaseLines() {
           </span>
         )}
       </div>
+      <BusinessCaseRun
+        study={study.data ?? null} studyKey={studyKey}
+        disabledReason={runOffReason(dirty, lines.length, (opts?.refusals ?? []).length)}
+        revenueLines={lines.filter(l => l.kind === 'revenue').map(l => l.name)}
+        breakEvenLine={draft?.break_even_line ?? null}
+        onBreakEvenLine={name => {
+          setDraft(d => ({ ...(d ?? { inputs: { lines: [] } }), break_even_line: name }) as BusinessCaseConfig)
+          setDirty(true); setMessage(null)
+        }} />
     </div>
   )
+}
+
+/** Why Run is off, in words beside it (UX 5); null when it can run. */
+function runOffReason(dirty: boolean, lineCount: number, refused: number): string | null {
+  if (dirty) return 'Save the lines to run.'
+  if (lineCount === 0) return 'Add a line to run.'
+  if (refused > 0) return `Fix the ${refused === 1 ? 'refused line' : `${refused} refusals`} above to run.`
+  return null
 }
 

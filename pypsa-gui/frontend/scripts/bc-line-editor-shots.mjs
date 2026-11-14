@@ -64,7 +64,38 @@ const REPORT = { status: 'done', report: { currency: 'EUR', basis: { id: 'projec
   locked: [{ stream: 'bill', key: 'energy_import', dropped: [], superseded_by: [] },
     { stream: 'export', key: 'grid_export', dropped: [[2030, 1], [2031, 1]], superseded_by: ['Hydrogen sales'] }] }, staleness: { stale: false } }
 
+// Business case 10: a run's report with a P&L and KPIs (a mixed-sign stream, a None tax).
+const YEARS = [2030, 2031, 2032, 2033, 2034, 2035]
+const ser = (...v) => YEARS.map((_, i) => v[i % v.length])
+const RUN_REPORT = { ...REPORT.report,
+  pnl: { years: YEARS,
+    streams: { product_revenue: ser(4.2e6, 4.4e6, -0.3e6), bill: ser(-1.9e6), export: ser(0.25e6), bc_staff: ser(-0.6e6) },
+    stream_class: { product_revenue: 'contract', bill: 'tariff', export: 'export', bc_staff: 'opex' },
+    stream_source: { product_revenue: 'line:revenue', bill: 'energy_model', export: 'energy_model', bc_staff: 'line:opex' },
+    rows: { revenue: ser(4.45e6, 4.65e6, 0.25e6), opex: ser(2.5e6), ebitda: ser(1.95e6, 2.15e6, -2.25e6), pass_through: ser(0),
+      revenue_net_of_pass_through: ser(4.45e6, 4.65e6, 0.25e6), ebitda_net_of_pass_through: ser(1.95e6, 2.15e6, -2.25e6),
+      ebitda_margin: ser(0.438, 0.462, null), terminal: ser(0), depreciation: ser(1.2e6), ebit: ser(0.75e6, 0.95e6, -3.45e6),
+      tax: null, net_income: null, capex: ser(0), stage_capex: ser(0), replacement: ser(0), grant: ser(0), credits: ser(0),
+      project_pre_tax: ser(1.95e6, 2.15e6, -2.25e6), project_post_tax: null, working_capital_change: null,
+      project_after_working_capital: null, fees: ser(0), debt_service: ser(0), draws: ser(0), reserve_interest: ser(0),
+      dsra_funding: ser(0), tax_equity: null, equity_pre_tax: null, equity_post_tax: null, equity_after_working_capital: null,
+      debt_established: false },
+    not_finite: [] },
+  kpis: {
+    project_npv: { value: null, status: 'not_established', reason: 'tax_not_established: corporate rate' },
+    project_irr: { value: null, status: 'not_established', reason: 'tax_not_established: corporate rate' },
+    equity_npv: { value: null, status: 'not_established', reason: 'debt_not_established' },
+    equity_irr: { value: null, status: 'not_established', reason: 'debt_not_established' },
+    payback_years: { value: null, status: 'not_established', reason: 'tax_not_established' },
+    min_dscr: { value: null, status: 'n/a', reason: 'no_debt' }, avg_dscr: { value: null, status: 'n/a', reason: 'no_debt' },
+    ebitda_margin_gross: { value: 0.31, status: 'ok', reason: null }, ebitda_margin_net: { value: 0.31, status: 'ok', reason: null },
+    revenue_per_capacity_gross: { value: null, status: 'not_established', reason: 'capacity_not_stated', unit: 'EUR/MW-year' },
+    revenue_per_capacity_net: { value: null, status: 'not_established', reason: 'capacity_not_stated', unit: 'EUR/MW-year' } },
+  break_even: { status: null, price: 3.85, price_scale: 0.86, money_year: 2025 } }
+const RAN = { status: 'done', report: RUN_REPORT, staleness: { stale: false, changed: [] } }
+
 // open: expand the named lines; wait: text to wait for; ran: GET business_case returns the report.
+// study: what GET business_case returns instead (10); run: scroll to the run section.
 const STATES = {
   'a-empty': { lines: [], status: 'not_set' },
   'b-template-lines': { lines: LINES(), narrow: true },
@@ -74,6 +105,10 @@ const STATES = {
   'e-expanded': { lines: LINES(), expand: 'Electrolyser plant' },
   'f-locked-before': { lines: LINES(), locked: true },
   'f-locked-after': { lines: LINES(), locked: true, ran: true },
+  'i-report': { lines: LINES(), narrow: true, run: true, study: RAN },
+  'j-running': { lines: LINES(), run: true, study: { status: 'running', stage: 'run_engine', stages: ['rebuild_ic_case', 'read_outputs', 'build', 'run_engine', 'break_even', 'store'], report: RUN_REPORT } },
+  'k-out-of-date': { lines: LINES(), run: true, study: { ...RAN, staleness: { stale: true, changed: ['investment_case'] } } },
+  'l-not-run': { lines: LINES(), run: true },
 }
 
 async function ensureStub() {
@@ -113,7 +148,7 @@ async function newPage(browser, mode, width, st, probe) {
     if (p === '/api/results/business_case/options') return ok(OPTIONS(st.refusals ?? null))
     if (p === '/api/results/business_case/preset') return ok({ template_id: 'eh_h2_hub', variants: { merchant: 'Merchant hub', contracted: 'Contracted offtake' },
       business_case: { inputs: { preset: 'eh_h2_hub.merchant@1', lines: LINES() } } })
-    if (p === '/api/results/business_case') return st.ran ? ok(REPORT) : r.fulfill({ status: 204, body: '' })
+    if (p === '/api/results/business_case') return st.study ? ok(st.study) : st.ran ? ok(REPORT) : r.fulfill({ status: 204, body: '' })
     if (p === '/api/simulation/status') return ok({ running: false, status: 'completed', condition: 'optimal', objective: 1234.5, solve_time: 2.5, dispatch: 'fresh' })
     if (p === '/api/simulation/queue') return ok({ jobs: [], running: [], paused: false })
     if (p === '/api/network/vintage_results') return ok({ results: {} })
@@ -174,6 +209,7 @@ try {
       }
       if (st.locked) await page.getByTestId('bc-locked').scrollIntoViewIfNeeded()
       if (st.ran) await page.getByTestId('bc-locked-row').first().waitFor()
+      if (st.run) { await page.getByTestId('bc-run').scrollIntoViewIfNeeded(); await page.evaluate(() => document.querySelector('[data-testid="bc-run"]')?.scrollIntoView({ block: 'start' })); await page.waitForTimeout(400) }
       await shootTo(page, `${key}-${mode}${width === 1000 && !st.only1000 ? '-1000' : ''}`)
     } catch (e) {
       problems.push(`${mode}/${key}/${width}: ${e.message.split('\n')[0]}`)
