@@ -111,4 +111,6 @@ def test_the_docs_stay_compact():
     # max_pressure_bar (grid-to-process issue 15, heat and steam levels).
     # 4600 (owner HOMER-02A-DOCCAP): room for the Generator fuel curve (fuel_price, fuel_curve_slope,
     # fuel_curve_no_load) and its derived stand_by_cost (homer-parity 02a).
-    assert len(attrs_doc()) < 4600
+    # 4700 (owner HOMER-02B-DOCCAP): room for the Generator run-hour pair (om_cost_per_run_hour,
+    # lifetime_run_hours; homer-parity 02b).
+    assert len(attrs_doc()) < 4700
