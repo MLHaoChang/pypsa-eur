@@ -42,12 +42,14 @@ const OUT = __dirname
     await block.scrollIntoViewIfNeeded()
     const f = l => block.getByLabel(l, { exact: true })
     const fill = async (a, b, c) => { await f('Reserve for load (%)').fill(a); await f('Reserve for solar output (%)').fill(b); await f('Reserve for wind output (%)').fill(c) }
-    const shot = async tag => { await page.waitForTimeout(300); await block.screenshot({ path: `${OUT}/${theme}-${tag}.png` }) }
+    const blur = () => page.evaluate(() => document.activeElement && document.activeElement.blur())
+    const shot = async tag => { await blur(); await page.waitForTimeout(300); await block.screenshot({ path: `${OUT}/${theme}-${tag}.png` }) }
     await fill('', '', '')
     await shot('idle')
     await fill('10', '20', '15')
     await shot('set')
     await fill('10', '150', '15')
+    await blur()
     await page.waitForTimeout(300)
     const bb = await block.boundingBox()
     // the panel column from the block's top down to the Save bar, so the disabled Save shows
