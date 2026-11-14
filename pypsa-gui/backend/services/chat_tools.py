@@ -3516,6 +3516,224 @@ def explain_cashflow(detail: str = "summary") -> dict:
     return out
 
 
+# ── Business case (4) — business case 08b (GK B (54) plan GO, D1–D9) ─────────
+# Each tool calls its route's own handler in process, so validation, the
+# If-Match check and the study mesh are the route's. The routes' refusals carry
+# `{"code": …}`; each is re-raised under a fixed kind (literals for the manifest
+# guard). The preset stays panel-only (GK B (54) Q3); a price comes only from the
+# user, cited and shown on the card (`services/business_case/chat_edit.py`).
+
+_BC_ERROR_KINDS = (
+    {"error_kind": "business_case_inputs_missing"}, {"error_kind": "business_case_inputs_invalid"},
+    {"error_kind": "business_case_changed"}, {"error_kind": "investment_case_missing"},
+    {"error_kind": "business_case_busy"}, {"error_kind": "business_case_request_invalid"},
+    {"error_kind": "solver_in_flight"}, {"error_kind": "finance_inputs_missing"},
+    {"error_kind": "finance_inputs_invalid"}, {"error_kind": "empty_edit"},
+)
+# Route code → kind (the inputs PUT and the run POST).
+_BC_CODES = {
+    "business_case_inputs_missing": "business_case_inputs_missing",
+    "business_case_inputs_invalid": "business_case_inputs_invalid",
+    "solver_config_invalid": "business_case_inputs_invalid",
+    "business_case_changed": "business_case_changed",
+    "investment_case_missing": "investment_case_missing",
+    "solver_in_flight": "solver_in_flight",
+    "finance_inputs_missing": "finance_inputs_missing",
+    "finance_inputs_invalid": "finance_inputs_invalid",
+}
+assert set(_BC_CODES.values()) <= {d["error_kind"] for d in _BC_ERROR_KINDS}
+_BC_SUMMARY_CHARS = 3500
+_BC_INPUTS_CHARS = 6000
+# Cut first when a summary outgrows the cap; each cut is named in `truncated`.
+_BC_CUT_ORDER = ("outputs", "flags", "break_even", "kpis")
+_BC_CITABLE_TURNS = 5
+_BC_NO_DATA = ("no business-case run and no stored report: run the investment case, set "
+               "the lines with set_business_case_lines, then run_business_case")
+
+
+@contextlib.contextmanager
+def _bc_errors():
+    """Re-raise the business-case routes' refusals under a fixed kind. A 409
+    without a code is the study mesh (a solve or another study running)."""
+    try:
+        yield
+    except HTTPException as exc:
+        d = exc.detail
+        if isinstance(d, dict) and "error_kind" in d:
+            raise
+        code = str(d.get("code") or "") if isinstance(d, dict) else ""
+        if code in _BC_CODES:
+            kind = _BC_CODES[code]
+        elif exc.status_code == 409 and not code:
+            kind = "business_case_busy"
+        else:
+            raise
+        detail = {"error_kind": kind,
+                  "message": str(d.get("message", "") if isinstance(d, dict) else d)[:500]}
+        if code and code != kind:
+            detail["code"] = code
+        for key in ("reason", "changed"):
+            if isinstance(d, dict) and d.get(key) is not None:
+                detail[key] = d[key]
+        if isinstance(d, dict) and isinstance(d.get("errors"), list):
+            detail["errors_total"] = len(d["errors"])
+            detail["errors"] = _fit([str(e)[:200] for e in d["errors"]])
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
+def _bc_ne(obj, key: str | None = None):
+    """A stored report value as the model reads it: an unknown number is "not
+    established", never 0 or null (plan C12)."""
+    if isinstance(obj, dict):
+        return {k: _bc_ne(v, k) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_bc_ne(v) for v in obj]
+    if key == "value" or isinstance(obj, float):
+        return _ne(obj)
+    return obj
+
+
+def _bc_citable_turns() -> list[dict]:
+    """The acting user's own last typed turns in this project, each with the
+    `turn_id` a price citation names (the run intake's `_typed_text` rule)."""
+    from services import run_intake
+    from services.business_case.chat_edit import _Host
+
+    try:  # an unsaved project, or one the user cannot open: no turn is citable
+        host = _Host().get()   # the same host the price citations are read on
+    except (run_intake.IntakeError, HTTPException):
+        return []
+    out = []
+    for record in reversed(host.turns):
+        if len(out) >= _BC_CITABLE_TURNS:
+            break
+        if not isinstance(record, dict):
+            continue
+        tid = run_intake.turn_id(record)
+        text = run_intake._typed_text(host, tid)
+        if text is not None:
+            out.append({"turn_id": tid, "text": text[:300], "cut": len(text) > 300})
+    return out
+
+
+def _bc_inputs() -> dict:
+    from routers.results import get_business_case_inputs as _h
+
+    out = dict(_h())
+    bc = out.get("business_case")
+    lines = ((bc or {}).get("inputs") or {}).get("lines") if isinstance(bc, dict) else None
+    if isinstance(lines, list) and _json_len(out) > _BC_INPUTS_CHARS:
+        kept, used = [], _json_len({**out, "business_case": {**bc, "inputs": {
+            **bc["inputs"], "lines": []}}})
+        for ln in lines:
+            cost = _json_len(ln) + 2
+            if used + cost > _BC_INPUTS_CHARS:
+                break
+            kept.append(ln)
+            used += cost
+        out["business_case"] = {**bc, "inputs": {**bc["inputs"], "lines": kept}}
+        out["truncated"] = {"lines": [str(ln.get("name"))[:80] for ln in lines[len(kept):]
+                                      if isinstance(ln, dict)]}
+        out["warning"] = ("lines were cut to fit the chat: do NOT send this object back to "
+                          "set_business_case_lines (the cut lines would be removed)")
+    out["citable_turns"] = _bc_citable_turns()
+    out["hint"] = ("send the whole business_case back to set_business_case_lines with "
+                   "if_match=digest; a new or changed price needs a citation of the user's "
+                   "own words (turn_id + quote from citable_turns), an upload cell or a PDF "
+                   "page; linked_share is the line's SOLD share, never a lease-up factor")
+    return out
+
+
+def get_business_case(detail: str = "summary") -> dict:
+    """The business-case run and its stored report (detail='summary'), or the
+    stored inputs with their digest and the citable turns (detail='inputs')."""
+    from routers.results import get_business_case as _h
+
+    if detail not in ("summary", "inputs"):
+        _ic_raise(422, "business_case_request_invalid", "detail is 'summary' or 'inputs'")
+    if detail == "inputs":
+        return _bc_inputs()
+    body = _h()
+    if getattr(body, "status_code", None) == 204:
+        return _no_data("business_case", _BC_NO_DATA)
+    report = body.get("report") or None
+    st = body.get("staleness") or {}
+    run = {k: body.get(k) for k in ("status", "stage", "stages_done", "error", "error_code",
+                                     "refusal") if body.get(k) is not None}
+    out: dict = {"run": run, "report": {"present": bool(report), "stale": st.get("stale"),
+                                        "changed": st.get("changed") or [],
+                                        "reason": st.get("reason")}}
+    if report and st.get("stale") is False:
+        out.update(currency=report.get("currency"), basis=report.get("basis"),
+                   pnl_years=(report.get("pnl") or {}).get("years"),
+                   kpis=_bc_ne(report.get("kpis") or {}),
+                   break_even=_bc_ne(report.get("break_even")),
+                   outputs=_bc_ne(report.get("outputs") or {}),
+                   flags=list(report.get("flags") or []))
+        cut = []
+        for section in _BC_CUT_ORDER:
+            if _json_len(out) <= _BC_SUMMARY_CHARS:
+                break
+            out.pop(section, None)
+            cut.append(section)
+        if cut:
+            out["truncated"] = cut
+            out["truncated_note"] = ("cut to fit the chat: " + ", ".join(cut) + "; the "
+                                     "results workbook (export_results_workbook) has them all")
+    elif report:
+        out["figures"] = ("not shown: the stored business case is STALE ("
+                          + (", ".join(out["report"]["changed"]) or str(st.get("reason")))
+                          + " changed since it ran); say so, and run_business_case again")
+    out["hint"] = ("an unknown number reads 'not established': NEVER report it as 0; "
+                   "the P&L by year is in the results workbook")
+    return out
+
+
+def set_business_case_lines(if_match: str, business_case: dict | None = None,
+                            clear: bool = False, citations: list | None = None) -> dict:
+    """Replace (or, with clear=true, remove) the business-case inputs through
+    `PUT /api/results/business_case/inputs`, always with the digest the model
+    read. A new or changed price must cite the user (GK B (54) Q1)."""
+    from routers.results import BusinessCaseIn, put_business_case_inputs as _h
+    from services.business_case import chat_edit
+
+    plan = chat_edit.plan({"if_match": if_match, "business_case": business_case,
+                           "clear": clear, "citations": citations})
+    with _bc_errors():
+        out = _h(BusinessCaseIn(business_case=plan["new"]), if_match=plan["tag"])
+    # The card's receipt carries every value; the stored object is not echoed (it can pass
+    # the chat's cap): get_business_case(detail='inputs') reads it.
+    stored = out.get("business_case") or {}
+    lines = (stored.get("inputs") or {}).get("lines") or []
+    return {"status": out.get("status"), "digest": out.get("digest"), "lines": len(lines),
+            "hint": "the next edit passes this digest as if_match; run_business_case runs it"}
+
+
+def run_business_case() -> dict:
+    """Start the business-case run on the stored investment case. Campaign-gated
+    like the studies (0 solves: it values the investment case's own solve)."""
+    from routers.results import post_business_case as _h
+
+    def start():
+        with _bc_errors():
+            return _h()
+
+    out = dict(_campaign_gated("business_case", start))
+    out["hint"] = ("poll get_business_case() until status is done / refused / failed; a "
+                   "refused run names its code and field")
+    return out
+
+
+def abort_business_case() -> dict:
+    """
+    Ask a running business-case run to stop at its next stage; it stores
+    nothing. IDEMPOTENT, and 200 even when the run has already finished; 404
+    only when no run was recorded in this session (as abort_investment_case).
+    """
+    from routers.results import post_business_case_abort as _h
+    return _h()
+
+
 # ── Decision study (6) — U3: the guided face's question, by chat ─────────────
 #
 # Thin wrappers over `routers/studies.py`, called in-process through `_route`
@@ -10012,6 +10230,11 @@ DISPATCHERS: dict[str, Any] = {
     "get_investment_case": get_investment_case,
     "solve_ppa_price": solve_ppa_price,
     "explain_cashflow": explain_cashflow,
+    # business case (4) — business case 08b
+    "run_business_case": run_business_case,
+    "get_business_case": get_business_case,
+    "set_business_case_lines": set_business_case_lines,
+    "abort_business_case": abort_business_case,
     # decision study (6) — U3
     "start_decision_study": start_decision_study,
     "set_study_parameter": set_study_parameter,
@@ -10284,6 +10507,7 @@ _LOCK_GATE_EXEMPT_PATHS = frozenset({
     "/api/results/coupling_loop/abort",
     "/api/results/eh_study/abort",
     "/api/results/investment_case/abort",  # as main.py (LV08 B2a)
+    "/api/results/business_case/abort",  # as main.py (BC 08b)
     # Latent today — `validate_network` is tiered `read`, so the tier filter
     # skips it before this set is consulted — but HTTP exempts preflight on
     # purpose, and the per-route parity test found the two sets disagreeing

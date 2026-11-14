@@ -70,6 +70,8 @@ REPORT_TOOLS = frozenset({"generate_report"})
 # Counted as solves when admitted, but no envelope lists them (issue 08, GK B (8)):
 # a sweep or an EH study is always the user's own card.
 NEVER_LISTED = frozenset({"run_sensitivity_sweep", "run_eh_study",
+                          # Business case 08b (GK B (54) D5): a price-bearing run is the user's own.
+                          "run_business_case", "abort_business_case",
                           # Study harness 10a (GK B (36)): the grid code is always the user's own.
                           "campus_publish_grid_code", "campus_save_grid_code_draft", "campus_new_grid_code_draft",
                           "campus_delete_grid_code_draft", "campus_confirm_grid_code_limit",

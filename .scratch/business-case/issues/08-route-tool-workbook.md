@@ -3,7 +3,7 @@
 
 # 08 — Route, chat tools and workbook sheet
 
-Status: ready-for-agent (blocked by 05; Opus; GK B)
+Status: done (08a #1467, 08b #1488; GK B)
 Type: task
 Blocked by: 05
 Gated: yes (GK B)
@@ -53,3 +53,18 @@ Checked on master: `services/finance/business_case.py` and `project_templates/bu
 - C8 PUT runs exactly the `BusinessCaseInputs` validators; no bulk path skips one (#738).
 - C9 at the trial merge: the four route-add tests, `test_packaging_requirements` on new imports, the error-kind manifest tests, inventory / route-parity / control-matrix `--check`.
 - 08b (plan delta before building): the card shows every digest-bound value (price, unit, linked_share, each year of linked_share_by_year, default_units, default_keys, kw_per_gpu; #1379 F2); a grant freezes only what the card showed; prices only from the user's words, bound at the grant (#1072), model-supplied price not on the card refuses; no `*project*` argument but the session's own (BOUND_CONTEXT_TOOLS + #875 test if a run profile lists them); a runs entry for the harness's own step never admits `run_business_case` on a model turn (#1123 / SH-14 B2); solves counted, plan delta states whether it solves.
+
+### 2026-11-13: GK B (54) 08b plan GO, D1–D9
+
+- Q1 (a), refined: a price needs a citation only when it is new or changed against the stored config; an unchanged price keeps its stored source. The citation is anything `run_intake` accepts (the owner's own typed text, an upload's sheet/cell, a PDF page/quote), checked through its verifier, never a fork. Anything else refuses `price_not_from_user`. This enforces "never invents a price" without an owner question.
+- Q2 (a): `abort_business_case`, mirroring `abort_investment_case`. Q3 (a): the preset stays out of chat.
+- D1 card in both modes: a diff against the stored config (each line added, changed old → new, or removed; a removal is never silent); each price's source (cited text, upload ref, "preset default (assumed)", "unchanged"); the digest binds exactly the rows shown; an oversize card refuses `business_case_card_too_large`.
+- D2 edit-card tests: one per digest-bound value (changed after preview → `edit_preview_stale`); one per citation path; each refusal (`price_not_from_user`, a quote not in the turn, another author's turn, a number absent from the quote) red under its mutant.
+- D3 `if_match` required; empty or `*` refused tool-side, as `_finance_request`; `business_case_changed` maps to its kind; tested through the tool.
+- D4 `get_business_case`: stale reads stale with what changed; not_established stays not_established; tested. A result that can exceed the tool-result cap says it is truncated and lists what was cut (#927, #1079).
+- D5 no project argument; `run_business_case` and `abort_business_case` in `run_envelope.NEVER_LISTED`, pinned; BOUND_CONTEXT ∩ NEVER_LISTED stays `{run_eh_study}`; `campaign.CHARGEABLE` at 0 solves, with a test that the run performs no solve.
+- D6 job: job_adapters monitor and wait-to-done, job_holds INPROC count 29 → 30, activity_history; tested.
+- D7 error kinds only in the `.d` fragment; at the trial merge `test_tool_error_kind_manifest`, `ChatPanel.manifest.test.tsx` and `smoke/json_fragments.py`; a route-parity `.d` only if the check asks.
+- D8 not_via_chat narrowed to the preset; "show the business case for …" reaches `get_business_case`; the BAU non-hits re-pinned.
+- D9 C9 again at the trial merge (route_chat_disposition, write_surface_lock_policy, project_route_acl_policy, golden_coverage, schema match, endpoint map, inventory / route_parity / control_matrix `--check`); the body lists the mutants killed and survived.
+- Lease-up stays out; `linked_share` reads "sold share" everywhere.
