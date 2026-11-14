@@ -36,7 +36,12 @@ selected hours an island criterion picked (``campus_freq_events.csv``,
 ``campus_freq_losses.csv``, ``campus_freq_bridge.csv``,
 ``campus_freq_planned.csv``, ``campus_freq_ups.csv``), with a summary
 (``campus_freq_summary.json``) that names the failing hours and the hours
-the every-hour E1 fails but the ranking did not select. ``psse_campus``
+the every-hour E1 fails but the ranking did not select. At an hour whose
+solved PCC tie is open (``campus_pcc.csv`` ``tie_open``) there is no
+islanding step: E1 reads "not applicable: tie open" with an empty ``ok``
+and the GFM bridge is not judged; the summary names those island hours
+(``tie_open_hours``), and when they are every island hour, says E1 and the
+bridge were not evaluated (``e1_bridge_note``). ``psse_campus``
 writes the PSS/E handoff (plan I8, ``gridspine.handoff.campus_bundle``), one
 bundle per island critical hour, under ``psse/``. ``cuts_campus`` then
 derives I7's frequency cuts for the hub (``campus_freq_cuts.csv``,
@@ -254,7 +259,7 @@ ISLAND_STATIC_SUMMARY_JSON = "campus_island_summary.json"
 #: The keys of ``campus_freq_summary.json``, in order (plan I6c).
 FREQ_SUMMARY_KEYS = ("label", "ledger", "scenarios", "island_hours", "every_hour_e1", "failing_hours",
                      "bridge_failing_hours", "planned_infeasible_hours", "e1_failing_hours",
-                     "e1_failing_not_selected")
+                     "e1_failing_not_selected", "tie_open_hours", "e1_bridge_note")
 MILP_HISTORY_CSV = "campus_milp_history.csv"
 MILP_COMPARISON_CSV = "campus_milp_comparison.csv"
 METHODS = ("least_cost", "milp")
@@ -452,29 +457,28 @@ def island_frequency_campus(run_dir, every_hour: bool = True, workers=1, should_
         raise ContractError("the run has no island tables (island_unit_hourly.csv, island_hourly.csv); "
                             "run the project's campus solve with its island sidecar first")
     unit, hourly_island = tables
-    hourly, _ = campus_tables(run_dir)
+    hourly, pcc = campus_tables(run_dir)
     hours = island_hours(run_dir)
+    # The solved tie state per hour (a run file without it reads closed).
+    tie_open = {(int(p), int(h)) for p, h, o in zip(pcc["period"], pcc["hour"], pcc["tie_open"]) if o}
     scenarios = campus.island["requirements"]["scenarios"]
     f0 = float(campus.net.f_hz)
-    sweep = (F.e1_every_hour(campus, hourly, hourly_island, unit, f0=f0)
+    sweep = (F.e1_every_hour(campus, hourly, hourly_island, unit, f0=f0, tie_open=tie_open)
              if every_hour and "seamless" in scenarios else pd.DataFrame(columns=list(F.E1_HOURLY_COLUMNS)))
     study = F.campus_frequency_study(campus, hourly, hours, island_unit_hourly=unit, f0=f0, workers=workers,
-                                     should_stop=should_stop)
+                                     should_stop=should_stop, tie_open=tie_open)
     _record_workers(run_dir, "island_frequency", parallel.used(workers, len(hours)), fresh=True)
     for name, df in ((FREQ_E1_HOURLY_CSV, sweep), (FREQ_EVENTS_CSV, study.events), (FREQ_LOSSES_CSV, study.losses),
                      (FREQ_BRIDGE_CSV, study.bridge), (FREQ_PLANNED_CSV, study.planned), (FREQ_UPS_CSV, study.ups)):
         _write_text_atomic(run_dir / name, df.to_csv(index=False))
 
     def failing(df):
-        if df.empty:
-            return []
-        bad = df[~df["ok"].astype(bool)]
-        return sorted({(int(p), int(h)) for p, h in zip(bad["period"], bad["hour"])})
+        # ``ok`` None (no e(t−1) to judge, or the tie open): never failing
+        return sorted({(int(r["period"]), int(r["hour"])) for _, r in df.iterrows() if F.failed(r["ok"])})
 
     sweep_fail = failing(sweep)
-    bridge_fail = (sorted({(int(r["period"]), int(r["hour"])) for _, r in study.bridge.iterrows()
-                           if r["ok"] is not None and not r["ok"]})        # None: no e(t−1) to judge
-                   if not study.bridge.empty else [])
+    bridge_fail = failing(study.bridge)
+    open_hours = [h for h in hours if h in tie_open]
     infeasible = (sorted({(int(r["period"]), int(r["hour"])) for _, r in study.planned.iterrows() if not r["feasible"]})
                   if not study.planned.empty else [])
     summary = {
@@ -489,6 +493,9 @@ def island_frequency_campus(run_dir, every_hour: bool = True, workers=1, should_
         "e1_failing_hours": [list(h) for h in sweep_fail],
         # E1 at every hour doubles as a check on the ranking's choice (plan I6)
         "e1_failing_not_selected": [list(h) for h in sweep_fail if h not in set(hours)],
+        # E1 and the GFM bridge are not judged at these island hours (the tie open)
+        "tie_open_hours": [list(h) for h in sorted(open_hours)],
+        "e1_bridge_note": F.TIE_OPEN_NOT_EVALUATED if hours and len(open_hours) == len(hours) else None,
     }
     _write_text_atomic(run_dir / FREQ_SUMMARY_JSON, json.dumps(summary, indent=2))
     return summary
@@ -582,6 +589,7 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
         margin = float(values.get("gfm_tuning_margin", 0.1))
     events = pd.read_csv(events_path)
     events = events[events["event"].isin(["E1", "E2", "E3", "E5"])]
+    events = events[events["binding"] != F.TIE_OPEN_NA]          # not run (the tie open): no case
     if "i_max_pu" in events:
         events = events[events["i_max_pu"].isna()]              # Q8's reruns are sensitivities, not cases
     ctx, cases, seen = {}, [], set()

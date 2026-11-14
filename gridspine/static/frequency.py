@@ -1103,6 +1103,40 @@ UPS_COLUMNS = ("period", "hour", "scenario", "event", "ups", "drops", "first_dro
                "t_online_s", "autonomy_ok")
 
 
+#: The ``binding`` of an E1 row at an hour whose solved PCC tie is open
+#: (``campus_pcc.csv`` ``tie_open``): no import, so no islanding step; E1 is
+#: not run and its ``ok`` is empty (None), and the hour's GFM bridge is not
+#: judged. Never a pass, never a failure.
+TIE_OPEN_NA = "not applicable: tie open"
+#: What E1 and the bridge read when every island hour is tie-open.
+TIE_OPEN_NOT_EVALUATED = "not evaluated (tie open on every island hour)"
+
+
+def failed(ok) -> bool:
+    """A judged row's ``ok`` read as a failure: True only for a real False
+    (a bool, or ``False``/``0`` as a CSV gives it back). None, NaN or an
+    empty cell (a row not judged: no e(t−1), the tie open) is never a
+    failure, and never a pass (``passed``)."""
+    if ok is None or (isinstance(ok, float) and ok != ok):
+        return False
+    if isinstance(ok, (bool, np.bool_)):
+        return not bool(ok)
+    return str(ok).strip().lower() in ("false", "0", "0.0")
+
+
+def passed(ok) -> bool:
+    """A judged row's ``ok`` read as a pass: True only for a real True."""
+    if isinstance(ok, (bool, np.bool_)):
+        return bool(ok)
+    return ok is not None and str(ok).strip().lower() in ("true", "1", "1.0")
+
+
+def _not_applicable(key, event, columns, **extra):
+    """An event row not run because the tie is open: every metric empty,
+    ``ok`` None, ``binding`` ``TIE_OPEN_NA``."""
+    return {**dict.fromkeys(columns), **key, "event": event, **extra, "ok": None, "binding": TIE_OPEN_NA}
+
+
 def _sweep_units(campus, rows, urows):
     """``e1_every_hour``'s units at one hour: the built ones, the cold
     gensets on their clock, a UPS that transfers left out; the rest on the
@@ -1112,7 +1146,7 @@ def _sweep_units(campus, rows, urows):
 
 
 def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenario="seamless",
-                  dt=5e-3, t_end=10.0, f0=F0):
+                  dt=5e-3, t_end=10.0, f0=F0, tie_open=()):
     """E1 at every hour (plan I6b): the PCC opens on I3a's lossless 0⁺ steps,
     ``dp_up_mw`` (an import lost, under-frequency) and ``dp_down_mw`` (an
     export lost, over-frequency), each run where it is above 0, on the
@@ -1122,7 +1156,10 @@ def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenar
     ``campus_frequency_study``); one that stays on line is kept, so a
     drop-out from its window is seen (``ups_drops``).
     Fast enough for every hour at the default 5 ms step; identical hours are
-    run once. Returns one row per (period, hour, direction)."""
+    run once. Returns one row per (period, hour, direction). At an hour in
+    ``tie_open`` (``(period, hour)`` pairs whose solved tie is open) there
+    is no islanding: each step is written ``TIE_OPEN_NA`` with ``ok`` None,
+    not run."""
     import pandas as pd
 
     from gridspine.schema.island import validate_island_hourly, validate_island_unit_hourly
@@ -1140,10 +1177,14 @@ def e1_every_hour(campus, hourly, island_hourly, island_unit_hourly=None, scenar
                  if abs(dp) > 1e-9 and (direction == "import") == (dp > 0)]
         if not steps:
             continue                     # nothing crosses the PCC: no event, and no units to build
+        key = {"period": period, "hour": hour, "scenario": scenario}
+        if (period, hour) in tie_open:
+            out += [_not_applicable(key, "E1", E1_HOURLY_COLUMNS, direction=direction, dp_mw=dp,
+                                    dp_source="I3a lossless") for direction, dp in steps]
+            continue
         rows = _hour_rows(hourly, period, hour)
         urows = iu[(iu["period"] == period) & (iu["hour"] == hour)] if iu is not None else None
         units = _sweep_units(campus, rows, urows)
-        key = {"period": period, "hour": hour, "scenario": scenario}
         for direction, dp in steps:
             ck = (repr(units), round(dp, 9), floor)
             if ck not in cache:
@@ -1216,7 +1257,7 @@ def _island_units(units, i4):
     return [dataclasses.replace(u, p0=float(p_isl[u.name]), join_s=0.0) if u.model != "ups" else u for u in units]
 
 
-def _study_context(campus, hourly, iu, load_step_mw, dt, t_end, f0):
+def _study_context(campus, hourly, iu, load_step_mw, dt, t_end, f0, tie_open=frozenset()):
     """What every island hour of ``campus_frequency_study`` shares; built
     once per worker (``parallel.ordered_map``)."""
     limits, req = _limits(campus)
@@ -1225,6 +1266,7 @@ def _study_context(campus, hourly, iu, load_step_mw, dt, t_end, f0):
     return {"campus": campus, "hourly": hourly, "iu": iu, "load_step_mw": load_step_mw, "f0": f0,
             "limits": limits, "req": req, "eq": eq,
             "kw": {"t_end": t_end, "dt": dt, "f0": f0, "floor": floor},
+            "tie_open": frozenset(tie_open),
             "e4_cache": {}}                       # hours with the same fleet share one E4 pickup
 
 
@@ -1255,17 +1297,23 @@ def _study_hour(c, hour_key):
                    "import_lossless_mw": lossless, "losses_mw": dp_ac - lossless})
     emt = emt_inputs(campus, rows)
     dp_e1 = dp_ac if i4.viable else lossless
+    # The solved tie is open this hour: no import, so no islanding step. E1
+    # and the GFM bridge are not judged (TIE_OPEN_NA); E2, E3 and E5 are.
+    tie_open = (int(period), int(hour)) in c["tie_open"]
 
     for scenario in req["scenarios"]:
         sk = {**key, "scenario": scenario}
         if scenario == "seamless":
             def e1(us):
                 return e1_islanding(us, dp_e1, **kw)
-            tr = e1(units)
-            ev.append(_event_row(sk, "E1", dp_e1, tr, limits, window, eq, f0, emt,
-                                 dp_source="I4 ΔP_AC" if i4.viable else "lossless import"))
-            log_ups(sk, "E1", tr)
-            bridge += _gfm_bridge(sk, units, tr, soc)
+            source = "I4 ΔP_AC" if i4.viable else "lossless import"
+            if tie_open:
+                ev.append(_not_applicable(sk, "E1", EVENT_COLUMNS, dp_mw=dp_e1, dp_source=source))
+            else:
+                tr = e1(units)
+                ev.append(_event_row(sk, "E1", dp_e1, tr, limits, window, eq, f0, emt, dp_source=source))
+                log_ups(sk, "E1", tr)
+                bridge += _gfm_bridge(sk, units, tr, soc)
             if not i4.viable:
                 continue
             isl = _island_units(units, i4)
@@ -1292,6 +1340,8 @@ def _study_hour(c, hour_key):
                 ev.append(_event_row(sk, "E5", pv, tr, limits, window, eq, f0, emt))
                 log_ups(sk, "E5", tr)
             for name, run, base, dp in (("E1", e1, units, dp_e1), ("E2", e2, isl, step_mw)):
+                if name == "E1" and tie_open:
+                    continue
                 for v, tr in i_max_sensitivity(base, run, rv["i_max_sensitivity_pu"]):
                     ev.append(_event_row(sk, name, dp, tr, limits, window, eq, f0, emt, i_max_pu=v))
         elif scenario == "ups_bridged":
@@ -1323,7 +1373,7 @@ def _study_hour(c, hour_key):
 
 
 def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_step_mw=None,
-                           dt=1e-3, t_end=20.0, f0=F0, workers=1, should_stop=None) -> FrequencyStudy:
+                           dt=1e-3, t_end=20.0, f0=F0, workers=1, should_stop=None, tie_open=()) -> FrequencyStudy:
     """E1–E6 at the island critical ``hours``, ``[(period, hour)]`` (plan
     I6b; I3b chooses them), in each of the campus's island ``scenarios``:
 
@@ -1341,14 +1391,20 @@ def campus_frequency_study(campus, hourly, hours, island_unit_hourly=None, load_
     for EMT/RMS where ``emt_flags`` says so. The hours run over ``workers``
     processes (``parallel.ordered_map``; default 1, in this process), the
     tables in the hours' order whatever the count; ``should_stop()`` is
-    asked between hours (``parallel.Stopped``)."""
+    asked between hours (``parallel.Stopped``).
+
+    ``tie_open``: the ``(period, hour)`` pairs whose solved PCC tie is open
+    (``campus_pcc.csv``): there E1 is written ``TIE_OPEN_NA`` with ``ok``
+    None and not run (nor its Q8 reruns), and no GFM bridge row is judged;
+    E2, E3, E4, E5 and E6 run as at any hour."""
     import pandas as pd
 
     from gridspine.schema.island import validate_island_unit_hourly
 
     iu = validate_island_unit_hourly(island_unit_hourly) if island_unit_hourly is not None else None
     parts = parallel.ordered_map(_study_hour, [(int(p), int(h)) for p, h in hours], _study_context,
-                                 (campus, hourly, iu, load_step_mw, dt, t_end, f0),
+                                 (campus, hourly, iu, load_step_mw, dt, t_end, f0,
+                                  frozenset((int(p), int(h)) for p, h in tie_open)),
                                  n_workers=workers, should_stop=should_stop)
     ev, losses, bridge, planned, ups = ([row for part in parts for row in part[i]] for i in range(5))
     return FrequencyStudy(*(pd.DataFrame(t, columns=list(c)) for t, c in (
@@ -1703,15 +1759,16 @@ def _event_cuts(c, r):
 def cut_events(events, sweep=None) -> list:
     """The event rows ``propose_cuts`` inverts, in its order: the failing
     E1, E2, E3 and E5 of ``events`` (Q8 reruns aside), then the failing
-    rows of ``sweep``."""
+    rows of ``sweep``. A row not judged (``ok`` None or empty: the tie
+    open) is not failing (``failed``)."""
     failing = []
     if events is not None and len(events):
         e = events[events["event"].isin(["E1", "E2", "E3", "E5"])]
         if "i_max_pu" in e:
             e = e[e["i_max_pu"].isna()]
-        failing += [r for _, r in e[~e["ok"].astype(bool)].iterrows()]
+        failing += [r for _, r in e.iterrows() if failed(r["ok"])]
     if sweep is not None and len(sweep):
-        failing += [r for _, r in sweep[~sweep["ok"].astype(bool)].iterrows()]
+        failing += [r for _, r in sweep.iterrows() if failed(r["ok"])]
     return failing
 
 
