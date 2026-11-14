@@ -145,24 +145,30 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
 def staleness(stored: dict | None, current: tuple[str, dict] | None,
               *, reason: str | None = None) -> dict[str, Any]:
     """The staleness block of `GET /results/investment_case`. A report whose
-    current key cannot be computed is stale (never silently current)."""
+    current key cannot be computed is stale (never silently current). It reads
+    the case's verdict on the provenance graph
+    (`provenance_graph.studies.investment_case_verdict`, PG-05): `changed` names
+    the assumption parts whose edge broke, and `verdict` carries the edges."""
     if not stored:
         return {"present": False, "stale": None, "changed": [], "reason": None}
     stored_hash = stored.get("assumptions_hash")
     prov = (((stored.get("sections") or {}).get("project") or {}).get("payload") or {}) \
         .get("provenance") or {}
     stored_parts = prov.get("inputs") or {}
+    from services.provenance_graph import studies
+
+    v = studies.investment_case_verdict(stored_hash, stored_parts, current)
+    stale = v.state == "stale"
+    out = {"present": True, "stale": stale}
     if current is None:
-        return {"present": True, "stale": True, "changed": [],
-                "reason": reason or "current_assumptions_not_established",
-                "assumptions_hash": stored_hash, "current_hash": None}
-    cur_hash, cur_parts = current
-    changed = sorted(k for k in cur_parts if stored_parts.get(k) != cur_parts.get(k)) \
-        if stored_parts else []
-    stale = cur_hash != stored_hash
-    return {"present": True, "stale": stale, "changed": changed if stale else [],
-            "reason": None if not stale else ("inputs_changed" if changed else "hash_differs"),
-            "assumptions_hash": stored_hash, "current_hash": cur_hash}
+        out.update(changed=[], reason=reason or "current_assumptions_not_established",
+                   assumptions_hash=stored_hash, current_hash=None)
+    else:
+        changed = [x.field for x in v.broken if x.edge == "derived_from"]
+        out.update(changed=sorted(changed) if stale else [],
+                   reason=None if not stale else ("inputs_changed" if changed else "hash_differs"),
+                   assumptions_hash=stored_hash, current_hash=current[0])
+    return {**out, "verdict": studies.verdict_wire(v)}
 
 
 # ── the study ────────────────────────────────────────────────────────────────
