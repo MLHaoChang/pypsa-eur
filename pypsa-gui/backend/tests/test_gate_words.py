@@ -26,8 +26,20 @@ def test_no_word_is_a_raw_id():
         assert word and rid not in word and "." not in word and "_" not in word
 
 
-def test_unknown_id_falls_back_visibly():
-    assert rule_words("zz.new.rule") == "unnamed check (zz.new.rule)"
+def test_unknown_id_falls_back_visibly_and_logs_the_id(caplog):
+    assert rule_words("zz.new.rule") == "Unnamed check"
+    assert "zz.new.rule" in caplog.text
+
+
+def test_nouns_are_unique_within_a_profile():
+    for ref, p in run_profiles.PROFILES.items():
+        ids = {
+            r["id"]
+            for s in p["stages"].values()
+            for r in ((s.get("gate") or s).get("rules") or [])
+        }
+        words = [RULE_WORDS[i] for i in ids]
+        assert len(words) == len(set(words)), ref
 
 
 def test_gates_table_cell_uses_words():
@@ -36,4 +48,4 @@ def test_gates_table_cell_uses_words():
         {"rule": "zz.new.rule", "verdict": "met", "facts": [{"fact": "f", "value": 1}]},
     ]}}}}
     cells = [row[2] for row in harness_chapter.gates_rows(run)]
-    assert cells == ["Fuel autonomy", "unnamed check (zz.new.rule)"]
+    assert cells == ["Fuel autonomy", "Unnamed check"]

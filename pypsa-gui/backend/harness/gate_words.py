@@ -5,11 +5,17 @@
 
 One map, rule id -> a short noun for a table cell. The report's gates table
 reads it so no raw id such as ``mg.fuel.autonomy`` reaches the reader. An id
-with no entry shows as ``unnamed check (<id>)``: visible, never silent.
+with no entry shows as ``Unnamed check`` and the id goes to the log: visible, never silent.
 A test enumerates every rule of every run profile so none lacks a noun.
 """
 
 from __future__ import annotations
+
+import logging
+
+log = logging.getLogger(__name__)
+
+UNNAMED = "Unnamed check"
 
 RULE_WORDS: dict[str, str] = {
     "dc.campus.contingency": "Campus survives a failure",
@@ -52,7 +58,7 @@ RULE_WORDS: dict[str, str] = {
     "in.readiness.ready": "Model ready to solve",
     "in.validate.errors": "Model errors",
     "ipp.export.limit": "Export limit",
-    "ipp.ic.min_dscr": "Debt cover",
+    "ipp.ic.min_dscr": "Debt service cover",
     "ipp.ic.pre_tax_irr": "Pre-tax return",
     "kpi.unserved_mwh": "Unserved energy",
     "mg.critical.tagged": "Critical loads tagged",
@@ -79,4 +85,8 @@ RULE_WORDS: dict[str, str] = {
 
 def rule_words(rule_id: str) -> str:
     """The table-cell noun for `rule_id`; an unknown id falls back visibly."""
-    return RULE_WORDS.get(rule_id) or f"unnamed check ({rule_id})"
+    word = RULE_WORDS.get(rule_id)
+    if word:
+        return word
+    log.warning("gate rule %r has no plain-word noun", rule_id)
+    return UNNAMED
