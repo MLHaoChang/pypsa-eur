@@ -109,7 +109,7 @@ def transport_from_env(env: Mapping[str, str] | None = None) -> LiveKitTransport
     if not (url and key and secret):
         return None
     config = LiveKitConfig(
-        url=url, api_key=key, api_secret=secret, agent_name=_get(env, AGENT_NAME)
+        url=url, key_id=key, api_secret=secret, agent_name=_get(env, AGENT_NAME)
     )
     return LiveKitTransport(config)
 
