@@ -373,6 +373,35 @@ def test_o1_a_linked_line_is_checked_against_the_catalogue_in_hand(
     assert not {f for _, f in got if f.startswith("lines[0].")}
 
 
+def test_typed_and_share_lines_are_not_checked_against_the_catalogue(
+    client, install_network, monkeypatch
+):
+    """Only a linked line is read against the catalogue in hand: a typed line in a
+    unit no output offers, and a share of it, are clean (mutant survivor, #1507)."""
+    from services.business_case import linked_outputs as L
+
+    _with_ic(client, install_network, monkeypatch)
+    _fresh(monkeypatch)
+    spec = L.OutputSpec("served_product.conc", "Product served on conc", ("t",))
+    monkeypatch.setattr(L, "catalogue", lambda n, solve=None: [spec])
+    lines = (
+        _line(name="typed", category="by_product", unit="kg"),
+        _line(
+            name="share",
+            unit="share",
+            quantity=0.5,
+            price=None,
+            quantity_source="share_of:revenue/by_product",
+        ),
+    )
+    assert _put(client, _bc(*lines)).status_code == 200
+    r = client.get(OPTIONS_URL)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["outputs"] is not None
+    assert body["refusals"] == []
+
+
 def test_refusals_wait_for_a_current_investment_case(
     client, install_network, monkeypatch
 ):
