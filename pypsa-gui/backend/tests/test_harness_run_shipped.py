@@ -1002,3 +1002,54 @@ def test_the_battery_case_moves_the_lp_but_not_the_fingerprint(project, built):
         for f in S.BESS_FIELDS
     ]
     assert all(changed)
+
+
+def _diff(a, b, path=""):
+    """Every leaf path where two JSON-like values differ."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = []
+        for k in sorted(set(a) | set(b)):
+            out += _diff(a.get(k), b.get(k), f"{path}.{k}" if path else k)
+        return out
+    if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+        out = []
+        for i, (x, y) in enumerate(zip(a, b)):
+            out += _diff(x, y, f"{path}.{i}")
+        return out
+    return [] if a == b else [path]
+
+
+@pytest.mark.parametrize(
+    "case_id,fields",
+    [
+        ("ppa_price_minus_10", {"price"}),
+        ("merchant_heavy", {"share"}),
+        ("longer_ppa", {"tenor_years"}),
+    ],
+)
+def test_a_finance_case_differs_from_the_base_only_in_the_fields_it_names(
+    project, built, case_id, fields
+):
+    """No LP column, no price ref and no other config key rides along."""
+    cfg, out, network = _applied(project, built, case_id)
+    leaves = _diff(cfg, out)
+    assert leaves and all(
+        leaf.startswith("commercial.contracts.") and leaf.rsplit(".", 1)[1] in fields
+        for leaf in leaves
+    )
+    assert (
+        _diff(
+            json.loads(network.storage_units.to_json()),
+            json.loads(built[1].storage_units.to_json()),
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("case_id", ["low_price", "cannibalised"])
+def test_a_price_ref_case_changes_the_ref_ids_and_nothing_else(project, built, case_id):
+    cfg, out, _ = _applied(project, built, case_id)
+    leaves = _diff(cfg, out)
+    assert {leaf.rsplit(".", 1)[1] for leaf in leaves} <= {"id", "hash"}
+    assert any(leaf.endswith("export_price_ref.id") for leaf in leaves)
+    assert any(leaf.endswith("import_price_ref.id") for leaf in leaves)
