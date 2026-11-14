@@ -3,7 +3,7 @@
 
 # 01 — Off-grid constraints: minimum renewable fraction and operating reserve
 
-Status: in progress (01a done #1424; 01b-1 engine PR pending on claude/homer-01b-reserve, 01b-2 UI next)
+Status: done (01a #1424, 01b-1 engine #1521, 01b-2 UI #1522; follow-up 01c needs-triage)
 Model: Opus
 Reviewer: GK B (GK A only if the adequacy/IC engine is touched)
 Blocked by: none (40 is independent: it is about island frequency screens, not these constraints)
