@@ -76,8 +76,9 @@ did not give stays empty and the run refuses it (say which), or the user removes
 the line. Then offer the assumed defaults (the `assumed` list) as one Assumptions
 card, as above: each with value, unit, source and year; "Keep all defaults"
 (recommended) or "Change some". Kept defaults stay assumed. A changed one is a
-**set** cell that cites the user's words (its citation names the **column** for a
-quantity, share or life), even when it equals the default.
+**set** cell that cites the user's words (its citation names the **column**:
+quantity, also for a share, life_years or money_year), even when it equals the
+default; a changed price default also asks the money year it is in.
 
 ## Step: verdict
 

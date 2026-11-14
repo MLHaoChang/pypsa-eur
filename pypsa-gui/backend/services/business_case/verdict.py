@@ -87,8 +87,8 @@ def verdict(report: dict | None) -> dict:
         },
         "could_flip_it": _flip(be),
         # A verdict that rests on pack defaults shows them (B5; #1172).
+        # A report stored before the list existed: not established, never "none".
         "rests_on_defaults": sorted({
-            str(a.get("line")) for a in (report or {}).get("assumed") or []
-            if isinstance(a, dict)
-        }),
+            str(a.get("line")) for a in (report or {})["assumed"] if isinstance(a, dict)
+        }) if isinstance((report or {}).get("assumed"), list) else None,
     }

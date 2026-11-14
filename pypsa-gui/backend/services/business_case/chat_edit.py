@@ -471,7 +471,11 @@ def _set_invalid(message: str) -> None:
 def _set_number(where: str, v, *, year: bool = False):
     if v is None:
         return None
-    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+    try:  # an int past float range overflows: a typed refusal, never a 500
+        ok = not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+    except OverflowError:
+        ok = False
+    if not ok:
         _set_invalid(f"{where}: a finite number or null, not {str(v)[:40]}")
     if year and v != int(v):
         _set_invalid(f"{where}: a whole year")
@@ -485,7 +489,7 @@ def _set_cell(where: str, col: str, v):
         _set_invalid(f"{where}: an object {{year: number}}")
     out = {}
     for y, x in v.items():
-        if not str(y).isdigit():
+        if not (str(y).isascii() and str(y).isdigit()):
             _set_invalid(f"{where}: year keys, not {str(y)[:20]}")
         out[str(int(y))] = _set_number(f"{where}.{y}", x)
         if out[str(int(y))] is None:
@@ -543,6 +547,10 @@ def apply_set(old: dict | None, patch) -> tuple[dict, dict[str, dict[tuple, str]
             # cell of the group.
             unit = d.get("unit") or line.get("unit") or ""
             cols = {group} | {c for c in cells if SET_COLUMNS[c] == group}
+            if group == "price" and line.get("money_year") is not None:
+                # The pack's money year came with its price default: the user's price is
+                # read in it only on the user's word (S3).
+                cols.add("money_year")
             for col in sorted(cols):
                 cell_unit = "year" if col == "money_year" else (
                     "" if col.startswith("price") else unit)

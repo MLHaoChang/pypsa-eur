@@ -224,7 +224,7 @@ def report_body(
     raw: dict,
     ic_hash: str,
     ic_case_hash: str | None,
-    inputs: BusinessCaseInputs | None = None,
+    inputs: BusinessCaseInputs,
 ) -> dict:
     """The stored report: P&L by year by stream, the KPIs (gross and net of
     pass-through), break-even, the locked rows, each linked output's state and every
@@ -247,7 +247,7 @@ def report_body(
         "locked": [_jsonable(dataclasses.asdict(r)) for r in bc.locked],
         "outputs": {name: _output_state(v) for name, v in sorted(outputs.items())},
         "flags": list(result.flags),
-        "assumed": assumed_defaults(inputs) if inputs is not None else [],
+        "assumed": assumed_defaults(inputs),
         "created_at": time.time(),
     }
 

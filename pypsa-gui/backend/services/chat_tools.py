@@ -3593,6 +3593,15 @@ def _bc_ne(obj, key: str | None = None):
     return obj
 
 
+def _bc_verdict(report: dict, verdict) -> dict:
+    """The verdict as the model reads it: an unknown list of defaults is "not
+    established", never an empty one."""
+    v = _bc_ne(verdict(report))
+    if v.get("rests_on_defaults") is None:
+        v["rests_on_defaults"] = _NE
+    return v
+
+
 def _bc_to_ask() -> list[dict]:
     """The stored lines' empty values the user must give (business case 14), so the
     assistant asks them and never invents one; [] when none are stored."""
@@ -3693,9 +3702,11 @@ def get_business_case(detail: str = "summary") -> dict:
                    break_even=_bc_ne(report.get("break_even")),
                    outputs=_bc_ne(report.get("outputs") or {}),
                    flags=list(report.get("flags") or []),
-                   assumed=[_bc_assumed_says(a) for a in report.get("assumed") or []],
-                   assumed_total=len(report.get("assumed") or []),
-                   verdict=_bc_ne(bc_verdict(report)))
+                   assumed=([_bc_assumed_says(a) for a in report["assumed"]]
+                            if isinstance(report.get("assumed"), list) else _NE),
+                   assumed_total=(len(report["assumed"])
+                                  if isinstance(report.get("assumed"), list) else _NE),
+                   verdict=_bc_verdict(report, bc_verdict))
         cut = []
         for section in _BC_CUT_ORDER:
             if _json_len(out) <= _BC_SUMMARY_CHARS:

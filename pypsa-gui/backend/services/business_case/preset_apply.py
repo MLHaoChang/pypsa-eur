@@ -32,6 +32,7 @@ ERROR_KINDS = (
     {"error_kind": "preset_variant_required"},
     {"error_kind": "preset_rows_required"},
     {"error_kind": "preset_invalid"},
+    {"error_kind": "template_not_known"},
 )
 
 EMPTY = "empty: ask the user"
@@ -134,18 +135,18 @@ def cells(line: dict) -> list[tuple[str, str, Any, str]]:
     if src != "typed":
         what += f", quantity {line.get('quantity_source')}"
     out: list[tuple[str, str, Any, str]] = [("", "line", what, "")]
-    cols = [c for c in ("quantity", "price", "life_years")
+    cols = [c for c in ("quantity", "price", "money_year", "life_years")
             if not (c == "quantity" and src == "linked")
-            and not (c == "price" and src == "share_of")
-            and not (c == "life_years" and line.get(c) is None)]
+            and not (c in ("price", "money_year") and src == "share_of")
+            and not (c in ("money_year", "life_years") and line.get(c) is None)]
     assumed = line.get("assumed") or {}
     for col in cols:
         v, by_year = line.get(col), line.get(f"{col}_by_year") or {}
         a = assumed.get(col) or {}
         if v is None and by_year:
             v = ", ".join(f"{y}: {by_year[y]:g}" for y in sorted(by_year))
-        unit = a.get("unit") or {"quantity": line.get("unit"), "life_years": "years"}.get(
-            col, f"per {line.get('unit')}")
+        unit = a.get("unit") or {"quantity": line.get("unit"), "life_years": "years",
+                                 "money_year": ""}.get(col, f"per {line.get('unit')}")
         out.append((col, col.replace("_", " "), EMPTY if v is None else v, unit or ""))
         if a:
             out.append((f"assumed.{col}", f"{col.replace('_', ' ')} source",
@@ -182,9 +183,10 @@ def to_ask(case: dict) -> list[dict]:
                         "per": ln.get("unit"), "hint": _hint(ln.get("hint"))})
         if (src in ("typed", "share_of") and ln.get("quantity") is None
                 and not ln.get("quantity_by_year")):
-            out.append({"line": ln["name"], "column": "share" if src == "share_of"
-                        else "quantity", "kind": ln.get("kind"), "per": ln.get("unit"),
-                        "hint": None})
+            out.append({"line": ln["name"], "column": "quantity", "kind": ln.get("kind"),
+                        "per": ln.get("unit"), "hint": None,
+                        **({"share_of": ln["quantity_source"].split(":", 1)[1]}
+                           if src == "share_of" else {})})
     gpu = any(ln.get("unit") == "GPU_h" and _source(ln) == "linked" for ln in lines)
     if gpu and case.get("kw_per_gpu") is None:
         out.append({"setting": "kw_per_gpu", "per": "kW per GPU", "hint": None})

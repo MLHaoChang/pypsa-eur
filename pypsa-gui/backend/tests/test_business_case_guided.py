@@ -78,7 +78,7 @@ def test_a_variant_template_refuses_anything_but_one_of_its_variants(bc, templat
 
 @pytest.mark.parametrize(
     "kw",
-    [{}, {"rows": []}, {"rows": ["Staff", "Staff"]}, {"rows": ["staff"]},
+    [{}, {"rows": []}, {"rows": ["Staff", "Staff"]}, {"rows": ["staff"]}, {"rows": ("Staff",)},
      {"rows": ["Staff", 3]}, {"rows": "Staff"}, {"rows": ["Staff"], "variant": "x"}],
 )
 def test_a_blank_table_refuses_anything_but_offered_labels_each_once(bc, template, kw):
@@ -352,6 +352,10 @@ def test_a_money_year_over_a_price_default_claims_the_price_too(
         ({"set": {"GPU-hours": {"money_year": 2025.5}}}, "business_case_set_invalid", 422),
         ({"set": {"kw_per_gpu": -1.0}}, "business_case_inputs_invalid", 422),
         ({"set": {"break_even_line": 3}}, "business_case_set_invalid", 422),
+        ({"set": {"GPU-hours": {"price": 10**400}}}, "business_case_set_invalid", 422),
+        ({"set": {"kw_per_gpu": 10**400}}, "business_case_set_invalid", 422),
+        ({"set": {"GPU-hours": {"price_by_year": {"\u00b2": 1.0}}}},
+         "business_case_set_invalid", 422),
     ],
 )
 def test_each_bad_set_is_a_typed_refusal_and_writes_nothing(bc, template, kw, kind, status):
@@ -531,9 +535,151 @@ def test_a_verdict_without_defaults_says_none_and_quotes_the_figures():
     v = verdict({"kpis": {"project_npv": {"status": "ok", "value": -3.0, "unit": "EUR"},
                           "ebitda_margin_net": {"status": "ok", "value": 0.3}},
                  "break_even": {"status": "ok", "line": "GPU-hours", "price_scale": 1.1,
-                                "basis": "project_post_tax_npv@wacc_nominal"}})
+                                "basis": "project_post_tax_npv@wacc_nominal"},
+                 "assumed": []})
     assert v["status"] == "not_worth_building" and v["rests_on_defaults"] == []
     assert v["figures"]["project_npv"]["value"] == -3.0
     assert set(v["figures"]) == {"project_npv", "ebitda_margin_net"}
     assert v["basis"] == "project_post_tax_npv@wacc_nominal"
     assert v["could_flip_it"]["line"] == "GPU-hours"
+
+
+# ── review and mutant follow-ups ────────────────────────────────────────────
+
+
+def test_a_price_over_a_price_default_also_asks_its_money_year(bc, template, monkeypatch):
+    monkeypatch.setattr(preset_apply, "_currency", lambda _cfg: "EUR")  # the pack's money
+    chat_tools.apply_business_case_preset(_digest(), variant="gpu_cloud")
+    before = _config()
+    fac = {ln["name"]: ln for ln in before["inputs"]["lines"]}["Facility, shell and M&E"]
+    assert "price" in fac["assumed"] and fac["money_year"] is not None
+    tid = _say(bc, "The facility costs 10000000 USD/MW.")
+    d = _refused(chat_tools.set_business_case_lines, _digest(),
+                 set={"Facility, shell and M&E": {"price": 10000000}},
+                 citations=[_cite(tid, "10000000 USD/MW", line="Facility, shell and M&E",
+                                  unit="USD/MW")])
+    assert d["error_kind"] == "price_not_from_user" and d["reason"] == "no_citation"
+    assert "money_year" in d["message"] and _config() == before
+
+
+def test_a_share_is_asked_as_its_quantity_and_set_as_one(bc, template):
+    template["id"] = "eh_h2_hub"
+    out = chat_tools.apply_business_case_preset(_digest(), variant="h2_offtake")
+    ins = next(a for a in out["to_ask"] if a.get("line") == "Insurance")
+    assert ins["column"] == "quantity" and ins["share_of"] == "capex"
+    chat_tools.set_business_case_lines(_digest(), set={"Insurance": {"quantity": 0.01}})
+    assert {ln["name"]: ln for ln in _config()["inputs"]["lines"]}["Insurance"][
+        "quantity"] == 0.01
+    assert not any(a.get("setting") == "kw_per_gpu" for a in out["to_ask"])
+
+
+def test_kw_per_gpu_is_asked_only_while_it_is_empty(bc, template):
+    chat_tools.apply_business_case_preset(_digest(), variant="gpu_cloud")
+    chat_tools.set_business_case_lines(_digest(), set={"kw_per_gpu": 1.2})
+    assert not any(a.get("setting") == "kw_per_gpu" for a in chat_tools.get_business_case()
+                   ["to_ask"])
+
+
+def test_a_report_from_before_the_list_reads_not_established(bc, monkeypatch):
+    from openpyxl import Workbook
+
+    import routers.results as R
+    from services.results_workbook.business_case import write_business_case_sheet
+    from tests.test_business_case_chat_tools import _report
+
+    rep = _report()  # no "assumed" key: stored before business case 14
+    R._state["business_case_report"] = rep
+    monkeypatch.setattr(R, "_bc_staleness_now", lambda s, ic_key=None: {"stale": False})
+    out = chat_tools.get_business_case()
+    assert out["assumed"] == out["assumed_total"] == "not established"
+    assert out["verdict"]["rests_on_defaults"] == "not established"
+    wb = Workbook()
+    ws = wb[write_business_case_sheet(wb, {**rep, "basis": {"label": "x"}},
+                                      {"stale": False})]
+    cells = [[c.value for c in row] for row in ws.iter_rows()]
+    at = next(i for i, r in enumerate(cells) if r[0] == "Assumed default")
+    assert cells[at + 1][0] == "not_established" and "again" in cells[at + 1][3]
+
+
+def test_the_workbook_row_without_a_unit_is_blank_never_none():
+    from openpyxl import Workbook
+
+    from services.results_workbook.business_case import _assumed_rows
+
+    wb = Workbook()
+    ws = wb.active
+    _assumed_rows(ws, 1, [{"line": "L", "column": "price", "value": 1.0, "unit": None,
+                           "source": "S", "source_year": 2026}])
+    assert ws.cell(row=2, column=3).value in ("", None) or ws.cell(row=2, column=3).value != "not_established"
+    assert ws.cell(row=2, column=3).value != "None"
+
+
+@pytest.mark.parametrize("labels", [[], ["Nope"], ["Staff", "Staff"]])
+def test_offered_case_refuses_unknown_repeated_or_no_labels(labels):
+    with pytest.raises(LookupError) as e:
+        P.offered_case("eh_site", labels, currency="EUR")
+    assert "Staff" in str(e.value) and "Product sales" in str(e.value)
+
+
+def test_offered_case_keeps_the_picked_order():
+    case = P.offered_case("eh_site", ["Staff", "Product sales"], currency="EUR")
+    assert [ln.name for ln in case.lines] == ["Staff", "Product sales"]
+
+
+def test_the_receipt_reads_a_removed_line_and_an_unknown_cell_as_nothing():
+    row = {"path": ["inputs", "lines", "gone"]}
+    assert preset_apply.read_cell(row, {"inputs": {"lines": []}}) is None
+    assert preset_apply.read_cell({"path": ["inputs", "lines", "a", "nope"]},
+                                  {"inputs": {"lines": [{"name": "a"}]}}) is None
+    assert preset_apply.read_cell({"path": ["inputs", "x"]},
+                                  {"inputs": {"lines": []}}) is None
+    assert preset_apply.read_cell({"path": ["preset"], "new": "p"}, None) == "p"
+
+
+def test_a_solve_in_flight_refuses_the_preset(bc, template, monkeypatch):
+    import routers.results as R
+
+    args = _args(variant="gpu_cloud")
+    with monkeypatch.context() as m:  # undone before the fixture clears the inputs
+        m.setattr(R, "_solver_in_flight", lambda: True)
+        d = _refused(preset_apply.plan, args)
+    assert d["error_kind"] == "solver_in_flight" and d["status"] == 409
+
+
+@pytest.mark.parametrize("cap", ["rows", "chars"])
+def test_an_oversize_preset_card_is_refused(bc, template, monkeypatch, cap):
+    monkeypatch.setattr(preset_apply, "CARD_ROW_CAP" if cap == "rows" else "CARD_CHARS", 3)
+    d = _refused(preset_apply.plan, _args(variant="gpu_cloud"))
+    assert d["error_kind"] == "business_case_card_too_large" and d["status"] == 422
+
+
+def test_a_pack_unit_mismatch_is_typed(bc, template, monkeypatch):
+    from models.business_case import DefaultUnitMismatch
+
+    def bad(*_a, **_k):
+        raise DefaultUnitMismatch("lines[1].default_keys[price]")
+
+    monkeypatch.setattr(P, "preset", bad)
+    d = _refused(preset_apply.plan, _args(variant="gpu_cloud"))
+    assert d["error_kind"] == "default_unit_mismatch" and d["status"] == 422
+
+
+def test_a_line_named_twice_is_refused(bc, template, monkeypatch):
+    template["id"] = "eh_site"
+    real = P.offered_case
+
+    def twice(t, labels, **k):
+        case = real(t, labels, **k)
+        return case.model_copy(update={"lines": case.lines + case.lines[:1]})
+
+    monkeypatch.setattr(P, "offered_case", twice)
+    d = _refused(preset_apply.plan, _args(rows=["Staff"]))
+    assert d["error_kind"] == "business_case_inputs_invalid" and "twice" in d["message"]
+
+
+def test_invalid_finance_inputs_are_typed(bc, template, monkeypatch):
+    import routers.results as R
+
+    monkeypatch.setattr(R._state["solver_config"], "finance", {"currency": 5})
+    d = _refused(preset_apply.plan, _args(variant="gpu_cloud"))
+    assert d["error_kind"] == "finance_inputs_invalid" and d["status"] == 422

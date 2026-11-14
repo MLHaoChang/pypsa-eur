@@ -19,6 +19,10 @@
   "default_unit_mismatch": {
    "surface": "inline",
    "why": "apply_business_case_preset refuses a preset whose pinned pack row is in another unit than the preset line names, with the field; nothing is filled or stored. The preset file needs fixing in the app, not in chat."
+  },
+  "template_not_known": {
+   "surface": "inline",
+   "why": "apply_business_case_preset refuses a project not made from a template: there is no preset to apply. The assistant sets the lines from the user's own figures with set_business_case_lines."
   }
  }
 }

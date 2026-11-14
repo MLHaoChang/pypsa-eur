@@ -46,10 +46,15 @@ def _kpi_cells(k: dict) -> tuple[Any, str]:
     return None, why  # `put` writes not_established
 
 
-def _assumed_rows(ws, r: int, assumed: list[dict]) -> int:
+def _assumed_rows(ws, r: int, assumed: list[dict] | None) -> int:
     """Every default the case relies on (business case 14): value, unit, source and year,
     one row each. None is said, never left blank. Returns the last row written."""
     heading(ws, r, ["Assumed default", "Value", "Unit", "Source and year"])
+    if assumed is None:  # a report stored before the list existed: unknown, never "none"
+        r += 1
+        put(ws, r, 1, None)
+        put(ws, r, 4, RUN_THE_BUSINESS_CASE + " again to list them")
+        return r
     if not assumed:
         r += 1
         put(ws, r, 1, "none: every value is the user's")
@@ -104,7 +109,7 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
         put(ws, r, 1, label)
         put(ws, r, 2, be.get(key) if (ok or key == "line") else None)
         put(ws, r, 3, "ok" if ok else (be.get("status") or NOT_ESTABLISHED))
-    r = _assumed_rows(ws, r + 2, report.get("assumed") or [])
+    r = _assumed_rows(ws, r + 2, report.get("assumed"))
     pnl = report.get("pnl") or {}
     years = pnl.get("years") or []
     for title, table in (
