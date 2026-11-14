@@ -40,6 +40,7 @@ inputs no longer match reads `not_evaluated` (G1).
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import math
@@ -224,13 +225,24 @@ def _admit(path, step_id, frozen, held) -> list[str] | None:
         cases.extend(rows)
         out["ids"] = [r["name"] for r in rows if r["status"] == "admitted"]
 
-    runner._update(path, change)
+    try:
+        runner._update(path, change)
+    except Exception:
+        out.pop("ids", None)
+        _release_all(path, rows)
+        raise
     if "ids" not in out:
-        for row in rows:  # never admitted: nothing it reserved is spent
-            if row["solves"].get("call_id"):
-                run_actions.release(path, row["solves"]["call_id"], 0, EVENT)
+        _release_all(path, rows)  # never admitted: nothing it reserved is spent
         return None
     return out["ids"]
+
+
+def _release_all(path, rows):
+    from services import run_actions
+
+    for row in rows:
+        if row["solves"].get("call_id"):
+            run_actions.release(path, row["solves"]["call_id"], 0, EVENT)
 
 
 def dispatch(path, step, frozen, attempt, instance) -> str:
@@ -305,9 +317,28 @@ _MINT_GUARD = threading.Lock()
 _MINT_LOCKS: dict[tuple[str, str], threading.Lock] = {}
 
 
-def _mint_lock(org_id, name) -> threading.Lock:
+@contextlib.contextmanager
+def _mint_lock(org_id, name):
+    """One hold per (org, series name): this process's lock, then the
+    cross-process file lock in the org's Library dir (review-gk: fail closed
+    is a `durable.file_lock`)."""
+    from harness.durable import file_lock
+    from services.library import series_store
+    from services.storage_paths import library_dir
+
     with _MINT_GUARD:
-        return _MINT_LOCKS.setdefault((str(org_id), name), threading.Lock())
+        local = _MINT_LOCKS.setdefault((str(org_id), name), threading.Lock())
+    folder = library_dir(series_store._default_root(), org_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    with (
+        local,
+        file_lock(
+            folder / f".mint-{series_store._slug(name)}.lock",
+            timeout=30,
+            busy="series mint busy",
+        ),
+    ):
+        yield
 
 
 def resolver(db, org_id, template_dir):
@@ -471,7 +502,15 @@ def run_case(path, case_id, digest) -> dict:
             base_fp = _fingerprint(base_ctx)
             before = _facts(base_ctx, case["changes"])
             reached["stage"] = "fork"
-            child = shipped_fork.create(db, user, base, name, DESCRIPTION)
+            try:
+                child = shipped_fork.create(db, user, base, name, DESCRIPTION)
+            except Exception:
+                # D7: a create that raised after its row exists still names the fork.
+                left = project_registry.find_project(db, user, name)
+                if left is not None:
+                    reached["fork"] = str(left.id)
+                    _mark(path, case_id, project_id=reached["fork"])
+                raise
             reached["fork"] = str(child.id)
             _mark(
                 path, case_id, project_id=str(child.id)
@@ -522,10 +561,12 @@ def run_case(path, case_id, digest) -> dict:
         outcome = "counted" if reached["queued"] else "released"
         if call_id:
             run_actions.release(path, call_id, 1 if reached["queued"] else 0, EVENT)
+        # D2: the validator's refusal of the patched block reads not_run.
+        invalid = getattr(exc, "kind", None) == "shipped_cases_invalid"
         _mark(
             path,
             case_id,
-            status="failed",
+            status="not_run" if invalid else "failed",
             reason=f"{reached['stage']}: {kind}: {exc}"[:480],
             solves={"used": 1 if reached["queued"] else 0, "outcome": outcome},
         )

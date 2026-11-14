@@ -768,3 +768,73 @@ def test_a_case_without_its_witness_is_never_passed(
     run_explore.advance(path, boot=INSTANCE, clock=time.time)
     case = _cases(path)["low_price"]
     assert case["status"] == "not_evaluated" and case["reason"] == "no witness"
+
+
+# ── D2: the validator's refusal reads not_run, shown and counted ─────────────
+
+
+def test_a_case_the_validator_refuses_is_not_run_with_its_reason(
+    baseline, tmp_path, queue
+):
+    _, pid, root = baseline
+    path = Path(root) / "cases.json"
+    data = json.loads(path.read_text())
+    share = next(c for c in data["cases"] if c["id"] == "merchant_heavy")
+    share["changes"][0]["new"] = 1.5  # a share above 1
+    path.write_text(json.dumps(data))
+    task = _task(tmp_path, pid, picked=["low_price"])
+    frozen = _read(task)["steps"][0]["frozen"]
+    (case,) = [c for c in frozen["cases"] if c["id"] == "merchant_heavy"]
+    assert case["status"] == "not_run" and "does not validate" in case["why"]
+    assert frozen["total"] == 8
+    _start(task, pid)
+    assert _cases(task)["merchant_heavy"]["status"] == "not_run"
+
+
+def test_a_validator_refusal_at_the_write_is_not_run_and_releases(
+    baseline, tmp_path, queue, monkeypatch
+):
+    _, pid, _ = baseline
+    path = _task(tmp_path, pid, picked=["low_price"])
+    real = run_shipped.apply
+
+    def apply(cfg, changes, resolve, *, check_old=True):
+        if check_old:
+            raise run_shipped.ShippedError("shipped_cases_invalid", "share above 1")
+        return real(cfg, changes, resolve, check_old=check_old)
+
+    monkeypatch.setattr(run_shipped, "apply", apply)
+    _start(path, pid)
+    case = _cases(path)["low_price"]
+    assert case["status"] == "not_run" and "share above 1" in case["reason"]
+    assert case["project_id"] in _children(pid)
+    assert case["solves"]["outcome"] == "released" and queue == []
+
+
+# ── D4: a template series edited after approval ──────────────────────────────
+
+
+def test_a_template_series_edited_after_approval_refuses_before_any_fork(
+    baseline, tmp_path, queue, monkeypatch
+):
+    import shutil
+
+    _, pid, _ = baseline
+    tpl = tmp_path / "templates"
+    shutil.copytree(TPL / "price_series", tpl / "eh_ipp_hybrid" / "price_series")
+    monkeypatch.setattr(E, "_TEMPLATES", tpl)
+    path = _task(tmp_path, pid)
+    victim = next(
+        p
+        for p in (tpl / "eh_ipp_hybrid" / "price_series").iterdir()
+        if p.name != "meta.json"
+    )
+    victim.write_bytes(victim.read_bytes() + b"\n")
+    _start(path, pid)
+    for name in LP_IDS:
+        case = _cases(path)[name]
+        assert (
+            case["status"] == "failed" and "shipped_series_unverified" in case["reason"]
+        )
+        assert "project_id" not in case
+    assert _children(pid) == {} and queue == []

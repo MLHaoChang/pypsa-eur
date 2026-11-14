@@ -95,10 +95,12 @@ def held(child, task_id: str):
             project_registry.bind_context(ctx, child)
             PyPSAService.register(key, ctx)
     harness_locks.hold(str(child.id), task_id)
-    token = harness_locks.enter_run(task_id)
     try:
-        with ctx.mutation_lock:
-            yield ctx
+        token = harness_locks.enter_run(task_id)
+        try:
+            with ctx.mutation_lock:
+                yield ctx
+        finally:
+            harness_locks.leave_run(token)
     finally:
-        harness_locks.leave_run(token)
         harness_locks.release(str(child.id), task_id)
