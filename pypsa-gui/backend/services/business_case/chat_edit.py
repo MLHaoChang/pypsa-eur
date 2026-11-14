@@ -545,6 +545,12 @@ def apply_set(old: dict | None, patch) -> tuple[dict, dict[str, dict[tuple, str]
     claimed: dict[str, dict[tuple, str]] = {}
     for key, cells in patch.items():
         if key in SET_SETTINGS:
+            if key in lines:
+                # GK B N2: a line named like a run setting is ambiguous in `set`.
+                _set_invalid(
+                    f"a stored line is also named '{key}'; rename that line with the "
+                    "whole business_case object before using `set`"
+                )
             if key == "kw_per_gpu":
                 new[key] = _set_number(key, cells)
             elif cells is not None and not isinstance(cells, str):

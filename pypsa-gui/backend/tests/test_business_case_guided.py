@@ -440,6 +440,12 @@ def test_a_money_year_over_a_price_default_claims_the_price_too(
     [
         ({"set": {"No such line": {"price": 1.0}}}, "business_case_set_invalid", 422),
         ({"set": {"GPU-hours": {"unit": "kg"}}}, "business_case_set_invalid", 422),
+        # GK B F1: a numeric column outside SET_COLUMNS, never a KeyError 500.
+        (
+            {"set": {"GPU-hours": {"escalation": 0.02}}},
+            "business_case_set_invalid",
+            422,
+        ),
         ({"set": {"GPU-hours": {"assumed": {}}}}, "business_case_set_invalid", 422),
         (
             {"set": {"GPU-hours": {"price": 1.0}}, "business_case": {"inputs": {}}},
@@ -487,6 +493,36 @@ def test_each_bad_set_is_a_typed_refusal_and_writes_nothing(
     d = _refused(chat_tools.set_business_case_lines, _digest(), **kw)
     assert (d["error_kind"], d["status"]) == (kind, status), d
     assert _config() == before
+
+
+def test_a_set_card_binds_its_values_and_its_digest(bc, template):
+    # GK B F2: the card digest covers each row's new value.
+    chat_tools.apply_business_case_preset(_digest(), variant="gpu_cloud")
+    tid = _say(bc, "2.5 USD/GPU_h, or maybe 3 USD/GPU_h.")
+    words = {2.5: "2.5 USD/GPU_h", 3.0: "3 USD/GPU_h"}
+
+    def args(price, if_match=None):
+        return {
+            "if_match": if_match or _digest(),
+            "set": {"GPU-hours": {"price": price}},
+            "citations": [_cite(tid, words[price], line="GPU-hours", unit="USD/GPU_h")],
+        }
+
+    tool = "set_business_case_lines"
+    card = edit_card.preview(tool, args(2.5))
+    edit_card.require_current(tool, args(2.5), card)  # unchanged: passes
+    d = _refused(edit_card.require_current, tool, args(3.0), card)
+    assert d["error_kind"] == "edit_preview_stale" and d["status"] == 409
+    # The card binds what it shows, not the if_match (edit_card._digest): an edit
+    # to another line leaves it valid, and the call's own if_match is then stale.
+    stale = _digest()
+    chat_tools.set_business_case_lines(
+        _digest(), set={"IT hardware": {"quantity": 1000}}
+    )
+    assert _digest() != stale
+    d = _refused(edit_card.require_current, tool, args(2.5, stale), card)
+    assert d["error_kind"] == "business_case_changed" and d["status"] == 412
+    edit_card.require_current(tool, args(2.5), card)  # same rows: still the card
 
 
 def test_a_set_on_a_stale_digest_is_business_case_changed(bc, template):
@@ -723,7 +759,64 @@ def test_a_verdict_without_defaults_says_none_and_quotes_the_figures():
     assert v["could_flip_it"]["line"] == "GPU-hours"
 
 
+@pytest.mark.parametrize(
+    "report",
+    [
+        None,
+        {},
+        {"kpis": None, "break_even": None},
+        {"kpis": {"project_npv": {"status": "not_established"}}},
+        {"kpis": {"project_npv": None}, "break_even": {"line": "GPU-hours"}},
+    ],
+)
+def test_a_report_missing_its_parts_reads_not_established_with_its_defaults(report):
+    v = verdict(report)
+    assert v["status"] == "not_established"
+    assert v["reason"] == "project NPV not established"
+    assert v["basis"] == "project post-tax NPV"
+    assert set(v["figures"]) <= {"project_npv"}  # a part present is quoted
+    assert v["could_flip_it"]["status"] == "not_established"
+    assert v["could_flip_it"]["change_to_npv_zero_pct"] is None
+    assert v["rests_on_defaults"] is None
+
+
 # ── review and mutant follow-ups ────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("key, value", [("kw_per_gpu", 5.0), ("break_even_line", None)])
+def test_a_set_key_that_is_both_a_setting_and_a_line_is_refused(key, value):
+    # GK B N2: never read as the setting while a line has that name.
+    from fastapi import HTTPException
+
+    from services.business_case.chat_edit import apply_set
+
+    old = {"inputs": {"lines": [{"name": key, "price": 1.0}]}}
+    with pytest.raises(HTTPException) as e:
+        apply_set(old, {key: value})
+    assert e.value.detail["error_kind"] == "business_case_set_invalid"
+    assert e.value.status_code == 422
+
+
+def test_no_preset_line_carries_a_year_map_or_a_settings_name():
+    # GK B N1: a scalar price `set` leaves price_by_year uncited, so no preset may
+    # fill one; N2: a `set` key named like a run setting never reaches a line.
+    from services.business_case.chat_edit import SET_SETTINGS
+
+    for path in P._files(P.PRESETS_DIR):
+        f = P.load(path)
+        for tid in f.templates:
+            for variant in f.variants:
+                case = P.preset(tid, variant, currency="EUR")
+                for ln in case.lines:
+                    assert not ln.price_by_year and not ln.quantity_by_year, (
+                        tid,
+                        ln.name,
+                    )
+                    assert ln.name not in SET_SETTINGS, (tid, ln.name)
+        for row in f.offered:
+            ln = row.line
+            assert not ln.price_by_year and not ln.quantity_by_year, row.label
+            assert ln.name not in SET_SETTINGS and row.label not in SET_SETTINGS
 
 
 def test_a_price_over_a_price_default_also_asks_its_money_year(
