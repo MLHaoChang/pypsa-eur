@@ -60,3 +60,16 @@ Owner answered (SH40-FREQ-1, `docs/agents/owner-decisions.md`). Status: ready-fo
 - Correction (this session, before building): with the subsea tie open the LP's islanding step is ΔP⁺ = p_imp − Σ_late X = 0 (`services/solver/island.py:1326-1338`), so its bridge energy B(t) is 0 whether summed or per battery. The screen's bridge step is I4's AC-loss ΔP_AC (25 kW), which the LP does not see, so a per-battery share of B(t) alone leaves the 24 hours failing. Corrected options sent to the coordinator as SH40-BRIDGE-2; waiting on the owner.
 - Measured (asked by GK A 27): on all 35 staged island hours the solved import is 0 (|x| < 2e-15 MW) and E1's 24.9 kW step equals the island's AC network losses (`gridspine/static/island_flow.py:306-310`): carried before and after islanding alike, not an islanding step.
 - Owner (via the coordinator, 2026-11-14 00:02Z): SH40-BRIDGE-2 option 1. In this PR: the screen does not judge E1 or the bridge on hours whose solved tie state is open (read from the run's own result, never a template tag); those hours read "not applicable: tie open", never a pass, named on the card; tests for an open-tie and a closed-tie hour; a template-keyed mutant must die. Plus the per-battery LP bridge row, with a closed-tie test where one battery is empty. GK A plan first; staged sizing unchanged.
+
+### 2026-11-14: GK A (27) plan GO for SH40-BRIDGE-2, conditions P1–P8
+
+One PR (GK A area, under PR-SIZE-1).
+- P1 tie state: rating = solved capacity (p_nom_opt if extendable, else p_nom); a committable Link with solved status 0 is open that hour; every PCC bus counts; PCC not unique or not found → fail closed (closed, judged); "at the PCC" by the producer's PCC definition, never by name. Test an extendable Link with p_nom_opt 0.
+- P2 ok = None readers: every reader of E1/bridge `ok` (failing(), cuts, GFM tuning cases, campus_island_report, run_actions, run_gates, pass counters) maps None explicitly — never failing, never passing, never in a pass total; a test each; list them in the PR body.
+- P3 round trip: tie_open and ok=None through the real persisted files (campus_pcc.csv, frequency CSVs, summary JSON) and the real readers; a missing column reads as closed.
+- P4 nothing judged: every island hour tie-open → E1 and bridge read "not evaluated (tie open on every island hour)"; E2/E3/E5 judged as before; one test.
+- P5 share: every grid-forming battery fixed → exact K_s/ΣK as frequency.py computes it; any extendable → 1 (conservative linear bound); the LP's notes say which; a test each; the fixed case shows LP and screen agree at the share boundary.
+- P6 LP row: usable energy above e_min_pu·e_nom; η = efficiency_dispatch (or the discharge Link's efficiency); t−1 at the first snapshot as the aggregate row; MWh = MW·T_join/3600; mutant dropping the e_min term.
+- P7 stored formats: list every reader and digest of campus_pcc.csv and the summary; show them unaffected or regenerate with a reason.
+- P8 templates: before/after sizes and NPV for both microgrids and any other template with grid-forming storage in an island; regenerate measured notes and shipped files if anything moves; slow test pins tie_open_hours == island_hours on the staged template, the single-year template's own value on it.
+- Rule 7: a new row state is tested at the runner and card level too.
