@@ -37,7 +37,7 @@ harness/
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py); `dispatch_tool_call` is the one per-call path (allowlist → guard → validators → card → handler) every caller drives
   run_lifecycle.py  LC-19: a re-solve of current results is asked about before its card (`results_current`), and a failed solve names its triage reads; nothing re-runs by itself
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
-  job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
+  job_adapters.py the fg:/ad:/rpt: job handles for wait_for_job without holding the turn, and (live-voice 11a) `job_status` / `cancel_job`: one neutral view of every job family, solve queue and GridSpine included, with a cursor, start revision, outcome and a cancel that reports only what it verified
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
   continuation.py  LC-12: a plan's finished job continues its conversation once; no approval authority

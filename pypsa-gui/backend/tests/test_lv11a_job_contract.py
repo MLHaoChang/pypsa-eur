@@ -467,6 +467,8 @@ def test_an_unrecognised_status_is_never_a_success(baseline, family):
         view = ja.job_status(job, actor_id=chat_tools.acting_user_id())
         assert view["status"] == "half_done"
         assert view["outcome"] == "unknown" and view["result_revision"] is None
+        # Neither running nor finished: nothing proves either.
+        assert view["terminal"] is False
     finally:
         _stop_all(started)
 
@@ -624,3 +626,83 @@ def test_every_native_terminal_status_maps_to_one_outcome():
     assert ja._outcome(ja.STUDY_FAMILY, "failed") == "failed"
     assert ja._outcome(ja.FOREGROUND_FAMILY, "running") is None
     assert ja._outcome(ja.FOREGROUND_FAMILY, "unknown") == "unknown"
+
+
+# ── Spec review: the ack is worker-verified ───────────────────────────────
+
+
+def test_an_aborted_record_whose_worker_still_runs_is_only_cancel_requested(baseline):
+    """routers.simulation.abort marks the record `aborted` at once; the solver may
+    still be in native code. That is not yet `cancelled`."""
+    ctx, *_ = baseline
+    started = [_start(ctx, "fg", honours_stop=False)]
+    try:
+        out = ja.cancel_job(
+            started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=0.2
+        )
+        assert out["job"]["status"] == "aborted" and started[0][1].is_alive()
+        assert out["cancel"] == "cancel_requested"
+    finally:
+        _stop_all(started)
+
+
+def test_a_worker_that_dies_without_a_status_after_the_stop_is_origin_lost(baseline):
+    ctx, *_ = baseline
+    started = [_start(ctx, "ad", honours_stop=False)]
+    job, thread, stop = started[0]
+
+    def die_on_stop():
+        stop.wait(2)
+        thread.release.set()  # the worker exits, its record still says running
+
+    threading.Thread(target=die_on_stop, daemon=True).start()
+    try:
+        out = ja.cancel_job(job, actor_id=chat_tools.acting_user_id(), settle_seconds=2)
+        assert out["cancel"] == "origin_lost"
+        assert out["job"]["outcome"] == "unknown" and out["job"]["terminal"] is False
+    finally:
+        _stop_all(started)
+
+
+def test_the_native_abort_runs_as_the_checked_actor(baseline, monkeypatch):
+    ctx, *_ = baseline
+    own = chat_tools.acting_user_id()
+    seen = []
+    monkeypatch.setattr(
+        chat_tools,
+        "abort_report_generation",
+        lambda: seen.append(chat_tools.acting_user_id()) or {},
+    )
+    started = [_start(ctx, "rpt", honours_stop=False)]
+    token = chat_tools._ACTING_USER_ID.set(str(uuid.uuid4()))  # another ambient user
+    try:
+        ja.cancel_job(started[0][0], actor_id=own, settle_seconds=0)
+    finally:
+        chat_tools._ACTING_USER_ID.reset(token)
+        _stop_all(started)
+    assert seen == [own]
+
+
+def test_a_queue_read_without_an_actor_is_job_not_found(baseline):
+    ctx, _project_id, path = baseline
+    job, _ = _queue(ctx, path)
+    for call in (ja.job_status, ja.cancel_job):
+        with pytest.raises(HTTPException) as refused:
+            call(job, actor_id=None)
+        assert refused.value.status_code == 404
+        assert refused.value.detail["error_kind"] == "job_not_found"
+
+
+def test_a_queue_job_that_finished_before_the_abort_reads_finished_first(
+    baseline, monkeypatch
+):
+    ctx, _project_id, path = baseline
+    job_id, job = _queue(ctx, path)
+
+    def finished_in_between(_job_id):
+        job.status, job.finished_at = "completed", 5.0
+        raise HTTPException(409, "Job already finished")
+
+    monkeypatch.setattr(chat_tools, "solve_queue_abort", finished_in_between)
+    out = ja.cancel_job(job_id, actor_id=chat_tools.acting_user_id(), settle_seconds=1)
+    assert out["cancel"] == "finished_first" and out["job"]["outcome"] == "succeeded"
