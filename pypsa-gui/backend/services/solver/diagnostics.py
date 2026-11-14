@@ -199,7 +199,7 @@ def _diagnose_infeasibility(network, config, log_queue,
         for line in _or_lines(n, config):
             emit(f"[INFEASIBLE]   • {line}")
             body = line[len(_OR_LABEL) + 2:] if line.startswith(f"{_OR_LABEL}: ") else line
-            body = _regex.sub(r" \(row [^)]*\)", "", body.split(". ", 1)[0] + ".")
+            body = _regex.sub(r" \(row [^)]*\)", "", body.split(". ", 1)[0].rstrip(".") + ".")
             add_constraint_hint(_OR_LABEL, body, "offgrid")
             hints += 1
     except Exception:
