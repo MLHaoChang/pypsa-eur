@@ -207,11 +207,18 @@ describe('the study record', () => {
     expect(progressText(studyProgress({ status: 'running' }))).toBeNull()
   })
 
-  it('stale from the record or the report block', () => {
-    expect(studyStale({ status: 'done', stale: true })).toEqual({ stale: true, changed: [], reason: null })
-    expect(studyStale({ status: 'done', report: { stale: true, changed: ['finance'] } }))
+  it('stale from the report block’s verdict alone (PG-05)', () => {
+    expect(studyStale({ status: 'done', report: { stale: true, changed: ['finance'],
+      verdict: { state: 'stale', broken: [] } } }))
       .toEqual({ stale: true, changed: ['finance'], reason: null })
-    expect(studyStale({ status: 'done', report: { stale: false } }).stale).toBe(false)
+    // an uncompared verdict never reads fresh
+    expect(studyStale({ status: 'done', report: { verdict: { state: 'uncompared', broken: [] } } }).stale).toBe(true)
+    expect(studyStale({ status: 'done', report: { stale: false, verdict: { state: 'fresh', broken: [] } } }).stale)
+      .toBe(false)
+    // the old flags are not OR'd in: the verdict is the one source
+    expect(studyStale({ status: 'done', stale: true, report: { stale: true, verdict: { state: 'fresh', broken: [] } } })
+      .stale).toBe(false)
+    expect(studyStale({ status: 'done', report: { present: false, stale: null } }).stale).toBe(false)
     expect(studyStale(null).stale).toBe(false)
   })
 
@@ -231,7 +238,7 @@ describe('WP4.7 review B3/B4', () => {
       payload: { has_counterfactual: false } } } } as never)
     expect(s).toContain('not the site party that pays the bill')
     const st = m.studyStale({ status: 'done', report: { present: true, stale: true, changed: [],
-      reason: 'solve_in_flight' } } as never)
+      reason: 'solve_in_flight', verdict: { state: 'stale', broken: [] } } } as never)
     expect(st.reason).toBe('solve_in_flight')
     expect(m.uncheckableReason(st.reason)).toContain('a solve is running')
     expect(m.uncheckableReason(null)).toBeNull()

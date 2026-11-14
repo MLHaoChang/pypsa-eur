@@ -16,7 +16,7 @@
 // flag).
 import axios from 'axios'
 import client from './client'
-import type { StaleVerdict } from './assetSchema'
+import type { GraphVerdict, StaleVerdict } from './assetSchema'
 
 // ── enums and small shapes ────────────────────────────────────────────────
 
@@ -465,6 +465,8 @@ export interface DecisionReport {
   /** Recomputed on every read (one hash rule with the case route's 409). */
   stale: boolean
   stale_reasons: string[]
+  /** The report's verdict on the provenance graph (PG-05): which edges broke, and whether each needs a run. */
+  verdict?: GraphVerdict
   honesty_notes: string[]
 }
 

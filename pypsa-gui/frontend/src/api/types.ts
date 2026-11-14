@@ -1,3 +1,5 @@
+import type { GraphVerdict } from './assetSchema'
+
 export interface Bus {
   name: string; v_nom: number; carrier: string; x: number; y: number
   country: string; unit: string; control: string; sub_network: string
@@ -1357,7 +1359,7 @@ export interface FinanceState {
 /** GET /results/investment_case: the study record (IC P4 WP4.6b); 204 when
  *  neither a run nor a report exists. Read defensively: the progress is a
  *  fraction / record (`progress`) or the runner's stages; the staleness is
- *  top-level (`stale`) or the stored report's block (`report.stale`). */
+ *  the stored report's block (`report`), whose `verdict` is the one source (PG-05). */
 export interface InvestmentCaseStudy {
   status: 'idle' | 'running' | 'done' | 'aborted' | 'error' | 'refused' | 'failed' | (string & {})
   study?: string
@@ -1368,7 +1370,8 @@ export interface InvestmentCaseStudy {
   stages_done?: string[]
   /** The stored report's assumptions changed since it was computed. */
   stale?: boolean | null
-  report?: { present?: boolean; stale?: boolean | null; changed?: string[]; reason?: string | null } | null
+  report?: { present?: boolean; stale?: boolean | null; changed?: string[]; reason?: string | null;
+             verdict?: GraphVerdict } | null
   code?: string | null
   message?: string | null
   error?: string | null

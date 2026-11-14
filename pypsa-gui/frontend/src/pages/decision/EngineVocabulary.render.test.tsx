@@ -98,7 +98,8 @@ describe('the part A gate conditions on the guided pages', () => {
   })
 
   it('asks for a re-run when the report was made from an earlier version’s run', () => {
-    render(<ReportStep report={{ ...report, stale: true, stale_reasons: ['run_by_an_earlier_version'] }} error={null}
+    render(<ReportStep report={{ ...report, stale: true, stale_reasons: ['run_by_an_earlier_version'],
+      verdict: { state: 'stale', broken: [{ edge: 'input:study:s1/engine_recorded', field: null, recorded: 'a', current_field: null, current: 'b', reason: 'changed', needs_run: true }] } }} error={null}
       assembleError={null} run={null} tornado={null} onAssemble={() => {}} busy={false} urls={{ html: '', docx: '', xlsx: '' }} />)
     expect(screen.getByTestId('report-rerun')).toBeTruthy()
   })

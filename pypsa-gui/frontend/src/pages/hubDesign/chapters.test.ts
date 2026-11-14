@@ -89,7 +89,8 @@ describe('chapterTiles', () => {
   it('investment: running, stale, refused', () => {
     expect(byId({ ...NONE, investment: { study: { status: 'running' } as never, report: null } })
       .investment.state).toBe('running')
-    const stale = byId({ ...NONE, investment: { study: { status: 'done', stale: true } as never,
+    const stale = byId({ ...NONE, investment: { study: { status: 'done', report: { present: true, stale: true,
+      verdict: { state: 'stale', broken: [] } } } as never,
       report: { npv_at_wacc: 5e6 } as never } })
     expect(stale.investment.state).toBe('stale')
     const refused = byId({ ...NONE, investment: { study: { status: 'refused',
