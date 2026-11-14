@@ -2449,6 +2449,90 @@ def get_business_case_preset(variant: str | None = Query(default=None)):
             "business_case": {"inputs": inputs.model_dump(mode="json")}}
 
 
+def _bc_ic_horizon() -> tuple[tuple[int, int], int] | None:
+    """(operating horizon, base year) of the stored investment-case report, as the
+    business case compiles against it (`build_timeline`); None without a project payload."""
+    stored = _state.get("investment_case_report")
+    if stored is not None and hasattr(stored, "model_dump"):
+        stored = stored.model_dump(mode="json")
+    payload = (((stored or {}).get("sections") or {}).get("project") or {}).get("payload") or {}
+    cod, n, base = (payload.get(k) for k in ("cod_year", "analysis_years", "base_year"))
+    if not all(isinstance(v, int) for v in (cod, n, base)) or n < 1:
+        return None
+    return (cod, cod + n - 1), base
+
+
+@results_router.get("/business_case/options")
+def get_business_case_options():
+    """What the line table offers (spec §4, §6.1), read-only: the template's preset
+    variants and "add line" rows, this project's linked outputs with the units each
+    offers (the catalogue the run reads), the units a typed line may take per kind, and
+    every refusal of the stored lines (G9) against the stored investment case's
+    horizon. `outputs` is None with `outputs_reason` when the network cannot be read;
+    `refusals` is None with `refusals_reason` without an investment case."""
+    from models.business_case import allowed_units
+    from services.business_case import linked_outputs as L
+    from services.business_case import presets as P
+    from services.business_case.runner import BusinessCaseConfig, refusal_detail
+
+    template_id = (_active_template_meta() or {}).get("id")
+    variants: dict[str, str] = {}
+    offered: list[dict] = []
+    if template_id:
+        try:
+            variants = P.variants(template_id)
+            offered = [o.model_dump(mode="json") for o in P.offered_rows(template_id)]
+        except LookupError:
+            pass        # a template with no preset file: a blank table
+    out: dict = {
+        "template_id": template_id,
+        "variants": variants,
+        "offered_rows": offered,
+        "typed_units": {k: list(allowed_units(k, "typed")) for k in ("revenue", "opex", "capex")},
+        "outputs": None,
+        "outputs_reason": None,
+        "refusals": None,
+        "refusals_reason": None,
+    }
+    lock = PyPSAService.get_lock()
+    if _solver_in_flight():
+        out["outputs_reason"] = "solve_in_flight"
+    elif not lock.acquire(timeout=_IC_LOCK_WAIT_S):
+        out["outputs_reason"] = "network_busy"
+    else:
+        try:
+            ctx = PyPSAService.get_active_context()
+            if ctx.network is None:
+                out["outputs_reason"] = "no_network"
+            else:
+                out["outputs"] = [
+                    {"id": s.id, "label": s.label, "units": list(s.units),
+                     "derived": s.derived}
+                    for s in L.catalogue(ctx.network, L.bind(ctx))
+                ]
+        except Exception as exc:  # noqa: BLE001 — a read must not 500 on a bad network
+            logger.warning("business_case options: outputs not readable: %s", exc)
+            out["outputs_reason"] = "outputs_not_readable"
+        finally:
+            lock.release()
+    raw = _bc_raw()
+    if raw is None:
+        out["refusals"] = []
+        return out
+    try:
+        inputs = BusinessCaseConfig.model_validate(raw).inputs
+    except ValidationError:
+        out["refusals_reason"] = "business_case_inputs_invalid"
+        return out
+    span = _bc_ic_horizon()
+    if span is None:
+        out["refusals_reason"] = "investment_case_missing"
+        return out
+    out["refusals"] = [refusal_detail(r)
+                       for r in inputs.refusals(horizon=span[0], base_year=span[1])]
+    return out
+
+
 def _bc_ic_check() -> tuple[str, str | None]:
     """(IC assumptions hash, IC case hash) of a current stored investment-case report, or
     409 `investment_case_missing`: no report, a refused one, a stale one or one whose key

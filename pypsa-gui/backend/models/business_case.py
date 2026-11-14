@@ -91,6 +91,21 @@ Unit = Literal[
     "share",
 ]
 
+def allowed_units(kind: str, source: str, output_units=()) -> tuple[str, ...]:
+    """The units a line of `kind` may take from its quantity `source` (spec §4 "Units by
+    source"): a share takes `share`; a linked line the units its output offers; a typed
+    line any but `share`, with `lump` and `MW` capex only. The line table's selects read
+    this; a test pins it to `_line_refusals`' `unit_not_allowed`."""
+    if source == "share_of":
+        return ("share",)
+    if source == "linked":
+        return tuple(u for u in output_units if u not in ("share", "lump", "MW"))
+    return tuple(
+        u for u in get_args(Unit)
+        if u != "share" and (kind == "capex" or u not in ("lump", "MW"))
+    )
+
+
 #: `models.finance.ESCALATION_CLASSES` plus `contract` (a test pins the two equal).
 Escalation = Literal["opex", "fuel", "tariff", "ppa", "export", "capex", "contract"]
 Depreciation = Literal["straight_line", "declining_balance"]
