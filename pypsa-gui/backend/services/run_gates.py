@@ -222,8 +222,8 @@ RESTORES = ("base", "final")
 # network's generators may lack outage data, or its outages may sit on Links.
 LOOP_NOTHING_TO_SAMPLE = "loop_nothing_to_sample"
 NOTHING_TO_SAMPLE_DETAIL = ("the loop found no outage to sample: no electrical generator has outage data "
-                            "(unavailability or repair time). Outages carried on Links, as on the H2 hubs, "
-                            "cannot be sampled yet.")
+                            "(unavailability or repair time), and no Link supplying an electrical bus has "
+                            "outage data.")
 # Study harness 12c (GK B (47) Q4): a loop the envelope's cap cut short. It is
 # the engine's own refusal kind (`run_envelope.reserve_engine`), read as not
 # evaluated with words: never met, and its last unconverged value is no result.
@@ -245,7 +245,19 @@ LOOP_FIELDS = ("status", "solves_used", "probe_solves", "restore", "base_restore
                "target_lole_h", "horizon_years", "draws", "basis", "goal_sources", "lever_star", "eps_star", "confident",
                "started_at", "finished_at", "error", "network_revision",
                # Adequacy loops 04 (D3): the goal verdict's numbers.
-               "event_h", "settle_draws", "settle_reason")
+               "event_h", "settle_draws", "settle_reason",
+               # Adequacy loops 02 (AL-2): what the supplying-Link walk decided.
+               "fleet_notes")
+
+FIRM_IMPORT_NOTE = "grid import taken as never failing"
+
+
+def _firm_import_words(loop):
+    """AL-2: the loop's own notes that a grid import was taken as never failing,
+    so the LOLE verdict rests on it; "" when the loop made none."""
+    notes = loop.get("fleet_notes") if isinstance(loop, dict) else None
+    firm = [n for n in (notes or ()) if isinstance(n, str) and n.startswith(FIRM_IMPORT_NOTE)]
+    return ("the verdict rests on an import taken as firm: " + "; ".join(firm)) if firm else ""
 
 # Adequacy loops 04 (D3, GK A (25)): a loop whose nearest plan sits at or
 # below the goal without confidence, within one more sampled draw of it.
@@ -258,7 +270,8 @@ def _not_confident_words(loop):
     from services.adequacy.lole_verdict import settle_text
     return ("the loop's nearest plan estimates LOLE at or below the goal, but not confidently, and one "
             "more sampled draw as heavy as the heaviest seen would put it above, so the rule is not evaluated; "
-            f"it never counts as met; {settle_text(loop)}")
+            f"it never counts as met; {settle_text(loop)}"
+            + (f"; {_firm_import_words(loop)}" if _firm_import_words(loop) else ""))
 
 
 def converged(record) -> bool:
@@ -1568,6 +1581,8 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
             result["facts"][0]["rows"] = scored.rows
         if looped is not None:
             result["facts"][0]["loop"] = looped.record
+            if _firm_import_words(looped.record):
+                result["note"] = _firm_import_words(looped.record)
         if detailed is not None:
             result["facts"][0]["detail"] = list(detailed.detail)
             if detailed.basis:
