@@ -95,7 +95,8 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
         if not _math.isfinite(eff) or eff <= 0:
             eff = 1.0
         # tCO2 per MWh_elec; a curve genset's fuel per MWh is its slope (GK B H1)
-        out_intensity = intensity * _fuel_curve.fuel_per_mwh(gens.loc[g], 1.0 / eff)
+        slope = _fuel_curve.curve_slope(gens.loc[g])
+        out_intensity = intensity * slope if slope is not None else intensity / eff
         # CO2 mass in tons → /1000 for kt.
         co2_total_kt = mwh_total * out_intensity / 1000.0
         co2_pp_kt = {p: v * out_intensity / 1000.0 for p, v in mwh_pp.items()}

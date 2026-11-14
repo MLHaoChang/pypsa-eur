@@ -1559,7 +1559,7 @@ def test_a_generator_without_a_curve_keeps_its_efficiency_co2_bit_for_bit():
         efficiency=EFF,
         marginal_cost=-200.0,  # runs whenever there is load, CO2 price included
     )
-    assert fuel_curve.fuel_per_mwh(n.generators.loc["plain"], 1.0 / EFF) == 1.0 / EFF
+    assert fuel_curve.curve_slope(n.generators.loc["plain"]) is None
     status, cond, log = _run_sim(n, SolverConfig(co2_price=100.0))
     assert status in ("ok", "optimal"), (cond, log[-800:])
     p_plain = float(n.generators_t.p["plain"].sum())
@@ -1619,14 +1619,15 @@ def test_no_co2_cap_refusal_off_an_emitting_carrier_or_without_a_curve():
 
 def _frames(n):
     return (
-        n.generators[["marginal_cost", "stand_by_cost"]].copy(),
+        n.generators.copy(),  # the whole static frame (GK B, #1538 review)
         n.generators_t.stand_by_cost.copy(),
         n.generators_t.marginal_cost.copy(),
     )
 
 
-def _same_frames(a, b):
-    return all(x.equals(y) for x, y in zip(a, b))
+def _same_frames(after, before):
+    # every column the network had before is restored bit for bit (another step may add its own column)
+    return all(x[y.columns].equals(y) for x, y in zip(after, before))
 
 
 def _co2_cfg(periods):
@@ -1715,8 +1716,8 @@ def test_no_load_fuel_reads_the_committed_curve_and_its_p_nom():
     assert fuel_curve.no_load_fuel({**row, fuel_curve.NO_LOAD: 0.0}) == 0.0
     assert fuel_curve.no_load_fuel({**row, "p_nom": None}) == 0.0
     assert fuel_curve.no_load_fuel({"committable": True, "p_nom": 2.0}) == 0.0
-    assert fuel_curve.fuel_per_mwh(row, 2.5) == SLOPE
-    assert fuel_curve.fuel_per_mwh({"p_nom": 2.0}, 2.5) == 2.5
+    assert fuel_curve.curve_slope(row) == SLOPE
+    assert fuel_curve.curve_slope({"p_nom": 2.0}) is None
     n = _no_load_co2_network()
     assert fuel_curve.no_load_fuel_t(n).empty  # not solved: no status
     n.generators_t.status = pd.DataFrame({"other": 1.0}, index=n.snapshots)
@@ -1741,3 +1742,57 @@ def test_the_co2_cap_check_reads_only_an_emitting_curve_under_a_cap():
     n.generators.at["genset", "carrier"] = "diesel"
     n.carriers.at["diesel", "co2_emissions"] = float("nan")
     assert fuel_curve.co2_cap_refusal(n, "genset") is None
+
+
+# ── GK B F1: a generator without a curve keeps master's `/ efficiency`, to the last bit ──────────────────────
+
+INEXACT_CO2, INEXACT_EFF = 0.187, 0.4  # 0.187 / 0.4 != 0.187 * (1 / 0.4) in floating point
+
+
+def _plain_emitter(periods=False):
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    if periods:
+        n.set_investment_periods([2030, 2035])
+        n.investment_period_weightings.loc[:, ["objective", "years"]] = 1.0
+    n.add("Bus", "el")
+    n.add("Carrier", "gas", co2_emissions=INEXACT_CO2)
+    n.add("Generator", "plain", bus="el", carrier="gas", p_nom=10.0, efficiency=INEXACT_EFF, marginal_cost=3.0)
+    return n
+
+
+def test_the_lp_co2_adder_of_a_plain_emitter_is_bit_identical_to_master():
+    from services.project_context import ProjectContext
+    from services.pypsa_service import PyPSAService
+    from services.solver.assumptions import _apply_modelling_assumptions
+
+    assert INEXACT_CO2 / INEXACT_EFF != INEXACT_CO2 * (1.0 / INEXACT_EFF)
+    n = _plain_emitter()
+    with PyPSAService.solving_context(ProjectContext(network=n, loaded_project="f1")):
+        restore, _ = _apply_modelling_assumptions(n, SolverConfig(co2_price=100.0), lambda msg: None)
+        assert n.generators.at["plain", "marginal_cost"] == 3.0 + INEXACT_CO2 * 100.0 / INEXACT_EFF
+        restore()
+    n = _plain_emitter(periods=True)
+    cfg = SolverConfig(co2_price=100.0, co2_price_per_period={2030: 70.0, 2035: 90.0}, multi_investment_periods=True)
+    with PyPSAService.solving_context(ProjectContext(network=n, loaded_project="f1")):
+        restore, _ = _apply_modelling_assumptions(n, cfg, lambda msg: None)
+        mc = n.generators_t.marginal_cost["plain"]
+        for period, price in ((2030, 70.0), (2035, 90.0)):
+            assert (mc.loc[period] == 3.0 + price * INEXACT_CO2 / INEXACT_EFF).all()
+        restore()
+
+
+def test_the_emission_reports_of_a_plain_emitter_are_bit_identical_to_master():
+    from services.asset_results.compute import build_ctx, gen_co2_rate
+    from services.compare.emissions import _compute_emissions_summary
+    from services.results.emissions import compute_emissions
+
+    n = _plain_emitter()
+    p = pd.Series([1.0, 3.0, 7.0, 2.0], index=n.snapshots)
+    n.generators_t.p = pd.DataFrame({"plain": p})
+    (row,) = compute_emissions(n, "lopf", result_df=_result_df)["by_generator"]
+    assert row["intensity_tCO2_per_MWh_out"] == INEXACT_CO2 / INEXACT_EFF
+    cmp = _compute_emissions_summary(n, [], False, True)
+    assert cmp.total_kt.total == float(p.sum()) * (INEXACT_CO2 / INEXACT_EFF) / 1000.0
+    ctx = build_ctx(n, "Generator", "plain", source="lopf", sns=n.snapshots)
+    assert gen_co2_rate(ctx).equals(p / INEXACT_EFF * INEXACT_CO2)

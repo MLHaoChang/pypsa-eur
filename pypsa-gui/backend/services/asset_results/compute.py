@@ -985,7 +985,8 @@ def gen_co2_rate(ctx: Ctx):
     # committed hour.
     from services import fuel_curve
 
-    rate = p * fuel_curve.fuel_per_mwh(ctx.params, 1.0 / eff) * factor
+    slope = fuel_curve.curve_slope(ctx.params)
+    rate = p * slope * factor if slope is not None else p / eff * factor
     no_load = fuel_curve.no_load_fuel(ctx.params)
     status = gen_status(ctx) if no_load > 0 else None
     if status is not None:

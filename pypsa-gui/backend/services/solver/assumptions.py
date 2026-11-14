@@ -703,24 +703,23 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 mask = gens["carrier"].isin(co2.index) & (gens["efficiency"] > 0)
                 if mask.any():
                     idx = gens.index[mask]
-                    # homer-parity 02e (GK B H1): MWh of fuel per MWh generated, 1 / efficiency, or a curve
-                    # genset's slope, so its CO2 follows the fuel its marginal cost prices.
-                    fuel_rate = pd.Series(
-                        {
-                            g: _fuel_curve.fuel_per_mwh(gens.loc[g], 1.0 / float(gens.at[g, "efficiency"]))
-                            for g in idx
-                        },
-                        dtype=float,
-                    )
+                    # homer-parity 02e (GK B H1): a curve genset's CO2 per MWh follows its slope, the fuel its
+                    # marginal cost prices; every other emitter keeps `/ efficiency`, bit for bit (GK B F1).
+                    slopes = {
+                        g: s for g in idx if (s := _fuel_curve.curve_slope(gens.loc[g])) is not None
+                    }
                     if has_per_period_price:
                         # Build the time-varying surcharge per emitting generator:
-                        # surcharge[g, t] = price_series[t] × co2[carrier(g)] × fuel_rate[g]
+                        # surcharge[g, t] = price_series[t] × co2[carrier(g)] / efficiency[g]
+                        # (× slope[g] for a curve genset)
                         intensity_per_gen = gens.loc[idx, "carrier"].map(co2)
+                        eff_per_gen = gens.loc[idx, "efficiency"]
                         base_mc = n.get_switchable_as_dense(
                             "Generator", "marginal_cost", inds=idx)
                         # outer = snapshot × generator; broadcast price (T,) × intensity (G,)
                         surcharge = pd.DataFrame(
-                            {g: price_series * float(intensity_per_gen.loc[g]) * float(fuel_rate.loc[g])
+                            {g: price_series * float(intensity_per_gen.loc[g]) * slopes[g] if g in slopes
+                             else price_series * float(intensity_per_gen.loc[g]) / float(eff_per_gen.loc[g])
                              for g in idx},
                             index=n.snapshots,
                         )
@@ -745,7 +744,9 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         )
                     else:
                         # Single-period network OR no per-period dict: uniform price path.
-                        add_per_mwh = gens.loc[idx, "carrier"].map(co2) * cfg.co2_price * fuel_rate
+                        add_per_mwh = gens.loc[idx, "carrier"].map(co2) * cfg.co2_price / gens.loc[idx, "efficiency"]
+                        for g, slope in slopes.items():
+                            add_per_mwh.loc[g] = float(co2[gens.at[g, "carrier"]]) * cfg.co2_price * slope
                         original_mc = gens.loc[idx, "marginal_cost"].copy()
                         gens.loc[idx, "marginal_cost"] = original_mc + add_per_mwh
                         undo_actions.append(("col", "generators", "marginal_cost", idx, original_mc))

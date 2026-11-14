@@ -30,7 +30,7 @@ cost notes ("Fuel curve used here").
 
 CO2 (homer-parity 02e, GK B H1). A curve genset's CO2 follows the same fuel as its cost:
 ``co2_emissions × (slope × p + no_load × p_nom × on)``. The per-MWh term reads the slope, not ``1 / efficiency``
-(``fuel_per_mwh``; a generator without a curve keeps ``co2_emissions / efficiency``), and the no-load fuel emits
+(``curve_slope``; a generator without a curve keeps ``co2_emissions / efficiency``, bit for bit), and the no-load fuel emits
 ``no_load × p_nom × co2_emissions`` per committed hour (``no_load_fuel``, ``no_load_fuel_t``), with no efficiency:
 both are already MWh of fuel, and they are disjoint (output-proportional fuel, and fuel burnt for being on). A CO2
 price reaches the per-MWh term through ``marginal_cost`` and the no-load term through ``stand_by_cost``
@@ -175,11 +175,11 @@ def slope_warning(row: Mapping[str, Any]) -> str | None:
     )
 
 
-def fuel_per_mwh(row: Mapping[str, Any], default: float) -> float:
-    """MWh of fuel per MWh generated: the curve's slope when the row sets a curve (GK B H1: one fuel source for its
-    cost and its CO2), else ``default`` (the caller's ``1 / efficiency``)."""
+def curve_slope(row: Mapping[str, Any]) -> float | None:
+    """MWh of fuel per MWh generated from the row's curve (its slope; GK B H1: one fuel source for its cost and its
+    CO2), or None without a curve: the caller keeps its own ``/ efficiency``, bit for bit (GK B F1)."""
     curve = curve_of(row)
-    return default if curve is None else curve[0]
+    return None if curve is None else curve[0]
 
 
 def no_load_fuel(row: Mapping[str, Any]) -> float:

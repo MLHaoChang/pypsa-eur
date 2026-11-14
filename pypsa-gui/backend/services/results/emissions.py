@@ -169,7 +169,11 @@ def compute_emissions(n, source, *, result_df):
         if not _math.isfinite(eff) or eff <= 0:
             eff = 1.0
         # GK B H1: a curve genset's fuel per MWh is its slope, not 1 / efficiency.
-        out_intensity = intensity * _fuel_curve.fuel_per_mwh(gens.loc[name], 1.0 / eff) if intensity != 0 else 0.0
+        slope = _fuel_curve.curve_slope(gens.loc[name])
+        if intensity == 0:
+            out_intensity = 0.0
+        else:
+            out_intensity = intensity * slope if slope is not None else intensity / eff
         mwh_horizon = float(gen_energy_horizon.get(name, 0.0))
         if not _math.isfinite(mwh_horizon):
             mwh_horizon = 0.0
