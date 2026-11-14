@@ -36,8 +36,15 @@ def _case_line(kind: str, source: str, unit: str) -> M.LineItem:
 @pytest.mark.parametrize("kind", ["revenue", "opex", "capex"])
 @pytest.mark.parametrize("source", ["typed", "share_of"])
 def test_allowed_units_equal_the_units_the_validator_accepts(kind, source):
-    base = ([_case_line("revenue", "typed", "t").model_copy(update={"category": "by_product"})]
-            if source == "share_of" else [])
+    base = (
+        [
+            _case_line("revenue", "typed", "t").model_copy(
+                update={"category": "by_product"}
+            )
+        ]
+        if source == "share_of"
+        else []
+    )
     accepted = []
     for unit in get_args(M.Unit):
         try:
@@ -63,8 +70,9 @@ def _project(client, install_network, monkeypatch, template):
     import routers.results as R
 
     install_network(build_network())
-    monkeypatch.setattr(R, "_active_template_meta",
-                        lambda: {"id": template} if template else None)
+    monkeypatch.setattr(
+        R, "_active_template_meta", lambda: {"id": template} if template else None
+    )
 
 
 def _fresh(monkeypatch):
@@ -74,7 +82,9 @@ def _fresh(monkeypatch):
     from services.business_case import linked_outputs as L
 
     real = L.bind
-    monkeypatch.setattr(L, "bind", lambda ctx, **kw: dataclasses.replace(real(ctx, **kw), fresh=True))
+    monkeypatch.setattr(
+        L, "bind", lambda ctx, **kw: dataclasses.replace(real(ctx, **kw), fresh=True)
+    )
 
 
 def test_no_template_is_a_blank_table_with_the_units_by_source(
@@ -87,11 +97,13 @@ def test_no_template_is_a_blank_table_with_the_units_by_source(
     assert body["template_id"] is None and body["variants"] == {}
     assert body["offered_rows"] == []
     kinds = ("revenue", "opex", "capex")
-    assert body["units_by_source"]["typed"] == {k: list(M.allowed_units(k, "typed")) for k in kinds}
+    assert body["units_by_source"]["typed"] == {
+        k: list(M.allowed_units(k, "typed")) for k in kinds
+    }
     assert body["units_by_source"]["share_of"] == {k: ["share"] for k in kinds}
     assert body["categories"] == {k: list(v) for k, v in M.CATEGORIES.items()}
     assert body["escalations"] == list(get_args(M.Escalation))
-    assert body["refusals"] == []          # nothing stored, nothing refused
+    assert body["refusals"] == []  # nothing stored, nothing refused
 
 
 def test_without_a_current_solve_outputs_are_null_never_empty(
@@ -114,10 +126,14 @@ def test_a_template_lists_its_variants_and_offered_rows(
     body = client.get(OPTIONS_URL).json()
     assert body["template_id"] == template
     assert body["variants"] == P.variants(template)
-    assert body["offered_rows"] == [o.model_dump(mode="json") for o in P.offered_rows(template)]
+    assert body["offered_rows"] == [
+        o.model_dump(mode="json") for o in P.offered_rows(template)
+    ]
 
 
-def test_outputs_and_their_units_are_the_catalogue_s_own(client, install_network, monkeypatch):
+def test_outputs_and_their_units_are_the_catalogue_s_own(
+    client, install_network, monkeypatch
+):
     """O4: pinned against `OutputSpec.units` of the real catalogue, not a copied list."""
     from services.business_case import linked_outputs as L
     from tests.test_business_case_linked_outputs import _plant
@@ -131,9 +147,11 @@ def test_outputs_and_their_units_are_the_catalogue_s_own(client, install_network
     body = client.get(OPTIONS_URL).json()
     # The default solver config names no export link: the same solve the route binds.
     specs = L.catalogue(n, L.LinkedSolve(network=n, fresh=True))
-    assert specs                                   # the plant offers outputs
-    assert body["outputs"] == [{"id": s.id, "label": s.label, "units": list(s.units),
-                                "derived": s.derived} for s in specs]
+    assert specs  # the plant offers outputs
+    assert body["outputs"] == [
+        {"id": s.id, "label": s.label, "units": list(s.units), "derived": s.derived}
+        for s in specs
+    ]
     assert body["catalogue_version"] == L.CATALOGUE_VERSION
     linked = body["units_by_source"]["linked"]
     for s in specs:
@@ -142,7 +160,9 @@ def test_outputs_and_their_units_are_the_catalogue_s_own(client, install_network
             assert set(linked[s.id][k]) <= set(s.units)
 
 
-def test_unreadable_outputs_are_a_reason_never_a_500(client, install_network, monkeypatch):
+def test_unreadable_outputs_are_a_reason_never_a_500(
+    client, install_network, monkeypatch
+):
     from services.business_case import linked_outputs as L
 
     _project(client, install_network, monkeypatch, None)
@@ -156,7 +176,9 @@ def test_unreadable_outputs_are_a_reason_never_a_500(client, install_network, mo
     assert body["outputs"] is None and body["outputs_reason"] == "outputs_not_readable"
 
 
-def test_a_busy_network_is_409_after_a_bounded_wait(client, install_network, monkeypatch):
+def test_a_busy_network_is_409_after_a_bounded_wait(
+    client, install_network, monkeypatch
+):
     """O2: the lock is tried with a timeout, never a blocking acquire."""
     import routers.results as R
     from services.pypsa_service import PyPSAService
@@ -184,7 +206,9 @@ def test_a_running_solve_is_409(client, install_network, monkeypatch):
     assert r.status_code == 409 and r.json()["detail"]["code"] == "solver_in_flight"
 
 
-def test_refusals_need_the_investment_case_horizon(client, install_network, monkeypatch):
+def test_refusals_need_the_investment_case_horizon(
+    client, install_network, monkeypatch
+):
     _project(client, install_network, monkeypatch, None)
     assert _put(client, _bc(_line(), _line(price=None))).status_code == 200
     body = client.get(OPTIONS_URL).json()
@@ -205,8 +229,9 @@ def test_every_refusal_names_its_line_and_column(client, install_network, monkey
     assert ("name_duplicate", "lines[1].name") in got
     assert ("price_not_established", "lines[1].price") in got
     assert ("unit_not_allowed", "lines[2].unit") in got
-    assert all(r["code"] == "business_case_refused" and r["message"]
-               for r in body["refusals"])
+    assert all(
+        r["code"] == "business_case_refused" and r["message"] for r in body["refusals"]
+    )
 
 
 def test_the_table_has_words_for_every_refusal_kind():
@@ -214,8 +239,15 @@ def test_the_table_has_words_for_every_refusal_kind():
     import pathlib
     import re
 
-    src = (pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages"
-           / "results" / "investment" / "businessCaseModel.ts").read_text()
+    src = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "src"
+        / "pages"
+        / "results"
+        / "investment"
+        / "businessCaseModel.ts"
+    ).read_text()
     block = src.split("export const REFUSAL_WORDS", 1)[1].split("\n}\n", 1)[0]
     keys = set(re.findall(r"^\s+([a-z_]+):", block, re.M))
     assert keys == set(M.REFUSAL_KINDS)
@@ -235,8 +267,13 @@ def test_o1_offered_units_save_and_run_clean_and_others_are_refused_on_the_unit(
     for kind, cat in cats.items():
         for unit in get_args(M.Unit):
             i = len(lines)
-            ln = _line(name=f"{kind}-{unit}", kind=kind, category=cat, unit=unit,
-                       escalation="capex" if kind == "capex" else "opex")
+            ln = _line(
+                name=f"{kind}-{unit}",
+                kind=kind,
+                category=cat,
+                unit=unit,
+                escalation="capex" if kind == "capex" else "opex",
+            )
             if kind == "capex":
                 ln["life_years"] = 10
             lines.append(ln)
@@ -244,5 +281,7 @@ def test_o1_offered_units_save_and_run_clean_and_others_are_refused_on_the_unit(
                 expect_refused.add(f"lines[{i}].unit")
     assert _put(client, _bc(*lines)).status_code == 200
     body = client.get(OPTIONS_URL).json()
-    refused = {r["field"] for r in body["refusals"] if r["refusal"] == "unit_not_allowed"}
+    refused = {
+        r["field"] for r in body["refusals"] if r["refusal"] == "unit_not_allowed"
+    }
     assert refused == expect_refused and expect_refused

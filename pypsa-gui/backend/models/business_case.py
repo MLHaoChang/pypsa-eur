@@ -91,6 +91,7 @@ Unit = Literal[
     "share",
 ]
 
+
 def allowed_units(kind: str, source: str, output_units=()) -> tuple[str, ...]:
     """The units a line of `kind` may take from its quantity `source` (spec §4 "Units by
     source"): a share takes `share`; a linked line the units its output offers; a typed
@@ -100,7 +101,8 @@ def allowed_units(kind: str, source: str, output_units=()) -> tuple[str, ...]:
         return ("share",)
     pool = output_units if source == "linked" else get_args(Unit)
     return tuple(
-        u for u in pool
+        u
+        for u in pool
         if u != "share"
         and (u != "lump" or kind == "capex")
         and (u != "MW" or (kind == "capex" and source == "typed"))
