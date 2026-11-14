@@ -1904,7 +1904,7 @@ def test_a_net_cluster_that_returns_more_than_it_draws_in_a_period_is_unknown():
     unknown, never a lower served."""
     n = _net_dispatch(_net_h2(_dispatched()), el=1.0, fc=4.0)
     kpi = renewable_fraction(n)
-    assert kpi["fraction"] is None and "negative" in kpi["reason"], kpi
+    assert kpi["fraction"] is None and "negative in period all" in kpi["reason"], kpi
 
 
 def test_a_nan_in_a_net_cluster_link_is_unknown():
@@ -2245,6 +2245,73 @@ def test_a_net_cluster_alone_carries_the_note_and_the_hint():
     assert renewable_fraction(n)["note"] == CONVERSION_NOTE
     lines = infeasibility_lines(_net_h2(_network(pv_max=5.0)), SolverConfig(min_renewable_fraction=0.9))
     assert len(lines) == 1 and "of what the conversion units draw" in lines[0], lines
+
+
+def test_an_unrelated_cluster_stays_apart_while_a_joined_pair_merges():
+    """GK B N6 (mutant killer): only a Link touching both clusters joins them; the merge keeps going past a
+    cluster that joins nothing."""
+    n = _dispatched()
+    n.add("Bus", "h2a", carrier="H2")
+    n.add("Load", "offtake h2a", bus="h2a", p_set=1.0)
+    n.add("Link", "el h2a", bus0="ac", bus1="h2a", p_nom=10.0, efficiency=0.7)
+    n.add("Link", "fc h2a", bus0="h2a", bus1="ac", p_nom=5.0, efficiency=0.5)
+    for b in ("h2b", "h2c"):
+        n.add("Bus", b, carrier="H2")
+        n.add("Load", f"offtake {b}", bus=b, p_set=1.0)
+        n.add("Link", f"el {b}", bus0="ac", bus1=b, p_nom=10.0, efficiency=0.7)
+    n.add("Link", "fc bc", bus0="h2b", bus1="ac", bus2="h2c", p_nom=5.0, efficiency=0.5, efficiency2=-0.5)
+    c = classify(n)
+    assert c["open_clusters"] == [], c
+    assert c["net_clusters"] == [
+        {"buses": ["h2a"], "links": ["el h2a", "fc h2a"]},
+        {"buses": ["h2b", "h2c"], "links": ["el h2b", "el h2c", "fc bc"]},
+    ], c
+
+
+def test_a_storage_unit_with_inflow_off_the_cluster_keeps_it_closed():
+    """GK B N1 (mutant killer): a hydro unit with inflow on the site bus is no opening of the H2 cluster."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("StorageUnit", "hydro", bus="ac", carrier="hydro", p_nom=5.0, max_hours=10.0,
+          cyclic_state_of_charge=True, inflow=3.0)
+    c = classify(n)
+    assert c["open_clusters"] == [] and c["net_clusters"] == CLUSTER, c
+
+
+def _alternating_net(n, el, fc):
+    """Electrolyser ``el`` MW in even hours, fuel cell burning ``fc`` MW of H2 (returning fc/2) in odd ones."""
+    even = pd.Series([1.0, 0.0] * (HOURS // 2), index=n.snapshots)
+    n.links_t.p0 = pd.DataFrame({"electrolyser": el * even, "fuel cell": fc * (1.0 - even)})
+    return n
+
+
+def test_a_period_net_is_signed_on_the_snapshot_weightings():
+    """GK B N2/N3 (mutant killer): +1 MW in the 2 h snapshots and −1.5 MW in the 1 h ones nets +6 MWh, though
+    the unweighted sum is negative."""
+    n = _alternating_net(_net_h2(_dispatched()), el=1.0, fc=3.0)
+    w = pd.Series([2.0, 1.0] * (HOURS // 2), index=n.snapshots)
+    for col in n.snapshot_weightings.columns:
+        n.snapshot_weightings[col] = w
+    kpi = renewable_fraction(n)
+    assert kpi["reason"] is None, kpi
+    assert kpi["conversion_mwh"] == pytest.approx(2.0 * 12 - 1.5 * 12)
+
+
+def test_a_period_net_that_cancels_to_rounding_reads_a_value():
+    """GK B N2 (mutant killer): the tolerance is relative to what the cluster drew, so a net of −6e-6 MWh on
+    12 MWh drawn is rounding, not a cluster returning more than it drew."""
+    n = _alternating_net(_net_h2(_dispatched()), el=1.0, fc=2.0 * (1.0 + 5e-7))
+    kpi = renewable_fraction(n)
+    assert kpi["reason"] is None, kpi
+
+
+def test_conversion_links_alone_carry_the_hint():
+    """R14 (mutant killer): a site with conversion Links and no net cluster names the conversion draw in the
+    infeasibility hint."""
+    n = _site_with_conversion()
+    c = classify(n)
+    assert c["conversion_links"] and c["net_clusters"] == [], c
+    lines = infeasibility_lines(n, SolverConfig(min_renewable_fraction=0.9))
+    assert lines and all("of what the conversion units draw" in l for l in lines), lines
 
 
 def _h2_with_negative_offtake(n, *, fuel_cell: bool, **offtake):
