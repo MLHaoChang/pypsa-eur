@@ -13,6 +13,8 @@ from pydantic import ValidationError
 from models.schemas import SolverConfigSchema
 from services.reliability_goal import goal_free_config, invalid_goal_fields
 from services.solver.operating_reserve import (
+    _AUX,
+    _label,
     ROW,
     _wrap_with_operating_reserve,
     assets,
@@ -168,7 +170,7 @@ def test_a_non_committable_genset_is_sized_for_the_reserve():
     _solve(n, {"reserve_share_load": 0.5})
     assert n.generators.at["diesel", "p_nom_opt"] == pytest.approx(15.0, rel=1e-6)
     res = operating_reserve_result(n, (0.5, 0.0, 0.0))
-    night = str(n.snapshots[0])
+    night = _label(n.snapshots[0])
     assert night in res["binding"], res["binding"]
 
 
@@ -290,3 +292,198 @@ def test_the_lp_chain_carries_the_reserve():
     n.optimize.create_model()
     build_lp_chain(n, SolverConfig(**ON), queue.SimpleQueue())(n, n.snapshots)
     assert n.model.constraints[ROW].shape == (HOURS,)
+
+
+# ── review fixes ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "carrier, kind", [("pv_rooftop", "pv"), ("PVrooftop", "pv"), ("onwind", "wind")]
+)
+def test_vre_carriers_match_by_substring_like_the_kpi(carrier, kind):
+    """O3/O5: the same carrier match as the renewable KPI, so rooftop PV is never dispatchable."""
+    n = _network()
+    n.add("Carrier", carrier)
+    n.add("Generator", "vre", bus="ac", carrier=carrier, p_nom=5.0)
+    sel = assets(n)
+    assert "vre" in sel[kind] and "vre" not in sel["dispatchable"], sel
+
+
+def test_run_of_river_is_not_dispatchable():
+    n = _network()
+    n.add("Generator", "river", bus="ac", carrier="ror_alpine", p_nom=5.0)
+    assert "river" not in assets(n)["dispatchable"]
+
+
+def test_a_withdrawing_renewable_carrier_generator_is_not_headroom():
+    """O3: an export modelled as a withdrawing biomass Generator is a sink, never headroom."""
+    n = _network()
+    n.add(
+        "Generator",
+        "export",
+        bus="ac",
+        carrier="biomass",
+        p_nom=5.0,
+        p_min_pu=-1.0,
+        p_max_pu=0.0,
+    )
+    assert "export" not in assets(n)["dispatchable"]
+
+
+def test_a_charging_battery_does_not_count_its_cancelled_charge_twice():
+    """O4: charging 10 MW from empty (η 0.9/0.9, w 1, soc(t) = 9): cancelling the charge frees 10 MW, and the
+    step then ends empty, so 10 MW, not 10 + 0.9·9."""
+    n = _network(committable=False, battery=True)
+    sns = n.snapshots
+    n.generators.loc["diesel", "p_nom"] = 0.0
+    n.generators_t.p = pd.DataFrame({"pv": 0.0, "diesel": 0.0}, index=sns)
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    n.storage_units_t.p_dispatch = pd.DataFrame({"bess": 0.0}, index=sns)
+    n.storage_units_t.p_store = pd.DataFrame({"bess": 10.0}, index=sns)
+    n.storage_units_t.state_of_charge = pd.DataFrame({"bess": 9.0}, index=sns)
+    res = operating_reserve_result(n, (1.0, 0.0, 0.0))
+    assert res["per_snapshot"][0]["held_mw"] == pytest.approx(10.0)
+
+
+def test_a_charging_battery_in_the_lp_holds_what_the_route_reports():
+    n = _network(committable=False, battery=True)
+    n.generators.loc["diesel", "p_nom"] = 12.0
+    _solve(n, {"reserve_share_load": 0.2})
+    res = operating_reserve_result(n, (0.2, 0.0, 0.0))
+    assert res["reason"] is None
+    assert all(r["held_mw"] >= r["required_mw"] - 1e-5 for r in res["per_snapshot"])
+
+
+def test_a_committable_extendable_genset_holds_status_times_its_size():
+    """A unit both committable and extendable: h ≤ p_nom·p_max_pu − p and h ≤ p_nom_max·status·p_max_pu − p."""
+    n = _network(committable=False)
+    n.remove("Generator", "diesel")
+    n.add(
+        "Generator",
+        "diesel",
+        bus="ac",
+        carrier="diesel",
+        marginal_cost=250.0,
+        committable=True,
+        p_nom_extendable=True,
+        p_nom_max=40.0,
+        p_min_pu=0.3,
+        capital_cost=1_000.0,
+    )
+    _solve(n, {"reserve_share_load": 0.5})
+    assert n.generators.at["diesel", "p_nom_opt"] == pytest.approx(15.0, rel=1e-5)
+    t = n.snapshots[NOON]
+    assert (
+        n.generators_t.status.at[t, "diesel"] == 1
+    )  # the reserve makes it run under the sun too
+    res = operating_reserve_result(n, (0.5, 0.0, 0.0))
+    assert all(r["held_mw"] >= r["required_mw"] - 1e-5 for r in res["per_snapshot"])
+
+
+def test_a_unit_holds_reserve_only_in_the_periods_it_is_in_service():
+    """A genset built in 2040 holds nothing in 2030 (build year and lifetime, per period)."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.set_investment_periods([2030, 2040])
+    n.add("Bus", "ac", carrier="AC")
+    n.add("Load", "site", bus="ac", p_set=LOAD_MW)
+    n.add(
+        "Generator",
+        "old",
+        bus="ac",
+        carrier="diesel",
+        p_nom=5.0,
+        build_year=2020,
+        lifetime=15,
+    )
+    n.add(
+        "Generator",
+        "new",
+        bus="ac",
+        carrier="diesel",
+        p_nom=30.0,
+        build_year=2040,
+        lifetime=30,
+    )
+    lines = infeasibility_lines(n, SolverConfig(reserve_share_load=1.0))
+    assert "2030 2030-01-01 00:00" in lines[0], lines  # 2030: only 'old' (5 MW) < 10 MW
+    assert "2040" not in lines[0].split(" the reserve needs")[0], (
+        lines
+    )  # 2040: 'new' (30 MW) covers it
+
+
+def test_off_adds_no_auxiliary_variable_and_on_does():
+    n = _network(battery=True)
+    n.optimize.create_model()
+    fn = build_lp_chain(n, SolverConfig(), queue.SimpleQueue())
+    if fn is not None:
+        fn(n, n.snapshots)
+    assert _AUX not in n.model.variables
+    m = _network(battery=True)
+    m.optimize.create_model()
+    build_lp_chain(m, SolverConfig(**ON), queue.SimpleQueue())(m, m.snapshots)
+    assert _AUX in m.model.variables
+
+
+def _run(n, **cfg):
+    import threading
+
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import run_simulation
+
+    PyPSAService.set_network(n)
+    q: queue.SimpleQueue = queue.SimpleQueue()
+    sink: dict = {}
+    status, _ = run_simulation(
+        SolverConfig(**cfg),
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        q,
+        state_update=lambda **kw: sink.update(kw),
+    )
+    log = []
+    while not q.empty():
+        log.append(str(q.get_nowait()))
+    return status, sink, log
+
+
+def test_last_solve_settings_carry_the_shares_only_when_on():
+    """O1: an off solve's settings are byte-identical to before 01b."""
+    status, sink, log = _run(_network())
+    assert status == "ok", log[-5:]
+    assert not any(k.startswith("reserve_share") for k in sink["last_solve_settings"])
+    status, sink, log = _run(_network(), **ON)
+    assert status == "ok", log[-5:]
+    assert sink["last_solve_settings"]["reserve_share_load"] == 0.2
+
+
+def test_every_myopic_horizon_builds_the_reserve_rows():
+    """O8: the myopic path chains the same wrapper; the row is built in each period's LP."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.set_investment_periods([2030, 2040])
+    n.add("Bus", "ac", carrier="AC")
+    n.add("Load", "site", bus="ac", p_set=LOAD_MW)
+    n.add(
+        "Generator",
+        "diesel",
+        bus="ac",
+        carrier="diesel",
+        p_nom_extendable=True,
+        capital_cost=100.0,
+        marginal_cost=250.0,
+        lifetime=50,
+        build_year=2030,
+        p_nom_max=100.0,
+    )
+    status, _, log = _run(
+        n,
+        solve_strategy="myopic",
+        multi_investment_periods=True,
+        reserve_share_load=0.5,
+    )
+    assert status == "ok", [l for l in log if "ERROR" in l or "rror" in l][:6]
+    assert sum(f"(row {ROW}," in l for l in log) == 2, [
+        l for l in log if "Operating reserve" in l
+    ]
