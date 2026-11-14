@@ -268,3 +268,249 @@ def test_a_ups_takes_its_storage_units_hourly_power():
     ups = _unit(hourly, campus, "bess")
     assert next(u for u in campus["campus"]["units"].values() if u["pypsa_name"] == "bess")["kind"] == "ups"
     assert ups["p_mw"].tolist() == [-5.0, 5.0, -5.0, 5.0, -5.0, 5.0]
+
+
+# ── the solved tie state per hour (study harness 40, SH40-BRIDGE-2) ─────────
+#
+# ``tie_open`` is True in an hour when nothing at the PCC can carry power
+# then: no Line or Transformer touches the PCC bus, and every Link there has
+# a solved rating times max(p_max_pu, -p_min_pu) of at most TIE_OPEN_TOL_MW,
+# or is committable and off (status 0). The networks here are built without
+# any template and without the campus file's tie_normally_open.
+
+
+def _tie(n, **attrs):
+    for k, v in attrs.items():
+        n.links.loc["grid_import", k] = v
+    return n
+
+
+def _no_flow(n):
+    n.links_t.p0["grid_import"] = 0.0
+    n.links_t.p1["grid_import"] = 0.0
+    return n
+
+
+def test_a_tie_held_at_zero_by_p_max_pu_is_open_in_every_hour():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc["tie_open"].dtype == bool and pcc["tie_open"].all()
+
+
+def test_a_tie_that_could_conduct_is_closed_even_when_it_carries_nothing():
+    n = _no_flow(solved_hub())                                     # p_max_pu 1, 0 MW through it
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
+
+
+def test_a_time_varying_limit_opens_the_tie_in_its_zero_hours_only():
+    n = _no_flow(solved_hub())
+    pu = np.array([1.0, 0.0, 0.0, 1.0, 0.0, 1.0])
+    n.links_t.p_max_pu = pd.DataFrame({"grid_import": pu}, index=n.snapshots)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc["tie_open"].tolist() == [False, True, True, False, True, False]
+
+
+def test_a_reverse_limit_keeps_the_tie_closed():
+    """max(p_max_pu, -p_min_pu): a Link that can carry power backwards conducts."""
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0, p_min_pu=-1.0))
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
+
+
+def test_a_rating_times_limit_at_the_tolerance_is_open_and_just_above_it_closed():
+    from gridspine.schema.campus import TIE_OPEN_TOL_MW
+
+    n = _no_flow(_tie(solved_hub(), p_nom=60.0))
+    pu = np.full(H, TIE_OPEN_TOL_MW / 60.0)
+    pu[3] = 1.5 * TIE_OPEN_TOL_MW / 60.0
+    n.links_t.p_max_pu = pd.DataFrame({"grid_import": pu}, index=n.snapshots)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc["tie_open"].tolist() == [True, True, True, False, True, True]
+
+
+def test_an_extendable_tie_the_solve_built_at_zero_is_open():
+    n = _no_flow(_tie(solved_hub(), p_nom_extendable=True, p_nom=60.0, p_nom_opt=0.0))
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc["tie_open"].all()
+    n.links.loc["grid_import", "p_nom_opt"] = 5.0                  # built: its solved size, not p_nom
+    n.links.loc["grid_import", "p_nom"] = 0.0
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
+
+
+def test_a_committable_tie_is_open_in_the_hours_it_is_off():
+    n = _no_flow(_tie(solved_hub(), committable=True))
+    n.links_t.status = pd.DataFrame({"grid_import": [1.0, 0.0, 1.0, 1.0, 0.0, 1.0]}, index=n.snapshots)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc["tie_open"].tolist() == [False, True, False, False, True, False]
+
+
+def test_a_committable_tie_without_a_solved_status_is_closed():
+    n = _no_flow(_tie(solved_hub(), committable=True))
+    n.links_t.status = pd.DataFrame(index=n.snapshots)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
+
+
+def test_a_line_at_the_pcc_closes_the_tie_whatever_the_links_say():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    n.add("Line", "pcc_line", bus0="grid", bus1="mv", x=0.1, r=0.01, s_nom=50.0)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
+
+
+def test_every_link_at_the_pcc_must_be_open():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    n.add("Link", "second_tie", bus0="grid", bus1="mv", p_nom=5.0)
+    n.links_t.p0["second_tie"] = 0.0
+    n.links_t.p1["second_tie"] = 0.0
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
+
+
+def test_a_pcc_fed_only_by_a_grid_generator_is_closed():
+    n = solved_hub()
+    n.remove("Link", "grid_import")
+    n.links_t.p0 = n.links_t.p0.drop(columns="grid_import", errors="ignore")
+    n.links_t.p1 = n.links_t.p1.drop(columns="grid_import", errors="ignore")
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
+
+
+def test_a_pcc_marked_twice_reads_closed():
+    """Not one PCC: fail closed, every hour judged."""
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    campus = draft_campus(n).spec
+    n.buses.loc["mv", "eh_poc"] = True
+    _, pcc = campus_hourly(n, campus)
+    assert not pcc["tie_open"].any()
+
+
+def test_a_pcc_the_network_does_not_have_reads_closed():
+    from gridspine.producers.campus import pcc_tie_open
+
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    assert pcc_tie_open(n, "grid").all()
+    assert not pcc_tie_open(n, "no_such_bus").any()
+    assert not pcc_tie_open(n, None).any()
+    assert len(pcc_tie_open(n, "no_such_bus")) == len(n.snapshots)
+
+
+def test_the_tie_state_is_read_from_the_solve_never_from_the_campus_file_or_the_name():
+    """A campus file that says tie_normally_open, on a network named like the
+    microgrid template, does not open a tie that can conduct, and a file that
+    does not say it does not close one that cannot."""
+    n = _no_flow(solved_hub())
+    n.name = "Island Microgrid"
+    campus = draft_campus(n).spec
+    campus["campus"]["pcc"]["tie_normally_open"] = True
+    _, pcc = campus_hourly(n, campus)
+    assert not pcc["tie_open"].any()
+    m = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    spec = draft_campus(m).spec
+    spec["campus"]["pcc"].pop("tie_normally_open", None)
+    _, pcc = campus_hourly(m, spec)
+    assert pcc["tie_open"].all()
+
+
+def test_the_tie_state_is_per_investment_period_hour():
+    n = _no_flow(solved_hub(periods=[2030, 2040]))
+    pu = np.where(np.arange(len(n.snapshots)) < H, 0.0, 1.0)      # open in 2030, closed in 2040
+    n.links_t.p_max_pu = pd.DataFrame({"grid_import": pu}, index=n.snapshots)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc.groupby("period")["tie_open"].agg(list).to_dict() == {2030: [True] * H, 2040: [False] * H}
+
+
+def test_the_draft_still_reads_a_normally_open_tie_from_every_hour():
+    """The draft's own rule (_open_tie_rating) is unchanged by the per-hour state."""
+    n = _no_flow(solved_hub())
+    pu = np.array([1.0, 0.0, 0.0, 1.0, 0.0, 1.0])
+    n.links_t.p_max_pu = pd.DataFrame({"grid_import": pu}, index=n.snapshots)
+    assert "tie_normally_open" not in draft_campus(n).spec["campus"]["pcc"]
+    m = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    assert draft_campus(m).spec["campus"]["pcc"]["tie_normally_open"] is True
+
+
+def test_the_tie_state_survives_the_written_pcc_file(tmp_path):
+    """P3: the column the producer writes reads back unchanged; a run file
+    written before the column existed, or a cell that is not a clear true,
+    reads as closed."""
+    from gridspine.schema.campus import validate_pcc
+
+    n = _no_flow(solved_hub())
+    n.links_t.p_max_pu = pd.DataFrame({"grid_import": [1.0, 0.0, 0.0, 1.0, 0.0, 1.0]}, index=n.snapshots)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    path = tmp_path / "campus_pcc.csv"
+    pcc.to_csv(path, index=False)
+    back = validate_pcc(pd.read_csv(path))
+    pd.testing.assert_frame_equal(back, pcc)
+    pcc.drop(columns="tie_open").to_csv(path, index=False)
+    old = validate_pcc(pd.read_csv(path))
+    assert old["tie_open"].dtype == bool and not old["tie_open"].any()
+    odd = pcc.astype({"tie_open": object})
+    odd["tie_open"] = ["True", "", None, "yes", "1", "false"]
+    odd.to_csv(path, index=False)
+    assert validate_pcc(pd.read_csv(path))["tie_open"].tolist() == [True, False, False, False, True, False]
+
+
+def test_a_line_away_from_the_pcc_leaves_the_tie_open():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    n.add("Bus", "mv2", v_nom=20.0)
+    n.add("Line", "campus_cable", bus0="mv", bus1="mv2", x=0.1, r=0.01, s_nom=50.0)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc["tie_open"].all()
+
+
+def test_a_network_that_marks_no_pcc_takes_the_campus_files_pcc():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    campus = draft_campus(n).spec
+    n.buses["eh_poc"] = False
+    _, pcc = campus_hourly(n, campus)
+    assert pcc["tie_open"].all()
+
+
+def test_a_status_on_a_link_that_is_not_committable_does_not_open_it():
+    n = _no_flow(solved_hub())
+    n.links_t.status = pd.DataFrame({"grid_import": 0.0}, index=n.snapshots)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
+
+
+def test_the_draft_does_not_call_a_tie_that_can_carry_power_back_normally_open():
+    m = _no_flow(_tie(solved_hub(), p_max_pu=0.0, p_min_pu=-1.0))
+    assert "tie_normally_open" not in draft_campus(m).spec["campus"]["pcc"]
+
+
+# GK A R2-1: the grid generator decides only when no Link touches the PCC.
+
+
+def test_r2_a_grid_generator_on_the_pcc_beside_an_open_tie_reads_open():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))               # grid_supply sits on the PCC bus
+    assert "grid_supply" in n.generators.index and n.generators.at["grid_supply", "bus"] == "grid"
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc["tie_open"].all()
+
+
+def test_r2_the_same_grid_generator_with_no_link_reads_closed():
+    from gridspine.producers.campus import pcc_tie_open
+
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    campus = draft_campus(n).spec
+    n.remove("Link", "grid_import")
+    n.links_t.p0 = n.links_t.p0.drop(columns="grid_import", errors="ignore")
+    n.links_t.p1 = n.links_t.p1.drop(columns="grid_import", errors="ignore")
+    n.links_t.p_max_pu = n.links_t.p_max_pu.drop(columns="grid_import", errors="ignore")
+    assert not pcc_tie_open(n, "grid").any()
+    _, pcc = campus_hourly(n, campus)
+    assert not pcc["tie_open"].any()
+
+
+def test_r2_an_open_tie_beside_a_conducting_link_reads_closed():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    n.add("Bus", "dc", v_nom=20.0, carrier="DC")
+    n.add("Link", "converter", bus0="grid", bus1="dc", p_nom=2.0)    # a local converter, can conduct
+    n.links_t.p0["converter"] = 0.0
+    n.links_t.p1["converter"] = 0.0
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Decision-study reports, the investment case and value-flow hubs now read their out-of-date state from the provenance graph. The report and investment-case responses carry a `verdict` naming each input that changed, and whether only a new run clears it. A current hash that cannot be read now marks the report out of date instead of failing the request.

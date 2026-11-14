@@ -90,7 +90,9 @@ def _file(file_id):
 
 
 def get_file_delivery(file_id: str) -> dict:
+    from services import upload_service
     project, _, _, meta, _ = _file(file_id)
+    upload_service.refuse_expired_delivery(meta)
     return {"file_id": meta.file_id, "filename": meta.filename, "mime": meta.mime,
             "size": meta.size, "kind": meta.kind, "sha256": meta.sha256,
             "project_id": str(project.id), "download_url":
@@ -999,6 +1001,7 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
     files, total = [], 0
     for file_id in file_ids:
         _, _, _, meta, path = _file(file_id)
+        upload_service.refuse_expired_delivery(meta)
         total += path.stat().st_size
         if total > upload_service.MAX_FILE_BYTES - 100000:
             workflow._refuse("delivery_too_large", "Delivery contents exceed the 25 MB limit.", 413)

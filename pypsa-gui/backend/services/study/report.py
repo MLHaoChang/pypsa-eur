@@ -633,30 +633,16 @@ def stale_reasons(report: DecisionReport, study: DecisionStudy, ledger: Assumpti
     U2 WP8 (plan §2 C10, gate C6): a report of a run that recorded no engine
     inputs is ``run_by_an_earlier_version``; a fork whose engine inputs were
     edited since is ``engine_inputs_changed_since_findings:<option>``.
-    """
-    from services.study import run_hashes
 
-    reasons = list(study.stale_reasons) if study.stale else []
-    hashes = report.hashes_at_findings
-    if hashes is None:
-        reasons.append("report_has_no_findings_hashes")
-        return list(dict.fromkeys(reasons))
-    if not run_hashes.engine_recorded(hashes):
-        reasons.append("run_by_an_earlier_version")
-    if not run_hashes.ledger_matches(ledger, hashes):
-        reasons.append("ledger_changed_since_findings")
-    if not run_hashes.intake_matches(study.intake, hashes):
-        reasons.append("intake_changed_since_findings")
-    forks = ((report.sections.get("appendix") or ReportSection(status="ok")).payload or {}).get(
-        "option_forks") or {}
-    for fork_uuid, recorded in sorted(hashes.option_network_hashes.items()):
-        if not run_hashes.fork_matches(recorded, fork_hash_now(fork_uuid)):
-            reasons.append(f"fork_changed_since_findings:{forks.get(fork_uuid, fork_uuid)}")
-        elif run_hashes.engine_recorded(hashes) and not run_hashes.compiled_matches(
-                hashes, fork_uuid, fork_engine_now(fork_uuid)):
-            reasons.append(
-                f"engine_inputs_changed_since_findings:{forks.get(fork_uuid, fork_uuid)}")
-    return list(dict.fromkeys(reasons))
+    The checks are the report's verdict on the provenance graph
+    (`provenance_graph.studies.report_verdict`, PG-05): these are its broken
+    edges in those codes, in this order. A current hash that cannot be read is
+    stale with its reason, never a raise.
+    """
+    from services.provenance_graph import studies
+
+    return studies.report_verdict(report, study, ledger, fork_hash_now,
+                                  fork_engine_now=fork_engine_now)[1]
 
 
 def money_unit(report: DecisionReport, *, per_year: bool = False) -> str:
