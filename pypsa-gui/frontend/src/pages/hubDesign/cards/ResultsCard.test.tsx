@@ -16,6 +16,15 @@ import { kpiMoney } from '../plainWords'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { REPORT, review } from '../testFixtures'
 import { EDITED_TEXT, ResultsCard } from './ResultsCard'
+import { useProjectFlow } from '../../../hooks/useProjectFlow'
+
+vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
+
+function flowWith(by: Record<string, string | null>, req = { optimisation: true, study: true, loadflow: false }) {
+  vi.mocked(useProjectFlow).mockReturnValue({ flow: { deferred: false, run_request: req,
+    sections: [{ section: 'results', freshness_by_kind: by }] },
+  } as unknown as ReturnType<typeof useProjectFlow>)
+}
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -34,6 +43,7 @@ function study(report: EhReferenceDesignReport = REPORT) {
 }
 
 beforeEach(() => {
+  vi.mocked(useProjectFlow).mockReturnValue({ flow: null } as unknown as ReturnType<typeof useProjectFlow>)
   useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: 'hubDesign',
     resultsTabRequest: null, ehReportRequest: false })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true, step: 'results' })
@@ -208,6 +218,23 @@ describe('ResultsCard body', () => {
     expect(tile.textContent).not.toContain('Out of date')
     expect(tile.querySelector('.opacity-60')).not.toBeNull()
     expect(stale.querySelector('button')?.textContent).toBe('Go to Goal and run the study')
+  })
+
+  it('says once, in words, that uncompared results were never checked (PG-12)', async () => {
+    flowWith({ optimisation: 'uncompared', study: 'fresh', loadflow: 'fresh' })
+    mount()
+    const note = await screen.findByTestId('hub-results-unchecked')
+    expect(note.textContent).toBe(
+      'Optimisation results came with the project and were not checked against its inputs. Run to check them.')
+    expect(screen.getAllByTestId('hub-results-unchecked')).toHaveLength(1)
+    expect(screen.queryByTestId('hub-results-stale')).toBeNull()
+  })
+
+  it.each(['fresh', 'stale'])('shows no unchecked notice for a %s kind', async (word) => {
+    flowWith({ optimisation: word, study: 'fresh', loadflow: 'fresh' })
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-unchecked')).toBeNull()
   })
 
   it('a "study record" source without stale:true shows no banner', async () => {

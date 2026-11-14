@@ -76,7 +76,10 @@ def invalid_goal_fields(data: dict) -> dict[str, Any]:
     then off) and names them, never refuses the file."""
     checks = (("target_lole_h", valid_lole), ("mc_draws", valid_draws),
               ("site_archetype", valid_archetype),
-              ("min_renewable_fraction", valid_fraction))
+              ("min_renewable_fraction", valid_fraction),
+              ("reserve_share_load", valid_fraction),
+              ("reserve_share_pv", valid_fraction),
+              ("reserve_share_wind", valid_fraction))
     return {k: data[k] for k, ok in checks
             if (data or {}).get(k) is not None and not ok(data[k])}
 
@@ -132,7 +135,8 @@ def goal_sources(goal: dict, overridden: set[str] | frozenset[str] = frozenset()
 # Opt-in LP fields added after fingerprints existed: left out while off
 # (None or 0, which change no outcome), so every fingerprint and digest
 # computed before the field existed still matches (homer-parity 01a R1).
-OFF_WHEN_FALSY = frozenset({"min_renewable_fraction"})
+OFF_WHEN_FALSY = frozenset({"min_renewable_fraction", "reserve_share_load",
+                            "reserve_share_pv", "reserve_share_wind"})
 
 
 def goal_free_config(cfg: Any) -> dict:

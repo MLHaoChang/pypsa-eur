@@ -441,7 +441,7 @@ export default function InvestmentCaseView() {
   // While a run is under way, the previous report describes other inputs.
   const r = running ? null : (report.data ?? null)
   const staleness = studyStale(s)
-  const stale = !running && (staleness.stale || r?.stale === true)
+  const stale = !running && staleness.stale
   const fraction = progressFraction(studyProgress(s))
   const progress = progressText(studyProgress(s))
   const failure = studyFailure(s)
@@ -480,7 +480,7 @@ export default function InvestmentCaseView() {
         <p role="alert" className="text-warn" data-testid="ic-stale">
           {uncheckableReason(staleness.reason)
             ? <>Unconfirmed: {uncheckableReason(staleness.reason)}.</>
-            : <>Stale: {staleness.changed.length
+            : <>Out of date: {staleness.changed.length
                 ? `${staleness.changed.map(stalePartLabel).join(', ')} changed`
                 : 'the finance inputs, the value flows, the commercial config, the solver config, the dispatch, '
                   + "a pack, the owner assets' investment columns or the campus study changed"}

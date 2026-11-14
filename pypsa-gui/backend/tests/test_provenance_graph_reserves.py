@@ -306,3 +306,146 @@ def test_a_network_swapped_during_the_read_reads_stale(active, monkeypatch):
         assert RP.solved(n, _digest([fcr])) == STALE
     finally:
         ctx.network = n
+
+
+# ── PG-13: the frame, the flags and the hours a line is priced at are one read ─
+
+
+def _reweight_right_after_the_read(monkeypatch, n):
+    """A reweighting (every hour doubled) that lands right after each bracket closes, with no edit-counter bump:
+    the next read would see it, this one must not."""
+    real = runs.locked_read
+    calls = []
+
+    def then_reweight(ctx, fn):
+        got = real(ctx, fn)
+        calls.append(got)
+        n.snapshot_weightings.loc[:, "objective"] = (
+            n.snapshot_weightings.objective * 2.0
+        )
+        return got
+
+    monkeypatch.setattr(runs, "locked_read", then_reweight)
+    return calls
+
+
+def test_a_line_is_priced_at_the_weights_its_frame_was_read_with(solved, monkeypatch):
+    """GK B (54) on #1478: the hours were read after `solved()` returned, so a reweighting landing in between priced
+    the old commitments at the new hours (400.0 against 200.0, flags [])."""
+    from services.results import billing as B
+
+    n, fcr = solved
+    backup = (FLOORS, frozenset({STRING}))
+    (base,), _ = B.reserve_lines(n, _cfg([fcr]), "site", backup=backup)
+    assert base.amount is not None and base.amount > 0
+    _reweight_right_after_the_read(monkeypatch, n)
+    (line,), flags = B.reserve_lines(n, _cfg([fcr]), "site", backup=backup)
+    assert (line.amount, line.flags, flags) == (base.amount, base.flags, [])
+
+
+def test_the_view_reads_once_and_hands_that_read_to_its_lines(solved, monkeypatch):
+    from services.results import billing as B
+    from services.results.reserves import reserve_view
+
+    n, fcr = solved
+    backup = (FLOORS, frozenset({STRING}))
+    (base,), _ = B.reserve_lines(n, _cfg([fcr]), "site", backup=backup)
+    calls = _reweight_right_after_the_read(monkeypatch, n)
+    view = reserve_view(n, _cfg([fcr]), solved=True, backup=backup)
+    assert len(calls) == 1
+    assert view["flags"] == []
+    (line,) = view["lines"]
+    assert (line["amount"], line["flags"]) == (base.amount, base.flags)
+
+
+def test_an_unreadable_read_prices_no_line(solved, monkeypatch):
+    from services.results import billing as B
+
+    n, fcr = solved
+    monkeypatch.setattr(runs, "locked_read", lambda ctx, fn: pins.UNREADABLE)
+    (line,), flags = B.reserve_lines(
+        n, _cfg([fcr]), "site", backup=(FLOORS, frozenset({STRING}))
+    )
+    assert line.amount is None
+    assert flags == ["reserve_inputs_changed_since_solve", "reserve_not_solved"]
+    assert line.flags == flags
+
+
+def test_a_read_taken_for_other_inputs_is_read_again(solved, monkeypatch):
+    """GK B P1: a read carries the digest it compared; one handed over from other products is never priced, it is
+    read again for these (here: stale, so no amount)."""
+    from services.results import billing as B
+
+    n, fcr = solved
+    backup = (FLOORS, frozenset({STRING}))
+    other = [_product(max_commit_mw=1.0)]
+    handed = RP.solved_read(n, lambda: _digest([fcr]))
+    assert handed.flags == [] and handed.inputs == _digest([fcr])
+    (line,), flags = B.reserve_lines(n, _cfg(other), "site", backup=backup, read=handed)
+    assert line.amount is None
+    assert flags == ["reserve_inputs_changed_since_solve", "reserve_not_solved"]
+    # The matching read is priced as handed, with no second bracket.
+    (base,), _ = B.reserve_lines(n, _cfg([fcr]), "site", backup=backup)
+    calls = _reweight_right_after_the_read(monkeypatch, n)
+    (line,), _ = B.reserve_lines(n, _cfg([fcr]), "site", backup=backup, read=handed)
+    assert line.amount == base.amount and calls == []
+
+
+def test_a_read_with_no_digest_is_read_again(solved):
+    from services.results import billing as B
+
+    n, fcr = solved
+    handed = RP.solved_read(n)
+    assert handed.flags == [] and handed.inputs is None
+    (line,), _ = B.reserve_lines(
+        n,
+        _cfg([_product(max_commit_mw=1.0)]),
+        "site",
+        backup=(FLOORS, frozenset({STRING})),
+        read=handed,
+    )
+    assert line.amount is None
+
+
+def test_hours_are_none_exactly_when_the_read_has_flags(solved):
+    """GK B P3, from the read's side: a fresh read has hours, a flagged one none."""
+    n, fcr = solved
+    fresh = RP.solved_read(n, _digest([fcr]))
+    assert fresh.flags == [] and fresh.hours is not None
+    assert fresh.hours.index.equals(n.snapshots)
+    for digest in (_digest([_product(max_commit_mw=1.0)]),):
+        stale = RP.solved_read(n, digest)
+        assert stale.flags and stale.hours is None
+    n.meta.pop(RP.META_KEY)
+    gone = RP.solved_read(n, _digest([fcr]))
+    assert gone.flags == ["reserve_not_solved"] and gone.hours is None
+
+
+@pytest.mark.parametrize("hours", ["none", "short"])
+def test_a_read_with_no_hours_for_these_snapshots_prices_no_line(solved, hours):
+    """GK B P3, from the line's side: a hand-built read with no flags but no hours (or hours for other snapshots)
+    gives no amount and a flag, never 0 or a partial price."""
+    from services.results import billing as B
+
+    n, fcr = solved
+    good = RP.solved_read(n, _digest([fcr]))
+    bad = None if hours == "none" else good.hours.iloc[:-1]
+    handed = RP.Solved(good.frame, [], bad, good.inputs)
+    (line,), flags = B.reserve_lines(
+        n, _cfg([fcr]), "site", backup=(FLOORS, frozenset({STRING})), read=handed
+    )
+    assert line.amount is None
+    assert flags == ["reserve_not_solved"] and "reserve_not_solved" in line.flags
+
+
+def test_a_stale_view_reads_once_too(solved, monkeypatch):
+    """A flagged read prices nothing whatever its digest, so the lines take it as handed: no second bracket."""
+    from services.results.reserves import reserve_view
+
+    n, _ = solved
+    calls = _reweight_right_after_the_read(monkeypatch, n)
+    now = [_product(max_commit_mw=1.0)]
+    view = reserve_view(n, _cfg(now), solved=True, backup=(FLOORS, frozenset({STRING})))
+    assert len(calls) == 1
+    assert view["flags"] == ["reserve_inputs_changed_since_solve", "reserve_not_solved"]
+    assert all(ln["amount"] is None for ln in view["lines"])

@@ -649,7 +649,12 @@ def test_the_off_grid_scorecard_excludes_the_sk_rows_with_their_reason(
         "flicker",
         "voltage_unbalance",
     } <= set(excluded)
-    assert all(reason in (G.SK_OFF_GRID, G.VS_OFF_GRID) for reason in excluded.values())
+    assert all(
+        reason in (G.SK_OFF_GRID, G.VS_OFF_GRID, G.CONN_OFF_GRID)
+        for reason in excluded.values()
+    )
+    # SH41-OFFGRID-1: the connection's ramp and oscillation limits leave too.
+    assert excluded["ramp_rate"] == excluded["oscillation"] == G.CONN_OFF_GRID
     assert not ids & set(excluded)
     # The island rows stay: the grid former and the ride-through scenario.
     assert "grid_former" in ids and "ride_through:seamless" in ids

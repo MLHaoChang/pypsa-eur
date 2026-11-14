@@ -313,6 +313,9 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/headline_kpis",
         # homer-parity 01a: one share per period, not a series.
         "/renewable_fraction",
+        # homer-parity 01b: per-snapshot records and the binding list, not a
+        # windowed index/columns/data frame.
+        "/operating_reserve",
         # Grid-to-process process view (ticket 04): per-product and per-unit
         # records; each inventory carries its own level list, not index/columns/data.
         "/process_view",

@@ -4691,10 +4691,33 @@ TOOLS: list[dict[str, Any]] = [
         "approves a card showing every line added, changed (old → new) or removed and "
         "each price's source; an edit too large for one card is refused "
         "(business_case_card_too_large): split it. clear=true (no business_case) removes "
-        "every line. The preset is the panel's (Results, Investment tab). Safety: write.",
+        "every line. `set` (instead of business_case) changes named cells of the STORED "
+        "lines without sending them back: {\"<line name>\": {price | price_by_year | "
+        "quantity | quantity_by_year | money_year | life_years: value}, kw_per_gpu?, "
+        "break_even_line?}; a cell that replaces a pack default (assumed) makes the user its "
+        "source, so it cites the user too (citation `column` names a non-price cell), even "
+        "when equal to the default. Unknown names or columns: business_case_set_invalid. "
+        "Safety: write.",
         {"business_case": {"type": "object"}, "if_match": {"type": "string"},
-         "clear": {"type": "boolean"},
+         "clear": {"type": "boolean"}, "set": {"type": "object"},
          "citations": {"type": "array", "maxItems": 60, "items": {"type": "object"}}},
+        ["if_match"],
+    ),
+    _t(
+        "apply_business_case_preset",
+        "Store the open project's template preset as the business-case lines (Guided "
+        "'is this plant worth building?'). The SERVER fills every cost default from the "
+        "preset's pinned pack, marked assumed with its source and year; revenue prices stay "
+        "empty. `variant` picks one of the template's presets; a template with none (the "
+        "generic site, or a template with no preset yet) takes `rows`, the labels of the "
+        "offered rows the user picked. Refusals list the choices: preset_variant_required "
+        "(variants), preset_rows_required (offered). `if_match` is REQUIRED (the digest of "
+        "get_business_case(detail='inputs')); it REPLACES the stored lines, so the card "
+        "shows each removed line. Returns `to_ask` (every empty price, quantity or share: "
+        "ask the user, NEVER invent) and `assumed` (each default with source and year). "
+        "Needs the finance inputs (their currency). Safety: write.",
+        {"if_match": {"type": "string"}, "variant": {"type": "string"},
+         "rows": {"type": "array", "maxItems": 20, "items": {"type": "string"}}},
         ["if_match"],
     ),
     _t(
@@ -4962,8 +4985,11 @@ TOOLS: list[dict[str, Any]] = [
         "why_this_number",
         "Explain why one number has its value, step by step, from the provenance graph. "
         "Target either an asset field (component, name, field; field='capital_cost' is the "
-        "Economics row's annualised cost) or a Guided ledger row (project, study_id, ledger_key, "
-        "option_id: the row on that option's network). The result starts with `outcome` "
+        "Economics row's annualised cost), a Guided ledger row (project, study_id, ledger_key, "
+        "option_id: the row on that option's network) or a calculation metric a checked evidence "
+        "record answered (evidence_id, metric: its steps pin the record's raw inputs, window and value "
+        "against the open network now; the run it was computed in reads uncompared, so it is never "
+        "fresh). The result starts with `outcome` "
         "(state fresh|stale|uncompared|from_memory, complete, truncated), then each step: what the value "
         "was derived from or priced through (a pack price scaled by dc_ac_ratio or a Link's "
         "efficiency), its value and unit as stored now, its provenance stamp (status, source, "
@@ -4982,7 +5008,9 @@ TOOLS: list[dict[str, Any]] = [
          "project": {"type": "string", "minLength": 1},
          "study_id": {"type": "string", "minLength": 1},
          "ledger_key": {"type": "string", "minLength": 1},
-         "option_id": {"type": "string", "minLength": 1}},
+         "option_id": {"type": "string", "minLength": 1},
+         "evidence_id": {"type": "string", "minLength": 1},
+         "metric": {"type": "string", "minLength": 1}},
         [],
     ),
     _t(
@@ -5872,7 +5900,8 @@ TOOL_ROUTES: dict[str, list] = {
     # end LV08 B2a
     # Provenance graph (1), issue 03: "why this number", an asset field or a Guided ledger row.
     "why_this_number": [("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}"),
-                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why")],
+                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why"),
+                        ("GET", "/api/chat/evidence/{evidence_id}/why/{metric}")],
     # Library references (3): two reads (the asset's pack from its provenance) and the apply.
     "list_library_references": [("GET", "/api/library/references")],
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
@@ -5901,6 +5930,8 @@ TOOL_ROUTES: dict[str, list] = {
     "get_business_case": [("GET", "/api/results/business_case"),
                           ("GET", "/api/results/business_case/inputs")],
     "set_business_case_lines": [("PUT", "/api/results/business_case/inputs")],
+    "apply_business_case_preset": [("GET", "/api/results/business_case/preset"),
+                                   ("PUT", "/api/results/business_case/inputs")],
     "abort_business_case": [("POST", "/api/results/business_case/abort")],
     # decision study (6) — U3: `routers/studies.py`, in process through `_route`.
     "start_decision_study": [("POST", "/api/projects/{name}/studies/")],
