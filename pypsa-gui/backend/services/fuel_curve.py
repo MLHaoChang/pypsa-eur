@@ -27,6 +27,17 @@ ruling 3): the backup prices fuel from its own heat rate, says so in its cost no
 ("Fuel curve not used here"), and its NPV is never summed into the solve's opex.
 
 A generator with none of the three set keeps its own costs: no curve, no change.
+
+Run hours (homer-parity 02b). ``om_cost_per_run_hour`` (EUR per hour while the unit is on, HOMER's O&M per
+operating hour) reaches the solve through the same ``stand_by_cost``, added to the no-load term:
+
+* ``stand_by_cost = no_load × p_nom × fuel_price + om_cost_per_run_hour``.
+
+It needs ``committable``: the LP knows an hour is run only through the unit's status. O&M alone owns only the
+stand-by cost (``owned``), so the marginal cost stays the user's. ``lifetime_run_hours`` (h) prices nothing in the
+LP (its capital cost annuity keeps the calendar ``lifetime``); the finance case reads it (``run_hour_lifetime``):
+the parts wear out after that many running hours at the solved rate, or at the calendar lifetime if sooner.
+``run_hours`` reports both in the cost breakdown, from solved values only.
 """
 
 from __future__ import annotations
@@ -41,6 +52,13 @@ SLOPE = "fuel_curve_slope"
 NO_LOAD = "fuel_curve_no_load"
 PRICE = "fuel_price"
 COLUMNS = (SLOPE, NO_LOAD, PRICE)
+OM_HOUR = "om_cost_per_run_hour"
+LIFE_HOURS = "lifetime_run_hours"
+#: Every input this module reads (the fingerprint, the pre-run check): the curve and the run-hour pair.
+INPUT_COLUMNS = (*COLUMNS, OM_HOUR, LIFE_HOURS)
+#: The inputs the LP reads (the solve fingerprint). A lifetime in running hours is read by the investment case only
+#: (`finance_case.owner_assets_digest`).
+LP_COLUMNS = (*COLUMNS, OM_HOUR)
 #: The PyPSA columns the curve writes.
 DERIVED = ("marginal_cost", "stand_by_cost")
 #: Each column as the Generator form labels it (`services/asset_schema/fields.py`): a refusal opens with it.
@@ -48,6 +66,8 @@ LABELS = {
     SLOPE: "Fuel curve slope",
     NO_LOAD: "No-load fuel",
     PRICE: "Fuel price",
+    OM_HOUR: "O&M per running hour",
+    LIFE_HOURS: "Lifetime in running hours",
     "marginal_cost": "Marginal cost",
     "stand_by_cost": "Stand-by cost",
 }
@@ -84,10 +104,25 @@ def curve_of(row: Mapping[str, Any]) -> tuple[float, float, float] | None:
 
 def check(row: Mapping[str, Any]) -> str | None:
     """Why the row's curve cannot be priced, or None when it can (or sets none)."""
-    for k in COLUMNS:
+    for k in INPUT_COLUMNS:
         v = row.get(k)
         if not _is_unset(v) and _num(v) is None:
             return f"{LABELS[k]}: enter a finite number (got {v})"
+    return _check_curve(row) or _check_run_hours(row)
+
+
+def _check_run_hours(row: Mapping[str, Any]) -> str | None:
+    om, life = _num(row.get(OM_HOUR)), _num(row.get(LIFE_HOURS))
+    if om is not None and om < 0:
+        return f"{LABELS[OM_HOUR]}: enter zero or more (got {om:g})"
+    if om and not _flag(row.get("committable")):
+        return f"{LABELS[OM_HOUR]}: turn on Unit commitment, or set it to 0. It is paid only while the unit is on."
+    if life is not None and life <= 0:
+        return f"{LABELS[LIFE_HOURS]}: enter more than zero (got {life:g})"
+    return None
+
+
+def _check_curve(row: Mapping[str, Any]) -> str | None:
     curve = curve_of(row)
     if curve is None:
         return None
@@ -111,6 +146,18 @@ def check(row: Mapping[str, Any]) -> str | None:
     return None
 
 
+def owned(row: Mapping[str, Any]) -> tuple[str, ...]:
+    """The PyPSA cost columns the row's inputs set: both with a curve, the stand-by cost with an O&M per running
+    hour alone, none otherwise. A lifetime in running hours sets none."""
+    if curve_of(row) is not None:
+        return DERIVED
+    return ("stand_by_cost",) if _num(row.get(OM_HOUR)) is not None else ()
+
+
+def _setter(row: Mapping[str, Any]) -> str:
+    return "fuel curve" if curve_of(row) is not None else LABELS[OM_HOUR]
+
+
 def _same(a: Any, b: Any) -> bool:
     fa, fb = _num(a), _num(b)
     if fa is None or fb is None:
@@ -132,22 +179,34 @@ def guard(
     """
     if msg := check(after):
         return msg
-    if curve_of(after) is None:
+    own = owned(after)
+    if not own:
         return None
-    if series := [c for c in DERIVED if c in set(cost_series)]:
+    if series := [c for c in own if c in set(cost_series)]:
+        if curve_of(after) is not None:
+            return (
+                f"{LABELS[series[0]]}: remove its profile, or clear the fuel curve. The curve sets this cost, "
+                "so the profile would be ignored"
+            )
         return (
-            f"{LABELS[series[0]]}: remove its profile, or clear the fuel curve. The curve sets this cost, "
+            f"{LABELS[series[0]]}: remove its profile, or clear the {LABELS[OM_HOUR]}. It sets this cost, "
             "so the profile would be ignored"
         )
-    if before is not None and curve_of(before) is not None:
-        for col in DERIVED:
+    if before is not None:
+        for col in owned(before):
             v = (submitted or {}).get(col)
             # A blank is not an edit: the form may send a read-only row empty.
-            if not _is_unset(v) and not _same(v, before.get(col)):
+            if _is_unset(v) or _same(v, before.get(col)):
+                continue
+            if curve_of(before) is not None:
                 return (
                     f"{LABELS[col]}: set by the fuel curve. Change the fuel price, slope or no-load fuel, "
                     "or clear the curve to enter it directly"
                 )
+            return (
+                f"{LABELS[col]}: set by the {LABELS[OM_HOUR]}. Change it, or clear it to enter the stand-by "
+                "cost directly"
+            )
     return None
 
 
@@ -171,16 +230,23 @@ def replace_notice(
     ``after`` is the row as written (the stored values overlaid with what was sent), so a cost sent together with
     a new curve is the one named.
     """
-    if curve_of(after) is None or (before is not None and curve_of(before) is not None):
+    newly = [
+        c
+        for c in owned(after)
+        if c not in (owned(before) if before is not None else ())
+    ]
+    if not newly:
         return None
     new = derived_costs(after)
     replaced = [
         f"the {LABELS[col].lower()} of {_num(after.get(col)):g} {_UNITS[col]} with {new[col]:g} "
         f"{_UNITS[col]}"
-        for col in DERIVED
+        for col in newly
         if (_num(after.get(col)) or 0.0) != 0.0 and not _same(after.get(col), new[col])
     ]
-    return f"The fuel curve replaces {' and '.join(replaced)}." if replaced else None
+    return (
+        f"The {_setter(after)} replaces {' and '.join(replaced)}." if replaced else None
+    )
 
 
 def cleared(
@@ -188,7 +254,11 @@ def cleared(
 ) -> dict[str, float]:
     """The costs a write that clears a curve resets: the stand-by cost, which the form cannot edit and which
     would otherwise stay a charge per on-hour with no curve behind it. Marginal cost stays (it is editable)."""
-    if before is None or curve_of(before) is None or curve_of(after) is not None:
+    if (
+        before is None
+        or "stand_by_cost" not in owned(before)
+        or "stand_by_cost" in owned(after)
+    ):
         return {}
     return {"stand_by_cost": 0.0}
 
@@ -199,9 +269,21 @@ def clear_notice(
     """What a write that clears a curve did to its costs (`cleared`), or None when it clears none.
 
     ``after`` is the row as written; the marginal cost it keeps is the one it carries (derived, or sent)."""
-    if not cleared(after, before=before):
-        return None
     mc = _num(after.get("marginal_cost"))
+    curve_gone = (
+        before is not None and curve_of(before) is not None and curve_of(after) is None
+    )
+    if not cleared(after, before=before):
+        if not curve_gone:
+            return None
+        # The curve is cleared but an O&M per running hour still sets the stand-by cost.
+        return (
+            f"Fuel curve cleared: stand-by cost is now the {LABELS[OM_HOUR]}, "
+            f"{derived_costs(after)['stand_by_cost']:g} €/h; marginal cost keeps {mc or 0.0:g} €/MWh "
+            "(was derived from the curve)."
+        )
+    if not curve_gone:
+        return f"{LABELS[OM_HOUR]} cleared: stand-by cost reset to 0 €/h."
     return (
         "Fuel curve cleared: stand-by cost reset to 0 €/h; marginal cost keeps "
         f"{mc or 0.0:g} €/MWh (was derived from the curve)."
@@ -209,13 +291,17 @@ def clear_notice(
 
 
 def derived_costs(row: Mapping[str, Any]) -> dict[str, float]:
-    """The PyPSA cost columns the curve sets, or {} when the row sets no curve."""
+    """The PyPSA cost columns the row's inputs set (`owned`), or {} when it sets none."""
+    out: dict[str, float] = {}
     curve = curve_of(row)
-    if curve is None:
-        return {}
-    slope, no_load, price = curve
-    p_nom = _num(row.get("p_nom")) or 0.0
-    return {"marginal_cost": slope * price, "stand_by_cost": no_load * p_nom * price}
+    if curve is not None:
+        slope, no_load, price = curve
+        p_nom = _num(row.get("p_nom")) or 0.0
+        out = {"marginal_cost": slope * price, "stand_by_cost": no_load * p_nom * price}
+    om = _num(row.get(OM_HOUR))
+    if om is not None:
+        out["stand_by_cost"] = out.get("stand_by_cost", 0.0) + om
+    return out
 
 
 def apply(n, names=None, *, stamp: bool = True) -> list[str]:
@@ -225,7 +311,7 @@ def apply(n, names=None, *, stamp: bool = True) -> list[str]:
     customised like any edit (``stamp``). Returns the generators whose costs changed.
     """
     gens = n.generators
-    if gens.empty or not any(c in gens.columns for c in COLUMNS):
+    if gens.empty or not any(c in gens.columns for c in INPUT_COLUMNS):
         return []
     idx = gens.index if names is None else [g for g in names if g in gens.index]
     written = []
@@ -258,7 +344,7 @@ def lp_refusals(n) -> list[str]:
     (`guard`). Read as the solve starts, before any transient transform: a CO2 price writes the cost columns of
     an emitter (a scalar adder, or a per-period series), which this would misread."""
     gens = n.generators
-    if gens.empty or not any(c in gens.columns for c in COLUMNS):
+    if gens.empty or not any(c in gens.columns for c in INPUT_COLUMNS):
         return []
     return [
         f"{name}: {msg}"
@@ -345,3 +431,109 @@ def fuel_use(
             no_load_cost_eur=no_load_mwh * price,
         )
     return rows
+
+
+# ── run hours (homer-parity 02b) ───────────────────────────────────────────────────────────────────────────
+
+
+def _run_hour_generators(gens: pd.DataFrame) -> list[str]:
+    cols = [c for c in (OM_HOUR, LIFE_HOURS) if c in gens.columns]
+    return [g for g in gens.index if any(_num(gens.at[g, c]) is not None for c in cols)]
+
+
+def _on(n, name: str) -> pd.Series | None:
+    """1 for each snapshot generator ``name`` runs, from solved values only: its status when committable, else
+    output above 1e-6 × capacity (``p_nom_opt`` when extendable, else ``p_nom``; a non-committable unit has no
+    status). None when the solved frame has no column for it."""
+    gens = n.generators
+    if _flag(gens.at[name, "committable"]):
+        status = getattr(n.generators_t, "status", None)
+        if status is None or name not in status.columns:
+            return None
+        return status[name].reindex(n.snapshots).fillna(0.0).astype(float)
+    p = getattr(n.generators_t, "p", None)
+    if p is None or name not in p.columns:
+        return None
+    cap_col = (
+        "p_nom_opt"
+        if _flag(gens.at[name, "p_nom_extendable"]) and "p_nom_opt" in gens.columns
+        else "p_nom"
+    )
+    tol = 1e-6 * (_num(gens.at[name, cap_col]) or 0.0)
+    return (p[name].reindex(n.snapshots).fillna(0.0) > tol).astype(float)
+
+
+def run_hours(n) -> list[dict[str, Any]]:
+    """Each run-hour generator's (an O&M per running hour or a lifetime in running hours set) hours run and O&M
+    over the solved horizon, from solved values only (None when not solved).
+
+    ``hours_run`` is weighted by ``snapshot_weights(n, "generators")`` (period years included); ``om_cost_eur``
+    like the LP objective (``snapshot_weights(n, "objective")``), so it is the O&M share of the stand-by cost inside
+    ``opex``. ``counted_from`` says how the hours were read: ``status`` (committable) or ``dispatch`` (output above
+    1e-6 × capacity, `_on`).
+    """
+    from services.period_utils import snapshot_weights
+
+    gens = n.generators
+    rows = []
+    for name in _run_hour_generators(gens):
+        om = _num(gens.at[name, OM_HOUR]) if OM_HOUR in gens.columns else None
+        row = {
+            "generator": name,
+            "carrier": str(gens.at[name, "carrier"]),
+            "counted_from": "status"
+            if _flag(gens.at[name, "committable"])
+            else "dispatch",
+            "hours_run": None,
+            "om_cost_eur": None,
+        }
+        rows.append(row)
+        on = _on(n, name)
+        if on is None:
+            continue
+        row["hours_run"] = float((on * snapshot_weights(n, "generators")).sum())
+        row["om_cost_eur"] = float((on * snapshot_weights(n, "objective")).sum()) * (
+            om or 0.0
+        )
+    return rows
+
+
+def run_hour_lifetime(n, name: str) -> tuple[float | None, list[str]]:
+    """Generator ``name``'s lifetime in years from its lifetime in running hours at the solved rate, and flags.
+
+    The rate is the horizon's run hours (Σ on × the generator snapshot weights, period years included) ÷
+    ``adequacy.metrics.horizon_years`` (the modelled time in years, never a fixed hours-per-year constant): one average rate
+    over every period, flagged ``run_hour_lifetime_averaged:<name>`` on a multi-period solve. A non-committable unit
+    is counted from its dispatch, flagged ``run_hour_lifetime_from_dispatch:<name>``. None when no lifetime in
+    running hours is set, when the unit never ran (it does not wear), when the result is not finite, or when the
+    solved frame has no column for it (flagged ``run_hour_lifetime_unknown:<name>``, never inferred).
+    The None returns for a unit that never ran or a non-finite result carry no flags: there is no lifetime for the
+    averaged or from-dispatch flags to qualify (GK B nit N2).
+    """
+    from services.adequacy.metrics import horizon_years
+    from services.period_utils import period_years_map, snapshot_weights
+
+    gens = n.generators
+    if name not in gens.index or LIFE_HOURS not in gens.columns:
+        return None, []
+    life_h = _num(gens.at[name, LIFE_HOURS])
+    if life_h is None or life_h <= 0:
+        return None, []
+    on = _on(n, name)
+    if on is None:
+        return None, [f"run_hour_lifetime_unknown:{name}"]
+    hours = float((on * snapshot_weights(n, "generators")).sum())
+    horizon = horizon_years(n)
+    if hours <= 0 or horizon <= 0:
+        return None, []
+    years = life_h / (hours / horizon)
+    if not math.isfinite(years):
+        return None, []
+    flags = (
+        []
+        if _flag(gens.at[name, "committable"])
+        else [f"run_hour_lifetime_from_dispatch:{name}"]
+    )
+    if len(period_years_map(n)) > 1:
+        flags.append(f"run_hour_lifetime_averaged:{name}")
+    return years, flags

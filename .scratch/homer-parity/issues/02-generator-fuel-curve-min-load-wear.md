@@ -3,7 +3,7 @@
 
 # 02 — Generator realism: fuel curve, minimum load and run-hour wear
 
-Status: ready-for-agent
+Status: ready-for-agent (02a done #1466; 02b in progress)
 Model: Opus
 Reviewer: GK B (GK A only if it touches the adequacy/IC engine)
 Blocked by: none
@@ -60,3 +60,18 @@ GO with conditions. Answers:
 - Owner HOMER-02A-DOCCAP: the assistant attrs-doc cap rises to 4600 for the three fuel fields.
 
 Conditions met in 02a: H1 one derivation (`services/fuel_curve.py`), staging authoritative, the same guard on the single edit, bulk edit and pre-run check; H2 the curve inputs in `_network_input_fingerprint` only when present; H3 a direct edit of a derived cost refuses, a new curve over a non-zero cost says what it replaces, a curve beside a `marginal_cost` series refuses, derived writes are stamped customised; H4 the DC backup prices fuel off the LP and never writes `marginal_cost`; H5 Finite inputs, one test per refusal; H6 the fuel block reads solved values only (None otherwise), uneven and multi-period weightings; H7 off hours counted out, no-curve results byte-equal to master; H8 mutants in the PR body.
+
+### 02b plan verdicts (2026-11-13)
+
+GK B GO: Q1 O&M without Unit commitment refuses; Q2 one horizon-average rate, flagged; Q3 a non-committable unit counts its dispatch, flagged. Conditions, each mapped to a test in the PR body:
+- H1 The O&M is counted once (inside stand_by_cost, one opex line per asset); the 02a fuel block stays fuel_use × price.
+- H2 Both inputs refuse NaN/±inf, `lifetime_run_hours` also 0, on single edit, bulk and import through one validator.
+- H3 Run hours per year = Σ(on × generator weighting) ÷ `metrics.horizon_years(n)`, never 8760 snapshots.
+- H4 Only a single-part generator wears; a multi-part one keeps its calendar lives, flagged.
+- H5 The run-hour life is finite; 0 hours run → calendar life; no solved column → calendar life + `run_hour_lifetime_unknown`.
+- H6 Non-committable: p > 1e-6 × p_nom_opt (p_nom when not extendable), flag `run_hour_lifetime_from_dispatch`.
+- H7 `om_cost_per_run_hour` in the solve fingerprint; `lifetime_run_hours` only in the investment-case digest; no inputs = equal to master.
+- H8 The 02a guards apply to the O&M on single, bulk and lp_refusals.
+- H9 Split if over ~1,500 lines; release note; UX brief; help and PR body say the capital cost annuity keeps the calendar lifetime.
+
+UX (no objection to placement): units through the € rule; shots of the form UC off and on, one refusal, Guided; no stray "+ 0". Owner question HOMER-02B-DOCCAP (attrs doc cap 4700) pending; built on the recommended option.
