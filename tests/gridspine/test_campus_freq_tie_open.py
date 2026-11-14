@@ -210,3 +210,12 @@ def test_the_gfm_settings_take_no_case_from_an_e1_not_run(tmp_path):
     assert out["cases"] and not [
         c for c in out["cases"] if c["key"].split()[-1] == "E1"
     ]
+
+
+def test_no_island_hours_is_no_tie_open_note(tmp_path):
+    """Nothing judged at all is not 'every island hour tie-open'."""
+    run = write_run(tmp_path / "run", campus_spec(), selected=((0, "max_import"),))
+    pcc = pd.read_csv(run / "campus_pcc.csv").assign(tie_open=True)
+    pcc.to_csv(run / "campus_pcc.csv", index=False)
+    summary = D.island_frequency_campus(run, every_hour=False)
+    assert summary["island_hours"] == [] and summary["e1_bridge_note"] is None
