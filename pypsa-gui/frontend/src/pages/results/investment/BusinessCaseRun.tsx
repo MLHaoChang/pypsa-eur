@@ -109,7 +109,8 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
       </div>
       {stale && <p role="alert" className="text-warn" data-testid="bc-out-of-date">{stale}</p>}
       {report && <ReportView report={report} breakEvenLine={p.breakEvenLine} />}
-      {!report && !running && s === null && (
+      {/* One reason at a time (UX): "not run yet" only when nothing else is said. */}
+      {!report && !running && s === null && off === null && !blocked && !run.isPending && (
         <p className="text-muted" data-testid="bc-not-run">Not run yet: save the lines, then run the business case.</p>
       )}
     </section>

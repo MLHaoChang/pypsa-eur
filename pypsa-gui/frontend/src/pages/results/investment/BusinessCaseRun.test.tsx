@@ -148,6 +148,20 @@ describe('the KPI row (UX 6)', () => {
 })
 
 describe('the run', () => {
+  it('says "not run yet" only when no other reason is showing', async () => {
+    mount(null)
+    expect(screen.getByTestId('bc-not-run')).toBeTruthy()
+    cleanup()
+    mount(null, { disabledReason: 'Fix the 2 refusals above to run.' })
+    expect(screen.queryByTestId('bc-not-run')).toBeNull()
+    cleanup()
+    api.startRun.mockRejectedValue(new InvestmentCaseMissing('no_report'))
+    mount(null)
+    fireEvent.click(screen.getByTestId('bc-run-button'))
+    await screen.findByTestId('bc-blocked')
+    expect(screen.queryByTestId('bc-not-run')).toBeNull()
+  })
+
   it('Run says why it is off', () => {
     mount(null, { disabledReason: 'Save the lines to run.' })
     expect((screen.getByTestId('bc-run-button') as HTMLButtonElement).disabled).toBe(true)
