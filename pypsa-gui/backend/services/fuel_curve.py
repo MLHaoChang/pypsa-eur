@@ -28,12 +28,16 @@ the curves as the solve does: ``(slope + no_load) × fuel_price`` per MWh at rat
 MW-weighted with its own heat rate for gensets without one (``dc_backup.fleet_fuel_curve``), and says so in its
 cost notes ("Fuel curve used here").
 
-CO2 (homer-parity 02e). The no-load fuel emits: ``no_load × p_nom × co2_emissions`` tCO2 per committed hour
-(``no_load_fuel``, ``no_load_fuel_t``). Efficiency does not enter it: ``no_load`` is already MWh of fuel. The
-per-MWh CO2 term stays ``co2_emissions / efficiency`` per MWh generated, so the two are disjoint: the per-MWh term
-is the output-proportional fuel, the no-load term the fuel burnt for being on. A CO2 price reaches the no-load
-term through ``stand_by_cost`` (``services/solver/assumptions.py``, transient like the per-MWh adder), and the
-emission reports add it from the solved status.
+CO2 (homer-parity 02e, GK B H1). A curve genset's CO2 follows the same fuel as its cost:
+``co2_emissions × (slope × p + no_load × p_nom × on)``. The per-MWh term reads the slope, not ``1 / efficiency``
+(``fuel_per_mwh``; a generator without a curve keeps ``co2_emissions / efficiency``), and the no-load fuel emits
+``no_load × p_nom × co2_emissions`` per committed hour (``no_load_fuel``, ``no_load_fuel_t``), with no efficiency:
+both are already MWh of fuel, and they are disjoint (output-proportional fuel, and fuel burnt for being on). A CO2
+price reaches the per-MWh term through ``marginal_cost`` and the no-load term through ``stand_by_cost``
+(``services/solver/assumptions.py``, both transient), and every emission report reads both from solved values.
+PyPSA's CO2 cap (a ``primary_energy`` global constraint on ``co2_emissions``) counts ``p / efficiency`` only, so a
+curve genset on an emitting carrier under such a cap is refused before the run (``co2_cap_refusal``, GK B H2)
+rather than let the cap and the reports disagree.
 
 A slope above 0 and below 1 MWh of fuel per MWh means more than 100 % efficiency, almost always a units slip:
 ``slope_warning`` names it before the run, which still prices what was entered.
@@ -169,6 +173,13 @@ def slope_warning(row: Mapping[str, Any]) -> str | None:
         f"{LABELS[SLOPE]}: {slope:g} MWh of fuel per MWh generated means {100 / slope:.0f} % efficiency. Check "
         "the units: it is MWh of fuel per MWh generated (1 / efficiency), not an efficiency or a volume per kWh."
     )
+
+
+def fuel_per_mwh(row: Mapping[str, Any], default: float) -> float:
+    """MWh of fuel per MWh generated: the curve's slope when the row sets a curve (GK B H1: one fuel source for its
+    cost and its CO2), else ``default`` (the caller's ``1 / efficiency``)."""
+    curve = curve_of(row)
+    return default if curve is None else curve[0]
 
 
 def no_load_fuel(row: Mapping[str, Any]) -> float:
@@ -385,21 +396,56 @@ def apply(n, names=None, *, stamp: bool = True) -> list[str]:
     return written
 
 
+def co2_caps(n) -> list[str]:
+    """The network's CO2 caps: ``primary_energy`` global constraints on ``co2_emissions``."""
+    gc = n.global_constraints
+    if gc.empty or "carrier_attribute" not in gc.columns:
+        return []
+    mask = (gc["type"].astype(str) == "primary_energy") & (
+        gc["carrier_attribute"].astype(str) == "co2_emissions"
+    )
+    return [str(c) for c in gc.index[mask]]
+
+
+def co2_cap_refusal(n, name: str, caps: list[str] | None = None) -> str | None:
+    """Why generator ``name``'s curve cannot run under the network's CO2 cap (GK B H2), or None: the cap counts
+    ``p / efficiency``, the curve sets the fuel (slope and no-load), so the two would disagree on its CO2."""
+    caps = co2_caps(n) if caps is None else caps
+    row = n.generators.loc[name]
+    if not caps or curve_of(row) is None:
+        return None
+    carriers = n.carriers
+    carrier = row.get("carrier")
+    if "co2_emissions" not in carriers.columns or carrier not in carriers.index:
+        return None
+    if not (_num(carriers.at[carrier, "co2_emissions"]) or 0.0) > 0:
+        return None
+    return (
+        f"Fuel curve: the CO2 cap {', '.join(caps)} counts this generator's CO2 from its efficiency, not from "
+        "its fuel curve, so the cap and the emissions results would disagree. Remove the cap, or clear the "
+        "fuel curve"
+    )
+
+
 class FuelCurveError(ValueError):
     """A solve refused before its LP is built: a curve it cannot price (`lp_refusals`)."""
 
 
 def lp_refusals(n) -> list[str]:
     """``"<generator>: <why>"`` for each curve the LP cannot price: half a curve or a curve with a cost profile
-    (`guard`). Read as the solve starts, before any transient transform: a CO2 price writes the cost columns of
+    (`guard`), or a curve on an emitting carrier under a CO2 cap (`co2_cap_refusal`). Read as the solve starts, before any transient transform: a CO2 price writes the cost columns of
     an emitter (a scalar adder, or a per-period series), which this would misread."""
     gens = n.generators
     if gens.empty or not any(c in gens.columns for c in INPUT_COLUMNS):
         return []
+    caps = co2_caps(n)
     return [
         f"{name}: {msg}"
         for name in gens.index
-        if (msg := guard(gens.loc[name], cost_series=cost_series(n, name)))
+        if (
+            msg := guard(gens.loc[name], cost_series=cost_series(n, name))
+            or co2_cap_refusal(n, name, caps)
+        )
     ]
 
 

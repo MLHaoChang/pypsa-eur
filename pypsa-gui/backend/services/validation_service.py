@@ -2657,6 +2657,9 @@ def _check_fuel_curves(n) -> list[Issue]:
     for name in gens.index:
         if msg := fuel_curve.guard(gens.loc[name], cost_series=fuel_curve.cost_series(n, name)):
             issues.append(Issue("error", "fuel_curve_invalid", "Generator", str(name), f"{msg}."))
+        elif msg := fuel_curve.co2_cap_refusal(n, name):
+            # GK B H2: the cap counts p / efficiency; refused rather than disagree with the reports.
+            issues.append(Issue("error", "fuel_curve_co2_cap", "Generator", str(name), f"{msg}."))
         elif msg := fuel_curve.slope_warning(gens.loc[name]):
             # homer-parity 02d: a warning, not a refusal; the run prices what was entered.
             issues.append(Issue("warning", "fuel_curve_slope_low", "Generator", str(name), msg))

@@ -168,7 +168,8 @@ def compute_emissions(n, source, *, result_df):
         eff = float(gens.at[name, "efficiency"]) if "efficiency" in gens.columns else 1.0
         if not _math.isfinite(eff) or eff <= 0:
             eff = 1.0
-        out_intensity = intensity / eff if intensity != 0 else 0.0
+        # GK B H1: a curve genset's fuel per MWh is its slope, not 1 / efficiency.
+        out_intensity = intensity * _fuel_curve.fuel_per_mwh(gens.loc[name], 1.0 / eff) if intensity != 0 else 0.0
         mwh_horizon = float(gen_energy_horizon.get(name, 0.0))
         if not _math.isfinite(mwh_horizon):
             mwh_horizon = 0.0
