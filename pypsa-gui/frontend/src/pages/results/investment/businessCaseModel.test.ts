@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BusinessCaseOptions, LineItem } from '../../../api/businessCase'
 import {
-  edited, parsePaste, placeRefusals, placeValidation, provenanceOf, sourceKind,
+  edited, hintUnitWords, parsePaste, priceUnitWords, placeRefusals, placeValidation, provenanceOf, sourceKind,
   unitNotAllowed, unitsFor, withKind, yearsOf,
 } from './businessCaseModel'
 
@@ -15,10 +15,14 @@ export const OPTS: BusinessCaseOptions = {
     capex: ['facility', 'equipment'],
   },
   escalations: ['opex', 'capex', 'contract'],
-  typed_units: {
-    revenue: ['MWh', 'kg', 't', 'unit'],
-    opex: ['MWh', 'kg', 't', 'unit'],
-    capex: ['MWh', 'kg', 't', 'MW', 'unit', 'lump'],
+  units_by_source: {
+    typed: {
+      revenue: ['MWh', 'kg', 't', 'unit'],
+      opex: ['MWh', 'kg', 't', 'unit'],
+      capex: ['MWh', 'kg', 't', 'MW', 'unit', 'lump'],
+    },
+    share_of: { revenue: ['share'], opex: ['share'], capex: ['share'] },
+    linked: { 'served_h2.h2_load': { revenue: ['MWh_H2', 'kg'], opex: ['MWh_H2', 'kg'], capex: ['MWh_H2', 'kg'] } },
   },
   catalogue_version: '1',
   outputs: [{ id: 'served_h2.h2_load', label: 'H2 served to h2_load', units: ['MWh_H2', 'kg'], derived: false }],
@@ -52,6 +56,14 @@ describe('unitsFor: the select offers only what the source allows', () => {
     expect(unitsFor(l, OPTS)).toEqual(['MWh', 'kg', 't', 'unit', 'lump'])
     expect(unitNotAllowed(l, OPTS)).toBe(true)
     expect(unitNotAllowed(line(), OPTS)).toBe(false)
+  })
+})
+
+describe('units in words', () => {
+  it('reads “USD per GPU-hour”, never the unit id', () => {
+    expect(priceUnitWords('USD', 'GPU_h')).toBe('USD per GPU-hour')
+    expect(hintUnitWords('USD/kW_month')).toBe('USD per kW-month')
+    expect(priceUnitWords('EUR', 'lump')).toBe('EUR, lump sum')
   })
 })
 

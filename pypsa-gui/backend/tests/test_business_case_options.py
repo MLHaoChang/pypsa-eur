@@ -67,7 +67,17 @@ def _project(client, install_network, monkeypatch, template):
                         lambda: {"id": template} if template else None)
 
 
-def test_no_template_is_a_blank_table_with_the_typed_units(
+def _fresh(monkeypatch):
+    """The run's bind, with the solve current (as `solve_matches_inputs` says after a run)."""
+    import dataclasses
+
+    from services.business_case import linked_outputs as L
+
+    real = L.bind
+    monkeypatch.setattr(L, "bind", lambda ctx, **kw: dataclasses.replace(real(ctx, **kw), fresh=True))
+
+
+def test_no_template_is_a_blank_table_with_the_units_by_source(
     client, install_network, monkeypatch
 ):
     _project(client, install_network, monkeypatch, None)
@@ -76,53 +86,67 @@ def test_no_template_is_a_blank_table_with_the_typed_units(
     body = r.json()
     assert body["template_id"] is None and body["variants"] == {}
     assert body["offered_rows"] == []
-    assert body["typed_units"] == {
-        k: list(M.allowed_units(k, "typed")) for k in ("revenue", "opex", "capex")
-    }
+    kinds = ("revenue", "opex", "capex")
+    assert body["units_by_source"]["typed"] == {k: list(M.allowed_units(k, "typed")) for k in kinds}
+    assert body["units_by_source"]["share_of"] == {k: ["share"] for k in kinds}
     assert body["categories"] == {k: list(v) for k, v in M.CATEGORIES.items()}
     assert body["escalations"] == list(get_args(M.Escalation))
-    assert "lump" in body["typed_units"]["capex"]
-    assert "lump" not in body["typed_units"]["revenue"]
-    assert isinstance(body["outputs"], list) and body["outputs_reason"] is None
     assert body["refusals"] == []          # nothing stored, nothing refused
 
 
-def test_a_template_lists_its_variants_and_offered_rows(
+def test_without_a_current_solve_outputs_are_null_never_empty(
     client, install_network, monkeypatch
+):
+    """O2: an empty list would read as "nothing to link"."""
+    _project(client, install_network, monkeypatch, None)
+    body = client.get(OPTIONS_URL).json()
+    assert body["outputs"] is None and body["outputs_reason"] == "no_current_solve"
+    assert body["units_by_source"]["linked"] == {}
+
+
+@pytest.mark.parametrize("template", ["eh_site", "eh_datacenter"])
+def test_a_template_lists_its_variants_and_offered_rows(
+    client, install_network, monkeypatch, template
 ):
     from services.business_case import presets as P
 
-    _project(client, install_network, monkeypatch, "eh_datacenter")
+    _project(client, install_network, monkeypatch, template)
     body = client.get(OPTIONS_URL).json()
-    assert set(body["variants"]) == {"gpu_cloud", "colocation"}
-    assert body["offered_rows"] == [
-        o.model_dump(mode="json") for o in P.offered_rows("eh_datacenter")
-    ]
+    assert body["template_id"] == template
+    assert body["variants"] == P.variants(template)
+    assert body["offered_rows"] == [o.model_dump(mode="json") for o in P.offered_rows(template)]
 
 
-def test_outputs_are_the_catalogue_the_run_reads(client, install_network, monkeypatch):
+def test_outputs_and_their_units_are_the_catalogue_s_own(client, install_network, monkeypatch):
+    """O4: pinned against `OutputSpec.units` of the real catalogue, not a copied list."""
     from services.business_case import linked_outputs as L
+    from tests.test_business_case_linked_outputs import _plant
 
-    _project(client, install_network, monkeypatch, None)
-    spec = L.OutputSpec("served_product.h2", "Product served on h2", ("MWh_H2", "kg"))
-    seen = {}
+    import routers.results as R
 
-    def fake(n, solve=None):
-        seen["solve"] = solve
-        return [spec]
-
-    monkeypatch.setattr(L, "catalogue", fake)
+    n = _plant()
+    install_network(n)
+    monkeypatch.setattr(R, "_active_template_meta", lambda: None)
+    _fresh(monkeypatch)
     body = client.get(OPTIONS_URL).json()
-    assert body["outputs"] == [{"id": "served_product.h2", "label": "Product served on h2",
-                                "units": ["MWh_H2", "kg"], "derived": False}]
+    # The default solver config names no export link: the same solve the route binds.
+    specs = L.catalogue(n, L.LinkedSolve(network=n, fresh=True))
+    assert specs                                   # the plant offers outputs
+    assert body["outputs"] == [{"id": s.id, "label": s.label, "units": list(s.units),
+                                "derived": s.derived} for s in specs]
     assert body["catalogue_version"] == L.CATALOGUE_VERSION
-    assert isinstance(seen["solve"], L.LinkedSolve)   # bound as the run binds it
+    linked = body["units_by_source"]["linked"]
+    for s in specs:
+        for k in ("revenue", "opex", "capex"):
+            assert linked[s.id][k] == list(M.allowed_units(k, "linked", s.units))
+            assert set(linked[s.id][k]) <= set(s.units)
 
 
 def test_unreadable_outputs_are_a_reason_never_a_500(client, install_network, monkeypatch):
     from services.business_case import linked_outputs as L
 
     _project(client, install_network, monkeypatch, None)
+    _fresh(monkeypatch)
 
     def boom(n, solve=None):
         raise RuntimeError("bad network")
@@ -132,20 +156,32 @@ def test_unreadable_outputs_are_a_reason_never_a_500(client, install_network, mo
     assert body["outputs"] is None and body["outputs_reason"] == "outputs_not_readable"
 
 
-def test_a_busy_network_is_a_reason(client, install_network, monkeypatch):
+def test_a_busy_network_is_409_after_a_bounded_wait(client, install_network, monkeypatch):
+    """O2: the lock is tried with a timeout, never a blocking acquire."""
     import routers.results as R
     from services.pypsa_service import PyPSAService
 
     _project(client, install_network, monkeypatch, None)
+    seen = {}
 
     class Busy:
-        def acquire(self, timeout=None):
+        def acquire(self, blocking=True, timeout=-1):
+            seen["timeout"] = timeout
             return False
 
     monkeypatch.setattr(PyPSAService, "get_lock", staticmethod(lambda: Busy()))
-    monkeypatch.setattr(R, "_IC_LOCK_WAIT_S", 0.0)
-    body = client.get(OPTIONS_URL).json()
-    assert body["outputs"] is None and body["outputs_reason"] == "network_busy"
+    r = client.get(OPTIONS_URL)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "network_busy"
+    assert seen["timeout"] == R._IC_LOCK_WAIT_S > 0
+
+
+def test_a_running_solve_is_409(client, install_network, monkeypatch):
+    import routers.results as R
+
+    _project(client, install_network, monkeypatch, None)
+    monkeypatch.setattr(R, "_solver_in_flight", lambda: True)
+    r = client.get(OPTIONS_URL)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "solver_in_flight"
 
 
 def test_refusals_need_the_investment_case_horizon(client, install_network, monkeypatch):
@@ -183,3 +219,30 @@ def test_the_table_has_words_for_every_refusal_kind():
     block = src.split("export const REFUSAL_WORDS", 1)[1].split("\n}\n", 1)[0]
     keys = set(re.findall(r"^\s+([a-z_]+):", block, re.M))
     assert keys == set(M.REFUSAL_KINDS)
+
+
+def test_o1_offered_units_save_and_run_clean_and_others_are_refused_on_the_unit(
+    client, install_network, monkeypatch
+):
+    """GK B O1, both directions through the routes: every typed unit the options route
+    offers for a kind is saved and draws no `unit_not_allowed`; every unit it does not
+    offer is saved (partial) and refused on `lines[i].unit`, the cell the table marks.
+    The expected units come from the route (the backend), not from the table."""
+    _with_ic(client, install_network, monkeypatch)
+    offered = client.get(OPTIONS_URL).json()["units_by_source"]["typed"]
+    cats = {"revenue": "product_sale", "opex": "staff", "capex": "facility"}
+    lines, expect_refused = [], set()
+    for kind, cat in cats.items():
+        for unit in get_args(M.Unit):
+            i = len(lines)
+            ln = _line(name=f"{kind}-{unit}", kind=kind, category=cat, unit=unit,
+                       escalation="capex" if kind == "capex" else "opex")
+            if kind == "capex":
+                ln["life_years"] = 10
+            lines.append(ln)
+            if unit not in offered[kind]:
+                expect_refused.add(f"lines[{i}].unit")
+    assert _put(client, _bc(*lines)).status_code == 200
+    body = client.get(OPTIONS_URL).json()
+    refused = {r["field"] for r in body["refusals"] if r["refusal"] == "unit_not_allowed"}
+    assert refused == expect_refused and expect_refused

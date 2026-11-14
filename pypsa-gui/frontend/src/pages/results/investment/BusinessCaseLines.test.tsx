@@ -27,7 +27,11 @@ const OPTS: BusinessCaseOptions = {
     line: { name: 'Staff', kind: 'opex', category: 'staff', unit: 'unit', quantity_source: 'typed', escalation: 'opex' } }],
   categories: { revenue: ['product_sale', 'by_product'], opex: ['staff', 'maintenance'], capex: ['facility'] },
   escalations: ['opex', 'capex', 'contract'],
-  typed_units: { revenue: ['MWh', 'kg', 't'], opex: ['MWh', 'kg', 't', 'unit'], capex: ['unit', 'lump'] },
+  units_by_source: {
+    typed: { revenue: ['MWh', 'kg', 't'], opex: ['MWh', 'kg', 't', 'unit'], capex: ['unit', 'lump'] },
+    share_of: { revenue: ['share'], opex: ['share'], capex: ['share'] },
+    linked: { 'served_h2.h2_load': { revenue: ['MWh_H2', 'kg'], opex: ['MWh_H2', 'kg'], capex: ['MWh_H2', 'kg'] } },
+  },
   catalogue_version: '1',
   outputs: [{ id: 'served_h2.h2_load', label: 'H2 served to h2_load', units: ['MWh_H2', 'kg'], derived: false }],
   outputs_reason: null,
@@ -126,7 +130,7 @@ describe('revenue prices', () => {
   it('an empty revenue price reads not established, with the public range beside it, never filled', async () => {
     mount(config(H2))
     expect(await screen.findByTestId('bc-not-established')).toBeTruthy()
-    expect(screen.getByTestId('bc-hint').textContent).toBe('Public range 3–6 EUR/kg · Hydrogen bank auction, 2024')
+    expect(screen.getByTestId('bc-hint').textContent).toBe('Public range 3–6 EUR per kg · Hydrogen bank auction, 2024')
     expect((screen.getByLabelText('Price, H2 sales') as HTMLInputElement).value).toBe('')
   })
 })
@@ -173,6 +177,19 @@ describe('preset, add, save', () => {
     expect(screen.getByLabelText('Unit, Staff 2')).toBeTruthy()
     fireEvent.change(screen.getByTestId('bc-add'), { target: { value: 'blank:revenue' } })
     expect((screen.getByLabelText('Category, New line 1') as HTMLSelectElement).value).toBe('product_sale')
+  })
+  it('the preset needs the finance inputs: the refusal links to them', async () => {
+    mount(null)
+    api.getPreset.mockRejectedValue(new BusinessCaseRejected({ code: 'finance_inputs_missing', message: 'x' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply preset' }))
+    expect((await screen.findByTestId('bc-open-finance')).textContent).toBe('Finance inputs ›')
+  })
+  it('discarding asks first and names what is lost', async () => {
+    mount(config(CAPEX))
+    fireEvent.change(await screen.findByLabelText('Price, Plant'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+    expect(screen.getByTestId('bc-discard-confirm').textContent).toMatch(/^Discard the unsaved changes to the lines\?/)
+    expect(api.getInputs).toHaveBeenCalledTimes(1)
   })
   it('a 412 asks for a reload', async () => {
     mount(config(CAPEX))

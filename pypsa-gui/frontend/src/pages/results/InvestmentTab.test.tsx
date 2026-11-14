@@ -239,11 +239,12 @@ describe('InvestmentTab → Economics', () => {
   })
   afterEach(() => useUIStore.setState({ uiMode: 'expert', activeSlidePanel: null }))
 
-  it('holds no input editors: the sections are results, with one link to Commercial & parties', async () => {
+  it('holds no model-input editors: the sections are results and the business case, with one link to Commercial & parties', async () => {
     useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results' })
     renderTab()
     const names = screen.getAllByRole('tab').map(t => t.textContent)
-    expect(names).toEqual(['Participants', 'Bill', 'Investment case'])
+    // The business case's lines are its own inputs, not solve inputs (UX ruling, DCBC Q3).
+    expect(names).toEqual(['Participants', 'Bill', 'Investment case', 'Business case'])
     expect((await screen.findByTestId('ic-edit-in-economics')).textContent)
       .toMatch(/set in Commercial & parties/)
     expect(screen.queryByRole('button', { name: /Define participants/ })).toBeNull()

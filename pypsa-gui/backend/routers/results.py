@@ -2468,8 +2468,10 @@ def get_business_case_options():
     variants and "add line" rows, this project's linked outputs with the units each
     offers (the catalogue the run reads), the units a typed line may take per kind, and
     every refusal of the stored lines (G9) against the stored investment case's
-    horizon. `outputs` is None with `outputs_reason` when the network cannot be read;
-    `refusals` is None with `refusals_reason` without an investment case."""
+    horizon. `outputs` is None with `outputs_reason` without a network, without a current
+    solve or when the catalogue cannot be read, never [] (GK B O2); 409 while a solve runs
+    or when the network lock is not had within the bounded wait. `refusals` is None with
+    `refusals_reason` without an investment case."""
     from typing import get_args
 
     from models.business_case import CATEGORIES, Escalation, allowed_units
@@ -2492,7 +2494,14 @@ def get_business_case_options():
         "offered_rows": offered,
         "categories": {k: list(v) for k, v in CATEGORIES.items()},
         "escalations": list(get_args(Escalation)),
-        "typed_units": {k: list(allowed_units(k, "typed")) for k in ("revenue", "opex", "capex")},
+        # The units a line may take per quantity source (spec §4), from `allowed_units`,
+        # the function the validator's `unit_not_allowed` reads (GK B O1).
+        "units_by_source": {
+            "typed": {k: list(allowed_units(k, "typed")) for k in ("revenue", "opex", "capex")},
+            "share_of": {k: list(allowed_units(k, "share_of"))
+                         for k in ("revenue", "opex", "capex")},
+            "linked": {},
+        },
         # A linked line stores `linked:<output id>@<catalogue_version>`.
         "catalogue_version": L.CATALOGUE_VERSION,
         "outputs": None,
@@ -2500,27 +2509,38 @@ def get_business_case_options():
         "refusals": None,
         "refusals_reason": None,
     }
-    lock = PyPSAService.get_lock()
+    kinds = ("revenue", "opex", "capex")
     if _solver_in_flight():
-        out["outputs_reason"] = "solve_in_flight"
-    elif not lock.acquire(timeout=_IC_LOCK_WAIT_S):
-        out["outputs_reason"] = "network_busy"
-    else:
-        try:
-            ctx = PyPSAService.get_active_context()
-            if ctx.network is None:
-                out["outputs_reason"] = "no_network"
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; the model "
+                                             "outputs are offered after it finishes"})
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(timeout=_IC_LOCK_WAIT_S):       # bounded, never a blocking read (O2)
+        raise HTTPException(409, {"code": "network_busy",
+                                  "message": "the model is busy; read the options again"})
+    try:
+        ctx = PyPSAService.get_active_context()
+        if ctx.network is None:
+            out["outputs_reason"] = "no_network"
+        else:
+            solve = L.bind(ctx)
+            if not solve.fresh:
+                out["outputs_reason"] = "no_current_solve"
             else:
-                out["outputs"] = [
-                    {"id": s.id, "label": s.label, "units": list(s.units),
-                     "derived": s.derived}
-                    for s in L.catalogue(ctx.network, L.bind(ctx))
-                ]
-        except Exception as exc:  # noqa: BLE001 — a read must not 500 on a bad network
-            logger.warning("business_case options: outputs not readable: %s", exc)
-            out["outputs_reason"] = "outputs_not_readable"
-        finally:
-            lock.release()
+                specs = L.catalogue(ctx.network, solve)
+                out["outputs"] = [{"id": s.id, "label": s.label, "units": list(s.units),
+                                   "derived": s.derived} for s in specs]
+                out["units_by_source"]["linked"] = {
+                    s.id: {k: list(allowed_units(k, "linked", s.units)) for k in kinds}
+                    for s in specs
+                }
+    except Exception as exc:  # noqa: BLE001 — a read must not 500 on a bad network
+        logger.warning("business_case options: outputs not readable: %s", exc)
+        out["outputs"] = None
+        out["units_by_source"]["linked"] = {}
+        out["outputs_reason"] = "outputs_not_readable"
+    finally:
+        lock.release()
     span = _bc_ic_horizon()
     out["horizon"] = None if span is None else list(span[0])
     out["base_year"] = None if span is None else span[1]

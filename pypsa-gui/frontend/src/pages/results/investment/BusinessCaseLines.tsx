@@ -15,10 +15,11 @@ import {
 } from '../../../api/businessCase'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
+import { openPanel } from '../openPanel'
 import { ACTION } from './actionStyle'
 import { NumInput } from './NumInput'
 import {
-  blankLine, edited, linkedOutputId, linkedSource, OUTPUTS_REASON_WORDS,
+  blankLine, edited, hintUnitWords, linkedOutputId, priceUnitWords, unitWords, linkedSource, OUTPUTS_REASON_WORDS,
   parsePaste, placeRefusals, placeValidation, provenanceDetail, provenanceOf,
   REFUSALS_REASON_WORDS, sourceKind, uniqueName, unitNotAllowed, unitsFor, withKind,
   yearsOf, type Placed,
@@ -36,6 +37,12 @@ const STREAM_WORD: Record<string, string> = {
   eaas_fee: 'Energy-as-a-service fee', ancillary: 'Ancillary services',
   fom: 'Fixed O&M (energy assets)', vom: 'Variable O&M (energy assets)',
   lost_production: 'Lost production',
+}
+
+function optionsErrorWords(e: unknown): string {
+  const code = (e as { response?: { data?: { detail?: { code?: string } } } })?.response?.data?.detail?.code
+  return code === 'solver_in_flight' ? 'a solve is running'
+    : code === 'network_busy' ? 'the model is busy' : 'they could not be read'
 }
 
 function cellRefusal(placed: Placed[], col: string): Placed | undefined {
@@ -198,7 +205,7 @@ function PriceCell({ line, set, bad, currency }: {
   line: LineItem; bad?: Placed; currency: string | null
   set: (patch: Partial<LineItem>) => void
 }) {
-  const unit = `${currency ?? ''}/${line.unit}`.replace(/^\//, '')
+  const unit = priceUnitWords(currency, line.unit)
   const empty = line.price == null && Object.keys(line.price_by_year ?? {}).length === 0
   return (
     <div className="space-y-0.5">
@@ -213,7 +220,7 @@ function PriceCell({ line, set, bad, currency }: {
       )}
       {line.kind === 'revenue' && line.hint && (
         <p className="text-muted max-w-[16rem]" data-testid="bc-hint">
-          Public range {line.hint.low}–{line.hint.high} {line.hint.unit} · {line.hint.source}, {line.hint.year}
+          Public range {line.hint.low}–{line.hint.high} {hintUnitWords(line.hint.unit)} · {line.hint.source}, {line.hint.year}
         </p>
       )}
     </div>
@@ -263,7 +270,8 @@ export default function BusinessCaseLines() {
   const [variant, setVariant] = useState('')
   const [confirmPreset, setConfirmPreset] = useState(false)
   const [rejected, setRejected] = useState<Placed[]>([])
-  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string; finance?: boolean } | null>(null)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [stale, setStale] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -347,9 +355,10 @@ export default function BusinessCaseLines() {
       setMessage({ tone: 'ok', text: 'Preset applied. Review the lines, then save.' })
     } catch (e) {
       const code = e instanceof BusinessCaseRejected ? e.detail.code : undefined
-      setMessage({ tone: 'error', text: code === 'finance_inputs_missing'
-        ? 'Preset not applied: set the finance inputs first (their currency prices the cost defaults), in Commercial & parties.'
-        : `Preset not applied: ${e instanceof Error ? e.message : 'the preset could not be read'}.` })
+      setMessage(code === 'finance_inputs_missing'
+        ? { tone: 'error', finance: true,
+            text: 'Preset not applied: set the finance inputs first (their currency prices the cost defaults).' }
+        : { tone: 'error', text: `Preset not applied: ${e instanceof Error ? e.message : 'the preset could not be read'}.` })
     }
   }
   const add = (value: string) => {
@@ -418,7 +427,7 @@ export default function BusinessCaseLines() {
       </div>
       {confirmPreset && (
         <div role="alert" className="text-warn flex flex-wrap gap-2 items-center" data-testid="bc-preset-confirm">
-          Replace the {lines.length} line{lines.length === 1 ? '' : 's'} with the preset?
+          Replace the {lines.length} line{lines.length === 1 ? '' : 's'} with the preset?{dirty ? ' Your unsaved changes to them are lost.' : ''}
           <button type="button" className={ACTION} onClick={() => { void applyPreset() }}>Replace</button>
           <button type="button" className={ACTION} onClick={() => setConfirmPreset(false)}>Cancel</button>
         </div>
@@ -426,20 +435,25 @@ export default function BusinessCaseLines() {
       <p className="text-muted" data-testid="bc-help">
         Energy bought or sold in the model (the bill, export, PPA and CfD) is in the rows from the energy model: don’t type it
         again here. Revenue prices start empty; a public range is shown beside them, never filled in.</p>
+      {options.isError && (
+        <p className="text-muted" data-testid="bc-options-error">
+          Model outputs and line checks are not offered now: {optionsErrorWords(options.error)}.{' '}
+          <button type="button" className={ACTION} onClick={() => { void options.refetch() }}>Read again</button></p>
+      )}
       {opts?.outputs === null && opts.outputs_reason && (
         <p className="text-muted" data-testid="bc-outputs-reason">
           Model outputs are not offered now: {OUTPUTS_REASON_WORDS[opts.outputs_reason] ?? words(opts.outputs_reason)}.</p>
       )}
       <div className="flex flex-wrap gap-3 items-start">
-        <div className="flex-1 min-w-0 overflow-x-auto">
+        <div className="flex-1 min-w-0 overflow-x-scroll">
           {lines.length === 0 ? (
             <p className="text-muted py-2" data-testid="bc-empty">No lines yet: apply the preset or add a line.</p>
           ) : (
             <table className="text-[11px] w-full" data-testid="bc-table">
               <thead>
                 <tr className="text-left text-muted">
-                  <th className="font-normal px-1"><span className="sr-only">Details</span></th>
-                  {['Name', 'Kind', 'Category', 'Quantity from', 'Quantity', 'Unit', 'Price', 'Escalation', 'Years', 'Basis']
+                  <th className="font-normal px-1 sticky left-0 bg-surface z-10">Name</th>
+                  {['Kind', 'Category', 'Quantity from', 'Quantity', 'Unit', 'Price', 'Escalation', 'Years', 'Basis']
                     .map(h => <th key={h} className="font-normal px-1">{h}</th>)}
                   <th className="font-normal px-1"><span className="sr-only">Remove</span></th>
                 </tr>
@@ -457,12 +471,10 @@ export default function BusinessCaseLines() {
                   return (
                     <Fragment key={i}>
                       <tr className="align-top border-t border-border" data-testid="bc-row">
-                        <td className="px-1">
-                          <button type="button" className={ACTION} aria-expanded={open.has(i)}
+                        <td className="px-1 sticky left-0 bg-surface z-10 whitespace-nowrap">
+                          <button type="button" className={ACTION + ' mr-1'} aria-expanded={open.has(i)}
                                   aria-label={`${open.has(i) ? 'Hide' : 'Show'} details of ${ln.name}`}
                                   onClick={() => toggle(i)}>{open.has(i) ? '▾' : '▸'}</button>
-                        </td>
-                        <td className="px-1">
                           <input aria-label={`Name, line ${i + 1}`} className={CELL + ' w-36' + (bad('name') ? BAD : '')}
                                  maxLength={80} value={ln.name} aria-invalid={bad('name') ? true : undefined}
                                  onChange={e => setLine(i, { name: e.target.value })} />
@@ -503,7 +515,7 @@ export default function BusinessCaseLines() {
                           <select aria-label={`Unit, ${ln.name}`} className={CELL + (unitBad ? BAD : '')}
                                   aria-invalid={unitBad ? true : undefined}
                                   value={ln.unit} onChange={e => setLine(i, { unit: e.target.value })}>
-                            {unitsFor(ln, opts).map(u => <option key={u} value={u}>{u}</option>)}
+                            {unitsFor(ln, opts).map(u => <option key={u} value={u}>{unitWords(u)}</option>)}
                           </select>
                         </td>
                         <td className="px-1">
@@ -537,7 +549,6 @@ export default function BusinessCaseLines() {
                       </tr>
                       {shown.length > 0 && (
                         <tr data-testid="bc-row-refusals">
-                          <td />
                           <td colSpan={11} className="px-1 pb-1">
                             <ul className="text-danger">
                               {shown.map((p, k) => (
@@ -555,7 +566,6 @@ export default function BusinessCaseLines() {
                       )}
                       {open.has(i) && (
                         <tr>
-                          <td />
                           <td colSpan={11} className="px-1 pb-2">
                             <Details line={ln} placed={here} years={yearsOf(ln, horizon)} set={p => setLine(i, p)} />
                           </td>
@@ -586,12 +596,21 @@ export default function BusinessCaseLines() {
           <LockedRows locked={study.data?.report?.locked ?? null} ran={ran} />
         </div>
       </div>
-      {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>{message.text}</p>}
+      {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>{message.text}
+        {message.finance && <>{' '}<button type="button" className="underline" data-testid="bc-open-finance"
+          onClick={() => openPanel('commercial', 'economics')}>Finance inputs ›</button></>}</p>}
       <div className="flex flex-wrap gap-2 items-center">
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
                 disabled={!dirty || saving || draft === null} onClick={() => { void save() }}>Save the lines</button>
-        <button type="button" className={ACTION} disabled={!dirty} onClick={() => { void reload() }}>Discard changes</button>
+        <button type="button" className={ACTION} disabled={!dirty} onClick={() => setConfirmDiscard(true)}>Discard changes</button>
         {!dirty && <span className="text-muted">No unsaved changes.</span>}
+        {dirty && confirmDiscard && (
+          <span role="alert" className="text-warn flex flex-wrap gap-2 items-center" data-testid="bc-discard-confirm">
+            Discard the unsaved changes to the lines? The stored lines are reloaded.
+            <button type="button" className={ACTION} onClick={() => { setConfirmDiscard(false); void reload() }}>Discard</button>
+            <button type="button" className={ACTION} onClick={() => setConfirmDiscard(false)}>Keep editing</button>
+          </span>
+        )}
       </div>
     </div>
   )

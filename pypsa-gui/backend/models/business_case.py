@@ -94,15 +94,16 @@ Unit = Literal[
 def allowed_units(kind: str, source: str, output_units=()) -> tuple[str, ...]:
     """The units a line of `kind` may take from its quantity `source` (spec §4 "Units by
     source"): a share takes `share`; a linked line the units its output offers; a typed
-    line any but `share`, with `lump` and `MW` capex only. The line table's selects read
-    this; a test pins it to `_line_refusals`' `unit_not_allowed`."""
+    line any but `share`, with `lump` capex only and `MW` typed capex only. The options
+    route and `_line_refusals`' `unit_not_allowed` both read this (GK B O1)."""
     if source == "share_of":
         return ("share",)
-    if source == "linked":
-        return tuple(u for u in output_units if u not in ("share", "lump", "MW"))
+    pool = output_units if source == "linked" else get_args(Unit)
     return tuple(
-        u for u in get_args(Unit)
-        if u != "share" and (kind == "capex" or u not in ("lump", "MW"))
+        u for u in pool
+        if u != "share"
+        and (u != "lump" or kind == "capex")
+        and (u != "MW" or (kind == "capex" and source == "typed"))
     )
 
 
@@ -440,10 +441,10 @@ class BusinessCaseInputs(BaseModel):
         if energy_in_price and ln.kind == "revenue" and ln.category == "cost_recovery":
             out.append(PassThroughPriceIncludesEnergy(f"{at}.category"))
         share = ln.source == "share_of"
-        if (
-            (ln.unit == "share") != share
-            or (ln.unit == "lump" and ln.kind != "capex")
-            or (ln.unit == "MW" and (ln.kind != "capex" or ln.source != "typed"))
+        # A linked line's own output units are checked when it is read (04); here only
+        # the rule every source shares, from the one function the options route serves.
+        if ln.unit not in allowed_units(
+            ln.kind, ln.source, (ln.unit,) if ln.source == "linked" else ()
         ):
             out.append(UnitNotAllowed(f"{at}.unit"))
         if share:

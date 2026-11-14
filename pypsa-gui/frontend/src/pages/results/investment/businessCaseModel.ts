@@ -24,25 +24,49 @@ export function outputOf(line: LineItem, opts: BusinessCaseOptions | null): Link
   return opts?.outputs?.find(o => o.id === id) ?? null
 }
 
-/** The units the Unit select offers (spec §4 "Units by source", the backend's
- *  `allowed_units`): a share takes `share`; a linked line its output's units; a
- *  typed line its kind's typed units. The line's own unit is kept in the list
- *  when it is not allowed, so the refusal shows on a value the user can see. */
-export function unitsFor(line: LineItem, opts: BusinessCaseOptions | null): string[] {
+/** The units the backend allows for the line's source and kind (`units_by_source`,
+ *  the backend's `allowed_units`); null when the options do not say (not loaded, or a
+ *  linked output this model does not offer). */
+function allowedFor(line: LineItem, opts: BusinessCaseOptions | null): string[] | null {
+  const by = opts?.units_by_source
+  if (!by) return null
   const src = sourceKind(line.quantity_source)
-  const allowed = src === 'share_of' ? ['share']
-    : src === 'linked' ? (outputOf(line, opts)?.units ?? [])
-    : (opts?.typed_units[line.kind] ?? [])
+  if (src === 'linked') return by.linked[linkedOutputId(line.quantity_source)]?.[line.kind] ?? null
+  return by[src][line.kind] ?? null
+}
+
+/** The units the Unit select offers (spec §4 "Units by source"), as the backend
+ *  serves them. The line's own unit is kept in the list when it is not allowed, so
+ *  the refusal shows on a value the user can see. */
+export function unitsFor(line: LineItem, opts: BusinessCaseOptions | null): string[] {
+  const allowed = allowedFor(line, opts) ?? []
   return allowed.includes(line.unit) || !line.unit ? allowed : [...allowed, line.unit]
 }
 
 /** Is the line's current unit outside what its source allows? */
 export const unitNotAllowed = (line: LineItem, opts: BusinessCaseOptions | null): boolean => {
-  const src = sourceKind(line.quantity_source)
-  const allowed = src === 'share_of' ? ['share']
-    : src === 'linked' ? (outputOf(line, opts)?.units ?? null)
-    : (opts?.typed_units[line.kind] ?? null)
+  const allowed = allowedFor(line, opts)
   return allowed !== null && !allowed.includes(line.unit)
+}
+
+/** Units in words (UX: "USD per GPU-hour", never "USD/GPU_h"). */
+export const UNIT_WORDS: Record<string, string> = {
+  MWh: 'MWh', MWh_H2: 'MWh of hydrogen', kg: 'kg', t: 'tonne', GPU_h: 'GPU-hour',
+  kW_month: 'kW-month', kW_year: 'kW-year', MW: 'MW', MW_year: 'MW-year', unit: 'unit',
+  unit_month: 'unit-month', lump: 'lump sum', share: 'share',
+}
+export const unitWords = (u: string) => UNIT_WORDS[u] ?? u.replace(/_/g, ' ')
+
+/** "USD per GPU-hour"; a lump sum is the currency alone; a unit-free price reads "per <unit>". */
+export function priceUnitWords(currency: string | null, unit: string): string {
+  if (unit === 'lump') return currency ? `${currency}, lump sum` : 'lump sum'
+  return `${currency ?? ''} per ${unitWords(unit)}`.trim()
+}
+
+/** A hint's "USD/GPU_h" in words. */
+export function hintUnitWords(unit: string): string {
+  const [cur, per] = unit.split('/', 2)
+  return per === undefined ? unitWords(cur) : priceUnitWords(cur, per)
 }
 
 // ── refusal placement (G9) ──────────────────────────────────────────────────

@@ -118,7 +118,13 @@ export interface BusinessCaseOptions {
   offered_rows: OfferedRow[]
   categories: Record<LineKind, string[]>
   escalations: string[]
-  typed_units: Record<LineKind, string[]>
+  /** The units a line may take per quantity source (the backend's `allowed_units`):
+   *  typed and share_of per kind; linked per output id, then per kind. */
+  units_by_source: {
+    typed: Record<LineKind, string[]>
+    share_of: Record<LineKind, string[]>
+    linked: Record<string, Record<LineKind, string[]>>
+  }
   catalogue_version: string
   outputs: LinkedOutput[] | null
   outputs_reason: string | null
