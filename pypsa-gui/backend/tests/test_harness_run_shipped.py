@@ -881,3 +881,124 @@ def test_an_invalid_patched_case_is_not_run_at_admission_with_the_reason(
     case = _by_id(project, tpl, built)["merchant_heavy"]
     assert case["status"] == "not_run" and "share" in case["why"]
     assert case["id"] not in _load(project, tpl, built)["admissible"]
+
+
+# ── GK B (58) K1-K4 ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "StorageUnit.bess.max_hours",  # another storage field
+        "StorageUnit.other.inv_power_overnight",  # another unit
+        "Store.bess.capital_cost",  # a Store cost
+        "Link.bess.capital_cost",  # a Link cost
+        "commercial.some_new_key",
+        "commercial.export_price_ref.hash",
+        "commercial.contracts.ppa_wind.reference_price.hash",
+        "commercial.connection.p_nom",
+        "commercial.contracts.ppa_wind.some_new_field",
+        "finance.degradation_by_asset.pv_plant",
+    ],
+)
+def test_a_change_the_classifier_does_not_recognise_is_unknown_never_lp_or_finance(
+    built, path
+):
+    assert S.classify(_change(path, 1.0, 2.0), built[0]) == "unknown"
+
+
+def test_an_unknown_case_is_never_run_at_admission(project, tpl, built):
+    cfg, network = built
+    bad = json.loads(json.dumps(cfg))
+    bad["commercial"] = "broken"  # nothing about the contracts is known
+    shipped = S.load(project, TID, template_dir=tpl, cfg=bad, network=network)
+    case = next(c for c in shipped["cases"] if c["id"] == "ppa_price_minus_10")
+    assert case["kind"] == "unknown" and case["status"] == "not_run"
+    assert case["why"] and "ppa_price_minus_10" not in shipped["admissible"]
+
+
+def test_the_project_contract_not_the_templates_decides_the_kind(project, tpl, built):
+    cfg, network = built
+    mine = json.loads(json.dumps(cfg))
+    wind = next(k for k in mine["commercial"]["contracts"] if k["id"] == "ppa_wind")
+    wind.update(settlement="physical", changes_dispatch=True)
+    wind["suspend_on_negative_price"] = None
+    kinds = {
+        c["id"]: c["kind"]
+        for c in S.load(project, TID, template_dir=tpl, cfg=mine, network=network)[
+            "cases"
+        ]
+    }
+    # The shipped file changes both contracts' price, and the project's wind PPA
+    # moves the LP; the template's own would not.
+    assert kinds["ppa_price_minus_10"] == "lp"
+    assert _by_id(project, tpl, built)["ppa_price_minus_10"]["kind"] == "finance"
+
+
+def test_apply_never_mutates_the_config_including_nested_lists(project, built):
+    cfg = _project_cfg(built[0])
+    before = json.loads(json.dumps(cfg))
+    for case_id in ("low_price", "ppa_price_minus_10", "cheap_battery"):
+        out, _ = S.apply(cfg, _case_changes(project, case_id), _resolver)
+        assert cfg == before
+        out["commercial"]["contracts"].append({"id": "x"})
+        assert cfg == before  # the copy is deep
+
+
+def test_the_validators_reason_is_what_the_case_reads(built):
+    cfg = _project_cfg(built[0])
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(
+            cfg, [_change("commercial.contracts.ppa_wind.share", 0.7, 7.0)], _resolver
+        )
+    assert str(exc.value).startswith("The changed commercial block does not validate:")
+    assert "share" in str(exc.value)
+
+
+def _fingerprint(cfg, network):
+    from services import workflow_tools as W
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.build_context()
+    ctx.network = network.copy()
+    ctx.solver_state["solver_config"] = cfg
+    return W._network_input_fingerprint(ctx)
+
+
+def _applied(project, built, case_id):
+    cfg = _project_cfg(built[0])
+    out, battery = S.apply(cfg, _case_changes(project, case_id), _resolver)
+    network = built[1].copy()
+    for change in battery:
+        network.storage_units.loc["bess", change["path"].split(".")[2]] = change["new"]
+    return cfg, out, network
+
+
+@pytest.mark.parametrize("case_id", ["low_price", "cannibalised"])
+def test_a_price_ref_case_moves_the_fingerprint(project, built, case_id):
+    cfg, out, network = _applied(project, built, case_id)
+    assert _fingerprint(out, network) != _fingerprint(cfg, built[1])
+
+
+@pytest.mark.parametrize(
+    "case_id", ["ppa_price_minus_10", "merchant_heavy", "longer_ppa"]
+)
+def test_a_finance_case_also_moves_the_fingerprint_so_it_cannot_judge_alone(
+    project, built, case_id
+):
+    """The fingerprint hashes the whole solver_config, contracts included, so it
+    does not tell a finance-only case from an LP one (the judge keys on the kind)."""
+    cfg, out, network = _applied(project, built, case_id)
+    assert _fingerprint(out, network) != _fingerprint(cfg, built[1])
+
+
+def test_the_battery_case_moves_the_lp_but_not_the_fingerprint(project, built):
+    """The overnight cost fields are custom columns the solve stages into the
+    capital cost (`periodized_costs`), so the fingerprint does not see them."""
+    cfg, out, network = _applied(project, built, "cheap_battery")
+    assert _fingerprint(out, network) == _fingerprint(cfg, built[1])
+    changed = [
+        network.storage_units.loc["bess", f] != built[1].storage_units.loc["bess", f]
+        for f in S.BESS_FIELDS
+    ]
+    assert all(changed)

@@ -225,14 +225,21 @@ def classify(change: dict, cfg) -> str:
     (`lp_bindings.dispatch_ppas`), decided from the project's own contract."""
     parts = change["path"].split(".")
     if parts[0] == "StorageUnit":
-        return LP
+        # Only the battery's two overnight cost fields: the solve stages them into
+        # the LP's capital cost. Any other storage field is not known (fail closed).
+        known = len(parts) == 3 and parts[1] == "bess" and parts[2] in BESS_FIELDS
+        return LP if known else UNKNOWN
     if parts[0] != "commercial":
         return UNKNOWN
-    if len(parts) == 3 and parts[1] in PRICE_REFS:
+    if len(parts) == 3 and parts[1] in PRICE_REFS and parts[2] == "id":
         return LP
-    if len(parts) == 5 and parts[3] == "reference_price":
+    if (
+        len(parts) == 5
+        and parts[1] == "contracts"
+        and parts[3:] == ["reference_price", "id"]
+    ):
         return FINANCE
-    if len(parts) == 4 and parts[1] == "contracts":
+    if len(parts) == 4 and parts[1] == "contracts" and parts[3] in CONTRACT_NUMBERS:
         dispatch = _dispatch_contract_ids(cfg)
         if dispatch is None:
             return UNKNOWN
@@ -401,6 +408,9 @@ def load(project_dir, template_id: str, *, template_dir, cfg, network) -> dict:
             reason = refusal(change, cfg, network)
             if reason:
                 why.append(reason)
+        if not why and case_kind(case["changes"], cfg) == UNKNOWN:
+            # Fail closed (GK B K1): what it moves is not known, so it never runs.
+            why.append("What this case moves is not known, so it is not run.")
         if not why:
             try:
                 apply(
