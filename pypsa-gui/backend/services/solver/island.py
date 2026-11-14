@@ -37,7 +37,10 @@ lifetime), as the reserve margin does.
 grid-forming storage also holds B(t) = ΔP⁺(t)·(start_s + sync_s)/3600, the
 energy until the slowest genset has joined. B enters (a)'s row for storage
 in both RT and the GFM set, so one MWh is not counted twice; otherwise it is
-its own row. ΔP⁺ is I2b's step below, as a linear expression, unless a
+its own row. Each grid-forming battery also holds its own share of B(t)
+above its floor (``Island-gfm-bridge-<s>``, SH 40): its droop split K_s/ΣK
+when every grid-forming battery is fixed, else 1 (``_gfm_shares``; the
+facts' ``gfm_bridge_share`` names the rule). ΔP⁺ is I2b's step below, as a linear expression, unless a
 caller passes ``delta_p_plus``. B carries max(ΔP⁺, 0) through a variable
 b ≥ ΔP⁺, b ≥ 0 in the same row. The UPS bridge applies when islanding is
 unplanned (``seamless`` or ``ups_bridged``), not to a ``planned`` transfer.
@@ -723,6 +726,7 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None,
     facts = {"n_plus_k": k, "ride_through_storage": rt, "critical_loads": critical,
              "truncated": False, "periods": {}, "fuel": {"status": "not checked"},
              "seamless_bridge": None, "missing": missing, "surplus": None,
+             "gfm_bridge_share": {},
              "uc": ({"status": "linearised (u may be fractional)", "committed": committed,
                      "not_committed": not_committed} if req.get("linearised_uc")
                     else {"status": "off"}),
@@ -841,6 +845,11 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None,
         own = [s for s in gfm_p if s not in rt_p]
         if own and not bridge.is_zero():
             _reserve_row(n, m, sns, sns_p, coord, own, bridge, f"Island-gfm-bridge{tag}")
+        # SH 40 (SH40-BRIDGE): each grid-forming battery also holds its own
+        # share of B(t), as gridspine's screen judges each battery on its own.
+        if gfm_p and not bridge.is_zero():
+            facts["gfm_bridge_share"][str(period)] = _gfm_share_rows(
+                n, m, sns, sns_p, coord, tag, units, gfm_p, bridge, _f0(island))
 
         # (b) every UPS holds its IT load for bridge_s, when islanding is
         # unplanned (the matrix: a planned transfer needs no bridge).
@@ -1085,6 +1094,73 @@ def _reserve_row(n, m, sns, sns_p, coord, names, need: _Lin, cname):
     for s in names:
         _add_soc_before(lhs, n, sns, sns_p, s, float(n.storage_units.at[s, "efficiency_dispatch"]))
     _row(m, lhs, need, cname, coord)
+
+
+#: The per-battery bridge share rules (SH 40, GK A P5), as the facts name them.
+GFM_SHARE_DROOP = "droop split K_s/ΣK over the grid-forming batteries (every one fixed)"
+GFM_SHARE_ONE = ("1 for every grid-forming battery (one is extendable: K_s/ΣK is not linear in "
+                 "p_nom, so the conservative linear bound)")
+
+
+def _gfm_shares(n, units, gfm, f0) -> tuple[dict, str]:
+    """``({battery: share of B(t)}, rule)``. Every grid-forming battery
+    fixed: its droop gain over theirs, K_s/ΣK with K = p_nom/(R·f0), as
+    gridspine's frequency model splits a step between them (``frequency.Unit.k``,
+    a VSM on its droop as well). ΣK is over the batteries alone: a genset
+    online at 0⁺ takes part too, but its governor lags (T_g) and is held to
+    its load step, so leaving it out keeps each share at or above what the
+    battery gives (conservative); with every τ_f equal and no genset online
+    the split is exact at every instant of the bridge. Any one extendable:
+    1 each (conservative linear bound)."""
+    su = n.storage_units
+    if any(bool(su.at[s, "p_nom_extendable"]) for s in gfm):
+        return {s: 1.0 for s in gfm}, GFM_SHARE_ONE
+    k = {s: float(su.at[s, "p_nom"]) / (units[s]["values"]["droop_pct"] / 100.0 * f0) for s in gfm}
+    total = sum(k.values())
+    if not total > 0.0:
+        return {s: 1.0 for s in gfm}, GFM_SHARE_ONE
+    return {s: k[s] / total for s in gfm}, GFM_SHARE_DROOP
+
+
+def _e_min_pu(n, s) -> float:
+    """The battery's floor as a share of its energy capacity: PyPSA's
+    StorageUnit has no minimum state of charge, so 0, unless the network
+    carries an ``e_min_pu`` column on its storage units (a reserve floor the
+    project states), which the bridge never draws below."""
+    if "e_min_pu" not in n.storage_units.columns:
+        return 0.0
+    v = n.storage_units.at[s, "e_min_pu"]
+    if v is None or v != v:
+        return 0.0
+    v = float(v)
+    if not 0.0 <= v < 1.0:
+        raise IslandRefusal(f"storage unit {s!r}: e_min_pu {v:g} is not in [0, 1)")
+    return v
+
+
+def _gfm_share_rows(n, m, sns, sns_p, coord, tag, units, gfm, bridge: _Lin, f0) -> dict:
+    """One row per grid-forming battery s (SH 40):
+
+        η_s·(e_s(t−1) − e_min_pu,s·max_hours_s·p_nom_s) ≥ share_s·B(t)
+
+    named ``Island-gfm-bridge-<s>{tag}``. η is ``efficiency_dispatch``,
+    e(t−1) and its first-snapshot term are ``_add_soc_before``'s, and B(t) is
+    the aggregate rows' own MWh (ΔP⁺·(start_s + sync_s)/3600), as in
+    ``Island-energy`` / ``Island-gfm-bridge``; those rows stay. Unlike them,
+    this row reads the energy above the battery's floor (``_e_min_pu``).
+    Grid-forming storage is a StorageUnit here (the GFM set is read from
+    ``storage_units``), so there is no Store split's discharge Link to read
+    η from. Returns the facts: the rule and each share."""
+    shares, rule = _gfm_shares(n, units, gfm, f0)
+    su = n.storage_units
+    for s in gfm:
+        eta = float(su.at[s, "efficiency_dispatch"])
+        lhs = _add_soc_before(_Lin(sns_p), n, sns, sns_p, s, eta)
+        floor = _e_min_pu(n, s)
+        if floor:
+            _add_nominal(lhs, n, "StorageUnit", s, -eta * floor * float(su.at[s, "max_hours"]))
+        _row(m, lhs, bridge.scaled(shares[s]), f"Island-gfm-bridge-{s}{tag}", coord)
+    return {"rule": rule, "shares": shares}
 
 
 def _it_load(n, units, u, sns_p) -> pd.Series:
