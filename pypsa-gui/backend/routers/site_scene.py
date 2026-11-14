@@ -7,6 +7,7 @@ The Site 3D native scene routes (SC-01a; D01/D02 in
   * ``GET  /{name}/sites/{site_id}/scene/results``: SC-03 native results on buildings and groups (D07).
   * ``POST /{name}/sites/{site_id}/scene/adopt``: explicit, digest-checked adoption.
   * ``POST /{name}/sites/{site_id}/scene/proposals``: an in-request native preview.
+  * ``POST /{name}/sites/{site_id}/scene/exports``: SC-04 GLB + manifest zip download (a read).
   * ``GET  …/proposals/{proposal_id}``, ``POST …/apply``, ``POST …/cancel``.
 
 Every route authorizes ``{name}`` with ``ProjectAccessDep`` (404 for a project
@@ -25,7 +26,7 @@ import uuid
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session as DBSession
 
@@ -250,3 +251,27 @@ def cancel_proposal(site_id: str, proposal_id: str, project: AuthorizedProject =
                     user: User | None = Depends(optional_user)) -> dict:
     _check_lock(project, db, user)
     return proposals.cancel(project.registry_key, _owner(user), site_id, proposal_id)
+
+
+@router.post("/{name}/sites/{site_id}/scene/exports")
+async def export_scene(site_id: str, request: Request, project: AuthorizedProject = ProjectAccessDep) -> Response:
+    """
+    SC-04: "Export for Blender", the neutral GLB + manifest bundle of the current
+    generation as a zip download. A read: viewers may call it, it takes no edit
+    lock, persists nothing and never starts Blender (V31). The body names the
+    format and media policy explicitly (`glb_manifest`, `none`).
+    """
+    from datetime import UTC, datetime
+
+    from services.http_filenames import content_disposition
+    from services.site_scene import export
+
+    body = await _json_body(request, MAX_SMALL_BODY)
+    export.parse_request(body)
+    await run_in_threadpool(_site_known, project, site_id)
+    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    data, meta = await _call(export.export_site, project.directory, project.name, site_id, stamp)
+    name = f"{meta['site_name'] or site_id}-scene-r{meta['revision']}.zip"
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": content_disposition(name),
+                             "X-Scene-Revision": str(meta["revision"])})

@@ -355,6 +355,21 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'site_scene_export',
+        'title': 'Exporting the 3D site for Blender',
+        'disposition': 'manual',
+        'reason': 'Exporting the 3D site downloads a file (a 3D model file and a manifest) to your computer. Use "Export for Blender" on the Site canvas.',
+        'page': 'Site 3D',
+        'panel': 'map',
+        'keywords': frozenset({
+            'blender',
+            'glb',
+        }),
+        'routes': frozenset({
+            ('POST', '/api/projects/{name}/sites/{site_id}/scene/exports'),
+        }),
+    },
+    {
         'id': 'library_uploads_and_tariff_edit',
         'title': 'Library series sent as JSON values',
         'disposition': 'manual',

@@ -1,0 +1,9 @@
+{
+ "limitations": [
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/scene/exports",
+   "reason": "binary-transfer"
+  }
+ ]
+}
