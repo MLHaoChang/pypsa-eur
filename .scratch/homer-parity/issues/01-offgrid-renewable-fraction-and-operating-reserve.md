@@ -90,3 +90,6 @@ GO for 01b-1 with Q1 (a) dispatched PV/wind output, Q2 (a) storage counts, Q3 (a
 - O9 per-snapshot mutant, a mutant per O3/O4 term, refusals through one validator; mutants on operating_reserve.py.
 UX placement note goes to UX before 01b-2.
 
+
+### 01b-2 UX placement (2026-11-14, UX 21)
+GO: sub-group "Operating reserve" in the Off-grid constraints block, under Minimum renewable fraction. Asks: labels "Reserve for load (%)", "Reserve for solar output (%)", "Reserve for wind output (%)", visible "0 means no reserve" and the one-line explanation, no engine keys in visible text; out of range or text gets an inline sentence opening with the label, no clamp, Save disabled with a visible reason; the infeasible message opens with the label; the chat edit card uses the same labels with a drift test; Guided shot or a PR line saying it is not reachable; no Results UI here (the binding-hours view is its own issue). Shots: idle, set, out of range, infeasible; Expert, Guided if reachable; light and dark.
