@@ -23,13 +23,15 @@ the electricity used on site (owner decision RENFRAC-ALL-1):
     whose H2 bus feeds a fuel cell) is not counted, or it would count twice.
     A Link that can run negative is a path back by itself, so a counted
     conversion Link never runs negative and its draw is p0 directly.
-  - Ambiguous: a path back AND a sink on a non-electrical bus it reaches
-    (an H2 bus with both an offtake and a fuel cell). A sink is an active
-    Load, or an active non-slack Generator that withdraws (R16: sign < 0, or
-    p_max_pu ≤ 0 throughout with p_min_pu < 0 somewhere). Fail closed: the
-    KPI is None when it draws, with a reason naming the Link(s) as an
-    ambiguous conversion (R15), and the row logs a warning; it is not
-    counted in the row.
+  - Net cluster (homer-parity 06): a path back AND a sink on a non-electrical
+    bus it reaches (an H2 bus with both an offtake and a fuel cell). A sink is
+    an active Load, or an active non-slack Generator that withdraws (R16:
+    sign < 0, or p_max_pu ≤ 0 throughout with p_min_pu < 0 somewhere). The
+    cluster is counted by its net draw: Σ p0·`_net_coef` over every Link
+    between it and electricity (what the electrolysers draw minus what the
+    fuel cell returns), signed and summed per period with the period's
+    weights, in the KPI and the row alike. A period whose cluster returns
+    more than it draws (a store filled before the horizon) lowers served.
   - Export is not use: elec→elec Links are not conversion, nor is a Link
     into a supply bus or a bus whose carrier names the grid or export.
   - Not guarded (R14j): renewable electricity dumped into a converter whose
@@ -457,13 +459,16 @@ def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
     docstring). Returns ``conversion_links`` (counted as use),
     ``conversion_inputs`` ({link: [k of each electrical input port]}),
     ``storage_links`` (their energy comes back to electricity) and
-    ``ambiguous_links`` (a path back AND a non-electrical sink, a Load or a
-    withdrawing Generator: fail closed)."""
+    ``net_clusters`` (homer-parity 06: a path back AND a non-electrical sink,
+    a Load or a withdrawing Generator). A net cluster is ``{"buses", "links"}``:
+    the non-electrical buses its conversion Links reach (clusters sharing a bus
+    merge) and every active non-source Link between them and electricity, each
+    once; it is counted by its net draw (`_net_coef`)."""
     out: dict[str, Any] = {
         "conversion_links": [],
         "conversion_inputs": {},
         "storage_links": [],
-        "ambiguous_links": [],
+        "net_clusters": [],
     }
     links = n.links
     if not len(links):
@@ -472,6 +477,7 @@ def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
     ports = {l: _ports(n, l) for l in active}
     reversible = {l for l in active if min_p_min_pu(n, l) < 0}
     loads = n.loads
+    clusters: list[set[str]] = []
     sink_buses = (
         {str(loads.at[l, "bus"]) for l in loads.index if _active(loads, l)}
         | {str(n.generators.at[g, "bus"]) for g in _withdrawing_generators(n)}
@@ -501,9 +507,47 @@ def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
             out["conversion_links"].append(l)
             out["conversion_inputs"][l] = e_in
         elif seen & sink_buses:
-            out["ambiguous_links"].append(l)
+            merged = set(seen)
+            for c in [c for c in clusters if c & merged]:
+                clusters.remove(c)
+                merged |= c
+            clusters.append(merged)
         else:
             out["storage_links"].append(l)
+    for buses in clusters:
+        bridge = [
+            m
+            for m in active
+            if m not in src_links
+            and any(b in elec for _k, b in _bus_ports(n, m))
+            and any(b in buses for _k, b in _bus_ports(n, m))
+        ]
+        out["net_clusters"].append({"buses": sorted(buses), "links": sorted(bridge)})
+    out["net_clusters"].sort(key=lambda c: c["buses"])
+    return out
+
+
+def _bus_ports(n, link) -> list[tuple[int, str]]:
+    """Every set port of a Link, ``[(k, bus)]``."""
+    ins, _outs = _ports(n, link)
+    links = n.links
+    out = list(ins)
+    for c in links.columns:
+        if c.startswith("bus") and c[3:].isdigit() and int(c[3:]) not in {k for k, _b in ins}:
+            bus = str(links.at[link, c] or "").strip()
+            if bus:
+                out.append((int(c[3:]), bus))
+    return sorted(out)
+
+
+def _net_coef(n, link: str, elec: set[str], snapshots) -> pd.Series:
+    """MW a net-cluster Link withdraws from electricity per MW of p0 (homer-parity 06): Σ over its electrical
+    ports k of 1 (k = 0) or −efficiencyk(t), PyPSA's own p_k ÷ p0. An electrolyser gives +1, a fuel cell into
+    electricity −η1 (it returns), a reversible Link is signed by its p0."""
+    out = pd.Series(0.0, index=snapshots)
+    for k, b in _bus_ports(n, link):
+        if b in elec:
+            out += 1.0 if k == 0 else -_efficiency(n, link, snapshots, _eff_attr(k))
     return out
 
 
@@ -622,7 +666,12 @@ def _has_nan(n, cls, gp, lp, snapshots) -> bool:
         ),
         (n.links_t.p1, cls["source_links"]),
         (lp, cls["loads"]),
-        (n.links_t.p0, cls["source_links"] + cls["conversion_links"]),
+        (
+            n.links_t.p0,
+            cls["source_links"]
+            + cls["conversion_links"]
+            + [l for c in cls["net_clusters"] for l in c["links"]],
+        ),
     ]
     for frame, names in reads:
         cols = [c for c in names if c in getattr(frame, "columns", [])]
@@ -773,20 +822,6 @@ def renewable_fraction(
             + ": it reaches the site through a path the fraction does not count"
         )
         return out
-    ambiguous = [l for l in cls["ambiguous_links"] if (_col(n.links_t.p0, l) > 0).any()]
-    if ambiguous:
-        names = ", ".join(map(str, ambiguous))
-        out["reason"] = (
-            "the electricity drawn by "
-            + names
-            + " cannot be attributed: "
-            + names
-            + " feeds a bus with both a load and a path back to electricity "
-            "(ambiguous conversion), so it is neither counted as used on site "
-            "nor as stored"
-        )
-        return out
-
     if _has_nan(n, cls, gp, lp, sns):
         out["reason"] = "the dispatch has missing values (NaN)"
         return out
@@ -819,6 +854,9 @@ def renewable_fraction(
     draw = pd.Series(0.0, index=sns)
     for l in cls["conversion_links"]:
         draw += _col(n.links_t.p0, l).clip(lower=0.0) * _draw_coef(n, cls, l, sns)
+    elec = _electrical_buses(n)
+    for l in (l for c in cls["net_clusters"] for l in c["links"]):
+        draw += _col(n.links_t.p0, l) * _net_coef(n, l, elec, sns)
     served_t = load + draw - slack - _unserved_mw(n, cls, unserved_t, sns)
 
     w = _weights(n, sns)
@@ -852,7 +890,7 @@ def renewable_fraction(
         nonrenewable_mwh=tot_nonren,
         renewable_mwh=tot_served - tot_nonren,
     )
-    if cls["conversion_links"]:
+    if cls["conversion_links"] or cls["net_clusters"]:
         out["note"] = CONVERSION_NOTE
     if tot_served <= 0:
         out["reason"] = NO_SERVED_REASON
@@ -983,7 +1021,6 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
             cls["unattributed_generators"]
             + cls["unattributed_links"]
             + cls["unattributed_stores"]
-            + cls["ambiguous_links"]
         )
         if unseen:
             _safe_log(
@@ -1030,6 +1067,17 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
         draw = pd.DataFrame(
             {l: _draw_coef(n, cls, l, snapshots) for l in convs}, index=snapshots
         )
+        # homer-parity 06: a net cluster's Links, signed by `_net_coef` (no clip: the net draw is linear).
+        elec = _electrical_buses(n)
+        nets = [
+            l
+            for c in cls["net_clusters"]
+            for l in c["links"]
+            if lvar is not None and l in lvar.indexes["name"]
+        ]
+        for l in nets:
+            draw[l] = _net_coef(n, l, elec, snapshots)
+        convs = convs + nets
         pmin_g = n.get_switchable_as_dense("Generator", "p_min_pu", snapshots)
         pmin_l = n.get_switchable_as_dense("Link", "p_min_pu", snapshots)
         g_src = (
@@ -1199,7 +1247,7 @@ def infeasibility_lines(n, cfg) -> list[str]:
         where = "" if P is None else f" in {P}"
         conv = (
             f", plus {_pct(f)} of what the conversion units draw"
-            if cls["conversion_links"]
+            if cls["conversion_links"] or cls["net_clusters"]
             else ""
         )
         lines.append(

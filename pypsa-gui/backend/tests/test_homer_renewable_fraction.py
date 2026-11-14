@@ -1750,7 +1750,7 @@ def _dispatch_conversion(n):
 def test_conversion_links_are_classified_as_use():
     c = classify(_site_with_conversion())
     assert c["conversion_links"] == ["electrolyser", "heat_pump"]
-    assert c["storage_links"] == [] and c["ambiguous_links"] == []
+    assert c["storage_links"] == [] and c["net_clusters"] == []
 
 
 def test_the_kpi_counts_what_converters_draw_as_used():
@@ -1825,7 +1825,7 @@ def test_a_battery_charger_is_not_use():
     n.add("Store", "cells2", bus="cellbus2", carrier="battery", e_nom=100.0)
     n.add("Link", "bidir", bus0="ac", bus1="cellbus2", p_nom=10.0, p_min_pu=-1.0)
     c = classify(n)
-    assert c["conversion_links"] == [] and c["ambiguous_links"] == []
+    assert c["conversion_links"] == [] and c["net_clusters"] == []
     assert set(c["storage_links"]) == {"charger", "bidir"}
     n.links_t.p0 = pd.DataFrame(
         {"charger": 5.0, "discharger": 0.0, "bidir": 3.0}, index=n.snapshots
@@ -1850,7 +1850,7 @@ def test_an_h2_storage_loop_is_not_use():
     ] == pytest.approx(0.625)
 
 
-def _ambiguous_h2(n):
+def _net_h2(n):
     n.add("Bus", "h2", carrier="H2")
     n.add("Store", "h2tank", bus="h2", carrier="H2", e_nom=200.0)
     n.add("Load", "offtake", bus="h2", p_set=1.0)
@@ -1859,27 +1859,82 @@ def _ambiguous_h2(n):
     return n
 
 
-def test_an_h2_bus_with_an_offtake_and_a_fuel_cell_fails_closed():
-    n = _ambiguous_h2(_dispatched())
+def _net_dispatch(n, el=4.0, fc=2.0):
+    """Electrolyser draws ``el`` MW; the fuel cell burns ``fc`` MW of H2 and returns η·fc = fc/2 MW."""
+    n.links_t.p0 = pd.DataFrame({"electrolyser": el, "fuel cell": fc}, index=n.snapshots)
+    return n
+
+
+CLUSTER = [{"buses": ["h2"], "links": ["electrolyser", "fuel cell"]}]
+
+
+def test_an_h2_bus_with_an_offtake_and_a_fuel_cell_counts_its_net_draw():
+    """homer-parity 06: a cluster with a sink and a path back is counted by its net draw, per period."""
+    n = _net_dispatch(_net_h2(_dispatched()))
     n.loads_t.p["offtake"] = 1.0
-    assert classify(n)["ambiguous_links"] == ["electrolyser"]
-    n.links_t.p0 = pd.DataFrame(
-        {"electrolyser": 4.0, "fuel cell": 0.0}, index=n.snapshots
-    )
+    c = classify(n)
+    assert "ambiguous_links" not in c and c["net_clusters"] == CLUSTER, c
+    assert c["conversion_links"] == [] and c["storage_links"] == []
     kpi = renewable_fraction(n)
-    assert kpi["fraction"] is None and "electrolyser" in kpi["reason"], kpi
-    # R15: the reason says why in plain words, not a generic "not solved".
-    for got in (kpi, renewable_fraction_result(n, None, 0.5)):
-        reason = got["reason"]
-        assert got["fraction"] is None, got
-        assert (
-            "electrolyser feeds a bus with both a load and a path back to "
-            "electricity (ambiguous conversion)" in reason
-        ), reason
-        assert "cannot be attributed" in reason, reason
-        assert "not evaluated" not in reason and "not been solved" not in reason
-    log = _with_row(_ambiguous_h2(_network()))
-    assert any("WARNING" in l and "electrolyser" in l for l in log), log
+    net = (4.0 - 0.5 * 2.0) * HOURS  # 72 MWh drawn from electricity, net of what the fuel cell returns
+    served = LOAD_MW * HOURS + net  # 312 MWh
+    assert kpi["reason"] is None, kpi
+    assert kpi["served_mwh"] == pytest.approx(served)
+    assert kpi["conversion_mwh"] == pytest.approx(net)
+    assert kpi["fraction"] == pytest.approx((served - 90.0) / served)
+    assert renewable_fraction_result(n, None, 0.5)["fraction"] == pytest.approx(kpi["fraction"])
+    log = _with_row(_net_h2(_network()))
+    assert not any("WARNING" in l and "electrolyser" in l for l in log), log
+
+
+def test_a_net_cluster_that_returns_more_than_it_draws_lowers_served():
+    """GK B Q1: the period's net is signed, the same number the row uses."""
+    n = _net_dispatch(_net_h2(_dispatched()), el=1.0, fc=4.0)
+    kpi = renewable_fraction(n)
+    assert kpi["conversion_mwh"] == pytest.approx((1.0 - 2.0) * HOURS)
+    assert kpi["served_mwh"] == pytest.approx(LOAD_MW * HOURS - HOURS)
+
+
+def test_a_nan_in_a_net_cluster_link_is_unknown():
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.links_t.p0.iloc[3, 1] = float("nan")
+    assert renewable_fraction(n)["fraction"] is None
+
+
+def test_two_electrolysers_on_one_h2_bus_are_one_cluster():
+    n = _net_h2(_dispatched())
+    n.add("Link", "electrolyser 2", bus0="ac", bus1="h2", p_nom=10.0, efficiency=0.7)
+    c = classify(n)
+    assert c["net_clusters"] == [{"buses": ["h2"], "links": ["electrolyser", "electrolyser 2", "fuel cell"]}], c
+    n.links_t.p0 = pd.DataFrame({"electrolyser": 4.0, "electrolyser 2": 1.0, "fuel cell": 2.0}, index=n.snapshots)
+    assert renewable_fraction(n)["conversion_mwh"] == pytest.approx((5.0 - 1.0) * HOURS)
+
+
+def test_a_reversible_bridge_link_is_signed_by_its_p0():
+    n = _dispatched()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Load", "offtake", bus="h2", p_set=1.0)
+    n.add("Link", "h2 converter", bus0="ac", bus1="h2", p_nom=10.0, p_min_pu=-1.0, efficiency=1.0)
+    c = classify(n)
+    assert c["net_clusters"] == [{"buses": ["h2"], "links": ["h2 converter"]}], c
+    p0 = pd.Series([3.0] * 12 + [-1.0] * 12, index=n.snapshots)
+    n.links_t.p0 = pd.DataFrame({"h2 converter": p0})
+    assert renewable_fraction(n)["conversion_mwh"] == pytest.approx(3.0 * 12 - 1.0 * 12)
+
+
+def test_the_row_and_the_kpi_agree_on_a_net_cluster():
+    """The row binds at the target, and the KPI of that dispatch reads the target: one net draw on both sides."""
+    free = _net_h2(_network())
+    free.add("Generator", "h2 supply", bus="h2", carrier="H2", p_nom=0.0)
+    assert _solve(free)[0] == "ok"
+    f_free = renewable_fraction(free)["fraction"]
+    assert f_free is not None and f_free < 0.6, f_free
+    n = _net_h2(_network())
+    status, _, log = _solve(n, min_renewable_fraction=0.6)
+    assert status == "ok", log
+    c = classify(n)
+    assert c["net_clusters"], c
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.6, abs=1e-6)
 
 
 def _h2_with_negative_offtake(n, *, fuel_cell: bool, **offtake):
@@ -1901,24 +1956,21 @@ _WITHDRAWS = [
 
 
 @pytest.mark.parametrize("offtake", _WITHDRAWS)
-def test_a_negative_generator_offtake_with_a_fuel_cell_fails_closed(offtake):
-    """R16: a Generator that withdraws is a sink, like an active Load."""
+def test_a_negative_generator_offtake_with_a_fuel_cell_counts_its_net_draw(offtake):
+    """R16: a Generator that withdraws is a sink, like an active Load; homer-parity 06 counts the net draw."""
     n = _h2_with_negative_offtake(_dispatched(), fuel_cell=True, **offtake)
     c = classify(n)
-    assert c["ambiguous_links"] == ["electrolyser"], c
+    assert c["net_clusters"] == CLUSTER, c
     assert c["conversion_links"] == [] and c["storage_links"] == []
-    n.links_t.p0 = pd.DataFrame(
-        {"electrolyser": 4.0, "fuel cell": 0.0}, index=n.snapshots
-    )
-    kpi = renewable_fraction(n)
-    assert kpi["fraction"] is None and "ambiguous conversion" in kpi["reason"], kpi
+    kpi = renewable_fraction(_net_dispatch(n))
+    assert kpi["reason"] is None and kpi["conversion_mwh"] == pytest.approx(3.0 * HOURS), kpi
 
 
 def test_a_negative_generator_offtake_given_in_time_is_a_sink():
     n = _h2_with_negative_offtake(_network(), fuel_cell=True)
     n.generators_t.p_min_pu["offtake"] = -1.0
     n.generators_t.p_max_pu["offtake"] = 0.0
-    assert classify(n)["ambiguous_links"] == ["electrolyser"]
+    assert classify(n)["net_clusters"] == CLUSTER
 
 
 @pytest.mark.parametrize("offtake", _WITHDRAWS)
@@ -1926,7 +1978,7 @@ def test_a_negative_generator_offtake_without_a_fuel_cell_is_use(offtake):
     n = _h2_with_negative_offtake(_dispatched(), fuel_cell=False, **offtake)
     c = classify(n)
     assert c["conversion_links"] == ["electrolyser"], c
-    assert c["ambiguous_links"] == [] and c["storage_links"] == []
+    assert c["net_clusters"] == [] and c["storage_links"] == []
 
 
 @pytest.mark.parametrize(
@@ -1955,7 +2007,7 @@ def test_a_slack_or_positive_generator_on_the_h2_bus_is_not_a_sink(gen):
     c = classify(n)
     # Storage; or, with a positive non-renewable H2 Generator, the H2 bus is
     # a supply bus and the electrolyser exports into it. Never ambiguous.
-    assert c["ambiguous_links"] == [], c
+    assert c["net_clusters"] == [], c
 
 
 @pytest.mark.parametrize(
@@ -1965,11 +2017,11 @@ def test_a_slack_or_positive_generator_on_the_h2_bus_is_not_a_sink(gen):
         pytest.param({"p_min_pu": -1.0, "p_max_pu": 0.0}, -2.0, id="p_min_pu"),
     ],
 )
-def test_a_dispatched_negative_offtake_with_a_fuel_cell_is_ambiguous_not_unattributed(
+def test_a_dispatched_negative_offtake_with_a_fuel_cell_is_a_net_cluster_not_unattributed(
     offtake, p
 ):
     """M12: the offtake withdraws (its dispatch column is set), so it is a
-    sink, never a non-renewable source leaking through the fuel cell."""
+    sink, never a non-renewable source leaking through the fuel cell; homer-parity 06 counts the net draw."""
     n = _h2_with_negative_offtake(_dispatched(), fuel_cell=True, **offtake)
     n.generators_t.p["offtake"] = p
     n.links_t.p0 = pd.DataFrame(
@@ -1977,9 +2029,8 @@ def test_a_dispatched_negative_offtake_with_a_fuel_cell_is_ambiguous_not_unattri
     )
     assert classify(n)["unattributed_generators"] == []
     kpi = renewable_fraction(n)
-    assert kpi["fraction"] is None, kpi
-    assert "ambiguous conversion" in kpi["reason"], kpi
-    assert "cannot attribute the electricity" not in kpi["reason"], kpi
+    assert kpi["reason"] is None, kpi
+    assert kpi["conversion_mwh"] == pytest.approx(4.0 * HOURS), kpi
 
 
 def test_a_two_way_generator_on_the_h2_bus_is_not_a_sink():
@@ -1991,7 +2042,7 @@ def test_a_two_way_generator_on_the_h2_bus_is_not_a_sink():
         _network(), fuel_cell=True, p_min_pu=-1.0, p_max_pu=1.0
     )
     c = classify(n)
-    assert c["ambiguous_links"] == [] and c["conversion_links"] == [], c
+    assert c["net_clusters"] == [] and c["conversion_links"] == [], c
     assert c["source_links"] == ["fuel cell"], c
 
 
@@ -2003,7 +2054,7 @@ def test_a_withdrawing_lost_production_slack_on_the_h2_bus_is_not_a_sink():
     n.add("Generator", "__lost_h2", bus="h2", carrier="process", sign=-1.0, p_nom=5)
     n.add("Link", "fuel cell", bus0="h2", bus1="ac", p_nom=5.0, efficiency=0.5)
     c = classify(n)
-    assert c["ambiguous_links"] == [], c
+    assert c["net_clusters"] == [], c
     assert c["storage_links"] == ["electrolyser"], c
 
 
@@ -2198,7 +2249,7 @@ def test_a_full_target_still_lets_renewables_export():
     assert renewable_fraction(n)["fraction"] == pytest.approx(1.0)
 
 
-def test_a_reversible_converter_is_storage_or_ambiguous_never_use():
+def test_a_reversible_converter_is_storage_or_a_net_cluster_never_use():
     """R14g: a Link that can run negative is its own path back, so a counted
     conversion Link always has p0 ≥ 0 and no gross auxiliary is needed."""
     n = _network()
@@ -2207,7 +2258,7 @@ def test_a_reversible_converter_is_storage_or_ambiguous_never_use():
     assert classify(n)["storage_links"] == ["hp"]
     n.add("Load", "space", bus="heat", p_set=1.0)
     c = classify(n)
-    assert c["ambiguous_links"] == ["hp"] and c["conversion_links"] == []
+    assert c["net_clusters"] == [{"buses": ["heat"], "links": ["hp"]}] and c["conversion_links"] == []
 
 
 def test_an_export_link_is_not_use():
@@ -2221,7 +2272,7 @@ def test_an_export_link_is_not_use():
     n.add("Bus", "sold", carrier="export")
     n.add("Link", "export_sold", bus0="ac", bus1="sold", p_nom=10.0)
     c = classify(n)
-    assert c["conversion_links"] == [] and c["ambiguous_links"] == []
+    assert c["conversion_links"] == [] and c["net_clusters"] == []
 
 
 def test_a_renewable_electrolyser_lets_more_diesel_serve_the_load():
@@ -2514,9 +2565,9 @@ def test_each_site_template_classifies_its_conversion_links(tid):
     T = _templates()
     n = T.BUILDERS[tid]()
     c = classify(n)
-    conv, amb = set(c["conversion_links"]), set(c["ambiguous_links"])
+    conv, amb = set(c["conversion_links"]), {l for cl in c["net_clusters"] for l in cl["links"]}
     if tid in ("eh_h2_hub", "eh_h2_hub_staged"):
-        # Electrolyser into an H2 bus with both an offtake and a fuel cell.
+        # Electrolyser into an H2 bus with both an offtake and a fuel cell: a net cluster (homer-parity 06).
         assert {l for l in n.links.index if l.startswith("electrolyser")} <= amb, c
         assert conv == set(), c
     elif tid == "eh_ammonia_staged":
@@ -2542,7 +2593,7 @@ def test_the_concentrator_process_links_are_use():
     flag = n.links["eh_process"].astype(object).fillna(False)
     process = {l for l in n.links.index if flag[l] is True or flag[l] == 1}
     assert process and process <= set(c["conversion_links"]), c
-    assert c["ambiguous_links"] == []
+    assert c["net_clusters"] == []
 
 
 # ── R12: mutant survivors ────────────────────────────────────────────────
@@ -2583,14 +2634,13 @@ def test_an_idle_or_charging_fuel_store_behind_a_reversible_link_is_not_refused(
     assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
 
 
-def test_an_idle_ambiguous_conversion_is_not_refused():
-    """Pins `> 0` on the ambiguous Link's p0: it fails closed only when it
-    draws."""
-    n = _ambiguous_h2(_dispatched())
+def test_an_idle_net_cluster_draws_nothing():
+    """An idle net cluster adds nothing to served (homer-parity 06; was R15's `> 0` pin)."""
+    n = _net_h2(_dispatched())
     n.links_t.p0 = pd.DataFrame(
         {"electrolyser": 0.0, "fuel cell": 0.0}, index=n.snapshots
     )
-    assert classify(n)["ambiguous_links"] == ["electrolyser"]
+    assert classify(n)["net_clusters"] == CLUSTER
     assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
 
 
