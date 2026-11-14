@@ -80,6 +80,12 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A field refusal opens with the field label, never the engine key; a hint says "its log names this constraint", not the key (#1424).
 - A dialog traps focus and returns it, closes on Esc, guards discards, shows Preview disabled with a visible reason, and gives unique non-empty auto names (#1405).
 - A report-ready Add button reads "In report" with aria-pressed and an undo title; its cap text sits on its own line.
+- Post-solve business-case inputs (the line table) may live in Results > Investment > Business case: design.md's "no price edited in Results" covers model inputs only (DCBC-SCOPE-1 Q3). Finance inputs and tariffs stay in section 7, with a link ("Finance inputs >").
+- An engine class name or key never prefixes user text, e.g. "FuelCurveError:" or "fuel_curve_ignored:" (#1466).
+- A mock artefact in a shot (an assistant-crashed panel, an error toast) is retaken before merge (#1470, #1477).
+- A loop or verdict key line does not repeat the verdict sentence (#1463).
+- Tonne-bus assets: every MW/MWh quantity field and header follows the bus unit. Cost units (€/kWh etc.) are logged as follow-up 05d (#1448).
+- A "shots required" claim for Results: the proof that a floating element is gone is a Results shot; a mocked payload is acceptable (#1470).
 
 ## Master merges
 

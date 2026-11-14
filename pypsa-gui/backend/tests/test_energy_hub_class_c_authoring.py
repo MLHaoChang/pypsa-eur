@@ -203,7 +203,8 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
                     "2026-10-30",                                            # AS-02 split storage
                     "2026-11-06",                                            # campus 220/110 kV
                     "2026-11-07",                                            # DC-05 power architecture
-                    "2026-11-10"):                                           # DC BC 02 cost defaults
+                    "2026-11-10",                                            # DC BC 02 cost defaults
+                    "2026-11-13"):                                           # CLG 03 220/110 kV losses
         pack = root / "services" / "library" / "defaults_pack" / "versions" / version
         pack.mkdir(parents=True)
         (pack / "manifest.json").write_text("{}")

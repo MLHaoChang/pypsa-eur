@@ -212,6 +212,9 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A preset note never prices a cost that a linked row also prices (#1462 F1, GK B (53)).
 - A key-scoped restore makes the outcome check compare only the restored keys (UM10 K3, GK B (53)).
 - A solver-config write that touches only fields in `reliability_goal.NOT_LP_FIELDS` need not bump the network revision, provided the fields are dropped from `goal_free_config` with a pin test that the fingerprint, adequacy hash and IC digest are unchanged, and every reader of those fields keys its staleness on its own inputs hash, with a test. Any other solver-config write still bumps (refines LC40-COUNTER-1; owner LC40-COUNTER-2; #1467 C1, GK B (54)).
+- A gate that compares session-scoped evidence for a project refuses with a typed reason when that project is not the session's open one; it never compares across projects (#1514 F1, GK B (57)).
+- A new guard on one entry point covers every entry point that sets the same state (`start_task`'s run path and `resume_task` as well as the switch path; #1515 F2, GK B (57)).
+- A tool-error-kind fragment with surface "banner" adds its frontend `TOOL_ERROR_BANNER_KINDS` and `KIND_COPY` entries in the same PR (#1515 F1, GK B (57)).
 
 ## Engineering rules
 

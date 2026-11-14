@@ -705,7 +705,14 @@ VARIANTS: list[dict] = [
              'with the open project (project_uuid), its unsaved G1 edit (20 to 33 MW) and the lc43_gates state kept: each file is parsed into a candidate network before it replaces the open one (LC-43c)',
              'import_uploaded_network',
              B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_import_is_refused_and_keeps_the_open_network'),
-    _pending('LC-D20.delivery_ttl', 'a delivery and its download never expire: no expiry gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _covered('LC-D20.delivery_ttl', 'a delivery lives 7 days (owner decision LC48A-TTL-1): made 604,800 - 60 s ago it is delivered, zipped and downloaded with the same sha256; made 604,800 + 60 s ago '
+             'get_file_delivery, build_delivery and the download are each 410 delivery_expired, with tests/lc43_gates.py state and the file\'s meta.json bytes unchanged; '
+             'the person\'s own upload made 30 days ago still downloads; exporting the same network again keeps the file id and serves it',
+             'export_network_nc get_file_delivery build_delivery',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_a_delivery_inside_seven_days_is_served',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_a_delivery_older_than_seven_days_is_refused_and_nothing_changes',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_the_persons_own_upload_never_expires',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_exporting_the_same_content_again_makes_a_fresh_delivery'),
     _covered('LC-D21.reports', 'exported DOCX read with python-docx: headline table MC LOLE 3.21 h/yr, ENS cap 10.00, unrun sections say not established; scripted 3.2 h/yr audited verified; '
              'regenerated 9.9 h/yr is version 2, unverified and listed in Numbers to check, tables and other sections unchanged, version 1 intact (one stored study report, scripted model)',
              'generate_report get_report_status list_reports get_report get_report_table regenerate_report_section diff_report_versions export_report_docx',
