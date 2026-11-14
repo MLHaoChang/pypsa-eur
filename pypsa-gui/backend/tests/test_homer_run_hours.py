@@ -3,6 +3,7 @@ running hours (the finance case's replacement timing)."""
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pandas as pd
@@ -776,3 +777,213 @@ def test_om_beside_a_stand_by_series_refuses_on_every_path(client, install_netwo
     assert [i.message for i in _check_fuel_curves(n) if i.name == "genset"][
         0
     ].startswith(want)
+
+
+# ── mutant killers: the guard and notice edges ──────────────────────────────
+
+CURVE = {fuel_curve.SLOPE: 0.25, fuel_curve.NO_LOAD: 0.05, fuel_curve.PRICE: 40.0}
+
+
+def test_a_curve_refusal_comes_before_the_run_hour_ones():
+    assert fuel_curve.check({fuel_curve.SLOPE: -1.0, OM_HOUR: -1.0}).startswith(
+        "Fuel curve slope:"
+    )
+
+
+def test_the_curve_keeps_its_own_series_and_edit_wording():
+    row = {
+        **CURVE,
+        OM_HOUR: OM,
+        "p_nom": 1.0,
+        "committable": True,
+        "stand_by_cost": 5.0,
+    }
+    assert fuel_curve.guard(row, cost_series=["stand_by_cost"]).startswith(
+        "Stand-by cost: remove its profile, or clear the fuel curve"
+    )
+    msg = fuel_curve.guard(
+        {**row, "stand_by_cost": 9.0}, before=row, submitted={"stand_by_cost": 9.0}
+    )
+    assert msg.startswith("Stand-by cost: set by the fuel curve")
+
+
+def test_resending_the_derived_stand_by_cost_is_not_an_edit():
+    before = {OM_HOUR: OM, "committable": True, "stand_by_cost": OM}
+    assert (
+        fuel_curve.guard(before, before=before, submitted={"stand_by_cost": OM}) is None
+    )
+
+
+def test_clearing_the_om_and_typing_a_stand_by_cost_is_not_refused():
+    before = {OM_HOUR: OM, "committable": True, "stand_by_cost": OM}
+    after = {**before, OM_HOUR: None, "stand_by_cost": 7.0}
+    assert (
+        fuel_curve.guard(
+            after, before=before, submitted={OM_HOUR: None, "stand_by_cost": 7.0}
+        )
+        is None
+    )
+
+
+def test_cleared_and_its_notice_on_rows_without_run_hour_inputs():
+    plain = {"stand_by_cost": 2.0, "committable": True}
+    assert fuel_curve.cleared(plain, before=None) == {}
+    assert fuel_curve.cleared(plain, before=plain) == {}
+    assert fuel_curve.clear_notice(plain, before=None) is None
+    assert fuel_curve.clear_notice(plain, before=plain) is None
+
+
+def test_clearing_the_om_under_a_kept_curve_says_nothing():
+    before = {**CURVE, OM_HOUR: OM, "p_nom": 1.0, "committable": True}
+    after = {**before, OM_HOUR: None}
+    assert fuel_curve.cleared(after, before=before) == {}
+    assert fuel_curve.clear_notice(after, before=before) is None
+
+
+def test_a_curve_cleared_under_om_with_no_marginal_cost_reads_zero():
+    before = {**CURVE, OM_HOUR: OM, "committable": True}
+    after = {**before, **{k: None for k in fuel_curve.COLUMNS}}
+    assert "marginal cost keeps 0 €/MWh" in fuel_curve.clear_notice(
+        after, before=before
+    )
+
+
+def test_om_with_a_curve_and_no_p_nom_derives_the_om_alone():
+    assert fuel_curve.derived_costs({**CURVE, OM_HOUR: OM, "committable": True}) == {
+        "marginal_cost": pytest.approx(10.0),
+        "stand_by_cost": OM,
+    }
+
+
+# ── mutant killers: run hours and the run-hour lifetime ─────────────────────
+
+
+def test_the_run_hours_row_has_exactly_its_fields():
+    n = _solve(_network(weight=2.0))
+    assert compute_cost_breakdown(n, CFG)["run_hours"] == [
+        {
+            "generator": "genset",
+            "carrier": "diesel",
+            "counted_from": "status",
+            "hours_run": pytest.approx(HOURS * 2.0),
+            "om_cost_eur": pytest.approx(HOURS * 2.0 * OM),
+        }
+    ]
+    n = _solve(_network(om=None, life_h=1_000.0, committable=False))
+    assert _block(compute_cost_breakdown(n, CFG))["counted_from"] == "dispatch"
+
+
+def test_run_hour_lifetime_edges(monkeypatch):
+    import services.adequacy.metrics as M
+
+    n = _solve(_network(life_h=1_000.0))
+    assert fuel_curve.run_hour_lifetime(n, "nope") == (None, [])
+    for unset in (float("nan"), 0.0, -1.0):
+        n.generators.loc["genset", LIFE_HOURS] = unset
+        assert fuel_curve.run_hour_lifetime(n, "genset") == (None, [])
+    n.generators.loc["genset", LIFE_HOURS] = 1_000.0
+    monkeypatch.setattr(M, "horizon_years", lambda *_a, **_k: 0.0)
+    assert fuel_curve.run_hour_lifetime(n, "genset") == (None, [])
+
+
+def test_one_investment_period_is_not_averaged():
+    n = pypsa.Network()
+    n.set_snapshots(
+        pd.MultiIndex.from_product(
+            [[2030], pd.date_range("2030-01-01", periods=4, freq="h")]
+        )
+    )
+    n.investment_periods = [2030]
+    n.add("Bus", "el", carrier="AC")
+    n.add(
+        "Generator",
+        "genset",
+        bus="el",
+        carrier="diesel",
+        p_nom=1.0,
+        committable=True,
+        **{LIFE_HOURS: 8_760.0},
+    )
+    n.generators_t.status = pd.DataFrame({"genset": [1.0] * 4}, index=n.snapshots)
+    assert fuel_curve.run_hour_lifetime(n, "genset") == (pytest.approx(1.0), [])
+
+
+def test_an_extendable_unit_with_no_solved_capacity_counts_any_output():
+    n = _network(om=None, life_h=8_760.0, committable=False)
+    n.generators.loc["genset", ["p_nom_extendable", "p_nom_opt"]] = [True, float("nan")]
+    n.generators_t.p = pd.DataFrame(
+        {"genset": [1e-12] + [0.0] * (HOURS - 1)}, index=n.snapshots
+    )
+    assert fuel_curve.run_hour_lifetime(n, "genset")[0] == pytest.approx(HOURS)
+
+
+@pytest.mark.parametrize(
+    "parts, life, want_parts, want_life, flagged",
+    [
+        ((5.0,), 5.0, [5.0], 5.0, False),  # equal: unchanged, unflagged
+        (
+            (3.0,),
+            None,
+            [3.0],
+            5.0,
+            True,
+        ),  # an unknown calendar life takes the run-hour one
+        ((20.0,), 4.0, [5.0], 4.0, True),  # a part longer than the run-hour life wears
+        (
+            (None,),
+            3.0,
+            [5.0],
+            3.0,
+            True,
+        ),  # a part with no stated life takes the run-hour one
+    ],
+)
+def test_which_lives_the_run_hour_life_shortens(
+    parts, life, want_parts, want_life, flagged
+):
+    from services.finance.case import AssetPart
+    from services.results.finance_case import _run_hour_life
+
+    n = _solve(_network(life_h=10_950.0, weight=365.0, load=_sixth()))
+    got, got_life, flags = _run_hour_life(
+        n, "genset", tuple(AssetPart("investment", 1.0, v) for v in parts), life
+    )
+    assert [p.lifetime_years for p in got] == [pytest.approx(v) for v in want_parts]
+    assert got_life == pytest.approx(want_life)
+    assert flags == (["run_hour_lifetime:genset"] if flagged else [])
+
+
+# ── the acceptance line end to end: the replacement year from the schedule ──
+
+
+def test_the_part_lifetimes_schedule_rebuys_at_the_run_hour_life():
+    from datetime import date
+
+    from services.finance.case import FinanceCase, FinanceInputs, Template
+    from services.finance.timeline import build_timeline
+
+    n = _solve(_network(life_h=10_950.0, weight=365.0, load=_sixth()))
+    (a,), _rates, _flags = _assets(n, [("Generator", "genset")])
+    a = dataclasses.replace(
+        a,
+        parts=(dataclasses.replace(a.parts[0], overnight_cost=1_000.0),),
+        overnight_cost=1_000.0,
+    )
+    cod = date(2031, 1, 1)
+    fin = FinanceInputs(
+        financial_close=date(2030, 6, 1),
+        cod_by_asset={"genset": cod},
+        analysis_years=12,
+        replacement_rule="part_lifetimes",
+    )
+    case = FinanceCase(
+        inputs=fin,
+        owner="owner",
+        base_year=2030,
+        cod=cod,
+        templates=(Template(first_year=2031, lines=()),),
+        assets=(a,),
+    )
+    got = replacements.schedule(case, build_timeline(case))
+    # 5-year life from 2031: re-bought in the last service year of each purchase, 2035 and 2040.
+    assert [(r.year, r.asset) for r in got] == [(2035, "genset"), (2040, "genset")]

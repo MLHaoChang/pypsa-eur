@@ -1791,13 +1791,13 @@ def _run_hour_life(n, name: str, parts: tuple[AssetPart, ...], life: float | Non
         # told apart here, so a multi-part generator keeps every calendar life.
         return parts, life, [f"run_hour_lifetime_multi_part:{name}"]
 
-    def worn(v: float | None) -> float:
+    def shorter(v: float | None) -> float:
         return years if v is None or v > years else v
 
     if life is not None and life <= years and all(
             p.lifetime_years is not None and p.lifetime_years <= years for p in parts):
         return parts, life, []
-    return (tuple(dataclasses.replace(p, lifetime_years=worn(p.lifetime_years)) for p in parts), worn(life),
+    return (tuple(dataclasses.replace(p, lifetime_years=shorter(p.lifetime_years)) for p in parts), shorter(life),
             [f"run_hour_lifetime:{name}", *flags])
 
 
@@ -1819,8 +1819,8 @@ def _assets(n, owned_list, *, discount_rate: float | None = None
         overnight = None if (not parts or any(c is None for c in costs)) else float(sum(costs))
         life = _fin(df.at[name, "lifetime"]) if "lifetime" in df.columns else None
         if comp == "Generator":
-            parts, life, f = _run_hour_life(n, name, parts, life)
-            flags += f
+            parts, life, run_flags = _run_hour_life(n, name, parts, life)
+            flags += run_flags
         carrier = str(df.at[name, "carrier"]) if "carrier" in df.columns else None
         assets.append(AssetFinance(name=name, component=comp, overnight_cost=overnight,
                                    lifetime_years=life, carrier=carrier or None, parts=parts))

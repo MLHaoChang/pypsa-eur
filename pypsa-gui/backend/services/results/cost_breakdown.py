@@ -734,7 +734,7 @@ def compute_cost_breakdown(n, cfg):
         "fuel": fuel_curve.fuel_use(n, period_years),
         # Hours run and O&M per running hour (homer-parity 02b), for each generator with an O&M per running hour
         # or a lifetime in running hours. The O&M is already inside `opex` (the stand-by cost). Empty without one.
-        "run_hours": fuel_curve.run_hours(n, period_years),
+        "run_hours": fuel_curve.run_hours(n),
         # CAPEX going into storage (StorageUnit + Store), expansion only.
         # Useful as a quick "how much of the investment is storage?" KPI.
         "storage_capex_expansion": storage_capex_expansion,

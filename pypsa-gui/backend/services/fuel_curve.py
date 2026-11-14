@@ -463,36 +463,27 @@ def _on(n, name: str) -> pd.Series | None:
     return (p[name].reindex(n.snapshots).fillna(0.0) > tol).astype(float)
 
 
-def _weights(n, column: str, period_years: Mapping[Any, float] | None) -> pd.Series:
-    index = n.snapshots
-    w = n.snapshot_weightings[column].reindex(index).fillna(0.0)
-    if isinstance(index, pd.MultiIndex) and period_years:
-        from services.period_utils import years_for_period
-
-        w = w * pd.Series(
-            [years_for_period(period_years, k[0]) for k in index], index=index
-        )
-    return w
-
-
-def run_hours(
-    n, period_years: Mapping[Any, float] | None = None
-) -> list[dict[str, Any]]:
+def run_hours(n) -> list[dict[str, Any]]:
     """Each run-hour generator's (an O&M per running hour or a lifetime in running hours set) hours run and O&M
     over the solved horizon, from solved values only (None when not solved).
 
-    ``hours_run`` is weighted by ``snapshot_weightings.generators`` × the period's years; ``om_cost_eur`` like the
-    LP objective (``objective`` × years), so it is the O&M share of the stand-by cost inside ``opex``.
+    ``hours_run`` is weighted by ``snapshot_weights(n, "generators")`` (period years included); ``om_cost_eur``
+    like the LP objective (``snapshot_weights(n, "objective")``), so it is the O&M share of the stand-by cost inside
+    ``opex``. ``counted_from`` says how the hours were read: ``status`` (committable) or ``dispatch`` (output above
+    1e-6 × capacity, `_on`).
     """
+    from services.period_utils import snapshot_weights
+
     gens = n.generators
-    if gens.empty:
-        return []
     rows = []
     for name in _run_hour_generators(gens):
         om = _num(gens.at[name, OM_HOUR]) if OM_HOUR in gens.columns else None
         row = {
             "generator": name,
             "carrier": str(gens.at[name, "carrier"]),
+            "counted_from": "status"
+            if _flag(gens.at[name, "committable"])
+            else "dispatch",
             "hours_run": None,
             "om_cost_eur": None,
         }
@@ -500,10 +491,10 @@ def run_hours(
         on = _on(n, name)
         if on is None:
             continue
-        row["hours_run"] = float((on * _weights(n, "generators", period_years)).sum())
-        row["om_cost_eur"] = float(
-            (on * _weights(n, "objective", period_years)).sum()
-        ) * (om or 0.0)
+        row["hours_run"] = float((on * snapshot_weights(n, "generators")).sum())
+        row["om_cost_eur"] = float((on * snapshot_weights(n, "objective")).sum()) * (
+            om or 0.0
+        )
     return rows
 
 
