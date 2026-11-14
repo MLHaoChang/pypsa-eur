@@ -259,7 +259,6 @@ def reserve_lines(n, cfg, site_party: str = "site", *,
         # A read taken for other products or floors is never priced here: read again (GK B P1).
         read = RP.solved_read(n, lambda: RP.inputs_digest(products, floors))
     frame, flags, hours, _inputs = read
-    flags = list(flags)
     if hours is None or not hours.index.equals(n.snapshots):
         # No hours for these snapshots: no price, never 0 or a partial one (GK B P3).
         frame, hours = None, None

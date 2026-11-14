@@ -436,3 +436,16 @@ def test_a_read_with_no_hours_for_these_snapshots_prices_no_line(solved, hours):
     )
     assert line.amount is None
     assert flags == ["reserve_not_solved"] and "reserve_not_solved" in line.flags
+
+
+def test_a_stale_view_reads_once_too(solved, monkeypatch):
+    """A flagged read prices nothing whatever its digest, so the lines take it as handed: no second bracket."""
+    from services.results.reserves import reserve_view
+
+    n, _ = solved
+    calls = _reweight_right_after_the_read(monkeypatch, n)
+    now = [_product(max_commit_mw=1.0)]
+    view = reserve_view(n, _cfg(now), solved=True, backup=(FLOORS, frozenset({STRING})))
+    assert len(calls) == 1
+    assert view["flags"] == ["reserve_inputs_changed_since_solve", "reserve_not_solved"]
+    assert all(ln["amount"] is None for ln in view["lines"])
