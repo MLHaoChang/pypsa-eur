@@ -124,6 +124,29 @@ def _case(hashes, own, ledger_edit, intake_edit):
     if hashes == "none":
         report, ledger = _hashed_report()
         report = report.model_copy(update={"hashes_at_findings": None})
+    elif hashes in ("no appendix", "appendix without payload", "no fork names"):
+        report, ledger = _hashed_report()
+        sections = dict(report.sections)
+        if hashes == "no appendix":
+            sections.pop("appendix")
+        elif hashes == "appendix without payload":
+            sections["appendix"] = R.ReportSection(status="ok")
+        else:
+            sections["appendix"] = R.ReportSection(
+                status="ok", payload={"option_forks": None}
+            )
+        report = report.model_copy(update={"sections": sections})
+    elif (
+        "option_compiled_hashes" in hashes and hashes["option_compiled_hashes"] is None
+    ):
+        report, ledger = _hashed_report()
+        report = report.model_copy(
+            update={
+                "hashes_at_findings": report.hashes_at_findings.model_copy(
+                    update={"option_compiled_hashes": None}
+                )
+            }
+        )
     else:
         report, ledger = _hashed_report(**hashes)
     study = _study(stale=bool(own), stale_reasons=own) if own else _study()
@@ -145,6 +168,11 @@ HASHES = {
     "fork unrecorded": {"option_network_hashes": {"f1": None}},
     "engine unrecorded": {"option_compiled_hashes": {}},
     "no intake hash": {"intake_hash": None},
+    "empty compiled hash": {"compiled_hash": ""},
+    "no engine map": {"option_compiled_hashes": None},
+    "no appendix": "no appendix",
+    "appendix without payload": "appendix without payload",
+    "no fork names": "no fork names",
 }
 OWN = [[], [COPIED], ["ledger_changed_during_run", "intake_changed_during_run"]]
 NETS = [NET, "x" * 16, None]

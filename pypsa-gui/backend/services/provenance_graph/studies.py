@@ -219,7 +219,7 @@ def investment_case_verdict(
             pins.Pin("assumptions_hash", stored_hash, lambda: cur_hash),
         )
     )
-    if stored_parts and current is not None:
+    if stored_parts:  # an unreadable key has no current parts
         for k in cur_parts:
             dst = f"input:investment_case/{k}"
             b.node(Node("input", dst))
