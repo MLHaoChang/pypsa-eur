@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 #
 # SPDX-License-Identifier: MIT
+# ruff: noqa: F811 -- the `baseline` fixture is imported by name
 """Study harness 14, S-B2b (GK B (59) G3): the sweep's children through the
 fork helper are what master's inline steps wrote, file for file."""
 
@@ -35,10 +36,16 @@ def _master_save(ctx, existing, spec, *, db, user):
     ctx.solver_state.update(status="idle", objective=None, condition=None)
     projects._enforce_project_lock(db, existing, user)
     projects._save_context(
-        ctx, existing.name, storage_dir=Path(ctx.storage_dir), db=db, user=user, project_row=existing
+        ctx,
+        existing.name,
+        storage_dir=Path(ctx.storage_dir),
+        db=db,
+        user=user,
+        project_row=existing,
     )
     atomic_write_bytes(
-        Path(ctx.storage_dir) / SENSITIVITY_CASE_FILE, json.dumps(spec, sort_keys=True).encode()
+        Path(ctx.storage_dir) / SENSITIVITY_CASE_FILE,
+        json.dumps(spec, sort_keys=True).encode(),
     )
 
 
@@ -50,21 +57,33 @@ def _child(project_id, name):
 
 def _frames(path):
     n = pypsa.Network(str(path / "network.nc"))
-    return {c: getattr(n, c).sort_index(axis=1) for c in ("buses", "generators", "loads")}
+    return {
+        c: getattr(n, c).sort_index(axis=1) for c in ("buses", "generators", "loads")
+    }
 
 
-def test_a_sweep_child_is_what_masters_inline_steps_wrote(baseline, monkeypatch):  # noqa: F811
+def test_a_sweep_child_is_what_masters_inline_steps_wrote(baseline, monkeypatch):
     _, project_id, _ = baseline
     out = chat_tools.run_sensitivity_sweep(project_id, [case("Helper child", 25)])
     assert out["status"] == "submitted"
     monkeypatch.setattr(shipped_fork, "save", _master_save)
     out = chat_tools.run_sensitivity_sweep(project_id, [case("Master child", 25)])
     assert out["status"] == "submitted"
-    helper, master = _child(project_id, "Helper child"), _child(project_id, "Master child")
-    assert (helper / "solver_config.json").read_bytes() == (master / "solver_config.json").read_bytes()
-    record = lambda d: json.loads((d / workflow_tools.SENSITIVITY_CASE_FILE).read_text())  # noqa: E731
-    a, b = record(helper), record(master)
-    assert a["case"].pop("new_name") == "Helper child" and b["case"].pop("new_name") == "Master child"
+    helper, master = (
+        _child(project_id, "Helper child"),
+        _child(project_id, "Master child"),
+    )
+    assert (helper / "solver_config.json").read_bytes() == (
+        master / "solver_config.json"
+    ).read_bytes()
+    a, b = (
+        json.loads((d / workflow_tools.SENSITIVITY_CASE_FILE).read_text())
+        for d in (helper, master)
+    )
+    assert (
+        a["case"].pop("new_name") == "Helper child"
+        and b["case"].pop("new_name") == "Master child"
+    )
     assert a == b
     fa, fb = _frames(helper), _frames(master)
     for name in fa:

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 #
 # SPDX-License-Identifier: MIT
+# ruff: noqa: F811 -- the `baseline` fixture is imported by name
 """Study harness 14, S-B2b (GK B (58) D1-D7, GK B (59) G1-G8): the shipped
 cases' engine on a real `eh_ipp_hybrid` project created through the route.
 The solve queue is a spy (no LP): what is under test is the fork, the write,
@@ -19,7 +20,13 @@ from pathlib import Path
 import pytest
 
 from harness import run_explore, run_shipped, run_shipped_engine as E, shipped_fork
-from services import chat_tools, project_registry, run_actions, run_envelope, workflow_tools
+from services import (
+    chat_tools,
+    project_registry,
+    run_actions,
+    run_envelope,
+    workflow_tools,
+)
 from services.pypsa_service import PyPSAService
 from tests.test_run_profile_ipp_runs import REF, baseline  # noqa: F401
 
@@ -137,16 +144,24 @@ def _children(base_id):
     from db.models import Project
 
     with chat_tools._acting() as (db, _):
-        rows = db.query(Project).filter(Project.parent_project_id == uuid.UUID(base_id)).all()
+        rows = (
+            db.query(Project)
+            .filter(Project.parent_project_id == uuid.UUID(base_id))
+            .all()
+        )
         return {str(r.id): r.name for r in rows}
 
 
 def _fork(path, name):
     with chat_tools._acting() as (db, user):
-        row = project_registry.resolve_project(db, user, _cases(path)[name]["project_id"])
+        row = project_registry.resolve_project(
+            db, user, _cases(path)[name]["project_id"]
+        )
         ctx = workflow_tools._load_context(row)
         record = json.loads(
-            (project_registry.project_dir(row) / workflow_tools.SENSITIVITY_CASE_FILE).read_text()
+            (
+                project_registry.project_dir(row) / workflow_tools.SENSITIVITY_CASE_FILE
+            ).read_text()
         )
     return row, ctx, record
 
@@ -155,19 +170,28 @@ def _fork(path, name):
 
 
 def test_the_runner_entry_takes_only_the_case_id_and_the_approved_digest():
-    assert list(inspect.signature(E.run_case).parameters) == ["path", "case_id", "digest"]
+    assert list(inspect.signature(E.run_case).parameters) == [
+        "path",
+        "case_id",
+        "digest",
+    ]
     for helper in (shipped_fork.create, shipped_fork.save, shipped_fork.held):
         assert not {"patch_cfg", "edit_network", "changes", "cases"} & set(
             inspect.signature(helper).parameters
         )
 
 
-def test_the_sweep_takes_no_fork_callables_through_its_args(baseline):  # noqa: F811
+def test_the_sweep_takes_no_fork_callables_through_its_args(baseline):
     _, pid, _ = baseline
     case = {
         "new_name": "Sweep extra",
         "changes": [
-            {"component_class": "StorageUnit", "names": ["bess"], "attribute": "p_nom_max", "value": 9.0}
+            {
+                "component_class": "StorageUnit",
+                "names": ["bess"],
+                "attribute": "p_nom_max",
+                "value": 9.0,
+            }
         ],
         "patch_cfg": "x",
     }
@@ -181,7 +205,11 @@ def test_the_sweep_takes_no_fork_callables_through_its_args(baseline):  # noqa: 
 
 @pytest.mark.parametrize("approved", [None, "0" * 64])
 def test_no_card_or_a_wrong_one_refuses_before_any_fork(
-    baseline, tmp_path, queue, monkeypatch, approved  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
+    monkeypatch,
+    approved,
 ):
     _, pid, _ = baseline
     path = _task(tmp_path, pid)
@@ -196,7 +224,10 @@ def test_no_card_or_a_wrong_one_refuses_before_any_fork(
 
 
 def test_every_case_is_admitted_with_its_status_and_only_lp_cases_fork(
-    baseline, tmp_path, queue, monkeypatch  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
+    monkeypatch,
 ):
     _, pid, _ = baseline
     path = _task(tmp_path, pid)
@@ -216,7 +247,9 @@ def test_every_case_is_admitted_with_its_status_and_only_lp_cases_fork(
     assert cases["ppa_price_minus_10"]["status"] == "not_evaluated"
     assert "Investment case per case not run" in cases["ppa_price_minus_10"]["reason"]
     for name in ("cannibalised", "merchant_heavy", "longer_ppa"):
-        assert cases[name]["status"] == "not_run" and cases[name]["reason"] == E.NOT_PICKED
+        assert (
+            cases[name]["status"] == "not_run" and cases[name]["reason"] == E.NOT_PICKED
+        )
     for name in ("tight_connection", "faster_degradation"):
         assert cases[name]["status"] == "not_run" and cases[name]["reason"]
     # G5: only the LP cases forked, wrote and queued; the others reserved nothing.
@@ -232,11 +265,13 @@ def test_every_case_is_admitted_with_its_status_and_only_lp_cases_fork(
         assert ("project_id" in case) == (name in LP_IDS)
     rows = _audit(path)
     assert [r["reserved"] for r in rows] == [1, 1]
-    assert {r["call_id"] for r in rows} == {cases[n]["solves"]["call_id"] for n in LP_IDS}
+    assert {r["call_id"] for r in rows} == {
+        cases[n]["solves"]["call_id"] for n in LP_IDS
+    }
     assert _read(path)["steps"][0]["status"] == "completed"
 
 
-def test_a_budget_short_of_a_case_runs_it_not_and_says_so(baseline, tmp_path, queue):  # noqa: F811
+def test_a_budget_short_of_a_case_runs_it_not_and_says_so(baseline, tmp_path, queue):
     _, pid, _ = baseline
     path = _task(tmp_path, pid, solves=1)
     _start(path, pid)
@@ -248,7 +283,9 @@ def test_a_budget_short_of_a_case_runs_it_not_and_says_so(baseline, tmp_path, qu
 
 
 def test_the_battery_goes_through_the_derive_and_the_price_refs_are_swapped(
-    baseline, tmp_path, queue  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
 ):
     _, pid, _ = baseline
     path = _task(tmp_path, pid)
@@ -263,7 +300,9 @@ def test_the_battery_goes_through_the_derive_and_the_price_refs_are_swapped(
     commercial = E._cfg(ctx)["commercial"]
     assert commercial["export_price_ref"]["id"] == "ipp_da_low"
     assert commercial["import_price_ref"]["id"] == "ipp_da_low"
-    assert all(c["reference_price"]["id"] == "ipp_da_low" for c in commercial["contracts"])
+    assert all(
+        c["reference_price"]["id"] == "ipp_da_low" for c in commercial["contracts"]
+    )
 
 
 # ── D4: the approved cases are current before the fork and before the solve ─
@@ -277,7 +316,10 @@ def _edit_cases(root):
 
 
 def test_an_edit_after_approval_refuses_before_any_fork(
-    baseline, tmp_path, queue, monkeypatch  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
+    monkeypatch,
 ):
     _, pid, root = baseline
     path = _task(tmp_path, pid)
@@ -293,7 +335,7 @@ def test_an_edit_after_approval_refuses_before_any_fork(
     assert [r.get("solves") for r in _audit(path)] == [0, 0]
 
 
-def test_a_library_ref_moved_after_approval_refuses(baseline, tmp_path, queue):  # noqa: F811
+def test_a_library_ref_moved_after_approval_refuses(baseline, tmp_path, queue):
     ctx, pid, root = baseline
     path = _task(tmp_path, pid)
     cfg_path = Path(root) / "solver_config.json"
@@ -306,7 +348,10 @@ def test_a_library_ref_moved_after_approval_refuses(baseline, tmp_path, queue): 
 
 
 def test_an_edit_while_the_fork_is_written_refuses_at_the_second_check(
-    baseline, tmp_path, queue, monkeypatch  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
+    monkeypatch,
 ):
     _, pid, root = baseline
     path = _task(tmp_path, pid, picked=["low_price"])
@@ -352,7 +397,13 @@ def _boom_on_write(real):
     ],
 )
 def test_a_raise_after_the_fork_names_the_fork_and_settles_its_reservation(
-    baseline, tmp_path, queue, monkeypatch, stage, target, counted  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
+    monkeypatch,
+    stage,
+    target,
+    counted,
 ):
     _, pid, _ = baseline
     path = _task(tmp_path, pid, picked=["cheap_battery"])
@@ -384,13 +435,16 @@ def test_a_raise_after_the_fork_names_the_fork_and_settles_its_reservation(
 # ── G7: what run_case refuses ────────────────────────────────────────────────
 
 
-def test_a_case_not_admitted_or_under_another_digest_refuses(baseline, tmp_path, queue):  # noqa: F811
+def test_a_case_not_admitted_or_under_another_digest_refuses(baseline, tmp_path, queue):
     _, pid, _ = baseline
     path = _task(tmp_path, pid)
     task = _read(path)
     task["steps"][0].update(status="running", attempt_id="a1")
     path.write_text(json.dumps(task))
-    assert E._admit(path, "explore.1", task["steps"][0]["frozen"], ("a1", INSTANCE)) == LP_IDS
+    assert (
+        E._admit(path, "explore.1", task["steps"][0]["frozen"], ("a1", INSTANCE))
+        == LP_IDS
+    )
     digest = _read(path)["steps"][0]["frozen"]["cases_digest"]
     with pytest.raises(run_shipped.ShippedError) as err:
         E.run_case(path, "tight_connection", digest)
@@ -402,7 +456,10 @@ def test_a_case_not_admitted_or_under_another_digest_refuses(baseline, tmp_path,
 
 
 def test_a_fork_name_already_taken_refuses_and_overwrites_nothing(
-    baseline, client, tmp_path, queue  # noqa: F811
+    baseline,
+    client,
+    tmp_path,
+    queue,
 ):
     _, pid, _ = baseline
     path = _task(tmp_path, pid, picked=["low_price"])
@@ -418,7 +475,10 @@ def test_a_fork_name_already_taken_refuses_and_overwrites_nothing(
 
 
 def test_a_second_writer_inside_the_read_waits_for_the_write(
-    baseline, tmp_path, queue, monkeypatch  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
+    monkeypatch,
 ):
     from routers import projects
 
@@ -466,7 +526,9 @@ def _versions(org, name):
     with chat_tools._acting() as (db, _):
         return sorted(
             r.version
-            for r in db.query(LibraryItem).filter(LibraryItem.org_id == org, LibraryItem.name == name)
+            for r in db.query(LibraryItem).filter(
+                LibraryItem.org_id == org, LibraryItem.name == name
+            )
         )
 
 
@@ -474,11 +536,13 @@ def _drop(org, name):
     from db.models import LibraryItem
 
     with chat_tools._acting() as (db, _):
-        db.query(LibraryItem).filter(LibraryItem.org_id == org, LibraryItem.name == name).delete()
+        db.query(LibraryItem).filter(
+            LibraryItem.org_id == org, LibraryItem.name == name
+        ).delete()
         db.commit()
 
 
-def test_a_series_the_library_lacks_is_minted_once_from_the_verified_file(baseline):  # noqa: F811
+def test_a_series_the_library_lacks_is_minted_once_from_the_verified_file(baseline):
     _, pid, _ = baseline
     org = _org(pid)
     _drop(org, "ipp_da_low")
@@ -489,7 +553,8 @@ def test_a_series_the_library_lacks_is_minted_once_from_the_verified_file(baseli
             refs.append(E.resolver(db, org, TPL)("ipp_da_low"))
 
     threads = [
-        threading.Thread(target=contextvars.copy_context().run, args=(mint,)) for _ in range(2)
+        threading.Thread(target=contextvars.copy_context().run, args=(mint,))
+        for _ in range(2)
     ]
     [t.start() for t in threads]
     [t.join(60) for t in threads]
@@ -497,7 +562,7 @@ def test_a_series_the_library_lacks_is_minted_once_from_the_verified_file(baseli
     assert refs[0] == refs[1] and refs[0]["id"] == "ipp_da_low"
 
 
-def test_a_library_series_with_another_hash_is_never_reminted(baseline):  # noqa: F811
+def test_a_library_series_with_another_hash_is_never_reminted(baseline):
     import pandas as pd
 
     from services.library import series_store
@@ -507,14 +572,20 @@ def test_a_library_series_with_another_hash_is_never_reminted(baseline):  # noqa
     with chat_tools._acting() as (db, _):
         before = series_store.latest_ref(db, org, "ipp_da_low")
         idx = pd.date_range("2030-01-01", periods=3, freq="h", tz="UTC")
-        series_store.put_series(db, org, "ipp_da_low", pd.Series([1.0, 2.0, 3.0], index=idx), {"unit": "EUR/MWh"})
+        series_store.put_series(
+            db,
+            org,
+            "ipp_da_low",
+            pd.Series([1.0, 2.0, 3.0], index=idx),
+            {"unit": "EUR/MWh"},
+        )
         versions = _versions(org, "ipp_da_low")
         assert versions[-1] == before.version + 1
         assert E.resolver(db, org, TPL)("ipp_da_low") is None
     assert _versions(org, "ipp_da_low") == versions
 
 
-def test_a_template_series_changed_after_verify_resolves_nothing(baseline, tmp_path):  # noqa: F811
+def test_a_template_series_changed_after_verify_resolves_nothing(baseline, tmp_path):
     import shutil
 
     _, pid, _ = baseline
@@ -534,7 +605,7 @@ def _fresh_record(ctx, record):
     return {**record, "input_fingerprint": E._fingerprint(ctx)}
 
 
-def test_the_witness_holds_on_each_lp_fork(baseline, tmp_path, queue):  # noqa: F811
+def test_the_witness_holds_on_each_lp_fork(baseline, tmp_path, queue):
     _, pid, _ = baseline
     path = _task(tmp_path, pid)
     _start(path, pid)
@@ -544,7 +615,9 @@ def test_the_witness_holds_on_each_lp_fork(baseline, tmp_path, queue):  # noqa: 
 
 
 def test_a_record_of_another_digest_or_changed_inputs_is_not_evaluated(
-    baseline, tmp_path, queue  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
 ):
     _, pid, _ = baseline
     path = _task(tmp_path, pid, picked=["low_price"])
@@ -558,7 +631,7 @@ def test_a_record_of_another_digest_or_changed_inputs_is_not_evaluated(
     assert "are the base's" in E.witness(case, ctx, same)
 
 
-def test_a_price_ref_left_at_the_base_is_not_evaluated(baseline, tmp_path, queue):  # noqa: F811
+def test_a_price_ref_left_at_the_base_is_not_evaluated(baseline, tmp_path, queue):
     _, pid, _ = baseline
     path = _task(tmp_path, pid, picked=["low_price"])
     _start(path, pid)
@@ -571,7 +644,9 @@ def test_a_price_ref_left_at_the_base_is_not_evaluated(baseline, tmp_path, queue
 
 
 def test_a_raw_battery_write_without_the_derive_is_not_evaluated(
-    baseline, tmp_path, queue  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
 ):
     _, pid, _ = baseline
     path = _task(tmp_path, pid, picked=["cheap_battery"])
@@ -579,12 +654,16 @@ def test_a_raw_battery_write_without_the_derive_is_not_evaluated(
     case = _cases(path)["cheap_battery"]
     _, ctx, record = _fork(path, "cheap_battery")
     # The overnight columns moved, the capital cost did not (a raw write).
-    ctx.network.storage_units.at["bess", "capital_cost"] = record["shipped"]["base"]["capital_cost"]["bess"]
+    ctx.network.storage_units.at["bess", "capital_cost"] = record["shipped"]["base"][
+        "capital_cost"
+    ]["bess"]
     why = E.witness(case, ctx, _fresh_record(ctx, record))
     assert "capital cost did not move" in why
 
 
-def test_a_battery_whose_inputs_are_the_bases_is_not_evaluated(baseline, tmp_path, queue):  # noqa: F811
+def test_a_battery_whose_inputs_are_the_bases_is_not_evaluated(
+    baseline, tmp_path, queue
+):
     _, pid, _ = baseline
     path = _task(tmp_path, pid, picked=["cheap_battery"])
     _start(path, pid)
@@ -595,7 +674,7 @@ def test_a_battery_whose_inputs_are_the_bases_is_not_evaluated(baseline, tmp_pat
     assert "are the base's" in E.witness(case, ctx, same)
 
 
-def test_an_overnight_cost_left_at_the_base_is_not_evaluated(baseline, tmp_path, queue):  # noqa: F811
+def test_an_overnight_cost_left_at_the_base_is_not_evaluated(baseline, tmp_path, queue):
     _, pid, _ = baseline
     path = _task(tmp_path, pid, picked=["cheap_battery"])
     _start(path, pid)
@@ -603,23 +682,31 @@ def test_an_overnight_cost_left_at_the_base_is_not_evaluated(baseline, tmp_path,
     _, ctx, record = _fork(path, "cheap_battery")
     ctx.network.storage_units.at["bess", "inv_power_overnight"] = 213927.9
     why = E.witness(case, ctx, _fresh_record(ctx, record))
-    assert why.startswith("StorageUnit.bess.inv_power_overnight is 213927.9 on the fork")
+    assert why.startswith(
+        "StorageUnit.bess.inv_power_overnight is 213927.9 on the fork"
+    )
 
 
-def test_a_contract_number_witness_reads_a_field_the_fingerprint_hashes(baseline):  # noqa: F811
+def test_a_contract_number_witness_reads_a_field_the_fingerprint_hashes(baseline):
     ctx, pid, _ = baseline
     with chat_tools._acting() as (db, user):
-        ctx = workflow_tools._load_context(project_registry.resolve_project(db, user, pid))
+        ctx = workflow_tools._load_context(
+            project_registry.resolve_project(db, user, pid)
+        )
     before = E._fingerprint(ctx)
     ctx.solver_state["solver_config"].commercial["contracts"][0]["price"] += 1.0
     assert E._fingerprint(ctx) != before
-    path = "commercial.contracts.%s.price" % ctx.solver_state["solver_config"].commercial["contracts"][0]["id"]
+    cid = ctx.solver_state["solver_config"].commercial["contracts"][0]["id"]
+    path = f"commercial.contracts.{cid}.price"
     new = ctx.solver_state["solver_config"].commercial["contracts"][0]["price"]
     case = {"digest": "d", "changes": [{"path": path, "old": new - 1.0, "new": new}]}
     record = {
         "input_fingerprint": E._fingerprint(ctx),
         "baseline_fingerprint": before,
-        "shipped": {"digest": "d", "base": {"values": {path: new - 1.0}, "capital_cost": {}}},
+        "shipped": {
+            "digest": "d",
+            "base": {"values": {path: new - 1.0}, "capital_cost": {}},
+        },
     }
     assert E.witness(case, ctx, record) is None
     ctx.solver_state["solver_config"].commercial["contracts"][0]["price"] = new + 5.0
@@ -627,28 +714,36 @@ def test_a_contract_number_witness_reads_a_field_the_fingerprint_hashes(baseline
     assert "on the fork, not" in E.witness(case, ctx, record)
 
 
-def test_a_contract_that_is_not_dispatch_bound_classifies_finance(baseline):  # noqa: F811
+def test_a_contract_that_is_not_dispatch_bound_classifies_finance(baseline):
     ctx, pid, _ = baseline
     with chat_tools._acting() as (db, user):
-        ctx = workflow_tools._load_context(project_registry.resolve_project(db, user, pid))
+        ctx = workflow_tools._load_context(
+            project_registry.resolve_project(db, user, pid)
+        )
     cfg = E._cfg(ctx)
     cid = cfg["commercial"]["contracts"][0]["id"]
     assert run_shipped._dispatch_contract_ids(cfg) == set()
-    assert run_shipped.classify({"path": f"commercial.contracts.{cid}.price"}, cfg) == run_shipped.FINANCE
+    assert (
+        run_shipped.classify({"path": f"commercial.contracts.{cid}.price"}, cfg)
+        == run_shipped.FINANCE
+    )
 
 
 def test_advance_judges_each_ended_case_and_settles_its_solve(
-    baseline, tmp_path, queue, monkeypatch  # noqa: F811
+    baseline,
+    tmp_path,
+    queue,
+    monkeypatch,
 ):
     _, pid, _ = baseline
     path = _task(tmp_path, pid)
     _start(path, pid)
     jobs = {"job-1": "completed", "job-2": "failed"}
+    monkeypatch.setattr(E, "_job", lambda case: {"status": jobs[case["job"]["job_id"]]})
     monkeypatch.setattr(
-        E, "_job", lambda case: {"status": jobs[case["job"]["job_id"]]}
-    )
-    monkeypatch.setattr(
-        run_explore, "case_gate", lambda task, case, profile: {"passed": True, "rules": []}
+        run_explore,
+        "case_gate",
+        lambda task, case, profile: {"passed": True, "rules": []},
     )
     assert run_explore.advance(path, boot=INSTANCE, clock=time.time)
     cases = _cases(path)
@@ -659,7 +754,9 @@ def test_advance_judges_each_ended_case_and_settles_its_solve(
     assert run_explore.unsettled(_read(path)["run"]) == 0
 
 
-def test_a_case_without_its_witness_is_never_passed(baseline, tmp_path, queue, monkeypatch):  # noqa: F811
+def test_a_case_without_its_witness_is_never_passed(
+    baseline, tmp_path, queue, monkeypatch
+):
     _, pid, _ = baseline
     path = _task(tmp_path, pid, picked=["low_price"])
     _start(path, pid)
