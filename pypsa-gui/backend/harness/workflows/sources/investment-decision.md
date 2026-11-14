@@ -64,7 +64,7 @@ listed. Everything else stays the generic defaults; say that once.
 Inputs the user must give (bidding zone, connection, load, tariff) are asked
 above and never get a default or a "Keep all defaults".
 
-For **plant_business_case**, `apply_business_case_preset` returned `to_ask`
+For **plant_business_case**, `apply_business_case_preset` returned a to_ask list
 (`get_business_case` lists it again): every empty price, quantity or share, and
 kW per GPU when a GPU-hour line needs it. Ask them all in ONE `ask_user` whose
 `detail` lists each with its line, unit and the preset's public range when there
