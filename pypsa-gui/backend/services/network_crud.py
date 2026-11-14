@@ -23,6 +23,8 @@ from services.asset_schema.derive import (
     derive_composite,
     effective_discount_rate,
     has_parts,
+    owned_column_label,
+    owned_columns,
     part_scales,
     split_parts,
 )
@@ -339,6 +341,30 @@ def _check_investment_parts(component_class: str, parts: dict, *, row: dict) -> 
         raise HTTPException(422, str(exc)) from exc
 
 
+def check_parts_own_costs(component_class: str, parts: dict, *, before: dict, submitted: dict) -> None:
+    """Refuse (422) an edit of a cost column the investment parts own (`derive.owned_columns`) when the row as
+    written still prices a part: the value would be reported written and then re-derived away. Like the fuel
+    curve's guard (`fuel_curve.guard`), a blank or the stored value is not an edit, since the form may send its
+    read-only rows. The single and bulk edits and the sweep share it."""
+    if not has_parts(component_class, parts):
+        return
+    for col in owned_columns(component_class):
+        if col not in submitted:
+            continue
+        v = submitted[col]
+        if v is None or v == "" or _same_value(v, before.get(col)):
+            continue
+        try:
+            if math.isnan(float(v)):
+                continue
+        except (TypeError, ValueError):
+            pass
+        raise HTTPException(
+            422,
+            f"{owned_column_label(col)}: set by the investment parts. Change a part's overnight cost, lifetime "
+            "or FOM share, or clear the parts to enter it directly")
+
+
 def _apply_investment_parts(n, component_class: str, name: str, parts: dict) -> None:
     """
     Write a composite asset's investment parts and derive its PyPSA cost columns (`services/asset_schema`).
@@ -642,6 +668,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, row=merged)
         stored = df.loc[name].to_dict()
+        check_parts_own_costs(component_class, parts, before=stored, submitted=kwargs)
         notice = check_fuel_curve(component_class, merged, n=n, name=name, before=stored, submitted=kwargs)
         if component_class == "Generator":
             notice = fuel_curve.clear_notice(merged, before=stored) or notice
