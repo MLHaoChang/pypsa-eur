@@ -1,6 +1,6 @@
 # 06 — Count an ambiguous conversion cluster by its net draw
 
-Status: in progress (PR pending, branch claude/homer-06-net-draw)
+Status: done (#1520)
 
 Follow-up from homer-parity 01a (#1424), GK B ruling 1 and R15.
 
