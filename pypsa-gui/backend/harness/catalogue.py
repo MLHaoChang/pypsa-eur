@@ -4962,8 +4962,11 @@ TOOLS: list[dict[str, Any]] = [
         "why_this_number",
         "Explain why one number has its value, step by step, from the provenance graph. "
         "Target either an asset field (component, name, field; field='capital_cost' is the "
-        "Economics row's annualised cost) or a Guided ledger row (project, study_id, ledger_key, "
-        "option_id: the row on that option's network). The result starts with `outcome` "
+        "Economics row's annualised cost), a Guided ledger row (project, study_id, ledger_key, "
+        "option_id: the row on that option's network) or a calculation metric a checked evidence "
+        "record answered (evidence_id, metric: its steps pin the record's raw inputs, window and value "
+        "against the open network now; the run it was computed in reads uncompared, so it is never "
+        "fresh). The result starts with `outcome` "
         "(state fresh|stale|uncompared|from_memory, complete, truncated), then each step: what the value "
         "was derived from or priced through (a pack price scaled by dc_ac_ratio or a Link's "
         "efficiency), its value and unit as stored now, its provenance stamp (status, source, "
@@ -4982,7 +4985,9 @@ TOOLS: list[dict[str, Any]] = [
          "project": {"type": "string", "minLength": 1},
          "study_id": {"type": "string", "minLength": 1},
          "ledger_key": {"type": "string", "minLength": 1},
-         "option_id": {"type": "string", "minLength": 1}},
+         "option_id": {"type": "string", "minLength": 1},
+         "evidence_id": {"type": "string", "minLength": 1},
+         "metric": {"type": "string", "minLength": 1}},
         [],
     ),
     _t(
@@ -5872,7 +5877,8 @@ TOOL_ROUTES: dict[str, list] = {
     # end LV08 B2a
     # Provenance graph (1), issue 03: "why this number", an asset field or a Guided ledger row.
     "why_this_number": [("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}"),
-                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why")],
+                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why"),
+                        ("GET", "/api/chat/evidence/{evidence_id}/why/{metric}")],
     # Library references (3): two reads (the asset's pack from its provenance) and the apply.
     "list_library_references": [("GET", "/api/library/references")],
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
