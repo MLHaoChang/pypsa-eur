@@ -155,7 +155,9 @@ def test_a_report_of_a_project_that_is_not_open_is_not_compared(
     assert state(project) == before
 
 
-def test_an_unreadable_evidence_read_refuses_with_its_reason(project, monkeypatch, caplog):
+def test_an_unreadable_evidence_read_refuses_with_its_reason(
+    project, monkeypatch, caplog
+):
     """GK B F2: a raising read is a stated refusal, never a 500 or an unrelated 404.
     GK B F4: the failure is logged as a warning with its traceback."""
     report_id = _generated(monkeypatch)
