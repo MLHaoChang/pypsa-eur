@@ -212,3 +212,22 @@ def test_the_lp_and_the_screen_agree_at_the_droop_share(scale, holds):
     )  # e_b(t−1) at the first hour
     status, cond = _solve(n, _sidecar(), check=True)
     assert (status == "ok") is holds, (status, cond)
+
+
+def test_a_floor_left_empty_on_one_battery_is_no_floor():
+    n = _net()
+    n.storage_units["e_min_pu"] = np.nan
+    n.storage_units.at["a", "e_min_pu"] = 0.1
+    assert _solve(n, _sidecar()) == ("ok", "optimal")
+    assert _soc_before(n, "b").min() == pytest.approx(B, abs=1e-6)
+
+
+def test_fixed_batteries_with_no_droop_gain_take_the_whole_share():
+    shares, rule = I._gfm_shares(_zero_fleet(), _sidecar()["units"], ["a", "b"], 50.0)
+    assert rule == I.GFM_SHARE_ONE and shares == {"a": 1.0, "b": 1.0}
+
+
+def _zero_fleet():
+    n = _net(a_ext=False, b_mw=0.0)
+    n.storage_units.at["a", "p_nom"] = 0.0
+    return n
