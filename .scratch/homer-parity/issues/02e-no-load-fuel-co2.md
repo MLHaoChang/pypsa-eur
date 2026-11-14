@@ -1,6 +1,6 @@
 # 02e — No-load fuel emits CO2
 
-Status: needs-triage
+Status: done (#1538)
 
 Follow-up from homer-parity 02a (#1466), asked for by GK B.
 

@@ -1,6 +1,6 @@
 # 02g — Test a generator with every fuel-curve input column at once
 
-Status: needs-triage
+Status: done (#1538)
 
 Follow-up from homer-parity 02b (#1506), from its mutant run.
 

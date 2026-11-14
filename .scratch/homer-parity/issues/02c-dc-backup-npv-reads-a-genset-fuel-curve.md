@@ -1,6 +1,6 @@
 # 02c — The DC backup NPV reads a backup genset's fuel curve
 
-Status: needs-triage
+Status: done (#1538)
 
 Follow-up from homer-parity 02a (#1466), a condition of GK B's ruling 3.
 
