@@ -15,4 +15,4 @@ The button sits after Snapshot in the Site control strip, in Guided and Expert.
 | Error toast (413 resource_limit mocked by a Playwright route) | guided-error.png | expert-error.png |
 
 The "Site context unavailable" toast and caption are the sandbox's blocked map-data service, unrelated to this change.
-The disabled shots predate the switch to the server's `export_scene` verdict; the reason text is the same string, now sent by the server.
+The disabled shots were retaken after the switch to the server's `export_scene` verdict, in a fresh project (`exportdisabled5`, Island Microgrid template, Site saved but not adopted): the reason under the strip is the server's string. The map-data toast is hidden before the shot; the footer caption still names the sandbox's blocked map-data service.

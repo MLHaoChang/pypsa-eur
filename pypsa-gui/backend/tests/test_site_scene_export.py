@@ -65,7 +65,9 @@ def read_glb(data: bytes) -> tuple[dict, bytes]:
     assert jtype == b"JSON" and jlen % 4 == 0
     raw = data[20 : 20 + jlen]
     end = raw.rindex(b"}") + 1
-    assert set(raw[end:]) <= {0x20} and jlen - end < 4, "JSON is padded with spaces only"
+    assert set(raw[end:]) <= {0x20} and jlen - end < 4, (
+        "JSON is padded with spaces only"
+    )
     doc = json.loads(raw.decode("utf-8"))
     rest = data[20 + jlen :]
     blen, btype = struct.unpack_from("<I4s", rest, 0)
@@ -82,9 +84,7 @@ def read_glb(data: bytes) -> tuple[dict, bytes]:
         covered[view["byteOffset"] : view["byteOffset"] + view["byteLength"]] = (
             b"\x01" * view["byteLength"]
         )
-    assert all(b == 0 for b, c in zip(binary, covered) if not c), (
-        "BIN padding is 0x00"
-    )
+    assert all(b == 0 for b, c in zip(binary, covered) if not c), "BIN padding is 0x00"
     for i, acc in enumerate(doc["accessors"]):
         fmt, size = _COMPONENTS[acc["componentType"]]
         view = doc["bufferViews"][acc["bufferView"]]
@@ -363,19 +363,34 @@ def test_concave_l_shaped_building_keeps_its_area_and_volume():
             {"footprint": [[0, 0], [10, 0], [10, 10], [0, 10]], "height_m": "5"},
             "invalid_height",
         ),
-        ({"footprint": [[0, 0], [10, "0"], [10, 10]], "height_m": 5}, "invalid_footprint"),
-        ({"footprint": [[0, 0], [True, 0], [10, 10]], "height_m": 5}, "invalid_footprint"),
+        (
+            {"footprint": [[0, 0], [10, "0"], [10, 10]], "height_m": 5},
+            "invalid_footprint",
+        ),
+        (
+            {"footprint": [[0, 0], [True, 0], [10, 10]], "height_m": 5},
+            "invalid_footprint",
+        ),
         # Vertex shape: a non-list point, a 3-element point, a non-list footprint.
         ({"footprint": [[0, 0], "10,0", [10, 10]], "height_m": 5}, "invalid_footprint"),
-        ({"footprint": [[0, 0], [10, 0, 1], [10, 10]], "height_m": 5}, "invalid_footprint"),
+        (
+            {"footprint": [[0, 0], [10, 0, 1], [10, 10]], "height_m": 5},
+            "invalid_footprint",
+        ),
         ({"footprint": {"0": [0, 0]}, "height_m": 5}, "invalid_footprint"),
         # F3: over MAX_FOOTPRINT_VERTICES is too detailed, not invalid.
         (
             {
                 "footprint": [
                     [
-                        10 * math.cos(2 * math.pi * k / (native.MAX_FOOTPRINT_VERTICES + 1)),
-                        10 * math.sin(2 * math.pi * k / (native.MAX_FOOTPRINT_VERTICES + 1)),
+                        10
+                        * math.cos(
+                            2 * math.pi * k / (native.MAX_FOOTPRINT_VERTICES + 1)
+                        ),
+                        10
+                        * math.sin(
+                            2 * math.pi * k / (native.MAX_FOOTPRINT_VERTICES + 1)
+                        ),
                     ]
                     for k in range(native.MAX_FOOTPRINT_VERTICES + 1)
                 ],
@@ -894,7 +909,10 @@ def test_index_width_switches_to_uint32_only_past_65535_vertices():
     # 422 is out of reach of real features (<= 2 * 256 vertices); pinned on the writer directly.
     snap = fixture.reference_snapshot()
     for n, ctype in ((0x10000, 5123), (0x10001, 5125)):
-        f = {**_feature("big", 1), "positions": [(float(k), 0.0, 0.0) for k in range(n)]}
+        f = {
+            **_feature("big", 1),
+            "positions": [(float(k), 0.0, 0.0) for k in range(n)],
+        }
         f["indices"] = [0, 1, n - 1]
         glb, _ = export._glb(snap, [f], {})
         doc, _binary = read_glb(glb)
@@ -923,7 +941,11 @@ def test_building_at_the_height_cap_is_exported():
         (None, {"width_m": 4.0, "depth_m": 0.0, "height_m": 2.5}, "invalid_footprint"),
         (None, {"width_m": -4.0, "depth_m": 2.0, "height_m": 2.5}, "invalid_footprint"),
         (None, {"width_m": 4.0, "depth_m": -2.0, "height_m": 2.5}, "invalid_footprint"),
-        (None, {"width_m": float("nan"), "depth_m": 2.0, "height_m": 2.5}, "invalid_footprint"),
+        (
+            None,
+            {"width_m": float("nan"), "depth_m": 2.0, "height_m": 2.5},
+            "invalid_footprint",
+        ),
         (None, {"width_m": 4.0, "depth_m": "2", "height_m": 2.5}, "invalid_footprint"),
         (None, {"width_m": 4.0, "depth_m": 2.0, "height_m": 0.0}, "invalid_height"),
         (
@@ -985,7 +1007,9 @@ def test_geometry_sha256_pins_positions_and_indices():
         chunks = []
         for acc in (prim["attributes"]["POSITION"], prim["indices"]):
             view = doc["bufferViews"][doc["accessors"][acc]["bufferView"]]
-            chunks.append(binary[view["byteOffset"] : view["byteOffset"] + view["byteLength"]])
+            chunks.append(
+                binary[view["byteOffset"] : view["byteOffset"] + view["byteLength"]]
+            )
         assert f["geometry_sha256"] == hashlib.sha256(b"".join(chunks)).hexdigest()
     taller = fixture.reference_snapshot()
     taller["buildings"][0]["height_m"] += 1
@@ -1046,7 +1070,11 @@ def test_missing_or_null_optional_keys_export_as_empty():
 def test_a_negative_zero_writes_the_same_bytes_as_zero():
     def glb_at(x):
         snap = fixture.reference_snapshot()
-        snap["site"]["placements"]["Generator:pv_roof"] = {"x": x, "y": 0.0, "heading": 0.0}
+        snap["site"]["placements"]["Generator:pv_roof"] = {
+            "x": x,
+            "y": 0.0,
+            "heading": 0.0,
+        }
         return export.build(snap)[0]
 
     glb = glb_at(-0.0)
@@ -1076,7 +1104,9 @@ def test_a_count_limit_is_an_http_413(client, geo, monkeypatch):
     )
 
 
-def test_a_viewer_member_without_the_lock_can_export(client, geo, _auth_db, seeded_identity):
+def test_a_viewer_member_without_the_lock_can_export(
+    client, geo, _auth_db, seeded_identity
+):
     # F8: the contract row says viewer; a plain member of the project's org,
     # assigned to the project and holding no edit lock, gets the download.
     import uuid
@@ -1102,14 +1132,27 @@ def test_a_viewer_member_without_the_lock_can_export(client, geo, _auth_db, seed
         )
         db.add(user)
         db.flush()
-        db.add(OrgMembership(id=uuid.uuid4(), user_id=user.id,
-                             org_id=seeded_identity["org_id"], role="member"))
-        project = db.query(Project).filter_by(
-            org_id=seeded_identity["org_id"], name="geo"
-        ).one()
-        db.add(ProjectMembership(project_id=project.id, user_id=user.id,
-                                 assigned_by=project.created_by,
-                                 assigned_at=datetime.now(tz=UTC)))
+        db.add(
+            OrgMembership(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                org_id=seeded_identity["org_id"],
+                role="member",
+            )
+        )
+        project = (
+            db.query(Project)
+            .filter_by(org_id=seeded_identity["org_id"], name="geo")
+            .one()
+        )
+        db.add(
+            ProjectMembership(
+                project_id=project.id,
+                user_id=user.id,
+                assigned_by=project.created_by,
+                assigned_at=datetime.now(tz=UTC),
+            )
+        )
         db.commit()
         uid = user.id
     with TestClient(main.app) as viewer:

@@ -175,7 +175,11 @@ def _ring(raw: Any) -> list[tuple[float, float]]:
         return native.check_footprint(ring, "export")
     except SceneError as e:
         # Over MAX_FOOTPRINT_VERTICES is only too detailed, not invalid (GK F3).
-        reason = "footprint_too_detailed" if e.kind == "resource_limit" else "invalid_footprint"
+        reason = (
+            "footprint_too_detailed"
+            if e.kind == "resource_limit"
+            else "invalid_footprint"
+        )
         raise _Omit(reason) from None
 
 
