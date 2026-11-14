@@ -28,6 +28,7 @@ the only media policy is ``none``: no photo, image or texture is ever included.
 The GLB writer is stdlib ``struct``/``json``: the geometry is prisms and boxes,
 so no glTF library is needed (GK B plan review).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -53,10 +54,26 @@ MAX_EXPORT_FEATURES = 4000
 MAX_TRIANGLES = 250_000
 MAX_EXPORT_BYTES = 16_000_000
 
-NOTE = ("A snapshot of one scene revision: not a live link to the model, and not a certified model. "
-        "Later edits in PyPSA Studio do not update it.")
-SOURCE_CLASS = {"osm": "mapped", "greenfield": "proposed", "manual": "drawn", "layout": "traced"}
-BINDING_FIELDS = ("id", "feature", "class", "uid", "name_at_bind", "carrier", "role", "weight")
+NOTE = (
+    "A snapshot of one scene revision: not a live link to the model, and not a certified model. "
+    "Later edits in PyPSA Studio do not update it."
+)
+SOURCE_CLASS = {
+    "osm": "mapped",
+    "greenfield": "proposed",
+    "manual": "drawn",
+    "layout": "traced",
+}
+BINDING_FIELDS = (
+    "id",
+    "feature",
+    "class",
+    "uid",
+    "name_at_bind",
+    "carrier",
+    "role",
+    "weight",
+)
 _ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 
 _FLOAT, _UINT16, _UINT32 = 5126, 5123, 5125
@@ -73,19 +90,27 @@ class ExportRequest(BaseModel):
 
 def parse_request(body: Any) -> ExportRequest:
     if not isinstance(body, dict):
-        raise SceneError("invalid_input", "Export: send format and media_policy", {"field": None})
+        raise SceneError(
+            "invalid_input", "Export: send format and media_policy", {"field": None}
+        )
     try:
         return ExportRequest.model_validate(body)
     except ValidationError as exc:
         err = exc.errors()[0]
         field = str(err["loc"][0]) if err.get("loc") else None
-        words = {"format": "Export format: only glb_manifest is available",
-                 "media_policy": "Media: only none is available, since no source photos exist yet"}
-        raise SceneError("invalid_input", words.get(field, f"Export: {field} is not accepted"),
-                         {"field": field}) from None
+        words = {
+            "format": "Export format: only glb_manifest is available",
+            "media_policy": "Media: only none is available, since no source photos exist yet",
+        }
+        raise SceneError(
+            "invalid_input",
+            words.get(field, f"Export: {field} is not accepted"),
+            {"field": field},
+        ) from None
 
 
 # ── reading one generation (E4) ──────────────────────────────────────────────
+
 
 def read_snapshot(project_dir, site_id: str) -> dict[str, Any]:
     """
@@ -98,15 +123,26 @@ def read_snapshot(project_dir, site_id: str) -> dict[str, Any]:
     with store.project_lock(project_dir):
         pointer = store._read_pointer(project_dir, site_id)
         if pointer is None:
-            raise SceneError("not_found", "This site has no 3D scene yet: generate its buildings first, then export")
+            raise SceneError(
+                "not_found",
+                "This site has no 3D scene yet: generate its buildings first, then export",
+            )
         gen = store._read_generation(project_dir, site_id, pointer)
-    return {"site_id": site_id, "revision": pointer["revision"], "generation": pointer["generation"],
-            "generation_sha256": store.sha256(gen), "site": gen["site"], "buildings": gen["buildings"],
-            "asset_footprints": gen.get("asset_footprints") or {}, "associations": gen.get("associations") or [],
-            "groups": gen.get("groups") or []}
+    return {
+        "site_id": site_id,
+        "revision": pointer["revision"],
+        "generation": pointer["generation"],
+        "generation_sha256": store.sha256(gen),
+        "site": gen["site"],
+        "buildings": gen["buildings"],
+        "asset_footprints": gen.get("asset_footprints") or {},
+        "associations": gen.get("associations") or [],
+        "groups": gen.get("groups") or [],
+    }
 
 
 # ── geometry ─────────────────────────────────────────────────────────────────
+
 
 class _Omit(Exception):
     def __init__(self, reason: str) -> None:
@@ -120,8 +156,10 @@ def _finite(v: Any) -> bool:
 
 def _ring(raw: Any) -> list[tuple[float, float]]:
     """A counter-clockwise simple ring with distinct consecutive corners, or `_Omit`."""
-    if not isinstance(raw, list) or not all(isinstance(p, (list, tuple)) and len(p) == 2
-                                            and all(_finite(c) for c in p) for p in raw):
+    if not isinstance(raw, list) or not all(
+        isinstance(p, (list, tuple)) and len(p) == 2 and all(_finite(c) for c in p)
+        for p in raw
+    ):
         raise _Omit("invalid_footprint")
     ring: list[tuple[float, float]] = []
     for p in raw:
@@ -155,12 +193,16 @@ def _triangulate(ring: list[tuple[float, float]]) -> list[tuple[int, int, int]]:
         for k in range(len(left)):
             a, b, c = left[k - 1], left[k], left[(k + 1) % len(left)]
             turn = _cross(ring[a], ring[b], ring[c])
-            if abs(turn) < 1e-12:            # b lies on a-c: drop it, no sliver triangle
+            if abs(turn) < 1e-12:  # b lies on a-c: drop it, no sliver triangle
                 left.pop(k)
                 break
             if turn < 0:
-                continue                     # reflex corner
-            if any(_inside(ring[p], ring[a], ring[b], ring[c]) for p in left if p not in (a, b, c)):
+                continue  # reflex corner
+            if any(
+                _inside(ring[p], ring[a], ring[b], ring[c])
+                for p in left
+                if p not in (a, b, c)
+            ):
                 continue
             tris.append((a, b, c))
             left.pop(k)
@@ -186,8 +228,9 @@ def _centroid(ring: list[tuple[float, float]]) -> tuple[float, float]:
     return cx / (3 * area), cy / (3 * area)
 
 
-def _prism(ring: list[tuple[float, float]], height: float,
-           pivot: tuple[float, float]) -> tuple[list[tuple[float, float, float]], list[int]]:
+def _prism(
+    ring: list[tuple[float, float]], height: float, pivot: tuple[float, float]
+) -> tuple[list[tuple[float, float, float]], list[int]]:
     """Positions in glTF axes (relative to `pivot` at ground) and outward-wound triangle indices of a prism."""
     n = len(ring)
     local = [(x - pivot[0], y - pivot[1]) for x, y in ring]
@@ -195,8 +238,8 @@ def _prism(ring: list[tuple[float, float]], height: float,
     positions += [frames.enu_to_gltf((e, nn, height)) for e, nn in local]
     indices: list[int] = []
     for a, b, c in _triangulate(ring):
-        indices += [a, c, b]                 # floor faces down
-        indices += [n + a, n + b, n + c]     # roof faces up
+        indices += [a, c, b]  # floor faces down
+        indices += [n + a, n + b, n + c]  # roof faces up
     for i in range(n):
         j = (i + 1) % n
         indices += [i, j, n + j, i, n + j, n + i]
@@ -204,7 +247,7 @@ def _prism(ring: list[tuple[float, float]], height: float,
 
 
 def _zero(v: float) -> float:
-    return v + 0.0                           # -0.0 -> 0.0, so equal scenes write equal bytes
+    return v + 0.0  # -0.0 -> 0.0, so equal scenes write equal bytes
 
 
 def _building(b: dict[str, Any]) -> dict[str, Any]:
@@ -213,18 +256,35 @@ def _building(b: dict[str, Any]) -> dict[str, Any]:
     pivot = _centroid(ring)
     positions, indices = _prism(ring, height, pivot)
     src = b.get("source") or {}
-    return {"id": b["id"], "kind": "building", "translation": frames.enu_to_gltf((pivot[0], pivot[1], 0.0)),
-            "rotation": None, "positions": positions, "indices": indices,
-            "record": {"source": {"namespace": src.get("namespace"), "source_id": src.get("source_id")},
-                       "source_class": SOURCE_CLASS.get(src.get("namespace"), "unknown"),
-                       "height_evidence": b.get("height_evidence"), "representation": "prism",
-                       "dims": {"height_m": height, "footprint_area_m2": frames.polygon_area(ring)}}}
+    return {
+        "id": b["id"],
+        "kind": "building",
+        "translation": frames.enu_to_gltf((pivot[0], pivot[1], 0.0)),
+        "rotation": None,
+        "positions": positions,
+        "indices": indices,
+        "record": {
+            "source": {
+                "namespace": src.get("namespace"),
+                "source_id": src.get("source_id"),
+            },
+            "source_class": SOURCE_CLASS.get(src.get("namespace"), "unknown"),
+            "height_evidence": b.get("height_evidence"),
+            "representation": "prism",
+            "dims": {
+                "height_m": height,
+                "footprint_area_m2": frames.polygon_area(ring),
+            },
+        },
+    }
 
 
 def _equipment(key: str, placement: Any, fp: Any) -> dict[str, Any]:
     if not isinstance(fp, dict):
         raise _Omit("no_footprint")
-    if not isinstance(placement, dict) or not all(_finite(placement.get(k)) for k in ("x", "y", "heading")):
+    if not isinstance(placement, dict) or not all(
+        _finite(placement.get(k)) for k in ("x", "y", "heading")
+    ):
         raise _Omit("invalid_placement")
     width, depth = fp.get("width_m"), fp.get("depth_m")
     if not (_finite(width) and _finite(depth) and width > 0 and depth > 0):
@@ -238,12 +298,27 @@ def _equipment(key: str, placement: Any, fp: Any) -> dict[str, Any]:
     h = math.radians(placement["heading"])
     # Heading is clockwise from north seen from above: a rotation of -h about up (+Y in glTF).
     rotation = (0.0, math.sin(-h / 2), 0.0, math.cos(-h / 2))
-    return {"id": key, "kind": "equipment",
-            "translation": frames.enu_to_gltf((float(placement["x"]), float(placement["y"]), 0.0)),
-            "rotation": rotation, "positions": positions, "indices": indices,
-            "record": {"source": {"namespace": "placement", "source_id": key}, "source_class": "model_placement",
-                       "representation": "proxy_box", "heading_deg": float(placement["heading"]),
-                       "dims": {"width_m": float(width), "depth_m": float(depth), "height_m": height}}}
+    return {
+        "id": key,
+        "kind": "equipment",
+        "translation": frames.enu_to_gltf(
+            (float(placement["x"]), float(placement["y"]), 0.0)
+        ),
+        "rotation": rotation,
+        "positions": positions,
+        "indices": indices,
+        "record": {
+            "source": {"namespace": "placement", "source_id": key},
+            "source_class": "model_placement",
+            "representation": "proxy_box",
+            "heading_deg": float(placement["heading"]),
+            "dims": {
+                "width_m": float(width),
+                "depth_m": float(depth),
+                "height_m": height,
+            },
+        },
+    }
 
 
 def _limit(name: str, cap: int, actual: int) -> SceneError:
@@ -251,10 +326,16 @@ def _limit(name: str, cap: int, actual: int) -> SceneError:
         words = f"the file would be {native.size_text(actual)}, over the {native.size_text(cap)} limit"
     else:
         words = f"{actual:,} {name} is over the {cap:,} limit"
-    return SceneError("resource_limit", f"Too large to export: {words}", {"limit": name, "max": cap, "actual": actual})
+    return SceneError(
+        "resource_limit",
+        f"Too large to export: {words}",
+        {"limit": name, "max": cap, "actual": actual},
+    )
 
 
-def _features(snap: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _features(
+    snap: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     buildings = snap.get("buildings") or []
     placements = (snap.get("site") or {}).get("placements") or {}
     footprints = snap.get("asset_footprints") or {}
@@ -265,7 +346,9 @@ def _features(snap: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str
         try:
             out.append(_building(b))
         except _Omit as o:
-            omissions.append({"feature": b.get("id"), "kind": "building", "reason": o.reason})
+            omissions.append(
+                {"feature": b.get("id"), "kind": "building", "reason": o.reason}
+            )
     for key in sorted(placements):
         try:
             out.append(_equipment(key, placements[key], footprints.get(key)))
@@ -279,52 +362,120 @@ def _features(snap: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str
 
 # ── GLB writer (E1) ──────────────────────────────────────────────────────────
 
+
 def _pad(data: bytes, fill: bytes) -> bytes:
     return data + fill * (-len(data) % 4)
 
 
-def _glb(snap: dict[str, Any], features: list[dict[str, Any]],
-         bindings: dict[str, list[dict[str, Any]]]) -> tuple[bytes, dict[str, str]]:
+def _glb(
+    snap: dict[str, Any],
+    features: list[dict[str, Any]],
+    bindings: dict[str, list[dict[str, Any]]],
+) -> tuple[bytes, dict[str, str]]:
     blob, views, accessors, meshes, nodes, geometry = bytearray(), [], [], [], [], {}
 
     def view(data: bytes, target: int) -> int:
-        views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": len(data), "target": target})
+        views.append(
+            {
+                "buffer": 0,
+                "byteOffset": len(blob),
+                "byteLength": len(data),
+                "target": target,
+            }
+        )
         blob.extend(_pad(data, b"\x00"))
         return len(views) - 1
 
     for i, f in enumerate(features):
-        pos = struct.pack(f"<{len(f['positions']) * 3}f", *(c for p in f["positions"] for c in p))
-        stored = [tuple(struct.unpack_from("<3f", pos, 12 * k)) for k in range(len(f["positions"]))]
+        pos = struct.pack(
+            f"<{len(f['positions']) * 3}f", *(c for p in f["positions"] for c in p)
+        )
+        stored = [
+            tuple(struct.unpack_from("<3f", pos, 12 * k))
+            for k in range(len(f["positions"]))
+        ]
         wide = len(stored) - 1 > 0xFFFF
         idx = struct.pack(f"<{len(f['indices'])}{'I' if wide else 'H'}", *f["indices"])
         geometry[f["id"]] = hashlib.sha256(pos + idx).hexdigest()
-        accessors.append({"bufferView": view(pos, _ARRAY_BUFFER), "componentType": _FLOAT, "count": len(stored),
-                          "type": "VEC3", "min": [min(p[k] for p in stored) for k in range(3)],
-                          "max": [max(p[k] for p in stored) for k in range(3)]})
-        accessors.append({"bufferView": view(idx, _ELEMENT_ARRAY_BUFFER), "componentType": _UINT32 if wide else _UINT16,
-                          "count": len(f["indices"]), "type": "SCALAR"})
-        meshes.append({"name": f["id"], "primitives": [{"attributes": {"POSITION": 2 * i}, "indices": 2 * i + 1,
-                                                         "mode": 4}]})
-        node = {"name": f["id"], "mesh": i, "translation": [_zero(c) for c in f["translation"]],
-                "extras": {"feature_id": f["id"], "kind": f["kind"], "source_class": f["record"]["source_class"],
-                           "bindings": bindings.get(f["id"], [])}}
+        accessors.append(
+            {
+                "bufferView": view(pos, _ARRAY_BUFFER),
+                "componentType": _FLOAT,
+                "count": len(stored),
+                "type": "VEC3",
+                "min": [min(p[k] for p in stored) for k in range(3)],
+                "max": [max(p[k] for p in stored) for k in range(3)],
+            }
+        )
+        accessors.append(
+            {
+                "bufferView": view(idx, _ELEMENT_ARRAY_BUFFER),
+                "componentType": _UINT32 if wide else _UINT16,
+                "count": len(f["indices"]),
+                "type": "SCALAR",
+            }
+        )
+        meshes.append(
+            {
+                "name": f["id"],
+                "primitives": [
+                    {"attributes": {"POSITION": 2 * i}, "indices": 2 * i + 1, "mode": 4}
+                ],
+            }
+        )
+        node = {
+            "name": f["id"],
+            "mesh": i,
+            "translation": [_zero(c) for c in f["translation"]],
+            "extras": {
+                "feature_id": f["id"],
+                "kind": f["kind"],
+                "source_class": f["record"]["source_class"],
+                "bindings": bindings.get(f["id"], []),
+            },
+        }
         if f["rotation"] is not None:
             node["rotation"] = [_zero(c) for c in f["rotation"]]
         nodes.append(node)
     site = snap["site"]
-    nodes.append({"name": f"site:{snap['site_id']}", "children": list(range(len(features))),
-                  "extras": {"kind": "site", "site_id": snap["site_id"]}})
-    doc = {"asset": {"version": "2.0", "generator": "PyPSA Studio site-scene export"},
-           "scene": 0,
-           "scenes": [{"name": str(site.get("name") or snap["site_id"]), "nodes": [len(nodes) - 1],
-                       "extras": {"format": FORMAT, "site_id": snap["site_id"], "revision": snap["revision"],
-                                  "generation_sha256": snap["generation_sha256"], "units": "m"}}],
-           "nodes": nodes, "meshes": meshes, "accessors": accessors, "bufferViews": views,
-           "buffers": [{"byteLength": len(blob)}]}
+    nodes.append(
+        {
+            "name": f"site:{snap['site_id']}",
+            "children": list(range(len(features))),
+            "extras": {"kind": "site", "site_id": snap["site_id"]},
+        }
+    )
+    doc = {
+        "asset": {"version": "2.0", "generator": "PyPSA Studio site-scene export"},
+        "scene": 0,
+        "scenes": [
+            {
+                "name": str(site.get("name") or snap["site_id"]),
+                "nodes": [len(nodes) - 1],
+                "extras": {
+                    "format": FORMAT,
+                    "site_id": snap["site_id"],
+                    "revision": snap["revision"],
+                    "generation_sha256": snap["generation_sha256"],
+                    "units": "m",
+                },
+            }
+        ],
+        "nodes": nodes,
+        "meshes": meshes,
+        "accessors": accessors,
+        "bufferViews": views,
+        "buffers": [{"byteLength": len(blob)}],
+    }
     if not features:
         for k in ("meshes", "accessors", "bufferViews", "buffers"):
             del doc[k]
-    js = _pad(json.dumps(doc, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8"), b" ")
+    js = _pad(
+        json.dumps(doc, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
+            "utf-8"
+        ),
+        b" ",
+    )
     out = bytearray()
     total = 12 + 8 + len(js) + (8 + len(blob) if blob else 0)
     out += struct.pack("<4sII", b"glTF", 2, total)
@@ -335,6 +486,7 @@ def _glb(snap: dict[str, Any], features: list[dict[str, Any]],
 
 
 # ── manifest and bundle ──────────────────────────────────────────────────────
+
 
 def _binding(row: dict[str, Any]) -> dict[str, Any]:
     return {k: row[k] for k in BINDING_FIELDS if k in row}
@@ -347,41 +499,85 @@ def build(snap: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
     direct: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         direct.setdefault(r.get("feature"), []).append(
-            {k: r[k] for k in ("class", "uid", "name_at_bind", "role") if k in r})
+            {k: r[k] for k in ("class", "uid", "name_at_bind", "role") if k in r}
+        )
     glb, geometry = _glb(snap, features, direct)
     site = snap["site"]
     origin = site.get("origin") or {}
     manifest = {
-        "format": FORMAT, "schema_version": SCHEMA_VERSION, "snapshot": True, "note": NOTE,
+        "format": FORMAT,
+        "schema_version": SCHEMA_VERSION,
+        "snapshot": True,
+        "note": NOTE,
         "project": snap.get("project"),
         "site": {"id": snap["site_id"], "name": site.get("name")},
-        "scene": {"revision": snap["revision"], "generation": snap["generation"],
-                  "generation_sha256": snap["generation_sha256"]},
-        "origin": {"lng": origin.get("lng"), "lat": origin.get("lat"), "crs": "EPSG:4326",
-                   "frame": "local east/north/up metres, equirectangular about the origin"},
-        "axes": {"units": "m", "gltf": {"x": "east", "y": "up", "-z": "north"},
-                 "heading": "degrees clockwise from north", "up": "metres above the site ground plane"},
-        "features": [{"id": f["id"], "kind": f["kind"], "node": i, "geometry_sha256": geometry[f["id"]],
-                      **f["record"]} for i, f in enumerate(features)],
+        "scene": {
+            "revision": snap["revision"],
+            "generation": snap["generation"],
+            "generation_sha256": snap["generation_sha256"],
+        },
+        "origin": {
+            "lng": origin.get("lng"),
+            "lat": origin.get("lat"),
+            "crs": "EPSG:4326",
+            "frame": "local east/north/up metres, equirectangular about the origin",
+        },
+        "axes": {
+            "units": "m",
+            "gltf": {"x": "east", "y": "up", "-z": "north"},
+            "heading": "degrees clockwise from north",
+            "up": "metres above the site ground plane",
+        },
+        "features": [
+            {
+                "id": f["id"],
+                "kind": f["kind"],
+                "node": i,
+                "geometry_sha256": geometry[f["id"]],
+                **f["record"],
+            }
+            for i, f in enumerate(features)
+        ],
         "omissions": omissions,
         "bindings": rows,
-        "groups": [{"id": g.get("id"), "label": g.get("label"), "members": list(g.get("members") or [])}
-                   for g in snap.get("groups") or [] if isinstance(g, dict)],
+        "groups": [
+            {
+                "id": g.get("id"),
+                "label": g.get("label"),
+                "members": list(g.get("members") or []),
+            }
+            for g in snap.get("groups") or []
+            if isinstance(g, dict)
+        ],
         "media": {"policy": "none", "included": []},
-        "stats": {"features": len(features), "omitted": len(omissions),
-                  "triangles": sum(len(f["indices"]) // 3 for f in features), "glb_bytes": len(glb)},
+        "stats": {
+            "features": len(features),
+            "omitted": len(omissions),
+            "triangles": sum(len(f["indices"]) // 3 for f in features),
+            "glb_bytes": len(glb),
+        },
     }
-    manifest["hashes"] = {"glb_sha256": hashlib.sha256(glb).hexdigest(),
-                          "semantic_sha256": hashlib.sha256(_canonical(manifest)).hexdigest()}
+    manifest["hashes"] = {
+        "glb_sha256": hashlib.sha256(glb).hexdigest(),
+        "semantic_sha256": hashlib.sha256(_canonical(manifest)).hexdigest(),
+    }
     return glb, manifest
 
 
 def _canonical(obj: Any) -> bytes:
     try:
-        return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                          allow_nan=False).encode("utf-8")
+        return json.dumps(
+            obj,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
     except ValueError:
-        raise SceneError("integrity_error", "This site's saved scene holds a number that is not finite") from None
+        raise SceneError(
+            "integrity_error",
+            "This site's saved scene holds a number that is not finite",
+        ) from None
 
 
 def _zip(manifest: bytes, glb: bytes) -> bytes:
@@ -406,7 +602,12 @@ def bundle(snap: dict[str, Any], *, exported_at: str) -> bytes:
     return data
 
 
-def export_site(project_dir, project_name: str, site_id: str, exported_at: str) -> tuple[bytes, dict[str, Any]]:
+def export_site(
+    project_dir, project_name: str, site_id: str, exported_at: str
+) -> tuple[bytes, dict[str, Any]]:
     """POST .../scene/exports: (zip bytes, {revision, site_name}). Reads one generation; writes nothing."""
     snap = {**read_snapshot(project_dir, site_id), "project": project_name}
-    return bundle(snap, exported_at=exported_at), {"revision": snap["revision"], "site_name": snap["site"].get("name")}
+    return bundle(snap, exported_at=exported_at), {
+        "revision": snap["revision"],
+        "site_name": snap["site"].get("name"),
+    }
