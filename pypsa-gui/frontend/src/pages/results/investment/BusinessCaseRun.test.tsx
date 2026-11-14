@@ -10,7 +10,8 @@ import {
 } from '../../../api/businessCase'
 import { useUIStore } from '../../../store/uiStore'
 import BusinessCaseRun, { type BusinessCaseRunProps } from './BusinessCaseRun'
-import { fmtYear, kpiText, reasonWords, streamGroups } from './businessCaseReport'
+import { fmtYear, kpiText, PNL_SECTIONS, reasonWords, ROW_NEEDS, streamGroups } from './businessCaseReport'
+import PNL_ROWS from './businessCasePnlRows.json'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/businessCase', async (importOriginal) => {
@@ -91,8 +92,8 @@ describe('the P&L (GK B F1–F4)', () => {
 
   it('a None row shows its reason, never 0, and net income is before financing', () => {
     mount(DONE)
-    expect(screen.getByTestId('bc-row-tax').textContent ?? '').toContain('Not established: the tax section is not established')
-    expect(screen.getByTestId('bc-row-net_income').textContent ?? '').toContain('Not established: needs EBIT and tax')
+    expect(screen.getByTestId('bc-row-tax').textContent ?? '').toContain('Not established. It needs the tax section.')
+    expect(screen.getByTestId('bc-row-net_income').textContent ?? '').toContain('Not established. It needs EBIT and tax.')
     expect(screen.getByTestId('bc-net-income-note').textContent ?? '').toContain('Net income is before financing (unlevered).')
     expect(screen.queryByTestId('bc-row-interest')).toBeNull()
     // A None year inside a series is "n/a" with its reason, not 0.
@@ -110,6 +111,13 @@ describe('the P&L (GK B F1–F4)', () => {
     cleanup()
     mount({ ...DONE, report: { ...REPORT, pnl: { ...PNL, rows: { ...PNL.rows, terminal: null } } } })
     expect(screen.getByTestId('bc-row-terminal').textContent ?? '').toContain('Not established')
+  })
+})
+
+describe('the row list (GK B W1)', () => {
+  it('ROW_NEEDS names every row the report serves, and the view shows only those', () => {
+    expect(Object.keys(ROW_NEEDS).sort()).toEqual(PNL_ROWS)
+    for (const sec of PNL_SECTIONS) for (const r of sec.rows) expect(PNL_ROWS).toContain(r.key)
   })
 })
 

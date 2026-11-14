@@ -6,6 +6,9 @@ streams without a copy of the maps, and every other report field is unchanged.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import services.business_case.runner as RN
 from models.business_case import CATEGORY_STREAM
 from services.finance.cashflow import BC_STREAM_CLASS, STREAM_CLASS
@@ -65,3 +68,34 @@ def test_the_report_adds_the_display_keys_and_changes_nothing_else(
         b.pop("created_at", None)  # the build time
     assert body == again
     assert set(body["pnl"]) == {"years", "streams", "rows", "not_finite"}
+
+
+#: The P&L row keys the view knows (its `ROW_NEEDS` and labels); a vitest pins the view's
+#: table to this list, and this test pins the list to what the report serves (GK B W1).
+PNL_ROWS = (
+    Path(__file__).resolve().parents[2]
+    / "frontend/src/pages/results/investment/businessCasePnlRows.json"
+)
+
+
+def test_the_view_s_row_list_is_the_report_s(client, install_network, monkeypatch):
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    assert client.post(BC_URL).status_code == 200
+    rows = _bc_poll(client)["report"]["pnl"]["rows"]
+    assert sorted(rows) == json.loads(PNL_ROWS.read_text())
+
+
+def test_line_and_ledger_stream_names_are_disjoint():
+    """W2: `stream_source` labels a stream by its name, so a name both a line and the IC
+    ledger can emit would be labelled wrong for part of its sum. `cashflow` refuses that
+    at import; this pins the names, and an unknown stream reads energy_model only when it
+    is not a line stream."""
+    line_streams = set(RN._STREAM_SOURCE)
+    ledger = set(STREAM_CLASS) - set(BC_STREAM_CLASS)
+    assert line_streams == set(BC_STREAM_CLASS)
+    assert not line_streams & ledger
+    for s in ledger | {"some_future_ledger_row"}:
+        assert RN._STREAM_SOURCE.get(s, "energy_model") == "energy_model"
+    for s in line_streams:
+        assert RN._STREAM_SOURCE[s].startswith("line:")

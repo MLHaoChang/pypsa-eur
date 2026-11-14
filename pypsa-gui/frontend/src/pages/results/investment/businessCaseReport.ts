@@ -77,32 +77,47 @@ export const PNL_SECTIONS: PnlSection[] = [
 
 export const NET_INCOME_NOTE = 'Net income is before financing (unlevered).'
 
-/** Why a None row is not established, from what the engine needs for it. */
-const ROW_NEEDS: Record<string, string> = {
-  revenue: 'the operating section is not established',
-  opex: 'the operating section is not established',
-  ebitda: 'the operating section is not established',
-  revenue_net_of_pass_through: 'needs revenue',
-  ebitda_net_of_pass_through: 'needs EBITDA',
-  ebitda_margin: 'needs EBITDA',
-  terminal: 'the terminal value is not established',
-  depreciation: 'the tax section is not established',
-  ebit: 'needs EBITDA, the terminal value and depreciation',
-  tax: 'the tax section is not established',
-  tax_equity: 'the levered tax is not established',
-  net_income: 'needs EBIT and tax',
-  project_pre_tax: 'needs EBITDA, the terminal value and the capital rows',
-  project_post_tax: 'needs project cash before tax, tax and credits',
-  equity_pre_tax: 'the debt section is not established',
-  equity_post_tax: 'needs equity cash before tax and the levered tax',
-  working_capital_change: 'no receivable days are set',
-  project_after_working_capital: 'needs project cash after tax and working capital',
-  equity_after_working_capital: 'needs equity cash after tax and working capital',
+/** What each P&L row is built from (GK B W1): a statement of its inputs, not a diagnosis
+ *  of which one is missing; the report serves no per-row reason. Its keys equal
+ *  `businessCasePnlRows.json`, which a backend test pins to the rows the report serves. */
+export const ROW_NEEDS: Record<string, string> = {
+  revenue: 'the operating section',
+  opex: 'the operating section',
+  ebitda: 'the operating section',
+  pass_through: 'the operating section',
+  revenue_net_of_pass_through: 'revenue',
+  ebitda_net_of_pass_through: 'EBITDA',
+  ebitda_margin: 'EBITDA and revenue',
+  terminal: 'the terminal value',
+  depreciation: 'the tax section',
+  ebit: 'EBITDA, the terminal value and depreciation',
+  tax: 'the tax section',
+  tax_equity: 'the levered tax section',
+  net_income: 'EBIT and tax',
+  capex: 'the operating section',
+  stage_capex: 'the operating section',
+  replacement: 'the operating section',
+  grant: 'the incentives section',
+  credits: 'the incentives section',
+  fees: 'the debt section',
+  debt_service: 'the debt section',
+  draws: 'the debt section',
+  reserve_interest: 'the debt section',
+  dsra_funding: 'the debt section',
+  debt_established: 'the debt section',
+  project_pre_tax: 'EBITDA, the terminal value and the capital rows',
+  project_post_tax: 'project cash before tax, tax and credits',
+  equity_pre_tax: 'project cash before tax and the debt section',
+  equity_post_tax: 'equity cash before tax, the levered tax and credits',
+  working_capital_change: 'revenue and receivable days',
+  project_after_working_capital: 'project cash after tax and the working capital change',
+  equity_after_working_capital: 'equity cash after tax and the working capital change',
 }
 
 export function rowReason(key: string, pnl: BusinessCasePnl): string {
-  if ((pnl.not_finite ?? []).includes(key)) return 'Not established: the figure is out of range'
-  return `Not established: ${ROW_NEEDS[key] ?? 'not served by this report'}`
+  if ((pnl.not_finite ?? []).includes(key)) return 'Not established. The figure is out of range.'
+  if (key.startsWith('stream:')) return 'Not established. It needs the stream\'s lines.'
+  return ROW_NEEDS[key] ? `Not established. It needs ${ROW_NEEDS[key]}.` : 'Not established.'
 }
 
 export function series(pnl: BusinessCasePnl, key: string): YearSeries {

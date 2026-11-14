@@ -227,3 +227,55 @@ describe('preset, add, save', () => {
     expectAllButtonsNamed(document.body)
   })
 })
+
+// GK B W4 (business case 10): a break-even line names a revenue line, so renaming,
+// retyping or removing that line clears the choice; the save still carries If-Match.
+describe('the break-even line', () => {
+  const withBe = () => ({ ...config(H2, CAPEX), break_even_line: 'H2 sales' })
+  const saved = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    await waitFor(() => expect(api.putInputs).toHaveBeenCalledTimes(1))
+    return api.putInputs.mock.calls[0]
+  }
+  beforeEach(() => {
+    api.putInputs.mockImplementation(async (cfg) => ({ business_case: cfg, digest: 'd2', status: 'ok' }))
+  })
+
+  it('is chosen in the draft and saved with the lines', async () => {
+    mount(config(H2, CAPEX))
+    fireEvent.change(await screen.findByLabelText('Break-even on'), { target: { value: 'H2 sales' } })
+    const [cfg, ifMatch] = await saved()
+    expect(cfg?.break_even_line).toBe('H2 sales')
+    expect(ifMatch).toBe('d1')
+  })
+  it('stays when another line changes', async () => {
+    mount(withBe())
+    fireEvent.change(await screen.findByLabelText('Price, Plant'), { target: { value: '1' } })
+    expect((await saved())[0]?.break_even_line).toBe('H2 sales')
+  })
+  it('clears when its line is renamed', async () => {
+    mount(withBe())
+    fireEvent.change(await screen.findByLabelText('Name, line 1'), { target: { value: 'H2 offtake' } })
+    expect((screen.getByLabelText('Break-even on') as HTMLSelectElement).value).toBe('')
+    expect((await saved())[0]?.break_even_line).toBeNull()
+  })
+  it('clears when its line is retyped', async () => {
+    mount(withBe())
+    fireEvent.change(await screen.findByLabelText('Kind, H2 sales'), { target: { value: 'opex' } })
+    expect((await saved())[0]?.break_even_line).toBeNull()
+  })
+  it('clears when its line is removed', async () => {
+    mount(withBe())
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove H2 sales' }))
+    expect((await saved())[0]?.break_even_line).toBeNull()
+  })
+  it('a clear does not get past a stale If-Match', async () => {
+    mount(withBe())
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove H2 sales' }))
+    api.putInputs.mockRejectedValue(new StaleEditError('changed'))
+    const [cfg, ifMatch] = await saved()
+    expect(cfg?.break_even_line).toBeNull()
+    expect(ifMatch).toBe('d1')
+    expect(await screen.findByTestId('bc-stale')).toBeTruthy()
+  })
+})
