@@ -388,9 +388,8 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'operating_reserve_result',
         'title': 'Operating reserve per hour',
         'disposition': 'unbuilt',
-        'reason': ('Reading the operating reserve held and required per hour, and the hours where it binds, '
-                   'is not available from chat yet (homer-parity 01b). The Results API serves it; the '
-                   'Solver Settings inputs and a Results view follow.'),
+        'reason': ('The operating reserve held and required per hour, and the hours where it binds, '
+                   'cannot be read from chat yet. A Results view follows.'),
         'page': 'Results',
         'panel': None,
         'keywords': frozenset({'reserve', 'headroom', 'spinning'}),
