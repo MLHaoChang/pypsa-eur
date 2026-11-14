@@ -131,8 +131,9 @@ def test_a_family_with_zero_rows_is_not_evaluated(monkeypatch):
         "dc.readiness.motor_start:",
         excluded=excluded,
     )
+    # SH 41 (GK A O3): the family names why its members left, never a bare "no rows".
     assert (
-        result["verdict"] == "not_evaluated" and "no scorecard row" in result["reason"]
+        result["verdict"] == "not_evaluated" and result["reason"] == "excluded: off grid"
     )
 
 
