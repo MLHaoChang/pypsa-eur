@@ -1561,3 +1561,26 @@ def test_frequency_with_a_malformed_tie_open_entry_is_unreadable(hub, monkeypatc
     task = _campus_step(hub, monkeypatch, _summary(**bad))
     g = _gate(hub, "mg.island.frequency", op="le", value=0, task=task)
     assert g["verdict"] == "not_evaluated" and g["facts"][0]["value"] == "unreadable"
+
+
+def test_the_screens_bridge_failure_of_an_extendable_battery_reaches_the_card(
+    hub, monkeypatch
+):
+    """GK A R1-1: an extendable battery has no per-battery LP row; when the
+    solve leaves it empty on a closed-tie hour the screen fails it, and that
+    hour is counted on the card."""
+    from tests.test_island_gfm_bridge_share import _screen_bridge_ok
+
+    ok = _screen_bridge_ok(10.0, e_a=0.0, unit="a")
+    assert ok is False
+    failing = [[2030, 4]] if _screen_failed(ok) else []
+    task = _campus_step(hub, monkeypatch, _summary(bridge_failing_hours=failing))
+    g = _gate(hub, "mg.island.frequency", op="le", value=0, task=task)
+    assert g["facts"][0]["value"] == 1 and g["verdict"] == "fail"
+    assert g["facts"][0]["detail"] == ["period 2030 hour 4"]
+
+
+def _screen_failed(ok):
+    from gridspine.static.frequency import failed
+
+    return failed(ok)
