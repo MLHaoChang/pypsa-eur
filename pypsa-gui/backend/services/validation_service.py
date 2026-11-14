@@ -2643,7 +2643,8 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
 
 
 def _check_fuel_curves(n) -> list[Issue]:
-    """A generator fuel curve the solve cannot price (`services.fuel_curve.check`, homer-parity 02a).
+    """A generator fuel curve the solve cannot price (`services.fuel_curve.check`, homer-parity 02a), or whose
+    slope implies more than 100 % efficiency (`services.fuel_curve.slope_warning`, a warning, 02d).
 
     The asset form refuses these; a network built or imported another way reaches the run with them, and the
     staging step would otherwise derive a cost from half a curve."""
@@ -2652,9 +2653,14 @@ def _check_fuel_curves(n) -> list[Issue]:
     gens = n.generators
     if gens.empty or not any(c in gens.columns for c in fuel_curve.INPUT_COLUMNS):
         return []
-    return [Issue("error", "fuel_curve_invalid", "Generator", str(name), f"{msg}.")
-            for name in gens.index
-            if (msg := fuel_curve.guard(gens.loc[name], cost_series=fuel_curve.cost_series(n, name)))]
+    issues = []
+    for name in gens.index:
+        if msg := fuel_curve.guard(gens.loc[name], cost_series=fuel_curve.cost_series(n, name)):
+            issues.append(Issue("error", "fuel_curve_invalid", "Generator", str(name), f"{msg}."))
+        elif msg := fuel_curve.slope_warning(gens.loc[name]):
+            # homer-parity 02d: a warning, not a refusal; the run prices what was entered.
+            issues.append(Issue("warning", "fuel_curve_slope_low", "Generator", str(name), msg))
+    return issues
 
 
 def _check_outage_params(n) -> list[Issue]:

@@ -980,7 +980,16 @@ def gen_co2_rate(ctx: Ctx):
         return None
     # PyPSA's convention: co2_emissions is per unit of PRIMARY energy, so the
     # electrical output is divided by efficiency to recover fuel input first.
-    return p / eff * factor
+    rate = p / eff * factor
+    # homer-parity 02e: a curve genset's no-load fuel (already MWh of fuel, no
+    # efficiency) emits in every committed hour.
+    from services import fuel_curve
+
+    no_load = fuel_curve.no_load_fuel(ctx.params)
+    status = gen_status(ctx) if no_load > 0 else None
+    if status is not None:
+        rate = rate + status.reindex(rate.index).fillna(0.0) * no_load * factor
+    return rate
 
 
 def gen_co2_total(ctx: Ctx):

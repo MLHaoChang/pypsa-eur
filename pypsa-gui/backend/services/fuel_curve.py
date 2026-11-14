@@ -22,9 +22,21 @@ direct edit of either is refused, and setting a curve over a non-zero value says
 (``replace_notice``).
 
 The DC backup (``services/adequacy/dc_backup.py``) prices its genset fuel off the LP (``backup_cost_delta``) and
-never writes a generator's ``marginal_cost``, so the two never fight over one column. Stated precedence (GK B
-ruling 3): the backup prices fuel from its own heat rate, says so in its cost notes when a genset carries a curve
-("Fuel curve not used here"), and its NPV is never summed into the solve's opex.
+never writes a generator's ``marginal_cost``, so the two never fight over one column. Its NPV is never summed into
+the solve's opex. When a backup genset carries a curve (homer-parity 02c), the backup prices the fleet's fuel from
+the curves as the solve does: ``(slope + no_load) × fuel_price`` per MWh at rated output over its run hours,
+MW-weighted with its own heat rate for gensets without one (``dc_backup.fleet_fuel_curve``), and says so in its
+cost notes ("Fuel curve used here").
+
+CO2 (homer-parity 02e). The no-load fuel emits: ``no_load × p_nom × co2_emissions`` tCO2 per committed hour
+(``no_load_fuel``, ``no_load_fuel_t``). Efficiency does not enter it: ``no_load`` is already MWh of fuel. The
+per-MWh CO2 term stays ``co2_emissions / efficiency`` per MWh generated, so the two are disjoint: the per-MWh term
+is the output-proportional fuel, the no-load term the fuel burnt for being on. A CO2 price reaches the no-load
+term through ``stand_by_cost`` (``services/solver/assumptions.py``, transient like the per-MWh adder), and the
+emission reports add it from the solved status.
+
+A slope above 0 and below 1 MWh of fuel per MWh means more than 100 % efficiency, almost always a units slip:
+``slope_warning`` names it before the run, which still prices what was entered.
 
 A generator with none of the three set keeps its own costs: no curve, no change.
 
@@ -144,6 +156,42 @@ def _check_curve(row: Mapping[str, Any]) -> str | None:
                 "hour follows the rated capacity"
             )
     return None
+
+
+def slope_warning(row: Mapping[str, Any]) -> str | None:
+    """Why the row's curve slope looks like a units slip (above 0 and below 1 MWh of fuel per MWh, so more than
+    100 % efficiency), or None. A warning: the run still prices it."""
+    curve = curve_of(row)
+    if curve is None or not 0 < curve[0] < 1:
+        return None
+    slope = curve[0]
+    return (
+        f"{LABELS[SLOPE]}: {slope:g} MWh of fuel per MWh generated means {100 / slope:.0f} % efficiency. Check "
+        "the units: it is MWh of fuel per MWh generated (1 / efficiency), not an efficiency or a volume per kWh."
+    )
+
+
+def no_load_fuel(row: Mapping[str, Any]) -> float:
+    """MWh of fuel the row burns per committed hour for being on: ``no_load × p_nom``, 0 when it sets no no-load
+    term or is not committable (`check` refuses that pairing)."""
+    curve = curve_of(row)
+    if curve is None or curve[1] <= 0 or not _flag(row.get("committable")):
+        return 0.0
+    return curve[1] * (_num(row.get("p_nom")) or 0.0)
+
+
+def no_load_fuel_t(n) -> pd.DataFrame:
+    """No-load fuel (MWh per hour, unweighted) per snapshot for each generator with a no-load term, from its
+    solved status. A generator with no solved status has no column."""
+    gens = n.generators
+    status = getattr(n.generators_t, "status", None)
+    cols = {}
+    if not gens.empty and NO_LOAD in gens.columns and status is not None:
+        for name in gens.index:
+            fuel = no_load_fuel(gens.loc[name])
+            if fuel > 0 and name in status.columns:
+                cols[name] = fuel * status[name].reindex(n.snapshots).fillna(0.0).astype(float)
+    return pd.DataFrame(cols, index=n.snapshots)
 
 
 def owned(row: Mapping[str, Any]) -> tuple[str, ...]:

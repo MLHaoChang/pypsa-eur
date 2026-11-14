@@ -188,6 +188,7 @@ ISSUE_TITLES: dict[str, str] = {
 
     # Generator fuel curve (homer-parity 02a)
     "fuel_curve_invalid": "Generator fuel curve cannot be priced",
+    "fuel_curve_slope_low": "Generator fuel curve slope implies more than 100 % efficiency",
 }
 
 
