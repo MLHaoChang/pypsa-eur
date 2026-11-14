@@ -804,6 +804,23 @@ def get_renewable_fraction():
                                      settings.get("min_renewable_fraction"))
 
 
+@results_router.get("/operating_reserve")
+def get_operating_reserve():
+    """
+    The operating reserve of the last solve (homer-parity 01b): per snapshot
+    the headroom required (shares of load, PV and wind output) and held by
+    dispatchable generators and storage units, from the solved values only,
+    and the snapshots where it binds. `shares` is None when it was off.
+    Definition in `services/solver/operating_reserve.py`.
+    """
+    from services.solver.operating_reserve import operating_reserve_result, shares_of
+
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        return _not_solved()
+    return operating_reserve_result(n, shares_of(_solved_settings() or {}))
+
+
 @results_router.get("/emissions")
 def get_emissions(source: str = "lopf"):
     """
