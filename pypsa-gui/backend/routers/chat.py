@@ -1484,6 +1484,18 @@ def checked_evidence(evidence_id: str, actor: User | None = Depends(optional_use
     return assurance_records.public(assurance_records.evidence(str(actor.id), evidence_id))
 
 
+@router.get("/evidence/{evidence_id}/why/{metric}")
+def checked_evidence_why(evidence_id: str, metric: str, actor: User | None = Depends(optional_user)):
+    """Why a calculation metric an evidence record answered has its value (provenance-graph 09): the walk to the
+    raw source, window and value it was computed from, each compared with the open network now. Reads only
+    (COPILOT-1); a target it cannot answer for is `why_target_unknown` (401 signed out, 404, 422)."""
+    from services.provenance_graph.explain import TargetUnknown, explain_metric
+    try:
+        return explain_metric(None if actor is None else str(actor.id), evidence_id, metric)
+    except TargetUnknown as exc:
+        raise HTTPException(exc.status, {"error_kind": "why_target_unknown", "message": str(exc)}) from exc
+
+
 @router.get("/answers/{answer_id}/export")
 def export_checked_answer(answer_id: str, format: Literal["json", "zip"] = "json",
                           actor: User | None = Depends(optional_user)):

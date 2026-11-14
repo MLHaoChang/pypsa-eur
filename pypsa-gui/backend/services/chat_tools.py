@@ -1363,14 +1363,25 @@ def get_asset_reference(view: str, component: str | None = None) -> dict:
 
 def why_this_number(component: str | None = None, name: str | None = None, field: str | None = None,
                     project: str | None = None, study_id: str | None = None,
-                    ledger_key: str | None = None, option_id: str | None = None) -> dict:
+                    ledger_key: str | None = None, option_id: str | None = None,
+                    evidence_id: str | None = None, metric: str | None = None) -> dict:
     """The provenance graph's walk for one number (provenance-graph 03): an asset field
     (`GET /api/network/asset_schema/{component}/provenance/{name}/why/{field}`) or a Guided
-    ledger row on one option's fork (`GET .../studies/{study_id}/ledger/{key}/why`). Reads only
-    (COPILOT-1)."""
+    ledger row on one option's fork (`GET .../studies/{study_id}/ledger/{key}/why`), or a
+    calculation metric an evidence record answered (`GET /api/chat/evidence/{evidence_id}/why/{metric}`,
+    provenance-graph 09). Reads only (COPILOT-1)."""
     asset = (component, name, field)
     ledger = (project, study_id, ledger_key, option_id)
-    if all(v is not None for v in asset) and all(v is None for v in ledger):
+    calc = (evidence_id, metric)
+    if all(v is not None for v in calc) and all(v is None for v in asset + ledger):
+        from routers.chat import checked_evidence_why as _metric_why
+
+        if _ACTING_USER_ID.get() is None:
+            # An evidence record is its owner's: with no acting user it is refused as the route refuses a
+            # signed-out caller (`why_target_unknown`, 401), never read as anyone.
+            return _metric_why(evidence_id, metric, None)
+        return _route(_metric_why, evidence_id, metric)
+    if all(v is not None for v in asset) and all(v is None for v in ledger + calc):
         from routers.network import get_asset_provenance_why as _asset_why
 
         if _ACTING_USER_ID.get() is None:
@@ -1378,14 +1389,15 @@ def why_this_number(component: str | None = None, name: str | None = None, field
             # reads `uncompared` ("not visible to you") rather than the 401 `_route` would raise.
             return _asset_why(component, name, field, None, None)
         return _route(_asset_why, component, name, field)  # the acting user's own memory read (P4)
-    if all(v is not None for v in ledger) and all(v is None for v in asset):
+    if all(v is not None for v in ledger) and all(v is None for v in asset + calc):
         from routers.studies import get_ledger_row_why as _row_why
 
         return _route(_row_why, study_id, ledger_key, option_id, project=_authorized_project(project))
     raise HTTPException(status_code=422, detail={
         "error_kind": "invalid_tool_args",
         "message": "pass component, name and field (an asset field), or project, study_id, "
-                   "ledger_key and option_id (a Guided ledger row), and nothing else"})
+                   "ledger_key and option_id (a Guided ledger row), or evidence_id and metric (a "
+                   "calculation metric), and nothing else"})
 
 
 def geocode_place(query: str) -> list[dict]:
