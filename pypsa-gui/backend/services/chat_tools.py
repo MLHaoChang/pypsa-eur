@@ -6961,7 +6961,11 @@ def _describe_step(wf, step) -> dict:
 def start_workflow(workflow_id: str) -> dict:
     """Start a workflow on this session (issue 06): state is (id, step) on
     the ChatSession; the per-turn addendum carries the step from the next
-    turn on, and this result carries it for the current one."""
+    turn on, and this result carries it for the current one.
+
+    The active-workflow check (LC48D-GOAL-1) takes no lock: it relies on a
+    session's tools running one at a time per turn (`_turn_in_flight`,
+    harness/loop.py), so no second start can interleave with it."""
     from harness import workflows
     key = str(workflow_id or "").strip().lower()
     wf = workflows.registry().get(key)
@@ -6973,6 +6977,17 @@ def start_workflow(workflow_id: str) -> dict:
                                           if w.status == "active")),
         })
     sess = _workflow_session()
+    active = getattr(sess, "workflow", None)
+    if active and active.get("id") != wf.id:
+        # LC48D-GOAL-1: no switch mid-workflow; the refusal names the one
+        # that runs, and end_workflow is the way out. Starting the active
+        # workflow again restarts it at its first step, as before.
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "switch_in_progress",
+            "active": {"kind": "workflow", "id": active.get("id"), "step": active.get("step")},
+            "message": f"the workflow {active.get('id')} is active (step "
+                       f"{active.get('step')}); call end_workflow before starting another",
+        })
     step = wf.steps[0]
     sess.workflow = {"id": wf.id, "step": step.id}
     return _describe_step(wf, step)
