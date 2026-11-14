@@ -786,7 +786,11 @@ def test_a_reference_price_change_only_settles_and_a_price_ref_moves_the_lp(buil
         S.case_kind([ref, _change("StorageUnit.bess.inv_power_overnight", 1, 2)], cfg)
         == "lp"
     )
-    assert S.case_kind([ref, _change("Link.x.p_nom", 1, 2)], cfg) == "unknown"
+    unknown = _change("Link.x.p_nom", 1, 2)
+    battery = _change("StorageUnit.bess.inv_power_overnight", 1, 2)
+    assert S.case_kind([ref, unknown], cfg) == "unknown"  # finance + unknown
+    assert S.case_kind([battery, unknown], cfg) == "unknown"  # lp + unknown
+    assert S.case_kind([unknown, battery, ref], cfg) == "unknown"  # order-free
 
 
 def _resolver(name):
@@ -1053,9 +1057,14 @@ def test_a_finance_case_differs_from_the_base_only_in_the_fields_it_names(
 def test_a_price_ref_case_changes_the_ref_ids_and_nothing_else(project, built, case_id):
     cfg, out, _ = _applied(project, built, case_id)
     leaves = _diff(cfg, out)
-    assert {leaf.rsplit(".", 1)[1] for leaf in leaves} <= {"id", "hash"}
-    assert any(leaf.endswith("export_price_ref.id") for leaf in leaves)
-    assert any(leaf.endswith("import_price_ref.id") for leaf in leaves)
+    # Exactly the replaced refs (id and the minted hash), nothing else.
+    refs = (
+        "commercial.export_price_ref",
+        "commercial.import_price_ref",
+        "commercial.contracts.0.reference_price",
+        "commercial.contracts.1.reference_price",
+    )
+    assert set(leaves) == {f"{r}.{f}" for r in refs for f in ("id", "hash")}
 
 
 def test_check_old_false_does_not_compare_the_old_value(project, built):
@@ -1090,3 +1099,18 @@ def test_a_missing_current_number_is_stale_not_a_crash(project, built):
     with pytest.raises(S.ShippedError) as exc:
         S.apply(cfg, _case_changes(project, "ppa_price_minus_10"), _resolver)
     assert exc.value.kind == "shipped_case_stale"
+
+
+def test_an_invalid_project_block_that_the_case_would_fix_is_still_not_run(
+    project, tpl, built
+):
+    """merchant_heavy sets both shares to 0.3, so a project whose wind share is
+    7.0 validates after the patch: only the unknown-kind guard stops the case."""
+    cfg, network = built
+    bad = json.loads(json.dumps(cfg))
+    bad["commercial"]["contracts"][0]["share"] = 7.0
+    shipped = S.load(project, TID, template_dir=tpl, cfg=bad, network=network)
+    case = next(c for c in shipped["cases"] if c["id"] == "merchant_heavy")
+    assert case["kind"] == "unknown" and case["status"] == "not_run"
+    assert case["why"] == "What this case moves is not known, so it is not run."
+    assert "merchant_heavy" not in shipped["admissible"]

@@ -248,12 +248,12 @@ def classify(change: dict, cfg) -> str:
 
 
 def case_kind(changes: list[dict], cfg) -> str:
-    """`lp` when any change moves the LP, else `unknown` when any is unknown,
-    else `finance`."""
+    """`unknown` when any change is unknown (a mixed case never runs its unknown
+    change), else `lp` when any change moves the LP, else `finance`."""
     kinds = {classify(c, cfg) for c in changes}
-    if LP in kinds:
-        return LP
-    return UNKNOWN if UNKNOWN in kinds else FINANCE
+    if UNKNOWN in kinds:
+        return UNKNOWN
+    return LP if LP in kinds else FINANCE
 
 
 def _stale(path: str, want, found):
