@@ -167,7 +167,7 @@ describe('HeadlineStrip', () => {
 
 describe('headline words', () => {
   // The ids `services/results/headline_kpis.py` ORDER can send.
-  const IDS = ['lcoe', 'system_cost', 'new_build_capital', 'curtailed_share', 'unserved_energy', 'peak_line_loading']
+  const IDS = ['lcoe', 'system_cost', 'new_build_capital', 'curtailed_share', 'unserved_energy', 'peak_line_loading', 'time_to_power']
 
   it('names every card the backend can send, in its tab’s own words', () => {
     expect(Object.keys(HEADLINE_WORDS).sort()).toEqual([...IDS].sort())
@@ -179,6 +179,8 @@ describe('headline words', () => {
 
   it('formats a price with its currency', () => {
     expect(headlineFigure(card('lcoe', { value: 55.5, unit: 'EUR/MWh' }))).toEqual({ value: '55.50 €/MWh', basis: 'investment case' })
+    expect(headlineFigure(card('time_to_power', { value: 12, unit: 'months' }))).toEqual({ value: '12 months', basis: 'from project start' })
+    expect(headlineFigure(card('time_to_power', { value: 1, unit: 'months', detail: 'First power may be as early as 2027-01-01.' }))).toEqual({ value: '1 month', basis: 'First power may be as early as 2027-01-01.' })
     expect(headlineFigure(card('lcoe', { value: 55.5, unit: 'USD/MWh' })).value).toBe('55.50 USD/MWh')
   })
 })

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Reserve capacity-payment lines are priced at the hours read together with the commitments, so a reweighting that lands right after the read no longer prices the old commitments at the new hours; the reserves view reads the commitments once and hands that read to its lines.
