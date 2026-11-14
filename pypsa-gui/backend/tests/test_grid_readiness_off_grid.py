@@ -149,7 +149,11 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
 def _conn_ids(card) -> set:
     """The ramp, oscillation and energization-peak ids on a scorecard, kept or excluded."""
     ids = {r["id"] for r in card["rows"]} | {e["id"] for e in card["excluded"]}
-    return {i for i in ids if i in ("ramp_rate", "oscillation") or i.split(":")[0] == "energization_peak"}
+    return {
+        i
+        for i in ids
+        if i in ("ramp_rate", "oscillation") or i.split(":")[0] == "energization_peak"
+    }
 
 
 def _open_tie(n):
@@ -168,14 +172,21 @@ def _assert_conn_excluded(out, conn):
     excluded = {e["id"]: e for e in out["excluded"]}
     assert conn <= set(excluded)
     assert not conn & {r["id"] for r in out["rows"]}
-    assert all(excluded[i]["reason"] == G.CONN_OFF_GRID and excluded[i]["requirement"] for i in conn)
+    assert all(
+        excluded[i]["reason"] == G.CONN_OFF_GRID and excluded[i]["requirement"]
+        for i in conn
+    )
     assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])
     for i in conn:
         fact = G.readiness_fact(out, i)
-        assert fact.value == "excluded" and fact.reason == f"excluded: {G.CONN_OFF_GRID}"
+        assert (
+            fact.value == "excluded" and fact.reason == f"excluded: {G.CONN_OFF_GRID}"
+        )
 
 
-def test_off_grid_with_an_open_tie_excludes_the_ramp_oscillation_and_peak_rows(tmp_path):
+def test_off_grid_with_an_open_tie_excludes_the_ramp_oscillation_and_peak_rows(
+    tmp_path,
+):
     # SH41-OFFGRID-1: the tie is open, so the connection's limits do not judge the island.
     out = G.grid_readiness(_off_grid(tmp_path), _open_tie(_site()), PROFILE)
     conn = _conn_ids(out)
@@ -196,8 +207,13 @@ def test_off_grid_excludes_every_energization_period_it_emitted(tmp_path, monkey
     from services.adequacy import site_peak as SP
 
     periods = [2030, 2035, 2040]
-    monkeypatch.setattr(SP, "peak_check", lambda n, island, unset=None: [
-        {"period": p, "unset": ["load"], "energized_max_mw": 10.0} for p in periods])
+    monkeypatch.setattr(
+        SP,
+        "peak_check",
+        lambda n, island, unset=None: [
+            {"period": p, "unset": ["load"], "energized_max_mw": 10.0} for p in periods
+        ],
+    )
     out = G.grid_readiness(_off_grid(tmp_path), _open_tie(_site()), PROFILE)
     peak = {f"energization_peak:{p}" for p in periods}
     assert {i for i in _conn_ids(out) if i.startswith("energization_peak")} == peak
@@ -244,8 +260,12 @@ def test_a_gate_on_ramp_rate_reads_excluded_never_pass_off_grid(tmp_path):
 def test_a_family_with_one_excluded_period_is_never_passed_on_the_rest():
     from services import run_gates
 
-    card = {"rows": [{"id": "energization_peak:2030", "verdict": "pass", "assumed": False}],
-            "excluded": [{"id": "energization_peak:2035", "requirement": "r", "reason": "why"}]}
+    card = {
+        "rows": [{"id": "energization_peak:2030", "verdict": "pass", "assumed": False}],
+        "excluded": [
+            {"id": "energization_peak:2035", "requirement": "r", "reason": "why"}
+        ],
+    }
     env = types_ns(cache={"scorecard": card}, ctx=types_ns(network=None))
     fact = run_gates._scorecard_reader(run_gates.SCORECARD + "energization_peak:")(env)
     assert isinstance(fact, run_gates.NoEvidence) and fact.value == "excluded"
@@ -255,7 +275,9 @@ def test_a_family_with_one_excluded_period_is_never_passed_on_the_rest():
     assert not isinstance(fact, run_gates.NoEvidence)
 
 
-def test_a_grid_project_judges_ramp_oscillation_and_peak_against_the_connection(tmp_path):
+def test_a_grid_project_judges_ramp_oscillation_and_peak_against_the_connection(
+    tmp_path,
+):
     _write(tmp_path)
     out = G.grid_readiness(tmp_path, _site(), PROFILE)
     assert out["excluded"] == []
@@ -285,8 +307,12 @@ def test_a_grid_project_keeps_every_row_in_the_scorecard_order(tmp_path):
     json.dumps(grid)  # the card stays plain JSON
 
 
-@pytest.mark.parametrize("tid", ("eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged"))
-def test_a_grid_template_card_is_unchanged_by_the_off_grid_connection_rule(tmp_path, monkeypatch, tid):
+@pytest.mark.parametrize(
+    "tid", ("eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged")
+)
+def test_a_grid_template_card_is_unchanged_by_the_off_grid_connection_rule(
+    tmp_path, monkeypatch, tid
+):
     # GK A O4: on a grid-connected template the SH 41 rule never runs, so the whole card is the
     # card without it, byte for byte.
     from tests.test_grid_readiness import _project
@@ -299,4 +325,6 @@ def test_a_grid_template_card_is_unchanged_by_the_off_grid_connection_rule(tmp_p
 
     monkeypatch.setattr(G, "_tie_open", boom)
     monkeypatch.setattr(G, "CONN_BUILDERS", frozenset())
-    assert json.dumps(G.grid_readiness(d, n, PROFILE), sort_keys=True, default=str) == card
+    assert (
+        json.dumps(G.grid_readiness(d, n, PROFILE), sort_keys=True, default=str) == card
+    )
