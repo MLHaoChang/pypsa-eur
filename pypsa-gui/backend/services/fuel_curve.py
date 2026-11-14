@@ -502,7 +502,7 @@ def run_hour_lifetime(n, name: str) -> tuple[float | None, list[str]]:
     """Generator ``name``'s lifetime in years from its lifetime in running hours at the solved rate, and flags.
 
     The rate is the horizon's run hours (Σ on × the generator snapshot weights, period years included) ÷
-    ``adequacy.metrics.horizon_years`` (the modelled time in years, never an 8760-hour assumption): one average rate
+    ``adequacy.metrics.horizon_years`` (the modelled time in years, never a fixed hours-per-year constant): one average rate
     over every period, flagged ``run_hour_lifetime_averaged:<name>`` on a multi-period solve. A non-committable unit
     is counted from its dispatch, flagged ``run_hour_lifetime_from_dispatch:<name>``. None when no lifetime in
     running hours is set, when the unit never ran (it does not wear), when the result is not finite, or when the
