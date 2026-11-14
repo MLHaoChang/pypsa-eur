@@ -93,6 +93,14 @@ const RUN_REPORT = { ...REPORT.report,
     revenue_per_capacity_net: { value: null, status: 'not_established', reason: 'capacity_not_stated', unit: 'EUR/MW-year' } },
   break_even: { status: null, price: 3.85, price_scale: 0.86, money_year: 2025 } }
 const RAN = { status: 'done', report: RUN_REPORT, staleness: { stale: false, changed: [] } }
+// The same report over `n` years (each series repeats), so the P&L scrolls at 1000 px.
+const longer = (n) => {
+  const ext = v => (Array.isArray(v) ? Array.from({ length: n }, (_, i) => v[i % v.length]) : v)
+  const pnl = RUN_REPORT.pnl
+  return { ...RAN, report: { ...RUN_REPORT, pnl: { ...pnl, years: Array.from({ length: n }, (_, i) => 2030 + i),
+    streams: Object.fromEntries(Object.entries(pnl.streams).map(([k, v]) => [k, ext(v)])),
+    rows: Object.fromEntries(Object.entries(pnl.rows).map(([k, v]) => [k, ext(v)])) } } }
+}
 
 // open: expand the named lines; wait: text to wait for; ran: GET business_case returns the report.
 // study: what GET business_case returns instead (10); run: scroll to the run section.
@@ -109,6 +117,14 @@ const STATES = {
   'j-running': { lines: LINES(), run: true, study: { status: 'running', stage: 'run_engine', stages: ['rebuild_ic_case', 'read_outputs', 'build', 'run_engine', 'break_even', 'store'], report: RUN_REPORT } },
   'k-out-of-date': { lines: LINES(), run: true, study: { ...RAN, staleness: { stale: true, changed: ['investment_case'] } } },
   'l-not-run': { lines: LINES(), run: true },
+  // Run off, its reason beside it (UX 5): unsaved lines, no lines, refused lines.
+  'm-off-unsaved': { lines: LINES(), run: true, edit: true },
+  'm-off-no-lines': { lines: [], status: 'not_set', run: true },
+  'm-off-refused': { lines: LINES(), refusals: REFUSALS, run: true },
+  // A 409 investment_case_missing from the run POST.
+  'n-blocked': { lines: LINES(), run: true, post409: true, click: 'Run the business case', wait: 'bc-blocked' },
+  // The P&L's sticky Line column, scrolled to its last year at 1000 px.
+  'o-pnl-scrolled': { lines: LINES(), narrow: true, only1000: true, study: longer(20), pnlScroll: true },
 }
 
 async function ensureStub() {
@@ -148,6 +164,7 @@ async function newPage(browser, mode, width, st, probe) {
     if (p === '/api/results/business_case/options') return ok(OPTIONS(st.refusals ?? null))
     if (p === '/api/results/business_case/preset') return ok({ template_id: 'eh_h2_hub', variants: { merchant: 'Merchant hub', contracted: 'Contracted offtake' },
       business_case: { inputs: { preset: 'eh_h2_hub.merchant@1', lines: LINES() } } })
+    if (p === '/api/results/business_case' && m === 'POST' && st.post409) return r.fulfill({ status: 409, json: { detail: { code: 'investment_case_missing', reason: 'no_report' } } })
     if (p === '/api/results/business_case') return st.study ? ok(st.study) : st.ran ? ok(REPORT) : r.fulfill({ status: 204, body: '' })
     if (p === '/api/simulation/status') return ok({ running: false, status: 'completed', condition: 'optimal', objective: 1234.5, solve_time: 2.5, dispatch: 'fresh' })
     if (p === '/api/simulation/queue') return ok({ jobs: [], running: [], paused: false })
@@ -209,7 +226,33 @@ try {
       }
       if (st.locked) await page.getByTestId('bc-locked').scrollIntoViewIfNeeded()
       if (st.ran) await page.getByTestId('bc-locked-row').first().waitFor()
+      if (st.edit) { const price = page.getByLabel('Price, Hydrogen sales'); await price.fill('4.5'); await price.blur() }
+      if (st.pnlScroll) {
+        await page.evaluate(() => {
+          const el = document.querySelector('[data-testid="bc-pnl"]')
+          el?.scrollIntoView({ block: 'start' })
+          if (el) el.scrollLeft = el.scrollWidth
+        })
+        await page.waitForTimeout(400)
+      }
       if (st.run) { await page.getByTestId('bc-run').scrollIntoViewIfNeeded(); await page.evaluate(() => document.querySelector('[data-testid="bc-run"]')?.scrollIntoView({ block: 'start' })); await page.waitForTimeout(400) }
+      if (st.click) { await page.getByRole('button', { name: st.click }).click(); await page.getByTestId(st.wait).waitFor() }
+      // The floating "Back to the canvas" pill sits over the lower page: scroll the
+      // report's last row clear of it (UX nit on BC 10 k).
+      if (st.study && !st.pnlScroll) {
+        await page.evaluate(() => {
+          const pill = [...document.querySelectorAll('button')].find(b => /Back to the canvas/.test(b.textContent || ''))
+          const pnl = document.querySelector('[data-testid="bc-pnl"]')
+          if (!pill || !pnl) return
+          const top = pill.getBoundingClientRect().top, bottom = pnl.getBoundingClientRect().bottom
+          if (bottom > top - 8) {
+            let el = pnl.parentElement
+            while (el && !(el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY))) el = el.parentElement
+            if (el) el.scrollTop += bottom - top + 16
+          }
+        })
+        await page.waitForTimeout(300)
+      }
       await shootTo(page, `${key}-${mode}${width === 1000 && !st.only1000 ? '-1000' : ''}`)
     } catch (e) {
       problems.push(`${mode}/${key}/${width}: ${e.message.split('\n')[0]}`)

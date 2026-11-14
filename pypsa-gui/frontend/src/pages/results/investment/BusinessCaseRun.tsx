@@ -12,7 +12,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { ACTION } from './actionStyle'
 import {
   breakEvenReason, fmtYear, hidden, KPI_ORDER, kpiText, NET_INCOME_NOTE, PNL_SECTIONS,
-  rowReason, series, staleText, stageText, streamGroups,
+  rowReason, series, staleText, stageText, streamGroups, yearReason,
 } from './businessCaseReport'
 import { fmtAmount } from './valueFlows'
 
@@ -164,13 +164,32 @@ function BreakEven({ report, line }: { report: BusinessCaseReport; line: string 
   )
 }
 
+/** Pinned to the scroll box's left edge, so a heading stays readable while the years scroll. */
+const PIN = 'sticky left-0 inline-block'
+
+/** Why a whole row is missing: under its label in the pinned column, so it stays in view. */
+function Reason({ text }: { text: string }) {
+  return <span className="block font-normal text-muted whitespace-normal max-w-[18rem]" data-testid="bc-row-reason">{text}</span>
+}
+
+/** The years of a missing row: "n/a" once, the reason being in the row header. */
+function Gap({ span }: { span: number }) {
+  return <td colSpan={span} className="text-muted px-1"><span aria-hidden="true">n/a</span></td>
+}
+
 function PnlTable({ pnl }: { pnl: BusinessCasePnl }) {
   const years = pnl.years
   const groups = streamGroups(pnl)
   const head = 'sticky left-0 bg-bg text-left pr-2 font-normal whitespace-nowrap'
-  const cells = (v: (number | null)[] | null, pct = false) => years.map((y, i) => (
-    <td key={y} className="text-right tabular-nums px-1 whitespace-nowrap">{fmtYear(v?.[i] ?? null, pct)}</td>
-  ))
+  const cells = (key: string, v: (number | null)[] | null, pct = false) => years.map((y, i) => {
+    const text = fmtYear(v?.[i] ?? null, pct)
+    if (text !== null) return <td key={y} className="text-right tabular-nums px-1 whitespace-nowrap">{text}</td>
+    const why = `n/a: ${yearReason(key)}`
+    return (
+      <td key={y} className="text-right px-1 whitespace-nowrap text-muted" title={why}>
+        <span aria-hidden="true">n/a</span><span className="sr-only">{why}</span></td>
+    )
+  })
   return (
     <div className="overflow-x-auto" data-testid="bc-pnl">
       <table className="text-[11px] border-collapse">
@@ -180,22 +199,23 @@ function PnlTable({ pnl }: { pnl: BusinessCasePnl }) {
             {years.map(y => <th key={y} scope="col" className="text-right px-1 font-normal text-muted">{y}</th>)}</tr>
         </thead>
         <tbody>
-          <tr><th scope="rowgroup" colSpan={years.length + 1} className="text-left pt-2 font-semibold">Streams</th></tr>
+          <tr><th scope="rowgroup" colSpan={years.length + 1} className="text-left pt-2 font-semibold">
+            <span className={PIN}>Streams</span></th></tr>
           {!pnl.stream_source && groups.length > 0 && (
             <tr><td colSpan={years.length + 1} className="text-muted" data-testid="bc-streams-other">
-              This report predates the stream groups: its streams are listed under Other. Run again to group them.</td></tr>
+              <span className={PIN}>This report predates the stream groups: its streams are listed under Other. Run again to group them.</span></td></tr>
           )}
           {groups.map(g => (
             <Fragment key={g.id}>
               <tr data-testid={`bc-group-${g.id}`}>
-                <th scope="rowgroup" colSpan={years.length + 1} className="text-left text-muted pl-1">{g.title}</th></tr>
+                <th scope="rowgroup" colSpan={years.length + 1} className="text-left text-muted"><span className={PIN + ' pl-1'}>{g.title}</span></th></tr>
               {g.streams.map(n => {
                 const v = pnl.streams[n]
                 return (
                   <tr key={n} data-testid={`bc-stream-${n}`}>
-                    <th scope="row" className={head + ' pl-3'}>{words(n.replace(/^bc_/, ''))}</th>
-                    {v ? cells(v)
-                      : <td colSpan={years.length} className="text-muted">{rowReason(`stream:${n}`, pnl)}</td>}
+                    <th scope="row" className={head + ' pl-3'}>{words(n.replace(/^bc_/, ''))}
+                      {!v && <Reason text={rowReason(`stream:${n}`, pnl)} />}</th>
+                    {v ? cells(n, v) : <Gap span={years.length} />}
                   </tr>
                 )
               })}
@@ -203,8 +223,9 @@ function PnlTable({ pnl }: { pnl: BusinessCasePnl }) {
           ))}
           {PNL_SECTIONS.map(sec => (
             <Fragment key={sec.title}>
-              <tr><th scope="rowgroup" colSpan={years.length + 1} className="text-left pt-2 font-semibold">{sec.title}
-                {sec.note && <span className="font-normal text-muted"> · {sec.note}</span>}</th></tr>
+              <tr><th scope="rowgroup" colSpan={years.length + 1} className="text-left pt-2 font-semibold">
+                <span className={PIN}>{sec.title}
+                  {sec.note && <span className="font-normal text-muted"> · {sec.note}</span>}</span></th></tr>
               {sec.rows.map(spec => {
                 const v = series(pnl, spec.key)
                 if (hidden(spec, v)) return null
@@ -213,9 +234,9 @@ function PnlTable({ pnl }: { pnl: BusinessCasePnl }) {
                     <th scope="row" className={head + (spec.total ? ' font-semibold' : ' pl-3')}>{spec.label}
                       {spec.key === 'net_income' && (
                         <span className="block font-normal text-muted" data-testid="bc-net-income-note">{NET_INCOME_NOTE}</span>
-                      )}</th>
-                    {v ? cells(v, spec.pct)
-                      : <td colSpan={years.length} className="text-muted">{rowReason(spec.key, pnl)}</td>}
+                      )}
+                      {!v && <Reason text={rowReason(spec.key, pnl)} />}</th>
+                    {v ? cells(spec.key, v, spec.pct) : <Gap span={years.length} />}
                   </tr>
                 )
               })}

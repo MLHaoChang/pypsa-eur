@@ -10,7 +10,7 @@ import {
 } from '../../../api/businessCase'
 import { useUIStore } from '../../../store/uiStore'
 import BusinessCaseRun, { type BusinessCaseRunProps } from './BusinessCaseRun'
-import { kpiText, reasonWords, streamGroups } from './businessCaseReport'
+import { fmtYear, kpiText, reasonWords, streamGroups } from './businessCaseReport'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/businessCase', async (importOriginal) => {
@@ -95,8 +95,10 @@ describe('the P&L (GK B F1–F4)', () => {
     expect(screen.getByTestId('bc-row-net_income').textContent ?? '').toContain('Not established: needs EBIT and tax')
     expect(screen.getByTestId('bc-net-income-note').textContent ?? '').toContain('Net income is before financing (unlevered).')
     expect(screen.queryByTestId('bc-row-interest')).toBeNull()
-    // A None year inside a series is "n/e", not 0.
-    expect(within(screen.getByTestId('bc-row-ebitda_margin')).getAllByRole('cell')[1].textContent ?? '').toContain('n/e')
+    // A None year inside a series is "n/a" with its reason, not 0.
+    const gap = within(screen.getByTestId('bc-row-ebitda_margin')).getAllByRole('cell')[1]
+    expect(gap.getAttribute('title')).toBe('n/a: there is no revenue this year')
+    expect(gap.textContent).toBe('n/an/a: there is no revenue this year')
   })
 
   it('terminal is hidden only when exactly 0; a None terminal shows as not established', () => {
@@ -125,6 +127,10 @@ describe('the KPI row (UX 6)', () => {
     }
     expect(kpiText({ value: 0, status: 'ok', reason: null }, 'pct')).toBe('0.00 %')
     expect(reasonWords(null)).toBe('no reason given')
+    // Millions read as whole numbers; small amounts keep their cents.
+    expect(fmtYear(4.2e6)).toBe((4.2e6).toLocaleString(undefined, { maximumFractionDigits: 0 }))
+    expect(fmtYear(12.5)).toBe((12.5).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+    expect(fmtYear(null)).toBeNull()
   })
 
   it('break-even shows its reason when not established', () => {

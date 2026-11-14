@@ -115,9 +115,19 @@ export function hidden(spec: PnlRowSpec, s: YearSeries): boolean {
   return !!spec.hideWhenZero && Array.isArray(s) && s.length > 0 && s.every(v => v === 0)
 }
 
-export function fmtYear(v: number | null, pct = false): string {
-  if (v === null || !Number.isFinite(v)) return 'n/e'
-  return pct ? `${(v * 100).toFixed(1)} %` : fmtAmount(v)
+/** A year's figure; null for a year with none (the view shows "n/a" and the reason).
+ *  Amounts of 1,000 or more read as whole numbers (UX nit on BC 10). */
+export function fmtYear(v: number | null, pct = false): string | null {
+  if (v === null || !Number.isFinite(v)) return null
+  if (pct) return `${(v * 100).toFixed(1)} %`
+  return Math.abs(v) >= 1000
+    ? v.toLocaleString(undefined, { maximumFractionDigits: 0 })
+    : fmtAmount(v)
+}
+
+/** Why one year of an otherwise established row has no figure. */
+export function yearReason(key: string): string {
+  return key === 'ebitda_margin' ? 'there is no revenue this year' : 'this year is not established'
 }
 
 // ── streams (F1, F2) ────────────────────────────────────────────────────────
