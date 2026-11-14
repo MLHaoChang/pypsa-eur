@@ -496,6 +496,20 @@ def test_triangle_limit_both_sides(monkeypatch):
     assert _limit_kind(lambda: export.build(snap)) == "triangles"
 
 
+def test_triangle_limit_refuses_before_any_mesh_is_built(monkeypatch):
+    # E7: counts first; an over-limit export never reaches the geometry.
+    snap = fixture.reference_snapshot()
+
+    def no_geometry(*a, **k):
+        raise AssertionError(
+            "no mesh may be built before the triangle count is admitted"
+        )
+
+    monkeypatch.setattr(export, "MAX_TRIANGLES", 1)
+    monkeypatch.setattr(export, "_prism", no_geometry)
+    assert _limit_kind(lambda: export.build(snap)) == "triangles"
+
+
 def test_byte_limit_both_sides(monkeypatch):
     snap = fixture.reference_snapshot()
     size = len(export.bundle(snap, exported_at="2026-01-01T00:00:00Z"))

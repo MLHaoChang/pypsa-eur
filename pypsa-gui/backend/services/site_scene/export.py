@@ -53,6 +53,7 @@ SCHEMA_VERSION = 1
 MAX_EXPORT_FEATURES = 4000
 MAX_TRIANGLES = 250_000
 MAX_EXPORT_BYTES = 16_000_000
+BOX_TRIANGLES = native.prism_triangles(4)
 
 NOTE = (
     "A snapshot of one scene revision: not a live link to the model, and not a certified model. "
@@ -250,9 +251,14 @@ def _zero(v: float) -> float:
     return v + 0.0  # -0.0 -> 0.0, so equal scenes write equal bytes
 
 
-def _building(b: dict[str, Any]) -> dict[str, Any]:
-    ring = _ring(b.get("footprint"))
-    height = _positive(b.get("height_m"))
+def _check_building(b: dict[str, Any]) -> tuple[list[tuple[float, float]], float]:
+    """The validated (ring, height) of a building, or `_Omit`; no geometry is built."""
+    return _ring(b.get("footprint")), _positive(b.get("height_m"))
+
+
+def _building(
+    b: dict[str, Any], ring: list[tuple[float, float]], height: float
+) -> dict[str, Any]:
     pivot = _centroid(ring)
     positions, indices = _prism(ring, height, pivot)
     src = b.get("source") or {}
@@ -279,7 +285,8 @@ def _building(b: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _equipment(key: str, placement: Any, fp: Any) -> dict[str, Any]:
+def _check_equipment(placement: Any, fp: Any) -> tuple[float, float, float]:
+    """The validated (width, depth, height) of a placed box, or `_Omit`; no geometry is built."""
     if not isinstance(fp, dict):
         raise _Omit("no_footprint")
     if not isinstance(placement, dict) or not all(
@@ -291,9 +298,14 @@ def _equipment(key: str, placement: Any, fp: Any) -> dict[str, Any]:
         raise _Omit("invalid_footprint")
     if fp.get("height_m") is None:
         raise _Omit("height_not_set")
-    height = _positive(fp["height_m"])
+    return float(width), float(depth), _positive(fp["height_m"])
+
+
+def _equipment(
+    key: str, placement: dict[str, Any], width: float, depth: float, height: float
+) -> dict[str, Any]:
     # The box in its own frame (heading 0); the heading is the node's rotation about up.
-    ring = frames.rectangle((0.0, 0.0), float(width), float(depth), 0.0)
+    ring = frames.rectangle((0.0, 0.0), width, depth, 0.0)
     positions, indices = _prism(ring, height, (0.0, 0.0))
     h = math.radians(placement["heading"])
     # Heading is clockwise from north seen from above: a rotation of -h about up (+Y in glTF).
@@ -313,8 +325,8 @@ def _equipment(key: str, placement: Any, fp: Any) -> dict[str, Any]:
             "representation": "proxy_box",
             "heading_deg": float(placement["heading"]),
             "dims": {
-                "width_m": float(width),
-                "depth_m": float(depth),
+                "width_m": width,
+                "depth_m": depth,
                 "height_m": height,
             },
         },
@@ -336,28 +348,41 @@ def _limit(name: str, cap: int, actual: int) -> SceneError:
 def _features(
     snap: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Every feature validated and counted before any geometry is built (E7):
+    the feature count first, then the triangle count of what passed, then the meshes.
+    """
     buildings = snap.get("buildings") or []
     placements = (snap.get("site") or {}).get("placements") or {}
     footprints = snap.get("asset_footprints") or {}
     if len(buildings) + len(placements) > MAX_EXPORT_FEATURES:
         raise _limit("features", MAX_EXPORT_FEATURES, len(buildings) + len(placements))
-    out, omissions = [], []
+    admitted, omissions = [], []
     for b in buildings:
         try:
-            out.append(_building(b))
+            ring, height = _check_building(b)
+            admitted.append(
+                (
+                    native.prism_triangles(len(ring)),
+                    lambda b=b, r=ring, h=height: _building(b, r, h),
+                )
+            )
         except _Omit as o:
             omissions.append(
                 {"feature": b.get("id"), "kind": "building", "reason": o.reason}
             )
     for key in sorted(placements):
         try:
-            out.append(_equipment(key, placements[key], footprints.get(key)))
+            dims = _check_equipment(placements[key], footprints.get(key))
+            admitted.append(
+                (BOX_TRIANGLES, lambda k=key, d=dims: _equipment(k, placements[k], *d))
+            )
         except _Omit as o:
             omissions.append({"feature": key, "kind": "equipment", "reason": o.reason})
-    triangles = sum(len(f["indices"]) // 3 for f in out)
+    triangles = sum(n for n, _make in admitted)
     if triangles > MAX_TRIANGLES:
         raise _limit("triangles", MAX_TRIANGLES, triangles)
-    return out, omissions
+    return [make() for _n, make in admitted], omissions
 
 
 # ── GLB writer (E1) ──────────────────────────────────────────────────────────
