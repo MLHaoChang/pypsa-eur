@@ -124,6 +124,12 @@ describe('refusals sit on their row and column (G9)', () => {
     mount(config(H2), { refusals: null, refusals_reason: 'investment_case_missing' })
     expect((await screen.findByTestId('bc-refusals-reason')).textContent).toMatch(/Run the investment case/)
   })
+  it('a busy model reads busy, not out of date (PG-09 Y1)', async () => {
+    mount(config(H2), { refusals: null, refusals_reason: 'network_busy' })
+    const text = (await screen.findByTestId('bc-refusals-reason')).textContent ?? ''
+    expect(text).toMatch(/^The model is busy/)
+    expect(text).not.toMatch(/out of date/)
+  })
 })
 
 describe('revenue prices', () => {

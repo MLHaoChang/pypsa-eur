@@ -2457,7 +2457,10 @@ def _bc_ic_horizon() -> tuple[tuple[int, int], int] | None:
         stored = stored.model_dump(mode="json")
     payload = (((stored or {}).get("sections") or {}).get("project") or {}).get("payload") or {}
     cod, n, base = (payload.get(k) for k in ("cod_year", "analysis_years", "base_year"))
-    if not all(isinstance(v, int) for v in (cod, n, base)) or n < 1:
+    # A bool is an int to isinstance; a year or a count never is one (GK B F3).
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (cod, n, base)):
+        return None
+    if n < 1:
         return None
     return (cod, cod + n - 1), base
 
@@ -2562,10 +2565,13 @@ def get_business_case_options():
     if span is None:
         out["refusals_reason"] = "investment_case_missing"
         return out
-    if not _bc_ic_current():
+    not_current = _bc_ic_current()
+    if not_current is not None:
         # The run needs a current investment case (C3); years from an old one could
-        # place a wrong `outside_horizon`, so nothing is checked against them.
-        out["refusals_reason"] = "investment_case_out_of_date"
+        # place a wrong `outside_horizon`, so nothing is checked against them. A key
+        # that cannot be read now (the network busy) says so, never "out of date"
+        # (ruling PG-09 Y1).
+        out["refusals_reason"] = not_current
         return out
     found = list(inputs.refusals(horizon=span[0], base_year=span[1]))
     # A linked line against the catalogue in hand (GK B O1): its output and its unit.
@@ -2579,13 +2585,24 @@ def get_business_case_options():
                 found.append(LinkedOutputMissing(f"lines[{i}].quantity_source"))
             elif ln.unit not in allowed_units(ln.kind, "linked", offered[oid]):
                 found.append(UnitNotAllowed(f"lines[{i}].unit"))
-    out["refusals"] = [refusal_detail(r) for r in found]
+    # The validator and the catalogue check can both refuse one cell (a linked unit):
+    # one refusal per kind and cell (GK B F1).
+    details, seen = [], set()
+    for r in found:
+        d = refusal_detail(r)
+        key = (d.get("code"), d.get("refusal"), d.get("field"))
+        if key not in seen:
+            seen.add(key)
+            details.append(d)
+    out["refusals"] = details
     return out
 
 
-def _bc_ic_current() -> bool:
-    """Whether the stored investment-case report is current, read as `_bc_ic_check`
-    reads it, without refusing."""
+def _bc_ic_current() -> str | None:
+    """None when the stored investment-case report is current, read as `_bc_ic_check`
+    reads it, without refusing; else why not: `investment_case_out_of_date`, or the
+    reason the current key cannot be read now (`network_busy`, `solve_in_flight`,
+    `current_assumptions_not_established`), which is never compared (PG-09 Y1)."""
     from services.business_case.runner import ic_report_key
     from services.finance.investment_case_runner import staleness
 
@@ -2594,9 +2611,13 @@ def _bc_ic_current() -> bool:
         stored = stored.model_dump(mode="json")
     a_hash, c_hash = ic_report_key(stored)
     if a_hash is None or c_hash is None:
-        return False
+        return "investment_case_out_of_date"
     current, why = _ic_current_assumptions()
-    return staleness(stored, current, reason=why)["stale"] is False
+    if current is None:
+        return why or "current_assumptions_not_established"
+    if staleness(stored, current, reason=why)["stale"] is False:
+        return None
+    return "investment_case_out_of_date"
 
 
 def _bc_ic_check() -> tuple[str, str | None]:

@@ -409,7 +409,7 @@ def test_refusals_wait_for_a_current_investment_case(
 
     _with_ic(client, install_network, monkeypatch)
     assert _put(client, _bc(_line(price=None))).status_code == 200
-    monkeypatch.setattr(R, "_bc_ic_current", lambda: False)
+    monkeypatch.setattr(R, "_bc_ic_current", lambda: "investment_case_out_of_date")
     body = client.get(OPTIONS_URL).json()
     assert body["refusals"] is None
     assert body["refusals_reason"] == "investment_case_out_of_date"
@@ -512,3 +512,102 @@ def test_a_report_without_its_key_is_out_of_date(
     body = client.get(OPTIONS_URL).json()
     assert body["refusals"] is None
     assert body["refusals_reason"] == "investment_case_out_of_date"
+
+
+# ── GK B NOT OK @64a3e5e8 (F1–F4) ────────────────────────────────────────────
+
+
+def test_one_cell_is_refused_once(client, install_network, monkeypatch):
+    """F1: a linked revenue line in `lump` is refused by the validator (lump is capex
+    only) and by the catalogue check (its output offers t): one refusal on the cell."""
+    from services.business_case import linked_outputs as L
+
+    _with_ic(client, install_network, monkeypatch)
+    _fresh(monkeypatch)
+    spec = L.OutputSpec("served_product.conc", "Product served on conc", ("t",))
+    monkeypatch.setattr(L, "catalogue", lambda n, solve=None: [spec])
+    v = L.CATALOGUE_VERSION
+    ln = _line(
+        unit="lump", quantity=None, quantity_source=f"linked:served_product.conc@{v}"
+    )
+    assert _put(client, _bc(ln)).status_code == 200
+    got = [
+        (r["refusal"], r["field"]) for r in client.get(OPTIONS_URL).json()["refusals"]
+    ]
+    assert got.count(("unit_not_allowed", "lines[0].unit")) == 1
+
+
+def test_without_a_network_outputs_say_so(client, monkeypatch):
+    """F2: no network loaded: outputs are None with `no_network`, never []."""
+    import routers.results as R
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    monkeypatch.setattr(ctx, "network", None)
+    monkeypatch.setattr(R, "_solver_in_flight", lambda: False, raising=False)
+    body = client.get(OPTIONS_URL).json()
+    assert body["outputs"] is None
+    assert body["outputs_reason"] == "no_network"
+
+
+@pytest.mark.parametrize("key", ["cod_year", "analysis_years", "base_year"])
+@pytest.mark.parametrize("bad", [True, 2030.0, "2030"])
+def test_a_year_or_count_of_the_wrong_type_is_no_horizon(
+    client, install_network, monkeypatch, session_state, key, bad
+):
+    """F3: a bool is an int to isinstance; it, a float and a string are no year."""
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    _store_ic(session_state, client, lambda r: _ic_payload(r).update({key: bad}))
+    body = client.get(OPTIONS_URL).json()
+    assert body["horizon"] is None and body["base_year"] is None
+    assert body["refusals_reason"] == "investment_case_missing"
+
+
+def test_a_busy_network_is_not_read_as_out_of_date(
+    client, install_network, monkeypatch
+):
+    """F4 (ruling PG-09 Y1): the lock held by someone else while the current IC key is
+    read: the refusals say the network is busy and nothing is compared."""
+    import threading
+
+    import routers.results as R
+    from services.pypsa_service import PyPSAService
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc(_line(price=None))).status_code == 200
+    monkeypatch.setattr(R, "_IC_LOCK_WAIT_S", 0.05)
+    held, done = threading.Event(), threading.Event()
+
+    def holder(lock):
+        with lock:
+            held.set()
+            done.wait(10)
+
+    real_raw = R._bc_raw
+
+    def raw_then_hold():
+        # After the options read has let the lock go, another thread takes it.
+        # The lock the route will ask for, read in the route's own context.
+        t = threading.Thread(
+            target=holder, args=(PyPSAService.get_lock(),), daemon=True
+        )
+        t.start()
+        held.wait(5)
+        return real_raw()
+
+    compared = []
+    monkeypatch.setattr(R, "_bc_raw", raw_then_hold)
+    import services.finance.investment_case_runner as IR
+
+    real_staleness = IR.staleness
+    monkeypatch.setattr(
+        IR, "staleness", lambda *a, **k: compared.append(1) or real_staleness(*a, **k)
+    )
+    try:
+        body = client.get(OPTIONS_URL).json()
+    finally:
+        done.set()
+    assert body["refusals"] is None
+    assert body["refusals_reason"] == "network_busy"
+    assert compared == []
