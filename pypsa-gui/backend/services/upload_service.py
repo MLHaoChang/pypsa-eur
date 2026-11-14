@@ -27,7 +27,9 @@ Concurrency contract:
 
 Idempotency:
   * `add_upload(same_bytes)` returns the existing meta with the original
-    `uploaded_at` preserved (first-writer wins).
+    `uploaded_at` preserved (first-writer wins) — except an `agent_export`
+    re-exported as one: that is a fresh delivery, so its `uploaded_at` moves
+    to now (LC48A-TTL-1) and it lists as the newest upload.
   * `delete_upload(missing)` returns success-style no-op via the caller's
     DeleteUploadResponse contract — `add_upload` semantics are dedup,
     `delete_upload` semantics are tombstone.
@@ -42,6 +44,7 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import logging
+import math
 import os
 import pathlib
 import re
@@ -319,7 +322,9 @@ def refuse_expired_delivery(meta: UploadMeta, *, now: float | None = None) -> No
     if meta.kind != "agent_export":
         return
     age = (time.time() if now is None else now) - meta.uploaded_at
-    if age > DELIVERY_TTL_SECONDS:
+    # A non-finite age (a NaN or infinite recorded time) is not a known-fresh
+    # delivery, so it reads as expired: `NaN > TTL` alone would serve it forever.
+    if not math.isfinite(age) or age > DELIVERY_TTL_SECONDS:
         raise HTTPException(
             status_code=410,
             detail={

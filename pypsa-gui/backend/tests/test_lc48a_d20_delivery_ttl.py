@@ -23,6 +23,8 @@ import hashlib
 import json
 import time
 
+import pytest
+
 from services import chat_tools, upload_service
 from tests.lc43_gates import refused, state
 from tests.test_assistant_capabilities import session  # noqa: F401
@@ -116,3 +118,49 @@ def test_exporting_the_same_content_again_makes_a_fresh_delivery(
     assert again["file_id"] == first["file_id"]
     assert chat_tools.get_file_delivery(again["file_id"])["sha256"] == first["sha256"]
     assert client.get(again["download_url"]).status_code == 200
+
+
+@pytest.mark.parametrize("recorded", ["NaN", "Infinity", "-Infinity"])
+def test_a_delivery_with_no_finite_creation_time_reads_as_expired(
+    baseline, session, client, recorded
+):
+    _ctx, _project_id, project_dir = baseline
+    delivery = chat_tools.export_network_nc()
+    path = _meta_path(project_dir, delivery["file_id"])
+    meta = json.loads(path.read_text())
+    path.write_text(
+        json.dumps({**meta, "uploaded_at": float(recorded.replace("Infinity", "inf"))})
+    )
+    meta_bytes = path.read_bytes()
+    before = state(project_dir)
+
+    refused(
+        lambda: chat_tools.get_file_delivery(delivery["file_id"]),
+        410,
+        "delivery_expired",
+    )
+    refused(
+        lambda: chat_tools.build_delivery([delivery["file_id"]]),
+        410,
+        "delivery_expired",
+    )
+    response = client.get(delivery["download_url"])
+    assert response.status_code == 410, response.text
+    assert state(project_dir) == before
+    assert path.read_bytes() == meta_bytes
+
+
+def test_the_persons_own_re_upload_keeps_its_first_time(baseline):
+    _ctx, _project_id, project_dir = baseline
+    first = upload_service.add_upload(
+        "Tool Baseline", b"bus\nB9\n", "mine.csv", "text/csv", project_dir=project_dir
+    )
+    made_ago(project_dir, first.file_id, 3600)
+    recorded = json.loads(_meta_path(project_dir, first.file_id).read_text())[
+        "uploaded_at"
+    ]
+    again = upload_service.add_upload(
+        "Tool Baseline", b"bus\nB9\n", "mine.csv", "text/csv", project_dir=project_dir
+    )
+    assert again.file_id == first.file_id
+    assert again.uploaded_at == recorded
