@@ -195,6 +195,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A date answered at model-period resolution discloses its true window: [earliest, reported]. earliest is the start of the earliest earlier period that was partly energised (max > 0) while load was in service, clamped by the first COD and the project start. Otherwise the date is exact. Never "up to a period earlier" (#1474 R1/R2, GK A (26)).
 - A thread-local handoff is cleared by its consumer on every outcome, success, refusal and raise alike (#1477 F1, GK B (54)).
 - A bulk write applies its side effects per target, never through one shared coerced dict (#1466 D1, GK B (54)).
+- A bulk write that touches derived-input columns (composite cost parts) re-derives per target through the same derive as the single edit, so the network-input fingerprint and the LP agree (TCU 08; extends #1466 D1 and #738, GK B (58)).
 - A plain-text refusal keeps a structured kind; the mutant that widens the check to the base class in `isinstance` is killed (#1466 D2, GK B (54)).
 - When a bounded-try lock is busy, a read says "network busy" without comparing, never stale (PG-09 Y1, GK B (54)).
 - An evidence or probe record that a later gate will trust binds a digest of the exact configuration that gate checks, plus the code version (#1483 F3, GK B (55)).
