@@ -190,7 +190,9 @@ def no_load_fuel_t(n) -> pd.DataFrame:
         for name in gens.index:
             fuel = no_load_fuel(gens.loc[name])
             if fuel > 0 and name in status.columns:
-                cols[name] = fuel * status[name].reindex(n.snapshots).fillna(0.0).astype(float)
+                cols[name] = fuel * status[name].reindex(n.snapshots).fillna(
+                    0.0
+                ).astype(float)
     return pd.DataFrame(cols, index=n.snapshots)
 
 

@@ -770,7 +770,9 @@ def fleet_fuel_curve(
     burns ``heat_rate`` at the backup ``fuel_price``. A mixed fleet is weighted by ``p_nom`` (equal weights when
     every ``p_nom`` is 0).
     """
-    curved = [g for g in gensets if fuel_curve.curve_of(n.generators.loc[g]) is not None]
+    curved = [
+        g for g in gensets if fuel_curve.curve_of(n.generators.loc[g]) is not None
+    ]
     if not curved:
         return None
     w = {g: max(float(n.generators.at[g, "p_nom"]), 0.0) for g in gensets}
@@ -895,7 +897,11 @@ def backup_cost_delta(
         )
         burn = mw * run_hours_per_year * rate_th
         if fc is None:  # byte-equal to the pre-02c product without a curve
-            return part, burn, np.r_[0.0, [burn * backup.fuel_price_per_mwh_fuel] * years]
+            return (
+                part,
+                burn,
+                np.r_[0.0, [burn * backup.fuel_price_per_mwh_fuel] * years],
+            )
         return part, burn, np.r_[0.0, [mw * run_hours_per_year * cost_el] * years]
 
     g, fuel_mwh_th, fuel = genset_leg(genset_mw)
