@@ -61,6 +61,9 @@ export default function FuelRunHours({ cost }: { cost: Pick<CostBreakdown, 'fuel
           </tbody>
         </table>
       </div>
+      <p className="text-[11px] text-muted mt-1">
+        – means this generator has no fuel curve (fuel columns) or no run-hour inputs (hour columns).
+      </p>
     </section>
   )
 }
