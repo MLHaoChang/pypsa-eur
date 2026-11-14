@@ -73,3 +73,9 @@ One PR (GK A area, under PR-SIZE-1).
 - P7 stored formats: list every reader and digest of campus_pcc.csv and the summary; show them unaffected or regenerate with a reason.
 - P8 templates: before/after sizes and NPV for both microgrids and any other template with grid-forming storage in an island; regenerate measured notes and shipped files if anything moves; slow test pins tie_open_hours == island_hours on the staged template, the single-year template's own value on it.
 - Rule 7: a new row state is tested at the runner and card level too.
+
+### 2026-11-14: GK A (27) rulings R1, R2 (after the build)
+
+- R1 (replaces P5), accepted: a fixed-p_nom GFM battery s holds η·(e_s(t−1) − e_min) ≥ B(t)·K_s/ΣK_fixed (exact when nothing is extendable, conservative otherwise, linear); an extendable battery gets no per-battery row (share 1 forces a build; K-weighting is bilinear). R1-1: the known LP/screen gap (a built extendable battery empty on a closed-tie hour with B > 0) is still judged and reported by the screen; facts["gfm_bridge_share"] names each extendable GFM battery "aggregate row only"; a test shows the screen's failure reaching the card. R1-2: ΣK_fixed = 0 → no per-battery rows, no division; tested. R1-3: a fixed battery with p_nom 0 → share 0, no NaN; the forced-build mutant (share 1 on the extendable candidate) is killed by the no-forced-build test.
+- R2, accepted as built: when any Link touches the PCC the state comes from those Links (every one at or under TIE_OPEN_TOL_MW, a local converter Link included, else closed); a grid generator at the PCC decides "closed" only when no Link touches it; lines and transformers always close it. R2-1: three template-free tests (grid generator + open tie Link → open; generator, no Link → closed; open tie + a conducting Link → closed); a mutant ignoring the generator rule dies on the second.
+- e_min_pu: a time-varying minimum series is refused or read per snapshot, never ignored; tested.
