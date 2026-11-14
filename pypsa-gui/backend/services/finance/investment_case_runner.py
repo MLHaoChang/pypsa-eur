@@ -164,7 +164,7 @@ def staleness(stored: dict | None, current: tuple[str, dict] | None,
         out.update(changed=[], reason=reason or "current_assumptions_not_established",
                    assumptions_hash=stored_hash, current_hash=None)
     else:
-        changed = [x.field for x in v.broken if x.edge == "derived_from"]
+        changed = [x.field for x in v.broken if x.dst.startswith(studies.IC_PART)]
         out.update(changed=sorted(changed) if stale else [],
                    reason=None if not stale else ("inputs_changed" if changed else "hash_differs"),
                    assumptions_hash=stored_hash, current_hash=current[0])

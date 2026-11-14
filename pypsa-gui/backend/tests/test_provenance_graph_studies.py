@@ -302,7 +302,7 @@ def test_a_recorded_none_never_matches_a_current_none():
     assert {x.reason for x in v.broken} == {"not recorded"}
 
 
-@pytest.mark.parametrize("what", ["network", "engine", "ledger"])
+@pytest.mark.parametrize("what", ["network", "engine", "ledger", "intake"])
 def test_a_raising_current_read_is_stale_with_its_reason(what, monkeypatch):
     """V6 (#1390 F2): a read that raises is stale with its reason, never a raise out of the route."""
     report, ledger = _hashed_report()
@@ -314,6 +314,8 @@ def test_a_raising_current_read_is_stale_with_its_reason(what, monkeypatch):
     eng = boom if what == "engine" else (lambda u: ENG)
     if what == "ledger":
         monkeypatch.setattr(packs, "ledger_hash", boom)
+    if what == "intake":
+        monkeypatch.setattr(run_hashes, "intake_hash", boom)
     v, codes = S.report_verdict(report, _study(), ledger, net, fork_engine_now=eng)
     assert v.state == "stale"
     assert (
@@ -322,6 +324,7 @@ def test_a_raising_current_read_is_stale_with_its_reason(what, monkeypatch):
             "network": ["fork_changed_since_findings:bess_2h"],
             "engine": ["engine_inputs_changed_since_findings:bess_2h"],
             "ledger": ["ledger_changed_since_findings"],
+            "intake": ["intake_changed_since_findings"],
         }[what]
     )
     assert [x.reason for x in v.broken] == ["cannot be read now: disk gone"]
@@ -397,11 +400,26 @@ def test_each_ic_part_breaks_exactly_its_own_edge(part):
     got = staleness(_stored("H", PARTS), ("H2", {**PARTS, part: "changed"}))
     assert got["changed"] == [part] and got["reason"] == "inputs_changed"
     edges = [(b["edge"], b["needs_run"]) for b in got["verdict"]["broken"]]
-    # The hash's edge and this part's; neither feeds a run the case's own read can redo.
+    # The hash's edge and this part's: the run's inputs, so only a new run clears either (V5).
     assert edges == [
-        ("run:investment_case", False),
-        (f"input:investment_case/{part}", False),
+        ("input:investment_case:assumptions_hash", True),
+        (f"input:investment_case/{part}", True),
     ]
+
+
+def test_a_part_changed_under_an_equal_hash_now_reads_stale():
+    """V1, the one row that moves: a record whose hash still matches but whose recorded part differs (an
+    inconsistent record) read fresh on master; the part's edge breaks now. Nothing moves toward fresh."""
+    from services.finance.investment_case_runner import staleness
+
+    stored, current = _stored("H", PARTS), ("H", {**PARTS, "finance": "f2"})
+    assert _legacy_staleness(stored, current)["stale"] is False
+    got = staleness(stored, current)
+    assert (got["stale"], got["changed"], got["reason"]) == (
+        True,
+        ["finance"],
+        "inputs_changed",
+    )
 
 
 def test_an_ic_key_that_cannot_be_computed_is_stale_never_fresh():
