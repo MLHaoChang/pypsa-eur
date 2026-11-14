@@ -116,7 +116,7 @@ def _check_run_hours(row: Mapping[str, Any]) -> str | None:
     if om is not None and om < 0:
         return f"{LABELS[OM_HOUR]}: enter zero or more (got {om:g})"
     if om and not _flag(row.get("committable")):
-        return f"{LABELS[OM_HOUR]}: turn on Unit commitment, or set it to 0. It is paid only while the unit is on"
+        return f"{LABELS[OM_HOUR]}: turn on Unit commitment, or set it to 0. It is paid only while the unit is on."
     if life is not None and life <= 0:
         return f"{LABELS[LIFE_HOURS]}: enter more than zero (got {life:g})"
     return None
@@ -507,6 +507,8 @@ def run_hour_lifetime(n, name: str) -> tuple[float | None, list[str]]:
     is counted from its dispatch, flagged ``run_hour_lifetime_from_dispatch:<name>``. None when no lifetime in
     running hours is set, when the unit never ran (it does not wear), when the result is not finite, or when the
     solved frame has no column for it (flagged ``run_hour_lifetime_unknown:<name>``, never inferred).
+    The None returns for a unit that never ran or a non-finite result carry no flags: there is no lifetime for the
+    averaged or from-dispatch flags to qualify (GK B nit N2).
     """
     from services.adequacy.metrics import horizon_years
     from services.period_utils import period_years_map, snapshot_weights

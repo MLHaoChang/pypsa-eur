@@ -199,6 +199,32 @@ def test_om_cost_is_hours_run_times_the_rate():
     assert _opex_of(n) == pytest.approx(row["om_cost_eur"] + 10.0 * energy)
 
 
+def test_hours_run_reads_the_generator_weights_and_om_the_objective_weights():
+    """GK B F1: objective ≠ generators weightings; each figure reads its own column, exactly."""
+    n = _network()
+    n.snapshot_weightings["objective"] = 3.0
+    n.snapshot_weightings["generators"] = 2.0
+    _solve(n)
+    on = float(n.generators_t.status["genset"].sum())
+    assert on == HOURS
+    row = _block(compute_cost_breakdown(n, CFG))
+    assert row["hours_run"] == on * 2.0
+    assert row["om_cost_eur"] == on * 3.0 * OM
+    energy = float((n.generators_t.p["genset"] * 3.0).sum())
+    assert _opex_of(n) == pytest.approx(row["om_cost_eur"] + 10.0 * energy)
+
+
+def test_an_om_of_zero_is_a_set_value_that_owns_the_stand_by_cost():
+    """GK B nit N1, decided: 0 is "no O&M per running hour", a value the refusal itself offers ("or set it to
+    0"), not "unset". It owns the stand-by cost like any O&M, so an O&M set from 3 to 0 leaves no stale 3 €/h
+    charge in the solve; an imported stand-by cost beside an O&M of 0 is replaced by 0."""
+    row = {"p_nom": 1.0, OM_HOUR: 0.0, "stand_by_cost": 5.0}
+    assert fuel_curve.owned(row) == ("stand_by_cost",)
+    assert fuel_curve.derived_costs(row) == {"stand_by_cost": 0.0}
+    n = _network(om=0.0)
+    assert n.generators.at["genset", "stand_by_cost"] == 0.0
+
+
 def test_om_counts_only_committed_hours():
     load = pd.Series(
         [0.3] * 12 + [0.0] * 12,
@@ -599,6 +625,34 @@ def test_validation_flags_om_without_unit_commitment():
     n.generators.loc["genset", OM_HOUR] = OM
     (issue,) = _check_fuel_curves(n)
     assert issue.message.startswith("O&M per running hour: turn on Unit commitment")
+
+
+def test_the_case_digest_without_run_hour_columns_is_master_s():
+    """GK B F2 (H7): a network with no lifetime in running hours digests exactly as before 02b. The literal was
+    computed with master 18bd4cfe's `owner_assets_digest` on this same network."""
+    from services.results.finance_case import owner_assets_digest
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=HOURS, freq="h"))
+    n.add("Bus", "el", carrier="AC")
+    n.add("Load", "site", bus="el", p_set=0.3)
+    n.add(
+        "Generator",
+        "genset",
+        bus="el",
+        carrier="diesel",
+        p_nom=1.0,
+        committable=True,
+        p_min_pu=0.2,
+        marginal_cost=10.0,
+        lifetime=20.0,
+        overnight_cost=1000.0,
+        discount_rate=0.07,
+    )
+    commercial = {
+        "value_flows": {"asset_owners": [{"component": "Generator", "asset_id": "genset"}]}
+    }
+    assert owner_assets_digest(n, commercial) == "188aa0034cd0ec22c9bfc70be2b70987"
 
 
 def test_om_enters_the_solve_fingerprint_and_the_lifetime_only_the_case_digest(
