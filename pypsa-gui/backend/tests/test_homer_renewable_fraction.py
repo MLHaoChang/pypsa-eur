@@ -2173,6 +2173,80 @@ def test_two_h2_buses_joined_by_a_pipe_are_one_cluster_with_each_link_once():
     assert renewable_fraction(n)["conversion_mwh"] == pytest.approx((3.0 - 1.0) * HOURS)
 
 
+@pytest.mark.parametrize(
+    "comp,kw",
+    [
+        pytest.param("Store", {"carrier": "H2", "e_nom": 50.0, "e_initial": 50.0}, id="full-store"),
+        pytest.param(
+            "StorageUnit",
+            {"carrier": "H2", "p_nom": 5.0, "max_hours": 10.0, "cyclic_state_of_charge": True, "inflow": 3.0},
+            id="inflow-su",
+        ),
+        pytest.param("Generator", {"carrier": "solar", "p_nom": 5.0}, id="injecting-gen"),
+    ],
+)
+def test_an_inactive_component_on_a_cluster_bus_keeps_it_closed(comp, kw):
+    """GK B N1 (mutant killer): only an active Store, StorageUnit or Generator can open a cluster."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add(comp, "idle", bus="h2", active=False, **kw)
+    c = classify(n)
+    assert c["open_clusters"] == [] and c["net_clusters"] == CLUSTER, c
+
+
+def test_a_storage_unit_with_an_inflow_series_opens_the_cluster():
+    """GK B N1 (mutant killer): an inflow in time, with a zero static inflow, opens it too."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("StorageUnit", "cavern", bus="h2", carrier="H2", p_nom=5.0, max_hours=10.0,
+          cyclic_state_of_charge=True, inflow=pd.Series(0.0, index=n.snapshots))
+    assert classify(n)["open_clusters"] == [], classify(n)
+    n.storage_units_t.inflow.iloc[3, 0] = 2.0
+    c = classify(n)
+    assert c["net_clusters"] == [] and "inflow" in c["open_clusters"][0]["why"], c
+
+
+@pytest.mark.parametrize("p_min_pu,opens", [(-1.0, True), (0.0, False)])
+def test_a_reversible_link_from_a_fuel_bus_opens_the_cluster(p_min_pu, opens):
+    """GK B N1 (mutant killer): a genset burning gas with an H2 co-feed delivers into the cluster from the gas
+    bus only when it can run backwards."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Link", "cofired", bus0="gas", bus1="ac", bus2="h2", p_nom=5.0, p_min_pu=p_min_pu,
+          efficiency=0.4, efficiency2=-0.1)
+    c = classify(n)
+    if opens:
+        assert c["net_clusters"] == [] and "cofired" in c["open_clusters"][0]["why"], c
+    else:
+        assert c["open_clusters"] == [] and [x["buses"] for x in c["net_clusters"]] == [["h2"]], c
+
+
+def test_three_clusters_joined_in_a_chain_by_two_input_links_merge_into_one():
+    """GK B N6 (mutant killer): a fuel cell burning H2 from two buses touches both clusters without the walk
+    reaching across it; the merge repeats until A–B and B–C are one cluster."""
+    n = _dispatched()
+    for b in ("h2a", "h2b", "h2c"):
+        n.add("Bus", b, carrier="H2")
+        n.add("Load", f"offtake {b}", bus=b, p_set=1.0)
+        n.add("Link", f"el {b}", bus0="ac", bus1=b, p_nom=10.0, efficiency=0.7)
+    n.add("Link", "fc ab", bus0="h2a", bus1="ac", bus2="h2b", p_nom=5.0, efficiency=0.5, efficiency2=-0.5)
+    n.add("Link", "fc bc", bus0="h2b", bus1="ac", bus2="h2c", p_nom=5.0, efficiency=0.5, efficiency2=-0.5)
+    c = classify(n)
+    assert c["open_clusters"] == [], c
+    assert c["net_clusters"] == [
+        {"buses": ["h2a", "h2b", "h2c"], "links": ["el h2a", "el h2b", "el h2c", "fc ab", "fc bc"]}
+    ], c
+
+
+def test_a_net_cluster_alone_carries_the_note_and_the_hint():
+    """homer-parity 06 (mutant killer): a net cluster without any conversion Link still names the conversion
+    draw in the KPI note and the infeasibility hint."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    c = classify(n)
+    assert c["conversion_links"] == [] and c["net_clusters"] == CLUSTER, c
+    assert renewable_fraction(n)["note"] == CONVERSION_NOTE
+    lines = infeasibility_lines(_net_h2(_network(pv_max=5.0)), SolverConfig(min_renewable_fraction=0.9))
+    assert len(lines) == 1 and "of what the conversion units draw" in lines[0], lines
+
+
 def _h2_with_negative_offtake(n, *, fuel_cell: bool, **offtake):
     """An electrolyser into an H2 bus whose offtake is a Generator that
     withdraws (``offtake`` sets sign or p_min_pu/p_max_pu), with or without a
