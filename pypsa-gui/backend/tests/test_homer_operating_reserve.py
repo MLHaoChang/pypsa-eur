@@ -833,3 +833,32 @@ def test_wind_is_a_wind_carrier_that_is_not_also_pv():
         n.add("Generator", c, bus="ac", carrier=c, p_nom=5.0)
     sel = assets(n)
     assert sel["wind"] == [] and "solar-wind" in sel["pv"], sel
+
+
+@pytest.mark.parametrize("short", [True, False], ids=["names-hours", "may-contribute"])
+def test_the_infeasible_card_hint_is_plain_words(short):
+    """UX 21 ask 3: the failure card's hint opens with the label (as its constraint), carries no engine row name
+    and ends in one period; the shortfall names the hours."""
+    import queue
+
+    from services.failure_taxonomy import classify_failure
+    from services.solver.diagnostics import _diagnose_infeasibility
+
+    n = _network()
+    if short:
+        n.generators.loc["diesel", "p_nom"] = 5.0
+    _diagnose_infeasibility(
+        n, SolverConfig(reserve_share_load=1.0), queue.SimpleQueue()
+    )
+    card = classify_failure("warning", "infeasible")
+    hints = [
+        h
+        for h in card.get("constraint_hints", [])
+        if h["constraint"] == "Operating reserve"
+    ]
+    assert len(hints) == 1, card
+    text = hints[0]["text"]
+    assert hints[0]["setting"] == "offgrid"
+    assert ROW not in text and "reserve_share" not in text and "row " not in text, text
+    assert text.endswith(".") and not text.endswith(".."), text
+    assert ("at " in text and "MW" in text) if short else "may contribute" in text, text

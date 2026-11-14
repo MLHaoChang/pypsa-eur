@@ -488,5 +488,6 @@ def infeasibility_lines(n, cfg) -> list[str]:
             "add dispatchable capacity."
         ]
     return [
-        f"{LABEL}: the reserve rows ({ROW}) may contribute; lower the reserve shares to check."
+        f"{LABEL}: the reserve may contribute to the infeasibility (row {ROW}); lower the reserve shares to "
+        "check."
     ]
