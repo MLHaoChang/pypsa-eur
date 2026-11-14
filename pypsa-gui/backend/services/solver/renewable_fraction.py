@@ -532,7 +532,9 @@ def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
         merged = False
         for i in range(len(clusters)):
             for j in range(i + 1, len(clusters)):
-                if any(touches(m, clusters[i]) and touches(m, clusters[j]) for m in active):
+                if any(
+                    touches(m, clusters[i]) and touches(m, clusters[j]) for m in active
+                ):
                     clusters[i] |= clusters.pop(j)
                     merged = True
                     break
@@ -564,7 +566,11 @@ def _starts_full(n, comp: str, name, multi: bool) -> bool:
     if comp == "Store":
         df, init, cyc = n.stores, "e_initial", "e_cyclic"
     else:
-        df, init, cyc = n.storage_units, "state_of_charge_initial", "cyclic_state_of_charge"
+        df, init, cyc = (
+            n.storage_units,
+            "state_of_charge_initial",
+            "cyclic_state_of_charge",
+        )
 
     def _get(attr, default):
         return df.at[name, attr] if attr in df.columns else default
@@ -586,14 +592,22 @@ def _cluster_open(n, buses, elec, active, ports) -> str | None:
     multi = isinstance(n.snapshots, pd.MultiIndex)
     for comp, df in (("Store", n.stores), ("StorageUnit", n.storage_units)):
         for name in df.index:
-            if _active(df, name) and str(df.at[name, "bus"]) in buses and _starts_full(n, comp, name, multi):
+            if (
+                _active(df, name)
+                and str(df.at[name, "bus"]) in buses
+                and _starts_full(n, comp, name, multi)
+            ):
                 return f"{comp} {name} can start with energy the cluster never drew"
     su = n.storage_units
     inflow_t = getattr(n.storage_units_t, "inflow", None)
     for name in su.index:
         if not (_active(su, name) and str(su.at[name, "bus"]) in buses):
             continue
-        series = inflow_t[name] if inflow_t is not None and name in getattr(inflow_t, "columns", []) else None
+        series = (
+            inflow_t[name]
+            if inflow_t is not None and name in getattr(inflow_t, "columns", [])
+            else None
+        )
         if float(su.at[name, "inflow"] if "inflow" in su.columns else 0.0) > 0 or (
             series is not None and (series.fillna(0.0) > 0).any()
         ):
@@ -607,9 +621,13 @@ def _cluster_open(n, buses, elec, active, ports) -> str | None:
         ins, outs = ports[m]
         delivers_to = list(outs)
         from_buses = [b for _k, b in ins]
-        if min_p_min_pu(n, m) < 0:  # runs backwards too: every port can deliver and feed
+        if (
+            min_p_min_pu(n, m) < 0
+        ):  # runs backwards too: every port can deliver and feed
             delivers_to = from_buses = [b for _k, b in _bus_ports(n, m)]
-        if any(b in buses for b in delivers_to) and any(b not in buses and b not in elec for b in from_buses):
+        if any(b in buses for b in delivers_to) and any(
+            b not in buses and b not in elec for b in from_buses
+        ):
             return f"Link {m} delivers into it from outside"
     return None
 
@@ -620,7 +638,11 @@ def _bus_ports(n, link) -> list[tuple[int, str]]:
     links = n.links
     out = list(ins)
     for c in links.columns:
-        if c.startswith("bus") and c[3:].isdigit() and int(c[3:]) not in {k for k, _b in ins}:
+        if (
+            c.startswith("bus")
+            and c[3:].isdigit()
+            and int(c[3:]) not in {k for k, _b in ins}
+        ):
             bus = str(links.at[link, c] or "").strip()
             if bus:
                 out.append((int(c[3:]), bus))
@@ -642,9 +664,15 @@ def _net_coefs(n, cls, snapshots) -> tuple[dict[str, pd.Series], list[dict]]:
     """`_net_coef` of every net-cluster Link, and the clusters with a non-finite one (GK B N4): one source for the
     KPI and the row (N3)."""
     elec = _electrical_buses(n)
-    coef = {l: _net_coef(n, l, elec, snapshots) for c in cls["net_clusters"] for l in c["links"]}
+    coef = {
+        l: _net_coef(n, l, elec, snapshots)
+        for c in cls["net_clusters"]
+        for l in c["links"]
+    }
     unknown = [
-        c for c in cls["net_clusters"] if any(not np.isfinite(coef[l].to_numpy()).all() for l in c["links"])
+        c
+        for c in cls["net_clusters"]
+        if any(not np.isfinite(coef[l].to_numpy()).all() for l in c["links"])
     ]
     return coef, unknown
 
@@ -939,11 +967,18 @@ def renewable_fraction(
         out["reason"] = "the dispatch has missing values (NaN)"
         return out
     net_coef, unknown = _net_coefs(n, cls, sns)
-    bad = [l for c in unknown for l in c["links"] if not np.isfinite(net_coef[l].to_numpy()).all()]
+    bad = [
+        l
+        for c in unknown
+        for l in c["links"]
+        if not np.isfinite(net_coef[l].to_numpy()).all()
+    ]
     if bad:
         # GK B N4: an unknown efficiency is unknown, never 0.
         out["reason"] = (
-            "the efficiency of " + ", ".join(map(str, bad)) + " is missing or not finite"
+            "the efficiency of "
+            + ", ".join(map(str, bad))
+            + " is missing or not finite"
         )
         return out
     nonren = pd.Series(0.0, index=sns)

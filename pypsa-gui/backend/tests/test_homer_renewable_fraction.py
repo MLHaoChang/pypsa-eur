@@ -1861,7 +1861,9 @@ def _net_h2(n):
 
 def _net_dispatch(n, el=4.0, fc=2.0):
     """Electrolyser draws ``el`` MW; the fuel cell burns ``fc`` MW of H2 and returns η·fc = fc/2 MW."""
-    n.links_t.p0 = pd.DataFrame({"electrolyser": el, "fuel cell": fc}, index=n.snapshots)
+    n.links_t.p0 = pd.DataFrame(
+        {"electrolyser": el, "fuel cell": fc}, index=n.snapshots
+    )
     return n
 
 
@@ -1876,13 +1878,17 @@ def test_an_h2_bus_with_an_offtake_and_a_fuel_cell_counts_its_net_draw():
     assert "ambiguous_links" not in c and c["net_clusters"] == CLUSTER, c
     assert c["conversion_links"] == [] and c["storage_links"] == []
     kpi = renewable_fraction(n)
-    net = (4.0 - 0.5 * 2.0) * HOURS  # 72 MWh drawn from electricity, net of what the fuel cell returns
+    net = (
+        4.0 - 0.5 * 2.0
+    ) * HOURS  # 72 MWh drawn from electricity, net of what the fuel cell returns
     served = LOAD_MW * HOURS + net  # 312 MWh
     assert kpi["reason"] is None, kpi
     assert kpi["served_mwh"] == pytest.approx(served)
     assert kpi["conversion_mwh"] == pytest.approx(net)
     assert kpi["fraction"] == pytest.approx((served - 90.0) / served)
-    assert renewable_fraction_result(n, None, 0.5)["fraction"] == pytest.approx(kpi["fraction"])
+    assert renewable_fraction_result(n, None, 0.5)["fraction"] == pytest.approx(
+        kpi["fraction"]
+    )
     log = _with_row(_net_h2(_network()))
     assert not any("WARNING" in l and "electrolyser" in l for l in log), log
 
@@ -1917,8 +1923,13 @@ def test_two_electrolysers_on_one_h2_bus_are_one_cluster():
     n = _net_h2(_dispatched())
     n.add("Link", "electrolyser 2", bus0="ac", bus1="h2", p_nom=10.0, efficiency=0.7)
     c = classify(n)
-    assert c["net_clusters"] == [{"buses": ["h2"], "links": ["electrolyser", "electrolyser 2", "fuel cell"]}], c
-    n.links_t.p0 = pd.DataFrame({"electrolyser": 4.0, "electrolyser 2": 1.0, "fuel cell": 2.0}, index=n.snapshots)
+    assert c["net_clusters"] == [
+        {"buses": ["h2"], "links": ["electrolyser", "electrolyser 2", "fuel cell"]}
+    ], c
+    n.links_t.p0 = pd.DataFrame(
+        {"electrolyser": 4.0, "electrolyser 2": 1.0, "fuel cell": 2.0},
+        index=n.snapshots,
+    )
     assert renewable_fraction(n)["conversion_mwh"] == pytest.approx((5.0 - 1.0) * HOURS)
 
 
@@ -1926,7 +1937,15 @@ def test_a_reversible_bridge_link_is_signed_by_its_p0():
     n = _dispatched()
     n.add("Bus", "h2", carrier="H2")
     n.add("Load", "offtake", bus="h2", p_set=1.0)
-    n.add("Link", "h2 converter", bus0="ac", bus1="h2", p_nom=10.0, p_min_pu=-1.0, efficiency=1.0)
+    n.add(
+        "Link",
+        "h2 converter",
+        bus0="ac",
+        bus1="h2",
+        p_nom=10.0,
+        p_min_pu=-1.0,
+        efficiency=1.0,
+    )
     c = classify(n)
     assert c["net_clusters"] == [{"buses": ["h2"], "links": ["h2 converter"]}], c
     p0 = pd.Series([3.0] * 12 + [-1.0] * 12, index=n.snapshots)
@@ -1960,9 +1979,14 @@ def test_the_row_and_the_kpi_agree_on_a_net_cluster():
 @pytest.mark.parametrize(
     "stock",
     [
-        pytest.param(("Store", {"e_nom": 50.0, "e_initial": 50.0}), id="store-e_initial"),
         pytest.param(
-            ("StorageUnit", {"p_nom": 5.0, "max_hours": 10.0, "state_of_charge_initial": 20.0}),
+            ("Store", {"e_nom": 50.0, "e_initial": 50.0}), id="store-e_initial"
+        ),
+        pytest.param(
+            (
+                "StorageUnit",
+                {"p_nom": 5.0, "max_hours": 10.0, "state_of_charge_initial": 20.0},
+            ),
             id="storage-unit-soc-initial",
         ),
     ],
@@ -1988,10 +2012,19 @@ def test_a_net_cluster_that_can_start_full_fails_closed(stock):
 @pytest.mark.parametrize(
     "comp, kw",
     [
-        pytest.param("Store", {"e_nom": 50.0, "e_initial": 50.0, "e_cyclic": True}, id="store-cyclic"),
+        pytest.param(
+            "Store",
+            {"e_nom": 50.0, "e_initial": 50.0, "e_cyclic": True},
+            id="store-cyclic",
+        ),
         pytest.param(
             "StorageUnit",
-            {"p_nom": 5.0, "max_hours": 10.0, "state_of_charge_initial": 20.0, "cyclic_state_of_charge": True},
+            {
+                "p_nom": 5.0,
+                "max_hours": 10.0,
+                "state_of_charge_initial": 20.0,
+                "cyclic_state_of_charge": True,
+            },
             id="storage-unit-cyclic",
         ),
     ],
@@ -2009,7 +2042,11 @@ def test_a_cyclic_stock_keeps_the_cluster_closed(comp, kw):
         pytest.param({"e_cyclic": True}, False, id="cyclic-over-the-horizon"),
         pytest.param({"e_cyclic_per_period": True}, True, id="cyclic-per-period"),
         pytest.param({"e_initial": 0.0}, False, id="empty-once"),
-        pytest.param({"e_initial": 0.0, "e_initial_per_period": True}, True, id="empty-each-period"),
+        pytest.param(
+            {"e_initial": 0.0, "e_initial_per_period": True},
+            True,
+            id="empty-each-period",
+        ),
     ],
 )
 def test_on_a_multi_period_network_a_stock_must_be_per_period(kw, closed):
@@ -2021,7 +2058,9 @@ def test_on_a_multi_period_network_a_stock_must_be_per_period(kw, closed):
     for k, v in kw.items():
         n.stores.loc["h2tank", k] = v
     c = classify(n)
-    assert (c["net_clusters"] == CLUSTER) is closed and (c["open_clusters"] == []) is closed, c
+    assert (c["net_clusters"] == CLUSTER) is closed and (
+        c["open_clusters"] == []
+    ) is closed, c
 
 
 def test_a_nan_efficiency_in_a_net_cluster_is_unknown_and_the_row_refuses_it():
@@ -2043,7 +2082,9 @@ def test_a_time_varying_efficiency_is_read_per_snapshot():
     eta = pd.Series([0.5] * 12 + [0.25] * 12, index=n.snapshots)
     n.links_t.efficiency = pd.DataFrame({"fuel cell": eta})
     kpi = renewable_fraction(n)
-    assert kpi["conversion_mwh"] == pytest.approx(4.0 * HOURS - 2.0 * (0.5 * 12 + 0.25 * 12))
+    assert kpi["conversion_mwh"] == pytest.approx(
+        4.0 * HOURS - 2.0 * (0.5 * 12 + 0.25 * 12)
+    )
 
 
 def test_a_multi_port_link_counts_only_its_electrical_ports():
@@ -2053,13 +2094,26 @@ def test_a_multi_port_link_counts_only_its_electrical_ports():
     n.add("Bus", "ac2", carrier="AC")
     n.links.loc["fuel cell", "bus2"] = "heat"
     n.links.loc["fuel cell", "efficiency2"] = 0.3
-    n.add("Link", "chp cell", bus0="h2", bus1="ac", bus2="ac2", p_nom=5.0, efficiency=0.4, efficiency2=0.1)
-    n.links_t.p0 = pd.DataFrame({"electrolyser": 4.0, "fuel cell": 2.0, "chp cell": 1.0}, index=n.snapshots)
+    n.add(
+        "Link",
+        "chp cell",
+        bus0="h2",
+        bus1="ac",
+        bus2="ac2",
+        p_nom=5.0,
+        efficiency=0.4,
+        efficiency2=0.1,
+    )
+    n.links_t.p0 = pd.DataFrame(
+        {"electrolyser": 4.0, "fuel cell": 2.0, "chp cell": 1.0}, index=n.snapshots
+    )
     assert classify(n)["net_clusters"] == [
         {"buses": ["h2", "heat"], "links": ["chp cell", "electrolyser", "fuel cell"]}
     ]
     kpi = renewable_fraction(n)
-    assert kpi["conversion_mwh"] == pytest.approx((4.0 - 0.5 * 2.0 - 0.5 * 1.0) * HOURS), kpi
+    assert kpi["conversion_mwh"] == pytest.approx(
+        (4.0 - 0.5 * 2.0 - 0.5 * 1.0) * HOURS
+    ), kpi
 
 
 def test_a_source_link_into_a_net_cluster_stays_gross_and_opens_the_cluster():
@@ -2070,10 +2124,21 @@ def test_a_source_link_into_a_net_cluster_stays_gross_and_opens_the_cluster():
     n.add("Bus", "gas", carrier="gas")
     n.add("Carrier", "gas")
     n.add("Generator", "gas well", bus="gas", carrier="gas", p_nom=50.0)
-    n.add("Link", "chp", bus0="gas", bus1="ac", bus2="h2", p_nom=10.0, efficiency=0.4, efficiency2=0.2)
+    n.add(
+        "Link",
+        "chp",
+        bus0="gas",
+        bus1="ac",
+        bus2="h2",
+        p_nom=10.0,
+        efficiency=0.4,
+        efficiency2=0.2,
+    )
     c = classify(n)
     assert c["source_links"] == ["chp"], c
-    assert c["net_clusters"] == [] and all("chp" not in o["links"] for o in c["open_clusters"]), c
+    assert c["net_clusters"] == [] and all(
+        "chp" not in o["links"] for o in c["open_clusters"]
+    ), c
     assert "chp" in c["open_clusters"][0]["why"], c
     assert renewable_fraction(n)["fraction"] is None
 
@@ -2099,10 +2164,21 @@ def test_a_conversion_link_touching_a_cluster_is_not_netted_too():
     n = _net_dispatch(_net_h2(_dispatched()))
     n.add("Bus", "ch4", carrier="gas")
     n.add("Load", "gas offtake", bus="ch4", p_set=1.0)
-    n.add("Link", "methanation", bus0="h2", bus1="ch4", bus2="ac", p_nom=5.0, efficiency=0.8, efficiency2=-0.5)
+    n.add(
+        "Link",
+        "methanation",
+        bus0="h2",
+        bus1="ch4",
+        bus2="ac",
+        p_nom=5.0,
+        efficiency=0.8,
+        efficiency2=-0.5,
+    )
     c = classify(n)
     assert "methanation" in c["conversion_links"], c
-    assert all("methanation" not in x["links"] for x in c["net_clusters"] + c["open_clusters"]), c
+    assert all(
+        "methanation" not in x["links"] for x in c["net_clusters"] + c["open_clusters"]
+    ), c
 
 
 @pytest.mark.parametrize(
@@ -2117,14 +2193,24 @@ def test_a_generator_injecting_into_a_cluster_opens_it(gen):
     n = _net_dispatch(_net_h2(_dispatched()))
     n.add("Generator", "h2 gen", bus="h2", **gen)
     c = classify(n)
-    assert c["net_clusters"] == [] and any("h2 gen" in o["why"] for o in c["open_clusters"]), c
+    assert c["net_clusters"] == [] and any(
+        "h2 gen" in o["why"] for o in c["open_clusters"]
+    ), c
     assert renewable_fraction(n)["fraction"] is None
 
 
 def test_a_storage_unit_with_inflow_opens_the_cluster():
     n = _net_dispatch(_net_h2(_dispatched()))
-    n.add("StorageUnit", "cavern", bus="h2", carrier="H2", p_nom=5.0, max_hours=10.0,
-          cyclic_state_of_charge=True, inflow=3.0)
+    n.add(
+        "StorageUnit",
+        "cavern",
+        bus="h2",
+        carrier="H2",
+        p_nom=5.0,
+        max_hours=10.0,
+        cyclic_state_of_charge=True,
+        inflow=3.0,
+    )
     c = classify(n)
     assert c["net_clusters"] == [] and "inflow" in c["open_clusters"][0]["why"], c
 
@@ -2135,9 +2221,20 @@ def test_a_bridge_link_fed_from_a_fuel_bus_opens_the_cluster():
     n = _net_dispatch(_net_h2(_dispatched()))
     n.add("Bus", "gas", carrier="gas")
     n.add("Store", "gas tank", bus="gas", carrier="gas", e_nom=100.0, e_initial=100.0)
-    n.add("Link", "smr", bus0="gas", bus1="h2", bus2="ac", p_nom=5.0, efficiency=0.7, efficiency2=-0.05)
+    n.add(
+        "Link",
+        "smr",
+        bus0="gas",
+        bus1="h2",
+        bus2="ac",
+        p_nom=5.0,
+        efficiency=0.7,
+        efficiency2=-0.05,
+    )
     c = classify(n)
-    assert c["net_clusters"] == [] and any("smr" in o["why"] for o in c["open_clusters"]), c
+    assert c["net_clusters"] == [] and any(
+        "smr" in o["why"] for o in c["open_clusters"]
+    ), c
 
 
 def test_a_link_touching_two_clusters_merges_them():
@@ -2149,7 +2246,15 @@ def test_a_link_touching_two_clusters_merges_them():
         n.add("Load", f"offtake {b}", bus=b, p_set=1.0)
         n.add("Link", f"el {b}", bus0="ac", bus1=b, p_nom=10.0, efficiency=0.7)
         n.add("Link", f"fc {b}", bus0=b, bus1="ac", p_nom=5.0, efficiency=0.5)
-    n.add("Link", "pipe", bus0="h2a", bus1="h2b", p_nom=10.0, p_min_pu=-1.0, efficiency=1.0)
+    n.add(
+        "Link",
+        "pipe",
+        bus0="h2a",
+        bus1="h2b",
+        p_nom=10.0,
+        p_min_pu=-1.0,
+        efficiency=1.0,
+    )
     c = classify(n)
     assert c["open_clusters"] == [], c
     assert c["net_clusters"] == [
@@ -2168,21 +2273,37 @@ def test_two_h2_buses_joined_by_a_pipe_are_one_cluster_with_each_link_once():
     n.add("Link", "pipe", bus0="h2a", bus1="h2b", p_nom=10.0, efficiency=1.0)
     n.add("Link", "fuel cell", bus0="h2b", bus1="ac", p_nom=5.0, efficiency=0.5)
     c = classify(n)
-    assert c["net_clusters"] == [{"buses": ["h2a", "h2b"], "links": ["el a", "el b", "fuel cell"]}], c
-    n.links_t.p0 = pd.DataFrame({"el a": 2.0, "el b": 1.0, "pipe": 1.4, "fuel cell": 2.0}, index=n.snapshots)
+    assert c["net_clusters"] == [
+        {"buses": ["h2a", "h2b"], "links": ["el a", "el b", "fuel cell"]}
+    ], c
+    n.links_t.p0 = pd.DataFrame(
+        {"el a": 2.0, "el b": 1.0, "pipe": 1.4, "fuel cell": 2.0}, index=n.snapshots
+    )
     assert renewable_fraction(n)["conversion_mwh"] == pytest.approx((3.0 - 1.0) * HOURS)
 
 
 @pytest.mark.parametrize(
     "comp,kw",
     [
-        pytest.param("Store", {"carrier": "H2", "e_nom": 50.0, "e_initial": 50.0}, id="full-store"),
+        pytest.param(
+            "Store",
+            {"carrier": "H2", "e_nom": 50.0, "e_initial": 50.0},
+            id="full-store",
+        ),
         pytest.param(
             "StorageUnit",
-            {"carrier": "H2", "p_nom": 5.0, "max_hours": 10.0, "cyclic_state_of_charge": True, "inflow": 3.0},
+            {
+                "carrier": "H2",
+                "p_nom": 5.0,
+                "max_hours": 10.0,
+                "cyclic_state_of_charge": True,
+                "inflow": 3.0,
+            },
             id="inflow-su",
         ),
-        pytest.param("Generator", {"carrier": "solar", "p_nom": 5.0}, id="injecting-gen"),
+        pytest.param(
+            "Generator", {"carrier": "solar", "p_nom": 5.0}, id="injecting-gen"
+        ),
     ],
 )
 def test_an_inactive_component_on_a_cluster_bus_keeps_it_closed(comp, kw):
@@ -2196,8 +2317,16 @@ def test_an_inactive_component_on_a_cluster_bus_keeps_it_closed(comp, kw):
 def test_a_storage_unit_with_an_inflow_series_opens_the_cluster():
     """GK B N1 (mutant killer): an inflow in time, with a zero static inflow, opens it too."""
     n = _net_dispatch(_net_h2(_dispatched()))
-    n.add("StorageUnit", "cavern", bus="h2", carrier="H2", p_nom=5.0, max_hours=10.0,
-          cyclic_state_of_charge=True, inflow=pd.Series(0.0, index=n.snapshots))
+    n.add(
+        "StorageUnit",
+        "cavern",
+        bus="h2",
+        carrier="H2",
+        p_nom=5.0,
+        max_hours=10.0,
+        cyclic_state_of_charge=True,
+        inflow=pd.Series(0.0, index=n.snapshots),
+    )
     assert classify(n)["open_clusters"] == [], classify(n)
     n.storage_units_t.inflow.iloc[3, 0] = 2.0
     c = classify(n)
@@ -2210,13 +2339,24 @@ def test_a_reversible_link_from_a_fuel_bus_opens_the_cluster(p_min_pu, opens):
     bus only when it can run backwards."""
     n = _net_dispatch(_net_h2(_dispatched()))
     n.add("Bus", "gas", carrier="gas")
-    n.add("Link", "cofired", bus0="gas", bus1="ac", bus2="h2", p_nom=5.0, p_min_pu=p_min_pu,
-          efficiency=0.4, efficiency2=-0.1)
+    n.add(
+        "Link",
+        "cofired",
+        bus0="gas",
+        bus1="ac",
+        bus2="h2",
+        p_nom=5.0,
+        p_min_pu=p_min_pu,
+        efficiency=0.4,
+        efficiency2=-0.1,
+    )
     c = classify(n)
     if opens:
         assert c["net_clusters"] == [] and "cofired" in c["open_clusters"][0]["why"], c
     else:
-        assert c["open_clusters"] == [] and [x["buses"] for x in c["net_clusters"]] == [["h2"]], c
+        assert c["open_clusters"] == [] and [x["buses"] for x in c["net_clusters"]] == [
+            ["h2"]
+        ], c
 
 
 def test_three_clusters_joined_in_a_chain_by_two_input_links_merge_into_one():
@@ -2227,12 +2367,33 @@ def test_three_clusters_joined_in_a_chain_by_two_input_links_merge_into_one():
         n.add("Bus", b, carrier="H2")
         n.add("Load", f"offtake {b}", bus=b, p_set=1.0)
         n.add("Link", f"el {b}", bus0="ac", bus1=b, p_nom=10.0, efficiency=0.7)
-    n.add("Link", "fc ab", bus0="h2a", bus1="ac", bus2="h2b", p_nom=5.0, efficiency=0.5, efficiency2=-0.5)
-    n.add("Link", "fc bc", bus0="h2b", bus1="ac", bus2="h2c", p_nom=5.0, efficiency=0.5, efficiency2=-0.5)
+    n.add(
+        "Link",
+        "fc ab",
+        bus0="h2a",
+        bus1="ac",
+        bus2="h2b",
+        p_nom=5.0,
+        efficiency=0.5,
+        efficiency2=-0.5,
+    )
+    n.add(
+        "Link",
+        "fc bc",
+        bus0="h2b",
+        bus1="ac",
+        bus2="h2c",
+        p_nom=5.0,
+        efficiency=0.5,
+        efficiency2=-0.5,
+    )
     c = classify(n)
     assert c["open_clusters"] == [], c
     assert c["net_clusters"] == [
-        {"buses": ["h2a", "h2b", "h2c"], "links": ["el h2a", "el h2b", "el h2c", "fc ab", "fc bc"]}
+        {
+            "buses": ["h2a", "h2b", "h2c"],
+            "links": ["el h2a", "el h2b", "el h2c", "fc ab", "fc bc"],
+        }
     ], c
 
 
@@ -2243,7 +2404,9 @@ def test_a_net_cluster_alone_carries_the_note_and_the_hint():
     c = classify(n)
     assert c["conversion_links"] == [] and c["net_clusters"] == CLUSTER, c
     assert renewable_fraction(n)["note"] == CONVERSION_NOTE
-    lines = infeasibility_lines(_net_h2(_network(pv_max=5.0)), SolverConfig(min_renewable_fraction=0.9))
+    lines = infeasibility_lines(
+        _net_h2(_network(pv_max=5.0)), SolverConfig(min_renewable_fraction=0.9)
+    )
     assert len(lines) == 1 and "of what the conversion units draw" in lines[0], lines
 
 
@@ -2259,7 +2422,16 @@ def test_an_unrelated_cluster_stays_apart_while_a_joined_pair_merges():
         n.add("Bus", b, carrier="H2")
         n.add("Load", f"offtake {b}", bus=b, p_set=1.0)
         n.add("Link", f"el {b}", bus0="ac", bus1=b, p_nom=10.0, efficiency=0.7)
-    n.add("Link", "fc bc", bus0="h2b", bus1="ac", bus2="h2c", p_nom=5.0, efficiency=0.5, efficiency2=-0.5)
+    n.add(
+        "Link",
+        "fc bc",
+        bus0="h2b",
+        bus1="ac",
+        bus2="h2c",
+        p_nom=5.0,
+        efficiency=0.5,
+        efficiency2=-0.5,
+    )
     c = classify(n)
     assert c["open_clusters"] == [], c
     assert c["net_clusters"] == [
@@ -2271,8 +2443,16 @@ def test_an_unrelated_cluster_stays_apart_while_a_joined_pair_merges():
 def test_a_storage_unit_with_inflow_off_the_cluster_keeps_it_closed():
     """GK B N1 (mutant killer): a hydro unit with inflow on the site bus is no opening of the H2 cluster."""
     n = _net_dispatch(_net_h2(_dispatched()))
-    n.add("StorageUnit", "hydro", bus="ac", carrier="hydro", p_nom=5.0, max_hours=10.0,
-          cyclic_state_of_charge=True, inflow=3.0)
+    n.add(
+        "StorageUnit",
+        "hydro",
+        bus="ac",
+        carrier="hydro",
+        p_nom=5.0,
+        max_hours=10.0,
+        cyclic_state_of_charge=True,
+        inflow=3.0,
+    )
     c = classify(n)
     assert c["open_clusters"] == [] and c["net_clusters"] == CLUSTER, c
 
@@ -2280,7 +2460,9 @@ def test_a_storage_unit_with_inflow_off_the_cluster_keeps_it_closed():
 def _alternating_net(n, el, fc):
     """Electrolyser ``el`` MW in even hours, fuel cell burning ``fc`` MW of H2 (returning fc/2) in odd ones."""
     even = pd.Series([1.0, 0.0] * (HOURS // 2), index=n.snapshots)
-    n.links_t.p0 = pd.DataFrame({"electrolyser": el * even, "fuel cell": fc * (1.0 - even)})
+    n.links_t.p0 = pd.DataFrame(
+        {"electrolyser": el * even, "fuel cell": fc * (1.0 - even)}
+    )
     return n
 
 
@@ -2340,7 +2522,9 @@ def test_a_negative_generator_offtake_with_a_fuel_cell_counts_its_net_draw(offta
     assert c["net_clusters"] == CLUSTER, c
     assert c["conversion_links"] == [] and c["storage_links"] == []
     kpi = renewable_fraction(_net_dispatch(n))
-    assert kpi["reason"] is None and kpi["conversion_mwh"] == pytest.approx(3.0 * HOURS), kpi
+    assert kpi["reason"] is None and kpi["conversion_mwh"] == pytest.approx(
+        3.0 * HOURS
+    ), kpi
 
 
 def test_a_negative_generator_offtake_given_in_time_is_a_sink():
@@ -2635,7 +2819,10 @@ def test_a_reversible_converter_is_storage_or_a_net_cluster_never_use():
     assert classify(n)["storage_links"] == ["hp"]
     n.add("Load", "space", bus="heat", p_set=1.0)
     c = classify(n)
-    assert c["net_clusters"] == [{"buses": ["heat"], "links": ["hp"]}] and c["conversion_links"] == []
+    assert (
+        c["net_clusters"] == [{"buses": ["heat"], "links": ["hp"]}]
+        and c["conversion_links"] == []
+    )
 
 
 def test_an_export_link_is_not_use():
@@ -2942,7 +3129,10 @@ def test_each_site_template_classifies_its_conversion_links(tid):
     T = _templates()
     n = T.BUILDERS[tid]()
     c = classify(n)
-    conv, amb = set(c["conversion_links"]), {l for cl in c["net_clusters"] for l in cl["links"]}
+    conv, amb = (
+        set(c["conversion_links"]),
+        {l for cl in c["net_clusters"] for l in cl["links"]},
+    )
     if tid in ("eh_h2_hub", "eh_h2_hub_staged"):
         # Electrolyser into an H2 bus with both an offtake and a fuel cell: a net cluster (homer-parity 06).
         assert {l for l in n.links.index if l.startswith("electrolyser")} <= amb, c
