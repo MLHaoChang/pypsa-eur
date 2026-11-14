@@ -50,7 +50,9 @@ def _assumed_rows(ws, r: int, assumed: list[dict] | None) -> int:
     """Every default the case relies on (business case 14): value, unit, source and year,
     one row each. None is said, never left blank. Returns the last row written."""
     heading(ws, r, ["Assumed default", "Value", "Unit", "Source and year"])
-    if assumed is None:  # a report stored before the list existed: unknown, never "none"
+    if (
+        assumed is None
+    ):  # a report stored before the list existed: unknown, never "none"
         r += 1
         put(ws, r, 1, None)
         put(ws, r, 4, RUN_THE_BUSINESS_CASE + " again to list them")

@@ -206,7 +206,9 @@ def pinned_pack(template_id: str, *, directory: pathlib.Path = PRESETS_DIR) -> s
     return _pack(_for_template(owner, directory)).stamp
 
 
-def offered_labels(template_id: str, *, directory: pathlib.Path = PRESETS_DIR) -> list[str]:
+def offered_labels(
+    template_id: str, *, directory: pathlib.Path = PRESETS_DIR
+) -> list[str]:
     """The labels of the offered rows the template (or the generic site) starts from."""
     owner = template_id if has_preset(template_id, directory=directory) else GENERIC
     return [o.label for o in _for_template(owner, directory).offered]

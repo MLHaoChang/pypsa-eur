@@ -204,12 +204,22 @@ def assumed_defaults(inputs: BusinessCaseInputs) -> list[dict]:
     out = []
     for ln in inputs.lines:
         for col, d in ln.assumed.items():
-            out.append({
-                "line": ln.name, "kind": ln.kind, "column": col, "value": d.value,
-                "unit": d.unit, "source": d.source, "source_year": d.source_year,
-                "currency": d.currency, "money_year": d.money_year, "pack": d.pack,
-                "range_low": d.range_low, "range_high": d.range_high,
-            })
+            out.append(
+                {
+                    "line": ln.name,
+                    "kind": ln.kind,
+                    "column": col,
+                    "value": d.value,
+                    "unit": d.unit,
+                    "source": d.source,
+                    "source_year": d.source_year,
+                    "currency": d.currency,
+                    "money_year": d.money_year,
+                    "pack": d.pack,
+                    "range_low": d.range_low,
+                    "range_high": d.range_high,
+                }
+            )
     return out
 
 

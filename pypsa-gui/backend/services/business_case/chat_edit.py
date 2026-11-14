@@ -254,8 +254,12 @@ def _not_from_user(line: str, year, reason: str, message: str) -> None:
 def _citation(citations, line: str, year, column: str = "price") -> dict | None:
     """The citation of one cell; a citation that names no `column` is a price's."""
     for c in citations or []:
-        if (isinstance(c, dict) and c.get("line") == line and c.get("year") == year
-                and (c.get("column") or "price") == column):
+        if (
+            isinstance(c, dict)
+            and c.get("line") == line
+            and c.get("year") == year
+            and (c.get("column") or "price") == column
+        ):
             return c
     return None
 
@@ -298,9 +302,14 @@ def _cited(
     c = _citation(citations, line_name, year, column)
     if c is None:
         _not_from_user(
-            line_name, year, "no_citation",
-            ("it is new or changed and cites no source." if column == "price" else
-             f"its {column} replaces a pack default and cites no source."),
+            line_name,
+            year,
+            "no_citation",
+            (
+                "it is new or changed and cites no source."
+                if column == "price"
+                else f"its {column} replaces a pack default and cites no source."
+            ),
         )
     field = {
         "label": f"{line_name} {column.replace('_', ' ')}",
@@ -312,8 +321,10 @@ def _cited(
     if column == "price":
         currency, currency_year = money
         field["unit_storage"] = _price_unit(line, currency)
-        field["money"] = {"currency": currency,
-                          "money_year": line.get("money_year") or currency_year}
+        field["money"] = {
+            "currency": currency,
+            "money_year": line.get("money_year") or currency_year,
+        }
     else:
         field["unit_storage"] = unit or ""
     cite = {k: v for k, v in c.items() if k not in ("line", "year", "column")}
@@ -385,8 +396,17 @@ def _line_rows(
         )
         if claim and not price:
             year = int(path[1]) if len(path) == 2 else None
-            got = _cited(name, line, year, n, citations, host, None,
-                         column=path[0].removesuffix("_by_year"), unit=claimed[path])
+            got = _cited(
+                name,
+                line,
+                year,
+                n,
+                citations,
+                host,
+                None,
+                column=path[0].removesuffix("_by_year"),
+                unit=claimed[path],
+            )
             row.update({"value_source": got["price_source"], "source": got["source"]})
         elif price and claim and not differs:
             year = int(path[1]) if path[0] == _PRICE_BY_YEAR else None
@@ -411,8 +431,13 @@ def _currency(stored_finance) -> str | None:
         return None
 
 
-def rows(old: dict | None, new: dict | None, citations, stored_finance,
-         claimed: dict[str, dict[tuple, str]] | None = None) -> list[dict]:
+def rows(
+    old: dict | None,
+    new: dict | None,
+    citations,
+    stored_finance,
+    claimed: dict[str, dict[tuple, str]] | None = None,
+) -> list[dict]:
     """The card's rows: the diff of `old` (stored) against `new` (None: cleared).
     `claimed` maps a line to its cells a `set` patch claimed from a pack default."""
     claimed = claimed or {}
@@ -439,8 +464,11 @@ def rows(old: dict | None, new: dict | None, citations, stored_finance,
         o, n = old_lines.get(name), new_lines.get(name)
         if o is not None and n is not None and _equal(o, n):
             continue
-        out.extend(_line_rows(name, o, n, citations, host, money_reader, currency,
-                              claimed.get(name)))
+        out.extend(
+            _line_rows(
+                name, o, n, citations, host, money_reader, currency, claimed.get(name)
+            )
+        )
     return out
 
 
@@ -472,7 +500,9 @@ def _set_number(where: str, v, *, year: bool = False):
     if v is None:
         return None
     try:  # an int past float range overflows: a typed refusal, never a 500
-        ok = not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+        ok = (
+            not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+        )
     except OverflowError:
         ok = False
     if not ok:
@@ -524,14 +554,18 @@ def apply_set(old: dict | None, patch) -> tuple[dict, dict[str, dict[tuple, str]
             continue
         line = lines.get(key)
         if line is None:
-            _set_invalid(f"no stored line is named {str(key)[:80]!r}; read the names with "
-                         "get_business_case(detail='inputs')")
+            _set_invalid(
+                f"no stored line is named '{str(key)[:80]}'; read the names with "
+                "get_business_case(detail='inputs')"
+            )
         if not isinstance(cells, dict) or not cells:
             _set_invalid(f"{str(key)[:80]}: an object {{column: value}}")
         bad = sorted(str(c) for c in cells if c not in SET_COLUMNS)
         if bad:
-            _set_invalid(f"{str(key)[:80]}: `set` changes only {', '.join(SET_COLUMNS)}; "
-                         f"not {', '.join(bad)[:120]}")
+            _set_invalid(
+                f"{str(key)[:80]}: `set` changes only {', '.join(SET_COLUMNS)}; "
+                f"not {', '.join(bad)[:120]}"
+            )
         assumed = dict(line.get("assumed") or {})
         dropped = {}
         for col, v in cells.items():
@@ -552,8 +586,11 @@ def apply_set(old: dict | None, patch) -> tuple[dict, dict[str, dict[tuple, str]
                 # read in it only on the user's word (S3).
                 cols.add("money_year")
             for col in sorted(cols):
-                cell_unit = "year" if col == "money_year" else (
-                    "" if col.startswith("price") else unit)
+                cell_unit = (
+                    "year"
+                    if col == "money_year"
+                    else ("" if col.startswith("price") else unit)
+                )
                 if col.endswith("_by_year"):
                     for y in line.get(col) or {}:
                         mine[(col, y)] = cell_unit
@@ -574,8 +611,10 @@ def plan(args: dict) -> dict:
     patch = args.get("set")
     if patch is not None:
         if args.get("business_case") is not None or args.get("clear"):
-            _set_invalid("`set` patches the stored lines: pass no `business_case` and no "
-                         "clear=true with it")
+            _set_invalid(
+                "`set` patches the stored lines: pass no `business_case` and no "
+                "clear=true with it"
+            )
         new_raw, tag = None, request(args.get("if_match"), {}, False)[1]
     else:
         new_raw, tag = request(
