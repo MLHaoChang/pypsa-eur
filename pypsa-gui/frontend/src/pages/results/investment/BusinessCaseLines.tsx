@@ -452,7 +452,7 @@ export default function BusinessCaseLines() {
             <table className="text-[11px] w-full" data-testid="bc-table">
               <thead>
                 <tr className="text-left text-muted">
-                  <th className="font-normal px-1 sticky left-0 bg-bg z-10">Name</th>
+                  <th className="font-normal px-1 sticky left-0 bg-bg z-10 min-w-[11rem] shadow-[1px_0_0_var(--color-border)]">Name</th>
                   {['Kind', 'Category', 'Quantity from', 'Quantity', 'Unit', 'Price', 'Escalation', 'Years', 'Basis']
                     .map(h => <th key={h} className="font-normal px-1">{h}</th>)}
                   <th className="font-normal px-1"><span className="sr-only">Remove</span></th>
@@ -471,7 +471,7 @@ export default function BusinessCaseLines() {
                   return (
                     <Fragment key={i}>
                       <tr className="align-top border-t border-border" data-testid="bc-row">
-                        <td className="px-1 sticky left-0 bg-bg z-10 whitespace-nowrap border-r border-border">
+                        <td className="px-1 sticky left-0 bg-bg z-10 whitespace-nowrap min-w-[11rem] shadow-[1px_0_0_var(--color-border)]">
                           <button type="button" className={ACTION + ' mr-1'} aria-expanded={open.has(i)}
                                   aria-label={`${open.has(i) ? 'Hide' : 'Show'} details of ${ln.name}`}
                                   onClick={() => toggle(i)}>{open.has(i) ? '▾' : '▸'}</button>
