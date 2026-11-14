@@ -3,7 +3,7 @@
 
 # 10 — P&L and KPI view
 
-Status: ready-for-agent (blocked by 08; Opus; UX plan first, GK B for figures)
+Status: done (#1537)
 Type: task
 Blocked by: 08
 Gated: yes (UX; GK B for the figures)
