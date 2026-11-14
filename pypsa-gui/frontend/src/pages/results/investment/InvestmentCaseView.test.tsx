@@ -160,7 +160,7 @@ describe('InvestmentCaseView', () => {
     renderView()
     await screen.findByTestId('ic-report')
     expect(screen.getByTestId('ic-stale').textContent)
-      .toMatch(/Stale: the campus study, the owner assets' investment columns changed/)
+      .toMatch(/Out of date: the campus study, the owner assets' investment columns changed/)
   })
 
   it('a comparison baseline that could not run is said beside the headlines (#283 review)', async () => {
@@ -241,7 +241,7 @@ describe('InvestmentCaseView', () => {
     api.getReport.mockResolvedValue(structuredClone(REPORT))
     const { container } = renderView()
     await screen.findByTestId('ic-report')
-    expect(screen.getByTestId('ic-stale').textContent).toMatch(/Stale: finance, value flows changed/)
+    expect(screen.getByTestId('ic-stale').textContent).toMatch(/Out of date: finance, value flows changed/)
 
     const h = (id: string) => screen.getByTestId(`ic-headline-${id}`).textContent ?? ''
     expect(h('project_irr_pre_tax')).toBe('8.50 %')
@@ -532,7 +532,7 @@ describe('InvestmentCaseView: campus electrical equipment (campus-IC 02/05)', ()
       extra_assets: [campusAsset('campus:TR_132_33_40#1')],
       campus_study: { study_method: 'least_cost', unresolved: [] } }))
     renderView()
-    expect((await screen.findByTestId('ic-stale')).textContent).toMatch(/Stale: the campus study changed/)
+    expect((await screen.findByTestId('ic-stale')).textContent).toMatch(/Out of date: the campus study changed/)
     // No freshness line of the block's own.
     expect(within(screen.getByTestId('ic-campus')).queryByText(/stale|changed|since/i)).toBeNull()
   })

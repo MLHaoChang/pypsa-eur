@@ -480,7 +480,7 @@ export default function InvestmentCaseView() {
         <p role="alert" className="text-warn" data-testid="ic-stale">
           {uncheckableReason(staleness.reason)
             ? <>Unconfirmed: {uncheckableReason(staleness.reason)}.</>
-            : <>Stale: {staleness.changed.length
+            : <>Out of date: {staleness.changed.length
                 ? `${staleness.changed.map(stalePartLabel).join(', ')} changed`
                 : 'the finance inputs, the value flows, the commercial config, the solver config, the dispatch, '
                   + "a pack, the owner assets' investment columns or the campus study changed"}
