@@ -1746,7 +1746,10 @@ def test_the_co2_cap_check_reads_only_an_emitting_curve_under_a_cap():
 
 # ── GK B F1: a generator without a curve keeps master's `/ efficiency`, to the last bit ──────────────────────
 
-INEXACT_CO2, INEXACT_EFF = 0.187, 0.4  # 0.187 / 0.4 != 0.187 * (1 / 0.4) in floating point
+INEXACT_CO2, INEXACT_EFF = (
+    0.187,
+    0.4,
+)  # 0.187 / 0.4 != 0.187 * (1 / 0.4) in floating point
 
 
 def _plain_emitter(periods=False):
@@ -1757,7 +1760,15 @@ def _plain_emitter(periods=False):
         n.investment_period_weightings.loc[:, ["objective", "years"]] = 1.0
     n.add("Bus", "el")
     n.add("Carrier", "gas", co2_emissions=INEXACT_CO2)
-    n.add("Generator", "plain", bus="el", carrier="gas", p_nom=10.0, efficiency=INEXACT_EFF, marginal_cost=3.0)
+    n.add(
+        "Generator",
+        "plain",
+        bus="el",
+        carrier="gas",
+        p_nom=10.0,
+        efficiency=INEXACT_EFF,
+        marginal_cost=3.0,
+    )
     return n
 
 
@@ -1769,11 +1780,20 @@ def test_the_lp_co2_adder_of_a_plain_emitter_is_bit_identical_to_master():
     assert INEXACT_CO2 / INEXACT_EFF != INEXACT_CO2 * (1.0 / INEXACT_EFF)
     n = _plain_emitter()
     with PyPSAService.solving_context(ProjectContext(network=n, loaded_project="f1")):
-        restore, _ = _apply_modelling_assumptions(n, SolverConfig(co2_price=100.0), lambda msg: None)
-        assert n.generators.at["plain", "marginal_cost"] == 3.0 + INEXACT_CO2 * 100.0 / INEXACT_EFF
+        restore, _ = _apply_modelling_assumptions(
+            n, SolverConfig(co2_price=100.0), lambda msg: None
+        )
+        assert (
+            n.generators.at["plain", "marginal_cost"]
+            == 3.0 + INEXACT_CO2 * 100.0 / INEXACT_EFF
+        )
         restore()
     n = _plain_emitter(periods=True)
-    cfg = SolverConfig(co2_price=100.0, co2_price_per_period={2030: 70.0, 2035: 90.0}, multi_investment_periods=True)
+    cfg = SolverConfig(
+        co2_price=100.0,
+        co2_price_per_period={2030: 70.0, 2035: 90.0},
+        multi_investment_periods=True,
+    )
     with PyPSAService.solving_context(ProjectContext(network=n, loaded_project="f1")):
         restore, _ = _apply_modelling_assumptions(n, cfg, lambda msg: None)
         mc = n.generators_t.marginal_cost["plain"]
