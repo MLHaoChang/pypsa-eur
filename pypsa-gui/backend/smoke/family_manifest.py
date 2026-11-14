@@ -750,7 +750,11 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d21_report_gates.py::test_a_deleted_headline_table_is_recorded',
              B + 'test_lc43_d21_report_gates.py::test_a_table_turned_into_its_siblings_copy_keeps_no_wrong_caption',
              B + 'test_lc43_d21_report_gates.py::test_two_swapped_tables_keep_their_own_captions_and_the_second_is_withheld'),
-    _pending('LC-D21.stale_report', 'a report generated or exported after its study changed is neither refused nor flagged (only the IC case note): no stale gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _covered('LC-D21.stale_report', 'owner decision LC48B-STALE-1: a generated report exports; a network edit alone leaves its evidence and the export open; after the study is re-run with MC LOLE 4.50 h/yr '
+             'exporting it (by id and by default) is 409 report_stale with tests/lc43_gates.py state unchanged; a report generated after the change exports with MC LOLE 4.50 h/yr while the old one stays report_stale',
+             'generate_report export_report_docx get_report_table update_component',
+             B + 'test_lc48b_d21_report_stale.py::test_a_report_exports_until_its_study_changes',
+             B + 'test_lc48b_d21_report_stale.py::test_a_report_generated_after_the_change_exports_the_new_figure'),
     _pending('LC-D21.report_resume', 'a report job interrupted by a restart is not resumed (its record is in-process state): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D22.undo_checkpoints', 'input-table fingerprint before/after: undo restores the exact fingerprint and the matching results (objective 100, current again), '
              'a second undo is refused; a pre-solve checkpoint (read from its network.nc) restores the inputs but no results (not current); an unknown checkpoint id changes nothing',

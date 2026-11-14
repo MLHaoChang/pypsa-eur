@@ -1,0 +1,3 @@
+{"kinds": {
+  "report_stale": {"surface": "inline", "why": "export_report_docx/export_report_pdf (and the export route) on a report version whose stored evidence_hash is not the project's evidence hash now: the study changed since it was written (LC48B-STALE-1). Nothing is rendered or saved; the assistant generates the report again, then exports."}
+}}

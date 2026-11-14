@@ -457,8 +457,14 @@ def test_regenerate_section_saves_version_2_through_the_dispatchers(project, mon
 
 # ── export and delete ───────────────────────────────────────────────────────
 
+def _current(doc):
+    """The doc as written from the project's evidence now, so its export is not stale (LC48B-STALE-1)."""
+    doc.evidence_hash = T.get_report_evidence_hash()["evidence_hash"]
+    return doc
+
+
 def test_export_report_docx_returns_an_agent_export_chip(project):
-    store.create_report(project, _big_doc())
+    store.create_report(project, _current(_big_doc()))
     meta = T.DISPATCHERS["export_report_docx"]()       # default: the newest report
     assert meta["kind"] == "agent_export"
     assert meta["filename"] == "report_0123456789abcdef_v1.docx"
@@ -470,7 +476,7 @@ def test_export_report_docx_returns_an_agent_export_chip(project):
 
     # A byte-identical .docx is a dedup hit in the upload store (the first
     # chip comes back), so the named export is of a second report.
-    store.create_report(project, _big_doc("fedcba9876543210", title="Second report"))
+    store.create_report(project, _current(_big_doc("fedcba9876543210", title="Second report")))
     named = T.export_report_docx("fedcba9876543210", filename="client-report")
     assert named["filename"] == "client-report.docx"
     assert named["report_id"] == "fedcba9876543210"
