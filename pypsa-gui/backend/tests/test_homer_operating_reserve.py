@@ -862,3 +862,143 @@ def test_the_infeasible_card_hint_is_plain_words(short):
     assert ROW not in text and "reserve_share" not in text and "row " not in text, text
     assert text.endswith(".") and not text.endswith(".."), text
     assert ("at " in text and "MW" in text) if short else "may contribute" in text, text
+
+
+# ── GK B review 2: F1, F2 and the surviving mutants ─────────────────────────
+
+
+def _charging_battery(**frames):
+    """The default battery with η_store 0.9, η_dispatch 0.95, and no other holder."""
+    n = _network(committable=False, battery=True)
+    n.generators.loc["diesel", "p_nom"] = 0.0
+    n.storage_units.loc["bess", "efficiency_dispatch"] = 0.95
+    _set_frames(n, {"pv": 0.0, "diesel": 0.0}, **frames)
+    return n
+
+
+def test_cancelling_a_charge_needs_the_energy_it_would_have_stored():
+    """F1: w 3, p_store 10, p_dispatch 8.55, soc(t) 0. Cancelling x MW of the charge still leaves the step's end
+    w·η_s·x short, so r ≤ soc(t)/(w·η_s) = 0, not p_store + η_d(soc/w − η_s·p_store) = 1.45."""
+    n = _charging_battery(
+        p_dispatch={"bess": 8.55}, p_store={"bess": 10.0}, state_of_charge={"bess": 0.0}
+    )
+    n.snapshot_weightings.loc[:, "stores"] = 3.0
+    held = operating_reserve_result(n, (1.0, 0.0, 0.0))["per_snapshot"][0]["held_mw"]
+    assert held == pytest.approx(0.0)
+    # soc(t) 6: soc/(w·η_s) = 6/2.7 < 10 + 0.95·(2 − 9) = 3.35
+    n.storage_units_t.state_of_charge.loc[:, "bess"] = 6.0
+    held = operating_reserve_result(n, (1.0, 0.0, 0.0))["per_snapshot"][0]["held_mw"]
+    assert held == pytest.approx(6.0 / 2.7)
+
+
+def test_the_lp_bounds_the_cancelled_charge_by_the_energy_at_the_end_of_the_step():
+    """F1 in the LP: w·η_s·r ≤ soc(t), one row per snapshot and StorageUnit; at w = 0 it bounds nothing."""
+    m, _ = _rows(_mixed_fleet(), (0.2, 0.0, 0.0))
+    sns = _mixed_fleet().snapshots
+    con = f"{_AUX}-energy-cancel"
+    assert m.constraints[con].shape == (HOURS, 2)
+    terms, rhs, sign = _terms(m, con, sns[NOON], "bess")
+    assert sign == "<=" and rhs == 0.0
+    assert terms == pytest.approx(
+        {(_AUX, "bess"): 2.0 * 0.8, ("StorageUnit-state_of_charge", "bess"): -1.0}
+    )
+    terms, _, _ = _terms(m, con, sns[0], "bess")
+    assert (_AUX, "bess") not in terms
+
+
+def _snapshot_of(m, var, con, t, name):
+    """The snapshot of the ``var`` term in row (t, name) of ``con``."""
+    lhs = m.constraints[con].lhs.sel(snapshot=t, name=name)
+    out = []
+    for v in lhs.vars.values.ravel():
+        if v != -1:
+            vn, pos = m.variables.get_label_position(int(v))
+            if vn == var:
+                out.append(pos["snapshot"])
+    return out
+
+
+@pytest.mark.parametrize("con", [f"{_AUX}-energy", f"{_AUX}-energy-cancel"])
+def test_the_energy_rows_read_the_state_of_charge_at_the_end_of_their_own_step(con):
+    """M1: the row at t reads soc(t), never soc(t−1) (which would count the step's planned dispatch twice)."""
+    n = _mixed_fleet()
+    m, _ = _rows(n, (0.2, 0.0, 0.0))
+    for t in (n.snapshots[1], n.snapshots[NOON], n.snapshots[-1]):
+        assert _snapshot_of(m, "StorageUnit-state_of_charge", con, t, "bess") == [t]
+
+
+def test_a_charging_battery_holds_more_than_its_spare_discharge_power():
+    """M2: p_nom 10, p_dispatch 0, p_store 5: cancelling the charge adds 5 MW to the 10 MW of spare power."""
+    n = _charging_battery(
+        p_dispatch={"bess": 0.0}, p_store={"bess": 5.0}, state_of_charge={"bess": 40.0}
+    )
+    held = operating_reserve_result(n, (1.0, 0.0, 0.0))["per_snapshot"][0]["held_mw"]
+    assert held == pytest.approx(15.0)
+
+
+def test_a_battery_short_of_power_holds_no_negative_reserve():
+    """M3: p_dispatch above what p_max_pu now allows holds 0 (r ≥ 0 in the LP), never a negative MW."""
+    n = _charging_battery(
+        p_dispatch={"bess": 8.0}, p_store={"bess": 0.0}, state_of_charge={"bess": 40.0}
+    )
+    n.storage_units.loc["bess", "p_max_pu"] = 0.5
+    held = operating_reserve_result(n, (1.0, 0.0, 0.0))["per_snapshot"][0]["held_mw"]
+    assert held == 0.0
+
+
+def test_a_committable_extendable_unit_without_p_nom_max_holds_nothing_in_the_lp_or_the_result():
+    """F2: no finite p_nom_max, so neither its headroom nor its output enters the row, and the result counts 0."""
+    n = _mixed_fleet()
+    n.add(
+        "Generator",
+        "open",
+        bus="ac",
+        carrier="diesel",
+        p_nom_extendable=True,
+        committable=True,
+    )
+    m, _ = _rows(n, (0.2, 0.0, 0.0))
+    terms, _, _ = _terms(m, ROW, n.snapshots[NOON])
+    assert not [k for k in terms if k[1] == "open"], terms
+    n = _network(committable=False)
+    n.add(
+        "Generator",
+        "open",
+        bus="ac",
+        carrier="diesel",
+        p_nom_extendable=True,
+        committable=True,
+    )
+    n.generators.loc["open", "p_nom_opt"] = 20.0
+    _set_frames(n, {"pv": 0.0, "diesel": 4.0, "open": 6.0})
+    n.generators_t.status = pd.DataFrame({"open": 1.0}, index=n.snapshots)
+    held = operating_reserve_result(n, (0.2, 0.0, 0.0))["per_snapshot"][0]["held_mw"]
+    assert held == pytest.approx(12.0 - 4.0)
+
+
+@pytest.mark.parametrize(
+    "p_nom, p_nom_max, short", [(0.0, 20.0, False), (20.0, 5.0, True)]
+)
+def test_the_infeasible_line_sizes_an_extendable_unit_by_its_p_nom_max(
+    p_nom, p_nom_max, short
+):
+    """M5: an extendable unit can hold up to p_nom_max, whatever its starting p_nom."""
+    n = _network(committable=False)
+    n.generators.loc["diesel", ["p_nom", "p_nom_max", "p_nom_extendable"]] = [
+        p_nom,
+        p_nom_max,
+        True,
+    ]
+    line = infeasibility_lines(n, SolverConfig(reserve_share_load=1.0))[0]
+    assert ("may contribute" not in line) is short, line
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
+def test_a_non_finite_share_is_zero(bad):
+    """M4: `shares_of` also reads plain dicts, which no schema has checked."""
+    assert shares_of({"reserve_share_load": bad, "reserve_share_pv": 0.1}) == (
+        0.0,
+        0.1,
+        0.0,
+    )
+    assert shares_of({"reserve_share_wind": bad}) is None

@@ -18,14 +18,18 @@ with ``a``, ``b``, ``c`` the shares in `SolverConfig` (``reserve_share_load``, `
   ``p_nom·status(t)·p_max_pu(t) − p(t)`` when committable (an off unit holds none: the reserve can make a genset
   run), ``p_nom·p_max_pu(t) − p(t)`` otherwise, with ``p_nom`` the LP variable when extendable. A committable and
   extendable unit holds ``h ≤ p_nom·p_max_pu − p`` and ``h ≤ p_nom_max·status·p_max_pu − p`` (linear; it needs a
-  finite ``p_nom_max``, and holds none without one, with a warning). On a multi-period network a unit holds
-  headroom only in the periods it is active (build year and lifetime, `n.get_active_assets`).
+  finite ``p_nom_max``, and holds none without one, with a warning: 0 in the row and in the result, its output
+  not subtracted). On a multi-period network a unit holds headroom only in the periods it is active (build year
+  and lifetime, `n.get_active_assets`).
 - StorageUnits on electrical buses (GK B Q2 (a), O4): ``r_s(t) ≥ 0`` with
   ``r_s ≤ p_nom·p_max_pu(t) − p_dispatch(t) + p_store(t)`` (the power it could still add, cancelling its charge
   included) and ``r_s ≤ p_store(t) + η_dispatch·(soc(t)/w(t) − η_store·p_store(t))``: cancelling the charge needs
   no stored energy but leaves the step's end short of what that charge would have stored, and the extra discharge
   must come from what is then left at the end of the step, with ``w`` the snapshot's own ``stores`` weighting
-  (the one the SoC balance uses). The SoC at the end of the step already nets the planned dispatch, standing loss
+  (the one the SoC balance uses). Cancelling x MW of the charge still leaves the step's end ``w·η_store·x``
+  short, so also ``w·η_store·r_s ≤ soc(t)`` (GK B F1; the two bounds' minimum is concave, so it stays an LP).
+  Written multiplied, it needs no division: at ``w = 0`` or ``η_store = 0`` it reads ``0 ≤ soc`` and bounds
+  nothing, and a zero-weight snapshot holds no stored-energy reserve through the first energy bound already. The SoC at the end of the step already nets the planned dispatch, standing loss
   and inflow, so no wrap at the first snapshot is needed and the planned discharge is not counted twice (a
   deliberate change from O4's soc(t−1), which counts it twice). A Store-and-Link battery is not counted; the
   result lists it under ``not_counted``.
@@ -244,6 +248,8 @@ def add_rows(n, snapshots, shares, log_queue=None) -> None:
                 + ", ".join(g for g in both if g not in bounded)
                 + " have no finite p_nom_max, so they hold no reserve here.",
             )
+            # Holding none is 0, not −p: their output is added back to the −Σp above.
+            lhs = lhs + gvar.sel(name=[g for g in both if g not in bounded]).sum("name")
         if bounded:
             h = m.add_variables(
                 coords=[sns, pd.Index(bounded, name="name")], name=_AUX_G
@@ -304,6 +310,13 @@ def add_rows(n, snapshots, shares, log_queue=None) -> None:
             r - pst * da(store_coef, sus) - soc * da(soc_coef, sus) <= 0,
             name=f"{_AUX}-energy",
         )
+        # Cancelling x MW of charge still leaves the step's end w·η_s·x short: w·η_s·r ≤ soc(t). At w·η_s = 0
+        # the row reads 0 ≤ soc and bounds nothing.
+        cancel_coef = pd.DataFrame({s: w * eta_s[s] for s in sus}, index=sns)
+        m.add_constraints(
+            r * da(cancel_coef, sus) - soc <= 0,
+            name=f"{_AUX}-energy-cancel",
+        )
         lhs = lhs + r.sum("name")
 
     load = _load_mw(n, sel["loads"], sns)
@@ -354,6 +367,16 @@ def _solved_p_nom(df, name) -> float:
     return float(df.at[name, "p_nom"])
 
 
+def _committable(df, name) -> bool:
+    return "committable" in df.columns and bool(df.at[name, "committable"])
+
+
+def _unbounded_extendable(df, name) -> bool:
+    return bool(df.at[name, "p_nom_extendable"]) and not math.isfinite(
+        float(df.at[name, "p_nom_max"])
+    )
+
+
 def _label(t) -> str:
     """A snapshot as people read it: "2030-01-01 12:00", with the period first on a multi-period network."""
     if isinstance(t, tuple):
@@ -394,11 +417,13 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
     avail = _avail(n, "Generator", sns, sel["dispatchable"])
     status = getattr(n.generators_t, "status", None)
     for g in sel["dispatchable"]:
+        if _committable(gens, g) and _unbounded_extendable(gens, g):
+            continue  # holds none, as in the LP
         p = need(g, gp)
         if p is None:
             continue
         cap = avail[g] * _solved_p_nom(gens, g)
-        if "committable" in gens.columns and bool(gens.at[g, "committable"]):
+        if _committable(gens, g):
             st = need(g, status)
             if st is None:
                 continue
@@ -421,7 +446,13 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
         )
         power = su_avail[s] * _solved_p_nom(su, s) - pdis + pst
         energy = pst + eta_d * (soc / w.where(w > 0, np.inf) - eta_s * pst)
-        held += np.minimum(power, energy).clip(lower=0.0)
+        ws = w * eta_s
+        cancel = soc / ws.where(
+            ws > 0, np.nan
+        )  # w·η_s = 0: no bound (as the LP's 0 ≤ soc)
+        held += np.minimum(np.minimum(power, energy), cancel.fillna(np.inf)).clip(
+            lower=0.0
+        )
     req = a * _load_mw(n, sel["loads"], sns)
     for share, names in ((b, sel["pv"]), (c, sel["wind"])):
         if not share:
