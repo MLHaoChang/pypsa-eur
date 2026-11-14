@@ -562,7 +562,8 @@ def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
 
 def _starts_full(n, comp: str, name, multi: bool) -> bool:
     """GK B N1: can this Store/StorageUnit hold energy at the start that the cluster never drew? Not when it
-    starts empty (each period, on a multi-period network) or wraps cyclically (per period when multi-period)."""
+    starts empty (each period, on a multi-period network) or wraps cyclically (per period when multi-period).
+    A non-cyclic Store that may go below zero (``e_min_pu`` < 0) can, even from empty (GK B F1)."""
     if comp == "Store":
         df, init, cyc = n.stores, "e_initial", "e_cyclic"
     else:
@@ -579,15 +580,21 @@ def _starts_full(n, comp: str, name, multi: bool) -> bool:
         return False
     if bool(_get(cyc, False)) and not multi:
         return False
+    if (
+        comp == "Store"
+        and (n.get_switchable_as_dense("Store", "e_min_pu")[name] < 0).any()
+    ):
+        return True
     empty = float(_get(init, 0.0) or 0.0) == 0.0
     return not (empty and (not multi or bool(_get(f"{init}_per_period", False))))
 
 
 def _cluster_open(n, buses, elec, active, ports) -> str | None:
     """GK B N1 (and its premise for N5): a net cluster is counted by its net draw only when it is closed, so
-    all it returns is electricity it drew. It is open when a Store or StorageUnit on its buses can start full or
-    has an inflow, when a Generator on them can inject (a slack, a renewable or any other supply; a withdrawing
-    sink is fine), or when any Link delivers into one of its buses from a bus that is neither electrical nor the
+    all it returns is electricity it drew. It is open when a Store or StorageUnit on its buses can start full
+    (or a Store can go below zero) or has an inflow, when a Generator on them can inject (a slack, a renewable,
+    a two-way withdrawer or any other supply; a one-way withdrawing sink is fine), when a Load on them can
+    inject (sign·p_set > 0), or when any Link delivers into one of its buses from a bus that is neither electrical nor the
     cluster's (a source Link's port, a reformer or a multi-port Link from a fuel bus). Returns why, or None."""
     multi = isinstance(n.snapshots, pd.MultiIndex)
     for comp, df in (("Store", n.stores), ("StorageUnit", n.storage_units)):
@@ -612,11 +619,28 @@ def _cluster_open(n, buses, elec, active, ports) -> str | None:
             series is not None and (series.fillna(0.0) > 0).any()
         ):
             return f"StorageUnit {name} has an inflow"
-    sinks = set(_withdrawing_generators(n))
+    withdraw = _withdrawing_generators(n)
+    sinks = set(withdraw) - set(
+        _two_way_withdrawers(n, withdraw)
+    )  # GK B F1: a two-way one can inject
     gens = n.generators
     for g in gens.index:
         if _active(gens, g) and str(gens.at[g, "bus"]) in buses and g not in sinks:
             return f"Generator {g} can inject into it"
+    loads = n.loads
+    names = [
+        l for l in loads.index if _active(loads, l) and str(loads.at[l, "bus"]) in buses
+    ]
+    if names:  # GK B F1: a Load injects where sign·p_set > 0 (a negative p_set, PyPSA's sign −1)
+        p_set = n.get_switchable_as_dense("Load", "p_set")[names]
+        sign = (
+            loads["sign"].astype(float)
+            if "sign" in loads.columns
+            else pd.Series(-1.0, index=loads.index)
+        )
+        for l in names:
+            if (float(sign[l]) * p_set[l] > 0).any():
+                return f"Load {l} can inject into it"
     for m in active:
         ins, outs = ports[m]
         delivers_to = list(outs)

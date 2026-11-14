@@ -2496,6 +2496,78 @@ def test_conversion_links_alone_carry_the_hint():
     assert lines and all("of what the conversion units draw" in l for l in lines), lines
 
 
+@pytest.mark.parametrize(
+    "comp,kw",
+    [
+        pytest.param(
+            "Generator",
+            {"carrier": "H2", "p_nom": 5.0, "sign": -1.0, "p_min_pu": -1.0},
+            id="two-way-withdrawer",
+        ),
+        pytest.param("Load", {"p_set": -1.0}, id="negative-load"),
+        pytest.param(
+            "Store",
+            {"carrier": "H2", "e_nom": 50.0, "e_min_pu": -1.0},
+            id="store-below-zero",
+        ),
+    ],
+)
+def test_an_injector_on_a_cluster_bus_opens_it(comp, kw):
+    """GK B F1: each of these can put carrier energy into the cluster it never drew from electricity, so the
+    cluster fails closed rather than being netted."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add(comp, "injector", bus="h2", **kw)
+    c = classify(n)
+    assert c["net_clusters"] == [] and any(
+        "injector" in o["why"] for o in c["open_clusters"]
+    ), c
+    assert renewable_fraction(n)["fraction"] is None
+
+
+def test_a_one_way_withdrawer_and_a_positive_load_keep_the_cluster_closed():
+    """GK B F1 (the other side): a sign −1 Generator that never runs negative and an ordinary Load only take."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("Generator", "sink", bus="h2", carrier="H2", p_nom=5.0, sign=-1.0)
+    n.add("Load", "second offtake", bus="h2", p_set=0.5)
+    c = classify(n)
+    assert c["open_clusters"] == [] and c["net_clusters"] == CLUSTER, c
+
+
+def test_a_refused_nan_efficiency_cluster_has_no_term_in_the_row():
+    """GK B F2: the row leaves an unknown (NaN η) cluster's Links out, not only warns about them."""
+    m = _net_h2(_network())
+    eta = pd.Series(0.5, index=m.snapshots)
+    eta.iloc[5] = float("nan")
+    m.links_t.efficiency = pd.DataFrame({"fuel cell": eta})
+    _with_row(m)
+    co = _row_coeffs(m, row_name(None))
+    assert not any(
+        var == "Link-p" and name in ("electrolyser", "fuel cell") for var, name in co
+    ), co
+
+
+def test_a_reversible_bridge_running_backwards_in_an_open_cluster_reads_none():
+    """GK B F3: an open cluster's Link counts as dispatched when p0 is negative too."""
+    n = _dispatched()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Load", "offtake", bus="h2", p_set=1.0)
+    n.add("Store", "full tank", bus="h2", carrier="H2", e_nom=100.0, e_initial=100.0)
+    n.add(
+        "Link",
+        "h2 converter",
+        bus0="ac",
+        bus1="h2",
+        p_nom=10.0,
+        p_min_pu=-1.0,
+        efficiency=1.0,
+    )
+    c = classify(n)
+    assert c["net_clusters"] == [] and c["open_clusters"], c
+    n.links_t.p0 = pd.DataFrame({"h2 converter": -1.0}, index=n.snapshots)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "cannot be attributed" in kpi["reason"], kpi
+
+
 def _h2_with_negative_offtake(n, *, fuel_cell: bool, **offtake):
     """An electrolyser into an H2 bus whose offtake is a Generator that
     withdraws (``offtake`` sets sign or p_min_pu/p_max_pu), with or without a
