@@ -20,13 +20,24 @@ Hand oracle:
 """
 
 # ruff: noqa: F811 -- shared public harness fixtures
+import pytest
+from fastapi import HTTPException
+
+import routers.reports as reports_router
 from models.energy_hub import ReferenceDesignReport, SectionState, empty_section_map
 from services import chat_tools as T
 from services.adequacy import eh_report as R
 from services.llm_fake import FakeProvider
 from services.pypsa_service import PyPSAService
+from services.reports import store
 from tests.lc43_gates import refused, state
-from tests.test_chat_report_tools import _install_provider, _poll, _script, project  # noqa: F401
+from tests.test_chat_report_tools import (  # noqa: F401
+    PROJECT,
+    _install_provider,
+    _poll,
+    _script,
+    project,
+)
 from tests.test_lc06_d21_reports import SECTIONS, _generated
 from tests.test_workflow_tools import helpers_state  # noqa: F401
 
@@ -108,3 +119,64 @@ def test_a_report_generated_after_the_change_exports_the_new_figure(
     headline = T.get_report_table(new, "headline")["items"]
     assert ["MC LOLE (h/yr)", "4.50 h/yr"] in headline, headline
     refused(lambda: T.export_report_docx(old), 409, "report_stale")
+
+
+def _reason(call) -> str:
+    """The ``reason`` of a 409 report_stale refusal."""
+    with pytest.raises(HTTPException) as failure:
+        call()
+    detail = failure.value.detail
+    assert (
+        failure.value.status_code == 409 and detail["error_kind"] == "report_stale"
+    ), detail
+    assert detail["hint"] == "generate the report again, then export", detail
+    return detail["reason"]
+
+
+def test_a_report_of_a_project_that_is_not_open_is_not_compared(
+    project, client, api_project, monkeypatch
+):
+    """GK B F1 on #1514: the evidence is the session's, so another open project
+    is no measure of this one's study."""
+    report_id = _generated(monkeypatch)
+    before = state(project)
+    api_project("other-open")  # the session now holds another project
+    exported = client.post(
+        f"/api/projects/{PROJECT}/reports/{report_id}/export", json={}
+    )
+    assert exported.status_code == 409, exported.text[:300]
+    detail = exported.json()["detail"]
+    assert (detail["error_kind"], detail["reason"]) == (
+        "report_stale",
+        "project_not_open",
+    )
+    assert state(project) == before
+
+
+def test_an_unreadable_evidence_read_refuses_with_its_reason(project, monkeypatch):
+    """GK B F2: a raising read is a stated refusal, never a 500 or an unrelated 404."""
+    report_id = _generated(monkeypatch)
+    before = state(project)
+
+    def broken(_project):
+        raise HTTPException(404, {"error_kind": "unrelated", "message": "gone"})
+
+    monkeypatch.setattr(reports_router, "_current_evidence", broken)
+    assert _reason(lambda: T.export_report_docx(report_id)) == "evidence_unreadable"
+    monkeypatch.setattr(
+        reports_router,
+        "_current_evidence",
+        lambda _p: (_ for _ in ()).throw(RuntimeError("disk")),
+    )
+    assert _reason(lambda: T.export_report_docx(report_id)) == "evidence_unreadable"
+    assert state(project) == before
+
+
+def test_a_version_without_an_evidence_hash_is_refused(project, monkeypatch):
+    """GK B F3: no stored hash cannot be compared, so it is not exported."""
+    report_id = _generated(monkeypatch)
+    doc = store.load_report(project, report_id)
+    store.save_version(project, doc.model_copy(update={"evidence_hash": ""}))
+    before = state(project)
+    assert _reason(lambda: T.export_report_docx(report_id)) == "no_evidence_hash"
+    assert state(project) == before

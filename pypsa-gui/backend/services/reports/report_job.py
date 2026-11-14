@@ -902,7 +902,13 @@ def _clear_job_marker(project_dir: pathlib.Path, token: str | None) -> None:
     try:
         _marker_path(project_dir).unlink(missing_ok=True)
     except OSError as exc:
+        # One left reading `running` would read interrupted after a restart
+        # (GK B N1): mark it ended instead, and log if that fails too.
         logger.warning("report job marker not removed for %s: %s", project_dir, exc)
+        try:
+            atomic_write_text(_marker_path(project_dir), json.dumps({**marker, "status": "ended"}))
+        except OSError as again:
+            logger.warning("report job marker not marked ended for %s: %s", project_dir, again)
 
 
 def interrupted_job(project_dir: pathlib.Path) -> dict[str, Any] | None:

@@ -754,7 +754,10 @@ VARIANTS: list[dict] = [
              'exporting it (by id and by default) is 409 report_stale with tests/lc43_gates.py state unchanged; a report generated after the change exports with MC LOLE 4.50 h/yr while the old one stays report_stale',
              'generate_report export_report_docx get_report_table update_component',
              B + 'test_lc48b_d21_report_stale.py::test_a_report_exports_until_its_study_changes',
-             B + 'test_lc48b_d21_report_stale.py::test_a_report_generated_after_the_change_exports_the_new_figure'),
+             B + 'test_lc48b_d21_report_stale.py::test_a_report_generated_after_the_change_exports_the_new_figure',
+             B + 'test_lc48b_d21_report_stale.py::test_a_report_of_a_project_that_is_not_open_is_not_compared',
+             B + 'test_lc48b_d21_report_stale.py::test_an_unreadable_evidence_read_refuses_with_its_reason',
+             B + 'test_lc48b_d21_report_stale.py::test_a_version_without_an_evidence_hash_is_refused'),
     _covered('LC-D21.report_resume', 'owner decision LC48B-RESUME-1: a running job keeps reports/.job.json with its report id and leaves none once done, aborted or failed; after a restart (no record in memory, the marker left) '
              'get_report_status is 409 report_interrupted, status interrupted, that report id, hint "generate the report again", with no model call and tests/lc43_gates.py state unchanged; generating again ends done with no marker',
              'generate_report get_report_status abort_report_generation',

@@ -139,3 +139,21 @@ def test_an_aborted_or_failed_job_leaves_no_marker(project, monkeypatch):
 def test_the_marker_stays_local_to_the_project():
     """Never data: copies, exports and imports skip it as they skip lock files."""
     assert store.is_lock_artifact(store.JOB_MARKER)
+
+
+def test_a_marker_that_cannot_be_removed_is_marked_ended(tmp_path, monkeypatch):
+    """GK B N1: an unlink failure must not leave a marker a restart reads as interrupted."""
+    token = report_job._write_job_marker(
+        tmp_path, {"report_id": "r1", "mode": "generate"}
+    )
+    assert report_job.interrupted_job(tmp_path)["report_id"] == "r1"
+
+    def refuse(self, *a, **k):
+        raise PermissionError("held")
+
+    monkeypatch.setattr(type(_marker(tmp_path)), "unlink", refuse)
+    report_job._clear_job_marker(tmp_path, token)
+    assert (
+        json.loads(_marker(tmp_path).read_text(encoding="utf-8"))["status"] == "ended"
+    )
+    assert report_job.interrupted_job(tmp_path) is None
