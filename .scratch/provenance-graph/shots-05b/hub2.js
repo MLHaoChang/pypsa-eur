@@ -13,6 +13,10 @@ const {chromium}=require('playwright');const {mock}=require('./ic.js');
  await p.getByTestId('hub-rail-step-results').click();await p.waitForTimeout(2500);
  const t=p.getByTestId('hub-chapter-investment');console.log(mode,'tile',await t.count());
  if(await t.count()){await t.scrollIntoViewIfNeeded();console.log(JSON.stringify(await t.innerText()));
+  // let any open-project toast close before the shot (UX 21: no toast in the frame)
+  await p.getByText(/already exists/).first().waitFor({state:'detached',timeout:30000}).catch(()=>{});
+  await p.waitForTimeout(1000);
+  console.log('toast left', await p.getByText(/already exists/).count());
   await p.screenshot({path:`hub-investment-tile-${mode}.png`});
   await p.getByTestId('hub-chapter-investment-open').click();await p.waitForTimeout(2500);
   const st=p.getByTestId('ic-stale');console.log(mode,'ic-stale after open',await st.count());
