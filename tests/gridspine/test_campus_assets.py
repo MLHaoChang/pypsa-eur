@@ -86,7 +86,7 @@ def test_every_entry_carries_every_field_tagged():
 #: sha256 of the shipped library: the defaults pack 2026-11-13 manifest pins the same bytes
 #: (2026-10-23 .. 2026-10-30 pinned the library before the 220/110 kV units, 2026-11-06 .. 2026-11-10
 #: before their sourced losses).
-SHIPPED_SHA256 = "aea49a692aa25e2b4afbad9b9393235e287d9f80256f25854390c9acb421f709"
+SHIPPED_SHA256 = "2608e39bdf3cb951f151dfeb90524ea7a285f4ef46ea0fa2b1c2a71c3a06b587"
 #: How many cost fields of each kind are cited reference values (tag literature).
 LITERATURE_COUNTS = {
     ("transformers", "capex_eur"): 29,
@@ -737,7 +737,7 @@ TIER2_PEI = {125.0: 99.780, 160.0: 99.790, 200.0: 99.797, 250.0: 99.797, 315.0: 
 
 
 def test_the_220_110_kv_losses_are_optcls_220_132_kv_caps_for_an_autotransformer_and_meet_tier_2():
-    """campus-library-gaps 03 (CLG03-SOURCE-1): 160 and 200 MVA read [OPTCL-TS] x1.25 (a 220/110 kV
+    """campus-library-gaps 03 (CLG03-SOURCE-1, -2): 160 and 200 MVA read [OPTCL-TS] x1.25 (a 220/110 kV
     autotransformer's equivalent winding rating over a 220/132 kV one's); 125 MVA is scaled down from the
     160 MVA row and 250/315 MVA up from the 200 MVA row at constant kW/MVA. Each stays tagged assumed (a
     rating may not be literature) with a note naming the row, the winding type, the cap and the scaling,
@@ -779,7 +779,12 @@ PREV_SHA256 = "5058116ad6b169fad78677e5638b957ca86ece4e30d63465538c5dc50bb6c23f"
 def test_the_library_differs_from_the_previous_pin_only_in_the_220_110_losses_and_their_citation():
     """GK A C4: putting the class rule back into the five units' vkr_percent and pfe_kw, and dropping the
     [OPTCL-TS] source entry and header paragraph, gives the previous pin byte for byte."""
-    text = DEFAULT_PATH.read_text(encoding="utf-8")
+    text = DEFAULT_PATH.read_text(encoding="utf-8").replace(
+        "# impedances and losses are unchanged from the shipped library, except the\n"
+        "# 220/110 kV units' losses (see below), and stay `assumed` (only a cost may be\n"
+        "# tagged `literature`).\n",
+        "# impedances and losses are unchanged from the shipped library and stay\n"
+        "# `assumed` (only a cost may be tagged `literature`).\n")
     src = text.index("#   [OPTCL-TS]")
     text = text[:src] + text[text.index("\n#\n", src) + 1:]
     para = text.index("# impedances follow producers/campus.py's class rule (tagged assumed). Their\n")

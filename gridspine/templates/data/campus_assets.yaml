@@ -17,8 +17,9 @@
 # Tags. `literature`: read from a cited source below, converted as stated.
 # `assumed`: no usable source was found for that kind or size, or the value is
 # extrapolated outside the source's range; the note says which. Ratings,
-# impedances and losses are unchanged from the shipped library and stay
-# `assumed` (only a cost may be tagged `literature`).
+# impedances and losses are unchanged from the shipped library, except the
+# 220/110 kV units' losses (see below), and stay `assumed` (only a cost may be
+# tagged `literature`).
 #
 # Sources (citation keys used in the notes):
 #   [EI-NVL]    Energimarknadsinspektionen (Swedish Energy Markets Inspectorate),
@@ -71,7 +72,8 @@
 # found, and 220/132 kV is the same 245/123-145 kV class as [EI-NVL] R-NR-T-8.
 # The units are assumed to be autotransformers, the usual build for a
 # 220/110 kV coupling ([EI-NVL] gives no winding type; a two-winding unit
-# carries roughly 2-2.5x these losses); an autotransformer's losses follow its equivalent winding rating
+# carries roughly 2-2.5x these losses; owner decision CLG03-SOURCE-2). An
+# autotransformer's losses follow its equivalent winding rating
 # S (1 - U_LV/U_HV), 0.50 S at 220/110 kV against 0.40 S at 220/132 kV, so
 # both losses are the source's x1.25. 160 and 200 MVA are the source's rows;
 # 125 MVA is scaled down from the 160 MVA row and 250/315 MVA up from the

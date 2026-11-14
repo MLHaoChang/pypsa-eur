@@ -1,4 +1,4 @@
-"""campus-library-gaps 03 (owner CLG03-SOURCE-1; GK A plan C4): the defaults pack version 2026-11-13 is
+"""campus-library-gaps 03 (owner CLG03-SOURCE-1 and -2; GK A plan C4): the defaults pack version 2026-11-13 is
 2026-11-10 byte for byte except the manifest's version, its campus sha256 and the block that says why.
 
 The five 220/110 kV campus transformers took sourced load and no-load losses in
