@@ -365,6 +365,24 @@ def test_the_digest_is_stable_and_binds_the_series_the_cases_name(project, tpl, 
     assert _load(project, tpl, built)["digest"] != a["digest"]
 
 
+def test_the_digest_binds_the_projects_own_library_refs(project, tpl, built):
+    cfg, network = built
+    base = S.load(project, TID, template_dir=tpl, cfg=cfg, network=network)
+
+    def with_ref(h):
+        c = json.loads(json.dumps(cfg))
+        c.setdefault("commercial", {})["export_price_ref"] = {
+            "id": "ipp_da_base",
+            "version": 1,
+            "hash": h,
+        }
+        return S.load(project, TID, template_dir=tpl, cfg=c, network=network)["digest"]
+
+    a, b = with_ref("a" * 64), with_ref("b" * 64)
+    assert a != base["digest"] and a != b
+    assert with_ref("a" * 64) == a
+
+
 def _approved(project, tpl, built):
     return _load(project, tpl, built)["digest"]
 

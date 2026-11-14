@@ -9,7 +9,9 @@ is editable, which is why the digest exists). The price series they name are
 taken from the shipped TEMPLATE dir's `price_series/meta.json`, after
 `template_series.verify` has checked every series file against it (S-A): an
 unhashed, missing or changed series refuses before any case is admitted. The
-digest binds exactly those two sources.
+digest binds those two sources and the Library refs (version, hash) the
+project's own solver_config holds for each series a case names (a created
+project prices from minted refs, not the template files).
 
 **Admission (C3, C4).** Every case in the file is shown, each with all its
 changes; one outside the allow-list is `not_run` with its reason, never
@@ -214,8 +216,37 @@ def _series_hashes(template_dir) -> dict[str, str]:
     return {e["name"]: e["sha256"] for e in meta["series"]}
 
 
-def _digest(data: dict, template_id: str, series: dict[str, Any]) -> str:
-    body = {"v": 1, "template": template_id, "cases": data, "series": series}
+def _project_refs(cfg, names) -> dict[str, list]:
+    """The Library refs `cfg` (the PROJECT's solver_config) holds for each named
+    series: `{name: sorted [version, hash]}`. A created project prices from refs
+    minted into its org's Library, whose hash covers canonical bytes, not the
+    template file, so the template hash alone does not bind what the run prices
+    from (C10)."""
+    commercial = (cfg or {}).get("commercial")
+    commercial = commercial if isinstance(commercial, dict) else {}
+    holders = [commercial.get(k) for k in PRICE_REFS]
+    for contract in commercial.get("contracts") or []:
+        if isinstance(contract, dict):
+            holders.append(contract.get("reference_price"))
+    found: dict[str, set] = {}
+    for ref in holders:
+        if isinstance(ref, dict) and ref.get("id") in names:
+            found.setdefault(ref["id"], set()).add(
+                (str(ref.get("version")), str(ref.get("hash")))
+            )
+    return {n: sorted(map(list, v)) for n, v in sorted(found.items())}
+
+
+def _digest(
+    data: dict, template_id: str, series: dict[str, Any], refs: dict | None = None
+) -> str:
+    body = {
+        "v": 2,
+        "template": template_id,
+        "cases": data,
+        "series": series,
+        "project_refs": refs or {},
+    }
     return hashlib.sha256(
         json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -256,7 +287,7 @@ def load(project_dir, template_id: str, *, template_dir, cfg, network) -> dict:
             }
         )
     return {
-        "digest": _digest(data, template_id, named),
+        "digest": _digest(data, template_id, named, _project_refs(cfg, named)),
         "total": len(cases),
         "cases": cases,
         "admissible": [c["id"] for c in cases if c["status"] == "admissible"],
