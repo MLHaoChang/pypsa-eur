@@ -236,6 +236,23 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'business_case_table_options',
+        'title': 'Business case line options',
+        'disposition': 'unbuilt',
+        'reason': 'The units each business-case line may take and every check on its cells are not available from chat yet. Use the line table in the Business case view on the Results page.',
+        'page': 'Results (Investment tab)',
+        'panel': None,
+        'keywords': frozenset({
+            'unit',
+            'units',
+            'options',
+            'checks',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/results/business_case/options'),
+        }),
+    },
+    {
         'id': 'intent_comparison',
         'title': 'Design intent comparison',
         'disposition': 'unbuilt',
@@ -565,6 +582,10 @@ def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
             continue
         if entry['id'] == 'business_case' and not _asks_for_the_business_case(words):
             continue
+        if (entry['id'] == 'business_case_table_options'
+                and not ('business' in words and words & _BUSINESS_CASE_NOUN
+                         and not words & _BUSINESS_AS_USUAL)):
+            continue  # "units" alone is any unit question; this is the line table's only
         hits = len(words & entry['keywords'])
         if hits:
             ranked.append((-hits, index, entry))
