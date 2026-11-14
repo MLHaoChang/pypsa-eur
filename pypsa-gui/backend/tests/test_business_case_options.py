@@ -79,6 +79,8 @@ def test_no_template_is_a_blank_table_with_the_typed_units(
     assert body["typed_units"] == {
         k: list(M.allowed_units(k, "typed")) for k in ("revenue", "opex", "capex")
     }
+    assert body["categories"] == {k: list(v) for k, v in M.CATEGORIES.items()}
+    assert body["escalations"] == list(get_args(M.Escalation))
     assert "lump" in body["typed_units"]["capex"]
     assert "lump" not in body["typed_units"]["revenue"]
     assert isinstance(body["outputs"], list) and body["outputs_reason"] is None
@@ -113,6 +115,7 @@ def test_outputs_are_the_catalogue_the_run_reads(client, install_network, monkey
     body = client.get(OPTIONS_URL).json()
     assert body["outputs"] == [{"id": "served_product.h2", "label": "Product served on h2",
                                 "units": ["MWh_H2", "kg"], "derived": False}]
+    assert body["catalogue_version"] == L.CATALOGUE_VERSION
     assert isinstance(seen["solve"], L.LinkedSolve)   # bound as the run binds it
 
 
@@ -149,7 +152,7 @@ def test_refusals_need_the_investment_case_horizon(client, install_network, monk
     _project(client, install_network, monkeypatch, None)
     assert _put(client, _bc(_line(), _line(price=None))).status_code == 200
     body = client.get(OPTIONS_URL).json()
-    assert body["refusals"] is None
+    assert body["refusals"] is None and body["horizon"] is None
     assert body["refusals_reason"] == "investment_case_missing"
 
 
@@ -160,9 +163,23 @@ def test_every_refusal_names_its_line_and_column(client, install_network, monkey
     assert _put(client, _bc(*lines)).status_code == 200
     body = client.get(OPTIONS_URL).json()
     assert body["refusals_reason"] is None
+    first, last = body["horizon"]
+    assert last >= first and isinstance(body["base_year"], int)
     got = [(r["refusal"], r["field"]) for r in body["refusals"]]
     assert ("name_duplicate", "lines[1].name") in got
     assert ("price_not_established", "lines[1].price") in got
     assert ("unit_not_allowed", "lines[2].unit") in got
     assert all(r["code"] == "business_case_refused" and r["message"]
                for r in body["refusals"])
+
+
+def test_the_table_has_words_for_every_refusal_kind():
+    """The line table places each refusal with plain words (G9): one entry per kind."""
+    import pathlib
+    import re
+
+    src = (pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages"
+           / "results" / "investment" / "businessCaseModel.ts").read_text()
+    block = src.split("export const REFUSAL_WORDS", 1)[1].split("\n}\n", 1)[0]
+    keys = set(re.findall(r"^\s+([a-z_]+):", block, re.M))
+    assert keys == set(M.REFUSAL_KINDS)

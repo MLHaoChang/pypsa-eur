@@ -147,8 +147,8 @@ describe('InvestmentTab', () => {
     fireEvent.keyDown(first, { key: 'ArrowRight' })
     expect(screen.getByRole('tab', { name: 'Bill' }).getAttribute('aria-selected')).toBe('true')
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Bill' }), { key: 'End' })
-    expect(screen.getByRole('tab', { name: 'Investment case' }).getAttribute('aria-selected')).toBe('true')
-    fireEvent.keyDown(screen.getByRole('tab', { name: 'Investment case' }), { key: 'Home' })
+    expect(screen.getByRole('tab', { name: 'Business case' }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Business case' }), { key: 'Home' })
     expect(first.getAttribute('aria-selected')).toBe('true')
     // aria-controls only on the selected tab: it must point at a panel in the DOM.
     for (const tab of screen.getAllByRole('tab')) {

@@ -2470,7 +2470,9 @@ def get_business_case_options():
     every refusal of the stored lines (G9) against the stored investment case's
     horizon. `outputs` is None with `outputs_reason` when the network cannot be read;
     `refusals` is None with `refusals_reason` without an investment case."""
-    from models.business_case import allowed_units
+    from typing import get_args
+
+    from models.business_case import CATEGORIES, Escalation, allowed_units
     from services.business_case import linked_outputs as L
     from services.business_case import presets as P
     from services.business_case.runner import BusinessCaseConfig, refusal_detail
@@ -2488,7 +2490,11 @@ def get_business_case_options():
         "template_id": template_id,
         "variants": variants,
         "offered_rows": offered,
+        "categories": {k: list(v) for k, v in CATEGORIES.items()},
+        "escalations": list(get_args(Escalation)),
         "typed_units": {k: list(allowed_units(k, "typed")) for k in ("revenue", "opex", "capex")},
+        # A linked line stores `linked:<output id>@<catalogue_version>`.
+        "catalogue_version": L.CATALOGUE_VERSION,
         "outputs": None,
         "outputs_reason": None,
         "refusals": None,
@@ -2515,6 +2521,9 @@ def get_business_case_options():
             out["outputs_reason"] = "outputs_not_readable"
         finally:
             lock.release()
+    span = _bc_ic_horizon()
+    out["horizon"] = None if span is None else list(span[0])
+    out["base_year"] = None if span is None else span[1]
     raw = _bc_raw()
     if raw is None:
         out["refusals"] = []
@@ -2524,7 +2533,6 @@ def get_business_case_options():
     except ValidationError:
         out["refusals_reason"] = "business_case_inputs_invalid"
         return out
-    span = _bc_ic_horizon()
     if span is None:
         out["refusals_reason"] = "investment_case_missing"
         return out
