@@ -6962,9 +6962,10 @@ def start_workflow(workflow_id: str) -> dict:
         })
     sess = _workflow_session()
     active = getattr(sess, "workflow", None)
-    if active:
+    if active and active.get("id") != wf.id:
         # LC48D-GOAL-1: no switch mid-workflow; the refusal names the one
-        # that runs, and end_workflow is the way out.
+        # that runs, and end_workflow is the way out. Starting the active
+        # workflow again restarts it at its first step, as before.
         raise HTTPException(status_code=409, detail={
             "error_kind": "switch_in_progress",
             "active": {"kind": "workflow", "id": active.get("id"), "step": active.get("step")},

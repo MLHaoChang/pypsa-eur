@@ -532,7 +532,7 @@ def _refuse_switch(session, task_id):
         "error_kind": "switch_in_progress",
         "active": {"kind": "task", "id": active, "title": task.get("title"),
                    "status": task.get("status")},
-        "message": f"the task \u201c{task.get('title')}\u201d is {task.get('status')}; wait for it, "
+        "message": f"the task \u201c{task.get('title') or active}\u201d is {task.get('status')}; wait for it, "
                    "or cancel it, before starting another",
     })
 

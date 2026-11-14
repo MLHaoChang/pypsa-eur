@@ -804,7 +804,7 @@ VARIANTS: list[dict] = [
              'update_component',
              B + 'test_lc48d_d23_wire_recovery.py::test_after_a_refused_switch_a_new_chat_recovers',
              B + 'test_lc48d_d23_wire_recovery.py::test_after_a_deleted_profile_picking_one_and_resending_recovers'),
-    _covered('LC-D23.goal_switch', 'owner decision LC48D-GOAL-1: start_workflow while build-network is active is 409 switch_in_progress naming it (step orient) and the session keeps it; after end_workflow the start goes through; '
+    _covered('LC-D23.goal_switch', 'owner decision LC48D-GOAL-1: start_workflow run-study while build-network is active is 409 switch_in_progress naming it (step orient) and the session keeps it; build-network again restarts it; after end_workflow run-study starts; '
              'start_task for another plan while one runs is 409 switch_in_progress naming it (status running), the same plan again is not refused, and after cancel_task the other starts',
              'start_workflow end_workflow start_task',
              B + 'test_lc48d_d23_wire_recovery.py::test_a_workflow_switch_is_refused_naming_the_active_one',

@@ -80,8 +80,9 @@ def refuse_if_lost_on_restart(token: object) -> None:
         detail={
             "error_kind": "confirmation_lost_on_restart",
             "message": (
-                "this approval card was shown before the server restarted; "
-                "approvals are kept in memory only, so nothing ran. Ask again."
+                "this approval card is no longer held by the server (it restarted, "
+                "or another worker showed the card); approvals are kept in memory "
+                "only, so nothing ran. Ask again."
             ),
             "hint": "ask again",
         },

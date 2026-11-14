@@ -19,9 +19,9 @@ Hand oracle on the baseline project (G1 20 MW):
 - profile recovery: after profile_switch_requires_new_chat, a new chat sends the turn
   and G1 reads 35 MW; after unknown_profile_id, resending on the same session with its
   own profile sends the turn and G1 reads 35 MW;
-- goal switch: starting a workflow while ``build-network`` is active is 409
-  switch_in_progress naming it (step ``orient``) and the session keeps it; after
-  end_workflow the start goes through. Starting another task while one runs is 409
+- goal switch: starting ``run-study`` while ``build-network`` is active is 409
+  switch_in_progress naming it (step ``orient``) and the session keeps it; starting
+  ``build-network`` again restarts it; after end_workflow ``run-study`` starts. Starting another task while one runs is 409
   switch_in_progress naming it (status running); a repeated start of the same plan is not
   refused; once the running task is cancelled the other starts.
 """
@@ -165,20 +165,21 @@ def chat(baseline):
 
 def test_a_workflow_switch_is_refused_naming_the_active_one(chat):
     chat_tools.start_workflow("build-network")
-    refused(
-        lambda: chat_tools.start_workflow("build-network"), 409, "switch_in_progress"
-    )
+    refused(lambda: chat_tools.start_workflow("run-study"), 409, "switch_in_progress")
     with pytest.raises(chat_router.HTTPException) as switch:
-        chat_tools.start_workflow("build-network")
+        chat_tools.start_workflow("run-study")
     assert switch.value.detail["active"] == {
         "kind": "workflow",
         "id": "build-network",
         "step": "orient",
     }
     assert chat.workflow == {"id": "build-network", "step": "orient"}
+    # The active workflow again is no switch: it restarts at its first step.
+    assert chat_tools.start_workflow("build-network")["step"] == "orient"
 
     chat_tools.end_workflow()
-    assert chat_tools.start_workflow("build-network")["step"] == "orient"
+    assert chat_tools.start_workflow("run-study")["workflow"] == "run-study"
+    assert chat.workflow["id"] == "run-study"
 
 
 WAIT = [{"id": "wait", "tool": "wait_for_job", "args": {"job_id": "job"}}]

@@ -2257,7 +2257,11 @@ def _run_turn_body(
     # between its tool calls and their results) is answered with a synthetic
     # `interrupted_tool_call` error, first in the user message after it, in
     # this outgoing list only: the history persists `user_content` as it is.
-    messages[:] = repair_unpaired_tool_use(messages)
+    repaired = repair_unpaired_tool_use(messages)
+    if repaired is not messages:
+        messages[:] = repaired
+        # The anchor is still the last message before this turn's own.
+        history_cache_anchor = len(messages) - 2 if len(messages) > 1 else None
 
     # Task 8 — vision capability enforcement, on the OUTBOUND MESSAGE ARRAY,
     # not on `attachment_file_ids`. Checked HERE, before this turn's message

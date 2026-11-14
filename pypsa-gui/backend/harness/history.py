@@ -1072,7 +1072,10 @@ def repair_unpaired_tool_use(messages: list[dict[str, Any]]) -> list[dict[str, A
                       "content": INTERRUPTED_TOOL_CALL} for t in missing]
         if nxt is not None and nxt.get("role") == "user":
             content = nxt.get("content")
-            blocks = content if isinstance(content, list) else [{"type": "text", "text": content}]
+            if isinstance(content, list):
+                blocks = content
+            else:
+                blocks = [{"type": "text", "text": content}] if content else []
             results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
             others = [b for b in blocks
                       if not (isinstance(b, dict) and b.get("type") == "tool_result")]
