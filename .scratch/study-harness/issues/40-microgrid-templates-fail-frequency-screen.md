@@ -10,7 +10,7 @@ Gated: GK A
 Likely files: pypsa-gui/backend/project_templates/eh_microgrid/island_config.json; pypsa-gui/backend/project_templates/eh_microgrid_staged/; pypsa-gui/backend/services/run_gates.py (mg.island.frequency); pypsa-gui/backend/services/campus_island_*.py
 Type: bug
 Found by: issue 12's fit check (GK A I5)
-Owner decisions: SH40-FREQ-1
+Owner decisions: SH40-FREQ-1, SH40-BRIDGE, SH40-BRIDGE-2
 
 ## What was seen
 
@@ -58,3 +58,5 @@ Owner answered (SH40-FREQ-1, `docs/agents/owner-decisions.md`). Status: ready-fo
 
 - Owner (via the coordinator, 17:39Z): SH40-BRIDGE option 2, "Widen: LP per battery": the island LP reserves each grid-forming battery's own bridge share, in this PR, GK A plan first.
 - Correction (this session, before building): with the subsea tie open the LP's islanding step is ΔP⁺ = p_imp − Σ_late X = 0 (`services/solver/island.py:1326-1338`), so its bridge energy B(t) is 0 whether summed or per battery. The screen's bridge step is I4's AC-loss ΔP_AC (25 kW), which the LP does not see, so a per-battery share of B(t) alone leaves the 24 hours failing. Corrected options sent to the coordinator as SH40-BRIDGE-2; waiting on the owner.
+- Measured (asked by GK A 27): on all 35 staged island hours the solved import is 0 (|x| < 2e-15 MW) and E1's 24.9 kW step equals the island's AC network losses (`gridspine/static/island_flow.py:306-310`): carried before and after islanding alike, not an islanding step.
+- Owner (via the coordinator, 2026-11-14 00:02Z): SH40-BRIDGE-2 option 1. In this PR: the screen does not judge E1 or the bridge on hours whose solved tie state is open (read from the run's own result, never a template tag); those hours read "not applicable: tie open", never a pass, named on the card; tests for an open-tie and a closed-tie hour; a template-keyed mutant must die. Plus the per-battery LP bridge row, with a closed-tie test where one battery is empty. GK A plan first; staged sizing unchanged.
