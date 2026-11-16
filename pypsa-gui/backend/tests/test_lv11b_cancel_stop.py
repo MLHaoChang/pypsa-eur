@@ -288,8 +288,20 @@ def _plan_run(gate):
     def on_frame(event, data):
         approve(event, data)
         seen.append((event, data.get("tool_name") if isinstance(data, dict) else None))
-        if event == "tool_progress" and data.get("tool_name") == "run_simulation" and not stopped:
-            stopped.append(chat_tools.chat_session().stop_monitoring())
+        if event == "tool_running" and data.get("tool_name") == "run_simulation":
+            session = chat_tools.chat_session()
+
+            def stop_once_held():
+                # The gate logs before the bridge subscribes, so no progress
+                # frame is guaranteed: stop once the solve is held and the
+                # turn is in its grace hold.
+                deadline = time.monotonic() + 10
+                while not gate.starts and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                time.sleep(0.5)
+                stopped.append(session.stop_monitoring())
+
+            threading.Thread(target=stop_once_held, daemon=True).start()
 
     plan = [{"id": "run", "tool": "run_simulation", "args": {}}]
     began = time.monotonic()
