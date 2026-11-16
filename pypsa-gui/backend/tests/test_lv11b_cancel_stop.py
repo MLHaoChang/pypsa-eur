@@ -399,9 +399,9 @@ def test_an_outsider_cannot_stop_someone_elses_monitor(own_session, _auth_db):
 # ── B2: Stop monitoring during a plan step's in-turn hold ────────────────────
 
 
-def _plan_run(gate):
+def _plan_run(gate, stop_mid_hold=True):
     """Start a one-step plan whose solve the gate holds, and Stop monitoring
-    on its first progress line, inside the turn's grace hold."""
+    once the solve is held, inside the turn's grace hold (or not at all)."""
     cards, stopped = [], []
     approve = _approve(cards)
 
@@ -410,7 +410,11 @@ def _plan_run(gate):
     def on_frame(event, data):
         approve(event, data)
         seen.append((event, data.get("tool_name") if isinstance(data, dict) else None))
-        if event == "tool_running" and data.get("tool_name") == "run_simulation":
+        if (
+            stop_mid_hold
+            and event == "tool_running"
+            and data.get("tool_name") == "run_simulation"
+        ):
             session = chat_tools.chat_session()
 
             def stop_once_held():
@@ -442,7 +446,9 @@ def _plan_run(gate):
         on_frame=on_frame,
     )
     elapsed = time.monotonic() - began
-    assert stopped, f"no progress frame in the hold ({elapsed:.1f}s): {seen[:40]}"
+    assert stopped or not stop_mid_hold, (
+        f"no stop in the hold ({elapsed:.1f}s): {seen[:40]}"
+    )
     return results, session, stopped, elapsed
 
 
@@ -463,6 +469,50 @@ def _released(results, session, stopped, elapsed):
     task = chat_tools.get_task(results[0]["task_id"])
     assert task["next_step"]["id"] == "run" and task["next_step"]["status"] == "waiting"
     return run["job_id"], results[0]["task_id"]
+
+
+def test_b2_a_stop_between_the_loops_read_and_the_first_poll_ends_the_hold_and_the_monitor(
+    held_plan, monkeypatch
+):
+    """GK B on #1548: loop.py reads the generation once and hands it to both the
+    detached monitor and the in-turn hold. A Stop landing right after that read
+    ends both; either one re-reading for itself would keep watching."""
+    from harness.session import ChatSession
+
+    real = ChatSession.monitor_generation
+    armed, fired = [], []
+
+    def read_then_stop(self):
+        generation = real(self)
+        if armed and not fired:
+            fired.append(generation)
+            self.stop_monitoring()  # after the loop's read, before any poll
+        return generation
+
+    monkeypatch.setattr(ChatSession, "monitor_generation", read_then_stop)
+    real_approve = _approve
+
+    def approve_and_arm(cards):
+        approve = real_approve(cards)
+
+        def on_frame(event, data):
+            approve(event, data)
+            if event == "tool_running" and data.get("tool_name") == "run_simulation":
+                armed.append(True)  # the next read is the hand-off's
+
+        return on_frame
+
+    monkeypatch.setitem(globals(), "_approve", approve_and_arm)
+    results, session, _, elapsed = _plan_run(held_plan, stop_mid_hold=False)
+    assert len(fired) == 1
+    assert elapsed < 15, f"the hold kept watching past the stop: {elapsed:.1f}s"
+    assert _until(lambda: not session.detached_monitor_active())
+    run = results[1]
+    assert run["running"] is True and run["job_id"].startswith("fg:")
+    held_plan.open.set()
+    _settle_solver()
+    task = _settled_step(results[0]["task_id"], "completed")
+    assert task["completed_steps"] == 1  # the step still settles from the record
 
 
 def _settled_step(task_id, status, timeout=60):
