@@ -23,7 +23,6 @@ from services.asset_schema.derive import (
     derive_composite,
     effective_discount_rate,
     has_parts,
-    owned_column_label,
     owned_columns,
     part_scales,
     split_parts,
@@ -341,6 +340,13 @@ def _check_investment_parts(component_class: str, parts: dict, *, row: dict) -> 
         raise HTTPException(422, str(exc)) from exc
 
 
+def _as_float(v) -> float | None:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def check_parts_own_costs(component_class: str, parts: dict, *, before: dict, submitted: dict) -> None:
     """Refuse (422) an edit of a cost column the investment parts own (`derive.owned_columns`) when the row as
     written still prices a part: the value would be reported written and then re-derived away. Like the fuel
@@ -354,22 +360,16 @@ def check_parts_own_costs(component_class: str, parts: dict, *, before: dict, su
         v = submitted[col]
         if v is None or v == "":
             continue
-        try:
-            fv = float(v)
-        except (TypeError, ValueError):
-            fv = None  # not a number: an edit, refused below
-        if fv is not None and math.isnan(fv):
-            continue
-        try:
-            stored = float(before.get(col))
-        except (TypeError, ValueError):
-            stored = None
+        fv, stored = _as_float(v), _as_float(before.get(col))
+        if fv is None or math.isnan(fv):
+            continue  # a blank is not an edit; a non-number is the type check's to refuse
         # Exact (GK B, TCU 09 P1): the form echoes the stored float, which JSON round-trips; no tolerance.
-        if fv is not None and stored is not None and fv == stored:
+        if stored is not None and fv == stored:
             continue
+        label = next((f.label for f in asset_fields.fields_for(component_class) if f.key == col), col)
         raise HTTPException(
             422,
-            f"{owned_column_label(col)}: set by the investment parts. Change a part's overnight cost, lifetime "
+            f"{label}: set by the investment parts. Change a part's overnight cost, lifetime "
             "or FOM share, or clear the parts to enter it directly")
 
 

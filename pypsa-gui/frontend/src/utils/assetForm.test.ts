@@ -126,7 +126,8 @@ describe('derivedStored: the capital cost PyPSA charges', () => {
 describe('omitDerived: a composite PUT never echoes a derived cost (TCU 09)', () => {
   it('drops the derived columns from the spread row, so the JSON body leaves them out', () => {
     const current = { name: 'bess', capital_cost: 41234.56789, inv_power_overnight: 300_000, p_nom: 10 }
-    const patch = omitDerived([OVERNIGHT, CAPEX, P_NOM], { p_nom: 12 } as Record<string, unknown>)
+    const patch: Record<string, unknown> = { p_nom: 12 }
+    omitDerived([OVERNIGHT, CAPEX, P_NOM], patch)
     const body = JSON.parse(JSON.stringify({ ...current, ...patch }))
     expect(body).toEqual({ name: 'bess', inv_power_overnight: 300_000, p_nom: 12 })
   })

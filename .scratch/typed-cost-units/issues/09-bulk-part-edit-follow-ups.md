@@ -14,7 +14,7 @@ Parent: `08-bulk-part-edit-skips-rederive-and-fingerprint.md`.
   `lifetime` when every part has its own lifetime: StorageUnit, not Line) reported "updated" and was then re-derived
   away. It is now a 422 naming the parts (`network_crud.check_parts_own_costs`, modelled on `fuel_curve.guard`):
   a blank or the stored value is not an edit; clearing the parts in the same write is allowed. The sweep refuses
-  such a case (`invalid_sensitivity_attribute`) before any case exists. The assistant preview already refuses
+  such a case (`invalid_sensitivity_cases`, a registered kind) before any case exists. The assistant preview already refuses
   these through `edit_card._check_value` (`derived_field`).
 - N3: after a project discount-rate change, any write to a priced row re-derives it at the new rate (bulk on any
   column, and PUT as before). Kept: the costs really are stale, the rate change already moved the fingerprint

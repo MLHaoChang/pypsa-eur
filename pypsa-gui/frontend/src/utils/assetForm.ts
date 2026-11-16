@@ -98,10 +98,9 @@ function blankValue(spec: AssetFieldSpec, current: Record<string, unknown>): unk
  * under the patch, and the backend refuses a derived cost that differs from the stored one while the asset's
  * investment parts own it; an undefined key drops out of the JSON body, so the stored value stands.
  */
-export function omitDerived<T extends object>(specs: AssetFieldSpec[], patch: T): T {
+export function omitDerived(specs: AssetFieldSpec[], patch: object): void {
   const out = patch as Record<string, unknown>
   for (const s of specs) if (s.derived) out[s.key] = undefined
-  return patch
 }
 
 /**

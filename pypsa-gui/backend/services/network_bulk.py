@@ -578,9 +578,7 @@ def apply_bulk_update(body: dict) -> dict:
 
         if component_class in COMPOSITE:
             from services.asset_schema.derive import split_parts
-            from services.network_crud import _check_investment_parts
-
-            from services.network_crud import check_parts_own_costs
+            from services.network_crud import _check_investment_parts, check_parts_own_costs
 
             for (_targets, coerced), (_, submitted) in zip(pending, batches):
                 for t in _targets:
