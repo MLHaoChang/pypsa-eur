@@ -64,6 +64,12 @@ def _frames(path):
 
 def test_a_sweep_child_is_what_masters_inline_steps_wrote(baseline, monkeypatch):
     _, project_id, _ = baseline
+    # No solve runs: it would rewrite the children's files while they are read.
+    monkeypatch.setattr(
+        chat_tools,
+        "solve_queue_enqueue",
+        lambda project_id, rerun_current=False: {"id": "job", "status": "queued"},
+    )
     out = chat_tools.run_sensitivity_sweep(project_id, [case("Helper child", 25)])
     assert out["status"] == "submitted"
     monkeypatch.setattr(shipped_fork, "save", _master_save)
