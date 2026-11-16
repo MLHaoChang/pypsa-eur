@@ -513,7 +513,10 @@ def test_a_write_of_a_column_the_parts_own_is_refused_and_writes_nothing(
             rows = [{"name": name, "updates": {col: value}}]
         r = client.patch(BULK, json={"component_class": cls, "rows": rows})
     assert r.status_code == 422, r.text
-    assert "set by the investment parts" in r.text
+    from services.asset_schema.fields import fields_for
+
+    label = next(f.label for f in fields_for(cls) if f.key == col)
+    assert f"{label}: set by the investment parts" in r.json()["detail"]
     pd.testing.assert_frame_equal(getattr(n, attr), frame)
 
 
@@ -586,9 +589,13 @@ def test_clearing_the_parts_and_typing_a_cost_in_one_write_is_accepted(
     assert float(n.storage_units.at["bess", "capital_cost"]) == 1234.0
 
 
+@pytest.mark.parametrize(
+    "names", [["bess"], ["missing", "bess"]], ids=["priced", "unknown-first"]
+)
 def test_a_sweep_of_a_cost_the_parts_own_is_refused_before_any_case_exists(
-    client, session_ctx, install_network
+    client, session_ctx, install_network, names
 ):
+    """An unknown name is skipped by the pre-check (the bulk write refuses it); the priced target still is."""
     from fastapi import HTTPException
 
     from services import chat_tools, project_registry
@@ -610,7 +617,7 @@ def test_a_sweep_of_a_cost_the_parts_own_is_refused_before_any_case_exists(
                 "changes": [
                     {
                         "component_class": "StorageUnit",
-                        "names": ["bess"],
+                        "names": names,
                         "attribute": "capital_cost",
                         "value": 1.0,
                     }
@@ -914,3 +921,35 @@ def test_a_new_all_blank_part_column_leaves_the_fingerprint(client, install_netw
     assert r.status_code == 200, r.text
     assert "inv_power_fom_share" in n.storage_units.columns
     assert _fingerprint(n) == fp
+
+
+def test_owned_columns_are_empty_for_a_class_without_parts():
+    from services.asset_schema.derive import owned_columns
+
+    assert owned_columns("Generator") == ()
+    assert owned_columns("StorageUnit") == (
+        "capital_cost",
+        "fom_cost",
+        "overnight_cost",
+        "lifetime",
+    )
+    assert owned_columns("Line") == ("capital_cost", "fom_cost", "overnight_cost")
+
+
+def test_a_bulk_part_edit_keeps_the_other_rows_parts(client, install_network):
+    """An existing part column is written, never re-created: the untouched battery keeps its parts."""
+    from services.asset_schema.schema import part_columns
+
+    n = install_network(_network())
+    cols = [c for c in part_columns("StorageUnit") if c in n.storage_units.columns]
+    other = n.storage_units.loc["bess2", cols].copy()
+    r = client.patch(
+        BULK,
+        json={
+            "component_class": "StorageUnit",
+            "names": ["bess"],
+            "updates": {"inv_power_overnight": 500_000.0},
+        },
+    )
+    assert r.status_code == 200, r.text
+    pd.testing.assert_series_equal(n.storage_units.loc["bess2", cols], other)

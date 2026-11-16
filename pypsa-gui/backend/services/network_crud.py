@@ -357,14 +357,11 @@ def check_parts_own_costs(component_class: str, parts: dict, *, before: dict, su
     for col in owned_columns(component_class):
         if col not in submitted:
             continue
-        v = submitted[col]
-        if v is None or v == "":
-            continue
-        fv, stored = _as_float(v), _as_float(before.get(col))
+        fv = _as_float(submitted[col])
         if fv is None or math.isnan(fv):
-            continue  # a blank is not an edit; a non-number is the type check's to refuse
+            continue  # a blank (None, "", NaN) is not an edit; a non-number is the type check's to refuse
         # Exact (GK B, TCU 09 P1): the form echoes the stored float, which JSON round-trips; no tolerance.
-        if stored is not None and fv == stored:
+        if fv == _as_float(before.get(col)):
             continue
         label = next((f.label for f in asset_fields.fields_for(component_class) if f.key == col), col)
         raise HTTPException(
