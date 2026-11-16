@@ -53,10 +53,9 @@ def format_event_id(epoch: str, seq: int) -> str:
 
 def parse_event_id(raw: str) -> tuple[str, int]:
     """Split ``<epoch>:<seq>``; ValueError on anything else."""
-    epoch, sep, seq = raw.strip().partition(":")
+    epoch, _sep, seq = raw.strip().partition(":")
     if (
-        not sep
-        or _EPOCH_RE.match(epoch) is None
+        _EPOCH_RE.match(epoch) is None
         or not seq.isdigit()
         or not seq.isascii()
         or len(seq) > _MAX_SEQ_DIGITS

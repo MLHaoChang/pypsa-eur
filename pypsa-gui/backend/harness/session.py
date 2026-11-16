@@ -683,7 +683,7 @@ class ChatSession:
             if epoch != current or seq > self._progress_seq:
                 return 'snapshot'
             oldest = (
-                int(self._progress_log[0].get('cursor') or 0)
+                int(self._progress_log[0]['cursor'])
                 if self._progress_log else self._progress_seq + 1
             )
             return 'replay' if seq >= oldest - 1 else 'snapshot'

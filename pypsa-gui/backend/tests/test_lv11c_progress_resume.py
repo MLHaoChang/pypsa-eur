@@ -81,6 +81,7 @@ def test_an_epoch_verifies_only_for_its_own_session():
     nonce, mac = epoch.split(".")
     flipped = mac[:-1] + ("0" if mac[-1] != "0" else "1")
     assert not progress_ids.epoch_belongs_to("s1", f"{nonce}.{flipped}")
+    assert not progress_ids.epoch_belongs_to("s1", "not-an-epoch")
 
 
 @pytest.mark.parametrize(
