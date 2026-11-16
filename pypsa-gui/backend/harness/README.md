@@ -10,7 +10,7 @@ harness/
   protocol.py     the provider seam: LLMProvider, LLMRequest, LLMEvent, ERROR_KINDS
   catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES
   toolsets.py     ordered provider-neutral catalogue views and always-available controls
-  events.py       the closed vocabulary of frames the turn loop yields to the UI
+  events.py       the closed vocabulary of frames the turn loop yields to the UI; (live-voice 11c) `PROGRESS_FRAMES`, the separate vocabulary of the /progress stream (`tool_progress`, `job_snapshot`, `job_terminal`)
   assurance.py    opt-in checked input/result drafts and publication gate
   assurance_scope.py  typed requested metrics, windows, cost basis and retained/comparison IDs
   assurance_conversation.py  bounded checked-scope carryover, cost clarification and previous-run selection
@@ -37,6 +37,7 @@ harness/
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py); `dispatch_tool_call` is the one per-call path (allowlist → guard → validators → card → handler) every caller drives
   run_lifecycle.py  LC-19: a re-solve of current results is asked about before its card (`results_current`), and a failed solve names its triage reads; nothing re-runs by itself
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call; (live-voice 11b) each bridge ends when its session's `monitor_generation` moves (Stop monitoring, `POST /api/chat/{id}/progress/stop`, `ChatSession.stop_monitoring`), which ends this session's observation only, never the job (cancelling is the `cancel_job` tool). The generation is per session and is not the 11c event-ring epoch
+  progress_ids.py (live-voice 11c) /progress event ids `<epoch>:<seq>`: an epoch is a nonce signed with the server key and the session id, so a past epoch still verifies for its session after a restart (resumed with a `job_snapshot`) and another session's does not (409 `progress_cursor_foreign`)
   job_adapters.py the fg:/ad:/rpt: job handles for wait_for_job without holding the turn, and (live-voice 11a) `job_status` / `cancel_job`: one neutral view of every job family, solve queue and GridSpine included, with a cursor, start revision, outcome and a cancel that reports only what it verified. Cancel verdicts: `cancelled` (outcome cancelled and the worker exited), `cancel_requested` (sent, not yet confirmed within the settle bound, capped at `CANCEL_SETTLE_MAX_SECONDS`), `already_finished`, `finished_first`, `origin_lost` (a newer run took the record, the worker exited without a status, or the project was reopened as a new context: nothing is stopped; a switch to another project is 409 `job_project_mismatch`), `refused` (with `refusal.error_kind`: the queue refused the abort, or `not_stoppable`); a native handle with no owner is 409 `job_owner_unknown` on cancel. The stop is set on the handle's own record in the same solver-state-lock hold that checked its origin
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
@@ -62,7 +63,7 @@ harness/
   mcp_client.py   external tools from admin-listed MCP servers (issue 19): the server list, the stdio and HTTP JSON-RPC client, the per-session tool list and tiers, the dispatcher
   goals.py        a goal with a round budget: set/pause/complete, what stops it after a turn, the per-turn goal block (rounds run in loop.run_turn)
   ratelimit.py    the /stream token bucket
-  sse.py          the SSE framing of a yielded (event, payload)
+  sse.py          the SSE framing of a yielded (event, payload); an optional `id:` line, written only on the /progress stream (live-voice 11c)
   fence.py        the untrusted-content delimiters and the neutraliser
   results.py      tool-result shaping: coercion, truncation, the per-turn result budget, error content
   spill.py        oversized results kept whole per owner and session; the model gets a preview and a locator for `read_result`

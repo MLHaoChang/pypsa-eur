@@ -133,3 +133,35 @@ snapshot recovery, results refresh).
   match. Tested: navigation after the job started (no navigation, no foreign
   invalidation), and cancelled or failed outcomes (no refresh).
 - Each PR that touches the frontend goes to UX too.
+
+2026-11-16: GK B (59) plan GO for 11c, split 11c-1 (backend) and 11c-2 (frontend, plus UX).
+- (a) A foreign epoch gets 409 `progress_cursor_foreign`, with nothing streamed. A
+  malformed id gets 400 `invalid_progress_cursor`. Both are tested.
+- (b) The terminal event is a progress item (`job_terminal`), not a second snapshot.
+- E1: a restart is the main C1 case. An epoch from before a rehydrate must give
+  `job_snapshot`, and a truly foreign id gives 409. Built as signed epochs
+  (`harness/progress_ids.py`): there is no stored set, so nothing is evicted.
+- E2: replay is ACL-filtered too. A replayed `job_terminal` re-reads the job through
+  `job_status` for the requesting actor at send time.
+- E3: Last-Event-ID wins over `?cursor=` (pinned).
+- E4: mutants on each snapshot filter (actor, project), the past-epoch check, the gap
+  check and the id parser.
+- E5: test_harness_layout, the manifest test, ChatPanel.manifest and the three smoke
+  `--check`s run at the trial merge.
+- R1: C3 compares job.input_revision with the same quantity it was captured from. A
+  job with input_revision None gets no auto-refresh.
+- R2: the high-water mark is per (session, epoch), and a snapshot resets it. Backoff is
+  bounded and stops when the monitor is inactive or after Stop monitoring.
+- R3: pressing Stop monitoring POSTs /progress/stop, closes the stream, and makes no
+  cancel call.
+
+2026-11-16: UX (21) conditions for 11c-2:
+1. Visible text: "Stop monitoring" with "the job keeps running" beside it; Cancel stays
+   the separate card. No engine or tool ids in either label.
+2. After a Stop the line reads "Not monitoring. The job is still running."; the
+   control goes away or becomes a way to watch again.
+3. A snapshot after a gap is announced in one muted line, never as a duplicate line.
+4. The in-place results refresh shows no toast and leaves no stale "refreshed" mark
+   in the mismatch cases.
+- Shots: the line with Stop monitoring, the state after Stop, and the card next to
+  Cancel, in Guided and Expert.
