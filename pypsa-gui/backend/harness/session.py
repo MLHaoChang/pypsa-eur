@@ -266,6 +266,9 @@ class ChatSession:
     _progress_log: collections.deque = field(
         default_factory=lambda: collections.deque(maxlen=500),
     )
+    # live-voice 11c: this in-memory life of the progress log (see
+    # harness/progress_ids.py); minted on first use, never moved by a Stop.
+    _progress_epoch: str | None = None
     _detached_monitor: dict[str, Any] | None = None
     # live-voice 11b: Stop monitoring. Every solver-log bridge on this
     # session records the generation it started under and ends when it moves.
@@ -654,6 +657,36 @@ class ChatSession:
     def progress_cursor(self) -> int:
         with self._lock:
             return self._progress_seq
+
+    def progress_epoch(self) -> str:
+        from harness import progress_ids
+
+        with self._lock:
+            if self._progress_epoch is None:
+                self._progress_epoch = progress_ids.mint_epoch(self.session_id)
+            return self._progress_epoch
+
+    def progress_resume_point(self, epoch: str, seq: int) -> str:
+        """How a client holding ``<epoch>:<seq>`` resumes (live-voice 11c).
+
+        ``replay``: the log still holds everything after ``seq``.
+        ``snapshot``: a past epoch of this session (a restart or rehydrate),
+        or a ``seq`` older than the log keeps (a gap); never a replay from 0.
+        ``foreign``: an epoch this session never had.
+        """
+        from harness import progress_ids
+
+        if not progress_ids.epoch_belongs_to(self.session_id, epoch):
+            return 'foreign'
+        current = self.progress_epoch()
+        with self._lock:
+            if epoch != current or seq > self._progress_seq:
+                return 'snapshot'
+            oldest = (
+                int(self._progress_log[0].get('cursor') or 0)
+                if self._progress_log else self._progress_seq + 1
+            )
+            return 'replay' if seq >= oldest - 1 else 'snapshot'
 
     def drain_detached_progress(
         self, *, after_cursor: int | None = None,

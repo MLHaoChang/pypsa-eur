@@ -2535,6 +2535,56 @@ def chat_dismiss_continuation(session_id: str, job_id: str,
         raise
 
 
+def _progress_project_id() -> str | None:
+    from services.pypsa_service import PyPSAService
+
+    project = PyPSAService.get_active_context().project_uuid
+    return str(project) if project else None
+
+
+def _progress_job_view(job_id: str, actor_id: str | None) -> dict | None:
+    """live-voice 11c (C1, E2): a job's view for this reader, read now.
+
+    Through the 11a adapter as the requesting actor, and only for the
+    session's current project; anything it refuses is served as nothing.
+    """
+    from harness import job_adapters
+
+    try:
+        view = job_adapters.job_status(job_id, actor_id=actor_id)
+    except HTTPException:
+        return None
+    project_id = _progress_project_id()
+    if project_id is None or view.get("project_id") != project_id:
+        return None
+    return view
+
+
+def _progress_snapshot(session, actor_id, epoch: str, seq: int) -> dict:
+    """live-voice 11c: what a resume that cannot replay starts from."""
+    from harness import job_adapters
+    from services.pypsa_service import PyPSAService
+
+    project_id = _progress_project_id()
+    jobs = []
+    if actor_id is not None and project_id is not None:
+        rows = job_adapters.activity_jobs(
+            PyPSAService.get_active_context(),
+            owner_id=str(actor_id),
+            project_id=project_id,
+        )
+        for row in rows:
+            view = _progress_job_view(row["source_id"], actor_id)
+            if view is not None:
+                jobs.append(view)
+    return {
+        "epoch": epoch,
+        "seq": seq,
+        "monitor_active": session.detached_monitor_active(),
+        "jobs": jobs,
+    }
+
+
 @router.get("/{session_id}/progress")
 async def chat_progress(
     session_id: str,
@@ -2545,10 +2595,15 @@ async def chat_progress(
     """
     Issue 11 — observe detached solver progress after a foreground handoff.
 
-    Drains the session's detached progress ring and emits existing
-    ``tool_progress`` SSE frames (no new frame names). Each payload carries
-    a monotonic ``cursor`` (D-I2). Pass ``?cursor=N`` to replay frames after
-    N from the session log (gap recovery) without clearing the unread ring.
+    Drains the session's detached progress ring and emits the frames in
+    ``harness.events.PROGRESS_FRAMES``. Each payload carries a monotonic
+    ``cursor`` (D-I2) and each frame an SSE ``id: <epoch>:<seq>`` (live-voice
+    11c). A ``Last-Event-ID`` header resumes after that id: same epoch with
+    the log intact replays the rest; a past epoch of this session (restart)
+    or a gap sends ``job_snapshot`` first and never replays from 0; a
+    malformed id is 400 and another session's id 409, with nothing streamed.
+    The header wins over ``?cursor=N``, the older path, which replays after
+    N from the session log without clearing the unread ring.
     Stays open while a detached monitor is active; exits once the ring is
     empty and the monitor is inactive. Ownership/replica gates match /confirm.
     """
@@ -2572,6 +2627,51 @@ async def chat_progress(
                 "message": "cursor must be a non-negative integer",
             },
         )
+    from harness import progress_ids
+
+    # live-voice 11c: Last-Event-ID (`<epoch>:<seq>`) wins over `?cursor=`,
+    # which stays for the old client path (Q1).
+    last_event_id = request.headers.get("last-event-id")
+    snapshot_first = False
+    if last_event_id is not None:
+        try:
+            epoch, seq = progress_ids.parse_event_id(last_event_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error_kind": "invalid_progress_cursor",
+                    "message": "Last-Event-ID must be an id this stream sent",
+                },
+            ) from None
+        point = session.progress_resume_point(epoch, seq)
+        if point == "foreign":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "progress_cursor_foreign",
+                    "message": "Last-Event-ID belongs to another chat session",
+                },
+            )
+        snapshot_first = point == "snapshot"
+        cursor = session.progress_cursor() if snapshot_first else seq
+    actor_id = str(actor.id) if actor is not None else session.owner_user_id
+    epoch_now = session.progress_epoch()
+
+    def _framed(payload):
+        event_id = progress_ids.format_event_id(epoch_now, int(payload["cursor"]))
+        if payload.get("frame") != "job_terminal":
+            return chat_service.sse_frame("tool_progress", payload, event_id=event_id)
+        return chat_service.sse_frame(
+            "job_terminal",
+            {
+                "job_id": payload["job_id"],
+                "tool_use_id": payload.get("tool_use_id"),
+                "job": _progress_job_view(payload["job_id"], actor_id),
+                "cursor": payload["cursor"],
+            },
+            event_id=event_id,
+        )
 
     async def _gen():
         # First drain is immediate so a short-lived ring is not held for a
@@ -2579,6 +2679,12 @@ async def chat_progress(
         # replays from the log once, then falls through to unread drains.
         idle_rounds = 0
         resume_cursor = cursor
+        if snapshot_first:
+            yield chat_service.sse_frame(
+                "job_snapshot",
+                _progress_snapshot(session, actor_id, epoch_now, resume_cursor),
+                event_id=progress_ids.format_event_id(epoch_now, resume_cursor),
+            )
         while True:
             if await request.is_disconnected():
                 return
@@ -2590,7 +2696,7 @@ async def chat_progress(
             else:
                 payloads = session.drain_detached_progress()
             for payload in payloads:
-                yield chat_service.sse_frame("tool_progress", payload)
+                yield _framed(payload)
             if session.detached_monitor_active():
                 idle_rounds = 0
                 await asyncio.sleep(PROGRESS_POLL_SECONDS)

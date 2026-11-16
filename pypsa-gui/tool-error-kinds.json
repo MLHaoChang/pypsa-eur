@@ -789,7 +789,7 @@
     },
     "invalid_progress_cursor": {
       "surface": "inline",
-      "why": "GET /api/chat/{id}/progress refuses a negative cursor query; route-only, never a tool completion failure."
+      "why": "GET /api/chat/{id}/progress refuses a negative cursor query (422) or a malformed Last-Event-ID (400, live-voice 11c); route-only, never a tool completion failure. Nothing is streamed; the panel reopens the stream without the id."
     },
     "invalid_component_name": {
       "surface": "inline",

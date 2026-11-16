@@ -68,3 +68,20 @@ FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
 }
 
 FRAMES: frozenset[str] = frozenset(FRAME_PAYLOADS)
+
+# live-voice 11c: the frames of the detached-progress stream
+# (GET /api/chat/{session_id}/progress), a separate envelope from the turn
+# frames above. Each carries an SSE ``id: <epoch>:<seq>`` the client resumes
+# from with Last-Event-ID (`harness/progress_ids.py`).
+PROGRESS_FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
+    # A solver line the detached monitor collected (issue 11, unchanged keys).
+    "tool_progress": ("tool_use_id", "line"),
+    # The jobs this actor may see in the session's project, sent first when
+    # a resume cannot replay: a past epoch (restart) or a gap.
+    "job_snapshot": ("epoch", "seq", "monitor_active", "jobs"),
+    # The monitored solve ended; `job` is the job's view re-read for the
+    # requesting actor when the frame is sent, or null when it is refused.
+    "job_terminal": ("job_id", "tool_use_id", "job"),
+}
+
+PROGRESS_FRAMES: frozenset[str] = frozenset(PROGRESS_FRAME_PAYLOADS)

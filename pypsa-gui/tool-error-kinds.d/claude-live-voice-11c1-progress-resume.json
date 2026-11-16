@@ -1,0 +1,3 @@
+{"kinds": {
+  "progress_cursor_foreign": {"surface": "inline", "why": "GET /api/chat/{id}/progress (live-voice 11c): the Last-Event-ID names an epoch this chat session never had (another session's id). Nothing is streamed; route-only, never a tool completion failure. The panel reopens the stream without the id."}
+}}
