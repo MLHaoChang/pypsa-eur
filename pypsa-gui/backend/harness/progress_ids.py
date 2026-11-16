@@ -26,11 +26,11 @@ _MAX_SEQ_DIGITS = 18
 def _key() -> bytes:
     from settings import get_settings
 
-    return get_settings().secret_key.encode("utf-8")
+    return get_settings().secret_key.encode()
 
 
 def _mac(session_id: str, nonce: str) -> str:
-    material = f"progress-epoch:{session_id}:{nonce}".encode("utf-8")
+    material = f"progress-epoch:{session_id}:{nonce}".encode()
     return hmac.new(_key(), material, hashlib.sha256).hexdigest()[:_MAC_HEX]
 
 

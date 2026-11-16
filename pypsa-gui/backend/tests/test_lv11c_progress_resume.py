@@ -16,7 +16,12 @@ from harness import job_adapters as ja
 from services import chat_service, chat_tools
 from services.pypsa_service import PyPSAService
 from tests.test_lv11a_job_contract import _start, _stop_all
-from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
+from tests import test_workflow_tools as _workflow_tools
+
+
+# The shared fixtures, bound by name so pytest finds them here.
+baseline = _workflow_tools.baseline
+helpers_state = _workflow_tools.helpers_state
 
 
 def _frames(body: str) -> list[tuple[str | None, str, dict]]:
@@ -86,8 +91,20 @@ def test_an_epoch_verifies_only_for_its_own_session():
 
 @pytest.mark.parametrize(
     "raw",
-    ["", "7", "abc:1", "zzzzzzzzzzzz.0123456789abcdef:1", ":1", "{e}", "{e}:", "{e}:-1",
-     "{e}:1.5", "{e}:١", "{e}:" + "9" * 19, "{e}:1:2"],
+    [
+        "",
+        "7",
+        "abc:1",
+        "zzzzzzzzzzzz.0123456789abcdef:1",
+        ":1",
+        "{e}",
+        "{e}:",
+        "{e}:-1",
+        "{e}:1.5",
+        "{e}:١",
+        "{e}:" + "9" * 19,
+        "{e}:1:2",
+    ],
 )
 def test_a_malformed_id_is_refused_by_the_parser(raw):
     with pytest.raises(ValueError):
@@ -96,7 +113,10 @@ def test_a_malformed_id_is_refused_by_the_parser(raw):
 
 def test_the_parser_reads_back_what_was_formatted():
     epoch = progress_ids.mint_epoch("s")
-    assert progress_ids.parse_event_id(progress_ids.format_event_id(epoch, 0)) == (epoch, 0)
+    assert progress_ids.parse_event_id(progress_ids.format_event_id(epoch, 0)) == (
+        epoch,
+        0,
+    )
     assert progress_ids.parse_event_id(f"{epoch}:" + "9" * 18) == (epoch, 10**18 - 1)
 
 
@@ -301,7 +321,9 @@ def test_the_detached_monitor_logs_one_terminal_item_when_its_solve_ends(baselin
     from harness.solver_bridge import start_detached_solver_monitor
 
     ctx, *_ = baseline
-    session = chat_service.get_or_create_session(owner_user_id=chat_tools.acting_user_id())
+    session = chat_service.get_or_create_session(
+        owner_user_id=chat_tools.acting_user_id()
+    )
     started = [_start(ctx, "fg")]
     job = started[0][0]
     settled = threading.Event()
@@ -320,8 +342,11 @@ def test_the_detached_monitor_logs_one_terminal_item_when_its_solve_ends(baselin
     deadline = time.monotonic() + 5
     while session.detached_monitor_active() and time.monotonic() < deadline:
         time.sleep(0.02)
-    items = [i for i in session.drain_detached_progress(after_cursor=0)
-             if i.get("frame") == "job_terminal"]
+    items = [
+        i
+        for i in session.drain_detached_progress(after_cursor=0)
+        if i.get("frame") == "job_terminal"
+    ]
     assert [(i["job_id"], i["tool_use_id"]) for i in items] == [(job, "tu-fg")]
 
 
@@ -332,7 +357,9 @@ def test_a_monitor_without_a_job_id_logs_no_terminal_item(baseline):
     from harness.solver_bridge import start_detached_solver_monitor
 
     ctx, *_ = baseline
-    session = chat_service.get_or_create_session(owner_user_id=chat_tools.acting_user_id())
+    session = chat_service.get_or_create_session(
+        owner_user_id=chat_tools.acting_user_id()
+    )
     started = [_start(ctx, "fg")]
     settled = threading.Event()
     start_detached_solver_monitor(
@@ -347,8 +374,11 @@ def test_a_monitor_without_a_job_id_logs_no_terminal_item(baseline):
     deadline = time.monotonic() + 5
     while session.detached_monitor_active() and time.monotonic() < deadline:
         time.sleep(0.02)
-    assert not [i for i in session.drain_detached_progress(after_cursor=0)
-                if i.get("frame") == "job_terminal"]
+    assert not [
+        i
+        for i in session.drain_detached_progress(after_cursor=0)
+        if i.get("frame") == "job_terminal"
+    ]
 
 
 def test_no_actor_or_no_project_shows_no_job(baseline, monkeypatch):
@@ -357,7 +387,9 @@ def test_no_actor_or_no_project_shows_no_job(baseline, monkeypatch):
     from routers import chat as chat_router
 
     ctx, *_ = baseline
-    session = chat_service.get_or_create_session(owner_user_id=chat_tools.acting_user_id())
+    session = chat_service.get_or_create_session(
+        owner_user_id=chat_tools.acting_user_id()
+    )
     ownerless = ja.register_study_job(
         study_key="fmea_sweep",
         tool_name="run_fmea_sweep",
@@ -401,8 +433,11 @@ def _terminal_items(session):
         if thread.name == "detached-solver-tu-fg":
             thread.join(5)
             assert not thread.is_alive()
-    return [i for i in session.drain_detached_progress(after_cursor=0)
-            if i.get("frame") == "job_terminal"]
+    return [
+        i
+        for i in session.drain_detached_progress(after_cursor=0)
+        if i.get("frame") == "job_terminal"
+    ]
 
 
 def test_a_plan_step_monitor_logs_the_end_of_its_solve():
@@ -429,7 +464,6 @@ def test_a_plan_step_monitor_stopped_mid_run_logs_no_end():
 
 def test_a_plan_step_monitor_logs_the_end_after_a_turn_abort():
     """Review F3: a turn abort ends the bridge, not the watch for the end."""
-    import threading
     import time
 
     session, ctx = _plan_step_monitor()
