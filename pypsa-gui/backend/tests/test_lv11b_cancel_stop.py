@@ -221,7 +221,7 @@ def test_a_stop_sent_before_the_monitor_thread_starts_still_ends_it_and_the_run_
             gate.wait(2)
             super().run()
 
-    monkeypatch.setattr(solver_bridge.threading, "Thread", Held)
+    monkeypatch.setattr(threading, "Thread", Held)  # solver_bridge imports it per call
     monkeypatch.setattr(solver_bridge, "_TERMINAL_POLL_S", 0.01)
     solver_bridge.start_detached_solver_monitor(
         session, ctx, tool_use_id="tu-1", tool_name="run_simulation",
@@ -283,8 +283,11 @@ def _plan_run(gate):
     cards, stopped = [], []
     approve = _approve(cards)
 
+    seen = []
+
     def on_frame(event, data):
         approve(event, data)
+        seen.append((event, data.get("tool_name") if isinstance(data, dict) else None))
         if event == "tool_progress" and data.get("tool_name") == "run_simulation" and not stopped:
             stopped.append(chat_tools.chat_session().stop_monitoring())
 
@@ -293,9 +296,12 @@ def _plan_run(gate):
     calls, results, frames, session = run_journey(
         *PROVIDER,
         [lambda r: ("start_task", {"title": "Solve", "request_id": "lv11b", "steps": plan}),
-         lambda r: ("run_simulation", {}), lambda r: (None, {})],
-        "Solve it.", on_frame=on_frame)
-    return results, session, stopped, time.monotonic() - began
+         # oj_grid solved once at setup: the step re-runs current results (lc19 OJ-32).
+         lambda r: ("run_simulation", {"rerun_current": True}), lambda r: (None, {})],
+        "Solve it again.", on_frame=on_frame)
+    elapsed = time.monotonic() - began
+    assert stopped, f"no progress frame in the hold ({elapsed:.1f}s): {seen[:40]}"
+    return results, session, stopped, elapsed
 
 
 @pytest.fixture
