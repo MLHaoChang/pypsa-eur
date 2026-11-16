@@ -90,9 +90,11 @@ describe('the Line panel', () => {
     const body = await sent(networkApi.updateLine)
     expect(body.inv_per_km_overnight).toBe(500)
     expect(body.inv_per_km_fom_share).toBeCloseTo(0.02, 12)
-    // The PUT carries the whole row: the derived columns go back unchanged and
-    // the backend re-derives them from the part and the length.
-    expect(body.capital_cost).toBe(3240.4)
+    // The derived costs stay out of the PUT (TCU 09); the backend re-derives
+    // them from the part and the length. The line's lifetime is an input.
+    expect(body.capital_cost).toBeUndefined()
+    expect(body.fom_cost).toBeUndefined()
+    expect(body.lifetime).toBe(40)
   })
 
   it('scales r, x and b typed per km by the length being saved', async () => {
