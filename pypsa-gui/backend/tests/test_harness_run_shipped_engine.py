@@ -456,6 +456,35 @@ def test_a_case_not_admitted_or_under_another_digest_refuses(baseline, tmp_path,
     assert _children(pid) == {} and queue == []
 
 
+def test_an_edit_after_admission_refuses_under_the_new_digest_too(
+    baseline, tmp_path, queue, monkeypatch
+):
+    """GK B (59) F3: a caller holding the NEW current digest after cases.json
+    changed is refused by the admitted case's own digest, before any fork."""
+    _, pid, root = baseline
+    path = _task(tmp_path, pid)
+    task = _read(path)
+    task["steps"][0].update(status="running", attempt_id="a1")
+    path.write_text(json.dumps(task))
+    E._admit(path, "explore.1", task["steps"][0]["frozen"], ("a1", INSTANCE))
+    _edit_cases(root)
+    task = _read(path)
+    with chat_tools._acting() as (db, user):
+        project = project_registry.resolve_project(db, user, pid)
+        _, sources = E._sources(project, E._template(run_explore._profile(task)))
+        current = run_shipped.load(
+            project_registry.project_dir(project),
+            E._template(run_explore._profile(task)),
+            **sources,
+        )["digest"]
+    assert current != _cases(path)["low_price"]["digest"]
+    monkeypatch.setattr(shipped_fork, "create", lambda *a, **k: pytest.fail("forked"))
+    with pytest.raises(run_shipped.ShippedError) as err:
+        E.run_case(path, "low_price", current)
+    assert err.value.kind == "shipped_cases_changed"
+    assert _children(pid) == {} and queue == []
+
+
 def test_a_fork_name_already_taken_refuses_and_overwrites_nothing(
     baseline,
     client,
@@ -511,6 +540,55 @@ def test_a_second_writer_inside_the_read_waits_for_the_write(
     seen["writer"].join(30)
     assert seen["blocked"] is True
     assert _cases(path)["low_price"]["status"] == "running"
+
+
+def test_a_solver_config_put_past_the_gate_waits_for_the_write(
+    baseline,
+    tmp_path,
+    queue,
+    monkeypatch,
+):
+    """GK B (59) F4: `PUT /api/simulation/solver_config` holds the solver-state
+    lock, not `mutation_lock`. A request already past the harness gate, on the
+    child, waits for the case's write and then merges over it: the case's
+    change and the request's both survive."""
+    from models.schemas import SolverConfigSchema
+    from routers import simulation
+
+    _, pid, _ = baseline
+    path = _task(tmp_path, pid, picked=["low_price"])
+    real_apply = run_shipped.apply
+    seen = {}
+
+    def put(resident):
+        with chat_tools._acting() as (db, user), workflow_tools._isolated(resident):
+            simulation.update_solver_config(
+                SolverConfigSchema(discount_rate=0.0123), db=db, user=user
+            )
+
+    def apply(cfg, changes, resolve, *, check_old=True):
+        if not check_old:
+            return real_apply(cfg, changes, resolve, check_old=False)
+        case = _cases(path)["low_price"]
+        with chat_tools._acting() as (db, user):
+            child = project_registry.resolve_project(db, user, case["project_id"])
+        resident = PyPSAService.get_context(project_registry.registry_key(child))
+        writer = threading.Thread(
+            target=contextvars.copy_context().run, args=(put, resident)
+        )
+        writer.start()
+        writer.join(0.5)
+        seen.update(blocked=writer.is_alive(), writer=writer, ctx=resident)
+        return real_apply(cfg, changes, resolve, check_old=True)
+
+    monkeypatch.setattr(run_shipped, "apply", apply)
+    _start(path, pid)
+    seen["writer"].join(30)
+    assert seen["blocked"] is True
+    assert _cases(path)["low_price"]["status"] == "running"
+    cfg = seen["ctx"].solver_state["solver_config"]
+    assert cfg.discount_rate == 0.0123
+    assert cfg.commercial["export_price_ref"]["id"] != "ipp_da_base"
 
 
 # ── D1 / G2: the series a case names ─────────────────────────────────────────
@@ -686,6 +764,35 @@ def test_an_overnight_cost_left_at_the_base_is_not_evaluated(baseline, tmp_path,
     assert why.startswith(
         "StorageUnit.bess.inv_power_overnight is 213927.9 on the fork"
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "path"),
+    [
+        ("low_price", "commercial.export_price_ref.id"),
+        ("cheap_battery", "StorageUnit.bess.inv_power_overnight"),
+    ],
+)
+def test_a_new_value_equal_to_the_bases_is_not_evaluated(
+    baseline, tmp_path, queue, name, path
+):
+    """GK B (59) F1/F2: a change whose new value is the base's moved nothing,
+    even with the fork's other inputs moved."""
+    _, pid, _ = baseline
+    task = _task(tmp_path, pid, picked=[name])
+    _start(task, pid)
+    case = _cases(task)[name]
+    _, ctx, record = _fork(task, name)
+    new = next(c["new"] for c in case["changes"] if c["path"] == path)
+    base = record["shipped"]["base"]
+    same = {
+        **record,
+        "shipped": {
+            **record["shipped"],
+            "base": {**base, "values": {**base["values"], path: new}},
+        },
+    }
+    assert E.witness(case, ctx, same) == f"{path} is the base's {new} on the fork."
 
 
 def test_a_contract_number_witness_reads_a_field_the_fingerprint_hashes(baseline):

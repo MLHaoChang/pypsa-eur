@@ -712,8 +712,9 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         # The fork helper (study harness 14, GK B (57)): the steps this block ran inline.
                         # Called by name so the write-lock verifier follows them.
                         from harness.shipped_fork import create as create_fork, save as save_fork
-                        existing = create_fork(db, user, base, request.name, request.description)
-                        result["project_id"] = str(existing.id)
+                        info = create_fork(db, user, base, request.name, request.description)
+                        result["project_id"] = str(info.id)
+                        existing = project_registry.resolve_project(db, user, str(info.id))
                         checkpoint('child_created', case_project_id=str(existing.id))
                         save_fork(ctx, existing, spec, db=db, user=user)
                         checkpoint('child_saved')

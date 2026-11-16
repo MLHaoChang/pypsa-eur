@@ -10,16 +10,22 @@ neither passes the other's arguments. The steps are the sweep's own, moved
 here unchanged so its children stay byte-identical:
 
 - `create`: `projects.create_scenario` copies the base's SAVED bundle into a
-  new child project (the parent link set) and returns the child's row.
+  new child project (the parent link set) and returns its info; the caller
+  resolves the row, as the sweep did (it names the child's id first).
 - `save`: binds a context to the child, clears the dispatch and objective it
   copied (only the case's own queued solve gives it results), saves it and
   writes its case record (`SENSITIVITY_CASE_FILE`).
 - `held`: the child's resident context, under the locks its existing writers
   take (G1): the harness hold on the child (`harness_locks`, which every
-  write route's `_enforce_project_lock` refuses from outside the run) and the
-  context's own `mutation_lock` (which `_save_context` and the solve queue
-  take). A read-modify-write of the child inside it cannot interleave with
-  another writer. The sweep does not use it (its children are written from
+  write route's `_enforce_project_lock` and the middleware's harness gate
+  refuse from outside the run), the context's own `mutation_lock` (which
+  `_save_context` and the solve queue take) and its `solver_state_lock`
+  (which `PUT /api/simulation/solver_config` and the other solver-state
+  writers take, so a request already past the gate waits). A
+  read-modify-write of the child inside it cannot interleave with another
+  writer. Lock order: harness hold, then `mutation_lock`, then
+  `solver_state_lock`; no writer takes `solver_state_lock` before
+  `mutation_lock`. The sweep does not use it (its children are written from
   private copies before anyone can resolve them).
 """
 
@@ -31,14 +37,12 @@ from pathlib import Path
 
 
 def create(db, user, base, name: str, description: str):
-    """A new child of the saved `base` named `name`: its project row."""
+    """A new child of the saved `base` named `name`: its project info."""
     from models.schemas import CreateScenarioRequest
     from routers import projects
-    from services import project_registry
 
     request = CreateScenarioRequest(name=name, description=description)
-    info = projects.create_scenario(str(base.id), request, db=db, user=user)
-    return project_registry.resolve_project(db, user, str(info.id))
+    return projects.create_scenario(str(base.id), request, db=db, user=user)
 
 
 def save(ctx, child, spec: dict, *, db, user) -> None:
@@ -78,8 +82,8 @@ def save(ctx, child, spec: dict, *, db, user) -> None:
 @contextlib.contextmanager
 def held(child, task_id: str):
     """The child's resident context (built and registered when none is),
-    held for `task_id`: the harness hold on the child and the context's
-    `mutation_lock`, both released on exit."""
+    held for `task_id`: the harness hold on the child, then the context's
+    `mutation_lock` and `solver_state_lock`, all released on exit."""
     from routers.projects import _hydrate_context_from_disk
     from services import harness_locks, project_registry
     from services.pypsa_service import PyPSAService
@@ -98,7 +102,7 @@ def held(child, task_id: str):
     try:
         token = harness_locks.enter_run(task_id)
         try:
-            with ctx.mutation_lock:
+            with ctx.mutation_lock, ctx.solver_state_lock:
                 yield ctx
         finally:
             harness_locks.leave_run(token)

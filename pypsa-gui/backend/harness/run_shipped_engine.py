@@ -503,18 +503,17 @@ def run_case(path, case_id, digest) -> dict:
             before = _facts(base_ctx, case["changes"])
             reached["stage"] = "fork"
             try:
-                child = shipped_fork.create(db, user, base, name, DESCRIPTION)
+                info = shipped_fork.create(db, user, base, name, DESCRIPTION)
+                reached["fork"] = str(info.id)
+                _mark(path, case_id, project_id=reached["fork"])  # D7: named first
+                child = project_registry.resolve_project(db, user, reached["fork"])
             except Exception:
                 # D7: a create that raised after its row exists still names the fork.
                 left = project_registry.find_project(db, user, name)
-                if left is not None:
+                if reached["fork"] is None and left is not None:
                     reached["fork"] = str(left.id)
                     _mark(path, case_id, project_id=reached["fork"])
                 raise
-            reached["fork"] = str(child.id)
-            _mark(
-                path, case_id, project_id=str(child.id)
-            )  # D7: named the moment it exists
             with shipped_fork.held(child, task["task_id"]) as ctx:
                 reached["stage"] = "patch"
                 patched, battery = run_shipped.apply(
