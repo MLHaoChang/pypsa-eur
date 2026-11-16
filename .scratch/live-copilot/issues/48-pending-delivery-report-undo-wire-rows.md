@@ -3,7 +3,7 @@
 
 # LC-48 — The pending LC-D20 to LC-D23 gate rows
 
-Status: split into 48a to 48d (no row dropped)
+Status: done (48a #1505, 48b #1514, 48c #1503, 48d #1515; no row dropped)
 Type: task
 
 Opened under owner decision LC43-ROWS-1. LC-43 (#1372) covered the five LC-D20 to LC-D23

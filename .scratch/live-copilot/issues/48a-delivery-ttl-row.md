@@ -3,7 +3,7 @@
 
 # LC-48a — The LC-D20 delivery expiry row
 
-Status: ready-for-agent
+Status: done (#1505)
 Model tier: sonnet
 Size: S
 Blocked by: none
