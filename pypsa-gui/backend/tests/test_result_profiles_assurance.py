@@ -110,6 +110,20 @@ def test_generator_emissions_use_dispatch_over_efficiency(gas, checked):
     assert answered(checked, frames) == pytest.approx({"generator_emissions": 8.5})
 
 
+def test_a_fuel_curve_generator_leaves_its_emissions_not_established(gas, checked):
+    """GK B F2 (homer-parity 02e): a curve genset emits from its slope and no-load fuel, which this profile does not
+    rebuild, so its emissions and the network total are withheld with a reason, never dispatch / efficiency."""
+    from services import fuel_curve
+
+    gas.network.generators.loc["G1", list(fuel_curve.COLUMNS)] = [2.5, 0.0, 40.0]
+    ctx = solve(gas)
+    frames = ask(checked, ctx, "generator-emissions/1", "G1", {"generator_emissions": 8.5})
+    assert slots(frames)["generator_emissions"]["reason"] == "fuel_curve_generator"
+    assert "1 generators burn fuel by a fuel curve" in public_text(frames)
+    frames = ask(checked, ctx, "network-emissions/1", "network", {"total_emissions": 8.5})
+    assert slots(frames)["total_emissions"]["reason"] == "fuel_curve_generator"
+
+
 def test_network_without_a_cap_has_no_shadow_price(gas, checked):
     ctx = solve(gas)
     frames = ask(checked, ctx, "network-emissions/1", "network", {"total_emissions": 8.5})

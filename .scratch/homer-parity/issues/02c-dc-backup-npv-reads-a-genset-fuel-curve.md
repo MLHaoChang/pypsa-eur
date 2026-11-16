@@ -1,6 +1,6 @@
 # 02c — The DC backup NPV reads a backup genset's fuel curve
 
-Status: needs-triage
+Status: done (#1538)
 
 Follow-up from homer-parity 02a (#1466), a condition of GK B's ruling 3.
 
@@ -22,3 +22,9 @@ the heat rate.
 
 - A curve-carrying fleet: the NPV equals a hand calculation from the curve, no-load term included.
 - No curve: the cost block is byte-equal to the one before.
+
+## Comments
+
+### Plan GO, GK B (58), 2026-11-14
+
+Conditions: H4. Hand oracle for a mixed fleet (one curved genset, one on the heat rate) under the MW-weighted rule. The note names the rule and lists the gensets that stay on the heat rate. With no curve, the dict is byte-equal to the pre-change call. The note states the full-load-over-run-hours assumption. H5: every reader of `fuel_curve_ignored` (frontend included) moves to the new keys. The only readers were tests; the keys are now `fuel_curve_priced` and `fuel_heat_rate_priced`. H7: mutants on the new fuel path.
