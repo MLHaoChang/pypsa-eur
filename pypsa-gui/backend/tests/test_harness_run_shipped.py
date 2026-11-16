@@ -720,3 +720,398 @@ def test_a_contract_with_no_id_is_not_a_contract_to_change(built):
     odd = {"commercial": {"contracts": [{"id": ""}, {"id": None}, {"price": 1}]}}
     change = _change("commercial.contracts..price", 1, 2)
     assert "contract the template does not have" in S.refusal(change, odd, network)
+
+
+# ── S-B2a: classify, apply, the admission-time validation ────────────────────
+
+
+def _ref(name, h="a" * 64):
+    return {"id": name, "version": 1, "hash": h, "source": "template"}
+
+
+def _project_cfg(cfg):
+    """The template's solver_config as a created project holds it: minted refs."""
+    c = json.loads(json.dumps(cfg))
+    com = c["commercial"]
+    com["export_price_ref"] = _ref("ipp_da_base")
+    com["import_price_ref"] = _ref("ipp_da_base")
+    for k in com["contracts"]:
+        k["reference_price"] = _ref("ipp_da_base")
+    return c
+
+
+def _by_id(project, tpl, built):
+    return {c["id"]: c for c in _load(project, tpl, built)["cases"]}
+
+
+def test_each_shipped_case_is_classified_by_what_it_moves(project, tpl, built):
+    kinds = {k: c["kind"] for k, c in _by_id(project, tpl, built).items()}
+    assert kinds == {
+        "low_price": "lp",
+        "cannibalised": "lp",
+        "ppa_price_minus_10": "finance",
+        "merchant_heavy": "finance",
+        "longer_ppa": "finance",
+        "cheap_battery": "lp",
+        "tight_connection": "unknown",
+        "faster_degradation": "unknown",
+    }
+
+
+def test_a_contract_number_is_lp_only_for_a_dispatch_ppa(built):
+    cfg, _ = built
+    change = _change("commercial.contracts.ppa_wind.price", 65.0, 58.5)
+    assert S.classify(change, cfg) == "finance"
+    dispatch = json.loads(json.dumps(cfg))
+    wind = next(k for k in dispatch["commercial"]["contracts"] if k["id"] == "ppa_wind")
+    wind["settlement"] = "physical"
+    wind["changes_dispatch"] = True
+    wind["suspend_on_negative_price"] = None
+    assert S.classify(change, dispatch) == "lp"
+    other = _change("commercial.contracts.ppa_pv.price", 50.0, 45.0)
+    assert S.classify(other, dispatch) == "finance"
+    assert S.classify(change, {"commercial": "broken"}) == "unknown"
+
+
+def test_a_reference_price_change_only_settles_and_a_price_ref_moves_the_lp(built):
+    cfg, _ = built
+    ref = _change("commercial.contracts.ppa_pv.reference_price.id", "a", "b", "string")
+    assert S.classify(ref, cfg) == "finance"
+    for k in ("export_price_ref", "import_price_ref"):
+        assert (
+            S.classify(_change(f"commercial.{k}.id", "a", "b", "string"), cfg) == "lp"
+        )
+    assert S.case_kind([ref], cfg) == "finance"
+    assert (
+        S.case_kind([ref, _change("StorageUnit.bess.inv_power_overnight", 1, 2)], cfg)
+        == "lp"
+    )
+    unknown = _change("Link.x.p_nom", 1, 2)
+    battery = _change("StorageUnit.bess.inv_power_overnight", 1, 2)
+    assert S.case_kind([ref, unknown], cfg) == "unknown"  # finance + unknown
+    assert S.case_kind([battery, unknown], cfg) == "unknown"  # lp + unknown
+    assert S.case_kind([unknown, battery, ref], cfg) == "unknown"  # order-free
+
+
+def _resolver(name):
+    return _ref(name, "b" * 64)
+
+
+def _case_changes(project, case_id):
+    data = json.loads((project / "cases.json").read_text())
+    return next(c for c in data["cases"] if c["id"] == case_id)["changes"]
+
+
+def test_apply_patches_a_copy_and_returns_the_battery_changes(project, built):
+    cfg = _project_cfg(built[0])
+    before = json.dumps(cfg, sort_keys=True)
+    out, network = S.apply(cfg, _case_changes(project, "low_price"), _resolver)
+    assert json.dumps(cfg, sort_keys=True) == before  # never mutates
+    assert out["commercial"]["export_price_ref"] == _ref("ipp_da_low", "b" * 64)
+    assert out["commercial"]["contracts"][0]["reference_price"]["id"] == "ipp_da_low"
+    assert network == []
+    out, network = S.apply(cfg, _case_changes(project, "cheap_battery"), _resolver)
+    assert out == cfg and [c["path"] for c in network] == [
+        "StorageUnit.bess.inv_power_overnight",
+        "StorageUnit.bess.inv_energy_overnight",
+    ]
+
+
+def test_apply_writes_each_contract_number(project, built):
+    cfg = _project_cfg(built[0])
+    out, _ = S.apply(cfg, _case_changes(project, "ppa_price_minus_10"), _resolver)
+    prices = {k["id"]: k["price"] for k in out["commercial"]["contracts"]}
+    assert prices == {"ppa_wind": 58.5, "ppa_pv": 45.0}
+
+
+@pytest.mark.parametrize("case_id", ["ppa_price_minus_10", "low_price"])
+def test_an_old_value_that_differs_from_the_forks_refuses(project, built, case_id):
+    cfg = _project_cfg(built[0])
+    if case_id == "low_price":
+        cfg["commercial"]["export_price_ref"] = _ref("someone_elses_series")
+    else:
+        cfg["commercial"]["contracts"][0]["price"] = 99.0
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, _case_changes(project, case_id), _resolver)
+    assert exc.value.kind == "shipped_case_stale"
+
+
+def test_a_missing_contract_or_ref_is_stale_not_a_crash(project, built):
+    cfg = _project_cfg(built[0])
+    cfg["commercial"]["contracts"] = []
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, _case_changes(project, "ppa_price_minus_10"), _resolver)
+    assert exc.value.kind == "shipped_case_stale"
+    cfg = _project_cfg(built[0])
+    cfg["commercial"]["export_price_ref"] = None
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, _case_changes(project, "low_price"), _resolver)
+    assert exc.value.kind == "shipped_case_stale"
+
+
+def test_a_series_with_no_ref_refuses_unresolved(project, built):
+    cfg = _project_cfg(built[0])
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, _case_changes(project, "low_price"), lambda name: None)
+    assert exc.value.kind == "shipped_series_unresolved"
+
+
+def test_a_patched_block_that_does_not_validate_refuses_with_the_validators_reason(
+    built,
+):
+    cfg = _project_cfg(built[0])
+    bad = _change("commercial.contracts.ppa_wind.share", 0.7, 7.0)
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, [bad], _resolver)
+    assert exc.value.kind == "shipped_cases_invalid"
+    assert "share" in str(exc.value)
+
+
+def test_a_project_with_no_commercial_block_cannot_apply(built):
+    cfg = json.loads(json.dumps(built[0]))
+    cfg.pop("commercial")
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, [_change("commercial.contracts.ppa_wind.price", 1, 2)], _resolver)
+    assert exc.value.kind == "shipped_case_not_runnable"
+
+
+def test_an_invalid_patched_case_is_not_run_at_admission_with_the_reason(
+    project, tpl, built
+):
+    _edit(
+        project,
+        lambda d: d["cases"][3]["changes"][0].update(new=7.0),  # merchant_heavy share
+    )
+    case = _by_id(project, tpl, built)["merchant_heavy"]
+    assert case["status"] == "not_run" and "share" in case["why"]
+    assert case["id"] not in _load(project, tpl, built)["admissible"]
+
+
+# ── GK B (58) K1-K4 ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "StorageUnit.bess.max_hours",  # another storage field
+        "StorageUnit.other.inv_power_overnight",  # another unit
+        "Store.bess.capital_cost",  # a Store cost
+        "Link.bess.capital_cost",  # a Link cost
+        "commercial.some_new_key",
+        "commercial.connection.id",  # the right shape, not a price ref
+        "commercial.x.c1.reference_price.id",  # not under contracts
+        "commercial.x.ppa_wind.price",  # not under contracts
+        "commercial.export_price_ref.hash",
+        "commercial.contracts.ppa_wind.reference_price.hash",
+        "commercial.connection.p_nom",
+        "commercial.contracts.ppa_wind.some_new_field",
+        "finance.degradation_by_asset.pv_plant",
+    ],
+)
+def test_a_change_the_classifier_does_not_recognise_is_unknown_never_lp_or_finance(
+    built, path
+):
+    assert S.classify(_change(path, 1.0, 2.0), built[0]) == "unknown"
+
+
+def test_an_unknown_case_is_never_run_at_admission(project, tpl, built):
+    cfg, network = built
+    bad = json.loads(json.dumps(cfg))
+    bad["commercial"] = "broken"  # nothing about the contracts is known
+    shipped = S.load(project, TID, template_dir=tpl, cfg=bad, network=network)
+    case = next(c for c in shipped["cases"] if c["id"] == "ppa_price_minus_10")
+    assert case["kind"] == "unknown" and case["status"] == "not_run"
+    assert case["why"] and "ppa_price_minus_10" not in shipped["admissible"]
+
+
+def test_the_project_contract_not_the_templates_decides_the_kind(project, tpl, built):
+    cfg, network = built
+    mine = json.loads(json.dumps(cfg))
+    wind = next(k for k in mine["commercial"]["contracts"] if k["id"] == "ppa_wind")
+    wind.update(settlement="physical", changes_dispatch=True)
+    wind["suspend_on_negative_price"] = None
+    kinds = {
+        c["id"]: c["kind"]
+        for c in S.load(project, TID, template_dir=tpl, cfg=mine, network=network)[
+            "cases"
+        ]
+    }
+    # The shipped file changes both contracts' price, and the project's wind PPA
+    # moves the LP; the template's own would not.
+    assert kinds["ppa_price_minus_10"] == "lp"
+    assert _by_id(project, tpl, built)["ppa_price_minus_10"]["kind"] == "finance"
+
+
+def test_apply_never_mutates_the_config_including_nested_lists(project, built):
+    cfg = _project_cfg(built[0])
+    before = json.loads(json.dumps(cfg))
+    for case_id in ("low_price", "ppa_price_minus_10", "cheap_battery"):
+        out, _ = S.apply(cfg, _case_changes(project, case_id), _resolver)
+        assert cfg == before
+        out["commercial"]["contracts"].append({"id": "x"})
+        assert cfg == before  # the copy is deep
+
+
+def test_the_validators_reason_is_what_the_case_reads(built):
+    cfg = _project_cfg(built[0])
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(
+            cfg, [_change("commercial.contracts.ppa_wind.share", 0.7, 7.0)], _resolver
+        )
+    assert str(exc.value).startswith("The changed commercial block does not validate:")
+    assert "share" in str(exc.value)
+
+
+def _fingerprint(cfg, network):
+    from services import workflow_tools as W
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.build_context()
+    ctx.network = network.copy()
+    ctx.solver_state["solver_config"] = cfg
+    return W._network_input_fingerprint(ctx)
+
+
+def _applied(project, built, case_id):
+    cfg = _project_cfg(built[0])
+    out, battery = S.apply(cfg, _case_changes(project, case_id), _resolver)
+    network = built[1].copy()
+    for change in battery:
+        network.storage_units.loc["bess", change["path"].split(".")[2]] = change["new"]
+    return cfg, out, network
+
+
+@pytest.mark.parametrize("case_id", ["low_price", "cannibalised"])
+def test_a_price_ref_case_moves_the_fingerprint(project, built, case_id):
+    cfg, out, network = _applied(project, built, case_id)
+    assert _fingerprint(out, network) != _fingerprint(cfg, built[1])
+
+
+@pytest.mark.parametrize(
+    "case_id", ["ppa_price_minus_10", "merchant_heavy", "longer_ppa"]
+)
+def test_a_finance_case_also_moves_the_fingerprint_so_it_cannot_judge_alone(
+    project, built, case_id
+):
+    """The fingerprint hashes the whole solver_config, contracts included, so it
+    does not tell a finance-only case from an LP one (the judge keys on the kind)."""
+    cfg, out, network = _applied(project, built, case_id)
+    assert _fingerprint(out, network) != _fingerprint(cfg, built[1])
+
+
+def test_the_battery_case_moves_the_lp_and_the_fingerprint(project, built):
+    """The overnight cost fields are the parts the solve stages into the capital
+    cost (`periodized_costs`); since TCU 08 (#1533) the fingerprint hashes the
+    composite parts too, so even this raw edit moves it."""
+    cfg, out, network = _applied(project, built, "cheap_battery")
+    assert _fingerprint(out, network) != _fingerprint(cfg, built[1])
+    changed = [
+        network.storage_units.loc["bess", f] != built[1].storage_units.loc["bess", f]
+        for f in S.BESS_FIELDS
+    ]
+    assert all(changed)
+
+
+def _diff(a, b, path=""):
+    """Every leaf path where two JSON-like values differ."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = []
+        for k in sorted(set(a) | set(b)):
+            out += _diff(a.get(k), b.get(k), f"{path}.{k}" if path else k)
+        return out
+    if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+        out = []
+        for i, (x, y) in enumerate(zip(a, b)):
+            out += _diff(x, y, f"{path}.{i}")
+        return out
+    return [] if a == b else [path]
+
+
+@pytest.mark.parametrize(
+    "case_id,fields",
+    [
+        ("ppa_price_minus_10", {"price"}),
+        ("merchant_heavy", {"share"}),
+        ("longer_ppa", {"tenor_years"}),
+    ],
+)
+def test_a_finance_case_differs_from_the_base_only_in_the_fields_it_names(
+    project, built, case_id, fields
+):
+    """No LP column, no price ref and no other config key rides along."""
+    cfg, out, network = _applied(project, built, case_id)
+    leaves = _diff(cfg, out)
+    assert leaves and all(
+        leaf.startswith("commercial.contracts.") and leaf.rsplit(".", 1)[1] in fields
+        for leaf in leaves
+    )
+    assert (
+        _diff(
+            json.loads(network.storage_units.to_json()),
+            json.loads(built[1].storage_units.to_json()),
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("case_id", ["low_price", "cannibalised"])
+def test_a_price_ref_case_changes_the_ref_ids_and_nothing_else(project, built, case_id):
+    cfg, out, _ = _applied(project, built, case_id)
+    leaves = _diff(cfg, out)
+    # Exactly the replaced refs (id and the minted hash), nothing else.
+    refs = (
+        "commercial.export_price_ref",
+        "commercial.import_price_ref",
+        "commercial.contracts.0.reference_price",
+        "commercial.contracts.1.reference_price",
+    )
+    assert set(leaves) == {f"{r}.{f}" for r in refs for f in ("id", "hash")}
+
+
+def test_check_old_false_does_not_compare_the_old_value(project, built):
+    cfg = _project_cfg(built[0])
+    cfg["commercial"]["contracts"][0]["price"] = 99.0
+    cfg["commercial"]["export_price_ref"] = _ref("someone_elses_series")
+    out, _ = S.apply(
+        cfg,
+        _case_changes(project, "ppa_price_minus_10")
+        + _case_changes(project, "low_price")[:1],
+        _resolver,
+        check_old=False,
+    )
+    assert out["commercial"]["contracts"][0]["price"] == 58.5
+    assert out["commercial"]["export_price_ref"]["id"] == "ipp_da_low"
+
+
+@pytest.mark.parametrize("contracts", [None, ["not a dict", 7]])
+def test_a_contracts_list_that_is_missing_or_malformed_is_stale_not_a_crash(
+    project, built, contracts
+):
+    cfg = _project_cfg(built[0])
+    cfg["commercial"]["contracts"] = contracts
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, _case_changes(project, "ppa_price_minus_10"), _resolver)
+    assert exc.value.kind == "shipped_case_stale"
+
+
+def test_a_missing_current_number_is_stale_not_a_crash(project, built):
+    cfg = _project_cfg(built[0])
+    cfg["commercial"]["contracts"][0]["price"] = None
+    with pytest.raises(S.ShippedError) as exc:
+        S.apply(cfg, _case_changes(project, "ppa_price_minus_10"), _resolver)
+    assert exc.value.kind == "shipped_case_stale"
+
+
+def test_an_invalid_project_block_that_the_case_would_fix_is_still_not_run(
+    project, tpl, built
+):
+    """merchant_heavy sets both shares to 0.3, so a project whose wind share is
+    7.0 validates after the patch: only the unknown-kind guard stops the case."""
+    cfg, network = built
+    bad = json.loads(json.dumps(cfg))
+    bad["commercial"]["contracts"][0]["share"] = 7.0
+    shipped = S.load(project, TID, template_dir=tpl, cfg=bad, network=network)
+    case = next(c for c in shipped["cases"] if c["id"] == "merchant_heavy")
+    assert case["kind"] == "unknown" and case["status"] == "not_run"
+    assert case["why"] == "What this case moves is not known, so it is not run."
+    assert "merchant_heavy" not in shipped["admissible"]

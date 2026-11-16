@@ -68,7 +68,8 @@ export const resultsEvidenceApi = {
       ?? (section ? `run_${runId}_${section}.json` : `run_${runId}.json`) })),
 }
 
-function fileNameOf(disposition: unknown): string | null {
+/** The download name from a `Content-Disposition` value: the RFC 5987 `filename*` first. */
+export function fileNameOf(disposition: unknown): string | null {
   if (typeof disposition !== 'string') return null
   const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition)
   if (star) return decodeURIComponent(star[1])

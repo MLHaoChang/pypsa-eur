@@ -1,0 +1,12 @@
+{
+ "kinds": {
+  "shipped_case_stale": {
+   "surface": "inline",
+   "why": "A shipped case expects a value (or a price series) that the fork's solver_config no longer holds, compared when the case is written. Nothing was changed; the case does not run."
+  },
+  "shipped_series_unresolved": {
+   "surface": "inline",
+   "why": "A shipped case names a price series that has no ref in the project's Library. Nothing was changed; the case does not run."
+  }
+ }
+}
