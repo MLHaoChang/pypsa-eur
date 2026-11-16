@@ -999,11 +999,12 @@ def test_a_finance_case_also_moves_the_fingerprint_so_it_cannot_judge_alone(
     assert _fingerprint(out, network) != _fingerprint(cfg, built[1])
 
 
-def test_the_battery_case_moves_the_lp_but_not_the_fingerprint(project, built):
-    """The overnight cost fields are custom columns the solve stages into the
-    capital cost (`periodized_costs`), so the fingerprint does not see them."""
+def test_the_battery_case_moves_the_lp_and_the_fingerprint(project, built):
+    """The overnight cost fields are the parts the solve stages into the capital
+    cost (`periodized_costs`); since TCU 08 (#1533) the fingerprint hashes the
+    composite parts too, so even this raw edit moves it."""
     cfg, out, network = _applied(project, built, "cheap_battery")
-    assert _fingerprint(out, network) == _fingerprint(cfg, built[1])
+    assert _fingerprint(out, network) != _fingerprint(cfg, built[1])
     changed = [
         network.storage_units.loc["bess", f] != built[1].storage_units.loc["bess", f]
         for f in S.BESS_FIELDS
