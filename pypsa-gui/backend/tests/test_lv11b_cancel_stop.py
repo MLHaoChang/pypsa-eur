@@ -506,3 +506,38 @@ def test_cancel_job_through_dispatch_runs_each_acl_as_the_acting_user(
             chat_tools._ACTING_USER_ID.reset(token)
         assert (refused.value.status_code, refused.value.detail["error_kind"]) == (404, "job_not_found")
         assert solve_queue.get_job(uuid.UUID(job))["status"] == "queued"
+
+
+# ── 11a mutant run 3 survivors in `_stop_own_run`, pinned here ───────────────
+
+
+def test_a_stop_for_an_unbound_handle_touches_nothing():
+    assert ja._stop_own_run("fg:" + uuid.uuid4().hex) == "origin_lost"
+
+
+def test_a_stop_bound_under_another_context_is_origin_lost(baseline):
+    ctx, *_ = baseline
+    started = [_start(ctx, "ad")]
+    job = started[0][0]
+    try:
+        with ja._LOCK:
+            binding = ja._ACTIVITY_BINDINGS[job]
+            ja._ACTIVITY_BINDINGS[job] = (binding[0] + 1, *binding[1:])  # a reopened project
+        assert ja._stop_own_run(job) == "origin_lost"
+        assert not started[0][2].is_set()
+    finally:
+        _stop_all(started)
+
+
+def test_a_run_that_finished_before_the_hold_keeps_its_status(baseline):
+    ctx, *_ = baseline
+    started = [_start(ctx, "fg")]
+    job = started[0][0]
+    try:
+        with ctx.solver_state_lock:
+            ctx.solver_state["status"] = "completed"  # it finished between the view and the hold
+        assert ja._stop_own_run(job) == "not_running"
+        assert ctx.solver_state["status"] == "completed"  # never overwritten to aborted
+        assert not started[0][2].is_set()
+    finally:
+        _stop_all(started)
