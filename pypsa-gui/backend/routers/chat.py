@@ -2569,16 +2569,17 @@ def _progress_snapshot(session, actor_id, epoch: str, seq: int) -> dict:
 
     project_id = _progress_project_id()
     jobs = []
-    if actor_id is not None and project_id is not None:
-        rows = job_adapters.activity_jobs(
-            PyPSAService.get_active_context(),
-            owner_id=str(actor_id),
-            project_id=project_id,
-        )
-        for row in rows:
-            view = _progress_job_view(row["source_id"], actor_id)
-            if view is not None:
-                jobs.append(view)
+    # The rows are candidates only; `_progress_job_view` is the one gate (it
+    # refuses a missing actor or project, another actor and another project).
+    rows = job_adapters.activity_jobs(
+        PyPSAService.get_active_context(),
+        owner_id=str(actor_id),
+        project_id=str(project_id),
+    )
+    for row in rows:
+        view = _progress_job_view(row["source_id"], actor_id)
+        if view is not None:
+            jobs.append(view)
     return {
         "epoch": epoch,
         "seq": seq,
@@ -2662,7 +2663,14 @@ async def chat_progress(
     epoch_now = session.progress_epoch()
 
     def _framed(payload):
-        event_id = progress_ids.format_event_id(epoch_now, int(payload["cursor"]))
+        # Every logged item carries its cursor; one without (a hand-fed payload)
+        # is framed without an id rather than failing the stream.
+        cursor_of = payload.get("cursor")
+        event_id = (
+            None
+            if cursor_of is None
+            else progress_ids.format_event_id(epoch_now, int(cursor_of))
+        )
         if payload.get("frame") != "job_terminal":
             return chat_service.sse_frame("tool_progress", payload, event_id=event_id)
         return chat_service.sse_frame(
@@ -2671,7 +2679,7 @@ async def chat_progress(
                 "job_id": payload["job_id"],
                 "tool_use_id": payload.get("tool_use_id"),
                 "job": _progress_job_view(payload["job_id"], actor_id),
-                "cursor": payload["cursor"],
+                "cursor": cursor_of,
             },
             event_id=event_id,
         )
