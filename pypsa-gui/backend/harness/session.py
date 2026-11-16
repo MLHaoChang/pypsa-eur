@@ -267,6 +267,9 @@ class ChatSession:
         default_factory=lambda: collections.deque(maxlen=500),
     )
     _detached_monitor: dict[str, Any] | None = None
+    # live-voice 11b: Stop monitoring. Every solver-log bridge on this
+    # session records the epoch it started under and ends when it moves.
+    _monitor_epoch: int = 0
     # W-3 — turns started on this session, the fallback bound for an endpoint
     # that never reports usage. See the ceiling in `_run_turn_body`.
     turns_started: int = 0
@@ -610,6 +613,27 @@ class ChatSession:
                     **self._detached_monitor,
                     'active': False,
                 }
+
+    def monitor_epoch(self) -> int:
+        with self._lock:
+            return self._monitor_epoch
+
+    def stop_monitoring(self) -> bool:
+        """Stop this session watching its jobs; the jobs keep running.
+
+        Moves the monitor epoch, so every solver-log bridge this session
+        started (the detached monitor, a plan step's in-turn hold) ends at
+        its next poll, and marks the detached monitor inactive, so the
+        /progress stream closes. Other sessions are untouched. Idempotent:
+        returns whether a monitor was active.
+        """
+        with self._lock:
+            self._monitor_epoch += 1
+            mon = self._detached_monitor
+            was_active = bool(mon and mon.get('active'))
+            if was_active:
+                self._detached_monitor = {**mon, 'active': False}
+        return was_active
 
     def detached_monitor_active(self, tool_use_id: str | None = None) -> bool:
         with self._lock:

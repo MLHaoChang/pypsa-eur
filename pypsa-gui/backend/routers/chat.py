@@ -2453,6 +2453,36 @@ def chat_abort(session_id: str,
     return {"ok": True}
 
 
+@router.post("/{session_id}/progress/stop")
+def chat_progress_stop(session_id: str,
+                       actor: User | None = Depends(optional_user)) -> dict[str, Any]:
+    """
+    Stop monitoring (live-voice 11b): this session stops watching its jobs.
+
+    The jobs keep running and still settle and publish; cancelling one is
+    `cancel_job`. Only this session's observation ends: its solver-log
+    bridges stop at their next poll and its GET /progress stream closes.
+    Another session watching the same job keeps receiving. Idempotent:
+    `stopped` says whether a monitor was active. Owner and replica checks
+    are /abort's: a foreign session reads as unknown.
+    """
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException as exc:
+        if exc.status_code == 409 and (
+            (exc.detail or {}).get("error_kind") == "wrong_replica"
+        ):
+            return {
+                "ok": False,
+                "reason": "wrong_replica",
+                "owner_replica_id": (exc.detail or {}).get("owner_replica_id"),
+            }
+        raise
+    if session is None:
+        return {"ok": False, "reason": "unknown_session"}
+    return {"ok": True, "stopped": session.stop_monitoring()}
+
+
 @router.get("/{session_id}/continuations")
 def chat_continuations(session_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
     """
