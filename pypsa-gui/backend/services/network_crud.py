@@ -363,7 +363,9 @@ def check_parts_own_costs(component_class: str, parts: dict, *, before: dict, su
         # Exact (GK B, TCU 09 P1): the form echoes the stored float, which JSON round-trips; no tolerance.
         if fv == _as_float(before.get(col)):
             continue
-        label = next((f.label for f in asset_fields.fields_for(component_class) if f.key == col), col)
+        # overnight_cost has no field spec on a composite class (it stays empty there): its plain name.
+        label = next((f.label for f in asset_fields.fields_for(component_class) if f.key == col),
+                     col.replace("_", " ").capitalize())
         raise HTTPException(
             422,
             f"{label}: set by the investment parts. Change a part's overnight cost, lifetime "

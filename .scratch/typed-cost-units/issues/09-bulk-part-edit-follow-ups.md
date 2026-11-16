@@ -1,6 +1,6 @@
 # Bulk part edit follow-ups: owned costs, rate change, absent part column
 
-Status: in-progress
+Status: done (#1545)
 Type: bug
 Found in: GK B (59) review of #1533 (TCU 08), non-blocking notes.
 Owner area: app backend (GK B reviews).
@@ -47,3 +47,5 @@ Parent: `08-bulk-part-edit-skips-rederive-and-fingerprint.md`.
   refuses with the registered `invalid_sensitivity_cases`. The test helper `_fingerprint` now hashes the test's
   own network: outside a request the active context is a different network, so the TCU 08 fingerprint asserts
   compared unrelated networks (they hold on the real one).
+- 2026-11-16, GK B (59) GK OK @cf7e7b3f on #1545 (P1–P5, N3, N4, mutants). Non-blocking note fixed after:
+  the overnight_cost refusal now names it in plain words (no field spec on a composite class).

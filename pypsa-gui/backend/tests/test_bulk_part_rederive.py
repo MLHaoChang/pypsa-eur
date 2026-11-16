@@ -965,3 +965,15 @@ def test_every_blank_spelling_is_not_an_edit(blank):
     check_parts_own_costs(
         "StorageUnit", BATTERY, before=before, submitted={"capital_cost": blank}
     )
+
+
+def test_an_overnight_cost_refusal_names_it_in_plain_words():
+    from fastapi import HTTPException
+
+    from services.network_crud import check_parts_own_costs
+
+    with pytest.raises(HTTPException) as exc:
+        check_parts_own_costs(
+            "StorageUnit", BATTERY, before={}, submitted={"overnight_cost": 1.0}
+        )
+    assert exc.value.detail.startswith("Overnight cost: set by the investment parts")
