@@ -4785,12 +4785,11 @@ def cancel_job(job_id: str) -> dict:
     out = ja.cancel_job(str(job_id), actor_id=acting_user_id())
     verdict = out["cancel"]
     if verdict == "refused":
-        refusal = out.get("refusal") or {}
+        refusal = out["refusal"]  # job_adapters._refusal: always a kind and a message
         raise HTTPException(409, {
             "error_kind": "job_cancel_refused",
             "message": "Nothing was cancelled: the job's abort refused the request"
-                       f" ({refusal.get('error_kind') or 'abort_refused'}:"
-                       f" {refusal.get('message') or 'no reason given'}).",
+                       f" ({refusal['error_kind']}: {refusal['message']}).",
             "refusal": refusal,
             "job": out["job"],
         })

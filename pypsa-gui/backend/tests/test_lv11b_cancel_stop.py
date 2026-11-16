@@ -110,7 +110,10 @@ def test_a_refused_abort_is_an_error_and_the_job_runs_on(baseline):
         status, detail = _raised(started[0][0])
         assert status == 409 and detail["error_kind"] == "job_cancel_refused"
         assert detail["refusal"]["error_kind"] == "not_stoppable"
-        assert "Nothing was cancelled" in detail["message"]
+        assert detail["message"] == (
+            "Nothing was cancelled: the job's abort refused the request"
+            " (not_stoppable: this run carries no stop event)."
+        )
         assert (
             detail["job"]["status"] == "running" and detail["job"]["terminal"] is False
         )
