@@ -74,7 +74,7 @@ _LOCK_ATTR_PRIMITIVES = frozenset({
     "project_locks.get_lock",
     "projects._check_project_lock", "projects._enforce_project_lock",
 })
-_OUR_MODULES = ("routers.", "services.")
+_OUR_MODULES = ("routers.", "services.", "harness.")
 # Any canonical uuid: `_foreign_lock_gate_exempt` matches REAL request paths,
 # and its job-scoped patterns are anchored to the dashed-uuid shape.
 _SAMPLE_UUID = "123e4567-e89b-12d3-a456-426614174000"
@@ -498,7 +498,7 @@ def _lock_check_path(fn, depth: int = 0, seen: set | None = None) -> list[str] |
     """
     The call chain from `fn` to a lock-check primitive, or None.
 
-    Follows calls by NAME into functions defined in `routers.*`/`services.*`
+    Follows calls by NAME into functions defined in `routers.*`/`services.*`/`harness.*`
     (module globals AND function-local imports), up to six levels deep. It
     does not follow a function passed as an argument; a handler that checks
     the lock that way needs a ROUTE_POLICY entry saying so. That is a false

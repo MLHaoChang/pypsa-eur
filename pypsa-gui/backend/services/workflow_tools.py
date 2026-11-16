@@ -710,11 +710,12 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                     if existing is None:
                         checkpoint('effect_started')
                         # The fork helper (study harness 14, GK B (57)): the steps this block ran inline.
-                        from harness import shipped_fork
-                        existing = shipped_fork.create(db, user, base, request.name, request.description)
+                        # Called by name so the write-lock verifier follows them.
+                        from harness.shipped_fork import create as create_fork, save as save_fork
+                        existing = create_fork(db, user, base, request.name, request.description)
                         result["project_id"] = str(existing.id)
                         checkpoint('child_created', case_project_id=str(existing.id))
-                        shipped_fork.save(ctx, existing, spec, db=db, user=user)
+                        save_fork(ctx, existing, spec, db=db, user=user)
                         checkpoint('child_saved')
                     result["project_id"] = str(existing.id)
                     saved_ctx = _load_context(existing)
