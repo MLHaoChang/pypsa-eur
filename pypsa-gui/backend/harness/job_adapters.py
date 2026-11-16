@@ -721,12 +721,6 @@ def _family_of(job_id: str) -> str:
     return QUEUE_FAMILY
 
 
-def _terminal(family: str, status: str | None) -> bool:
-    from services.solve_queue import _TERMINAL
-    return status in {FOREGROUND_FAMILY: _FG_TERMINAL, STUDY_FAMILY: _STUDY_TERMINAL,
-                      REPORT_FAMILY: _REPORT_TERMINAL, QUEUE_FAMILY: _TERMINAL}[family]
-
-
 def _outcome(family: str, status: str | None) -> str | None:
     """The neutral terminal outcome; None while the job still runs.
 
@@ -908,9 +902,9 @@ def _worker_exited(job_id: str) -> bool:
     with _LOCK:
         binding = _ACTIVITY_BINDINGS.get(job_id)
     worker = binding[2] if binding is not None else None
-    if not isinstance(worker, threading.Thread) or worker.ident is None:
-        return True  # no started worker thread is bound: the record is the only witness
-    return not worker.is_alive()
+    if not isinstance(worker, threading.Thread):
+        return True  # no worker thread is bound: the record is the only witness
+    return not worker.is_alive()  # an unstarted thread is not alive either
 
 
 def _abort_native(job_id: str) -> None:

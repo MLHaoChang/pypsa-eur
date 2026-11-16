@@ -938,3 +938,55 @@ def test_a_non_string_id_is_not_found(baseline):
         with pytest.raises(HTTPException) as refused:
             ja.job_status(job_id, actor_id=chat_tools.acting_user_id())
         assert refused.value.detail["error_kind"] == "job_not_found"
+
+
+def test_the_foreground_phase_is_the_records_kind_then_the_handles(baseline):
+    ctx, *_ = baseline
+    actor = chat_tools.acting_user_id()
+    started = [_start(ctx, "fg")]
+    try:
+        with ctx.solver_state_lock:
+            ctx.solver_state["kind"] = "ac_pf"
+        assert ja.job_status(started[0][0], actor_id=actor)["phase"] == "ac_pf"
+        with ctx.solver_state_lock:
+            ctx.solver_state["kind"] = None
+        assert ja.job_status(started[0][0], actor_id=actor)["phase"] == "lopf"
+    finally:
+        _stop_all(started)
+
+
+@pytest.mark.parametrize("family", ["ad", "rpt"])
+def test_a_verified_cancel_returns_without_waiting_out_the_bound(baseline, family):
+    ctx, *_ = baseline
+    started = [_start(ctx, family)]
+    try:
+        t0 = time.monotonic()
+        out = ja.cancel_job(
+            started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=5
+        )
+        assert out["cancel"] == "cancelled" and time.monotonic() - t0 < 2
+    finally:
+        _stop_all(started)
+
+
+def test_a_job_that_finished_first_returns_without_waiting_out_the_bound(
+    baseline, monkeypatch
+):
+    ctx, *_ = baseline
+    started = [_start(ctx, "ad", honours_stop=False)]
+
+    def done_instead(_key):
+        with ctx.solver_state_lock:
+            ctx.solver_state["fmea_sweep"]["status"] = "done"
+        started[0][1].release.set()
+        started[0][1].join(1)
+
+    monkeypatch.setattr(chat_tools, "abort_adequacy_study", done_instead)
+    try:
+        t0 = time.monotonic()
+        out = ja.cancel_job(
+            started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=5
+        )
+        assert out["cancel"] == "finished_first" and time.monotonic() - t0 < 2
+    finally:
+        _stop_all(started)
