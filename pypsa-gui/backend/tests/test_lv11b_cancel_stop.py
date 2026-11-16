@@ -347,26 +347,35 @@ def _settled_step(task_id, status, timeout=60):
 
 
 def test_b2_a_step_solve_that_finishes_after_stop_monitoring_still_settles_completed(held_plan):
-    job, task_id = _released(*_plan_run(held_plan))
+    run = _plan_run(held_plan)
+    job, task_id = _released(*run)
+    session = run[1]
     held_plan.open.set()
     _settle_solver()
     assert PyPSAService.get_solver_state().get("status") == "completed"
-    session = chat_tools.chat_session()
     due = _await_due(session)
     assert [d["job_id"] for d in due] == [job]  # one continuation, as without the stop
     task = _settled_step(task_id, "completed")
     assert task["completed_steps"] == 1
 
 
-def test_b2_a_step_solve_that_fails_after_stop_monitoring_still_settles_failed(held_plan):
+def test_b2_a_step_solve_that_fails_after_stop_monitoring_still_settles_failed(
+    held_plan, monkeypatch
+):
+    import routers.simulation as simulation
+
     from harness import continuation
 
-    def boom(n, lock):
-        raise RuntimeError("solver blew up")
+    held = simulation.run_simulation  # the gate's wrapper
 
-    held_plan.after_solve = boom
-    job, task_id = _released(*_plan_run(held_plan))
-    session = chat_tools.chat_session()
+    def infeasible(*args, **kwargs):
+        held(*args, **kwargs)
+        return "warning", "infeasible"  # the worker maps it to `failed`
+
+    monkeypatch.setattr(simulation, "run_simulation", infeasible)
+    run = _plan_run(held_plan)
+    job, task_id = _released(*run)
+    session = run[1]
     held_plan.open.set()
     _settle_solver()
     assert PyPSAService.get_solver_state().get("status") == "failed"
@@ -380,8 +389,9 @@ def test_b2_a_step_solve_that_fails_after_stop_monitoring_still_settles_failed(h
 def test_b2_a_step_solve_cancelled_by_cancel_job_after_stop_monitoring_settles_failed(held_plan):
     from harness import continuation
 
-    job, task_id = _released(*_plan_run(held_plan))
-    session = chat_tools.chat_session()
+    run = _plan_run(held_plan)
+    job, task_id = _released(*run)
+    session = run[1]
     cards = []
     calls, results, frames, _ = run_journey(
         *PROVIDER, [lambda r: ("cancel_job", {"job_id": job}), lambda r: (None, {})],
