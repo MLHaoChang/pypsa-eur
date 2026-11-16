@@ -560,6 +560,16 @@ def _network_input_fingerprint(ctx, *, exact=False):
     if present:
         parts.append("fuel-curve/1")
         parts.append(_exact_frame_json(n.generators[present]) if exact else n.generators[present].to_json())
+    # TCU 08: a composite asset's investment parts, which the solve staging turns into capital_cost, fom_cost and
+    # lifetime (hashed as PyPSA columns). A backstop for a writer that sets a part without re-deriving (the
+    # legacy Excel sheet import). Appended only when a part column holds a value.
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, part_columns
+    for comp_class in COMPOSITE:
+        frame = getattr(n, CLASS_ATTR[comp_class])
+        present = [c for c in part_columns(comp_class) if c in frame.columns]
+        if present and frame[present].notna().any().any():
+            parts.append(f"composite-parts/{comp_class}/1")
+            parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
     # AS-05: the PCS/STATCOM tags and their costs change the LP rows and the
     # objective. Appended only when a Store or Link carries one.
     from services.solver.pcs_statcom import pcs_statcom_tags

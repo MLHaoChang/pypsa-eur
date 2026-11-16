@@ -34,6 +34,7 @@ REASON_NO_RUN = "No native run: run a study to play results"
 REASON_NOT_IN_N = "Not available yet: comes in a later version"
 REASON_NO_WORKER = "Not available: this engine is not installed"
 REASON_NO_PROPOSAL = "No proposal: generate or edit first"
+REASON_NO_BUILDINGS = "Generate the 3D buildings first (Generate tab): only a 3D site can be exported"
 
 # Rule 4 homes. `guided.open` is how the jump lands: request-then-scroll to the
 # drawer (as requestGridReadiness does), never a bare setSlidePanel.
@@ -45,6 +46,7 @@ HOME_LOADS = {"guided": {"section": "loads", "drawer": None, "open": "request_th
 HOME_RESULTS = {"guided": {"section": "results", "drawer": None, "open": "request_then_scroll"},
                 "expert": {"panel": "results"}}
 HOME_SITE_MAP = {"site_part": "map"}
+HOME_SITE_GENERATE = {"site_part": "generate"}
 
 # SC-06-layout made `process_layout` native (a calibrated GeoJSON/raster layout through
 # an `import_layout` proposal, no engine); photos and Blender still need one.
@@ -112,8 +114,12 @@ def actions(*, saved: bool, can_edit: bool, anchor_confirmed: bool, site: str, b
         # blocker here (UX #821): REASON_NO_RUN applies once playback ships.
         _action("play_results", False, "plays native hourly results at their own cadence",
                 _blocker("not_in_this_slice", REASON_NOT_IN_N, HOME_RESULTS)),
-        _action("export_scene", False, "writes an export snapshot of one generation",
-                _blocker("not_in_this_slice", REASON_NOT_IN_N, HOME_SITE_MAP)),
+        # SC-04: a read, so viewers may export too; it needs accepted buildings to have a scene to export.
+        _action("export_scene", saved and buildings > 0,
+                "downloads a snapshot of one scene revision as a 3D model file (GLB) and a manifest; writes nothing",
+                _blocker("save_first", REASON_SAVE_FIRST, HOME_SAVE) if not saved
+                else _blocker("no_buildings", REASON_NO_BUILDINGS, HOME_SITE_GENERATE),
+                ["accepted 3D buildings"]),
         _action("apply_proposal", writable and pending_proposal, "commits the reviewed proposal as a new revision",
                 no_write if not writable else _blocker("no_proposal", REASON_NO_PROPOSAL, HOME_SITE_MAP)),
         _action("process_layout", writable and site != "none" and boundary,

@@ -1,6 +1,6 @@
 # 02f — Sizing loop: the objective scale and dual-reading checks
 
-Status: needs-triage
+Status: done (#1536)
 
 Follow-up from homer-parity 02a (#1466, GK A A2-1).
 
