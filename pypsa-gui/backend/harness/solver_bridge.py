@@ -67,6 +67,7 @@ def start_detached_solver_monitor(
     on_terminal: Callable[[], None] | None = None,
     on_superseded: Callable[[], None] | None = None,
     is_pending: Callable[[], bool] | None = None,
+    monitor_generation: int | None = None,
 ) -> None:
     """Run ``solver_log_bridge`` on a daemon thread after turn handoff (issue 11).
 
@@ -109,10 +110,13 @@ def start_detached_solver_monitor(
             return True
         return False
 
-    # live-voice 11b: the generation is read here, on the caller's thread, so a
-    # Stop monitoring sent before the thread starts still ends this watch.
-    generation_of = getattr(session, "monitor_generation", None)
-    generation = generation_of() if generation_of is not None else None
+    # live-voice 11b: the generation is the caller's (one read shared with any
+    # in-turn hold) or read here, on the caller's thread, so a Stop monitoring
+    # sent before the thread starts still ends this watch.
+    generation = monitor_generation
+    if generation is None:
+        generation_of = getattr(session, "monitor_generation", None)
+        generation = generation_of() if generation_of is not None else None
 
     def _run() -> None:
         session.mark_detached_monitor(tool_use_id, tool_name, active=True)

@@ -4266,6 +4266,7 @@ def _dispatch_real_tool_call(
                     active_ctx,
                     tool_use_id=tool_use_id,
                     tool_name=tool_name,
+                    monitor_generation=monitor_generation,
                     **({} if task_path else _publish_hooks(active_ctx, run_token)),
                 )
                 if task_path:
