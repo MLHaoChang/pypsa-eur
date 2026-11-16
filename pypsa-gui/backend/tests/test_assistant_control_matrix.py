@@ -146,10 +146,11 @@ def test_check_builds_in_memory_and_never_touches_a_matrix_file(tmp_path):
 
 # ── issue 08 close-out: explicit full-coverage limitation block ─────────
 
-def test_full_coverage_is_explicitly_not_claimed_while_manifest_variants_are_pending(matrix):
+def test_full_coverage_is_explicitly_not_claimed(matrix):
+    # Every manifest variant may be covered (LC-48 closed the last pending rows); the
+    # claim stays false while the standing blockers below hold it.
     block = matrix['full_coverage']
     pending = [r for r in matrix['family_journeys'] if r['variants']['pending']]
-    assert pending, 'update this guard together with the claim once every manifest variant is covered'
     assert block['claimed'] is False and block['status'] == 'not_established'
     assert block['journeys_total'] == 14 and block['journeys_pending'] == len(pending)
     assert 'Tested subsets only' in block['permitted_statement']
@@ -159,6 +160,8 @@ def test_full_coverage_is_explicitly_not_claimed_while_manifest_variants_are_pen
         lc06 = [v for v in row['variants']['pending'] if v.split('.')[0] not in r3]
         if lc06:
             assert blockers[f'family-manifest:{row["journey_id"].removeprefix("manifest:")}']['pending_variants'] == lc06
+    if not pending:
+        assert not [b for b in blockers if b.startswith(('family-manifest:', 'r3-uncovered:'))]
     # The families LC-06 leaves out (R3) keep an explicit blocker each, owned by LC-43,
     # for as long as one of their variants is pending; a suite LC-43 has covered has none.
     open_suites = {v.split('.')[0] for row in pending for v in row['variants']['pending']}
@@ -211,7 +214,8 @@ def test_matrix_never_asserts_whole_application_coverage_elsewhere(matrix):
     (lambda m: m['full_coverage'].update(claimed=True, status='established'), 'claimed is true'),
     (lambda m: m['full_coverage'].update(claimed=True), 'claimed is true'),
     (lambda m: m['full_coverage'].update(status='established'), 'claimed=false/not_established'),
-    (lambda m: m['full_coverage'].update(journeys_pending=0), 'journeys_pending disagrees'),
+    (lambda m: m['full_coverage'].update(journeys_pending=m['full_coverage']['journeys_pending'] + 1),
+     'journeys_pending disagrees'),
     (lambda m: m.pop('full_coverage'), 'missing'),
 ])
 def test_ci_rejects_a_full_coverage_claim_without_passing_journeys(matrix, mutate, expected):
@@ -264,19 +268,30 @@ def test_claim_guard_rejects_claim_even_if_artifact_was_regenerated():
     assert {b['id'] for b in gen.STANDING_BLOCKERS} <= {b['id'] for b in block['blockers']}
 
 
-def test_claim_guard_reads_pending_from_the_manifest_not_the_matrix_copy(matrix):
+def _one_pending(gen, monkeypatch):
+    """The manifest with one variant pending, whatever the shipped manifest holds."""
+    one = [dict(v, status='pending') if v['id'] == 'LC-D19.single_case' else v
+           for v in gen.family_manifest.VARIANTS]
+    assert any(v['status'] == 'pending' for v in one)
+    monkeypatch.setattr(gen.family_manifest, 'VARIANTS', one)
+
+
+def test_claim_guard_reads_pending_from_the_manifest_not_the_matrix_copy(matrix, monkeypatch):
     # Editing the matrix's own journey rows cannot hide a pending manifest variant.
+    gen = _gen()
+    _one_pending(gen, monkeypatch)
     forged = json.loads(json.dumps(matrix))
     for row in forged['family_journeys']:
         row['variants']['pending'] = []
         row['status'] = 'covered'
     forged['full_coverage']['journeys_pending'] = 0
-    assert 'journeys_pending disagrees with family_manifest' in (_gen().matrix_problem(forged) or '')
+    assert 'journeys_pending disagrees with family_manifest' in (gen.matrix_problem(forged) or '')
 
 
 def test_claim_guard_ignores_the_module_family_journeys(matrix, monkeypatch):
     # Pending is recomputed from the manifest's variants, never from FAMILY_JOURNEYS.
     gen = _gen()
+    _one_pending(gen, monkeypatch)
     cleared = [dict(r, variants=dict(r['variants'], pending=[]), status='covered') for r in gen.FAMILY_JOURNEYS]
     monkeypatch.setattr(gen, 'FAMILY_JOURNEYS', cleared)
     forged = json.loads(json.dumps(matrix))

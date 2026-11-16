@@ -435,6 +435,7 @@ from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-expor
     _THINKING_REQUIRED_FIELDS,
     _thinking_block_is_wellformed,
     _sanitise_history_message,
+    repair_unpaired_tool_use,
 )
 
 
@@ -2252,6 +2253,15 @@ def _run_turn_body(
     history_cache_anchor: int | None = len(messages) - 1 if messages else None
 
     messages.append({"role": "user", "content": user_content})
+    # LC48D-REPAIR-1: an unpaired tool_use in the stored history (a turn killed
+    # between its tool calls and their results) is answered with a synthetic
+    # `interrupted_tool_call` error, first in the user message after it, in
+    # this outgoing list only: the history persists `user_content` as it is.
+    repaired = repair_unpaired_tool_use(messages)
+    if repaired is not messages:
+        messages[:] = repaired
+        # The anchor is still the last message before this turn's own.
+        history_cache_anchor = len(messages) - 2 if len(messages) > 1 else None
 
     # Task 8 — vision capability enforcement, on the OUTBOUND MESSAGE ARRAY,
     # not on `attachment_file_ids`. Checked HERE, before this turn's message

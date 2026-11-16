@@ -244,6 +244,10 @@ export interface SolverConfig {
   reserve_margin?: number | null
   /** homer-parity 01a: share of the electricity used on site (load plus converter draw) from renewables, 0–1; null = off. */
   min_renewable_fraction?: number | null
+  /** homer-parity 01b operating reserve shares (0–1), null or 0 off. */
+  reserve_share_load?: number | null
+  reserve_share_pv?: number | null
+  reserve_share_wind?: number | null
   // Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in.
   dsr_price_eur_per_mwh?: number
   dsr_share_of_load?: number

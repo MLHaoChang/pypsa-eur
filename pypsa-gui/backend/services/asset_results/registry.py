@@ -222,7 +222,8 @@ _GENERATOR_METRICS: tuple[Metric, ...] = (
     # ── emissions ────────────────────────────────────────────────────────
     Metric(id="co2_rate", label="CO₂ rate", unit="t/h", kind="series",
            category="emissions", classes=("Generator",), origin="derived",
-           formula="p ÷ efficiency × carrier.co2_emissions",
+           formula="p ÷ efficiency × carrier.co2_emissions; with a fuel curve, "
+                   "(slope × p + no-load fuel × p_nom × on) × carrier.co2_emissions",
            compute=C.gen_co2_rate, requires=(REQ_DISPATCH, REQ_CO2)),
     Metric(id="co2_total_t", label="CO₂ emitted", unit="t", kind="scalar",
            category="emissions", classes=("Generator",), origin="derived",
