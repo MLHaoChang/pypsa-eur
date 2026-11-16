@@ -953,3 +953,15 @@ def test_a_bulk_part_edit_keeps_the_other_rows_parts(client, install_network):
     )
     assert r.status_code == 200, r.text
     pd.testing.assert_series_equal(n.storage_units.loc["bess2", cols], other)
+
+
+@pytest.mark.parametrize(
+    "blank", [None, "", float("nan")], ids=["none", "empty", "nan"]
+)
+def test_every_blank_spelling_is_not_an_edit(blank):
+    from services.network_crud import check_parts_own_costs
+
+    before = {"capital_cost": 41_000.0}
+    check_parts_own_costs(
+        "StorageUnit", BATTERY, before=before, submitted={"capital_cost": blank}
+    )
