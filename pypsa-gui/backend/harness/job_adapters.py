@@ -673,8 +673,10 @@ def wait_report_job(
 
 CONTRACT_VERSION = 1
 QUEUE_FAMILY = 'solve_queue'
-# How long a cancel waits for the worker to confirm it stopped.
+# How long a cancel waits for the worker to confirm it stopped, and the most
+# a caller may ask for (GK B F3): the wait runs inside a tool call.
 CANCEL_SETTLE_SECONDS = 3.0
+CANCEL_SETTLE_MAX_SECONDS = 10.0
 
 # Native terminal status -> neutral outcome. A loop that finished without
 # meeting its target (`LOOP_STATUSES` other than `met`) is `not_met`.
@@ -907,22 +909,43 @@ def _worker_exited(job_id: str) -> bool:
     return not worker.is_alive()  # an unstarted thread is not alive either
 
 
-def _abort_native(job_id: str) -> None:
-    """The existing abort for the handle's family; never a new stop path."""
-    from services import chat_tools
-    family = _family_of(job_id)
-    if family == FOREGROUND_FAMILY:
-        chat_tools.abort_simulation()
-    elif family == REPORT_FAMILY:
-        chat_tools.abort_report_generation()
-    else:
-        key = _STUDIES[job_id].study_key
-        if key == 'investment_case':
-            chat_tools.abort_investment_case()
-        elif key == 'business_case':
-            chat_tools.abort_business_case()
-        else:
-            chat_tools.abort_adequacy_study(key)
+def _stop_own_run(job_id: str) -> str:
+    """
+    Stop exactly this handle's run: check its origin and set ITS stop event
+    in one hold of the family's state lock (GK B F1 on #1543).
+
+    The abort routes stop whatever run is active; a run started between the
+    caller's read and the route would be stopped instead. This sets the same
+    event the routes set, on the record this handle bound, and for the
+    foreground solve flips `status` to `aborted` as `routers.simulation.abort`
+    does. Returns `sent`, `origin_lost` (a newer run owns the record: nothing
+    is touched), `not_running` (it ended before the hold) or `not_stoppable`
+    (the record carries no stop event).
+    """
+    from services.pypsa_service import PyPSAService
+    ctx = PyPSAService.get_active_context()
+    with _LOCK:
+        binding = _ACTIVITY_BINDINGS.get(job_id)
+    if ctx is None or binding is None or binding[0] != id(ctx):
+        return 'origin_lost'
+    _, key, worker, started = binding
+    with ctx.solver_state_lock:
+        record = ctx.solver_state if key is None else ctx.solver_state.get(key)
+        if not _same_origin(record, worker, started):
+            return 'origin_lost'
+        if record.get('status') != 'running':
+            return 'not_running'
+        event = record.get('stop_event')
+        if event is None:
+            return 'not_stoppable'
+        event.set()
+        if key is None:
+            record['status'] = 'aborted'
+    return 'sent'
+
+
+def _refusal(kind: str, status: int, message: str) -> dict[str, Any]:
+    return {'error_kind': kind, 'status': status, 'message': message[:200]}
 
 
 def cancel_job(
@@ -939,38 +962,57 @@ def cancel_job(
       - `cancelled`: the outcome is `cancelled` AND the handle's worker
         thread has exited (a queue job: the queue flips it only then);
       - `cancel_requested`: the stop was sent and the worker had not yet
-        confirmed within `settle_seconds` (it stops at its next boundary);
+        confirmed within the settle bound (it stops at its next boundary);
       - `already_finished`: the job was terminal before the request, nothing sent;
       - `finished_first`: the job ended another way while the stop was in flight;
       - `origin_lost`: the handle's worker no longer owns a live record (a
         newer run replaced it, or it exited without a status): nothing is
-        sent, or what happened after the send cannot be proved.
+        sent, or what happened after the send cannot be proved;
+      - `refused`: nothing was stopped; `refusal` names why (the queue's
+        abort refused it, or the run carries no stop event).
     The ACL and project checks are `job_status`'s: a foreign handle is 404.
+    A native handle minted without an owner cannot be cancelled (409
+    `job_owner_unknown`): the view's owner check passes anyone for it.
+    The settle bound is capped at CANCEL_SETTLE_MAX_SECONDS.
     """
     stop = stop or threading.Event()
     before = job_status(job_id, actor_id=actor_id)
+    queue = before['family'] == QUEUE_FAMILY
+    if not queue and before['owner_user_id'] is None:
+        _refuse('job_owner_unknown',
+                'This job was started without a recorded owner, so it cannot be cancelled by handle.',
+                409)
     if before['outcome'] == 'unknown':
         return {'cancel': 'origin_lost', 'job': before}
     if before['terminal']:
         return {'cancel': 'already_finished', 'job': before}
-    # `job_status` read the handle's own origin (`_same_origin`): a newer run
-    # that replaced it reads `unknown`, so nothing reaches the abort below.
-    queue = before['family'] == QUEUE_FAMILY
-    try:
-        with _as_actor(actor_id):
-            if queue:
-                from services import chat_tools
+    if queue:
+        from services import chat_tools
+        try:
+            with _as_actor(actor_id):
                 chat_tools.solve_queue_abort(job_id)
-            else:
-                _abort_native(job_id)
-    except HTTPException as exc:
-        # The abort found nothing running (it ended in between): the re-read decides.
-        if exc.status_code not in (400, 404, 409):
-            raise
+        except HTTPException as exc:
+            if exc.status_code not in (400, 404, 409):
+                raise
+            detail = exc.detail
+            kind = detail.get('error_kind') if isinstance(detail, dict) else None
+            message = detail.get('message') if isinstance(detail, dict) else detail
+            return {'cancel': 'refused', 'job': job_status(job_id, actor_id=actor_id),
+                    'refusal': _refusal(kind or 'abort_refused', exc.status_code, str(message))}
+    else:
+        sent = _stop_own_run(job_id)
+        if sent == 'origin_lost':
+            return {'cancel': 'origin_lost', 'job': job_status(job_id, actor_id=actor_id)}
+        if sent == 'not_stoppable':
+            return {'cancel': 'refused', 'job': job_status(job_id, actor_id=actor_id),
+                    'refusal': _refusal('not_stoppable', 409, 'this run carries no stop event')}
+        # `not_running`: it ended before the hold; the re-read says how.
     # The re-read holds no project lock or turn lease: each read takes the
     # short solver-state lock once, as every status read does (GK B A2).
     bound = CANCEL_SETTLE_SECONDS if settle_seconds is None else settle_seconds
-    deadline = time.monotonic() + max(0.0, bound)
+    bound = min(max(0.0, bound), CANCEL_SETTLE_MAX_SECONDS) if math.isfinite(bound) \
+        else CANCEL_SETTLE_SECONDS
+    deadline = time.monotonic() + bound
     while True:
         after = job_status(job_id, actor_id=actor_id)
         # A queue job has no bound worker (`_worker_exited` is True): the queue

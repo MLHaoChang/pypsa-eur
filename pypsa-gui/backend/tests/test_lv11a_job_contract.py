@@ -48,7 +48,7 @@ def _record(ctx, family):
     return ctx.solver_state if key is None else ctx.solver_state[key]
 
 
-def _worker(ctx, family, *, honours_stop=True, aborted="aborted"):
+def _worker(ctx, family, *, honours_stop=True, aborted="aborted", key=None):
     """A fake native worker: it stops when its record's stop event is set."""
     stop, release = threading.Event(), threading.Event()
 
@@ -58,17 +58,27 @@ def _worker(ctx, family, *, honours_stop=True, aborted="aborted"):
             pass
         if honours_stop:
             with ctx.solver_state_lock:
-                _record(ctx, family)["status"] = aborted
+                (ctx.solver_state[key] if key else _record(ctx, family))["status"] = (
+                    aborted
+                )
 
     thread = threading.Thread(target=run, daemon=True)
     thread.release = release
     return thread, stop
 
 
-def _start(ctx, family, *, honours_stop=True, study_key="fmea_sweep"):
+def _start(
+    ctx, family, *, honours_stop=True, study_key="fmea_sweep", ends_as="aborted"
+):
     owner = chat_tools.acting_user_id()
     project = str(ctx.project_uuid)
-    thread, stop = _worker(ctx, family, honours_stop=honours_stop)
+    thread, stop = _worker(
+        ctx,
+        family,
+        honours_stop=honours_stop,
+        aborted=ends_as,
+        key=study_key if family == "ad" else None,
+    )
     record = {
         "status": "running",
         "thread": thread,
@@ -278,31 +288,6 @@ def test_a_cancel_never_stops_a_newer_run_that_replaced_the_handle(baseline):
         _stop_all([first, second])
 
 
-@pytest.mark.parametrize(
-    "study_key,tool",
-    [
-        ("investment_case", "abort_investment_case"),
-        ("business_case", "abort_business_case"),
-        ("mc", "abort_adequacy_study"),
-    ],
-)
-def test_each_study_key_takes_its_own_existing_abort(
-    baseline, monkeypatch, study_key, tool
-):
-    ctx, *_ = baseline
-    calls = []
-    monkeypatch.setattr(chat_tools, tool, lambda *a: calls.append(a) or {})
-    started = [_start(ctx, "ad", honours_stop=False, study_key=study_key)]
-    try:
-        out = ja.cancel_job(
-            started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=0
-        )
-        assert out["cancel"] == "cancel_requested"
-        assert calls == ([(study_key,)] if tool == "abort_adequacy_study" else [()])
-    finally:
-        _stop_all(started)
-
-
 # ── GK B A1: 4 families x {view, cancel} x {own, foreign actor, foreign project} ──
 
 
@@ -411,24 +396,12 @@ def test_a_job_that_succeeds_before_the_abort_lands_reads_succeeded(
 
     racer = threading.Thread(target=finish_first, daemon=True)
     racer.start()
-    if family == "fg":
-        # abort_simulation flips a running record to `aborted` itself; the
-        # native worker then finishes first, as a solve past its last iteration does.
-        import routers.simulation as sim
-
-        real = sim.abort
-
-        def abort_lost_race():
-            stop.set()
-            racer.join(2)
-            raise HTTPException(400, "No simulation running")
-
-        sim.abort = abort_lost_race
+    # For fg the stop also flips the record to `aborted`; the worker then
+    # finishes first, as a solve past its last iteration does.
     try:
         out = ja.cancel_job(job, actor_id=chat_tools.acting_user_id(), settle_seconds=2)
     finally:
-        if family == "fg":
-            sim.abort = real
+        racer.join(2)
         _stop_all(started)
     assert out["cancel"] == "finished_first"
     assert (out["job"]["outcome"], out["job"]["status"]) == ("succeeded", done)
@@ -664,25 +637,6 @@ def test_a_worker_that_dies_without_a_status_after_the_stop_is_origin_lost(basel
         _stop_all(started)
 
 
-def test_the_native_abort_runs_as_the_checked_actor(baseline, monkeypatch):
-    ctx, *_ = baseline
-    own = chat_tools.acting_user_id()
-    seen = []
-    monkeypatch.setattr(
-        chat_tools,
-        "abort_report_generation",
-        lambda: seen.append(chat_tools.acting_user_id()) or {},
-    )
-    started = [_start(ctx, "rpt", honours_stop=False)]
-    token = chat_tools._ACTING_USER_ID.set(str(uuid.uuid4()))  # another ambient user
-    try:
-        ja.cancel_job(started[0][0], actor_id=own, settle_seconds=0)
-    finally:
-        chat_tools._ACTING_USER_ID.reset(token)
-        _stop_all(started)
-    assert seen == [own]
-
-
 def test_a_queue_read_without_an_actor_is_job_not_found(baseline):
     ctx, _project_id, path = baseline
     job, _ = _queue(ctx, path)
@@ -691,21 +645,6 @@ def test_a_queue_read_without_an_actor_is_job_not_found(baseline):
             call(job, actor_id=None)
         assert refused.value.status_code == 404
         assert refused.value.detail["error_kind"] == "job_not_found"
-
-
-def test_a_queue_job_that_finished_before_the_abort_reads_finished_first(
-    baseline, monkeypatch
-):
-    ctx, _project_id, path = baseline
-    job_id, job = _queue(ctx, path)
-
-    def finished_in_between(_job_id):
-        job.status, job.finished_at = "completed", 5.0
-        raise HTTPException(409, "Job already finished")
-
-    monkeypatch.setattr(chat_tools, "solve_queue_abort", finished_in_between)
-    out = ja.cancel_job(job_id, actor_id=chat_tools.acting_user_id(), settle_seconds=1)
-    assert out["cancel"] == "finished_first" and out["job"]["outcome"] == "succeeded"
 
 
 # ── GK B A7: mutant pins ──────────────────────────────────────────────────
@@ -793,29 +732,17 @@ def test_a_stopped_cancel_returns_at_once_as_cancel_requested(baseline):
         _stop_all(started)
 
 
-@pytest.mark.parametrize("queue", [False, True])
-def test_an_unexpected_abort_error_is_raised_not_swallowed(
-    baseline, monkeypatch, queue
-):
+def test_an_unexpected_queue_abort_error_is_raised_not_swallowed(baseline, monkeypatch):
     ctx, _project_id, path = baseline
+    job, _ = _queue(ctx, path)
 
     def boom(*_a):
         raise HTTPException(500, "solver host gone")
 
-    started = []
-    if queue:
-        job, _ = _queue(ctx, path)
-        monkeypatch.setattr(chat_tools, "solve_queue_abort", boom)
-    else:
-        started.append(_start(ctx, "ad"))
-        job = started[0][0]
-        monkeypatch.setattr(chat_tools, "abort_adequacy_study", boom)
-    try:
-        with pytest.raises(HTTPException) as raised:
-            ja.cancel_job(job, actor_id=chat_tools.acting_user_id(), settle_seconds=0)
-        assert raised.value.status_code == 500
-    finally:
-        _stop_all(started)
+    monkeypatch.setattr(chat_tools, "solve_queue_abort", boom)
+    with pytest.raises(HTTPException) as raised:
+        ja.cancel_job(job, actor_id=chat_tools.acting_user_id(), settle_seconds=0)
+    assert raised.value.status_code == 500
 
 
 def test_an_unknown_actor_is_the_acting_refusal_not_a_silent_none(baseline):
@@ -969,24 +896,153 @@ def test_a_verified_cancel_returns_without_waiting_out_the_bound(baseline, famil
         _stop_all(started)
 
 
-def test_a_job_that_finished_first_returns_without_waiting_out_the_bound(
-    baseline, monkeypatch
-):
+def test_a_job_that_finished_first_returns_without_waiting_out_the_bound(baseline):
     ctx, *_ = baseline
-    started = [_start(ctx, "ad", honours_stop=False)]
-
-    def done_instead(_key):
-        with ctx.solver_state_lock:
-            ctx.solver_state["fmea_sweep"]["status"] = "done"
-        started[0][1].release.set()
-        started[0][1].join(1)
-
-    monkeypatch.setattr(chat_tools, "abort_adequacy_study", done_instead)
+    started = [_start(ctx, "ad", ends_as="done")]  # it completes as the stop lands
     try:
         t0 = time.monotonic()
         out = ja.cancel_job(
             started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=5
         )
-        assert out["cancel"] == "finished_first" and time.monotonic() - t0 < 2
+        assert (
+            out["cancel"] == "finished_first" and out["job"]["outcome"] == "succeeded"
+        )
+        assert time.monotonic() - t0 < 2
+    finally:
+        _stop_all(started)
+
+
+# ── GK B on #1543 ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "study_key", ["fmea_sweep", "mc", "investment_case", "business_case"]
+)
+def test_each_study_key_stops_its_own_record_only(baseline, study_key):
+    ctx, *_ = baseline
+    other = threading.Event()
+    with ctx.solver_state_lock:
+        ctx.solver_state["frontier"] = {"status": "running", "stop_event": other}
+    started = [_start(ctx, "ad", study_key=study_key)]
+    try:
+        out = ja.cancel_job(
+            started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=2
+        )
+        assert out["cancel"] == "cancelled" and started[0][2].is_set()
+        assert not other.is_set()
+    finally:
+        _stop_all(started)
+
+
+@pytest.mark.parametrize("family", ["fg", "ad", "rpt"])
+def test_f1_a_run_that_replaced_the_handle_between_read_and_stop_survives(
+    baseline, monkeypatch, family
+):
+    """The interleave: the read sees this handle's run; before the stop a new run
+    of the same family replaces the record. Nothing reaches the new run."""
+    ctx, *_ = baseline
+    started = [_start(ctx, family)]
+    real = ja.job_status
+    newer = []
+
+    def read_then_replace(job_id, *, actor_id):
+        view = real(job_id, actor_id=actor_id)
+        if not newer:
+            started[0][1].release.set()
+            started[0][2].set()  # this run ends ...
+            started[0][1].join(1)
+            newer.append(_start(ctx, family))  # ... and a new one takes the record
+        return view
+
+    monkeypatch.setattr(ja, "job_status", read_then_replace)
+    try:
+        out = ja.cancel_job(
+            started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=1
+        )
+        assert out["cancel"] == "origin_lost"
+        assert not newer[0][2].is_set()
+        assert _record(ctx, family)["status"] == "running"
+    finally:
+        _stop_all(started + newer)
+
+
+def test_f2_a_queue_job_the_actor_may_see_but_not_stop_is_refused(
+    baseline, monkeypatch
+):
+    import routers.solve_queue as sq_router
+
+    ctx, _project_id, path = baseline
+    job_id, job = _queue(ctx, path)
+    monkeypatch.setattr(sq_router, "_may_abort", lambda *_a: False)
+    out = ja.cancel_job(job_id, actor_id=chat_tools.acting_user_id(), settle_seconds=1)
+    assert out["cancel"] == "refused"
+    assert out["refusal"]["status"] == 404
+    assert out["refusal"]["error_kind"] == "abort_refused"
+    assert out["job"]["status"] == "queued" and job.status == "queued"
+
+
+def test_f2_a_refused_queue_abort_carries_its_kind(baseline, monkeypatch):
+    ctx, _project_id, path = baseline
+    job_id, _ = _queue(ctx, path)
+
+    def refuse(_job_id):
+        raise HTTPException(409, {"error_kind": "job_locked", "message": "held"})
+
+    monkeypatch.setattr(chat_tools, "solve_queue_abort", refuse)
+    out = ja.cancel_job(job_id, actor_id=chat_tools.acting_user_id(), settle_seconds=0)
+    assert out["cancel"] == "refused"
+    assert out["refusal"] == {
+        "error_kind": "job_locked",
+        "status": 409,
+        "message": "held",
+    }
+
+
+def test_f2_a_run_without_a_stop_event_is_refused_not_requested(baseline):
+    ctx, *_ = baseline
+    started = [_start(ctx, "ad")]
+    try:
+        with ctx.solver_state_lock:
+            ctx.solver_state["fmea_sweep"]["stop_event"] = None
+        out = ja.cancel_job(
+            started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=0
+        )
+        assert out["cancel"] == "refused"
+        assert out["refusal"]["error_kind"] == "not_stoppable"
+        assert out["job"]["status"] == "running"
+    finally:
+        _stop_all(started)
+
+
+@pytest.mark.parametrize("asked", [3600.0, float("inf"), float("nan")])
+def test_f3_the_settle_wait_is_capped(baseline, monkeypatch, asked):
+    ctx, *_ = baseline
+    monkeypatch.setattr(ja, "CANCEL_SETTLE_MAX_SECONDS", 0.2)
+    monkeypatch.setattr(ja, "CANCEL_SETTLE_SECONDS", 0.1)
+    started = [_start(ctx, "ad", honours_stop=False)]
+    try:
+        t0 = time.monotonic()
+        out = ja.cancel_job(
+            started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=asked
+        )
+        assert out["cancel"] == "cancel_requested" and time.monotonic() - t0 < 1.5
+    finally:
+        _stop_all(started)
+
+
+@pytest.mark.parametrize("family", ["fg", "ad", "rpt"])
+def test_f4_an_ownerless_handle_is_viewable_but_not_cancellable(baseline, family):
+    ctx, *_ = baseline
+    started = [_start(ctx, family)]
+    try:
+        store = {"fg": ja._FOREGROUND, "ad": ja._STUDIES, "rpt": ja._REPORTS}[family]
+        store[started[0][0]].owner_user_id = None
+        actor = chat_tools.acting_user_id()
+        assert ja.job_status(started[0][0], actor_id=actor)["status"] == "running"
+        with pytest.raises(HTTPException) as refused:
+            ja.cancel_job(started[0][0], actor_id=actor, settle_seconds=0)
+        assert refused.value.status_code == 409
+        assert refused.value.detail["error_kind"] == "job_owner_unknown"
+        assert not started[0][2].is_set()
     finally:
         _stop_all(started)
