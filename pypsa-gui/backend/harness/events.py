@@ -76,8 +76,10 @@ FRAMES: frozenset[str] = frozenset(FRAME_PAYLOADS)
 PROGRESS_FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
     # A solver line the detached monitor collected (issue 11, unchanged keys).
     "tool_progress": ("tool_use_id", "line"),
-    # The jobs this actor may see in the session's project, sent first when
-    # a resume cannot replay: a past epoch (restart) or a gap.
+    # Sent first when a resume cannot replay: a past epoch (restart) or a gap.
+    # `jobs`: this actor's registered fg:/ad:/rpt: jobs in the session's
+    # project, each read through `job_status`. The registry is in memory, so
+    # after a restart (whose solves ended with the process) it is empty.
     "job_snapshot": ("epoch", "seq", "monitor_active", "jobs"),
     # The monitored solve ended; `job` is the job's view re-read for the
     # requesting actor when the frame is sent, or null when it is refused.

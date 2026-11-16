@@ -198,19 +198,27 @@ def test_the_tripwire_is_red_on_a_planted_frame():
 
 
 def _progress_route_frames() -> set[str]:
-    """live-voice 11c: the frame names `routers/chat.py` writes on the
-    /progress stream (every `sse_frame(...)` with an `event_id=`)."""
+    """live-voice 11c: the frame names the /progress route (`chat_progress`
+    in `routers/chat.py`) writes: every `sse_frame(...)` inside it. A name
+    that is not a string constant is reported as `<not a constant>`."""
     source = (BACKEND / "routers" / "chat.py").read_text(encoding="utf-8")
+    route = next(
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "chat_progress"
+    )
     names: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(route):
         if (
             isinstance(node, ast.Call)
             and getattr(node.func, "attr", getattr(node.func, "id", None)) == "sse_frame"
-            and any(k.arg == "event_id" for k in node.keywords)
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
         ):
-            names.add(node.args[0].value)
+            first = node.args[0] if node.args else None
+            names.add(
+                first.value
+                if isinstance(first, ast.Constant) and isinstance(first.value, str)
+                else "<not a constant>"
+            )
     return names
 
 

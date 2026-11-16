@@ -394,11 +394,13 @@ def _plan_step_monitor():
 
 
 def _terminal_items(session):
-    import time
+    """Once the monitor thread has exited (not merely been marked inactive)."""
+    import threading
 
-    deadline = time.monotonic() + 5
-    while session.detached_monitor_active() and time.monotonic() < deadline:
-        time.sleep(0.02)
+    for thread in threading.enumerate():
+        if thread.name == "detached-solver-tu-fg":
+            thread.join(5)
+            assert not thread.is_alive()
     return [i for i in session.drain_detached_progress(after_cursor=0)
             if i.get("frame") == "job_terminal"]
 
@@ -421,3 +423,73 @@ def test_a_plan_step_monitor_stopped_mid_run_logs_no_end():
     assert session.detached_monitor_active()
     session.stop_monitoring()
     assert _terminal_items(session) == []  # the solve still runs
+    ctx.solver_state["status"] = "completed"
+    assert _terminal_items(session) == []  # and its end is not watched
+
+
+def test_a_plan_step_monitor_logs_the_end_after_a_turn_abort():
+    """Review F3: a turn abort ends the bridge, not the watch for the end."""
+    import threading
+    import time
+
+    session, ctx = _plan_step_monitor()
+    time.sleep(0.3)
+    session.abort_event.set()
+    time.sleep(0.3)
+    assert not session.detached_monitor_active()
+    threading.Timer(0.3, ctx.solver_state.__setitem__, ("status", "completed")).start()
+    assert [i["job_id"] for i in _terminal_items(session)] == ["fg:x"]
+
+
+def test_a_header_resume_follows_the_log_and_leaves_the_shared_ring(client, owned):
+    """Review F1: a resumed stream never drains the unread ring, so a half-open
+    older stream or a second tab cannot take its frames (nor it theirs)."""
+    _lines(owned, "a", "b")
+    _get(client, owned)  # the ring is drained
+    _lines(owned, "c")
+    frames = _frames(_get(client, owned, f"{owned.progress_epoch()}:2").text)
+    assert [f[2]["line"] for f in frames] == ["c"]
+    assert [i["line"] for i in owned.drain_detached_progress()] == ["c"]
+
+
+def test_a_gap_while_following_gives_a_snapshot(client, owned, monkeypatch):
+    """Review F2: the log outran the reader between two polls."""
+    import collections
+
+    monkeypatch.setattr(owned, "_progress_log", collections.deque(maxlen=3))
+    monkeypatch.setattr("routers.chat.PROGRESS_POLL_SECONDS", 0.01, raising=False)
+    calls = []
+
+    def active(_tid=None):
+        calls.append(1)
+        if len(calls) == 1:
+            _lines(owned, "a", "b", "c", "d", "e")  # the log keeps 3..5
+            return True
+        return False
+
+    monkeypatch.setattr(owned, "detached_monitor_active", active)
+    frames = _frames(_get(client, owned, f"{owned.progress_epoch()}:0").text)
+    assert [(f[1], f[2].get("seq")) for f in frames] == [("job_snapshot", 5)]
+
+
+def test_progress_since_decides_and_collects_in_one_call(owned):
+    _lines(owned, "a", "b", "c")
+    epoch = owned.progress_epoch()
+    point, items, head = owned.progress_since(epoch, 1)
+    assert (point, [i["line"] for i in items], head) == ("replay", ["b", "c"], 3)
+    assert owned.progress_since(epoch, 3) == ("replay", [], 3)
+    assert owned.progress_since(epoch, 4)[0] == "snapshot"
+    other = progress_ids.mint_epoch(owned.session_id)
+    assert owned.progress_since(other, 1) == ("snapshot", [], 3)
+    assert owned.progress_since(progress_ids.mint_epoch("x"), 1)[0] == "foreign"
+
+
+def test_an_adapter_fault_serves_no_view(baseline, monkeypatch):
+    """Review F6: fail closed, and the stream goes on."""
+    from routers import chat as chat_router
+
+    def broken(job_id, *, actor_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(ja, "job_status", broken)
+    assert chat_router._progress_job_view("ad:x", chat_tools.acting_user_id()) is None

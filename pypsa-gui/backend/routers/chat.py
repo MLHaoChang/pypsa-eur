@@ -30,6 +30,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from sqlalchemy.orm import Session as DBSession
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 
 from db.models import Session as SessionRow
@@ -2556,6 +2557,9 @@ def _progress_job_view(job_id: str, actor_id: str | None) -> dict | None:
         view = job_adapters.job_status(job_id, actor_id=actor_id)
     except HTTPException:
         return None
+    except Exception:  # noqa: BLE001 — an adapter fault serves nothing, the stream goes on
+        logger.exception("chat progress: job view for %s failed", job_id)
+        return None
     project_id = _progress_project_id()
     if project_id is None or view.get("project_id") != project_id:
         return None
@@ -2635,7 +2639,7 @@ async def chat_progress(
     # live-voice 11c: Last-Event-ID (`<epoch>:<seq>`) wins over `?cursor=`,
     # which stays for the old client path (Q1).
     last_event_id = request.headers.get("last-event-id")
-    snapshot_first = False
+    resume = None
     if last_event_id is not None:
         try:
             epoch, seq = progress_ids.parse_event_id(last_event_id)
@@ -2647,7 +2651,7 @@ async def chat_progress(
                     "message": "Last-Event-ID must be an id this stream sent",
                 },
             ) from None
-        point = session.progress_resume_point(epoch, seq)
+        point, items, head = session.progress_since(epoch, seq)
         if point == "foreign":
             raise HTTPException(
                 status_code=409,
@@ -2656,8 +2660,7 @@ async def chat_progress(
                     "message": "Last-Event-ID belongs to another chat session",
                 },
             )
-        snapshot_first = point == "snapshot"
-        cursor = session.progress_cursor() if snapshot_first else seq
+        resume = (point, items, head if point == "snapshot" else seq)
     # The ownership gate above admitted this actor; its id filters every job view.
     actor_id = str(actor.id) if actor is not None else None
     epoch_now = session.progress_epoch()
@@ -2684,22 +2687,41 @@ async def chat_progress(
             event_id=event_id,
         )
 
+    async def _snapshot_frame(seq):
+        snap = await run_in_threadpool(
+            _progress_snapshot, session, actor_id, epoch_now, seq
+        )
+        return chat_service.sse_frame(
+            "job_snapshot", snap, event_id=progress_ids.format_event_id(epoch_now, seq)
+        )
+
     async def _gen():
         # First drain is immediate so a short-lived ring is not held for a
-        # full poll interval before the client sees it. A resume cursor
-        # replays from the log once, then falls through to unread drains.
+        # full poll interval before the client sees it. Without Last-Event-ID
+        # the stream drains the unread ring (a `?cursor=` replays from the
+        # log once first). With it (live-voice 11c) the stream follows the
+        # log by its own cursor and never drains the shared ring, so a
+        # half-open older stream or a second tab cannot take its frames; a
+        # gap at any point is answered with a snapshot.
         idle_rounds = 0
         resume_cursor = cursor
-        if snapshot_first:
-            yield chat_service.sse_frame(
-                "job_snapshot",
-                _progress_snapshot(session, actor_id, epoch_now, resume_cursor),
-                event_id=progress_ids.format_event_id(epoch_now, resume_cursor),
-            )
+        follow = None
+        pending = None
+        if resume is not None:
+            point, pending, follow = resume
+            if point == "snapshot":
+                yield await _snapshot_frame(follow)
         while True:
             if await request.is_disconnected():
                 return
-            if resume_cursor is not None:
+            if follow is not None:
+                if pending is None:
+                    point, pending, head = session.progress_since(epoch_now, follow)
+                    if point != "replay":
+                        follow = head
+                        yield await _snapshot_frame(follow)
+                payloads, pending = pending, None
+            elif resume_cursor is not None:
                 payloads = session.drain_detached_progress(
                     after_cursor=resume_cursor,
                 )
@@ -2707,7 +2729,9 @@ async def chat_progress(
             else:
                 payloads = session.drain_detached_progress()
             for payload in payloads:
-                yield _framed(payload)
+                yield await run_in_threadpool(_framed, payload)
+                if follow is not None:
+                    follow = int(payload["cursor"])
             if session.detached_monitor_active():
                 idle_rounds = 0
                 await asyncio.sleep(PROGRESS_POLL_SECONDS)
@@ -2716,7 +2740,7 @@ async def chat_progress(
                 idle_rounds = 0
                 await asyncio.sleep(PROGRESS_POLL_SECONDS)
                 continue
-            # Monitor gone and ring empty — one extra short wait for a late
+            # Monitor gone and nothing new — one extra short wait for a late
             # append, then close.
             idle_rounds += 1
             if idle_rounds >= 2:

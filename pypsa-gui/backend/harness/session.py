@@ -666,27 +666,37 @@ class ChatSession:
                 self._progress_epoch = progress_ids.mint_epoch(self.session_id)
             return self._progress_epoch
 
-    def progress_resume_point(self, epoch: str, seq: int) -> str:
-        """How a client holding ``<epoch>:<seq>`` resumes (live-voice 11c).
+    def progress_since(
+        self, epoch: str, seq: int,
+    ) -> tuple[str, list[dict[str, Any]], int]:
+        """Where a reader holding ``<epoch>:<seq>`` stands (live-voice 11c).
 
-        ``replay``: the log still holds everything after ``seq``.
-        ``snapshot``: a past epoch of this session (a restart or rehydrate),
-        or a ``seq`` older than the log keeps (a gap); never a replay from 0.
-        ``foreign``: an epoch this session never had.
+        One lock hold decides and collects, so the log cannot move between
+        the verdict and the replay. Returns ``(point, items, head)``:
+        ``replay`` with every logged item after ``seq``; ``snapshot`` (no
+        items) for a past epoch of this session (a restart or rehydrate),
+        a ``seq`` past the head, or a ``seq`` older than the log keeps (a
+        gap), never a replay from 0; ``foreign`` for an epoch this session
+        never had. ``head`` is the newest cursor. The unread ring is left
+        alone: a resumed reader follows the log, not the shared ring.
         """
         from harness import progress_ids
 
         if not progress_ids.epoch_belongs_to(self.session_id, epoch):
-            return 'foreign'
+            return 'foreign', [], self.progress_cursor()
         current = self.progress_epoch()
         with self._lock:
-            if epoch != current or seq > self._progress_seq:
-                return 'snapshot'
+            head = self._progress_seq
+            if epoch != current or seq > head:
+                return 'snapshot', [], head
             oldest = (
                 int(self._progress_log[0]['cursor'])
-                if self._progress_log else self._progress_seq + 1
+                if self._progress_log else head + 1
             )
-            return 'replay' if seq >= oldest - 1 else 'snapshot'
+            if seq < oldest - 1:
+                return 'snapshot', [], head
+            items = [i for i in self._progress_log if int(i['cursor']) > seq]
+            return 'replay', items, head
 
     def drain_detached_progress(
         self, *, after_cursor: int | None = None,

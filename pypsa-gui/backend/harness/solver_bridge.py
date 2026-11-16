@@ -103,8 +103,9 @@ def start_detached_solver_monitor(
     def _note_end() -> None:
         """live-voice 11c: a `job_terminal` item once this solve has ended.
 
-        Called once: `_settle` notes the end exactly when it settles, and the
-        monitor's no-`on_terminal` path notes it only in its `finally`. The
+        Called once: `_settle` notes the end exactly when it settles; the
+        no-`on_terminal` path notes it in its `finally` when the solve has
+        ended, or else once its wait after a turn abort sees the end. The
         item names the job only; the progress route re-reads the job's view
         for whoever is reading the stream, so a replay is ACL-checked too.
         """
@@ -166,6 +167,19 @@ def start_detached_solver_monitor(
                 return
             time.sleep(_TERMINAL_POLL_S)
             settled = _settle()
+        # live-voice 11c: the plan step's monitor (no on_terminal) also waits
+        # out a turn abort so its solve's end is still logged once, as the
+        # path above does; Stop monitoring ends the watch for good.
+        if on_terminal is None and job_id is not None and not _done():
+            while not _stopped():
+                if _done():
+                    _note_end()
+                    return
+                time.sleep(_TERMINAL_POLL_S)
+
+    def _stopped() -> bool:
+        generation_of = getattr(session, "monitor_generation", None)
+        return generation_of is not None and generation_of() != generation
 
     threading.Thread(
         target=_run,
