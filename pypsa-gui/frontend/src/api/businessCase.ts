@@ -150,10 +150,44 @@ export interface LockedRow {
   superseded_by: string[]
 }
 
+/** Per year; null where a year (or the whole series) is not established. */
+export type YearSeries = (number | null)[] | null
+
+/** The report's P&L (`runner.report_body` → `pnl`). Streams are signed as the ledger's
+ *  lines (revenue +, cost −); the totals are `rows`, never a sum of streams (GK B F1). */
+export interface BusinessCasePnl {
+  years: number[]
+  streams: Record<string, YearSeries>
+  /** Display keys (GK B F2); absent on a report stored before them. */
+  stream_class?: Record<string, string | null>
+  stream_source?: Record<string, string>
+  rows: Record<string, YearSeries | boolean>
+  not_finite?: string[]
+}
+
+export interface BusinessCaseKpi {
+  value: number | null
+  status: 'ok' | 'n/a' | 'not_established'
+  reason: string | null
+  unit?: string | null
+  basis?: unknown
+}
+
+export interface BusinessCaseBreakEven {
+  status: string | null
+  price_scale?: number | null
+  price?: number | null
+  money_year?: number | null
+  basis?: string
+}
+
 export interface BusinessCaseReport {
   currency?: string
   basis?: { id: string; label: string }
   locked?: LockedRow[]
+  pnl?: BusinessCasePnl
+  kpis?: Record<string, BusinessCaseKpi>
+  break_even?: BusinessCaseBreakEven | null
   [key: string]: unknown
 }
 
@@ -161,12 +195,26 @@ export interface BusinessCaseStudy {
   status: string
   stage?: string | null
   refusal?: string | null
+  error?: string | null
+  error_code?: string | null
+  stages?: string[]
+  stages_done?: string[]
   report?: BusinessCaseReport | null
-  staleness?: { stale: boolean | null; reason?: string | null; [key: string]: unknown }
+  staleness?: {
+    stale: boolean | null; reason?: string | null; changed?: string[]; [key: string]: unknown
+  }
   [key: string]: unknown
 }
 
 /** A 422 from the inputs PUT or the preset GET, its detail kept for placement. */
+/** A 409 `investment_case_missing` from the run POST: no current investment case (C3). */
+export class InvestmentCaseMissing extends Error {
+  constructor(public reason: string | null) {
+    super('the business case needs a current investment case')
+    this.name = 'InvestmentCaseMissing'
+  }
+}
+
 export class BusinessCaseRejected extends Error {
   constructor(public detail: {
     code?: string; refusal?: string; field?: string; message?: string
@@ -194,6 +242,9 @@ function typed(e: unknown): never {
   if (status === 409 && detail.code === 'solver_in_flight') {
     throw new SolverInFlightError(message ?? 'a solve is running')
   }
+  if (status === 409 && detail.code === 'investment_case_missing') {
+    throw new InvestmentCaseMissing((detail.reason as string | undefined) ?? null)
+  }
   if (status === 422) throw new BusinessCaseRejected(detail as BusinessCaseRejected['detail'])
   throw e
 }
@@ -213,6 +264,12 @@ export const businessCaseApi = {
   getStudy: () =>
     client.get<BusinessCaseStudy>('/results/business_case', QUIET)
       .then(r => (r.status === 204 ? null : r.data)),
+  /** Start a run (spec §7): 409 `investment_case_missing` → `InvestmentCaseMissing`. */
+  startRun: () =>
+    client.post<BusinessCaseStudy>('/results/business_case', {}, QUIET).then(r => r.data, typed),
+  abortRun: () =>
+    client.post<{ status?: string; aborting?: boolean }>('/results/business_case/abort', {}, QUIET)
+      .then(r => r.data),
   /** No variant: the variants only (`business_case` null when the template has some). */
   getPreset: (variant?: string) =>
     client.get<PresetResponse>('/results/business_case/preset',

@@ -25,6 +25,8 @@ import pytest
 
 from harness import run_site
 from services import (
+    chat_service,
+    chat_tools,
     run_actions,
     run_envelope,
     run_gates,
@@ -315,7 +317,15 @@ def test_a_typed_site_reads_into_two_rows_and_v2_rows_are_unchanged(site_host, s
         SITE["lon"],
     )
     assert not [g for g in v3["gaps"] if g["param"].startswith("site.")]
-    v2 = _intake(_start(base, f"Site {uuid.uuid4().hex[:6]}", ref="eh_site@2"), site)
+    # LC48D-GOAL-1: a chat runs one plan at a time, so the v2 run is another chat's.
+    first_chat = chat_tools.chat_session()
+    chat_tools.set_chat_session(chat_service.ChatSession())
+    try:
+        v2 = _intake(
+            _start(base, f"Site {uuid.uuid4().hex[:6]}", ref="eh_site@2"), site
+        )
+    finally:
+        chat_tools.set_chat_session(first_chat)
     assert v2["rows"] == [r for r in v3["rows"] if not r["param"].startswith("site.")]
     assert "site" not in run_intake.params(v3["rows"])
 

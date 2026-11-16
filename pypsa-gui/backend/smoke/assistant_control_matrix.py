@@ -498,8 +498,11 @@ def _full_coverage_problem(matrix: dict) -> str | None:
     pending = [j for j in family_journeys() if _open(j['variants'])]
     if block.get('claimed') is True and (pending or block.get('blockers')):
         return 'full_coverage.claimed is true while family journeys are pending or blockers remain'
-    if pending and (block.get('claimed') is not False or block.get('status') != 'not_established'):
-        return 'full_coverage must be claimed=false/not_established while manifest variants are pending'
+    # Unclaimed reads not_established whether or not variants are pending: with every
+    # variant covered the standing blockers still hold the claim (LC-48d close-out).
+    if block.get('claimed') is not True and (block.get('claimed') is not False
+                                             or block.get('status') != 'not_established'):
+        return 'full_coverage must be claimed=false/not_established until a claim is made'
     if block.get('journeys_pending') != len(pending):
         return 'full_coverage.journeys_pending disagrees with family_manifest'
     return _standing_blocker_problem(block.get('blockers'))
