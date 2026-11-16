@@ -1,7 +1,7 @@
 // S1b: the pure form logic behind the schema-rendered asset cards.
 import { describe, expect, it } from 'vitest'
 import type { AssetFieldSpec } from '../api/assetSchema'
-import { annuity, buildPatch, derivedStored, displayValue, isRevealed, seedForm } from './assetForm'
+import { annuity, buildPatch, derivedStored, displayValue, isRevealed, omitDerived, seedForm } from './assetForm'
 
 function spec(key: string, over: Partial<AssetFieldSpec> = {}): AssetFieldSpec {
   return {
@@ -120,5 +120,14 @@ describe('derivedStored: the capital cost PyPSA charges', () => {
     expect(derivedStored('capital_cost', { overnight_cost: null, capital_cost: 95_712, lifetime: 25,
       discount_rate: 0.07 })).toBe(95_712)
     expect(derivedStored('lifetime', { lifetime: 25, overnight_cost: 1, discount_rate: 0.07 })).toBe(25)
+  })
+})
+
+describe('omitDerived: a composite PUT never echoes a derived cost (TCU 09)', () => {
+  it('drops the derived columns from the spread row, so the JSON body leaves them out', () => {
+    const current = { name: 'bess', capital_cost: 41234.56789, inv_power_overnight: 300_000, p_nom: 10 }
+    const patch = omitDerived([OVERNIGHT, CAPEX, P_NOM], { p_nom: 12 } as Record<string, unknown>)
+    const body = JSON.parse(JSON.stringify({ ...current, ...patch }))
+    expect(body).toEqual({ name: 'bess', inv_power_overnight: 300_000, p_nom: 12 })
   })
 })

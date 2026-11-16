@@ -352,13 +352,21 @@ def check_parts_own_costs(component_class: str, parts: dict, *, before: dict, su
         if col not in submitted:
             continue
         v = submitted[col]
-        if v is None or v == "" or _same_value(v, before.get(col)):
+        if v is None or v == "":
             continue
         try:
-            if math.isnan(float(v)):
-                continue
+            fv = float(v)
         except (TypeError, ValueError):
-            pass
+            fv = None  # not a number: an edit, refused below
+        if fv is not None and math.isnan(fv):
+            continue
+        try:
+            stored = float(before.get(col))
+        except (TypeError, ValueError):
+            stored = None
+        # Exact (GK B, TCU 09 P1): the form echoes the stored float, which JSON round-trips; no tolerance.
+        if fv is not None and stored is not None and fv == stored:
+            continue
         raise HTTPException(
             422,
             f"{owned_column_label(col)}: set by the investment parts. Change a part's overnight cost, lifetime "

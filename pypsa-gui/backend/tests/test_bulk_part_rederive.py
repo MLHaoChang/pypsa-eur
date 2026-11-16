@@ -63,11 +63,12 @@ def _network():
     return n
 
 
-def _fingerprint():
-    from services.pypsa_service import PyPSAService
+def _fingerprint(n):
+    """The input fingerprint of `n` itself. Outside a request the active context is not the installed network
+    (a test-client call binds its own), so hashing it would compare two unrelated networks."""
     from services.workflow_tools import _network_input_fingerprint
 
-    return _network_input_fingerprint(PyPSAService.get_active_context())
+    return _network_input_fingerprint(_ctx(n))
 
 
 def _derived(n, cls_attr, name):
@@ -126,7 +127,7 @@ def test_bulk_part_edit_rederives_like_put(
 
     n = install_network(_network())
     before = _derived(n, attr, name)
-    fp_before = _fingerprint()
+    fp_before = _fingerprint(n)
     body = (
         {"component_class": cls, "rows": [{"name": name, "updates": {col: value}}]}
         if row_form
@@ -138,7 +139,7 @@ def test_bulk_part_edit_rederives_like_put(
     after = _derived(n, attr, name)
     assert after[moves] != pytest.approx(before[moves])
     assert after == expected  # T5: the same apply_parts call, so bit-equal
-    assert _fingerprint() != fp_before
+    assert _fingerprint(n) != fp_before
 
 
 def test_bulk_rederives_every_target_on_its_own_row(client, install_network):
@@ -262,12 +263,12 @@ def test_the_assistant_apply_moves_cost_and_fingerprint(install_network):
     from services import chat_tools
 
     n = install_network(_network())
-    cost, fp = float(n.storage_units.at["bess", "capital_cost"]), _fingerprint()
+    cost, fp = float(n.storage_units.at["bess", "capital_cost"]), _fingerprint(n)
     chat_tools.bulk_update_components(
         "StorageUnit", ["bess"], {"inv_power_overnight": 500_000.0}
     )
     assert float(n.storage_units.at["bess", "capital_cost"]) > cost
-    assert _fingerprint() != fp
+    assert _fingerprint(n) != fp
 
 
 def test_the_sweep_child_path_moves_cost_and_fingerprint(install_network):
@@ -602,6 +603,7 @@ def test_a_sweep_of_a_cost_the_parts_own_is_refused_before_any_case_exists(
             project = project_registry.resolve_project(db, user, "TCU Baseline")
             path = project_registry.project_dir(project)
         before = (path / "network.nc").read_bytes()
+        dirs = sorted(p.name for p in path.parent.iterdir())
         cases = [
             {
                 "new_name": "TCU Case",
@@ -617,10 +619,17 @@ def test_a_sweep_of_a_cost_the_parts_own_is_refused_before_any_case_exists(
         ]
         with pytest.raises(HTTPException) as exc:
             chat_tools.run_sensitivity_sweep(str(project.id), cases)
-        assert exc.value.detail["error_kind"] == "invalid_sensitivity_attribute"
+        assert exc.value.detail["error_kind"] == "invalid_sensitivity_cases"
         assert "set by the investment parts" in exc.value.detail["message"]
         assert (path / "network.nc").read_bytes() == before
         assert not any(p["name"] == "TCU Case" for p in chat_tools.list_projects())
+        assert (
+            sorted(p.name for p in path.parent.iterdir()) == dirs
+        )  # P5: no child directory
+        with chat_tools._acting() as (db, user):
+            assert (
+                project_registry.find_project(db, user, "TCU Case") is None
+            )  # P5: no DB row
     finally:
         PyPSAService._turn_cell.reset(cell)
         PyPSAService.reset_request_context(binding)
@@ -744,7 +753,10 @@ def test_a_bulk_part_on_a_frame_without_part_columns_matches_put(
     priced = {"inv_power_overnight": 300_000.0, "inv_power_lifetime": 10.0}
     put_net = install_network(plain())
     assert _put(client, "StorageUnit", "plain", priced).status_code == 200
-    expected, put_fp = _derived(put_net, "storage_units", "plain"), _fingerprint()
+    expected, put_fp = (
+        _derived(put_net, "storage_units", "plain"),
+        _fingerprint(put_net),
+    )
 
     n = install_network(plain())
     assert "inv_power_overnight" not in n.storage_units.columns
@@ -759,7 +771,7 @@ def test_a_bulk_part_on_a_frame_without_part_columns_matches_put(
     r = client.patch(BULK, json=body)
     assert r.status_code == 200, r.text
     assert _derived(n, "storage_units", "plain") == expected
-    assert _fingerprint() == put_fp
+    assert _fingerprint(n) == put_fp
 
 
 def test_a_bulk_to_an_unknown_non_part_column_is_still_a_400(client, install_network):
@@ -782,3 +794,123 @@ def test_a_bulk_to_an_unknown_non_part_column_is_still_a_400(client, install_net
         },
     )  # a StorageUnit part, not a Line's
     assert r.status_code == 400, r.text
+
+
+# GK B conditions on the TCU 09 plan (P1, P3, N4a, N4b).
+
+
+def test_the_guard_compares_exactly_with_the_stored_float(client, install_network):
+    """P1: the form echoes the stored float, which JSON round-trips exactly; one ulp off is an edit."""
+    n = install_network(_network())
+    stored = float(n.storage_units.at["bess", "capital_cost"])
+    assert (
+        _put(client, "StorageUnit", "bess", {"capital_cost": stored}).status_code == 200
+    )
+    r = _put(
+        client,
+        "StorageUnit",
+        "bess",
+        {"capital_cost": math.nextafter(stored, math.inf)},
+    )
+    assert r.status_code == 422, r.text
+
+
+def _plain():
+    n = build_network()
+    n.add(
+        "StorageUnit", "plain", bus="B1", p_nom=10.0, max_hours=2.0, capital_cost=1234.0
+    )
+    return n
+
+
+@pytest.mark.parametrize("route", ["put", "bulk"])
+def test_pricing_the_first_part_and_typing_a_cost_in_one_write_is_refused(
+    client, install_network, route
+):
+    """P3: ownership is read from the row AFTER the write, so the new part owns capital_cost at once. Intended:
+    the typed cost would be re-derived away in the same write."""
+    n = install_network(_plain())
+    updates = {
+        "inv_power_overnight": 300_000.0,
+        "inv_power_lifetime": 10.0,
+        "capital_cost": 999.0,
+    }
+    if route == "put":
+        r = _put(client, "StorageUnit", "plain", updates)
+    else:
+        r = client.patch(
+            BULK,
+            json={
+                "component_class": "StorageUnit",
+                "names": ["plain"],
+                "updates": updates,
+            },
+        )
+    assert r.status_code == 422, r.text
+    assert "set by the investment parts" in r.text
+    assert float(n.storage_units.at["plain", "capital_cost"]) == 1234.0
+    # The stored value echoed alongside the first part is not an edit.
+    updates["capital_cost"] = 1234.0
+    if route == "put":
+        r = _put(client, "StorageUnit", "plain", updates)
+    else:
+        r = client.patch(
+            BULK,
+            json={
+                "component_class": "StorageUnit",
+                "names": ["plain"],
+                "updates": updates,
+            },
+        )
+    assert r.status_code == 200, r.text
+    assert (
+        float(n.storage_units.at["plain", "capital_cost"]) != 1234.0
+    )  # derived from the part
+
+
+@pytest.mark.parametrize("row_form", [False, True], ids=["names", "rows"])
+def test_a_refused_bulk_creates_no_part_column(client, install_network, row_form):
+    """N4a: the new part column is created only after every target passes; a 422 leaves columns and dtypes."""
+    n = build_network()
+    for name in ("p1", "p2"):
+        n.add(
+            "StorageUnit",
+            name,
+            bus="B1",
+            p_nom=10.0,
+            max_hours=2.0,
+            capital_cost=1234.0,
+        )
+    n = install_network(n)
+    columns, dtypes = list(n.storage_units.columns), n.storage_units.dtypes.copy()
+    ok = {"inv_power_overnight": 300_000.0, "inv_power_lifetime": 10.0}
+    bad = {"inv_power_overnight": 300_000.0}  # priced without a lifetime
+    body = (
+        {
+            "component_class": "StorageUnit",
+            "rows": [{"name": "p1", "updates": ok}, {"name": "p2", "updates": bad}],
+        }
+        if row_form
+        else {"component_class": "StorageUnit", "names": ["p1", "p2"], "updates": bad}
+    )
+    r = client.patch(BULK, json=body)
+    assert r.status_code == 422, r.text
+    assert list(n.storage_units.columns) == columns
+    pd.testing.assert_series_equal(n.storage_units.dtypes, dtypes)
+
+
+def test_a_new_all_blank_part_column_leaves_the_fingerprint(client, install_network):
+    """N4b: a part column created holding no value appends nothing to the fingerprint (the notna gate)."""
+    n = install_network(_plain())
+    fp = _fingerprint(n)
+    r = client.patch(
+        BULK,
+        json={
+            "component_class": "StorageUnit",
+            "names": ["plain"],
+            "updates": {"inv_power_fom_share": None},
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert "inv_power_fom_share" in n.storage_units.columns
+    assert _fingerprint(n) == fp

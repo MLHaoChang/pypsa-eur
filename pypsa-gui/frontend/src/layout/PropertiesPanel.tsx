@@ -38,7 +38,7 @@ import { vintageCloneToast, saveFailedToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
 import { useAssetProvenance } from '../hooks/useAssetProvenance'
-import { buildPatch, seedForm } from '../utils/assetForm'
+import { buildPatch, omitDerived, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, fieldHelp, fieldUnit, schemaFields } from './properties/AssetFields'
 import { useSaveAction } from '../components/memory/ParameterMemory'
 import { GuideButton } from '../components/GuidedTour'
@@ -359,6 +359,8 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       qc, useUIStore.getState().currentProject, 'storage_units', su.name,
       (current) => {
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<StorageUnit>
+      // TCU 09: the derived costs stay out of the PUT; the parts own them.
+      omitDerived(specs, payload)
       payload.name = form.name?.trim() || su.name
       payload.bus = (form.bus as string | undefined)?.trim() || su.bus
       payload.carrier = form.carrier || current.carrier
@@ -1545,6 +1547,8 @@ export function LinePanel({ name }: { name: string }) {
       (current) => {
       if (!line) throw new Error('Line not found')
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Line>
+      // TCU 09: the derived costs stay out of the PUT; the parts own them.
+      omitDerived(specs, payload)
       payload.name = form.name?.trim() || name
       // r/x/b are entered per km; PyPSA stores absolute Ohm / Siemens.
       // Multiply by the length being saved. Per-km 0 (or empty) ⇒ absolute 0.

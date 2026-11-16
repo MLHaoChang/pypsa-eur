@@ -641,7 +641,7 @@ def _refuse_cost_the_parts_own(n, change) -> None:
             check_parts_own_costs(change.component_class, parts, before=before,
                                   submitted={change.attribute: change.value})
         except HTTPException as exc:
-            _refuse("invalid_sensitivity_attribute", f"{change.component_class} {name}: {exc.detail}")
+            _refuse("invalid_sensitivity_cases", f"{change.component_class} {name}: {exc.detail}")
 
 
 def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
