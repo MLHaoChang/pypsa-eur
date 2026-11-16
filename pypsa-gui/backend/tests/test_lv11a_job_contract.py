@@ -1046,3 +1046,87 @@ def test_f4_an_ownerless_handle_is_viewable_but_not_cancellable(baseline, family
         assert not started[0][2].is_set()
     finally:
         _stop_all(started)
+
+
+class _HandOverLock:
+    """The context's RLock; when armed, the cancelling thread's release waits
+    until a replacer thread has taken the lock and replaced the record, so
+    anything the cancel does after its hold sees the NEW run."""
+
+    def __init__(self, real):
+        self.real, self.after_release = real, None
+
+    def acquire(self, *a, **k):
+        return self.real.acquire(*a, **k)
+
+    def release(self):
+        self.real.release()
+        hook, self.after_release = self.after_release, None
+        if hook is not None:
+            hook()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+@pytest.mark.parametrize("family", ["fg", "ad"])
+def test_f1_the_stop_lands_inside_the_hold_that_checked_the_origin(
+    baseline, monkeypatch, family
+):
+    """GK B on #1543: a replacement tried right after `_same_origin` passes (a new
+    run claiming the record from another thread) waits for the hold; the new run
+    keeps running and its stop event stays clear."""
+    import sys
+
+    import routers.simulation as sim
+
+    ctx, *_ = baseline
+    started = [_start(ctx, family, honours_stop=False)]
+    lock = _HandOverLock(ctx.solver_state_lock)
+    monkeypatch.setattr(ctx, "solver_state_lock", lock)
+    real_same_origin = ja._same_origin
+    new_stop, new_thread = threading.Event(), threading.Thread(target=lambda: None)
+
+    def claim():
+        if family == "fg":
+            sim._state_update(  # the route's own claim path
+                status="running",
+                thread=new_thread,
+                stop_event=new_stop,
+                started_at=time.time(),
+            )
+        else:
+            with ctx.solver_state_lock:
+                ctx.solver_state["fmea_sweep"] = {
+                    "status": "running",
+                    "thread": new_thread,
+                    "stop_event": new_stop,
+                    "started_at": time.time(),
+                }
+
+    def same_origin_then_claim(*args):
+        ok = real_same_origin(*args)
+        if sys._getframe(1).f_code.co_name == "_stop_own_run" and ok:
+            import contextvars
+
+            bound = contextvars.copy_context()  # the same active project
+            replacer = threading.Thread(target=bound.run, args=(claim,), daemon=True)
+            replacer.start()  # blocks on the lock the cancel holds
+            lock.after_release = lambda: replacer.join(2)
+        return ok
+
+    monkeypatch.setattr(ja, "_same_origin", same_origin_then_claim)
+    try:
+        ja.cancel_job(
+            started[0][0], actor_id=chat_tools.acting_user_id(), settle_seconds=0
+        )
+        assert started[0][2].is_set()  # this handle's run got the stop
+        assert not new_stop.is_set()
+        assert _record(ctx, family)["status"] == "running"
+        assert _record(ctx, family)["stop_event"] is new_stop
+    finally:
+        _stop_all(started)
