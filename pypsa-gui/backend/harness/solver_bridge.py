@@ -169,8 +169,9 @@ def start_detached_solver_monitor(
             settled = _settle()
         # live-voice 11c: the plan step's monitor (no on_terminal) also waits
         # out a turn abort so its solve's end is still logged once, as the
-        # path above does; Stop monitoring ends the watch for good.
-        if on_terminal is None and job_id is not None and not _done():
+        # path above does (after which the solve is done, so this is skipped);
+        # Stop monitoring ends the watch for good.
+        if job_id is not None and not _done():
             while not _stopped():
                 if _done():
                     _note_end()
@@ -178,8 +179,8 @@ def start_detached_solver_monitor(
                 time.sleep(_TERMINAL_POLL_S)
 
     def _stopped() -> bool:
-        generation_of = getattr(session, "monitor_generation", None)
-        return generation_of is not None and generation_of() != generation
+        # `generation` is None only for a session without the method (11b).
+        return generation is not None and session.monitor_generation() != generation
 
     threading.Thread(
         target=_run,

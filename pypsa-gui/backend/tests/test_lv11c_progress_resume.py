@@ -437,8 +437,30 @@ def test_a_plan_step_monitor_logs_the_end_after_a_turn_abort():
     session.abort_event.set()
     time.sleep(0.3)
     assert not session.detached_monitor_active()
-    threading.Timer(0.3, ctx.solver_state.__setitem__, ("status", "completed")).start()
+    time.sleep(0.7)  # past one wait poll: the running solve logs no end yet
+    assert not [i for i in session._progress_log if i.get("frame") == "job_terminal"]
+    ctx.solver_state["status"] = "completed"
     assert [i["job_id"] for i in _terminal_items(session)] == ["fg:x"]
+
+
+def test_a_monitor_without_a_job_id_does_not_wait_out_a_turn_abort():
+    import threading
+    import time
+
+    from harness.solver_bridge import start_detached_solver_monitor
+    from tests.test_lv11b_cancel_stop import _Ctx
+
+    ctx = _Ctx()
+    session = chat_service.get_or_create_session(owner_user_id="u1")
+    start_detached_solver_monitor(
+        session, ctx, tool_use_id="tu-fg", tool_name="run_simulation"
+    )
+    time.sleep(0.3)
+    session.abort_event.set()
+    threads = [t for t in threading.enumerate() if t.name == "detached-solver-tu-fg"]
+    for thread in threads:
+        thread.join(2)
+    assert threads and not any(t.is_alive() for t in threads)  # the solve still runs
 
 
 def test_a_header_resume_follows_the_log_and_leaves_the_shared_ring(client, owned):
