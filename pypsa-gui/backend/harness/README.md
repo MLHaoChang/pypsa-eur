@@ -975,6 +975,19 @@ provider receives it. Browser dictation remains an explicit fallback. See
 `docs/superpowers/plans/2026-10-10-multilingual-dictation.md` and the results
 assessment for the automated, real-browser and live-API validation boundaries.
 
+Continuous speech (live-voice 01) keeps every vendor behind the protocols in
+`providers/live_media.py`: `livekit_media` (rooms and HS256 grants over the
+LiveKit Twirp API; the browser gets one room-scoped microphone grant, at most
+15 min; a failed start deletes its room), `deepgram_stt` (one streaming socket
+per stream, pinned model and language, numerals as digits, actual usage) and
+`openai_tts` (pinned model and voice, refused from its retirement date, never
+swapped). `hosted_speech` reads their configuration from the environment at
+call time, and `main` installs the LiveKit transport into `services/live_speech`
+only when `PYPSA_GUI_LIVE_SPEECH=1`. Its `probe_gate` keeps the paid probe
+(`smoke/live_voice_probe.py`) closed with typed refusals until keys, pinned
+models and an owner-approved budget within the plan's $0.10 per 60 s ceiling are
+set; `sanitize` strips keys, tokens and JWTs from the evidence.
+
 `find_capabilities(goal)` searches the shared catalogue and explains required
 arguments, safety, project eligibility and reduced-toolset visibility.
 Discovery is advisory: dispatch still checks the exact catalogue offered to

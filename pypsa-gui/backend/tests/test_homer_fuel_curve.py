@@ -264,6 +264,7 @@ def test_validation_flags_a_curve_it_cannot_price():
     from services.validation_service import _check_fuel_curves
 
     n = _network(curve=True)
+    n.generators.at["genset", fuel_curve.SLOPE] = 2.5  # the fixture's 0.25 warns (02d)
     assert _check_fuel_curves(n) == []
     n.generators.at["genset", "committable"] = False
     (issue,) = _check_fuel_curves(n)
@@ -769,16 +770,18 @@ def _dc_network():
 
 
 def _curve_note(out):
-    return [x for x in out["cost"]["notes"] if x.startswith("Fuel curve not used here")]
+    return [x for x in out["cost"]["notes"] if x.startswith("Fuel curve used here")]
 
 
 @pytest.mark.live_solve
-def test_the_dc_backup_prices_fuel_from_its_heat_rate_not_a_genset_curve():
+def test_the_dc_backup_prices_fuel_from_a_genset_curve():
+    """02c: a curve on one backup genset of several prices the fleet's fuel MW-weighted with the heat rate; a curve
+    outside the fleet changes nothing."""
     from services.adequacy import dc_backup
 
     plain, units = _dc_assess(_dc_network())
     assert len(units) > 1 and _curve_note(plain) == []
-    assert "fuel_curve_ignored" not in plain["cost"]
+    assert "fuel_curve_priced" not in plain["cost"]
     assert plain["cost"]["notes"][: len(dc_backup.COST_NOTES)] == list(
         dc_backup.COST_NOTES
     )
@@ -789,29 +792,96 @@ def test_the_dc_backup_prices_fuel_from_its_heat_rate_not_a_genset_curve():
             v  # a curve on a generator outside the backup fleet
         )
     off, _ = _dc_assess(n)
-    assert off["cost"]["notes"] == plain["cost"]["notes"]
+    assert _close(off["cost"], plain["cost"]) == []
     for col, v in CURVE.items():
         n.generators.loc[units[0], col] = v  # one backup genset of several
     curved, _ = _dc_assess(n)
-    for key in (
-        "npv_genset",
-        "npv_chosen",
-        "delta",
-        "fuel_mwh_th_avoided_per_year",
-        "lines",
-        "inputs",
-    ):
-        assert curved["cost"][key] == plain["cost"][key], key
+    cost = curved["cost"]
+    assert cost["fuel_curve_priced"] == [units[0]]
+    assert cost["fuel_heat_rate_priced"] == units[1:]
     (note,) = _curve_note(curved)
-    assert curved["cost"]["fuel_curve_ignored"] == [units[0]]
-    assert "fuel_curve_ignored" not in off["cost"]
-    assert note.startswith(
-        "Fuel curve not used here: fuel is priced from the backup heat rate ("
+    assert "MW-weighted (p_nom) with the backup heat rate and fuel price for " in note
+    assert other not in note and all(u in note for u in units)
+    w = {u: float(n.generators.at[u, "p_nom"]) for u in units}
+    (heat,) = [i["value"] for i in plain["cost"]["inputs"] if i["key"] == "heat_rate"]
+    fp = curved["cost"]["inputs"]
+    (fuel_price,) = [i["value"] for i in fp if i["key"] == "fuel_price"]
+    (cost_el,) = [i["value"] for i in fp if i["key"] == "fleet_fuel_cost_per_mwh_el"]
+    expect = (
+        w[units[0]] * (SLOPE + NO_LOAD) * PRICE
+        + sum(w[u] for u in units[1:]) * heat * fuel_price
+    ) / sum(w.values())
+    assert cost_el == pytest.approx(expect, rel=1e-12)
+    fuel = {ln["line"]: ln["npv"] for ln in cost["lines"] if ln["leg"] == "genset"}
+    fuel0 = {
+        ln["line"]: ln["npv"] for ln in plain["cost"]["lines"] if ln["leg"] == "genset"
+    }
+    assert fuel["fuel"] == pytest.approx(
+        fuel0["fuel"] * expect / (heat * fuel_price), rel=1e-9
     )
-    assert "(slope and no-load fuel) is read only by the solve" in note
+    assert fuel["capex_and_repurchase"] == fuel0["capex_and_repurchase"]
+
+
+def test_fleet_fuel_curve_weights_a_mixed_fleet_by_p_nom():
+    from services.adequacy import dc_backup
+
+    n = pypsa.Network()
+    n.add("Bus", "b")
+    n.add("Generator", "a", bus="b", p_nom=3.0, **CURVE)
+    n.add("Generator", "b", bus="b", p_nom=1.0)
+    n.add("Generator", "c", bus="b", p_nom=0.0)
+    assert dc_backup.fleet_fuel_curve(n, ["b", "c"], 2.8, 50.0) is None
+    all_curved = dc_backup.fleet_fuel_curve(n, ["a"], 2.8, 50.0)
+    assert all_curved["heat_rate"] == pytest.approx(SLOPE + NO_LOAD)
+    assert all_curved["cost_per_mwh_el"] == pytest.approx((SLOPE + NO_LOAD) * PRICE)
     assert (
-        units[0] in note and not any(u in note for u in units[1:]) and other not in note
+        all_curved["heat_rate_gensets"] == []
+        and "MW-weighted" not in all_curved["rule"]
     )
+    mixed = dc_backup.fleet_fuel_curve(n, ["a", "b", "c"], 2.8, 50.0)
+    assert mixed["curved"] == ["a"] and mixed["heat_rate_gensets"] == ["b", "c"]
+    assert mixed["heat_rate"] == pytest.approx((3 * (SLOPE + NO_LOAD) + 2.8) / 4)
+    assert mixed["cost_per_mwh_el"] == pytest.approx(
+        (3 * (SLOPE + NO_LOAD) * PRICE + 2.8 * 50.0) / 4
+    )
+    n.generators.loc[["a", "b"], "p_nom"] = 0.0  # no rated MW anywhere: equal weights
+    even = dc_backup.fleet_fuel_curve(n, ["a", "b"], 2.8, 50.0)
+    assert even["heat_rate"] == pytest.approx((SLOPE + NO_LOAD + 2.8) / 2)
+
+
+def test_the_backup_npv_of_a_curved_fleet_matches_the_hand_calculation():
+    """02c: fuel = MW × run hours × (slope + no-load) × fuel price a year, discounted end of year."""
+    from tests.test_dc_backup import _PRICES, _delta
+
+    fleet = {
+        "heat_rate": SLOPE + NO_LOAD,
+        "cost_per_mwh_el": (SLOPE + NO_LOAD) * PRICE,
+        "curved": ["g"],
+        "heat_rate_gensets": [],
+        "rule": "rule",
+    }
+    kw = dict(genset_mw=4.0, run_hours_per_year=50.0, years=3)
+    out = _delta(fuel_curve_fleet=fleet, **kw)
+    r = _PRICES["discount_rate"]
+    per_year = 4.0 * 50.0 * (SLOPE + NO_LOAD) * PRICE
+    (fuel,) = [
+        ln["npv"]
+        for ln in out["lines"]
+        if ln["leg"] == "genset" and ln["line"] == "fuel"
+    ]
+    assert fuel == pytest.approx(
+        sum(per_year / (1 + r) ** y for y in (1, 2, 3)), rel=1e-12
+    )
+    assert out["fuel_mwh_th_avoided_per_year"] == pytest.approx(
+        4.0 * 50.0 * (SLOPE + NO_LOAD)
+    )
+    keys = [i["key"] for i in out["inputs"]]
+    assert {"fleet_fuel_mwh_th_per_mwh_el", "fleet_fuel_cost_per_mwh_el"} <= set(keys)
+    plain = _delta(**kw)
+    assert _close(plain, _delta(fuel_curve_fleet=None, **kw)) == []
+    assert "fleet_fuel_cost_per_mwh_el" not in [i["key"] for i in plain["inputs"]]
+    with pytest.raises(Exception, match="fuel curve fleet"):
+        _delta(fuel_curve_fleet={**fleet, "cost_per_mwh_el": float("nan")}, **kw)
 
 
 @pytest.mark.live_solve
@@ -893,14 +963,15 @@ def test_a_co2_priced_curve_run_pays_the_adder_exactly_once(periods):
     n = _co2_network(periods=periods)
     prices = {2030: 100.0, 2035: 200.0}
     cfg = SolverConfig(co2_price=100.0, co2_price_per_period=prices if periods else {})
-    # Hand calculation: fuel slope × price, plus price_CO2 × 0.25 t/MWh_th / 0.4 (= 62.5 €/MWh at 100 €/t).
+    # Hand calculation: fuel slope × price, plus price_CO2 × 0.25 t/MWh_th × the slope's MWh_th per MWh (GK B H1:
+    # the curve, not the 0.4 efficiency, sets the fuel and so the CO2).
     if periods:
         expect = sum(
-            12 * LOAD_MW * (SLOPE * PRICE + p * CO2_T_PER_MWH_TH / EFF)
+            12 * LOAD_MW * (SLOPE * PRICE + p * CO2_T_PER_MWH_TH * SLOPE)
             for p in prices.values()
         )
     else:
-        expect = HOURS * LOAD_MW * (SLOPE * PRICE + 100.0 * CO2_T_PER_MWH_TH / EFF)
+        expect = HOURS * LOAD_MW * (SLOPE * PRICE + 100.0 * CO2_T_PER_MWH_TH * SLOPE)
     for _ in range(2):  # re-staging neither drops nor doubles the adder
         status, cond, log = _run_sim(n, cfg)
         assert status in ("ok", "optimal"), (cond, log[-800:])
@@ -1287,3 +1358,461 @@ def test_a_refusal_in_the_full_year_solve_carries_its_kind():
         "error",
         "fuel_curve_invalid",
     )
+
+
+def test_a_generator_with_every_input_column_is_staged_and_read_by_the_lp_guard():
+    """02g: every column of INPUT_COLUMNS on one generator. `apply` stamps the derived costs and `lp_refusals`
+    reads the row (its marginal cost profile is refused), so neither gate closes when every input is present."""
+    n = _network(curve=True)
+    n.generators.at["genset", fuel_curve.OM_HOUR] = 3.0
+    n.generators.at["genset", fuel_curve.LIFE_HOURS] = 20_000.0
+    n.generators.loc["genset", ["marginal_cost", "stand_by_cost"]] = 0.0
+    assert set(fuel_curve.INPUT_COLUMNS) <= set(n.generators.columns)
+    assert fuel_curve.apply(n, stamp=False) == ["genset"]
+    assert n.generators.at["genset", "marginal_cost"] == pytest.approx(SLOPE * PRICE)
+    assert n.generators.at["genset", "stand_by_cost"] == pytest.approx(
+        NO_LOAD * 1.0 * PRICE + 3.0
+    )
+    assert fuel_curve.lp_refusals(n) == []
+    n.generators_t.marginal_cost["genset"] = pd.Series(1.0, index=n.snapshots)
+    (refusal,) = fuel_curve.lp_refusals(n)
+    assert refusal.startswith("genset: Marginal cost: remove its profile")
+
+
+# ── 02d: a slope below 1 MWh fuel per MWh warns ───────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "slope, warns",
+    [(0.8, True), (0.999, True), (1.0, False), (2.5, False), (0.0, False)],
+)
+def test_a_slope_below_one_warns_before_the_run(slope, warns):
+    from services.issue_titles import issue_title
+    from services.validation_service import _check_fuel_curves
+
+    n = _network(curve=True)
+    n.generators.at["genset", fuel_curve.SLOPE] = slope
+    issues = _check_fuel_curves(n)
+    if not warns:
+        assert issues == []
+        return
+    (issue,) = issues
+    assert (issue.severity, issue.code, issue.component_class, issue.name) == (
+        "warning",
+        "fuel_curve_slope_low",
+        "Generator",
+        "genset",
+    )
+    assert issue.message.startswith(
+        f"Fuel curve slope: {slope:g} MWh of fuel per MWh generated means "
+    )
+    if slope == 0.8:
+        assert "means 125 % efficiency." in issue.message
+    assert issue_title(issue.code) != issue.code.replace("_", " ")
+
+
+def test_no_slope_warning_without_a_curve_or_with_an_invalid_one():
+    from services.validation_service import _check_fuel_curves
+
+    assert _check_fuel_curves(_network(curve=False)) == []
+    assert fuel_curve.slope_warning({"marginal_cost": 5.0}) is None
+    # a curve with the slope unset (no-load fuel only) reads slope 0: no warning
+    assert (
+        fuel_curve.slope_warning({fuel_curve.NO_LOAD: 0.1, fuel_curve.PRICE: 40.0})
+        is None
+    )
+    n = _network(curve=True)
+    n.generators.at["genset", fuel_curve.SLOPE] = 0.5
+    n.generators.at["genset", "committable"] = (
+        False  # refused: the error, not also the warning
+    )
+    assert [i.code for i in _check_fuel_curves(n)] == ["fuel_curve_invalid"]
+
+
+# ── 02e: the no-load fuel emits CO2 ───────────────────────────────────────────────────────────────────────────
+
+OFF_HOURS = 6
+
+
+def _no_load_co2_network(
+    *, periods: bool = False, no_load: float = NO_LOAD
+) -> pypsa.Network:
+    """The committable curve genset on a CO2 fuel at efficiency 0.4; no load in the first hours, so it is off."""
+    n = _network(curve=True)
+    n.add("Carrier", "diesel", co2_emissions=CO2_T_PER_MWH_TH)
+    n.generators.at["genset", "efficiency"] = EFF
+    n.generators.at["genset", fuel_curve.NO_LOAD] = no_load
+    fuel_curve.apply(n, stamp=False)
+    load = pd.Series(LOAD_MW, index=n.snapshots)
+    load.iloc[:OFF_HOURS] = 0.0
+    n.loads_t.p_set["site"] = load
+    if periods:
+        n.set_investment_periods([2030, 2035])
+        n.investment_period_weightings.loc[:, ["objective", "years"]] = 1.0
+    return n
+
+
+def _expect(co2_price, *, no_load=NO_LOAD, on_hours=HOURS - OFF_HOURS):
+    per_on_hour = LOAD_MW * (
+        SLOPE * PRICE + co2_price * CO2_T_PER_MWH_TH * SLOPE
+    ) + no_load * 1.0 * (PRICE + co2_price * CO2_T_PER_MWH_TH)
+    return on_hours * per_on_hour
+
+
+@pytest.mark.parametrize("periods", [False, True])
+def test_a_committed_hour_pays_the_no_load_co2_exactly_once(periods):
+    n = _no_load_co2_network(periods=periods)
+    if periods:
+        prices = {2030: 100.0, 2035: 200.0}
+        cfg = SolverConfig(co2_price=100.0, co2_price_per_period=prices)
+    else:
+        cfg = SolverConfig(co2_price=100.0)
+    for _ in range(2):  # re-staging neither drops nor doubles the adder
+        status, cond, log = _run_sim(n, cfg)
+        assert status in ("ok", "optimal"), (cond, log[-800:])
+        on = n.generators_t.status["genset"]
+        for part in [g for _, g in on.groupby(level=0)] if periods else [on]:
+            assert part.iloc[:OFF_HOURS].sum() == 0 and part.iloc[OFF_HOURS:].min() == 1
+        if periods:
+            per = on.groupby(level=0).sum()
+            expect = sum(_expect(p, on_hours=float(per[y])) for y, p in prices.items())
+        else:
+            expect = _expect(100.0)
+        assert n.objective == pytest.approx(expect, rel=1e-9)
+        # the transform is transient
+        assert n.generators.at["genset", "stand_by_cost"] == pytest.approx(
+            NO_LOAD * PRICE
+        )
+        assert "genset" not in n.generators_t.stand_by_cost.columns
+        assert "genset" not in n.generators_t.marginal_cost.columns
+
+
+@pytest.mark.parametrize("co2_price, no_load", [(0.0, NO_LOAD), (100.0, 0.0)])
+def test_no_co2_price_or_no_no_load_term_leaves_the_objective_as_before(
+    co2_price, no_load
+):
+    n = _no_load_co2_network(no_load=no_load)
+    status, cond, log = _run_sim(n, SolverConfig(co2_price=co2_price))
+    assert status in ("ok", "optimal"), (cond, log[-800:])
+    assert n.objective == pytest.approx(_expect(co2_price, no_load=no_load), rel=1e-9)
+    assert "no-load fuel" not in log
+
+
+def _result_df(n, comp, attr, src):
+    return getattr(getattr(n, comp), attr)
+
+
+W = 2.0  # a snapshot weighting other than 1
+
+
+def test_the_emission_reports_count_the_no_load_co2_per_committed_hour():
+    from services.asset_results.compute import build_ctx, gen_co2_total
+    from services.compare.emissions import _compute_emissions_summary
+    from services.results.emissions import compute_emissions
+
+    n = _no_load_co2_network()
+    n.snapshot_weightings.loc[:, :] = (
+        W  # every report weights the no-load CO2 like the dispatch
+    )
+    status, cond, log = _run_sim(n, SolverConfig(co2_price=100.0))
+    assert status in ("ok", "optimal"), (cond, log[-800:])
+    on_hours = W * (HOURS - OFF_HOURS)
+    output_t = (
+        on_hours * LOAD_MW * SLOPE * CO2_T_PER_MWH_TH
+    )  # the curve's fuel, not 1 / efficiency (H1)
+    no_load_t = on_hours * NO_LOAD * 1.0 * CO2_T_PER_MWH_TH
+    out = compute_emissions(n, "lopf", result_df=_result_df)
+    (row,) = [r for r in out["by_generator"] if r["name"] == "genset"]
+    assert row["tCO2"] == pytest.approx(output_t + no_load_t, rel=1e-9)
+    assert row["no_load_tCO2"] == pytest.approx(no_load_t, rel=1e-9)
+    assert out["total_tCO2"] == pytest.approx(output_t + no_load_t, rel=1e-9)
+    cmp = _compute_emissions_summary(n, [], False, True)
+    assert cmp.total_kt.total == pytest.approx(
+        (output_t + no_load_t) / 1000.0, rel=1e-9
+    )
+    ctx = build_ctx(n, "Generator", "genset", source="test", sns=n.snapshots)
+    assert gen_co2_total(ctx) == pytest.approx(output_t + no_load_t, rel=1e-9)
+    # no no-load term: the reports read the output CO2 only, and no extra key
+    n2 = _no_load_co2_network(no_load=0.0)
+    n2.snapshot_weightings.loc[:, :] = W
+    _run_sim(n2, SolverConfig())
+    (row2,) = [
+        r
+        for r in compute_emissions(n2, "lopf", result_df=_result_df)["by_generator"]
+        if r["name"] == "genset"
+    ]
+    assert "no_load_tCO2" not in row2
+    assert row2["tCO2"] == pytest.approx(output_t, rel=1e-9)
+
+
+def test_a_generator_without_a_curve_keeps_its_efficiency_co2_bit_for_bit():
+    """GK B H1: only curve gensets move. A plain emitter beside the curve genset keeps co2 / efficiency."""
+    from services.results.emissions import compute_emissions
+
+    n = _no_load_co2_network()
+    n.add(
+        "Generator",
+        "plain",
+        bus="el",
+        carrier="diesel",
+        p_nom=0.1,
+        efficiency=EFF,
+        marginal_cost=-200.0,  # runs whenever there is load, CO2 price included
+    )
+    assert fuel_curve.curve_slope(n.generators.loc["plain"]) is None
+    status, cond, log = _run_sim(n, SolverConfig(co2_price=100.0))
+    assert status in ("ok", "optimal"), (cond, log[-800:])
+    p_plain = float(n.generators_t.p["plain"].sum())
+    assert p_plain > 0
+    (row,) = [
+        r
+        for r in compute_emissions(n, "lopf", result_df=_result_df)["by_generator"]
+        if r["name"] == "plain"
+    ]
+    assert row["intensity_tCO2_per_MWh_out"] == CO2_T_PER_MWH_TH / EFF
+    assert row["tCO2"] == pytest.approx(p_plain * CO2_T_PER_MWH_TH / EFF, rel=1e-12)
+    assert "no_load_tCO2" not in row
+
+
+# ── GK B H2: a CO2 cap counts p / efficiency, so a curve genset under one is refused ────────────────────────────
+
+
+def _add_cap(n):
+    n.add(
+        "GlobalConstraint",
+        "co2_cap",
+        type="primary_energy",
+        carrier_attribute="co2_emissions",
+        sense="<=",
+        constant=1e6,
+    )
+    return n
+
+
+def test_a_co2_cap_refuses_a_curve_genset_on_an_emitting_carrier():
+    from services.validation_service import _check_fuel_curves
+
+    n = _add_cap(_no_load_co2_network())
+    (refusal,) = fuel_curve.lp_refusals(n)
+    assert refusal.startswith(
+        "genset: Fuel curve: the CO2 cap co2_cap counts this generator's CO2 from its efficiency"
+    )
+    (issue,) = [i for i in _check_fuel_curves(n) if i.code == "fuel_curve_co2_cap"]
+    assert (issue.severity, issue.name) == ("error", "genset")
+    status, cond, log = _run_sim(n, SolverConfig())
+    assert status not in ("ok", "optimal")
+    assert "the CO2 cap co2_cap" in log
+
+
+def test_no_co2_cap_refusal_off_an_emitting_carrier_or_without_a_curve():
+    n = _add_cap(_no_load_co2_network())
+    n.carriers.at["diesel", "co2_emissions"] = 0.0
+    assert fuel_curve.co2_caps(n) == ["co2_cap"] and fuel_curve.lp_refusals(n) == []
+    plain = _network(curve=False)
+    plain.add("Carrier", "diesel", co2_emissions=CO2_T_PER_MWH_TH)
+    assert fuel_curve.lp_refusals(_add_cap(plain)) == []
+    assert fuel_curve.co2_caps(_no_load_co2_network()) == []
+
+
+# ── GK B H3: the no-load CO2 transform is undone bit for bit, also when the apply raises ───────────────────────
+
+
+def _frames(n):
+    return (
+        n.generators.copy(),  # the whole static frame (GK B, #1538 review)
+        n.generators_t.stand_by_cost.copy(),
+        n.generators_t.marginal_cost.copy(),
+    )
+
+
+def _same_frames(after, before):
+    # every column the network had before is restored bit for bit (another step may add its own column)
+    return all(x[y.columns].equals(y) for x, y in zip(after, before))
+
+
+def _co2_cfg(periods):
+    return SolverConfig(
+        co2_price=100.0,
+        co2_price_per_period={2030: 100.0, 2035: 200.0} if periods else {},
+        multi_investment_periods=periods,
+    )
+
+
+@pytest.mark.parametrize("periods", [False, True])
+def test_the_no_load_co2_transform_restores_the_frames_bit_for_bit(periods):
+    from services.project_context import ProjectContext
+    from services.pypsa_service import PyPSAService
+    from services.solver.assumptions import _apply_modelling_assumptions
+
+    n = _no_load_co2_network(periods=periods)
+    before = _frames(n)
+    with PyPSAService.solving_context(ProjectContext(network=n, loaded_project="h3")):
+        restore, _ = _apply_modelling_assumptions(
+            n, _co2_cfg(periods), lambda msg: None
+        )
+        if periods:
+            sb = n.generators_t.stand_by_cost["genset"]
+            assert sb.loc[2035].iloc[0] == pytest.approx(
+                NO_LOAD * (PRICE + 200.0 * CO2_T_PER_MWH_TH)
+            )
+        else:
+            assert n.generators.at["genset", "stand_by_cost"] == pytest.approx(
+                NO_LOAD * (PRICE + 100.0 * CO2_T_PER_MWH_TH)
+            )
+        restore()
+    assert _same_frames(_frames(n), before)
+
+
+class _Boom(RuntimeError):
+    pass
+
+
+@pytest.mark.parametrize("periods", [False, True])
+def test_a_raise_after_the_no_load_co2_transform_restores_the_frames(periods):
+    from services.project_context import ProjectContext
+    from services.pypsa_service import PyPSAService
+    from services.solver.assumptions import _apply_modelling_assumptions
+
+    n = _no_load_co2_network(periods=periods)
+    before = _frames(n)
+
+    def phase(msg):
+        if "no-load fuel" in msg:  # logged right after the transform and its undo entry
+            raise _Boom(msg)
+
+    with PyPSAService.solving_context(ProjectContext(network=n, loaded_project="h3")):
+        with pytest.raises(_Boom):
+            _apply_modelling_assumptions(n, _co2_cfg(periods), phase)
+    assert _same_frames(_frames(n), before)
+
+
+def test_the_emission_reports_split_the_no_load_co2_by_period():
+    from services.compare.emissions import _compute_emissions_summary
+    from services.results.emissions import compute_emissions
+
+    n = _no_load_co2_network(periods=True)
+    status, cond, log = _run_sim(n, _co2_cfg(True))
+    assert status in ("ok", "optimal"), (cond, log[-800:])
+    on = n.generators_t.status["genset"].groupby(level=0).sum()
+    out = compute_emissions(n, "lopf", result_df=_result_df)
+    cmp = _compute_emissions_summary(n, [2030, 2035], True, True)
+    for period in (2030, 2035):
+        expect = float(on[period]) * (LOAD_MW * SLOPE + NO_LOAD) * CO2_T_PER_MWH_TH
+        (bucket,) = [b for b in out["by_period"] if int(b["period"]) == period]
+        (row,) = [r for r in bucket["by_generator"] if r["name"] == "genset"]
+        assert row["no_load_tCO2"] == pytest.approx(
+            float(on[period]) * NO_LOAD * CO2_T_PER_MWH_TH, rel=1e-9
+        )
+        assert row["tCO2"] == pytest.approx(expect, rel=1e-9)
+        assert cmp.total_kt.by_period[str(period)] == pytest.approx(
+            expect / 1000.0, rel=1e-9
+        )
+
+
+def test_no_load_fuel_reads_the_committed_curve_and_its_p_nom():
+    row = {**CURVE, "committable": True, "p_nom": 2.0}
+    assert fuel_curve.no_load_fuel(row) == pytest.approx(NO_LOAD * 2.0)
+    assert fuel_curve.no_load_fuel({**row, "committable": False}) == 0.0
+    assert fuel_curve.no_load_fuel({**row, fuel_curve.NO_LOAD: 0.0}) == 0.0
+    assert fuel_curve.no_load_fuel({**row, "p_nom": None}) == 0.0
+    assert fuel_curve.no_load_fuel({"committable": True, "p_nom": 2.0}) == 0.0
+    assert fuel_curve.curve_slope(row) == SLOPE
+    assert fuel_curve.curve_slope({"p_nom": 2.0}) is None
+    n = _no_load_co2_network()
+    assert fuel_curve.no_load_fuel_t(n).empty  # not solved: no status
+    n.generators_t.status = pd.DataFrame({"other": 1.0}, index=n.snapshots)
+    assert fuel_curve.no_load_fuel_t(
+        n
+    ).empty  # a status frame without the genset's column
+
+
+def test_the_co2_cap_check_reads_only_an_emitting_curve_under_a_cap():
+    from types import SimpleNamespace
+
+    assert fuel_curve.co2_caps(SimpleNamespace(global_constraints=pd.DataFrame())) == []
+    no_attr = pd.DataFrame({"type": ["primary_energy"]}, index=["cap"])
+    assert fuel_curve.co2_caps(SimpleNamespace(global_constraints=no_attr)) == []
+    n = _add_cap(_no_load_co2_network())
+    n.add("Generator", "plain", bus="el", carrier="diesel", p_nom=0.1)
+    assert fuel_curve.co2_cap_refusal(n, "plain") is None  # under the cap, but no curve
+    n.generators.at["genset", "carrier"] = (
+        "unlisted"  # a carrier missing from the table
+    )
+    assert fuel_curve.co2_cap_refusal(n, "genset") is None
+    n.generators.at["genset", "carrier"] = "diesel"
+    n.carriers.at["diesel", "co2_emissions"] = float("nan")
+    assert fuel_curve.co2_cap_refusal(n, "genset") is None
+
+
+# ── GK B F1: a generator without a curve keeps master's `/ efficiency`, to the last bit ──────────────────────
+
+INEXACT_CO2, INEXACT_EFF = (
+    0.187,
+    0.4,
+)  # 0.187 / 0.4 != 0.187 * (1 / 0.4) in floating point
+
+
+def _plain_emitter(periods=False):
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    if periods:
+        n.set_investment_periods([2030, 2035])
+        n.investment_period_weightings.loc[:, ["objective", "years"]] = 1.0
+    n.add("Bus", "el")
+    n.add("Carrier", "gas", co2_emissions=INEXACT_CO2)
+    n.add(
+        "Generator",
+        "plain",
+        bus="el",
+        carrier="gas",
+        p_nom=10.0,
+        efficiency=INEXACT_EFF,
+        marginal_cost=3.0,
+    )
+    return n
+
+
+def test_the_lp_co2_adder_of_a_plain_emitter_is_bit_identical_to_master():
+    from services.project_context import ProjectContext
+    from services.pypsa_service import PyPSAService
+    from services.solver.assumptions import _apply_modelling_assumptions
+
+    assert INEXACT_CO2 / INEXACT_EFF != INEXACT_CO2 * (1.0 / INEXACT_EFF)
+    n = _plain_emitter()
+    with PyPSAService.solving_context(ProjectContext(network=n, loaded_project="f1")):
+        restore, _ = _apply_modelling_assumptions(
+            n, SolverConfig(co2_price=100.0), lambda msg: None
+        )
+        assert (
+            n.generators.at["plain", "marginal_cost"]
+            == 3.0 + INEXACT_CO2 * 100.0 / INEXACT_EFF
+        )
+        restore()
+    n = _plain_emitter(periods=True)
+    cfg = SolverConfig(
+        co2_price=100.0,
+        co2_price_per_period={2030: 70.0, 2035: 90.0},
+        multi_investment_periods=True,
+    )
+    with PyPSAService.solving_context(ProjectContext(network=n, loaded_project="f1")):
+        restore, _ = _apply_modelling_assumptions(n, cfg, lambda msg: None)
+        mc = n.generators_t.marginal_cost["plain"]
+        for period, price in ((2030, 70.0), (2035, 90.0)):
+            assert (mc.loc[period] == 3.0 + price * INEXACT_CO2 / INEXACT_EFF).all()
+        restore()
+
+
+def test_the_emission_reports_of_a_plain_emitter_are_bit_identical_to_master():
+    from services.asset_results.compute import build_ctx, gen_co2_rate
+    from services.compare.emissions import _compute_emissions_summary
+    from services.results.emissions import compute_emissions
+
+    n = _plain_emitter()
+    p = pd.Series([1.0, 3.0, 7.0, 2.0], index=n.snapshots)
+    n.generators_t.p = pd.DataFrame({"plain": p})
+    (row,) = compute_emissions(n, "lopf", result_df=_result_df)["by_generator"]
+    assert row["intensity_tCO2_per_MWh_out"] == INEXACT_CO2 / INEXACT_EFF
+    cmp = _compute_emissions_summary(n, [], False, True)
+    assert cmp.total_kt.total == float(p.sum()) * (INEXACT_CO2 / INEXACT_EFF) / 1000.0
+    ctx = build_ctx(n, "Generator", "plain", source="lopf", sns=n.snapshots)
+    assert gen_co2_rate(ctx).equals(p / INEXACT_EFF * INEXACT_CO2)

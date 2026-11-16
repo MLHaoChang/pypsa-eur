@@ -57,6 +57,8 @@ ERROR_KINDS = (
     {"error_kind": "shipped_series_unverified"},
     {"error_kind": "shipped_cases_over_budget"},
     {"error_kind": "shipped_case_not_runnable"},
+    {"error_kind": "shipped_case_stale"},
+    {"error_kind": "shipped_series_unresolved"},
 )
 
 
@@ -197,6 +199,134 @@ def refusal(change: dict, cfg, network) -> str | None:
     return None
 
 
+def _dispatch_contract_ids(cfg) -> set[str] | None:
+    """The ids of the contracts whose price, share and tenor enter the LP (a
+    dispatch PPA), read from the project's own commercial block; None when it
+    does not validate (then nothing about it is known)."""
+    from models.commercial import CommercialConfig
+    from services.commercial import lp_bindings
+
+    try:
+        parsed = CommercialConfig.model_validate((cfg or {}).get("commercial"))
+    except Exception:  # noqa: BLE001 -- any invalid block is "unknown"
+        return None
+    return {c.id for c in lp_bindings.dispatch_ppas(parsed)}
+
+
+LP, FINANCE, UNKNOWN = "lp", "finance", "unknown"
+
+
+def classify(change: dict, cfg) -> str:
+    """Whether a change moves the LP (`lp`), only the settlement on the solved
+    dispatch (`finance`), or is not known (`unknown`) (GK B D5). The price
+    references enter the LP as the links' `ic_export_price` / `ic_import_price`;
+    a battery cost is an LP cost term; a contract's reference price only settles;
+    a contract's price, share and tenor enter the LP only for a dispatch PPA
+    (`lp_bindings.dispatch_ppas`), decided from the project's own contract."""
+    parts = change["path"].split(".")
+    if parts[0] == "StorageUnit":
+        # Only the battery's two overnight cost fields: the solve stages them into
+        # the LP's capital cost. Any other storage field is not known (fail closed).
+        known = len(parts) == 3 and parts[1] == "bess" and parts[2] in BESS_FIELDS
+        return LP if known else UNKNOWN
+    if parts[0] != "commercial":
+        return UNKNOWN
+    if len(parts) == 3 and parts[1] in PRICE_REFS and parts[2] == "id":
+        return LP
+    if (
+        len(parts) == 5
+        and parts[1] == "contracts"
+        and parts[3:] == ["reference_price", "id"]
+    ):
+        return FINANCE
+    if len(parts) == 4 and parts[1] == "contracts" and parts[3] in CONTRACT_NUMBERS:
+        dispatch = _dispatch_contract_ids(cfg)
+        if dispatch is None:
+            return UNKNOWN
+        return LP if parts[2] in dispatch else FINANCE
+    return UNKNOWN
+
+
+def case_kind(changes: list[dict], cfg) -> str:
+    """`unknown` when any change is unknown (a mixed case never runs its unknown
+    change), else `lp` when any change moves the LP, else `finance`."""
+    kinds = {classify(c, cfg) for c in changes}
+    if UNKNOWN in kinds:
+        return UNKNOWN
+    return LP if LP in kinds else FINANCE
+
+
+def _stale(path: str, want, found):
+    raise ShippedError(
+        "shipped_case_stale",
+        f"{path} is {found} now, not {want} as the case expects; nothing was changed.",
+    )
+
+
+def apply(cfg: dict, changes: list[dict], resolve_ref, *, check_old: bool = True):
+    """`(patched solver_config, battery changes)`: a copy of `cfg` with the
+    commercial changes applied, the `old` value of each compared with what `cfg`
+    holds now (the caller reads `cfg` and writes the result in one critical
+    section, GK B D3) and the commercial block validated like a user edit (D2).
+    A series name maps to the project's ref through `resolve_ref(name)` (a ref
+    dict, or None: `shipped_series_unresolved`). The battery changes are not
+    solver_config: they come back untouched for the caller to write to the
+    network. Never mutates `cfg`."""
+    from models.commercial import CommercialConfig
+
+    out = json.loads(json.dumps(cfg))
+    commercial = out.get("commercial")
+    if not isinstance(commercial, dict):
+        raise ShippedError(
+            "shipped_case_not_runnable", "The project has no commercial block."
+        )
+    network = []
+    for change in changes:
+        parts = change["path"].split(".")
+        if parts[0] != "commercial":
+            network.append(dict(change))
+            continue
+        if len(parts) == 3:
+            holder, field = commercial, parts[1]
+        else:
+            hits = [
+                c
+                for c in commercial.get("contracts") or []
+                if isinstance(c, dict) and c.get("id") == parts[2]
+            ]
+            if len(hits) != 1:
+                _stale(change["path"], change["old"], "a contract that is not there")
+            holder, field = hits[0], parts[3]
+        if _is_ref(change["path"]):
+            ref = holder.get(field)
+            found = ref.get("id") if isinstance(ref, dict) else None
+            if check_old and found != change["old"]:
+                _stale(change["path"], change["old"], found)
+            new = resolve_ref(change["new"])
+            if not isinstance(new, dict):
+                raise ShippedError(
+                    "shipped_series_unresolved",
+                    f"{change['path']}: the series {change['new']} has no ref in "
+                    "the project's Library.",
+                )
+            holder[field] = dict(new)
+        else:
+            found = holder.get(field)
+            if check_old and not (
+                _finite(found) and math.isclose(found, change["old"], rel_tol=1e-9)
+            ):
+                _stale(change["path"], change["old"], found)
+            holder[field] = change["new"]
+    try:
+        CommercialConfig.model_validate(commercial)
+    except Exception as exc:  # noqa: BLE001 -- the validator's words are the reason
+        raise ShippedError(
+            "shipped_cases_invalid",
+            f"The changed commercial block does not validate: {exc}",
+        ) from exc
+    return out, network
+
+
 def _is_ref(path: str) -> bool:
     parts = path.split(".")
     return (len(parts) == 3 and parts[1] in PRICE_REFS and parts[2] == "id") or (
@@ -278,10 +408,29 @@ def load(project_dir, template_id: str, *, template_dir, cfg, network) -> dict:
             reason = refusal(change, cfg, network)
             if reason:
                 why.append(reason)
+        if not why and case_kind(case["changes"], cfg) == UNKNOWN:
+            # Fail closed (GK B K1): what it moves is not known, so it never runs.
+            why.append("What this case moves is not known, so it is not run.")
+        if not why:
+            try:
+                apply(
+                    cfg,
+                    case["changes"],
+                    lambda name: {
+                        "id": name,
+                        "version": 1,
+                        "hash": "0" * 64,
+                        "source": "template",
+                    },
+                    check_old=False,
+                )
+            except ShippedError as exc:
+                why.append(str(exc))
         cases.append(
             {
                 "id": case["id"],
                 "label": case["label"],
+                "kind": case_kind(case["changes"], cfg),
                 "answers": case["answers"],
                 "reason": case["reason"],
                 "changes": [dict(c) for c in case["changes"]],

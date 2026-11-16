@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Continuous speech installs the LiveKit transport from the environment when enabled, and the hosted-speech live probe ships behind a gate that refuses with typed reasons until keys, pinned models and an owner-approved budget are set.

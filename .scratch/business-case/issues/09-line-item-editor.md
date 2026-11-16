@@ -3,7 +3,7 @@
 
 # 09 — Line-item table editor
 
-Status: ready-for-agent (blocked by 07, 08; Opus; UX plan first, GK B for figures)
+Status: done (#1507)
 Type: task
 Blocked by: 07, 08
 Gated: yes (UX; GK B for the figures)
