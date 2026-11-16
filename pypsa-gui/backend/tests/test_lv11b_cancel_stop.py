@@ -365,11 +365,12 @@ def test_b2_a_step_solve_that_finishes_after_stop_monitoring_still_settles_compl
     assert ja.job_status(job, actor_id=chat_tools.acting_user_id())["outcome"] == "succeeded"
     _settle_solver()
     assert PyPSAService.get_solver_state().get("status") == "completed"
-    assert chat_tools.list_project_runs(status="completed")["total_count"] == runs_before + 1
     due = _await_due(session)
     assert [d["job_id"] for d in due] == [job]  # one continuation, as without the stop
     task = _settled_step(task_id, "completed")
     assert task["completed_steps"] == 1
+    # S1: the run is published as without the stop (the step settles after the publish).
+    assert chat_tools.list_project_runs(status="completed")["total_count"] == runs_before + 1
 
 
 def test_b2_a_step_solve_that_fails_after_stop_monitoring_still_settles_failed(
@@ -413,10 +414,13 @@ def test_b2_a_step_solve_cancelled_by_cancel_job_after_stop_monitoring_settles_f
     _settle_solver()
     task = _settled_step(task_id, "failed")
     assert task["completed_steps"] == 0
-    step = task["next_step"]
+    from services import assistant_tasks
+
+    assert task["next_step"]["id"] == "run" and task["next_step"]["status"] == "failed"
     # Status `failed` as for every native abort (GK B: option A; issue 16 for a
-    # cancelled status), with the cancel's own facts on the step.
-    assert step["id"] == "run" and step["status"] == "failed"
+    # cancelled status), with the cancel's own facts on the stored step.
+    _path, stored = assistant_tasks._read(task_id)
+    step = next(s for s in stored["steps"] if s["id"] == "run")
     assert step["job"]["outcome"] == "aborted" and "aborted" in step["error"]
     time.sleep(0.3)
     assert continuation.due(session) == []
@@ -459,7 +463,9 @@ def test_each_unverified_cancel_reaches_the_model_as_a_tool_error(baseline, case
 
 @pytest.mark.parametrize("who,family,kind", [
     ("own", "sq", None),
-    ("foreign_actor", "sq", "job_not_found"),
+    # Through dispatch a user without access to the project is refused before
+    # any handler runs; the queue ACL's own 404 is pinned at the tool below.
+    ("foreign_actor", "sq", "restriction_unavailable"),
     # the queue's own ACL hides another project's job (11a FOREIGN_PROJECT_KIND)
     ("foreign_project", "sq", "job_not_found"),
     ("foreign_project", "fg", "job_project_mismatch"),
@@ -491,3 +497,12 @@ def test_cancel_job_through_dispatch_runs_each_acl_as_the_acting_user(
         assert errors == [kind]
         if family == "sq":
             assert solve_queue.get_job(uuid.UUID(job))["status"] == "queued"
+    if who == "foreign_actor":
+        token = chat_tools._ACTING_USER_ID.set(str(second_identity["user_id"]))
+        try:
+            with pytest.raises(HTTPException) as refused:
+                chat_tools.cancel_job(job)
+        finally:
+            chat_tools._ACTING_USER_ID.reset(token)
+        assert (refused.value.status_code, refused.value.detail["error_kind"]) == (404, "job_not_found")
+        assert solve_queue.get_job(uuid.UUID(job))["status"] == "queued"
