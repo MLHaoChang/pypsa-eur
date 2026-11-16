@@ -3,7 +3,7 @@
 
 # LC-48c — The LC-D22 undo rows (rebind, viewer role)
 
-Status: ready-for-agent
+Status: done (#1503)
 Model tier: opus
 Size: M
 Blocked by: none

@@ -68,6 +68,11 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
         for p, v in mwh_pp.items():
             bucket["by_period"][p] = bucket["by_period"].get(p, 0.0) + v
 
+    # homer-parity 02e: a curve genset's no-load fuel (MWh of fuel, no efficiency) emits per committed hour.
+    from services import fuel_curve as _fuel_curve
+
+    no_load_t = _fuel_curve.no_load_fuel_t(n)
+
     for g in p_t.columns:
         if g not in gens.index:
             continue
@@ -89,12 +94,19 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
         eff = float(gens.at[g, "efficiency"]) if "efficiency" in gens.columns else 1.0
         if not _math.isfinite(eff) or eff <= 0:
             eff = 1.0
-        out_intensity = intensity / eff  # tCO2 per MWh_elec
+        # tCO2 per MWh_elec; a curve genset's fuel per MWh is its slope (GK B H1)
+        slope = _fuel_curve.curve_slope(gens.loc[g])
+        out_intensity = intensity * slope if slope is not None else intensity / eff
         # CO2 mass in tons → /1000 for kt.
         co2_total_kt = mwh_total * out_intensity / 1000.0
+        co2_pp_kt = {p: v * out_intensity / 1000.0 for p, v in mwh_pp.items()}
+        if g in no_load_t.columns:
+            nl = no_load_t[g].reindex(sns).fillna(0.0) * weights
+            co2_total_kt += float(nl.sum()) * intensity / 1000.0
+            for p, v in _per_period_groupby(nl, sns, is_multi).items():
+                co2_pp_kt[p] = co2_pp_kt.get(p, 0.0) + v * intensity / 1000.0
         if co2_total_kt < 1e-9:
             continue
-        co2_pp_kt = {p: v * out_intensity / 1000.0 for p, v in mwh_pp.items()}
 
         total_bucket["total"] += co2_total_kt
         for p, v in co2_pp_kt.items():

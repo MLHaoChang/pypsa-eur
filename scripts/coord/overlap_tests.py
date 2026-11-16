@@ -17,6 +17,8 @@ relative to ``pypsa-gui/backend``), ``vitest <file> <test>`` (relative to
 
 - Backend ``pypsa-gui/backend/<path>/<mod>.py`` maps to
   ``pypsa-gui/backend/tests/test_<mod>*.py``.
+- A backend ``tests/test_*.py`` or frontend ``*.test.ts|tsx`` file maps to
+  itself.
 - Frontend ``pypsa-gui/frontend/src/**/<Name>.tsx|ts`` maps to every
   ``<Name>*.test.*`` under ``pypsa-gui/frontend/src``.
 - The shared JSON files in ``SHARED_JSON`` (and their ``.d/`` fragments) map to
@@ -45,14 +47,20 @@ def tests_for(root, path):
         if stem in SHARED_JSON:
             return "pytest", SHARED_JSON[stem]
     if p.suffix == ".py" and p.is_relative_to(BACKEND):
-        if p.is_relative_to(BACKEND / "tests") or p.stem.startswith("__"):
+        if p.is_relative_to(BACKEND / "tests"):
+            # A changed test module is its own test; conftest and helpers have none.
+            if p.name.startswith("test_") and (root / p).is_file():
+                return "pytest", [str(p.relative_to(BACKEND))]
+            return "pytest", []
+        if p.stem.startswith("__"):
             return "pytest", []
         tests = sorted((root / BACKEND / "tests").glob(f"test_{p.stem}*.py"))
         return "pytest", [str(PurePosixPath(t.relative_to(root / BACKEND))) for t in tests]
     if p.suffix in (".ts", ".tsx") and p.is_relative_to(FRONTEND / "src"):
         name = p.name.split(".")[0]
         if p.name.endswith((".test.ts", ".test.tsx")):
-            return "vitest", []
+            # A changed test file is its own test.
+            return "vitest", [str(p.relative_to(FRONTEND))] if (root / p).is_file() else []
         tests = sorted((root / FRONTEND / "src").rglob(f"{name}*.test.*"))
         return "vitest", [str(PurePosixPath(t.relative_to(root / FRONTEND))) for t in tests]
     return "none", []
