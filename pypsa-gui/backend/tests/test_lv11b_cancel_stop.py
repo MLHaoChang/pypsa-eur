@@ -264,14 +264,14 @@ def test_an_outsider_cannot_stop_someone_elses_monitor(own_session, _auth_db):
     from tests.test_chat_session_ownership import _other_org_user
 
     own_session.mark_detached_monitor("tu-1", "run_simulation", active=True)
-    epoch = own_session.monitor_epoch()
+    generation = own_session.monitor_generation()
     uid, session_local = _other_org_user(_auth_db)
     with TestClient(main.app) as c:
         outsider = attach_session(c, session_local, uid)
         r = outsider.post(f"/api/chat/{own_session.session_id}/progress/stop")
         unknown = outsider.post(f"/api/chat/no-such-{uuid.uuid4().hex}/progress/stop")
     assert (r.status_code, r.json()) == (unknown.status_code, unknown.json())
-    assert own_session.detached_monitor_active() and own_session.monitor_epoch() == epoch
+    assert own_session.detached_monitor_active() and own_session.monitor_generation() == generation
 
 
 # ── B2: Stop monitoring during a plan step's in-turn hold ────────────────────
@@ -347,12 +347,25 @@ def _settled_step(task_id, status, timeout=60):
 
 
 def test_b2_a_step_solve_that_finishes_after_stop_monitoring_still_settles_completed(held_plan):
+    runs_before = chat_tools.list_project_runs(status="completed")["total_count"]
     run = _plan_run(held_plan)
     job, task_id = _released(*run)
     session = run[1]
-    held_plan.open.set()
+    # S1: Stop monitoring is no cancel: neither the job's stop nor the turn's abort is set.
+    assert not PyPSAService.get_solver_state()["stop_event"].is_set()
+    assert not session.abort_event.is_set()
+    # S2: the stop closed this observer only; a later wait in the same session
+    # still follows the job to its end.
+    threading.Timer(0.5, held_plan.open.set).start()
+    calls, results, frames, _ = run_journey(
+        *PROVIDER, [lambda r: ("wait_for_job", {"job_id": job, "timeout_seconds": 25}),
+                    lambda r: (None, {})],
+        "Is it done?", session=session)
+    assert results[0]["terminal"] is True and results[0]["completed"] is True
+    assert ja.job_status(job, actor_id=chat_tools.acting_user_id())["outcome"] == "succeeded"
     _settle_solver()
     assert PyPSAService.get_solver_state().get("status") == "completed"
+    assert chat_tools.list_project_runs(status="completed")["total_count"] == runs_before + 1
     due = _await_due(session)
     assert [d["job_id"] for d in due] == [job]  # one continuation, as without the stop
     task = _settled_step(task_id, "completed")
@@ -363,8 +376,6 @@ def test_b2_a_step_solve_that_fails_after_stop_monitoring_still_settles_failed(
     held_plan, monkeypatch
 ):
     import routers.simulation as simulation
-
-    from harness import continuation
 
     held = simulation.run_simulation  # the gate's wrapper
 
@@ -382,8 +393,9 @@ def test_b2_a_step_solve_that_fails_after_stop_monitoring_still_settles_failed(
     task = _settled_step(task_id, "failed")
     assert task["completed_steps"] == 0
     assert task["next_step"]["id"] == "run" and task["next_step"]["status"] == "failed"
-    time.sleep(0.3)
-    assert continuation.due(session) == []
+    # As without the stop: a failed (not aborted) solve arms one triage continuation.
+    due = _await_due(session)
+    assert [(d["job_id"], d["status"]) for d in due] == [(job, "failed")]
 
 
 def test_b2_a_step_solve_cancelled_by_cancel_job_after_stop_monitoring_settles_failed(held_plan):
@@ -401,7 +413,11 @@ def test_b2_a_step_solve_cancelled_by_cancel_job_after_stop_monitoring_settles_f
     _settle_solver()
     task = _settled_step(task_id, "failed")
     assert task["completed_steps"] == 0
-    assert task["next_step"]["id"] == "run" and task["next_step"]["status"] == "failed"
+    step = task["next_step"]
+    # Status `failed` as for every native abort (GK B: option A; issue 16 for a
+    # cancelled status), with the cancel's own facts on the step.
+    assert step["id"] == "run" and step["status"] == "failed"
+    assert step["job"]["outcome"] == "aborted" and "aborted" in step["error"]
     time.sleep(0.3)
     assert continuation.due(session) == []
     assert len(held_plan.starts) == 1
@@ -436,3 +452,42 @@ def test_each_unverified_cancel_reaches_the_model_as_a_tool_error(baseline, case
                 "owner_unknown": "job_owner_unknown"}[case]
     assert kinds == [expected]
     assert not (isinstance(results[0], dict) and results[0].get("cancel") == "cancelled")
+
+
+# ── S5: queue (GridSpine included) jobs through dispatch, per actor ─────────
+
+
+@pytest.mark.parametrize("who,family,kind", [
+    ("own", "sq", None),
+    ("foreign_actor", "sq", "job_not_found"),
+    # the queue's own ACL hides another project's job (11a FOREIGN_PROJECT_KIND)
+    ("foreign_project", "sq", "job_not_found"),
+    ("foreign_project", "fg", "job_project_mismatch"),
+])
+def test_cancel_job_through_dispatch_runs_each_acl_as_the_acting_user(
+    baseline, second_identity, who, family, kind
+):
+    from services.solve_queue import solve_queue
+    from tests.test_lv11a_job_contract import _foreign_project_job, _queue
+
+    ctx, _project_id, path = baseline
+    job = (_foreign_project_job(ctx, path, family)[0] if who == "foreign_project"
+           else _queue(ctx, path)[0])
+    token = (chat_tools._ACTING_USER_ID.set(str(second_identity["user_id"]))
+             if who == "foreign_actor" else None)
+    cards = []
+    try:
+        calls, results, frames, _ = run_journey(
+            *PROVIDER, [lambda r: ("cancel_job", {"job_id": job}), lambda r: (None, {})],
+            "Cancel it.", on_frame=_approve(cards))
+    finally:
+        if token is not None:
+            chat_tools._ACTING_USER_ID.reset(token)
+    errors = [d.get("error_kind") for e, d in frames if e == "tool_error"]
+    if kind is None:
+        assert errors == [] and results[0]["cancel"] == "cancelled"
+        assert solve_queue.get_job(uuid.UUID(job))["status"] == "aborted"
+    else:
+        assert errors == [kind]
+        if family == "sq":
+            assert solve_queue.get_job(uuid.UUID(job))["status"] == "queued"

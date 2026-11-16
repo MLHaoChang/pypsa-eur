@@ -4260,7 +4260,7 @@ def _dispatch_real_tool_call(
                 # live-voice 11b (B2): Stop monitoring ends this watch and the
                 # plan step's in-turn hold below together; the step still
                 # settles from the native record through `follow_job`.
-                monitor_epoch = session.monitor_epoch()
+                monitor_generation = session.monitor_generation()
                 start_detached_solver_monitor(
                     session,
                     active_ctx,
@@ -4300,7 +4300,7 @@ def _dispatch_real_tool_call(
                         is_solver_done=lambda: (
                             settled.is_set() or time.monotonic() >= deadline
                         ),
-                        monitor_epoch=monitor_epoch,
+                        monitor_generation=monitor_generation,
                     ):
                         yield (
                             "tool_progress",
