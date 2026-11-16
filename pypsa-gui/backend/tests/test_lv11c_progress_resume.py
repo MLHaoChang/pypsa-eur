@@ -349,3 +349,75 @@ def test_a_monitor_without_a_job_id_logs_no_terminal_item(baseline):
         time.sleep(0.02)
     assert not [i for i in session.drain_detached_progress(after_cursor=0)
                 if i.get("frame") == "job_terminal"]
+
+
+def test_no_actor_or_no_project_shows_no_job(baseline, monkeypatch):
+    """Fail closed: an ownerless job is never matched by a missing actor, and
+    a project-less job never by a missing project."""
+    from routers import chat as chat_router
+
+    ctx, *_ = baseline
+    session = chat_service.get_or_create_session(owner_user_id=chat_tools.acting_user_id())
+    ownerless = ja.register_study_job(
+        study_key="fmea_sweep",
+        tool_name="run_fmea_sweep",
+        tool_use_id="tu-o",
+        owner_user_id=None,
+        project_uuid=_project(ctx),
+    )
+    assert chat_router._progress_snapshot(session, None, "e", 0)["jobs"] == []
+    assert chat_router._progress_job_view(ownerless, None) is None
+    me = chat_tools.acting_user_id()
+    unbound = ja.register_study_job(
+        study_key="fmea_sweep",
+        tool_name="run_fmea_sweep",
+        tool_use_id="tu-u",
+        owner_user_id=me,
+        project_uuid=None,
+    )
+    monkeypatch.setattr(chat_router, "_progress_project_id", lambda: None)
+    assert chat_router._progress_snapshot(session, me, "e", 0)["jobs"] == []
+    assert chat_router._progress_job_view(unbound, me) is None
+
+
+def _plan_step_monitor():
+    """The plan step's monitor: no on_terminal (the step settles elsewhere)."""
+    from harness.solver_bridge import start_detached_solver_monitor
+    from tests.test_lv11b_cancel_stop import _Ctx
+
+    ctx = _Ctx()
+    session = chat_service.get_or_create_session(owner_user_id="u1")
+    start_detached_solver_monitor(
+        session, ctx, tool_use_id="tu-fg", tool_name="run_simulation", job_id="fg:x"
+    )
+    return session, ctx
+
+
+def _terminal_items(session):
+    import time
+
+    deadline = time.monotonic() + 5
+    while session.detached_monitor_active() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return [i for i in session.drain_detached_progress(after_cursor=0)
+            if i.get("frame") == "job_terminal"]
+
+
+def test_a_plan_step_monitor_logs_the_end_of_its_solve():
+    import time
+
+    session, ctx = _plan_step_monitor()
+    time.sleep(0.3)
+    assert session.detached_monitor_active()
+    ctx.solver_state["status"] = "completed"
+    assert [i["job_id"] for i in _terminal_items(session)] == ["fg:x"]
+
+
+def test_a_plan_step_monitor_stopped_mid_run_logs_no_end():
+    import time
+
+    session, ctx = _plan_step_monitor()
+    time.sleep(0.3)
+    assert session.detached_monitor_active()
+    session.stop_monitoring()
+    assert _terminal_items(session) == []  # the solve still runs

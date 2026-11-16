@@ -2550,6 +2550,8 @@ def _progress_job_view(job_id: str, actor_id: str | None) -> dict | None:
     """
     from harness import job_adapters
 
+    if actor_id is None:
+        return None  # job_status would show an ownerless job to no one in particular
     try:
         view = job_adapters.job_status(job_id, actor_id=actor_id)
     except HTTPException:
@@ -2655,7 +2657,8 @@ async def chat_progress(
             )
         snapshot_first = point == "snapshot"
         cursor = session.progress_cursor() if snapshot_first else seq
-    actor_id = str(actor.id) if actor is not None else session.owner_user_id
+    # The ownership gate above admitted this actor; its id filters every job view.
+    actor_id = str(actor.id) if actor is not None else None
     epoch_now = session.progress_epoch()
 
     def _framed(payload):

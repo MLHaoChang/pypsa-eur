@@ -100,17 +100,16 @@ def start_detached_solver_monitor(
         status, same = _state()
         return status in _TERMINAL or not same
 
-    ended = []
-
     def _note_end() -> None:
-        """live-voice 11c: one `job_terminal` item once this solve has ended.
+        """live-voice 11c: a `job_terminal` item once this solve has ended.
 
-        It names the job only; the progress route re-reads the job's view for
-        whoever is reading the stream, so a replay is ACL-checked too.
+        Called once: `_settle` notes the end exactly when it settles, and the
+        monitor's no-`on_terminal` path notes it only in its `finally`. The
+        item names the job only; the progress route re-reads the job's view
+        for whoever is reading the stream, so a replay is ACL-checked too.
         """
-        if job_id is None or ended:
+        if job_id is None:
             return
-        ended.append(True)
         session.append_detached_progress({
             "frame": "job_terminal",
             "job_id": job_id,
