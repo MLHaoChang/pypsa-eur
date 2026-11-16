@@ -217,6 +217,7 @@ def test_no_card_or_a_wrong_one_refuses_before_any_fork(
     assert _start(path, pid, approved) == "shipped_card"
     step = _read(path)["steps"][0]
     assert step["status"] == "failed" and step["error"].startswith("shipped_card")
+    assert "shipped cases" in step["error"]
     assert _read(path)["run"]["cases"] == [] and queue == [] and _audit(path) == []
 
 
@@ -768,6 +769,37 @@ def test_a_case_without_its_witness_is_never_passed(
     run_explore.advance(path, boot=INSTANCE, clock=time.time)
     case = _cases(path)["low_price"]
     assert case["status"] == "not_evaluated" and case["reason"] == "no witness"
+
+
+@pytest.mark.parametrize("which", ["no_hit", "not_running", "other_engine"])
+def test_advance_touches_only_running_shipped_cases_it_has_a_verdict_for(
+    baseline, tmp_path, queue, monkeypatch, which
+):
+    """`judged` reads outside the run's lock, so `advance` re-checks each
+    case's engine and status under it before it writes a verdict."""
+    _, pid, _ = baseline
+    path = _task(tmp_path, pid, picked=["low_price"])
+    _start(path, pid)
+    verdict = ("passed", "", None, 1)
+    if which == "no_hit":
+        hits = {}
+    elif which == "not_running":
+        hits = {"ppa_price_minus_10": verdict}
+    else:
+        data = _read(path)
+        data["run"]["cases"].append(
+            {"name": "net", "engine": "network", "status": "running", "solves": {}}
+        )
+        path.write_text(json.dumps(data))
+        hits = {"net": verdict}
+    before, open_ = _cases(path), run_explore.unsettled(_read(path)["run"])
+    monkeypatch.setattr(E, "judged", lambda task, profile: hits)
+    run_explore.advance(path, boot=INSTANCE, clock=time.time)
+    after = _cases(path)
+    for name in hits or ["low_price"]:
+        assert after[name]["status"] == before[name]["status"], name
+    assert after["low_price"]["status"] == "running"
+    assert run_explore.unsettled(_read(path)["run"]) == open_
 
 
 # ── D2: the validator's refusal reads not_run, shown and counted ─────────────
