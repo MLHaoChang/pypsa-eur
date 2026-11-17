@@ -6,6 +6,8 @@ Engine gatekeeper A (gridspine, DC, grid-to-process and IC/adequacy engine revie
 
 Engine gatekeeper B (harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCukHqj8bJzw2v711usX`
 
+Engine gatekeeper A2 (grid-compliance packages GC-01..GC-08 only; owner decision GC-PACE-1): `session_01G7qCumuWN3rDn5ATXsENkm`
+
 UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01G7qCunoAdupkWmqQj5HNvo`
 
 Send every coordinator message to this id. A rotating coordinator (`.claude/skills/coordinator/SKILL.md`, "Rotation") replaces its line in a tiny PR (and does the same when a gatekeeper or UX reviewer rotates), and tells each live session the new id.
