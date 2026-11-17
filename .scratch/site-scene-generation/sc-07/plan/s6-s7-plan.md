@@ -129,3 +129,19 @@ take it as S6d unless the coordinator gives it to SC-06 (c).
 S6a (new module first) → S6b → S6c (parallel with S6b) → S7. S6d after #1619.
 No change to `harness/events.py`, `loop.py`, `change_set.py`, `confirm.py`,
 `compose.py` or `navigation.py` is planned.
+
+## 2026-11-17: UX 2 plan GO with changes (S6c, S7, SC-06 (c) card)
+
+Answers: Q1 "Explain these results". Q2 the card in the Generate part, above the
+correction panel, only while a return is open. Q3 no revision: "From the current
+site." Chat describes, never applies. Same card and words in both modes. Apply
+primary, Discard plain.
+
+1. Out-of-date results use `ResultState`'s own label and tone ("Out of date"), never "stale" on screen.
+2. ISO dates (#1327). `snapshotWords` (only `SceneResultsPanel` uses it) already gives `2030-03-03 14:00`; the prefill reuses it, no fork.
+3. "Ask for help" only on a `/flow` results blocker, not on out of date alone. Shots of both; the PR names the `/flow` field keyed on.
+4. A "Journey fit" line in each PR body (setup/Generate, results, decide; Back to Site 3D after "Readiness and run ›"; Back from the return card).
+5. Discard says in one visible line what is lost and is guarded (confirm or undo), with sensible Esc focus. A disabled Apply shows a visible reason.
+6. "Not applied" names plain building labels only (RAW-NAMES-1).
+7. Shots in light and dark, both modes, real app with route mocks (#1470): return open with and without unknowns, after Apply, after Discard, card absent, the Resume line.
+8. The eyebrow is the flow section name with the 15 px title (UI-COHESION-1); "›" links ink and underlined, red only for Apply and the active tab.
