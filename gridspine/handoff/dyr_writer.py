@@ -371,7 +371,7 @@ def _poc_ids(net, poc):
             )
         bus2 = nums[name_of.at[b.grid_bus]]
         bus1 = i if bus2 == j else j
-        key = (bus1, bus2, ckt)
+        key = (b.table, bus1, bus2, ckt)    # line and trafo CKTs count apart, as in the RAW
         if key in seen:
             raise ContractError(
                 f"units {seen[key]} and {unit_id} share PoC branch {key}: one REPCA1 per "

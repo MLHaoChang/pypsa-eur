@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 import pandapower as pp
+import pandas as pd
 import pytest
 
 from gridspine.handoff import dyr_writer
@@ -389,3 +390,56 @@ def test_campus_assets_yaml_is_untouched():
 def test_a_con_filling_ten_columns_keeps_a_separator():
     assert dyr_writer._con(-99.0) == "  -99.00000"[1:]          # unchanged: 10 columns
     assert dyr_writer._con(-998.0) == " -998.00000"             # 11: one blank added
+
+
+def test_reecc1_con_order_hand_listed():
+    """Hand-listed from the public v35 parser table (VeraGrid v35 dyr.py),
+    not derived from REECA1_CONS."""
+    assert up.REECC1_CONS == tuple("reec_" + n for n in (
+        "vdip", "vup", "trv", "dbd1", "dbd2", "kqv", "iqh1", "iql1", "vref0", "tp",
+        "qmax", "qmin", "vmax", "vmin", "kqp", "kqi", "kvp", "kvi", "tiq", "dpmax",
+        "dpmin", "pmax", "pmin", "imax", "tpord",
+        "vq1", "iq1", "vq2", "iq2", "vq3", "iq3", "vq4", "iq4",
+        "vp1", "ip1", "vp2", "ip2", "vp3", "ip3", "vp4", "ip4",
+        "t", "socini", "socmax", "socmin",
+    ))
+    assert up.REECC1_ICONS == ("reec_pfflag", "reec_vflag", "reec_qflag", "reec_pqflag")
+
+
+@pytest.mark.parametrize("edit, reason", [
+    ({"repc_qmax": {"value": "inf", "source": "assumed"}}, "must be a finite number"),
+    ({"repc_qmax": {"value": "nan", "source": "assumed"}}, "must be a finite number"),
+    ({"repc_qmin": {"value": 0.5, "source": "assumed"}}, "repc_qmin must be < repc_qmax"),
+    ({"reec_pfflag": {"value": 1, "source": "assumed"}}, "reec_pfflag must be 0 under plant control"),
+])
+def test_an_overlay_on_the_new_groups_is_checked(tmp_path, edit, reason):
+    _toy_templates(tmp_path, ibr=PLANT)
+    with pytest.raises(ContractError, match=reason):
+        load_unit_templates(tmp_path / "toy_ibr.yaml", overlay={"W_BUS_02": edit})
+
+
+def test_a_line_and_a_trafo_on_one_bus_pair_are_not_one_poc_branch(tmp_path):
+    net = _net()
+    pp.create_sgen(net, bus=1, p_mw=20.0, sn_mva=50.0, name="W2")
+    pp.create_transformer_from_parameters(
+        net, hv_bus=0, lv_bus=1, sn_mva=60.0, vn_hv_kv=345.0, vn_lv_kv=345.0,
+        vkr_percent=0.5, vk_percent=12.0, pfe_kw=0.0, i0_percent=0.0,
+    )
+    ids = dyr_writer._poc_ids(net, {"W_BUS_02": PocBranch("line", 0, 0), "W2": PocBranch("trafo", 0, 0)})
+    assert ids["W_BUS_02"] == ids["W2"] == (1, 2, 1, "1")
+
+
+def test_two_controlled_machines_each_get_exactly_one_repca1(tmp_path):
+    """Two plants on their own PoC lines: one REPCA1 per REGCA1 machine."""
+    net = _net()
+    params, templates = _toy_templates(tmp_path, ibr=PLANT)
+    t2 = templates.params[templates.params["unit_id"] == "W_BUS_02"].assign(unit_id="W2")
+    templates.params = pd.concat([templates.params, t2], ignore_index=True)
+    templates.units.loc["W2"] = templates.units.loc["W_BUS_02"]
+    pp.create_sgen(net, bus=1, p_mw=20.0, sn_mva=50.0, name="W2")
+    poc = {"W_BUS_02": PocBranch("line", 0, 0), "W2": PocBranch("line", 1, 0)}
+    write_dyr(net, params, tmp_path / "t.dyr", ibr=wecc_params(templates), poc=poc)
+    recs = _records((tmp_path / "t.dyr").read_text())
+    regca = sorted((b, i) for b, m, i, _ in recs if m == "REGCA1")
+    repca = sorted((b, i) for b, m, i, _ in recs if m == "REPCA1")
+    assert len(regca) == 2 and repca == regca

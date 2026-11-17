@@ -512,6 +512,10 @@ def _apply_overlay(uid, parsed, entries):
             raise ContractError(
                 f"overlay entry {uid}.{name} value must be a number, got {spec['value']!r}"
             ) from exc
+        if not math.isfinite(value):
+            raise ContractError(
+                f"overlay entry {uid}.{name} value must be a finite number, got {spec['value']!r}"
+            )
         parsed[name] = (value, spec["source"])
     return parsed
 
