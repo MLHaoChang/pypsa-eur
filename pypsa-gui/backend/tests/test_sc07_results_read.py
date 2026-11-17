@@ -396,5 +396,7 @@ def test_the_dispatcher_answers_what_the_module_answers(client, bound_ctx, call)
     from services import chat_tools
 
     with bound_ctx(client):
-        via_tool = chat_tools.DISPATCHERS["site_scene_results"](site_id="campus", snapshot=T3)
+        via_tool = chat_tools.DISPATCHERS["site_scene_results"](
+            site_id="campus", snapshot=T3
+        )
     assert via_tool == call(snapshot=T3)
