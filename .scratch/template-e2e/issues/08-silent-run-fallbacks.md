@@ -4,6 +4,7 @@
 # 08 — Run inputs that fall back to a default without saying so
 
 Status: ready-for-agent
+Owner: builder session_01G7qCuo15kNsNqjAaBLjvmL
 Size: M
 Gated: GK B; UX
 Likely files: pypsa-gui/backend/services/reliability_goal.py (mc_draws ~l.35, site_archetype l.34); pypsa-gui/backend/services/adequacy/eh_stages.py (~l.479-487, efficiency 1.0); pypsa-gui/backend/copt_endpoint.py (l.54, VOLL 0.0); pypsa-gui/backend/services/adequacy/occurrence.py (l.214, carrier outage defaults); pypsa-gui/backend/services/flow_service.py (assumption items ~l.855-899); Results "Assumptions behind this result"

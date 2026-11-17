@@ -3,7 +3,8 @@
 
 # 07 — Decisions found in neither mode, and Expert-only decisions Guided never names
 
-Status: needs-triage
+Status: ready-for-agent
+Owner: unassigned: triaged by the coordinator
 Size: M
 Gated: UX
 Likely files: pypsa-gui/frontend/src/layout/PropertiesPanel.tsx (Load and Generator blocks); pypsa-gui/frontend/src/pages/hubDesign/SectionView.tsx; pypsa-gui/backend/services/flow_service.py (section items); pypsa-gui/frontend/src/pages/SolverSettings.tsx
@@ -15,7 +16,6 @@ Design §3.5 lets Expert hold fields that Guided does not show. Guided must then
 
 **Found in neither mode** (on a load or asset form, in the panels, or in the drawers):
 - load flexibility (curtailable / deferrable share), §2.1 section 4;
-- critical share / criticality tier after creation (only eh_site's creation form has "Must stay on (%)");
 - per-asset unit commitment (min load, min up/down, restart): Expert Grid study has only a global "Linearised unit commitment for the fixed-size gensets". Code check pending for the Haber-Bosch loop (`eh_ammonia.py`);
 - parties / value split (§2.1 section 7): not checked; confirm or list.
 
@@ -24,6 +24,8 @@ Design §3.5 lets Expert hold fields that Guided does not show. Guided must then
 - grid code profile and grid-code document, point of connection, export link, site time zone (section 3);
 - scenario variants to compare (section 8);
 - overnight cost and lifetime show a "Default" tag but no "assumed" mark, so finding 7 of decisions.md applies.
+
+Re-triaged after TEMPLATE-GAPS-1: critical share, PUE, backup mode and architecture moved to 04 (Q3 a). What is left here: load flexibility, per-asset unit commitment, parties (confirm), and the Expert-only fields Guided must name.
 
 ## Acceptance
 

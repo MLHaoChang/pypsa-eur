@@ -4,6 +4,7 @@
 # 05 — Raw parameter, option and internal names shown to the user (RAW-NAMES-1)
 
 Status: ready-for-agent
+Owner: expert-catalogue slices 01/02 (lead session_01G7qCuo4TtQpLUWDE5GKpny)
 Size: M
 Gated: UX
 Decided: TEMPLATE-GAPS-1 Q2 (a), component ids count as raw names; templates ship plain display names, ids stay internal

@@ -4,6 +4,7 @@
 # 06 — Reliability goal shows "3 h/yr (assumed)" and "No goal yet" at once; backup inputs grouped under Scenarios in Expert only
 
 Status: ready-for-agent
+Owner: builder session_01G7qCuo15kNsNqjAaBLjvmL (backend first; reliability_goal.py after #1604)
 Size: S
 Gated: UX; GK B (goal value source)
 Likely files: pypsa-gui/frontend/src/pages/hubDesign/cards/GoalCard.tsx; pypsa-gui/frontend/src/components/reliabilityGoal/ReliabilityGoalEditor.tsx; pypsa-gui/backend/services/reliability_goal.py (~l.87-108, pack value fallback); pypsa-gui/frontend/src/pages/SolverSettings.tsx (~l.1595)

@@ -184,4 +184,4 @@ Sent to the coordinator as options (HOLISTIC-1). **Answered 2026-11-17 (TEMPLATE
 | [05](issues/05-raw-names-in-ui.md) raw names | all | all | ready-for-agent (Q2 a) |
 | [06](issues/06-goal-and-backup-consistency.md) goal, backup grouping | 5, 8 | DC, MG, Conc | ready-for-agent |
 | [08](issues/08-silent-run-fallbacks.md) silent run fallbacks | 5, 8, 10 | all | ready-for-agent |
-| [07](issues/07-expert-only-decisions.md) decisions in neither mode / Expert-only and unnamed | 1, 3, 4, 5, 7, 8 | all | needs-triage |
+| [07](issues/07-expert-only-decisions.md) decisions in neither mode / Expert-only and unnamed | 1, 3, 4, 5, 7, 8, 10 | all | ready-for-agent |

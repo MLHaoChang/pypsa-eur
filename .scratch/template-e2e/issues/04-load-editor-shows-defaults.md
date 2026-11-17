@@ -4,6 +4,7 @@
 # 04 — The load editor shows profile-generator defaults, not the load; non-electric loads get MW; DC load inputs are creation-only
 
 Status: ready-for-agent
+Owner: builder session_01G7qCumsdzuVnJQAD41wFxk (after #1565)
 Size: M
 Gated: UX
 Decided: TEMPLATE-GAPS-1 Q3 (a), PUE, critical share, backup mode and architecture editable after creation in sections 4–5, both modes

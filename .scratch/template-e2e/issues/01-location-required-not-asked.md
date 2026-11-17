@@ -4,6 +4,7 @@
 # 01 — Location is a required input, but no template asks for it and Run does not wait for it
 
 Status: ready-for-agent
+Owner: builder session_01G7qCumsdzuVnJQAD41wFxk (after #1586/#1594)
 Size: S
 Gated: UX; GK B (run gate)
 Decided: TEMPLATE-GAPS-1 Q1 (a), a missing location blocks Run until it is set (2026-11-17)

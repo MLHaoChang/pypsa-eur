@@ -4,6 +4,7 @@
 # 03 — Carriers & processes: every Edit in Guided jumps to Expert
 
 Status: ready-for-agent
+Owner: unassigned: waits on owner Q5
 Size: M
 Gated: UX
 Likely files: pypsa-gui/frontend/src/pages/hubDesign/SectionView.tsx (GenericSectionCard, "Add a process unit in Expert"); pypsa-gui/frontend/src/pages/hubDesign/SectionHoldings.tsx (Edit buttons ~l.28)

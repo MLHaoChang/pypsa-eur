@@ -4,6 +4,7 @@
 # 02 — The connection limit cannot be changed in Guided; "Import efficiency" opens an empty Link form
 
 Status: ready-for-agent
+Owner: builder session_01G7qCumsdzuVnJQAD41wFxk
 Size: S
 Gated: UX
 Likely files: pypsa-gui/frontend/src/pages/hubDesign/cards/SiteCard.tsx ("Connection limit" KPI ~l.145); pypsa-gui/frontend/src/pages/hubDesign/SectionView.tsx; pypsa-gui/frontend/src/components/FieldDrawer.tsx; pypsa-gui/backend/services/flow_service.py (assumption rows → drawer target, ~l.855-899)
