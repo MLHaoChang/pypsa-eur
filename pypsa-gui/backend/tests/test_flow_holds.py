@@ -531,6 +531,25 @@ def test_a_helper_generator_by_its_role_is_flagged(role):
     assert {h["entity"]: h for h in holds["assets"]}["supplier"]["helper"] is True
 
 
+def test_a_site_asset_that_is_not_a_generator_is_never_a_helper_whatever_its_name():
+    """Only a Generator can be a helper: a Store, StorageUnit or Link with a helper-like name is the site's (GK B3)."""
+    n = _hand_built()
+    n.add("StorageUnit", "__lost_bess", bus="site", p_nom=1.0)
+    n.add("Store", "__buy_tank", bus="h2", e_nom=1.0)
+    n.add("Link", "voll_slack_link", bus0="site", bus1="h2", p_nom=1.0)
+    holds, _ = S._holds(
+        n, [], S._site_assets(n, ["grid_import"], {"grid_import", "export_tie"})
+    )
+    rows = {(h["component"], h["entity"]): h for h in holds["assets"]}
+    for key in (
+        ("StorageUnit", "__lost_bess"),
+        ("Store", "__buy_tank"),
+        ("Link", "voll_slack_link"),
+    ):
+        assert key in rows, key
+        assert rows[key]["helper"] is False, key
+
+
 def test_a_plain_generator_and_every_other_asset_is_not_a_helper():
     from services.process_products import is_helper_generator
 
