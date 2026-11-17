@@ -256,7 +256,13 @@ def _follow(path, ticket, job_id, ctx, begun):
         ):
             _WAKE.wait(POLL_SECONDS)
             record = _record(ctx)
-        if wall is not None and time.time() >= wall and _running(record, begun):
+        if (
+            wall is not None
+            and time.time() >= wall
+            and _own(record, begun)
+            and not _ended_by(record, begun, wall)
+        ):  # B1, O6: past the wall time only a case that ended in time settles;
+            # a lost or replaced record stays unverifiable (O5)
             settle_walled(path, ticket, job_id)
             return
         settle(path, ticket, job_id, record, begun)
@@ -280,6 +286,11 @@ def _wall_of(path, ticket):
     return deadline
 
 
+def _own(record, begun) -> bool:
+    """The step's own case record (not lost, not replaced by a later run)."""
+    return isinstance(record, dict) and record.get("started_at") == begun
+
+
 def _ended_by(record, begun, wall) -> bool:
     """B1, O6: the step's own case ended (not running) no later than the
     run's wall time, so its record settles the step, never a late finish."""
@@ -289,6 +300,7 @@ def _ended_by(record, begun, wall) -> bool:
         and record.get("started_at") == begun
         and record.get("status") != "running"
         and isinstance(finished, (int, float))
+        and not isinstance(finished, bool)
         and finished <= wall
     )
 
@@ -440,9 +452,9 @@ def recover(path, ctx, *, instance, now=None, lapsed_ok=False):
                     continue
         if walled:  # B1: the run's wall time ended with the case still out
             record = _record(ctx) if mine else None
-            if _ended_by(
-                record, begun, deadline
-            ):  # it ended in time; a restart lost the follower
+            # O5: a lost or replaced record is unverifiable; B1: one that ended
+            # in time settles from its record (a restart lost the follower)
+            if (mine and not _own(record, begun)) or _ended_by(record, begun, deadline):
                 if settle(path, ticket, job_id, record, begun) is not None:
                     swept += 1
             elif settle_walled(path, ticket, job_id) is not None:

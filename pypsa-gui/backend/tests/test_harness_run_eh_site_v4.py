@@ -1019,6 +1019,7 @@ def test_recovery_past_the_wall_time_settles_the_typed_refusal(tmp_path, settled
     "finished_offset, expect",
     [
         (-5, ("done", "completed")),
+        (0, ("done", "completed")),  # GK B (63) P2: finished exactly at the deadline
         (+5, ("timed_out", "failed")),
         (None, ("timed_out", "failed")),
     ],
@@ -1046,6 +1047,31 @@ def test_recovery_past_the_wall_time_reads_a_case_that_ended_in_time(
     assert [c[:2] for c in settled] == [expect]
     if expect[1] == "failed":
         assert _step(path)["error"] == run_ic.WALL_TIME
+
+
+@pytest.mark.parametrize(
+    "record", [None, _record("running", started=2.0)], ids=["gone", "replaced"]
+)
+def test_recovery_past_the_wall_time_of_a_lost_record_stays_unverifiable(
+    tmp_path, settled, record
+):
+    """O5 (GK B (63) P2): recovery, like the follower, reads a lost or
+    replaced record past the wall time as unverifiable, never the gap."""
+    job = {
+        "job_id": "ad:1",
+        "continuation": "armed",
+        "kind": run_ic.STUDY,
+        "started_at": 1.0,
+        "call_id": "a1",
+        "deadline_at": time.time() - 1,
+        "deadline_kind": run_ic.WALL_TIME_KIND,
+    }
+    path = _task(tmp_path, job=job)
+    ctx = ctx_for(tmp_path, template=None)
+    if record is not None:
+        ctx.solver_state[run_ic.STUDY] = record
+    assert run_ic.recover(path, ctx, instance="i1") == 1
+    assert [c[:2] for c in settled] == [("unknown", "uncertain")]
 
 
 def test_recovery_past_a_plain_follow_deadline_stays_uncertain(tmp_path, settled):
@@ -1099,15 +1125,38 @@ def test_only_a_wall_time_deadline_is_the_steps_wall(tmp_path):
     assert run_ic._wall_of(tmp_path / "gone.json", TICKET) is None
 
 
-def test_a_case_done_at_the_wall_time_settles_from_its_record(
-    tmp_path, monkeypatch, settled
+@pytest.mark.parametrize(
+    "finished_offset, expect",
+    [
+        (-5, ("done", "completed")),
+        (0, ("done", "completed")),
+        (+0.5, ("timed_out", "failed")),
+        (None, ("timed_out", "failed")),
+        (True, ("timed_out", "failed")),
+    ],
+)
+def test_past_the_wall_time_the_follower_settles_only_a_case_that_ended_in_time(
+    tmp_path, monkeypatch, settled, finished_offset, expect
 ):
-    """B1: past the wall time, only a case still running is `ic_wall_time`;
-    one that ended done is completed from its own record."""
-    path, _ = _wait(tmp_path, monkeypatch, _record("done"), expires=_iso(-1))
+    """B1, O6 (GK B (63) P2): past the wall time, a case that ended done by
+    the wall time is completed from its own record; one that finished after
+    it, or with no (or a bool) finish time, is `ic_wall_time`, never completed."""
+    expires = _iso(-1)
+    wall = datetime.fromisoformat(expires).timestamp()
+    if finished_offset is None or finished_offset is True:
+        finished = finished_offset
+    else:
+        finished = wall + finished_offset
+    path, _ = _wait(
+        tmp_path, monkeypatch, _record("done", finished_at=finished), expires=expires
+    )
     _join()
-    assert [s[:2] for s in settled] == [("done", "completed")]
-    assert "judged_by" not in _step(path)
+    assert [s[:2] for s in settled] == [expect]
+    step = _step(path)
+    if expect[1] == "completed":
+        assert "judged_by" not in step
+    else:
+        assert step["error"] == run_ic.WALL_TIME and step["judged_by"] == run_ic.JUDGED
 
 
 @pytest.mark.parametrize(

@@ -58,3 +58,11 @@ The gap kinds (`ic_budget`, `ic_wall_time`, `ic_case_refused`, `ic_case_failed` 
 - (b) Every chapter-gap row carries a kind from the set. A foreign exception maps to `ic_case_failed`, never raw text and never a 500.
 - (c) No tool_error frame on the run path carries one of these kinds. Should one ever need to, it gets a fragment in that PR.
 - (d) Each kind has a test of its own trigger.
+
+### 2026-11-17: the baseline reservation (GK B (60) Q2 (a), A1–A4), recorded at GK B (63)'s ask
+
+Q1 ("the case spends 0 solves") holds for the case's own work. Q2 (a) is the exception: when the site keeps existing assets, the case re-solves a counterfactual baseline. Admission reserves that baseline at its bound, `run_envelope.CASE_BASELINE_SOLVES = 2`, out of the run's budget.
+- A1: the bound is checked against `baseline_plan`'s maximum, so a third leg fails a test.
+- A2: the check and the reservation are one step under the admit lock. With 1 solve left the case is refused `ic_budget` and runs no LP; with exactly 2 left it runs. A case that needs no baseline reserves 0.
+- A3: IPP@1 keeps B2's `baseline_solve` refusal.
+- A4: `budget.solves` goes from 6 to 8 at @4 only, and the worst case fits.
