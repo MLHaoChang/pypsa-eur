@@ -285,3 +285,87 @@ describe('the break-even line', () => {
     expect(await screen.findByTestId('bc-stale')).toBeTruthy()
   })
 })
+
+// BC 15: the volume factor (lease-up) strip under the table, saved with the lines.
+describe('the volume factor strip', () => {
+  const saved = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    await waitFor(() => expect(api.putInputs).toHaveBeenCalledTimes(1))
+    return api.putInputs.mock.calls[0][0]!.inputs
+  }
+  const cell = (y: number) => screen.getByLabelText(`Volume factor (lease-up), % ${y}`) as HTMLInputElement
+  beforeEach(() => {
+    api.putInputs.mockImplementation(async (cfg) => ({ business_case: cfg, digest: 'd2', status: 'ok' }))
+  })
+
+  it('at default every operating year is blank (100 %) and the save adds nothing', async () => {
+    mount(config(CAPEX))
+    await screen.findByTestId('bc-volume-factor')
+    expect([2030, 2031, 2032].map(y => [cell(y).value, cell(y).placeholder])).toEqual([['', '100'], ['', '100'], ['', '100']])
+    expect(screen.getByTestId('bc-vf-key').textContent).toBe('Blank = 100 %')
+    expect(screen.getByTestId('bc-vf-scope').textContent).toMatch(/^Scales: lines priced on the model's served output/)
+    fireEvent.change(screen.getByLabelText('Price, Plant'), { target: { value: '1' } })
+    expect(await saved()).not.toHaveProperty('volume_factor_by_year')
+  })
+  it('an edit marks the draft unsaved and saves fractions in the one PUT', async () => {
+    mount(config(CAPEX))
+    await screen.findByTestId('bc-volume-factor')
+    fireEvent.change(cell(2031), { target: { value: '60' } })
+    expect(screen.getByTestId('bc-unsaved')).toBeTruthy()
+    const inputs = await saved()
+    expect(inputs.volume_factor_by_year).toEqual({ 2031: 0.6 })
+    expect(inputs.lines).toHaveLength(1)
+  })
+  it('refuses an entry outside 0..100 beside the strip, keeps it, and holds the save', async () => {
+    mount(config(CAPEX))
+    await screen.findByTestId('bc-volume-factor')
+    fireEvent.change(cell(2031), { target: { value: '150' } })
+    expect(cell(2031).value).toBe('150')
+    expect(cell(2031).getAttribute('aria-invalid')).toBe('true')
+    expect(cell(2031).className).toContain('border-danger')
+    expect(screen.getByTestId('bc-vf-refusals').textContent).toBe('Volume factor 2031: must be between 0 and 100 %')
+    expect((screen.getByRole('button', { name: 'Save the lines' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('bc-save-off').textContent).toMatch(/Fix the volume factor/)
+    fireEvent.change(cell(2031), { target: { value: '' } })
+    expect(screen.queryByTestId('bc-vf-refusals')).toBeNull()
+  })
+  it('sets every operating year at once', async () => {
+    mount(config(CAPEX))
+    await screen.findByTestId('bc-volume-factor')
+    fireEvent.change(screen.getByLabelText('Set all years, %'), { target: { value: '50' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set all years' }))
+    expect(cell(2032).value).toBe('50')
+    expect((await saved()).volume_factor_by_year).toEqual({ 2030: 0.5, 2031: 0.5, 2032: 0.5 })
+  })
+  it('shows a save’s validation error on the strip, not with the lines', async () => {
+    mount(config(CAPEX))
+    await screen.findByTestId('bc-volume-factor')
+    fireEvent.change(cell(2030), { target: { value: '40' } })
+    api.putInputs.mockRejectedValue(new BusinessCaseRejected({ code: 'business_case_inputs_invalid',
+      errors: [{ loc: ['body', 'business_case', 'inputs', 'volume_factor_by_year', '2030'], msg: 'Input should be a finite number' }] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    expect((await screen.findByTestId('bc-vf-refusals')).textContent)
+      .toBe('Volume factor (lease-up), % 2030: Input should be a finite number')
+    expect(cell(2030).getAttribute('aria-invalid')).toBe('true')
+    expect(screen.queryByTestId('bc-case-refusals')).toBeNull()
+  })
+  it('the stale message names the strip', async () => {
+    mount(config(CAPEX))
+    await screen.findByTestId('bc-volume-factor')
+    fireEvent.change(cell(2030), { target: { value: '40' } })
+    api.putInputs.mockRejectedValue(new StaleEditError('changed'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    expect((await screen.findByTestId('bc-stale')).textContent).toMatch(/The lines or the volume factor changed elsewhere/)
+  })
+  it('Remove on the report’s ignored years takes them out of the draft; Save writes it', async () => {
+    api.getStudy.mockResolvedValueOnce({ status: 'done', report: { pnl: {
+      years: [2030, 2031, 2032], streams: {}, rows: {}, volume_factor: { 2031: 0.6 }, volume_factor_ignored: [2029],
+    } } })
+    mount({ inputs: { lines: [CAPEX], volume_factor_by_year: { 2029: 0.5, 2031: 0.6 } } })
+    const line = await screen.findByTestId('bc-volume-factor-ignored')
+    expect(line.textContent).toMatch(/^Ignored, outside the operating years: 2029/)
+    fireEvent.click(within(line).getByRole('button', { name: /Remove/ }))
+    expect(screen.getByTestId('bc-unsaved')).toBeTruthy()
+    expect((await saved()).volume_factor_by_year).toEqual({ 2031: 0.6 })
+  })
+})

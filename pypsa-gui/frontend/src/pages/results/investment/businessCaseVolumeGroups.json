@@ -1,0 +1,23 @@
+{
+  "scales": [
+    { "words": "lines priced on the model's served output",
+      "kinds": ["contracted_it_kw", "derived_o2", "it_energy", "served_h2", "served_load", "served_product", "shipped"] },
+    { "words": "energy, network and fuel costs",
+      "streams": ["energy_import", "energy_wholesale", "fuel", "network_energy"] },
+    { "words": "per-unit operating costs and lost production", "streams": ["lost_production", "vom"] },
+    { "words": "demand charges", "streams": ["demand_charge"] },
+    { "words": "per-kWh taxes and certificates", "streams": ["certificates", "tax"] }
+  ],
+  "kept": [
+    { "words": "capacity lines", "kinds": ["capacity"] },
+    { "words": "capital cost lines" },
+    { "words": "fixed charges",
+      "streams": ["capex", "dr_availability", "eaas_fee", "fom", "lease", "network_capacity", "other", "retail_fixed"] }
+  ],
+  "refuses": [
+    { "words": "a typed revenue or cost line" },
+    { "words": "a line on exported energy", "kinds": ["export"] },
+    { "words": "an export, PPA, CfD, ancillary-service or demand-response activation row from the energy model that is not zero",
+      "streams": ["ancillary", "cfd_settlement", "dr_activation", "energy_export", "ppa_settlement"] }
+  ]
+}

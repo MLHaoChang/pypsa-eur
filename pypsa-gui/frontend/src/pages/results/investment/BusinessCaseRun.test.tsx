@@ -258,3 +258,49 @@ describe('the run', () => {
     expect(onBreakEvenLine).toHaveBeenCalledWith('H2 sales')
   })
 })
+
+// BC 15: the volume factor (lease-up) in the report.
+describe('the volume factor in the report', () => {
+  const LEASED: BusinessCaseStudy = { ...DONE, report: { ...REPORT, pnl: {
+    ...PNL, volume_factor: { 2030: 0.6 },
+    volume_factor_note: 'volume-tied costs and revenue scaled pro rata by the factor; the dispatch was not re-solved at reduced load',
+  } } }
+
+  it('at default adds no row, note, mark or ignored line', () => {
+    mount(DONE)
+    for (const id of ['bc-row-volume_factor', 'bc-volume-factor-note', 'bc-kpi-volume-factor', 'bc-volume-factor-ignored']) {
+      expect(screen.queryByTestId(id)).toBeNull()
+    }
+  })
+  it('a first P&L row reads every year as a percent, with the note under it', () => {
+    mount(LEASED)
+    const row = screen.getByTestId('bc-row-volume_factor')
+    expect(row.querySelector('th')!.textContent).toMatch(/^Volume factor \(lease-up\), %/)
+    expect(within(row).getAllByRole('cell').map(c => c.textContent)).toEqual(['60 %', '100 %'])
+    expect(screen.getByTestId('bc-volume-factor-note').textContent).toMatch(/^Volume-tied costs .* reduced load\.$/)
+    // First in "Profit and loss": before the revenue row.
+    expect(row.compareDocumentPosition(screen.getByTestId('bc-row-revenue')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+  it('marks the KPI row', () => {
+    mount(LEASED)
+    expect(screen.getByTestId('bc-kpi-volume-factor').textContent).toBe(
+      'With volume factor (lease-up) These figures differ from the Investment case because of the volume factor.')
+  })
+  it('names the ignored years, and Remove hands back the ones the draft still states', () => {
+    const onRemove = vi.fn()
+    const study = { ...LEASED, report: { ...LEASED.report!, pnl: { ...LEASED.report!.pnl!, volume_factor_ignored: [2028, 2029] } } }
+    mount(study, { volumeFactorYears: ['2029', '2030'], onRemoveVolumeFactorYears: onRemove })
+    const line = screen.getByTestId('bc-volume-factor-ignored')
+    expect(line.textContent).toMatch(/^Ignored, outside the operating years: 2028, 2029/)
+    fireEvent.click(within(line).getByRole('button'))
+    expect(onRemove).toHaveBeenCalledWith([2029])
+  })
+  it('a run refused on the volume factor reads plain words, never the kind', () => {
+    mount({ status: 'refused', error: 'business_case_refused:volume_factor_unclassified: energy_export',
+            error_code: 'business_case_refused',
+            refusal: { code: 'business_case_refused', refusal: 'volume_factor_unclassified', field: 'energy_export' } as unknown as string })
+    const text = screen.getByTestId('bc-failure').textContent ?? ''
+    expect(text).toMatch(/^Refused: Volume factor \(lease-up\), %: The energy-model row “energy export”/)
+    expect(text).not.toMatch(/volume_factor/)
+  })
+})

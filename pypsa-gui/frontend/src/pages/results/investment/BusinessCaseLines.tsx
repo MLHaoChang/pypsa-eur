@@ -19,11 +19,12 @@ import { openPanel } from '../openPanel'
 import { ACTION } from './actionStyle'
 import BusinessCaseRun from './BusinessCaseRun'
 import { NumInput } from './NumInput'
+import VolumeFactorStrip from './BusinessCaseVolumeFactor'
 import {
   blankLine, edited, hintUnitWords, priceUnitWords, unitWords, linkedSource, OUTPUTS_REASON_WORDS,
   parsePaste, placeRefusals, placeValidation, provenanceDetail, provenanceOf,
-  REFUSALS_REASON_WORDS, sourceKind, uniqueName, unitNotAllowed, unitsFor, withKind,
-  yearsOf, type Placed,
+  operatingYears, REFUSALS_REASON_WORDS, sourceKind, uniqueName, unitNotAllowed, unitsFor, VOLUME_FIELD,
+  withKind, yearsOf, type Placed,
 } from './businessCaseModel'
 
 const KINDS: LineKind[] = ['revenue', 'opex', 'capex']
@@ -279,6 +280,8 @@ export default function BusinessCaseLines() {
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [stale, setStale] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Volume-factor entries outside 0..100, by year: kept in their cell, not in the draft.
+  const [vfBad, setVfBad] = useState<Record<string, number>>({})
 
   useEffect(() => {
     if (inputs.data && draft === undefined && !inputs.isFetching) {
@@ -315,16 +318,21 @@ export default function BusinessCaseLines() {
     })
     setDirty(true); setRejected([]); setMessage(null)
   }
+  const vf = draft?.inputs.volume_factor_by_year ?? {}
+  const setVolumeFactor = (next: Record<string, number>, bad: Record<string, number> = vfBad) => {
+    setDraft(d => ({ ...(d ?? {}), inputs: { ...(d?.inputs ?? { lines: [] }), volume_factor_by_year: next } }))
+    setVfBad(bad); setDirty(true); setRejected([]); setMessage(null)
+  }
   const setLine = (i: number, patch: Partial<LineItem>) =>
     setLines(lines.map((l, k) => (k === i ? edited(l, patch) : l)))
 
   // Refusals of the stored lines sit on their row only while the table is what was stored.
   const placed: Placed[] = dirty ? rejected : [...rejected, ...placeRefusals(opts?.refusals)]
   const placedOn = (i: number) => placed.filter(p => p.line === i)
-  const caseLevel = placed.filter(p => p.line < 0 || p.line >= lines.length)
+  const caseLevel = placed.filter(p => (p.line < 0 || p.line >= lines.length) && p.column !== VOLUME_FIELD)
 
   const reload = async () => {
-    setStale(false); setRejected([]); setMessage(null)
+    setStale(false); setRejected([]); setMessage(null); setVfBad({})
     try {
       const fresh = await qc.fetchQuery({ queryKey: inputsKey, queryFn: () => businessCaseApi.getInputs(), staleTime: 0 })
       setDraft(fresh.business_case ? structuredClone(fresh.business_case) : null)
@@ -334,7 +342,7 @@ export default function BusinessCaseLines() {
     }
   }
   const save = async () => {
-    if (saving || !draft) return
+    if (saving || !draft || Object.keys(vfBad).length > 0) return
     setSaving(true); setRejected([]); setMessage(null)
     try {
       const out = await businessCaseApi.putInputs(draft, digest ?? '')
@@ -395,6 +403,7 @@ export default function BusinessCaseLines() {
     setOpen(new Set())
   }
   const horizon = opts?.horizon ?? null
+  const vfOff = Object.keys(vfBad).length > 0
   const ran = !!study.data?.report
 
   return (
@@ -403,7 +412,7 @@ export default function BusinessCaseLines() {
         which is versus the site today.</p>
       {stale && (
         <div role="alert" className="text-warn" data-testid="bc-stale">
-          The lines changed elsewhere since you opened them; your edits were not saved.{' '}
+          The lines or the volume factor changed elsewhere since you opened them; your edits were not saved.{' '}
           <button type="button" className={ACTION} onClick={() => { void reload() }}>Reload the lines</button>
         </div>
       )}
@@ -607,6 +616,11 @@ export default function BusinessCaseLines() {
               {REFUSALS_REASON_WORDS[opts.refusals_reason] ?? words(opts.refusals_reason)}</p>
           )}
           {dirty && <p className="text-muted" data-testid="bc-unsaved">Unsaved changes: save to check the lines.</p>}
+          <div className="mt-2 max-w-[56rem]">
+            <VolumeFactorStrip years={operatingYears(horizon)} value={vf} bad={vfBad}
+                               server={rejected.filter(p => p.column === VOLUME_FIELD)}
+                               onChange={setVolumeFactor} />
+          </div>
         </div>
         <div className="max-w-xl">
           <LockedRows locked={study.data?.report?.locked ?? null} ran={ran} />
@@ -617,9 +631,13 @@ export default function BusinessCaseLines() {
           onClick={() => openPanel('commercial', 'economics')}>Finance inputs ›</button></>}</p>}
       <div className="flex flex-wrap gap-2 items-center">
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
-                disabled={!dirty || saving || draft === null} onClick={() => { void save() }}>Save the lines</button>
+                disabled={!dirty || saving || draft === null || vfOff}
+                aria-describedby={vfOff ? 'bc-save-off' : undefined}
+                onClick={() => { void save() }}>Save the lines</button>
         <button type="button" className={ACTION} disabled={!dirty} onClick={() => setConfirmDiscard(true)}>Discard changes</button>
         {!dirty && <span className="text-muted">No unsaved changes.</span>}
+        {dirty && vfOff && <span id="bc-save-off" className="text-muted" data-testid="bc-save-off">
+          Fix the volume factor (lease-up) above to save.</span>}
         {dirty && confirmDiscard && (
           <span role="alert" className="text-warn flex flex-wrap gap-2 items-center" data-testid="bc-discard-confirm">
             Discard the unsaved changes to the lines? The stored lines are reloaded.
@@ -636,6 +654,12 @@ export default function BusinessCaseLines() {
         onBreakEvenLine={name => {
           setDraft(d => ({ ...(d ?? { inputs: { lines: [] } }), break_even_line: name }) as BusinessCaseConfig)
           setDirty(true); setMessage(null)
+        }}
+        volumeFactorYears={Object.keys(vf)}
+        onRemoveVolumeFactorYears={years => {
+          const next = { ...vf }
+          for (const y of years) delete next[String(y)]
+          setVolumeFactor(next)
         }} />
     </div>
   )
