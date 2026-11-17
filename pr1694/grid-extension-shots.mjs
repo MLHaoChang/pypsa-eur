@@ -3,6 +3,9 @@
 // payloads of GridExtensionCard.test.tsx. The reliability goal is patched to off_grid so the
 // card shows, and /api/health answers auth_enabled:false (the card's local mode) for every
 // state but "needs local mode", which keeps the real multi-user answer.
+// States 13-15 (Guided only) reach the card's three message lines: the compare POST refused
+// as baseline_not_saved with undo info unsaved, Find with the grid NPC empty, and the
+// break-even POST refused 409 supply_architectures_stale.
 //   OUT=<dir> node grid-extension-shots.mjs     (ONLY=<state> to run one state)
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -41,7 +44,7 @@ const RUNNING = { status: 'running', architectures: ['pv', 'genset', 'pv+genset'
 const result = over => ({ status: 'break_even', km: 8.1075, architecture_id: 'pv+genset', total_cost_eur_per_year: 14_000,
   offgrid_npc: 163_150, basis: BASIS, approximation: 'annualised approximation', ...over })
 
-// name, study list, supply-architectures answer, break-even answer (null = do not press Find), max km typed
+// name, study list, supply-architectures answer, break-even answer (null = do not press Find), max km typed, extra action
 const STATES = [
   ['not-run', [], null, null],
   ['running', [STUDY], RUNNING, null],
@@ -56,6 +59,9 @@ const STATES = [
   ['aborted-row-statuses', [STUDY], ABORTED, null],
   ['comparison-failed', [STUDY], { status: 'failed', rows: [], error: 'x' }, null],
   ['needs-local-mode', null, null, null],
+  ['save-first', [STUDY], null, null, null, 'save-first'],
+  ['input-error', [STUDY], DONE, null, null, 'input-error'],
+  ['route-refusal', [STUDY], DONE, null, null, 'refusal'],
 ]
 
 const browser = await chromium.launch()
@@ -80,11 +86,11 @@ try {
   await owner.close()
 
   let n = 0
-  for (const [name, list, arch, be, maxKm] of STATES) {
+  for (const [name, list, arch, be, maxKm, act] of STATES) {
    n += 1
    if (ONLY && ONLY !== name) continue
    for (const scheme of ['light', 'dark']) {
-    for (const mode of ['guided', 'expert']) {
+    for (const mode of act ? ['guided'] : ['guided', 'expert']) {
      const tag = `${n}-${name}-${mode}-${scheme}`
      const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, reducedMotion: 'reduce', colorScheme: scheme })
      await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
@@ -112,8 +118,13 @@ try {
      await page.route(u => /\/studies\/[^/]+\/supply-architectures$/.test(u.pathname), r =>
        r.request().method() === 'GET'
          ? (arch ? r.fulfill({ json: arch }) : r.fulfill({ status: 404, json: { detail: { error_kind: 'supply_architectures_never_run', message: 'x' } } }))
-         : r.fulfill({ json: RUNNING }))
-     await page.route(u => /\/grid-extension-break-even$/.test(u.pathname), r => r.fulfill({ json: be ?? result({}) }))
+         : act === 'save-first'
+           ? r.fulfill({ status: 409, json: { detail: { error_kind: 'baseline_not_saved', message: 'x' } } })
+           : r.fulfill({ json: RUNNING }))
+     await page.route(u => /\/grid-extension-break-even$/.test(u.pathname), r => act === 'refusal'
+       ? r.fulfill({ status: 409, json: { detail: { error_kind: 'supply_architectures_stale', message: 'the base project changed' } } })
+       : r.fulfill({ json: be ?? result({}) }))
+     if (act === 'save-first') await page.route(u => u.pathname.endsWith('/network/undo/info'), r => r.fulfill({ json: { depth: 1, unsaved: true } }))
 
      try {
        await page.goto(`${BASE}/`); await page.waitForLoadState('networkidle')
@@ -137,6 +148,16 @@ try {
          if (maxKm) await card.getByLabel('Maximum distance (km)').fill(maxKm)
          await card.getByTestId('grid-ext-find').click()
          await card.getByTestId('grid-ext-result').waitFor(); await page.waitForTimeout(500)
+       }
+       if (act === 'save-first') {
+         await card.getByTestId('grid-ext-compare').click()
+         await card.getByTestId('grid-ext-save-first').waitFor(); await page.waitForTimeout(500)
+       }
+       if (act === 'input-error' || act === 'refusal') {
+         await card.getByLabel('Grid extension cost (€ per km)').fill('25000')
+         if (act === 'refusal') await card.getByLabel('Grid supply net present cost (€)').fill('-120000')
+         await card.getByTestId('grid-ext-find').click()
+         await card.getByTestId(act === 'refusal' ? 'grid-ext-error' : 'grid-ext-input-error').waitFor(); await page.waitForTimeout(500)
        }
        await card.scrollIntoViewIfNeeded()
        await card.evaluate(el => { const out = []; for (const x of document.body.querySelectorAll('*')) { if (el.contains(x) || x.contains(el)) continue
