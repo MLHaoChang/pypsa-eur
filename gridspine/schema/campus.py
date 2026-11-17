@@ -117,3 +117,49 @@ def validate_pcc(df: pd.DataFrame) -> pd.DataFrame:
     if dup.any():
         raise ContractError(f"{where}: duplicate (period, hour) rows")
     return out
+
+
+#: The fields of a vendor (black-box) model reference (GC-01, TRGC 01/02):
+#: the file's name, the simulation tool it runs in, the model's name in that
+#: tool, its version and the file's SHA-256. GridSpine stores the reference
+#: and never opens or parses the file.
+VENDOR_MODEL_FIELDS = ("file", "tool", "model", "version", "sha256")
+_HEX = frozenset("0123456789abcdef")
+
+
+def check_vendor_models(block, kinds) -> dict:
+    """The campus's optional ``vendor_models`` block, ``{unit_kind:
+    {file, tool, model, version, sha256}}``, checked and copied. ``kinds``
+    are the unit kinds a reference may name. Every field is required and a
+    non-empty string; ``sha256`` is 64 hex digits (lower-cased). Refused,
+    naming the kind and field: an unknown kind, an unknown, missing or empty
+    field, a bad hash."""
+    if block is None:
+        return {}
+    if not isinstance(block, dict):
+        raise ContractError("campus: vendor_models must be a mapping {unit_kind: reference}")
+    out = {}
+    for kind, ref in block.items():
+        where = f"vendor_models.{kind}"
+        if kind not in kinds:
+            raise ContractError(f"{where}: unknown unit kind {kind!r}; allowed {sorted(kinds)}")
+        if not isinstance(ref, dict):
+            raise ContractError(f"{where}: must be a mapping of {list(VENDOR_MODEL_FIELDS)}")
+        unknown = sorted(set(ref) - set(VENDOR_MODEL_FIELDS))
+        if unknown:
+            raise ContractError(f"{where}: unknown field(s) {unknown}; allowed {list(VENDOR_MODEL_FIELDS)}")
+        missing = [f for f in VENDOR_MODEL_FIELDS if f not in ref]
+        if missing:
+            raise ContractError(f"{where}: missing field(s) {missing}")
+        clean = {}
+        for f in VENDOR_MODEL_FIELDS:
+            v = ref[f]
+            if not isinstance(v, str) or not v.strip():
+                raise ContractError(f"{where}.{f}: must be a non-empty string")
+            clean[f] = v.strip()
+        sha = clean["sha256"].lower()
+        if len(sha) != 64 or not set(sha) <= _HEX:
+            raise ContractError(f"{where}.sha256: must be 64 hex digits, got {len(sha)} characters")
+        clean["sha256"] = sha
+        out[kind] = clean
+    return out
