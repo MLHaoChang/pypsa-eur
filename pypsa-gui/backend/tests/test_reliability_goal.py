@@ -226,11 +226,11 @@ def test_the_mc_study_fills_its_draws_from_the_goal(client, install_network):
     _put(client, mc_draws=16)
     r = client.post("/api/results/mc", json={"seed": SEED, "cov_target": COV})
     assert r.status_code == 200, r.text
-    assert (r.json()["draws"], r.json()["goal_sources"]) == (16, {"mc_draws": "stored"})
+    assert (r.json()["draws"], r.json()["goal_sources"]) == (16, {"mc_draws": "stored", "target_lole_h": "default"})
     assert mc_poll(client)["status"] == "done"
 
     r = client.post("/api/results/mc", json={"draws": 8, "seed": SEED, "cov_target": COV})
-    assert (r.json()["draws"], r.json()["goal_sources"]) == (8, {"mc_draws": "override"})
+    assert (r.json()["draws"], r.json()["goal_sources"]) == (8, {"mc_draws": "override", "target_lole_h": "default"})
     mc_poll(client)
 
 
