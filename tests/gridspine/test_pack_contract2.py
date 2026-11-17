@@ -243,7 +243,7 @@ def test_a_v1_pack_reads_unknown_on_every_stays_connected_row(tmp_path):
     for c in judged:
         sc = _rows(c)["stays_connected"]
         assert sc["status"] == "unknown"
-        assert NO_CONNECTED in sc["detail"]
+        assert "no connected channel (contract v1)" in sc["detail"]
         assert c["status"] != "pass"
     assert not any(c["status"] == "pass" for c in cases.values())
 
