@@ -63,3 +63,31 @@ def test_a_stale_mip_solve_still_reads_unverified(priced, checked):
     )
     got = slots(ask(checked, ctx, "bus-price/1", "B1", PRICE))
     assert {s.get("reason") for s in got.values()} == {"unverified_solve"}
+
+
+# ── GK B 65 B1: the checked chart never draws a MIP's 0.0 as a price ─────────
+
+
+@pytest.mark.parametrize("limit", ["mip_duals_not_marginal", "unsupported_stochastic_run"])
+def test_a_bus_price_chart_with_a_solve_limit_is_not_drawn(limit, monkeypatch):
+    from types import SimpleNamespace
+
+    from harness import profile_common
+    from services import assistant_tools, checked_charts
+
+    monkeypatch.setattr(profile_common, "lp_outputs_live", lambda ctx: True)
+    monkeypatch.setattr(
+        assistant_tools, "_project", lambda: (SimpleNamespace(id="p1"), None, None)
+    )
+    monkeypatch.setattr(
+        checked_charts, "dataset", lambda *a: pytest.fail("a limited price was drawn")
+    )
+    record = {
+        "project_id": "p1",
+        "request_scope": {"profile": "bus-price/1", "entity_id": "B1"},
+        "raw": {"index": ["2030-01-01T00:00:00"], "price": [0.0], "solve_limit": limit},
+    }
+    chart = checked_charts.render(None, record, ["marginal_price"])
+    assert chart["status"] == "not_drawn" and chart["reason"] == limit
+    assert [s["reason"] for s in chart["series"]] == [limit]
+    assert chart["title"] == checked_charts.REASONS[limit]

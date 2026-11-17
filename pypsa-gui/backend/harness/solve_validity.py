@@ -23,10 +23,11 @@ since the solver returns no duals, so a MIP price is never a marginal price.
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 from numbers import Real
 
 from services.solver.assumptions import _MIP_KEYS_BY_SOLVER, _resolve_mip_kwargs
-from services.solver.process_uc import committable_counts
+from services.solver.process_uc import committable_counts, other_committable, planning_uc_mode
 
 # A relative gap at or below this reads as optimal (GK B G2c).
 SOLVE_GAP_TOLERANCE = 1e-6
@@ -69,8 +70,25 @@ def is_stochastic(n) -> bool:
     return bool(getattr(n, "has_scenarios", False))
 
 
-def is_mip(n) -> bool:
-    return _committable(n) or _modular(n)
+def _integer_commitment(n, config) -> bool:
+    """Committable units the solve kept binary, under the effective process-UC
+    mode (`process_uc.planning_uc_mode`, the one solver_service applies):
+    "linearised" relaxes commitment network-wide, so the solve is an LP; "plain"
+    solves the process units as plain Links, leaving only the other committable
+    units binary."""
+    if not _committable(n):
+        return False
+    setting = SimpleNamespace(process_uc=_field(config, "process_uc", "auto"))
+    mode = planning_uc_mode(n, setting)
+    if mode == "linearised":
+        return False
+    if mode == "plain":
+        return bool(sum(other_committable(n)))
+    return True
+
+
+def is_mip(n, config=None) -> bool:
+    return _integer_commitment(n, config) or _modular(n)
 
 
 def _field(config, name, default=None):
@@ -115,7 +133,7 @@ def classify(n, config) -> dict:
             "optimal": False,
             "disclosure": "Stochastic (scenario) runs are not supported by checked answers.",
         }
-    if not is_mip(n):
+    if not is_mip(n, config):
         return {"kind": "lp", "gap": 0.0, "optimal": True, "disclosure": None}
     gap = applied_gap(n, config)
     if gap is None:

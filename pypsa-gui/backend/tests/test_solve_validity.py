@@ -417,3 +417,43 @@ def test_a_raw_delta_needs_both_records():
 )
 def test_notes(raw, expected):
     assert sv.notes(raw) == expected
+
+
+# ── GK B 65 B2: the effective process-UC mode ───────────────────────────────
+
+
+def _process(other_committable=False):
+    n = _lp()
+    n.add("Link", "proc", bus0="a", bus1="b", p_nom=5, committable=True)
+    n.links["eh_process"] = True
+    if other_committable:
+        n.generators.loc["g1", "committable"] = True
+    return n
+
+
+@pytest.mark.parametrize(
+    "process_uc, other, kind",
+    [
+        ("linearised", False, "lp"),  # relaxed network-wide: an LP
+        ("linearised", True, "lp"),
+        ("binary", False, "mip"),
+        ("plain", False, "lp"),  # process units solve as plain Links
+        ("plain", True, "mip"),  # the other committable unit stays binary
+        ("auto", False, "lp"),  # auto without other committables: linearised
+        ("auto", True, "mip"),  # auto with other committables: binary
+    ],
+)
+def test_the_effective_process_uc_mode_decides_lp_or_mip(process_uc, other, kind):
+    n = _process(other)
+    cfg = _cfg(process_uc=process_uc)
+    assert sv.is_mip(n, cfg) is (kind == "mip")
+    cls = sv.classify(n, cfg)
+    assert cls["kind"] == kind
+    if kind == "lp":
+        assert cls["disclosure"] is None and sv.price_limit(cls) is None
+
+
+def test_a_linearised_solve_with_a_modular_asset_is_still_a_mip():
+    n = _process()
+    n.add("Generator", "m", bus="a", p_nom_extendable=True, p_nom_mod=5.0, p_nom_max=20.0)
+    assert sv.is_mip(n, _cfg(process_uc="linearised")) is True
