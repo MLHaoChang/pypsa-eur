@@ -448,7 +448,7 @@ def _stays_connected(case, env, quantity, window, ended="", within="", empty="")
     if bad.any():
         raise ContractError(
             f"{case.where}: the connected channel {case.channels['connected']!r} must be 0 or 1, "
-            f"got {status[bad][0]!r} at {float(t[bad][0]):g} s"
+            f"got {float(status[bad][0])!r} at {float(t[bad][0]):g} s"
         )
     if not window.any():
         return _row(

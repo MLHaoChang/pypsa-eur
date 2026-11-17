@@ -68,7 +68,7 @@ FAULT = (T >= 0.2) & (T < 0.35)
 
 
 def _case(case_id, kind, params, trgc="07"):
-    return Case(case_id, kind, trgc, GRID, 0.2, 1.5, tuple(CHANNELS), params)
+    return Case(case_id, kind, trgc, GRID, 0.2, 1.5, tuple(c for c in CHANNELS if c != "connected"), params)
 
 
 def _rise(y0, y1):
@@ -195,14 +195,16 @@ def test_end_to_end_status_counts(tmp_path):
     assert {k: c["status"] for k, c in cases.items()} == {
         "fault_3ph_skmin_xrmin_v030": "unknown",
         "fault_1ph_skmin_xrmin_v030": "unknown",
-        "p_step_skmin_xrmin_up": "pass",
+        # contract v1 has no 'connected' channel, so no case passes (GK A2 D-2);
+        # the v2 twin of this pack is in test_pack_contract2.py
+        "p_step_skmin_xrmin_up": "unknown",
         "p_step_skmin_xrmin_down": "fail",
-        "q_step_skmin_xrmin_up": "pass",
-        "f_step_skmin_xrmin_up": "pass",
+        "q_step_skmin_xrmin_up": "unknown",
+        "f_step_skmin_xrmin_up": "unknown",
         "v_step_skmin_xrmin_up": "unknown",
         "flat_skmin_xrmin": "unknown",
     }
-    assert status_counts(j) == {"pass": 3, "fail": 1, "unknown": 4}
+    assert status_counts(j) == {"pass": 0, "fail": 1, "unknown": 7}
     assert cases["v_step_skmin_xrmin_up"]["detail"] == "no result file"
     assert "not judged by GC-07" in cases["flat_skmin_xrmin"]["detail"]
     assert cases["flat_skmin_xrmin"]["rows"] == []
@@ -272,7 +274,7 @@ def test_mvar_to_pu_by_hand(tmp_path):
         {"q_poc_mvar": ("Mvar", _rise(4.0, 8.0))},
         Ratings(1.0, "unused", 40.0, "hand"),
     )
-    assert c["status"] == "pass"
+    assert _rows(c)["rise_time"]["status"] == "pass"
     assert "target 0.2 pu = pre-step mean 0.1 pu" in _rows(c)["rise_time"]["detail"]
 
 
@@ -282,7 +284,11 @@ def test_p_based_rows_name_the_rated_p_base(tmp_path):
     assert j["header"]["rated_mva_base"] == "rated MVA = test plant"
     cases = _by_id(j)
     for cid in ("p_step_skmin_xrmin_up", "f_step_skmin_xrmin_up"):
-        assert all("rated P = test plant" in r["detail"] for r in cases[cid]["rows"])
+        assert all(
+            "rated P = test plant" in r["detail"]
+            for r in cases[cid]["rows"]
+            if r["check"] != "stays_connected"
+        )
     fault = _rows(cases["fault_3ph_skmin_xrmin_v030"])
     assert "rated P = test plant" in fault["active_power_recovery"]["detail"]
     assert "rated P" not in fault["reactive_current_rise"]["detail"]
@@ -311,7 +317,7 @@ def test_mvar_is_never_put_in_pu_of_the_mw_rating(tmp_path):
         Ratings(100.0, "mw", 40.0, "mva"),
     )
     assert "pre-step mean 0.1 pu" in _rows(c)["rise_time"]["detail"]
-    assert c["status"] == "pass"
+    assert _rows(c)["rise_time"]["status"] == "pass"
 
 
 def test_a_missing_rating_is_unknown_never_mw_as_pu(tmp_path):
@@ -415,8 +421,8 @@ def test_each_known_version_is_accepted(tmp_path, pack, version, contract):
         ({"pack": "psse"}, "is not one this reader knows"),
         ({"pack_version": "2"}, "is not one this reader knows"),
         (
-            {"contract_version": "2"},
-            "contract_version '2' is not one this reader knows",
+            {"contract_version": "3"},
+            "contract_version '3' is not one this reader knows",
         ),
         ({"files": {}}, "lists no battery.json"),
         ({"files": {"battery.json": "0" * 64}}, "SHA-256 is not the manifest's entry"),
@@ -567,7 +573,7 @@ def test_an_unreadable_result_is_unknown_for_that_case_only(tmp_path):
     bad = cases["p_step_skmin_xrmin_down"]
     assert bad["status"] == "unknown" and bad["rows"] == []
     assert bad["detail"].startswith("p_step_skmin_xrmin_down.inf unreadable: ")
-    assert cases["p_step_skmin_xrmin_up"]["status"] == "pass"
+    assert _rows(cases["p_step_skmin_xrmin_up"])["settling_time"]["status"] == "pass"
 
 
 def _bad_records():
@@ -672,7 +678,7 @@ def test_driver_writes_json_and_csv_and_a_rerun_replaces_both(tmp_path):
 
 def test_a_string_pack_path_is_accepted(tmp_path):
     j = judge_pack(str(_full_pack(tmp_path)), PROFILE, RATINGS)
-    assert status_counts(j) == {"pass": 3, "fail": 1, "unknown": 4}
+    assert status_counts(j) == {"pass": 0, "fail": 1, "unknown": 7}
     assert read_manifest(str(tmp_path / "pack"))["data_hash"] == "d" * 64
 
 
@@ -706,7 +712,8 @@ def test_pscad_files_are_claimed(tmp_path):
         numbered=True,
     )
     j = judge_pack(pack, PROFILE, RATINGS)
-    assert j["header"]["extra_files"] == [] and j["cases"][0]["status"] == "pass"
+    assert j["header"]["extra_files"] == []
+    assert _rows(j["cases"][0])["settling_time"]["status"] == "pass"
 
 
 def test_the_pre_step_mean_window_includes_its_start_and_excludes_the_step(tmp_path):
@@ -782,4 +789,6 @@ def test_a_written_emt_pack_is_read_and_judged(tmp_path):
         and c["rows"] == []
         and not k.startswith(("flat", "f_ramp", "phase_jump"))
     )
-    assert _rows(cases[fault])["stays_connected"]["status"] == "unknown"
+    # the EMT pack writes contract v2 (GC-12 PR-C), so 'connected' = 1 is read
+    assert manifest["contract_version"] == "2"
+    assert _rows(cases[fault])["stays_connected"]["status"] == "pass"

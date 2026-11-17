@@ -337,7 +337,7 @@ def _judge_one(
             base = _p_base(ratings)
             row["detail"] = f"{row['detail']}; {base}" if row["detail"] else base
         if row["check"] == "stays_connected" and why is not None:
-            row["detail"] = why
+            row["detail"] = f"{row['detail']}; {why}" if row["detail"] else why
     result["kind"] = case.kind
     result["judge_kind"] = jc["kind"]
     result["detail"] = ""
