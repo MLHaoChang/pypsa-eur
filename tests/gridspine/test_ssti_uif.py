@@ -178,3 +178,28 @@ def test_campus_without_converter_not_evaluated():
         del spec["campus"]["units"][uid]
     study = su.campus_uif(build_campus(spec))
     assert (study.verdict, study.notes) == ("not evaluated", [su.NO_CONVERTERS])
+
+
+def test_sc_i_zero_accepted_and_tolerance_edge_clamps():
+    assert su.uif(100.0, 50.0, 0.0, 1000.0) == (2.0, False)
+    edge = 1000.0 * (1.0 + su.SC_TOLERANCE)
+    assert su.uif(100.0, 50.0, edge, 1000.0) == (0.0, True)
+
+
+def test_campus_uif_fault_levels_in_mva():
+    rows = su.campus_uif(build_campus(campus_spec()), fault_levels=_stub).rows.set_index(["bus", "case"])
+    assert rows.at[("MV2", "min"), "sc_tot_mva"] == pytest.approx(440.0, abs=1e-9)
+    assert rows.at[("MV2", "min"), "sc_without_mva"] == pytest.approx(360.0, abs=1e-9)
+    assert rows.at[("PCC", "max"), "sc_tot_mva"] == pytest.approx(3100.0, abs=1e-9)
+
+
+def test_campus_uif_c_from_the_bus_own_voltage():
+    """c is the evaluation bus's own: a bus at or below 1 kV takes c_min 0.95 (IEC 60909)."""
+    def lv_mv2(campus, installed):
+        t = _stub(campus, installed)
+        t.loc[t["bus"] == "MV2", "vn_kv"] = 0.4
+        return t
+
+    rows = su.campus_uif(build_campus(campus_spec()), fault_levels=lv_mv2).rows.set_index(["bus", "case"])
+    assert rows.at[("MV2", "min"), "c"] == 0.95
+    assert rows.at[("MV1", "min"), "c"] == 1.0

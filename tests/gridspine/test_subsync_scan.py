@@ -174,3 +174,103 @@ def test_refuses_low_f0():
 
 def test_harmonic_scan_branches_promoted_without_change():
     assert hs._branches is hs.branches
+
+
+# --- the network elements, each against an independent hand formula --------------------------
+
+FS = np.array([10.0, 20.0, 30.0, 40.0])
+H = FS / 50.0
+
+
+def test_grid_c_and_rx_by_case():
+    """max case: X_grid = c Un^2 / S_sc / sqrt(1 + rx^2) = 1.1 * 10 / sqrt(1.01) ohm, R_grid = rx X_grid."""
+    net, b1, b2 = _radial()
+    xg = 1.1 * 10.0 / math.sqrt(1.01)
+    z = ss.z_poc(net, b2, 1210.0, 0.1, FS, [(b1, b2, 25.0)], "max")
+    assert np.allclose(z, (0.1 * xg + 0.5) + 1j * ((xg + 40.0) * H - 25.0 / H))
+
+
+def test_z_poc_builds_its_own_branches():
+    net, b1, b2 = _radial()
+    study = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)], df=10.0)
+    z = ss.z_poc(net, b2, 1210.0, 0.0, study.scan["f_hz"].to_numpy(), [(b1, b2, 25.0)])
+    assert np.allclose(z, study.scan["r_ohm"] + 1j * study.scan["x_ohm"])
+
+
+def test_cable_charging_pi():
+    """One pi line from the grid bus: B/2 at each end, B = 2 pi f0 C l (here 1e-3 S at f0)."""
+    net = pp.create_empty_network(sn_mva=100, f_hz=50)
+    g, poc = pp.create_bus(net, vn_kv=110.0), pp.create_bus(net, vn_kv=110.0)
+    pp.create_ext_grid(net, g, s_sc_max_mva=1210.0, s_sc_min_mva=1210.0, rx_max=0.0, rx_min=0.0)
+    c_nf = 1e-3 / (2 * math.pi * 50) * 1e9
+    pp.create_line_from_parameters(net, g, poc, length_km=1.0, r_ohm_per_km=0.5, x_ohm_per_km=40.0,
+                                   c_nf_per_km=c_nf, max_i_ka=1.0)
+    yc = 0.5j * H * 1e-3
+    z0 = 1.0 / (1.0 / (1j * 10.0 * H) + yc)
+    expect = 1.0 / (yc + 1.0 / (0.5 + 1j * 40.0 * H + z0))
+    assert np.allclose(ss.z_poc(net, poc, 1210.0, 0.0, FS), expect)
+
+
+@pytest.mark.parametrize("q_mvar", [-5.0, 5.0])
+def test_shunt_bank_all_steps_in(q_mvar):
+    """A bank of 2 steps of q (load convention) and 0.1 MW at the PoC: Y = (P - j Q h^+-1) / Un^2."""
+    net, b1, b2 = _radial()
+    pp.create_shunt(net, b2, q_mvar=q_mvar, p_mw=0.1, step=1, max_step=2)
+    q = 2 * q_mvar
+    yb = (0.2 - 1j * q * (H if q < 0 else 1.0 / H)) / 110.0 ** 2
+    zs = 0.5 + 1j * (X_LOOP * H - 25.0 / H)
+    assert np.allclose(ss.z_poc(net, b2, 1210.0, 0.0, FS, [(b1, b2, 25.0)]), 1.0 / (1.0 / zs + yb))
+
+
+def test_elements_off_the_poc_are_left_out():
+    """An island with its own grid and line, and lines to an out-of-service bus, change nothing."""
+    net, b1, b2 = _radial()
+    base = ss.z_poc(net, b2, 1210.0, 0.0, FS, [(b1, b2, 25.0)])
+    i1, i2 = pp.create_bus(net, vn_kv=110.0), pp.create_bus(net, vn_kv=110.0)
+    pp.create_ext_grid(net, i1, s_sc_max_mva=500.0, s_sc_min_mva=500.0, rx_max=0.1, rx_min=0.1)
+    pp.create_line_from_parameters(net, i1, i2, length_km=1.0, r_ohm_per_km=1.0, x_ohm_per_km=5.0,
+                                   c_nf_per_km=0.0, max_i_ka=1.0)
+    off = pp.create_bus(net, vn_kv=110.0, in_service=False)
+    for a, b in ((b2, off), (off, b2)):
+        pp.create_line_from_parameters(net, a, b, length_km=1.0, r_ohm_per_km=1.0, x_ohm_per_km=5.0,
+                                       c_nf_per_km=0.0, max_i_ka=1.0)
+    assert np.allclose(ss.z_poc(net, b2, 1210.0, 0.0, FS, [(b1, b2, 25.0)]), base)
+    with pytest.raises(ContractError, match="not between in-service buses"):
+        ss.z_poc(net, b2, 1210.0, 0.0, FS, [(off, b2, 25.0)])
+
+
+def test_refuses_poc_out_of_service_and_no_grid():
+    net, b1, b2 = _radial()
+    net.bus.loc[b2, "in_service"] = False
+    with pytest.raises(ContractError, match="PoC bus .* is not an in-service bus"):
+        ss.z_poc(net, b2, 1210.0, 0.0, FS)
+    net, b1, b2 = _radial()
+    net.ext_grid["in_service"] = False
+    with pytest.raises(ContractError, match="no path to the grid"):
+        ss.z_poc(net, b2, 1210.0, 0.0, FS, [(b1, b2, 25.0)])
+
+
+def test_crossings_at_a_scan_point_counted_once_and_interpolated():
+    fs = np.array([1.0, 2.0, 3.0])
+    assert ss.crossings(fs, np.array([1 - 1j, 3 + 0j, 5 + 1j])) == [(2.0, 3.0)]
+    assert ss.crossings(fs, np.array([1 - 1j, 3 + 1j, 5 + 3j])) == [(1.5, 2.0)]
+    assert ss.crossings(fs, np.array([1 + 1j, 3 - 1j, 5 - 3j])) == []
+
+
+def test_lowest_f0_scans_one_point_and_mode_at_zero_refused():
+    assert list(ss.frequencies(10.0)) == [5.0]
+    net, _, b2 = _radial()
+    with pytest.raises(ContractError, match="must lie in"):
+        ss.subsync_scan(net, b2, CASE, torsional_modes={"G": [0.0]})
+
+
+def test_long_line_note_judged_at_f0():
+    """The lumped-pi note is about the scanned range (up to f0), not the harmonic range."""
+    net, b1, b2 = _radial()
+    net.line["c_nf_per_km"] = 10.0
+    net.line["length_km"] = 5.0          # past 0.4 of a quarter wave at the harmonic top, far short at f0
+    assert ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)]).notes == []
+    net.line["length_km"] = 2000.0
+    study = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)])
+    assert len(study.notes) == 1 and "quarter wavelength at 50 Hz" in study.notes[0]
+    assert all(study.notes[0] in n for n in study.resonance.loc[study.resonance["kind"] == ss.SERIES, "note"])

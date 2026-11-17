@@ -94,7 +94,7 @@ def z_poc(net, poc_bus: int, s_sc_mva: float, rx: float, fs: np.ndarray, series_
     ohm at the from bus's voltage."""
     f0 = float(net.f_hz)
     if series is None:
-        series, _ = hs.branches(net, f0)
+        series, _ = hs.branches(net, f0, 1.0)
     buses = list(hs._in_service(net.bus).index)
     at = {b: i for i, b in enumerate(buses)}
     if poc_bus not in at:
@@ -212,7 +212,7 @@ def subsync_scan(net, poc_bus: int, cases: dict, *, series_caps=(), torsional_mo
     if limit <= 0:
         raise ContractError(f"sub-synchronous scan: clearance must be > 0, got {limit}")
     assumed = clearance_hz is None or clearance_assumed
-    series, line_notes = hs.branches(net, f0)
+    series, line_notes = hs.branches(net, f0, 1.0)
     notes = [*notes, *line_notes]
     base = {"clearance_hz": limit, "assumed": assumed, "label": LABEL}
 
