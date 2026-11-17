@@ -5846,8 +5846,13 @@ def update_project_layout(name: str, layout: dict) -> dict:
 def download_project_bundle(name: str) -> dict:
     from routers.projects import _project_bundle_bytes
     proj = _authorized_project(name)
+    with _acting() as (db, user):
+        from services import project_registry
+
+        row = project_registry.find_project(db, user, proj.uuid) if user is not None else None
     return _save_agent_export(
-        _project_bundle_bytes(proj.name, proj.directory),
+        _project_bundle_bytes(proj.name, proj.directory,
+                              project_kind=getattr(row, "project_kind", None)),
         f"{proj.name}.pypsaproj.zip",
         "application/zip",
     )
