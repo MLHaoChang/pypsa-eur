@@ -520,3 +520,119 @@ def test_a_running_study_is_a_dry_run_warning_but_refuses_the_import(
         in r.json()["warnings"]
     )
     assert _post(client, data, "bm_study_dst").status_code == 409
+
+
+# ── mutant follow-ups (PR2b run 1 and run 2 survivors) ──────────────────────
+
+
+def test_the_manifest_cap_is_one_mib_and_a_large_real_manifest_reads():
+    assert BM.MAX_MANIFEST_BYTES == 1024 * 1024
+    members = {f"uploads/file-{i:04d}.csv": b"x" for i in range(400)}
+    zf = zipfile.ZipFile(
+        io.BytesIO(BM.add_to(_zip(members).fp.getvalue(), project_kind=None))
+    )
+    assert zf.getinfo(PC.MANIFEST).file_size > 32 * 1024
+    assert BM.check(zf) == []
+
+
+@pytest.mark.parametrize(
+    "cfg",
+    [
+        b"{}",
+        b'{"extra_functionality_code": null}',
+        b'{"extra_functionality_code": "  "}',
+    ],
+    ids=["no-key", "null", "blank"],
+)
+def test_a_dry_run_strips_nothing_without_user_code(
+    client, api_project, project_storage_dir, cfg
+):
+    d = project_storage_dir(api_project("bm-dry-nocode"))
+    r = _dry(client, _bundle_from(d, {"solver_config.json": cfg}), "bm_dry_nocode_dst")
+    assert r.status_code == 200, r.text
+    assert r.json()["stripped"] == []
+
+
+@pytest.mark.parametrize(
+    "settings, at_default",
+    [(None, True), (b'{"discount_rate": 0.05}', False)],
+    ids=["no-settings", "own-rate"],
+)
+def test_a_dry_run_reports_rederived_rows_and_the_rate_they_used(
+    client, tmp_path, settings, at_default
+):
+    from tests.test_project_contents import _priced_bundle
+
+    def stale(n):
+        n.storage_units.at["bess", "capital_cost"] = 1.0
+
+    data = _priced_bundle(tmp_path, stale)
+    if settings is not None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(data)) as src, zipfile.ZipFile(buf, "w") as dst:
+            for info in src.infolist():
+                dst.writestr(info, src.read(info.filename))
+            dst.writestr("solver_config.json", settings)
+        data = buf.getvalue()
+    r = _dry(client, data, "bm_dry_priced_dst")
+    assert r.status_code == 200, r.text
+    dry = r.json()
+    assert dry["rederived"], dry
+    assert dry["rederived_at_default_rate"] is at_default
+    real = _post(client, data, "bm_dry_priced_dst")
+    assert real.status_code in (200, 201), real.text
+    real_fields = real.json()
+    assert real_fields["rederived"] == dry["rederived"]
+    assert real_fields.get("rederived_at_default_rate", False) is at_default
+
+
+def test_a_running_study_refuses_the_real_import_before_the_upload_is_read(
+    client, api_project, project_storage_dir, project_row, projects_root, monkeypatch
+):
+    from fastapi import HTTPException
+
+    from routers import projects
+    from services.pypsa_service import PyPSAService
+
+    d = project_storage_dir(api_project("bm-study-first"))
+
+    def running(cls, action="", *, ctx=None):
+        raise HTTPException(409, f"Cannot {action} while a study is running.")
+
+    def never(*a, **k):
+        raise AssertionError("the upload was read past the study guard")
+
+    monkeypatch.setattr(PyPSAService, "refuse_if_study_running", classmethod(running))
+    monkeypatch.setattr(projects, "_bundle_network_owning_its_costs", never)
+    r = _post(client, _bundle_from(d), "bm_study_first_dst")
+    assert r.status_code == 409, r.text
+    assert _left_behind(project_row, projects_root, "bm_study_first_dst") == []
+
+
+def test_the_dry_run_leaves_the_callers_stripped_list_alone(tmp_path):
+    from routers import projects
+
+    (tmp_path / "solver_config.json").write_text('{"extra_functionality_code": "x=1"}')
+    stripped = ["gridspine.from_network"]
+
+    class _NoUser:
+        pass
+
+    import unittest.mock as um
+
+    with um.patch("services.project_registry.find_project", return_value=None):
+        out = projects._import_dry_run(
+            None,
+            _NoUser(),
+            tmp_path,
+            "n",
+            None,
+            {"network.nc"},
+            ignored=[],
+            stripped=stripped,
+            rederived=[],
+            rate_source="default",
+            warnings=[],
+        )
+    assert out["stripped"] == ["gridspine.from_network", "extra_functionality_code"]
+    assert stripped == ["gridspine.from_network"]
