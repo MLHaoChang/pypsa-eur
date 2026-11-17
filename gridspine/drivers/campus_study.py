@@ -1299,12 +1299,12 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     if caps and not (resonance["kind"] == ss.SERIES).any():
         band = f"{ss.F_MIN_HZ:g}-{float(net.f_hz) - ss.F_MIN_HZ:g} Hz"
         scanned = sorted(campus.series_capacitors.index.astype(str))
-        clear = [{"case": case, "kind": ss.SERIES, "verdict": "clear", "bus": name[b],
-                  "clearance_hz": ss.DEFAULT_CLEARANCE_HZ if clearance is None else clearance,
-                  "assumed": clearance is None or assumed, "label": ss.LABEL,
+        # the same clearance, assumed flag and label as the scan's own rows
+        base = resonance.iloc[0][["clearance_hz", "assumed", "label"]].to_dict()
+        clear = [{"case": case, "kind": ss.SERIES, "verdict": "clear", "bus": name[b], **base,
                   "note": f"clear in the {band} scan band: series capacitor(s) {scanned} scanned, "
                           f"no series resonance"}
-                 for b, _ in studies[1:] or studies for case in cases]
+                 for b, _ in studies[1:] for case in cases]
         resonance = pd.concat([resonance, pd.DataFrame(clear)], ignore_index=True)
     sub = ss.SubsyncStudy(scan=scan, resonance=resonance, notes=studies[0][1].notes)
     series = sub.resonance[sub.resonance["kind"] == ss.SERIES]["verdict"]

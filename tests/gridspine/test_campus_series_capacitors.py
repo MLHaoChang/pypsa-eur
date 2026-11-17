@@ -584,6 +584,11 @@ def test_a_capacitor_resonating_below_the_band_reads_clear_in_the_band_and_names
         "no series resonance"
     }
     assert out.subsync_verdict == "clear"
+    # scanned from behind the capacitor only, with the scan's own clearance and label
+    assert set(series["bus"]) == {"MV1C"}
+    ssci = res[res["kind"] == ss.SSCI].iloc[0]
+    for col in ("clearance_hz", "assumed", "label"):
+        assert set(series[col]) == {ssci[col]}
 
 
 def test_without_a_capacitor_the_campus_step_still_reads_not_evaluated(
@@ -647,3 +652,33 @@ def test_the_harmonic_scan_refuses_a_campus_with_a_series_capacitor_naming_it():
     plain = build_campus(campus_spec())
     bus, cases, _ = hs.campus_cases(plain)
     assert not hs.impedance_scan(plain.net, bus, cases).envelope.empty
+
+
+def test_a_line_that_is_not_a_name_is_refused():
+    _refused(
+        cap_spec(xc_ohm=None, k=t(0.5), line=5),
+        r"series_capacitors\.SC1\.line: a k entry needs the name of the cable",
+    )
+
+
+def test_a_plain_impedance_without_the_marker_is_no_series_capacitor():
+    from gridspine.static import series_caps as SC
+
+    campus = build_campus(campus_spec())
+    bus = {n: i for i, n in campus.net.bus["name"].items()}
+    # island_flow's droop reactance is such an impedance
+    pp.create_impedance(
+        campus.net, bus["MV1"], bus["MV2"], rft_pu=0.0, xft_pu=0.1, sn_mva=1.0
+    )
+    assert SC.series_caps(campus.net).empty
+    SC.refuse(campus.net, "anything")
+
+
+def test_an_empty_series_capacitors_key_builds_and_aggregates_like_none():
+    from gridspine.ingest.aggregate import aggregate
+    from tests.gridspine.test_aggregate import plant
+
+    spec = plant()
+    spec["campus"]["series_capacitors"] = None
+    assert build_campus(spec).series_capacitors.empty
+    assert aggregate(spec).spec["campus"]["series_capacitors"] is None
