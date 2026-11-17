@@ -6,6 +6,7 @@
 // States 13-15 (Guided only) reach the card's three message lines: the compare POST refused
 // as baseline_not_saved with undo info unsaved, Find with the grid NPC empty, and the
 // break-even POST refused 409 supply_architectures_stale.
+//   PROBE=1 logs the first button's disabled state and computed colours.
 //   OUT=<dir> node grid-extension-shots.mjs     (ONLY=<state> to run one state)
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -159,6 +160,7 @@ try {
          await card.getByTestId('grid-ext-find').click()
          await card.getByTestId(act === 'refusal' ? 'grid-ext-error' : 'grid-ext-input-error').waitFor(); await page.waitForTimeout(500)
        }
+       if (process.env.PROBE) console.log(tag, JSON.stringify(await card.locator('button').first().evaluate(b => { const c = getComputedStyle(b); return { disabled: b.disabled, color: c.color, background: c.backgroundColor } })))
        await card.scrollIntoViewIfNeeded()
        await card.evaluate(el => { const out = []; for (const x of document.body.querySelectorAll('*')) { if (el.contains(x) || x.contains(el)) continue
          if ((getComputedStyle(x).position === 'fixed' || x.matches('[data-testid="companion-launcher"]')) && x.style.visibility !== 'hidden') { x.style.visibility = 'hidden'; out.push(x) } } window.__h = out })
