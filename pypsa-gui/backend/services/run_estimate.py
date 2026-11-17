@@ -79,7 +79,11 @@ def mode_key(kind: str, solver_config: str | None) -> Any:
 
 def _utc(value: Any) -> datetime | None:
     """A timezone-aware datetime in UTC, or None for anything else (naive included)."""
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         return None
     return value.astimezone(UTC)
 
@@ -124,11 +128,16 @@ def estimate(rows: list[dict], kind: str, key: Any) -> dict:
     }
 
 
-def for_job(job_id: Any, project_key: str, kind: str, solver_config: str | None) -> dict:
+def for_job(
+    job_id: Any, project_key: str, kind: str, solver_config: str | None
+) -> dict:
     """The estimate for job `job_id`: its project's other completed runs of its
     kind under the same mode. The job itself never counts towards its own."""
     from services import solve_job_store
 
-    rows = [r for r in solve_job_store.load_completed_runs(project_key, kind)
-            if str(r.get("id")) != str(job_id)]
+    rows = [
+        r
+        for r in solve_job_store.load_completed_runs(project_key, kind)
+        if str(r.get("id")) != str(job_id)
+    ]
     return {"kind": kind, **estimate(rows, kind, mode_key(kind, solver_config))}
