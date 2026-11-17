@@ -218,6 +218,16 @@ describe('RunMonitor', () => {
     expect((await screen.findByTestId('run-report-link')).textContent).toBe('Open the report ›')
   })
 
+  it('a resume the goal-switch guard refused names the task the run waits for (LC-48e)', async () => {
+    show('held_by_switch')
+    expect((await screen.findByTestId('run-held')).textContent).toBe(
+      'Your answer is saved. This run waits for \u201cWait for result\u201d, which is still running; ask to resume the run once it ends')
+    expect(screen.getByTestId('run-state').textContent).toBe('Waiting for you')
+    expect(screen.queryByTestId('run-waiting-step')).toBeNull()
+    expect(card()).not.toMatch(INTERNAL)
+    expect(card()).not.toMatch(/switch_in_progress|task-2/)
+  })
+
   it('research: the value waits beside its page and verbatim quote; Use this value settles it (issue 09)', async () => {
     vi.mocked(api.decideResearch).mockResolvedValue(STATES.research_cap)
     show('research_confirm')

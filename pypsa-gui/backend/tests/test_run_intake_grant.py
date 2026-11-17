@@ -814,3 +814,74 @@ def test_a_card_write_whose_lock_is_held_past_the_bound_is_an_ordinary_write(
     task = json.loads(path.read_text())
     assert not task["run"].get("answers") and task["run"]["waiting"] is not None
     assert resumed == []
+
+
+# ── LC-48e: a resume the goal-switch guard refuses is shown on the card ────
+
+WAIT = [{"id": "wait", "tool": "wait_for_job", "args": {"job_id": "job"}}]
+
+
+def _answer_while_another_task_runs(waiting):
+    """The data request is answered in a chat whose task is another plan that
+    runs (LC48D-GOAL-1): `resume_task` refuses with `switch_in_progress`."""
+    from harness import session as harness_session
+    from services import chat_tools
+
+    path, record, _ = waiting
+    chat_tools.set_acting_user(record["owner_id"])
+    chat = harness_session.ChatSession(
+        session_id="chat-1", owner_user_id=record["owner_id"]
+    )
+    chat_tools.set_chat_session(chat)
+    other = chat_tools.start_task(
+        title="Wait for result", request_id="other", steps=WAIT
+    )
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    card = {"rows": [_typed("p_nom"), _typed("marginal_cost")]}
+    ctx = PyPSAService.get_active_context()
+    with run_envelope.answering(chat, "call-card", card):
+        ctx.network.generators.loc["G1", ["p_nom", "marginal_cost"]] = [25.0, 12.0]
+    return chat, other
+
+
+def test_a_resume_refused_by_the_switch_guard_is_shown_on_the_run_card(waiting):
+    from services import run_monitor
+
+    path, record, _ = waiting
+    chat, other = _answer_while_another_task_runs(waiting)
+    task = json.loads(path.read_text())
+    # The answer stands.
+    assert task["run"]["answers"][0]["decision_id"] == "call-card"
+    assert task["run"]["waiting"] is None
+    # The run is not resumed: the chat keeps the other task, the run its state.
+    assert chat.task_id == other["task_id"]
+    assert task["run"]["status"] == "needs_user"
+    assert task["steps"] == record["steps"]
+    active = {
+        "kind": "task",
+        "id": other["task_id"],
+        "title": "Wait for result",
+        "status": "running",
+    }
+    assert task["run"]["held"]["kind"] == "switch_in_progress"
+    assert task["run"]["held"]["active"] == active
+    # The card reads it from the run view.
+    view = run_monitor.view(record["task_id"], provider_ready=True)
+    assert view["run"]["held"] == {
+        "kind": "switch_in_progress",
+        "active": active,
+        "since": task["run"]["held"]["since"],
+    }
+
+
+def test_the_held_note_goes_once_the_run_resumes(waiting, monkeypatch):
+    path, record, _ = waiting
+    chat, other = _answer_while_another_task_runs(waiting)
+    assert "held" in json.loads(path.read_text())["run"]
+    tasks.cancel_task(other["task_id"])
+    advanced = []
+    monkeypatch.setattr(tasks, "_advance_run", advanced.append)  # no runner here
+    monkeypatch.setattr(tasks, "_wake", lambda path: None)
+    tasks.resume_task(record["task_id"])
+    assert advanced == [path] and chat.task_id == record["task_id"]
+    assert "held" not in json.loads(path.read_text())["run"]

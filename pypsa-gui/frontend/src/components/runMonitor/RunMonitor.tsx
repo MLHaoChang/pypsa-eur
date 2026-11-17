@@ -98,6 +98,13 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
 }
 
 // A run that waits on the user, not one that stopped.
+// LC-48e: the active task's status as the 409 `switch_in_progress` names it.
+const HELD_WORDS: Record<string, string> = {
+  running: 'which is still running',
+  waiting_job: 'which waits on a job',
+  unreadable: 'which this project cannot read',
+}
+
 const WAITS = new Set(['waiting_card', 'waiting_research_confirm'])
 
 // Study harness issue 09: what a research step that ended early says, and each gap's name.
@@ -287,6 +294,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
   const pausedAt = view.paused_at_card
   const research = view.monitor.waiting?.kind === 'research_confirm'
     ? view.monitor.research?.rows.find(r => r.row === view.monitor.waiting!.ref) ?? null : null
+  const held = run.held?.kind === 'switch_in_progress' ? run.held.active : null
   const state = cancelled ? `Stopped at ${stoppedAt}` : finished ? 'Finished'
     : gateFailed ? `${stoppedAt} failed` : stop ? stop.words
     : pausedAt ? 'Waiting for you' : run.status === 'needs_user' ? 'Waiting for you'
@@ -332,7 +340,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
     </div>}
     {noticeWords && <p className={noticeWords.failed ? 'text-warn' : 'text-muted'} data-testid="run-loop-notice">{noticeWords.text}</p>}
 
-    {going && (pausedAt || card || view.monitor.waiting) && <div data-testid="run-waiting">
+    {going && (pausedAt || card || view.monitor.waiting || held) && <div data-testid="run-waiting">
       <div className="font-medium">Waiting for you</div>
       <ul className="list-disc pl-5">
         {pausedAt && <li>
@@ -348,6 +356,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
         </li>}
         {card && <li data-testid="run-waiting-card">A step needs your approval: see the card below</li>}
         {!card && view.monitor.waiting && !research && !pausedAt && <li data-testid="run-waiting-step">A step waits for your decision; its card opens here</li>}
+        {held && <li data-testid="run-held">Your answer is saved. This run waits for {held.title ? `\u201c${held.title}\u201d` : 'the chat\u2019s other task'}, {HELD_WORDS[held.status] ?? 'which is still going'}; ask to resume the run once it ends</li>}
       </ul>
       {research && <ResearchCard row={research} busy={busy}
         others={(view.monitor.research?.rows ?? []).filter(r => r.gap === research.gap && r.row !== research.row && r.status === 'proposed').length}

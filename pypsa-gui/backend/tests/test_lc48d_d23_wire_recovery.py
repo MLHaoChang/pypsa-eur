@@ -27,6 +27,8 @@ Hand oracle on the baseline project (G1 20 MW):
 """
 
 # ruff: noqa: F811 -- shared public harness fixtures
+import uuid
+
 import pytest
 
 from harness import session as harness_session
@@ -331,6 +333,59 @@ def test_a_run_start_for_another_plan_is_refused_while_a_task_runs(chat, monkeyp
         "running",
     )
     assert chat.task_id == first["task_id"]
+    assert not _stored("run-1").exists()  # GK B N-a on #1515
+
+
+def _stored(request_id):
+    """Where `start_task` keeps the plan of `request_id` in the open project."""
+    root, project, owner = tasks._authority()
+    task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
+    return root / "assistant_tasks" / (task_id + ".json")
+
+
+# LC-48f (owner decision LC48F-REFUSE-1): a task this project cannot read
+# may still run where it lives, so a start for another plan is refused.
+
+
+def test_after_a_project_switch_the_running_task_still_blocks_a_start(
+    chat, monkeypatch, tmp_path
+):
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    _, _, owner = tasks._authority()
+    # The chat now works in another project: the first task's file is not there.
+    monkeypatch.setattr(
+        tasks, "_authority", lambda: (tmp_path, str(uuid.uuid4()), owner)
+    )
+    with pytest.raises(chat_router.HTTPException) as switch:
+        chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert switch.value.status_code == 409
+    assert switch.value.detail["error_kind"] == "switch_in_progress"
+    assert switch.value.detail["active"] == {
+        "kind": "task",
+        "id": first["task_id"],
+        "title": None,
+        "status": "unreadable",
+    }
+    assert chat.task_id == first["task_id"]
+    assert not _stored("second").exists()
+    # The same plan again is no switch: it reads as not found in this project.
+    refused(
+        lambda: tasks.resume_task(first["task_id"]), 404, "task_not_found"
+    )
+
+
+def test_an_unreadable_task_file_blocks_a_start_for_another_plan(chat):
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    _stored("first").write_text("{not json")
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+    assert chat.task_id == first["task_id"]
+    assert not _stored("second").exists()
 
 
 def test_resuming_another_task_is_refused_while_one_runs(chat):

@@ -3,7 +3,7 @@
 
 # LC-48f — The goal-switch guard when the active task cannot be read
 
-Status: needs-triage
+Status: done
 Model tier: opus
 Size: S
 Blocked by: none
@@ -20,3 +20,7 @@ Parent: [48d-wire-recovery-rows.md](48d-wire-recovery-rows.md) (GK B N-c on #151
 - The owner decides whether a running task in another project blocks a start: refuse with `switch_in_progress`, or allow it because the projects are separate.
 - The guard follows that decision, with a test that switches the chat's project while its task runs and then starts another plan.
 - Carried in from GK B N-a on #1515: `test_a_run_start_for_another_plan_is_refused_while_a_task_runs` in `tests/test_lc48d_d23_wire_recovery.py` also asserts that no task file exists for `run-1` after the refusal, and that `session.task_id` is unchanged.
+
+## Resolution
+
+Owner decision LC48F-REFUSE-1: fail closed. `_refuse_switch` refuses with `switch_in_progress` when `_read` of the chat's task fails (not found in this project, or unreadable), `active.status` `unreadable`, `title` null. Tests in tests/test_lc48d_d23_wire_recovery.py: `test_after_a_project_switch_the_running_task_still_blocks_a_start`, `test_an_unreadable_task_file_blocks_a_start_for_another_plan`, and the N-a asserts on the `run-1` test.

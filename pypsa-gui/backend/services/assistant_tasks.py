@@ -522,14 +522,23 @@ def _refuse_switch(session, task_id):
     not a switch. A harness run's task stays `ready` while its run executes, so
     the run's own status counts too (GK B F2 on #1515). Callers hold `_LOCK`,
     the lock that sets `session.task_id`: `start_task`, `_start_run` and
-    `resume_task`."""
+    `resume_task`.
+
+    A task this project cannot read (the chat switched projects, or its file
+    needs repair) may still run where it lives, so it refuses too: fail closed
+    (owner decision LC48F-REFUSE-1)."""
     active = getattr(session, "task_id", None)
     if not active or active == task_id:
         return
     try:
         _, task = _read(active)
     except HTTPException:
-        return  # gone or unreadable: nothing runs that a switch would cut
+        raise HTTPException(409, {
+            "error_kind": "switch_in_progress",
+            "active": {"kind": "task", "id": active, "title": None, "status": "unreadable"},
+            "message": "this chat's task cannot be read in this project and may still run in its own; "
+                       "cancel it there, or open a new chat, before starting another",
+        }) from None
     status = task.get("status")
     run_status = (task.get("run") or {}).get("status")
     if status not in _RUNNING_TASK and run_status not in _RUNNING_TASK:
@@ -542,6 +551,21 @@ def _refuse_switch(session, task_id):
         "message": f"the task \u201c{task.get('title') or active}\u201d is {shown}; wait for it, "
                    "or cancel it, before starting another",
     })
+
+
+def note_held(task_id, refusal):
+    """LC-48e (owner decision LC48E-SURFACE-1): the answered run's resume was
+    refused with `switch_in_progress`; the run card shows what it waits for,
+    named as the 409's `active` names it. Nothing resumes it on its own; the
+    next `resume_task` that the guard lets through drops the note."""
+    with _LOCK:
+        path, task = _read(task_id)
+        run = task.get("run")
+        if not isinstance(run, dict):
+            return
+        run["held"] = {"kind": refusal["error_kind"], "active": refusal["active"],
+                       "since": _now()}
+        _save(path, task)
 
 
 def start_task(title: str, steps: list[dict], request_id: str, brief: dict | None = None,
@@ -976,6 +1000,7 @@ def _run_view(task):
             **({"intake": _intake_view(run)} if isinstance(run.get("intake"), dict) else {}),
             **({"handed_over": run["handed_over"]} if run.get("handed_over") else {}),
             **({"reason": run["reason"]} if run.get("reason") else {}),
+            **({"held": {k: run["held"][k] for k in ("kind", "active", "since")}} if run.get("held") else {}),
             "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
             "stages": stages,
             **({"loop": {**{k: run["loop"][k] for k in ("kind", "stage", "rounds", "limit", "refusals", "ended")
@@ -1006,6 +1031,8 @@ def resume_task(task_id: str) -> dict:
     with _LOCK:
         _refuse_switch(session, task_id)
         path, task = _read(task_id)
+        if (task.get("run") or {}).pop("held", None) is not None:
+            _save(path, task)  # LC-48e: the guard lets it through now
         if task["status"] == "cancelled":
             _refuse("task_cancelled", "Create a new plan to restart a cancelled task.")
         if task["status"] == "paused_at_card":
