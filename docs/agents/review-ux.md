@@ -86,6 +86,12 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A loop or verdict key line does not repeat the verdict sentence (#1463).
 - Tonne-bus assets: every MW/MWh quantity field and header follows the bus unit. Cost units (€/kWh etc.) are logged as follow-up 05d (#1448).
 - A "shots required" claim for Results: the proof that a floating element is gone is a Results shot; a mocked payload is acceptable (#1470).
+- Selected canvas node: a 2 px ink ring plus a soft accent halo on every carrier (#1598, #1597).
+- Panel title is 15 px with the flow-section name as a 9 px eyebrow (UI-COHESION-1).
+- Links and eyebrows are ink and always underlined or marked "›"; red is only for the primary action and the active state (UI-COHESION-1).
+- A lens or filter never hides Essentials or Guided blockers, and shows a "Showing for … Clear" chip.
+- Folds use ▸/▾, never ">".
+- "·" separates data fields; a comma separates names inside one field.
 
 ## Master merges
 
