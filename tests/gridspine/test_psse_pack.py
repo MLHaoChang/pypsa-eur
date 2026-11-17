@@ -234,10 +234,9 @@ def test_seq_notes_are_write_seqs_own_return_split_by_kind(tmp_path):
         and m["seq"]["assumed"]
     )
     readme = (_out / "README.md").read_text()
-    assert f"- .seq: seq: earthing transformer ET1: {NOT_WRITTEN}" in readme
-    assert (
-        "- .seq: seq: grid GRID: no x0x_max; X0 = X1, R0/X0 = R/X (assumed)" in readme
-    )
+    assert f"- .seq: earthing transformer ET1: {NOT_WRITTEN}" in readme
+    assert "- .seq: grid GRID: no x0x_max; X0 = X1, R0/X0 = R/X (assumed)" in readme
+    assert ".seq: seq:" not in readme
 
 
 def test_the_generated_contingency_set_is_written(tmp_path):
@@ -289,6 +288,11 @@ def test_a_model_set_without_its_variant_is_refused(tmp_path):
     ms = new_model_set(spec(), {}, now=_NOW)
     with pytest.raises(ContractError, match="model_set and its variant together"):
         _write(tmp_path, model_set=ms)
+
+
+def test_a_variant_without_its_model_set_is_refused(tmp_path):
+    with pytest.raises(ContractError, match="model_set and its variant together"):
+        _write(tmp_path, variant="detailed")
 
 
 def test_the_mon_band_is_listed_as_assumed(tmp_path):
@@ -349,8 +353,10 @@ def test_readme_says_none_assumed_and_nothing_not_written(tmp_path):
     u["PV1"]["island"] = copy.deepcopy(u["BESS1"]["island"])
     _hc, _m, out = _write(tmp_path, s)
     assert "## Assumed values\n\n- none\n" in (out / "README.md").read_text()
-    _hc, m, out = _write(tmp_path / "plant", plant=PLANT)
+    # BESS1 grid-following, so every RAW machine has a .dyr record
+    _hc, m, out = _write(tmp_path / "plant", _gfl_bess(), plant=PLANT)
     assert m["seq"]["not_written"] == [] and m["contingencies"]["not_written"] == []
+    assert m["dyr"]["not_written"] == []
     assert "## Not written\n\n- nothing\n" in (out / "README.md").read_text()
 
 
@@ -391,3 +397,76 @@ def test_the_campus_bundle_dyr_bytes_are_masters(tmp_path):
     _camp, b = bundle(tmp_path)
     data = (b.path / f"{b.path.name}.dyr").read_bytes()
     assert hashlib.sha256(data).hexdigest() == _CAMPUS_DYR_SHA256
+
+
+# --------------------------------------------------------------------------
+# RAW machines with no .dyr record, and the missing plant controller
+
+
+def test_raw_machines_without_a_dyr_record_are_listed_with_their_reason(tmp_path):
+    import pandapower as pp
+
+    hc, case, lines, grid = _hour_campus(tmp_path)
+    # a compensator in the RAW that is not a campus unit, as a STATCOM is
+    pp.create_sgen(hc.net, bus=hc.net.sgen.at[0, "bus"], p_mw=0.0, name="STAT1")
+    m = PP.write_psse_pack(tmp_path / "pack", hc, case, lines, grid)
+    ids = {r[0]: (r[1], r[2].strip()) for r in machine_records(hc.net)}
+    control = hc.island["units"]["BESS1"]["control"]
+    assert control in ("gfm_droop", "gfm_vsm")
+    assert m["dyr"]["not_written"] == [
+        {
+            "unit": "BESS1",
+            "bus": ids["BESS1"][0],
+            "id": ids["BESS1"][1],
+            "reason": f"grid-forming converter ({control}): no generic grid-forming model; "
+            "its parameters are in the campus bundle's GFM table (gfm_models.csv) only",
+        },
+        {
+            "unit": "STAT1",
+            "bus": ids["STAT1"][0],
+            "id": ids["STAT1"][1],
+            "reason": "not a campus unit (a compensator such as a STATCOM): "
+            "no dynamic model supplied",
+        },
+    ]
+    # every machine not listed has a record in the pack's .dyr
+    recs = _records((tmp_path / "pack" / f"{case}.dyr").read_text())
+    written = {(b, i) for b, _model, i, _t in recs}
+    for uid, (num, mid) in ids.items():
+        assert ((num, mid) in written) == (uid not in ("BESS1", "STAT1")), uid
+    readme = (tmp_path / "pack" / "README.md").read_text()
+    for d in m["dyr"]["not_written"]:
+        assert (
+            f"- .dyr: {d['unit']} (bus {d['bus']}, id '{d['id']}'): {d['reason']}\n"
+            in readme
+        )
+
+
+def test_a_machine_of_a_kind_with_no_record_is_listed_by_its_kind(tmp_path):
+    hc, case, lines, grid = _hour_campus(tmp_path)
+    gen1 = next(r for r in machine_records(hc.net) if r[0] == "GEN1")
+    head = f"{gen1[1]:>6d} "
+    own = [ln for ln in lines if not ln.startswith(head)]
+    assert len(own) < len(lines)  # GEN1's records dropped from the bundle's
+    m = PP.write_psse_pack(tmp_path / "pack", hc, case, own, grid)
+    assert {
+        "unit": "GEN1",
+        "bus": gen1[1],
+        "id": gen1[2].strip(),
+        "reason": "genset: no dynamic record supplied",
+    } in m["dyr"]["not_written"]
+
+
+def test_without_a_plant_the_readme_says_no_plant_controller(tmp_path):
+    _hc, m, out = _write(tmp_path)
+    assert m["plant_controller_not_written"] == PP._REPCA1_NEEDS_PLANT
+    assert (
+        "a pack written by the campus bundle has none yet"
+        in m["plant_controller_not_written"]
+    )
+    assert f"- {PP._REPCA1_NEEDS_PLANT}\n" in (out / "README.md").read_text()
+    _hc, m, out = _write(tmp_path / "plant", plant=PLANT)
+    assert m["plant_controller_not_written"] is None
+    assert (
+        "plant controller (REPCA1) not written" not in (out / "README.md").read_text()
+    )

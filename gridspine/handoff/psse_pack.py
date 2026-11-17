@@ -29,6 +29,7 @@ is checked against the manifest's file list (GK S1).
 
 import dataclasses
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -85,6 +86,12 @@ _SCRIPTS_NEED_PLANT = (
     "psspy scripts not written: the SMIB cases need the aggregated plant's PoC branch and "
     "machine (GC-01)"
 )
+_REPCA1_NEEDS_PLANT = (
+    "plant controller (REPCA1) not written: no aggregated plant (GC-01) is given; a pack "
+    "written by the campus bundle has none yet (issue 04c)"
+)
+#: The head line of a .dyr record: bus number, 'MODEL', 'ID'.
+_DYR_HEAD = re.compile(r"^\s*(\d+)\s+'[^']*'\s+'([^']*)'")
 #: Campus unit kinds behind a converter (a load, a genset and a UPS are not).
 CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell")
 _COLUMNS = ["mbase_mva", *IBR_PARAMS, *REECC1_ONLY, *WECC_GROUP_PARAMS]
@@ -112,6 +119,35 @@ def grid_following(campus, unit_id) -> bool:
         return False
     block = campus.island["units"].get(unit_id)
     return block is None or block.get("control") not in ("gfm_droop", "gfm_vsm")
+
+
+def _no_record(campus, dyr_lines):
+    """
+    Every RAW machine with no record in the pack's .dyr, with the reason read
+    from the campus data: not a campus unit (a compensator such as a STATCOM),
+    a grid-forming converter, or a unit of a kind that got none.
+    """
+    heads = {
+        (int(h[1]), h[2].strip())
+        for h in (_DYR_HEAD.match(ln) for ln in dyr_lines)
+        if h is not None
+    }
+    out = []
+    for uid, num, mid, _mbase, _sync in machine_records(campus.net):
+        if (num, mid.strip()) in heads:
+            continue
+        block = campus.island["units"].get(uid) or {}
+        if uid not in campus.units.index:
+            why = "not a campus unit (a compensator such as a STATCOM): no dynamic model supplied"
+        elif block.get("control") in ("gfm_droop", "gfm_vsm"):
+            why = (
+                f"grid-forming converter ({block['control']}): no generic grid-forming model; "
+                "its parameters are in the campus bundle's GFM table (gfm_models.csv) only"
+            )
+        else:
+            why = f"{campus.units.at[uid, 'kind']}: no dynamic record supplied"
+        out.append({"unit": uid, "bus": num, "id": mid.strip(), "reason": why})
+    return out
 
 
 def _battery_cases(net):
@@ -224,6 +260,7 @@ def write_psse_pack(
     conv_lines, _, repc = converter_records(net, ibr, version=VERSION, poc=poc)
     with open(out / names["dyr"], "w", newline="\n") as f:
         f.write("".join(f"{ln}\n" for ln in [*sync_lines, *conv_lines]))
+    no_record = _no_record(campus, [*sync_lines, *conv_lines])
 
     cs = _contingency_set(campus) if contingency_set is None else contingency_set
     con_skipped = write_con(cs, net, out / names["con"])
@@ -281,11 +318,15 @@ def write_psse_pack(
             "not_written": [n for n in seq_notes if NOT_WRITTEN in n],
             "assumed": [n for n in seq_notes if NOT_WRITTEN not in n],
         },
+        "dyr": {"not_written": no_record},
         "contingencies": {
             "written": int(len(cs)) - len(con_skipped),
             "not_written": list(con_skipped),
         },
         "scripts_not_written": None if plant is not None else _SCRIPTS_NEED_PLANT,
+        "plant_controller_not_written": None
+        if plant is not None
+        else _REPCA1_NEEDS_PLANT,
         "battery_assumed": battery_notes,
         "mon_assumed": MON_ASSUMED,
         "pending_verification": [PIN_NOTE, BUSR_NOTE, PSSPY_NOTE],
@@ -322,16 +363,22 @@ def _readme(m) -> str:
         f"(generic WECC set, `{a['from']}`)"
         for a in m["assumed"]
     ] or ["- none"]
-    lines += [f"- .seq: {n}" for n in m["seq"]["assumed"]]
+    lines += [f"- .seq: {n.removeprefix('seq: ')}" for n in m["seq"]["assumed"]]
     lines += [f"- {n}" for n in m["battery_assumed"]]
     lines.append(f"- {m['mon_assumed']}")
     lines += ["", "## Not written", ""]
-    not_written = [f".seq: {n}" for n in m["seq"]["not_written"]]
+    not_written = [f".seq: {n.removeprefix('seq: ')}" for n in m["seq"]["not_written"]]
+    not_written += [
+        f".dyr: {d['unit']} (bus {d['bus']}, id '{d['id']}'): {d['reason']}"
+        for d in m["dyr"]["not_written"]
+    ]
     not_written += [
         f".con: {cid} (compound)" for cid in m["contingencies"]["not_written"]
     ]
     if m["scripts_not_written"]:
         not_written.append(m["scripts_not_written"])
+    if m["plant_controller_not_written"]:
+        not_written.append(m["plant_controller_not_written"])
     lines += [f"- {n}" for n in not_written] or ["- nothing"]
     lines += [
         "",

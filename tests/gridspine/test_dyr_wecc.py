@@ -689,6 +689,21 @@ def test_synchronous_records_keep_a_separator_before_a_ten_column_con():
     assert line.count(" -998.00000") == len(cons)
 
 
+def test_write_dyr_synchronous_records_keep_a_separator_before_a_ten_column_con(
+    tmp_path,
+):
+    # write_dyr's own GENROU/GENSAL CONs go through _con too, not format_record
+    params, templates = _toy_templates(tmp_path, ibr=_IBR)
+    params = params.copy()
+    params.loc["G_BUS_02", "d"] = -998.0
+    path = tmp_path / "t.dyr"
+    write_dyr(_net(), params, path, ibr=wecc_params(templates))
+    text = path.read_text()
+    sync = [ln for ln in text.splitlines() if re.search(r"'GEN(ROU|SAL)'", ln)]
+    assert [ln.count(" -998.00000") for ln in sync].count(1) == 1
+    assert re.search(r"\S-998\.00000", text) is None
+
+
 def _converter_inputs(tmp_path):
     _params, templates = _toy_templates(tmp_path, ibr=_IBR)
     return _net(), wecc_params(templates)
@@ -788,3 +803,9 @@ def test_converter_records_skips_a_converter_with_no_ibr_row(tmp_path):
         {},
         {},
     )
+
+
+def test_converter_records_refuses_a_poc_branch_for_a_unit_without_repca1(tmp_path):
+    net, ibr = _converter_inputs(tmp_path)
+    with pytest.raises(ContractError, match="write no REPCA1 record"):
+        dyr_writer.converter_records(net, ibr, version=35, poc=POC)
