@@ -297,9 +297,11 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
     extra = "; below it an EMT study is recommended" if gates.emt_recommended else ""
     low = next(r for r in payload["buses"] if r["bus"] == payload["min_bus"])
     # GK A (walkthrough 05): a stated capacity below the converters the network
-    # holds, or a converter not sized yet, never certifies a Pass.
-    if verdict == "pass" and (_stated_below(low) or low.get("ibr_unsized")):
-        verdict = "warn"
+    # holds, or a derived one with a converter not sized yet, never certifies a
+    # Pass. It reads unknown, not warn, so the verdict stays the declared rule's
+    # wherever it is given (checked results S9: a checker withholds unknown).
+    if verdict == "pass" and (_stated_below(low) or _unsized(low)):
+        verdict = "unknown"
     return [_row("scr", "Short-circuit ratio at the PoC", project_value=round(payload["min_scr"], 3),
                  verdict=verdict, assumed=True,
                  note=(f"Lowest SCR, at {payload['min_bus']}: fault level over inverter-based capacity "
@@ -319,6 +321,10 @@ def _stated_below(row: dict) -> bool:
     return row.get("ibr_source") == "stated" and d is not None and d > row["ibr_mva"]
 
 
+def _unsized(row: dict) -> bool:
+    return row.get("ibr_source") == "derived" and bool(row.get("ibr_unsized"))
+
+
 def _capacity_words(row: dict, architecture: str | None) -> str:
     """Where the SCR's inverter capacity comes from (DC grid-readiness walkthrough 05)."""
     mva, assets, derived = row["ibr_mva"], row.get("ibr_assets") or {}, row.get("ibr_derived_mva")
@@ -328,14 +334,14 @@ def _capacity_words(row: dict, architecture: str | None) -> str:
                 "assumed unless you sourced it")
         if _stated_below(row):
             text += (f". It is below the converter-coupled assets the network now holds ({derived:.4g} MVA: "
-                     f"{listed}): it predates them, so the verdict is at most Warn; clear it to derive "
+                     f"{listed}): it predates them, so a Pass is not established; clear it to derive "
                      "the capacity from them")
     else:
         text = (f"Inverter capacity {mva:.4g} MVA, derived from the converter-coupled assets ({listed}), "
                 "installed MW read as MVA (assumed)")
-    if row.get("ibr_unsized"):
-        text += (f"; not sized yet, counted 0: {', '.join(map(_display, row['ibr_unsized']))}, so the "
-                 "verdict is at most Warn before sizing")
+    if _unsized(row):
+        text += (f"; not sized yet, counted 0: {', '.join(map(_display, row['ibr_unsized']))}, so a "
+                 "Pass is not established before sizing")
     if row.get("ibr_excluded") and architecture:
         text += (f"; not counted: behind the {architecture} ({', '.join(map(_display, row['ibr_excluded']))}). "
                  "The architecture's own grid-facing converter is not in this figure")

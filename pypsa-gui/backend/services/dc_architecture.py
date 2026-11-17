@@ -251,23 +251,15 @@ def behind_architecture(n, island: dict | None, architecture: str | None) -> lis
     critical: set[str] = set()
     if n is not None and "eh_critical" in n.buses.columns:
         critical = set(n.buses.index[flag_column(n.buses, "eh_critical")].astype(str))
-
-    def bus_of(name):
-        for frame in ("generators", "storage_units"):
-            df = getattr(n, frame, None) if n is not None else None
-            if df is not None and name in df.index:
-                return str(df.at[name, "bus"])
-        return None
-
-    out = []
-    for name, u in ((island or {}).get("units") or {}).items():
-        if u.get("kind") != "load" and (u.get("kind") == "ups" or bus_of(name) in critical):
-            out.append(str(name))
+    units = (island or {}).get("units") or {}
+    out = [str(k) for k, u in units.items() if u.get("kind") == "ups"]
     for frame in ("generators", "storage_units"):
         df = getattr(n, frame, None) if n is not None else None
         if df is None or df.empty:
             continue
-        out += [str(x) for x in df.index[df["bus"].astype(str).isin(critical)] if str(x) not in out]
+        for x in df.index[df["bus"].astype(str).isin(critical)].astype(str):
+            if x not in out and (units.get(x) or {}).get("kind") != "load":
+                out.append(x)
     return out
 
 

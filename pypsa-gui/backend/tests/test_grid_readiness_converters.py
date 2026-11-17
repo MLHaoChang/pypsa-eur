@@ -14,7 +14,8 @@ architecture and the unit each credited service comes from.
 converter-coupled assets (inverter-based generators and storage; under a set
 architecture, not the units behind it). The row states the capacity it used
 and where it comes from. A stated capacity below those assets, or a converter
-not sized yet, caps the verdict at Warn (GK A 30, Q2/Q3). One predicate
+not sized yet, never passes: it reads unknown (GK A 30, Q2/Q3; unknown,
+not warn, so the verdict stays the declared rule's, checked results S9). One predicate
 (``dc_architecture.behind_architecture``) serves 03 and 05 (R1).
 """
 from __future__ import annotations
@@ -290,7 +291,7 @@ def test_an_unset_architecture_counts_every_converter_and_caps_an_unsized_one(tm
     T.write_sidecars(d, "eh_datacenter")
     row = _rows(d, n)["scr"]
     assert row["project_value"] == pytest.approx(250.0 / 44.0, rel=1e-3)   # PV 4 + UPS 40; bess_new unsized
-    assert row["verdict"] == "warn" and "not sized yet" in row["note"] and "BESS new" in row["note"]
+    assert row["verdict"] == "unknown" and "not sized yet" in row["note"] and "BESS new" in row["note"]
     n.storage_units.at["bess_new", "p_nom_opt"] = 10.0
     row = _rows(d, n)["scr"]
     assert row["verdict"] == "pass" and row["project_value"] == pytest.approx(250.0 / 54.0, rel=1e-3)
@@ -312,7 +313,7 @@ def test_a_stated_capacity_below_the_converters_says_it_predates_them_and_never_
     n.buses.at["grid", "eh_ibr_mva"] = 30.0                  # a project saved before the derivation
     row = _rows(d, n)["scr"]
     assert row["project_value"] == pytest.approx(250.0 / 30.0, rel=1e-3)
-    assert row["verdict"] == "warn"                          # 8.3 would pass; the stale value caps it
+    assert row["verdict"] == "unknown"                       # 8.3 would pass; the stale value withholds it
     assert "stated" in row["note"] and "IBR capacity field" in row["note"]
     assert "below the converter-coupled assets" in row["note"] and "predates them" in row["note"]
 
@@ -339,3 +340,9 @@ def test_an_unknown_scr_names_the_input_it_needs(tmp_path):
     n.buses.at["grid", "eh_sk_mva"] = float("nan")
     row = _rows(d, n)["scr"]
     assert row["verdict"] == "unknown" and "IBR capacity field" in row["note"]
+
+
+def test_a_network_unit_on_the_critical_bus_is_behind_even_outside_the_island_but_never_a_load():
+    n = T.BUILDERS["eh_datacenter"]()
+    assert "bess_new" in A.behind_architecture(n, {"units": {}}, "ac")          # not in the island
+    assert "bess_new" not in A.behind_architecture(n, {"units": {"bess_new": {"kind": "load"}}}, "ac")
