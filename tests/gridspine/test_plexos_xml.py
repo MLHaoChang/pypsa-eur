@@ -93,7 +93,7 @@ EDGE_BROKEN = {
     ("t_data", "18"): "membership 999 does not exist",
     ("t_data", "19"): "property 999 does not exist",
     ("t_data", "20"): "belongs to another collection",
-    ("t_data", "22"): "membership 18 does not exist",  # a row on a broken membership
+    ("t_data", "22"): "membership 18 is broken (parent or child object does not exist)",
     ("t_band", "999"): "data row 999 does not exist",
     ("t_band", "2"): "not a whole number",
     ("t_band", "3 (row 3)"): "a second t_band entry",
@@ -103,12 +103,14 @@ EDGE_BROKEN = {
     ("t_memo_data", "9 (row 1)"): "a second t_memo_data entry",
     ("t_memo_data", "row 2"): "data row None does not exist",  # no data_id
     ("t_text", "12"): "unknown class id 99",
+    ("t_text", "12 (row 3)"): "a second Data File text for data row 12",
     ("t_tag", "5 (row 5)"): "tag object 999 does not exist",
     ("t_tag", "999"): "data row 999 does not exist",
     ("t_tag", "6 (row 7)"): "unknown action id 77",
     ("t_attribute_data", "999/1 (row 1)"): "object or attribute does not exist",
     ("t_attribute_data", "3/1 (row 2)"): "attribute of Node set on a Generator",
     ("t_attribute_data", "2/999 (row 3)"): "object or attribute does not exist",
+    ("t_attribute_data", "2/1 (row 4)"): "a second Latitude value for Node 'X'",
 }
 
 
@@ -171,6 +173,70 @@ def test_external_entity_is_refused_as_a_dtd(tmp_path):
     with pytest.raises(PlexosRefused) as exc:
         read_plexos_xml(str(p))
     assert exc.value.kind == "dtd"
+
+
+def _refused_kind(tmp_path, content: bytes) -> str:
+    p = tmp_path / "f.xml"
+    p.write_bytes(content)
+    with pytest.raises(PlexosRefused) as exc:
+        read_plexos_xml(str(p))
+    return exc.value.kind
+
+
+@pytest.fixture
+def garbage_dtd(tmp_path):
+    """
+    A file that is not a DTD: a parser that loads it fails with a syntax
+    error (kind "not_xml"), so kind "dtd" proves it was never read.
+    """
+    g = tmp_path / "garbage.dtd"
+    g.write_text("this is <<< not a dtd")
+    return g
+
+
+def test_an_external_dtd_file_is_never_loaded(tmp_path, garbage_dtd):
+    # pins load_dtd=False and no_network=True
+    head = f'<!DOCTYPE MasterDataSet SYSTEM "file://{garbage_dtd}">'
+    assert _refused_kind(tmp_path, xml(MINIMAL, header=head)) == "dtd"
+
+
+def test_an_external_parameter_entity_is_never_loaded(tmp_path, garbage_dtd):
+    # pins resolve_entities=False (and load_dtd=False)
+    head = f'<!DOCTYPE MasterDataSet [<!ENTITY % p SYSTEM "file://{garbage_dtd}"> %p;]>'
+    assert _refused_kind(tmp_path, xml(MINIMAL, header=head)) == "dtd"
+
+
+def test_a_missing_external_dtd_is_refused_as_a_dtd(tmp_path):
+    head = f'<!DOCTYPE MasterDataSet SYSTEM "file://{tmp_path}/does-not-exist.dtd">'
+    assert _refused_kind(tmp_path, xml(MINIMAL, header=head)) == "dtd"
+
+
+@pytest.mark.parametrize(
+    "before", ["<!-- a comment -->", '<?xml-stylesheet href="x"?>']
+)
+def test_a_doctype_after_a_comment_or_pi_is_refused(tmp_path, before):
+    head = before + '<!DOCTYPE MasterDataSet [<!ENTITY h "hello">]>'
+    assert _refused_kind(tmp_path, xml(MINIMAL, header=head)) == "dtd"
+
+
+def test_an_entity_in_a_root_attribute_is_refused(tmp_path):
+    head = '<!DOCTYPE MasterDataSet [<!ENTITY h "hello">]>'
+    body = f'<MasterDataSet xmlns="{NS[1:-1]}" a="&h;">{MINIMAL}</MasterDataSet>'
+    assert _refused_kind(tmp_path, (head + body).encode()) == "dtd"
+
+
+def test_billion_laughs_in_a_root_attribute_is_refused(tmp_path):
+    # expanded by libxml2 before the root is seen, bounded by its cap
+    ents = '<!ENTITY a0 "aaaaaaaaaa">' + "".join(
+        f'<!ENTITY a{i} "{f"&a{i - 1};" * 10}">' for i in range(1, 10)
+    )
+    head = f"<!DOCTYPE MasterDataSet [{ents}]>"
+    body = f'<MasterDataSet xmlns="{NS[1:-1]}" a="&a9;">{MINIMAL}</MasterDataSet>'
+    p = tmp_path / "lol-attr.xml"
+    p.write_bytes((head + body).encode())
+    with pytest.raises(PlexosRefused, match="amplification") as exc:
+        read_plexos_xml(str(p))
+    assert exc.value.kind == "not_xml"
 
 
 def test_a_bare_doctype_is_refused(tmp_path):

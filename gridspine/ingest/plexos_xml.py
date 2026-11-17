@@ -21,9 +21,13 @@ Nothing is dropped silently. Every row of every table lands in exactly one of
 ``resolved`` or ``broken`` (``PlexosModel.accounting``), and a row whose value
 cannot be read keeps the raw text and a reason instead of turning into 0.
 
-Hostile input is refused, never expanded: any DTD (and so any entity
-declaration or external reference) is a ``PlexosRefused`` of kind ``"dtd"``,
-and the parser runs with entity resolution, DTD loading and network access off.
+Hostile input is refused: any DOCTYPE (and so any entity declaration or
+external reference) is a ``PlexosRefused`` of kind ``"dtd"`` before a single
+row is read, and the parser runs with entity resolution, DTD loading and
+network access off, so no external DTD or entity file is ever opened. An
+internal entity used in the root element's own attributes is expanded by
+libxml2 before the root is seen; that expansion is bounded by libxml2's
+amplification cap, and the file is still refused.
 """
 
 from __future__ import annotations
@@ -420,14 +424,26 @@ def read_plexos_xml(source) -> PlexosModel:
             memberships[mid] = Membership(mid, coll, parent.key, child.key)
             ledger.ok("t_membership")
 
+    broken_membership = {
+        b.row_id: b.reason
+        for b in ledger.broken
+        if b.table == "t_membership" and b.row_id not in memberships
+    }
+
     # data rows
     rows: dict[str, PropertyRow] = {}
     for did, row in _index(tables, ledger, "t_data", "data_id").items():
         m = memberships.get(row.get("membership_id"))
         p = prop.get(row.get("property_id"))
         if m is None:
+            mid = row.get("membership_id")
+            why = broken_membership.get(mid)
             ledger.bad(
-                "t_data", did, f"membership {row.get('membership_id')} does not exist"
+                "t_data",
+                did,
+                f"membership {mid} is broken ({why})"
+                if why
+                else f"membership {mid} does not exist",
             )
             continue
         if p is None:
@@ -510,15 +526,21 @@ def read_plexos_xml(source) -> PlexosModel:
             continue
         target.memo = row.get("value")
         ledger.ok("t_memo_data")
-    for i, row, target in each_qualifier(
-        "t_text"
-    ):  # several texts per row are allowed (one per class)
+    # several texts per row are allowed, one per class
+    for i, row, target in each_qualifier("t_text"):
         cls = class_name.get(row.get("class_id"))
         if cls is None:
             ledger.bad(
                 "t_text",
                 target.data_id,
                 f"text of unknown class id {row.get('class_id')}",
+            )
+            continue
+        if any(c == cls for c, _ in target.texts):
+            ledger.bad(
+                "t_text",
+                f"{target.data_id} (row {i})",
+                f"a second {cls} text for data row {target.data_id}",
             )
             continue
         target.texts.append((cls, row.get("value") or ""))
@@ -561,6 +583,7 @@ def read_plexos_xml(source) -> PlexosModel:
         )
         ledger.ok("t_attribute")
     attributes = []
+    attribute_seen = set()
     for i, row in enumerate(tables.get("t_attribute_data", [])):
         obj, adef = (
             objects_by_id.get(row.get("object_id")),
@@ -575,6 +598,14 @@ def read_plexos_xml(source) -> PlexosModel:
                 "t_attribute_data", rid, f"attribute of {adef[2]} set on a {obj.cls}"
             )
             continue
+        if (obj.key, adef[0]) in attribute_seen:
+            ledger.bad(
+                "t_attribute_data",
+                rid,
+                f"a second {adef[0]} value for {obj.cls} {obj.name!r}",
+            )
+            continue
+        attribute_seen.add((obj.key, adef[0]))
         value, why = _number(row.get("value"))
         attributes.append(
             Attribute(obj.key, adef[0], adef[1], row.get("value"), value, why)
