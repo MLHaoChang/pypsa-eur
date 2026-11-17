@@ -11,10 +11,9 @@ those itself when it runs an IEC 60909 calculation.
 
 Layout (``version=35``, the default, or ``33``). The record layouts follow
 .seq files PSS/E 34.0 and 35.0 wrote themselves (their ``@!`` header lines
-carry the manual's field names) and, for the transformer record and its
-connection codes, the AESO Transformer Modelling Guide Rev 2, App. A,
-Tables A-7-1 to A-7-3, which transcribes the PSS/E manual. A v36 RAW takes a
-v35 .seq. v35 opens with a SYSTEM-WIDE section (RPTFORMAT, MOV, SCMODEL at
+carry the manual's field names); the transformer connection codes are
+PSS/E's documented zero-sequence codes (generic engineering: the earth path
+each winding connection gives). A v36 RAW takes a v35 .seq. v35 opens with a SYSTEM-WIDE section (RPTFORMAT, MOV, SCMODEL at
 PSS/E 35.0's defaults) and adds REFDEG to the machine record; v33 has neither.
 
 What each element is:
