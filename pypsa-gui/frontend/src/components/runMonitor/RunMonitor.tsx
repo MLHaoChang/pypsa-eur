@@ -306,6 +306,8 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
           aria-current={now ? 'step' : undefined} className={now ? 'font-medium' : s.status === 'skipped' ? 'text-muted' : ''}>
           <span data-testid="run-stage-words">{stageWords(s.stage)} · {now && ['pending', 'active'].includes(s.status)
             ? currentWords : STAGE_STATUS_WORDS[s.status] ?? 'to do'}</span>
+          {/* Study harness 15 (GK B): a stage the profile skips says why, e.g. no report until issue 50. */}
+          {s.status === 'skipped' && s.reason && <div data-testid="run-stage-reason" className="text-muted">{s.reason}</div>}
           {now && !cancelled && <CurrentStage stage={s} view={view} />}
         </li>
       })}

@@ -9,7 +9,8 @@ One native read step, run by the runner on the run's bound context, writes
   no number from model text enters it (GK B C14);
 - `coverage`: each part of the approved request (the report, each profile
   chapter, each brief case, the stated targets) `covered`, `partly` or
-  `gap` (HH-09A). `covered` comes only from a receipt or a passing gate; a
+  `gap` (HH-09A), or `skipped` with the profile's reason when the profile
+  skips the report stage (study harness 15; not a gap). `covered` comes only from a receipt or a passing gate; a
   missing or unreadable one is a `gap`, never `covered` (GK B C13);
 - `revert`: "Revert the run's changes" as one LC-16 preview
   (`assistant_tools.preview_project_changes`) over the ledger's
@@ -39,6 +40,9 @@ PREVIEW_CLASSES = frozenset(
     {"Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"}
 )
 COVERED, PARTLY, GAP = "covered", "partly", "gap"
+# A part the profile itself leaves out (its stage `skipped`, with the profile's
+# reason): named with that reason, and never counted as a gap (study harness 15).
+SKIPPED = "skipped"
 
 
 # ── KPIs (C14) ───────────────────────────────────────────────────────────────
@@ -127,7 +131,7 @@ def _part(part, kind, read):
     except Exception:  # noqa: BLE001 -- an unreadable receipt is a gap, never covered
         logger.info("coverage of %s could not be read", part, exc_info=True)
         status, basis = GAP, "its receipt could not be read"
-    if status not in (COVERED, PARTLY, GAP):
+    if status not in (COVERED, PARTLY, GAP, SKIPPED):
         status, basis = GAP, "no receipt"
     return {"part": part, "kind": kind, "status": status, "basis": basis}
 
@@ -204,9 +208,17 @@ def coverage(task: dict, profile: dict, project_dir) -> list[dict]:
     parts = []
     if project_dir is not None:
         doc = None
+        stage = (run.get("stages") or {}).get("report") or {}
+        skipped = (
+            stage.get("reason")
+            if stage.get("status") == "skipped" and stage.get("by") == "profile"
+            else None
+        )
 
         def report():
             nonlocal doc
+            if skipped:
+                return SKIPPED, skipped
             state = run_report.status(task, project_dir)
             if state != "ready":
                 return GAP, f"the report is {state or 'not read'}"
@@ -221,6 +233,8 @@ def coverage(task: dict, profile: dict, project_dir) -> list[dict]:
         for sid in profile.get("chapters") or []:
 
             def chapter(sid=sid):
+                if skipped:
+                    return SKIPPED, skipped
                 sec = next(
                     (
                         s

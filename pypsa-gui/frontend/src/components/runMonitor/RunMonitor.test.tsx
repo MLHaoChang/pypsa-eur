@@ -175,6 +175,17 @@ describe('RunMonitor', () => {
     expect(row.querySelector('[data-testid="run-stage-words"]')?.textContent).toBe(words)
   })
 
+  it('a stage the profile skips says why under its row, and no other stage carries a reason line', async () => {
+    show('gate_fail')
+    await screen.findByTestId('run-state')
+    const rows = screen.getAllByTestId('run-stage')
+    const reason = (stage: string) =>
+      rows.find(r => r.getAttribute('data-stage') === stage)?.querySelector('[data-testid="run-stage-reason"]')?.textContent
+    expect(reason('report')).toBe('The run report is not part of a run yet.')
+    expect(reason('explore')).toBe('Exploring cases is not part of a run yet.')
+    expect(screen.getAllByTestId('run-stage-reason')).toHaveLength(2)
+  })
+
   it.each(['over_budget', 'solves_used_up'] as const)('%s: a held run offers Stop but not Pause', async (state) => {
     show(state)
     await screen.findByTestId('run-failure')
