@@ -265,7 +265,20 @@ def test_with_a_case_the_kpis_equal_the_report_and_the_npv_is_live(solved):
     # Walk 2026-11-17 issue 06: every sheet title in words, never an id.
     assert set(CASE_SHEET_WORDS) >= {"About", "Summary", "CashflowLines", *IC_REPORT_SECTIONS}
     assert "Case Dispatch modes" in case and "Case Tax equity" in case
+    assert len(set(wb.sheetnames)) == len(wb.sheetnames)
     assert not [s for s in wb.sheetnames if "_" in s or s.startswith("Case CashflowLines")]
+
+
+def test_case_sheet_titles_fit_excel_and_never_collide():
+    """GK B2 A2: every case title is at most 31 characters, has no character Excel
+    refuses, and no two collide, with each other or with the workbook's own sheets
+    (openpyxl would rename a duplicate silently)."""
+    from services.results_workbook.business_case import SHEET
+
+    titles = [case_sheet_title(s) for s in CASE_SHEET_WORDS]
+    assert all(len(t) <= 31 and not set(t) & set(":\\/?*[]") for t in titles)
+    assert len(set(titles)) == len(titles)
+    assert SHEET not in titles and "Overview" not in titles and "About" not in titles
     assert len(ws._charts) == 3
 
 

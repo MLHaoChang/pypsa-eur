@@ -3,7 +3,8 @@
 // words; a refused run names the line and the column, never `lines[n].column`.
 import { describe, expect, it } from 'vitest'
 import type { BusinessCasePnl } from '../../../api/businessCase'
-import { firstFix, kpiText, refusedRunText, servedReasonText } from './businessCaseReport'
+import { REFUSAL_WORDS } from './businessCaseModel'
+import { firstFix, kpiText, REFUSAL_ACTION, refusedRunText, servedReasonText } from './businessCaseReport'
 
 const item = (section: string | null, code: string) => ({ section, code })
 const pnl = (row_reason: BusinessCasePnl['row_reason']): BusinessCasePnl =>
@@ -28,13 +29,14 @@ const TAX = pnl({
 const NE = { value: null, status: 'not_established', reason: 'operating_not_established' } as const
 
 describe('a not-established KPI names the first blocker (walk 03)', () => {
-  it('reads the served reasons of the row it is computed from', () => {
-    expect(kpiText(NE, 'amount', DC, 'project_npv')).toBe('Not established: the operating section needs a '
-      + 'degradation rate for genset 1, genset 2, genset new and rooftop pv.')
-    expect(kpiText({ ...NE, reason: 'operating_not_established' }, 'pct', DC, 'ebitda_margin_gross'))
-      .toBe('Not established: the operating section needs a degradation rate for genset 1.')
-    expect(kpiText(NE, 'amount', IPP, 'project_npv')).toBe('Not established: the terminal value section needs a '
-      + 'terminal value and a cost and lifetime for Plant capex (its investment part).')
+  it('reads one blocker from the served reasons of the row it is computed from', () => {
+    expect(kpiText(NE, 'amount', DC, 'project_npv')).toBe('Not established: needs a '
+      + 'degradation rate for Genset 1, Genset 2, Genset new and Rooftop PV')
+    expect(kpiText(NE, 'pct', DC, 'ebitda_margin_gross'))
+      .toBe('Not established: needs a degradation rate for Genset 1')
+    expect(kpiText(NE, 'amount', IPP, 'project_npv')).toBe('Not established: needs a terminal value')
+    // A section that only waits on another yields to a cause.
+    expect(kpiText(NE, 'amount', TAX, 'project_npv')).toBe('Not established: needs tax losses')
     for (const p of [DC, IPP, TAX]) {
       const t = kpiText(NE, 'amount', p, 'project_npv').replace(/^Not established: /, '')
       expect(t).not.toMatch(CODE)
@@ -49,39 +51,44 @@ describe('a not-established KPI names the first blocker (walk 03)', () => {
     expect(kpiText(NE, 'amount')).toBe('Not established: the operating section is not established')
   })
 
-  it('merges one family over several assets and never repeats a phrase', () => {
+  it('merges one family over several assets, in display names', () => {
     expect(servedReasonText(DC.row_reason!.project_post_tax))
-      .toBe('Not established: the operating section needs a degradation rate for genset 1, '
-        + 'genset 2, genset new and rooftop pv.')
+      .toBe('Not established: the operating section needs a degradation rate for Genset 1, '
+        + 'Genset 2, Genset new and Rooftop PV.')
+    expect(servedReasonText(IPP.row_reason!.project_post_tax)).toBe('Not established: the terminal '
+      + 'value section needs a terminal value and a cost and lifetime for Plant capex (its investment part).')
   })
 
-  it('says what is needed first and where, skipping a section that only waits on another', () => {
+  it('says what to do first and where', () => {
     const kpis = { project_npv: NE, ebitda_margin_gross: { ...NE } }
     expect(firstFix(kpis, DC)).toEqual({
-      text: 'Needed first: a degradation rate for genset 1, genset 2, genset new and rooftop pv, in the finance inputs.',
-      place: 'finance',
-    })
-    expect(firstFix(kpis, TAX)?.text).toBe('Needed first: tax losses, in the finance inputs.')
+      action: 'Set a degradation rate for Genset 1, Genset 2, Genset new and Rooftop PV', place: 'finance' })
+    expect(firstFix(kpis, TAX)?.action).toBe('Set tax losses')
     expect(firstFix(kpis, pnl({ project_post_tax: [item('operating', 'line_not_established:GoO')] })))
-      .toEqual({ text: 'Needed first: the line “GoO”, in the lines above.', place: 'lines' })
+      .toEqual({ action: 'Fix the line “GoO”', place: 'lines' })
     expect(firstFix({ project_npv: { value: 1, status: 'ok', reason: null } }, DC)).toBeNull()
   })
 })
 
-describe('a refused run names the line and the column (walk 05)', () => {
+describe('a refused run names the line and what to do (walk 05)', () => {
   const names = ['Capacity payment (BESS, firm capacity)', 'Guarantees of origin', 'Insurance']
   it('words the served refusal', () => {
     expect(refusedRunText('business_case_refused:indexation_missing: lines[1].indexation', names))
-      .toBe('Guarantees of origin › Indexation: needed with contract escalation')
+      .toBe('Guarantees of origin: set an indexation rate')
     expect(refusedRunText('business_case_refused:quantity_missing: lines[2].quantity', names))
-      .toBe('Insurance › Quantity: give a quantity or fill every year')
+      .toBe('Insurance: give a quantity, or fill every year')
     // A line past the saved list reads its number, never `lines[n]`.
     expect(refusedRunText('business_case_refused:quantity_missing: lines[7].quantity', names))
-      .toBe('Line 8 › Quantity: give a quantity or fill every year')
-    // Not a refusal string: kept as served.
+      .toBe('Line 8: give a quantity, or fill every year')
+    // A kind with no action reads its cell words; text that is not a refusal is kept.
+    expect(refusedRunText('business_case_refused:a_new_kind: lines[0].price', names))
+      .toBe('Capacity payment (BESS, firm capacity): Price: refused')
     expect(refusedRunText('the run could not start', names)).toBe('the run could not start')
-    for (const t of [refusedRunText('business_case_refused:indexation_missing: lines[0].indexation', names)]) {
-      expect(t).not.toMatch(/lines\[|business_case_refused|_missing/)
+  })
+  it('has an action only for kinds the cells know, each one sentence with no code', () => {
+    for (const [k, a] of Object.entries(REFUSAL_ACTION)) {
+      expect(k in REFUSAL_WORDS, k).toBe(true)
+      expect(a, k).not.toMatch(/_|:/)
     }
   })
 })

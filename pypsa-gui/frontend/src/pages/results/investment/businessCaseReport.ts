@@ -7,6 +7,7 @@
 import type {
   BusinessCaseKpi, BusinessCasePnl, BusinessCaseRowReasonItem, BusinessCaseStudy, YearSeries,
 } from '../../../api/businessCase'
+import { displayName } from '../../../utils/displayName'
 import { parseField, refusalWords } from './businessCaseModel'
 import { fmtAmount } from './valueFlows'
 
@@ -129,7 +130,8 @@ const REASON_SECTION: Record<string, string> = {
 }
 
 const plain = (s: string | undefined) => (s ?? '').replace(/[_:]/g, ' ').trim()
-const forThe = (a: string[]) => (a[0] ? ` for ${plain(a[0])}` : '')
+// An asset or line in its display name (RAW-NAMES-1): `genset_1` reads "Genset 1".
+const forThe = (a: string[]) => (a[0] ? ` for ${displayName(a[0])}` : '')
 
 /** Words for each code family the report can serve (BC 17, GK B C3). Each is a noun
  *  phrase: what the section needs. Its keys equal `businessCaseRowReasonCodes.json`,
@@ -144,7 +146,8 @@ export const REASON_CODE_WORDS: Record<string, (args: string[]) => string> = {
   debt_not_established: () => 'the debt section',
   debt_tenor_beyond_analysis: () => 'a debt tenor inside the analysis period',
   degradation_missing: a => `a degradation rate${forThe(a)}`,
-  escalation_missing: a => `an escalation rate${forThe(a)}`,
+  // An escalation class, not an asset: its id in words.
+  escalation_missing: a => `an escalation rate${a[0] ? ` for ${plain(a[0])}` : ''}`,
   feoc_flag_missing: () => 'the FEOC flag',
   generation_missing: () => 'the generation',
   grace_not_inside_tenor: () => 'a grace period inside the tenor',
@@ -182,7 +185,7 @@ export const REASON_CODE_WORDS: Record<string, (args: string[]) => string> = {
   terminal_needs_part_lifetimes: a => `part lifetimes${forThe(a)}`,
   terminal_not_established: () => 'the terminal value',
   // `<asset or line>:<part>`: the remaining-life rule values each part by its cost and life.
-  terminal_part_unknown: a => `a cost and lifetime for ${plain(a[0]) || 'each part'}${a[1] ? ` (its ${plain(a[1])} part)` : ''}`,
+  terminal_part_unknown: a => `a cost and lifetime for ${displayName(a[0] ?? '') || 'each part'}${a[1] ? ` (its ${plain(a[1])} part)` : ''}`,
   terminal_value_missing: () => 'a terminal value',
   upfront_only_from_capital_cost: a => `an upfront cost${forThe(a)}`,
 }
@@ -219,7 +222,7 @@ function familyWords(codes: string[]): string[] {
     const firsts = argsList.map(a => a[0]).filter((a): a is string => !!a)
     // Merge only a family that names one item each (its first argument).
     if (f && argsList.length > 1 && argsList.every(a => a.length === 1) && firsts.length === argsList.length) {
-      out.push(f([joinAnd([...new Set(firsts.map(x => plain(x)))])]))
+      out.push(f([joinAnd([...new Set(firsts.map(displayName))])]))
     } else {
       for (const a of argsList) out.push(f ? f(a) : plain([fam, ...a].join(':')))
     }
@@ -254,26 +257,30 @@ function fixPlace(it: BusinessCaseRowReasonItem): 'finance' | 'lines' {
   const fam = it.code.split(':', 1)[0]
   return LINE_FAMILIES.has(fam) || (it.section === 'inputs' && fam !== 'input_missing') ? 'lines' : 'finance'
 }
-const PLACE_WORDS = { finance: 'in the finance inputs', lines: 'in the lines above' } as const
 
-/** The first thing to set for the KPIs that are not established (walk 03): the first
- *  served item of the first such KPI's row, its family merged over items, and where to
- *  set it. A section that only waits on another (`capex_not_established` in tax) yields
- *  to a concrete item. Null when every KPI is established or no reason is served. */
+/** The first blocker among served items (walk 03, UX 2): the first item that is a
+ *  cause, not a section that only waits on another (`capex_not_established` in tax),
+ *  with its family merged over items, and where it is set. */
+function firstBlocker(items: BusinessCaseRowReasonItem[]): { phrase: string; place: 'finance' | 'lines' } | null {
+  const real = items.filter(it => it.code !== 'not_established' && it.section !== null)
+  if (!real.length) return null
+  const first = real.find(it => !/_not_established$/.test(it.code.split(':', 1)[0])) ?? real[0]
+  const fam = first.code.split(':', 1)[0]
+  const same = real.filter(it => it.code.split(':', 1)[0] === fam && it.section === first.section)
+  return { phrase: joinAnd(familyWords(same.map(it => it.code))), place: fixPlace(first) }
+}
+
+/** What to do first for the KPIs that are not established (walk 03, UX 2): one
+ *  blocker, as an action ("Set a degradation rate for Genset 1"), and where it is set.
+ *  Null when every KPI is established or no reason is served. */
 export function firstFix(
   kpis: Record<string, BusinessCaseKpi | undefined>, pnl: BusinessCasePnl | undefined,
-): { text: string; place: 'finance' | 'lines' } | null {
+): { action: string; place: 'finance' | 'lines' } | null {
   for (const spec of KPI_ORDER) {
     const k = kpis[spec.key]
     if (k?.status !== 'not_established' || !sectionReason(k.reason)) continue
-    const items = (pnl?.row_reason?.[KPI_ROW[spec.key]] ?? [])
-      .filter(it => it.code !== 'not_established' && it.section !== null)
-    if (!items.length) continue
-    const first = items.find(it => !/_not_established$/.test(it.code.split(':', 1)[0])) ?? items[0]
-    const fam = first.code.split(':', 1)[0]
-    const same = items.filter(it => it.code.split(':', 1)[0] === fam && it.section === first.section)
-    const place = fixPlace(first)
-    return { text: `Needed first: ${joinAnd(familyWords(same.map(it => it.code)))}, ${PLACE_WORDS[place]}.`, place }
+    const b = firstBlocker(pnl?.row_reason?.[KPI_ROW[spec.key]] ?? [])
+    if (b) return { action: `${b.place === 'lines' ? 'Fix' : 'Set'} ${b.phrase}`, place: b.place }
   }
   return null
 }
@@ -408,8 +415,8 @@ export function kpiText(
 ): string {
   if (!k) return 'Not established: not in this report'
   if (k.status === 'not_established') {
-    const served = sectionReason(k.reason) ? pnl?.row_reason?.[KPI_ROW[key ?? ''] ?? ''] : undefined
-    return served?.length ? servedReasonText(served) : `Not established: ${reasonWords(k.reason)}`
+    const b = sectionReason(k.reason) ? firstBlocker(pnl?.row_reason?.[KPI_ROW[key ?? ''] ?? ''] ?? []) : null
+    return b ? `Not established: needs ${b.phrase}` : `Not established: ${reasonWords(k.reason)}`
   }
   if (k.status === 'n/a' || k.value === null) return `n/a: ${reasonWords(k.reason)}`
   const v = k.value
@@ -469,15 +476,43 @@ export function staleText(s: BusinessCaseStudy | null): string | null {
     + ' since this report was computed. Run the business case again for current figures.'
 }
 
-/** A refused run in words (walk 05): `business_case_refused:<kind>: lines[<i>].<column>`
- *  reads "<line name> › <column words>", the line by its saved name (or its number past
- *  the saved list), never the index. Any other text is kept as served. */
+/** What to do about each refusal kind, as an action (UX 2: "Guarantees of origin: set
+ *  an indexation rate"). A kind without one reads its cell words. */
+export const REFUSAL_ACTION: Record<string, string> = {
+  name_duplicate: 'give it a name no other line has',
+  category_not_in_kind: 'pick a category of its kind',
+  unit_not_allowed: 'pick a unit its quantity source offers',
+  quantity_missing: 'give a quantity, or fill every year',
+  share_out_of_range: 'give a share between 0 and 1',
+  share_cycle: 'take the share of a line that is not a share',
+  share_base_empty: 'add a line to take the share of, or type the quantity',
+  end_before_start: 'set an end year after the start year',
+  outside_horizon: 'set years inside the investment case',
+  year_out_of_range: 'keep each year between its start and end',
+  indexation_missing: 'set an indexation rate',
+  life_missing: 'set a life in years',
+  rate_missing: 'set a declining-balance rate',
+  price_not_established: 'set a price',
+  cost_not_established: 'set a price',
+  capex_missing: 'add a capex line of the category it needs',
+  it_capex_missing: 'add an IT hardware capex line',
+  facility_capex_missing: 'add a facility capex line',
+  capex_not_owned: 'remove it, or pick a capex the project owns',
+  pass_through_price_includes_energy: 'remove the cost-recovery line; the price already includes energy',
+  linked_output_missing: 'pick another output; this model has no such output',
+  double_count: 'type the quantity; the energy model already prices this output',
+  default_unit_mismatch: 'set the price; the cost default is in another unit',
+}
+
+/** A refused run in words (walk 05, UX 2): `business_case_refused:<kind>: lines[<i>].<column>`
+ *  reads "<line name>: <action>", the line by its saved name (or its number past the
+ *  saved list), never the index. Any other text is kept as served. */
 export function refusedRunText(error: string, lineNames: string[]): string {
   const m = /^business_case_refused:([a-z_]+)(?::\s*(.*))?$/.exec(error.trim())
   if (!m) return error
   const [, kind, field] = m
-  const words = refusalWords(kind, field)
+  const action = REFUSAL_ACTION[kind] ?? refusalWords(kind, field)
   const at = parseField(field)
-  if (!at) return words
-  return `${lineNames[at.line] ?? `Line ${at.line + 1}`} › ${words}`
+  if (!at) return action.charAt(0).toUpperCase() + action.slice(1)
+  return `${lineNames[at.line] ?? `Line ${at.line + 1}`}: ${action}`
 }

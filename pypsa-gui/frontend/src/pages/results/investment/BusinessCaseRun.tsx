@@ -70,7 +70,7 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
   const report = running ? null : (s?.report ?? null)
   const stale = running ? null : staleText(s)
   const failure = s?.status === 'failed' || s?.status === 'refused'
-    ? `${s.status === 'refused' ? 'Refused' : 'Failed'}: ${
+    ? `${s.status === 'refused' ? 'Refused.' : 'Failed.'} ${
       s.error ? refusedRunText(s.error, p.lineNames ?? []) : words(s.error_code ?? 'unknown')}`
     : null
 
@@ -154,9 +154,11 @@ function KpiRow({ report }: { report: BusinessCaseReport }) {
       })}
     </dl>
     {fix && (
-      <p className="text-warn" data-testid="bc-first-fix">{fix.text}
-        {fix.place === 'finance' && <>{' '}<button type="button" className="underline" data-testid="bc-first-fix-open"
-          onClick={() => openPanel('commercial', 'economics')}>Finance inputs ›</button></>}</p>
+      <p className="text-warn" data-testid="bc-first-fix">First:{' '}
+        {fix.place === 'finance'
+          ? <button type="button" className="underline" data-testid="bc-first-fix-open"
+              onClick={() => openPanel('commercial', 'economics')}>{fix.action} ›</button>
+          : <>{fix.action} in the lines above.</>}</p>
     )}
     </>
   )

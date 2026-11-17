@@ -268,16 +268,15 @@ describe('walk 03 and 05 on the panel', () => {
     mount({ ...DONE, report: { ...REPORT, pnl: { ...REPORT.pnl!, row_reason },
       kpis: { ...REPORT.kpis, project_npv: ne } } as BusinessCaseReport })
     expect(screen.getByTestId('bc-kpi-project_npv').textContent).toContain(
-      'Not established: the operating section needs a degradation rate for genset 1 and rooftop pv.')
-    expect(screen.getByTestId('bc-first-fix').textContent).toContain(
-      'Needed first: a degradation rate for genset 1 and rooftop pv, in the finance inputs.')
-    expect(screen.getByTestId('bc-first-fix-open').textContent).toBe('Finance inputs ›')
+      'Not established: needs a degradation rate for Genset 1 and Rooftop PV')
+    expect(screen.getByTestId('bc-first-fix-open').textContent).toBe(
+      'Set a degradation rate for Genset 1 and Rooftop PV ›')
   })
 
   it('a refused run names the line and the column', () => {
     mount({ status: 'refused', error: 'business_case_refused:indexation_missing: lines[1].indexation' } as BusinessCaseStudy,
       { lineNames: ['Capacity payment', 'Guarantees of origin'] })
     expect(screen.getByTestId('bc-failure').textContent).toBe(
-      'Refused: Guarantees of origin › Indexation: needed with contract escalation')
+      'Refused. Guarantees of origin: set an indexation rate')
   })
 })
