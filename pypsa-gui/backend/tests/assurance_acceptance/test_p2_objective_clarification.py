@@ -102,3 +102,15 @@ def test_a_reply_outside_the_three_labels_is_not_taken_as_a_choice(solved, chat)
     frames, _ = chat("Marginal dispatch expenditure")
     reasons = {s.get("reason") for s in approval(frames)["receipt"]["result_slots"]}
     assert reasons == {"unsupported_followup"}
+
+
+def test_a_label_typed_while_another_card_is_open_is_not_this_cards_answer():
+    from types import SimpleNamespace
+
+    from harness import assurance_conversation
+
+    state = {"scope": {"profile": "capacity/1", "entity_id": "G1"}}
+    for pending in ("capacity_meaning_required", "cost_quantity_required", None):
+        assert assurance_conversation._objective(
+            SimpleNamespace(), "Solver objective", pending, state
+        ) is None

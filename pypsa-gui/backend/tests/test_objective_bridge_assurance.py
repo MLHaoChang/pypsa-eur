@@ -282,3 +282,89 @@ def test_every_reason_code_is_short_plain_words_with_its_own_line():
     for code, line in ob.EXPLAINED.items():
         assert re.fullmatch(r"[a-z]+(?:_[a-z]+){0,2}", code), code
         assert line.startswith("Not available: ") and "_" not in line and "{" not in line
+
+
+# ── G8: one test per guard the mutants showed untested ────────────────────
+
+
+@pytest.mark.parametrize(
+    "field, value", [("version", 2), ("profile", "network-losses/1"), ("entity_id", "g")]
+)
+def test_a_raw_record_of_another_identity_is_refused(field, value):
+    _, raw, scope = _run(_solved())
+    raw[field] = value
+    with pytest.raises(ValueError, match="^objective_bridge_source_identity$"):
+        ob.calculate(raw, scope)
+
+
+def test_a_reversed_window_stays_reversed_and_an_unknown_bound_is_unsupported():
+    _, raw, scope = _run(_solved())
+    with pytest.raises(ValueError, match="^reversed_window$"):
+        ob.calculate(raw, {**scope, "start": SNAPS[2].isoformat(), "end": SNAPS[0].isoformat()})
+    with pytest.raises(ValueError, match="^unsupported_snapshot_scope$"):
+        ob.calculate(raw, {**scope, "start": "2031-01-01T00:00:00", "end": SNAPS[2].isoformat()})
+
+
+def test_a_stored_lp_power_flow_result_refuses_too():
+    with pytest.raises(ValueError, match="^ac_pf_present$"):
+        ob.source(SimpleNamespace(network=_solved(), solver_state={"lopf_results": {}}), "network")
+
+
+def test_a_non_finite_value_in_a_stored_record_is_never_answered():
+    _, raw, scope = _run(_solved())
+    raw["bridge"]["residual_eur"] = math.inf
+    facts, slots = ob.calculate(raw, scope)
+    assert "residual_eur" not in {f["metric"] for f in facts}
+    assert {s["metric"]: s.get("reason") for s in slots}["residual_eur"] == "terms_missing"
+
+
+def _cb(n):
+    from services.results.cost_breakdown import compute_cost_breakdown
+
+    return compute_cost_breakdown(n, SolverConfig())
+
+
+def test_one_name_only_slack_beside_a_carried_one_makes_the_penalty_unknown():
+    n = _net()
+    n.add("Generator", "__voll_c", bus="b", carrier="AC", p_nom=1e3, marginal_cost=100)
+    assert n.optimize(solver_name="highs") == ("ok", "optimal")
+    assert od._penalty_eur(n, _cb(n)) is None
+
+
+@pytest.mark.parametrize(
+    "by_carrier",
+    [
+        None,  # no per-carrier rows at all
+        [],  # a slack exists but has no row: unknown, not 0
+        [{"component": "Generator", "carrier": "load_shedding", "total": math.inf}],
+    ],
+    ids=["missing", "no-slack-row", "infinite"],
+)
+def test_a_penalty_without_a_finite_slack_row_is_unknown(by_carrier):
+    n = _solved()
+    assert od._penalty_eur(n, {"total": OBJECTIVE, "by_carrier": by_carrier}) is None
+
+
+def test_only_generator_slack_rows_count_as_penalty():
+    rows = [
+        {"component": "Generator", "carrier": "load_shedding", "total": 1200.0},
+        {"component": "StorageUnit", "carrier": "load_shedding", "total": 7.0},
+    ]
+    assert od._penalty_eur(_solved(), {"by_carrier": rows}) == 1200.0
+
+
+def test_a_network_without_generators_has_a_real_zero_penalty():
+    n = pypsa.Network()
+    n.set_snapshots(SNAPS)
+    assert od._penalty_eur(n, {"by_carrier": []}) == 0.0
+
+
+@pytest.mark.parametrize("case", ["rolling", "no-total"])
+def test_the_service_bridges_nothing_without_a_horizon_objective_or_a_total(case):
+    n = _solved()
+    cfg = SolverConfig(solve_strategy="rolling") if case == "rolling" else SolverConfig()
+    out = od.objective_bridge(n, _cb(n) if case == "rolling" else None, cfg)
+    assert out["scope"] == ("last_window" if case == "rolling" else "horizon")
+    for key in ("nonextendable_fixed_cost_eur", "period_weighting_adjustment_eur",
+                "reserve_revenue_eur", "penalty_eur", "residual_eur"):
+        assert out[key] is None, key

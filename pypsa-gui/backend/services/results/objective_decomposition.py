@@ -298,13 +298,11 @@ def _penalty_eur(n, cost_breakdown):
 
     from services.adequacy.slack import SLACK_CARRIERS, slack_generator_mask
 
-    gens = n.generators
-    mask = slack_generator_mask(gens) if len(gens) else None
-    if mask is None or not mask.any():
+    gens = n.generators  # PyPSA always gives this frame a `carrier` column
+    mask = slack_generator_mask(gens)
+    if not mask.any():
         return 0.0
-    if "carrier" not in gens.columns or not (
-        gens.loc[mask, "carrier"].astype(str).isin(SLACK_CARRIERS).all()
-    ):
+    if not gens.loc[mask, "carrier"].astype(str).isin(SLACK_CARRIERS).all():
         return None
     rows = cost_breakdown.get("by_carrier")
     if not isinstance(rows, list):
