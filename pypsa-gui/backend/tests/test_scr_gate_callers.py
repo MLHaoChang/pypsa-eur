@@ -6,6 +6,7 @@ on the network, StorageUnits included, wherever it sits. A set architecture's
 units behind it count here, though the scorecard leaves them out. These pins
 state that behaviour, which the release note announces.
 """
+
 from __future__ import annotations
 
 import queue
@@ -32,7 +33,9 @@ def _network():
 
 
 def test_readiness_derives_the_capacity_from_every_converter_and_storage():
-    scr = eh_readiness(_network(), default_weak_flexible_pack(), budget_solves=10)["scr"]
+    scr = eh_readiness(_network(), default_weak_flexible_pack(), budget_solves=10)[
+        "scr"
+    ]
     assert scr["status"] == "ok" and scr["min_scr"] == pytest.approx(300.0 / 30.0)
 
 
@@ -42,11 +45,19 @@ def test_the_study_gate_derives_the_capacity_from_every_converter_and_storage():
     n = _network()
     PyPSAService.set_network(n)
     report = S.run_eh_study(
-        n, default_weak_flexible_pack(), SolverConfig(voll=5000.0),
-        lock=PyPSAService.get_lock(), log_queue=queue.SimpleQueue(),
-        stages=["apply_pack", "ens_solve"], stop_event=threading.Event())
+        n,
+        default_weak_flexible_pack(),
+        SolverConfig(voll=5000.0),
+        lock=PyPSAService.get_lock(),
+        log_queue=queue.SimpleQueue(),
+        stages=["apply_pack", "ens_solve"],
+        stop_event=threading.Event(),
+    )
     gates = report.sections["gates"]
     assert gates.status == "ok"
     (row,) = gates.payload["buses"]
-    assert row["ibr_source"] == "derived" and row["ibr_assets"] == {"pv": 10.0, "bess": 20.0}
+    assert row["ibr_source"] == "derived" and row["ibr_assets"] == {
+        "pv": 10.0,
+        "bess": 20.0,
+    }
     assert gates.payload["min_scr"] == pytest.approx(300.0 / 30.0)

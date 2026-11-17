@@ -924,8 +924,9 @@ def compare_project(
         # walkthrough 03). Unset, nothing is behind, as on the scorecard: the
         # spec's "ac" is only a default then (GK A 30).
         try:
-            got = grid_facing_offer(n, validate(island),
-                                    spec.architecture if is_set(raw) else None)
+            got = grid_facing_offer(
+                n, validate(island), spec.architecture if is_set(raw) else None
+            )
             offered = got["services"]
             # Units are named only under a set architecture, as on the scorecard.
             offered_sources = got["sources"] if is_set(raw) else None

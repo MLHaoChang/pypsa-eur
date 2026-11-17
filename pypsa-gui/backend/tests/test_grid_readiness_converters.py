@@ -183,7 +183,12 @@ def test_each_architectures_voltage_cell_names_only_voltage_control(
     # DC walk 05 shots: the voltage cell repeated the frequency services and
     # missed the architecture's own assumed voltage control.
     d, _ = _dc_project(
-        tmp_path, monkeypatch, client, project_row, "dc_vc_cells", {"architecture": "ac"}
+        tmp_path,
+        monkeypatch,
+        client,
+        project_row,
+        "dc_vc_cells",
+        {"architecture": "ac"},
     )
     out = A.compare_project(d, T, energy_price_per_mwh=80.0)
     for v in out["variants"]:
@@ -199,7 +204,9 @@ def test_an_unset_architecture_compares_with_the_scorecards_values(
     # GK A 30 ask 3: with nothing stored, the compare's "ac" default does not
     # move units behind an architecture, so its cells read the scorecard's rows.
     dc_load = {k: v for k, v in _bess().items() if k != "architecture"}
-    d, n = _dc_project(tmp_path, monkeypatch, client, project_row, "dc_unset_cmp", dc_load)
+    d, n = _dc_project(
+        tmp_path, monkeypatch, client, project_row, "dc_unset_cmp", dc_load
+    )
     from services.adequacy import dc_backup
 
     assert not A.is_set((dc_backup._meta(d).get("dc_load") or {}).get("spec"))
@@ -207,7 +214,10 @@ def test_an_unset_architecture_compares_with_the_scorecards_values(
     ac = next(v for v in out["variants"] if v["architecture"] == "ac")
     row = _rows(d, n)["frequency_support"]
     cell = ac["verdicts"]["frequency_support"]
-    assert (cell["verdict"], cell["project_value"]) == (row["verdict"], row["project_value"])
+    assert (cell["verdict"], cell["project_value"]) == (
+        row["verdict"],
+        row["project_value"],
+    )
     assert "sources" not in row and cell["sources"] == []  # no units named, as before
 
 
