@@ -1662,20 +1662,24 @@ def _import_dry_run(db: DBSession, user, staging: pathlib.Path, target_name: str
     """What `import_bundle` would create from the checked, staged bundle.
 
     Reads only: no row, no project folder; the caller removes `staging`.
-    The fields are the ones the real import reports; `would_conflict` is the
-    409 the real import would answer for a name already taken.
+    The fields are the ones the real import reports (`stripped`, `ignored`,
+    `rederived`, `rederived_at_default_rate`, `warnings`, `dropped_goal`);
+    `would_conflict` is the 409 the real import would answer for a name
+    already taken. Checks that run only after the move (library pins,
+    hydration) are not part of the answer.
     """
     from services import project_registry
 
     stripped = list(stripped)
+    dropped_goal: list[dict] = []
     cfg_path = staging / "solver_config.json"
     if cfg_path.is_file():
-        try:
-            cfg_data = json.loads(cfg_path.read_text())
-        except ValueError:
-            cfg_data = {}
-        if isinstance(cfg_data, dict) and _carries_user_code(cfg_data):
+        # `_bundle_network_owning_its_costs` has already refused (422) a
+        # solver_config.json that is not a readable JSON object.
+        cfg_data = json.loads(cfg_path.read_text())
+        if _carries_user_code(cfg_data):
             stripped.append("extra_functionality_code")
+        dropped_goal = _dropped_goal(cfg_data)
     clash = project_registry.find_project(db, user, target_name, name_only=True)
     return {
         "dry_run": True,
@@ -1688,6 +1692,7 @@ def _import_dry_run(db: DBSession, user, staging: pathlib.Path, target_name: str
         "rederived": list(rederived),
         "rederived_at_default_rate": bool(rederived) and rate_source == "default",
         "warnings": list(warnings),
+        **({"dropped_goal": dropped_goal} if dropped_goal else {}),
     }
 
 

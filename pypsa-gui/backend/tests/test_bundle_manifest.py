@@ -234,7 +234,7 @@ def test_an_export_carries_a_manifest_and_imports_without_a_warning(
     }
 
     r = _post(client, r.content, "bm_dst")
-    assert r.status_code in (200, 201), r.text
+    assert r.status_code == 200, r.text
     assert "warnings" not in r.json()
     assert not (project_storage_dir("bm_dst") / PC.MANIFEST).exists()
 
@@ -244,7 +244,7 @@ def test_an_old_bundle_without_a_manifest_imports_with_the_warning(
 ):
     d = project_storage_dir(api_project("bm-old"))
     r = _post(client, _bundle_from(d), "bm_old_dst")
-    assert r.status_code in (200, 201), r.text
+    assert r.status_code == 200, r.text
     assert r.json()["warnings"] == [BM.NO_MANIFEST_WARNING]
 
 
@@ -320,7 +320,7 @@ def test_a_dry_run_writes_nothing_and_answers_what_the_import_does(
     }
 
     real = _post(client, data, "bm_dry_dst")
-    assert real.status_code in (200, 201), real.text
+    assert real.status_code == 200, real.text
     got = real.json()
     assert got["stripped"] == dry["stripped"]
     assert got["ignored"] == dry["ignored"]
@@ -497,7 +497,7 @@ def test_would_conflict_matches_the_real_409_both_ways(
     assert _post(client, data, "bm-clash").status_code == 409
     # Free, though a near-miss in case: the dry run says free and the import succeeds.
     assert _dry(client, data, "BM-CLASH-2").json()["would_conflict"] is False
-    assert _post(client, data, "BM-CLASH-2").status_code in (200, 201)
+    assert _post(client, data, "BM-CLASH-2").status_code == 200
 
 
 def test_a_running_study_is_a_dry_run_warning_but_refuses_the_import(
@@ -580,7 +580,7 @@ def test_a_dry_run_reports_rederived_rows_and_the_rate_they_used(
     assert dry["rederived"], dry
     assert dry["rederived_at_default_rate"] is at_default
     real = _post(client, data, "bm_dry_priced_dst")
-    assert real.status_code in (200, 201), real.text
+    assert real.status_code == 200, real.text
     real_fields = real.json()
     assert real_fields["rederived"] == dry["rederived"]
     assert real_fields.get("rederived_at_default_rate", False) is at_default
@@ -636,3 +636,35 @@ def test_the_dry_run_leaves_the_callers_stripped_list_alone(tmp_path):
         )
     assert out["stripped"] == ["gridspine.from_network", "extra_functionality_code"]
     assert stripped == ["gridspine.from_network"]
+
+
+@pytest.mark.parametrize("cfg", [b"{not json", b"[1, 2]"], ids=["not-json", "not-object"])
+def test_an_unreadable_solver_config_refuses_the_dry_run_and_the_import_alike(
+    client, api_project, project_storage_dir, project_row, projects_root, row_count, cfg
+):
+    d = project_storage_dir(api_project("bm-badcfg"))
+    data = _bundle_from(d, {"solver_config.json": cfg})
+    rows, tree = row_count(), _tree(projects_root)
+
+    for r in (_dry(client, data, "bm_badcfg_dst"), _post(client, data, "bm_badcfg_dst")):
+        assert r.status_code == 422, r.text
+        detail = r.json()["detail"]
+        assert detail["error_kind"] == "import_unreadable"
+        assert "solver_config.json" in detail["message"]
+    assert (row_count(), _tree(projects_root)) == (rows, tree)
+    assert _left_behind(project_row, projects_root, "bm_badcfg_dst") == []
+
+
+def test_a_dry_run_names_the_goal_values_the_import_drops(
+    client, api_project, project_storage_dir
+):
+    d = project_storage_dir(api_project("bm-goal"))
+    cfg = json.dumps({"target_lole_h": -1}).encode()
+    data = _bundle_from(d, {"solver_config.json": cfg})
+
+    dry = _dry(client, data, "bm_goal_dst")
+    assert dry.status_code == 200, dry.text
+    assert dry.json()["dropped_goal"] == [{"field": "target_lole_h", "value": -1}]
+    real = _post(client, data, "bm_goal_dst")
+    assert real.status_code == 200, real.text
+    assert real.json()["dropped_goal"] == dry.json()["dropped_goal"]
