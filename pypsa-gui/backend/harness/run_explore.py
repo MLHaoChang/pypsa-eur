@@ -1190,6 +1190,7 @@ def advance(path, *, boot, clock) -> bool:
         if step["tool"] == "run_sensitivity_sweep" and step["status"] in (
             "completed",
             "failed",
+            "cancelled",
             "uncertain",
         ):
             outcomes = _outcomes(step)

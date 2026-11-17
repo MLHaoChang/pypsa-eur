@@ -127,6 +127,7 @@ describe('RunMonitor', () => {
     ['solves_used_up', /^Solve budget used up: the run waits for you: Change the budget ›$/],
     ['expired', /^Unattended approval expired: Continue step by stepNothing runs until you resume: it picks up at Solve\.$/],
     ['solver_error', /^Solve did not finish: Open the solve log ›$/],
+    ['solve_stopped', /^The solve was stopped: the run waits for you: Open the solve log ›$/],
     ['out_of_date', /^Inputs out of date: Review a new brief ›$/],
   ] as const)('says the %s failure in words with a › fix', async (state, words) => {
     show(state)
