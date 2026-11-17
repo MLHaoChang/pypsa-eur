@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useUIStore } from '../../store/uiStore'
 const nav = vi.hoisted(() => ({ openFlowTarget: vi.fn(), openFlowTargetInPlace: vi.fn() }))
 vi.mock('../../layout/flowNavigation', () => nav)
-import ProductionTiles from './ProductionTiles'
+import ProductionTiles, { processCarrierLabels } from './ProductionTiles'
 import type { ProcessAmount, ProcessProduct, ProcessView } from '../../api/types'
 
 afterEach(cleanup)
@@ -65,4 +65,34 @@ describe('ProductionTiles', () => {
       expect(nav[used]).toHaveBeenCalledWith({ section: 'carriers', panel: null, component: 'Bus', entity: 'nh3', field: 'mwh_per_t' })
       expect(nav[other]).not.toHaveBeenCalled()
     })
+
+  // Control-strategy walkthrough issue 10: the product bought in, so Made + Bought in + Lost = Delivered.
+  it('shows the product bought in, priced, between Made and Delivered', () => {
+    const p = { ...NH3, production: amount(900), buy_in: amount(60, { eur: 56_400_000, carriers: ['NH3 import'] }),
+      lost: amount(40, { eur: 32_000, carriers: ['NH3 shortfall'] }) }
+    render(<ProductionTiles view={view([p])} />)
+    const ids = [...document.querySelectorAll('[data-testid^="production-nh3-"]')].map(e => e.getAttribute('data-testid'))
+    expect(ids.slice(0, 4)).toEqual(['production-nh3-made', 'production-nh3-bought-in', 'production-nh3-delivered', 'production-nh3-lost'])
+    const tile = screen.getByTestId('production-nh3-bought-in')
+    expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('60.0 t')
+    expect(tile.textContent).toContain('€\u00a056\u00a0m at the buy-in price')
+  })
+
+  it('shows a real zero bought in, and hides the tile only when the bus has no buy-in', () => {
+    render(<ProductionTiles view={view([{ ...NH3, buy_in: amount(0, { eur: 0, carriers: ['NH3 import'] }) }])} />)
+    expect(screen.getByTestId('production-nh3-bought-in').querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('0 t')
+    cleanup()
+    render(<ProductionTiles view={view([{ ...NH3, buy_in: amount(0, { eur: 0, carriers: [] }) }])} />)
+    expect(screen.queryByTestId('production-nh3-bought-in')).toBeNull()
+  })
+})
+
+describe('processCarrierLabels', () => {
+  it('names the buy-in and shortfall carriers in the tile words, with the product name', () => {
+    const p = { ...NH3, buy_in: amount(60, { carriers: ['NH3 import'] }), lost: amount(40, { carriers: ['NH3 shortfall'] }) }
+    const labels = processCarrierLabels(view([p]))
+    expect(labels.get('NH3 import')).toBe('NH₃ bought in')
+    expect(labels.get('NH3 shortfall')).toBe('NH₃ lost (shortfall)')
+    expect(processCarrierLabels(null).size).toBe(0)
+  })
 })

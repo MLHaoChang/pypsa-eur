@@ -14,6 +14,7 @@ vi.mock('../../api/flow', async (orig) => ({ ...(await orig<typeof import('../..
 const api = vi.hoisted(() => ({
   getCostBreakdown: vi.fn(), getEmissions: vi.fn(), getLostLoad: vi.fn(), getReserveMargin: vi.fn(),
   getAdequacy: vi.fn(), getStatistics: vi.fn(), getStatus: vi.fn(), getHeadlineKpis: vi.fn(),
+  getProcessView: vi.fn(),
 }))
 vi.mock('../../api/simulation', async (orig) => {
   const actual = await orig<typeof import('../../api/simulation')>()
@@ -21,7 +22,8 @@ vi.mock('../../api/simulation', async (orig) => {
     ...actual,
     resultsApi: { ...actual.resultsApi, getCostBreakdown: api.getCostBreakdown, getEmissions: api.getEmissions,
       getLostLoad: api.getLostLoad, getReserveMargin: api.getReserveMargin, getAdequacy: api.getAdequacy,
-      getStatistics: api.getStatistics, getHeadlineKpis: api.getHeadlineKpis },
+      getStatistics: api.getStatistics, getHeadlineKpis: api.getHeadlineKpis,
+      getProcessView: api.getProcessView },
     simulationApi: { ...actual.simulationApi, getStatus: api.getStatus },
   }
 })
@@ -59,6 +61,7 @@ beforeEach(() => {
   api.getReserveMargin.mockResolvedValue(null)
   api.getAdequacy.mockResolvedValue(null)
   api.getStatistics.mockResolvedValue(STATS)
+  api.getProcessView.mockResolvedValue(null)
 })
 afterEach(() => { cleanup(); vi.clearAllMocks(); useUIStore.setState({ currentProject: null }) })
 
@@ -112,6 +115,20 @@ describe('the Summary tab (M3)', () => {
     expect(row.textContent).toContain('120 MW')
     expect(row.textContent).toContain('100 MW')
     expect(screen.getByTestId('summary-cap-Generator-gas').textContent).toContain('—')
+  })
+
+  it('names the buy-in and shortfall capacities in the Production tiles\' words (control-strategy 10)', async () => {
+    api.getStatistics.mockResolvedValue([
+      { level_0: 'Generator', level_1: 'NH3 import', 'Optimal Capacity': 32, 'Installed Capacity': 32 },
+      { level_0: 'Generator', level_1: 'NH3 shortfall', 'Optimal Capacity': 32, 'Installed Capacity': 32 },
+    ])
+    const amt = (carriers: string[]) => ({ value: 0, unit: 'MWh', t: 0, flag: null, carriers })
+    api.getProcessView.mockResolvedValue({ process_units: [], products: [{ bus: 'nh3', carrier: 'NH3', unit: 'MWh',
+      t_per_unit: 0.19, production: amt([]), delivery: amt([]), buy_in: amt(['NH3 import']), lost: amt(['NH3 shortfall']),
+      inventory: [] }] })
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('summary-cap-Generator-NH3 import').textContent).toContain('NH₃ bought in'))
+    expect(screen.getByTestId('summary-cap-Generator-NH3 shortfall').textContent).toContain('NH₃ lost (shortfall)')
   })
 
   it('shows the solve status and the LP objective', async () => {

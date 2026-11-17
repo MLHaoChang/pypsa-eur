@@ -373,3 +373,41 @@ def test_the_shared_role_predicate_reads_the_column_never_the_name():
     assert list(product_role_generators(n, "shortfall")) == ["__lost_nh3"]
     assert list(product_role_generators(n, "buy_in")) == ["grid"]
     assert list(product_role_generators(n, "lost")) == []
+
+
+# ── Control-strategy walkthrough issue 10: the buy-in is priced and the tiles add up ──
+def test_the_buy_in_is_priced_at_its_marginal_cost(hb):
+    nh3 = _product(compute_process_view(hb), "nh3")
+    p = hb.generators_t.p["__buy_nh3"].clip(lower=0)
+    w = hb.snapshot_weightings.objective
+    assert nh3["buy_in"]["eur"] == pytest.approx(float((p * 97.0 * w).sum()))
+    assert nh3["buy_in"]["eur"] > 0
+    assert nh3["buy_in"]["eur_flag"] is None
+    assert nh3["buy_in"]["carriers"] == ["NH3"]
+    assert nh3["lost"]["carriers"] == ["NH3"]
+
+
+def test_a_time_varying_buy_in_price_is_summed_per_hour():
+    n = _hb_network()
+    n.generators_t.marginal_cost["__buy_nh3"] = [90.0, 91.0, 92.0, 93.0, 94.0, 95.0]
+    nh3 = _product(compute_process_view(n), "nh3")
+    p = n.generators_t.p["__buy_nh3"].clip(lower=0)
+    expected = float((p * pd.Series([90.0, 91.0, 92.0, 93.0, 94.0, 95.0], index=n.snapshots)).sum())
+    assert nh3["buy_in"]["eur"] == pytest.approx(expected)
+
+
+def test_a_bus_without_a_buy_in_has_no_buy_in_carriers():
+    n = _hb_network()
+    n.remove("Generator", "__buy_nh3")
+    nh3 = _product(compute_process_view(n), "nh3")
+    assert nh3["buy_in"]["carriers"] == []
+    assert nh3["buy_in"]["eur"] == 0.0
+
+
+def test_made_plus_bought_in_plus_lost_is_delivered(hb):
+    # The tiles' identity: the shortfall slack feeds the bus, so the load's p (Delivered) counts it;
+    # the cyclic tank's level change is zero over the horizon.
+    nh3 = _product(compute_process_view(hb), "nh3")
+    assert nh3["lost"]["t"] > 0 and nh3["buy_in"]["t"] > 0
+    made, bought, lost = nh3["production"]["t"], nh3["buy_in"]["t"], nh3["lost"]["t"]
+    assert made + bought + lost == pytest.approx(nh3["delivery"]["t"], rel=1e-6)

@@ -6,6 +6,7 @@ import Kpi from '../../components/Kpi'
 import type { ResultStateKind } from '../../components/ResultState'
 import type { ProcessAmount, ProcessProduct, ProcessView } from '../../api/types'
 import { fmtCurrency, fmtTonnage } from '../../utils/format'
+import { money } from '../../utils/money'
 import { openComponentField } from './openPanel'
 
 const REASON: Record<string, string> = {
@@ -60,13 +61,39 @@ export function productionTiles(p: ProcessProduct): ProductionTile[] {
         reason: p.inventory.length ? reasonFor(p.t_per_unit == null ? 'tonne_factor_missing' : 'non_finite_values')
           : 'No store sits on this product bus.',
         fixBus: p.inventory.length && p.t_per_unit == null ? p.bus : undefined }
+  // Control-strategy walkthrough issue 10: Made + Bought in + Lost = Delivered. Hidden only when the bus
+  // has no buy-in generator (`carriers` empty); a real zero shows as one.
+  const boughtIn: ProductionTile[] = p.buy_in.carriers?.length === 0 ? [] : [{
+    ...tonnes('bought-in', 'Bought in', p.buy_in, 'whole horizon', p.bus),
+    ...(p.buy_in.t != null && p.buy_in.eur != null && Number.isFinite(p.buy_in.eur)
+      ? { basis: `whole horizon · ${money(p.buy_in.eur, 'EUR')} at the buy-in price` } : {}),
+  }]
   return [
     tonnes('made', 'Made', p.production, 'whole horizon', p.bus),
+    ...boughtIn,
     tonnes('delivered', 'Delivered', p.delivery, 'whole horizon', p.bus),
     tonnes('lost', 'Lost', p.lost, 'shortfall, whole horizon', p.bus),
     lostEur,
     inventory,
   ]
+}
+
+/** "NH3" → "NH₃": a product name with its digits set as subscripts, as the templates write it. */
+function productName(carrier: string): string {
+  const SUB = '₀₁₂₃₄₅₆₇₈₉'
+  return carrier.replace(/([A-Za-z)])(\d+)/g, (_, a: string, d: string) => a + [...d].map(c => SUB[Number(c)]).join(''))
+}
+
+/** The Key-capacities names for the buy-in and shortfall generators' carriers, in the tiles' words
+ *  (control-strategy walkthrough issue 10): "NH₃ bought in", "NH₃ lost (shortfall)". */
+export function processCarrierLabels(view: ProcessView | null | undefined): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const p of view?.products ?? []) {
+    const name = productName(p.carrier || p.bus)
+    for (const c of p.buy_in.carriers ?? []) out.set(c, `${name} bought in`)
+    for (const c of p.lost.carriers ?? []) out.set(c, `${name} lost (shortfall)`)
+  }
+  return out
 }
 
 export default function ProductionTiles({ view }: { view: ProcessView | null | undefined }) {

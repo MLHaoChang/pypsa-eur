@@ -21,7 +21,7 @@ import {
 import type { AdequacyReportPayload } from './adequacy'
 import { CARD_GROUPS, type CardGroupId } from './groups'
 import { freshnessOf } from './GroupHeader'
-import ProductionTiles from './ProductionTiles'
+import ProductionTiles, { processCarrierLabels } from './ProductionTiles'
 import OperationalGap from './OperationalGap'
 import { solveWords } from './solveWords'
 import HeadlineStrip, { useHeadlineKpis } from './HeadlineStrip'
@@ -140,6 +140,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
 
   const c = costView(cost, selectedPeriod)
   const e = emissionsView(emissions as EmissionsPayload | null | undefined, selectedPeriod)
+  const carrierLabels = processCarrierLabels(processView)
   const caps = capacityRows(stats as Record<string, unknown>[] | null | undefined, selectedPeriod)
   const ll = (lostLoad ?? null) as LostLoadPayload | null
   const rm = reserveMarginVerdict(margin as ReserveMarginSummary | null | undefined)
@@ -276,7 +277,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
               <tbody>
                 {caps.slice(0, MAX_CAPACITY_ROWS).map(r => (
                   <tr key={`${r.component}-${r.carrier}`} data-testid={`summary-cap-${r.component}-${r.carrier}`}>
-                    <td className="truncate" title={r.component}>{r.carrier || r.component}</td>
+                    <td className="truncate" title={r.component}>{carrierLabels.get(r.carrier) ?? (r.carrier || r.component)}</td>
                     <td className="text-right font-mono tabular-nums">{fmtCapacity(r.capacity, r.unit)}</td>
                     <td className="text-right font-mono tabular-nums">{r.newBuild > 0 ? fmtCapacity(r.newBuild, r.unit) : '—'}</td>
                   </tr>

@@ -1408,9 +1408,11 @@ export interface ProcessAmount {
   t: number | null
   t_flag?: string | null
   flag: string | null
-  /** Set on `lost` only: the shortfall priced, null with `eur_flag` when unknown. */
+  /** Set on `lost` (the shortfall priced) and `buy_in` (at its marginal cost); null with `eur_flag` when unknown. */
   eur?: number | null
   eur_flag?: string | null
+  /** Set on `buy_in` and `lost`: the carriers of the buy-in / shortfall generators (empty: none on the bus). */
+  carriers?: string[]
 }
 export interface ProcessInventory { name: string; unit: string; e: (number | null)[]; flag: string | null }
 export interface ProcessProduct {

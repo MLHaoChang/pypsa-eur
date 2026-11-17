@@ -151,7 +151,8 @@ def _product(view: _View, bus: str) -> dict:
     if capture_flag and not lost_amount.get("flag"):
         lost_amount["flag"] = capture_flag              # stale: shown, never as current
     lost_amount.update(eur=eur, eur_flag=eur_flag or capture_flag, eur_by_period=eur_pp,
-                       eur_weighting=COST_BASIS)
+                       eur_weighting=COST_BASIS,
+                       carriers=_carriers(n, [s.name for s in lost if s.source == "generator"]))
 
     inventory = []
     for st in n.stores.index[n.stores["bus"] == bus]:
@@ -168,13 +169,38 @@ def _product(view: _View, bus: str) -> dict:
         "product_value": product_value(n, bus),
         "production": view.amount(made, unit, tf),
         "delivery": view.amount([s for s in delivered if s is not None], unit, tf),
-        "buy_in": view.amount([s.clip(lower=0) for s in (_frame_col(gen_p, g, sns) for g in buy) if s is not None],
-                              unit, tf),
+        "buy_in": _buy_in(n, view, buy, gen_p, unit, tf),
         "lost": lost_amount,
         "unused_supply": view.amount([u for u in (_unused(view, g) for g in sources) if u is not None], unit, tf),
         "inventory": inventory,
         "role_flag": sorted(role_flags)[0] if role_flags else None,
     }
+
+
+def _carriers(n, gens) -> list[str]:
+    """The carriers of these Generators, sorted, so the Key-capacities rows can use the tile words."""
+    return sorted({str(n.generators.at[g, "carrier"]) for g in gens if g in n.generators.index})
+
+
+def _buy_in(n, view: _View, buy: list, gen_p, unit: str, tf: float | None) -> dict:
+    """The product bought in: its amount, and what it cost at the buy-in generators' marginal cost
+    (per snapshot, on the objective basis, as `lost.eur` is), control-strategy walkthrough issue 10."""
+    flows = [(g, s.clip(lower=0)) for g, s in ((g, _frame_col(gen_p, g, view.sns)) for g in buy) if s is not None]
+    out = view.amount([s for _, s in flows], unit, tf)
+    eur, eur_flag, eur_pp = 0.0, None, {}
+    if flows:
+        mc = n.get_switchable_as_dense("Generator", "marginal_cost", inds=[g for g, _ in flows])
+        for g, s in flows:
+            t, pp = view.wsum(s * mc[g].reindex(view.sns), view.w_cost)
+            if t is None:
+                eur, eur_flag, eur_pp = None, "non_finite_values", {}
+                break
+            eur += t
+            for k, v in pp.items():
+                eur_pp[k] = eur_pp.get(k, 0.0) + v
+    out.update(eur=eur, eur_flag=eur_flag, eur_by_period=eur_pp, eur_weighting=COST_BASIS,
+               carriers=_carriers(n, buy))
+    return out
 
 
 def _unused(view: _View, gen: str):
