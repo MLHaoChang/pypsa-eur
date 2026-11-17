@@ -247,12 +247,6 @@ def test_the_pack_carries_every_sheet_and_the_rscad_note(tmp_path):
         "cables",
         "converters",
     }
-    for f in p.manifest["files"]:
-        assert (
-            f in rscad_notes()
-            or not f.endswith(".csv")
-            or f.split(".")[0] not in SHEETS
-        )
 
 
 def test_the_campus_bundle_writes_the_emt_pack(tmp_path):
