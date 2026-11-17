@@ -3,7 +3,7 @@
 
 # SC-04 — export an editable site snapshot for Blender
 
-Status: ready-for-agent (engine chosen Q-SS-2; blockers: 02 and 03 per the 2026-11-05 note)
+Status: done (#1517, merged as 983b2a43)
 Type: task
 Dependencies: SC-00 N/SC-01 for native export; SC-02 for bindings; SC-00 B before claiming tested Blender compatibility
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c

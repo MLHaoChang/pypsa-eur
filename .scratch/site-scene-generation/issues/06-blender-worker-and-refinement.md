@@ -3,7 +3,7 @@
 
 # SC-05 — optional integrated Blender generation and reviewed return
 
-Status: ready-for-agent (engine chosen Q-SS-2; blockers: 05 and SC-00 B worker evidence)
+Status: ready-for-agent (slice (a) in progress, see the 2026-11-17 comment; slice (b), the reviewed return, waits on (a) and the SC-00 B numbers)
 Type: task
 Dependencies: SC-04; SC-00 worker/protocol/resource evidence
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -45,3 +45,17 @@ Was: `needs-triage — specification proposed; not implemented`. Owner question 
 ### 2026-11-14: engine chosen (Q-SS-2)
 
 2026-11-14, owner answer Q-SS-2 (coordinator card): "option 1 (Recommended)". Engines chosen, see [research-engines.md](../research-engines.md) (#1490): Blender-free GLB+manifest by default (trimesh/pygltflib, MIT); Blender 5.2 LTS only as a separate pinned no-network container for optional `.blend` output; photos via OpenDroneMap/NodeODM, out-of-process and unmodified (AGPL). Change: the worker is one container job running the pinned Blender 5.2 LTS binary with `--background --python-exit-code --factory-startup --offline-mode`, no network, resource caps and a process-group kill for cancel/timeout. Not the `bpy` wheel (exact Python 3.13, GPL linked in-process, no cancel). Never open inbound `.blend` files: Blender has no sandbox, isolation is OS-level. Sandbox and resource numbers come from the SC-00 B measured run.
+
+### 2026-11-17: SC-00 B moved to CI; plan GO; split into two slices
+
+- SC-00 B evidence: the agent container may not run the Blender binary (the auto-mode classifier refuses it). Owner decision SC06-CI-1: a manual CI job (`.github/workflows/site-scene-blender-sc00b.yaml`, #1557) measures the round trip. Facts recorded without a run:
+  - Pin: Blender 5.2.4 LTS (2026-11-10), URL https://download.blender.org/release/Blender5.2/blender-5.2.4-linux-x64.tar.xz.
+  - Tarball sha256: 2fd14c50987426897ba60237ee996edf2b4151f4b1a72a460ca20be58c1d2d86 (matches blender.org's).
+  - The unpacked `blender` executable's sha256: 9c12ad1b09401dcd3a8a5336279bca91455f15023aa0e5e4cb5cdb7b116a09f1.
+  - glTF custom-properties options: exporter `export_extras` (default False), importer `import_scene_extras` (default True).
+  - The measured CPU, peak RSS, wall time and output still come from that job.
+- GK B plan GO, with conditions B1–B7 for slice (a) and R1–R2 for slice (b):
+  - Q1: always a container wrapper (`--network none`, read-only root, non-root user, memory cap). There is no in-host mode. An in-host mode for desktop installs is an owner question, not built here.
+  - Q2: split.
+- Slice (a): worker, `blender_scene` job kind, readiness, and `POST .../scene/blender-jobs` + `GET .../scene/artifacts/{id}`. There is no path that applies returned geometry. The caps are conservative placeholders until the CI numbers land.
+- Slice (b): the reviewed return (proposal plus Apply), with GK B's R1 (the returned GLB is untrusted: size caps, embedded buffers only) and R2. It also fixes the contract `lock: False` mismatch on the proposal create and cancel routes.
