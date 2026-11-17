@@ -360,3 +360,10 @@ Eight sessions reached 300k context in 75–120 minutes. The causes were full-si
 - **Small script faults cost sweeps.** `inputs.sh` died on a PR with no merge base; `brief.py --stream X` exited on a missing template block; `whois.py` needed code for each new reviewer; `tasks.py` printed "no row" for new issues; `frontier.py` listed issues a live session or a HOLD decision held.
   - Fix: `inputs.sh` leaves that PR out and carries on; a missing stream block warns; `whois.py` builds roles from the labelled lines of the role files; `tasks.py` adds a row for a new issue; `frontier.py` matches a session's `doing` text to the issue id (tag, `<effort> NN/MM`) and lists `HOLD-...` decisions' issues under `--held`.
   - Lives in: `scripts/coord/inputs.sh`, `brief.py`, `whois.py`, `tasks.py`, `frontier.py`.
+
+## 17 Nov 2026: registry fragments (retro package RETRO-FRAG-1)
+
+- **Central registry files serialised feature PRs.** On 17 Nov four open PRs edited the write-surface lock-policy table, and three each the route chat-disposition table, the LC-06 family manifest, `chat_tools.py` and `routers/chat.py`; `not_via_chat.py` blocked a business-case PR. Every new route or tool added a row to the same lists.
+  - Fix: each per-route and per-tool registry takes the error-kind `.d/` fragment pattern. A PR adds its own `<branch>.json`; the loader puts the hand-written rows first, then the JSON base, then the fragments in file-name order, refuses a key defined twice (so a fragment cannot override a reviewed row), and every existing check runs on the merged table. Loaders landed first with no row moved; the existing rows migrate later, in a PR timed when few PRs are open.
+  - Lives in: `pypsa-gui/backend/smoke/json_fragments.py` (`extend`, `extend_items`), the registries' `.d/` folders and READMEs, steward "Release note" (live and template copies), `pypsa-gui/backend/harness/README.md`.
+

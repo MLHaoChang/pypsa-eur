@@ -821,10 +821,18 @@ merge in either order. The inventory, route parity
 (`smoke/assistant_route_parity.py`) and control matrix
 (`smoke/assistant_control_matrix.py`) are built in memory by their `--check`s and
 are not committed; `--write` saves a copy under `.scratch/live-voice/` (git
-ignores it) for reading. New entries in the shared hand-written JSON go in a new
-fragment file per PR: error kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity
-declarations in `smoke/assistant_route_parity_declarations.d/`
-(`smoke/json_fragments.py` merges them and fails on a duplicate). A declaration or
+ignores it) for reading. New entries in a shared list go in a new fragment file
+per PR, never a new row in the shared file (RETRO-COST-1, RETRO-FRAG-1): error
+kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity declarations in
+`smoke/assistant_route_parity_declarations.d/`, a write route's or tool's lock
+decision in `tests/write_surface_lock_policy.d/`, a route's chat disposition in
+`tests/route_chat_disposition.d/`, a feature chat cannot do (and its refusal
+goals) in `services/not_via_chat.d/`, a tool's LC-06 family, variant or evidence
+in `smoke/family_manifest.d/`, and a results route's golden surfaces in
+`tests/golden_route_surfaces.d/`. Each folder's README has the format.
+`smoke/json_fragments.py` merges them after the Python rows and fails on a key
+defined twice, so a fragment adds rows and never overrides one; every check
+(stale or unknown route, unknown tool, ceilings) runs on the merged table. A declaration or
 `KNOWN_GAPS` row whose route a tool now serves stays in place and passes as stale;
 the coordinator's sweep deletes it (`smoke/prune_stale_declarations.py`). New tool
 blocks go at the end of TOOLS (and of the matching chat_tools section). Existing tools then keep their selection tie-breaks, which `wiring._bounded_tools` resolves toward the earlier index. Two PRs that append at the same anchor conflict as text: resolve it by keeping both blocks, the earlier-merged PR's first, then run `assistant_inventory.py --check` and the tool-selection tests at the merge.

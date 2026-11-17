@@ -13,6 +13,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
    Done when the PR exists and its head is pushed.
 2. **Release note.** Add a fragment file under `{{RELEASE_NOTES_DIR}}/` as its `README.md` describes.
    Done when the PR diff contains one new fragment.
+   Shared lists that every new route or tool extends (registries, declarations, error kinds) work the same way: each PR adds its own `<branch>.json` in the list's `.d/` folder, merged by a loader that fails on a key defined twice, so two PRs never edit the same lines. Changing or deleting an existing row stays an edit where the row lives.
 3. **Wait for CI on the head.** Run the project's pre-push check (`scripts/coord/prepush.sh` in the reference repo: lint, the fixed contract tests, then the tests mapped to the changed files under a time cap, the repr guard) before every push; it passes, or the push message names the failing step and why it stays. You own CI for your PR: the coordinator does not watch it. Let every run on the current head finish. Each push cancels and restarts {{SLOW_CI_JOB}}, so batch fixes into one validated push.
    `subscribe_pr_activity` only to the PR whose CI you are driving now: each subscription costs a ~13k-char wake. For the other PRs of a stack, run `scripts/coord/ciwait.sh 118 <pr>` with the Bash tool's `run_in_background` instead.
    Done when every check run on the head SHA is completed.
