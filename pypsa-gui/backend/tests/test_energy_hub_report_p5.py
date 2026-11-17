@@ -246,6 +246,18 @@ def test_a_multi_period_asset_is_one_row_per_build():
     ]
 
 
+def test_slack_generators_are_not_in_the_carrier_totals():
+    """The shared slack set: a VOLL / DSR slack generator adds nothing to
+    the carrier totals, by its name or its carrier."""
+    n = _ens_network()
+    n.add("Generator", "__voll_b", bus="b", carrier="gas", p_nom=999.0)
+    n.add("Generator", "flex_b", bus="b", carrier="dsr", p_nom=999.0)
+    sizing = R.sizing_summary_from_network(n)
+    assert "dsr" not in sizing["by_carrier"]
+    assert sizing["by_carrier"]["gas"] == pytest.approx(100.0)
+    assert sizing["total_p_nom_mw"] == pytest.approx(125.0)
+
+
 def test_a_sized_storage_with_no_duration_has_no_energy():
     """GK A 30 A7 survivor: a built storage unit whose max_hours is not a
     finite number has no MWh, rather than failing the summary."""
