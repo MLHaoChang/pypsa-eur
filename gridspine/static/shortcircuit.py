@@ -44,6 +44,7 @@ import pandas as pd
 from gridspine.schema.contingency import FAULT_CASES, validate_fault_levels
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch
+from gridspine.static import series_caps as SC
 from gridspine.static.loadflow import _apply_loads
 from gridspine.templates.unit_params import UnitTemplates
 
@@ -184,7 +185,7 @@ def fault_levels(net, dispatch, loads, hour, registry, templates, case="max") ->
     """Validated fault-level table for ``hour``: bus, ikss_ka, sk_mva, case."""
     if case not in FAULT_CASES:
         raise ContractError(f"case must be one of {sorted(FAULT_CASES)}, got {case!r}")
-    work = copy.deepcopy(net)
+    work = SC.bypass_for_faults(copy.deepcopy(net))  # IEC 60909-0: a bypassed series cap is neglected
     apply_fault_state(work, dispatch, loads, hour, registry, templates)
     sc.calc_sc(work, fault="3ph", case=case)
     res = work.res_bus_sc.reindex(work.bus.index)

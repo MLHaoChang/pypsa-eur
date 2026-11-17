@@ -64,6 +64,7 @@ import numpy as np
 import pandas as pd
 
 from gridspine.static import island_sc as ISC
+from gridspine.static import series_caps as SC
 from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 
 #: The operator a = e^(j 120 deg).
@@ -216,6 +217,7 @@ def sequence_net(campus, sources, island=True, case="max", gfl_min_case="drop", 
     bus behind its unit transformer): that unit then takes K_G and its
     transformer no correction."""
     net = campus.net
+    SC.refuse(net, "sequence networks (unbalanced faults, earthing)")
     sbase = float(net.sn_mva)
     names = [str(b) for b in net.bus["name"]]
     at = {int(b): n for n, b in enumerate(net.bus.index)}

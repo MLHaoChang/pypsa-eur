@@ -139,11 +139,31 @@ Refused at load, each with a message naming the field:
 * a malformed ``vector_group``, earthing on a delta winding, or solid or
   resistance earthing on a star whose neutral is not brought out;
 * a relay with neither pickup;
+* a series capacitor between unknown buses, the same bus or buses of
+  different nominal voltages; with both or neither of ``xc_ohm`` and ``k``;
+  with ``k`` outside (0, 1), or ``k`` without a ``line`` that is a cable in
+  series with it (sharing exactly one of its buses); with an unknown
+  ``protection``;
 * an earthing transformer at an unknown bus or with an unknown field;
 * ``sk_min`` above ``sk_max``;
 * duplicate names;
 * a name outside the canonical charset or 12-character cap
   (``schema/network.py``).
+
+A **series capacitor** (GC-01b, read by GC-08's sub-synchronous scan) is
+``series_capacitors: {name: {from_bus, to_bus, xc_ohm}}``: ``xc_ohm`` is
+the tagged, positive capacitive reactance magnitude at f0. Alternatively it
+can be ``k`` (tagged, the compensation degree, 0 < k < 1) with ``line``, the
+cable it compensates; then Xc = k * X_line, tagged with k's source. The
+cable must be in series with the capacitor: it shares exactly one bus with
+it. A cable between the same two buses would sit in parallel with it. Both
+buses are at the same nominal voltage. The capacitor enters the net as a
+pandapower ``impedance`` of -Xc (``rft = rtf = 0``) and the
+``series_capacitors`` table lists it. ``protection`` (untagged) is
+``bypassed`` (the default: a voltage-limiting device in parallel, as real
+installations have) or ``none``. IEC 60909-0 lets a bypassed capacitor be
+neglected in short-circuit calculations, so the fault-level paths short it
+(``static/series_caps.bypass_for_faults``); load flow and the sub-synchronous scan keep Xc.
 
 Any element may carry ``pypsa_name``, the name it has in the capacity-
 expansion project. It is a plain string and not a value, so it is untagged.
@@ -173,6 +193,7 @@ from gridspine.schema.island import (
 from gridspine.schema.network import validate_canonical
 from gridspine.schema.transformer import VECTOR_GROUP, check_tap
 from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
+from gridspine.static import series_caps as SC
 
 SOURCES = frozenset({"measured", "datasheet", "assumed"})
 UNIT_KINDS = ("load", "bess", "pv", "wind", "fuel_cell", "genset", "ups")
@@ -199,7 +220,7 @@ REGISTRY_KIND = {"bess": "storage", "ups": "storage", "pv": "res", "wind": "res"
 WINDING_TOLERANCE = 0.10
 
 _TOP = frozenset({"name", "f_hz", "pcc", "buses", "transformers", "cables", "units", "compensation", "island",
-                  "relays", "earthing_transformers", "vendor_models"})
+                  "relays", "earthing_transformers", "vendor_models", "series_capacitors"})
 #: A relay (island plan I5): the branch it protects, the bus whose fault it
 #: must see, its pickups (tagged: the phase ``i_pickup_ka`` and the
 #: earth-fault ``i_pickup_e_ka``, at least one) and its timing. An instantaneous relay is
@@ -242,6 +263,13 @@ _ASSET_FLAGS = ("existing", "library_id")
 #: When an asset was put in service (plan C14): tagged, optional, a whole year.
 _COMMISSIONED = "commissioning_year"
 _COMP_STRUCTURAL = ("name", "bus", "kind", "library_id", "pypsa_name")
+#: A series capacitor (GC-01b): exactly one of ``xc_ohm`` and ``k`` + ``line``.
+_SERIES_CAP_VALUES = ("xc_ohm", "k")
+_SERIES_CAP_STRUCTURAL = ("from_bus", "to_bus", "line", "protection", "pypsa_name")
+#: ``bypassed``: a voltage-limiting device in parallel, so IEC 60909-0 lets the
+#: fault-level paths neglect the capacitor; ``none`` keeps it in them.
+SERIES_CAP_PROTECTIONS = ("bypassed", "none")
+_SERIES_CAP_COLUMNS = ["name", "from_bus", "to_bus", "xc_ohm", "source", "protection"]
 #: Fields that may be zero. Every other tagged field must be strictly positive.
 _MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "rx_sc", "rx_max", "rx_min", "rx_normal", "c0_nf_per_km",
                           "r0x0_max", "r0x0_min"})
@@ -310,6 +338,19 @@ class Campus:
     #: tool, model, version, sha256}}`` (``schema/campus.py``); stored, never
     #: parsed. Empty when none is given.
     vendor_models: dict = dataclasses.field(default_factory=dict)
+    #: The series capacitors (GC-01b), index ``name``: ``from_bus``,
+    #: ``to_bus`` (campus bus names), ``xc_ohm`` (at f0, positive),
+    #: ``source`` and ``protection``; empty when none is given. Each is also a
+    #: pandapower ``impedance`` of the same name in ``net``.
+    series_capacitors: pd.DataFrame = dataclasses.field(default_factory=lambda: _empty_series_capacitors())
+
+    @property
+    def series_caps(self) -> list:
+        """The series capacitors as GC-08's sub-synchronous scan takes them:
+        ``[(from pandapower bus, to pandapower bus, Xc ohm at f0)]``."""
+        bus = pd.Series(self.net.bus.index, index=self.net.bus["name"])
+        return [(int(bus[r.from_bus]), int(bus[r.to_bus]), float(r.xc_ohm))
+                for r in self.series_capacitors.itertuples()]
 
 
 _COMP_COLUMNS = ["name", "kind", "bus", "q_mvar", "steps", "library_id", "pypsa_name"]
@@ -321,6 +362,70 @@ _ET_COLUMNS = ["bus", "x0_ohm", "r_n_ohm"]
 
 def _empty_earthing_transformers():
     return pd.DataFrame(columns=["name", *_ET_COLUMNS]).set_index("name")
+
+
+def _empty_series_capacitors():
+    return pd.DataFrame(columns=_SERIES_CAP_COLUMNS).set_index("name")
+
+
+def _series_capacitors(caps, buses, idx, net, rows, edges):
+    """Validate the ``series_capacitors`` block, add each as a pandapower
+    ``impedance`` of -Xc and an edge, and return their table. Runs after
+    the cables, whose reactance a ``k`` entry reads from ``net.line``."""
+    out = []
+    for cname, cs in caps.items():
+        where = f"series_capacitors.{cname}"
+        _fields(where, cs, _SERIES_CAP_VALUES, _SERIES_CAP_STRUCTURAL)
+        a, b = str(cs.get("from_bus")), str(cs.get("to_bus"))
+        if a == b:
+            raise ContractError(f"{where}: from_bus and to_bus are the same bus {a!r}")
+        if _bus_kv(f"{where}.from_bus", buses, a) != _bus_kv(f"{where}.to_bus", buses, b):
+            raise ContractError(f"{where}: connects buses of different nominal voltages ({buses[a]} and {buses[b]} kV)")
+        if ("xc_ohm" in cs) == ("k" in cs):
+            raise ContractError(f"{where}: give exactly one of xc_ohm and k (with line)")
+        if "xc_ohm" in cs:
+            if "line" in cs:
+                raise ContractError(f"{where}.line: only a k entry names a line")
+            xc = _tagged(where, "xc_ohm", cs, rows)
+            source = cs["xc_ohm"]["source"]
+        else:
+            k = _tagged(where, "k", cs, rows)
+            if not k < 1:
+                raise ContractError(f"{where}.k must be in (0, 1), got {k}")
+            xc = k * _line_x(where, cs.get("line"), (a, b), net)
+            source = cs["k"]["source"]
+        protection = cs.get("protection", "bypassed")
+        if protection not in SERIES_CAP_PROTECTIONS:
+            raise ContractError(f"{where}.protection must be one of {list(SERIES_CAP_PROTECTIONS)}, got {protection!r}")
+        x_pu = -xc / (buses[a] ** 2 / NET_BASE_MVA)
+        i = pp.create_impedance(net, idx[a], idx[b], rft_pu=0.0, xft_pu=x_pu, rtf_pu=0.0, xtf_pu=x_pu,
+                                sn_mva=NET_BASE_MVA, name=str(cname))
+        # the marker static/series_caps.py reads (fault paths bypass, walkers refuse)
+        net.impedance.loc[i, SC.MARK] = True
+        net.impedance.loc[i, SC.PROTECTION] = protection
+        edges.append((a, b))
+        out.append({"name": str(cname), "from_bus": a, "to_bus": b, "xc_ohm": xc, "source": source,
+                    "protection": protection})
+    return pd.DataFrame(out, columns=_SERIES_CAP_COLUMNS).set_index("name") if out else _empty_series_capacitors()
+
+
+def _line_x(where, line, cap_buses, net):
+    """X (ohm at f0) of the cable a ``k`` entry compensates. The cable must be in
+    series with the capacitor: it shares exactly one of its buses."""
+    if not isinstance(line, str) or not line:
+        raise ContractError(f"{where}.line: a k entry needs the name of the cable it compensates")
+    hit = net.line[net.line["name"] == line]
+    if hit.empty:
+        raise ContractError(f"{where}.line: {line!r} is not a cable of the campus")
+    ln = hit.iloc[0]
+    ends = {net.bus.at[ln.from_bus, "name"], net.bus.at[ln.to_bus, "name"]}
+    if len(ends & set(cap_buses)) != 1:
+        raise ContractError(f"{where}.line: cable {line!r} ({sorted(ends)}) is not in series with the capacitor "
+                            f"({sorted(cap_buses)}); it must share exactly one of its buses")
+    x = float(ln.x_ohm_per_km) * float(ln.length_km) / float(ln.parallel)
+    if not math.isfinite(x) or x <= 0:
+        raise ContractError(f"{where}.line: cable {line!r} has no positive reactance to compensate, got {x}")
+    return x
 
 
 def _empty_relays():
@@ -530,8 +635,11 @@ def build_campus(spec) -> Campus:
     ets = c.get("earthing_transformers") or {}
     if not isinstance(ets, dict):
         raise ContractError(f"campus.earthing_transformers must be a mapping, got {type(ets).__name__}")
+    scaps = c.get("series_capacitors") or {}
+    if not isinstance(scaps, dict):
+        raise ContractError(f"campus.series_capacitors must be a mapping, got {type(scaps).__name__}")
     element_names = [GRID_NAME, *map(str, trafos), *map(str, cables), *map(str, units),
-                     *(str(cs["name"]) for cs in comps), *map(str, ets)]
+                     *(str(cs["name"]) for cs in comps), *map(str, ets), *map(str, scaps)]
     dup = sorted({n for n in element_names if element_names.count(n) > 1})
     if dup:
         raise ContractError(f"campus: duplicate element name(s) {dup}; transformer, cable and unit names share one namespace")
@@ -640,6 +748,7 @@ def build_campus(spec) -> Campus:
     earthing_transformers = (pd.DataFrame(et_rows, columns=["name", *_ET_COLUMNS]).set_index("name") if et_rows
                              else _empty_earthing_transformers())
 
+    series_capacitors = _series_capacitors(scaps, buses, idx, net, rows, edges)
     reachable = _connected_from(pcc_bus, edges, buses)
     stranded = sorted(set(buses) - reachable)
     if stranded:
@@ -718,7 +827,8 @@ def build_campus(spec) -> Campus:
     return Campus(name=name, net=net, units=units_df, params=params, registry=registry, compensation=compensation,
                   island=island, earthing=earthing, relays=relays, windings=windings,
                   earthing_transformers=earthing_transformers, assumptions=assumptions, taps=taps,
-                  tie_normally_open=tie_open, vendor_models=vendor_models)
+                  tie_normally_open=tie_open, vendor_models=vendor_models,
+                  series_capacitors=series_capacitors)
 
 
 def _island_requirements(c, units_df, island_units, rows):

@@ -33,6 +33,7 @@ import pandapower.shortcircuit as sc
 import pandas as pd
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 from gridspine.static.contingency_set import branch_contingencies, n2_candidates
 from gridspine.static.shortcircuit import apply_fault_state
 
@@ -120,7 +121,7 @@ def outage_fault_levels(net, dispatch, loads, hour, registry, templates, buses,
     buses = list(dict.fromkeys(buses))
     if not buses:
         raise ContractError("no PoC bus given")
-    faulted = copy.deepcopy(net)
+    faulted = SC.bypass_for_faults(copy.deepcopy(net))  # IEC 60909-0: a bypassed series cap is neglected
     apply_fault_state(faulted, dispatch, loads, hour, registry, templates)
     bus_idx = _bus_indexes(faulted, buses)
     # The plant being judged is out of its own fault level (ledgered in strength.STUDY_LEDGER).

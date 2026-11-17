@@ -53,6 +53,8 @@ sgen (RES / IBR machine) decisions:
 """
 import numpy as np
 
+from gridspine.static import series_caps as SC
+
 SBASE_MVA = 100.0
 
 _EMPTY_TAIL = [
@@ -111,6 +113,7 @@ class _IdCounter:
 
 
 def write_raw(net, path, title="gridspine export", f_hz=50.0):
+    SC.refuse(net, "PSS/E RAW writer")  # GC-01b: not written yet (follow-up)
     nums = _bus_numbers(net)
     name_of = net.bus["name"]
     slack_buses = set(net.ext_grid["bus"])

@@ -140,7 +140,8 @@ class Group:
 
 def _graph(net):
     adj = {int(i): set() for i in net.bus.index}
-    for tbl, a, b in (("line", "from_bus", "to_bus"), ("trafo", "hv_bus", "lv_bus")):
+    # a series capacitor (GC-01b) is an impedance: the buses behind it hang off it
+    for tbl, a, b in (("line", "from_bus", "to_bus"), ("trafo", "hv_bus", "lv_bus"), ("impedance", "from_bus", "to_bus")):
         for i in net[tbl].index:
             x, y = int(net[tbl].at[i, a]), int(net[tbl].at[i, b])
             adj[x].add((y, tbl, i))
