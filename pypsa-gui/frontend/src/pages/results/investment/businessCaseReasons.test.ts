@@ -70,6 +70,10 @@ describe('a not-established KPI names the first blocker (walk 03)', () => {
     expect(firstFix(kpis, pnl({ project_post_tax: [item('operating', 'line_not_established:GoO')] })))
       .toEqual({ action: 'Fix the line “GoO”', place: 'lines' })
     expect(firstFix({ project_npv: { value: 1, status: 'ok', reason: null } }, DC)).toBeNull()
+    // A linked output read from another solve says what to do, never `not own solve`.
+    expect(firstFix(kpis, pnl({ project_post_tax: [item('operating',
+      'linked_output_not_evaluated:capacity.StorageUnit.bess:not_own_solve')] }))?.action)
+      .toBe('Fix its linked output, which is not from a current solve of this project (solve the model again)')
   })
 })
 

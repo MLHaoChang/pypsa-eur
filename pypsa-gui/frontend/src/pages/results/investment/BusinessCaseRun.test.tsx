@@ -136,7 +136,7 @@ describe('the served row reason (BC 17)', () => {
     } }
     expect(rowReason('tax', served)).toBe('Not established: the tax section needs a tax pack.')
     expect(rowReason('net_income', served)).toBe('Not established: the operating section needs '
-      + 'the line “nh3” and its linked output, which is stale; '
+      + 'the line “nh3” and its linked output, which is out of date; '
       + 'the business case needs receivable days; the tax section needs a tax pack.')
     // Served wins; absent falls back; an empty map from a new report never falls back.
     expect(rowReason('tax', PNL)).toBe('Not established. It needs the tax section.')

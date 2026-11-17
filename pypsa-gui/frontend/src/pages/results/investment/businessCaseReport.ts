@@ -133,6 +133,13 @@ const plain = (s: string | undefined) => (s ?? '').replace(/[_:]/g, ' ').trim()
 // An asset or line in its display name (RAW-NAMES-1): `genset_1` reads "Genset 1".
 const forThe = (a: string[]) => (a[0] ? ` for ${displayName(a[0])}` : '')
 
+/** Why a linked output was not read (`linked_outputs.NotEvaluated.reason`), in words. */
+const LINKED_STATE: Record<string, string> = {
+  not_own_solve: 'not from a current solve of this project (solve the model again)',
+  stale: 'out of date',
+  not_finite: 'out of range',
+}
+
 /** Words for each code family the report can serve (BC 17, GK B C3). Each is a noun
  *  phrase: what the section needs. Its keys equal `businessCaseRowReasonCodes.json`,
  *  which a backend test pins to every reason code the engine writes. */
@@ -163,7 +170,7 @@ export const REASON_CODE_WORDS: Record<string, (args: string[]) => string> = {
   itc_twice_same_asset: () => 'one ITC per asset',
   line_not_established: a => `the line “${a.join(':')}”`,
   // The line names it in the user's words; the output id stays out of the text (UX 1).
-  linked_output_not_evaluated: a => `its linked output, which is ${plain(a.slice(1).join(' ')) || 'not evaluated'}`,
+  linked_output_not_evaluated: a => `its linked output, which is ${LINKED_STATE[a[a.length - 1] ?? ''] ?? (plain(a.slice(1).join(' ')) || 'not evaluated')}`,
   not_established: () => 'an input',
   not_finite: a => `the ${rowLabel(a[0] ?? '')} figure in range`,
   operating_not_established: () => 'the operating section',
