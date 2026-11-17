@@ -33,7 +33,7 @@ from fastapi import HTTPException
 VERSION = 1
 
 
-def _refuse(kind: str, message: str, status: int = 409):
+def _raise(kind: str, message: str, status: int = 409):
     raise HTTPException(
         status_code=status, detail={"error_kind": kind, "message": message}
     )
@@ -65,27 +65,25 @@ def preview(args: dict) -> dict:
             {"variable": args.get("y_variable"), "values": args.get("y_values")},
         )
     except M.MapRefused as exc:
-        _refuse(exc.code, exc.detail, 422)
+        _raise(exc.code, exc.detail, 422)
     ap = chat_tools._authorized_project(str(args.get("project") or ""))
     with chat_tools._acting() as (db, user):
         base = R._base_row(ap, db, user)
     if base is None:
-        _refuse("project_not_found", "The study's base project was not found.", 404)
+        _raise("project_not_found", "The study's base project was not found.", 404)
     resident = PyPSAService.get_context(project_registry.registry_key(base))
     try:
         SAR._refuse_unsaved(resident)
         network, _cfg, fingerprint = SAR._saved_base(base)
         archs = SA.select(network, args.get("architectures"))
     except study_runner.RunRefused as exc:
-        _refuse(exc.code, exc.message, exc.status)
+        _raise(exc.code, exc.message, exc.status)
     except SA.ArchitectureUnsolved as exc:
-        _refuse(
-            exc.code, exc.detail, 422 if exc.code == "unknown_architecture" else 409
-        )
+        _raise(exc.code, exc.detail, 422 if exc.code == "unknown_architecture" else 409)
     groups = SA.classify(network)
     for var, values in (xa, ya):
         if not M.apply_variable(network.copy(), var, values[0], groups).scaled:
-            _refuse(
+            _raise(
                 "variable_not_in_network",
                 f"{var.label} changes nothing in this project: it has no such "
                 "asset (or none the optimiser sizes) or its value is zero",
@@ -94,7 +92,7 @@ def preview(args: dict) -> dict:
     cells = len(xa[1]) * len(ya[1])
     too_many = M.solves_refusal(cells, len(archs), campaign.MAX_BUDGET_SOLVES)
     if too_many:
-        _refuse("campaign_budget_invalid", too_many, 422)
+        _raise("campaign_budget_invalid", too_many, 422)
     shown = {
         "project": str(args.get("project") or ""),
         "study_id": str(args.get("study_id") or ""),
@@ -120,12 +118,18 @@ def require_current(args: dict, card: dict) -> None:
     architectures and solve count are what the card computed."""
     now = preview(args)
     if now["digest"] != card["digest"]:
-        _refuse(
-            "system_map_preview_stale",
-            "The base project or the request changed since the card; review a new card.",
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "system_map_preview_stale",
+                "message": "The base project or the request changed since the card; review a new card.",
+            },
         )
     if (now["architectures"], now["solves"]) != (card["architectures"], card["solves"]):
-        _refuse(
-            "system_map_preview_stale",
-            "The architectures or the solve count differ from the card; review a new card.",
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "system_map_preview_stale",
+                "message": "The architectures or the solve count differ from the card; review a new card.",
+            },
         )
