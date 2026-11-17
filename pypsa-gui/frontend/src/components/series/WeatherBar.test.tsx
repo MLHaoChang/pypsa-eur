@@ -80,6 +80,13 @@ describe('WeatherBar', () => {
       expect(line).not.toContain('2030')
     })
 
+    it('names a one-day window by its one date', async () => {
+      prof.weather.mockResolvedValue(answer({ year: 2025, window: { first: '2030-07-01 00:00:00', last: '2030-07-01 23:00:00', hours: 24, runs: 1 } }))
+      renderIt()
+      const line = (await screen.findByTestId('weather-window')).textContent!
+      expect(line).toBe('Your model covers 1 Jul (24 h): a generated profile takes these dates from 2025.')
+    })
+
     it('names both months of a window across the year end', async () => {
       prof.weather.mockResolvedValue(answer({ year: 2025, window: { first: '2030-12-29 00:00:00', last: '2031-01-04 23:00:00', hours: 168, runs: 1 } }))
       renderIt()

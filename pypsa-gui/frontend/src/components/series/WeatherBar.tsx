@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 import { errorText, profilesApi, type ProfileSource, type WeatherChoice } from '../../api/profiles'
 import { nk } from '../../utils/queryKeys'
 import { Seg } from '../PageKit'
-import { windowDates } from './SeriesKit'
+import { DAY_MONTH, windowDates } from './SeriesKit'
 import { openSiteConnection } from '../../pages/economics/SiteConnectionLink'
 
 const YEAR_WORDS = {
@@ -24,7 +24,8 @@ function windowLine(w: WeatherChoice): string | null {
   if (!win || 'unsupported' in win) return null
   if (win.runs > 1) return `Your model has ${win.runs} sampled periods (${win.hours} h): a generated profile takes these dates from ${w.year}.`
   // The window's own calendar dates as the route sends them; never parsed in local time.
-  const dates = windowDates({ from: win.first.slice(0, 10), to: win.last.slice(0, 10) })
+  const [from, to] = [win.first.slice(0, 10), win.last.slice(0, 10)]
+  const dates = from === to ? DAY_MONTH.format(new Date(`${from}T00:00Z`)) : windowDates({ from, to })
   return `Your model covers ${dates} (${win.hours} h): a generated profile takes these dates from ${w.year}.`
 }
 
