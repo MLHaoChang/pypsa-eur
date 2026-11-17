@@ -480,3 +480,24 @@ def test_a_time_varying_buy_in_price_under_multi_period_weights():
     expected = {"2030": 4 * (10 + 20 + 30) * 2 * 10, "2040": 4 * (40 + 50 + 60) * 2 * 5}
     assert nh3["buy_in"]["eur"] == pytest.approx(sum(expected.values()))
     assert {str(k): v for k, v in nh3["buy_in"]["eur_by_period"].items()} == pytest.approx(expected)
+
+
+def test_a_negative_buy_in_flow_costs_nothing():
+    # GK A B7 mutant: the cost clips the flow as the quantity does.
+    n = _hb_network()
+    p = n.generators_t.p["__buy_nh3"].copy()
+    p.iloc[0] = -3.0
+    n.generators_t.p["__buy_nh3"] = p
+    nh3 = _product(compute_process_view(n), "nh3")
+    assert nh3["buy_in"]["eur"] == pytest.approx(float((p.clip(lower=0) * 97.0).sum()))
+
+
+def test_the_buy_in_cost_is_on_the_objective_weights_not_the_energy_ones():
+    # GK A B7 mutant: with objective weights unlike the generator weights, the cost follows the objective's.
+    n = _hb_network()
+    n.snapshot_weightings["objective"] = 2.0
+    n.snapshot_weightings["generators"] = 1.0
+    nh3 = _product(compute_process_view(n), "nh3")
+    p = n.generators_t.p["__buy_nh3"].clip(lower=0)
+    assert nh3["buy_in"]["eur"] == pytest.approx(float((p * 97.0 * 2.0).sum()))
+    assert nh3["buy_in"]["value"] == pytest.approx(float(p.sum()))
