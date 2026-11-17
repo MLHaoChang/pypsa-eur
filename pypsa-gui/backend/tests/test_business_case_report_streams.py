@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import services.business_case.runner as RN
+import services.finance.business_case as BCM
 from models.business_case import CATEGORY_STREAM
 from services.finance.cashflow import BC_STREAM_CLASS, STREAM_CLASS
 from tests.test_business_case_routes import BC_URL, _bc, _bc_poll, _put, _with_ic
@@ -50,6 +51,7 @@ def test_the_report_adds_the_display_keys_and_changes_nothing_else(
         "not_finite",
         "stream_class",
         "stream_source",
+        "row_reason",
     }
     assert set(pnl["stream_class"]) == set(pnl["streams"]) == set(pnl["stream_source"])
     assert pnl["stream_source"]["product_revenue"] == "line:revenue"
@@ -65,6 +67,7 @@ def test_the_report_adds_the_display_keys_and_changes_nothing_else(
     for b in (body, again):
         b["pnl"].pop("stream_class")
         b["pnl"].pop("stream_source")
+        b["pnl"].pop("row_reason")
         b.pop("created_at", None)  # the build time
     assert body == again
     assert set(body["pnl"]) == {"years", "streams", "rows", "not_finite"}
@@ -82,8 +85,12 @@ def test_the_view_s_row_list_is_the_report_s(client, install_network, monkeypatc
     _with_ic(client, install_network, monkeypatch)
     assert _put(client, _bc()).status_code == 200
     assert client.post(BC_URL).status_code == 200
-    rows = _bc_poll(client)["report"]["pnl"]["rows"]
+    pnl = _bc_poll(client)["report"]["pnl"]
+    rows = pnl["rows"]
     assert sorted(rows) == json.loads(PNL_ROWS.read_text())
+    # BC 17: a reason for exactly the rows that read None, each naming its input.
+    assert set(pnl["row_reason"]) == {k for k, v in rows.items() if v is None}
+    assert sorted(BCM._ROW_INPUTS) == json.loads(PNL_ROWS.read_text())
 
 
 def test_line_and_ledger_stream_names_are_disjoint():
@@ -99,3 +106,49 @@ def test_line_and_ledger_stream_names_are_disjoint():
         assert RN._STREAM_SOURCE.get(s, "energy_model") == "energy_model"
     for s in line_streams:
         assert RN._STREAM_SOURCE[s].startswith("line:")
+
+
+def test_bc17_row_reason_is_a_display_key_that_moves_no_digest_or_staleness(
+    client, install_network, monkeypatch
+):
+    """GK B BC 17 C4: two reports that differ only in `row_reason` agree on every other
+    field, the digests among them, and read the same staleness."""
+    seen = {}
+    real = RN.report_body
+
+    def spy(**kw):
+        seen["kw"] = kw
+        return real(**kw)
+
+    monkeypatch.setattr(RN, "report_body", spy)
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    assert client.post(BC_URL).status_code == 200
+    _bc_poll(client)
+    kw = seen["kw"]
+    a = real(**kw)
+    monkeypatch.setattr(
+        BCM,
+        "row_reasons",
+        lambda *_a, **_k: {"revenue": [{"section": "operating", "code": "x"}]},
+    )
+    b = real(**kw)
+    assert a["pnl"]["row_reason"] != b["pnl"]["row_reason"]
+    # Staleness reads the stored bodies with the key in them.
+    current = (a["ic_assumptions_hash"], None)
+    for cur in (current, (None, "gone")):
+        assert RN.staleness(a, inputs_raw=kw["raw"], ic_current=cur) == RN.staleness(
+            b, inputs_raw=kw["raw"], ic_current=cur
+        )
+    assert RN.staleness(b, inputs_raw=kw["raw"], ic_current=current)["stale"] is False
+    for k in (
+        "business_case_hash",
+        "inputs_digest",
+        "ic_assumptions_hash",
+        "ic_case_hash",
+    ):
+        assert a[k] == b[k], k
+    for body in (a, b):
+        body["pnl"].pop("row_reason")
+        body.pop("created_at")
+    assert a == b
