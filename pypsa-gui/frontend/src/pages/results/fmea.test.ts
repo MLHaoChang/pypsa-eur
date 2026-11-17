@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount } from './fmea'
 import type { CoptPayload } from './adequacy'
 
 const copt: CoptPayload = {
@@ -46,6 +46,36 @@ describe('mergeWorksheet', () => {
     expect(mergeWorksheet(null, null)).toEqual([])
     expect(mergeWorksheet(copt, null)).toHaveLength(2)
     expect(mergeWorksheet(null, sidecar)).toHaveLength(1)
+  })
+})
+
+describe('mergeWorksheet — unpriced modes (no VOLL)', () => {
+  // Since #1645 /fmea_modes with no VOLL sends null € fields: never €0.
+  const unpriced: CoptPayload = {
+    ...copt,
+    voll_eur_per_mwh: 0,
+    per_mode: [
+      { ...copt.per_mode![0], name: 'zeta', severity_eur: null, criticality_eur_per_year: null },
+      { ...copt.per_mode![1], name: 'alpha', severity_eur: null, criticality_eur_per_year: null },
+    ],
+  } as unknown as CoptPayload
+  it('keeps a null severity and criticality as null, not 0', () => {
+    const rows = mergeWorksheet(unpriced, null)
+    expect(rows.map(r => r.severity_eur)).toEqual([null, null])
+    expect(rows.map(r => r.criticality_eur_per_year)).toEqual([null, null])
+  })
+  it('sorts unpriced modes after every priced one, by name', () => {
+    const rows = mergeWorksheet(unpriced, sidecar)
+    expect(rows.map(r => r.name)).toEqual(['cyber', 'alpha', 'zeta'])
+  })
+  it('counts the unpriced modes for the visible line', () => {
+    expect(unpricedModeCount(mergeWorksheet(unpriced, sidecar))).toBe(2)
+    expect(unpricedModeCount(mergeWorksheet(copt, sidecar))).toBe(0)
+  })
+  it('writes an empty CSV cell for an unpriced €', () => {
+    const [row] = worksheetCsvRows(mergeWorksheet(unpriced, null))
+    expect(row[WORKSHEET_CSV_HEADER.indexOf('severity_eur')]).toBe('')
+    expect(row[WORKSHEET_CSV_HEADER.indexOf('criticality_eur_per_year')]).toBe('')
   })
 })
 

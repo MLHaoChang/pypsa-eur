@@ -27,10 +27,12 @@ import {
   worksheetCsvRows,
   type ModesPayload,
   unpricedRankingWarning,
+  unpricedModeCount,
   type WorksheetRow,
   type WorksheetSidecar,
   CRITICALITY_PER_YEAR_LABEL,
 } from './fmea'
+import { openReliabilityGoal } from '../../layout/flowNavigation'
 
 const FIDELITY_TIP: Record<string, string> = {
   analytic_convolution:
@@ -76,6 +78,12 @@ function guidedBasis(basis: string): string {
   return 'outage rate'
 }
 
+// An unpriced € cell (no VOLL): plain words, the reason is the visible line
+// above the table, never a tooltip or a bare dash.
+function NotSetCell({ last = false }: { last?: boolean }) {
+  return <td data-testid="fmea-not-set" className={`py-1 ${last ? '' : 'pr-2 '}text-muted`}>Not set</td>
+}
+
 export default function FmeaTab() {
   const currentProject = useUIStore(s => s.currentProject)
   const guided = useUIStore(s => s.uiMode) === 'guided'
@@ -113,6 +121,7 @@ export default function FmeaTab() {
     () => mergeWorksheet((modes ?? null) as ModesPayload | null, sc),
     [modes, sc],
   )
+  const unpricedCount = unpricedModeCount(rows)
 
   // Class B/C need LP re-solves — run on demand, budget-guarded server-side.
   const abortSweep = useMutation({
@@ -207,7 +216,17 @@ export default function FmeaTab() {
         )}
       </header>
 
-      {unpricedRankingWarning(modes as ModesPayload | null | undefined) && (
+      {unpricedCount > 0 ? (
+        <p data-testid="fmea-unpriced-line" className="text-[11px] text-muted">
+          Not priced: {unpricedCount} mode{unpricedCount === 1 ? ' is' : 's are'} listed
+          last and left out of the ranking.{' '}
+          <button type="button" data-testid="fmea-unpriced-set-voll"
+            onClick={() => openReliabilityGoal()}
+            className="text-accent hover:underline">
+            Set the Value of Lost Load (VOLL) in Solver settings ›
+          </button>
+        </p>
+      ) : unpricedRankingWarning(modes as ModesPayload | null | undefined) && (
         <p className="text-[10px] text-danger border border-danger/40 rounded px-2 py-1">
           {unpricedRankingWarning(modes as ModesPayload | null | undefined)}
         </p>
@@ -307,7 +326,7 @@ export default function FmeaTab() {
                   </td>
                   <td className="py-1 pr-2 font-mono">{r.occurrence_per_year.toFixed(2)}
                     <span className="text-muted font-sans"> <Term k="fmea_occurrence">{guidedBasis(r.occurrence_basis)}</Term></span></td>
-                  {r.severity_eur === 0 && zeroReasonText(r.zero_reason) ? (
+                  {r.severity_eur === null ? <NotSetCell /> : r.severity_eur === 0 && zeroReasonText(r.zero_reason) ? (
                     <td className="py-1 pr-2 text-muted">{zeroReasonText(r.zero_reason)}</td>
                   ) : (
                     <td className="py-1 pr-2 font-mono">{fmtCurrency(r.severity_eur, 1)}</td>
@@ -332,7 +351,9 @@ export default function FmeaTab() {
                       )}
                     </span>
                   </td>
-                  <td className="py-1 font-mono font-semibold">{fmtCurrency(r.criticality_eur_per_year, 1)}</td>
+                  {r.criticality_eur_per_year === null ? <NotSetCell last /> : (
+                    <td className="py-1 font-mono font-semibold">{fmtCurrency(r.criticality_eur_per_year, 1)}</td>
+                  )}
                 </tr>
                 )
               })}
@@ -368,10 +389,14 @@ export default function FmeaTab() {
                   <td className="py-1 pr-2">{r.failure_class}</td>
                   <td className="py-1 pr-2 font-mono">{r.occurrence_per_year.toFixed(2)}
                     <span className="text-muted"> {r.occurrence_basis}</span></td>
-                  <td className="py-1 pr-2 font-mono"
-                    title={r.severity_eur === 0 ? zeroReasonText(r.zero_reason) ?? undefined : undefined}>
-                    {fmtCurrency(r.severity_eur, 1)}</td>
-                  <td className="py-1 pr-2 font-mono font-semibold">{fmtCurrency(r.criticality_eur_per_year, 1)}</td>
+                  {r.severity_eur === null ? <NotSetCell /> : (
+                    <td className="py-1 pr-2 font-mono"
+                      title={r.severity_eur === 0 ? zeroReasonText(r.zero_reason) ?? undefined : undefined}>
+                      {fmtCurrency(r.severity_eur, 1)}</td>
+                  )}
+                  {r.criticality_eur_per_year === null ? <NotSetCell /> : (
+                    <td className="py-1 pr-2 font-mono font-semibold">{fmtCurrency(r.criticality_eur_per_year, 1)}</td>
+                  )}
                   <td className="py-1 pr-2">
                     <input
                       className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] w-44 focus:outline-none focus:border-accent"

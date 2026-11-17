@@ -67,8 +67,10 @@ export interface WorksheetRow {
   failure_class: string
   occurrence_per_year: number
   occurrence_basis: string
-  severity_eur: number
-  criticality_eur_per_year: number
+  // null = unpriced: the backend had no VOLL to price the mode (#1645).
+  // Shown as "Not set", ranked after every priced mode, never as €0.
+  severity_eur: number | null
+  criticality_eur_per_year: number | null
   delta_eue_mwh?: number
   in_metric_scope: boolean
   mitigability: string
@@ -91,6 +93,11 @@ export interface WorksheetSidecar {
 // the regenerated row); manual rows append as editable. One ranking, €/yr
 // criticality descending, computed and manual interleaved — the worksheet is
 // ONE table, not two (spec §4.2).
+// A computed row's € field: a number, or null when the backend sent none.
+function eurOrNull(v: unknown): number | null {
+  return v === null || v === undefined ? null : Number(v)
+}
+
 export function mergeWorksheet(
   copt: ModesPayload | null,
   sidecar: WorksheetSidecar | null,
@@ -107,8 +114,8 @@ export function mergeWorksheet(
       failure_class: String(r.failure_class ?? ''),
       occurrence_per_year: Number(r.occurrence_per_year ?? 0),
       occurrence_basis: String(r.occurrence_basis ?? ''),
-      severity_eur: Number(r.severity_eur ?? 0),
-      criticality_eur_per_year: Number(r.criticality_eur_per_year ?? 0),
+      severity_eur: eurOrNull(r.severity_eur),
+      criticality_eur_per_year: eurOrNull(r.criticality_eur_per_year),
       delta_eue_mwh: typeof r.delta_eue_mwh === 'number' ? r.delta_eue_mwh : undefined,
       in_metric_scope: r.in_metric_scope !== false,
       mitigability: overlays[modeId]?.mitigability ?? '',
@@ -137,8 +144,22 @@ export function mergeWorksheet(
       editable: true,
     })
   }
-  rows.sort((a, b) => b.criticality_eur_per_year - a.criticality_eur_per_year)
+  // Priced modes by criticality, then the unpriced ones by name: an unpriced
+  // mode is never ranked as "least critical".
+  rows.sort((a, b) => {
+    const ca = a.criticality_eur_per_year, cb = b.criticality_eur_per_year
+    if (ca === null || cb === null) {
+      if (ca !== cb) return ca === null ? 1 : -1
+      return a.name.localeCompare(b.name)
+    }
+    return cb - ca
+  })
   return rows
+}
+
+/** How many rows the backend could not price (no VOLL). */
+export function unpricedModeCount(rows: WorksheetRow[]): number {
+  return rows.filter(r => r.criticality_eur_per_year === null).length
 }
 
 // IEC 60812-shaped column order: identify the mode, then occurrence,
@@ -155,7 +176,7 @@ export function worksheetCsvRows(rows: WorksheetRow[]): unknown[][] {
   return rows.map(r => [
     r.mode_id, r.failure_class, r.component_class, r.name,
     r.occurrence_per_year, r.occurrence_basis,
-    r.severity_eur, r.criticality_eur_per_year, r.delta_eue_mwh ?? '',
+    r.severity_eur ?? '', r.criticality_eur_per_year ?? '', r.delta_eue_mwh ?? '',
     r.in_metric_scope, r.mitigability, r.engine, r.fidelity,
   ])
 }
