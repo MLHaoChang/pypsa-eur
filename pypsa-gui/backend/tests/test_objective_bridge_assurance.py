@@ -44,8 +44,17 @@ def _net(capital_cost=0.0, slack_carrier="load_shedding"):
     n.snapshot_weightings.loc[:, :] = 2.0
     n.add("Bus", "b")
     n.add("Load", "d", bus="b", p_set=[10.0, 10.0, 10.0])
-    n.add("Generator", "g", bus="b", p_nom=8, marginal_cost=5, capital_cost=capital_cost)
-    n.add("Generator", "__voll_b", bus="b", carrier=slack_carrier, p_nom=1e3, marginal_cost=100)
+    n.add(
+        "Generator", "g", bus="b", p_nom=8, marginal_cost=5, capital_cost=capital_cost
+    )
+    n.add(
+        "Generator",
+        "__voll_b",
+        bus="b",
+        carrier=slack_carrier,
+        p_nom=1e3,
+        marginal_cost=100,
+    )
     return n
 
 
@@ -58,10 +67,17 @@ def _solved(**kw):
 
 def _run(n, state=None, **window):
     raw = ob.source(SimpleNamespace(network=n, solver_state=state or {}), "network")
-    scope = {"profile": ob.PROFILE, "entity_id": "network", "metrics": list(ALL), **window}
+    scope = {
+        "profile": ob.PROFILE,
+        "entity_id": "network",
+        "metrics": list(ALL),
+        **window,
+    }
     facts, slots = ob.calculate(raw, scope)
     out = {f["metric"]: f["value"] for f in facts}
-    out.update({s["metric"]: s["reason"] for s in slots if s["disposition"] == "unavailable"})
+    out.update(
+        {s["metric"]: s["reason"] for s in slots if s["disposition"] == "unavailable"}
+    )
     return out, raw, scope
 
 
@@ -70,15 +86,18 @@ def _run(n, state=None, **window):
 
 def test_a_plain_solve_reconciles_with_its_penalty_inside_the_total():
     out, raw, scope = _run(_solved())
-    assert out == pytest.approx({
-        "objective_eur": OBJECTIVE,
-        "reported_total_cost_eur": OBJECTIVE,
-        "penalty_cost_eur": PENALTY,
-        "nonextendable_fixed_cost_eur": 0.0,
-        "period_weighting_adjustment_eur": 0.0,
-        "reserve_revenue_eur": 0.0,
-        "residual_eur": 0.0,
-    }, abs=1e-6)
+    assert out == pytest.approx(
+        {
+            "objective_eur": OBJECTIVE,
+            "reported_total_cost_eur": OBJECTIVE,
+            "penalty_cost_eur": PENALTY,
+            "nonextendable_fixed_cost_eur": 0.0,
+            "period_weighting_adjustment_eur": 0.0,
+            "reserve_revenue_eur": 0.0,
+            "residual_eur": 0.0,
+        },
+        abs=1e-6,
+    )
     assert ob.notes(raw, scope) == [f"Matches within {1440e-6:.6g} EUR."]
 
 
@@ -86,10 +105,14 @@ def test_fixed_cost_of_an_asset_the_solve_could_not_size_bridges_the_gap():
     out, raw, scope = _run(_solved(capital_cost=10.0))
     assert out["objective_eur"] == pytest.approx(OBJECTIVE)
     assert out["reported_total_cost_eur"] == 1440.05479
-    assert out["nonextendable_fixed_cost_eur"] == pytest.approx(80 * 6 / 8760, rel=1e-12)
+    assert out["nonextendable_fixed_cost_eur"] == pytest.approx(
+        80 * 6 / 8760, rel=1e-12
+    )
     assert out["period_weighting_adjustment_eur"] == 0.0
     # Only the 5-decimal rounding of the total is left: 1440.05479 - 0.0547945... .
-    assert out["residual_eur"] == pytest.approx(-(1440.05479 - 1440 - 80 * 6 / 8760), abs=1e-9)
+    assert out["residual_eur"] == pytest.approx(
+        -(1440.05479 - 1440 - 80 * 6 / 8760), abs=1e-9
+    )
     assert ob.notes(raw, scope)[0].startswith("Matches within")
 
 
@@ -127,8 +150,14 @@ def test_the_objective_is_read_in_eur_after_the_scale_is_reversed(config):
 
     n = _net()
     PyPSAService.set_network(n)
-    status, _ = run_simulation(config, n, PyPSAService.get_lock(), threading.Event(),
-                               queue.SimpleQueue(), state_update=lambda **k: None)
+    status, _ = run_simulation(
+        config,
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **k: None,
+    )
     assert status in ("ok", "optimal")
     out, raw, _ = _run(n, state={"solver_config": config})
     assert raw["objective_scale"] == 1.0
@@ -143,7 +172,9 @@ def test_an_objective_still_scaled_is_unavailable_never_a_wrong_number():
     assert out["objective_eur"] == "still_scaled"
     assert out["residual_eur"] == "still_scaled"
     assert out["reported_total_cost_eur"] == pytest.approx(OBJECTIVE)
-    assert ob.notes(raw, scope) == ["Not available: the objective is still scaled for the solver."]
+    assert ob.notes(raw, scope) == [
+        "Not available: the objective is still scaled for the solver."
+    ]
 
 
 # ── G3: residual tolerance constant, boundary ─────────────────────────────
@@ -191,9 +222,13 @@ def test_no_slack_generator_is_a_real_zero_penalty():
 
 
 def test_a_rolling_horizon_answers_no_row():
-    out, raw, scope = _run(_solved(), state={"solver_config": SolverConfig(solve_strategy="rolling")})
+    out, raw, scope = _run(
+        _solved(), state={"solver_config": SolverConfig(solve_strategy="rolling")}
+    )
     assert out == dict.fromkeys(ALL, "last_window_only")
-    assert ob.notes(raw, scope) == ["Not available: the objective covers only the last window."]
+    assert ob.notes(raw, scope) == [
+        "Not available: the objective covers only the last window."
+    ]
 
 
 def test_an_unverified_solve_answers_no_row(monkeypatch):
@@ -217,21 +252,34 @@ def test_only_the_network_is_a_bridge_entity():
     with pytest.raises(ValueError, match="^network_scope_required$"):
         ob.source(SimpleNamespace(network=_solved(), solver_state={}), "g")
     with pytest.raises(ValueError, match="network_scope_required"):
-        assurance_scope.validate({
-            "version": 1, "profile": ob.PROFILE, "project_id": "p", "entity_id": "g", "retain": False,
-        })
+        assurance_scope.validate(
+            {
+                "version": 1,
+                "profile": ob.PROFILE,
+                "project_id": "p",
+                "entity_id": "g",
+                "retain": False,
+            }
+        )
 
 
 def test_an_ac_power_flow_refuses():
     with pytest.raises(ValueError, match="^ac_pf_present$"):
-        ob.source(SimpleNamespace(network=_solved(), solver_state={"ac_pf_results": {}}), "network")
+        ob.source(
+            SimpleNamespace(network=_solved(), solver_state={"ac_pf_results": {}}),
+            "network",
+        )
 
 
 def test_the_rows_are_in_bridge_order_and_the_disclosure_is_exact():
     assert list(ob.METRICS) == [
-        "objective_eur", "reported_total_cost_eur", "penalty_cost_eur",
-        "nonextendable_fixed_cost_eur", "period_weighting_adjustment_eur",
-        "reserve_revenue_eur", "residual_eur",
+        "objective_eur",
+        "reported_total_cost_eur",
+        "penalty_cost_eur",
+        "nonextendable_fixed_cost_eur",
+        "period_weighting_adjustment_eur",
+        "reserve_revenue_eur",
+        "residual_eur",
     ]
     assert ob.DISCLOSURE == (
         "The solver objective includes penalty and slack terms and period weightings, "
@@ -245,7 +293,9 @@ def test_a_myopic_objective_reads_last_period_only():
     facts, slots = ob.calculate(raw, scope)
     assert facts == []
     assert {s["reason"] for s in slots} == {"last_period_only"}
-    assert ob.notes(raw, scope) == ["Not available: the objective covers only the last period."]
+    assert ob.notes(raw, scope) == [
+        "Not available: the objective covers only the last period."
+    ]
 
 
 def test_an_unreadable_cost_breakdown_reads_plain_reasons_each_explained(monkeypatch):
@@ -266,13 +316,19 @@ def test_an_unreadable_cost_breakdown_reads_plain_reasons_each_explained(monkeyp
         "residual_eur": "total_missing",
     }
     assert ob.notes(raw, scope) == [
-        ob.EXPLAINED["total_missing"], ob.EXPLAINED["not_separable"], ob.EXPLAINED["terms_missing"],
+        ob.EXPLAINED["total_missing"],
+        ob.EXPLAINED["not_separable"],
+        ob.EXPLAINED["terms_missing"],
     ]
 
 
 def test_only_the_requested_rows_reasons_are_explained():
     _, raw, _ = _run(_solved(slack_carrier="AC"))
-    scope = {"profile": ob.PROFILE, "entity_id": "network", "metrics": ["objective_eur"]}
+    scope = {
+        "profile": ob.PROFILE,
+        "entity_id": "network",
+        "metrics": ["objective_eur"],
+    }
     assert ob.notes(raw, scope) == []  # no residual shown, so no match line either
 
 
@@ -281,14 +337,17 @@ def test_every_reason_code_is_short_plain_words_with_its_own_line():
 
     for code, line in ob.EXPLAINED.items():
         assert re.fullmatch(r"[a-z]+(?:_[a-z]+){0,2}", code), code
-        assert line.startswith("Not available: ") and "_" not in line and "{" not in line
+        assert (
+            line.startswith("Not available: ") and "_" not in line and "{" not in line
+        )
 
 
 # ── G8: one test per guard the mutants showed untested ────────────────────
 
 
 @pytest.mark.parametrize(
-    "field, value", [("version", 2), ("profile", "network-losses/1"), ("entity_id", "g")]
+    "field, value",
+    [("version", 2), ("profile", "network-losses/1"), ("entity_id", "g")],
 )
 def test_a_raw_record_of_another_identity_is_refused(field, value):
     _, raw, scope = _run(_solved())
@@ -300,14 +359,21 @@ def test_a_raw_record_of_another_identity_is_refused(field, value):
 def test_a_reversed_window_stays_reversed_and_an_unknown_bound_is_unsupported():
     _, raw, scope = _run(_solved())
     with pytest.raises(ValueError, match="^reversed_window$"):
-        ob.calculate(raw, {**scope, "start": SNAPS[2].isoformat(), "end": SNAPS[0].isoformat()})
+        ob.calculate(
+            raw, {**scope, "start": SNAPS[2].isoformat(), "end": SNAPS[0].isoformat()}
+        )
     with pytest.raises(ValueError, match="^unsupported_snapshot_scope$"):
-        ob.calculate(raw, {**scope, "start": "2031-01-01T00:00:00", "end": SNAPS[2].isoformat()})
+        ob.calculate(
+            raw, {**scope, "start": "2031-01-01T00:00:00", "end": SNAPS[2].isoformat()}
+        )
 
 
 def test_a_stored_lp_power_flow_result_refuses_too():
     with pytest.raises(ValueError, match="^ac_pf_present$"):
-        ob.source(SimpleNamespace(network=_solved(), solver_state={"lopf_results": {}}), "network")
+        ob.source(
+            SimpleNamespace(network=_solved(), solver_state={"lopf_results": {}}),
+            "network",
+        )
 
 
 def test_a_non_finite_value_in_a_stored_record_is_never_answered():
@@ -315,7 +381,9 @@ def test_a_non_finite_value_in_a_stored_record_is_never_answered():
     raw["bridge"]["residual_eur"] = math.inf
     facts, slots = ob.calculate(raw, scope)
     assert "residual_eur" not in {f["metric"] for f in facts}
-    assert {s["metric"]: s.get("reason") for s in slots}["residual_eur"] == "terms_missing"
+    assert {s["metric"]: s.get("reason") for s in slots}[
+        "residual_eur"
+    ] == "terms_missing"
 
 
 def _cb(n):
@@ -362,9 +430,16 @@ def test_a_network_without_generators_has_a_real_zero_penalty():
 @pytest.mark.parametrize("case", ["rolling", "no-total"])
 def test_the_service_bridges_nothing_without_a_horizon_objective_or_a_total(case):
     n = _solved()
-    cfg = SolverConfig(solve_strategy="rolling") if case == "rolling" else SolverConfig()
+    cfg = (
+        SolverConfig(solve_strategy="rolling") if case == "rolling" else SolverConfig()
+    )
     out = od.objective_bridge(n, _cb(n) if case == "rolling" else None, cfg)
     assert out["scope"] == ("last_window" if case == "rolling" else "horizon")
-    for key in ("nonextendable_fixed_cost_eur", "period_weighting_adjustment_eur",
-                "reserve_revenue_eur", "penalty_eur", "residual_eur"):
+    for key in (
+        "nonextendable_fixed_cost_eur",
+        "period_weighting_adjustment_eur",
+        "reserve_revenue_eur",
+        "penalty_eur",
+        "residual_eur",
+    ):
         assert out[key] is None, key

@@ -9,16 +9,22 @@ with weight 1, so the objective is 5 x 2 x 10 = 100 EUR. There is no fixed
 cost, no slack generator and no reserve, so the reported total is 100 EUR and
 every bridge term and the residual are 0.
 """
+
 # ruff: noqa: F811 -- imported shared fixtures.
 import pytest
 
 from tests.assurance_acceptance.support import approval
-from tests.assurance_acceptance.test_p2_request_slots import asked, blocks, card, chat, slots  # noqa: F401
+from tests.assurance_acceptance.test_p2_request_slots import asked, blocks, card, slots
+from tests.assurance_acceptance.test_p2_request_slots import chat  # noqa: F401
 from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_capacity_cycles_assurance import solve
 from tests.test_workflow_tools import baseline  # noqa: F401
 
-LABELS = ["Solver objective", "Total declared-basis cost", "Objective-to-cost reconciliation"]
+LABELS = [
+    "Solver objective",
+    "Total declared-basis cost",
+    "Objective-to-cost reconciliation",
+]
 BRIDGE = {
     "objective_eur": 100,
     "reported_total_cost_eur": 100,
@@ -50,7 +56,9 @@ def solved(baseline):
         "show the objective versus cost.",
     ],
 )
-def test_the_objective_alone_asks_which_with_exactly_three_labels(solved, chat, message):
+def test_the_objective_alone_asks_which_with_exactly_three_labels(
+    solved, chat, message
+):
     frames, provider = chat(message)
     text = asked(frames, provider, reason="objective_or_cost_required")
     assert card(frames) == LABELS
@@ -71,7 +79,10 @@ def test_a_bare_total_cost_keeps_todays_route(message):
 
     from harness import assurance_conversation
 
-    assert assurance_conversation._objective(SimpleNamespace(), message, None, None) is None
+    assert (
+        assurance_conversation._objective(SimpleNamespace(), message, None, None)
+        is None
+    )
 
 
 def test_solver_objective_answers_the_objective_only(solved, chat, checked):
@@ -87,7 +98,8 @@ def test_the_reconciliation_answers_every_row_in_bridge_order(solved, chat, chec
     frames, _ = chat("objective-to-cost reconciliation.", BRIDGE)
     assert list(slots(frames)) == list(BRIDGE)
     assert blocks(checked, frames) == {
-        metric: (pytest.approx(value, abs=1e-6), "EUR") for metric, value in BRIDGE.items()
+        metric: (pytest.approx(value, abs=1e-6), "EUR")
+        for metric, value in BRIDGE.items()
     }
 
 
@@ -111,6 +123,9 @@ def test_a_label_typed_while_another_card_is_open_is_not_this_cards_answer():
 
     state = {"scope": {"profile": "capacity/1", "entity_id": "G1"}}
     for pending in ("capacity_meaning_required", "cost_quantity_required", None):
-        assert assurance_conversation._objective(
-            SimpleNamespace(), "Solver objective", pending, state
-        ) is None
+        assert (
+            assurance_conversation._objective(
+                SimpleNamespace(), "Solver objective", pending, state
+            )
+            is None
+        )

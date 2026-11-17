@@ -15,7 +15,9 @@ from harness import profile_common as common
 from services.results.objective_decomposition import residual_tolerance
 
 PROFILE = "objective-bridge/1"
-REFUSALS = frozenset({"network_scope_required", "ac_pf_present", "unsupported_snapshot_scope"})
+REFUSALS = frozenset(
+    {"network_scope_required", "ac_pf_present", "unsupported_snapshot_scope"}
+)
 # Bridge order (UX 25): the objective, the reported total and its penalty share,
 # the terms between them, the residual last.
 METRICS = {
@@ -123,14 +125,20 @@ def _value(raw, metric):
 
 
 def _objective_reason(raw):
-    return "still_scaled" if raw["objective_scale"] not in (None, 1.0) else "objective_missing"
+    return (
+        "still_scaled"
+        if raw["objective_scale"] not in (None, 1.0)
+        else "objective_missing"
+    )
 
 
 def _rows(raw):
     """(available values, reasons) for a valid solve: the one source of both the
     slots and the note lines that explain them."""
     if raw["scope"] != "horizon":
-        code = "last_window_only" if raw["scope"] == "last_window" else "last_period_only"
+        code = (
+            "last_window_only" if raw["scope"] == "last_window" else "last_period_only"
+        )
         return {}, dict.fromkeys(METRICS, code)
     available = {m: v for m in METRICS if (v := _value(raw, m)) is not None}
     missing = {
@@ -138,12 +146,16 @@ def _rows(raw):
         "reported_total_cost_eur": "total_missing",
         "penalty_cost_eur": "not_separable",
         "residual_eur": (
-            _objective_reason(raw) if "objective_eur" not in available
-            else "total_missing" if "reported_total_cost_eur" not in available
+            _objective_reason(raw)
+            if "objective_eur" not in available
+            else "total_missing"
+            if "reported_total_cost_eur" not in available
             else "terms_missing"
         ),
     }
-    reasons = {m: missing.get(m, "terms_missing") for m in METRICS if m not in available}
+    reasons = {
+        m: missing.get(m, "terms_missing") for m in METRICS if m not in available
+    }
     return available, reasons
 
 
@@ -185,7 +197,11 @@ def notes(raw, scope):
     requested = requested_metrics(scope)
     available, reasons = _rows(raw)
     lines = []
-    if "residual_eur" in requested and "objective_eur" in available and "residual_eur" in available:
+    if (
+        "residual_eur" in requested
+        and "objective_eur" in available
+        and "residual_eur" in available
+    ):
         objective, residual = available["objective_eur"], available["residual_eur"]
         tolerance = residual_tolerance(objective)
         lines.append(

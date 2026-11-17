@@ -158,7 +158,9 @@ DRIVERS = {
         "lossy", solve_lossy, _scope("network-losses/1", "network")
     ),
     "lost-load/1": Driver("shed", _same, _scope("lost-load/1", "L1")),
-    "objective-bridge/1": Driver("shed", _same, _scope("objective-bridge/1", "network")),
+    "objective-bridge/1": Driver(
+        "shed", _same, _scope("objective-bridge/1", "network")
+    ),
     "bus-price/1": Driver(
         "priced", lambda ctx: solve(ctx, voll=1000), _scope("bus-price/1", "B1")
     ),
