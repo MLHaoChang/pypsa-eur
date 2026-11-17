@@ -5,6 +5,7 @@
 
 Status: ready-for-agent
 Owner: unassigned: waits on owner Q5
+Blocked by: owner question Q5 (decisions.md §6)
 Size: M
 Gated: UX
 Likely files: pypsa-gui/frontend/src/pages/hubDesign/SectionView.tsx (GenericSectionCard, "Add a process unit in Expert"); pypsa-gui/frontend/src/pages/hubDesign/SectionHoldings.tsx (Edit buttons ~l.28)
