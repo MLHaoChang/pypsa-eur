@@ -24,8 +24,12 @@ here unchanged so its children stay byte-identical:
   writers take, so a request already past the gate waits). A
   read-modify-write of the child inside it cannot interleave with another
   writer. Lock order: harness hold, then `mutation_lock`, then
-  `solver_state_lock`; no writer takes `solver_state_lock` before
-  `mutation_lock`. The sweep does not use it (its children are written from
+  `solver_state_lock`. No `with` block takes `solver_state_lock` and then
+  `mutation_lock` directly. One call path could: `routers/flow.py` calls
+  `update_solver_config` under `solver_state_lock`, and a commercial rebind
+  in it (`_bind_commercial`) may reach `mutation_lock`. That path acts only
+  on the ACTIVE project (`active_project_dir`), and while the run holds the
+  child the harness gate refuses that route for it; not reachable today. The sweep does not use it (its children are written from
   private copies before anyone can resolve them).
 """
 

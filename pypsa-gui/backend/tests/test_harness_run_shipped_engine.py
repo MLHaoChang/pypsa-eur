@@ -950,6 +950,137 @@ def test_a_validator_refusal_at_the_write_is_not_run_and_releases(
     assert case["solves"]["outcome"] == "released" and queue == []
 
 
+# ── GK B (60): each refusal this engine adds, tripped alone ─────────────────
+
+
+def _admitted(path):
+    task = _read(path)
+    task["steps"][0].update(status="running", attempt_id="a1")
+    path.write_text(json.dumps(task))
+    return E._admit(path, "explore.1", task["steps"][0]["frozen"], ("a1", INSTANCE))
+
+
+def test_a_dirty_base_refuses_with_its_kind_before_any_fork(
+    baseline, tmp_path, queue, monkeypatch
+):
+    from services import dirty_state
+
+    _, pid, _ = baseline
+    path = _task(tmp_path, pid, picked=["low_price"])
+    with chat_tools._acting() as (db, user):
+        base = project_registry.resolve_project(db, user, pid)
+    resident = PyPSAService.get_context(project_registry.registry_key(base))
+    assert resident is not None
+    dirty_state.mark_dirty(resident)
+    monkeypatch.setattr(shipped_fork, "create", lambda *a, **k: pytest.fail("forked"))
+    _start(path, pid)
+    case = _cases(path)["low_price"]
+    assert case["status"] == "failed"
+    assert case["reason"].startswith("require_current: shipped_base_unsaved:")
+    assert queue == [] and _children(pid) == {}
+
+
+def test_a_battery_cost_that_does_not_derive_is_not_run_with_its_kind(
+    baseline, tmp_path, queue, monkeypatch
+):
+    from fastapi import HTTPException
+
+    from services import network_crud
+
+    _, pid, _ = baseline
+    path = _task(tmp_path, pid, picked=["cheap_battery"])
+
+    def refuse(*a, **k):
+        raise HTTPException(422, "no derive")
+
+    monkeypatch.setattr(network_crud, "_check_investment_parts", refuse)
+    _start(path, pid)
+    case = _cases(path)["cheap_battery"]
+    assert case["status"] == "not_run"
+    assert case["reason"].startswith("edit: shipped_cases_invalid:")
+    assert "does not derive" in case["reason"]
+    assert case["solves"]["outcome"] == "released" and queue == []
+
+
+def test_a_battery_value_moved_on_the_fork_is_stale_at_the_edit(
+    baseline, tmp_path, queue, monkeypatch
+):
+    """The fork-side `old` check is the only layer that sees the fork's own
+    battery column: the base is current, so both `require_current` calls pass."""
+    import contextlib
+
+    _, pid, _ = baseline
+    path = _task(tmp_path, pid, picked=["cheap_battery"])
+    real = shipped_fork.held
+
+    @contextlib.contextmanager
+    def held(child, task_id):
+        with real(child, task_id) as ctx:
+            ctx.network.storage_units.at["bess", "inv_power_overnight"] += 1.0
+            yield ctx
+
+    monkeypatch.setattr(shipped_fork, "held", held)
+    _start(path, pid)
+    case = _cases(path)["cheap_battery"]
+    assert case["status"] == "failed"
+    assert case["reason"].startswith("edit: shipped_case_stale:")
+    assert case["solves"]["outcome"] == "released" and queue == []
+
+
+def test_a_series_the_template_does_not_hold_resolves_nothing(baseline):
+    from services.library import series_store
+
+    _, pid, _ = baseline
+    org = _org(pid)
+    with chat_tools._acting() as (db, _):
+        assert E.resolver(db, org, TPL)("no_such_series") is None
+        assert series_store.latest_ref(db, org, "no_such_series") is None
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [None, {}, {"templates": []}, {"templates": ["a", "b"]}],
+)
+def test_a_profile_without_exactly_one_template_is_not_runnable(profile):
+    with pytest.raises(run_shipped.ShippedError) as err:
+        E._template(profile)
+    assert err.value.kind == "shipped_case_not_runnable"
+    assert E._template({"templates": ["eh_ipp_hybrid"]}) == "eh_ipp_hybrid"
+
+
+def test_cases_are_admitted_once_per_run(baseline, tmp_path, queue):
+    _, pid, _ = baseline
+    path = _task(tmp_path, pid)
+    assert _admitted(path) == LP_IDS
+    rows = len(_read(path)["run"]["cases"])
+    task = _read(path)
+    assert (
+        E._admit(path, "explore.1", task["steps"][0]["frozen"], ("a1", INSTANCE))
+        is None
+    )
+    assert len(_read(path)["run"]["cases"]) == rows
+    # the second admission's reservations are released, the first's stand
+    assert run_explore.unsettled(_read(path)["run"]) == len(LP_IDS)
+    assert [a.get("solves") for a in _audit(path)].count(0) == len(LP_IDS)
+
+
+def test_an_admission_by_a_runner_that_lost_the_step_admits_nothing(
+    baseline, tmp_path, queue
+):
+    _, pid, _ = baseline
+    path = _task(tmp_path, pid)
+    task = _read(path)
+    task["steps"][0].update(status="running", attempt_id="a1")
+    path.write_text(json.dumps(task))
+    frozen = task["steps"][0]["frozen"]
+    assert E._admit(path, "explore.1", frozen, ("other", INSTANCE)) is None
+    assert E.dispatch(path, task["steps"][0], frozen, "other", INSTANCE) == (
+        "taken_over"
+    )
+    assert _read(path)["run"]["cases"] == [] and queue == []
+    assert all(a.get("solves") == 0 for a in _audit(path))
+
+
 # ── D4: a template series edited after approval ──────────────────────────────
 
 
