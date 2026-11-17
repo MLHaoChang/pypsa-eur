@@ -12,3 +12,7 @@ Follow-up from homer-parity 01c (UX 21, condition 3). The 01c view shows the agg
 
 - The route payload carries the per-unit headroom for the binding snapshots only, from the solved values.
 - The section lists them in plain words; UX OK on the head.
+
+## Chat tool
+
+`GET /api/results/operating_reserve` has no typed read-only chat tool yet: the assistant cannot read the reserve's binding hours. Add one (harness catalogue, route parity) in this issue; until then the route is declared held-by-spec against this file.
