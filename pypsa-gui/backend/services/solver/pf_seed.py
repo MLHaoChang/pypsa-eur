@@ -7,6 +7,7 @@ diverge on such a network, while a linear power flow followed by
 ``pf(use_seed=True)`` converges. Networks without an active shifting
 transformer keep the flat-start call exactly as the caller wrote it.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -56,6 +57,8 @@ def run_pf(network, phase: Callable[[str], None] | None = None, **pf_kwargs):
             f"AC PF seeded: lpf() then pf(use_seed=True), since {len(shifted)} "
             f"transformer(s) shift phase ({names})."
         )
-    lpf_kwargs = {"snapshots": pf_kwargs["snapshots"]} if "snapshots" in pf_kwargs else {}
+    lpf_kwargs = (
+        {"snapshots": pf_kwargs["snapshots"]} if "snapshots" in pf_kwargs else {}
+    )
     network.lpf(**lpf_kwargs)
     return network.pf(**{**pf_kwargs, "use_seed": True})

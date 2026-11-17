@@ -6,6 +6,7 @@ number, as pandapower maps it). The fixture below, two Dyn11 transformers in a
 seeds ``pf(use_seed=True)``. Networks without an active shifting transformer
 keep the caller's flat-start ``pf`` call exactly.
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -24,8 +25,17 @@ def _chain(shift: float = 30.0, active: bool = True) -> pypsa.Network:
     prev = "HV"
     for i in (1, 2):
         n.add("Bus", f"MV{i}", v_nom=20.0)
-        n.add("Transformer", f"T{i}", bus0=prev, bus1=f"MV{i}", s_nom=40.0,
-              x=0.1, r=0.01, phase_shift=shift, active=active)
+        n.add(
+            "Transformer",
+            f"T{i}",
+            bus0=prev,
+            bus1=f"MV{i}",
+            s_nom=40.0,
+            x=0.1,
+            r=0.01,
+            phase_shift=shift,
+            active=active,
+        )
         n.add("Load", f"L{i}", bus=f"MV{i}", p_set=10.0, q_set=2.5)
         prev = f"MV{i}"
     return n
@@ -44,13 +54,16 @@ def test_dyn11_chain_fails_flat_start():
 def test_dyn11_chain_converges_seeded_and_says_so():
     n = _chain()
     log: list[str] = []
-    result = run_pf(n, log.append, snapshots=n.snapshots, use_seed=False,
-                    distribute_slack=False)
+    result = run_pf(
+        n, log.append, snapshots=n.snapshots, use_seed=False, distribute_slack=False
+    )
     assert _converged(result)
     assert len(log) == 1 and "lpf() then pf(use_seed=True)" in log[0]
     assert "T1, T2" in log[0]
     # The seeded solve lands on the shifted angle: two -30° hops below the slack.
-    assert n.buses_t.v_ang["MV2"].iloc[0] == pytest.approx(-2 * 30 * 3.14159265 / 180, abs=0.12)
+    assert n.buses_t.v_ang["MV2"].iloc[0] == pytest.approx(
+        -2 * 30 * 3.14159265 / 180, abs=0.12
+    )
 
 
 def test_solver_service_call_shape_is_seeded_too():
@@ -124,8 +137,11 @@ def test_only_active_shifting_transformers_are_named():
 
 def test_multi_period_activity_follows_the_snapshot_periods():
     n = _chain()
-    n.set_snapshots(pd.MultiIndex.from_product(
-        [[2030, 2040], pd.date_range("2030-01-01", periods=1, freq="h")]))
+    n.set_snapshots(
+        pd.MultiIndex.from_product(
+            [[2030, 2040], pd.date_range("2030-01-01", periods=1, freq="h")]
+        )
+    )
     n.investment_periods = [2030, 2040]
     n.transformers.loc["T1", "phase_shift"] = 0.0
     n.transformers.loc["T2", ["build_year", "lifetime"]] = [2040, 20]
@@ -151,8 +167,15 @@ def test_log_names_at_most_five_transformers(count, tail):
     n.add("Bus", "HV", v_nom=110.0)
     for i in range(count):
         n.add("Bus", f"B{i}", v_nom=20.0)
-        n.add("Transformer", f"T{i}", bus0="HV", bus1=f"B{i}", x=0.1, s_nom=1.0,
-              phase_shift=150.0)
+        n.add(
+            "Transformer",
+            f"T{i}",
+            bus0="HV",
+            bus1=f"B{i}",
+            x=0.1,
+            s_nom=1.0,
+            phase_shift=150.0,
+        )
     n.lpf = n.pf = lambda **kw: None  # only the log line is under test
     log: list[str] = []
     run_pf(n, log.append)
