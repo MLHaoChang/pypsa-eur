@@ -723,8 +723,20 @@ class _Converter:
     def _units(self, obj, name: str) -> float | None:
         u = self.take(obj, "Units")
         if u is None:
-            self.drop_object(obj, "Units not given (PLEXOS default 0: not built)")
-            return None
+            # The file's own t_property default, never a hard-coded one (GK A).
+            found = [v for (coll, prop), v in self.m.defaults.items()
+                     if prop == "Units" and coll[0] == "System" and coll[1] == obj[0]]
+            if len(found) != 1 or found[0] is None:
+                self.drop_object(obj, "unit count unknown: no Units row and no default in the file")
+                return None
+            if found[0] == 0:
+                self.drop_object(obj, "0 units (the file's default Units): not built")
+                return None
+            if found[0] < 0 or found[0] != int(found[0]):
+                self.drop_object(obj, "the file's default Units is not a whole number above 0")
+                return None
+            self.assume(name, "units", found[0], "no Units row; the file's default Units used")
+            return found[0]
         if u.value == 0:
             self.used(u, "unmapped")
             self.drop_object(obj, "0 units: not built")
@@ -872,8 +884,9 @@ class _Converter:
         self.r.suggestions.append(Suggestion(
             target=name, parameter="minimum stable level (p_min_pu, unit commitment on)",
             current=0.0, proposed=round(pu, 6),
-            why="PLEXOS minimum stable level; it applies only while the unit runs, "
-                "so it needs unit commitment, which makes the solve slower",
+            why=f"PLEXOS minimum stable level: {pu:g} pu of Max Capacity ({pu * cap:g} MW). "
+                "It applies only while the unit runs, so it needs unit commitment, "
+                "which makes the solve slower",
             source="PLEXOS Min Stable Factor / Min Stable Level", confidence="high"))
 
     def _dates(self, obj, name: str, kw: dict) -> None:

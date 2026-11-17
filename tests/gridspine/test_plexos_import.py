@@ -222,6 +222,10 @@ def test_zip_refuses_oversized_and_too_many(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "MAX_MEMBER_BYTES", 50)
     with pytest.raises(ImportFormatError, match="larger than"):
         read_plexos([path], {})
+    # a data file is never read in this slice: only the stated size stops it
+    big_csv = _zip(tmp_path, [("m.xml", b"<a/>"), ("x.csv", b"1" * 60)], name="c.zip")
+    with pytest.raises(ImportFormatError, match=r"'x.csv' is unsafe \(larger than"):
+        read_plexos([big_csv], {})
     monkeypatch.setattr(mod, "MAX_MEMBER_BYTES", 2**20)
     monkeypatch.setattr(mod, "MAX_TOTAL_BYTES", 300)
     with pytest.raises(ImportFormatError, match="unpacked"):
@@ -481,7 +485,7 @@ def test_load_in_equals_mapped_plus_unmapped():
 # ----------------------------------------------------------- generators
 
 
-def test_generator_units_zero_or_missing_not_built():
+def test_generator_units_zero_not_built():
     m0 = build([("Node", "A"), ("Generator", "G")],
                [("Generator", "G", "Units", 0, "-"), ("Generator", "G", "Max Capacity", 50, "MW")],
                [(("Generator", "G"), ("Node", "A"), "Nodes")])
@@ -489,11 +493,36 @@ def test_generator_units_zero_or_missing_not_built():
     assert conv.network.generators.empty
     assert any("0 units" in r for r in unmapped_reason(conv, "Generator 'G'"))
     check_ledger(m0, conv)
-    m1 = build([("Node", "A"), ("Generator", "G")],
-               [("Generator", "G", "Max Capacity", 50, "MW")],
-               [(("Generator", "G"), ("Node", "A"), "Nodes")])
-    conv = convert(m1, {})
-    assert any("Units not given" in r for r in unmapped_reason(conv, "Generator 'G'"))
+
+
+@pytest.mark.parametrize(
+    "default, built, needle",
+    [
+        (1.0, True, None),
+        (0.0, False, "0 units (the file's default Units): not built"),
+        (None, False, "unit count unknown"),
+        ("absent", False, "unit count unknown"),
+    ],
+)
+def test_missing_units_use_the_files_default(default, built, needle):
+    model = build([("Node", "A"), ("Generator", "G")],
+                  [("Generator", "G", "Max Capacity", 50, "MW")],
+                  [(("Generator", "G"), ("Node", "A"), "Nodes")])
+    if default != "absent":
+        model.defaults[(("System", "Generator", "Generators"), "Units")] = default
+    conv = convert(model, {})
+    assert ("G" in conv.network.generators.index) is built
+    if built:
+        assert conv.network.generators.loc["G", "p_nom"] == 50
+        assert any(a.asset == "G" and a.parameter == "units" and a.value == 1
+                   for a in conv.report.assumed)
+    else:
+        assert any(needle in r for r in unmapped_reason(conv, "Generator 'G'"))
+    check_ledger(model, conv)
+
+
+def test_irl_file_default_units_is_zero():
+    assert read_plexos_xml(IRL).defaults[(("System", "Generator", "Generators"), "Units")] == 0
 
 
 def test_generator_p_nom_is_capacity_times_units():
@@ -615,6 +644,7 @@ def test_ramp_dates_outages():
     [
         ([("Retirement Date", 47484)], "without a Commission Date"),
         ([("Commission Date", 47484), ("Retirement Date", 36526)], "not after Commission"),
+        ([("Commission Date", 36526), ("Retirement Date", 36800)], "not after Commission"),
         ([("Commission Date", 60)], "Commission Date unreadable"),
     ],
 )
