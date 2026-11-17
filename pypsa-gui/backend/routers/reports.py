@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import pathlib
 import uuid
 from types import SimpleNamespace
@@ -1217,7 +1218,14 @@ def _own_run(project: AuthorizedProject, user: User | None, task_id: str) -> pat
         canonical = False
     if user is None or not canonical:
         raise missing
-    path = pathlib.Path(project.directory) / "assistant_tasks" / f"{task_id}.json"
+    # Realpath plus a prefix check: the run file must resolve directly inside
+    # `assistant_tasks/` (the form CodeQL reads as a py/path-injection
+    # barrier; the uuid check above is correct but not one it models).
+    root = os.path.realpath(os.path.join(project.directory, "assistant_tasks"))
+    target = os.path.realpath(os.path.join(root, f"{task_id}.json"))
+    if not target.startswith(root + os.sep) or os.path.dirname(target) != root:
+        raise missing
+    path = pathlib.Path(target)
     try:
         task = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
