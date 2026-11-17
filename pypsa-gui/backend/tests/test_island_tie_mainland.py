@@ -221,9 +221,71 @@ def test_an_eh_poc_link_end_on_bus1_names_bus1_as_the_grid_side():
 
 def test_an_untagged_link_with_no_grid_marker_reads_as_the_islands_own_feeder():
     """#48 decision: with no eh_role and no eh_poc, topology cannot tell a mainland feed from the
-    island's own feeder (hospital_feeder, site_transformer), so the Link is not a mainland feed."""
+    island's own feeder (hospital_feeder, site_transformer), so the Link is not a mainland feed.
+    SH 50: never silently, the no_tie answer names each such Link and how to mark a grid feed."""
     n, island = _untagged_r4(poc=False)
+    out = S.tie_state(n, island)
+    assert (out["state"], out["ties"], out["carrying"]) == ("no_tie", [], [])
+    assert out["unmarked_links"] == ["hospital_feeder", "subsea_tie"]
+    for word in ("hospital_feeder, subsea_tie", "own feeder", "grid_import", "eh_poc"):
+        assert word in out["warning"], word
+
+
+def test_an_unmarked_link_that_cannot_deliver_is_not_named():
+    """SH 50: a 0 MW, non-extendable Link is no feed of any kind (#49)."""
+    n, island = _untagged_r4(poc=False)
+    n.links.at["subsea_tie", "p_nom"] = 0.0
+    n.links.at["subsea_tie", "p_nom_extendable"] = False
+    assert S.tie_state(n, island)["unmarked_links"] == ["hospital_feeder"]
+
+
+def test_no_tie_with_no_internal_link_carries_no_warning():
+    n, island = _untagged_r4(poc=False)
+    n.remove("Link", ["hospital_feeder", "subsea_tie"])
     assert S.tie_state(n, island) == {"state": "no_tie", "ties": [], "carrying": []}
+
+
+# ── SH 51: every port of a multi-port Link is read ──
+
+
+def _three_port(bus2):
+    """The untagged R4 fixture with subsea_tie given a third port."""
+    n, island = _untagged_r4(poc=False)
+    n.links["bus2"] = ""
+    n.links.at["subsea_tie", "bus2"] = bus2
+    return n, island
+
+
+def test_a_third_port_on_the_eh_poc_bus_marks_the_mainland_feed():
+    n, island = _three_port("hospital")
+    n.links.at["subsea_tie", "bus0"] = "island"  # bus0 and bus1 are both off the eh_poc bus
+    n.links.at["subsea_tie", "bus1"] = "mainland"
+    n.buses.at["hospital", "eh_poc"] = True
+    out = S.tie_state(n, island)
+    assert (out["state"], out["buses"], sorted(out["links"])) == (
+        "unit_on_mainland",
+        ["hospital"],
+        ["hospital_feeder", "subsea_tie"],
+    )
+    assert "bus hospital, which reads as the mainland's: it is the eh_poc" in out["reason"]
+    assert "subsea_tie" in out["reason"]
+
+
+def test_a_grid_import_link_with_a_port_off_the_island_is_a_tie_not_a_feed():
+    n, island = _three_port("elsewhere")
+    n.add("Bus", "elsewhere")
+    n.links.at["subsea_tie", "eh_role"] = "grid_import"
+    out = S.tie_state(n, island)
+    assert out["state"] == "open"  # the template's subsea_tie is normally open
+    assert "subsea_tie" in out["ties"]
+
+
+@pytest.mark.parametrize("blank", ["", float("nan")])
+def test_a_blank_extra_port_is_ignored(blank):
+    n, island = _three_port(blank)
+    n.buses.at["mainland", "eh_poc"] = True
+    out = S.tie_state(n, island)
+    assert (out["state"], out["links"]) == ("unit_on_mainland", ["subsea_tie"])
 
 
 def test_an_internal_link_with_no_end_on_the_eh_poc_bus_is_not_a_feed():

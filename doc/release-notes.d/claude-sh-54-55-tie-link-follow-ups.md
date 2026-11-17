@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The island-tie check now names a link inside the island that carries no grid-import or point-of-connection tag when it reads "no tie", instead of treating it as the island's own feeder without a word, and it reads every port of a multi-port link when looking for the mainland feed.

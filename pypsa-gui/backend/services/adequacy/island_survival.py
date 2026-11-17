@@ -295,6 +295,16 @@ def _can_deliver(df, name, nom) -> bool:
         return True
 
 
+def _ports(df, name) -> tuple[str, ...]:
+    """Every bus a branch row connects (``bus0``, ``bus1``, ``bus2``, ...), blanks left out."""
+    return tuple(
+        str(df.at[name, col])
+        for col in df.columns
+        if col.startswith("bus") and col[3:].isdigit()
+        and str(df.at[name, col]) not in ("", "nan")
+    )
+
+
 def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
     """``{link: (marker, grid-side buses)}`` for each Link with both ends on the units' buses
     ``own`` that feeds the mainland's supply in and can deliver: tagged
@@ -304,8 +314,9 @@ def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
     #48: an untagged Link with no end on an ``eh_poc`` bus is not a mainland feed. Topology alone
     cannot tell it from the island's own feeder (``hospital_feeder``, ``site_transformer``), and a
     Link from an unlisted supply is caught anyway: on a unit's bus by that supply, off the
-    island as a tie. Only ``bus0`` and ``bus1`` are read: a multi-port Link's further ports are
-    out of scope here (the tie check still sees them). A feed is read by its size alone: a normally-open feed with capacity is
+    island as a tie. Every port is read (SH 51): a Link counts when all its ports are on ``own``,
+    and an ``eh_poc`` match on any port names that port; a Link with a port off the island is the
+    tie check's. A feed is read by its size alone: a normally-open feed with capacity is
     still the mainland's, and whether it carries power is the tie's open or closed answer."""
     from services.adequacy.archetypes import _poc_buses
 
@@ -313,7 +324,7 @@ def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
     role = n.links["eh_role"].astype(str) if "eh_role" in n.links.columns else None
     out = {}
     for name in n.links.index:
-        ends = (str(n.links.at[name, "bus0"]), str(n.links.at[name, "bus1"]))
+        ends = _ports(n.links, name)
         if not set(ends) <= own or not _can_deliver(n.links, name, "p_nom"):
             continue
         if role is not None and role.at[name] == "grid_import":
@@ -408,11 +419,7 @@ def _ties(n, own: set[str]) -> list[tuple[str, str]]:
     ):
         df = getattr(n, table)
         for name in df.index:
-            ends = {
-                str(df.at[name, col])
-                for col in df.columns
-                if col.startswith("bus") and col[3:].isdigit()
-            } - {"", "nan"}
+            ends = set(_ports(df, name))
             if ends & own and ends - own:
                 out.append((comp, str(name)))
     return out
@@ -436,12 +443,36 @@ def _carries(n, comp, name) -> bool:
     return False
 
 
+def _unmarked_warning(n, own: set[str]) -> dict:
+    """SH 50: ``{unmarked_links, warning}`` naming each Link with every port on the island's buses
+    ``own`` that can deliver and that nothing marks as a mainland feed, which #48 reads as the
+    island's own feeder; ``{}`` when there is none. ``_units_on_mainland`` has already refused
+    every marked feed, so each Link left here is unmarked."""
+    links = sorted(
+        str(name)
+        for name in n.links.index
+        if set(_ports(n.links, name)) <= own and _can_deliver(n.links, name, "p_nom")
+    )
+    if not links:
+        return {}
+    return {
+        "unmarked_links": links,
+        "warning": (
+            f"{', '.join(links)} join island buses with no grid-import or point-of-connection "
+            "tag, so each is read as the island's own feeder. If one brings the mainland supply "
+            "in, set its eh_role to grid_import or tag its grid-side bus eh_poc."
+        ),
+    }
+
+
 def tie_state(n, island) -> dict:
     """``{state, ties, carrying}``: ``open`` when every branch between the
     island's own buses (``island_buses``) and any other bus is at 0 in both
     directions in every hour (the island runs alone), ``closed`` naming each
     branch that can carry power, ``no_tie`` when no branch leaves the island
-    and ``no_island`` when the network has none of the sidecar's units.
+    and ``no_island`` when the network has none of the sidecar's units. ``no_tie`` also carries
+    ``unmarked_links`` and ``warning`` when an internal Link is read as the island's own feeder
+    (``_unmarked_warning``).
     ``unit_on_mainland`` (with ``units``, ``buses``, ``links`` and ``reason``)
     refuses when a sidecar unit sits on a bus that reads as the mainland's
     (``_units_on_mainland``).
@@ -457,7 +488,7 @@ def tie_state(n, island) -> dict:
         return refused
     ties = _ties(n, own)
     if not ties:
-        return {"state": "no_tie", "ties": [], "carrying": []}
+        return {"state": "no_tie", "ties": [], "carrying": [], **_unmarked_warning(n, own)}
     carrying = [name for comp, name in ties if _carries(n, comp, name)]
     return {
         "state": "closed" if carrying else "open",
