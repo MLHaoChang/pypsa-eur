@@ -662,6 +662,7 @@ def test_trip_on_the_exit_sample_is_allowed_and_status_must_be_binary():
         ({"id": 5}, "needs an id"),
         ({"t_event": "0.2"}, "finite time from 0"),
         ({"t_event": True}, "finite time from 0"),
+        ({"pre_window_s": -0.05}, "finite time from 0"),
         ({"t_event": 0.0}, "not inside the record"),
         ({"t_event": 1.5}, "not inside the record"),
         ({"t_clear": 0.2}, "must be after t_event"),
