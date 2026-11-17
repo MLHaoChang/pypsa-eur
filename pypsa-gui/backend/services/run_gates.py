@@ -1191,9 +1191,10 @@ def _mg_tie(env):
         return NoEvidence("unit_on_mainland", str(out.get("reason") or "a sidecar unit sits on the mainland"))
     if state not in ("open", "closed", "no_tie"):
         return NoEvidence("unreadable", "the island's tie cannot be read")
-    if state == "no_tie" and out.get("warning"):  # SH 50: an internal Link read as the island's own feeder
-        return Detailed(state, [str(out["warning"])])
-    return Detailed(state, [str(t) for t in out.get("carrying") or []])
+    detail = [str(t) for t in out.get("carrying") or []]
+    # SH 54: an internal Link read as the island's own feeder; SH 56: a supply left out as never available.
+    detail += [str(out[k]) for k in ("warning", "idle_warning") if out.get(k)]
+    return Detailed(state, detail)
 
 
 def _mg_critical(env):

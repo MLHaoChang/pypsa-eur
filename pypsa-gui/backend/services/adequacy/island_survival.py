@@ -305,8 +305,53 @@ def _ports(df, name) -> tuple[str, ...]:
     )
 
 
-def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
-    """``{link: (marker, grid-side buses)}`` for each Link with both ends on the units' buses
+#: The supply tables with an hourly availability, each with its PyPSA component name (SH 56).
+_AVAILABILITY = {"generators": "Generator", "storage_units": "StorageUnit"}
+
+
+def _never_available(n, table, name) -> bool:
+    """SH 56 (owner decision, option 3): True when the row's ``p_max_pu`` is exactly 0 in every hour
+    of this network's data (its static value where it has no series). Fails closed: a NaN, a
+    missing column or anything unreadable reads as available."""
+    comp = _AVAILABILITY.get(table)
+    if comp is None:
+        return False
+    try:
+        hourly = n.get_switchable_as_dense(comp, "p_max_pu")[name]
+        values = pd.to_numeric(hourly, errors="coerce")
+        return len(values) > 0 and bool(values.notna().all()) and bool((values == 0.0).all())
+    except Exception:  # noqa: BLE001 - unreadable availability is no evidence of none (GK A C4)
+        return False
+
+
+def _idle_supplies(n, island) -> list[str]:
+    """SH 56: the unlisted supplies on a unit's bus that ``_units_on_mainland`` leaves out because
+    they are never available, sorted; they are named on the tie row, never dropped silently."""
+    from services.adequacy.slack import is_slack_name, slack_generator_mask
+
+    unit_buses = set(_unit_buses(n, island).values())
+    named = set(island["units"])
+    out = []
+    for table, nom in _SUPPLY_TABLES.items():
+        df = getattr(n, table)
+        slack = slack_generator_mask(df) if table == "generators" else None
+        for name in df.index:
+            if (slack is not None and bool(slack.at[name])) or is_slack_name(name) or name in named:
+                continue
+            if (str(df.at[name, "bus"]) in unit_buses and _can_deliver(df, name, nom)
+                    and _never_available(n, table, name)):
+                out.append(str(name))
+    return sorted(out)
+
+
+def _listed(names: list[str], limit: int = 5) -> str:
+    """At most ``limit`` names, then "and N more" (GK A C3)."""
+    shown = ", ".join(names[:limit])
+    return shown + (f" and {len(names) - limit} more" if len(names) > limit else "")
+
+
+def _mainland_links(n, own: set[str]) -> dict[str, dict[str, str]]:
+    """``{link: {grid-side bus: marker}}`` for each Link with every port on the units' buses
     ``own`` that feeds the mainland's supply in and can deliver: tagged
     ``eh_role == "grid_import"`` (its ``bus0`` the grid side), or with an end on a bus tagged
     ``eh_poc`` (that end the grid side, as ``archetypes.select_import_links`` reads it).
@@ -316,7 +361,8 @@ def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
     Link from an unlisted supply is caught anyway: on a unit's bus by that supply, off the
     island as a tie. Every port is read (SH 51): a Link counts when all its ports are on ``own``,
     and an ``eh_poc`` match on any port names that port; a Link with a port off the island is the
-    tie check's. A feed is read by its size alone: a normally-open feed with capacity is
+    tie check's. A ``grid_import`` Link names ``bus0`` by its role and, as well, any other port on
+    an ``eh_poc`` bus (GK A C5); ``bus0`` keeps the role's marker when it is also ``eh_poc``. A feed is read by its size alone: a normally-open feed with capacity is
     still the mainland's, and whether it carries power is the tie's open or closed answer."""
     from services.adequacy.archetypes import _poc_buses
 
@@ -327,10 +373,11 @@ def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
         ends = _ports(n.links, name)
         if not set(ends) <= own or not _can_deliver(n.links, name, "p_nom"):
             continue
+        grid = {bus: "eh_poc" for bus in sorted(set(ends) & poc)}
         if role is not None and role.at[name] == "grid_import":
-            out[str(name)] = ("grid_import", (ends[0],))
-        elif set(ends) & poc:
-            out[str(name)] = ("eh_poc", tuple(sorted(set(ends) & poc)))
+            grid[str(n.links.at[name, "bus0"])] = "grid_import"
+        if grid:
+            out[str(name)] = grid
     return out
 
 
@@ -359,11 +406,12 @@ def _units_on_mainland(n, island) -> dict | None:
                 name not in named
                 and bus in unit_bus.values()
                 and _can_deliver(df, name, nom)
+                and not _never_available(n, table, name)
             ):
                 foreign.setdefault(bus, []).append(str(name))
     feeds = _mainland_links(n, set(unit_bus.values()))
     links = list(feeds)
-    for _marker, grid in feeds.values():
+    for grid in feeds.values():
         for bus in grid:
             foreign.setdefault(bus, [])
     if not foreign:
@@ -378,9 +426,8 @@ def _units_on_mainland(n, island) -> dict | None:
             reasons.append(
                 f"it hosts {', '.join(sorted(foreign[bus]))}, which the island sidecar does not list"
             )
-        imports = [link for link in links if bus in feeds[link][1]]
-        tagged = [link for link in imports if feeds[link][0] == "grid_import"]
-        poc_fed = [link for link in imports if feeds[link][0] == "eh_poc"]
+        tagged = [link for link in links if feeds[link].get(bus) == "grid_import"]
+        poc_fed = [link for link in links if feeds[link].get(bus) == "eh_poc"]
         if tagged:
             reasons.append(
                 f"it is the grid side (bus0) of the grid-import link {', '.join(tagged)}"
@@ -458,9 +505,23 @@ def _unmarked_warning(n, own: set[str]) -> dict:
     return {
         "unmarked_links": links,
         "warning": (
-            f"{', '.join(links)} join island buses with no grid-import or point-of-connection "
+            f"{_listed(links)} join island buses with no grid-import or point-of-connection "
             "tag, so each is read as the island's own feeder. If one brings the mainland supply "
             "in, set its eh_role to grid_import or tag its grid-side bus eh_poc."
+        ),
+    }
+
+
+def _idle_warning(n, island) -> dict:
+    """SH 56: ``{idle_supplies, idle_warning}`` for the never-available supplies left out, else ``{}``."""
+    idle = _idle_supplies(n, island)
+    if not idle:
+        return {}
+    return {
+        "idle_supplies": idle,
+        "idle_warning": (
+            f"{_listed(idle)} sit on island buses without being listed in the island settings but "
+            "are available 0 % of the time in every hour, so they are not read as a mainland supply."
         ),
     }
 
@@ -472,7 +533,8 @@ def tie_state(n, island) -> dict:
     branch that can carry power, ``no_tie`` when no branch leaves the island
     and ``no_island`` when the network has none of the sidecar's units. ``no_tie`` also carries
     ``unmarked_links`` and ``warning`` when an internal Link is read as the island's own feeder
-    (``_unmarked_warning``).
+    (``_unmarked_warning``). Any of the three carries ``idle_supplies`` and ``idle_warning`` when an
+    unlisted supply is left out for being available 0 % of the time (``_idle_warning``, SH 56).
     ``unit_on_mainland`` (with ``units``, ``buses``, ``links`` and ``reason``)
     refuses when a sidecar unit sits on a bus that reads as the mainland's
     (``_units_on_mainland``).
@@ -487,13 +549,15 @@ def tie_state(n, island) -> dict:
     if refused is not None:
         return refused
     ties = _ties(n, own)
+    idle = _idle_warning(n, island)
     if not ties:
-        return {"state": "no_tie", "ties": [], "carrying": [], **_unmarked_warning(n, own)}
+        return {"state": "no_tie", "ties": [], "carrying": [], **_unmarked_warning(n, own), **idle}
     carrying = [name for comp, name in ties if _carries(n, comp, name)]
     return {
         "state": "closed" if carrying else "open",
         "ties": [name for _c, name in ties],
         "carrying": carrying,
+        **idle,
     }
 
 

@@ -507,3 +507,101 @@ def test_an_unreadable_extendable_flag_keeps_a_zero_supply_detected(flag):
     n.generators["p_nom_extendable"] = n.generators["p_nom_extendable"].astype(object)
     n.generators.at["flag_supply", "p_nom_extendable"] = flag
     assert S.tie_state(n, island)["state"] == "unit_on_mainland"
+
+
+# ── GK A (28) conditions on SH 54 / 55 ──
+
+
+def test_a_link_to_a_bus_with_no_sidecar_unit_is_a_tie_not_an_unmarked_feeder():
+    """C1: "the island's buses" is one set, the sidecar units' buses (``island_buses``), for both the
+    SH 54 warning and the SH 55 port check. A bus without a unit is off the island."""
+    n, island = _untagged_r4(poc=False)
+    n.add("Bus", "spare")
+    n.add("Link", "to_spare", bus0="island", bus1="spare", p_nom=5.0)
+    assert "spare" not in S.island_buses(n, island)
+    out = S.tie_state(n, island)
+    assert out["state"] in ("open", "closed")
+    assert "to_spare" in out["ties"]
+    assert "unmarked_links" not in out
+
+
+def test_the_warning_names_five_links_then_the_true_total():
+    """C3: at most five names, then "and N more"; ``unmarked_links`` keeps the full list."""
+    n, island = _untagged_r4(poc=False)
+    extra = [f"feeder_{i}" for i in range(5)]
+    for name in extra:
+        n.add("Link", name, bus0="island", bus1="hospital", p_nom=1.0)
+    out = S.tie_state(n, island)
+    every = sorted(["hospital_feeder", "subsea_tie", *extra])
+    assert out["unmarked_links"] == every
+    assert out["warning"].startswith(", ".join(every[:5]) + " and 2 more join island buses")
+
+
+def test_a_normally_open_unmarked_internal_link_still_warns():
+    """C4: "can deliver" is size only (#1567), so a Link held at 0 every hour is still named."""
+    n, island = _untagged_r4(poc=False)
+    n.links.at["hospital_feeder", "p_max_pu"] = 0.0
+    n.links.at["hospital_feeder", "p_min_pu"] = 0.0
+    assert "hospital_feeder" in S.tie_state(n, island)["unmarked_links"]
+
+
+def test_a_grid_import_link_with_a_third_port_on_eh_poc_names_both_grid_sides():
+    """C5: bus0 by the role, and the eh_poc port as well, each with its own words."""
+    n, island = _three_port("hospital")
+    n.links.at["subsea_tie", "eh_role"] = "grid_import"
+    n.buses.at["hospital", "eh_poc"] = True
+    out = S.tie_state(n, island)
+    assert out["state"] == "unit_on_mainland"
+    assert "mainland" in out["buses"] and "hospital" in out["buses"]
+    assert "bus mainland, which reads as the mainland's: it is the grid side (bus0) of the grid-import link subsea_tie" in out["reason"]
+    assert "bus hospital, which reads as the mainland's: it is the eh_poc" in out["reason"]
+
+
+# ── SH 56 (owner decision, option 3): a supply never available is left out, and named ──
+
+
+def _idle_fixture():
+    """The template with an unlisted generator on the island bus."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    n.add("Generator", "parked", bus="island", p_nom=4.0)
+    return n, island
+
+
+def test_an_unlisted_supply_at_zero_availability_is_left_out_and_named():
+    n, island = _idle_fixture()
+    n.generators.at["parked", "p_max_pu"] = 0.0
+    out = S.tie_state(n, island)
+    assert out["state"] == "open"
+    assert out["idle_supplies"] == ["parked"]
+    for word in ("parked", "0 %", "not read as a mainland supply"):
+        assert word in out["idle_warning"], word
+
+
+def test_a_zero_hourly_availability_series_is_left_out_too():
+    n, island = _idle_fixture()
+    n.generators_t.p_max_pu["parked"] = 0.0
+    assert S.tie_state(n, island)["idle_supplies"] == ["parked"]
+
+
+@pytest.mark.parametrize("hour_value", [0.2, float("nan")])
+def test_any_available_or_unreadable_hour_keeps_the_supply_detected(hour_value):
+    n, island = _idle_fixture()
+    n.generators_t.p_max_pu["parked"] = 0.0
+    n.generators_t.p_max_pu.iloc[0, n.generators_t.p_max_pu.columns.get_loc("parked")] = hour_value
+    out = S.tie_state(n, island)
+    assert out["state"] == "unit_on_mainland"
+    assert "parked" in out["reason"]
+
+
+def test_an_idle_storage_unit_is_left_out_too():
+    n, island = _idle_fixture()
+    n.remove("Generator", "parked")
+    n.add("StorageUnit", "parked_bess", bus="island", p_nom=2.0, p_max_pu=0.0)
+    assert S.tie_state(n, island)["idle_supplies"] == ["parked_bess"]
+
+
+def test_an_available_unlisted_supply_is_still_refused():
+    n, island = _idle_fixture()
+    out = S.tie_state(n, island)
+    assert out["state"] == "unit_on_mainland" and "parked" in out["reason"]
