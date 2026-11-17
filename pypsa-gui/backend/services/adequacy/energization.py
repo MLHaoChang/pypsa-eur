@@ -217,13 +217,12 @@ def _period_mask(store: pd.DataFrame, period) -> tuple[np.ndarray, str]:
         if isinstance(period, bool) or not isinstance(period, (int, str)) or str(period) not in masks:
             raise EnergizationEditError(
                 "energization_unknown_period",
-                f"{period!r} is not one of the schedule's periods ({', '.join(masks)}).")
+                f"Choose one of the schedule's periods: {', '.join(masks)}.")
         return masks[str(period)], str(period)
     if period is not None and period != ALL:
         raise EnergizationEditError(
             "energization_unknown_period",
-            f"This network has one period, so the schedule is set for all of it "
-            f"(period \"all\"), not for {period!r}.")
+            "This network has one period: set the schedule for all of it (period \"all\").")
     return np.ones(len(index), dtype=bool), ALL
 
 
@@ -243,11 +242,11 @@ def plan_period_mw(n, link: str, period, mw) -> dict:
     if store is None or link not in store.columns or link not in n.links.index:
         # Never created here: a schedule is the template's, or an upload's.
         raise EnergizationEditError(
-            "energization_no_schedule", f"The link {link!r} has no energization schedule to edit.")
+            "energization_no_schedule", f"The link {link} has no energization schedule to edit.")
     if store[link].dtype.kind != "f":
         raise EnergizationEditError(
             "energization_no_schedule",
-            f"The energization schedule of {link!r} is not stored as MW numbers.")
+            f"The energization schedule of {link} is not stored as MW numbers.")
     mask, key = _period_mask(store, period)
     current = store[link].to_numpy(dtype=float)[mask]
     finite = current[np.isfinite(current)]

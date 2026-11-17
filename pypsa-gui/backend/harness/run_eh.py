@@ -239,8 +239,10 @@ def _energization_change(ctx, frozen) -> str | None:
     if now is None or not isinstance(then, dict):
         return "The connection's energization schedule can't be compared now. Review the run again."
     moved = sorted(link for link in {*then, *now} if then.get(link) != now.get(link))
-    return (f"The connection's energization schedule changed since the study's card was "
-            f"drawn ({', '.join(moved)}). Review the run again.")
+    return (
+        f"The connection's energization schedule changed since the study's card was "
+        f"drawn ({', '.join(moved)}). Review the run again."
+    )
 
 
 def islanding(network, args):

@@ -19,7 +19,10 @@ import pypsa
 import pytest
 from pandas.testing import assert_frame_equal
 
-from project_templates.eh_templates import build_eh_datacenter, build_eh_datacenter_staged
+from project_templates.eh_templates import (
+    build_eh_datacenter,
+    build_eh_datacenter_staged,
+)
 from services.adequacy import energization as E
 
 TEMPLATES = pathlib.Path(__file__).resolve().parents[1] / "project_templates"
@@ -49,9 +52,9 @@ def _refused(n, kind, link, period, mw):
     assert exc.value.error_kind == kind
     after = E.energization_frame(n)
     if before is None:
-        assert after is None                                  # never created (W3)
+        assert after is None  # never created (W3)
     else:
-        assert_frame_equal(after, before)                     # W4: untouched
+        assert_frame_equal(after, before)  # W4: untouched
     return exc.value.message
 
 
@@ -64,14 +67,19 @@ def test_one_period_is_set_flat_and_no_other_moves():
     before = frame.copy()
     out = E.set_period_mw(n, LINK, 2030, 30.0)
     assert out["period"] == "2030" and out["mw"] == 30.0 and out["previous_mw"] == 55.0
-    assert out["note"] is None and len(out["series"]) == (frame.index.get_level_values(0) == 2030).sum()
+    assert (
+        out["note"] is None
+        and len(out["series"]) == (frame.index.get_level_values(0) == 2030).sum()
+    )
     after = E.energization_frame(n)
-    assert after is frame                                     # edited in place
+    assert after is frame  # edited in place
     assert after.index.equals(before.index) and after.dtypes.equals(before.dtypes)
     assert (after.loc[2030, LINK] == 30.0).all()
     for p in (2027, 2035):
-        assert_frame_equal(after.loc[[p]], before.loc[[p]])   # not every period
-    assert E.by_period(n, LINK) == {"by_period": {"2027": 15.0, "2030": 30.0, "2035": 55.0}}
+        assert_frame_equal(after.loc[[p]], before.loc[[p]])  # not every period
+    assert E.by_period(n, LINK) == {
+        "by_period": {"2027": 15.0, "2030": 30.0, "2035": 55.0}
+    }
 
 
 def test_the_period_may_be_given_as_its_digits():
@@ -82,17 +90,26 @@ def test_the_period_may_be_given_as_its_digits():
 
 @pytest.mark.parametrize("mw", [True, False, "30", None, [30.0]])
 def test_a_value_that_is_not_a_number_is_refused(mw):
-    assert _refused(_staged(), "energization_invalid_mw", LINK, 2030, mw) == E.NOT_A_NUMBER
+    assert (
+        _refused(_staged(), "energization_invalid_mw", LINK, 2030, mw) == E.NOT_A_NUMBER
+    )
 
 
-@pytest.mark.parametrize("mw", [float("nan"), float("inf"), -float("inf"), np.float64("nan")])
+@pytest.mark.parametrize(
+    "mw", [float("nan"), float("inf"), -float("inf"), np.float64("nan")]
+)
 def test_a_value_that_is_not_finite_is_refused(mw):
-    assert _refused(_staged(), "energization_invalid_mw", LINK, 2030, mw) == E.NOT_A_NUMBER
+    assert (
+        _refused(_staged(), "energization_invalid_mw", LINK, 2030, mw) == E.NOT_A_NUMBER
+    )
 
 
 @pytest.mark.parametrize("mw", [0, 0.0, -5.0])
 def test_a_value_not_above_zero_is_refused(mw):
-    assert _refused(_staged(), "energization_invalid_mw", LINK, 2030, mw) == E.NOT_ABOVE_ZERO
+    assert (
+        _refused(_staged(), "energization_invalid_mw", LINK, 2030, mw)
+        == E.NOT_ABOVE_ZERO
+    )
 
 
 def test_a_numpy_number_is_accepted():
@@ -106,7 +123,7 @@ def test_a_link_without_a_schedule_is_refused_and_none_is_created():
     _refused(n, "energization_no_schedule", other, 2030, 10.0)
     assert other not in E.energization_frame(n).columns
     _refused(n, "energization_no_schedule", "nope", 2030, 10.0)
-    plain = build_eh_datacenter()                             # no schedule at all
+    plain = build_eh_datacenter()  # no schedule at all
     assert E.energization_frame(plain) is None
     _refused(plain, "energization_no_schedule", LINK, "all", 10.0)
     assert E.ATTR not in plain.links_t or E.energization_frame(plain) is None
@@ -159,8 +176,10 @@ def test_a_period_that_varies_is_refused_with_its_range_never_scaled():
     rows = np.flatnonzero(frame.index.get_level_values(0) == 2035)
     frame.iloc[rows[:10], 0] = 30.0
     frame.iloc[rows[10:], 0] = 40.0
-    assert _refused(n, "energization_period_not_flat", LINK, 2035, 50.0) == \
-        "2035 varies 30–40 MW: set it on the network."
+    assert (
+        _refused(n, "energization_period_not_flat", LINK, 2035, 50.0)
+        == "2035 varies 30–40 MW: set it on the network."
+    )
     assert E.by_period(n, LINK)["by_period"]["2035"] == {"min": 30.0, "max": 40.0}
     # The other periods stay editable.
     assert E.set_period_mw(n, LINK, 2030, 20.0)["mw"] == 20.0
@@ -168,8 +187,10 @@ def test_a_period_that_varies_is_refused_with_its_range_never_scaled():
 
 def test_a_period_with_hours_without_a_value_is_not_flat():
     n = _single((20.0, np.nan, 20.0, 20.0))
-    assert _refused(n, "energization_period_not_flat", LINK, "all", 10.0) == \
-        "The period varies 20–20 MW: set it on the network."
+    assert (
+        _refused(n, "energization_period_not_flat", LINK, "all", 10.0)
+        == "The period varies 20–20 MW: set it on the network."
+    )
     assert E.by_period(n, LINK) == {"by_period": {"all": {"min": 20.0, "max": 20.0}}}
 
 
@@ -185,7 +206,10 @@ def test_above_the_rating_is_accepted_with_its_note():
     p_nom = float(n.links.at[LINK, "p_nom"])
     out = E.set_period_mw(n, LINK, 2030, p_nom + 10)
     assert out["mw"] == p_nom + 10 and out["p_nom_mw"] == p_nom
-    assert out["note"] == f"This is above the link's rating ({p_nom:g} MW): it doesn't raise the link's capacity."
+    assert (
+        out["note"]
+        == f"This is above the link's rating ({p_nom:g} MW): it doesn't raise the link's capacity."
+    )
     assert float(n.links.at[LINK, "p_nom"]) == p_nom
     assert E.set_period_mw(n, LINK, 2030, p_nom)["note"] is None
 
@@ -194,8 +218,9 @@ def test_above_the_rating_is_accepted_with_its_note():
 
 
 def _fp_ctx(n):
-    return types.SimpleNamespace(network=n, solver_state={"solver_config": {}}, user_ts={},
-                                 storage_dir=None)
+    return types.SimpleNamespace(
+        network=n, solver_state={"solver_config": {}}, user_ts={}, storage_dir=None
+    )
 
 
 def _fps(n):
@@ -208,7 +233,7 @@ def _fps(n):
 def test_the_fingerprint_moves_on_a_period_edit_both_branches():
     n = _staged()
     before = _fps(n)
-    assert _fps(n) == before                                  # deterministic
+    assert _fps(n) == before  # deterministic
     E.set_period_mw(n, LINK, 2030, 30.0)
     after = _fps(n)
     assert after[0] != before[0] and after[1] != before[1]
@@ -220,7 +245,9 @@ def test_the_fingerprint_moves_on_an_upload_equivalent_write():
     n = _staged()
     before = _fps(n)
     frame = E.energization_frame(n)
-    n.links_t[E.ATTR] = pd.DataFrame({LINK: frame[LINK].to_numpy() * 0.5}, index=frame.index)
+    n.links_t[E.ATTR] = pd.DataFrame(
+        {LINK: frame[LINK].to_numpy() * 0.5}, index=frame.index
+    )
     after = _fps(n)
     assert after[0] != before[0] and after[1] != before[1]
 
@@ -235,7 +262,7 @@ def test_the_fingerprint_is_unchanged_without_the_column(monkeypatch):
     del n.links_t[E.ATTR]
     without = _fps(n)
     assert nan_only == without != with_schedule
-    monkeypatch.setattr(E, "energization_frame", lambda _n: None)   # the block dropped
+    monkeypatch.setattr(E, "energization_frame", lambda _n: None)  # the block dropped
     n2 = _single()
     del n2.links_t[E.ATTR]
     assert _fps(n2) == without
@@ -259,7 +286,9 @@ def test_the_investment_case_key_moves_with_the_schedule():
     h1, parts1 = _ic_key(n)
     assert h1 != h0 and parts1["energization"] != parts["energization"]
     frame = E.energization_frame(n)
-    n.links_t[E.ATTR] = pd.DataFrame({LINK: frame[LINK].to_numpy() * 0.5}, index=frame.index)
+    n.links_t[E.ATTR] = pd.DataFrame(
+        {LINK: frame[LINK].to_numpy() * 0.5}, index=frame.index
+    )
     assert _ic_key(n)[0] != h1
 
 
@@ -271,7 +300,9 @@ def test_the_investment_case_key_is_unchanged_without_a_schedule():
     assert "energization" not in parts
     base = dict(finance=None, commercial=None, dispatch="d", packs={})
     assert assumptions_digest(**base) == assumptions_digest(**base, energization=None)
-    assert assumptions_digest(**base)[0] != assumptions_digest(**base, energization="x")[0]
+    assert (
+        assumptions_digest(**base)[0] != assumptions_digest(**base, energization="x")[0]
+    )
 
 
 # ── E4: the run's freeze and admission ──────────────────────────────────────
@@ -280,20 +311,43 @@ def test_the_investment_case_key_is_unchanged_without_a_schedule():
 def _run_ctx(tmp_path, n):
     from services import flow_service as F
 
-    meta = json.loads((TEMPLATES / "eh_datacenter_staged" / "eh_template.json").read_text())
+    meta = json.loads(
+        (TEMPLATES / "eh_datacenter_staged" / "eh_template.json").read_text()
+    )
     (tmp_path / F.TEMPLATE_FILE).write_text(json.dumps(meta))
-    return types.SimpleNamespace(storage_dir=str(tmp_path), project_uuid="p", network=n,
-                                 network_revision=0, solver_state_lock=threading.RLock(),
-                                 solver_state={"solver_config": {}})
+    return types.SimpleNamespace(
+        storage_dir=str(tmp_path),
+        project_uuid="p",
+        network=n,
+        network_revision=0,
+        solver_state_lock=threading.RLock(),
+        solver_state={"solver_config": {}},
+    )
 
 
 def _admit(tmp_path, ctx, frozen):
     from harness import run_eh
 
-    step = {"id": "solve.2", "tool": "run_eh_study", "args": dict(frozen["args"]),
-            "frozen": frozen, "status": "pending", "attempt_id": "a1"}
-    task = {"task_id": "t1", "project_id": "p", "status": "running", "steps": [step],
-            "run": {"profile": "eh_site@1", "status": "running", "stage": "solve", "stages": {}}}
+    step = {
+        "id": "solve.2",
+        "tool": "run_eh_study",
+        "args": dict(frozen["args"]),
+        "frozen": frozen,
+        "status": "pending",
+        "attempt_id": "a1",
+    }
+    task = {
+        "task_id": "t1",
+        "project_id": "p",
+        "status": "running",
+        "steps": [step],
+        "run": {
+            "profile": "eh_site@1",
+            "status": "running",
+            "stage": "solve",
+            "stages": {},
+        },
+    }
     return run_eh.admit(tmp_path / "task.json", task, step, step["args"], ctx)
 
 
@@ -302,14 +356,20 @@ def test_freeze_records_the_schedule_and_admit_compares_it_exactly(tmp_path):
 
     n = _staged()
     ctx = _run_ctx(tmp_path, n)
-    frozen = json.loads(json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)))
-    assert frozen["energization"] == {LINK: {"by_period": {"2027": 15.0, "2030": 55.0, "2035": 55.0}}}
+    frozen = json.loads(
+        json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
+    )
+    assert frozen["energization"] == {
+        LINK: {"by_period": {"2027": 15.0, "2030": 55.0, "2035": 55.0}}
+    }
     assert run_eh._energization_change(ctx, frozen) is None
-    E.set_period_mw(n, LINK, 2030, 54.999999)                # exact, never a tolerance
+    E.set_period_mw(n, LINK, 2030, 54.999999)  # exact, never a tolerance
     kind, message = _admit(tmp_path, ctx, frozen)
     assert kind == run_eh.ARGS_KIND
-    assert message == ("The connection's energization schedule changed since the study's card "
-                       "was drawn (grid_import). Review the run again.")
+    assert message == (
+        "The connection's energization schedule changed since the study's card "
+        "was drawn (grid_import). Review the run again."
+    )
 
 
 def test_a_record_frozen_before_02b_refuses_on_a_staged_network(tmp_path):
