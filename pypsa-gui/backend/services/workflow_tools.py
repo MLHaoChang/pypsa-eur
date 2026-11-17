@@ -622,26 +622,35 @@ def _network_input_fingerprint(ctx, *, exact=False):
 _SWEEP_LOCK = threading.Lock()
 
 
-def _refuse_cost_the_parts_own(n, change) -> None:
-    """TCU 09: a case that sets a cost a target's investment parts own would build a child identical to the
-    baseline, since the bulk write re-derives it; refused before any case exists, in the single edit's words."""
+def cost_the_parts_own_problem(n, change) -> str | None:
+    """Why a change sets a cost a target's investment parts own (the single edit's rule and words,
+    `network_crud.check_parts_own_costs`), naming the target; None when it does not. The sweep (TCU 09) and the
+    experiment preflight copy (TCU 11) share it, each refusing with its own kind."""
     from services.asset_schema.derive import split_parts
     from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
     from services.network_crud import check_parts_own_costs
 
     if change.component_class not in COMPOSITE:
-        return
+        return None
     frame = getattr(n, CLASS_ATTR[change.component_class])
     for name in change.names:
         if name not in frame.index:
-            continue  # the bulk write refuses an unknown name
+            continue  # the caller's own write refuses an unknown name
         before = frame.loc[name].to_dict()
         _, parts = split_parts(change.component_class, before)
         try:
             check_parts_own_costs(change.component_class, parts, before=before,
                                   submitted={change.attribute: change.value})
         except HTTPException as exc:
-            _refuse("invalid_sensitivity_cases", f"{change.component_class} {name}: {exc.detail}")
+            return f"{change.component_class} {name}: {exc.detail}"
+    return None
+
+
+def _refuse_cost_the_parts_own(n, change) -> None:
+    """TCU 09: a case that sets a cost a target's investment parts own would build a child identical to the
+    baseline, since the bulk write re-derives it; refused before any case exists, in the single edit's words."""
+    if problem := cost_the_parts_own_problem(n, change):
+        _refuse("invalid_sensitivity_cases", problem)
 
 
 def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:

@@ -545,3 +545,122 @@ def test_an_experiment_case_changing_a_priced_scale_rederives_the_copy(install_n
     assert got.at["bess", "capital_cost"] == pytest.approx(want.storage_units.at["bess", "capital_cost"], rel=1e-12)
     assert got.at["bess", "capital_cost"] != pytest.approx(before)
     assert n.storage_units.at["bess", "capital_cost"] == before  # the open network is untouched
+
+
+# ── GK B (62) conditions on TCU 11 ───────────────────────────────────────────
+
+
+def _with_member(data: bytes, member: str, body: bytes | None) -> bytes:
+    """The bundle with `member` replaced (None: removed)."""
+    import zipfile
+
+    src = zipfile.ZipFile(io.BytesIO(data))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as out:
+        for item in src.namelist():
+            if item != member:
+                out.writestr(item, src.read(item))
+        if body is not None:
+            out.writestr(member, body)
+    return buf.getvalue()
+
+
+def test_a_bundle_without_solver_settings_derives_at_the_default_rate_and_says_so(
+    client, install_network, session_ctx
+):
+    """A1: only an absent settings file uses the default rate."""
+    n = _network()
+    n.storage_units.at["bess", "capital_cost"] = 1.0
+    data = _with_member(_bundle_of(client, install_network, n, rate=0.05), "solver_config.json", None)
+    install_network(_network())
+    r = client.put("/api/simulation/solver_config", json={"discount_rate": 0.09})
+    assert r.status_code == 200, r.text
+    r = _import_bundle(client, data, "tcu11_nocfg")
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["rederived_at_default_rate"] is True
+    _assert_derived(session_ctx(client).network.storage_units, "bess", rate=0.07)
+
+
+@pytest.mark.parametrize("body", [b"{not json", b"[1, 2]", b'{"discount_rate": "abc"}'])
+def test_a_bundle_with_unreadable_solver_settings_is_refused_before_anything_is_written(
+    client, install_network, session_ctx, project_row, body
+):
+    """A1: present but unreadable is a 422, never the default rate."""
+    n = _network()
+    data = _with_member(_bundle_of(client, install_network, n), "solver_config.json", body)
+    good = install_network(_network())
+    r = _import_bundle(client, data, "tcu11_badcfg")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "import_unreadable"
+    assert project_row("tcu11_badcfg") is None
+    assert session_ctx(client).network is good
+
+
+def test_a_clean_bundle_loads_as_the_old_path_did_and_is_not_marked_unsaved(
+    client, install_network, session_ctx, tmp_path
+):
+    """A2: the candidate swapped in equals a reset-and-load of the same network.nc, frame by frame."""
+    import zipfile
+
+    from services import dirty_state
+    from services.pypsa_service import PyPSAService
+
+    data = _bundle_of(client, install_network, _network())
+    r = _import_bundle(client, data, "tcu11_clean")
+    assert r.status_code in (200, 201), r.text
+    assert "rederived" not in r.json() and "rederived_at_default_rate" not in r.json()
+    ctx = session_ctx(client)
+    assert not dirty_state.is_dirty(ctx)
+    got = ctx.network
+    path = tmp_path / "network.nc"
+    path.write_bytes(zipfile.ZipFile(io.BytesIO(data)).read("network.nc"))
+    with PyPSAService.get_lock():
+        PyPSAService.reset_network()
+        old = PyPSAService.get_network()
+        PyPSAService.import_network_from_netcdf(old, path)
+    for c in ("Bus", "Generator", "Load", "Line", "StorageUnit", "Carrier"):
+        pd.testing.assert_frame_equal(got.components[c].static, old.components[c].static, obj=c)
+    pd.testing.assert_index_equal(got.snapshots, old.snapshots)
+    pd.testing.assert_frame_equal(got.snapshot_weightings, old.snapshot_weightings)
+    pd.testing.assert_frame_equal(got.loads_t.p_set, old.loads_t.p_set)
+
+
+def test_a_bad_row_in_a_second_class_refuses_with_nothing_left_behind(
+    client, install_network, session_ctx, project_row, project_storage_dir
+):
+    """A3: the storage rows are fine; the Line's infinite length refuses before the project row or a folder."""
+    n = _network()
+    n.lines.at["ab", "length"] = float("inf")
+    data = _bundle_of(client, install_network, n, name="tcu11_src2")
+    root = project_storage_dir("tcu11_src2").parent
+    before = {p.name for p in root.iterdir()}
+    good = install_network(_network())
+    r = _import_bundle(client, data, "tcu11_line")
+    assert r.status_code == 422, r.text
+    assert "Line 'ab'" in r.json()["detail"]["message"]
+    assert project_row("tcu11_line") is None
+    assert {p.name for p in root.iterdir()} == before
+    assert session_ctx(client).network is good
+
+
+def test_an_experiment_change_cannot_reach_a_rate_or_a_part():
+    """B2: the preflight's allowlist holds no discount rate and no investment part, so a re-derive inside the
+    copy never runs at a rate the same changes move."""
+    from services.asset_schema.schema import COMPOSITE, part_columns
+    from services.workflow_tools import _ATTRIBUTES
+
+    for cls in COMPOSITE:
+        allowed = _ATTRIBUTES.get(cls, set())
+        assert "discount_rate" not in allowed, cls
+        assert not allowed & set(part_columns(cls)), cls
+
+
+def test_every_owned_cost_an_experiment_can_name_is_refused():
+    """B3: the refused set is the single edit's (`derive.owned_columns`); of it, the allowlist reaches only
+    capital_cost, which the refusal tests above cover on both priced classes."""
+    from services.asset_schema.derive import owned_columns
+    from services.asset_schema.schema import COMPOSITE
+    from services.workflow_tools import _ATTRIBUTES
+
+    reachable = {cls: _ATTRIBUTES.get(cls, set()) & set(owned_columns(cls)) for cls in COMPOSITE}
+    assert reachable == {cls: {"capital_cost"} for cls in COMPOSITE}, reachable

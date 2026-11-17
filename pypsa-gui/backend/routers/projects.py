@@ -1372,32 +1372,61 @@ def _extract_bundle(zf: zipfile.ZipFile, members: set[str], dest: pathlib.Path,
 def _bundle_network_owning_its_costs(zf: zipfile.ZipFile):
     """A bundle's `network.nc` parsed into a network that is not open yet, with its priced rows checked and
     re-derived (`network_crud.rederive_imported_parts`, 422 on a bad row) at the bundle's own discount rate:
-    the project it restores brings its solver settings with it. Returns the network and the re-derived rows."""
+    the project it restores brings its solver settings, read as every load reads them
+    (`_solver_config_from_dict`). A `solver_config.json` that is present but cannot be read refuses the
+    import (422); only an absent one uses the defaults. Returns the network, the rows whose owned cost the
+    re-derive moved, and the rate's source ("bundle" or "default")."""
     import tempfile
 
     import pypsa
 
-    from services.asset_schema.derive import number
     from services.network_crud import rederive_imported_parts
     from services.solver_service import SolverConfig
 
-    cfg: dict = {}
     if "solver_config.json" in zf.namelist():
         try:
             loaded = json.loads(zf.read("solver_config.json").decode("utf-8"))
-            cfg = loaded if isinstance(loaded, dict) else {}
-        except Exception:  # noqa: BLE001 - an unreadable config loads as the defaults
-            cfg = {}
-    rate = number(cfg.get("discount_rate"))
+            if not isinstance(loaded, dict):
+                raise ValueError("not an object")
+            rate = float(_solver_config_from_dict(loaded).discount_rate)
+            if not math.isfinite(rate):
+                raise ValueError("discount rate is not a finite number")
+        except Exception as exc:  # noqa: BLE001 - any unreadable settings file refuses, by name
+            raise HTTPException(422, {
+                "error_kind": "import_unreadable",
+                "message": f"The bundle's solver settings (solver_config.json) cannot be read "
+                           f"({type(exc).__name__}); nothing was imported.",
+            }) from exc
+        source = "bundle"
+    else:
+        rate, source = float(SolverConfig().discount_rate), "default"
     with tempfile.TemporaryDirectory() as tmp:
         path = pathlib.Path(tmp) / "network.nc"
         path.write_bytes(zf.read("network.nc"))
         candidate = pypsa.Network()
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(candidate, path)
-    rederived = rederive_imported_parts(
-        candidate, global_rate=SolverConfig().discount_rate if rate is None else rate)
-    return candidate, rederived
+    before = _owned_costs(candidate)
+    rederive_imported_parts(candidate, global_rate=rate)
+    after = _owned_costs(candidate)
+    # Only the rows whose owned cost moved: a bundle saved with its costs current re-derives to the same values,
+    # so it reads as saved and lists nothing.
+    moved = [label for label, value in after.items() if not before[label].equals(value)]
+    return candidate, moved, source
+
+
+def _owned_costs(n) -> dict:
+    """{"Storage 'name'": the row's part-owned cost columns} for every row of a class with investment parts."""
+    from services.asset_schema.derive import class_label, owned_columns
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+
+    out = {}
+    for component_class in COMPOSITE:
+        df = getattr(n, CLASS_ATTR[component_class])
+        cols = [c for c in owned_columns(component_class) if c in df.columns]
+        for name in df.index:
+            out[f"{class_label(component_class)} '{name}'"] = df.loc[name, cols].copy()
+    return out
 
 @router.post("/import_bundle")
 async def import_bundle(
@@ -1476,7 +1505,7 @@ async def import_bundle(
     # TCU 11: the bundle's network is an upload like the network imports, so its investment parts own their
     # rows' costs. A priced part that cannot be derived refuses the import here, before the project row or
     # any file exists; the priced rows are re-derived at the bundle's own rate.
-    candidate, rederived = _bundle_network_owning_its_costs(zf)
+    candidate, rederived, rate_source = _bundle_network_owning_its_costs(zf)
 
     # `target_name` may come from a zip's metadata.json — never trust it.
     # `_safe_project_dir` rejects path traversal and shell-metachar names.
@@ -1682,6 +1711,8 @@ async def import_bundle(
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
         # The priced rows whose costs were re-derived from their parts (TCU 11).
         **({"rederived": rederived} if rederived else {}),
+        # The bundle had no solver settings, so the costs were re-derived at the default discount rate.
+        **({"rederived_at_default_rate": True} if rederived and rate_source == "default" else {}),
         "summary": ImportSummary(
             buses=len(n.buses),
             generators=len(n.generators),
