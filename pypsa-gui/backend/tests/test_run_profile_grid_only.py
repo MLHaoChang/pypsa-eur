@@ -441,6 +441,29 @@ def test_each_part_of_the_pf_freshness_guard_refuses_on_its_own(fingerprints, ov
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
 
 
+def test_a_failed_flow_leaves_the_lp_current_only_for_a_profile_that_reads_the_pf(
+    fingerprints,
+):
+    """GK B SH-15 (1): the flow's failure feeds only grid.pf.converged (the stage restores the
+    LP's frames), so with `after_pf` the LP is still current; the LP-only guard is unchanged."""
+    ctx = _fresh_ctx(condition="optimal; ac_pf_failed: singular", pf=False)
+    fingerprints(ctx)
+    assert _calc.solve_matches_inputs(ctx, after_pf=True) is True
+    assert _calc.solve_matches_inputs(ctx) is False
+
+
+@pytest.mark.parametrize(
+    "condition",
+    ["optimal; ac_pf_unknown: x", "infeasible; ac_pf_failed: x", "lopf+ac_pf_ok", None],
+)
+def test_without_a_flow_only_the_lp_or_a_failed_flow_is_current(
+    fingerprints, condition
+):
+    ctx = _fresh_ctx(condition=condition, pf=False)
+    fingerprints(ctx)
+    assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
+
+
 def test_a_changed_input_is_never_current_after_a_pf(fingerprints):
     ctx = _fresh_ctx(condition="lopf+ac_pf_ok")
     ctx.network.meta.update(
@@ -511,6 +534,49 @@ def test_a_solve_leaves_the_input_fingerprint_where_it_was(template, with_pf):
     finally:
         logging.disable(logging.NOTSET)
     assert before == after
+
+
+@pytest.mark.parametrize("template", ["3bus", "ieee14", "belgium", "ieee39"])
+def test_the_in_place_flow_adds_no_edit_and_leaves_the_branch_carriers(template):
+    """GK B SH-15 (2) A3: the AC power flow runs in place on the solved network; it pushes
+    no undo entry, moves no edit counter and leaves the saved branch carriers as the LP left them."""
+    import logging
+    import pathlib
+    import queue
+
+    from services.ac_pf_service import run_ac_pf_stage
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig
+
+    path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "project_templates"
+        / template
+        / "network.nc"
+    )
+    if not path.exists():
+        pytest.skip(f"{template} is not built here")
+    logging.disable(logging.CRITICAL)
+    n = pypsa.Network(str(path))
+    ctx = PyPSAService.build_context()
+    ctx.network = n
+    token = PyPSAService.bind_request_context(ctx)
+    try:
+        assert n.optimize(solver_name="highs")[0] == "ok"
+        carriers = {
+            c: n.static(c).get("carrier", pd.Series(dtype=object)).copy()
+            for c in ("Line", "Transformer")
+        }
+        undo, revision = len(ctx.undo.stack), ctx.network_revision
+        run_ac_pf_stage(n, SolverConfig(), queue.Queue())
+        assert len(ctx.undo.stack) == undo and ctx.network_revision == revision
+        for c, before in carriers.items():
+            pd.testing.assert_series_equal(
+                n.static(c).get("carrier", pd.Series(dtype=object)), before
+            )
+    finally:
+        PyPSAService.reset_request_context(token)
+        logging.disable(logging.NOTSET)
 
 
 def _fingerprint(n):

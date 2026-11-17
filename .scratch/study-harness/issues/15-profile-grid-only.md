@@ -29,3 +29,21 @@ Design: [design.md](../design.md) §9.3 "Grid-only"
 `pypsa-gui/backend/services/run_profiles.py`, `pypsa-gui/backend/services/run_gates.py`, `pypsa-gui/backend/tests/test_run_profile_grid_only.py` (new)
 
 ## Comments
+
+GK B (61), 2026-11-17, consolidating GK B (60)'s plan-GO conditions. The scope decision SH15-SCOPE is A: ship as is, with follow-up issue 51.
+
+- (1) `lopf+ac_pf_*` is parsed so that an optimal LP stays optimal, and the PF outcome feeds only `grid.pf.converged`.
+  - Done: `run_gates.lp_condition`.
+  - Done: `calculations.solve_matches_inputs(after_pf=True)` accepts `optimal; ac_pf_failed: …` with no PF result, because the stage restores the LP frames.
+- (2) `after_pf` needs both the revision and the condition, each with its own red case.
+  - Done: revision-only and condition-only red cases.
+  - A1: AC PF overwrites the slack's `generators_t`, so the run has no KPIs after a flow. Follow-up issue 50.
+  - A2: `sub_network` is not an Input attr; the C-a pin passes with PF.
+  - A3: the flow runs in place. It adds no undo entry or edit counter and leaves the branch carriers unchanged (test).
+- (3) Test the capture check ordering.
+- (4) The fingerprint change `''`→`'AC'` is accepted with:
+  - C-a: before equals after solve, with and without PF, on 3bus, ieee14 and ieee39 (belgium skipped while unbuilt);
+  - C-b;
+  - C-c: the shift is stated in the release note;
+  - C-d.
+- #851's branch-overload reader stays off `after_pf`.
