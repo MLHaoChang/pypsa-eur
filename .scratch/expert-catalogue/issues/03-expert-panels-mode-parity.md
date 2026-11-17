@@ -33,3 +33,8 @@ Depends on: 01, 02. Starts after #1565 (PropertiesPanel, AssetFields, assetSchem
 ## Keeping both modes in step
 
 This slice is where both modes switch to the one component, in one PR; the parity test guards it from then on.
+
+## Comments
+
+- GK B (65), 2026-11-17 16:41Z, at the #1634 OK: T3 carries here as a named condition. `options_plain` is display only. A test shows the stored value stays the raw option through a card edit and save (round trip), and an unknown stored option reads as itself and is flagged, never blank or coerced.
+- UX (25), 2026-11-17 16:18Z, DGS-EXTRAS-1: a field hidden by `reveal_when` gets a one-line reason (for example "Shown when AC control is Slack"), not a silent disappearance. This is one frontend change for every reveal_when field, and it lands here.
