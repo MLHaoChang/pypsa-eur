@@ -225,3 +225,23 @@ def test_a_mip_solve_on_master_writes_zero_prices_not_duals(reset_backend, monke
     prices = live.buses_t.marginal_price
     assert not prices.empty and (prices.to_numpy() == 0.0).all()
     assert sv.price_limit(sv.classify(live, cfg)) == sv.DUALS_NOT_MARGINAL
+
+
+# ── G2c: the band's objective is in user units ──────────────────────────────
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("scale_kw", [
+    {"user_objective_scale": 1.0},
+    {"user_objective_scale": 1e-3},
+    {"auto_objective_scale": True},
+])
+def test_the_captured_objective_is_in_user_units_under_any_scale(scale_kw, reset_backend, monkeypatch):
+    # Hand-worked: g1 (10 EUR/MWh) serves 5 + 8 + 3 = 16 MWh -> 160 EUR.
+    from services.pypsa_service import PyPSAService
+
+    live, _, _ = _solve(_lp(), {"solver_name": "highs", **scale_kw}, monkeypatch)
+    ctx = PyPSAService.build_context()
+    ctx.network = live
+    captured = sv.capture(ctx)
+    assert captured["kind"] == "lp"
+    assert captured["objective"] == pytest.approx(160.0, rel=1e-9)
