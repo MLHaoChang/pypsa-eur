@@ -48,6 +48,11 @@ def writes_nothing(bbox, year, month, target, stop_event):
     return None
 
 
+def writes_garbage(bbox, year, month, target, stop_event):
+    """Answers "ok" but leaves a file no netCDF reader can open."""
+    Path(target).write_bytes(b"partial")
+
+
 def exits_3(bbox, year, month, target, stop_event):
     """Dies without answering, as a crash in the fetch would."""
     os._exit(3)

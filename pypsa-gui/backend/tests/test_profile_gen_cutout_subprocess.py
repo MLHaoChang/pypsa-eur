@@ -380,6 +380,23 @@ def test_a_month_finished_as_the_stop_came_is_kept(cds_env):
 
 
 @pytest.mark.parametrize("in_child", [True, False])
+def test_a_month_that_wrote_unreadable_bytes_is_never_merged(cds_env, in_child):
+    cache = cds_env / "c"
+    parts = _seed(cache, range(1, 12))
+    with pytest.raises(CutoutDownloadError, match="month 12 left no readable data"):
+        ensure_cutout(
+            BBOX,
+            YEAR,
+            cache_dir=cache,
+            downloader=cutout_fakes.writes_garbage,
+            fetch_in_subprocess=in_child,
+        )
+    assert not (parts / "m12.nc").exists()
+    assert not list(parts.glob("*.fetch.nc"))
+    assert not list(cache.glob("era5_*.nc"))
+
+
+@pytest.mark.parametrize("in_child", [True, False])
 def test_a_month_that_wrote_nothing_is_never_merged(cds_env, in_child):
     cache = cds_env / "c"
     _seed(cache, range(1, 12))
