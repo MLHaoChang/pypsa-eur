@@ -1122,7 +1122,8 @@ def test_island_assumption_rows_open_the_island_panel_not_expert_capacity_bounds
     from services.flow_service import _assumed_items
 
     items = ["existing island", "island sidecar", "island unit data",
-             "transition RoCoF limit", "island rows", "island break-even"]
+             "transition RoCoF limit", "island rows", "island break-even",
+             "ride-through settings"]
     template = {"ledger": [{"item": i, "value": "x", "source": "assumed"} for i in items]}
     out = _assumed_items(template, {})
     assert len(out) == len(items)

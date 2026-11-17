@@ -25,3 +25,19 @@ def test_a_normally_open_import_tie_is_not_missing_outage_data():
 def test_a_closed_import_tie_without_outage_data_is_still_missing():
     _, missing = outage_scan(_net(1.0), ["tie"])
     assert [m["name"] for m in missing] == ["tie"]
+
+
+def test_a_zero_static_rating_overridden_by_a_series_is_not_open():
+    n = _net(0.0)
+    n.snapshots = range(3)
+    n.links_t.p_max_pu["tie"] = [1.0, 1.0, 1.0]
+    _, missing = outage_scan(n, ["tie"])
+    assert [m["name"] for m in missing] == ["tie"]
+
+
+def test_a_zero_static_rating_with_an_all_zero_series_is_open():
+    n = _net(0.0)
+    n.snapshots = range(3)
+    n.links_t.p_max_pu["tie"] = [0.0, 0.0, 0.0]
+    _, missing = outage_scan(n, ["tie"])
+    assert missing == []
