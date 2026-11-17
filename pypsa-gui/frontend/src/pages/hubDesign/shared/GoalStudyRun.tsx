@@ -15,12 +15,15 @@ import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 import { useFlowScope, useInScope } from '../../../components/flowScope/useFlowScope'
 import { useGoalStudy } from '../useGoalStudy'
 import { useUIStore } from '../../../store/uiStore'
+import { useSimulationStore } from '../../../store/simulationStore'
+import { useHubDesignStore } from '../hubDesignStore'
 
 export const RELIABILITY_OUT_OF_SCOPE =
   'Outside scope: add Reliability goal & study (below) to run the study.'
 
 export function GoalStudyRun() {
   const gate = useRunGate('all')
+  const solveGate = useRunGate('optimisation')
   const {
     project, study, running, templateUnknown, refetchTemplate, vollMissing, built, run, abort, problem,
   } = useGoalStudy()
@@ -34,10 +37,9 @@ export function GoalStudyRun() {
   const outOfScopeTitle = goalOpt && goalOpt.status !== 'available'
     ? (goalOpt.reason ? `Not offered for this site: ${goalOpt.reason}` : 'Not offered for this site.')
     : RELIABILITY_OUT_OF_SCOPE
-  // A site with no reliability study to run (generation-only: "nothing to make
-  // adequate") has one Run, the dispatch solve: the header's gated Run, so the
-  // gate and the save are the same (owner decision GENONLY-RUN-1).
-  const requestRunSolve = useUIStore(s => s.requestRunSolve)
+  // A site with no reliability study to run (generation-only) has one Run, the
+  // optimisation: the header's gated Run, so the gate and the save are the
+  // same (owner decision GENONLY-RUN-1).
   const solveOnly = goalOpt != null && goalOpt.status !== 'available'
   const status = study?.status
   const again = status === 'failed' || status === 'aborted' || status === 'done'
@@ -51,18 +53,7 @@ export function GoalStudyRun() {
     + ` · ${elapsed} elapsed`
 
   if (solveOnly) {
-    return (
-      <div data-testid="hub-run" className="flex flex-col gap-2">
-        <button type="button" data-testid="hub-run-solve" onClick={() => requestRunSolve()}
-          disabled={!project || gate.blocked}
-          className="inline-flex items-center gap-1.5 self-start rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
-          <Play size={12} /> Run the solve
-        </button>
-        <p data-testid="hub-run-solve-why" className="text-[12px] text-muted">
-          {goalOpt.reason ? `${goalOpt.reason} ` : ''}The run for this site is the dispatch solve.
-        </p>
-      </div>
-    )
+    return <OptimisationRun blocked={solveGate.blocked} reason={solveGate.reason} hasProject={!!project} />
   }
 
   return (
@@ -112,6 +103,54 @@ export function GoalStudyRun() {
       {!running && status === 'aborted' && (
         <p data-testid="hub-run-error" className="text-[12px] text-warn">
           Stopped before the end: the results cover only the parts that finished.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The Run of a site that has no reliability study (generation-only): the
+ *  optimisation, started through the header's gated Run. Guided hides that
+ *  Run, so this is the Guided entry point; it shows the run's own state and
+ *  where the result is. Stopping a run stays with the run-progress package. */
+function OptimisationRun({ blocked, reason, hasProject }: {
+  blocked: boolean; reason: string | null; hasProject: boolean
+}) {
+  const requestRunSolve = useUIStore(s => s.requestRunSolve)
+  const status = useSimulationStore(s => s.status)
+  const setStep = useHubDesignStore(s => s.setStep)
+  const running = status === 'running'
+  const elapsed = formatElapsed(useElapsed(running))
+  return (
+    <div data-testid="hub-run" className="flex flex-col gap-2">
+      <button type="button" data-testid="hub-run-solve" onClick={() => requestRunSolve()}
+        disabled={!hasProject || blocked || running}
+        className="inline-flex items-center gap-1.5 self-start rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
+        {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+        {running ? 'Running…' : status === 'idle' ? 'Run the optimisation' : 'Run the optimisation again'}
+      </button>
+      <p data-testid="hub-run-solve-why" className="text-[12px] text-muted">
+        This site has no reliability study to run: the run is the optimisation, which sizes and dispatches the assets.
+      </p>
+      {running && (
+        <p data-testid="hub-run-running" className="text-[12px] text-muted">Running… · {elapsed} elapsed</p>
+      )}
+      {!running && blocked && (
+        <p data-testid="hub-run-blocked" className="text-[12px] text-warn">{reason}</p>
+      )}
+      {status === 'completed' && (
+        <p data-testid="hub-run-finished" className="flex flex-wrap items-center gap-2 text-[12px] text-text">
+          The optimisation finished.
+          <button type="button" data-testid="hub-run-open-results"
+            onClick={() => setStep('results', { user: true })}
+            className="text-accent hover:underline">
+            Open the results ›
+          </button>
+        </p>
+      )}
+      {(status === 'failed' || status === 'aborted') && (
+        <p data-testid="hub-run-error" className="text-[12px] text-warn">
+          {status === 'failed' ? 'The optimisation failed.' : 'The optimisation was stopped.'}
         </p>
       )}
     </div>

@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi, simulationApi } from '../../../api/simulation'
 import { useUIStore } from '../../../store/uiStore'
+import { useSimulationStore } from '../../../store/simulationStore'
 import { buildGoalFreeStudyBody, EMPTY_PACK_FORM, formFromTemplate } from '../../results/EhReferenceDesignPanel'
 import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
@@ -141,7 +142,7 @@ describe('GoalStudyRun run', () => {
 })
 
 describe('GoalStudyRun where Reliability is not offered', () => {
-  it('says why in words, with the registry reason, not "add…"', async () => {
+  it('says in plain words why the run is the optimisation', async () => {
     getFlowScope.mockResolvedValue({
       scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_ipp_hybrid',
         options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
@@ -155,10 +156,10 @@ describe('GoalStudyRun where Reliability is not offered', () => {
     mount()
     const why = await screen.findByTestId('hub-run-solve-why')
     expect(why.textContent).toBe(
-      'Nothing to make adequate: this site only generates and has no load. The run for this site is the dispatch solve.')
+      'This site has no reliability study to run: the run is the optimisation, which sizes and dispatches the assets.')
   })
 
-  it('offers "Run the solve" through the gated header Run instead of a disabled study (GENONLY-RUN-1)', async () => {
+  it('offers "Run the optimisation" through the gated header Run instead of a disabled study (GENONLY-RUN-1)', async () => {
     getFlowScope.mockResolvedValue({
       scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_ipp_hybrid',
         options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
@@ -173,11 +174,41 @@ describe('GoalStudyRun where Reliability is not offered', () => {
     useUIStore.setState({ requestRunSolve } as never)
     const user = mount()
     const btn = await screen.findByTestId('hub-run-solve') as HTMLButtonElement
-    expect(btn.textContent).toMatch(/Run the solve/)
+    expect(btn.textContent).toBe('Run the optimisation')
     expect(screen.queryByTestId('hub-run-start')).toBeNull()
     await user.click(btn)
     expect(requestRunSolve).toHaveBeenCalledTimes(1)
     expect(resultsApi.startEhStudy).not.toHaveBeenCalled()
+  })
+})
+
+describe('GoalStudyRun optimisation-only states (GENONLY-RUN-1)', () => {
+  const IPP_SCOPE = {
+    scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_ipp_hybrid',
+      options: { capacity: ['sizing', 'dispatch'], grid: [], control: [], reliability: [], commercial: [], handoff: ['reports'] } },
+    cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: [],
+      sections: ['assets', 'scenarios'], chip: 'Reliability',
+      options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'not_yet_available', reason: 'x' }] }],
+    preset_id: 'eh_ipp_hybrid', preset_label: 'IPP', preset: { version: 1, groups: [], options: {} },
+  }
+  afterEach(() => { useSimulationStore.setState({ status: 'idle' }) })
+
+  it('running: the button is disabled and the line says Running with the elapsed time', async () => {
+    getFlowScope.mockResolvedValue(IPP_SCOPE)
+    useSimulationStore.setState({ status: 'running' })
+    mount()
+    expect((await screen.findByTestId('hub-run-running')).textContent).toBe('Running… · 0:00 elapsed')
+    expect((screen.getByTestId('hub-run-solve') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('finished: says so and opens the results step', async () => {
+    getFlowScope.mockResolvedValue(IPP_SCOPE)
+    useSimulationStore.setState({ status: 'completed' })
+    const user = mount()
+    expect((await screen.findByTestId('hub-run-finished')).textContent)
+      .toBe('The optimisation finished.Open the results ›')
+    await user.click(screen.getByTestId('hub-run-open-results'))
+    expect(useHubDesignStore.getState().step).toBe('results')
   })
 })
 
