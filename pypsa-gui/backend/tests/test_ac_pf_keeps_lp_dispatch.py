@@ -141,8 +141,38 @@ def test_the_saved_dispatch_is_the_lps_on_a_lossy_template(
     assert d.status_code == 200, d.text
 
 
-def _solved_ieee14() -> pypsa.Network:
+def _ieee14_every_pf_table() -> pypsa.Network:
+    """ieee14 plus one of each component the flow writes q (or shunt p) for and
+    ieee14 lacks: a transformer to a 33 kV bus, a storage unit, a store and a
+    shunt, so a prior flow fills all 12 PF-only tables (GK A 30)."""
     n = _ieee14()
+    n.add("Bus", "Bus 14 LV", v_nom=33.0, carrier="AC")
+    n.add(
+        "Transformer",
+        "T 14",
+        bus0="Bus 14",
+        bus1="Bus 14 LV",
+        s_nom=100.0,
+        x=0.1,
+        r=0.01,
+    )
+    n.add("Load", "Load 14 LV", bus="Bus 14 LV", p_set=5.0, q_set=1.0)
+    n.add(
+        "StorageUnit",
+        "SU 3",
+        bus="Bus 3",
+        p_nom=20.0,
+        max_hours=4.0,
+        q_set=2.0,
+        carrier="AC",
+    )
+    n.add("Store", "Store 4", bus="Bus 4", e_nom=50.0, q_set=2.0, carrier="AC")
+    n.add("ShuntImpedance", "Shunt 9", bus="Bus 9", g=0.01, b=0.19)
+    return n
+
+
+def _solved_ieee14(build=_ieee14) -> pypsa.Network:
+    n = build()
     n.optimize(solver_name="highs")
     return n
 
@@ -159,18 +189,26 @@ def _master_stage(n):
         ac_pf_service._restore_result_state = real
 
 
+@pytest.mark.parametrize("build", [_ieee14, _ieee14_every_pf_table])
 @pytest.mark.parametrize("earlier_flow", [False, True])
-def test_every_dynamic_frame_is_the_lps_or_an_emptied_pf_only_one(earlier_flow):
+def test_every_dynamic_frame_is_the_lps_or_an_emptied_pf_only_one(earlier_flow, build):
     """A sweep over every `n.<c>_t` table on a lossy template, not a list. With
     `earlier_flow` the network carries a previous flow's q, |V| and bus
-    injections (saved before PF-SAVE-1) when the LP runs again."""
+    injections (saved before PF-SAVE-1) when the LP runs again; on
+    `_ieee14_every_pf_table` that is every PF-only table, so dropping any one
+    name from `_PF_ONLY_RESULTS` fails here (GK A 30)."""
     from services.solver_service import SolverConfig
 
-    n = _solved_ieee14()
+    n = _solved_ieee14(build)
     if earlier_flow:
         _master_stage(n)
         assert not n.buses_t.q.columns.empty, "fixture: a flow's q is live"
         n.optimize(solver_name="highs")
+        if build is _ieee14_every_pf_table:
+            for key in PF_ONLY_PINNED:
+                acc, attr = key.split(".", 1)
+                df = getattr(getattr(n, acc), attr)
+                assert df.abs().to_numpy().max() > 1e-6, f"fixture: {key} is live"
     before = _every_frame(n)
     out = ac_pf_service.run_ac_pf_stage(n, SolverConfig(), queue.Queue())
     _assert_lp_or_emptied(n, before)
