@@ -47,7 +47,8 @@ Then **refused** (``AggregationError``, naming the element): a converter
 unit with zero ``p_mw`` or ``s_mva``; a ring in a tree (any branch that
 reaches a bus already reached); a tree that
 reaches the PCC another way, or holds two roots; a load, genset, UPS,
-compensation or earthing transformer inside a tree (below its root): an
+compensation, earthing transformer or series capacitor (GC-01b; the walk
+follows it, so the buses behind it count) inside a tree (below its root): an
 equivalent of them is not defined here; transformers cascaded in a tree, or
 fed from their LV side; unit transformers with different rated voltages,
 vector groups or earthing, or units at two voltage levels; a campus with no
@@ -139,6 +140,8 @@ def _tree(c, root, main, roots):
     for kind, table, a, b in (
         ("cable", "cables", "from_bus", "to_bus"),
         ("trafo", "transformers", "hv_bus", "lv_bus"),
+        # followed so the walk sees the whole collector; _plan refuses one inside it
+        ("series capacitor", "series_capacitors", "from_bus", "to_bus"),
     ):
         for name, br in (c.get(table) or {}).items():
             if name in main:
@@ -190,6 +193,12 @@ def _plan(c, root, main, roots):
             raise AggregationError(
                 f"aggregation: compensation {comp['name']} sits inside the collector "
                 f"behind {root} (at {comp['bus']})"
+            )
+    for name, sc in (c.get("series_capacitors") or {}).items():
+        if below & {sc["from_bus"], sc["to_bus"]}:
+            raise AggregationError(
+                f"aggregation: series capacitor {name} sits inside the collector "
+                f"behind {root} ({sc['from_bus']}-{sc['to_bus']})"
             )
     for name, et in (c.get("earthing_transformers") or {}).items():
         if et["bus"] in below:
@@ -473,6 +482,7 @@ def aggregate(campus_spec) -> Aggregation:
         *c["units"],
         *(x["name"] for x in c.get("compensation") or []),
         *(c.get("earthing_transformers") or {}),
+        *(c.get("series_capacitors") or {}),
     }
     removed_buses, removed_branches = set(), set()
     for i, (root, nodes, parent, units, utr) in enumerate(plans):

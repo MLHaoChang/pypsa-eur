@@ -338,3 +338,58 @@ def test_the_tap_graph_reaches_the_buses_behind_the_capacitor():
     bus = {n: i for i, n in campus.net.bus["name"].items()}
     assert CT._reach(adj, bus["PCC"], set()) == set(bus.values())
     assert (bus["MV1C"], "impedance", 0) in adj[bus["MV1"]]
+
+
+# --- GC-01's aggregation: refused inside a collector tree, kept elsewhere ------
+
+
+def _plant_with_cap_in_collector():
+    from tests.gridspine.test_aggregate import plant
+
+    spec = plant()
+    c = spec["campus"]
+    # COL -> SC1 -> JC -> TRUNK -> J: every converter sits behind the capacitor.
+    c["buses"]["JC"] = {"vn_kv": 33.0}
+    c["cables"]["TRUNK"]["from_bus"] = "JC"
+    c["series_capacitors"] = {"SC1": {"from_bus": "COL", "to_bus": "JC", "xc_ohm": t(0.5)}}
+    return spec
+
+
+def _plant_with_aux_feeder(cap_name):
+    """``plant()`` plus a second main transformer feeding AUX -> cap -> AUXC
+    with a load: a tree without converters, which aggregation leaves alone."""
+    from tests.gridspine.test_aggregate import plant
+
+    spec = plant()
+    c = spec["campus"]
+    c["transformers"]["TRA"] = dict(c["transformers"]["TRM"], lv_bus="AUX")
+    c["buses"]["AUX"] = {"vn_kv": 33.0}
+    c["buses"]["AUXC"] = {"vn_kv": 33.0}
+    c["units"]["AUXLD"] = {"kind": "load", "bus": "AUXC", "p_mw": t(1.0), "pf": t(0.95)}
+    c["series_capacitors"] = {cap_name: {"from_bus": "AUX", "to_bus": "AUXC", "xc_ohm": t(0.5)}}
+    return spec
+
+
+def test_a_series_capacitor_inside_a_collector_tree_is_refused_by_name_before_the_walk_loses_its_far_side():
+    from gridspine.ingest.aggregate import AggregationError, aggregate
+
+    spec = _plant_with_cap_in_collector()
+    build_campus(spec)  # a valid campus: only aggregation refuses it
+    # Without following the capacitor the walk would find no converter and say so instead.
+    with pytest.raises(AggregationError, match=r"series capacitor SC1 sits inside the collector behind COL \(COL-JC\)"):
+        aggregate(spec)
+
+
+def test_a_series_capacitor_outside_every_collector_stays_in_the_aggregated_model():
+    from gridspine.ingest.aggregate import aggregate
+
+    agg = aggregate(_plant_with_aux_feeder("SCAUX"))
+    assert agg.spec["campus"]["series_capacitors"] == _plant_with_aux_feeder("SCAUX")["campus"]["series_capacitors"]
+    assert build_campus(agg.spec).series_capacitors.index.tolist() == ["SCAUX"]
+
+
+def test_a_kept_series_capacitor_name_blocks_an_equivalent_of_the_same_name():
+    from gridspine.ingest.aggregate import AggregationError, aggregate
+
+    with pytest.raises(AggregationError, match=r"the equivalent name\(s\) \['EQ_MV'\] are already taken"):
+        aggregate(_plant_with_aux_feeder("EQ_MV"))
