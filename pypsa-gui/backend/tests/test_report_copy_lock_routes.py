@@ -13,6 +13,8 @@ import threading
 import time
 import zipfile
 
+from tests.bundle_util import refresh_manifest
+
 import pytest
 
 from services import project_registry
@@ -219,7 +221,7 @@ def _with_member(data: bytes, member: str) -> bytes:
         for item in src.namelist():
             dst.writestr(item, src.read(item))
         dst.writestr(member, b"x")
-    return out.getvalue()
+    return refresh_manifest(out.getvalue())  # the edit changes members, so the manifest is rebuilt (project-io 02)
 
 
 def test_export_refuses_while_a_report_is_being_written(client, project):

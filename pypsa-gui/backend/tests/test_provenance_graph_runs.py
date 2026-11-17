@@ -1023,7 +1023,9 @@ def test_a_bundle_import_moves_the_stamp_after_the_user_ts(
                 data = json.dumps(meta).encode()
             z.writestr(item, data)
     assert any(i.filename.endswith("metadata.json") for i in raw.infolist())
-    bundle = out.getvalue()
+    from tests.bundle_util import refresh_manifest
+
+    bundle = refresh_manifest(out.getvalue())  # the edit changes members, so the manifest is rebuilt (project-io 02)
     seen = _poll_in_the_reapply_window(monkeypatch)
     r = client.post(
         "/api/projects/import_bundle",
