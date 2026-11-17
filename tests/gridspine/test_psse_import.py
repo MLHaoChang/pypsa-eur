@@ -16,9 +16,9 @@ import numpy as np
 import pandapower as pp
 import pytest
 
-from gridspine.handoff.raw_writer import write_raw
+from gridspine.handoff.raw_writer import SECTIONS, write_raw
 from gridspine.ingest.import_result import ImportFormatError, ImportResult
-from gridspine.ingest.psse_import import read_psse
+from gridspine.ingest.psse_import import THRSHZ, read_psse
 from gridspine.ingest.psse_raw_parse import read_raw
 
 FIX = Path(__file__).parent / "fixtures" / "psse"
@@ -530,3 +530,334 @@ def test_off_nominal_transformer_round_trip(tmp_path, tap_side):
         assert x_ours == pytest.approx(x_pp * windv2**2, rel=1e-4), _PENDING[tap_side]
     else:
         assert x_ours == pytest.approx(x_pp, rel=1e-4)
+
+
+# ---------------------------------------------------------------- hand-written edge cases
+#: Two 110 kV buses, a swing machine and a rated line: the base most cases below extend.
+_BUSES = ["1,'A', 110.0,3", "2,'B', 110.0,1"]
+_SWING = "1,'1',50.0,0.0,99.0,-99.0,1.0,0,100.0,0,1,0,0,1,1,100,200.0,0.0"
+_LINE = "1,2,'1',0.01,0.1,0.0,100.0"
+
+
+def _case(tmp_path, rev=33, head=None, title="t", **sections):
+    """
+    Import a RAW file of version ``rev``: each section's lines (keyword = section
+    name with ``_`` for spaces, e.g. ``FIXED_SHUNT``), then its ``0``.
+    """
+    lines = [head or f" 0, 100.00, {rev}, 0, 0, 50.00", title, "second"]
+    for name in SECTIONS[rev]:
+        lines += sections.get(name.replace(" ", "_").replace("-", "_"), [])
+        lines.append("0")
+    p = tmp_path / "c.raw"
+    p.write_text("\n".join(lines) + "\nQ\n")
+    return read_psse([p], {})
+
+
+def _gen(
+    bus, gid, qt=99.0, qb=-99.0, vs=1.0, ireg=0, mbase=100.0, stat=1, pt=200.0, pb=0.0
+):
+    return f"{bus},'{gid}',10.0,0.0,{qt},{qb},{vs},{ireg},{mbase},0,1,0,0,1,{stat},100,{pt},{pb}"
+
+
+def test_path_given_as_text():
+    rep = read_psse([str(FIX / "case14.raw")], {}).report
+    assert rep.source_files == ["case14.raw"]
+
+
+def test_no_files_named_as_none():
+    with pytest.raises(ImportFormatError, match="got 0: none$"):
+        read_psse([], {})
+    with pytest.raises(ImportFormatError, match="got 2: a.raw, b.raw$"):
+        read_psse([Path("a.raw"), Path("b.raw")], {})
+
+
+@pytest.mark.parametrize("make_dir", [False, True])
+def test_unreadable_raw_names_it(tmp_path, make_dir):
+    path = tmp_path / "gone.raw"
+    if make_dir:
+        path.mkdir()
+    with pytest.raises(ImportFormatError, match="gone.raw: cannot be read"):
+        read_psse([path], {})
+
+
+def test_case_refused_while_mapping_names_the_file(tmp_path):
+    # CM=2 with exciting current below its no-load loss reads, but cannot be mapped
+    with pytest.raises(ImportFormatError, match="t.raw: .*below its no-load loss"):
+        _two_winding_raw(tmp_path, cm=2, mag=(30000.0, 0.0))
+
+
+def test_reader_assumptions_reach_the_report(tmp_path):
+    rep = _case(
+        tmp_path,
+        head=" 0, 100.00, 33, 0, 0",
+        BUS=_BUSES,
+        GENERATOR=[_SWING],
+        BRANCH=[_LINE],
+    ).report
+    assert _assumed(rep, "base frequency (Hz)") == ["case"]
+
+
+def test_area_zone_owner_tables_and_bus_columns(tmp_path):
+    res = _case(
+        tmp_path,
+        title="Area test",
+        BUS=["1,'A', 110.0,3,1,1,1", "2,'B', 110.0,1,2,2,2"],
+        GENERATOR=[_SWING],
+        BRANCH=[_LINE],
+        AREA=["1,1,12.5,2.5,'NORTH'", "2,0,0.0,1.0,''"],
+        ZONE=["1,'Z1'", "2,''"],
+        OWNER=["1,'O1'", "2,'  '"],
+    )
+    side = res.sidecars["psse_case.json"]
+    assert side == {
+        "psse_version": 33,
+        "system_base_mva": 100.0,
+        "base_frequency_hz": 50.0,
+        "title": "Area test",
+        "areas": [
+            {"I": 1, "ARNAME": "NORTH", "ISW": 1, "PDES": 12.5, "PTOL": 2.5},
+            {"I": 2, "ARNAME": "", "ISW": 0, "PDES": 0.0, "PTOL": 1.0},
+        ],
+        "zones": [{"I": 1, "ZONAME": "Z1"}, {"I": 2, "ZONAME": ""}],
+        "owners": [{"I": 1, "OWNAME": "O1"}, {"I": 2, "OWNAME": ""}],
+    }
+    assert [type(side["areas"][0][k]) for k in ("I", "ISW")] == [int, int]
+    b = res.network.buses
+    assert list(b["area"]) == ["NORTH", "2"]  # a blank name falls back to the number
+    assert list(b["zone"]) == ["Z1", "2"]
+    assert list(b["owner"]) == ["O1", "2"]
+
+
+def test_bus_names_repeated_or_blank(tmp_path):
+    n = _case(
+        tmp_path,
+        BUS=["1,'X', 110.0,3", "2,'X', 110.0,1", "3,'', 110.0,1", "4,'Y', 110.0,1"],
+        GENERATOR=[_SWING],
+        BRANCH=[
+            "1,2,'1',0.01,0.1,0.0,100.0",
+            "2,3,'1',0.01,0.1,0.0,100.0",
+            "3,4,'1',0.01,0.1,0.0,100.0",
+        ],
+    ).network
+    assert list(n.buses.index) == ["X #1", "X #2", "Bus 3", "Y"]
+
+
+@pytest.mark.parametrize(
+    "title, name", [("My case", "My case"), ("   ", "PSS/E import")]
+)
+def test_network_named_after_title(tmp_path, title, name):
+    n = _case(
+        tmp_path, title=title, BUS=_BUSES, GENERATOR=[_SWING], BRANCH=[_LINE]
+    ).network
+    assert n.name == name
+
+
+def test_isolated_bus_switches_off_everything_touching_it(tmp_path):
+    def tr(i, j):
+        return [
+            f"{i},{j},0,'1',1,1,1,0.0,0.0,2,'',1",
+            "0.004,0.1,100.0",
+            "1.0,0.0,0.0,50.0",
+            "1.0,0.0",
+        ]
+
+    n = _case(
+        tmp_path,
+        BUS=_BUSES + ["3,'C', 110.0,4", "4,'D', 20.0,1", "5,'E', 20.0,4"],
+        LOAD=["2,'1',1,1,1,10.0,2.0", "3,'1',1,1,1,10.0,2.0", "2,'2',0,1,1,10.0,2.0"],
+        GENERATOR=[_SWING],
+        BRANCH=[_LINE, "2,3,'1',0.01,0.1,0.0,100.0", "3,2,'2',0.01,0.1,0.0,100.0"],
+        TRANSFORMER=tr(1, 4) + tr(2, 5) + tr(5, 2),
+    ).network
+    assert list(n.loads["active"]) == [True, False, False]
+    assert list(n.lines["active"]) == [True, False, False]
+    assert list(n.transformers["active"]) == [True, False, False]
+
+
+def test_slack_goes_to_the_first_in_service_machine_on_the_swing_bus(tmp_path):
+    n = _case(
+        tmp_path,
+        BUS=["1,'A', 110.0,3", "2,'B', 110.0,1", "3,'C', 110.0,2"],
+        GENERATOR=[
+            _gen(1, 1, stat=0),
+            _gen(1, 2),
+            _gen(1, 3),
+            _gen(2, 1),  # QT > QB on a load bus
+            _gen(3, 1, qt=5.0, qb=5.0),  # fixed Q on a generator bus
+        ],
+        BRANCH=[_LINE, "2,3,'1',0.01,0.1,0.0,100.0"],
+    ).network
+    assert list(n.generators["control"]) == ["PV", "Slack", "PV", "PQ", "PQ"]
+
+
+def test_rated_power_and_minimum_output(tmp_path):
+    res = _case(
+        tmp_path,
+        BUS=_BUSES,
+        GENERATOR=[
+            _gen(1, 1, pt=50.0, pb=10.0),
+            _gen(1, 2, pt=0.0, mbase=80.0),
+            _gen(1, 3, pt=9999.0, mbase=90.0),
+            _gen(1, 4, pt=0.0, mbase=0.0, pb=0.0),
+            _gen(1, 5, pt=60.0, pb=-9999.0),
+        ],
+        BRANCH=[_LINE],
+    )
+    g = res.network.generators
+    assert list(g["p_nom"]) == [50.0, 80.0, 90.0, 0.0, 60.0]
+    assert list(g["p_min_pu"]) == pytest.approx([0.2, 0.0, 0.0, 0.0, 0.0])
+    assert _assumed(res.report, "rated power (MW)") == ["Gen A 2", "Gen A 3", "Gen A 4"]
+
+
+def test_remote_regulation_assumed_only_for_voltage_holders(tmp_path):
+    rep = _case(
+        tmp_path,
+        BUS=["1,'A', 110.0,3", "2,'B', 110.0,1", "3,'C', 110.0,2"],
+        GENERATOR=[
+            _gen(1, 1, ireg=1),
+            _gen(2, 1, ireg=1),
+            _gen(3, 1, ireg=3),
+            _gen(3, 2, ireg=2),
+        ],
+        BRANCH=[_LINE, "2,3,'1',0.01,0.1,0.0,100.0"],
+    ).report
+    assert _assumed(rep, "regulated bus") == ["Gen C 2"]
+
+
+def test_bus_voltage_set_only_by_in_service_voltage_holders(tmp_path):
+    n = _case(
+        tmp_path,
+        BUS=[
+            "1,'A', 110.0,3",
+            "2,'B', 110.0,2,1,1,1,1.01",
+            "3,'C', 110.0,1,1,1,1,1.02",
+        ],
+        GENERATOR=[_SWING, _gen(2, 1, vs=1.05, stat=0), _gen(3, 1, vs=1.07)],
+        BRANCH=[_LINE, "2,3,'1',0.01,0.1,0.0,100.0"],
+    ).network
+    assert list(n.buses["v_mag_pu_set"]) == [1.0, 1.01, 1.02]
+
+
+def test_only_r_and_x_zero_is_a_jumper(tmp_path):
+    res = _case(
+        tmp_path,
+        BUS=_BUSES + ["3,'C', 20.0,1"],
+        GENERATOR=[_SWING],
+        BRANCH=[
+            "1,2,'1',0.0,0.1,0.0,100.0",
+            "1,2,'2',0.01,0.0,0.0,100.0",
+            "1,2,'3',0.0,0.0,0.0,100.0",
+            "2,3,'1',0.0,0.0,0.0,50.0",
+        ],
+    )
+    n, zb = res.network, 110.0**2 / 100.0
+    assert list(n.lines["x"]) == pytest.approx([0.1 * zb, 0.0, THRSHZ * zb])
+    assert n.transformers.at["Line B - C 1", "x"] == pytest.approx(
+        THRSHZ * 50.0 / 100.0
+    )
+    assert _assumed(res.report, "reactance (pu)") == ["Line A - B 3", "Line B - C 1"]
+
+
+def test_different_kv_branch_rating_and_charging(tmp_path):
+    n = _case(
+        tmp_path,
+        BUS=_BUSES + ["3,'C', 20.0,1"],
+        GENERATOR=[_SWING],
+        BRANCH=[_LINE, "2,3,'1',0.01,0.1,0.02,0.0", "2,3,'2',0.01,0.1,0.02,50.0"],
+    ).network
+    tr = n.transformers
+    assert list(tr["s_nom"]) == [100.0, 50.0]  # no rating: SBASE
+    assert list(tr["r"]) == pytest.approx([0.01, 0.005])
+    assert list(tr["b"]) == pytest.approx([0.02, 0.01])
+
+
+def test_unrated_line_assumed(tmp_path):
+    res = _case(
+        tmp_path, BUS=_BUSES, GENERATOR=[_SWING], BRANCH=["1,2,'1',0.01,0.1,0.0,0.0"]
+    )
+    assert res.network.lines.at["Line A - B 1", "s_nom"] == 0.0
+    assert _assumed(res.report, "thermal rating (MVA)") == ["Line A - B 1"]
+
+
+def test_line_end_shunts_rebased_to_each_end(tmp_path):
+    # GI, BI, GJ, BJ after RATEA..RATEC: pu on the from-bus (110 kV) base
+    n = _case(
+        tmp_path,
+        BUS=_BUSES + ["3,'C', 20.0,1"],
+        GENERATOR=[_SWING],
+        BRANCH=[
+            _LINE,
+            "2,3,'1',0.01,0.1,0.0,50.0,0.0,0.0,0.0,0.01,0.02,0.03",
+            "2,3,'2',0.01,0.1,0.0,50.0,0.0,0.0,0.04",
+        ],
+    ).network
+    sh = n.shunt_impedances
+    zb, scale = 110.0**2 / 100.0, (110.0 / 20.0) ** 2
+    assert list(sh.index) == [
+        "Line B - C 1 from-end shunt",
+        "Line B - C 1 to-end shunt",
+        "Line B - C 2 from-end shunt",
+    ]
+    assert list(sh["bus"]) == ["B", "C", "B"]
+    assert list(sh["g"]) == pytest.approx([0.0, 0.02 / zb * scale, 0.04 / zb])
+    assert list(sh["b"]) == pytest.approx([0.01 / zb, 0.03 / zb * scale, 0.0])
+
+
+def test_three_winding_unrated_windings_take_their_pair_base(tmp_path):
+    res = _case(
+        tmp_path,
+        BUS=["1,'A', 110.0,3", "2,'B', 20.0,1", "3,'C', 10.0,1"],
+        GENERATOR=[_SWING],
+        TRANSFORMER=[
+            "1,2,3,'1',1,1,1,0.0,0.0,2,'T3',1",
+            "0.01,0.1,100.0,0.01,0.1,50.0,0.01,0.1,30.0,1.0,0.0",
+            "1.0,0.0,0.0,0.0",
+            "1.0,0.0,0.0,0.0",
+            "1.0,0.0,0.0,0.0",
+        ],
+    )
+    tr = res.network.transformers
+    assert list(tr.index) == ["T3 winding 1", "T3 winding 2", "T3 winding 3"]
+    assert list(tr["s_nom"]) == [100.0, 50.0, 30.0]
+    assert list(tr["active"]) == [True, True, True]
+    assert _assumed(res.report, "rating (MVA)") == list(tr.index)
+
+
+@pytest.mark.parametrize("mag", [(0.002, 0.0), (0.0, -0.01)])
+def test_magnetising_with_one_part_only(tmp_path, mag):
+    n = _two_winding_raw(tmp_path, cm=1, mag=mag)
+    (nm,) = n.shunt_impedances.index
+    sh = n.shunt_impedances.loc[nm]
+    assert (sh["g"], sh["b"]) == pytest.approx(
+        (mag[0] * 100.0 / 110.0**2, mag[1] * 100.0 / 110.0**2)
+    )
+
+
+def test_lone_bus_with_a_generator_not_warned(tmp_path):
+    rep = _case(
+        tmp_path,
+        BUS=_BUSES + ["3,'C', 110.0,1", "4,'D', 110.0,1"],
+        LOAD=["4,'1',1,1,1,10.0,2.0"],
+        GENERATOR=[_SWING, _gen(3, 1)],
+        BRANCH=[_LINE],
+    ).report
+    assert rep.warnings == [
+        "1 bus(es) have no in-service connection and no generator (D); PyPSA's power "
+        "flow cannot solve such a bus on its own, so switch it out of the study or "
+        "connect it"
+    ]
+
+
+@pytest.mark.parametrize("rev", [35, 36])
+def test_v35_branch_name_used_when_set(tmp_path, rev):
+    n = _case(
+        tmp_path,
+        rev=rev,
+        BUS=_BUSES,
+        GENERATOR=["1,'1',50.0,0.0,99.0,-99.0,1.0,0,0,100.0"],
+        BRANCH=[
+            "1,2,'1',0.01,0.1,0.0,'FEEDER',100.0",
+            "1,2,'2',0.01,0.1,0.0,' ',100.0",
+        ],
+    ).network
+    assert list(n.lines.index) == ["FEEDER", "Line A - B 2"]
