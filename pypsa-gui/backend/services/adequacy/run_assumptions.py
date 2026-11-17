@@ -116,9 +116,12 @@ def _outage_rows(n) -> list[dict]:
         params = resolve_outage_params(n, attr)
         carriers = df["carrier"].astype(str).str.strip().str.lower()
         groups: dict[tuple[str, str], list[str]] = {}
+        no_basis: list[str] = []
         for name in df.index:
             src = params.at[name, "source"]
-            if src == "carrier_default":
+            # "Outages already in availability" zeroes the rate the run uses,
+            # so a carrier default the run does not apply is not assumed.
+            if src == "carrier_default" and not params.at[name, "outages_in_availability"]:
                 groups.setdefault(("rate", carriers[name]), []).append(str(name))
             elif (
                 src == "asset"
@@ -128,6 +131,10 @@ def _outage_rows(n) -> list[dict]:
                 and carriers[name] in CARRIER_DEFAULTS
             ):
                 groups.setdefault(("mttr", carriers[name]), []).append(str(name))
+            if src == "asset" and not _is_set(
+                df.at[name, "outage_rate_basis"] if "outage_rate_basis" in df.columns else None
+            ):
+                no_basis.append(str(name))
         for (kind, carrier), names in groups.items():
             d = CARRIER_DEFAULTS[carrier]
             what = _carrier_label(n, carrier)
@@ -163,6 +170,22 @@ def _outage_rows(n) -> list[dict]:
                         field="mttr_hours",
                     )
                 )
+        if no_basis:
+            # resolve_outage_params reads an asset rate without a basis as FOR.
+            out.append(
+                _row(
+                    f"outage_basis:{component}",
+                    f"Outage rate basis of {noun} ({', '.join(no_basis)})",
+                    "FOR",
+                    "FOR (forced outage rate)",
+                    "default",
+                    "an outage rate without a basis is read as a forced outage rate",
+                    ASSET_SECTION,
+                    component=component,
+                    entity=", ".join(no_basis),
+                    field="outage_rate_basis",
+                )
+            )
     return out
 
 

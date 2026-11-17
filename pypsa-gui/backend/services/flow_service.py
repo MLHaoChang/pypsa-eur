@@ -619,7 +619,6 @@ def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
     from fastapi import HTTPException
 
     from services.adequacy.eh_study_runner import (
-        VOLL_REFUSAL,
         EhStudyRequest,
         check_eh_study_start,
     )
@@ -634,7 +633,7 @@ def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
             exc.detail.get("message") if isinstance(exc.detail, dict)
             and isinstance(exc.detail.get("message"), str) else json.dumps(exc.detail))
         # The VOLL refusal points at its field (template-e2e 06).
-        fld = "voll" if detail == VOLL_REFUSAL else ""
+        fld = exc.detail.get("field", "") if isinstance(exc.detail, dict) else ""
         return [_item("eh_study_refused", "error",
                       f"The reliability study would not start: {detail}", "eh_study",
                       "scenarios", fld=fld, blocking=requested)]

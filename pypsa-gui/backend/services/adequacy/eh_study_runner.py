@@ -255,10 +255,14 @@ def _assumptions_recorder(record: dict, cfg, body, goal_sources: dict):
 
     def record_from(network) -> None:
         try:
-            record["assumptions"] = study_assumptions(
+            rows = study_assumptions(
                 run_assumptions(network, cfg, template), goal_sources, requested)
         except Exception:
             logger.exception("eh_study: the run's assumed inputs could not be read")
+            return
+        # Every write to the record holds this lock (see the worker's updates).
+        with PyPSAService.get_solver_state_lock():
+            record["assumptions"] = rows
 
     return record_from
 
@@ -371,7 +375,10 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
     from services.adequacy.run_assumptions import voll_is_set
     if not voll_is_set(cfg):
         from services.adequacy.campaign import unsupported_scope
-        raise unsupported_scope(VOLL_REFUSAL)
+        refusal = unsupported_scope(VOLL_REFUSAL)
+        # Typed, so readiness points the refusal at its field without reading the text.
+        refusal.detail["field"] = "voll"
+        raise refusal
     return {"body": body, "archetype": archetype, "budget": budget, "stages": stages,
             "goal_sources": goal_sources,
             "cfg": cfg, "n": n, "lock": lock, "pack": pack, "raw_dtc": raw_dtc,

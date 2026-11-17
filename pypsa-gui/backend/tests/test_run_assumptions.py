@@ -120,6 +120,32 @@ def test_an_asset_rate_is_not_assumed_but_a_missing_repair_time_is():
     assert "mttr:Generator:gas" not in _keys(run_assumptions(n, {}, None))
 
 
+def test_an_asset_rate_without_a_basis_is_assumed_forced_outage():
+    n = _net()
+    n.generators.loc["gt", "outage_rate_value"] = 0.02
+    basis = _row(run_assumptions(n, {}, None), "outage_basis:Generator")
+    assert (basis["value"], basis["entity"], basis["field"], basis["source"]) == (
+        "FOR",
+        "gt",
+        "outage_rate_basis",
+        "default",
+    )
+    n.generators.loc["gt", "outage_rate_basis"] = "EFOR"
+    assert "outage_basis:Generator" not in _keys(run_assumptions(n, {}, None))
+
+
+def test_a_carrier_rate_zeroed_by_the_availability_flag_is_not_assumed():
+    from services.adequacy.occurrence import FLAG_COL
+
+    n = _net()
+    n.generators.loc["gt", "p_max_pu"] = 0.9
+    n.generators.loc["gt", FLAG_COL] = True
+    assert "outage_rate:Generator:gas" not in _keys(run_assumptions(n, {}, None))
+    # The flag on a unit with availability 1 is ignored, so the rate applies.
+    n.generators.loc["gt", "p_max_pu"] = 1.0
+    assert "outage_rate:Generator:gas" in _keys(run_assumptions(n, {}, None))
+
+
 def test_a_link_without_an_efficiency_is_assumed_lossless():
     n = _net()
     n.add("Link", "ely", bus0="ac", bus1="h2", p_nom=5, efficiency=0.7)
@@ -222,9 +248,10 @@ def _voll(client, value):
     )
 
 
-def test_the_study_start_refuses_without_a_voll(client, tmp_projects_dir):
+@pytest.mark.parametrize("tid", STUDY_IDS)
+def test_the_study_start_refuses_without_a_voll(client, tmp_projects_dir, tid):
     r = client.post(
-        "/api/projects/from_template/eh_microgrid", params={"name": "novoll"}
+        f"/api/projects/from_template/{tid}", params={"name": "novoll"}
     )
     assert r.status_code == 200, r.text
     _voll(client, 0.0)
@@ -277,9 +304,16 @@ def test_a_request_value_that_differs_retires_the_goal_row():
     assert {r["key"] for r in kept} == {"mc_draws", "site_archetype"}
 
 
-def test_the_study_record_carries_its_assumptions(client, tmp_projects_dir):
+GOAL_KEYS = {"mc_draws", "site_archetype"}
+
+
+@pytest.mark.parametrize("tid", STUDY_IDS)
+def test_the_study_record_carries_its_assumptions(client, tmp_projects_dir, tid):
+    """E2E-TEMPLATES-1: each template's study, run with its inputs missing,
+    records every assumed run input its network has (outage, basis, efficiency)."""
+    expected = _keys(run_assumptions(build_for_solve(T, tid), {}, None)) - GOAL_KEYS
     r = client.post(
-        "/api/projects/from_template/eh_microgrid", params={"name": "record"}
+        f"/api/projects/from_template/{tid}", params={"name": "record"}
     )
     assert r.status_code == 200, r.text
     try:
@@ -294,7 +328,8 @@ def test_the_study_record_carries_its_assumptions(client, tmp_projects_dir):
         # on_private_copy), so present before the first stage ends.
         keys = {a["key"] for a in rec["assumptions"]}
         assert "mc_draws" in keys
-        assert any(a["source"] == "carrier_default" for a in rec["assumptions"])
+        assert expected, tid
+        assert keys - GOAL_KEYS == expected, tid
     finally:
         client.post("/api/results/eh_study/abort")
         _poll_done(client)
@@ -389,6 +424,38 @@ def test_the_report_tells_none_from_not_recorded(run, said):
 
 
 # ── GK B plan conditions (Q2, A1, A3, A5) ────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "record, stored, want",
+    [
+        ({}, None, None),
+        ({}, {"sections": {}}, {"recorded": False, "rows": []}),
+        ({"report": {}}, None, {"recorded": False, "rows": []}),
+        ({"report": {}, "assumptions": []}, None, {"recorded": True, "rows": []}),
+    ],
+    ids=["no-study", "stored-report-record-gone", "old-record", "none-assumed"],
+)
+def test_the_report_reads_the_runs_rows_or_says_not_recorded(
+    monkeypatch, tmp_path, record, stored, want
+):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from routers import reports
+    from routers import results as results_router
+    from services import flow_service
+
+    def no_case(**_):
+        raise HTTPException(404, "no case")
+
+    monkeypatch.setattr(results_router, "get_investment_case_report", no_case)
+    monkeypatch.setattr(results_router, "_state", {"eh_study": record})
+    monkeypatch.setattr(flow_service, "read_template", lambda d: {"id": "t"})
+    monkeypatch.setattr(reports, "_current_eh_report", lambda: stored)
+    out = reports._current_chapter_sources(SimpleNamespace(directory=tmp_path))
+    assert out.get("run_assumptions") == want
 
 
 def test_a_conversion_link_at_exactly_one_is_assumed_lossless():
@@ -499,6 +566,7 @@ def test_every_unusable_voll_is_refused(voll):
     assert exc.value.detail == {
         "error_kind": "unsupported_scope",
         "message": VOLL_REFUSAL,
+        "field": "voll",
     }
 
 
