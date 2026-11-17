@@ -1,0 +1,114 @@
+"""
+GC-04 part 4: the PSS/E .con, .sub and .mon files.
+
+The .con is read back with GC-03's importer (``read_contingency_list``), so
+the two sides share one grammar: every written contingency maps back onto
+the same kind and elements, with nothing unmatched. An element not on the
+network is refused (GK S2); compound kinds are returned as not written.
+"""
+import pandas as pd
+import pytest
+
+from gridspine.handoff.contingencies import (
+    CON_NOT_WRITTEN,
+    write_con,
+    write_mon,
+    write_sub,
+)
+from gridspine.ingest.contingency_list import read_contingency_list
+from gridspine.schema.contracts import ContractError
+from gridspine.static.contingency_set import (
+    branch_contingencies,
+    n_1_1_contingencies,
+    n_m_1_contingencies,
+)
+from tests.gridspine.test_planning_criteria import _net, _set
+
+
+def _sets(cset):
+    return sorted((r.kind, tuple(r.element_ids)) for r in cset.itertuples(index=False))
+
+
+@pytest.fixture
+def net():
+    return _net()
+
+
+@pytest.fixture
+def cset(net):
+    return _set(net, kinds=("branch", "unit", "bus_section"))
+
+
+def test_round_trip_through_gc03_reader(net, cset, tmp_path):
+    assert write_con(cset, net, tmp_path / "s.con") == []
+    imp = read_contingency_list((tmp_path / "s.con").read_text(), net, fmt="con")
+    assert imp.unmatched.empty and imp.excluded == []
+    assert _sets(imp.contingencies) == _sets(cset)
+    assert sorted(imp.contingencies["contingency_id"]) == sorted(cset["contingency_id"])
+
+
+def test_hand_written_records(net, cset, tmp_path):
+    """_net(): BUS_A=1, BUS_B=2, BUS_C=3, BUS_S=4; lines A-B ckt 1 and 2; G1 on BUS_C."""
+    write_con(cset, net, tmp_path / "s.con")
+    text = (tmp_path / "s.con").read_text()
+    assert "   OPEN BRANCH FROM BUS 1 TO BUS 2 CIRCUIT '2 '\n" in text
+    assert "   REMOVE MACHINE '1 ' FROM BUS 3\n" in text
+    assert "   DISCONNECT BUS 4\n" in text
+    assert text.endswith("END\nEND\n")
+    assert text.count("CONTINGENCY ") == len(cset)
+
+
+def test_an_n2_pair_is_one_block_with_two_openings(net, tmp_path):
+    n1 = _set(net)
+    a, b = n1["element_ids"].iloc[0][0], n1["element_ids"].iloc[1][0]
+    pair = pd.DataFrame({"contingency_id": ["N2"], "kind": ["branch"], "element_ids": [[a, b]], "order": [2]})
+    write_con(pair, net, tmp_path / "p.con")
+    imp = read_contingency_list((tmp_path / "p.con").read_text(), net, fmt="con")
+    assert _sets(imp.contingencies) == [("branch", (a, b))]
+
+
+@pytest.mark.parametrize("kind, el, reason", [
+    ("branch", "NO_SUCH_LINE", "branch NO_SUCH_LINE is not on the network"),
+    ("unit", "G9", "unit G9 is not a machine on the network"),
+    ("bus_section", "BUS_Z", "bus BUS_Z is not a bus on the network"),
+])
+def test_an_element_not_on_the_network_is_refused(net, tmp_path, kind, el, reason):
+    bad = pd.DataFrame({"contingency_id": ["X"], "kind": [kind], "element_ids": [[el]], "order": [1]})
+    with pytest.raises(ContractError, match=reason):
+        write_con(bad, net, tmp_path / "x.con")
+    assert not (tmp_path / "x.con").exists()
+
+
+def test_a_label_outside_the_token_charset_is_refused(net, cset, tmp_path):
+    bad = cset.head(1).assign(contingency_id="x" * 33)
+    with pytest.raises(ContractError, match="not a .con label"):
+        write_con(bad, net, tmp_path / "x.con")
+
+
+@pytest.mark.parametrize("build", [n_m_1_contingencies, n_1_1_contingencies])
+def test_compound_kinds_are_returned_not_written(net, tmp_path, build):
+    n1 = branch_contingencies(net)
+    compound = build(n1).head(3)
+    assert len(compound)
+    skipped = write_con(pd.concat([n1.head(1), compound], ignore_index=True), net, tmp_path / "c.con")
+    assert skipped == list(compound["contingency_id"])
+    text = (tmp_path / "c.con").read_text()
+    assert text.count("CONTINGENCY ") == 1
+    assert all(cid not in text for cid in skipped)
+
+
+def test_sub_and_mon(net, tmp_path):
+    write_sub(net, tmp_path / "s.sub")
+    assert (tmp_path / "s.sub").read_text().startswith("SUBSYSTEM 'STUDY'\n   KVRANGE ")
+    write_mon(tmp_path / "s.mon")
+    text = (tmp_path / "s.mon").read_text()
+    assert "MONITOR VOLTAGE RANGE SUBSYSTEM 'STUDY' 0.900 1.100" in text and text.endswith("END\n")
+
+
+@pytest.mark.parametrize("lo, hi, reason", [
+    (1.1, 0.9, "v_min < v_max"), (1.0, 1.0, "v_min < v_max"),
+    (float("nan"), 1.1, "finite and > 0"), (0.0, 1.1, "finite and > 0"),
+])
+def test_a_bad_monitor_band_is_refused(tmp_path, lo, hi, reason):
+    with pytest.raises(ContractError, match=reason):
+        write_mon(tmp_path / "m.mon", lo, hi)

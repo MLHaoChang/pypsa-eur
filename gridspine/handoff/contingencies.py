@@ -15,6 +15,8 @@ convention ``selected.csv`` uses for ``reasons``.
 
 Nothing here imports an engine; the net is read for its tables only.
 """
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -22,6 +24,7 @@ from gridspine.handoff.dyr_writer import _machines
 from gridspine.handoff.raw_writer import _bus_numbers
 from gridspine.schema.contingency import COMPOUND_SEPARATORS, validate_contingency_set
 from gridspine.schema.contracts import ContractError
+from gridspine.static.contingency_set import branch_contingencies
 
 ELEMENT_SEP = "|"
 
@@ -81,3 +84,94 @@ def write_contingencies(contingency_set: pd.DataFrame, net, path) -> pd.DataFram
         out[col] = out[col].astype("float64")
     out.to_csv(path, index=False)
     return out
+
+
+# --------------------------------------------------------------------------
+# PSS/E .con / .sub / .mon (GC-04 PR4)
+# --------------------------------------------------------------------------
+
+#: The study subsystem every .con/.mon refers to.
+SUBSYSTEM = "STUDY"
+#: Kinds a .con block cannot carry: an N-1-1 / N-M-1 is a SEQUENCE (an outage,
+#: re-dispatch, then a second outage), which one PSS/E contingency block does
+#: not express. They are returned as not written, never silently dropped.
+CON_NOT_WRITTEN = tuple(sorted(COMPOUND_SEPARATORS))
+
+
+def _con_label(cid: str) -> str:
+    """The block label: the contingency id itself, which must be one token of
+    [A-Za-z0-9_-], at most 32 characters, so GC-03's reader maps it back to
+    the same id."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", cid):
+        raise ContractError(f"contingency {cid!r}: not a .con label ([A-Za-z0-9_-], 1-32 characters)")
+    return cid
+
+
+def write_con(contingency_set: pd.DataFrame, net, path) -> list:
+    """Write ``path`` as a PSS/E contingency description file; return the ids
+    NOT written (the compound kinds, ``CON_NOT_WRITTEN``), for the manifest.
+
+    Identity is the RAW's: a branch is ``OPEN BRANCH FROM BUS i TO BUS j
+    CIRCUIT 'c '`` with the RAW's numbers and CKT (``branch_contingencies``,
+    the table GC-03's reader matches against); a unit is ``REMOVE MACHINE
+    'id' FROM BUS n`` with the RAW's per-bus machine ID; a bus section is
+    ``DISCONNECT BUS n``. An element not on the network is refused and
+    nothing is written (S2). Labels are the contingency ids themselves.
+    """
+    cset = validate_contingency_set(contingency_set)
+    nums = _bus_numbers(net)
+    branch = {}
+    for r in branch_contingencies(net).itertuples(index=False):
+        branch[r.element_ids[0]] = (nums[r.from_bus], nums[r.to_bus], str(r.ckt))
+    machine = {uid: (num, mid) for uid, num, mid, _mb, _sync in _machines(net)}
+    lines, skipped = [], []
+    for r in cset.itertuples(index=False):
+        if r.kind in CON_NOT_WRITTEN:
+            skipped.append(r.contingency_id)
+            continue
+        body = []
+        for el in r.element_ids:
+            if r.kind == "branch":
+                if el not in branch:
+                    raise ContractError(f"contingency {r.contingency_id}: branch {el} is not on the network")
+                i, j, ckt = branch[el]
+                body.append(f"   OPEN BRANCH FROM BUS {i} TO BUS {j} CIRCUIT '{ckt:<2s}'")
+            elif r.kind == "unit":
+                if el not in machine:
+                    raise ContractError(f"contingency {r.contingency_id}: unit {el} is not a machine on the network")
+                num, mid = machine[el]
+                body.append(f"   REMOVE MACHINE '{mid:<2s}' FROM BUS {num}")
+            else:  # bus_section
+                if el not in nums:
+                    raise ContractError(f"contingency {r.contingency_id}: bus {el} is not a bus on the network")
+                body.append(f"   DISCONNECT BUS {nums[el]}")
+        lines += [f"CONTINGENCY {_con_label(r.contingency_id)}", *body, "END"]
+    lines.append("END")
+    with open(path, "w", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return skipped
+
+
+def write_sub(net, path) -> None:
+    """The study subsystem: every bus of the network, by its kV range."""
+    kv = net.bus["vn_kv"].astype(float)
+    text = f"SUBSYSTEM '{SUBSYSTEM}'\n   KVRANGE {float(kv.min()):.3f} {float(kv.max()):.3f}\nEND\nEND\n"
+    with open(path, "w", newline="\n") as f:
+        f.write(text)
+
+
+def write_mon(path, v_min_pu=0.90, v_max_pu=1.10) -> None:
+    """Monitor every branch and every bus voltage of the study subsystem
+    against ``[v_min_pu, v_max_pu]`` (the caller's planning band)."""
+    for v in (v_min_pu, v_max_pu):
+        if not (np.isfinite(v) and v > 0):
+            raise ContractError(f"monitor voltage band must be finite and > 0, got {v}")
+    if not v_min_pu < v_max_pu:
+        raise ContractError(f"monitor band needs v_min < v_max, got {v_min_pu}, {v_max_pu}")
+    text = (
+        f"MONITOR BRANCHES IN SUBSYSTEM '{SUBSYSTEM}'\n"
+        f"MONITOR VOLTAGE RANGE SUBSYSTEM '{SUBSYSTEM}' {v_min_pu:.3f} {v_max_pu:.3f}\n"
+        "END\n"
+    )
+    with open(path, "w", newline="\n") as f:
+        f.write(text)
