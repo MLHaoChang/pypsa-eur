@@ -16,7 +16,7 @@ import captured from '../../../test/fixtures/headlineKpis.json'
 import { ResultsCard } from './ResultsCard'
 import { chartFigure } from '../../../components/charts/chartTheme'
 import { HEADLINE_WORDS, headlineFigure } from '../../results/headlineWords'
-import { LCOE_NOT_APPLICABLE, mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
+import { LCOE_NO_SOLVE, LCOE_NOT_APPLICABLE, LCOE_UNREAD, mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
 
 vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
 vi.mock('../../../api/finance', async (importOriginal) => {
@@ -154,6 +154,19 @@ describe('Results headline', () => {
     expect(lcoe.textContent).toContain(card.reason)
   })
 
+  it.each([
+    ['no solve yet (204)', null, 'not_run', LCOE_NO_SOLVE],
+    ['the read failed', 'fail', 'unavailable', LCOE_UNREAD],
+  ] as const)('LCOE with %s is never called not applicable', async (_w, data, state, reason) => {
+    if (data === 'fail') vi.mocked(resultsApi.getHeadlineKpis).mockRejectedValue(new Error('500'))
+    else vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(data)
+    mount()
+    const lcoe = await screen.findByTestId('hub-results-lcoe')
+    expect(lcoe.getAttribute('data-state')).toBe(state)
+    expect(lcoe.textContent).toContain(reason)
+    expect(lcoe.textContent).not.toContain(LCOE_NOT_APPLICABLE)
+  })
+
   it('a project type without an LCOE card says so in words, under the label Expert uses', async () => {
     vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue({ ...HEADLINE, cards: HEADLINE.cards.filter(c => c.id !== 'lcoe') })
     mount()
@@ -211,13 +224,26 @@ describe('ReliabilityBullet', () => {
     render(<ReliabilityBullet lole={12.38} target={3} ci={[10, 14.5]} stale={false} />)
     const frame = screen.getByTestId('hub-results-reliability-chart')
     expect(frame.textContent).toContain('Expected shortfall 12.4 h/yr, goal 3 h/yr')
-    expect(screen.getByRole('img').getAttribute('aria-label')).toContain('likely between 10 h/yr and 14.5 h/yr')
+    expect(screen.getByRole('img').getAttribute('aria-label')).toMatch(/likely between 10(\.0)? h\/yr and 14\.5 h\/yr/)
+    // The range line is named in words, not left for the reader to guess.
+    expect(screen.getByTestId('hub-results-reliability-ci-words').textContent).toMatch(/likely range: 10(\.0)? h\/yr to 14\.5 h\/yr/)
     expect(screen.getByTestId('hub-results-reliability-goal')).toBeTruthy()
     expect(screen.getByTestId('hub-results-reliability-bar').className).toContain('bg-danger')
     // The band is not the only cue (UX 23, 7).
     expect(screen.getByTestId('hub-results-reliability-against').textContent).toBe('Above goal')
     expect(frame.textContent).toContain('Expected shortfall (h/yr) · lower is better')
     expect(frame.textContent).toContain('Goal')
+  })
+  it('a zero shortfall still draws a mark, and reads as the tile does', () => {
+    render(<ReliabilityBullet lole={0} target={3} ci={null} stale={false} />)
+    expect(screen.getByTestId('hub-results-reliability-bar').style.minWidth).toBe('3px')
+    expect(screen.getByTestId('hub-results-reliability-chart').textContent).toContain(`Expected shortfall ${chartFigure('0 h/yr')}`)
+    expect(screen.queryByTestId('hub-results-reliability-ci-words')).toBeNull()
+  })
+  it('a range that rounds to one value is left out', () => {
+    render(<ReliabilityBullet lole={0} target={3} ci={[0, 0.01]} stale={false} />)
+    expect(screen.queryByTestId('hub-results-reliability-ci')).toBeNull()
+    expect(screen.queryByTestId('hub-results-reliability-ci-words')).toBeNull()
   })
   it('within the goal says so in words', () => {
     render(<ReliabilityBullet lole={0.4} target={1} ci={null} stale={false} />)

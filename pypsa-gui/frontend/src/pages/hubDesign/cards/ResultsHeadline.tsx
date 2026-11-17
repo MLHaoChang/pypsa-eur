@@ -9,7 +9,7 @@
 // out of date, one line says which (GK B G1).
 import Kpi from '../../../components/Kpi'
 import type { ResultStateKind } from '../../../components/ResultState'
-import { ChartFrame, ChartSourceProvider, CHART_TICK } from '../../../components/charts/chartTheme'
+import { ChartFrame, chartFigure, ChartSourceProvider, CHART_TICK } from '../../../components/charts/chartTheme'
 import { showResultsTab } from '../../../layout/flowNavigation'
 import type { HeadlineCard } from '../../../api/simulation'
 import { HEADLINE_WORDS, headlineFigure } from '../../results/headlineWords'
@@ -79,12 +79,20 @@ function TileFigure({ tile, testId, studyBanner = false }: { tile: ChapterTile; 
 /** A project type whose Expert strip has no LCOE card: said in words, never a blank tile (UX 23, 2). */
 export const LCOE_NOT_APPLICABLE = 'Not applicable for this project type.'
 
-function LcoeFigure({ card }: { card: HeadlineCard | null }) {
+/** No figures from `/results/headline_kpis` yet: it answers 204 until the project itself is solved. */
+export const LCOE_NO_SOLVE = 'LCOE needs a solve of the project and its investment case.'
+/** The strip's own words when the read fails. */
+export const LCOE_UNREAD = 'The headline figures could not be read.'
+
+/** `read`: what the headline read gave: a response (with or without an LCOE card), none yet (204), or a failure. */
+function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null } | { kind: 'none' } | { kind: 'failed' } }) {
   const words = HEADLINE_WORDS.lcoe
-  if (!card) {
-    return <Kpi headline testId="hub-results-lcoe" label={words.label} value="" state="not_applicable"
-      reason={LCOE_NOT_APPLICABLE} />
+  if (read.kind !== 'card' || !read.card) {
+    const [state, reason]: [ResultStateKind, string] = read.kind === 'failed' ? ['unavailable', LCOE_UNREAD]
+      : read.kind === 'none' ? ['not_run', LCOE_NO_SOLVE] : ['not_applicable', LCOE_NOT_APPLICABLE]
+    return <Kpi headline testId="hub-results-lcoe" label={words.label} value="" state={state} reason={reason} />
   }
+  const card = read.card
   const { value, basis } = headlineFigure(card)
   return (
     <div className="flex flex-col gap-1">
@@ -98,15 +106,20 @@ function LcoeFigure({ card }: { card: HeadlineCard | null }) {
 }
 
 /** Shortfall against the goal: one bar, the goal as a marker, the study's interval when it gave one. */
-export function ReliabilityBullet({ lole, target, ci, stale }: {
+export function ReliabilityBullet({ lole, target, ci: range, stale }: {
   lole: number; target: number | null; ci: [number, number] | null; stale: boolean
 }) {
-  const top = Math.max(lole, target ?? 0, ci?.[1] ?? 0) * 1.2 || 1
+  const top = Math.max(lole, target ?? 0, range?.[1] ?? 0) * 1.2 || 1
   const x = (v: number) => `${Math.min(100, (v / top) * 100)}%`
-  const words = (v: number) => `${Number(v.toPrecision(3))} h/yr`
+  // Rounded as the KPI tile rounds it, so the chart's title and the tile never disagree.
+  const words = (v: number) => chartFigure(`${v} h/yr`)
+  // The goal is the user's own number: written as the tile's basis writes it ("the goal is 3 h/yr").
+  const goalWords = (v: number) => `${Number(v.toPrecision(6))} h/yr`
   const pass = target != null && lole <= target
+  // A range that rounds to one value says nothing: it is left out, line and words.
+  const ci = range && words(range[0]) !== words(range[1]) ? range : null
   const title = target != null
-    ? `Expected shortfall ${words(lole)}, goal ${words(target)}`
+    ? `Expected shortfall ${words(lole)}, goal ${goalWords(target)}`
     : `Expected shortfall ${words(lole)}, no goal set`
   // The band is not the only cue: the result is also said in words (UX 23, 7).
   const against = target == null ? null : pass ? 'Within goal' : 'Above goal'
@@ -120,18 +133,23 @@ export function ReliabilityBullet({ lole, target, ci, stale }: {
         <div role="img"
           aria-label={[title, against, ci && `likely between ${words(ci[0])} and ${words(ci[1])}`, 'lower is better']
             .filter(Boolean).join(', ')}
-          className="relative h-6">
+          className="relative h-7">
           <div className="absolute inset-y-2 left-0 right-0 rounded-sm bg-bg-2" />
           {target != null && (
             // The allowed band: up to the goal passes.
             <div className="absolute inset-y-2 left-0 rounded-sm bg-success/15" style={{ width: x(target) }} />
           )}
           <div data-testid="hub-results-reliability-bar"
-            className={`absolute inset-y-[11px] left-0 rounded-sm ${target == null ? 'bg-accent' : pass ? 'bg-success' : 'bg-danger'}`}
-            style={{ width: x(lole) }} />
+            className={`absolute inset-y-2 left-0 rounded-sm ${target == null ? 'bg-accent' : pass ? 'bg-success' : 'bg-danger'}`}
+            // A zero still shows a mark at the axis.
+            style={{ width: x(lole), minWidth: 3 }} />
           {ci && (
-            <div data-testid="hub-results-reliability-ci" className="absolute top-1/2 h-px bg-text"
-              style={{ left: x(ci[0]), width: `calc(${x(ci[1])} - ${x(ci[0])})` }} />
+            // The likely range: a line with end caps over the bar, named under the axis.
+            <div data-testid="hub-results-reliability-ci"
+              className="absolute top-1/2 h-2.5 -translate-y-1/2 border-x border-text"
+              style={{ left: x(ci[0]), width: `calc(${x(ci[1])} - ${x(ci[0])})` }}>
+              <div className="absolute top-1/2 h-px w-full bg-text" />
+            </div>
           )}
           {target != null && (
             <div data-testid="hub-results-reliability-goal" className="absolute inset-y-0 w-0.5 bg-text"
@@ -145,6 +163,11 @@ export function ReliabilityBullet({ lole, target, ci, stale }: {
           )}
           <span className="absolute right-0">{words(top)}</span>
         </div>
+        {ci && (
+          <p data-testid="hub-results-reliability-ci-words" className="mt-1 text-[10.5px] text-muted">
+            The line marks the likely range: {words(ci[0])} to {words(ci[1])}.
+          </p>
+        )}
         <p className="mt-1 text-[10.5px] text-muted" aria-hidden="true">Expected shortfall (h/yr) · lower is better</p>
       </ChartFrame>
     </ChartSourceProvider>
@@ -169,11 +192,13 @@ export function ResultsHeadline({ reliability, cost, ci }: {
   const note = mixedSourceNote(figures)
   return (
     <section aria-label="Headline figures" data-testid="hub-results-headline" className="flex flex-col gap-2">
-      <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]">
+      <div className="grid grid-cols-2 gap-2">
         {rel && <TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true} />}
         {cost}
         {npv && <TileFigure tile={npv} testId="hub-results-npv" />}
-        {headline.isSuccess && <LcoeFigure card={lcoe} />}
+        {!headline.isLoading && (
+          <LcoeFigure read={headline.isError ? { kind: 'failed' } : headline.data ? { kind: 'card', card: lcoe } : { kind: 'none' }} />
+        )}
       </div>
       {note && <p role="note" data-testid="hub-results-mixed" className="text-[11.5px] text-muted">{note}</p>}
       {reliability.lole != null && (
