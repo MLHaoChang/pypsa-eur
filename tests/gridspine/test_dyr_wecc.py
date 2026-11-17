@@ -467,3 +467,44 @@ def test_a_ten_column_con_line_keeps_its_separators(tmp_path):
     is written with a blank before each, so it reads back as two values."""
     _, text = _write(tmp_path, PLANT, POC)
     assert "   999.00000 -998.00000" in text
+
+
+# GK A2 (P5 per field): one case per field of each range set, from a
+# hand-written list, so dropping any field from the checker's tuple fails.
+_FULL = PLANT | WT3 | {"reec_pflag": 1}
+
+
+@pytest.mark.parametrize("field", ["wtdt_h", "wtdt_freq1", "wttq_twref", "wttq_trate"])
+@pytest.mark.parametrize("bad", [0.0, -1.0])
+def test_each_positive_field_is_refused_at_zero_and_below(tmp_path, field, bad):
+    with pytest.raises(ContractError, match=f"unit .*: {field} must be > 0, got {bad}"):
+        _load(tmp_path, _FULL | {field: bad})
+
+
+@pytest.mark.parametrize("field", [
+    "repc_tfltr", "repc_tft", "repc_tfv", "repc_tp", "repc_tg", "repc_kc",
+    "repc_ddn", "repc_dup", "wtdt_damp", "wtdt_dshaft", "wtpt_tp", "wttq_tp",
+])
+def test_each_non_negative_field_is_refused_below_zero(tmp_path, field):
+    with pytest.raises(ContractError, match=f"unit .*: {field} must be >= 0, got -0.01"):
+        _load(tmp_path, _FULL | {field: -0.01})
+
+
+@pytest.mark.parametrize("lo, hi, op", [
+    ("repc_emin", "repc_emax", "<"),
+    ("repc_dbd1", "repc_dbd2", "<="),
+    ("repc_qmin", "repc_qmax", "<"),
+    ("repc_fdbd1", "repc_fdbd2", "<="),
+    ("repc_femin", "repc_femax", "<"),
+    ("repc_pmin", "repc_pmax", "<"),
+    ("wtpt_thetamin", "wtpt_thetamax", "<"),
+    ("wtpt_rthetamin", "wtpt_rthetamax", "<"),
+    ("wttq_temin", "wttq_temax", "<"),
+])
+def test_each_ordered_pair_is_refused_at_its_boundary(tmp_path, lo, hi, op):
+    # Strict pairs are refused at equality, non-strict ones just above it;
+    # the legal side of each boundary loads.
+    bad = _FULL[hi] if op == "<" else _FULL[hi] + 0.001
+    with pytest.raises(ContractError, match=f"unit .*: {lo} must be {op} {hi}: "):
+        _load(tmp_path, _FULL | {lo: bad})
+    _load(tmp_path, _FULL | {lo: _FULL[hi] - 0.001 if op == "<" else _FULL[hi]})
