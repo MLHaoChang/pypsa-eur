@@ -348,3 +348,15 @@ Eight sessions reached 300k context in 75–120 minutes. The causes were full-si
 - **Session-admin tool results (2–8k tokens each) landed in the coordinator's context.**
   - Fix: session admin always goes through the Haiku subagent.
   - Lives in: coordinator "Tool hygiene".
+
+## 17 Nov 2026: parallel-session retro (RETRO-PAR-1)
+
+- **Every shared file blocked a package, though premerge waives docs overlap.** `frontier.py` and `brief.py` kept their own idea of overlap, so packages queued behind PRs that only touched docs.
+  - Fix: the waiver regexes live in one data file, `waivers.conf`, read by `premerge.sh`, `frontier.py` and `brief.py`; docs overlap prints as `soft`, code overlap as `overlap`/`OVERLAP`, and `brief.py` exits 3 only on a hard one.
+  - Lives in: `scripts/coord/waivers.conf`, `premerge.sh`, `frontier.py`, `brief.py`.
+- **A Sonnet subagent spawned each session at 50-60k tokens against ~1.5k inline**, and "Stay out of" ran ~3k characters per brief.
+  - Fix: `spawn.py <brief-file>` prints the `create_session` arguments and the coordinator calls it itself; "Stay out of" is one line per open PR (top areas) and one line of live session titles.
+  - Lives in: coordinator "Opening a session", `scripts/coord/spawn.py`, `brief.py`.
+- **Small script faults cost sweeps.** `inputs.sh` died on a PR with no merge base; `brief.py --stream X` exited on a missing template block; `whois.py` needed code for each new reviewer; `tasks.py` printed "no row" for new issues; `frontier.py` listed issues a live session or a HOLD decision held.
+  - Fix: `inputs.sh` leaves that PR out and carries on; a missing stream block warns; `whois.py` builds roles from the labelled lines of the role files; `tasks.py` adds a row for a new issue; `frontier.py` matches a session's `doing` text to the issue id (tag, `<effort> NN/MM`) and lists `HOLD-...` decisions' issues under `--held`.
+  - Lives in: `scripts/coord/inputs.sh`, `brief.py`, `whois.py`, `tasks.py`, `frontier.py`.

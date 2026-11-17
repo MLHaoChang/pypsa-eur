@@ -6,6 +6,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
 import { ProvenanceChip, staleNote } from '../../components/ProvenanceChip'
+import { fuelSlopeHint } from './fuelSlopeHint'
 import type { Bus, Carrier } from '../../api/types'
 import { ReferenceApplyDrawer } from '../../pages/results/investment/ReferenceApplyDrawer'
 import { SuggestionChips, useParameterSuggestions } from '../../components/memory/ParameterMemory'
@@ -375,6 +376,10 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                 )}
                 {f.key !== firstPart && chipsFor(f)}
                 {f.key === 'lifetime' && <LifetimeInherit fs={fs} set={set} />}
+                {f.key === 'fuel_curve_slope' && fuelSlopeHint(fs.fuel_curve_slope) && (
+                  <div className="col-span-2 -mt-0.5 text-[9px] text-warn" role="note" data-testid="asset-slope-hint">
+                    {fuelSlopeHint(fs.fuel_curve_slope)}</div>
+                )}
                 {f.key === 'i_start_pu' && <StartMultipleDefault fs={fs} />}
                 {LIMIT_KEYS.has(f.key) && (fs[f.key] ?? '').trim() === '' && (
                   <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid={`asset-no-limit-${f.key}`}>No limit</div>

@@ -1,6 +1,6 @@
 # 02h — Show the fuel and run-hours blocks of the cost breakdown in Results
 
-Status: needs-triage
+Status: done
 
 Follow-up from homer-parity 02b (#1506).
 

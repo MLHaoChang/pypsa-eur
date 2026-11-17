@@ -1,0 +1,12 @@
+{
+ "kinds": {
+  "shipped_fork_exists": {
+   "surface": "inline",
+   "why": "A shipped case's fork name (made by the harness from the run and the case) is already taken by a project. Nothing was overwritten; the case does not run."
+  },
+  "shipped_base_unsaved": {
+   "surface": "inline",
+   "why": "The run's project has unsaved edits, so a shipped case cannot fork its saved copy. Nothing was forked; the case does not run until the project is saved."
+  }
+ }
+}

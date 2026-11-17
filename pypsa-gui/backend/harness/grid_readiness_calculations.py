@@ -103,6 +103,7 @@ def source(ctx, entity):
         "index": ["saved scorecard"],
         "grid_code": {"id": card["profile"]["id"], "title": card["profile"].get("title")},
         "rows": [{k: r.get(k) for k in keep if k in r} for r in card["rows"]],
+        "excluded": [{k: e.get(k) for k in ("id", "requirement", "reason")} for e in card.get("excluded") or []],
         "unsaved_edits": bool(dirty_state.is_dirty(ctx)),
         # The user's limits sidecar, whole: any edit to it (a note included) makes
         # earlier evidence stale, even where every row reads the same.
@@ -177,4 +178,8 @@ def notes(raw, label):
                          + (f" ({'; '.join(extra)})" if extra else "") + ".")
         else:
             lines.append(f"{name}: not checked; {DISPOSITION_WORDS[kind]}.")
+    if raw.get("excluded"):
+        lines.append("Left out as not applicable to this project (no verdict, not counted): "
+                     + "; ".join(f"{label(str(e.get('requirement') or e['id']))} ({label(str(e['reason']))})"
+                                 for e in raw["excluded"]) + ".")
     return lines

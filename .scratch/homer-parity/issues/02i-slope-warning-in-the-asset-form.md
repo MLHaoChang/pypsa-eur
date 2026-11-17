@@ -1,6 +1,6 @@
 # 02i — Show the fuel curve slope warning in the generator form
 
-Status: needs-triage
+Status: done
 
 Follow-up from homer-parity 02d, asked for by UX (21).
 

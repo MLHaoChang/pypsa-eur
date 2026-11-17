@@ -622,10 +622,31 @@ def _network_input_fingerprint(ctx, *, exact=False):
 _SWEEP_LOCK = threading.Lock()
 
 
+def _refuse_cost_the_parts_own(n, change) -> None:
+    """TCU 09: a case that sets a cost a target's investment parts own would build a child identical to the
+    baseline, since the bulk write re-derives it; refused before any case exists, in the single edit's words."""
+    from services.asset_schema.derive import split_parts
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+    from services.network_crud import check_parts_own_costs
+
+    if change.component_class not in COMPOSITE:
+        return
+    frame = getattr(n, CLASS_ATTR[change.component_class])
+    for name in change.names:
+        if name not in frame.index:
+            continue  # the bulk write refuses an unknown name
+        before = frame.loc[name].to_dict()
+        _, parts = split_parts(change.component_class, before)
+        try:
+            check_parts_own_costs(change.component_class, parts, before=before,
+                                  submitted={change.attribute: change.value})
+        except HTTPException as exc:
+            _refuse("invalid_sensitivity_cases", f"{change.component_class} {name}: {exc.detail}")
+
+
 def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
     """Preflight all cases, then persist/enqueue isolated children. No activation."""
     from models.schemas import CreateScenarioRequest
-    from routers import projects
     from services import chat_tools, dirty_state, gridspine_service as gs, project_registry
     from services.safe_names import fold
     if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
@@ -681,6 +702,7 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         boolean = change.attribute.endswith("_extendable")
                         if boolean != isinstance(change.value, bool) or (not boolean and not math.isfinite(change.value)):
                             _refuse("invalid_sensitivity_value", "Use finite numbers for numeric inputs and booleans for extendable flags.")
+                        _refuse_cost_the_parts_own(ctx.network, change)
                         chat_tools.bulk_update_components(change.component_class, change.names, {change.attribute: change.value})
                     validation = chat_tools.validate_network()
                     if not validation.get("ok") or validation.get("deferred"):
@@ -710,25 +732,14 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         _refuse("baseline_changed", "The saved baseline changed during preparation; inspect saved cases before retrying.", 409)
                     if existing is None:
                         checkpoint('effect_started')
-                        info = projects.create_scenario(str(base.id), request, db=db, user=user)
+                        # The fork helper (study harness 14, GK B (57)): the steps this block ran inline.
+                        # Called by name so the write-lock verifier follows them.
+                        from harness.shipped_fork import create as create_fork, save as save_fork
+                        info = create_fork(db, user, base, request.name, request.description)
                         result["project_id"] = str(info.id)
                         existing = project_registry.resolve_project(db, user, str(info.id))
                         checkpoint('child_created', case_project_id=str(existing.id))
-                        ctx.loaded_project = existing.name
-                        ctx.org_id, ctx.project_uuid = str(existing.org_id), str(existing.id)
-                        ctx.storage_dir = str(project_registry.project_dir(existing))
-                        # Invalidate copied dispatch/results; only the new queued solve
-                        # establishes results for the altered inputs.
-                        with _isolated(ctx):
-                            from services.dispatch_status import clear_dispatch
-                            clear_dispatch(ctx.network)
-                            ctx.network._objective = None
-                            ctx.network._objective_constant = None
-                        ctx.solver_state.update(status="idle", objective=None, condition=None)
-                        projects._enforce_project_lock(db, existing, user)
-                        projects._save_context(ctx, existing.name, storage_dir=Path(ctx.storage_dir), db=db, user=user, project_row=existing)
-                        from services.atomic_io import atomic_write_bytes
-                        atomic_write_bytes(Path(ctx.storage_dir) / SENSITIVITY_CASE_FILE, json.dumps(spec, sort_keys=True).encode())
+                        save_fork(ctx, existing, spec, db=db, user=user)
                         checkpoint('child_saved')
                     result["project_id"] = str(existing.id)
                     saved_ctx = _load_context(existing)

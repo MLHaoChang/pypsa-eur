@@ -20,16 +20,20 @@ Apply issue stages and merge notes to the Feature-progress dashboard's ``tasks.j
 - ``--note <issue path>=TEXT`` (repeatable): sets the row's ``note``.
 
 ``tasks.json`` is a list of rows or ``{"rows": [...]}``; the file is rewritten in
-place and a one-line summary printed. A path that matches no row is reported, so a
-renamed issue is not silently dropped.
+place and a one-line summary printed. A ``.scratch/<feature>/issues/*.md`` path in
+``--stages`` with no row gets a new row ``{path, feature, title, stage}`` (reported as
+"added"). Any other path that matches no row (``--merged``, ``--note``) is reported,
+so a renamed issue is not silently dropped.
 """
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 KEYS = ("path", "issue", "id", "file")
+ISSUE = re.compile(r"\.scratch/([^/]+)/issues/(.+)\.md$")
 
 
 def rows_of(data):
@@ -57,12 +61,17 @@ def main(argv=None):
 
     data = json.loads(args.tasks.read_text(encoding="utf-8"))
     rows = rows_of(data)
-    changed, missing = 0, []
+    changed, missing, added = 0, [], []
 
-    def put(path, **fields):
+    def put(path, add=False, **fields):
         nonlocal changed
         hit = find(rows, path)
-        if not hit:
+        if not hit and add and (m := ISSUE.match(path)):
+            rows.append({"path": path, "feature": m.group(1), "title": m.group(2)})
+            hit = rows[-1:]
+            added.append(path)
+            changed += 1
+        elif not hit:
             missing.append(path)
         for r in hit:
             if any(r.get(k) != v for k, v in fields.items()):
@@ -73,7 +82,7 @@ def main(argv=None):
         for line in args.stages.read_text(encoding="utf-8").splitlines():
             path, sep, stage = line.partition("\t")
             if sep and stage.strip():
-                put(path, stage=stage.strip())
+                put(path, add=True, stage=stage.strip())
     for text in args.merged:
         pr, path = pair(text, "--merged")
         put(path, stage="Done", note=f"merged #{pr.lstrip('#')}")
@@ -83,6 +92,8 @@ def main(argv=None):
 
     args.tasks.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
     print(f"tasks: {changed} field change(s) in {len(rows)} rows")
+    for path in sorted(set(added)):
+        print(f"tasks: added row for {path}")
     for path in sorted(set(missing)):
         print(f"tasks: no row for {path}")
     return 0

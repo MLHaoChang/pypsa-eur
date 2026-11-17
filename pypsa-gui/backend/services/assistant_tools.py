@@ -680,9 +680,9 @@ def _preview_candidate(ctx, parsed):
     for change in parsed:
         for name in change.names:
             targets.setdefault(change.component_class, {}).setdefault(name, {})[change.attribute] = change.value
-    # The bulk handler skips the priced-part check a single edit runs
-    # (`network_crud._update_component`): a part priced without a lifetime is
-    # refused here, before any sandbox work, with the single edit's words.
+    # The bulk handler runs the single edit's priced-part check too (TCU 08);
+    # this one runs first, so a part priced without a lifetime is refused with a
+    # typed kind (invalid_edit_value) before any sandbox work.
     for klass, rows in targets.items():
         attr = edit_card._component_attr(klass)
         for name, attrs in rows.items():

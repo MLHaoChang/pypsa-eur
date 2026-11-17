@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The island tie gate now reads a Link with an end on the point-of-connection (`eh_poc`) bus as the mainland feed, as it already did for `eh_role = grid_import`, and leaves out an unlisted supply that cannot deliver (zero capacity, not extendable), so such a supply no longer refuses the tie (study harness 48, 49).

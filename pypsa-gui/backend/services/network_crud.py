@@ -20,13 +20,15 @@ from services import attribute_catalog, change_log_service, fuel_curve, vintage_
 from services.adequacy.occurrence import BLANK_SPELLINGS as _BLANK_SPELLINGS
 from services.asset_schema.derive import (
     apply_parts,
+    class_label,
     derive_composite,
     effective_discount_rate,
     has_parts,
+    owned_columns,
     part_scales,
     split_parts,
 )
-from services.asset_schema.schema import CLASS_ATTR
+from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, composite_parts
 from services.asset_schema import fields as asset_fields
 from services.asset_schema import provenance as asset_provenance
 from services import component_identity
@@ -339,6 +341,38 @@ def _check_investment_parts(component_class: str, parts: dict, *, row: dict) -> 
         raise HTTPException(422, str(exc)) from exc
 
 
+def _as_float(v) -> float | None:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def check_parts_own_costs(component_class: str, parts: dict, *, before: dict, submitted: dict) -> None:
+    """Refuse (422) an edit of a cost column the investment parts own (`derive.owned_columns`) when the row as
+    written still prices a part: the value would be reported written and then re-derived away. Like the fuel
+    curve's guard (`fuel_curve.guard`), a blank or the stored value is not an edit, since the form may send its
+    read-only rows. The single and bulk edits and the sweep share it."""
+    if not has_parts(component_class, parts):
+        return
+    for col in owned_columns(component_class):
+        if col not in submitted:
+            continue
+        fv = _as_float(submitted[col])
+        if fv is None or math.isnan(fv):
+            continue  # a blank (None, "", NaN) is not an edit; a non-number is the type check's to refuse
+        # Exact (GK B, TCU 09 P1): the form echoes the stored float, which JSON round-trips; no tolerance.
+        if fv == _as_float(before.get(col)):
+            continue
+        # overnight_cost has no field spec on a composite class (it stays empty there): its plain name.
+        label = next((f.label for f in asset_fields.fields_for(component_class) if f.key == col),
+                     col.replace("_", " ").capitalize())
+        raise HTTPException(
+            422,
+            f"{label}: set by the investment parts. Change a part's overnight cost, lifetime "
+            "or FOM share, or clear the parts to enter it directly")
+
+
 def _apply_investment_parts(n, component_class: str, name: str, parts: dict) -> None:
     """
     Write a composite asset's investment parts and derive its PyPSA cost columns (`services/asset_schema`).
@@ -384,6 +418,51 @@ def rederive_scaled_parts(n, component_class: str, name: str) -> None:
     own_rate = df.at[name, "discount_rate"] if "discount_rate" in df.columns else None
     apply_parts(n, component_class, name, {},
                 discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
+
+
+def _imported_parts_problem(component_class: str, row) -> str | None:
+    """Why an imported priced row's parts cannot be derived, in words; None when they can."""
+    for spec in composite_parts(component_class):
+        for field in spec.fields:
+            v = _as_float(row.get(spec.column(field)))
+            if v is not None and math.isinf(v):
+                return f"the {spec.name} part's {field.replace('_', ' ')} must be a finite number"
+    rate = effective_discount_rate(row.get("discount_rate"), _global_discount_rate())
+    try:
+        derived = derive_composite(component_class, dict(row), scales=part_scales(component_class, row),
+                                   discount_rate=rate, asset_lifetime=row.get("lifetime"))
+    except ValueError as exc:
+        return str(exc)
+    if not all(math.isfinite(derived[c]) for c in ("capital_cost", "fom_cost")):
+        scale = ", ".join(sorted({s.scale_by for s in composite_parts(component_class) if s.scale_by}))
+        return f"its derived cost is not finite (check {scale or 'the parts'})"
+    return None
+
+
+def rederive_imported_parts(n) -> list[str]:
+    """An imported network's composite rows (TCU 10, N5). Every priced row is checked first, as the create path
+    checks one (`_check_investment_parts`), and also for a non-finite part or scale: the first bad row refuses
+    the import (422 `invalid_edit_value`, naming it) before anything is written. Then every priced row is
+    re-derived so its parts own its costs (a stale `capital_cost`, `fom_cost` or `lifetime` from the file
+    included) at the rate in force: the asset's own, else the open project's (a network file carries no
+    solver settings). Returns the re-derived rows as "Storage 'name'". `n` is the import's candidate, not yet
+    open, so no lock is needed."""
+    priced = []
+    for component_class in COMPOSITE:
+        df = getattr(n, CLASS_ATTR[component_class])
+        for name in df.index:
+            row = df.loc[name]
+            if not has_parts(component_class, row):
+                continue
+            if problem := _imported_parts_problem(component_class, row):
+                raise HTTPException(422, {
+                    "error_kind": "invalid_edit_value",
+                    "message": f"{class_label(component_class)} '{name}': {problem}. "
+                               "The open network is unchanged."})
+            priced.append((component_class, name))
+    for component_class, name in priced:
+        rederive_scaled_parts(n, component_class, name)
+    return [f"{class_label(component_class)} '{name}'" for component_class, name in priced]
 
 
 def _refuse_edit_during_live_study() -> None:
@@ -642,6 +721,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, row=merged)
         stored = df.loc[name].to_dict()
+        check_parts_own_costs(component_class, parts, before=stored, submitted=kwargs)
         notice = check_fuel_curve(component_class, merged, n=n, name=name, before=stored, submitted=kwargs)
         if component_class == "Generator":
             notice = fuel_curve.clear_notice(merged, before=stored) or notice

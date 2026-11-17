@@ -10,8 +10,12 @@ import {
 } from '../../../api/businessCase'
 import { useUIStore } from '../../../store/uiStore'
 import BusinessCaseRun, { type BusinessCaseRunProps } from './BusinessCaseRun'
-import { fmtYear, kpiText, PNL_SECTIONS, reasonWords, ROW_NEEDS, streamGroups } from './businessCaseReport'
+import {
+  fmtYear, kpiText, PNL_SECTIONS, REASON_CODE_WORDS, reasonCodeWords, reasonWords, ROW_NEEDS, rowReason,
+  streamGroups,
+} from './businessCaseReport'
 import PNL_ROWS from './businessCasePnlRows.json'
+import REASON_CODES from './businessCaseRowReasonCodes.json'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/businessCase', async (importOriginal) => {
@@ -118,6 +122,55 @@ describe('the row list (GK B W1)', () => {
   it('ROW_NEEDS names every row the report serves, and the view shows only those', () => {
     expect(Object.keys(ROW_NEEDS).sort()).toEqual(PNL_ROWS)
     for (const sec of PNL_SECTIONS) for (const r of sec.rows) expect(PNL_ROWS).toContain(r.key)
+  })
+})
+
+describe('the served row reason (BC 17)', () => {
+  const item = (section: string | null, code: string) => ({ section, code })
+  it('words the served items by section, and ROW_NEEDS only for a report stored before', () => {
+    const served = { ...PNL, row_reason: {
+      tax: [item('tax', 'tax_pack_missing')],
+      net_income: [item('operating', 'line_not_established:nh3'),
+        item('operating', 'linked_output_not_evaluated:served_product.nh3:stale'),
+        item('inputs', 'input_missing:receivable_days'), item('tax', 'tax_pack_missing')],
+    } }
+    expect(rowReason('tax', served)).toBe('Not established: the tax section needs a tax pack.')
+    expect(rowReason('net_income', served)).toBe('Not established: the operating section needs '
+      + 'the line “nh3” and its linked output, which is stale; '
+      + 'the business case needs receivable days; the tax section needs a tax pack.')
+    // Served wins; absent falls back; an empty map from a new report never falls back.
+    expect(rowReason('tax', PNL)).toBe('Not established. It needs the tax section.')
+    expect(rowReason('tax', { ...PNL, row_reason: {} })).toBe('Not established.')
+    expect(rowReason('tax', { ...PNL, not_finite: ['tax'], row_reason: served.row_reason }))
+      .toBe('Not established. The figure is out of range.')
+    expect(rowReason('ebit', { ...PNL, row_reason: { ebit: [item(null, 'not_finite:ebitda')] } }))
+      .toBe('Not established: the EBITDA figure is out of range.')
+    // Two codes with the same words read once (two lines missing one escalation class).
+    expect(rowReason('revenue', { ...PNL, row_reason: { revenue: [
+      item('operating', 'escalation_missing:tariff:bill'), item('operating', 'escalation_missing:tariff:fee')] } }))
+      .toBe('Not established: the operating section needs an escalation rate for tariff.')
+    expect(rowReason('x', { ...PNL, row_reason: { x: [item(null, 'not_established')] } }))
+      .toBe('Not established.')
+    mount({ ...DONE, report: { ...REPORT, pnl: served } })
+    expect(screen.getByTestId('bc-row-tax').textContent ?? '')
+      .toContain('Not established: the tax section needs a tax pack.')
+    // An established row shows no reason.
+    expect(screen.getByTestId('bc-row-revenue').textContent ?? '').not.toContain('Not established')
+    cleanup()
+    mount({ ...DONE, report: { ...REPORT, pnl: { ...PNL, row_reason: {} } } })
+    expect(screen.getByTestId('bc-row-tax').textContent ?? '').not.toContain('It needs')
+    expect(screen.getByTestId('bc-row-revenue').textContent ?? '').not.toContain('Not established')
+  })
+
+  it('has words for every code family the report can serve, never a raw code (GK B C3)', () => {
+    expect(Object.keys(REASON_CODE_WORDS).sort()).toEqual(REASON_CODES)
+    for (const fam of REASON_CODES) {
+      const w = reasonCodeWords(`${fam}:some_asset:2`)
+      // The line's own name is the user's words, shown as typed (UX 1).
+      expect(w.replace(/“[^”]*”/g, ''), fam).not.toMatch(/[_:]/)
+      expect(w.length, fam).toBeGreaterThan(0)
+    }
+    expect(reasonCodeWords('a_future_code:x_y')).toBe('a future code x y')
   })
 })
 

@@ -118,3 +118,16 @@ def test_the_written_evidence_is_pinned_to_the_checked_out_source(tmp_path):
         for journey in family['journeys']:
             assert 'result' not in journey  # mapped, never an unobserved result
     assert data['limitations'] and all(item['source'] for item in data['limitations'])
+
+
+def test_the_pin_covers_the_manifest_json_and_every_fragment(tmp_path, monkeypatch):
+    base = tmp_path / 'family_manifest.json'
+    base.write_text(fm.MANIFEST_FILE.read_text())
+    (tmp_path / 'family_manifest.d').mkdir()
+    (tmp_path / 'family_manifest.d/claude-x.json').write_text('{}')
+    monkeypatch.setattr(fm, 'ROOT', tmp_path)
+    monkeypatch.setattr(re_, 'ROOT', tmp_path)
+    monkeypatch.setattr(fm, 'MANIFEST_FILE', base)
+    files = re_._mapped_files({'variants': []}, journeys={})
+    assert {'family_manifest.json', 'family_manifest.d/claude-x.json'} <= set(files)
+
