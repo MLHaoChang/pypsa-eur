@@ -3,7 +3,7 @@
 
 # Template creation: dev 404 text, duplicate name, one unverified project
 
-Status: needs-triage
+Status: needs-info
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J1 Pick template
 Severity: medium
@@ -18,3 +18,7 @@ Send to: template-e2e (decision inventory)
 ## Done when
 
 The 404 shows plain words; a duplicate name offers a numbered copy; template-e2e covers the hydrogen card.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Not ready: a numbered copy for a duplicate name is new behaviour (scope), the 404 wording is dev-only, and the hydrogen card is unverified. Question sent to the coordinator as options.

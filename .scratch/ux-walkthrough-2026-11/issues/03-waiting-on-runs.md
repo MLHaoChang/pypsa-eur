@@ -3,7 +3,11 @@
 
 # Waiting on a run: header says Idle, no ETA, long runs unbounded
 
-Status: needs-triage
+Status: ready-for-agent
+Model tier: sonnet
+Size: S
+Blocked by: #1627, #1630 merged
+Likely files: `pypsa-gui/frontend/src/` run-state hook and the run routes; find the 409 source first (diagnosing-bugs)
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J4 Run, J5 Wait
 Severity: high
@@ -24,3 +28,7 @@ One run state shows in the header, Guided and Expert. A long run shows how far i
 ## Journey fit
 
 J4 to J5 to J6: the wait ends where Guided results begins.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Narrowed. The "Idle" header pill, elapsed/ETA and the end of the wait landing on the headline belong to run progress (#1614, #1627, #1630; session_01G7qCunh1ZQ2fxfbTPMJRin). What stays here: (1) the 409 Conflict responses logged during three runs with no error shown; find the cause and either remove it or say it in words; (2) the wait text does not say whether Guided "Run study" or Expert "Run LOPF" is running (check after #1630). A bound on a 25-minute-plus run is template-e2e 09, not this issue.

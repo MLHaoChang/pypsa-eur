@@ -3,7 +3,7 @@
 
 # Guide tour: opt-in only, numbering and copy out of step with the stepper
 
-Status: needs-triage
+Status: needs-info
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J1 Pick template, J2 Set up (onboarding)
 Severity: medium
@@ -25,3 +25,7 @@ First open of a project offers the tour once (or an equivalent first-run checkli
 ## Journey fit
 
 J1 to J2: the tour is the hand-off from picking a template to filling section 1.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Not ready: offering the tour on first open is new behaviour (a product choice), while the 5-vs-10 count, the step jumps and the assistant-on wording are plain fixes. Question sent to the coordinator as options; owner is the next-step flow session (session_01G7qCukhif9YGKwK5Ktmeu5).
