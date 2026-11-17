@@ -16,7 +16,8 @@ import {
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { openPanel } from '../openPanel'
-import { categoryWords, escalationWords, streamWords } from './businessCaseWords'
+import { categoryWords, escalationWords, hintCurrencyNote, streamWords } from './businessCaseWords'
+import { financeApi } from '../../../api/finance'
 import { ACTION } from './actionStyle'
 import BusinessCaseRun from './BusinessCaseRun'
 import { NumInput } from './NumInput'
@@ -220,6 +221,9 @@ function PriceCell({ line, set, bad, currency }: {
           Public range {line.hint.low}–{line.hint.high} {hintUnitWords(line.hint.unit)} · {line.hint.source}, {line.hint.year}
         </p>
       )}
+      {line.kind === 'revenue' && line.hint && hintCurrencyNote(line.hint.unit, currency) && (
+        <p className="text-warn max-w-[12rem]" data-testid="bc-hint-currency">{hintCurrencyNote(line.hint.unit, currency)}</p>
+      )}
     </div>
   )
 }
@@ -259,6 +263,9 @@ export default function BusinessCaseLines() {
   const optionsKey = nk(project, 'results', 'business_case', 'options')
   const inputs = useQuery({ queryKey: inputsKey, queryFn: () => businessCaseApi.getInputs() })
   const options = useQuery({ queryKey: optionsKey, queryFn: () => businessCaseApi.getOptions() })
+  // Shares the finance editor's query: the project currency for the price hints (walk 04).
+  const finance = useQuery({ queryKey: nk(project, 'simulation', 'finance'), queryFn: () => financeApi.getFinance(),
+                             retry: false })
   const studyKey = nk(project, 'results', 'business_case')
   const study = useQuery({ queryKey: studyKey, queryFn: () => businessCaseApi.getStudy(),
                            refetchInterval: q => (q.state.data?.status === 'running' ? 2000 : false) })
@@ -297,7 +304,9 @@ export default function BusinessCaseLines() {
 
   const lines = draft?.inputs.lines ?? []
   const names = lines.map(l => l.name)
-  const currency = (study.data?.report?.currency as string | undefined) ?? null
+  // The report's currency, else the finance inputs' (blank reads EUR, as their form says).
+  const currency = (study.data?.report?.currency as string | undefined)
+    ?? (finance.data?.finance ? (finance.data.finance.currency || 'EUR') : null)
   const setLines = (next: LineItem[]) => {
     // A break-even line must name a revenue line (the validator's rule): one renamed,
     // retyped or removed leaves the choice empty rather than a refused save.

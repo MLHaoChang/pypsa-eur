@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { CATEGORY_WORDS, categoryWords, ESCALATION_WORDS, escalationWords, STREAM_WORDS, streamWords } from './businessCaseWords'
+import { hintCurrencyNote, CATEGORY_WORDS, categoryWords, ESCALATION_WORDS, escalationWords, STREAM_WORDS, streamWords } from './businessCaseWords'
 
 const BACKEND = resolve(__dirname, '../../../../../backend')
 const read = (p: string) => readFileSync(resolve(BACKEND, p), 'utf8')
@@ -43,5 +43,14 @@ describe('business-case ids in words (walk 06)', () => {
     expect(streamWords('energy_wholesale')).toBe('Wholesale market energy')
     expect(streamWords('ppa_settlement')).toBe('PPA settlement')
     expect(streamWords('bc_sga')).toBe('Overheads (SG&A)')
+  })
+})
+
+describe('a public range in another currency (walk 04)', () => {
+  it('says its currency, not converted, against the project currency', () => {
+    expect(hintCurrencyNote('USD/kW_month', 'EUR')).toBe('In USD, not converted: type the price in EUR, the project currency.')
+    expect(hintCurrencyNote('EUR/kg', 'eur')).toBeNull()
+    expect(hintCurrencyNote('GBP/kW_year', null)).toBeNull()
+    expect(hintCurrencyNote('kg', 'EUR')).toBeNull()
   })
 })

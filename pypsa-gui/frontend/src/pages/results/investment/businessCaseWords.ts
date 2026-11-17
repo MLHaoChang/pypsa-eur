@@ -90,3 +90,13 @@ export function streamWords(id: string): string {
   const cat = id.startsWith('bc_') ? id.slice(3) : null
   return cat && CATEGORY_WORDS[cat] ? CATEGORY_WORDS[cat] : plain(id)
 }
+
+/** A public price range in another currency than the project's (walk 04): it is
+ *  shown as published and never converted, so the row says so. Null when the two
+ *  agree or either is unknown. */
+export function hintCurrencyNote(hintUnit: string, projectCurrency: string | null): string | null {
+  const cur = hintUnit.split('/', 1)[0]?.trim().toUpperCase()
+  const proj = projectCurrency?.trim().toUpperCase()
+  if (!cur || !proj || cur === proj || !/^[A-Z]{3}$/.test(cur)) return null
+  return `In ${cur}, not converted: type the price in ${proj}, the project currency.`
+}
