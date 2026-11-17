@@ -169,4 +169,6 @@
   <t_property><property_id>15</property_id><collection_id>1</collection_id><name>Notes</name></t_property>
   <t_text><data_id>12</data_id><class_id>7</class_id><value>csv_files\other.csv</value></t_text>
   <t_attribute_data><object_id>2</object_id><attribute_id>1</attribute_id><value>99.9</value></t_attribute_data>
+  <t_data><data_id>25</data_id><membership_id>50</membership_id><property_id>1</property_id><value>1</value></t_data>
+  <t_object><object_id>50</object_id><class_id>99</class_id><name>Ghost 2</name></t_object>
 </MasterDataSet>

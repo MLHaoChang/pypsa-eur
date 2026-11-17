@@ -424,10 +424,10 @@ def read_plexos_xml(source) -> PlexosModel:
             memberships[mid] = Membership(mid, coll, parent.key, child.key)
             ledger.ok("t_membership")
 
+    # consulted only for ids that did not resolve, so the first of two
+    # duplicate ids (resolved) never reads its twin's reason
     broken_membership = {
-        b.row_id: b.reason
-        for b in ledger.broken
-        if b.table == "t_membership" and b.row_id not in memberships
+        b.row_id: b.reason for b in ledger.broken if b.table == "t_membership"
     }
 
     # data rows

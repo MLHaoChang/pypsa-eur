@@ -94,6 +94,9 @@ EDGE_BROKEN = {
     ("t_data", "19"): "property 999 does not exist",
     ("t_data", "20"): "belongs to another collection",
     ("t_data", "22"): "membership 18 is broken (parent or child object does not exist)",
+    # membership 50 does not exist, though object 50 is broken: no borrowed reason
+    ("t_data", "25"): "membership 50 does not exist",
+    ("t_object", "50"): "unknown class id 99",
     ("t_band", "999"): "data row 999 does not exist",
     ("t_band", "2"): "not a whole number",
     ("t_band", "3 (row 3)"): "a second t_band entry",
