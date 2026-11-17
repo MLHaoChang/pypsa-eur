@@ -98,6 +98,24 @@ def test_a_project_with_no_recorded_template_reads_blank(
     assert run_profiles.scope_for(flow_scope.preset_template(pdir))["preset"] == "blank"
 
 
+@pytest.mark.parametrize("tid", ["no_such_template", "eh_microgrid", 7, None, ["3bus"]])
+def test_an_unknown_or_non_string_template_id_reads_blank(
+    client, project_storage_dir, tmp_path, monkeypatch, tid
+):
+    """GK B 65: a recorded id that is not a grid template, or not a string
+    (an int, null, an unhashable list), reads the old preset and never fails."""
+    name = _create(client, tmp_path, monkeypatch, "ieee14")
+    pdir = project_storage_dir(name)
+    meta = json.loads((pdir / "metadata.json").read_text())
+    meta["template_id"] = tid
+    (pdir / "metadata.json").write_text(json.dumps(meta))
+    assert flow_scope.preset_template(pdir) is None
+    r = client.get(f"/api/projects/{name}/flow/scope")
+    assert r.status_code == 200, r.text
+    assert r.json()["preset_id"] == "blank"
+    assert run_profiles.scope_for(flow_scope.preset_template(pdir))["preset"] == "blank"
+
+
 def test_a_save_keeps_the_recorded_template(
     client, project_storage_dir, tmp_path, monkeypatch
 ):
