@@ -13,12 +13,15 @@ machine (``grid_machine``) at the PoC side, whose impedance the script sets
 **Channels.** PSS/E records ``raw_<name>`` channels as it measures them; after
 the run the script reads the ``.out`` back with ``dyntools.CHNF.get_data``,
 applies :data:`CONVERSIONS` in a pure ``_convert`` function and writes the CSV
-with the header ``t_s`` plus the case's channels by their contract names, in
-contract units (``test_battery.CHANNELS``). So the read-back never sees a PSS/E
-unit. id/iq come from the plant converter's current commands, pu on the plant
+with the header ``t_s``, the case's channels by their contract names, in
+contract units (``test_battery.CHANNELS``), then ``status``. So the read-back
+never sees a PSS/E unit. ``status`` is always in the header, so the header is
+fixed per case; it is empty on every evaluated row (see V = 0 below). id/iq come from the plant converter's current commands, pu on the plant
 machine's MBASE: the pack sets MBASE = plant rated apparent power, which is
-the contract base. P and Q are the PoC branch flow measured at its from bus
-(the plant side) towards the grid: export, i.e. injection, is positive.
+the contract base. P and Q are measured at the PoC: ``plant_branch`` is
+``(from = poc_bus, to = plant side bus, ckt)``, so PSS/E reports the flow
+from the PoC into the plant branch, and :data:`CONVERSIONS` negates both, so
+export (plant to grid), i.e. injection, is positive.
 
 **Thevenin source.** ``thevenin_impedances_ohm`` gives Z1 (and Z0) in ohms at
 the PoC base kV; the generator converts them to pu on the grid machine's MBASE
@@ -42,11 +45,12 @@ never starts from an unsolved case. :func:`check_script` refuses a script
 without ``fnsl``, then that convergence check, then ``cong``, in that order.
 
 **Current magnitude at V = 0.** ``i_poc_pu`` is ``|S| / (V * S_rated)``,
-undefined when the PoC voltage is 0 (a bolted fault at the PoC). The result
-is a CSV of finite numbers with a fixed contract header and no slot for a
-"not evaluated" sample, so ``_convert`` refuses: it raises ``ValueError``
-naming the channel and the reason, and no CSV is written for that case (the
-``.out`` stays). It never writes NaN or inf.
+undefined when the PoC voltage is 0 (a bolted fault at the PoC, the core LVRT
+cases). The script still writes the CSV: on a sample with V <= 1e-6 the
+``i_poc_pu`` cell is empty and ``status`` reads :data:`STATUS_V0`; every other
+channel of that row is written as usual. It never writes NaN or inf, so the
+read-back reads that sample's current as unknown. Reading the current from a
+direct channel instead is issue 21.
 
 The psspy calls were written without a PSS/E licence: :data:`PENDING` is
 repeated in every script, :data:`EVENT_CALLS` / :data:`CHANNEL_CALLS`
@@ -131,8 +135,14 @@ CHANNEL_CALLS = {
     "raw_theta_poc_deg": ("voltage_and_angle_channel", "absolute bus angle, deg"),
     "raw_theta_src": ("machine_array_channel", "code 1 ANGLE of the grid GENCLS, deg"),
     "raw_f_hz": ("bus_frequency_channel", "pu deviation from base frequency"),
-    "raw_p_poc_mw": ("branch_p_and_q_channel", "MW at the from (plant) bus"),
-    "raw_q_poc_mvar": ("branch_p_and_q_channel", "Mvar at the from (plant) bus"),
+    "raw_p_poc_mw": (
+        "branch_p_and_q_channel",
+        "MW at the from (PoC) bus, into the plant",
+    ),
+    "raw_q_poc_mvar": (
+        "branch_p_and_q_channel",
+        "Mvar at the from (PoC) bus, into the plant",
+    ),
     "raw_id_pu": (
         "machine_array_channel",
         "code 22, Ip command, pu on MBASE = plant rated",
@@ -153,18 +163,19 @@ CONVERSIONS = {
         "theta = bus angle - source EMF angle",
     ),
     "f_hz": (("raw_f_hz",), "f0_hz * (1.0 + a)", "f = f0 * (1 + dev_pu)"),
-    "p_poc_mw": (("raw_p_poc_mw",), "a", "P plant -> grid, export positive"),
-    "q_poc_mvar": (("raw_q_poc_mvar",), "a", "Q plant -> grid, injection positive"),
+    "p_poc_mw": (("raw_p_poc_mw",), "-a", "P plant -> grid = -(PoC -> plant)"),
+    "q_poc_mvar": (("raw_q_poc_mvar",), "-a", "Q plant -> grid = -(PoC -> plant)"),
     "id_pu": (("raw_id_pu",), "a", "Ip command on MBASE = plant rated"),
     "iq_pu": (("raw_iq_pu",), "a", "Iq command on MBASE = plant rated"),
     "i_poc_pu": (
         ("raw_p_poc_mw", "raw_q_poc_mvar", "raw_v_poc_pu"),
-        "(a * a + b * b) ** 0.5 / (c * s_rated) if c > 1e-6 else "
-        "_refuse('i_poc_pu: V = 0 at the PoC (bolted fault there), current from "
-        "P, Q and V undefined')",
-        "|I| = sqrt(P^2 + Q^2) / (V * S_rated), S_rated = plant MBASE; refused at V = 0",
+        "(a * a + b * b) ** 0.5 / (c * s_rated) if c > 1e-6 else ''",
+        "|I| = sqrt(P^2 + Q^2) / (V * S_rated), S_rated = plant MBASE; empty at V = 0",
     ),
 }
+
+#: ``status`` cell of a row whose ``i_poc_pu`` is not evaluated (V = 0 at the PoC)
+STATUS_V0 = "not evaluated: V = 0 at PoC"
 
 ALLOWED_IMPORTS = frozenset({"psspy", "dyntools", "os"})
 _FORBIDDEN_CALLS = frozenset(
@@ -420,12 +431,13 @@ def _channel_lines(case):
 
 
 def _convert_lines(case):
-    """A pure ``_convert(rec, f0_hz, s_rated)``: recorded lists -> contract units."""
+    """
+    A pure ``_convert(rec, f0_hz, s_rated)``: recorded lists -> contract units
+    plus ``status``; and a pure ``_csv_text(data, header)`` that formats them
+    (a str cell as is, a number by ``repr(float(x))``).
+    """
     out = [
         "def _convert(rec, f0_hz, s_rated):",
-        "    def _refuse(why):",
-        "        raise ValueError('not evaluated, no CSV written: ' + why)",
-        "",
         "    out = {'t_s': list(rec['t_s'])}",
     ]
     for ch in case.channels:
@@ -440,7 +452,24 @@ def _convert_lines(case):
             f"    # {formula}",
             f"    out[{ch!r}] = [{expr} for ({', '.join(names)},) in zip({cols})]",
         ]
-    return out + ["    return out", ""]
+    status = (
+        f"[{STATUS_V0!r} if x == '' else '' for x in out['i_poc_pu']]"
+        if "i_poc_pu" in case.channels
+        else "['' for _ in out['t_s']]"
+    )
+    return out + [
+        f"    out['status'] = {status}",
+        "    return out",
+        "",
+        "",
+        "def _csv_text(data, header):",
+        "    def cell(x):",
+        "        return x if isinstance(x, str) else repr(float(x))",
+        "",
+        "    rows = [header, *zip(*[data[h] for h in header])]",
+        "    return ''.join(','.join(cell(x) for x in row) + '\\n' for row in rows)",
+        "",
+    ]
 
 
 def _script(
@@ -488,7 +517,7 @@ def _script(
         f"T_EVENT, T_END = {case.t_event_s!r}, {case.t_end_s!r}",
         f"F0_HZ, PLANT_MBASE = {float(f0_hz)!r}, "
         f"{None if plant_mbase is None else float(plant_mbase)!r}",
-        f"HEADER = {['t_s', *case.channels]!r}",
+        f"HEADER = {['t_s', *case.channels, 'status']!r}",
     ]
     if plant_branch is not None:
         lines.append("BR_FROM, BR_TO, BR_CKT = {!r}, {!r}, {!r}".format(*plant_branch))
@@ -536,9 +565,7 @@ def _script(
         "rec['t_s'] = values['time']",
         "data = _convert(rec, F0_HZ, PLANT_MBASE)",
         f"with open(os.path.join(HERE, {csv!r}), 'w') as fh:",
-        "    fh.write(','.join(HEADER) + '\\n')",
-        "    for row in zip(*[data[h] for h in HEADER]):",
-        "        fh.write(','.join(repr(float(x)) for x in row) + '\\n')",
+        "    fh.write(_csv_text(data, HEADER))",
         "",
     ]
     return "\n".join(lines)
@@ -583,7 +610,9 @@ def write_scripts(
     ``raw``/``seq``/``dyr`` are pack-local file names; ``poc_bus`` the RAW bus
     number of the PoC, ``poc_kv`` its base kV; ``grid_machine`` the grid source
     ``(bus, id)`` with MBASE ``grid_mbase_mva``; ``plant_branch`` the PoC branch
-    ``(from_bus = plant side, to_bus, ckt)`` for P/Q/current channels;
+    ``(from_bus = poc_bus, to_bus = plant side, ckt)`` for P/Q/current
+    channels, measured at the PoC (a pack whose PoC branch is BUS1 = plant
+    side, BUS2 = grid side passes ``(BUS2, BUS1, CKT)``);
     ``plant_machine`` the ``(bus, id)`` whose references the V/Q/P steps move
     and whose current commands id/iq record; ``f0_hz`` the base frequency that
     turns PSS/E's pu frequency deviation into Hz; ``plant_mbase_mva`` the plant
