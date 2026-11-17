@@ -552,7 +552,9 @@ def test_a_path_given_as_text_is_read(tmp_path):
 
 
 def test_a_zero_power_factor_is_refused(tmp_path):
-    with pytest.raises(ImportFormatError, match="rated power factor 0 must be above zero"):
+    with pytest.raises(
+        ImportFormatError, match="rated power factor 0 must be above zero"
+    ):
         read_text(tmp_path, dgs_text(_with(ElmGenstat=["41;PV;2;5.0;0;3.0;1.0;0"])))
 
 
