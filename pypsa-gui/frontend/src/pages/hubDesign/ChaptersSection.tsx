@@ -70,8 +70,8 @@ export function useChapterTiles(reliability: ChapterInputs['reliability']) {
   return { tiles, processView: processView.data }
 }
 
-/** `headlined`: tiles whose figure the Results headline shows; here they keep their
- *  state and their way in, without the number (one number, one place). */
+/** `headlined`: tiles whose figure, state and Expert link the Results headline shows; here
+ *  they keep their group and say so (one number, one place; one entry point per destination). */
 export function ChaptersSection({ reliability, headlined = [] }: {
   reliability: ChapterInputs['reliability']; headlined?: ChapterId[]
 }) {

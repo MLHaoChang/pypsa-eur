@@ -8,6 +8,7 @@
 // Each figure keeps its own source and state; when some are current and others
 // out of date, one line says which (GK B G1).
 import Kpi from '../../../components/Kpi'
+import { Skeleton } from '../../../components/Skeleton'
 import type { ResultStateKind } from '../../../components/ResultState'
 import { ChartFrame, chartFigure, ChartSourceProvider, CHART_TICK } from '../../../components/charts/chartTheme'
 import { showResultsTab } from '../../../layout/flowNavigation'
@@ -94,14 +95,11 @@ function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null 
   }
   const card = read.card
   const { value, basis } = headlineFigure(card)
+  // No link of its own: LCOE lives on the Investment case tab, which the NPV figure already opens
+  // (one entry point per destination, UX 23, 5).
   return (
-    <div className="flex flex-col gap-1">
-      <Kpi headline testId="hub-results-lcoe" label={words.label} value={value} basis={basis}
-        state={cardState(card)}
-        reason={card.reason ?? undefined} />
-      <OpenLink label={words.tabLabel} testId="hub-results-lcoe-open"
-        onClick={() => showResultsTab(words.tab, { from: 'Results' })} />
-    </div>
+    <Kpi headline testId="hub-results-lcoe" label={words.label} value={value} basis={basis}
+      state={cardState(card)} reason={card.reason ?? undefined} />
   )
 }
 
@@ -196,7 +194,8 @@ export function ResultsHeadline({ reliability, cost, ci }: {
         {rel && <TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true} />}
         {cost}
         {npv && <TileFigure tile={npv} testId="hub-results-npv" />}
-        {!headline.isLoading && (
+        {/* The tile's place is kept while the figures load, so the grid does not move (as Expert's strip). */}
+        {headline.isLoading ? <Skeleton className="min-h-[96px]" /> : (
           <LcoeFigure read={headline.isError ? { kind: 'failed' } : headline.data ? { kind: 'card', card: lcoe } : { kind: 'none' }} />
         )}
       </div>

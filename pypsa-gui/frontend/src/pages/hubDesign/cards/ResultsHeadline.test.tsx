@@ -193,6 +193,31 @@ describe('Results headline', () => {
     expect(screen.getByTestId('hub-results-reliability').getAttribute('data-state')).toBe('ready')
   })
 
+  it('a stale LCOE carries its own out-of-date state', async () => {
+    vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(withLcoe({ ...LCOE_READY, state: 'stale' }))
+    mount()
+    const lcoe = await screen.findByTestId('hub-results-lcoe')
+    expect(lcoe.getAttribute('data-state')).toBe('stale')
+    expect(lcoe.querySelector('[data-kpi-value]')).not.toBeNull()
+  })
+
+  it('an edit since the study: the study figure reads out of date beside a current NPV (G1)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(
+      { status: 'done', archetype: 'weak_flexible', report: REPORT, edited_since_study: true } as never)
+    mount()
+    expect(await screen.findByTestId('hub-results-edited')).toBeTruthy()
+    const note = await screen.findByTestId('hub-results-mixed')
+    expect(note.textContent).toContain('Expected shortfall is out of date')
+    expect(screen.getByTestId('hub-results-reliability-chart').textContent).toContain('Out of date')
+  })
+
+  it('one entry point per destination: LCOE has no second link to the Investment case', async () => {
+    mount()
+    await screen.findByTestId('hub-results-lcoe')
+    expect(screen.queryByTestId('hub-results-lcoe-open')).toBeNull()
+    expect(await screen.findByTestId('hub-results-npv-open')).toBeTruthy()
+  })
+
   it('one entry point per destination: headlined tiles drop their own Open link', async () => {
     mount()
     await screen.findByTestId('hub-chapter-reliability-headlined')
@@ -212,7 +237,7 @@ describe('Results headline', () => {
 
   it('each figure opens the Expert tab that holds it, with a way back', async () => {
     const user = mount()
-    await user.click(await screen.findByTestId('hub-results-lcoe-open'))
+    await user.click(await screen.findByTestId('hub-results-npv-open'))
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
     expect(useUIStore.getState().resultsTabRequest).toBe('investment')
     expect(useUIStore.getState().flowReturn).not.toBeNull()
