@@ -360,3 +360,87 @@ def test_an_episode_rotated_after_lookup_writes_nothing(monkeypatch):
     monkeypatch.setattr(dc, 'find_thread_for_episode', lambda episode_id, **_: thread_id)
     assert dc.record_current_view('ep-old', FULL_CONTEXT) is False
     assert _file_bytes(thread_id) == before
+
+
+# --- the admission hook in the loop (L2, L3) ----------------------------------
+
+def _turn(session, ui_context):
+    from harness.providers.fake import FakeProvider
+
+    provider = FakeProvider([{'blocks': [{'type': 'text', 'text': 'ok'}],
+                              'usage': {'input_tokens': 3, 'output_tokens': 2}}])
+    return [(event, data) for event, data in chat_service.run_turn(
+        session, 'which line is closest to its limit?', provider=provider, ui_context=ui_context,
+    ) if event != 'usage']
+
+
+def _answer(session):
+    last = [m for m in session.messages if m.get('role') == 'assistant'][-1]['content']
+    return last if isinstance(last, str) else ''.join(b.get('text', '') for b in last if isinstance(b, dict))
+
+
+def _resumed():
+    thread = dc.create_thread()
+    _, session = dc.resume_episode(thread['thread_id'], generation=thread['generation'])
+    return thread['thread_id'], session
+
+
+def test_a_turn_records_its_view_on_the_bound_thread():
+    thread_id, session = _resumed()
+    _turn(session, FULL_CONTEXT)
+    current = dict(_refs(thread_id)['current'])
+    current.pop('at')
+    assert current == FULL_VIEW
+
+
+def test_the_turn_answers_the_same_with_or_without_the_record(monkeypatch):
+    _, bound = _resumed()
+    recorded = _turn(bound, FULL_CONTEXT)
+    monkeypatch.setattr(dc, 'record_current_view', lambda *a, **k: False)
+    _, other = _resumed()
+    plain = _turn(other, FULL_CONTEXT)
+    assert [e for e, _ in recorded] == [e for e, _ in plain] == ['session_init', 'turn_done']
+    done = [d for e, d in recorded if e == 'turn_done'][0]
+    assert done == [d for e, d in plain if e == 'turn_done'][0]
+    assert _answer(bound) == _answer(other) == 'ok'
+
+
+def test_a_failing_store_never_reaches_the_turn(monkeypatch):
+    _, session = _resumed()
+
+    real = dc.record_current_view
+    calls = []
+
+    def with_full_disk(*args, **kwargs):
+        def broken(*_a, **_k):
+            raise OSError('disk full')
+
+        saved, dc._save = dc._save, broken
+        try:
+            calls.append(real(*args, **kwargs))
+        finally:
+            dc._save = saved
+        return calls[-1]
+
+    monkeypatch.setattr(dc, 'record_current_view', with_full_disk)
+    frames = _turn(session, FULL_CONTEXT)
+    assert calls == [False]
+    assert [e for e, _ in frames] == ['session_init', 'turn_done']
+    assert _answer(session) == 'ok'
+
+
+def test_the_hook_runs_with_no_session_lock_held(monkeypatch):
+    _, session = _resumed()
+    held = []
+    real = dc.record_current_view
+
+    def spy(*args, **kwargs):
+        free = session._lock.acquire(blocking=False)
+        if free:
+            session._lock.release()
+        held.append(not free)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(dc, 'record_current_view', spy)
+    _turn(session, FULL_CONTEXT)
+    assert held == [False]

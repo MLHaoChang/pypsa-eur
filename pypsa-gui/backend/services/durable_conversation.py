@@ -1313,7 +1313,7 @@ def record_current_view(episode_id: str, ui_context: Any, *, generation: int | N
             thread['updated_at'] = view['at']
             _save(path, thread)
             return True
-    except HTTPException:
+    except (HTTPException, OSError, ValueError):
         return False
 
 

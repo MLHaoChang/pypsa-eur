@@ -2180,6 +2180,13 @@ def _run_turn_body(
     # turn would break that cache for a fidelity nobody asked for.
     ui_block = _format_ui_context(ui_context)
     session.turn_ui_context = dict(ui_context) if isinstance(ui_context, dict) else None
+    # Live-voice 03a: the durable current view, distinct from refs.discussed.
+    # Held locks here: none (no session or provider lock); the call takes only
+    # durable_conversation._LOCK. It never refuses or delays the turn, and the
+    # utterance generation was already checked at admission.
+    from services import durable_conversation as _durable
+
+    _durable.record_current_view(session.session_id, ui_context)
     # Issue 13 (shadow): each addendum is its own event as well as part of
     # the user message.
     from harness import eventlog as _eventlog
