@@ -1,8 +1,9 @@
 // One input's standing as an assumption (WALK-IMPROVE-1 b): a value a template
 // ships, with where it comes from, until the person types their own or keeps
 // it. Shared by the finance inputs, the readiness checklist and the template
-// screens, in Guided and Expert alike. The source is words on the page, never
-// hover-only (TCU-05): "Assumed · <source>, <year> — <note>".
+// and goal screens, in Guided and Expert alike. The source is words on the page, never
+// hover-only (TCU-05): "Assumed <source>, <year>: <note>". The state is a word,
+// never colour alone.
 
 /** Which of the three an input is. Typed wins over confirmed: an edit replaces the assumption. */
 export type AssumedState = 'assumed' | 'confirmed' | 'typed'
@@ -10,7 +11,8 @@ export type AssumedState = 'assumed' | 'confirmed' | 'typed'
 export interface AssumedChipProps {
   /** Where the shipped value comes from (the template's finance ledger names it). */
   source?: string | null
-  sourceYear?: number | null
+  /** A year, or an ISO date when the source is dated more finely. */
+  sourceYear?: number | string | null
   /** Why the value stands, when the source alone does not say (e.g. "assumed, no primary source"). */
   note?: string | null
   /** The person typed their own value: the chip reads "Stated" and the source goes. */
@@ -44,7 +46,7 @@ export function assumedSourceText(p: AssumedChipProps): string | null {
   const src = p.source?.trim()
   const head = src ? `${src}${p.sourceYear != null ? `, ${p.sourceYear}` : ''}` : 'source not recorded'
   const note = p.note?.trim()
-  return note ? `${head} — ${note}` : head
+  return note ? `${head}: ${note}` : head
 }
 
 export function AssumedChip(props: AssumedChipProps) {
@@ -58,15 +60,13 @@ export function AssumedChip(props: AssumedChipProps) {
   )
 }
 
-/** The key under a list of chips. `confirmable` adds "Confirmed" where the screen lets a person keep a value. */
-export function AssumedKey({ confirmable = false, testId }: { confirmable?: boolean; testId?: string }) {
+/** The key under a card's chips, one per card: it explains all three states. */
+export function AssumedKey({ testId }: { testId?: string }) {
   return (
     <p className="text-muted" data-testid={testId}>
-      <span className={`${CHIP} ${TONE.assumed}`}>{ASSUMED_CHIP_LABELS.assumed}</span> a template default, its source
+      <span className={`${CHIP} ${TONE.assumed}`}>{ASSUMED_CHIP_LABELS.assumed}</span> a default, its source
       beside it; editing it makes it stated ·{' '}
-      {confirmable && <>
-        <span className={`${CHIP} ${TONE.confirmed}`}>{ASSUMED_CHIP_LABELS.confirmed}</span> a default you kept ·{' '}
-      </>}
+      <span className={`${CHIP} ${TONE.confirmed}`}>{ASSUMED_CHIP_LABELS.confirmed}</span> a default you kept ·{' '}
       <span className={`${CHIP} ${TONE.typed}`}>{ASSUMED_CHIP_LABELS.typed}</span> typed by you
     </p>
   )
