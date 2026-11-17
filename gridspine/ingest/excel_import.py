@@ -74,7 +74,8 @@ def _check_zip(path: pathlib.Path) -> None:
     try:
         with zipfile.ZipFile(path) as zf:
             infos = zf.infolist()
-    except (zipfile.BadZipFile, OSError) as exc:
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError, NotImplementedError, ValueError, EOFError) as exc:
+        # A damaged header can claim a zip version or feature Python does not support.
         raise L.ImportFormatError("The file is not an Excel workbook (.xlsx).") from exc
     if len(infos) > L.LIMITS["zip_members"]:
         raise L.ImportLimitError("zip_members", len(infos))
