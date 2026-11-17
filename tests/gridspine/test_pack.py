@@ -638,3 +638,55 @@ def test_no_sample_before_the_step_is_unknown(tmp_path):
         c["status"] == "unknown"
         and "no sample in the 0.1 s before the step" in c["detail"]
     )
+
+
+# --- the GC-06 pack itself (keeps the synthetic manifest in step with emt_pack) -------------------------------
+
+
+def _emt_pack(tmp_path):
+    from gridspine.handoff.emt_pack import battery_from_campus
+    from gridspine.ingest.campus import build_campus
+    from tests.gridspine.test_emt_pack import pack, spec
+
+    return pack(tmp_path, battery=battery_from_campus(build_campus(spec())))
+
+
+def test_the_reader_matches_the_emt_pack_writer(tmp_path):
+    from gridspine.handoff import emt_pack
+    from gridspine.readback import pack as reader
+
+    assert (reader.MANIFEST, reader.BATTERY_JSON, reader.RESULTS_DIR) == (
+        emt_pack.MANIFEST,
+        emt_pack.BATTERY_JSON,
+        emt_pack.RESULTS_DIR,
+    )
+    assert emt_pack.PACK_VERSION in KNOWN_PACKS["pscad_emt"]
+    written = json.loads((_emt_pack(tmp_path).path / "manifest.json").read_text())
+    synthetic = json.loads(
+        (_pack(tmp_path / "s", [P_UP]) / "manifest.json").read_text()
+    )
+    assert set(synthetic) <= set(written)
+    assert written["pack"] == "pscad_emt"
+    assert written["contract_version"] in KNOWN_CONTRACT_VERSIONS
+
+
+def test_a_written_emt_pack_is_read_and_judged(tmp_path):
+    p = _emt_pack(tmp_path).path
+    manifest = read_manifest(p)
+    assert manifest["files"]["battery.json"]
+    ids = manifest["case_ids"]
+    fault = next(i for i in ids if i.startswith("fault_3ph_"))
+    (p / "results").mkdir(exist_ok=True)
+    _csv(p / "results" / f"{fault}.csv", _ride_through())
+    j = judge_pack(p, PROFILE, RATINGS)
+    cases = _by_id(j)
+    assert set(cases) == set(ids)
+    assert j["header"]["data_hash"] == manifest["data_hash"]
+    assert all(
+        c["detail"] == "no result file"
+        for k, c in cases.items()
+        if k != fault
+        and c["rows"] == []
+        and not k.startswith(("flat", "f_ramp", "phase_jump"))
+    )
+    assert _rows(cases[fault])["stays_connected"]["status"] == "pass"

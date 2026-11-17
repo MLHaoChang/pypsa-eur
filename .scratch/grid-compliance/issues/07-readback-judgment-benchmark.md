@@ -3,7 +3,7 @@
 
 # GC-07 External-result read-back, automatic compliance judgment, RMS–EMT and field benchmark
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (parts 1–4 on a neutral channel frame); part 5 waits on 04 and 06 for their output files
