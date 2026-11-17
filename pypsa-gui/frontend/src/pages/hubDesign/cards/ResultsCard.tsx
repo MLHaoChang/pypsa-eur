@@ -37,6 +37,11 @@ export const STALE_TEXT =
 export const EDITED_TEXT =
   'The network has been edited since this study, so its verdict, expected shortfall, design cost and risks describe the design as it was. Run again to refresh.'
 
+/** GK B F1 (rulings #1170, #1390 F2): the server says `edited_since_study` is null when it could not
+ *  compare, such as a study saved before revisions were captured. Unknown never reads as current. */
+export const FRESHNESS_UNKNOWN_TEXT =
+  "Can't tell whether the network changed since this study, so its verdict, expected shortfall, design cost and risks may not describe the current design. Run again to check."
+
 export function openFullReport(): void {
   const ui = useUIStore.getState()
   ui.setSlidePanel('results')
@@ -86,6 +91,8 @@ export function ResultsCard() {
   const verdict = summary.verdict
   // Out-of-date figures are marked on the tiles too, not only above them (UX review N4, L5).
   const stale = review?.stale === true && study?.edited_since_study !== true
+  // Null or missing means the server could not compare (GK B F1): only a strict `false` reads as current.
+  const freshnessUnknown = study?.edited_since_study !== true && study?.edited_since_study !== false && !stale
   const reliability = {
     hasResults: studyHasResults(study), running,
     lole: summary.mc_lole_h_per_year ?? report?.mc_lole_h ?? null,
@@ -118,6 +125,12 @@ export function ResultsCard() {
         <p data-testid="hub-results-edited"
           className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
           {EDITED_TEXT}
+        </p>
+      )}
+      {freshnessUnknown && (
+        <p data-testid="hub-results-freshness-unknown"
+          className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+          {FRESHNESS_UNKNOWN_TEXT}
         </p>
       )}
       {uncheckedKinds.length > 0 && (
@@ -158,16 +171,17 @@ export function ResultsCard() {
 
       {/* An edit since the study makes the study's figures out of date too: the edited banner is their
           mark, and the headline's mixed-source line and chart then say so (review P1, GK B G1). */}
-      <ResultsHeadline reliability={{ ...reliability, stale: stale || study?.edited_since_study === true }} ci={loleCi(report)} cost={cost != null && (
+      <ResultsHeadline reliability={{ ...reliability, stale: stale || study?.edited_since_study === true }}
+        freshnessUnknown={freshnessUnknown} ci={loleCi(report)} cost={cost != null && (
         // The cost of the planned design at the pack's energy target, without
         // shortfall costs — never "the cost of your goal" (P24-FE gate B1).
         // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.
         <Kpi testId="hub-results-cost" headline
           label={costTileLabel(report?.period_basis, periods.data?.periods)}
-          value={fmtCurrency(cost)} fromStudy={solved === false && !stale}
-          hint={solved === false && !stale ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
+          value={fmtCurrency(cost)} fromStudy={solved === false && !stale && !freshnessUnknown}
+          hint={solved === false && !stale && !freshnessUnknown ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
           // The banner above says "Out of date" once for the card; the tile only dims.
-          state="ready" dimmed={stale} />
+          state="ready" dimmed={stale || freshnessUnknown} />
       )} />
 
       {(risks.length > 0 || coped.length > 0) && (

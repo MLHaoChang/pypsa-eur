@@ -46,7 +46,9 @@ const HEADLINE = captured as HeadlineKpis
 // a figure is laid over it, in the unit the server's card type names ("<ISO code>/MWh").
 const withLcoe = (over: Partial<HeadlineCard>): HeadlineKpis =>
   ({ ...HEADLINE, cards: HEADLINE.cards.map(c => (c.id === 'lcoe' ? { ...c, ...over } : c)) })
-const LCOE_READY: Partial<HeadlineCard> = { state: 'ready', value: 61.23, unit: 'EUR/MWh', reason: null }
+const LCOE_READY: Partial<HeadlineCard> = {
+  state: 'ready', value: 61.23, unit: 'EUR/MWh', reason: null, formula_id: 'investment-lcoe-real/1',
+}
 const LCOE = withLcoe(LCOE_READY).cards.find(c => c.id === 'lcoe') as HeadlineCard
 
 beforeEach(() => {
@@ -54,7 +56,8 @@ beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: 'hubDesign', uiMode: 'guided',
     resultsTabRequest: null, ehReportRequest: false, flowReturn: null })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true, step: 'results' })
-  vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', archetype: 'weak_flexible', report: REPORT } as never)
+  vi.mocked(resultsApi.getEhStudy).mockResolvedValue(
+    { status: 'done', archetype: 'weak_flexible', report: REPORT, edited_since_study: false } as never)
   vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
   vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
@@ -87,6 +90,15 @@ describe('mixedSourceNote (GK B G1)', () => {
   it('says nothing when all are current, or all are out of date (the card banner says that once)', () => {
     expect(mixedSourceNote([{ label: 'A', state: 'ready' }, { label: 'B', state: 'not_run' }])).toBeNull()
     expect(mixedSourceNote([{ label: 'A', state: 'stale' }, { label: 'B', state: 'stale' }])).toBeNull()
+  })
+  it('a figure whose freshness is unknown is never counted as current (GK B F1)', () => {
+    expect(mixedSourceNote([
+      { label: 'Expected shortfall', state: 'ready', freshnessUnknown: true },
+      { label: 'LCOE (real)', state: 'ready' },
+    ])).toBe('Not all figures describe the current design: Expected shortfall may not be current.')
+    expect(mixedSourceNote([
+      { label: 'A', state: 'ready', freshnessUnknown: true }, { label: 'B', state: 'stale' },
+    ])).toBeNull()
   })
 })
 
@@ -211,6 +223,20 @@ describe('Results headline', () => {
     expect(screen.getByTestId('hub-results-reliability-chart').textContent).toContain('Out of date')
   })
 
+  it.each([
+    ['null', { edited_since_study: null }],
+    ['missing', {}],
+  ])('edited_since_study %s: the study figure is not read as current (GK B F1)', async (_name, over) => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(
+      { status: 'done', archetype: 'weak_flexible', report: REPORT, ...over } as never)
+    mount()
+    expect(await screen.findByTestId('hub-results-freshness-unknown')).toBeTruthy()
+    const note = await screen.findByTestId('hub-results-mixed')
+    expect(note.textContent).toContain('Expected shortfall may not be current')
+    expect(screen.getByTestId('hub-results-reliability-chart').textContent).toContain("can't tell if current")
+    expect(screen.getByTestId('hub-results-reliability').querySelector('.opacity-60')).not.toBeNull()
+  })
+
   it('one entry point per destination: LCOE has no second link to the Investment case', async () => {
     mount()
     await screen.findByTestId('hub-results-lcoe')
@@ -226,7 +252,7 @@ describe('Results headline', () => {
     expect(screen.getByTestId('hub-chapter-operation-open')).toBeTruthy()
   })
 
-  it('mixed revisions: a stale LCOE beside a current study says so once (G1)', async () => {
+  it('a stale LCOE beside a current study: the mixed-source line names it once (G1)', async () => {
     vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(withLcoe({ ...LCOE_READY, state: 'stale' }))
     mount()
     const note = await screen.findByTestId('hub-results-mixed')

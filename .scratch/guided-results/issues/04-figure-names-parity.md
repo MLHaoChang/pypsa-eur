@@ -38,3 +38,7 @@ GK B (63) ruling, 2026-11-17: NPV is one figure. `npv_at_wacc` = `project_post_t
 the WACC. Its name is "Project NPV at the WACC, after tax (unlevered)", with "after tax" as the single tax word on every
 surface. The names are fixed in this issue's naming slice, not in #1611. Also: the LCOE card carries no money year
 (`/results/headline_kpis` sends none); add it here.
+
+## Money year for LCOE (GK B 63, PR #1611 non-blocking)
+
+The server sends no money year with the LCOE card (`harness/investment_calculations.py:244-249`), so the headline can't show "money year as the server gives it" for LCOE yet. Add it to the card here, with its naming.

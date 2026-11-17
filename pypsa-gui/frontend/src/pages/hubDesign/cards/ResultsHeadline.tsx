@@ -25,15 +25,31 @@ import { useHubDesignStore } from '../hubDesignStore'
 export const HEADLINED = ['reliability', 'investment'] as const
 
 /** One figure of the headline, as the mixed-source line needs it. */
-export interface HeadlineFigureState { label: string; state: ResultStateKind }
+export interface HeadlineFigureState {
+  label: string; state: ResultStateKind
+  /** The server could not tell whether the figure is current (GK B F1): it is never "ready". */
+  freshnessUnknown?: boolean
+}
 
-/** "Not all figures describe the current design: …" when some are current and some are out of date. */
+const listed = (labels: string[]) =>
+  labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`
+
+/** "Not all figures describe the current design: …" when some are current and some are not, or may not be.
+ *
+ *  The rule (GK B G1, F2): each figure's "ready" is its own exact check against the current network —
+ *  the study by `network_revision`, LCOE by its stale flag or assumptions hash, the IC by its own
+ *  verdict check. So when every figure is ready, all describe the same revision and no line is needed;
+ *  out-of-date (or unknown) beside ready is the case this line names. */
 export function mixedSourceNote(figures: HeadlineFigureState[]): string | null {
-  const stale = figures.filter(f => f.state === 'stale').map(f => f.label)
-  const ready = figures.some(f => f.state === 'ready')
-  if (!stale.length || !ready) return null
-  const list = stale.length === 1 ? stale[0] : `${stale.slice(0, -1).join(', ')} and ${stale[stale.length - 1]}`
-  return `Not all figures describe the current design: ${list} ${stale.length === 1 ? 'is' : 'are'} out of date.`
+  const unknown = figures.filter(f => f.freshnessUnknown).map(f => f.label)
+  const stale = figures.filter(f => !f.freshnessUnknown && f.state === 'stale').map(f => f.label)
+  const ready = figures.some(f => !f.freshnessUnknown && f.state === 'ready')
+  if ((!stale.length && !unknown.length) || !ready) return null
+  const parts = [
+    ...(stale.length ? [`${listed(stale)} ${stale.length === 1 ? 'is' : 'are'} out of date`] : []),
+    ...(unknown.length ? [`${listed(unknown)} may not be current`] : []),
+  ]
+  return `Not all figures describe the current design: ${parts.join('; ')}.`
 }
 
 /** The LCOE card's state as a tile shows it; "zero" is a figure. */
@@ -63,14 +79,19 @@ function shown(state: ResultStateKind, studyBanner: boolean): { state: ResultSta
   return state === 'stale' && studyBanner ? { state: 'ready', dimmed: true } : { state, dimmed: false }
 }
 
-function TileFigure({ tile, testId, studyBanner = false }: { tile: ChapterTile; testId: string; studyBanner?: boolean }) {
+function TileFigure({ tile, testId, studyBanner = false, dimmed = false }: {
+  tile: ChapterTile; testId: string; studyBanner?: boolean
+  /** Freshness unknown (GK B F1): the figure stays, dimmed under the card's line, never plain ready. */
+  dimmed?: boolean
+}) {
+  const view = shown(tile.state, studyBanner)
   const setStep = useHubDesignStore(s => s.setStep)
   const o = tile.open
   const tab = 'step' in o ? null : o.panel === 'results' ? tabLabel(o.tab) : null
   return (
     <div className="flex flex-col gap-1">
       <Kpi headline testId={testId} label={tile.label} value={tile.value} unit={tile.unit} basis={tile.basis}
-        {...shown(tile.state, studyBanner)}
+        state={view.state} dimmed={view.dimmed || dimmed}
         reason={tile.reason} fromStudy={tile.fromStudy} hint={tile.fromStudy ? FROM_STUDY_HINT : undefined}
         action={'step' in o ? { label: 'Go to Goal', onClick: () => openTile(o, setStep) } : undefined} />
       {tab && <OpenLink label={tab} testId={`${testId}-open`} onClick={() => openTile(o, setStep)} />}
@@ -107,8 +128,8 @@ function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null 
 }
 
 /** Shortfall against the goal: one bar, the goal as a marker, the study's interval when it gave one. */
-export function ReliabilityBullet({ lole, target, ci: range, stale }: {
-  lole: number; target: number | null; ci: [number, number] | null; stale: boolean
+export function ReliabilityBullet({ lole, target, ci: range, stale, freshnessUnknown = false }: {
+  lole: number; target: number | null; ci: [number, number] | null; stale: boolean; freshnessUnknown?: boolean
 }) {
   const top = Math.max(lole, target ?? 0, range?.[1] ?? 0) * 1.2 || 1
   const x = (v: number) => `${Math.min(100, (v / top) * 100)}%`
@@ -125,7 +146,7 @@ export function ReliabilityBullet({ lole, target, ci: range, stale }: {
   // The band is not the only cue: the result is also said in words (UX 23, 7).
   const against = target == null ? null : pass ? 'Within goal' : 'Above goal'
   return (
-    <ChartSourceProvider value={{ line: 'Reliability study · Monte Carlo', stale }}>
+    <ChartSourceProvider value={{ line: `Reliability study · Monte Carlo${freshnessUnknown ? " · can't tell if current" : ''}`, stale }}>
       <ChartFrame testId="hub-results-reliability-chart" title={title} bodyClassName="px-4 py-3"
         right={against && (
           <span data-testid="hub-results-reliability-against"
@@ -175,8 +196,10 @@ export function ReliabilityBullet({ lole, target, ci: range, stale }: {
   )
 }
 
-export function ResultsHeadline({ reliability, cost, ci }: {
+export function ResultsHeadline({ reliability, cost, ci, freshnessUnknown = false }: {
   reliability: ChapterInputs['reliability']
+  /** The study ran, but the server could not tell whether the network changed since (GK B F1). */
+  freshnessUnknown?: boolean
   /** The study's cost tile, unchanged (P24-FE gate B1), placed with the figures. */
   cost: React.ReactNode
   ci: [number, number] | null
@@ -187,14 +210,17 @@ export function ResultsHeadline({ reliability, cost, ci }: {
   const rel = tiles.find(t => t.id === 'reliability')
   const npv = tiles.find(t => t.id === 'investment')
   const figures: HeadlineFigureState[] = [
-    ...[rel, npv].filter((t): t is ChapterTile => !!t).map(t => ({ label: t.label, state: t.state })),
+    ...[rel, npv].filter((t): t is ChapterTile => !!t).map(t => ({
+      label: t.label, state: t.state, freshnessUnknown: freshnessUnknown && t.id === 'reliability',
+    })),
     ...(lcoe ? [{ label: HEADLINE_WORDS.lcoe.label, state: cardState(lcoe) }] : []),
   ]
   const note = mixedSourceNote(figures)
   return (
     <section aria-label="Headline figures" data-testid="hub-results-headline" className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2">
-        {rel && <TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true} />}
+        {rel && <TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true}
+          dimmed={freshnessUnknown} />}
         {cost}
         {npv && <TileFigure tile={npv} testId="hub-results-npv" />}
         {/* The tile's place is kept while the figures load, so the grid does not move (as Expert's strip). */}
@@ -205,7 +231,7 @@ export function ResultsHeadline({ reliability, cost, ci }: {
       {note && <p role="note" data-testid="hub-results-mixed" className="text-[11.5px] text-muted">{note}</p>}
       {reliability.lole != null && (
         <ReliabilityBullet lole={reliability.lole} target={reliability.target} ci={ci}
-          stale={reliability.stale === true} />
+          stale={reliability.stale === true} freshnessUnknown={freshnessUnknown} />
       )}
     </section>
   )

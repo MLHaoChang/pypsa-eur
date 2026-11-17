@@ -15,7 +15,7 @@ import { headline } from '../headline'
 import { kpiMoney } from '../plainWords'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { REPORT, review } from '../testFixtures'
-import { EDITED_TEXT, ResultsCard } from './ResultsCard'
+import { EDITED_TEXT, FRESHNESS_UNKNOWN_TEXT, ResultsCard } from './ResultsCard'
 import { useProjectFlow } from '../../../hooks/useProjectFlow'
 
 vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
@@ -39,7 +39,8 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
 })
 
 function study(report: EhReferenceDesignReport = REPORT) {
-  return { status: 'done', archetype: 'weak_flexible' as const, report }
+  // A study the server compared with the current network and found current (GK B F1: only `false` is).
+  return { status: 'done', archetype: 'weak_flexible' as const, report, edited_since_study: false as boolean | null }
 }
 
 beforeEach(() => {
@@ -299,7 +300,8 @@ describe('ResultsCard: Set a goal (P26 gate)', () => {
 
 // P33b 10b (D-2, D-3): `edited_since_study` on the study record says an edit
 // seam was crossed since the study started. One amber line: the edited
-// banner subsumes the solved-since one; `false` / `null` / absent say nothing.
+// banner subsumes the solved-since one; `false` / `null` / absent say nothing of an edit, and
+// `null` / absent say the freshness is unknown (GK B F1).
 describe('ResultsCard: edited since the study (P33b)', () => {
   const EDITED = 'The network has been edited since this study, so its verdict, expected shortfall, design cost and risks describe the design as it was. Run again to refresh.'
 
@@ -324,6 +326,27 @@ describe('ResultsCard: edited since the study (P33b)', () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...study(), edited_since_study: v })
     mount()
     await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-edited')).toBeNull()
+    expect(screen.queryByTestId('hub-results-stale')).toBeNull()
+  })
+
+  it('edited_since_study: false → current, no freshness line', async () => {
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-freshness-unknown')).toBeNull()
+  })
+
+  // GK B F1: the server returns null when it could not compare (an older results_state.pkl);
+  // an older record leaves the field out. Neither may read as current.
+  it.each([
+    ['null', { edited_since_study: null }],
+    ['missing', {}],
+  ])('edited_since_study %s → freshness unknown, in words', async (_name, over) => {
+    const { edited_since_study: _drop, ...bare } = study()
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...bare, ...over } as never)
+    mount()
+    expect((await screen.findByTestId('hub-results-freshness-unknown')).textContent).toBe(FRESHNESS_UNKNOWN_TEXT)
+    expect(FRESHNESS_UNKNOWN_TEXT).toContain("Can't tell whether the network changed since this study")
     expect(screen.queryByTestId('hub-results-edited')).toBeNull()
     expect(screen.queryByTestId('hub-results-stale')).toBeNull()
   })
