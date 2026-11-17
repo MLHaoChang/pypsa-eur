@@ -141,6 +141,18 @@ describe('AssumptionsCard', () => {
     expect(screen.getByTestId('assumptions-toggle').textContent).toContain(`· ${assumed.length} not yet confirmed`)
     // Every assumed row is one of the open "to check" the Readiness list and the Expert badge count.
     expect(countOpen(section).check).toBe(assumed.length)
+    expect(assumed.length).toBeLessThanOrEqual(countOpen(section).check)
+  })
+
+  it('a section with no assumed rows shows no card, and its to-check count is untouched (N = 0)', () => {
+    // A template whose section raises other warnings but assumes nothing.
+    const section = [item(7, { code: 'missing_load', severity: 'error' }), item(6, { code: 'low_margin' })]
+    const assumed = assumedItems(section)
+    expect(assumed).toHaveLength(0)
+    renderCard(assumed)
+    expect(screen.queryByTestId('assumptions-card')).toBeNull()
+    expect(screen.queryByText(/not yet confirmed/)).toBeNull()
+    expect(countOpen(section).check).toBeGreaterThanOrEqual(assumed.length)
   })
 
   it('groups the open rows under plain headings by work card, in first-seen order', () => {
