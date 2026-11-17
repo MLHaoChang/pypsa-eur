@@ -132,6 +132,7 @@ def test_the_list_and_the_count_share_one_set():
         "unit": "MWh",
         "extendable": False,
         "series": False,
+        "helper": False,
     }
     assert by["pv"]["carrier"] == "solar" and by["pv"]["value"] == 5.0
     # The size as entered, flagged; never a solved one.
@@ -488,3 +489,45 @@ def test_without_gridspine_the_extendable_flag_still_follows_the_rule(monkeypatc
     assert S._held("Generator", "g", extendable="1.0")["extendable"] is True
     assert S._held("Generator", "g", extendable=np.float64(1.0))["extendable"] is True
     assert S._held("Generator", "g", extendable=float("nan"))["extendable"] is False
+
+
+# guided-results 03 (GK B 62 (1), (2)): the helper generators (slack, lost production, buy-in) are flagged by the
+# server's own predicates, `is_slack_name` and `generator_role`, never a copied prefix list.
+_HELPER_NAMES = ["__voll_site", "voll_slack_site", "__dsr_site", "__dccurt_site", "__lost_h2", "__buy_h2"]
+
+
+@pytest.mark.parametrize("name", _HELPER_NAMES)
+def test_a_helper_generator_by_its_name_is_flagged(name):
+    from services.process_products import is_helper_generator
+
+    n = _hand_built()
+    n.add("Generator", name, bus="site", p_nom=1.0)
+    assert is_helper_generator(n, name) is True
+    holds, _ = S._holds(n, [], S._site_assets(n, ["grid_import"], {"grid_import", "export_tie"}))
+    assert {h["entity"]: h for h in holds["assets"]}[name]["helper"] is True
+
+
+@pytest.mark.parametrize("role", ["buy_in", "shortfall"])
+def test_a_helper_generator_by_its_role_is_flagged(role):
+    from services.process_products import is_helper_generator
+
+    n = _hand_built()
+    n.add("Generator", "supplier", bus="h2", p_nom=1.0)
+    n.generators["process_role"] = ""
+    n.generators.at["supplier", "process_role"] = role
+    assert is_helper_generator(n, "supplier") is True
+    holds, _ = S._holds(n, [], S._site_assets(n, ["grid_import"], {"grid_import", "export_tie"}))
+    assert {h["entity"]: h for h in holds["assets"]}["supplier"]["helper"] is True
+
+
+def test_a_plain_generator_and_every_other_asset_is_not_a_helper():
+    from services.process_products import is_helper_generator
+
+    n = _hand_built()
+    assert is_helper_generator(n, "pv") is False
+    assert is_helper_generator(n, "lost_and_found") is False  # the prefix, not a substring
+    holds, _ = S._holds(n, [], S._site_assets(n, ["grid_import"], {"grid_import", "export_tie"}))
+    assert all(h["helper"] is False for h in holds["assets"])
+    # Only asset rows carry the flag; the other lists keep their shape.
+    for key in ("carriers", "loads", "profiles"):
+        assert all("helper" not in h for h in holds.get(key, []))
