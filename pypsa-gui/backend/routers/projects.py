@@ -18,16 +18,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, NamedTuple
 
-from fastapi import (
-    APIRouter,
-    Body,
-    Depends,
-    File,
-    HTTPException,
-    Query,
-    Request,
-    UploadFile,
-)
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 import local_mode
@@ -97,9 +88,7 @@ _BUNDLE_FILES = PC.names(PC.BUNDLE, group=PC.SIDECAR)
 
 # Bundle files a scenario fork (`create_scenario`, the study option forks)
 # must not inherit, though bundles, copies and snapshots carry them.
-_FORK_SKIPPED_FILES = frozenset(
-    f for f in _BUNDLE_FILES if PC.FORK not in PC.entry(f).carried_by
-)
+_FORK_SKIPPED_FILES = frozenset(f for f in _BUNDLE_FILES if PC.FORK not in PC.entry(f).carried_by)
 
 # The campus electrical study's files under `campus_electrical/` (plan C9):
 # exported and imported with the bundle, each only when it exists; not copied
@@ -126,26 +115,13 @@ _HISTORY_DIRS = PC.names(PC.SAVE_AS, group=PC.HISTORY)
 # throw-away fork (S6: `owner_variant_id`, `throwaway`). Literals, to keep
 # the router free of a services.study import;
 # `tests/test_study_forks.py` pins them equal to `forks.OWNER_KEYS`.
-_STUDY_FORK_META_KEYS = (
-    "owner_study_id",
-    "owner_base_project",
-    "owner_option_id",
-    "owner_variant_id",
-    "throwaway",
-)
+_STUDY_FORK_META_KEYS = ("owner_study_id", "owner_base_project", "owner_option_id",
+                         "owner_variant_id", "throwaway")
 
 # The bundle files `_save_context` writes itself on every save. `_carry_sidecars_on_move`
 # copies every OTHER `_BUNDLE_FILES` entry from the source project; these it must
 # not touch, or it would overwrite the freshly written network with the source's.
-_SAVE_WRITTEN_FILES = frozenset(
-    {
-        "network.nc",
-        "metadata.json",
-        "solver_config.json",
-        "user_ts.json",
-        "results_state.pkl",
-    }
-)
+_SAVE_WRITTEN_FILES = frozenset({"network.nc", "metadata.json", "solver_config.json", "user_ts.json", "results_state.pkl"})
 
 # Cap on the serialized blank-canvas layout document. Even a large network's
 # schematic is a few hundred KB of coordinates; 4 MB bounds a malformed or
@@ -282,9 +258,8 @@ def _remove_closed_dir(target: pathlib.Path) -> None:
 
 
 @contextlib.contextmanager
-def _reports_copy_guard(
-    src: pathlib.Path | None = None, dst: pathlib.Path | None = None, *, incoming=()
-):
+def _reports_copy_guard(src: pathlib.Path | None = None, dst: pathlib.Path | None = None,
+                        *, incoming=()):
     """
     `report_store.reports_copy_lock` for a route (study harness 07e): the
     report locks a bundle copy needs, taken before its first write. Busy →
@@ -297,19 +272,14 @@ def _reports_copy_guard(
         with report_store.reports_copy_lock(src, dst, incoming=incoming) as held:
             yield held
     except report_store.ReportBusy as exc:
-        raise HTTPException(
-            409,
-            {
-                "error_kind": "report_busy",
-                "message": "A report of this project is being written, so its reports "
-                "could not be copied; nothing was changed. Try again in a moment.",
-            },
-        ) from exc
+        raise HTTPException(409, {
+            "error_kind": "report_busy",
+            "message": "A report of this project is being written, so its reports "
+                       "could not be copied; nothing was changed. Try again in a moment.",
+        }) from exc
 
 
-def _copy_bundle_dirs(
-    src: pathlib.Path, dst: pathlib.Path, *, op: str = PC.FORK
-) -> None:
+def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path, *, op: str = PC.FORK) -> None:
     """
     Recursively copy each project folder `op` carries (`project_contents`)
     from `src` to `dst`,
@@ -349,9 +319,7 @@ def _copy_bundle_dirs(
                 try:
                     _replace_dir_keeping(src_d, dst_d, keep)
                 except OSError as exc:
-                    logger.warning(
-                        "bundle: copy_bundle_dir %s → %s failed: %s", src_d, dst_d, exc
-                    )
+                    logger.warning("bundle: copy_bundle_dir %s → %s failed: %s", src_d, dst_d, exc)
                 continue
             if dname == "sites":
                 _swap_in_sites(src_d, dst_d, scene_blobs)
@@ -366,15 +334,11 @@ def _copy_bundle_dirs(
             except OSError as exc:
                 logger.warning(
                     "bundle: copy_bundle_dir %s → %s failed: %s",
-                    src_d,
-                    dst_d,
-                    exc,
+                    src_d, dst_d, exc,
                 )
 
 
-def _replace_dir_keeping(
-    src_d: pathlib.Path | None, dst_d: pathlib.Path, keep: tuple[str, ...]
-) -> None:
+def _replace_dir_keeping(src_d: pathlib.Path | None, dst_d: pathlib.Path, keep: tuple[str, ...]) -> None:
     """
     Make `dst_d` a copy of `src_d` except the sub-paths `keep`: those are never
     copied from `src_d`, and `dst_d`'s own are left where they are (a snapshot
@@ -391,14 +355,8 @@ def _replace_dir_keeping(
                 child.unlink()
     if src_d is None:
         return
-    shutil.copytree(
-        str(src_d),
-        str(dst_d),
-        dirs_exist_ok=True,
-        ignore=lambda d, names: [
-            n for n in names if pathlib.Path(d) == src_d and n in keep
-        ],
-    )
+    shutil.copytree(str(src_d), str(dst_d), dirs_exist_ok=True,
+                    ignore=lambda d, names: [n for n in names if pathlib.Path(d) == src_d and n in keep])
 
 
 def _swap_in_sites(src_d: pathlib.Path, dst_d: pathlib.Path, scene_blobs: list) -> None:
@@ -412,9 +370,7 @@ def _swap_in_sites(src_d: pathlib.Path, dst_d: pathlib.Path, scene_blobs: list) 
     tmp_d = dst_d.with_name(f".{dst_d.name}.tmp-{stamp}")
     old_d = dst_d.with_name(f".{dst_d.name}.old-{stamp}")
     try:
-        shutil.copytree(
-            str(src_d), str(tmp_d), ignore=scene_store.ignore_scene_dirs(src_d)
-        )
+        shutil.copytree(str(src_d), str(tmp_d), ignore=scene_store.ignore_scene_dirs(src_d))
         for rel, data in scene_blobs:
             target = tmp_d / pathlib.PurePath(rel).relative_to(dst_d.name)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -435,7 +391,6 @@ def _swap_in_sites(src_d: pathlib.Path, dst_d: pathlib.Path, scene_blobs: list) 
 def _copy_history_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
     """`_copy_bundle_dirs` for `_HISTORY_DIRS`: Save-As / Save-a-Copy only."""
     import shutil as _shutil
-
     for dname in _HISTORY_DIRS:
         src_d, dst_d = src / dname, dst / dname
         if not src_d.is_dir() or src_d.is_symlink():
@@ -445,9 +400,7 @@ def _copy_history_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
                 _force_rmtree(dst_d)
             _shutil.copytree(str(src_d), str(dst_d))
         except OSError as exc:
-            logger.warning(
-                "bundle: copy_history_dir %s → %s failed: %s", src_d, dst_d, exc
-            )
+            logger.warning("bundle: copy_history_dir %s → %s failed: %s", src_d, dst_d, exc)
 
 
 def _safe_project_dir(name: str) -> pathlib.Path:
@@ -556,37 +509,31 @@ _RESULTS_STATE_SCHEMA = 1
 # degrade gracefully (warn + no cached results — the netcdf still carries the LP
 # dispatch, which is re-derivable). A rare un-enumerated legit class also fails
 # safe (results dropped, never executed).
-_SAFE_UNPICKLE_GLOBALS = frozenset(
-    {
-        ("builtins", "slice"),
-        ("datetime", "date"),
-        ("datetime", "datetime"),
-        ("datetime", "time"),
-        ("datetime", "timedelta"),
-        ("datetime", "timezone"),
-        ("decimal", "Decimal"),
-        ("numpy", "dtype"),
-        ("numpy", "ndarray"),
-        ("numpy._core.multiarray", "_reconstruct"),  # numpy >= 2
-        ("numpy.core.multiarray", "_reconstruct"),  # numpy < 2
-        ("numpy._core.multiarray", "scalar"),  # numpy scalars (np.float64, …)
-        ("numpy.core.multiarray", "scalar"),
-        ("pandas._libs.arrays", "__pyx_unpickle_NDArrayBacked"),
-        ("pandas._libs.internals", "_unpickle_block"),
-        ("pandas.core.arrays.datetimes", "DatetimeArray"),
-        ("pandas.core.dtypes.dtypes", "DatetimeTZDtype"),
-        ("pandas.core.frame", "DataFrame"),
-        ("pandas.core.series", "Series"),
-        ("pandas.core.indexes.base", "Index"),
-        ("pandas.core.indexes.base", "_new_Index"),
-        ("pandas.core.indexes.datetimes", "DatetimeIndex"),
-        ("pandas.core.indexes.datetimes", "_new_DatetimeIndex"),
-        ("pandas.core.indexes.multi", "MultiIndex"),
-        ("pandas.core.indexes.range", "RangeIndex"),
-        ("pandas.core.internals.managers", "BlockManager"),
-        ("pandas.core.internals.managers", "SingleBlockManager"),
-    }
-)
+_SAFE_UNPICKLE_GLOBALS = frozenset({
+    ("builtins", "slice"),
+    ("datetime", "date"), ("datetime", "datetime"), ("datetime", "time"),
+    ("datetime", "timedelta"), ("datetime", "timezone"),
+    ("decimal", "Decimal"),
+    ("numpy", "dtype"), ("numpy", "ndarray"),
+    ("numpy._core.multiarray", "_reconstruct"),   # numpy >= 2
+    ("numpy.core.multiarray", "_reconstruct"),    # numpy < 2
+    ("numpy._core.multiarray", "scalar"),         # numpy scalars (np.float64, …)
+    ("numpy.core.multiarray", "scalar"),
+    ("pandas._libs.arrays", "__pyx_unpickle_NDArrayBacked"),
+    ("pandas._libs.internals", "_unpickle_block"),
+    ("pandas.core.arrays.datetimes", "DatetimeArray"),
+    ("pandas.core.dtypes.dtypes", "DatetimeTZDtype"),
+    ("pandas.core.frame", "DataFrame"),
+    ("pandas.core.series", "Series"),
+    ("pandas.core.indexes.base", "Index"),
+    ("pandas.core.indexes.base", "_new_Index"),
+    ("pandas.core.indexes.datetimes", "DatetimeIndex"),
+    ("pandas.core.indexes.datetimes", "_new_DatetimeIndex"),
+    ("pandas.core.indexes.multi", "MultiIndex"),
+    ("pandas.core.indexes.range", "RangeIndex"),
+    ("pandas.core.internals.managers", "BlockManager"),
+    ("pandas.core.internals.managers", "SingleBlockManager"),
+})
 _SAFE_UNPICKLE_COPYREG = frozenset({"_reconstructor", "__newobj__", "__newobj_ex__"})
 # DatetimeIndex/PeriodIndex carry a freq offset (Hour, Day, MonthEnd, …) from
 # this module. Rather than enumerate every offset class, allow this module but
@@ -607,7 +554,6 @@ class _SafeResultsUnpickler(pickle.Unpickler):
             cls = super().find_class(module, name)  # import only; not called yet
             try:
                 from pandas._libs.tslibs.offsets import BaseOffset
-
                 if isinstance(cls, type) and issubclass(cls, BaseOffset):
                     return cls
             except Exception:
@@ -718,7 +664,6 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
     # so concurrent `/results/ac_pf/status` polls don't observe a mix of
     # old and new state during the restore window.
     from routers.simulation import _state_update as _sim_state_update
-
     _sim_state_update(**{k: None for k in _RESULTS_STATE_KEYS})
     # P33b: the edit counter travels with the record it is compared against.
     # Every caller (load, bundle import, Saved-snapshot restore) restores the
@@ -736,9 +681,7 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
             # (a corrupt/legacy non-dict is already covered by the except).
             if isinstance(restored, dict) and "__schema__" in restored:
                 change_log_service.log(
-                    "warn",
-                    "Project",
-                    project_name,
+                    "warn", "Project", project_name,
                     f"results_state.pkl uses unsupported schema "
                     f"{restored.get('__schema__')!r} (this build expects "
                     f"{_RESULTS_STATE_SCHEMA}); skipped. Re-run the solve to "
@@ -752,9 +695,7 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
             _map_eh_study_mirror(PyPSAService.get_solver_state())
     except Exception as exc:
         change_log_service.log(
-            "warn",
-            "Project",
-            project_name,
+            "warn", "Project", project_name,
             f"Couldn't restore results_state.pkl ({type(exc).__name__}: {exc}). "
             f"Re-run the solve to repopulate side results (cost / dispatch "
             f"unaffected — they come from the netcdf).",
@@ -896,14 +837,15 @@ def _project_info(project_dir: pathlib.Path) -> ProjectInfo:
     """
     meta = _read_meta(project_dir)
     nc = project_dir / "network.nc"
-    has_orphan = any((project_dir / f"{fname}.tmp").exists() for fname in _BUNDLE_FILES)
+    has_orphan = any(
+        (project_dir / f"{fname}.tmp").exists() for fname in _BUNDLE_FILES
+    )
     return ProjectInfo(
         name=project_dir.name,
         created_at=meta.get(
             "created_at",
             datetime.fromtimestamp(nc.stat().st_mtime, tz=timezone.utc).isoformat()
-            if nc.exists()
-            else datetime.now(tz=timezone.utc).isoformat(),
+            if nc.exists() else datetime.now(tz=timezone.utc).isoformat(),
         ),
         has_solver_config=(project_dir / "solver_config.json").exists(),
         bus_count=meta.get("bus_count", 0),
@@ -928,9 +870,7 @@ def _settings_from_meta(meta: dict) -> ProjectSettings:
     # so ProjectInfo and the network routes agree on every stored value: a
     # bad one (a string flag, a non-finite or out-of-range autonomy) reads as
     # that field's default without taking its siblings down with it.
-    return ProjectSettings(
-        **project_settings.settings_from_table(meta.get(project_settings.SETTINGS_KEY))
-    )
+    return ProjectSettings(**project_settings.settings_from_table(meta.get(project_settings.SETTINGS_KEY)))
 
 
 def _project_info_db(db, project) -> ProjectInfo:
@@ -1007,8 +947,7 @@ def _mark_study_owned(info: ProjectInfo, project_dir: pathlib.Path, parent) -> N
     info.owner_study_id = str(study_id)
     try:
         info.owner_study_name = study_store.load_study(
-            project_registry.project_dir(parent), str(study_id)
-        ).name
+            project_registry.project_dir(parent), str(study_id)).name
     except (study_store.StudyNotFound, study_store.StudyUnreadable, OSError):
         info.owner_study_name = None
 
@@ -1019,20 +958,14 @@ def _serialize_registry_project(project) -> dict[str, str | None]:
         "name": project.name,
         "org_id": str(project.org_id),
         "parent_project_id": (
-            str(project.parent_project_id)
-            if project.parent_project_id is not None
-            else None
+            str(project.parent_project_id) if project.parent_project_id is not None else None
         ),
     }
 
 
 def _raise_tenancy_http_error(exc: Exception) -> None:
     """Map a tenancy-service error onto its HTTP status (mirrors routers.admin)."""
-    from services.tenancy_service import (
-        ConflictError,
-        PermissionDenied,
-        ValidationError,
-    )
+    from services.tenancy_service import ConflictError, PermissionDenied, ValidationError
 
     if isinstance(exc, PermissionDenied):
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -1043,9 +976,7 @@ def _raise_tenancy_http_error(exc: Exception) -> None:
     raise exc
 
 
-def _serialize_project_lock(
-    db: DBSession, project_id, user: User
-) -> dict[str, object] | None:
+def _serialize_project_lock(db: DBSession, project_id, user: User) -> dict[str, object] | None:
     """
     Thin adapter over `project_locks.serialize_lock` (which owns the shape so
     the write middleware in `main.py` can emit the same one without importing
@@ -1233,17 +1164,11 @@ def import_projects_from_folder(
         import app_paths
 
         stamp = datetime.now(tz=timezone.utc)
-        manifest = (
-            app_paths.app_data_dir() / f"import-manifest-{stamp:%Y%m%dT%H%M%S}.json"
-        )
+        manifest = app_paths.app_data_dir() / f"import-manifest-{stamp:%Y%m%dT%H%M%S}.json"
 
     report = legacy_import.import_all(
-        db,
-        source,
-        local_mode.LOCAL_ORG_ID,
-        user.id,
-        apply=body.apply,
-        manifest_path=manifest,
+        db, source, local_mode.LOCAL_ORG_ID, user.id,
+        apply=body.apply, manifest_path=manifest,
     )
     if body.apply and manifest is not None and not report.records:
         manifest.unlink(missing_ok=True)
@@ -1331,23 +1256,16 @@ def _bundle_report_ids(members: set[str]) -> frozenset[str]:
         try:
             ids.add(report_store.validate_report_id(parts[1]))
         except report_store.InvalidReportId as exc:
-            raise HTTPException(
-                400,
-                {
-                    "error_kind": "invalid_report_id",
-                    "message": f"The bundle's reports folder holds '{parts[1]}', "
-                    "which is not a report. Nothing was imported.",
-                },
-            ) from exc
+            raise HTTPException(400, {
+                "error_kind": "invalid_report_id",
+                "message": f"The bundle's reports folder holds '{parts[1]}', "
+                           "which is not a report. Nothing was imported.",
+            }) from exc
     return frozenset(ids)
 
 
-def _extract_bundle(
-    zf: zipfile.ZipFile,
-    members: set[str],
-    dest: pathlib.Path,
-    incoming_reports: frozenset[str],
-) -> None:
+def _extract_bundle(zf: zipfile.ZipFile, members: set[str], dest: pathlib.Path,
+                    incoming_reports: frozenset[str]) -> None:
     """Write a bundle's members into `dest`, the import's private staging
     folder. `members` are the ones `project_contents.screen_members` allowed:
     no path among them leaves `dest`."""
@@ -1399,14 +1317,11 @@ def _bundle_project_kind(meta: dict) -> str | None:
 
     if not isinstance(raw, str) or raw not in gs.PROJECT_KINDS:
         shown = raw if isinstance(raw, str) else type(raw).__name__
-        raise HTTPException(
-            422,
-            {
-                "error_kind": "bundle_unknown_kind",
-                "message": f"The bundle says it is a '{str(shown)[:40]}' project, which this app "
-                "does not know. Nothing was imported.",
-            },
-        )
+        raise HTTPException(422, {
+            "error_kind": "bundle_unknown_kind",
+            "message": f"The bundle says it is a '{str(shown)[:40]}' project, which this app "
+                       "does not know. Nothing was imported.",
+        })
     if raw == gs.CAPACITY_EXPANSION:
         return None
     gs.require_gridspine()
@@ -1436,14 +1351,10 @@ def _gridspine_path_fields() -> tuple[str, ...]:
         # No gridspine in this build: no planning kind imports, and a
         # capacity-expansion import never writes gridspine/.
         return _GRIDSPINE_GUI_SOURCES
-    return (
-        tuple(
-            f.name
-            for f in dataclasses.fields(gs.StudyConfig)
-            if f.type in (Path, "Path") and f.name not in _GRIDSPINE_REDERIVED
-        )
-        + _GRIDSPINE_GUI_SOURCES
-    )
+    return tuple(
+        f.name for f in dataclasses.fields(gs.StudyConfig)
+        if f.type in (Path, "Path") and f.name not in _GRIDSPINE_REDERIVED
+    ) + _GRIDSPINE_GUI_SOURCES
 
 
 def _clear_gridspine_sources(staging: pathlib.Path) -> list[str]:
@@ -1483,14 +1394,8 @@ def _stripped_note(fields: list[str]) -> str:
     return " ".join(parts)
 
 
-def _discard_import(
-    db: DBSession,
-    project,
-    dest: pathlib.Path | None,
-    *,
-    session: SessionRow | None = None,
-    prev_pointer=None,
-) -> None:
+def _discard_import(db: DBSession, project, dest: pathlib.Path | None, *,
+                    session: SessionRow | None = None, prev_pointer=None) -> None:
     """Undo a bundle import that failed after its row was created (GK B I3).
 
     A failure after the swap also leaves the project's context resident and
@@ -1502,9 +1407,7 @@ def _discard_import(
     try:
         PyPSAService.drop(project_registry.registry_key(project))
     except Exception:  # noqa: BLE001 — the original failure is the one to raise
-        logger.exception(
-            "import_bundle: could not drop the context of %s", project.name
-        )
+        logger.exception("import_bundle: could not drop the context of %s", project.name)
     try:
         db.rollback()
         if session is not None and session.active_project_id == project.id:
@@ -1514,6 +1417,7 @@ def _discard_import(
         logger.exception("import_bundle: could not remove the row of %s", project.name)
     if dest is not None and dest.exists():
         _force_rmtree(dest)
+
 
 
 def _bundle_network_owning_its_costs(zf: zipfile.ZipFile):
@@ -1537,20 +1441,15 @@ def _bundle_network_owning_its_costs(zf: zipfile.ZipFile):
             if not isinstance(loaded, dict):
                 raise ValueError("not an object")
             # The raw value, before the dataclass coerces it: a bool or a string is not a rate (GK B 63).
-            if "discount_rate" in loaded and (
-                problem := discount_rate_problem(loaded["discount_rate"])
-            ):
+            if "discount_rate" in loaded and (problem := discount_rate_problem(loaded["discount_rate"])):
                 raise ValueError(problem)
             rate = float(_solver_config_from_dict(loaded).discount_rate)
         except Exception as exc:  # noqa: BLE001 - any unreadable settings file refuses, by name
-            raise HTTPException(
-                422,
-                {
-                    "error_kind": "import_unreadable",
-                    "message": f"The bundle's solver settings (solver_config.json) cannot be read "
-                    f"({type(exc).__name__}); nothing was imported.",
-                },
-            ) from exc
+            raise HTTPException(422, {
+                "error_kind": "import_unreadable",
+                "message": f"The bundle's solver settings (solver_config.json) cannot be read "
+                           f"({type(exc).__name__}); nothing was imported.",
+            }) from exc
         source = "bundle"
     else:
         rate, source = float(SolverConfig().discount_rate), "default"
@@ -1582,7 +1481,6 @@ def _owned_costs(n) -> dict:
             out[f"{class_label(component_class)} '{name}'"] = df.loc[name, cols].copy()
     return out
 
-
 @router.post("/import_bundle")
 async def import_bundle(
     file: UploadFile = File(...),
@@ -1608,7 +1506,6 @@ async def import_bundle(
     # every attempt 409 with "already exists" instead.
     PyPSAService.refuse_if_study_running("import a project bundle")
     from services.upload_guard import read_capped
-
     data = await read_capped(file)
 
     # Named separately, because it is the one malformed case whose fix is
@@ -1655,7 +1552,7 @@ async def import_bundle(
     if not target_name:
         target_name = str(bundle_meta.get("name", "") or "").strip()
     if not target_name:
-        base = file.filename or "imported_project"
+        base = (file.filename or "imported_project")
         for ext in (".pypsaproj.zip", ".zip"):
             if base.lower().endswith(ext):
                 base = base[: -len(ext)]
@@ -1694,15 +1591,10 @@ async def import_bundle(
         if reserved:
             # `ic:` names the commercial reference frames' columns (P2 WP2.2-0):
             # refused before anything is swapped (review 0b #2).
-            raise HTTPException(
-                422, f"bus names starting 'ic:' are reserved: {reserved[:5]}"
-            )
+            raise HTTPException(422, f"bus names starting 'ic:' are reserved: {reserved[:5]}")
         # OPEN-ITEMS item 8, also before the swap: a new import may not bring in a
         # name the create routes would refuse.
-        from services.component_names import (
-            invalid_names_in_netcdf,
-            refuse_invalid_names,
-        )
+        from services.component_names import invalid_names_in_netcdf, refuse_invalid_names
 
         refuse_invalid_names(invalid_names_in_netcdf(staged_nc))
 
@@ -1713,10 +1605,7 @@ async def import_bundle(
         # land as roots. A second import of the same name gets the 409.
         prev_pointer = session.active_project_id if session is not None else None
         _imported_project = project_registry.create_root(
-            db,
-            user,
-            target_name,
-            **_scenario_fields_from_meta(bundle_meta),
+            db, user, target_name, **_scenario_fields_from_meta(bundle_meta),
         )
         dest = None
         try:
@@ -1727,46 +1616,27 @@ async def import_bundle(
             with _reports_copy_guard(None, dest, incoming=incoming_reports):
                 _move_staged(staging, dest)
             return _open_imported_bundle(
-                db,
-                session,
-                _imported_project,
-                dest,
-                file.filename,
-                candidate=candidate,
-                rederived=rederived,
-                rate_source=rate_source,
-                stripped_fields=stripped_fields,
-                ignored=ignored,
-            )
+                db, session, _imported_project, dest, file.filename,
+                candidate=candidate, rederived=rederived, rate_source=rate_source,
+                stripped_fields=stripped_fields, ignored=ignored)
         except BaseException:
-            _discard_import(
-                db, _imported_project, dest, session=session, prev_pointer=prev_pointer
-            )
+            _discard_import(db, _imported_project, dest,
+                            session=session, prev_pointer=prev_pointer)
             raise
     finally:
         _force_rmtree(staging)
 
 
-def _open_imported_bundle(
-    db: DBSession,
-    session: SessionRow | None,
-    _imported_project,
-    dest: pathlib.Path,
-    filename: str | None,
-    *,
-    candidate,
-    rederived: list[str],
-    rate_source: str,
-    stripped_fields: list[str],
-    ignored: list[str],
-) -> dict:
+def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_project,
+                          dest: pathlib.Path, filename: str | None, *,
+                          candidate, rederived: list[str], rate_source: str,
+                          stripped_fields: list[str], ignored: list[str]) -> dict:
     """The import's swap and hydration, once its files are in `dest`. Any
     failure here is undone by the caller (`_discard_import`)."""
     from services import project_registry
 
     target_name = _imported_project.name
     from services import dirty_state, undo_service
-
     with PyPSAService.get_lock():
         # A different project: a fresh context (own undo, counter 0, no result
         # state of the project being left — P33b gate B-1). The clears apply
@@ -1794,7 +1664,6 @@ def _open_imported_bundle(
 
     cfg_path = dest / "solver_config.json"
     from routers.simulation import _state
-
     dropped_goal: list[dict] = []
     if cfg_path.exists():
         cfg_data = json.loads(cfg_path.read_text())
@@ -1838,7 +1707,6 @@ def _open_imported_bundle(
     else:
         # Defaults, not the previously open project's config (WP1.1c review #2).
         from services.solver_service import SolverConfig
-
         _state["solver_config"] = SolverConfig()
 
     from routers.network import (
@@ -1846,7 +1714,6 @@ def _open_imported_bundle(
         _reapply_user_ts_to_network,
         _restore_user_ts,
     )
-
     try:
         user_ts_path = dest / "user_ts.json"
         if user_ts_path.exists():
@@ -1890,7 +1757,6 @@ def _open_imported_bundle(
     # assignment window). Mirror of the F11 fix on the solver-worker
     # write path; same race vector via the project-import handler.
     from routers.simulation import _state_update as _sim_state_update
-
     if has_dispatch_bundle and meta_bundle.get("has_results"):
         _sim_state_update(
             status="completed",
@@ -1915,36 +1781,23 @@ def _open_imported_bundle(
     from routers.io import _rederived_note
 
     change_log_service.log(
-        "import",
-        "Project",
-        target_name,
+        "import", "Project", target_name,
         f"Imported project bundle '{filename}' as '{target_name}' "
-        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)"
-        + _rederived_note(rederived)
+        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)" + _rederived_note(rederived)
         + (f". {_stripped_note(stripped_fields)}" if stripped_fields else ""),
     )
     from routers.simulation import _state as _sim_state
-
     library_issues = _library_pin_issues(
-        db,
-        _imported_project,
-        dest,
-        _sim_state.get("solver_config") if cfg_path.exists() else None,
-    )
+        db, _imported_project, dest,
+        _sim_state.get("solver_config") if cfg_path.exists() else None)
     return {
         "imported": target_name,
         "library_issues": library_issues,
         # Present only when the import dropped something the caller was not
         # authorized to set, so a stripped field is never a silent difference
         # between the uploaded bundle and the imported project.
-        **(
-            {
-                "stripped": stripped_fields,
-                "stripped_note": _stripped_note(stripped_fields),
-            }
-            if stripped_fields
-            else {}
-        ),
+        **({"stripped": stripped_fields,
+            "stripped_note": _stripped_note(stripped_fields)} if stripped_fields else {}),
         # Archive members no table entry names: reported, never written (GK B I2).
         **({"ignored": ignored} if ignored else {}),
         # Likewise each reliability-goal value the bundle carried that PUT
@@ -1953,11 +1806,7 @@ def _open_imported_bundle(
         # The priced rows whose costs were re-derived from their parts (TCU 11).
         **({"rederived": rederived} if rederived else {}),
         # The bundle had no solver settings, so the costs were re-derived at the default discount rate.
-        **(
-            {"rederived_at_default_rate": True}
-            if rederived and rate_source == "default"
-            else {}
-        ),
+        **({"rederived_at_default_rate": True} if rederived and rate_source == "default" else {}),
         "summary": ImportSummary(
             buses=len(n.buses),
             generators=len(n.generators),
@@ -2063,16 +1912,11 @@ def _planned_network(mod, template_key: str, planning, load_spec):
     except ValueError as exc:
         refused = [str(exc)]
     if refused:
-        raise HTTPException(
-            422,
-            {
-                "error_kind": "planning_invalid",
-                "code": "planning_invalid",
-                "field": "planning",
-                "message": "planning: the example does not build for "
-                f"{list(planning.years)} → {planning.end_year}: " + "; ".join(refused),
-            },
-        )
+        raise HTTPException(422, {"error_kind": "planning_invalid",
+                                  "code": "planning_invalid", "field": "planning",
+                                  "message": "planning: the example does not build for "
+                                             f"{list(planning.years)} → {planning.end_year}: "
+                                             + "; ".join(refused)})
     return n
 
 
@@ -2083,9 +1927,7 @@ def _eh_site_module():
     path = _PROJECT_TEMPLATES_DIR / "eh_site.py"
     spec = importlib.util.spec_from_file_location("_eh_site", path)
     if not path.is_file() or spec is None or spec.loader is None:
-        raise HTTPException(
-            404, "Template 'eh_site' is registered but eh_site.py is missing."
-        )
+        raise HTTPException(404, "Template 'eh_site' is registered but eh_site.py is missing.")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -2106,7 +1948,6 @@ def _solver_config_from_dict(data: dict):
     from dataclasses import fields as _dc_fields
 
     from services.solver_service import SolverConfig
-
     # EH P17: the energy import cap is PACK-ONLY (spec §6 amendment) — a
     # saved or foreign config can never switch it on for an ordinary solve.
     pack_only = {"import_energy_cap_mwh_per_year", "import_energy_links"}
@@ -2119,7 +1960,6 @@ def _solver_config_from_dict(data: dict):
     # PUT would refuse loads as "not set" (logged; load_project and bundle
     # import also name it in their responses), never as a bad goal.
     from services.reliability_goal import invalid_goal_fields
-
     for key, value in invalid_goal_fields(clean).items():
         logger.warning("solver_config: ignoring invalid %s=%r", key, value)
         clean[key] = None
@@ -2129,11 +1969,8 @@ def _solver_config_from_dict(data: dict):
 def _dropped_goal(cfg_data: dict) -> list[dict]:
     """The stored goal values a load ignores, as ``[{field, value}]``."""
     from services.reliability_goal import invalid_goal_fields
-
-    return [
-        {"field": k, "value": v if _json_finite(v) else str(v)}
-        for k, v in invalid_goal_fields(cfg_data).items()
-    ]
+    return [{"field": k, "value": v if _json_finite(v) else str(v)}
+            for k, v in invalid_goal_fields(cfg_data).items()]
 
 
 def _json_finite(v) -> bool:
@@ -2209,7 +2046,6 @@ def create_from_template(
 
     # Reset + load, mirroring import_bundle / load_project.
     from services import dirty_state, undo_service
-
     with PyPSAService.get_lock():
         # A different project: a fresh context (own undo, counter 0, no result
         # state of the project being left — P33b gate B-1). The clears apply
@@ -2244,15 +2080,9 @@ class _Materialised(NamedTuple):
     template_series: list
 
 
-def _materialise_from_template(
-    template_id: str,
-    name: str | None,
-    params: dict | None,
-    db: DBSession,
-    user: User | None,
-    *,
-    project_id=None,
-) -> _Materialised:
+def _materialise_from_template(template_id: str, name: str | None, params: dict | None,
+                               db: DBSession, user: User | None, *,
+                               project_id=None) -> _Materialised:
     """The checked project row and its files for `create_from_template`, with
     no context swap: every check the route makes for the user (template and
     params, the workspace's create permission and name rules via
@@ -2289,14 +2119,8 @@ def _materialise_from_template(
             site_p = site_mod.site_params(params)
         except site_mod.SiteParamsError as exc:
             # The field, so the Guided form puts the message beside it.
-            raise HTTPException(
-                422,
-                {
-                    "code": "site_params_invalid",
-                    "field": exc.field,
-                    "message": str(exc),
-                },
-            )
+            raise HTTPException(422, {"code": "site_params_invalid", "field": exc.field,
+                                      "message": str(exc)})
         site_net = site_mod.build_eh_site(site_p)
         site = (site_mod, site_p, site_net, site_mod.solver_config(site_p, site_net))
     elif params is not None and _template_params(template_key):
@@ -2307,56 +2131,34 @@ def _materialise_from_template(
         allowed = _template_params(template_key)
         extra = sorted(set(params) - allowed)
         if extra:
-            raise HTTPException(
-                422,
-                {
-                    "error_kind": "template_params_invalid",
-                    "code": "template_params_invalid",
-                    "field": extra[0],
-                    "message": f"{extra[0]}: unknown parameter (this template "
-                    f"takes only {', '.join(sorted(allowed))})",
-                },
-            )
+            raise HTTPException(422, {"error_kind": "template_params_invalid",
+                                      "code": "template_params_invalid", "field": extra[0],
+                                      "message": f"{extra[0]}: unknown parameter (this template "
+                                                 f"takes only {', '.join(sorted(allowed))})"})
         tpl_mod = _eh_templates_module()
         planning = None
         if "planning" in params:
             try:
                 planning = tpl_mod.planning_spec(template_key, params["planning"])
             except tpl_mod.PlanningError as exc:
-                raise HTTPException(
-                    422,
-                    {
-                        "error_kind": "planning_invalid",
-                        "code": "planning_invalid",
-                        "field": exc.field,
-                        "message": str(exc),
-                    },
-                ) from exc
+                raise HTTPException(422, {"error_kind": "planning_invalid",
+                                          "code": "planning_invalid", "field": exc.field,
+                                          "message": str(exc)}) from exc
         dc_spec = None
         if "dc_load" in params:
             try:
-                dc_spec = tpl_mod.dc_load_spec(
-                    template_key, params.get("dc_load"), planning=planning
-                )
+                dc_spec = tpl_mod.dc_load_spec(template_key, params.get("dc_load"),
+                                               planning=planning)
             except DcLoadError as exc:
-                raise HTTPException(
-                    422,
-                    {
-                        "error_kind": "dc_load_invalid",
-                        "code": "dc_load_invalid",
-                        "field": exc.field,
-                        "message": str(exc),
-                    },
-                ) from exc
+                raise HTTPException(422, {"error_kind": "dc_load_invalid",
+                                          "code": "dc_load_invalid", "field": exc.field,
+                                          "message": str(exc)}) from exc
         if planning is None:
             built_net = tpl_mod.BUILDERS[template_key](load_spec=dc_spec)
         else:
             built_net = _planned_network(tpl_mod, template_key, planning, dc_spec)
             planned = (tpl_mod, planning, dc_spec)
-        dc = (
-            built_net,
-            tpl_mod.dc_load_meta(template_key, dc_spec) if dc_spec else None,
-        )
+        dc = (built_net, tpl_mod.dc_load_meta(template_key, dc_spec) if dc_spec else None)
     elif params is not None:
         raise HTTPException(422, f"Template '{template_key}' takes no parameters.")
     src_nc = _PROJECT_TEMPLATES_DIR / template_key / "network.nc"
@@ -2380,22 +2182,16 @@ def _materialise_from_template(
     # `name` is optional — default to the template's friendly name, then
     # uniquify so clicking the same template twice doesn't clobber the first.
     requested = (name or "").strip() or (
-        (site[1]["name"] or site[0].template_meta(site[1])["name"])
-        if site is not None
-        else _TEMPLATE_DEFAULT_NAMES[template_key]
-    )
+        (site[1]["name"] or site[0].template_meta(site[1])["name"]) if site is not None
+        else _TEMPLATE_DEFAULT_NAMES[template_key])
     from services import project_registry
 
     project_registry.require_user(user)
     # The template's price series (IPP ticket 02): read, checked and minted into the
     # creating org's Library BEFORE the project row exists, so a bad series refuses the
     # create and leaves nothing behind (minting is idempotent on content).
-    template_series, series_refs = _mint_template_series(
-        db, user, template_key, planned
-    )
-    _created_project = project_registry.create_root(
-        db, user, requested, project_id=project_id
-    )
+    template_series, series_refs = _mint_template_series(db, user, template_key, planned)
+    _created_project = project_registry.create_root(db, user, requested, project_id=project_id)
     target_name = _created_project.name
     dest = project_registry.ensure_project_dir(_created_project)
     # `copy2` opens the destination for writing before it reads the source, so
@@ -2405,9 +2201,8 @@ def _materialise_from_template(
     else:
         atomic_copy(src_nc, dest / "network.nc")
     if site is not None:
-        site[0].write_sidecars(
-            dest, site[1], site[2], site[3], entered=site[0].entered_fields(params)
-        )
+        site[0].write_sidecars(dest, site[1], site[2], site[3],
+                               entered=site[0].entered_fields(params))
     elif planned is not None:
         # Built for the entered years: the sidecars are written for them,
         # never copied from the example's.
@@ -2422,11 +2217,8 @@ def _materialise_from_template(
         from services.library import template_series as TS
 
         cfg_path = dest / "solver_config.json"
-        cfg = TS.apply_refs(
-            json.loads(cfg_path.read_text()) if cfg_path.is_file() else {},
-            template_series,
-            series_refs,
-        )
+        cfg = TS.apply_refs(json.loads(cfg_path.read_text()) if cfg_path.is_file() else {},
+                            template_series, series_refs)
         atomic_write_text(cfg_path, json.dumps(cfg, indent=2, sort_keys=True) + "\n")
         # Pin what the config now names, as a save does (WP1.1c): an unpinned ref
         # reads `library_ref_stale` on the first open.
@@ -2441,14 +2233,11 @@ def _materialise_from_template(
         meta[META_KEY] = dc[1]
         atomic_write_text(meta_path, json.dumps(meta, indent=2, sort_keys=True) + "\n")
 
-    return _Materialised(
-        _created_project, target_name, dest, template_id, template_series
-    )
+    return _Materialised(_created_project, target_name, dest, template_id, template_series)
 
 
-def _finish_created_project(
-    made: _Materialised, db: DBSession, user: User | None, session: SessionRow | None
-) -> dict:
+def _finish_created_project(made: _Materialised, db: DBSession, user: User | None,
+                            session: SessionRow | None) -> dict:
     """The created project's solver state, metadata and template bindings, on
     the context the caller has made active (the route: the live one after its
     swap; the hand-over: the new project's own, request-scoped). With no
@@ -2458,20 +2247,17 @@ def _finish_created_project(
     # template's own when it ships one (P19 EH templates set VOLL), else the
     # defaults, so no stale state from a previously-open project leaks in.
     from routers.network import _reapply_user_ts_to_network, _restore_user_ts
-
     _restore_user_ts({})
     # Atomic lifecycle reset via `_state_update` (see F11 / G2 rationale).
     from services.solver_service import SolverConfig
 
     from routers.simulation import _state
     from routers.simulation import _state_update as _sim_state_update
-
     _tpl_cfg = dest / "solver_config.json"
     if _tpl_cfg.is_file():
         try:
             _state["solver_config"] = _solver_config_from_dict(
-                json.loads(_tpl_cfg.read_text())
-            )
+                json.loads(_tpl_cfg.read_text()))
         except (OSError, ValueError, TypeError):
             _state["solver_config"] = SolverConfig()
     else:
@@ -2483,43 +2269,34 @@ def _finish_created_project(
     # The authoritative loaded-project binding was set inside the swap lock above.
     _reapply_user_ts_to_network(n)
 
-    _write_meta(
-        dest,
-        {
-            "created_at": datetime.now(tz=timezone.utc).isoformat(),
-            "last_saved": datetime.now(tz=timezone.utc).isoformat(),
-            "bus_count": len(n.buses),
-            "snapshot_count": len(n.snapshots),
-            "objective": None,
-            "has_results": False,
-            "condition": None,
-            "solve_time": None,
-            "user_ts_count": 0,
-            # P33b gate S-4: a fresh project's edit counter, on disk from creation
-            # (the new context starts at 0; a cold hydrate then agrees with memory).
-            "network_revision": int(
-                PyPSAService.get_active_context().network_revision or 0
-            ),
-            "parent_project": None,
-            "scenario_description": None,
-        },
-    )
+    _write_meta(dest, {
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "last_saved": datetime.now(tz=timezone.utc).isoformat(),
+        "bus_count": len(n.buses),
+        "snapshot_count": len(n.snapshots),
+        "objective": None,
+        "has_results": False,
+        "condition": None,
+        "solve_time": None,
+        "user_ts_count": 0,
+        # P33b gate S-4: a fresh project's edit counter, on disk from creation
+        # (the new context starts at 0; a cold hydrate then agrees with memory).
+        "network_revision": int(PyPSAService.get_active_context().network_revision or 0),
+        "parent_project": None,
+        "scenario_description": None,
+    })
     # A template's commercial config and finance inputs (slice D4) are bound
     # and validated as their PUT routes do; one that does not is dropped and
     # reported, never stored unbound. After the metadata, so the project is
     # complete whatever the bind does (#283 review).
-    solver_config_issues = _bind_template_solver_config(
-        user, dest / "solver_config.json"
-    )
+    solver_config_issues = _bind_template_solver_config(user, dest / "solver_config.json")
     if template_series:
         # The bind materialised the minted series on the network (its price frames): write
         # them into network.nc, as a save would, so a reopen before the first save prices
         # the same dispatch (IPP ticket 02).
         with PyPSAService.get_lock(), PyPSAService.get_netcdf_io_lock():
-            _atomic_write_with(
-                dest / "network.nc",
-                lambda p: PyPSAService.export_network_to_netcdf(n, p),
-            )
+            _atomic_write_with(dest / "network.nc",
+                               lambda p: PyPSAService.export_network_to_netcdf(n, p))
 
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed create does not leave the session pointing at a
@@ -2528,9 +2305,7 @@ def _finish_created_project(
     if session is not None:
         active_project.set_active_project(db, session, _created_project)
     change_log_service.log(
-        "import",
-        "Project",
-        target_name,
+        "import", "Project", target_name,
         f"Created project '{target_name}' from template '{template_id}' "
         f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)",
     )
@@ -2551,9 +2326,7 @@ def _finish_created_project(
     }
 
 
-def _mint_template_series(
-    db, user, template_key: str, planned=None
-) -> tuple[list, dict]:
+def _mint_template_series(db, user, template_key: str, planned=None) -> tuple[list, dict]:
     """(the template's price series, {name: Library ref}) minted in the user's org; ([], {})
     when it ships none. A bad series or meta is a typed 422 before anything is created.
     ``planned`` (the module, Planning, spec) mints them for the entered years (E1d): written
@@ -2574,42 +2347,31 @@ def _mint_template_series(
                     TS.verify(src)
                 series = TS.read(src)
             else:
-                mod.PRICE_SERIES[template_key](
-                    tmp, mod._planned(template_key, planning)
-                )
+                mod.PRICE_SERIES[template_key](tmp, mod._planned(template_key, planning))
                 TS.verify(tmp)
                 series = TS.read(tmp)
         if not series:
             return [], {}
         org = library_acl.org_of(db, user)
         if org is None:
-            raise TS.TemplateSeriesError(
-                "library_org_unknown",
-                "the template ships price series and your account "
-                "has no organisation Library to store them in",
-            )
+            raise TS.TemplateSeriesError("library_org_unknown",
+                                         "the template ships price series and your account "
+                                         "has no organisation Library to store them in")
         # A ref the template names but does not ship is refused before minting.
         cfg_path = _PROJECT_TEMPLATES_DIR / template_key / "solver_config.json"
         if mod is not None or cfg_path.is_file():
-            tpl_cfg = (
-                json.loads(cfg_path.read_text())
-                if mod is None
-                else mod.solver_config(template_key, planning)
-            )
-            TS.apply_refs(
-                tpl_cfg, series, {ts.name: _PlaceholderRef() for ts in series}
-            )
+            tpl_cfg = (json.loads(cfg_path.read_text()) if mod is None
+                       else mod.solver_config(template_key, planning))
+            TS.apply_refs(tpl_cfg, series, {ts.name: _PlaceholderRef() for ts in series})
             # The illustrative series and the study's money basis must agree (gatekeeper).
             clash = TS.basis_conflicts(series, tpl_cfg.get("finance"))
             if clash:
-                raise TS.TemplateSeriesError(
-                    "template_series_basis_mismatch", "; ".join(clash)
-                )
+                raise TS.TemplateSeriesError("template_series_basis_mismatch",
+                                             "; ".join(clash))
         refs = TS.mint(db, org, series, created_by=getattr(user, "id", None))
     except TS.TemplateSeriesError as exc:
-        raise HTTPException(
-            422, {"error_kind": exc.code, "code": exc.code, "message": str(exc)}
-        ) from exc
+        raise HTTPException(422, {"error_kind": exc.code, "code": exc.code,
+                                  "message": str(exc)}) from exc
     return series, refs
 
 
@@ -2644,72 +2406,37 @@ def _bind_template_solver_config(user, cfg_path: pathlib.Path) -> list[dict]:
     if cfg.commercial is not None:
         try:
             parsed = CommercialConfig.model_validate(cfg.commercial)
-            binding.check_site_connection(
-                PyPSAService.get_network(),
-                parsed.poc_link,
-                parsed.export_link,
-                direction_only=True,
-                group_members=parsed.group_members,
-            )
+            binding.check_site_connection(PyPSAService.get_network(), parsed.poc_link,
+                                          parsed.export_link, direction_only=True,
+                                          group_members=parsed.group_members)
             if parsed.value_flows is not None:
                 vf = P.parse_value_flows(parsed.value_flows)
-                problems = P.value_flows_problems(
-                    vf, parsed, PyPSAService.get_network()
-                )
+                problems = P.value_flows_problems(vf, parsed, PyPSAService.get_network())
                 if problems:
-                    raise binding.BindingRefusal(
-                        422, "value_flows_invalid", "; ".join(problems)
-                    )
+                    raise binding.BindingRefusal(422, "value_flows_invalid", "; ".join(problems))
             merged["commercial"] = binding.bind_commercial_on_context(
-                PyPSAService.get_active_context(), parsed, user=user, solver_cfg=cfg
-            )
+                PyPSAService.get_active_context(), parsed, user=user, solver_cfg=cfg)
         except ValidationError as exc:
-            issues.append(
-                {
-                    "field": "commercial",
-                    "code": "commercial_config_invalid",
-                    "message": str(exc.errors()[0]["msg"]),
-                }
-            )
+            issues.append({"field": "commercial", "code": "commercial_config_invalid",
+                           "message": str(exc.errors()[0]["msg"])})
         except P.ValueFlowsInvalid as exc:
-            issues.append(
-                {"field": "commercial", "code": exc.code, "message": str(exc)}
-            )
+            issues.append({"field": "commercial", "code": exc.code, "message": str(exc)})
         except binding.BindingRefusal as exc:
-            issues.append(
-                {"field": "commercial", "code": exc.code, "message": exc.message}
-            )
-        except Exception:  # noqa: BLE001 — the project exists; report, never a 500
+            issues.append({"field": "commercial", "code": exc.code, "message": exc.message})
+        except Exception:   # noqa: BLE001 — the project exists; report, never a 500
             logger.exception("template commercial block failed to bind")
-            issues.append(
-                {
-                    "field": "commercial",
-                    "code": "commercial_bind_failed",
-                    "message": "the template's commercial settings could not be applied",
-                }
-            )
+            issues.append({"field": "commercial", "code": "commercial_bind_failed",
+                           "message": "the template's commercial settings could not be applied"})
     if cfg.finance is not None:
         try:
-            merged["finance"] = FinanceInputs.model_validate(cfg.finance).model_dump(
-                mode="json"
-            )
+            merged["finance"] = FinanceInputs.model_validate(cfg.finance).model_dump(mode="json")
         except ValidationError as exc:
-            issues.append(
-                {
-                    "field": "finance",
-                    "code": "finance_inputs_invalid",
-                    "message": str(exc.errors()[0]["msg"]),
-                }
-            )
-        except Exception:  # noqa: BLE001 — as above
+            issues.append({"field": "finance", "code": "finance_inputs_invalid",
+                           "message": str(exc.errors()[0]["msg"])})
+        except Exception:   # noqa: BLE001 — as above
             logger.exception("template finance block failed to validate")
-            issues.append(
-                {
-                    "field": "finance",
-                    "code": "finance_bind_failed",
-                    "message": "the template's finance inputs could not be applied",
-                }
-            )
+            issues.append({"field": "finance", "code": "finance_bind_failed",
+                           "message": "the template's finance inputs could not be applied"})
     for issue in issues:
         merged[issue["field"]] = None
     _state["solver_config"] = SolverConfig(**merged)
@@ -2718,11 +2445,9 @@ def _bind_template_solver_config(user, cfg_path: pathlib.Path) -> list[dict]:
             data = json.loads(cfg_path.read_text())
             for issue in issues:
                 data.pop(issue["field"], None)
-            atomic_write_text(
-                cfg_path, json.dumps(data, indent=2, sort_keys=True) + "\n"
-            )
+            atomic_write_text(cfg_path, json.dumps(data, indent=2, sort_keys=True) + "\n")
         except (OSError, ValueError):
-            pass  # the stored config already dropped it; a later save rewrites the file
+            pass   # the stored config already dropped it; a later save rewrites the file
     return issues
 
 
@@ -2774,9 +2499,7 @@ def save_project(
     # be the bound project's id.
     _refuse_copy_of_busy_reports(
         PyPSAService.get_active_context(),
-        project.name if project is not None else name,
-        db,
-        user,
+        project.name if project is not None else name, db, user,
     )
     if project is None:
         # First save of a new project — register a root row in the DB.
@@ -2826,10 +2549,10 @@ def save_project(
     # passes clear_undo=false to keep the in-memory revert history intact.
     if clear_undo:
         from services import dirty_state, undo_service
-
         undo_service.clear()
         dirty_state.clear()  # memory and disk now agree
     return result
+
 
 
 # `_study_in_flight_detail` moved to `services/study_state.py` (P27a) so the
@@ -2941,7 +2664,6 @@ def _carry_sidecars_on_move(
 
         try:
             from services import chat_service
-
             mode = (
                 chat_service.SAVE_LINEAGE_REBIND_MOVE
                 if rebind
@@ -2953,12 +2675,8 @@ def _carry_sidecars_on_move(
             # source, the lineage helper would resolve src == dst and the
             # move/copy would be a no-op (Phase 4 walkthrough bug).
             chat_service.handle_save_lineage(
-                ctx,
-                target_name=name,
-                mode=mode,
-                source_name=loaded,
-                source_dir=src_dir,
-                target_dir=dest,
+                ctx, target_name=name, mode=mode, source_name=loaded,
+                source_dir=src_dir, target_dir=dest,
             )
         except Exception:  # noqa: BLE001 — never abort save on lineage failure
             pass
@@ -2994,14 +2712,12 @@ def _carry_sidecars_on_move(
             try:
                 shutil.copy2(src_file, dest / fname)
             except OSError:
-                logger.exception(
-                    "save: sidecar copy %s (%s → %s) failed", fname, loaded, name
-                )
+                logger.exception("save: sidecar copy %s (%s → %s) failed", fname, loaded, name)
 
 
-def _saves_its_own_directory(
-    bound_dir, loaded: str | None, name: str, dest: pathlib.Path
-) -> bool:
+
+def _saves_its_own_directory(bound_dir, loaded: str | None, name: str,
+                             dest: pathlib.Path) -> bool:
     """
     True when a save writes a network back into the directory it was bound
     to before the save: the context's storage directory is ``dest``, or (a
@@ -3017,9 +2733,8 @@ def _saves_its_own_directory(
     return loaded is not None and loaded == name
 
 
-def _carried_settings(
-    existing_meta: dict, bound_dir, loaded: str | None, name: str, dest: pathlib.Path
-) -> dict:
+def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: str,
+                      dest: pathlib.Path) -> dict:
     """
     The `settings` entry a save writes into ``dest``'s metadata.json.
 
@@ -3155,6 +2870,8 @@ def _check_save_allowed(
     return n
 
 
+
+
 def _save_context(ctx, name: str, *args, **kwargs):
     """
     `_write_context` (the save itself; its docstring is the contract), with
@@ -3175,12 +2892,10 @@ def _save_context(ctx, name: str, *args, **kwargs):
             held.close()
         else:
             storage_dir = kwargs.get("storage_dir")
-            held.enter_context(
-                _reports_copy_guard(
-                    _save_source_dir(loaded, kwargs.get("db"), kwargs.get("user")),
-                    storage_dir if storage_dir is not None else _safe_project_dir(name),
-                )
-            )
+            held.enter_context(_reports_copy_guard(
+                _save_source_dir(loaded, kwargs.get("db"), kwargs.get("user")),
+                storage_dir if storage_dir is not None else _safe_project_dir(name),
+            ))
         return _write_context(ctx, name, *args, **kwargs)
 
 
@@ -3254,7 +2969,6 @@ def _write_context(
     # next reload. Surfacing a clean 409 here is much friendlier than
     # letting the export fail with an opaque HDF5 error.
     from routers.simulation import _solver_in_flight_ctx
-
     if _solver_in_flight_ctx(ctx):
         # Structured detail so the chat agent surfaces a typed error frame
         # consistent with activate_project (Phase 4 QA: error-handling-matrix).
@@ -3315,14 +3029,9 @@ def _write_context(
         # round-trips) or another network over it (it does not).
         bound_dir = getattr(ctx, "storage_dir", None)
         n = _check_save_allowed(
-            ctx,
-            name,
-            loaded=loaded,
-            expect=expect,
-            force=force,
-            rebind=rebind,
-            nc_path=nc_path,
-            dest=dest,
+            ctx, name,
+            loaded=loaded, expect=expect, force=force, rebind=rebind,
+            nc_path=nc_path, dest=dest,
         )
 
         # Ensure time series round-trip correctly:
@@ -3352,8 +3061,8 @@ def _write_context(
         # Atomic replace so a crash mid-save leaves the previous file intact.
         with PyPSAService.get_netcdf_io_lock():
             _atomic_write_with(
-                nc_path, lambda p: PyPSAService.export_network_to_netcdf(n, p)
-            )
+                nc_path,
+                lambda p: PyPSAService.export_network_to_netcdf(n, p))
 
         # Bind/claim — atomic with the export, keyed off the binding read at the
         # top of THIS lock block (it can't have changed; we hold the lock
@@ -3374,7 +3083,6 @@ def _write_context(
                 # ctx keyed by its display name and reintroduce the cross-org
                 # collision Step 0a removes.
                 from services import project_registry as _registry
-
                 _registry.bind_context(ctx, project_row)
                 # The context's identity just changed, so its registry slot must
                 # too — a first save promotes a session's `scratch:` draft into a
@@ -3403,18 +3111,13 @@ def _write_context(
     # An override rather than writing the snapshot back into the live context:
     # the user may have edited their config after enqueueing, and that edit is
     # theirs to keep. Only the FILE has to match the solve.
-    cfg = (
-        solver_config_override
-        if solver_config_override is not None
-        else (ctx.solver_state.get("solver_config"))
+    cfg = solver_config_override if solver_config_override is not None else (
+        ctx.solver_state.get("solver_config")
     )
     if cfg is not None:
-        _atomic_write_text(
-            dest / "solver_config.json", json.dumps(asdict(cfg), indent=2)
-        )
+        _atomic_write_text(dest / "solver_config.json", json.dumps(asdict(cfg), indent=2))
         # Pin the Library versions the config references (WP1.1c).
         from services.library import bundle_pins
-
         bundle_pins.write_pins(dest, bundle_pins.collect_pins(asdict(cfg)))
 
     # Persist solve-time _state fields that n.export_to_netcdf doesn't
@@ -3432,16 +3135,13 @@ def _write_context(
     # number of snapshots × component count, same order of magnitude as
     # the .nc itself, so disk overhead is acceptable.
     import pickle
-
     results_state = {k: ctx.solver_state.get(k) for k in _RESULTS_STATE_KEYS}
     # P33b D-1: the finished EH study record's mirror, derived from the LIVE
     # record (never from the always-None mirror key), compared against the
     # `network_revision` written to metadata.json below when it is restored.
     from services.study_state import finished_study_record
-
     results_state["eh_study_record"] = finished_study_record(
-        ctx.solver_state.get("eh_study")
-    )
+        ctx.solver_state.get("eh_study"))
     results_path = dest / "results_state.pkl"
     if any(v is not None for v in results_state.values()):
         # Versioned envelope so a future shape change can be detected on load
@@ -3519,9 +3219,7 @@ def _write_context(
             and not n.buses.empty
         ):
             change_log_service.log(
-                "warn",
-                "Project",
-                name,
+                "warn", "Project", name,
                 f"metadata.json for '{name}' was missing or corrupted on save — "
                 f"if this project was a scenario, its parent link was lost and "
                 f"must be re-created from the Scenarios panel.",
@@ -3546,69 +3244,51 @@ def _write_context(
             scen_fields = _scenario_fields_from_meta(existing_meta)
             new_desc = scen_fields["scenario_description"]
             new_type = scen_fields["scenario_type"]
-        _write_meta(
-            dest,
-            {
-                "created_at": existing_meta.get(
-                    "created_at", datetime.now(tz=timezone.utc).isoformat()
-                ),
-                "last_saved": datetime.now(tz=timezone.utc).isoformat(),
-                "bus_count": len(n.buses),
-                "snapshot_count": len(n.snapshots),
-                "objective": obj,
-                # Result-state fields — written when an actual solve is in memory so
-                # the load path can restore the lifecycle indicators consistently.
-                "has_results": bool(has_dispatch),
-                "condition": ctx.solver_state.get("condition")
-                if has_dispatch
-                else None,
-                "solve_time": ctx.solver_state.get("solve_time")
-                if has_dispatch
-                else None,
-                "user_ts_count": len(user_ts_data),
-                # P33b: the edit counter the saved EH study record is compared to.
-                "network_revision": int(ctx.network_revision or 0),
-                "parent_project": new_parent,
-                "scenario_description": new_desc,
-                "scenario_type": new_type,
-                # Decision-study fork ownership (S4, `services/study/forks.py`):
-                # round-tripped from THIS directory's metadata, and only when the
-                # network being written is this directory's own — a fork's own
-                # saves (the queue's post-solve save, the Expert view's Ctrl+S)
-                # keep it. A save into another directory never gains it, and a
-                # forced Save-As / Save-a-Copy of ANOTHER network over a fork's
-                # directory drops it (gate S4 [N], S9): the directory now holds
-                # the user's work, which a re-run or the study's delete would
-                # otherwise remove as the study's.
-                **(
-                    {
-                        k: existing_meta[k]
-                        for k in _STUDY_FORK_META_KEYS
-                        if k in existing_meta
-                    }
-                    if _saves_its_own_directory(bound_dir, loaded, name, dest)
-                    else {}
-                ),
-                # Per-project settings (plan M2, AS-AUTONOMY-1) round-trip:
-                # `PATCH /{name}/settings` is their only writer, and a save that
-                # dropped the key would silently reset the user's choice.
-                **_carried_settings(existing_meta, bound_dir, loaded, name, dest),
-            },
-        )
+        _write_meta(dest, {
+            "created_at": existing_meta.get(
+                "created_at", datetime.now(tz=timezone.utc).isoformat()
+            ),
+            "last_saved": datetime.now(tz=timezone.utc).isoformat(),
+            "bus_count": len(n.buses),
+            "snapshot_count": len(n.snapshots),
+            "objective": obj,
+            # Result-state fields — written when an actual solve is in memory so
+            # the load path can restore the lifecycle indicators consistently.
+            "has_results": bool(has_dispatch),
+            "condition":   ctx.solver_state.get("condition") if has_dispatch else None,
+            "solve_time":  ctx.solver_state.get("solve_time") if has_dispatch else None,
+            "user_ts_count": len(user_ts_data),
+            # P33b: the edit counter the saved EH study record is compared to.
+            "network_revision": int(ctx.network_revision or 0),
+            "parent_project": new_parent,
+            "scenario_description": new_desc,
+            "scenario_type": new_type,
+            # Decision-study fork ownership (S4, `services/study/forks.py`):
+            # round-tripped from THIS directory's metadata, and only when the
+            # network being written is this directory's own — a fork's own
+            # saves (the queue's post-solve save, the Expert view's Ctrl+S)
+            # keep it. A save into another directory never gains it, and a
+            # forced Save-As / Save-a-Copy of ANOTHER network over a fork's
+            # directory drops it (gate S4 [N], S9): the directory now holds
+            # the user's work, which a re-run or the study's delete would
+            # otherwise remove as the study's.
+            **({k: existing_meta[k] for k in _STUDY_FORK_META_KEYS
+                if k in existing_meta}
+               if _saves_its_own_directory(bound_dir, loaded, name, dest) else {}),
+            # Per-project settings (plan M2, AS-AUTONOMY-1) round-trip:
+            # `PATCH /{name}/settings` is their only writer, and a save that
+            # dropped the key would silently reset the user's choice.
+            **_carried_settings(existing_meta, bound_dir, loaded, name, dest),
+        })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.
     if ts_columns_saved and isinstance(user_ts_data, dict):
         ts_columns_saved = sum(
-            len(cols)
-            for attrs in user_ts_data.values()
-            if isinstance(attrs, dict)
-            for cols in attrs.values()
-            if isinstance(cols, dict)
+            len(cols) for attrs in user_ts_data.values() if isinstance(attrs, dict)
+            for cols in attrs.values() if isinstance(cols, dict)
         )
     change_log_service.log(
-        "save",
-        "Project",
-        name,
+        "save", "Project", name,
         f"Saved project '{name}' ({len(n.buses)} buses, {len(n.snapshots)} snapshots, "
         f"{ts_columns_saved} time-series columns)",
     )
@@ -3618,14 +3298,10 @@ def _write_context(
     # background save must NOT run it (it would wipe the FOREGROUND's undo).
 
     _carry_sidecars_on_move(
-        ctx,
-        loaded=loaded,
-        name=name,
-        rebind=rebind,
-        dest=dest,
-        db=db,
-        user=user,
+        ctx, loaded=loaded, name=name, rebind=rebind,
+        dest=dest, db=db, user=user,
     )
+
 
     return {
         "saved": name,
@@ -3726,19 +3402,11 @@ def _tariff_ref_load_issues(cfg, project_name: str | None) -> list[dict]:
     `[]` otherwise. Flagged, never repaired (the solve refuses the copy)."""
     from services.commercial.binding import tariff_ref_load_issue
 
-    issue = (
-        tariff_ref_load_issue(getattr(cfg, "commercial", None))
-        if cfg is not None
-        else None
-    )
+    issue = tariff_ref_load_issue(getattr(cfg, "commercial", None)) if cfg is not None else None
     if issue is None:
         return []
-    change_log_service.log(
-        "warn",
-        "Project",
-        project_name or "(unsaved)",
-        f"{issue['code']} ({issue['reason']}): {issue['message']}",
-    )
+    change_log_service.log("warn", "Project", project_name or "(unsaved)",
+                           f"{issue['code']} ({issue['reason']}): {issue['message']}")
     return [issue]
 
 
@@ -3756,21 +3424,16 @@ def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
     if db is None or project is None:
         return local
     issues = local + bundle_pins.check_pins(
-        db, project.org_id, src, config=asdict(cfg) if cfg is not None else {}
-    )
-    for issue in issues[len(local) :]:
+        db, project.org_id, src, config=asdict(cfg) if cfg is not None else {})
+    for issue in issues[len(local):]:
         change_log_service.log(
-            "warn",
-            "Project",
-            project.name,
+            "warn", "Project", project.name,
             f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}",
         )
     return issues
 
 
-def _hydrate_context_from_disk(
-    ctx, src: pathlib.Path, name: str, *, allow_networkless: bool = False
-) -> None:
+def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str, *, allow_networkless: bool = False) -> None:
     """
     Populate a (typically OFF-TO-THE-SIDE, background) ProjectContext from the
     on-disk project at ``src`` WITHOUT touching the active pointer or the
@@ -3862,9 +3525,7 @@ def _hydrate_context_from_disk(
         except Exception as exc:  # noqa: BLE001 — a corrupt sidecar is not fatal
             ctx.user_ts_unreadable = True
             change_log_service.log(
-                "warn",
-                "Project",
-                name,
+                "warn", "Project", name,
                 f"Couldn't read user_ts.json ({type(exc).__name__}: {exc}). The "
                 f"netcdf still carries the profiles; only series longer than the "
                 f"saved snapshot range are affected.",
@@ -3900,9 +3561,7 @@ def _hydrate_context_from_disk(
     results_path = src / "results_state.pkl"
     if results_path.exists():
         try:
-            data = _unwrap_results_state(
-                _safe_unpickle_results(results_path.read_bytes())
-            )
+            data = _unwrap_results_state(_safe_unpickle_results(results_path.read_bytes()))
             if isinstance(data, dict):
                 for k, v in data.items():
                     if k in _RESULTS_STATE_KEYS:
@@ -3910,9 +3569,7 @@ def _hydrate_context_from_disk(
             _map_eh_study_mirror(ctx.solver_state)
         except Exception as exc:
             change_log_service.log(
-                "warn",
-                "Project",
-                name,
+                "warn", "Project", name,
                 f"Couldn't restore results_state.pkl for background solve "
                 f"({type(exc).__name__}: {exc}). The netcdf still carries the "
                 f"dispatch; only side-results are affected.",
@@ -3982,10 +3639,8 @@ def activate_project(
     src = project_registry.project_dir(project)
     lock_info = _serialize_project_lock(db, project.id, user)
     registry_id = project_registry.registry_key(project)
-    networkless_study = (
-        project.project_kind == "planning_dynamics"
-        and (src / "gridspine" / "config.json").is_file()
-    )
+    networkless_study = (project.project_kind == "planning_dynamics"
+                        and (src / "gridspine" / "config.json").is_file())
     if not (src / "network.nc").exists() and not networkless_study:
         raise HTTPException(404, f"Project '{project_id}' not found")
 
@@ -4000,10 +3655,8 @@ def activate_project(
     # LEGACY `/run` worker (which writes via the active proxy that FOLLOWS
     # `_active`) is unsafe to switch away from → 409 only in THAT case.
     from routers.simulation import _solver_in_flight
-
     if _solver_in_flight():
         from services.solve_queue import solve_queue
-
         active_id = PyPSAService.get_active_id()
         queue_solving_active = active_id is not None and any(
             j.get("project_key") == active_id and j.get("status") == "running"
@@ -4017,7 +3670,8 @@ def activate_project(
                 detail={
                     "error_kind": "solver_in_flight",
                     "message": (
-                        "Finish or abort the running solve before switching projects."
+                        "Finish or abort the running solve before switching "
+                        "projects."
                     ),
                 },
             )
@@ -4026,7 +3680,8 @@ def activate_project(
     # user can neither see nor abort, and the eviction it can then suffer
     # would save a mid-study network. The study's own sentence, so the user
     # can abort it by name.
-    _study = _study_in_flight_detail(PyPSAService.get_solver_state(), "switch projects")
+    _study = _study_in_flight_detail(PyPSAService.get_solver_state(),
+                                     "switch projects")
     if _study:
         raise HTTPException(status_code=409, detail=_study)
 
@@ -4049,16 +3704,13 @@ def activate_project(
             # protected (it's the new active id) so it's never its own victim.
             ctx = PyPSAService.build_context()
             if networkless_study:
-                _hydrate_context_from_disk(
-                    ctx, src, project.name, allow_networkless=True
-                )
+                _hydrate_context_from_disk(ctx, src, project.name, allow_networkless=True)
             else:
                 _hydrate_context_from_disk(ctx, src, project.name)
             project_registry.bind_context(ctx, project)
             evicted = PyPSAService.activate_context(ctx, register=True)
             library_issues = _library_pin_issues(
-                db, project, src, ctx.solver_state.get("solver_config")
-            )
+                db, project, src, ctx.solver_state.get("solver_config"))
 
     # Persist the pointer (Step 0b). Until this, "which project am I looking
     # at" lived only in process memory, so it was shared by every user on the
@@ -4077,25 +3729,16 @@ def activate_project(
         # without it; WP1.1c review #3). Check its IN-MEMORY config's refs —
         # the sidecar on disk may lag unsaved edits.
         from services.library import bundle_pins
-
         cfg = PyPSAService.get_active_context().solver_state.get("solver_config")
         library_issues = bundle_pins.check_pins(
-            db, project.org_id, None, config=asdict(cfg) if cfg is not None else {}
-        )
+            db, project.org_id, None, config=asdict(cfg) if cfg is not None else {})
         for issue in library_issues:
             change_log_service.log(
-                "warn",
-                "Project",
-                project.name,
-                f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}",
-            )
+                "warn", "Project", project.name,
+                f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}")
         library_issues = _tariff_ref_load_issues(cfg, project.name) + library_issues
-    return {
-        "activated": project.name,
-        "evicted": evicted,
-        "lock": lock_info,
-        "library_issues": library_issues,
-    }
+    return {"activated": project.name, "evicted": evicted, "lock": lock_info,
+            "library_issues": library_issues}
 
 
 @router.post("/{project_id}/lock")
@@ -4224,9 +3867,7 @@ def load_project(
         # Don't raise — load proceeds against the known-good `network.nc`.
         # Logged via the changelog so a UI banner can surface it later.
         change_log_service.log(
-            "warn",
-            "Project",
-            name,
+            "warn", "Project", name,
             f"Orphaned partial save detected at '{tmp_orphan.name}' (last save "
             f"was interrupted). Project loaded from the previous good copy.",
         )
@@ -4270,7 +3911,6 @@ def load_project(
 
     cfg_path = src / "solver_config.json"
     from routers.simulation import _state
-
     dropped_goal: list[dict] = []
     if cfg_path.exists():
         data = json.loads(cfg_path.read_text())
@@ -4286,7 +3926,6 @@ def load_project(
         # that project's settings, commercial block and Library pins into this
         # one (WP1.1c review #2; `create_from_template` already does this).
         from services.solver_service import SolverConfig
-
         _state["solver_config"] = SolverConfig()
 
     # Hydrate simulation state from metadata when the saved network has
@@ -4309,9 +3948,7 @@ def load_project(
     actual_bus_count = len(n_loaded.buses)
     if cached_bus_count is not None and cached_bus_count != actual_bus_count:
         change_log_service.log(
-            "warn",
-            "Project",
-            name,
+            "warn", "Project", name,
             f"Metadata mismatch: project list cached bus_count={cached_bus_count} "
             f"but network.nc has {actual_bus_count} buses. Possible interrupted "
             f"save or external edit — verify the project is intact.",
@@ -4321,7 +3958,6 @@ def load_project(
     # (see F11 / G2). Without this, header could briefly display
     # "Completed €n/a" or "Idle €123M" at the load instant.
     from routers.simulation import _state_update as _sim_state_update
-
     # Gate on `has_dispatch` ALONE — it's computed from the actual loaded
     # network DataFrames (authoritative), whereas `meta["has_results"]` is a
     # cached flag that can drift stale (e.g. a hand-edited / older bundle, or a
@@ -4338,9 +3974,7 @@ def load_project(
         )
     else:
         # Loading an unsolved project clears any stale state from a prior run.
-        _sim_state_update(
-            status="idle", condition=None, objective=None, solve_time=None
-        )
+        _sim_state_update(status="idle", condition=None, objective=None, solve_time=None)
 
     # Restore the solve-time _state side-results from results_state.pkl
     # (counterpart of the save block in save_project). Same helper used by
@@ -4353,7 +3987,6 @@ def load_project(
         _reapply_user_ts_to_network,
         _restore_user_ts,
     )
-
     try:
         user_ts_path = src / "user_ts.json"
         if user_ts_path.exists():
@@ -4425,9 +4058,7 @@ def load_project(
     if session is not None:
         active_project.set_active_project(db, session, project)
     change_log_service.log(
-        "load",
-        "Project",
-        name,
+        "load", "Project", name,
         f"Loaded project '{name}' ({len(n.buses)} buses, {len(n.generators)} generators, {len(n.snapshots)} snapshots)",
     )
     summary = ImportSummary(
@@ -4442,16 +4073,9 @@ def load_project(
         snapshots=len(n.snapshots),
     )
     from routers.simulation import _state as _sim_state
-
-    library_issues = _library_pin_issues(
-        db, project, src, _sim_state.get("solver_config")
-    )
-    return {
-        **summary.model_dump(),
-        "lock": lock_info,
-        "library_issues": library_issues,
-        **({"dropped_goal": dropped_goal} if dropped_goal else {}),
-    }
+    library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
+    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues,
+            **({"dropped_goal": dropped_goal} if dropped_goal else {})}
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:
@@ -4461,9 +4085,7 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
     from services import project_registry
 
     project_registry.require_user(user)
-    base_dir = project_registry.project_dir(
-        project_registry.resolve_project(db, user, base)
-    )
+    base_dir = project_registry.project_dir(project_registry.resolve_project(db, user, base))
     with _reports_copy_guard(base_dir):
         return _copy_scenario_db(db, user, base, req)
 
@@ -4488,12 +4110,8 @@ def _copy_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Projec
     desc = _reject_legacy_tag((req.description or "").strip() or None)
     scen_type = _validated_scenario_type(req.scenario_type)
     child = project_registry.create_scenario(
-        db,
-        user,
-        base_project,
-        req.name,
-        scenario_description=desc,
-        scenario_type=scen_type,
+        db, user, base_project, req.name,
+        scenario_description=desc, scenario_type=scen_type,
     )
     child_dir = project_registry.ensure_project_dir(child)
 
@@ -4546,9 +4164,7 @@ def _copy_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Projec
         raise
 
     change_log_service.log(
-        "scenario_create",
-        "Project",
-        req.name,
+        "scenario_create", "Project", req.name,
         f"Created scenario '{req.name}' from base '{base_project.name}'"
         + (f": {desc[:80]}" if desc else ""),
     )
@@ -4636,7 +4252,9 @@ def update_scenario_metadata(
 
     if "description" in submitted:
         raw = submitted["description"]
-        project.scenario_description = _reject_legacy_tag((raw or "").strip() or None)
+        project.scenario_description = _reject_legacy_tag(
+            (raw or "").strip() or None
+        )
     if "scenario_type" in submitted:
         project.scenario_type = _validated_scenario_type(submitted["scenario_type"])
 
@@ -4653,8 +4271,7 @@ def update_scenario_metadata(
         if not project_dir.is_dir():
             logger.info(
                 "scenario metadata for '%s' not mirrored: no storage directory "
-                "(the project has never been saved)",
-                project.name,
+                "(the project has never been saved)", project.name,
             )
         else:
             meta = _read_meta(project_dir)
@@ -4684,16 +4301,10 @@ def update_scenario_metadata(
         )
 
     change_log_service.log(
-        "update_scenario",
-        "Project",
-        project.name,
+        "update_scenario", "Project", project.name,
         f"Scenario metadata updated on '{project.name}'"
         + (f" · type={project.scenario_type}" if project.scenario_type else "")
-        + (
-            f" · {project.scenario_description[:60]}"
-            if project.scenario_description
-            else ""
-        ),
+        + (f" · {project.scenario_description[:60]}" if project.scenario_description else ""),
     )
     return _project_info_db(db, project)
 
@@ -4751,7 +4362,7 @@ def update_project_settings(
             table = {}
         for key, value in submitted.items():
             if value is None:
-                table.pop(key, None)  # null = back to the default
+                table.pop(key, None)       # null = back to the default
             else:
                 table[key] = value
         meta[project_settings.SETTINGS_KEY] = table
@@ -4759,9 +4370,7 @@ def update_project_settings(
 
     changed = ", ".join(f"{k}={v}" for k, v in submitted.items())
     change_log_service.log(
-        "update_settings",
-        "Project",
-        project.name,
+        "update_settings", "Project", project.name,
         f"Project settings updated on '{project.name}' · {changed}",
     )
     return _project_info_db(db, project)
@@ -4778,9 +4387,7 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_delete_project(db, user, project):
-        raise HTTPException(
-            403, f"You do not have permission to delete '{project.name}'"
-        )
+        raise HTTPException(403, f"You do not have permission to delete '{project.name}'")
     _enforce_project_lock(db, project, user)
 
     child_projects = project_registry.descendants(db, project)
@@ -4813,8 +4420,7 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
 
     target_keys = {project_registry.registry_key(p) for p in [project, *child_projects]}
     active_jobs = [
-        j
-        for j in solve_queue.list_jobs()
+        j for j in solve_queue.list_jobs()
         if j.get("project_key") in target_keys
         and j.get("status") in ("queued", "running")
     ]
@@ -4849,9 +4455,7 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
     try:
         with PyPSAService.get_lock(), contextlib.ExitStack() as closed:
             for target_dir in target_dirs.values():
-                closed.enter_context(
-                    project_registry.reports_closed_or_409(target_dir, "deleted")
-                )
+                closed.enter_context(project_registry.reports_closed_or_409(target_dir, "deleted"))
             project_registry.refuse_running_report(target_dirs, "delete it")
             for target in targets:
                 target_dir = target_dirs[target.name]
@@ -4861,9 +4465,7 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
                 except OSError as exc:  # noqa: BLE001
                     failed.append(target.name)
                     change_log_service.log(
-                        "warn",
-                        "Project",
-                        target.name,
+                        "warn", "Project", target.name,
                         f"Could not fully delete '{target.name}': {exc}.",
                     )
                     continue
@@ -4882,17 +4484,11 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
         try:
             PyPSAService.drop(target_key)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "could not evict resident context for '%s': %s", target_name, exc
-            )
+            logger.warning("could not evict resident context for '%s': %s", target_name, exc)
 
-    change_log_service.log(
-        "delete_project", "Project", project.name, f"Deleted project '{project.name}'"
-    )
+    change_log_service.log("delete_project", "Project", project.name, f"Deleted project '{project.name}'")
     if failed and not deleted:
-        raise HTTPException(
-            500, f"Failed to delete '{project.name}': {', '.join(failed)}."
-        )
+        raise HTTPException(500, f"Failed to delete '{project.name}': {', '.join(failed)}.")
     return {"deleted": deleted, "failed": failed}
 
 
@@ -4939,9 +4535,7 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
 
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_delete_project(db, user, project):
-        raise HTTPException(
-            403, f"You do not have permission to rename '{project.name}'"
-        )
+        raise HTTPException(403, f"You do not have permission to rename '{project.name}'")
     _enforce_project_lock(db, project, user)
     old_name = project.name
     if new_name == old_name:
@@ -4995,12 +4589,7 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
             project_registry.bind_context(_renamed_ctx, project)
             PyPSAService.rekey_context(_renamed_ctx)
 
-    change_log_service.log(
-        "rename_project",
-        "Project",
-        new_name,
-        f"Renamed project '{old_name}' → '{new_name}'",
-    )
+    change_log_service.log("rename_project", "Project", new_name, f"Renamed project '{old_name}' → '{new_name}'")
     return _project_info_db(db, project)
 
 
@@ -5104,9 +4693,7 @@ def get_results_bundle(
     results_path = project_dir / "results_state.pkl"
     if results_path.exists():
         try:
-            data = _unwrap_results_state(
-                _safe_unpickle_results(results_path.read_bytes())
-            )
+            data = _unwrap_results_state(_safe_unpickle_results(results_path.read_bytes()))
             if isinstance(data, dict):
                 snap = data.get("ac_pf_results")
                 ac_pf_snap = snap if isinstance(snap, dict) else None
@@ -5130,18 +4717,14 @@ def get_results_bundle(
         except Exception:  # noqa: BLE001
             return None
 
-    frames = {
-        key: _payload_or_none(_frame(acc, attr)) for key, acc, attr in _BUNDLE_FRAMES
-    }
+    frames = {key: _payload_or_none(_frame(acc, attr)) for key, acc, attr in _BUNDLE_FRAMES}
 
     lopf_available = bool(
         getattr(temp_n, "is_solved", False) and network_has_dispatch(temp_n)
     )
     ac_pf_available = isinstance(ac_pf_snap, dict) and len(ac_pf_snap) > 0
 
-    if not any(v is not None for v in frames.values()) and not (
-        lopf_available or ac_pf_available
-    ):
+    if not any(v is not None for v in frames.values()) and not (lopf_available or ac_pf_available):
         return Response(status_code=204)
 
     # Carrier map so the client can group/colour the generation stack without a
@@ -5350,9 +4933,9 @@ def put_sites(
         n = site_bindings.open_network(dest)
         if n is not None:
             held.enter_context(PyPSAService.get_lock())
-            n = site_bindings.open_network(dest)  # still open, under the lock
+            n = site_bindings.open_network(dest)       # still open, under the lock
         held.enter_context(scene_store.project_lock(dest))
-        scene_store.guard_legacy_put(dest, sites)  # SceneError -> main's handler
+        scene_store.guard_legacy_put(dest, sites)      # SceneError -> main's handler
         sites = _stamp_sites(dest, sites, n)
         try:
             site_service.write_sites(dest, sites)
@@ -5363,9 +4946,7 @@ def put_sites(
         try:
             site_service.prune_site_dirs(dest, sites, rmtree=_force_rmtree)
         except OSError:
-            logger.warning(
-                "sites: orphan context prune failed for %s", name, exc_info=True
-            )
+            logger.warning("sites: orphan context prune failed for %s", name, exc_info=True)
     return {"saved": name, "sites": len(sites["sites"])}
 
 
@@ -5464,9 +5045,7 @@ def fetch_site_context(
     except OSError:
         # The document is in hand; a cache that cannot be written costs the
         # next open another fetch, not this one its answer.
-        logger.warning(
-            "site context: cache write failed for %s/%s", name, site_id, exc_info=True
-        )
+        logger.warning("site context: cache write failed for %s/%s", name, site_id, exc_info=True)
     return doc
 
 
@@ -5513,9 +5092,7 @@ def get_site_thumbnail(
     data = site_service.read_thumbnail(target)
     if data is None:
         raise HTTPException(404, f"No thumbnail for site '{site_id}'")
-    return Response(
-        content=data, media_type="image/png", headers={"Cache-Control": "no-store"}
-    )
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
 @router.put("/{name}/sites/{site_id}/thumbnail")
@@ -5538,9 +5115,7 @@ async def put_site_thumbnail(
     dest, name = _resolve_project_src(name, db, user)
     if not dest.exists():
         raise HTTPException(404, f"Project '{name}' not found")
-    content_type = (
-        (request.headers.get("content-type") or "").split(";")[0].strip().lower()
-    )
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
     if content_type != "image/png":
         raise HTTPException(415, "thumbnail must be sent as image/png")
     lock_project = project_registry.find_project(db, user, name)
@@ -5608,11 +5183,7 @@ def put_map_layout(
         map_layout_service.write_map_layout(dest, layout, max_bytes=_MAX_LAYOUT_BYTES)
     except map_layout_service.MapLayoutTooLarge as exc:
         raise HTTPException(413, str(exc)) from exc
-    return {
-        "saved": name,
-        "routes": len(layout["routes"]),
-        "bubbles": len(layout["bubbles"]),
-    }
+    return {"saved": name, "routes": len(layout["routes"]), "bubbles": len(layout["bubbles"])}
 
 
 def _require_active_project(dest: pathlib.Path, name: str) -> None:
@@ -5626,10 +5197,7 @@ def _require_active_project(dest: pathlib.Path, name: str) -> None:
 
     active = network_lengths.active_project_dir()
     if active is None or os.path.realpath(active) != os.path.realpath(dest):
-        raise HTTPException(
-            409,
-            f"Open project '{name}' first: geometry is matched against the loaded network.",
-        )
+        raise HTTPException(409, f"Open project '{name}' first: geometry is matched against the loaded network.")
 
 
 def _placed_buses_and_branches(n) -> tuple[dict[str, tuple[float, float]], list]:
@@ -5647,9 +5215,7 @@ def _placed_buses_and_branches(n) -> tuple[dict[str, tuple[float, float]], list]
         if df is None or df.empty:
             continue
         for nm in df.index:
-            branches.append(
-                Branch(kind, str(nm), str(df.at[nm, "bus0"]), str(df.at[nm, "bus1"]))
-            )
+            branches.append(Branch(kind, str(nm), str(df.at[nm, "bus0"]), str(df.at[nm, "bus1"])))
     return buses, branches
 
 
@@ -5657,17 +5223,13 @@ def _check_import_tolerance(tolerance_m: float) -> None:
     from services import map_geometry_import as mgi
 
     if not (0 < tolerance_m <= mgi.MAX_TOLERANCE_M):
-        raise HTTPException(
-            422, f"tolerance_m must be between 0 and {mgi.MAX_TOLERANCE_M:g} m"
-        )
+        raise HTTPException(422, f"tolerance_m must be between 0 and {mgi.MAX_TOLERANCE_M:g} m")
 
 
 def _import_cap_message() -> str:
     from services import map_geometry_import as mgi
 
-    return (
-        f"Geometry upload exceeds the {mgi.MAX_IMPORT_BYTES // (1024 * 1024)} MB cap."
-    )
+    return f"Geometry upload exceeds the {mgi.MAX_IMPORT_BYTES // (1024 * 1024)} MB cap."
 
 
 def _parse_import_features(data: bytes, filename: str | None):
@@ -5682,9 +5244,7 @@ def _parse_import_features(data: bytes, filename: str | None):
         raise HTTPException(422, str(exc)) from exc
 
 
-def _import_match_report(
-    dest: pathlib.Path, name: str, features, tolerance_m: float
-) -> dict:
+def _import_match_report(dest: pathlib.Path, name: str, features, tolerance_m: float) -> dict:
     """The match report of `features` against the active project; nothing is written."""
     from services import map_geometry_import as mgi
     from services import site_service
@@ -5694,20 +5254,10 @@ def _import_match_report(
     with PyPSAService.get_lock():
         buses, branches = _placed_buses_and_branches(n)
     try:
-        existing_ids = {
-            s.get("id")
-            for s in site_service.read_sites(dest)["sites"]
-            if isinstance(s, dict)
-        }
+        existing_ids = {s.get("id") for s in site_service.read_sites(dest)["sites"] if isinstance(s, dict)}
     except PermissionError as exc:
         raise _access_denied(dest / site_service.SITES_FILE) from exc
-    return mgi.match_features(
-        features,
-        branches,
-        buses,
-        tolerance_m=tolerance_m,
-        existing_site_ids=existing_ids,
-    )
+    return mgi.match_features(features, branches, buses, tolerance_m=tolerance_m, existing_site_ids=existing_ids)
 
 
 @router.post("/{name}/map_layout/import")
@@ -5732,13 +5282,7 @@ async def import_map_geometry(
     cap, 422 on malformed GeoJSON/KML.
     """
     from services import map_geometry_import as mgi
-    from services import (
-        map_layout_service,
-        network_lengths,
-        project_registry,
-        project_settings,
-        site_service,
-    )
+    from services import map_layout_service, network_lengths, project_registry, project_settings, site_service
 
     dest, name = _resolve_project_src(name, db, user)
     if not dest.exists():
@@ -5753,9 +5297,7 @@ async def import_map_geometry(
         form = await request.form()
         upload = form.get("file")
         if upload is None or not hasattr(upload, "read"):
-            raise HTTPException(
-                422, "Multipart body needs a `file` part holding GeoJSON or KML."
-            )
+            raise HTTPException(422, "Multipart body needs a `file` part holding GeoJSON or KML.")
         data = await upload.read()
         filename = getattr(upload, "filename", None)
     else:
@@ -5778,16 +5320,10 @@ async def import_map_geometry(
     report["applied"] = True
     report["written"] = written
     change_log_service.log(
-        "import",
-        "MapLayout",
-        name,
+        "import", "MapLayout", name,
         f"Imported geometry: {len(written['routes'])} route(s), {len(written['sites'])} site(s)",
     )
-    length_keys = [
-        k
-        for k in written["routes"]
-        if k.split(":", 1)[0] in network_lengths.LENGTH_KINDS
-    ]
+    length_keys = [k for k in written["routes"] if k.split(":", 1)[0] in network_lengths.LENGTH_KINDS]
     if length_keys and project_settings.derive_lengths_enabled(dest):
         report["lengths"] = network_lengths.apply_lengths_from_geometry(length_keys)
     return report
@@ -5822,9 +5358,8 @@ def osm_suggestions(
         raise HTTPException(exc.status, str(exc)) from exc
 
 
-def _project_bundle_bytes(
-    name: str, src: pathlib.Path | None = None, *, project_kind: str | None = None
-) -> bytes:
+def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
+                          project_kind: str | None = None) -> bytes:
     """
     Materialise a zipped project bundle (.pypsaproj.zip) as bytes.
 
@@ -5847,21 +5382,14 @@ def _project_bundle_bytes(
     buf = io.BytesIO()
     # The report locks (study harness 07e): no report is read while one
     # write to it is in progress; busy → 409 `report_busy`.
-    with (
-        _reports_copy_guard(src) as reports_held,
-        zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf,
-    ):
+    with _reports_copy_guard(src) as reports_held, \
+            zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for fname in _BUNDLE_FILES:
             p = src / fname
             if fname == "metadata.json" and project_kind:
                 # The kind lives on the DB row; the bundle carries it in its
                 # metadata so an import can restore it (project-io 01, I1).
-                zf.writestr(
-                    fname,
-                    json.dumps(
-                        {**_read_meta(src), "project_kind": project_kind}, indent=2
-                    ),
-                )
+                zf.writestr(fname, json.dumps({**_read_meta(src), "project_kind": project_kind}, indent=2))
             elif p.exists():
                 zf.write(p, arcname=fname)
         for fname in _BUNDLE_CAMPUS_FILES:
@@ -5874,7 +5402,6 @@ def _project_bundle_bytes(
         # A scene-enabled Site's scene goes in as its closure only (D03),
         # read under the scene mutex; nothing else under sites/<id>/scene.
         from services.site_scene import store as scene_store
-
         scene_blobs = scene_store.closure_blobs(src)
         for dname in PC.names(PC.BUNDLE, kind=PC.DIR):
             d = src / dname
@@ -5887,10 +5414,8 @@ def _project_bundle_bytes(
                     if scene_store.is_scene_path(full.relative_to(src)):
                         continue
                     rel = full.relative_to(src)
-                    if (
-                        dname == report_store.REPORTS_DIRNAME
-                        and rel.parts[1] not in reports_held["src"]
-                    ):
+                    if (dname == report_store.REPORTS_DIRNAME
+                            and rel.parts[1] not in reports_held["src"]):
                         # A lock file, a report created meanwhile, or a stray
                         # file an import would refuse.
                         continue
@@ -5899,10 +5424,7 @@ def _project_bundle_bytes(
         for rel, data in scene_blobs:
             zf.writestr(rel.as_posix(), data)
     change_log_service.log(
-        "export",
-        "Project",
-        name,
-        f"Downloaded project bundle '{name}.pypsaproj.zip'",
+        "export", "Project", name, f"Downloaded project bundle '{name}.pypsaproj.zip'",
     )
     return buf.getvalue()
 
@@ -5967,9 +5489,7 @@ def put_project_members(
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_manage_membership(db, user, project):
-        raise HTTPException(
-            403, "You do not have permission to manage members on this project"
-        )
+        raise HTTPException(403, "You do not have permission to manage members on this project")
     _enforce_project_lock(db, project, user)
 
     try:
@@ -6005,7 +5525,6 @@ def project_statistics(
         if not nc_path.exists():
             raise HTTPException(404, f"Project '{name}' not found")
         import pypsa
-
         # netCDF4/HDF5 share process-global, thread-unsafe state — this transient
         # read must hold the io lock or it races concurrent reads/writes (e.g. a
         # compare-state/results-summary fan-out, or a background solve once that
@@ -6014,11 +5533,8 @@ def project_statistics(
         with PyPSAService.get_netcdf_io_lock():
             n = pypsa.Network(str(nc_path))
         cfg_path = src / "solver_config.json"
-        solver_config = (
-            _solver_config_from_dict(json.loads(cfg_path.read_text()))
-            if cfg_path.exists()
-            else _solver_config_from_dict({})
-        )
+        solver_config = (_solver_config_from_dict(json.loads(cfg_path.read_text()))
+                         if cfg_path.exists() else _solver_config_from_dict({}))
     meta = _read_meta(src)
     return {
         "name": name,
@@ -6027,16 +5543,8 @@ def project_statistics(
         "generators": len(n.generators),
         "lines": len(n.lines),
         "snapshots": len(n.snapshots),
-        "carriers": n.generators.carrier.unique().tolist()
-        if not n.generators.empty
-        else [],
+        "carriers": n.generators.carrier.unique().tolist() if not n.generators.empty else [],
         "summary": project_summary.summarise(
-            n,
-            solver_config=solver_config,
-            project_id=str(project.id),
-            project_name=name,
-            root=src,
-            live_ctx=ctx if live else None,
-            limit=limit,
-        ),
+            n, solver_config=solver_config, project_id=str(project.id), project_name=name,
+            root=src, live_ctx=ctx if live else None, limit=limit),
     }
