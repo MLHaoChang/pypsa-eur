@@ -147,17 +147,24 @@ def _series(component, attribute, entity, index):
     return [_number(component.static.at[entity, attribute])] * len(index)
 
 
-def solve_matches_inputs(ctx):
+def solve_matches_inputs(ctx, after_pf=False):
     """Both recorded solve fingerprints match the current inputs: the lossy one
     and the exact one the Load flow tab requires. After an AC power flow the
     live outputs are PF values (ac_pf_service overwrites them and keeps the LP
-    aside), so the live network no longer holds the LP solve."""
+    aside), so the live network no longer holds the LP solve: that state
+    answers only with `after_pf` (study harness 15), and then only for a flow
+    that ran on the current edit counter (a PF result, never an LP one)."""
     n, state = ctx.network, ctx.solver_state
+    flowed = state.get("ac_pf_results") is not None
+    if flowed and not after_pf:
+        return False
+    if flowed and (state.get("ac_pf_network_revision") != int(getattr(ctx, "network_revision", 0) or 0)
+                   or state.get("condition") != "lopf+ac_pf_ok"):
+        return False
     return (
-        state.get("ac_pf_results") is None
-        and state.get("lopf_results") is None
+        (flowed or state.get("lopf_results") is None)
         and state.get("status") == "completed"
-        and state.get("condition") == "optimal"
+        and (flowed or state.get("condition") == "optimal")
         and n.meta.get("assistant_solve_input_fingerprint")
         == workflow_tools._network_input_fingerprint(ctx)
         and n.meta.get("assistant_solve_exact_input_fingerprint")

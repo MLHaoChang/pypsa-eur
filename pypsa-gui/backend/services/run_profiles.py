@@ -34,6 +34,9 @@ BOUND_CONTEXT_TOOLS = frozenset({
     # SC-07 S3 (GK B G7, N7): a 3D site apply step works on the bound project. A
     # profile never lists it: its args come only from a prepare step (N2).
     "site_scene_apply",
+    # Study harness 15 (owner decision SH15-PF-1): grid_only's setup switches Load flow on,
+    # a carded write of the solver config's `run_ac_pf_after_lopf` alone (a merge, never a scope reset).
+    "update_solver_config",
 })
 
 # Issue 07 (design §3 stages 7-8): steps only the runner runs, never a chat
@@ -1102,13 +1105,83 @@ def _eh_microgrid(staged: bool) -> dict:
 EH_MICROGRID = _eh_microgrid(staged=False)
 EH_MICROGRID_STAGED = _eh_microgrid(staged=True)
 
+
+# Study harness 15 (design §9.3 "Grid-only"; owner decision SH-PILOT-1; GK A,
+# ACPF-BUG): grid_only@1 serves the four grid templates. No params, no
+# sidecars and no tunables: a failed result rule is diagnosed and the run ends
+# `needs_user`. The PF rules read only the AC PF result the engine labels as
+# PF (`run_grid_pf`); without one they are `not_evaluated` and never pass on
+# LOPF flows. Convergence and line loading block (an absent PF asks the user to
+# switch Load flow on); the voltage band and N-1 warn, and read not evaluated
+# until the buses state a band and the solver's N-1 option is on.
+GRID_TEMPLATES = ("3bus", "ieee14", "belgium", "ieee39")
+GRID_LOADING_MAX_PCT = 100.0
+
+
+def _grid_only() -> dict:
+    return {
+        "id": "grid_only", "version": 1,
+        "templates": list(GRID_TEMPLATES),
+        "pf_results": True,  # the run reads its solve's AC power flow (`run_gates._fresh`, `run_handoff`)
+        "scope": "flow_scope.preset_for",
+        "params": {"required": [], "ask": []},
+        "inputs": {"required": []},
+        "stages": {
+            "setup": {"actions": [_call("update_solver_config", partial={"run_ac_pf_after_lopf": True})], "rules": [
+                *GENERIC["setup"]["rules"],
+                _rule("set.project.template", "project.template", "in", list(GRID_TEMPLATES),
+                      basis="The profile serves the four grid-only templates."),
+                _rule("set.template.source", "grid.template.source", "eq", "available",
+                      basis="The template's network is built here (belgium and ieee39 need a source a "
+                            "checkout may lack)."),
+            ]},
+            "result_gate": {**GENERIC["result_gate"], "rules": [
+                *CORE_RESULT_RULES,
+                {**_rule("grid.pf.converged", "grid.pf.converged", "eq", True,
+                         basis="Every snapshot of the run's AC power flow converged. Read only from the AC PF "
+                               "result; with none the rule is not evaluated and LOPF flows never satisfy it."),
+                 "unevaluated": run_gates.UNEVALUATED_TO_USER},
+                {**_rule("grid.pf.loading", "grid.pf.loading_pct", "le", GRID_LOADING_MAX_PCT,
+                         basis="No line or transformer carries more than its rating in the AC power flow "
+                               "(apparent power, converged snapshots). Read only from the AC PF result."),
+                 "unit": "%", "unevaluated": run_gates.UNEVALUATED_TO_USER},
+                {**_rule("grid.pf.voltage", "grid.pf.voltage_violations", "le", 0, severity="warn",
+                         basis="No bus voltage leaves the bus's own v_mag_pu_min/max band in the AC power "
+                               "flow; not evaluated while no bus states a band."),
+                 "unit": "count"},
+                _rule("grid.n1.secured", "grid.n1.secured", "eq", True, severity="warn",
+                      basis="The solve enforced N-1 on every line (the solver's N-1 option on); not evaluated "
+                            "while the option is off or covers only listed lines."),
+            ]},
+            "explore": {"skip": "Grid-only runs explore no cases by default."},
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            # No `ho.kpis_read`: cost and emissions are read from the live network, which the
+            # solve's AC power flow rewrites (the slack generator's dispatch), so no headline
+            # KPI is read back for this profile until the engine keeps the LP's frames.
+            "handoff": {"actions": [_native("handoff")], "rules": []},
+        },
+        "tunable": [],
+        # No lever to grant: the envelope covers the run's one solve and report, and the
+        # L2 round diagnoses (a round with no change ends the loop, §6.2).
+        "envelope": {"edits": [], "runs": [{"tool": "update_solver_config"}, {"tool": "solve_queue_enqueue"},
+                                           {"tool": "generate_report"}],
+                     "budget": {"solves": 1, "rounds": 2, "wall_time_h": 8.0}},
+        "kpis": [],
+        "chapters": [],
+        "missing_tools": ["headline KPIs after an AC power flow (the flow rewrites the live dispatch)"],
+    }
+
+
+GRID_ONLY = _grid_only()
+
 PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_site@3": EH_SITE_V3,
                               "eh_datacenter@1": EH_DATACENTER,
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
                               "eh_ammonia_staged@1": EH_AMMONIA_STAGED,
                               "eh_ipp_hybrid@1": EH_IPP_HYBRID,
-                              "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED}
+                              "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED,
+                              "grid_only@1": GRID_ONLY}
 
 
 def needs_goal(profile: dict) -> bool:

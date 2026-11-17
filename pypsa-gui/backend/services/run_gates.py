@@ -39,6 +39,7 @@ FACTS_VERSION = 1
 # needs_user` that reads no evidence ends the result stage for the user; no
 # L2 round runs, since no lever can supply the evidence.
 UNEVALUATED_TO_USER = "needs_user"
+AC_PF_OK = "lopf+ac_pf_ok"  # the solve job's condition when the LP was optimal and the AC power flow ran
 OPS = ("eq", "ne", "lt", "le", "gt", "ge", "in", "not_in", "empty", "nonempty", "within")
 SEVERITIES = ("block", "warn")
 
@@ -151,13 +152,28 @@ def _solve_status(env):
     job = _solve_job(env)
     if job is None or job["status"] != "completed":
         return None
-    return _not_applied(job) or job["condition"]
+    return _not_applied(job) or lp_condition(job["condition"])
+
+
+def lp_condition(condition):
+    """The LP's own condition. The solve job's condition also carries the AC power
+    flow after it: `lopf+ac_pf_ok` (the stage ran; per-snapshot convergence is the PF
+    rules') and `optimal; ac_pf_failed: <why>` both mean the LP was optimal, and the
+    flow is judged by its own rules, never as a failed solve (study harness 15).
+    Any other suffix is unknown: it is not optimal (fail closed)."""
+    if condition == AC_PF_OK:
+        return "optimal"
+    if isinstance(condition, str) and condition.startswith("optimal; ac_pf_failed: "):
+        return "optimal"
+    return condition
 
 
 def _fresh(env):
-    """The results describe the current inputs (LC-12, Check answers' guard)."""
+    """The results describe the current inputs (LC-12, Check answers' guard). A profile
+    that reads the AC power flow (`pf_results`, study harness 15) also counts its solve's
+    own flow as current; every other profile keeps the LP-only guard."""
     from services import workflow_tools
-    return workflow_tools.solve_freshness(env.ctx)["results_current"]
+    return workflow_tools.solve_freshness(env.ctx, after_pf=bool(_profile(env).get("pf_results")))["results_current"]
 
 
 def _template(env):
@@ -1287,6 +1303,77 @@ def _mg_frequency(env):
     return Detailed(len(out["hours"]), detail, run_actions.MG_FREQUENCY_BASIS)
 
 
+# Study harness 15 (design §9.3 "Grid-only"; GK A, ACPF-BUG): the grid-only
+# profile's setup and AC power-flow facts. The PF readers sit in `run_grid_pf`
+# and read only the PF snapshot the engine stored.
+def _grid_template_source(env):
+    """belgium and ieee39 are built from sources a checkout may lack
+    (`project_templates/_build.py`): the template's own network file, or the
+    source it is built from, must be there; no evidence names what is missing."""
+    import importlib.util
+    import pathlib
+
+    template = _template(env)
+    if template not in ("belgium", "ieee39"):
+        return "available" if template in ("3bus", "ieee14") else None
+    backend = pathlib.Path(__file__).resolve().parents[1]
+    if (backend / "project_templates" / template / "network.nc").exists():
+        return "available"
+    if template == "belgium":
+        source = backend.parents[1] / "resources" / "test-elec" / "networks" / "base_s_5_elec_.nc"
+        if source.exists():
+            return "available"
+        return NoEvidence("source_missing", f"the Belgium grid's source {source.name} is not built here")
+    if importlib.util.find_spec("gridspine") is not None:
+        return "available"
+    return NoEvidence("source_missing", "the IEEE 39-bus network needs gridspine, which is not installed here")
+
+
+def _grid_pf(read_fact):
+    """A reader of the run's own PF snapshot: `read_fact(ctx, evidence)`."""
+    def fact(env):
+        from services import run_grid_pf as pf
+
+        def read(ctx):
+            out = read_fact(ctx, pf.read(ctx))
+            return NoEvidence(out.code, out.reason) if isinstance(out, pf.Missing) else out
+        return _own_solve(env, read, typed=True)
+    return fact
+
+
+def _grid_converged(ctx, ev):
+    from services import run_grid_pf as pf
+    return pf.converged(ev)
+
+
+def _grid_loading(ctx, ev):
+    from services import run_grid_pf as pf
+    out = pf.loading(ctx, ev)
+    if isinstance(out, pf.Missing):
+        return out
+    peak, over = out
+    return Detailed(round(peak, 2), over, "peak apparent-power loading of any line or transformer, % of its "
+                                          "rating, on the converged AC power-flow snapshots")
+
+
+def _grid_voltage(ctx, ev):
+    from services import run_grid_pf as pf
+    out = pf.voltage(ctx, ev)
+    if isinstance(out, pf.Missing):
+        return out
+    count, names = out
+    return Detailed(count, names, "bus-snapshots outside the buses' own voltage band, on the converged snapshots")
+
+
+def _grid_n1(env):
+    from services import run_grid_pf as pf
+
+    def read(ctx):
+        out = pf.n1(ctx)
+        return NoEvidence(out.code, out.reason) if isinstance(out, pf.Missing) else out
+    return _own_solve(env, read, typed=True)
+
+
 FACTS: dict[str, Fact] = {
     # Harness facts: the run block itself, written only by harness code.
     "brief.valid": Fact("task.brief", "brief", None, lambda env: bool(env.task.get("brief"))),
@@ -1316,6 +1403,14 @@ FACTS: dict[str, Fact] = {
     "ic.baseline_keeps": Fact("services.ic_counterfactual.read_baseline_keeps", "kept", None,
                               _ic_baseline_keeps),
     LOOP_FACT: Fact("task.steps[engine].result.loop", "status", None, _loop_converged, per_rule=True),
+    # Study harness 15: the grid-only profile.
+    "grid.template.source": Fact("services.run_gates._grid_template_source", "source", None, _grid_template_source),
+    "grid.pf.converged": Fact("services.run_grid_pf.converged", "converged", None,
+                              _grid_pf(_grid_converged)),
+    "grid.pf.loading_pct": Fact("services.run_grid_pf.loading", "peak_pct", "%", _grid_pf(_grid_loading)),
+    "grid.pf.voltage_violations": Fact("services.run_grid_pf.voltage", "violations", "count",
+                                       _grid_pf(_grid_voltage)),
+    "grid.n1.secured": Fact("services.run_grid_pf.n1", "secured", None, _grid_n1),
     # Issue 07: the report and hand-off stages.
     "report.status": Fact("harness.run_report.status", "status", None, _report_status),
     "report.unsupported_listed": Fact("harness.run_report.unsupported_listed", "listed", None,

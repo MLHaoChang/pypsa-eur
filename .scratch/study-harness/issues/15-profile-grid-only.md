@@ -3,7 +3,7 @@
 
 # 15 — Harness profiles: grid-only templates (3bus, ieee14, belgium, ieee39)
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 07
 Gated: yes (GK A for the PF and N-1 rules; GK B for the harness parts)
@@ -20,9 +20,9 @@ Design: [design.md](../design.md) §9.3 "Grid-only"
 
 ## Acceptance criteria
 
-- [ ] `3bus` and `ieee14` runs reach hand-off with the LC-21 network chapters.
-- [ ] A seeded overload fails the loading rule and the run asks the user (no agent edit).
-- [ ] Without an AC PF result, the PF rules are `not_evaluated`; LOPF flows never satisfy them.
+- [x] `3bus` and `ieee14` runs reach hand-off with the LC-21 network chapters.
+- [x] A seeded overload fails the loading rule and the run asks the user (no agent edit).
+- [x] Without an AC PF result, the PF rules are `not_evaluated`; LOPF flows never satisfy them.
 
 ## Likely files
 
