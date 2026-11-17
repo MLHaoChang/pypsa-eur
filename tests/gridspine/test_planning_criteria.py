@@ -323,6 +323,35 @@ def test_unit_outage_reports_the_generation_lost():
     assert row["stage1_verdict"] in ("pass", "fail")
 
 
+def _screen_sgen(net, cset):
+    """_screen, with each sgen dispatched at its own p_mw (signed: a charging unit draws)."""
+    dispatch, loads, reg = _tables(net)
+    p = dict(zip(net.sgen["name"], net.sgen["p_mw"]))
+    dispatch["p_mw"] = [p.get(u, v) for u, v in zip(dispatch["unit_id"], dispatch["p_mw"])]
+    return screen_planning(net, cset, dispatch, loads, 0, reg)
+
+
+def test_a_charging_storage_unit_lost_is_no_generation_lost_and_says_its_draw():
+    net = _net()
+    pp.create_sgen(net, 3, p_mw=-5.0, name="BESS1")  # charging on BUS_S
+    res, _ = _screen_sgen(net, _set(net, ("unit",)))
+    row = _one(res, "BESS1")
+    assert bool(row["converged"])
+    assert row["gen_lost_mw"] == 0.0
+    assert row["load_lost_mw"] == 0.0
+    assert row["note"].count("charging storage lost: 5.0 MW of draw removed") == 1
+
+
+def test_generation_lost_clips_each_unit_before_the_sum():
+    net = _net()
+    pp.create_sgen(net, 3, p_mw=5.0, name="PV1")     # discharging / generating on BUS_S
+    pp.create_sgen(net, 3, p_mw=-3.0, name="BESS1")  # charging on BUS_S
+    res, _ = _screen_sgen(net, _set(net, ("bus_section",)))
+    row = _one(res, "BUS_S")
+    assert row["gen_lost_mw"] == pytest.approx(5.0)
+    assert "charging storage lost: 3.0 MW of draw removed" in row["note"]
+
+
 # --------------------------------------------------------------------------
 # bus sections
 # --------------------------------------------------------------------------

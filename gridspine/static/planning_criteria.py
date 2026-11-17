@@ -145,6 +145,9 @@ PLANNING_LEDGER = (
     "a bus-section loss takes out the bus and everything on it; the load and "
     "generation lost (p_mw x scaling) are reported, and the lost generation is "
     "picked up by the slack",
+    "generation lost counts each unit's injection clipped at 0: a charging storage "
+    "unit lost is neither generation nor load lost; its removed draw is named in the "
+    "note and the load flow runs with it out",
     "an outage that leaves any other bus unsupplied is islanded: not solved, "
     "both stages not_solved",
     "N-M-1 and N-1-1 share mechanics in this static model: the first branch "
@@ -690,16 +693,34 @@ def _p_mw(table) -> pd.Series:
     return table["p_mw"] * scaling
 
 
+def _units_off(base, work, gone, tbl) -> pd.Series:
+    b, w = base[tbl], work[tbl]
+    return b["in_service"].astype(bool) & (~w["in_service"].astype(bool) | b["bus"].isin(gone))
+
+
 def _lost(base, work, gone) -> tuple:
-    """(load MW, generation MW) on ``gone`` buses plus units the outage took off."""
+    """(load MW, generation MW) on ``gone`` buses plus units the outage took off.
+    Generation counts each unit's injection clipped at 0 before the sum: a
+    charging storage unit (p < 0) lost is neither generation nor load lost
+    (``_draw_lost`` reports it), and netting it would hide a lost generator."""
     on = base.load["in_service"].astype(bool) & base.load["bus"].isin(gone)
     load = float(_p_mw(base.load)[on].sum())
     gen = 0.0
     for tbl in ("gen", "sgen"):
-        b, w = base[tbl], work[tbl]
-        off = b["in_service"].astype(bool) & (~w["in_service"].astype(bool) | b["bus"].isin(gone))
-        gen += float(_p_mw(b)[off].sum())
+        gen += float(_p_mw(base[tbl])[_units_off(base, work, gone, tbl)].clip(lower=0.0).sum())
     return load, gen
+
+
+def _draw_lost(base, work, gone) -> float:
+    """MW of charging draw (sgen p < 0) the outage took off: still load-flowed
+    with the unit out, so its thermal and voltage effect is screened."""
+    p = _p_mw(base.sgen)[_units_off(base, work, gone, "sgen")]
+    return float(-p.clip(upper=0.0).sum())
+
+
+def _draw_note(base, work, gone) -> list:
+    draw = _draw_lost(base, work, gone)
+    return [f"charging storage lost: {draw:.1f} MW of draw removed"] if draw > 0 else []
 
 
 def _row(r, hour, **kw):
@@ -917,7 +938,8 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
                 load_lost, gen_lost = _lost(base, work, cut)
                 names = ", ".join(sorted(str(base.bus.at[b, "name"]) for b in cut))
                 rows.append(_row(r, hour, islanded=True, load_lost_mw=load_lost, gen_lost_mw=gen_lost,
-                                 note=f"islanded at the first outage ({first}): disconnects {names}"))
+                                 note="; ".join([f"islanded at the first outage ({first}): disconnects {names}",
+                                                 *_draw_note(base, work, cut)])))
                 continue
             judged = live(work)
             s0 = _solve(work, judged)
@@ -934,6 +956,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
         _apply_outage(work, r, handles)
         out_bus, cut = cut_off(work)
         load_lost, gen_lost = _lost(base, work, out_bus | cut)
+        notes += _draw_note(base, work, out_bus | cut)
         lost = {"load_lost_mw": load_lost, "gen_lost_mw": gen_lost}
         if r.kind == "bus_section":
             notes.append(f"bus section lost: {load_lost:.1f} MW load, {gen_lost:.1f} MW generation "

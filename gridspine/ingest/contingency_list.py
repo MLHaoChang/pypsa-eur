@@ -148,7 +148,7 @@ def _contingency_id(label: str) -> str:
 
 
 def _unquote(tok: str) -> str:
-    if (not (len(tok) >= 2 and tok[0] == tok[-1] and (tok[0] in '\'"'))):
+    if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in "'\"":
         return tok[1:-1].strip()
     return tok.strip()
 

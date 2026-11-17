@@ -1589,35 +1589,23 @@ def _gc03_templates(campus, net):
     )
 
 
+#: The SCR of a PoC below 1 kV: pandapower's minimum case applies c_min there.
+LV_C_NOTE = ("PoC below 1 kV: S_k'' carries the IEC 60909 voltage factor c_min = 0.95 (IEC 60909-0 Table 1), "
+             "so SCR and ESCR read 5 % low (conservative)")
 #: Full N-1 up to this many branches; above it, outage_fault_levels pre-screens.
 STRENGTH_OUTAGE_CAP = 200
 
 
-def strength_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> dict:
-    """SCR, ESCR and WSCR per PoC and stage (``static/strength.strength_table``),
-    intact and under the worst campus N-1 branch outage
-    (``static/strength_outages.outage_fault_levels``), written to
-    ``campus_strength.csv`` (per PoC) and ``campus_strength_groups.csv``
-    (WSCR). Returns the summary. A static screen: the binding answer is the
-    RMS/EMT study.
-
-    S_k'' is the IEC 60909 minimum case of the grid side alone: every
-    converter (``IBR_KINDS``) is off, gensets stay in, and the grid is the
-    campus spec's S_k''min and rx_min. A PoC is each bus carrying a converter;
-    a stage is a period, with P the RATED power of the converters built in it.
-    Capacitor banks off every PoC are subtracted at every PoC (worst case)."""
+def _gc03_strength(campus, hourly):
+    """``strength_campus`` on a built campus and its hourly table: ``(per PoC,
+    groups, outage method, notes)``."""
     import copy
 
     from gridspine.static.strength import q_c_by_poc, strength_table
     from gridspine.static.strength_outages import outage_fault_levels
 
-    del profile, profile_dirs  # the bands are strength.py's; the limits are the readiness rows'
-    run_dir = Path(run_dir)
-    _unchanged_project(run_dir)
-    campus = load_run_campus(run_dir)
     if campus.tie_normally_open:
         raise ContractError("the tie to the grid is normally open: no grid infeed to judge strength against")
-    hourly, _ = campus_tables(run_dir)
     units = campus.units
     ibr = units[units["kind"].isin(IBR_KINDS)]
     if ibr.empty:
@@ -1638,36 +1626,57 @@ def strength_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) ->
         q_c["q_c_mvar"] = q_c["q_c_mvar"].astype(float) + extra
         names = ", ".join(sorted(map(str, off.index)))
         notes.append(f"capacitor bank(s) {names} on no PoC: {extra:g} Mvar subtracted at every PoC (worst case)")
-    per_poc, groups = [], []
+    gensets = set(units.index[units["kind"] == "genset"].astype(str))
+    per_poc, groups, method = [], [], ""
     for period, block in hourly.groupby("period"):
         period = int(period)
         built = set(block.loc[block["status"] == 1, "unit_id"].astype(str))
         stage_ibr = ibr[ibr.index.astype(str).isin(built)]
-        stages = (stage_ibr.groupby(stage_ibr["bus"].astype(str))["p_mw"].sum()
-                  .reindex(poc_buses).fillna(0.0))
-        stages = pd.DataFrame({"stage": str(period), "poc": poc_buses, "p_mw": stages.values})
+        p = stage_ibr.groupby(stage_ibr["bus"].astype(str))["p_mw"].sum().reindex(poc_buses).fillna(0.0)
+        stages = pd.DataFrame({"stage": str(period), "poc": poc_buses, "p_mw": p.values})
         hour = int(block["hour"].min())
         sl = block[block["hour"] == hour][["unit_id", "p_mw", "status"]].reset_index(drop=True)
-        work = copy.deepcopy(campus)
-        # converters out of the fault level; a genset not built in the period too
-        drop = [i for i in work.net.sgen.index
-                if str(work.net.sgen.at[i, "name"]) not in set(units.index[units["kind"] == "genset"]) & built]
-        net, dispatch, loads, registry = _gc03_hour_net(work, sl, hour)
-        net.sgen.drop(index=drop, inplace=True)
-        registry = registry.drop(index=[u for u in registry.index if u not in set(net.sgen["name"].astype(str))
-                                        and registry.at[u, "kind"] == "res"])
+        net, dispatch, loads, registry = _gc03_hour_net(copy.deepcopy(campus), sl, hour)
+        # every converter out of the fault level, and a genset not built in the period
+        keep = gensets & built
+        net.sgen.drop(index=[i for i in net.sgen.index if str(net.sgen.at[i, "name"]) not in keep], inplace=True)
+        registry = registry[(registry["kind"] != "res") | registry.index.isin(keep)]
         dispatch = dispatch[dispatch["unit_id"].isin(registry.index)].reset_index(drop=True)
         ofl = outage_fault_levels(net, dispatch, loads, hour, registry, _gc03_templates(campus, net), poc_buses,
                                   cap=STRENGTH_OUTAGE_CAP)
         study = strength_table(pocs, stages, ofl.intact, ofl.outages, ofl.method, q_c)
-        per_poc.append(study.pocs.assign(period=period))
+        rows = study.pocs.assign(period=period)
+        lv = rows["bus"].map(lambda b: float(net.bus.loc[net.bus["name"].astype(str) == b, "vn_kv"].iloc[0]) < 1.0)
+        rows.loc[lv, "note"] = rows.loc[lv, "note"].fillna("").map(lambda t: "; ".join(x for x in (t, LV_C_NOTE) if x))
+        per_poc.append(rows)
         groups.append(study.groups.assign(period=period))
-    per_poc = pd.concat(per_poc, ignore_index=True)
-    groups = pd.concat(groups, ignore_index=True)
+        method = ofl.method
+    notes.append("S_k'' is the IEC 60909 minimum case with every converter off (gensets in), network "
+                 "transformers with the impedance correction K_T (IEC 60909-0 6.3.3); "
+                 "P is the rated power of the converters built in the period")
+    return pd.concat(per_poc, ignore_index=True), pd.concat(groups, ignore_index=True), method, notes
+
+
+def strength_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> dict:
+    """SCR, ESCR and WSCR per PoC and stage (``static/strength.strength_table``),
+    intact and under the worst campus N-1 branch outage
+    (``static/strength_outages.outage_fault_levels``), written to
+    ``campus_strength.csv`` (per PoC) and ``campus_strength_groups.csv``
+    (WSCR). Returns the summary. A static screen: the binding answer is the
+    RMS/EMT study.
+
+    S_k'' is the IEC 60909 minimum case of the grid side alone: every
+    converter (``IBR_KINDS``) is off, gensets stay in, and the grid is the
+    campus spec's S_k''min and rx_min. A PoC is each bus carrying a converter;
+    a stage is a period, with P the RATED power of the converters built in it.
+    Capacitor banks off every PoC are subtracted at every PoC (worst case)."""
+    del profile, profile_dirs  # the bands are strength.py's; the limits are the readiness rows'
+    run_dir = Path(run_dir)
+    _unchanged_project(run_dir)
+    campus = load_run_campus(run_dir)
+    hourly, _ = campus_tables(run_dir)
+    per_poc, groups, method, notes = _gc03_strength(campus, hourly)
     _write_text_atomic(run_dir / STRENGTH_CSV, per_poc.to_csv(index=False))
     _write_text_atomic(run_dir / STRENGTH_GROUPS_CSV, groups.to_csv(index=False))
-    notes.append("S_k'' is the IEC 60909 minimum case with every converter off (gensets in); "
-                 "P is the rated power of the converters built in the period")
-    return {"pocs": poc_buses, "stages": sorted(per_poc["stage"].unique().tolist()),
-            "outage_method": ofl.method, "notes": notes,
-            "basis": "static screen; binding answer is the RMS/EMT study"}
+    return {"pocs": sorted(per_poc["poc"].unique().tolist()), "stages": sorted(per_poc["stage"].unique().tolist()),
+            "outage_method": method, "notes": notes, "basis": "static screen; binding answer is the RMS/EMT study"}
