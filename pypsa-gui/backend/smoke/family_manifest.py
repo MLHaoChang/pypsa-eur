@@ -31,6 +31,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from smoke.json_fragments import extend, extend_items, fragment_files, load_merged
+except ImportError:  # run as a script: smoke/ itself is on sys.path
+    from json_fragments import extend, extend_items, fragment_files, load_merged
+
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / '.scratch/live-copilot/family-manifest.json'
 B = 'pypsa-gui/backend/tests/'
@@ -859,6 +864,106 @@ def inventory_tools() -> tuple[str, ...]:
     return tuple(sorted(t['name'] for t in build_inventory()['tools']))
 
 
+# A new tool's family, a new variant, a settled pending variant and a covered
+# variant's extra tools or tests arrive as a fragment instead of an edit above
+# (RETRO-FRAG-1): `family_manifest.d/<branch>.json`, format in that folder's
+# README. A fragment adds rows; one redefining a row above fails.
+MANIFEST_FILE = Path(__file__).with_name('family_manifest.json')
+PYTHON_TOOLS_BY_FAMILY = TOOLS_BY_FAMILY
+PYTHON_VARIANTS = VARIANTS
+_VARIANT_KEYS = {'covered': {'id', 'status', 'oracle', 'tools', 'tests'},
+                 'pending': {'id', 'status', 'reason'},
+                 'unavailable': {'id', 'status', 'reason', 'pointer'}}
+
+
+def _words(raw, key: str) -> list[str]:
+    value = raw.get(key, [])
+    if not (isinstance(value, list) and all(isinstance(x, str) and x and ' ' not in x for x in value)):
+        raise ValueError(f'{key} is a list of names')
+    return value
+
+
+def _variant(raw) -> dict:
+    """A fragment's variant, built by the same helpers as the rows above."""
+    keys = _VARIANT_KEYS.get(raw.get('status')) if isinstance(raw, dict) else None
+    if keys is None or set(raw) != keys or not isinstance(raw['id'], str):
+        raise ValueError(f'a variant has exactly the keys of its status: {_VARIANT_KEYS}')
+    if raw['status'] == 'covered':
+        return _covered(raw['id'], raw['oracle'], ' '.join(_words(raw, 'tools')), *_words(raw, 'tests'))
+    if raw['status'] == 'pending':
+        return _pending(raw['id'], raw['reason'])
+    return _unavailable(raw['id'], raw['reason'], raw['pointer'])
+
+
+def merged_tables(base: Path = MANIFEST_FILE) -> tuple[dict, list, dict]:
+    """TOOLS_BY_FAMILY, VARIANTS and {settled variant id: fragment}: the rows above plus the fragments'.
+
+    Sections apply in order: `tool_families`, `variants` (new ids), `settles` (a
+    pending variant, once, kept in place) and `variant_additions` (a covered
+    variant's extra tools and tests). `manifest_problems` then checks the result.
+    """
+    owner = {t: f for f, tools in PYTHON_TOOLS_BY_FAMILY.items() for t in tools}
+
+    def tool_family(tool, family):
+        if family not in FAMILIES:
+            raise ValueError(f'no family {family!r}; one of {sorted(FAMILIES)}')  # repr-ok: names a JSON key in a CI/import error
+        if tool in owner:
+            raise ValueError(f'{tool} is already in {owner[tool]}')
+        return tool, family
+    tools = {f: set(names) for f, names in PYTHON_TOOLS_BY_FAMILY.items()}
+    for tool, family in extend({}, base, 'tool_families', tool_family).items():
+        tools[family].add(tool)
+    variants = extend_items(PYTHON_VARIANTS, base, 'variants', convert=_variant)
+    for section in ('settles', 'variant_additions'):
+        if not isinstance(load_merged(base).get(section), list):
+            raise ValueError(f'{base}: needs a list {section!r}')  # repr-ok: names a JSON key in a CI/import error
+    files = [(path, json.loads(path.read_text(encoding='utf-8'))) for path in [base, *fragment_files(base)]]
+    index = {v['id']: i for i, v in enumerate(variants)}
+    settled: dict[str, Path] = {}
+    for path, data in files:
+        for raw in data.get('settles', []):
+            try:
+                variant = _variant(raw)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f'{path}: settles item {raw!r}: {exc}') from exc  # repr-ok: names a JSON key in a CI/import error
+            vid = variant['id']
+            if vid in settled:
+                raise ValueError(f'{path}: {vid} is already settled by {settled[vid].name}')
+            base_status = variants[index[vid]]['status'] if vid in index else None
+            if base_status != 'pending' or variant['status'] == 'pending':
+                raise ValueError(f'{path}: settles {vid!r}: only a pending variant can be settled, '  # repr-ok: names a JSON key in a CI/import error
+                                 'and only to covered or unavailable')
+            variants[index[vid]], settled[vid] = variant, path
+    for path, data in files:
+        for raw in data.get('variant_additions', []):
+            vid = raw.get('id') if isinstance(raw, dict) else None
+            try:
+                if vid not in index or set(raw) - {'id', 'tools', 'tests'}:
+                    raise ValueError(f'names no variant {vid!r}, or has keys beyond id, tools, tests')  # repr-ok: names a JSON key in a CI/import error
+                old = variants[index[vid]]
+                if old['status'] != 'covered':
+                    raise ValueError(f'{vid} is not covered')
+                more_tools, more_tests = _words(raw, 'tools'), _words(raw, 'tests')
+                again = sorted((set(old['tools']) & set(more_tools)) | (set(old['tests']) & set(more_tests)))
+                if again or len(set(more_tools)) < len(more_tools) or len(set(more_tests)) < len(more_tests):
+                    raise ValueError(f'{vid} already lists {again or "a name twice"}')
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f'{path}: variant_additions item {raw!r}: {exc}') from exc  # repr-ok: names a JSON key in a CI/import error
+            grown = old['tools'] + more_tools
+            variants[index[vid]] = {**old, 'tools': grown, 'tests': old['tests'] + more_tests,
+                                    'seam': 'chat tools' if grown else CHECKED_STREAM}
+    return {f: frozenset(names) for f, names in tools.items()}, variants, settled
+
+
+def stale_rows(settled: dict[str, Path]) -> list[str]:
+    """A pending row a fragment settled stays above until someone deletes it; say so."""
+    return [f'stale: {vid} is still pending where it is declared, and {path.name} settles it; '
+            'delete that pending row' for vid, path in sorted(settled.items())]
+
+
+TOOLS_BY_FAMILY, VARIANTS, SETTLED = merged_tables()
+
+
 def _families(tools_by_family: dict, inventory: tuple[str, ...]) -> dict[str, set[str]]:
     families = {f: set(tools) for f, tools in tools_by_family.items()}
     families['gridspine-campus'] |= {t for t in inventory
@@ -970,6 +1075,7 @@ def report(built: dict) -> str:
         f'unavailable={c["unavailable_variants"]}', 'full_coverage=not_established'])]
     if built['unmapped_tools']:
         lines.append('unmapped: ' + ' '.join(built['unmapped_tools']))
+    lines += stale_rows(SETTLED)
     return '\n'.join(lines)
 
 

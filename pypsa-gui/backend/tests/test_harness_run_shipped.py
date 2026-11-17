@@ -455,7 +455,7 @@ def _approved(project, tpl, built):
         lambda d: d.update(note="edited"),
         lambda d: d.update(base="edited"),
         lambda d: d["cases"].pop(),
-        lambda d: d["cases"].append({**d["cases"][0], "id": "added"}),
+        lambda d: d["cases"].append({**d["cases"][0], "id": "added", "label": "Added"}),
         lambda d: d["cases"].reverse(),
     ],
 )
@@ -492,50 +492,86 @@ def test_the_admissible_cases_that_fit_the_cap_all_run(project, tpl, built):
     assert S.choose(shipped, 6) == shipped["admissible"]
 
 
-def test_more_admissible_cases_than_the_cap_need_a_pick_and_the_count_is_the_true_total(
+LP_IDS = ["low_price", "cannibalised", "cheap_battery"]
+FINANCE_IDS = ["ppa_price_minus_10", "merchant_heavy", "longer_ppa"]
+
+
+def test_the_cases_split_three_lp_and_three_finance(project, tpl, built):
+    shipped = _load(project, tpl, built)
+    kinds = {c["id"]: c["kind"] for c in shipped["cases"]}
+    assert [i for i in shipped["admissible"] if kinds[i] == S.LP] == LP_IDS
+    assert [i for i in shipped["admissible"] if kinds[i] == S.FINANCE] == FINANCE_IDS
+
+
+def test_more_lp_cases_than_the_cap_need_a_pick_and_the_count_is_the_true_total(
     project, tpl, built
 ):
     shipped = _load(project, tpl, built)
-    with pytest.raises(S.ShippedError, match="6 of 8") as err:
-        S.choose(shipped, CAP)
+    with pytest.raises(S.ShippedError, match="3 of 8") as err:
+        S.choose(shipped, 2)
     assert err.value.kind == "shipped_cases_over_budget"
 
 
-def test_a_pick_runs_exactly_the_picked_cases_never_the_first_ones(project, tpl, built):
+def test_finance_cases_cost_no_solve_so_three_lp_fit_a_cap_of_three(
+    project, tpl, built
+):
+    # P3: kills the mutant that counts finance cases against the cap.
     shipped = _load(project, tpl, built)
-    last = shipped["admissible"][-CAP:]
-    assert S.choose(shipped, CAP, last) == last
-    assert last != shipped["admissible"][:CAP]
+    assert S.choose(shipped, 3) == shipped["admissible"]
 
 
-def test_a_pick_is_deduplicated_in_order(project, tpl, built):
+def test_a_cap_of_zero_admits_no_lp_case_and_still_runs_the_finance_ones(
+    project, tpl, built
+):
+    assert S.choose(_load(project, tpl, built), 0) == FINANCE_IDS
+
+
+def test_a_pick_runs_exactly_the_picked_lp_cases_and_every_finance_case(
+    project, tpl, built
+):
     shipped = _load(project, tpl, built)
-    a, b = shipped["admissible"][:2]
-    assert S.choose(shipped, CAP, [b, a, b]) == [b, a]
+    ids = S.choose(shipped, 2, ["cheap_battery", "cannibalised"])
+    want = {"cannibalised", "cheap_battery", *FINANCE_IDS}
+    assert ids == [i for i in shipped["admissible"] if i in want]  # file order
+    assert "low_price" not in ids  # never the first ones
 
 
 @pytest.mark.parametrize(
-    "picked", [["tight_connection"], ["nope"], ["low_price", "faster_degradation"]]
+    "picked, kind",
+    [
+        ({}, "shipped_pick_invalid"),
+        ("low_price", "shipped_pick_invalid"),
+        ([1], "shipped_pick_invalid"),
+        ([], "shipped_pick_empty"),
+        (["low_price", "low_price"], "shipped_pick_duplicate"),
+        (["nope"], "shipped_pick_unknown"),
+        (["tight_connection"], "shipped_case_not_runnable"),
+        (["low_price", "faster_degradation"], "shipped_case_not_runnable"),
+        (["merchant_heavy"], "shipped_pick_finance"),
+        (["low_price", "longer_ppa"], "shipped_pick_finance"),
+        (LP_IDS, "shipped_cases_over_budget"),
+    ],
 )
-def test_a_pick_of_a_case_that_cannot_run_refuses(project, tpl, built, picked):
-    assert (
-        _kind(lambda: S.choose(_load(project, tpl, built), CAP, picked))
-        == "shipped_case_not_runnable"
+def test_each_refused_pick_has_its_own_kind(project, tpl, built, picked, kind):
+    assert _kind(lambda: S.choose(_load(project, tpl, built), 2, picked)) == kind
+
+
+def test_a_pick_at_the_cap_runs(project, tpl, built):
+    # The over-budget guard is `>`, not `>=`.
+    assert "cheap_battery" in S.choose(
+        _load(project, tpl, built), 2, ["low_price", "cheap_battery"]
     )
 
 
-@pytest.mark.parametrize("picked", [[], {}, "low_price", [1]])
-def test_a_pick_that_is_empty_or_malformed_refuses(project, tpl, built, picked):
-    kind = _kind(lambda: S.choose(_load(project, tpl, built), CAP, picked))
-    assert kind in ("shipped_cases_over_budget", "shipped_case_not_runnable")
-
-
-def test_a_pick_over_the_cap_refuses(project, tpl, built):
+def test_load_names_each_series_hash_and_project_ref(project, tpl, built):
     shipped = _load(project, tpl, built)
-    assert (
-        _kind(lambda: S.choose(shipped, 2, shipped["admissible"][:3]))
-        == "shipped_cases_over_budget"
-    )
+    assert set(shipped["series"]) >= {
+        "ipp_da_base",
+        "ipp_da_low",
+        "ipp_da_cannibalised",
+    }
+    assert all(len(h) == 64 for h in shipped["series"].values())
+    assert isinstance(shipped["refs"], dict)
 
 
 # ── what the allow-list refuses whatever the kind of value (mutant survivors) ─
@@ -1115,3 +1151,46 @@ def test_an_invalid_project_block_that_the_case_would_fix_is_still_not_run(
     assert case["kind"] == "unknown" and case["status"] == "not_run"
     assert case["why"] == "What this case moves is not known, so it is not run."
     assert "merchant_heavy" not in shipped["admissible"]
+
+
+# ── GK B (61): the cards name cases by label ──────────────────────────────────
+
+
+def _relabel(project, *labels):
+    path = project / "cases.json"
+    data = json.loads(path.read_text())
+    for case, label in zip(data["cases"], labels):
+        case["label"] = label
+    path.write_text(json.dumps(data))
+
+
+@pytest.mark.parametrize(
+    "labels, match",
+    [
+        (("",), "needs a label"),
+        (("   ",), "needs a label"),
+        (("Same", "Same"), "share the label"),
+        (("Same", "same "), "share the label"),
+    ],
+)
+def test_an_empty_or_shared_label_refuses_never_picks_the_first(
+    project, tpl, built, labels, match
+):
+    original = (project / "cases.json").read_text()
+    try:
+        _relabel(project, *labels)
+        with pytest.raises(S.ShippedError, match=match) as err:
+            _load(project, tpl, built)
+        assert err.value.kind == "shipped_cases_invalid"
+    finally:
+        (project / "cases.json").write_text(original)
+
+
+def test_a_relabel_changes_the_digest(project, tpl, built):
+    original = (project / "cases.json").read_text()
+    try:
+        before = _load(project, tpl, built)["digest"]
+        _relabel(project, "Low price level, relabelled")
+        assert _load(project, tpl, built)["digest"] != before
+    finally:
+        (project / "cases.json").write_text(original)
