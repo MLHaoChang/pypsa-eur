@@ -199,12 +199,64 @@ def test_v3_adds_only_the_ppa_step_after_the_case_and_its_kpi():
     assert R.resolve(V3)["envelope"]["budget"]["solves"] == 5
 
 
-def test_a_run_started_on_v2_resolves_v2_at_every_later_stage():
-    for _stage in ("solve", "result_gate", "explore", "report", "handoff"):
-        profile = R.resolve(V2)
-        assert profile["version"] == 2 and _sha(R.PROFILES[V2]) == V2_SHA
-        assert not any(k.get("record") for k in profile["kpis"])
-    assert run_explore._profile({"run": {"profile": V2}})["version"] == 2
+def test_a_run_started_on_v2_resolves_v2_at_every_later_stage(tmp_path, monkeypatch):
+    """S7: each later stage's own resolver (the gates' `run_gates._profile`,
+    explore's `run_explore._profile`, the report job's `run_report.start`, the
+    hand-off's `run_handoff.run_step`) reads @2 for a run started on it."""
+    from harness import run_report
+    from routers import report_jobs
+    from services import chat_tools, run_gates
+
+    seen = []
+    real = R.resolve
+    monkeypatch.setattr(R, "resolve", lambda ref: (seen.append(ref), real(ref))[1])
+    folder = tmp_path / "assistant_tasks"
+    folder.mkdir()
+    path = folder / f"{uuid.uuid4().hex}.json"
+    native = [
+        {"id": "report.1", "tool": "generate_report", "args": {}, "native": "report"},
+        {"id": "handoff.1", "tool": "read_handoff", "args": {}, "native": "handoff"},
+    ]
+    task = {
+        "task_id": path.stem,
+        "project_id": PID,
+        "status": "running",
+        "steps": [{**s, "status": "pending"} for s in native],
+        "run": {
+            "profile": V2,
+            "stage": "report",
+            "status": "running",
+            "stages": {n: {"status": "active"} for n in R.STAGES},
+        },
+    }
+    path.write_text(json.dumps(task))
+    ctx = SimpleNamespace(project_uuid=PID)
+    env = run_gates.Env(task=task, ctx=None, project=None, project_dir=None)
+    assert run_gates._profile(env)["version"] == 2
+    assert run_explore._profile(task)["version"] == 2
+
+    def no_llm():
+        raise RuntimeError("stop after the profile was read")
+
+    monkeypatch.setattr(
+        chat_tools, "_report_project", lambda: SimpleNamespace(uuid=PID)
+    )
+    monkeypatch.setattr(report_jobs, "_resolve_profile", no_llm)
+    assert (
+        run_report.start(path, ctx, task["steps"][0], instance=None)
+        == "report_start_failed"
+    )
+    read = []
+    monkeypatch.setattr(
+        run_handoff, "read_kpis", lambda profile, task=None: read.append(profile) or []
+    )
+    monkeypatch.setattr(run_handoff, "coverage", lambda *a: [])
+    monkeypatch.setattr(run_handoff, "revert_preview", lambda run: {"preview_id": None})
+    monkeypatch.setattr(run_report, "report_step", lambda task: None)
+    run_handoff.run_step(path, ctx, task["steps"][1])
+    [profile] = read
+    assert profile["version"] == 2 and not any(k.get("record") for k in profile["kpis"])
+    assert len(seen) >= 4 and set(seen) == {V2} and _sha(R.PROFILES[V2]) == V2_SHA
 
 
 def test_the_ppa_step_before_the_case_refuses_at_load():
@@ -663,3 +715,239 @@ def test_the_case_still_refuses_a_kept_asset_under_v3(monkeypatch):
         == "baseline_solve"
     )
     assert _refusal(monkeypatch, "run_investment_case", call="c1", step="c1") is None
+
+
+def test_a_run_turn_is_never_offered_solve_ppa_price(monkeypatch):
+    """C8 on the real path. `solve_ppa_price` is read tier, so its calls never
+    reach `run_envelope.admit`. The layer that refuses it on an @3 run session
+    is the offered-tools allowlist: `providers.wiring._tools_payload_for_profile`
+    offers only the stage's `session.stage_tools`, and `loop.dispatch_tool_call`
+    refuses a tool outside the offer (`tool_not_offered`) before its handler.
+    `run_envelope.PPA_TOOLS` stays as defence in depth."""
+    import contextvars
+
+    from harness import catalogue, loop
+    from harness.providers import wiring
+    from harness.session import ChatSession
+    from services import chat_tools
+
+    assert catalogue.safety_tier_for("solve_ppa_price") == "read"
+    assert "solve_ppa_price" in R.BOUND_CONTEXT_TOOLS  # GK B (52) I1
+    ran = []
+    monkeypatch.setitem(
+        chat_tools.DISPATCHERS, "solve_ppa_price", lambda **kw: ran.append(kw) or {}
+    )
+    agents = [s["agent"] for s in R.resolve(V3)["stages"].values() if "agent" in s]
+    assert len(agents) == 2  # the input and result gates' turns
+    for agent in agents:
+        session = ChatSession(model="m", owner_user_id="u1")
+        session.task_id, session.stage_tools = "t1", frozenset(agent["tools"])
+
+        def offer(session=session):
+            chat_tools.set_chat_session(session)
+            return {
+                t["name"]
+                for t in wiring._tools_payload_for_profile(SimpleNamespace(tools=True))
+            }
+
+        offered = contextvars.copy_context().run(offer)
+        assert offered and "solve_ppa_price" not in offered
+        collector = []
+        call = {
+            "id": "tu_1",
+            "name": "solve_ppa_price",
+            "input": {"target_irr": 0.08, "target_year": 25},
+        }
+        gen = loop.dispatch_tool_call(
+            session, call, collector, offered_tool_names=offered
+        )
+        frames = []
+        try:
+            while True:
+                frames.append(next(gen))
+        except StopIteration as stop:
+            dispatched = stop.value
+        assert dispatched is False and frames[0][1]["error_kind"] == "tool_not_offered"
+        assert collector == [
+            {
+                "type": "tool_result",
+                "tool_use_id": "tu_1",
+                "is_error": True,
+                "content": "tool_not_offered",
+            }
+        ]
+    assert ran == []
+
+
+# ── fail-closed stops ────────────────────────────────────────────────────────
+
+
+def test_a_raising_read_stops_the_step_for_the_user(tmp_path, world, monkeypatch):
+    ctx = _ctx()
+    path = _task(tmp_path, ctx)
+
+    def boom(*a):
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(run_ppa, "evaluate", boom)
+    assert (
+        run_actions.start(path, ctx, _read(path)["steps"][1], instance=None)
+        == "ppa_start_failed"
+    )
+    task = _read(path)
+    step = task["steps"][1]
+    assert step["status"] == "failed" and step["error"].startswith("ppa_start_failed")
+    assert "ppa_price" not in task["run"] and task["run"]["status"] == "needs_user"
+
+
+def test_a_run_taken_over_keeps_no_price(tmp_path, world, monkeypatch):
+    ctx = _ctx()
+    path = _task(tmp_path, ctx)
+    monkeypatch.setattr(run_actions, "_held", lambda *a: False)
+    assert (
+        run_actions.start(path, ctx, _read(path)["steps"][1], instance=None)
+        == "taken_over"
+    )
+    task = _read(path)
+    assert "ppa_price" not in task["run"] and task["steps"][1]["status"] == "running"
+
+
+# ── the hand-off reads a judged not-evaluated price back (review 1) ─────────
+
+
+def _handoff(path, ctx, monkeypatch):
+    from services.pypsa_service import PyPSAService
+
+    monkeypatch.setattr(PyPSAService, "get_active_context", staticmethod(lambda: ctx))
+    profile = {"kpis": [R.PPA_KPI]}
+    task = _read(path)
+    task["run"]["handoff"] = {"kpis": run_handoff.read_kpis(profile, task)}
+    return task, profile
+
+
+@pytest.mark.parametrize("case", ["no_root", "no_target"])
+def test_a_price_the_step_judged_not_evaluated_passes_the_handoff(
+    tmp_path, world, monkeypatch, case
+):
+    if case == "no_root":
+        _payload(world)["solve_ppa_status"] = "solve_ppa_no_root"
+    path, ctx = _run(tmp_path, _ctx(target=None) if case == "no_target" else None)
+    task, profile = _handoff(path, ctx, monkeypatch)
+    [row] = task["run"]["handoff"]["kpis"]
+    assert (row["status"], row["value"]) == ("not_evaluated", None) and row["reason"]
+    assert run_handoff.kpis_read(task, profile) is True
+    row["reason"] = "another reason"
+    assert run_handoff.kpis_read(task, profile) is False
+
+
+def test_a_stale_price_fails_the_handoff(tmp_path, world, monkeypatch):
+    path, ctx = _run(tmp_path, _ctx(started=200.0))
+    task, profile = _handoff(path, ctx, monkeypatch)
+    assert task["run"]["handoff"]["kpis"][0]["status"] == "stale"
+    assert task["run"]["handoff"]["kpis"][0]["settled"] is False
+    assert run_handoff.kpis_read(task, profile) is False
+
+
+def test_a_missing_record_is_never_read_back(tmp_path, world, monkeypatch):
+    path, ctx = _run(tmp_path)
+    task, profile = _handoff(path, ctx, monkeypatch)
+    del task["run"]["ppa_price"]
+    task["run"]["handoff"]["kpis"] = run_handoff.read_kpis(profile, task)
+    assert task["run"]["handoff"]["kpis"][0]["status"] == "not_evaluated"
+    assert run_handoff.kpis_read(task, profile) is False
+
+
+# ── the read-back binds the value (review 2) and the race (review 3) ────────
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"solved_ppa_price": 70.0},
+        {"currency": "USD"},
+        {"solved_ppa_price_money_year": 2025},
+    ],
+)
+def test_a_stored_price_other_than_the_one_read_reads_stale(tmp_path, world, change):
+    path, ctx = _run(tmp_path)
+    _payload(world).update(change)
+    got = run_ppa.read(_read(path), ctx)
+    assert got["state"] == "stale" and "not the one this run read" in got["reason"]
+
+
+def _race(world, monkeypatch, ctx):
+    """A new human case starts while the report is read."""
+
+    def reads(c):
+        ctx.solver_state["investment_case"] = {
+            "status": "running",
+            "started_at": 300.0,
+            "assumptions_hash": None,
+        }
+        return world["body"], world["report"]
+
+    monkeypatch.setattr(run_ppa, "_ic_reads", reads)
+
+
+def test_a_case_started_during_the_step_read_reads_stale(tmp_path, world, monkeypatch):
+    ctx = _ctx()
+    _race(world, monkeypatch, ctx)
+    path, _ = _run(tmp_path, ctx)
+    assert (
+        _record(path)["status"] == "stale"
+        and "started while" in _record(path)["reason"]
+    )
+
+
+def test_a_case_started_during_the_read_back_reads_stale(tmp_path, world, monkeypatch):
+    path, ctx = _run(tmp_path)
+    _race(world, monkeypatch, ctx)
+    got = run_ppa.read(_read(path), ctx)
+    assert got["state"] == "stale" and "started while" in got["reason"]
+
+
+# ── S4 read-time red cases (review 7) ────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "field,value", [("target_irr", 0.1), ("target_year", 20), ("contract_id", "ppa_pv")]
+)
+def test_a_target_or_contract_edited_after_the_step_reads_stale(
+    tmp_path, world, field, value
+):
+    path, ctx = _run(tmp_path)
+    ctx.solver_state["solver_config"].finance["solve_ppa"][field] = value
+    got = run_ppa.read(_read(path), ctx)
+    assert got["state"] == "stale" and "target" in got["reason"]
+
+
+def test_a_report_hash_mismatch_at_the_read_reads_stale(tmp_path, world):
+    path, ctx = _run(tmp_path)
+    world["report"]["assumptions_hash"] = "h2"  # the body still judges h1 current
+    got = run_ppa.read(_read(path), ctx)
+    assert got["state"] == "stale" and "not this run's own" in got["reason"]
+
+
+def test_the_case_record_no_longer_done_after_the_report_reads_reads_stale(
+    tmp_path, world, monkeypatch
+):
+    """The same case record, now not done (it was replaced in place)."""
+    ctx = _ctx()
+
+    def reads(c):
+        ctx.solver_state["investment_case"]["status"] = "running"
+        return world["body"], world["report"]
+
+    monkeypatch.setattr(run_ppa, "_ic_reads", reads)
+    path, _ = _run(tmp_path, ctx)
+    assert _record(path)["status"] == "stale"
+
+
+def test_a_judged_record_of_another_run_is_never_read_back(
+    tmp_path, world, monkeypatch
+):
+    path, ctx = _run(tmp_path, _ctx(target=None))
+    task, profile = _handoff(path, ctx, monkeypatch)
+    task["run"]["ppa_price"]["run_id"] = "another-run"
+    task["run"]["handoff"]["kpis"] = run_handoff.read_kpis(profile, task)
+    assert run_handoff.kpis_read(task, profile) is False

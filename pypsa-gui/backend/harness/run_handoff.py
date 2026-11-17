@@ -74,6 +74,7 @@ def _record_kpi(kpi: dict, task: dict | None) -> dict:
         "source": f"run.{kpi['record']}",
         "status": got["state"],
         "reason": got["reason"],
+        "settled": got.get("settled") is True,
     }
 
 
@@ -134,13 +135,21 @@ def kpis_read(task: dict, profile: dict) -> bool | None:
     if not isinstance(stored, list) or not profile.get("kpis"):
         return None
     fresh = read_kpis(profile, task)
-    if any(r["status"] != "read" for r in fresh):
-        return False
     by_id = {r.get("id"): r for r in stored if isinstance(r, dict)}
-    return all(
-        by_id.get(r["id"], {}).get("value") == r["value"]
-        and by_id[r["id"]].get("status") == "read"
-        for r in fresh
+    return all(_read_back(r, by_id.get(r["id"]) or {}) for r in fresh)
+
+
+def _read_back(fresh: dict, stored: dict) -> bool:
+    """One KPI read back: read now and equal to its row; or (study harness
+    14 S-C) a record KPI the run's own step judged not evaluated, with the
+    same status and reason as its row. Stale or anything else fails."""
+    if fresh["status"] == "read":
+        return stored.get("status") == "read" and stored.get("value") == fresh["value"]
+    return (
+        fresh.get("settled") is True
+        and fresh["status"] == NOT_EVALUATED
+        and stored.get("status") == NOT_EVALUATED
+        and stored.get("reason") == fresh.get("reason")
     )
 
 

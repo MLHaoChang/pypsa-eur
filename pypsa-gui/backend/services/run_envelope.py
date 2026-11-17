@@ -65,7 +65,10 @@ ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
 CASE_TOOLS = frozenset({"run_investment_case"})
 # Study harness 14 S-C (GK B (56) C8): the PPA price is the runner's native read
 # of the run's own case (`harness/run_ppa.py`); no call is ever its step, so a
-# model turn never solves one under the grant (#1123).
+# model turn never solves one under the grant (#1123). The tool is read tier, so
+# its calls never reach `admit`: a run turn is refused by the offered-tools
+# allowlist (`session.stage_tools`, `loop.dispatch_tool_call`). This branch is
+# defence in depth, for a tier or offer that changes later.
 PPA_TOOLS = frozenset({"solve_ppa_price"})
 # Study harness 07 (GK B B1-b): a grant that lists the run's report covers only
 # the stage-7 card (`cross`); the runner starts that job itself, so a chat

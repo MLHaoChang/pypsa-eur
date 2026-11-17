@@ -316,6 +316,22 @@ def _ic_reads(ctx) -> tuple[dict | None, dict | None]:
     )
 
 
+def _same_case(ctx, started) -> bool:
+    """Re-read after the report reads (review-gk: check the identity of the
+    record you publish): still the run's own case, and done."""
+    live = _live(ctx)
+    return (
+        live is not None
+        and live.get("started_at") == started
+        and live.get("status") == "done"
+    )
+
+
+def _payload(report) -> dict:
+    payload = ((report.get("sections") or {}).get("project") or {}).get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
 def _results_current(ctx) -> bool:
     from services import workflow_tools
 
@@ -406,6 +422,10 @@ def evaluate(task, step_id, frozen, ctx) -> dict:
     if live.get("status") != "done":
         return out(NOT_EVALUATED, "the run's investment case did not finish")
     body, report = _ic_reads(ctx)
+    if not _same_case(ctx, ic["started_at"]):
+        return out(
+            STALE, "a newer investment case started while the PPA price was read"
+        )
     if body is None or report is None:
         return out(NOT_EVALUATED, "the investment case has no report")
     own = report.get("assumptions_hash")
@@ -416,7 +436,7 @@ def evaluate(task, step_id, frozen, ctx) -> dict:
         return out(STALE, "the investment case's inputs changed since it ran")
     if not _results_current(ctx):
         return out(STALE, "the solve's results no longer describe the network")
-    payload = ((report.get("sections") or {}).get("project") or {}).get("payload") or {}
+    payload = _payload(report)
     flags = payload.get("flags") if isinstance(payload.get("flags"), list) else []
     why = _status_words(payload.get("solve_ppa_status"), flags)
     if why is not None:
@@ -545,12 +565,23 @@ def _check(task, rec, ctx) -> dict:
     if live is None or live.get("started_at") != rec["ic"]["started_at"]:
         return _no(STALE, "a newer investment case replaced this run's own")
     body, report = _ic_reads(ctx)
+    if not _same_case(ctx, rec["ic"]["started_at"]):
+        return _no(
+            STALE, "a newer investment case started while the PPA price was read"
+        )
     if report is None or report.get("assumptions_hash") != rec["assumptions_hash"]:
         return _no(STALE, "the stored investment case is not this run's own")
     if _current_hash(body) != rec["assumptions_hash"]:
         return _no(
             STALE, "the investment case's inputs changed after the PPA price was read"
         )
+    payload = _payload(report)
+    if (
+        payload.get("solved_ppa_price") != rec["price"]
+        or payload.get("currency") != rec["currency"]
+        or payload.get("solved_ppa_price_money_year") != rec["money_year"]
+    ):
+        return _no(STALE, "the stored PPA price is not the one this run read")
     return {
         "state": "read",
         "reason": None,
@@ -574,7 +605,12 @@ def read(task, ctx) -> dict:
     if not shape_ok(rec):
         return _no(NOT_EVALUATED, UNREADABLE)
     if rec["status"] != SOLVED:
-        return _no(rec["status"], rec["reason"])
+        # `settled`: the run's own step judged it not evaluated (the hand-off
+        # reads that back as such); a stale record never is.
+        settled = rec["status"] == NOT_EVALUATED and rec["run_id"] == task.get(
+            "task_id"
+        )
+        return {**_no(rec["status"], rec["reason"]), "settled": settled}
     try:
         return _check(task, rec, ctx)
     except Exception:  # noqa: BLE001 — an unreadable binding is stated, never a 500
