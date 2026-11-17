@@ -270,6 +270,44 @@ def test_mvar_to_pu_by_hand(tmp_path):
     assert "target 0.2 pu = pre-step mean 0.1 pu" in _rows(c)["rise_time"]["detail"]
 
 
+def test_p_based_rows_name_the_rated_p_base(tmp_path):
+    j = judge_pack(_full_pack(tmp_path), PROFILE, RATINGS)
+    assert j["header"]["rated_p_base"] == "rated P = test plant"
+    assert j["header"]["rated_mva_base"] == "rated MVA = test plant"
+    cases = _by_id(j)
+    for cid in ("p_step_skmin_xrmin_up", "f_step_skmin_xrmin_up"):
+        assert all("rated P = test plant" in r["detail"] for r in cases[cid]["rows"])
+    fault = _rows(cases["fault_3ph_skmin_xrmin_v030"])
+    assert "rated P = test plant" in fault["active_power_recovery"]["detail"]
+    assert "rated P" not in fault["reactive_current_rise"]["detail"]
+    assert not any(
+        "rated P" in r["detail"] for r in cases["q_step_skmin_xrmin_up"]["rows"]
+    )
+    j = judge_pack(
+        _full_pack(tmp_path / "b"), PROFILE, Ratings(rated_mva=50.0, mva_source="m")
+    )
+    assert j["header"]["rated_p_base"] == "no rated P"
+    assert j["header"]["rated_mva_base"] == "rated MVA = m"
+    assert _by_id(j)["p_step_skmin_xrmin_up"]["detail"] == (
+        "no rated P given: 'p_poc_mw' cannot be put in pu"
+    )
+    j = judge_pack(_full_pack(tmp_path / "c"), PROFILE, Ratings(100.0, "x"))
+    assert j["header"]["rated_mva_base"] == "no rated MVA"
+
+
+def test_mvar_is_never_put_in_pu_of_the_mw_rating(tmp_path):
+    # 4 Mvar is 0.1 pu of 40 MVA but 0.04 pu of 100 MW; only the first may appear
+    c = _one(
+        tmp_path,
+        _case("q_step_skmin_xrmin_up", "q_step", {"step_pu": 0.1}, "06"),
+        "q_step_skmin_xrmin_up",
+        {"q_poc_mvar": ("Mvar", _rise(4.0, 8.0))},
+        Ratings(100.0, "mw", 40.0, "mva"),
+    )
+    assert "pre-step mean 0.1 pu" in _rows(c)["rise_time"]["detail"]
+    assert c["status"] == "pass"
+
+
 def test_a_missing_rating_is_unknown_never_mw_as_pu(tmp_path):
     c = _one(
         tmp_path,
@@ -278,7 +316,7 @@ def test_a_missing_rating_is_unknown_never_mw_as_pu(tmp_path):
         {"q_poc_mvar": ("Mvar", _rise(4.0, 8.0))},
         Ratings(100.0, "hand"),
     )
-    assert c["status"] == "unknown" and "no rated_mva given" in c["detail"]
+    assert c["status"] == "unknown" and "no rated MVA given" in c["detail"]
 
 
 @pytest.mark.parametrize(
@@ -303,6 +341,19 @@ def test_a_missing_rating_is_unknown_never_mw_as_pu(tmp_path):
             "rated_mva must be a finite number > 0",
         ),
         ({"rated_mva": 50.0}, "rated_mva needs a stated source"),
+        (
+            {"rated_mva": -5.0, "mva_source": "x"},
+            "rated_mva must be a finite number > 0",
+        ),
+        (
+            {"rated_mva": float("nan"), "mva_source": "x"},
+            "rated_mva must be a finite number > 0",
+        ),
+        (
+            {"rated_mva": float("inf"), "mva_source": "x"},
+            "rated_mva must be a finite number > 0",
+        ),
+        ({"rated_mva": 50.0, "mva_source": ""}, "rated_mva needs a stated source"),
     ],
 )
 def test_rating_refusals(kwargs, match):

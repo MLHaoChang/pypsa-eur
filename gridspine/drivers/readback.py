@@ -51,7 +51,7 @@ JUDGMENT_COLUMNS = (
     "contract_version",
 )
 #: Where the rated active power comes from when the caller gives none.
-RATED_MW_SOURCE = "campus.yaml pcc.p_connection_mw (contracted connection capacity)"
+RATED_MW_SOURCE = "connection capacity p_connection_mw (campus file)"
 
 
 def run_ratings(run_dir, rated_mva=None, mva_source="", rated_mw=None, mw_source=""):

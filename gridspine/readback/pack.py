@@ -190,6 +190,14 @@ def _pre_mean(frame: ChannelFrame, values, t_event: float, window: float):
     return float(np.mean(values[sel])) if sel.any() else None
 
 
+def _p_base(ratings: Ratings) -> str:
+    return (
+        f"rated P = {ratings.mw_source}"
+        if ratings.rated_mw is not None
+        else "no rated P"
+    )
+
+
 def _unknown_case(case_id, kind, why) -> dict:
     return {
         "case_id": case_id,
@@ -206,6 +214,7 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
     p = case.params
     jc = {"id": case.case_id, "t_event": case.t_event_s, "pre_window_s": PRE_WINDOW_S}
     note = ""
+    p_rows = ()  # the checks that read P in pu of the rated P
 
     def take(role, values, unit):
         name = role.upper()
@@ -222,9 +231,10 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
                 take(role, frame.channel(name), frame.units[name])
         if "connected" in frame:
             take("connected", frame.channel("connected"), frame.units["connected"])
-        pmw, _ = _pu(frame, "p_poc_mw", "MW", ratings.rated_mw, "rated_mw")
+        pmw, _ = _pu(frame, "p_poc_mw", "MW", ratings.rated_mw, "rated P")
         if pmw is not None:
             take("p", pmw, "pu")
+            p_rows = ("active_power_recovery", "active_power_ramp")
         if case.kind == "fault_1ph":
             note = ONE_PHASE
     elif case.kind in ("v_step", "q_step", "p_step"):
@@ -237,14 +247,16 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
             y = frame.channel("v_poc_pu")
         else:
             name, unit, rating, label = (
-                ("q_poc_mvar", "Mvar", ratings.rated_mva, "rated_mva")
+                ("q_poc_mvar", "Mvar", ratings.rated_mva, "rated MVA")
                 if case.kind == "q_step"
-                else ("p_poc_mw", "MW", ratings.rated_mw, "rated_mw")
+                else ("p_poc_mw", "MW", ratings.rated_mw, "rated P")
             )
             y, why = _pu(frame, name, unit, rating, label)
             if y is None:
                 return _unknown_case(case.case_id, case.kind, why)
         take("y", y, "pu")
+        if case.kind == "p_step":
+            p_rows = ("rise_time", "settling_time", "overshoot")
         y0 = _pre_mean(frame, y, case.t_event_s, PRE_WINDOW_S)
         if y0 is None:
             return _unknown_case(
@@ -263,11 +275,12 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
             return _unknown_case(
                 case.case_id, case.kind, "the result has no 'f_hz' channel"
             )
-        pmw, why = _pu(frame, "p_poc_mw", "MW", ratings.rated_mw, "rated_mw")
+        pmw, why = _pu(frame, "p_poc_mw", "MW", ratings.rated_mw, "rated P")
         if pmw is None:
             return _unknown_case(case.case_id, case.kind, why)
         take("f", frame.channel("f_hz"), frame.units["f_hz"])
         take("p", pmw, "pu")
+        p_rows = ("droop",)
     else:
         return _unknown_case(
             case.case_id, case.kind, f"kind {case.kind!r} is not judged by GC-07"
@@ -282,6 +295,9 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
     for row in result["rows"]:
         if note:
             row["detail"] = f"{row['detail']}; {note}" if row["detail"] else note
+        if row["check"] in p_rows:
+            base = _p_base(ratings)
+            row["detail"] = f"{row['detail']}; {base}" if row["detail"] else base
         if row["check"] == "stays_connected" and "connected" not in jc["channels"]:
             row["detail"] = (
                 f"{row['detail']}; {NO_CONNECTED}" if row["detail"] else NO_CONNECTED
@@ -341,6 +357,12 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
         "pack_version": manifest["pack_version"],
         **stamp,
         "ratings": dataclasses.asdict(ratings),
+        "rated_p_base": _p_base(ratings),
+        "rated_mva_base": (
+            f"rated MVA = {ratings.mva_source}"
+            if ratings.rated_mva is not None
+            else "no rated MVA"
+        ),
         "connected": NO_CONNECTED,
         "extra_files": extra,
     }

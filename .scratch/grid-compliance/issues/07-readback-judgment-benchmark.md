@@ -87,3 +87,11 @@ PR2 (envelopes + judge)
 - K6 Output: judgment.csv/json written atomically; a re-run replaces both. Case summary follows J8. End-to-end status counts with literals.
 - K7 Shared files: `drivers/readback.py` additive only; `readback/__init__.py` gets GC-07's exports only.
 - Mutants on pack.py and the driver function, survivors argued in the PR body.
+
+**2026-11-17, GK A2 on K2 (ratings): GO with option C.** Rated P from the campus run's `pcc.p_connection_mw`, rated MVA only given with a source; follow-up `13-pack-manifest-ratings.md` for ratings in the manifest.
+
+- K2a: p_connection_mw is the connection capacity, not necessarily rated output; every P-based row and the header name the base ("rated P = connection capacity p_connection_mw (campus file)"); an explicit rated_mw with a source wins and its source is named.
+- K2b: never an MVA stand-in; without rated_mva + source, MVA-based cases read unknown "no rated MVA"; a test fails if MW is substituted.
+- K2c: a non-finite or ≤ 0 rating, or an explicit one without a source, is refused; each tested.
+- K2d: the follow-up names GC-06 manifest keys rated_mw / rated_mva / rating_source under data_hash; needs-triage, gated GK A.
+- A manifest-schema test keeps the synthetic manifest in step with GC-06's keys (#1587).
