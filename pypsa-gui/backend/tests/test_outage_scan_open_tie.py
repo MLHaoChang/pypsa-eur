@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 # SPDX-License-Identifier: MIT
 """A normally-open tie (p_max_pu 0) is no unit missing outage data (walkthrough 12)."""
+
 from __future__ import annotations
 
 import pypsa
