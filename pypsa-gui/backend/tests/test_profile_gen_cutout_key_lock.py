@@ -14,7 +14,12 @@ import time
 
 import pytest
 
-from services.profile_gen.cutout_cache import CutoutDownloadAborted, ensure_cutout
+from services.profile_gen.cutout_cache import (
+    CutoutDownloadAborted,
+    _key,
+    _pad_bbox,
+    ensure_cutout,
+)
 from tests import cutout_fakes
 
 BBOX = (13.0, 52.0, 14.0, 53.0)
@@ -47,6 +52,7 @@ def test_two_calls_for_the_same_key_fetch_each_month_once(cds_env, monkeypatch):
         threading.Thread(
             target=_run,
             args=(results, name),
+            daemon=True,
             kwargs=dict(
                 cache_dir=cache,
                 downloader=cutout_fakes.log_fetch,
@@ -90,14 +96,17 @@ def test_aborting_the_waiting_call_leaves_the_running_one_alone(cds_env):
     results: dict = {}
     stop_b = threading.Event()
     a = threading.Thread(
-        target=_run, args=(results, "a"),
+        target=_run, args=(results, "a"), daemon=True,
         kwargs=dict(cache_dir=cache, downloader=fetch_as("a")),
     )
     a.start()
     assert first_fetch.wait(10)
+    # A merge-stage temp of the running call: a waiter must not clear it.
+    part = cache / f"{_key('era5', _pad_bbox(BBOX, 0.5), YEAR)}.nc.part"
+    part.write_bytes(b"merging")
 
     b = threading.Thread(
-        target=_run, args=(results, "b"),
+        target=_run, args=(results, "b"), daemon=True,
         kwargs=dict(cache_dir=cache, downloader=fetch_as("b"), stop_event=stop_b),
     )
     b.start()
@@ -110,9 +119,41 @@ def test_aborting_the_waiting_call_leaves_the_running_one_alone(cds_env):
     assert not b.is_alive()
     assert isinstance(results["b"], CutoutDownloadAborted)
     assert a.is_alive() and "a" not in results  # the running call is untouched
+    assert part.exists()
+    part.unlink()
 
     gate.set()
     a.join(30)
     assert not a.is_alive()
     assert results["a"].exists()
     assert [m for _, m in calls] == list(range(1, 13))
+
+
+def test_a_different_cutout_does_not_wait(cds_env):
+    cache = cds_env / "cutouts"
+    gate = threading.Event()
+    first_fetch = threading.Event()
+
+    def gated(bbox, year, month, target, stop_event):
+        first_fetch.set()
+        assert gate.wait(30)
+        cutout_fakes.write_month(target, year, month)
+
+    def quick(bbox, year, month, target, stop_event):
+        cutout_fakes.write_month(target, year, month)
+
+    results: dict = {}
+    a = threading.Thread(
+        target=_run, args=(results, "a"), daemon=True,
+        kwargs=dict(cache_dir=cache, downloader=gated),
+    )
+    a.start()
+    try:
+        assert first_fetch.wait(10)
+        other = ensure_cutout((20.0, 40.0, 21.0, 41.0), YEAR, cache_dir=cache, downloader=quick)
+        assert other.exists()
+        assert a.is_alive()  # finished while the first cutout still fetched
+    finally:
+        gate.set()
+        a.join(30)
+    assert results["a"].exists() and results["a"] != other

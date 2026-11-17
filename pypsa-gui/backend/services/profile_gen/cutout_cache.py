@@ -399,6 +399,35 @@ def _merge_months(parts: list[Path], final: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# One fetch per cutout (RP-21)
+# ---------------------------------------------------------------------------
+
+# A lock per cutout file, process-wide: with PYPSA_GUI_MAX_CONCURRENT_SOLVES
+# > 1, two jobs for the same bbox and year would otherwise share `<key>.parts/`
+# (one unlinks or renames the other's `mNN.fetch.nc`) and both merge into
+# `<key>.nc`. Entries are never dropped: one small lock per distinct cutout.
+_KEY_LOCKS: dict[str, threading.Lock] = {}
+_KEY_LOCKS_GUARD = threading.Lock()
+_KEY_LOCK_POLL_S = 0.25
+
+
+def _key_lock(final: Path) -> threading.Lock:
+    name = str(final.resolve())
+    with _KEY_LOCKS_GUARD:
+        return _KEY_LOCKS.setdefault(name, threading.Lock())
+
+
+def _acquire_key_lock(lock: threading.Lock, stop_event: Any | None, key: str) -> None:
+    """Wait for the cutout's lock; a stop while waiting ends the call with
+    `CutoutDownloadAborted` and leaves the running fetch alone."""
+    while not lock.acquire(timeout=_KEY_LOCK_POLL_S):
+        if stop_event is not None and stop_event.is_set():
+            raise CutoutDownloadAborted(
+                f"cutout download aborted while another job fetched {key}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -437,8 +466,35 @@ def ensure_cutout(
     if final.exists():
         return final  # cache hit: no credentials needed, no network
 
-    # Cold path: credentials first (spec D2), then stale-merge cleanup.
+    # Cold path: credentials first (spec D2), then one fetch per cutout: a
+    # second call for the same key waits here (RP-21).
     cds_preflight()
+    lock = _key_lock(final)
+    _acquire_key_lock(lock, stop_event, key)
+    try:
+        if final.exists():
+            return final  # the call we waited on finished it: a cache hit
+        return _fetch_cutout(
+            padded, int(year), module, final, parts_dir,
+            downloader, progress, stop_event, timeout_s, fetch_in_subprocess,
+        )
+    finally:
+        lock.release()
+
+
+def _fetch_cutout(
+    padded: tuple[float, float, float, float],
+    year: int,
+    module: str,
+    final: Path,
+    parts_dir: Path,
+    downloader: Downloader | None,
+    progress: ProgressFn | None,
+    stop_event: Any | None,
+    timeout_s: float,
+    fetch_in_subprocess: bool | None,
+) -> Path:
+    """The month loop and the merge; the caller holds the cutout's lock."""
     Path(str(final) + ".part").unlink(missing_ok=True)  # never serve a .part
 
     dl = downloader or _atlite_month_downloader
