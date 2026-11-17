@@ -22,7 +22,7 @@ import {
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
 import CampusIslandCutsSection, { scenarioWords } from './CampusIslandCutsSection'
-import { showResultsTab, withReturnFrom } from '../layout/flowNavigation'
+import { openFlowTargetInPlace, showResultsTab, withReturnFrom } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
 import { money } from '../utils/money'
 
@@ -107,6 +107,17 @@ const fieldWords = (f: string) => {
   if (!rest.length) return FIELD_WORDS[f] ?? f.replace(/_/g, ' ')
   const field = rest.join('.')
   return `${head.replace(/_/g, ' ')}: ${(FIELD_WORDS[field] ?? field.replace(/_/g, ' ')).replace(/^./, c => c.toLowerCase())}`.replace(/^./, c => c.toUpperCase())
+}
+
+/** The campus file's home, Grid connection. In Guided it replaces the drawer's content (the user
+ *  stays over the card, with one way back); in Expert it opens the panel. */
+export function openCampusFile(): void {
+  const ui = useUIStore.getState()
+  if (ui.uiMode === 'guided') {
+    openFlowTargetInPlace({ section: 'connection', panel: 'campusElectrical', component: null, entity: null, field: null })
+  } else {
+    withReturnFrom(() => useUIStore.getState().setSlidePanel('campusElectrical'))
+  }
 }
 
 const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
@@ -329,10 +340,10 @@ export function IslandReportView({ report }: { report: IslandReport | undefined 
         <p className="text-[12px] text-muted mb-2" data-testid="island-missing">
           {tables.length > 0 && <>Ran: {tables.map(t => inSentence(t.title)).join('; ')}. </>}
           Not run yet: {report.missing.join(', ')}.{' '}
-          They need the campus file (draft it in Grid connection), then the grid study run.{' '}
+          They need the campus file (drafted in Grid connection) and a grid study run.{' '}
           <button type="button" className="text-accent underline" data-testid="island-missing-link"
-            onClick={() => withReturnFrom(() => useUIStore.getState().setSlidePanel('campusElectrical'))}>
-            Draft the campus file ›
+            onClick={openCampusFile}>
+            Open Grid connection ›
           </button>
         </p>
       )}

@@ -43,7 +43,6 @@ import { openPanel } from './results/openPanel'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
-import { withReturnFrom } from '../layout/flowNavigation'
 import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
 import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
@@ -53,7 +52,7 @@ import CampusDipsRestartSection from './CampusDipsRestartSection'
 import CampusHarmonicScanSection from './CampusHarmonicScanSection'
 import CampusUnitQCurveSection from './CampusUnitQCurveSection'
 import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
-import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
+import CampusIslandSection, { ISLAND_REPORT_KEY, openCampusFile } from './CampusIslandSection'
 import DcArchitectureSection from './DcArchitectureSection'
 import DcBackupSection from './DcBackupSection'
 import CampusLibrarySection from './CampusLibrarySection'
@@ -275,7 +274,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
               The study runs on the campus file, a description of your site's electrical network. It is
               drafted from the project in Grid connection.{' '}
               <button type="button" className="text-accent underline" data-testid="campus-draft-link"
-                onClick={() => withReturnFrom(() => useUIStore.getState().setSlidePanel('campusElectrical'))}>
+                onClick={openCampusFile}>
                 Draft the campus file ›
               </button>
             </p>

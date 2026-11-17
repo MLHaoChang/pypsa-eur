@@ -160,11 +160,11 @@ describe('island section: the report', () => {
     expect(within(table).getByTestId('island-binding-note').textContent).toContain('do not add up')
   })
 
-  it('says what ran, what has not, and links to drafting the campus file', async () => {
+  it('says what ran, what has not, and links to Grid connection', async () => {
     renderReport()
     const note = await screen.findByTestId('island-missing')
     expect(note.textContent).toMatch(/Ran: .*Not run yet: .*campus run with island tables/)
-    expect(within(note).getByTestId('island-missing-link').textContent).toContain('Draft the campus file')
+    expect(within(note).getByTestId('island-missing-link').textContent).toContain('Open Grid connection')
   })
 
   it('says what is missing', async () => {
