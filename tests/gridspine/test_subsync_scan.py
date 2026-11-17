@@ -126,11 +126,16 @@ def test_two_series_capacitors_on_parallel_paths_give_two_crossings():
             max_i_ka=1.0,
         )
     study = ss.subsync_scan(
-        net, poc, CASE, series_caps=[(a, poc, 0.2 * 40.0), (b, poc, 0.6 * 60.0)]
+        net,
+        poc,
+        {"normal": (1e7, 0.0)},
+        series_caps=[(a, poc, 0.2 * 40.0), (b, poc, 0.6 * 60.0)],
     )
     f = sorted(_series(study.resonance)["f_er_hz"])
     assert len(f) == 2
-    assert 5.0 < f[0] < f[1] < 45.0
+    # each path's own resonance, 50 sqrt(8/40) and 50 sqrt(36/60), where its series impedance vanishes
+    assert abs(f[0] - 22.360680) <= ss.DF_HZ
+    assert abs(f[1] - 38.729833) <= ss.DF_HZ
 
 
 def test_torsional_margin_uses_complement():
@@ -386,12 +391,14 @@ def test_long_line_note_judged_at_f0():
     net.line["length_km"] = (
         5.0  # past 0.4 of a quarter wave at the harmonic top, far short at f0
     )
-    assert ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)]).notes == []
+    assert ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)]).notes == [
+        ss.NO_MACHINES
+    ]
     net.line["length_km"] = 2000.0
     study = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)])
-    assert len(study.notes) == 1 and "quarter wavelength at 50 Hz" in study.notes[0]
+    assert len(study.notes) == 2 and "quarter wavelength at 50 Hz" in study.notes[1]
     assert all(
-        study.notes[0] in n
+        study.notes[1] in n
         for n in study.resonance.loc[study.resonance["kind"] == ss.SERIES, "note"]
     )
 
@@ -405,3 +412,31 @@ def test_a_grid_on_another_island_is_not_the_poc_grid():
     )
     with pytest.raises(ContractError, match="no path to the grid"):
         ss.z_poc(net, b2, 1210.0, 0.0, FS, [(b1, b2, 25.0)])
+
+
+def test_a_series_capacitor_across_an_existing_branch_is_refused():
+    net, b1, b2 = _radial()
+    with pytest.raises(
+        ContractError, match="already joining those buses; split the compensated line"
+    ):
+        ss.z_poc(net, b2, 1210.0, 0.0, FS, [(b1, b2, 25.0), (b2, b1, 10.0)])
+    b0 = int(net.line.at[0, "from_bus"])
+    with pytest.raises(ContractError, match="already joining those buses"):
+        ss.z_poc(net, b2, 1210.0, 0.0, FS, [(b1, b0, 25.0)])
+
+
+def test_every_series_row_says_machines_are_not_in_the_scan():
+    assert ss.NO_MACHINES == (
+        "synchronous machine impedance is not in the scan "
+        "(the network's branches, banks and grid only)"
+    )
+    net, b1, b2 = _radial()
+    res = _series(
+        ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)]).resonance
+    )
+    assert len(res) == 1 and ss.NO_MACHINES in res["note"].iloc[0]
+    res = _series(ss.subsync_scan(net, b1, CASE).resonance)
+    assert (
+        list(res["verdict"]) == ["not evaluated"]
+        and ss.NO_MACHINES in res["note"].iloc[0]
+    )

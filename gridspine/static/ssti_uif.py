@@ -24,7 +24,8 @@ cell, UPS) or the rectifier-fed load connect, each with its own ``S_plant``:
 at the PCC the grid's infeed dominates SC_tot, which would understate UIF.
 The PCC row is kept for information and does not set the verdict. Fault
 levels come from ``campus_sc.campus_fault_levels`` (IEC 60909 through
-pandapower) in its max and min cases; the verdict is the worst over buses,
+pandapower) with the machines alone energised, in its max and min cases (a
+converter's current-source infeed would raise SC_tot and understate UIF); the verdict is the worst over buses,
 cases and machines, since a weak grid raises a machine's share.
 
 Screening only: the binding answer is the EMT study.
@@ -201,12 +202,20 @@ def screen(
 def plant_mva_by_bus(units: pd.DataFrame) -> dict:
     """``{bus: S_plant MVA}`` over the converter-interfaced units and loads (``PLANT_NOTE``)."""
     out: dict = {}
-    for _, u in units[units["kind"].isin(CONVERTER_KINDS)].iterrows():
-        s = (
-            float(u["p_mw"]) / float(u["pf"])
-            if u["kind"] == "load"
-            else float(u["s_mva"])
-        )
+    for uid, u in units[units["kind"].isin(CONVERTER_KINDS)].iterrows():
+        if u["kind"] == "load":
+            pf = _finite(f"pf of {uid}", u["pf"])
+            if not 0 < pf <= 1:
+                raise ContractError(
+                    f"UIF screen: pf of {uid} must be in (0, 1], got {pf}"
+                )
+            s = _finite(f"p_mw of {uid}", u["p_mw"]) / pf
+        else:
+            s = _finite(f"s_mva of {uid}", u["s_mva"])
+        if s < 0:
+            raise ContractError(
+                f"UIF screen: the rating of {uid} must be >= 0, got {s}"
+            )
         out[str(u["bus"])] = out.get(str(u["bus"]), 0.0) + s
     return out
 
@@ -239,7 +248,9 @@ def campus_uif(
             notes=[note],
         )
     pcc = str(campus.net.bus.at[int(campus.net.ext_grid.iloc[0]["bus"]), "name"])
-    every = set(units.index)
+    every = set(
+        machines.index
+    )  # the machines alone: a converter's infeed would understate UIF
     full = fault_levels(campus, every)
     out = {uid: fault_levels(campus, every - {uid}) for uid in machines.index}
     evaluate = [(b, s, ROLE_CONVERTER) for b, s in sorted(plants.items())] + [
