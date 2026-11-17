@@ -3,7 +3,7 @@
 // unresolved, failed or stopped is never shown as a pass, and a converged row says how many checks did not run.
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { campusApi, errorText } from '../api/campusElectrical'
+import { errorText } from '../api/campusElectrical'
 import { networkApi } from '../api/network'
 import { nk } from '../utils/queryKeys'
 import { intentDefaults } from './intentDefaults'
@@ -104,17 +104,14 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
   const buses = useQuery(q('buses', networkApi.getBuses))
   const loads = useQuery(q('loads', networkApi.getLoads))
   const links = useQuery(q('links', networkApi.getLinks))
-  const profile = useQuery({
-    queryKey: ['intentGridCode', name, gridCode], enabled: gridCode != null, retry: false, staleTime: 30_000,
-    queryFn: () => campusApi.getPublishedGridCode(name, gridCode as string),
-  })
   const defaults = intentDefaults({
     buses: (buses.data ?? []) as never, loads: (loads.data ?? []) as never, links: (links.data ?? []) as never,
-    pstLimit: profile.data?.profile.pst_limit?.value ?? null, gridCode,
+    // The applied code's Pst limit from the backend, which reads shipped and the project's own codes alike.
+    pstLimit: held.data?.pst_limit.value ?? null, gridCode: codeKnown ? gridCode : '',
     status: { buses: buses.status === 'pending' ? 'loading' : buses.status === 'error' ? 'error' : 'ok',
       loads: loads.status === 'pending' ? 'loading' : loads.status === 'error' ? 'error' : 'ok',
       links: links.status === 'pending' ? 'loading' : links.status === 'error' ? 'error' : 'ok',
-      grid: gridCode == null || profile.status === 'success' ? 'ok' : profile.status === 'error' ? 'error' : 'loading' },
+      grid: held.status === 'pending' ? 'loading' : held.status === 'error' ? 'error' : 'ok' },
   })
   const f = {
     critical: typed.critical ?? defaults.critical.value, link: typed.link ?? defaults.link.value,
@@ -135,7 +132,7 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
     const isTyped = typed[k] !== undefined
     if (f[k] === '' && !isTyped) return null
     if (k === 'critical' || k === 'sk' || k === 'link') return sourceWord('project', isTyped)
-    if (k === 'pst') return sourceWord('grid_code', isTyped)
+    if (k === 'pst') return sourceWord(held.data?.pst_limit.kind ?? 'grid_code', isTyped)
     if (k === 'ramp') return sourceWord(held.data?.ramp_mw_per_min.kind, isTyped)
     return sourceWord(held.data?.envelope.kind, isTyped)
   }

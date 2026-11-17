@@ -44,7 +44,7 @@ export type RowProgress = 'queued' | 'running' | 'done'
 export type PqField = 'x_pu' | 'pf' | 'pf_req' | 's_n_mva' | 'p_cap_mw' | 'statcom_capital_cost'
 /** One project-held input: its value, where it came from in words, and its kind (`intent_inputs.KINDS`). */
 export interface Sourced<T> { value: T | null; source: string | null; kind?: SourceKind; reason?: string }
-export type SourceKind = 'project' | 'assumed' | 'load_envelope'
+export type SourceKind = 'project' | 'assumed' | 'load_envelope' | 'grid_code'
 export interface Envelope {
   phases: unknown[]
   max: { swing_mw: number; oscillation_amplitude_mw: number; oscillation_period_s: number }
@@ -57,6 +57,8 @@ export interface IntentInputDefaults {
   pq: Partial<Record<PqField, Sourced<number>>>
   /** The grid code the campus study applies: its saved one, else its default. */
   grid_code: { value: string | null; title: string | null; source: 'saved' | 'default' }
+  /** That code's Pst limit (shipped or the project's own code), or a reason. */
+  pst_limit: Sourced<number>
 }
 export interface IntentJob {
   status: JobStatus

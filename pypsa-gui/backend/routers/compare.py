@@ -588,6 +588,25 @@ def _intent_inputs(row, project, network, config, req: dict | None = None):
     return intent_inputs.resolve(network, req, **kw)
 
 
+def _pst_limit(row, code: str | None) -> dict:
+    """The applied grid code's Pst limit as {value, source, kind}: the profile the POST loads
+    (`campus.grid_code_profile`, shipped or the project's own); none when the code sets none or does not load."""
+    from services import campus_electrical_service as campus
+
+    if code is None:
+        return {"value": None, "source": None, "reason": "No grid code is set."}
+    try:
+        lim = campus.grid_code_profile(row, code).get("pst_limit") or {}
+    except HTTPException:
+        return {"value": None, "source": None, "reason": "The grid code could not be read."}
+    value = lim.get("value") if isinstance(lim, dict) else lim
+    if not isinstance(value, (int, float)) or not value > 0:
+        return {"value": None, "source": None, "reason": "The grid code sets no Pst limit."}
+    src = lim.get("source") if isinstance(lim, dict) else None
+    return {"value": float(value), "source": (lim.get("clause") if isinstance(lim, dict) else None) or "the grid code",
+            "kind": "assumed" if src == "assumed" else "grid_code"}
+
+
 @router.get("/{name}/intent-comparison/defaults")
 def get_intent_comparison_defaults(
     project: AuthorizedProject = ProjectAccessDep,
@@ -609,6 +628,7 @@ def get_intent_comparison_defaults(
     saved = (_read_json(project.directory / campus.SUBDIR / campus.SETTINGS_FILE) or {}).get("profile")
     out["grid_code"] = {"value": profile.get("id"), "title": profile.get("title"),
                         "source": "saved" if saved else "default"}
+    out["pst_limit"] = _pst_limit(row, profile.get("id"))
     return out
 
 
