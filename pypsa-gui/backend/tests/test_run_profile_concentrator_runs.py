@@ -46,6 +46,8 @@ FIXTURES = (granted, rated)
 def baseline(client, session_ctx, install_network, tmp_path):
     """The template from the route, its network replaced by the first stage's
     (2027) and saved, bound as the run's project."""
+    from services.solver_service import SolverConfig
+
     name = "Concentrator"
     response = client.post(
         f"/api/projects/from_template/{TEMPLATE}", params={"name": name}
@@ -55,9 +57,12 @@ def baseline(client, session_ctx, install_network, tmp_path):
         tmp_path / "stage1.nc"
     )
     install_network(pypsa.Network(tmp_path / "stage1.nc"))
+    # The network swap resets the session's settings: the template's own (its
+    # finance and commercial inputs among them) go back before the save.
+    ctx = session_ctx(client)
+    ctx.solver_state["solver_config"] = SolverConfig(**T.solver_config(TEMPLATE))
     response = client.post(f"/api/projects/{name}")
     assert response.status_code == 200, response.text
-    ctx = session_ctx(client)
     binding = PyPSAService.bind_request_context(ctx)
     cell = PyPSAService.bind_turn_cell()
     try:
