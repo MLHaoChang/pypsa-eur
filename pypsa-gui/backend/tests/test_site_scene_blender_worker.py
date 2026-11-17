@@ -789,3 +789,30 @@ def test_b5_an_oversize_blend_is_typed(make):
     with pytest.raises(bw.WorkerError) as e:
         bw.run(_ready(env), b"x" * 10, None, _caps(output_bytes=1000), env)
     assert e.value.kind == bw.OUTPUT_LIMIT and "out.blend" in str(e.value)
+
+
+# ── slice (b): GK B's pins on the kill path ─────────────────────────────────
+
+
+def test_the_container_kill_is_bounded_by_a_timeout(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(bw.subprocess, "run", fake_run)
+    bw._kill_container(bw.Readiness(True, None, "/b", "/rt", "img"), "n", {}, 2.0)
+    assert seen["timeout"] == 12.0
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [subprocess.TimeoutExpired(["kill"], 1), OSError("gone"), subprocess.SubprocessError()],
+)
+def test_a_kill_that_hangs_or_fails_never_breaks_cleanup(monkeypatch, exc):
+    def boom(*a, **k):
+        raise exc
+
+    monkeypatch.setattr(bw.subprocess, "run", boom)
+    assert bw._kill_container(bw.Readiness(True, None, "/b", "/rt", "img"), "n", {}, 0.1) is None

@@ -127,10 +127,8 @@ def _store(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def read_artifact(
-    project_dir, site_id: str, artifact_id: str
-) -> tuple[bytes, dict[str, Any]]:
-    """GET .../scene/artifacts/{id}: (zip bytes, meta). Not found unless it is this site's."""
+def _checked(project_dir, site_id: str, artifact_id: str) -> tuple[Path, dict[str, Any]]:
+    """The artifact's dir and meta, or not found unless it is this site's."""
     d = artifact_dir(project_dir, artifact_id)
     # No symlink anywhere on the way: neither the store, nor the artifact dir,
     # nor (through O_NOFOLLOW, regular files only, size-capped) any file.
@@ -138,8 +136,19 @@ def read_artifact(
         raise SceneError("not_found", "No such scene artifact")
     try:
         meta = json.loads(bw._read_output(d, "meta.json", META_CAP))
-        if not isinstance(meta, dict) or meta.get("site_id") != site_id:
-            raise SceneError("not_found", "No such scene artifact")
+    except (OSError, ValueError, bw.WorkerError):
+        raise SceneError("not_found", "No such scene artifact") from None
+    if not isinstance(meta, dict) or meta.get("site_id") != site_id:
+        raise SceneError("not_found", "No such scene artifact")
+    return d, meta
+
+
+def read_artifact(
+    project_dir, site_id: str, artifact_id: str
+) -> tuple[bytes, dict[str, Any]]:
+    """GET .../scene/artifacts/{id}: (zip bytes, meta). Not found unless it is this site's."""
+    d, meta = _checked(project_dir, site_id, artifact_id)
+    try:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for name in FILES:
@@ -148,3 +157,19 @@ def read_artifact(
     except (OSError, ValueError, bw.WorkerError):
         raise SceneError("not_found", "No such scene artifact") from None
     return buf.getvalue(), meta
+
+
+def read_return(
+    project_dir, site_id: str, artifact_id: str, cap: int
+) -> tuple[bytes, dict[str, Any]]:
+    """Slice (b): the returned GLB (at most `cap` bytes) and meta. The GLB is untrusted (`glb_read`)."""
+    d, meta = _checked(project_dir, site_id, artifact_id)
+    try:
+        return bw._read_output(d, "scene.glb", cap), meta
+    except bw.WorkerError as exc:
+        if exc.kind == bw.OUTPUT_LIMIT:
+            raise SceneError("resource_limit", f"The returned scene is over {cap >> 20} MiB",
+                             {"limit": "return_bytes", "max": cap}) from None
+        raise SceneError("not_found", "No such scene artifact") from None
+    except OSError:
+        raise SceneError("not_found", "No such scene artifact") from None

@@ -84,3 +84,20 @@ The manual job ran on `ubuntu-24.04` (4 vCPU, 16 GiB, 3 GiB swap). Artifact `sc0
   | memory | 2 GiB, no swap | about 6x peak RSS |
   | output | 256 MiB each | about 500x the `.blend` |
 
+
+### 2026-11-17: slice (b) built (branch `claude/site-scene-06b`)
+
+- R1 is `services/site_scene/glb_read.py`. The returned GLB is untrusted, and these limits apply:
+  - Container: one JSON chunk and at most one BIN chunk, with the declared length exact.
+  - Buffers: exactly one, embedded. Any `uri` and any `extensionsRequired` is refused.
+  - Every view and accessor is bounds-checked. Running totals of vertices, indices and primitives are capped, so aliased accessors cannot amplify.
+  - The node graph is a forest of depth at most 16.
+  - A node may not carry a matrix or a scale. Numbers must be finite.
+  - Every `extras` is capped at 4 KiB, and only `extras.feature_id` is read.
+- The `blender_return` proposal (`services/site_scene/blender_return.py`) is route-only and not a chat action.
+  - The export base must be exact: revision, generation and generation sha256, and the rebuilt export GLB's sha256 must equal the meta's.
+  - It proposes rigid moves and yaw turns of matched buildings only. Everything else is a named unknown and is not applied: tilted, lifted, mesh_edited, height_changed, no_mesh, missing_in_return, duplicate_feature_id, unknown_feature_id, equipment_not_applied, not_a_building. A mesh with no id is counted as reference-only.
+  - The returned GLB's sha256 joins the input hash, so Apply re-reads the artifact and refuses changed bytes.
+- Contract: proposal create and cancel are `lock: True`. A test drives every contract row under a foreign lock.
+- GK B's four pins from #1561 have their own tests: the kill timeout, the kill except, the symlinked store, and META_CAP.
+- Artifact streaming and retention are filed as issue 10. The review UI (diff panel plus Apply) is not in this slice.

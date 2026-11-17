@@ -23,6 +23,7 @@ from db.models import SolveJobRow
 from services import solve_queue as sq
 from services.site_scene import blender_job
 from services.site_scene import blender_worker as bw
+from services.site_scene.contract import SceneError
 from tests.test_site_scene_blender_worker import make  # noqa: F401 - fixture
 from tests.test_site_scene_export import _scene_with_buildings
 from tests.test_site_scene_routes import _empty_network, _kind
@@ -512,3 +513,48 @@ def test_a_symlinked_artifact_dir_is_404(client, geo, tmp_path):
     store.mkdir(parents=True, exist_ok=True)
     (store / aid).symlink_to(elsewhere / blender_job.ARTIFACTS / aid)
     assert client.get(ART + aid).status_code == 404
+
+
+# ── slice (b): GK B's pins on the artifact read ─────────────────────────────
+
+
+def test_a_symlinked_artifact_store_is_404(client, geo, tmp_path):
+    _scene_with_buildings(client, geo)
+    aid = str(uuid.uuid4())
+    elsewhere = tmp_path / "elsewhere"
+    blender_job._store(
+        elsewhere, aid, bw.Result(b"g", b"b", ""), {"artifact_id": aid, "site_id": "campus"}
+    )
+    (geo / blender_job.ARTIFACTS).symlink_to(elsewhere / blender_job.ARTIFACTS)
+    assert client.get(ART + aid).status_code == 404
+
+
+def test_meta_json_is_always_read_under_its_own_small_cap(geo, monkeypatch):
+    aid = str(uuid.uuid4())
+    blender_job._store(
+        geo, aid, bw.Result(b"g", b"b", ""), {"artifact_id": aid, "site_id": "campus"}
+    )
+    caps = []
+    real = bw._read_output
+
+    def spy(work, name, cap):
+        caps.append((name, cap))
+        return real(work, name, cap)
+
+    monkeypatch.setattr(bw, "_read_output", spy)
+    blender_job.read_artifact(geo, "campus", aid)
+    meta_caps = [c for n, c in caps if n == "meta.json"]
+    assert meta_caps and set(meta_caps) == {blender_job.META_CAP}
+    assert blender_job.META_CAP < bw.Caps().output_bytes
+
+
+def test_an_oversized_meta_json_is_404(geo):
+    aid = str(uuid.uuid4())
+    pad = "x" * blender_job.META_CAP
+    blender_job._store(
+        geo, aid, bw.Result(b"g", b"b", ""),
+        {"artifact_id": aid, "site_id": "campus", "pad": pad},
+    )
+    with pytest.raises(SceneError) as e:
+        blender_job.read_artifact(geo, "campus", aid)
+    assert e.value.kind == "not_found"

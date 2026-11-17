@@ -65,10 +65,10 @@ ROUTES: tuple[dict[str, Any], ...] = (
     {"method": "PUT", "path": "/api/projects/{name}/site-anchor", "role": "editor", "lock": True, "chat": "none"},
     {"method": "GET", "path": "/api/projects/{name}/sites/{site_id}/scene", "role": "viewer", "lock": False, "chat": "none"},
     {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/adopt", "role": "editor", "lock": True, "chat": "none"},
-    {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals", "role": "editor", "lock": False, "chat": "none"},
+    {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals", "role": "editor", "lock": True, "chat": "none"},
     {"method": "GET", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}", "role": "editor", "lock": False, "chat": "none"},
     {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply", "role": "editor", "lock": True, "chat": "none"},
-    {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel", "role": "editor", "lock": False, "chat": "none"},
+    {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel", "role": "editor", "lock": True, "chat": "none"},
     # SC-04: a read that answers with a download; it writes nothing, so a viewer may call it and no lock applies.
     {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/exports", "role": "viewer", "lock": False, "chat": "none"},
     # Issue 06 slice (a): queue a pinned-Blender run; it stores an artifact under the project, so it locks.

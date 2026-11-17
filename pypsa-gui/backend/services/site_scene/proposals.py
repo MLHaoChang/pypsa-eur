@@ -28,17 +28,18 @@ import uuid
 from collections import OrderedDict
 from typing import Any
 
-from services.site_scene import associations, layout, native, store
+from services.site_scene import associations, blender_return, layout, native, store
 from services.site_scene.contract import SceneError
 from services.site_scene.verdicts import REASON_NO_BOUNDARY
 
 # GK B G1: route-only actions are marked on their receipt, so the chat can tell
 # them apart even after the proposal map has lost the entry.
-ROUTE_ONLY_ACTIONS = ("import_layout",)
-ACTIONS = ("generate_native", "edit_buildings", "import_layout", "bind_targets", "rebind", "place_existing", "detach", "undo_detach")
+ROUTE_ONLY_ACTIONS = ("import_layout", "blender_return")
+ACTIONS = ("generate_native", "edit_buildings", "import_layout", "bind_targets", "rebind", "place_existing", "detach",
+           "undo_detach", "blender_return")
 # SC-02a: the inputs each action takes. The model actions read the open network.
 INPUT_KEYS = {"generate_native": {"greenfield", "sources"}, "edit_buildings": {"greenfield", "sources"},
-              "import_layout": {"layout"},
+              "import_layout": {"layout"}, "blender_return": {"artifact_id"},
               "bind_targets": {"associations", "groups"}, "rebind": {"association", "placement", "target", "confirmed"},
               "place_existing": {"placements"}, "detach": {"keys"}, "undo_detach": {"proposal"}}
 MODEL_ACTIONS = {"bind_targets": (associations.prepare_bind, associations.apply_bind),
@@ -128,6 +129,8 @@ def _parse(body: Any) -> tuple[str, int, dict[str, Any]]:
         # SC-06 L2: only the fields generation uses are kept, so the proposal never
         # holds a document's properties, foreign members or names.
         inputs = {"layout": layout.normalize(inputs["layout"])}
+    if action == "blender_return" and not isinstance(inputs.get("artifact_id"), str):
+        raise SceneError("invalid_input", "Proposal: blender_return needs an artifact_id", {"field": "inputs"})
     return action, base, inputs
 
 
@@ -155,6 +158,13 @@ def create(project_dir, project_key: str, owner: str | None, site_id: str, body:
             raise SceneError("resource_limit", f"Too large: the preview is over the "
                              f"{native.size_text(native.MAX_PREVIEW_BYTES)} limit",
                              {"limit": "preview_bytes", "max": native.MAX_PREVIEW_BYTES, "actual": size})
+    elif action == "blender_return":
+        # Issue 06 (b): the returned GLB's sha256 joins the inputs, so the input
+        # hash names exactly the bytes reviewed and Apply refuses changed ones.
+        sha, buildings, review = blender_return.prepare(project_dir, scene, inputs["artifact_id"])
+        inputs = {**inputs, "glb_sha256": sha}
+        stats = native.admit_output(buildings)
+        preview, size = {"buildings": buildings, "stats": stats, "blender_return": review}, stats["bytes"]
     else:
         if len(scene["site"].get("boundary") or []) < 3:
             raise SceneError("invalid_input", REASON_NO_BOUNDARY, {"field": "boundary"})
@@ -305,6 +315,12 @@ def _commit_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], ex
     if scene["revision"] != entry["base_revision"]:
         # A receipt further back in the chain is still read back (store.apply); otherwise refuse.
         return store.apply(project_dir, site_id, {**proposal, "changes": {}}, expected)
+    if entry["action"] == "blender_return":
+        inputs = entry["inputs"]
+        _sha, buildings, _review = blender_return.prepare(project_dir, scene, inputs["artifact_id"],
+                                                          inputs["glb_sha256"])
+        native.admit_output(buildings)
+        return store.apply(project_dir, site_id, {**proposal, "changes": {"buildings": buildings}}, expected)
     if n is None:
         buildings, _ = _buildings(entry["action"], scene["buildings"], scene["site"], entry["inputs"])
         return store.apply(project_dir, site_id, {**proposal, "changes": {"buildings": buildings}}, expected)
