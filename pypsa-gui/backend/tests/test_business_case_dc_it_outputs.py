@@ -34,8 +34,9 @@ from tests.test_investment_case_routes import (
 IT_OUTPUTS = {"contracted_it_kw", "it_energy"}
 
 
-def _dc_project(client, tmp_path, monkeypatch, project_row, install_network, tid,
-                dc_load=None):
+def _dc_project(
+    client, tmp_path, monkeypatch, project_row, install_network, tid, dc_load=None
+):
     """A data-centre project created through the route (with the form's body when
     ``dc_load`` is a dict), its saved network solved and live. `fresh` is forced,
     as `solve_matches_inputs` reads it after a run through the solve route."""
@@ -49,10 +50,13 @@ def _dc_project(client, tmp_path, monkeypatch, project_row, install_network, tid
 
     _stage_dc(tmp_path, monkeypatch, tid)
     body = {"dc_load": dc_load} if dc_load is not None else None
-    r = client.post(f"/api/projects/from_template/{tid}", params={"name": "dc_bc"},
-                    json=body)
+    r = client.post(
+        f"/api/projects/from_template/{tid}", params={"name": "dc_bc"}, json=body
+    )
     assert r.status_code in (200, 201), r.text
-    d = pathlib.Path(project_registry.project_dir(project_row(r.json().get("name", "dc_bc"))))
+    d = pathlib.Path(
+        project_registry.project_dir(project_row(r.json().get("name", "dc_bc")))
+    )
     n = pypsa.Network(str(d / "network.nc"))
     n.optimize(solver_name="highs")
     install_network(n)
@@ -93,16 +97,27 @@ def test_options_offer_the_it_outputs_on_a_project_made_with_the_form(
     assert body["outputs_reason"] is None, body["outputs_reason"]
     ids = {o["id"] for o in body["outputs"]}
     assert IT_OUTPUTS <= ids
-    assert body["units_by_source"]["linked"]["contracted_it_kw"]["revenue"] == ["kW_month"]
+    assert body["units_by_source"]["linked"]["contracted_it_kw"]["revenue"] == [
+        "kW_month"
+    ]
 
 
-@pytest.mark.parametrize(("variant", "kw_per_gpu"), [("colocation", None), ("gpu_cloud", 1.25)])
+@pytest.mark.parametrize(
+    ("variant", "kw_per_gpu"), [("colocation", None), ("gpu_cloud", 1.25)]
+)
 def test_the_dc_preset_runs_with_typed_prices_only(
-    client, tmp_path, monkeypatch, project_row, tmp_projects_dir, install_network,
-    variant, kw_per_gpu
+    client,
+    tmp_path,
+    monkeypatch,
+    project_row,
+    tmp_projects_dir,
+    install_network,
+    variant,
+    kw_per_gpu,
 ):
-    _dc_project(client, tmp_path, monkeypatch, project_row, install_network,
-                "eh_datacenter", {})
+    _dc_project(
+        client, tmp_path, monkeypatch, project_row, install_network, "eh_datacenter", {}
+    )
     _fake_build(monkeypatch)
     assert _put_fin(client, _s2_inputs()).status_code == 200
     r = client.post(IC_URL, json={})
@@ -112,9 +127,11 @@ def test_the_dc_preset_runs_with_typed_prices_only(
     r = client.get(PRESET_URL, params={"variant": variant})
     assert r.status_code == 200, r.text
     bc = _typed_prices(r.json()["business_case"], kw_per_gpu)
-    linked = {ln["quantity_source"].split(":", 1)[1].split("@", 1)[0]
-              for ln in bc["inputs"]["lines"]
-              if (ln.get("quantity_source") or "").startswith("linked:")}
+    linked = {
+        ln["quantity_source"].split(":", 1)[1].split("@", 1)[0]
+        for ln in bc["inputs"]["lines"]
+        if (ln.get("quantity_source") or "").startswith("linked:")
+    }
     assert linked & IT_OUTPUTS, linked
     r = _put(client, bc)
     assert r.status_code == 200, r.text
@@ -122,19 +139,26 @@ def test_the_dc_preset_runs_with_typed_prices_only(
     assert "linked_output_missing" not in kinds, kinds
     assert client.post(BC_URL).status_code == 200
     out = _bc_poll(client)
-    assert out["status"] == "done", {k: out.get(k) for k in ("error", "error_code", "message", "field")}
+    assert out["status"] == "done", {
+        k: out.get(k) for k in ("error", "error_code", "message", "field")
+    }
     outputs = out["report"]["outputs"]
     for ln in bc["inputs"]["lines"]:
         src = ln.get("quantity_source") or ""
         if src.split(":", 1)[-1].split("@", 1)[0] in IT_OUTPUTS:
-            assert outputs[ln["name"]]["status"] == "ok", (ln["name"], outputs[ln["name"]])
+            assert outputs[ln["name"]]["status"] == "ok", (
+                ln["name"],
+                outputs[ln["name"]],
+            )
 
 
 def test_a_dc_project_without_the_form_body_offers_no_it_output(
     client, tmp_path, monkeypatch, project_row, tmp_projects_dir, install_network
 ):
     """No spec stored: the IT outputs are not offered (never read off a default spec)."""
-    _dc_project(client, tmp_path, monkeypatch, project_row, install_network, "eh_datacenter")
+    _dc_project(
+        client, tmp_path, monkeypatch, project_row, install_network, "eh_datacenter"
+    )
     body = client.get(OPTIONS_URL).json()
     assert not IT_OUTPUTS & {o["id"] for o in body["outputs"]}
 
@@ -167,8 +191,10 @@ def _bc_report(client, monkeypatch, variant, kw_per_gpu=None):
     assert _put_fin(client, _s2_inputs()).status_code == 200
     assert client.post(IC_URL, json={}).status_code == 200
     assert _poll(client)["status"] == "done"
-    bc = _typed_prices(client.get(PRESET_URL, params={"variant": variant}).json()["business_case"],
-                       kw_per_gpu)
+    bc = _typed_prices(
+        client.get(PRESET_URL, params={"variant": variant}).json()["business_case"],
+        kw_per_gpu,
+    )
     assert _put(client, bc).status_code == 200
     assert client.post(BC_URL).status_code == 200
     out = _bc_poll(client)
@@ -194,11 +220,18 @@ def _hash_of(spec, timezone, variant="colocation", tid="eh_datacenter"):
     n.optimize(solver_name="highs")
     lost = {"lost_load_t": pd.DataFrame(index=n.snapshots)}  # no slack ran: none lost
     solve = L.LinkedSolve(network=n, fresh=True, lost_load=lost, dc=(spec, timezone))
-    raw = _typed_prices({"inputs": P.preset(tid, variant, currency="EUR").model_dump(mode="json")})
+    raw = _typed_prices(
+        {"inputs": P.preset(tid, variant, currency="EUR").model_dump(mode="json")}
+    )
     inputs = BusinessCaseInputs.model_validate(raw["inputs"])
-    outputs = {ln.name: L.resolve(ln, n, solve, kw_per_gpu=1.25)
-               for ln in inputs.lines if ln.source == "linked"}
-    assert outputs and all(not isinstance(v, L.NotEvaluated) for v in outputs.values()), outputs
+    outputs = {
+        ln.name: L.resolve(ln, n, solve, kw_per_gpu=1.25)
+        for ln in inputs.lines
+        if ln.source == "linked"
+    }
+    assert outputs and all(
+        not isinstance(v, L.NotEvaluated) for v in outputs.values()
+    ), outputs
     return business_case_hash(S.to_finance_case("s2"), inputs, outputs)
 
 
@@ -215,8 +248,9 @@ def test_a1_the_digest_moves_with_the_it_spec_and_with_nothing_else():
     spec = T.dc_load_spec("eh_datacenter", {})
     base = _hash_of(spec, None)
     assert _hash_of(spec, None) == base
-    smaller = spec.model_copy(update={"phases": [p.model_copy(update={"it_mw": 30.0})
-                                                 for p in spec.phases]})
+    smaller = spec.model_copy(
+        update={"phases": [p.model_copy(update={"it_mw": 30.0}) for p in spec.phases]}
+    )
     assert _hash_of(smaller, None) != base
     # The digest reads the amounts, not the spec: a timezone enters only through them.
     # On this whole-week network the utilisation's daily profile sums the same on any
@@ -230,12 +264,23 @@ def test_a1_the_digest_moves_with_the_it_spec_and_with_nothing_else():
     assert _hash_of(other_backup, None) == base
 
 
-@pytest.mark.parametrize("bad", ["{not json", '{"id": "eh_datacenter", "dc_load": {"spec": {"phases": "x"}}}'])
+@pytest.mark.parametrize(
+    "bad",
+    ["{not json", '{"id": "eh_datacenter", "dc_load": {"spec": {"phases": "x"}}}'],
+)
 def test_a2_a_corrupt_spec_drops_only_the_it_outputs(
-    client, tmp_path, monkeypatch, project_row, tmp_projects_dir, install_network, caplog, bad
+    client,
+    tmp_path,
+    monkeypatch,
+    project_row,
+    tmp_projects_dir,
+    install_network,
+    caplog,
+    bad,
 ):
-    d = _dc_project(client, tmp_path, monkeypatch, project_row, install_network,
-                    "eh_datacenter", {})
+    d = _dc_project(
+        client, tmp_path, monkeypatch, project_row, install_network, "eh_datacenter", {}
+    )
     from services.template_marker import source_path
 
     source_path(d).write_text(bad)
@@ -244,7 +289,7 @@ def test_a2_a_corrupt_spec_drops_only_the_it_outputs(
     assert body["outputs_reason"] is None
     ids = {o["id"] for o in body["outputs"]}
     assert any(i.startswith("capacity.") for i in ids) and not IT_OUTPUTS & ids
-    if bad.startswith("{\"id\""):
+    if bad.startswith('{"id"'):
         assert "data-centre load spec does not read" in caplog.text
 
 
@@ -255,15 +300,22 @@ def test_a3_a_non_dc_template_reads_as_before(
     i.e. those of `bind(ctx, dc=None)` (master's `bind(ctx)`)."""
     from services.business_case import linked_outputs as L
 
-    _dc_project(client, tmp_path, monkeypatch, project_row, install_network, "eh_h2_hub")
+    _dc_project(
+        client, tmp_path, monkeypatch, project_row, install_network, "eh_h2_hub"
+    )
     first = _bc_report(client, monkeypatch, "h2_offtake")
     now = client.get(OPTIONS_URL).json()
     with_project = L.bind
-    monkeypatch.setattr(L, "bind", lambda ctx, **kw: with_project(ctx, **{"dc": None, **kw}))
+    monkeypatch.setattr(
+        L, "bind", lambda ctx, **kw: with_project(ctx, **{"dc": None, **kw})
+    )
     assert client.get(OPTIONS_URL).json() == now
     assert client.post(BC_URL).status_code == 200
     again = _bc_poll(client)
-    assert again["business_case_hash"] and again["business_case_hash"] == first["business_case_hash"]
+    assert (
+        again["business_case_hash"]
+        and again["business_case_hash"] == first["business_case_hash"]
+    )
 
 
 def test_a4_the_staged_campus_binds_its_template_timezone(
@@ -273,9 +325,15 @@ def test_a4_the_staged_campus_binds_its_template_timezone(
     from services.business_case import linked_outputs as L
     from services.pypsa_service import PyPSAService
 
-    _dc_project(client, tmp_path, monkeypatch, project_row, install_network,
-                "eh_datacenter_staged", {})
+    _dc_project(
+        client,
+        tmp_path,
+        monkeypatch,
+        project_row,
+        install_network,
+        "eh_datacenter_staged",
+        {},
+    )
     solve = L.bind(PyPSAService.get_active_context())
     assert solve.dc is not None and solve.dc[1] == "UTC"
     assert solve.dc[0].phases  # the stored spec, its phases from the form body
-
