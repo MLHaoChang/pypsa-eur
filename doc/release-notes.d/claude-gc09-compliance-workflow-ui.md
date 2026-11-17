@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Grid compliance section in Studies › Campus electrical. It lists the 25 TRGC deliverables by phase, each with its declared status, prerequisites, data list, data freeze ("out of date" after an edit, "as submitted" once submitted), TSO comment log and report-pack download. Refusals from the server are shown as given, and disabled actions say why.
