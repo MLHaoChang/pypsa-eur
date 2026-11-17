@@ -163,13 +163,19 @@ def test_a_dc_project_without_the_form_body_offers_no_it_output(
     assert not IT_OUTPUTS & {o["id"] for o in body["outputs"]}
 
 
-def test_bind_reads_no_spec_off_a_context_without_a_project():
+def test_bind_reads_no_spec_off_a_context_without_a_project(caplog):
+    """A scratch network has no project to read: no spec, and no warning that one
+    does not read."""
     from services.business_case import linked_outputs as L
 
-    ctx = SimpleNamespace(network=pypsa.Network(), solver_state={}, storage_dir=None)
-    assert L._project_dc(ctx) is None
-    ctx = SimpleNamespace(network=pypsa.Network(), solver_state={})
-    assert L._project_dc(ctx) is None
+    with caplog.at_level("WARNING"):
+        ctx = SimpleNamespace(
+            network=pypsa.Network(), solver_state={}, storage_dir=None
+        )
+        assert L._project_dc(ctx) is None
+        ctx = SimpleNamespace(network=pypsa.Network(), solver_state={})
+        assert L._project_dc(ctx) is None
+    assert "does not read" not in caplog.text
 
 
 def test_bind_keeps_an_explicit_dc(monkeypatch):
