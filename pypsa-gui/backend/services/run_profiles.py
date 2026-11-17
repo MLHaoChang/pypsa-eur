@@ -886,6 +886,107 @@ def _eh_ammonia_staged() -> dict:
 
 EH_AMMONIA_STAGED = _eh_ammonia_staged()
 
+# Study harness 16 (design §9.3 "eh_concentrator_staged"; GK A (28) GO,
+# Q1-Q6): eh_concentrator_staged@1 on the shipped template (g2p 10-12, 18).
+# The solve, then the investment case against the site as it stands today
+# (g2p 11: a baseline re-solve). The result gate blocks on the mass balance
+# and on a case not established on that basis; the motor start, the restart
+# and N-1 on the site transformer warn (the start method and the transformer
+# are the user's, §6.0), each FAIL shown with its numbers. The KPIs are warn
+# rules that read as established: lost tonnes and EUR by period, the shed's
+# level and the project NPV. The process units, the mine, the shipments, the
+# services load, the grid import and the lost-production slack are never
+# levers: the envelope names the per-year candidates, each up to twice its
+# template cap (`eh_concentrator.py`: PV 40, BESS 20 MW, stockpile 60,000 t).
+CONC_MASS_BALANCE_TOL = 1e-6  # design §3.B
+CONC_SOLVES = 1  # the plan; the case's baseline re-solve is not an envelope solve (run_ic.SOLVES)
+
+
+def _conc_levers():
+    return [_h2_edit("Generator", "pv_new_*", "p_nom_max", 80.0),
+            _h2_edit("StorageUnit", "bess_new_*", "p_nom_max", 40.0),
+            _h2_edit("Store", "coarse_ore_stockpile_new_*", "e_nom_max", 120_000.0)]
+
+
+def _eh_concentrator_staged() -> dict:
+    from services.run_gates_concentrator import MASS_BALANCE_BASIS
+    template = "eh_concentrator_staged"
+    unserved = next(r for r in EH_RESULT_RULES if r["id"] == "kpi.unserved_mwh")
+    edits = _conc_levers()
+    tunable = sorted({(e["target"]["component"], e["target"]["attr"]) for e in edits})
+    levers = [f"{c}.{a}" for c, a in tunable]
+    return {
+        "id": template, "version": 1,
+        "templates": [template],
+        "scope": "flow_scope.preset_for",
+        "params": {"required": [], "ask": []},
+        "inputs": {"required": []},
+        "stages": {
+            "setup": {"actions": [], "rules": [
+                *GENERIC["setup"]["rules"],
+                _rule("set.project.template", "project.template", "eq", template,
+                      basis=f"The profile serves the {template} template only."),
+            ]},
+            "inputs": {"actions": list(GENERIC["inputs"]["actions"]), "rules": [
+                _rule("conc.process.units", "process.units", "nonempty",
+                      basis="The process units are the user's inputs (the process-unit form): a committable unit "
+                            "with a capacity and an efficiency to a product counted in tonnes."),
+            ]},
+            "solve": {"actions": [*GENERIC["solve"]["actions"], _call("run_investment_case")],
+                      "rules": GENERIC["solve"]["rules"]},
+            "result_gate": {**GENERIC["result_gate"], "rules": [
+                *CORE_RESULT_RULES,
+                {**unserved, "basis": "No electrical load is shed in normal operation (the run's own solve). "
+                                      "Concentrate short of the shipments is lost production, counted in "
+                                      "tonnes by conc.kpi.lost_tonnes, never as served."},
+                _rule("conc.mass_balance", "process.mass_balance", "le", CONC_MASS_BALANCE_TOL,
+                      basis=MASS_BALANCE_BASIS),
+                _rule("conc.motor_start", "process.motor_start", "eq", "pass", severity="warn",
+                      basis="Each process unit's motor start keeps the voltage change at the PoC within the grid "
+                            "code's limit (a screen; a FAIL names the unit, its ΔU and the limit). The start "
+                            "method is the user's, never a lever."),
+                _rule("conc.restart", "process.restart", "eq", 0, severity="warn",
+                      basis="Every unit the dip classes trip restarts after a grid trip: none FAILs its motor "
+                            "start on the PoC or its pickup block (the count of units that fail)."),
+                _rule("conc.n_1.site_transformer", "process.n_1.site_transformer", "empty", severity="warn",
+                      basis="No single site transformer's outage stops a process unit (N-1, first order). "
+                            "A project with no site transformer is not evaluated."),
+                _rule("conc.ic.counterfactual", "ic.counterfactual", "eq", "established",
+                      basis="The investment case compares against an established counterfactual."),
+                _rule("conc.ic.basis", "ic.counterfactual.basis", "eq", "site_today",
+                      basis="The counterfactual is the site as it stands today (existing connection, no PV or "
+                            "BESS, the same process), re-solved by the case."),
+                _rule("conc.kpi.lost_tonnes", "process.lost_production", "ge", 0.0, severity="warn",
+                      basis="KPI: concentrate lost to the grid per year (t/yr), the worst period's; each "
+                            "period's tonnes and lost-production EUR are listed."),
+                _rule("conc.kpi.shed_level", "process.shed_level", "ge", 0.0, severity="warn",
+                      basis="KPI: the concentrate shed's peak level (t); each period's least, peak and last."),
+                _rule("conc.kpi.npv", "ic.returns", "nonempty", severity="warn",
+                      basis="KPI: the project NPV at the WACC and IRR against the site as today. NPV by stage "
+                            "is not established (missing tools)."),
+            ]},
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
+        },
+        "tunable": [{"component": c, "attr": a} for c, a in tunable],
+        "envelope": {
+            "edits": edits,
+            "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "run_investment_case"}, {"tool": "generate_report"}],
+            # The solve and each L2 round's re-solve (L2_ROUNDS = 2).
+            "budget": {"solves": CONC_SOLVES + 2, "rounds": 2, "wall_time_h": 8.0},
+        },
+        "kpis": copy.deepcopy(EH_SITE["kpis"]),
+        "chapters": ["sizing", "investment_case", "grid_risk"],
+        "missing_tools": [
+            "NPV by stage: the case reports the project NPV and each stage's capex lines, no NPV per stage",
+            "N-1 on the site transformer: the template has no site transformer",
+            "a chat path to the process-unit form (G2P-07; the user fills it)",
+        ],
+    }
+
+
+EH_CONCENTRATOR_STAGED = _eh_concentrator_staged()
+
 # Study harness 14 (design §9.3 "eh_ipp_hybrid"; GK B (52) GO, I1-I10):
 # eh_ipp_hybrid@1. Commercial-led: the solve, then the single-owner investment
 # case. The result gate blocks when the peak export passes the export link's
@@ -1107,6 +1208,7 @@ PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
                               "eh_ammonia_staged@1": EH_AMMONIA_STAGED,
+                              "eh_concentrator_staged@1": EH_CONCENTRATOR_STAGED,
                               "eh_ipp_hybrid@1": EH_IPP_HYBRID,
                               "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED}
 

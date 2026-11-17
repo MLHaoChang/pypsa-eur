@@ -1287,6 +1287,14 @@ def _mg_frequency(env):
     return Detailed(len(out["hours"]), detail, run_actions.MG_FREQUENCY_BASIS)
 
 
+def _concentrator(name):
+    """Study harness 16: a reader of `services.run_gates_concentrator`, imported when read."""
+    def read(env):
+        from services import run_gates_concentrator
+        return getattr(run_gates_concentrator, name)(env)
+    return read
+
+
 FACTS: dict[str, Fact] = {
     # Harness facts: the run block itself, written only by harness code.
     "brief.valid": Fact("task.brief", "brief", None, lambda env: bool(env.task.get("brief"))),
@@ -1340,6 +1348,22 @@ FACTS: dict[str, Fact] = {
     "process.binary_check": Fact("services.solver.process_uc.binary_check", "status", None, _binary_check),
     "process.delivery.shortfall": Fact("services.run_gates._delivery_shortfall", "shortfall_share", "p.u.",
                                        _delivery_shortfall),
+    # Study harness 16: the concentrator run (GK A (28) Q1-Q6), read by
+    # `services.run_gates_concentrator` (imported when read: it imports this module).
+    "process.mass_balance": Fact("services.run_gates_concentrator.mass_balance_of", "share", "p.u.",
+                                 _concentrator("_mass_balance")),
+    "process.motor_start": Fact("services.adequacy.grid_readiness._motor_start_rows", "verdict", None,
+                                _concentrator("_motor_start")),
+    "process.restart": Fact("gridspine.static.restart_sequence.restart_sequence", "fail_count", "count",
+                            _concentrator("_restart")),
+    "process.n_1.site_transformer": Fact("services.adequacy.process_loss.units_cut_off", "transformers", None,
+                                         _concentrator("_n_1_site_transformer")),
+    "ic.counterfactual.basis": Fact("services.ic_counterfactual.read", "basis", None,
+                                    _concentrator("_ic_counterfactual_basis")),
+    "process.lost_production": Fact("services.results.grid_risk_production.grid_risk_production",
+                                    "lost_t_per_year", "t/yr", _concentrator("_lost_production")),
+    "process.shed_level": Fact("services.run_gates_concentrator.shed_level_of", "peak_t", "t",
+                               _concentrator("_shed_level")),
     # Study harness 10a: the data-centre run (GK B (36) D1, Q1, Q2).
     "dc.campus.contingency": Fact("services.run_actions.contingency", "failing", None, _dc_campus_contingency),
     "dc.gridcode.published": Fact("services.run_actions.choose", "id", None, _dc_gridcode_published),
