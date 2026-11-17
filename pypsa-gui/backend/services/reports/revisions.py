@@ -87,6 +87,8 @@ _COMMENT_ID = re.compile(r"\A[0-9a-f]{16}\Z")
 NO_EDIT_TARGET = "no_edit_target"
 OUTSIDE_EDIT_SET = "outside_edit_set"
 EDIT_KIND_MISMATCH = "edit_kind_mismatch"
+DRAFT_BUDGET = "draft_budget"
+DRAFT_UNAVAILABLE = "draft_unavailable"
 
 REASON_TEXT = {
     NO_EDIT_TARGET: "The comment names a whole section, not one paragraph, bullet list or "
@@ -106,6 +108,12 @@ REASON_TEXT = {
     "changes_evidence_hash": "The edit changes the evidence the report was made from.",
     "changes_table_shape": "The edit changes a table's shape.",
     "edit_outside_anchor": "The edit changes something outside the commented block.",
+    # A model draft for this comment (07d) could not be made; the comment
+    # stays open for the user's own edit.
+    DRAFT_BUDGET: "The run's model budget cannot cover a draft for this comment. Write "
+    "the edit yourself, or raise the run's budget.",
+    DRAFT_UNAVAILABLE: "No draft could be made for this comment. Write the edit yourself, "
+    "or ask the run for a draft again.",
 }
 
 _ANCHOR_KINDS = {
@@ -823,3 +831,80 @@ def address(
         )
         _write_comments(project_dir, report_id, comments)
         return comments[i], saved
+
+
+# ── model drafts (07d) ──────────────────────────────────────────────────────
+
+
+def draftable(project_dir, report_id: str, comment_id: str):
+    """The open comment, the latest version, its digest and the anchored
+    part, for a model draft (07d). Writes nothing. Refuses
+    `report_comment_not_found` (404), `report_comment_closed` (409),
+    `revision_stale_base` (409) when the anchored block changed since the
+    comment, and `report_revision_unsupported` (422) when no edit of the
+    closed set can address it."""
+    comment = load_comments(project_dir, report_id)
+    comment = comment[_find(comment, comment_id)]
+    _open_or_409(comment)
+    base, digest = _latest(project_dir, report_id)
+    found = _anchored(base, comment.anchor)
+    if found is None or _anchor_sha(found) != comment.anchor_sha:
+        raise RevisionError(
+            "revision_stale_base",
+            409,
+            "The commented block changed since the comment; no draft is made.",
+        )
+    unsupported = _unsupported_reason(found)
+    if unsupported:
+        raise RevisionError(
+            "report_revision_unsupported",
+            422,
+            REASON_TEXT[unsupported],
+            reasons=[unsupported],
+        )
+    return comment, base, digest, found
+
+
+def edit_kinds(found: tuple[str, Any]) -> tuple[str, ...]:
+    """The edit kinds of the closed set that fit the anchored part."""
+    what, obj = found
+    if what == "table":
+        return ("table_text", "table_cells")
+    kind = _ANCHOR_KINDS.get(getattr(obj, "type", None))
+    return (kind,) if kind else ()
+
+
+def preview(base: ReportDocument, anchor: Anchor, edit: Any) -> list[str]:
+    """The reasons `address` would keep the comment open for `edit` against
+    `base`, without writing: [] when the edit fits and keeps every
+    invariant."""
+    found = _anchored(base, anchor)
+    if found is None:
+        return [NO_EDIT_TARGET]
+    unsupported = _unsupported_reason(found)
+    if unsupported:
+        return [unsupported]
+    if not _fits(found, edit):
+        return [EDIT_KIND_MISMATCH]
+    return check_invariants(base, apply_edit(base, anchor, edit), anchor)
+
+
+def note_draft_refused(project_dir, report_id: str, comment_id: str, reason: str) -> bool:
+    """A draft for an open comment was refused (07d): the comment stays open
+    with `reason` (`draft_budget` or `draft_unavailable`). A comment that is
+    gone or closed is left alone. Returns whether it was written."""
+    if reason not in (DRAFT_BUDGET, DRAFT_UNAVAILABLE):
+        raise ValueError(f"not a draft reason: {reason!r}")
+    with store.report_lock(project_dir, report_id):
+        comments = load_comments(project_dir, report_id)
+        try:
+            i = _find(comments, comment_id)
+        except RevisionError:
+            return False
+        if comments[i].status != "open":
+            return False
+        comments[i] = comments[i].model_copy(
+            update={"reason": reason, "reasons": [reason], "updated_at": _now()}
+        )
+        _write_comments(project_dir, report_id, comments)
+        return True

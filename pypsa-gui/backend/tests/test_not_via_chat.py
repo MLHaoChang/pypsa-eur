@@ -74,6 +74,7 @@ def test_the_issue_rows_are_declared():
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
         'report_comment_revisions': ('unbuilt', None),
+        'report_revision_drafts': ('out of chat', None),
         'operating_reserve_result': ('unbuilt', None),
         'report_chart_snapshots': ('manual', 'results'),
     }

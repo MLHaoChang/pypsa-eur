@@ -3,7 +3,7 @@
 
 # 24 — A durable reservation before each model send, settled across restarts
 
-Status: ready-for-agent (04 and #1059 landed; built on `claude/sh-24-durable-send-reservation`)
+Status: done (#1088)
 Type: task
 Blocked by: 04; PR #1059 (LC-07 PR2, in review; it changes files under `pypsa-gui/backend/harness/`, so build after it merges)
 Gated: yes (GK B: persistence and failure semantics)
