@@ -406,6 +406,10 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
     template = read_template(d)
     if template is not None:
         out["template_ledger"] = template
+        # What the last study run assumed (template-e2e 08), from its record.
+        record = results_router._state.get("eh_study") or {}
+        if record.get("assumptions"):
+            out["run_assumptions"] = record["assumptions"]
     if (d / "island_config.json").is_file() \
             or (d / "campus_electrical" / "run" / "campus_freq_events.csv").is_file():
         import importlib

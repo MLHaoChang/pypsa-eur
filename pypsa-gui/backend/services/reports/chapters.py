@@ -355,8 +355,10 @@ def grid_readiness_disclosures(payload: dict) -> list[str]:
 # ── template assumptions (metadata, never a measurement) ──────────────────
 
 
-def template_ledger_payload(meta: dict | None) -> dict | None:
-    """Read assumptions as stored; disclose damaged or inconsistent metadata."""
+def template_ledger_payload(meta: dict | None, run_rows: list | None = None) -> dict | None:
+    """Read assumptions as stored; disclose damaged or inconsistent metadata.
+    ``run_rows`` are the inputs the last study run fell back on
+    (``run_assumptions``, template-e2e 08); listed only when there are any."""
     if not isinstance(meta, dict) or ("ledger" not in meta and "growth_inputs" not in meta):
         return None
     missing_ledger = "ledger" not in meta
@@ -401,6 +403,10 @@ def template_ledger_payload(meta: dict | None) -> dict | None:
                            "the stored assumption is retained.")
     rows.sort(key=lambda row: row["item"] not in unresolved)
     payload = {"rows": rows, "integrity": notices}
+    run = [{key: r.get(key) for key in ("label", "shown", "reason")}
+           for r in run_rows or [] if isinstance(r, dict) and r.get("label")]
+    if run:
+        payload["run_rows"] = run
     if missing_ledger:
         payload["missing_ledger"] = True
     return payload
@@ -412,6 +418,9 @@ def template_ledger_table(payload: dict, source_path: str):
     rows = [[F.fmt_text(row.get("label") or row.get("item")), F.fmt_text(row.get("value")),
              str(row.get("unit") or ""), F.fmt_text(row.get("source")), F.fmt_text(row.get("note"))]
             for row in payload["rows"]]
+    rows += [[F.fmt_text(row.get("label")), F.fmt_text(row.get("shown")), "",
+              "assumed by the run", F.fmt_text(row.get("reason"))]
+             for row in payload.get("run_rows") or []]
     return EvidenceTable(table_id=TEMPLATE_LEDGER, columns=["Assumption", "Value", "Unit", "Source", "Note"],
                          rows=rows, caption="Template assumptions (not measurements)", source_path=source_path)
 

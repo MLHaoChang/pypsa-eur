@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextvars as _contextvars
 import logging
+import math
 import queue as _queue
 import threading as _threading
 import time
@@ -239,6 +240,33 @@ class EhStudyLockBusy(Exception):
     (a solve or an edit has it): the verdict is deferred, not a refusal."""
 
 
+def _assumptions_at_start(n, cfg, lock, body, goal_sources: dict) -> list[dict]:
+    """The run's assumed inputs, read under the lock from the network the
+    worker is about to copy, with the project's template."""
+    from services import network_lengths
+    from services.adequacy.run_assumptions import run_assumptions, study_assumptions
+    from services.flow_service import read_template
+
+    project_dir = network_lengths.active_project_dir()
+    template = read_template(project_dir) if project_dir is not None else None
+    with lock:
+        rows = run_assumptions(n, cfg, template)
+    requested = {"site_archetype": body.archetype,
+                 "mc_draws": (body.mc or {}).get("draws") if isinstance(body.mc, dict) else None}
+    return study_assumptions(rows, goal_sources, requested)
+
+
+VOLL_REFUSAL = "the reliability study requires a VOLL > 0 in solver settings"
+
+
+def _voll_set(cfg) -> bool:
+    try:
+        v = float(getattr(cfg, "voll", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(v) and v > 0
+
+
 def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
                          lock_blocking: bool = True) -> dict:
     """Every refusal `POST /results/eh_study` makes before its worker exists
@@ -287,6 +315,11 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
     cfg = solver_state.get("solver_config")
     if cfg is None:
         raise HTTPException(422, "solver settings are not configured")
+    # Template-e2e 06: the frontier and stress stages price unserved energy,
+    # so a missing VOLL is refused here — the API and assistant path — as the
+    # Run button refuses it, never run as 0.0.
+    if not _voll_set(cfg):
+        raise HTTPException(422, VOLL_REFUSAL)
 
     n = PyPSAService.get_network()
     if n is None:
@@ -382,6 +415,9 @@ def start_eh_study(
         "dtc_attribution": dtc_attribution,
         # Where each goal field came from: stored / template / default / override.
         "goal_sources": plan["goal_sources"],
+        # Template-e2e 08: every input this run falls back on, as readiness
+        # showed it before the run (`run_assumptions`).
+        "assumptions": _assumptions_at_start(n, cfg, lock, body, plan["goal_sources"]),
         # The rest of the request (P19–P22 gate): a re-run built from this
         # record must not silently drop the user's MC / DSR / DtC choices.
         "mc": dict(body.mc) if body.mc else None,

@@ -84,6 +84,7 @@ from services import flow_scope as S
 from services import flow_sections as F
 from services.issue_titles import ISSUE_TITLES
 from services.validation_service import STAGE2_CODES
+from services.adequacy.run_assumptions import run_assumptions
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,8 @@ class _Facts:
     # how many cost fields a person typed (no money year recorded) (B9).
     money_years: dict = field(default_factory=dict)
     hand_typed_costs: int = 0
+    # The run inputs the study would fall back on (template-e2e 08).
+    run_defaults: list = field(default_factory=list)
 
 
 # eh_readiness copies and walks the network; cached per readiness key.
@@ -553,6 +556,7 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         ens_cap=getattr(config, "ens_cap_permyriad", None),
         commercial=commercial, finance=getattr(config, "finance", None),
         cfg_dict=cfg_dict, cfg_hash=cfg_hash, copy=copy,
+        run_defaults=run_assumptions(n, config, template),
         **_money_years(n))
 
 
@@ -614,7 +618,11 @@ def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
     answers as `deferred`."""
     from fastapi import HTTPException
 
-    from services.adequacy.eh_study_runner import EhStudyRequest, check_eh_study_start
+    from services.adequacy.eh_study_runner import (
+        VOLL_REFUSAL,
+        EhStudyRequest,
+        check_eh_study_start,
+    )
     from services.pypsa_service import PyPSAService
 
     try:
@@ -623,9 +631,11 @@ def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
                              lock_blocking=False)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
+        # The VOLL refusal points at its field (template-e2e 06).
+        fld = "voll" if detail == VOLL_REFUSAL else ""
         return [_item("eh_study_refused", "error",
                       f"The reliability study would not start: {detail}", "eh_study",
-                      "scenarios", blocking=requested)]
+                      "scenarios", fld=fld, blocking=requested)]
     return []
 
 
@@ -898,6 +908,26 @@ def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
                          f"Energization schedule: {steps} (assumed): confirm it with the "
                          "network operator's offer.", "template",
                          "connection", entity="energization schedule", value=value))
+    return out
+
+
+def _run_default_items(rows: list[dict], template: dict | None) -> list[dict]:
+    """The run's fallbacks (``run_assumptions``) as warnings, filed where the
+    value is set: nothing the run assumes is silent (DECISION-GAPS-1). A
+    field the template's ledger already raises is left to that row."""
+    ledger = {(str(r.get("entity") or ""), str(r.get("field") or ""))
+              for r in (template or {}).get("ledger") or []
+              if isinstance(r, dict) and r.get("source") == "assumed" and r.get("field")}
+    out: list[dict] = []
+    for r in rows:
+        if (r["entity"], r["field"]) in ledger:
+            continue
+        out.append(_item(f"assumed_run_{r['key']}", "warning",
+                         f"{r['label']}: {r['shown']} (assumed: {r['reason']}): "
+                         "confirm it or set your own.", "run_defaults", r["section"],
+                         component=r["component"], entity=r["entity"], fld=r["field"],
+                         value=json.dumps(r["value"])))
+        out[-1]["card"] = r["card"]
     return out
 
 
@@ -1280,6 +1310,10 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     items: list[dict] = []
     presence = _presence(facts, islanded=islanded, study_requested=study_requested,
                          loads_not_needed=loads_not_needed)
+    # The study's own VOLL refusal (blocking, same field) says it once.
+    voll_refused = any(i["target"]["field"] == "voll" for i in study_items)
+    if voll_refused:
+        presence = [i for i in presence if i["code"] != "presence_voll"]
     items += presence
     items += _validation_items(issues, frozenset(facts.connection_links))
     items += _money_year_items(facts)
@@ -1287,9 +1321,10 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
         items += study_items
         if not loads_not_needed:
             r = _readiness(facts, template, cache_key)
-            items += _readiness_items(r, voll_noted=any(
+            items += _readiness_items(r, voll_noted=voll_refused or any(
                 i["code"] == "presence_voll" for i in presence))
         items += _assumed_items(template, facts.cfg_dict)
+        items += _run_default_items(facts.run_defaults, template)
     items += _bind_items(facts, db, org_id, project_dir, n)
     # Load flow and N-1 security are on exactly when their solver settings are.
     scope = S.apply_settings(scope, facts.cfg_dict)

@@ -723,7 +723,7 @@ def _tables(sections: dict[str, EvidenceSection], headline: dict[str, Any],
 
 
 def _chapter_sections(ic_report, ic_stale, island, grid_readiness=None, template_ledger=None,
-                      grid_risk=None) -> dict[str, EvidenceSection]:
+                      grid_risk=None, run_assumptions=None) -> dict[str, EvidenceSection]:
     """The investment-case, island and grid-readiness chapters
     (``services/reports/chapters``), each only when its source was passed."""
     from services.reports import chapters as C
@@ -762,7 +762,7 @@ def _chapter_sections(ic_report, ic_stale, island, grid_readiness=None, template
                 source=source, engine="grid_risk_production", payload=payload,
                 note="expected values per year; the total is an upper bound (the lines may overlap)")
     if template_ledger is not None:
-        payload = C.template_ledger_payload(template_ledger)
+        payload = C.template_ledger_payload(template_ledger, run_assumptions)
         source = "eh_template.json (template ledger)"
         out[C.TEMPLATE_LEDGER] = _missing(C.TEMPLATE_LEDGER, "template_ledger", C.NO_TEMPLATE_LEDGER,
                                          source=source) \
@@ -860,7 +860,8 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
                      worksheet: dict | None, ic_report: dict | None = None,
                      ic_stale: bool | None = None, island: dict | None = None,
                      grid_readiness: dict | None = None, template_ledger: dict | None = None,
-                     grid_risk: dict | None = None, network: dict | None = None, harness_run: dict | None = None) -> Evidence:
+                     grid_risk: dict | None = None, network: dict | None = None, harness_run: dict | None = None,
+                     run_assumptions: list | None = None) -> Evidence:
     """
     Union the adequacy write-up, the EH reference design and the worksheet.
 
@@ -877,6 +878,8 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     chapters (LC-21); None, a network never solved, adds none.
     ``harness_run`` (``{task, envelope, chapters, coverage}``, a harness
     run's report stage) adds the harness chapter (study harness issue 07).
+    ``run_assumptions`` (the EH study record's ``assumptions``, template-e2e
+    08) joins the template-assumptions chapter as the run's own rows.
     """
     has_study = isinstance(study_report, dict)
     has_eh = isinstance(eh_report, dict)
@@ -885,7 +888,8 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     sections.update(_eh_sections(eh_report))
     sections.update(_adequacy_sections(study_report))
     sections[WORKSHEET_SECTION] = _worksheet_section(worksheet)
-    sections.update(_chapter_sections(ic_report, ic_stale, island, grid_readiness, template_ledger, grid_risk))
+    sections.update(_chapter_sections(ic_report, ic_stale, island, grid_readiness, template_ledger, grid_risk,
+                                      run_assumptions))
     network_payloads = _network_sections(network, sections)
     harness_tables = _harness_section(harness_run, sections)
 
