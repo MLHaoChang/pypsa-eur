@@ -17,14 +17,30 @@ by ``case_id``, which is unique in a battery and safe as a file name.
 
 **Thevenin source.** Each case runs against an ideal source behind an
 impedance set by ``sk_mva`` (three-phase short-circuit level at the PoC) and
-``x_over_r``. The source voltage is 1.0 pu before the event.
+``x_over_r``; the negative-sequence impedance equals the positive. A source
+for a single-phase fault also carries its zero sequence: ``z0_over_z1``
+(|Z0| / |Z1|) and ``x0_over_r0``. The source voltage is 1.0 pu before the
+event.
+
+**Fault definition.** ``v_retained_pu`` is the retained voltage at the PoC
+with the plant DISCONNECTED (the open-circuit voltage the fault leaves), so
+it fixes the fault impedance independently of the plant's response and every
+tool applies the same fault. :func:`fault_impedance_ohm` turns it into the
+fault impedance each tool applies, from the Thevenin source and the nominal
+PoC voltage:
+
+- three-phase: ``Z_f = Z_th * v / (1 - v)``, at the source's angle
+  (``atan(x_over_r)``), so the divider ``Z_f / (Z_th + Z_f)`` is exactly ``v``;
+- single-phase to earth: ``Z_f = v (2 Z1 + Z0) / (3 (1 - v))``, from the
+  series-connected sequence networks, so the faulted phase's voltage
+  ``3 Z_f / (Z1 + Z2 + Z0 + 3 Z_f)`` is exactly ``v``.
+
+``v = 0`` is a bolted fault (``Z_f = 0``).
 
 **Event parameters** (per kind, :data:`KIND_PARAMS`):
 
-- ``fault_3ph`` / ``fault_1ph``: ``v_retained_pu`` is the RETAINED voltage at
-  the PoC during the fault (0.0 = bolted fault, 0.5 = half voltage left), in
-  [0, 1); ``duration_s`` is the time from fault inception to clearing, > 0.
-  For a single-phase fault the retained voltage is that of the faulted phase.
+- ``fault_3ph`` / ``fault_1ph``: ``v_retained_pu`` as above, in [0, 1);
+  ``duration_s`` is the time from fault inception to clearing, > 0.
 - ``v_step``: ``step_pu`` is the change of the voltage setpoint, pu of
   nominal voltage; nonzero.
 - ``q_step``: ``step_pu`` is the change of the reactive power setpoint, pu of
@@ -38,13 +54,22 @@ impedance set by ``sk_mva`` (three-phase short-circuit level at the PoC) and
   0 < |angle| < 180.
 - ``flat``: no event; the flat run that checks initialisation.
 
-Every number is finite (``math.isfinite``). A fault or ramp must end before
-``t_end_s``; the event must start at or after 0 and before ``t_end_s``.
+Every number is finite (``math.isfinite``; bool is not a number). A fault or
+ramp must end before ``t_end_s``; the event must start at or after 0 and
+before ``t_end_s``.
+
+**Corners.** Faults and setpoint steps run at all four (Sk, X/R) corners:
+a weak grid with high X/R is the hard case for reactive current and voltage
+control, a strong grid with low X/R couples P and V most, and which corner
+binds depends on the plant (generic engineering). Frequency events, which
+barely depend on strength, run at the strong corner; the phase-angle jump,
+hardest on a weak grid, at the weak corner (Sk min, X/R min).
 
 **Sources.** The battery's event depths, durations and step sizes are generic
 engineering defaults (``source='assumed'``); a case edited through
-``build_battery(overrides=...)`` is marked ``source='supplied'``. Sk and X/R
-always come from the caller (a network study or the TSO's data).
+``build_battery(overrides=...)`` is marked ``source='supplied'``. Sk, X/R and
+the zero sequence always come from the caller (a network study or the TSO's
+data); nothing about the grid is defaulted.
 
 **Serialisation.** :func:`battery_frame` / :func:`cases_from_frame` give a
 flat table; :func:`battery_json` / :func:`cases_from_json` give the
@@ -54,9 +79,11 @@ same battery always gives byte-equal JSON. A reader refuses a different
 contract version.
 """
 
+import cmath
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -152,6 +179,7 @@ KIND_PARAMS = {
 PARAM_NAMES = tuple(sorted({p for ps in KIND_PARAMS.values() for p in ps}))
 SOURCES = ("assumed", "supplied")
 _NONZERO = ("step_pu", "step_hz", "ramp_hz_per_s")
+_ZERO_SEQ = ("z0_over_z1", "x0_over_r0")
 _ID = re.compile(r"[a-z0-9_]{1,64}")
 CHANNEL_SEP = "|"
 
@@ -165,25 +193,32 @@ class Thevenin:
     label: str
     sk_mva: float
     x_over_r: float
+    z0_over_z1: float | None = None
+    x0_over_r0: float | None = None
 
     def __post_init__(self):
         if not isinstance(self.label, str) or not _ID.fullmatch(self.label):
             raise ContractError(f"thevenin label {self.label!r}: not a lower-case id")
-        for name in ("sk_mva", "x_over_r"):
+        given = [n for n in _ZERO_SEQ if getattr(self, n) is not None]
+        if given and len(given) != len(_ZERO_SEQ):
+            raise ContractError(
+                f"thevenin {self.label}: zero sequence needs both {list(_ZERO_SEQ)}, got {given}"
+            )
+        for name in ("sk_mva", "x_over_r", *given):
             v = getattr(self, name)
             if not _finite(v):
                 raise ContractError(
                     f"thevenin {self.label}: {name}={v!r} is not a finite number"
                 )
             object.__setattr__(self, name, float(v))
-        if self.sk_mva <= 0:
-            raise ContractError(
-                f"thevenin {self.label}: sk_mva={self.sk_mva} must be > 0"
-            )
-        if self.x_over_r <= 0:
-            raise ContractError(
-                f"thevenin {self.label}: x_over_r={self.x_over_r} must be > 0"
-            )
+            if v <= 0:
+                raise ContractError(
+                    f"thevenin {self.label}: {name}={float(v)} must be > 0"
+                )
+
+    @property
+    def has_zero_sequence(self) -> bool:
+        return self.z0_over_z1 is not None
 
 
 @dataclass(frozen=True)
@@ -195,9 +230,7 @@ class Case:
     t_event_s: float
     t_end_s: float
     channels: tuple
-    params: MappingProxyType = field(
-        default_factory=dict
-    )  # read-only after construction
+    params: Mapping = field(default_factory=dict)  # read-only after construction
     source: str = "assumed"
 
     def __post_init__(self):
@@ -210,6 +243,10 @@ class Case:
             raise ContractError(f"case {cid}: trgc reference is empty")
         if not isinstance(self.grid, Thevenin):
             raise ContractError(f"case {cid}: grid is not a Thevenin source")
+        if self.kind == "fault_1ph" and not self.grid.has_zero_sequence:
+            raise ContractError(
+                f"case {cid}: a single-phase fault needs the source's zero sequence {list(_ZERO_SEQ)}"
+            )
         if self.source not in SOURCES:
             raise ContractError(f"case {cid}: source {self.source!r} not in {SOURCES}")
         self._check_times()
@@ -232,6 +269,12 @@ class Case:
 
     def _check_channels(self):
         cid = self.case_id
+        if isinstance(self.channels, str) or not isinstance(
+            self.channels, (tuple, list)
+        ):
+            raise ContractError(
+                f"case {cid}: channels must be a list of names, got {type(self.channels).__name__}"
+            )
         chans = tuple(self.channels)
         if not chans:
             raise ContractError(f"case {cid}: names no output channels")
@@ -246,6 +289,10 @@ class Case:
 
     def _check_params(self):
         cid = self.case_id
+        if not isinstance(self.params, Mapping):
+            raise ContractError(
+                f"case {cid}: params must be a mapping, got {type(self.params).__name__}"
+            )
         params = dict(self.params)
         need = KIND_PARAMS[self.kind]
         missing = [p for p in need if p not in params]
@@ -288,6 +335,37 @@ class Case:
         )
 
 
+def thevenin_impedances_ohm(grid: Thevenin, vn_kv: float) -> tuple:
+    """
+    ``(Z1, Z0)`` of the source in ohms at the nominal PoC voltage ``vn_kv``.
+
+    ``|Z1| = vn_kv**2 / sk_mva`` at ``atan(x_over_r)``; ``Z0`` is ``None``
+    for a source without zero-sequence data.
+    """
+    if not _finite(vn_kv) or vn_kv <= 0:
+        raise ContractError(f"vn_kv={vn_kv!r} must be a finite number > 0")
+    z1 = cmath.rect(vn_kv**2 / grid.sk_mva, math.atan(grid.x_over_r))
+    if not grid.has_zero_sequence:
+        return z1, None
+    return z1, cmath.rect(abs(z1) * grid.z0_over_z1, math.atan(grid.x0_over_r0))
+
+
+def fault_impedance_ohm(case: Case, vn_kv: float) -> complex:
+    """
+    The fault impedance (ohms, at ``vn_kv``) every tool applies for a fault case.
+
+    Chosen so the PoC voltage with the plant disconnected is exactly
+    ``v_retained_pu`` (module docstring, "Fault definition").
+    """
+    if case.kind not in ("fault_3ph", "fault_1ph"):
+        raise ContractError(f"case {case.case_id}: kind {case.kind} is not a fault")
+    v = case.params["v_retained_pu"]
+    z1, z0 = thevenin_impedances_ohm(case.grid, vn_kv)
+    if case.kind == "fault_3ph":
+        return z1 * v / (1.0 - v)
+    return v * (2.0 * z1 + z0) / (3.0 * (1.0 - v))
+
+
 def validate_battery(cases) -> tuple:
     """Return ``cases`` as a tuple after checking each is a Case and ids are unique."""
     cases = tuple(cases)
@@ -319,26 +397,30 @@ def _ordered(names) -> tuple:
     return tuple(c for c in CHANNELS if c in set(names))
 
 
-def build_battery(sk_min_mva, sk_max_mva, xr_min, xr_max, *, overrides=None) -> tuple:
+def build_battery(
+    sk_min_mva, sk_max_mva, xr_min, xr_max, *, z0_over_z1, x0_over_r0, overrides=None
+) -> tuple:
     """
     The default DMAT battery for a PoC with the given Sk and X/R range.
 
-    The SMIB flat run is done at all four (Sk, X/R) corners; events at the
-    weak corner (Sk min, X/R min) and the strong corner (Sk max, X/R max);
-    frequency events, which barely depend on strength, at the strong corner;
-    the phase-angle jump, which is hardest on a weak grid, at the weak corner.
+    ``z0_over_z1`` and ``x0_over_r0`` are the source's zero sequence, used by
+    the single-phase faults at every corner; both are required (no default).
+    Which cases run at which corner: module docstring, "Corners".
 
     ``overrides`` maps a case id to ``{name: value}`` for any of its event
     parameters, ``t_event_s`` or ``t_end_s``; an edited case is marked
     ``source='supplied'``. An unknown id or a name the case does not take is
     refused.
     """
-    for name, v in (
+    inputs = (
         ("sk_min_mva", sk_min_mva),
         ("sk_max_mva", sk_max_mva),
         ("xr_min", xr_min),
         ("xr_max", xr_max),
-    ):
+        ("z0_over_z1", z0_over_z1),
+        ("x0_over_r0", x0_over_r0),
+    )
+    for name, v in inputs:
         if not _finite(v):
             raise ContractError(f"{name}={v!r} is not a finite number")
     if sk_min_mva > sk_max_mva:
@@ -346,17 +428,20 @@ def build_battery(sk_min_mva, sk_max_mva, xr_min, xr_max, *, overrides=None) -> 
     if xr_min > xr_max:
         raise ContractError(f"xr_min={xr_min} exceeds xr_max={xr_max}")
     grids = {
-        "skmin_xrmin": Thevenin("skmin_xrmin", sk_min_mva, xr_min),
-        "skmin_xrmax": Thevenin("skmin_xrmax", sk_min_mva, xr_max),
-        "skmax_xrmin": Thevenin("skmax_xrmin", sk_max_mva, xr_min),
-        "skmax_xrmax": Thevenin("skmax_xrmax", sk_max_mva, xr_max),
+        label: Thevenin(label, sk, xr, z0_over_z1, x0_over_r0)
+        for label, sk, xr in (
+            ("skmin_xrmin", sk_min_mva, xr_min),
+            ("skmin_xrmax", sk_min_mva, xr_max),
+            ("skmax_xrmin", sk_max_mva, xr_min),
+            ("skmax_xrmax", sk_max_mva, xr_max),
+        )
     }
     weak, strong = grids["skmin_xrmin"], grids["skmax_xrmax"]
     specs = []  # (case_id, kind, grid, params, channels)
     for g in grids.values():
         specs.append((f"flat_{g.label}", "flat", g, {}, _BASE_CH))
     for kind in ("fault_3ph", "fault_1ph"):
-        for g in (weak, strong):
+        for g in grids.values():
             for v in _V_RETAINED:
                 specs.append(
                     (
@@ -372,7 +457,7 @@ def build_battery(sk_min_mva, sk_max_mva, xr_min, xr_max, *, overrides=None) -> 
         ("q_step", 0.2, ("iq_pu",)),
         ("p_step", 0.2, ("id_pu",)),
     ):
-        for g in (weak, strong):
+        for g in grids.values():
             for tag, sign in (("up", 1), ("down", -1)):
                 specs.append(
                     (
@@ -452,14 +537,20 @@ _FRAME_HEAD = [
     "grid_label",
     "sk_mva",
     "x_over_r",
+    "z0_over_z1",
+    "x0_over_r0",
     "t_event_s",
     "t_end_s",
 ]
 FRAME_COLUMNS = _FRAME_HEAD + list(PARAM_NAMES) + ["channels", "source"]
 
 
+def _nan_if_none(v):
+    return math.nan if v is None else v
+
+
 def battery_frame(cases) -> pd.DataFrame:
-    """One row per case; parameters a kind does not take are NaN; channels joined on ``|``."""
+    """One row per case; a parameter or zero sequence a case lacks is NaN; channels joined on ``|``."""
     rows = []
     for c in validate_battery(cases):
         row = {
@@ -469,6 +560,8 @@ def battery_frame(cases) -> pd.DataFrame:
             "grid_label": c.grid.label,
             "sk_mva": c.grid.sk_mva,
             "x_over_r": c.grid.x_over_r,
+            "z0_over_z1": _nan_if_none(c.grid.z0_over_z1),
+            "x0_over_r0": _nan_if_none(c.grid.x0_over_r0),
             "t_event_s": c.t_event_s,
             "t_end_s": c.t_end_s,
             "channels": CHANNEL_SEP.join(c.channels),
@@ -479,15 +572,25 @@ def battery_frame(cases) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=FRAME_COLUMNS)
 
 
+def _none_if_nan(v):
+    return None if pd.isna(v) else float(v)
+
+
 def cases_from_frame(frame: pd.DataFrame) -> tuple:
-    """Inverse of :func:`battery_frame`. NaN means "not taken": a taken parameter is never NaN."""
+    """Inverse of :func:`battery_frame`. NaN means "not taken": a taken value is never NaN."""
     missing = [c for c in FRAME_COLUMNS if c not in frame.columns]
     if missing:
         raise ContractError(f"battery frame lacks column(s) {missing}")
     cases = []
     for r in frame.to_dict("records"):
         params = {p: float(r[p]) for p in PARAM_NAMES if not pd.isna(r[p])}
-        grid = Thevenin(r["grid_label"], float(r["sk_mva"]), float(r["x_over_r"]))
+        grid = Thevenin(
+            r["grid_label"],
+            float(r["sk_mva"]),
+            float(r["x_over_r"]),
+            _none_if_nan(r["z0_over_z1"]),
+            _none_if_nan(r["x0_over_r0"]),
+        )
         cases.append(
             Case(
                 r["case_id"],
@@ -522,6 +625,8 @@ def battery_json(cases) -> str:
                     "label": c.grid.label,
                     "sk_mva": c.grid.sk_mva,
                     "x_over_r": c.grid.x_over_r,
+                    "z0_over_z1": c.grid.z0_over_z1,
+                    "x0_over_r0": c.grid.x0_over_r0,
                 },
                 "t_event_s": c.t_event_s,
                 "t_end_s": c.t_end_s,
@@ -557,15 +662,19 @@ def cases_from_json(text: str) -> tuple:
                 c["kind"],
                 c["trgc"],
                 Thevenin(
-                    c["grid"]["label"], c["grid"]["sk_mva"], c["grid"]["x_over_r"]
+                    c["grid"]["label"],
+                    c["grid"]["sk_mva"],
+                    c["grid"]["x_over_r"],
+                    c["grid"].get("z0_over_z1"),
+                    c["grid"].get("x0_over_r0"),
                 ),
                 c["t_event_s"],
                 c["t_end_s"],
-                tuple(c["channels"]),
+                c["channels"],
                 c["params"],
                 c["source"],
             )
             for c in doc.get("cases", [])
         )
-    except (KeyError, TypeError) as exc:
+    except (KeyError, TypeError, AttributeError) as exc:
         raise ContractError(f"battery JSON case is malformed: {exc!r}") from exc

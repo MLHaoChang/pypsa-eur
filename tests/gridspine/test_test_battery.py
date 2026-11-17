@@ -7,6 +7,7 @@ asserts its own guard's reason, so a mutant of one guard is killed by its own
 test and not by a neighbour's.
 """
 
+import cmath
 import math
 
 import pytest
@@ -22,12 +23,19 @@ from gridspine.handoff.test_battery import (
     build_battery,
     cases_from_frame,
     cases_from_json,
+    fault_impedance_ohm,
+    thevenin_impedances_ohm,
     validate_battery,
 )
 from gridspine.schema.contracts import ContractError
 
 BAD_NUMBERS = [math.inf, -math.inf, math.nan]
-GRID = Thevenin("g", 1000.0, 5.0)
+GRID = Thevenin("g", 1000.0, 5.0, 2.0, 5.0)
+Z0 = {"z0_over_z1": 1.5, "x0_over_r0": 4.0}
+
+
+def _bb(*args, **kw):
+    return build_battery(*args, **{**Z0, **kw})
 
 
 def _case(**kw):
@@ -47,7 +55,7 @@ def _case(**kw):
 
 @pytest.fixture(scope="module")
 def battery():
-    return build_battery(1000, 3000, 3, 10)
+    return _bb(1000, 3000, 3, 10)
 
 
 EXPECTED_IDS = {
@@ -58,25 +66,49 @@ EXPECTED_IDS = {
     "fault_3ph_skmin_xrmin_v000",
     "fault_3ph_skmin_xrmin_v020",
     "fault_3ph_skmin_xrmin_v050",
+    "fault_3ph_skmin_xrmax_v000",
+    "fault_3ph_skmin_xrmax_v020",
+    "fault_3ph_skmin_xrmax_v050",
+    "fault_3ph_skmax_xrmin_v000",
+    "fault_3ph_skmax_xrmin_v020",
+    "fault_3ph_skmax_xrmin_v050",
     "fault_3ph_skmax_xrmax_v000",
     "fault_3ph_skmax_xrmax_v020",
     "fault_3ph_skmax_xrmax_v050",
     "fault_1ph_skmin_xrmin_v000",
     "fault_1ph_skmin_xrmin_v020",
     "fault_1ph_skmin_xrmin_v050",
+    "fault_1ph_skmin_xrmax_v000",
+    "fault_1ph_skmin_xrmax_v020",
+    "fault_1ph_skmin_xrmax_v050",
+    "fault_1ph_skmax_xrmin_v000",
+    "fault_1ph_skmax_xrmin_v020",
+    "fault_1ph_skmax_xrmin_v050",
     "fault_1ph_skmax_xrmax_v000",
     "fault_1ph_skmax_xrmax_v020",
     "fault_1ph_skmax_xrmax_v050",
     "v_step_skmin_xrmin_up",
     "v_step_skmin_xrmin_down",
+    "v_step_skmin_xrmax_up",
+    "v_step_skmin_xrmax_down",
+    "v_step_skmax_xrmin_up",
+    "v_step_skmax_xrmin_down",
     "v_step_skmax_xrmax_up",
     "v_step_skmax_xrmax_down",
     "q_step_skmin_xrmin_up",
     "q_step_skmin_xrmin_down",
+    "q_step_skmin_xrmax_up",
+    "q_step_skmin_xrmax_down",
+    "q_step_skmax_xrmin_up",
+    "q_step_skmax_xrmin_down",
     "q_step_skmax_xrmax_up",
     "q_step_skmax_xrmax_down",
     "p_step_skmin_xrmin_up",
     "p_step_skmin_xrmin_down",
+    "p_step_skmin_xrmax_up",
+    "p_step_skmin_xrmax_down",
+    "p_step_skmax_xrmin_up",
+    "p_step_skmax_xrmin_down",
     "p_step_skmax_xrmax_up",
     "p_step_skmax_xrmax_down",
     "f_step_skmax_xrmax_up",
@@ -93,7 +125,7 @@ EXPECTED_IDS = {
 
 def test_pinned_ids_and_count(battery):
     ids = [c.case_id for c in battery]
-    assert len(ids) == 34
+    assert len(ids) == 58
     assert set(ids) == EXPECTED_IDS
 
 
@@ -140,7 +172,7 @@ def test_channel_contract_states_unit_base_sign_point():
 
 
 def test_override_marks_supplied_and_applies():
-    b = build_battery(
+    b = _bb(
         1000,
         3000,
         3,
@@ -154,14 +186,12 @@ def test_override_marks_supplied_and_applies():
 
 def test_override_unknown_case_refused():
     with pytest.raises(ContractError, match="unknown case id"):
-        build_battery(1000, 3000, 3, 10, overrides={"nope": {"t_end_s": 5.0}})
+        _bb(1000, 3000, 3, 10, overrides={"nope": {"t_end_s": 5.0}})
 
 
 def test_override_unknown_name_refused():
     with pytest.raises(ContractError, match="case takes no"):
-        build_battery(
-            1000, 3000, 3, 10, overrides={"flat_skmin_xrmin": {"duration_s": 0.2}}
-        )
+        _bb(1000, 3000, 3, 10, overrides={"flat_skmin_xrmin": {"duration_s": 0.2}})
 
 
 # --- builder input guards ----------------------------------------------------
@@ -169,16 +199,16 @@ def test_override_unknown_name_refused():
 
 def test_sk_min_above_max_refused():
     with pytest.raises(ContractError, match="exceeds sk_max_mva"):
-        build_battery(3000.5, 3000, 3, 10)
+        _bb(3000.5, 3000, 3, 10)
 
 
 def test_sk_min_equal_max_allowed():
-    assert build_battery(3000, 3000, 3, 10)
+    assert _bb(3000, 3000, 3, 10)
 
 
 def test_xr_min_above_max_refused():
     with pytest.raises(ContractError, match="exceeds xr_max"):
-        build_battery(1000, 3000, 10.5, 10)
+        _bb(1000, 3000, 10.5, 10)
 
 
 @pytest.mark.parametrize("bad", BAD_NUMBERS)
@@ -187,7 +217,7 @@ def test_builder_nonfinite_refused(bad, pos):
     args = [1000, 3000, 3, 10]
     args[pos] = bad
     with pytest.raises(ContractError, match="not a finite number"):
-        build_battery(*args)
+        _bb(*args)
 
 
 # --- Thevenin guards ---------------------------------------------------------
@@ -205,7 +235,7 @@ def test_xr_zero_refused():
 
 def test_sk_negative_refused_by_builder():
     with pytest.raises(ContractError, match="sk_mva=-1.0 must be > 0"):
-        build_battery(-1, 3000, 3, 10)
+        _bb(-1, 3000, 3, 10)
 
 
 @pytest.mark.parametrize("bad", BAD_NUMBERS)
@@ -383,7 +413,7 @@ def test_empty_battery_refused():
 
 
 def _edited():
-    return build_battery(
+    return _bb(
         800.5,
         2500,
         2.5,
@@ -399,7 +429,7 @@ def _edited():
     )
 
 
-@pytest.mark.parametrize("make", [lambda: build_battery(1000, 3000, 3, 10), _edited])
+@pytest.mark.parametrize("make", [lambda: _bb(1000, 3000, 3, 10), _edited])
 def test_frame_round_trip_field_by_field(make):
     cases = make()
     back = cases_from_frame(battery_frame(cases))
@@ -413,7 +443,7 @@ def test_frame_round_trip_field_by_field(make):
         )
 
 
-@pytest.mark.parametrize("make", [lambda: build_battery(1000, 3000, 3, 10), _edited])
+@pytest.mark.parametrize("make", [lambda: _bb(1000, 3000, 3, 10), _edited])
 def test_json_round_trip_field_by_field(make):
     cases = make()
     back = cases_from_json(battery_json(cases))
@@ -423,14 +453,14 @@ def test_json_round_trip_field_by_field(make):
 
 
 def test_json_is_deterministic():
-    a = battery_json(build_battery(1000, 3000, 3, 10)).encode()
-    b = battery_json(build_battery(1000.0, 3000.0, 3.0, 10.0)).encode()
+    a = battery_json(_bb(1000, 3000, 3, 10)).encode()
+    b = battery_json(_bb(1000.0, 3000.0, 3.0, 10.0)).encode()
     assert a == b
     assert f'"contract_version": "{CONTRACT_VERSION}"' in a.decode()
 
 
 def test_json_wrong_version_refused():
-    text = battery_json(build_battery(1000, 3000, 3, 10)).replace(
+    text = battery_json(_bb(1000, 3000, 3, 10)).replace(
         f'"contract_version": "{CONTRACT_VERSION}"', '"contract_version": "0"'
     )
     with pytest.raises(ContractError, match="contract_version '0'"):
@@ -438,7 +468,7 @@ def test_json_wrong_version_refused():
 
 
 def test_json_changed_contract_refused():
-    text = battery_json(build_battery(1000, 3000, 3, 10)).replace('"Hz"', '"kHz"', 1)
+    text = battery_json(_bb(1000, 3000, 3, 10)).replace('"Hz"', '"kHz"', 1)
     with pytest.raises(ContractError, match="channel contract differs"):
         cases_from_json(text)
 
@@ -447,23 +477,21 @@ def test_json_malformed_case_refused():
     with pytest.raises(ContractError, match="malformed"):
         import json
 
-        doc = json.loads(battery_json(build_battery(1000, 3000, 3, 10)))
+        doc = json.loads(battery_json(_bb(1000, 3000, 3, 10)))
         del doc["cases"][0]["grid"]
         cases_from_json(json.dumps(doc))
 
 
 def test_frame_missing_column_refused():
     with pytest.raises(ContractError, match="lacks column"):
-        cases_from_frame(
-            battery_frame(build_battery(1000, 3000, 3, 10)).drop(columns=["source"])
-        )
+        cases_from_frame(battery_frame(_bb(1000, 3000, 3, 10)).drop(columns=["source"]))
 
 
 # --- identity and type guards; pinned default values -------------------------
 
 
 def test_xr_min_equal_max_allowed():
-    assert build_battery(1000, 3000, 10, 10)
+    assert _bb(1000, 3000, 10, 10)
 
 
 @pytest.mark.parametrize("label", ["Weak", "", 7])
@@ -559,7 +587,7 @@ def test_pinned_channels_per_kind(battery):
 
 
 def test_json_golden_case_text():
-    text = battery_json(build_battery(1000, 3000, 3, 10))
+    text = battery_json(_bb(1000, 3000, 3, 10))
     golden = """  {
    "case_id": "phase_jump_skmin_xrmin_down",
    "channels": [
@@ -575,7 +603,9 @@ def test_json_golden_case_text():
    "grid": {
     "label": "skmin_xrmin",
     "sk_mva": 1000.0,
-    "x_over_r": 3.0
+    "x0_over_r0": 4.0,
+    "x_over_r": 3.0,
+    "z0_over_z1": 1.5
    },
    "kind": "phase_jump",
    "params": {
@@ -588,3 +618,138 @@ def test_json_golden_case_text():
   }
  ]"""
     assert golden in text
+
+
+# --- GK A2 review of 619e1d53: zero sequence, fault impedance, bool probes ----
+
+
+def test_fault_1ph_without_zero_sequence_refused():
+    with pytest.raises(
+        ContractError, match="single-phase fault needs the source's zero sequence"
+    ):
+        _case(kind="fault_1ph", grid=Thevenin("g", 1000.0, 5.0))
+
+
+def test_fault_3ph_without_zero_sequence_allowed():
+    assert _case(grid=Thevenin("g", 1000.0, 5.0)).grid.z0_over_z1 is None
+
+
+def test_half_zero_sequence_refused():
+    with pytest.raises(ContractError, match="zero sequence needs both"):
+        Thevenin("g", 1000.0, 5.0, z0_over_z1=1.0)
+
+
+@pytest.mark.parametrize("name", ["z0_over_z1", "x0_over_r0"])
+def test_zero_sequence_zero_refused(name):
+    kw = {"z0_over_z1": 1.0, "x0_over_r0": 3.0, name: 0}
+    with pytest.raises(ContractError, match=f"{name}=0.0 must be > 0"):
+        Thevenin("g", 1000.0, 5.0, **kw)
+
+
+@pytest.mark.parametrize("bad", BAD_NUMBERS)
+@pytest.mark.parametrize("name", ["z0_over_z1", "x0_over_r0"])
+def test_zero_sequence_nonfinite_refused(bad, name):
+    kw = {"z0_over_z1": 1.0, "x0_over_r0": 3.0, name: bad}
+    with pytest.raises(ContractError, match=f"{name}=.* is not a finite number"):
+        Thevenin("g", 1000.0, 5.0, **kw)
+
+
+@pytest.mark.parametrize("name", ["z0_over_z1", "x0_over_r0"])
+def test_builder_requires_zero_sequence(name):
+    kw = dict(Z0)
+    del kw[name]
+    with pytest.raises(TypeError, match=name):
+        build_battery(1000, 3000, 3, 10, **kw)
+
+
+def test_builder_zero_sequence_nonfinite_refused():
+    with pytest.raises(ContractError, match="z0_over_z1=nan is not a finite number"):
+        build_battery(1000, 3000, 3, 10, z0_over_z1=math.nan, x0_over_r0=4.0)
+
+
+def test_built_grids_carry_zero_sequence(battery):
+    assert {(c.grid.z0_over_z1, c.grid.x0_over_r0) for c in battery} == {(1.5, 4.0)}
+
+
+# Hand values: 110 kV, Sk 1000 MVA, X/R 10 -> |Z1| = 12.1 ohm,
+# R1 = 12.1/sqrt(101) = 1.2039950, X1 = 10 R1 = 12.039950.
+# Z0 = 2 |Z1| at X0/R0 = 5 -> R0 = 24.2/sqrt(26) = 4.7460105, X0 = 23.730052.
+_HAND = Thevenin("g", 1000.0, 10.0, 2.0, 5.0)
+
+
+def test_thevenin_impedances_hand_value():
+    z1, z0 = thevenin_impedances_ohm(_HAND, 110.0)
+    assert z1 == pytest.approx(complex(1.2039950, 12.039950), rel=1e-7)
+    assert z0 == pytest.approx(complex(4.7460105, 23.730052), rel=1e-7)
+
+
+def test_fault_3ph_impedance_hand_value():
+    # v = 0.2: Z_f = Z1 * 0.2 / 0.8 = Z1 / 4
+    c = _case(grid=_HAND, params={"v_retained_pu": 0.2, "duration_s": 0.15})
+    assert fault_impedance_ohm(c, 110.0) == pytest.approx(
+        complex(0.30099875, 3.0099875), rel=1e-6
+    )
+
+
+def test_fault_1ph_impedance_hand_value():
+    # v = 0.2: Z_f = 0.2 (2 Z1 + Z0) / 2.4 = (2 Z1 + Z0) / 12
+    # 2 Z1 + Z0 = 7.1540005 + j 47.809952 -> Z_f = 0.5961667 + j 3.9841627
+    c = _case(
+        kind="fault_1ph", grid=_HAND, params={"v_retained_pu": 0.2, "duration_s": 0.15}
+    )
+    assert fault_impedance_ohm(c, 110.0) == pytest.approx(
+        complex(0.5961667, 3.9841627), rel=1e-6
+    )
+
+
+@pytest.mark.parametrize("kind", ["fault_3ph", "fault_1ph"])
+@pytest.mark.parametrize("v", [0.0, 0.2, 0.5, 0.9])
+def test_fault_impedance_retains_v_with_plant_disconnected(kind, v):
+    c = _case(kind=kind, grid=_HAND, params={"v_retained_pu": v, "duration_s": 0.15})
+    zf = fault_impedance_ohm(c, 110.0)
+    z1, z0 = thevenin_impedances_ohm(_HAND, 110.0)
+    retained = (
+        zf / (z1 + zf) if kind == "fault_3ph" else 3 * zf / (2 * z1 + z0 + 3 * zf)
+    )
+    assert abs(retained) == pytest.approx(v, abs=1e-12)
+    assert abs(cmath.phase(retained)) < 1e-9 or v == 0.0
+
+
+def test_fault_impedance_of_non_fault_refused():
+    with pytest.raises(ContractError, match="is not a fault"):
+        fault_impedance_ohm(_case(kind="flat", params={}), 110.0)
+
+
+@pytest.mark.parametrize("vn", [0.0, -110.0, math.nan, True])
+def test_fault_impedance_bad_voltage_refused(vn):
+    with pytest.raises(ContractError, match="vn_kv=.* must be a finite number > 0"):
+        fault_impedance_ohm(_case(), vn)
+
+
+def test_json_params_not_mapping_refused():
+    import json
+
+    doc = json.loads(battery_json(_bb(1000, 3000, 3, 10)))
+    doc["cases"][0]["params"] = [["x"]]
+    with pytest.raises(ContractError, match="params must be a mapping"):
+        cases_from_json(json.dumps(doc))
+
+
+def test_json_channels_string_refused():
+    import json
+
+    doc = json.loads(battery_json(_bb(1000, 3000, 3, 10)))
+    doc["cases"][0]["channels"] = "v_poc_pu"
+    with pytest.raises(ContractError, match="channels must be a list"):
+        cases_from_json(json.dumps(doc))
+
+
+@pytest.mark.parametrize("name", ["t_event_s", "t_end_s"])
+def test_bool_time_refused(name):
+    with pytest.raises(ContractError, match=f"{name}=True is not a finite number"):
+        _case(kind="flat", params={}, **{name: True})
+
+
+def test_bool_param_refused():
+    with pytest.raises(ContractError, match="duration_s=True is not a finite number"):
+        _case(params={"v_retained_pu": 0.2, "duration_s": True})
