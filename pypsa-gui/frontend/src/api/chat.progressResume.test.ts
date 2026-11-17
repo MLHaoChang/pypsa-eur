@@ -164,6 +164,20 @@ describe('createResumableProgressStream', () => {
     expect(ends).toEqual(['monitor_ended'])
   })
 
+  it('a replayed duplicate does not restart the try count: duplicates-then-drop gives up', async () => {
+    fetchMock().mockResolvedValueOnce(body([progress('e.1:1')], 'drop'))
+    for (let i = 0; i < PROGRESS_BACKOFF_MS.length; i++) {
+      fetchMock().mockResolvedValueOnce(body([progress('e.1:1')], 'drop'))
+    }
+    fetchMock().mockResolvedValue(body([progress('e.1:2')], 'close'))
+    const { frames, ends } = open()
+    await vi.advanceTimersByTimeAsync(PROGRESS_BACKOFF_MS.reduce((a, b) => a + b, 0) + 1)
+    expect(shownIds(frames)).toEqual(['e.1:1'])
+    expect(fetchMock()).toHaveBeenCalledTimes(PROGRESS_BACKOFF_MS.length + 1)
+    expect(ends).toEqual(['gave_up'])
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   describe('F1: giving up leaves no timer', () => {
     it('after the tries run out', async () => {
       fetchMock().mockRejectedValue(new TypeError('offline'))

@@ -181,20 +181,28 @@ describe('Stop monitoring', () => {
     expect(stopButton()).toBeNull()
   })
 
-  it('F6: a failed stop POST still closes the stream, throws nothing, and reads the same', async () => {
-    vi.mocked(postChatProgressStop).mockRejectedValueOnce(new Error('HTTP 500'))
+  it('F6: a failed stop POST still closes the stream, its rejection is handled, and the line reads the same', async () => {
+    // Made when the panel calls it, so the only handler it can get is the panel's.
+    let handled: ReturnType<typeof vi.fn> | undefined
+    vi.mocked(postChatProgressStop).mockImplementationOnce(() => {
+      const failed = Promise.reject(new Error('HTTP 500'))
+      handled = vi.spyOn(failed, 'catch') as unknown as ReturnType<typeof vi.fn>
+      return failed
+    })
     const unhandled = vi.fn()
-    process.on('unhandledRejection', unhandled)
+    window.addEventListener('unhandledrejection', unhandled)
     try {
       const watch = await startWatching()
       await userEvent.click(stopButton() as HTMLElement)
       await new Promise((r) => setTimeout(r, 0))
+      expect(handled).toBeDefined()
+      expect(handled).toHaveBeenCalledTimes(1)
       expect(watch.close).toHaveBeenCalledTimes(1)
       expect(postChatAbort).not.toHaveBeenCalled()
       expect(line()?.textContent).toBe(MONITOR_WORDS.stopped)
       expect(unhandled).not.toHaveBeenCalled()
     } finally {
-      process.off('unhandledRejection', unhandled)
+      window.removeEventListener('unhandledrejection', unhandled)
     }
   })
 
@@ -216,6 +224,13 @@ it('Expert: the request row and the result row share the tool id, and the line s
   await startWatching({ requestRow: true })
   expect(screen.getAllByTestId('chat-monitor-line')).toHaveLength(1)
   expect(screen.getAllByRole('button', { name: MONITOR_WORDS.stop })).toHaveLength(1)
+  // It sits in the result row, the later of the two, not in the request row.
+  const rows = screen.getAllByTestId('chat-message')
+  const requestRow = rows.findIndex((r) => r.textContent?.includes('→ run_simulation'))
+  const owner = (line() as HTMLElement).closest('[data-testid="chat-message"]') as HTMLElement
+  expect(requestRow).toBeGreaterThanOrEqual(0)
+  expect(rows.indexOf(owner)).toBeGreaterThan(requestRow)
+  expect(owner.textContent).not.toContain('→ run_simulation')
 })
 
 describe('F1: the stream ending by itself', () => {

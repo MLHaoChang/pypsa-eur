@@ -6,7 +6,7 @@
    "shadows": [
     "/api/chat/runs/{task_id}/stop"
    ],
-   "reason": "chat/runs/{task_id}/stop registers before chat/{session_id}/progress/stop; it matches only a session id equal to the literal 'runs', which a session id never is"
+   "reason": "chat/runs/{task_id}/stop registers before chat/{session_id}/progress/stop. A session id can be client-chosen (harness/session.py get_or_create_session_reporting keeps a given id), so a session named 'runs' with a task id 'progress' would reach the runs route; that route serves only the caller's own run in the active project (task_not_found otherwise), and the GUI never names a session 'runs'"
   }
  ],
  "limitations": [

@@ -274,7 +274,7 @@ function splitProgressId(id: string): [string, number] | null {
  *
  * Every frame of GET /api/chat/{id}/progress carries `id: <epoch>:<seq>`. A
  * dropped stream reconnects with `Last-Event-ID`, waiting `PROGRESS_BACKOFF_MS`
- * between tries (the count starts again once a frame arrives), so the server
+ * between tries (the count starts again once a new frame arrives), so the server
  * replays only what follows or answers with a `job_snapshot`. Frames at or
  * below the highest seq seen for their epoch are dropped, so a replayed
  * overlap is never shown twice; a `job_snapshot` sets that mark to its own seq.
@@ -311,7 +311,6 @@ export function createResumableProgressStream(
   }
 
   const accept = (frame: ChatFrame) => {
-    tries = 0
     const parsed = frame.id ? splitProgressId(frame.id) : null
     if (parsed) {
       const [epoch, seq] = parsed
@@ -322,6 +321,9 @@ export function createResumableProgressStream(
       hwm.set(epoch, seq)
       lastId = frame.id as string
     }
+    // Only a frame that is shown proves progress: a replayed duplicate does not
+    // restart the try count, or duplicates-then-drop would reconnect forever.
+    tries = 0
     onFrame(frame)
     if (frame.event === 'job_snapshot' && frame.data.monitor_active === false) {
       finish('monitor_ended')
