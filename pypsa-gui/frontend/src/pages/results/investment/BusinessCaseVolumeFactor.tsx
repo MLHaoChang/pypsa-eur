@@ -82,7 +82,7 @@ export default function VolumeFactorStrip({ years, value, bad, server, onChange 
                     return (
                       <td key={y} className="px-0.5">
                         <NumInput aria-label={`${VOLUME_LABEL} ${y}`} placeholder="100"
-                                  className={CELL + ' w-14 placeholder:text-muted' + (refused ? BAD : '')}
+                                  className={CELL + ' w-14 placeholder:text-muted placeholder:italic' + (refused ? BAD : '')}
                                   aria-invalid={refused || undefined}
                                   aria-describedby={refused ? `bc-vf-why-${k}` : undefined}
                                   data-year={k}
