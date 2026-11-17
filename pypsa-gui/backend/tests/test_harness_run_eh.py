@@ -40,6 +40,20 @@ TEMPLATE = {
 PROJECT = "11111111-1111-1111-1111-111111111111"
 
 
+def grid_network(mw=40.0):
+    """A site behind one grid import Link of `mw` (the template's 40 MW): a
+    weak-grid study's import cap is the network's connection limit and is
+    refused without one (template-e2e 02, GK B C2)."""
+    import pypsa
+
+    n = pypsa.Network()
+    n.add("Bus", "grid", carrier="AC")
+    n.add("Bus", "site", carrier="AC")
+    n.add("Link", "grid_import", bus0="grid", bus1="site", carrier="AC", p_nom=mw)
+    n.links.loc["grid_import", "eh_role"] = "grid_import"
+    return n
+
+
 def ctx_for(tmp_path, cfg=None, template=TEMPLATE, **state):
     root = tmp_path / "project"
     root.mkdir(exist_ok=True)
@@ -51,6 +65,7 @@ def ctx_for(tmp_path, cfg=None, template=TEMPLATE, **state):
         solver_state_lock=threading.RLock(),
         solver_state={"solver_config": dict(cfg or {}), **state},
         network_revision=0,
+        network=grid_network(),
     )
 
 
@@ -287,7 +302,7 @@ def test_without_a_grant_the_stage_entry_freezes_within_the_profile_budget(tmp_p
 def test_a_freeze_that_fails_leaves_the_step_unfrozen(tmp_path, monkeypatch):
     path, task = task_for(tmp_path)
     monkeypatch.setattr(run_eh, "goal_of", lambda ctx: 1 / 0)
-    monkeypatch.setattr(flow_service, "_request_for", lambda *a: 1 / 0)
+    monkeypatch.setattr(flow_service, "_template_request", lambda *a: 1 / 0)
     steps = run_profiles.materialise(PROFILE, "solve", PROJECT)
     run_eh.fill(steps, run_eh.stage_frozen(path, task, PROFILE, ctx_for(tmp_path)))
     assert steps[1]["args"] == run_eh.UNFROZEN and "frozen" not in steps[1]
@@ -1734,7 +1749,8 @@ def test_releasing_an_unknown_charge_on_a_row_without_a_reservation_settles_zero
 def test_the_freeze_takes_a_goal_card_without_pack_overrides(tmp_path):
     ctx = ctx_for(tmp_path, template={**TEMPLATE, "pack_overrides": None})
     frozen = run_eh.freeze(ctx, PROFILE, 6)
-    assert "import_p_nom_mw" not in frozen["args"].get("pack_overrides", {})
+    # template-e2e 02: no template cap, the network's connection limit (40 MW).
+    assert frozen["args"]["pack_overrides"] == {"import_p_nom_mw": 40.0}
 
 
 def test_skipped_ignores_a_stage_that_is_not_a_dict():
@@ -1774,10 +1790,12 @@ def test_the_freeze_takes_the_profiles_block_over_the_goal_card_and_falls_back_t
 ):
     """F1: the profile's `eh_study` block wins for pack overrides and MC
     settings (draws stay the goal's); its stages, when it names none, are
-    the goal card's, and with neither the study's own default applies."""
+    the goal card's, and with neither the study's own default applies. The
+    weak-grid import cap is the network's connection limit over both
+    (template-e2e 02, GK B C3)."""
     block = {
         "budget_solves": 2,
-        "pack_overrides": {"import_p_nom_mw": 55.0},
+        "pack_overrides": {"import_p_nom_mw": 55.0, "import_energy_mwh_per_year": 1000.0},
         "mc": {"seed": 7},
     }
     template = {**TEMPLATE, "stages": ["apply_pack", "ens_solve"]}
@@ -1787,7 +1805,8 @@ def test_the_freeze_takes_the_profiles_block_over_the_goal_card_and_falls_back_t
     # the card's stages (the study request appends its own closing stage)
     assert frozen["args"]["stages"][:2] == ["apply_pack", "ens_solve"]
     assert "mc_certify" not in frozen["args"]["stages"]
-    assert frozen["args"]["pack_overrides"]["import_p_nom_mw"] == 55.0
+    assert frozen["args"]["pack_overrides"]["import_energy_mwh_per_year"] == 1000.0
+    assert frozen["args"]["pack_overrides"]["import_p_nom_mw"] == 40.0
     assert frozen["args"]["mc"]["seed"] == 7
     bare = run_eh.freeze(
         ctx_for(tmp_path), {**PROFILE, "eh_study": {"budget_solves": 2}}, 6

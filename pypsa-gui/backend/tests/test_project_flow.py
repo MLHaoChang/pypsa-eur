@@ -516,7 +516,12 @@ def _server_verdict(client, monkeypatch, name) -> bool:
     if meta.status_code == 200:
         monkeypatch.setattr("services.adequacy.eh_study.run_eh_study",
                             lambda *a, **k: {})
-        r = client.post("/api/results/eh_study", json=S._request_for(meta.json()))
+        try:
+            # What the Goal card sends: the network's connection limit (template-e2e 02).
+            body = S._request_for(meta.json(), None, PyPSAService.get_network())
+        except S.ImportCapacityError:
+            return False                         # the card sends nothing: no study can start
+        r = client.post("/api/results/eh_study", json=body)
         assert r.status_code in (200, 202, 422), r.text
         ok = ok and r.status_code != 422
         for _ in range(100):                     # let the fake worker finish
