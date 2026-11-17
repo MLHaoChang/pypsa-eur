@@ -39,7 +39,7 @@ import { vintageCloneToast, saveFailedToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
 import { useAssetProvenance } from '../hooks/useAssetProvenance'
-import { buildPatch, costBasisOf, omitDerived, seedForm } from '../utils/assetForm'
+import { buildPatch, cardCostClaim, omitDerived, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, fieldHelp, fieldUnit, schemaFields } from './properties/AssetFields'
 import { useSaveAction } from '../components/memory/ParameterMemory'
 import { GuideButton } from '../components/GuidedTour'
@@ -172,7 +172,9 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     // PUT and invalidation; this builder owns only the form→patch mapping.
     // `current` arrives from the chokepoint — fresh-fetched on a cold cache
     // (ruling 3), so the old `?? gen` stale-prop fallback is gone.
-    mutationFn: () => updateAsset<Generator>(
+    mutationFn: () => {
+      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
+      return updateAsset<Generator>(
       qc, useUIStore.getState().currentProject, 'generators', gen.name,
       (current) => {
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Generator>
@@ -181,8 +183,10 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       payload.carrier = form.carrier || current.carrier
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Generator'))))
+      // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
+      for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }, { costBasis: costBasisOf(schema) }),
+    }, { costBasis: claim.costBasis }) },
     onSuccess: () => {
       // Invalidation is the chokepoint's job now.
       setOpen(false)
@@ -356,7 +360,9 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   const saveMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
     // the schema's descriptors own the form→patch mapping.
-    mutationFn: () => updateAsset<StorageUnit>(
+    mutationFn: () => {
+      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
+      return updateAsset<StorageUnit>(
       qc, useUIStore.getState().currentProject, 'storage_units', su.name,
       (current) => {
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<StorageUnit>
@@ -367,8 +373,10 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       payload.carrier = form.carrier || current.carrier
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('StorageUnit'))))
+      // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
+      for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }, { costBasis: costBasisOf(schema) }),
+    }, { costBasis: claim.costBasis }) },
     onSuccess: () => {
       setOpen(false)
       toast.success('Storage unit saved')
@@ -524,7 +532,9 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   const saveMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
     // the schema's descriptors own the form→patch mapping.
-    mutationFn: () => updateAsset<Store>(
+    mutationFn: () => {
+      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
+      return updateAsset<Store>(
       qc, useUIStore.getState().currentProject, 'stores', store.name,
       (current) => {
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Store>
@@ -533,8 +543,10 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
       payload.carrier = form.carrier || current.carrier
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Store'))))
+      // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
+      for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }, { costBasis: costBasisOf(schema) }),
+    }, { costBasis: claim.costBasis }) },
     onSuccess: () => {
       setOpen(false)
       toast.success('Store saved')
@@ -893,7 +905,9 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     // the spread is what keeps un-surfaced Link fields (`efficiency2`,
     // `bus2..bus4`, `committable`, `terrain_factor`, …) alive through the
     // backend's remove+add cycle. This builder is only the form→patch map.
-    mutationFn: () => updateAsset<Link>(
+    mutationFn: () => {
+      const claim = cardCostClaim(schema, specs, form, asset, 'bus0')
+      return updateAsset<Link>(
       qc, useUIStore.getState().currentProject, 'links', link.name,
       (current) => {
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Link>
@@ -904,8 +918,10 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
       Object.assign(payload, ehLinkPayload(form, current))
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Link'))))
+      // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
+      for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }, { costBasis: costBasisOf(schema) }),
+    }, { costBasis: claim.costBasis }) },
     onSuccess: () => {
       setOpen(false)
       toast.success('Link saved')

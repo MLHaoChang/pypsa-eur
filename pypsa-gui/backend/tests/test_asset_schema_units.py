@@ -296,6 +296,7 @@ def test_moving_the_bus_and_pricing_in_one_save_is_checked_against_the_new_bus(
     )
     assert r.status_code == 409, r.text
     assert r.json()["detail"]["actual"] == "energy"
+    assert "Save the bus change on its own first" in r.json()["detail"]["message"]
     assert _stored(client, name) == before
     ok = _put_generator(
         client, name, {"bus": energy_bus, "overnight_cost": 123400.0}, "energy"
@@ -316,7 +317,9 @@ def test_a_snapshot_restore_that_puts_the_asset_back_on_a_tonne_bus_refuses_the_
     network to the tonne bus. The stale form's claim (energy) is refused and nothing is stored."""
     name = _tonne_generator(n)
     energy_bus = n.links.at[_first(n, "links", "bus0", False), "bus0"]
-    install_network(n, name="restore05d")
+    install_network(
+        n.copy(), name="restore05d"
+    )  # the PUT below must not move the shared fixture's bus
     r = client.post("/api/projects/restore05d", params={"force": True, "rebind": True})
     assert r.status_code == 200, r.text
     assert (
@@ -348,3 +351,41 @@ def test_a_snapshot_restore_that_puts_the_asset_back_on_a_tonne_bus_refuses_the_
         "tonne",
     )
     assert _stored(client, name) == before
+
+
+def test_a_create_under_the_wrong_basis_is_refused_and_nothing_is_added(
+    client, install_network, n
+):
+    """The create path (the creation form's POST) checks the claim too: a generator and a store on a tonne bus."""
+    install_network(n)
+    tonne_bus = n.generators.at[_tonne_generator(n), "bus"]
+    r = client.post(
+        "/api/network/generators",
+        json={"name": "g05d", "bus": tonne_bus, "overnight_cost": 123400.0},
+        headers={"X-Cost-Basis": "energy"},
+    )
+    assert r.status_code == 409, r.text
+    d = r.json()["detail"]
+    assert (d["error_kind"], d["claimed"], d["actual"]) == (
+        "cost_basis_mismatch",
+        "energy",
+        "tonne",
+    )
+    names = [g["name"] for g in client.get("/api/network/generators").json()]
+    assert "g05d" not in names
+
+    r = client.post(
+        "/api/network/stores",
+        json={"name": "s05d", "bus": tonne_bus, "capital_cost": 5.0},
+        headers={"X-Cost-Basis": "energy"},
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["actual"] == "tonne"
+    assert "s05d" not in [s["name"] for s in client.get("/api/network/stores").json()]
+
+    ok = client.post(
+        "/api/network/stores",
+        json={"name": "s05d", "bus": tonne_bus, "capital_cost": 5.0},
+        headers={"X-Cost-Basis": "tonne"},
+    )
+    assert ok.status_code == 201, ok.text

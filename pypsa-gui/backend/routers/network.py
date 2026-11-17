@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session as DBSession
 from models.schemas import (
@@ -390,14 +392,19 @@ def get_links():
     return _get_component("Link", "links")
 
 
+
+# 05d: the basis a client scaled its typed costs under (tonne | energy). Annotated, so a direct call of the route
+# function (tests, in-process callers) gets None rather than a FieldInfo default.
+CostBasisHeader = Annotated[str | None, Header(alias="X-Cost-Basis")]
+
 @router.post("/links", status_code=201)
-def create_link(link: LinkCreate, cost_basis: str | None = Header(None, alias="X-Cost-Basis")):
+def create_link(link: LinkCreate, cost_basis: CostBasisHeader = None):
     unset_lazy = LINK_LAZY_COLUMNS - link.model_fields_set
     return _create_component("Link", "links", link.name, link.model_dump(exclude={"name"} | unset_lazy), cost_basis)
 
 
 @router.put("/links/{name}")
-def update_link(name: str, link: LinkCreate, cost_basis: str | None = Header(None, alias="X-Cost-Basis")):
+def update_link(name: str, link: LinkCreate, cost_basis: CostBasisHeader = None):
     return _update_component("Link", "links", name, link.model_dump(exclude_unset=True), cost_basis)
 
 
@@ -414,13 +421,13 @@ def get_generators():
 
 
 @router.post("/generators", status_code=201)
-def create_generator(gen: GeneratorCreate, cost_basis: str | None = Header(None, alias="X-Cost-Basis")):
+def create_generator(gen: GeneratorCreate, cost_basis: CostBasisHeader = None):
     unset_lazy = GENERATOR_LAZY_COLUMNS - gen.model_fields_set
     return _create_component("Generator", "generators", gen.name, gen.model_dump(exclude={"name"} | unset_lazy), cost_basis)
 
 
 @router.put("/generators/{name}")
-def update_generator(name: str, gen: GeneratorCreate, cost_basis: str | None = Header(None, alias="X-Cost-Basis")):
+def update_generator(name: str, gen: GeneratorCreate, cost_basis: CostBasisHeader = None):
     return _update_component("Generator", "generators", name, gen.model_dump(exclude_unset=True), cost_basis)
 
 
@@ -437,12 +444,12 @@ def get_storage_units():
 
 
 @router.post("/storage_units", status_code=201)
-def create_storage_unit(su: StorageUnitCreate, cost_basis: str | None = Header(None, alias="X-Cost-Basis")):
+def create_storage_unit(su: StorageUnitCreate, cost_basis: CostBasisHeader = None):
     return _create_component("StorageUnit", "storage_units", su.name, su.model_dump(exclude={"name"}), cost_basis)
 
 
 @router.put("/storage_units/{name}")
-def update_storage_unit(name: str, su: StorageUnitCreate, cost_basis: str | None = Header(None, alias="X-Cost-Basis")):
+def update_storage_unit(name: str, su: StorageUnitCreate, cost_basis: CostBasisHeader = None):
     return _update_component("StorageUnit", "storage_units", name, su.model_dump(exclude_unset=True), cost_basis)
 
 
@@ -459,12 +466,12 @@ def get_stores():
 
 
 @router.post("/stores", status_code=201)
-def create_store(store: StoreCreate, cost_basis: str | None = Header(None, alias="X-Cost-Basis")):
+def create_store(store: StoreCreate, cost_basis: CostBasisHeader = None):
     return _create_component("Store", "stores", store.name, store.model_dump(exclude={"name"}), cost_basis)
 
 
 @router.put("/stores/{name}")
-def update_store(name: str, store: StoreCreate, cost_basis: str | None = Header(None, alias="X-Cost-Basis")):
+def update_store(name: str, store: StoreCreate, cost_basis: CostBasisHeader = None):
     return _update_component("Store", "stores", name, store.model_dump(exclude_unset=True), cost_basis)
 
 

@@ -1,7 +1,7 @@
 // S1b: the pure form logic behind the schema-rendered asset cards.
 import { describe, expect, it } from 'vitest'
 import type { AssetFieldSpec } from '../api/assetSchema'
-import { annuity, buildPatch, costBasisOf, derivedStored, displayValue, isRevealed, omitDerived, seedForm } from './assetForm'
+import { annuity, buildPatch, cardCostClaim, costBasisOf, derivedStored, displayValue, isRevealed, omitDerived, seedForm } from './assetForm'
 
 function spec(key: string, over: Partial<AssetFieldSpec> = {}): AssetFieldSpec {
   return {
@@ -151,5 +151,26 @@ describe('costBasisOf (05d): what the costs on screen are per', () => {
   it('claims nothing without a schema or a cost field', () => {
     expect(costBasisOf(undefined)).toBeUndefined()
     expect(costBasisOf(schema([P_NOM, spec('start_up_cost', { unit_display: 'EUR' })]))).toBeUndefined()
+  })
+})
+
+describe('cardCostClaim (05d U1): a bus move alone saves without a claim', () => {
+  const OC = spec('overnight_cost', { unit_display: 'EUR/(t/h)' })
+  const BUS = spec('bus', { kind: 'bus' })
+  const schema = { component: 'Generator', groups: [{ key: 'g', label: 'g', fields: [BUS, OC] }] } as never
+  const asset = { bus: 'ore', overnight_cost: 50 }
+  const seeded = seedForm([BUS, OC], asset)
+
+  it('claims the schema basis when the bus stays', () => {
+    expect(cardCostClaim(schema, [BUS, OC], { ...seeded, overnight_cost: '60' }, asset, 'bus'))
+      .toEqual({ costBasis: 'tonne', dropCosts: [] })
+  })
+  it('drops the untouched costs and the claim when only the bus moves', () => {
+    expect(cardCostClaim(schema, [BUS, OC], { ...seeded, bus: 'grid' }, asset, 'bus'))
+      .toEqual({ costBasis: undefined, dropCosts: ['overnight_cost'] })
+  })
+  it('keeps the claim when the bus moves and a cost changed', () => {
+    expect(cardCostClaim(schema, [BUS, OC], { ...seeded, bus: 'grid', overnight_cost: '60' }, asset, 'bus'))
+      .toEqual({ costBasis: 'tonne', dropCosts: [] })
   })
 })

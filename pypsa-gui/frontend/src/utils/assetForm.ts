@@ -160,3 +160,25 @@ export function costBasisOf(schema: AssetSchema | undefined): 'tonne' | 'energy'
   if (!f) return undefined
   return /^EUR\/(\(t\/h\)|t)(\/|$)/.test(f.unit_display.replace('€', 'EUR')) ? 'tonne' : 'energy'
 }
+
+/** A cost whose unit follows the bus (EUR/kW, EUR/kWh, EUR/MWh on an energy bus; EUR/(t/h), EUR/t on a tonne bus). */
+const BUS_SCALED_COST = /^(EUR|€)\/(\(t\/h\)|t|kW|kWh|MWh)(\/|$)/
+
+/**
+ * The claim an edit card sends with its save (05d, GK B2 U1). A save that moves the asset to another bus and leaves
+ * every bus-scaled cost as seeded sends those costs as stored and no claim, so a bus move alone always saves; the
+ * costs are then entered in the new bus's unit. A save that moves the bus and changes a cost keeps the claim, and
+ * the server refuses it, saying to save the bus change first. `busKey` is the bus the size is measured on.
+ */
+export function cardCostClaim(
+  schema: AssetSchema | undefined, specs: AssetFieldSpec[], form: FS, asset: Record<string, unknown>,
+  busKey: 'bus' | 'bus0',
+): { costBasis?: 'tonne' | 'energy'; dropCosts: string[] } {
+  const formBus = String(form[busKey] ?? '').trim()
+  const moved = formBus !== '' && formBus !== String(asset[busKey] ?? '')
+  const seed = seedForm(specs, asset)
+  const costs = specs.filter(s => !s.derived && BUS_SCALED_COST.test(s.unit_display)).map(s => s.key)
+  const touched = costs.some(k => (form[k] ?? '') !== (seed[k] ?? ''))
+  if (moved && !touched) return { costBasis: undefined, dropCosts: costs }
+  return { costBasis: costBasisOf(schema), dropCosts: [] }
+}
