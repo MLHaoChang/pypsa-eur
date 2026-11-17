@@ -183,6 +183,17 @@ def test_every_template_names_what_its_run_assumes(tid):
     assert "mc_draws" in _keys(rows)
     assert "site_archetype" in _keys(rows)
     assert any(r["source"] == "carrier_default" for r in rows), tid
+    # UX: visible words only. No basis code, row key or source id is shown.
+    import re
+
+    for r in rows:
+        for text in (r["label"], r["shown"], r["reason"]):
+            assert not re.search(r"\b(FOR|EFORd|MTTR)\b|≈", text), (tid, text)
+            # Unit names are the user's own and are shown as typed.
+            words = text
+            for unit in sorted(filter(None, r["entity"].split(", ")), key=len)[::-1]:
+                words = words.replace(unit, "")
+            assert r["key"] not in words and "_" not in words, (tid, text)
 
 
 # ── Before the run: readiness raises each row where its value is set ────────
@@ -277,6 +288,18 @@ def test_readiness_blocks_run_on_a_missing_voll_once(client, tmp_projects_dir):
     assert len(voll) == 1, [i["message"] for i in voll]
     assert voll[0]["blocking"] and voll[0]["target"]["section"] == "scenarios"
     assert voll[0]["target"]["field"] == "voll"
+    # Opens with the panel's label (UX: a refusal names the field as shown).
+    assert voll[0]["message"].startswith("Value of Lost Load (VOLL): ")
+
+
+def test_the_voll_refusal_names_the_solver_settings_label():
+    """The refusal's field words are the Solver settings panel's own label, so
+    the two cannot drift apart."""
+    from services.adequacy.eh_study_runner import VOLL_FIELD_LABEL, VOLL_REFUSAL
+
+    panel = (BACKEND.parent / "frontend/src/pages/SolverSettings.tsx").read_text()
+    assert f'label="{VOLL_FIELD_LABEL}"' in panel
+    assert VOLL_REFUSAL.startswith(f"{VOLL_FIELD_LABEL}: ")
 
 
 # ── The run record carries what the run assumed ──────────────────────────────

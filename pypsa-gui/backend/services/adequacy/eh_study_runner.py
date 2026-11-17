@@ -267,7 +267,12 @@ def _assumptions_recorder(record: dict, cfg, body, goal_sources: dict):
     return record_from
 
 
-VOLL_REFUSAL = "the reliability study requires a VOLL > 0 in solver settings"
+# The Solver settings panel's own label for the field (SolverSettings.tsx;
+# test_run_assumptions pins the two together), so the refusal names what the
+# user sees there.
+VOLL_FIELD_LABEL = "Value of Lost Load (VOLL)"
+VOLL_REFUSAL = (f"{VOLL_FIELD_LABEL}: must be above 0 to run the reliability study. "
+                "Set it in Solver settings.")
 
 
 def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,

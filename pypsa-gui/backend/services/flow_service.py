@@ -634,8 +634,10 @@ def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
             and isinstance(exc.detail.get("message"), str) else json.dumps(exc.detail))
         # The VOLL refusal points at its field (template-e2e 06).
         fld = exc.detail.get("field", "") if isinstance(exc.detail, dict) else ""
+        # A field refusal opens with the field's own label, so it is shown as is.
+        text = detail if fld else f"The reliability study would not start: {detail}"
         return [_item("eh_study_refused", "error",
-                      f"The reliability study would not start: {detail}", "eh_study",
+                      text, "eh_study",
                       "scenarios", fld=fld, blocking=requested)]
     return []
 

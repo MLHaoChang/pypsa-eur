@@ -21,6 +21,7 @@ arithmetic, and these rows describe exactly those fallbacks:
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 GOAL_SECTION = "scenarios"
@@ -65,6 +66,24 @@ def _row(
 def _plain(raw: str) -> str:
     text = str(raw).replace("_", " ").strip()
     return text[:1].upper() + text[1:]
+
+
+# The outage-rate bases in words (the asset form's `outage_rate_basis` values).
+BASIS_WORDS = {
+    "FOR": "forced outage rate",
+    "EFORd": "forced outage rate on demand",
+}
+_BASIS_RE = re.compile(r"\b(" + "|".join(BASIS_WORDS) + r")\b")
+
+
+def _basis(code: str) -> str:
+    return BASIS_WORDS.get(code, code)
+
+
+def _plain_source(source: str) -> str:
+    """A carrier default's citation in words: bases spelled out, ≈ as "about"."""
+    text = _BASIS_RE.sub(lambda m: BASIS_WORDS[m.group(1)], source)
+    return text.replace("≈", "about").strip()
 
 
 def _number(v: float) -> str:
@@ -143,7 +162,9 @@ def _outage_rows(n) -> list[dict]:
         for (kind, carrier), names in groups.items():
             d = CARRIER_DEFAULTS[carrier]
             what = _carrier_label(n, carrier)
-            reason = f"the {what.lower()} class default: {d.source}"
+            reason = (
+                f"the typical value for {what.lower()} units, {_plain_source(d.source)}"
+            )
             entity = ", ".join(names)
             if kind == "rate":
                 out.append(
@@ -151,7 +172,7 @@ def _outage_rows(n) -> list[dict]:
                         f"outage_rate:{component}:{carrier}",
                         f"Outage rate of {what.lower()} {noun} ({', '.join(names)})",
                         d.rate,
-                        f"{_number(d.rate * 100)} % {d.basis}, repair {_number(d.mttr_hours)} h",
+                        f"{_number(d.rate * 100)} % {_basis(d.basis)}, repair {_number(d.mttr_hours)} h",
                         "carrier_default",
                         reason,
                         ASSET_SECTION,
@@ -182,7 +203,7 @@ def _outage_rows(n) -> list[dict]:
                     f"outage_basis:{component}",
                     f"Outage rate basis of {noun} ({', '.join(no_basis)})",
                     "FOR",
-                    "FOR (forced outage rate)",
+                    _basis("FOR").capitalize(),
                     "default",
                     "an outage rate without a basis is read as a forced outage rate",
                     ASSET_SECTION,
