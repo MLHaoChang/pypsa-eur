@@ -35,7 +35,7 @@ import json
 import logging
 import math
 import statistics
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def _utc(value: Any) -> datetime | None:
     """A timezone-aware datetime in UTC, or None for anything else (naive included)."""
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         return None
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def duration_s(row: dict) -> float | None:

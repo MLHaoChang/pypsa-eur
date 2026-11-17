@@ -325,7 +325,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
     every writer here stamps UTC (`_dt`), so naive means UTC at this seam."""
     if value is None:
         return None
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 def load_completed_runs(project_key: str, kind: str) -> list[dict]:
