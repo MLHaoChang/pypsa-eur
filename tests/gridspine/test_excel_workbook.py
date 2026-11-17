@@ -201,7 +201,7 @@ def _write(n, tmp_path, *, template=False, sidecars=None, name="w.xlsx"):
 
 
 def _read(path):
-    return read_excel(path, {"custom_columns": CUSTOM})
+    return read_excel(path, {"custom_columns": CUSTOM, "columns": CATALOGUE})
 
 
 def _um(res) -> list[tuple[str, str]]:
@@ -804,6 +804,12 @@ def test_a_missing_weighting_column_keeps_the_default(tmp_path):
         ws.delete_cols(_col(ws, "stores", L.TS_ROW_ATTR))
 
     res = _edit(_write(_network(False), tmp_path), fn)
+    assert (
+        "every time step",
+        "Storage weighting",
+        1.0,
+        "no column: the model default",
+    ) in _am(res)
     assert (res.network.snapshot_weightings["stores"] == 1.0).all()
     assert (res.network.snapshot_weightings["objective"] == 2.0).all()
 
@@ -895,3 +901,88 @@ def test_read_excel_takes_a_plain_string_path_and_no_options(tmp_path):
     # Without the allow-list, the custom columns are reported, never set.
     assert any("is not a parameter of Generators" in why for _, why in _um(res))
     assert "eh_flag" not in res.network.generators.columns
+
+
+# ── review findings (mp-code-review) ─────────────────────────────────────────
+
+
+def test_a_unit_and_its_factor_changed_together_cannot_rescale_a_value(tmp_path):
+    """E1: the shown unit must be the catalogue's, so the pair cannot be swapped."""
+
+    def fn(wb):
+        ws = wb["Generators"]
+        c = _col(ws, "capital_cost")
+        ws.cell(L.ROW_UNIT, c).value = "EUR/MW/yr"
+        ws.cell(L.ROW_SCALE, c).value = 1.0
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert (
+        "Generators › Annualised investment",
+        "the unit 'EUR/MW/yr' is not this parameter's unit 'EUR/kW/yr'",
+    ) in _um(res)
+    assert res.network.generators.at["wind 1", "capital_cost"] == 0.0
+
+
+def test_a_store_on_a_tonne_node_counts_its_size_in_tonnes(tmp_path):
+    """E4: a stock on a tonne node is in t, a flow in t/h."""
+    path = _write(_network(False), tmp_path)
+    ws = openpyxl.load_workbook(path)["Stores"]
+    assert ws.cell(L.FIRST_DATA_ROW, _col(ws, "~size_unit")).value == "t"
+    assert _read(path).report.warnings == []
+
+
+def test_only_the_engine_s_own_infinity_is_accepted(tmp_path):
+    def fn(wb):
+        ws = wb["Generators"]
+        ws.cell(L.FIRST_DATA_ROW + 1, _col(ws, "p_nom_max")).value = "-inf"
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert (
+        "Generators › electrolyser out › Maximum capacity",
+        "only inf is allowed here; the model default is kept",
+    ) in _um(res)
+
+
+def test_a_formula_without_a_saved_value_anywhere_is_reported(tmp_path):
+    def fn(wb):
+        wb[L.HORIZON]["B2"] = "=7/100"
+
+    res = _edit(
+        _write(_network(False), tmp_path, sidecars={"solver_config.json": SOLVER}), fn
+    )
+    assert (
+        f"{L.HORIZON} › cell B2",
+        "a formula with no saved value; open and save the file in Excel, or type the value",
+    ) in _um(res)
+    assert "discount_rate" not in res.sidecars["solver_config.json"]
+
+
+def test_upload_provenance_that_is_not_json_ready_is_dropped_with_a_warning(tmp_path):
+    n = _network(False)
+
+    def fn(wb):
+        wb[L.LISTS]["D2"] = '{"loads": NaN}'
+
+    res = _edit(_write(n, tmp_path, sidecars={"user_ts.json": _user_ts(n)}), fn)
+    assert "$meta" not in res.sidecars["user_ts.json"]
+    assert any("provenance" in w for w in res.report.warnings)
+    json.dumps(res.sidecars, allow_nan=False)
+
+
+def test_the_template_carries_the_accepted_custom_columns_hidden(tmp_path):
+    ws = openpyxl.load_workbook(_write(_network(False), tmp_path, template=True))[
+        "Generators"
+    ]
+    for key in CUSTOM["Generator"]:
+        c = _col(ws, key)
+        assert ws.column_dimensions[openpyxl.utils.get_column_letter(c)].hidden
+
+
+def test_a_custom_column_off_the_allow_list_is_exported_and_reported_on_import(
+    tmp_path,
+):
+    n = _network(False)
+    n.loads["site_note"] = ["north yard"]
+    res = _read(_write(n, tmp_path))
+    assert ("Loads › Site note", "'site_note' is not a parameter of Loads") in _um(res)
+    assert "site_note" not in res.network.loads.columns

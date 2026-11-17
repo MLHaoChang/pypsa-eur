@@ -19,20 +19,10 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import pandas as pd
+from openpyxl.utils import get_column_letter
 
 from gridspine.ingest import excel_layout as L
 
-SIZE_UNIT_KEY = "~size_unit"
-#: Sidecar keys: the project files they become (the import contract).
-SIDECAR_USER_TS, SIDECAR_SOLVER = "user_ts.json", "solver_config.json"
-#: The column naming the bus a class's size is counted on (a Link's input side).
-SIZE_BUS = {
-    "Generator": "bus",
-    "StorageUnit": "bus",
-    "Store": "bus",
-    "Load": "bus",
-    "Link": "bus0",
-}
 _VALIDATION_ROWS = 2000
 
 
@@ -109,15 +99,23 @@ def _sheet_columns(
         out.append(c)
         seen.add(c.key)
     if template:
-        return out
+        # The custom columns the reader accepts, hidden like on an export.
+        return out + [
+            L.Column(k, L.humanise(k), visible=False, kind="text")
+            for k in custom
+            if k not in seen
+        ]
+    every = _defaults(n, list_name).index
     for key in table.columns:
         if key in seen:
             continue
         if key in attrs.index:
             if _is_default(table[key], attrs.at[key, "default"]):
                 continue
-        elif key not in custom:
-            continue
+        elif key in every:
+            continue  # an output (a result); results are not in the workbook
+        # A custom column, on the caller's allow-list or not: written hidden, so the
+        # import reports one it does not accept instead of the export losing it.
         out.append(L.Column(key, L.humanise(key), visible=False, kind="text"))
         seen.add(key)
     return out
@@ -132,22 +130,18 @@ def _write_header(ws, cols: Sequence[L.Column]) -> None:
         L.put(ws, L.ROW_UNIT, j, c.unit or None).font = italic
         L.put(ws, L.ROW_KEY, j, c.key)
         L.put(ws, L.ROW_SCALE, j, float(c.scale))
-        ws.column_dimensions[_letter(j)].width = max(10, min(36, len(c.label) + 2))
+        ws.column_dimensions[get_column_letter(j)].width = max(
+            10, min(36, len(c.label) + 2)
+        )
         if not c.visible:
-            ws.column_dimensions[_letter(j)].hidden = True
+            ws.column_dimensions[get_column_letter(j)].hidden = True
     ws.row_dimensions[L.ROW_KEY].hidden = True
     ws.row_dimensions[L.ROW_SCALE].hidden = True
     ws.freeze_panes = ws.cell(row=L.FIRST_DATA_ROW, column=2)
 
 
-def _letter(j: int) -> str:
-    from openpyxl.utils import get_column_letter
-
-    return get_column_letter(j)
-
-
 def _size_units(n, cls: str, names, size_unit_of) -> list[str] | None:
-    col = SIZE_BUS.get(cls)
+    col = L.SIZE_BUS.get(cls)
     if col is None:
         return None
     table = getattr(n, L.LIST_NAME[cls])
@@ -161,9 +155,10 @@ def _size_units(n, cls: str, names, size_unit_of) -> list[str] | None:
                 if bus in n.buses.index and "unit" in n.buses
                 else ""
             )
-            unit = "t/h" if bus_unit == "t" else "MW"
+            unit = L.size_unit(cls, bus_unit)
         units.append(unit)
-    return units if any(u != "MW" for u in units) else None
+    plain = L.size_unit(cls, "")
+    return units if any(u != plain for u in units) else None
 
 
 def _write_component(
@@ -176,7 +171,7 @@ def _write_component(
     names = [] if template else list(table.index)
     sizes = None if template else _size_units(n, cls, names, size_unit_of)
     if sizes:
-        cols.insert(1, L.Column(SIZE_UNIT_KEY, "Size unit", kind="text"))
+        cols.insert(1, L.Column(L.SIZE_UNIT_KEY, "Size unit", kind="text"))
     ws = wb.create_sheet(L.SHEET_OF[cls])
     _write_header(ws, cols)
     for i, name in enumerate(names):
@@ -184,7 +179,7 @@ def _write_component(
         for j, c in enumerate(cols, start=1):
             if c.key == "name":
                 v = str(name)
-            elif c.key == SIZE_UNIT_KEY:
+            elif c.key == L.SIZE_UNIT_KEY:
                 v = sizes[i]
             elif c.key in table.columns:
                 v = _cell_value(table.at[name, c.key], c.scale)
@@ -221,7 +216,7 @@ def _validate(ws, cols, lists: Mapping[str, str]) -> None:
             showErrorMessage=c.kind != "carrier",
         )
         dv.error = f"Pick a value from the list for {c.label}."
-        dv.add(f"{_letter(j)}{L.FIRST_DATA_ROW}:{_letter(j)}{last}")
+        dv.add(f"{get_column_letter(j)}{L.FIRST_DATA_ROW}:{get_column_letter(j)}{last}")
         ws.add_data_validation(dv)
 
 
@@ -247,7 +242,7 @@ def _write_lists(wb, n) -> dict[str, str]:
         for i, v in enumerate(values, start=2):
             L.put(ws, i, j, str(v))
         if values:
-            col = _letter(j)
+            col = get_column_letter(j)
             out[kind] = f"'{L.LISTS}'!${col}$2:${col}${len(values) + 1}"
     return out
 
@@ -330,17 +325,6 @@ def _write_time_series(
     return len(series)
 
 
-def snapshot_index_json(snapshots) -> list:
-    """The snapshots as `user_ts.json` writes an index: ISO strings, or [period, ISO] pairs."""
-
-    def iso(t):
-        return t.isoformat() if hasattr(t, "isoformat") else t
-
-    if isinstance(snapshots, pd.MultiIndex):
-        return [[int(p), iso(t)] for p, t in snapshots]
-    return [iso(t) for t in snapshots]
-
-
 def _json_values(s: pd.Series) -> list:
     return [
         None if isinstance(v, float) and not math.isfinite(v) else v for v in s.tolist()
@@ -354,7 +338,7 @@ def _split_uploaded(n, user_ts: Mapping, series) -> tuple[dict, list]:
     in the hidden row, so an edit in Excel edits both. The rest keep their own time
     steps in the hidden Uploaded profiles sheet.
     """
-    index = snapshot_index_json(n.snapshots)
+    index = L.snapshot_index_json(n.snapshots)
     on_sheet = {(L.LIST_NAME[cls], col.key, name): s for cls, _, name, col, s in series}
     flagged: dict = {}
     elsewhere: list = []
@@ -564,12 +548,12 @@ def write_workbook(
         counts[L.TIME_SERIES] = 0
     else:
         counts[L.TIME_SERIES] = _write_time_series(
-            wb, n, columns, sidecars.get(SIDECAR_USER_TS) or {}
+            wb, n, columns, sidecars.get(L.SIDECAR_USER_TS) or {}
         )
     sheets.append(L.TIME_SERIES)
-    _write_horizon(wb, n, sidecars.get(SIDECAR_SOLVER) or {}, template)
+    _write_horizon(wb, n, sidecars.get(L.SIDECAR_SOLVER) or {}, template)
     sheets.append(L.HORIZON)
-    meta = (sidecars.get(SIDECAR_USER_TS) or {}).get("$meta")
+    meta = (sidecars.get(L.SIDECAR_USER_TS) or {}).get("$meta")
     if meta:
         # Provenance of uploaded series: kept for the round trip, in the hidden Lists sheet.
         L.put(wb[L.LISTS], 1, 4, "$meta")

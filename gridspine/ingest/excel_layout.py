@@ -107,6 +107,45 @@ LIMITS = {
 }
 
 
+#: Sidecar keys: the project files they become (the import contract).
+SIDECAR_USER_TS, SIDECAR_SOLVER = "user_ts.json", "solver_config.json"
+
+#: A visible per-row column on sheets whose size sits on a node that may count in tonnes (E4).
+SIZE_UNIT_KEY = "~size_unit"
+#: The column naming the node a class's size is counted on (a Link's input side).
+SIZE_BUS = {
+    "Generator": "bus",
+    "StorageUnit": "bus",
+    "Store": "bus",
+    "Load": "bus",
+    "Link": "bus0",
+}
+#: Classes whose size is a stock (energy), not a flow.
+STOCK_CLASSES = frozenset({"Store"})
+
+
+def size_unit(cls: str, bus_unit: str) -> str:
+    """
+    The unit of a class's size on a node of `bus_unit`: t/h (t for a stock) on a
+    tonne node, MW (MWh for a stock) otherwise, as the app's `_size_unit` reads it.
+    """
+    stock = cls in STOCK_CLASSES
+    if bus_unit == "t":
+        return "t" if stock else "t/h"
+    return "MWh" if stock else "MW"
+
+
+def snapshot_index_json(snapshots) -> list:
+    """The snapshots as `user_ts.json` writes an index: ISO strings, or [period, ISO] pairs."""
+
+    def iso(t):
+        return t.isoformat() if hasattr(t, "isoformat") else t
+
+    if hasattr(snapshots, "levels"):
+        return [[int(p), iso(t)] for p, t in snapshots]
+    return [iso(t) for t in snapshots]
+
+
 class ImportFormatError(_ContractFormatError):
     """The file is not a workbook this reader can open; the message is plain language."""
 

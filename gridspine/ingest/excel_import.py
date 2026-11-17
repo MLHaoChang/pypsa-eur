@@ -28,15 +28,9 @@ from typing import Any
 
 import pandas as pd
 import pypsa
+from openpyxl.utils import get_column_letter
 
 from gridspine.ingest import excel_layout as L
-from gridspine.ingest.excel_export import (
-    SIDECAR_SOLVER,
-    SIDECAR_USER_TS,
-    SIZE_BUS,
-    SIZE_UNIT_KEY,
-    snapshot_index_json,
-)
 from gridspine.ingest.import_result import Assumed, ImportReport, ImportResult, Unmapped
 
 logger = logging.getLogger(__name__)
@@ -98,6 +92,7 @@ class _Sheets:
             }
             self.rows: dict[str, list[tuple]] = {}
             self.formula_cells: dict[str, set[tuple[int, int]]] = {}
+            self.reported: set[tuple[str, int, int]] = set()
             cells = 0
             for name in self.names:
                 f_cells: set[tuple[int, int]] = set()
@@ -139,16 +134,31 @@ class _Sheets:
         return None
 
     def uncached_formula(self, sheet: str, r: int, c: int) -> bool:
-        return (r, c) in self.formula_cells.get(sheet, ()) and self.cell(
+        """
+        Whether the cell is a formula Excel saved no value for; such a cell is
+        reported where it is read, and `unread_formulas` lists the rest.
+        """
+        hit = (r, c) in self.formula_cells.get(sheet, ()) and self.cell(
             sheet, r, c
         ) is None
+        if hit:
+            self.reported.add((sheet, r, c))
+        return hit
+
+    def unread_formulas(self) -> list[tuple[str, int, int]]:
+        return sorted(
+            (sheet, r, c)
+            for sheet, cells in self.formula_cells.items()
+            for r, c in cells
+            if self.cell(sheet, r, c) is None and (sheet, r, c) not in self.reported
+        )
 
 
 # ── values (E3) ──────────────────────────────────────────────────────────────
 
 
 class _Bad(ValueError):
-    pass
+    """One cell the reader cannot use; the message is the report's reason."""
 
 
 def _attr_type(defaults: pd.DataFrame, key: str) -> type | None:
@@ -158,13 +168,16 @@ def _attr_type(defaults: pd.DataFrame, key: str) -> type | None:
     return typ if typ in (bool, int, float, str) else str
 
 
-def _inf_ok(defaults: pd.DataFrame, key: str) -> bool:
-    """Infinity only where the model's own default is infinite (p_nom_max and the like)."""
+def _allowed_inf(defaults: pd.DataFrame, key: str) -> float | None:
+    """
+    The one infinity a column accepts: its model default when that is infinite
+    (+inf for p_nom_max and the like), else none.
+    """
     d = defaults["default"].get(key)
-    return isinstance(d, float) and math.isinf(d)
+    return d if isinstance(d, float) and math.isinf(d) else None
 
 
-def _number(v: Any, *, inf_ok: bool) -> float:
+def _number(v: Any, *, inf: float | None = None) -> float:
     if isinstance(v, bool):
         raise _Bad("a TRUE/FALSE value in a number column")
     if isinstance(v, int | float):
@@ -178,12 +191,18 @@ def _number(v: Any, *, inf_ok: bool) -> float:
         raise _Bad(f"'{str(v)[:40]}' is not a number")
     if math.isnan(f):
         raise _Bad("not a number (NaN)")
-    if math.isinf(f) and not inf_ok:
-        raise _Bad("infinity is not allowed here")
+    if math.isinf(f) and f != inf:
+        raise _Bad(
+            "infinity is not allowed here"
+            if inf is None
+            else f"only {inf} is allowed here"
+        )
     return f
 
 
-def _convert(v: Any, typ: type | None, *, scale: float, inf_ok: bool) -> Any:
+def _convert(
+    v: Any, typ: type | None, *, scale: float = 1.0, inf: float | None = None
+) -> Any:
     """One cell as the model stores it, or `_Bad` with the reason."""
     if typ is bool:
         if isinstance(v, bool):
@@ -192,10 +211,10 @@ def _convert(v: Any, typ: type | None, *, scale: float, inf_ok: bool) -> Any:
             return _BOOL_TEXT[v.strip().lower()]
         raise _Bad(f"'{str(v)[:40]}' is not TRUE or FALSE")
     if typ is float:
-        f = _number(v, inf_ok=inf_ok)
+        f = _number(v, inf=inf)
         return f if math.isinf(f) else L.rescale(f, 1.0 / scale)
     if typ is int:
-        f = _number(v, inf_ok=False)
+        f = _number(v)
         if not f.is_integer():
             raise _Bad(f"{f} is not a whole number")
         return int(f)
@@ -217,16 +236,38 @@ def _convert(v: Any, typ: type | None, *, scale: float, inf_ok: bool) -> Any:
 
 class _Reader:
     def __init__(
-        self, sheets: _Sheets, report: ImportReport, custom: Mapping[str, Sequence[str]]
+        self, sheets: _Sheets, report: ImportReport, options: Mapping[str, Any]
     ):
         self.s = sheets
         self.report = report
+        custom = options.get("custom_columns") or {}
         self.custom = {cls: set(cols) for cls, cols in custom.items()}
+        # The catalogue's unit per class and column: the shown unit must be it (E1),
+        # so a unit and its factor changed together cannot rescale a value.
+        self.units = {
+            cls: {c.key: c.unit for c in cols}
+            for cls, cols in (options.get("columns") or {}).items()
+        }
         self.n = pypsa.Network()
         self.uploaded: dict = {}
 
     def unmapped(self, item: str, reason: str) -> None:
         self.report.unmapped.append(Unmapped(item, reason))
+
+    def _unit_ok(self, shown, cls, key, unit, scale, *, row: int) -> bool:
+        expected = self.units.get(cls, {}).get(key)
+        if expected is not None and str(unit) != expected:
+            self.unmapped(
+                shown, f"the unit '{unit}' is not this parameter's unit '{expected}'"
+            )
+            return False
+        if not L.scale_ok(str(unit), scale):
+            self.unmapped(
+                shown,
+                f"the hidden unit factor (row {row}) does not match the unit '{unit}'",
+            )
+            return False
+        return True
 
     def assumed(self, asset: str, parameter: str, value: Any, why: str) -> None:
         """
@@ -272,14 +313,12 @@ class _Reader:
                     )
                 continue
             key = str(key)
-            if key not in allowed and not (key == SIZE_UNIT_KEY and cls in SIZE_BUS):
+            if key not in allowed and not (
+                key == L.SIZE_UNIT_KEY and cls in L.SIZE_BUS
+            ):
                 self.unmapped(shown, f"'{key[:60]}' is not a parameter of {sheet}")
                 continue
-            if not L.scale_ok(str(unit), scale):
-                self.unmapped(
-                    shown,
-                    f"the hidden unit factor (row 4) does not match the unit '{unit}'",
-                )
+            if not self._unit_ok(shown, cls, key, unit, scale, row=L.ROW_SCALE):
                 continue
             if key in seen:
                 self.unmapped(shown, "a second column for the same parameter")
@@ -309,7 +348,7 @@ class _Reader:
                 self.unmapped(f"{sheet} row {r}", "the row has values but no name")
                 continue
             try:
-                name = _convert(name, str, scale=1.0, inf_ok=False)
+                name = _convert(name, str, scale=1.0)
             except _Bad as exc:
                 self.unmapped(f"{sheet} row {r}", f"name: {exc}")
                 continue
@@ -332,7 +371,7 @@ class _Reader:
                 v = self.s.cell(sheet, r, c)
                 if v is None:
                     continue
-                if key == SIZE_UNIT_KEY:
+                if key == L.SIZE_UNIT_KEY:
                     size_units[name] = str(v)
                     continue
                 try:
@@ -340,7 +379,7 @@ class _Reader:
                         v,
                         _attr_type(defaults, key),
                         scale=scale,
-                        inf_ok=_inf_ok(defaults, key),
+                        inf=_allowed_inf(defaults, key),
                     )
                 except _Bad as exc:
                     self.unmapped(
@@ -380,7 +419,7 @@ class _Reader:
             names = added
         table = getattr(self.n, L.LIST_NAME[cls])
         for _, key, label, _ in cols:
-            if key in ("name", SIZE_UNIT_KEY) or key in full:
+            if key in ("name", L.SIZE_UNIT_KEY) or key in full:
                 continue
             have = {nm: records[nm][key] for nm in names if key in records[nm]}
             if have:
@@ -412,14 +451,14 @@ class _Reader:
     def _check_size_units(self, sheet, cls, size_units) -> None:
         if not size_units:
             return
-        col = SIZE_BUS[cls]
+        col = L.SIZE_BUS[cls]
         table = getattr(self.n, L.LIST_NAME[cls])
         for name, unit in size_units.items():
             if name not in table.index:
                 continue  # the model refused the row; already reported
             bus = table.at[name, col]
             bus_unit = self.n.buses.at[bus, "unit"] if bus in self.n.buses.index else ""
-            expected = "t/h" if bus_unit == "t" else "MW"
+            expected = L.size_unit(cls, bus_unit)
             if unit != expected:
                 self.report.warnings.append(
                     f"{sheet} › {name}: size unit '{unit[:20]}' but its node counts in '{expected}'; "
@@ -455,16 +494,14 @@ class _Reader:
                     if key == "discount_rate":
                         if (self.s.cell(sheet, r, 3) or "") != unit:
                             raise _Bad(f"the unit must be '{unit}'")
-                        solver[key] = _convert(v, float, scale=scale, inf_ok=False)
+                        solver[key] = _convert(v, float, scale=scale)
                     elif key == "multi_investment_periods":
-                        solver[key] = _convert(v, bool, scale=1.0, inf_ok=False)
+                        solver[key] = _convert(v, bool, scale=1.0)
                     elif key == "investment_periods":
                         parts = [
                             p for p in str(v).replace(";", ",").split(",") if p.strip()
                         ]
-                        solver[key] = [
-                            _convert(p, int, scale=1.0, inf_ok=False) for p in parts
-                        ]
+                        solver[key] = [_convert(p, int, scale=1.0) for p in parts]
                     elif key == "snapshot_kind":
                         if v not in L.SNAPSHOT_KINDS:
                             raise _Bad(
@@ -484,9 +521,9 @@ class _Reader:
                 if p is None and obj is None and yrs is None:
                     continue
                 try:
-                    periods[_convert(p, int, scale=1.0, inf_ok=False)] = (
-                        _number(obj, inf_ok=False),
-                        _number(yrs, inf_ok=False),
+                    periods[_convert(p, int, scale=1.0)] = (
+                        _number(obj),
+                        _number(yrs),
                     )
                 except _Bad as exc:
                     self.unmapped(
@@ -540,11 +577,7 @@ class _Reader:
                 continue
             unit = self.s.cell(sheet, L.TS_ROW_UNIT, c) or ""
             scale = self.s.cell(sheet, L.TS_ROW_SCALE, c)
-            if not L.scale_ok(str(unit), scale):
-                self.unmapped(
-                    shown,
-                    f"the hidden unit factor (row 7) does not match the unit '{unit}'",
-                )
+            if not self._unit_ok(shown, cls, attr, unit, scale, row=L.TS_ROW_SCALE):
                 continue
             if asset is None:
                 self.unmapped(shown, "no asset name in row 2")
@@ -577,7 +610,6 @@ class _Reader:
                         self.s.cell(sheet, r, time_cols["period"]),
                         int,
                         scale=1.0,
-                        inf_ok=False,
                     )
                     if "period" in time_cols
                     else None
@@ -602,15 +634,16 @@ class _Reader:
             )
             return
         self.n.set_snapshots(index)
-        for key in ("objective", "stores", "generators"):
+        for key, label, _ in L.SNAPSHOT_COLUMNS[2:]:
             if key not in time_cols:
+                self.assumed(
+                    "every time step", label, 1.0, "no column: the model default"
+                )
                 continue
             vals = []
             for r in keep_rows:
                 try:
-                    vals.append(
-                        _number(self.s.cell(sheet, r, time_cols[key]), inf_ok=False)
-                    )
+                    vals.append(_number(self.s.cell(sheet, r, time_cols[key])))
                 except _Bad as exc:
                     self.unmapped(f"{sheet} row {r} › weighting", f"{exc}; 1 is used")
                     vals.append(1.0)
@@ -642,7 +675,7 @@ class _Reader:
                         blanks += 1
                         vals.append(static)
                         continue
-                    vals.append(_convert(v, float, scale=scale, inf_ok=False))
+                    vals.append(_convert(v, float, scale=scale))
             except _Bad as exc:
                 self.unmapped(shown, f"{exc}; the column was not read")
                 continue
@@ -669,7 +702,7 @@ class _Reader:
             return
         s = getattr(self.n, f"{list_name}_t")[attr][asset]
         entry = {
-            "index": snapshot_index_json(self.n.snapshots),
+            "index": L.snapshot_index_json(self.n.snapshots),
             "values": [None if not math.isfinite(v) else v for v in s.tolist()],
             **_index_name(extra),
         }
@@ -704,7 +737,7 @@ class _Reader:
                     if isinstance(i, str) and i.startswith("["):
                         i = _json_list(i)
                     index.append(i)
-                    values.append(None if v is None else _number(v, inf_ok=False))
+                    values.append(None if v is None else _number(v))
             except _Bad as exc:
                 self.unmapped(shown, f"uploaded profile: {exc}")
                 continue
@@ -744,11 +777,15 @@ class _Reader:
             self.n.investment_period_weightings.loc[p, "years"] = yrs
 
 
+def _no_constant(name: str):
+    raise ValueError(f"{name} is not JSON-ready")
+
+
 def _json_dict(v: Any) -> dict | None:
     if not isinstance(v, str) or len(v) > _MAX_JSON_CELL:
         return None
     try:
-        out = json.loads(v)
+        out = json.loads(v, parse_constant=_no_constant)
     except ValueError:
         return None
     return out if isinstance(out, dict) else None
@@ -756,7 +793,7 @@ def _json_dict(v: Any) -> dict | None:
 
 def _json_list(v: str) -> list:
     try:
-        out = json.loads(v) if len(v) < 200 else None
+        out = json.loads(v, parse_constant=_no_constant) if len(v) < 200 else None
     except ValueError:
         out = None
     if not isinstance(out, list):
@@ -777,15 +814,15 @@ def _snapshot(v: Any, kind: str) -> Any:
             raise _Bad(f"'{v}' is not a date")
         return pd.Timestamp(v.strip())
     if kind == "numbers":
-        f = _number(v, inf_ok=False)
+        f = _number(v)
         return int(f) if f.is_integer() else f
-    return _convert(v, str, scale=1.0, inf_ok=False)
+    return _convert(v, str, scale=1.0)
 
 
 def _read_input_workbook(
-    sheets: _Sheets, report: ImportReport, custom
+    sheets: _Sheets, report: ImportReport, options: Mapping[str, Any]
 ) -> tuple[pypsa.Network, dict]:
-    rd = _Reader(sheets, report, custom)
+    rd = _Reader(sheets, report, options)
     solver = rd.horizon()
     kind = solver.pop("snapshot_kind", "dates")
     known = {L.ABOUT, L.TIME_SERIES, L.HORIZON, L.LISTS, L.UPLOADED} | set(
@@ -802,12 +839,20 @@ def _read_input_workbook(
     rd.periods(solver)
     rd.uploaded_sheet()
     rd.meta()
+    for sheet, r, c in sheets.unread_formulas():
+        rd.unmapped(
+            f"{sheet} › cell {get_column_letter(c)}{r}",
+            "a formula with no saved value; open and save the file in Excel, or type the value",
+        )
     report.counts[L.TIME_SERIES] = sum(
         len(getattr(rd.n, f"{ln}_t")[a].columns)
         for _, _, ln in L.SHEETS
         for a in getattr(rd.n, f"{ln}_t", {}).keys()
     )
-    sidecars: dict[str, Any] = {SIDECAR_USER_TS: rd.uploaded, SIDECAR_SOLVER: solver}
+    sidecars: dict[str, Any] = {
+        L.SIDECAR_USER_TS: rd.uploaded,
+        L.SIDECAR_SOLVER: solver,
+    }
     return rd.n, sidecars
 
 
@@ -819,9 +864,13 @@ def read_excel(
     options: Mapping[str, Any] | None = None,
 ) -> ImportResult:
     """
-    Read one .xlsx file. `options["custom_columns"]`: per model class, the
-    non-PyPSA columns the caller accepts (investment parts, eh_* tags); any other
-    column the file names is reported, never set.
+    Read one .xlsx file.
+
+    `options["custom_columns"]`: per model class, the non-PyPSA columns the caller
+    accepts (investment parts, eh_* tags); any other column the file names is
+    reported, never set. `options["columns"]`: the catalogue the writer was given
+    (`excel_layout.Column`s per class); a column whose shown unit is not the
+    catalogue's is reported. Without it, only the unit/factor pair is checked.
     """
     options = options or {}
     if isinstance(paths, str | pathlib.Path):
@@ -837,7 +886,5 @@ def read_excel(
             f"{path.name} is not the app's input workbook (it has no About and "
             f"'{L.HORIZON}' sheets). Download the template from the Import dialog and fill it in."
         )
-    n, sidecars = _read_input_workbook(
-        sheets, report, options.get("custom_columns") or {}
-    )
+    n, sidecars = _read_input_workbook(sheets, report, options)
     return ImportResult(network=n, sidecars=sidecars, report=report)
