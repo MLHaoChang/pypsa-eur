@@ -26,6 +26,7 @@ from gridspine.readback.pack import (
     ONE_PHASE,
     Ratings,
     judge_pack,
+    read_manifest,
     status_counts,
 )
 from gridspine.schema.contracts import ContractError
@@ -579,6 +580,7 @@ def test_driver_writes_json_and_csv_and_a_rerun_replaces_both(tmp_path):
 def test_a_string_pack_path_is_accepted(tmp_path):
     j = judge_pack(str(_full_pack(tmp_path)), PROFILE, RATINGS)
     assert status_counts(j) == {"pass": 4, "fail": 1, "unknown": 3}
+    assert read_manifest(str(tmp_path / "pack"))["data_hash"] == "d" * 64
 
 
 def test_extra_files_are_exactly_the_ones_no_case_claims(tmp_path):
