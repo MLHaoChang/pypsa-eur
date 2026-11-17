@@ -26,3 +26,10 @@ Two more parts of the same root cause:
 - KPIs after a PF equal the LP's.
 - The saved dispatch is the LP's.
 - `grid_only@1`'s report stage is re-enabled, with a test that its figures are the LP's.
+
+## GK B (61) and GK A (28), 2026-11-17 (SH-15 known limitation)
+
+1. **Measured repro.** On the slack, against `lopf_results`: 3bus 0.0028 MW, ieee14 0.077 MW. The gap grows with network losses. On a large lossy grid, the persisted slack energy, cost and CO2 can differ materially from the LP objective.
+2. **Readers that disagree after a reload.** Once persisted, `generators_t.p` disagrees with the solve record for: energy flows, emissions, the cost breakdown, and #851's lost-load and branch-overload screens.
+3. **Fix (engine side).** Keep the LP frames and persist the PF results separately, for example under a `pf_` namespace.
+   - Done criterion: a test that the persisted `generators_t.p` equals `lopf_results` on a lossy template.
