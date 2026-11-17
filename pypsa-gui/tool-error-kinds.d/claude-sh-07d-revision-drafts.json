@@ -1,7 +1,0 @@
-{"kinds": {
- "revision_draft_not_run_report": {"surface": "inline", "why": "A revision draft was asked of a run for a report that run did not make, or whose report can no longer be read; the user asks the run that made the report."},
- "revision_draft_run_state": {"surface": "inline", "why": "Only a completed run drafts a report revision; the user waits for the run to finish, or writes the edit themselves."},
- "revision_draft_limit": {"surface": "inline", "why": "The run is already drafting, or has drafted ten times; the user waits for the draft in flight, or writes the edit themselves."},
- "revision_draft_not_drafted": {"surface": "inline", "why": "Only a drafted revision can be applied or set aside; another click came first, or the draft was rejected, refused or lost."},
- "revision_draft_not_found": {"surface": "inline", "why": "No such revision draft on this run for this report; the user reloads the run card."}
-}}

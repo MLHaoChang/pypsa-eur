@@ -889,7 +889,9 @@ def preview(base: ReportDocument, anchor: Anchor, edit: Any) -> list[str]:
     return check_invariants(base, apply_edit(base, anchor, edit), anchor)
 
 
-def note_draft_refused(project_dir, report_id: str, comment_id: str, reason: str) -> bool:
+def note_draft_refused(
+    project_dir, report_id: str, comment_id: str, reason: str
+) -> bool:
     """A draft for an open comment was refused (07d): the comment stays open
     with `reason` (`draft_budget` or `draft_unavailable`). A comment that is
     gone or closed is left alone. Returns whether it was written."""

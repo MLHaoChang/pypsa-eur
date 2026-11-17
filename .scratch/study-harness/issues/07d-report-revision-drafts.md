@@ -51,5 +51,5 @@ Q1: a request for a run the user names, made under the run's own lease and charg
 - D6 Confirm and discard: routes only ("out of chat"); drafted → applying under the lock before `address`; 07c's ACL; a non-drafted row gets a typed refusal; a fault never leaves `applying`.
 - D7 Limits: requested or drafting blocks a second request; 10 rows in every status.
 - D8 Run state: only `completed`; another or unreadable report is `revision_draft_not_run_report`.
-- D9 Route checklist, new kinds in a fragment, REASON_TEXT pinned; `lost` only on a lapsed lease or this instance's.
+- D9 Route checklist, new kinds in a fragment, REASON_TEXT pinned; `lost` only on a lapsed lease or this instance's. The new kinds are route-only and out of chat, so they never reach a tool_error frame; `test_tool_error_kind_manifest` calls a `tool-error-kinds.d/` entry for them stale, so PR A adds none.
 - D10 One mutant per guard, listed in the PR body.
