@@ -65,15 +65,18 @@ class _Via:
             self.client = request.getfixturevalue("client")
         install_network(n)
         if via == "route":
-            r = self.client.put("/api/simulation/solver_config",
-                                json={"solver_name": "highs", "voll": 150.0})
+            r = self.client.put(
+                "/api/simulation/solver_config",
+                json={"solver_name": "highs", "voll": 150.0},
+            )
             assert r.status_code == 200, r.text
         else:
             from services.pypsa_service import PyPSAService
 
             state = PyPSAService.get_solver_state()
             state["solver_config"] = dataclasses.replace(
-                state["solver_config"], solver_name="highs", voll=150.0)
+                state["solver_config"], solver_name="highs", voll=150.0
+            )
 
     def record(self):
         if self.via == "route":
@@ -214,8 +217,11 @@ def test_import_capacity_takes_no_network_lock(install_network):
         assert held.wait(timeout=5)
         out: list = []
         reader = threading.Thread(
-            target=lambda: out.append(F.import_capacity(n, {"archetype": "weak_flexible"})),
-            daemon=True)
+            target=lambda: out.append(
+                F.import_capacity(n, {"archetype": "weak_flexible"})
+            ),
+            daemon=True,
+        )
         reader.start()
         reader.join(timeout=5)
         assert out and out[0].mw == 45.0, "import_capacity waited on the network lock"
