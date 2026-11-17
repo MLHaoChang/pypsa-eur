@@ -156,6 +156,22 @@ def test_a_period_not_in_level_zero_is_refused(period):
     assert "2027, 2030, 2035" in message
 
 
+@pytest.mark.parametrize("period", [2030.0, True])
+def test_g1_a_float_or_bool_period_never_writes_2030(period):
+    """GK G1: the period-type check on a real staged network, whose level 0
+    is int64 (so its keys are digit strings: "2030", never "2030.0" or
+    "True"). A float 2030.0 or a bool is refused, typed, and 2030 keeps 55 MW."""
+    n = _staged()
+    frame = E.energization_frame(n)
+    assert frame.index.get_level_values(0).dtype == np.int64
+    before = frame.copy()
+    with pytest.raises(E.EnergizationEditError) as exc:
+        E.set_period_mw(n, LINK, period, 10.0)
+    assert exc.value.error_kind == "energization_unknown_period"
+    assert_frame_equal(E.energization_frame(n), before)
+    assert (E.energization_frame(n).loc[2030, LINK] == 55.0).all()
+
+
 @pytest.mark.parametrize("period", [2030, "2030", 0])
 def test_a_single_axis_takes_only_all(period):
     _refused(_single(), "energization_unknown_period", LINK, period, 10.0)
@@ -266,6 +282,23 @@ def test_the_fingerprint_is_unchanged_without_the_column(monkeypatch):
     n2 = _single()
     del n2.links_t[E.ATTR]
     assert _fps(n2) == without
+
+
+def test_g3_a_partly_nan_column_is_hashed_and_moves_when_its_nan_period_is_set():
+    """GK G3: a column with a value in only some periods is in the block (its
+    fingerprint differs from no schedule at all), and setting the NaN period
+    moves it."""
+    n = _staged()
+    frame = E.energization_frame(n)
+    frame.loc[2035, LINK] = np.nan  # a value in 2027 and 2030 only
+    partly_nan = _fps(n)
+    del n.links_t[E.ATTR]
+    without = _fps(n)
+    n.links_t[E.ATTR] = frame
+    assert _fps(n) == partly_nan != without
+    assert E.set_period_mw(n, LINK, 2035, 40.0)["previous_mw"] is None
+    after = _fps(n)
+    assert after[0] != partly_nan[0] and after[1] != partly_nan[1]
 
 
 # ── W2: the investment case's key ───────────────────────────────────────────
