@@ -16,6 +16,7 @@ come from that value, so the prefill (`GET .../intent-comparison/defaults`) and 
 
 Nothing here imports a router.
 """
+
 from __future__ import annotations
 
 import math
@@ -30,12 +31,23 @@ SOURCE_PROJECT = "project"
 #: its parity test reads this tuple).
 KINDS = ("project", "assumed", "load_envelope")
 #: Request `pq` field → the Link tag column it sets.
-PQ_COLUMNS = {"x_pu": "pq_x_pu", "pf": "pq_pf", "s_n_mva": "pq_s_n_mva", "p_cap_mw": "pq_p_cap_mw",
-              "pf_req": "pq_pf_req", "statcom_capital_cost": "statcom_capital_cost"}
+PQ_COLUMNS = {
+    "x_pu": "pq_x_pu",
+    "pf": "pq_pf",
+    "s_n_mva": "pq_s_n_mva",
+    "p_cap_mw": "pq_p_cap_mw",
+    "pf_req": "pq_pf_req",
+    "statcom_capital_cost": "statcom_capital_cost",
+}
 #: The plain words for each `pq` field, as the form labels it.
-PQ_LABELS = {"x_pu": "transformer reactance (p.u.)", "pf": "load power factor",
-             "s_n_mva": "transformer rating (MVA)", "p_cap_mw": "import cap (MW)",
-             "pf_req": "required power factor", "statcom_capital_cost": "STATCOM cost (€/Mvar/yr)"}
+PQ_LABELS = {
+    "x_pu": "transformer reactance (p.u.)",
+    "pf": "load power factor",
+    "s_n_mva": "transformer rating (MVA)",
+    "p_cap_mw": "import cap (MW)",
+    "pf_req": "required power factor",
+    "statcom_capital_cost": "STATCOM cost (€/Mvar/yr)",
+}
 #: Generic engineering values where the project holds none (SAGC-1: assumed, marked as such).
 ASSUMED_X_PU = 0.12
 ASSUMED_PF = 0.95
@@ -62,8 +74,10 @@ def _reach_mw(n, link: str) -> float:
     """How far the link's flow can reach, in MW: its rating times its largest per-unit bound."""
     s = n.links.loc[link]
     p_nom = float(s["p_nom_max"] if s["p_nom_extendable"] else s["p_nom"])
-    pu = max(n.get_switchable_as_dense("Link", "p_max_pu")[link].abs().max(),
-             n.get_switchable_as_dense("Link", "p_min_pu")[link].abs().max())
+    pu = max(
+        n.get_switchable_as_dense("Link", "p_max_pu")[link].abs().max(),
+        n.get_switchable_as_dense("Link", "p_min_pu")[link].abs().max(),
+    )
     return p_nom * float(pu)
 
 
@@ -79,8 +93,10 @@ def statcom_cost(rate: float) -> tuple[float, str]:
     life = pack.value(f"{key}.lifetime").value
     fom = pack.value(f"{key}.fom_share").value
     value = overnight * (annuity(rate, life) + fom)
-    note = (f"assumed (defaults pack {pack.version}, {key}.overnight / {STATCOM_PACK_MVAR:g} Mvar, lifetime "
-            f"{life:g} years, fixed O&M {fom:.0%}/yr), annualised at the project's discount rate {rate:.1%}")
+    note = (
+        f"assumed (defaults pack {pack.version}, {key}.overnight / {STATCOM_PACK_MVAR:g} Mvar, lifetime "
+        f"{life:g} years, fixed O&M {fom:.0%}/yr), annualised at the project's discount rate {rate:.1%}"
+    )
     return value, note
 
 
@@ -92,16 +108,26 @@ def _project_pq(n, link: str, rate: float) -> dict:
         tags = links.loc[link]
     reach = _reach_mw(n, link)
     assumed = {
-        "x_pu": (ASSUMED_X_PU, "assumed: a typical transformer short-circuit reactance"),
+        "x_pu": (
+            ASSUMED_X_PU,
+            "assumed: a typical transformer short-circuit reactance",
+        ),
         "pf": (ASSUMED_PF, "assumed: a typical load power factor"),
         "s_n_mva": (reach, "assumed: the connection's rating"),
         "p_cap_mw": (reach, "assumed: the connection's rating"),
-        "pf_req": (ASSUMED_PF_REQ, "assumed: no grid code value; a typical connection-offer requirement"),
+        "pf_req": (
+            ASSUMED_PF_REQ,
+            "assumed: no grid code value; a typical connection-offer requirement",
+        ),
     }
     for field, col in PQ_COLUMNS.items():
         v = None if tags is None else tags.get(col)
         if v is not None and math.isfinite(float(v)):
-            out[field] = {"value": float(v), "source": SOURCE_PROJECT, "kind": "project"}
+            out[field] = {
+                "value": float(v),
+                "source": SOURCE_PROJECT,
+                "kind": "project",
+            }
         elif field == "statcom_capital_cost":
             value, note = statcom_cost(rate)
             out[field] = {"value": value, "source": note, "kind": "assumed"}
@@ -111,7 +137,9 @@ def _project_pq(n, link: str, rate: float) -> dict:
     return out
 
 
-def resolve(n, req: dict, *, ramp_row: dict | None, envelope: dict | None, rate: float) -> tuple[dict, dict]:
+def resolve(
+    n, req: dict, *, ramp_row: dict | None, envelope: dict | None, rate: float
+) -> tuple[dict, dict]:
     """(inputs, sources). `inputs` is `req` with `link`, `ramp_mw_per_min`, `envelope` and `pq` filled from the
     project where `req` leaves them out; `sources[field]` says where each of those came from (`pq` per field).
     `req` is not changed."""
@@ -123,44 +151,69 @@ def resolve(n, req: dict, *, ramp_row: dict | None, envelope: dict | None, rate:
     else:
         link = poc_link(n)
         if link is None:
-            raise IntentInputsRefusal("Campus link: no link is marked as the grid import; choose the campus link")
+            raise IntentInputsRefusal(
+                "Campus link: no link is marked as the grid import; choose the campus link"
+            )
         inputs["link"], sources["link"] = link, SOURCE_PROJECT
 
     if req.get("ramp_mw_per_min") is not None:
         sources["ramp_mw_per_min"] = SOURCE_REQUEST
     elif ramp_row is not None and ramp_row.get("limit") is not None:
-        inputs["ramp_mw_per_min"], sources["ramp_mw_per_min"] = float(ramp_row["limit"]), ramp_row["source"]
+        inputs["ramp_mw_per_min"], sources["ramp_mw_per_min"] = (
+            float(ramp_row["limit"]),
+            ramp_row["source"],
+        )
     else:
-        raise IntentInputsRefusal("Grid ramp limit: the project has none; enter it in MW/min")
+        raise IntentInputsRefusal(
+            "Grid ramp limit: the project has none; enter it in MW/min"
+        )
 
     if req.get("envelope") is not None:
         sources["envelope"] = SOURCE_REQUEST
     elif envelope is not None:
-        inputs["envelope"], sources["envelope"] = envelope, "the DC load's dynamic envelope"
+        inputs["envelope"], sources["envelope"] = (
+            envelope,
+            "the DC load's dynamic envelope",
+        )
     else:
-        raise IntentInputsRefusal("Load swing, oscillation amplitude and period: the project has no DC load "
-                                  "envelope; enter them")
+        raise IntentInputsRefusal(
+            "Load swing, oscillation amplitude and period: the project has no DC load "
+            "envelope; enter them"
+        )
 
     link = inputs["link"]
     if link not in n.links.index:
-        raise IntentInputsRefusal(f"Campus link: {link} is not in the network; choose the campus link")
+        raise IntentInputsRefusal(
+            f"Campus link: {link} is not in the network; choose the campus link"
+        )
     given = req.get("pq")
     project = _project_pq(n, link, rate)
     if given is None and any(v["source"] != SOURCE_PROJECT for v in project.values()):
-        missing = [PQ_LABELS[f] for f, v in project.items() if v["source"] != SOURCE_PROJECT]
-        raise IntentInputsRefusal(f"Point of connection: the project holds no {', '.join(missing)}; enter them "
-                                  "or use the assumed values the form shows")
+        missing = [
+            PQ_LABELS[f] for f, v in project.items() if v["source"] != SOURCE_PROJECT
+        ]
+        raise IntentInputsRefusal(
+            f"Point of connection: the project holds no {', '.join(missing)}; enter them "
+            "or use the assumed values the form shows"
+        )
     if given is not None and not isinstance(given, dict):
-        raise IntentInputsRefusal("Point of connection: the values must be given by name")
+        raise IntentInputsRefusal(
+            "Point of connection: the values must be given by name"
+        )
     unknown = sorted(set(given or {}) - set(PQ_COLUMNS))
     if unknown:
-        raise IntentInputsRefusal(f"Point of connection: unknown value(s) {', '.join(unknown)}")
+        raise IntentInputsRefusal(
+            f"Point of connection: unknown value(s) {', '.join(unknown)}"
+        )
     pq, pq_sources = {}, {}
     for field in PQ_COLUMNS:
         if given is not None and given.get(field) is not None:
             pq[field], pq_sources[field] = given[field], SOURCE_REQUEST
         else:
-            pq[field], pq_sources[field] = project[field]["value"], project[field]["source"]
+            pq[field], pq_sources[field] = (
+                project[field]["value"],
+                project[field]["source"],
+            )
     inputs["pq"], sources["pq"] = pq, pq_sources
     return inputs, sources
 
@@ -170,16 +223,40 @@ def defaults(n, *, ramp_row: dict | None, envelope: dict | None, rate: float) ->
     a field the project cannot supply is {value: None, source: None, reason}."""
     out: dict = {}
     link = poc_link(n)
-    out["link"] = ({"value": link, "source": SOURCE_PROJECT, "kind": "project"} if link is not None else
-                   {"value": None, "source": None, "reason": "No link is marked as the grid import."})
+    out["link"] = (
+        {"value": link, "source": SOURCE_PROJECT, "kind": "project"}
+        if link is not None
+        else {
+            "value": None,
+            "source": None,
+            "reason": "No link is marked as the grid import.",
+        }
+    )
     if ramp_row is not None and ramp_row.get("limit") is not None:
-        out["ramp_mw_per_min"] = {"value": float(ramp_row["limit"]), "source": ramp_row["source"],
-                                  "kind": "assumed" if ramp_row.get("assumed") else "project"}
+        out["ramp_mw_per_min"] = {
+            "value": float(ramp_row["limit"]),
+            "source": ramp_row["source"],
+            "kind": "assumed" if ramp_row.get("assumed") else "project",
+        }
     else:
-        out["ramp_mw_per_min"] = {"value": None, "source": None, "reason": "The project has no ramp limit."}
-    out["envelope"] = ({"value": envelope, "source": "the DC load's dynamic envelope", "kind": "load_envelope"}
-                       if envelope is not None
-                       else {"value": None, "source": None, "reason": "The project has no DC load envelope."})
+        out["ramp_mw_per_min"] = {
+            "value": None,
+            "source": None,
+            "reason": "The project has no ramp limit.",
+        }
+    out["envelope"] = (
+        {
+            "value": envelope,
+            "source": "the DC load's dynamic envelope",
+            "kind": "load_envelope",
+        }
+        if envelope is not None
+        else {
+            "value": None,
+            "source": None,
+            "reason": "The project has no DC load envelope.",
+        }
+    )
     out["pq"] = _project_pq(n, link, rate) if link is not None else {}
     return out
 
@@ -196,15 +273,23 @@ def apply_pq(n, inputs: dict) -> dict:
         raise IntentInputsRefusal("Point of connection: every value must be a number")
     bad = [PQ_LABELS[f] for f, v in values.items() if not math.isfinite(v)]
     if bad:
-        raise IntentInputsRefusal(f"Point of connection: {', '.join(bad)} must be a finite number")
+        raise IntentInputsRefusal(
+            f"Point of connection: {', '.join(bad)} must be a finite number"
+        )
     pcs_statcom.tag_pq_link(n, inputs["link"], **values)
     try:
         pcs_statcom._check(n)
     except pcs_statcom.PcsStatcomRefusal as exc:
         text = str(exc)
-        named = [PQ_LABELS[f] for f, col in PQ_COLUMNS.items() if re.search(rf"\b{col}\b", text)]
+        named = [
+            PQ_LABELS[f]
+            for f, col in PQ_COLUMNS.items()
+            if re.search(rf"\b{col}\b", text)
+        ]
         if named:
-            raise IntentInputsRefusal(f"Point of connection: {', '.join(named)} out of range ({_plain(text)})")
+            raise IntentInputsRefusal(
+                f"Point of connection: {', '.join(named)} out of range ({_plain(text)})"
+            )
         raise IntentInputsRefusal(f"Point of connection: {_plain(text)}")
     return rest
 
