@@ -5,11 +5,13 @@ requirements: tools still enforce their own ACL, lock, confirmation and limits.
 No prefix-based exemption or auto-populated gap hides a newly added route.
 """
 from collections import defaultdict
+from pathlib import Path
 
 import main
 from harness.catalogue import TOOLS, TOOL_ROUTES
 from routers import network_library_reference as reference_routes
 from services.not_via_chat import NOT_VIA_CHAT
+from smoke.json_fragments import extend, origin, route_key
 from tests.test_write_surface_lock_policy import _walk_routes
 
 # D declares preview_router when moving this one known read route. Select the
@@ -249,6 +251,44 @@ def _buckets():
     return buckets
 
 
+# A new route adds its disposition as a fragment instead of a row above
+# (RETRO-FRAG-1): `route_chat_disposition.d/<branch>.json`, format in that
+# folder's README. A fragment adds rows; one naming a row above fails.
+DISPOSITION_FILE = Path(__file__).with_name('route_chat_disposition.json')
+PYTHON_TABLES = (SERVED_BY_TOOL, UI_INTERNAL, KNOWN_GAPS)
+
+
+def _text(value) -> str:
+    if not (isinstance(value, str) and value.strip()):
+        raise ValueError(f'needs text, not {value!r}')
+    return value
+
+
+def _ui_bucket(name, row):
+    if not (isinstance(row, dict) and set(row) == {'reason', 'routes'} and isinstance(row['routes'], list)
+            and row['routes']):
+        raise ValueError(f'needs {{"reason": text, "routes": ["METHOD /path", ...]}}, not {row!r}')
+    return name, {'reason': _text(row['reason']), 'routes': frozenset(map(route_key, row['routes']))}
+
+
+def disposition_tables(base: Path = DISPOSITION_FILE) -> tuple[dict, dict, dict]:
+    """SERVED_BY_TOOL, UI_INTERNAL and KNOWN_GAPS: the rows above plus the fragments'."""
+    gaps = extend(PYTHON_TABLES[2], base, 'known_gaps', lambda k, v: (route_key(k), _text(v)))
+    return (
+        extend(PYTHON_TABLES[0], base, 'served_by_tool', lambda k, v: (route_key(k), _text(v))),
+        extend(PYTHON_TABLES[1], base, 'ui_internal', _ui_bucket),
+        dict(sorted(gaps.items())),
+    )
+
+
+SERVED_BY_TOOL, UI_INTERNAL, KNOWN_GAPS = disposition_tables()
+
+
+def known_gap_origin(route: tuple[str, str]) -> Path:
+    """Where a KNOWN_GAPS row lives: this file, or the JSON base or fragment that adds it."""
+    return origin(DISPOSITION_FILE, 'known_gaps', f'{route[0]} {route[1]}') or Path(__file__)
+
+
 def stale_known_gaps() -> list[tuple[str, str]]:
     """KNOWN_GAPS rows a tool now serves. They pass: the PR that serves a route
     leaves its row, so two such PRs never edit the same lines. The coordinator's
@@ -272,10 +312,12 @@ def _classification_message(missing, routes):
     return '\n'.join(rows) + '''
 Give each route exactly one chat disposition:
   a chat tool calls it over HTTP      -> its tool's entry in harness/catalogue.py TOOL_ROUTES
-  a _service_call_ tool reaches it    -> SERVED_BY_TOOL in tests/test_route_chat_disposition.py
-  chat must refuse or point elsewhere -> an entry's routes in services/not_via_chat.py (reason + page)
-  only the app's own screens call it  -> UI_INTERNAL in tests/test_route_chat_disposition.py (one-line reason)
-KNOWN_GAPS only shrinks: a new route without a tool is declared in services/not_via_chat.py as "unbuilt".
+  a _service_call_ tool reaches it    -> SERVED_BY_TOOL: "served_by_tool" in a tests/route_chat_disposition.d/<branch>.json fragment
+  chat must refuse or point elsewhere -> an entry in a services/not_via_chat.d/<branch>.json fragment (reason + page)
+  only the app's own screens call it  -> UI_INTERNAL: "ui_internal" in a tests/route_chat_disposition.d/<branch>.json fragment
+Each fragment folder's README has the format; rows already in tests/test_route_chat_disposition.py
+and services/not_via_chat.py are edited where they are.
+KNOWN_GAPS only shrinks: a new route without a tool is declared in services/not_via_chat.py's fragments as "unbuilt".
 '''
 
 

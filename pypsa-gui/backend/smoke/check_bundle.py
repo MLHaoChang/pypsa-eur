@@ -133,6 +133,8 @@ EXPECTED = (
     "default.docx",
     # Class-C profile packs (P15): read by `stress.py` at scenario save/run.
     "synth_dunkelflaute.json",
+    # Not-via-chat entries (RETRO-FRAG-1): read beside `services/not_via_chat.py` at import.
+    "not_via_chat.json",
 )
 
 # Info.plist usage-description keys macOS TCC requires before the app may

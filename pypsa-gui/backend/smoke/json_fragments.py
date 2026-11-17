@@ -9,6 +9,11 @@ The merged view is the base followed by the fragments in file-name order. It
 fails closed, naming the offending file: a non-object top level, a key the base
 does not define, a list item or dict key already present, or an unreadable file.
 Standard library only, so the stdlib-only CI checks can read it.
+
+A registry that is a hand-written Python table (a route's lock decision, a
+chat disposition, a not-via-chat entry, a family-manifest variant) takes its
+fragments through ``extend`` / ``extend_items``: the Python rows first, then the
+JSON base, then the fragments, and a key defined twice fails (RETRO-FRAG-1).
 """
 from __future__ import annotations
 
@@ -81,6 +86,72 @@ def load_merged(base: Path) -> dict:
                 seen[key].add(text)
             merged[key] = merged[key] + value
     return merged
+
+
+def route_key(text: str) -> tuple[str, str]:
+    """``"POST /api/x"`` -> ``("POST", "/api/x")``: how a fragment spells a route key."""
+    method, _, path = text.partition(' ')
+    if not (method.isalpha() and method.isupper() and path.startswith('/') and ' ' not in path):
+        raise ValueError(f'a route key is "METHOD /path", not {text!r}')
+    return method, path
+
+
+def _section(base: Path, section: str, kind: type) -> None:
+    load_merged(base)  # every load_merged rule: unknown key, bad file, duplicate across fragments
+    if not isinstance(_read_object(base).get(section), kind):
+        raise ValueError(f'{base}: needs a {kind.__name__} {section!r}')
+
+
+def extend(table: dict, base: Path, section: str, convert=None) -> dict:
+    """A hand-written Python registry ``table`` plus the rows ``section`` holds in
+    ``base`` and then its fragments in file-name order.
+
+    ``convert(raw_key, raw_value) -> (key, value)`` turns a JSON row into the
+    table's own form; whatever it raises is reported against the file. A key the
+    table or an earlier file already defines fails, naming the file: a fragment
+    adds rows and never changes one, so a reviewed row cannot be overridden.
+    """
+    _section(base, section, dict)
+    out = dict(table)
+    for path in [base, *fragment_files(base)]:
+        for raw, row in _read_object(path).get(section, {}).items():
+            try:
+                key, value = convert(raw, row) if convert else (raw, row)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f'{path}: {section} {raw!r}: {exc}') from exc
+            if key in out:
+                raise ValueError(f'{path}: {section} {raw!r} is already defined; a fragment adds '
+                                 'rows, so change that row where it is')
+            out[key] = value
+    return out
+
+
+def extend_items(items, base: Path, section: str, key: str = 'id', convert=None) -> list:
+    """``extend`` for a list of objects told apart by ``key``: ``items`` first, then
+    ``section`` of ``base``, then of each fragment in file-name order."""
+    _section(base, section, list)
+    out, seen = list(items), {item[key] for item in items}
+    for path in [base, *fragment_files(base)]:
+        for raw in _read_object(path).get(section, []):
+            try:
+                item = convert(raw) if convert else raw
+                ident = item[key]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f'{path}: {section} item {raw!r}: {exc}') from exc
+            if ident in seen:
+                raise ValueError(f'{path}: {section} {ident!r} is already defined; a fragment adds '
+                                 'rows, so change that row where it is')
+            seen.add(ident)
+            out.append(item)
+    return out
+
+
+def origin(base: Path, section: str, raw_key: str) -> Path | None:
+    """The file (``base`` or a fragment) whose ``section`` defines ``raw_key``."""
+    for path in [base, *fragment_files(base)]:
+        if raw_key in _read_object(path).get(section, {}):
+            return path
+    return None
 
 
 TOOL_ERROR_KINDS = Path(__file__).resolve().parents[2] / 'tool-error-kinds.json'
