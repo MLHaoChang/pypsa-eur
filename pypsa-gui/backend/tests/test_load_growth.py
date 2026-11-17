@@ -403,14 +403,14 @@ def test_a_typed_cell_through_the_route_becomes_typed(client):
                 "load_growth_pct_per_year": {"electrical": 2.0},
                 "load_growth_base_year": True,
             },
-            None,
+            "load_growth_invalid",
         ),
         (
             {
                 "load_growth_pct_per_year": {"electrical": 2.0},
                 "load_growth_base_year": "2030",
             },
-            None,
+            "load_growth_invalid",
         ),
         (
             {
@@ -968,3 +968,11 @@ def test_a_fresh_project_with_an_empty_network_still_derives_on_the_config_perio
     # no loads), a legitimate state, not a read failure.
     assert _put(client, GROW).status_code == 200
     assert _cfg(client)["load_scalers_by_carrier"] == {"electrical": {"2035": 1.104081}}
+
+
+@pytest.mark.parametrize("base", [True, "2030", 2030.5])
+def test_a_loose_start_year_without_a_rate_is_refused_and_not_stored(client, base):
+    r = _put(client, {"load_growth_base_year": base})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "load_growth_invalid"
+    assert _cfg(client)["load_growth_base_year"] is None

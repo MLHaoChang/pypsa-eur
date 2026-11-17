@@ -240,6 +240,18 @@ def apply(after: dict, stored_cfg, periods: list, load_carriers=None) -> dict:
     ``load_carriers`` (``load_carriers_of``) checks each rate names a load's
     carrier; the routes that only re-derive pass none. Raises
     ``LoadGrowthError``."""
+    base_year = after.get("load_growth_base_year")
+    if base_year is not None and (
+        isinstance(base_year, bool) or not isinstance(base_year, int)
+    ):
+        # Refused with or without a rate, so a loose year is never stored.
+        raise LoadGrowthError(
+            {
+                "code": "load_growth_invalid",
+                "error_kind": "load_growth_invalid",
+                "message": "Growth from year: must be a whole year",
+            }
+        )
     raw = after.get("load_growth_pct_per_year")
     if not _has_rates(raw) and not _has_rates(
         getattr(stored_cfg, "load_growth_pct_per_year", None)
@@ -258,7 +270,6 @@ def apply(after: dict, stored_cfg, periods: list, load_carriers=None) -> dict:
             }
         )
     rates = canonical_rates(raw)
-    base_year = after.get("load_growth_base_year")
     problems = rate_key_problems(
         after.get("load_growth_pct_per_year"), load_carriers
     ) + load_growth_problems(rates, base_year, periods)

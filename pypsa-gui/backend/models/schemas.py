@@ -756,8 +756,10 @@ class SolverConfigSchema(BaseModel):
     # coerced (`true` → 1.0, `"1.5"` → 1.5) or refused by the schema with a
     # message the settings page cannot show (GK #1617 K4).
     load_growth_pct_per_year: dict[str, Any] = {}
-    # Strict: a bool or a text year is refused, not read as 1 / 0 or parsed.
-    load_growth_base_year: Annotated[int, Field(strict=True)] | None = None
+    # Any here: the route's own check (`services/solver/load_growth.py`)
+    # refuses a bool, text or fractional year with a typed, plain-words 422,
+    # never read as 1 / 0 or parsed.
+    load_growth_base_year: Any = None
     load_scalers_derived: dict[str, list[str]] = {}
     # Per-period auto-discount via ipw.objective. When True, the LP applies a
     # uniform PV factor (1+discount_rate)^-(P-ref_year) to every period's
