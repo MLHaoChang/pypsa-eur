@@ -592,8 +592,9 @@ the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
 (opt-in, `price_calculations.py`, `emissions_calculations.py`,
 `curtailment_calculations.py`, sharing `profile_common.py`) check one bus's
 time-weighted price, generator CO2 over the time-varying efficiency with the cap's
-dual as −mu, and curtailment of generators with a time-varying availability. Every
-profile refuses once an AC power flow has overwritten the LP outputs.
+dual as −mu, and curtailment of generators with a time-varying availability. An AC
+power flow leaves the LP outputs in place (owner decision PF-SAVE-1: the flow's
+values live only in `ac_pf_results`), so every profile still reads the LP after one.
 `capacity/1` (opt-in) reports one named-class component's `*_nom_opt` and its
 change, and says when it was built to its bound; `storage-cycles/1` divides window
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
@@ -1813,14 +1814,18 @@ with no params, sidecars or levers (owner decisions SH-PILOT-1, SH15-PF-1).
   when not evaluated; `grid.pf.voltage` (each bus's own band, none set: not
   evaluated) and `grid.n1.secured` (the solver's N-1 option over every line,
   and every transformer when there is one) warn. A solve with Load flow on is
-  fresh only while `ac_pf_network_revision` is the network's and the condition
-  is exactly `lopf+ac_pf_ok` (`run_gates.lp_condition`,
-  `calculations.solve_matches_inputs(after_pf=True)`), and only for a profile
-  that sets `pf_results`.
-- **Report and hand-off.** The report stage is skipped, and the hand-off has
-  no KPIs. The flow rewrites the live dispatch the stock report and the KPI
-  readers use, so cost and CO2 read after it are not the LP's (issue 50,
-  `missing_tools`). The grant lists no report.
+  fresh for a profile that sets `pf_results` only while `ac_pf_network_revision`
+  is the network's and the condition is exactly `lopf+ac_pf_ok`
+  (`run_gates.lp_condition`, `calculations.solve_matches_inputs(after_pf=True)`).
+  An LP-only reader stays current through the flow (issue 50).
+- **Report and hand-off (issue 50, PF-SAVE-1).** The flow restores the LP's
+  tables into the live network, so the report and the hand-off's total-cost and
+  CO2 KPIs read the LP dispatch. The chapters are `headline_results`,
+  `dispatch` and `load_flow`; the load-flow chapter reads the flow's own result.
+  The grant lists the report.
+- **Scope (issue 51).** The four grid templates have their own preset in
+  `flow_scope.TEMPLATE_PRESETS`: the grid card with Load flow, and no EH
+  reliability study or investment case.
 
 ### The approval envelope (study harness issue 03)
 
