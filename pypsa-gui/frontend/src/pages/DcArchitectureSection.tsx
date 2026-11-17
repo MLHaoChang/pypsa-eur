@@ -208,7 +208,7 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
                     )}
                     {/* The units each credited service comes from (DC grid-readiness walkthrough 03). */}
                     {([['frequency_support', v.verdicts.frequency_support], ['voltage_control', v.verdicts.voltage_control]] as const).map(([k, sv]) => (
-                      <td key={k}>
+                      <td key={k} className={k === 'frequency_support' ? 'min-w-[18rem]' : 'min-w-[12rem]'}>
                         <VerdictChip verdict={sv.verdict} />
                         {sv.project_value && (
                           <div className="text-[10px] text-muted" data-testid={`dc-architecture-${k}-${v.architecture}`}>
