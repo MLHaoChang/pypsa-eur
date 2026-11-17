@@ -1381,6 +1381,7 @@ def _bundle_network_owning_its_costs(zf: zipfile.ZipFile):
     import pypsa
 
     from services.network_crud import rederive_imported_parts
+    from services.solver.periodized_costs import discount_rate_problem
     from services.solver_service import SolverConfig
 
     if "solver_config.json" in zf.namelist():
@@ -1388,9 +1389,10 @@ def _bundle_network_owning_its_costs(zf: zipfile.ZipFile):
             loaded = json.loads(zf.read("solver_config.json").decode("utf-8"))
             if not isinstance(loaded, dict):
                 raise ValueError("not an object")
+            # The raw value, before the dataclass coerces it: a bool or a string is not a rate (GK B 63).
+            if "discount_rate" in loaded and (problem := discount_rate_problem(loaded["discount_rate"])):
+                raise ValueError(problem)
             rate = float(_solver_config_from_dict(loaded).discount_rate)
-            if not math.isfinite(rate):
-                raise ValueError("discount rate is not a finite number")
         except Exception as exc:  # noqa: BLE001 - any unreadable settings file refuses, by name
             raise HTTPException(422, {
                 "error_kind": "import_unreadable",

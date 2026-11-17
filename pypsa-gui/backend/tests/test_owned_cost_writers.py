@@ -10,6 +10,7 @@ whose investment parts own its costs (`derive.owned_columns`).
 from __future__ import annotations
 
 import io
+import json
 
 import openpyxl
 import pandas as pd
@@ -226,6 +227,7 @@ def test_a_native_import_of_a_priced_line_with_an_infinite_length_is_refused(
         files={"file": (FORMATS[fmt][1], data, "application/octet-stream")},
     )
     assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
     assert "Line 'ab'" in r.json()["detail"]["message"]
     assert session_ctx(client).network is good
 
@@ -469,6 +471,7 @@ def test_a_bundle_import_of_a_bad_priced_part_is_refused_before_anything_is_writ
     good = install_network(_network())
     r = _import_bundle(client, data, "tcu11_bad")
     assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
     assert "bess2" in r.json()["detail"]["message"]
     assert "must be a finite number" in r.json()["detail"]["message"]
     assert project_row("tcu11_bad") is None  # refused before the project row
@@ -578,6 +581,38 @@ def test_an_experiment_case_changing_a_priced_scale_rederives_the_copy(install_n
     )  # the open network is untouched
 
 
+@pytest.mark.parametrize(
+    "cls,attr,name,column,change",
+    [
+        (
+            "StorageUnit",
+            "storage_units",
+            "bess",
+            "inv_power_lifetime",
+            ("max_hours", 4.0),
+        ),
+        ("Line", "lines", "ab", "lifetime", ("s_nom_max", 200.0)),
+    ],
+)
+def test_an_experiment_case_on_a_priced_part_without_a_lifetime_is_refused(
+    install_network, cls, attr, name, column, change
+):
+    """GK B (63), T2: the copy runs the single edit's priced-part check first, so a row a raw writer left with a
+    priced part and no lifetime is refused with the edit's kind, naming the row, not a raw ValueError."""
+    from fastapi import HTTPException
+
+    n = _bounded()
+    getattr(n, attr).at[name, column] = float("nan")
+    install_network(n)
+    frame = getattr(n, attr).copy()
+    with pytest.raises(HTTPException) as exc:
+        _experiment_candidate(n, change[0], change[1], name=name, cls=cls)
+    assert exc.value.detail["error_kind"] == "invalid_edit_value", exc.value.detail
+    assert f"'{name}'" in exc.value.detail["message"]
+    assert "is priced but has no lifetime" in exc.value.detail["message"]
+    pd.testing.assert_frame_equal(getattr(n, attr), frame)
+
+
 def test_a_sweep_case_setting_a_cost_the_parts_own_is_refused_and_an_unpriced_one_is_not():
     """TCU 09's sweep guard, on the problem it shares with the experiment copy."""
     from fastapi import HTTPException
@@ -657,6 +692,14 @@ def test_a_bundle_without_solver_settings_derives_at_the_default_rate_and_says_s
         b'{"discount_rate": NaN}',
         b'{"discount_rate": Infinity}',
         b'{"discount_rate": -Infinity}',
+        # A rate the annuity cannot take (GK B 63, T1): at or below -1, or so large (1 + r)^L overflows.
+        b'{"discount_rate": -2}',
+        b'{"discount_rate": -1}',
+        b'{"discount_rate": 1e308}',
+        # Not a number, though Python would coerce it.
+        b'{"discount_rate": true}',
+        b'{"discount_rate": "0.05"}',
+        b'{"discount_rate": null}',
     ],
 )
 def test_a_bundle_with_unreadable_solver_settings_is_refused_before_anything_is_written(
@@ -673,6 +716,48 @@ def test_a_bundle_with_unreadable_solver_settings_is_refused_before_anything_is_
     assert r.json()["detail"]["error_kind"] == "import_unreadable"
     assert project_row("tcu11_badcfg") is None
     assert session_ctx(client).network is good
+
+
+@pytest.mark.parametrize("rate", [0.0, 0.05, -0.5])
+def test_a_bundle_rate_the_annuity_takes_imports_at_that_rate(
+    client, install_network, session_ctx, rate
+):
+    """GK B (63), T1: the edges of the rate rule still import, re-derived at the bundle's rate."""
+    n = _network()
+    n.storage_units.at["bess", "capital_cost"] = 1.0
+    data = _with_member(
+        _bundle_of(client, install_network, n),
+        "solver_config.json",
+        json.dumps({"discount_rate": rate}).encode(),
+    )
+    install_network(_network())
+    r = _import_bundle(client, data, "tcu11_edge")
+    assert r.status_code in (200, 201), r.text
+    _assert_derived(session_ctx(client).network.storage_units, "bess", rate=rate)
+
+
+@pytest.mark.parametrize(
+    "value,ok",
+    [
+        (0.07, True),
+        (0, True),
+        (-0.999, True),
+        (5.0, True),
+        (-1, False),
+        (-1.5, False),
+        (1e308, False),
+        (1e-300, False),
+        (float("nan"), False),
+        (float("inf"), False),
+        (True, False),
+        ("0.05", False),
+        (None, False),
+    ],
+)
+def test_the_rate_rule_is_the_annuitys(value, ok):
+    from services.solver.periodized_costs import discount_rate_problem
+
+    assert (discount_rate_problem(value) is None) is ok
 
 
 def test_a_clean_bundle_loads_as_the_old_path_did_and_is_not_marked_unsaved(
@@ -718,6 +803,7 @@ def test_a_bad_row_in_a_second_class_refuses_with_nothing_left_behind(
     good = install_network(_network())
     r = _import_bundle(client, data, "tcu11_line")
     assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
     assert "Line 'ab'" in r.json()["detail"]["message"]
     assert project_row("tcu11_line") is None
     assert {p.name for p in root.iterdir()} == before
