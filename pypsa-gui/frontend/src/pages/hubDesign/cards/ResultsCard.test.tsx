@@ -394,7 +394,7 @@ describe('ResultsCard source run (control-strategy 06)', () => {
     expect(cost.getAttribute('data-state')).toBe('ready')
     expect(screen.getByTestId('hub-results-source-from').textContent).toMatch(/^From the dispatch solve, 2026-11-1[78] \d\d:\d\d$/)
     expect(screen.getByTestId('hub-results-source-missing').textContent)
-      .toBe('· The reliability study has not run · Go to Goal and run the study ›')
+      .toBe('The reliability study has not run · Go to Goal and run the study ›')
     // The headline's own "Not run yet" is gone; the other chapters keep theirs.
     expect(screen.getByTestId('hub-card-results').textContent).not.toContain('The study writes its verdict, cost and risks here.')
   })
@@ -426,7 +426,7 @@ describe('ResultsCard source run (control-strategy 06)', () => {
     const line = await screen.findByTestId('hub-results-source')
     expect(within(line).getByTestId('hub-results-source-from').textContent).toBe('From the reliability study')
     await waitFor(() => expect(within(line).getByTestId('hub-results-source-missing').textContent)
-      .toBe('· The dispatch solve has not run · Run the solve ›'))
+      .toBe('The dispatch solve has not run · Run the solve ›'))
     fireEvent.click(within(line).getByTestId('hub-results-source-action'))
     expect(run).toHaveBeenCalledTimes(1)
   })

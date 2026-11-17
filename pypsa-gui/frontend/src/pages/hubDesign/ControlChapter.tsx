@@ -10,10 +10,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { campusApi, type IslandReport } from '../../api/campusElectrical'
 import { AddToScope } from '../../components/flowScope/ScopeCards'
+import { StatePill } from '../../components/ResultState'
 import { useInScope } from '../../components/flowScope/useFlowScope'
 import { withReturnFrom } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 import { money } from '../../utils/money'
+import { CAMPUS_KEY } from '../CampusElectricalPanel'
+import { scenarioWords } from '../CampusIslandCutsSection'
 import { ISLAND_REPORT_KEY } from '../CampusIslandSection'
 
 export interface ControlFindings {
@@ -55,22 +58,35 @@ export function ControlChapter() {
     queryKey: ISLAND_REPORT_KEY(project ?? ''), queryFn: () => campusApi.islandReport(project!),
     retry: false, enabled: !!project,
   })
+  // Out of date after an edit, as Expert's Island & ride-through says it (its Provenance pill).
+  const campus = useQuery({
+    queryKey: CAMPUS_KEY(project ?? ''), queryFn: () => campusApi.state(project!),
+    retry: false, enabled: !!project,
+  })
+  const stale = campus.data?.stale === true
   const found = controlFindings(report.data)
   if (!found) return null
   return (
     <div data-testid="hub-chapter-control"
       className={`flex flex-col gap-1.5 rounded-[10px] border border-border/70 p-2 ${inScope ? '' : 'opacity-60'}`}>
       <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Control</span>
-      <p className="text-[11.5px] font-medium text-text">Cost of island capability</p>
-      <ul className="text-[11.5px] text-text" data-testid="hub-chapter-control-costs">
-        {found.costs.map(c => (
-          <li key={c.scenario}>{c.scenario}: {c.eur != null ? eur(c.eur) : 'not solved'}</li>
-        ))}
-      </ul>
-      <p className="text-[11.5px] text-muted" data-testid="hub-chapter-control-limits">
-        {found.limits === 0 ? 'No island limit was reached.'
-          : `${found.limits} island limit${found.limits === 1 ? ' was' : 's were'} reached.`}
-      </p>
+      {/* The same inner tile as the other chapters' figures (Kpi). */}
+      <div className="flex flex-col gap-1 rounded-[8px] border border-border bg-bg-2 px-3 py-2.5"
+        data-testid="hub-chapter-control-tile">
+        <p className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
+          <span>Cost of island capability</span>
+          {stale && <span data-testid="hub-chapter-control-stale"><StatePill state="stale" /></span>}
+        </p>
+        <ul className={`text-[11.5px] text-text ${stale ? 'opacity-60' : ''}`} data-testid="hub-chapter-control-costs">
+          {found.costs.map(c => (
+            <li key={c.scenario}>{scenarioWords(c.scenario)}: {c.eur != null ? eur(c.eur) : 'not solved'}</li>
+          ))}
+        </ul>
+        <p className="text-[11.5px] text-muted" data-testid="hub-chapter-control-limits">
+          {found.limits === 0 ? 'No island limit was reached.'
+            : `${found.limits} island limit${found.limits === 1 ? ' was' : 's were'} reached.`}
+        </p>
+      </div>
       {inScope ? (
         <button type="button" data-testid="hub-chapter-control-open" onClick={openIsland}
           className="self-start text-[11.5px] text-accent hover:underline">Open in Expert ›</button>

@@ -41,9 +41,11 @@ export default function SourceRunLine({ source, at, outOfDate = false, missing, 
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted" data-testid={testId}>
       {source && <span data-testid={`${testId}-from`}>From {RUN_NAME[source]}{stamp ? `, ${stamp}` : ''}</span>}
       {source && outOfDate && <span data-testid={`${testId}-stale`}><StatePill state="stale" /></span>}
+      {/* The separator is its own flex item, so the gap sits evenly on both sides of it. */}
+      {source && missing && <span aria-hidden="true">·</span>}
       {missing && (
         <span data-testid={`${testId}-missing`}>
-          {source ? '· ' : ''}{RUN_NAME[missing.run].replace(/^t/, 'T')} has not run
+          {RUN_NAME[missing.run].replace(/^t/, 'T')} has not run
           {missing.action && (
             <>
               {' · '}

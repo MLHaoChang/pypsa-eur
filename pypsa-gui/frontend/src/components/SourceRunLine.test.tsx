@@ -25,7 +25,9 @@ describe('SourceRunLine (control-strategy 06, improvement 2)', () => {
   it('says the other run has not run, with one link', () => {
     const onClick = vi.fn()
     render(<SourceRunLine source="study" missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick } }} />)
-    expect(screen.getByTestId('source-run-missing').textContent).toBe('· The dispatch solve has not run · Run the solve ›')
+    expect(screen.getByTestId('source-run-missing').textContent).toBe('The dispatch solve has not run · Run the solve ›')
+    // The "·" is its own flex item, so the gap is even on both sides (no literal space beside it).
+    expect(screen.getByTestId('source-run').textContent).toBe('From the reliability study·The dispatch solve has not run · Run the solve ›')
     fireEvent.click(screen.getByTestId('source-run-action'))
     expect(onClick).toHaveBeenCalledTimes(1)
   })
