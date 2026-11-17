@@ -1520,6 +1520,6 @@ def powerfactory_campus(run_dir, hours=None) -> list:
                               "lf_branch_flow.csv", "manifest.json"],
                     "no_spectrum": sorted(sources.loc[sources["status"] != "spectrum", "pp_name"]),
                     "pending_verification": [PENDING_VERIFICATION]}
-        (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        _write_text_atomic(out / "manifest.json", json.dumps(manifest, indent=2) + "\n")
         out_dirs.append(out)
     return out_dirs

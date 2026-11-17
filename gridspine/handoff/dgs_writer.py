@@ -301,7 +301,7 @@ def write_dgs(
     for i, b in net.bus.iterrows():
         tid = next(ids)
         term[i] = tid
-        dname = nm("ElmTerm", b["name"])
+        dname = nm("ElmTerm", b["name"] if _val(b, "name", None) else f"bus_{i}")
         rows["ElmTerm"].append((tid, dname, grid, float(b["vn_kv"]), _out(b)))
         names.append(("bus", i, str(b["name"]), "ElmTerm", dname, None, None, None))
 
@@ -519,12 +519,15 @@ def write_dgs(
     for i, e in net.ext_grid.iterrows():
         eid = next(ids)
         dname = nm("ElmXnet", e["name"] if _val(e, "name", None) else f"ext_grid_{i}")
-        sk_max = _val(e, "s_sc_max_mva", None)
-        sk_min = _val(e, "s_sc_min_mva", None)
-        if sk_max is None or sk_min is None:
+        case = {
+            c: _val(e, c, None)
+            for c in ("s_sc_max_mva", "s_sc_min_mva", "rx_max", "rx_min")
+        }
+        missing = [c for c, v in case.items() if v is None]
+        if missing:
             raise ContractError(
-                f"DGS: external grid {dname!r} needs s_sc_max_mva and s_sc_min_mva "
-                "(the harmonic and strength studies run at both)"
+                f"DGS: external grid {dname!r} needs {', '.join(missing)} "
+                "(the harmonic and strength studies run at S_k min and max)"
             )
         rows["ElmXnet"].append(
             (
@@ -532,10 +535,10 @@ def write_dgs(
                 dname,
                 grid,
                 float(_val(e, "vm_pu", 1.0)),
-                float(sk_max),
-                float(sk_min),
-                float(_val(e, "rx_max", 0.1)),
-                float(_val(e, "rx_min", _val(e, "rx_max", 0.1))),
+                float(case["s_sc_max_mva"]),
+                float(case["s_sc_min_mva"]),
+                float(case["rx_max"]),
+                float(case["rx_min"]),
                 "SL",
                 _out(e),
             )
@@ -595,6 +598,12 @@ def write_dgs(
                     *(repr(float(a)) for a in alphas),
                 ]
             )
+        )
+    listed = {r[1] for r in hsources}
+    for name in sorted(converters - listed - holders):
+        # a converter the net models as no load or static generator (or not at all)
+        hsources.append(
+            ("", name, "", NO_SPECTRUM, "not a load or static generator in the net", "")
         )
     with open(path, "w", newline="\n", encoding="utf-8") as f:
         f.write("".join(f"{ln}\n" for ln in lines))

@@ -158,6 +158,8 @@ def test_the_background_adds_a_with_background_row_by_the_iec_sum(run, tmp_path)
     assert bg["u_h_pct"][5] > plant["u_h_pct"][5]
     assert "PQ survey" in bg["note"] and "2026-09-30" in bg["note"]
     assert "no background measured at order(s) 11" in bg["note"]
+    # PUMP has no rated MVA: the background row cannot pass either
+    assert bg["verdict"] in ("unknown", "fail") and "no input for pump" in bg["note"]
     assert "with background" in (run / HARMONICS_CSV).read_text()
 
 

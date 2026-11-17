@@ -318,7 +318,21 @@ def test_a_spectrum_for_an_unknown_element_or_an_unbounded_grid_is_refused(tmp_p
         write_dgs(
             fixture_net(), tmp_path / "a.dgs", harmonics={"nope": {"spectrum": "5: 1"}}
         )
+    for col in ("s_sc_min_mva", "rx_min"):
+        net = fixture_net()
+        net.ext_grid[col] = float("nan")
+        with pytest.raises(ContractError, match=col):
+            write_dgs(net, tmp_path / "b.dgs")
+
+
+def test_a_converter_the_net_has_no_injection_for_is_still_listed(tmp_path):
+    exp = write_dgs(fixture_net(), tmp_path / "c.dgs", converters=["genset", "ghost"])
+    hs = exp.harmonic_sources.set_index("pp_name")
+    assert hs.loc[["genset", "ghost"], "status"].tolist() == [NO_SPECTRUM, NO_SPECTRUM]
+
+
+def test_an_unnamed_bus_gets_a_name(tmp_path):
     net = fixture_net()
-    net.ext_grid["s_sc_min_mva"] = float("nan")
-    with pytest.raises(ContractError, match="s_sc_min_mva"):
-        write_dgs(net, tmp_path / "b.dgs")
+    net.bus.loc[0, "name"] = None
+    write_dgs(net, tmp_path / "d.dgs")
+    assert read_dgs(tmp_path / "d.dgs")["ElmTerm"][0]["loc_name"] == "bus_0"

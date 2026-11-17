@@ -135,7 +135,7 @@ def _dgs_keyed(bundle_dir: Path, bus_csv, branch_csv):
     if not names_path.is_file():
         return bus_csv, branch_csv
     bus_map, branch_map = dgs_name_map(pd.read_csv(names_path, dtype=str, keep_default_na=False))
-    pf = pd.read_csv(bus_csv)
+    pf = pd.read_csv(bus_csv, dtype={"bus_name": str})          # a DGS name like "001" stays text
     if "bus_name" in pf.columns:
         key = pf["bus_name"].astype(str).str.strip()
         unknown = set(key) - set(bus_map)
@@ -145,7 +145,7 @@ def _dgs_keyed(bundle_dir: Path, bus_csv, branch_csv):
     bus_buf = io.StringIO(pf.to_csv(index=False))
     if branch_csv is None:
         return bus_buf, None
-    br = pd.read_csv(branch_csv)
+    br = pd.read_csv(branch_csv, dtype={DGS_BRANCH_COL: str})
     if DGS_BRANCH_COL in br.columns:
         key = br.pop(DGS_BRANCH_COL).astype(str).str.strip()
         unknown = set(key) - set(branch_map)

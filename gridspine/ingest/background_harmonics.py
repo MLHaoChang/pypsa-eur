@@ -52,11 +52,11 @@ def parse_background(
 ) -> dict:
     """
     The validated measurement record from CSV ``data`` (bytes, text or a
-    path). ``source`` (who measured, which instrument) and ``measured_on``
+    ``Path``; a ``str`` is always CSV text). ``source`` (who measured, which instrument) and ``measured_on``
     (an ISO date) are required: a background without provenance cannot be
     cited.
     """
-    if isinstance(data, (str, Path)) and Path(str(data)).is_file():
+    if isinstance(data, Path):
         filename = filename or Path(data).name
         data = Path(data).read_bytes()
     raw = data.encode() if isinstance(data, str) else bytes(data)
@@ -154,6 +154,16 @@ def load_background(run_dir) -> dict | None:
     path = Path(run_dir) / BACKGROUND_JSON
     if not path.is_file():
         return None
-    rec = json.loads(path.read_text())
-    rec["orders_pct"] = {int(h): float(v) for h, v in rec["orders_pct"].items()}
+    try:
+        rec = json.loads(path.read_text())
+        rec["orders_pct"] = {int(h): float(v) for h, v in rec["orders_pct"].items()}
+        missing = [
+            k for k in ("poc", "source", "measured_on", "statistic") if k not in rec
+        ]
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise ContractError(
+            f"{path.name} is not a background-harmonics record ({exc}); import it again"
+        ) from None
+    if missing:
+        raise ContractError(f"{path.name} lacks {missing}; import the background again")
     return rec

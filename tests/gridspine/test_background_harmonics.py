@@ -54,6 +54,7 @@ def test_alpha_is_one_below_the_fifth_and_two_above_the_tenth():
     "text,match",
     [
         ("order,u_h_pct_p95\n5,-0.1\n", "not a finite value >= 0"),
+        ("order,u_h_pct_p95\n-5,1\n", "outside 2..50"),
         ("order,u_h_pct_p95\n5,\n", "order 5 has no value"),
         ("order,u_h_pct_p95\n,1.0\n", "has no order"),
         ("order,u_h_pct_p95\n5,1\n5,2\n", "given twice"),
@@ -87,3 +88,20 @@ def test_the_record_round_trips_through_the_run_dir(tmp_path):
     assert rec["filename"] == "pq.csv"
     save_background(tmp_path, rec)
     assert load_background(tmp_path) == rec
+
+
+def test_a_full_survey_given_as_text_parses():
+    text = "order,u_h_pct_p95\n" + "".join(f"{h},0.{h % 10}\n" for h in range(2, 51))
+    assert len(text) > 255  # longer than any file name
+    assert len(_parse(text)["orders_pct"]) == 49
+
+
+def test_a_damaged_stored_record_is_refused(tmp_path):
+    from gridspine.ingest.background_harmonics import BACKGROUND_JSON
+
+    (tmp_path / BACKGROUND_JSON).write_text('{"orders_pct": {"5": 1.0}}')
+    with pytest.raises(ContractError, match="lacks"):
+        load_background(tmp_path)
+    (tmp_path / BACKGROUND_JSON).write_text("not json")
+    with pytest.raises(ContractError, match="not a background-harmonics record"):
+        load_background(tmp_path)
