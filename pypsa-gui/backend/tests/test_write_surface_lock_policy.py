@@ -61,10 +61,12 @@ import inspect
 import re
 import textwrap
 from functools import lru_cache
+from pathlib import Path
 
 import pytest
 
 import main
+from smoke.json_fragments import extend, named_with_file, route_key
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _LOCK_PRIMITIVES = frozenset({"_check_project_lock", "_enforce_project_lock"})
@@ -438,6 +440,38 @@ KNOWN_GAPS: dict[str, str] = {
 
 # ── enumeration ─────────────────────────────────────────────────────────────
 
+# A new route or tool adds its decision as a fragment instead of a row above
+# (RETRO-FRAG-1): `write_surface_lock_policy.d/<branch>.json`, format in that
+# folder's README. A fragment adds rows; one naming a row above fails.
+POLICY_FILE = Path(__file__).with_name("write_surface_lock_policy.json")
+PYTHON_TABLES = (ROUTE_POLICY, TOOL_POLICY, KNOWN_GAPS)
+
+
+def _decision(_key, row) -> tuple[str, str]:
+    if not (isinstance(row, dict) and set(row) == {"category", "reason"}
+            and row["category"] in CATEGORIES and isinstance(row["reason"], str) and row["reason"].strip()):
+        raise ValueError(f'needs {{"category": one of {sorted(CATEGORIES)}, "reason": text}}, not {row!r}')
+    return row["category"], row["reason"]
+
+
+def _gap(key, text):
+    if not (isinstance(text, str) and text.strip()):
+        raise ValueError("a known gap needs its defect as text")
+    return key, text
+
+
+def policy_tables(base: Path = POLICY_FILE) -> tuple[dict, dict, dict]:
+    """ROUTE_POLICY, TOOL_POLICY and KNOWN_GAPS: the rows above plus the fragments'."""
+    return (
+        extend(PYTHON_TABLES[0], base, "routes", lambda k, v: (route_key(k), _decision(k, v))),
+        extend(PYTHON_TABLES[1], base, "tools", lambda k, v: (k, _decision(k, v))),
+        extend(PYTHON_TABLES[2], base, "known_gaps", _gap),
+    )
+
+
+ROUTE_POLICY, TOOL_POLICY, KNOWN_GAPS = policy_tables()
+
+
 def _walk_routes(routes):
     from fastapi.routing import APIRoute
 
@@ -591,7 +625,7 @@ def test_no_route_policy_entry_is_stale_or_redundant():
     """
     routes = _write_routes()
     gone = sorted(k for k in ROUTE_POLICY if k not in routes)
-    assert not gone, f"ROUTE_POLICY names routes that no longer exist: {gone}"
+    assert not gone, f"ROUTE_POLICY names routes that no longer exist: {named_with_file(POLICY_FILE, ('routes',), gone)}"
     gated = sorted(k for k in ROUTE_POLICY if _middleware_gated(k[1]))
     assert not gated, f"ROUTE_POLICY names middleware-gated routes: {gated}"
     checked = sorted(k for k in ROUTE_POLICY if _lock_check_path(routes[k]))
@@ -691,7 +725,7 @@ def test_no_tool_policy_entry_is_stale_or_redundant():
     chat_tools, TOOL_ROUTES, nonread, gated = _tool_tables()
     for table, label in ((TOOL_POLICY, "TOOL_POLICY"), (KNOWN_GAPS, "KNOWN_GAPS")):
         gone = sorted(n for n in table if n not in chat_tools.DISPATCHERS)
-        assert not gone, f"{label} names tools that no longer exist: {gone}"
+        assert not gone, f"{label} names tools that no longer exist: {named_with_file(POLICY_FILE, ('tools', 'known_gaps'), gone)}"
     covered = sorted(n for n in TOOL_POLICY
                      if _tool_is_covered(n, chat_tools, TOOL_ROUTES, gated))
     assert not covered, f"these are covered now; delete their TOOL_POLICY entries: {covered}"
