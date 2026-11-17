@@ -946,3 +946,68 @@ def test_a_shed_store_removed_or_unreadable_is_no_evidence(n0, direct):
         "not_evaluated",
         "unreadable_dispatch",
     )
+
+
+# ── survivors of the mutant run (each reader's own words and inputs) ─────────
+
+
+def test_a_missing_line_with_nothing_named_says_it_is_not_readable(n0, monkeypatch):
+    from services.results import grid_risk_production as grp
+
+    line = {"key": "connection", "status": "missing", "missing": [], "by_period": {}}
+    monkeypatch.setattr(grp, "grid_risk_production", lambda n, lost: {"lines": [line]})
+    out = RC.lost_production_of(n0, None)
+    assert out.reason == "the lost production is not readable"
+
+
+def test_a_shed_store_with_no_solved_level_is_no_shed(n0, direct):
+    n = n0.copy()
+    n.stores_t.e = pd.DataFrame(
+        0.0, index=n.snapshots, columns=[s for s in n.stores.index if s != RC.SHED]
+    )
+    assert _state(direct("conc.kpi.shed_level", network=n)) == (
+        "not_evaluated",
+        "no_shed",
+    )
+
+
+@pytest.mark.parametrize("state", [{"last_lost_load": "capture"}, None])
+def test_the_lost_tonnes_read_the_solves_own_capture(direct, monkeypatch, state):
+    seen = []
+    monkeypatch.setattr(
+        RC,
+        "lost_production_of",
+        lambda n, lost: seen.append(lost) or run_gates.NoEvidence("x", "x"),
+    )
+    direct("conc.kpi.lost_tonnes", network="n", solver_state=state)
+    assert seen == [None if state is None else "capture"]
+
+
+def test_unreadable_settings_say_so_not_that_the_code_does_not_load(
+    n0, tmp_path, monkeypatch
+):
+    from services import campus_electrical_service as ce
+    from services import project_registry
+
+    monkeypatch.setattr(project_registry, "project_dir", lambda project: tmp_path)
+    (tmp_path / ce.SUBDIR).mkdir()
+    (tmp_path / ce.SUBDIR / ce.SETTINGS_FILE).write_text('{"profile": 3}')
+    out = RC._scorecard_inputs(SimpleNamespace(project="p"), n0)
+    assert "cannot be read" in out.reason
+
+
+@pytest.mark.parametrize("note, words", [("n", "m: n"), (None, "m: not computed")])
+def test_an_unknown_motor_start_names_its_note_or_not_computed(
+    n0, monkeypatch, note, words
+):
+    row = {
+        "id": "motor_start:m",
+        "verdict": "unknown",
+        "project_value": None,
+        "limit": 3.0,
+    }
+    if note:
+        row["note"] = note
+    _rows(monkeypatch, [row])
+    out = RC.motor_start_of(_inputs(n0))
+    assert isinstance(out, run_gates.NoEvidence) and out.reason == words

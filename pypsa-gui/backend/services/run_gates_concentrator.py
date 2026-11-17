@@ -131,7 +131,7 @@ def mass_balance_of(n):
     Each row: the bus, the period, Σ w·|Σ terms| and its share of the period's fed-in tonnes Σ w·feed."""
     index = n.snapshots
     buses = _tonne_buses(n)
-    if (False):
+    if not buses:
         return G.NoEvidence("no_tonne_bus", "the network has no bus counted in tonnes")
     weights = n.snapshot_weightings["generators"].reindex(index)
     w_all = [float(v) for v in weights]
