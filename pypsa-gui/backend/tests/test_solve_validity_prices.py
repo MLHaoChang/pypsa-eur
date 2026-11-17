@@ -93,3 +93,42 @@ def test_a_bus_price_chart_with_a_solve_limit_is_not_drawn(limit, monkeypatch):
     assert chart["status"] == "not_drawn" and chart["reason"] == limit
     assert [s["reason"] for s in chart["series"]] == [limit]
     assert chart["title"] == checked_charts.REASONS[limit]
+
+
+class _Drawn(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    "profile, raw",
+    [
+        ("bus-price/1", {"index": [], "price": []}),  # an LP price: no solve limit
+        ("bus-price/1", None),  # a record without raw is not a limit
+        (
+            "generator-dispatch/1",
+            {"solve_limit": "mip_duals_not_marginal"},
+        ),  # not a price
+    ],
+)
+def test_only_a_limited_bus_price_skips_drawing(profile, raw, monkeypatch):
+    from types import SimpleNamespace
+
+    from harness import profile_common
+    from services import assistant_tools, checked_charts
+
+    monkeypatch.setattr(profile_common, "lp_outputs_live", lambda ctx: True)
+    monkeypatch.setattr(
+        assistant_tools, "_project", lambda: (SimpleNamespace(id="p1"), None, None)
+    )
+
+    def drawn(*a):
+        raise _Drawn
+
+    monkeypatch.setattr(checked_charts, "dataset", drawn)
+    record = {
+        "project_id": "p1",
+        "request_scope": {"profile": profile, "entity_id": "x"},
+        "raw": raw,
+    }
+    with pytest.raises(_Drawn):
+        checked_charts.render(None, record, ["marginal_price"])
