@@ -3,7 +3,7 @@
 
 # RP-21: one fetch per cutout key when solves run concurrently
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Raised by: GK B2 reviewing RP-13 (#1569), finding F2, 2026-11-17. The gap is already on master; #1569 does not add it.
 
