@@ -810,6 +810,7 @@ def test_switched_shunt_regulating_a_remote_bus_says_so(tmp_path):
     [
         (1, "winding 1 tap ratio", 1.05),
         (3, "winding 1 phase angle (deg)", 30.0),
+        (0, None, None),
         (-1, None, None),
     ],
 )
