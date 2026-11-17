@@ -23,8 +23,9 @@ EDITABLE = ("date", "clause", "comment", "response", "revision", "status")
 def _only_editable(fields: dict, extra: tuple[str, ...] = ()) -> None:
     unknown = set(fields) - set(EDITABLE) - set(extra)
     if unknown:
-        raise GridComplianceError("gc_comment_invalid", 422,
-                                  f"Unknown comment field(s): {sorted(unknown)}.")
+        raise GridComplianceError(
+            "gc_comment_invalid", 422, f"Unknown comment field(s): {sorted(unknown)}."
+        )
 
 
 def add(project, code: str, fields: dict) -> dict:
@@ -35,9 +36,14 @@ def add(project, code: str, fields: dict) -> dict:
     with editing(project) as tracker:
         entry = tracker.deliverables.setdefault(code, DeliverableState())
         now = _now()
-        comment = TsoComment.model_validate({
-            **fields, "comment_id": f"C-{entry.next_comment:03d}",
-            "created_at": now, "updated_at": now})
+        comment = TsoComment.model_validate(
+            {
+                **fields,
+                "comment_id": f"C-{entry.next_comment:03d}",
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
         _check(comment)
         entry.comments.append(comment)
         entry.next_comment += 1
@@ -49,12 +55,14 @@ def update(project, code: str, comment_id: str, fields: dict) -> dict:
     _only_editable(fields, ("pack_version",))
     with editing(project) as tracker:
         entry = tracker.deliverables.get(code) or DeliverableState()
-        i = next((i for i, c in enumerate(entry.comments)
-                  if c.comment_id == comment_id), None)
+        i = next(
+            (i for i, c in enumerate(entry.comments) if c.comment_id == comment_id),
+            None,
+        )
         if i is None:
             raise GridComplianceError(
-                "gc_comment_not_found", 404,
-                f"TRGC {code} has no comment {comment_id!r}.")
+                "gc_comment_not_found", 404, f"TRGC {code} has no comment {comment_id}."
+            )
         data = entry.comments[i].model_dump()
         version = fields.pop("pack_version", None)
         data.update(fields)
@@ -62,8 +70,10 @@ def update(project, code: str, comment_id: str, fields: dict) -> dict:
             ref = next((p for p in entry.packs if p.version == version), None)
             if ref is None:
                 raise GridComplianceError(
-                    "gc_pack_not_found", 422,
-                    f"TRGC {code} has no generated pack version {version!r}.")
+                    "gc_pack_not_found",
+                    422,
+                    f"TRGC {code} has no generated pack version {version}.",
+                )
             data["pack"] = ref.model_dump()
         data["updated_at"] = _now()
         comment = TsoComment.model_validate(data)
@@ -75,5 +85,7 @@ def update(project, code: str, comment_id: str, fields: dict) -> dict:
 def _check(comment: TsoComment) -> None:
     if comment.status != "open" and not comment.response.strip():
         raise GridComplianceError(
-            "gc_comment_invalid", 422,
-            "A comment is marked responded or closed only once it has a response.")
+            "gc_comment_invalid",
+            422,
+            "A comment is marked responded or closed only once it has a response.",
+        )

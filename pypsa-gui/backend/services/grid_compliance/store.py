@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Literal
+from collections.abc import Iterator
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -35,8 +36,9 @@ Status = Literal[STATUSES]  # type: ignore[valid-type]
 class GridComplianceError(ValueError):
     """A typed refusal: ``kind`` is the HTTP ``error_kind``, ``status`` its code."""
 
-    def __init__(self, kind: str, status: int, message: str, *,
-                 blockers: list[str] | None = None) -> None:
+    def __init__(
+        self, kind: str, status: int, message: str, *, blockers: list[str] | None = None
+    ) -> None:
         super().__init__(message)
         self.kind, self.status, self.message = kind, status, message
         self.blockers = list(blockers or [])
@@ -112,8 +114,10 @@ def _lock(path: Path):
             yield
     except TimeoutError as exc:
         raise GridComplianceError(
-            "gc_tracker_busy", 409,
-            "Another edit of the compliance tracker is in progress. Try again.") from exc
+            "gc_tracker_busy",
+            409,
+            "Another edit of the compliance tracker is in progress. Try again.",
+        ) from exc
 
 
 def tracker_path(project) -> Path:
@@ -128,9 +132,11 @@ def load(project) -> TrackerFile:
         return TrackerFile.model_validate_json(path.read_bytes())
     except (OSError, ValueError, ValidationError) as exc:
         raise GridComplianceError(
-            "gc_tracker_unreadable", 409,
+            "gc_tracker_unreadable",
+            409,
             f"The compliance tracker file cannot be read ({type(exc).__name__}). "
-            "Nothing was changed.") from exc
+            "Nothing was changed.",
+        ) from exc
 
 
 @contextmanager
@@ -141,11 +147,15 @@ def editing(project) -> Iterator[TrackerFile]:
     with _lock(path):
         tracker = load(project)
         yield tracker
-        text = TrackerFile.model_validate(tracker.model_dump()).model_dump_json(indent=1)
+        text = TrackerFile.model_validate(tracker.model_dump()).model_dump_json(
+            indent=1
+        )
         try:
             atomic_write_text(path, text)
         except OSError as exc:
             raise GridComplianceError(
-                "gc_tracker_write_failed", 503,
+                "gc_tracker_write_failed",
+                503,
                 f"The compliance tracker could not be saved ({type(exc).__name__}). "
-                "Nothing was changed.") from exc
+                "Nothing was changed.",
+            ) from exc

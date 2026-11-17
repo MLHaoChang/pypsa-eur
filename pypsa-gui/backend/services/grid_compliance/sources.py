@@ -10,7 +10,7 @@ provider returns None, shows as pending on the tracker and in the pack.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from models.report import Table
 

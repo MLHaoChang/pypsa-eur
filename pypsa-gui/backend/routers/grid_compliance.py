@@ -80,8 +80,9 @@ def _http(exc: Exception) -> HTTPException:
         if exc.blockers:
             detail["blockers"] = exc.blockers
         return HTTPException(exc.status, detail)
-    return HTTPException(422, {"error_kind": "gc_invalid",
-                               "message": str(exc).splitlines()[0]})
+    return HTTPException(
+        422, {"error_kind": "gc_invalid", "message": str(exc).splitlines()[0]}
+    )
 
 
 def _call(fn, *args):
@@ -92,14 +93,17 @@ def _call(fn, *args):
 
 
 @router.get("/{name}")
-def get_state(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+def get_state(
+    proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)
+):
     """Every TRGC deliverable with status, blockers, data list, freeze, comments."""
     return _call(tracker.state, _project(proj, db))
 
 
 @router.put("/{name}/deliverables/{code}/status")
 def set_status(
-    code: str, body: StatusBody,
+    code: str,
+    body: StatusBody,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
@@ -111,7 +115,8 @@ def set_status(
 
 @router.put("/{name}/deliverables/{code}/data")
 def set_data(
-    code: str, body: DataBody,
+    code: str,
+    body: DataBody,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
@@ -135,7 +140,8 @@ def freeze(
 
 @router.post("/{name}/deliverables/{code}/comments", status_code=201)
 def add_comment(
-    code: str, body: CommentBody,
+    code: str,
+    body: CommentBody,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
@@ -147,15 +153,22 @@ def add_comment(
 
 @router.patch("/{name}/deliverables/{code}/comments/{comment_id}")
 def update_comment(
-    code: str, comment_id: str, body: CommentPatch,
+    code: str,
+    comment_id: str,
+    body: CommentPatch,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
     """Answer or edit a TSO comment."""
     _check_lock(proj, db, user)
-    return _call(revision_log.update, _project(proj, db), code, comment_id,
-                 body.model_dump(exclude_none=True))
+    return _call(
+        revision_log.update,
+        _project(proj, db),
+        code,
+        comment_id,
+        body.model_dump(exclude_none=True),
+    )
 
 
 @router.post("/{name}/deliverables/{code}/pack")
@@ -170,5 +183,8 @@ def build_pack(
     _check_lock(proj, db, user)
     data, manifest = _call(pack.build, _project(proj, db), code)
     filename = f"TRGC-{code}-pack-v{manifest['pack_version']}.zip"
-    return Response(content=data, media_type="application/zip", headers={
-        "Content-Disposition": f'attachment; filename="{filename}"'})
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

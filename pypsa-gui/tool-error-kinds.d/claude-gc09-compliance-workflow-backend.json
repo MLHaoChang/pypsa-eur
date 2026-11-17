@@ -1,0 +1,1 @@
+{"kinds": {"gc_invalid": {"surface": "inline", "why": "A grid-compliance tracker write (status, data list, TSO comment) carried a field that fails validation; the assistant names the field and asks for a corrected value."}}}

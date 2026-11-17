@@ -26,13 +26,20 @@ counts as frozen.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from services import campus_electrical_service as ce
 
 from . import catalogue as cat
 from .sources import package_available
-from .store import DataItem, DeliverableState, Freeze, GridComplianceError, editing, load
+from .store import (
+    DataItem,
+    DeliverableState,
+    Freeze,
+    GridComplianceError,
+    editing,
+    load,
+)
 
 #: The campus files a freeze covers, in hash order. GC-01 replaces this
 #: interim hash with its model-set freeze over the canonicalised inputs.
@@ -54,14 +61,15 @@ NEXT_STEP = {
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def require_deliverable(code: str) -> cat.Deliverable:
     d = cat.BY_CODE.get(code)
     if d is None:
-        raise GridComplianceError("gc_unknown_deliverable", 404,
-                                  f"There is no TRGC deliverable {code!r}.")
+        raise GridComplianceError(
+            "gc_unknown_deliverable", 404, f"There is no TRGC deliverable {code}."
+        )
     return d
 
 
@@ -112,8 +120,10 @@ def freeze_state(freeze: Freeze | None, current: str | None) -> str:
 
 
 def default_items(d: cat.Deliverable) -> list[DataItem]:
-    return [DataItem(item_id=f"item-{i + 1}", label=label)
-            for i, label in enumerate(d.data_items)]
+    return [
+        DataItem(item_id=f"item-{i + 1}", label=label)
+        for i, label in enumerate(d.data_items)
+    ]
 
 
 def _rank(statuses: dict[str, str], code: str) -> int:
@@ -122,7 +132,9 @@ def _rank(statuses: dict[str, str], code: str) -> int:
 
 def _blockers(code: str, statuses: dict[str, str]) -> list[str]:
     floor = cat.RANK[cat.PREREQUISITE_MIN]
-    return [p for p in require_deliverable(code).depends_on if _rank(statuses, p) < floor]
+    return [
+        p for p in require_deliverable(code).depends_on if _rank(statuses, p) < floor
+    ]
 
 
 def _statuses(tracker) -> dict[str, str]:
@@ -138,27 +150,37 @@ def _view(project, tracker, codes) -> list[dict]:
     for d in wanted:
         s = tracker.deliverables.get(d.code) or DeliverableState()
         fstate = freeze_state(s.freeze, current)
-        rows.append({
-            "code": d.code,
-            "title": d.title,
-            "phase": d.phase,
-            "tool": d.tool,
-            "depends_on": list(d.depends_on),
-            "blocked_by": _blockers(d.code, statuses),
-            "status": s.status,
-            "status_basis": "declared",
-            "status_at": s.status_at,
-            "next_step": NEXT_STEP[s.status],
-            "data": [i.model_dump() for i in
-                     (s.data if s.data is not None else default_items(d))],
-            "freeze": s.freeze.model_dump() if s.freeze else None,
-            "freeze_state": fstate,
-            "stale": fstate == "stale",
-            "feeds": [{"package": p, "label": cat.PACKAGE_LABELS[p],
-                       "available": available[p]} for p in d.packages],
-            "comments": [c.model_dump() for c in s.comments],
-            "packs": [p.model_dump() for p in s.packs],
-        })
+        rows.append(
+            {
+                "code": d.code,
+                "title": d.title,
+                "phase": d.phase,
+                "tool": d.tool,
+                "depends_on": list(d.depends_on),
+                "blocked_by": _blockers(d.code, statuses),
+                "status": s.status,
+                "status_basis": "declared",
+                "status_at": s.status_at,
+                "next_step": NEXT_STEP[s.status],
+                "data": [
+                    i.model_dump()
+                    for i in (s.data if s.data is not None else default_items(d))
+                ],
+                "freeze": s.freeze.model_dump() if s.freeze else None,
+                "freeze_state": fstate,
+                "stale": fstate == "stale",
+                "feeds": [
+                    {
+                        "package": p,
+                        "label": cat.PACKAGE_LABELS[p],
+                        "available": available[p],
+                    }
+                    for p in d.packages
+                ],
+                "comments": [c.model_dump() for c in s.comments],
+                "packs": [p.model_dump() for p in s.packs],
+            }
+        )
     return rows
 
 
@@ -179,37 +201,53 @@ def check_move(code: str, status: str, statuses: dict[str, str], fstate: str) ->
         blockers = _blockers(code, statuses)
         if blockers:
             raise GridComplianceError(
-                "gc_prerequisite_not_judged", 409,
+                "gc_prerequisite_not_judged",
+                409,
                 f"TRGC {code} cannot be {status} while "
                 + ", ".join(f"TRGC {b}" for b in blockers)
-                + " is not judged yet.", blockers=blockers)
+                + " is not judged yet.",
+                blockers=blockers,
+            )
         if fstate != "fresh":
             raise GridComplianceError(
-                "gc_freeze_not_fresh", 409,
+                "gc_freeze_not_fresh",
+                409,
                 f"TRGC {code} cannot be {status} on data that is not frozen "
-                f"(freeze: {fstate.replace('_', ' ')}). Freeze the data first.")
+                f"(freeze: {fstate.replace('_', ' ')}). Freeze the data first.",
+            )
     if rank < cat.RANK[cat.PREREQUISITE_MIN]:
-        submitted = [d for d in cat.dependents(code)
-                     if _rank(statuses, d) >= cat.RANK[cat.SUBMITTED]]
+        submitted = [
+            d
+            for d in cat.dependents(code)
+            if _rank(statuses, d) >= cat.RANK[cat.SUBMITTED]
+        ]
         if submitted:
             raise GridComplianceError(
-                "gc_dependent_submitted", 409,
+                "gc_dependent_submitted",
+                409,
                 f"TRGC {code} cannot go back to {status}: "
                 + ", ".join(f"TRGC {d}" for d in submitted)
-                + " was submitted on its judged result.", blockers=submitted)
+                + " was submitted on its judged result.",
+                blockers=submitted,
+            )
 
 
 def set_status(project, code: str, status: str) -> dict:
     require_deliverable(code)
     if status not in cat.RANK:
-        raise GridComplianceError("gc_unknown_status", 422,
-                                  f"{status!r} is not a deliverable status.")
+        raise GridComplianceError(
+            "gc_unknown_status", 422, f'"{status}" is not a deliverable status.'
+        )
     # Hashing the network is slow, so it is done before the lock; the freeze
     # it is compared with, and every status, are read under the lock.
-    current = data_hash(project) if cat.RANK[status] >= cat.RANK[cat.SUBMITTED] else None
+    current = (
+        data_hash(project) if cat.RANK[status] >= cat.RANK[cat.SUBMITTED] else None
+    )
     with editing(project) as tracker:
         entry = tracker.deliverables.setdefault(code, DeliverableState())
-        check_move(code, status, _statuses(tracker), freeze_state(entry.freeze, current))
+        check_move(
+            code, status, _statuses(tracker), freeze_state(entry.freeze, current)
+        )
         entry.status = status
         entry.status_at = now()
     return _view(project, tracker, [code])[0]
@@ -220,8 +258,9 @@ def set_data(project, code: str, items: list[dict]) -> dict:
     parsed = [DataItem.model_validate(i) for i in items]
     ids = [i.item_id for i in parsed]
     if len(set(ids)) != len(ids):
-        raise GridComplianceError("gc_duplicate_item", 422,
-                                  "Two data-list items share an id.")
+        raise GridComplianceError(
+            "gc_duplicate_item", 422, "Two data-list items share an id."
+        )
     with editing(project) as tracker:
         tracker.deliverables.setdefault(code, DeliverableState()).data = parsed
     return _view(project, tracker, [code])[0]
@@ -231,15 +270,22 @@ def freeze(project, code: str) -> dict:
     require_deliverable(code)
     if not (ce.campus_dir(project) / ce.CAMPUS_FILE).is_file():
         raise GridComplianceError(
-            "gc_no_campus_input", 409,
-            "There is no campus input to freeze yet. Save the campus file first.")
+            "gc_no_campus_input",
+            409,
+            "There is no campus input to freeze yet. Save the campus file first.",
+        )
     digest = data_hash(project)
     if digest is None:
         raise GridComplianceError(
-            "gc_inputs_unreadable", 409,
-            "The project's network cannot be read, so its inputs cannot be frozen.")
+            "gc_inputs_unreadable",
+            409,
+            "The project's network cannot be read, so its inputs cannot be frozen.",
+        )
     with editing(project) as tracker:
         tracker.deliverables.setdefault(code, DeliverableState()).freeze = Freeze(
-            model_set_id=f"ms-{digest[:12]}", data_hash=digest,
-            frozen_at=now(), source=FREEZE_SOURCE)
+            model_set_id=f"ms-{digest[:12]}",
+            data_hash=digest,
+            frozen_at=now(),
+            source=FREEZE_SOURCE,
+        )
     return _view(project, tracker, [code])[0]
