@@ -1,5 +1,4 @@
-"""
-The campus study as the backend sees it (plan C2).
+"""The campus study as the backend sees it (plan C2).
 
 A campus study is separate from the case39 year study. It runs no unit
 commitment, no N-2 and no PSS/E handoff. It takes two inputs:
@@ -176,51 +175,29 @@ import pandas as pd
 import yaml
 
 from gridspine.ingest.campus import Campus, build_campus
-from gridspine.producers.campus import (
-    CampusDraft,
-    campus_hourly,
-    draft_campus,
-    is_solved,
-    period_weightings,
-)
+from gridspine.producers.campus import CampusDraft, campus_hourly, draft_campus, is_solved, period_weightings
 from gridspine.producers.pypsa_nodal import load_solved_network
 from gridspine.ranking.campus import campus_metrics, island_metrics, select_campus_hours
-from gridspine.schema.campus import (
-    HOURLY_CSV,
-    PCC_CSV,
-    TIE_OPEN_TOL_MW,
-    validate_hourly,
-    validate_pcc,
-)
+from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, TIE_OPEN_TOL_MW, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
+from gridspine.static.campus_flow import SizingCriteria, held_transformers, size_transformers, solve_cases
+from gridspine.static.campus_reactive import ibr_q_capability, ibr_q_curve, reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import OPEN_TIE_CLAUSE, campus_compliance
-from gridspine.static.campus_flow import (
-    SizingCriteria,
-    held_transformers,
-    size_transformers,
-    solve_cases,
-)
 from gridspine.static.campus_invest import ParallelRules, period_spans, select_assets
 from gridspine.static.campus_milp import select_assets_milp
-from gridspine.static.campus_reactive import (
-    ibr_q_capability,
-    ibr_q_curve,
-    reactive_need,
-    requirement_from,
-    size_compensation,
-)
 from gridspine.static.campus_sc import campus_fault_levels
 from gridspine.static.campus_taps import PCC_TAP_CONTROL  # noqa: F401  (re-exported: the backend's seam)
 from gridspine.templates.campus_assets import DEFAULT_PATH as ASSET_LIBRARY_PATH  # noqa: F401  (the backend's seam)
 from gridspine.templates.campus_assets import load_asset_library
 from gridspine.templates.grid_codes import (  # noqa: F401  (re-exported: the backend's seam)
     PROFILE_ID,
+    SOURCES as GRID_CODE_SOURCES,
     confirm_limit,
     list_grid_codes,
     load_grid_code,
     reported_requirements,
-    unconfirmed,
     uncovered_kv_ranges,
+    unconfirmed,
     validate_profile,
 )
 
@@ -309,15 +286,13 @@ def _write_text_atomic(path: Path, text: str) -> None:
 
 
 def draft_from_project(network_path, island=None, f_hz=None) -> CampusDraft:
-    """
-    A campus draft from the saved, solved project at ``network_path``.
+    """A campus draft from the saved, solved project at ``network_path``.
     An unsolved project is refused here. The draft itself needs no dispatch,
     but the study does, and the user should hear it now rather than at run
     time. ``island``, the project's validated island sidecar, is passed to
     ``draft_campus`` (campus island plan I1, I9b): the campus then carries
     its island data. Without it the draft is unchanged. ``f_hz`` is
-    ``draft_campus``'s own parameter, passed through.
-    """
+    ``draft_campus``'s own parameter, passed through."""
     n = load_solved_network(network_path)
     if not is_solved(n):
         raise ContractError("the project is not solved; solve it and save, then draft the campus")
@@ -330,19 +305,15 @@ def check_campus(spec: dict) -> None:
 
 
 def grid_code_profiles(extra_dirs=()) -> dict:
-    """
-    ``{profile: title}`` a campus study can be held to: the shipped
-    profiles, then the project's own in ``extra_dirs``.
-    """
+    """``{profile: title}`` a campus study can be held to: the shipped
+    profiles, then the project's own in ``extra_dirs``."""
     return list_grid_codes(extra_dirs=extra_dirs)
 
 
 def prepare_campus(run_dir, campus: dict, network_path) -> dict:
-    """
-    Validate ``campus`` against the project at ``network_path``, then write
+    """Validate ``campus`` against the project at ``network_path``, then write
     the run (see the module docstring). Returns a summary: ``periods``,
-    ``units``, ``hours_per_period``.
-    """
+    ``units``, ``hours_per_period``."""
     network_path = Path(network_path)
     build_campus(campus)                                   # refuse before writing
     n = load_solved_network(network_path)
@@ -397,11 +368,9 @@ def load_run_campus(run_dir) -> Campus:
 
 
 def _island_tables(run_dir: Path):
-    """
-    ``(island_unit_hourly, island_hourly)`` of the run when the project's
+    """``(island_unit_hourly, island_hourly)`` of the run when the project's
     solve wrote them (plan I3a; written by pypsa-gui beside
-    ``campus_hourly.csv``), else None. One without the other is refused.
-    """
+    ``campus_hourly.csv``), else None. One without the other is refused."""
     from gridspine.schema.island import (
         ISLAND_HOURLY_CSV,
         ISLAND_UNIT_HOURLY_CSV,
@@ -421,12 +390,10 @@ def _island_tables(run_dir: Path):
 
 
 def rank_campus(run_dir, k: int = DEFAULT_K) -> pd.DataFrame:
-    """
-    Rank the prepared run's hours and select the critical ones (k per
+    """Rank the prepared run's hours and select the critical ones (k per
     criterion, per period), with the island criteria when the run has the
     island tables (plan I3b). Writes ``campus_metrics.csv`` and
-    ``campus_selected.csv``; returns the selection.
-    """
+    ``campus_selected.csv``; returns the selection."""
     run_dir = Path(run_dir)
     hourly, pcc = campus_tables(run_dir)
     spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
@@ -449,10 +416,8 @@ def selected_hours(run_dir) -> pd.DataFrame:
 
 
 def island_hours(run_dir) -> list:
-    """
-    ``[(period, hour)]`` of the stored selection that an island criterion
-    picked (plan I3b's ``ISLAND_CRITERIA``): the island critical hours.
-    """
+    """``[(period, hour)]`` of the stored selection that an island criterion
+    picked (plan I3b's ``ISLAND_CRITERIA``): the island critical hours."""
     from gridspine.ranking.campus import ISLAND_CRITERIA
 
     island = {reason for reason, _ in ISLAND_CRITERIA}
@@ -463,11 +428,9 @@ def island_hours(run_dir) -> list:
 
 
 def _record_workers(run_dir, stage, n, fresh=False):
-    """
-    Note in ``WORKERS_JSON`` how many processes ``stage`` ran on
+    """Note in ``WORKERS_JSON`` how many processes ``stage`` ran on
     (``parallel.used``); ``fresh`` starts the file over (the frequency
-    check, which the cuts follow).
-    """
+    check, which the cuts follow)."""
     path = run_dir / WORKERS_JSON
     record = {} if fresh or not path.is_file() else json.loads(path.read_text())
     record[stage] = n
@@ -475,15 +438,13 @@ def _record_workers(run_dir, stage, n, fresh=False):
 
 
 def island_frequency_campus(run_dir, every_hour: bool = True, workers=1, should_stop=None) -> dict:
-    """
-    The island frequency check of a ranked run (plan I6, see the module
+    """The island frequency check of a ranked run (plan I6, see the module
     docstring). Needs the campus island requirements and the island tables
     (plan I3a). ``every_hour=False`` skips the every-hour E1. The island
     hours run over ``workers`` processes (default 1, this one; the count
     used is noted in ``WORKERS_JSON``); ``should_stop()`` is asked between
     them (``parallel.Stopped``, nothing written). Returns the summary it
-    writes.
-    """
+    writes."""
     from gridspine.static import frequency as F
     from gridspine.static import parallel
 
@@ -541,13 +502,11 @@ def island_frequency_campus(run_dir, every_hour: bool = True, workers=1, should_
 
 
 def island_static_campus(run_dir) -> dict:
-    """
-    The island steady state and short circuit of a ranked run at its
+    """The island steady state and short circuit of a ranked run at its
     island critical hours (plan I4, I5, I5b; see the module docstring).
     Needs the campus island data; reads I3a's per-unit table when the run
     has the island tables, for which gensets run at each hour. Returns the
-    summary it writes.
-    """
+    summary it writes."""
     from gridspine.static import island_hours as IH
 
     run_dir = Path(run_dir)
@@ -568,15 +527,13 @@ def island_static_campus(run_dir) -> dict:
 
 
 def cuts_campus(run_dir, workers=1, should_stop=None) -> pd.DataFrame:
-    """
-    I7's frequency cuts for a run whose frequency check has run
+    """I7's frequency cuts for a run whose frequency check has run
     (``island_frequency_campus``): the failing E1, E2, E3 and E5 events at
     the island hours and E1 at every hour, each re-run and inverted
     (``frequency.propose_cuts``), ``current`` from the run's I3a tables.
     The events run over ``workers`` processes and ``should_stop`` is asked
     between them, as in ``island_frequency_campus``. Writes
-    ``campus_freq_cuts.csv`` (``frequency.CUT_COLUMNS``); returns it.
-    """
+    ``campus_freq_cuts.csv`` (``frequency.CUT_COLUMNS``); returns it."""
     from gridspine.static import frequency as F
     from gridspine.static import parallel
 
@@ -599,8 +556,7 @@ def cuts_campus(run_dir, workers=1, should_stop=None) -> pd.DataFrame:
 
 def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 400, margin=None,
                         should_stop=None) -> dict:
-    """
-    Recommended grid-forming settings for a run whose frequency check has
+    """Recommended grid-forming settings for a run whose frequency check has
     run (``island_frequency_campus``): one droop and one equivalent inertia
     for every GFM converter that make the island-hour events pass with margin
     (``gfm_tuning.recommend_gfm_settings``), or, when none within the bounds
@@ -613,8 +569,7 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
     I2b's capacity margin). The search ranges are ledgered as assumed
     (``ledger``). ``should_stop`` is the search's cooperative stop
     (``gfm_tuning.SearchStopped``, nothing written). Writes
-    ``campus_gfm_settings.json`` and returns it.
-    """
+    ``campus_gfm_settings.json`` and returns it."""
     from gridspine.static import frequency as F
     from gridspine.static import gfm_tuning as T
 
@@ -666,13 +621,11 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
 
 
 def _json_ready(x):
-    """
-    ``x`` with each non-finite float as None and each numpy scalar as its
+    """``x`` with each non-finite float as None and each numpy scalar as its
     Python value: strict JSON (a collapse's ``inf`` RoCoF, nadir or capacity
     delta would otherwise be written as ``Infinity``, which a JSON response
     refuses). ``json.dumps``' ``default`` never sees a float, so this walks
-    the value first.
-    """
+    the value first."""
     if isinstance(x, dict):
         return {k: _json_ready(v) for k, v in x.items()}
     if isinstance(x, (list, tuple)):
@@ -685,11 +638,9 @@ def _json_ready(x):
 
 
 def psse_campus(run_dir, hours=None) -> list:
-    """
-    The PSS/E handoff of a ranked run (plan I8): one bundle per island
+    """The PSS/E handoff of a ranked run (plan I8): one bundle per island
     critical hour (``island_hours``), or per ``hours`` given, under
-    ``psse/``, each named ``p<period>_h<hour>``. Returns the bundles.
-    """
+    ``psse/``, each named ``p<period>_h<hour>``. Returns the bundles."""
     from gridspine.handoff.campus_bundle import export_campus_bundle
     from gridspine.static.frequency import LEDGER
 
@@ -716,10 +667,8 @@ OPEN_TIE_P_REF = "normally open tie: its rating, the campus file p_connection_mw
 
 
 def _requirement(code, campus, pcc, pf):
-    """
-    ``(requirement, p_ref, p_ref_from)`` at the PCC. For a normally open
-    tie the clause says it applies with the tie closed.
-    """
+    """``(requirement, p_ref, p_ref_from)`` at the PCC. For a normally open
+    tie the clause says it applies with the tie closed."""
     p_ref, p_ref_from = _p_ref(campus, pcc)
     req = requirement_from(code, p_ref, pf=pf)
     if campus.tie_normally_open:
@@ -751,14 +700,12 @@ def _p_ref(campus, pcc: pd.DataFrame):
 
 def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
                 pf: float | None = None, profile_dirs=()) -> dict:
-    """
-    Solve the selected hours, size the transformers, and correct each hour
+    """Solve the selected hours, size the transformers, and correct each hour
     into the PCC reactive band. Writes the per-hour tables, the two sizing
     tables and the requirement. Returns ``{"transformers", "compensation",
     "requirement"}``. ``profile`` may name a project profile in
     ``profile_dirs``; its unconfirmed limits reach the report as
-    ``extracted``.
-    """
+    ``extracted``."""
     run_dir = Path(run_dir)
     code = load_grid_code(profile, extra_dirs=profile_dirs)
     hourly, pcc = campus_tables(run_dir)
@@ -833,8 +780,7 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
                   pf: float | None = None, profile_dirs=(), pcc_switchgear: bool = True,
                   method: str = "least_cost", progress=None, should_stop=None,
                   parallel: ParallelRules = ParallelRules(), pcc_tap_control: str = "campus") -> dict:
-    """
-    Least-cost electrical assets for a ranked run, AC-checked (module
+    """Least-cost electrical assets for a ranked run, AC-checked (module
     docstring). ``library`` is a path, or None for the shipped library;
     ``profile`` may be a project profile in ``profile_dirs``, as for
     ``size_campus``. ``pcc_switchgear`` False leaves the PCC's switchgear to
@@ -861,8 +807,7 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
     PCC (plan C15): ``campus`` (default; the study may move them) or
     ``grid_operator`` (they stay at the file's taps). It is written to the
     scope file too, and the taps of the re-check to
-    ``campus_invest_taps.csv``.
-    """
+    ``campus_invest_taps.csv``."""
     if method not in METHODS:
         raise ContractError(f"unknown investment method {method!r}; allowed {list(METHODS)}")
     if method != "milp" and (progress is not None or should_stop is not None):
@@ -910,10 +855,8 @@ def _pcc_sk_min(pcc: dict) -> float:
 
 
 def _sk_source(campus: dict, n) -> tuple[str, bool]:
-    """
-    Where the campus PCC's minimum fault level came from, and whether it is
-    the producer's typical fallback.
-    """
+    """Where the campus PCC's minimum fault level came from, and whether it is
+    the producer's typical fallback."""
     from gridspine.producers.campus import _typical_sk
 
     pcc = campus["campus"]["pcc"]
@@ -934,10 +877,8 @@ def _sk_source(campus: dict, n) -> tuple[str, bool]:
 
 
 def _unchanged_project(run_dir: Path):
-    """
-    The project network a run was prepared from, refused when it changed
-    since (its sha256 is in the manifest).
-    """
+    """The project network a run was prepared from, refused when it changed
+    since (its sha256 is in the manifest)."""
     manifest = json.loads(_require(run_dir, CAMPUS_MANIFEST).read_text())
     network_path = Path(manifest["network_path"])
     if not network_path.is_file() or _sha256_file(network_path) != manifest["network_sha256"]:
@@ -946,12 +887,10 @@ def _unchanged_project(run_dir: Path):
 
 
 def harmonic_units(n, poc: str) -> pd.DataFrame:
-    """
-    The harmonic sources of a project network, all lumped at ``poc``: every
+    """The harmonic sources of a project network, all lumped at ``poc``: every
     Link that is a process unit (``eh_process``) or names a
     ``harmonic_source``. A unit with an input missing is kept (the screen says
-    "no input").
-    """
+    "no input")."""
     links = n.links
     cols = ("rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter")
 
@@ -969,10 +908,8 @@ def harmonic_units(n, poc: str) -> pd.DataFrame:
 
 
 def _screen_inputs(run_dir, profile, profile_dirs):
-    """
-    A prepared run's campus description, its project network (refused when
-    it changed since the run was prepared) and the grid-code profile.
-    """
+    """A prepared run's campus description, its project network (refused when
+    it changed since the run was prepared) and the grid-code profile."""
     n = _unchanged_project(run_dir)
     campus = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
     return campus, n, load_grid_code(profile, extra_dirs=profile_dirs)
@@ -980,10 +917,8 @@ def _screen_inputs(run_dir, profile, profile_dirs):
 
 def _screen_frame(pocs, units, unit_assumed, sk_source, typical, profile, limit_assumed, poc_columns,
                   unit_columns) -> pd.DataFrame:
-    """
-    One ``level`` ``poc`` row per PoC and one ``unit`` row per unit, with
-    the S_k source, the profile and the ``assumed`` flag.
-    """
+    """One ``level`` ``poc`` row per PoC and one ``unit`` row per unit, with
+    the S_k source, the profile and the ``assumed`` flag."""
     frames = []
     for level, df, extra in (("poc", pocs, bool(unit_assumed.any())), ("unit", units, unit_assumed)):
         df = df.copy()
@@ -1001,8 +936,7 @@ def _screen_frame(pocs, units, unit_assumed, sk_source, typical, profile, limit_
 
 
 def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), law: str = "iec") -> pd.DataFrame:
-    """
-    The harmonic screen of a prepared run (``static/harmonics.py``),
+    """The harmonic screen of a prepared run (``static/harmonics.py``),
     written to ``campus_harmonics.csv``: one ``level`` ``poc`` row and one
     ``unit`` row per harmonic source.
 
@@ -1010,8 +944,7 @@ def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), l
     the project's own fault level, the draft's typical fallback (the row is
     then ``assumed`` and says so) or the campus description's. The unit inputs
     are read from the project network the run was prepared from, which must
-    be unchanged since (its sha256 is in the manifest).
-    """
+    be unchanged since (its sha256 is in the manifest)."""
     from gridspine.static import harmonics as hm
 
     run_dir = Path(run_dir)
@@ -1038,11 +971,9 @@ FLICKER_CSV = "campus_flicker.csv"
 
 
 def flicker_units(n, poc: str) -> pd.DataFrame:
-    """
-    The fluctuating loads of a project network, all lumped at ``poc``:
+    """The fluctuating loads of a project network, all lumped at ``poc``:
     every Link that is a process unit (``eh_process``) or names a flicker
-    step. A unit with an input missing is kept (the screen says "no input").
-    """
+    step. A unit with an input missing is kept (the screen says "no input")."""
     links = n.links
 
     def col(name, default):
@@ -1057,11 +988,9 @@ def flicker_units(n, poc: str) -> pd.DataFrame:
 
 
 def flicker_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> pd.DataFrame:
-    """
-    The flicker screen of a prepared run (``static/flicker.py``), written
+    """The flicker screen of a prepared run (``static/flicker.py``), written
     to ``campus_flicker.csv``: one ``level`` ``poc`` row and one ``unit`` row
-    per process unit, with S_k and its source as in ``harmonics_campus``.
-    """
+    per process unit, with S_k and its source as in ``harmonics_campus``."""
     from gridspine.static import flicker as fl
 
     run_dir = Path(run_dir)
@@ -1100,14 +1029,12 @@ RESTART_LEDGER = (
 
 
 def _island_source(campus: Campus):
-    """
-    ``(island Source or None, note, pickup blocks or None)`` of a built campus.
+    """``(island Source or None, note, pickup blocks or None)`` of a built campus.
 
     The island's minimum case is its genset fleet less the ``genset_redundancy_n`` units with the largest
     S_k'' (the N+k rule of ``site_peak.firm_genset_mw``), each s_mva / xd_pp, given as ``sk_min_mva`` so
     ``motor_start.short_circuit_power`` divides by c_min at the gensets' bus voltage. A genset missing s_mva or
-    xd_pp makes the source unknown: a partial sum is never used.
-    """
+    xd_pp makes the source unknown: a partial sum is never used."""
     from gridspine.static import motor_start as ms
 
     req = (campus.island or {}).get("requirements") or {}
@@ -1157,8 +1084,7 @@ def _stamp(df: pd.DataFrame, level: str, **cols) -> pd.DataFrame:
 
 
 def restart_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    The dip and restart screens of a prepared run (``static/ride_through.py``,
+    """The dip and restart screens of a prepared run (``static/ride_through.py``,
     ``static/restart_sequence.py``), written to ``campus_dip_trips.csv`` and ``campus_restart.csv``.
 
     ``campus_dip_trips.csv``: one ``class`` row per process unit and dip class (trips, rides or unknown), one
@@ -1168,8 +1094,7 @@ def restart_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> 
     ``campus_restart.csv``: per ``transition`` (``trip``, ``island``), one ``unit`` row per restarted unit, one
     ``event`` row per timeline event and one ``total`` row. A grid trip screens each motor start on the PCC's
     minimum case, an island transition on the island's gensets (``RESTART_LEDGER``). The unit inputs are read
-    from the project network the run was prepared from, which must be unchanged since.
-    """
+    from the project network the run was prepared from, which must be unchanged since."""
     from gridspine.drivers import process_chain as pc
     from gridspine.drivers.process_chain import restart_units
     from gridspine.static import motor_start as ms
@@ -1232,10 +1157,8 @@ TDD_CSV = "campus_tdd.csv"
 
 
 def _rated_load_mva(campus) -> float | None:
-    """
-    I_L as MVA: the rated campus load, sum p_mw / pf over the ``load``
-    units (all behind the one PCC). None when the campus has none.
-    """
+    """I_L as MVA: the rated campus load, sum p_mw / pf over the ``load``
+    units (all behind the one PCC). None when the campus has none."""
     loads = campus.units[campus.units["kind"] == "load"]
     if loads.empty:
         return None
@@ -1243,8 +1166,7 @@ def _rated_load_mva(campus) -> float | None:
 
 
 def tdd_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), law: str = "iec") -> pd.DataFrame:
-    """
-    The current-distortion screen of a prepared run
+    """The current-distortion screen of a prepared run
     (``static/current_tdd.py``), written to ``campus_tdd.csv``: one ``level``
     ``poc`` row for the PCC.
 
@@ -1253,8 +1175,7 @@ def tdd_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), law: st
     ``harmonics_campus``, and I_L is the rated campus load (``assumed``). The
     profile's ``current_tdd_standard`` names the limits; without it the row
     is ``unknown``. A project's Links are process units, never generation, so
-    no unit is flagged ``generation`` here.
-    """
+    no unit is flagged ``generation`` here."""
     from gridspine.static import current_tdd as td
 
     run_dir = Path(run_dir)
@@ -1282,8 +1203,7 @@ HARMONIC_RESONANCE_CSV = "campus_harmonic_resonance.csv"
 
 
 def harmonic_scan_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()):
-    """
-    The harmonic impedance scan of a prepared run from its PCC
+    """The harmonic impedance scan of a prepared run from its PCC
     (``static/harmonic_scan.py``), written to ``campus_harmonic_scan.csv``
     (R(h), X(h) per short-circuit case and capacitor state),
     ``campus_harmonic_envelope.csv`` and ``campus_harmonic_resonance.csv``.
@@ -1291,8 +1211,7 @@ def harmonic_scan_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(
     The orders that count are 6k +- 1 and every order a harmonic source's
     spectrum injects (vendor or demo default, as the harmonic screen takes
     them), read from the project network, which must be unchanged since the
-    run was prepared. Returns the ``ScanStudy``.
-    """
+    run was prepared. Returns the ``ScanStudy``."""
     from gridspine.static import harmonic_scan as hs
     from gridspine.static import harmonics as hm
 
@@ -1330,10 +1249,8 @@ VS_COLUMNS = ("period", "verdict", "planned_mw", "hour", "pf", "e_pu", "nose_mw"
 
 
 def _vs_net(vn_kv, e_pu, sk_min_mva, rx, c, f_hz):
-    """
-    The grid-side screening net: a source at ``e_pu`` behind the Thevenin
-    impedance Z = c·Un²/S_k''min with R/X ``rx``, and the PCC as the PoC.
-    """
+    """The grid-side screening net: a source at ``e_pu`` behind the Thevenin
+    impedance Z = c·Un²/S_k''min with R/X ``rx``, and the PCC as the PoC."""
     import pandapower as pp
 
     z = c * vn_kv**2 / sk_min_mva
@@ -1348,10 +1265,8 @@ def _vs_net(vn_kv, e_pu, sk_min_mva, rx, c, f_hz):
 
 
 def _vs_period(lf, bus, period, rated_mw):
-    """
-    The operating point of one period from its converged intact hours: ``(planned_mw, planned_from, pf,
-    pf_note, e_pu, e_note, hour)``, or the reason there is none (a string).
-    """
+    """The operating point of one period from its converged intact hours: ``(planned_mw, planned_from, pf,
+    pf_note, e_pu, e_note, hour)``, or the reason there is none (a string)."""
     from gridspine.static.voltage_stability import VoltageStabilitySettings
 
     pcc = lf["pcc"]
@@ -1388,8 +1303,7 @@ def _vs_period(lf, bus, period, rated_mw):
 
 
 def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> dict:
-    """
-    The P–V nose and Q–V margin at the PCC of a sized run, per period
+    """The P–V nose and Q–V margin at the PCC of a sized run, per period
     (``static/voltage_stability.py`` on the grid-side screening net), written
     to ``campus_voltage_stability.csv``. Returns the summary: ``ledger``,
     ``notes`` and the equivalent's inputs.
@@ -1402,8 +1316,7 @@ def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_di
     import and the rated import (``p_connection_mw``), at the max-import
     hour's lagging power factor; the source EMF is the lowest converged PCC
     voltage of the period when below 1.0 pu. ``profile`` is accepted with the
-    other screens' signature; the limits are the readiness rows'.
-    """
+    other screens' signature; the limits are the readiness rows'."""
     from gridspine.static.island_sc_seq import c_factor
     from gridspine.static.voltage_stability import (
         SCREENING_BASIS,
@@ -1493,13 +1406,11 @@ _LOAD_LOST_TOL_MW = 1e-3
 
 
 def _gc03_hour_net(campus, rows, hour: int):
-    """
-    The campus net carrying one hour, with the ``dispatch`` / ``loads`` /
+    """The campus net carrying one hour, with the ``dispatch`` / ``loads`` /
     ``registry`` tables ``apply_snapshot`` and the static screens take.
     The hour goes on through ``apply_hour`` (the campus load flow's own
     mapping: load Q from each load's power factor, converter Q at 0); the
-    tables are read back off that net so they agree with it.
-    """
+    tables are read back off that net so they agree with it."""
     import copy
 
     from gridspine.ingest.pandapower_source import registry_from_net
@@ -1536,10 +1447,8 @@ def _gc03_hour_net(campus, rows, hour: int):
 
 
 def _gc03_hours(run_dir, periods):
-    """
-    Per period, the max-import and max-export intact converged hours of
-    the sized run (``LF_PCC_CSV``, ``p_mw`` > 0 imports), or the reason none.
-    """
+    """Per period, the max-import and max-export intact converged hours of
+    the sized run (``LF_PCC_CSV``, ``p_mw`` > 0 imports), or the reason none."""
     pcc = pd.read_csv(_require(Path(run_dir), LF_PCC_CSV))
     out = {}
     for period in periods:
@@ -1554,11 +1463,9 @@ def _gc03_hours(run_dir, periods):
 
 
 def _gc03_case_verdict(r) -> str:
-    """
-    A contingency fails unless stage 2 (after remedial action) passes with
+    """A contingency fails unless stage 2 (after remedial action) passes with
     no load lost and the angle check does not fail. A case that does not
-    converge, or islands the load, is a violation, never a skip.
-    """
+    converge, or islands the load, is a violation, never a skip."""
     if r["stage2_verdict"] != "pass" or r["angle_verdict"] == "fail":
         return PLANNING_CASE_FAIL
     if float(r["load_lost_mw"]) > _LOAD_LOST_TOL_MW:
@@ -1567,8 +1474,7 @@ def _gc03_case_verdict(r) -> str:
 
 
 def planning_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), contingencies=None) -> dict:
-    """
-    The planning-criteria screen (``static/planning_criteria.screen_planning``)
+    """The planning-criteria screen (``static/planning_criteria.screen_planning``)
     of a sized run at each period's max-import and max-export hour, written
     to ``campus_planning.csv``. Returns the summary.
 
@@ -1576,13 +1482,9 @@ def planning_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), co
     branch and converter or genset unit) when None, or the TSO's list
     (``ingest/contingency_list.read_contingency_list``). An imported list's
     excluded contingencies are carried into the summary, and the verdict is
-    then never "pass" (fail closed).
-    """
+    then never "pass" (fail closed)."""
     from gridspine.static.contingency import BaseCaseNotConverged
-    from gridspine.static.contingency_set import (
-        branch_contingencies,
-        unit_contingencies,
-    )
+    from gridspine.static.contingency_set import branch_contingencies, unit_contingencies
     from gridspine.static.planning_criteria import screen_planning
 
     run_dir = Path(run_dir)
@@ -1646,11 +1548,9 @@ def planning_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), co
 
 
 def _gc03_source(campus, element, param) -> str:
-    """
-    The template source tag of a value taken from the campus spec: the
+    """The template source tag of a value taken from the campus spec: the
     spec's own tag when it is a template tag, "datasheet" for another entered
-    value, "assumed" when the spec does not give it.
-    """
+    value, "assumed" when the spec does not give it."""
     from gridspine.templates.unit_params import SOURCES
 
     p = campus.params
@@ -1662,12 +1562,10 @@ def _gc03_source(campus, element, param) -> str:
 
 
 def _gc03_templates(campus, net):
-    """
-    IEC 60909 unit templates that reproduce the campus spec on ``net``:
+    """IEC 60909 unit templates that reproduce the campus spec on ``net``:
     the grid as a source of S_k''min (mbase = S_k''min, x''d = 1, R/X =
     rx_min) and each remaining sgen with its own k and R/X, so
-    ``set_sc_params`` writes back the values the net already has.
-    """
+    ``set_sc_params`` writes back the values the net already has."""
     from gridspine.templates.unit_params import UnitTemplates
 
     units, params = [], []
@@ -1699,10 +1597,8 @@ STRENGTH_OUTAGE_CAP = 200
 
 
 def _gc03_strength(campus, hourly):
-    """
-    ``strength_campus`` on a built campus and its hourly table: ``(per PoC,
-    groups, outage method, notes)``.
-    """
+    """``strength_campus`` on a built campus and its hourly table: ``(per PoC,
+    groups, outage method, notes)``."""
     import copy
 
     from gridspine.static.strength import q_c_by_poc, strength_table
@@ -1762,8 +1658,7 @@ def _gc03_strength(campus, hourly):
 
 
 def strength_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> dict:
-    """
-    SCR, ESCR and WSCR per PoC and stage (``static/strength.strength_table``),
+    """SCR, ESCR and WSCR per PoC and stage (``static/strength.strength_table``),
     intact and under the worst campus N-1 branch outage
     (``static/strength_outages.outage_fault_levels``), written to
     ``campus_strength.csv`` (per PoC) and ``campus_strength_groups.csv``
@@ -1774,8 +1669,7 @@ def strength_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) ->
     converter (``IBR_KINDS``) is off, gensets stay in, and the grid is the
     campus spec's S_k''min and rx_min. A PoC is each bus carrying a converter;
     a stage is a period, with P the RATED power of the converters built in it.
-    Capacitor banks off every PoC are subtracted at every PoC (worst case).
-    """
+    Capacitor banks off every PoC are subtracted at every PoC (worst case)."""
     del profile, profile_dirs  # the bands are strength.py's; the limits are the readiness rows'
     run_dir = Path(run_dir)
     _unchanged_project(run_dir)
