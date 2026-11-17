@@ -116,6 +116,29 @@ def test_each_knockout_names_its_input_on_every_row_that_reads_it(row, knock):
     assert all({"section": None, "code": "not_established"} not in v for v in got.values())
 
 
+#: C1 for the edges no real input knocks out alone (stage_capex, replacement and grant
+#: are never None; a tax knockout takes depreciation, tax and tax_equity together): the
+#: knocked-out case's own result with one input row set None in an otherwise whole P&L.
+#: Dropping the edge leaves the row with no cause, so it fails here.
+ONE_ROW = [
+    ("project_pre_tax", "grant", "inc"), ("project_pre_tax", "stage_capex", "capex"),
+    ("project_pre_tax", "replacement", "capex"), ("equity_post_tax", "tax_equity", "tax"),
+    ("ebit", "depreciation", "tax"), ("net_income", "tax", "tax"),
+    ("project_post_tax", "credits", "inc"), ("equity_post_tax", "credits", "inc"),
+    ("project_post_tax", "tax", "tax"), ("credits", "capex", "capex"),
+]
+
+
+@pytest.mark.parametrize("row,dep,knock", ONE_ROW)
+def test_each_edge_alone_names_its_input(row, dep, knock):
+    r, _, _ = _knocked(knock)
+    _, whole, _ = _case()
+    rows = dict(whole.rows, **{dep: None, row: None})
+    got = row_reasons(r, PnL(whole.years, whole.streams, rows))
+    _, _, want = _knock(knock)
+    assert got[row] == got[dep] and want in got[row]
+
+
 def test_a_linked_output_not_evaluated_follows_its_line():
     _, _, got = _case(lines=[_LINKED], outputs=_STALE)
     assert got["revenue"] == [

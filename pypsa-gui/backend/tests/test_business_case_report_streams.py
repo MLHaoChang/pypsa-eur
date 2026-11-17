@@ -133,12 +133,16 @@ def test_bc17_row_reason_is_a_display_key_that_moves_no_digest_or_staleness(
     )
     b = real(**kw)
     assert a["pnl"]["row_reason"] != b["pnl"]["row_reason"]
+    # Staleness reads the stored bodies with the key in them.
+    current = (a["ic_assumptions_hash"], None)
+    for cur in (current, (None, "gone")):
+        assert RN.staleness(a, inputs_raw=kw["raw"], ic_current=cur) == RN.staleness(
+            b, inputs_raw=kw["raw"], ic_current=cur
+        )
+    assert RN.staleness(b, inputs_raw=kw["raw"], ic_current=current)["stale"] is False
+    for k in ("business_case_hash", "inputs_digest", "ic_assumptions_hash", "ic_case_hash"):
+        assert a[k] == b[k], k
     for body in (a, b):
         body["pnl"].pop("row_reason")
         body.pop("created_at")
     assert a == b
-    for cur in ((a["ic_assumptions_hash"], None), (None, "gone")):
-        assert RN.staleness(a, inputs_raw=kw["raw"], ic_current=cur) == RN.staleness(
-            b, inputs_raw=kw["raw"], ic_current=cur
-        )
-    assert RN.staleness(a, inputs_raw=kw["raw"], ic_current=cur)["changed"] == []

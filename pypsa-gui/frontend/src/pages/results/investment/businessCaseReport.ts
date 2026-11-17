@@ -228,6 +228,7 @@ export function servedReasonText(items: BusinessCaseRowReasonItem[]): string {
 
 export function rowReason(key: string, pnl: BusinessCasePnl): string {
   if ((pnl.not_finite ?? []).includes(key)) return 'Not established. The figure is out of range.'
+  // A stream is not a P&L row: the report serves no row reason for it.
   if (key.startsWith('stream:')) return 'Not established. It needs the stream\'s lines.'
   // A report that serves reasons (BC 17) is never read through ROW_NEEDS, even for a
   // row it gives no reason for; only a report stored before it falls back.
