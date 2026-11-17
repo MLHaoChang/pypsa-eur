@@ -3,7 +3,11 @@
 
 # Guide tour: opt-in only, numbering and copy out of step with the stepper
 
-Status: needs-info
+Status: ready-for-agent
+Model tier: sonnet
+Size: M
+Gated: UX
+Blocked by: none
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J1 Pick template, J2 Set up (onboarding)
 Severity: medium
@@ -29,3 +33,5 @@ J1 to J2: the tour is the hand-off from picking a template to filling section 1.
 ## Comments
 
 **2026-11-17 triage (SCALE-1).** Not ready: offering the tour on first open is new behaviour (a product choice), while the 5-vs-10 count, the step jumps and the assistant-on wording are plain fixes. Question sent to the coordinator as options; owner is the next-step flow session (session_01G7qCukhif9YGKwK5Ktmeu5).
+
+**2026-11-17 owner decision TOUR-AUTO-1 (via the coordinator).** Offer the tour once per project on first open, with steps matched to the 10 sections (each jumps to its section) and wording that depends on whether the assistant is on. Owner area: next-step flow (session_01G7qCukhif9YGKwK5Ktmeu5); unowned until a builder opens it. Likely files: `pypsa-gui/frontend/src/components/GuidedTour.tsx` and the hub stepper.

@@ -3,7 +3,11 @@
 
 # Template creation: dev 404 text, duplicate name, one unverified project
 
-Status: needs-info
+Status: ready-for-agent
+Model tier: sonnet
+Size: S
+Gated: UX
+Blocked by: none
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J1 Pick template
 Severity: medium
@@ -22,3 +26,5 @@ The 404 shows plain words; a duplicate name offers a numbered copy; template-e2e
 ## Comments
 
 **2026-11-17 triage (SCALE-1).** Not ready: a numbered copy for a duplicate name is new behaviour (scope), the 404 wording is dev-only, and the hydrogen card is unverified. Question sent to the coordinator as options.
+
+**2026-11-17 owner decision TEMPLATE-COPY-1 (via the coordinator).** When a template's name already exists, offer a numbered copy ("Name 2") next to "Open the existing project". The dev-only 404 text becomes plain words, and template-e2e covers the Industrial Hydrogen card check. Likely files: the template create route and its frontend toast/dialog.
