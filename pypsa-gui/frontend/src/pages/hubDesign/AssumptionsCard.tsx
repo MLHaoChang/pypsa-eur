@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2 } from 'lucide-react'
 import { ackFlowItems, type FlowItem } from '../../api/flow'
@@ -5,7 +6,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { openFlowTargetInPlace } from '../../layout/flowNavigation'
 import { useFieldLabels } from '../../hooks/useFieldLabels'
-import { fieldWords } from '../../utils/flowItems'
+import { fieldWords, isOpenItem } from '../../utils/flowItems'
 
 // One card for every default the project still assumes (LC-46): the value and
 // where it comes from, one "Keep all defaults" and an edit per row. Assumed
@@ -21,6 +22,19 @@ const ASSUMED_HINT = /\s*[—:]\s*confirm it[^.]*\.?$/
 /** A flow item the server raised for a template default the user has not confirmed. */
 export const isAssumedItem = (it: FlowItem): boolean =>
   it.severity === 'warning' && it.code.startsWith('assumed_')
+
+/** The card's rows: the open items (the one filter the Readiness count and the
+ *  Expert badge use) that are assumed defaults. */
+export const assumedItems = (items: FlowItem[]): FlowItem[] => items.filter(i => isOpenItem(i) && isAssumedItem(i))
+
+/** Open or closed is a per-user convenience in this browser, never project state. */
+export const ASSUMPTIONS_OPEN_KEY = 'pypsa-gui:assumptions-open'
+function readOpen(): boolean {
+  try { return localStorage.getItem(ASSUMPTIONS_OPEN_KEY) === '1' } catch { return false }
+}
+function writeOpen(open: boolean): void {
+  try { localStorage.setItem(ASSUMPTIONS_OPEN_KEY, open ? '1' : '0') } catch { /* no storage: this visit only */ }
+}
 
 /** The server's own reason (`detail.message`), when it sent one. */
 function failureReason(err: unknown): string {
@@ -45,8 +59,12 @@ function AssumedRow({ item }: { item: FlowItem }) {
   )
 }
 
-export function AssumptionsCard({ items }: { items: FlowItem[] }) {
+/** `waiting`: the section's state waits only on these defaults. Collapsed or
+ *  open, "Keep all defaults" sends the same rows (guided-results 03, GK (5)). */
+export function AssumptionsCard({ items, waiting = false }: { items: FlowItem[]; waiting?: boolean }) {
   const project = useUIStore(s => s.currentProject)
+  const [open, setOpen] = useState(readOpen)
+  const toggle = () => { setOpen(!open); writeOpen(!open) }
   const qc = useQueryClient()
   const accept = useMutation({
     mutationFn: () => ackFlowItems(project as string,
@@ -65,7 +83,10 @@ export function AssumptionsCard({ items }: { items: FlowItem[] }) {
       className="flex flex-col gap-2 rounded border border-border bg-panel px-3 py-2">
       <div className="flex items-center gap-2">
         <h3 className="flex-1 text-[12px] font-semibold text-text">
-          Assumptions <span className="font-normal text-muted">· {items.length} default{items.length === 1 ? '' : 's'} not yet confirmed</span>
+          <button type="button" data-testid="assumptions-toggle" aria-expanded={open} aria-controls="assumptions-rows"
+            onClick={toggle} className="text-left hover:text-accent">
+            {open ? '▾' : '▸'} Assumed <span className="font-normal text-muted">· {items.length} not yet confirmed</span>
+          </button>
         </h3>
         <button type="button" data-testid="assumptions-accept-all"
           disabled={!project || accept.isPending}
@@ -74,9 +95,16 @@ export function AssumptionsCard({ items }: { items: FlowItem[] }) {
           <CheckCircle2 size={12} /> {KEEP_ALL_DEFAULTS}
         </button>
       </div>
-      <ul className="flex flex-col gap-1.5">
-        {items.map((it, i) => <AssumedRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
-      </ul>
+      {waiting && (
+        <p data-testid="assumptions-waiting" className="text-[11px] text-warn">
+          This section waits on these {items.length === 1 ? 'default' : `${items.length} defaults`}: keep {items.length === 1 ? 'it' : 'them'}, or edit one.
+        </p>
+      )}
+      {open && (
+        <ul id="assumptions-rows" className="flex flex-col gap-1.5">
+          {items.map((it, i) => <AssumedRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
+        </ul>
+      )}
       {accept.isError && (
         <p role="status" data-testid="assumptions-error" className="text-[11px] text-danger">
           The defaults could not be saved{reason ? `: ${reason}` : ''}. Try again.

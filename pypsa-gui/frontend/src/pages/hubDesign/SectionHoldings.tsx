@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FlowHeld, FlowSectionId } from '../../api/flow'
 import { openFlowTargetInPlace, openSectionInExpert, openTimeSeriesFor, withReturnFrom } from '../../layout/flowNavigation'
+import { SectionSummary } from './SectionSummary'
 import { FOLD_AFTER, groupTitle, heldFigure, heldGroups, heldHome, heldKind, heldRest } from './holdWords'
 
 // What a Guided section holds (ui-modern 05, finding 7): one row per carrier,
@@ -97,6 +98,7 @@ export function SectionHoldings({ id, holds, total, pending, failed, deferred = 
   const rest = heldRest(holds.length, total)
   return (
     <div data-testid="section-held-list" className="flex flex-col gap-3">
+      <SectionSummary id={id} holds={holds} total={total} />
       {groups.map(g => (
         <Group key={g.component} section={id} rows={g.rows} counted={rest === null}
           title={groups.length > 1 ? groupTitle(g.component) : null} />
