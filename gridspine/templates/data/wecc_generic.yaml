@@ -165,3 +165,8 @@ blocks:
       tg: {value: 0.1, from: "WECC 2019 p.28 example repc_a tlag (PSLF name of PSS/E Tg)"}
       ddn: {value: 20.0, from: "WECC 2019 p.28 example repc_a ddn"}
       dup: {value: 0.0, from: "WECC 2019 p.28 example repc_a dup"}
+  repc_bess:
+    source: "Generic engineering for a battery plant (no public example record): a battery charges and holds headroom both ways, unlike the PV example the repc block is taken from"
+    values:
+      pmin: {value: -1.0, from: "generic engineering: a battery plant charges, so Pmin = -Pmax (repc pmax = 1.0)"}
+      dup: {value: 20.0, from: "generic engineering: storage holds upward headroom, so the under-frequency droop equals the repc block's ddn (symmetric 5% droop)"}

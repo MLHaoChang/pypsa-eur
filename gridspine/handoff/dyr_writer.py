@@ -1,5 +1,4 @@
-"""
-PSS/E .dyr writer — the handoff contract's dynamics half.
+"""PSS/E .dyr writer — the handoff contract's dynamics half.
 
 One record per synchronous machine, model class from the template, and a
 REGCA1 + REECA1 pair per converter that has a group (below)::
@@ -133,10 +132,8 @@ DYR_CONS = {
 
 
 def _machines(net):
-    """
-    Every machine as (unit_id, bus_number, machine_id, mbase, synchronous),
-    in RAW record order, IDs from the RAW's own per-bus counter.
-    """
+    """Every machine as (unit_id, bus_number, machine_id, mbase, synchronous),
+    in RAW record order, IDs from the RAW's own per-bus counter."""
     nums = _bus_numbers(net)
     name_of = net.bus["name"]
     ids = _IdCounter()
@@ -167,20 +164,16 @@ DYR_CONTROLS = {
 
 
 def machine_records(net):
-    """
-    ``(unit_id, bus_number, machine_id, mbase, synchronous)`` for every
+    """``(unit_id, bus_number, machine_id, mbase, synchronous)`` for every
     machine, in RAW record order with the RAW's own IDs (public for the
-    campus bundle, which attaches its own records to the same identities).
-    """
+    campus bundle, which attaches its own records to the same identities)."""
     return _machines(net)
 
 
 def format_record(num, mid, model, values):
-    """
-    One record of a ``DYR_CONTROLS`` model: ``values`` maps each ICON and
+    """One record of a ``DYR_CONTROLS`` model: ``values`` maps each ICON and
     CON field to its number; a missing one raises (a zero is a plausible
-    wrong control).
-    """
+    wrong control)."""
     icon_names, con_names = DYR_CONTROLS[model]
     missing = [n for n in icon_names + con_names if values.get(n) is None or pd.isna(values.get(n))]
     if missing:
@@ -228,10 +221,8 @@ class UserModelOnly(ContractError):
 
 
 def check_model(model, version):
-    """
-    Refuse a model this writer cannot write for ``version``: a user-only
-    model (REGC_B, REEC_D), an unpinned one, or one the version does not ship.
-    """
+    """Refuse a model this writer cannot write for ``version``: a user-only
+    model (REGC_B, REEC_D), an unpinned one, or one the version does not ship."""
     if model in USER_MODEL_ONLY:
         raise UserModelOnly(
             f"{model} ({USER_MODEL_ONLY[model]}): user model only (USRMDL) up to 35.2; not written"
@@ -248,10 +239,8 @@ def check_model(model, version):
 
 @dataclasses.dataclass(frozen=True)
 class PocBranch:
-    """
-    The plant's PoC branch for its REPCA1: a pandapower ``line`` or
-    ``trafo`` row, and the bus at its grid end (the PoC).
-    """
+    """The plant's PoC branch for its REPCA1: a pandapower ``line`` or
+    ``trafo`` row, and the bus at its grid end (the PoC)."""
 
     table: str
     element: int
@@ -288,11 +277,9 @@ def _values(unit_id, model, names, row):
 
 
 def _con(c):
-    """
-    A CON in ten columns, with a leading blank even when the value fills
+    """A CON in ten columns, with a leading blank even when the value fills
     all ten (``-998.00000``): PSS/E reads free format, and two values written
-    edge to edge would read as one.
-    """
+    edge to edge would read as one."""
     text = f"{c:10.5f}"
     return text if text.startswith(" ") else " " + text
 
@@ -303,10 +290,8 @@ def _quoted(ckt):
 
 
 def _record(num, mid, model, icons, cons, version):
-    """
-    One wrapped record: ICONs on the head line (ints, or a quoted CKT),
-    CONs five to a line. The ICON/CON counts are checked against the pin.
-    """
+    """One wrapped record: ICONs on the head line (ints, or a quoted CKT),
+    CONs five to a line. The ICON/CON counts are checked against the pin."""
     check_model(model, version)
     n_icon, n_con = MODEL_PIN[model][:2]
     if (len(icons), len(cons)) != (n_icon, n_con):
@@ -329,10 +314,8 @@ def _has(row, names):
 
 
 def _ibr_lines(unit_id, num, mid, row, version=33, repc=None):
-    """
-    The converter's records. ``repc`` is ``(busr, bus1, bus2, ckt)`` when
-    the unit carries a REPCA1 group.
-    """
+    """The converter's records. ``repc`` is ``(busr, bus1, bus2, ckt)`` when
+    the unit carries a REPCA1 group."""
     electrical = ("REECC1", REECC1_ICONS, REECC1_CONS) if _has(row, REECC1_ONLY) else IBR_RECORDS[1]
     lines = []
     for model, icon_names, con_names in (IBR_RECORDS[0], electrical):
@@ -359,13 +342,11 @@ def _ibr_lines(unit_id, num, mid, row, version=33, repc=None):
 
 
 def _poc_ids(net, poc):
-    """
-    unit_id -> (BUSR, BUS1, BUS2, CKT) from the RAW's own branch identities.
+    """unit_id -> (BUSR, BUS1, BUS2, CKT) from the RAW's own branch identities.
     BUS1 is the plant end, BUS2 the grid end (the PoC, also BUSR), so branch
     flow from BUS1 to BUS2 is export, positive. One controlled machine per PoC
     branch: N REPCA1s each measuring the whole plant's flow on their own MBASE
-    would multiply the loop gain by N, so a plant is aggregated (GC-01) first.
-    """
+    would multiply the loop gain by N, so a plant is aggregated (GC-01) first."""
     if not poc:
         return {}
     nums = _bus_numbers(net)
@@ -414,15 +395,13 @@ def _check_base(unit_id, template_base, mbase):
 def write_dyr(
     net, unit_params: pd.DataFrame, path, ibr: pd.DataFrame = None, version=33, poc=None,
 ) -> dict:
-    """
-    Write the .dyr; return unit_id -> bus_number for every machine written.
+    """Write the .dyr; return unit_id -> bus_number for every machine written.
 
     ``ibr`` is ``unit_params.ibr_params(templates)`` (REGCA1 + REECA1) or
     ``wecc_params(templates)`` (also REECC1, REPCA1, type 3 wind): the
     inverters that get converter records. An inverter not in it is omitted
     (see module docstring). ``version`` is 33 or 35; ``poc`` maps a unit with
-    a REPCA1 group to its ``PocBranch``.
-    """
+    a REPCA1 group to its ``PocBranch``."""
     if version not in DYR_VERSIONS:
         raise ContractError(f".dyr version {version!r} not supported; supported {DYR_VERSIONS}")
     repc = _poc_ids(net, poc)

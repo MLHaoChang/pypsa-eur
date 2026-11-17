@@ -1,5 +1,4 @@
-"""
-Task 12: contingencies.csv, the ledger README, and bundle assembly.
+"""Task 12: contingencies.csv, the ledger README, and bundle assembly.
 
 The bundle is the artifact a dynamics engineer opens WITHOUT the study
 directory: .raw, .dyr, contingencies.csv, ledger.md, the flow and the hour's
@@ -33,11 +32,7 @@ from gridspine.handoff.bundle import (
 )
 from gridspine.handoff.contingencies import ELEMENT_SEP, write_contingencies
 from gridspine.handoff.raw_writer import _bus_numbers, write_raw
-from gridspine.ingest.pandapower_source import (
-    RES_LEDGER,
-    load_case39_res,
-    registry_from_net,
-)
+from gridspine.ingest.pandapower_source import RES_LEDGER, load_case39_res, registry_from_net
 from gridspine.ingest.synthetic_profiles import PROFILE_LEDGER
 from gridspine.schema.contingency import validate_contingency_set
 from gridspine.schema.contracts import ContractError
@@ -51,11 +46,7 @@ from gridspine.static.contingency_set import (
     unit_contingencies,
 )
 from gridspine.static.loadflow import LFResult, apply_snapshot, run_lf
-from gridspine.templates.unit_params import (
-    UnitTemplates,
-    load_unit_params,
-    load_unit_templates,
-)
+from gridspine.templates.unit_params import UnitTemplates, load_unit_params, load_unit_templates
 
 HOUR = 0
 RES_CF = 0.3
@@ -358,21 +349,17 @@ def test_bundle_flow_files_match_the_lfresult(bundle, snapshot):
 
 
 def test_bundle_refuses_a_net_that_does_not_carry_the_hour(snapshot, tmp_path):
-    """
-    The stage-order guard, in the builder this time: a RAW exported off a net
-    the snapshot was never applied to is the increment-1 defect in a new file.
-    """
+    """The stage-order guard, in the builder this time: a RAW exported off a net
+    the snapshot was never applied to is the increment-1 defect in a new file."""
     fresh = load_case39_res()  # native peak loads, native gens, RES at installed
     with pytest.raises(ContractError, match="does not carry hour"):
         export_bundle(tmp_path, _inputs(snapshot, net=fresh))
 
 
 def test_bundle_refuses_a_net_whose_loads_moved(snapshot, tmp_path):
-    """
-    The load half of the same guard. The fresh-net case above fires on the
+    """The load half of the same guard. The fresh-net case above fires on the
     derated RES because this fixture's loads ARE the native loads — so on its
-    own it would leave the load check untested.
-    """
+    own it would leave the load check untested."""
     import copy
 
     moved = copy.deepcopy(snapshot["net"])

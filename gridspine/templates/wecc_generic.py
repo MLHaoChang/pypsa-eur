@@ -40,7 +40,7 @@ from gridspine.templates.unit_params import (
 PATH = Path(__file__).parent / "data" / "wecc_generic.yaml"
 SOURCE = "assumed"
 NOT_FOR_SUBMISSION = (
-    "not for submission: generic WECC parameters (assumed) until OEM data"
+    "not for submission until replaced with OEM data: generic WECC parameters (assumed)"
 )
 
 #: block -> (key prefix, the unit_params fields it must cover exactly, PSS/E model).
@@ -49,6 +49,9 @@ BLOCKS = {
     "reec": ("reec_", REECA1_ICONS + REECA1_CONS, "REECA1"),
     "reecc": ("reec_", REECC1_ICONS + REECC1_CONS + REECC1_ONLY, "REECC1"),
     "repc": ("repc_", REPCA1_ICONS + REPCA1_CONS, "REPCA1"),
+    # A battery plant's REPCA1: the PV example's pmin = 0 and dup = 0 would block
+    # charging and any response to low frequency, so these two override "repc".
+    "repc_bess": ("repc_", ("repc_pmin", "repc_dup"), "REPCA1"),
 }
 
 
@@ -110,9 +113,11 @@ def load_generic(path=None) -> dict:
 def groups(battery: bool, plant: bool) -> tuple:
     """
     The blocks a converter takes: REGCA1 with REECC1 (battery) or REECA1,
-    plus REPCA1 when it is the plant's aggregated machine.
+    plus REPCA1 when it is the plant's aggregated machine (with the battery
+    overrides ``repc_bess`` for a battery plant).
     """
-    return ("regc", "reecc" if battery else "reec") + (("repc",) if plant else ())
+    plant_blocks = ("repc", "repc_bess") if battery else ("repc",)
+    return ("regc", "reecc" if battery else "reec") + (plant_blocks if plant else ())
 
 
 def converter_set(generic: dict, battery: bool, plant: bool) -> dict:

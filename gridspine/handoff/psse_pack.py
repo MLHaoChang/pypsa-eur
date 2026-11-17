@@ -69,14 +69,14 @@ from gridspine.templates.wecc_generic import (
 VERSION = 35
 SUBDIR = "psse_v35"
 BUSR_NOTE = "BUSR = BUS2, BUS1→BUS2 export: pending verification on first PSS/E load"
-#: The test battery's grid zero sequence when the caller gives no cases: the
-#: same Z0 = Z1 the .seq assumes for the grid, and X0/R0 at the grid's largest X/R.
 #: The .mon voltage band. The campus carries no planning band of its own, so
 #: the pack uses this one and lists it as assumed.
 MON_BAND_PU = (0.90, 1.10)
 MON_ASSUMED = (
     ".mon: voltage band 0.90-1.10 pu (assumed; no planning band in the campus data)"
 )
+#: The test battery's grid zero sequence when the caller gives no cases: the
+#: same Z0 = Z1 the .seq assumes for the grid, and X0/R0 at the grid's largest X/R.
 BATTERY_ASSUMED = (
     "test battery: grid |Z0|/|Z1| = 1.0 (as the .seq's grid X0 = X1)",
     "test battery: grid X0/R0 = the grid's largest X/R",
@@ -116,6 +116,11 @@ def grid_following(campus, unit_id) -> bool:
 
 def _battery_cases(net):
     g = net.ext_grid.iloc[0]
+    for col in ("rx_max", "rx_min"):
+        if not float(g[col]) > 0:
+            raise ContractError(
+                f"psse pack: the grid's {col}={float(g[col])!r} must be > 0 to build the test battery"
+            )
     # rx_max/rx_min belong to the max/min short-circuit cases, not an ordered range
     xr_min, xr_max = sorted((1.0 / float(g["rx_max"]), 1.0 / float(g["rx_min"])))
     cases = build_battery(
@@ -188,10 +193,9 @@ def write_psse_pack(
     )
 
     generic = load_generic() if generic is None else generic
-    machines = {
-        uid: (num, mid, mbase) for uid, num, mid, mbase, _ in machine_records(net)
-    }
-    sync = {uid for uid, *_, synchronous in machine_records(net) if synchronous}
+    records = machine_records(net)
+    machines = {uid: (num, mid, mbase) for uid, num, mid, mbase, _ in records}
+    sync = {uid for uid, *_, synchronous in records if synchronous}
     rows, assumed = {}, []
     for uid in machines:
         if uid in sync or not grid_following(campus, uid):
@@ -204,7 +208,9 @@ def write_psse_pack(
         assumed.append(
             {
                 "unit": uid,
-                "models": [BLOCKS[g][2] for g in groups(battery, is_plant)],
+                "models": list(
+                    dict.fromkeys(BLOCKS[g][2] for g in groups(battery, is_plant))
+                ),
                 "source": SOURCE,
                 "from": GENERIC_PATH.name,
             }
@@ -232,8 +238,17 @@ def write_psse_pack(
         _busr, bus1, bus2, ckt = repc[plant.unit_id]
         num, mid, mbase = machines[plant.unit_id]
         grid_mbase = next(
-            m for n, i, m in machines.values() if (n, i) == tuple(grid_machine)
+            (
+                m
+                for n, i, m in machines.values()
+                if grid_machine is not None and (n, i) == tuple(grid_machine)
+            ),
+            None,
         )
+        if grid_mbase is None:
+            raise ContractError(
+                f"psse pack: grid machine {grid_machine!r} is not a machine of the RAW"
+            )
         scripts = write_scripts(
             cases,
             out,
@@ -287,7 +302,8 @@ def write_psse_pack(
 def _readme(m) -> str:
     lines = [f"# {m['case']}: PSS/E v{m['psse_version']} study pack", ""]
     if m["not_for_submission"]:
-        lines += [f"**{m['not_for_submission'].capitalize()}.**", ""]
+        mark = m["not_for_submission"]
+        lines += [f"**{mark[:1].upper()}{mark[1:]}.**", ""]
     lines += ["## Files", "", *(f"- `{f}`" for f in m["files"]), ""]
     if "model_set" in m:
         ms = m["model_set"]

@@ -1,5 +1,4 @@
-"""
-The campus PSS/E handoff: one bundle per island hour (island plan I8, PSS/E path).
+"""The campus PSS/E handoff: one bundle per island hour (island plan I8, PSS/E path).
 
 Plan: ``docs/superpowers/plans/2026-10-07-campus-island-operation.md``.
 
@@ -166,11 +165,9 @@ def _gfm_rows(campus, uid, block, num, mid):
 
 
 def export_campus_bundle(outdir, campus, rows, hour, ledger=()) -> CampusBundle:
-    """
-    Write the bundle for one island ``hour`` (a label) from that hour's
+    """Write the bundle for one island ``hour`` (a label) from that hour's
     rows of the campus hourly table. ``ledger`` adds the caller's entries
-    to the README's.
-    """
+    to the README's."""
     case = f"{campus.name}_{hour}"
     out = Path(outdir) / case
     out.mkdir(parents=True, exist_ok=True)

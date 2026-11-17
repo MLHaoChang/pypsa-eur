@@ -16,6 +16,7 @@ Oracles:
 
 import copy
 import datetime
+import hashlib
 import json
 
 import pytest
@@ -142,7 +143,10 @@ def test_a_grid_following_battery_gets_reecc1(tmp_path):
 def test_readme_marks_not_for_submission_and_lists_every_assumed_group(tmp_path):
     _hc, m, out = _write(tmp_path, _gfl_bess(), plant=PLANT)
     readme = (out / "README.md").read_text()
-    assert f"**{NOT_FOR_SUBMISSION.capitalize()}.**" in readme
+    assert (
+        "**Not for submission until replaced with OEM data: "
+        "generic WECC parameters (assumed).**"
+    ) in readme
     assert "- BESS1: REGCA1, REECC1, every value assumed" in readme
     assert "- PV1: REGCA1, REECA1, REPCA1, every value assumed" in readme
 
@@ -359,3 +363,31 @@ def test_the_scripts_carry_the_grid_machines_own_mbase(tmp_path):
     assert scripts
     for name in scripts:
         assert line in (out / name).read_text().splitlines(), name
+
+
+def test_a_grid_machine_not_in_the_raw_is_refused(tmp_path):
+    hc, case, lines, _grid = _hour_campus(tmp_path)
+    for bad in [(999999, "1"), None]:
+        with pytest.raises(
+            ContractError, match=r"grid machine .* is not a machine of the RAW"
+        ):
+            PP.write_psse_pack(tmp_path / "pack", hc, case, lines, bad, plant=PLANT)
+
+
+@pytest.mark.parametrize("col", ["rx_max", "rx_min"])
+def test_a_zero_grid_rx_is_refused_when_building_the_battery(tmp_path, col):
+    hc, case, lines, grid = _hour_campus(tmp_path)
+    hc.net.ext_grid[col] = 0.0
+    with pytest.raises(ContractError, match=f"the grid's {col}=0.0 must be > 0"):
+        PP.write_psse_pack(tmp_path / "pack", hc, case, lines, grid, plant=PLANT)
+
+
+#: sha256 of the campus fixture's TEST_HUB_h18.dyr as origin/master 5400f7fd wrote it
+#: (owner decision GC04-DEFAULTS-1: the campus bundle's own files are unchanged).
+_CAMPUS_DYR_SHA256 = "605fa8911ebb98c5942d74069172afbf01713af3ca135f626845b206091923c4"
+
+
+def test_the_campus_bundle_dyr_bytes_are_masters(tmp_path):
+    _camp, b = bundle(tmp_path)
+    data = (b.path / f"{b.path.name}.dyr").read_bytes()
+    assert hashlib.sha256(data).hexdigest() == _CAMPUS_DYR_SHA256

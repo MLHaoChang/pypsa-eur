@@ -29,26 +29,29 @@ def _load(tmp_path, edit):
 def test_the_shipped_set_loads_with_hand_listed_block_sizes():
     g = WG.load_generic()
     # REGCA1 1 ICON + 14 CON; REECA1 5 + 45 (BUSR is written by the writer);
-    # REECC1 4 + 41 + the 4 SOC fields; REPCA1 3 + 27 (BUSR/BUS1/BUS2/CKT written).
+    # REECC1 4 + 41 + the 4 SOC fields; REPCA1 3 + 27 (BUSR/BUS1/BUS2/CKT written);
+    # the battery plant overrides REPCA1 pmin and dup.
     assert {k: len(v) for k, v in g.items()} == {
         "regc": 15,
         "reec": 50,
         "reecc": 49,
         "repc": 30,
+        "repc_bess": 2,
     }
 
 
 def test_groups_per_converter_kind():
     assert WG.groups(battery=False, plant=False) == ("regc", "reec")
     assert WG.groups(battery=True, plant=False) == ("regc", "reecc")
-    assert WG.groups(battery=True, plant=True) == ("regc", "reecc", "repc")
+    assert WG.groups(battery=True, plant=True) == ("regc", "reecc", "repc", "repc_bess")
+    assert WG.groups(battery=False, plant=True) == ("regc", "reec", "repc")
     g = WG.load_generic()
     assert WG.converter_set(g, False, True) == g["regc"] | g["reec"] | g["repc"]
 
 
 def test_the_mark_reads_as_the_owner_decided():
     assert WG.NOT_FOR_SUBMISSION == (
-        "not for submission: generic WECC parameters (assumed) until OEM data"
+        "not for submission until replaced with OEM data: generic WECC parameters (assumed)"
     )
     assert WG.SOURCE == "assumed"
 
@@ -62,6 +65,20 @@ def test_citations_follow_gc_text_1():
     assert ".gov" not in text
     for name, block in RAW["blocks"].items():
         assert block["source"].strip(), name
+    # EPRI is cited as a document only: no URL after its report number.
+    for line in text.splitlines():
+        if "3002006525" in line:
+            assert "http" not in line.split("3002006525", 1)[1], line
+
+
+def test_a_battery_plant_controller_can_charge_and_respond_to_low_frequency():
+    g = WG.load_generic()
+    bess = WG.converter_set(g, battery=True, plant=True)
+    pv = WG.converter_set(g, battery=False, plant=True)
+    assert bess["repc_pmin"] == -bess["repc_pmax"] == -1.0
+    assert bess["repc_dup"] == bess["repc_ddn"] == 20.0
+    # the PV plant keeps the WECC example's values
+    assert (pv["repc_pmin"], pv["repc_dup"]) == (0.0, 0.0)
 
 
 @pytest.mark.parametrize(
@@ -101,7 +118,7 @@ def test_citations_follow_gc_text_1():
         ),
         (
             lambda r: r.update(blocks=list(r["blocks"])),
-            "blocks must be exactly \\['reec', 'reecc', 'regc', 'repc'\\], got \\[",
+            "blocks must be exactly \\['reec', 'reecc', 'regc', 'repc', 'repc_bess'\\], got \\[",
         ),
         (
             lambda r: r["blocks"].update(repc="x"),
