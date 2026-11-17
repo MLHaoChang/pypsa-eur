@@ -14,6 +14,7 @@ A product bus that counts in tonnes (or carries ``mwh_per_t``) is shown per
 tonne, with electricity in kWh/t; any other product per MWh, electricity in
 MWh/MWh. Display only: the writer is the Link's own asset update.
 """
+
 from __future__ import annotations
 
 import math
@@ -44,8 +45,10 @@ def _flag(value) -> bool:
 
 
 def is_recipe_link(n, link: str) -> bool:
-    return _flag(_cell(n.links, link, "eh_process")) or str(
-        _cell(n.links, link, "eh_role") or "") == "electrolyser"
+    return (
+        _flag(_cell(n.links, link, "eh_process"))
+        or str(_cell(n.links, link, "eh_role") or "") == "electrolyser"
+    )
 
 
 def _carrier_label(n, carrier: str) -> str:
@@ -92,17 +95,30 @@ def link_recipe(n, link: str) -> dict | None:
         if e > 0:
             return None
         carrier = _bus_carrier(n, bus)
-        inputs.append({"port": i, "carrier": carrier, "label": _carrier_label(n, carrier),
-                       "value": -e * product_per / eff, "unit": bus_unit(n, bus) or "MWh"})
+        inputs.append(
+            {
+                "port": i,
+                "carrier": carrier,
+                "label": _carrier_label(n, carrier),
+                "value": -e * product_per / eff,
+                "unit": bus_unit(n, bus) or "MWh",
+            }
+        )
     product_carrier = _bus_carrier(n, product_bus)
     el = product_per / eff
     return {
         "label": recipe_label(n, link),
-        "product": {"carrier": product_carrier, "label": _carrier_label(n, product_carrier)},
+        "product": {
+            "carrier": product_carrier,
+            "label": _carrier_label(n, product_carrier),
+        },
         "per": "t" if per_t else "MWh",
         # Units of the product bus per recipe unit: what the writer turns rates back into efficiencies with.
         "product_per": product_per,
-        "electricity": {"value": el * 1000.0 if per_t else el, "unit": "kWh" if per_t else "MWh"},
+        "electricity": {
+            "value": el * 1000.0 if per_t else el,
+            "unit": "kWh" if per_t else "MWh",
+        },
         "inputs": inputs,
     }
 

@@ -1,5 +1,6 @@
 """Gap 03: a process's recipe as Guided section 2 shows it (services/recipes.py), and the
 section 2 list that carries it (flow_service._holds)."""
+
 from __future__ import annotations
 
 import pathlib
@@ -52,7 +53,16 @@ def _process(**over):
     for b, c in (("el", "AC"), ("p", "NH3"), ("h", "H2")):
         n.add("Bus", b, carrier=c)
     n.add("Carrier", "H2", nice_name="Hydrogen")
-    n.add("Link", "unit", bus0="el", bus1="p", bus2="h", efficiency=2.0, efficiency2=-3.0, carrier="Synthesis")
+    n.add(
+        "Link",
+        "unit",
+        bus0="el",
+        bus1="p",
+        bus2="h",
+        efficiency=2.0,
+        efficiency2=-3.0,
+        carrier="Synthesis",
+    )
     n.links["eh_process"] = over.pop("flag", True)
     for k, v in over.items():
         n.links.at["unit", k] = v
@@ -72,8 +82,15 @@ def test_only_an_exactly_true_process_flag_counts(flag):
     assert link_recipe(_process(flag=flag), "unit") is None
 
 
-@pytest.mark.parametrize("over", [{"efficiency": 0.0}, {"efficiency": -1.0}, {"efficiency": np.nan},
-                                  {"efficiency2": 0.5}])
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"efficiency": 0.0},
+        {"efficiency": -1.0},
+        {"efficiency": np.nan},
+        {"efficiency2": 0.5},
+    ],
+)
 def test_no_recipe_where_the_card_cannot_show_one(over):
     assert link_recipe(_process(**over), "unit") is None
 
@@ -84,11 +101,14 @@ def test_section_2_lists_the_carriers_then_the_recipes(ammonia):
     carriers = [str(c) for c in ammonia.carriers.index]
     rows, totals = flow_service._holds(ammonia, carriers, site)
     held = rows["carriers"]
-    assert [h["entity"] for h in held[:len(carriers)]] == carriers
-    recipes = held[len(carriers):]
+    assert [h["entity"] for h in held[: len(carriers)]] == carriers
+    recipes = held[len(carriers) :]
     assert {h["entity"] for h in recipes} == set(recipe_links(ammonia))
     assert all(h["component"] == "Link" and h["recipe"]["label"] for h in recipes)
     assert totals["carriers"] == len(carriers) + len(recipes)
     # Section 5 keeps the same Links as assets, with their size and no recipe.
     assets = {h["entity"]: h for h in rows["assets"]}
-    assert "recipe" not in assets["haber_bosch"] and assets["haber_bosch"]["field"] == "p_nom"
+    assert (
+        "recipe" not in assets["haber_bosch"]
+        and assets["haber_bosch"]["field"] == "p_nom"
+    )
