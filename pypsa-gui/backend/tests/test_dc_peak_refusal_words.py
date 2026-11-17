@@ -173,8 +173,14 @@ def test_a_refusal_with_gensets_searches_no_it_load(mode, monkeypatch):
             "phases": [{"cod": "2030-01-01", "it_mw": 20.0}],
         },
     )
+    builds = []
     monkeypatch.setattr(
-        T, "_peak_over", lambda *a, **k: (NS(snapshots=pd.DatetimeIndex([])), [row])
+        T,
+        "_peak_over",
+        lambda *a, **k: (
+            builds.append(a[1].backup.mode)
+            or (NS(snapshots=pd.DatetimeIndex([])), [row])
+        ),
     )
     monkeypatch.setattr(
         T, "_largest_fitting_it", lambda *a, **k: pytest.fail("searched")
@@ -182,6 +188,8 @@ def test_a_refusal_with_gensets_searches_no_it_load(mode, monkeypatch):
     with pytest.raises(DcLoadError) as exc:
         T._check_dc_peak("eh_datacenter", spec)
     assert str(exc.value).endswith("Raise the connection after you create the project.")
+    # Nor is another mode built to be named: only the entered one is checked.
+    assert builds == [mode]
 
 
 def test_hybrid_is_named_only_where_it_builds():
@@ -226,3 +234,9 @@ def test_the_search_brackets_from_the_current_it_load(monkeypatch):
 def test_the_staged_refusal_names_each_mode_that_builds(alts, want):
     words = T._peak_ways_out(_spec("bess"), None, single=False, alts=alts)
     assert want in words, words
+
+
+@pytest.mark.parametrize("mode", ["genset", "hybrid"])
+def test_only_a_battery_refusal_names_another_mode(mode):
+    words = T._peak_ways_out(_spec(mode), None, single=True, alts=("hybrid", "genset"))
+    assert "Pick" not in words and "backup" not in words, words
