@@ -300,7 +300,11 @@ def test_injections_shunts_and_both_short_circuit_cases(written):
 
 def _own(row):
     """A merged TypHmccur row's own (order, amplitude, alpha) entries: those with a non-zero amplitude."""
-    return [(h, a, al) for h, a, al in zip(row["norder"], row["ampl"], row["alpha"]) if a != 0]
+    return [
+        (h, a, al)
+        for h, a, al in zip(row["norder"], row["ampl"], row["alpha"])
+        if a != 0
+    ]
 
 
 def test_each_source_carries_its_units_spectrum_and_a_missing_one_is_listed(written):
@@ -474,9 +478,13 @@ def test_the_tap_side_is_written(tmp_path):
 # ── GC-15: one TypHmccur block over the union of orders (GK A2) ──
 
 
-def test_every_harmonic_source_shares_one_block_over_the_union_of_orders(written, tmp_path):
-    """Neither a repeated header nor padded fields: one header, every row the same SIZEROW; an order a source
-    does not name is 0 amplitude and 0 alpha, physically the same as absent."""
+def test_every_harmonic_source_shares_one_block_over_the_union_of_orders(
+    written, tmp_path
+):
+    """
+    Neither a repeated header nor padded fields: one header, every row the same SIZEROW; an order a source
+    does not name is 0 amplitude and 0 alpha, physically the same as absent.
+    """
     net = fixture_net()
     path = tmp_path / "u.dgs"
     write_dgs(net, path, title="fixture", harmonics=HARMONICS, converters=["bess"])
@@ -509,8 +517,14 @@ def test_the_merge_leaves_each_sources_own_entries_unchanged(written):
 
 def test_one_block_per_class_in_the_whole_file(written, tmp_path):
     path = tmp_path / "b.dgs"
-    write_dgs(fixture_net(), path, title="fixture", harmonics=HARMONICS, converters=["bess"])
-    heads = [ln.split(";")[0] for ln in path.read_text(encoding="utf-8").splitlines() if ln.startswith("$$")]
+    write_dgs(
+        fixture_net(), path, title="fixture", harmonics=HARMONICS, converters=["bess"]
+    )
+    heads = [
+        ln.split(";")[0]
+        for ln in path.read_text(encoding="utf-8").splitlines()
+        if ln.startswith("$$")
+    ]
     assert len(heads) == len(set(heads))
 
 
@@ -555,14 +569,16 @@ def test_a_shunt_with_active_power_is_listed_with_its_value_and_reason(tmp_path)
     net = fixture_net()
     net.shunt.loc[0, "p_mw"] = 0.02
     exp = write_dgs(net, tmp_path / "s.dgs")
-    assert exp.not_written.to_dict("records") == [{
-        "pp_table": "shunt",
-        "pp_name": "cap",
-        "dgs_name": "cap",
-        "attribute": "p_mw",
-        "value": 0.02,
-        "reason": "active power not written: no verified attribute",
-    }]
+    assert exp.not_written.to_dict("records") == [
+        {
+            "pp_table": "shunt",
+            "pp_name": "cap",
+            "dgs_name": "cap",
+            "attribute": "p_mw",
+            "value": 0.02,
+            "reason": "active power not written: no verified attribute",
+        }
+    ]
 
 
 @pytest.mark.parametrize("p", [float("nan"), float("inf")])

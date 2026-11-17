@@ -80,7 +80,14 @@ HARMONIC_COLUMNS = (
     "orders",
 )
 #: GC-16: a value the file cannot carry under a verified attribute name, listed instead of guessed.
-NOT_WRITTEN_COLUMNS = ("pp_table", "pp_name", "dgs_name", "attribute", "value", "reason")
+NOT_WRITTEN_COLUMNS = (
+    "pp_table",
+    "pp_name",
+    "dgs_name",
+    "attribute",
+    "value",
+    "reason",
+)
 SHUNT_P_NOT_WRITTEN = "active power not written: no verified attribute"
 NO_SPECTRUM = "no spectrum"
 WITH_SPECTRUM = "spectrum"
@@ -354,7 +361,9 @@ def write_dgs(
         dname = nm("ElmLne", ln["name"] if _val(ln, "name", None) else f"line_{i}")
         vn = float(net.bus.at[ln["from_bus"], "vn_kv"])
         b_us = 2 * math.pi * f_hz * float(ln["c_nf_per_km"]) * 1e-3  # nF/km -> uS/km
-        g_us = float(_val(ln, "g_us_per_km", 0.0))  # GC-16: written even when 0, so every row has it
+        g_us = float(
+            _val(ln, "g_us_per_km", 0.0)
+        )  # GC-16: written even when 0, so every row has it
         cable = str(_val(ln, "type", "ol")) == "cs"
         rows["TypLne"].append(
             (
@@ -536,11 +545,26 @@ def write_dgs(
         eid = next(ids)
         dname = nm("ElmShnt", sh["name"] if _val(sh, "name", None) else f"shunt_{i}")
         q = float(sh["q_mvar"])  # pandapower load convention: negative is capacitive
-        p = float(sh["p_mw"]) if "p_mw" in sh.index else 0.0  # a NaN is refused below, never read as 0
+        p = (
+            float(sh["p_mw"]) if "p_mw" in sh.index else 0.0
+        )  # a NaN is refused below, never read as 0
         if not math.isfinite(p):
-            raise ContractError(f"DGS: shunt {dname!r} active power p_mw is not finite ({p})")
-        if p != 0.0:  # GK A2 option 1: no public source names the shunt's loss attribute, so it is listed
-            not_written.append(("shunt", str(_val(sh, "name", "")), dname, "p_mw", p, SHUNT_P_NOT_WRITTEN))
+            raise ContractError(
+                f"DGS: shunt {dname!r} active power p_mw is not finite ({p})"
+            )
+        if (
+            p != 0.0
+        ):  # GK A2 option 1: no public source names the shunt's loss attribute, so it is listed
+            not_written.append(
+                (
+                    "shunt",
+                    str(_val(sh, "name", "")),
+                    dname,
+                    "p_mw",
+                    p,
+                    SHUNT_P_NOT_WRITTEN,
+                )
+            )
         max_step = int(_val(sh, "max_step", 1))
         rows["ElmShnt"].append(
             (

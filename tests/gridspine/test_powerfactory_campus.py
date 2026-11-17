@@ -194,7 +194,11 @@ def test_each_source_equals_its_units_spectrum_from_the_harmonic_screen(run, cas
         _, spectrum, _, _ = hm.unit_inputs(units.loc[link].to_dict())
         typ = by_id[next(r for r in dgs["ElmLod"] if r["loc_name"] == elm)["phmc"]]
         # GC-15: one block over every source's orders; a source's own entries are its non-zero ones.
-        own = [(h, a, al) for h, a, al in zip(typ["norder"], typ["ampl"], typ["alpha"]) if a != 0]
+        own = [
+            (h, a, al)
+            for h, a, al in zip(typ["norder"], typ["ampl"], typ["alpha"])
+            if a != 0
+        ]
         assert {h: a for h, a, _ in own} == spectrum
         assert [al for _, _, al in own] == [hm.alpha(h) for h, _, _ in own]
 
