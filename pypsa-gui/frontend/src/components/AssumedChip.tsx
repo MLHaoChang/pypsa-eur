@@ -31,7 +31,7 @@ export const ASSUMED_CHIP_LABELS: Record<AssumedState, string> = {
 const TONE: Record<AssumedState, string> = {
   assumed: 'bg-warn/15 text-warn',
   confirmed: 'bg-success/10 text-success',
-  typed: 'bg-accent/10 text-accent',
+  typed: 'bg-muted/15 text-text',
 }
 
 const CHIP = 'inline-flex items-center whitespace-nowrap rounded px-1'
