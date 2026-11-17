@@ -309,3 +309,16 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A bit-identity claim is tested with an inexact operand pair (e.g. 0.187/0.4), exact `==`, at every site. Replacing `x / y` with `x * (1/y)` is not bit-identical (#1538 F1).
 - A race fix is pinned at the call site that reads the shared value, not only in the callee. Mutate each call site (#1548 F1, #1543 F1-t).
 - A guard with two parts ("differs from base" AND "equals new") needs a case where only the first fails. A test that trips the second part first leaves the first unkilled (#1544 F1/F2).
+
+## Standing rulings (GK B 60, GK B 61 and GK B2 1, recorded 2026-11-17)
+
+- A dependency or derivation table is pinned by exact equality per knockout (#1559).
+- Dedupe is tested with a real duplicate, backend and frontend (#1559).
+- A read-back applies the write path's normalisation before comparing (#1555).
+- A validator checks at the writer's parameter, e.g. the effective discount rate (#1555).
+- A vitest/jsdom "no unhandled rejection" claim is tested via window `unhandledrejection` or by asserting the rejection is consumed (#1556 F6).
+- A retry counter resets only on progress that survives dedupe (#1556).
+- One targeted mutant per added guard replaces a multi-hour full mutant sweep (#1544, #1561).
+- A display scale the client applies before a write, where the scale depends on server state (e.g. a bus unit), is enforced on the server: the write carries the basis the client assumed and the server refuses a mismatch against the post-patch state with a typed 409. Cache invalidation alone never closes it: races, revision rewinds on restore and in-form edits each defeated it (#1565, GK B2).
+- A FastAPI `Header`, `Query` or `Body` parameter on a route function that tests or code call directly is declared `Annotated[T, Header(...)] = default`, never `= Header(default)`; a direct call otherwise receives the FieldInfo object (#1565 B1, GK B2).
+- A card may name a bound item by a label in place of its engine id only when labels are unique (case-insensitive, non-blank, refused otherwise) and the digest binds id and label together. Content hashes may stay off the card when the card names each item the hash covers; the hash binds the identity of named content. A bound scalar the card does not show (e.g. a cap) is shown, or not bound (#1575, GK B 61).

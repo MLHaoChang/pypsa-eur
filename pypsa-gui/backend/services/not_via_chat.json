@@ -1,0 +1,5 @@
+{
+ "$comment": "Features chat cannot do (services/not_via_chat.py). Entries here and in not_via_chat.d/ follow NOT_VIA_CHAT there; see the folder's README (RETRO-FRAG-1). Shipped with the app: pypsa-gui.spec lists this file and the folder.",
+ "entries": [],
+ "goals": {}
+}
