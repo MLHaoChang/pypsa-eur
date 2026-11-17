@@ -26,6 +26,7 @@ from gridspine.handoff.test_battery import (
     battery_json,
     contract_channels,
 )
+from gridspine.readback.channels import STATUS_NOT_READ, read_csv
 from gridspine.readback.pack import (
     CONNECTED_READ,
     KNOWN_CONTRACT_VERSIONS,
@@ -39,6 +40,7 @@ from tests.gridspine.test_pack import (
     RATINGS,
     T,
     _by_id,
+    _csv,
     _emt_pack,
     _pscad,
     _ride_through,
@@ -184,6 +186,45 @@ def test_a_zero_before_the_event_is_not_judged_as_the_trip(tmp_path):
     assert _rows(c)["stays_connected"]["status"] == "pass"
 
 
+def test_a_zero_exactly_at_t_event_is_the_trip(tmp_path):
+    # the window is closed at t_event: a sample at 0.2 s is judged
+    _, c = _judge(
+        tmp_path, F_STEP, _f_step_channels(), _status((0.2, 0.0), (0.201, 1.0))
+    )
+    sc = _rows(c)["stays_connected"]
+    assert sc["status"] == "fail" and "disconnected at 0.2 s" in sc["detail"]
+
+
+def test_a_v2_pass_row_carries_no_missing_channel_reason(tmp_path):
+    _, c = _judge(tmp_path, F_STEP, _f_step_channels(), _status())
+    sc = _rows(c)["stays_connected"]
+    assert sc["status"] == "pass"
+    assert NO_CONNECTED not in sc["detail"] and "None" not in sc["detail"]
+    assert not any(
+        "connected" in r["detail"] for r in c["rows"] if r["check"] != "stays_connected"
+    )
+
+
+def test_one_stays_connected_row_per_case(tmp_path):
+    for case, ch in ((FAULT, _fault_channels()), (F_STEP, _f_step_channels())):
+        _, c = _judge(tmp_path / case.kind, case, ch, _status())
+        assert [r["check"] for r in c["rows"]].count("stays_connected") == 1, case.kind
+
+
+@pytest.mark.parametrize("reader", ["csv", "pscad"])
+def test_a_v2_result_without_connected_is_unknown_naming_it(tmp_path, reader):
+    pack = _pack2(tmp_path, [F_STEP])
+    if reader == "csv":
+        _csv(pack / "results" / f"{F_STEP_ID}.csv", _f_step_channels())
+    else:
+        _pscad(pack / "results", F_STEP_ID, _f_step_channels())
+    c = _by_id(judge_pack(pack, PROFILE, RATINGS))[F_STEP_ID]
+    sc = _rows(c)["stays_connected"]
+    assert sc["status"] == "unknown"
+    assert "the result has no 'connected' channel" in sc["detail"]
+    assert _rows(c)["droop"]["status"] == "pass"
+
+
 # --- D-3: unit and value gates ---------------------------------------------------------------------------------
 
 
@@ -224,6 +265,34 @@ def test_a_literal_minus_one_in_a_pscad_result_is_refused(tmp_path):
     assert c["status"] == "unknown" and c["rows"] == []
     assert c["detail"].startswith(f"{FAULT_ID}.inf unreadable: ")
     assert "got -1.0 at row 400" in c["detail"]
+
+
+def test_connected_in_pu_with_a_blank_cell_is_refused_not_read_as_unread(tmp_path):
+    # blank_status applies to a 'status' unit only; any other blank is refused
+    _, c = _judge(tmp_path, FAULT, _fault_channels(), _status((0.3, None)), unit="pu")
+    assert c["status"] == "unknown" and c["rows"] == []
+    assert "unreadable" in c["detail"] and "missing or non-numeric value" in c["detail"]
+
+
+def test_a_status_channel_not_named_blank_status_refuses_a_blank(tmp_path):
+    path = tmp_path / "r.csv"
+    _write(path, _f_step_channels(), _status((0.3, None)))
+    assert read_csv(path, blank_status=("connected",)).channel("connected")[300] == (
+        STATUS_NOT_READ
+    )
+    with pytest.raises(ContractError, match="missing or non-numeric value at row 300"):
+        read_csv(path)
+
+
+def test_a_pscad_connected_in_pu_reads_the_unit_gate_not_unreadable(tmp_path):
+    pack = _pack2(tmp_path, [FAULT])
+    ch = dict(_fault_channels())
+    ch["connected"] = ("pu", np.array(_status((0.4, -1.0), (0.41, 1.0))))
+    _pscad(pack / "results", FAULT_ID, ch)
+    c = _by_id(judge_pack(pack, PROFILE, RATINGS))[FAULT_ID]
+    sc = _rows(c)["stays_connected"]
+    assert sc["status"] == "unknown"
+    assert "'connected' is in 'pu', expected 'status'" in sc["detail"]
 
 
 # --- D-2: a v1 pack never passes stays_connected ---------------------------------------------------------------
@@ -284,6 +353,8 @@ def test_a_v1_pack_reads_unknown_on_every_stays_connected_row(tmp_path):
         sc = _rows(c)["stays_connected"]
         assert sc["status"] == "unknown", kind
         assert "no connected channel (contract v1)" in sc["detail"], kind
+        others = [r for r in c["rows"] if r["check"] != "stays_connected"]
+        assert others and not any(NO_CONNECTED in r["detail"] for r in others), kind
     assert not any(c["status"] == "pass" for c in cases.values())
 
 
