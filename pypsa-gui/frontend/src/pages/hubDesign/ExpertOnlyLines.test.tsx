@@ -1,5 +1,5 @@
 // Guided names each field only Expert edits, with its value, and one
-// "Open in Expert >" per Expert place that leaves a way back (design §3.5).
+// "Open in Expert ›" per Expert place that leaves a way back (design §3.5).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -155,7 +155,8 @@ describe('ExpertOnlyLines', () => {
       const links = box.querySelectorAll('button')
       expect(links).toHaveLength(1)
       expect(links[0].getAttribute('data-testid')).toBe(`expert-only-open-${Object.keys(lines)[0]}`)
-      expect(links[0].textContent).toBe('Open in Expert >')
+      expect(links[0].textContent).toBe('Open in Expert ›')
+      expect(links[0].textContent).not.toContain('>') // the Guided link arrow is U+203A, never ASCII
       expect(box.textContent).not.toContain('—')
     })
   }
@@ -172,7 +173,7 @@ describe('ExpertOnlyLines', () => {
     for (const [section, keys] of Object.entries(expected)) {
       const { unmount } = mount(section as FlowSectionId)
       const box = await settled(section as FlowSectionId)
-      for (const k of keys) expect(lineText(k)?.replace('Open in Expert >', '')).toMatch(/: not set$/)
+      for (const k of keys) expect(lineText(k)?.replace('Open in Expert ›', '')).toMatch(/: not set$/)
       expect(box.textContent).not.toContain('—')
       unmount()
     }
@@ -222,7 +223,7 @@ describe('ExpertOnlyLines', () => {
     expect(lineText('representative_weeks')).toBe('Representative weeks: no, a chronological year')
   })
 
-  it('"Open in Expert >" opens the place in Expert and leaves a way back to the section', async () => {
+  it('"Open in Expert ›" opens the place in Expert and leaves a way back to the section', async () => {
     setValues()
     useUIStore.setState({ activeSection: 'results' })
     mount('results')

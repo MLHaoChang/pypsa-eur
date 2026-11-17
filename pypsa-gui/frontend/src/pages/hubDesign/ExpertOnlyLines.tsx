@@ -20,7 +20,7 @@ import { buildScenarioForest, collectSubtree } from '../ScenariosPanel'
 import { openFlowTarget, openSectionInExpert, withReturnFrom } from '../../layout/flowNavigation'
 
 // The fields of a Guided section that only Expert edits (design §3.5): each is
-// named with its value, and one "Open in Expert >" per Expert place goes there,
+// named with its value, and one "Open in Expert ›" per Expert place goes there,
 // leaving "Back to <section>" (GAP03-ADD-1). Read-only and frontend-only: the
 // lines add no flow item and change no section state.
 
@@ -253,7 +253,7 @@ function Lines({ section, useLines }: { section: FlowSectionId; useLines: () => 
                 <button type="button" data-testid={`expert-only-open-${l.key}`} onClick={link.open}
                   aria-label={link.label}
                   className="shrink-0 text-[11px] text-text underline">
-                  {'Open in Expert >'}
+                  {'Open in Expert ›'}
                 </button>
               )}
             </li>
