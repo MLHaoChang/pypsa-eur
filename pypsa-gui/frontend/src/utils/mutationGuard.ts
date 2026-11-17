@@ -77,6 +77,10 @@ export function readOnlyMessage(reason: ReadOnlyReason): string | null {
 // Still ONE place per surface-kind that maps a reason to English: the banners
 // call this, everything that speaks about a refused mutation calls the table
 // above. `holderEmail` is ignored for every reason but 'locked-by-user'.
+/** The run strip's read-only line while this project is being solved (owner
+ * decision RUN-READONLY-1; UX plan GO 3 and 4: one line, a colon, no dash). */
+export const RUN_READ_ONLY_LINE = 'Being solved: edits open again when the run ends.'
+
 export function readOnlyBannerMessage(
   reason: ReadOnlyReason,
   holderEmail: string | null = null,

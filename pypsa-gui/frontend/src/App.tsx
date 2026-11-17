@@ -50,6 +50,7 @@ import RescaleDialogHost from './components/RescaleDialogHost'
 import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
+import RunStrip from './components/runStatus/RunStrip'
 import ProjectMismatchBanner from './components/ProjectMismatchBanner'
 import { ProjectMismatchWatcher } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -702,6 +703,11 @@ export default function App() {
         {/* Renders only when another user holds this project's edit lock
             (auth mode). Hidden otherwise so it takes no vertical space. */}
         <LockBanner />
+
+        {/* ── Run strip (run progress) ───────────────────────────────── */}
+        {/* While this project's run is queued or going on: what runs, how
+            far, the estimate, and the read-only line while it is solved. */}
+        <RunStrip />
 
         {/* ── Tab / backend project mismatch (A2) ───────────────────── */}
         {/* Renders only while this tab's project and the backend's binding

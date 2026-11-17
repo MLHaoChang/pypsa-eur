@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): While a project's run is queued or going on, a strip at the top of the tab says which run, its stage and steps, the time since it started and, after two comparable past runs, about how long is left; while the project is read-only for its solve, the same strip says so. The header's status pill no longer reads "Idle" while a Guided reliability study runs.

@@ -3,7 +3,7 @@
 
 # Run progress, ETA and finish notification
 
-Status: needs-triage (spec under review by GK B and UX)
+Status: ready-for-agent (GK B plan GO slice 1; UX plan GO with conditions below)
 Type: spec
 Owner decision: UX-NEXT-1 (2026-11-17), with HOLISTIC-1, EXPERT-GUIDED-1, RAW-NAMES-1, DENSITY-1
 
@@ -54,12 +54,18 @@ No raw tool or kind names on screen (RAW-NAMES-1): never `gridspine`,
 | `gridspine` | "Grid study" | Waiting in queue → Running → Saving results (study stages later, slice 5) |
 | `profile_gen` | "Generating profiles" | Waiting in queue → Generating |
 | AC power flow (foreground) | "Power flow" | Running (phase text later, slice 5) |
+| Guided goal study (`eh_study`, not a queue job) | "Reliability study" | Studying *step 12 of up to 30* (its `pipeline.solves_consumed` / `budget_solves`) |
 
 Expert adds, on the same line: the step count for staged work (*12 of 35*) and a
 "Log" link to the existing log stream. Guided shows stage + time only.
 
 The bar is **indeterminate** unless an estimate exists (section 2). We never
 draw a percentage we cannot back.
+
+**One place.** The header's existing status pill (today "Idle" / "Running…" /
+"Queued #n", and "Idle" while a Guided study runs: walkthrough J4/J5) becomes
+the status line. It reflects every run of the current project, queue job or
+study, so Guided and Expert show the same state. No second element.
 
 ## 2. ETA
 
@@ -82,6 +88,10 @@ Never a negative or "0 min left".
 **Not used:** runs of other projects (model size differs too much), failed or
 aborted runs, runs whose `started_at` is missing. Changing the solver mode
 starts a fresh history.
+
+**Goal study:** no estimate. Its step budget is an upper bound (it can stop
+early), it has no stored history, and it runs 12–33 s on the shipped sites
+(walkthrough). It shows the step count and elapsed time only.
 
 **Campus per-stage estimate** (slice 5): store stage durations on the job, then
 estimate the remaining stages instead of the whole run.
@@ -114,17 +124,21 @@ Fires once per job, only for jobs the signed-in user started
 
 - The whole app: navigation, other projects (edit, save, run — they queue),
   results of other projects, Guided chapters, chat.
-- The running project: read-only, as today, with the reason on every blocked
-  control ("Being solved — edits open again when the run ends"). Its previous
-  results stay readable, marked "being re-run".
+- The running project: read-only, as today (owner decision RUN-READONLY-1,
+  2026-11-17), with one visible line at the top of the tab ("Being solved:
+  edits open again when the run ends"); blocked controls refer to it (UX 4).
+  Its previous results stay readable, shown as "Out of date" with a visible
+  "Re-running" tag (ResultState words, UX 5).
 - A **Runs indicator** in the header (count of my active runs across projects,
   amber while any run is active) opens the queue panel. It replaces the need to
   keep the queue panel open to see progress.
 - Nothing modal. Abort stays on the Run button.
 
-Open question (to the owner via the coordinator): may the user keep editing the
-running project as a draft that applies after the run? This spec keeps
-read-only; changing it is a separate package.
+Owner decision RUN-READONLY-1: read-only, explained. Drafting edits during a
+run is not in this package.
+
+The package also owns the lasting header "Open results" link after a solve
+(audit #25, handed over from the next-step flow).
 
 ## 5. Chat and voice
 
@@ -157,10 +171,44 @@ sees a named stage and elapsed time from start to end; an estimate after two
 runs of the same project; one notification on finish or fail in the tab or the
 OS; and can work elsewhere in the app throughout.
 
+## UX plan GO conditions (UX reviewer, 2026-11-17)
+
+- (a) Header is fine with a stated truncation order and real shots at 1280 and
+  1024 px. Drop order: ETA, then step count and Log link, then stage name;
+  elapsed and the project/run name stay. Cut text still exists in the Runs
+  panel. If it does not fit at 1024 px, a strip under the header instead, not
+  both. Elapsed timer not announced; only a stage change goes to a
+  `role="status"` region.
+- 1 Guided: the Runs indicator opens a popover/in-place drawer listing the runs
+  (the Solve queue is Expert-only); "See why" shows the error there in plain
+  words. Open results: `openFlowTargetInPlace` (Guided) / `openFlowTarget`
+  (Expert), always through `withReturn`. A finished run never jumps by itself.
+- 2 Runs indicator not colour alone: visible count + "N runs active", with a key.
+- 3 Colons, not em dashes: "Campus study finished: Project X · 6 min",
+  "Optimisation failed: Project X", "first runs: no estimate yet",
+  "usually about 6 min" (not "~6").
+- 4 Read-only reason: one line at the top of the tab, not on every control.
+- 5 "Out of date" + visible "Re-running" tag with a key; reports and exports
+  made during a re-run carry the state in their caption (#1421).
+- 6 Browser notification opt-in line says "Shows the project name in the
+  notification"; the link stays until a choice; after a denial a muted
+  "Blocked in this browser" under user preferences, named in both modes.
+- 7 Finish toast auto-dismisses; failed and interrupted stay; all
+  `role="status"`; "Run again: Campus study" with a double-click guard.
+- 8 Indeterminate bar and animation honour `prefers-reduced-motion`;
+  skeleton/busy rules apply while the line loads.
+- 9 Chat/voice line uses the toast's words; slice 6 ETA in the same words.
+- 10 Shots per UI slice, Guided and Expert: queued with position, running
+  with ETA, unknown ETA, over-run, Runs indicator open, each toast, away
+  summary, read-only line, narrow widths; hidden-tab notification text in the PR.
+
 ## Coordination
 
 - UI-MODERN-1 04 ("solver-stage progress") overlaps slice 2/5: whoever holds it
   reuses this status line rather than adding a second one.
+- Guided results legibility (session_01G7qCuinh1KruE32usEJvz7) owns
+  `ResultsCard.tsx` and the chapter tiles' running lines; "Open results" lands
+  on its section-10 headline.
 - Live-voice issue 11 owns detached progress for chat/voice; slice 6 plugs into it.
 - RunMonitor (assistant runs) keeps its own card; its solves show up in the
   Runs indicator like any other job.

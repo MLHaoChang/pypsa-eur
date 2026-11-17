@@ -8,15 +8,30 @@
 // That is the exact sentence the reason widening exists to stop being a lie.
 //
 // Revert the `readOnlyBannerMessage(reason, holder)` wiring in LockBanner.tsx
-// and the solving case below fails.
+// and the lock cases below fail.
+//
+// Run progress: the solving reason is said once, by the run strip under the
+// header (`runStatus/RunStrip`), next to the run's progress; LockBanner yields
+// to it. The solving cases render both surfaces, as the app does.
 import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it } from 'vitest'
 import LockBanner from './LockBanner'
+import RunStrip from './runStatus/RunStrip'
 import { useUIStore } from '../store/uiStore'
 import { WRITABLE } from '../utils/lockState'
 
 function bannerText(): string {
   return screen.getByRole('status').textContent ?? ''
+}
+
+/** What the user reads across the read-only banner and the run strip. */
+function renderBoth(): string {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const { container } = render(
+    <QueryClientProvider client={qc}><LockBanner /><RunStrip /></QueryClientProvider>,
+  )
+  return container.textContent ?? ''
 }
 
 beforeEach(() => {
@@ -35,11 +50,13 @@ describe('LockBanner', () => {
     expect(useUIStore.getState().readOnlyReason).toBe('solving')
     expect(useUIStore.getState().lockHolderEmail).toBeNull()
 
-    render(<LockBanner />)
+    const text = renderBoth()
 
-    expect(bannerText()).toMatch(/solving in the queue/i)
-    expect(bannerText()).not.toMatch(/another user is editing/i)
-    expect(bannerText()).not.toMatch(/lock is released/i)
+    expect(text).toMatch(/being solved: edits open again when the run ends/i)
+    expect(text).not.toMatch(/another user is editing/i)
+    expect(text).not.toMatch(/lock is released/i)
+    // Said once: the banner yields, so the sentence is not shown twice.
+    expect(text.match(/solv/gi)).toHaveLength(1)
   })
 
   it('names the holder when another user actually holds the edit lock', () => {
@@ -72,9 +89,9 @@ describe('LockBanner', () => {
     })
     useUIStore.getState().setSolvingReadOnly(true)
 
-    render(<LockBanner />)
+    const text = renderBoth()
 
-    expect(bannerText()).toMatch(/solving in the queue/i)
-    expect(bannerText()).not.toMatch(/ada@example\.com/)
+    expect(text).toMatch(/being solved/i)
+    expect(text).not.toMatch(/ada@example\.com/)
   })
 })
