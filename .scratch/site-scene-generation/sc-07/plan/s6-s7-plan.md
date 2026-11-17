@@ -145,3 +145,18 @@ primary, Discard plain.
 6. "Not applied" names plain building labels only (RAW-NAMES-1).
 7. Shots in light and dark, both modes, real app with route mocks (#1470): return open with and without unknowns, after Apply, after Discard, card absent, the Resume line.
 8. The eyebrow is the flow section name with the 15 px title (UI-COHESION-1); "›" links ink and underlined, red only for Apply and the active tab.
+
+## 2026-11-17: GK B3 plan GO with changes (S6a, S6b, S7, S6d)
+
+Q1: two PRs, S6a then S6b. Q2: an unbound building stays, with its `unbound_target` leaves.
+
+- P1. Availability comes from `results.gate` alone; stale results carry no numbers. Any `solve_freshness()` words are read in the same `get_lock()` window with the same ctx. Test: stale → every leaf unavailable with the gate's reason and a stale flag. Hand mutant "availability from solve_freshness" dies.
+- P2. The route's lock order, not nested: `store.project_lock` → `read_scene` → release, then `get_lock()` for open_network, parse_query, gate and project. Reuse chat.py's `scope` / `_site_known` binding.
+- P3. `building` matches `feature_words(scene)` from that same read, exact and case-insensitive. An ambiguous or unknown word → `invalid_input`. Both tested.
+- P4. Caps cut whole items, never a leaf's reason; `truncated` names each cut. Boundary tests at cap and cap+1 for items and bytes.
+- P5. A viewer can call it, as they can GET the route; viewer test, `test_project_route_acl_policy`.
+- P6. At the trial merge: route chat disposition, route ACL policy, golden coverage, inventory, route parity and control matrix checks. A new error kind goes in a fragment.
+- P7. PR body: Journey fit, mutants.py survivors, hand mutants with their killing tests.
+- S6b asserts the tool results against an independent `n.*_t` read, and the stale step asserts the gate's reason with no numbers.
+- S7 as planned.
+- S6d: `my_previews` stays `CHAT_ACTIONS` only. A pending return is a separate describe-only field on `site_scene_read` (owner-scoped, capped), `ROUTE_ONLY_ACTIONS` unchanged, with a test that no chat path applies it. The coordinator decides who builds it.
