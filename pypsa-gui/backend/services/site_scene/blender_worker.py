@@ -31,8 +31,10 @@ process group. Exit statuses map to typed kinds: 137 is the memory cap (or a
 kill from outside), 152 is SIGXCPU, and 153 is SIGXFSZ. Outputs are read
 through `O_NOFOLLOW`, regular files only, under a size cap.
 
-The caps are conservative placeholders until the SC06-CI-1 measured run lands
-(GK B, B5). They are stated in `Caps` and in the PR.
+The caps are confirmed against the SC06-CI-1 measured run (GK B, B5; run
+44013964974 on 6b559a5e): a 3-node round trip took 2.8 s wall, 2.7 s CPU and
+330 MiB peak RSS, and wrote 0.5 MiB. The caps leave room for larger scenes and
+container start-up. They are stated in `Caps` and in issue 06.
 """
 
 from __future__ import annotations
@@ -107,7 +109,7 @@ class WorkerError(Exception):
 
 @dataclass(frozen=True)
 class Caps:
-    """Conservative until the SC06-CI-1 numbers land."""
+    """Confirmed against the SC06-CI-1 run: about 45x its CPU, 6x its RSS, 65x its wall time."""
 
     wall_s: float = 180.0
     cpu_s: int = 120

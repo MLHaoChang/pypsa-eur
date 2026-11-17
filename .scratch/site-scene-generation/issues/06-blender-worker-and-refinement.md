@@ -57,7 +57,7 @@ Was: `needs-triage — specification proposed; not implemented`. Owner question 
 - GK B plan GO, with conditions B1–B7 for slice (a) and R1–R2 for slice (b):
   - Q1: always a container wrapper (`--network none`, read-only root, non-root user, memory cap). There is no in-host mode. An in-host mode for desktop installs is an owner question, not built here.
   - Q2: split.
-- Slice (a): worker, `blender_scene` job kind, readiness, and `POST .../scene/blender-jobs` + `GET .../scene/artifacts/{id}`. There is no path that applies returned geometry. The caps are conservative placeholders until the CI numbers land.
+- Slice (a): worker, `blender_scene` job kind, readiness, and `POST .../scene/blender-jobs` + `GET .../scene/artifacts/{id}`. There is no path that applies returned geometry. The caps were placeholders until the CI numbers landed; see the SC-00 B measurement below.
   - The app builds the whole `docker`/`podman run` command itself. The operator sets only:
     - the unpacked tree, `PYPSA_GUI_BLENDER_DIR`, whose whole-tree sha256 is pinned (`9c3072a9…a3be`), bind-mounted read-only;
     - an absolute runtime path, `PYPSA_GUI_BLENDER_RUNTIME`;
@@ -65,3 +65,22 @@ Was: `needs-triage — specification proposed; not implemented`. Owner question 
   - There is no free-form wrapper. An early free-form wrapper draft failed review: its flags could be overridden, and the limits and kill reached only the CLI.
   - Cancel and timeout run `<runtime> kill <name>`.
 - Slice (b): the reviewed return (proposal plus Apply), with GK B's R1 (the returned GLB is untrusted: size caps, embedded buffers only) and R2. It also fixes the contract `lock: False` mismatch on the proposal create and cancel routes.
+
+### 2026-11-17: SC-00 B measured (run 44013964974, master 6b559a5e)
+
+The manual job ran on `ubuntu-24.04` (4 vCPU, 16 GiB, 3 GiB swap). Artifact `sc00b-blender-roundtrip`, sha256 `a76ac095…861b`.
+
+- Blender 5.2.4 LTS (hash cd5dc428cce1). The round trip imported, read `feature_id` from the extras and exported: `MATCH 3 nodes`.
+- Process wall time 2.77 s. Inside Blender: 0.68 s script wall, 2.46 s user plus 0.19 s system CPU, peak RSS 337,432 KiB (about 330 MiB).
+- Output: `rt.glb` 5,028 B and `rt.blend` 511,551 B.
+- glTF options (grep of the bundled add-on): `export_extras` at line 667 and `import_scene_extras` at line 2013.
+- Missing libraries: `ldd` found none, both before and after the job installed `libxxf86vm1 libxfixes3 libxi6 libxkbcommon0 libsm6 libxrender1 libgl1 libegl1`. The runner image already carries them, so this run does not give a minimal image's list. The operator's runtime image must provide at least those eight X/GL libraries, plus glibc. A minimal image's list stays unmeasured until the image is built.
+- Caps (B5) confirmed, not tightened. The fixture is a 3-node scene, so a real campus scene and container start-up need headroom:
+
+  | cap | value | headroom over the run |
+  |---|---|---|
+  | wall | 180 s | about 65x |
+  | CPU | 120 s | about 45x |
+  | memory | 2 GiB, no swap | about 6x peak RSS |
+  | output | 256 MiB each | about 500x the `.blend` |
+
