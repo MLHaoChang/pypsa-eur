@@ -236,9 +236,14 @@ def _call_with_timeout(fn: Callable[[], None], timeout_s: float, month: int) -> 
         ) from exc
 
 
-# The typed errors a child may send back, rebuilt by class name in the parent.
+# The typed errors a child may send back, rebuilt by exact class (module and
+# qualified name) in the parent; any other class takes the generic path.
+def _class_id(cls: type) -> str:
+    return f"{cls.__module__}.{cls.__qualname__}"
+
+
 _CHILD_ERRORS: dict[str, type[ProfileGenError]] = {
-    cls.__name__: cls
+    _class_id(cls): cls
     for cls in (
         ProfileGenError,
         AtliteNotInstalledError,
@@ -261,19 +266,20 @@ def _month_child(
     target: str,
 ) -> None:
     """Child entry point: fetch one month, answer ("ok",) or ("err", class
-    name, message, traceback, is_typed) down `conn`. The parent's stop_event
-    cannot cross the process boundary, so the downloader gets None; the
-    parent terminates the child instead."""
+    id, class name, message, traceback) down `conn`. Credentials reach the
+    child through the inherited environment only, never through the pipe.
+    The parent's stop_event cannot cross the process boundary, so the
+    downloader gets None; the parent kills the child instead."""
     try:
         downloader(bbox, year, month, Path(target), None)
         reply: tuple = ("ok",)
     except BaseException as exc:  # noqa: BLE001 — sent to the parent
         reply = (
             "err",
+            _class_id(type(exc)),
             type(exc).__name__,
             str(exc),
             traceback.format_exc(),
-            isinstance(exc, ProfileGenError),
         )
     try:
         conn.send(reply)
@@ -294,10 +300,11 @@ def _fetch_month_in_child(
 
     Same pattern as `services.document_values._parse`: a frozen desktop build
     hands spawn children to `multiprocessing.freeze_support()`
-    (`desktop/gui.py`). The parent polls the pipe: the caller's stop_event
-    terminates the child, the timeout kills it, and a child that dies without
-    answering fails the month. A killed child may leave a partial month file;
-    the next run's `_valid_month` check deletes it before re-fetching."""
+    (`desktop/gui.py`). The parent polls the pipe; the caller's stop_event
+    and the timeout end the child (killed in `finally`, on every path), and a
+    child that exits without answering fails the month. The pipe is read
+    until it answers or reports EOF, so a child that sends and exits at once
+    still reads as its answer."""
     ctx = multiprocessing.get_context("spawn")
     receive, send = ctx.Pipe(duplex=False)
     child = ctx.Process(
@@ -313,13 +320,11 @@ def _fetch_month_in_child(
         deadline = time.monotonic() + timeout_s
         while True:
             if stop_event is not None and stop_event.is_set():
-                child.terminate()
                 raise CutoutDownloadAborted(
                     f"cutout download aborted during month {month}"
                 )
             left = deadline - time.monotonic()
             if left <= 0:
-                child.kill()
                 raise CutoutTimeoutError(
                     f"ERA5 download timed out after {timeout_s:.0f}s (month {month}); "
                     "the CDS request wedged — retrying usually resumes where it left off"
@@ -327,7 +332,7 @@ def _fetch_month_in_child(
             if receive.poll(min(_CHILD_POLL_S, left)):
                 try:
                     reply = receive.recv()
-                except (EOFError, OSError):  # died before it answered
+                except (EOFError, OSError):  # exited before it answered
                     reply = None
                 break
     finally:
@@ -338,7 +343,7 @@ def _fetch_month_in_child(
 
     if reply is None:
         logger.error(
-            "ERA5 download child for month %s died without answering (exit %s)",
+            "ERA5 download child for month %s exited without answering (exit %s)",
             month, child.exitcode,
         )
         raise CutoutDownloadError(
@@ -347,8 +352,8 @@ def _fetch_month_in_child(
         )
     if reply[0] == "ok":
         return
-    _, name, message, tb, typed = reply
-    cls = _CHILD_ERRORS.get(name) if typed else None
+    _, class_id, name, message, tb = reply
+    cls = _CHILD_ERRORS.get(class_id)
     if cls is not None:
         raise cls(message)
     # Today's rule for untyped errors: the library's text can carry the
@@ -453,24 +458,34 @@ def ensure_cutout(
                 # Not under the netCDF lock: a month can take minutes, and the
                 # lock would stall every project save. The child has its own
                 # HDF5 state, so its xarray/netCDF4 writes cannot collide with
-                # this process's (RP-13).
-                if in_child:
-                    _fetch_month_in_child(
-                        dl, padded, int(year), month, mpath, timeout_s, stop_event
-                    )
-                else:
-                    _call_with_timeout(
-                        lambda m=month, p=mpath: dl(padded, int(year), m, p, stop_event),
-                        timeout_s,
-                        month,
-                    )
-                if not stopped() and not _valid_month(mpath):
-                    # The resume rule holds for a fresh month too: only a
-                    # readable month is ever merged.
-                    raise CutoutDownloadError(
-                        f"ERA5 download for month {month} left no readable data; "
-                        "retrying re-fetches it"
-                    )
+                # this process's (RP-13). The fetch writes to a staging name; only a month that
+                # passes the resume rule is renamed into place, so a killed
+                # or aborted fetch never leaves a month file behind.
+                staging = parts_dir / f"m{month:02d}.fetch.nc"
+                staging.unlink(missing_ok=True)
+                try:
+                    if in_child:
+                        _fetch_month_in_child(
+                            dl, padded, int(year), month, staging, timeout_s, stop_event
+                        )
+                    else:
+                        _call_with_timeout(
+                            lambda m=month, p=staging: dl(padded, int(year), m, p, stop_event),
+                            timeout_s,
+                            month,
+                        )
+                    if stopped():
+                        raise CutoutDownloadAborted(
+                            f"cutout download aborted at month {month}"
+                        )
+                    if not _valid_month(staging):
+                        raise CutoutDownloadError(
+                            f"ERA5 download for month {month} left no readable data; "
+                            "retrying re-fetches it"
+                        )
+                    os.replace(staging, mpath)
+                finally:
+                    staging.unlink(missing_ok=True)
                 written.append(mpath)
             if stopped():
                 raise CutoutDownloadAborted(

@@ -47,6 +47,40 @@ def writes_nothing(bbox, year, month, target, stop_event):
     return None
 
 
+def exits_3(bbox, year, month, target, stop_event):
+    """Dies without answering, as a crash in the fetch would."""
+    os._exit(3)
+
+
+def atlite_missing(bbox, year, month, target, stop_event):
+    from services.profile_gen.engine import AtliteNotInstalledError
+
+    raise AtliteNotInstalledError("atlite is not installed here")
+
+
+def typed_download_error(bbox, year, month, target, stop_event):
+    from services.profile_gen.cutout_cache import CutoutDownloadError
+
+    raise CutoutDownloadError("CDS refused the request (typed)")
+
+
+class CutoutDownloadError(Exception):
+    """A foreign class that shares the typed error's bare name."""
+
+
+def foreign_same_name(bbox, year, month, target, stop_event):
+    raise CutoutDownloadError("https://cds.example/foreign?key=secret")
+
+
+def report_pid(bbox, year, month, target, stop_event):
+    """Write the fetching process's pid and the CDS env it sees to the file
+    named by `CUTOUT_FAKE_REPORT`, then leave a valid month."""
+    Path(os.environ["CUTOUT_FAKE_REPORT"]).write_text(
+        f"{os.getpid()}\n{os.environ.get('CDSAPI_KEY', '')}"
+    )
+    write_month(target, year, month)
+
+
 def hammer_netcdf(bbox, year, month, target, stop_event):
     """Write and read netCDF through xarray for `CUTOUT_FAKE_SECONDS`, the way
     atlite's prepare() does, then leave a valid month at `target`."""
