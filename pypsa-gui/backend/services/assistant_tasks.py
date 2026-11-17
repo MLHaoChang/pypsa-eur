@@ -1747,7 +1747,8 @@ def begin_step(session, tool, args):
         except HTTPException as exc:
             if exc.status_code == 404:
                 # A legitimate project switch detaches the task; the start and
-                # resume guard keeps reading it (LC-48f, `_refuse_switch`).
+                # resume guard keeps reading it (LC-48f, `_refuse_switch`). Like
+                # `task_id`, it lives on the in-memory session only: a restart forgets it.
                 session.detached_task_id, session.task_id = task_id, None
                 return None
             raise

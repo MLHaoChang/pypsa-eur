@@ -429,6 +429,20 @@ def test_an_ended_task_leaves_a_later_task_of_the_chat_alone(chat):
     chat.detached_task_id = None
 
 
+def test_an_ended_task_releases_a_chat_that_is_not_the_current_one(chat, monkeypatch):
+    """GK B E: the task ends on another thread (a job, a runner tick), so its
+    chat is found in the session registry, not as the current session."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    away = harness_session.ChatSession(session_id="chat-away")
+    away.detached_task_id = first["task_id"]
+    monkeypatch.setitem(harness_session._SESSIONS, chat.session_id or "chat", chat)
+    monkeypatch.setitem(harness_session._SESSIONS, "chat-away", away)
+    chat_tools.set_chat_session(None)
+    _set_stored(first["task_id"], status="completed")
+    assert chat.task_id is None and away.detached_task_id is None
+    chat_tools.set_chat_session(chat)
+
+
 def test_a_runner_session_keeps_its_run_when_the_task_ends(chat):
     """A runner session is its run's by identity (`_is_run_session`)."""
     from services import run_envelope

@@ -971,6 +971,41 @@ def test_the_held_note_names_a_task_the_reader_cannot_read_by_id_only(waiting):
 ACTIVE = {"kind": "task", "id": "t-2", "title": "T", "status": "running"}
 
 
+def test_the_held_note_hides_the_title_of_another_owners_task(waiting):
+    """GK B E-c: a real task file of this project that another user owns,
+    running, is named by id only: its owner check in `_read` holds."""
+    path, record, _ = waiting
+    chat, other = _answer_while_another_task_runs(waiting)
+    with tasks._LOCK:
+        other_path, task = tasks._read(other["task_id"])
+    theirs = str(uuid.uuid4())
+    foreign = other_path.with_name(theirs + ".json")
+    foreign.write_text(
+        json.dumps(
+            dict(task, task_id=theirs, owner_id=str(uuid.uuid4()), title="Theirs")
+        )
+    )
+    held = {
+        "kind": "switch_in_progress",
+        "active": {
+            "kind": "task",
+            "id": theirs,
+            "title": "Theirs",
+            "status": "running",
+        },
+        "since": "2026-11-17T02:00:00+00:00",
+    }
+    assert tasks._held_view(held)["active"] == {
+        "kind": "task",
+        "id": theirs,
+        "title": None,
+        "status": "unreadable",
+    }
+    # The same file under its own owner's id reads, title and all.
+    foreign.write_text(json.dumps(dict(task, task_id=theirs, title="Theirs")))
+    assert tasks._held_view(held)["active"]["title"] == "Theirs"
+
+
 @pytest.mark.parametrize(
     "failure",
     [
