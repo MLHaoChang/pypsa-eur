@@ -55,11 +55,11 @@ generator.o_and_m_per_running_hour
 generator.outage_rate_basis
 generator.overnight_cost
 generator.process_role
-generator.r_x_at_maximum_short_circuit
-generator.r_x_at_minimum_short_circuit
 generator.ramp_down_limit
 generator.ramp_up_limit
 generator.rated_apparent_power
+generator.resistance_to_reactance_ratio_at_maximum_short_circuit
+generator.resistance_to_reactance_ratio_at_minimum_short_circuit
 generator.running_cost
 generator.shut_down_cost
 generator.smallest_size

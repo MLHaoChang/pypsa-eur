@@ -282,17 +282,18 @@ GENERATOR: tuple[FieldSpec, ...] = (
     FieldSpec("e_sum_max", "performance", "Maximum energy", "Most energy the generator may produce over the "
               "modelled horizon, e.g. a fuel or water budget. Empty for no upper bound.", "MWh", "MWh"),
     FieldSpec("control", "performance", "AC control", "Control type in the AC power flow only: PQ fixes P and Q, "
-              "PV holds the voltage, Slack absorbs the imbalance.", kind="enum", options=("PQ", "PV", "Slack")),
+              "PV holds the voltage, Slack absorbs the imbalance. Slack also shows the external grid's short-circuit "
+              "power and resistance-to-reactance ratio.", kind="enum", options=("PQ", "PV", "Slack")),
     FieldSpec("sk_max_mva", "performance", "Maximum short-circuit power", "Short-circuit power of the external "
               "grid at its strongest, for fault and harmonic studies. Leave empty when unknown.", "MVA", "MVA",
               reveal_when=_SLACK),
     FieldSpec("sk_min_mva", "performance", "Minimum short-circuit power", "Short-circuit power of the external "
               "grid at its weakest, for fault and harmonic studies. Leave empty when unknown.", "MVA", "MVA",
               reveal_when=_SLACK),
-    FieldSpec("rx_max", "performance", "R/X at maximum short circuit", "Resistance-to-reactance ratio of the "
-              "external grid at its strongest. Leave empty when unknown.", "", "", reveal_when=_SLACK),
-    FieldSpec("rx_min", "performance", "R/X at minimum short circuit", "Resistance-to-reactance ratio of the "
-              "external grid at its weakest. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    FieldSpec("rx_max", "performance", "Resistance-to-reactance ratio at maximum short circuit", "Ratio of the "
+              "external grid's resistance to its reactance at its strongest, e.g. 0.1. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    FieldSpec("rx_min", "performance", "Resistance-to-reactance ratio at minimum short circuit", "Ratio of the "
+              "external grid's resistance to its reactance at its weakest, e.g. 0.15. Leave empty when unknown.", "", "", reveal_when=_SLACK),
     *_harmonic_rows("generator"),
     *_outages(with_cf_flag=True),
 )
