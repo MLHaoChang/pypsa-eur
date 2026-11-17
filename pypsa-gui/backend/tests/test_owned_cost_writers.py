@@ -28,7 +28,13 @@ def _legacy_workbook(rows: list[dict]) -> bytes:
     buses.append(["name", "v_nom"])
     buses.append(["B1", 110.0])
     sheet = wb.create_sheet("storage_units")
-    headers = ["name", "bus", "p_nom", "max_hours", *sorted({k for r in rows for k in r})]
+    headers = [
+        "name",
+        "bus",
+        "p_nom",
+        "max_hours",
+        *sorted({k for r in rows for k in r}),
+    ]
     sheet.append(headers)
     for i, r in enumerate(rows):
         sheet.append([f"s{i}", "B1", 10.0, 2.0, *[r.get(h) for h in headers[4:]]])
@@ -51,9 +57,17 @@ def _expected(parts: dict, rate: float | None = None) -> dict:
     n = pypsa.Network()
     n.add("Bus", "B1")
     n.add("StorageUnit", "s", bus="B1", p_nom=10.0, max_hours=2.0)
-    apply_parts(n, "StorageUnit", "s", parts,
-                discount_rate=_global_discount_rate() if rate is None else rate)
-    return {c: float(n.storage_units.at["s", c]) for c in ("capital_cost", "fom_cost", "lifetime")}
+    apply_parts(
+        n,
+        "StorageUnit",
+        "s",
+        parts,
+        discount_rate=_global_discount_rate() if rate is None else rate,
+    )
+    return {
+        c: float(n.storage_units.at["s", c])
+        for c in ("capital_cost", "fom_cost", "lifetime")
+    }
 
 
 def _assert_derived(su, name, rate=None):
@@ -63,7 +77,10 @@ def _assert_derived(su, name, rate=None):
 
 # ── Excel, legacy sheets ─────────────────────────────────────────────────────
 
-def test_an_excel_sheet_cost_the_parts_own_is_rederived_from_the_parts(client, install_network, session_ctx):
+
+def test_an_excel_sheet_cost_the_parts_own_is_rederived_from_the_parts(
+    client, install_network, session_ctx
+):
     install_network(_network())
     stale = {**BATTERY, "capital_cost": 1.0, "fom_cost": 2.0, "lifetime": 3.0}
     plain = {"capital_cost": 5000.0}
@@ -72,17 +89,26 @@ def test_an_excel_sheet_cost_the_parts_own_is_rederived_from_the_parts(client, i
     su = session_ctx(client).network.storage_units
     _assert_derived(su, "s0")
     assert su.at["s0", "capital_cost"] != 1.0
-    assert su.at["s1", "capital_cost"] == 5000.0  # no priced part: the sheet's own cost stands
+    assert (
+        su.at["s1", "capital_cost"] == 5000.0
+    )  # no priced part: the sheet's own cost stands
 
 
-@pytest.mark.parametrize("bad", [
-    {k: v for k, v in BATTERY.items() if k != "inv_power_lifetime"},     # priced, no lifetime
-    # Not finite: a sheet cell cannot hold a float inf (openpyxl writes a blank), so the typed text.
-    {**BATTERY, "inv_energy_overnight": "inf"},
-    {**BATTERY, "inv_power_lifetime": "inf"},
-], ids=["no-lifetime", "inf-overnight", "inf-lifetime"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {
+            k: v for k, v in BATTERY.items() if k != "inv_power_lifetime"
+        },  # priced, no lifetime
+        # Not finite: a sheet cell cannot hold a float inf (openpyxl writes a blank), so the typed text.
+        {**BATTERY, "inv_energy_overnight": "inf"},
+        {**BATTERY, "inv_power_lifetime": "inf"},
+    ],
+    ids=["no-lifetime", "inf-overnight", "inf-lifetime"],
+)
 def test_an_excel_bad_priced_row_after_a_good_one_refuses_and_leaves_the_network(
-        client, install_network, session_ctx, bad):
+    client, install_network, session_ctx, bad
+):
     n = install_network(_network())
     before = n.copy()
     r = _import(client, _legacy_workbook([BATTERY, bad]))
@@ -103,54 +129,77 @@ def test_an_import_derives_at_the_rate_in_force(client, install_network, session
     r = _import(client, _legacy_workbook([BATTERY]))
     assert r.status_code == 200, r.text
     _assert_derived(session_ctx(client).network.storage_units, "s0", rate=0.10)
-    assert _expected(BATTERY, 0.10)["capital_cost"] != _expected(BATTERY, 0.07)["capital_cost"]
+    assert (
+        _expected(BATTERY, 0.10)["capital_cost"]
+        != _expected(BATTERY, 0.07)["capital_cost"]
+    )
 
 
 # ── the native exports: Excel, netCDF, CSV bundle ────────────────────────────
 
-FORMATS = {"excel": ("excel", "x.xlsx"), "netcdf": ("netcdf", "x.nc"), "csv": ("csv", "x.zip")}
+FORMATS = {
+    "excel": ("excel", "x.xlsx"),
+    "netcdf": ("netcdf", "x.nc"),
+    "csv": ("csv", "x.zip"),
+}
 
 
 def _round_trip(client, fmt):
     route, filename = FORMATS[fmt]
     data = client.get(f"/api/io/export/{route}").content
-    return client.post(f"/api/io/import/{route}", files={"file": (filename, data, "application/octet-stream")})
+    return client.post(
+        f"/api/io/import/{route}",
+        files={"file": (filename, data, "application/octet-stream")},
+    )
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
 def test_a_native_import_rederives_a_stale_cost_and_moves_the_fingerprint(
-        client, install_network, session_ctx, fmt):
+    client, install_network, session_ctx, fmt
+):
     from tests.test_bulk_part_rederive import _fingerprint
 
     n = _network()
     n.storage_units.at["bess", "capital_cost"] = 1.0  # a raw writer left it stale
-    n.storage_units.at["bess", "inv_power_overnight"] = 400_000.0  # and moved a part raw
+    n.storage_units.at["bess", "inv_power_overnight"] = (
+        400_000.0  # and moved a part raw
+    )
     install_network(n)
     stale_print = _fingerprint(n)
     r = _round_trip(client, fmt)
     assert r.status_code == 200, r.text
     got = session_ctx(client).network
     want = _expected({**BATTERY, "inv_power_overnight": 400_000.0})
-    assert got.storage_units.at["bess", "capital_cost"] == pytest.approx(want["capital_cost"], rel=1e-12)
+    assert got.storage_units.at["bess", "capital_cost"] == pytest.approx(
+        want["capital_cost"], rel=1e-12
+    )
     _assert_derived(got.storage_units, "bess2")
     assert _fingerprint(got) != stale_print
 
 
-@pytest.mark.parametrize("fmt,col,value", [
-    *[(f, "inv_power_lifetime", float("nan")) for f in FORMATS],
-    # Excel cannot carry a float inf (it is written blank); netCDF and CSV can.
-    ("netcdf", "inv_energy_overnight", float("inf")), ("csv", "inv_energy_overnight", float("inf")),
-    ("netcdf", "inv_power_lifetime", float("inf")),
-])
-def test_a_native_import_of_a_bad_priced_part_is_refused(client, install_network, session_ctx, fmt, col, value):
+@pytest.mark.parametrize(
+    "fmt,col,value",
+    [
+        *[(f, "inv_power_lifetime", float("nan")) for f in FORMATS],
+        # Excel cannot carry a float inf (it is written blank); netCDF and CSV can.
+        ("netcdf", "inv_energy_overnight", float("inf")),
+        ("csv", "inv_energy_overnight", float("inf")),
+        ("netcdf", "inv_power_lifetime", float("inf")),
+    ],
+)
+def test_a_native_import_of_a_bad_priced_part_is_refused(
+    client, install_network, session_ctx, fmt, col, value
+):
     n = _network()
     n.storage_units.at["bess2", col] = value  # written raw, never validated
     install_network(n)
     data = client.get(f"/api/io/export/{FORMATS[fmt][0]}").content
     good = install_network(_network())
     before = good.copy()
-    r = client.post(f"/api/io/import/{FORMATS[fmt][0]}",
-                    files={"file": (FORMATS[fmt][1], data, "application/octet-stream")})
+    r = client.post(
+        f"/api/io/import/{FORMATS[fmt][0]}",
+        files={"file": (FORMATS[fmt][1], data, "application/octet-stream")},
+    )
     assert r.status_code == 422, r.text
     assert "bess2" in r.text
     assert session_ctx(client).network is good
@@ -159,8 +208,11 @@ def test_a_native_import_of_a_bad_priced_part_is_refused(client, install_network
 
 # ── pack pricing ─────────────────────────────────────────────────────────────
 
+
 @pytest.mark.parametrize("attr,name", [("storage_units", "bess"), ("lines", "ab")])
-def test_pack_pricing_refuses_a_row_whose_parts_own_its_costs_and_writes_nothing(attr, name):
+def test_pack_pricing_refuses_a_row_whose_parts_own_its_costs_and_writes_nothing(
+    attr, name
+):
     from services.library.defaults_pack.pricing import PartsOwnCosts, price_from_pack
 
     n = _network()
@@ -201,9 +253,14 @@ def test_every_caller_prices_a_class_with_parts_only_as_a_battery():
     import re
 
     root = pathlib.Path(__file__).resolve().parents[1]
-    call = re.compile(r'_?price(?:_from_pack)?\(\s*\w+,\s*"(\w+)",\s*[^,]+,\s*"([\w-]+)"')
+    call = re.compile(
+        r'_?price(?:_from_pack)?\(\s*\w+,\s*"(\w+)",\s*[^,]+,\s*"([\w-]+)"'
+    )
     seen = []
-    for path in [*root.glob("project_templates/*.py"), root / "services/adequacy/redundancy.py"]:
+    for path in [
+        *root.glob("project_templates/*.py"),
+        root / "services/adequacy/redundancy.py",
+    ]:
         for attr, tech in call.findall(path.read_text()):
             seen.append((path.name, attr, tech))
             if attr in ("storage_units", "lines"):
@@ -213,17 +270,27 @@ def test_every_caller_prices_a_class_with_parts_only_as_a_battery():
 
 # ── library reference apply ──────────────────────────────────────────────────
 
+
 @pytest.mark.parametrize("cls,name", [("StorageUnit", "bess"), ("Line", "ab")])
-def test_the_library_reference_routes_refuse_a_class_with_parts(client, install_network, cls, name):
+def test_the_library_reference_routes_refuse_a_class_with_parts(
+    client, install_network, cls, name
+):
     """It writes through the single edit (both validators); its targets are Generator or Link, so a priced
     storage unit or line is refused with its own kind and left as it was."""
     n = install_network(_network())
     before = (n.storage_units.copy(), n.lines.copy())
-    body = {"component_class": cls, "name": name, "technology": "onwind", "projection_year": 2030}
+    body = {
+        "component_class": cls,
+        "name": name,
+        "technology": "onwind",
+        "projection_year": 2030,
+    }
     r = client.post("/api/library_reference/preview", json=body)
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "reference_target_unsupported"
-    r = client.post("/api/network/library_reference/apply", json={**body, "digest": "x"})
+    r = client.post(
+        "/api/network/library_reference/apply", json={**body, "digest": "x"}
+    )
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "reference_target_unsupported"
     pd.testing.assert_frame_equal(n.storage_units, before[0])
@@ -232,12 +299,17 @@ def test_the_library_reference_routes_refuse_a_class_with_parts(client, install_
 
 # ── the import helper and its log note ──────────────────────────────────────
 
+
 def test_the_import_lists_only_the_priced_rows_it_rederived():
     from services.network_crud import rederive_imported_parts
 
     n = _network()
     n.add("StorageUnit", "plain", bus="B1", p_nom=1.0, capital_cost=5.0)
-    assert rederive_imported_parts(n) == ["StorageUnit 'bess'", "StorageUnit 'bess2'", "Line 'ab'"]
+    assert rederive_imported_parts(n) == [
+        "StorageUnit 'bess'",
+        "StorageUnit 'bess2'",
+        "Line 'ab'",
+    ]
     assert n.storage_units.at["plain", "capital_cost"] == 5.0
 
 
