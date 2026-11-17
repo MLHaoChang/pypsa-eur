@@ -266,3 +266,15 @@ def test_numpy_integral_float_hashes_as_int():
 
 def test_assumptions_default_to_empty():
     assert new_model_set(campus_spec(), PARAMS, now=T0).assumptions == ()
+
+
+def test_mutating_the_callers_input_after_freeze_leaves_the_manifest_byte_equal():
+    spec, agg, params = campus_spec(), campus_spec(), {"case": ["max"]}
+    ms = new_model_set(spec, params, aggregated=agg, now=T0)
+    before = {v: json.dumps(manifest(ms, v), sort_keys=True) for v in VARIANTS}
+    spec["campus"]["name"] = agg["campus"]["name"] = "CHANGED"
+    params["case"].append("min")
+    assert {v: json.dumps(manifest(ms, v), sort_keys=True) for v in VARIANTS} == before
+    assert ms.spec("aggregated")["campus"]["name"] == "TEST_HUB" and ms.params == {
+        "case": ["max"]
+    }
