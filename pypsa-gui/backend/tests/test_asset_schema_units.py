@@ -132,7 +132,10 @@ def test_a_store_on_a_tonne_bus_prices_per_tonne_of_stock(n):
     for name in n.stores.index:
         if _size_unit(n, n.stores.at[name, "bus"], stock=True) == "t":
             c = cost_units(n, "Store", name)
-            assert c["overnight_cost"]["unit"] == "EUR/t" and c["fom_cost"]["unit"] == "EUR/t/yr"
+            assert (
+                c["overnight_cost"]["unit"] == "EUR/t"
+                and c["fom_cost"]["unit"] == "EUR/t/yr"
+            )
             return
     pytest.skip("no store on a tonne bus")
 
@@ -150,15 +153,22 @@ def test_the_units_route_carries_the_cost_units(client, install_network, n):
     body = client.get(f"/api/network/asset_schema/Generator/units/{name}").json()
     assert body["costs"]["marginal_cost"] == {"unit": "EUR/t", "scale": 1.0}
     energy = _first(n, "links", "bus0", False)
-    assert client.get(f"/api/network/asset_schema/Link/units/{energy}").json()["costs"] == {}
+    assert (
+        client.get(f"/api/network/asset_schema/Link/units/{energy}").json()["costs"]
+        == {}
+    )
 
 
 def test_a_link_prices_on_its_input_bus_and_a_storage_unit_on_its_bus():
     from services.asset_schema.fields import cost_units
 
     assert cost_units(_two_bus_net("t", "MWh"), "Link", "l")["overnight_cost"] == {
-        "unit": "EUR/(t/h)", "scale": 1.0}
-    assert cost_units(_two_bus_net("MWh", "t"), "Link", "l") == {}  # bus1 is not the size bus
+        "unit": "EUR/(t/h)",
+        "scale": 1.0,
+    }
+    assert (
+        cost_units(_two_bus_net("MWh", "t"), "Link", "l") == {}
+    )  # bus1 is not the size bus
     import pypsa
 
     m = pypsa.Network()
