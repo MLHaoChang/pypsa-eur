@@ -592,6 +592,7 @@ def test_mc_result_carries_the_goal_verdict_and_its_draw_budget(
     assert body["status"] == "done", body
     goal = body["result"]["goal"]
     assert goal["target_lole_h"] == pytest.approx(8760.0)
+    assert goal["target_source"] == "stored"
     assert goal["verdict"] == "pass"
     assert body["result"]["draws"] == {
         "first_batch": DRAWS, "max": MAX_DRAWS, "cov_target": COV}
@@ -634,4 +635,21 @@ def test_vre_elcc_rows_have_the_installed_capacity_beside_the_peak(
     row = body["result"]["elcc"][0]
     assert set(row) == ELCC_ROW_KEYS
     assert row["nameplate_mw"] == pytest.approx(160.0)
-    assert body["result"]["elcc_installed_mw"] == {"wind": pytest.approx(200.0)}
+    assert body["result"]["elcc_installed"] == {
+        "wind": {"mw": pytest.approx(200.0), "basis": "p_nom"}}
+
+
+def test_mc_judges_an_unset_goal_against_the_site_types_and_says_so(
+        client, install_network):
+    """GK A 30 A2: no goal set on a weak-grid site: the verdict is against
+    the site type's assumed 3 h/yr, and the result says it was assumed."""
+    install_network(_network())
+    _set_goal(target_lole_h=None, site_archetype="weak_flexible")
+    assert client.post("/api/results/mc", json={
+        "draws": DRAWS, "seed": SEED, "cov_target": COV}).status_code == 200
+    body = _poll(client)
+    assert body["status"] == "done", body
+    goal = body["result"]["goal"]
+    assert (goal["target_lole_h"], goal["target_source"]) == (3.0, "default")
+    assert goal["verdict"] == "miss"       # 4 h on 24 h is far above 3 h/yr
+

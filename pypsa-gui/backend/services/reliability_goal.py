@@ -15,6 +15,8 @@ user saves a goal, and a saved value always wins.
 """
 from __future__ import annotations
 
+import logging
+
 import math
 from dataclasses import asdict
 from typing import Any
@@ -31,6 +33,8 @@ GOAL_FIELDS = frozenset({"target_lole_h", "mc_draws", "site_archetype"})
 NOT_LP_FIELDS = frozenset({"business_case"})
 
 ARCHETYPES = ("strong_grid", "weak_flexible", "off_grid")
+logger = logging.getLogger("pypsa_gui.reliability_goal")
+
 DEFAULT_ARCHETYPE = "strong_grid"
 # The engine default every MC-based study shares (mc, coupling and margin
 # loops, `DEFAULT_EH_MC_DRAWS`).
@@ -89,8 +93,8 @@ def effective_goal(cfg: Any, template: dict | None) -> dict[str, dict[str, Any]]
     ``ens_cap_permyriad`` (‱), ``mc_draws`` and ``site_archetype``.
     ``cfg`` is a SolverConfig or its dict; ``template`` the project's
     ``eh_template.json`` (None for a project without one). A ``default``
-    LOLE is the site type's own pack target (None when the pack has none);
-    any other ``default`` value of None means "the pack's own value"."""
+    value of None means "the pack's own value"; a ``default`` LOLE also
+    carries ``assumed``, that pack's target (None when it has none)."""
     get = cfg.get if isinstance(cfg, dict) else (lambda k: getattr(cfg, k, None))
     po = (template or {}).get("pack_overrides") or {}
 
@@ -108,13 +112,15 @@ def effective_goal(cfg: Any, template: dict | None) -> dict[str, dict[str, Any]]
     archetype = pick(get("site_archetype"), valid_archetype,
                      (template or {}).get("recommended_archetype"),
                      DEFAULT_ARCHETYPE)
+    target = pick(get("target_lole_h"), valid_lole, po.get("target_lole_h"), None)
+    if target["source"] == DEFAULT:
+        # Walkthrough asset-investment 01: the site type's own pack target,
+        # the goal the EH study certifies against when nothing sets one. It
+        # is ASSUMED, never the value: a reader keyed on `value` (the loops,
+        # the run digests) sees no goal, as before; a screen names this one.
+        target = {**target, "assumed": pack_target_lole_h(archetype["value"])}
     return {
-        # The default is the site type's own pack target: the goal the EH
-        # study certifies against when nothing else sets one, so every reader
-        # names the same number (asset-investment walkthrough 01).
-        "target_lole_h": pick(get("target_lole_h"), valid_lole,
-                              po.get("target_lole_h"),
-                              pack_target_lole_h(archetype["value"])),
+        "target_lole_h": target,
         "ens_cap_permyriad": pick(get("ens_cap_permyriad"), ens_ok,
                                   po.get("ens_cap_permyriad"), None),
         "mc_draws": pick(get("mc_draws"), valid_draws, None, DEFAULT_MC_DRAWS),
@@ -123,12 +129,18 @@ def effective_goal(cfg: Any, template: dict | None) -> dict[str, dict[str, Any]]
 
 
 def pack_target_lole_h(archetype: str) -> float | None:
-    """The site type's own pack LOLE target (h/yr), or None when its pack
-    has none (strong_grid)."""
+    """The site type's own pack LOLE target (h/yr): the pack factory the EH
+    study certifies with (``eh_study_runner._PACK_FACTORY``). None when the
+    pack has none (strong_grid) or the site type is unknown."""
     from services.adequacy.eh_study_runner import _PACK_FACTORY
 
     factory = _PACK_FACTORY.get(archetype)
-    availability = factory().availability if factory is not None else None
+    try:
+        availability = factory().availability if factory is not None else None
+    except Exception:                                   # noqa: BLE001
+        # A pack that cannot be built assumes nothing; the study refuses it.
+        logger.exception("site type %r: its pack could not be built", archetype)
+        return None
     target = getattr(availability, "target_lole_h", None)
     return float(target) if target is not None else None
 
@@ -229,6 +241,21 @@ def loop_goal(body: Any, goal: dict, nyears: float | None) -> tuple[float | None
         draws = goal["mc_draws"]["value"]
     sources = goal_sources(goal, overridden)
     return target, int(draws), {k: sources[k] for k in ("target_lole_h", "mc_draws")}
+
+
+def assumed_lole(goal: dict) -> float | None:
+    """The site type's goal (h/yr) a screen names when none is set; None
+    when a goal is set or the site type has none."""
+    t = goal["target_lole_h"]
+    return t.get("assumed") if t["value"] is None else None
+
+
+def no_target_hint(solver_state: dict) -> str:
+    """The loops' refusal tail when no goal is set (GK A 30, A1): name the
+    site type's assumed goal, which the loop never uses unless it is set."""
+    lole = assumed_lole(active_goal(solver_state))
+    return "" if lole is None else (
+        f" (the site type assumes {lole:g} h/yr; type it there to search against it)")
 
 
 def active_loop_goal(body: Any, solver_state: dict) -> tuple[float | None, int, dict[str, str]]:
