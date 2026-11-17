@@ -87,10 +87,16 @@ const TEXT = [
   'text', 'ink-900', 'ink-800', 'ink-700', 'ink-600', 'ink-500', 'muted', 'legend', 'accent',
   'success', 'warn', 'danger', 'info',
 ].map(n => `--color-${n}`)
-// UI components (1.4.11). border-3 is a decorative hairline, not a component
-// boundary; its six `text-border-3` call sites move to an ink token in the
-// colour sweep.
-const UI = ['--color-axis', '--color-focus']
+// UI components (1.4.11): the chart axis, the focus ring and the strong
+// hairline (hover borders, separators). border and border-2 are decorative
+// dividers; inputs and cards are told apart by fill as well as border.
+const UI = ['--color-axis', '--color-focus', '--color-border-3']
+// Solid status fills and the foregrounds allowed on them (statusFill.guard.test.ts
+// keeps call sites on these), at full strength and at the hover / overlay
+// opacities the app uses, composited over every surface.
+const STATUS_FILLS = ['success', 'warn', 'danger', 'info'].map(n => `--color-${n}`)
+const ON_FILL = ['--color-on-status', '--color-bg']
+const FILL_ALPHAS = [1, 0.95, 0.9] // statusFill.guard.test.ts keeps text-bearing fills at /90 or more
 
 describe.each(Object.entries(themes(indexCss)))('index.css %s theme meets WCAG AA', (_theme, t) => {
   const surfaces = (): Array<[string, Rgb]> => {
@@ -117,6 +123,18 @@ describe.each(Object.entries(themes(indexCss)))('index.css %s theme meets WCAG A
 
   it.each(['--color-accent', '--color-accent-700'])('on-accent on %s fill ≥ 4.5:1', fill => {
     expect(contrast(solid(t, '--color-on-accent'), solid(t, fill))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it.each(STATUS_FILLS)('on-status and bg text on a %s fill ≥ 4.5:1', fill => {
+    const f = paint(t, fill)
+    for (const fg of ON_FILL) {
+      for (const a of FILL_ALPHAS) {
+        for (const [name, s] of surfaces()) {
+          const bgRgb = over({ rgb: f.rgb, a }, s)
+          expect(contrast(solid(t, fg), bgRgb), `${fg} on ${fill} @${a} over ${name}`).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+    }
   })
 
   it('the focus ring is the solid --color-focus', () => {

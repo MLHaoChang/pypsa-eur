@@ -40,7 +40,7 @@
   /* Borders / hairlines — fine to strong */
   --color-border: #e6e6e6;
   --color-border-2: #d9d9d9;
-  --color-border-3: #b3b3b3;
+  --color-border-3: #808080; /* strong hairline and hover border: ≥ 3.3 : 1 on every surface (WCAG 1.4.11) */
   --color-grid: #ececec;
 
   /* Ink scale (text) */
@@ -70,6 +70,10 @@
      theme's red (5.7 : 1); the dark theme's bright red needs ink instead. */
   --color-on-accent: #ffffff;
   --color-focus: #d0021b;
+  /* Foreground for anything FILLED with a status colour (bg-danger, bg-warn,
+     bg-success, bg-info). White on the light theme's deep status colours;
+     the dark theme's bright ones need ink, like on-accent. */
+  --color-on-status: #ffffff;
 
   /* State colours. `danger` stays the saturated destructive red even though
      the brand accent is now also red — red IS the destructive signal, and
@@ -178,19 +182,20 @@
 }
 
 /* ── Dark theme overrides ──────────────────────────────────────────────────
-   Activated by `<html data-theme="dark">` (the shipped default). Matches the
-   sign-in landing page in index.html: a near-black surface ramp warmed a few
+   Activated by `<html data-theme="dark">`, the user's toggle (light is the
+   default, THEME-LIGHT-1). Matches the sign-in page's dark theme
+   (public/brand.css): a near-black surface ramp warmed a few
    degrees toward red, near-white text with a desaturated warm grey for
    secondary copy, and a red accent. Hairlines are the solid-hex equivalents of
    rgba(255,255,255,0.10) → 0.18 composited over the surface ramp, so the
    existing border utilities keep working without an alpha channel.
 
    The second selector pins the SAME ramp onto any subtree marked
-   `data-pypsa-surface="brand-dark"`. The projects home is the product's front
-   door and is always dark (it shares the sign-in page's backdrop), so
-   token-driven children mounted inside it — NewProjectWizard and friends —
-   must read the dark ramp even when the user's workbench preference is light.
-   Custom properties cascade, so redeclaring them on a subtree is enough. */
+   `data-pypsa-surface="brand-dark"`: the projects home when the workspace
+   theme is dark, and the admin console, which stays dark until the colour
+   sweep (THEME-LIGHT-1 slice d). Token-driven children mounted inside it —
+   NewProjectWizard and friends — read the dark ramp. Custom properties
+   cascade, so redeclaring them on a subtree is enough. */
 /* The projects home in the light theme: the `--brand-*` names the home page
    uses map onto the light tokens, so it follows the workspace theme. */
 [data-pypsa-surface="brand-light"] {
@@ -210,7 +215,7 @@
   --brand-danger: var(--color-danger);
   --brand-warn: var(--color-warn);
   --brand-red-gradient: linear-gradient(135deg, var(--color-accent), var(--color-accent-700));
-  --brand-red-glow: 0 10px 24px rgba(179, 38, 30, 0.22);
+  --brand-red-glow: 0 10px 24px rgba(208, 2, 27, 0.22);
 }
 
 :root[data-theme="dark"],
@@ -231,7 +236,7 @@
 
   --color-border: #2e2729;
   --color-border-2: #3d3437;
-  --color-border-3: #514649;
+  --color-border-3: #806f72; /* ≥ 3.3 : 1 on every dark surface; was #514649, 1.9 : 1 */
   --color-grid: #2e2729;
 
   --color-ink-900: #f4eaea;
@@ -258,6 +263,7 @@
   --color-accent-50: #260c0e;
   --color-on-accent: #14090a;
   --color-focus: #ff5252;
+  --color-on-status: #14090a;
 
   --color-nav: #131011;
   --color-nav-hover: #211b1c;

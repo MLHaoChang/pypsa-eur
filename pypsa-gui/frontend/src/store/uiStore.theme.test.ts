@@ -61,7 +61,7 @@ describe('opening theme: stored choice → OS preference → light', () => {
     expect(useUIStore.getState().theme).toBe(want)
   })
 
-  for (const file of ['spa.html', 'index.html']) {
+  for (const file of ['spa.html', 'index.html', 'public/login.html']) {
     it.each(matrix)(`${file} boot script: stored %s, OS %s → %s`, (stored, os, want) => {
       arrange(stored, os)
       delete document.documentElement.dataset.theme

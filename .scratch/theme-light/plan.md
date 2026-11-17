@@ -75,7 +75,9 @@ Parses `index.css` and `brand.css`, and for both themes asserts:
 - 4.5:1 for text tokens (`text`, `ink-900…500`, `muted`, `legend`, `accent`, `danger`, `info`)
   on `bg`, `bg-2`, `panel`, `panel-2`, `band`, `tint`, and `accent-50` for `accent`;
 - 4.5:1 for `on-accent` on `accent` and `accent-700`;
-- 3:1 for `axis` and `border-3` (UI components, WCAG 1.4.11);
+- 3:1 for `axis`, `focus` and `border-3` (UI components, WCAG 1.4.11);
+- 4.5:1 for `on-status` and `bg` text on every status fill at 90–100 % opacity
+  (`statusFill.guard.test.ts` keeps text-bearing fills on those foregrounds);
 - the same pairs for the sign-in page's `--brand-*` tokens.
 The existing chart guard (`chartThemeTokens.test.ts`) keeps the 3:1 and ΔE ≥ 10 pins.
 

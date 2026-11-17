@@ -1184,7 +1184,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '' }}
         >
           <ThemeIcon size={12} />
-          <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
+          <span>{theme === 'light' ? 'Dark theme' : 'Light theme'}</span>
         </button>
         <button
           onClick={toggleDensity} title={densityTitle}
