@@ -414,7 +414,8 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
         return s
 
     held = pd.Series(0.0, index=sns)
-    parts: list[tuple[str, str, pd.Series]] = []  # (name, kind, headroom): what `held` sums, per unit
+    # (name, kind, headroom) per unit: the terms `held` sums
+    parts: list[tuple[str, str, pd.Series]] = []
     avail = _avail(n, "Generator", sns, sel["dispatchable"])
     status = getattr(n.generators_t, "status", None)
     for g in sel["dispatchable"]:
@@ -485,7 +486,7 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
                     for name, kind, v in parts
                     if float(v[t]) > 0
                 ),
-                key=lambda x: -x["held_mw"],
+                key=lambda x: (-x["held_mw"], x["name"]),
             )
         out["per_snapshot"].append(row)
         if binds:

@@ -1064,7 +1064,9 @@ def test_a_battery_is_named_with_the_energy_it_can_deliver():
     res = operating_reserve_result(n, (0.18, 0.0, 0.0))  # required 1.8 = what it holds
     r = res["per_snapshot"][0]
     assert r["binding"]
-    assert r["holders"] == [{"name": "bess", "kind": "storage_unit", "held_mw": pytest.approx(1.8)}]
+    assert r["holders"] == [
+        {"name": "bess", "kind": "storage_unit", "held_mw": pytest.approx(1.8)}
+    ]
 
 
 def test_non_binding_hours_carry_no_holders():
@@ -1091,3 +1093,155 @@ def test_no_holders_when_the_dispatch_is_missing():
     del n.generators_t.p["diesel"]
     res = operating_reserve_result(n, (0.2, 0.0, 0.0))
     assert res["reason"] and not any("holders" in r for r in res["per_snapshot"])
+
+
+def _frozen(n, diesel_p, status=None):
+    """Hand-set dispatch (no solve): pv idle, diesel at `diesel_p`, load LOAD_MW."""
+    sns = n.snapshots
+    n.generators_t.p = pd.DataFrame({"pv": 0.0, "diesel": diesel_p}, index=sns)
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    if status is not None:
+        n.generators_t.status = pd.DataFrame({"diesel": status}, index=sns)
+
+
+def test_the_units_add_up_to_held_when_one_is_large_and_one_tiny():
+    """H1: the units are the very terms `held` sums, so the sum agrees with held_mw to float
+    summation order only (hence approx at 1e-12), with a 1e6 MW unit beside a 1e-6 MW one."""
+    n = _network(committable=False)
+    n.add(
+        "Generator", "tiny", bus="ac", carrier="diesel", p_nom=1e-6, marginal_cost=250.0
+    )
+    n.generators.loc["diesel", "p_nom"] = 1e6
+    sns = n.snapshots
+    n.generators_t.p = pd.DataFrame({"pv": 0.0, "diesel": 0.0, "tiny": 0.0}, index=sns)
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    held = 1e6 + 1e-6
+    res = operating_reserve_result(n, (held / LOAD_MW, 0.0, 0.0))["per_snapshot"][0]
+    assert res["binding"]
+    assert sum(h["held_mw"] for h in res["holders"]) == pytest.approx(
+        res["held_mw"], rel=1e-12
+    )
+    assert [h["name"] for h in res["holders"]] == ["diesel", "tiny"]
+
+
+def test_equal_holders_are_ordered_by_name():
+    n = _network(committable=False)
+    n.add(
+        "Generator",
+        "alpha",
+        bus="ac",
+        carrier="diesel",
+        p_nom=12.0,
+        marginal_cost=250.0,
+    )
+    n.generators.loc["diesel", "p_nom"] = 12.0
+    sns = n.snapshots
+    n.generators_t.p = pd.DataFrame({"pv": 0.0, "diesel": 0.0, "alpha": 0.0}, index=sns)
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    r = operating_reserve_result(n, (2.4, 0.0, 0.0))["per_snapshot"][
+        0
+    ]  # required 24 = 12 + 12
+    assert r["binding"]
+    assert [(h["name"], h["held_mw"]) for h in r["holders"]] == [
+        ("alpha", 12.0),
+        ("diesel", 12.0),
+    ]
+    assert {h["kind"] for h in r["holders"]} == {"generator"}
+
+
+def test_a_committable_unit_that_is_off_is_not_a_holder_and_an_on_one_is():
+    n = _network()
+    sns = n.snapshots
+    _frozen(n, 0.0, status=np.array([0.0] * 12 + [1.0] * 12))
+    out = operating_reserve_result(n, (0.6, 0.0, 0.0))  # required 6 MW
+    off, on = out["per_snapshot"][0], out["per_snapshot"][12]
+    # off: no headroom at all, so the hour binds (6 MW required, 0 held) and names nobody
+    assert off["held_mw"] == 0.0 and off["binding"] and off["holders"] == []
+    assert on["held_mw"] == 12.0
+    out = operating_reserve_result(
+        n, (1.2, 0.0, 0.0)
+    )  # required 12 MW = diesel's headroom
+    assert out["per_snapshot"][12]["holders"] == [
+        {"name": "diesel", "kind": "generator", "held_mw": 12.0}
+    ]
+    assert out["per_snapshot"][0]["holders"] == []
+
+
+def test_a_unit_missing_from_the_dispatch_gives_a_reason_and_no_holders():
+    n = _network(committable=False, battery=True)
+    sns = n.snapshots
+    _frozen(n, 0.0)
+    n.storage_units_t.p_dispatch = pd.DataFrame({"bess": 0.0}, index=sns)
+    n.storage_units_t.p_store = pd.DataFrame({"bess": 0.0}, index=sns)
+    # no state_of_charge column for the battery: it was added after the solve
+    res = operating_reserve_result(n, (0.2, 0.0, 0.0))
+    assert "bess" in res["reason"]
+    assert res["per_snapshot"] == []
+
+
+# ── 01d: the chat read ──────────────────────────────────────────────────────
+
+
+def _payload(n_binding, n_holders):
+    rows = [
+        {"snapshot": f"h{i}", "required_mw": 2.0, "held_mw": 2.0, "binding": False}
+        for i in range(3)
+    ]
+    for i in range(n_binding):
+        hs = [
+            {"name": f"u{k}", "kind": "generator", "held_mw": float(n_holders - k)}
+            for k in range(n_holders)
+        ]
+        rows.append(
+            {
+                "snapshot": f"b{i}",
+                "required_mw": 2.0,
+                "held_mw": 2.0,
+                "binding": True,
+                "holders": hs,
+            }
+        )
+    return {
+        "shares": {"load": 0.1, "pv": 0, "wind": 0},
+        "not_counted": [],
+        "per_snapshot": rows,
+        "binding": [r["snapshot"] for r in rows if r["binding"]],
+        "reason": None,
+    }
+
+
+def test_the_chat_read_lists_binding_hours_only_with_true_totals():
+    from services.chat_tools import _operating_reserve_page
+
+    out = _operating_reserve_page(_payload(30, 8))
+    assert out["hours_total"] == 33 and out["binding_hours_total"] == 30
+    assert len(out["binding_hours"]) == 24 and out["offset"] == 0
+    assert all(r["binding"] for r in out["binding_hours"])
+    assert all(
+        len(r["holders"]) == 5 and r["holders_total"] == 8 for r in out["binding_hours"]
+    )
+    assert "per_snapshot" not in out and "binding" not in out
+    nxt = _operating_reserve_page(_payload(30, 8), offset=24)
+    assert [r["snapshot"] for r in nxt["binding_hours"]] == [
+        f"b{i}" for i in range(24, 30)
+    ]
+    assert len(_operating_reserve_page(_payload(30, 1), limit=3)["binding_hours"]) == 3
+
+
+def test_the_chat_tool_answers_the_reserve_goal(monkeypatch):
+    """The assistant reads the reserve through get_results (the row that said it could not is gone)."""
+    from routers import results as results_router
+    from services import chat_tools
+
+    assert "operating_reserve" in chat_tools._RESULTS_ENUM
+    monkeypatch.setattr(results_router, "get_operating_reserve", lambda: _payload(2, 2))
+    monkeypatch.setattr(chat_tools, "_with_freshness", lambda r: r)
+    out = chat_tools.get_results("operating_reserve")
+    assert out["binding_hours_total"] == 2
+    assert out["binding_hours"][0]["holders"][0]["name"] == "u0"
+    off = _payload(0, 0) | {
+        "shares": None,
+        "reason": "the operating reserve was off for this solve",
+    }
+    monkeypatch.setattr(results_router, "get_operating_reserve", lambda: off)
+    assert chat_tools.get_results("operating_reserve")["shares"] is None

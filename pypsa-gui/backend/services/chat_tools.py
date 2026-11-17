@@ -650,6 +650,8 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     "renewable_fraction": "get_renewable_fraction",
     # homer-parity 01d.
     "operating_reserve": "get_operating_reserve",
+    # homer-parity 01d.
+    "operating_reserve": "get_operating_reserve",
     # Edge Investment Case P3 WP3.4.
     "value_flows": "get_value_flows",
 }
@@ -735,7 +737,30 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
     if result_kind == "value_flows" and isinstance(result, dict) and result.get("status") == "ok":
         result = (_value_flow_lines_page(result, offset, limit) if detail == "lines"
                   else _value_flows_summary(result))
+    if result_kind == "operating_reserve" and isinstance(result, dict) and "per_snapshot" in result:
+        result = _operating_reserve_page(result, offset, limit)
     return _with_freshness(result)
+
+
+_RESERVE_ROWS = 24     # binding hours per read (homer-parity 01d)
+_RESERVE_HOLDERS = 5   # units named per binding hour
+
+
+def _operating_reserve_page(result: dict, offset: int = 0, limit: int | None = None) -> dict:
+    """The reserve for the model: only the binding hours, one page of them, each with its largest
+    holders. Every count is the true total, so the model never reads a cut list as the whole."""
+    rows = [r for r in result["per_snapshot"] if r.get("binding")]
+    start = max(0, int(offset or 0))
+    size = _RESERVE_ROWS if limit is None else max(1, min(int(limit), _RESERVE_ROWS))
+    page = []
+    for r in rows[start:start + size]:
+        holders = r.get("holders") or []
+        page.append({**{k: v for k, v in r.items() if k != "holders"},
+                     "holders": holders[:_RESERVE_HOLDERS], "holders_total": len(holders)})
+    out = {k: v for k, v in result.items() if k not in ("per_snapshot", "binding")}
+    return {**out, "hours_total": len(result["per_snapshot"]), "binding_hours_total": len(rows),
+            "binding_hours": page, "offset": start,
+            "note": "Only binding hours are listed; page with offset/limit."}
 
 
 def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -> dict:

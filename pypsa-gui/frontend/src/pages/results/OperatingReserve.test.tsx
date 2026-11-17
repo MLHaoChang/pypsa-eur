@@ -48,7 +48,7 @@ it('lists the binding hours with the shares in plain text and the inputs link', 
   expect(screen.getByText('Shortfall (MW)')).toBeTruthy()
   expect(screen.getByText('0.5')).toBeTruthy()
   expect(screen.getByText(/bat\./)).toBeTruthy()
-  expect(screen.getByTestId('operating-reserve-holders').textContent).toBe('Diesel 1.2 MW, Battery (storage) 0.3 MW')
+  expect(screen.getByTestId('operating-reserve-holders').textContent).toBe('Diesel 1.2 MW · Battery (storage) 0.3 MW')
   fireEvent.click(screen.getByTestId('operating-reserve-inputs'))
   expect(openOffGrid).toHaveBeenCalledTimes(1)
 })
@@ -68,13 +68,15 @@ it('states the cap and translates the server reason', async () => {
   expect((await screen.findByTestId('operating-reserve-reason')).textContent).not.toMatch(/the solve has no dispatch for g1/)
 })
 
-it('caps the units named per hour and says when none were reported', async () => {
-  const holders = Array.from({ length: 6 }, (_, i) => ({ name: `u${i}`, kind: 'generator' as const, held_mw: 6 - i }))
+it('folds past five units behind Show all and explains a binding hour with no holders', async () => {
+  const holders = Array.from({ length: 7 }, (_, i) => ({ name: `u${i}`, kind: 'generator' as const, held_mw: 7 - i }))
   show({ ...base, per_snapshot: [
-    { snapshot: 'a', required_mw: 21, held_mw: 21, binding: true, holders },
-    { snapshot: 'b', required_mw: 1, held_mw: 1, binding: true },
+    { snapshot: 'a', required_mw: 28, held_mw: 28, binding: true, holders },
+    { snapshot: 'b', required_mw: 1, held_mw: 0, binding: true, holders: [] },
   ] })
   const cells = await screen.findAllByTestId('operating-reserve-holders')
-  expect(cells[0].textContent).toBe('u0 6 MW, u1 5 MW, u2 4 MW, u3 3 MW and 2 more')
-  expect(cells[1].textContent).toBe('No unit reported')
+  expect(cells[0].textContent).toBe('u0 7 MW · u1 6 MW · u2 5 MW · u3 4 MW · u4 3 MW · (2 more) Show all')
+  expect(cells[1].textContent).toBe('No unit had spare capacity to hold reserve')
+  fireEvent.click(screen.getByTestId('operating-reserve-show-all'))
+  expect(screen.getAllByTestId('operating-reserve-holders')[0].textContent).toBe('u0 7 MW · u1 6 MW · u2 5 MW · u3 4 MW · u4 3 MW · u5 2 MW · u6 1 MW')
 })
