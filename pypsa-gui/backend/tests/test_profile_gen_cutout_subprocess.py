@@ -274,7 +274,8 @@ def test_a_foreign_class_with_a_typed_name_takes_the_generic_path(caplog):
     assert "cds.example" in caplog.text  # the library text stays in the server log
 
 
-def test_untyped_child_error_reaches_the_caller_as_its_type_only(cds_env, caplog):
+@pytest.mark.parametrize("in_child", [True, False])
+def test_untyped_error_reaches_the_caller_as_its_type_only(cds_env, caplog, in_child):
     cache = cds_env / "c"
     _seed(cache, range(1, 12))
     with pytest.raises(CutoutDownloadError) as info:
@@ -283,9 +284,11 @@ def test_untyped_child_error_reaches_the_caller_as_its_type_only(cds_env, caplog
             YEAR,
             cache_dir=cache,
             downloader=cutout_fakes.boom,
-            fetch_in_subprocess=True,
+            fetch_in_subprocess=in_child,
         )
-    assert "RuntimeError" in str(info.value) and "month 12" in str(info.value)
+    assert str(info.value) == (
+        "ERA5 download failed at month 12 (RuntimeError); see the server log"
+    )
     assert "secret" not in str(info.value) and "cds.example" not in str(info.value)
     assert "cds.example" in caplog.text
     _no_children_left()
@@ -393,6 +396,8 @@ def test_a_month_that_wrote_nothing_is_never_merged(cds_env, in_child):
 
 
 def test_a_full_year_in_children_resumes_and_merges(cds_env):
+    """The queue worker always passes its stop_event: an unset one lets the
+    children run to the end."""
     cache = cds_env / "c"
     _seed(cache, range(1, 10))
     final = ensure_cutout(
@@ -401,6 +406,7 @@ def test_a_full_year_in_children_resumes_and_merges(cds_env):
         cache_dir=cache,
         downloader=cutout_fakes.ok,
         fetch_in_subprocess=True,
+        stop_event=threading.Event(),
     )
     import xarray as xr
 
