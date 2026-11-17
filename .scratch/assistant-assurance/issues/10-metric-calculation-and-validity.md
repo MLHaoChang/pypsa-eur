@@ -7,7 +7,7 @@ Status: ready-for-agent
 Model: Opus
 Progress: harness/calculations.py with generator, network and storage profiles shipped; other domains, NPV and validity checks pending
 Type: task
-Blocked by: reliability contract review; 01 for computed schema; 02 for raw evidence
+Blocked by: none (reliability contract review done, GK B OK @d36109ae, AA-A04-REVIEW-1; 01 and 02 done)
 
 ## Scope
 

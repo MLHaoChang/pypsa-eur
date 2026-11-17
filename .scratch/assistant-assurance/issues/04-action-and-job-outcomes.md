@@ -6,7 +6,7 @@
 Status: ready-for-agent
 Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) merged ee141c66; S1b (chat tool-line marks) in review; S2–S5 planned; update_component static inputs done (effects.py)
 Type: task
-Blocked by: 01, 02; live-voice issue 11 for nonblocking jobs
+Blocked by: none (01 and 02 done; live-voice 11a and 11b merged, #1548; only the nonblocking-job cases of the test matrix wait for live-voice 11c, the versioned job events)
 
 Read the [spec](../spec.md), [test matrix](../test-plan.md),
 [plan](../../../docs/superpowers/plans/2026-10-10-assistant-answer-assurance.md)
