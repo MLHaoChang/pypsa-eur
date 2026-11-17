@@ -69,7 +69,7 @@ def run_ratings(run_dir, rated_mva=None, mva_source="", rated_mw=None, mw_source
     if rated_mw is None:
         path = Path(run_dir) / CAMPUS_YAML
         if path.is_file():
-            pcc = (yaml.safe_load(path.read_text()) or {}).get("pcc") or {}
+            pcc = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("pcc") or {}
             if pcc.get("p_connection_mw") is not None:
                 rated_mw, mw_source = pcc["p_connection_mw"], RATED_MW_SOURCE
     return Ratings(rated_mw, mw_source, rated_mva, mva_source)

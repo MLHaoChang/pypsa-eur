@@ -193,7 +193,7 @@ def test_end_to_end_status_counts(tmp_path):
     j = judge_pack(_full_pack(tmp_path), PROFILE, RATINGS)
     cases = _by_id(j)
     assert {k: c["status"] for k, c in cases.items()} == {
-        "fault_3ph_skmin_xrmin_v030": "pass",
+        "fault_3ph_skmin_xrmin_v030": "unknown",
         "fault_1ph_skmin_xrmin_v030": "unknown",
         "p_step_skmin_xrmin_up": "pass",
         "p_step_skmin_xrmin_down": "fail",
@@ -202,7 +202,7 @@ def test_end_to_end_status_counts(tmp_path):
         "v_step_skmin_xrmin_up": "unknown",
         "flat_skmin_xrmin": "unknown",
     }
-    assert status_counts(j) == {"pass": 4, "fail": 1, "unknown": 3}
+    assert status_counts(j) == {"pass": 3, "fail": 1, "unknown": 4}
     assert cases["v_step_skmin_xrmin_up"]["detail"] == "no result file"
     assert "not judged by GC-07" in cases["flat_skmin_xrmin"]["detail"]
     assert cases["flat_skmin_xrmin"]["rows"] == []
@@ -220,8 +220,10 @@ def test_one_phase_fault_says_positive_sequence_and_why_connection_is_unknown(tm
     assert others and not any(NO_CONNECTED in r["detail"] for r in others)
     three = _rows(_by_id(j)["fault_3ph_skmin_xrmin_v030"])
     assert not any(ONE_PHASE in r["detail"] for r in three.values())
-    assert three["stays_connected"]["status"] == "pass"
-    assert not any(NO_CONNECTED in r["detail"] for r in three.values())
+    # a 'connected' column outside the contract is not read (K3, GC-12)
+    assert "connected" in _ride_through()
+    assert three["stays_connected"]["status"] == "unknown"
+    assert NO_CONNECTED in three["stays_connected"]["detail"]
 
 
 def test_every_row_and_case_carries_the_pack_binding(tmp_path):
@@ -534,6 +536,40 @@ def test_a_wrong_unit_is_unknown_naming_it(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    "case, channels",
+    [
+        (
+            _case("v_step_skmin_xrmin_up", "v_step", {"step_pu": 0.05}, "06"),
+            {"v_poc_pu": ("kV", np.full_like(T, 110.0))},
+        ),
+        (
+            _case(
+                "fault_3ph_skmin_xrmin_v030",
+                "fault_3ph",
+                {"v_retained_pu": 0.3, "duration_s": 0.15},
+            ),
+            {"v_poc_pu": ("kV", np.where(FAULT, 33.0, 110.0))},
+        ),
+    ],
+)
+def test_a_voltage_not_in_pu_is_unknown_naming_it(tmp_path, case, channels):
+    c = _one(tmp_path, case, case.case_id, channels, RATINGS)
+    assert c["status"] == "unknown" and c["rows"] == []
+    assert "'v_poc_pu' is in 'kV', expected 'pu'" in c["detail"]
+
+
+def test_an_unreadable_result_is_unknown_for_that_case_only(tmp_path):
+    pack = _full_pack(tmp_path)
+    (pack / "results" / "p_step_skmin_xrmin_down.out").unlink()
+    j = judge_pack(pack, PROFILE, RATINGS)
+    cases = _by_id(j)
+    bad = cases["p_step_skmin_xrmin_down"]
+    assert bad["status"] == "unknown" and bad["rows"] == []
+    assert bad["detail"].startswith("p_step_skmin_xrmin_down.inf unreadable: ")
+    assert cases["p_step_skmin_xrmin_up"]["status"] == "pass"
+
+
 def test_fault_without_p_or_iq_judges_what_it_has(tmp_path):
     case = _case(
         "fault_3ph_skmin_xrmin_v030",
@@ -544,7 +580,7 @@ def test_fault_without_p_or_iq_judges_what_it_has(tmp_path):
     del ch["iq_pu"], ch["p_poc_mw"]
     c = _one(tmp_path, case, case.case_id, ch, RATINGS)
     rows = _rows(c)
-    assert rows["stays_connected"]["status"] == "pass"
+    assert rows["stays_connected"]["status"] == "unknown"
     assert rows["reactive_current_rise"]["status"] == "unknown"
     assert c["status"] == "unknown"
 
@@ -579,7 +615,7 @@ def test_driver_writes_json_and_csv_and_a_rerun_replaces_both(tmp_path):
 
 def test_a_string_pack_path_is_accepted(tmp_path):
     j = judge_pack(str(_full_pack(tmp_path)), PROFILE, RATINGS)
-    assert status_counts(j) == {"pass": 4, "fail": 1, "unknown": 3}
+    assert status_counts(j) == {"pass": 3, "fail": 1, "unknown": 4}
     assert read_manifest(str(tmp_path / "pack"))["data_hash"] == "d" * 64
 
 
@@ -689,4 +725,4 @@ def test_a_written_emt_pack_is_read_and_judged(tmp_path):
         and c["rows"] == []
         and not k.startswith(("flat", "f_ramp", "phase_jump"))
     )
-    assert _rows(cases[fault])["stays_connected"]["status"] == "pass"
+    assert _rows(cases[fault])["stays_connected"]["status"] == "unknown"

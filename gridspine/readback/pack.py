@@ -33,9 +33,9 @@ Battery kind to judge kind:
 
 MW and Mvar channels become pu of the plant's rated active and apparent power
 (``Ratings``); a case that needs a rating the caller has not given is
-``unknown``. The contract has no breaker / trip status channel (issue GC-12):
-a ``connected`` channel is used only when the result file carries one by that
-name, so a fault case reads ``unknown`` from contract channels alone.
+``unknown``. The contract has no breaker / trip status channel (issue GC-12),
+so stays-connected is ``unknown`` and no fault case passes; a ``connected``
+column outside the contract is not read.
 """
 
 from __future__ import annotations
@@ -62,9 +62,9 @@ KNOWN_PACKS = {"pscad_emt": ("1",)}
 KNOWN_CONTRACT_VERSIONS = (CONTRACT_VERSION,)
 NOT_JUDGED = ("flat", "f_ramp", "phase_jump")
 NO_CONNECTED = (
-    "the channel contract has no breaker / trip status channel (GC-12) and the "
-    "result file carries no 'connected' channel: stays-connected is unknown, so "
-    "no fault case passes from contract channels alone"
+    "the channel contract has no breaker / trip status channel (GC-12): "
+    "stays-connected is unknown, so no fault case passes until the contract "
+    "carries one"
 )
 ONE_PHASE = "positive-sequence voltage; per-phase ride-through not judged"
 
@@ -229,8 +229,6 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
         for role, name in (("v1", "v_poc_pu"), ("iq", "iq_pu")):
             if name in frame:
                 take(role, frame.channel(name), frame.units[name])
-        if "connected" in frame:
-            take("connected", frame.channel("connected"), frame.units["connected"])
         pmw, _ = _pu(frame, "p_poc_mw", "MW", ratings.rated_mw, "rated P")
         if pmw is not None:
             take("p", pmw, "pu")
@@ -243,6 +241,12 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
             if "v_poc_pu" not in frame:
                 return _unknown_case(
                     case.case_id, case.kind, "the result has no 'v_poc_pu' channel"
+                )
+            if frame.units["v_poc_pu"] != "pu":
+                return _unknown_case(
+                    case.case_id,
+                    case.kind,
+                    f"'v_poc_pu' is in {frame.units['v_poc_pu']!r}, expected 'pu'",
                 )
             y = frame.channel("v_poc_pu")
         else:
@@ -290,6 +294,12 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
             return _unknown_case(
                 case.case_id, case.kind, f"the result has no {name!r} channel"
             )
+        if frame.units[name] != unit:
+            return _unknown_case(
+                case.case_id,
+                case.kind,
+                f"{name!r} is in {frame.units[name]!r}, expected {unit!r}",
+            )
     view = ChannelFrame(frame.time, channels, units, frame.source)
     result = judge(view, jc, profile)
     for row in result["rows"]:
@@ -298,7 +308,7 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
         if row["check"] in p_rows:
             base = _p_base(ratings)
             row["detail"] = f"{row['detail']}; {base}" if row["detail"] else base
-        if row["check"] == "stays_connected" and "connected" not in jc["channels"]:
+        if row["check"] == "stays_connected":
             row["detail"] = (
                 f"{row['detail']}; {NO_CONNECTED}" if row["detail"] else NO_CONNECTED
             )
@@ -335,8 +345,15 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
         if found is None:
             cases.append(_unknown_case(case.case_id, case.kind, "no result file"))
             continue
-        read, _label = found
-        cases.append(_judge_one(case, read(), profile, ratings))
+        read, label = found
+        try:
+            frame = read()
+        except ContractError as exc:
+            cases.append(
+                _unknown_case(case.case_id, case.kind, f"{label} unreadable: {exc}")
+            )
+            continue
+        cases.append(_judge_one(case, frame, profile, ratings))
     stamp = {
         "data_hash": manifest["data_hash"],
         "contract_version": manifest["contract_version"],
