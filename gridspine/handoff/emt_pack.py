@@ -68,6 +68,7 @@ import json
 import math
 import shutil
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -80,6 +81,7 @@ from gridspine.handoff.test_battery import (
     battery_json,
     build_battery,
     contract_channels,
+    corner_level,
     fault_impedance_ohm,
     thevenin_impedances_ohm,
     validate_battery,
@@ -255,9 +257,17 @@ def study_sources(pcc: dict) -> tuple:
     return tuple(out), gaps
 
 
-def _corner_zero_sequence(sources) -> tuple:
+class CornerZeroSequence(NamedTuple):
+    """The battery's zero sequence per corner level, and whether Sk-min borrowed the max case's."""
+
+    z0_over_z1: dict
+    x0_over_r0: dict
+    min_assumed: bool
+
+
+def _corner_zero_sequence(sources) -> CornerZeroSequence:
     """
-    ``(z0_over_z1, x0_over_r0, min_assumed)`` per corner level for the battery.
+    The zero sequence per corner level for the battery.
 
     The Sk-max corners take the max case's zero sequence and the Sk-min
     corners the min case's; when the min case holds none they take the max
@@ -270,7 +280,7 @@ def _corner_zero_sequence(sources) -> tuple:
         )
     min_assumed = not by["min"].has_zero_sequence
     at_min = by["max"] if min_assumed else by["min"]
-    return (
+    return CornerZeroSequence(
         {"skmax": by["max"].z0_over_z1, "skmin": at_min.z0_over_z1},
         {"skmax": by["max"].x0_over_r0, "skmin": at_min.x0_over_r0},
         min_assumed,
@@ -291,14 +301,14 @@ def battery_from_campus(campus, overrides=None) -> tuple:
     sources, _ = study_sources(pcc)
     by = {g.label: g for g, _ in sources}
     xrs = (by["max"].x_over_r, by["min"].x_over_r)
-    z0_over_z1, x0_over_r0, _ = _corner_zero_sequence(sources)
+    z0 = _corner_zero_sequence(sources)
     return build_battery(
         by["min"].sk_mva,
         by["max"].sk_mva,
         min(xrs),
         max(xrs),
-        z0_over_z1=z0_over_z1,
-        x0_over_r0=x0_over_r0,
+        z0_over_z1=z0.z0_over_z1,
+        x0_over_r0=z0.x0_over_r0,
         overrides=overrides,
         contract_version=EMT_CONTRACT_VERSION,
     )
@@ -312,13 +322,13 @@ def _z0_note(min_assumed) -> str:
     )
 
 
-def readme_text(battery, z0_assumed, min_assumed) -> str:
-    """``README.md``: the contract's channels, the zero sequence per corner, the c note."""
+def readme_text(zero_sequence: str) -> str:
+    """``README.md``: the contract's channels, the c note and ``zero_sequence`` (one line)."""
     lines = [
         "# PSCAD / EMT pack",
         "",
-        f"Battery contract version {EMT_CONTRACT_VERSION}. Each case writes the channels in "
-        f"{SCHEDULE_CSV}'s `channels` column, named by contract name:",
+        f"Battery contract version {EMT_CONTRACT_VERSION}. Record, for each case, the channels "
+        f"listed in {SCHEDULE_CSV}'s `channels` column, named by contract name:",
         "",
     ]
     for name in contract_channels(EMT_CONTRACT_VERSION):
@@ -332,20 +342,28 @@ def readme_text(battery, z0_assumed, min_assumed) -> str:
         "",
         f"Source impedance: {C_NOTE}.",
         "",
+        zero_sequence,
     ]
+    return "\n".join(lines) + "\n"
+
+
+def _readme_zero_sequence(battery_given, battery, z0_assumed, min_assumed) -> str:
     if battery is None:
-        lines.append(
+        return (
             f"No battery: the max case's zero sequence is not held (see {SUPPLY_CSV})."
         )
-    elif min_assumed:
-        lines.append(
+    if battery_given:
+        return (
+            "Zero sequence: as in the caller's battery (battery.json); not checked against "
+            "the PCC study cases."
+        )
+    if min_assumed:
+        return (
             f"Zero sequence: {_z0_note(True)} (x0x_min, r0x0_min not held). An unbalanced-fault "
             "verdict at an Sk-min corner never passes on this assumed Z0 alone; the manifest's "
             f"`z0_assumed` lists the {len(z0_assumed)} cases."
         )
-    else:
-        lines.append(f"Zero sequence: {_z0_note(False)}.")
-    return "\n".join(lines) + "\n"
+    return f"Zero sequence: {_z0_note(False)}."
 
 
 def _impedance_row(g: Thevenin, vn_kv) -> dict:
@@ -393,7 +411,7 @@ def thevenin_set(
                 **_impedance_row(c.grid, vn_kv),
                 "source": (
                     f"{battery_source}; this corner's Z0 {BATTERY_Z0_NOTE}"
-                    if min_assumed and c.grid.label.startswith("skmin_")
+                    if min_assumed and corner_level(c.grid.label) == "skmin"
                     else battery_source
                 ),
                 "note": C_NOTE,
@@ -435,7 +453,7 @@ def stage_reference(campus, stages) -> list:
 def case_schedule(battery, vn_kv) -> list:
     """One schedule row per battery case, in battery order."""
     rows = []
-    for c in validate_battery(battery):
+    for c in validate_battery(battery, EMT_CONTRACT_VERSION):
         z1, z0 = thevenin_impedances_ohm(c.grid, vn_kv)
         zf = (
             fault_impedance_ohm(c, vn_kv)
@@ -570,10 +588,11 @@ def write_emt_pack(
         f"thevenin: {C_NOTE}; confirm the source impedance convention with the TSO"
     ]
     z0_assumed, min_assumed, battery_source = {}, False, "caller's battery"
+    battery_given = battery is not None
     if battery is None:
         if {g.label: g for g, _ in sources}["max"].has_zero_sequence:
             battery = battery_from_campus(campus)
-            min_assumed = _corner_zero_sequence(sources)[2]
+            min_assumed = _corner_zero_sequence(sources).min_assumed
             battery_source = f"campus PCC corners; Z0 {_z0_note(min_assumed)}"
             if min_assumed:
                 assumptions.append(
@@ -596,7 +615,7 @@ def write_emt_pack(
         z0_assumed = {
             c.case_id: BATTERY_Z0_NOTE
             for c in battery
-            if c.grid.label.startswith("skmin_")
+            if corner_level(c.grid.label) == "skmin"
         }
 
     set_rows = thevenin_set(sources, battery, vn_kv, battery_source, min_assumed)
@@ -625,7 +644,9 @@ def write_emt_pack(
     for name, frame in sheets.items():
         texts[f"{name}.csv"] = frame.to_csv(index=False, lineterminator="\n")
     texts[RSCAD_NOTES] = rscad_notes()
-    texts[README] = readme_text(battery, z0_assumed, min_assumed)
+    texts[README] = readme_text(
+        _readme_zero_sequence(battery_given, battery, z0_assumed, min_assumed)
+    )
     supply += sheet_gaps.to_dict("records")
     texts[SUPPLY_CSV] = _csv(supply, SUPPLY_COLUMNS)
 

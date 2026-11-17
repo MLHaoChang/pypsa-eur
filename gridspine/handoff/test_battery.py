@@ -460,6 +460,14 @@ def _ordered(names) -> tuple:
 _SK_LEVELS = ("skmin", "skmax")
 
 
+def corner_level(label) -> str:
+    """The Sk level (``"skmin"`` or ``"skmax"``) of a battery corner label such as ``skmin_xrmax``."""
+    level = str(label).split("_")[0]
+    if level not in _SK_LEVELS:
+        raise ContractError(f"{label!r} is not a battery corner label")
+    return level
+
+
 def _z0_at(name, value, level):
     """``value`` for corner level ``level``: the number itself, or its entry in a per-level mapping."""
     if not isinstance(value, Mapping):
@@ -532,7 +540,7 @@ def build_battery(
     if xr_min > xr_max:
         raise ContractError(f"xr_min={xr_min} exceeds xr_max={xr_max}")
     grids = {
-        label: Thevenin(label, sk, xr, *z0[label.split("_")[0]])
+        label: Thevenin(label, sk, xr, *z0[corner_level(label)])
         for label, sk, xr in (
             ("skmin_xrmin", sk_min_mva, xr_min),
             ("skmin_xrmax", sk_min_mva, xr_max),

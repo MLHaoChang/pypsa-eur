@@ -412,7 +412,6 @@ def test_manifest_cites_the_contract(tmp_path):
         "i_poc_pu",
         "connected",
     ]
-    assert m["contract_version"] == "2"
     assert m["contract_version"] == emt_pack.EMT_CONTRACT_VERSION
     assert m["files"] and math.isfinite(m["vn_kv"])
 

@@ -15,7 +15,7 @@ import pytest
 
 from gridspine.handoff import emt_pack
 from gridspine.handoff.emt_pack import C_NOTE, write_emt_pack
-from gridspine.handoff.test_battery import battery_json, build_battery
+from gridspine.handoff.test_battery import battery_json, build_battery, corner_level
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from tests.gridspine.test_emt_pack import spec
@@ -94,6 +94,61 @@ def test_min_not_held_skmin_rows_use_the_max_ratios_and_are_assumed(tmp_path):
 def test_held_min_assumes_nothing(held):
     p, _ = held
     assert p.manifest["z0_assumed"] == {}
+    assert not any("Sk-min corners" in a for a in p.manifest["assumptions"])
+    rows = json.loads((p.path / "thevenin_set.json").read_text())["sources"]
+    held_src = (
+        "campus PCC corners; Z0 per corner: Sk-max corners from the max case, "
+        "Sk-min corners from the min case"
+    )
+    assert {r["source"] for r in rows if r["group"] == "battery"} == {held_src}
+
+
+def test_min_not_held_marks_only_the_skmin_corner_rows(tmp_path):
+    p, _ = _pack(tmp_path, x0x_min=None, r0x0_min=None)
+    assert [a for a in p.manifest["assumptions"] if "Sk-min corners" in a] == [
+        "battery zero sequence at the Sk-min corners: assumed: from max "
+        "(x0x_max, r0x0_max); x0x_min, r0x0_min not held"
+    ]
+    rows = json.loads((p.path / "thevenin_set.json").read_text())["sources"]
+    src = {r["label"]: r["source"] for r in rows if r["group"] == "battery"}
+    base = (
+        "campus PCC corners; Z0 Sk-max corners from the max case; Sk-min corners "
+        "assumed: from max"
+    )
+    assert src == {
+        "skmax_xrmin": base,
+        "skmax_xrmax": base,
+        "skmin_xrmin": base + "; this corner's Z0 assumed: from max",
+        "skmin_xrmax": base + "; this corner's Z0 assumed: from max",
+    }
+
+
+def test_caller_battery_rows_and_readme_say_caller(tmp_path):
+    camp = build_campus(spec(x0x_min=None, r0x0_min=None))
+    b = emt_pack.battery_from_campus(camp)
+    p = write_emt_pack(tmp_path / "emt", camp, battery=b)
+    rows = json.loads((p.path / "thevenin_set.json").read_text())["sources"]
+    assert {r["source"] for r in rows if r["group"] == "battery"} == {
+        "caller's battery"
+    }
+    assert p.manifest["z0_assumed"] == {}
+    text = (p.path / "README.md").read_text()
+    assert (
+        "Zero sequence: as in the caller's battery (battery.json); not checked against "
+        "the PCC study cases." in text
+    )
+
+
+def test_case_schedule_refuses_a_v1_battery():
+    v1 = build_battery(2000, 3000, 8, 10, z0_over_z1=3.0, x0_over_r0=10.0)
+    with pytest.raises(ContractError, match="needs the 'connected' channel"):
+        emt_pack.case_schedule(v1, 110.0)
+
+
+@pytest.mark.parametrize("label", ["g", "max", "skmid_xrmin", ""])
+def test_corner_level_refuses_a_non_corner_label(label):
+    with pytest.raises(ContractError, match="is not a battery corner label"):
+        corner_level(label)
 
 
 def test_every_thevenin_row_still_states_the_c_note(held):
@@ -183,6 +238,17 @@ def test_per_corner_mapping_reaches_each_corner():
     "bad", [{"skmin": 2.0}, {"skmin": 2.0, "skmax": 1.5, "x": 1.0}, {}]
 )
 def test_per_corner_mapping_with_wrong_keys_refused(bad):
+    with pytest.raises(
+        ContractError,
+        match=r"x0_over_r0: a per-corner zero sequence maps exactly \['skmin', 'skmax'\]",
+    ):
+        build_battery(1000, 3000, 3, 10, z0_over_z1=1.5, x0_over_r0=bad)
+
+
+@pytest.mark.parametrize(
+    "bad", [{"skmin": 2.0}, {"skmin": 2.0, "skmax": 1.5, "x": 1.0}, {}]
+)
+def test_per_corner_z0z1_mapping_with_wrong_keys_refused(bad):
     with pytest.raises(
         ContractError,
         match=r"z0_over_z1: a per-corner zero sequence maps exactly \['skmin', 'skmax'\]",
