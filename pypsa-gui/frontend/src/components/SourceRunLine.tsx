@@ -44,11 +44,11 @@ export default function SourceRunLine({ source, at, outOfDate = false, missing, 
       {/* The separator is its own flex item, so the gap sits evenly on both sides of it. */}
       {source && missing && <span aria-hidden="true">·</span>}
       {missing && (
-        <span data-testid={`${testId}-missing`}>
-          {RUN_NAME[missing.run].replace(/^t/, 'T')} has not run
+        <span data-testid={`${testId}-missing`} className="inline-flex flex-wrap items-center gap-x-2">
+          <span>{RUN_NAME[missing.run].replace(/^t/, 'T')} has not run</span>
           {missing.action && (
             <>
-              {' · '}
+              <span aria-hidden="true">·</span>
               <button type="button" onClick={missing.action.onClick} className="text-accent hover:underline"
                 data-testid={`${testId}-action`}>{missing.action.label} ›</button>
             </>
