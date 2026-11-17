@@ -33,10 +33,12 @@ TONNE = "t"
 MASS_BALANCE_BASIS = (
     "The tonnes on every tonne bus balance in every period: in = out, to 1e-6 of the tonnes fed in from outside "
     "the site. The LP enforces nodal balance, so this catches corrupt results (stale or rewritten frames, a reader "
-    "that misses a component); it is not a check of the design.")
+    "that misses a component); it is not a check of the design."
+)
 NO_SITE_TRANSFORMER = (
     "the project has no site transformer (an electricity link that feeds the process units, not the grid import), "
-    "so N-1 on it is not evaluated")
+    "so N-1 on it is not evaluated"
+)
 SHED = "concentrate_shed"
 
 
@@ -70,13 +72,20 @@ def bus_terms(n, bus, index):
     """The named in/out terms on `bus` per snapshot (`{label: [values]}`, injection positive), or None when a
     flow the bus carries is unreadable. One-ports by their `sign`; a Link at every port by −p_i."""
     terms = {}
-    for comp, static, dynamic in (("Generator", n.generators, n.generators_t.p),
-                                  ("StorageUnit", n.storage_units, n.storage_units_t.p),
-                                  ("Store", n.stores, n.stores_t.p),
-                                  ("Load", n.loads, n.loads_t.p)):
+    for comp, static, dynamic in (
+        ("Generator", n.generators, n.generators_t.p),
+        ("StorageUnit", n.storage_units, n.storage_units_t.p),
+        ("Store", n.stores, n.stores_t.p),
+        ("Load", n.loads, n.loads_t.p),
+    ):
         names = [str(x) for x in static.index[static["bus"] == bus]]
         for name in names:
-            values = _signed(dynamic, [name], static["sign"] if "sign" in static.columns else None, index)
+            values = _signed(
+                dynamic,
+                [name],
+                static["sign"] if "sign" in static.columns else None,
+                index,
+            )
             if values is None:
                 return None
             terms[f"{comp} {name}"] = values
@@ -96,15 +105,24 @@ def bus_terms(n, bus, index):
 
 def _tonne_buses(n):
     from services.process_products import bus_unit
+
     return [str(b) for b in n.buses.index if bus_unit(n, str(b)) == TONNE]
 
 
 def _fed_in(n, buses, index):
-    """The tonnes fed in from outside the site per snapshot: the supply Generators on tonne buses (a shortfall
-    role's slack is not a supply). None when one is unreadable."""
+    """The tonnes fed in from outside the site per snapshot: the supply Generators on tonne buses. A shortfall
+    role's slack and any LP slack Generator (`slack_generator_mask`, #1461 S1) are not a supply. None when one
+    is unreadable."""
     from models.process_unit import product_role_generators
+    from services.adequacy.slack import slack_generator_mask
+
     slack = set(product_role_generators(n, "shortfall"))
-    names = [str(g) for g in n.generators.index[n.generators["bus"].astype(str).isin(buses)] if str(g) not in slack]
+    slack |= {str(g) for g in n.generators.index[slack_generator_mask(n.generators)]}
+    names = [
+        str(g)
+        for g in n.generators.index[n.generators["bus"].astype(str).isin(buses)]
+        if str(g) not in slack
+    ]
     return _signed(n.generators_t.p, names, None, index)
 
 
@@ -127,22 +145,43 @@ def mass_balance_of(n):
         terms = bus_terms(n, bus, index)
         if terms is None:
             return G.UNREADABLE_DISPATCH
-        per_bus[bus] = [math.fsum(v[k] for v in terms.values()) for k in range(len(index))]
-    periods = list(index.get_level_values(0).unique()) if len(n.investment_periods) else [None]
+        per_bus[bus] = [
+            math.fsum(v[k] for v in terms.values()) for k in range(len(index))
+        ]
+    periods = (
+        list(index.get_level_values(0).unique())
+        if len(n.investment_periods)
+        else [None]
+    )
     rows = []
     for period in periods:
-        pick = ([k for k, p in enumerate(index.get_level_values(0)) if p == period]
-                if period is not None else list(range(len(index))))
+        pick = (
+            [k for k, p in enumerate(index.get_level_values(0)) if p == period]
+            if period is not None
+            else list(range(len(index)))
+        )
         fed = math.fsum(w_all[k] * feed[k] for k in pick)
-        if not fed > 0:  # Q1 (c): a period with nothing fed in is no evidence, never a pass
+        if (
+            not fed > 0
+        ):  # Q1 (c): a period with nothing fed in is no evidence, never a pass
             label = "the whole horizon" if period is None else f"period {period}"
-            return G.NoEvidence("nothing_fed_in", f"no tonnes are fed in from outside the site in {label}, so the "
-                                                  "mass balance has no scale")
+            return G.NoEvidence(
+                "nothing_fed_in",
+                f"no tonnes are fed in from outside the site in {label}, so the "
+                "mass balance has no scale",
+            )
         for bus in buses:
             residual = math.fsum(w_all[k] * abs(per_bus[bus][k]) for k in pick)
-            rows.append({"bus": bus, "period": None if period is None else int(period),
-                         "residual_t": residual, "share": residual / fed, "fed_in_t": fed,
-                         "assumed": False})
+            rows.append(
+                {
+                    "bus": bus,
+                    "period": None if period is None else int(period),
+                    "residual_t": residual,
+                    "share": residual / fed,
+                    "fed_in_t": fed,
+                    "assumed": False,
+                }
+            )
     return G._worst(rows, "share")
 
 
@@ -153,6 +192,7 @@ def _mass_balance(env):
         if not solve_matches_inputs(ctx):
             return G.STALE_SOLVE
         return mass_balance_of(ctx.network)
+
     return G._own_solve(env, read, typed=True)
 
 
@@ -161,7 +201,9 @@ def _mass_balance(env):
 
 def _scorecard_inputs(env, n):
     """The scorecard's inputs for the run's project on `n` (the live network), held to the project's campus
-    grid-code profile (its saved choice, else the default), as `grid_readiness_for` reads them."""
+    grid-code profile (its saved choice, else the default), as `grid_readiness_for` reads them. Saved settings
+    it cannot read (not JSON, not an object, a profile that is not a name) or a grid code that does not load
+    are no evidence, never the default (#1384 N2b)."""
     import json
 
     from services import campus_electrical_service as ce
@@ -170,21 +212,49 @@ def _scorecard_inputs(env, n):
 
     d = project_registry.project_dir(env.project)
     settings = d / ce.SUBDIR / ce.SETTINGS_FILE
-    saved = json.loads(settings.read_text()) if settings.is_file() else {}
-    profile_id = (saved if isinstance(saved, dict) else {}).get("profile") or ce.DEFAULTS["profile"]
-    profile, error = gr._load_profile(profile_id, (d / ce.SUBDIR / ce.GRID_CODES_SUBDIR,))
+    try:
+        saved = json.loads(settings.read_text()) if settings.is_file() else {}
+    except (OSError, ValueError):
+        saved = None
+    chosen = saved.get("profile") if isinstance(saved, dict) else None
+    if not isinstance(saved, dict) or not (chosen is None or isinstance(chosen, str)):
+        return G.NoEvidence(
+            "grid_code_unreadable",
+            f"the project's campus settings ({ce.SETTINGS_FILE}) cannot be read",
+        )
+    profile_id = chosen or ce.DEFAULTS["profile"]
+    profile, error = gr._load_profile(
+        profile_id, (d / ce.SUBDIR / ce.GRID_CODES_SUBDIR,)
+    )
+    if error:
+        return G.NoEvidence(
+            "grid_code_unreadable",
+            f"the grid code {profile_id!r} does not load: {error}",
+        )
     return gr._Inputs(d, n, profile, error, None, None)
+
+
+def _screened(env, of):
+    """`of(inputs)` on the run's live network, or the inputs' NoEvidence."""
+
+    def read(n):
+        inp = _scorecard_inputs(env, n)
+        return inp if isinstance(inp, G.NoEvidence) else of(inp)
+
+    return _on_network(env, read)
 
 
 def _on_network(env, read):
     """`read(n)` on the run's live network under the network guard; NoEvidence with no project."""
     from harness.durable import network_guard
+
     if env.ctx is None or env.project is None:
         return G.NoEvidence("not_run", "the run has no project")
 
     def guarded():
         with network_guard():
             return read(env.ctx.network)
+
     return G._on(env.ctx, guarded)
 
 
@@ -192,28 +262,40 @@ def motor_start_of(inp):
     """Q2: `Detailed("pass" | "fail", rows)` from the scorecard's own motor-start rows; a fail names each
     failing unit's ΔU against the limit. An unknown row with no fail is no evidence."""
     from services.adequacy import grid_readiness as gr
+
     rows = gr._motor_start_rows(inp)
     detail, fails, unknown = [], 0, []
     for r in rows:
         ms = r.get("motor_start") or {}
         name = r["id"].split(":", 1)[1] if ":" in r["id"] else r["id"]
         if r["verdict"] == "pass":
-            detail.append(f"{name}: ΔU {r['project_value']:.2f} % ≤ {r['limit']:g} % ({ms.get('start_method')}): PASS")
-        elif r["verdict"] == gr.RULE_MOTOR_START["otherwise"] and r["project_value"] is not None:
+            detail.append(
+                f"{name}: ΔU {r['project_value']:.2f} % ≤ {r['limit']:g} % ({ms.get('start_method')}): PASS"
+            )
+        elif (
+            r["verdict"] == gr.RULE_MOTOR_START["otherwise"]
+            and r["project_value"] is not None
+        ):
             fails += 1
-            detail.append(f"{name}: ΔU {r['project_value']:.2f} % > {r['limit']:g} % ({ms.get('start_method')}): FAIL")
+            detail.append(
+                f"{name}: ΔU {r['project_value']:.2f} % > {r['limit']:g} % ({ms.get('start_method')}): FAIL"
+            )
         else:
             unknown.append(f"{name}: {r.get('note') or 'not computed'}")
     if fails:
-        return G.Detailed("fail", detail + unknown, "the voltage change at the PoC of each process unit's motor "
-                                                    "start, against the grid code's rapid-voltage-change limit")
+        return G.Detailed(
+            "fail",
+            detail + unknown,
+            "the voltage change at the PoC of each process unit's motor "
+            "start, against the grid code's rapid-voltage-change limit",
+        )
     if unknown:
         return G.NoEvidence("motor_start_unknown", "; ".join(unknown))
     return G.Detailed("pass", detail)
 
 
 def _motor_start(env):
-    return _on_network(env, lambda n: motor_start_of(_scorecard_inputs(env, n)))
+    return _screened(env, motor_start_of)
 
 
 def restart_of(inp):
@@ -230,30 +312,49 @@ def restart_of(inp):
     n = inp.n
     units = restart_units(n)
     if units.empty:
-        return G.NoEvidence("no_process_unit", "the network has no process unit to restart")
+        return G.NoEvidence(
+            "no_process_unit", "the network has no process unit to restart"
+        )
     trips = rt.trip_table(units)
     tripped = set(trips.loc[trips["verdict"].isin(("trips", "unknown")), "unit"])
     if not tripped:
         return G.Detailed(0, ["no process unit trips on the dip classes"])
     limit, _ = ms.limit_from_profile(inp.profile)
     sk_min, vn = gr._poc_sk_min(inp)
-    source = ms.Source(sk_mva=gr._poc_sk_mva(n), sk_min_mva=sk_min, vn_kv=vn if vn is not None else gr._poc_vn_kv(n))
+    source = ms.Source(
+        sk_mva=gr._poc_sk_mva(n),
+        sk_min_mva=sk_min,
+        vn_kv=vn if vn is not None else gr._poc_vn_kv(n),
+    )
     q_gfm, _ = gr._q_gfm_mvar(inp)
-    table, _, total = rs.restart_sequence(units[units["unit"].isin(tripped)], "trip", poc_source=source,
-                                          q_gfm_mvar=q_gfm, limit_pct=limit)
-    detail = [f"{r['unit']}: motor start {r['start_verdict']}, restart {r['verdict']}; {r['note']}"
-              for r in table.to_dict("records")]
-    detail.append(f"lost while restarting: {total['lost_t']:.1f} t"
-                  + (" (a lower bound)" if total["lower_bound"] else ""))
+    table, _, total = rs.restart_sequence(
+        units[units["unit"].isin(tripped)],
+        "trip",
+        poc_source=source,
+        q_gfm_mvar=q_gfm,
+        limit_pct=limit,
+    )
+    detail = [
+        f"{r['unit']}: motor start {r['start_verdict']}, restart {r['verdict']}; {r['note']}"
+        for r in table.to_dict("records")
+    ]
+    detail.append(
+        f"lost while restarting: {total['lost_t']:.1f} t"
+        + (" (a lower bound)" if total["lower_bound"] else "")
+    )
     fails = int(total["fail_count"])
     if not fails and int(total["unknown_count"]):
         return G.NoEvidence("restart_unknown", "; ".join(detail))
-    return G.Detailed(fails, detail, "the units that fail to restart after a grid trip (each motor start on the "
-                                     "PoC against the rapid-voltage-change limit)")
+    return G.Detailed(
+        fails,
+        detail,
+        "the units that fail to restart after a grid trip (each motor start on the "
+        "PoC against the rapid-voltage-change limit)",
+    )
 
 
 def _restart(env):
-    return _on_network(env, lambda n: restart_of(_scorecard_inputs(env, n)))
+    return _screened(env, restart_of)
 
 
 # ── N-1 on the site transformer (Q4) ─────────────────────────────────────────
@@ -273,7 +374,9 @@ def n_1_site_transformer_of(n):
         stopped = PL.units_cut_off(n, link)
         if stopped:
             failing.append(link)
-            detail.append(f"{link} out of service stops {', '.join(sorted(map(str, stopped)))}")
+            detail.append(
+                f"{link} out of service stops {', '.join(sorted(map(str, stopped)))}"
+            )
         else:
             detail.append(f"{link} out of service stops no process unit")
     return G.Detailed(sorted(failing), detail)
@@ -289,6 +392,7 @@ def _n_1_site_transformer(env):
 def _ic_counterfactual_basis(env):
     """`site_today` or `analytic` when the case is established; else no evidence, as `ic.counterfactual`."""
     from services import ic_counterfactual as ic
+
     fact = ic.read(env.ctx, lambda fn: G._on(env.ctx, fn))
     if fact["state"] == ic.ESTABLISHED:
         return fact["basis"]
@@ -308,17 +412,28 @@ def lost_production_of(n, lost_load):
     """`Detailed(worst period's lost tonnes per year, rows)` from the grid-risk section's `connection` line
     (the LP's shortfall, `grid_risk_production`); a missing line is no evidence."""
     from services.results.grid_risk_production import grid_risk_production
+
     out = grid_risk_production(n, lost_load)
     if out is None:
         return G.NoEvidence("no_process_unit", "the network has no process unit")
     line = next(x for x in out["lines"] if x["key"] == "connection")
     if line["status"] == "missing":
-        return G.NoEvidence("lost_production_missing", "; ".join(line["missing"]) or "the lost production is not "
-                                                                                       "readable")
-    rows = [{"period": k, "lost_t_per_year": c["t_per_year"], "lost_eur_per_year": c["eur_per_year"]}
-            for k, c in line["by_period"].items()]
+        return G.NoEvidence(
+            "lost_production_missing",
+            "; ".join(line["missing"]) or "the lost production is not readable",
+        )
+    rows = [
+        {
+            "period": k,
+            "lost_t_per_year": c["t_per_year"],
+            "lost_eur_per_year": c["eur_per_year"],
+        }
+        for k, c in line["by_period"].items()
+    ]
     if any(r["lost_t_per_year"] is None for r in rows):
-        return G.NoEvidence("lost_production_missing", "a period's lost tonnes are not readable")
+        return G.NoEvidence(
+            "lost_production_missing", "a period's lost tonnes are not readable"
+        )
     return _peak(rows, "lost_t_per_year")
 
 
@@ -328,23 +443,38 @@ def _lost_production(env):
     def read(ctx):
         if not solve_matches_inputs(ctx):
             return G.STALE_SOLVE
-        return lost_production_of(ctx.network, (ctx.solver_state or {}).get("last_lost_load"))
+        return lost_production_of(
+            ctx.network, (ctx.solver_state or {}).get("last_lost_load")
+        )
+
     return G._own_solve(env, read, typed=True)
 
 
 def shed_level_of(n, store=SHED):
     """`Detailed(peak level in t, rows)`: the concentrate shed's level per period (least, peak, last)."""
     if store not in n.stores.index or store not in n.stores_t.e.columns:
-        return G.NoEvidence("no_shed", f"the network has no store {store} with a solved level")
+        return G.NoEvidence(
+            "no_shed", f"the network has no store {store} with a solved level"
+        )
     e = n.stores_t.e[store]
     if not all(math.isfinite(float(v)) for v in e):
         return G.UNREADABLE_DISPATCH
-    periods = list(e.index.get_level_values(0).unique()) if len(n.investment_periods) else [None]
+    periods = (
+        list(e.index.get_level_values(0).unique())
+        if len(n.investment_periods)
+        else [None]
+    )
     rows = []
     for period in periods:
         s = e.loc[period] if period is not None else e
-        rows.append({"period": None if period is None else int(period), "least_t": float(s.min()),
-                     "peak_t": float(s.max()), "last_t": float(s.iloc[-1])})
+        rows.append(
+            {
+                "period": None if period is None else int(period),
+                "least_t": float(s.min()),
+                "peak_t": float(s.max()),
+                "last_t": float(s.iloc[-1]),
+            }
+        )
     return _peak(rows, "peak_t")
 
 
@@ -355,5 +485,5 @@ def _shed_level(env):
         if not solve_matches_inputs(ctx):
             return G.STALE_SOLVE
         return shed_level_of(ctx.network)
-    return G._own_solve(env, read, typed=True)
 
+    return G._own_solve(env, read, typed=True)

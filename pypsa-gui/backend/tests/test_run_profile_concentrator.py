@@ -317,6 +317,23 @@ def test_the_shortfall_slack_is_not_fed_in(direct):
     assert direct("conc.mass_balance", network=n)["verdict"] == "not_evaluated"
 
 
+def test_an_lp_slack_without_a_role_is_not_fed_in(direct):
+    """#1461 S1: a slack Generator (by its name or carrier) on a tonne bus is
+    not a supply, with or without a shortfall role."""
+    from services.adequacy.slack import SLACK_NAME_PREFIXES
+
+    n = _chain()
+    name = SLACK_NAME_PREFIXES[0] + "out"
+    n.add("Generator", name, bus="out", p_nom=100)
+    df = n.generators_t.p.copy()
+    df[name] = 0.0
+    df.loc[2030, "mine"] = 0.0
+    df.loc[2030, name] = 5.0
+    df.loc[2030, "__lost"] = 0.0
+    n.generators_t.p = df
+    assert direct("conc.mass_balance", network=n)["verdict"] == "not_evaluated"
+
+
 @pytest.mark.parametrize(
     "frame,attr,name", KINDS, ids=[k[2] + "." + k[1] for k in KINDS]
 )
@@ -554,6 +571,73 @@ def test_the_case_passes_only_established_against_the_site_as_today(
         assert r["reason"] == ic.reason_words(fact)
 
 
+def _stored_case(stale=False):
+    from services import ic_counterfactual as ic
+
+    return {
+        "status": "done",
+        "flags": [ic._SITE_TODAY],
+        "report": {"present": True, "stale": stale, "assumptions_hash": "h"},
+    }
+
+
+@pytest.mark.parametrize(
+    "case,current,reasons",
+    [
+        (_stored_case(), True, None),
+        (_stored_case(stale=True), True, ["case_stale"]),
+        (_stored_case(stale=None), True, ["case_stale"]),
+        (_stored_case(), False, ["case_stale", "results_not_current"]),
+        (None, True, ["no_case"]),
+    ],
+    ids=["fresh", "stale", "stale_unknown", "results_not_current", "absent"],
+)
+def test_the_case_rules_read_only_a_case_current_on_this_network(
+    direct, monkeypatch, case, current, reasons
+):
+    """GK A (28) Q8 (1), (2): the real `classify` on the stored case. Fresh,
+    the case rules pass and the NPV is its number; stale, out of date for the
+    solve, or absent, each case rule is not evaluated with its reason (never
+    a pass) and the NPV has no number."""
+    import routers.results as results_router
+    from services import chat_tools
+    from services import ic_counterfactual as ic
+
+    monkeypatch.setattr(ic, "_case", lambda ctx, on: (case, current))
+    report = {"assumptions_hash": "h"}
+    monkeypatch.setattr(
+        results_router, "get_investment_case_report", lambda detail: report
+    )
+    monkeypatch.setattr(
+        chat_tools,
+        "_ic_headlines",
+        lambda r: {
+            "project_post_tax_npv_at_wacc": 1.5e6,
+            "project_post_tax_irr": 0.11,
+        },
+    )
+    monkeypatch.setattr(
+        chat_tools, "_section", lambda r, key: {"payload": {"currency": "EUR"}}
+    )
+    rules = {
+        rid: direct(rid)
+        for rid in ("conc.ic.counterfactual", "conc.ic.basis", "conc.kpi.npv")
+    }
+    for rid, r in rules.items():
+        assert r["severity"] == "warn", rid
+        if reasons is None:
+            assert r["verdict"] == "pass", (rid, r.get("reason"))
+        else:
+            assert r["verdict"] == "not_evaluated", rid
+            fact = {"state": "not_run", "basis": None, "reasons": reasons}
+            assert r["reason"] == ic.reason_words(fact), (rid, r["reason"])
+    npv = rules["conc.kpi.npv"]["facts"][0]["value"]
+    if reasons is None:
+        assert npv == {"npv_at_wacc": 1.5e6, "irr": 0.11, "currency": "EUR"}
+    else:
+        assert npv == "not_run", npv  # the typed state, never a figure
+
+
 # ── KPIs (Q6) ────────────────────────────────────────────────────────────────
 
 
@@ -707,6 +791,38 @@ def test_the_screens_read_the_projects_saved_grid_code_else_the_default(
     (tmp_path / ce.SUBDIR / ce.SETTINGS_FILE).write_text(json.dumps({"profile": None}))
     RC._scorecard_inputs(env, n0)
     assert asked == [ce.DEFAULTS["profile"], "us_ieee2800_nerc", ce.DEFAULTS["profile"]]
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["{not json", "[]", "null", '{"profile": 3}', '{"profile": "nope"}'],
+)
+def test_unreadable_settings_or_an_unknown_grid_code_are_no_evidence(
+    n0, tmp_path, monkeypatch, text
+):
+    """#1384 N2b: never the default grid code in their place."""
+    from services import campus_electrical_service as ce
+    from services import project_registry
+
+    monkeypatch.setattr(project_registry, "project_dir", lambda project: tmp_path)
+    (tmp_path / ce.SUBDIR).mkdir()
+    (tmp_path / ce.SUBDIR / ce.SETTINGS_FILE).write_text(text)
+    out = RC._scorecard_inputs(SimpleNamespace(project="p"), n0)
+    assert isinstance(out, run_gates.NoEvidence) and out.value == "grid_code_unreadable"
+
+
+@pytest.mark.parametrize("rule_id", ["conc.motor_start", "conc.restart"])
+def test_the_screens_on_unreadable_settings_are_not_evaluated(
+    n0, tmp_path, monkeypatch, direct, rule_id
+):
+    from services import campus_electrical_service as ce
+    from services import project_registry
+
+    monkeypatch.setattr(project_registry, "project_dir", lambda project: tmp_path)
+    (tmp_path / ce.SUBDIR).mkdir()
+    (tmp_path / ce.SUBDIR / ce.SETTINGS_FILE).write_text("[]")
+    r = direct(rule_id, network=n0, project="p")
+    assert _state(r) == ("not_evaluated", "grid_code_unreadable")
 
 
 @pytest.mark.parametrize(
