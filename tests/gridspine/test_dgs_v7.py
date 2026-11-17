@@ -303,7 +303,7 @@ def test_the_report_says_decimal_comma_once(tmp_path):
 
 
 def test_where_reads_a_float_line_number():
-    """iterrows turns an all-number row's line into a float; where still says "line 4"."""
+    """Iterrows turns an all-number row's line into a float; where still says "line 4"."""
     t = parse_dgs_text(G7 + "$$ElmTerm;FID(a:40);OP(a:1);uknom(r)\n2;C;33\n")
     assert t.where(4.0) == "line 4"
 
