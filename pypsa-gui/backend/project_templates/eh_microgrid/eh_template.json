@@ -132,6 +132,12 @@
       "source": "assumed",
       "unit": "h/yr",
       "value": 3.0
+    },
+    {
+      "item": "tax",
+      "note": "a stand-in: the template is priced in EUR on German data; pick your country's tax rule. Depreciation straight line by the BMF AfA table where it lists the asset (generating sets 19, wind 16, PV 20 years); batteries 10 years, and assets it does not list their own lifetime or 20 years, assumed",
+      "source": "assumed",
+      "value": "German corporate tax (pack eu_de), Hebesatz 400 %"
     }
   ],
   "name": "Island Microgrid",

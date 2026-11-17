@@ -867,7 +867,11 @@ def _finance_state(raw) -> dict:
     from services.finance.investment_case_runner import finance_digest
 
     out = {"finance": raw, "digest": finance_digest(raw),
-           "status": "not_set" if raw is None else "ok"}
+           "status": "not_set" if raw is None else "ok",
+           # The inputs the project's template shipped as assumptions, with their
+           # source (WALK-IMPROVE-1 b): a field reads as assumed while its stored
+           # value equals the record's. A label only; not in the digest.
+           "assumed": _assumed_state(raw)}
     if raw is not None:
         from models.finance import FinanceInputs
 
@@ -880,11 +884,29 @@ def _finance_state(raw) -> dict:
     return out
 
 
+def _assumed_state(raw) -> dict:
+    """{field: {value, source, source_year, note, current}} for each stored
+    `finance_assumed` record; `current` is True while the stored input still
+    equals the shipped value. Empty without finance inputs."""
+    records = getattr(_state["solver_config"], "finance_assumed", None)
+    if raw is None or not isinstance(records, dict):
+        return {}
+    from models.finance import parse_finance_assumed
+
+    try:
+        parsed = parse_finance_assumed(records)
+    except ValueError:
+        return {}                     # never a label the model would refuse
+    return {k: {**r.model_dump(mode="json"), "current": raw.get(k) == r.value}
+            for k, r in parsed.items()}
+
+
 @router.get("/finance")
 def get_finance():
     """The stored finance inputs (`FinanceInputs` JSON) and their `If-Match`
     digest (IC P4 WP4.6b). `status`: `not_set`, `ok` or
-    `finance_inputs_invalid`."""
+    `finance_inputs_invalid`. `assumed`: the template's assumed values with
+    their source (`_assumed_state`)."""
     return _finance_state(getattr(_state["solver_config"], "finance", None))
 
 

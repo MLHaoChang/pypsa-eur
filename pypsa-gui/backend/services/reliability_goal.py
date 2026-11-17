@@ -28,7 +28,7 @@ GOAL_FIELDS = frozenset({"target_lole_h", "mc_draws", "site_archetype"})
 # Config fields no solve and no investment case reads (business case 08, GK B
 # C1): always left out, so they leave every fingerprint and digest, and every
 # one computed before they existed, unchanged.
-NOT_LP_FIELDS = frozenset({"business_case"})
+NOT_LP_FIELDS = frozenset({"business_case", "finance_assumed"})
 
 ARCHETYPES = ("strong_grid", "weak_flexible", "off_grid")
 DEFAULT_ARCHETYPE = "strong_grid"

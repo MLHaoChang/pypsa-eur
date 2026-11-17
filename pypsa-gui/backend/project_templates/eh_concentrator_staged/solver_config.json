@@ -194,7 +194,7 @@
   },
   "discount_rate": 0.07,
   "finance": {
-    "acquisition_date": null,
+    "acquisition_date": "2027-01-01",
     "analysis_years": 18,
     "annualise": false,
     "capex_phasing": [
@@ -235,7 +235,27 @@
       "pv_new_2030": 0.005,
       "pv_new_2035": 0.005
     },
-    "depreciation_class_by_asset": {},
+    "depreciation_class_by_asset": {
+      "bess_new_2027": "afa_10",
+      "bess_new_2030": "afa_10",
+      "bess_new_2035": "afa_10",
+      "coarse_ore_stockpile": "afa_20",
+      "coarse_ore_stockpile_new_2027": "afa_25",
+      "coarse_ore_stockpile_new_2030": "afa_25",
+      "coarse_ore_stockpile_new_2035": "afa_25",
+      "concentrate_shed": "afa_20",
+      "crusher": "afa_20",
+      "flotation": "afa_20",
+      "flotation_2035": "afa_20",
+      "grid_import": "afa_20",
+      "mill_1": "afa_20",
+      "mill_2": "afa_20",
+      "mill_3": "afa_20",
+      "mine": "afa_20",
+      "pv_new_2027": "afa_20",
+      "pv_new_2030": "afa_20",
+      "pv_new_2035": "afa_20"
+    },
     "escalation": {
       "capex": 0.02,
       "export": 0.02,
@@ -246,7 +266,7 @@
     },
     "financial_close": "2026-01-01",
     "financing_fee_tax": "not_deducted",
-    "hebesatz_pct": null,
+    "hebesatz_pct": 400.0,
     "incentives": [],
     "inflation": 0.02,
     "island_outage": null,
@@ -262,12 +282,145 @@
     "state_rate": null,
     "tax_equity": null,
     "tax_losses": "offset_other_income",
-    "tax_pack_id": null,
+    "tax_pack_id": "eu_de",
     "terminal_value": {
       "method": "remaining_life_annuity",
       "value": null
     },
     "wacc_nominal": 0.07
+  },
+  "finance_assumed": {
+    "acquisition_date": {
+      "note": "the first commercial operation date",
+      "source": "assumed",
+      "value": "2027-01-01"
+    },
+    "analysis_years": {
+      "note": "the template's planning horizon",
+      "source": "assumed",
+      "value": 18
+    },
+    "cod_by_asset": {
+      "note": "every asset in service in the first modelled year",
+      "source": "assumed",
+      "value": {
+        "coarse_ore_stockpile": "2027-01-01",
+        "concentrate_shed": "2027-01-01",
+        "crusher": "2027-01-01",
+        "flotation": "2027-01-01",
+        "flotation_2035": "2035-01-01",
+        "mill_1": "2027-01-01",
+        "mill_2": "2027-01-01",
+        "mill_3": "2035-01-01",
+        "mine": "2027-01-01"
+      }
+    },
+    "cost_of_equity": {
+      "note": "no primary source. Set your own",
+      "source": "assumed",
+      "value": 0.07
+    },
+    "degradation_by_asset": {
+      "note": "PV 0.5 %/yr (median of field data); other assets none, assumed",
+      "source": "Jordan & Kurtz, Photovoltaic Degradation Rates: An Analytical Review, Prog. Photovolt. 21 (2013)",
+      "source_year": 2013,
+      "value": {
+        "bess_new_2027": 0.0,
+        "bess_new_2030": 0.0,
+        "bess_new_2035": 0.0,
+        "coarse_ore_stockpile": 0.0,
+        "concentrate_shed": 0.0,
+        "crusher": 0.0,
+        "flotation": 0.0,
+        "flotation_2035": 0.0,
+        "mill_1": 0.0,
+        "mill_2": 0.0,
+        "mill_3": 0.0,
+        "mine": 0.0,
+        "pv_new_2027": 0.005,
+        "pv_new_2030": 0.005,
+        "pv_new_2035": 0.005
+      }
+    },
+    "depreciation_class_by_asset": {
+      "note": "straight line: Fundstelle 3.1.2 generating sets 19 years, 3.1.5 wind 16, 3.1.6 PV 20; batteries 10 years and assets the table does not list (electrolysers, H2 storage, links) their own lifetime or 20 years are assumed",
+      "source": "BMF AfA-Tabelle AV (BMF-Schreiben vom 15.12.2000, BStBl. I 2000 S. 1532)",
+      "source_year": 2000,
+      "value": {
+        "bess_new_2027": "afa_10",
+        "bess_new_2030": "afa_10",
+        "bess_new_2035": "afa_10",
+        "coarse_ore_stockpile": "afa_20",
+        "coarse_ore_stockpile_new_2027": "afa_25",
+        "coarse_ore_stockpile_new_2030": "afa_25",
+        "coarse_ore_stockpile_new_2035": "afa_25",
+        "concentrate_shed": "afa_20",
+        "crusher": "afa_20",
+        "flotation": "afa_20",
+        "flotation_2035": "afa_20",
+        "grid_import": "afa_20",
+        "mill_1": "afa_20",
+        "mill_2": "afa_20",
+        "mill_3": "afa_20",
+        "mine": "afa_20",
+        "pv_new_2027": "afa_20",
+        "pv_new_2030": "afa_20",
+        "pv_new_2035": "afa_20"
+      }
+    },
+    "escalation": {
+      "note": "every cost and price class at 2 %/yr",
+      "source": "ECB monetary policy strategy (2 % inflation target)",
+      "source_year": 2021,
+      "value": {
+        "capex": 0.02,
+        "export": 0.02,
+        "fuel": 0.02,
+        "opex": 0.02,
+        "ppa": 0.02,
+        "tariff": 0.02
+      }
+    },
+    "financial_close": {
+      "note": "before the first operation date",
+      "source": "assumed",
+      "value": "2026-01-01"
+    },
+    "hebesatz_pct": {
+      "note": "rounded to 400 %; set your municipality's",
+      "source": "Destatis, Realsteuervergleich 2023: average trade-tax Hebesatz of all municipalities 407 %",
+      "source_year": 2023,
+      "value": 400.0
+    },
+    "inflation": {
+      "source": "ECB monetary policy strategy (2 % inflation target)",
+      "source_year": 2021,
+      "value": 0.02
+    },
+    "tax_losses": {
+      "note": "a sponsor with other taxable income",
+      "source": "assumed",
+      "value": "offset_other_income"
+    },
+    "tax_pack_id": {
+      "note": "a stand-in: every template is priced in EUR on German data. Pick your country's tax rule",
+      "source": "German corporate tax: KStG \u00a723 (15 %), SolZG (5.5 %), GewStG \u00a711 (3.5 % \u00d7 Hebesatz)",
+      "source_year": 2025,
+      "value": "eu_de"
+    },
+    "terminal_value": {
+      "note": "each asset's remaining life valued as an annuity of its last year",
+      "source": "assumed",
+      "value": {
+        "method": "remaining_life_annuity",
+        "value": null
+      }
+    },
+    "wacc_nominal": {
+      "note": "nominal, post-tax; no primary source: a planning value for an equity-funded energy asset. Set your own",
+      "source": "assumed",
+      "value": 0.07
+    }
   },
   "multi_investment_periods": true,
   "solver_options": {
