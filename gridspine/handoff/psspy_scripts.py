@@ -34,9 +34,24 @@ any ``os`` call outside ``os.path`` (GK condition S1). The one ``open`` allowed
 is ``open(os.path.join(HERE, '<file>.csv'), 'w')`` on a pack file, with
 ``HERE`` bound once to the script's own directory.
 
+**Solved start.** The RAW is written flat (VM 1, VA 0). After setting the
+source impedance each script solves the power flow (``fnsl`` with
+:data:`FNSL_OPTIONS`) and refuses to continue (``SystemExit``) when
+``psspy.solved()`` is not 0, so dynamic initialisation (``cong`` onwards)
+never starts from an unsolved case. :func:`check_script` refuses a script
+without ``fnsl``, then that convergence check, then ``cong``, in that order.
+
+**Current magnitude at V = 0.** ``i_poc_pu`` is ``|S| / (V * S_rated)``,
+undefined when the PoC voltage is 0 (a bolted fault at the PoC). The result
+is a CSV of finite numbers with a fixed contract header and no slot for a
+"not evaluated" sample, so ``_convert`` refuses: it raises ``ValueError``
+naming the channel and the reason, and no CSV is written for that case (the
+``.out`` stays). It never writes NaN or inf.
+
 The psspy calls were written without a PSS/E licence: :data:`PENDING` is
-repeated in every script, and :data:`EVENT_CALLS` / :data:`CHANNEL_CALLS`
-state per kind and channel which calls are used and what is unverified.
+repeated in every script, :data:`EVENT_CALLS` / :data:`CHANNEL_CALLS`
+state per kind and channel which calls are used and what is unverified, and
+:data:`UNVERIFIED` lists the remaining unverified calls and conventions.
 """
 
 import ast
@@ -55,6 +70,25 @@ PENDING = (
     "psspy calls generated without a PSS/E licence; pending verification on "
     "first PSS/E load"
 )
+
+#: fnsl options: taps locked, area interchange off, phase shifters locked, dc
+#: taps locked, switched shunts locked, no flat start (the RAW values are
+#: already flat), var limits applied at once, non-divergent solution on.
+FNSL_OPTIONS = (0, 0, 0, 0, 0, 0, 0, 1)
+#: GENCLS angle state = STATE K + this offset, K from ``mdlind(..., 'STATE')``.
+ANGLE_STATE_OFFSET = 1
+
+#: call or convention -> what is assumed and unverified
+UNVERIFIED = {
+    "GENCLS angle state": (
+        "mdlind(GRID_BUS, GRID_ID, 'GEN', 'STATE') gives K, the first GENCLS "
+        "state; the rotor angle is assumed STATE K+1 with K the speed deviation "
+        "(the speed-then-angle order of the larger machine models); no public "
+        "source found"
+    ),
+    "fnsl": "option order and meaning of FNSL_OPTIONS",
+    "solved": "psspy.solved() returns 0 when the last solution converged",
+}
 
 #: kind -> (psspy calls used, note)
 EVENT_CALLS = {
@@ -125,8 +159,10 @@ CONVERSIONS = {
     "iq_pu": (("raw_iq_pu",), "a", "Iq command on MBASE = plant rated"),
     "i_poc_pu": (
         ("raw_p_poc_mw", "raw_q_poc_mvar", "raw_v_poc_pu"),
-        "(a * a + b * b) ** 0.5 / (c * s_rated) if c > 1e-6 else float('nan')",
-        "|I| = sqrt(P^2 + Q^2) / (V * S_rated), S_rated = plant MBASE; NaN at V = 0",
+        "(a * a + b * b) ** 0.5 / (c * s_rated) if c > 1e-6 else "
+        "_refuse('i_poc_pu: V = 0 at the PoC (bolted fault there), current from "
+        "P, Q and V undefined')",
+        "|I| = sqrt(P^2 + Q^2) / (V * S_rated), S_rated = plant MBASE; refused at V = 0",
     ),
 }
 
@@ -173,6 +209,30 @@ def _open_ok(node, allowed):
         and name.value in allowed
         and str(name.value).endswith(".csv")
     )
+
+
+def _calls(node):
+    return {_dotted(n.func) for n in ast.walk(node) if isinstance(n, ast.Call)}
+
+
+def _solve_order_ok(tree):
+    """
+    True when the module's top level holds ``psspy.fnsl(...)``, then an
+    ``if`` on ``psspy.solved()`` that raises, then ``psspy.cong(...)``.
+    """
+    want = [
+        lambda n: isinstance(n, ast.Expr) and "psspy.fnsl" in _calls(n),
+        lambda n: (
+            isinstance(n, ast.If)
+            and "psspy.solved" in _calls(n.test)
+            and any(isinstance(b, ast.Raise) for b in n.body)
+        ),
+        lambda n: isinstance(n, ast.Expr) and "psspy.cong" in _calls(n),
+    ]
+    for node in tree.body:
+        if want and want[0](node):
+            want.pop(0)
+    return not want
 
 
 def check_script(text, allowed_files, channels=()) -> set:
@@ -249,6 +309,11 @@ def check_script(text, allowed_files, channels=()) -> set:
     )
     if len(here) != 1 or len(binds) != 1 or ast.unparse(binds[0].value) != _HERE_EXPR:
         problems.append(f"HERE must be bound once, to {_HERE_EXPR}")
+    if not _solve_order_ok(tree):
+        problems.append(
+            "the case must be solved before dynamics: psspy.fnsl, then an if on "
+            "psspy.solved() that raises, then psspy.cong"
+        )
     for ch in channels:
         if ch not in literals:
             problems.append(f"channel {ch!r} has no ident literal")
@@ -299,11 +364,12 @@ def _event_lines(case, poc_kv):
         return [f"psspy.increment_gref(PLANT_BUS, PLANT_ID, {p['step_pu']!r})"]
     head = [
         "ierr, K = psspy.mdlind(GRID_BUS, GRID_ID, 'GEN', 'STATE')",
-        "ierr, ANGLE0 = psspy.dsrval('STATE', K)",
+        f"K_ANGLE = K + {ANGLE_STATE_OFFSET!r}  # GENCLS angle state: unverified",
+        "ierr, ANGLE0 = psspy.dsrval('STATE', K_ANGLE)",
     ]
     if kind == "phase_jump":
         rad = math.radians(p["angle_deg"])
-        return head + [f"psspy.change_state(K, ANGLE0 + {rad!r})"]
+        return head + [f"psspy.change_state(K_ANGLE, ANGLE0 + {rad!r})"]
     if kind == "f_step":
         rate, ramp, hold = p["step_hz"], 0.0, 0.0
     else:
@@ -315,7 +381,7 @@ def _event_lines(case, poc_kv):
         "    tau = n * DT",
         "    th = min(tau, HOLD)",
         "    cycles = DF0 * tau + RAMP * (0.5 * th * th + HOLD * (tau - th))",
-        f"    psspy.change_state(K, ANGLE0 + {_TWO_PI!r} * cycles)",
+        f"    psspy.change_state(K_ANGLE, ANGLE0 + {_TWO_PI!r} * cycles)",
         "    psspy.run(0, T_EVENT + tau, 1000, 1, 0)",
         "    n += 1",
     ]
@@ -355,7 +421,13 @@ def _channel_lines(case):
 
 def _convert_lines(case):
     """A pure ``_convert(rec, f0_hz, s_rated)``: recorded lists -> contract units."""
-    out = ["def _convert(rec, f0_hz, s_rated):", "    out = {'t_s': list(rec['t_s'])}"]
+    out = [
+        "def _convert(rec, f0_hz, s_rated):",
+        "    def _refuse(why):",
+        "        raise ValueError('not evaluated, no CSV written: ' + why)",
+        "",
+        "    out = {'t_s': list(rec['t_s'])}",
+    ]
     for ch in case.channels:
         inputs, expr, formula = CONVERSIONS[ch]
         if len(inputs) > len("abc"):
@@ -444,6 +516,9 @@ def _script(
             "list(Z1_PU) + list(Z1_PU) + list(Z0_PU) + [_f, _f])",
         ]
     lines += [
+        f"psspy.fnsl({list(FNSL_OPTIONS)!r})",
+        "if psspy.solved() != 0:",
+        "    raise SystemExit('power flow did not converge; dynamics not started')",
         "psspy.cong(0)",
         "for k in (1, 2, 3):",
         "    psspy.conl(0, 1, k, [0, 0], [100.0, 0.0, 0.0, 100.0])",
@@ -535,6 +610,11 @@ def write_scripts(
             raise ContractError(
                 f"plant_branch={plant_branch!r} must be a (from bus, to bus, ckt) "
                 "tuple of (int, int, str)"
+            )
+        if plant_branch[0] != poc_bus:
+            raise ContractError(
+                f"plant_branch from bus {plant_branch[0]!r} is not poc_bus "
+                f"{poc_bus!r}: the PoC branch is measured at the PoC"
             )
     positive = [
         ("poc_kv", poc_kv),
