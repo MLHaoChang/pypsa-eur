@@ -34,3 +34,15 @@ Expert-catalogue design lead: GO. No Results tab is renamed or moved; no Expert 
 - "Open in Expert" switches mode only on the user's click, through withReturn, so Back returns to the Guided Results card.
 
 Next-step flow: takes no files; its optional "Open results" header link (layout/AppHeader.tsx) would target hub-card-results.
+
+UX (23): plan GO with conditions (Q1-Q3 as recommended):
+1. Each figure carries its own ResultState; a card-level mark only where all share it. Built: per-figure state; the study banner is the study figure's own mark (its text names the study), NPV and LCOE carry their own.
+2. LCOE "Not applicable for this project type" as text, same label as Expert's strip. `money()` notation for NPV and cost: answered in the PR (the shared Kpi tile has its own notation, which Expert's strip uses too).
+3. Expert never shows less than Guided: say how Expert gets "Why this number" (slice 2).
+4. The "why" walk passes the plain-words test (no ledger keys, route names, engine ids); "Assumed" is the word for unconfirmed defaults (slice 2/3).
+5. One entry point per destination; the figure link goes through withReturn on a user click. Built.
+6. Collapsed Assumptions line uses ▸/▾, shows a blocking state in words, only "Keep all defaults" as bulk action (slice 3).
+7. Bullet chart: axis with unit, goal text label, "lower is better", "Within goal"/"Above goal" as text, text alternative, source line. Built.
+8. Summary lines use "·"; section 5 chart unit-labelled axis, direct carrier labels, tonne buses never on one axis with MW, extendable assets named in a visible line, demo-data label kept (slice 3).
+9. HOLISTIC: the PR lists where the three figures appear (Summary, Compare, reports, chat) and that they read the same source.
+10. Shots dark and light, dc- and mg-, all states; one Expert shot of the Results headline.

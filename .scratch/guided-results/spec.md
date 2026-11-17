@@ -3,7 +3,7 @@
 
 # Guided results legibility
 
-Status: needs review (UX 23, expert-catalogue design lead, GK B 62)
+Status: agreed (UX 23 plan GO with conditions 1-10; GK B 62 plan GO with G1-G5; expert-catalogue design lead GO). Conditions in `issues/01-headline-card.md`.
 
 Owner decisions: UX-NEXT-1 (commissions this package), HOLISTIC-1, HOLISTIC-REC-1, EXPERT-GUIDED-1, RAW-NAMES-1,
 VISUALS-1, DASHBOARD-1, DENSITY-1. Master `c78a115e3`.
@@ -40,13 +40,18 @@ One card replaces the verdict block and the cost tile. Top to bottom:
    - **Net present value**: from the investment case (`chapters.investment`, same read, same basis words).
    - **Cost of energy (LCOE)**: the `lcoe` card of `/results/headline_kpis`, the read Expert's strip uses.
    A figure that is not there says its `ResultState` and the one action that produces it ("Run the investment case"),
-   never 0 and never blank. The study's cost at target (today's tile) stays, as the reliability figure's second line
-   ("Design cost at this goal: €34.7 M"), because the verdict is about reliability at that cost.
+   never 0 and never blank; a project type whose Expert strip has no LCOE card reads "Not applicable for this project
+   type" under the same label. The study's cost at target (today's tile) stays as its own tile in the row, unchanged
+   (P24-FE gate B1 wording, period basis). Each figure carries its own state; the card's study banner ("These results
+   are from an earlier study") is the study figure's one mark, so that tile only dims under it. When some figures are
+   current and others out of date, one line says which (GK B G1). Tiles use the shared `Kpi` notation, the one
+   Expert's strip uses, so the two modes print a figure alike.
 3. **One chart: reliability against the goal.** A horizontal bullet chart: the expected shortfall as the bar, the
    goal as a marker, the pass/fail band behind it; the number in the title ("Expected shortfall 0.4 h/yr, goal
    1 h/yr"). Built from `components/charts/chartTheme.tsx` (`ChartFrame`, `ChartSourceLine`, tokens), with the
-   source line naming the study run and its out-of-date mark (VISUALS-1). With no goal set, the chart shows the bar
-   alone and the existing "Set a goal" button.
+   source line naming the study run and its out-of-date mark (VISUALS-1). The axis says "Expected shortfall (h/yr) ·
+   lower is better", the goal has a text label, and "Within goal" / "Above goal" is printed in words (UX 23, 7). With
+   no goal set, the chart shows the bar alone and the existing "Set a goal" button.
 4. **"Why this number"**, a disclosure under each figure (closed by default), in plain words:
    - what produced it (the study run, the investment case, the solve) and whether it is current;
    - the inputs it rests on: the Guided ledger rows the study used, each with its value, its source stamp
@@ -56,8 +61,9 @@ One card replaces the verdict block and the cost tile. Top to bottom:
    and calls the existing ledger-row route. A graph target for the study's own figures is a follow-up (see Open
    questions, Q2).
 5. Then, unchanged: biggest risks, what the study could not establish, report buttons, and the chapter tiles. The
-   tiles no longer repeat a figure the headline shows: "What the design is worth" and "Expected shortfall" keep their
-   state and "Open ›" but drop the number (one number, one place).
+   tiles no longer repeat a figure the headline shows: "What the design is worth" and "Expected shortfall" say
+   "in the headline above" and drop their number and their "Open" link, since the headline figure's link goes to the
+   same Expert tab (one number, one place; one entry point per destination, UX 23, 5).
 
 Guided and Expert agree: the LCOE figure and its state come from the same `/results/headline_kpis` read as Expert's
 strip; NPV from the same investment report as Expert's Investment tab; each figure's "Open in Expert" opens that tab.
