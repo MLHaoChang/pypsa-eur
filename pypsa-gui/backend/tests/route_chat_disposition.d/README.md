@@ -20,7 +20,10 @@ tool's `TOOL_ROUTES` entry, and one chat refuses goes in a
 Every section is optional. A route key is `"METHOD /path"` exactly as FastAPI
 mounts it. The checks run on the merged tables: a row the test file or another
 fragment already defines, a route that no longer exists, a tool that does not
-exist, and a known gap past `_KNOWN_GAPS_CEILING` all fail. `known_gaps` only
+exist, and a known gap past `_KNOWN_GAPS_CEILING` all fail. `UI_INTERNAL` is capped
+at 11 buckets (`test_ui_internal_stays_small`) and is full today, so a new
+`ui_internal` bucket fails until a reviewer agrees to raise the cap; prefer a
+`served_by_tool` row, a tool's `TOOL_ROUTES`, or a `not_via_chat.d/` entry. `known_gaps` only
 shrinks, so a new gap also raises the ceiling and needs a reviewer's reason;
 declare a route without a tool as "unbuilt" in `services/not_via_chat.d/`
 instead. A gap a tool now serves is listed as stale, and the coordinator's

@@ -656,7 +656,7 @@ def test_the_frozen_app_ships_the_not_via_chat_json_and_its_folder():
     datas = _spec_backend_datas()
     assert datas.get("services/not_via_chat.json") == "services", datas
     assert datas.get("services/not_via_chat.d") == "services/not_via_chat.d", datas
-    assert "not_via_chat.json" in _check_bundle().EXPECTED
+    assert {"not_via_chat.json", "not_via_chat.d"} <= set(_check_bundle().EXPECTED)
 
 
 def test_the_sweep_prunes_a_stale_fragment_known_gap_and_its_empty_file(
@@ -752,3 +752,62 @@ def test_a_stale_fragment_row_is_named_with_its_file(copy, monkeypatch):
         AssertionError, match=r"POST /api/no/such/route \(claude-x\.json\)"
     ):
         lock.test_no_route_policy_entry_is_stale_or_redundant()
+
+
+def test_the_manifest_report_prints_a_settled_pending_row_as_stale(
+    monkeypatch, tmp_path
+):
+    counts = dict.fromkeys(
+        (
+            "covered_tools",
+            "tools",
+            "unmapped_tools",
+            "variants",
+            "covered_variants",
+            "pending_variants",
+            "unavailable_variants",
+        ),
+        0,
+    )
+    monkeypatch.setattr(fm, "SETTLED", {"LC-D05.thing": tmp_path / "claude-x.json"})
+    lines = fm.report({"counts": counts, "unmapped_tools": []}).splitlines()
+    assert lines[1].startswith("stale: LC-D05.thing") and "claude-x.json" in lines[1]
+    monkeypatch.setattr(fm, "SETTLED", {})
+    assert len(fm.report({"counts": counts, "unmapped_tools": []}).splitlines()) == 1
+
+
+def test_a_fragment_ui_internal_bucket_counts_against_its_cap(copy, monkeypatch):
+    base, fragment = copy(disposition.DISPOSITION_FILE)
+    fragment(
+        "claude-x.json",
+        {
+            "ui_internal": {
+                "new_bucket": {
+                    "reason": "only the app's own screen calls it",
+                    "routes": ["GET /x"],
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        disposition, "UI_INTERNAL", disposition.disposition_tables(base)[1]
+    )
+    with pytest.raises(AssertionError):
+        disposition.test_ui_internal_stays_small()
+
+
+def test_not_via_chat_order_is_python_rows_then_the_json_base_then_fragments(
+    copy, monkeypatch
+):
+    base, fragment = copy(nvc.ENTRIES_FILE)
+    data = json.loads(base.read_text())
+    data["entries"] = [_entry("base_thing", title="Base thing")]
+    base.write_text(json.dumps(data))
+    fragment("claude-a.json", {"entries": [_entry("a_thing", title="A thing")]})
+    entries = nvc.load_entries(base)
+    assert [e["id"] for e in entries] == [e["id"] for e in nvc.PYTHON_ENTRIES] + [
+        "base_thing",
+        "a_thing",
+    ]
+    monkeypatch.setattr(nvc, "NOT_VIA_CHAT", entries)
+    assert [m["title"] for m in nvc.matches({"zzqx"})] == ["Base thing", "A thing"]
