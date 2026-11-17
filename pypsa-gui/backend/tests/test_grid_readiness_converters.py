@@ -550,3 +550,28 @@ def test_a_cap_on_any_poc_withholds_the_pass_not_only_on_the_lowest_scr_one(tmp_
     assert "poc2" in row["note"] and "predates them" in row["note"]
     n.buses.at["poc2", "eh_ibr_mva"] = 100.0  # stated at the converters: the Pass holds
     assert _rows(d, n)["scr"]["verdict"] == "pass"
+
+
+def test_a_set_architecture_with_no_island_reads_unknown_without_sources(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    # GK A 31 ask 2b: the unknown return still carries "sources": [].
+    d, n = _dc_project(
+        tmp_path,
+        monkeypatch,
+        client,
+        project_row,
+        "dc_ac_no_island",
+        {"architecture": "ac"},
+    )
+    (d / "island_config.json").unlink()
+    row = _rows(d, n)["frequency_support"]
+    assert row["sources"] == [] and row["value_rest"] is None
+
+
+def test_an_unnamed_voltage_cell_lists_only_voltage_control():
+    # GK A 31 ask 2a: without unit sources the value is the wanted services only.
+    got = G.service_verdict(
+        ["grid_forming", "voltage_control"], wanted=("voltage_control",)
+    )
+    assert got["project_value"] == "voltage control" and got["sources"] == []

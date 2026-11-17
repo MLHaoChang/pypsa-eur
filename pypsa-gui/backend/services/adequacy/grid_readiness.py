@@ -285,7 +285,8 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
     from services.dc_architecture import LABEL, behind_architecture
     behind = behind_architecture(inp.n, inp.island, arch[0] if arch else None)
     gates, status, payload, note = evaluate_network_scr_gate(inp.n, behind=behind)
-    if status != "ok" or gates is None:
+    # A capped gate (not_established with a computed payload) still shows its figure.
+    if payload is None or payload.get("min_scr") is None:
         from services.adequacy.scr_gate import unattributed_converters
         off = unattributed_converters(inp.n, behind)
         return [_row("scr", "Short-circuit ratio at the PoC", project_value=None,
@@ -297,19 +298,16 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
                            + (f". Converters on no point of connection's bus, so their point of connection is "
                               f"unknown: {', '.join(map(_display, off))}" if off else "")),
                      **base)]
-    verdict = _judge(float(payload["min_scr"]), PASS_SCR, RULE_SCR)
-    extra = "; below it an EMT study is recommended" if gates.emt_recommended else ""
+    # GK A (walkthrough 05, GK A 31): the gate itself withholds a Pass when any
+    # PoC's capacity is capped (stated below its converters, or a converter not
+    # sized yet), for every caller. It reads unknown, not warn, so the verdict
+    # stays the declared rule's wherever it is given (checked results S9: a
+    # checker withholds unknown). A real SCR below 3.0 still warns.
+    verdict = "unknown" if gates is None else _judge(float(payload["min_scr"]), PASS_SCR, RULE_SCR)
+    extra = "; below it an EMT study is recommended" if gates is not None and gates.emt_recommended else ""
     low = next(r for r in payload["buses"] if r["bus"] == payload["min_bus"])
-    # GK A (walkthrough 05): a stated capacity below the converters the network
-    # holds, or a derived one with a converter not sized yet, never certifies a
-    # Pass. It reads unknown, not warn, so the verdict stays the declared rule's
-    # wherever it is given (checked results S9: a checker withholds unknown).
-    # GK A 30: a cap on any PoC, not only the lowest-SCR one, since a capped
-    # PoC's real SCR may be below the lowest shown.
     label = LABEL[arch[0]] if arch else None
-    capped = [r for r in payload["buses"] if _stated_below(r) or _unsized(r)]
-    if verdict == "pass" and capped:
-        verdict = "unknown"
+    capped = [r for r in payload["buses"] if r["bus"] in payload.get("capped_pocs", ())]
     others = "".join(f". At {r['bus']} (SCR {r['scr']:.4g}): {_capacity_words(r, label)}"
                      for r in capped if r is not low)
     return [_row("scr", "Short-circuit ratio at the PoC", project_value=round(payload["min_scr"], 3),
@@ -327,12 +325,13 @@ def _display(name: str) -> str:
 
 
 def _stated_below(row: dict) -> bool:
-    d = row.get("ibr_derived_mva")
-    return row.get("ibr_source") == "stated" and d is not None and d > row["ibr_mva"]
+    from services.adequacy.scr_gate import stated_below
+    return stated_below(row)
 
 
 def _unsized(row: dict) -> bool:
-    return row.get("ibr_source") == "derived" and bool(row.get("ibr_unsized"))
+    from services.adequacy.scr_gate import unsized
+    return unsized(row)
 
 
 def _capacity_words(row: dict, architecture: str | None) -> str:
@@ -1533,7 +1532,7 @@ def service_verdict(offered, arch_counted=(), *, wanted=None, conditional=(),
     cond = [x for x in (conditional or ()) if x in wanted]
     if offered is None and not arch and not cond:
         return {"verdict": "unknown", "project_value": None, "assumed_from_architecture": [],
-                "sources": []}
+                "sources": [], "value_rest": None}
     own, arch, cond_shown = shown(offered or []), shown(arch), shown(conditional or ())
     sources = ([{"service": x, "label": SERVICE_WORDS.get(x, x),
                  "units": [_display(u) for u in offered_sources.get(x, [])]}

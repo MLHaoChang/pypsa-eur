@@ -306,4 +306,30 @@ def evaluate_network_scr_gate(
         f"SCR {gate.scr} at {min_row['bus']} "
         f"(min SCR={min_scr:.3g}, threshold={PASS_SCR:g}; warn-only thin slice)"
     )
+    # GK A (walkthrough 05): a stated capacity below the converters the network
+    # holds, or a derived one with a converter not sized yet, never certifies a
+    # Pass, at any PoC and for every caller. A real SCR below the threshold
+    # still warns. The payload stays, so a caller can show the figure.
+    capped = [r["bus"] for r in rows if stated_below(r) or unsized(r)]
+    payload["capped_pocs"] = capped
+    if gate.scr == "pass" and capped:
+        why = "; ".join(
+            f"{r['bus']}: " + (f"not sized yet: {', '.join(r['ibr_unsized'])}" if unsized(r)
+                               else f"stated {r['ibr_mva']:g} MVA below its converters' "
+                                    f"{r['ibr_derived_mva']:g} MVA")
+            for r in rows if r["bus"] in capped)
+        return (None, "not_established", payload,
+                f"SCR pass not established (min SCR={min_scr:.3g} at {min_row['bus']}): "
+                f"the inverter capacity is incomplete at {why}")
     return gate, "ok", payload, note
+
+
+def stated_below(row: dict[str, Any]) -> bool:
+    """A stated capacity below the converter-coupled assets its bus now holds."""
+    d = row.get("ibr_derived_mva")
+    return row.get("ibr_source") == "stated" and d is not None and d > row["ibr_mva"]
+
+
+def unsized(row: dict[str, Any]) -> bool:
+    """A derived capacity that counts a converter not sized yet as 0."""
+    return row.get("ibr_source") == "derived" and bool(row.get("ibr_unsized"))
