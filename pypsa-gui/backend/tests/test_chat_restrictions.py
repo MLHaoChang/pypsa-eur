@@ -135,6 +135,31 @@ def test_foreign_and_no_longer_current_projects_cannot_be_edited(baseline, clien
     assert client.get('/api/chat/access').json()['restrictions']['mode'] == 'standard'
 
 
+def test_a_user_without_project_access_is_refused_as_no_access_not_unavailable(
+        baseline, client, second_identity):
+    """Issue 17: admission tells "no access to this project" (404, its own kind)
+    apart from "the rule store is unreadable" (503 restriction_unavailable)."""
+    from fastapi import HTTPException
+    from harness import restrictions
+
+    token = chat_tools._ACTING_USER_ID.set(str(second_identity['user_id']))
+    try:
+        with pytest.raises(HTTPException) as refused:
+            restrictions.capture(ChatSession())
+        frames = list(dispatch_tool_call(ChatSession(), {
+            'id': 'no-access', 'name': 'bulk_update_components', 'input': {
+                'component_class': 'Generator', 'names': ['G1'],
+                'updates': {'marginal_cost': 20}}}, []))
+    finally:
+        chat_tools._ACTING_USER_ID.reset(token)
+    assert refused.value.status_code == 404
+    assert refused.value.detail['error_kind'] == 'project_access_denied'
+    assert 'access to this project' in refused.value.detail['message']
+    assert [d.get('error_kind') for e, d in frames if e == 'tool_error'] == ['project_access_denied']
+    assert not any(e == 'tool_running' for e, _ in frames)
+    assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+
+
 @pytest.mark.parametrize('invalid', [
     {'mode': 'approve_all'}, {'mode': True}, {'owner_id': 'someone-else'},
     {'auto_approve': True}, {'revision': 'grant'}, {'project_id': None},
