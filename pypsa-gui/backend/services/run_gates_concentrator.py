@@ -229,7 +229,7 @@ def _scorecard_inputs(env, n):
     if error:
         return G.NoEvidence(
             "grid_code_unreadable",
-            f"the grid code {profile_id!r} does not load: {error}",
+            f"the grid code {profile_id} does not load: {error}",
         )
     return gr._Inputs(d, n, profile, error, None, None)
 
