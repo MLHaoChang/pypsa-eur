@@ -75,7 +75,9 @@ try {
           + frame('token', { delta: 'I will raise the electrical load growth to 3 % per year.' })
           + frame('tool_pending_confirmation', { tool_use_id: 'edit-1', tool_name: 'update_solver_config',
             args: { partial: { load_growth_pct_per_year: { electrical: 3.0 } } }, safety_tier: 'edit',
-            confirmation_token: 'fixture-token', ttl_seconds: 600, edit_card: CARD }) })
+            confirmation_token: 'fixture-token', ttl_seconds: 600, edit_card: CARD })
+          // The turn ends as the backend's does (harness/events.py): the composer goes idle, the card stays pending.
+          + frame('turn_done', {}) + frame('session_done', { reason: 'complete' }) })
       }
       if (p.startsWith('/api/chat/') || p.startsWith('/api/dictation/')) return ok({})
       if (p === '/api/network/meta') return ok({ name: PROJECT, bus_count: 2, snapshot_count: 3, line_count: 1, generator_count: 1, load_count: 1, storage_unit_count: 0, link_count: 0, transformer_count: 0, store_count: 0 })
