@@ -367,3 +367,74 @@ def test_c5_an_investment_case_abort_settles_cancelled_with_its_own_text(tmp_pat
     assert step["job"]["outcome"] == "aborted"
     # run_ic overwrites the settle's neutral text with its own.
     assert step["error"] == "The investment case ended aborted: user_stop"
+
+
+# ── Mutant follow-ups: each guard's other side ──────────────────────────────
+
+
+def test_a_stopped_step_without_a_brief_is_not_gated(session):
+    """Issue 22 keeps today's non-brief behaviour: only a brief gates a stopped step."""
+    steps = [{"id": "solve", "tool": "run_simulation", "args": {}}]
+    chat_tools.start_task(title="Solve", request_id="lv16-nobrief", steps=steps)
+    _settle_solve(session)
+    assert tasks.begin_step(session, "run_simulation", {}) is not None
+
+
+def test_a_stopped_read_step_under_a_brief_is_not_gated(session):
+    steps = [{"id": "runs", "tool": "list_project_runs", "args": {}}]
+    chat_tools.start_task(
+        title="Runs", request_id="lv16-read", steps=steps, brief=brief(steps)
+    )
+    ticket = tasks.begin_step(session, "list_project_runs", {})
+    job_id = "fg:" + uuid.uuid4().hex
+    path = tasks.await_job(ticket, job_id, session.session_id)
+    tasks.settle_job(path, ticket, job_id, "aborted", "failed")
+    assert tasks.begin_step(session, "list_project_runs", {}) is not None
+
+
+def test_a_pending_step_under_a_brief_offers_no_correction(session):
+    task = _solve_plan("lv16-pending")
+    view = chat_tools.get_task(task["task_id"])
+    assert view["next_step"]["status"] == "pending"
+    assert "correction" not in view["next_step"]
+
+
+def test_a_stopped_step_that_is_not_a_scene_step_carries_no_edit_rows():
+    receipt = {"says": "it p_set 3 → 2 MW", "rows": [{"name": "it"}]}
+    view = tasks._view(
+        {
+            "task_id": "t",
+            "title": "Edit",
+            "project_id": "p",
+            "status": "ready",
+            "steps": [
+                {
+                    "id": "e",
+                    "tool": "update_component",
+                    "status": "completed",
+                    "result": {"_edit_receipt": receipt},
+                },
+                {
+                    "id": "x",
+                    "tool": "run_simulation",
+                    "status": "cancelled",
+                    "args": {},
+                },
+            ],
+        }
+    )
+    assert view["changes"] == ["it p_set 3 → 2 MW"] and "change_edits" not in view
+
+
+@pytest.mark.parametrize(
+    "steps", [[], [{"status": "running"}], [{"status": "waiting"}]]
+)
+def test_the_campus_gate_waits_while_its_step_is_missing_or_unsettled(steps):
+    from services import run_actions, run_gates
+
+    for step in steps:
+        step.update(id="solve.3", tool=run_actions.CAMPUS, native=run_actions.KIND)
+    env = run_gates.Env(
+        task={"steps": steps, "run": {}}, ctx=None, project=None, project_dir=None
+    )
+    assert run_gates._dc_campus_study(env) is None
