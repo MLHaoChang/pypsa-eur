@@ -644,3 +644,355 @@ def test_the_fingerprint_leaves_the_live_carrier_as_it_was():
 def test_a_failed_loading_rule_ends_the_run_for_the_user_with_no_agent_edit():
     rule = _rules()["grid.pf.loading"]
     assert rule["unevaluated"] == "needs_user" and _profile()["tunable"] == []
+
+
+# ── C-b (GK B 61): the carrier canonicalisation moves no fingerprint but the '' branch one ───
+#
+# `master` is the fingerprint with `_canonical_branch_carriers` switched off: that step is
+# the only change this branch makes to `_network_input_fingerprint`, so this is master's code.
+
+
+def _templates():
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "project_templates"
+    return sorted(p.parent.name for p in root.glob("*/network.nc"))
+
+
+def _both(n, monkeypatch, *, exact):
+    """(this branch's, master's) fingerprint of `n`."""
+    from services import workflow_tools
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.build_context()
+    ctx.network = n
+    now = workflow_tools._network_input_fingerprint(ctx, exact=exact)
+    with monkeypatch.context() as m:
+        m.setattr(workflow_tools, "_canonical_branch_carriers", lambda n: None)
+        master = workflow_tools._network_input_fingerprint(ctx, exact=exact)
+    return now, master
+
+
+def _branch_carriers(n):
+    return {c: set(n.components[c].static["carrier"]) for c in ("Line", "Transformer")
+            if "carrier" in n.components[c].static.columns and len(n.components[c].static)}
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_cb_a_every_shipped_template_without_an_empty_branch_carrier_hashes_as_on_master(
+        monkeypatch, exact):
+    import logging
+
+    names = _templates()
+    if not names:
+        pytest.skip("no template is built here (project_templates/_build.py)")
+    logging.disable(logging.CRITICAL)
+    try:
+        checked = []
+        for name in names:
+            from pathlib import Path
+
+            n = pypsa.Network(str(Path(__file__).resolve().parents[1] / "project_templates"
+                                  / name / "network.nc"))
+            carriers = _branch_carriers(n)
+            if any("" in s for s in carriers.values()):
+                continue  # an empty carrier is case (b)
+            now, master = _both(n, monkeypatch, exact=exact)
+            assert now == master, name
+            checked.append(name)
+    finally:
+        logging.disable(logging.NOTSET)
+    assert checked
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_cb_a_a_network_with_no_branch_hashes_as_on_master(monkeypatch, exact):
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(2))
+    n.add("Bus", "a")
+    n.add("Generator", "g", bus="a", p_nom=10)
+    n.add("Load", "l", bus="a", p_set=5)
+    now, master = _both(n, monkeypatch, exact=exact)
+    assert now == master
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_cb_b_a_shipped_grid_template_hashes_as_masters_same_network_with_ac(monkeypatch, exact):
+    """The four grid templates ship Lines with carrier '' (ieee39's Transformers have no
+    carrier column): each hashes as master hashes it with those carriers set to 'AC'."""
+    import logging
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "project_templates"
+    logging.disable(logging.CRITICAL)
+    try:
+        checked = []
+        for name in _templates():
+            n = pypsa.Network(str(root / name / "network.nc"))
+            if not any("" in s for s in _branch_carriers(n).values()):
+                continue
+            now, _ = _both(n, monkeypatch, exact=exact)
+            for c in ("Line", "Transformer"):
+                static = n.components[c].static
+                if "carrier" in static.columns:
+                    static.loc[static["carrier"] == "", "carrier"] = "AC"
+            assert now == _both(n, monkeypatch, exact=exact)[1], name
+            checked.append(name)
+    finally:
+        logging.disable(logging.NOTSET)
+    if not checked:
+        pytest.skip("no grid template is built here (project_templates/_build.py)")
+
+
+def _with_transformer(line="", trafo=""):
+    n = _net()
+    n.add("Bus", "c")
+    n.add("Transformer", "t1", bus0="b", bus1="c", x=0.1, s_nom=50)
+    n.lines["carrier"], n.transformers["carrier"] = line, trafo
+    return n
+
+
+@pytest.mark.parametrize("exact", [False, True])
+@pytest.mark.parametrize("line, trafo", [("", ""), ("", "AC"), ("AC", "")])
+def test_cb_b_an_empty_branch_carrier_hashes_as_masters_ac(monkeypatch, exact, line, trafo):
+    now, _ = _both(_with_transformer(line, trafo), monkeypatch, exact=exact)
+    _, master_ac = _both(_with_transformer("AC", "AC"), monkeypatch, exact=exact)
+    assert now == master_ac
+
+
+@pytest.mark.parametrize("exact", [False, True])
+@pytest.mark.parametrize("carrier", ["DC", "HVDC", "ac"])
+def test_cb_c_another_branch_carrier_hashes_as_on_master(monkeypatch, exact, carrier):
+    n = _with_transformer(carrier, carrier)
+    now, master = _both(n, monkeypatch, exact=exact)
+    assert now == master
+    assert now != _both(_with_transformer("AC", "AC"), monkeypatch, exact=exact)[0]
+
+
+def _empty_carrier_on(component):
+    n = _with_transformer("AC", "AC")
+    n.add("Generator", "g", bus="a", p_nom=10)
+    n.add("Load", "l", bus="b", p_set=5)
+    n.add("Link", "k", bus0="a", bus1="c", p_nom=5)
+    n.add("Store", "s", bus="c", e_nom=5)
+    for c in ("Bus", "Generator", "Link", "Store"):
+        n.components[c].static["carrier"] = "AC"
+    n.components[component].static["carrier"] = ""
+    return n
+
+
+@pytest.mark.parametrize("exact", [False, True])
+@pytest.mark.parametrize("component", ["Bus", "Generator", "Link", "Store"])
+def test_cb_c_an_empty_carrier_off_the_branches_hashes_as_on_master(monkeypatch, exact, component):
+    now, master = _both(_empty_carrier_on(component), monkeypatch, exact=exact)
+    assert now == master
+
+
+# ── C-d (GK B 61): each fingerprint equality reader across the carrier change ───
+#
+# A "pre-change" record is the fingerprint master wrote for a project whose Lines carry
+# '' (`_canonical_branch_carriers` switched off); a "post-change" one is this branch's.
+# A PF-on project reads the first stale with a typed reason, never a 500 or fresh, and
+# accepts the second.
+
+
+@pytest.fixture
+def pf_project(install_network, monkeypatch):
+    from services import workflow_tools
+    from services.provenance_graph import runs
+    from services.pypsa_service import PyPSAService
+
+    runs._clear_cache_for_tests()
+    n = install_network(_net())
+    n.lines["carrier"] = ""
+    ctx = PyPSAService.get_active_context()
+    ctx.solver_state["solver_config"].run_ac_pf_after_lopf = True
+    n.generators_t.p = pd.DataFrame(index=n.snapshots)
+
+    def record(pre_change, *, flowed):
+        with monkeypatch.context() as m:
+            if pre_change:
+                m.setattr(workflow_tools, "_canonical_branch_carriers", lambda n: None)
+            n.meta["assistant_solve_input_fingerprint"] = workflow_tools._network_input_fingerprint(ctx)
+            n.meta["assistant_solve_exact_input_fingerprint"] = (
+                workflow_tools._network_input_fingerprint(ctx, exact=True))
+        ctx.solver_state.update(status="completed", condition="optimal",
+                                lopf_results=None, ac_pf_results=None)
+        if flowed:
+            ctx.solver_state.update(
+                condition="lopf+ac_pf_ok", lopf_results={}, ac_pf_results={},
+                ac_pf_network_revision=int(ctx.network_revision or 0))
+        runs._clear_cache_for_tests()
+        return n.meta["assistant_solve_input_fingerprint"]
+
+    yield ctx, record
+    runs._clear_cache_for_tests()
+
+
+@pytest.mark.parametrize("flowed", [False, True])
+def test_cd_solve_matches_inputs_reads_a_pre_change_record_stale(pf_project, flowed):
+    ctx, record = pf_project
+    record(False, flowed=flowed)
+    assert _calc.solve_matches_inputs(ctx, after_pf=True) is True
+    record(True, flowed=flowed)
+    assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
+
+
+def test_cd_the_saved_results_verdict_reads_a_pre_change_record_stale_with_the_edge(pf_project):
+    from services.provenance_graph import runs
+
+    ctx, record = pf_project
+    record(False, flowed=True)
+    assert runs.results_verdicts(runs.read(ctx))["optimisation"].state == "fresh"
+    fp = record(True, flowed=True)
+    verdict = runs.results_verdicts(runs.read(ctx))["optimisation"]
+    assert verdict.state == "stale"
+    assert [(b.field, b.reason, b.recorded[0]) for b in verdict.broken] == [
+        ("input fingerprint", "changed", fp)]
+
+
+def test_cd_the_retained_run_binding_reads_a_pre_change_run_changed(pf_project, monkeypatch):
+    from services import retained_results, run_evidence
+
+    ctx, record = pf_project
+    for pre_change, want in ((False, (True, False)), (True, (False, True))):
+        fp = record(pre_change, flowed=True)
+        monkeypatch.setattr(run_evidence, "get_run_evidence",
+                            lambda rid, fp=fp: {"status": "completed", "fingerprint": fp})
+        monkeypatch.setattr(run_evidence, "list_project_runs",
+                            lambda **kw: {"items": [{"run_id": "r1"}]})
+        ref, flags = retained_results.run_binding("r1")
+        assert (flags["run_is_current"], flags["inputs_changed_since_run"]) == want
+        assert (ref is not None) is want[0]
+
+
+def test_cd_the_investment_case_fact_reads_a_pre_change_solve_not_current(pf_project):
+    from services import ic_counterfactual
+
+    ctx, record = pf_project
+    body = {"status": "done", "report": {"present": True, "stale": False}, "flags": []}
+    record(False, flowed=False)
+    assert ic_counterfactual.read(ctx, lambda fn: body)["state"] == ic_counterfactual.ESTABLISHED
+    record(True, flowed=False)
+    fact = ic_counterfactual.read(ctx, lambda fn: body)
+    assert fact["state"] == ic_counterfactual.NOT_RUN
+    assert "results_not_current" in fact["reasons"]
+
+
+# ── GK B (61) (3): an edit around the flow never reads as the solve's own PF ───
+
+
+@pytest.fixture
+def solved_3bus(install_network):
+    """The real 3bus template, solved and recorded as a PF-on run records it (the LP's
+    fingerprints from `_record_solve_inputs`, then the state the run leaves)."""
+    import logging
+    import pathlib
+
+    from services import workflow_tools
+    from services.pypsa_service import PyPSAService
+
+    path = pathlib.Path(__file__).resolve().parents[1] / "project_templates" / "3bus" / "network.nc"
+    if not path.exists():
+        pytest.skip("3bus is not built here")
+    logging.disable(logging.CRITICAL)
+    n = install_network(pypsa.Network(str(path)))
+    ctx = PyPSAService.get_active_context()
+    config = ctx.solver_state["solver_config"]
+    config.run_ac_pf_after_lopf = True
+    assert n.optimize(solver_name="highs")[0] == "ok"
+    workflow_tools._record_solve_inputs(n, config)
+    ctx.solver_state.update(status="completed", condition="optimal",
+                            lopf_results=None, ac_pf_results=None)
+    yield n, ctx, config
+    logging.disable(logging.NOTSET)
+
+
+def _flow(n, ctx, config):
+    import queue
+
+    from services.ac_pf_service import run_ac_pf_stage
+    from services.pypsa_service import PyPSAService
+
+    with PyPSAService.get_lock():
+        out = run_ac_pf_stage(n, config, queue.Queue())
+    ctx.solver_state.update(**out, status="completed", condition="lopf+ac_pf_ok")
+    return out
+
+
+def test_a_revision_bump_after_the_flow_makes_the_real_run_not_current(solved_3bus):
+    from services import dirty_state
+
+    n, ctx, config = solved_3bus
+    out = _flow(n, ctx, config)
+    assert out["ac_pf_network_revision"] == int(ctx.network_revision or 0)
+    assert _calc.solve_matches_inputs(ctx, after_pf=True) is True
+    dirty_state.bump_revision(ctx)
+    assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
+
+
+def test_an_edit_between_the_lp_and_the_flow_is_caught_by_the_input_fingerprint(solved_3bus):
+    """The run holds the network lock from before the LP to after `n.pf()`
+    (`solver_service.run_simulation`'s `with lock:`), so no edit lands there; an edit
+    in that gap is simulated here. The flow then reads the edited counter, so the
+    revision compare cannot catch it: the input fingerprint does."""
+    from services import dirty_state, workflow_tools
+
+    n, ctx, config = solved_3bus
+    n.lines.loc[n.lines.index[0], "x"] *= 1.5
+    dirty_state.bump_revision(ctx)
+    out = _flow(n, ctx, config)
+    assert out["ac_pf_network_revision"] == int(ctx.network_revision or 0)  # not the catcher
+    assert (n.meta["assistant_solve_input_fingerprint"]
+            != workflow_tools._network_input_fingerprint(ctx))  # the catcher
+    assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
+    assert workflow_tools.solve_freshness(ctx, after_pf=True)["results_current"] is False
+
+
+def _saved_inputs(n):
+    """Every saved field the flow must leave alone: each component's static and series
+    attributes whose status is not an output (results are PF values by design, issue 50,
+    and are not pinned here, the slack generator's p included)."""
+    fields = {}
+    for c in n.components:
+        if c.name == "SubNetwork":
+            continue  # topology PyPSA rebuilds; never saved
+        status = c.defaults["status"].astype(str)
+        keep = [a for a in c.static.columns if "Output" not in status.get(a, "")]
+        fields[(c.name, "static")] = c.static[keep].copy()
+        for a, frame in c.dynamic.items():
+            if "Output" not in status.get(a, "Output") and not frame.empty:
+                fields[(c.name, a)] = frame.copy()
+    fields["meta"] = dict(n.meta)
+    return fields
+
+
+@pytest.mark.parametrize("template", ["3bus", "ieee14", "belgium", "ieee39"])
+def test_the_flow_moves_no_saved_field_but_the_results(template):
+    """GK B SH-15 (2) A3, option A: after the LP, the in-place flow changes no saved
+    input, series input or meta; only result fields move."""
+    import logging
+    import pathlib
+    import queue
+
+    from services.ac_pf_service import run_ac_pf_stage
+    from services.solver_service import SolverConfig
+
+    path = pathlib.Path(__file__).resolve().parents[1] / "project_templates" / template / "network.nc"
+    if not path.exists():
+        pytest.skip(f"{template} is not built here")
+    logging.disable(logging.CRITICAL)
+    try:
+        n = pypsa.Network(str(path))
+        assert n.optimize(solver_name="highs")[0] == "ok"
+        before = _saved_inputs(n)
+        run_ac_pf_stage(n, SolverConfig(), queue.Queue())
+        after = _saved_inputs(n)
+    finally:
+        logging.disable(logging.NOTSET)
+    assert after.keys() == before.keys()
+    for key, frame in before.items():
+        if key == "meta":
+            assert after[key] == frame
+        else:
+            pd.testing.assert_frame_equal(after[key], frame, obj=str(key))

@@ -499,6 +499,17 @@ def _unused_extra_ports(component):
     return skip
 
 
+def _canonical_branch_carriers(n):
+    """PyPSA also gives a Line or Transformer without a carrier its sub-network's
+    ("AC") while solving. That assignment is no edit: without this a solve on a
+    project of Lines moves its own input identity (study harness 15). Only an
+    empty Line/Transformer carrier is read as "AC", on the fingerprint's private
+    copy `n`; every other carrier and component hashes as before."""
+    for branches in (n.lines, n.transformers):
+        if "carrier" in branches.columns:
+            branches.loc[branches["carrier"] == "", "carrier"] = "AC"
+
+
 def _network_input_fingerprint(ctx, *, exact=False):
     """Hash model inputs, excluding solver outputs so a solve can be reused."""
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
@@ -511,12 +522,7 @@ def _network_input_fingerprint(ctx, *, exact=False):
     n.determine_network_topology()
     for subnet in n.sub_networks.obj:
         subnet.find_bus_controls()
-    # PyPSA also gives a Line or Transformer without a carrier its sub-network's
-    # ("AC") while solving. That assignment is no edit: without this a solve on
-    # a project of Lines moves its own input identity (study harness 15).
-    for branches in (n.lines, n.transformers):
-        if "carrier" in branches.columns:
-            branches.loc[branches["carrier"] == "", "carrier"] = "AC"
+    _canonical_branch_carriers(n)
     def encode(frame):
         return _exact_frame_json(frame) if exact else frame.to_json(date_format="iso")
 
