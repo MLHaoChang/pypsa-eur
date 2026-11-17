@@ -1,3 +1,4 @@
+# ruff: noqa: F811  (pytest fixtures imported by name)
 """bus-price/1 on a MIP (assistant-assurance 10, S2, GK B G2d).
 
 On master's solve path HiGHS returns no duals for a MIP and PyPSA writes 0.0 to

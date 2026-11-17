@@ -1,3 +1,4 @@
+# ruff: noqa: F811  (pytest fixtures imported by name)
 """MIP gap band on retained cost comparisons and the gap disclosure
 (assistant-assurance 10, S2; GK B G2c, G2e).
 
