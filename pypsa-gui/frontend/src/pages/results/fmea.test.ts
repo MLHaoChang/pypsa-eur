@@ -77,6 +77,13 @@ describe('mergeWorksheet — unpriced modes (no VOLL)', () => {
     expect(row[WORKSHEET_CSV_HEADER.indexOf('severity_eur')]).toBe('')
     expect(row[WORKSHEET_CSV_HEADER.indexOf('criticality_eur_per_year')]).toBe('')
   })
+  it('closes the CSV with a note row saying why, only when a mode is unpriced', () => {
+    const csv = worksheetCsvRows(mergeWorksheet(unpriced, null))
+    expect(csv).toHaveLength(3)
+    expect(csv[2]).toEqual(['Not priced: 2 modes are listed last and left out of the ranking. ' +
+      'Set the Value of Lost Load (VOLL) in Solver settings.'])
+    expect(worksheetCsvRows(mergeWorksheet(copt, sidecar))).toHaveLength(3)
+  })
 })
 
 describe('worksheetCsvRows', () => {

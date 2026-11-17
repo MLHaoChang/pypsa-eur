@@ -28,11 +28,13 @@ import {
   type ModesPayload,
   unpricedRankingWarning,
   unpricedModeCount,
+  unpricedNote,
+  SET_VOLL_TEXT,
   type WorksheetRow,
   type WorksheetSidecar,
   CRITICALITY_PER_YEAR_LABEL,
 } from './fmea'
-import { openReliabilityGoal } from '../../layout/flowNavigation'
+import { openVollField } from '../../layout/flowNavigation'
 
 const FIDELITY_TIP: Record<string, string> = {
   analytic_convolution:
@@ -77,6 +79,9 @@ function guidedBasis(basis: string): string {
   if (basis === 'expert') return 'your estimate'
   return 'outage rate'
 }
+
+// The Back pill after the VOLL link names the tab it left.
+export const FMEA_RETURN_LABEL = 'FMEA'
 
 // An unpriced € cell (no VOLL): plain words, the reason is the visible line
 // above the table, never a tooltip or a bare dash.
@@ -218,12 +223,11 @@ export default function FmeaTab() {
 
       {unpricedCount > 0 ? (
         <p data-testid="fmea-unpriced-line" className="text-[11px] text-muted">
-          Not priced: {unpricedCount} mode{unpricedCount === 1 ? ' is' : 's are'} listed
-          last and left out of the ranking.{' '}
+          {unpricedNote(unpricedCount)}{' '}
           <button type="button" data-testid="fmea-unpriced-set-voll"
-            onClick={() => openReliabilityGoal()}
+            onClick={() => openVollField(FMEA_RETURN_LABEL)}
             className="text-accent hover:underline">
-            Set the Value of Lost Load (VOLL) in Solver settings ›
+            {SET_VOLL_TEXT} ›
           </button>
         </p>
       ) : unpricedRankingWarning(modes as ModesPayload | null | undefined) && (

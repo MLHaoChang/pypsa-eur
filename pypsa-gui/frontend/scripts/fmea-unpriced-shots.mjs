@@ -4,7 +4,8 @@
  * template-e2e 11 screenshot harness: the FMEA worksheet with no VOLL (unpriced
  * modes read "Not set", listed last, one visible line with the VOLL link),
  * Guided and Expert, dark and light, on the real app. Mocked routes only:
- * `GET /api/results/fmea_modes` and the project's worksheet sidecar.
+ * `GET /api/results/fmea_modes`, the project's worksheet sidecar, and VOLL 0 in `GET /api/simulation/solver_config`
+ * while unpriced. Also checks Back after the VOLL link (names "FMEA", lands on the table) and the priced state.
  * Needs the API on :8000 and Vite on :5173 (dev admin, scripts/dev-credentials.mjs).
  *
  * Usage: node scripts/fmea-unpriced-shots.mjs [outDir]      env: BASE
@@ -32,6 +33,9 @@ const MODES = {
     mode_('UPS', 'StorageUnit', 0.3, 'FOR')],
   sweep_status: null, sweep_error: null, voll_eur_per_mwh: 0,
 }
+let PRICED = false
+const PRICED_MODES = { ...MODES, voll_eur_per_mwh: 5000, per_mode: MODES.per_mode.map((m, i) => ({
+  ...m, severity_eur: 12000 / (i + 1), criticality_eur_per_year: (12000 / (i + 1)) * m.occurrence_per_year })) }
 const WORKSHEET = { version: 1, overlays: {}, manual_rows: [{
   mode_id: 'manual:cyber', component_class: 'Network', name: 'cyber attack', failure_class: 'D',
   occurrence_per_year: 0.1, occurrence_basis: 'expert', severity_eur: 250000, criticality_eur_per_year: 25000,
@@ -73,7 +77,13 @@ try {
       const page = await ctx.newPage()
       page.setDefaultTimeout(15000)
       page.on('pageerror', e => problems.push(`${mode}/${theme}: page error: ${e.message}`))
-      await page.route(u => u.pathname === '/api/results/fmea_modes', r => r.fulfill({ json: MODES }))
+      await page.route(u => u.pathname === '/api/results/fmea_modes', r => r.fulfill({ json: PRICED ? PRICED_MODES : MODES }))
+      // Unpriced means no VOLL: the real solver config, with VOLL 0, so the VOLL link lands on the empty field.
+      await page.route(u => u.pathname === '/api/simulation/solver_config', async r => {
+        if (PRICED || r.request().method() !== 'GET') return r.continue()
+        const res = await r.fetch()
+        r.fulfill({ response: res, json: { ...(await res.json()), voll: 0 } })
+      })
       const ws = `/api/projects/${encodeURIComponent(PROJECT)}/worksheet`
       await page.route(u => u.pathname === ws, r => (r.request().method() === 'GET' ? r.fulfill({ json: WORKSHEET }) : r.continue()))
       try {
@@ -93,6 +103,30 @@ try {
         const file = path.join(OUT, `te2e-11-${mode}-${theme}.png`)
         await page.screenshot({ path: file, clip })
         written.push(file)
+        if (theme === 'dark') {
+          // Back after the VOLL link: the pill names "FMEA" and lands on the table.
+          await page.getByTestId('fmea-unpriced-set-voll').click()
+          const pill = page.getByTestId('flow-return')
+          await pill.waitFor(); await page.waitForTimeout(800)
+          const back = path.join(OUT, `te2e-11-${mode}-back-pill.png`)
+          await page.screenshot({ path: back }); written.push(back)
+          const label = (await pill.textContent()) ?? ''
+          if (!label.includes('FMEA')) problems.push(`${mode}: Back pill reads "${label.trim()}"`)
+          await pill.click(); await page.waitForTimeout(1200)
+          if (!(await page.getByTestId('fmea-table').isVisible())) problems.push(`${mode}: Back did not land on the FMEA table`)
+          const landed = path.join(OUT, `te2e-11-${mode}-after-back.png`)
+          await page.screenshot({ path: landed }); written.push(landed)
+        }
+        // The priced-only state: no line, € cells as numbers.
+        PRICED = true
+        await page.reload(); await page.waitForLoadState('networkidle')
+        await page.getByText(PROJECT).first().waitFor(); await page.waitForTimeout(2500)
+        await page.evaluate(async () => { const { showResultsTab } = await import('/src/layout/flowNavigation.ts'); showResultsTab('fmea') })
+        await page.getByTestId('fmea-table').waitFor(); await page.waitForTimeout(800)
+        if (await page.getByTestId('fmea-unpriced-line').count()) problems.push(`${mode}/${theme}: line shown when priced`)
+        const priced = path.join(OUT, `te2e-11-${mode}-${theme}-priced.png`)
+        await page.getByTestId('fmea-table').screenshot({ path: priced }); written.push(priced)
+        PRICED = false
       } catch (e) {
         problems.push(`${mode}/${theme}: ${e.message.split('\n')[0]}`)
         await page.screenshot({ path: path.join(OUT, `failed-${mode}-${theme}.png`) }).catch(() => {})

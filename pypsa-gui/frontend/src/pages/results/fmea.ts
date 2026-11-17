@@ -157,6 +157,13 @@ export function mergeWorksheet(
   return rows
 }
 
+/** The sentence that says why unpriced modes sit last: one wording for the
+ *  tab's visible line and the CSV's note row. */
+export function unpricedNote(count: number): string {
+  return `Not priced: ${count} mode${count === 1 ? ' is' : 's are'} listed last and left out of the ranking.`
+}
+export const SET_VOLL_TEXT = 'Set the Value of Lost Load (VOLL) in Solver settings'
+
 /** How many rows the backend could not price (no VOLL). */
 export function unpricedModeCount(rows: WorksheetRow[]): number {
   return rows.filter(r => r.criticality_eur_per_year === null).length
@@ -173,12 +180,16 @@ export const WORKSHEET_CSV_HEADER = [
 ]
 
 export function worksheetCsvRows(rows: WorksheetRow[]): unknown[][] {
-  return rows.map(r => [
+  const out: unknown[][] = rows.map(r => [
     r.mode_id, r.failure_class, r.component_class, r.name,
     r.occurrence_per_year, r.occurrence_basis,
     r.severity_eur ?? '', r.criticality_eur_per_year ?? '', r.delta_eue_mwh ?? '',
     r.in_metric_scope, r.mitigability, r.engine, r.fidelity,
   ])
+  // The empty € cells say nothing on their own: a closing note row says why.
+  const unpriced = unpricedModeCount(rows)
+  if (unpriced > 0) out.push([`${unpricedNote(unpriced)} ${SET_VOLL_TEXT}.`])
+  return out
 }
 
 // Build a contract-valid manual (class-D, expert) row from the add-form's

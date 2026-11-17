@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import FmeaTab from './FmeaTab'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
-import { openReliabilityGoal } from '../../layout/flowNavigation'
+import { openVollField } from '../../layout/flowNavigation'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -23,7 +23,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
 })
 vi.mock('../../layout/flowNavigation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../layout/flowNavigation')>()
-  return { ...actual, openReliabilityGoal: vi.fn() }
+  return { ...actual, openVollField: vi.fn() }
 })
 vi.mock('./StressScenarioEditor', () => ({ default: () => <div data-testid="stress-editor-stub" /> }))
 
@@ -42,7 +42,7 @@ const EXPERT = {
 
 afterEach(() => cleanup())
 beforeEach(() => {
-  vi.mocked(openReliabilityGoal).mockReset()
+  vi.mocked(openVollField).mockReset()
   vi.mocked(resultsApi.getFmeaModes).mockReset().mockResolvedValue({
     per_mode: [ROW('grid'), ROW('gen')], sweep_status: null, sweep_error: null,
     voll_eur_per_mwh: 0,
@@ -80,6 +80,27 @@ describe.each(['guided', 'expert'] as const)('FMEA tab, unpriced modes (%s)', (m
     expect(at('cyber')).toBeLessThan(at('grid'))
   })
 
+  it('keeps unpriced modes last when the risk column is sorted the other way', async () => {
+    await renderTab(mode)
+    const header = screen.getByTestId('fmea-table').querySelectorAll('thead th')
+    const risk = Array.from(header).find(th => /risk|Criticality/.test(th.textContent ?? '')) as HTMLElement
+    fireEvent.click(risk)   // desc → asc (or asc → desc): the sort direction flips
+    const names = rowNames()
+    const at = (n: string) => names.findIndex(t => t.includes(n))
+    expect(at('cyber')).toBeLessThan(at('gen'))
+    expect(at('cyber')).toBeLessThan(at('grid'))
+  })
+
+  it('shows no line once every mode is priced', async () => {
+    vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({
+      per_mode: [{ ...ROW('grid'), severity_eur: 100, criticality_eur_per_year: 200 }],
+      sweep_status: null, sweep_error: null, voll_eur_per_mwh: 5000,
+    })
+    await renderTab(mode)
+    expect(screen.queryByTestId('fmea-unpriced-line')).toBeNull()
+    expect(screen.queryByTestId('fmea-not-set')).toBeNull()
+  })
+
   it('says why in a visible line whose link opens the VOLL field', async () => {
     await renderTab(mode)
     const line = screen.getByTestId('fmea-unpriced-line')
@@ -87,6 +108,6 @@ describe.each(['guided', 'expert'] as const)('FMEA tab, unpriced modes (%s)', (m
     const link = screen.getByTestId('fmea-unpriced-set-voll')
     expect(link.textContent).toBe('Set the Value of Lost Load (VOLL) in Solver settings ›')
     fireEvent.click(link)
-    expect(openReliabilityGoal).toHaveBeenCalledTimes(1)
+    expect(openVollField).toHaveBeenCalledWith('FMEA')
   })
 })
