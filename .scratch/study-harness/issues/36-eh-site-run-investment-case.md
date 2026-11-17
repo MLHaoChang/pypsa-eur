@@ -3,7 +3,7 @@
 
 # 36 — eh_site: run_investment_case for the investment chapter
 
-Status: ready-for-agent (Opus; GK B plan first; finance code)
+Status: ready-for-agent (Opus; GK B plan GO) · PR #1624
 Type: task
 Gated: yes (GK B)
 Model tier: opus
