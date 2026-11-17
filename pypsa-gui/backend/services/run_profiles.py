@@ -916,7 +916,6 @@ def _eh_concentrator_staged() -> dict:
     unserved = next(r for r in EH_RESULT_RULES if r["id"] == "kpi.unserved_mwh")
     edits = _conc_levers()
     tunable = sorted({(e["target"]["component"], e["target"]["attr"]) for e in edits})
-    levers = [f"{c}.{a}" for c, a in tunable]
     return {
         "id": template, "version": 1,
         "templates": [template],

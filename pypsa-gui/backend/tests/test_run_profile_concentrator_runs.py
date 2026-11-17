@@ -47,9 +47,13 @@ def baseline(client, session_ctx, install_network, tmp_path):
     """The template from the route, its network replaced by the first stage's
     (2027) and saved, bound as the run's project."""
     name = "Concentrator"
-    response = client.post(f"/api/projects/from_template/{TEMPLATE}", params={"name": name})
+    response = client.post(
+        f"/api/projects/from_template/{TEMPLATE}", params={"name": name}
+    )
     assert response.status_code == 200, response.text
-    C.build_eh_concentrator_staged(T, years=(2027,)).export_to_netcdf(tmp_path / "stage1.nc")
+    C.build_eh_concentrator_staged(T, years=(2027,)).export_to_netcdf(
+        tmp_path / "stage1.nc"
+    )
     install_network(pypsa.Network(tmp_path / "stage1.nc"))
     response = client.post(f"/api/projects/{name}")
     assert response.status_code == 200, response.text
@@ -94,25 +98,44 @@ def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site, monke
         def counted(*args, **kwargs):
             solved.append(1)
             return (solve or run_simulation)(*args, **kwargs)
+
         return real_solve(n, cfg, plan, solve=counted)
+
     monkeypatch.setattr(baseline_mod, "solve_baseline", spy)
     task, path, _ = granted(run={**RUN, "profile": REF})
     script = Script()  # never consulted: no L2 round on a passing gate
     record = go(harness_runner.Runner("a", agent_provider=script), path, task)
     run = record["run"]
-    rules = {r["rule"]: r for r in (run["stages"].get("result_gate", {}).get("gate") or {}).get("rules", [])}
+    rules = {
+        r["rule"]: r
+        for r in (run["stages"].get("result_gate", {}).get("gate") or {}).get(
+            "rules", []
+        )
+    }
     assert run["status"] == "completed" and run["stage"] == "handoff", (
-        run["status"], run["stage"], [(s["id"], s["status"], s.get("error")) for s in record["steps"]],
-        {k: (r["verdict"], r.get("reason")) for k, r in rules.items()})
+        run["status"],
+        run["stage"],
+        [(s["id"], s["status"], s.get("error")) for s in record["steps"]],
+        {k: (r["verdict"], r.get("reason")) for k, r in rules.items()},
+    )
     assert script.requests == []
-    solve = [(s["tool"], s["status"]) for s in record["steps"] if s["id"].startswith("solve.")]
+    solve = [
+        (s["tool"], s["status"])
+        for s in record["steps"]
+        if s["id"].startswith("solve.")
+    ]
     assert solve == [("solve_queue_enqueue", "completed"), (run_ic.TOOL, "completed")]
     verdicts = {k: r["verdict"] for k, r in rules.items()}
     assert verdicts["conc.mass_balance"] == "pass"
     assert rules["conc.mass_balance"]["facts"][0]["value"] <= 1e-6
-    assert verdicts["conc.ic.counterfactual"] == "pass" and verdicts["conc.ic.basis"] == "pass"
+    assert (
+        verdicts["conc.ic.counterfactual"] == "pass"
+        and verdicts["conc.ic.basis"] == "pass"
+    )
     assert verdicts["conc.motor_start"] == "fail"
-    assert any("(dol): FAIL" in d for d in rules["conc.motor_start"]["facts"][0]["detail"])
+    assert any(
+        "(dol): FAIL" in d for d in rules["conc.motor_start"]["facts"][0]["detail"]
+    )
     assert verdicts["conc.restart"] == "fail"
     assert verdicts["conc.n_1.site_transformer"] == "not_evaluated"
     for kpi in ("conc.kpi.lost_tonnes", "conc.kpi.shed_level", "conc.kpi.npv"):
