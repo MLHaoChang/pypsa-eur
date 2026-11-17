@@ -984,43 +984,56 @@ def test_an_editor_still_meets_a_foreign_lock_on_these_routes(
     )
 
 
-def test_a_viewer_and_an_editor_comment_at_the_same_moment_and_both_survive(
+def test_an_editors_comment_and_a_viewers_withdraw_wait_for_the_report_lock(
     world, as_user, locked_report
 ):
-    """V-a: both writers serialise on `store.report_lock`; neither is lost."""
+    """V-a: with `store.report_lock` held, an editor's comment and a viewer's
+    withdraw both wait; once it is released both land. A comment or withdraw
+    that skipped the lock would change the comments file while it is held."""
     import threading
+    import time
 
-    from services.reports import revisions
+    from services.reports import revisions, store
+    from tests import test_report_revisions as reports
 
-    viewer, editor, base = (
-        as_user(world["viewer"]),
-        locked_report["editor"],
-        locked_report["base"],
+    rid, base = locked_report["rid"], locked_report["base"]
+    mine = revisions.add_comment(
+        world["path"],
+        rid,
+        "mine",
+        reports._anchor(),
+        user=f"viewer-{world['viewer'].hex}@example.com",
     )
-    barrier, results = threading.Barrier(2), {}
-
-    def post(name, client):
-        barrier.wait()
-        results[name] = client.post(
-            f"{base}/comments", json={"text": name, "anchor": _ANCHOR}
-        )
-
+    comments_file = revisions._path(world["path"], rid)
+    held = comments_file.read_bytes()
+    viewer, editor = as_user(world["viewer"]), locked_report["editor"]
+    results = {}
+    calls = {
+        "comment": lambda: editor.post(
+            f"{base}/comments", json={"text": "editor", "anchor": _ANCHOR}
+        ),
+        "withdraw": lambda: viewer.post(f"{base}/comments/{mine.comment_id}/withdraw"),
+    }
     threads = [
-        threading.Thread(target=post, args=("viewer", viewer)),
-        threading.Thread(target=post, args=("editor", editor)),
+        threading.Thread(target=lambda k=k: results.__setitem__(k, calls[k]()))
+        for k in calls
     ]
-    for t in threads:
-        t.start()
+    with store.report_lock(world["path"], rid):
+        for t in threads:
+            t.start()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            assert comments_file.read_bytes() == held, "a write skipped the lock"
+            assert not results, results
+            time.sleep(0.05)
     for t in threads:
         t.join(timeout=60)
     assert {k: r.status_code for k, r in results.items()} == {
-        "viewer": 200,
-        "editor": 200,
-    }
-    texts = sorted(
-        c.text for c in revisions.load_comments(world["path"], locked_report["rid"])
-    )
-    assert texts == ["editor", "viewer"]
+        "comment": 200,
+        "withdraw": 200,
+    }, {k: r.text for k, r in results.items()}
+    status = {c.text: c.status for c in revisions.load_comments(world["path"], rid)}
+    assert status == {"mine": "withdrawn", "editor": "open"}
 
 
 def test_a_viewers_comment_is_refused_while_the_reports_are_closing(
@@ -1032,15 +1045,15 @@ def test_a_viewers_comment_is_refused_while_the_reports_are_closing(
     viewer, base = as_user(world["viewer"]), locked_report["base"]
     with store.reports_closed(world["path"]):
         refused = viewer.post(f"{base}/comments", json={"text": "x", "anchor": _ANCHOR})
-    assert refused.status_code != 200, refused.text
+    assert refused.status_code == 409 and _kind(refused) == "report_busy", refused.text
     assert revisions.load_comments(world["path"], locked_report["rid"]) == []
 
 
-def test_a_viewers_export_during_a_close_answers_as_an_editors_does(
+def test_a_viewers_export_during_a_close_succeeds_as_an_editors_does(
     world, as_user, locked_report
 ):
-    """V-b for export: it writes no reports/ file, so the close treats a viewer's
-    export exactly as an editor's (who holds the lock here, so meets no 409)."""
+    """V-b for export: it writes no reports/ file, so a close does not refuse it,
+    for a viewer exactly as for the editor (who holds the lock here)."""
     from services.reports import store
 
     viewer, editor, base = (
@@ -1051,11 +1064,21 @@ def test_a_viewers_export_during_a_close_answers_as_an_editors_does(
     with store.reports_closed(world["path"]):
         as_viewer = viewer.post(f"{base}/export", json={})
         as_editor = editor.post(f"{base}/export", json={})
-    assert as_viewer.status_code == as_editor.status_code, (
-        as_viewer.text,
-        as_editor.text,
+    assert as_viewer.status_code == 200, as_viewer.text
+    assert as_editor.status_code == 200, as_editor.text
+
+
+def test_a_viewer_cannot_queue_a_blender_run(world, as_user):
+    """Master's site-scene 06a route queues a job and writes an artifact: refused."""
+    from services import solve_queue as queue_service
+
+    before = queue_service.solve_queue.list_jobs()
+    viewer = as_user(world["viewer"])
+    response = viewer.post(
+        f"/api/projects/{world['project']}/sites/any-site/scene/blender-jobs"
     )
-    assert _kind(as_viewer) == _kind(as_editor)
+    assert response.status_code == 403 and _kind(response) == KIND, response.text
+    assert queue_service.solve_queue.list_jobs() == before
 
 
 # ── F3: a removed member's queued job is not run ─────────────────────────────

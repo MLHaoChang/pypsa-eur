@@ -248,6 +248,7 @@ PUT    /api/projects/{name}/sites  write path:name
 DELETE /api/projects/{name}/sites/{site_id}/context  write path:name
 POST   /api/projects/{name}/sites/{site_id}/context  write path:name
 POST   /api/projects/{name}/sites/{site_id}/scene/adopt  write path:name
+POST   /api/projects/{name}/sites/{site_id}/scene/blender-jobs  write path:name
 POST   /api/projects/{name}/sites/{site_id}/scene/exports  write path:name
 POST   /api/projects/{name}/sites/{site_id}/scene/proposals  allow prepares an in-memory proposal owned by the caller; nothing is written until apply, which is refused (read-tier tool site_scene_prepare)
 POST   /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply  write path:name
