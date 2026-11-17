@@ -329,3 +329,11 @@ def test_default_values_make_a_three_by_three_grid():
         {"variable": "load"}, {"variable": "genset_fuel_price"}
     )
     assert len(xv) == len(yv) == 3
+
+
+def test_five_values_make_a_five_by_five_grid():
+    (_, xv), (_, yv) = M.check_axes(
+        {"variable": "load", "values": [1, 2, 3, 4, 5]},
+        {"variable": "genset_fuel_price", "values": [1, 2, 3, 4, 5]},
+    )
+    assert len(xv) == len(yv) == 5
