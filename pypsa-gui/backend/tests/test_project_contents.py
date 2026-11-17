@@ -645,7 +645,9 @@ def test_the_unpacked_cap_defaults_to_four_gib(monkeypatch):
     # the old one (`bundle_manifest`) no longer matches `PC.BundleRefused` in
     # every test that runs after this one.
     monkeypatch.delenv("PYPSA_GUI_MAX_BUNDLE_UNPACKED_BYTES", raising=False)
-    spec = importlib.util.spec_from_file_location("_project_contents_fresh", PC.__file__)
+    spec = importlib.util.spec_from_file_location(
+        "_project_contents_fresh", PC.__file__
+    )
     fresh = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, fresh)
     spec.loader.exec_module(fresh)
