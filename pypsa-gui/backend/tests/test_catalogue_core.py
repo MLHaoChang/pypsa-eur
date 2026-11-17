@@ -283,3 +283,33 @@ def test_an_option_without_a_plain_name_reads_as_itself():
         options=("buy_in", "brand_new"),
     )
     assert E.options_plain_of(spec) == ("Bought in", "brand_new")
+
+
+def test_values_set_on_the_row_win_over_the_rules():
+    spec = FieldSpec(
+        "p_nom",
+        "size",
+        "Capacity",
+        "Long help. More.",
+        kind="enum",
+        options=("a_b",),
+        plain_name="Own name",
+        short_help="Own help.",
+        options_plain=("Own option",),
+    )
+    assert E.plain_name_of("Generator", spec) == "Own name"
+    assert E.short_help_of("Generator", spec) == "Own help."
+    assert E.options_plain_of(spec) == ("Own option",)
+
+
+def test_derived_entries_sit_in_full_detail():
+    by = {(e.scope, e.model_name): e for e in ENTRIES}
+    assert by[("Generator", "capital_cost")].depth == "detail"
+    assert by[("Line", "capital_cost")].depth == "detail"
+
+
+def test_a_bus_voltage_is_electrical_and_not_a_coordinate():
+    by = {(e.scope, e.model_name): e for e in ENTRIES}
+    assert by[("Bus", "v_nom")].functions["load_flow"] == "needs"
+    assert by[("Bus", "y")].functions == {"dispatch": "uses"}
+    assert by[("Transformer", "tap_ratio")].group == "electrical"

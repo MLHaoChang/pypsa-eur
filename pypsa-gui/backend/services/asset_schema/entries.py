@@ -349,7 +349,7 @@ def functions_of(scope: str, spec: FieldSpec, group: str) -> dict[str, str]:
     }
 
 
-#: One-line help where the row's first sentence is too long or names a model column.
+#: One-line help, keyed by (class, model name), where the row's first sentence is too long or names a model column.
 SHORT_HELP: dict[Any, str] = {
     (
         "Generator",
@@ -409,11 +409,7 @@ def _first_sentence(text: str) -> str:
 def short_help_of(scope: str, spec: FieldSpec) -> str:
     if spec.short_help:
         return spec.short_help
-    return (
-        SHORT_HELP.get((scope, spec.key))
-        or SHORT_HELP.get(spec.key)
-        or _first_sentence(spec.help)
-    )
+    return SHORT_HELP.get((scope, spec.key)) or _first_sentence(spec.help)
 
 
 _SCOPE_SLUG = re.compile(r"(?<!^)(?=[A-Z])")
