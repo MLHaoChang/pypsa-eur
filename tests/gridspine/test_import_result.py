@@ -1,6 +1,7 @@
 """The shared import contract: report types and the importer registry."""
 
 import json
+import re
 import subprocess
 import sys
 import textwrap
@@ -27,8 +28,14 @@ def _report(**over):
         source_format="psse",
         source_files=["case.raw", "case.dyr"],
         counts={"Buses": 3, "Lines": 2},
-        unmapped=[Unmapped("Switched shunt 7", "no matching asset type yet")],
-        assumed=[Assumed("Line 1-2", "Thermal rating", 100.0, "RATEA was 0")],
+        unmapped=[
+            Unmapped("Switched shunt 7", "no matching asset type yet"),
+            Unmapped("FACTS device 2", "no matching asset type yet"),
+        ],
+        assumed=[
+            Assumed("Line 1-2", "Thermal rating", 100.0, "RATEA was 0"),
+            Assumed("Line 2-3", "Thermal rating", 80.0, "RATEA was 0"),
+        ],
         warnings=["Area names missing"],
     )
     base.update(over)
@@ -38,9 +45,10 @@ def _report(**over):
 def test_report_round_trips_through_a_plain_dict():
     report = _report()
     data = report.to_dict()
-    assert data["unmapped"] == [
-        {"source_item": "Switched shunt 7", "reason": "no matching asset type yet"}
-    ]
+    assert data["unmapped"][0] == {
+        "source_item": "Switched shunt 7",
+        "reason": "no matching asset type yet",
+    }
     assert data["assumed"][0]["parameter"] == "Thermal rating"
     assert ImportReport.from_dict(data) == report
 
@@ -311,8 +319,8 @@ def test_declared_importer_modules_are_frozen_into_the_app():
     the ones the spec names; a missing one would vanish from the frozen app.
     """
     spec_text = (ROOT / "pypsa-gui" / "pypsa-gui.spec").read_text(encoding="utf-8")
-    missing = [s.module for s in ir.DECLARED if f'"{s.module}"' not in spec_text]
-    assert not missing
+    listed = set(re.findall(r'"(gridspine\.ingest\.\w+_import)"', spec_text))
+    assert listed == {s.module for s in ir.DECLARED}
 
 
 def test_contract_module_imports_no_engine():
@@ -332,3 +340,32 @@ def test_zero_counts_are_allowed():
 def test_non_string_names_are_refused_as_values():
     with pytest.raises(ValueError):
         Unmapped(7, "why")
+
+
+def test_round_trip_keeps_every_unmapped_and_assumed_item():
+    data = _report().to_dict()
+    assert len(data["unmapped"]) == 2 and len(data["assumed"]) == 2
+    back = ImportReport.from_dict(data)
+    assert len(back.unmapped) == 2 and len(back.assumed) == 2
+
+
+@pytest.mark.parametrize(
+    "change, match",
+    [
+        (lambda d: d["counts"].update(Buses=True), "Buses"),
+        (lambda d: d["counts"].update(Buses=-1), "Buses"),
+        (lambda d: d["assumed"][0].update(value=float("nan")), "Assumed.value"),
+    ],
+)
+def test_from_dict_validates_like_the_constructor(change, match):
+    data = _report().to_dict()
+    change(data)
+    with pytest.raises(ValueError, match=match):
+        ImportReport.from_dict(data)
+
+
+def test_get_does_not_import_the_reader(fake_package):
+    _write_importer(fake_package, "psse")
+    ir.get("psse", (_spec("psse"),))
+    ir.for_extension(".raw", (_spec("psse"),))
+    assert "fake_ingest.psse_import" not in sys.modules
