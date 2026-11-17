@@ -209,7 +209,11 @@ it('reads no receipt from a malformed frame', () => {
 const PICK = {
   ...SET,
   pick_max: 2,
-  requirements: { checked: 0, says: 'Pick up to 2 of these 3 cases to solve.' },
+  requirements: {
+    checked: 0,
+    says: 'The other cases: Merchant-heavy runs with no solve: its read is not evaluated. '
+      + 'Tight connection is not run: it changes something not on the list of things a shipped case may change.',
+  },
 }
 
 it('a pick card starts unticked and holds the ticks to its limit', async () => {
@@ -220,7 +224,13 @@ it('a pick card starts unticked and holds the ticks to its limit', async () => {
   expect(approve().disabled).toBe(true)
   expect(screen.getByTestId('chat-change-set-none').textContent).toBe('Tick at least one case to solve.')
   ticks().forEach(t => fireEvent.click(t))
-  expect(screen.getByTestId('chat-change-set-over-pick').textContent).toContain('Tick at most 2 cases')
+  const title = document.getElementById('chat-confirmation-title')!.textContent!
+  const overPick = screen.getByTestId('chat-change-set-over-pick').textContent!
+  expect(overPick).toBe('Tick at most 2 cases: the run has 2 solves for them.')
+  // UX (S-B2c): no line repeats the title, and none names an engine id.
+  expect(overPick).not.toContain(title)
+  expect(screen.getByTestId('chat-change-set-requirements').textContent).not.toContain('Pick up to')
+  expect(document.body.textContent).not.toMatch(/pick_max|ipp_|[0-9a-f]{12}/)
   expect(approve().disabled).toBe(true)
   fireEvent.click(ticks()[1])
   expect(screen.queryByTestId('chat-change-set-over-pick')).toBeNull()

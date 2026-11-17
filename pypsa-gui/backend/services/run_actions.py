@@ -39,6 +39,7 @@ import copy
 import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -443,40 +444,180 @@ def _note(field, note) -> dict:
 _LP = "lp"  # `harness.run_shipped.LP` (not imported here: harness imports services)
 SHIPPED_UNITS = {
     "price": "EUR/MWh",
-    "share": "of output",
     "tenor_years": "years",
     "inv_power_overnight": "EUR/MW",
     "inv_energy_overnight": "EUR/MWh",
     "p_nom": "MW",
 }
+# UX (S-B2c): each change in the owning panel's words, pinned to the panels by
+# `test_the_shipped_card_words_are_the_panels_words`. The price refs are the
+# Market prices block's (MarketPricesBlock.tsx); a contract field is the
+# Contracts editor's (contractModel.ts CONTRACT_FIELDS); an asset field is the
+# asset schema's (`fields_for`), what the Properties panel shows.
+SHIPPED_REF_WORDS = {
+    "export_price_ref": "Export price series",
+    "import_price_ref": "Import price series",
+}
+SHIPPED_CONTRACT_FIELD_WORDS = {
+    "reference_price": "reference price series",
+    "price": "price (per MWh)",
+    "share": "share of the plant's output (0–1)",
+    "tenor_years": "tenor (years)",
+}
+# The template's contracts by what they sell (eh_ipp.PPA: wind farm, PV plant).
+SHIPPED_CONTRACT_WORDS = {"ppa_wind": "Wind PPA", "ppa_pv": "Solar PPA"}
+# An asset by runWords.ts NAME_WORDS, else "<COMPONENT_LABEL> “<name>”" as
+# runWords.editSubject reads it.
+SHIPPED_ASSET_WORDS = {"bess": "The battery"}
+SHIPPED_COMPONENT_WORDS = {"StorageUnit": "Storage", "Link": "Link"}
+# A per-asset finance map by its title in FinanceInputsEditor.tsx (AssetMap).
+SHIPPED_FINANCE_WORDS = {"degradation_by_asset": "Degradation"}
+# utils/displayName.ts ACRONYMS: a raw asset id in plain words.
+DISPLAY_ACRONYMS = {
+    "ac": "AC",
+    "dc": "DC",
+    "it": "IT",
+    "pv": "PV",
+    "h2": "H2",
+    "ups": "UPS",
+    "ev": "EV",
+    "hv": "HV",
+    "mv": "MV",
+    "lv": "LV",
+    "bess": "BESS",
+    "chp": "CHP",
+    "ccgt": "CCGT",
+    "ocgt": "OCGT",
+    "poc": "PoC",
+    "co2": "CO₂",
+    "lng": "LNG",
+}
+# Why a case is not run, in plain words, by the reason `run_shipped.load` gave
+# (its text is the server's; each marker below is a phrase of it).
+SHIPPED_WHY_WORDS = (
+    (
+        (
+            "is outside what a case may change",
+            "is not a commercial field a case may change",
+            "is not a battery field a case may change",
+        ),
+        "it changes something not on the list of things a shipped case may change",
+    ),
+    (
+        ("which the template does not ship",),
+        "the template does not ship a price series it names",
+    ),
+    (("What this case moves is not known",), "what this case moves is not known"),
+)
+SHIPPED_WHY_OTHER = "it cannot run in this project"
 
 
-def _shipped_change(change, frozen) -> str:
-    """One change, old → new with its unit; a price ref names its series' file
-    hash and the project's Library ref, as the digest binds them."""
+def _shipped_why(why) -> str:
+    """A not-runnable case's reason in plain words, never the server's text."""
+    said = [
+        words
+        for markers, words in SHIPPED_WHY_WORDS
+        if any(m in str(why or "") for m in markers)
+    ]
+    return "; ".join(said) or SHIPPED_WHY_OTHER
+
+
+def _series_words(template) -> dict[str, str]:
+    """Each template series' label (its meta.json), by series name."""
+    from services.library import template_series
+
+    try:
+        meta = json.loads(
+            (
+                _shipped("_TEMPLATES")
+                / str(template)
+                / template_series.DIR
+                / template_series.META
+            ).read_text()
+        )
+        return {e["name"]: str(e["label"]) for e in meta["series"] if e.get("label")}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def _display_name(name) -> str:
+    """utils/displayName.ts's `displayName`: an id as a person reads it."""
+    name = str(name)
+    if not name or re.search(r"\s|[A-Z]", name):
+        return name
+    words = [w for w in re.split(r"[_-]+", name) if w]
+    return " ".join(
+        DISPLAY_ACRONYMS.get(w, w[:1].upper() + w[1:] if i == 0 else w)
+        for i, w in enumerate(words)
+    )
+
+
+def _asset_words(component, name) -> str:
+    """runWords.editSubject's subject: NAME_WORDS, else the class and name."""
+    if name in SHIPPED_ASSET_WORDS:
+        return SHIPPED_ASSET_WORDS[name]
+    return f"{SHIPPED_COMPONENT_WORDS.get(component, 'Asset')} “{_display_name(name)}”"
+
+
+def _field_words(component, attr) -> str:
+    from services.asset_schema.fields import fields_for
+
+    try:
+        specs = fields_for(component)
+    except (KeyError, ValueError):
+        specs = ()
+    return next((s.label for s in specs if s.key == attr), "a design value")
+
+
+def _shipped_change(change, frozen, labels) -> str:
+    """One change in the panels' words, old → new with its unit. A price ref
+    names its series by label and says which Library version the project holds
+    (or that the template file adds it); the digest binds the hashes."""
     path, old, new = change["path"], change.get("old"), change.get("new")
+    parts = path.split(".")
+    if parts[0] == "commercial" and len(parts) >= 4 and parts[1] == "contracts":
+        what = (
+            f"{SHIPPED_CONTRACT_WORDS.get(parts[2], 'A contract')} · "
+            f"{SHIPPED_CONTRACT_FIELD_WORDS.get(parts[3], 'a contract value')}"
+        )
+    elif parts[0] == "commercial" and len(parts) >= 2:
+        what = SHIPPED_REF_WORDS.get(parts[1], "A commercial value")
+    elif parts[0] == "finance" and len(parts) == 3:
+        what = (
+            f"{_asset_words(None, parts[2])} · "
+            f"{SHIPPED_FINANCE_WORDS.get(parts[1], 'a finance value')}"
+        )
+    elif len(parts) == 3:
+        what = (
+            f"{_asset_words(parts[0], parts[1])} · {_field_words(parts[0], parts[2])}"
+        )
+    else:
+        what = "A value"
     if path.endswith(".id") and isinstance(new, str):
 
         def series(name):
-            sha = str((frozen.get("series") or {}).get(name) or "not shipped")[:12]
             refs = (frozen.get("refs") or {}).get(name) or []
-            lib = (
-                ", ".join(f"Library v{v} {str(h)[:12]}" for v, h in refs)
-                or "no Library ref yet: added from the template file"
+            versions = [str(v) for v, _ in refs]
+            held = (
+                f"Library version{'s' if len(versions) > 1 else ''} {', '.join(versions)}"
+                if versions
+                else "added from the template file"
             )
-            return f"{name} (file {sha}; {lib})"
+            return f"{labels.get(name, 'a series the template does not ship')}, {held}"
 
-        return f"{path[: -len('.id')]}: series {series(old)} → {series(new)}"
-    unit = SHIPPED_UNITS.get(path.rsplit(".", 1)[-1], "")
-    return f"{path}: {old} → {new}{(' ' + unit) if unit else ''}"
+        return f"{what} · {series(old)} → {series(new)}"
+    unit = SHIPPED_UNITS.get(parts[-1], "")
+    return f"{what} · {old} → {new}{(' ' + unit) if unit else ''}"
 
 
 def _shipped_rows(frozen, ids, cap_now) -> list[dict]:
-    """Every case in file order with all its changes and what happens to it."""
+    """Every case in file order, by its label, with all its changes and what
+    happens to it."""
+    labels = _series_words(frozen.get("template"))
     rows = []
     for case in frozen["cases"]:
         if case["status"] != "admissible":
-            what = f"not run: {case.get('why')}"
+            what = f"not run: {_shipped_why(case.get('why'))}"
         elif case["kind"] != _LP:
             what = (
                 "runs with no solve; read not evaluated (it moves only the settlement)"
@@ -487,11 +628,9 @@ def _shipped_rows(frozen, ids, cap_now) -> list[dict]:
             what = "not run: " + (
                 "not picked" if cap_now else "the run has no solve left for it"
             )
-        rows.append(
-            _note(f"case.{case['id']}", f"{case['label']} ({case['id']}): {what}")
-        )
+        rows.append(_note(f"case.{case['id']}", f"{case['label']} · {what}"))
         rows.extend(
-            _note(f"case.{case['id']}.{n}", "  " + _shipped_change(c, frozen))
+            _note(f"case.{case['id']}.{n}", "  " + _shipped_change(c, frozen, labels))
             for n, c in enumerate(case["changes"])
         )
     return rows
@@ -514,8 +653,7 @@ def _shipped_card(step, frozen) -> dict:
         _note("solves", f"Reserves {solves} solve{'' if solves == 1 else 's'}"),
         _note(
             "source",
-            f"Source: {frozen['template']} cases.json · digest {frozen['cases_digest'][:12]}"
-            f" · {frozen['total']} cases",
+            f"Source: the template's shipped cases, {frozen['total']} cases",
         ),
     ]
     return {
@@ -545,8 +683,8 @@ def pick_card(step) -> dict | None:
 
     def other(c):
         if c["status"] != "admissible":
-            return f"{c['label']}: not run ({c['why']})"
-        return f"{c['label']}: runs with no solve, read not evaluated"
+            return f"{c['label']} is not run: {_shipped_why(c['why'])}."
+        return f"{c['label']} runs with no solve: its read is not evaluated."
 
     items = [
         {
@@ -558,7 +696,7 @@ def pick_card(step) -> dict | None:
                 "tool": step["tool"],
                 "rows": [_note(f"case.{c['id']}", "Forks the project and solves once")],
                 "sets": [],
-                "says": f"{c['label']} ({c['id']})",
+                "says": c["label"],
                 "complete": True,
                 "digest": c["id"],
             },
@@ -575,11 +713,13 @@ def pick_card(step) -> dict | None:
         "pick_max": cap_now,
         "requirements": {
             "checked": 0,
+            # UX (S-B2c): the title says the pick and the over-pick line the
+            # cap, so this line names only every other case, in plain words.
             "says": (
-                f"Pick up to {cap_now} of these {len(lp)} cases to solve (the run has "
-                f"{cap_now} solve{'' if cap_now == 1 else 's'} for them). "
-                + " ".join(other(c) + "." for c in others)
-            ).strip(),
+                "The other cases: " + " ".join(other(c) for c in others)
+                if others
+                else ""
+            ),
         },
     }
 

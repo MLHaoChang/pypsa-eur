@@ -10,6 +10,8 @@ run's lease and freezes the step anew; the approval card binds that record."""
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -87,7 +89,18 @@ def test_more_lp_cases_than_the_solves_left_wait_on_a_pick_card(baseline, tmp_pa
     for c in shown["cases"]:
         if c["id"] not in LP:
             assert c["label"] in says  # every other case is named on the card
-    assert "not run (" in says and "read not evaluated" in says
+    assert "Merchant-heavy runs with no solve: its read is not evaluated." in says
+    assert (
+        "Tight connection is not run: it changes something not on the list of "
+        "things a shipped case may change." in says
+    )
+    assert "Pick up to" not in says  # the title's words, not repeated (UX)
+    shown_text = [says, *(i["edit_card"]["says"] for i in card["items"])]
+    shown_text += [r["note"] for i in card["items"] for r in i["edit_card"]["rows"]]
+    assert [i["edit_card"]["says"] for i in card["items"]] == [
+        next(c["label"] for c in shown["cases"] if c["id"] == i) for i in LP
+    ]
+    _no_engine_words(shown_text, shown["cases"])
 
 
 def test_the_cap_is_held_to_the_solves_the_grant_has_left(baseline, tmp_path):
@@ -254,21 +267,123 @@ def test_the_approval_card_shows_every_case_and_change_in_file_order(
     assert "read not evaluated" in notes["case.merchant_heavy"]
     for name in NOT_RUN:
         why = next(c["why"] for c in frozen["cases"] if c["id"] == name)
-        assert notes[f"case.{name}"].endswith(f"not run: {why}")
+        assert notes[f"case.{name}"].endswith(
+            "not run: it changes something not on the list of things a shipped "
+            "case may change"
+        )
+        assert why not in notes[f"case.{name}"]  # never the server's text
     for case in frozen["cases"]:  # every change, old -> new
         for n, change in enumerate(case["changes"]):
             assert "→" in notes[f"case.{case['id']}.{n}"]
-    assert notes["case.ppa_price_minus_10.0"].endswith("65.0 → 58.5 EUR/MWh")
-    assert notes["case.longer_ppa.0"].endswith("10 → 15 years")
-    assert notes["case.cheap_battery.0"].endswith("EUR/MW")
-    assert notes["case.cheap_battery.1"].endswith("EUR/MWh")
-    assert notes["case.tight_connection.0"].endswith("70.0 → 55.0 MW")
-    ref = notes["case.low_price.0"]
-    assert "series ipp_da_base (file " in ref and "→ ipp_da_low (file " in ref
-    assert frozen["series"]["ipp_da_low"][:12] in ref
-    assert "Library" in ref
+    assert notes["case.ppa_price_minus_10.0"] == (
+        "  Wind PPA · price (per MWh) · 65.0 → 58.5 EUR/MWh"
+    )
+    assert notes["case.ppa_price_minus_10.1"].startswith("  Solar PPA · price")
+    assert notes["case.merchant_heavy.0"] == (
+        "  Wind PPA · share of the plant's output (0–1) · 0.7 → 0.3"
+    )
+    assert notes["case.longer_ppa.0"] == "  Wind PPA · tenor (years) · 10 → 15 years"
+    assert notes["case.cheap_battery.0"] == (
+        "  The battery · Power part: overnight cost · 213927.9 → 149749.53 EUR/MW"
+    )
+    assert notes["case.cheap_battery.1"].startswith(
+        "  The battery · Energy part: overnight cost · "
+    ) and notes["case.cheap_battery.1"].endswith(" EUR/MWh")
+    assert notes["case.tight_connection.0"] == (
+        "  Link “Grid export” · Capacity · 70.0 → 55.0 MW"
+    )
+    assert notes["case.faster_degradation.0"] == (
+        "  Asset “PV plant” · Degradation · 0.005 → 0.01"
+    )
+    held = (
+        "Library version 1"
+        if frozen["refs"].get("ipp_da_base")
+        else "added from the template file"
+    )
+    assert notes["case.low_price.0"] == (
+        "  Export price series · Illustrative DE-LU day-ahead shape, base (2030), "
+        f"{held} → Illustrative DE-LU day-ahead shape, low price level (× 0.8) "
+        "(2030), added from the template file"
+    )
+    assert notes["case.low_price.2"].startswith(
+        "  Wind PPA · reference price series · Illustrative"
+    )
+    assert notes["case.low_price.1"].startswith("  Import price series · ")
     assert notes["solves"] == "Reserves 2 solves"
-    assert frozen["cases_digest"][:12] in notes["source"]
+    assert notes["source"] == "Source: the template's shipped cases, 8 cases"
+    _no_engine_words(list(notes.values()), frozen["cases"])
+
+
+def _no_engine_words(texts, cases):
+    """UX (S-B2c): no hash or digest, no case id, series id, path or template id
+    in what the user reads."""
+    ids = [c["id"] for c in cases]
+    for text in texts:
+        assert not re.search(r"[0-9a-f]{12}", text), text
+        assert "ipp_" not in text and "eh_ipp_hybrid" not in text, text
+        assert "cases.json" not in text and "pick_max" not in text, text
+        assert not re.search(r"\b(commercial|StorageUnit|Link|finance)\.", text), text
+        for cid in ids:
+            assert not re.search(rf"\b{re.escape(cid)}\b", text), (cid, text)
+
+
+def test_a_not_runnable_reason_reads_in_plain_words():
+    words = run_actions._shipped_why
+    assert words("Link.grid_export.p_nom is outside what a case may change here.") == (
+        "it changes something not on the list of things a shipped case may change"
+    )
+    assert words(
+        "commercial.x.id names the series ipp_da_x, which the template does not ship."
+    ) == ("the template does not ship a price series it names")
+    assert words("What this case moves is not known, so it is not run.") == (
+        "what this case moves is not known"
+    )
+    assert words("shown as not runnable") == "it cannot run in this project"
+    assert words(None) == "it cannot run in this project"
+
+
+def test_each_reason_marker_is_the_shipped_modules_text():
+    """The plain words key on phrases of `run_shipped`'s reasons: a reworded
+    reason fails here, not silently on the card."""
+    source = Path(run_shipped.__file__).read_text()
+    for markers, _ in run_actions.SHIPPED_WHY_WORDS:
+        for marker in markers:
+            assert marker in source, marker
+
+
+def test_the_shipped_card_words_are_the_panels_words():
+    """UX: the card's words are the owning panels' (parity, as #1194)."""
+    from services.asset_schema.fields import fields_for
+
+    front = Path(__file__).resolve().parents[2] / "frontend" / "src"
+    market = (front / "pages/results/investment/MarketPricesBlock.tsx").read_text()
+    contracts = (front / "pages/results/investment/contractModel.ts").read_text()
+    names = (front / "components/runMonitor/runWords.ts").read_text()
+    components = (front / "utils/componentLabels.ts").read_text()
+    for words in run_actions.SHIPPED_REF_WORDS.values():
+        assert f'label="{words}"' in market, words
+    for key, words in run_actions.SHIPPED_CONTRACT_FIELD_WORDS.items():
+        assert re.search(
+            rf"key: '{key}', label: ['\"]{re.escape(words)}['\"]", contracts
+        ), words
+    finance = (front / "pages/results/investment/FinanceInputsEditor.tsx").read_text()
+    for path, words in run_actions.SHIPPED_FINANCE_WORDS.items():
+        assert f'title="{words}" noun="a degradation rate" path="{path}"' in finance
+    acronyms = (front / "utils/displayName.ts").read_text()
+    acronyms = acronyms[acronyms.index("ACRONYMS") : acronyms.index("}")]
+    assert dict(re.findall(r"(\w+): '([^']+)'", acronyms)) == (
+        run_actions.DISPLAY_ACRONYMS
+    )
+    for name, words in run_actions.SHIPPED_ASSET_WORDS.items():
+        assert f"{name}: '{words}'" in names, words
+    for component, words in run_actions.SHIPPED_COMPONENT_WORDS.items():
+        assert f"{component}: '{words}'" in components, words
+    labels = {s.key: s.label for s in fields_for("StorageUnit")}
+    assert (
+        run_actions._field_words("StorageUnit", "inv_power_overnight")
+        == (labels["inv_power_overnight"])
+    )
+    assert run_actions._field_words("Link", "p_nom") == "Capacity"
 
 
 def test_the_grid_code_card_is_unchanged_by_the_shipped_branch():
