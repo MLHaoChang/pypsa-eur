@@ -395,6 +395,65 @@ def _dips_restart_results(run: Path) -> dict | None:
             "restart": _read_csv(run / cs.RESTART_CSV) or [], "out_of_date": []}
 
 
+#: The SSTI and sub-synchronous screens (grid-compliance GC-08): the threshold and clearance they judged on and their
+#: verdicts; or, when the screens could not run, why.
+SSTI_SCREENS_META = "campus_ssti_screens.json"
+SSTI_SCREENS_ERROR = "ssti_screens_error.json"
+
+
+def _ssti_screens(run: Path, profile: str, profile_dirs) -> None:
+    """The SSTI UIF screen and the sub-synchronous scan of the prepared run in ``run`` (GC-08,
+    ``campus_study.ssti_screens_campus``), the meta in ``SSTI_SCREENS_META``. Screening beside the
+    sizing, so a failure never fails the run: the reason goes to ``SSTI_SCREENS_ERROR`` and no screen
+    file stays."""
+    from gridspine.static import subsync_scan as ss
+
+    files = (cs.SSTI_UIF_CSV, cs.SUBSYNC_SCAN_CSV, cs.SUBSYNC_RESONANCE_CSV, SSTI_SCREENS_META, SSTI_SCREENS_ERROR)
+
+    def clear():
+        for name in files:
+            (run / name).unlink(missing_ok=True)
+
+    clear()
+    try:
+        out = cs.ssti_screens_campus(run, profile, profile_dirs)
+    except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
+        if not isinstance(exc, ContractError):
+            logger.exception("campus run: the SSTI screens failed in %s", run)
+        clear()
+        (run / SSTI_SCREENS_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
+        return
+
+    def cited(c):
+        return {"source": c[0]["source"] if c else None, "clause": c[0]["clause"] if c else None}
+
+    worst = out.uif.worst_uif
+    meta = {"uif": {"verdict": out.uif.verdict, "worst_uif": None if math.isnan(worst) else worst,
+                    "threshold": out.threshold,
+                    **cited(out.uif_threshold), "notes": list(out.uif.notes)},
+            "subsync": {"verdict": out.subsync_verdict,
+                        "clearance_hz": out.clearance_hz,
+                        **cited(out.subsync_clearance), "notes": list(out.subsync.notes)},
+            "label": ss.LABEL}
+    (run / SSTI_SCREENS_META).write_text(json.dumps(meta))
+
+
+def _ssti_screens_results(run: Path) -> dict | None:
+    """The screens for ``get_state``: when they could not run, ``{error}`` with each screen's verdict
+    ``error``; else the meta with the UIF rows (``uif.rows``) and the sub-synchronous resonance rows
+    (``subsync.resonance``); None for a run from before they were a stage."""
+    error = run / SSTI_SCREENS_ERROR
+    if error.is_file():
+        return {**json.loads(error.read_text()), "uif": {"verdict": "error"}, "subsync": {"verdict": "error"}}
+    meta = run / SSTI_SCREENS_META
+    if not meta.is_file():
+        return None
+    meta = json.loads(meta.read_text())
+    meta["uif"]["rows"] = _read_csv(run / cs.SSTI_UIF_CSV) or []
+    meta["subsync"]["resonance"] = _read_csv(run / cs.SUBSYNC_RESONANCE_CSV) or []
+    return meta
+
+
 _DIPS_INPUTS_CACHE: dict = {}
 
 
@@ -567,6 +626,8 @@ def _results(run: Path):
         "voltage_stability": _voltage_stability_results(run),
         # Grid-to-process 12b: dips to trips to lost tonnes, and the restart sequence (``_dips_restart_results``).
         "dips_restart": _dips_restart_results(run),
+        # GC-08: the SSTI UIF screen and the sub-synchronous scan (``_ssti_screens_results``).
+        "ssti_screens": _ssti_screens_results(run),
     }
 
 
@@ -1658,7 +1719,7 @@ def _aborted_on_stop(stage):
 #: The run's stages, in order, as its progress names them (the queue log's
 #: ``campus <stage> <done>/<total>`` lines and ``get_state``'s ``run_job``).
 RUN_STAGES = ("prepare", "rank", "island_checks", "cuts", "size", "harmonic_scan", "voltage_stability",
-              "dips_restart", "invest")
+              "dips_restart", "ssti_screens", "invest")
 
 
 class CampusRunAborted(Exception):
@@ -1771,6 +1832,8 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                 _voltage_stability(work, s["profile"], profile_dirs)
                 stage("dips_restart")
                 _dips_restart(work, s["profile"], profile_dirs, nc)
+                stage("ssti_screens")
+                _ssti_screens(work, s["profile"], profile_dirs)
             except ContractError as exc:
                 raise _unprocessable(exc)
             _publish_run(work, published)

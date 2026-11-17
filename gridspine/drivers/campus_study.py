@@ -1236,6 +1236,59 @@ def harmonic_scan_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(
     return study
 
 
+# --- the SSTI and sub-synchronous screens (grid-compliance GC-08, TRGC 19, 20) ---
+
+SSTI_UIF_CSV = "campus_ssti_uif.csv"
+SUBSYNC_SCAN_CSV = "campus_subsync_scan.csv"
+SUBSYNC_RESONANCE_CSV = "campus_subsync_resonance.csv"
+#: The worst verdict first: a flag outranks a missing input, which outranks a clear.
+SUBSYNC_VERDICT_ORDER = ("flag", "check", "not evaluated", "clear")
+
+
+@dataclasses.dataclass
+class SstiScreens:
+    uif: object                 # ssti_uif.UifStudy
+    subsync: object             # subsync_scan.SubsyncStudy
+    subsync_verdict: str        # the worst of the series-resonance rows (``SUBSYNC_VERDICT_ORDER``)
+    threshold: float            # the UIF threshold judged on (the profile's, or the assumed default)
+    uif_threshold: list         # the profile's citation of ``ssti_uif_threshold`` ([] without one)
+    clearance_hz: float         # the torsional clearance judged on (the profile's, or the assumed default)
+    subsync_clearance: list     # the same for ``subsync_torsional_clearance_hz``
+
+
+def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> SstiScreens:
+    """The SSTI unit-interaction-factor screen (``static/ssti_uif.py``) and the
+    sub-synchronous impedance scan from the PCC (``static/subsync_scan.py``) of
+    a prepared run, written to ``campus_ssti_uif.csv``,
+    ``campus_subsync_scan.csv`` and ``campus_subsync_resonance.csv``.
+
+    The campus enters no series capacitor and no torsional mode, so the scan's
+    series-resonance verdict reads ``not evaluated`` (grid-side series
+    compensation needs the TSP's data). Screening only: the binding answer is
+    the EMT study."""
+    from gridspine.static import harmonic_scan as hs
+    from gridspine.static import ssti_uif as su
+    from gridspine.static import subsync_scan as ss
+
+    run_dir = Path(run_dir)
+    campus = load_run_campus(run_dir)
+    code = load_grid_code(profile, extra_dirs=profile_dirs)
+    threshold, t_cited = su.threshold_from_profile(code)
+    uif = su.campus_uif(campus, threshold, assumed=bool(t_cited) and t_cited[0]["source"] != "code")
+    bus, cases, notes = hs.campus_cases(campus)
+    clearance, c_cited = ss.clearance_from_profile(code)
+    sub = ss.subsync_scan(campus.net, bus, cases, clearance_hz=clearance,
+                          clearance_assumed=bool(c_cited) and c_cited[0]["source"] != "code", notes=notes)
+    series = sub.resonance[sub.resonance["kind"] == ss.SERIES]["verdict"]
+    verdict = next(v for v in SUBSYNC_VERDICT_ORDER if v in set(series)) if len(series) else "not evaluated"
+    for name, df in ((SSTI_UIF_CSV, uif.rows), (SUBSYNC_SCAN_CSV, sub.scan), (SUBSYNC_RESONANCE_CSV, sub.resonance)):
+        _write_text_atomic(run_dir / name, df.to_csv(index=False))
+    return SstiScreens(uif=uif, subsync=sub, subsync_verdict=verdict,
+                       threshold=su.DEFAULT_THRESHOLD if threshold is None else threshold, uif_threshold=t_cited,
+                       clearance_hz=ss.DEFAULT_CLEARANCE_HZ if clearance is None else clearance,
+                       subsync_clearance=c_cited)
+
+
 # --- the P–V/Q–V margin at the PCC (study harness issue 18) ---------------
 
 VOLTAGE_STABILITY_CSV = "campus_voltage_stability.csv"

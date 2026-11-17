@@ -512,7 +512,7 @@ export interface CampusState {
 }
 
 /** The run's stages, as the backend names them (`RUN_STAGES`), then `done`. */
-export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'harmonic_scan' | 'voltage_stability' | 'dips_restart' | 'invest'
+export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'harmonic_scan' | 'voltage_stability' | 'dips_restart' | 'ssti_screens' | 'invest'
   | 'gfm_settings' | 'done'
 
 /** The campus run's solve-queue job, with the stage it reached. */
