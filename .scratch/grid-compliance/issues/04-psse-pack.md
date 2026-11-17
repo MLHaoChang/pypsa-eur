@@ -122,3 +122,9 @@ PR3 research (secondary public sources only; no vendor primary is public). ICON/
 - the shared `_con` separator in the synchronous records.
 
 REPCA1 and the scripts are written only for a `Plant` (the GC-01 aggregated machine with its PoC branch). Without one, the manifest names the reason. The EPRI guide is cited by title and number only (GC-TEXT-1).
+
+**PR5 builder (5) notes (2026-11-17).**
+- Open gap: `campus_bundle.py`'s one pack call passes no `plant`, `model_set` or `variant`, so a pack written by the bundle today has no REPCA1, no psspy scripts and no GC-01 citation; its manifest says why. Wiring the bundle to the GC-01 model set belongs with GC-01, not this issue.
+- A battery plant's REPCA1 takes `pmin = -1` and `dup = ddn` (`repc_bess`, generic engineering): the PV example's `pmin = 0`, `dup = 0` would block charging and low-frequency response.
+- Wind gets the type 4 set (REGCA1 + REECA1), as PV; the type 3 set (WTDTA1/WTARA1/WTPTA1/WTTQA1) needs OEM data and is not defaulted.
+- Inherited from the test battery: no IEC 60909 factor c in the Thevenin source, filed as `14-thevenin-voltage-factor-c.md`.
