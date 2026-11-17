@@ -242,7 +242,9 @@ def test_only_a_battery_refusal_names_another_mode(mode):
     assert "Pick" not in words and "backup" not in words, words
 
 
-@pytest.mark.parametrize("err", [RuntimeError("boom"), DcLoadError("hybrid words", "x")])
+@pytest.mark.parametrize(
+    "err", [RuntimeError("boom"), DcLoadError("hybrid words", "x")]
+)
 def test_a_probe_that_raises_is_not_named_and_is_logged(err, monkeypatch, caplog):
     """GK A ask: building another mode to name it may raise. That mode is not
     named, the error is logged, and the user still gets their own refusal."""
