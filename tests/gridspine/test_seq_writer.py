@@ -534,11 +534,16 @@ def test_refusal_names_the_transformer(tmp_path):
         write_seq(c, tmp_path / "c.seq")
 
 
-@pytest.mark.parametrize("version, listed", [(33, True), (35, False)])
-def test_v33_neutral_resistance_listed(tmp_path, version, listed):
+@pytest.mark.parametrize(
+    "version, earthing, listed",
+    [(33, "resistance", True), (35, "resistance", False), (33, None, False)],
+)
+def test_v33_neutral_resistance_listed(tmp_path, version, earthing, listed):
     s = _spec()
-    s["campus"]["transformers"]["TR2"].update(
-        vector_group="Dyn11", earthing_lv="resistance", r_n_lv_ohm=t(20.0)
-    )
+    s["campus"]["transformers"]["TR2"].update(vector_group="Dyn11")
+    if earthing:
+        s["campus"]["transformers"]["TR2"].update(
+            earthing_lv=earthing, r_n_lv_ohm=t(20.0)
+        )
     _, assumed = _write(build_campus(s), tmp_path, version=version)
-    assert any("TR2: v33 RG1 / RG2 written under CC 3" in a for a in assumed) is listed
+    assert any("TR2: v33 RG1 / RG2" in a for a in assumed) is listed

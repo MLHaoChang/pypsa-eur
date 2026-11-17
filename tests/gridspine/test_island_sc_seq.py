@@ -446,7 +446,8 @@ def test_a_cable_without_c0_takes_its_c_for_the_capacitive_current():
 # --- the helpers the .seq writer shares (GC-04) ----------------------------------
 
 
-@pytest.mark.parametrize("given", [(), ("r0",), ("x0",), ("c0",), ("r0", "x0"), ("r0", "x0", "c0")])
+@pytest.mark.parametrize("given", [(), ("r0",), ("x0",), ("c0",), ("r0", "x0"), ("x0", "c0"), ("r0", "c0"),
+                                   ("r0", "x0", "c0")])
 def test_line_zero_seq_drafts_each_missing_value(given):
     s = copy.deepcopy(campus_spec())
     vals = {"r0": ("r0_ohm_per_km", 1.2), "x0": ("x0_ohm_per_km", 0.4), "c0": ("c0_nf_per_km", 200.0)}
