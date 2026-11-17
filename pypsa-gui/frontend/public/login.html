@@ -10,6 +10,7 @@
     <!-- Identity palette. Single source of truth for the red/black brand
          colours, shared with spa.html — see public/brand.css. -->
     <link rel="stylesheet" href="/brand.css" />
+    <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <script>
       // Mirror uiStore's opening theme onto <html> before first paint:
       // the stored explicit choice, else the OS preference, else light
@@ -57,7 +58,7 @@
 
       body {
         margin: 0;
-        font-family: "Inter", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+        font-family: "Inter", "Inter Fallback", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
         color: var(--ink);
         background: var(--brand-bg);
         overflow: hidden;
@@ -341,7 +342,7 @@
       }
 
       code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-family: "JetBrains Mono", "JetBrains Mono Fallback", ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.76rem;
         color: var(--brand-code);
       }

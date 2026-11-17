@@ -995,7 +995,7 @@ export default function AppHeader() {
       </div>
 
       {/* Search — multi-type, debounced, keyboard navigable */}
-      <div className="relative mx-2" style={{ width: 220 }}>
+      <div className="relative mx-2" style={{ width: 220, minWidth: 150 }}>
         <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
         <input
           ref={searchRef}

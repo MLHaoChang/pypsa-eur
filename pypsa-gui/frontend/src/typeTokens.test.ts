@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const css = readFileSync(resolve(here, 'index.css'), 'utf8')
+const brand = readFileSync(resolve(here, '../public/brand.css'), 'utf8')
 const theme = css.slice(css.indexOf('@theme'))
 
 describe('index.css design tokens', () => {
@@ -16,9 +17,9 @@ describe('index.css design tokens', () => {
     expect(theme).toMatch(/--font-mono:\s*'JetBrains Mono'/)
     expect(css).not.toContain('--font-family-')
   })
-  it('ships Inter and JetBrains Mono as swapped woff2 faces that exist under public/fonts', () => {
+  it('ships Inter and JetBrains Mono as swapped woff2 faces (brand.css) that exist under public/fonts', () => {
     for (const family of ['Inter', 'JetBrains Mono']) {
-      const faces = css.split('@font-face').filter(f => f.includes(`font-family: '${family}'`))
+      const faces = brand.split('@font-face').filter(f => f.includes(`font-family: '${family}'`))
       expect(faces.length).toBe(3)
       for (const f of faces) {
         expect(f).toContain('font-display: swap')
@@ -36,13 +37,23 @@ describe('index.css design tokens', () => {
   it('names a metric-matched local fallback in each font token', () => {
     expect(theme).toMatch(/--font-sans:[^;]*'Inter Fallback'[^;]*system-ui/)
     expect(theme).toMatch(/--font-mono:[^;]*'JetBrains Mono Fallback'[^;]*ui-monospace/)
-    expect(css).toMatch(/font-family: 'Inter Fallback';[^}]*size-adjust/)
+    expect(brand).toMatch(/font-family: 'Inter Fallback';[^}]*size-adjust/)
   })
   it('preloads only the Latin Inter file from spa.html', () => {
     const html = readFileSync(resolve(here, '../spa.html'), 'utf8')
     const preloads = html.match(/<link rel="preload"[^>]*>/g) ?? []
     expect(preloads).toHaveLength(1)
     expect(preloads[0]).toContain('/fonts/inter-latin-wght-normal.woff2')
+  })
+  it('has one set of @font-face rules, in brand.css, which every entry point links', () => {
+    expect(css).not.toContain('@font-face')
+    for (const page of ['../spa.html', '../index.html', '../public/login.html']) {
+      const html = readFileSync(resolve(here, page), 'utf8')
+      expect(html, page).toContain('href="/brand.css"')
+      expect(html, page).toContain('/fonts/inter-latin-wght-normal.woff2')
+      // the same first font and the same fallback name as the app tokens
+      if (!page.includes('spa.html')) expect(html, page).toMatch(/font-family: "Inter", "Inter Fallback"/)
+    }
   })
   it('does not shadow a Tailwind default text key', () => {
     const tw = ['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl', '4xl', '5xl', '6xl', '7xl', '8xl', '9xl']
