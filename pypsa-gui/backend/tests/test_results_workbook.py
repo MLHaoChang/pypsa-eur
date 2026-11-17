@@ -267,6 +267,7 @@ def test_with_a_case_the_kpis_equal_the_report_and_the_npv_is_live(solved):
     assert "Case Dispatch modes" in case and "Case Tax equity" in case
     assert len(set(wb.sheetnames)) == len(wb.sheetnames)
     assert not [s for s in wb.sheetnames if "_" in s or s.startswith("Case CashflowLines")]
+    assert len(ws._charts) == 3
 
 
 def test_case_sheet_titles_fit_excel_and_never_collide():
@@ -279,7 +280,6 @@ def test_case_sheet_titles_fit_excel_and_never_collide():
     assert all(len(t) <= 31 and not set(t) & set(":\\/?*[]") for t in titles)
     assert len(set(titles)) == len(titles)
     assert SHEET not in titles and "Overview" not in titles and "About" not in titles
-    assert len(ws._charts) == 3
 
 
 def test_the_charts_reference_the_overviews_own_cells(solved):
