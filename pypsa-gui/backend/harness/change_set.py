@@ -287,8 +287,12 @@ def validate_ticks(pc, decision: str, ticked: Any) -> list[str] | None:
             {**_INVALID_TICKS, "message": "ticked applies only to a change-set card"},
         )
     ids = list((pc.args or {}).get("tool_use_ids") or [])
-    if pick and decision == "approve" and (
-        not isinstance(ticked, list) or not 1 <= len(ticked) <= pc.args["pick_max"]
+    if (
+        pick
+        and decision == "approve"
+        and (
+            not isinstance(ticked, list) or not 1 <= len(ticked) <= pc.args["pick_max"]
+        )
     ):
         raise HTTPException(
             400,

@@ -455,6 +455,7 @@ def _shipped_change(change, frozen) -> str:
     hash and the project's Library ref, as the digest binds them."""
     path, old, new = change["path"], change.get("old"), change.get("new")
     if path.endswith(".id") and isinstance(new, str):
+
         def series(name):
             sha = str((frozen.get("series") or {}).get(name) or "not shipped")[:12]
             refs = (frozen.get("refs") or {}).get(name) or []
@@ -476,14 +477,18 @@ def _shipped_rows(frozen, ids, cap_now) -> list[dict]:
         if case["status"] != "admissible":
             what = f"not run: {case.get('why')}"
         elif case["kind"] != "lp":
-            what = "runs with no solve; read not evaluated (it moves only the settlement)"
+            what = (
+                "runs with no solve; read not evaluated (it moves only the settlement)"
+            )
         elif case["id"] in ids:
             what = "forks the project and solves once"
         else:
             what = "not run: " + (
                 "not picked" if cap_now else "the run has no solve left for it"
             )
-        rows.append(_note(f"case.{case['id']}", f"{case['label']} ({case['id']}): {what}"))
+        rows.append(
+            _note(f"case.{case['id']}", f"{case['label']} ({case['id']}): {what}")
+        )
         rows.extend(
             _note(f"case.{case['id']}.{n}", "  " + _shipped_change(c, frozen))
             for n, c in enumerate(case["changes"])

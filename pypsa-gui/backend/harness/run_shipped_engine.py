@@ -133,7 +133,9 @@ def forks(profile) -> int:
 
     shipped = (profile.get("explore") or {}).get("shipped") or {}
     allowance = shipped.get("forks")
-    return int(allowance) if isinstance(allowance, int) else run_explore.caps(profile)[0]
+    return (
+        int(allowance) if isinstance(allowance, int) else run_explore.caps(profile)[0]
+    )
 
 
 def cap(profile, path, task) -> int:

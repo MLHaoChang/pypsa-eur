@@ -31,7 +31,10 @@ from services.pypsa_service import PyPSAService
 from tests.test_run_profile_ipp_runs import REF, baseline  # noqa: F401
 
 INSTANCE = "i-shipped"
-PICK = ["low_price", "cheap_battery"]  # two LP cases; every finance case rides along (P3)
+PICK = [
+    "low_price",
+    "cheap_battery",
+]  # two LP cases; every finance case rides along (P3)
 LP_IDS = ["low_price", "cheap_battery"]
 TPL = Path(__file__).resolve().parents[1] / "project_templates" / "eh_ipp_hybrid"
 

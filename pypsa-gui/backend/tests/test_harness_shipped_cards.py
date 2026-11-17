@@ -74,7 +74,10 @@ def test_more_lp_cases_than_the_solves_left_wait_on_a_pick_card(baseline, tmp_pa
     shown = step["unfrozen"]["pick"]
     assert shown["cap"] == 2 and shown["total"] == 8
     assert [c["id"] for c in shown["cases"]] == [
-        c["id"] for c in json.loads((E._TEMPLATES / "eh_ipp_hybrid" / "cases.json").read_text())["cases"]
+        c["id"]
+        for c in json.loads(
+            (E._TEMPLATES / "eh_ipp_hybrid" / "cases.json").read_text()
+        )["cases"]
     ]
     card = run_actions.pick_card(step)
     assert [i["tool_use_id"] for i in card["items"]] == LP  # only LP cases tick
@@ -134,7 +137,9 @@ def test_a_pick_freezes_the_step_and_its_approval_card_binds_it(baseline, tmp_pa
     assert task["run"]["explore"]["shipped_pick"] == ["cheap_battery", "low_price"]
     assert "unfrozen" not in step and step["frozen"]["digest"] == digest
     assert step["frozen"]["run"] == [
-        i for i in step["frozen"]["run"] if i in ("low_price", "cheap_battery", *FINANCE)
+        i
+        for i in step["frozen"]["run"]
+        if i in ("low_price", "cheap_battery", *FINANCE)
     ]
     assert step["frozen"]["solves"] == 2
     card = run_actions.approval_card(step)
@@ -169,12 +174,21 @@ def test_a_pick_from_another_card_or_runner_or_a_second_pick_is_closed(
     _, pid, _ = baseline
     path = _pick_task(tmp_path, pid)
     before = _read(path)
-    assert _kind(lambda: _pick(path, ["low_price"], digest="0" * 64)) == "shipped_pick_closed"
-    assert _kind(lambda: _pick(path, ["low_price"], instance="other")) == "shipped_pick_closed"
+    assert (
+        _kind(lambda: _pick(path, ["low_price"], digest="0" * 64))
+        == "shipped_pick_closed"
+    )
+    assert (
+        _kind(lambda: _pick(path, ["low_price"], instance="other"))
+        == "shipped_pick_closed"
+    )
     assert _read(path) == before
     card = run_actions.pick_card(_step(path))
     _pick(path, ["low_price"])
-    again = lambda: E.pick(path, "explore.1", ["cannibalised"], card["digest"], INSTANCE)  # noqa: E731
+
+    def again():
+        return E.pick(path, "explore.1", ["cannibalised"], card["digest"], INSTANCE)
+
     assert _kind(again) == "shipped_pick_closed"
     assert _read(path)["run"]["explore"]["shipped_pick"] == ["low_price"]
 
@@ -215,14 +229,20 @@ def test_a_pick_after_approval_changes_the_digest_and_the_approval_refuses(
 # ── the approval card (P7) ─────────────────────────────────────────────────────
 
 
-def test_the_approval_card_shows_every_case_and_change_in_file_order(baseline, tmp_path):
+def test_the_approval_card_shows_every_case_and_change_in_file_order(
+    baseline, tmp_path
+):
     _, pid, _ = baseline
     path = _pick_task(tmp_path, pid)
     _pick(path, ["low_price", "cheap_battery"])
     step = _step(path)
     frozen = step["frozen"]
     rows = run_actions.approval_card(step)["rows"]
-    heads = [r["field"] for r in rows if r["field"].count(".") == 1 and r["field"].startswith("case.")]
+    heads = [
+        r["field"]
+        for r in rows
+        if r["field"].count(".") == 1 and r["field"].startswith("case.")
+    ]
     assert heads == [f"case.{c['id']}" for c in frozen["cases"]]  # all 8, file order
     notes = {r["field"]: r["note"] for r in rows}
     assert "forks the project and solves once" in notes["case.low_price"]
@@ -248,7 +268,12 @@ def test_the_approval_card_shows_every_case_and_change_in_file_order(baseline, t
 
 
 def test_the_grid_code_card_is_unchanged_by_the_shipped_branch():
-    assert run_actions.approval_card({"tool": run_actions.SHIPPED, "frozen": {"digest": "d"}}) is None
+    assert (
+        run_actions.approval_card(
+            {"tool": run_actions.SHIPPED, "frozen": {"digest": "d"}}
+        )
+        is None
+    )
 
 
 # ── ticks (P2) ─────────────────────────────────────────────────────────────────
@@ -256,7 +281,12 @@ def test_the_grid_code_card_is_unchanged_by_the_shipped_branch():
 
 def _pc(tool, args):
     return PendingConfirmation(
-        token="t", tool_name=tool, args=args, safety_tier="write", created_at=0.0, expires_at=1e12
+        token="t",
+        tool_name=tool,
+        args=args,
+        safety_tier="write",
+        created_at=0.0,
+        expires_at=1e12,
     )
 
 
@@ -335,7 +365,9 @@ def test_the_runner_shows_the_pick_card_and_writes_the_approved_pick(
     live, session = _runner_pick(path, monkeypatch, "approve", ["cannibalised"])
     assert live["change_set"] == card and "edit_card" not in live
     assert session.issued[1] == {
-        "digest": card["digest"], "tool_use_ids": LP, "pick_max": 2,
+        "digest": card["digest"],
+        "tool_use_ids": LP,
+        "pick_max": 2,
     }
     task = _read(path)
     assert task["run"]["explore"]["shipped_pick"] == ["cannibalised"]

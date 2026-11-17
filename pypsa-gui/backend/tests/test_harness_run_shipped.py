@@ -512,7 +512,9 @@ def test_more_lp_cases_than_the_cap_need_a_pick_and_the_count_is_the_true_total(
     assert err.value.kind == "shipped_cases_over_budget"
 
 
-def test_finance_cases_cost_no_solve_so_three_lp_fit_a_cap_of_three(project, tpl, built):
+def test_finance_cases_cost_no_solve_so_three_lp_fit_a_cap_of_three(
+    project, tpl, built
+):
     # P3: kills the mutant that counts finance cases against the cap.
     shipped = _load(project, tpl, built)
     assert S.choose(shipped, 3) == shipped["admissible"]
@@ -556,12 +558,18 @@ def test_each_refused_pick_has_its_own_kind(project, tpl, built, picked, kind):
 
 def test_a_pick_at_the_cap_runs(project, tpl, built):
     # The over-budget guard is `>`, not `>=`.
-    assert "cheap_battery" in S.choose(_load(project, tpl, built), 2, ["low_price", "cheap_battery"])
+    assert "cheap_battery" in S.choose(
+        _load(project, tpl, built), 2, ["low_price", "cheap_battery"]
+    )
 
 
 def test_load_names_each_series_hash_and_project_ref(project, tpl, built):
     shipped = _load(project, tpl, built)
-    assert set(shipped["series"]) >= {"ipp_da_base", "ipp_da_low", "ipp_da_cannibalised"}
+    assert set(shipped["series"]) >= {
+        "ipp_da_base",
+        "ipp_da_low",
+        "ipp_da_cannibalised",
+    }
     assert all(len(h) == 64 for h in shipped["series"].values())
     assert isinstance(shipped["refs"], dict)
 
