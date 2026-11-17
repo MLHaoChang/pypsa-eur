@@ -7,6 +7,7 @@ the same kind and elements, with nothing unmatched. An element not on the
 network is refused (GK S2); compound kinds are returned as not written.
 """
 
+import pandapower as pp
 import pandas as pd
 import pytest
 
@@ -97,6 +98,15 @@ def test_a_label_outside_the_token_charset_is_refused(net, cset, tmp_path):
         write_con(bad, net, tmp_path / "x.con")
 
 
+def test_a_label_with_a_space_is_refused_by_name(net, cset, tmp_path):
+    bad = cset.head(1).assign(contingency_id="LINE A")
+    with pytest.raises(
+        ContractError, match=r"characters outside \[A-Za-z0-9_-\]: 'LINE A'"
+    ):
+        write_con(bad, net, tmp_path / "x.con")
+    assert not (tmp_path / "x.con").exists()
+
+
 @pytest.mark.parametrize("build", [n_m_1_contingencies, n_1_1_contingencies])
 def test_compound_kinds_are_returned_not_written(net, tmp_path, build):
     n1 = branch_contingencies(net)
@@ -119,6 +129,78 @@ def test_sub_and_mon(net, tmp_path):
     assert (
         "MONITOR VOLTAGE RANGE SUBSYSTEM 'STUDY' 0.900 1.100" in text
         and text.endswith("END\n")
+    )
+
+
+@pytest.fixture
+def golden_net():
+    """
+    BUS_A=1 (slack), BUS_B=2, BUS_C=3 (20 kV); G1 and G2 both on BUS_B, so
+    G2 is machine '2' on bus 2 (the RAW's per-bus counter), not '1'.
+    """
+    n = pp.create_empty_network(sn_mva=100)
+    a, b, c = (
+        pp.create_bus(n, kv, name=k)
+        for k, kv in (("BUS_A", 110), ("BUS_B", 110), ("BUS_C", 20))
+    )
+    pp.create_ext_grid(n, a, name="SLK")
+    pp.create_line_from_parameters(
+        n, a, b, 10, r_ohm_per_km=0.06, x_ohm_per_km=0.4, c_nf_per_km=9, max_i_ka=1.0
+    )
+    pp.create_transformer_from_parameters(
+        n,
+        b,
+        c,
+        sn_mva=40,
+        vn_hv_kv=110,
+        vn_lv_kv=20,
+        vk_percent=12,
+        vkr_percent=0.4,
+        pfe_kw=0,
+        i0_percent=0,
+    )
+    pp.create_gen(n, b, p_mw=10, vm_pu=1.0, name="G1")
+    pp.create_gen(n, b, p_mw=10, vm_pu=1.0, name="G2")
+    return n
+
+
+def test_golden_con(golden_net, tmp_path):
+    cset = pd.DataFrame(
+        {
+            "contingency_id": ["L1", "U_G2", "B_C"],
+            "kind": ["branch", "unit", "bus_section"],
+            "element_ids": [["BUS_A-BUS_B-1"], ["G2"], ["BUS_C"]],
+            "order": [1, 1, 1],
+        }
+    )
+    assert write_con(cset, golden_net, tmp_path / "g.con") == []
+    assert (tmp_path / "g.con").read_bytes() == (
+        b"CONTINGENCY L1\n"
+        b"   OPEN BRANCH FROM BUS 1 TO BUS 2 CIRCUIT '1 '\n"
+        b"END\n"
+        b"CONTINGENCY U_G2\n"
+        b"   REMOVE MACHINE '2 ' FROM BUS 2\n"
+        b"END\n"
+        b"CONTINGENCY B_C\n"
+        b"   DISCONNECT BUS 3\n"
+        b"END\n"
+        b"END\n"
+    )
+
+
+def test_golden_sub(golden_net, tmp_path):
+    write_sub(golden_net, tmp_path / "g.sub")
+    assert (tmp_path / "g.sub").read_bytes() == (
+        b"SUBSYSTEM 'STUDY'\n   KVRANGE 20.000 110.000\nEND\nEND\n"
+    )
+
+
+def test_golden_mon(tmp_path):
+    write_mon(tmp_path / "g.mon", 0.9, 1.1)
+    assert (tmp_path / "g.mon").read_bytes() == (
+        b"MONITOR BRANCHES IN SUBSYSTEM 'STUDY'\n"
+        b"MONITOR VOLTAGE RANGE SUBSYSTEM 'STUDY' 0.900 1.100\n"
+        b"END\n"
     )
 
 

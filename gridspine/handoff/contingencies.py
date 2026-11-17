@@ -117,6 +117,12 @@ def write_con(contingency_set: pd.DataFrame, net, path) -> list:
     'id' FROM BUS n`` with the RAW's per-bus machine ID; a bus section is
     ``DISCONNECT BUS n``. An element not on the network is refused and
     nothing is written (S2). Labels are the contingency ids themselves.
+
+    Label scope: a contingency id outside ``[A-Za-z0-9_-]{1,32}`` (a space,
+    a dot, an accent, more than 32 characters) is refused by name, never
+    rewritten, so a label always reads back as the id it came from. Ids
+    such as PyPSA-Eur bus names need sequential labels and a label -> id map;
+    that is a follow-up (GC-19), not this writer.
     """
     cset = validate_contingency_set(contingency_set)
     nums = _bus_numbers(net)
