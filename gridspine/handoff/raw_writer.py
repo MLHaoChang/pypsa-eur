@@ -159,6 +159,50 @@ class _IdCounter:
         return str(n)
 
 
+def trafo_impedance(net, tr):
+    """``(r_pu, x_pu, windv1, windv2)`` of a two-winding transformer row as the
+    RAW writes it: R/X in pu on system SBASE at the winding's bus voltage base
+    (CZ=1), the windings' off-nominal ratios in pu of the bus voltage (CW=1).
+
+    pandapower vk/vkr are on (sn_mva, vn_lv) base. Probed against net._ppc:
+    with tap_side=="lv" pandapower uses the TAP-ADJUSTED lv nominal voltage as
+    the impedance base (r/x scale by tap**2); with tap_side=="hv" it does not.
+    """
+    sn = tr["sn_mva"]
+    par = int(tr.get("parallel", 1))
+    bus_vn_hv = net.bus.at[tr["hv_bus"], "vn_kv"]
+    bus_vn_lv = net.bus.at[tr["lv_bus"], "vn_kv"]
+    tap = _tap_ratio(tr)
+    vn_hv_eff, vn_lv_eff = tr["vn_hv_kv"], tr["vn_lv_kv"]
+    if str(tr.get("tap_side", "hv")) == "lv":
+        vn_lv_eff *= tap
+    else:
+        vn_hv_eff *= tap
+    conv = (SBASE_MVA / sn) * (vn_lv_eff / bus_vn_lv) ** 2 / par
+    r_pu = (tr["vkr_percent"] / 100.0) * conv
+    z_pu = (tr["vk_percent"] / 100.0) * conv
+    x_pu = np.sqrt(max(z_pu ** 2 - r_pu ** 2, 1e-12))
+    return r_pu, x_pu, vn_hv_eff / bus_vn_hv, vn_lv_eff / bus_vn_lv
+
+
+def branch_ids(net):
+    """``(lines, trafos)``: per row, in table order, the RAW's ``(I, J, CKT)``
+    for each line (from, to) and ``(I, J, CKT)`` for each transformer (hv, lv).
+    CKT comes from a per-pair counter over each table, as ``write_raw`` stamps it.
+    """
+    nums = _bus_numbers(net)
+    name_of = net.bus["name"]
+    out = []
+    for table, a, b in ((net.line, "from_bus", "to_bus"), (net.trafo, "hv_bus", "lv_bus")):
+        ckts = _IdCounter()
+        ids = []
+        for _, row in table.iterrows():
+            i, j = nums[name_of.at[row[a]]], nums[name_of.at[row[b]]]
+            ids.append((i, j, ckts.next((min(i, j), max(i, j)))))
+        out.append(ids)
+    return tuple(out)
+
+
 def _rates(rate):
     """RATE1..RATE12 for v35/v36: the one known rating in sets 1-3 (v33's A, B, C), 0 elsewhere."""
     return "".join(f"{rate if k < 3 else 0.0:8.2f}," for k in range(_N_RATES))
@@ -292,25 +336,7 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0, version=33):
         sn = tr["sn_mva"]
         par = int(tr.get("parallel", 1))
         hv_bus, lv_bus = tr["hv_bus"], tr["lv_bus"]
-        bus_vn_hv = net.bus.at[hv_bus, "vn_kv"]
-        bus_vn_lv = net.bus.at[lv_bus, "vn_kv"]
-        # pandapower vk/vkr are on (sn_mva, vn_lv) base; CZ=1 wants p.u. on
-        # system SBASE at the winding's bus voltage base. Probed against
-        # net._ppc: with tap_side=="lv" pandapower uses the TAP-ADJUSTED lv
-        # nominal voltage as the impedance base (r/x scale by tap**2); with
-        # tap_side=="hv" it does not.
-        tap = _tap_ratio(tr)
-        vn_hv_eff, vn_lv_eff = tr["vn_hv_kv"], tr["vn_lv_kv"]
-        if str(tr.get("tap_side", "hv")) == "lv":
-            vn_lv_eff *= tap
-        else:
-            vn_hv_eff *= tap
-        conv = (SBASE_MVA / sn) * (vn_lv_eff / bus_vn_lv) ** 2 / par
-        r_pu = (tr["vkr_percent"] / 100.0) * conv
-        z_pu = (tr["vk_percent"] / 100.0) * conv
-        x_pu = np.sqrt(max(z_pu ** 2 - r_pu ** 2, 1e-12))
-        windv1 = vn_hv_eff / bus_vn_hv
-        windv2 = vn_lv_eff / bus_vn_lv
+        r_pu, x_pu, windv1, windv2 = trafo_impedance(net, tr)
         shift = float(tr.get("shift_degree", 0.0) or 0.0)
         hv, lv = nums[name_of.at[hv_bus]], nums[name_of.at[lv_bus]]
         ckt = trafo_ckts.next((min(hv, lv), max(hv, lv)))

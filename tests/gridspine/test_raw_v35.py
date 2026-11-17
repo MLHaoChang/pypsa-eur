@@ -1,4 +1,5 @@
-"""GC-04 part 2: PSS/E RAW v35 and v36 beside the v33 default.
+"""
+GC-04 part 2: PSS/E RAW v35 and v36 beside the v33 default.
 
 The field positions below were transcribed by hand from the ``@!`` header
 lines of RAW files PSS/E 35.3, 35.6, 36.0 and 36.1 wrote themselves (the
@@ -6,6 +7,7 @@ licensed Program Operation Manual carries the same names). A test-side reader
 parses each written file and compares it with the pandapower net itself, not
 only with the v33 export, so a bug shared by all versions still fails.
 """
+
 import csv
 import io
 
@@ -103,7 +105,8 @@ def _tokens(line):
 
 
 def read_raw(text):
-    """``(header tokens, system-wide lines, {section: [records]}, terminators)``.
+    """
+    ``(header tokens, system-wide lines, {section: [records]}, terminators)``.
 
     A section is named from the terminator that closes it. Transformer records
     are grouped four lines to a record (two-winding units only).
@@ -141,7 +144,16 @@ def _net_lines(net):
         zb = net.bus.at[ln["from_bus"], "vn_kv"] ** 2 / SBASE_MVA
         r = ln["r_ohm_per_km"] * ln["length_km"] / ln["parallel"] / zb
         x = ln["x_ohm_per_km"] * ln["length_km"] / ln["parallel"] / zb
-        b = 2 * np.pi * 50.0 * ln["c_nf_per_km"] * 1e-9 * ln["length_km"] * ln["parallel"] * zb
+        b = (
+            2
+            * np.pi
+            * 50.0
+            * ln["c_nf_per_km"]
+            * 1e-9
+            * ln["length_km"]
+            * ln["parallel"]
+            * zb
+        )
         out[(i, j, str(seen[key]))] = (r, x, b)
     return out
 
@@ -172,19 +184,26 @@ def test_counts_and_identities_match_the_net(net, written, version):
     assert len(recs["LOAD"]) == len(net.load)
     assert len(recs["GENERATOR"]) == len(net.gen) + len(net.ext_grid)
     num = {b: k + 1 for k, b in enumerate(net.bus.index)}
-    expect_mach = sorted([num[b] for b in net.gen["bus"]] + [num[b] for b in net.ext_grid["bus"]])
+    expect_mach = sorted(
+        [num[b] for b in net.gen["bus"]] + [num[b] for b in net.ext_grid["bus"]]
+    )
     assert sorted(int(r[0]) for r in recs["GENERATOR"]) == expect_mach
     assert all(r[1] == "1" for r in recs["GENERATOR"])  # case39: one machine per bus
     assert len(recs["BRANCH"]) == len(net.line)
     assert len(recs["TRANSFORMER"]) == len(net.trafo)
-    hv_lv = sorted((num[h], num[lv]) for h, lv in zip(net.trafo["hv_bus"], net.trafo["lv_bus"]))
+    hv_lv = sorted(
+        (num[h], num[lv]) for h, lv in zip(net.trafo["hv_bus"], net.trafo["lv_bus"])
+    )
     assert sorted((int(t[0][0]), int(t[0][1])) for t in recs["TRANSFORMER"]) == hv_lv
 
 
 @pytest.mark.parametrize("version", [33, 35, 36])
 def test_branch_rxb_match_the_net(net, written, version):
     _, _, recs, _ = read_raw(written[version])
-    got = {(int(r[0]), int(r[1]), r[2]): tuple(float(v) for v in r[3:6]) for r in recs["BRANCH"]}
+    got = {
+        (int(r[0]), int(r[1]), r[2]): tuple(float(v) for v in r[3:6])
+        for r in recs["BRANCH"]
+    }
     want = _net_lines(net)
     assert set(got) == set(want)
     for k, (r, x, b) in want.items():
@@ -218,7 +237,9 @@ def test_v33_default_unchanged(net, tmp_path):
 
 def test_v35_golden_header(written):
     lines = written[35].splitlines()
-    assert lines[0] == " 0, 100.00, 35, 0, 0, 50.00"  # IC, SBASE, REV, XFRRAT, NXFRAT, BASFRQ
+    assert (
+        lines[0] == " 0, 100.00, 35, 0, 0, 50.00"
+    )  # IC, SBASE, REV, XFRRAT, NXFRAT, BASFRQ
     assert lines[1] == "gridspine export"
     assert lines[2] == "gridspine v35 export"
 
@@ -231,7 +252,10 @@ def test_v35_system_wide_block(written):
 def test_v36_system_wide_adds_swd_rating_names(written):
     _, sw, _, _ = read_raw(written[36])
     assert sw[: len(V35_SYSTEM_WIDE)] == V35_SYSTEM_WIDE
-    assert sw[len(V35_SYSTEM_WIDE)] == 'SWDRATNAM,  1, "RATE1 ", 0, "MVA", "SWD RATING SET 1                "'
+    assert (
+        sw[len(V35_SYSTEM_WIDE)]
+        == 'SWDRATNAM,  1, "RATE1 ", 0, "MVA", "SWD RATING SET 1                "'
+    )
     assert len(sw) == len(V35_SYSTEM_WIDE) + 12
     assert all(x.startswith("SWDRATNAM, ") for x in sw[len(V35_SYSTEM_WIDE) :])
 
@@ -275,7 +299,9 @@ def test_v35_branch_name_and_twelve_ratings(net, written):
     b35 = read_raw(written[35])[2]["BRANCH"][0]
     # v35: I,J,CKT,R,X,B,'NAME',RATE1..RATE12,GI,BI,GJ,BJ,STAT,MET,LEN,O1,F1
     assert len(b35) == len(b33) - 3 + 1 + 12
-    assert net.line["name"].iloc[0] is None and b35[6] == ""  # an unnamed line: blank NAME, never 'None'
+    assert (
+        net.line["name"].iloc[0] is None and b35[6] == ""
+    )  # an unnamed line: blank NAME, never 'None'
     assert b35[7:10] == b33[6:9]  # RATE1-3 = v33 RATEA-C
     assert b35[10:19] == ["0.00"] * 9
     assert b35[19:] == b33[9:]
@@ -306,7 +332,10 @@ def test_v35_transformer_line3_ratings_and_nod1(written):
 def test_v35_switching_device_section_sits_between_branch_and_transformer(written):
     terms = read_raw(written[35])[3]
     i = terms.index("0 / END OF BRANCH DATA, BEGIN SYSTEM SWITCHING DEVICE DATA")
-    assert terms[i + 1] == "0 / END OF SYSTEM SWITCHING DEVICE DATA, BEGIN TRANSFORMER DATA"
+    assert (
+        terms[i + 1]
+        == "0 / END OF SYSTEM SWITCHING DEVICE DATA, BEGIN TRANSFORMER DATA"
+    )
 
 
 @pytest.mark.parametrize("bad", [34, 37, "35", None])
