@@ -97,7 +97,8 @@ def start_mc(
     from services.reliability_goal import active_goal, goal_sources as _sources
     goal = active_goal(solver_state)
     draws = getattr(body, "draws", None)
-    goal_sources = {"mc_draws": _sources(goal, {"mc_draws"} if draws is not None else set())["mc_draws"]}
+    goal_sources = {"mc_draws": _sources(goal, {"mc_draws"} if draws is not None else set())["mc_draws"],
+                    "target_lole_h": goal["target_lole_h"]["source"]}
     draws = goal["mc_draws"]["value"] if draws is None else int(draws)
     if draws < 1:
         raise HTTPException(422, "draws must be a positive number of samples")
@@ -137,6 +138,15 @@ def start_mc(
         # EH study keeps it; `edited_since_study` compares it.
         network_revision = dirty_state.revision()
         vre_names = [nm for kind, nm in assets if kind == "vre"]
+        # Walkthrough asset-investment 01: the goal's LOLE on this horizon,
+        # by the loops' one conversion, for the verdict the result carries.
+        from services.adequacy.metrics import horizon_years
+        from services.reliability_goal import loop_goal
+        target_horizon = loop_goal(body, goal, float(horizon_years(n)))[0]
+        # Walkthrough 07: an ELCC vre row's `nameplate_mw` is its PEAK
+        # must-take output (the bracket the bisection prices); the installed
+        # capacity rides beside the rows so the table can state both.
+        installed = {nm: _installed_mw(n, nm) for nm in vre_names}
         # Adequacy loops 03: the study samples the loops' fleet
         # (`link_supply`): split at a trusted import Link, the hub side is
         # the fleet and the demand, the Link a sampled unit; the grid side
@@ -308,7 +318,14 @@ def start_mc(
                                          "reason": "no_process_link_outages_in_sequential_mc"}}
                        if has_process else {}),
                     "metrics": metrics,
+                    # Walkthrough 01/08: the goal this run is judged against
+                    # (the ONE LOLE-vs-goal rule) and the draws it may take.
+                    "goal": _goal_block(metrics, goal["target_lole_h"]["value"],
+                                        target_horizon),
+                    "draws": {"first_batch": draws, "max": MAX_DRAWS,
+                              "cov_target": cov_target},
                     "elcc": rows,
+                    "elcc_installed_mw": installed,
                     # Phase 12c: a SIBLING of `elcc`, never a row in it.
                     "elcc_portfolio": portfolio,
                     "warning": MC_WARNING_V1,
@@ -381,3 +398,31 @@ def start_mc(
     return {"status": "running", "draws": draws, "seed": seed, "goal_sources": goal_sources,
             "cov_target": cov_target, "elcc_assets": len(assets),
             "elcc_portfolio": want_portfolio}
+
+
+def _goal_block(metrics: dict, target_h_per_year, target_horizon) -> dict | None:
+    """``lole_verdict`` of this run against the project's goal, with the goal
+    in h/yr; None when no goal applies."""
+    if target_horizon is None:
+        return None
+    from services.adequacy.lole_verdict import lole_verdict
+    from services.adequacy.mc import MAX_DRAWS
+
+    return {"target_lole_h": float(target_h_per_year),
+            **lole_verdict(metrics["lole_hours"], metrics.get("lole_ci"),
+                           target_horizon, metrics.get("event_h"),
+                           metrics["n_samples"], MAX_DRAWS)}
+
+
+def _installed_mw(n, name: str) -> float | None:
+    """A generator's installed capacity: ``p_nom_opt`` when it was sized,
+    else ``p_nom``; None when the network has no such generator."""
+    gens = n.generators
+    if name not in gens.index:
+        return None
+    row = gens.loc[name]
+    if bool(row.get("p_nom_extendable", False)):
+        opt = row.get("p_nom_opt")
+        if opt is not None and opt == opt:
+            return float(opt)
+    return float(row.get("p_nom", 0.0) or 0.0)

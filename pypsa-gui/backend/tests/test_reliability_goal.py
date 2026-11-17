@@ -416,3 +416,40 @@ def test_the_assistant_tools_default_to_the_goal(install_network, monkeypatch):
         time.sleep(0.02)
     out = T.run_eh_study(archetype="strong_grid", stages=stages)
     assert (out["archetype"], out["goal_sources"]["site_archetype"]) == ("strong_grid", "override")
+
+
+# ── Walkthrough asset-investment 01: the goal the study certifies against ──
+
+def test_default_lole_is_the_site_types_pack_goal():
+    """With no stored or template LOLE, the goal is the site type's own pack
+    target (what the EH study certifies against), still marked `default`:
+    the Goal card, the loops and the MC read the same 3 h/yr the Guided
+    verdict uses. A strong-grid site has none."""
+    off_grid = G.effective_goal({}, {"recommended_archetype": "off_grid"})
+    assert off_grid["target_lole_h"] == {"value": 3.0, "source": "default"}
+    weak = G.effective_goal({"site_archetype": "weak_flexible"}, None)
+    assert weak["target_lole_h"] == {"value": 3.0, "source": "default"}
+    assert G.effective_goal({"site_archetype": "strong_grid"},
+                            {"recommended_archetype": "off_grid"})["target_lole_h"] \
+        == {"value": None, "source": "default"}
+    # A stored or template value still wins over the pack's.
+    assert G.effective_goal({"target_lole_h": 1.5}, {"recommended_archetype": "off_grid"}
+                            )["target_lole_h"] == {"value": 1.5, "source": "stored"}
+
+
+def test_pack_goal_leaves_the_eh_request_alone():
+    """A `default` goal (the pack's own) adds no pack override: the EH study
+    request is exactly the request it was before (AI-A owns its numbers)."""
+    goal = G.effective_goal({}, {"recommended_archetype": "off_grid"})
+    body, sources = G.eh_request_with_goal(EhStudyRequest(), goal)
+    assert body.pack_overrides in (None, {})
+    assert sources["target_lole_h"] == "default"
+
+
+def test_loops_read_the_pack_goal_on_the_horizon():
+    class Body:
+        target_lole_h = None
+        draws = None
+    goal = G.effective_goal({}, {"recommended_archetype": "off_grid"})
+    target, draws, sources = G.loop_goal(Body(), goal, 2.0)
+    assert (target, draws, sources["target_lole_h"]) == (6.0, G.DEFAULT_MC_DRAWS, "default")

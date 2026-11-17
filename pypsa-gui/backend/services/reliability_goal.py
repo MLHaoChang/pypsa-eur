@@ -89,7 +89,8 @@ def effective_goal(cfg: Any, template: dict | None) -> dict[str, dict[str, Any]]
     ``ens_cap_permyriad`` (‱), ``mc_draws`` and ``site_archetype``.
     ``cfg`` is a SolverConfig or its dict; ``template`` the project's
     ``eh_template.json`` (None for a project without one). A ``default``
-    value of None means "the pack's own value"."""
+    LOLE is the site type's own pack target (None when the pack has none);
+    any other ``default`` value of None means "the pack's own value"."""
     get = cfg.get if isinstance(cfg, dict) else (lambda k: getattr(cfg, k, None))
     po = (template or {}).get("pack_overrides") or {}
 
@@ -104,16 +105,32 @@ def effective_goal(cfg: Any, template: dict | None) -> dict[str, dict[str, Any]]
         n = _number(v)
         return n is not None and n > 0       # 0 / None = no ENS target
 
+    archetype = pick(get("site_archetype"), valid_archetype,
+                     (template or {}).get("recommended_archetype"),
+                     DEFAULT_ARCHETYPE)
     return {
+        # The default is the site type's own pack target: the goal the EH
+        # study certifies against when nothing else sets one, so every reader
+        # names the same number (asset-investment walkthrough 01).
         "target_lole_h": pick(get("target_lole_h"), valid_lole,
-                              po.get("target_lole_h"), None),
+                              po.get("target_lole_h"),
+                              pack_target_lole_h(archetype["value"])),
         "ens_cap_permyriad": pick(get("ens_cap_permyriad"), ens_ok,
                                   po.get("ens_cap_permyriad"), None),
         "mc_draws": pick(get("mc_draws"), valid_draws, None, DEFAULT_MC_DRAWS),
-        "site_archetype": pick(get("site_archetype"), valid_archetype,
-                               (template or {}).get("recommended_archetype"),
-                               DEFAULT_ARCHETYPE),
+        "site_archetype": archetype,
     }
+
+
+def pack_target_lole_h(archetype: str) -> float | None:
+    """The site type's own pack LOLE target (h/yr), or None when its pack
+    has none (strong_grid)."""
+    from services.adequacy.eh_study_runner import _PACK_FACTORY
+
+    factory = _PACK_FACTORY.get(archetype)
+    availability = factory().availability if factory is not None else None
+    target = getattr(availability, "target_lole_h", None)
+    return float(target) if target is not None else None
 
 
 def active_goal(solver_state: dict) -> dict[str, dict[str, Any]]:

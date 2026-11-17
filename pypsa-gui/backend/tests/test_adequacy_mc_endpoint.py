@@ -566,3 +566,72 @@ def test_every_candidate_is_accepted_by_the_run_that_prices_it(
         assert row["status"] in {"ok", "unidentifiable", "not_bracketed",
                                  "aborted"}
         assert row["nameplate_mw"] > 0.0
+
+
+# ── Walkthrough asset-investment 01/07/08: goal verdict, draws, installed ──
+
+def _set_goal(**fields):
+    import dataclasses
+
+    from services.pypsa_service import PyPSAService
+    state = PyPSAService.get_solver_state()
+    state["solver_config"] = dataclasses.replace(state["solver_config"], **fields)
+
+
+def test_mc_result_carries_the_goal_verdict_and_its_draw_budget(
+        client, install_network):
+    """The Expert MC reads the project's one goal and judges its LOLE with
+    `lole_verdict` (01); the result names the draws it may take (08)."""
+    install_network(_network())
+    # ~4.6 h on a 24 h horizon. 8,760 h/yr is 24 h on this horizon: a pass;
+    # 1 h/yr is 0.0027 h on it: a miss.
+    _set_goal(target_lole_h=8760.0)
+    assert client.post("/api/results/mc", json={
+        "draws": DRAWS, "seed": SEED, "cov_target": COV}).status_code == 200
+    body = _poll(client)
+    assert body["status"] == "done", body
+    goal = body["result"]["goal"]
+    assert goal["target_lole_h"] == pytest.approx(8760.0)
+    assert goal["verdict"] == "pass"
+    assert body["result"]["draws"] == {
+        "first_batch": DRAWS, "max": MAX_DRAWS, "cov_target": COV}
+    assert body["goal_sources"]["target_lole_h"] == "stored"
+
+
+
+def test_mc_result_misses_a_goal_below_its_lole(client, install_network):
+    install_network(_network())
+    _set_goal(target_lole_h=1.0)          # 0.0027 h on the 24 h horizon
+    assert client.post("/api/results/mc", json={
+        "draws": DRAWS, "seed": SEED, "cov_target": COV}).status_code == 200
+    body = _poll(client)
+    assert body["status"] == "done", body
+    assert body["result"]["goal"]["verdict"] == "miss"
+    assert body["result"]["goal"]["target_lole_h"] == pytest.approx(1.0)
+
+
+def test_mc_result_has_no_verdict_without_a_goal(client, install_network):
+    install_network(_network())
+    _set_goal(target_lole_h=None, site_archetype="strong_grid")
+    assert client.post("/api/results/mc", json={
+        "draws": DRAWS, "seed": SEED, "cov_target": COV}).status_code == 200
+    body = _poll(client)
+    assert body["status"] == "done", body
+    assert body["result"]["goal"] is None
+
+
+def test_vre_elcc_rows_have_the_installed_capacity_beside_the_peak(
+        client, install_network):
+    """A vre row's `nameplate_mw` is its peak output (0.8 × 200 = 160 MW);
+    the installed 200 MW rides beside the rows (07). Rows keep their nine
+    contract keys."""
+    install_network(_mixed_network())
+    assert client.post("/api/results/mc", json={
+        "draws": DRAWS, "seed": SEED, "cov_target": COV,
+        "elcc_assets": [{"kind": "vre", "name": "wind"}]}).status_code == 200
+    body = _poll(client)
+    assert body["status"] == "done", body
+    row = body["result"]["elcc"][0]
+    assert set(row) == ELCC_ROW_KEYS
+    assert row["nameplate_mw"] == pytest.approx(160.0)
+    assert body["result"]["elcc_installed_mw"] == {"wind": pytest.approx(200.0)}

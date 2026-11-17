@@ -55,6 +55,33 @@ def test_sizing_summary_groups_p_nom_by_carrier():
     assert sizing["total_p_nom_mw"] == pytest.approx(125.0)
 
 
+def test_sizing_lists_each_asset_the_study_sized():
+    """Walkthrough asset-investment 03: the sized new units by name, with
+    their built size and allowed range; storage adds its energy. Fixed
+    assets are not rows; the carrier totals are unchanged."""
+    n = _ens_network()
+    n.add("Carrier", "battery")
+    n.add("Generator", "diesel_new", bus="b", carrier="gas", p_nom=0.0,
+          p_nom_extendable=True, p_nom_min=0.0, p_nom_max=12.0)
+    n.generators.loc["diesel_new", "p_nom_opt"] = 4.2
+    n.add("StorageUnit", "bess_new", bus="b", carrier="battery",
+          p_nom_extendable=True, p_nom_max=15.0, max_hours=4.0)
+    n.storage_units.loc["bess_new", "p_nom_opt"] = 2.5
+    sizing = R.sizing_summary_from_network(n)
+    assert sizing["assets"] == [
+        {"component": "Generator", "name": "diesel_new", "carrier": "gas",
+         "built_mw": pytest.approx(4.2), "min_mw": 0.0, "max_mw": 12.0},
+        {"component": "StorageUnit", "name": "bess_new", "carrier": "battery",
+         "built_mw": pytest.approx(2.5), "min_mw": 0.0, "max_mw": 15.0,
+         "max_hours": 4.0, "built_mwh": pytest.approx(10.0)},
+    ]
+    assert sizing["by_carrier"]["gas"] == pytest.approx(104.2)
+
+
+def test_sizing_without_extendable_assets_has_no_rows():
+    assert R.sizing_summary_from_network(_ens_network())["assets"] == []
+
+
 def test_tea_lcoe_is_cost_over_served_energy():
     tea = R.compute_tea(cost_eur=9_720.0, served_energy_mwh=1_080.0)
     assert tea.lcoe_eur_per_mwh == pytest.approx(9_720.0 / 1_080.0)

@@ -74,7 +74,55 @@ def sizing_summary_from_network(n) -> dict[str, Any]:
     return {
         "by_carrier": {k: float(v) for k, v in sorted(by_carrier.items())},
         "total_p_nom_mw": float(total),
+        "assets": sized_assets(n),
     }
+
+
+def _finite(v: Any) -> float | None:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+#: (component, its table, the size attribute's stem): ``p`` sizes MW, ``e`` MWh.
+_SIZED = (("Generator", "generators", "p"), ("StorageUnit", "storage_units", "p"),
+          ("Link", "links", "p"), ("Store", "stores", "e"))
+
+
+def sized_assets(n) -> list[dict[str, Any]]:
+    """One row per asset the solve sized (``*_extendable``), in component
+    order then the network's: its built size (``*_opt``) and allowed range
+    (an infinite bound reads None). A storage unit adds its energy
+    (``built_mw × max_hours``); a store is sized in MWh. Slack generators
+    are not assets (walkthrough asset-investment 03)."""
+    rows: list[dict[str, Any]] = []
+    for component, table, stem in _SIZED:
+        df = getattr(n, table, None)
+        ext = f"{stem}_nom_extendable"
+        if df is None or df.empty or ext not in df.columns:
+            continue
+        for name, row in df[df[ext].fillna(False).astype(bool)].iterrows():
+            carrier = str(row.get("carrier", "") or "")
+            if component == "Generator" and (str(name).startswith("__voll") or carrier in {
+                    "voll", "load_shedding", "dsr", "demand_response"}):
+                continue
+            unit = "mw" if stem == "p" else "mwh"
+            out: dict[str, Any] = {
+                "component": component, "name": str(name), "carrier": carrier,
+                f"built_{unit}": _finite(row.get(f"{stem}_nom_opt")),
+                f"min_{unit}": _finite(row.get(f"{stem}_nom_min")),
+                f"max_{unit}": _finite(row.get(f"{stem}_nom_max")),
+            }
+            if component == "StorageUnit":
+                hours = _finite(row.get("max_hours"))
+                out["max_hours"] = hours
+                built = out["built_mw"]
+                out["built_mwh"] = (built * hours
+                                    if built is not None and hours is not None else None)
+            rows.append(out)
+    return rows
 
 
 def served_energy_mwh_from_network(n, *, ens_mwh: float | None = None) -> float | None:
