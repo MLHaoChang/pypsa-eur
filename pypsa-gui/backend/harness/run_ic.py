@@ -44,10 +44,15 @@ JUDGED = "report"
 GAP_KINDS = {
     "refused": ("ic_case_refused", "the investment case was refused for its inputs"),
     "failed": ("ic_case_failed", "the investment case failed"),
-    "aborted": ("ic_case_aborted", "the investment case was stopped before it finished"),
+    "aborted": (
+        "ic_case_aborted",
+        "the investment case was stopped before it finished",
+    ),
 }
 WALL_TIME_KIND = "ic_wall_time"
-WALL_TIME = f"{WALL_TIME_KIND}: the investment case did not finish within the run's wall time."
+WALL_TIME = (
+    f"{WALL_TIME_KIND}: the investment case did not finish within the run's wall time."
+)
 BUDGET_KIND = "ic_budget"  # `run_envelope.IC_BUDGET_KIND` (A2, A5)
 BUDGET = (
     f"{BUDGET_KIND}: the run's solves left do not cover the investment case's baseline "
@@ -148,7 +153,9 @@ def chapter_gaps(task) -> dict[str, str]:
             and not step.get("superseded")
             and step.get("status") in ("failed", "uncertain")
         ):
-            out[INVESTMENT] = str(step.get("error") or f"the investment case step {step['status']}")
+            out[INVESTMENT] = str(
+                step.get("error") or f"the investment case step {step['status']}"
+            )
     return out
 
 
@@ -246,7 +253,9 @@ def _wall_of(path, ticket):
     step = next((s for s in task.get("steps", []) if s["id"] == ticket[1]), None)
     job = (step or {}).get("job") or {}
     deadline = job.get("deadline_at")
-    if job.get("deadline_kind") != WALL_TIME_KIND or not isinstance(deadline, (int, float)):
+    if job.get("deadline_kind") != WALL_TIME_KIND or not isinstance(
+        deadline, (int, float)
+    ):
         return None
     return deadline
 
@@ -284,8 +293,12 @@ def budget_gap(path, step_id) -> bool:
 
     def mark(task):
         step = next((s for s in task["steps"] if s["id"] == step_id), None)
-        if step is None or not is_ic_step(step) or step.get(ON_END) != CHAPTER_GAP \
-                or step["status"] in ("completed", "failed", "uncertain"):
+        if (
+            step is None
+            or not is_ic_step(step)
+            or step.get(ON_END) != CHAPTER_GAP
+            or step["status"] in ("completed", "failed", "uncertain")
+        ):
             return False
         step.update(status="failed", error=BUDGET, judged_by=JUDGED)
         done.append(step_id)
@@ -315,14 +328,20 @@ def reserved(path) -> int:
         audit = (run_envelope._load(path) or {}).get("audit") or []
     except Exception:  # noqa: BLE001 -- no envelope to read: nothing was reserved
         return SOLVES
-    last = next((a for a in reversed(audit) if a.get("event") == "used" and a.get("tool") == TOOL), None)
+    last = next(
+        (
+            a
+            for a in reversed(audit)
+            if a.get("event") == "used" and a.get("tool") == TOOL
+        ),
+        None,
+    )
     solves = (last or {}).get("solves")
     return solves if type(solves) is int else SOLVES
 
 
 def settle(path, ticket, job_id, record, begun):
     """Settle the step from `record`; the case is never started again."""
-    from harness import runner
     from services import assistant_tasks
 
     native, status, error = outcome(record, begun)
@@ -333,7 +352,12 @@ def settle(path, ticket, job_id, record, begun):
     )
     view = assistant_tasks.settle_job(path, ticket, job_id, native, status, result)
     if view is not None and error:
-        _judge(path, ticket[1], error, gap_error(native, record) if native in GAP_KINDS else None)
+        _judge(
+            path,
+            ticket[1],
+            error,
+            gap_error(native, record) if native in GAP_KINDS else None,
+        )
     return view
 
 

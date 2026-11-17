@@ -61,7 +61,11 @@ def test_new_runs_are_offered_eh_site_v2_only():
 
     schema = next(t for t in TOOLS if t["name"] == "start_task")
     run = (schema.get("input_schema") or schema.get("parameters"))["properties"]["run"]
-    assert run["properties"]["profile"]["enum"] == ["eh_site@2", "eh_site@3", "eh_site@4"]
+    assert run["properties"]["profile"]["enum"] == [
+        "eh_site@2",
+        "eh_site@3",
+        "eh_site@4",
+    ]
 
 
 @pytest.mark.parametrize("ref", REFS)

@@ -226,7 +226,7 @@ def _check_run(entry):
         raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS)} and an optional "
                             "kind (none for the report); a "
                             "loop-driving tool may carry restore \"final\", and the case "
-                            f"baseline_solves {CASE_BASELINE_SOLVES}: {entry!r}")
+                            f"baseline_solves {CASE_BASELINE_SOLVES}: {json.dumps(entry, default=str)}")
     if entry["tool"] in NEVER_LISTED:
         raise EnvelopeError(f"{entry['tool']} is never in an envelope; it is always its own card.")
     return dict(entry)

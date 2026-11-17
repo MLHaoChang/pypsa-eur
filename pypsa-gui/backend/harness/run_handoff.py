@@ -114,7 +114,11 @@ def read_kpis(profile: dict) -> list[dict]:
 # report lists the chapter's gap, the hand-off states why (follow-up (a)).
 IC_SOURCE = "investment_case"
 IC_KPIS = {  # key -> (reader, the figure in its fact, the source path)
-    "npv_at_wacc": ("read_returns", ("returns", "npv_at_wacc"), "project_post_tax_npv_at_wacc"),
+    "npv_at_wacc": (
+        "read_returns",
+        ("returns", "npv_at_wacc"),
+        "project_post_tax_npv_at_wacc",
+    ),
     "post_tax_irr": ("read_returns", ("returns", "irr"), "project_post_tax_irr"),
     "pre_tax_irr": ("read_pre_tax_irr", ("irr",), "project_pre_tax_irr"),
 }
@@ -147,12 +151,18 @@ def _ic_kpi(kpi: dict, facts: dict) -> dict:
         reasons = list(fact.get("reasons") or [])
         if fact.get("state") != ic.ESTABLISHED:
             stale = bool(_IC_STALE & set(reasons))
-            return {**row, "status": "not_current" if stale else NOT_ESTABLISHED, "reasons": reasons}
+            return {
+                **row,
+                "status": "not_current" if stale else NOT_ESTABLISHED,
+                "reasons": reasons,
+            }
         value = fact
         for key in path:
             value = value[key]
     except Exception:  # noqa: BLE001 -- an unreadable case is stated, never guessed
-        logger.info("investment-case KPI %s could not be read", kpi["id"], exc_info=True)
+        logger.info(
+            "investment-case KPI %s could not be read", kpi["id"], exc_info=True
+        )
         return {**row, "status": "unreadable", "reasons": ["unreadable"]}
     if _number(value) is None:
         return {**row, "status": "unreadable", "reasons": ["not_a_number"]}
