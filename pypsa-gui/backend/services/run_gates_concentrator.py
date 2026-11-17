@@ -113,10 +113,10 @@ def _fed_in(n, buses, index):
     """The tonnes fed in from outside the site per snapshot: the supply Generators on tonne buses. A shortfall
     role's slack and any LP slack Generator (`slack_generator_mask`, #1461 S1) are not a supply. None when one
     is unreadable."""
-    from models.process_unit import product_role_generators
     from services.adequacy.slack import slack_generator_mask
+    from services.process_products import shortfalls
 
-    slack = set(product_role_generators(n, "shortfall"))
+    slack = {s.name for s in shortfalls(n) if s.source == "generator"}
     slack |= {str(g) for g in n.generators.index[slack_generator_mask(n.generators)]}
     names = [
         str(g)
