@@ -1392,7 +1392,7 @@ STRENGTH_CSV = "campus_strength.csv"
 STRENGTH_GROUPS_CSV = "campus_strength_groups.csv"
 
 #: Converter-interfaced unit kinds: off for the strength fault levels and the
-#: PoCs of the SCR screen. A genset is a synchronous machine and stays in.
+#: PoCs of the SCR screen. A genset is not a converter, so not a PoC (GENSET_SK_NOTE).
 IBR_KINDS = ("pv", "wind", "fuel_cell", "bess", "ups")
 #: Per-case verdicts in ``campus_planning.csv``.
 PLANNING_CASE_FAIL, PLANNING_CASE_PASS = "fail", "pass"
