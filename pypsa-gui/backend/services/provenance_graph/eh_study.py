@@ -372,7 +372,7 @@ def study_graph(r: StudyRead) -> StudyGraph:
             recorded: Any = Unrecorded("assumption row: not an object")
         elif not all(isinstance(row.get(k), str) for k in ("component", "entity", "field")):
             recorded = Unrecorded("assumption row: names no network field")
-        elif row.get("value") is None or not _scalar(row.get("value")):
+        elif not _scalar(row.get("value")):
             recorded = Unrecorded("assumption row: no comparable value")
         else:
             recorded = row["value"]

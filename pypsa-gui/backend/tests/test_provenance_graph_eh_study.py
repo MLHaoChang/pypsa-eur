@@ -203,7 +203,7 @@ def test_a_null_missing_or_mistyped_captured_revision_reads_uncompared(study, ca
     assert out["outcome"]["state"] == "uncompared"
     assert S.RUN in out["outcome"]["uncompared"]
     assert S.input_id("network_revision") in out["outcome"]["uncompared"]
-    assert _step(out, S.RUN)["state"] == "uncompared"
+    assert _step(out, S.RUN)["via"]["recorded"] == {"unrecorded": "the study recorded no network revision"}
     assert "unrecorded" in _step(out, S.input_id("network_revision"))["via"]["recorded"]
 
 
@@ -324,6 +324,7 @@ def _held(lock):
 
 
 def test_a_busy_lock_reads_network_busy_uncompared_never_stale_and_never_waits(study):
+    study.solver_state["eh_study"]["assumptions"] = [_row()]
     study.network_revision = int(study.network_revision or 0) + 1  # an edit that would read stale
     _goal(study, target_lole_h=9.0)
     with _held(study.mutation_lock):
@@ -479,6 +480,9 @@ def test_a_context_with_no_locks_is_read_with_nothing_to_wait_for(study):
     bare = types.SimpleNamespace(network=study.network, solver_state=study.solver_state,
                                  network_revision=study.network_revision)
     assert explain_study_figure("expected_shortfall", ctx=bare)["outcome"]["state"] == "fresh"
+    with pytest.raises(TargetUnknown) as exc:  # no solver state at all: no study, never a 500
+        explain_study_figure("expected_shortfall", ctx=types.SimpleNamespace(network=study.network))
+    assert exc.value.error_kind == "study_not_run"
 
 
 def test_a_text_assumption_row_compares_exactly(study):
@@ -537,6 +541,12 @@ def test_assumptions_that_are_not_a_list_read_uncompared(study):
     out = explain_study_figure("expected_shortfall")
     assert out["outcome"]["state"] == "uncompared"
     assert out["outcome"]["uncompared"] == [S.input_id("assumptions")]
+
+
+def test_a_row_with_no_key_or_label_is_named_by_its_place(study):
+    study.solver_state["eh_study"]["assumptions"] = [_row(key=None, label=None)]
+    step = _step(explain_study_figure("expected_shortfall"), S.input_id("assumption/#0"))
+    assert step["label"] == "#0" and step["state"] == "fresh"
 
 
 def test_two_rows_with_one_key_are_two_inputs(study):
