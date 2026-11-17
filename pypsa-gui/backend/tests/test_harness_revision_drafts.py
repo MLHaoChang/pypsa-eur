@@ -1185,3 +1185,52 @@ def test_the_routes_give_one_404_for_every_run_that_is_not_the_callers(
         busy.status_code == 409
         and busy.json()["detail"]["error_kind"] == "report_job_in_flight"
     )
+
+
+class Silent:
+    name = "silent"
+
+    def stream(self, request):
+        return iter(())
+
+
+def test_a_stream_with_no_events_at_all_is_rejected_as_truncated(made):
+    path, _root, _c = made
+    drafted(made, Silent())
+    assert rows(path)[0]["status"] == "rejected"
+    assert rows(path)[0]["reasons"] == [run_revise.DRAFT_TRUNCATED]
+
+
+def test_scan_still_returns_a_driven_run_with_nothing_due(made, monkeypatch):
+    path, _root, _c = made
+    update(path, lambda t: t["run"].update(status="running"))
+    runner = harness_runner.Runner(BOOT)
+    monkeypatch.setattr(runner, "_runs", lambda: [(path, record(path))])
+    assert runner.scan() == [path]
+
+
+def test_confirm_and_discard_on_a_task_with_no_run_are_404(
+    client, api_project, project_storage_dir, project_row, seeded_identity
+):
+    import uuid
+
+    name, root, path, _task_id, _cid = _route_run(
+        client,
+        api_project,
+        project_storage_dir,
+        project_row,
+        seeded_identity,
+        "rev-drafts-norun",
+    )
+    task = {k: v for k, v in json.loads(path.read_text()).items() if k != "run"}
+    tid = str(uuid.uuid4())
+    (root / "assistant_tasks" / f"{tid}.json").write_text(json.dumps(task))
+    for act in ("confirm", "discard"):
+        r = client.post(
+            f"/api/projects/{name}/reports/{RID}/drafts/{'a' * 16}/{act}",
+            json={"task_id": tid},
+        )
+        assert (
+            r.status_code == 404
+            and r.json()["detail"]["error_kind"] == "task_not_found"
+        ), act
