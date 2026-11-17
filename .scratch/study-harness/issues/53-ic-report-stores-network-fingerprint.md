@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# 50 — The IC report stores the network fingerprint it was built on
+# 53 — The IC report stores the network fingerprint it was built on
 
 Status: needs-triage
 Gated: GK A
