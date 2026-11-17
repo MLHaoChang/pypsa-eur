@@ -41,3 +41,12 @@ Turn `services/asset_schema/` into the one Parameter catalogue (spec §3.1):
 ## Keeping both modes in step
 
 The catalogue is mode-free: `depth: essentials` is the Guided set, everything else Expert depth. No mode-specific label or unit.
+
+## Comments
+
+- GK B (63), OK on #1597 @887ab0d6, slice-01 conditions:
+  - T1: state where template display names live. Native template byte-identity either holds, or each changed file is named and its fixture updated on purpose. An old project with no display name falls back to its id (test).
+  - T2: `internal: true` hides a unit only from lists, palette and canvases; never from KPIs, balances, costs, the ledger, chat reads or reports. Test: a sum that includes `__lost_concentrate` is unchanged by the flag.
+  - T3: `options_plain` is display only; the stored value stays the raw option (round-trip test). An unknown stored option reads as itself and is flagged, never blank or coerced.
+- UX (23), OK on #1597 @887ab0d6: existing projects show the plain display name where one exists (a label beside the unchanged id); `internal: true` assets stay reachable in Results and reports as what they mean ("Concentrate shortfall").
+- Agreed with homer-parity 04a and GK B (62): "Load growth starts from year" has default source `none`, required when a rate is set; the UI pre-fills the first period and saves it explicitly; the server's 422 stays.
