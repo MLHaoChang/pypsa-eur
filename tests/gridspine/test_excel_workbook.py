@@ -830,6 +830,118 @@ def test_a_legacy_formula_with_no_saved_value_is_reported(tmp_path):
     ) in _um(res)
 
 
+_BUS = [["name", "v_nom"], ["B1", 110.0]]
+_OFF_LIST = "not an input of this kind of asset; the column was not read"
+
+
+def test_a_legacy_output_column_is_reported_not_set(tmp_path):
+    """E1: a result attribute such as p_nom_opt is not an input, so it is not read."""
+    path = _book(
+        tmp_path,
+        {
+            "buses": _BUS,
+            "generators": [["name", "bus", "p_nom_opt"], ["G1", "B1", 9.0]],
+        },
+    )
+    res = read_excel(path)
+    assert ("generators › column p_nom_opt", _OFF_LIST) in _um(res)
+    assert res.network.generators.at["G1", "p_nom_opt"] == 0.0
+
+
+def test_a_network_sheet_pypsa_cannot_read_is_a_format_error(tmp_path):
+    from gridspine.ingest.import_result import ImportFormatError
+
+    path = _book(
+        tmp_path,
+        {"network": [["name"], ["n"]], "buses": [["name", "v_nom"], ["B1", "high"]]},
+    )
+    with pytest.raises(ImportFormatError, match="PyPSA could not read it"):
+        read_excel(path)
+
+
+def test_a_formula_with_no_saved_value_in_a_pypsa_export_is_reported(tmp_path):
+    n = pypsa.Network()
+    n.add("Bus", "B1", v_nom=110.0)
+    path = _native(n, tmp_path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb["buses"]
+    col = [c.value for c in ws[1]].index("v_nom") + 1
+    cell = ws.cell(row=2, column=col)
+    cell.value = "=1+1"
+    wb.save(path)
+    res = read_excel(path)
+    assert any(
+        src == f"buses › cell {cell.coordinate}"
+        and "formula with no saved value" in why
+        for src, why in _um(res)
+    )
+
+
+def test_a_pypsa_export_counts_only_the_kinds_it_holds(tmp_path):
+    n = _network(False)
+    res = _read(_native(n, tmp_path))
+    held = {sheet for _, sheet, ln in L.SHEETS if not getattr(n, ln).empty}
+    assert set(res.report.counts) == held
+
+
+def test_an_empty_legacy_sheet_is_skipped(tmp_path):
+    res = read_excel(_book(tmp_path, {"buses": _BUS, "loads": []}))
+    assert list(res.network.buses.index) == ["B1"]
+    assert res.network.loads.empty
+
+
+def test_a_legacy_name_column_need_not_come_first(tmp_path):
+    res = read_excel(_book(tmp_path, {"buses": [["v_nom", "name"], [110.0, "B1"]]}))
+    assert res.network.buses.at["B1", "v_nom"] == 110.0
+    assert _um(res) == []
+
+
+def test_a_legacy_blank_header_or_blank_row_is_skipped_silently(tmp_path):
+    path = _book(
+        tmp_path,
+        {
+            "buses": [
+                ["name", None, "v_nom"],
+                ["B1", None, 110.0],
+                [None, None, None],
+                ["B2", None, 220.0],
+            ]
+        },
+    )
+    res = read_excel(path)
+    assert _um(res) == []
+    assert res.network.buses["v_nom"].to_dict() == {"B1": 110.0, "B2": 220.0}
+
+
+def test_a_legacy_blank_name_is_reported_and_a_number_name_is_kept(tmp_path):
+    path = _book(tmp_path, {"buses": [["name", "v_nom"], ["  ", 110.0], [7.0, 220.0]]})
+    res = read_excel(path)
+    assert ("buses row 2", "the row has values but no name") in _um(res)
+    assert "7" in res.network.buses.index
+
+
+@pytest.mark.parametrize("marker", [L.ABOUT, L.HORIZON])
+def test_one_input_workbook_sheet_alone_reads_as_raw_sheets(tmp_path, marker):
+    res = read_excel(_book(tmp_path, {marker: [["x"]], "buses": _BUS}))
+    assert list(res.network.buses.index) == ["B1"]
+    assert (marker, "not a component sheet; its rows were not read") in _um(res)
+
+
+def test_a_legacy_row_names_its_first_bad_cell(tmp_path):
+    path = _book(
+        tmp_path,
+        {
+            "buses": _BUS,
+            "generators": [
+                ["name", "bus", "p_nom", "marginal_cost"],
+                ["G1", "B1", "lots", "bad"],
+            ],
+        },
+    )
+    res = read_excel(path)
+    assert _um(res) == [("generators › G1", "p_nom: 'lots' is not a number")]
+
+
 def test_unescape_undoes_only_the_export_s_quote():
     from gridspine.ingest.excel_import import unescape_formula
 
