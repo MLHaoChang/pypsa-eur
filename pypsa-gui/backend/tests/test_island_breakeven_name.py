@@ -33,17 +33,25 @@ def test_the_label_is_the_owner_approved_name():
 
 def test_the_template_ledger_row_is_the_label_lowercased(tmp_path):
     T.write_sidecars(tmp_path, TID)
-    for meta in (json.loads((tmp_path / T.META_FILE).read_text()),
-                 json.loads(COMMITTED.read_text())):
+    for meta in (
+        json.loads((tmp_path / T.META_FILE).read_text()),
+        json.loads(COMMITTED.read_text()),
+    ):
         items = _ledger_items(meta)
         assert LABEL.lower() in items
         assert OLD_ITEM not in items
 
 
 def test_the_report_chapter_uses_the_label():
-    payload = {"island_breakeven_text": "The island capability must be worth at least EUR 1 a year"}
-    assert any(LABEL.lower() in line for line in chapters.investment_disclosures(payload))
-    assert LABEL in dict(chapters.investment_table(payload, "/sections/investment").rows)
+    payload = {
+        "island_breakeven_text": "The island capability must be worth at least EUR 1 a year"
+    }
+    assert any(
+        LABEL.lower() in line for line in chapters.investment_disclosures(payload)
+    )
+    assert LABEL in dict(
+        chapters.investment_table(payload, "/sections/investment").rows
+    )
 
 
 def test_the_xlsx_summary_uses_the_label():
@@ -51,7 +59,10 @@ def test_the_xlsx_summary_uses_the_label():
     from services.finance.export_xlsx import build_workbook
 
     rep = _report()
-    rep.sections["project"].payload["island_breakeven"] = {"eur_per_year": 1.0, "text": "x"}
+    rep.sections["project"].payload["island_breakeven"] = {
+        "eur_per_year": 1.0,
+        "text": "x",
+    }
     wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
     assert LABEL in {r[0] for r in _values(wb["Summary"])}
 
@@ -62,12 +73,15 @@ def _hashes(client, session_ctx):
 
     ctx = session_ctx(client)
     cfg = ctx.solver_state["solver_config"]
-    assumptions = results._ic_assumptions(cfg, ctx.network, lock=contextlib.nullcontext())
+    assumptions = results._ic_assumptions(
+        cfg, ctx.network, lock=contextlib.nullcontext()
+    )
     return assumptions, workflow_tools._network_input_fingerprint(ctx)
 
 
 def test_no_digest_or_fingerprint_hashes_the_ledger_label(
-        client, tmp_projects_dir, bound_ctx, session_ctx):
+    client, tmp_projects_dir, bound_ctx, session_ctx
+):
     """The assumptions digest of the investment case and the network input
     fingerprint do not read the template's ledger: rewriting the row's item
     text (old wording against new) changes neither."""
