@@ -1,4 +1,5 @@
 """The model set and data freeze contract (GC-01, ``schema/model_set.py``)."""
+
 import datetime
 import hashlib
 
@@ -7,29 +8,48 @@ import pandas as pd
 import pytest
 
 from gridspine.schema.contracts import ContractError
-from gridspine.schema.model_set import VARIANTS, canonical, data_hash, manifest, new_model_set
+from gridspine.schema.model_set import (
+    VARIANTS,
+    canonical,
+    data_hash,
+    manifest,
+    new_model_set,
+)
 from tests.gridspine.test_campus import campus_spec
 
 PARAMS = {"study": {"dispatch_mw": [10.0, 20.0], "pf": 0.95}, "case": "max"}
-T0 = datetime.datetime(2026, 11, 17, 8, 0, tzinfo=datetime.timezone.utc)
+T0 = datetime.datetime(2026, 11, 17, 8, 0, tzinfo=datetime.UTC)
 SHA = "ab" * 32
 
 
 def with_vendor(spec, sha=SHA):
-    spec["campus"]["vendor_models"] = {"pv": {"file": "pv_plant.dyr", "tool": "PSS/E", "model": "PVGEN",
-                                              "version": "1.2", "sha256": sha}}
+    spec["campus"]["vendor_models"] = {
+        "pv": {
+            "file": "pv_plant.dyr",
+            "tool": "PSS/E",
+            "model": "PVGEN",
+            "version": "1.2",
+            "sha256": sha,
+        }
+    }
     return spec
 
 
 def test_hash_of_a_fixed_input_is_the_literal():
-    """Computed once by hand: hashlib on the literal canonical string. A
-    change to ``canonical()`` changes it."""
+    """
+    Computed once by hand: hashlib on the literal canonical string. A
+    change to ``canonical()`` changes it.
+    """
     expected_text = '{"campus":{"a":1},"params":{"b":[2.5,true]}}'
     assert canonical({"a": 1.0}, {"b": (2.5, True)}) == expected_text
-    assert hashlib.sha256(expected_text.encode()).hexdigest() == \
-        "7284c972380a916258451963b7befbc80ecd4f14087e9053f01ef77105d63cde"
-    assert data_hash({"a": 1.0}, {"b": (2.5, True)}) == \
-        "7284c972380a916258451963b7befbc80ecd4f14087e9053f01ef77105d63cde"
+    assert (
+        hashlib.sha256(expected_text.encode()).hexdigest()
+        == "7284c972380a916258451963b7befbc80ecd4f14087e9053f01ef77105d63cde"
+    )
+    assert (
+        data_hash({"a": 1.0}, {"b": (2.5, True)})
+        == "7284c972380a916258451963b7befbc80ecd4f14087e9053f01ef77105d63cde"
+    )
 
 
 def test_same_inputs_same_hash():
@@ -54,8 +74,9 @@ def test_int_and_integral_float_hash_the_same_but_not_bool():
 
 
 def test_numpy_scalars_and_tuples_are_plain_values():
-    assert data_hash({"a": np.float64(2.5), "n": np.int64(3), "b": np.bool_(True)}, {"t": (1, 2)}) == \
-        data_hash({"a": 2.5, "n": 3, "b": True}, {"t": [1, 2]})
+    assert data_hash(
+        {"a": np.float64(2.5), "n": np.int64(3), "b": np.bool_(True)}, {"t": (1, 2)}
+    ) == data_hash({"a": 2.5, "n": 3, "b": True}, {"t": [1, 2]})
 
 
 def test_changed_nested_param_changes_the_hash():
@@ -70,19 +91,32 @@ def test_changed_campus_value_changes_the_hash():
 
 
 def test_changed_vendor_model_changes_the_hash():
-    assert data_hash(with_vendor(campus_spec(), "cd" * 32), PARAMS) != data_hash(with_vendor(campus_spec()), PARAMS)
+    assert data_hash(with_vendor(campus_spec(), "cd" * 32), PARAMS) != data_hash(
+        with_vendor(campus_spec()), PARAMS
+    )
 
 
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"])
+@pytest.mark.parametrize(
+    "bad", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"]
+)
 def test_non_finite_is_refused_naming_the_path(bad):
     with pytest.raises(ContractError, match=r"params\.study\.pf is .*finite"):
         data_hash(campus_spec(), {"study": {"pf": bad}})
 
 
-@pytest.mark.parametrize("bad, kind", [(pd.Series([1.0]), "Series"), (pd.DataFrame({"a": [1]}), "DataFrame"),
-                                       ({1, 2}, "set"), (np.array([1.0]), "ndarray")])
+@pytest.mark.parametrize(
+    "bad, kind",
+    [
+        (pd.Series([1.0]), "Series"),
+        (pd.DataFrame({"a": [1]}), "DataFrame"),
+        ({1, 2}, "set"),
+        (np.array([1.0]), "ndarray"),
+    ],
+)
 def test_other_types_are_refused_naming_the_path(bad, kind):
-    with pytest.raises(ContractError, match=rf"params\.x is a {kind}; only plain JSON data"):
+    with pytest.raises(
+        ContractError, match=rf"params\.x is a {kind}; only plain JSON data"
+    ):
         data_hash({}, {"x": bad})
 
 
@@ -119,10 +153,19 @@ def test_model_set_holds_copies_of_its_inputs():
 
 
 def test_manifest_names_model_set_hash_and_variant():
-    ms = new_model_set(campus_spec(), PARAMS, aggregated=campus_spec(), unit_map={"EQ_PV": ["PV1"]}, now=T0)
+    ms = new_model_set(
+        campus_spec(),
+        PARAMS,
+        aggregated=campus_spec(),
+        unit_map={"EQ_PV": ["PV1"]},
+        now=T0,
+    )
     for variant in VARIANTS:
-        assert manifest(ms, variant) == {"model_set_id": ms.model_set_id, "data_hash": ms.data_hash,
-                                         "variant": variant}
+        assert manifest(ms, variant) == {
+            "model_set_id": ms.model_set_id,
+            "data_hash": ms.data_hash,
+            "variant": variant,
+        }
     assert ms.unit_map == {"EQ_PV": ["PV1"]}
 
 
@@ -146,11 +189,11 @@ def test_none_is_plain_data():
 
 
 def test_default_freeze_time_is_now_in_utc():
-    before = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    before = datetime.datetime.now(datetime.UTC).replace(microsecond=0)
     ms = new_model_set(campus_spec(), PARAMS)
     created = datetime.datetime.fromisoformat(ms.created_utc)
     assert created.utcoffset() == datetime.timedelta(0)
-    assert before <= created <= datetime.datetime.now(datetime.timezone.utc)
+    assert before <= created <= datetime.datetime.now(datetime.UTC)
 
 
 def test_unit_map_defaults_to_empty():
