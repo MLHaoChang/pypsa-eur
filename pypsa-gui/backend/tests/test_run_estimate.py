@@ -174,6 +174,15 @@ def test_a_mode_change_resets_the_samples():
     assert run_estimate.estimate(rows, "solve", _key(other))["samples"] == 0
 
 
+def test_a_mode_field_change_resets_the_samples():
+    # `mode` itself (lopf -> pf), with solver and periods unchanged.
+    pf = json.dumps({"mode": "pf", "solver_name": "highs"})
+    rows = [_row(60), _row(60, finished_offset_h=1)]
+    assert _key(pf) != _key(LOPF)
+    assert run_estimate.estimate(rows, "solve", _key(pf))["samples"] == 0
+    assert run_estimate.estimate(rows, "solve", _key(LOPF))["samples"] == 2
+
+
 def test_a_solver_change_resets_the_samples():
     other = json.dumps({"mode": "lopf", "solver_name": "gurobi"})
     rows = [_row(60), _row(60, finished_offset_h=1)]

@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import statistics
 from datetime import datetime, UTC
 from typing import Any
@@ -103,7 +102,7 @@ def duration_s(row: dict) -> float | None:
     if started is None or finished is None:
         return None
     seconds = (finished - started).total_seconds()
-    if not math.isfinite(seconds) or seconds <= 0:
+    if seconds <= 0:
         return None
     return seconds
 
