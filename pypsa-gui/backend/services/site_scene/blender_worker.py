@@ -99,7 +99,7 @@ class WorkerError(Exception):
 
     def __init__(self, kind: str, message: str) -> None:
         if kind not in KINDS:
-            raise ValueError(f"unclassified worker kind {kind!r}")
+            raise ValueError(f"unclassified worker kind: {kind}")
         super().__init__(f"{kind}: {message}")
         self.kind = kind
         self.message = message

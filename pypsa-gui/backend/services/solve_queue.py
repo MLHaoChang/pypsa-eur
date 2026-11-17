@@ -1286,7 +1286,7 @@ class SolveQueue:
 
         status, error = "failed", None
         try:
-            log_queue.put(f"Blender scene run starting for {job.project_id!r}")
+            log_queue.put(f"Blender scene run starting for {job.project_id}")
             meta = blender_job.run_queued(job, stop_event)
             status = "completed"
             log_queue.put(f"Blender scene artifact stored: {meta['artifact_id']}")
