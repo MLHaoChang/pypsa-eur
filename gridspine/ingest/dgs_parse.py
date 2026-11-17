@@ -73,8 +73,6 @@ import pandas as pd
 from gridspine.schema.contracts import ContractError
 
 SUPPORTED_MAJORS = ("5", "7")
-#: The key column per major version.
-_KEY = {"5": "ID", "7": "FID"}
 #: Columns only a 7.x file has; a 5.x header holding one is refused.
 _V7_ONLY = ("FID", "OP")
 #: The column holding each row's 1-based line number in the source file, so
@@ -378,7 +376,7 @@ def _version(general, fail):
     if not found:
         fail(general[0][LINE_COLUMN] if general else 1, "no General table Version")
     v = str(found[0].get("Val") or "").strip()
-    if not re.fullmatch(r"[57](\.\d+)*", v):
+    if not re.fullmatch(rf"[{''.join(SUPPORTED_MAJORS)}](\.\d+)*", v):
         fail(
             found[0][LINE_COLUMN],
             f"version {v!r} found; only DGS 5.x and 7.x are read",

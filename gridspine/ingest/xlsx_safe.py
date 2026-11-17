@@ -11,17 +11,20 @@ another (GK B E2, GK A2 X5).
   formulas as formulas (`data_only=False`): a reader sees a formula cell as
   one and never takes its cached value, or its absence, for data.
 - openpyxl hardens its XML parser only when defusedxml is importable;
-  pypsa-gui/backend/tests/test_packaging_requirements.py pins that it is.
+  ``pypsa-gui/backend/tests/test_packaging_requirements.py`` pins that it is.
 
 No pypsa here: a sniff can open a workbook without loading the engine.
 """
 
 from __future__ import annotations
 
+import logging
 import pathlib
 import zipfile
 
 from gridspine.ingest import excel_layout as L
+
+logger = logging.getLogger(__name__)
 
 
 def check_zip(path: pathlib.Path) -> None:
@@ -83,6 +86,7 @@ def open_workbook(path: pathlib.Path):
             path, read_only=True, data_only=False, keep_links=False
         )
     except Exception as exc:  # noqa: BLE001 - any parser failure is one refusal
+        logger.warning("Workbook %s refused as unreadable", path.name, exc_info=True)
         raise L.ImportFormatError("The file is not a readable Excel workbook.") from exc
     if len(wb.sheetnames) > L.LIMITS["sheets"]:
         wb.close()

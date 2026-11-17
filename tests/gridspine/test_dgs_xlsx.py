@@ -390,3 +390,18 @@ def test_one_extension_one_importer_needs_no_sniff(tmp_path):
     assert ir.for_file(path).format_id == "dgs"
     with pytest.raises(ImportFormatError, match=r"a.csv: no importer reads .csv"):
         ir.for_file(tmp_path / "a.csv")
+
+
+def test_every_declared_sniff_resolves():
+    """A typo in a sniff would make its importer silently unreachable."""
+    import importlib
+
+    for spec in ir.DECLARED:
+        if spec.sniff:
+            module, _, func = spec.sniff.partition(":")
+            assert callable(getattr(importlib.import_module(module), func)), spec.sniff
+
+
+def test_a_row_of_spaces_is_an_empty_row(tmp_path):
+    path = one_sheet(tmp_path, [HEAD, ["2", "C", "T", 33.0, 1], ["  ", " "]])
+    assert list(parse_dgs_xlsx(path).tables["ElmTerm"].index) == ["2"]

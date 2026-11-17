@@ -123,7 +123,7 @@ def _as_text(wb, source: str) -> tuple[str, dict]:
                     for c, cell in enumerate(row, start=1)
                 ]
             )
-        while rows and not any(rows[-1]):
+        while rows and not any(f.strip() for f in rows[-1]):
             rows.pop()
         if not rows:
             continue  # a wholly empty sheet
@@ -141,7 +141,7 @@ def _as_text(wb, source: str) -> tuple[str, dict]:
         lines.append(f"$${name};" + ";".join(head))
         locations[len(lines)] = f"sheet {name}, row 1"
         for r, fields in enumerate(rows[1:], start=2):
-            if not any(fields):
+            if not any(f.strip() for f in fields):
                 continue  # a wholly empty row
             for c, v in enumerate(fields[width:], start=width + 1):
                 if v != "":
