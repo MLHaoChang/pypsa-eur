@@ -68,6 +68,16 @@ describe('SectionHoldings', () => {
     expect(openTimeSeriesFor).toHaveBeenCalledWith('Generator', 'pv', { field: 'p_max_pu' })
   })
 
+  it('"Edit" on a load time series opens the load\'s own editor in Guided, not the library', () => {
+    render(<SectionHoldings id="profiles" pending={false} failed={false}
+      holds={[held({ component: 'Load', entity: 'it_load', field: 'p_set', value: null, unit: null })]} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Edit it_load/ }))
+    expect(openTimeSeriesFor).not.toHaveBeenCalled()
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe('guided')
+    expect(ui.fieldDrawer).toEqual({ section: 'profiles', panel: null, component: 'Load', entity: 'it_load', field: null })
+  })
+
   it('"Edit" on a carrier goes to Expert and leaves a way back to the section', () => {
     useUIStore.setState({ activeSection: 'carriers' })
     render(<SectionHoldings id="carriers" pending={false} failed={false}

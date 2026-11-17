@@ -43,6 +43,7 @@ import { openPanel } from './results/openPanel'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
+import { withReturnFrom } from '../layout/flowNavigation'
 import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
 import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
@@ -271,7 +272,12 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
         ) : (
           <PageSection title="Study settings">
             <p className="text-[12px] text-muted">
-              Draft the campus file in the grid connection first; the study runs on it.
+              The study runs on the campus file, a description of your site's electrical network. It is
+              drafted from the project in Grid connection.{' '}
+              <button type="button" className="text-accent underline" data-testid="campus-draft-link"
+                onClick={() => withReturnFrom(() => useUIStore.getState().setSlidePanel('campusElectrical'))}>
+                Draft the campus file ›
+              </button>
             </p>
           </PageSection>
         )}

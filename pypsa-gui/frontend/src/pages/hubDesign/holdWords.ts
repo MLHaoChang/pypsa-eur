@@ -53,6 +53,12 @@ const SERIES_TYPES = new Set(['Load', 'Generator', 'Link'])
 
 export function heldHome(section: FlowSectionId, h: FlowHeld): HeldHome {
   if (h.component === 'Carrier') return { kind: 'expert' }
+  // A load's series editor (archetype, upload, preview, Apply) is in its own drawer, the one
+  // section 4 opens; the series library is too wide for the drawer and has no generator.
+  if (section === 'profiles' && h.component === 'Load') {
+    return { kind: 'drawer',
+      target: { section, panel: null, component: h.component, entity: h.entity, field: null } }
+  }
   if (section === 'profiles' && h.field && SERIES_TYPES.has(h.component)) {
     return { kind: 'series', type: h.component as 'Load' | 'Generator' | 'Link', name: h.entity, field: h.field }
   }

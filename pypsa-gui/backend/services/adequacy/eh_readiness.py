@@ -145,6 +145,10 @@ def outage_scan(net, import_links) -> tuple[dict[str, int], list[dict[str, str]]
                                        for k in _NOT_EQUIPMENT_KW))
             else:
                 thermal = cls == "Link" and name in imports
+                # A normally-open tie (p_max_pu 0) carries nothing: the study runs
+                # the site as an island, so its outage rate never enters it.
+                if thermal and "p_max_pu" in df.columns and float(df.at[name, "p_max_pu"]) == 0.0:
+                    thermal = False
             if thermal:
                 missing.append({"class": cls, "name": str(name)})
         by_class[cls] = count
