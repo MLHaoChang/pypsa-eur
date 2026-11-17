@@ -2324,7 +2324,11 @@ leaves write-tier tools uncarded. Guided mode cards every write, and
 
 Each admitted turn records the view it was asked from in the durable thread's
 `refs.current`, through `durable_conversation.record_current_view`, called once
-in `loop.py` right after `turn_ui_context` is set. `refs.discussed` is never
+in `loop.py` after the turn has passed every refusal and its user message is
+kept. The loop reads the bound thread's generation before `session_init`
+(`current_view_generation`) and passes it on; the write re-checks it under
+`_LOCK`, so a rebind during the turn, an obsolete utterance or an unreadable
+start generation records nothing. `refs.discussed` is never
 touched by it: what the user is looking at and the run under discussion stay
 distinct, and a resumed episode keeps both.
 

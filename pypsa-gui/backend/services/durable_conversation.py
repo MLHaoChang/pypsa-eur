@@ -1280,6 +1280,28 @@ def current_view_from_ui_context(ui_context: Any) -> dict[str, Any] | None:
     return view
 
 
+def current_view_generation(episode_id: str) -> int | None:
+    """The generation of the thread bound to ``episode_id`` at turn start, or None.
+
+    The loop reads it before ``session_init`` and passes it to
+    ``record_current_view``, so a rebind during the turn makes its view
+    obsolete. Never raises (L2).
+    """
+    if not isinstance(episode_id, str) or not episode_id:
+        return None
+    try:
+        thread_id = find_thread_for_episode(episode_id)
+        if not thread_id:
+            return None
+        with _LOCK:
+            _, thread = _read(thread_id)
+            if thread.get('episode_id') != episode_id:
+                return None
+            return int(thread.get('generation', 1))
+    except (HTTPException, OSError, ValueError, TypeError):
+        return None
+
+
 def record_current_view(episode_id: str, ui_context: Any, *, generation: int | None = None) -> bool:
     """Store the turn's view in ``refs.current`` of the thread bound to ``episode_id``.
 

@@ -567,3 +567,100 @@ def test_the_hook_runs_with_no_session_lock_held(monkeypatch):
     monkeypatch.setattr(dc, "record_current_view", spy)
     _turn(session, FULL_CONTEXT)
     assert held == [False]
+
+
+# --- a rebind after session_init makes the turn's view obsolete (GK B 65) ------
+
+
+@pytest.mark.parametrize("spoken", [False, True])
+def test_a_rebind_after_session_init_records_nothing(spoken):
+    from harness.providers.fake import FakeProvider
+    from services import utterance_admission as ua
+
+    thread_id, session = _resumed()
+    before = json.dumps(_refs(thread_id), sort_keys=True)
+    provider = FakeProvider(
+        [
+            {
+                "blocks": [{"type": "text", "text": "ok"}],
+                "usage": {"input_tokens": 3, "output_tokens": 2},
+            }
+        ]
+    )
+    kwargs = {}
+    if spoken:
+        kwargs = {
+            "utterance_id": "utt-lv03-1",
+            "generation": ua._DEFAULT.generation(session.session_id),
+        }
+    turn = chat_service.run_turn(
+        session,
+        "which line is closest?",
+        provider=provider,
+        ui_context=FULL_CONTEXT,
+        **kwargs,
+    )
+    first = next(turn)
+    while first[0] != "session_init":
+        first = next(turn)
+    dc.rebind_scope(thread_id, generation=dc.get_thread(thread_id)["generation"])
+    list(turn)
+    assert json.dumps(_refs(thread_id), sort_keys=True) == before
+
+
+def test_an_obsolete_utterance_records_nothing():
+    """An utterance generation bump alone (no thread rebind) still voids the view."""
+    from harness.providers.fake import FakeProvider
+    from services import utterance_admission as ua
+
+    thread_id, session = _resumed()
+    before = json.dumps(_refs(thread_id), sort_keys=True)
+    provider = FakeProvider(
+        [
+            {
+                "blocks": [{"type": "text", "text": "ok"}],
+                "usage": {"input_tokens": 3, "output_tokens": 2},
+            }
+        ]
+    )
+    turn = chat_service.run_turn(
+        session,
+        "which line is closest?",
+        provider=provider,
+        ui_context=FULL_CONTEXT,
+        utterance_id="utt-lv03-2",
+        generation=ua._DEFAULT.generation(session.session_id),
+    )
+    event = next(turn)
+    while event[0] != "session_init":
+        event = next(turn)
+    ua._DEFAULT.bump_generation(session_id=session.session_id)
+    list(turn)
+    assert json.dumps(_refs(thread_id), sort_keys=True) == before
+
+
+def test_the_start_generation_is_the_bound_threads():
+    thread_id, session = _resumed()
+    assert (
+        dc.current_view_generation(session.session_id)
+        == dc.get_thread(thread_id)["generation"]
+    )
+    assert dc.current_view_generation("ep-unbound") is None
+    assert dc.current_view_generation("") is None
+
+
+def test_the_start_generation_of_a_rotated_episode_is_none(monkeypatch):
+    thread_id, _ = _resumed()
+    monkeypatch.setattr(
+        dc, "find_thread_for_episode", lambda episode_id, **_: thread_id
+    )
+    assert dc.current_view_generation("ep-old") is None
+
+
+def test_an_unreadable_start_generation_records_nothing(monkeypatch):
+    """Fail closed: no start generation means no check, so nothing is written."""
+    thread_id, session = _resumed()
+    before = json.dumps(_refs(thread_id), sort_keys=True)
+    monkeypatch.setattr(dc, "current_view_generation", lambda episode_id: None)
+    _turn(session, FULL_CONTEXT)
+    assert json.dumps(_refs(thread_id), sort_keys=True) == before
