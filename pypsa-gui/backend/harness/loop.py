@@ -419,6 +419,7 @@ from harness.compose import (  # noqa: E402, F401 — moved (issue 08); re-expor
     _STYLE_GUIDANCE,
     _UI_CONTEXT_MAX_VALUE_CHARS,
     _UNTRUSTED_DATA_CLAUSE,
+    _VIEW_ONLY,
     _WORKFLOW_STATE_TOOLS,
     _build_system_prompt,
     _format_live_network_meta,
@@ -2362,7 +2363,17 @@ def _run_turn_body(
     tool_call_count = 0
     # Task 8 — `[]` when the profile's `tools` capability is off; see
     # _tools_payload_for_profile.
-    tools = selected_tools
+    # project-viewer-role 01: a viewer is offered only the tools dispatch
+    # admits for them (`restrictions.role_admits`, the rule `require_allowed`
+    # applies), and the prompt says the project is view only.
+    from harness import restrictions
+
+    viewer_snapshot = _role_snapshot(session)
+    tools = [
+        t for t in selected_tools
+        if not isinstance(t, dict)
+        or restrictions.role_admits(viewer_snapshot, _tool_tier(session, t.get("name")))
+    ]
     # C-1 — the ALLOWLIST the dispatch loop below enforces.
     #
     # Derived from `tools` (what this turn actually SENT), never from the
@@ -2384,6 +2395,8 @@ def _run_turn_body(
     )
     if session.assurance_turn is not None:
         system_prompt += "\n" + session.assurance_turn.prompt()
+    if restrictions.view_only(viewer_snapshot):
+        system_prompt += "\n" + _VIEW_ONLY
 
     # A8 — at most one fallback-model downgrade after rate_limited retries
     # are exhausted, PER TURN (public cost/availability escape hatch).
@@ -3086,6 +3099,20 @@ def dispatch_tool_call(
         guided=guided,
     )
     return True
+
+
+def _role_snapshot(session: ChatSession):
+    """The turn's restriction snapshot, for choosing what to offer.
+
+    None when it cannot be read here (no acting user, a changed owner): the
+    tools stay as selected and dispatch, which captures again, decides.
+    """
+    from harness import restrictions
+
+    try:
+        return restrictions.capture(session)
+    except HTTPException:
+        return None
 
 
 def _tool_tier(session: ChatSession, tool_name: str) -> str:

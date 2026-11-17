@@ -97,12 +97,9 @@ def project_role(db: DBSession, user: User, project: Project) -> str | None:
     string ``"editor"`` grants edit: NULL or an unknown value reads view-only,
     so a damaged row fails closed (project-viewer-role 01, GK B R6).
     """
-    membership = _get_org_membership(db, user, project)
-    if membership is None:
+    if _get_org_membership(db, user, project) is None:
         return None
-    if membership.role == "admin":
-        return EDIT
-    if _user_created_in_lineage(db, user, project):
+    if role_is_fixed(db, user, project):
         return EDIT
     root_project = resolve_tree_root(db, project)
     row = db.scalar(
@@ -114,6 +111,18 @@ def project_role(db: DBSession, user: User, project: Project) -> str | None:
     if row is None:
         return None
     return EDIT if row.role == "editor" else VIEW
+
+
+def role_is_fixed(db: DBSession, user: User, project: Project) -> bool:
+    """True when `user` edits `project` whatever their membership row says.
+
+    Org admins and anyone who created a project in the lineage: the members
+    dialog shows their role as fixed, since `project_role` ignores the row.
+    """
+    membership = _get_org_membership(db, user, project)
+    if membership is None:
+        return False
+    return membership.role == "admin" or _user_created_in_lineage(db, user, project)
 
 
 def accessible_project_ids(

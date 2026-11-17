@@ -798,9 +798,12 @@ VARIANTS: list[dict] = [
              'update_component build_delivery export_network_nc',
              B + 'test_lc48c_d22_rebind_gates.py::test_a_write_after_the_active_project_switched_mid_turn_writes_nothing',
              B + 'test_lc48c_d22_rebind_gates.py::test_a_delivery_built_while_the_active_project_switched_is_refused'),
-    _unavailable('LC-D22.viewer_role', 'DROPPED by owner decision LC48C-ROLE-1: project ACL has only admin and member, no read-only role exists to refuse an edit, '
-                 'undo or restore; a read-only project viewer role is filed as a product idea (.scratch/project-viewer-role/issues/01-read-only-project-viewer-role.md)',
-                 'docs/agents/owner-decisions.md LC48C-ROLE-1'),
+    _covered('LC-D22.viewer_role', 'a project viewer (owner decision VIEWER-ROLE-1) asks the copilot for G1 marginal cost 99, undo and a restore of the owner\'s checkpoint S0: '
+             'each is a tool_error project_view_only with no confirmation card and no run, and tests/lc43_gates.py state is unchanged; a viewer is offered only read tools '
+             'on the Claude and the OpenAI-compatible wire, and the system prompt says the project is view only',
+             'update_component undo_last restore_project_snapshot',
+             B + 'test_viewer_role_chat.py::test_a_viewers_copilot_edit_undo_and_restore_are_refused_and_change_nothing',
+             B + 'test_viewer_role_chat.py::test_a_viewer_is_offered_only_read_tools_and_told_why'),
     _covered('LC-D23.provider_parity', 'one journey on the Claude wire only (LC32-OPEN-1), read from the request bodies: toolset results offers a strict subset without update_component; '
              'the unoffered call is refused tool_not_offered with G1 still 20 MW; toolset all restores the first offer; approved write gives G1 35 MW and a 20 -> 35 receipt, denied leaves 20 MW',
              'use_toolset update_component',
