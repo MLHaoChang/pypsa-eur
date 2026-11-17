@@ -67,8 +67,11 @@ GRID = Thevenin("skmin_xrmin", 100.0, 3.0, 1.0, 3.0)
 FAULT = (T >= 0.2) & (T < 0.35)
 
 
+V1_CHANNELS = tuple(c for c in CHANNELS if c != "connected")  # contract v1 (GC-12)
+
+
 def _case(case_id, kind, params, trgc="07"):
-    return Case(case_id, kind, trgc, GRID, 0.2, 1.5, tuple(CHANNELS), params)
+    return Case(case_id, kind, trgc, GRID, 0.2, 1.5, V1_CHANNELS, params)
 
 
 def _rise(y0, y1):
