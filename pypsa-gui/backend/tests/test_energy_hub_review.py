@@ -201,6 +201,10 @@ def test_review_then_apply_the_recommended_action_on_the_datacenter(
     sys.path.insert(0, str(BACKEND / "project_templates"))
     import eh_templates as TPL
     install_network(TPL.build_eh_datacenter())
+    # The template's own VOLL: the study start refuses none (template-e2e 06).
+    from services.pypsa_service import PyPSAService
+    PyPSAService.get_solver_state()["solver_config"].voll = \
+        TPL.solver_config("eh_datacenter")["voll"]
     meta = TPL.TEMPLATE_META["eh_datacenter"]
     stages = ["apply_pack", "ens_solve", "mc_certify", "assemble"]
     args = {"archetype": meta["recommended_archetype"], "stages": stages,
