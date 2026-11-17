@@ -185,7 +185,9 @@ def entries(
 ) -> tuple[Entry, ...]:
     """The table entries `op` carries, in table order."""
     if op not in OPS:
-        raise ValueError(f"unknown operation {op!r}")
+        raise ValueError(
+            f"unknown operation {op!r}"
+        )  # repr-ok: a programming error, never shown to a user
     return tuple(
         e
         for e in TABLE
@@ -229,12 +231,14 @@ MAX_UNPACKED_BYTES = int(
 
 
 class BundleRefused(ValueError):
-    """A bundle that may not be imported, in words a user can act on."""
+    """A bundle that may not be imported: `detail` is the 400's body, an
+    `error_kind` and a message a user can act on."""
 
-    def __init__(self, kind: str, message: str):
-        super().__init__(message)
-        self.kind = kind
-        self.message = message
+    def __init__(self, detail: dict):
+        super().__init__(detail["message"])
+        self.detail = detail
+        self.kind = detail["error_kind"]
+        self.message = detail["message"]
 
 
 def _folded(member: str) -> str:
@@ -267,27 +271,35 @@ def screen_members(
             or (len(parts[0]) >= 2 and parts[0][1] == ":")
         ):
             raise BundleRefused(
-                "bundle_unsafe_path",
-                f"The bundle holds '{name}', a path outside the project. Nothing was imported.",
+                {
+                    "error_kind": "bundle_unsafe_path",
+                    "message": f"The bundle holds '{name}', a path outside the project. Nothing was imported.",
+                }
             )
         if _stat.S_ISLNK(info.external_attr >> 16):
             raise BundleRefused(
-                "bundle_unsafe_path",
-                f"The bundle holds '{name}' as a link. Nothing was imported.",
+                {
+                    "error_kind": "bundle_unsafe_path",
+                    "message": f"The bundle holds '{name}' as a link. Nothing was imported.",
+                }
             )
         folded = _folded(name)
         if folded in seen:
             raise BundleRefused(
-                "bundle_name_clash",
-                f"The bundle holds both '{seen[folded]}' and '{name}', which are one file "
-                "on Windows and macOS. Nothing was imported.",
+                {
+                    "error_kind": "bundle_name_clash",
+                    "message": f"The bundle holds both '{seen[folded]}' and '{name}', which are one file "
+                    "on Windows and macOS. Nothing was imported.",
+                }
             )
         seen[folded] = name
         total += info.file_size
         if total > cap:
             raise BundleRefused(
-                "bundle_too_large",
-                f"The bundle unpacks to more than {cap // 1024**2} MB. Nothing was imported.",
+                {
+                    "error_kind": "bundle_too_large",
+                    "message": f"The bundle unpacks to more than {cap // 1024**2} MB. Nothing was imported.",
+                }
             )
         (allowed if allows_member(name) else ignored).append(name)
     return allowed, ignored

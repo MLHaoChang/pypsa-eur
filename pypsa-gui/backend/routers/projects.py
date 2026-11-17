@@ -1444,7 +1444,7 @@ async def import_bundle(
     try:
         allowed, ignored = PC.screen_members(zf)
     except PC.BundleRefused as exc:
-        raise HTTPException(400, {"error_kind": exc.kind, "message": exc.message}) from exc
+        raise HTTPException(400, exc.detail) from exc
     members = set(allowed)
     if "network.nc" not in members:
         raise HTTPException(400, "Bundle is missing network.nc")
