@@ -6,7 +6,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from db.models import ChatRestriction
-from services import project_registry
+from services import project_acl, project_registry, project_write_gate
 from services.pypsa_service import PyPSAService
 
 MODES = frozenset({'standard', 'confirm_changes', 'read_only'})
@@ -81,10 +81,23 @@ def capture(session):
         if session.owner_user_id is not None and session.owner_user_id != str(user.id):
             raise HTTPException(403, 'Chat ownership changed.')
         project = current_project(db, user, project_id)
-        return {**read(db, user.id, project.id), 'owner_id': str(user.id), 'project_id': str(project.id)}
+        # The caller's project role, read fresh at every admission and again at
+        # execution (require_current), so an editor demoted to viewer mid-turn
+        # is refused at the next write (project-viewer-role 01, GK B R3).
+        role = project_acl.project_role(db, user, project)
+        return {**read(db, user.id, project.id), 'owner_id': str(user.id), 'project_id': str(project.id),
+                'project_role': role}
+
+
+def _require_role(snapshot, tier):
+    # A viewer's write is refused whatever personal rule is saved: a saved
+    # 'standard' rule never loosens the role (project-viewer-role 01).
+    if snapshot is not None and snapshot.get('project_role') != project_acl.EDIT and tier != 'read':
+        raise project_write_gate.refusal()
 
 
 def require_allowed(snapshot, tier):
+    _require_role(snapshot, tier)
     if snapshot is not None and snapshot['mode'] == 'read_only' and tier != 'read':
         raise HTTPException(403, {'error_kind': 'user_restriction',
                                   'message': 'Your saved project rule blocks non-read tools. Change it in Access and approvals to request this action.'})
@@ -92,6 +105,12 @@ def require_allowed(snapshot, tier):
 
 def require_current(snapshot, session):
     """A later rule (even a change-and-restore) needs fresh tool admission."""
-    if capture(session) != snapshot:
+    fresh = capture(session)
+    if fresh != snapshot:
+        # Edit rights lost since admission refuse with the role's own kind,
+        # not a generic revocation (project-viewer-role 01, GK B R3). An
+        # unchanged role is never re-judged here: a viewer's read was admitted.
+        if (snapshot or {}).get('project_role') == project_acl.EDIT:
+            _require_role(fresh, 'write')
         raise HTTPException(409, {'error_kind': 'confirmation_revoked',
                                   'message': 'Your project restrictions changed. Request and review the action again.'})

@@ -122,3 +122,13 @@ GK B (session_01G7qCunbvxN6JVyrzVTsisA) reviews this package (the brief names it
 - R8. A mutant per guard: gate view check, each resolver, `require_allowed` role branch (with a loosening saved rule), members role authority, save-on-switch skip.
 - R9. At the trial merge: test_route_chat_disposition, test_project_route_acl_policy, test_write_surface_lock_policy, test_golden_coverage, tool_error_kind_manifest, ChatPanel.manifest, assistant_inventory / route_parity / control_matrix --check.
 - R10. Choice made: **role-setting stays out of PR 1.** Members PUT is unchanged in PR 1 (roles are set only by tests), so no viewer can exist before PR 2 ships the UI, the generic `project_view_only` message and the role picker. R5 lands in PR 2.
+
+### 2026-11-17: PR 1 findings (R1, R3, R4)
+
+- R1. Every write row declares its target in `services/_project_write_rules.py`. Ids under `/api/projects/{name}/…` (snapshot, report, comment, chart, study, upload, site, proposal) are looked up inside the path project's directory or keyed by its registry key (route audit), so `path:name` is that id's owner. `{name}` is checked both by id and by exact name. Job-keyed rows are `handler` and resolve the job's project in `routers/solve_queue.py`. While another user holds the edit lock, the foreign-lock middleware runs first, and a viewer then gets that 409 `project_locked` instead.
+- R3. Re-read at use: chat (`restrictions.capture` per tool call; `require_current` at execution raises `project_view_only` when edit rights were lost) and the solve queue worker (`_run_job`, covering solve, gridspine, campus and profile-gen jobs). Not re-read: the in-process runners (studies, tornado, supply architectures, adequacy loops, business and investment case, report jobs, campus island apply). Each starts only through a gated route but records no requester. Assistant tasks (`_may_write`, in `assistant_tasks.py`, which open PRs #1575/#1590 hold) re-check the lock and access but not the role. The backend has no scheduled triggers or cron.
+- R4. There are no server WebSocket routes; voice and chat are HTTP/SSE through the same gate and tool admission. Three GETs write:
+  - `GET /api/gridspine/{name}/bundles/{hour}` rewrites a derived bundle zip.
+  - `GET /api/projects/{name}` (load) saves an evicted context's in-memory edits, which only editors could have made, and the session's active-project row.
+  - `GET /api/chat/history` repairs the caller's own event log in app data.
+  None writes project input data on a viewer's behalf. Tool tier source: the `Safety:` marker (`catalogue.safety_tier_for`). Undo, restore and snapshot writes are `destructive`/`write`. A test fails if a read-tier tool is bound to a route the viewer is refused.

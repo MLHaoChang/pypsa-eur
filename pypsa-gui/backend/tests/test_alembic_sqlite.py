@@ -259,7 +259,7 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     from sqlalchemy.orm import sessionmaker
 
     import local_bootstrap
-    from db.models import LibraryItem, OrgMembership, Organization, Project
+    from db.models import LibraryItem, OrgMembership, Organization, Project, ProjectMembership
     from db.models import Session as SessionRow
     from db.models import SolveJobRow, User
     from db.session import enable_sqlite_foreign_keys
@@ -279,13 +279,20 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     # earlier row, which is an ordinary solve.
     # 0012 adds `assistant_job_holds` (assistant-assurance issue 16): a new
     # table, no backfill.
-    NEW_TABLE_NAME = "assistant_job_holds"
-    NEW_COLUMN = None      # (table, column) or None
+    # 0016 adds `project_memberships.role` (project-viewer-role 01): existing
+    # rows read 'editor' through the server default.
+    NEW_TABLE_NAME = None
+    NEW_COLUMN = ("project_memberships", "role")      # (table, column) or None
+    # The value every pre-existing row reads after the upgrade: None for a
+    # column with no backfill (0006, 0011), "editor" for 0016 (its server
+    # default keeps every existing member an editor).
+    NEW_COLUMN_BACKFILL = "editor"
     # `solve_jobs` joined this list with 0007: the column under test is on it,
     # and a QUEUED job row surviving the migration is the thing that matters —
     # a restart restores those rows into the in-memory queue.
     PRE_EXISTING_TABLES = [
         "organizations", "users", "org_memberships", "projects", "sessions", "solve_jobs", "library_items",
+        "project_memberships",
     ]
 
     def _dump_rows(engine, table_names):
@@ -427,13 +434,17 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
             version=1, hash='a' * 64, path='existing/curve.json', meta_json='{"unit":"EUR/MWh"}',
             created_by=user_id, created_at=now,
         )])
+        _seed(conn, [ProjectMembership(
+            id=uuid.uuid4(), project_id=project1_id, user_id=user_id,
+            assigned_by=user_id, assigned_at=now,
+        )])
 
     with engine.connect() as conn:
         version_before = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
     assert version_before == predecessor
 
     before = _dump_rows(engine, PRE_EXISTING_TABLES)
-    assert [len(before[t]) for t in PRE_EXISTING_TABLES] == [1, 1, 1, 2, 3, 1, 1], (
+    assert [len(before[t]) for t in PRE_EXISTING_TABLES] == [1, 1, 1, 2, 3, 1, 1, 1], (
         "seeding produced the wrong row counts — the byte-identical comparison below "
         "would be vacuous against an empty or partially-seeded table"
     )
@@ -482,8 +493,8 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
         table, column = NEW_COLUMN
         added = {k for row in after[table] for k in row} - {k for row in before[table] for k in row}
         assert added == {column}, f"the migration added unexpected column(s) to {table}: {sorted(added)}"
-        assert all(row[column] is None for row in after[table]), (
-            f"{table}.{column} was backfilled on pre-existing rows; 0006 backfills nothing"
+        assert after[table] and all(row[column] == NEW_COLUMN_BACKFILL for row in after[table]), (
+            f"{table}.{column} on pre-existing rows is not {NEW_COLUMN_BACKFILL!r}"
         )
         after = {
             name: [{k: v for k, v in row.items() if k != column} for row in rows]

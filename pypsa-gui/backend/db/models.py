@@ -103,6 +103,10 @@ class ProjectMembership(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     assigned_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # 'editor' or 'viewer' (project-viewer-role 01). Read only through
+    # `project_acl.project_role`, which treats anything else, NULL included, as
+    # view-only: an unreadable role must never grant edit rights.
+    role: Mapped[str | None] = mapped_column(String(16), nullable=True, server_default="editor")
 
 
 class ChatRestriction(Base):

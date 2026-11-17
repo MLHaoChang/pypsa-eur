@@ -267,6 +267,34 @@ class SolveConfigConflict(Exception):
         self.existing = existing
 
 
+def _enqueuer_views_project(job: "SolveJob") -> bool:
+    """True when the person who queued `job` now only views its project.
+
+    Read fresh from the database at the moment the job runs. A job with no
+    recorded requester or project (local mode, unkeyed jobs) is not judged here.
+    """
+    key, requester = job.project_key, job.enqueued_by_user_id
+    if not key or requester is None or ":" not in key:
+        return False
+    try:
+        project_id = uuid.UUID(key.split(":", 1)[1])
+        user_id = uuid.UUID(str(requester))
+    except ValueError:
+        return False
+    from db import session as db_session
+    from db.models import Project, User
+    from services import project_acl
+
+    db = db_session.SessionLocal()
+    try:
+        user, project = db.get(User, user_id), db.get(Project, project_id)
+        if user is None or project is None:
+            return False
+        return project_acl.project_role(db, user, project) == project_acl.VIEW
+    finally:
+        db.close()
+
+
 class SolveQueue:
     """FIFO dispatcher: enqueue saved projects, solve them one at a time."""
 
@@ -1032,6 +1060,14 @@ class SolveQueue:
         """Dispatch on the job's kind. Everything else about a job — claiming
         it, the log queue, the stop event, the persisted status — is the same
         whichever runner takes it."""
+        if _enqueuer_views_project(job):
+            # The role is read again here, at execution: a person made a
+            # viewer after queueing does not get the solve saved
+            # (project-viewer-role 01, GK B R3).
+            from services import project_write_gate
+
+            self._finish(job, "failed", error=f"{project_write_gate.KIND}: {project_write_gate.MESSAGE}")
+            return
         if job.kind == KIND_GRIDSPINE:
             self._run_gridspine_job(job)
         elif job.kind == KIND_CAMPUS:

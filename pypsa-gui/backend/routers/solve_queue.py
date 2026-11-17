@@ -38,6 +38,7 @@ import local_mode
 from db.models import User
 from db.session import get_db
 from deps import optional_user
+from services import project_acl, project_write_gate
 from services.pypsa_service import PyPSAService
 from services.solve_queue import _TERMINAL, _row_epoch, solve_queue
 
@@ -104,6 +105,8 @@ def enqueue_solve(
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, req.project_id)
+    # A viewer may not solve (and so save) the project (project-viewer-role 01).
+    project_write_gate.require_writable(db, user, project)
     # TWO INDEPENDENT PRE-CONDITIONS, both 409, checked in this order.
     #
     # The lock check goes first because its refusal is the more actionable one:
@@ -337,6 +340,21 @@ def _may_abort(db: DBSession, user: User, job: dict) -> bool:
     if f"{project.org_id}:" != prefix:
         return False  # the key's org half lied about the row's real owner
     return project_acl.can_access_project(db, user, project)
+
+
+def _job_view_only(db: DBSession, user: User, job: dict) -> bool:
+    """True when `job`'s project is one the caller only views."""
+    from db.models import Project
+    from services import project_acl
+
+    project_id = _project_uuid(job, _org_prefix(db, user))
+    project = db.get(Project, project_id) if project_id is not None else None
+    return project is not None and project_acl.project_role(db, user, project) == project_acl.VIEW
+
+
+def _require_job_writable(db: DBSession, user: User, job: dict) -> None:
+    if _job_view_only(db, user, job):
+        raise project_write_gate.refusal()
 
 
 def _parse_job_id(job_id: str) -> uuid.UUID | None:
@@ -845,6 +863,8 @@ def abort_job(
         return persisted
     if not _may_abort(db, user, job):
         raise not_found
+    # Stopping a live solve undoes an editor's work: a viewer may not.
+    _require_job_writable(db, user, job)
     res = solve_queue.abort(parsed)
     if res is None:
         # Cleared by a concurrent clear_finished between the two lookups.
@@ -953,6 +973,11 @@ def requeue_job(
         project = db.get(Project, project_uuid)
         if project is None:
             raise not_found
+        # Requeue solves and saves this project: the caller must be able to
+        # see it (404, like enqueue's resolve_project) and edit it.
+        if project_acl.project_role(db, user, project) is None:
+            raise not_found
+        project_write_gate.require_writable(db, user, project)
         project_name = project.name
         # HOLDER CHECK — the precondition for this route's foreign-lock
         # exemption (`main._FOREIGN_LOCK_GATE_EXEMPT_PATTERNS`), not an
@@ -1200,6 +1225,8 @@ def cancel_queued(
             continue
         if not _may_abort(db, user, job):
             continue
+        if _job_view_only(db, user, job):
+            continue  # a viewer's sweep leaves an editor's queued work alone
         parsed = _parse_job_id(job["id"])
         if parsed is None:
             continue

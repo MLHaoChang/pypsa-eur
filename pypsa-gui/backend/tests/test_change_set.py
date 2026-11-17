@@ -1126,7 +1126,7 @@ def test_a_denied_set_whose_row_also_moved_is_recorded_as_the_users_deny(
 
     looks = iter(range(1000))
     monkeypatch.setattr(
-        restrictions, "capture", lambda s: {"mode": "standard", "rev": next(looks)}
+        restrictions, "capture", lambda s: {"mode": "standard", "project_role": "edit", "rev": next(looks)}
     )
     decided = []
     real = approvals.decided
@@ -1354,7 +1354,7 @@ def test_a_restriction_changed_after_the_card_revokes_at_the_member_gate(
     # at a member's admission is already out of date at its gate.
     looks = iter(range(1000))
     monkeypatch.setattr(
-        restrictions, "capture", lambda s: {"mode": "standard", "rev": next(looks)}
+        restrictions, "capture", lambda s: {"mode": "standard", "project_role": "edit", "rev": next(looks)}
     )
     decided = []
     real = approvals.decided

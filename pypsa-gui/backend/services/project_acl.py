@@ -83,6 +83,39 @@ def can_access_project(db: DBSession, user: User, project: Project) -> bool:
     return _has_root_membership(db, user, root_project)
 
 
+EDIT = "edit"
+VIEW = "view"
+
+
+def project_role(db: DBSession, user: User, project: Project) -> str | None:
+    """The caller's access to `project`: ``"edit"``, ``"view"`` or ``None``.
+
+    ``None`` means no access at all (the caller answers 404, as
+    ``ensure_project_access`` does). Org admins and anyone who created a
+    project in the lineage always edit, whatever their membership row says.
+    Otherwise the tree-root membership's ``role`` decides, and only the exact
+    string ``"editor"`` grants edit: NULL or an unknown value reads view-only,
+    so a damaged row fails closed (project-viewer-role 01, GK B R6).
+    """
+    membership = _get_org_membership(db, user, project)
+    if membership is None:
+        return None
+    if membership.role == "admin":
+        return EDIT
+    if _user_created_in_lineage(db, user, project):
+        return EDIT
+    root_project = resolve_tree_root(db, project)
+    row = db.scalar(
+        select(ProjectMembership).where(
+            ProjectMembership.project_id == root_project.id,
+            ProjectMembership.user_id == user.id,
+        )
+    )
+    if row is None:
+        return None
+    return EDIT if row.role == "editor" else VIEW
+
+
 def accessible_project_ids(
     db: DBSession, user: User, project_ids: Iterable[uuid.UUID]
 ) -> set[uuid.UUID]:
