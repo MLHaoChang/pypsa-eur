@@ -885,60 +885,89 @@ def _codes(result, section: str) -> list[str]:
     return list(src.get(section) or [])
 
 
-def _section_reason(result, section: str, outputs: dict) -> str:
-    """`<section>_not_established: <codes>`, the codes naming the missing inputs. A
-    code that is another section's `<s>_not_established` (tax waits on debt) is
-    followed by that section's own codes, one level deep."""
-    if section == "receivable_days":
-        return "input_missing:receivable_days"
-    ok = (
-        result.op.established(section)
-        if section in _OP_SECTIONS
-        else result.sections.get(section) == "ok"
-    )
-    if ok:
-        return "not_established"
+def _established(result, section: str) -> bool:
+    if section in _OP_SECTIONS:
+        return result.op.established(section)
+    return result.sections.get(section) == "ok"
+
+
+def _leaf_codes(result, section: str, seen: frozenset = frozenset()):
+    """(section, code) for each input `section` lacks, in the engine's order. A code
+    that is another section's `<s>_not_established` (the tax waits on the debt, the
+    debt on the capex) is replaced by that section's own codes, recursively, or kept
+    when it has none. The engine's operating section also fails on the terminal."""
+    seen = seen | {section}
     codes = _codes(result, section)
     if "book_value_needs_tax_basis" in codes:
         codes.append("tax_not_established")
-    deep = []
+    out: list[tuple[str, str]] = []
     for c in codes:
-        deep.append(c)
         inner = c.removesuffix("_not_established")
-        if inner != c and inner != section:
-            deep += _codes(result, inner)
-    named = []
-    for c in deep:
-        named.append(c)
+        deeper: list[tuple[str, str]] = []
+        if inner != c and inner not in seen:
+            for sec in (inner, "terminal") if inner == "operating" else (inner,):
+                deeper += _leaf_codes(result, sec, seen)
+        out += deeper or [(section, c)]
+    return out
+
+
+def _section_items(result, section: str, outputs: dict) -> list[tuple[str, str]]:
+    """The inputs `section` lacks (`_leaf_codes`); none when it is established. A line
+    not established is followed by the linked output it waits on."""
+    if section == "inputs":
+        return [("inputs", "input_missing:receivable_days")]
+    if _established(result, section):
+        return []
+    items = _leaf_codes(result, section) or [(section, f"{section}_not_established")]
+    out: list[tuple[str, str]] = []
+    for sec, c in items:
+        out.append((sec, c))
         line = c.removeprefix("line_not_established:")
-        out = outputs.get(line) if line != c else None
-        if isinstance(out, NotEvaluated):
-            named.append(f"linked_output_not_evaluated:{out.output_id}:{out.reason}")
-    return f"{section}_not_established" + (f": {', '.join(named)}" if named else "")
+        got = outputs.get(line) if line != c else None
+        if isinstance(got, NotEvaluated):
+            out.append(
+                (sec, f"linked_output_not_evaluated:{got.output_id}:{got.reason}")
+            )
+    return out
 
 
-def row_reasons(result, p: PnL, outputs: dict | None = None) -> dict[str, str]:
-    """Why each P&L row that reads None is not established, naming the missing input
-    for this case (BC 17): the engine's own reason codes for the first input the row
-    lacks, never a recomputation. A display key: it moves no digest. A row that
-    overflowed reads `not_finite` (it is in `p.not_finite`), and so does a row whose
-    input did. `outputs` maps a linked line to its output, so a line that is not
-    established names the linked output it waits on."""
+def row_reasons(
+    result, p: PnL, outputs: dict | None = None, *, receivable_days=None
+) -> dict[str, list[dict]]:
+    """Why each P&L row that reads None is not established (BC 17): every input the
+    row lacks for this case, as `{"section", "code"}` items in the engine's own reason
+    codes, never a recomputation. The items are the union over the row's missing input
+    rows (`_ROW_INPUTS`, depth first in table order) and its own section when that is
+    not established, deduplicated in first-seen order. An input row that overflowed
+    reads `{"section": None, "code": "not_finite:<row>"}`; a row that overflowed itself
+    is in `p.not_finite` and gets no entry. Rows are all-or-nothing (an array or None);
+    a ratio's None year is not a row reason. A display key: it moves no digest.
+    `outputs` maps a linked line to its output, so a line names its linked output."""
     outputs = outputs or {}
     nf = set(p.not_finite)
 
-    def why(row: str) -> str:
+    def items(row: str) -> list[tuple[str | None, str]]:
         if row in nf:
-            return f"not_finite:{row}"
+            return [(None, f"not_finite:{row}")]
         deps, own = _ROW_INPUTS.get(row, ((), None))
+        got: list[tuple[str | None, str]] = []
         for d in deps:
             if p.rows.get(d) is None:
-                return why(d)
-        return "not_established" if own is None else _section_reason(result, own, outputs)
+                got += items(d)
+        if own == "receivable_days":
+            if receivable_days is None:
+                got += _section_items(result, "inputs", outputs)
+        elif own is not None:
+            got += _section_items(result, own, outputs)
+        return got
 
-    return {
-        k: why(k) for k, v in p.rows.items() if v is None and k not in nf
-    }
+    out: dict[str, list[dict]] = {}
+    for k, v in p.rows.items():
+        if v is not None or k in nf:
+            continue
+        seen = list(dict.fromkeys(items(k))) or [(None, "not_established")]
+        out[k] = [{"section": sec, "code": c} for sec, c in seen]
+    return out
 
 
 # ── KPIs (BC2, BC8, C5) ──────────────────────────────────────────────────────

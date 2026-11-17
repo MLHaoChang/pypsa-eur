@@ -106,3 +106,39 @@ def test_line_and_ledger_stream_names_are_disjoint():
         assert RN._STREAM_SOURCE.get(s, "energy_model") == "energy_model"
     for s in line_streams:
         assert RN._STREAM_SOURCE[s].startswith("line:")
+
+
+def test_bc17_row_reason_is_a_display_key_that_moves_no_digest_or_staleness(
+    client, install_network, monkeypatch
+):
+    """GK B BC 17 C4: two reports that differ only in `row_reason` agree on every other
+    field, the digests among them, and read the same staleness."""
+    seen = {}
+    real = RN.report_body
+
+    def spy(**kw):
+        seen["kw"] = kw
+        return real(**kw)
+
+    monkeypatch.setattr(RN, "report_body", spy)
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    assert client.post(BC_URL).status_code == 200
+    _bc_poll(client)
+    kw = seen["kw"]
+    a = real(**kw)
+    monkeypatch.setattr(
+        BCM, "row_reasons",
+        lambda *_a, **_k: {"revenue": [{"section": "operating", "code": "x"}]},
+    )
+    b = real(**kw)
+    assert a["pnl"]["row_reason"] != b["pnl"]["row_reason"]
+    for body in (a, b):
+        body["pnl"].pop("row_reason")
+        body.pop("created_at")
+    assert a == b
+    for cur in ((a["ic_assumptions_hash"], None), (None, "gone")):
+        assert RN.staleness(a, inputs_raw=kw["raw"], ic_current=cur) == RN.staleness(
+            b, inputs_raw=kw["raw"], ic_current=cur
+        )
+    assert RN.staleness(a, inputs_raw=kw["raw"], ic_current=cur)["changed"] == []
