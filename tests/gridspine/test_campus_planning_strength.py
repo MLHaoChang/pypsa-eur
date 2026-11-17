@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from gridspine.drivers import campus_study
 from gridspine.drivers.campus_study import (
     LF_PCC_CSV,
     LV_C_NOTE,
@@ -34,10 +35,9 @@ from gridspine.drivers.campus_study import (
     size_campus,
     strength_campus,
 )
-from gridspine.drivers import campus_study
 from gridspine.ingest.campus import build_campus
-from gridspine.schema.contracts import ContractError
 from gridspine.ingest.contingency_list import read_contingency_list
+from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_sc import campus_fault_levels
 from tests.gridspine.test_campus_hourly import solved_hub
 
