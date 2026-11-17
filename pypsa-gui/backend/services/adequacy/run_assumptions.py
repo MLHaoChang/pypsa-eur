@@ -97,11 +97,9 @@ def _goal_rows(cfg: Any, template: dict | None) -> list[dict]:
 
 
 def _carrier_label(n, carrier: str) -> str:
-    carriers = getattr(n, "carriers", None)
-    if carriers is not None and carrier in carriers.index and "nice_name" in carriers:
-        nice = str(carriers.at[carrier, "nice_name"] or "").strip()
-        if nice:
-            return nice
+    nice = n.carriers["nice_name"].get(carrier)
+    if isinstance(nice, str) and nice.strip():
+        return nice.strip()
     return _plain(carrier) if carrier else "Unnamed carrier"
 
 
@@ -114,9 +112,7 @@ def _outage_rows(n) -> list[dict]:
 
     out: list[dict] = []
     for attr, component, noun in _COMPONENTS:
-        df = getattr(n, attr, None)
-        if df is None or df.empty or "carrier" not in df.columns:
-            continue
+        df = getattr(n, attr)
         params = resolve_outage_params(n, attr)
         carriers = df["carrier"].astype(str).str.strip().str.lower()
         groups: dict[tuple[str, str], list[str]] = {}
@@ -175,12 +171,8 @@ def _efficiency_rows(n) -> list[dict]:
     from services.adequacy.eh_stages import LINK_EFFICIENCY_DEFAULT, link_attr_series
     from services.adequacy.slack import is_slack_name
 
-    links = getattr(n, "links", None)
-    if links is None or links.empty:
-        return []
-    bus_carrier = (
-        n.buses["carrier"].astype(str) if "carrier" in n.buses.columns else None
-    )
+    links = n.links
+    bus_carrier = n.buses["carrier"].astype(str)
     out: list[dict] = []
     for name in links.index:
         role = str(links.at[name, "eh_role"]) if "eh_role" in links.columns else ""
@@ -190,8 +182,7 @@ def _efficiency_rows(n) -> list[dict]:
         if fell_back:
             reason = "no efficiency is set, so the study reads it as lossless"
         elif (
-            bus_carrier is not None
-            and name not in n.links_t.efficiency.columns
+            name not in n.links_t.efficiency.columns
             and bus_carrier.get(links.at[name, "bus0"])
             != bus_carrier.get(links.at[name, "bus1"])
             and float(links.at[name, "efficiency"]) == LINK_EFFICIENCY_DEFAULT

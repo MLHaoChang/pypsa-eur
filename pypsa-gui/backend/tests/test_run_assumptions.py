@@ -510,3 +510,18 @@ def test_a_positive_voll_passes_the_voll_check():
     assert voll_is_set(SimpleNamespace(voll=0.01))
     assert voll_is_set(SimpleNamespace(voll=5000))
     assert voll_is_set({"voll": 5000}) and not voll_is_set({})
+
+
+def test_a_carrier_row_uses_the_carriers_own_name():
+    n = _net()
+    n.add("Carrier", "battery", nice_name="Lithium-ion battery")
+    row = _row(run_assumptions(n, {}, None), "outage_rate:StorageUnit:battery")
+    assert "lithium-ion battery" in row["label"]
+    n.carriers.loc["battery", "nice_name"] = "  "
+    row = _row(run_assumptions(n, {}, None), "outage_rate:StorageUnit:battery")
+    assert row["label"].startswith("Outage rate of battery storage units")
+
+
+def test_an_empty_network_assumes_only_the_goal():
+    rows = run_assumptions(pypsa.Network(), {}, None)
+    assert _keys(rows) == {"mc_draws", "site_archetype"}
