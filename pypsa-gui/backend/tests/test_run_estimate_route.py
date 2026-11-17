@@ -143,12 +143,20 @@ def test_a_job_the_caller_cannot_see_is_indistinguishable_from_none(
     try:
         with TestClient(main.app) as c:
             member = attach_session(c, session_local, uid)
-            hidden = member.get(f"/api/simulation/queue/{theirs['id']}/estimate")
+            q = "/api/simulation/queue"
+            hidden = member.get(f"{q}/{theirs['id']}/estimate")
             bogus_id = str(uuid.uuid4())
-            missing = member.get(f"/api/simulation/queue/{bogus_id}/estimate")
+            missing = member.get(f"{q}/{bogus_id}/estimate")
+            # The same job and the same bogus id through /log_history: the
+            # estimate route must answer exactly what that route answers.
+            hidden_log = member.get(f"{q}/{theirs['id']}/log_history")
+            missing_log = member.get(f"{q}/{bogus_id}/log_history")
     finally:
         _drop_user(session_local, uid)
     assert hidden.status_code == missing.status_code == 404
+    assert hidden_log.status_code == missing_log.status_code == 404
+    assert hidden.json() == hidden_log.json()
+    assert missing.json() == missing_log.json()
     assert hidden.json()["detail"].replace(theirs["id"], "X") == missing.json()[
         "detail"
     ].replace(bogus_id, "X")
@@ -156,7 +164,25 @@ def test_a_job_the_caller_cannot_see_is_indistinguishable_from_none(
 
 def test_a_malformed_job_id_is_the_same_404(client):
     r = client.get("/api/simulation/queue/not-a-uuid/estimate")
-    assert r.status_code == 404
+    log = client.get("/api/simulation/queue/not-a-uuid/log_history")
+    assert r.status_code == log.status_code == 404
+    assert r.json() == log.json()
+    assert "not-a-uuid" in r.json()["detail"]
+
+
+def test_a_job_without_a_stored_row_is_unknown(
+    client, install_network, tmp_projects_dir, parked, monkeypatch
+):
+    # GK B 63, R1: with no stored row there is no snapshot to compare on. The
+    # project's snapshot-less runs (config=None) must not count as a match.
+    job = _enqueue(client, install_network, "EstimateNoRow")
+    key = solve_job_store.load_job(uuid.UUID(job["id"]))["project_key"]
+    for i, s in enumerate([100, 200]):
+        _persist(key, "solve", seconds=s, config=None, finished=time.time() - 9 + i)
+    monkeypatch.setattr(solve_job_store, "load_job", lambda _id: None)
+    r = client.get(f"/api/simulation/queue/{job['id']}/estimate")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"kind": "solve", **run_estimate.unknown()}
 
 
 def test_a_job_of_an_unknown_kind_is_unknown_not_an_error(

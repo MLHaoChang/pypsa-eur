@@ -467,7 +467,12 @@ def job_estimate(
     if kind not in KINDS or not project_key:
         return {"kind": kind, **run_estimate.unknown()}
     row = solve_job_store.load_job(_parse_job_id(job_id))
-    return run_estimate.for_job(job_id, project_key, kind, (row or {}).get("solver_config"))
+    if row is None:
+        # No stored row means no settings snapshot to compare on. Reading that
+        # as "no snapshot" would match the project's snapshot-less runs, which
+        # is a different mode, so the estimate is unknown (GK B 63, R1).
+        return {"kind": kind, **run_estimate.unknown()}
+    return run_estimate.for_job(job_id, project_key, kind, row.get("solver_config"))
 
 
 @router.get("/{job_id}/log_stream")
