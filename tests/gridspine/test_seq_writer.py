@@ -12,7 +12,12 @@ import copy
 import pytest
 
 from gridspine.handoff.raw_writer import SBASE_MVA, write_raw
-from gridspine.handoff.seq_writer import NOT_WRITTEN, OPEN_PU, connection_code, write_seq
+from gridspine.handoff.seq_writer import (
+    NOT_WRITTEN,
+    OPEN_PU,
+    connection_code,
+    write_seq,
+)
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from gridspine.static.island_sc_seq import sequence_net
@@ -350,7 +355,9 @@ def test_no_earthing_transformer_no_header_note(tmp_path):
 
 def test_assumed_values_are_listed(tmp_path):
     s = _spec()
-    s["campus"]["units"]["GEN1"]["island"] = genset()  # neutral_earthing as genset() gives
+    s["campus"]["units"]["GEN1"]["island"] = (
+        genset()
+    )  # neutral_earthing as genset() gives
     _, assumed = _write(build_campus(s), tmp_path)
     text = "\n".join(assumed)
     assert "seq: grid GRID: no x0x_max; X0 = X1" in text
@@ -363,8 +370,10 @@ def test_assumed_values_are_listed(tmp_path):
 
 
 def test_line_zero_sequence_equals_the_island_draft(tmp_path):
-    """The drafted R0 / X0 are island_sc_seq's own (max case: no temperature
-    factor), taken from its sequence network, not retyped."""
+    """
+    The drafted R0 / X0 are island_sc_seq's own (max case: no temperature
+    factor), taken from its sequence network, not retyped.
+    """
     c = build_campus(_spec())
     sn = sequence_net(c, {}, island=False, case="max")
     br = next(b for b in sn.branches if b.name == "CB1")
@@ -387,4 +396,6 @@ def test_branch_and_transformer_ids_match_the_raw(tmp_path, version):
     assert ids(recs["ZERO SEQ. NON-TRANSFORMER BRANCH"]) == ids(raw["BRANCH"])
     seq_tr = [(r[0], r[1], r[3]) for r in recs["ZERO SEQ. TRANSFORMER"]]
     assert seq_tr == [(t[0][0], t[0][1], t[0][3].strip()) for t in raw["TRANSFORMER"]]
-    assert all(t[0][2] == "0" for t in raw["TRANSFORMER"])  # two-winding, as K = 0 in the .seq
+    assert all(
+        t[0][2] == "0" for t in raw["TRANSFORMER"]
+    )  # two-winding, as K = 0 in the .seq
