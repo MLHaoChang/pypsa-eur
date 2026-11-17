@@ -2,7 +2,7 @@
 
 Current coordinator session: `session_01G7qCuk1qJJdGMWYcvasF5S`
 
-Engine gatekeeper A (30; gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCujnY77uA6znnUwXz9M`
+Engine gatekeeper A (31; gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCunWgCoUguGVtSasU5r`
 
 Engine gatekeeper B (66; harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCujsT2Qwb6DXqTzvsM5`
 
