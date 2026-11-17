@@ -300,7 +300,8 @@ def _ports(df, name) -> tuple[str, ...]:
     return tuple(
         str(df.at[name, col])
         for col in df.columns
-        if col.startswith("bus") and col[3:].isdigit()
+        if col.startswith("bus")
+        and col[3:].isdigit()
         and str(df.at[name, col]) not in ("", "nan")
     )
 
@@ -319,7 +320,9 @@ def _never_available(n, table, name) -> bool:
     try:
         hourly = n.get_switchable_as_dense(comp, "p_max_pu")[name]
         values = pd.to_numeric(hourly, errors="coerce")
-        return len(values) > 0 and bool((values == 0.0).all())  # a NaN hour is not 0: available
+        return len(values) > 0 and bool(
+            (values == 0.0).all()
+        )  # a NaN hour is not 0: available
     except Exception:  # noqa: BLE001 - unreadable availability is no evidence of none (GK A C4)
         return False
 
@@ -336,10 +339,17 @@ def _idle_supplies(n, island) -> list[str]:
         df = getattr(n, table)
         slack = slack_generator_mask(df) if table == "generators" else None
         for name in df.index:
-            if (slack is not None and bool(slack.at[name])) or is_slack_name(name) or name in named:
+            if (
+                (slack is not None and bool(slack.at[name]))
+                or is_slack_name(name)
+                or name in named
+            ):
                 continue
-            if (str(df.at[name, "bus"]) in unit_buses and _can_deliver(df, name, nom)
-                    and _never_available(n, table, name)):
+            if (
+                str(df.at[name, "bus"]) in unit_buses
+                and _can_deliver(df, name, nom)
+                and _never_available(n, table, name)
+            ):
                 out.append(str(name))
     return sorted(out)
 
@@ -551,7 +561,13 @@ def tie_state(n, island) -> dict:
     ties = _ties(n, own)
     idle = _idle_warning(n, island)
     if not ties:
-        return {"state": "no_tie", "ties": [], "carrying": [], **_unmarked_warning(n, own), **idle}
+        return {
+            "state": "no_tie",
+            "ties": [],
+            "carrying": [],
+            **_unmarked_warning(n, own),
+            **idle,
+        }
     carrying = [name for comp, name in ties if _carries(n, comp, name)]
     return {
         "state": "closed" if carrying else "open",
