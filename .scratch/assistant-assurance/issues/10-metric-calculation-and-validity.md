@@ -159,5 +159,5 @@ Also found: the reported total includes slack (VOLL) dispatch cost. Its share co
 Limits: `objective-bridge/1` is single-period like every bounded profile, so myopic (multi-period) runs get the standard `unsupported_snapshot_scope` refusal. Only rolling-horizon runs read "Not available: the objective covers only the last window."
 
 Follow-ups:
-- € formatting and "Not available" wording for all checked answers, if UX 25 rules (a) on rendering.
+- UX 25 (interim, rendering a): S3 renders through the shared renderer. Its reason codes are plain words (`last_window_only`, `last_period_only`, `still_scaled`, `objective_missing`, `total_missing`, `terms_missing`, `not_separable`), each explained by a note line in the same answer. € and "Not available" wording for all checked answers is ticket 19.
 - `adequacy/report.py:509-515` falls back to `total_system_cost = 0.0` when the objective is not finite, which breaks G3's never-0 rule outside checked answers; ticket it in S4.

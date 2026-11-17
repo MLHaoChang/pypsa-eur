@@ -24,3 +24,10 @@ UX 25 waived this for S3 only. S3 uses plain-word codes, each explained by a not
 
 - Exact-text tests for one answered and one unavailable slot per profile family.
 - A test that no `[a-z]+_[a-z_]+` token reaches an answer's public text.
+
+## Also seen in the S3 shots (shared renderer and card, every profile)
+
+- The answer renders as one run-on paragraph in the dock: the rows and the note lines are not on separate lines.
+- The header reads "Network network;" with raw ISO timestamps ("2030-01-01T00:00:00 to …").
+- The card's question is shown twice: as the assistant message and inside the card.
+- "Checking answer against project evidence." stays under the user message after the answer arrives.
