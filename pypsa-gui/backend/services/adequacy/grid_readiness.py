@@ -1444,7 +1444,9 @@ def _ssti_rows(inp: _Inputs) -> list[dict]:
     reads unknown with its reason. SSCI is never evaluated here (converter damping is not modelled)."""
     import pandas as pd
 
-    target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
+    # The screens read the campus run, not the PoC's entered fault level: the target is the section, where
+    # the grid study runs.
+    target = _target("connection")
     common = dict(rule=None, limit=None, unit=None, source="the campus run", assumed=True,
                   section="connection", target=target)
 
