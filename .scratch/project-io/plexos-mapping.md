@@ -1,6 +1,6 @@
 # PLEXOS import: mapping plan
 
-Status: ready-for-agent (slice 1 plan GO from GK A (29); scope settled by PLEXOS-SCOPE-1)
+Status: ready-for-agent (slice 1 merged as #1603; slice 2 plan GO from GK A (29), split 2a/2b; scope settled by PLEXOS-SCOPE-1)
 Owner decisions: IMPORTS-1, IMPORT-FLOW-1, HOLISTIC-1, RAW-NAMES-1, PR-SIZE-1, PLEXOS-SCOPE-1
 
 ## What a PLEXOS model file is
@@ -108,3 +108,22 @@ Generator: capacity, unit count, minimum stable level, rating profile, heat rate
   - P9 Cage: a subprocess imports `plexos_xml` with `sys.modules['pypsa'] = None`.
   - Later-slice notes are carried into slice 2: zip traversal and size caps; Units = 0 means not built; lifetime = retirement − build year; the sign of Min Flow; VoLL stays in the sidecar.
 - Memory: the full 130 MB World file reads in about 12 s with a peak of about 580 MB, because the raw row dicts are held until resolution. That is fine for slice 1; if GK wants it lower, the fix is two-pass streaming.
+- 2026-11-17, GK A (29), plan GO for slices 2a and 2b (split and slice-1 condition answers accepted), added conditions:
+  - Q1 Units drive conversion: convert from the t_unit slice 1 attaches; unknown unit (BTU/kWh, GW, kV vs V, % vs pu) converted with a test or unmapped with reason. Test one non-default unit.
+  - Q2 Reactance base: system base from file when present, else 100 MVA with an assumed row. Hand-check one line.
+  - Q3 Load never silently lost: Region Load with Node LPF distributed (sum exact) or unmapped. Test load in = mapped + unmapped.
+  - Q4 One node per generator/battery; multi-node → unmapped. Line with from == to → unmapped. Tests.
+  - Q5 Heat Rate band 1 only; Base+Incr, multi-fuel, Fuel Offtake → unmapped. Min Stable Factor vs Level precedence stated, tested, assumed row on disagreement.
+  - Q6 Percentages/efficiencies in (0,100] before ÷100; else unmapped. p_nom ≤ 0 (not Units=0) → unmapped. Tests.
+  - Q7 Unique names per component: refuse or deterministic suffix with assumed row naming both; never overwrite/truncate. Test.
+  - Q8 Excel serial dates: epoch 1899-12-30, serial 60 handled; test known date + fractional serial. Horizon: leap year, non-hourly step, snapshot_weightings = step. Tests.
+  - Q9 Accounting on both fixtures, per table, rows in = rows out, duplicates fail.
+  - Q10 (2b) CSV match case-insensitive basename after \ → /. Short / gappy / duplicate timestamps → warning or unmapped, never 0-fill/ffill. NaN cells unreadable. Tests.
+  - Q11 Targeted mutants per refusal and per conversion factor (×0.0036, ÷100, pu→Ω, Min Flow sign), -x each; survivors in PR body.
+  - Session: <id> line in each PR body.
+- 2026-11-17, core session (project-io) on where the sidecars live: outage rates go on the generators' own columns (`outage_rate_value`, `outage_rate_basis` = "FOR", `mttr_hours`), which adequacy reads through `occurrence.resolve_outage_params`; never `asset_health.json`. Areas go to `plexos_areas.json` and static fuel prices to `plexos_fuel_prices.json`; the core session adds both to `_BUNDLE_FILES`. Fuel prices are also folded into `marginal_cost`, each derived cost listed in `report.assumed` with the heat rate used.
+- Slice 2a choices, for review:
+  - Min Stable Factor / Level bind only with unit commitment, so they are not set as `p_min_pu` (that would make the unit must-run in an LP). The larger of the two is offered as a `Suggestion`; the rows are listed as unmapped with that reason.
+  - A missing generator or battery `Units` is read as the PLEXOS default 0 (not built) and listed as unmapped, never assumed 1.
+  - Horizon: `Chrono Date From` (else `Date From`) × `Chrono Step Count` days × `Periods per Day` (default 24); weightings equal the step in hours. A horizon without a length gives one year, in `assumed`. Other horizon settings are unmapped.
+  - Scenario-tagged rows are all unmapped in 2a: "not selected", or "is on in the chosen Model; applied in a later slice". Data-file, dated, variable and band > 1 rows likewise.
