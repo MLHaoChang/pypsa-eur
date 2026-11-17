@@ -91,12 +91,14 @@ def bypass_for_faults(net):
 
 
 def far_side(net, root_bus: int) -> list:
-    """``[(cap name, far-side bus index)]`` for each in-service series
+    """
+    ``[(cap name, far-side bus index)]`` for each in-service series
     capacitor: the end with the greater graph distance from ``root_bus``
     (the PCC) over in-service lines, transformers, impedances and closed
     bus-bus switches. That is where the units behind the capacitor see grid,
     transformer and capacitor in series (GC-08's sub-synchronous scan). A tie
-    (a ring) is refused, naming the capacitor, because neither end is behind it."""
+    (a ring) is refused, naming the capacitor, because neither end is behind it.
+    """
     from collections import deque
 
     adj = {int(b): set() for b in net.bus.index}
