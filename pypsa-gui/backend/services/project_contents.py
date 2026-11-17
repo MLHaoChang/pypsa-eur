@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os as _os
 import stat as _stat
+import unicodedata as _unicodedata
 import zipfile as _zipfile
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath as _Posix
@@ -72,6 +73,17 @@ def _importer(path, writer):
     )
 
 
+def _marker_entry() -> Entry:
+    """The template marker's row. Named here only to say which operations copy
+    it; every read goes through `services.template_marker` (its test exempts
+    this function, as it does `solve_capture.sidecars`)."""
+    return _f(
+        "eh_template.json",
+        _ALL - {FORK} | {TEMPLATE},
+        "the template marker (UM07-KIND-1)",
+    )
+
+
 TABLE: tuple[Entry, ...] = (
     _f("network.nc", _ALL, "the network"),
     _f("user_ts.json", _ALL, "uploaded time series"),
@@ -103,11 +115,7 @@ TABLE: tuple[Entry, ...] = (
     # Dropped by every copy path until project-io 01. A fork does not take
     # them: a sensitivity case reads its base's marker (template_marker), and a
     # copy of its own would cut that link.
-    _f(
-        "eh_template.json",
-        _ALL - {FORK} | {TEMPLATE},
-        "the template marker (UM07-KIND-1)",
-    ),
+    _marker_entry(),
     _f(
         "cases.json",
         _ALL - {FORK} | {TEMPLATE},
@@ -245,7 +253,11 @@ class BundleRefused(ValueError):
 
 
 def _folded(member: str) -> str:
-    return "/".join(p.rstrip(". ").casefold() for p in member.split("/"))
+    # NFC as well: macOS stores names decomposed, so "é" and "e\u0301" are one file there.
+    return "/".join(
+        _unicodedata.normalize("NFC", p.rstrip(". ")).casefold()
+        for p in member.split("/")
+    )
 
 
 def screen_members(
@@ -306,4 +318,16 @@ def screen_members(
             )
         if name != MANIFEST:
             (allowed if allows_member(name) else ignored).append(name)
+    for folded, name in seen.items():
+        parts = folded.split("/")
+        for i in range(1, len(parts)):
+            parent = "/".join(parts[:i])
+            if parent in seen:
+                raise BundleRefused(
+                    {
+                        "error_kind": "bundle_unsafe_path",
+                        "message": f"The bundle holds '{seen[parent]}' as a file and '{name}' inside it. "
+                        "Nothing was imported.",
+                    }
+                )
     return allowed, ignored

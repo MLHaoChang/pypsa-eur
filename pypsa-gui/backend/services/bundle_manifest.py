@@ -92,7 +92,13 @@ def _read(zf: zipfile.ZipFile) -> dict:
         with zf.open(MANIFEST) as fh:
             raw = fh.read(MAX_MANIFEST_BYTES + 1)
         manifest = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError, zipfile.BadZipFile, zlib.error, EOFError) as exc:
+    except (
+        UnicodeDecodeError,
+        ValueError,
+        zipfile.BadZipFile,
+        zlib.error,
+        EOFError,
+    ) as exc:
         raise _corrupt("Its manifest cannot be read.") from exc
     if not isinstance(manifest, dict):
         raise _corrupt("Its manifest cannot be read.")

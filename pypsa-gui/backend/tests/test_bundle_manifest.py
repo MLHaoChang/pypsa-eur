@@ -15,13 +15,19 @@ from services import project_contents as PC
 from tests.test_project_contents import _bundle_from, _left_behind, _post, projects_root  # noqa: F401
 
 
-def _zip(members: dict[str, bytes], manifest: dict | bytes | None = None) -> zipfile.ZipFile:
+def _zip(
+    members: dict[str, bytes], manifest: dict | bytes | None = None
+) -> zipfile.ZipFile:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, data in members.items():
             zf.writestr(name, data)
         if manifest is not None:
-            raw = manifest if isinstance(manifest, bytes) else json.dumps(manifest).encode()
+            raw = (
+                manifest
+                if isinstance(manifest, bytes)
+                else json.dumps(manifest).encode()
+            )
             zf.writestr(PC.MANIFEST, raw)
     return zipfile.ZipFile(io.BytesIO(buf.getvalue()))
 
@@ -80,10 +86,26 @@ def test_a_directory_entry_is_not_a_member():
 @pytest.mark.parametrize(
     "members, manifest, says",
     [
-        ({"network.nc": b"net"}, _manifest(), "'uploads/a.csv' is listed in its manifest but missing"),
-        ({**_GOOD, "layout.json": b"{}"}, _manifest(), "'layout.json' is in the bundle but not in its manifest"),
-        ({**_GOOD, "network.nc": b"nett"}, _manifest(), "'network.nc' has a different size"),
-        ({**_GOOD, "network.nc": b"NET"}, _manifest(), "'network.nc' does not match its checksum"),
+        (
+            {"network.nc": b"net"},
+            _manifest(),
+            "'uploads/a.csv' is listed in its manifest but missing",
+        ),
+        (
+            {**_GOOD, "layout.json": b"{}"},
+            _manifest(),
+            "'layout.json' is in the bundle but not in its manifest",
+        ),
+        (
+            {**_GOOD, "network.nc": b"nett"},
+            _manifest(),
+            "'network.nc' has a different size",
+        ),
+        (
+            {**_GOOD, "network.nc": b"NET"},
+            _manifest(),
+            "'network.nc' does not match its checksum",
+        ),
     ],
     ids=["missing", "extra", "size", "hash"],
 )
@@ -106,10 +128,22 @@ def test_a_member_that_does_not_match_is_refused(members, manifest, says):
         (_manifest(schema_version=0), "no valid schema version"),
         (_manifest(members=[]), "no list of files"),
         (_manifest(members={"network.nc": {"size": 3}}), "entry for 'network.nc'"),
-        (_manifest(members={"network.nc": {"size": "3", "sha256": "0" * 64}}), "entry for 'network.nc'"),
-        (_manifest(members={"network.nc": {"size": 3, "sha256": 1}}), "entry for 'network.nc'"),
-        (_manifest(members={"network.nc": {"size": 3, "sha256": "0" * 63}}), "entry for 'network.nc'"),
-        (_manifest(members={"network.nc": {"size": 3, "sha256": "0" * 64 + "\n"}}), "entry for 'network.nc'"),
+        (
+            _manifest(members={"network.nc": {"size": "3", "sha256": "0" * 64}}),
+            "entry for 'network.nc'",
+        ),
+        (
+            _manifest(members={"network.nc": {"size": 3, "sha256": 1}}),
+            "entry for 'network.nc'",
+        ),
+        (
+            _manifest(members={"network.nc": {"size": 3, "sha256": "0" * 63}}),
+            "entry for 'network.nc'",
+        ),
+        (
+            _manifest(members={"network.nc": {"size": 3, "sha256": "0" * 64 + "\n"}}),
+            "entry for 'network.nc'",
+        ),
         (_manifest(members={"network.nc": ["x"]}), "entry for 'network.nc'"),
     ],
 )
@@ -131,9 +165,15 @@ def test_the_current_schema_is_accepted():
 
 
 def test_a_member_whose_data_is_damaged_is_refused_not_a_500():
-    data = bytearray(BM.add_to(_zip({"network.nc": b"n" * 4000}).fp.getvalue(), project_kind=None))
+    data = bytearray(
+        BM.add_to(_zip({"network.nc": b"n" * 4000}).fp.getvalue(), project_kind=None)
+    )
     # Flip one byte inside network.nc's stored data: the zip's own CRC fails.
-    off = zipfile.ZipFile(io.BytesIO(bytes(data))).getinfo("network.nc").header_offset + 30 + len("network.nc")
+    off = (
+        zipfile.ZipFile(io.BytesIO(bytes(data))).getinfo("network.nc").header_offset
+        + 30
+        + len("network.nc")
+    )
     data[off + 5] ^= 0xFF
     exc = _refusal(zipfile.ZipFile(io.BytesIO(bytes(data))))
     assert exc.kind == "bundle_corrupt"
@@ -182,7 +222,9 @@ def test_an_export_carries_a_manifest_and_imports_without_a_warning(
     assert r.status_code == 200, r.text
     zf = zipfile.ZipFile(io.BytesIO(r.content))
     assert PC.MANIFEST in zf.namelist()
-    assert set(json.loads(zf.read(PC.MANIFEST))["members"]) == set(zf.namelist()) - {PC.MANIFEST}
+    assert set(json.loads(zf.read(PC.MANIFEST))["members"]) == set(zf.namelist()) - {
+        PC.MANIFEST
+    }
 
     r = _post(client, r.content, "bm_dst")
     assert r.status_code in (200, 201), r.text
@@ -201,7 +243,12 @@ def test_an_old_bundle_without_a_manifest_imports_with_the_warning(
 
 @pytest.mark.parametrize("how", ["changed", "added", "newer"])
 def test_a_damaged_or_newer_bundle_is_refused_and_leaves_nothing(
-    client, api_project, project_storage_dir, project_row, projects_root, how  # noqa: F811
+    client,
+    api_project,
+    project_storage_dir,
+    project_row,
+    projects_root,
+    how,  # noqa: F811
 ):
     name = api_project(f"bm-bad-{how}")
     good = client.get(f"/api/projects/{name}/bundle").content
@@ -220,18 +267,30 @@ def test_a_damaged_or_newer_bundle_is_refused_and_leaves_nothing(
     dst = f"bm_bad_{how}_dst"
     r = _post(client, buf.getvalue(), dst)
     assert r.status_code == 400, r.text
-    assert r.json()["detail"]["error_kind"] == ("bundle_too_new" if how == "newer" else "bundle_corrupt")
+    assert r.json()["detail"]["error_kind"] == (
+        "bundle_too_new" if how == "newer" else "bundle_corrupt"
+    )
     assert _left_behind(project_row, projects_root, dst) == []
 
 
 def test_a_dry_run_writes_nothing_and_answers_what_the_import_does(
-    client, api_project, project_storage_dir, project_row, projects_root, row_count  # noqa: F811
+    client,
+    api_project,
+    project_storage_dir,
+    project_row,
+    projects_root,
+    row_count,  # noqa: F811
 ):
     d = project_storage_dir(api_project("bm-dry"))
     data = _bundle_from(
         d,
-        {"layout.json": b"{}", "stray.txt": b"x",
-         "solver_config.json": json.dumps({"extra_functionality_code": "print(1)"}).encode()},
+        {
+            "layout.json": b"{}",
+            "stray.txt": b"x",
+            "solver_config.json": json.dumps(
+                {"extra_functionality_code": "print(1)"}
+            ).encode(),
+        },
     )
     rows, tree = row_count(), _tree(projects_root)
 
@@ -259,8 +318,14 @@ def test_a_dry_run_writes_nothing_and_answers_what_the_import_does(
     assert got["stripped"] == dry["stripped"]
     assert got["ignored"] == dry["ignored"]
     assert got["warnings"] == dry["warnings"]
-    assert sorted(p.name for p in project_storage_dir("bm_dry_dst").iterdir()
-                  if p.name in dry["members"]) == dry["members"]
+    assert (
+        sorted(
+            p.name
+            for p in project_storage_dir("bm_dry_dst").iterdir()
+            if p.name in dry["members"]
+        )
+        == dry["members"]
+    )
 
     again = _dry(client, data, "bm_dry_dst")
     assert again.status_code == 200, again.text
@@ -268,7 +333,12 @@ def test_a_dry_run_writes_nothing_and_answers_what_the_import_does(
 
 
 def test_a_dry_run_refuses_what_the_import_refuses_and_leaves_nothing(
-    client, api_project, project_storage_dir, project_row, projects_root, row_count  # noqa: F811
+    client,
+    api_project,
+    project_storage_dir,
+    project_row,
+    projects_root,
+    row_count,  # noqa: F811
 ):
     d = project_storage_dir(api_project("bm-dry-bad"))
     rows, tree = row_count(), _tree(projects_root)
@@ -281,7 +351,11 @@ def test_a_dry_run_refuses_what_the_import_refuses_and_leaves_nothing(
 
 
 def test_a_dry_run_cleans_its_staging_when_a_late_check_fails(
-    client, api_project, project_storage_dir, projects_root, monkeypatch  # noqa: F811
+    client,
+    api_project,
+    project_storage_dir,
+    projects_root,
+    monkeypatch,  # noqa: F811
 ):
     from routers import projects
 
@@ -297,7 +371,9 @@ def test_a_dry_run_cleans_its_staging_when_a_late_check_fails(
     assert not staging.exists() or not any(staging.iterdir())
 
 
-def test_a_dry_run_needs_a_signed_in_user(anon_client, client, api_project, project_storage_dir):
+def test_a_dry_run_needs_a_signed_in_user(
+    anon_client, client, api_project, project_storage_dir
+):
     d = project_storage_dir(api_project("bm-dry-anon"))
     data = _bundle_from(d)
     anon = _dry(anon_client, data, "bm_dry_anon_dst")
@@ -318,7 +394,9 @@ def test_an_oversized_manifest_is_refused_before_it_is_parsed():
 
 def test_a_manifest_at_the_cap_is_read():
     base = json.dumps(_manifest(pad="")).encode()
-    exact = json.dumps(_manifest(pad="x" * (BM.MAX_MANIFEST_BYTES - len(base)))).encode()
+    exact = json.dumps(
+        _manifest(pad="x" * (BM.MAX_MANIFEST_BYTES - len(base)))
+    ).encode()
     assert len(exact) == BM.MAX_MANIFEST_BYTES
     assert BM.check(_zip(_GOOD, exact)) == []
 
@@ -374,7 +452,9 @@ def _active_state(_auth_db):
 
     _engine, session_local = _auth_db
     with session_local() as db:
-        pointers = sorted(str(x) for x in db.scalars(select(SessionRow.active_project_id)))
+        pointers = sorted(
+            str(x) for x in db.scalars(select(SessionRow.active_project_id))
+        )
     ctx = PyPSAService._active
     return pointers, id(ctx), id(ctx.network) if ctx is not None else None
 
@@ -400,7 +480,9 @@ def test_a_dry_run_swaps_nothing_and_never_reaches_the_commit_path(
     assert _active_state(_auth_db) == before
 
 
-def test_would_conflict_matches_the_real_409_both_ways(client, api_project, project_storage_dir):
+def test_would_conflict_matches_the_real_409_both_ways(
+    client, api_project, project_storage_dir
+):
     d = project_storage_dir(api_project("bm-clash"))
     data = _bundle_from(d)
     # Taken: the dry run says so and the real import answers 409.
@@ -426,5 +508,8 @@ def test_a_running_study_is_a_dry_run_warning_but_refuses_the_import(
     monkeypatch.setattr(PyPSAService, "refuse_if_study_running", classmethod(running))
     r = _dry(client, data, "bm_study_dst")
     assert r.status_code == 200, r.text
-    assert "Cannot import a project bundle while a study is running." in r.json()["warnings"]
+    assert (
+        "Cannot import a project bundle while a study is running."
+        in r.json()["warnings"]
+    )
     assert _post(client, data, "bm_study_dst").status_code == 409
