@@ -944,7 +944,9 @@ def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), l
     the project's own fault level, the draft's typical fallback (the row is
     then ``assumed`` and says so) or the campus description's. The unit inputs
     are read from the project network the run was prepared from, which must
-    be unchanged since (its sha256 is in the manifest)."""
+    be unchanged since (its sha256 is in the manifest). When the run holds a
+    field background (``import_background_campus``), a second ``poc`` row
+    labelled "with background" sums it with the plant's U_h (IEC 61000-3-6)."""
     from gridspine.static import harmonics as hm
 
     run_dir = Path(run_dir)
@@ -956,10 +958,11 @@ def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), l
     sk = _pcc_sk_min(pcc)
     sk_source, typical = _sk_source(campus, n)
     study = hm.harmonic_table(harmonic_units(n, poc), {poc: sk}, limits, law=law)
+    pocs = _with_background(run_dir, study.pocs, limits, law)
 
     limit_assumed = not cited or any(c["source"] != "code" for c in cited)
     unit_demo = study.units["spectrum_source"].astype(str).str.startswith("demo")
-    out = _screen_frame(study.pocs, study.units, unit_demo, sk_source, typical, profile, limit_assumed,
+    out = _screen_frame(pocs, study.units, unit_demo, sk_source, typical, profile, limit_assumed,
                         hm.POC_COLUMNS, hm.UNIT_COLUMNS)
     _write_text_atomic(run_dir / HARMONICS_CSV, out.to_csv(index=False))
     return out
@@ -1383,3 +1386,140 @@ def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_di
               "source EMF: 1.0 pu, or the period's lowest converged PCC voltage when lower"]
     return {"ledger": ledger, "notes": notes, "basis": SCREENING_BASIS, "sk_min_mva": sk, "rx_min": rx,
             "c": c, "vn_kv": vn}
+
+
+# --- the PowerFactory handoff and the field background (GC-05; TRGC 13, 14, 18) ---
+
+POWERFACTORY_DIR = "powerfactory"
+HARMONIC_SOURCES_CSV = "harmonic_sources.csv"
+#: Converter-interfaced unit kinds: each should carry a harmonic spectrum.
+CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell", "ups")
+NOT_IN_MODEL = "not in the network model"
+
+
+def import_background_campus(run_dir, data, source: str, measured_on, filename: str | None = None) -> dict:
+    """Store a field measurement of the background voltage harmonics at the
+    campus PCC (``ingest/background_harmonics.py``) as the run's
+    ``background_harmonics.json``; the harmonic screen then adds a "with
+    background" row. Returns the stored record."""
+    from gridspine.ingest.background_harmonics import parse_background, save_background
+
+    run_dir = Path(run_dir)
+    campus = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
+    rec = parse_background(data, poc=str(campus["campus"]["pcc"]["bus"]), source=source,
+                           measured_on=measured_on, filename=filename)
+    save_background(run_dir, rec)
+    return rec
+
+
+def _with_background(run_dir: Path, pocs: pd.DataFrame, limits, law: str) -> pd.DataFrame:
+    """``pocs`` plus one "with background" row per PoC the stored background
+    was measured at: the plant's U_h and the background summed per IEC
+    61000-3-6, judged against the same limits. Unchanged when none is stored."""
+    from gridspine.ingest.background_harmonics import WITH_BACKGROUND, citation, combine, load_background
+    from gridspine.static import harmonics as hm
+
+    rec = load_background(run_dir)
+    if rec is None:
+        return pocs
+    rows = []
+    for row in pocs.to_dict("records"):
+        if str(row["poc"]) != rec["poc"]:
+            continue
+        out = dict(row, label=f"{WITH_BACKGROUND}; {hm.LABEL}")
+        if row["u_h_pct"] is None:
+            out["note"] = f"{citation(rec)}; {row['note']}"
+            rows.append(out)
+            continue
+        plant = row["u_h_pct"]
+        j = hm.judge(combine(plant, rec["orders_pct"], law), limits)
+        notes = [citation(rec), *j.pop("notes")]
+        unmeasured = sorted(set(plant) - set(rec["orders_pct"]))
+        if unmeasured:
+            notes.append("no background measured at order(s) " + ", ".join(map(str, unmeasured)))
+        if row["no_input_units"]:
+            if j["verdict"] != "fail":
+                j["verdict"] = "unknown"
+            notes.append("no input for " + ", ".join(map(str, row["no_input_units"]))
+                         + ": a missing unit blocks a pass")
+        out.update(j, note="; ".join(notes))
+        rows.append(out)
+    return pd.concat([pocs, pd.DataFrame(rows, columns=pocs.columns)], ignore_index=True) if rows else pocs
+
+
+def _dgs_spectra(campus: Campus, units: pd.DataFrame) -> tuple[dict, set, list]:
+    """``(harmonics, converters, unmatched)`` for ``write_dgs``: the spectrum
+    of every network element whose unit (by ``pypsa_name``) is a harmonic
+    source of the project, as the harmonic screen reads it; the elements that
+    should carry one; and the harmonic sources no network element stands for."""
+    from gridspine.static import harmonics as hm
+
+    by_link = {}
+    for rec in units.to_dict("records"):
+        _, spectrum, source, _ = hm.unit_inputs(rec)
+        by_link[str(rec["unit"])] = {"spectrum": spectrum or {}, "source": source}
+    pypsa = campus.units["pypsa_name"].astype(str) if "pypsa_name" in campus.units.columns else pd.Series(dtype=str)
+    harmonics, matched = {}, set()
+    for uid, link in pypsa.items():
+        if link in by_link:
+            harmonics[str(uid)] = by_link[link]
+            matched.add(link)
+    converters = {str(u) for u, k in campus.units["kind"].items() if k in CONVERTER_KINDS}
+    converters |= {str(c) for c, k in campus.compensation["kind"].items() if k == "statcom"}
+    converters |= set(harmonics)
+    return harmonics, converters, sorted(set(by_link) - matched)
+
+
+def powerfactory_campus(run_dir, hours=None) -> list:
+    """The PowerFactory handoff of a ranked run: per island critical hour
+    (``island_hours``), or per ``(period, hour)`` given, a directory
+    ``powerfactory/<campus>_p<period>_h<hour>/`` with the network as DGS
+    (``handoff/dgs_writer.py``: Sk min and max at the PCC, each converter's
+    harmonic spectrum), ``dgs_names.csv``, ``harmonic_sources.csv`` (every
+    converter, with or without a spectrum, and any harmonic source the
+    network does not model), the hour's pandapower load flow
+    (``lf_bus.csv``, ``lf_branch_flow.csv``) and ``manifest.json`` — so
+    ``readback.results.read_back`` compares a PowerFactory export of it
+    directly. Returns the directories."""
+    import copy
+
+    from gridspine.handoff.dgs_writer import HARMONIC_COLUMNS, PENDING_VERIFICATION, write_dgs
+    from gridspine.readback.results import DGS_NAMES_CSV
+    from gridspine.static.campus_flow import apply_hour
+    from gridspine.static.loadflow import run_lf
+
+    run_dir = Path(run_dir)
+    campus = load_run_campus(run_dir)
+    spec = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
+    n = _unchanged_project(run_dir)
+    harmonics, converters, unmatched = _dgs_spectra(campus, harmonic_units(n, str(spec["campus"]["pcc"]["bus"])))
+    extra = pd.DataFrame([("unit", u, "", NOT_IN_MODEL, "", "") for u in unmatched], columns=list(HARMONIC_COLUMNS))
+    hourly, _ = campus_tables(run_dir)
+    out_dirs = []
+    for period, hour in (island_hours(run_dir) if hours is None else hours):
+        rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)][["unit_id", "p_mw", "status"]]
+        if rows.empty:
+            raise ContractError(f"the run has no hour {hour} in period {period}")
+        case = f"{campus.name}_p{period}_h{hour}"
+        out = run_dir / POWERFACTORY_DIR / case
+        out.mkdir(parents=True, exist_ok=True)
+        hour_campus = dataclasses.replace(campus, net=copy.deepcopy(campus.net))
+        apply_hour(hour_campus, rows.reset_index(drop=True))
+        net = hour_campus.net
+        exp = write_dgs(net, out / f"{case}.dgs", title=f"{campus.name} p{period} h{hour}",
+                        harmonics=harmonics, converters=converters)
+        exp.names.to_csv(out / DGS_NAMES_CSV, index=False)
+        sources = pd.concat([exp.harmonic_sources, extra], ignore_index=True) if len(extra) else exp.harmonic_sources
+        sources.to_csv(out / HARMONIC_SOURCES_CSV, index=False)
+        lf = run_lf(net)
+        lf.bus.to_csv(out / "lf_bus.csv", index_label="bus")
+        lf.branch_flow.to_csv(out / "lf_branch_flow.csv", index=False)
+        manifest = {"case": case, "period": int(period), "hour": int(hour), "converged": bool(lf.converged),
+                    "f_hz": float(net.f_hz),
+                    "files": [f"{case}.dgs", DGS_NAMES_CSV, HARMONIC_SOURCES_CSV, "lf_bus.csv",
+                              "lf_branch_flow.csv", "manifest.json"],
+                    "no_spectrum": sorted(sources.loc[sources["status"] != "spectrum", "pp_name"]),
+                    "pending_verification": [PENDING_VERIFICATION]}
+        (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        out_dirs.append(out)
+    return out_dirs

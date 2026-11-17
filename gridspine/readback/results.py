@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import io
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +34,12 @@ PF_BUS_CSV = "pf_bus.csv"
 PF_BRANCHES_CSV = "pf_branches.csv"
 READBACK_BUS_CSV = "readback_bus.csv"
 READBACK_BRANCHES_CSV = "readback_branches.csv"
+#: Written by the PowerFactory (DGS) handoff next to its ``.dgs``: every DGS
+#: name and the pandapower element it stands for (``handoff/dgs_writer.py``).
+DGS_NAMES_CSV = "dgs_names.csv"
+#: A PowerFactory branch export of a DGS network may key each row by the DGS
+#: element name instead of the ``(from_bus, to_bus, ckt)`` triple.
+DGS_BRANCH_COL = "branch_name"
 
 #: The gate, named once so the summary and the figures quote the same numbers.
 BUS_TOLERANCE = {"vm_rel_err": 0.01, "va_abs_err_deg": 0.5}
@@ -107,6 +114,49 @@ def _branch_summary(cmp: pd.DataFrame) -> dict:
     }
 
 
+def dgs_name_map(names: pd.DataFrame) -> tuple[dict, dict]:
+    """``(bus, branch)`` from a ``dgs_names.csv`` frame: DGS terminal name ->
+    pandapower bus name, and DGS line/transformer name -> ``(from_bus,
+    to_bus, ckt)``."""
+    bus = names[names["pp_table"] == "bus"]
+    br = names[names["pp_table"].isin(["line", "trafo"])]
+    return (dict(zip(bus["dgs_name"].astype(str), bus["pp_name"].astype(str))),
+            {str(r.dgs_name): (str(r.from_bus), str(r.to_bus), str(r.ckt)) for r in br.itertuples()})
+
+
+def _unmapped(kind: str, names) -> ContractError:
+    return ContractError(f"PowerFactory {kind} name(s) not in the DGS export: {sorted(map(str, names))}")
+
+
+def _dgs_keyed(bundle_dir: Path, bus_csv, branch_csv):
+    """The two exports re-keyed from DGS names onto the bundle's load flow,
+    as CSV buffers; the paths unchanged when the bundle has no DGS map."""
+    names_path = bundle_dir / DGS_NAMES_CSV
+    if not names_path.is_file():
+        return bus_csv, branch_csv
+    bus_map, branch_map = dgs_name_map(pd.read_csv(names_path, dtype=str, keep_default_na=False))
+    pf = pd.read_csv(bus_csv)
+    if "bus_name" in pf.columns:
+        key = pf["bus_name"].astype(str).str.strip()
+        unknown = set(key) - set(bus_map)
+        if unknown:
+            raise _unmapped("bus", unknown)
+        pf["bus_name"] = key.map(bus_map)
+    bus_buf = io.StringIO(pf.to_csv(index=False))
+    if branch_csv is None:
+        return bus_buf, None
+    br = pd.read_csv(branch_csv)
+    if DGS_BRANCH_COL in br.columns:
+        key = br.pop(DGS_BRANCH_COL).astype(str).str.strip()
+        unknown = set(key) - set(branch_map)
+        if unknown:
+            raise _unmapped("branch", unknown)
+        triples = key.map(branch_map)
+        for k, col in enumerate(("from_bus", "to_bus", "ckt")):
+            br[col] = [t[k] for t in triples]
+    return bus_buf, io.StringIO(br.to_csv(index=False))
+
+
 def read_back(bundle_dir, bus_csv, branch_csv=None) -> dict:
     """Compare a PowerFactory export with the bundle's load flow and record it.
 
@@ -115,12 +165,18 @@ def read_back(bundle_dir, bus_csv, branch_csv=None) -> dict:
     than passing by default. The overall `pass` is the AND of what was judged.
     Raises `ContractError` — and writes nothing — when the bundle's load flow
     did not converge, a column is missing, or the element sets disagree.
+
+    A PowerFactory (DGS) bundle carries ``dgs_names.csv``: the export's
+    ``bus_name`` is then the DGS terminal name, and a branch row may name its
+    DGS element in ``branch_name`` instead of the triple. Both are re-keyed
+    onto the load flow first; a name the DGS never wrote is refused.
     """
     bundle_dir = Path(bundle_dir)
     lf = load_bundle_lf(bundle_dir)
-    bus_cmp = compare_lf(lf, bus_csv, vm_tol=BUS_TOLERANCE["vm_rel_err"], va_tol_deg=BUS_TOLERANCE["va_abs_err_deg"])
+    bus_in, branch_in = _dgs_keyed(bundle_dir, bus_csv, branch_csv)
+    bus_cmp = compare_lf(lf, bus_in, vm_tol=BUS_TOLERANCE["vm_rel_err"], va_tol_deg=BUS_TOLERANCE["va_abs_err_deg"])
     branch_cmp = (
-        compare_branch_flows(lf, branch_csv, p_tol=BRANCH_TOLERANCE["p_rel_err"],
+        compare_branch_flows(lf, branch_in, p_tol=BRANCH_TOLERANCE["p_rel_err"],
                              q_tol_mvar=BRANCH_TOLERANCE["q_abs_err_mvar"])
         if branch_csv is not None else None
     )
