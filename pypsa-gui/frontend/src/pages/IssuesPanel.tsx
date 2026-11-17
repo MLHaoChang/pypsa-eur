@@ -259,7 +259,7 @@ export default function IssuesPanel() {
           className="shrink-0"
           title="Findings"
           count={total}
-          hint="Live preflight — the same gate Run LOPF uses"
+          hint="Live preflight (the gate Run LOPF uses) and the project's other open items"
           right={
             <div className="flex items-center gap-2">
               {/* Warnings do not block the run: the Run is here too, not only in the all-clear. */}
@@ -358,7 +358,7 @@ export default function IssuesPanel() {
             className="shrink-0"
             title="Assumptions"
             count={assumedTotal}
-            hint="Values the run will use until you confirm or change them, as Guided shows them"
+            hint="Values the run uses until you confirm or change them"
             bodyClassName=""
           >
             <div className="flex flex-col pb-3" data-testid="issues-assumptions">
