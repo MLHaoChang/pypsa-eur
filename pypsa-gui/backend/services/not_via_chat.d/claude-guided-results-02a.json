@@ -1,0 +1,22 @@
+{
+ "entries": [
+  {
+   "id": "eh_study_why",
+   "title": "Why a study figure has its value",
+   "disposition": "unbuilt",
+   "reason": "Why a study figure has its value is not in chat yet; guided-results slice 02b/chat adds the tool. Open Why this number on Guided Results.",
+   "page": "Guided Results",
+   "panel": null,
+   "keywords": [
+    "shortfall",
+    "verdict"
+   ],
+   "routes": [
+    [
+     "GET",
+     "/api/results/eh_study/why/{figure}"
+    ]
+   ]
+  }
+ ]
+}
