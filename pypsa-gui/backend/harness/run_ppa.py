@@ -41,9 +41,10 @@ IC_STUDY = "investment_case"
 SOURCE_PATH = "finance.solve_ppa.target_irr"
 SOLVED, NOT_EVALUATED, STALE = "solved", "not_evaluated", "stale"
 STATES = (SOLVED, NOT_EVALUATED, STALE)
-NOT_SET = (
-    "the project's investment settings set no PPA target return (finance.solve_ppa)"
-)
+NOT_SET = "no target set"
+NO_PRICE = "no price found for it"
+# As the finance panel (FinanceInputsEditor) words the target.
+IRR_WORDS = "Target equity IRR (post-tax)"
 UNREADABLE = "the run's PPA price record cannot be read"
 # S2: each status `finance.engine.solve_ppa` emits other than `ok`, in words.
 _STATUS_WORDS = (
@@ -69,7 +70,7 @@ _STATUS_WORDS = (
         "solve_ppa_cash_not_established",
         "the owner's cash is not established at a zero price",
     ),
-    ("solve_ppa_no_root", "no price in the search range reaches the target return"),
+    ("solve_ppa_no_root", "none in the search range reaches the target return"),
     (
         "solve_ppa_irr_ambiguous",
         "the price found gives more than one return, so the target is not established",
@@ -113,11 +114,11 @@ def target_of(finance) -> tuple[dict | None, str | None]:
         for k in ("target_irr", "target_year", "contract_id")
     )
     if not _finite(irr) or not -1 < irr < 10:
-        return None, "the PPA target return is not a finite number"
+        return None, f"{NOT_SET} (the target return is not a number)"
     if not _whole(year) or year < 1:
-        return None, "the PPA target year is not a whole operating year"
+        return None, f"{NOT_SET} (the target year is not a whole year)"
     if contract is not None and (not isinstance(contract, str) or not contract.strip()):
-        return None, "the PPA target names no contract"
+        return None, f"{NOT_SET} (the target names no contract)"
     return {
         "target_irr": float(irr),
         "target_year": year,
@@ -160,7 +161,10 @@ def freeze(task) -> dict:
         try:
             target, missing = target_of(_finance(ctx))
         except Exception:  # noqa: BLE001 — an unreadable config is no target
-            target, missing = None, "the project's investment settings cannot be read"
+            target, missing = (
+                None,
+                f"{NOT_SET} (the investment settings cannot be read)",
+            )
     frozen = {
         "kind": _run_actions().PPA_KIND,
         "version": VERSION,
@@ -213,28 +217,25 @@ def card(frozen) -> dict:
     ra = _run_actions()
     target = frozen.get("target")
     if target is None:
-        rows = [
-            ra._note("target", f"Not evaluated: {frozen.get('missing') or NOT_SET}")
-        ]
-        says = "The PPA price is not evaluated: no target return is set"
+        missing = frozen.get("missing") or NOT_SET
+        rows = [ra._note("target", f"{IRR_WORDS}: {missing}")]
+        says = f"PPA price · not evaluated: {missing}"
     else:
         rows = [
-            ra._note(
-                "target",
-                f"Target return: {_percent(target['target_irr'])} post-tax equity IRR",
-            ),
+            ra._note("target", f"{IRR_WORDS}: {_percent(target['target_irr'])}"),
             ra._note("year", f"Reached in operating year {target['target_year']}"),
             ra._note(
                 "contract", f"Contract priced: {_contract_words(target['contract_id'])}"
             ),
         ]
-        says = f"Read the PPA price for a {_percent(target['target_irr'])} post-tax equity IRR"
+        says = f"PPA price for a target equity IRR (post-tax) of {_percent(target['target_irr'])}"
     rows += [
         ra._note(
             "solves",
             "Runs no solve: it reads the price from this run's investment case",
         ),
-        ra._note("source", f"Source: the project's investment settings, {SOURCE_PATH}"),
+        # UX: the engine key appears only here, in the campus card's Source style.
+        ra._note("source", f"Source: investment settings · {SOURCE_PATH}"),
     ]
     return {
         "version": 1,
@@ -364,20 +365,23 @@ def _current_hash(body) -> str | None:
 
 
 def _status_words(status, flags) -> str | None:
-    """None only for a solved status (S2: an allow-list); else why not."""
+    """None only for a solved status (S2: an allow-list); else why not, in
+    plain words (UX: never a raw status)."""
     if status == "ok":
         bad = sorted(f for f in flags if str(f).startswith("solve_ppa_"))
         if not bad:
             return None
-        return _FLAG_WORDS.get(
+        why = _FLAG_WORDS.get(
             bad[0], "the price found does not give a unique target return"
         )
-    if status is None:
-        return "the investment case did not price the PPA"
-    return next(
-        (w for key, w in _STATUS_WORDS if str(status).startswith(key)),
-        "the PPA price was not solved",
-    )
+    elif status is None:
+        return NO_PRICE
+    else:
+        why = next(
+            (w for key, w in _STATUS_WORDS if str(status).startswith(key)),
+            "the investment case could not solve it",
+        )
+    return f"{NO_PRICE} ({why})"
 
 
 def evaluate(task, step_id, frozen, ctx) -> dict:
@@ -447,10 +451,12 @@ def evaluate(task, step_id, frozen, ctx) -> dict:
     )
     if not _finite(price) or price <= 0:
         return out(
-            NOT_EVALUATED, "the solved PPA price is not a finite positive number"
+            NOT_EVALUATED, f"{NO_PRICE} (the price found is not a positive number)"
         )
     if not isinstance(currency, str) or not currency or not _whole(year):
-        return out(NOT_EVALUATED, "the solved PPA price has no currency or money year")
+        return out(
+            NOT_EVALUATED, f"{NO_PRICE} (the price has no currency or money year)"
+        )
     if (
         fingerprint is None
         or _fingerprint(ctx) != fingerprint
@@ -590,10 +596,51 @@ def _check(task, rec, ctx) -> dict:
     }
 
 
+def money(price, currency, year) -> str:
+    """UX: the one money notation (`chapters.fmt_eur_short`, the twin of the
+    frontend's `utils/money.ts`) with the unit and money year in words."""
+    from services.reports.chapters import fmt_eur_short
+
+    amount = fmt_eur_short(price)
+    if currency != "EUR":
+        amount = amount.replace("€", currency, 1)
+    return f"{amount} per MWh, {year} money"
+
+
+def _when(ts) -> str:
+    from datetime import UTC, datetime
+
+    return datetime.fromtimestamp(ts, UTC).strftime("%-d %b %Y, %H:%M UTC")
+
+
+def words(got, rec) -> str:
+    """The price, or its state with its plain reason, as the user reads it."""
+    if got["state"] == "read":
+        return money(rec["price"], rec["currency"], rec["money_year"])
+    if got["state"] == STALE:
+        text = f"Out of date: {got['reason']}"
+        ic = rec.get("ic") if isinstance(rec, dict) else None
+        if isinstance(ic, dict) and _finite(ic.get("started_at")):
+            text += f". It was solved against the investment case of {_when(ic['started_at'])}"
+        return text
+    return f"Not evaluated: {got['reason']}"
+
+
 def read(task, ctx) -> dict:
-    """`{state, reason, value, unit}` for the run's `run.ppa_price`: `read`
-    only for a solved record whose every binding still holds now; a missing
-    or malformed record is `not_evaluated`, a broken binding `stale`."""
+    """`{state, reason, value, unit, text}` for the run's `run.ppa_price`:
+    `read` only for a solved record whose every binding still holds now; a
+    missing or malformed record is `not_evaluated`, a broken binding `stale`."""
+    got = _read_state(task, ctx)
+    run = task.get("run") if isinstance(task, dict) else None
+    rec = run.get("ppa_price") if isinstance(run, dict) else None
+    try:
+        text = words(got, rec)
+    except Exception:  # noqa: BLE001 — words never turn a read into a 500
+        text = f"Not evaluated: {UNREADABLE}"
+    return {**got, "text": text}
+
+
+def _read_state(task, ctx) -> dict:
     task = task if isinstance(task, dict) else {}
     rec = (
         (task.get("run") or {}).get("ppa_price")
@@ -620,3 +667,59 @@ def read(task, ctx) -> dict:
             exc_info=True,
         )
         return _no(NOT_EVALUATED, UNREADABLE)
+
+
+# ── what the user sees (UX, GK B (61) (a)) ───────────────────────────────────
+
+UI_STATES = {"read": "priced", NOT_EVALUATED: "not_evaluated", STALE: "out_of_date"}
+
+
+def _recorded(rec) -> dict:
+    """The step's own record as the user reads it (no binding re-read)."""
+    if not shape_ok(rec):
+        got = _no(NOT_EVALUATED, UNREADABLE)
+    elif rec["status"] == SOLVED:
+        got = {"state": "read", "reason": None}
+    else:
+        got = _no(rec["status"], rec["reason"])
+    return {**got, "text": words(got, rec)}
+
+
+def monitor(task) -> dict | None:
+    """The run monitor's PPA price block: the step's card lines, then the
+    price or its state with its plain reason; at hand-off, the KPI row the
+    hand-off read (`Out of date` when its binding no longer held). None for
+    a run with no PPA price step."""
+    ra = _run_actions()
+    step = ra.latest(task, ra.PPA_PRICE)
+    if step is None:
+        return None
+    card = step.get("card") if isinstance(step.get("card"), dict) else {}
+    lines = [
+        r["note"]
+        for r in card.get("rows") or []
+        if isinstance(r, dict) and isinstance(r.get("note"), str)
+    ]
+    run = task.get("run") or {}
+    kpis = (run.get("handoff") or {}).get("kpis") or []
+    kpi = next(
+        (r for r in kpis if isinstance(r, dict) and r.get("source") == "run.ppa_price"),
+        None,
+    )
+    if kpi is not None and isinstance(kpi.get("text"), str):
+        state, text = UI_STATES.get(kpi.get("status"), "not_evaluated"), kpi["text"]
+    elif step.get("status") == "completed" and "ppa_price" in run:
+        got = _recorded(run["ppa_price"])
+        state, text = UI_STATES[got["state"]], got["text"]
+    else:
+        state, text = "pending", "Not read yet"
+    return {"title": "PPA price", "lines": lines, "state": state, "text": text}
+
+
+def gap_line(task) -> str | None:
+    """The report's line for a run whose PPA price is not established; None
+    when it is, or when the run has no PPA price step (as `run_site.gap_line`)."""
+    shown = monitor(task or {})
+    if shown is None or shown["state"] in ("priced", "pending"):
+        return None
+    return f"PPA price · {shown['text']}"

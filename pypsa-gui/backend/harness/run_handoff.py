@@ -75,6 +75,7 @@ def _record_kpi(kpi: dict, task: dict | None) -> dict:
         "status": got["state"],
         "reason": got["reason"],
         "settled": got.get("settled") is True,
+        "text": got["text"],  # UX: the price, or its state with its plain reason
     }
 
 

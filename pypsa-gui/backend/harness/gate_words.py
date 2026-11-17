@@ -53,7 +53,7 @@ RULE_WORDS: dict[str, str] = {
     "h2.electrolyser.utilisation": "Electrolyser use",
     "h2.ic.counterfactual": "Comparison case",
     "h2.offtake.met": "Hydrogen demand met",
-    "ho.kpis_read": "Headline results read back",
+    "ho.kpis_read": "Headline results read back, or shown as not evaluated with the reason",
     "in.diagnose.unserved_islands": "Every load connected",
     "in.readiness.ready": "Model ready to solve",
     "in.validate.errors": "Model errors",

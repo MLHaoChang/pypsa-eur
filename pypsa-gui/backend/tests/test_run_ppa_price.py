@@ -44,7 +44,7 @@ def _sha(profile):
 # ── fixtures: a run, its case step, the context and the case's reads ─────────
 
 
-def _ctx(target=TARGET, started=100.0, a_hash="h1"):
+def _ctx(target=TARGET, started=1794911400.0, a_hash="h1"):
     finance = {} if target is None else {"solve_ppa": dict(target)}
     return SimpleNamespace(
         project_uuid=PID,
@@ -108,7 +108,7 @@ def _payload(state):
     return state["report"]["sections"]["project"]["payload"]
 
 
-def _ic_step(started=100.0, job="j1", status="completed"):
+def _ic_step(started=1794911400.0, job="j1", status="completed"):
     return {
         "id": "solve.2",
         "tool": "run_investment_case",
@@ -288,18 +288,19 @@ def test_the_template_target_is_frozen_with_its_value_unit_year_contract_and_sou
         and step["frozen"]["source_path"] == "finance.solve_ppa.target_irr"
     )
     words = [r["note"] for r in step["card"]["rows"]]
-    assert words[:3] == [
-        "Target return: 8% post-tax equity IRR",
+    assert words == [
+        "Target equity IRR (post-tax): 8%",
         "Reached in operating year 25",
         "Contract priced: Wind PPA",
+        "Runs no solve: it reads the price from this run's investment case",
+        "Source: investment settings · finance.solve_ppa.target_irr",
     ]
-    assert (
-        "Source: the project's investment settings, finance.solve_ppa.target_irr"
-        in words
-    )
+    assert step["card"]["says"] == "PPA price for a target equity IRR (post-tax) of 8%"
     assert not any(
         re.search(r"[0-9a-f]{12}", w) or "ppa_wind" in w for w in words
     )  # UX #1332
+    # UX: the engine key only in the Source row.
+    assert [w for w in words if "finance." in w] == [words[-1]]
 
 
 @pytest.mark.parametrize(
@@ -321,7 +322,8 @@ def test_no_or_a_non_finite_target_reads_not_evaluated_never_a_default(
     step = _read(path)["steps"][1]
     assert step["frozen"]["target"] is None and step["card"]["rows"][0][
         "note"
-    ].startswith("Not evaluated")
+    ].startswith("Target equity IRR (post-tax): no target set")
+    assert not any("finance." in r["note"] for r in step["card"]["rows"][:-1])
     rec = _record(path)
     assert (
         rec["status"] == "not_evaluated"
@@ -339,7 +341,7 @@ def test_the_run_reads_its_own_price_with_currency_and_money_year(tmp_path, worl
         "version": 1,
         "run_id": path.stem,
         "step": "solve.3",
-        "ic": {"job_id": "j1", "started_at": 100.0},
+        "ic": {"job_id": "j1", "started_at": 1794911400.0},
         "assumptions_hash": "h1",
         "network_revision": 4,
         "fingerprint": "fp1",
@@ -359,6 +361,7 @@ def test_the_run_reads_its_own_price_with_currency_and_money_year(tmp_path, worl
         "reason": None,
         "value": 62.5,
         "unit": "EUR/MWh (2024 money)",
+        "text": "€ 62.5 per MWh, 2024 money",
     }
 
 
@@ -373,8 +376,41 @@ def test_a_newer_human_case_between_the_steps_is_not_read(tmp_path, world):
     assert (
         rec["status"] == "stale"
         and rec["price"] is None
-        and "newer investment case" in rec["reason"]
+        and rec["reason"] == "a newer investment case replaced this run's own"
     )
+
+
+def test_a_foreign_running_case_at_the_step_reads_stale_and_fails_the_handoff(
+    tmp_path, world, monkeypatch
+):
+    """GK B (#1590) 1: a newer case still running is not this run's case
+    unfinished: stale, never a judged not-evaluated that hand-off reads back."""
+    ctx = _ctx(started=200.0)
+    ctx.solver_state["investment_case"]["status"] = "running"
+    path, _ = _run(tmp_path, ctx)
+    assert _record(path)["status"] == "stale"
+    task, profile = _handoff(path, ctx, monkeypatch)
+    assert run_handoff.kpis_read(task, profile) is False
+
+
+def test_a_newer_case_that_starts_and_finishes_during_the_read_reads_stale(
+    tmp_path, world, monkeypatch
+):
+    """GK B (#1590) 2: the re-read's started_at, not only its status."""
+    ctx = _ctx()
+
+    def reads(c):
+        ctx.solver_state["investment_case"] = {
+            "status": "done",
+            "started_at": 300.0,
+            "assumptions_hash": "h1",
+        }
+        return world["body"], world["report"]
+
+    monkeypatch.setattr(run_ppa, "_ic_reads", reads)
+    path, _ = _run(tmp_path, ctx)
+    assert _record(path)["status"] == "stale"
+    assert "started while" in _record(path)["reason"]
 
 
 def test_a_case_step_that_did_not_complete_reads_not_evaluated(tmp_path, world):
@@ -553,7 +589,12 @@ def test_a_changed_case_at_the_read_reads_stale(tmp_path, world):
     assert run_ppa.read(_read(path), ctx)["state"] == "stale"
     world["body"]["report"].update(stale=False, current_hash="h1")
     ctx.solver_state["investment_case"]["started_at"] = 300.0
-    assert run_ppa.read(_read(path), ctx)["state"] == "stale"
+    got = run_ppa.read(_read(path), ctx)
+    # GK B (#1590) 3: the read-back's own check before the report reads.
+    assert (got["state"], got["reason"]) == (
+        "stale",
+        "a newer investment case replaced this run's own",
+    )
 
 
 def test_a_record_of_another_run_reads_stale_with_the_bindings_cleared(tmp_path, world):
@@ -567,6 +608,8 @@ def test_a_record_of_another_run_reads_stale_with_the_bindings_cleared(tmp_path,
         "reason": "the PPA price record is another run's",
         "value": None,
         "unit": None,
+        "text": "Out of date: the PPA price record is another run's. It was solved "
+        "against the investment case of 17 Nov 2026, 10:30 UTC",
     }
 
 
@@ -606,6 +649,7 @@ def test_a_malformed_record_reads_not_evaluated(tmp_path, world, mutate):
         "reason": run_ppa.UNREADABLE,
         "value": None,
         "unit": None,
+        "text": "Not evaluated: the run's PPA price record cannot be read",
     }
 
 
@@ -951,3 +995,171 @@ def test_a_judged_record_of_another_run_is_never_read_back(
     task["run"]["ppa_price"]["run_id"] = "another-run"
     task["run"]["handoff"]["kpis"] = run_handoff.read_kpis(profile, task)
     assert run_handoff.kpis_read(task, profile) is False
+
+
+# ── UX words (#1590): the card, the price, the states ────────────────────────
+
+
+@pytest.mark.parametrize(
+    "status,reason",
+    [
+        (None, "no price found for it"),
+        (
+            "solve_ppa_no_root",
+            "no price found for it (none in the search range reaches the target return)",
+        ),
+        (
+            "solve_ppa_contract_not_found",
+            "no price found for it (the contract to price is not in the investment case)",
+        ),
+        (
+            "solve_ppa_irr_ambiguous:0.07",
+            "no price found for it (the price found gives more than one return, "
+            "so the target is not established)",
+        ),
+        (
+            "something_new",
+            "no price found for it (the investment case could not solve it)",
+        ),
+    ],
+)
+def test_each_status_reads_in_plain_words(tmp_path, world, status, reason):
+    _payload(world)["solve_ppa_status"] = status
+    path, _ = _run(tmp_path)
+    assert _record(path)["reason"] == reason and "solve_ppa" not in reason
+
+
+def _shown(path):
+    return run_ppa.monitor(_read(path))
+
+
+def test_the_monitor_shows_a_priced_run(tmp_path, world):
+    path, _ = _run(tmp_path)
+    shown = _shown(path)
+    assert shown["state"] == "priced" and shown["text"] == "€ 62.5 per MWh, 2024 money"
+    assert (
+        shown["title"] == "PPA price"
+        and shown["lines"][0] == "Target equity IRR (post-tax): 8%"
+    )
+    assert run_ppa.gap_line(_read(path)) is None
+
+
+def test_the_monitor_shows_no_target_set(tmp_path, world):
+    path, _ = _run(tmp_path, _ctx(target=None))
+    shown = _shown(path)
+    assert (shown["state"], shown["text"]) == (
+        "not_evaluated",
+        "Not evaluated: no target set",
+    )
+    assert shown["lines"][0] == "Target equity IRR (post-tax): no target set"
+    assert run_ppa.gap_line(_read(path)) == "PPA price · Not evaluated: no target set"
+
+
+def test_another_currency_keeps_the_notation(tmp_path, world):
+    _payload(world)["currency"] = "USD"
+    path, _ = _run(tmp_path)
+    assert _shown(path)["text"] == "USD 62.5 per MWh, 2024 money"
+
+
+def test_a_stale_price_at_handoff_says_out_of_date_and_what_it_was_solved_against(
+    tmp_path, world, monkeypatch
+):
+    path, ctx = _run(tmp_path)
+    ctx.network_revision = 5  # an edit after the step
+    task, _ = _handoff(path, ctx, monkeypatch)
+    [row] = task["run"]["handoff"]["kpis"]
+    assert row["status"] == "stale"
+    assert row["text"] == (
+        "Out of date: the network was edited after the PPA price was read. It was solved "
+        "against the investment case of 17 Nov 2026, 10:30 UTC"
+    )
+    shown = run_ppa.monitor(task)
+    assert (shown["state"], shown["text"]) == ("out_of_date", row["text"])
+    assert "stale" not in shown["text"].lower()
+
+
+def test_the_monitor_view_carries_the_block(tmp_path, world, monkeypatch):
+    from harness import runner
+    from services import run_monitor
+
+    path, _ = _run(tmp_path)
+    task = {**_read(path), "title": "IPP study"}
+    monkeypatch.setattr(run_monitor, "_task", lambda task_id: (path, task))
+    monkeypatch.setattr(runner, "live_card", lambda task_id: None)
+    monkeypatch.setattr(run_monitor, "_budgets", lambda task, env: {})
+    monkeypatch.setattr(run_monitor, "_unattended", lambda *a: None)
+    monkeypatch.setattr(assistant_tasks, "_with_envelope", lambda path, view: view)
+    monkeypatch.setattr(assistant_tasks, "_view", lambda task, fresh=False: {})
+    from services import email_service
+
+    monkeypatch.setattr(email_service, "get_status", lambda: {"configured": False})
+    out = run_monitor.view(task["task_id"], provider_ready=True)
+    assert out["monitor"]["ppa"] == run_ppa.monitor(task)
+
+
+# ── GK B (61) (a): `ho.kpis_read` means read honestly, never met ─────────────
+
+
+def test_a_not_evaluated_price_is_shown_with_its_reason_and_never_counted_met(
+    tmp_path, world, monkeypatch
+):
+    from services.reports import harness_chapter
+
+    _payload(world)["solve_ppa_status"] = "solve_ppa_no_root"
+    path, ctx = _run(tmp_path)
+    task, profile = _handoff(path, ctx, monkeypatch)
+    assert run_handoff.kpis_read(task, profile) is True  # read back honestly
+    from harness.gate_words import RULE_WORDS
+
+    # GK B (#1590) 4: the passed rule never claims a value was read.
+    assert RULE_WORDS["ho.kpis_read"] == (
+        "Headline results read back, or shown as not evaluated with the reason"
+    )
+    reason = (
+        "no price found for it (none in the search range reaches the target return)"
+    )
+    # The hand-off card (the run monitor) and the report show it, with its reason.
+    shown = run_ppa.monitor(task)
+    assert (shown["state"], shown["text"]) == (
+        "not_evaluated",
+        f"Not evaluated: {reason}",
+    )
+    payload, _tables = harness_chapter.build(task, None, [], [])
+    assert f"PPA price · Not evaluated: {reason}" in payload["gaps"]
+    assert payload["counts"]["gaps"] == len(payload["gaps"]) >= 1
+    # No verdict, summary or count takes it as met: the result checks do not
+    # count it, and no request part reads covered from it.
+    counts = run_handoff.checks(task["run"])["counts"]
+    assert sum(counts.values()) == 0
+    parts = run_handoff.coverage(task, profile, None)
+    assert not any("PPA" in p["part"] and p["status"] == "covered" for p in parts)
+
+
+# The shots' and vitest's PPA blocks are this module's own output (#1590).
+FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "frontend"
+    / "src"
+    / "components"
+    / "runMonitor"
+    / "ppaPrice.fixture.json"
+)
+
+
+def test_the_frontend_fixture_is_the_backends_words(tmp_path, world, monkeypatch):
+    import os
+
+    priced, _ = _run(tmp_path / "a")
+    unset, _ = _run(tmp_path / "b", _ctx(target=None))
+    stale, ctx = _run(tmp_path / "c")
+    ctx.network_revision = 5
+    task, _ = _handoff(stale, ctx, monkeypatch)
+    blocks = {
+        "priced": run_ppa.monitor(_read(priced)),
+        "not_evaluated": run_ppa.monitor(_read(unset)),
+        "out_of_date": run_ppa.monitor(task),
+    }
+    if os.environ.get("PPA_FIXTURE_WRITE"):
+        FIXTURE.write_text(json.dumps(blocks, indent=2, ensure_ascii=False) + "\n")
+    assert json.loads(FIXTURE.read_text()) == blocks
+    assert [b["state"] for b in blocks.values()] == list(blocks)

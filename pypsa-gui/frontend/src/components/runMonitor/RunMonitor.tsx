@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import {
   decideResearch, getRun, pauseRun, presentRun, resumeRun, stopRun,
-  type GateRule, type ResearchRow, type RunMonitorView, type RunStage,
+  type GateRule, type ResearchRow, type RunMonitorView, type RunPpaPrice, type RunStage,
 } from '../../api/runMonitor'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore, type SlidePanel } from '../../store/uiStore'
@@ -94,6 +94,17 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
         {RESEARCH_STOP[s.status]}: {s.gaps.map(g => gapWords(g)).join(', ')} {s.gaps.length === 1
           ? 'stays as the template has it' : 'stay as the template has them'}.</div>)}
     <Budgets view={view} />
+  </div>
+}
+
+/** Study harness 14 S-C: the PPA price, as the backend words it. A price not
+ *  evaluated or out of date is amber with its reason, never a pass. */
+function PpaPrice({ ppa }: { ppa: RunPpaPrice }) {
+  const amber = ppa.state === 'not_evaluated' || ppa.state === 'out_of_date'
+  return <div data-testid="run-ppa" data-state={ppa.state} className="mt-1 rounded border border-border p-2">
+    <div className="font-medium">{ppa.title}</div>
+    <div data-testid="run-ppa-text" className={amber ? 'text-amber-400' : 'text-text'}>{ppa.text}</div>
+    <ul className="text-muted">{ppa.lines.map((line, i) => <li key={i} data-testid="run-ppa-line">{line}</li>)}</ul>
   </div>
 }
 
@@ -313,6 +324,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
         <Link testId="run-report-link" onClick={() => open('reports')}>Open the report</Link>
       </li>}
     </ol>
+    {view.monitor.ppa && <PpaPrice ppa={view.monitor.ppa} />}
 
     {gateFailed && <div data-testid="run-failure">
       {stoppedAt} failed: {failedRules} {failedRules === 1 ? 'rule' : 'rules'} did not pass.{' '}

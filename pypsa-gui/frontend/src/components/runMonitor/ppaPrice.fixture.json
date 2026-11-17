@@ -1,0 +1,36 @@
+{
+  "priced": {
+    "title": "PPA price",
+    "lines": [
+      "Target equity IRR (post-tax): 8%",
+      "Reached in operating year 25",
+      "Contract priced: Wind PPA",
+      "Runs no solve: it reads the price from this run's investment case",
+      "Source: investment settings · finance.solve_ppa.target_irr"
+    ],
+    "state": "priced",
+    "text": "€ 62.5 per MWh, 2024 money"
+  },
+  "not_evaluated": {
+    "title": "PPA price",
+    "lines": [
+      "Target equity IRR (post-tax): no target set",
+      "Runs no solve: it reads the price from this run's investment case",
+      "Source: investment settings · finance.solve_ppa.target_irr"
+    ],
+    "state": "not_evaluated",
+    "text": "Not evaluated: no target set"
+  },
+  "out_of_date": {
+    "title": "PPA price",
+    "lines": [
+      "Target equity IRR (post-tax): 8%",
+      "Reached in operating year 25",
+      "Contract priced: Wind PPA",
+      "Runs no solve: it reads the price from this run's investment case",
+      "Source: investment settings · finance.solve_ppa.target_irr"
+    ],
+    "state": "out_of_date",
+    "text": "Out of date: the network was edited after the PPA price was read. It was solved against the investment case of 17 Nov 2026, 10:30 UTC"
+  }
+}

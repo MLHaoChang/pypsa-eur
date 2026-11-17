@@ -142,6 +142,11 @@ def build(
     site_gap = run_site.gap_line(task)
     if site_gap:
         gap_lines.append(site_gap)  # issue 33 (GK B (49)): never a silent default
+    from harness import run_ppa
+
+    ppa_gap = run_ppa.gap_line(task)
+    if ppa_gap:
+        gap_lines.append(ppa_gap)  # study harness 14 S-C: not evaluated, never met
     refusals = refusal_rows(envelope)
     payload = {
         "mode": run.get("mode"),

@@ -68,7 +68,8 @@ CASE_TOOLS = frozenset({"run_investment_case"})
 # model turn never solves one under the grant (#1123). The tool is read tier, so
 # its calls never reach `admit`: a run turn is refused by the offered-tools
 # allowlist (`session.stage_tools`, `loop.dispatch_tool_call`). This branch is
-# defence in depth, for a tier or offer that changes later.
+# defence in depth: unreachable for a read-tier tool through dispatch, it holds
+# if the tool's tier or a stage's offer ever changes.
 PPA_TOOLS = frozenset({"solve_ppa_price"})
 # Study harness 07 (GK B B1-b): a grant that lists the run's report covers only
 # the stage-7 card (`cross`); the runner starts that job itself, so a chat
