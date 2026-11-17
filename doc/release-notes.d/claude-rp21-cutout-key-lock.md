@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Two renewable-profile jobs for the same area and weather year, running at once (`PYPSA_GUI_MAX_CONCURRENT_SOLVES` above 1), now download the ERA5 cutout once. The second job waits for the first and then reuses its cutout, so neither can delete or replace the other's monthly files. Stopping the waiting job ends it as aborted and leaves the running download alone.

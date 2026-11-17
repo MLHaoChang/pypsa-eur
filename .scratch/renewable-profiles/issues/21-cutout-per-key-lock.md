@@ -3,7 +3,7 @@
 
 # RP-21: one fetch per cutout key when solves run concurrently
 
-Status: ready-for-agent
+Status: done (RP-21 PR)
 Type: task
 Raised by: GK B2 reviewing RP-13 (#1569), finding F2, 2026-11-17. The gap is already on master; #1569 does not add it.
 
@@ -24,3 +24,12 @@ file, or replace a month while the other merges. The default of 1 concurrent sol
 - A test runs two `ensure_cutout` calls for the same key on two threads, with a module-level fake downloader in a
   child. Each month is fetched once, both calls return the same `<key>.nc`, and nothing raises.
 - Aborting the waiting call ends it with `CutoutDownloadAborted` without disturbing the running one.
+
+## Built
+
+`cutout_cache.ensure_cutout` takes a process-wide lock per cutout file after the credential preflight. It waits in
+0.25 s polls, so a stop while waiting raises `CutoutDownloadAborted`, and checks for `<key>.nc` again once it holds
+the lock. The stale `.part` cleanup, the month loop and the merge (now `_fetch_cutout`) all run under it.
+Tests: `tests/test_profile_gen_cutout_key_lock.py`. The only caller is `services/profile_gen/job.py` (queued profile
+jobs, which the chat tools and Guided offer start), so no other path needs the lock. The lock is per API process: two
+API processes sharing one cache dir are still unguarded (not a supported setup).

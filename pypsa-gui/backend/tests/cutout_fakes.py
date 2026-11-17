@@ -128,3 +128,12 @@ def hammer_netcdf(bbox, year, month, target, stop_event):
             back.load()
     scratch.unlink(missing_ok=True)
     write_month(target, year, month)
+
+
+def log_fetch(bbox, year, month, target, stop_event):
+    """Append the month to the file named by `CUTOUT_FAKE_LOG` (one line per
+    fetch, from whichever process runs it), then leave a valid month (RP-21)."""
+    with open(os.environ["CUTOUT_FAKE_LOG"], "a") as log:
+        log.write(f"{month}\n")
+    time.sleep(0.05)  # long enough that a racing second fetch would overlap
+    write_month(target, year, month)
