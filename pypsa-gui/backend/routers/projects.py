@@ -1368,6 +1368,37 @@ def _extract_bundle(zf: zipfile.ZipFile, members: set[str], dest: pathlib.Path,
             atomic_write_bytes(target_path, zf.read(member))
 
 
+
+def _bundle_network_owning_its_costs(zf: zipfile.ZipFile):
+    """A bundle's `network.nc` parsed into a network that is not open yet, with its priced rows checked and
+    re-derived (`network_crud.rederive_imported_parts`, 422 on a bad row) at the bundle's own discount rate:
+    the project it restores brings its solver settings with it. Returns the network and the re-derived rows."""
+    import tempfile
+
+    import pypsa
+
+    from services.asset_schema.derive import number
+    from services.network_crud import rederive_imported_parts
+    from services.solver_service import SolverConfig
+
+    cfg: dict = {}
+    if "solver_config.json" in zf.namelist():
+        try:
+            loaded = json.loads(zf.read("solver_config.json").decode("utf-8"))
+            cfg = loaded if isinstance(loaded, dict) else {}
+        except Exception:  # noqa: BLE001 - an unreadable config loads as the defaults
+            cfg = {}
+    rate = number(cfg.get("discount_rate"))
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "network.nc"
+        path.write_bytes(zf.read("network.nc"))
+        candidate = pypsa.Network()
+        with PyPSAService.get_netcdf_io_lock():
+            PyPSAService.import_network_from_netcdf(candidate, path)
+    rederived = rederive_imported_parts(
+        candidate, global_rate=SolverConfig().discount_rate if rate is None else rate)
+    return candidate, rederived
+
 @router.post("/import_bundle")
 async def import_bundle(
     file: UploadFile = File(...),
@@ -1442,6 +1473,11 @@ async def import_bundle(
                 break
         target_name = base or "imported_project"
 
+    # TCU 11: the bundle's network is an upload like the network imports, so its investment parts own their
+    # rows' costs. A priced part that cannot be derived refuses the import here, before the project row or
+    # any file exists; the priced rows are re-derived at the bundle's own rate.
+    candidate, rederived = _bundle_network_owning_its_costs(zf)
+
     # `target_name` may come from a zip's metadata.json — never trust it.
     # `_safe_project_dir` rejects path traversal and shell-metachar names.
     from services import project_registry
@@ -1485,12 +1521,13 @@ async def import_bundle(
         # A different project: a fresh context (own undo, counter 0, no result
         # state of the project being left — P33b gate B-1). The clears apply
         # to the new context, never to the resident one being left.
-        PyPSAService.reset_network()
+        # The network checked and re-derived above, parsed from this same network.nc.
+        PyPSAService.reset_network(network=candidate)
         undo_service.clear()
         dirty_state.clear()  # memory and disk now agree
+        if rederived:
+            dirty_state.mark_dirty()  # unless costs were re-derived: then the file still holds the stale ones
         n = PyPSAService.get_network()
-        with PyPSAService.get_netcdf_io_lock():
-            PyPSAService.import_network_from_netcdf(n, nc_path)
         # Bind identity atomically with the swap (see load_project for the
         # rationale on why this must be inside the lock, not after).
         project_registry.bind_context(
@@ -1622,10 +1659,12 @@ async def import_bundle(
     # stale pointer on the next request and silently reverts the switch.
     if session is not None:
         active_project.set_active_project(db, session, _imported_project)
+    from routers.io import _rederived_note
+
     change_log_service.log(
         "import", "Project", target_name,
         f"Imported project bundle '{file.filename}' as '{target_name}' "
-        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)",
+        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)" + _rederived_note(rederived),
     )
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(
@@ -1641,6 +1680,8 @@ async def import_bundle(
         # Likewise each reliability-goal value the bundle carried that PUT
         # would refuse: imported as "not set" (W3b-R), named here.
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
+        # The priced rows whose costs were re-derived from their parts (TCU 11).
+        **({"rederived": rederived} if rederived else {}),
         "summary": ImportSummary(
             buses=len(n.buses),
             generators=len(n.generators),

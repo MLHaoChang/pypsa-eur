@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A project bundle import now checks and re-derives the costs a priced asset's investment parts own, at the bundle's own discount rate, and refuses a bundle whose parts cannot be priced before anything is written. An experiment case can no longer set a cost the investment parts own, and a changed battery duration re-derives the case's cost.

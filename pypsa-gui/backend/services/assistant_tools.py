@@ -319,8 +319,30 @@ def _changes(changes):
     return parsed
 
 
+def _refuse_cost_the_parts_own(n, change) -> None:
+    """TCU 11: a case that sets a cost a priced row's investment parts own would be re-derived away at staging,
+    so it would solve as the baseline while reported changed; refused in the single edit's words."""
+    from services.asset_schema.derive import split_parts
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+    from services.network_crud import check_parts_own_costs
+
+    if change.component_class not in COMPOSITE:
+        return
+    frame = getattr(n, CLASS_ATTR[change.component_class])
+    for name in change.names:
+        before = frame.loc[name].to_dict()
+        _, parts = split_parts(change.component_class, before)
+        try:
+            check_parts_own_costs(change.component_class, parts, before=before,
+                                  submitted={change.attribute: change.value})
+        except HTTPException as exc:
+            workflow._refuse("derived_field", f"{change.component_class} {name}: {exc.detail}")
+
+
 def _candidate(ctx, changes):
     from services import chat_tools
+    from services.asset_schema.schema import COMPOSITE
+    from services.network_crud import rederive_scaled_parts
     candidate = PyPSAService.build_context()
     candidate.network = workflow._network_copy(ctx.network)
     candidate.user_ts = copy.deepcopy(ctx.user_ts)
@@ -338,6 +360,7 @@ def _candidate(ctx, changes):
             diffs.append({"component_class": change.component_class, "name": name, "attribute": change.attribute,
                           "before": before.item() if hasattr(before, "item") else before,
                           "after": change.value, "unit": unit})
+        _refuse_cost_the_parts_own(candidate.network, change)
         component.static.loc[change.names, change.attribute] = change.value
         for name in change.names:
             stored = component.static.at[name, change.attribute]
@@ -345,6 +368,12 @@ def _candidate(ctx, changes):
             if stored != change.value:
                 workflow._refuse('invalid_change_value', 'The native input field would round this value; choose an exactly representable value and create a new preview.', 409)
     with workflow._isolated(candidate):
+        # A changed scale (a battery's max_hours) moves the cost its parts own: re-derived on the copy at the
+        # copy's own rate, as the native edit does (a no-op on a row without priced parts).
+        for change in changes:
+            if change.component_class in COMPOSITE:
+                for name in change.names:
+                    rederive_scaled_parts(candidate.network, change.component_class, name)
         validation = chat_tools.validate_network()
     if not validation.get("ok") or validation.get("deferred"):
         workflow._refuse("change_preflight_failed", "The candidate fails network validation; the project was not modified.", 409)
