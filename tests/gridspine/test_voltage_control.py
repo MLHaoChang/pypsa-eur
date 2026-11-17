@@ -728,6 +728,7 @@ def test_the_voltage_control_keys_load():
         ({"q_band_v_range_pu": {**RANGE, "min": 1.05, "max": 0.95}}, "0 < min < max"),
         ({"q_band_v_range_pu": {**RANGE, "max": math.inf}}, "0 < min < max"),
         ({"q_band_v_range_pu": {**RANGE, "min": 0.0}}, "0 < min < max"),
+        ({"q_band_v_range_pu": {**RANGE, "min": 1.0, "max": 1.0}}, "0 < min < max"),
     ],
 )
 def test_an_impossible_voltage_control_key_is_refused_with_its_reason(extra, match):
@@ -862,3 +863,105 @@ def test_the_step_writes_the_chart_the_droop_on_both_grids_and_the_scorecard(tmp
     )
     assert bare.at["q_v_droop", "status_as_is"] == "unknown"
     assert bare.loc["voltage_control_modes", "status_as_is"] == "unknown"
+
+
+def _droop_run(tmp_path, sk=2000.0):
+    """
+    A prepared, ranked hub run (S_k''min ``sk`` at the PoC, NaN: none entered) and a project
+    profile ``vc_test`` that states every droop setting.
+    """
+    import yaml
+
+    from gridspine.drivers.campus_study import (
+        draft_from_project,
+        prepare_campus,
+        rank_campus,
+    )
+    from tests.gridspine.test_campus_hourly import solved_hub
+
+    n = solved_hub(periods=[2030, 2040])
+    n.buses["eh_sk_mva"] = [sk, float("nan")]
+    path = tmp_path / "network.nc"
+    n.export_to_netcdf(str(path))
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(path).spec, path)
+    rank_campus(run, k=1)
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    db = {"value": 1.0, "clause": "test deadband", "source": "assumed"}
+    ibr = {"value": 0.33, "clause": "test ibr", "source": "assumed"}
+    (profiles / "vc_test.yaml").write_text(
+        yaml.safe_dump(
+            _profile(q_v_slope_pct=SLOPE, voltage_deadband_pct=db, q_range_ibr=ibr)
+        )
+    )
+    return run, [profiles]
+
+
+def _droop_row(run, dirs):
+    from gridspine.drivers.campus_study import voltage_control_campus
+
+    out = voltage_control_campus(run, "vc_test", profile_dirs=dirs)
+    return out["outcomes"], out["scorecard"].set_index("check").loc["q_v_droop"]
+
+
+def test_without_an_entered_sk_min_the_droop_is_unknown_never_judged_on_the_typical_grid(
+    tmp_path,
+):
+    from gridspine.drivers.campus_study import NO_SK_MIN
+
+    run, dirs = _droop_run(tmp_path, sk=float("nan"))
+    outcomes, row = _droop_row(run, dirs)
+    assert outcomes.empty
+    assert row["status_as_is"] == "unknown" and row["detail"].startswith(NO_SK_MIN)
+
+
+def test_a_normally_open_tie_leaves_the_droop_unknown(tmp_path, monkeypatch):
+    import gridspine.drivers.campus_study as cs
+
+    run, dirs = _droop_run(tmp_path)
+    real = cs.load_run_campus
+
+    def tie_open(run_dir):
+        c = real(run_dir)
+        c.tie_normally_open = True
+        return c
+
+    monkeypatch.setattr(cs, "load_run_campus", tie_open)
+    monkeypatch.setattr(
+        cs, "_p_ref", lambda campus, pcc: (60.0, "test")
+    )  # an open tie never conducts
+    outcomes, row = _droop_row(run, dirs)
+    assert outcomes.empty
+    assert row["status_as_is"] == "unknown" and "normally open" in row["detail"]
+
+
+def test_a_grid_the_equivalent_refuses_leaves_the_droop_unknown_with_the_reason(
+    tmp_path, monkeypatch
+):
+    import gridspine.drivers.campus_study as cs
+
+    run, dirs = _droop_run(tmp_path)
+    real = cs.load_run_campus
+
+    def bad_rx(run_dir):
+        c = real(run_dir)
+        c.net.ext_grid["rx_min"] = -1.0
+        return c
+
+    monkeypatch.setattr(cs, "load_run_campus", bad_rx)
+    outcomes, row = _droop_row(run, dirs)
+    assert outcomes.empty
+    assert row["status_as_is"] == "unknown" and "rx_min" in row["detail"]
+
+
+def test_the_controlled_losses_are_the_campus_losses_of_the_same_dispatch_at_the_same_poc_voltage():
+    f = intact(one_unit(vm=1.02), PlantControl("q_fixed", setpoint=6.0))
+    o = f.control
+    # the same unit Q on a stiff PoC held at the voltage the loop reached: the campus is the same flow
+    same = solve_cases(
+        one_unit(vm=o.v_poc_pu), hour(), setpoints={"sgen_q": dict(o.unit_q)}
+    )["intact"]
+    assert f.losses_mw == pytest.approx(same.losses_mw, abs=1e-6)
+    assert f.losses_mw > 0.01  # real losses, not a cancelled sign
+    assert f.pcc_p_mw == pytest.approx(same.pcc_p_mw, abs=1e-6)
