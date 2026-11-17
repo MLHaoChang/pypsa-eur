@@ -322,7 +322,8 @@ def _changes(changes):
 def _candidate(ctx, changes):
     from services import chat_tools
     from services.asset_schema.schema import COMPOSITE
-    from services.network_crud import rederive_scaled_parts
+    from services.asset_schema.derive import class_label, split_parts
+    from services.network_crud import _check_investment_parts, rederive_scaled_parts
     candidate = PyPSAService.build_context()
     candidate.network = workflow._network_copy(ctx.network)
     candidate.user_ts = copy.deepcopy(ctx.user_ts)
@@ -343,6 +344,17 @@ def _candidate(ctx, changes):
         # TCU 11: a cost the parts own would be re-derived away at staging, so the case would solve as the baseline.
         if problem := workflow.cost_the_parts_own_problem(candidate.network, change):
             workflow._refuse("derived_field", problem)
+        # GK B (63): the single edit's priced-part check, first, on each row as the change will leave it, so a
+        # priced part without a lifetime is refused with the edit's kind before the re-derive below raises.
+        if change.component_class in COMPOSITE:
+            for name in change.names:
+                row, parts = split_parts(change.component_class,
+                                         {**component.static.loc[name].to_dict(), change.attribute: change.value})
+                try:
+                    _check_investment_parts(change.component_class, parts, row=row)
+                except HTTPException as exc:
+                    workflow._refuse("invalid_edit_value",
+                                     f"{class_label(change.component_class)} '{name}': {exc.detail}")
         component.static.loc[change.names, change.attribute] = change.value
         for name in change.names:
             stored = component.static.at[name, change.attribute]

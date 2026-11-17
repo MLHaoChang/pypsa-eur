@@ -46,3 +46,8 @@ Two writers were left:
     (pinned by a test).
   - B3: the refused set is `derive.owned_columns`; of it the allowlist reaches only `capital_cost` (pinned).
   - B4: the open network is read from the session's own context and pinned unchanged.
+- 2026-11-17, GK B (63) on #1628 @6e5d4fca: NOT OK. T1: a bundle rate the annuity cannot take (-2, 1e308) escaped
+  as a raw 500, and -1, `true` and `"0.05"` were accepted; now refused as 422 `import_unreadable` by
+  `periodized_costs.discount_rate_problem` on the raw value. T2: the experiment copy skipped
+  `_check_investment_parts`; it now runs first and refuses as `invalid_edit_value`, naming the row. Ruling: a
+  null bundle rate stays a 422; load_project reading null as 0.07 is ticket `12-load-project-null-discount-rate.md`.
