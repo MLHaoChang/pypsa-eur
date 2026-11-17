@@ -34,7 +34,9 @@ the contract channel names in contract order.
 **Battery from the campus.** :func:`battery_from_campus` builds the default
 battery from the PCC corners. The battery holds one zero-sequence pair for
 all corners; it is taken from the max case and recorded in the manifest as
-``assumed: from max``, with every study case whose own zero sequence differs.
+``assumed: from max`` (in the manifest and on each battery-corner row). The
+manifest's ``z0_differs_from_battery`` maps each study case whose own zero
+sequence differs to the battery case ids at that case's Sk.
 
 **Automation stub.** ``run_schedule.py`` is generated text for the mhi.pscad
 API: it loops the schedule, sets the source and event parameters and runs
@@ -77,6 +79,7 @@ C_NOTE = "IEC 60909 c not applied (as the test battery); with c_max = 1.1 the ma
 STAGE_NOTE = "reference, not the EMT source: IEC 60909 at the PoC bus with the stage's units energised"
 BATTERY_Z0_NOTE = "assumed: from max"
 STUDY_CASES = ("max", "min", "normal")
+_REQUIRED_PCC = ("sk_max_mva", "sk_min_mva", "rx_max", "rx_min")
 _STUDY_FIELDS = {
     "max": ("sk_max_mva", "rx_max", "x0x_max", "r0x0_max"),
     "min": ("sk_min_mva", "rx_min", "x0x_min", "r0x0_min"),
@@ -180,6 +183,11 @@ def study_sources(pcc: dict) -> tuple:
     tuple of ``(Thevenin, source_tag)``; ``gaps`` lists ``(case, param, why)``
     for a study case whose zero sequence is not held.
     """
+    missing = [f for f in _REQUIRED_PCC if f not in pcc]
+    if missing:
+        raise EmtPackError(
+            f"PCC data lacks {missing}: the Thevenin set needs Sk and R/X of the max and min cases"
+        )
     sk_min, sk_max = pcc["sk_min_mva"][0], pcc["sk_max_mva"][0]
     if sk_min > sk_max:
         raise EmtPackError(
@@ -192,7 +200,9 @@ def study_sources(pcc: dict) -> tuple:
             continue
         xr = _x_over_r(case, rx_name, pcc[rx_name][0])
         z0, used = {}, [sk_name, rx_name]
-        if x0x_name and x0x_name in pcc and r0x0_name in pcc:
+        if x0x_name is None:
+            pass  # the campus schema holds no zero sequence for this case and no battery case uses it
+        elif x0x_name in pcc and r0x0_name in pcc:
             x0x, r0x0 = pcc[x0x_name][0], pcc[r0x0_name][0]
             if r0x0 == 0:
                 gaps.append(
@@ -211,7 +221,7 @@ def study_sources(pcc: dict) -> tuple:
                 }
                 used += [x0x_name, r0x0_name]
         else:
-            for n in (f"x0x_{case}", f"r0x0_{case}"):
+            for n in (x0x_name, r0x0_name):
                 if n not in pcc:
                     gaps.append(
                         (
@@ -267,7 +277,7 @@ def _impedance_row(g: Thevenin, vn_kv) -> dict:
     }
 
 
-def thevenin_set(sources, battery, vn_kv) -> list:
+def thevenin_set(sources, battery, vn_kv, battery_source="caller's battery") -> list:
     """
     Rows of the Thevenin set: the study cases (group ``study``, tagged
     with their PCC data source) then each distinct battery corner (group
@@ -293,7 +303,7 @@ def thevenin_set(sources, battery, vn_kv) -> list:
                 "label": c.grid.label,
                 "group": "battery",
                 **_impedance_row(c.grid, vn_kv),
-                "source": "campus PCC corners",
+                "source": battery_source,
                 "note": C_NOTE,
             }
         )
@@ -403,7 +413,7 @@ RESULTS = HERE / "{RESULTS_DIR}"
 SOURCE_KEYS = {{"r_ohm": "R", "x_ohm": "X", "r0_ohm": "R0", "x0_ohm": "X0"}}
 #: schedule column -> parameter of the event block (edit to your model)
 EVENT_KEYS = {{
-    "t_event_s": "T_EVENT", "duration_s": "T_DUR", "fault_r_ohm": "RF", "fault_x_ohm": "XF",
+    "kind": "KIND", "t_event_s": "T_EVENT", "duration_s": "T_DUR", "fault_r_ohm": "RF", "fault_x_ohm": "XF", "v_retained_pu": "VRET",
     "step_pu": "STEP_PU", "step_hz": "STEP_HZ", "ramp_hz_per_s": "RAMP_HZ_S", "angle_deg": "ANGLE_DEG",
 }}
 
@@ -467,10 +477,11 @@ def write_emt_pack(
     assumptions = [
         f"thevenin: {C_NOTE}; confirm the source impedance convention with the TSO"
     ]
-    z0_differs = []
+    z0_differs, battery_source = {}, "caller's battery"
     if battery is None:
-        if sources[0][0].has_zero_sequence:
+        if {g.label: g for g, _ in sources}["max"].has_zero_sequence:
             battery = battery_from_campus(campus)
+            battery_source = f"campus PCC corners; Z0 {BATTERY_Z0_NOTE}"
             assumptions.append(
                 f"battery zero sequence: {BATTERY_Z0_NOTE} (x0x_max, r0x0_max)"
             )
@@ -486,15 +497,17 @@ def write_emt_pack(
     battery = validate_battery(battery) if battery is not None else None
     if battery is not None:
         pair = {(c.grid.z0_over_z1, c.grid.x0_over_r0) for c in battery}
-        z0_differs = sorted(
-            g.label
+        z0_differs = {
+            g.label: [c.case_id for c in battery if c.grid.sk_mva == g.sk_mva]
             for g, _ in sources
             if g.has_zero_sequence and (g.z0_over_z1, g.x0_over_r0) not in pair
-        )
+        }
 
+    set_rows = thevenin_set(sources, battery, vn_kv, battery_source)
+    stage_rows = stage_reference(campus, stages)
     texts = {
-        THEVENIN_CSV: _csv(thevenin_set(sources, battery, vn_kv), THEVENIN_COLUMNS),
-        STAGES_CSV: _csv(stage_reference(campus, stages), STAGE_COLUMNS),
+        THEVENIN_CSV: _csv(set_rows, THEVENIN_COLUMNS),
+        STAGES_CSV: _csv(stage_rows, STAGE_COLUMNS),
     }
     texts[THEVENIN_JSON] = _dumps(
         {
@@ -502,8 +515,8 @@ def write_emt_pack(
             "stage_note": STAGE_NOTE,
             "pcc_bus": bus,
             "vn_kv": vn_kv,
-            "sources": thevenin_set(sources, battery, vn_kv),
-            "stages": stage_reference(campus, stages),
+            "sources": set_rows,
+            "stages": stage_rows,
         }
     )
     if battery is not None:

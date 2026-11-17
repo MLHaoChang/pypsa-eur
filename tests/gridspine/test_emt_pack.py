@@ -22,9 +22,13 @@ from gridspine.handoff.emt_pack import (
 from gridspine.handoff.test_battery import (
     CHANNEL_SEP,
     CHANNELS,
+    PARAM_NAMES,
+    Case,
+    Thevenin,
     build_battery,
     cases_from_json,
     fault_impedance_ohm,
+    thevenin_impedances_ohm,
 )
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
@@ -185,7 +189,9 @@ def test_battery_z0_is_from_max_and_the_differing_case_is_listed(tmp_path):
     assert {(round(c.grid.z0_over_z1, 9), round(c.grid.x0_over_r0, 9)) for c in b} == {
         (3.0, 10.0)
     }
-    assert p.manifest["z0_differs_from_battery"] == ["min"]
+    camp = build_campus(spec())
+    on_min = [c.case_id for c in battery_from_campus(camp) if c.grid.sk_mva == 2000.0]
+    assert on_min and p.manifest["z0_differs_from_battery"] == {"min": on_min}
     assert any("assumed: from max" in a for a in p.manifest["assumptions"])
 
 
@@ -363,7 +369,7 @@ def test_data_hash_covers_every_listed_file_and_moves(tmp_path):
     camp = build_campus(spec())
     edited = battery_from_campus(camp, overrides={"flat_skmin_xrmin": {"t_end_s": 5.0}})
     q = write_emt_pack(tmp_path / "q", camp, battery=edited)
-    assert q.manifest["files"]["thevenin_set.csv"] == files["thevenin_set.csv"]
+    assert q.manifest["files"]["thevenin_stages.csv"] == files["thevenin_stages.csv"]
     assert q.manifest["files"]["case_schedule.json"] != files["case_schedule.json"]
     assert q.manifest["data_hash"] != p.manifest["data_hash"]
 
@@ -386,3 +392,132 @@ def test_manifest_cites_the_contract(tmp_path):
     assert m["channels"] == list(CHANNELS)
     assert m["contract_version"] == emt_pack.CONTRACT_VERSION
     assert m["files"] and math.isfinite(m["vn_kv"])
+
+
+# --- review and mutant follow-ups --------------------------------------------
+
+
+def test_normal_case_without_schema_zero_sequence_is_not_a_gap(tmp_path):
+    p = pack(tmp_path, spec(sk_normal_mva=2500.0, rx_normal=0.11))
+    assert p.to_be_supplied.empty
+
+
+def test_x0x_without_r0x0_lists_only_the_missing_one(tmp_path):
+    p = pack(tmp_path, spec(r0x0_min=None))
+    assert list(p.to_be_supplied["param"]) == ["r0x0_min"]
+    assert by_label(p)["min"]["x0_ohm"] is None
+
+
+def test_a_source_without_zero_sequence_is_not_listed_as_differing(tmp_path):
+    p = pack(tmp_path, spec(x0x_min=None, r0x0_min=None))
+    assert p.manifest["z0_differs_from_battery"] == {}
+
+
+def test_missing_pcc_field_is_refused_by_name():
+    with pytest.raises(EmtPackError, match=r"PCC data lacks \['rx_min'\]"):
+        study_sources(
+            {"sk_min_mva": (1.0, "a"), "sk_max_mva": (2.0, "a"), "rx_max": (0.1, "a")}
+        )
+
+
+def test_battery_rows_say_their_zero_sequence_is_borrowed(tmp_path):
+    s = by_label(pack(tmp_path))
+    corners = [r for r in s.values() if r["group"] == "battery"]
+    assert sorted(r["label"] for r in corners) == [
+        "skmax_xrmax",
+        "skmax_xrmin",
+        "skmin_xrmax",
+        "skmin_xrmin",
+    ]
+    assert s["skmin_xrmin"]["source"] == "campus PCC corners; Z0 assumed: from max"
+    camp = build_campus(spec())
+    own = write_emt_pack(tmp_path / "own", camp, battery=battery_from_campus(camp))
+    assert by_label(own)["skmin_xrmin"]["source"] == "caller's battery"
+
+
+def test_a_battery_holding_a_non_case_is_refused(tmp_path):
+    with pytest.raises(ContractError, match="not a Case"):
+        write_emt_pack(tmp_path, build_campus(spec()), battery=("flat",))
+
+
+def test_schedule_zero_sequence_present_and_absent(tmp_path):
+    camp = build_campus(spec())
+    battery = battery_from_campus(camp)
+    sched = {
+        r["case_id"]: r
+        for r in rows(
+            write_emt_pack(tmp_path / "a", camp, battery=battery).path,
+            "case_schedule.json",
+        )
+    }
+    c = next(c for c in battery if c.kind == "fault_1ph")
+    _, z0 = thevenin_impedances_ohm(c.grid, 110.0)
+    assert (sched[c.case_id]["r0_ohm"], sched[c.case_id]["x0_ohm"]) == (
+        z0.real,
+        z0.imag,
+    )
+    flat = Case(
+        "flat_only",
+        "flat",
+        "04/05",
+        Thevenin("g", 2000.0, 8.0),
+        1.0,
+        10.0,
+        ("v_poc_pu",),
+    )
+    r = rows(
+        write_emt_pack(tmp_path / "b", camp, battery=(flat,)).path, "case_schedule.json"
+    )[0]
+    assert r["r0_ohm"] is None and r["x0_ohm"] is None
+
+
+def _literal(text, name):
+    for n in ast.parse(text).body:
+        if isinstance(n, ast.Assign) and n.targets[0].id == name:
+            return ast.literal_eval(n.value)
+    raise AssertionError(name)
+
+
+def test_stub_maps_every_column_that_tells_cases_apart(tmp_path):
+    _, text = _stub(tmp_path)
+    events = _literal(text, "EVENT_KEYS")
+    assert {"kind", "t_event_s", "fault_r_ohm", "fault_x_ohm", *PARAM_NAMES} <= set(
+        events
+    )
+    assert set(_literal(text, "SOURCE_KEYS")) == {"r_ohm", "x_ohm", "r0_ohm", "x0_ohm"}
+
+
+def test_manifest_and_thevenin_keys_are_pinned(tmp_path):
+    p = pack(tmp_path)
+    m = json.loads((p.path / "manifest.json").read_text())
+    assert set(m) == {
+        "pack",
+        "pack_version",
+        "contract_version",
+        "f_hz",
+        "pcc_bus",
+        "vn_kv",
+        "files",
+        "data_hash",
+        "case_ids",
+        "channels",
+        "outputs",
+        "assumptions",
+        "z0_differs_from_battery",
+        "to_be_supplied",
+        "trgc",
+    }
+    assert (m["pack"], m["pack_version"], m["f_hz"], m["pcc_bus"], m["vn_kv"]) == (
+        "pscad_emt",
+        "1",
+        50.0,
+        "PCC",
+        110.0,
+    )
+    assert m["trgc"] == ["02", "03", "05", "07", "17", "19", "20", "21", "22", "23"]
+    assert m["to_be_supplied"] == "to_be_supplied.csv"
+    assert len(m["assumptions"]) == 2
+    th = rows(p.path, "thevenin_set.json")
+    assert set(th) == {"note", "stage_note", "pcc_bus", "vn_kv", "sources", "stages"}
+    assert (th["note"], th["pcc_bus"], th["vn_kv"]) == (C_NOTE, "PCC", 110.0)
+    assert th["stage_note"] == emt_pack.STAGE_NOTE
