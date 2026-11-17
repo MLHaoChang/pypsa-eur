@@ -22,6 +22,12 @@ export const ENVELOPE: Envelope = {
 const ORDER = ['intake', 'setup', 'inputs', 'input_gate', 'solve', 'result_gate', 'explore', 'report', 'handoff']
 const SKIPPED: Record<string, string> = { explore: 'Exploring cases is not part of a run yet.', report: 'The run report is not part of a run yet.' }
 
+// The grid_only@1 profile's own skip reasons (`services/run_profiles.py`).
+const GRID_SKIPPED: Record<string, string> = {
+  explore: 'Grid-only runs explore no cases by default.',
+  report: 'No report from grid-only runs yet: the report would read results the load flow has overwritten.',
+}
+
 function stages(at: string, current: Partial<RunStage> = {}, done = false): RunStage[] {
   const index = ORDER.indexOf(at)
   return ORDER.map((stage, i) => SKIPPED[stage] ? { stage, status: 'skipped', reason: SKIPPED[stage] }
@@ -104,6 +110,11 @@ export const STATES: Record<string, RunMonitorView> = {
     envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   finished_report: view({ status: 'completed', run: run('handoff', { status: 'completed',
     stages: stages('handoff', {}, true).map(s => (s.stage === 'report' ? { stage: 'report', status: 'passed' } : s)) }),
+    envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
+  // Study harness 15: a grid-only run, finished, with explore and the report skipped by the profile.
+  finished_grid_only: view({ status: 'completed', run: run('handoff', { profile: 'grid_only@1', status: 'completed',
+    stages: stages('handoff', {}, true).map(s => s.stage in GRID_SKIPPED
+      ? { stage: s.stage, status: 'skipped', reason: GRID_SKIPPED[s.stage] } : s) }),
     envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   over_budget: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'budget', stages: stages('solve') }),
     monitor: { ...MONITOR, budgets: { cost_eur: { used: 5.01, limit: 5, unmetered: false } } } }),

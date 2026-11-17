@@ -11,7 +11,7 @@
  * fixture run is put in the companion as a local turn, the way "Open the run ›"
  * does; no model is called.
  *
- * Usage: node scripts/run-monitor-shots.mjs [outDir]
+ * Usage: [ONLY=state,state] node scripts/run-monitor-shots.mjs [outDir]
  * Writes `<mode>-<state>.png` for every STATES key, plus
  * `<mode>-activity-row.png`, `<mode>-activity-open-run.png` and
  * `<mode>-link-landing.png`.
@@ -133,7 +133,9 @@ try {
       await shown.evaluate(e => (e.closest('[data-testid^="chat-choice"]') ?? e).scrollIntoView({ block: 'start' }))
     }
 
-    for (const key of Object.keys(fx.STATES)) {
+    // ONLY=a,b shoots just those states (study harness 15).
+    const only = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null
+    for (const key of Object.keys(fx.STATES).filter(k => !only || only.has(k))) {
       try {
         await showRun(key)
         const step = fx.STEPS[key]

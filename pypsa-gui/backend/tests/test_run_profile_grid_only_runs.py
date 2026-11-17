@@ -101,10 +101,12 @@ def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
     }
     assert run["stages"]["explore"]["status"] == "skipped" and script.requests == []
     assert run["stages"]["handoff"]["gate"]["passed"] is True
-    # GK B (61) SH-15: no report job is ever enqueued; the stage reads skipped, naming issue 50.
+    # GK B (61) SH-15: no report job is ever enqueued; the stage reads skipped with the reason
+    # (issue 50), in user words: no tracker number reaches the user (UX).
     report = run["stages"]["report"]
     assert enqueued == [] and report["status"] == "skipped", report
-    assert "issue 50" in report.get("reason", ""), report
+    assert "load flow has overwritten" in report.get("reason", ""), report
+    assert "issue" not in report["reason"].lower(), report
     # GK B SH-15 A1: no LP figure is read back after the flow rewrote the live dispatch (issue 50).
     assert run["handoff"]["kpis"] == []
     # GK B (61) condition 7: the receipt names the skipped report with its reason, never a gap.
@@ -124,7 +126,7 @@ def test_a_skipped_report_names_its_reason_for_the_report_and_its_chapters(tmp_p
     A report stage skipped by anything but the profile is read as before."""
     from harness import run_handoff
 
-    why = "No report yet (issue 50)."
+    why = "No report yet."
     task = {
         "run": {
             "stages": {"report": {"status": "skipped", "reason": why, "by": "profile"}}

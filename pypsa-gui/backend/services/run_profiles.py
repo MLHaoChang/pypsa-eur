@@ -1158,8 +1158,8 @@ def _grid_only() -> dict:
             "explore": {"skip": "Grid-only runs explore no cases by default."},
             # GK B (61) SH-15 A1: the stock report reads the live network, which the flow
             # rewrites, so no report is published until the LP frames are kept (issue 50).
-            "report": {"skip": "No report from grid-only runs yet: the AC power flow rewrites the live "
-                               "dispatch the report reads (issue 50)."},
+            "report": {"skip": "No report from grid-only runs yet: the report would read results "
+                               "the load flow has overwritten."},
             # No `ho.kpis_read`: cost and emissions are read from the live network, which the
             # solve's AC power flow rewrites (the slack generator's dispatch), so no headline
             # KPI is read back for this profile until the engine keeps the LP's frames.

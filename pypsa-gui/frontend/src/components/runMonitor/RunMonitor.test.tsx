@@ -186,6 +186,15 @@ describe('RunMonitor', () => {
     expect(screen.getAllByTestId('run-stage-reason')).toHaveLength(2)
   })
 
+  it('a finished grid-only run says why it has no report, in words without a tracker number', async () => {
+    show('finished_grid_only')
+    await screen.findByTestId('run-state')
+    const row = screen.getAllByTestId('run-stage').find(r => r.getAttribute('data-stage') === 'report')!
+    const reason = row.querySelector('[data-testid="run-stage-reason"]')?.textContent ?? ''
+    expect(reason).toMatch(/^No report from grid-only runs yet/)
+    expect(screen.getByTestId('run-monitor').textContent).not.toMatch(/issue \d|#\d/i)
+  })
+
   it.each(['over_budget', 'solves_used_up'] as const)('%s: a held run offers Stop but not Pause', async (state) => {
     show(state)
     await screen.findByTestId('run-failure')
