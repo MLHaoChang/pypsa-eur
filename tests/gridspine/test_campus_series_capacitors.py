@@ -522,6 +522,168 @@ def test_a_kept_series_capacitor_name_blocks_an_equivalent_of_the_same_name():
         aggregate(_plant_with_aux_feeder("EQ_MV"))
 
 
+# --- GC-08's campus step scans from behind each capacitor (S7) ---------------
+#
+# Hand calculation on the test campus, everything in ohm at 20 kV (Zbase = 400 ohm on 1 MVA):
+# * two 40 MVA 110/21 kV transformers, vk 12 %, vkr 0.4 %, at the nominal ratio:
+#   zk = 0.12 / 40 = 0.003 pu, rk = 0.004 / 40 = 0.0001 pu, xk = sqrt(zk^2 - rk^2) = 0.0029983 pu;
+#   two in parallel: 0.00149917 pu = 0.599667 ohm;
+# * the grid (IEC 60909 c: 1.1 for max, 1.0 for min, at 110 kV):
+#   max: 1.1 / 3000 / sqrt(1 + 0.1^2) = 3.64837e-4 pu = 0.145935 ohm;
+#   min: 1.0 / 2000 / sqrt(1 + 0.12^2) = 4.96442e-4 pu = 0.198577 ohm.
+# X_total(max) = 0.745602 ohm, X_total(min) = 0.798244 ohm; f_er = 50 * sqrt(Xc / X_total).
+X_TOTAL = {"max": 0.745602, "min": 0.798244}
+
+
+def _screens(tmp_path, monkeypatch, spec):
+    from gridspine.drivers import campus_study as cs
+
+    campus = build_campus(spec)
+    monkeypatch.setattr(cs, "load_run_campus", lambda run_dir: campus)
+    return cs.ssti_screens_campus(tmp_path)
+
+
+def test_the_campus_step_finds_the_capacitors_resonance_from_its_far_side_bus(
+    tmp_path, monkeypatch
+):
+    import math
+
+    import pandas as pd
+
+    from gridspine.drivers import campus_study as cs
+    from gridspine.static import subsync_scan as ss
+
+    out = _screens(tmp_path, monkeypatch, cap_spec(xc_ohm=t(0.5)))
+    res = pd.read_csv(tmp_path / cs.SUBSYNC_RESONANCE_CSV)
+    series = res[res["kind"] == ss.SERIES].set_index("case")
+    assert set(series["bus"]) == {"MV1C"}
+    for case, x_total in X_TOTAL.items():
+        f_er = 50.0 * math.sqrt(0.5 / x_total)  # max 40.945 Hz, min 39.572 Hz
+        assert series.at[case, "f_er_hz"] == pytest.approx(f_er, abs=ss.DF_HZ)
+    assert out.subsync_verdict == "check"  # no torsional mode given
+    scan = pd.read_csv(tmp_path / cs.SUBSYNC_SCAN_CSV)
+    assert set(scan["bus"]) == {"PCC", "MV1C"}
+    assert set(res[res["kind"] == ss.SSCI]["bus"]) == {"PCC", "MV1C"}
+
+
+def test_a_capacitor_resonating_below_the_band_reads_clear_in_the_band_and_names_it(
+    tmp_path, monkeypatch
+):
+    import pandas as pd
+
+    from gridspine.drivers import campus_study as cs
+    from gridspine.static import subsync_scan as ss
+
+    # Xc = 0.005 ohm: f_er = 50 * sqrt(0.005 / 0.7456) = 4.1 Hz, below the 5 Hz edge.
+    out = _screens(tmp_path, monkeypatch, cap_spec(xc_ohm=t(0.005)))
+    res = pd.read_csv(tmp_path / cs.SUBSYNC_RESONANCE_CSV)
+    series = res[res["kind"] == ss.SERIES]
+    assert set(series["verdict"]) == {"clear"} and set(series["case"]) == {"max", "min"}
+    assert set(series["note"]) == {
+        "clear in the 5-45 Hz scan band: series capacitor(s) ['SC1'] scanned, "
+        "no series resonance"
+    }
+    assert out.subsync_verdict == "clear"
+    # scanned from behind the capacitor only, with the scan's own clearance and label
+    assert set(series["bus"]) == {"MV1C"}
+    ssci = res[res["kind"] == ss.SSCI].iloc[0]
+    for col in ("clearance_hz", "assumed", "label"):
+        assert set(series[col]) == {ssci[col]}
+
+
+def test_without_a_capacitor_the_campus_step_still_reads_not_evaluated(
+    tmp_path, monkeypatch
+):
+    import pandas as pd
+
+    from gridspine.drivers import campus_study as cs
+
+    out = _screens(tmp_path, monkeypatch, campus_spec())
+    assert out.subsync_verdict == "not evaluated"
+    assert set(pd.read_csv(tmp_path / cs.SUBSYNC_SCAN_CSV)["bus"]) == {"PCC"}
+
+
+def test_with_two_capacitors_the_worst_row_decides(tmp_path, monkeypatch):
+    from gridspine.static import subsync_scan as ss
+
+    # SC1 resonates below the band (clear on its own); SC2, on a second feeder, inside it.
+    spec = cap_spec(xc_ohm=t(0.005))
+    c = spec["campus"]
+    c["buses"]["MV3C"] = {"vn_kv": 20.0}
+    c["buses"]["MV3"] = {"vn_kv": 20.0}
+    c["cables"]["CB3"] = dict(c["cables"]["CB1"], from_bus="MV3C", to_bus="MV3")
+    c["series_capacitors"]["SC2"] = {
+        "from_bus": "MV1",
+        "to_bus": "MV3C",
+        "xc_ohm": t(0.5),
+    }
+    out = _screens(tmp_path, monkeypatch, spec)
+    res = out.subsync.resonance
+    series = res[res["kind"] == ss.SERIES]
+    assert set(series["bus"]) == {"MV3C"}  # only SC2 crosses inside the band
+    assert out.subsync_verdict == "check"
+
+
+def test_a_capacitor_in_a_ring_has_no_far_side_and_is_refused(tmp_path, monkeypatch):
+    # SC1 ties MV1 to MVB, each fed by its own transformer from the PCC: both ends sit one
+    # branch from the PCC, so neither is behind the capacitor.
+    spec = cap_spec(to_bus="MVB")
+    c = spec["campus"]
+    c["cables"]["CB1"]["from_bus"] = "MV1"
+    del c["buses"]["MV1C"]
+    c["buses"]["MVB"] = {"vn_kv": 20.0}
+    c["transformers"]["TR3"] = dict(c["transformers"]["TR1"], lv_bus="MVB")
+    with pytest.raises(
+        ContractError,
+        match=r"series capacitor SC1: neither end is behind it seen from the PCC "
+        r"\(graph distances 1 and 1\)",
+    ):
+        _screens(tmp_path, monkeypatch, spec)
+
+
+def test_the_harmonic_scan_refuses_a_campus_with_a_series_capacitor_naming_it():
+    from gridspine.static import harmonic_scan as hs
+
+    campus = build_campus(cap_spec())
+    bus, cases, _ = hs.campus_cases(campus)
+    _refuses(
+        lambda: hs.impedance_scan(campus.net, bus, cases), "harmonic impedance scan"
+    )
+    plain = build_campus(campus_spec())
+    bus, cases, _ = hs.campus_cases(plain)
+    assert not hs.impedance_scan(plain.net, bus, cases).envelope.empty
+
+
+def test_a_line_that_is_not_a_name_is_refused():
+    _refused(
+        cap_spec(xc_ohm=None, k=t(0.5), line=5),
+        r"series_capacitors\.SC1\.line: a k entry needs the name of the cable",
+    )
+
+
+def test_a_plain_impedance_without_the_marker_is_no_series_capacitor():
+    from gridspine.static import series_caps as SC
+
+    campus = build_campus(campus_spec())
+    bus = {n: i for i, n in campus.net.bus["name"].items()}
+    # island_flow's droop reactance is such an impedance
+    pp.create_impedance(
+        campus.net, bus["MV1"], bus["MV2"], rft_pu=0.0, xft_pu=0.1, sn_mva=1.0
+    )
+    assert SC.series_caps(campus.net).empty
+    SC.refuse(campus.net, "anything")
+
+
+def test_an_empty_series_capacitors_key_builds_and_aggregates_like_none():
+    from gridspine.ingest.aggregate import aggregate
+    from tests.gridspine.test_aggregate import plant
+
+    spec = plant()
+    spec["campus"]["series_capacitors"] = None
+    assert build_campus(spec).series_capacitors.empty
+    assert aggregate(spec).spec["campus"]["series_capacitors"] is None
+
+
 def test_a_bad_hourly_status_is_printed_as_a_plain_number():
     import pandas as pd
 
