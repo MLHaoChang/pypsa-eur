@@ -165,7 +165,7 @@ Nothing to decide: Readiness lists each section's state and offers **Run study**
 ## 6. Owner questions
 
 <a id="owner-questions"></a>
-Sent to the coordinator as options (HOLISTIC-1). **Answered 2026-11-17 (TEMPLATE-GAPS-1): Q1–Q4 option (a).** Q5 is open. Q4 (a) also asks for design §2.3 to gain concentrator and IPP columns; that edit belongs to the design doc's owner and is not made here.
+Sent to the coordinator as options (HOLISTIC-1). **Answered 2026-11-17 (TEMPLATE-GAPS-1): Q1–Q4 option (a).** Q5 answered (a) (GAP03-ADD-1). Q4 (a) also asks for design §2.3 to gain concentrator and IPP columns; that edit belongs to the design doc's owner and is not made here.
 
 - **Q1 Location.** Should a missing location block Run? (a) Block Run until set, as §2.3's R says (recommended: profiles and market bundles need it); (b) keep it a note and make location opt.
 - **Q2 Component names.** Are template component ids (`it_load`, `genset_new`, `grid_import`) raw names under RAW-NAMES-1? (a) Yes: templates ship plain display names ("IT load", "New genset") and ids stay internal (recommended); (b) no: they are the user's own names.

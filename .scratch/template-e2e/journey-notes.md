@@ -26,4 +26,4 @@ What the step-1 probe learned about driving the app. The probe ran against the d
 
 ## Expected-fail map (gap → journey step)
 
-01 location gate (once built, Run must wait for it), 02 connection limit in Guided, 03 recipe edit in Guided, 04 load editor value and unit, 05 raw-name scan, 06 goal value shown, 07 flexibility and critical share, 08 assumed run inputs in Results.
+01 location gate (once built, Run must wait for it), 02 connection limit in Guided, 03 recipe edit in a Guided drawer (adding a carrier or process unit is asserted to be an Expert link that returns, GAP03-ADD-1), 04 load editor value and unit, 05 raw-name scan, 06 goal value shown, 07 flexibility and critical share, 08 assumed run inputs in Results.

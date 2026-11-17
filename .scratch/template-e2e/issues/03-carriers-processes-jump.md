@@ -4,8 +4,8 @@
 # 03 — Carriers & processes: every Edit in Guided jumps to Expert
 
 Status: ready-for-agent
-Owner: unassigned: waits on owner Q5
-Blocked by: owner question Q5 (decisions.md §6)
+Owner: builder session_01G7qCumsdzuVnJQAD41wFxk
+Decided: GAP03-ADD-1 (Q5 a), Guided edits recipe values in a drawer; adding carriers and process units stays an Expert action behind a return link
 Size: M
 Gated: UX
 Likely files: pypsa-gui/frontend/src/pages/hubDesign/SectionView.tsx (GenericSectionCard, "Add a process unit in Expert"); pypsa-gui/frontend/src/pages/hubDesign/SectionHoldings.tsx (Edit buttons ~l.28)
