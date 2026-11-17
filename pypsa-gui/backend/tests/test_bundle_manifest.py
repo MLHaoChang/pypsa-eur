@@ -638,7 +638,9 @@ def test_the_dry_run_leaves_the_callers_stripped_list_alone(tmp_path):
     assert stripped == ["gridspine.from_network"]
 
 
-@pytest.mark.parametrize("cfg", [b"{not json", b"[1, 2]"], ids=["not-json", "not-object"])
+@pytest.mark.parametrize(
+    "cfg", [b"{not json", b"[1, 2]"], ids=["not-json", "not-object"]
+)
 def test_an_unreadable_solver_config_refuses_the_dry_run_and_the_import_alike(
     client, api_project, project_storage_dir, project_row, projects_root, row_count, cfg
 ):
@@ -646,7 +648,10 @@ def test_an_unreadable_solver_config_refuses_the_dry_run_and_the_import_alike(
     data = _bundle_from(d, {"solver_config.json": cfg})
     rows, tree = row_count(), _tree(projects_root)
 
-    for r in (_dry(client, data, "bm_badcfg_dst"), _post(client, data, "bm_badcfg_dst")):
+    for r in (
+        _dry(client, data, "bm_badcfg_dst"),
+        _post(client, data, "bm_badcfg_dst"),
+    ):
         assert r.status_code == 422, r.text
         detail = r.json()["detail"]
         assert detail["error_kind"] == "import_unreadable"
