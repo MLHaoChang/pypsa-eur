@@ -1,7 +1,9 @@
 """The model set and data freeze contract (GC-01, ``schema/model_set.py``)."""
 
+import dataclasses
 import datetime
 import hashlib
+import json
 
 import numpy as np
 import pandas as pd
@@ -225,3 +227,70 @@ def test_default_freeze_time_is_now_in_utc():
 
 def test_unit_map_defaults_to_empty():
     assert new_model_set(campus_spec(), PARAMS, now=T0).unit_map == {}
+
+
+def test_mutating_what_is_read_leaves_the_manifest_byte_equal():
+    ms = new_model_set(
+        campus_spec(),
+        PARAMS,
+        aggregated=campus_spec(),
+        unit_map={"EQ_PV": ["PV1"]},
+        now=T0,
+    )
+    before = {v: json.dumps(manifest(ms, v), sort_keys=True) for v in VARIANTS}
+    ms.specs["aggregated"]["campus"]["name"] = "CHANGED"
+    ms.spec("aggregated")["campus"]["units"].clear()
+    ms.params["case"] = "min"
+    ms.unit_map["EQ_PV"].append("X")
+    assert {v: json.dumps(manifest(ms, v), sort_keys=True) for v in VARIANTS} == before
+    assert ms.spec("aggregated") == campus_spec()
+    assert ms.params == PARAMS and ms.unit_map == {"EQ_PV": ["PV1"]}
+
+
+def test_model_hashes_and_fields_cannot_be_reassigned():
+    ms = new_model_set(campus_spec(), PARAMS, aggregated=campus_spec(), now=T0)
+    with pytest.raises(TypeError):
+        ms.model_hashes["aggregated"] = "0" * 64
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        ms.data_hash = "0" * 64
+
+
+def test_numpy_nan_is_refused():
+    with pytest.raises(ContractError, match=r"params\.x is nan"):
+        data_hash({}, {"x": np.float64("nan")})
+
+
+def test_numpy_integral_float_hashes_as_int():
+    assert canonical({"a": np.float64(1.0)}, {}) == '{"campus":{"a":1},"params":{}}'
+
+
+def test_assumptions_default_to_empty():
+    assert new_model_set(campus_spec(), PARAMS, now=T0).assumptions == ()
+
+
+def test_mutating_the_callers_input_after_freeze_leaves_the_manifest_byte_equal():
+    spec, agg, params = campus_spec(), campus_spec(), {"case": ["max"]}
+    ms = new_model_set(spec, params, aggregated=agg, now=T0)
+    before = {v: json.dumps(manifest(ms, v), sort_keys=True) for v in VARIANTS}
+    spec["campus"]["name"] = agg["campus"]["name"] = "CHANGED"
+    params["case"].append("min")
+    assert {v: json.dumps(manifest(ms, v), sort_keys=True) for v in VARIANTS} == before
+    assert ms.spec("aggregated")["campus"]["name"] == "TEST_HUB" and ms.params == {
+        "case": ["max"]
+    }
+
+
+def test_mutating_the_callers_unit_map_after_freeze_leaves_it_unchanged():
+    umap = {"EQ_PV": ["PV1"]}
+    ms = new_model_set(
+        campus_spec(), PARAMS, aggregated=campus_spec(), unit_map=umap, now=T0
+    )
+    umap["EQ_PV"].append("X")
+    assert ms.unit_map == {"EQ_PV": ["PV1"]}
+
+
+def test_assumptions_are_kept_as_a_tuple():
+    lines = ["aggregation: line one", "aggregation: line two"]
+    assert new_model_set(
+        campus_spec(), PARAMS, assumptions=lines, now=T0
+    ).assumptions == tuple(lines)
