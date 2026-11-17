@@ -14,7 +14,9 @@ What the step-1 probe learned about driving the app. The probe ran against the d
 - Creating a project can take more than 60 s on the first build. Wait for the toast "Created '<name>' from template", then for `/app`. A second create with the same name refuses with "already exists": delete via `DELETE /api/projects/<name>` first.
 - Mode: buttons "Guided" / "Expert" (exact) in the header group "Interface mode".
 - Guided rail: `getByRole('navigation', { name: 'Project flow sections' })`, buttons named after the sections ("1 Project & site" …); the last one, "↳ Improve", stays hidden until a result exists. Card host `hub-design-panel`.
-- Drawers: **Edit ›** / **Open here ›** open `field-drawer` (close with `field-drawer-close`; Escape does not close it). Section 2's Edit and "Open … in Expert" switch to Expert with a "Back to <section>" button; recover with that button, or with "Guided".
+- **Escape closes the whole Hub design panel** (and with it the rail). Reopen it with `sidebar-hub-design`; never press Escape to close a drawer.
+- eh_site radios are `sr-only`: click `getByTestId('site-type-<id>')`.
+- Drawers: **Edit ›** / **Open here ›** open `field-drawer` (close with `field-drawer-close`). Section 2's Edit and "Open … in Expert" switch to Expert with a "Back to <section>" button; recover with that button, or with "Guided".
 - Expert: section blocks `[data-testid^=flow-section-]`; an entry's panel overlays the canvas, so close it ("Close") before opening the next. Components: type in "Search components…", click the `option` (Enter does not select); the property panel is the last `aside`.
 - Run (Guided): section 9 "Run study" (`hub-run-start`); verdict `hub-results-verdict`. Goal: "Allowed shortfall (hours per year)", "Save goal" (`hub-goal-save`).
 
