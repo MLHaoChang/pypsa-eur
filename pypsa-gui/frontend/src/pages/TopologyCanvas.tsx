@@ -3098,7 +3098,7 @@ export default function TopologyCanvas() {
       )}
       {resultsOverlayEnabled && acPfAvailable && resultSource === 'ac_pf' && currentSnapConvergence === false && (
         <div className="absolute bottom-14 left-16 right-[232px] z-[850] flex justify-center pointer-events-none">
-          <div className="pointer-events-auto bg-warn/95 text-white text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
+          <div className="pointer-events-auto bg-warn/95 text-on-status text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
             <span aria-hidden="true" className="text-base leading-none">⚠</span>
             <span>
               AC Power Flow did not converge for this snapshot (<span className="whitespace-nowrap">{currentSnapIso.slice(0, 16).replace('T', ' ')}</span>).

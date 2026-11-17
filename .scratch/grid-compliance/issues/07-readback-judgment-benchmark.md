@@ -51,3 +51,28 @@ each test judged against the code's envelopes; 08 needs the RMS and EMT models b
 - A case with no matching channel is "unknown", never "pass".
 
 Release note: one new file under `doc/release-notes.d/` (see its README).
+
+## Comments
+
+**2026-11-17, GK A2 plan GO** (three PRs; PR3 after GC-04's battery merges). Conditions:
+
+PR1 (channels + benchmark)
+- B1 Every row (or the result header) states "whole-window metrics; no IEC pre-filter or sub-window split". The deferred pre-filter and transient/quasi-steady sub-windows are a needs-triage follow-up. Cite IEC 61400-27-2 for the method, 27-1 only for the model.
+- B2 Any aggregate verdict is pass only when every row passes; any unknown, or zero rows, is unknown. No aggregate → say so in the docstring.
+- B3 Reference/test unit mismatch refuses, tested with real rescaled units (kV vs V).
+- B4 Tolerance edge: exactly at the limit passes, one ulp above fails (np.nextafter). Separate refusals for NaN, inf and negative tolerances, and for an event on or outside the span edge.
+- B5 MXE keeps its sign and the time of the first occurrence on ties; tested with a negative-only error.
+- B6 COMTRADE PS conversion both ways (S-file with primary True/False, P-file with primary=False divides by the ratio); multi-rate times follow each segment; a refused missing value names channel and row.
+- B7 PSCAD per-file time compare is exact; a 2nd .out differing in one sample refuses.
+- B8 Every guard has a targeted mutant its own test kills; list in the PR body.
+
+PR2 (envelopes + judge)
+- J1 Voltage-within-curve is a test-validity row; the obligation is the stays-connected row (connected at every sample while V is on/above the LVRT curve, on/below for HVRT; a trip after V first leaves the curve is allowed). No connected channel → unknown, also when V left the curve early (stated in the row). Never pass on the voltage row alone.
+- J2 Curve: linear between distinct t, vertical step at repeated t (right-continuous), last value held, t from t_event. Tests mid-ramp, both sides of a step, HVRT mirrored.
+- J3 Name the voltage quantity (positive-sequence or min phase-to-phase at PoC) in row and docstring; the channel role says which.
+- J4 Iq: ΔV from a stated pre-fault mean window; stated deadband convention; sign capacitive for undervoltage, inductive for overvoltage; right magnitude wrong sign fails; Iq in pu of rated current, unit mismatch refuses.
+- J5 P recovery: pre-fault mean over a stated window; stays to end of record or a stated hold; a dip back fails; ramp_min on its own row.
+- J6 Step: rise is 0 → rise_level_pct of the change; band centred on the commanded target, else an end-of-record mean disclosed in the row; overshoot direction-aware, downward step tested.
+- J7 Droop: droop_pct > 0 finite; ΔP≈0 or Δf inside deadband → unknown or finite guard, never inf/NaN.
+- J8 Case status: fail if any row fails, else unknown if any unknown, else pass; zero rows unknown; absent profile key unknown "not in profile".
+- J9 Profile values finite and in range (pct in (0,100], times ≥ 0, points non-empty, t non-decreasing), each refusal tested; grid_codes.py change additive, existing PROFILE_KEYS and shipped profiles validate unchanged; line order coordinated with GC-02.

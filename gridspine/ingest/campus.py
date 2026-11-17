@@ -55,6 +55,14 @@ The description is one YAML mapping under ``campus``:
     ``{name: {bus, x0_ohm, r_n_ohm?}}``: a zig-zag or star-delta earthing
     transformer, an earth reference in the zero sequence only (I5b).
 
+``vendor_models`` (optional, GC-01)
+    ``{unit_kind: {file, tool, model, version, sha256}}``: per unit kind, a
+    reference to an external vendor (black-box) model for TRGC 01/02 (any
+    kind but ``load``). It is
+    stored on ``Campus.vendor_models`` and never parsed
+    (``schema/campus.check_vendor_models``). Untagged: it names a file, it
+    is not a value.
+
 A transformer or cable may carry ``existing: true``: it is owned already, so
 an investment study (``static/campus_invest.py``) prices it at zero. It may
 also carry ``library_id``, the asset-library entry it was taken from. Both
@@ -153,6 +161,7 @@ import pandapower as pp
 import pandas as pd
 import yaml
 
+from gridspine.schema.campus import check_vendor_models
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.island import (
     EARTHINGS,
@@ -168,6 +177,9 @@ from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 SOURCES = frozenset({"measured", "datasheet", "assumed"})
 UNIT_KINDS = ("load", "bess", "pv", "wind", "fuel_cell", "genset", "ups")
 COMP_KINDS = ("capacitor_bank", "shunt_reactor", "statcom")
+#: The unit kinds a vendor model may be given for (GC-01): every kind that
+#: is plant, not a load.
+VENDOR_MODEL_KINDS = tuple(k for k in UNIT_KINDS if k != "load")
 #: A STATCOM's IEC 60909 screening: a current source of k times its rated
 #: current, the drafted inverter's figures (producers/campus.py), assumed.
 STATCOM_K, STATCOM_RX = 1.2, 0.1
@@ -187,7 +199,7 @@ REGISTRY_KIND = {"bess": "storage", "ups": "storage", "pv": "res", "wind": "res"
 WINDING_TOLERANCE = 0.10
 
 _TOP = frozenset({"name", "f_hz", "pcc", "buses", "transformers", "cables", "units", "compensation", "island",
-                  "relays", "earthing_transformers"})
+                  "relays", "earthing_transformers", "vendor_models"})
 #: A relay (island plan I5): the branch it protects, the bus whose fault it
 #: must see, its pickups (tagged: the phase ``i_pickup_ka`` and the
 #: earth-fault ``i_pickup_e_ka``, at least one) and its timing. An instantaneous relay is
@@ -294,6 +306,10 @@ class Campus:
     taps: dict = dataclasses.field(default_factory=dict)
     #: The PCC is a normally open tie (the ``pcc.tie_normally_open`` flag).
     tie_normally_open: bool = False
+    #: The vendor (black-box) model references (GC-01), ``{unit_kind: {file,
+    #: tool, model, version, sha256}}`` (``schema/campus.py``); stored, never
+    #: parsed. Empty when none is given.
+    vendor_models: dict = dataclasses.field(default_factory=dict)
 
 
 _COMP_COLUMNS = ["name", "kind", "bus", "q_mvar", "steps", "library_id", "pypsa_name"]
@@ -473,6 +489,7 @@ def build_campus(spec) -> Campus:
         if key not in c:
             raise ContractError(f"campus: missing {key!r}")
     name = str(c.get("name") or "CAMPUS")
+    vendor_models = check_vendor_models(c.get("vendor_models"), VENDOR_MODEL_KINDS)
     f_hz = campus_f_hz(c)
     rows = []
 
@@ -701,7 +718,7 @@ def build_campus(spec) -> Campus:
     return Campus(name=name, net=net, units=units_df, params=params, registry=registry, compensation=compensation,
                   island=island, earthing=earthing, relays=relays, windings=windings,
                   earthing_transformers=earthing_transformers, assumptions=assumptions, taps=taps,
-                  tie_normally_open=tie_open)
+                  tie_normally_open=tie_open, vendor_models=vendor_models)
 
 
 def _island_requirements(c, units_df, island_units, rows):
