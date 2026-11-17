@@ -12,18 +12,19 @@ compares its returned GLB with the native export it was made from:
 * The returned GLB is untrusted (`glb_read`, GK B R1). Only a node's
   `extras.feature_id` is read from its extras. A node is matched to a building
   only by that id and only when the id is a current building's.
-* A matched building whose mesh is still its exported prism, in its own frame,
-  may come back moved and turned about the vertical. That rigid move is the
-  one change a return proposes: the building's footprint is moved and turned
-  the same way. Its height, source, evidence and every other field stay as
-  they are.
+* A matched building whose mesh is still its exported prism may come back
+  moved, turned about the vertical, or with its roof at a new height. The prism
+  check compares the footprint corners, in the node's own frame, with the
+  stored ones to 1 mm. That rigid move, plus the height, is the one change a
+  return proposes. The footprint is moved and turned the same way and checked
+  by the editor's own validators (G5). Source, evidence and every other field
+  stay as they are.
 * Everything else is a named unknown and is not applied:
-  - a node with no id or an unknown id (reference-only geometry, never
-    rebound);
+  - a node with no id or an unknown id (reference-only geometry, listed by
+    node, never rebound);
   - an equipment node (placements are model-owned);
-  - a duplicated id;
-  - a tilted or lifted node;
-  - an edited mesh (`height_changed` when only the roof moved);
+  - a tilted node (pitch or roll past TILT_TOLERANCE) or a lifted one;
+  - an edited mesh;
   - a building the return no longer holds.
   The building stays as it is.
 
@@ -42,8 +43,8 @@ from services.site_scene import blender_job, export, glb_read, native
 from services.site_scene.contract import SceneError
 
 TOLERANCE_M = 1e-3
-TILT_TOLERANCE = 1e-4
-MAX_LISTED_UNKNOWNS = 200
+TILT_TOLERANCE = 1e-4  # quaternion x and z: about 0.011 degrees of pitch or roll
+TURN_TOLERANCE_DEG = 0.01
 
 STALE = "This Blender result was made from an earlier version of the scene: run the job again"
 
@@ -53,10 +54,14 @@ def _key(p) -> tuple[int, int, int]:
 
 
 def _stale(field: str) -> SceneError:
-    return SceneError("revision_conflict", STALE, {"current_revision": None, "field": field})
+    return SceneError(
+        "revision_conflict", STALE, {"current_revision": None, "field": field}
+    )
 
 
-def check_base(meta: dict[str, Any], snap: dict[str, Any], scene: dict[str, Any]) -> bytes:
+def check_base(
+    meta: dict[str, Any], snap: dict[str, Any], scene: dict[str, Any]
+) -> bytes:
     """The export GLB of the current scene, when the meta names it exactly; otherwise a stale return."""
     for field in ("revision", "generation", "generation_sha256"):
         if meta.get(field) != snap[field]:
@@ -77,17 +82,18 @@ def _shape(features: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _mesh_reason(node: glb_read.Node, want: set) -> str | None:
+def _mesh(node: glb_read.Node, want: set) -> tuple[str | None, float | None]:
+    """(reason, None) when the mesh is not the rigid prism; else (None, its height in metres)."""
     if node.positions is None:
-        return "no_mesh"
+        return "no_mesh", None
     got = {_key(p) for p in node.positions}
-    if got == want:
-        return None
-    # The same footprint at a different roof height: named, not applied.
-    flat = {(x, z) for x, _, z in want}
-    if {(x, z) for x, _, z in got} == flat and len({y for _, y, _ in got}) == 2:
-        return "height_changed"
-    return "mesh_edited"
+    base = {k for k in want if k[1] == 0}
+    levels = {k[1] for k in got} - {0}
+    if len(levels) == 1:
+        top = levels.pop()
+        if got == base | {(x, top, z) for x, _, z in base}:
+            return None, top * TOLERANCE_M
+    return "mesh_edited", None
 
 
 def _yaw_deg(q) -> float:
@@ -95,22 +101,30 @@ def _yaw_deg(q) -> float:
     return (deg + 180.0) % 360.0 - 180.0
 
 
-def compare(scene: dict[str, Any], features: list[dict[str, Any]],
-            nodes: list[glb_read.Node]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def compare(
+    scene: dict[str, Any], features: list[dict[str, Any]], nodes: list[glb_read.Node]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """The building list a return would commit, and its review: changes, unknowns, reference-only count."""
     shapes = _shape(features)
     pivots = {f["id"]: f["translation"] for f in features}
     by_id: dict[str, list[glb_read.Node]] = {}
     unknowns: list[dict[str, Any]] = []
-    reference_only = 0
+    reference_only: list[dict[str, Any]] = []
     for n in nodes:
         if n.feature_id is None:
             if n.positions is not None:
-                reference_only += 1
+                reference_only.append({"node": n.index, "name": n.name})
             continue
         if n.feature_id not in shapes:
-            reference_only += 1
-            unknowns.append({"id": None, "reason": "unknown_feature_id"})
+            reference_only.append({"node": n.index, "name": n.name})
+            unknowns.append(
+                {
+                    "id": None,
+                    "node": n.index,
+                    "name": n.name,
+                    "reason": "unknown_feature_id",
+                }
+            )
             continue
         by_id.setdefault(n.feature_id, []).append(n)
     changes, buildings = [], []
@@ -123,19 +137,28 @@ def compare(scene: dict[str, Any], features: list[dict[str, Any]],
         reason = None
         if not found:
             reason = "missing_in_return"
-        elif len(found) > 1:
-            reason = "duplicate_feature_id"
         else:
-            reason = _apply_one(b, shapes[bid]["keys"], pivots[bid], found[0], changes, buildings)
+            reason = _apply_one(
+                b, shapes[bid]["keys"], pivots[bid], found[0], changes, buildings
+            )
             if reason is None:
                 continue
         unknowns.append({"id": bid, "reason": reason})
         buildings.append(b)
     for fid, found in sorted(by_id.items()):
-        unknowns.append({"id": fid, "reason": "equipment_not_applied"
-                         if shapes[fid]["kind"] == "equipment" else "not_a_building"})
-    review = {"changes": changes, "unknowns": unknowns[:MAX_LISTED_UNKNOWNS],
-              "unknown_count": len(unknowns), "reference_only": reference_only}
+        unknowns.append(
+            {
+                "id": fid,
+                "reason": "equipment_not_applied"
+                if shapes[fid]["kind"] == "equipment"
+                else "not_a_building",
+            }
+        )
+    review = {
+        "changes": changes,
+        "unknowns": unknowns,
+        "reference_only": reference_only,
+    }
     return buildings, review
 
 
@@ -146,7 +169,7 @@ def _apply_one(b, want, pivot, node, changes, buildings) -> str | None:
         return "tilted"
     if abs(node.translation[1] - pivot[1]) > TOLERANCE_M:
         return "lifted"
-    reason = _mesh_reason(node, want)
+    reason, height = _mesh(node, want)
     if reason:
         return reason
     # The pivot in glTF axes is (e, 0, -n); a yaw of theta about +Y turns the
@@ -157,32 +180,57 @@ def _apply_one(b, want, pivot, node, changes, buildings) -> str | None:
     ne, nn = node.translation[0], -node.translation[2]
     moved = math.hypot(ne - pe, nn - pn)
     turned = _yaw_deg(q)
-    if moved <= TOLERANCE_M and abs(turned) < 0.01:
+    same_height = abs(height - b["height_m"]) <= TOLERANCE_M
+    if moved <= TOLERANCE_M and abs(turned) < TURN_TOLERANCE_DEG and same_height:
         buildings.append(b)
         return None
-    ring = [(ne + c * (x - pe) - s * (y - pn), nn + s * (x - pe) + c * (y - pn)) for x, y in b["footprint"]]
-    ring = native.check_footprint(ring, f"Building {b['id']}")
+    # G5: the editor's own validators, so a return cannot write what an edit would refuse.
+    where = f"Building {b['id']}"
+    ring = [
+        (ne + c * (x - pe) - s * (y - pn), nn + s * (x - pe) + c * (y - pn))
+        for x, y in b["footprint"]
+    ]
     nb = copy.deepcopy(b)
-    nb["footprint"] = [list(p) for p in ring]
+    nb["footprint"] = [list(p) for p in native.check_footprint(ring, where)]
+    if not same_height:
+        nb["height_m"] = native._height(round(height, 3), where)
     buildings.append(nb)
-    changes.append({"id": b["id"], "moved_m": round(moved, 3), "turned_deg": round(turned, 2)})
+    changes.append(
+        {
+            "id": b["id"],
+            "moved_m": round(moved, 3),
+            "turned_deg": round(turned, 2),
+            "height_m": {"before": b["height_m"], "after": nb["height_m"]},
+        }
+    )
     return None
 
 
-def prepare(project_dir, scene: dict[str, Any], artifact_id: str,
-            expect_sha256: str | None = None) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+def prepare(
+    project_dir,
+    scene: dict[str, Any],
+    artifact_id: str,
+    expect_sha256: str | None = None,
+) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
     """(returned GLB sha256, buildings, review). `expect_sha256` is the reviewed GLB's, rechecked at Apply."""
     snap = export.read_snapshot(project_dir, scene["site_id"])
-    data, meta = blender_job.read_return(project_dir, scene["site_id"], artifact_id, glb_read.MAX_RETURN_BYTES)
+    data, meta = blender_job.read_return(
+        project_dir, scene["site_id"], artifact_id, glb_read.MAX_RETURN_BYTES
+    )
     sha = hashlib.sha256(data).hexdigest()
     if expect_sha256 is not None and sha != expect_sha256:
-        raise SceneError("revision_conflict", "This Blender result changed since you reviewed it: review it again",
-                         {"current_revision": None, "field": "artifact"})
+        raise SceneError(
+            "revision_conflict",
+            "This Blender result changed since you reviewed it: review it again",
+            {"current_revision": None, "field": "artifact"},
+        )
     check_base(meta, snap, scene)
     nodes = glb_read.parse(data)
     features, _omissions = export._features(snap)
     buildings, review = compare(scene, features, nodes)
     review["artifact_id"] = artifact_id
-    review["export_base"] = {k: meta[k] for k in ("revision", "generation", "generation_sha256",
-                                                  "export_glb_sha256")}
+    review["export_base"] = {
+        k: meta[k]
+        for k in ("revision", "generation", "generation_sha256", "export_glb_sha256")
+    }
     return sha, buildings, review

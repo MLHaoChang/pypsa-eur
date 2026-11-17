@@ -48,6 +48,7 @@ MAX_TRIANGLES = 2 * export.MAX_TRIANGLES
 MAX_DEPTH = 16
 MAX_EXTRAS_BYTES = 4096
 MAX_ID_LENGTH = 512
+MAX_NAME_LENGTH = 128
 SCALE_TOLERANCE = 1e-6
 
 _FLOAT, _UINT8, _UINT16, _UINT32 = 5126, 5121, 5123, 5125
@@ -57,6 +58,8 @@ _INDEX_FMT = {_UINT8: "B", _UINT16: "H", _UINT32: "I"}
 
 @dataclass(frozen=True)
 class Node:
+    index: int
+    name: str | None
     feature_id: str | None
     translation: tuple[float, float, float]
     rotation: tuple[float, float, float, float]
@@ -64,13 +67,19 @@ class Node:
 
 
 def _bad(reason: str, message: str) -> SceneError:
-    return SceneError("invalid_geometry", f"The returned scene was refused: {message}",
-                      {"field": "artifact", "reason": reason})
+    return SceneError(
+        "invalid_geometry",
+        f"The returned scene was refused: {message}",
+        {"field": "artifact", "reason": reason},
+    )
 
 
 def _limit(name: str, cap: int, actual: int) -> SceneError:
-    return SceneError("resource_limit", f"The returned scene is too large: {name} over {cap}",
-                      {"limit": f"return_{name}", "max": cap, "actual": actual})
+    return SceneError(
+        "resource_limit",
+        f"The returned scene is too large: {name} over {cap}",
+        {"limit": f"return_{name}", "max": cap, "actual": actual},
+    )
 
 
 def _int(v: Any, what: str, hi: int) -> int:
@@ -80,8 +89,14 @@ def _int(v: Any, what: str, hi: int) -> int:
 
 
 def _nums(v: Any, n: int, what: str) -> tuple[float, ...]:
-    if (not isinstance(v, list) or len(v) != n
-            or not all(isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c) for c in v)):
+    if (
+        not isinstance(v, list)
+        or len(v) != n
+        or not all(
+            isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c)
+            for c in v
+        )
+    ):
         raise _bad("transform", f"{what} must be {n} finite numbers")
     return tuple(float(c) for c in v)
 
@@ -117,6 +132,21 @@ def _extras_capped(obj: Any, depth: int = 0) -> None:
             _extras_capped(v, depth + 1)
 
 
+class _Duplicate(ValueError):
+    pass
+
+
+def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out = dict(pairs)
+    if len(out) != len(pairs):
+        raise _Duplicate()
+    return out
+
+
+def _no_constant(name: str) -> Any:
+    raise ValueError(name)  # NaN, Infinity, -Infinity are not JSON numbers here
+
+
 def _chunks(data: bytes) -> tuple[dict[str, Any], bytes]:
     if len(data) > MAX_RETURN_BYTES:
         raise _limit("bytes", MAX_RETURN_BYTES, len(data))
@@ -134,9 +164,16 @@ def _chunks(data: bytes) -> tuple[dict[str, Any], bytes]:
     if end > len(data):
         raise _bad("container", "its JSON chunk runs past the end")
     try:
-        doc = json.loads(data[20:end].decode("utf-8"),
-                         parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
-    except (UnicodeDecodeError, ValueError, RecursionError):
+        doc = json.loads(
+            data[20:end].decode("utf-8"),
+            object_pairs_hook=_no_duplicates,
+            parse_constant=_no_constant,
+        )
+    except _Duplicate:
+        raise _bad("duplicate_key", "its JSON repeats a key") from None
+    except RecursionError:
+        raise _bad("depth", "the document nests too deep") from None
+    except (UnicodeDecodeError, ValueError):
         raise _bad("json", "its JSON chunk does not parse") from None
     if not isinstance(doc, dict):
         raise _bad("json", "its JSON chunk is not an object")
@@ -146,8 +183,10 @@ def _chunks(data: bytes) -> tuple[dict[str, Any], bytes]:
             raise _bad("container", "a chunk header runs past the end")
         bin_len, bin_type = struct.unpack_from("<I4s", data, end)
         if bin_type != b"BIN\x00" or end + 8 + bin_len != len(data):
-            raise _bad("container", "it holds a chunk other than one trailing BIN chunk")
-        blob = data[end + 8:]
+            raise _bad(
+                "container", "it holds a chunk other than one trailing BIN chunk"
+            )
+        blob = data[end + 8 :]
     return doc, blob
 
 
@@ -166,7 +205,11 @@ def _views(doc: dict[str, Any], blob: bytes) -> list[tuple[int, int, int | None]
     buffers = _list(doc, "buffers", 1)
     if buffers:
         size = buffers[0].get("byteLength")
-        if not isinstance(size, int) or isinstance(size, bool) or not 0 <= size <= len(blob):
+        if (
+            not isinstance(size, int)
+            or isinstance(size, bool)
+            or not 0 <= size <= len(blob)
+        ):
             raise _bad("buffer", "the buffer is not embedded in the BIN chunk")
     out = []
     for v in _list(doc, "bufferViews", MAX_ACCESSORS):
@@ -178,8 +221,12 @@ def _views(doc: dict[str, Any], blob: bytes) -> list[tuple[int, int, int | None]
                 raise _bad("bounds", "a bufferView's offset or length is invalid")
         if off + ln > buffers[0]["byteLength"]:
             raise _bad("bounds", "a bufferView runs past its buffer")
-        if stride is not None and (not isinstance(stride, int) or isinstance(stride, bool)
-                                   or not 4 <= stride <= 252 or stride % 4):
+        if stride is not None and (
+            not isinstance(stride, int)
+            or isinstance(stride, bool)
+            or not 4 <= stride <= 252
+            or stride % 4
+        ):
             raise _bad("bounds", "a bufferView's stride is invalid")
         out.append((off, ln, stride))
     return out
@@ -194,7 +241,9 @@ def _read_accessor(doc, views, blob: bytes, i: Any, kind: str, room: int) -> lis
     count = a.get("count")
     if not isinstance(count, int) or isinstance(count, bool) or count < 1:
         raise _bad("accessor", "an accessor's count is invalid")
-    off_v, len_v, stride = views[_int(a.get("bufferView"), "an accessor's bufferView", len(views))]
+    off_v, len_v, stride = views[
+        _int(a.get("bufferView"), "an accessor's bufferView", len(views))
+    ]
     off_a = a.get("byteOffset", 0)
     if not isinstance(off_a, int) or isinstance(off_a, bool) or off_a < 0:
         raise _bad("bounds", "an accessor's offset is invalid")
@@ -211,7 +260,9 @@ def _read_accessor(doc, views, blob: bytes, i: Any, kind: str, room: int) -> lis
         if ct not in _INDEX_SIZE or a.get("type") != "SCALAR":
             raise _bad("accessor", "indices must be unsigned SCALAR")
         if count > room:
-            raise _limit("triangles", MAX_TRIANGLES, (3 * MAX_TRIANGLES - room + count) // 3)
+            raise _limit(
+                "triangles", MAX_TRIANGLES, (3 * MAX_TRIANGLES - room + count) // 3
+            )
         elem = step = _INDEX_SIZE[ct]
         if stride is not None:
             raise _bad("bounds", "index data may not be strided")
@@ -227,11 +278,17 @@ def _read_accessor(doc, views, blob: bytes, i: Any, kind: str, room: int) -> lis
     return list(struct.unpack_from(f"<{count}{_INDEX_FMT[ct]}", blob, base))
 
 
-def _mesh_positions(doc, views, blob: bytes, m: Any, budget: list[int]) -> tuple[tuple[float, float, float], ...]:
+def _mesh_positions(
+    doc, views, blob: bytes, m: Any, budget: list[int]
+) -> tuple[tuple[float, float, float], ...]:
     meshes = doc.get("meshes", [])
     mesh = meshes[_int(m, "a node's mesh", len(meshes))]
     prims = mesh.get("primitives")
-    if not isinstance(prims, list) or not prims or not all(isinstance(p, dict) for p in prims):
+    if (
+        not isinstance(prims, list)
+        or not prims
+        or not all(isinstance(p, dict) for p in prims)
+    ):
         raise _bad("json", "a mesh has no primitives")
     budget[0] -= len(prims)
     if budget[0] < 0:
@@ -239,6 +296,8 @@ def _mesh_positions(doc, views, blob: bytes, m: Any, budget: list[int]) -> tuple
     # Accessors may alias one view, so the totals read, not the bytes, are what is capped.
     positions: list[tuple[float, float, float]] = []
     for p in prims:
+        if p.get("targets"):
+            raise _bad("morph_targets", "it carries morph targets")
         if p.get("mode", 4) != 4:
             raise _bad("accessor", "only triangle meshes are read")
         attrs = p.get("attributes")
@@ -258,10 +317,12 @@ def _mesh_positions(doc, views, blob: bytes, m: Any, budget: list[int]) -> tuple
 def _qmul(a, b):
     ax, ay, az, aw = a
     bx, by, bz, bw = b
-    return (aw * bx + ax * bw + ay * bz - az * by,
-            aw * by - ax * bz + ay * bw + az * bx,
-            aw * bz + ax * by - ay * bx + az * bw,
-            aw * bw - ax * bx - ay * by - az * bz)
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
 
 
 def rotate(q, v):
@@ -270,7 +331,9 @@ def rotate(q, v):
     return (x, y, z)
 
 
-def _local(node: dict[str, Any]) -> tuple[tuple[float, float, float], tuple[float, float, float, float]]:
+def _local(
+    node: dict[str, Any],
+) -> tuple[tuple[float, float, float], tuple[float, float, float, float]]:
     if "matrix" in node:
         raise _bad("transform", "a node uses a matrix")
     t = _nums(node.get("translation", [0, 0, 0]), 3, "a translation")
@@ -296,8 +359,11 @@ def parse(data: bytes) -> list[Node]:
     """The returned GLB's nodes, after every check above. Raises `SceneError` on anything else."""
     doc, blob = _chunks(data)
     _no_uri(doc)
-    if doc.get("extensionsRequired"):
-        raise _bad("extension", "it requires an extension")
+    if doc.get("extensionsRequired") or doc.get("extensionsUsed"):
+        raise _bad("extension", "it uses an extension")
+    for key in ("animations", "skins"):
+        if doc.get(key):
+            raise _bad(key, f"it carries {key}")
     _extras_capped(doc)
     nodes = _list(doc, "nodes", MAX_NODES)
     _list(doc, "meshes", MAX_MESHES)
@@ -335,5 +401,16 @@ def parse(data: bytes) -> list[Node]:
             if m not in meshes:
                 meshes[m] = _mesh_positions(doc, views, blob, m, budget)
             positions = meshes[m]
-        out.append(Node(_feature_id(n), t, q, positions))
+        name = n.get("name")
+        name = name[:MAX_NAME_LENGTH] if isinstance(name, str) else None
+        out.append(Node(i, name, _feature_id(n), t, q, positions))
+    seen: set[str] = set()
+    for node in out:
+        if node.feature_id is not None:
+            if node.feature_id in seen:
+                # G3: an id on two nodes is ambiguous; neither is picked.
+                raise _bad(
+                    "ambiguous_feature_id", "two nodes carry the same feature id"
+                )
+            seen.add(node.feature_id)
     return out

@@ -13,7 +13,10 @@ import pytest
 from services.site_scene import glb_read
 from services.site_scene.contract import SceneError
 
-FIXTURE = Path(__file__).resolve().parents[2] / "frontend/src/site3d/__fixtures__/scene-export.glb"
+FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "frontend/src/site3d/__fixtures__/scene-export.glb"
+)
 
 
 def pack(doc: dict, blob: bytes = b"") -> bytes:
@@ -21,7 +24,11 @@ def pack(doc: dict, blob: bytes = b"") -> bytes:
     js += b" " * (-len(js) % 4)
     blob += b"\x00" * (-len(blob) % 4)
     total = 12 + 8 + len(js) + (8 + len(blob) if blob else 0)
-    out = struct.pack("<4sII", b"glTF", 2, total) + struct.pack("<I4s", len(js), b"JSON") + js
+    out = (
+        struct.pack("<4sII", b"glTF", 2, total)
+        + struct.pack("<I4s", len(js), b"JSON")
+        + js
+    )
     if blob:
         out += struct.pack("<I4s", len(blob), b"BIN\x00") + blob
     return out
@@ -34,12 +41,22 @@ def tri(extras=None, **node):
     doc = {
         "asset": {"version": "2.0"},
         "buffers": [{"byteLength": len(pos) + len(idx)}],
-        "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": 36},
-                        {"buffer": 0, "byteOffset": 36, "byteLength": 6}],
-        "accessors": [{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
-                      {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}],
+        "bufferViews": [
+            {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+            {"buffer": 0, "byteOffset": 36, "byteLength": 6},
+        ],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+            {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"},
+        ],
         "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
-        "nodes": [{"mesh": 0, "extras": extras if extras is not None else {"feature_id": "osm:1"}, **node}],
+        "nodes": [
+            {
+                "mesh": 0,
+                "extras": extras if extras is not None else {"feature_id": "osm:1"},
+                **node,
+            }
+        ],
     }
     return doc, pos + idx
 
@@ -114,7 +131,11 @@ def test_an_accessor_offset_past_its_view_is_refused():
 
 def test_an_index_out_of_range_is_refused():
     doc, _ = tri()
-    blob = struct.pack("<9f", 0, 0, 0, 1, 0, 0, 0, 0, 1) + struct.pack("<3H", 0, 1, 3) + b"\x00\x00"
+    blob = (
+        struct.pack("<9f", 0, 0, 0, 1, 0, 0, 0, 0, 1)
+        + struct.pack("<3H", 0, 1, 3)
+        + b"\x00\x00"
+    )
     refused(doc, blob, reason="bounds")
 
 
@@ -126,12 +147,18 @@ def test_position_must_be_float_vec3():
 
 def test_a_non_finite_vertex_is_refused():
     doc, _ = tri()
-    blob = struct.pack("<9f", 0, 0, 0, math.inf, 0, 0, 0, 0, 1) + struct.pack("<3H", 0, 1, 2) + b"\x00\x00"
+    blob = (
+        struct.pack("<9f", 0, 0, 0, math.inf, 0, 0, 0, 0, 1)
+        + struct.pack("<3H", 0, 1, 2)
+        + b"\x00\x00"
+    )
     refused(doc, blob, reason="transform")
 
 
 def test_oversized_extras_are_refused_and_never_read():
-    doc, blob = tri(extras={"feature_id": "osm:1", "pad": "x" * glb_read.MAX_EXTRAS_BYTES})
+    doc, blob = tri(
+        extras={"feature_id": "osm:1", "pad": "x" * glb_read.MAX_EXTRAS_BYTES}
+    )
     refused(doc, blob, kind="resource_limit")
 
 
@@ -149,7 +176,9 @@ def test_oversized_extras_anywhere_are_refused():
 
 
 def test_only_a_string_feature_id_is_read_from_extras():
-    doc, blob = tri(extras={"feature_id": 7, "height_m": 99, "bindings": [{"uid": "x"}]})
+    doc, blob = tri(
+        extras={"feature_id": 7, "height_m": 99, "bindings": [{"uid": "x"}]}
+    )
     (n,) = glb_read.parse(pack(doc, blob))
     assert n.feature_id is None
     assert not hasattr(n, "extras")
@@ -169,7 +198,11 @@ def test_a_scale_is_refused_and_unit_scale_is_not():
 
 def test_a_non_finite_translation_is_refused():
     doc, blob = tri()
-    doc["nodes"][0]["translation"] = [0, "inf", 0]  # JSON has no inf; a string is the attempt
+    doc["nodes"][0]["translation"] = [
+        0,
+        "inf",
+        0,
+    ]  # JSON has no inf; a string is the attempt
     refused(doc, blob, reason="transform")
 
 
@@ -177,10 +210,10 @@ def test_a_nan_literal_in_the_json_is_refused():
     doc, blob = tri()
     raw = pack(doc, blob).replace(b'"asset"', b'"x":NaN,"asset"', 1)
     # keep the declared lengths true for the edited JSON
-    js = raw[20:20 + struct.unpack_from("<I", raw, 12)[0]]
+    js = raw[20 : 20 + struct.unpack_from("<I", raw, 12)[0]]
     js = js.rstrip(b" ")
     js += b" " * (-len(js) % 4)
-    blobpart = raw[20 + struct.unpack_from("<I", raw, 12)[0]:]
+    blobpart = raw[20 + struct.unpack_from("<I", raw, 12)[0] :]
     body = struct.pack("<I4s", len(js), b"JSON") + js + blobpart
     data = struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body
     with pytest.raises(SceneError) as e:
@@ -217,7 +250,9 @@ def test_too_many_nodes_is_refused():
 def test_aliased_accessors_cannot_amplify_past_the_vertex_total(monkeypatch):
     monkeypatch.setattr(glb_read, "MAX_VERTICES", 5)
     doc, blob = tri()
-    doc["meshes"][0]["primitives"].append(copy.deepcopy(doc["meshes"][0]["primitives"][0]))
+    doc["meshes"][0]["primitives"].append(
+        copy.deepcopy(doc["meshes"][0]["primitives"][0])
+    )
     refused(doc, blob, kind="resource_limit")
 
 
@@ -254,8 +289,96 @@ def test_a_required_extension_is_refused():
 def test_world_transforms_compose_through_the_parent():
     doc, blob = tri(translation=[1.0, 0.0, 0.0])
     half = math.sqrt(0.5)
-    doc["nodes"].append({"children": [0], "translation": [10.0, 0.0, 0.0], "rotation": [0, half, 0, half]})
+    doc["nodes"].append(
+        {
+            "children": [0],
+            "translation": [10.0, 0.0, 0.0],
+            "rotation": [0, half, 0, half],
+        }
+    )
     n = glb_read.parse(pack(doc, blob))[0]
     # The parent turns +90 degrees about +Y: its local +X becomes -Z.
     assert n.translation == pytest.approx((10.0, 0.0, -1.0))
     assert n.rotation == pytest.approx((0, half, 0, half))
+
+
+# ── GK B G1 to G3 ───────────────────────────────────────────────────────────
+
+
+def _raw_json(js: bytes, blob: bytes = b"") -> bytes:
+    js += b" " * (-len(js) % 4)
+    total = 12 + 8 + len(js) + (8 + len(blob) if blob else 0)
+    out = (
+        struct.pack("<4sII", b"glTF", 2, total)
+        + struct.pack("<I4s", len(js), b"JSON")
+        + js
+    )
+    return out + (struct.pack("<I4s", len(blob), b"BIN\x00") + blob if blob else b"")
+
+
+def test_a_repeated_json_key_is_refused():
+    with pytest.raises(SceneError) as e:
+        glb_read.parse(_raw_json(b'{"asset":{"version":"2.0"},"nodes":[],"nodes":[]}'))
+    assert e.value.detail["reason"] == "duplicate_key"
+
+
+def test_json_nested_past_the_interpreter_is_a_typed_refusal():
+    with pytest.raises(SceneError) as e:
+        glb_read.parse(_raw_json(b'{"a":' + b"[" * 100_000 + b"]" * 100_000 + b"}"))
+    assert e.value.detail["reason"] == "depth"
+
+
+def test_json_nested_past_the_cap_is_refused():
+    with pytest.raises(SceneError) as e:
+        glb_read.parse(_raw_json(b'{"a":' + b"[" * 80 + b"]" * 80 + b"}"))
+    assert e.value.detail["reason"] == "depth"
+
+
+@pytest.mark.parametrize(
+    "key, value, reason",
+    [
+        ("extensionsUsed", ["KHR_materials_unlit"], "extension"),
+        ("animations", [{"channels": [], "samplers": []}], "animations"),
+        ("skins", [{"joints": [0]}], "skins"),
+    ],
+)
+def test_animation_skin_and_any_extension_are_refused(key, value, reason):
+    doc, blob = tri()
+    doc[key] = value
+    refused(doc, blob, reason=reason)
+
+
+def test_morph_targets_are_refused():
+    doc, blob = tri()
+    doc["meshes"][0]["primitives"][0]["targets"] = [{"POSITION": 0}]
+    refused(doc, blob, reason="morph_targets")
+
+
+def test_a_sparse_accessor_is_refused():
+    doc, blob = tri()
+    doc["accessors"][0]["sparse"] = {"count": 1}
+    refused(doc, blob, reason="accessor")
+
+
+@pytest.mark.parametrize("stride", [2, 13, 256])
+def test_a_stride_off_the_4_to_252_grid_is_refused(stride):
+    doc, blob = tri()
+    doc["bufferViews"][0]["byteStride"] = stride
+    refused(doc, blob, reason="bounds")
+
+
+def test_an_index_accessor_must_be_unsigned_scalar():
+    doc, blob = tri()
+    doc["accessors"][1]["componentType"] = 5126
+    refused(doc, blob, reason="accessor")
+
+
+def test_two_nodes_with_one_feature_id_are_ambiguous():
+    doc, blob = tri()
+    doc["nodes"].append(dict(doc["nodes"][0]))
+    refused(doc, blob, reason="ambiguous_feature_id")
+
+
+def test_a_node_name_is_kept_short():
+    doc, blob = tri(name="n" * 1000)
+    assert glb_read.parse(pack(doc, blob))[0].name == "n" * glb_read.MAX_NAME_LENGTH

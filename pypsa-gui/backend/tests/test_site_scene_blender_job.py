@@ -523,7 +523,10 @@ def test_a_symlinked_artifact_store_is_404(client, geo, tmp_path):
     aid = str(uuid.uuid4())
     elsewhere = tmp_path / "elsewhere"
     blender_job._store(
-        elsewhere, aid, bw.Result(b"g", b"b", ""), {"artifact_id": aid, "site_id": "campus"}
+        elsewhere,
+        aid,
+        bw.Result(b"g", b"b", ""),
+        {"artifact_id": aid, "site_id": "campus"},
     )
     (geo / blender_job.ARTIFACTS).symlink_to(elsewhere / blender_job.ARTIFACTS)
     assert client.get(ART + aid).status_code == 404
@@ -552,7 +555,9 @@ def test_an_oversized_meta_json_is_404(geo):
     aid = str(uuid.uuid4())
     pad = "x" * blender_job.META_CAP
     blender_job._store(
-        geo, aid, bw.Result(b"g", b"b", ""),
+        geo,
+        aid,
+        bw.Result(b"g", b"b", ""),
         {"artifact_id": aid, "site_id": "campus", "pad": pad},
     )
     with pytest.raises(SceneError) as e:

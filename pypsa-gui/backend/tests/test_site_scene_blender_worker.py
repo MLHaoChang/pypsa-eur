@@ -808,11 +808,18 @@ def test_the_container_kill_is_bounded_by_a_timeout(monkeypatch):
 
 @pytest.mark.parametrize(
     "exc",
-    [subprocess.TimeoutExpired(["kill"], 1), OSError("gone"), subprocess.SubprocessError()],
+    [
+        subprocess.TimeoutExpired(["kill"], 1),
+        OSError("gone"),
+        subprocess.SubprocessError(),
+    ],
 )
 def test_a_kill_that_hangs_or_fails_never_breaks_cleanup(monkeypatch, exc):
     def boom(*a, **k):
         raise exc
 
     monkeypatch.setattr(bw.subprocess, "run", boom)
-    assert bw._kill_container(bw.Readiness(True, None, "/b", "/rt", "img"), "n", {}, 0.1) is None
+    assert (
+        bw._kill_container(bw.Readiness(True, None, "/b", "/rt", "img"), "n", {}, 0.1)
+        is None
+    )

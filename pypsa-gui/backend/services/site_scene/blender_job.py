@@ -127,7 +127,9 @@ def _store(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _checked(project_dir, site_id: str, artifact_id: str) -> tuple[Path, dict[str, Any]]:
+def _checked(
+    project_dir, site_id: str, artifact_id: str
+) -> tuple[Path, dict[str, Any]]:
     """The artifact's dir and meta, or not found unless it is this site's."""
     d = artifact_dir(project_dir, artifact_id)
     # No symlink anywhere on the way: neither the store, nor the artifact dir,
@@ -168,8 +170,11 @@ def read_return(
         return bw._read_output(d, "scene.glb", cap), meta
     except bw.WorkerError as exc:
         if exc.kind == bw.OUTPUT_LIMIT:
-            raise SceneError("resource_limit", f"The returned scene is over {cap >> 20} MiB",
-                             {"limit": "return_bytes", "max": cap}) from None
+            raise SceneError(
+                "resource_limit",
+                f"The returned scene is over {cap >> 20} MiB",
+                {"limit": "return_bytes", "max": cap},
+            ) from None
         raise SceneError("not_found", "No such scene artifact") from None
     except OSError:
         raise SceneError("not_found", "No such scene artifact") from None

@@ -3,7 +3,7 @@
 
 # SC-05 — optional integrated Blender generation and reviewed return
 
-Status: ready-for-agent (slice (a) in progress, see the 2026-11-17 comment; slice (b), the reviewed return, waits on (a) and the SC-00 B numbers)
+Status: ready-for-agent (slice (a) #1561; slice (b), the backend reviewed return, on `claude/site-scene-06b`; slice (c), the review UI, still to build; see the 2026-11-17 comments)
 Type: task
 Dependencies: SC-04; SC-00 worker/protocol/resource evidence
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -85,18 +85,40 @@ The manual job ran on `ubuntu-24.04` (4 vCPU, 16 GiB, 3 GiB swap). Artifact `sc0
   | output | 256 MiB each | about 500x the `.blend` |
 
 
+### 2026-11-17: slice (b) plan GO, GK B (61), conditions G1–G9
+
+- R2's text was lost with GK B (60)'s session. R1 plus G1–G3 are the complete untrusted-GLB contract.
+- Q1: (b) is backend-only and route-only, and no chat path can create or apply it. Slice (c) is the review UI, under UX review.
+- Q2: a height taken from the mesh's Y extent is accepted only when the mesh passes the rigid-prism check. It must be finite, above 0 and at most the height cap, and the diff shows it before and after.
+- G1: the parser refuses:
+  - duplicate JSON keys and NaN/Infinity, with nesting depth capped and a typed refusal;
+  - sparse accessors, animations, skins, morph targets and any extension (`extensionsUsed` included);
+  - a byteStride outside 4..252 or not a multiple of 4, and a wrong componentType for the accessor's type.
+  - Total decoded data is capped before any decode.
+- G2: every refusal is typed, with its own reason and test, and each parser guard has a killed mutant.
+- G3: a feature_id on two nodes refuses the whole return.
+- G4: world transforms compose. Rotation is yaw-only within a stated tolerance. The prism is matched within a stated tolerance. An unedited round trip is exactly zero, and a known move plus a 30° yaw reproduces exactly those values.
+- G5: Apply runs the editor's validators, with one refusal through the return path.
+- G6: access, project and site are rechecked at create and at Apply. Each part of the meta equality has its own red case.
+- G7: the diff lists every bound value per building, and every unknown or reference-only node by name, never as a count.
+- G8: `lock: True` passes the lock-policy, chat-disposition, ACL and golden-coverage tests, plus the inventory, route-parity and control-matrix checks at the trial merge.
+- G9: the four (a) pins each have a mutant. Follow-up issue 10.
+
 ### 2026-11-17: slice (b) built (branch `claude/site-scene-06b`)
 
 - R1 is `services/site_scene/glb_read.py`. The returned GLB is untrusted, and these limits apply:
   - Container: one JSON chunk and at most one BIN chunk, with the declared length exact.
-  - Buffers: exactly one, embedded. Any `uri` and any `extensionsRequired` is refused.
+  - Buffers: exactly one, embedded. Any `uri`, extension, animation, skin or morph target is refused, and so are duplicate JSON keys and NaN.
   - Every view and accessor is bounds-checked. Running totals of vertices, indices and primitives are capped, so aliased accessors cannot amplify.
   - The node graph is a forest of depth at most 16.
   - A node may not carry a matrix or a scale. Numbers must be finite.
   - Every `extras` is capped at 4 KiB, and only `extras.feature_id` is read.
 - The `blender_return` proposal (`services/site_scene/blender_return.py`) is route-only and not a chat action.
   - The export base must be exact: revision, generation and generation sha256, and the rebuilt export GLB's sha256 must equal the meta's.
-  - It proposes rigid moves and yaw turns of matched buildings only. Everything else is a named unknown and is not applied: tilted, lifted, mesh_edited, height_changed, no_mesh, missing_in_return, duplicate_feature_id, unknown_feature_id, equipment_not_applied, not_a_building. A mesh with no id is counted as reference-only.
+  - It proposes, for matched buildings only, rigid moves, yaw turns and a prism's new height, checked by `native.check_footprint` and `native._height`.
+  - Everything else is a named unknown and is not applied: tilted, lifted, mesh_edited, no_mesh, missing_in_return, unknown_feature_id, equipment_not_applied, not_a_building.
+  - Nodes with no id or an unknown id are listed by node index and name as reference-only.
+  - A duplicated id refuses the whole return (`ambiguous_feature_id`).
   - The returned GLB's sha256 joins the input hash, so Apply re-reads the artifact and refuses changed bytes.
 - Contract: proposal create and cancel are `lock: True`. A test drives every contract row under a foreign lock.
 - GK B's four pins from #1561 have their own tests: the kill timeout, the kill except, the symlinked store, and META_CAP.
