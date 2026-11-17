@@ -1259,7 +1259,8 @@ def _assessed(out):
 
 
 @pytest.mark.parametrize(
-    "built,mode", [("bess", None), ("bess", "genset"), ("hybrid", "genset"), ("hybrid", "hybrid")]
+    "built,mode",
+    [("bess", None), ("bess", "genset"), ("hybrid", "genset"), ("hybrid", "hybrid")],
 )
 def test_a_project_created_with_strings_assesses_as_a_genset_one_would(
     client, tmp_path, monkeypatch, tmp_projects_dir, project_row, built, mode
@@ -1285,7 +1286,8 @@ def test_a_project_created_with_strings_assesses_as_a_genset_one_would(
     assert any("not assessed as built" in x for x in out["built"]["notes"])
     assert _sidecar_bytes(d) == before
     r = client.post(
-        f"/api/campus-electrical/{g_name}/dc-backup/assess", json={"mode": mode or built}
+        f"/api/campus-electrical/{g_name}/dc-backup/assess",
+        json={"mode": mode or built},
     )
     assert r.status_code == 200, r.text
     ref = r.json()
@@ -1304,7 +1306,11 @@ def test_a_genset_create_copies_the_example_sidecars_byte_for_byte(
     _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
     _name, d = _dc_built(client, project_row, "dc_g6", "genset", it=36.0)
     src = tmp_path / "eh_datacenter"
-    for f in ("island_config.json", "adequacy_stress_scenarios.json", "solver_config.json"):
+    for f in (
+        "island_config.json",
+        "adequacy_stress_scenarios.json",
+        "solver_config.json",
+    ):
         assert (d / f).read_bytes() == (src / f).read_bytes(), f
     meta, example = (json.loads((p / "eh_template.json").read_text()) for p in (d, src))
     block = meta.pop("dc_load")

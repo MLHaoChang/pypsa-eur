@@ -1578,7 +1578,8 @@ def genset_form(n, island: dict, built: str, genset_n, genset_island: dict):
     strings = built_strings(n, island)
     built_mw = sum(float(n.storage_units.at[s, "p_nom"]) for s in strings)
     built_mwh = sum(
-        float(n.storage_units.at[s, "p_nom"]) * float(n.storage_units.at[s, "max_hours"])
+        float(n.storage_units.at[s, "p_nom"])
+        * float(n.storage_units.at[s, "max_hours"])
         for s in strings
     )
     m = n.copy()
@@ -1611,10 +1612,15 @@ def genset_form(n, island: dict, built: str, genset_n, genset_island: dict):
             )
         gens = [u for u in names if u in genset_n.generators.index]
         if gens:
-            m.add("Generator", gens, **{
-                c: genset_n.generators.loc[gens, c] for c in genset_n.generators.columns
-                if c in m.generators.columns or c in ("bus", "carrier")
-            })
+            m.add(
+                "Generator",
+                gens,
+                **{
+                    c: genset_n.generators.loc[gens, c]
+                    for c in genset_n.generators.columns
+                    if c in m.generators.columns or c in ("bus", "carrier")
+                },
+            )
             for attr, frame in genset_n.generators_t.items():
                 cols = [g for g in gens if g in frame.columns]
                 if cols:
@@ -1630,7 +1636,9 @@ def genset_form(n, island: dict, built: str, genset_n, genset_island: dict):
 
         crit = [c for c in critical_loads(out) if c in genset_n.loads.index]
         mine, theirs = named_load(m, crit), named_load(genset_n, crit)
-        if crit and abs(float(mine.max()) - float(theirs.max())) > 0.005 * float(theirs.max()):
+        if crit and abs(float(mine.max()) - float(theirs.max())) > 0.005 * float(
+            theirs.max()
+        ):
             notes.append(
                 f"The project's critical peak ({float(mine.max()):.4g} MW) differs from the "
                 f"spec's ({float(theirs.max()):.4g} MW): the restored gensets are sized for "
@@ -1711,11 +1719,17 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
     notes: list[str] = []
     if built in _BACKUP_REQUIREMENTS:
         # Created with the strings: assessed in genset form, on copies (walkthrough 01).
-        gspec = spec.model_copy(update={"backup": spec.backup.model_copy(update={"mode": "genset"})})
-        n_g = (tpl.BUILDERS[tid](load_spec=gspec) if planning is None
-               else tpl.BUILDERS[tid](load_spec=gspec, planning=planning))
+        gspec = spec.model_copy(
+            update={"backup": spec.backup.model_copy(update={"mode": "genset"})}
+        )
+        n_g = (
+            tpl.BUILDERS[tid](load_spec=gspec)
+            if planning is None
+            else tpl.BUILDERS[tid](load_spec=gspec, planning=planning)
+        )
         n, island, notes, _strings = genset_form(
-            n, island, built, n_g, tpl.island_config(tid, planning, load_spec=gspec))
+            n, island, built, n_g, tpl.island_config(tid, planning, load_spec=gspec)
+        )
     cfg_path = d / "solver_config.json"
     try:
         cfg = _solver_config_from_dict(
@@ -1740,7 +1754,11 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
             lock=PyPSAService.get_lock(),
             **finance_rate(getattr(cfg, "finance", None)),
         )
-    return {**out, "basis": _basis(nc), "built": {"mode": built or "genset", "notes": notes}}
+    return {
+        **out,
+        "basis": _basis(nc),
+        "built": {"mode": built or "genset", "notes": notes},
+    }
 
 
 #: What the assessment's re-dispatch does not reproduce from a normal solve

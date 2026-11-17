@@ -14,7 +14,9 @@ TID = "eh_datacenter"
 
 
 def _spec(mode, it=30.0):
-    return T.dc_load_spec(TID, {"backup": {"mode": mode}, "phases": [{"cod": "2030-01-01", "it_mw": it}]})
+    return T.dc_load_spec(
+        TID, {"backup": {"mode": mode}, "phases": [{"cod": "2030-01-01", "it_mw": it}]}
+    )
 
 
 def _campus(mode, it=30.0):
@@ -31,16 +33,24 @@ def _same_network(a, b):
         sa, sb = a.static(c), b.static(c)
         assert sorted(sa.index) == sorted(sb.index), c
         cols = [k for k in sa.columns if k in sb.columns]
-        pd.testing.assert_frame_equal(sa.loc[sorted(sa.index), cols], sb.loc[sorted(sb.index), cols],
-                                      check_dtype=False, obj=c)
+        pd.testing.assert_frame_equal(
+            sa.loc[sorted(sa.index), cols],
+            sb.loc[sorted(sb.index), cols],
+            check_dtype=False,
+            obj=c,
+        )
         ta, tb = a.dynamic(c), b.dynamic(c)
         for attr in set(ta) | set(tb):
             fa, fb = ta.get(attr, pd.DataFrame()), tb.get(attr, pd.DataFrame())
             if fa.empty and fb.empty:
                 continue
             assert sorted(fa.columns) == sorted(fb.columns), (c, attr)
-            pd.testing.assert_frame_equal(fa[sorted(fa.columns)], fb[sorted(fb.columns)],
-                                          check_dtype=False, obj=f"{c}.{attr}")
+            pd.testing.assert_frame_equal(
+                fa[sorted(fa.columns)],
+                fb[sorted(fb.columns)],
+                check_dtype=False,
+                obj=f"{c}.{attr}",
+            )
 
 
 @pytest.mark.parametrize("mode", ["bess", "hybrid"])
@@ -58,9 +68,17 @@ def test_a_built_campus_round_trips_to_genset_form(mode):
 def test_it_leaves_its_inputs_as_they_are():
     n_b, i_b = _campus("bess")
     n_g, i_g = _genset()
-    before = (sorted(n_b.storage_units.index), sorted(n_b.generators.index), copy.deepcopy(i_b))
+    before = (
+        sorted(n_b.storage_units.index),
+        sorted(n_b.generators.index),
+        copy.deepcopy(i_b),
+    )
     B.genset_form(n_b, i_b, "bess", n_g, i_g)
-    assert before == (sorted(n_b.storage_units.index), sorted(n_b.generators.index), i_b)
+    assert before == (
+        sorted(n_b.storage_units.index),
+        sorted(n_b.generators.index),
+        i_b,
+    )
 
 
 def test_a_user_unit_sharing_the_prefix_is_kept_and_a_user_edit_survives():
@@ -70,7 +88,10 @@ def test_a_user_unit_sharing_the_prefix_is_kept_and_a_user_edit_survives():
     n_b.add("StorageUnit", B.STRING_PREFIX + "mine", bus=bus, p_nom=1.0)
     n_b.generators.loc["rooftop_pv", "p_nom"] = 7.5
     m, island, _notes, strings = B.genset_form(n_b, i_b, "bess", n_g, i_g)
-    assert B.STRING_PREFIX + "mine" in m.storage_units.index and B.STRING_PREFIX + "mine" not in strings
+    assert (
+        B.STRING_PREFIX + "mine" in m.storage_units.index
+        and B.STRING_PREFIX + "mine" not in strings
+    )
     assert m.generators.at["rooftop_pv", "p_nom"] == 7.5
 
 
