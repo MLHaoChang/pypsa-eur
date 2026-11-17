@@ -122,6 +122,8 @@ def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site, monke
         run["stage"],
         [(s["id"], s["status"], s.get("error")) for s in record["steps"]],
         {k: (r["verdict"], r.get("reason")) for k, r in rules.items()},
+        {k: v for k, v in run["stages"].get(run["stage"], {}).items() if k != "gate"},
+        (run["stages"].get(run["stage"], {}).get("gate") or {}).get("rules"),
     )
     assert script.requests == []
     solve = [
