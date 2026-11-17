@@ -112,6 +112,9 @@ export function returnToOrigin(): void {
   const o = useUIStore.getState().flowReturn
   if (!o) return
   const ui = useUIStore.getState()
+  // Back from Expert to Guided abandons an Add form the jump opened (Guided's "Add a process unit
+  // in Expert"); left set, it would take over the next Guided drawer.
+  if (ui.uiMode === 'expert' && o.mode === 'guided') ui.setCreationItem(null)
   ui.setUiMode(o.mode)
   ui.setActiveSection(o.section)
   if (o.mode === 'guided') {

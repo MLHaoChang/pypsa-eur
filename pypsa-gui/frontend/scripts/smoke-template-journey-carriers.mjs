@@ -91,6 +91,15 @@ try {
   assert.match(text, /5\.93 MWh H2 \+ 1,277\.55 kWh electricity per t NH3/)
   await page.screenshot({ path: path.join(artifacts, 'tj-03-guided-list.png') })
 
+  // Adding a process unit is an Expert form (GAP03-ADD-1 a); Back returns to §2 and drops the form.
+  await list.getByRole('button', { name: 'Add a process unit in Expert ›' }).click()
+  const back = page.getByTestId('flow-return')
+  assert.equal(await back.innerText(), 'Back to Carriers & processes')
+  await page.screenshot({ path: path.join(artifacts, 'tj-03-expert-add-back.png') })
+  await back.click()
+  await list.waitFor()
+  assert.equal(await page.getByTestId('ui-mode-guided').getAttribute('aria-pressed'), 'true')
+
   // A carrier's Edit opens its card in the drawer, and Guided stays.
   await list.getByRole('button', { name: 'Edit H2', exact: true }).click()
   await page.getByTestId('field-drawer').getByText('Carrier Properties').waitFor()
