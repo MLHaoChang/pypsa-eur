@@ -461,3 +461,23 @@ def test_a_finance_only_run_never_saves(baseline, tmp_path, queue, monkeypatch):
 
 def test_the_cards_lp_kind_is_the_shipped_modules():
     assert run_actions._LP == run_shipped.LP
+
+
+def test_the_real_save_cleans_a_dirty_base_and_the_case_forks(
+    baseline, tmp_path, queue
+):
+    from services import chat_tools, dirty_state, project_registry
+    from services.pypsa_service import PyPSAService
+
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    _pick(path, ["low_price"])
+    with chat_tools._acting() as (db, user):
+        base = project_registry.resolve_project(db, user, pid)
+    resident = PyPSAService.get_context(project_registry.registry_key(base))
+    dirty_state.mark_dirty(resident)
+    _start(path, pid)
+    assert _step(path)["result"]["saved"] is True
+    assert not dirty_state.is_dirty(resident)
+    assert _cases(path)["low_price"]["status"] == "running"
+    assert len(queue) == 1

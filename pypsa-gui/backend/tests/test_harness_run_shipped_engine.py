@@ -978,7 +978,15 @@ def test_a_dirty_base_refuses_with_its_kind_before_any_fork(
     assert resident is not None
     dirty_state.mark_dirty(resident)
     monkeypatch.setattr(shipped_fork, "create", lambda *a, **k: pytest.fail("forked"))
+
+    def save_fails(name, **k):
+        raise OSError("disk full")
+
+    # S-B2c P5: the step saves the base first; when that save fails the
+    # backstop still refuses each case.
+    monkeypatch.setattr(chat_tools, "save_project", save_fails)
     _start(path, pid)
+    assert _read(path)["steps"][0]["result"]["saved"] is None
     case = _cases(path)["low_price"]
     assert case["status"] == "failed"
     assert case["reason"].startswith("require_current: shipped_base_unsaved:")
