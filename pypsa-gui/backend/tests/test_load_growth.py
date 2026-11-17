@@ -388,7 +388,7 @@ def test_a_typed_cell_through_the_route_becomes_typed(client):
                 "load_growth_pct_per_year": {"electrical": -100.0},
                 "load_growth_base_year": 2030,
             },
-            None,
+            "load_growth_invalid",
         ),
         ({"load_growth_pct_per_year": {"electrical": 2.0}}, "load_growth_invalid"),
         (
@@ -728,3 +728,243 @@ def test_no_network_and_no_rate_skip_the_carrier_check():
     assert LG.load_carriers_of(None) is None
     assert LG.load_carriers_of(SimpleNamespace()) is None
     assert LG.rate_key_problems(None, {"electrical"}) == []
+
+
+# ── GK NOT OK (1): a rate the field took loosely is refused in plain words ───
+
+
+def _put_raw(client, body):
+    # JSON has no NaN literal; Python's encoder writes one, as a lenient client might.
+    return client.put(
+        "/api/simulation/solver_config",
+        content=json.dumps(body),
+        headers={"content-type": "application/json"},
+    )
+
+
+@pytest.mark.parametrize(
+    "rate,words",
+    [
+        (True, "must be a number"),
+        ("2", "must be a number"),
+        (-100, "must be above -100 %"),
+        (float("nan"), "must be a finite number"),
+    ],
+)
+def test_the_route_refuses_a_loose_rate_with_a_typed_plain_words_message(
+    client, rate, words
+):
+    _put(client, {"multi_investment_periods": True, "investment_periods": [2030, 2035]})
+    r = _put_raw(
+        client,
+        {
+            "load_growth_pct_per_year": {"electrical": rate},
+            "load_growth_base_year": 2030,
+        },
+    )
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    # What Model Horizon's `growthErrorMessage` reads beside the field.
+    assert isinstance(detail, dict), detail
+    assert detail["error_kind"] == "load_growth_invalid"
+    assert detail["message"].startswith("Load growth (electrical): " + words)
+    assert _cfg(client)["load_growth_pct_per_year"] == {}
+
+
+@pytest.mark.parametrize("rate", [True, "1.5"])
+def test_the_chat_dict_refuses_a_loose_rate_with_a_typed_kind(client, rate):
+    from fastapi import HTTPException
+
+    from services import chat_tools
+
+    _put(client, {"multi_investment_periods": True, "investment_periods": [2030, 2035]})
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.update_solver_config(
+            {
+                "load_growth_pct_per_year": {"electrical": rate},
+                "load_growth_base_year": 2030,
+            }
+        )
+    assert exc.value.detail["error_kind"] == "load_growth_invalid"
+    assert _cfg(client)["load_growth_pct_per_year"] == {}
+
+
+# ── GK NOT OK (2): a malformed stored rate map fails closed, never a 500 ─────
+
+_MALFORMED = [[1], "2", 5, {"electrical": "x"}]
+
+
+@pytest.mark.parametrize("raw", _MALFORMED)
+def test_a_malformed_stored_rate_map_reads_as_a_typed_refusal(raw):
+    cfg = _grown_cfg(load_growth_pct_per_year=raw)
+    problem = LG.stale_problem(cfg, None)
+    assert isinstance(problem, str) and problem.startswith("Load growth")
+    with pytest.raises(LG.LoadGrowthError) as exc:
+        LG.refreshed_config(cfg, _P)
+    assert exc.value.kind == "load_growth_invalid"
+    with pytest.raises(LG.LoadGrowthError):
+        LG.refresh(cfg, _P)
+
+
+def _malform(ctx, raw):
+    ctx.solver_state["solver_config"] = replace(
+        ctx.solver_state["solver_config"], load_growth_pct_per_year=raw
+    )
+
+
+@pytest.mark.parametrize("raw", [[1], "2"])
+def test_a_malformed_stored_map_fails_the_preflight_check(
+    grown_network, session_ctx, raw
+):
+    from services.validation_service import validate_for_run
+
+    ctx = session_ctx(grown_network)
+    _malform(ctx, raw)
+    issues = [
+        i
+        for i in validate_for_run(ctx.network, ctx.solver_state["solver_config"])
+        if i.code == "load_growth_stale"
+    ]
+    assert issues and issues[0].severity == "error"
+
+
+@pytest.mark.parametrize("raw", [[1], "2"])
+def test_a_malformed_stored_map_refuses_the_put_in_plain_words(
+    grown_network, session_ctx, raw
+):
+    _malform(session_ctx(grown_network), raw)
+    r = _put(grown_network, {"investment_periods": [2030, 2035]})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "load_growth_invalid"
+
+
+@pytest.mark.parametrize("raw", [[1], "2"])
+def test_a_malformed_stored_map_refuses_a_time_axis_change(
+    grown_network, session_ctx, raw
+):
+    ctx = session_ctx(grown_network)
+    _malform(ctx, raw)
+    r = grown_network.post(
+        "/api/network/investment_periods", json={"periods": [2030, 2040]}
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "load_growth_invalid"
+    assert list(ctx.network.investment_periods) == [2030, 2035]
+
+
+@pytest.mark.parametrize("raw", [[1], "2"])
+def test_an_undo_over_a_malformed_stored_map_leaves_it_for_the_preflight(
+    grown_network, session_ctx, raw
+):
+    ctx = session_ctx(grown_network)
+    r = grown_network.post(
+        "/api/network/investment_periods", json={"periods": [2030, 2040]}
+    )
+    assert r.status_code == 200, r.text
+    _malform(ctx, raw)
+    r = grown_network.post("/api/network/undo")
+    assert r.status_code == 200, r.text
+    assert ctx.solver_state["solver_config"].load_growth_pct_per_year == raw
+
+
+def test_a_network_import_over_a_malformed_stored_map_leaves_it(
+    grown_network, session_ctx, tmp_path
+):
+    from tests.test_fca_load_scalers import build_edge_15min
+
+    base = build_edge_15min()
+    n = base.copy()
+    n.set_snapshots(base.snapshots[:96])
+    n.loads_t.p_set = base.loads_t.p_set.iloc[:96]
+    n.generators_t.p_max_pu = base.generators_t.p_max_pu.iloc[:96]
+    n.set_investment_periods([2030, 2040])
+    path = tmp_path / "other.nc"
+    n.export_to_netcdf(path)
+    _malform(session_ctx(grown_network), [1])
+    r = grown_network.post(
+        "/api/io/import/netcdf",
+        files={"file": ("other.nc", path.read_bytes(), "application/x-netcdf")},
+    )
+    assert r.status_code == 200, r.text[:300]
+    cfg = session_ctx(grown_network).solver_state["solver_config"]
+    assert cfg.load_growth_pct_per_year == [1]
+
+
+# ── GK NOT OK (3, C6): each time-axis hook re-derives or refuses ─────────────
+
+_WINDOW = {"start": "2025-01-01T00:00", "end": "2025-01-01T03:00", "freq": "h"}
+
+
+def test_a_multi_period_rebuild_before_the_start_year_is_refused_before_any_write(
+    grown_network, session_ctx
+):
+    r = grown_network.post(
+        "/api/network/snapshots/multi_period", json={"periods": [2025, 2035], **_WINDOW}
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "load_growth_invalid"
+    assert list(session_ctx(grown_network).network.investment_periods) == [2030, 2035]
+
+
+def test_a_multi_period_rebuild_rederives(grown_network):
+    r = grown_network.post(
+        "/api/network/snapshots/multi_period", json={"periods": [2030, 2040], **_WINDOW}
+    )
+    assert r.status_code == 200, r.text
+    assert _cfg(grown_network)["load_scalers_by_carrier"] == {
+        "electrical": {"2040": round(1.02**10, 6)}
+    }
+
+
+def test_flat_snapshots_drop_every_derived_multiplier(grown_network):
+    r = grown_network.post("/api/network/snapshots", json=_WINDOW)
+    assert r.status_code == 200, r.text
+    cfg = _cfg(grown_network)
+    assert cfg["load_scalers_by_carrier"].get("electrical", {}) == {}
+    assert cfg["load_scalers_derived"] == {}
+
+
+def test_clearing_the_investment_periods_drops_every_derived_multiplier(grown_network):
+    r = grown_network.post("/api/network/investment_periods", json={"periods": []})
+    assert r.status_code == 200, r.text
+    cfg = _cfg(grown_network)
+    assert cfg["load_scalers_by_carrier"].get("electrical", {}) == {}
+    assert cfg["load_scalers_derived"] == {}
+
+
+# ── GK NOT OK (5): a network read failure refuses, never derives on [] ──────
+
+
+def test_a_network_read_failure_refuses_the_put_with_a_typed_kind(
+    grown_network, monkeypatch
+):
+    from services.pypsa_service import PyPSAService
+
+    before = _cfg(grown_network)
+
+    def unreadable(*_a, **_k):
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(PyPSAService, "get_network", unreadable)
+    r = _put(grown_network, {"load_growth_pct_per_year": {"electrical": 3.0}})
+    monkeypatch.undo()
+    assert r.status_code == 503, r.text
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "load_growth_network_unreadable"
+    assert "disk gone" not in detail["message"]
+    after = _cfg(grown_network)
+    keys = (
+        "load_growth_pct_per_year",
+        "load_scalers_by_carrier",
+        "load_scalers_derived",
+    )
+    assert {k: after[k] for k in keys} == {k: before[k] for k in keys}
+
+
+def test_a_fresh_project_with_an_empty_network_still_derives_on_the_config_periods(
+    client,
+):
+    # No network opened: the active context is an empty network (no periods,
+    # no loads), a legitimate state, not a read failure.
+    assert _put(client, GROW).status_code == 200
+    assert _cfg(client)["load_scalers_by_carrier"] == {"electrical": {"2035": 1.104081}}

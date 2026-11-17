@@ -10,6 +10,7 @@ tests/test_oj05_selected_line_edit_journey.py.
 import json
 
 from fastapi import HTTPException
+import pandas as pd
 import pypsa
 import pytest
 
@@ -361,6 +362,68 @@ def test_solver_card_shows_a_load_growth_rate_and_the_multipliers_it_derives(gri
     assert rows["load_growth_pct_per_year.electrical"]["label"] == "Load growth electrical"
     assert rows["load_growth_pct_per_year.electrical"]["unit"] == "% per year"
     assert rows["load_scalers_by_carrier.electrical"]["new"] == '{"2035":1.104081}'
+
+
+def _grown(**kw):
+    cfg = PyPSAService.get_active_context().solver_state["solver_config"]
+    cfg.multi_investment_periods, cfg.investment_periods = True, kw.pop("periods", [2030, 2035])
+    cfg.load_growth_pct_per_year, cfg.load_growth_base_year = {"electrical": 2.0}, 2030
+    cfg.load_scalers_by_carrier = {"electrical": {"2035": 1.104081}}
+    cfg.load_scalers_derived = {"electrical": ["2035"]}
+    return cfg
+
+
+def test_solver_card_shows_the_stored_start_year_beside_a_rate_only_change(grid):
+    _grown()
+    card = edit_card.preview("update_solver_config", {"partial": {
+        "load_growth_pct_per_year": {"electrical": 3.0}}})
+    rows = {r["field"]: r for r in card["rows"]}
+    assert set(rows) == {"load_growth_pct_per_year.electrical", "load_growth_base_year",
+                         "load_scalers_by_carrier.electrical"}
+    assert rows["load_growth_base_year"]["old"] == rows["load_growth_base_year"]["new"] == 2030
+    assert rows["load_scalers_by_carrier.electrical"]["new"] == '{"2035":1.159274}'
+
+
+def test_solver_card_shows_the_stored_rate_beside_a_start_year_only_change(grid):
+    _grown()
+    card = edit_card.preview("update_solver_config", {"partial": {"load_growth_base_year": 2025}})
+    rows = {r["field"]: r for r in card["rows"]}
+    assert set(rows) == {"load_growth_pct_per_year.electrical", "load_growth_base_year",
+                         "load_scalers_by_carrier.electrical"}
+    assert rows["load_growth_pct_per_year.electrical"]["new"] == 2.0
+
+
+@pytest.mark.parametrize("tool,args,new", [
+    ("set_investment_periods", {"periods": [2030, 2040]}, '{"2040":1.218994}'),
+    ("set_multi_period_snapshots", {"periods": [2040, 2030], "operational_from": "2025-01-01",
+                                    "operational_to": "2025-01-01 01:00"}, '{"2040":1.218994}'),
+    ("set_investment_periods", {"periods": []}, "{}"),
+    ("set_snapshots", {"start": "2025-01-01", "end": "2025-01-01 01:00"}, "{}"),
+])
+def test_a_time_axis_card_shows_the_load_multipliers_its_period_change_rederives(grid, tool, args, new):
+    _grown(periods=[])  # the network's periods rule (the config sets no override)
+    PyPSAService.get_network().set_snapshots(
+        pd.MultiIndex.from_product([[2030, 2035], [0, 1]], names=["period", "timestep"]))
+    PyPSAService.get_network().investment_periods = [2030, 2035]
+    card = edit_card.preview(tool, args)
+    rows = {r["field"]: r for r in card["rows"]}
+    assert rows["load_scalers_by_carrier.electrical"]["old"] == '{"2035":1.104081}'
+    assert rows["load_scalers_by_carrier.electrical"]["new"] == new
+    assert rows["load_scalers_by_carrier.electrical"]["label"] == "Load multiplier electrical"
+    assert set(args) <= set(rows)          # the arguments stay on the card
+    assert card["complete"] is False       # the network change itself is not read back
+
+
+def test_a_time_axis_card_refuses_a_period_the_load_growth_cannot_follow(grid):
+    _grown(periods=[])
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview("set_investment_periods", {"periods": [2025, 2035]})
+    assert exc.value.detail["error_kind"] == "load_growth_invalid"
+
+
+def test_a_time_axis_card_without_a_rate_shows_only_its_arguments(grid):
+    card = edit_card.preview("set_investment_periods", {"periods": [2030, 2040]})
+    assert [r["field"] for r in card["rows"]] == ["periods"]
 
 
 def test_solver_card_refuses_an_invalid_load_growth_rate(grid):

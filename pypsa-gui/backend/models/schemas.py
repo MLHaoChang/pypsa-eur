@@ -750,8 +750,12 @@ class SolverConfigSchema(BaseModel):
     # % per year, compounded from `load_growth_base_year`. It derives the
     # entries of `load_scalers_by_carrier` it does not hold typed
     # (`services/solver/load_growth.py`); `load_scalers_derived` names the
-    # derived ones. `gt=-100`: a fall of 100 % or more leaves no load.
-    load_growth_pct_per_year: dict[str, Annotated[float, Field(gt=-100, allow_inf_nan=False)]] = {}
+    # derived ones. Each rate is taken as sent and judged by the route's own
+    # check (`load_growth_problems`): a bool, a text, a non-finite rate or one
+    # at or below -100 % is refused there as a typed, plain-words 422, never
+    # coerced (`true` → 1.0, `"1.5"` → 1.5) or refused by the schema with a
+    # message the settings page cannot show (GK #1617 K4).
+    load_growth_pct_per_year: dict[str, Any] = {}
     # Strict: a bool or a text year is refused, not read as 1 / 0 or parsed.
     load_growth_base_year: Annotated[int, Field(strict=True)] | None = None
     load_scalers_derived: dict[str, list[str]] = {}

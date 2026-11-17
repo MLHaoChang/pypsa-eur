@@ -425,10 +425,20 @@ def _derive_load_growth(submitted: dict, stored_cfg) -> None:
 
     after = {k: submitted[k] if k in submitted else getattr(stored_cfg, k, None)
              for k in _LOAD_GROWTH_KEYS}
+    # No project opened is not a read failure: the active context is then an
+    # empty network (no periods, no loads), which derives on the config's own
+    # periods. A read that fails refuses: deriving as if the network had no
+    # periods would skip the carrier check and drop the stored derived
+    # entries (GK #1626 C2/C3).
     try:
-        network = PyPSAService.get_active_context().network
+        network = PyPSAService.get_network()
     except Exception:
-        network = None
+        logger.exception("load growth: the network could not be read")
+        raise HTTPException(503, {
+            "code": "load_growth_network_unreadable",
+            "error_kind": "load_growth_network_unreadable",
+            "message": "Load growth: the network could not be read, so the load multipliers "
+                       "were not derived and nothing was saved; try again"}) from None
     periods = LG.effective_periods(SimpleNamespace(**after), network)
     try:
         submitted.update(

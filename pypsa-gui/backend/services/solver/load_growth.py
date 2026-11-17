@@ -224,6 +224,13 @@ def derive_load_scalers(
     return out, out_derived
 
 
+def _has_rates(raw) -> bool:
+    """A rate map is stored or set: anything but an absent or empty map. A
+    malformed one (a list, a text, a number) counts, so ``apply`` refuses it
+    rather than reading it as "no rate" (#1390 F2)."""
+    return raw is not None and not (isinstance(raw, dict) and not raw)
+
+
 def apply(after: dict, stored_cfg, periods: list, load_carriers=None) -> dict:
     """The growth keys as a change leaves them: ``after`` holds the config's
     ``load_scalers``, ``load_scalers_by_carrier``, ``load_growth_pct_per_year``
@@ -233,9 +240,24 @@ def apply(after: dict, stored_cfg, periods: list, load_carriers=None) -> dict:
     ``load_carriers`` (``load_carriers_of``) checks each rate names a load's
     carrier; the routes that only re-derive pass none. Raises
     ``LoadGrowthError``."""
-    rates = canonical_rates(after.get("load_growth_pct_per_year"))
-    if not rates and not getattr(stored_cfg, "load_growth_pct_per_year", None):
+    raw = after.get("load_growth_pct_per_year")
+    if not _has_rates(raw) and not _has_rates(
+        getattr(stored_cfg, "load_growth_pct_per_year", None)
+    ):
         return {}
+    if raw is not None and not isinstance(raw, dict):
+        # A hand-edited or bundled config the loader does not check: refused,
+        # never a 500 and never derived as if no rate were set (#1390 F2).
+        raise LoadGrowthError(
+            {
+                "code": "load_growth_invalid",
+                "error_kind": "load_growth_invalid",
+                "message": "Load growth: the stored rates cannot be read (each carrier "
+                "needs a number in % per year); set the rate again in Model Horizon's "
+                "period economics",
+            }
+        )
+    rates = canonical_rates(raw)
     base_year = after.get("load_growth_base_year")
     problems = rate_key_problems(
         after.get("load_growth_pct_per_year"), load_carriers
@@ -287,7 +309,7 @@ def stale_problem(cfg, n) -> str | None:
     """A plain-words reason the stored multipliers are not what the rate gives
     for the periods the LP will solve, or ``None``: the pre-flight net for a
     writer that did not re-derive."""
-    if not getattr(cfg, "load_growth_pct_per_year", None):
+    if not _has_rates(getattr(cfg, "load_growth_pct_per_year", None)):
         return None
     periods = effective_periods(cfg, n)
     try:
@@ -307,7 +329,7 @@ def refreshed_config(cfg, network_periods: list):
     (the config's own ``investment_periods`` override still wins), or ``cfg``
     itself when nothing changes or no rate is stored. Raises
     ``LoadGrowthError``."""
-    if cfg is None or not getattr(cfg, "load_growth_pct_per_year", None):
+    if cfg is None or not _has_rates(getattr(cfg, "load_growth_pct_per_year", None)):
         return cfg
     from dataclasses import replace
     from types import SimpleNamespace
