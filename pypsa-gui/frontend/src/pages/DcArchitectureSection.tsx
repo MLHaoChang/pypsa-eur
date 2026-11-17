@@ -154,7 +154,7 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
           <table className="w-full text-[11px] [&_td]:px-2 [&_td]:py-0.5 [&_th]:px-2 [&_th]:align-bottom" data-testid="dc-architecture-table">
             <thead className="text-muted">
               <tr>
-                <th className="text-left font-normal">Architecture</th>
+                <th className="sticky left-0 z-[1] bg-bg text-left font-normal">Architecture</th>
                 {!guided && <th className="text-right font-normal">Efficiency to rack</th>}
                 <th className="text-right font-normal">Effective PUE</th>
                 <th className="text-right font-normal">Facility energy (GWh/yr)</th>
@@ -171,7 +171,8 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
               {data.variants.map(v => (
                 <Fragment key={v.architecture}>
                   <tr data-testid={`dc-architecture-row-${v.architecture}`} className={v.own ? 'font-medium' : ''}>
-                    <td className="whitespace-nowrap">
+                    {/* sticky, so a sideways scroll never hides which row is which (UX 2) */}
+                    <td className="sticky left-0 z-[1] whitespace-nowrap bg-bg">
                       {!guided && (
                         <button type="button" className="mr-1 text-muted" aria-expanded={open === v.architecture}
                                 aria-label={`Loss chain of ${v.label}`}

@@ -1,8 +1,8 @@
 /** The units each credited grid service comes from (DC grid-readiness
  *  walkthrough 03), shared by the scorecard's frequency-support value and the
  *  architecture compare's cells. A service with more than five units folds
- *  after five, with "(N more) Show all" on click, as the unrecorded-series
- *  banner does. `rest` is the value's text after the named services (the
+ *  after five, with "(N more) Show all" on click (an ink, underlined toggle:
+ *  UI-COHESION-1). `rest` is the value's text after the named services (the
  *  architecture's assumed and conditional services). */
 import { useState } from 'react'
 import type { GridReadinessServiceSource } from '../../api/campusElectrical'
@@ -17,8 +17,10 @@ function Units({ units, testId }: { units: string[]; testId: string }) {
       {(folded ? units.slice(0, SHOWN_AT_FIRST) : units).join(', ')}
       {units.length > SHOWN_AT_FIRST && (
         <button type="button" data-testid={testId} aria-expanded={open}
-          className="ml-1 text-accent hover:underline" onClick={() => setOpen(o => !o)}>
-          {open ? 'Show fewer' : `(${units.length - SHOWN_AT_FIRST} more) Show all`}
+          className="ml-1 text-text" onClick={() => setOpen(o => !o)}>
+          {open
+            ? <span className="underline">Show fewer</span>
+            : <><span className="text-muted">({units.length - SHOWN_AT_FIRST} more)</span> <span className="underline">Show all</span></>}
         </button>
       )}
     </>
