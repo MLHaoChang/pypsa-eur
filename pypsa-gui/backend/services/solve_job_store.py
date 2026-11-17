@@ -316,6 +316,57 @@ def load_by_status(
         return []
 
 
+#: How many recent completed rows `load_completed_runs` reads per project+kind.
+COMPLETED_RUNS_LIMIT = 50
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """A column value as UTC. SQLite reads `DateTime(timezone=True)` back naive;
+    every writer here stamps UTC (`_dt`), so naive means UTC at this seam."""
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+def load_completed_runs(project_key: str, kind: str) -> list[dict]:
+    """
+    The latest `completed` rows of one project and kind, newest first, for the
+    run estimate (`services.run_estimate`). Never raises: an unreadable table
+    means "no history", which the estimate reports as unknown.
+    """
+    try:
+        from sqlalchemy import select
+
+        from db.models import SolveJobRow
+        from db.session import SessionLocal
+
+        with SessionLocal() as db:
+            stmt = (
+                select(SolveJobRow)
+                .where(
+                    SolveJobRow.project_key == project_key,
+                    SolveJobRow.kind == kind,
+                    SolveJobRow.status == "completed",
+                    SolveJobRow.finished_at.is_not(None),
+                )
+                .order_by(SolveJobRow.finished_at.desc())
+                .limit(COMPLETED_RUNS_LIMIT)
+            )
+            return [
+                {
+                    "id": r.id,
+                    "status": r.status,
+                    "solver_config": r.solver_config,
+                    "started_at": _as_utc(r.started_at),
+                    "finished_at": _as_utc(r.finished_at),
+                }
+                for r in db.execute(stmt).scalars()
+            ]
+    except Exception:  # noqa: BLE001 — an unreadable table means "no history"
+        logger.exception("solve_job_store: could not load completed runs for %s", kind)
+        return []
+
+
 def delete_jobs(ids: Iterable[uuid.UUID]) -> int | None:
     """
     Delete rows by id. Returns the number of rows deleted, or None when the

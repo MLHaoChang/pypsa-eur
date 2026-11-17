@@ -442,6 +442,34 @@ def job_log_history(
     return {"lines": lines, "status": job["status"]}
 
 
+@router.get("/{job_id}/estimate")
+def job_estimate(
+    job_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    How long this job is likely to run, from its project's past runs of the
+    same kind and settings (`services.run_estimate`; run progress spec §2).
+
+    `seconds` is None when fewer than two such runs exist: the estimate is
+    unknown, never 0. `samples` and `run_ids` are its basis. A read: anyone who
+    may see the job may ask, whoever holds the project's edit lock. Same
+    visibility and the same byte-for-byte 404 as `/log_history`.
+    """
+    from services import project_registry, run_estimate, solve_job_store
+    from services.solve_queue import KIND_SOLVE, KINDS
+
+    project_registry.require_user(user)
+    job = _visible_job_or_404(db, user, job_id)
+    kind = job.get("kind") or KIND_SOLVE
+    project_key = job.get("project_key")
+    if kind not in KINDS or not project_key:
+        return {"kind": kind, "seconds": None, "samples": 0, "run_ids": []}
+    row = solve_job_store.load_job(_parse_job_id(job_id))
+    return run_estimate.for_job(job_id, project_key, kind, (row or {}).get("solver_config"))
+
+
 @router.get("/{job_id}/log_stream")
 async def job_log_stream(
     job_id: str,
