@@ -855,7 +855,9 @@ def test_every_owned_cost_an_experiment_can_name_is_refused():
 # ── GK B (64) ask on TCU 11 ──────────────────────────────────────────────────
 
 
-def _assert_refused_unwritten(r, name, client, session_ctx, project_row, good, root, before):
+def _assert_refused_unwritten(
+    r, name, client, session_ctx, project_row, good, root, before
+):
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
     msg = r.json()["detail"]["message"]
@@ -914,3 +916,28 @@ def test_the_rate_rule_refuses_an_int_too_large_for_a_float(value):
     from services.solver.periodized_costs import discount_rate_problem
 
     assert discount_rate_problem(value) is not None
+
+
+def test_the_annuity_refusal_names_only_the_priced_parts_lifetimes():
+    """An unpriced part's lifetime is not one the annuity was asked to take."""
+    from fastapi import HTTPException
+
+    from services.network_crud import rederive_imported_parts
+
+    n = _network()
+    n.storage_units.at["bess2", "inv_power_overnight"] = float("nan")
+    n.storage_units.at["bess2", "inv_power_lifetime"] = 50.0
+    n.storage_units.at["bess2", "inv_energy_lifetime"] = 300.0
+    with pytest.raises(HTTPException) as exc:
+        rederive_imported_parts(n, global_rate=10)
+    assert exc.value.detail["message"] == (
+        "Storage 'bess2': its investment parts cannot be annuitised at rate 10 "
+        "over 300 years. The open network is unchanged."
+    )
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), 10**400])
+def test_a_rate_that_is_not_a_finite_number_says_so(value):
+    from services.solver.periodized_costs import discount_rate_problem
+
+    assert discount_rate_problem(value) == "the discount rate is not a finite number"

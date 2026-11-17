@@ -24,6 +24,7 @@ from services.asset_schema.derive import (
     derive_composite,
     effective_discount_rate,
     has_parts,
+    number,
     owned_columns,
     part_scales,
     split_parts,
@@ -436,9 +437,9 @@ def _imported_parts_problem(component_class: str, row, global_rate: float) -> st
         return str(exc)
     except ArithmeticError:  # (1 + r)^L overflows, or 1 + r = ±1 divides by zero (GK B 64)
         lives = sorted({life for spec in composite_parts(component_class)
-                        if _as_float(row.get(spec.column("overnight"))) is not None
-                        and (life := _as_float(row.get(spec.column("lifetime")) if spec.own_lifetime
-                                               else row.get("lifetime"))) is not None})
+                        if number(row.get(spec.column("overnight"))) is not None
+                        and (life := number(row.get(spec.column("lifetime")) if spec.own_lifetime
+                                            else row.get("lifetime"))) is not None})
         over = " and ".join(f"{life:g}" for life in lives)
         return f"its investment parts cannot be annuitised at rate {rate:g} over {over} years"
     if not all(math.isfinite(derived[c]) for c in ("capital_cost", "fom_cost")):
