@@ -1029,3 +1029,65 @@ def test_a_non_finite_share_is_zero(bad):
         0.0,
     )
     assert shares_of({"reserve_share_wind": bad}) is None
+
+
+# ── 01d: the units holding the reserve at each binding hour ─────────────────
+
+
+def test_holders_name_the_units_and_sum_to_the_held_reserve():
+    n = _network(committable=False, battery=True)
+    _solve(n, ON)
+    res = operating_reserve_result(n, (0.2, 0.0, 0.0))
+    binding = [r for r in res["per_snapshot"] if r["binding"]]
+    assert binding, "the case needs a binding hour"
+    for r in binding:
+        hs = r["holders"]
+        assert hs and {h["kind"] for h in hs} <= {"generator", "storage_unit"}
+        assert sum(h["held_mw"] for h in hs) == pytest.approx(r["held_mw"])
+        assert all(h["held_mw"] > 0 for h in hs)
+        assert [h["held_mw"] for h in hs] == sorted(
+            (h["held_mw"] for h in hs), reverse=True
+        )
+    assert "diesel" in {h["name"] for r in binding for h in r["holders"]}
+
+
+def test_a_battery_is_named_with_the_energy_it_can_deliver():
+    n = _network(committable=False, battery=True)
+    sns = n.snapshots
+    n.snapshot_weightings.loc[:, "stores"] = 2.0
+    n.generators_t.p = pd.DataFrame({"pv": 0.0, "diesel": 0.0}, index=sns)
+    n.generators.loc["diesel", "p_nom"] = 0.0
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    n.storage_units_t.p_dispatch = pd.DataFrame({"bess": 1.0}, index=sns)
+    n.storage_units_t.p_store = pd.DataFrame({"bess": 0.0}, index=sns)
+    n.storage_units_t.state_of_charge = pd.DataFrame({"bess": 4.0}, index=sns)
+    res = operating_reserve_result(n, (0.18, 0.0, 0.0))  # required 1.8 = what it holds
+    r = res["per_snapshot"][0]
+    assert r["binding"]
+    assert r["holders"] == [{"name": "bess", "kind": "storage_unit", "held_mw": pytest.approx(1.8)}]
+
+
+def test_non_binding_hours_carry_no_holders():
+    n = _network(committable=False, battery=True)
+    _solve(n, ON)
+    res = operating_reserve_result(n, (0.2, 0.0, 0.0))
+    quiet = [r for r in res["per_snapshot"] if not r["binding"]]
+    assert quiet and all("holders" not in r for r in quiet)
+
+
+def test_a_committable_unit_that_is_off_holds_nothing():
+    n = _network()
+    _solve(n, ON)
+    res = operating_reserve_result(n, (0.2, 0.0, 0.0))
+    st = n.generators_t.status["diesel"]
+    for r, (t, on) in zip(res["per_snapshot"], st.items()):
+        if r["binding"] and not on:
+            assert "diesel" not in {h["name"] for h in r["holders"]}
+
+
+def test_no_holders_when_the_dispatch_is_missing():
+    n = _network(committable=False)
+    _solve(n, ON)
+    del n.generators_t.p["diesel"]
+    res = operating_reserve_result(n, (0.2, 0.0, 0.0))
+    assert res["reason"] and not any("holders" in r for r in res["per_snapshot"])

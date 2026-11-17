@@ -610,6 +610,7 @@ _RESULTS_ENUM = (
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
     "asset_economics", "billing", "cfe_score", "value_flows", "renewable_fraction",
+    "operating_reserve",
 )
 
 
@@ -647,6 +648,8 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     "billing": "get_billing",
     "cfe_score": "get_cfe_score",
     "renewable_fraction": "get_renewable_fraction",
+    # homer-parity 01d.
+    "operating_reserve": "get_operating_reserve",
     # Edge Investment Case P3 WP3.4.
     "value_flows": "get_value_flows",
 }

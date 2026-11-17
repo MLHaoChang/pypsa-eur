@@ -39,7 +39,8 @@ it('lists the binding hours with the shares in plain text and the inputs link', 
     ...base, not_counted: ['bat'], binding: ['2030-01-01 03:00'],
     per_snapshot: [
       { snapshot: '2030-01-01 02:00', required_mw: 1, held_mw: 5, binding: false },
-      { snapshot: '2030-01-01 03:00', required_mw: 2, held_mw: 1.5, binding: true },
+      { snapshot: '2030-01-01 03:00', required_mw: 2, held_mw: 1.5, binding: true,
+        holders: [{ name: 'Diesel', kind: 'generator', held_mw: 1.2 }, { name: 'Battery', kind: 'storage_unit', held_mw: 0.3 }] },
     ],
   })
   expect(await screen.findByTestId('operating-reserve-shares')).toHaveProperty('textContent', 'Reserve for load 10 %, solar 20 %, wind 15 %')
@@ -47,6 +48,7 @@ it('lists the binding hours with the shares in plain text and the inputs link', 
   expect(screen.getByText('Shortfall (MW)')).toBeTruthy()
   expect(screen.getByText('0.5')).toBeTruthy()
   expect(screen.getByText(/bat\./)).toBeTruthy()
+  expect(screen.getByTestId('operating-reserve-holders').textContent).toBe('Diesel 1.2 MW, Battery (storage) 0.3 MW')
   fireEvent.click(screen.getByTestId('operating-reserve-inputs'))
   expect(openOffGrid).toHaveBeenCalledTimes(1)
 })
@@ -64,4 +66,15 @@ it('states the cap and translates the server reason', async () => {
   cleanup()
   show({ ...base, reason: 'the solve has no dispatch for g1' })
   expect((await screen.findByTestId('operating-reserve-reason')).textContent).not.toMatch(/the solve has no dispatch for g1/)
+})
+
+it('caps the units named per hour and says when none were reported', async () => {
+  const holders = Array.from({ length: 6 }, (_, i) => ({ name: `u${i}`, kind: 'generator' as const, held_mw: 6 - i }))
+  show({ ...base, per_snapshot: [
+    { snapshot: 'a', required_mw: 21, held_mw: 21, binding: true, holders },
+    { snapshot: 'b', required_mw: 1, held_mw: 1, binding: true },
+  ] })
+  const cells = await screen.findAllByTestId('operating-reserve-holders')
+  expect(cells[0].textContent).toBe('u0 6 MW, u1 5 MW, u2 4 MW, u3 3 MW and 2 more')
+  expect(cells[1].textContent).toBe('No unit reported')
 })

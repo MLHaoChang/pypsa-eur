@@ -1,6 +1,6 @@
 # 01d — Name the units holding the operating reserve in each binding hour
 
-Status: ready-for-agent
+Status: done
 
 Follow-up from homer-parity 01c (UX 21, condition 3). The 01c view shows the aggregate reserve held per binding hour, plus the storage that is not counted.
 

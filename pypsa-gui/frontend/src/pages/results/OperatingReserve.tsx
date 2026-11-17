@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { resultsApi } from '../../api/simulation'
+import { resultsApi, type ReserveHolder } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { openOffGridConstraints } from '../../layout/flowNavigation'
@@ -9,6 +9,18 @@ export const RESERVE_ROW_CAP = 50
 
 const pct = (f: number) => `${+(f * 100).toFixed(1)} %`
 const mw = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+
+/** Most units named per hour; the rest are counted. */
+export const RESERVE_HOLDER_CAP = 4
+
+/** "Diesel 120 MW, Battery 30 MW (storage)": who holds the reserve that hour, in plain words. */
+function heldBy(holders: ReserveHolder[] | undefined): string {
+  if (!holders || holders.length === 0) return 'No unit reported'
+  const named = holders.slice(0, RESERVE_HOLDER_CAP).map(h =>
+    `${h.name}${h.kind === 'storage_unit' ? ' (storage)' : ''} ${mw(h.held_mw)} MW`)
+  const rest = holders.length - named.length
+  return named.join(', ') + (rest > 0 ? ` and ${rest} more` : '')
+}
 
 /** The server's reason, in plain words (it carries engine wording). */
 function plainReason(reason: string): string {
@@ -50,13 +62,14 @@ export default function OperatingReserve() {
       ) : (
         <>
           <div className="overflow-auto border border-border rounded">
-            <table className="w-full text-xs border-collapse" style={{ minWidth: 480 }}>
+            <table className="w-full text-xs border-collapse" style={{ minWidth: 640 }}>
               <thead>
                 <tr>
                   <th className={`${th} text-left`}>Hour</th>
                   <th className={th}>Reserve required (MW)</th>
                   <th className={th}>Reserve held (MW)</th>
                   <th className={th}>Shortfall (MW)</th>
+                  <th className={`${th} text-left`}>Held by</th>
                 </tr>
               </thead>
               <tbody>
@@ -66,6 +79,7 @@ export default function OperatingReserve() {
                     <td className={td}>{mw(r.required_mw)}</td>
                     <td className={td}>{mw(r.held_mw)}</td>
                     <td className={td}>{mw(Math.max(0, r.required_mw - r.held_mw))}</td>
+                    <td data-testid="operating-reserve-holders" className="px-2 py-1 text-[11px]">{heldBy(r.holders)}</td>
                   </tr>
                 ))}
               </tbody>

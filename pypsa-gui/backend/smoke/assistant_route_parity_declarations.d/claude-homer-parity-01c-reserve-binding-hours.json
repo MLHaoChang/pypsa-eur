@@ -1,1 +1,0 @@
-{"limitations": [{"method": "GET", "path": "/api/results/operating_reserve", "reason": "held-by-spec", "issue": ".scratch/homer-parity/issues/01d-operating-reserve-holding-units.md"}]}

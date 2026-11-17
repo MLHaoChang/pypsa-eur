@@ -414,6 +414,7 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
         return s
 
     held = pd.Series(0.0, index=sns)
+    parts: list[tuple[str, str, pd.Series]] = []  # (name, kind, headroom): what `held` sums, per unit
     avail = _avail(n, "Generator", sns, sel["dispatchable"])
     status = getattr(n.generators_t, "status", None)
     for g in sel["dispatchable"]:
@@ -429,6 +430,7 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
                 continue
             cap = cap * st
         held += cap - p
+        parts.append((str(g), "generator", cap - p))
     su = n.storage_units
     su_t = n.storage_units_t
     w = n.snapshot_weightings["stores"].reindex(sns).astype(float)
@@ -450,9 +452,11 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
         cancel = soc / ws.where(
             ws > 0, np.nan
         )  # w·η_s = 0: no bound (as the LP's 0 ≤ soc)
-        held += np.minimum(np.minimum(power, energy), cancel.fillna(np.inf)).clip(
+        hold = np.minimum(np.minimum(power, energy), cancel.fillna(np.inf)).clip(
             lower=0.0
         )
+        held += hold
+        parts.append((str(s), "storage_unit", hold))
     req = a * _load_mw(n, sel["loads"], sns)
     for share, names in ((b, sel["pv"]), (c, sel["wind"])):
         if not share:
@@ -472,9 +476,18 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
     for t in sns:
         r, h = float(req[t]), float(held[t])
         binds = r > 0 and h - r <= _REL * r + _ABS
-        out["per_snapshot"].append(
-            {"snapshot": _label(t), "required_mw": r, "held_mw": h, "binding": binds}
-        )
+        row = {"snapshot": _label(t), "required_mw": r, "held_mw": h, "binding": binds}
+        if binds:
+            # Binding hours only (01d); a unit's headroom is what the sum above added, so the units add up to held_mw.
+            row["holders"] = sorted(
+                (
+                    {"name": name, "kind": kind, "held_mw": float(v[t])}
+                    for name, kind, v in parts
+                    if float(v[t]) > 0
+                ),
+                key=lambda x: -x["held_mw"],
+            )
+        out["per_snapshot"].append(row)
         if binds:
             out["binding"].append(_label(t))
     return out
