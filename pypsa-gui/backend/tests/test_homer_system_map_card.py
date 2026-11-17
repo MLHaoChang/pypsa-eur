@@ -161,3 +161,20 @@ def test_the_chat_loop_attaches_the_card_only_to_a_start():
 
     sig = inspect.signature(confirm._confirm_destructive_tool)
     assert "map_card" in sig.parameters
+
+
+def test_the_card_shows_the_project_and_the_study_it_will_run_on(
+    client, studies_on, install_network
+):
+    sid = _project(client, install_network, "mc-shown")
+    shown = C.preview(_args("mc-shown", sid))["shown"]
+    assert shown["project"] == "mc-shown" and shown["study_id"] == sid
+
+
+def test_an_unknown_architecture_is_422_and_a_missing_source_is_409(
+    client, studies_on, install_network
+):
+    sid = _project(client, install_network, "mc-status")
+    with pytest.raises(HTTPException) as exc:
+        C.preview(_args("mc-status", sid, architectures=["wind"]))
+    assert exc.value.status_code == 422
