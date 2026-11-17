@@ -25,7 +25,7 @@ import pathlib
 import uuid
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session as DBSession
 from db.session import get_db
 from db.models import Project as ProjectRow
@@ -572,7 +572,7 @@ def _plain_refusal(line: str) -> str:
     return next((v for k, v in _PLAIN_REFUSALS.items() if line.startswith(k)), line)
 
 
-def _intent_inputs(row, project, network, config, req: dict | None = None):
+def _intent_inputs(row, project, network, config, req: dict | None = None, link: str | None = None):
     """`intent_inputs.resolve` (or, without `req`, `defaults`) on the project's own ramp limit (the grid-readiness
     scorecard's row) and stored DC load envelope, at the project's discount rate."""
     from services.adequacy.grid_readiness import grid_readiness_for
@@ -582,7 +582,7 @@ def _intent_inputs(row, project, network, config, req: dict | None = None):
     ramp = next((r for r in card.get("rows", []) if r.get("id") == "ramp_rate"), None)
     kw = dict(ramp_row=ramp, envelope=read_envelope(project.directory), rate=float(config.discount_rate))
     if req is None:
-        return intent_inputs.defaults(network, **kw), card.get("profile") or {}
+        return intent_inputs.defaults(network, link=link, **kw), card.get("profile") or {}
     return intent_inputs.resolve(network, req, **kw)
 
 
@@ -609,10 +609,12 @@ def _pst_limit(row, code: str | None) -> dict:
 def get_intent_comparison_defaults(
     project: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
+    link: str | None = Query(None, description="The link the user chose; `pq` is then that link's."),
 ) -> dict:
     """What the comparison runs on when the request leaves the project-held inputs out, each as
-    {value, source}: the PoC link, ramp limit, DC load envelope, PoC values (`pq`), and the grid code the campus
-    study applies (its saved one, else its default). Read only."""
+    {value, source}: the PoC link, ramp limit, DC load envelope, PoC values (`pq`, for `link` when given, the
+    link the run then reads them from), and the grid code the campus study applies (its saved one, else its
+    default). Read only."""
     from services import campus_electrical_service as campus
 
     row = db.get(ProjectRow, uuid.UUID(project.uuid))
@@ -620,7 +622,7 @@ def get_intent_comparison_defaults(
         raise HTTPException(404, f"Project '{project.name}' not found")
     network = _load_project_network(project.directory)
     config = _project_solver_config(project.directory)
-    out, profile = _intent_inputs(row, project, network, config)
+    out, profile = _intent_inputs(row, project, network, config, link=link)
     from services.adequacy.grid_readiness import _read_json
 
     saved = (_read_json(project.directory / campus.SUBDIR / campus.SETTINGS_FILE) or {}).get("profile")

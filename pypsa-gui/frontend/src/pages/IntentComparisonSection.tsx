@@ -14,7 +14,7 @@ import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 import {
   DESIGN_INTENTS, intentComparisonApi, type CheckState, type DesignIntent, type IntentJob, type IntentRow, type Outcome,
-  type PqField,
+  type IntentInputDefaults, type PqField,
 } from '../api/intentComparison'
 import { Btn, Field, PageSection, Tag } from '../components/PageKit'
 import { withReturnFrom } from '../layout/flowNavigation'
@@ -139,11 +139,23 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
     swing: typed.swing ?? shown(env?.swing_mw, 2), amp: typed.amp ?? shown(env?.oscillation_amplitude_mw, 2),
     period: typed.period ?? shown(env?.oscillation_period_s, 2), ...g,
   }
-  const pqValue = (k: PqField, d: number) => pqTyped[k] ?? shown(held.data?.pq[k]?.value, d)
+  // GK B3: on another link than the grid import, the PoC values a run takes are that link's own; show those.
+  const otherLink = held.isSuccess && f.link !== '' && f.link !== (held.data?.link.value ?? '')
+  const heldForLink = useQuery({ queryKey: ['intentInputDefaults', name, f.link],
+    queryFn: () => intentComparisonApi.defaults(name, f.link), enabled: otherLink, staleTime: 30_000, retry: false })
+  const heldPq: IntentInputDefaults['pq'] = (otherLink ? heldForLink.data?.pq : held.data?.pq) ?? {}
+  const pqValue = (k: PqField, d: number) => pqTyped[k] ?? shown(heldPq[k]?.value, d)
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const v = e.target.value
     if (k === 'library') setG(p => ({ ...p, [k]: v }))
     else setF(p => ({ ...p, [k]: v }))
+  }
+  /** Why an empty field has no prefill (GK B4: every field the backend gives a reason for). */
+  const why = (k: Typed | 'library'): string | null | undefined => {
+    if (k === 'critical' || k === 'link' || k === 'sk' || k === 'pst') return defaults[k].reason
+    if (k === 'ramp') return held.data?.ramp_mw_per_min.reason
+    if (k === 'swing' || k === 'amp' || k === 'period') return held.data?.envelope.reason
+    return null
   }
   /** The word after a field for where its value comes from. */
   const fieldSource = (k: Typed | 'library'): string | null => {
@@ -266,8 +278,8 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
                 <input className={INPUT} inputMode="decimal" value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
               )}
               {fieldSource(k) && <span className={`${SOURCE_CHIP} ml-1`} data-testid={`intent-src-${k}`}>{fieldSource(k)}</span>}
-              {(k === 'critical' || k === 'link' || k === 'sk' || k === 'pst') && f[k] === '' && defaults[k].reason && (
-                <p className="text-[11px] text-muted" data-testid={`intent-why-${k}`}>{defaults[k].reason}</p>
+              {f[k] === '' && why(k) && (
+                <p className="text-[11px] text-muted" data-testid={`intent-why-${k}`}>{why(k)}</p>
               )}
             </Field>
           ))}
@@ -285,13 +297,13 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
             <Field key={k} label={label}>
               <input className={INPUT} inputMode="decimal" value={pqValue(k, d)} disabled={running}
                 onChange={e => { const v = e.target.value; setPq(p => ({ ...p, [k]: v })) }} data-testid={`intent-pq-${k}`} />
-              {(pqTyped[k] !== undefined || held.data?.pq[k]?.value != null) && (
+              {(pqTyped[k] !== undefined || heldPq[k]?.value != null) && (
                 <span className={`${SOURCE_CHIP} ml-1`} data-testid={`intent-pq-src-${k}`}
-                  title={pqTyped[k] === undefined ? held.data?.pq[k]?.source ?? undefined : undefined}>
-                  {sourceWord(held.data?.pq[k]?.kind, pqTyped[k] !== undefined)}</span>
+                  title={pqTyped[k] === undefined ? heldPq[k]?.source ?? undefined : undefined}>
+                  {sourceWord(heldPq[k]?.kind, pqTyped[k] !== undefined)}</span>
               )}
-              {pqValue(k, d) === '' && held.data?.pq[k]?.reason && (
-                <p className="text-[11px] text-muted" data-testid={`intent-why-pq-${k}`}>{held.data.pq[k]?.reason}</p>
+              {pqValue(k, d) === '' && heldPq[k]?.reason && (
+                <p className="text-[11px] text-muted" data-testid={`intent-why-pq-${k}`}>{heldPq[k]?.reason}</p>
               )}
               {k === 'statcom_capital_cost' && Number(pqValue(k, d)) > 0 && (
                 <p className="text-[11px] text-muted" data-testid="intent-pq-cost-money">

@@ -395,3 +395,48 @@ def test_pst_limit_reads_the_applied_code(monkeypatch, code, profile, want):
     monkeypatch.setattr("services.campus_electrical_service.grid_code_profile", load)
     got = compare._pst_limit(object(), code)
     assert {k: got.get(k) for k in want} == want
+
+
+def test_the_defaults_for_a_chosen_link_are_what_the_run_records(
+    client, hub, monkeypatch
+):
+    """GK B3: pick another link than the grid import; the PoC values the form shows for it (GET defaults with
+    ?link=) are the ones the run takes and records."""
+    name, _ = hub
+    _island_off(client)
+    from tests.test_intent_table import _result
+
+    monkeypatch.setattr(
+        "services.adequacy.sizing_loop_runner.run_sizing",
+        lambda network, config, inp, **kw: _result(),
+    )
+    r = client.get(URL.format(name) + "/defaults", params={"link": "site_transformer"})
+    assert r.status_code == 200, r.text
+    shown = {f: v["value"] for f, v in r.json()["pq"].items()}
+    assert shown != {f: v["value"] for f, v in _defaults(client, name)["pq"].items()}
+    body = {
+        "intents": [{"intent": "B"}, {"intent": "C"}],
+        "critical_mw": 34.49,
+        "inputs": {
+            "link": "site_transformer",
+            "sk_mva": 250.0,
+            "pst_limit": 1.0,
+            "transformer_library_mva": [40.0],
+            "pq": {},
+        },
+    }
+    assert client.post(URL.format(name), json=body).status_code == 202, body
+    assert _wait(client, name)["inputs"]["values"]["pq"] == shown
+
+
+def test_a_bool_point_of_connection_value_is_422_by_its_label(client, hub):
+    """GK B2: True is not a power factor of 1."""
+    name, _ = hub
+    body = _body(_defaults(client, name), "BC")
+    body["inputs"]["pq"] = {"pf": True}
+    r = client.post(URL.format(name), json=body)
+    assert r.status_code == 422
+    assert (
+        r.json()["detail"]
+        == "Point of connection: load power factor must be a number, got bool"
+    )

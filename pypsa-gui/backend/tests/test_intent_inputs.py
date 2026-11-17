@@ -168,7 +168,6 @@ def test_defaults_without_a_ramp_or_envelope_say_why(n):
 @pytest.mark.parametrize(
     "pq,words",
     [
-        ({"pf": "high"}, "every value must be a number"),
         ({"x_pu": math.inf}, "transformer reactance (p.u.) must be a finite number"),
         ({"pf": 1.5}, "load power factor out of range"),
         ({"pf_req": 0.0}, "required power factor out of range"),
@@ -199,24 +198,86 @@ def test_apply_pq_tags_the_given_network_and_returns_the_sizing_fields(n):
     assert n.links.at["grid_import", "pq_x_pu"] == ii.ASSUMED_X_PU
 
 
-def test_an_unbounded_extendable_link_reads_its_p_nom(n):
+def test_an_unbounded_extendable_link_is_refused_by_name_and_not_prefilled(n):
+    # GK B1: the check reads the reach from p_nom_max, so no typed rating can pass; refuse up front.
     n.links.loc["grid_import", ["p_nom_extendable", "p_nom_max"]] = [True, math.inf]
-    inputs, _ = _resolve(n, {"pq": {}})
-    assert inputs["pq"]["s_n_mva"] == n.links.at["grid_import", "p_nom"]
+    held = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=0.07)["pq"]
+    for f in ("s_n_mva", "p_cap_mw"):
+        assert held[f]["value"] is None and "Maximum capacity" in held[f]["reason"]
+    typed = {"pq": {"s_n_mva": 40.0, "p_cap_mw": 40.0}}
+    assert _refused(_resolve, n, typed).startswith(
+        "Campus link: grid_import has no maximum capacity"
+    )
+    n.links.at["grid_import", "p_nom_max"] = 40.0
+    inputs, _ = _resolve(n, typed)
+    ii.apply_pq(n, inputs)  # bounded, the check passes on the same values
 
 
-def test_a_link_with_no_finite_rating_asks_for_it(n):
-    n.links.loc["grid_import", ["p_nom_extendable", "p_nom_max", "p_nom"]] = [
-        True,
-        math.inf,
-        0.0,
-    ]
+def test_an_unbounded_fixed_link_is_refused_by_name(n):
+    n.links.loc["grid_import", ["p_nom_extendable", "p_nom"]] = [False, math.inf]
+    held = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=0.07)["pq"]
+    assert held["s_n_mva"]["value"] is None
+    assert _refused(_resolve, n, {"pq": {}}).startswith("Campus link: grid_import")
+
+
+def test_a_link_with_no_rating_asks_for_it_and_runs_on_the_typed_one(n):
+    n.links.loc["grid_import", ["p_nom_extendable", "p_nom"]] = [False, 0.0]
     held = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=0.07)["pq"]
     assert held["s_n_mva"]["value"] is None and held["s_n_mva"]["reason"]
     text = _refused(_resolve, n, {"pq": {"p_cap_mw": 40.0}})
     assert text.startswith("Point of connection: transformer rating (MVA):")
     inputs, _ = _resolve(n, {"pq": {"p_cap_mw": 40.0, "s_n_mva": 40.0}})
     assert inputs["pq"]["s_n_mva"] == 40.0
+    ii.apply_pq(n, inputs)
+
+
+@pytest.mark.parametrize(
+    "value,kind", [(True, "bool"), (False, "bool"), ("0.1", "str"), ([1], "list")]
+)
+def test_a_pq_value_that_is_not_a_number_is_refused_by_its_label(n, value, kind):
+    # GK B2: a bool is not 1.0 or 0.0, and a numeric string is not a number.
+    for f, label in (
+        ("x_pu", "transformer reactance (p.u.)"),
+        ("pf", "load power factor"),
+    ):
+        text = _refused(_resolve, n, {"pq": {f: value}})
+        assert text == f"Point of connection: {label} must be a number, got {kind}"
+        assert _refused(
+            ii.apply_pq, n, {"link": "grid_import", "pq": {**TAGS, f: value}}
+        ).startswith(f"Point of connection: {label} must be a number")
+
+
+def test_typed_pq_values_are_recorded_as_floats(n):
+    inputs, _ = _resolve(n, {"pq": {"s_n_mva": 40, "p_cap_mw": 40}})
+    assert (
+        type(inputs["pq"]["s_n_mva"]) is float
+        and type(inputs["pq"]["p_cap_mw"]) is float
+    )
+
+
+def test_defaults_for_a_chosen_link_are_what_resolve_runs_on_it(n):
+    # GK B3: the prefill for the link the user picks equals what the run takes for it.
+    held = ii.defaults(
+        n, ramp_row=RAMP, envelope=ENV, rate=0.07, link="site_transformer"
+    )
+    inputs, _ = _resolve(n, {"link": "site_transformer", "pq": {}})
+    assert {f: v["value"] for f, v in held["pq"].items()} == inputs["pq"]
+    assert (
+        held["link"]["value"] == "grid_import"
+    )  # the marked grid import is still the link's prefill
+    poc = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=0.07)["pq"]
+    assert poc["s_n_mva"]["value"] != held["pq"]["s_n_mva"]["value"]
+    assert (
+        ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=0.07, link="nowhere")["pq"]
+        == {}
+    )
+
+
+def test_a_non_finite_discount_rate_gives_no_assumed_statcom_cost(n):
+    # GK N1: a NaN cost would make GET .../defaults a 500.
+    held = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=math.nan)["pq"]
+    cost = held["statcom_capital_cost"]
+    assert cost["value"] is None and "discount rate" in cost["reason"]
 
 
 def test_apply_pq_moves_the_tags_to_the_chosen_link_in_the_copy(n):
@@ -232,12 +293,6 @@ def test_a_fixed_link_reads_its_p_nom_not_its_p_nom_max(n):
     n.links.loc["grid_import", ["p_nom_extendable", "p_nom_max"]] = [False, 999.0]
     inputs, _ = _resolve(n, {"pq": {}})
     assert inputs["pq"]["s_n_mva"] == n.links.at["grid_import", "p_nom"]
-
-
-def test_an_unbounded_fixed_link_has_no_assumed_rating(n):
-    n.links.loc["grid_import", ["p_nom_extendable", "p_nom"]] = [False, math.inf]
-    held = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=0.07)["pq"]
-    assert held["s_n_mva"]["value"] is None
 
 
 def test_the_statcom_cost_is_the_packs_overnight_per_mvar_as_an_annuity_plus_fom():

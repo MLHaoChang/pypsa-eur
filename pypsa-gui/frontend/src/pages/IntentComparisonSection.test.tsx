@@ -386,6 +386,28 @@ describe('IntentComparisonSection prefill from the project (walkthrough bug 06)'
     expect(screen.queryByTestId('intent-pq-src-s_n_mva')).toBeNull()
   })
 
+  it('shows the reason under the ramp limit and each envelope field when the project has none (GK B4)', async () => {
+    dcNet(); api.get.mockResolvedValue(null); api.defaults.mockResolvedValue(HELD_NONE)
+    renderIt(null)
+    expect((await screen.findByTestId('intent-why-ramp')).textContent).toBe('The project has no ramp limit.')
+    for (const k of ['swing', 'amp', 'period'])
+      expect(screen.getByTestId(`intent-why-${k}`).textContent).toBe('The project has no DC load envelope.')
+  })
+
+  it('shows the PoC values of the link the user picks, the ones the run takes on it (GK B3)', async () => {
+    const user = userEvent.setup()
+    dcNet(); api.get.mockResolvedValue(null)
+    const site = { ...HELD_DC, pq: { ...PQ, s_n_mva: { value: 25, source: "assumed: the connection's rating", kind: 'assumed' as const } } }
+    api.defaults.mockImplementation(async (_p: string, link?: string) => (link === 'site_transformer' ? site : HELD_DC))
+    renderIt(null)
+    await waitFor(() => expect((screen.getByTestId('intent-pq-s_n_mva') as HTMLInputElement).value).toBe('40'))
+    await user.selectOptions(screen.getByTestId('intent-in-link'), 'site_transformer')
+    await waitFor(() => expect((screen.getByTestId('intent-pq-s_n_mva') as HTMLInputElement).value).toBe('25'))
+    expect(api.defaults).toHaveBeenCalledWith('Hub A', 'site_transformer')
+    await user.selectOptions(screen.getByTestId('intent-in-link'), 'poc')
+    await waitFor(() => expect((screen.getByTestId('intent-pq-s_n_mva') as HTMLInputElement).value).toBe('40'))
+  })
+
   it('leaves untouched project values out of the request and sends only the typed PoC values', async () => {
     const user = userEvent.setup()
     dcNet(); api.get.mockResolvedValue(null); api.start.mockResolvedValue(job([row('B'), row('C')]))

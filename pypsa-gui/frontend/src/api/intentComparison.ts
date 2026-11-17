@@ -81,7 +81,9 @@ export const intentComparisonApi = {
       if ((e as { response?: { status?: number } })?.response?.status === 404) return null
       throw e
     }),
-  defaults: (project: string) =>
-    client.get<IntentInputDefaults>(`${base(project)}/defaults`, quiet).then(r => r.data),
+  /** `link`: the link the user chose; `pq` is then that link's, the values a run on it takes. */
+  defaults: (project: string, link?: string) =>
+    client.get<IntentInputDefaults>(`${base(project)}/defaults`, { ...quiet, params: link ? { link } : undefined })
+      .then(r => r.data),
   abort: (project: string) => client.post<{ status: string; aborting: boolean }>(`${base(project)}/abort`, {}, quiet).then(r => r.data),
 }

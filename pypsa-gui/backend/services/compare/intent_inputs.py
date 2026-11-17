@@ -70,19 +70,24 @@ def poc_link(n) -> str | None:
     return str(hits[0]) if len(hits) else None
 
 
-def _reach_mw(n, link: str) -> float | None:
-    """How far the link's flow can reach, in MW: its rating times its largest per-unit bound. An extendable
-    link with no finite `p_nom_max` reads its `p_nom`; None when that gives no finite, positive reach."""
+def _reach_mw(n, link: str) -> float:
+    """How far the link's flow can reach, in MW, as `pcs_statcom._check` reads it: its rating (`p_nom_max` when
+    extendable, else `p_nom`) times its largest per-unit bound. Infinite when the link has no maximum size."""
     s = n.links.loc[link]
-    p_nom = float(s["p_nom"])
-    if s["p_nom_extendable"] and math.isfinite(float(s["p_nom_max"])):
-        p_nom = float(s["p_nom_max"])
+    p_nom = float(s["p_nom_max"] if s["p_nom_extendable"] else s["p_nom"])
     pu = max(
         n.get_switchable_as_dense("Link", "p_max_pu")[link].abs().max(),
         n.get_switchable_as_dense("Link", "p_min_pu")[link].abs().max(),
     )
-    reach = p_nom * float(pu)
-    return reach if math.isfinite(reach) and reach > 0 else None
+    return p_nom * float(pu)
+
+
+def _unbounded(link: str) -> str:
+    """Why a link with no maximum size cannot carry the PQ cut: the solver can grow it past any import cap."""
+    return (
+        f"Campus link: {link} has no maximum capacity, so the flow it can carry has no bound and no import cap "
+        "holds; set the link's Maximum capacity"
+    )
 
 
 def statcom_cost(rate: float) -> tuple[float, str]:
@@ -111,14 +116,23 @@ def _project_pq(n, link: str, rate: float) -> dict:
     if links is not None and link in links.index:
         tags = links.loc[link]
     reach = _reach_mw(n, link)
+    if not math.isfinite(reach):
+        rating = (
+            None,
+            "The link has no maximum capacity; set the link's Maximum capacity.",
+        )
+    elif reach <= 0:
+        rating = (None, "The connection has no rating; enter it.")
+    else:
+        rating = (reach, "assumed: the connection's rating")
     assumed = {
         "x_pu": (
             ASSUMED_X_PU,
             "assumed: a typical transformer short-circuit reactance",
         ),
         "pf": (ASSUMED_PF, "assumed: a typical load power factor"),
-        "s_n_mva": (reach, "assumed: the connection's rating"),
-        "p_cap_mw": (reach, "assumed: the connection's rating"),
+        "s_n_mva": rating,
+        "p_cap_mw": rating,
         "pf_req": (
             ASSUMED_PF_REQ,
             "assumed: no grid code value; a typical connection-offer requirement",
@@ -132,6 +146,14 @@ def _project_pq(n, link: str, rate: float) -> dict:
                 "source": SOURCE_PROJECT,
                 "kind": "project",
             }
+        elif field == "statcom_capital_cost" and not math.isfinite(rate):
+            # N1: no discount rate, no annuity (a NaN would not serialise).
+            out[field] = {
+                "value": None,
+                "source": None,
+                "kind": "assumed",
+                "reason": "The project has no discount rate; enter the STATCOM cost.",
+            }
         elif field == "statcom_capital_cost":
             value, note = statcom_cost(rate)
             out[field] = {"value": value, "source": note, "kind": "assumed"}
@@ -142,7 +164,7 @@ def _project_pq(n, link: str, rate: float) -> dict:
                     "value": None,
                     "source": None,
                     "kind": "assumed",
-                    "reason": "The connection has no finite rating; enter it.",
+                    "reason": note,
                 }
             else:
                 out[field] = {"value": float(value), "source": note, "kind": "assumed"}
@@ -197,6 +219,8 @@ def resolve(
         raise IntentInputsRefusal(
             f"Campus link: {link} is not in the network; choose the campus link"
         )
+    if not math.isfinite(_reach_mw(n, link)):
+        raise IntentInputsRefusal(_unbounded(link))
     given = req.get("pq")
     project = _project_pq(n, link, rate)
     if given is None and any(v["source"] != SOURCE_PROJECT for v in project.values()):
@@ -219,10 +243,10 @@ def resolve(
     pq, pq_sources = {}, {}
     for field in PQ_COLUMNS:
         if given is not None and given.get(field) is not None:
-            pq[field], pq_sources[field] = given[field], SOURCE_REQUEST
+            pq[field], pq_sources[field] = _number(field, given[field]), SOURCE_REQUEST
         elif project[field]["value"] is None:
             raise IntentInputsRefusal(
-                f"Point of connection: {PQ_LABELS[field]}: the connection has no finite rating; enter it"
+                f"Point of connection: {PQ_LABELS[field]}: {project[field]['reason']}"
             )
         else:
             pq[field], pq_sources[field] = (
@@ -233,14 +257,22 @@ def resolve(
     return inputs, sources
 
 
-def defaults(n, *, ramp_row: dict | None, envelope: dict | None, rate: float) -> dict:
+def defaults(
+    n,
+    *,
+    ramp_row: dict | None,
+    envelope: dict | None,
+    rate: float,
+    link: str | None = None,
+) -> dict:
     """What `resolve` runs on a request that leaves the project-held inputs out, as {field: {value, source}};
-    a field the project cannot supply is {value: None, source: None, reason}."""
+    a field the project cannot supply is {value: None, source: None, reason}. `pq` is for `link` when given (the
+    link the user chose, which `resolve` reads the PoC values from), else for the marked grid import."""
     out: dict = {}
-    link = poc_link(n)
+    chosen, poc = link, poc_link(n)
     out["link"] = (
-        {"value": link, "source": SOURCE_PROJECT, "kind": "project"}
-        if link is not None
+        {"value": poc, "source": SOURCE_PROJECT, "kind": "project"}
+        if poc is not None
         else {
             "value": None,
             "source": None,
@@ -272,7 +304,12 @@ def defaults(n, *, ramp_row: dict | None, envelope: dict | None, rate: float) ->
             "reason": "The project has no DC load envelope.",
         }
     )
-    out["pq"] = _project_pq(n, link, rate) if link is not None else {}
+    pq_link = chosen if chosen is not None else poc
+    out["pq"] = (
+        _project_pq(n, pq_link, rate)
+        if pq_link is not None and pq_link in n.links.index
+        else {}
+    )
     return out
 
 
@@ -282,10 +319,7 @@ def apply_pq(n, inputs: dict) -> dict:
     check refuses is an `IntentInputsRefusal` naming the field in plain words."""
     rest = {k: v for k, v in inputs.items() if k != "pq"}
     pq = inputs["pq"]
-    try:
-        values = {f: float(pq[f]) for f in PQ_COLUMNS}
-    except (TypeError, ValueError):
-        raise IntentInputsRefusal("Point of connection: every value must be a number")
+    values = {f: _number(f, pq.get(f)) for f in PQ_COLUMNS}
     bad = [PQ_LABELS[f] for f, v in values.items() if not math.isfinite(v)]
     if bad:
         raise IntentInputsRefusal(
@@ -316,6 +350,15 @@ def apply_pq(n, inputs: dict) -> dict:
             )
         raise IntentInputsRefusal(f"Point of connection: {_plain(text)}")
     return rest
+
+
+def _number(field: str, v) -> float:
+    """A PQ value as a float; a bool, a string or anything else not a number is refused by the field's label."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise IntentInputsRefusal(
+            f"Point of connection: {PQ_LABELS[field]} must be a number, got {type(v).__name__}"
+        )
+    return float(v)
 
 
 def _plain(text: str) -> str:
