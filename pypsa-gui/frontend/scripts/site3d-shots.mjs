@@ -106,6 +106,9 @@ const STATES = {
     'run-blocker': { results: { current: false, reason: 'run_not_solved', status: 'idle' }, runBlocker: true },
   }).map(([k, v]) => [`s6c-${k}-${theme}`, { lastReceipt: null, readOnly: false, part: 'Results', provider: 'ready', theme, ...v }]))),
 }
+// The served playback verdict (services/site_scene/verdicts.py): always blocked until playback ships.
+const PLAYBACK_BLOCKER = { code: 'not_in_this_slice', reason: 'Not available yet: comes in a later version', link: '›',
+  home: { guided: { section: 'results', drawer: null, open: 'request_then_scroll' }, expert: { panel: 'results' } } }
 const RUN_BLOCKER = { section: 'readiness', message: 'Readiness and run: Bus “mv” has no voltage: set v_nom above 0', target: {} }
 const FLOW_SECTIONS = [{ section: 'readiness', label: 'Readiness and run', state: null, required: true, items: [], summary: null },
   { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null, freshness: 'stale' }]
@@ -155,9 +158,10 @@ try {
       if (st.provider && p === '/api/chat/profiles') return ok({ profiles: [{ ...PROFILE, chat_ready: st.provider === 'ready' }], active_profile_id: PROFILE.id })
       if (p.startsWith('/api/chat/') || p.startsWith('/api/dictation/')) return r.abort()
       if (/\/flow$/.test(p)) return ok({ sections: st.theme ? FLOW_SECTIONS : [], run_ready: !st.runBlocker, run_blocker: st.runBlocker ? RUN_BLOCKER : null, run_request: { optimisation: true, study: false, loadflow: false }, notes: [], deferred: false, deferred_reason: null,
-        scene: { entry: 'available', anchor_moved: [], actions: ['generate', 'assign_native'].map(action => (st.blocked && action === 'assign_native'
+        scene: { entry: 'available', anchor_moved: [], actions: [...['generate', 'assign_native'].map(action => (st.blocked && action === 'assign_native'
           ? { action, available: false, blocker: LOADS_BLOCKER, required_inputs: [], computes: '' }
-          : { action, available: true, blocker: null, required_inputs: [], computes: '' })) } })
+          : { action, available: true, blocker: null, required_inputs: [], computes: '' })),
+          ...(st.theme ? [{ action: 'play_results', available: false, blocker: PLAYBACK_BLOCKER, required_inputs: [], computes: '' }] : [])] } })
       if (p === '/api/simulation/queue') return ok({ jobs: [], running: [], paused: false })
       const sch = p.match(/^\/api\/network\/asset_schema\/([^/]+)$/)
       if (sch) return SCHEMAS[sch[1]] ? ok(SCHEMAS[sch[1]]) : r.fulfill({ status: 404, json: { detail: 'none' } })
