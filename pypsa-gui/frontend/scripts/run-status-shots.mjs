@@ -47,7 +47,8 @@ const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] }
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 })
   const page = await context.newPage()
-  await page.emulateMedia({ reducedMotion: 'reduce' })
+  // OS in light mode, so the dark shots prove the app's own theme switch (UX 24).
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'light' })
 
   const { email, password } = devCredentials()
   await page.goto(`${BASE}/login`)

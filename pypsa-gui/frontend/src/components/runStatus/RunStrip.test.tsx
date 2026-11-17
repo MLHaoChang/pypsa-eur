@@ -39,6 +39,11 @@ describe('RunStrip', () => {
     expect(screen.getByTestId('run-status').getAttribute('title')).toContain('Optimisation · Solving')
     expect(screen.getByTestId('run-strip-readonly').textContent)
       .toBe('Being solved: edits open again when the run ends.')
+    // UX 24: colours come from the app's theme tokens, which follow the app's
+    // theme switch; Tailwind `dark:` follows the OS instead.
+    const cls = screen.getByTestId('run-strip').className + screen.getByTestId('run-strip-readonly').className
+    expect(cls).toContain('text-warn')
+    expect(cls).not.toMatch(/dark:|amber-/)
   })
 
   it('a queued run or a Guided study shows without the read-only line', () => {

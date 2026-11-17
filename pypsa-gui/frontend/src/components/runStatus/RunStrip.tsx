@@ -25,10 +25,10 @@ export default function RunStrip() {
     {announce}
     {(run || solving) && (
     <div data-testid="run-strip"
-      className="flex items-center gap-3 px-3 h-8 shrink-0 overflow-hidden border-b border-amber-500/30 bg-amber-500/10 text-[11.5px] text-amber-700 dark:text-amber-300">
+      className="flex items-center gap-3 px-3 h-8 shrink-0 overflow-hidden border-b border-warn/30 bg-warn/10 text-[11.5px] text-warn">
       {run && <RunStatusLine run={run} />}
       {solving && (
-        <span data-testid="run-strip-readonly" className="ml-auto flex shrink-0 items-center gap-1.5 text-amber-700/80 dark:text-amber-300/80">
+        <span data-testid="run-strip-readonly" className="ml-auto flex shrink-0 items-center gap-1.5 text-warn/80">
           <Lock size={12} className="shrink-0" aria-hidden />
           {RUN_READ_ONLY_LINE}
         </span>
