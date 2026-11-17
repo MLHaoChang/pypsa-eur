@@ -553,3 +553,72 @@ def test_an_import_error_without_a_module_name_names_the_importer(fake_package):
     )
     with pytest.raises(ImportFormatError, match="'fake_ingest.psse_import'"):
         ir.read("psse", ["case.raw"], declared=(_spec("psse"),))
+
+
+# --- for_file and sniffs (DGS S3, X6) ----------------------------------------
+
+
+def test_a_spec_without_a_sniff_never_claims(tmp_path):
+    assert not _spec("dgs", (".xlsx",)).claims(tmp_path / "a.xlsx")
+
+
+def test_a_sniff_whose_module_is_missing_never_claims(tmp_path):
+    spec = ir.ImporterSpec(
+        format_id="x",
+        display_name="X",
+        extensions=(".xlsx",),
+        help="h",
+        sniff="no_such_module_anywhere:check",
+    )
+    assert not spec.claims(tmp_path / "a.xlsx")
+    spec = ir.ImporterSpec(
+        format_id="x",
+        display_name="X",
+        extensions=(".xlsx",),
+        help="h",
+        sniff="gridspine.ingest.import_result:no_such_function",
+    )
+    assert not spec.claims(tmp_path / "a.xlsx")
+
+
+def test_for_file_names_what_this_build_reads(tmp_path, fake_package):
+    (fake_package / "psse_import.py").write_text("def read_psse(p, o): pass\n")
+    with pytest.raises(
+        ImportFormatError,
+        match=r"noext: no importer reads files without an extension; this build reads .dyr, .raw",
+    ):
+        ir.for_file(tmp_path / "noext", (_spec("psse"),))
+    with pytest.raises(
+        ImportFormatError,
+        match=r"a.raw: no importer reads .raw; this build reads nothing",
+    ):
+        ir.for_file(tmp_path / "a.raw", ())
+
+
+def test_for_file_names_the_candidates_when_none_claims(tmp_path, fake_package):
+    for fid in ("aa", "bb"):
+        (fake_package / f"{fid}_import.py").write_text(
+            f"def read_{fid}(p, o): pass\ndef sniff(p): return {fid == 'bb'}\n"
+        )
+    specs = [
+        ir.ImporterSpec(
+            format_id=fid,
+            display_name=f"{fid.upper()} file",
+            extensions=(".xlsx",),
+            help="h",
+            package="fake_ingest",
+            sniff=f"fake_ingest.{fid}_import:sniff",
+        )
+        for fid in ("aa", "bb")
+    ]
+    assert ir.for_file(tmp_path / "w.xlsx", specs).format_id == "bb"
+    specs[1] = ir.ImporterSpec(
+        format_id="bb",
+        display_name="BB file",
+        extensions=(".xlsx",),
+        help="h",
+        package="fake_ingest",
+    )
+    with pytest.raises(ImportFormatError) as e:
+        ir.for_file(tmp_path / "w.xlsx", specs)
+    assert "importers recognise: AA file, BB file" in str(e.value)

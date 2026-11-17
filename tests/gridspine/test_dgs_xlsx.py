@@ -405,3 +405,132 @@ def test_every_declared_sniff_resolves():
 def test_a_row_of_spaces_is_an_empty_row(tmp_path):
     path = one_sheet(tmp_path, [HEAD, ["2", "C", "T", 33.0, 1], ["  ", " "]])
     assert list(parse_dgs_xlsx(path).tables["ElmTerm"].index) == ["2"]
+
+
+# --- mutant survivors: limits, paths, sniffs ---------------------------------
+
+
+def _ws(rows, cols):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(max_row=rows, max_column=cols)
+
+
+def test_the_declared_size_is_checked_per_limit(monkeypatch):
+    from gridspine.ingest import xlsx_safe as X
+
+    monkeypatch.setitem(L.LIMITS, "rows", 10)
+    monkeypatch.setitem(L.LIMITS, "columns", 10)
+    monkeypatch.setitem(L.LIMITS, "cells", 50)
+    X.declared_within_limits(_ws(10, 5))  # at each limit: accepted
+    X.declared_within_limits(_ws(5, 10))
+    X.declared_within_limits(_ws(None, None))  # an empty sheet declares nothing
+    for ws, limit in (
+        (_ws(11, 1), "rows"),
+        (_ws(1, 11), "columns"),
+        (_ws(6, 9), "cells"),
+    ):
+        with pytest.raises(L.ImportLimitError) as e:
+            X.declared_within_limits(ws)
+        assert e.value.limit == limit
+    X.declared_within_limits(_ws(10, 5))  # rows * cols == 50: accepted
+
+
+def test_streamed_rows_are_capped_per_limit(monkeypatch):
+    from gridspine.ingest import xlsx_safe as X
+
+    monkeypatch.setitem(L.LIMITS, "rows", 2)
+    monkeypatch.setitem(L.LIMITS, "columns", 3)
+    assert list(X.capped([(1, 2, 3), (4, 5, 6)])) == [(1, (1, 2, 3)), (2, (4, 5, 6))]
+    with pytest.raises(L.ImportLimitError) as e:
+        list(X.capped([(1,), (2,), (3,)]))
+    assert e.value.limit == "rows"
+    with pytest.raises(L.ImportLimitError) as e:
+        list(X.capped([(1, 2, 3, 4)]))
+    assert e.value.limit == "columns"
+
+
+def test_the_cell_count_runs_across_sheets(tmp_path, monkeypatch):
+    path = one_sheet(tmp_path, [HEAD, ["2", "C", "T", 33.0, 1]])  # 6 + 10 cells
+    monkeypatch.setitem(L.LIMITS, "cells", 16)
+    assert parse_dgs_xlsx(path).tables["ElmTerm"].loc["2", "uknom"] == 33.0
+    monkeypatch.setitem(L.LIMITS, "cells", 15)
+    with pytest.raises(L.ImportLimitError, match="cells 16 exceeds 15"):
+        parse_dgs_xlsx(path)
+
+
+def test_exactly_the_sheet_limit_is_accepted(tmp_path, monkeypatch):
+    path = one_sheet(tmp_path, [HEAD, ["2", "C", "T", 33.0, 1]])
+    monkeypatch.setitem(L.LIMITS, "sheets", 2)
+    assert parse_dgs_xlsx(path).version == "7.0"
+    monkeypatch.setitem(L.LIMITS, "sheets", 1)
+    with pytest.raises(L.ImportLimitError, match="sheets 2 exceeds 1"):
+        parse_dgs_xlsx(path)
+
+
+def test_a_zip_that_is_not_a_workbook_is_refused(tmp_path):
+    import zipfile
+
+    path = tmp_path / "z.xlsx"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("hello.txt", "not a workbook")
+    with pytest.raises(
+        ImportFormatError, match="z.xlsx: The file is not a readable Excel workbook"
+    ):
+        read_dgs([path], {})
+    assert not is_dgs_workbook(path) and not L.is_input_workbook(path)
+
+
+def test_a_path_may_be_text(tmp_path):
+    path = workbook(V7, tmp_path / "v7.xlsx")
+    assert parse_dgs_xlsx(str(path)).version == "7.0"
+    assert ir.for_file(str(path)).format_id == "dgs"
+
+
+def test_a_short_row_is_padded_to_the_header(tmp_path):
+    path = one_sheet(tmp_path, [HEAD, ["2", "C"]])
+    df = parse_dgs_xlsx(path).tables["ElmTerm"]
+    assert df.loc["2", "loc_name"] is None and pd.isna(df.loc["2", "uknom"])
+
+
+def test_an_empty_header_row_over_data_is_refused(tmp_path):
+    path = one_sheet(tmp_path, [[None, None], ["2", "C", "T", 33.0, 1]])
+    with pytest.raises(ContractError, match=r"sheet ElmTerm, row 1: row 1 is empty"):
+        parse_dgs_xlsx(path)
+
+
+def test_a_carriage_return_is_refused(tmp_path):
+    path = one_sheet(tmp_path, [HEAD, ["2", "C", "a\rb", 33.0, 1]])
+    with pytest.raises(ContractError, match="line break"):
+        parse_dgs_xlsx(path)
+
+
+def test_a_general_sheet_with_a_number_in_its_header_is_still_read(tmp_path):
+    wb = openpyxl.Workbook()
+    wb.active.title = "General"
+    wb.active.append(["FID(a:40)", 5, "Descr(a:40)", "Val(a:40)"])
+    path = tmp_path / "g.xlsx"
+    wb.save(path)
+    assert is_dgs_workbook(path)
+
+
+def test_a_general_sheet_past_the_limits_is_not_dgs(tmp_path, monkeypatch):
+    path = one_sheet(tmp_path, [HEAD])
+    monkeypatch.setitem(L.LIMITS, "rows", 1)
+    assert not is_dgs_workbook(path)
+
+
+@pytest.mark.parametrize(
+    "sheets", [["About"], ["Horizon and finance"], ["About", "Nodes"]]
+)
+def test_the_input_workbook_needs_both_marker_sheets(tmp_path, sheets):
+    wb = openpyxl.Workbook()
+    wb.active.title = sheets[0]
+    for s in sheets[1:]:
+        wb.create_sheet(s)
+    path = tmp_path / "w.xlsx"
+    wb.save(path)
+    assert not L.is_input_workbook(path)
+    wb.create_sheet("Horizon and finance" if "About" in sheets else "About")
+    wb.save(path)
+    assert L.is_input_workbook(path)

@@ -297,3 +297,37 @@ def test_the_report_says_decimal_comma_once(tmp_path):
         w.startswith("Decimal comma")
         for w in _read(tmp_path, V5, "v5.dgs").report.warnings
     )
+
+
+# --- mutant survivors --------------------------------------------------------
+
+
+def test_where_reads_a_float_line_number():
+    """iterrows turns an all-number row's line into a float; where still says "line 4"."""
+    t = parse_dgs_text(G7 + "$$ElmTerm;FID(a:40);OP(a:1);uknom(r)\n2;C;33\n")
+    assert t.where(4.0) == "line 4"
+
+
+def test_a_matrix_in_a_later_5_x_header_of_a_class_is_refused_there():
+    text = (
+        G5
+        + "$$ElmTerm;ID(a:40);uknom(r)\n2;33\n"
+        + "$$ElmTerm;ID(a:40);uknom(r);G:MATRIX(a)\n3;33;\n"
+    )
+    with pytest.raises(
+        ContractError, match=r"line 5: ElmTerm: column 'G:MATRIX' belongs to DGS 7.x"
+    ):
+        parse_dgs_text(text, "x.dgs")
+
+
+def test_matrix_columns_of_types_are_listed_and_of_unmapped_classes_are_not(tmp_path):
+    text = V7.replace(
+        "$$TypLne;FID(a:40);OP(a:1);loc_name(a:80);",
+        "$$TypLne;FID(a:40);OP(a:1);M:MATRIX(a);loc_name(a:80);",
+    ).replace("830;C;L type;", "830;C;;L type;")
+    text += "$$IntGrf;FID(a:40);OP(a:1);loc_name(a:80);P:MATRIX(a)\n  990;C;g;\n"
+    r = _read(tmp_path, text, "v7.dgs")
+    cols = sorted(u.source_item for u in r.report.unmapped if "column" in u.source_item)
+    assert "TypLne column 'M:MATRIX'" in cols
+    assert not any("IntGrf column" in c for c in cols)
+    assert any(u.source_item.startswith("IntGrf 'g'") for u in r.report.unmapped)
