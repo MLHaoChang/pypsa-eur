@@ -421,7 +421,7 @@ class BusinessCaseInputs(BaseModel):
                 and _YEAR_KEY.fullmatch(str(k))
             ) or (isinstance(k, str) and _YEAR_KEY.fullmatch(k))
             if not ok:
-                raise ValueError(f"year {k!r} is not a year")
+                raise ValueError(f"year {k} is not a four-digit year")
             if isinstance(f, bool) or not isinstance(f, (int, float)):
                 raise ValueError(f"the factor of {k} is not a number")
         return v
