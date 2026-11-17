@@ -29,7 +29,9 @@ registered beside it.
   defaulted; one test each, and the default-to-1 mutant killed.
 - R2 Magnetising: exact ShuntImpedance at the winding-1 bus, transformer g = b = 0, sign as in
   the file (b negative = inductive). Hand-computed CM=2 cases at kV1 ≠ NOMV1 and at NOMV1 = 0,
-  each factor killed by its own mutant. Three-winding placement cited and pinned by a test.
+  each factor killed by its own mutant. Three-winding placement cited and pinned by a test;
+  the hand mutant that moves the three-winding magnetising shunt to the star bus is killed by
+  `test_three_winding_magnetising_at_winding1_bus` (GK A condition on R2).
 - R3 Loads with constant-current or constant-admittance parts: one `assumed` row each; the
   pandapower comparison uses a case without such parts; tolerance never widened.
 - R4 A branch whose ends differ in kV becomes a 1:1 transformer with an `assumed` row, tested.
