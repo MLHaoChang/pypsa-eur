@@ -71,6 +71,10 @@ export const RELIABILITY_GOAL_LABEL = 'Reliability goal (LOLE)'
  *  the Goal field's key line, template-e2e PR-C, says the same). */
 export const ASSUMED_GOAL_NOTE = 'assumed for the site type'
 
+/** The AssumedChip's source words for that goal (UX 2: the shared chip, one
+ *  design with the Goal card's): "[Assumed] site type default". */
+export const ASSUMED_GOAL_SOURCE = 'site type default'
+
 /** The site type's assumed LOLE goal (h/yr), or null: a missing or
  *  non-number `assumed` reads as not set (GK B 65 C9). */
 export function assumedLole(goal: ReliabilityGoal | null): number | null {

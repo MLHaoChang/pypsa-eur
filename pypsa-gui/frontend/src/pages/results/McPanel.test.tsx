@@ -507,9 +507,9 @@ describe('mcGoalText', () => {
     expect(mcGoalText({ ...g, verdict: 'not_confident', confident: false, settle_draws: 4200 }))
       .toBe('Not confident: at or under the 3 h/yr goal, but not by enough to call it a pass; '
         + 'about 4,200 draws would settle it')
-    // A goal nobody set says it is the site type's assumed one.
+    // A goal nobody set: the same words; the panel marks it with the chip.
     expect(mcGoalText({ ...g, verdict: 'miss', target_source: 'default' }))
-      .toBe('Goal missed: above the 3 h/yr goal (assumed for the site type)')
+      .toBe('Goal missed: above the 3 h/yr goal')
   })
 })
 
@@ -536,7 +536,10 @@ describe('McPanel goal verdict', () => {
     })
     await openPanel()
     expect((await screen.findByTestId('mc-goal-verdict')).textContent)
-      .toBe('Goal missed: above the 3 h/yr goal (assumed for the site type)')
+      .toMatch(/^Goal missed: above the 3 h\/yr goal Assumed/)
+    // The shared AssumedChip, its source as visible words (UX 2).
+    expect(screen.getByTestId('mc-goal-assumed').dataset.state).toBe('assumed')
+    expect(screen.getByTestId('mc-goal-assumed-source').textContent).toBe('site type default')
     expect(screen.getByTestId('mc-fleet-note').textContent).toBe(
       'Samples the network as entered: assets the study sizes count at their entered size, '
       + 'not the study\'s sizes; the Guided verdict uses the sized design.')

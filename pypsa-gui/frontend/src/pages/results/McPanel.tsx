@@ -7,7 +7,8 @@ import type {
 } from '../../api/simulation'
 import { blockerMessage } from '../../utils/blockerMessage'
 import { NATIVE_OUTCOME_WORDS } from '../../components/activityWords'
-import { ASSUMED_GOAL_NOTE } from '../../hooks/useReliabilityGoal'
+import { ASSUMED_GOAL_SOURCE } from '../../hooks/useReliabilityGoal'
+import { AssumedChip } from '../../components/AssumedChip'
 import { useUIStore } from '../../store/uiStore'
 import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
@@ -111,9 +112,10 @@ export function loleStatement(m: McMetrics): string {
 }
 
 /** The run against the project's goal in words (walkthrough asset-investment
- *  01): the loops' words for met and not confident (`NATIVE_OUTCOME_WORDS`). */
+ *  01): the loops' words for met and not confident (`NATIVE_OUTCOME_WORDS`).
+ *  A goal nobody set is marked beside it with the shared AssumedChip. */
 export function mcGoalText(g: McGoalVerdict): string {
-  const goal = `${trim(g.target_lole_h)} h/yr goal${g.target_source === 'default' ? ` (${ASSUMED_GOAL_NOTE})` : ''}`
+  const goal = `${trim(g.target_lole_h)} h/yr goal`
   if (g.verdict === 'pass') return `${NATIVE_OUTCOME_WORDS.met}: at or under the ${goal}`
   if (g.verdict === 'miss') return `Goal missed: above the ${goal}`
   const settle = g.settle_draws != null
@@ -675,6 +677,9 @@ export function McPanel() {
                 <span data-testid="mc-goal-verdict"
                   className={`text-[11px] self-end ${result.goal.verdict === 'pass' ? 'text-success' : 'text-warn'}`}>
                   {mcGoalText(result.goal)}
+                  {result.goal.target_source === 'default' && (
+                    <>{' '}<AssumedChip source={ASSUMED_GOAL_SOURCE} testId="mc-goal-assumed" /></>
+                  )}
                 </span>
               )}
               {result?.goal && (

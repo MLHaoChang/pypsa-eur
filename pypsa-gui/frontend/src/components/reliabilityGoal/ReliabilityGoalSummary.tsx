@@ -4,7 +4,8 @@
 // type. The study sends none of these: the backend fills them from the goal.
 import type { GoalValue } from '../../api/flow'
 import { openReliabilityGoal, openSiteType } from '../../layout/flowNavigation'
-import { goalWords, MAX_GOAL_DRAWS, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { ASSUMED_GOAL_SOURCE, assumedLole, goalWords, MAX_GOAL_DRAWS, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { AssumedChip } from '../AssumedChip'
 import { siteTypeLabel } from './SiteTypeSelect'
 
 export const NO_GOAL = 'No reliability goal set.'
@@ -47,9 +48,12 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false }:
   }
   // The same words the editor shows in both modes (`goalWords`).
   const parts: string[] = []
+  // A goal nobody set reads the site type's, marked with the shared chip.
+  const assumed = items.includes('target') && goal?.target_lole_h.value == null ? assumedLole(goal) : null
   if (goal) {
     for (const it of items) {
-      if (it === 'target') parts.push(`allowed shortfall ${goalWords(goal, 'target_lole_h')}`)
+      if (it === 'target') parts.push(`allowed shortfall ${assumed != null ? `${assumed} h/yr`
+        : goalWords(goal, 'target_lole_h')}`)
       else if (it === 'ens') parts.push(`ENS target ${goalWords(goal, 'ens_cap_permyriad')}`)
       else if (it === 'draws') parts.push(`MC draws ${goalWords(goal, 'mc_draws')}`)
       // The Expert MC batches adaptively (walkthrough asset-investment 08):
@@ -73,6 +77,9 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false }:
       <span data-testid={`${testId}-values`} className="font-mono">
         {goal ? parts.join(' · ') : isError ? 'could not be read' : '…'}
       </span>
+      {assumed != null && (
+        <>{' '}<AssumedChip source={ASSUMED_GOAL_SOURCE} testId={`${testId}-assumed`} /></>
+      )}
       <button type="button" data-testid={`${testId}-change`} className={inlineLink}
         onClick={openReliabilityGoal}>Change in Scenarios &amp; optimisation ›</button>
       {items.includes('site') && (
