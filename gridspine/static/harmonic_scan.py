@@ -53,6 +53,7 @@ import numpy as np
 import pandas as pd
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 from gridspine.static.harmonics import H_MAX
 from gridspine.static.island_sc_seq import c_factor
 
@@ -341,6 +342,8 @@ def impedance_scan(net, poc_bus: int, cases: dict, *, spectrum_orders=(), spectr
     and marks every resonance row ``assumed``, as does ``limit_assumed`` (a limit that is not the
     code's). A row whose nearest order is only in a demo spectrum (``spectrum_demo``) is ``assumed``
     too. ``notes`` are carried onto the envelope and resonance rows."""
+    # GC-01b: a series capacitor (Xc/h at order h) is not carried yet (follow-up)
+    SC.refuse(net, "harmonic impedance scan")
     f0 = float(net.f_hz)
     hs = orders(h_max, dh)
     shunts = switched_shunts(net)

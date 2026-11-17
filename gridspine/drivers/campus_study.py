@@ -1265,9 +1265,10 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     a prepared run, written to ``campus_ssti_uif.csv``,
     ``campus_subsync_scan.csv`` and ``campus_subsync_resonance.csv``.
 
-    The campus enters no series capacitor and no torsional mode, so the scan's
-    series-resonance verdict reads ``not evaluated`` (grid-side series
-    compensation needs the TSP's data). Screening only: the binding answer is
+    The campus's series capacitors (``Campus.series_caps``, GC-01b) enter the
+    scan; without one the series-resonance verdict reads ``not evaluated``
+    (grid-side series compensation needs the TSP's data). No torsional mode
+    is entered. Screening only: the binding answer is
     the EMT study."""
     from gridspine.static import harmonic_scan as hs
     from gridspine.static import ssti_uif as su
@@ -1280,7 +1281,7 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     uif = su.campus_uif(campus, threshold, assumed=bool(t_cited) and t_cited[0]["source"] != "code")
     bus, cases, notes = hs.campus_cases(campus)
     clearance, c_cited = ss.clearance_from_profile(code)
-    sub = ss.subsync_scan(campus.net, bus, cases, clearance_hz=clearance,
+    sub = ss.subsync_scan(campus.net, bus, cases, series_caps=campus.series_caps, clearance_hz=clearance,
                           clearance_assumed=bool(c_cited) and c_cited[0]["source"] != "code", notes=notes)
     series = sub.resonance[sub.resonance["kind"] == ss.SERIES]["verdict"]
     verdict = next(v for v in SUBSYNC_VERDICT_ORDER if v in set(series)) if len(series) else "not evaluated"
