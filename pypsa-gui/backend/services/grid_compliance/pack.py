@@ -136,6 +136,14 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+#: How the pack states the current inputs against the submitted record.
+_SINCE_TEXT = {
+    "unchanged": "The inputs are unchanged since submission.",
+    "changed": "The inputs changed after submission; the submitted record is kept as it was.",
+    "not_compared": "The current inputs were not compared with the submitted record.",
+}
+
+
 def _pending_callout(package: str, state: str = "pending") -> Callout:
     label = cat.PACKAGE_LABELS[package]
     text = (
@@ -150,7 +158,7 @@ def _skeleton(
     d: cat.Deliverable,
     entry: DeliverableState,
     fstate: str,
-    changed: bool,
+    since: dict | None,
     tables: dict[str, Table],
     pending: dict[str, str],
     version: int,
@@ -190,13 +198,9 @@ def _skeleton(
             freeze_blocks.append(
                 Field(
                     key="Submitted",
-                    value="This report follows the model set it was submitted on."
-                    + (
-                        " The inputs changed after submission; the submitted "
-                        "record is kept as it was."
-                        if changed
-                        else ""
-                    ),
+                    value="This report follows the model set it was submitted on. "
+                    + _SINCE_TEXT[since["inputs"]]
+                    + (f" {since['reason']}" if since["reason"] else ""),
                 )
             )
         elif fstate != "fresh":
@@ -284,7 +288,7 @@ def _render(
     include_pdf: bool,
 ) -> tuple[bytes, dict]:
     stamp = now()
-    fstate, changed = record_state(entry, data_hash(project))
+    fstate, since = record_state(entry, data_hash(project))
     items = entry.data if entry.data is not None else default_items(d)
     data_rows = [[str(getattr(i, k) or "") for k in DATA_COLUMNS] for i in items]
     comment_rows = [
@@ -333,7 +337,7 @@ def _render(
             tables[key] = t.model_copy(update={"table_id": key})
             files[f"tables/{key}.csv"] = _csv(t.columns, t.rows)
     docx = render_document_docx(
-        _skeleton(d, entry, fstate, changed, tables, pending, version, stamp),
+        _skeleton(d, entry, fstate, since, tables, pending, version, stamp),
         figure_bytes={},
     )
     files[f"report/TRGC-{d.code}.docx"] = docx
@@ -362,7 +366,7 @@ def _render(
         "model_set": entry.freeze.model_dump() if entry.freeze else None,
         "submissions": [f.model_dump() for f in entry.submissions],
         "freeze_state": fstate,
-        "inputs_changed_since_submission": changed,
+        "since_submission": since,
         "sources": source_states,
         "skipped": skipped,
         "files": [
