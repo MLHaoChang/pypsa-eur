@@ -878,10 +878,11 @@ def test_a_formula_with_no_saved_value_in_a_pypsa_export_is_reported(tmp_path):
 
 
 def test_a_pypsa_export_counts_only_the_kinds_it_holds(tmp_path):
-    n = _network(False)
-    res = _read(_native(n, tmp_path))
-    held = {sheet for _, sheet, ln in L.SHEETS if not getattr(n, ln).empty}
-    assert set(res.report.counts) == held
+    n = pypsa.Network()
+    n.add("Bus", "B1", v_nom=110.0)
+    n.add("Load", "L1", bus="B1", p_set=1.0)
+    res = read_excel(_native(n, tmp_path))
+    assert res.report.counts == {"Nodes": 1, "Loads": 1}
 
 
 def test_an_empty_legacy_sheet_is_skipped(tmp_path):
