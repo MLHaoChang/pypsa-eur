@@ -111,9 +111,10 @@ def test_as_shipped_the_island_constraints_refusal_names_the_setting(client, hub
     name, _ = hub
     r = client.post(URL.format(name), json=_body(_defaults(client, name), "BC"))
     assert r.status_code == 422
-    assert (
-        "Island limits in the optimisation: they are on" in r.json()["detail"]
-        and "island_config.json" not in r.json()["detail"]
+    # Opens with the setting's label, one clause, no "cannot run" prefix (UX 2).
+    assert r.json()["detail"] == (
+        "Island limits in the optimisation: on for this project, and the intent "
+        "comparison cannot include them yet."
     )
 
 

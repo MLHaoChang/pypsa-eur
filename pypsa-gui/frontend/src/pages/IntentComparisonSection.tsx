@@ -70,6 +70,23 @@ const PQ_FIELDS: [PqField, string, number][] = [
 ]
 /** A prefill as the field shows it: rounded to the field's precision, never a long float. */
 export const shown = (v: number | null | undefined, d: number) => (v == null ? '' : String(Number(v.toFixed(d))))
+/** The field on this form a refusal opens with (review-ux.md: a refusal opens with the field's label, and the fix
+ *  action sits on its own line): the label to name in the link and the field's test id. Null when the refusal
+ *  names no field here. */
+export function refusalField(text: string): { label: string; testId: string } | null {
+  const FORM: [string, string, string][] = [
+    ['Campus link:', 'Campus link', 'intent-in-link'],
+    ['Grid ramp limit:', 'Grid ramp limit', 'intent-in-ramp'],
+    ['Load swing, oscillation amplitude and period:', 'Load swing', 'intent-in-swing'],
+  ]
+  const hit = FORM.find(([prefix]) => text.startsWith(prefix))
+  if (hit) return { label: hit[1], testId: hit[2] }
+  const poc = 'Point of connection: '
+  if (!text.startsWith(poc)) return null
+  const rest = text.slice(poc.length).toLowerCase()
+  const field = PQ_FIELDS.find(([, label]) => rest.startsWith(label.toLowerCase()))
+  return field ? { label: field[1], testId: `intent-pq-${field[0]}` } : { label: 'Point of connection', testId: 'intent-pq-x_pu' }
+}
 type Typed = 'critical' | 'link' | 'sk' | 'pst' | 'ramp' | 'swing' | 'amp' | 'period'
 
 const AUTONOMY_DEFAULT_H = 4
@@ -243,7 +260,7 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
               {k === 'link' ? (
                 <select className={INPUT} value={f.link} onChange={set('link')} disabled={running} data-testid="intent-in-link">
                   <option value="">Choose a link</option>
-                  {defaults.links.map(n => <option key={n} value={n}>{n === defaults.link.value ? 'Point of connection' : n}</option>)}
+                  {defaults.links.map(n => <option key={n} value={n}>{n === defaults.link.value ? 'Grid import (point of connection)' : n}</option>)}
                 </select>
               ) : (
                 <input className={INPUT} inputMode="decimal" value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
@@ -286,7 +303,7 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
         {held.isError && <p className="text-[11px] text-err" data-testid="intent-held-error">The project's values could not be read: {errorText(held.error)}</p>}
       </div>
       {(start.isError || job.isError) && !(start.isError && start.error && (start.error as { response?: { status?: number } }).response?.status === 409) && (
-        <p className="text-[12px] text-err" role="alert" data-testid="intent-error">{errorText(start.error ?? job.error)}</p>
+        <RefusalLine text={errorText(start.error ?? job.error)} />
       )}
       {job.data?.status === 'failed' && job.data.error && (
         <p className="text-[12px] text-err" role="alert" data-testid="intent-job-failed">Failed: {job.data.error}</p>
@@ -386,6 +403,23 @@ function InputsUsed({ inputs }: { inputs: NonNullable<IntentJob['inputs']> }) {
     <p className="text-[11px] text-muted" data-testid="intent-inputs-used">
       Inputs used: {join(Object.entries(rest).map(item))}
       {poc.length > 0 && <>; point of connection: {join(poc.map(item))}</>}.
+    </p>
+  )
+}
+
+/** A refusal, with a link on its own line that focuses the field on this form it names (review-ux.md). */
+function RefusalLine({ text }: { text: string }) {
+  const field = refusalField(text)
+  const focus = () => {
+    const el = field && document.querySelector<HTMLElement>(`[data-testid="${field.testId}"]`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center' })
+    el.focus()
+  }
+  return (
+    <p className="text-[12px] text-err" role="alert" data-testid="intent-error">
+      {text}
+      {field && <>{' '}<button type="button" className="underline" data-testid="intent-error-field" onClick={focus}>{field.label} ›</button></>}
     </p>
   )
 }

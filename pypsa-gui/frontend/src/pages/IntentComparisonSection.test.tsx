@@ -6,7 +6,7 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { IntentInputDefaults, IntentJob, IntentRow } from '../api/intentComparison'
-import IntentComparisonSection, { assetLabel, checkLabel } from './IntentComparisonSection'
+import IntentComparisonSection, { assetLabel, checkLabel, refusalField } from './IntentComparisonSection'
 
 const api = vi.hoisted(() => ({ start: vi.fn(), get: vi.fn(), abort: vi.fn(), defaults: vi.fn() }))
 vi.mock('../api/intentComparison', async () => {
@@ -174,6 +174,29 @@ describe('IntentComparisonSection', () => {
     vi.useRealTimers()
   })
 
+  it('a refusal naming a field on this form links to it on its own line and focuses it', async () => {
+    const user = userEvent.setup()
+    api.get.mockResolvedValue(null)
+    api.start.mockRejectedValue({ response: { status: 422, data: { detail: 'Grid ramp limit: the project has no ramp limit; enter one' } } })
+    renderIt(); await fill(user)
+    await user.click(screen.getByLabelText(/^B\. /)); await user.click(screen.getByLabelText(/^C\. /))
+    await user.click(screen.getByTestId('intent-run'))
+    const link = await screen.findByTestId('intent-error-field')
+    expect(link.textContent).toBe('Grid ramp limit ›')
+    expect(screen.getByTestId('intent-error').contains(link)).toBe(true)
+    await user.click(link)
+    expect(document.activeElement).toBe(screen.getByTestId('intent-in-ramp'))
+  })
+
+  it('maps each refusal label to its field, and a refusal from another panel to none', () => {
+    expect(refusalField('Campus link: nowhere is not in the network')?.testId).toBe('intent-in-link')
+    expect(refusalField('Load swing, oscillation amplitude and period: the project has none')?.testId).toBe('intent-in-swing')
+    expect(refusalField('Point of connection: transformer rating (MVA): enter it')).toEqual(
+      { label: 'Transformer rating (MVA)', testId: 'intent-pq-s_n_mva' })
+    expect(refusalField('Point of connection: every value must be a number')?.testId).toBe('intent-pq-x_pu')
+    expect(refusalField('Island limits in the optimisation: on for this project')).toBeNull()
+  })
+
   it('a 409 on start shows the running job and does not start a second one', async () => {
     const user = userEvent.setup()
     api.get.mockResolvedValueOnce(null).mockResolvedValue(job([], { status: 'running', progress: { B: 'running', C: 'queued' } }))
@@ -339,7 +362,7 @@ describe('IntentComparisonSection prefill from the project (walkthrough bug 06)'
     expect(val('intent-in-swing')).toBe('23.4'); expect(val('intent-in-amp')).toBe('7.2'); expect(val('intent-in-period')).toBe('2')
     expect(val('intent-in-link')).toBe('poc')
     const select = screen.getByTestId('intent-in-link') as HTMLSelectElement
-    expect(select.selectedOptions[0].textContent).toBe('Point of connection')
+    expect(select.selectedOptions[0].textContent).toBe('Grid import (point of connection)')
     expect(screen.getByTestId('intent-src-ramp').textContent).toBe('assumed')
     expect(screen.getByTestId('intent-src-swing').textContent).toBe('load envelope')
     expect(screen.getByTestId('intent-src-link').textContent).toBe('project')

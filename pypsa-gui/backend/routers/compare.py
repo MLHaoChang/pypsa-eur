@@ -563,8 +563,8 @@ def _load_project_network(directory: pathlib.Path):
 
 #: `sizing_loop_runner.refusals` lines in the words the app uses for the setting (walkthrough bug 05).
 _PLAIN_REFUSALS = {
-    "sizing loop: island constraints": "Island limits in the optimisation: they are on for this project, and the "
-                                       "intent comparison cannot include them yet, so it cannot run here",
+    "sizing loop: island constraints": "Island limits in the optimisation: on for this project, and the intent "
+                                       "comparison cannot include them yet.",
 }
 
 
@@ -663,7 +663,8 @@ def post_intent_comparison(
         sources["xr"] = inputs["xr_source"]
         _check_inputs(network, SizingInputs(**inputs))
         if refusals(config):
-            raise SizingLoopRefusal("; ".join(_plain_refusal(line) for line in refusals(config)))
+            # Each line opens with its setting's label (UX 2): no "cannot run" prefix.
+            raise HTTPException(422, " ".join(_plain_refusal(line) for line in refusals(config)))
         for spec in body.intents:
             grid_code_warnings(spec, profile)
     except intent_inputs.IntentInputsRefusal as exc:
