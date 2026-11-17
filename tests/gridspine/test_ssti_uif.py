@@ -5,6 +5,7 @@
 
 import math
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -12,7 +13,7 @@ from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from gridspine.static import ssti_uif as su
 from gridspine.templates.grid_codes import load_grid_code, validate_profile
-from tests.gridspine.test_campus import campus_spec
+from tests.gridspine.test_campus import campus_spec, t
 
 
 def test_two_machine_hand_calculation():
@@ -244,3 +245,63 @@ def test_campus_uif_c_from_the_bus_own_voltage():
     ).rows.set_index(["bus", "case"])
     assert rows.at[("MV2", "min"), "c"] == 0.95
     assert rows.at[("MV1", "min"), "c"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("pf", "reason"),
+    [
+        (0.0, r"must be in \(0, 1\]"),
+        (-0.5, r"must be in \(0, 1\]"),
+        (1.2, r"must be in \(0, 1\]"),
+        (math.nan, "pf of L must be finite"),
+    ],
+)
+def test_plant_refuses_a_bad_load_pf(pf, reason):
+    units = pd.DataFrame(
+        [{"kind": "load", "bus": "MV", "p_mw": 10.0, "pf": pf, "s_mva": math.nan}],
+        index=["L"],
+    )
+    with pytest.raises(ContractError, match=reason):
+        su.plant_mva_by_bus(units)
+
+
+@pytest.mark.parametrize(
+    ("row", "reason"),
+    [
+        (
+            {"kind": "bess", "s_mva": math.nan, "p_mw": 1.0, "pf": math.nan},
+            "s_mva of U must be finite",
+        ),
+        (
+            {"kind": "bess", "s_mva": -1.0, "p_mw": 1.0, "pf": math.nan},
+            "rating of U must be >= 0",
+        ),
+        (
+            {"kind": "load", "s_mva": math.nan, "p_mw": math.inf, "pf": 0.9},
+            "p_mw of U must be finite",
+        ),
+    ],
+)
+def test_plant_refuses_a_bad_rating(row, reason):
+    with pytest.raises(ContractError, match=reason):
+        su.plant_mva_by_bus(pd.DataFrame([{**row, "bus": "MV"}], index=["U"]))
+
+
+def test_fault_levels_with_the_machines_alone():
+    """
+    Converters are current sources in ``machine_net``: their infeed would raise SC_tot and understate
+    UIF. The screen energises the machines alone, so a converter's k_sc leaves UIF unchanged.
+    """
+    seen = []
+
+    def spy(campus, installed):
+        seen.append(set(installed))
+        return _stub(campus, installed)
+
+    su.campus_uif(build_campus(campus_spec()), fault_levels=spy)
+    assert seen == [{"GEN1"}, set()]
+    base = su.campus_uif(build_campus(campus_spec())).rows["uif"]
+    spec = campus_spec()
+    spec["campus"]["units"]["BESS1"]["k_sc"] = t(6.0)
+    stiff = su.campus_uif(build_campus(spec)).rows["uif"]
+    assert np.allclose(stiff, base, rtol=1e-12, atol=0)

@@ -9,7 +9,9 @@ scan reads (``harmonic_scan.branches``), with h = f / f0:
 * cable and transformer: R + j h X in series (no skin term below f0), j h B / 2
   at each end of a cable;
 * series capacitor (``series_caps``, ``(from bus, to bus, Xc ohm at f0)``):
-  -j Xc / h;
+  -j Xc / h, on a bus pair of its own (split the compensated line at a
+  dedicated bus; a pair already joined by a branch is refused, since the
+  capacitor would sit in parallel with it);
 * grid: c Un^2 / S_sc split by the case's R/X, R + j h X, a shunt at its bus
   (c as ``harmonic_scan.grid_c``);
 * capacitor banks with every step in: j h B; shunt reactors: -j B / h.
@@ -28,6 +30,8 @@ and the margin is at least the clearance, ``check`` when no mode is given. With
 no series capacitor in the model a row ``not evaluated`` says grid-side series
 compensation needs the TSP's data; it never reads ``clear``.
 
+Synchronous machines are not in the scan (``NO_MACHINES``, on every series
+row): a machine's own impedance in parallel at its bus would lower X there.
 The network is passive (R, L, C; no converter impedance), so R at a crossing
 is reported for information only. Sub-synchronous control interaction (SSCI)
 needs the converter's own damping: one ``SSCI`` row per case reads ``not
@@ -59,6 +63,7 @@ SSCI_NOTE = (
     "not evaluated: converter damping not modelled; binding answer is the EMT study"
 )
 NO_MODES = "no torsional modes given"
+NO_MACHINES = "synchronous machine impedance is not in the scan (the network's branches, banks and grid only)"
 NO_CLEARANCE = "the grid code sets no torsional clearance; demo default"
 SCAN_COLUMNS = ("case", "f_hz", "r_ohm", "x_ohm", "z_ohm", "label")
 RESONANCE_COLUMNS = (
@@ -135,7 +140,13 @@ def z_poc(
     elems = [
         (a, b, r, x, 0.0, bsh) for a, b, r, x, bsh in series if a in at and b in at
     ]
+    joined = {frozenset((a, b)) for a, b, *_ in elems}
     for a, b, xc in series_caps:
+        if frozenset((a, b)) in joined:
+            raise ContractError(
+                f"sub-synchronous scan: series capacitor {a}-{b} would sit in parallel with a branch "
+                f"already joining those buses; split the compensated line at a dedicated bus"
+            )
         if a not in at or b not in at:
             raise ContractError(
                 f"sub-synchronous scan: series capacitor {a}-{b} is not between in-service buses"
@@ -146,6 +157,7 @@ def z_poc(
                 f"sub-synchronous scan: series capacitor {a}-{b} needs Xc > 0, got {xc}"
             )
         elems.append((a, b, 0.0, 0.0, xc / (vn[a] ** 2 / sbase), 0.0))
+        joined.add(frozenset((a, b)))
     part = hs._component(
         len(buses), [(at[a], at[b]) for a, b, *_ in elems], at[poc_bus]
     )
@@ -285,7 +297,7 @@ def subsync_scan(
         raise ContractError(f"sub-synchronous scan: clearance must be > 0, got {limit}")
     assumed = clearance_hz is None or clearance_assumed
     series, line_notes = hs.branches(net, f0, 1.0)
-    notes = [*notes, *line_notes]
+    notes = [*notes, NO_MACHINES, *line_notes]
     base = {"clearance_hz": limit, "assumed": assumed, "label": LABEL}
 
     def note(*extra):
