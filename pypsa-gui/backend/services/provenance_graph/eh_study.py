@@ -174,13 +174,13 @@ def normalise(raw: Any) -> Record:
         raise StudyNotRun("the Energy Hub study is still running", status=409)
     if status not in FINISHED:
         return Record(
-            unreadable=f"the study record's status {status!r} is not a finished study"
+            unreadable=f"the study record's status {status} is not a finished study"
         )
     version = raw.get("version", RECORD_VERSION)
     if version != RECORD_VERSION or isinstance(version, bool):
         return Record(
             status=status,
-            unreadable=f"the study record's version {version!r} is not one this reads",
+            unreadable=f"the study record's version {version} is not one this reads",
         )
     report = raw.get("report")
     report = report if isinstance(report, dict) else {}
