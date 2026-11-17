@@ -496,7 +496,7 @@ def _check_revision(task, hold) -> None:
     try:
         metered = runner._budget(task)["used"]["cost_eur"]
         limit = runner._budget(task)["limit"]["cost_eur"]
-        used = cost_eur(task) if _number(metered) else None
+        used = cost_eur(task)
     except (KeyError, TypeError, ValueError):
         raise refused from None
     if not (_number(metered) and _number(used) and _number(hold) and _number(limit) and limit > 0):

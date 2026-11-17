@@ -1095,6 +1095,21 @@ def test_a_revision_refuses_a_total_spend_that_is_not_a_finite_number(
     assert exc.value.reason == "budget"
 
 
+def test_a_revision_refuses_a_negative_metered_spend_hidden_by_ledger_spend(
+    made, monkeypatch
+):
+    """A negative metered spend refuses even when the ledger's sends lift the
+    total back above zero: the metered part is checked on its own."""
+    path, _root, _c = made
+    leased(path, BOOT, 2e12)
+    update(path, lambda t: harness_runner._budget(t)["used"].update(cost_eur=-1.0))
+    update(path, lambda t: harness_runner._budget(t)["limit"].update(cost_eur=1000.0))
+    monkeypatch.setattr(send_reservation, "_unmetered_eur", lambda run: 2.0)
+    with pytest.raises(send_reservation.SendRefused) as exc:
+        send_reservation.admit(path, req(), boot=BOOT, scope="revision")
+    assert exc.value.reason == "budget"
+
+
 @pytest.mark.parametrize("hold", [_NAN, _INF, -0.01, "0.01", None])
 def test_a_revision_refuses_a_hold_that_is_not_a_finite_number(made, monkeypatch, hold):
     path, _root, _c = made
