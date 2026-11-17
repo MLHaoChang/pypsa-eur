@@ -1594,16 +1594,17 @@ _AFA = "BMF AfA-Tabelle AV (BMF-Schreiben vom 15.12.2000, BStBl. I 2000 S. 1532)
 #: Straight line throughout: the degressive AfA is an election (§7 Abs. 2 EStG),
 #: and a staged build after the COD cannot take it (P5).
 _AFA_BY_CARRIER: dict[str, str] = {"solar": "afa_20", "wind": "afa_16", "onwind": "afa_16",
-                                   "gas": "afa_19", "diesel": "afa_19", "battery": "afa_10"}
+                                   "gas": "afa_19", "diesel": "afa_19",
+                                   "battery": "afa_10"}   # 3.1.6, 3.1.5, 3.1.2, 3.1.3
 #: An asset the AfA table does not list and the network gives no finite life.
 _AFA_UNLISTED = "afa_20"
 
 #: Where each shipped finance input comes from (`models.finance.FinanceAssumedValue`
 #: without its value). Keys are `FinanceInputs` fields.
 FINANCE_SOURCES: dict[str, dict] = {
-    "wacc_nominal": {"source": "assumed", "note": "nominal, post-tax; no primary source: a "
-                     "planning value for an equity-funded energy asset. Set your own"},
-    "cost_of_equity": {"source": "assumed", "note": "no primary source. Set your own"},
+    "wacc_nominal": {"source": "assumed, no primary source",
+                     "note": "nominal, post-tax: a planning value. Set your own"},
+    "cost_of_equity": {"source": "assumed, no primary source", "note": "Set your own"},
     "escalation": {"source": "ECB monetary policy strategy (2 % inflation target)",
                    "source_year": 2021, "note": "every cost and price class at 2 %/yr"},
     "inflation": {"source": "ECB monetary policy strategy (2 % inflation target)",
@@ -1616,11 +1617,13 @@ FINANCE_SOURCES: dict[str, dict] = {
                      "Hebesatz of all municipalities 407 %", "source_year": 2023,
                      "note": "rounded to 400 %; set your municipality's"},
     "depreciation_class_by_asset": {"source": _AFA, "source_year": 2000,
-                                    "note": "straight line: Fundstelle 3.1.2 generating sets 19 "
-                                            "years, 3.1.5 wind 16, 3.1.6 PV 20; batteries 10 years and assets the "
-                                            "table does not list (electrolysers, H2 storage, "
-                                            "links) their own lifetime or 20 years are "
-                                            "assumed"},
+                                    "note": "straight line: 3.1.2 Stromerzeugung (Gleichrichter, "
+                                            "Ladeaggregate, Notstromaggregate, Stromgeneratoren, "
+                                            "Stromumformer usw.) 19 years; 3.1.3 Akkumulatoren 10; "
+                                            "3.1.5 Windkraftanlagen 16; 3.1.6 "
+                                            "Photovoltaikanlagen 20. Assets the table does not "
+                                            "list (electrolysers, H2 storage, links): assumed, "
+                                            "network lifetime, else 20 years"},
     "acquisition_date": {"source": "assumed", "note": "the first commercial operation date"},
     "degradation_by_asset": {"source": "Jordan & Kurtz, Photovoltaic Degradation Rates: An "
                              "Analytical Review, Prog. Photovolt. 21 (2013)",
@@ -2045,10 +2048,11 @@ def _finance_ledger(template_id: str, planning: Planning | None, meta: dict) -> 
             "value": f"German corporate tax (pack eu_de), Hebesatz {fin['hebesatz_pct']:g} %",
             "source": "assumed",
             "note": "a stand-in: the template is priced in EUR on German data; pick your "
-                    "country's tax rule. Depreciation straight line by the BMF AfA table where "
-                    "it lists the asset (generating sets 19, wind 16, PV 20 years); batteries "
-                    "10 years, and assets it does not list their own lifetime or 20 years, "
-                    "assumed"})
+                    "country's tax rule. Depreciation straight line by the BMF AfA-Tabelle AV "
+                    "(2000): 3.1.2 Stromerzeugung 19 years, 3.1.3 Akkumulatoren 10, 3.1.5 "
+                    "Windkraftanlagen 16, 3.1.6 Photovoltaikanlagen 20; assets it does not list "
+                    "assumed, network lifetime, else 20 years. Hebesatz: Destatis 2023 average "
+                    "407 %, rounded to 400 %"})
     return rows
 
 

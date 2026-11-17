@@ -104,6 +104,40 @@ def test_the_record_is_in_no_fingerprint_or_case_digest():
     assert "finance_assumed" not in a
 
 
+def test_the_record_is_not_in_the_investment_case_assumptions_digest():
+    """review-gk (inert SolverConfig fields, both digests): the case's staleness
+    key is the same with any record or none."""
+    from dataclasses import asdict
+
+    from routers.projects import _solver_config_from_dict
+    from services.finance.investment_case_runner import assumptions_digest
+
+    cfg = T.solver_config("eh_datacenter")
+    keys = []
+    for rec in (cfg["finance_assumed"], {"wacc_nominal": {"value": 0.5, "source": "x"}}, None):
+        solver = asdict(_solver_config_from_dict({**cfg, "finance_assumed": rec}))
+        keys.append(assumptions_digest(finance=cfg["finance"], commercial=cfg["commercial"],
+                                       dispatch="d", packs={}, solver=solver)[0])
+    assert keys[0] == keys[1] == keys[2]
+
+
+def test_a_sunk_asset_with_a_zero_basis_is_depreciated_by_nothing():
+    """The existing campus carries a class (the pack needs one per owned
+    asset) but no basis, so its AfA is 0: only the candidates are written off."""
+    from models.finance import FinanceInputs
+    from services.finance.packs.base import load_pack
+    from services.finance.tax_layers import OwnerAsset, resolve_tax_layers
+
+    fin = FinanceInputs.model_validate(T.solver_config("eh_datacenter")["finance"])
+    assets = [OwnerAsset("genset_1", "gas", 0.0), OwnerAsset("genset_new", "gas", 1.0e6)]
+    res = resolve_tax_layers(load_pack("eu_de", as_of=fin.financial_close), fin, assets,
+                             min(fin.cod_by_asset.values()))
+    assert res.missing == []
+    for layer in res.layers:
+        shares = {c.name.rpartition(":")[0]: c.share for c in layer.depreciation}
+        assert shares == {"genset_1": 0.0, "genset_new": 1.0}
+
+
 def test_a_project_saved_before_the_defaults_loads_unchanged():
     """D1: a stored config without the record loads as it was, with no record."""
     from routers.projects import _solver_config_from_dict
@@ -125,7 +159,7 @@ def test_the_finance_read_marks_each_shipped_value_until_it_is_changed(reset_bac
     sim_router._state["solver_config"] = _solver_config_from_dict(cfg)
     out = get_finance()
     wacc = out["assumed"]["wacc_nominal"]
-    assert wacc["value"] == 0.07 and wacc["current"] is True and wacc["source"] == "assumed"
+    assert wacc["value"] == 0.07 and wacc["current"] is True and wacc["source"].startswith("assumed")
     assert out["digest"] == get_finance()["digest"]
 
     edited = {**cfg, "finance": {**cfg["finance"], "wacc_nominal": 0.08}}
@@ -193,7 +227,10 @@ def test_the_data_centre_case_runs_on_its_shipped_inputs(reset_backend):
     # Hand check: the one capex the owner pays is the genset candidate at its
     # overnight cost (the existing campus is sunk at 0; no contingency; the
     # first stage's capex is not escalated, `cashflow` C6), written off
-    # straight line over the AfA table's 19 years from the 2030 COD.
+    # straight line over the AfA table's 19 years from the 2030 COD:
+    #   21 317 813 EUR / 19 = 1 121 990.16 EUR a year, 2030-2043 (14 years);
+    #   2044, the last case year, also writes off the 4 years left:
+    #   5 × 1 121 990.16 = 5 609 950.79; Σ = 19 × 1 121 990.16 = 21 317 813.
     genset = next(a for a in case.assets if a.name == "genset_new")
     assert sum(a.overnight_cost or 0.0 for a in case.assets) == genset.overnight_cost
     basis = genset.overnight_cost
