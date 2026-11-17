@@ -58,4 +58,10 @@ Was: `needs-triage — specification proposed; not implemented`. Owner question 
   - Q1: always a container wrapper (`--network none`, read-only root, non-root user, memory cap). There is no in-host mode. An in-host mode for desktop installs is an owner question, not built here.
   - Q2: split.
 - Slice (a): worker, `blender_scene` job kind, readiness, and `POST .../scene/blender-jobs` + `GET .../scene/artifacts/{id}`. There is no path that applies returned geometry. The caps are conservative placeholders until the CI numbers land.
+  - The app builds the whole `docker`/`podman run` command itself. The operator sets only:
+    - the unpacked tree, `PYPSA_GUI_BLENDER_DIR`, whose whole-tree sha256 is pinned (`9c3072a9…a3be`), bind-mounted read-only;
+    - an absolute runtime path, `PYPSA_GUI_BLENDER_RUNTIME`;
+    - a digest-pinned library image, `PYPSA_GUI_BLENDER_IMAGE`.
+  - There is no free-form wrapper. An early free-form wrapper draft failed review: its flags could be overridden, and the limits and kill reached only the CLI.
+  - Cancel and timeout run `<runtime> kill <name>`.
 - Slice (b): the reviewed return (proposal plus Apply), with GK B's R1 (the returned GLB is untrusted: size caps, embedded buffers only) and R2. It also fixes the contract `lock: False` mismatch on the proposal create and cancel routes.

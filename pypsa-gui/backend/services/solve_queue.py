@@ -1273,6 +1273,7 @@ class SolveQueue:
         from routers import simulation as sim
         from services.site_scene import blender_job
         from services.site_scene import blender_worker as bw
+        from services.site_scene.contract import SceneError
 
         stop_event = threading.Event()
         log_queue = sim.BufferedLogQueue()
@@ -1294,9 +1295,14 @@ class SolveQueue:
                 status = "aborted"
                 log_queue.put("Blender scene run aborted")
             else:
-                error = str(exc) if isinstance(exc, bw.WorkerError) else f"{type(exc).__name__}: {exc}"
+                # A WorkerError or SceneError message names no host path; anything
+                # else (an OSError's filename) is logged here and served by class only.
+                if isinstance(exc, (bw.WorkerError, SceneError)):
+                    error = str(exc)
+                else:
+                    error = f"{bw.FAILED}: an internal error stopped the run ({type(exc).__name__})"
+                    logger.exception("solve_queue: blender_scene job %s failed", job.id)
                 log_queue.put(f"Blender scene run failed: {error}")
-                logger.warning("solve_queue: blender_scene job %s failed: %s", job.id, error)
         finally:
             log_queue.put(None)
             self._finish(job, status, error=error)

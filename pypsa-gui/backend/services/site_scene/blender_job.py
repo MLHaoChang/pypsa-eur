@@ -97,6 +97,12 @@ def run_queued(
         "created_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     _store(project_dir, str(job.id), result, meta)
+    if stop_event is not None and stop_event.is_set():
+        # A cancel that landed while storing: roll the artifact back.
+        shutil.rmtree(artifact_dir(project_dir, str(job.id)), ignore_errors=True)
+        raise bw.WorkerError(
+            bw.CANCELLED, "cancelled while storing; the artifact was removed"
+        )
     return meta
 
 

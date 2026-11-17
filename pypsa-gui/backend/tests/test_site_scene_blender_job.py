@@ -37,8 +37,10 @@ ART = "/api/projects/geo/sites/campus/scene/artifacts/"
 @pytest.fixture(autouse=True)
 def _clean_queue():
     sq.solve_queue.reset_for_tests()
+    bw._ready_cache.clear()
     yield
     sq.solve_queue.reset_for_tests()
+    bw._ready_cache.clear()
 
 
 @pytest.fixture
@@ -101,7 +103,7 @@ def test_a_blender_row_never_reaches_the_solve_runner(monkeypatch, tmp_path):
     monkeypatch.setattr(
         sq.SolveQueue, "_run_solve_job", lambda self, job: ran.append(job.id)
     )
-    monkeypatch.delenv(bw.ENV_WRAPPER, raising=False)
+    monkeypatch.delenv(bw.ENV_IMAGE, raising=False)
     job = sq.solve_queue.enqueue(
         "p",
         project_key="p",
@@ -174,10 +176,10 @@ def test_with_no_container_worker_the_route_is_503_and_names_why(
     client, geo, monkeypatch
 ):
     _scene_with_buildings(client, geo)
-    monkeypatch.delenv(bw.ENV_WRAPPER, raising=False)
+    monkeypatch.delenv(bw.ENV_IMAGE, raising=False)
     r = client.post(JOBS)
     assert r.status_code == 503 and _kind(r) == "worker_unavailable"
-    assert bw.ENV_WRAPPER in r.json()["detail"]["message"]
+    assert bw.ENV_IMAGE in r.json()["detail"]["message"]
     assert sq.solve_queue.list_jobs() == []
 
 
@@ -354,3 +356,45 @@ def test_cancel_frees_the_dispatcher_within_the_grace_so_a_queued_solve_starts(
     assert _wait(lambda: bool(started), timeout=15)
     assert started[0] - t0 < bw.Caps().grace_s + 3
     assert _status(scene["id"]) == "aborted"
+
+
+def test_a_cancel_that_lands_while_storing_rolls_the_artifact_back(
+    client, geo, monkeypatch, worker
+):
+    _scene_with_buildings(client, geo)
+    worker("ok")
+    stop = __import__("threading").Event()
+    real = blender_job._store
+
+    def store_then_cancel(*a, **k):
+        real(*a, **k)
+        stop.set()
+
+    monkeypatch.setattr(blender_job, "_store", store_then_cancel)
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        storage_dir=str(geo),
+        solver_config_json=blender_job.spec("campus", "geo"),
+    )
+    with pytest.raises(bw.WorkerError) as e:
+        blender_job.run_queued(job, stop)
+    assert e.value.kind == bw.CANCELLED
+    assert not (geo / blender_job.ARTIFACTS / str(job.id)).exists()
+
+
+def test_an_unexpected_error_is_served_without_host_paths(monkeypatch, tmp_path):
+    def boom(job, stop):
+        raise OSError(13, "Permission denied", str(tmp_path / "secret-host-path"))
+
+    monkeypatch.setattr(blender_job, "run_queued", boom)
+    job = sq.solve_queue.enqueue(
+        "p",
+        project_key="p",
+        storage_dir=str(tmp_path),
+        solver_config_json=blender_job.spec("campus", "p"),
+        kind=sq.KIND_BLENDER_SCENE,
+    )
+    assert _wait(lambda: _status(job.id) in sq._TERMINAL)
+    got = sq.solve_queue.get_job(job.id)
+    assert got["status"] == "failed" and got["error"].startswith(bw.FAILED)
+    assert "secret-host-path" not in got["error"] and str(tmp_path) not in got["error"]
