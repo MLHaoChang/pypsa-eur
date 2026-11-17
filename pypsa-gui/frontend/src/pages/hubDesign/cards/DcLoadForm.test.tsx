@@ -125,7 +125,7 @@ describe('DcLoadForm Batteries words (DC walkthrough 01)', () => {
     expect(screen.queryByTestId('dc-form-backup-staged')).toBeNull()
     await userEvent.selectOptions(screen.getByLabelText(BACKUP_MODE_FIELD), 'bess')
     expect(screen.getByTestId('dc-form-backup-staged').textContent?.trim())
-      .toBe(`Create refuses ${MODE_LABEL.bess} on this example: pick ${MODE_LABEL.hybrid}.`)
+      .toBe(`Create refuses ${MODE_LABEL.bess} on this example at the default PUE: pick ${MODE_LABEL.hybrid}.`)
     await userEvent.selectOptions(screen.getByLabelText(BACKUP_MODE_FIELD), 'hybrid')
     expect(screen.queryByTestId('dc-form-backup-staged')).toBeNull()
   })

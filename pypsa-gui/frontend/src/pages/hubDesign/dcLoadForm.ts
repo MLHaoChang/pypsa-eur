@@ -27,9 +27,10 @@ export const BACKUP_HINT: Record<DcBackupMode, string> = {
   bess: 'Battery strings replace the gensets. They are sized at creation from the IT load and carry outages only, so the normal peak must fit the import.',
   hybrid: 'Gensets stay, and battery strings cover what the gensets leave uncovered.',
 }
-/** Under the hint on the staged example: its build plan's peak never fits the
- *  import with Batteries alone, so Create refuses it (DC walkthrough 01). */
-export const STAGED_BESS_LINE = `Create refuses ${MODE_LABEL.bess} on this example: pick ${MODE_LABEL.hybrid}.`
+/** Under the hint on the staged example: at its default PUE the build plan's
+ *  peak does not fit the import with Batteries alone, so Create refuses it
+ *  (DC walkthrough 01). A low enough PUE fits, so the line names the default. */
+export const STAGED_BESS_LINE = `Create refuses ${MODE_LABEL.bess} on this example at the default PUE: pick ${MODE_LABEL.hybrid}.`
 
 /** The example's own defaults: single IT load (MW) or the staged phases. */
 export const DC_DEFAULTS = {

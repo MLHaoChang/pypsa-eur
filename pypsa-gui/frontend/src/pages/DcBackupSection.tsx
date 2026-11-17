@@ -179,7 +179,7 @@ function Assessment({ result, stale, stored }: { result: DcBackupAssessment; sta
   const assumed = c.inputs.filter(i => i.assumed)
   return (
     <div className="mt-2 space-y-2 text-[12px]" data-testid="dc-backup-result" data-stale={stale}>
-      {result.built && result.built.mode !== 'genset' && (
+      {result.built.mode !== 'genset' && (
         <p className="text-muted" data-testid="dc-backup-built">
           This project was created with {BACKUP_MODE_FIELD} set to {MODE_LABEL[result.built.mode]}, so it is assessed as
           if created with {MODE_LABEL.genset}. {result.built.notes.join(' ')}

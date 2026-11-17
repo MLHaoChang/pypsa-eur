@@ -983,7 +983,7 @@ export interface DcBackupAssessment {
   notes: string[]
   /** The mode the saved network was built in. A Batteries or Hybrid build is
    *  assessed in genset form; the notes say what that means (DC walkthrough 01). */
-  built?: { mode: DcBackupMode; notes: string[] }
+  built: { mode: DcBackupMode; notes: string[] }
   /** The saved network the assessment read, and what its re-dispatch does not reproduce. */
   basis?: { network_saved_at: string; network_sha256: string; not_reproduced: string[] }
 }

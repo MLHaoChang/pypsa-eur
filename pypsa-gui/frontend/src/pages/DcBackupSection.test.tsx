@@ -41,7 +41,7 @@ const assessment = (over: Partial<DcBackupAssessment> = {}): DcBackupAssessment 
     inputs: [{ key: 'run_hours_per_year', value: 50, unit: 'h/year', assumed: true },
       { key: 'heat_rate', value: 2.8, unit: 'MWh_th/MWh_e', assumed: true },
       { key: 'retention', value: 0.912345678, unit: 'per unit', assumed: true }] },
-  notes: [],
+  notes: [], built: { mode: 'genset', notes: [] },
   basis: { network_saved_at: '2026-11-06T01:00:00+00:00', network_sha256: 'abc', not_reproduced: ['x'] }, ...over,
 })
 

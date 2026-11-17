@@ -29,6 +29,7 @@ redundant ones out). ``backup_cost_delta`` prices the mode against gensets.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import pathlib
@@ -1572,10 +1573,21 @@ def genset_form(n, island: dict, built: str, genset_n, genset_island: dict):
     ``hybrid`` the gensets stayed and only ``sustained_h`` comes back. Every
     other component and sidecar entry is the project's own. Returns
     ``(n', island', notes, built_strings)``; a restored genset whose name the
-    project already uses is refused, never merged (G5)."""
-    import copy
+    project already uses is refused, never merged (G5). A project whose
+    sidecar lists no built string (one created before the create wrote its
+    own sidecar) is refused: its strings cannot be told from a user's.
 
+    The edited-load note is for ``bess`` only: there the gensets are the
+    example's, sized for the spec; a ``hybrid`` project keeps its own gensets,
+    so none is restored from the spec."""
     strings = built_strings(n, island)
+    if not strings:
+        raise DcBackupError(
+            f"backup: this project was created with {built} backup, but its saved "
+            "sidecar does not list the battery strings, so the assessment cannot "
+            "tell them from your own storage. Create the project again to assess it",
+            "backup.mode",
+        )
     built_mw = sum(float(n.storage_units.at[s, "p_nom"]) for s in strings)
     built_mwh = sum(
         float(n.storage_units.at[s, "p_nom"])

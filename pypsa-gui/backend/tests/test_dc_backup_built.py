@@ -110,3 +110,55 @@ def test_an_edited_critical_load_is_said():
     n_b.loads_t.p_set[crit] = n_b.loads_t.p_set[crit] * 1.2
     _m, _i, notes, _s = B.genset_form(n_b, i_b, "bess", n_g, i_g)
     assert any("sized for the spec, not the edited load" in x for x in notes)
+
+
+def _listed(n_b, i_b, name, kind, prefixed):
+    """A StorageUnit the sidecar lists as ride-through storage, with ``kind``."""
+    unit = (B.STRING_PREFIX if prefixed else "user_") + name
+    n_b.add("StorageUnit", unit, bus=n_b.storage_units.bus.iloc[0], p_nom=1.0)
+    i_b["requirements"]["ride_through_storage"].append(unit)
+    i_b["units"][unit] = {"kind": kind}
+    return unit
+
+
+@pytest.mark.parametrize(
+    "kind,prefixed", [("ups", True), ("bess", False)], ids=["not-bess", "no-prefix"]
+)
+def test_a_listed_unit_is_a_built_string_only_with_the_kind_and_the_prefix(
+    kind, prefixed
+):
+    """GK A G2: each part of the provenance test has its own killing case."""
+    n_b, i_b = _campus("bess")
+    unit = _listed(n_b, i_b, "x", kind, prefixed)
+    assert unit not in B.built_strings(n_b, i_b)
+    assert B.built_strings(n_b, i_b)
+
+
+def test_other_time_steps_than_the_example_are_refused():
+    n_b, i_b = _campus("bess")
+    n_g, i_g = _genset()
+    n_b.set_snapshots(n_b.snapshots[:-1])
+    with pytest.raises(B.DcBackupError, match="time steps differ"):
+        B.genset_form(n_b, i_b, "bess", n_g, i_g)
+
+
+@pytest.mark.parametrize("mode", ["bess", "hybrid"])
+def test_a_sidecar_that_lists_no_string_is_refused_in_words(mode):
+    """A project created before its create wrote its own sidecar holds the
+    example's genset sidecar: its strings cannot be found, so it is refused
+    with the way out, never assessed with them left in."""
+    n_b, _i = _campus(mode)
+    n_g, i_g = _genset()
+    with pytest.raises(B.DcBackupError, match="does not list the battery strings"):
+        B.genset_form(n_b, copy.deepcopy(i_g), mode, n_g, i_g)
+
+
+def test_the_staged_example_refuses_batteries_at_its_default_pue():
+    """Pins the create form's staged line (STAGED_BESS_LINE in
+    frontend dcLoadForm.ts): at the example's default PUE, Batteries does not
+    fit the build plan's import. If this starts to pass, drop the line."""
+    tid = "eh_datacenter_staged"
+    from services.dc_load_profile import DcLoadError
+
+    with pytest.raises(DcLoadError, match="peak is"):
+        T.BUILDERS[tid](load_spec=T.dc_load_spec(tid, {"backup": {"mode": "bess"}}))
