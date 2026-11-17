@@ -234,6 +234,33 @@ def _validate_dtc_config(raw: dict, n) -> DtcConfig:
     return dtc
 
 
+def _with_network_import_cap(body: EhStudyRequest, archetype: str, n
+                             ) -> tuple[EhStudyRequest, ArchetypePack]:
+    """``body`` and its pack with ``pack_overrides.import_p_nom_mw`` taken
+    from the network ``n`` (`flow_service.import_capacity`, as `run_eh.freeze`
+    takes it; template-e2e 02c). 422 with the plain sentence where the
+    network fixes no limit, and with both values where an explicit cap is not
+    exactly the network's. The caller holds the network lock."""
+    from services import flow_service
+
+    cap = flow_service.import_capacity(n, {"archetype": archetype})
+    if cap.refusal is not None:
+        raise HTTPException(422, cap.refusal)
+    overrides = dict(body.pack_overrides or {})
+    asked = overrides.get("import_p_nom_mw")
+    # `apply_pack_overrides` validated it first: a finite number > 0, or None.
+    if asked is not None and float(asked) != cap.mw:
+        raise HTTPException(
+            422,
+            f"pack_overrides.import_p_nom_mw is {float(asked):.12g} MW but the "
+            f"network's connection limit is {cap.mw:.12g} MW: change it on the "
+            "network, or leave the import cap out.")
+    overrides["import_p_nom_mw"] = cap.mw
+    body = body.model_copy(update={"pack_overrides": overrides})
+    return body, apply_pack_overrides(
+        _PACK_FACTORY[archetype](), body.pack_overrides, raise_http=True)
+
+
 class EhStudyLockBusy(Exception):
     """`check_eh_study_start(lock_blocking=False)` found the network lock held
     (a solve or an edit has it): the verdict is deferred, not a refusal."""
@@ -302,6 +329,13 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
     if not lock.acquire(blocking=lock_blocking):
         raise EhStudyLockBusy()
     try:
+        if pack.import_overlay.import_p_nom_mw is not None:
+            # template-e2e 02c (GK B (63), (64)): a weak-grid study's import
+            # cap is the network's connection limit, filled here under the
+            # lock before the pack the worker runs is built; never the pack's
+            # constant. `import_capacity` takes no PyPSAService lock (pinned
+            # in tests/test_eh_study_import_cap.py).
+            body, pack = _with_network_import_cap(body, archetype, n)
         dtc_config = (_validate_dtc_config(raw_dtc, n)
                       if raw_dtc is not None else None)
         bus_names = set(map(str, n.buses.index))

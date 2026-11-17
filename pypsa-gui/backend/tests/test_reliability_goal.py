@@ -394,10 +394,11 @@ def test_the_assistant_tools_default_to_the_goal(install_network, monkeypatch):
 
     from services import chat_tools as T
     from services.pypsa_service import PyPSAService
+    from tests.test_energy_hub_mvp_b import _weak_mvp_b_network
     from tests.test_energy_hub_study_http import _install_stub
-    from tests.test_energy_hub_study_http import _network as eh_network
 
-    install_network(eh_network())
+    # A weak-grid study needs the network's connection limit (template-e2e 02c).
+    install_network(_weak_mvp_b_network())
     state = PyPSAService.get_solver_state()
     state["solver_config"] = dataclasses.replace(
         state["solver_config"], solver_name="highs", voll=150.0)
