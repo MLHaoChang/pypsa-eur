@@ -324,3 +324,73 @@ def test_the_statcom_cost_is_the_pack_unit_annualised_at_the_project_rate():
         == pytest.approx(11_195.36, abs=0.01)
     )
     assert "statcom.sc_33_5m.investment.overnight" in note and "7.0%" in note
+
+
+def test_the_island_refusal_has_no_engine_words(client, hub):
+    name, _ = hub
+    r = client.post(URL.format(name), json=_body(_defaults(client, name), "BC"))
+    assert (
+        "sizing loop" not in r.json()["detail"]
+        and "island_constraints" not in r.json()["detail"]
+    )
+
+
+def test_a_saved_grid_code_is_reported_as_saved(client, hub):
+    import json
+
+    from services import campus_electrical_service as campus
+
+    name, d = hub
+    path = d / campus.SUBDIR / campus.SETTINGS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"profile": campus.DEFAULTS["profile"]}))
+    assert _defaults(client, name)["grid_code"]["source"] == "saved"
+
+
+@pytest.mark.parametrize(
+    "code,profile,want",
+    [
+        (None, None, {"value": None, "reason": "No grid code is set."}),
+        ("x", "raise", {"value": None, "reason": "The grid code could not be read."}),
+        ("x", {}, {"value": None, "reason": "The grid code sets no Pst limit."}),
+        (
+            "x",
+            {"pst_limit": {"value": 0}},
+            {"value": None, "reason": "The grid code sets no Pst limit."},
+        ),
+        (
+            "x",
+            {"pst_limit": {"value": "1"}},
+            {"value": None, "reason": "The grid code sets no Pst limit."},
+        ),
+        (
+            "x",
+            {"pst_limit": 0.9},
+            {"value": 0.9, "source": "the grid code", "kind": "grid_code"},
+        ),
+        (
+            "x",
+            {"pst_limit": {"value": 1.0, "clause": "§ 5", "source": "code"}},
+            {"value": 1.0, "source": "§ 5", "kind": "grid_code"},
+        ),
+        (
+            "x",
+            {"pst_limit": {"value": 0.8, "source": "assumed"}},
+            {"value": 0.8, "source": "the grid code", "kind": "assumed"},
+        ),
+    ],
+)
+def test_pst_limit_reads_the_applied_code(monkeypatch, code, profile, want):
+    from fastapi import HTTPException
+
+    from routers import compare
+
+    def load(row, c):
+        assert c == code
+        if profile == "raise":
+            raise HTTPException(422, "bad")
+        return profile
+
+    monkeypatch.setattr("services.campus_electrical_service.grid_code_profile", load)
+    got = compare._pst_limit(object(), code)
+    assert {k: got.get(k) for k in want} == want

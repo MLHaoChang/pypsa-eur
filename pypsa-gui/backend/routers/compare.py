@@ -566,7 +566,7 @@ def _load_project_network(directory: pathlib.Path):
 #: `sizing_loop_runner.refusals` lines in the words the app uses for the setting (walkthrough bug 05).
 _PLAIN_REFUSALS = {
     "sizing loop: island constraints": "Island limits in the optimisation: they are on for this project, and the "
-                                       "sizing loop does not reproduce them yet, so it cannot compare intents here",
+                                       "intent comparison cannot include them yet, so it cannot run here",
 }
 
 
