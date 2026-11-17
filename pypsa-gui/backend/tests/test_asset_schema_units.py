@@ -187,10 +187,14 @@ def test_the_units_for_a_bus_serve_an_asset_not_yet_created(client, install_netw
     install_network(n)
     tonne_bus = n.generators.at[_tonne_generator(n), "bus"]
     energy_bus = n.links.at[_first(n, "links", "bus0", False), "bus0"]
-    body = client.get("/api/network/asset_schema/Generator/units", params={"bus": tonne_bus}).json()
+    body = client.get(
+        "/api/network/asset_schema/Generator/units/new", params={"bus": tonne_bus}
+    ).json()
     assert body["units"]["p_nom"] == "t/h"
     assert body["costs"]["overnight_cost"] == {"unit": "EUR/(t/h)", "scale": 1.0}
-    body = client.get("/api/network/asset_schema/Generator/units", params={"bus": energy_bus}).json()
+    body = client.get(
+        "/api/network/asset_schema/Generator/units/new", params={"bus": energy_bus}
+    ).json()
     assert body["units"] == {} and body["costs"] == {}
 
 

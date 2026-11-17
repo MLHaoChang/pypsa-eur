@@ -791,28 +791,18 @@ def get_asset_schema(component: str) -> dict:
         )
 
 
-@router.get("/asset_schema/{component}/units")
-def get_asset_units_for_bus(component: str, bus: str) -> dict:
-    """The same unit overrides for an asset not yet created, from the bus it will be attached to (the creation
-    form): a tonne bus gives t/h, t and per-tonne costs, anything else none."""
-    if component not in CLASS_ATTR:
-        raise HTTPException(400, f"No asset schema for '{component}'.")
-    n = PyPSAService.get_network()
-    return {"component": component, "bus": bus, "units": asset_fields.size_units(n, component, None, bus),
-            "costs": asset_fields.cost_units(n, component, None, bus)}
-
-
 @router.get("/asset_schema/{component}/units/{name}")
-def get_asset_units(component: str, name: str) -> dict:
-    """The size fields whose unit follows this asset's bus (t/h, t on a tonne bus); the rest keep the
-    class-level unit from `asset_schema/{component}`."""
+def get_asset_units(component: str, name: str, bus: str | None = None) -> dict:
+    """The fields whose unit follows this asset's bus (t/h, t and per-tonne costs on a tonne bus); the rest keep
+    the class-level unit from `asset_schema/{component}`. With `bus` the asset need not exist: the creation form
+    asks what a new asset attached to that bus would read (`name` is then only a label)."""
     if component not in CLASS_ATTR:
         raise HTTPException(400, f"No asset schema for '{component}'.")
     n = PyPSAService.get_network()
-    if name not in getattr(n, CLASS_ATTR[component]).index:
+    if bus is None and name not in getattr(n, CLASS_ATTR[component]).index:
         raise HTTPException(404, f"{component} '{name}' not found")
-    return {"component": component, "name": name, "units": asset_fields.size_units(n, component, name),
-            "costs": asset_fields.cost_units(n, component, name)}
+    return {"component": component, "name": name, "units": asset_fields.size_units(n, component, name, bus),
+            "costs": asset_fields.cost_units(n, component, name, bus)}
 
 
 @router.get("/asset_costs")

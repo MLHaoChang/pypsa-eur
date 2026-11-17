@@ -46,10 +46,10 @@ async function createOn(bus: string) {
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', creationItem: null })
-  vi.mocked(assetSchemaApi.get).mockResolvedValue((schemaFixture as Record<string, never>).Generator)
+  vi.mocked(assetSchemaApi.get).mockResolvedValue((schemaFixture as unknown as Record<string, never>).Generator)
   vi.mocked(assetSchemaApi.unitsForBus).mockImplementation(async (_c, bus) => ({
     component: 'Generator', bus, units: {},
-    costs: bus === 'NH3' ? { overnight_cost: { unit: 'EUR/(t/h)', scale: 1 } } : {} }))
+    costs: bus === 'NH3' ? { overnight_cost: { unit: 'EUR/(t/h)', scale: 1 } } : ({} as Record<string, { unit: string; scale: number }>) }))
 })
 afterEach(() => { vi.clearAllMocks(); useUIStore.setState({ currentProject: null, creationItem: null }) })
 

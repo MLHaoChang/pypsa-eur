@@ -124,7 +124,7 @@ export const assetSchemaApi = {
   unitsForBus: (component: string, bus: string) =>
     client.get<{ component: string; bus: string; units: Record<string, string>;
       costs?: Record<string, { unit: string; scale: number }> }>(
-      `/network/asset_schema/${component}/units`, { params: { bus } }).then(r => r.data),
+      `/network/asset_schema/${component}/units/new`, { params: { bus } }).then(r => r.data),
 
   /** Size-field units that follow the asset's bus (t/h, t on a tonne bus); empty on an energy bus. */
   units: (component: string, name: string) =>
