@@ -57,3 +57,12 @@ cases.
 - Pack manifest cites the model-set id when GC-01 is present.
 
 Release note: one new file under `doc/release-notes.d/` (see its README).
+
+**GK A2 on the PR2 approach (2026-11-17): GO with five changes.**
+- Point 1 citations accepted: cite the PSS/E-written files (their `@!` field names, version, repo path); omitted trailing optional fields stated in the docstring; one golden test of each v35/v36 section order including empty sections. (GC-TEXT-1 check: the builder kept the utility-guide name out of code; confirm with GK whether it may appear in PR text.)
+- Q1 No catch-all CC: map each vector group the campus schema allows (YNyn, YNy, Yyn, Yy, YNd, Dyn, Yd, Dy, Dd, Z if allowed) to its own code; refuse an unknown one with a named ContractError; one test per group plus the refusal.
+- Q2 v33 uses CC 1–9 (11+ came later): write the v33 table for v33 (cited) or refuse v33 .seq; test YNd and Dyn in both versions.
+- Q3 Reuse island_sc_seq.py's helpers for line R0/X0/C0, genset x2/x0 defaults and neutral data (call them or promote one to public with no behaviour change); test against the draft's value, not a retyped literal; state 3·0.727 ohm/km with units and source.
+- Q4 Nothing missing silently: list each omitted earthing transformer ("not written: zero-sequence source omitted") in the pack manifest and file header, with a test (better: write it if the target version has a zero-sequence fixed-shunt record); list the assumed values (grid X0 = X1, vk0 = vk, OPEN_PU, genset X'/Xs = x''d) in the manifest, with a test.
+- Q5 Cite that PSS/E triples the grounding impedance; hand-value test with nonzero R_N checking the file holds R_N (not 3·R_N) on the right base.
+- Also run the test-side reader on .seq: counts and ids match the RAW, values match the source params.
