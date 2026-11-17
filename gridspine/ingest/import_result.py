@@ -249,7 +249,7 @@ def _require_sidecar_name(name: Any) -> None:
         or "\\" in name
         or name.strip() != name
         or name in (".", "..")
-        or Path(name).is_absolute()
+        or ":" in name  # a Windows drive ("C:x.json") or alternate stream
     ):
         raise ValueError(f"sidecar file name must be a plain file name, got {name!r}")
     if name in RESERVED_SIDECARS:

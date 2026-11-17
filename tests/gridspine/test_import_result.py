@@ -430,6 +430,7 @@ def test_a_bug_while_loading_a_reader_is_not_hidden(fake_package):
         "..",
         ".",
         "/abs.json",
+        "C:x.json",
         " x.json",
         "network.nc",
         "results_state.pkl",
