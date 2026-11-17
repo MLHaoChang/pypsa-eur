@@ -143,6 +143,17 @@ Order is fixed for every asset type; a type shows only groups with entries. Guid
 | `eh_sk_mva` | Short-circuit level at the connection | Electrical |
 | `committable` | Must start and stop (unit commitment) | Operation |
 
+- **Folded in: template-e2e gap 05** (`.scratch/template-e2e/issues/05-raw-names-in-ui.md`, PR #1613; TEMPLATE-GAPS-1 Q2 (a)). Its surfaces are in scope as follows.
+
+| Surface (gap 05) | Fix | Slice |
+|---|---|---|
+| Load profile generator fields (`holidays`, `timezone`, `seasonal_amplitude`, `noise`, `seed`, `shifts`, `base_share`, `saturday_operation`, `shutdown_weeks`) in the Guided drawer and Expert | settings entries with scope `load_profile`, rendered by `CatalogueField` | 01 (entries), 03 (render) |
+| Grid study checkboxes (`ups_bridged`, `seamless`, `planned`) and control-mode options (`gfl_pq`, `gfl_qu`, `gfl_pf`, `gfl_fw`, `gfm_droop`, `gfm_vsm`) | entries with `options_plain` (e.g. "Grid-following, fixed P/Q", "Grid-forming, droop"); placement moves to section 5 per design §2.1 (template-e2e finding) | 01, 03 |
+| Internal units such as `__lost_concentrate` listed as generators | asset types gain `internal: true` (hidden from lists, palette and canvases; shown only as what they mean, e.g. "Concentrate shortfall", in results) | 01, 04 |
+| Template component ids as the only name (`it_load`, `genset_new`, `bess_new`, `grid_import`, `dc_mv`, `site_transformer`, `hospital_load`) | templates ship a plain display name per component; ids stay internal; existing projects keep their ids. Not a catalogue entry (it is an instance name), but every view shows the display name, and the guard scans for ids | 01 (template display names), 02 (guard) |
+| Library ids in the import price series (`ipp_da_base v1`) | Library items show their title; the guard covers them | 02 (guard), Library stream for titles |
+| Raw YAML stub as the campus file editor | out of catalogue scope: handed to the campus electrical stream (#1578) as a form over the same entries | follow-up |
+
 - The guard (§7.2) fails on a model name in user-facing text; the guide's "In model files" line is the one allowed place (and the import mapping dialog, which shows both columns by design).
 - Chat: tool results carry `plain_name` beside every `model_name`; the system prompt tells the model to use plain names; the assistant pilot scorer counts raw names in replies as a failure. A deterministic **display replacement** (§7.3) swaps backticked model names for plain names in assistant text only.
 - Reports and the Assumptions ledger use `plain_name` + unit from the catalogue; a report appendix lists "Parameter guide" entries for every parameter the report shows (one line: plain name · short help).

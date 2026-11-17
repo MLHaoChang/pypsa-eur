@@ -23,6 +23,7 @@ Turn `services/asset_schema/` into the one Parameter catalogue (spec §3.1):
 8. `component_discovery.py` and `attrs_doc.py` read text from the catalogue.
 9. `frontend/src/catalogue/modelNames.generated.json` written by a backend script; a backend test checks it is current (the only frontend file in this slice).
 10. CONTEXT.md: the terms of spec §1.
+10b. Template-e2e gap 05 (spec §3.6 table): `load_profile` and grid-study settings entries with `options_plain`; `internal: true` on asset types; templates ship a plain display name per component (ids stay internal, existing projects unchanged).
 11. Rename diff table in the PR body (spec §3.6): every changed label against `FIELD_LABELS`, `FIELD_WORDS`, `CARD_GROUPS`, `ledgerFieldLabels()`, Results, legends, ledger and reports; frontend words that must follow move in slice 03, or the old word stays.
 
 ## Likely files

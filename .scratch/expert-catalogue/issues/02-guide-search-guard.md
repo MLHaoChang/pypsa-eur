@@ -16,7 +16,7 @@ Depends on: 01 (05 for the chat link end-to-end). `CommandPalette.tsx` and `uiNa
 3. ⌘K palette: a "Parameters" source (entries and asset values), Enter → `openParameter`, Shift+Enter → guide, both hinted in the footer; platform-aware shortcut label. In Guided, hits open the field drawer (EXPERT-GUIDED-1). A reveal into Advanced does not change the saved depth.
 4. `uiNavigate.ts`: handle navigate kind `parameter` from `open_parameter`; add it to the navigate allow-list (vitest).
 5. Chat links `guide:<id>` open the drawer (the display replacement itself is issue 05).
-6. `uiCopyGuard.test.ts` covers all of `src/` (spec §7.2) with `src/uiCopyGuard.allow.json` (shrink-only) and the pin that only the guide's "In model files" line and the import mapping dialog show model names; fix `CapacityBoundsEditor.tsx:170` and "MC" (`PropertiesPanel.tsx:263`, only if #1565 has merged, else allowlist row naming slice 03).
+6. `uiCopyGuard.test.ts` covers all of `src/` (spec §7.2) with `src/uiCopyGuard.allow.json` (shrink-only) and the pin that only the guide's "In model files" line and the import mapping dialog show model names; the guard also covers template component ids and Library ids shown as names (template-e2e gap 05, spec §3.6); fix `CapacityBoundsEditor.tsx:170` and "MC" (`PropertiesPanel.tsx:263`, only if #1565 has merged, else allowlist row naming slice 03).
 
 ## Likely files
 
