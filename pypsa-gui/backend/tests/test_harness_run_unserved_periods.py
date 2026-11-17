@@ -215,6 +215,16 @@ def test_one_period_over_the_bound_is_unsupported_though_the_total_is_not(
     assert isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
 
 
+def test_an_empty_period_by_time_index_is_unsupported(tmp_path, monkeypatch):
+    """GK B (62), #1225 P7: no snapshots is refused on its own reason (the
+    per-period count of an empty index is NaN, which no bound refuses)."""
+    env = periods_env(tmp_path, monkeypatch)
+    n = env.ctx.network
+    env.ctx.network = _Snapshots(n, n.snapshots[:0])
+    value = _by_period(env)
+    assert isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
+
+
 HOURS = 8760
 
 
