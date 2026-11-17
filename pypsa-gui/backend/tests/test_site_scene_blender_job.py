@@ -398,3 +398,27 @@ def test_an_unexpected_error_is_served_without_host_paths(monkeypatch, tmp_path)
     got = sq.solve_queue.get_job(job.id)
     assert got["status"] == "failed" and got["error"].startswith(bw.FAILED)
     assert "secret-host-path" not in got["error"] and str(tmp_path) not in got["error"]
+
+
+def test_a_store_that_fails_partway_leaves_neither_a_temp_nor_an_artifact(tmp_path):
+    aid = str(uuid.uuid4())
+    result = bw.Result(glb=b"g", blend=b"b", log_tail="")
+    with pytest.raises(TypeError):
+        blender_job._store(tmp_path, aid, result, {"unserialisable": object()})
+    parent = blender_job.artifact_dir(tmp_path, aid).parent
+    assert list(parent.iterdir()) == []
+
+
+def test_only_a_member_of_the_project_reaches_the_jobs_and_artifacts(
+    client, anon_client, other_org_client, geo, worker
+):
+    _scene_with_buildings(client, geo)
+    worker("ok")
+    job = client.post(JOBS).json()
+    assert _wait(lambda: _status(job["id"]) in sq._TERMINAL)
+    assert client.get(ART + job["id"]).status_code == 200
+    assert anon_client.get(ART + job["id"]).status_code == 401
+    assert anon_client.post(JOBS).status_code in (401, 403)
+    r = other_org_client.get(ART + job["id"])
+    assert r.status_code == 404 and b"BLENDER" not in r.content, r.status_code
+    assert other_org_client.post(JOBS).status_code == 404

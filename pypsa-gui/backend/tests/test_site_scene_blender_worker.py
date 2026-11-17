@@ -558,3 +558,79 @@ def test_a_fifo_output_is_refused_without_blocking(tmp_path):
 def test_an_unclassified_kind_is_refused():
     with pytest.raises(ValueError):
         bw.WorkerError("nope", "x")
+
+
+# ── guards a targeted mutant showed were unguarded ───────────────────────────
+
+
+def test_every_resource_limit_reaches_the_container_command(tmp_path):
+    caps = bw.Caps()
+    ready = bw.Readiness(True, None, "/opt/b", "/usr/bin/docker", IMAGE)
+    head = bw._container_argv(ready, "n1", tmp_path, ["--version"], caps)
+    pairs = list(zip(head, head[1:], strict=False))
+    for flag, value in [
+        ("--pids-limit", str(caps.pids)),
+        ("--ulimit", f"fsize={caps.fsize_bytes}:{caps.fsize_bytes}"),
+        ("--ulimit", f"nofile={caps.nofile}:{caps.nofile}"),
+    ]:
+        assert (flag, value) in pairs, (flag, value)
+
+
+@pytest.mark.parametrize("which", ["dir", "runtime"])
+def test_a_relative_path_that_exists_is_still_unavailable(make, monkeypatch, which):
+    env, _ = make()
+    key = bw.ENV_DIR if which == "dir" else bw.ENV_RUNTIME
+    p = Path(env[key])
+    monkeypatch.chdir(p.parent)
+    assert Path(p.name).exists(), "the relative path resolves from the cwd"
+    r = bw.readiness({**env, key: p.name}, FAST)
+    assert not r.available and key in r.reason
+
+
+def test_the_cli_process_group_is_killed_on_every_path(make, monkeypatch):
+    env, _ = make()
+    ready = _ready(env)
+    killed = []
+    real = bw._killpg
+    monkeypatch.setattr(bw, "_killpg", lambda pid, grace: (killed.append(pid), real(pid, grace)))
+    bw.run(ready, b"g", None, FAST, env)
+    assert len(killed) == 1, "the CLI's group is killed after a clean run too"
+
+
+def test_neither_the_version_check_nor_a_run_leaves_a_temp_file(make, monkeypatch, tmp_path):
+    import tempfile
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    env, _ = make()
+    ready = _ready(env)
+    assert list(scratch.iterdir()) == [], "the version check leaves no work dir or log"
+    bw.run(ready, b"g", None, FAST, env)
+    assert list(scratch.iterdir()) == [], "a run leaves no work dir or log"
+
+
+def test_an_output_over_the_cap_by_its_size_is_refused_before_any_read(tmp_path, monkeypatch):
+    (tmp_path / "out.glb").write_bytes(b"x" * 2000)
+    reads = []
+    real = os.read
+    monkeypatch.setattr(os, "read", lambda fd, n: (reads.append(fd), real(fd, n))[1])
+    with pytest.raises(bw.WorkerError) as e:
+        bw._read_output(tmp_path, "out.glb", 1000)
+    monkeypatch.undo()
+    assert e.value.kind == bw.OUTPUT_LIMIT and reads == []
+
+
+def test_an_output_that_grows_past_the_cap_while_read_is_refused(tmp_path, monkeypatch):
+    (tmp_path / "out.glb").write_bytes(b"x" * 2000)
+    real = os.fstat
+
+    def small(fd):
+        st = real(fd)
+        return os.stat_result((st.st_mode, *st[1:6], 10, *st[7:]))
+
+    monkeypatch.setattr(os, "fstat", small)
+    with pytest.raises(bw.WorkerError) as e:
+        bw._read_output(tmp_path, "out.glb", 1000)
+    monkeypatch.undo()
+    assert e.value.kind == bw.OUTPUT_LIMIT
