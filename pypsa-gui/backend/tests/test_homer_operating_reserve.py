@@ -1151,7 +1151,6 @@ def test_equal_holders_are_ordered_by_name():
 
 def test_a_committable_unit_that_is_off_is_not_a_holder_and_an_on_one_is():
     n = _network()
-    sns = n.snapshots
     _frozen(n, 0.0, status=np.array([0.0] * 12 + [1.0] * 12))
     out = operating_reserve_result(n, (0.6, 0.0, 0.0))  # required 6 MW
     off, on = out["per_snapshot"][0], out["per_snapshot"][12]
