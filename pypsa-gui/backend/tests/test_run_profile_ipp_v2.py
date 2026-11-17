@@ -113,3 +113,12 @@ def test_shipped_cases_with_a_proposal_turn_need_the_explore_block():
     agent = {"tools": list(R.EXPLORE_TOOLS), "rounds": 1, "changes": 2, "cases": 4}
     with pytest.raises(R.ProfileError, match="explore block"):
         R.load(_v2(agent=agent))
+
+
+def test_shipped_cases_with_an_explore_block_but_no_turn_refuse():
+    # P6: the levers block without its proposal turn is the old shape's refusal.
+    profile = copy.deepcopy(R.PROFILES[V2])
+    lever = copy.deepcopy(R.PROFILES["eh_site@1"]["explore"]["levers"][0])
+    profile["explore"] = {"levers": [lever]}
+    with pytest.raises(R.ProfileError, match="proposal turn"):
+        R.load(profile)
