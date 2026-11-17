@@ -1,4 +1,5 @@
 """Saved personal restrictions through HTTP and real ordinary tool dispatch."""
+import contextlib
 import uuid
 import json
 import pytest
@@ -158,6 +159,232 @@ def test_a_user_without_project_access_is_refused_as_no_access_not_unavailable(
     assert [d.get('error_kind') for e, d in frames if e == 'tool_error'] == ['project_access_denied']
     assert not any(e == 'tool_running' for e, _ in frames)
     assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+
+WRITE_G1 = {'component_class': 'Generator', 'names': ['G1'], 'updates': {'marginal_cost': 20}}
+
+
+@contextlib.contextmanager
+def acting_as(user_id):
+    token = chat_tools._ACTING_USER_ID.set(str(user_id))
+    try:
+        yield
+    finally:
+        chat_tools._ACTING_USER_ID.reset(token)
+
+
+def refused_write():
+    """One ordinary write refused at admission: what the user and the model
+    see, minus the call id, after proving nothing ran."""
+    collector = []
+    frames = list(dispatch_tool_call(ChatSession(), {
+        'id': 'refused-' + uuid.uuid4().hex, 'name': 'bulk_update_components',
+        'input': WRITE_G1}, collector))
+    assert not any(e in {'tool_pending_confirmation', 'tool_running'} for e, _ in frames), frames
+    assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+    errors = [{k: v for k, v in d.items() if k != 'tool_use_id'} for e, d in frames if e == 'tool_error']
+    return json.dumps({'errors': errors, 'results': [r['content'] for r in collector]}, sort_keys=True)
+
+
+def test_no_access_and_a_missing_project_are_refused_byte_for_byte_alike(
+        baseline, client, second_identity):
+    """Issue 17 V2: the refusal never tells "exists, not yours" from "no such
+    project", and names neither."""
+    from services.pypsa_service import PyPSAService
+
+    pid = baseline[1]
+    with acting_as(second_identity['user_id']):
+        foreign = refused_write()
+    active = PyPSAService.get_active_context()
+    missing_id = str(uuid.uuid4())
+    active.project_uuid = missing_id
+    try:
+        missing = refused_write()
+    finally:
+        active.project_uuid = pid
+    assert foreign == missing
+    assert json.loads(foreign)['errors'][0]['error_kind'] == 'project_access_denied'
+    assert pid not in foreign and missing_id not in missing
+
+
+def test_a_deleted_project_is_refused_like_one_without_access(baseline, client, second_identity):
+    """Issue 17 V2: the bound project deleted from under the chat reads exactly
+    like no access."""
+    from services.pypsa_service import PyPSAService
+
+    pid = baseline[1]
+    with acting_as(second_identity['user_id']):
+        foreign = refused_write()
+    assert client.delete('/api/projects/Tool Baseline').status_code == 200
+    assert PyPSAService.get_active_context().project_uuid == pid
+    deleted = refused_write()
+    assert foreign == deleted and pid not in deleted
+
+
+def test_a_changed_binding_is_not_turned_into_no_access(baseline, client, monkeypatch):
+    """Issue 17: only current_project's 404 becomes project_access_denied; its
+    409 (binding changed) passes through unchanged."""
+    from fastapi import HTTPException
+    from harness import restrictions
+
+    message = 'Project binding changed. Refresh access before saving restrictions.'
+
+    def rebound(db, user, expected):
+        raise HTTPException(409, message)
+
+    monkeypatch.setattr(restrictions, 'current_project', rebound)
+    with pytest.raises(HTTPException) as refused:
+        restrictions.capture(ChatSession())
+    assert refused.value.status_code == 409
+    assert refused.value.detail == message
+
+
+def test_a_change_set_never_offers_rows_to_an_actor_without_access(
+        baseline, client, second_identity, monkeypatch):
+    """Issue 17 V3 (b): change_set._admitted fails closed, so no set card shows
+    for an actor without project access; each call keeps its own refused path.
+    Only the admission check runs as that actor: the previews that follow
+    would refuse on their own and hide a failing _admitted."""
+    from harness import change_set, loop
+
+    calls = [
+        {'id': 'cs-0', 'name': 'update_component', 'input': {
+            'component_class': 'Generator', 'name': 'G1', 'attrs': {'marginal_cost': 20}}},
+        {'id': 'cs-1', 'name': 'update_component', 'input': {
+            'component_class': 'Load', 'name': 'L1', 'attrs': {'p_set': 7}}},
+    ]
+
+    def members():
+        session = ChatSession()
+        return change_set.members(session, calls, tier_of=lambda name: loop._tool_tier(session, name),
+                                  external_of=lambda name: False, redirects=None)
+
+    assert [i['tool_use_id'] for i in members()] == ['cs-0', 'cs-1']  # the owner gets a set
+    admitted = change_set._admitted
+
+    def admitted_without_access(*args):
+        with acting_as(second_identity['user_id']):
+            return admitted(*args)
+
+    monkeypatch.setattr(change_set, '_admitted', admitted_without_access)
+    assert members() == []
+
+
+def test_a_harness_runner_asks_the_user_for_an_actor_without_access(baseline, client, second_identity):
+    """Issue 17 V3 (c): Runner._policy fails closed: no access asks the user."""
+    from harness.runner import Runner
+
+    assert Runner._policy(None, ChatSession(), 'get_component') == 'none'
+    with acting_as(second_identity['user_id']):
+        assert Runner._policy(None, ChatSession(), 'get_component') == 'user'
+
+
+def approve_then(session, switch, collector):
+    """Dispatch the G1 write to its card and approve it; `switch` runs in the
+    generator's own context as the card is answered."""
+    frames = []
+    for event, data in dispatch_tool_call(session, {
+            'id': 'switched-' + uuid.uuid4().hex, 'name': 'bulk_update_components',
+            'input': WRITE_G1}, collector):
+        frames.append((event, data))
+        if event == 'tool_pending_confirmation':
+            switch()
+            session.record_decision(data['confirmation_token'], 'approve')
+    return frames
+
+
+def test_access_lost_while_a_card_waits_revokes_its_approval(baseline, client, second_identity):
+    """Issue 17 V3 (d): confirm.py re-reads the rule at approval; an actor who
+    lost access by then revokes the approval and nothing runs."""
+    save_rule(client, baseline[1], 'confirm_changes')
+    collector, token = [], []
+    try:
+        frames = approve_then(ChatSession(), lambda: token.append(
+            chat_tools._ACTING_USER_ID.set(str(second_identity['user_id']))), collector)
+    finally:
+        for t in token:
+            chat_tools._ACTING_USER_ID.reset(t)
+    assert token, 'the card never showed'
+    assert [d['error_kind'] for e, d in frames if e == 'tool_error'] == ['confirmation_revoked'], frames
+    assert not any(e == 'tool_running' for e, _ in frames)
+    assert len(collector) == 1 and collector[0]['is_error']
+    assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+
+
+def test_access_lost_after_the_card_decision_is_refused_before_the_handler(
+        baseline, client, second_identity):
+    """Issue 17 V3 (f): loop.require_current_confirmation re-reads the rule
+    after the card's own check; access lost between the two refuses the write."""
+    save_rule(client, baseline[1], 'confirm_changes')
+    session, collector, token = ChatSession(), [], []
+
+    def lose_access_after_the_card_check(tool_name, args):
+        token.append(chat_tools._ACTING_USER_ID.set(str(second_identity['user_id'])))
+        return True
+
+    session.decision_guard = lose_access_after_the_card_check
+    try:
+        frames = approve_then(session, lambda: None, collector)
+    finally:
+        for t in token:
+            chat_tools._ACTING_USER_ID.reset(t)
+    assert token, 'the card was never decided'
+    assert [d['error_kind'] for e, d in frames if e == 'tool_error'] == ['project_access_denied'], frames
+    assert not any(e == 'tool_running' for e, _ in frames)
+    assert len(collector) == 1 and collector[0]['is_error']
+    assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+
+
+def test_access_lost_at_a_change_set_member_gate_revokes_that_member(
+        baseline, client, second_identity, monkeypatch):
+    """Issue 17 V3 (e): change_set.member_gate re-reads the rule for each
+    ticked member; an actor who lost access there writes nothing."""
+    import contextvars
+    import threading
+    import time
+    from harness import change_set
+    from services import chat_service
+    from tests.test_change_set import VOLL, _client, _voll
+
+    monkeypatch.setattr(change_set, 'ENABLED', True)
+    still_shown = change_set._still_shown
+
+    def lose_access_then_check(*args, **kwargs):
+        chat_tools._ACTING_USER_ID.set(str(second_identity['user_id']))  # the turn thread's own context
+        return still_shown(*args, **kwargs)
+
+    monkeypatch.setattr(change_set, '_still_shown', lose_access_then_check)
+    session, events, done = chat_service.ChatSession(), [], threading.Event()
+    calls = [('update_component', {'component_class': 'Generator', 'name': 'G1',
+                                   'attrs': {'marginal_cost': 20}}),
+             VOLL]  # two asset edits in a saved project route to one preview card instead
+    voll = _voll()
+
+    def turn():
+        try:
+            events.extend(chat_service.run_turn(session, 'do it', client=_client(calls),
+                                                ui_context={'ui_mode': 'expert'}))
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=contextvars.copy_context().run, args=(turn,))
+    worker.start()
+    deadline, pending = time.monotonic() + 5.0, None
+    while time.monotonic() < deadline and pending is None:
+        with session._lock:
+            pending = next(iter(session.pending_confirmations), None)
+        time.sleep(0.02)
+    assert pending, 'no change-set card appeared'
+    session.record_decision(pending, 'approve')
+    assert done.wait(10.0), 'turn did not finish'
+    worker.join()
+    cards = [d for e, d in events if e == 'tool_pending_confirmation']
+    assert len(cards) == 1 and cards[0].get('change_set'), events
+    errors = {d['tool_use_id']: d['error_kind'] for e, d in events if e == 'tool_error'}
+    assert errors['tu-0'] == 'confirmation_revoked', events
+    assert errors.get('tu-1') in {'confirmation_revoked', 'project_access_denied'}, events
+    assert not any(e == 'tool_running' for e, _ in events)
+    assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+    assert _voll() == voll
 
 
 @pytest.mark.parametrize('invalid', [

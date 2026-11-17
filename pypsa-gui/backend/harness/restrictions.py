@@ -88,7 +88,7 @@ def capture(session):
             # No access is not an unreadable store (issue 17); still 404, so a
             # project's existence never leaks across the access boundary.
             raise HTTPException(404, {'error_kind': 'project_access_denied',
-                                      'message': 'You do not have access to this project. No tool was admitted.'}) from None
+                                      'message': 'You do not have access to this project. No tool was admitted.'}) from exc
         return {**read(db, user.id, project.id), 'owner_id': str(user.id), 'project_id': str(project.id)}
 
 
