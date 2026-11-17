@@ -47,3 +47,11 @@ profile_gen = the whole settings snapshot (their jobs store their own settings,
 and an island-tuning action must not mix with a full run); gridspine = none.
 SQLite reads timestamps back naive; `load_completed_runs` stamps them UTC at the
 ORM seam (every writer stamps UTC), and the estimator still rejects naive input.
+
+- 2026-11-17, builder (successor 2), GK B 63 R1–R3: no stored row → unknown
+  (test `test_a_job_without_a_stored_row_is_unknown`; mutant "fall back to
+  None key" killed). `mode` itself changes lopf → pf
+  (`test_a_mode_field_change_resets_the_samples`; mutant "drop `mode` from
+  MODE_FIELDS" killed). The hidden/bogus/malformed 404s compare status and
+  body with `/log_history`. Dead `isfinite` dropped. `_aware` not reused: it
+  reads a naive stamp as UTC, while `_utc` deliberately rejects it.
