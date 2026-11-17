@@ -239,3 +239,15 @@ def test_role_is_fixed_for_an_org_admin_and_a_creator_only(world):
         project.created_by = world["viewer"]
         db.flush()
         assert fixed(world["viewer"]) is True
+
+
+def test_a_stale_editor_row_grants_nothing_after_leaving_the_org(world, seeded_identity):
+    # A user who left the org keeps no access through an old membership row.
+    from db.models import OrgMembership, Project, User
+    from services import project_acl
+
+    with world["session_local"]() as db:
+        db.query(OrgMembership).filter_by(user_id=world["editor"]).delete()
+        db.commit()
+        project = db.get(Project, uuid.UUID(world["project"]))
+        assert project_acl.project_role(db, db.get(User, world["editor"]), project) is None
