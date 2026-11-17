@@ -16,6 +16,8 @@ Parent: [48d-wire-recovery-rows.md](48d-wire-recovery-rows.md) (GK B N-b on #151
 
 Since #1515 (owner decision LC48D-GOAL-1), `resume_task` refuses with 409 `switch_in_progress` when the chat session's task is another task that runs. When the user answers a run's data request, `run_envelope` stores the answer and then calls `resume_task`. If another task of that chat runs at that moment, the 409 is caught by the broad `except` there and only logged. The answer stands, but the run it belongs to stays waiting, and nothing tells the user why.
 
+Owner decision LC48E-SURFACE-1: surface the refusal on the card (name the active task); no auto-resume.
+
 ## Done when
 
 - The refusal reaches the user: the card or the chat shows that the run waits for the active task, naming it as the 409's `active` does. Alternatively the run resumes on its own once the active task ends; pick one with the owner.
