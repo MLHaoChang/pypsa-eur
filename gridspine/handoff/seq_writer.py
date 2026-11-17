@@ -74,6 +74,7 @@ import math
 from gridspine.handoff.dyr_writer import machine_records
 from gridspine.handoff.raw_writer import SBASE_MVA, branch_ids, trafo_impedance
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 from gridspine.static.island_sc import _param
 from gridspine.static.island_sc_seq import (
     DEFAULT_WINDINGS,
@@ -257,6 +258,7 @@ def write_seq(campus, path, version=35, case="max", f_hz=50.0) -> list:
     Write the .seq for ``campus.net`` (as ``write_raw`` numbers it, with the
     same ``f_hz`` for the zero-sequence charging); return the assumptions applied.
     """
+    SC.refuse(campus.net, "PSS/E sequence writer")  # GC-01b: not written yet (follow-up)
     if version not in VERSIONS:
         raise ContractError(f"SEQ version {version!r} not in {VERSIONS}")
     if case not in CASES:

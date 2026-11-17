@@ -305,7 +305,9 @@ def _refuses(call, what):
 
 
 def test_every_line_and_transformer_walker_refuses_a_campus_with_a_series_capacitor():
+    from gridspine.handoff.dgs_writer import write_dgs
     from gridspine.handoff.raw_writer import write_raw
+    from gridspine.handoff.seq_writer import write_seq
     from gridspine.producers.pypsa_nodal import to_pypsa
     from gridspine.static import island_sc as ISC
     from gridspine.static import island_sc_seq as SEQ
@@ -319,6 +321,8 @@ def test_every_line_and_transformer_walker_refuses_a_campus_with_a_series_capaci
     _refuses(lambda: SEQ.sequence_net(campus, {}), r"sequence networks \(unbalanced faults, earthing\)")
     _refuses(lambda: write_raw(campus.net, "unused.raw"), "PSS/E RAW writer")
     _refuses(lambda: to_pypsa(campus.net), "PyPSA nodal export")
+    _refuses(lambda: write_dgs(campus.net, "unused.dgs"), "PowerFactory DGS writer")
+    _refuses(lambda: write_seq(campus, "unused.seq"), "PSS/E sequence writer")
 
 
 def test_the_walkers_still_take_a_campus_without_capacitors():
