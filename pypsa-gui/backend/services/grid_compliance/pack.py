@@ -33,6 +33,7 @@ only; the project is not named.
 from __future__ import annotations
 
 import csv
+import re
 import hashlib
 import io
 import json
@@ -59,8 +60,8 @@ from .tracker import (
     FREEZE_WORDS,
     data_hash,
     default_items,
-    freeze_state,
     now,
+    record_state,
     require_deliverable,
 )
 
@@ -108,18 +109,19 @@ DOCUMENT_SECTIONS: dict[str, tuple[tuple[str, str, str], ...]] = {
 _FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
 
 
+#: A plain decimal number: a sign, digits with an optional fraction, an
+#: optional exponent. Not ``float()``, which also takes "-inf", "+nan" and "-1_000".
+_PLAIN_NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
+
+
 def _safe_cell(value) -> str:
     """The cell as text, with a leading ``'`` when a spreadsheet would read
     it as a formula (CSV injection). A plain number, negative ones included,
     stays as it is."""
     text = "" if value is None else str(value)
-    if not text.startswith(_FORMULA_LEAD):
+    if not text.startswith(_FORMULA_LEAD) or _PLAIN_NUMBER.fullmatch(text):
         return text
-    try:
-        float(text)
-    except ValueError:
-        return "'" + text
-    return text
+    return "'" + text
 
 
 def _csv(header, rows) -> bytes:
@@ -148,6 +150,7 @@ def _skeleton(
     d: cat.Deliverable,
     entry: DeliverableState,
     fstate: str,
+    changed: bool,
     tables: dict[str, Table],
     pending: dict[str, str],
     version: int,
@@ -183,7 +186,20 @@ def _skeleton(
             Field(key="Data hash", value=freeze.data_hash),
             Field(key="Frozen", value=freeze.frozen_at),
         ]
-        if fstate != "fresh":
+        if fstate == "submitted":
+            freeze_blocks.append(
+                Field(
+                    key="Submitted",
+                    value="This report follows the model set it was submitted on."
+                    + (
+                        " The inputs changed after submission; the submitted "
+                        "record is kept as it was."
+                        if changed
+                        else ""
+                    ),
+                )
+            )
+        elif fstate != "fresh":
             freeze_blocks.append(
                 Callout(
                     kind="gap",
@@ -268,7 +284,7 @@ def _render(
     include_pdf: bool,
 ) -> tuple[bytes, dict]:
     stamp = now()
-    fstate = freeze_state(entry.freeze, data_hash(project))
+    fstate, changed = record_state(entry, data_hash(project))
     items = entry.data if entry.data is not None else default_items(d)
     data_rows = [[str(getattr(i, k) or "") for k in DATA_COLUMNS] for i in items]
     comment_rows = [
@@ -317,7 +333,8 @@ def _render(
             tables[key] = t.model_copy(update={"table_id": key})
             files[f"tables/{key}.csv"] = _csv(t.columns, t.rows)
     docx = render_document_docx(
-        _skeleton(d, entry, fstate, tables, pending, version, stamp), figure_bytes={}
+        _skeleton(d, entry, fstate, changed, tables, pending, version, stamp),
+        figure_bytes={},
     )
     files[f"report/TRGC-{d.code}.docx"] = docx
     skipped: list[dict] = []
@@ -345,6 +362,7 @@ def _render(
         "model_set": entry.freeze.model_dump() if entry.freeze else None,
         "submissions": [f.model_dump() for f in entry.submissions],
         "freeze_state": fstate,
+        "inputs_changed_since_submission": changed,
         "sources": source_states,
         "skipped": skipped,
         "files": [

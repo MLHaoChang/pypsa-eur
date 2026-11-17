@@ -330,6 +330,7 @@ def test_unreadable_inputs_never_read_fresh(client, hub, monkeypatch):
         b'{"schema_version": 1, "deliverables": {"99": {}}}',
         b'{"schema_version": 1, "deliverables": {}, "extra": 1}',
         b'{"schema_version": 1, "deliverables": {"06": {"comments": [{"comment_id": "C-001"}]}}}',
+        b'{"schema_version": 1, "deliverables": {"14": {"submissions": [{"model_set_id": "x"}]}}}',
     ],
 )
 def test_an_unreadable_tracker_is_refused_and_never_overwritten(client, hub, content):
@@ -760,6 +761,7 @@ def test_the_pack_contents_follow_the_tracker(client, hub, monkeypatch):
         "model_set",
         "submissions",
         "freeze_state",
+        "inputs_changed_since_submission",
         "sources",
         "skipped",
         "files",
@@ -779,8 +781,22 @@ def test_the_model_set_a_deliverable_was_submitted_on_is_kept(client, hub):
     assert resp.status_code == 200, resp.text
     assert resp.json()["submissions"] == [submitted_on]
 
+    row = _row(client, "14")
+    assert row["freeze_state"] == "submitted"
+    assert row["inputs_changed_since_submission"] is False
     _network(hub).add("Bus", "gc09-after-submission", v_nom=33.0)
-    assert _row(client, "14")["freeze_state"] == "stale"
+    # judged against the submission record: never "out of date", which would
+    # ask for a re-freeze the server refuses
+    row = _row(client, "14")
+    assert row["freeze_state"] == "submitted" and row["stale"] is False
+    assert row["inputs_changed_since_submission"] is True
+    _, z = _pack(client, "14")
+    manifest = json.loads(z.read("manifest.json"))
+    assert manifest["freeze_state"] == "submitted"
+    assert manifest["inputs_changed_since_submission"] is True
+    doc = _document(z, "14")
+    assert b"follows the model set it was submitted on" in doc
+    assert b"out of date" not in doc and b"no longer match" not in doc
     # a re-freeze cannot replace the submitted model set ...
     resp = client.post(f"{BASE}/deliverables/14/freeze")
     assert resp.status_code == 409 and _kind(resp) == "gc_freeze_after_submission"
@@ -871,21 +887,36 @@ def test_csv_cells_that_a_spreadsheet_reads_as_formulas_are_neutralised(
         json={"date": "2026-11-01", "clause": payload, "comment": payload},
     )
     assert resp.status_code == 201, resp.text
+    short = f"{lead}1+1"  # the revision is capped at 16 characters
+    resp = client.patch(
+        f"{BASE}/deliverables/06/comments/C-001",
+        json={"response": payload, "revision": short},
+    )
+    assert resp.status_code == 200, resp.text
     _, z = _pack(client, "06")
     data = list(csv.reader(io.StringIO(z.read("data_list.csv").decode())))
     log = list(csv.reader(io.StringIO(z.read("revision_log.csv").decode())))
     assert data[1][1] == data[1][2] == "'" + payload
-    assert log[1][2] == log[1][3] == "'" + payload
+    assert log[1][2] == log[1][3] == log[1][4] == "'" + payload
+    assert log[1][5] == "'" + short
 
 
-def test_plain_numbers_in_a_csv_stay_numbers():
-    assert gc_pack._safe_cell("-3.1") == "-3.1"
-    assert gc_pack._safe_cell("+2") == "+2"
-    assert gc_pack._safe_cell("-1+1") == "'-1+1"
+@pytest.mark.parametrize("number", ["-3.1", "+2", "-0.5e-3", "-.5", "+7."])
+def test_plain_numbers_in_a_csv_stay_numbers(number):
+    assert gc_pack._safe_cell(number) == number
+
+
+@pytest.mark.parametrize(
+    "cell", ["-1+1", "-inf", "+nan", "-1_000", "\t1", "\r-1", "-1 ", "+0x1f", "-1e"]
+)
+def test_only_a_strict_decimal_escapes_the_formula_guard(cell):
+    assert gc_pack._safe_cell(cell) == "'" + cell
     assert gc_pack._safe_cell("Sk min") == "Sk min"
 
 
-def test_a_source_that_raises_reads_unavailable_never_a_500(client, hub, monkeypatch):
+def test_a_source_that_raises_reads_unavailable_never_a_500(
+    client, hub, monkeypatch, caplog
+):
     def broken(project):
         raise RuntimeError("provider bug")
 
@@ -901,6 +932,14 @@ def test_a_source_that_raises_reads_unavailable_never_a_500(client, hub, monkeyp
         "pending",
     ]
     assert b"could not be read" in _document(z, "15")
+    logged = [
+        r
+        for r in caplog.records
+        if r.name == sources.__name__ and "GC-03 could not be read" in r.getMessage()
+    ]
+    assert logged and all(
+        r.exc_info and "provider bug" in str(r.exc_info[1]) for r in logged
+    )
 
 
 def test_an_invalid_field_is_named_in_the_refusal(client, hub):
