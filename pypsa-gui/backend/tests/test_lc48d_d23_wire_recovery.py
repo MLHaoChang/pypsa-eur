@@ -399,6 +399,43 @@ def test_a_detached_task_keeps_blocking_until_it_reads_as_ended(chat, monkeypatc
     assert chat.task_id == second["task_id"]
 
 
+def test_a_task_that_ended_before_the_switch_never_blocks_a_start(
+    chat, monkeypatch, tmp_path
+):
+    """GK B E: the task's terminal write lets go of the chat, so after a
+    project switch the guard has nothing to read."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    _set_stored(first["task_id"], status="completed")
+    assert chat.task_id is None
+    _, _, owner = tasks._authority()
+    monkeypatch.setattr(
+        tasks, "_authority", lambda: (tmp_path, str(uuid.uuid4()), owner)
+    )
+    second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert chat.task_id == second["task_id"]
+
+
+def test_an_ended_task_leaves_a_later_task_of_the_chat_alone(chat):
+    """GK B E: only the session ids that name the ended task change."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    later = str(uuid.uuid4())
+    chat.task_id, chat.detached_task_id = later, first["task_id"]
+    _set_stored(first["task_id"], status="cancelled")
+    assert chat.task_id == later and chat.detached_task_id is None
+    chat.task_id, chat.detached_task_id = first["task_id"], later
+    _set_stored(first["task_id"], status="completed")
+    assert chat.task_id is None and chat.detached_task_id == later
+    chat.detached_task_id = None
+
+
+def test_a_task_that_has_not_ended_keeps_its_chat(chat):
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    for status in ("ready", "running", "waiting_job", "needs_review"):
+        _set_stored(first["task_id"], status=status)
+        assert chat.task_id == first["task_id"]
+
+
 def test_a_detached_task_that_reads_as_ended_lets_go(chat, monkeypatch, tmp_path):
     first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
     tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})

@@ -176,6 +176,31 @@ def _save(path, task):
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
+    if task.get("status") in _ENDED_TASK:
+        _release_sessions(task.get("task_id"))
+
+
+# LC-48f (GK B E): the task statuses after which nothing of it runs again.
+_ENDED_TASK = frozenset({"completed", "cancelled"})
+
+
+def _release_sessions(task_id):
+    """A task that has ended lets go of the chats it is bound to, in the same
+    write as its status, so the start guard (`_refuse_switch`) never has to
+    read a finished task, which after a project switch it could not. Only a
+    session whose `task_id` or `detached_task_id` is this task changes."""
+    from harness import session as harness_session
+    from services import chat_tools
+    if not task_id:
+        return
+    with harness_session._SESSIONS_LOCK:
+        sessions = list(harness_session._SESSIONS.values())
+    current = chat_tools.chat_session()
+    for session in ([current] if current is not None else []) + sessions:
+        if getattr(session, "task_id", None) == task_id:
+            session.task_id = None
+        if getattr(session, "detached_task_id", None) == task_id:
+            session.detached_task_id = None
 
 
 def _resolve(value, steps):
@@ -566,7 +591,11 @@ def note_held(task_id, refusal):
     with _LOCK:
         path, task = _read(task_id)
         run = task.get("run")
-        if not isinstance(run, dict):
+        # A resume can land between the guard's refusal and this note (the
+        # active task ended, the user resumed): only a run still at the answer
+        # is held (GK B 59, call-site race).
+        if not isinstance(run, dict) or run.get("status") != "needs_user" or run.get("waiting") \
+                or task.get("status") in _ENDED_TASK:
             return
         run["held"] = {"kind": refusal["error_kind"], "active": refusal["active"],
                        "since": _now()}

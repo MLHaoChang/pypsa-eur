@@ -25,4 +25,10 @@ Owner decision LC48F-REFUSE-1: refuse with `switch_in_progress` when the active 
 
 ## Resolution
 
-Owner decision LC48F-REFUSE-1: fail closed. `_refuse_switch` refuses with `switch_in_progress` when `_read` of the chat's task fails (not found in this project, or unreadable), `active.status` `unreadable`, `title` null. Tests in tests/test_lc48d_d23_wire_recovery.py: `test_after_a_project_switch_the_running_task_still_blocks_a_start`, `test_an_unreadable_task_file_blocks_a_start_for_another_plan`, and the N-a asserts on the `run-1` test.
+Owner decision LC48F-REFUSE-1: fail closed. A project switch does not stop the chat's task (`activate_project` swaps the pointer; the runner keeps its own `RUN_CONTEXT`), so:
+
+- `_refuse_switch` refuses with `switch_in_progress` when the chat's task cannot be read (not found in this project, `task_unreadable`, OSError, bad JSON): `active.status` `unreadable`, `title` null.
+- GK B D: `begin_step`'s detach on a 404 keeps the id as `session.detached_task_id`; the guard reads it the same way, and lets go once it reads as not running or on `cancel_task`.
+- GK B E: a task's terminal write (`completed`, `cancelled`, in `_save`) clears `session.task_id` and `detached_task_id` wherever they name that task, so a task that ended before the switch never blocks.
+
+Tests in tests/test_lc48d_d23_wire_recovery.py: the project-switch, detach, ended-task, later-task, read-error and unreadable-file cases, and the N-a asserts on the `run-1` test.

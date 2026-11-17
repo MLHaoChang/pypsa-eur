@@ -890,6 +890,33 @@ def test_the_held_note_says_when_the_active_task_has_ended(waiting):
     }
 
 
+def test_a_run_resumed_before_the_note_is_never_held(waiting):
+    """GK B 59 call-site race: the active task ended and the user resumed the
+    run between the guard's refusal and `note_held`."""
+    from services import chat_tools
+
+    path, record, _ = waiting
+    chat_tools.set_acting_user(record["owner_id"])
+    refusal = {
+        "error_kind": "switch_in_progress",
+        "active": {"kind": "task", "id": str(uuid.uuid4()), "title": "T", "status": "running"},
+    }
+    task = json.loads(path.read_text())
+    task["run"].update(status="running", waiting=None)
+    path.write_text(json.dumps(task))
+    tasks.note_held(record["task_id"], refusal)
+    assert "held" not in json.loads(path.read_text())["run"]
+    # Still waiting on its data request: not the answered run either.
+    task["run"].update(status="needs_user", waiting={"kind": "data", "ref": "r"})
+    path.write_text(json.dumps(task))
+    tasks.note_held(record["task_id"], refusal)
+    assert "held" not in json.loads(path.read_text())["run"]
+    task["run"].update(waiting=None)
+    path.write_text(json.dumps(task))
+    tasks.note_held(record["task_id"], refusal)
+    assert json.loads(path.read_text())["run"]["held"]["active"] == refusal["active"]
+
+
 def test_a_cancelled_run_never_shows_the_held_note(waiting):
     """GK B E-b: a stale note on a run that is over."""
     from services import run_monitor
