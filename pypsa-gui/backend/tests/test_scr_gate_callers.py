@@ -134,3 +134,18 @@ def test_a_stated_capacity_below_its_converters_on_a_second_poc_withholds_the_pa
     assert payload["capped_pocs"] == ["poc2"]
     n.buses.at["poc2", "eh_ibr_mva"] = 100.0
     assert G.evaluate_network_scr_gate(n)[1] == "ok"
+
+
+def test_a_converter_the_last_solve_sized_at_zero_is_sized_not_unsized():
+    # The DC study's ENS solve sizes bess_new at 0: that is a size, and the
+    # gate passes. On a network never solved, a 0 p_nom_opt is PyPSA's default
+    # and stays an unsized candidate (DC walk 05, GK A 31).
+    from services.adequacy import scr_gate as G
+
+    n = _with_unsized(_network())
+    n.storage_units.at["bess_new", "p_nom_opt"] = 0.0
+    assert G.evaluate_network_scr_gate(n)[1] == "not_established"  # never solved
+    n._objective = 123.0  # as an optimize() leaves it, and as a saved .nc keeps it
+    gate, status, payload, _ = G.evaluate_network_scr_gate(n)
+    assert status == "ok" and gate.scr == "pass" and payload["capped_pocs"] == []
+    assert payload["buses"][0]["ibr_assets"]["bess_new"] == 0.0

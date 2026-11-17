@@ -95,10 +95,22 @@ class _Invalid(ValueError):
     """A non-finite or negative rating: the capacity is unknown, never 0."""
 
 
-def _rating(row) -> tuple[float, bool]:
+def _solved(n) -> bool:
+    """Whether ``n`` holds a solve: ``optimize()`` stores the objective, and a
+    saved network keeps it. Read without the getter, which warns when unset."""
+    v = getattr(n, "_objective", None)
+    try:
+        return v is not None and math.isfinite(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def _rating(row, solved: bool = False) -> tuple[float, bool]:
     """``(MVA, unsized)``: installed MW read as MVA. An extendable asset reads
     its ``p_nom_opt`` (the saved network's last solve), and without one it is
     an unsized candidate counting 0; any other asset reads ``p_nom``. A
+    ``p_nom_opt`` of 0 is PyPSA's default on a network never ``solved`` (an
+    unsized candidate), but a size the solve chose on a solved one. A
     non-finite or negative value raises ``_Invalid``."""
     def num(key):
         try:
@@ -114,7 +126,7 @@ def _rating(row) -> tuple[float, bool]:
         if opt is None or (isinstance(opt, float) and math.isnan(opt)):
             return 0.0, True
         v = num("p_nom_opt")
-        return v, v <= 0
+        return v, v <= 0 and not solved
     return num("p_nom"), False
 
 
@@ -142,6 +154,7 @@ def converter_assets(n, bus: str | None = None,
     power architecture
     (``dc_architecture.behind_architecture``)."""
     out: dict[str, dict] = {}
+    solved = _solved(n)
     for frame, ibr_only in (("generators", True), ("storage_units", False)):
         df = getattr(n, frame, None)
         if df is None or df.empty or "bus" not in df.columns:
@@ -152,7 +165,7 @@ def converter_assets(n, bus: str | None = None,
             carrier = str(row.get("carrier", "") or "").lower()
             if (carrier not in IBR_CARRIERS) if ibr_only else (carrier in SYNCHRONOUS_STORAGE):
                 continue
-            mva, unsized = _rating(row)
+            mva, unsized = _rating(row, solved)
             out[str(name)] = {"mva": mva, "unsized": unsized, "bus": str(row.get("bus", "")),
                               "solved": _truthy(row.get("p_nom_extendable", False)) and not unsized}
     return out
