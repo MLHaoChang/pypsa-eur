@@ -3,7 +3,7 @@ guided-rate-only.png: Guided; electrical 2 %/yr from 2030; 2035/2040 Load x cell
 expert-rate-only.png: same state in Expert.
 guided-typed-override.png: Guided; electrical 2035 typed as 1.3 over the rate (not in load_scalers_derived): normal-weight cell with the reset button (Back to the rate), 2040 still derived.
 expert-typed-override.png: same in Expert.
-guided-validation-error.png: Guided; rate-only state, then -150 typed in the Heat rate input and blurred; the alert "Load growth (Heat): must be above -100 %" shows above the table, so a sideways scroll never hides it.
+guided-validation-error.png: Guided; rate-only state, then -150 typed in the Heat rate input and blurred; the alert "Load growth (Heat): must be above -100 %" shows above the table; the refused -150 stays in the Heat field, outlined red (aria-invalid, described by the alert), and the table scrolls that column into view.
 expert-validation-error.png: same in Expert.
-guided-empty.png: Guided; no rate, no scalers, load_growth_base_year null: empty rate inputs and "defaults to the first investment period" hint.
+guided-empty.png: Guided; no rate, no scalers, load_growth_base_year null: empty rate inputs; "Growth from year" disabled with its reason "Enter a growth rate first".
 expert-empty.png: same in Expert.

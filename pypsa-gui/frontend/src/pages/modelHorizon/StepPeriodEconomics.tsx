@@ -230,7 +230,7 @@ export function StepPeriodEconomics({
               a conditional-render column split on this ONE table rather than
               a second table behind StepShell's `advanced` slot. */}
           {advancedOpen && growthAlert && (
-            <div role="alert" className="text-[10px] text-danger mt-1">{growthAlert}</div>
+            <div id={LOAD_GROWTH_ALERT_ID} role="alert" className="text-[10px] text-danger mt-1">{growthAlert}</div>
           )}
           <div className="border border-border rounded overflow-auto max-h-64 mt-1">
             <table
@@ -270,6 +270,7 @@ export function StepPeriodEconomics({
                     onBaseYearChange={onLoadGrowthBaseYearChange}
                     pending={loadGrowthPending}
                     onProblem={setGrowthProblem}
+                    serverProblem={loadGrowthError}
                   />
                 )}
                 {periodWeightings.map((row, i) => {
@@ -478,11 +479,23 @@ export function StepPeriodEconomics({
   )
 }
 
+const LOAD_GROWTH_ALERT_ID = 'load-growth-alert'
+const INPUT_CLASS = 'w-14 px-1 py-0.5 border rounded text-[11px] font-mono bg-bg focus:outline-none text-right disabled:opacity-50'
+
+/** The marks of a refused entry: it stays in the field, outlined, and points
+ * at the alert above the table that says why. */
+function invalidProps(isInvalid: boolean) {
+  return isInvalid
+    ? { 'aria-invalid': true, 'aria-describedby': LOAD_GROWTH_ALERT_ID,
+        className: `${INPUT_CLASS} border-danger focus:border-danger` }
+    : { className: `${INPUT_CLASS} border-border focus:border-accent` }
+}
+
 /** The "Load growth, % per year" row (homer-parity 04a): one rate per carrier
  * above that carrier's multiplier column, and the year growth compounds from.
  * The server derives the multipliers below; this row only edits the inputs. */
 function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, onBaseYearChange, pending,
-  onProblem }: {
+  onProblem, serverProblem }: {
   loadCarriers: Array<{ key: string; label: string }>
   periods: number[]
   rates: Record<string, number>
@@ -491,9 +504,23 @@ function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, o
   onBaseYearChange: (year: number) => void
   pending: boolean
   onProblem: (problem: string | null) => void
+  /** The server's refusal of the last change, marked on the field that sent it. */
+  serverProblem: string | null
 }) {
   const first = periods.length > 0 ? Math.min(...periods) : null
   const shownYear = baseYear ?? first
+  const noRate = Object.keys(rates).length === 0
+  // The field whose entry was refused ('year' or a carrier key): the entry
+  // stays as typed, so the user sees what was refused.
+  const [invalid, setInvalid] = useState<string | null>(null)
+  const [lastSent, setLastSent] = useState<string | null>(null)
+  const marked = invalid ?? (serverProblem ? lastSent : null)
+  const refuse = (field: string, msg: string | null, el: HTMLInputElement) => {
+    onProblem(msg)
+    setInvalid(msg ? field : null)
+    // A narrow panel scrolls the table sideways: bring the refused column into view.
+    if (msg) el.scrollIntoView?.({ block: 'nearest', inline: 'center' })
+  }
   return (
     <tr className="border-b border-border bg-bg-2">
       <td colSpan={4} className="px-2 py-1 text-[10px] text-muted">
@@ -509,18 +536,20 @@ function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, o
             step="1"
             defaultValue={shownYear ?? ''}
             aria-label="Growth from year"
-            disabled={pending || Object.keys(rates).length === 0}
+            disabled={pending || noRate}
             onBlur={e => {
               const y = parseInt(e.target.value, 10)
               const msg = Number.isFinite(y) ? loadGrowthProblem(0, y, periods)
                 : 'Growth from year: must be a year'
-              onProblem(msg)
-              if (msg) { e.target.value = String(shownYear ?? ''); return }
-              if (y !== shownYear) onBaseYearChange(y)
+              refuse('year', msg, e.target)
+              if (msg) return
+              if (y !== shownYear) { setLastSent('year'); onBaseYearChange(y) }
             }}
-            className="w-14 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50"
+            {...invalidProps(marked === 'year')}
           />
-          {baseYear == null && <span>· defaults to the first investment period</span>}
+          {noRate
+            ? <span>· Enter a growth rate first</span>
+            : baseYear == null && <span>· defaults to the first investment period</span>}
         </div>
 
       </td>
@@ -541,18 +570,18 @@ function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, o
                 onBlur={e => {
                   const raw = e.target.value.trim()
                   if (!raw) {
-                    onProblem(null)
+                    refuse(key, null, e.target)
                     if (rate != null) onRateChange(key, null)
                     return
                   }
                   const v = parseFloat(raw)
                   const msg = loadGrowthProblem(v, baseYear, periods)
                     ?.replace(/^Load growth:/, `Load growth (${label}):`) ?? null
-                  onProblem(msg)
-                  if (msg) { e.target.value = rate != null ? String(rate) : ''; return }
-                  if (v !== rate) onRateChange(key, v)
+                  refuse(key, msg, e.target)
+                  if (msg) return
+                  if (v !== rate) { setLastSent(key); onRateChange(key, v) }
                 }}
-                className="w-14 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50"
+                {...invalidProps(marked === key)}
               />
               <span className="text-[10px] text-muted">%</span>
             </span>

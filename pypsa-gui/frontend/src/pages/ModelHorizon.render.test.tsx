@@ -435,6 +435,38 @@ it('shows the load growth rate beside the multipliers it derives, and sends a ty
   await userEvent.type(hydrogen, '900')
   await userEvent.tab()
   expect((await screen.findByRole('alert')).textContent).toMatch(/^Load growth \(heat\): 900 %/)
+  // the refused entry stays in its field, marked and pointing at the alert
+  expect((hydrogen as HTMLInputElement).value).toBe('900')
+  expect(hydrogen.getAttribute('aria-invalid')).toBe('true')
+  expect(hydrogen.getAttribute('aria-describedby')).toBe('load-growth-alert')
+
+  // a client-side refusal keeps the entry too; clearing the field clears the mark
+  const heatRate = screen.getByLabelText('Load growth (% per year), Heat') as HTMLInputElement
+  await userEvent.clear(heatRate)
+  await userEvent.type(heatRate, '-150')
+  await userEvent.tab()
+  expect(heatRate.value).toBe('-150')
+  expect(heatRate.getAttribute('aria-invalid')).toBe('true')
+  expect(screen.getByRole('alert').textContent).toBe('Load growth (Heat): must be above -100 %')
+  await userEvent.clear(heatRate)
+  await userEvent.tab()
+  expect(heatRate.getAttribute('aria-invalid')).toBeNull()
+})
+
+it('says why the growth year is disabled while no carrier has a rate', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2035],
+    weightings: [{ period: 2030, years: 5, objective: 1 }, { period: 2035, years: 5, objective: 1 }],
+  })
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true }))
+  renderPage()
+  await openStep(/Economics/)
+  await screen.findByText('Period weightings')
+  await userEvent.click(screen.getByText('Advanced'))
+  expect((await screen.findByLabelText('Growth from year') as HTMLInputElement).disabled).toBe(true)
+  expect(screen.getByText('· Enter a growth rate first')).not.toBeNull()
 })
 
 // ── 4. Guided-step shell: routing between summary and steps (Task 3) ──────
