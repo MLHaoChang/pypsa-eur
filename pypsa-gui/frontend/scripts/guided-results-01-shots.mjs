@@ -11,7 +11,8 @@
  *       later with mgready, when the study outlasts STUDY_WAIT_MS).
  *
  * Needs the API on :8000 and Vite on :5173, signed in as the dev admin (scripts/dev-credentials.mjs).
- * Usage: node scripts/guided-results-01-shots.mjs [dc|dcx|dcstale|dcn|mg|mgready ...] [--out dir]      env: BASE
+ * Usage: node scripts/guided-results-01-shots.mjs [dc|dcx|dcstale|dcn|mg|mgready ...] [--out dir]
+ * env: BASE, DC_PROJECT (the dc/dcx/dcstale project, default "Data Center Energy Hub")
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -28,7 +29,7 @@ const OUT = path.resolve(outAt >= 0 ? args[outAt + 1]
   : path.join(here, '..', '..', '..', '.scratch', 'guided-results', 'shots-01'))
 const picked = args.filter((a, i) => !a.startsWith('--') && (outAt < 0 || i !== outAt + 1))
 const PHASES = picked.length ? picked : ['dc', 'dcx', 'dcstale', 'dcn', 'mg', 'mgready']
-const DC = 'Data Center Energy Hub'
+const DC = process.env.DC_PROJECT || 'Data Center Energy Hub'
 const DCN = 'Data Center Energy Hub not run'
 const MG = 'Island Microgrid'
 const THEMES = ['dark', 'light']
@@ -38,8 +39,8 @@ await fs.mkdir(OUT, { recursive: true })
 const browser = await chromium.launch()
 const problems = []
 
-async function open(auth, project, theme) {
-  const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1280, height: 800 },
+async function open(auth, project, theme, height = 800) {
+  const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1280, height },
     deviceScaleFactor: 1, reducedMotion: 'reduce' })
   await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
   await ctx.addInitScript(({ project, theme }) => {
@@ -173,7 +174,8 @@ try {
   if (PHASES.includes('dcstale')) {
     // Out of date: nudge one generator's p_nom, then section 10 again.
     for (const theme of THEMES) {
-      const { ctx, page } = await open(auth, DC, theme)
+      // Taller viewport: the out-of-date banner and the chart's pill in one frame.
+      const { ctx, page } = await open(auth, DC, theme, 1000)
       if (theme === 'dark') {
         // The app may still be settling its project switch: retry when the page navigates under us.
         const nudge = () => page.evaluate(async () => {
