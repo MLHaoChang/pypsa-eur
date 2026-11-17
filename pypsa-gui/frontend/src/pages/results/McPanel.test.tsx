@@ -499,13 +499,17 @@ describe('McPanel ELCC table', () => {
 // ── walkthrough asset-investment 01, 07: the goal verdict, sizes ──────────
 
 describe('mcGoalText', () => {
-  const g = { target_lole_h: 3, confident: true, settle_draws: null, settle_reason: null }
+  const g = { target_lole_h: 3, target_source: 'stored' as const, confident: true,
+    settle_draws: null, settle_reason: null }
   it('names the verdict against the goal in the loops\' words', () => {
     expect(mcGoalText({ ...g, verdict: 'pass' })).toBe('Target met: at or under the 3 h/yr goal')
     expect(mcGoalText({ ...g, verdict: 'miss' })).toBe('Goal missed: above the 3 h/yr goal')
     expect(mcGoalText({ ...g, verdict: 'not_confident', confident: false, settle_draws: 4200 }))
       .toBe('Not confident: at or under the 3 h/yr goal, but not by enough to call it a pass; '
         + 'about 4,200 draws would settle it')
+    // A goal nobody set says it is the site type's assumed one.
+    expect(mcGoalText({ ...g, verdict: 'miss', target_source: 'default' }))
+      .toBe('Goal missed: above the 3 h/yr goal (assumed for the site type)')
   })
 })
 
@@ -525,14 +529,14 @@ describe('McPanel goal verdict', () => {
       ...DONE,
       result: {
         ...DONE.result!,
-        goal: { target_lole_h: 3, verdict: 'miss', confident: false,
+        goal: { target_lole_h: 3, target_source: 'default', verdict: 'miss', confident: false,
           settle_draws: null, settle_reason: null },
-        elcc_installed_mw: { 'Wind-North': 6 },
+        elcc_installed: { 'Wind-North': { mw: 6, basis: 'p_nom' } },
       },
     })
     await openPanel()
     expect((await screen.findByTestId('mc-goal-verdict')).textContent)
-      .toBe('Goal missed: above the 3 h/yr goal')
+      .toBe('Goal missed: above the 3 h/yr goal (assumed for the site type)')
     expect(screen.getByTestId('elcc-size-Wind-North').textContent).toMatch(/6 MW installed · .* MW peak/)
   })
 

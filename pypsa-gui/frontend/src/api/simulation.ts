@@ -283,6 +283,8 @@ export interface ActivitySummary {
 export interface McGoalVerdict {
   /** The goal in h/yr. */
   target_lole_h: number
+  /** `default`: nobody set it; it is the site type's assumed goal. */
+  target_source: 'stored' | 'template' | 'default' | 'override'
   verdict: 'pass' | 'miss' | 'not_confident'
   confident: boolean
   settle_draws: number | null
@@ -298,9 +300,10 @@ export interface McResult {
   /** Walkthrough 08: the first batch, the cap and the stopping CoV. */
   draws?: { first_batch: number; max: number; cov_target: number }
   elcc: ElccRow[]
-  /** Walkthrough 07: installed MW of each priced vre asset; a vre row's
-   *  `nameplate_mw` is its peak output. */
-  elcc_installed_mw?: Record<string, number | null>
+  /** Walkthrough 07: installed MW of each priced vre asset (`p_nom_opt`
+   *  when sized and solved, else `p_nom`); a vre row's `nameplate_mw` is its
+   *  peak output. */
+  elcc_installed?: Record<string, { mw: number; basis: 'p_nom' | 'p_nom_opt' } | null>
   /** MC_WARNING_V1, shipped with every payload — render it, never inline it. */
   warning: string
   /** Phase 12c-pre: units whose outages were sampled ON their availability
@@ -731,6 +734,8 @@ export interface EhSizedAsset {
   min_mwh?: number | null
   max_mwh?: number | null
   max_hours?: number | null
+  /** A Link's MW is on its bus0 side. */
+  basis?: 'bus0'
 }
 
 /** TEA wrap (spec decision 9). LCOH is null + a flag when it cannot be

@@ -36,6 +36,10 @@ describe('SizedDesignTable', () => {
     expect(sizedBuilt({ ...DIESEL, built_mw: null })).toBe('not reported')
     expect(sizedBuilt({ component: 'Store', name: 'h2', carrier: 'H2', built_mwh: 30 })).toBe('30 MWh')
     expect(sizedRange({ ...DIESEL, max_mw: null })).toBe('no limit')
+    // The solver's -0 is "none built", never "-0 MW".
+    expect(sizedBuilt({ ...DIESEL, built_mw: -0 })).toBe('none built')
+    expect(sizedBuilt({ ...DIESEL, built_mw: 1e-9 })).toBe('none built')
+    expect(sizedRange({ ...DIESEL, min_mw: -0 })).toBe('0–12 MW')
     expect(sizedRange({ ...DIESEL, min_mw: 2, max_mw: null })).toBe('at least 2 MW')
   })
 })

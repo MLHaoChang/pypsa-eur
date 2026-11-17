@@ -5,7 +5,15 @@
 import type { EhReferenceDesignReport, EhSizedAsset } from '../../api/simulation'
 import { componentLabel } from '../../utils/componentLabels'
 
-const num = (v: number): string => v.toLocaleString('en-GB', { maximumFractionDigits: 2 })
+// A solver's -0 or 1e-9 reads 0, never "-0".
+const num = (v: number): string =>
+  (Math.abs(v) < 0.005 ? 0 : v).toLocaleString('en-GB', { maximumFractionDigits: 2 })
+
+/** True when the study built none of it (a size that rounds to zero). */
+export function notBuilt(a: EhSizedAsset): boolean {
+  const built = a.component === 'Store' ? a.built_mwh : a.built_mw
+  return built != null && Math.abs(built) < 0.005
+}
 
 /** The rows of a report's sizing section; [] when it has none. */
 export function sizedAssets(report: EhReferenceDesignReport | null | undefined): EhSizedAsset[] {
@@ -23,8 +31,11 @@ export function sizedByName(report: EhReferenceDesignReport | null | undefined):
 /** "4.2 MW", "2.5 MW · 10 MWh (4 h)", "30 MWh"; "not reported" when the
  *  solve left no size. */
 export function sizedBuilt(a: EhSizedAsset): string {
-  if (a.component === 'Store') return a.built_mwh != null ? `${num(a.built_mwh)} MWh` : 'not reported'
+  if (a.component === 'Store') {
+    return a.built_mwh == null ? 'not reported' : notBuilt(a) ? 'none built' : `${num(a.built_mwh)} MWh`
+  }
   if (a.built_mw == null) return 'not reported'
+  if (notBuilt(a)) return 'none built'
   const mw = `${num(a.built_mw)} MW`
   if (a.component !== 'StorageUnit' || a.built_mwh == null) return mw
   const hours = a.max_hours != null ? ` (${num(a.max_hours)} h)` : ''

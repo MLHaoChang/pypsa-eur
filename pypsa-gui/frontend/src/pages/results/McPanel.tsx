@@ -7,6 +7,7 @@ import type {
 } from '../../api/simulation'
 import { blockerMessage } from '../../utils/blockerMessage'
 import { NATIVE_OUTCOME_WORDS } from '../../components/activityWords'
+import { ASSUMED_GOAL_NOTE } from '../../hooks/useReliabilityGoal'
 import { useUIStore } from '../../store/uiStore'
 import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
@@ -112,7 +113,7 @@ export function loleStatement(m: McMetrics): string {
 /** The run against the project's goal in words (walkthrough asset-investment
  *  01): the loops' words for met and not confident (`NATIVE_OUTCOME_WORDS`). */
 export function mcGoalText(g: McGoalVerdict): string {
-  const goal = `${trim(g.target_lole_h)} h/yr goal`
+  const goal = `${trim(g.target_lole_h)} h/yr goal${g.target_source === 'default' ? ` (${ASSUMED_GOAL_NOTE})` : ''}`
   if (g.verdict === 'pass') return `${NATIVE_OUTCOME_WORDS.met}: at or under the ${goal}`
   if (g.verdict === 'miss') return `Goal missed: above the ${goal}`
   const settle = g.settle_draws != null
@@ -713,7 +714,7 @@ export function McPanel() {
                         <td className="py-1 pr-3">{r.name}</td>
                         <td className="py-1 pr-3 font-sans">{r.kind}</td>
                         <td className="py-1 pr-3 text-right" data-testid={`elcc-size-${r.name}`}>
-                          {elccSize(r, result?.elcc_installed_mw?.[r.name])}
+                          {elccSize(r, result?.elcc_installed?.[r.name]?.mw)}
                         </td>
                         {/* A refusal is DATA. The bisection either resolved a
                             credit or it did not, and when it did not the engine

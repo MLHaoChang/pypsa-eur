@@ -67,6 +67,10 @@ export function goalText(goal: ReliabilityGoal | null, k: GoalNumberField): stri
  *  same words (parity test in EnvelopeSection.test.tsx). */
 export const RELIABILITY_GOAL_LABEL = 'Reliability goal (LOLE)'
 
+/** The words after a goal nobody set, the site type's own (walkthrough 01;
+ *  the Goal field's key line, template-e2e PR-C, says the same). */
+export const ASSUMED_GOAL_NOTE = 'assumed for the site type'
+
 /** What an unset field reads, in both modes and in the Results summary. */
 export const GOAL_UNSET: Record<'target_lole_h' | 'ens_cap_permyriad', string> = {
   target_lole_h: 'not set', ens_cap_permyriad: 'off',
@@ -78,11 +82,12 @@ export const GOAL_UNSET: Record<'target_lole_h' | 'ens_cap_permyriad', string> =
  *  formatter the editor's placeholders (both modes) and the summary use. */
 export function goalWords(goal: ReliabilityGoal | null, k: GoalNumberField): string {
   const f = goal?.[k]
+  // An unset LOLE names the site type's assumed goal (walkthrough 01).
+  const assumed = k === 'target_lole_h' && f?.value == null ? goal?.target_lole_h.assumed : null
+  if (assumed != null) return `${assumed} h/yr (${ASSUMED_GOAL_NOTE})`
   if (!f || f.value == null) return k === 'mc_draws' ? '' : GOAL_UNSET[k]
   const unit = k === 'target_lole_h' ? ' h/yr' : k === 'ens_cap_permyriad' ? '‱' : ''
-  const note = f.source === 'template' ? ' (template)'
-    // A default LOLE with a value is the site type's own goal (walkthrough 01).
-    : f.source === 'default' ? (k === 'target_lole_h' ? ' (site type default)' : ' (default)') : ''
+  const note = f.source === 'template' ? ' (template)' : f.source === 'default' ? ' (default)' : ''
   return `${f.value}${unit}${note}`
 }
 

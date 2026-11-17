@@ -39,7 +39,7 @@ export function heldFigure(section: FlowSectionId, h: FlowHeld, sized?: EhSizedA
   const label = section === 'loads' ? PEAK_LOAD : (h.field && FIELD_LABELS[h.field]) || 'Size'
   // After a study, the size it chose (walkthrough asset-investment 03).
   if (h.extendable && sized && sizedBuilt(sized) !== 'not reported') {
-    return `${label}: ${sizedBuilt(sized)} (sized by the last study)`
+    return `${label}: ${sizedBuilt(sized)} (by the last study)`
   }
   if (h.extendable) return `${label}: sized by the study`
   if (h.value === null) return `${label}: ${h.series ? 'its profile has no values yet' : 'not set'}`
