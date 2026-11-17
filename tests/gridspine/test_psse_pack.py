@@ -21,7 +21,8 @@ import json
 import pytest
 
 from gridspine.handoff import psse_pack as PP
-from gridspine.handoff.dyr_writer import PIN_NOTE, PocBranch
+from gridspine.handoff.dyr_writer import PIN_NOTE, PocBranch, machine_records
+from gridspine.handoff.psspy_scripts import PENDING as PSSPY_NOTE
 from gridspine.handoff.psspy_scripts import check_script
 from gridspine.handoff.seq_writer import NOT_WRITTEN, write_seq
 from gridspine.schema.contracts import ContractError
@@ -32,6 +33,7 @@ from tests.gridspine.test_campus import t
 from tests.gridspine.test_campus_bundle import bundle
 from tests.gridspine.test_dyr_wecc import _records
 from tests.gridspine.test_island_flow import rows, spec
+from tests.gridspine.test_island_schema import pv_qu
 
 PLANT = PP.Plant("PV1", PocBranch("trafo", 0, 0))  # TR1, grid end at the PCC
 GENERIC = load_generic()
@@ -290,3 +292,62 @@ def test_the_mon_band_is_listed_as_assumed(tmp_path):
     assert m["mon_assumed"] == PP.MON_ASSUMED
     assert f"- {PP.MON_ASSUMED}" in (out / "README.md").read_text()
     assert "0.900 1.100" in (out / f"{m['case']}.mon").read_text()
+
+
+# --------------------------------------------------------------------------
+# mutant kills: the guards and exact outputs
+
+
+def test_grid_following_reads_the_kind_and_the_island_control(tmp_path):
+    # PV1 carries an island block with a grid-following control (gfl_qu)
+    hc, _case, _lines, _grid = _hour_campus(tmp_path, spec(pv_island=pv_qu()))
+    assert {
+        u: PP.grid_following(hc, u) for u in ("PV1", "BESS1", "GEN1", "GRID", "NOPE")
+    } == {"PV1": True, "BESS1": False, "GEN1": False, "GRID": False, "NOPE": False}
+
+
+def test_a_gfl_island_block_still_takes_the_generic_set(tmp_path):
+    _hc, m, _out = _write(tmp_path, spec(pv_island=pv_qu()))
+    assert [a["unit"] for a in m["assumed"]] == ["PV1"]
+
+
+def test_out_may_be_a_string(tmp_path):
+    hc, case, lines, grid = _hour_campus(tmp_path)
+    m = PP.write_psse_pack(str(tmp_path / "pack"), hc, case, lines, grid)
+    assert json.loads((tmp_path / "pack" / "manifest.json").read_text()) == m
+
+
+def test_the_manifest_lists_exactly_the_files_written(tmp_path):
+    _hc, m, out = _write(tmp_path)
+    case = m["case"]
+    assert m["files"] == [
+        f"{case}.{e}" for e in ("raw", "seq", "dyr", "con", "sub", "mon")
+    ] + ["README.md", "manifest.json"]
+    assert sorted(p.name for p in out.iterdir()) == sorted(m["files"])
+
+
+def test_pending_verification_is_the_three_notes_in_order(tmp_path):
+    _hc, m, _out = _write(tmp_path)
+    assert m["pending_verification"] == [PIN_NOTE, PP.BUSR_NOTE, PSSPY_NOTE]
+
+
+def test_readme_says_none_assumed_and_nothing_not_written(tmp_path):
+    s = spec()
+    u = s["campus"]["units"]
+    u["PV1"]["island"] = copy.deepcopy(u["BESS1"]["island"])
+    _hc, _m, out = _write(tmp_path, s)
+    assert "## Assumed values\n\n- none\n" in (out / "README.md").read_text()
+    _hc, m, out = _write(tmp_path / "plant", plant=PLANT)
+    assert m["seq"]["not_written"] == [] and m["contingencies"]["not_written"] == []
+    assert "## Not written\n\n- nothing\n" in (out / "README.md").read_text()
+
+
+def test_the_scripts_carry_the_grid_machines_own_mbase(tmp_path):
+    hc, m, out = _write(tmp_path, plant=PLANT)
+    grid = next(r for r in machine_records(hc.net) if r[0] == "GRID")
+    assert grid[3] == 100.0
+    line = f"GRID_BUS, GRID_ID, GRID_MBASE = {grid[1]!r}, {grid[2]!r}, 100.0"
+    scripts = [f for f in m["files"] if f.startswith("run_")]
+    assert scripts
+    for name in scripts:
+        assert line in (out / name).read_text().splitlines(), name

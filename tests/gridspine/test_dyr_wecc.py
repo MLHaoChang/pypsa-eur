@@ -478,3 +478,23 @@ def test_synchronous_records_keep_a_separator_before_a_ten_column_con():
     values = {n: 1 for n in icons} | {n: -998.0 for n in cons}
     line = format_record(1, "1", model, values)
     assert line.count(" -998.00000") == len(cons)
+
+
+def _converter_inputs(tmp_path):
+    _params, templates = _toy_templates(tmp_path, ibr=_IBR)
+    return _net(), wecc_params(templates)
+
+
+def test_converter_records_refuses_a_version_outside_33_35(tmp_path):
+    net, ibr = _converter_inputs(tmp_path)
+    with pytest.raises(ContractError, match=r"\.dyr version 34 not supported; supported \(33, 35\)"):
+        dyr_writer.converter_records(net, ibr, version=34)
+
+
+def test_converter_records_skips_a_synchronous_machine_with_an_ibr_row(tmp_path):
+    net, ibr = _converter_inputs(tmp_path)
+    own = dyr_writer.converter_records(net, ibr, version=35)
+    # the gen G_BUS_02 is synchronous: a converter row under its name is not written
+    both = pd.concat([ibr, ibr.rename(index={"W_BUS_02": "G_BUS_02"})])
+    assert dyr_writer.converter_records(net, both, version=35) == own
+    assert list(own[1]) == ["W_BUS_02"]

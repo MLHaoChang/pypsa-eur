@@ -99,6 +99,26 @@ def test_citations_follow_gc_text_1():
             lambda r: r["blocks"]["regc"]["values"]["tg"].update(value=True),
             "regc.regc_tg must be a finite",
         ),
+        (
+            lambda r: r.update(blocks=list(r["blocks"])),
+            "blocks must be exactly \\['reec', 'reecc', 'regc', 'repc'\\], got \\[",
+        ),
+        (
+            lambda r: r["blocks"].update(repc="x"),
+            "block repc \\(REPCA1\\) has no source",
+        ),
+        (
+            lambda r: r["blocks"]["repc"].pop("source"),
+            "block repc \\(REPCA1\\) has no source",
+        ),
+        (
+            lambda r: r["blocks"]["regc"].update(values=[]),
+            "block regc has no values mapping",
+        ),
+        (
+            lambda r: r["blocks"]["regc"]["values"].update(tg=0.02),
+            "regc.regc_tg needs a value and a 'from'",
+        ),
         # the loader's own converter checks run on the set
         (
             lambda r: r["blocks"]["regc"]["values"]["iqrmax"].update(value=-1.0),
