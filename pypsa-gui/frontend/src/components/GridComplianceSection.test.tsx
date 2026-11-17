@@ -33,8 +33,8 @@ function row(code: string, over: Partial<Deliverable> = {}): Deliverable {
     status: 'not_started', status_basis: 'declared', status_at: null,
     next_step: 'Collect the data list',
     data: [{ item_id: 'item-1', label: 'Single-line diagram', supplier: '', due: null, status: 'requested' }],
-    freeze: null, freeze_state: 'none', stale: false,
-    feeds: [{ package: 'GC-04', label: 'PSS/E study results', available: false }],
+    freeze: null, freeze_state: 'none', stale: false, submissions: [],
+    feeds: [{ package: 'GC-04', label: 'PSS/E study results', available: false, state: 'pending' }],
     comments: [], packs: [], ...over,
   }
 }
@@ -142,6 +142,23 @@ describe('GridComplianceSection', () => {
     expect(store.requestPanelSection).toHaveBeenCalledWith('campusElectrical', 'campus_file')
     await user.click(screen.getByRole('button', { name: 'Freeze again' }))
     await waitFor(() => expect(api.freeze).toHaveBeenCalledWith('P', '04'))
+  })
+
+  it('keeps Freeze off after submission and says what was submitted on', async () => {
+    const user = userEvent.setup()
+    const frozen = { model_set_id: 'ms-abc', data_hash: 'h', frozen_at: '2026-11-10T00:00:00+00:00', source: 'interim' }
+    api.state.mockResolvedValue(state([row('14', {
+      status: 'submitted', freeze: frozen, submissions: [frozen], freeze_state: 'stale', stale: true,
+      feeds: [{ package: 'GC-03', label: 'grid strength results', available: false, state: 'unavailable' }],
+    })]))
+    renderSection()
+    await user.click(await screen.findByRole('button', { name: /Study 14/ }))
+    expect((screen.getByRole('button', { name: 'Freeze again' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/submitted on the data frozen on 2026-11-10, and that record is kept/)).toBeTruthy()
+    expect(screen.getByText(/What was submitted stays as frozen/)).toBeTruthy()
+    expect(screen.queryByText(/freeze again once they are right/)).toBeNull()
+    expect(screen.getByText('Could not be read: grid strength results.')).toBeTruthy()
+    expect(screen.queryByText(/ms-abc/)).toBeNull()
   })
 
   it('turns Freeze off with a visible reason while there is no campus file', async () => {

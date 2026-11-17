@@ -215,7 +215,9 @@ function Detail({ name, d, statuses, hasCampusInput }: {
     setSlidePanel('campusElectrical')
     requestPanelSection('campusElectrical', 'campus_file')
   })
-  const pending = d.feeds.filter(f => !f.available)
+  const pending = d.feeds.filter(f => f.state === 'pending')
+  const unavailable = d.feeds.filter(f => f.state === 'unavailable')
+  const submittedOn = statuses.indexOf(d.status) >= SUBMITTED_RANK ? d.submissions.at(-1) ?? null : null
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
@@ -224,7 +226,7 @@ function Detail({ name, d, statuses, hasCampusInput }: {
           disabled={status.isPending} onChange={e => status.mutate(e.target.value as GcStatus)}>
           {statuses.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
         </select>
-        <Btn onClick={() => freeze.mutate()} disabled={freeze.isPending || !hasCampusInput}>
+        <Btn onClick={() => freeze.mutate()} disabled={freeze.isPending || !hasCampusInput || submittedOn !== null}>
           {freeze.isPending ? 'Freezing…' : d.freeze ? 'Freeze again' : 'Freeze data'}
         </Btn>
         <Btn onClick={() => pack.mutate()} disabled={pack.isPending}>
@@ -238,13 +240,24 @@ function Detail({ name, d, statuses, hasCampusInput }: {
           <button type="button" className={linkCls} onClick={toCampusFile}>Campus file ›</button>
         </p>
       )}
+      {hasCampusInput && submittedOn && (
+        <p className="text-[11px] text-muted">
+          Freeze is off: this deliverable was submitted on the data frozen on {submittedOn.frozen_at.slice(0, 10)},
+          and that record is kept. Set the status back to Judged to freeze again.
+        </p>
+      )}
       {error && <p role="alert" className="text-[11px] text-danger">{error}</p>}
       <div className="text-[11px] text-ink-700 space-y-0.5">
         {d.freeze ? (
           <p>Data frozen on {d.freeze.frozen_at.slice(0, 10)}{' '}
             <Tag tone={FREEZE_TONE[d.freeze_state]}>{FREEZE_LABEL[d.freeze_state]}</Tag></p>
         ) : <p className="text-muted">The data is not frozen for this deliverable.</p>}
-        {hasCampusInput && (d.freeze_state === 'stale' || d.freeze_state === 'unreadable') && (
+        {submittedOn && (d.freeze_state === 'stale' || d.freeze_state === 'unreadable') && (
+          <p className="text-muted">
+            The inputs changed after submission. What was submitted stays as frozen; later steps follow that record.
+          </p>
+        )}
+        {hasCampusInput && !submittedOn && (d.freeze_state === 'stale' || d.freeze_state === 'unreadable') && (
           <p>
             {d.freeze_state === 'stale'
               ? 'The campus file, asset library or network changed after the freeze: freeze again once they are right. '
@@ -254,6 +267,9 @@ function Detail({ name, d, statuses, hasCampusInput }: {
         )}
         {pending.length > 0 && (
           <p className="text-muted">Not in yet: {pending.map(f => f.label).join('; ')}.</p>
+        )}
+        {unavailable.length > 0 && (
+          <p className="text-warning">Could not be read: {unavailable.map(f => f.label).join('; ')}.</p>
         )}
         {d.packs.length > 0 && <p className="text-muted">Report packs built: {d.packs.length}.</p>}
       </div>

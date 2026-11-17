@@ -8,6 +8,8 @@ export type GcStatus =
 
 export type FreezeState = 'none' | 'fresh' | 'stale' | 'refreeze_needed' | 'unreadable'
 
+export interface Freeze { model_set_id: string; data_hash: string; frozen_at: string; source: string }
+
 export interface DataItem {
   item_id: string
   label: string
@@ -41,10 +43,12 @@ export interface Deliverable {
   status_at: string | null
   next_step: string
   data: DataItem[]
-  freeze: { model_set_id: string; data_hash: string; frozen_at: string; source: string } | null
+  freeze: Freeze | null
   freeze_state: FreezeState
   stale: boolean
-  feeds: { package: string; label: string; available: boolean }[]
+  /** The model set each submission went out on, oldest first; never rewritten. */
+  submissions: Freeze[]
+  feeds: { package: string; label: string; available: boolean; state: 'present' | 'pending' | 'unavailable' }[]
   comments: TsoComment[]
   packs: { version: number; digest: string }[]
 }
