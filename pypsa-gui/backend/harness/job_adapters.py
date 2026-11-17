@@ -5,6 +5,9 @@ can observe completion without holding the turn lease or using the solve
 queue. Adequacy/FMEA/MC/frontier/coupling/EH/investment studies mint
 ``ad:…`` handles over the in-process study mesh. Queue jobs (including
 GridSpine) keep their UUID ids and existing ACL path.
+
+`job_status` and `cancel_job` (live-voice 11a) read every family, the queue
+included, through one neutral view with a verified cancel.
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -72,6 +76,8 @@ class ForegroundJob:
     kind: str | None
     created_at: float
     registered_at: float = field(default_factory=time.time)
+    # live-voice 11a: the project's `network_revision` when the handle was minted.
+    input_revision: int | None = None
 
 
 @dataclass
@@ -85,6 +91,8 @@ class StudyJob:
     project_uuid: str | None
     created_at: float
     registered_at: float = field(default_factory=time.time)
+    # live-voice 11a: the project's `network_revision` when the handle was minted.
+    input_revision: int | None = None
 
 
 @dataclass
@@ -98,6 +106,8 @@ class ReportJobHandle:
     project_uuid: str | None
     created_at: float
     registered_at: float = field(default_factory=time.time)
+    # live-voice 11a: the project's `network_revision` when the handle was minted.
+    input_revision: int | None = None
 
 
 _LOCK = threading.RLock()
@@ -155,6 +165,7 @@ def _snapshot_bound_job(job_id, ctx):
         snap = {k: record.get(k) for k in (
             'status', 'kind', 'objective', 'condition', 'stage', 'error',
             'report_id', 'mode', 'section', 'version',
+            'started_at', 'finished_at', 'warnings',
         )}
         snap['section'] = snap['section'] or record.get('current_section')
         snap['status'] = _native_status(record, worker)
@@ -285,6 +296,7 @@ def register_foreground_solve(
         )
         origin = _bind_activity(job_id, ctx)
         handle = _FOREGROUND[job_id]
+        handle.input_revision = getattr(origin, 'network_revision', None)
     _remember_activity(handle, origin)
     _watch_activity(handle, origin)
     return job_id
@@ -320,6 +332,7 @@ def register_study_job(
         )
         origin = _bind_activity(job_id, ctx, study_key)
         handle = _STUDIES[job_id]
+        handle.input_revision = getattr(origin, 'network_revision', None)
     _remember_activity(handle, origin)
     _watch_activity(handle, origin)
     return job_id
@@ -349,6 +362,7 @@ def register_report_job(
         )
         origin = _bind_activity(job_id, ctx, REPORT_STATE_KEY)
         handle = _REPORTS[job_id]
+        handle.input_revision = getattr(origin, 'network_revision', None)
     _remember_activity(handle, origin)
     _watch_activity(handle, origin)
     return job_id
@@ -649,6 +663,377 @@ def wait_report_job(
         stop.wait(min(0.25, max(0, deadline - time.monotonic())))
 
 
+# ── Neutral job contract (live-voice 11a) ───────────────────────────────────
+#
+# One view for every asynchronous family, so a monitor, a snapshot on
+# reconnect and a cancel read the same shape whatever runs: identity, status,
+# phase/progress, a per-job cursor, timestamps, input/result revision,
+# warnings, the terminal outcome, and a verified cancel. The family views
+# above stay as `detail` for the tools that already return them.
+
+CONTRACT_VERSION = 1
+QUEUE_FAMILY = 'solve_queue'
+# How long a cancel waits for the worker to confirm it stopped, and the most
+# a caller may ask for (GK B F3): the wait runs inside a tool call.
+CANCEL_SETTLE_SECONDS = 3.0
+CANCEL_SETTLE_MAX_SECONDS = 10.0
+
+# Native terminal status -> neutral outcome. A loop that finished without
+# meeting its target (`LOOP_STATUSES` other than `met`) is `not_met`.
+_OUTCOMES: dict[str, dict[str, str]] = {
+    FOREGROUND_FAMILY: {'completed': 'succeeded', 'failed': 'failed', 'aborted': 'cancelled'},
+    # The loop statuses first, so the shared names (`aborted`, `met`) keep their own outcome.
+    STUDY_FAMILY: {**{s: 'not_met' for s in LOOP_STATUSES},
+                   'done': 'succeeded', 'met': 'succeeded', 'failed': 'failed',
+                   'aborted': 'cancelled', 'refused': 'refused'},
+    REPORT_FAMILY: {'done': 'succeeded', 'failed': 'failed', 'aborted': 'cancelled'},
+    QUEUE_FAMILY: {'completed': 'succeeded', 'failed': 'failed', 'aborted': 'cancelled',
+                   'interrupted': 'interrupted'},
+}
+OUTCOMES = frozenset(o for table in _OUTCOMES.values() for o in table.values()) | {'unknown'}
+# The only native statuses that read as still running; anything else a family
+# does not map fails closed to `unknown`, never to a success (GK B A3).
+_LIVE = frozenset({'running', 'queued'})
+_NO_INPUT_REVISION = {
+    QUEUE_FAMILY: 'a queued job solves the saved project file; no start revision is recorded',
+    'not_bound': 'no network_revision was recorded when the handle was minted',
+}
+
+@dataclass
+class _Cursor:
+    """What a monitor last saw of one job; `seq` moves only on a change."""
+
+    seq: int = 0
+    seen: tuple | None = None  # (status, phase, progress)
+    updated_at: float = 0.0
+    finished_at: float | None = None
+
+
+_CURSORS: OrderedDict[str, _Cursor] = OrderedDict()
+_CURSORS_MAX = 512  # as many as the activity bindings keep
+
+
+def _family_of(job_id: str) -> str:
+    if is_foreground_job_id(job_id):
+        return FOREGROUND_FAMILY
+    if is_study_job_id(job_id):
+        return STUDY_FAMILY
+    if is_report_job_id(job_id):
+        return REPORT_FAMILY
+    return QUEUE_FAMILY
+
+
+def _outcome(family: str, status: str | None) -> str | None:
+    """The neutral terminal outcome; None while the job still runs.
+
+    Fails closed: a status the family does not name (an exited worker, a lost
+    origin, a status added later) is `unknown`, never `succeeded`.
+    """
+    if status in _LIVE:  # no family names a live status terminal
+        return None
+    return _OUTCOMES[family].get(status, 'unknown')
+
+
+def _advance_cursor(job_id: str, status, phase, progress, terminal: bool) -> _Cursor:
+    """The job's cursor, moved on when what a monitor sees changed."""
+    seen = (status, phase, repr(progress))
+    now = time.time()
+    with _LOCK:
+        cur = _CURSORS.get(job_id)
+        if cur is None:
+            cur = _CURSORS[job_id] = _Cursor(updated_at=now)
+        if cur.seen != seen:
+            cur.seq += 1
+            cur.seen = seen
+            cur.updated_at = now
+            if terminal and cur.finished_at is None:
+                cur.finished_at = now
+        _CURSORS.move_to_end(job_id)
+        while len(_CURSORS) > _CURSORS_MAX:
+            _CURSORS.popitem(last=False)
+        return _Cursor(cur.seq, cur.seen, cur.updated_at, cur.finished_at)
+
+
+def _view(*, job_id, family, kind, tool_use_id, owner, project, status, phase, progress,
+          created_at, started_at, finished_at, input_revision, input_revision_note,
+          result_revision, warnings, outcome, detail) -> dict[str, Any]:
+    """The neutral job view (CONTRACT_VERSION); every family builds it here."""
+    cur = _advance_cursor(job_id, status, phase, progress, outcome not in (None, 'unknown'))
+    return {
+        'contract': CONTRACT_VERSION,
+        'id': job_id,
+        'family': family,
+        'kind': kind,
+        'tool_use_id': tool_use_id,
+        'owner_user_id': None if owner is None else str(owner),
+        'project_id': None if project is None else str(project),
+        'status': status,
+        'phase': None if phase is None else str(phase)[:120],
+        'progress': progress,
+        'cursor': cur.seq,
+        'created_at': created_at,
+        'started_at': started_at,
+        'updated_at': cur.updated_at,
+        'finished_at': finished_at or cur.finished_at,
+        'input_revision': input_revision,
+        'input_revision_note': input_revision_note,
+        'result_revision': result_revision if outcome == 'succeeded' else None,
+        'warnings': warnings,
+        # `unknown` is neither running nor finished: nothing proves either.
+        'terminal': outcome is not None and outcome != 'unknown',
+        'outcome': outcome,
+        'detail': detail,
+    }
+
+
+def _active_ctx_for(handle):
+    from services.pypsa_service import PyPSAService
+    ctx = PyPSAService.get_active_context()
+    if handle.project_uuid and ctx.project_uuid and str(ctx.project_uuid) != str(handle.project_uuid):
+        _refuse('job_project_mismatch', 'The active project no longer matches this job.', 409)
+    return ctx
+
+
+def _warnings(handle, snap) -> list[str]:
+    from harness import completion_observer
+    out = [str(w)[:200] for w in (snap.get('warnings') or []) if w][:10]
+    if handle.owner_user_id is not None and handle.project_uuid is not None:
+        out += completion_observer.warnings(str(handle.owner_user_id), str(handle.project_uuid))
+    return out
+
+
+def _result_revision(handle, snap, ctx) -> str | None:
+    """What identifies the results a succeeded job wrote, or None."""
+    if handle.family == FOREGROUND_FAMILY:
+        network = getattr(ctx, 'network', None)
+        meta = getattr(network, 'meta', None) or {}
+        fingerprint = meta.get('assistant_solve_input_fingerprint')
+        return f'solve:{fingerprint}' if fingerprint else None
+    if handle.family == STUDY_FAMILY:
+        return f"{handle.study_key}:{snap.get('started_at')}"
+    report_id = snap.get('report_id') or handle.report_id
+    return f"report:{report_id}@{snap.get('version')}" if report_id else None
+
+
+def _native_view(job_id: str, actor_id: str | None) -> dict[str, Any]:
+    family = _family_of(job_id)
+    if family == FOREGROUND_FAMILY:
+        handle, view_of = _require_foreground(job_id, actor_id), _job_view
+    elif family == STUDY_FAMILY:
+        handle, view_of = _require_study(job_id, actor_id), _study_job_view
+    else:
+        handle, view_of = _require_report(job_id, actor_id), _report_job_view
+    ctx = _active_ctx_for(handle)
+    snap = _snapshot_bound_job(job_id, ctx)
+    status = snap['status']  # `_snapshot_bound_job` always names one
+    outcome = _outcome(family, status)
+    phase = snap.get('stage') or snap.get('section') or snap.get('kind') or getattr(handle, 'kind', None)
+    return _view(
+        job_id=job_id, family=family, kind=handle.tool_name, tool_use_id=handle.tool_use_id,
+        owner=handle.owner_user_id, project=handle.project_uuid, status=status, phase=phase,
+        progress=snap.get('progress'), created_at=handle.registered_at,
+        started_at=snap.get('started_at'), finished_at=snap.get('finished_at'),
+        # Captured when the handle was minted, never read now: a later edit is not this job's input.
+        input_revision=handle.input_revision,
+        input_revision_note=('network_revision at handoff' if handle.input_revision is not None
+                             else _NO_INPUT_REVISION['not_bound']),
+        result_revision=_result_revision(handle, snap, ctx) if outcome == 'succeeded' else None,
+        warnings=_warnings(handle, snap), outcome=outcome, detail=view_of(handle, snap),
+    )
+
+
+@contextmanager
+def _as_actor(actor_id: str | None):
+    """Run a queue call as `actor_id`, through chat_tools' own acting checks."""
+    from services import chat_tools
+    token = chat_tools._ACTING_USER_ID.set(None if actor_id is None else str(actor_id))
+    try:
+        yield
+    finally:
+        chat_tools._ACTING_USER_ID.reset(token)
+
+
+def _queue_job(job_id: str, actor_id: str | None) -> dict[str, Any]:
+    """The queue route's own ACL (`_visible_job_or_404`), as `actor_id`; a job
+    the actor may not see is the neutral 404 `job_not_found`."""
+    from routers.solve_queue import _visible_job_or_404
+    from services import chat_tools
+    if actor_id is None:
+        _refuse('job_not_found', 'No job is registered for that id.')
+    with _as_actor(actor_id):
+        try:
+            with chat_tools._acting() as (db, user):
+                return _visible_job_or_404(db, user, job_id)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                _refuse('job_not_found', 'No job is registered for that id.')
+            raise
+
+
+def _queue_view(job_id: str, actor_id: str | None) -> dict[str, Any]:
+    job = _queue_job(job_id, actor_id)
+    status = job.get('status') or 'unknown'
+    outcome = _outcome(QUEUE_FAMILY, status)
+    return _view(
+        job_id=str(job['id']), family=QUEUE_FAMILY, kind=job.get('kind'), tool_use_id=None,
+        owner=None,  # the queue's ACL is the project's, not one owner's
+        project=job.get('project_id'), status=status, phase=job.get('kind'),
+        progress={'position': job['position']} if job.get('position') is not None else None,
+        created_at=job.get('enqueued_at'), started_at=job.get('started_at'),
+        finished_at=job.get('finished_at'), input_revision=None,
+        input_revision_note=_NO_INPUT_REVISION[QUEUE_FAMILY],
+        result_revision=f"queue:{job['id']}@{job.get('finished_at')}",
+        warnings=[],  # the queue records an error, read as `outcome: failed`
+        outcome=outcome, detail=job,
+    )
+
+
+def job_status(job_id: str, *, actor_id: str | None) -> dict[str, Any]:
+    """The neutral view of any job this actor may see; 404 `job_not_found` otherwise."""
+    if not isinstance(job_id, str):
+        _refuse('job_not_found', 'No job is registered for that id.')
+    if _family_of(job_id) == QUEUE_FAMILY:
+        return _queue_view(job_id, actor_id)
+    return _native_view(job_id, actor_id)
+
+
+def _worker_exited(job_id: str) -> bool:
+    """Whether the handle's own worker thread has exited. An abort route may
+    mark the record `aborted` before its worker leaves native code
+    (`routers.simulation.abort`), so the status alone is not the proof."""
+    with _LOCK:
+        binding = _ACTIVITY_BINDINGS.get(job_id)
+    worker = binding[2] if binding is not None else None
+    if not isinstance(worker, threading.Thread):
+        return True  # no worker thread is bound: the record is the only witness
+    return not worker.is_alive()  # an unstarted thread is not alive either
+
+
+def _stop_own_run(job_id: str) -> str:
+    """
+    Stop exactly this handle's run: check its origin and set ITS stop event
+    in one hold of the family's state lock (GK B F1 on #1543).
+
+    The abort routes stop whatever run is active; a run started between the
+    caller's read and the route would be stopped instead. This sets the same
+    event the routes set, on the record this handle bound, and for the
+    foreground solve flips `status` to `aborted` as `routers.simulation.abort`
+    does. Returns `sent`, `origin_lost` (a newer run owns the record: nothing
+    is touched), `not_running` (it ended before the hold) or `not_stoppable`
+    (the record carries no stop event).
+    """
+    from services.pypsa_service import PyPSAService
+    ctx = PyPSAService.get_active_context()
+    with _LOCK:
+        binding = _ACTIVITY_BINDINGS.get(job_id)
+    if ctx is None or binding is None or binding[0] != id(ctx):
+        return 'origin_lost'
+    _, key, worker, started = binding
+    with ctx.solver_state_lock:
+        record = ctx.solver_state if key is None else ctx.solver_state.get(key)
+        if not _same_origin(record, worker, started):
+            return 'origin_lost'
+        if record.get('status') != 'running':
+            return 'not_running'
+        event = record.get('stop_event')
+        if event is None:
+            return 'not_stoppable'
+        event.set()
+        if key is None:
+            record['status'] = 'aborted'
+    return 'sent'
+
+
+def _refusal(kind: str, status: int, message: str) -> dict[str, Any]:
+    return {'error_kind': kind, 'status': status, 'message': message[:200]}
+
+
+def cancel_job(
+    job_id: str,
+    *,
+    actor_id: str | None,
+    settle_seconds: float | None = None,
+    stop: threading.Event | None = None,
+) -> dict[str, Any]:
+    """
+    Cancel one job by handle and report the VERIFIED outcome.
+
+    `cancel` is one of:
+      - `cancelled`: the outcome is `cancelled` AND the handle's worker
+        thread has exited (a queue job: the queue flips it only then);
+      - `cancel_requested`: the stop was sent and the worker had not yet
+        confirmed within the settle bound (it stops at its next boundary);
+      - `already_finished`: the job was terminal before the request, nothing sent;
+      - `finished_first`: the job ended another way while the stop was in flight;
+      - `origin_lost`: the handle's worker no longer owns a live record (a
+        newer run replaced it, or it exited without a status): nothing is
+        sent, or what happened after the send cannot be proved;
+      - `refused`: nothing was stopped; `refusal` names why (the queue's
+        abort refused it, or the run carries no stop event).
+    The ACL and project checks are `job_status`'s: a foreign handle is 404.
+    A native handle minted without an owner cannot be cancelled (409
+    `job_owner_unknown`): the view's owner check passes anyone for it.
+    The settle bound is capped at CANCEL_SETTLE_MAX_SECONDS.
+    """
+    stop = stop or threading.Event()
+    before = job_status(job_id, actor_id=actor_id)
+    queue = before['family'] == QUEUE_FAMILY
+    if not queue and before['owner_user_id'] is None:
+        _refuse('job_owner_unknown',
+                'This job was started without a recorded owner, so it cannot be cancelled by handle.',
+                409)
+    if before['outcome'] == 'unknown':
+        return {'cancel': 'origin_lost', 'job': before}
+    if before['terminal']:
+        return {'cancel': 'already_finished', 'job': before}
+    if queue:
+        from services import chat_tools
+        try:
+            with _as_actor(actor_id):
+                chat_tools.solve_queue_abort(job_id)
+        except HTTPException as exc:
+            if exc.status_code not in (400, 404, 409):
+                raise
+            detail = exc.detail
+            kind = detail.get('error_kind') if isinstance(detail, dict) else None
+            message = detail.get('message') if isinstance(detail, dict) else detail
+            return {'cancel': 'refused', 'job': job_status(job_id, actor_id=actor_id),
+                    'refusal': _refusal(kind or 'abort_refused', exc.status_code, str(message))}
+    else:
+        sent = _stop_own_run(job_id)
+        if sent == 'origin_lost':
+            return {'cancel': 'origin_lost', 'job': job_status(job_id, actor_id=actor_id)}
+        if sent == 'not_stoppable':
+            return {'cancel': 'refused', 'job': job_status(job_id, actor_id=actor_id),
+                    'refusal': _refusal('not_stoppable', 409, 'this run carries no stop event')}
+        # `not_running`: it ended before the hold; the re-read says how.
+    # The re-read holds no project lock or turn lease: each read takes the
+    # short solver-state lock once, as every status read does (GK B A2).
+    bound = CANCEL_SETTLE_SECONDS if settle_seconds is None else settle_seconds
+    bound = min(max(0.0, bound), CANCEL_SETTLE_MAX_SECONDS) if math.isfinite(bound) \
+        else CANCEL_SETTLE_SECONDS
+    deadline = time.monotonic() + bound
+    while True:
+        after = job_status(job_id, actor_id=actor_id)
+        # A queue job has no bound worker (`_worker_exited` is True): the queue
+        # flips it to `aborted` only once its worker returned.
+        stopped = after['outcome'] == 'cancelled' and _worker_exited(job_id)
+        settled = stopped or (after['terminal'] and after['outcome'] != 'cancelled') \
+            or after['outcome'] == 'unknown'
+        if settled or stop.is_set() or time.monotonic() >= deadline:
+            break
+        stop.wait(min(0.05, max(0.0, deadline - time.monotonic())))
+    if stopped:
+        verdict = 'cancelled'
+    elif after['outcome'] == 'unknown':
+        verdict = 'origin_lost'
+    elif after['terminal'] and after['outcome'] != 'cancelled':
+        verdict = 'finished_first'
+    else:
+        verdict = 'cancel_requested'  # sent; the worker has not confirmed it stopped
+    return {'cancel': verdict, 'job': after}
+
+
 def _reset_for_tests() -> None:
     from harness import completion_observer
     completion_observer._reset_for_tests()
@@ -657,3 +1042,4 @@ def _reset_for_tests() -> None:
         _STUDIES.clear()
         _REPORTS.clear()
         _ACTIVITY_BINDINGS.clear()
+        _CURSORS.clear()
