@@ -291,6 +291,9 @@ export interface McGoalVerdict {
   settle_reason: string | null
 }
 
+/** One vre asset's installed capacity beside its ELCC row (walkthrough 07). */
+export interface ElccInstalled { mw: number | null; basis: 'p_nom' | 'p_nom_opt' | 'not_built' }
+
 export interface McResult {
   engine: string
   fidelity: string
@@ -300,10 +303,11 @@ export interface McResult {
   /** Walkthrough 08: the first batch, the cap and the stopping CoV. */
   draws?: { first_batch: number; max: number; cov_target: number }
   elcc: ElccRow[]
-  /** Walkthrough 07: installed MW of each priced vre asset (`p_nom_opt`
-   *  when sized and solved, else `p_nom`); a vre row's `nameplate_mw` is its
-   *  peak output. */
-  elcc_installed?: Record<string, { mw: number; basis: 'p_nom' | 'p_nom_opt' } | null>
+  /** Walkthrough 07: installed MW of each priced vre asset, as the MC
+   *  samples it (`copt.solved_capacity`); `basis` names the figure:
+   *  `not_built` is a sizable unit no solve built (0 MW). `mw` is null when
+   *  the unit has no finite size. A vre row's `nameplate_mw` is its peak. */
+  elcc_installed?: Record<string, ElccInstalled | null>
   /** MC_WARNING_V1, shipped with every payload — render it, never inline it. */
   warning: string
   /** Phase 12c-pre: units whose outages were sampled ON their availability

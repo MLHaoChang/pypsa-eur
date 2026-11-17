@@ -14,6 +14,7 @@ minutes of arithmetic — so every test here drives POST → poll → payload, w
 a tiny network (2 units, 24 h) and small draw counts at a FIXED seed so the
 assertions are stable rather than merely usually true.
 """
+
 from __future__ import annotations
 
 import threading
@@ -36,8 +37,15 @@ SEED = 7
 COV = 1.0
 
 ELCC_ROW_KEYS = {
-    "kind", "name", "nameplate_mw", "elcc_mw", "elcc_share",
-    "status", "reason", "baseline_lole_h", "baseline_lole_ci",
+    "kind",
+    "name",
+    "nameplate_mw",
+    "elcc_mw",
+    "elcc_share",
+    "status",
+    "reason",
+    "baseline_lole_h",
+    "baseline_lole_ci",
 }
 
 
@@ -55,9 +63,16 @@ def _network() -> pypsa.Network:
     n.add("Bus", "b", carrier="AC")
     n.add("Load", "l", bus="b", p_set=100.0)
     for g in ("g1", "g2"):
-        n.add("Generator", g, bus="b", carrier="gas", p_nom=60.0,
-              outage_rate_value=0.1, outage_rate_basis="EFORd",
-              mttr_hours=24.0)
+        n.add(
+            "Generator",
+            g,
+            bus="b",
+            carrier="gas",
+            p_nom=60.0,
+            outage_rate_value=0.1,
+            outage_rate_basis="EFORd",
+            mttr_hours=24.0,
+        )
     return n
 
 
@@ -87,19 +102,46 @@ def _mixed_network() -> pypsa.Network:
     # fleet to shed, so the baseline LOLE is identifiable rather than zero.
     profile = pd.Series(0.1, index=n.snapshots)
     profile.iloc[12] = 0.8
-    n.add("Generator", "wind", bus="b", carrier="wind", p_nom=200.0,
-          p_max_pu=profile)
-    n.add("Generator", "dead", bus="b", carrier="wind", p_nom=90.0,
-          p_max_pu=pd.Series(0.0, index=n.snapshots))
-    n.add("Generator", "__voll_b", bus="b", carrier="load_shedding",
-          p_nom=9999.0, marginal_cost=4000.0)
+    n.add("Generator", "wind", bus="b", carrier="wind", p_nom=200.0, p_max_pu=profile)
+    n.add(
+        "Generator",
+        "dead",
+        bus="b",
+        carrier="wind",
+        p_nom=90.0,
+        p_max_pu=pd.Series(0.0, index=n.snapshots),
+    )
+    n.add(
+        "Generator",
+        "__voll_b",
+        bus="b",
+        carrier="load_shedding",
+        p_nom=9999.0,
+        marginal_cost=4000.0,
+    )
 
-    n.add("StorageUnit", "batt", bus="b", carrier="battery", p_nom=50.0,
-          max_hours=4.0, efficiency_store=0.95, efficiency_dispatch=0.95)
+    n.add(
+        "StorageUnit",
+        "batt",
+        bus="b",
+        carrier="battery",
+        p_nom=50.0,
+        max_hours=4.0,
+        efficiency_store=0.95,
+        efficiency_dispatch=0.95,
+    )
 
     n.add("Bus", "h2bus", carrier="H2")
-    n.add("Generator", "h2gen", bus="h2bus", carrier="gas", p_nom=500.0,
-          outage_rate_value=0.05, outage_rate_basis="EFORd", mttr_hours=12.0)
+    n.add(
+        "Generator",
+        "h2gen",
+        bus="h2bus",
+        carrier="gas",
+        p_nom=500.0,
+        outage_rate_value=0.05,
+        outage_rate_basis="EFORd",
+        mttr_hours=12.0,
+    )
     return n
 
 
@@ -111,8 +153,14 @@ def _no_candidates_network() -> pypsa.Network:
     n.add("Carrier", "load_shedding")
     n.add("Bus", "b", carrier="AC")
     n.add("Load", "l", bus="b", p_set=100.0)
-    n.add("Generator", "__voll_b", bus="b", carrier="load_shedding",
-          p_nom=9999.0, marginal_cost=4000.0)
+    n.add(
+        "Generator",
+        "__voll_b",
+        bus="b",
+        carrier="load_shedding",
+        p_nom=9999.0,
+        marginal_cost=4000.0,
+    )
     return n
 
 
@@ -121,7 +169,7 @@ def _barren_network() -> pypsa.Network:
     n = _network()
     for g in ("g1", "g2"):
         n.generators.at[g, "outage_rate_value"] = float("nan")
-        n.generators.at[g, "carrier"] = "unobtainium"   # no library default
+        n.generators.at[g, "carrier"] = "unobtainium"  # no library default
     return n
 
 
@@ -148,8 +196,15 @@ def _fake_running(state: dict, key: str):
     release = threading.Event()
     t = threading.Thread(target=release.wait, daemon=True, name=f"fake-{key}")
     t.start()
-    state[key] = {"status": "running", "result": None, "rows": [], "points": [],
-                  "error": None, "started_at": time.time(), "thread": t}
+    state[key] = {
+        "status": "running",
+        "result": None,
+        "rows": [],
+        "points": [],
+        "error": None,
+        "started_at": time.time(),
+        "thread": t,
+    }
     try:
         yield
     finally:
@@ -173,6 +228,7 @@ def _poll(client, timeout: float = 300.0) -> dict:
 
 # ── ★ 204 before any run ──────────────────────────────────────────────────
 
+
 def test_get_mc_is_204_before_any_run(client, install_network):
     """★ Bite: serve 200 with an empty body instead of 204.
 
@@ -187,8 +243,10 @@ def test_get_mc_is_204_before_any_run(client, install_network):
 
 # ── ★ the run itself ──────────────────────────────────────────────────────
 
+
 def test_post_runs_in_a_worker_and_serves_the_sibling_payload(
-        client, install_network, session_state):
+    client, install_network, session_state
+):
     """★ Bite: leak the worker-thread handle into the GET payload.
 
     ``_state["mc"]`` carries a Thread; serving the dict unfiltered either
@@ -202,8 +260,9 @@ def test_post_runs_in_a_worker_and_serves_the_sibling_payload(
     cfg = session_state(client).get("solver_config")
     assert float(getattr(cfg, "voll", 0.0) or 0.0) == 0.0
 
-    r = client.post("/api/results/mc",
-                    json={"draws": DRAWS, "seed": SEED, "cov_target": COV})
+    r = client.post(
+        "/api/results/mc", json={"draws": DRAWS, "seed": SEED, "cov_target": COV}
+    )
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "running"
 
@@ -220,9 +279,19 @@ def test_post_runs_in_a_worker_and_serves_the_sibling_payload(
     assert res["elcc"] == []
 
     m = res["metrics"]
-    assert set(m) >= {"lole_hours", "lole_ci", "eue_mwh", "eue_ci",
-                      "by_period", "n_samples", "converged", "time_basis",
-                      "horizon_years", "resolution_floor_h", "warning"}
+    assert set(m) >= {
+        "lole_hours",
+        "lole_ci",
+        "eue_mwh",
+        "eue_ci",
+        "by_period",
+        "n_samples",
+        "converged",
+        "time_basis",
+        "horizon_years",
+        "resolution_floor_h",
+        "warning",
+    }
     # CIs cross the wire as 2-element JSON arrays, not tuples.
     assert isinstance(m["lole_ci"], list) and len(m["lole_ci"]) == 2
     assert isinstance(m["eue_ci"], list) and len(m["eue_ci"]) == 2
@@ -243,8 +312,10 @@ def test_post_runs_in_a_worker_and_serves_the_sibling_payload(
 
 # ── ★ the mutual-exclusion mesh ───────────────────────────────────────────
 
+
 def test_409_mesh_between_mc_frontier_sweep_and_solve(
-        client, install_network, session_state):
+    client, install_network, session_state
+):
     """★ Bite: drop the mc check from ``post_frontier``.
 
     The mesh has to be registered in BOTH directions: an MC study and a
@@ -294,6 +365,7 @@ def test_409_mesh_between_mc_frontier_sweep_and_solve(
 
 # ── ★ nothing to sample ───────────────────────────────────────────────────
 
+
 def test_422_when_no_unit_carries_occurrence_data(client, install_network):
     """★ Bite: skip the emptiness check.
 
@@ -309,8 +381,8 @@ def test_422_when_no_unit_carries_occurrence_data(client, install_network):
 
 # ── the §2.2 inconsistent pair, surfaced synchronously ────────────────────
 
-def test_422_for_an_inconsistent_unavailability_mttr_pair(
-        client, install_network):
+
+def test_422_for_an_inconsistent_unavailability_mttr_pair(client, install_network):
     """Bite: drop the ``transition_probs`` pre-flight loop in ``post_mc``.
 
     The pair is a property of the SNAPSHOT alone, so there is no reason to
@@ -329,6 +401,7 @@ def test_422_for_an_inconsistent_unavailability_mttr_pair(
 
 # ── ★ request validation ──────────────────────────────────────────────────
 
+
 def test_404_for_an_unknown_elcc_asset_at_post_time(client, install_network):
     """★ Bite: drop the synchronous ``_resolve`` pre-check in ``post_mc``.
 
@@ -338,9 +411,14 @@ def test_404_for_an_unknown_elcc_asset_at_post_time(client, install_network):
     study, which is why this test asserts the 404 AND that no run was started.
     """
     install_network(_network())
-    r = client.post("/api/results/mc", json={
-        "draws": 8, "cov_target": COV,
-        "elcc_assets": [{"kind": "generator", "name": "not_a_generator"}]})
+    r = client.post(
+        "/api/results/mc",
+        json={
+            "draws": 8,
+            "cov_target": COV,
+            "elcc_assets": [{"kind": "generator", "name": "not_a_generator"}],
+        },
+    )
     assert r.status_code == 404, r.text
     assert "not_a_generator" in r.json()["detail"]
     # …and nothing was started.
@@ -348,12 +426,14 @@ def test_404_for_an_unknown_elcc_asset_at_post_time(client, install_network):
 
 
 def test_422_when_more_than_the_cap_of_elcc_assets_is_asked_for(
-        client, install_network):
+    client, install_network
+):
     """★ Bite: drop the ELCC-asset cap enforcement."""
     install_network(_network())
     assets = [{"kind": "generator", "name": "g1"}] * (MAX_ELCC_ASSETS + 1)
-    r = client.post("/api/results/mc",
-                    json={"draws": 8, "cov_target": COV, "elcc_assets": assets})
+    r = client.post(
+        "/api/results/mc", json={"draws": 8, "cov_target": COV, "elcc_assets": assets}
+    )
     assert r.status_code == 422, r.text
     assert str(MAX_ELCC_ASSETS) in r.json()["detail"]
     assert client.get("/api/results/mc").status_code == 204
@@ -370,20 +450,31 @@ def test_422_when_draws_exceed_the_engine_cap(client, install_network):
 
 def test_422_for_an_unknown_elcc_kind(client, install_network):
     install_network(_network())
-    r = client.post("/api/results/mc", json={
-        "draws": 8, "cov_target": COV,
-        "elcc_assets": [{"kind": "transformer", "name": "g1"}]})
+    r = client.post(
+        "/api/results/mc",
+        json={
+            "draws": 8,
+            "cov_target": COV,
+            "elcc_assets": [{"kind": "transformer", "name": "g1"}],
+        },
+    )
     assert r.status_code == 422, r.text
 
 
 # ── the ELCC happy path ───────────────────────────────────────────────────
 
-def test_elcc_row_carries_exactly_the_nine_contract_keys(
-        client, install_network):
+
+def test_elcc_row_carries_exactly_the_nine_contract_keys(client, install_network):
     install_network(_network())
-    r = client.post("/api/results/mc", json={
-        "draws": DRAWS, "seed": SEED, "cov_target": COV,
-        "elcc_assets": [{"kind": "generator", "name": "g1"}]})
+    r = client.post(
+        "/api/results/mc",
+        json={
+            "draws": DRAWS,
+            "seed": SEED,
+            "cov_target": COV,
+            "elcc_assets": [{"kind": "generator", "name": "g1"}],
+        },
+    )
     assert r.status_code == 200, r.text
 
     body = _poll(client)
@@ -401,7 +492,8 @@ def test_elcc_row_carries_exactly_the_nine_contract_keys(
     assert 0.0 <= row["elcc_mw"] <= 60.0
     assert row["elcc_share"] == pytest.approx(row["elcc_mw"] / 60.0)
     assert row["baseline_lole_h"] == pytest.approx(
-        body["result"]["metrics"]["lole_hours"])
+        body["result"]["metrics"]["lole_hours"]
+    )
     assert len(row["baseline_lole_ci"]) == 2
 
 
@@ -456,14 +548,15 @@ def test_elcc_candidates_enumerate_the_three_kinds(client, install_network):
     assert by_name["wind"]["kind"] == "vre"
     assert by_name["wind"]["nameplate_mw"] == pytest.approx(0.8 * 200.0)
 
-    assert "__voll_b" not in by_name       # a slack is not an asset
-    assert "dead" not in by_name           # zero peak → no credit to measure
-    assert "h2gen" not in by_name          # non-electrical bus, out of scope
+    assert "__voll_b" not in by_name  # a slack is not an asset
+    assert "dead" not in by_name  # zero peak → no credit to measure
+    assert "h2gen" not in by_name  # non-electrical bus, out of scope
     assert set(by_name) == {"g1", "g2", "batt", "wind"}
 
 
 def test_elcc_candidates_echo_the_cap_and_sort_by_nameplate_then_name(
-        client, install_network):
+    client, install_network
+):
     """The picker's cap comes FROM THE PAYLOAD, and the order is pinned.
 
     Descending nameplate puts the assets whose credit moves the answer at the
@@ -475,11 +568,16 @@ def test_elcc_candidates_echo_the_cap_and_sort_by_nameplate_then_name(
     body = _candidates(client)
     assert body["max_assets"] == MAX_ELCC_ASSETS
     assert [(a["name"], a["nameplate_mw"]) for a in body["assets"]] == [
-        ("wind", 160.0), ("g1", 60.0), ("g2", 60.0), ("batt", 50.0)]
+        ("wind", 160.0),
+        ("g1", 60.0),
+        ("g2", 60.0),
+        ("batt", 50.0),
+    ]
 
 
 def test_elcc_candidates_is_200_with_an_empty_list_when_nothing_qualifies(
-        client, install_network):
+    client, install_network
+):
     """200 + `[]`, never 204.
 
     An empty candidates list is an ANSWER — "this network has no asset whose
@@ -512,22 +610,23 @@ def test_a_slack_generator_cannot_be_priced_as_vre(client, install_network):
     ``snapshot_inputs`` — this POST then returns 200 and the test fails.
     """
     install_network(_mixed_network())
-    r = client.post("/api/results/mc", json={
-        "draws": 8,
-        "elcc_assets": [{"kind": "vre", "name": "__voll_b"}]})
+    r = client.post(
+        "/api/results/mc",
+        json={"draws": 8, "elcc_assets": [{"kind": "vre", "name": "__voll_b"}]},
+    )
     assert r.status_code == 404, r.text
     assert "__voll_b" in r.json()["detail"]
 
     # The non-electrical generator is equally not must-take on the electrical
     # system, whatever its p_max_pu says.
-    r2 = client.post("/api/results/mc", json={
-        "draws": 8,
-        "elcc_assets": [{"kind": "vre", "name": "h2gen"}]})
+    r2 = client.post(
+        "/api/results/mc",
+        json={"draws": 8, "elcc_assets": [{"kind": "vre", "name": "h2gen"}]},
+    )
     assert r2.status_code == 404, r2.text
 
 
-def test_every_candidate_is_accepted_by_the_run_that_prices_it(
-        client, install_network):
+def test_every_candidate_is_accepted_by_the_run_that_prices_it(client, install_network):
     """★ Bite: let the enumeration also list a slack generator (any asset
     `_resolve` rejects — a slack is neither in the sampled fleet nor in
     `vre_profiles`, so it is a KeyError → 404).
@@ -546,8 +645,10 @@ def test_every_candidate_is_accepted_by_the_run_that_prices_it(
     assets = [{"kind": a["kind"], "name": a["name"]} for a in body["assets"]]
     assert 0 < len(assets) <= body["max_assets"]
 
-    r = client.post("/api/results/mc", json={
-        "draws": DRAWS, "seed": SEED, "cov_target": COV, "elcc_assets": assets})
+    r = client.post(
+        "/api/results/mc",
+        json={"draws": DRAWS, "seed": SEED, "cov_target": COV, "elcc_assets": assets},
+    )
     assert r.status_code == 200, r.text
 
     done = _poll(client)
@@ -555,7 +656,8 @@ def test_every_candidate_is_accepted_by_the_run_that_prices_it(
     assert done["error"] is None
     rows = done["result"]["elcc"]
     assert [(r_["kind"], r_["name"]) for r_ in rows] == [
-        (a["kind"], a["name"]) for a in assets]
+        (a["kind"], a["name"]) for a in assets
+    ]
     for row in rows:
         assert set(row) == ELCC_ROW_KEYS, row
         # Phase 12e widened this union with `aborted` (a bisection stopped by
@@ -563,31 +665,37 @@ def test_every_candidate_is_accepted_by_the_run_that_prices_it(
         # (shipped-code review, finding 18). It cannot trip on this fixture —
         # nothing aborts here — but a set that silently lags the union is
         # exactly how the NEXT status ships unasserted.
-        assert row["status"] in {"ok", "unidentifiable", "not_bracketed",
-                                 "aborted"}
+        assert row["status"] in {"ok", "unidentifiable", "not_bracketed", "aborted"}
         assert row["nameplate_mw"] > 0.0
 
 
 # ── Walkthrough asset-investment 01/07/08: goal verdict, draws, installed ──
 
+
 def _set_goal(**fields):
     import dataclasses
 
     from services.pypsa_service import PyPSAService
+
     state = PyPSAService.get_solver_state()
     state["solver_config"] = dataclasses.replace(state["solver_config"], **fields)
 
 
 def test_mc_result_carries_the_goal_verdict_and_its_draw_budget(
-        client, install_network):
+    client, install_network
+):
     """The Expert MC reads the project's one goal and judges its LOLE with
     `lole_verdict` (01); the result names the draws it may take (08)."""
     install_network(_network())
     # ~4.6 h on a 24 h horizon. 8,760 h/yr is 24 h on this horizon: a pass;
     # 1 h/yr is 0.0027 h on it: a miss.
     _set_goal(target_lole_h=8760.0)
-    assert client.post("/api/results/mc", json={
-        "draws": DRAWS, "seed": SEED, "cov_target": COV}).status_code == 200
+    assert (
+        client.post(
+            "/api/results/mc", json={"draws": DRAWS, "seed": SEED, "cov_target": COV}
+        ).status_code
+        == 200
+    )
     body = _poll(client)
     assert body["status"] == "done", body
     goal = body["result"]["goal"]
@@ -595,16 +703,24 @@ def test_mc_result_carries_the_goal_verdict_and_its_draw_budget(
     assert goal["target_source"] == "stored"
     assert goal["verdict"] == "pass"
     assert body["result"]["draws"] == {
-        "first_batch": DRAWS, "max": MAX_DRAWS, "cov_target": COV}
+        "first_batch": DRAWS,
+        "max": MAX_DRAWS,
+        "cov_target": COV,
+    }
     assert body["goal_sources"]["target_lole_h"] == "stored"
-
+    # Draws the request named are its own; omitted, they are the goal's.
+    assert body["goal_sources"]["mc_draws"] == "override"
 
 
 def test_mc_result_misses_a_goal_below_its_lole(client, install_network):
     install_network(_network())
-    _set_goal(target_lole_h=1.0)          # 0.0027 h on the 24 h horizon
-    assert client.post("/api/results/mc", json={
-        "draws": DRAWS, "seed": SEED, "cov_target": COV}).status_code == 200
+    _set_goal(target_lole_h=1.0)  # 0.0027 h on the 24 h horizon
+    assert (
+        client.post(
+            "/api/results/mc", json={"draws": DRAWS, "seed": SEED, "cov_target": COV}
+        ).status_code
+        == 200
+    )
     body = _poll(client)
     assert body["status"] == "done", body
     assert body["result"]["goal"]["verdict"] == "miss"
@@ -614,42 +730,118 @@ def test_mc_result_misses_a_goal_below_its_lole(client, install_network):
 def test_mc_result_has_no_verdict_without_a_goal(client, install_network):
     install_network(_network())
     _set_goal(target_lole_h=None, site_archetype="strong_grid")
-    assert client.post("/api/results/mc", json={
-        "draws": DRAWS, "seed": SEED, "cov_target": COV}).status_code == 200
+    assert (
+        client.post(
+            "/api/results/mc", json={"draws": DRAWS, "seed": SEED, "cov_target": COV}
+        ).status_code
+        == 200
+    )
     body = _poll(client)
     assert body["status"] == "done", body
     assert body["result"]["goal"] is None
 
 
 def test_vre_elcc_rows_have_the_installed_capacity_beside_the_peak(
-        client, install_network):
+    client, install_network
+):
     """A vre row's `nameplate_mw` is its peak output (0.8 × 200 = 160 MW);
     the installed 200 MW rides beside the rows (07). Rows keep their nine
     contract keys."""
     install_network(_mixed_network())
-    assert client.post("/api/results/mc", json={
-        "draws": DRAWS, "seed": SEED, "cov_target": COV,
-        "elcc_assets": [{"kind": "vre", "name": "wind"}]}).status_code == 200
+    assert (
+        client.post(
+            "/api/results/mc",
+            json={
+                "draws": DRAWS,
+                "seed": SEED,
+                "cov_target": COV,
+                "elcc_assets": [{"kind": "vre", "name": "wind"}],
+            },
+        ).status_code
+        == 200
+    )
     body = _poll(client)
     assert body["status"] == "done", body
     row = body["result"]["elcc"][0]
     assert set(row) == ELCC_ROW_KEYS
     assert row["nameplate_mw"] == pytest.approx(160.0)
     assert body["result"]["elcc_installed"] == {
-        "wind": {"mw": pytest.approx(200.0), "basis": "p_nom"}}
+        "wind": {"mw": pytest.approx(200.0), "basis": "p_nom"}
+    }
 
 
 def test_mc_judges_an_unset_goal_against_the_site_types_and_says_so(
-        client, install_network):
+    client, install_network
+):
     """GK A 30 A2: no goal set on a weak-grid site: the verdict is against
     the site type's assumed 3 h/yr, and the result says it was assumed."""
     install_network(_network())
     _set_goal(target_lole_h=None, site_archetype="weak_flexible")
-    assert client.post("/api/results/mc", json={
-        "draws": DRAWS, "seed": SEED, "cov_target": COV}).status_code == 200
+    assert (
+        client.post(
+            "/api/results/mc", json={"draws": DRAWS, "seed": SEED, "cov_target": COV}
+        ).status_code
+        == 200
+    )
     body = _poll(client)
     assert body["status"] == "done", body
     goal = body["result"]["goal"]
     assert (goal["target_lole_h"], goal["target_source"]) == (3.0, "default")
-    assert goal["verdict"] == "miss"       # 4 h on 24 h is far above 3 h/yr
+    assert goal["verdict"] == "miss"  # 4 h on 24 h is far above 3 h/yr
 
+
+def test_mc_without_draws_takes_the_goals_and_names_its_source(client, install_network):
+    install_network(_network())
+    _set_goal(mc_draws=DRAWS)
+    assert (
+        client.post(
+            "/api/results/mc", json={"seed": SEED, "cov_target": COV}
+        ).status_code
+        == 200
+    )
+    body = _poll(client)
+    assert body["status"] == "done", body
+    assert body["goal_sources"]["mc_draws"] == "stored"
+    assert body["result"]["draws"]["first_batch"] == DRAWS
+
+
+def test_installed_is_the_capacity_the_mc_draws_with_its_basis():
+    """GK A 30 A6 / GK B3 1: `mw` is `copt.solved_capacity` (the size the MC
+    samples), and `basis` names the figure it is. An extendable unit the
+    solve declined, or one no solve has sized (PyPSA's 0.0 default), is 0 MW
+    `not_built`, never its p_nom. A unit with no finite size reads null; an
+    unknown name is None."""
+    import pandas as pd
+    import pypsa
+
+    from services.adequacy.copt import solved_capacity
+    from services.adequacy.mc_loop_runner import _installed
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Bus", "b")
+    n.add("Generator", "wind", bus="b", p_nom=4.0, p_nom_extendable=True)
+    n.add("Generator", "fixed", bus="b", p_nom=5.0)
+    # Unsolved: p_nom_opt is PyPSA's 0.0 default.
+    assert _installed(n, "wind") == {"mw": 0.0, "basis": "not_built"}
+    assert _installed(n, "fixed") == {"mw": 5.0, "basis": "p_nom"}
+    n.generators.loc["wind", "p_nom_opt"] = 6.0
+    n.generators.loc["fixed", "p_nom_opt"] = 5.0
+    n._objective = 1.0
+    assert _installed(n, "wind") == {"mw": 6.0, "basis": "p_nom_opt"}
+    assert _installed(n, "fixed") == {"mw": 5.0, "basis": "p_nom_opt"}
+    # Declined by the solve: 0 MW, not the 4 MW nameplate.
+    n.generators.loc["wind", "p_nom_opt"] = 0.0
+    assert _installed(n, "wind") == {"mw": 0.0, "basis": "not_built"}
+    # No solved size at all: the MC's p_nom fallback, named as such.
+    n.generators.loc["wind", "p_nom_opt"] = float("nan")
+    assert _installed(n, "wind") == {"mw": 4.0, "basis": "p_nom"}
+    # Nothing finite: null, with the figure it would have read.
+    n.generators.loc["fixed", ["p_nom", "p_nom_opt"]] = [float("inf"), float("nan")]
+    assert _installed(n, "fixed") == {"mw": None, "basis": "p_nom"}
+    # Every finite answer is the MC's own capacity, never a second rule.
+    for name in ("wind", "fixed"):
+        got = _installed(n, name)["mw"]
+        if got is not None:
+            assert got == solved_capacity(n.generators.loc[name])
+    assert _installed(n, "nope") is None
