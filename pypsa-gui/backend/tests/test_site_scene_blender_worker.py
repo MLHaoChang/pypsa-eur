@@ -162,6 +162,8 @@ if MODE == "symlink":
 else:
     open(out_blend, "wb").write(b"BLENDER-v502")
 print("DONE stub")
+if MODE == "late_fail":  # both outputs written, then a non-zero exit
+    sys.exit(3)
 """
 
 
@@ -523,6 +525,7 @@ def test_b5_the_wall_timeout_is_typed_and_stops_the_container(make):
         ("fsize", bw.OUTPUT_LIMIT),
         ("memory", bw.MEMORY_LIMIT),
         ("crash", bw.FAILED),
+        ("late_fail", bw.FAILED),
         ("no_output", bw.FAILED),
         ("symlink", bw.FAILED),
     ],
