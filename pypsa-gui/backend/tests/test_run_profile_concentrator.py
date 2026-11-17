@@ -615,11 +615,18 @@ def _state(r):
     return r["verdict"], r["facts"][0]["value"]
 
 
-@pytest.mark.parametrize("frame,attr,name", KINDS, ids=[k[2] + "." + k[1] for k in KINDS])
+@pytest.mark.parametrize(
+    "frame,attr,name", KINDS, ids=[k[2] + "." + k[1] for k in KINDS]
+)
 def test_a_missing_flow_column_is_unreadable_dispatch(direct, frame, attr, name):
     n = _chain()
-    setattr(getattr(n, frame), attr, getattr(getattr(n, frame), attr).drop(columns=[name]))
-    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "unreadable_dispatch")
+    setattr(
+        getattr(n, frame), attr, getattr(getattr(n, frame), attr).drop(columns=[name])
+    )
+    assert _state(direct("conc.mass_balance", network=n)) == (
+        "not_evaluated",
+        "unreadable_dispatch",
+    )
 
 
 def test_a_link_port_with_no_flow_frame_is_unreadable_dispatch(direct):
@@ -627,7 +634,10 @@ def test_a_link_port_with_no_flow_frame_is_unreadable_dispatch(direct):
     n.links["bus3"] = ""
     n.links.loc["grind", "bus3"] = "ore"
     assert getattr(n.links_t, "p3", None) is None or "grind" not in n.links_t.p3.columns
-    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "unreadable_dispatch")
+    assert _state(direct("conc.mass_balance", network=n)) == (
+        "not_evaluated",
+        "unreadable_dispatch",
+    )
 
 
 def test_only_bus_n_columns_are_link_ports():
@@ -640,13 +650,19 @@ def test_no_tonne_bus_is_named(direct):
     n = _chain()
     n.buses["unit"] = ""
     n.buses["carrier"] = "AC"
-    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "no_tonne_bus")
+    assert _state(direct("conc.mass_balance", network=n)) == (
+        "not_evaluated",
+        "no_tonne_bus",
+    )
 
 
 def test_an_infinite_weight_is_unreadable_and_a_zero_weight_is_read(direct):
     n = _chain()
     n.snapshot_weightings.loc[n.snapshots[0], "generators"] = float("inf")
-    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "unreadable_weights")
+    assert _state(direct("conc.mass_balance", network=n)) == (
+        "not_evaluated",
+        "unreadable_weights",
+    )
     m = _chain()
     m.snapshot_weightings.loc[m.snapshots[0], "generators"] = 0.0
     assert direct("conc.mass_balance", network=m)["verdict"] == "pass"
@@ -655,10 +671,15 @@ def test_an_infinite_weight_is_unreadable_and_a_zero_weight_is_read(direct):
 def test_a_missing_supply_column_is_unreadable_dispatch(direct):
     n = _chain()
     n.generators_t.p = n.generators_t.p.drop(columns=["mine"])
-    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "unreadable_dispatch")
+    assert _state(direct("conc.mass_balance", network=n)) == (
+        "not_evaluated",
+        "unreadable_dispatch",
+    )
 
 
-def test_the_screens_read_the_projects_saved_grid_code_else_the_default(n0, tmp_path, monkeypatch):
+def test_the_screens_read_the_projects_saved_grid_code_else_the_default(
+    n0, tmp_path, monkeypatch
+):
     import json
 
     from services import campus_electrical_service as ce
@@ -668,12 +689,19 @@ def test_the_screens_read_the_projects_saved_grid_code_else_the_default(n0, tmp_
 
     monkeypatch.setattr(project_registry, "project_dir", lambda project: tmp_path)
     load, asked = gr._load_profile, []
-    monkeypatch.setattr(gr, "_load_profile", lambda pid, dirs: asked.append(pid) or load(pid, dirs))
+    monkeypatch.setattr(
+        gr, "_load_profile", lambda pid, dirs: asked.append(pid) or load(pid, dirs)
+    )
     env = SimpleNamespace(project="p")
     default = RC._scorecard_inputs(env, n0)
-    assert default.profile == load(ce.DEFAULTS["profile"], ())[0] and default.profile_error is None
+    assert (
+        default.profile == load(ce.DEFAULTS["profile"], ())[0]
+        and default.profile_error is None
+    )
     (tmp_path / ce.SUBDIR).mkdir()
-    (tmp_path / ce.SUBDIR / ce.SETTINGS_FILE).write_text(json.dumps({"profile": "us_ieee2800_nerc"}))
+    (tmp_path / ce.SUBDIR / ce.SETTINGS_FILE).write_text(
+        json.dumps({"profile": "us_ieee2800_nerc"})
+    )
     saved = RC._scorecard_inputs(env, n0)
     assert saved.profile == load("us_ieee2800_nerc", ())[0] != default.profile
     (tmp_path / ce.SUBDIR / ce.SETTINGS_FILE).write_text(json.dumps({"profile": None}))
@@ -681,34 +709,61 @@ def test_the_screens_read_the_projects_saved_grid_code_else_the_default(n0, tmp_
     assert asked == [ce.DEFAULTS["profile"], "us_ieee2800_nerc", ce.DEFAULTS["profile"]]
 
 
-@pytest.mark.parametrize("ctx,project", [(None, "p"), (SimpleNamespace(network="n"), None), (None, None)])
+@pytest.mark.parametrize(
+    "ctx,project", [(None, "p"), (SimpleNamespace(network="n"), None), (None, None)]
+)
 def test_the_screens_need_the_runs_context_and_project(monkeypatch, ctx, project):
     seen = []
     out = RC._on_network(SimpleNamespace(ctx=ctx, project=project), seen.append)
-    assert isinstance(out, run_gates.NoEvidence) and out.value == "not_run" and seen == []
+    assert (
+        isinstance(out, run_gates.NoEvidence) and out.value == "not_run" and seen == []
+    )
 
 
 def test_the_screens_read_the_live_network_under_its_guard(monkeypatch):
     monkeypatch.setattr(run_gates, "_on", lambda ctx, fn, *args: fn(*args))
     seen = []
-    RC._on_network(SimpleNamespace(ctx=SimpleNamespace(network="n"), project="p"), seen.append)
+    RC._on_network(
+        SimpleNamespace(ctx=SimpleNamespace(network="n"), project="p"), seen.append
+    )
     assert seen == ["n"]
 
 
 def _rows(monkeypatch, rows):
     from services.adequacy import grid_readiness as gr
+
     monkeypatch.setattr(gr, "_motor_start_rows", lambda inp: rows)
 
 
 def test_a_row_without_its_motor_detail_still_reads(n0, monkeypatch):
-    _rows(monkeypatch, [{"id": "motor_start:m", "verdict": "pass", "project_value": 1.0, "limit": 3.0}])
+    _rows(
+        monkeypatch,
+        [
+            {
+                "id": "motor_start:m",
+                "verdict": "pass",
+                "project_value": 1.0,
+                "limit": 3.0,
+            }
+        ],
+    )
     assert RC.motor_start_of(_inputs(n0)).detail == ["m: ΔU 1.00 % ≤ 3 % (None): PASS"]
 
 
 @pytest.mark.parametrize("verdict,value", [("warn", None), ("unknown", 5.0)])
 def test_only_a_computed_dip_over_the_limit_fails(n0, monkeypatch, verdict, value):
-    _rows(monkeypatch, [{"id": "motor_start:m", "verdict": verdict, "project_value": value, "limit": 3.0,
-                         "note": "n"}])
+    _rows(
+        monkeypatch,
+        [
+            {
+                "id": "motor_start:m",
+                "verdict": verdict,
+                "project_value": value,
+                "limit": 3.0,
+                "note": "n",
+            }
+        ],
+    )
     out = RC.motor_start_of(_inputs(n0))
     assert isinstance(out, run_gates.NoEvidence) and out.value == "motor_start_unknown"
 
@@ -718,7 +773,10 @@ def test_no_process_unit_has_nothing_to_restart_or_lose(n0, direct):
     n.remove("Link", [u for u in n.links.index if bool(n.links.at[u, "eh_process"])])
     out = RC.restart_of(_inputs(n))
     assert isinstance(out, run_gates.NoEvidence) and out.value == "no_process_unit"
-    assert _state(direct("conc.kpi.lost_tonnes", network=n, solver_state={})) == ("not_evaluated", "no_process_unit")
+    assert _state(direct("conc.kpi.lost_tonnes", network=n, solver_state={})) == (
+        "not_evaluated",
+        "no_process_unit",
+    )
 
 
 def test_every_unit_restarting_on_a_vfd_passes_with_none_failing(n0, screens):
@@ -740,11 +798,18 @@ def test_no_lost_production_value_names_what_is_missing(n0, direct):
 
 def test_a_period_with_unreadable_tonnes_is_no_evidence(n0, monkeypatch):
     from services.results import grid_risk_production as grp
-    line = {"key": "connection", "status": "ok", "missing": [],
-            "by_period": {"2027": {"t_per_year": None, "eur_per_year": None}}}
+
+    line = {
+        "key": "connection",
+        "status": "ok",
+        "missing": [],
+        "by_period": {"2027": {"t_per_year": None, "eur_per_year": None}},
+    }
     monkeypatch.setattr(grp, "grid_risk_production", lambda n, lost: {"lines": [line]})
     out = RC.lost_production_of(n0, None)
-    assert isinstance(out, run_gates.NoEvidence) and out.value == "lost_production_missing"
+    assert (
+        isinstance(out, run_gates.NoEvidence) and out.value == "lost_production_missing"
+    )
 
 
 def test_a_shed_store_removed_or_unreadable_is_no_evidence(n0, direct):
@@ -754,8 +819,14 @@ def test_a_shed_store_removed_or_unreadable_is_no_evidence(n0, direct):
     m = n.copy()
     m.remove("Store", RC.SHED)
     m.stores_t.e = e  # its level kept, the store gone: still no shed
-    assert _state(direct("conc.kpi.shed_level", network=m)) == ("not_evaluated", "no_shed")
+    assert _state(direct("conc.kpi.shed_level", network=m)) == (
+        "not_evaluated",
+        "no_shed",
+    )
     e2 = e.copy()
     e2.iloc[3, e2.columns.get_loc(RC.SHED)] = float("nan")
     n.stores_t.e = e2
-    assert _state(direct("conc.kpi.shed_level", network=n)) == ("not_evaluated", "unreadable_dispatch")
+    assert _state(direct("conc.kpi.shed_level", network=n)) == (
+        "not_evaluated",
+        "unreadable_dispatch",
+    )
