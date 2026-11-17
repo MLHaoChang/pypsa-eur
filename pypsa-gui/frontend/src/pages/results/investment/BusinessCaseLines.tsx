@@ -632,6 +632,7 @@ export default function BusinessCaseLines() {
         study={study.data ?? null} studyKey={studyKey}
         disabledReason={runOffReason(dirty, lines.length, (opts?.refusals ?? []).length)}
         revenueLines={lines.filter(l => l.kind === 'revenue').map(l => l.name)}
+        lineNames={lines.map(l => l.name)}
         breakEvenLine={draft?.break_even_line ?? null}
         onBreakEvenLine={name => {
           setDraft(d => ({ ...(d ?? { inputs: { lines: [] } }), break_even_line: name }) as BusinessCaseConfig)

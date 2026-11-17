@@ -258,3 +258,26 @@ describe('the run', () => {
     expect(onBreakEvenLine).toHaveBeenCalledWith('H2 sales')
   })
 })
+
+describe('walk 03 and 05 on the panel', () => {
+  it('a KPI names the served cause and the first fix opens the finance inputs', () => {
+    const row_reason = { project_post_tax: [
+      { section: 'operating', code: 'degradation_missing:genset_1' },
+      { section: 'operating', code: 'degradation_missing:rooftop_pv' }] }
+    const ne = { value: null, status: 'not_established', reason: 'operating_not_established' } as const
+    mount({ ...DONE, report: { ...REPORT, pnl: { ...REPORT.pnl!, row_reason },
+      kpis: { ...REPORT.kpis, project_npv: ne } } as BusinessCaseReport })
+    expect(screen.getByTestId('bc-kpi-project_npv').textContent).toContain(
+      'Not established: the operating section needs a degradation rate for genset 1 and rooftop pv.')
+    expect(screen.getByTestId('bc-first-fix').textContent).toContain(
+      'Needed first: a degradation rate for genset 1 and rooftop pv, in the finance inputs.')
+    expect(screen.getByTestId('bc-first-fix-open').textContent).toBe('Finance inputs ›')
+  })
+
+  it('a refused run names the line and the column', () => {
+    mount({ status: 'refused', error: 'business_case_refused:indexation_missing: lines[1].indexation' } as BusinessCaseStudy,
+      { lineNames: ['Capacity payment', 'Guarantees of origin'] })
+    expect(screen.getByTestId('bc-failure').textContent).toBe(
+      'Refused: Guarantees of origin › Indexation: needed with contract escalation')
+  })
+})

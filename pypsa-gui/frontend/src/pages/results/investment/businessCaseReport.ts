@@ -7,6 +7,7 @@
 import type {
   BusinessCaseKpi, BusinessCasePnl, BusinessCaseRowReasonItem, BusinessCaseStudy, YearSeries,
 } from '../../../api/businessCase'
+import { parseField, refusalWords } from './businessCaseModel'
 import { fmtAmount } from './valueFlows'
 
 const words = (id: string) => id.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
@@ -180,7 +181,8 @@ export const REASON_CODE_WORDS: Record<string, (args: string[]) => string> = {
   terminal_needs_operating: () => 'the operating section',
   terminal_needs_part_lifetimes: a => `part lifetimes${forThe(a)}`,
   terminal_not_established: () => 'the terminal value',
-  terminal_part_unknown: a => `a known part${forThe(a)}`,
+  // `<asset or line>:<part>`: the remaining-life rule values each part by its cost and life.
+  terminal_part_unknown: a => `a cost and lifetime for ${plain(a[0]) || 'each part'}${a[1] ? ` (its ${plain(a[1])} part)` : ''}`,
   terminal_value_missing: () => 'a terminal value',
   upfront_only_from_capital_cost: a => `an upfront cost${forThe(a)}`,
 }
@@ -203,6 +205,28 @@ export function reasonCodeWords(code: string): string {
 const joinAnd = (a: string[]) =>
   a.length <= 1 ? (a[0] ?? '') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`
 
+/** The served items of one section in words: one family over several items (a
+ *  degradation rate for six assets) reads once with its items joined (walk 03). */
+function familyWords(codes: string[]): string[] {
+  const fams = new Map<string, string[][]>()
+  for (const c of codes) {
+    const [fam, ...args] = c.split(':')
+    fams.set(fam, [...(fams.get(fam) ?? []), args])
+  }
+  const out: string[] = []
+  for (const [fam, argsList] of fams) {
+    const f = REASON_CODE_WORDS[fam]
+    const firsts = argsList.map(a => a[0]).filter((a): a is string => !!a)
+    // Merge only a family that names one item each (its first argument).
+    if (f && argsList.length > 1 && argsList.every(a => a.length === 1) && firsts.length === argsList.length) {
+      out.push(f([joinAnd([...new Set(firsts.map(x => plain(x)))])]))
+    } else {
+      for (const a of argsList) out.push(f ? f(a) : plain([fam, ...a].join(':')))
+    }
+  }
+  return [...new Set(out)]
+}
+
 /** The served items in a sentence (UX on BC 17): grouped by section in served order,
  *  "Not established: the tax section needs a tax pack." No nested colons. */
 export function servedReasonText(items: BusinessCaseRowReasonItem[]): string {
@@ -216,14 +240,42 @@ export function servedReasonText(items: BusinessCaseRowReasonItem[]): string {
         : reasonCodeWords(it.code))
       continue
     }
-    const g = groups.get(it.section) ?? []
-    g.push(reasonCodeWords(it.code))
-    groups.set(it.section, g)
+    groups.set(it.section, [...(groups.get(it.section) ?? []), it.code])
   }
-  const parts = [...groups].map(([sec, needs]) =>
-    `${REASON_SECTION[sec] ?? `the ${plain(sec)} section`} needs ${joinAnd([...new Set(needs)])}`)
+  const parts = [...groups].map(([sec, codes]) =>
+    `${REASON_SECTION[sec] ?? `the ${plain(sec)} section`} needs ${joinAnd(familyWords(codes))}`)
   const all = [...parts, ...loose]
   return all.length ? `Not established: ${all.join('; ')}.` : 'Not established.'
+}
+
+/** Where a served item is fixed: the finance inputs, or the business-case lines. */
+const LINE_FAMILIES = new Set(['line_not_established', 'linked_output_not_evaluated', 'not_finite'])
+function fixPlace(it: BusinessCaseRowReasonItem): 'finance' | 'lines' {
+  const fam = it.code.split(':', 1)[0]
+  return LINE_FAMILIES.has(fam) || (it.section === 'inputs' && fam !== 'input_missing') ? 'lines' : 'finance'
+}
+const PLACE_WORDS = { finance: 'in the finance inputs', lines: 'in the lines above' } as const
+
+/** The first thing to set for the KPIs that are not established (walk 03): the first
+ *  served item of the first such KPI's row, its family merged over items, and where to
+ *  set it. A section that only waits on another (`capex_not_established` in tax) yields
+ *  to a concrete item. Null when every KPI is established or no reason is served. */
+export function firstFix(
+  kpis: Record<string, BusinessCaseKpi | undefined>, pnl: BusinessCasePnl | undefined,
+): { text: string; place: 'finance' | 'lines' } | null {
+  for (const spec of KPI_ORDER) {
+    const k = kpis[spec.key]
+    if (k?.status !== 'not_established' || !sectionReason(k.reason)) continue
+    const items = (pnl?.row_reason?.[KPI_ROW[spec.key]] ?? [])
+      .filter(it => it.code !== 'not_established' && it.section !== null)
+    if (!items.length) continue
+    const first = items.find(it => !/_not_established$/.test(it.code.split(':', 1)[0])) ?? items[0]
+    const fam = first.code.split(':', 1)[0]
+    const same = items.filter(it => it.code.split(':', 1)[0] === fam && it.section === first.section)
+    const place = fixPlace(first)
+    return { text: `Needed first: ${joinAnd(familyWords(same.map(it => it.code)))}, ${PLACE_WORDS[place]}.`, place }
+  }
+  return null
 }
 
 export function rowReason(key: string, pnl: BusinessCasePnl): string {
@@ -329,10 +381,36 @@ export function reasonWords(reason: string | null | undefined): string {
   return words(reason).toLowerCase()
 }
 
-/** A KPI in words (UX 6): never 0 for a missing value. */
-export function kpiText(k: BusinessCaseKpi | undefined, fmt: (typeof KPI_ORDER)[number]['fmt']): string {
+/** The P&L row each KPI is computed from (`services/finance/business_case.kpis`):
+ *  a KPI not established for a section reads that row's served reasons (walk 03). */
+const KPI_ROW: Record<string, string> = {
+  project_npv: 'project_post_tax',
+  project_irr: 'project_post_tax',
+  equity_npv: 'equity_post_tax',
+  equity_irr: 'equity_post_tax',
+  payback_years: 'equity_post_tax',
+  min_dscr: 'debt_service',
+  avg_dscr: 'debt_service',
+  ebitda_margin_gross: 'ebitda',
+  ebitda_margin_net: 'ebitda',
+  revenue_per_capacity_gross: 'ebitda',
+  revenue_per_capacity_net: 'ebitda',
+}
+
+/** A KPI reason that only names a section (`operating_not_established…`), not a cause. */
+const sectionReason = (r: string | null | undefined) =>
+  !!r && (r === 'not_established' || /^[a-z]+_not_established(:|$)/.test(r))
+
+/** A KPI in words (UX 6): never 0 for a missing value. With the report's P&L, a KPI
+ *  that only names a section reads the cause the engine served for its row (walk 03). */
+export function kpiText(
+  k: BusinessCaseKpi | undefined, fmt: (typeof KPI_ORDER)[number]['fmt'], pnl?: BusinessCasePnl, key?: string,
+): string {
   if (!k) return 'Not established: not in this report'
-  if (k.status === 'not_established') return `Not established: ${reasonWords(k.reason)}`
+  if (k.status === 'not_established') {
+    const served = sectionReason(k.reason) ? pnl?.row_reason?.[KPI_ROW[key ?? ''] ?? ''] : undefined
+    return served?.length ? servedReasonText(served) : `Not established: ${reasonWords(k.reason)}`
+  }
   if (k.status === 'n/a' || k.value === null) return `n/a: ${reasonWords(k.reason)}`
   const v = k.value
   switch (fmt) {
@@ -389,4 +467,17 @@ export function staleText(s: BusinessCaseStudy | null): string | null {
   const parts = (st.changed ?? []).map(c => STALE_PART[c] ?? words(c).toLowerCase())
   return `Out of date: ${parts.length ? `${parts.join(' and ')} changed` : reasonWords(st.reason ?? null)}`
     + ' since this report was computed. Run the business case again for current figures.'
+}
+
+/** A refused run in words (walk 05): `business_case_refused:<kind>: lines[<i>].<column>`
+ *  reads "<line name> › <column words>", the line by its saved name (or its number past
+ *  the saved list), never the index. Any other text is kept as served. */
+export function refusedRunText(error: string, lineNames: string[]): string {
+  const m = /^business_case_refused:([a-z_]+)(?::\s*(.*))?$/.exec(error.trim())
+  if (!m) return error
+  const [, kind, field] = m
+  const words = refusalWords(kind, field)
+  const at = parseField(field)
+  if (!at) return words
+  return `${lineNames[at.line] ?? `Line ${at.line + 1}`} › ${words}`
 }
