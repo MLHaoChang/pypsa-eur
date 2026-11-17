@@ -723,9 +723,20 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
     # One modelled year: its IT load is the form's one field (the staged plan's
     # phases are read-only there, so no number is searched).
     single = not week
-    most = (_largest_fitting_it(template_id, spec, planning, over)
-            if single and spec.backup.mode == "bess" else None)
-    raise DcLoadError(words + _peak_ways_out(spec, most, single=single), "dc_load.phases")
+    bess = spec.backup.mode == "bess"
+    most = _largest_fitting_it(template_id, spec, planning) if single and bess else None
+    # Name another backup mode only where it builds (GK A review).
+    alts = tuple(
+        m for m in (("hybrid",) if single else ("hybrid", "genset"))
+        if bess and not _peak_over(template_id, _with_backup(spec, m), planning)[1]
+    )
+    raise DcLoadError(words + _peak_ways_out(spec, most, single=single, alts=alts),
+                      "dc_load.phases")
+
+
+def _with_backup(spec, mode: str):
+    """``spec`` with another backup mode, the rest as entered."""
+    return spec.model_copy(update={"backup": spec.backup.model_copy(update={"mode": mode})})
 
 
 def _peak_over(template_id: str, spec, planning: Planning | None = None):
@@ -742,25 +753,27 @@ def _peak_over(template_id: str, spec, planning: Planning | None = None):
     return n, [r for r in rows if r["headroom_mw"] is not None and r["headroom_mw"] < -1e-9]
 
 
+#: The New project form's backup mode words (frontend ``MODE_LABEL``).
+_MODE_WORD = {"hybrid": "Hybrid", "genset": "Gensets"}
+
 #: The New project form takes the IT load in decimals; the way out names it to this step (MW).
 IT_STEP_MW = 0.1
 
 
-def _largest_fitting_it(template_id: str, spec, planning, over: list[dict]) -> float:
+def _largest_fitting_it(template_id: str, spec, planning) -> float:
     """The largest IT load, on the form's 0.1 MW step, whose peak fits: a bisection
     on the same check (GK A D1: the load is not exactly proportional to the IT
-    load, so the linear IT × cap / load overstates it). 0 when none fits. The
-    linear figure brackets it from above, so ~6 builds of the network."""
+    load, so the linear IT × cap / load is no bound). 0 when none fits. The
+    bracket is proven: 0 MW fits, and the current IT load is refused (GK A
+    review), so ~9 builds of the network."""
     import math
 
     def fits(it_mw: float) -> bool:
         phase = spec.phases[0].model_copy(update={"it_mw": it_mw})
         return not _peak_over(template_id, spec.model_copy(update={"phases": [phase]}), planning)[1]
 
-    steps = lambda mw: int(math.floor(mw / IT_STEP_MW + 1e-9))  # noqa: E731
     it = float(spec.phases[0].it_mw)
-    ratio = min(r["cap_mw"] / r["load_mw"] for r in over if r["load_mw"] > 0)
-    lo, hi = 0, min(steps(it * ratio) + 1, int(math.ceil(it / IT_STEP_MW - 1e-9)))  # lo fits (0 MW), hi refused
+    lo, hi = 0, int(math.ceil(it / IT_STEP_MW - 1e-9))  # lo fits (0 MW), hi refused
     while hi - lo > 1:
         mid = (lo + hi) // 2
         if fits(mid * IT_STEP_MW):
@@ -770,11 +783,14 @@ def _largest_fitting_it(template_id: str, spec, planning, over: list[dict]) -> f
     return round(lo * IT_STEP_MW, 1)
 
 
-def _peak_ways_out(spec, most: float | None, *, single: bool) -> str:
+def _peak_ways_out(spec, most: float | None, *, single: bool,
+                   alts: tuple[str, ...] = ()) -> str:
     """Why the peak is refused and each way out (DC grid-readiness walkthrough 01).
     ``most`` is the largest IT load that fits (``_largest_fitting_it``), searched for
     Battery backup only: with gensets the firm cap may move with the IT load, so no
-    number is given (GK A D1). 0 says no IT load fits."""
+    number is given (GK A D1). 0 says no IT load fits. ``alts`` are the other
+    backup modes that build with the same spec: only those are named (GK A
+    review: Hybrid is refused too at a high IT load)."""
     bess = spec.backup.mode == "bess"
     out = (" Battery strings carry outages only, so the normal peak must fit the import."
            if bess else "")
@@ -784,8 +800,9 @@ def _peak_ways_out(spec, most: float | None, *, single: bool) -> str:
             ways.append(f"set IT load to at most {most:g} MW")
         else:
             out += " No IT load fits the energized import."
-    if bess:
-        ways.append("pick Hybrid backup" if single else "pick Hybrid or Gensets backup")
+    named = [_MODE_WORD[m] for m in ("hybrid", "genset") if m in alts]
+    if bess and named:
+        ways.append(f"pick {' or '.join(named)} backup")
     ways.append("raise the connection after you create the project" if single
                 else "change the build plan after you create the project")
     said = ways[0] if len(ways) == 1 else ", ".join(ways[:-1]) + ", or " + ways[-1]

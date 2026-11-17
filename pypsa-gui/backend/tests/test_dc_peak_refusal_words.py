@@ -98,7 +98,7 @@ def test_no_it_number_where_the_cap_may_move_with_it(mode):
 
 
 def test_no_it_load_fits_is_said_not_zero():
-    words = T._peak_ways_out(_spec("bess"), 0.0, single=True)
+    words = T._peak_ways_out(_spec("bess"), 0.0, single=True, alts=("hybrid",))
     assert "at most 0" not in words and "No IT load fits the energized import." in words
     assert words.endswith(
         "Pick Hybrid backup, or raise the connection after you create the project."
@@ -111,11 +111,10 @@ def test_the_search_stays_below_the_current_it_load(monkeypatch):
     spec = T.dc_load_spec(
         "eh_datacenter", {**BESS, "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]}
     )
-    over = [{"cap_mw": 47.2, "load_mw": 47.2}]
-    assert T._largest_fitting_it("eh_datacenter", spec, None, over) == 19.9
+    assert T._largest_fitting_it("eh_datacenter", spec, None) == 19.9
     # None fits: 0.
     monkeypatch.setattr(T, "_peak_over", lambda *a, **k: (None, [{}]))
-    assert T._largest_fitting_it("eh_datacenter", spec, None, over) == 0.0
+    assert T._largest_fitting_it("eh_datacenter", spec, None) == 0.0
 
 
 def test_snapshot_words():
@@ -183,3 +182,47 @@ def test_a_refusal_with_gensets_searches_no_it_load(mode, monkeypatch):
     with pytest.raises(DcLoadError) as exc:
         T._check_dc_peak("eh_datacenter", spec)
     assert str(exc.value).endswith("Raise the connection after you create the project.")
+
+
+def test_hybrid_is_named_only_where_it_builds():
+    """GK A ask 2: at IT 80, Hybrid is refused too (its firm cap is below the
+    peak), so the Battery refusal does not offer it."""
+    body = {**BESS, "phases": [{"cod": "2030-01-01", "it_mw": 80.0}]}
+    msg = _refusal("eh_datacenter", body)
+    assert "Hybrid" not in msg, msg
+    _refusal("eh_datacenter", {**body, "backup": {"mode": "hybrid"}})
+    assert re.search(
+        r"Set IT load to at most \d+(?:\.\d)? MW, or raise the connection", msg
+    ), msg
+
+
+def test_the_search_brackets_from_the_current_it_load(monkeypatch):
+    """GK A ask 1: the upper bracket is the current IT load (refused), never a
+    linear estimate, so a check that fits above the estimate is still found."""
+    spec = T.dc_load_spec(
+        "eh_datacenter", {**BESS, "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]}
+    )
+    # Fits up to 15.0 MW, above a linear estimate from a cap/load of 0.5 (10 MW).
+    monkeypatch.setattr(
+        T,
+        "_peak_over",
+        lambda tid, s, p: (None, [] if s.phases[0].it_mw <= 15.0 + 1e-9 else [{}]),
+    )
+    assert T._largest_fitting_it("eh_datacenter", spec, None) == 15.0
+
+
+@pytest.mark.parametrize(
+    "alts,want",
+    [
+        ((), "Change the build plan after you create the project."),
+        (("hybrid",), "Pick Hybrid backup, or change the build plan"),
+        (("genset",), "Pick Gensets backup, or change the build plan"),
+        (
+            ("hybrid", "genset"),
+            "Pick Hybrid or Gensets backup, or change the build plan",
+        ),
+    ],
+)
+def test_the_staged_refusal_names_each_mode_that_builds(alts, want):
+    words = T._peak_ways_out(_spec("bess"), None, single=False, alts=alts)
+    assert want in words, words
