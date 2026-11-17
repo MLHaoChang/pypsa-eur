@@ -6,6 +6,7 @@ fetched, by `cutout_fakes.hammer_netcdf`. Prints OK and exits 0 when the fetch
 and every writer finished; a netCDF collision crashes the process (HDF5 is not
 thread-safe) or fails the fetch. Used by test_profile_gen_cutout_subprocess.
 """
+
 from __future__ import annotations
 
 import sys
@@ -21,7 +22,9 @@ def main(cache: Path, mode: str) -> int:
     import pypsa
 
     from services.profile_gen.cutout_cache import (
-        _key, _pad_bbox, ensure_cutout,
+        _key,
+        _pad_bbox,
+        ensure_cutout,
     )
     from services.profile_gen.job import write_pending
     from services.pypsa_service import PyPSAService
@@ -53,7 +56,9 @@ def main(cache: Path, mode: str) -> int:
     def pending() -> None:
         while not done.is_set():
             try:
-                write_pending(cache / "pending", str(uuid.uuid4()), frame, {"points": ["x"]})
+                write_pending(
+                    cache / "pending", str(uuid.uuid4()), frame, {"points": ["x"]}
+                )
             except Exception as exc:  # noqa: BLE001 — any failure counts
                 errors.append(repr(exc))
             time.sleep(0.005)
@@ -64,8 +69,12 @@ def main(cache: Path, mode: str) -> int:
         t.start()
     try:
         final = ensure_cutout(
-            bbox, year, cache_dir=cache, downloader=cutout_fakes.hammer_netcdf,
-            fetch_in_subprocess=(mode == "child"), timeout_s=300,
+            bbox,
+            year,
+            cache_dir=cache,
+            downloader=cutout_fakes.hammer_netcdf,
+            fetch_in_subprocess=(mode == "child"),
+            timeout_s=300,
         )
     finally:
         done.set()

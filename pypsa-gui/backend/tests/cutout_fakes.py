@@ -5,6 +5,7 @@ live here rather than as closures in the test. Each takes the real
 downloader's signature `(bbox, year, month, target, stop_event)`; the child
 always passes `stop_event=None`.
 """
+
 from __future__ import annotations
 
 import os

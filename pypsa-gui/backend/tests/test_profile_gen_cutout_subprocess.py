@@ -9,6 +9,7 @@ errors (over a pipe) and the resume rule (`_valid_month`).
 The fakes live in `tests/cutout_fakes.py`: a spawn child runs only an
 importable function.
 """
+
 from __future__ import annotations
 
 import multiprocessing
@@ -81,8 +82,11 @@ class _RecordedProcess(_SPAWN.Process):
 def recorded(monkeypatch):
     STARTED.clear()
     ctx = types.SimpleNamespace(Pipe=_SPAWN.Pipe, Process=_RecordedProcess)
-    monkeypatch.setattr(cutout_cache, "multiprocessing",
-                        types.SimpleNamespace(get_context=lambda kind: ctx))
+    monkeypatch.setattr(
+        cutout_cache,
+        "multiprocessing",
+        types.SimpleNamespace(get_context=lambda kind: ctx),
+    )
     return STARTED
 
 
@@ -94,8 +98,9 @@ def _assert_dead(started):
 
 
 def _run_child(fake, *, timeout_s=60.0, stop_event=None, target=None):
-    _fetch_month_in_child(fake, BBOX, YEAR, 12, target or Path("unused.nc"),
-                          timeout_s, stop_event)
+    _fetch_month_in_child(
+        fake, BBOX, YEAR, 12, target or Path("unused.nc"), timeout_s, stop_event
+    )
 
 
 # --- the crash this fixes ----------------------------------------------------
@@ -106,19 +111,27 @@ def test_month_fetch_in_a_child_survives_saves_and_pending_writes(tmp_path):
     through xarray for 10 s, beside two network save/load threads and a
     pending writer. In-process the same scenario segfaults (rc 139; kept as
     PR evidence, not as a test: a segfault is not deterministic)."""
-    env = {**os.environ, "CUTOUT_FAKE_SECONDS": "10",
-           "CDSAPI_URL": "https://cds.climate.copernicus.eu/api",
-           "CDSAPI_KEY": "test-token-abc123"}
+    env = {
+        **os.environ,
+        "CUTOUT_FAKE_SECONDS": "10",
+        "CDSAPI_URL": "https://cds.climate.copernicus.eu/api",
+        "CDSAPI_KEY": "test-token-abc123",
+    }
     cache = tmp_path / "c"
     out = subprocess.run(
         [sys.executable, "-m", "tests.cutout_crash_scenario", str(cache), "child"],
-        cwd=BACKEND, env=env, capture_output=True, text=True, timeout=240,
+        cwd=BACKEND,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=240,
     )
     assert out.returncode == 0, out.stderr[-2000:]
     assert out.stdout.strip().endswith("OK")
     finals = list(cache.glob("era5_*.nc"))
     assert len(finals) == 1 and not _parts(cache).exists()
     import xarray as xr
+
     with xr.open_dataset(finals[0]) as ds:
         assert ds.sizes["time"] == 24  # 12 months x 2 hours
 
@@ -127,17 +140,22 @@ def test_month_fetch_in_a_child_survives_saves_and_pending_writes(tmp_path):
 
 
 def test_default_downloader_runs_in_a_child_and_injected_one_in_process(
-        cds_env, monkeypatch):
+    cds_env, monkeypatch
+):
     report = cds_env / "report.txt"
     monkeypatch.setenv("CUTOUT_FAKE_REPORT", str(report))
-    monkeypatch.setattr(cutout_cache, "_atlite_month_downloader", cutout_fakes.report_pid)
+    monkeypatch.setattr(
+        cutout_cache, "_atlite_month_downloader", cutout_fakes.report_pid
+    )
 
     _seed(cds_env / "a", range(1, 12))
     ensure_cutout(BBOX, YEAR, cache_dir=cds_env / "a")  # downloader=None
     assert int(report.read_text().split("\n")[0]) != os.getpid()
 
     _seed(cds_env / "b", range(1, 12))
-    ensure_cutout(BBOX, YEAR, cache_dir=cds_env / "b", downloader=cutout_fakes.report_pid)
+    ensure_cutout(
+        BBOX, YEAR, cache_dir=cds_env / "b", downloader=cutout_fakes.report_pid
+    )
     assert int(report.read_text().split("\n")[0]) == os.getpid()
 
 
@@ -148,8 +166,13 @@ def test_the_child_sees_credentials_set_after_import(cds_env, monkeypatch):
     monkeypatch.setenv("CUTOUT_FAKE_REPORT", str(report))
     monkeypatch.setenv("CDSAPI_KEY", "set-after-import")
     _seed(cds_env / "c", range(1, 12))
-    ensure_cutout(BBOX, YEAR, cache_dir=cds_env / "c",
-                  downloader=cutout_fakes.report_pid, fetch_in_subprocess=True)
+    ensure_cutout(
+        BBOX,
+        YEAR,
+        cache_dir=cds_env / "c",
+        downloader=cutout_fakes.report_pid,
+        fetch_in_subprocess=True,
+    )
     pid, key = report.read_text().split("\n")
     assert int(pid) != os.getpid() and key == "set-after-import"
 
@@ -189,8 +212,11 @@ def test_an_answer_sent_just_before_the_child_exits_is_not_lost(recorded, monkey
         return _LatePoll(receive), send
 
     ctx = types.SimpleNamespace(Pipe=late_pipe, Process=_RecordedProcess)
-    monkeypatch.setattr(cutout_cache, "multiprocessing",
-                        types.SimpleNamespace(get_context=lambda kind: ctx))
+    monkeypatch.setattr(
+        cutout_cache,
+        "multiprocessing",
+        types.SimpleNamespace(get_context=lambda kind: ctx),
+    )
     _run_child(cutout_fakes.writes_nothing)  # "ok", then exits at once
     assert recorded[0].exitcode == 0
     _assert_dead(recorded)
@@ -202,12 +228,22 @@ def test_a_child_that_dies_without_answering_reports_its_exit_code(recorded):
     _assert_dead(recorded)
 
 
-@pytest.mark.parametrize("fake, cls, message", [
-    (cutout_fakes.no_credentials, CdsCredentialError, "CDS credentials missing"),
-    (cutout_fakes.atlite_missing, AtliteNotInstalledError, "atlite is not installed here"),
-    (cutout_fakes.typed_download_error, CutoutDownloadError,
-     "CDS refused the request (typed)"),
-])
+@pytest.mark.parametrize(
+    "fake, cls, message",
+    [
+        (cutout_fakes.no_credentials, CdsCredentialError, "CDS credentials missing"),
+        (
+            cutout_fakes.atlite_missing,
+            AtliteNotInstalledError,
+            "atlite is not installed here",
+        ),
+        (
+            cutout_fakes.typed_download_error,
+            CutoutDownloadError,
+            "CDS refused the request (typed)",
+        ),
+    ],
+)
 def test_typed_child_errors_round_trip_as_their_exact_class(fake, cls, message):
     with pytest.raises(cls) as info:
         _run_child(fake)
@@ -218,7 +254,8 @@ def test_a_foreign_class_with_a_typed_name_takes_the_generic_path(caplog):
     with pytest.raises(CutoutDownloadError) as info:
         _run_child(cutout_fakes.foreign_same_name)
     assert str(info.value) == (
-        "ERA5 download failed at month 12 (CutoutDownloadError); see the server log")
+        "ERA5 download failed at month 12 (CutoutDownloadError); see the server log"
+    )
     assert "cds.example" in caplog.text  # the library text stays in the server log
 
 
@@ -226,8 +263,13 @@ def test_untyped_child_error_reaches_the_caller_as_its_type_only(cds_env, caplog
     cache = cds_env / "c"
     _seed(cache, range(1, 12))
     with pytest.raises(CutoutDownloadError) as info:
-        ensure_cutout(BBOX, YEAR, cache_dir=cache, downloader=cutout_fakes.boom,
-                      fetch_in_subprocess=True)
+        ensure_cutout(
+            BBOX,
+            YEAR,
+            cache_dir=cache,
+            downloader=cutout_fakes.boom,
+            fetch_in_subprocess=True,
+        )
     assert "RuntimeError" in str(info.value) and "month 12" in str(info.value)
     assert "secret" not in str(info.value) and "cds.example" not in str(info.value)
     assert "cds.example" in caplog.text
@@ -242,21 +284,33 @@ def _month_files(parts: Path) -> dict[str, bytes]:
 
 
 def test_a_wedged_child_is_killed_at_the_timeout_and_its_month_refetched(
-        cds_env, recorded, monkeypatch):
+    cds_env, recorded, monkeypatch
+):
     cache = cds_env / "c"
     parts = _seed(cache, range(1, 12))
     before = _month_files(parts)
     with pytest.raises(CutoutTimeoutError, match="month 12"):
-        ensure_cutout(BBOX, YEAR, cache_dir=cache, downloader=cutout_fakes.hang,
-                      fetch_in_subprocess=True, timeout_s=2)
+        ensure_cutout(
+            BBOX,
+            YEAR,
+            cache_dir=cache,
+            downloader=cutout_fakes.hang,
+            fetch_in_subprocess=True,
+            timeout_s=2,
+        )
     _assert_dead(recorded)
     # The half-written month never landed: only the 11 done months remain.
     assert _month_files(parts) == before
 
     report = cds_env / "report.txt"
     monkeypatch.setenv("CUTOUT_FAKE_REPORT", str(report))
-    final = ensure_cutout(BBOX, YEAR, cache_dir=cache,
-                          downloader=cutout_fakes.report_pid, fetch_in_subprocess=True)
+    final = ensure_cutout(
+        BBOX,
+        YEAR,
+        cache_dir=cache,
+        downloader=cutout_fakes.report_pid,
+        fetch_in_subprocess=True,
+    )
     assert report.exists()  # month 12 was fetched again
     assert final.exists() and not parts.exists()
 
@@ -270,8 +324,15 @@ def test_stop_event_ends_the_child_and_keeps_done_months(cds_env, recorded):
     timer.start()
     try:
         with pytest.raises(CutoutDownloadAborted):
-            ensure_cutout(BBOX, YEAR, cache_dir=cache, downloader=cutout_fakes.hang,
-                          fetch_in_subprocess=True, stop_event=stop, timeout_s=120)
+            ensure_cutout(
+                BBOX,
+                YEAR,
+                cache_dir=cache,
+                downloader=cutout_fakes.hang,
+                fetch_in_subprocess=True,
+                stop_event=stop,
+                timeout_s=120,
+            )
     finally:
         timer.cancel()
     _assert_dead(recorded)
@@ -286,8 +347,13 @@ def test_a_month_that_wrote_nothing_is_never_merged(cds_env, in_child):
     cache = cds_env / "c"
     _seed(cache, range(1, 12))
     with pytest.raises(CutoutDownloadError, match="month 12 left no readable data"):
-        ensure_cutout(BBOX, YEAR, cache_dir=cache,
-                      downloader=cutout_fakes.writes_nothing, fetch_in_subprocess=in_child)
+        ensure_cutout(
+            BBOX,
+            YEAR,
+            cache_dir=cache,
+            downloader=cutout_fakes.writes_nothing,
+            fetch_in_subprocess=in_child,
+        )
     assert not list(cache.glob("era5_*.nc"))
     assert not (_parts(cache) / "m12.nc").exists()
 
@@ -295,10 +361,15 @@ def test_a_month_that_wrote_nothing_is_never_merged(cds_env, in_child):
 def test_a_full_year_in_children_resumes_and_merges(cds_env):
     cache = cds_env / "c"
     _seed(cache, range(1, 10))
-    final = ensure_cutout(BBOX, YEAR, cache_dir=cache, downloader=cutout_fakes.ok,
-                          fetch_in_subprocess=True)
+    final = ensure_cutout(
+        BBOX,
+        YEAR,
+        cache_dir=cache,
+        downloader=cutout_fakes.ok,
+        fetch_in_subprocess=True,
+    )
     import xarray as xr
+
     with xr.open_dataset(final) as ds:
         assert ds.sizes["time"] == 24
     _no_children_left()
-
