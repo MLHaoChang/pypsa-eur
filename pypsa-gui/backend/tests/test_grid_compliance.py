@@ -545,3 +545,70 @@ def test_every_write_is_refused_under_a_foreign_lock(client, hub, same_org_other
 
 def test_an_unknown_project_is_not_found(client, hub):
     assert client.get("/api/grid-compliance/No Such Project").status_code == 404
+
+
+# ── gaps found by scripts/coord/mutants.py ────────────────────────────────
+
+
+def test_a_deleted_campus_input_makes_the_freeze_unreadable(client, hub):
+    _freeze(client, hub, "04")
+    (ce.campus_dir(hub) / ce.CAMPUS_FILE).unlink()
+    assert _row(client, "04")["freeze_state"] == "unreadable"
+
+
+def test_a_prerequisite_may_step_back_to_judged_under_a_submitted_dependent(client, hub):
+    _judge(client, "04", "05", "06", "07")
+    _freeze(client, hub, "07")
+    assert _set(client, "07", "accepted").status_code == 200
+    _freeze(client, hub, "08")
+    assert _set(client, "08", "submitted").status_code == 200
+    assert _set(client, "07", "judged").status_code == 200
+
+
+def test_the_service_refuses_unknown_comment_fields_and_unknown_comments(client, hub):
+    with pytest.raises(store.GridComplianceError) as exc:
+        revision_log.add(hub, "06", {"date": "2026-11-01", "comment": "x", "owner": "y"})
+    assert exc.value.kind == "gc_comment_invalid"
+    with pytest.raises(store.GridComplianceError) as exc:
+        revision_log.update(hub, "06", "C-001", {"vendor": "y"})
+    assert exc.value.kind == "gc_comment_invalid"
+    # a deliverable never touched before has no comments: 404, not a crash
+    resp = client.patch(f"{BASE}/deliverables/12/comments/C-001", json={"response": "x"})
+    assert resp.status_code == 404 and _kind(resp) == "gc_comment_not_found"
+
+
+def _document(z, code):
+    return zipfile.ZipFile(io.BytesIO(z.read(f"report/TRGC-{code}.docx"))).read(
+        "word/document.xml")
+
+
+def test_the_pack_contents_follow_the_tracker(client, hub, monkeypatch):
+    from models.report import Table
+
+    _freeze(client, hub, "15")
+    items = [{"item_id": "contingencies", "label": "TSO contingency list",
+              "supplier": "TSO", "due": None, "status": "received"}]
+    client.put(f"{BASE}/deliverables/15/data", json={"items": items})
+    table = Table(table_id="escr", columns=["case"], rows=[["Sk min"]],
+                  caption="Strength at the PoC")
+    monkeypatch.setitem(sources.SOURCES, "GC-03", lambda project: [table])
+    _campus(hub, "campus: {name: edited}\n")
+    _, z = _pack(client, "15")
+    assert z.read("data_list.csv") == (
+        b"item_id,label,supplier,due,status\n"
+        b"contingencies,TSO contingency list,TSO,,received\n")
+    doc = _document(z, "15")
+    assert b"Freeze state: stale" in doc
+    assert b"Strength at the PoC" in doc
+    assert b"No prerequisite deliverable" in doc
+    manifest = json.loads(z.read("manifest.json"))
+    assert manifest["deliverable"] == {"trgc": "15", "title": cat.BY_CODE["15"].title,
+                                       "phase": 3, "tool": "PSS/E"}
+    assert manifest["schema_version"] == 1 and manifest["grid_code"] == gc_pack.GRID_CODE
+    assert manifest["generated_at"] and manifest["freeze_state"] == "stale"
+    assert set(manifest) == {"schema_version", "deliverable", "pack_version", "generated_at",
+                             "grid_code", "model_set", "freeze_state", "sources", "skipped",
+                             "files"}
+    _, z = _pack(client, "08")
+    assert b"Requires TRGC 06" in _document(z, "08")
+    assert b"Freeze state" not in _document(z, "08")

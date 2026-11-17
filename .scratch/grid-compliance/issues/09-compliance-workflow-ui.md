@@ -70,6 +70,6 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 - Revision log: reuses `RevisionRef` from `services/reports/revisions.py` to tie a response to
   its pack. It does not reuse the report anchors.
 - Chat disposition: UI_INTERNAL group, cap 11 to 12, with follow-up GC-10
-  (`10-assistant-tools.md`). Waiting on the owner's answer.
+  (`10-assistant-tools.md`), owner decision GC09-CHAT-1.
 - 09/10/11 user guides and datasheets: their own skeleton sections now. Content arrives from
   GC-01/04/06 through `sources.SOURCES`.

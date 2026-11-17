@@ -322,7 +322,8 @@ def test_served_by_names_real_tools():
 
 
 def test_ui_internal_stays_small():
-    # 12: grid_compliance_workflow until GC-10 ships its chat tools (then back to 11).
+    # 12, owner decision GC09-CHAT-1: the one extra slot is grid_compliance_workflow, until
+    # .scratch/grid-compliance/issues/10-assistant-tools.md ships its chat tools (then 11).
     assert len(UI_INTERNAL) <= 12 and 'series_json_put' in UI_INTERNAL
     assert all(20 <= len(entry['reason']) <= 160 for entry in UI_INTERNAL.values())
 

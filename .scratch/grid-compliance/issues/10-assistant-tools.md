@@ -9,7 +9,7 @@ Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: GC-09 backend (`/api/grid-compliance`)
 Gated: **yes** (GK B)
 Size: M
-Owner decision: GC-SCOPE-1, GC-TEXT-1; the UI_INTERNAL cap question from GC-09 (pending)
+Owner decision: GC-SCOPE-1, GC-TEXT-1, GC09-CHAT-1 (2026-11-17: UI_INTERNAL cap 11 → 12 for this one group until these tools land)
 
 **Confidentiality (GC-TEXT-1).** Cite only the public grid code and generic engineering; never
 name a project, customer, consultant, EPC or OEM.
