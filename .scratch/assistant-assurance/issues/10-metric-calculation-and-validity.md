@@ -147,3 +147,17 @@ Also from S2 (#1680, GK B 65 point c): ticket to record the solver options actua
 ### 2026-11-17: addendum to ticket 18 (GK B 65 on #1680 @fba8ff2d)
 
 To fold into `18-record-applied-solver-options.md` once #1680 merges: the island sidecar (`services/solver/island.py`, around line 531) solves committed islands with `linearized_unit_commitment=True`. `solve_validity.is_mip` reads only `process_uc.planning_uc_mode`, so such a run is classified as a MIP although its solve was an LP. Its cost deltas and bus prices are then refused needlessly. The refusal is safe, but too strict. Recording the applied options at the solve call (ticket 18) removes it.
+
+### 2026-11-17: S3 objective-to-cost bridge (successor builder of session_01G7qCujZDfEnPrXW8Munor4)
+
+UX 25 led (G9): Q1a, so the card is asked only for "objective" without "cost", or "objective vs cost"; a bare "total cost" keeps today's route. Q2a: the labels are exactly "Solver objective" / "Total declared-basis cost" / "Objective-to-cost reconciliation", final once merged. Q3a: one table in bridge order with the residual last, no Results link (a later PR may add one through the mode-aware opener). Disclosure: "The solver objective includes penalty and slack terms and period weightings, so it is not the total system cost."
+
+Finding: on a single-period network, `objective_decomposition._bridge` derives `period_weighting_adjustment_eur` from `cost_breakdown["total"]`, so that row absorbs any error in the total and the residual stays 0. A 10 EUR over-reported total read "residual 0, adjustment −10". The public `objective_bridge()` builds the adjustment from the cost parts instead (the additive `_bridge` key `reported_basis_eur`), so the error lands in the residual. `/results/objective_decomposition` output is unchanged.
+
+Also found: the reported total includes slack (VOLL) dispatch cost. Its share comes from `by_carrier` and is shown as a row; it is unavailable when a slack generator sits under an ordinary carrier.
+
+Limits: `objective-bridge/1` is single-period like every bounded profile, so myopic (multi-period) runs get the standard `unsupported_snapshot_scope` refusal. Only rolling-horizon runs read "Not available: the objective covers only the last window."
+
+Follow-ups:
+- € formatting and "Not available" wording for all checked answers, if UX 25 rules (a) on rendering.
+- `adequacy/report.py:509-515` falls back to `total_system_cost = 0.0` when the objective is not finite, which breaks G3's never-0 rule outside checked answers; ticket it in S4.

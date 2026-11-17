@@ -65,15 +65,19 @@ _FIELDS = {
     "reserve_revenue_eur": "reserve_revenue_eur",
     "residual_eur": "residual_eur",
 }
-# Why a row is unavailable when the bridge could not compute it.
-_MISSING = {
-    "objective_eur": "objective_unavailable",
-    "reported_total_cost_eur": "reported_total_unavailable",
-    "penalty_cost_eur": "penalty_not_identifiable",
-    "nonextendable_fixed_cost_eur": "bridge_unavailable",
-    "period_weighting_adjustment_eur": "bridge_unavailable",
-    "reserve_revenue_eur": "bridge_unavailable",
-    "residual_eur": "bridge_unavailable",
+# Why a row is unavailable. UX 25: the shared renderer prints the code, so each
+# is a short plain phrase, and `notes` explains every code an answer carries.
+EXPLAINED = {
+    "last_window_only": "Not available: the objective covers only the last window.",
+    "last_period_only": "Not available: the objective covers only the last period.",
+    "still_scaled": "Not available: the objective is still scaled for the solver.",
+    "objective_missing": "Not available: the run recorded no objective.",
+    "total_missing": "Not available: the total system cost could not be read.",
+    "terms_missing": "Not available: the bridge terms could not be computed from the cost breakdown.",
+    "not_separable": (
+        "Not available: a slack generator has an ordinary carrier, so its penalty "
+        "cannot be separated from the total."
+    ),
 }
 DISCLOSURE = (
     "The solver objective includes penalty and slack terms and period weightings, "
@@ -118,6 +122,31 @@ def _value(raw, metric):
     return v if v is not None and math.isfinite(v) else None
 
 
+def _objective_reason(raw):
+    return "still_scaled" if raw["objective_scale"] not in (None, 1.0) else "objective_missing"
+
+
+def _rows(raw):
+    """(available values, reasons) for a valid solve: the one source of both the
+    slots and the note lines that explain them."""
+    if raw["scope"] != "horizon":
+        code = "last_window_only" if raw["scope"] == "last_window" else "last_period_only"
+        return {}, dict.fromkeys(METRICS, code)
+    available = {m: v for m in METRICS if (v := _value(raw, m)) is not None}
+    missing = {
+        "objective_eur": _objective_reason(raw),
+        "reported_total_cost_eur": "total_missing",
+        "penalty_cost_eur": "not_separable",
+        "residual_eur": (
+            _objective_reason(raw) if "objective_eur" not in available
+            else "total_missing" if "reported_total_cost_eur" not in available
+            else "terms_missing"
+        ),
+    }
+    reasons = {m: missing.get(m, "terms_missing") for m in METRICS if m not in available}
+    return available, reasons
+
+
 def calculate(raw, scope):
     """Every row reads the whole run; a partial window is refused, not pro-rated."""
     if (
@@ -134,18 +163,10 @@ def calculate(raw, scope):
         raise ValueError("unsupported_snapshot_scope") from None
     if (a, b) != (0, len(raw["index"]) - 1):
         raise ValueError("unsupported_snapshot_scope")
-    available, reasons = {}, {}
     if not raw["valid_solve"]:
-        reasons = dict.fromkeys(METRICS, "unverified_solve")
-    elif raw["scope"] != "horizon":
-        reasons = dict.fromkeys(METRICS, "objective_scope_not_horizon")
+        available, reasons = {}, dict.fromkeys(METRICS, "unverified_solve")
     else:
-        for metric in METRICS:
-            value = _value(raw, metric)
-            if value is None:
-                reasons[metric] = _MISSING[metric]
-            else:
-                available[metric] = value
+        available, reasons = _rows(raw)
     return common.facts_and_slots(scope, METRICS, available, reasons, b - a + 1)
 
 
@@ -155,15 +176,17 @@ def reconciled(objective, residual):
 
 
 def notes(raw, scope):
-    """The match state in plain words, stated once, or why nothing is answered."""
+    """The match state in plain words with the tolerance stated once, then one
+    line for each reason code a requested row carries (UX 25)."""
     if not raw["valid_solve"]:
         return []
-    if raw["scope"] != "horizon":
-        part = "window" if raw["scope"] == "last_window" else "period"
-        return [f"Not available: the objective covers only the last {part}."]
+    from harness.calculations import requested_metrics
+
+    requested = requested_metrics(scope)
+    available, reasons = _rows(raw)
     lines = []
-    objective, residual = _value(raw, "objective_eur"), _value(raw, "residual_eur")
-    if objective is not None and residual is not None:
+    if "residual_eur" in requested and "objective_eur" in available and "residual_eur" in available:
+        objective, residual = available["objective_eur"], available["residual_eur"]
         tolerance = residual_tolerance(objective)
         lines.append(
             f"Matches within {tolerance:.6g} EUR."
@@ -171,11 +194,6 @@ def notes(raw, scope):
             else f"Does not match: the residual is {residual:.6g} EUR, "
             f"above the {tolerance:.6g} EUR tolerance."
         )
-    elif raw["objective_scale"] not in (None, 1.0):
-        lines.append("Not available: the objective is still scaled for the solver.")
-    if _value(raw, "penalty_cost_eur") is None:
-        lines.append(
-            "Not available: a slack generator has an ordinary carrier, so its penalty "
-            "cannot be separated from the total."
-        )
+    shown = [reasons[m] for m in requested if m in reasons]
+    lines.extend(EXPLAINED[code] for code in dict.fromkeys(shown))
     return lines

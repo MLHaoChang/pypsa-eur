@@ -140,8 +140,8 @@ def test_an_objective_still_scaled_is_unavailable_never_a_wrong_number():
     n = _solved()
     n._pypsa_gui_objective_scale = 2.0  # the post-solve rescale never ran
     out, raw, scope = _run(n)
-    assert out["objective_eur"] == "objective_unavailable"
-    assert out["residual_eur"] == "bridge_unavailable"
+    assert out["objective_eur"] == "still_scaled"
+    assert out["residual_eur"] == "still_scaled"
     assert out["reported_total_cost_eur"] == pytest.approx(OBJECTIVE)
     assert ob.notes(raw, scope) == ["Not available: the objective is still scaled for the solver."]
 
@@ -168,7 +168,7 @@ def test_the_tolerance_boundary_matches_and_one_ulp_above_does_not():
 
 def test_a_slack_under_an_ordinary_carrier_is_not_available_not_zero():
     out, raw, scope = _run(_solved(slack_carrier="AC"))
-    assert out["penalty_cost_eur"] == "penalty_not_identifiable"
+    assert out["penalty_cost_eur"] == "not_separable"
     assert out["objective_eur"] == pytest.approx(OBJECTIVE)
     assert out["residual_eur"] == pytest.approx(0.0, abs=1e-6)
     assert ob.notes(raw, scope)[-1] == (
@@ -192,7 +192,7 @@ def test_no_slack_generator_is_a_real_zero_penalty():
 
 def test_a_rolling_horizon_answers_no_row():
     out, raw, scope = _run(_solved(), state={"solver_config": SolverConfig(solve_strategy="rolling")})
-    assert out == dict.fromkeys(ALL, "objective_scope_not_horizon")
+    assert out == dict.fromkeys(ALL, "last_window_only")
     assert ob.notes(raw, scope) == ["Not available: the objective covers only the last window."]
 
 
@@ -237,3 +237,48 @@ def test_the_rows_are_in_bridge_order_and_the_disclosure_is_exact():
         "The solver objective includes penalty and slack terms and period weightings, "
         "so it is not the total system cost."
     )
+
+
+def test_a_myopic_objective_reads_last_period_only():
+    _, raw, scope = _run(_solved())
+    raw["scope"] = "last_period"
+    facts, slots = ob.calculate(raw, scope)
+    assert facts == []
+    assert {s["reason"] for s in slots} == {"last_period_only"}
+    assert ob.notes(raw, scope) == ["Not available: the objective covers only the last period."]
+
+
+def test_an_unreadable_cost_breakdown_reads_plain_reasons_each_explained(monkeypatch):
+    from services.results import cost_breakdown
+
+    def broken(n, cfg):
+        raise RuntimeError("no statistics")
+
+    monkeypatch.setattr(cost_breakdown, "compute_cost_breakdown", broken)
+    out, raw, scope = _run(_solved())
+    assert out == {
+        "objective_eur": pytest.approx(OBJECTIVE),
+        "reported_total_cost_eur": "total_missing",
+        "penalty_cost_eur": "not_separable",
+        "nonextendable_fixed_cost_eur": "terms_missing",
+        "period_weighting_adjustment_eur": "terms_missing",
+        "reserve_revenue_eur": "terms_missing",
+        "residual_eur": "total_missing",
+    }
+    assert ob.notes(raw, scope) == [
+        ob.EXPLAINED["total_missing"], ob.EXPLAINED["not_separable"], ob.EXPLAINED["terms_missing"],
+    ]
+
+
+def test_only_the_requested_rows_reasons_are_explained():
+    _, raw, _ = _run(_solved(slack_carrier="AC"))
+    scope = {"profile": ob.PROFILE, "entity_id": "network", "metrics": ["objective_eur"]}
+    assert ob.notes(raw, scope) == []  # no residual shown, so no match line either
+
+
+def test_every_reason_code_is_short_plain_words_with_its_own_line():
+    import re
+
+    for code, line in ob.EXPLAINED.items():
+        assert re.fullmatch(r"[a-z]+(?:_[a-z]+){0,2}", code), code
+        assert line.startswith("Not available: ") and "_" not in line and "{" not in line
