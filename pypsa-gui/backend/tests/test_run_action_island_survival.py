@@ -1598,7 +1598,7 @@ def _screen_failed(ok):
 
 
 def test_no_tie_names_an_internal_link_read_as_the_islands_own_feeder(hub):
-    """SH 50: the untagged R4 network reads no_tie, and the row's detail says why, by name."""
+    """SH 54: the untagged R4 network reads no_tie, and the row's detail says why, by name."""
     _sidecar(hub)
     n = T.BUILDERS[TID]()
     n.remove("Generator", "mainland_supply")

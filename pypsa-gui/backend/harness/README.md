@@ -1647,7 +1647,7 @@ kind refuses (GK B (46) M2). The data-centre record is unchanged (M1).
     fails the frequency judge in, each (period, hour) once and named, not
     weighted, with that basis in the gate record (M11, C5); no evidence once
     the island sidecar is newer than the judgement (B6).
-  - `mg.tie.open`: `open`, `closed` or `no_tie` on the live network (M12). A `no_tie` row names, as detail, each untagged internal link read as the island's own feeder (SH 54).
+  - `mg.tie.open`: `open`, `closed` or `no_tie` on the live network (M12). A `no_tie` row names, as detail, each untagged internal link read as the island's own feeder (SH 54). An `open`, `closed` or `no_tie` row also carries, as detail after any carrying ties and that warning, the `idle_warning` naming each supply the island sidecar does not list that sits on an island bus and is never available (`p_max_pu` 0 in every hour), left out of the mainland check (SH 56); it is present only when there is such a supply.
   - `mg.critical.tagged`: `tagged`, `none` or `mismatch` (M12).
   - `mg.fuel.autonomy`: always no evidence: the gensets draw no modelled
     fuel (GK A Q5).

@@ -369,10 +369,11 @@ def _mainland_links(n, own: set[str]) -> dict[str, dict[str, str]]:
     #48: an untagged Link with no end on an ``eh_poc`` bus is not a mainland feed. Topology alone
     cannot tell it from the island's own feeder (``hospital_feeder``, ``site_transformer``), and a
     Link from an unlisted supply is caught anyway: on a unit's bus by that supply, off the
-    island as a tie. Every port is read (SH 51): a Link counts when all its ports are on ``own``,
+    island as a tie. Every port is read (SH 55): a Link counts when all its ports are on ``own``,
     and an ``eh_poc`` match on any port names that port; a Link with a port off the island is the
-    tie check's. A ``grid_import`` Link names ``bus0`` by its role and, as well, any other port on
-    an ``eh_poc`` bus (GK A C5); ``bus0`` keeps the role's marker when it is also ``eh_poc``. A feed is read by its size alone: a normally-open feed with capacity is
+    tie check's. A ``grid_import`` Link names ``bus0`` by its role and, as well, any port beyond
+    ``bus1`` (``bus2``, ...) on an ``eh_poc`` bus (GK A C5); its ``bus0`` and ``bus1`` read exactly as
+    #1567 read them, so an ``eh_poc`` ``bus1`` is not named. A feed is read by its size alone: a normally-open feed with capacity is
     still the mainland's, and whether it carries power is the tie's open or closed answer."""
     from services.adequacy.archetypes import _poc_buses
 
@@ -383,9 +384,12 @@ def _mainland_links(n, own: set[str]) -> dict[str, dict[str, str]]:
         ends = _ports(n.links, name)
         if not set(ends) <= own or not _can_deliver(n.links, name, "p_nom"):
             continue
-        grid = {bus: "eh_poc" for bus in sorted(set(ends) & poc)}
         if role is not None and role.at[name] == "grid_import":
+            extra = set(ends) - {str(n.links.at[name, b]) for b in ("bus0", "bus1")}
+            grid = {bus: "eh_poc" for bus in sorted(extra & poc)}
             grid[str(n.links.at[name, "bus0"])] = "grid_import"
+        else:
+            grid = {bus: "eh_poc" for bus in sorted(set(ends) & poc)}
         if grid:
             out[str(name)] = grid
     return out
@@ -500,24 +504,36 @@ def _carries(n, comp, name) -> bool:
     return False
 
 
-def _unmarked_warning(n, own: set[str]) -> dict:
-    """SH 50: ``{unmarked_links, warning}`` naming each Link with every port on the island's buses
-    ``own`` that can deliver and that nothing marks as a mainland feed, which #48 reads as the
-    island's own feeder; ``{}`` when there is none. ``_units_on_mainland`` has already refused
-    every marked feed, so each Link left here is unmarked."""
+def _unmarked_warning(n, island, own: set[str]) -> dict:
+    """SH 54: ``{unmarked_links, warning}`` naming each Link with every port on the island's buses
+    ``own`` that can deliver, that the sidecar does not list as a unit and that nothing marks as a
+    mainland feed, which #48 reads as the island's own feeder; ``{}`` when there is none.
+    ``_units_on_mainland`` has already refused every marked feed, so each Link left here is
+    unmarked."""
+    named = set(island["units"])
     links = sorted(
         str(name)
         for name in n.links.index
-        if set(_ports(n.links, name)) <= own and _can_deliver(n.links, name, "p_nom")
+        if name not in named
+        and set(_ports(n.links, name)) <= own
+        and _can_deliver(n.links, name, "p_nom")
     )
     if not links:
         return {}
+    one = len(links) == 1
     return {
         "unmarked_links": links,
         "warning": (
-            f"{_listed(links)} join island buses with no grid-import or point-of-connection "
-            "tag, so each is read as the island's own feeder. If one brings the mainland supply "
-            "in, set its eh_role to grid_import or tag its grid-side bus eh_poc."
+            f"{_listed(links)} "
+            + (
+                "joins island buses and carries no grid-import or point-of-connection tag, so "
+                "it is read as the island's own feeder. If it brings"
+                if one
+                else "join island buses and carry no grid-import or point-of-connection tag, so "
+                "each is read as the island's own feeder. If one brings"
+            )
+            + " the mainland supply in, set its eh_role to grid_import or tag its grid-side bus "
+            "eh_poc."
         ),
     }
 
@@ -530,8 +546,15 @@ def _idle_warning(n, island) -> dict:
     return {
         "idle_supplies": idle,
         "idle_warning": (
-            f"{_listed(idle)} sit on island buses without being listed in the island settings but "
-            "are available 0 % of the time in every hour, so they are not read as a mainland supply."
+            f"{_listed(idle)} "
+            + (
+                "sits on an island bus without being listed in the island sidecar, but it is"
+                if len(idle) == 1
+                else "sit on island buses without being listed in the island sidecar, but they are"
+            )
+            + " never available (p_max_pu is 0 in every hour), so "
+            + ("it is" if len(idle) == 1 else "they are")
+            + " not read as a mainland supply."
         ),
     }
 
@@ -544,7 +567,7 @@ def tie_state(n, island) -> dict:
     and ``no_island`` when the network has none of the sidecar's units. ``no_tie`` also carries
     ``unmarked_links`` and ``warning`` when an internal Link is read as the island's own feeder
     (``_unmarked_warning``). Any of the three carries ``idle_supplies`` and ``idle_warning`` when an
-    unlisted supply is left out for being available 0 % of the time (``_idle_warning``, SH 56).
+    unlisted supply is left out for being never available (``_idle_warning``, SH 56).
     ``unit_on_mainland`` (with ``units``, ``buses``, ``links`` and ``reason``)
     refuses when a sidecar unit sits on a bus that reads as the mainland's
     (``_units_on_mainland``).
@@ -565,7 +588,7 @@ def tie_state(n, island) -> dict:
             "state": "no_tie",
             "ties": [],
             "carrying": [],
-            **_unmarked_warning(n, own),
+            **_unmarked_warning(n, island, own),
             **idle,
         }
     carrying = [name for comp, name in ties if _carries(n, comp, name)]

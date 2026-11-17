@@ -3,7 +3,7 @@
 
 # 56 — An unlisted supply with p_max_pu = 0 in every hour still refuses the island tie
 
-Status: needs-info
+Status: ready-for-agent
 Gated: GK A
 Type: bug
 Parent: SH 49 (#1567) review follow-up
@@ -17,3 +17,9 @@ hour can deliver nothing either, but still marks its bus as the mainland's, so t
 
 An owner decision, sent to the coordinator as options: (1) leave it out when 0 in every hour of this network
 (recommended), (2) keep refusing, (3) leave it out and name it as a warning on the tie row.
+
+## Comments
+
+Owner decision SH56-TIE-1 (option 3), relayed by the coordinator: leave an unlisted supply whose `p_max_pu`
+is 0 in every hour of this network out of the mainland check, and name it as a warning on the tie row; built on
+this branch.
