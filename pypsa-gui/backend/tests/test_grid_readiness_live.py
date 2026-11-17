@@ -146,3 +146,14 @@ def test_the_report_reads_the_saved_project_while_the_screen_reads_live(client, 
     gr = reports._current_chapter_sources(ap)["grid_readiness"]
     assert gr["network"] == "saved"
     assert next(r for r in gr["rows"] if r["id"] == "scr")["project_value"] == saved
+
+
+def test_a_project_not_loaded_reads_its_saved_file(client, hub, monkeypatch):
+    from services.pypsa_service import PyPSAService
+
+    saved = _scr(client, hub)["project_value"]
+    _edit_fault(client, hub, 60 / 250)
+    monkeypatch.setattr(PyPSAService, "get_context", classmethod(lambda cls, key: None))
+    out = _get(client, hub)
+    assert out["network"] == "saved"
+    assert next(r for r in out["rows"] if r["id"] == "scr")["project_value"] == saved

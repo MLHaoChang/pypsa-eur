@@ -58,8 +58,8 @@ describe('the out-of-date line', () => {
     const qc = new QueryClient()
     const { rerender } = render(<GridReadinessScorecard data={{ ...DATA, network: 'out_of_date' }} mode="guided" />,
       { wrapper: wrapper(qc) })
-    expect(screen.getByTestId('gr-out-of-date').textContent).toBe(
-      'Out of date: the project is busy, so this reads the saved project. Save the project to update.')
+    expect(screen.getByRole('status').textContent).toBe(
+      'A run is using the project, so this reads the last saved project. Save the project to update.')
     rerender(<GridReadinessScorecard data={{ ...DATA, network: 'live' }} mode="guided" />)
     expect(screen.queryByTestId('gr-out-of-date')).toBeNull()
   })

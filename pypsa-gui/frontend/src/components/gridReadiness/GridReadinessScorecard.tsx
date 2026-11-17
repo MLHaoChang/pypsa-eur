@@ -358,8 +358,8 @@ export function GridReadinessScorecard({ data, mode, onJump = () => {}, fieldLab
           <div data-testid="gr-since-run" className="text-[11px] text-warn">{sinceRunText(data.profile.since_run)}</div>
         )}
         {data.network === 'out_of_date' && (
-          <div data-testid="gr-out-of-date" className="text-[11px] text-warn">
-            Out of date: the project is busy, so this reads the saved project. Save the project to update.
+          <div data-testid="gr-out-of-date" role="status" className="text-[11px] text-warn">
+            A run is using the project, so this reads the last saved project. Save the project to update.
           </div>
         )}
         {data.profile.error && (

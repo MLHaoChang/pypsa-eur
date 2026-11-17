@@ -1879,11 +1879,9 @@ def _live_network(project) -> tuple[Any, str]:
         from services import project_registry
         from services.pypsa_service import PyPSAService
 
+        # The registry key is the project's org and uuid: only the context of the
+        # project the route authorised is read (GK A L2).
         ctx = PyPSAService.get_context(project_registry.registry_key(project))
-        if ctx is None:
-            active = PyPSAService.get_active_context()
-            if str(getattr(active, "project_uuid", "") or "") == str(project.id):
-                ctx = active
     except Exception:  # noqa: BLE001 — not loaded reads the saved file
         return None, "saved"
     if ctx is None:
