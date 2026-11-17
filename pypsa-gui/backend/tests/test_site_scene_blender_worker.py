@@ -286,6 +286,9 @@ def test_each_missing_setting_is_unavailable_and_named(make, name):
     [
         (bw.ENV_IMAGE, "blender-runtime:latest", "digest"),
         (bw.ENV_IMAGE, "x@sha256:" + "a" * 63, "digest"),
+        (bw.ENV_IMAGE, "x@sha256:" + "a" * 65, "digest"),
+        (bw.ENV_IMAGE, "x@sha256:" + "A" * 64, "digest"),
+        (bw.ENV_IMAGE, "x@sha256:" + "a" * 64 + "\n", "digest"),
         (bw.ENV_RUNTIME, "/bin/sh", "docker or podman"),
         (bw.ENV_RUNTIME, "docker", "docker or podman"),
         (bw.ENV_DIR, "relative/blender", bw.ENV_DIR),
@@ -640,3 +643,56 @@ def test_an_output_that_grows_past_the_cap_while_read_is_refused(tmp_path, monke
         bw._read_output(tmp_path, "out.glb", 1000)
     monkeypatch.undo()
     assert e.value.kind == bw.OUTPUT_LIMIT
+
+
+def test_the_caps_are_the_documented_values():
+    assert bw.Caps() == bw.Caps(
+        wall_s=180.0,
+        cpu_s=120,
+        memory_bytes=2 << 30,
+        fsize_bytes=512 << 20,
+        output_bytes=256 << 20,
+        nofile=256,
+        pids=256,
+        grace_s=5.0,
+        version_timeout_s=30.0,
+        poll_s=0.1,
+        ready_ttl_s=60.0,
+    )
+
+
+def test_an_output_of_exactly_the_cap_is_read_and_one_byte_more_is_refused(tmp_path):
+    (tmp_path / "out.glb").write_bytes(b"x" * 1000)
+    assert len(bw._read_output(tmp_path, "out.glb", 1000)) == 1000
+    with pytest.raises(bw.WorkerError) as e:
+        bw._read_output(tmp_path, "out.glb", 999)
+    assert e.value.kind == bw.OUTPUT_LIMIT
+
+
+def test_a_cancel_kills_the_container_before_the_cli_group(make, monkeypatch):
+    env, rec = make("hang")
+    ready = _ready(env)
+    calls = []
+    real_kill, real_pg = bw._kill_container, bw._killpg
+    monkeypatch.setattr(
+        bw,
+        "_kill_container",
+        lambda *a: (calls.append("container"), real_kill(*a))[1],
+    )
+    monkeypatch.setattr(
+        bw, "_killpg", lambda *a: (calls.append("group"), real_pg(*a))[1]
+    )
+    stop = threading.Event()
+    kid_file = Path(str(rec) + ".kid")
+
+    def cancel_when_started():
+        deadline = time.monotonic() + 15
+        while not kid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        stop.set()
+
+    threading.Thread(target=cancel_when_started, daemon=True).start()
+    with pytest.raises(bw.WorkerError) as e:
+        bw.run(ready, b"g", stop, FAST, env)
+    assert e.value.kind == bw.CANCELLED
+    assert calls == ["container", "group"]

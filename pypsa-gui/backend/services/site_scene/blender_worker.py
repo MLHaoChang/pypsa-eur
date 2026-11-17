@@ -220,7 +220,7 @@ def _config(env) -> tuple[Path, str, str]:
         raise WorkerError(
             UNAVAILABLE, f"{ENV_RUNTIME} is not an absolute path to docker or podman"
         )
-    if not _IMAGE.match(image):
+    if not _IMAGE.fullmatch(image):
         raise WorkerError(
             UNAVAILABLE, f"{ENV_IMAGE} must be pinned by digest (name@sha256:...)"
         )

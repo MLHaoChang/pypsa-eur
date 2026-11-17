@@ -14,6 +14,7 @@ import time
 import uuid
 import zipfile
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -422,3 +423,44 @@ def test_only_a_member_of_the_project_reaches_the_jobs_and_artifacts(
     r = other_org_client.get(ART + job["id"])
     assert r.status_code == 404 and b"BLENDER" not in r.content, r.status_code
     assert other_org_client.post(JOBS).status_code == 404
+
+
+def test_an_unknown_kind_is_a_typed_refusal_and_known_kinds_pass():
+    for kind in sq.KINDS:
+        sq.check_kind(kind)
+    with pytest.raises(ValueError) as e:
+        sq.check_kind("blender_scene_v2")
+    assert str(e.value).startswith(sq.UNKNOWN_KIND_CONDITION)
+
+
+def test_no_mount_source_comes_from_the_project_or_the_request(
+    client, geo, worker, monkeypatch
+):
+    import tempfile
+
+    _scene_with_buildings(client, geo)
+    worker("ok")
+    seen = []
+    real = bw._container_argv
+
+    def spy(ready, name, work, tail, caps):
+        argv = real(ready, name, work, tail, caps)
+        seen.append([argv[i + 1] for i, a in enumerate(argv) if a == "--mount"])
+        return argv
+
+    monkeypatch.setattr(bw, "_container_argv", spy)
+    job = client.post(JOBS).json()
+    assert _wait(lambda: _status(job["id"]) in sq._TERMINAL)
+    assert _status(job["id"]) == "completed"
+    assert seen, "the worker ran through the spied argv"
+    tmp = Path(tempfile.gettempdir()).resolve()
+    tree = Path(bw.os.environ[bw.ENV_DIR])
+    for mounts in seen:
+        work, blender = (
+            dict(kv.split("=", 1) for kv in m.split(",") if "=" in kv) for m in mounts
+        )
+        assert Path(work["source"]).parent.resolve() == tmp
+        assert Path(work["source"]).name.startswith("blender-run-")
+        assert Path(blender["source"]) == tree
+        for m in mounts:
+            assert str(geo) not in m and "campus" not in m and job["id"] not in m
