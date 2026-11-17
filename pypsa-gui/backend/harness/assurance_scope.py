@@ -21,7 +21,8 @@ class RequestScope(BaseModel):
     profile: Literal[
         "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1",
         "storage-unit-dispatch/1", "storage-unit-cost/1", "carrier-energy/1",
-        "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
+        "branch-loading/1", "network-loading/1", "branch-losses/1", "network-losses/1",
+        "lost-load/1", "bus-price/1",
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
         "copt-screening/1", "grid-readiness/1", "time-to-power/1",
@@ -73,7 +74,7 @@ def validate(value):
     ):
         raise ValueError("unsupported_loading_cost_scope")
     if scope["profile"] in ("bus-price/1", "generator-emissions/1", "network-emissions/1",
-                            "curtailment/1") and (
+                            "curtailment/1", "branch-losses/1", "network-losses/1") and (
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_result_cost_scope")
@@ -85,7 +86,7 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_lost_load_cost_scope")
-    classed = {"branch-loading/1": ("Line", "Transformer"),
+    classed = {"branch-loading/1": ("Line", "Transformer"), "branch-losses/1": ("Line", "Transformer"),
                "capacity/1": ("Generator", "Link", "StorageUnit", "Store", "Line", "Transformer"),
                "storage-cycles/1": ("StorageUnit", "Store")}
     if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
@@ -102,6 +103,10 @@ def validate(value):
             raise ValueError("unsupported_result_cost_scope")
     if (scope["profile"] == "network-loading/1") != (scope["entity_id"] == "network") and (
         scope["profile"] in ("branch-loading/1", "network-loading/1")
+    ) and not scope.get("component_class"):
+        raise ValueError("network_scope_required")
+    if (scope["profile"] == "network-losses/1") != (scope["entity_id"] == "network") and (
+        scope["profile"] in ("branch-losses/1", "network-losses/1")
     ) and not scope.get("component_class"):
         raise ValueError("network_scope_required")
     return scope

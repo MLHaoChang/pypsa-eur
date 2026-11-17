@@ -583,7 +583,12 @@ Stores and always discloses how many it excluded. `branch-loading/1` and
 `network-loading/1` (`branch_calculations.py`, also opt-in) check one Line or
 Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
 P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
-refuse whenever AC power-flow results exist. `lost-load/1` (`lost_load_calculations.py`,
+refuse whenever AC power-flow results exist. `branch-losses/1` and `network-losses/1`
+(`losses_calculations.py`, opt-in) check one Line's or Transformer's, or the network's,
+LP transmission-loss energy, peak and (network) share of Load demand. They read the raw
+loss and load frames through `services/results/losses._validity_rows`, so a missing,
+infinite or misaligned value in the window gives no value while a real 0 is answered;
+they refuse when AC power-flow results exist. `lost-load/1` (`lost_load_calculations.py`,
 opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted shed
 hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
 claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and

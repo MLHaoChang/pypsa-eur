@@ -1872,6 +1872,7 @@ def capture_scoped(owner, scope):
             in (
                 calculations.carrier.PROFILE,
                 *calculations.branch.PROFILES,
+                *calculations.losses.PROFILES,
                 calculations.lost_load.PROFILE,
                 calculations.price.PROFILE,
                 *calculations.emissions.PROFILES,

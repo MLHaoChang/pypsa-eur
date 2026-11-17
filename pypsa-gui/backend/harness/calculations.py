@@ -17,6 +17,7 @@ from harness import emissions_calculations as emissions
 from harness import energy_balance_calculations as balance
 from harness import grid_readiness_calculations as readiness
 from harness import investment_calculations as investment
+from harness import losses_calculations as losses
 from harness import lost_load_calculations as lost_load
 from harness import price_calculations as price
 from harness import site_import_calculations as site_import
@@ -82,7 +83,7 @@ COMPARISON_METRICS = {
     },
 }
 DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRICS, **storage_costs.METRICS,
-               **carrier.METRICS, **branch.METRICS, **branch.NETWORK_METRICS,
+               **carrier.METRICS, **branch.METRICS, **branch.NETWORK_METRICS, **losses.NETWORK_METRICS,
                **lost_load.METRICS, **price.METRICS, **emissions.GENERATOR_METRICS,
                **emissions.NETWORK_METRICS, **curtailment.METRICS, **capacity.METRICS,
                **cycles.METRICS, **balance.METRICS, **site_import.METRICS, **investment.METRICS,
@@ -99,6 +100,8 @@ PROFILES = {
     carrier.PROFILE: tuple(carrier.METRICS),
     branch.PROFILE: tuple(branch.METRICS),
     branch.NETWORK_PROFILE: tuple(branch.NETWORK_METRICS),
+    losses.PROFILE: tuple(losses.METRICS),
+    losses.NETWORK_PROFILE: tuple(losses.NETWORK_METRICS),
     lost_load.PROFILE: tuple(lost_load.METRICS),
     price.PROFILE: tuple(price.METRICS),
     emissions.GENERATOR_PROFILE: tuple(emissions.GENERATOR_METRICS),
@@ -116,7 +119,7 @@ PROFILES = {
 }
 # Profiles added after the pilot's first five run only when listed explicitly
 # in PYPSA_GUI_ANSWER_ASSURANCE_PROFILES (`rollout.profile_enabled`).
-OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES, lost_load.PROFILE, price.PROFILE,
+OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES, *losses.PROFILES, lost_load.PROFILE, price.PROFILE,
                              *emissions.PROFILES, curtailment.PROFILE, capacity.PROFILE,
                              cycles.PROFILE, balance.PROFILE, site_import.PROFILE,
                              *investment.PROFILES, copt_screen.PROFILE,
@@ -376,6 +379,9 @@ def scoped_source(ctx, scope, owner=None, investment_state=None):
     if scope["profile"] in branch.PROFILES:
         return branch.source(ctx, scope["entity_id"], scope["profile"] == branch.NETWORK_PROFILE,
                              scope.get("component_class"))
+    if scope["profile"] in losses.PROFILES:
+        return losses.source(ctx, scope["entity_id"], scope["profile"] == losses.NETWORK_PROFILE,
+                             scope.get("component_class"))
     if scope["profile"] in STORAGE_PROFILES:
         adapter = storage_costs if scope["profile"] == storage_costs.PROFILE else storage
         return _comparison({"storage_unit": adapter.source(ctx, scope["entity_id"])}, scope, owner)
@@ -551,6 +557,8 @@ def scoped_calculate(raw, scope):
         return carrier.calculate(raw, scope)
     if scope["profile"] in branch.PROFILES:
         return branch.calculate(raw, scope)
+    if scope["profile"] in losses.PROFILES:
+        return losses.calculate(raw, scope)
     if scope["profile"] == lost_load.PROFILE:
         return lost_load.calculate(raw, scope)
     if scope["profile"] == price.PROFILE:
@@ -727,6 +735,8 @@ def disclosure(scope):
         return carrier.DISCLOSURE
     if scope["profile"] in branch.PROFILES:
         return branch.DISCLOSURE
+    if scope["profile"] in losses.PROFILES:
+        return losses.DISCLOSURE
     if scope["profile"] == lost_load.PROFILE:
         return lost_load.DISCLOSURE
     if scope["profile"] == price.PROFILE:

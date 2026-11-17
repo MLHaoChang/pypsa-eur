@@ -4452,6 +4452,8 @@
         "carrier-energy/1",
         "branch-loading/1",
         "network-loading/1",
+        "branch-losses/1",
+        "network-losses/1",
         "lost-load/1",
         "bus-price/1",
         "generator-emissions/1",
@@ -5791,6 +5793,24 @@
     "branch_rating"
    ]
   },
+  "branch-losses/1": {
+   "definitions": {
+    "loss_mwh": {
+     "formula_id": "branch-loss-energy-weighted/1",
+     "label": "Transmission losses (generator snapshot weights)",
+     "unit": "MWh"
+    },
+    "peak_loss_mw": {
+     "formula_id": "branch-loss-peak/1",
+     "label": "Peak transmission loss",
+     "unit": "MW"
+    }
+   },
+   "metrics": [
+    "loss_mwh",
+    "peak_loss_mw"
+   ]
+  },
   "bus-price/1": {
    "definitions": {
     "hours_at_voll": {
@@ -6269,6 +6289,30 @@
     "branches_above_rating"
    ]
   },
+  "network-losses/1": {
+   "definitions": {
+    "loss_mwh": {
+     "formula_id": "branch-loss-energy-weighted/1",
+     "label": "Transmission losses (generator snapshot weights)",
+     "unit": "MWh"
+    },
+    "loss_pct_of_demand": {
+     "formula_id": "branch-loss-share-of-load-demand/1",
+     "label": "Losses as a share of load demand",
+     "unit": "%"
+    },
+    "peak_loss_mw": {
+     "formula_id": "branch-loss-peak/1",
+     "label": "Peak transmission loss",
+     "unit": "MW"
+    }
+   },
+   "metrics": [
+    "loss_mwh",
+    "peak_loss_mw",
+    "loss_pct_of_demand"
+   ]
+  },
   "site-import/1": {
    "definitions": {
     "export_energy": {
@@ -6632,6 +6676,8 @@
      "carrier-energy/1",
      "branch-loading/1",
      "network-loading/1",
+     "branch-losses/1",
+     "network-losses/1",
      "lost-load/1",
      "bus-price/1",
      "generator-emissions/1",

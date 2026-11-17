@@ -52,6 +52,10 @@ WEIGHT_BASIS: dict[str, str] = {
     "branch_rating": "none",
     "max_branch_utilisation": "none",
     "branches_above_rating": "none",
+    # losses_calculations.py: the share divides weighted loss by weighted demand
+    "loss_mwh": "generators",
+    "peak_loss_mw": "none",
+    "loss_pct_of_demand": "generators",
     # lost_load_calculations.py
     "lost_load_energy": "generators",
     "peak_shed": "none",

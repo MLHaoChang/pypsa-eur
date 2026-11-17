@@ -341,12 +341,14 @@ class Turn:
                 from harness import (
                     branch_calculations, carrier_calculations, curtailment_calculations,
                     capacity_calculations, emissions_calculations, energy_balance_calculations,
-                    lost_load_calculations, site_import_calculations, investment_calculations, copt_calculations,
+                    losses_calculations, lost_load_calculations, site_import_calculations,
+                    investment_calculations, copt_calculations,
                     grid_readiness_calculations, time_to_power_calculations,
                     price_calculations, storage_cycles_calculations,
                 )
 
                 refusals = (carrier_calculations.REFUSALS | branch_calculations.REFUSALS
+                            | losses_calculations.REFUSALS
                             | lost_load_calculations.REFUSALS | price_calculations.REFUSALS
                             | emissions_calculations.REFUSALS | curtailment_calculations.REFUSALS
                             | capacity_calculations.REFUSALS | storage_cycles_calculations.REFUSALS
@@ -525,6 +527,8 @@ class Turn:
         profile = self.request_scope["profile"]
         result_kind = {
             assurance_metrics.price.PROFILE: "Bus",
+            assurance_metrics.losses.PROFILE: "Branch",
+            assurance_metrics.losses.NETWORK_PROFILE: "Network",
             assurance_metrics.emissions.GENERATOR_PROFILE: "Generator",
             assurance_metrics.emissions.NETWORK_PROFILE: "Network",
             assurance_metrics.balance.PROFILE: "Network",
@@ -557,6 +561,8 @@ class Turn:
             lines.extend(assurance_metrics.carrier.notes(record["raw"], self.request_scope))
         if loading:
             lines.extend(assurance_metrics.branch.notes(record["raw"]))
+        if profile in assurance_metrics.losses.PROFILES:
+            lines.extend(assurance_metrics.losses.notes(record["raw"], self.request_scope))
         if shed:
             lines.extend(assurance_metrics.lost_load.notes(record["raw"], self.request_scope, _label))
         if profile in assurance_metrics.emissions.PROFILES:
