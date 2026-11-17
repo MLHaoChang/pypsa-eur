@@ -15,7 +15,7 @@ What is written, from the pandapower net:
 - ``ElmTerm`` per bus (``uknom`` kV); ``ElmXnet`` per external grid with
   BOTH short-circuit cases (``snss``/``snssmin`` MVA, ``rntxn``/``rntxnmin``
   R/X), so the harmonic and strength studies can run at S_k min and max;
-- ``TypLne`` + ``ElmLne`` per line or cable (Ohm/km, uS/km, km, parallel
+- ``TypLne`` + ``ElmLne`` per line or cable (Ohm/km, uS/km for both B and G, km, parallel
   count; ``inAir`` 0 for a cable when the net marks it ``type == "cs"``);
 - ``TypTr2`` + ``ElmTr2`` per 2-winding transformer (rating, voltages,
   ``uktr``/``pcutr``, no-load losses, tap step, neutral, limits, side and
@@ -26,7 +26,12 @@ What is written, from the pandapower net:
 - ``TypHmccur`` per harmonic spectrum, pointed at by its element's ``phmc``:
   orders, magnitude in % of the unit's rated current — the base the harmonic
   screen uses, I_h = % / 100 * rated_mva at nominal voltage — and the IEC 61000-3-6
-  summation exponent per order (``harmonics.alpha``), as vectors.
+  summation exponent per order (``harmonics.alpha``), as vectors. One block over the
+  union of every source's orders: an order a source does not name is amplitude 0 and
+  alpha 0 there (GC-15).
+
+A value no verified attribute can carry is listed in ``DgsExport.not_written``, never
+guessed: a shunt's active power ``p_mw`` (GC-16).
 
 Names: every DGS ``loc_name`` is the pandapower name, with ``;`` (the field
 separator) and control characters replaced, cut to 40 characters and made
@@ -74,6 +79,9 @@ HARMONIC_COLUMNS = (
     "spectrum_source",
     "orders",
 )
+#: GC-16: a value the file cannot carry under a verified attribute name, listed instead of guessed.
+NOT_WRITTEN_COLUMNS = ("pp_table", "pp_name", "dgs_name", "attribute", "value", "reason")
+SHUNT_P_NOT_WRITTEN = "active power not written: no verified attribute"
 NO_SPECTRUM = "no spectrum"
 WITH_SPECTRUM = "spectrum"
 PENDING_VERIFICATION = (
@@ -98,6 +106,7 @@ ATTRIBUTES = {
         ("rline", "r"),
         ("xline", "r"),
         ("bline", "r"),
+        ("gline", "r"),
         ("inAir", "i"),
         ("frnom", "r"),
     ],
@@ -231,6 +240,9 @@ class DgsExport:
 
     names: pd.DataFrame
     harmonic_sources: pd.DataFrame
+    not_written: pd.DataFrame = dataclasses.field(
+        default_factory=lambda: pd.DataFrame(columns=list(NOT_WRITTEN_COLUMNS))
+    )
 
 
 _UNSAFE = re.compile(r"[;\x00-\x1f\x7f]")
@@ -313,7 +325,7 @@ def write_dgs(
         )
 
     rows: dict = {cls: [] for cls in [*ATTRIBUTES, HARMONIC_CLASS]}
-    names, hsources = [], []
+    names, hsources, not_written = [], [], []
     ids = iter(range(1, 10**9))
     nm = _Names()
 
@@ -342,6 +354,7 @@ def write_dgs(
         dname = nm("ElmLne", ln["name"] if _val(ln, "name", None) else f"line_{i}")
         vn = float(net.bus.at[ln["from_bus"], "vn_kv"])
         b_us = 2 * math.pi * f_hz * float(ln["c_nf_per_km"]) * 1e-3  # nF/km -> uS/km
+        g_us = float(_val(ln, "g_us_per_km", 0.0))  # GC-16: written even when 0, so every row has it
         cable = str(_val(ln, "type", "ol")) == "cs"
         rows["TypLne"].append(
             (
@@ -352,6 +365,7 @@ def write_dgs(
                 float(ln["r_ohm_per_km"]),
                 float(ln["x_ohm_per_km"]),
                 b_us,
+                g_us,
                 0 if cable else 1,
                 f_hz,
             )
@@ -522,6 +536,11 @@ def write_dgs(
         eid = next(ids)
         dname = nm("ElmShnt", sh["name"] if _val(sh, "name", None) else f"shunt_{i}")
         q = float(sh["q_mvar"])  # pandapower load convention: negative is capacitive
+        p = float(sh["p_mw"]) if "p_mw" in sh.index else 0.0  # a NaN is refused below, never read as 0
+        if not math.isfinite(p):
+            raise ContractError(f"DGS: shunt {dname!r} active power p_mw is not finite ({p})")
+        if p != 0.0:  # GK A2 option 1: no public source names the shunt's loss attribute, so it is listed
+            not_written.append(("shunt", str(_val(sh, "name", "")), dname, "p_mw", p, SHUNT_P_NOT_WRITTEN))
         max_step = int(_val(sh, "max_step", 1))
         rows["ElmShnt"].append(
             (
@@ -595,32 +614,43 @@ def write_dgs(
                     [str(r[0]), *(_fmt(v, t[0]) for v, (_, t) in zip(r[1:], attrs))]
                 )
             )
+    # GC-15 (GK A2): one TypHmccur block over the union of every source's orders. A source with no value at an
+    # order gets amplitude 0 and alpha 0 there (physically the same as absent), so every row has the same
+    # SIZEROW: no repeated header and no empty fields, neither of which a reader is known to accept.
+    union = sorted({h for r in rows[HARMONIC_CLASS] for h in r[2]})
+    if rows[HARMONIC_CLASS]:
+        n = len(union)
+        lines.append(
+            ";".join(
+                [
+                    "$$" + HARMONIC_CLASS,
+                    "ID(a:40)",
+                    "loc_name(a:40)",
+                    "norder:SIZEROW(i)",
+                    *(f"norder:{k}(i)" for k in range(n)),
+                    "ampl:SIZEROW(i)",
+                    *(f"ampl:{k}(r)" for k in range(n)),
+                    "alpha:SIZEROW(i)",
+                    *(f"alpha:{k}(r)" for k in range(n)),
+                ]
+            )
+        )
     for r in rows[HARMONIC_CLASS]:
         hid, hname, orders, mags, alphas = r
-        n = len(orders)
-        head = [
-            "$$" + HARMONIC_CLASS,
-            "ID(a:40)",
-            "loc_name(a:40)",
-            "norder:SIZEROW(i)",
-            *(f"norder:{k}(i)" for k in range(n)),
-            "ampl:SIZEROW(i)",
-            *(f"ampl:{k}(r)" for k in range(n)),
-            "alpha:SIZEROW(i)",
-            *(f"alpha:{k}(r)" for k in range(n)),
-        ]
-        lines.append(";".join(head))
+        own = {h: (float(m), float(a)) for h, m, a in zip(orders, mags, alphas)}
+        mags = [own.get(h, (0.0, 0.0))[0] for h in union]
+        alphas = [own.get(h, (0.0, 0.0))[1] for h in union]
         lines.append(
             ";".join(
                 [
                     str(hid),
                     hname,
                     str(n),
-                    *map(str, orders),
+                    *map(str, union),
                     str(n),
-                    *(repr(float(m)) for m in mags),
+                    *(repr(m) for m in mags),
                     str(n),
-                    *(repr(float(a)) for a in alphas),
+                    *(repr(a) for a in alphas),
                 ]
             )
         )
@@ -636,6 +666,7 @@ def write_dgs(
     return DgsExport(
         names=pd.DataFrame(names, columns=list(NAME_COLUMNS)),
         harmonic_sources=pd.DataFrame(hsources, columns=list(HARMONIC_COLUMNS)),
+        not_written=pd.DataFrame(not_written, columns=list(NOT_WRITTEN_COLUMNS)),
     )
 
 
