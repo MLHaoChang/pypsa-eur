@@ -27,6 +27,7 @@ from services.results.cost_breakdown import compute_cost_breakdown
 from services.results.economics_by_carrier import compute_economics_by_carrier
 from services.results_workbook import registry
 from services.results_workbook.overview import CASE_ROWS, RUN_THE_CASE
+from services.results_workbook.finance import CASE_SHEET_WORDS, case_sheet_title
 from services.solver_service import SolverConfig
 
 URL = "/api/results/workbook.xlsx"
@@ -259,8 +260,12 @@ def test_with_a_case_the_kpis_equal_the_report_and_the_npv_is_live(solved):
     assert _approx(_row(ws, "NPV in the stored report")[1].value, rep.npv_at_wacc)
     # Finance sheets come from export_xlsx, prefixed.
     case = [s for s in wb.sheetnames if s.startswith("Case ")]
-    assert {"Case About", "Case Summary", "Case CashflowLines"} <= set(case)
-    assert {f"Case {s}"[:31] for s in IC_REPORT_SECTIONS} <= set(case)
+    assert {"Case About", "Case Summary", "Case Cash flow lines"} <= set(case)
+    assert {case_sheet_title(s) for s in IC_REPORT_SECTIONS} <= set(case)
+    # Walk 2026-11-17 issue 06: every sheet title in words, never an id.
+    assert set(CASE_SHEET_WORDS) >= {"About", "Summary", "CashflowLines", *IC_REPORT_SECTIONS}
+    assert "Case Dispatch modes" in case and "Case Tax equity" in case
+    assert not [s for s in wb.sheetnames if "_" in s or s.startswith("Case CashflowLines")]
     assert len(ws._charts) == 3
 
 
@@ -404,7 +409,7 @@ def test_case_sheets_equal_the_standalone_case_export(solved):
     assert not wb.defined_names
     titles = set(wb.sheetnames)
     for ws in alone.worksheets:
-        copy = wb[f"Case {ws.title}"[:31]]
+        copy = wb[case_sheet_title(ws.title)]
         for row in ws.iter_rows():
             for c in row:
                 d = copy[c.coordinate]

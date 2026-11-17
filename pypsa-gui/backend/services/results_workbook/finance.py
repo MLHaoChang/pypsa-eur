@@ -18,9 +18,34 @@ import io
 from services.results_workbook.overview import RUN_THE_CASE
 from services.results_workbook.registry import register
 
-__all__ = ["CASE_PREFIX", "write_case_sheets"]
+__all__ = ["CASE_PREFIX", "CASE_SHEET_WORDS", "case_sheet_title", "write_case_sheets"]
 
 CASE_PREFIX = "Case "
+
+# The case workbook's sheet titles in words (walk 2026-11-17 issue 06, RAW-NAMES-1):
+# `models.finance.IC_REPORT_SECTIONS` and the export's own sheets. Excel caps a title
+# at 31 characters and refuses ":", so the prefix stays "Case ".
+CASE_SHEET_WORDS: dict[str, str] = {
+    "About": "About",
+    "Summary": "Summary",
+    "CashflowLines": "Cash flow lines",
+    "design": "Design",
+    "commercial": "Commercial",
+    "dispatch_modes": "Dispatch modes",
+    "participants": "Participants",
+    "project": "Project",
+    "debt": "Debt",
+    "tax": "Tax",
+    "tax_equity": "Tax equity",
+    "uncertainty": "Uncertainty",
+    "gates": "Gates",
+}
+
+
+def case_sheet_title(source_title: str) -> str:
+    """The workbook title of one case sheet: "Case " and the sheet in words."""
+    words = CASE_SHEET_WORDS.get(source_title, source_title.replace("_", " ").capitalize())
+    return (CASE_PREFIX + words)[:31]
 
 
 def _copy(src, dst) -> None:
@@ -52,7 +77,7 @@ def write_case_sheets(wb, report, *, project: str | None = None) -> list[str]:
                            "write_case_sheets must rewrite their sheet references")
     titles = []
     for ws in src.worksheets:
-        dst = wb.create_sheet((CASE_PREFIX + ws.title)[:31])
+        dst = wb.create_sheet(case_sheet_title(ws.title))
         _copy(ws, dst)
         titles.append(dst.title)
     return titles
