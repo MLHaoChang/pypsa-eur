@@ -82,3 +82,9 @@ it('folds past five units behind Show all and explains a binding hour with no ho
   fireEvent.click(screen.getByTestId('operating-reserve-show-all'))
   expect(screen.getAllByTestId('operating-reserve-holders')[0].textContent).toBe('u0 7 MW · u1 6 MW · u2 5 MW · u3 4 MW · u4 3 MW · u5 2 MW · u6 1 MW')
 })
+
+it('reads a unit running over its limit in words, not as a minus sign', async () => {
+  show({ ...base, per_snapshot: [{ snapshot: 'a', required_mw: 4, held_mw: 4, binding: true,
+    holders: [{ name: 'b', kind: 'generator', held_mw: 5 }, { name: 'Diesel', kind: 'generator', held_mw: -1 }] }] })
+  expect((await screen.findByTestId('operating-reserve-holders')).textContent).toBe('b 5 MW · Diesel 1 MW over its limit')
+})

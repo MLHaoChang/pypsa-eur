@@ -15,7 +15,10 @@ const mw = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2
 export const RESERVE_HOLDER_CAP = 5
 
 /** One unit as people read it: "Diesel 120 MW", with "(storage)" after a storage unit's name. */
-const holderText = (h: ReserveHolder) => `${h.name}${h.kind === 'storage_unit' ? ' (storage)' : ''} ${mw(h.held_mw)} MW`
+const holderText = (h: ReserveHolder) =>
+  h.held_mw < 0
+    ? `${h.name} ${mw(Math.abs(h.held_mw))} MW over its limit`
+    : `${h.name}${h.kind === 'storage_unit' ? ' (storage)' : ''} ${mw(h.held_mw)} MW`
 
 /** Who holds the reserve in one binding hour: "Diesel 120 MW · Battery (storage) 30 MW", folded past five units. */
 function HeldBy({ holders, heldMw }: { holders: ReserveHolder[]; heldMw: number }) {

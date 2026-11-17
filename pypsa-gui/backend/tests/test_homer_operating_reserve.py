@@ -1303,3 +1303,49 @@ def test_an_explicit_limit_is_clamped_to_the_page_size_in_the_chat_read():
     out = _operating_reserve_page(_payload(40, 1), limit=1000)
     assert len(out["binding_hours"]) == 24 and out["binding_hours_total"] == 40
     assert len(_operating_reserve_page(_payload(40, 1), limit=0)["binding_hours"]) == 1
+
+
+def test_the_units_add_up_with_values_whose_naive_sum_depends_on_the_order():
+    """1e16 + 1 + 1: a plain float sum (numpy's) loses both ones; the exactly rounded sum keeps them.
+    (Python's builtin sum is compensated since 3.12 and agrees with fsum here.)"""
+    assert float(np.array([1e16, 1.0, 1.0]).sum()) != math.fsum([1e16, 1.0, 1.0])
+    n = _network(committable=False)
+    sns = n.snapshots
+    n.generators.loc["diesel", "p_nom"] = 0.0
+    for name, size in (("a_big", 1e16), ("b_one", 1.0), ("c_one", 1.0)):
+        n.add(
+            "Generator",
+            name,
+            bus="ac",
+            carrier="diesel",
+            p_nom=size,
+            marginal_cost=250.0,
+        )
+    n.generators_t.p = pd.DataFrame(
+        {"pv": 0.0, "diesel": 0.0, "a_big": 0.0, "b_one": 0.0, "c_one": 0.0}, index=sns
+    )
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    row = operating_reserve_result(n, ((1e16 + 2.0) / LOAD_MW, 0.0, 0.0))[
+        "per_snapshot"
+    ][0]
+    assert row["binding"] and row["held_mw"] == 1e16 + 2.0
+    assert [h["name"] for h in row["holders"]] == ["a_big", "b_one", "c_one"]
+    assert math.fsum(h["held_mw"] for h in row["holders"]) == row["held_mw"]
+
+
+def test_a_real_overdraw_is_listed_with_a_negative_amount_and_the_sum_still_holds():
+    n = _network(committable=False)
+    sns = n.snapshots
+    n.add("Generator", "b", bus="ac", carrier="diesel", p_nom=5.0, marginal_cost=250.0)
+    n.generators_t.p = pd.DataFrame(
+        {"pv": 0.0, "diesel": 12.0 + 1e-3, "b": 0.0}, index=sns
+    )
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    row = operating_reserve_result(n, (0.4999, 0.0, 0.0))["per_snapshot"][
+        0
+    ]  # required 4.999
+    assert row["binding"]
+    assert [h["name"] for h in row["holders"]] == ["b", "diesel"]
+    assert row["holders"][0]["held_mw"] == 5.0
+    assert row["holders"][1]["held_mw"] == pytest.approx(-1e-3, rel=1e-6)
+    assert math.fsum(h["held_mw"] for h in row["holders"]) == row["held_mw"]
