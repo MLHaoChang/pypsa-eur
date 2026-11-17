@@ -97,3 +97,17 @@ def test_the_stamp_is_utc_on_a_server_in_another_zone(n, tokyo_clock):
         time.strptime(n.meta["assistant_solve_at"], "%Y-%m-%dT%H:%M:%SZ")
     )
     assert abs(stamped - time.time()) < 60
+
+
+def test_a_solve_whose_fingerprint_fails_still_moves_the_stamp(n, monkeypatch):
+    # solver_service drops both fingerprints when recording them raises, but the dispatch is new:
+    # the line must not show the previous solve's time (GK B3, #1700).
+    n.meta["assistant_solve_at"] = "2000-01-01T00:00:00Z"
+
+    def boom(ctx, exact=False):
+        raise RuntimeError("fingerprint failed")
+
+    monkeypatch.setattr(workflow_tools, "_network_input_fingerprint", boom)
+    with pytest.raises(RuntimeError):
+        workflow_tools._record_solve_inputs(n, {})
+    assert n.meta["assistant_solve_at"] != "2000-01-01T00:00:00Z"

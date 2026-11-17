@@ -880,6 +880,10 @@ def hold_solve_inputs(network, lock):
 
 def _record_solve_inputs(network, config):
     """Called under the existing solve lock, after modelling inputs restore."""
+    # When this solve ran (UTC), saved with the project: the Results source-run line names it
+    # (control-strategy walkthrough 06). Stamped first, so a fingerprint failure after it (the caller then
+    # drops both fingerprints) never leaves the previous solve's time on this new dispatch.
+    network.meta["assistant_solve_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     # A queued solve of another project runs in `solving_context(ctx)`: its
     # own uploaded series (user_ts) belong in the fingerprint, as every later
     # read hydrates them from disk (LC-18).
@@ -893,6 +897,3 @@ def _record_solve_inputs(network, config):
         ctx.solver_state["solver_config"] = config
     network.meta["assistant_solve_input_fingerprint"] = _network_input_fingerprint(ctx)
     network.meta["assistant_solve_exact_input_fingerprint"] = _network_input_fingerprint(ctx, exact=True)
-    # When this solve was recorded (UTC), beside its fingerprint so it is saved with the project: the
-    # Results source-run line names it (control-strategy walkthrough 06).
-    network.meta["assistant_solve_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
