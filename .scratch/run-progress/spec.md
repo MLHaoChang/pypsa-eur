@@ -62,10 +62,12 @@ Expert adds, on the same line: the step count for staged work (*12 of 35*) and a
 The bar is **indeterminate** unless an estimate exists (section 2). We never
 draw a percentage we cannot back.
 
-**One place.** The header's existing status pill (today "Idle" / "Running…" /
-"Queued #n", and "Idle" while a Guided study runs: walkthrough J4/J5) becomes
-the status line. It reflects every run of the current project, queue job or
-study, so Guided and Expert show the same state. No second element.
+**One place.** A run strip at the top of the tab (where the read-only banner
+sits) carries the line; it reflects every run of the current project, queue
+job or study, so Guided and Expert show the same state. The header pill stays
+compact ("Running…", "Queued #n") and no longer reads "Idle" while a Guided
+study runs (walkthrough J4/J5). Header first was tried: in Expert the line was
+cut at 1280 px and wrapped at 1024 px, so per UX (a) it is a strip, not both.
 
 ## 2. ETA
 
