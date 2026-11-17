@@ -350,9 +350,12 @@ export function StepPeriodEconomics({
                         const rate = loadGrowthPctPerYear[carrier]
                         const derived = isDerivedScaler({ load_scalers_derived: loadScalersDerived }, carrier, period)
                         // With a rate, an absent entry is the base year's 1.000 (the
-                        // server writes no 1.0), so it too follows the rate.
+                        // server writes no 1.0), so it too follows the rate, unless the
+                        // all-carrier `load_scalers` holds that period: the server keeps
+                        // it typed and never derives over it.
                         const fromRate = rate != null && (derived
-                          || loadScalersByCarrier[carrier]?.[String(period)] == null)
+                          || (loadScalersByCarrier[carrier]?.[String(period)] == null
+                            && legacyLoadScalers[String(period)] == null))
                         const typedOverRate = rate != null && !fromRate
                         const shown = v.toFixed(3)
                         return (

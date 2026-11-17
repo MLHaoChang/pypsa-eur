@@ -453,6 +453,27 @@ it('shows the load growth rate beside the multipliers it derives, and sends a ty
   expect(heatRate.getAttribute('aria-invalid')).toBeNull()
 })
 
+it('shows a period the all-carrier multiplier holds as typed, not from the rate', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2035],
+    weightings: [{ period: 2030, years: 5, objective: 1 }, { period: 2035, years: 5, objective: 1 }],
+  })
+  // The server keeps a legacy all-carrier value and never derives over it.
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(baseSolverConfig({
+    multi_investment_periods: true,
+    load_scalers: { '2035': 1.3 },
+    load_growth_pct_per_year: { electrical: 2 },
+    load_growth_base_year: 2030,
+  }))
+  renderPage()
+  await openStep(/Economics/)
+  await screen.findByText('Period weightings')
+  await userEvent.click(screen.getByText('Advanced'))
+  await screen.findByLabelText('Load growth (% per year), Electrical')
+  expect(screen.getAllByText('from rate').length).toBe(1)  // 2030 only
+})
+
 it('says why the growth year is disabled while no carrier has a rate', async () => {
   vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
   vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({

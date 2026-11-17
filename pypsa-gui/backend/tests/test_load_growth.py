@@ -195,6 +195,26 @@ def test_each_invalid_start_year_is_refused(base):
     assert load_growth_problems({"electrical": 2.0}, base, [2030, 2035])
 
 
+# ── C4: rate keys are load carriers, one rate per carrier ────────────────────
+
+
+def test_two_aliases_of_one_carrier_are_refused():
+    assert LG.rate_key_problems({"AC": 2.0, "electrical": 3.0}, None)
+
+
+def test_a_rate_on_a_carrier_no_load_has_is_refused():
+    assert LG.rate_key_problems({"foo": 2.0}, {"electrical"})
+
+
+def test_a_rate_on_an_alias_of_a_load_carrier_passes():
+    assert LG.rate_key_problems({"AC": 2.0}, {"electrical"}) == []
+
+
+def test_without_a_network_the_carrier_is_not_checked():
+    assert LG.rate_key_problems({"foo": 2.0}, None) == []
+    assert LG.rate_key_problems({"foo": 2.0}, set()) == []
+
+
 def test_a_valid_rate_and_no_rate_pass():
     assert load_growth_problems({"electrical": -5.0}, 2030, [2030, 2035]) == []
     assert load_growth_problems({}, None, [2030, 2035]) == []
@@ -545,3 +565,69 @@ def test_a_period_change_no_writer_followed_blocks_the_solve_in_plain_words(
     ]
     assert issues and issues[0].severity == "error"
     assert "out of date for the periods [2030, 2035]" in issues[0].message
+
+
+def test_the_route_refuses_a_rate_on_a_carrier_no_load_has(grown_network):
+    r = _put(grown_network, {"load_growth_pct_per_year": {"foo": 2.0}})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "load_growth_invalid"
+    assert _cfg(grown_network)["load_growth_pct_per_year"] == {"electrical": 2.0}
+
+
+def test_the_route_refuses_two_aliases_of_one_carrier(client):
+    r = _put(
+        client,
+        {
+            "load_growth_pct_per_year": {"AC": 2.0, "electrical": 3.0},
+            "load_growth_base_year": 2030,
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "load_growth_invalid"
+
+
+# ── C7: export/import keeps the growth inputs; a network import re-derives ───
+
+
+def test_a_bundle_round_trip_keeps_the_rate_start_year_and_marks(grown_network):
+    before = _cfg(grown_network)
+    r = grown_network.post("/api/projects/lg_net", params={"force": True})
+    assert r.status_code == 200, r.text
+    r = grown_network.get("/api/projects/lg_net/bundle")
+    assert r.status_code == 200, r.text[:300]
+    r = grown_network.post(
+        "/api/projects/import_bundle",
+        params={"name": "lg_copy"},
+        files={"file": ("b.zip", r.content, "application/zip")},
+    )
+    assert r.status_code in (200, 201), r.text[:300]
+    after = _cfg(grown_network)
+    keys = (
+        "load_growth_pct_per_year",
+        "load_growth_base_year",
+        "load_scalers_by_carrier",
+        "load_scalers_derived",
+    )
+    assert {k: after[k] for k in keys} == {k: before[k] for k in keys}
+    assert after["load_scalers_derived"] == {"electrical": ["2035"]}
+
+
+def test_a_network_import_rederives_on_its_periods(grown_network, tmp_path):
+    from tests.test_fca_load_scalers import build_edge_15min
+
+    base = build_edge_15min()
+    n = base.copy()
+    n.set_snapshots(base.snapshots[:96])
+    n.loads_t.p_set = base.loads_t.p_set.iloc[:96]
+    n.generators_t.p_max_pu = base.generators_t.p_max_pu.iloc[:96]
+    n.set_investment_periods([2030, 2040])
+    path = tmp_path / "other.nc"
+    n.export_to_netcdf(path)
+    r = grown_network.post(
+        "/api/io/import/netcdf",
+        files={"file": ("other.nc", path.read_bytes(), "application/x-netcdf")},
+    )
+    assert r.status_code == 200, r.text[:300]
+    assert _cfg(grown_network)["load_scalers_by_carrier"] == {
+        "electrical": {"2040": round(1.02**10, 6)}
+    }

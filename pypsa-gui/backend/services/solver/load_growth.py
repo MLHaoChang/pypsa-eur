@@ -55,6 +55,42 @@ def canonical_rates(rates) -> dict:
     return {_canonical_load_carrier_key(c): r for c, r in (rates or {}).items()}
 
 
+def rate_key_problems(rates, load_carriers) -> list[str]:
+    """Each reason the rate's carrier keys are refused (GK B C4): two keys that
+    name one carrier (``'AC'`` and ``'electrical'``), and, when
+    ``load_carriers`` (the canonical carriers of the network's loads) is known
+    and not empty, a key no load has, which would scale nothing."""
+    from services.solver.assumptions import _canonical_load_carrier_key
+
+    problems: list[str] = []
+    seen: dict[str, str] = {}
+    for raw in rates or {}:
+        key = _canonical_load_carrier_key(raw)
+        if key in seen:
+            problems.append(
+                f"Load growth: {seen[key]!r} and {raw!r} are the same carrier "
+                f"({key}); give it one rate"
+            )
+            continue
+        seen[key] = raw
+        if load_carriers and key not in load_carriers:
+            problems.append(
+                f"Load growth ({raw}): no load in the network has this carrier"
+            )
+    return problems
+
+
+def load_carriers_of(n) -> set[str] | None:
+    """The canonical carriers of the network's loads; ``None`` with no
+    network (the carrier check is then skipped)."""
+    from services.solver.assumptions import _canonical_load_carrier_key
+
+    loads = getattr(n, "loads", None) if n is not None else None
+    if loads is None:
+        return None
+    return {_canonical_load_carrier_key(c) for c in loads.carrier}
+
+
 def effective_periods(cfg, n) -> list[int]:
     """The periods the LP solves: the config's ``investment_periods`` override
     when multi-period and set (``assumptions`` step 4), else the network's."""
@@ -188,18 +224,22 @@ def derive_load_scalers(
     return out, out_derived
 
 
-def apply(after: dict, stored_cfg, periods: list) -> dict:
+def apply(after: dict, stored_cfg, periods: list, load_carriers=None) -> dict:
     """The growth keys as a change leaves them: ``after`` holds the config's
     ``load_scalers``, ``load_scalers_by_carrier``, ``load_growth_pct_per_year``
     and ``load_growth_base_year`` after the change; ``stored_cfg`` is the
     config before it. Returns the keys to write, ``{}`` when no rate is stored
     or set (nothing is read or written, so the config stays as it is).
-    Raises ``LoadGrowthError``."""
+    ``load_carriers`` (``load_carriers_of``) checks each rate names a load's
+    carrier; the routes that only re-derive pass none. Raises
+    ``LoadGrowthError``."""
     rates = canonical_rates(after.get("load_growth_pct_per_year"))
     if not rates and not getattr(stored_cfg, "load_growth_pct_per_year", None):
         return {}
     base_year = after.get("load_growth_base_year")
-    problems = load_growth_problems(rates, base_year, periods)
+    problems = rate_key_problems(
+        after.get("load_growth_pct_per_year"), load_carriers
+    ) + load_growth_problems(rates, base_year, periods)
     if problems:
         raise LoadGrowthError(
             {
@@ -281,17 +321,19 @@ def refreshed_config(cfg, network_periods: list):
     return replace(cfg, **fresh)
 
 
-def follow_network(ctx) -> None:
+def follow_network(ctx, periods: list[int] | None = None) -> None:
     """Re-derive the live session's stored multipliers for its network's
-    current periods (homer-parity 04a), for a writer that replaces the network
-    but keeps the solver config: undo, a network import. A refusal leaves the
-    config as it is; the solve's pre-flight check (``stale_problem``) names it."""
+    periods (homer-parity 04a), for a writer that changes the network but
+    keeps the solver config: undo, a network import, a time-axis route (which
+    passes the new ``periods`` before the network holds them). A refusal
+    leaves the config as it is; the solve's pre-flight check
+    (``stale_problem``) names it."""
     cfg = ctx.solver_state.get("solver_config")
-    periods = getattr(ctx.network, "investment_periods", None)
+    if periods is None:
+        held = getattr(ctx.network, "investment_periods", None)
+        periods = [int(p) for p in held] if held is not None else []
     try:
-        grown = refreshed_config(
-            cfg, [int(p) for p in periods] if periods is not None else []
-        )
+        grown = refreshed_config(cfg, periods)
     except LoadGrowthError:
         return
     if grown is not cfg:

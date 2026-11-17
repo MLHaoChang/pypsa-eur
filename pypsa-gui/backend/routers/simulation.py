@@ -431,7 +431,9 @@ def _derive_load_growth(submitted: dict, stored_cfg) -> None:
         network = None
     periods = LG.effective_periods(SimpleNamespace(**after), network)
     try:
-        submitted.update(LG.apply(after, stored_cfg, periods))
+        submitted.update(
+            LG.apply(after, stored_cfg, periods, LG.load_carriers_of(network))
+        )
     except LG.LoadGrowthError as exc:
         raise HTTPException(422, exc.detail) from None
 

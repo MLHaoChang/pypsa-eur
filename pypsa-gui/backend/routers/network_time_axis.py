@@ -541,16 +541,9 @@ def _apply_load_growth(periods: list[int]) -> None:
     periods (homer-parity 04a), so none is left from the old period set. A
     refusal here (a config changed since `_check_load_growth`) leaves the
     config as it is; the solve's pre-flight check then names it."""
-    from services.solver import load_growth as LG
+    from services.solver.load_growth import follow_network
 
-    ctx = PyPSAService.get_active_context()
-    cfg = ctx.solver_state.get("solver_config")
-    try:
-        grown = LG.refreshed_config(cfg, periods)
-    except LG.LoadGrowthError:
-        return
-    if grown is not cfg:
-        ctx.solver_state["solver_config"] = grown
+    follow_network(PyPSAService.get_active_context(), periods)
 
 
 @router.post("/snapshots")

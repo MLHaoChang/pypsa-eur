@@ -351,8 +351,10 @@ export default function ModelHorizon() {
   const updateLoadScalersByCarrier = useMutation({
     mutationFn: (next: ReturnType<typeof loadScalerEdit>) => simulationApi.updateSolverConfig(next),
     onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
-    onError: (e: { response?: { data?: { detail?: string } } }) =>
-      toast.error(e.response?.data?.detail ?? 'Failed to update per-carrier load scaler'),
+    // With a rate stored the PUT re-derives, so a 422 detail is the growth
+    // refusal's {code, error_kind, message}, not a string.
+    onError: (e: unknown) =>
+      toast.error(growthErrorMessage(e) ?? 'Failed to update per-carrier load scaler'),
   })
 
   const growthErrorMessage = (e: unknown): string | null => {
