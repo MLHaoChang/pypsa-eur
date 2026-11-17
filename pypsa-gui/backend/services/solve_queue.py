@@ -267,11 +267,14 @@ class SolveConfigConflict(Exception):
         self.existing = existing
 
 
-def _enqueuer_views_project(job: "SolveJob") -> bool:
-    """True when the person who queued `job` now only views its project.
+def _enqueuer_may_not_write(job: "SolveJob") -> bool:
+    """True when the person who queued `job` may no longer write its project:
+    they now only view it, their membership is gone, or their account is.
 
-    Read fresh from the database at the moment the job runs. A job with no
-    recorded requester or project (local mode, unkeyed jobs) is not judged here.
+    Read fresh from the database at the moment the job runs; a lost membership
+    fails closed like a demotion (GK B F3 on #1622). A job with no recorded
+    requester or project (local mode, unkeyed jobs) is not judged here, nor is
+    a deleted project.
     """
     key, requester = job.project_key, job.enqueued_by_user_id
     if not key or requester is None or ":" not in key:
@@ -288,9 +291,11 @@ def _enqueuer_views_project(job: "SolveJob") -> bool:
     db = db_session.SessionLocal()
     try:
         user, project = db.get(User, user_id), db.get(Project, project_id)
-        if user is None or project is None:
+        if project is None:
             return False
-        return project_acl.project_role(db, user, project) == project_acl.VIEW
+        if user is None:
+            return True
+        return project_acl.project_role(db, user, project) != project_acl.EDIT
     finally:
         db.close()
 
@@ -1060,9 +1065,9 @@ class SolveQueue:
         """Dispatch on the job's kind. Everything else about a job — claiming
         it, the log queue, the stop event, the persisted status — is the same
         whichever runner takes it."""
-        if _enqueuer_views_project(job):
+        if _enqueuer_may_not_write(job):
             # The role is read again here, at execution: a person made a
-            # viewer after queueing does not get the solve saved
+            # viewer, or removed, after queueing does not get the solve saved
             # (project-viewer-role 01, GK B R3).
             from services import project_write_gate
 

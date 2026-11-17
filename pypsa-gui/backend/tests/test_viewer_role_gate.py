@@ -518,9 +518,9 @@ def test_a_job_queued_by_an_editor_demoted_before_it_runs_is_not_run(
     from services import solve_queue as queue_service
 
     job = _job(world, world["editor"])
-    assert queue_service._enqueuer_views_project(job) is False
+    assert queue_service._enqueuer_may_not_write(job) is False
     _set_role(world["session_local"], world["project"], world["editor"], "viewer")
-    assert queue_service._enqueuer_views_project(job) is True
+    assert queue_service._enqueuer_may_not_write(job) is True
     finished, ran = [], []
     q = queue_service.solve_queue
     monkeypatch.setattr(
@@ -880,11 +880,11 @@ def test_job_view_only_for_a_deleted_project_is_false(db, world):
     assert queue_router._job_view_only(db, viewer, real) is True
 
 
-def test_enqueuer_views_project_judges_only_a_complete_job(world):
+def test_enqueuer_may_not_write_judges_only_a_complete_job(world):
     from services import solve_queue as queue_service
 
     job = _job(world, world["viewer"])
-    assert queue_service._enqueuer_views_project(job) is True
+    assert queue_service._enqueuer_may_not_write(job) is True
     org_key = job.project_key
     for project_key, requester in [
         (None, world["viewer"]),
@@ -893,11 +893,202 @@ def test_enqueuer_views_project_judges_only_a_complete_job(world):
         ("no-colon", world["viewer"]),
         ("org:not-a-uuid", world["viewer"]),
         (org_key, "not-a-uuid"),
-        (org_key, uuid.uuid4()),
         (f"{org_key.split(':')[0]}:{uuid.uuid4()}", world["viewer"]),
     ]:
         job.project_key, job.enqueued_by_user_id = project_key, requester
-        assert queue_service._enqueuer_views_project(job) is False, (
+        assert queue_service._enqueuer_may_not_write(job) is False, (
             project_key,
             requester,
         )
+
+
+# ── F1: a viewer comments and exports while an editor holds the edit lock ────
+# (VIEWER-ROLE-1 Q3/Q4; GK B F1 on #1622, conditions V-a to V-d)
+
+
+@pytest.fixture
+def locked_report(world, as_user, monkeypatch):
+    """A report of the project, and the editor holding the project's edit lock.
+
+    Staleness is not what these tests judge, so the export's evidence
+    comparison (`_refuse_stale`) is stubbed out."""
+    from routers import reports as reports_router
+    from services.reports import store
+    from tests import test_report_revisions as reports
+
+    store.create_report(world["path"], reports._doc())
+    monkeypatch.setattr(reports_router, "_refuse_stale", lambda project, doc: None)
+    editor = as_user(world["editor"])
+    taken = editor.post(f"/api/projects/{world['project']}/lock")
+    assert taken.status_code == 200, taken.text
+    base = f"/api/projects/{world['project']}/reports/{reports.RID}"
+    return {"editor": editor, "rid": reports.RID, "base": base}
+
+
+_ANCHOR = {"section_id": "grid", "block_index": 0}
+
+
+def test_a_viewer_comments_withdraws_and_exports_under_an_editors_lock(
+    world, as_user, locked_report
+):
+    from services.reports import revisions
+
+    viewer, base = as_user(world["viewer"]), locked_report["base"]
+    added = viewer.post(f"{base}/comments", json={"text": "shorter", "anchor": _ANCHOR})
+    assert added.status_code == 200, added.text
+    mine = added.json()["comment_id"]
+    assert viewer.post(f"{base}/comments/{mine}/withdraw").status_code == 200
+    reports_before = _disk(world["path"] / "reports")
+    exported = viewer.post(f"{base}/export", json={})
+    assert exported.status_code == 200, exported.text
+    assert exported.json()["kind"] == "agent_export"
+    # V-d: the export rendered the saved version; the report's files are untouched.
+    assert _disk(world["path"] / "reports") == reports_before
+    status = {
+        c.comment_id: c.status
+        for c in revisions.load_comments(world["path"], locked_report["rid"])
+    }
+    assert status == {mine: "withdrawn"}
+
+
+@pytest.mark.parametrize("route", ["comment", "withdraw", "export"])
+def test_an_editor_still_meets_a_foreign_lock_on_these_routes(
+    world, as_user, locked_report, route
+):
+    """V-c: the skip is the viewer's alone; it kills a mutant skipping for all."""
+    from services.reports import revisions
+    from tests import test_report_revisions as reports
+
+    other = _member(world["session_local"], _org_of(world))
+    _grant(
+        world["session_local"], world["project"], other, "editor", by=world["editor"]
+    )
+    client, base = as_user(other), locked_report["base"]
+    if route == "comment":
+        response = client.post(
+            f"{base}/comments", json={"text": "x", "anchor": _ANCHOR}
+        )
+    elif route == "withdraw":
+        held = revisions.add_comment(
+            world["path"],
+            locked_report["rid"],
+            "n",
+            reports._anchor(),
+            user=f"viewer-{other.hex}@example.com",
+        )
+        response = client.post(f"{base}/comments/{held.comment_id}/withdraw")
+    else:
+        response = client.post(f"{base}/export", json={})
+    assert response.status_code == 409 and _kind(response) == "project_locked", (
+        response.text
+    )
+
+
+def test_a_viewer_and_an_editor_comment_at_the_same_moment_and_both_survive(
+    world, as_user, locked_report
+):
+    """V-a: both writers serialise on `store.report_lock`; neither is lost."""
+    import threading
+
+    from services.reports import revisions
+
+    viewer, editor, base = (
+        as_user(world["viewer"]),
+        locked_report["editor"],
+        locked_report["base"],
+    )
+    barrier, results = threading.Barrier(2), {}
+
+    def post(name, client):
+        barrier.wait()
+        results[name] = client.post(
+            f"{base}/comments", json={"text": name, "anchor": _ANCHOR}
+        )
+
+    threads = [
+        threading.Thread(target=post, args=("viewer", viewer)),
+        threading.Thread(target=post, args=("editor", editor)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    assert {k: r.status_code for k, r in results.items()} == {
+        "viewer": 200,
+        "editor": 200,
+    }
+    texts = sorted(
+        c.text for c in revisions.load_comments(world["path"], locked_report["rid"])
+    )
+    assert texts == ["editor", "viewer"]
+
+
+def test_a_viewers_comment_is_refused_while_the_reports_are_closing(
+    world, as_user, locked_report
+):
+    """V-b: the skip leaves the directory close in force."""
+    from services.reports import revisions, store
+
+    viewer, base = as_user(world["viewer"]), locked_report["base"]
+    with store.reports_closed(world["path"]):
+        refused = viewer.post(f"{base}/comments", json={"text": "x", "anchor": _ANCHOR})
+    assert refused.status_code != 200, refused.text
+    assert revisions.load_comments(world["path"], locked_report["rid"]) == []
+
+
+def test_a_viewers_export_during_a_close_answers_as_an_editors_does(
+    world, as_user, locked_report
+):
+    """V-b for export: it writes no reports/ file, so the close treats a viewer's
+    export exactly as an editor's (who holds the lock here, so meets no 409)."""
+    from services.reports import store
+
+    viewer, editor, base = (
+        as_user(world["viewer"]),
+        locked_report["editor"],
+        locked_report["base"],
+    )
+    with store.reports_closed(world["path"]):
+        as_viewer = viewer.post(f"{base}/export", json={})
+        as_editor = editor.post(f"{base}/export", json={})
+    assert as_viewer.status_code == as_editor.status_code, (
+        as_viewer.text,
+        as_editor.text,
+    )
+    assert _kind(as_viewer) == _kind(as_editor)
+
+
+# ── F3: a removed member's queued job is not run ─────────────────────────────
+
+
+def test_a_job_queued_by_a_member_removed_before_it_runs_is_not_run(world):
+    from services import solve_queue as queue_service
+
+    job = _job(world, world["editor"])
+    assert queue_service._enqueuer_may_not_write(job) is False
+    with world["session_local"]() as db:
+        db.query(ProjectMembership).filter_by(
+            project_id=uuid.UUID(str(world["project"])), user_id=world["editor"]
+        ).delete()
+        db.commit()
+    assert _role(world["session_local"], world["project"], world["editor"]) is None
+    assert queue_service._enqueuer_may_not_write(job) is True
+
+
+def test_a_job_queued_by_a_deleted_account_is_not_run(world):
+    from services import solve_queue as queue_service
+
+    job = _job(world, world["editor"])
+    job.enqueued_by_user_id = uuid.uuid4()
+    assert queue_service._enqueuer_may_not_write(job) is True
+
+
+def test_a_project_named_as_its_own_id_is_listed_once(world):
+    """Both readings of `{name}` find the same project; it is checked once."""
+    with world["session_local"]() as db:
+        db.get(Project, uuid.UUID(world["project"])).name = world["project"]
+        db.commit()
+    with world["session_local"]() as db:
+        viewer = db.get(User, world["viewer"])
+        found = project_write_gate._path_projects(db, viewer, world["project"])
+        assert [p.id for p in found] == [uuid.UUID(world["project"])]
