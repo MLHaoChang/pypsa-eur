@@ -1,0 +1,6 @@
+{
+ "$comment": "Lock decisions for write routes and chat tools (tests/test_write_surface_lock_policy.py). Rows here and in write_surface_lock_policy.d/ join ROUTE_POLICY, TOOL_POLICY and KNOWN_GAPS there; see the folder's README (RETRO-FRAG-1).",
+ "routes": {},
+ "tools": {},
+ "known_gaps": {}
+}
