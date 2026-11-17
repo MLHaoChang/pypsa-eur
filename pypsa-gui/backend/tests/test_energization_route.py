@@ -116,6 +116,20 @@ def test_each_refusal_is_a_typed_422_and_writes_nothing(
     assert _row(client, name)["energization"][0]["by_period"] == AS_BUILT
 
 
+@pytest.mark.parametrize("mw", [True, False])
+def test_d3_a_bool_mw_is_refused_on_the_bool_path(client, tmp_projects_dir, mw):
+    """GK B D3: a bool is refused before the number checks. True would read as
+    1 MW (accepted) and False as 0 (NOT_ABOVE_ZERO); both read NOT_A_NUMBER."""
+    name = _create(client, "eh_datacenter_staged", "staged02b_bool")
+    r = _put(client, name, link=LINK, period=2030, mw=mw)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == {
+        "error_kind": "energization_invalid_mw",
+        "message": E.NOT_A_NUMBER,
+    }
+    assert _row(client, name)["energization"][0]["by_period"] == AS_BUILT
+
+
 def test_a_period_that_varies_is_refused_by_the_route_and_shown_as_a_range(
     client, tmp_projects_dir, bound_ctx
 ):

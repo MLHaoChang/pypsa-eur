@@ -305,15 +305,90 @@ def test_the_investment_case_key_is_unchanged_without_a_schedule():
     )
 
 
+# GK B D2a / D2b: the investment case's status across the update. A record
+# made before 02b holds the parts and the hash without `energization`.
+
+PRE_02B_PARTS = {
+    "finance",
+    "value_flows",
+    "commercial",
+    "solver_config",
+    "dispatch",
+    "packs",
+    "owner_assets",
+    "extra_assets",
+}
+
+
+def _ic_stored(key):
+    from services.finance.report import refused_finance_report
+
+    h, parts = key
+    stored = refused_finance_report("x", assumptions_hash=h).model_dump(mode="json")
+    stored["sections"]["project"]["payload"] = {"provenance": {"inputs": dict(parts)}}
+    return stored
+
+
+def _pre_02b(key):
+    """The key the code before 02b computed from the same inputs."""
+    from services.finance.investment_case_runner import json_digest
+
+    parts = {k: v for k, v in key[1].items() if k != "energization"}
+    return json_digest(parts), parts
+
+
+def test_d2a_an_unscheduled_network_keeps_its_pre_02b_key_and_reads_fresh():
+    from services.finance.investment_case_runner import staleness
+
+    n = build_eh_datacenter()  # the real template, no schedule
+    assert E.energization_frame(n) is None
+    key = _ic_key(n)
+    assert set(key[1]) == PRE_02B_PARTS
+    assert key == _pre_02b(key)  # byte-identical hash and parts
+    status = staleness(_ic_stored(_pre_02b(key)), _ic_key(n))
+    assert status["stale"] is False and status["reason"] is None
+    assert status["changed"] == []
+    # The study fingerprint too: the block adds nothing on this network.
+    assert E.schedule_digest(n) is None
+
+
+def test_d2a_the_fingerprint_of_an_unscheduled_template_is_pre_02b(monkeypatch):
+    n = build_eh_datacenter()
+    now = _fps(n)
+    monkeypatch.setattr(E, "energization_frame", lambda _n: None)  # the block dropped
+    assert _fps(n) == now
+
+
+def test_d2b_a_scheduled_network_reads_inputs_changed_once_then_fresh(monkeypatch):
+    from services.finance.investment_case_runner import staleness
+
+    n = _staged()  # the real template, carrying its schedule
+    stored = _ic_stored(_pre_02b(_ic_key(n)))
+    status = staleness(stored, _ic_key(n))
+    assert status["stale"] is True and status["reason"] == "inputs_changed"
+    assert status["changed"] == ["energization"]  # named, nothing else
+    stored = _ic_stored(_ic_key(n))  # the case re-run records the new key
+    for _ in range(2):  # and stays fresh: stale exactly once
+        status = staleness(stored, _ic_key(n))
+        assert status["stale"] is False and status["reason"] is None
+    # The study fingerprint: a solve recorded before 02b reads changed once,
+    # and a re-solve (re-record) reads fresh.
+    with_block = _fps(n)
+    with monkeypatch.context() as m:
+        m.setattr(E, "energization_frame", lambda _n: None)
+        recorded = _fps(n)
+    assert recorded[0] != with_block[0] and recorded[1] != with_block[1]
+    recorded = _fps(n)
+    assert recorded == with_block and _fps(n) == recorded
+
+
 # ── E4: the run's freeze and admission ──────────────────────────────────────
 
 
-def _run_ctx(tmp_path, n):
+def _run_ctx(tmp_path, n, template="eh_datacenter_staged"):
     from services import flow_service as F
 
-    meta = json.loads(
-        (TEMPLATES / "eh_datacenter_staged" / "eh_template.json").read_text()
-    )
+    meta = json.loads((TEMPLATES / template / "eh_template.json").read_text())
     (tmp_path / F.TEMPLATE_FILE).write_text(json.dumps(meta))
     return types.SimpleNamespace(
         storage_dir=str(tmp_path),
@@ -384,3 +459,12 @@ def test_a_record_frozen_before_02b_refuses_on_a_staged_network(tmp_path):
     # A network without a schedule has nothing to re-freeze.
     plain = types.SimpleNamespace(network=build_eh_datacenter())
     assert run_eh._energization_change(plain, {"args": {}}) is None
+
+
+def test_d4_a_record_frozen_before_02b_admits_on_an_unscheduled_network(tmp_path):
+    from harness import run_eh
+
+    ctx = _run_ctx(tmp_path, build_eh_datacenter(), "eh_datacenter")
+    frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
+    assert frozen.pop("energization") == {}
+    assert _admit(tmp_path, ctx, frozen) is None  # admitted, as before 02b
