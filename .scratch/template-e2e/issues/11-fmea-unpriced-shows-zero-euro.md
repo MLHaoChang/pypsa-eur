@@ -14,8 +14,9 @@ Journey fit: results (FMEA worksheet) → decide.
 
 Since #1645, `/fmea_modes` with no VOLL returns `severity_eur` and `criticality_eur_per_year` as None (GK B plan Q1a), together with the row "Value of lost load: not set". fmea.ts turns None into 0, so the worksheet prints €0 next to the unpriced warning and ranks unpriced modes as the least critical.
 
-## Acceptance
+## Acceptance (UX 2's terms on #1645)
 
-- An unpriced mode's € cells read "not set" (the words the Assumptions row uses), not €0.
-- Unpriced modes sort after the priced ones.
-- A vitest pins both (None → "not set"; sort order).
+1. An unpriced mode's € cells read a plain "Not set". The reason is visible text on the table, for example one muted line: "Not priced: set the Value of Lost Load (VOLL) in Solver settings >" with withReturn, the label as in the Solver settings panel. Never a bare "—", and never a reason shown only in a tooltip (#1266). This holds in Guided and Expert alike.
+2. Unpriced modes sort after the priced ones, and the column header or that line says so. They are never mixed in as "least critical". Any total or chart over the modes leaves them out and says so.
+3. A vitest covers null severity and null criticality. One shot of the table in the unpriced state, dark and light, comes from the results-components builder. That builder acknowledges ownership before #1645 merges.
+4. It lands with or before slice 2 of template-e2e 08, not after. If it hasn't started when slice 2's plan is ready, tell UX 2.
