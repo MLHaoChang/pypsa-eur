@@ -10,6 +10,7 @@ missing value (NaN), +inf or -inf, and whether the entity had no column at all.
 Every expected value below is worked by hand from the frames in `_net`, never
 read back from the function under test.
 """
+
 from __future__ import annotations
 
 import math
@@ -30,16 +31,22 @@ def _net():
     n.add("Line", ["L1", "L2", "L3", "L4"], bus0="a", bus1="b", x=0.1, s_nom=10)
     n.add("Load", ["D1", "D2", "D3"], bus="a")
     # L3 has no column: a branch the solve never reported.
-    n.lines_t["loss"] = pd.DataFrame({
-        "L1": [0.0, 1.0, np.nan],      # real zero, a value, a missing value
-        "L2": [0.0, 0.0, 0.0],         # a genuine zero-loss line
-        "L4": [np.inf, 1.0, -np.inf],  # corrupt solver output
-    }, index=n.snapshots)
+    n.lines_t["loss"] = pd.DataFrame(
+        {
+            "L1": [0.0, 1.0, np.nan],  # real zero, a value, a missing value
+            "L2": [0.0, 0.0, 0.0],  # a genuine zero-loss line
+            "L4": [np.inf, 1.0, -np.inf],  # corrupt solver output
+        },
+        index=n.snapshots,
+    )
     # D3 has no column.
-    n.loads_t["p"] = pd.DataFrame({
-        "D1": [10.0, np.nan, 10.0],
-        "D2": [5.0, 5.0, 5.0],
-    }, index=n.snapshots)
+    n.loads_t["p"] = pd.DataFrame(
+        {
+            "D1": [10.0, np.nan, 10.0],
+            "D2": [5.0, 5.0, 5.0],
+        },
+        index=n.snapshots,
+    )
     return n
 
 
@@ -70,9 +77,27 @@ def test_existing_fields_are_unchanged():
         "total_demand_mwh": 40.0,
         "loss_pct_of_demand": 5.0,
         "by_branch": [
-            {"component": "Line", "name": "L1", "loss_mwh": 2.0, "peak_mw": 1.0, "share_pct": 100.0},
-            {"component": "Line", "name": "L2", "loss_mwh": 0.0, "peak_mw": 0.0, "share_pct": 0.0},
-            {"component": "Line", "name": "L4", "loss_mwh": 0.0, "peak_mw": 0.0, "share_pct": 0.0},
+            {
+                "component": "Line",
+                "name": "L1",
+                "loss_mwh": 2.0,
+                "peak_mw": 1.0,
+                "share_pct": 100.0,
+            },
+            {
+                "component": "Line",
+                "name": "L2",
+                "loss_mwh": 0.0,
+                "peak_mw": 0.0,
+                "share_pct": 0.0,
+            },
+            {
+                "component": "Line",
+                "name": "L4",
+                "loss_mwh": 0.0,
+                "peak_mw": 0.0,
+                "share_pct": 0.0,
+            },
         ],
     }
 
@@ -83,14 +108,34 @@ def test_validity_keeps_zero_missing_infinite_and_absent_apart():
         "snapshots": 3,
         "complete": False,
         "branches": [
-            {"component": "Line", "name": "L1", "state": "incomplete", **_counts(finite=1, zero=1, missing=1)},
+            {
+                "component": "Line",
+                "name": "L1",
+                "state": "incomplete",
+                **_counts(finite=1, zero=1, missing=1),
+            },
             {"component": "Line", "name": "L2", "state": "complete", **_counts(zero=3)},
             {"component": "Line", "name": "L3", "state": "absent", **_counts()},
-            {"component": "Line", "name": "L4", "state": "incomplete", **_counts(finite=1, pos_inf=1, neg_inf=1)},
+            {
+                "component": "Line",
+                "name": "L4",
+                "state": "incomplete",
+                **_counts(finite=1, pos_inf=1, neg_inf=1),
+            },
         ],
         "loads": [
-            {"component": "Load", "name": "D1", "state": "incomplete", **_counts(finite=2, missing=1)},
-            {"component": "Load", "name": "D2", "state": "complete", **_counts(finite=3)},
+            {
+                "component": "Load",
+                "name": "D1",
+                "state": "incomplete",
+                **_counts(finite=2, missing=1),
+            },
+            {
+                "component": "Load",
+                "name": "D2",
+                "state": "complete",
+                **_counts(finite=3),
+            },
             {"component": "Load", "name": "D3", "state": "absent", **_counts()},
         ],
     }
@@ -113,20 +158,31 @@ def test_losses_switched_off_reports_every_branch_absent_not_zero():
     out = compute_losses_summary(n, "lopf", False, result_df=_result_df)
     assert out["enabled"] is False and out["total_mwh"] == 0.0
     assert [(b["name"], b["state"]) for b in out["validity"]["branches"]] == [
-        ("L1", "absent"), ("L2", "absent"), ("L3", "absent"), ("L4", "absent"),
+        ("L1", "absent"),
+        ("L2", "absent"),
+        ("L3", "absent"),
+        ("L4", "absent"),
     ]
     assert out["validity"]["complete"] is False
 
 
 def test_ac_pf_nan_from_a_nonconverged_line_is_missing_not_zero():
     n = _net()
-    n.lines_t["p0"] = pd.DataFrame({"L1": [1.0, np.nan, 2.0], "L2": [1.0, 1.0, 1.0]}, index=n.snapshots)
-    n.lines_t["p1"] = pd.DataFrame({"L1": [-0.5, -1.0, -2.0], "L2": [-1.0, -1.0, -1.0]}, index=n.snapshots)
+    n.lines_t["p0"] = pd.DataFrame(
+        {"L1": [1.0, np.nan, 2.0], "L2": [1.0, 1.0, 1.0]}, index=n.snapshots
+    )
+    n.lines_t["p1"] = pd.DataFrame(
+        {"L1": [-0.5, -1.0, -2.0], "L2": [-1.0, -1.0, -1.0]}, index=n.snapshots
+    )
     out = compute_losses_summary(n, "ac_pf", True, result_df=_result_df)
     by_name = {b["name"]: b for b in out["validity"]["branches"]}
     # L1 = [0.5, nan, 0.0]: one value, one missing, one real zero.
-    assert by_name["L1"] == {"component": "Line", "name": "L1", "state": "incomplete",
-                             **_counts(finite=1, zero=1, missing=1)}
+    assert by_name["L1"] == {
+        "component": "Line",
+        "name": "L1",
+        "state": "incomplete",
+        **_counts(finite=1, zero=1, missing=1),
+    }
     assert by_name["L2"]["state"] == "complete" and by_name["L2"]["zero"] == 3
     # The zero-filled screen value is unchanged: 0.5 MWh from L1.
     assert math.isclose(out["total_mwh"], 0.5)
