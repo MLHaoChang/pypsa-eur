@@ -411,6 +411,22 @@ def year_snapshots(snapshots: pd.Index) -> pd.DatetimeIndex:
     return idx
 
 
+_FRAME_CLASS = {"generators": "Generator", "storage_units": "StorageUnit", "links": "Link",
+                "stores": "Store"}
+
+
+def _forget_pack_price(n, frame: str, rows) -> None:
+    """A sunk existing asset's overnight cost is 0 by assumption (the ledger's
+    "existing site" row), not the pack price `_price` stamped on it: drop that
+    stamp, so the Expert chip does not call the 0 a pack default."""
+    from services.asset_schema import provenance
+
+    cls = provenance._root(n).get(_FRAME_CLASS[frame], {})
+    for name in rows:
+        cls.get(name, {}).pop("overnight_cost", None)
+        provenance._prune(n, _FRAME_CLASS[frame], name)
+
+
 def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, dict[str, float]],
                   energization: dict[str, list[float]], weights: dict[int, int],
                   existing: tuple[str, ...], candidates,
@@ -454,6 +470,7 @@ def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, d
         df = getattr(n, frame)
         rows = [a for a in existing if a in df.index]
         df.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, DISCOUNT_RATE]
+        _forget_pack_price(n, frame, rows)
     for y in years:
         candidates(n, y)
     cyclic_per_period(n)
@@ -881,12 +898,18 @@ def template_meta(p: dict, entered: list[str] | None = None) -> dict:
                          "checks it does not cost less); the extra is the difference from "
                          "the same site with ride-through off"}]
                if p["ride_through"] else []),
+            *([{"item": "PV candidate", "value": "rooftop PV (pack row solar-rooftop)",
+                "source": "pack",
+                "note": f"solar-rooftop costs from defaults pack {PACK_VERSION}: a "
+                        "behind-the-meter site builds on its roofs, so it is dearer per kW than "
+                        "the ground-mounted solar-utility row the hub templates use"}]
+              if p["candidates"]["pv"]["enabled"] else []),
             {"item": "fault level at the PoC", "value": f"{p['fault_level_mva']:g} MVA",
              "source": "assumed", "note": "20 × the connection unless set"},
             {"item": "power factor and load damping",
-             "value": "PF 0.98, load damping D = 0 (gridspine defaults)",
+             "value": "PF 0.98, load damping D = 0 (the studies' built-in values)",
              "source": "assumed",
-             "note": "the electrical and frequency studies use the data center's defaults; "
+             "note": "the electrical and frequency studies use their built-in values; "
                      "PF 0.98 is optimistic for a motor-heavy site, D = 0 is conservative "
                      "(per-site values are a later slice)"},
         ],

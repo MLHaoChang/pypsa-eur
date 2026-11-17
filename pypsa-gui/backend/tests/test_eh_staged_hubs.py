@@ -380,3 +380,23 @@ def test_the_microgrid_case_compares_with_the_island_as_it_stands_today(reset_ba
     # changes, never loosen the tolerance.
     assert r.metrics["project_pre_tax_npv"] == pytest.approx(43_231_055.0, rel=0.01)
 
+
+
+def test_a_sunk_existing_unit_does_not_call_its_zero_cost_a_pack_default(staged):
+    """App walk 2026-11-17: the staged H2 hub's fuel cell read "Default 0 €/kW"."""
+    from services.asset_schema import provenance
+
+    tid, n = staged
+    cls = {"generators": "Generator", "storage_units": "StorageUnit", "links": "Link",
+           "stores": "Store"}
+    sunk = 0
+    for frame, klass in cls.items():
+        df = getattr(n, frame)
+        for a in (a for a in EXISTING[tid] if a in df.index):
+            if df.at[a, "overnight_cost"] == 0.0:
+                sunk += 1
+                assert "overnight_cost" not in provenance.get(n, klass, a), (tid, a)
+    assert sunk
+    # a candidate keeps its pack stamp
+    cand = next(a for a in n.generators.index if a.startswith(("wind_new", "pv_new", "solar_new")))
+    assert provenance.get(n, "Generator", cand)["overnight_cost"]["status"] == "default"

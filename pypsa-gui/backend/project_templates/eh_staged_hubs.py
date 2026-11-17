@@ -111,6 +111,7 @@ def _sink_stores(n, existing) -> None:
     (the H2 tank) is sunk the same way."""
     rows = [a for a in existing if a in n.stores.index]
     n.stores.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, DISCOUNT_RATE]
+    _site()._forget_pack_price(n, "stores", rows)
 
 
 def _in_service(n, existing) -> None:

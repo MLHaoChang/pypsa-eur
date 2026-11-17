@@ -209,6 +209,8 @@ def test_the_ledger_states_the_assumptions():
     items = {r["item"]: r for r in meta["ledger"]}
     assert "industrial_two_shift" in items["load shape"]["note"]
     assert "PF 0.98" in items["power factor and load damping"]["value"]
+    assert "gridspine" not in str(items["power factor and load damping"])
+    assert "solar-rooftop" in items["PV candidate"]["value"]
     assert "not modelled" in items["PoC and feeder losses"]["note"]
     assert items["import tariff"]["source"] == "synthetic"
     assert meta["site_type"] == "industrial" and meta["recommended_archetype"] == "weak_flexible"

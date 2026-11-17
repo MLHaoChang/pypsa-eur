@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A sunk existing unit in a staged template (overnight cost 0) no longer shows the pack's "Default" chip on that 0; the "Your own site" ledger names its rooftop-PV cost row and no longer shows the internal name "gridspine".
