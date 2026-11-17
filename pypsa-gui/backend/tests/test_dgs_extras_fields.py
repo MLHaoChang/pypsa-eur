@@ -316,6 +316,19 @@ def test_x6_an_overlong_spectrum_is_a_typed_422(client, install_network):
     assert r.status_code == 422 and "Harmonic spectrum: it is" in r.text, r.text
 
 
+def test_x6_the_spectrum_cap_is_inclusive_and_only_for_spectra():
+    from services.adequacy.eh_columns import SPECTRUM_MAX_CHARS, _checked_text
+
+    at_cap = "5:1." + "0" * (SPECTRUM_MAX_CHARS - 4)
+    assert len(at_cap) == SPECTRUM_MAX_CHARS
+    assert _checked_text("harmonic_spectrum", at_cap) == at_cap
+    with pytest.raises(ValueError, match="Harmonic spectrum: it is"):
+        _checked_text("harmonic_spectrum", at_cap + "0")
+    # A ride-through curve shares the parser path but not the spectrum cap.
+    curve = "20:1." + "0" * SPECTRUM_MAX_CHARS
+    assert _checked_text("ride_through_curve", curve) == curve
+
+
 def test_x7_the_rerecording_moved_only_generator_and_load():
     """sha256 of every other class in asset_schema_payload_pre_catalogue.json, as recorded before DGS-EXTRAS-1."""
     import hashlib
