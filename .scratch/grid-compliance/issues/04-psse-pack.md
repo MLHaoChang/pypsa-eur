@@ -98,3 +98,16 @@ Every PR: release-note fragment, GC-TEXT-1 grep of the diff, targeted mutants an
 - Q4 Nothing missing silently: list each omitted earthing transformer ("not written: zero-sequence source omitted") in the pack manifest and file header, with a test (better: write it if the target version has a zero-sequence fixed-shunt record); list the assumed values (grid X0 = X1, vk0 = vk, OPEN_PU, genset X'/Xs = x''d) in the manifest, with a test.
 - Q5 Cite that PSS/E triples the grounding impedance; hand-value test with nonzero R_N checking the file holds R_N (not 3·R_N) on the right base.
 - Also run the test-side reader on .seq: counts and ids match the RAW, values match the source params.
+
+**GK A2 on the PR3 plan (2026-11-17): GO with conditions** (recorded verbatim by the PR3 builder).
+- Decision (a): refuse REGC_B and REEC_D with a named ContractError, "user model only (USRMDL) up to 35.2; not written".
+- P1: each MODEL_PIN row names its source (repo path + doc title). The pack README/manifest says "dyr ICON/CON counts and order from public parser tables; pending verification on first PSS/E load", with a test. Never claim the counts come from the PSS/E manual.
+- P2: REPCA1 attaches to a machine. Either every IBR machine of a plant gets its own REPCA1 (same BUSR/BUS1/BUS2/CKT), or the GC-01 aggregate gets one. Choose and state which. Test: every REGCA1 machine of a controlled plant has exactly one REPCA1.
+- P3: BUS1 is the plant side of the PoC branch and BUS2 the grid side (export positive). Test with a branch whose RAW I is the grid side. CKT is the RAW's. A missing branch is refused (D2).
+- P4: type 3 (WTTQA1) requires REECA1 PFLAG = 1. The REECA1/REPCA1 flags are checked as a set (REPCA1 drives Qext; PFFLAG = 0 under plant control). A contradictory set is refused, with one test and one mutant per rule.
+- P5: every new CON is finite and in range like _check_ibr: time constants > 0 where PSS/E divides by them, min < max, breakpoints ordered. One refusal test per rule class. Assumed defaults carry source 'assumed' and are listed in the pack assumptions.
+- P6: write_dyr version in {33, 35}, anything else refused by name. A v35 file of a v33-only set is byte-identical to v33. A golden tests/gridspine/data/case39_v33.raw from master's writer pins test_v33_default_unchanged (GK's PR2 follow-up); its commit or docstring names the master sha.
+- P7: unit_params.py and campus_assets.yaml are additive only, with a pin test. Check GC-01 PR2 for touches to them first.
+- Mutants on dyr_writer and unit_params; one targeted mutant per new guard.
+
+PR3 research (secondary public sources only; no vendor primary is public). ICON/CON counts, earliest library version: REGCA1 1/14 (33); REECA1 6/45 (33); REECC1 5/45 (35; REECCU1 is a user model in 33/34); REPCA1 7/27 (33); WTDTA1 0/5, WTARA1 0/2, WTPTA1 0/10, WTTQA1 1/15 (all 33); REGCBU1 2/7 and REECDU1 6/77 user models only. Sources: andes `andes/io/psse-dyr.yaml`; GridPACK `src/parser/parser_classes`; PowerSystemsTestData `psse_dyr/240busWECC_2018_PSS.dyr` l.800-807 (REPCA1 sample); WECC "Summary of 2nd Generation Generic RES Models Rev5" p.4 (model sets).
