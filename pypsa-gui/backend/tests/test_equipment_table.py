@@ -590,3 +590,13 @@ def test_et23_the_real_dispatch_hands_the_clicked_card_digest_to_the_route(grid,
     assert seen == [cards[0]["edit_card"]["digest"]]
     assert result["_edit_receipt"]["outcome"] == "verified"
     assert edit_card.approved_digest() is None  # reset after the handler
+
+
+def test_raw_names_1_left_out_rows_read_in_words(grid):
+    """RAW-NAMES-1: a left-out row names the class in lower case and the asset in curly quotes."""
+    uid = _csv("name,rating\nL9,1\nL2,5\nL2,6\n")
+    out = chat_tools.preview_equipment_mapping(uid, "Line", "name", {"rating": {"field": "s_nom", "unit": "MVA"}})
+    messages = sorted(u["message"] for u in out["unmapped"])
+    assert "No line named \u201cL9\u201d." in messages
+    assert "\u201cL2\u201d appears on 2 rows; none of them is mapped." in messages
+    assert not any("'" in m for m in messages)
