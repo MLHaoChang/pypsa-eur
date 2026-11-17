@@ -622,6 +622,28 @@ def _network_input_fingerprint(ctx, *, exact=False):
 _SWEEP_LOCK = threading.Lock()
 
 
+def _refuse_cost_the_parts_own(n, change) -> None:
+    """TCU 09: a case that sets a cost a target's investment parts own would build a child identical to the
+    baseline, since the bulk write re-derives it; refused before any case exists, in the single edit's words."""
+    from services.asset_schema.derive import split_parts
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+    from services.network_crud import check_parts_own_costs
+
+    if change.component_class not in COMPOSITE:
+        return
+    frame = getattr(n, CLASS_ATTR[change.component_class])
+    for name in change.names:
+        if name not in frame.index:
+            continue  # the bulk write refuses an unknown name
+        before = frame.loc[name].to_dict()
+        _, parts = split_parts(change.component_class, before)
+        try:
+            check_parts_own_costs(change.component_class, parts, before=before,
+                                  submitted={change.attribute: change.value})
+        except HTTPException as exc:
+            _refuse("invalid_sensitivity_cases", f"{change.component_class} {name}: {exc.detail}")
+
+
 def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
     """Preflight all cases, then persist/enqueue isolated children. No activation."""
     from models.schemas import CreateScenarioRequest
@@ -681,6 +703,7 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         boolean = change.attribute.endswith("_extendable")
                         if boolean != isinstance(change.value, bool) or (not boolean and not math.isfinite(change.value)):
                             _refuse("invalid_sensitivity_value", "Use finite numbers for numeric inputs and booleans for extendable flags.")
+                        _refuse_cost_the_parts_own(ctx.network, change)
                         chat_tools.bulk_update_components(change.component_class, change.names, {change.attribute: change.value})
                     validation = chat_tools.validate_network()
                     if not validation.get("ok") or validation.get("deferred"):

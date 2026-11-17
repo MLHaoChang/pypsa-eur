@@ -118,9 +118,12 @@ describe('a battery is edited as its two parts', () => {
     expect(body.inv_power_overnight).toBe(213_900)
     expect(body.inv_power_fom_share).toBeCloseTo(0.0034, 12)
     expect(body.efficiency_store).toBeCloseTo(0.96, 12)
-    // No capital cost is typed: the PUT carries the whole row, so the derived
-    // value goes back unchanged, and the backend re-derives it from the parts.
-    expect(body.capital_cost).toBe(95_712)
+    // No capital cost is typed, and none is echoed (TCU 09): the derived costs
+    // stay out of the PUT, so the stored values stand and the backend
+    // re-derives them from the parts.
+    expect(body.capital_cost).toBeUndefined()
+    expect(body.fom_cost).toBeUndefined()
+    expect(body.lifetime).toBeUndefined()
   })
 
   it('clearing a part sends null (the backend then has nothing to derive from)', async () => {

@@ -94,6 +94,16 @@ function blankValue(spec: AssetFieldSpec, current: Record<string, unknown>): unk
 }
 
 /**
+ * Leave a composite asset's derived cost columns out of its PUT (TCU 09). `updateAsset` spreads the cached row
+ * under the patch, and the backend refuses a derived cost that differs from the stored one while the asset's
+ * investment parts own it; an undefined key drops out of the JSON body, so the stored value stands.
+ */
+export function omitDerived(specs: AssetFieldSpec[], patch: object): void {
+  const out = patch as Record<string, unknown>
+  for (const s of specs) if (s.derived) out[s.key] = undefined
+}
+
+/**
  * The PUT patch for the typed fields present in the form. A blank follows the
  * field's policy (null, 0, or the current value); a number that does not
  * parse keeps the current value; an enum outside its options is a blank.
