@@ -134,7 +134,7 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
     ):
         r += 2
         heading(ws, r, [title, *years])
-        lease = pnl.get("volume_factor") or {}
+        lease = pnl.get("volume_factor")
         if title == "P&L by year" and lease:
             # BC 15: the lease-up the run applied, a percent per year (100 = full volume).
             r += 1

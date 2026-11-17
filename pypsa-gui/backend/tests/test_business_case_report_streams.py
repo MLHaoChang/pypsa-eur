@@ -245,6 +245,7 @@ def test_bc15_a_lease_up_reaches_the_report_and_the_workbook(
     assert by_item["Volume factor years ignored"] == "outside the operating years: 1990"
     at = next(i for i, r in enumerate(cells) if r[0] == "P&L by year")
     assert cells[at + 1][0] == LEASE_UP_ROW
+    assert [r[0] for r in cells].count(LEASE_UP_ROW) == 1  # not in the ledger table
     want = [25.0 if y == first else 100.0 for y in years]
     assert cells[at + 1][1 : 1 + len(years)] == want
     # A full-volume report writes none of it.
@@ -264,3 +265,15 @@ def test_bc15_a_lease_up_outside_zero_to_one_is_a_422(
         bc = _bc()
         bc["inputs"]["volume_factor_by_year"] = {"2031": bad}
         assert _put(client, bc).status_code == 422
+
+
+def test_bc15_a_report_without_a_pnl_writes_its_header_only():
+    from openpyxl import Workbook
+
+    from services.results_workbook.business_case import write_business_case_sheet
+
+    wb = Workbook()
+    rep = {"basis": {"label": "x"}, "currency": "EUR", "kpis": {}}
+    ws = wb[write_business_case_sheet(wb, rep, {"stale": False})]
+    items = [r[0].value for r in ws.iter_rows()]
+    assert "Basis" in items and "Volume factor (lease-up)" not in items

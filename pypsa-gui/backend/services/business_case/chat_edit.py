@@ -175,10 +175,10 @@ def _is_price(path: tuple) -> bool:
 def _label(line: str | None, path: tuple) -> str:
     joined = ".".join(path)
     # A case-level grid ("inputs.volume_factor_by_year", BC 15) keeps its year as tail.
-    pair = ".".join(path[:2]) if len(path) > 2 and path[0] == "inputs" else None
+    pair = ".".join(path[:2])
     head = (
         _WORDS.get(joined)
-        or (pair and _WORDS.get(pair))
+        or _WORDS.get(pair)
         or _WORDS.get(path[0])
         or path[0].replace("_", " ").capitalize()
     )

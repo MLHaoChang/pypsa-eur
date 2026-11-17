@@ -1169,3 +1169,9 @@ def test_bc15_the_volume_factor_round_trips_through_json():
     again = B.BusinessCaseInputs.model_validate_json(inputs.model_dump_json())
     assert again.volume_factor_by_year == {2031: 0.25, 2032: 1.0}
     assert again == inputs
+
+
+@pytest.mark.parametrize("bad", [[0.5], "2031", 0.5])
+def test_bc15_c3_the_volume_factor_is_a_mapping(bad):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year=bad)

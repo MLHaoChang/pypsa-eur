@@ -1989,6 +1989,12 @@ def test_bc15_q1_a_typed_operating_line_refuses_under_a_factor_below_full():
     ]
     # Not when the factor is 1 in its span, nor outside it, nor for capex, nor for a
     # year outside the operating years (ignored, never both ignored and refused: C3).
+    # The first and last operating years count (the horizon bounds are inclusive).
+    for edge in (2031, 2035):
+        found = _lease_case({edge: 0.5}, typed).refusals(
+            horizon=(2031, 2035), base_year=2031
+        )
+        assert [x.kind for x in found] == ["volume_factor_typed_line"], edge
     later = typed.model_copy(update={"start_year": 2033})
     for case in (
         _lease_case({2032: 1.0}, typed),
@@ -2028,6 +2034,23 @@ def test_bc15_c5_an_undetermined_ic_row_refuses_only_where_nonzero_and_below_ful
     # Both: refuses.
     with pytest.raises(VolumeFactorUnclassified):
         _run(_lease_case({2032: 0.5}), ic=ic, outputs=_NH3_OUT)
+
+
+def test_bc15_a_value_the_solve_lacks_stays_not_established_under_a_factor():
+    """A linked line with no value and an IC row with no amount stay None (LO-7)
+    under a factor, never 0 and never an error; `_templates` without a factor is the
+    IC as it was."""
+    _, r = _run(
+        _lease_case({2032: 0.5}),
+        ic=_no_export_ic(),
+        outputs={"nh3": NotEvaluated("served_product.nh3", "stale")},
+    )
+    assert "line_not_established:nh3" in r.op.reasons["operating"]
+    gone = TemplateLine("bill", "energy_import", None, "tariff")
+    assert bcm._ic_scaled(gone, 0.5).amount is None
+    ic = _no_export_ic()
+    tl = bcm.build_timeline(ic)
+    assert bcm._templates(ic, tl, {}) == bcm._templates(ic, tl, {}, lease_up={})
 
 
 def test_bc15_an_unknown_ic_stream_or_linked_kind_refuses():
