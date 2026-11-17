@@ -17,8 +17,12 @@ template's ``## Stream NAME`` heading. "Stay out of" is built from the open PRs'
 changed files (``--open-prs``, the file ``frontier.py`` takes) and the live
 sessions (``--sessions``, ``sessions.py`` output or issue paths), plus
 ``--stay-out`` text. ``--files`` names the package's likely files (paths or
-directory prefixes); each one an open PR also changes prints an ``OVERLAP`` line
-and the script exits 3, because the package is not ready until that PR merges.
+directory prefixes); each code file an open PR also changes prints an ``OVERLAP``
+line and the script exits 3, because the package is not ready until that PR
+merges. Docs and catalogue overlap (``waivers.conf``, the list ``premerge.sh``
+waives) prints as ``soft`` and does not block. A ``--stream`` with no template
+block warns and the brief is written without it. Next to the brief, ``<out>.create``
+holds the ``create_session`` arguments as JSON; ``spawn.py <out>`` prints them.
 ``--coordinator`` is the coordinator's session id, written literally into the
 brief (default: the caller's own id from ``CLAUDE_CODE_REMOTE_SESSION_ID``;
 required when that is unset), so a session never depends on reading
@@ -28,6 +32,7 @@ required when that is unset), so a session never depends on reading
 """
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -35,10 +40,11 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from frontier import read_prs  # noqa: E402
+from frontier import is_soft, load_waivers, read_prs  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "docs" / "agents" / "session-brief.md"
+SOURCE_URL = "https://github.com/MLHaoChang/pypsa-eur"
 FENCE = re.compile(r"```markdown\n(.*?)\n```", re.S)
 
 
@@ -54,20 +60,21 @@ def template_blocks(text):
 
 
 def area(path):
-    """The directory a changed file sits in, at most three levels deep."""
-    parts = path.split("/")[:-1][:3]
+    """The top-level area a changed file sits in: at most two directory levels."""
+    parts = path.split("/")[:-1][:2]
     return "/".join(parts) + "/" if parts else path
 
 
 def stay_out(prs, session_lines, extra):
+    """One line per open PR naming its top areas, one line of live session titles."""
     out = []
     for pr in sorted(prs, key=int):
         counts = Counter(area(f) for f in prs[pr])
-        top = ", ".join(f"`{a}` ({n})" for a, n in counts.most_common(5))
-        more = f", +{len(counts) - 5} more" if len(counts) > 5 else ""
+        top = ", ".join(f"`{a}`" for a, _ in counts.most_common(4))
+        more = f" +{len(counts) - 4}" if len(counts) > 4 else ""
         out.append(f"- open PR #{pr}: {top}{more}")
-    for text in session_lines:
-        out.append(f"- live session: {text[:110]}")
+    if session_lines:
+        out.append("- live sessions: " + ", ".join(t[:70] for t in session_lines))
     if extra:
         out.append(f"- {extra}")
     return "\n".join(out) if out else "none"
@@ -88,7 +95,7 @@ def overlaps(prs, likely):
 def own_session_id():
     """The caller's session id (``session_...``), or "" when it cannot be found."""
     raw = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID", "")
-    return "session_" + raw[len("cse_"):] if raw.startswith("cse_") else raw
+    return "session_" + raw[len("cse_") :] if raw.startswith("cse_") else raw
 
 
 def fill(block, values):
@@ -109,13 +116,19 @@ def main(argv=None):
     task = ap.add_mutually_exclusive_group(required=True)
     task.add_argument("--task", help="task text")
     task.add_argument("--task-file", type=Path, help="file holding the task text")
-    ap.add_argument("--decisions", default="", help="comma-separated owner decision keys")
-    ap.add_argument("--read", action="append", default=[], help="'path: why', repeatable")
+    ap.add_argument(
+        "--decisions", default="", help="comma-separated owner decision keys"
+    )
+    ap.add_argument(
+        "--read", action="append", default=[], help="'path: why', repeatable"
+    )
     ap.add_argument("--dependencies", default="none")
     ap.add_argument("--review", default="none required")
     ap.add_argument("--stream", default="", help="stream name, e.g. dc")
     ap.add_argument("--open-prs", help="file: '<pr> <changed path>' per line, or JSON")
-    ap.add_argument("--exclude-pr", action="append", default=[], help="PR number to leave out")
+    ap.add_argument(
+        "--exclude-pr", action="append", default=[], help="PR number to leave out"
+    )
     ap.add_argument("--sessions", help="file: live sessions, one per line")
     ap.add_argument("--stay-out", default="", help="extra text for Stay out of")
     ap.add_argument(
@@ -123,18 +136,23 @@ def main(argv=None):
     )
     ap.add_argument("--sha", default="", help="master SHA the session starts from")
     ap.add_argument(
-        "--coordinator", default="", help="coordinator session id (default: this session's)"
+        "--coordinator",
+        default="",
+        help="coordinator session id (default: this session's)",
     )
     ap.add_argument("--model", default="")
     ap.add_argument("--title", default="")
     ap.add_argument("--team", default="build")
+    ap.add_argument("--source-url", default=SOURCE_URL)
     ap.add_argument("--template", type=Path, default=TEMPLATE)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
 
     coordinator = args.coordinator or own_session_id()
     if not coordinator.startswith("session_"):
-        ap.error("--coordinator <session id> is required: this session's id was not found")
+        ap.error(
+            "--coordinator <session id> is required: this session's id was not found"
+        )
     task = args.task if args.task is not None else args.task_file.read_text().strip()
     prs = read_prs(args.open_prs) if args.open_prs else {}
     for n in args.exclude_pr:
@@ -160,19 +178,41 @@ def main(argv=None):
     brief, streams = template_blocks(args.template.read_text())
     text = fill(brief, values).replace("@COORDINATOR@", coordinator)
     if args.stream:
-        if args.stream.lower() not in streams:
-            ap.error(f"template has no '## Stream {args.stream}' block")
-        text += "\n\n" + streams[args.stream.lower()]
+        if args.stream.lower() in streams:
+            text += "\n\n" + streams[args.stream.lower()]
+        else:
+            print(
+                f"warning: template has no '## Stream {args.stream}' block; brief written without it",
+                file=sys.stderr,
+            )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(text + "\n")
     tags = f"team:{args.team}"
     print(f"wrote {args.out} ({len(text.split())} words)")
-    print(f"create_session: model={args.model or '?'} title={args.title or '?'} tags=[{tags}]")
+    print(
+        f"create_session: model={args.model or '?'} title={args.title or '?'} tags=[{tags}]"
+    )
+    create = {
+        "model": args.model,
+        "title": args.title,
+        "tags": [tags],
+        "source_url": args.source_url,
+    }
+    Path(f"{args.out}.create").write_text(json.dumps(create) + "\n")
     likely = [f.strip() for f in args.files.split(",") if f.strip()]
-    hits = overlaps(prs, likely)
-    for path, pr, f in hits:
-        print(f"OVERLAP: {path} is changed by open PR #{pr} ({f}); open after it merges")
-    return 3 if hits else 0
+    waivers = load_waivers()
+    hard = 0
+    for path, pr, f in overlaps(prs, likely):
+        if is_soft(f, waivers):
+            print(
+                f"soft: {path} is also changed by open PR #{pr} ({f}); docs or catalogue, not blocking"
+            )
+        else:
+            hard += 1
+            print(
+                f"OVERLAP: {path} is changed by open PR #{pr} ({f}); open after it merges"
+            )
+    return 3 if hard else 0
 
 
 if __name__ == "__main__":

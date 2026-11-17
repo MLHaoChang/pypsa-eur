@@ -123,7 +123,7 @@ def _in_service(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["in_service"].astype(bool)] if "in_service" in df.columns else df
 
 
-def _branches(net, f0: float, h_max: float = H_MAX):
+def branches(net, f0: float, h_max: float = H_MAX):
     """``(series, notes)``: each in-service cable and transformer as ``(from bus, to bus, r pu, x pu,
     b pu)`` on ``net.sn_mva`` and the bus voltages, at the fundamental."""
     sbase, vn = float(net.sn_mva), net.bus["vn_kv"].astype(float)
@@ -152,6 +152,10 @@ def _branches(net, f0: float, h_max: float = H_MAX):
         zk, rk = float(tr["vk_percent"]) / 100 * scale, float(tr["vkr_percent"]) / 100 * scale
         series.append((a, b, rk, math.sqrt(max(zk ** 2 - rk ** 2, 0.0)), 0.0))
     return series, notes
+
+
+#: The old private name, kept for callers that still use it.
+_branches = branches
 
 
 def switched_shunts(net) -> pd.DataFrame:
@@ -226,10 +230,10 @@ def grid_c(vn_kv: float, case: str) -> float:
 def z_poc(net, poc_bus: int, s_sc_mva: float, rx: float, state: dict, shunts: pd.DataFrame,
           hs: np.ndarray, series=None, case: str = "normal") -> np.ndarray:
     """Complex Z seen from ``poc_bus`` (ohm at its voltage) at each order in ``hs``, for one grid case
-    and one capacitor state. ``series`` is ``_branches``'s, when already built. ``case`` sets the
+    and one capacitor state. ``series`` is ``branches``'s, when already built. ``case`` sets the
     grid's voltage factor c (``grid_c``)."""
     if series is None:
-        series, _ = _branches(net, float(net.f_hz))
+        series, _ = branches(net, float(net.f_hz))
     buses = list(_in_service(net.bus).index)
     at = {b: i for i, b in enumerate(buses)}
     if poc_bus not in at:
@@ -341,7 +345,7 @@ def impedance_scan(net, poc_bus: int, cases: dict, *, spectrum_orders=(), spectr
     hs = orders(h_max, dh)
     shunts = switched_shunts(net)
     states, state_notes = cap_states(shunts)
-    series, line_notes = _branches(net, f0, h_max)
+    series, line_notes = branches(net, f0, h_max)
     notes = [*notes, *state_notes, *line_notes]
     note = "; ".join(notes)
     limit = DEFAULT_CLEARANCE_H if limit_h is None else float(limit_h)

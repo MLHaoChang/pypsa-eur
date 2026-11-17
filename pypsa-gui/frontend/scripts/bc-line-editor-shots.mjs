@@ -93,6 +93,12 @@ const RUN_REPORT = { ...REPORT.report,
     revenue_per_capacity_net: { value: null, status: 'not_established', reason: 'capacity_not_stated', unit: 'EUR/MW-year' } },
   break_even: { status: null, price: 3.85, price_scale: 0.86, money_year: 2025 } }
 const RAN = { status: 'done', report: RUN_REPORT, staleness: { stale: false, changed: [] } }
+const TAX = [{ section: 'tax', code: 'tax_input_missing:corporate_rate' }]
+const RD = [{ section: 'inputs', code: 'input_missing:receivable_days' }]
+const DEBT = [{ section: 'debt', code: 'input_missing:upfront_fee:0:term_loan' }]
+const ROW_REASON = { tax: TAX, net_income: TAX, tax_equity: TAX, project_post_tax: TAX,
+  working_capital_change: RD, project_after_working_capital: [...RD, ...TAX],
+  equity_pre_tax: DEBT, equity_post_tax: [...DEBT, ...TAX], equity_after_working_capital: [...RD, ...DEBT, ...TAX] }
 // The same report over `n` years (each series repeats), so the P&L scrolls at 1000 px.
 const longer = (n) => {
   const ext = v => (Array.isArray(v) ? Array.from({ length: n }, (_, i) => v[i % v.length]) : v)
@@ -125,6 +131,9 @@ const STATES = {
   'n-blocked': { lines: LINES(), run: true, post409: true, click: 'Run the business case', wait: 'bc-blocked' },
   // The P&L's sticky Line column, scrolled to its last year at 1000 px.
   'o-pnl-scrolled': { lines: LINES(), narrow: true, only1000: true, study: longer(20), pnlScroll: true },
+  // BC 17: the served reason under each row that is not established (wraps in the Line column).
+  'p-row-reasons': { lines: LINES(), narrow: true, run: true, study: { ...RAN, report: { ...RUN_REPORT,
+    pnl: { ...RUN_REPORT.pnl, row_reason: ROW_REASON } } }, rowScroll: 'bc-row-ebit' },
 }
 
 async function ensureStub() {
@@ -251,6 +260,10 @@ try {
             if (el) el.scrollTop += bottom - top + 16
           }
         })
+        await page.waitForTimeout(300)
+      }
+      if (st.rowScroll) {
+        await page.getByTestId(st.rowScroll).evaluate(el => el.scrollIntoView({ block: 'start' }))
         await page.waitForTimeout(300)
       }
       await shootTo(page, `${key}-${mode}${width === 1000 && !st.only1000 ? '-1000' : ''}`)

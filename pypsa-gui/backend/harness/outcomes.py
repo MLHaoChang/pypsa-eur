@@ -1327,6 +1327,11 @@ def note_import(tool: str, args: dict) -> dict:
         if fmt not in ("netcdf", "csv_bundle"):
             raise ValueError(fmt)
         expected = _read_file(fmt, data)
+        # The route re-derives a priced row's owned costs from its parts (TCU 10): so does the read-back's copy,
+        # else a stale cost in the file reads as not landed. A file the route refuses raises here: uncertain.
+        from services.network_crud import rederive_imported_parts
+
+        rederive_imported_parts(expected)
         want = _rows(expected)
         # Imports keep the revision counter, so the revision alone cannot tell
         # two projects apart (GK B (27) E3): bind the project, as note_undo does.

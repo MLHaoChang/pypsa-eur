@@ -252,7 +252,7 @@ export default function SnapshotPicker() {
             onClick={togglePlay}
             title={playing ? 'Pause' : 'Play through snapshots'}
             className={`flex items-center justify-center w-5 h-5 rounded-full transition-colors ${
-              playing ? 'bg-warn text-white' : 'bg-accent text-white hover:bg-accent/90'
+              playing ? 'bg-warn text-on-status' : 'bg-accent text-white hover:bg-accent/90'
             }`}
           >
             {playing ? <Pause size={10} /> : <Play size={10} />}
