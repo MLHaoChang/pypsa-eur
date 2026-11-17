@@ -36,7 +36,3 @@ def read(project, package: str) -> tuple[str, list[Table] | None]:
         log.exception("grid-compliance source %s could not be read", package)
         return "unavailable", None
     return ("pending", None) if got is None else ("present", got)
-
-
-def package_available(project, package: str) -> bool:
-    return read(project, package)[0] == "present"
