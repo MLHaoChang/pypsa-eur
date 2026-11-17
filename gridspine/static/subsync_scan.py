@@ -1,4 +1,5 @@
-"""The sub-synchronous impedance scan at the point of connection (PoC)
+"""
+The sub-synchronous impedance scan at the point of connection (PoC)
 (grid-compliance issue GC-08, TRGC 20).
 
 R(f) and X(f) seen from the PoC for f = ``F_MIN_HZ``, ``F_MIN_HZ`` + df, ...,
@@ -54,12 +55,27 @@ PROFILE_KEY = "subsync_torsional_clearance_hz"
 SERIES = "series resonance"
 SSCI = "SSCI"
 NO_SERIES_CAP = "not evaluated: grid-side series compensation needs the TSP's data"
-SSCI_NOTE = "not evaluated: converter damping not modelled; binding answer is the EMT study"
+SSCI_NOTE = (
+    "not evaluated: converter damping not modelled; binding answer is the EMT study"
+)
 NO_MODES = "no torsional modes given"
 NO_CLEARANCE = "the grid code sets no torsional clearance; demo default"
 SCAN_COLUMNS = ("case", "f_hz", "r_ohm", "x_ohm", "z_ohm", "label")
-RESONANCE_COLUMNS = ("case", "kind", "f_er_hz", "f_comp_hz", "r_ohm", "machine", "mode_hz", "margin_hz",
-                     "clearance_hz", "verdict", "assumed", "note", "label")
+RESONANCE_COLUMNS = (
+    "case",
+    "kind",
+    "f_er_hz",
+    "f_comp_hz",
+    "r_ohm",
+    "machine",
+    "mode_hz",
+    "margin_hz",
+    "clearance_hz",
+    "verdict",
+    "assumed",
+    "note",
+    "label",
+)
 
 
 @dataclasses.dataclass
@@ -73,7 +89,9 @@ def _finite(name: str, v) -> float:
     try:
         x = float(v)
     except (TypeError, ValueError):
-        raise ContractError(f"sub-synchronous scan: {name} must be a number, got {v!r}") from None
+        raise ContractError(
+            f"sub-synchronous scan: {name} must be a number, got {v!r}"
+        ) from None
     if not math.isfinite(x):
         raise ContractError(f"sub-synchronous scan: {name} must be finite, got {v!r}")
     return x
@@ -83,32 +101,54 @@ def frequencies(f0: float, df: float = DF_HZ) -> np.ndarray:
     """The scanned frequencies ``F_MIN_HZ``, ``F_MIN_HZ`` + df, ..., f0 - ``F_MIN_HZ``."""
     f0, df = _finite("f0", f0), _finite("df", df)
     if df <= 0 or f0 - F_MIN_HZ < F_MIN_HZ:
-        raise ContractError(f"sub-synchronous scan: need df > 0 and f0 >= {2 * F_MIN_HZ}, got df={df}, f0={f0}")
+        raise ContractError(
+            f"sub-synchronous scan: need df > 0 and f0 >= {2 * F_MIN_HZ}, got df={df}, f0={f0}"
+        )
     return np.round(np.arange(F_MIN_HZ, f0 - F_MIN_HZ + df / 2, df), 9)
 
 
-def z_poc(net, poc_bus: int, s_sc_mva: float, rx: float, fs: np.ndarray, series_caps=(), case: str = "normal",
-          series=None) -> np.ndarray:
-    """Complex Z seen from ``poc_bus`` (ohm at its voltage) at each frequency in ``fs`` for one grid
+def z_poc(
+    net,
+    poc_bus: int,
+    s_sc_mva: float,
+    rx: float,
+    fs: np.ndarray,
+    series_caps=(),
+    case: str = "normal",
+    series=None,
+) -> np.ndarray:
+    """
+    Complex Z seen from ``poc_bus`` (ohm at its voltage) at each frequency in ``fs`` for one grid
     case, every capacitor bank step in. ``series_caps`` are ``(from bus, to bus, Xc ohm at f0)``, Xc in
-    ohm at the from bus's voltage."""
+    ohm at the from bus's voltage.
+    """
     f0 = float(net.f_hz)
     if series is None:
         series, _ = hs.branches(net, f0, 1.0)
     buses = list(hs._in_service(net.bus).index)
     at = {b: i for i, b in enumerate(buses)}
     if poc_bus not in at:
-        raise ContractError(f"sub-synchronous scan: PoC bus {poc_bus} is not an in-service bus")
+        raise ContractError(
+            f"sub-synchronous scan: PoC bus {poc_bus} is not an in-service bus"
+        )
     sbase, vn = float(net.sn_mva), net.bus["vn_kv"].astype(float)
-    elems = [(a, b, r, x, 0.0, bsh) for a, b, r, x, bsh in series if a in at and b in at]
+    elems = [
+        (a, b, r, x, 0.0, bsh) for a, b, r, x, bsh in series if a in at and b in at
+    ]
     for a, b, xc in series_caps:
         if a not in at or b not in at:
-            raise ContractError(f"sub-synchronous scan: series capacitor {a}-{b} is not between in-service buses")
+            raise ContractError(
+                f"sub-synchronous scan: series capacitor {a}-{b} is not between in-service buses"
+            )
         xc = _finite("Xc", xc)
         if xc <= 0:
-            raise ContractError(f"sub-synchronous scan: series capacitor {a}-{b} needs Xc > 0, got {xc}")
+            raise ContractError(
+                f"sub-synchronous scan: series capacitor {a}-{b} needs Xc > 0, got {xc}"
+            )
         elems.append((a, b, 0.0, 0.0, xc / (vn[a] ** 2 / sbase), 0.0))
-    part = hs._component(len(buses), [(at[a], at[b]) for a, b, *_ in elems], at[poc_bus])
+    part = hs._component(
+        len(buses), [(at[a], at[b]) for a, b, *_ in elems], at[poc_bus]
+    )
     pos = {buses[k]: i for i, k in enumerate(part)}
     m = len(part)
     h = np.asarray(fs, dtype=float) / f0
@@ -133,7 +173,7 @@ def z_poc(net, poc_bus: int, s_sc_mva: float, rx: float, fs: np.ndarray, series_
         if bus not in pos:
             continue
         zg = hs.grid_c(float(vn[bus]), case) * sbase / s_sc_mva
-        xg = zg / math.sqrt(1.0 + rx ** 2)
+        xg = zg / math.sqrt(1.0 + rx**2)
         shunt(bus, 1.0 / (rx * xg + 1j * h * xg))
         grid += 1
     if not grid:
@@ -141,7 +181,10 @@ def z_poc(net, poc_bus: int, s_sc_mva: float, rx: float, fs: np.ndarray, series_
     shunts = hs.switched_shunts(net)
     for i in shunts.index:
         steps = int(shunts.at[i, "max_step"])
-        q, g = float(shunts.at[i, "q_step_pu"]) * steps, float(shunts.at[i, "g_step_pu"]) * steps
+        q, g = (
+            float(shunts.at[i, "q_step_pu"]) * steps,
+            float(shunts.at[i, "g_step_pu"]) * steps,
+        )
         shunt(int(shunts.at[i, "bus"]), g - 1j * q * (h if q < 0 else 1.0 / h))
     e = np.zeros((len(h), m, 1), dtype=complex)
     e[:, pos[poc_bus], 0] = 1.0
@@ -150,13 +193,20 @@ def z_poc(net, poc_bus: int, s_sc_mva: float, rx: float, fs: np.ndarray, series_
 
 
 def crossings(fs: np.ndarray, z: np.ndarray) -> list:
-    """``[(f_er, R there)]``: each zero crossing of X = Im z from negative to non-negative, interpolated
-    linearly between scan points."""
+    """
+    ``[(f_er, R there)]``: each zero crossing of X = Im z from negative to non-negative, interpolated
+    linearly between scan points.
+    """
     x, r = z.imag, z.real
     out = []
     for k in np.nonzero((x[:-1] < 0) & (x[1:] >= 0))[0]:
         t = -x[k] / (x[k + 1] - x[k])
-        out.append((float(fs[k] + t * (fs[k + 1] - fs[k])), float(r[k] + t * (r[k + 1] - r[k]))))
+        out.append(
+            (
+                float(fs[k] + t * (fs[k + 1] - fs[k])),
+                float(r[k] + t * (r[k + 1] - r[k])),
+            )
+        )
     return out
 
 
@@ -167,7 +217,9 @@ def judge(margin_hz: float | None, clearance_hz: float) -> str:
     return "flag" if margin_hz < clearance_hz else "clear"
 
 
-def nearest_mode(f_hz: float, modes: dict) -> tuple[str | None, float | None, float | None]:
+def nearest_mode(
+    f_hz: float, modes: dict
+) -> tuple[str | None, float | None, float | None]:
     """``(machine, mode Hz, |f - mode|)`` of the given torsional mode nearest ``f_hz``; Nones without one."""
     pairs = [(m, f) for m, fl in modes.items() for f in fl]
     if not pairs:
@@ -182,33 +234,53 @@ def _modes(modes: dict | None, f0: float) -> dict:
         vals = [_finite(f"torsional mode of {machine}", f) for f in fl]
         bad = [f for f in vals if not 0 < f < f0]
         if bad:
-            raise ContractError(f"sub-synchronous scan: torsional modes of {machine} must lie in (0, {f0}) Hz, "
-                                f"got {bad}")
+            raise ContractError(
+                f"sub-synchronous scan: torsional modes of {machine} must lie in (0, {f0}) Hz, "
+                f"got {bad}"
+            )
         out[str(machine)] = vals
     return out
 
 
 def clearance_from_profile(profile: dict | None) -> tuple[float | None, list]:
-    """The profile's ``subsync_torsional_clearance_hz`` and where it comes from: ``(value or None,
-    [{"key", "clause", "source"}])``."""
+    """
+    The profile's ``subsync_torsional_clearance_hz`` and where it comes from: ``(value or None,
+    [{"key", "clause", "source"}])``.
+    """
     lim = (profile or {}).get(PROFILE_KEY)
     if not isinstance(lim, dict):
         return None, []
-    return _finite(PROFILE_KEY, lim["value"]), [{"key": PROFILE_KEY, "clause": lim.get("clause"),
-                                                 "source": lim.get("source")}]
+    return _finite(PROFILE_KEY, lim["value"]), [
+        {"key": PROFILE_KEY, "clause": lim.get("clause"), "source": lim.get("source")}
+    ]
 
 
-def subsync_scan(net, poc_bus: int, cases: dict, *, series_caps=(), torsional_modes: dict | None = None,
-                 clearance_hz: float | None = None, clearance_assumed: bool = False, notes=(),
-                 df: float = DF_HZ) -> SubsyncStudy:
-    """The scan of ``net`` from ``poc_bus`` for each case in ``cases`` (``{case: (s_sc_mva, rx)}``).
+def subsync_scan(
+    net,
+    poc_bus: int,
+    cases: dict,
+    *,
+    series_caps=(),
+    torsional_modes: dict | None = None,
+    clearance_hz: float | None = None,
+    clearance_assumed: bool = False,
+    notes=(),
+    df: float = DF_HZ,
+) -> SubsyncStudy:
+    """
+    The scan of ``net`` from ``poc_bus`` for each case in ``cases`` (``{case: (s_sc_mva, rx)}``).
     ``torsional_modes`` is ``{machine: [Hz, ...]}``. ``clearance_hz`` None takes ``DEFAULT_CLEARANCE_HZ``
     and marks every resonance row ``assumed``, as does ``clearance_assumed``. ``notes`` are carried onto
-    the resonance rows."""
+    the resonance rows.
+    """
     f0 = float(net.f_hz)
     fs = frequencies(f0, df)
     modes = _modes(torsional_modes, f0)
-    limit = DEFAULT_CLEARANCE_HZ if clearance_hz is None else _finite("clearance", clearance_hz)
+    limit = (
+        DEFAULT_CLEARANCE_HZ
+        if clearance_hz is None
+        else _finite("clearance", clearance_hz)
+    )
     if limit <= 0:
         raise ContractError(f"sub-synchronous scan: clearance must be > 0, got {limit}")
     assumed = clearance_hz is None or clearance_assumed
@@ -217,27 +289,75 @@ def subsync_scan(net, poc_bus: int, cases: dict, *, series_caps=(), torsional_mo
     base = {"clearance_hz": limit, "assumed": assumed, "label": LABEL}
 
     def note(*extra):
-        return "; ".join(filter(None, [*extra, NO_CLEARANCE if clearance_hz is None else "", *notes]))
+        return "; ".join(
+            filter(None, [*extra, NO_CLEARANCE if clearance_hz is None else "", *notes])
+        )
 
     frames, res = [], []
     for case, (s_sc, rx) in cases.items():
         s_sc = _finite(f"S_sc of case {case}", s_sc)
         rx = _finite(f"R/X of case {case}", rx)
         if s_sc <= 0 or rx < 0:
-            raise ContractError(f"sub-synchronous scan: case {case} needs S_sc > 0 and R/X >= 0, got {s_sc}, {rx}")
+            raise ContractError(
+                f"sub-synchronous scan: case {case} needs S_sc > 0 and R/X >= 0, got {s_sc}, {rx}"
+            )
         z = z_poc(net, poc_bus, s_sc, rx, fs, series_caps, case, series)
-        frames.append(pd.DataFrame({"case": case, "f_hz": fs, "r_ohm": z.real, "x_ohm": z.imag,
-                                    "z_ohm": np.abs(z), "label": LABEL}))
+        frames.append(
+            pd.DataFrame(
+                {
+                    "case": case,
+                    "f_hz": fs,
+                    "r_ohm": z.real,
+                    "x_ohm": z.imag,
+                    "z_ohm": np.abs(z),
+                    "label": LABEL,
+                }
+            )
+        )
         for f_er, r in crossings(fs, z):
             comp = f0 - f_er
             machine, fm, margin = nearest_mode(comp, modes)
-            res.append({"case": case, "kind": SERIES, "f_er_hz": f_er, "f_comp_hz": comp, "r_ohm": r,
-                        "machine": machine, "mode_hz": fm, "margin_hz": margin, "verdict": judge(margin, limit),
-                        "note": note("" if modes else NO_MODES), **base})
+            res.append(
+                {
+                    "case": case,
+                    "kind": SERIES,
+                    "f_er_hz": f_er,
+                    "f_comp_hz": comp,
+                    "r_ohm": r,
+                    "machine": machine,
+                    "mode_hz": fm,
+                    "margin_hz": margin,
+                    "verdict": judge(margin, limit),
+                    "note": note("" if modes else NO_MODES),
+                    **base,
+                }
+            )
         if not series_caps:
-            res.append({"case": case, "kind": SERIES, "verdict": "not evaluated", "note": note(NO_SERIES_CAP),
-                        **base})
-        res.append({"case": case, "kind": SSCI, "verdict": "not evaluated", "note": SSCI_NOTE, **base})
-    scan = pd.concat(frames, ignore_index=True).reindex(columns=list(SCAN_COLUMNS)) if frames \
+            res.append(
+                {
+                    "case": case,
+                    "kind": SERIES,
+                    "verdict": "not evaluated",
+                    "note": note(NO_SERIES_CAP),
+                    **base,
+                }
+            )
+        res.append(
+            {
+                "case": case,
+                "kind": SSCI,
+                "verdict": "not evaluated",
+                "note": SSCI_NOTE,
+                **base,
+            }
+        )
+    scan = (
+        pd.concat(frames, ignore_index=True).reindex(columns=list(SCAN_COLUMNS))
+        if frames
         else pd.DataFrame(columns=list(SCAN_COLUMNS))
-    return SubsyncStudy(scan=scan, resonance=pd.DataFrame(res, columns=list(RESONANCE_COLUMNS)), notes=notes)
+    )
+    return SubsyncStudy(
+        scan=scan,
+        resonance=pd.DataFrame(res, columns=list(RESONANCE_COLUMNS)),
+        notes=notes,
+    )
