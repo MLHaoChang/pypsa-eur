@@ -478,12 +478,32 @@ def test_droop_on_a_60_hz_system():
 def test_end_window_must_lie_after_the_step():
     y = _step_response()
     last = float(TS[-1])
+    ew = 0.5
+    edge = last - ew  # the end window starts exactly at t_event
     with pytest.raises(ContractError, match="reaches back to t_event"):
-        _step(y, target=None, end_window_s=last - 0.2)  # exactly back to t_event
+        _step(y, target=None, end_window_s=ew, t_event=edge)
+    rows = _step(
+        y, target=None, end_window_s=ew, t_event=float(np.nextafter(edge, 0.0))
+    )
+    assert all("no target given" in r["detail"] for r in rows.values())
     with pytest.raises(ContractError, match="reaches back to t_event"):
         _step(y, target=None, end_window_s=last)
     rows = _step(y, target=None, end_window_s=float(np.nextafter(last - 0.2, 0.0)))
     assert all("no target given" in r["detail"] for r in rows.values())
+
+
+def test_end_window_is_not_checked_for_ride_through():
+    last = float(T[-1])
+    case = {
+        "id": "late",
+        "kind": "lvrt",
+        "t_event": last - 0.05,  # less than the 0.1 s end window before the end
+        "t_clear": last,
+        "end_window_s": 0.1,
+        "channels": {"v1": "V"},
+    }
+    rows = _rows(judge(_frame(T, V=np.ones_like(T)), case, {"lvrt_curve": LVRT}))
+    assert rows["voltage_within_curve"]["status"] == "pass"
 
 
 def test_overshoot_of_a_subnormal_change_is_finite_or_fails():
