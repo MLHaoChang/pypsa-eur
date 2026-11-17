@@ -6,7 +6,8 @@
 Status: approved design (EXPERT-CAT-1); owner answered Q1–Q4 (§9) on 2026-11-17.
 Base: master `882d7114`. Paths are under `pypsa-gui/` unless they start with `.scratch/` or `docs/`.
 Review: UX NOT OK and GK NOT OK @0025d36b addressed in this revision (§13).
-Owner decisions applied: EXPERT-CAT-1, EXPERT-CAT Q1–Q4 (all (a)), AI-IMPORT-1, RAW-NAMES-1, WIKI-1, EXPERT-GUIDED-1, HOLISTIC-1, DENSITY-1, UI-COHESION-1, E2E-TEMPLATES-1.
+Journey fit (HOLISTIC-REC-1): touches set up site and assets (catalogue, panels, Guided cards, canvases), check readiness (function "needs"), run (range validation before a run starts), read results and report/export (plain names, units, guide appendix), in Guided and Expert. Hand-offs: a template seeds entries by id; readiness "needs" link straight into the field that run is waiting on; results and reports use the same plain names the user set, so nothing is renamed between setup and results. Shared reference: the journey map in `.scratch/ux-walkthrough-2026-11/README.md`.
+Owner decisions applied: HOLISTIC-REC-1, EXPERT-CAT-1, EXPERT-CAT Q1–Q4 (all (a)), AI-IMPORT-1, RAW-NAMES-1, WIKI-1, EXPERT-GUIDED-1, HOLISTIC-1, DENSITY-1, UI-COHESION-1, E2E-TEMPLATES-1.
 
 ## 0. Goal, in the owner's words
 
@@ -117,7 +118,8 @@ Order is fixed for every asset type; a type shows only groups with entries. Guid
 ### 3.5 Coverage rule ("every user-settable parameter")
 
 - Every Component column the GUI or chat can write is an entry, or is listed in `not_offered.py` with a one-line reason (engine-internal, output, unsupported). A test walks `attribute_catalog.py`'s PyPSA input columns for the 11 classes and the `EH_CUSTOM_COLUMNS`, and fails on any column in neither.
-- Every project-level setting an endpoint accepts (flow targets in `FIELD_LABELS`, the reliability goal, optimisation levers `models/energy_hub.py:151`, connection agreement, finance inputs in section 7) is an entry in `settings.py`. Slice 01 starts with the ~35 `FIELD_LABELS` keys, the levers and the solver-config fields other streams report (homer-parity 04a: "Load growth" % per year per energy type, valid finite and above -100; "Load growth starts from year", default the first period; "Load multiplier" ×; its internal `load_scalers_derived` stays out as not offered); a test lists the remaining write routes without entries as `KNOWN_GAPS` (shrink-only).
+- Every project-level setting an endpoint accepts (flow targets in `FIELD_LABELS`, the reliability goal, optimisation levers `models/energy_hub.py:151`, connection agreement, finance inputs in section 7) is an entry in `settings.py`. Slice 01 starts with the ~35 `FIELD_LABELS` keys, the levers and the solver-config fields other streams report (homer-parity 04a: "Load growth" % per year per energy type, valid finite and above -100; "Load growth starts from year", default source `none` and required whenever a rate is set, which the UI pre-fills with the first investment period and saves explicitly (the server's 422 stays; agreed with homer 04a and GK B); "Load multiplier" ×; its internal `load_scalers_derived` stays out as not offered); a test lists the remaining write routes without entries as `KNOWN_GAPS` (shrink-only).
+- Imported columns count too: the PSS/E importer's load-flow inputs (generator control, voltage set point, reactive limits, tap ratio, phase shift, switched-shunt fields, ZIP load shares) become Electrical/Operation entries; its bookkeeping ids (bus and circuit numbers, area, zone, owner) are read-only Source entries or not offered.
 - Q3 (a): Full detail offers every input our engines read; other PyPSA input columns are listed in `not_offered.py` with a reason.
 
 ### 3.6 Plain names (RAW-NAMES-1)
