@@ -122,13 +122,15 @@ export default function StatusBar() {
   const color = STATUS_COLORS[status] ?? 'text-muted'
   // The last solve's objective, read from /simulation/status (set after every
   // solve and after a reload); the store's value covers a reconnect. In the one
-  // money notation (utils/money.ts); a solve the network has since moved past
-  // keeps its figure, marked out of date. "—" only when nothing is solved
+  // money notation (utils/money.ts). Only a fresh dispatch has a figure: an
+  // edit clears the solve (the backend drops the objective and the app toasts
+  // "Results cleared"), so the bar reads "—" as Results reads "Not run yet"
   // (control-strategy 07).
-  const solvedObjective = liveStatus ? liveStatus.objective ?? null : objective
-  const outOfDate = liveStatus?.dispatch != null && liveStatus.dispatch !== 'fresh'
+  const solvedObjective = liveStatus
+    ? (liveStatus.dispatch === 'fresh' ? liveStatus.objective ?? null : null)
+    : objective
   const objStr = solvedObjective != null && Number.isFinite(solvedObjective)
-    ? `${solvedObjective < 0 ? '−' : ''}${money(solvedObjective, 'EUR')}${outOfDate ? ' · out of date' : ''}`
+    ? `${solvedObjective < 0 ? '−' : ''}${money(solvedObjective, 'EUR')}`
     : '—'
 
   // Prefer the UI store's project name (set on import/load/save) over PyPSA's

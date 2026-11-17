@@ -43,11 +43,13 @@ describe('StatusBar objective (control-strategy 07)', () => {
     expect(await screen.findByText('Obj: € 120 m')).toBeTruthy()
   })
 
-  it('keeps the figure, marked out of date, after an edit since the solve', async () => {
+  it('reads a dash once the network has moved past the solve, as Results does', async () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValue(
       { status: 'completed', objective: 3473806.32, dispatch: 'stale' } as never)
     renderBar()
-    expect(await screen.findByText('Obj: € 3.5 m · out of date')).toBeTruthy()
+    await vi.waitFor(() => expect(simulationApi.getStatus).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 0))
+    expect(screen.getByText('Obj: —')).toBeTruthy()
   })
 
   it('reads a dash when nothing is solved', async () => {
