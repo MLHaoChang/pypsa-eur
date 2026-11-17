@@ -117,11 +117,12 @@ class ModelSet:
 
     def spec(self, variant: str) -> dict:
         """
-        The campus description of ``variant``; refused when the variant
-        is unknown or was not frozen.
+        A copy of the campus description of ``variant`` (the frozen one
+        stays as hashed); refused when the variant is unknown or was not
+        frozen.
         """
         _check_variant(self, variant)
-        return self.specs[variant]
+        return copy.deepcopy(self.specs[variant])
 
 
 def _check_variant(ms, variant):
@@ -166,11 +167,22 @@ def new_model_set(
 def manifest(ms: ModelSet, variant: str) -> dict:
     """
     What every export pack (GC-04..06) embeds to name the model it was
-    written from: ``model_set_id``, ``data_hash`` and ``variant``.
+    written from: ``model_set_id``, ``data_hash``, ``variant`` and
+    ``model_hash``. ``data_hash`` names the inputs; ``model_hash`` (the
+    SHA-256 of the variant's own campus description, same canonical form)
+    names the model itself, so an aggregated model that a later version of
+    the aggregation code derives differently from the same inputs does not
+    pass under the same manifest.
     """
     _check_variant(ms, variant)
     return {
         "model_set_id": ms.model_set_id,
         "data_hash": ms.data_hash,
         "variant": variant,
+        "model_hash": model_hash(ms.specs[variant]),
     }
+
+
+def model_hash(spec) -> str:
+    """SHA-256 (hex) of one variant's campus description, canonical form."""
+    return data_hash(spec, {})
