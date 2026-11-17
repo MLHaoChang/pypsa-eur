@@ -3,7 +3,7 @@
 
 # RP-13 — fetch ERA5 cutout months in a subprocess
 
-Status: in-progress (session_01G7qCukJE2zt5D3dN1X1BbL)
+Status: done (#1569)
 Model: Opus
 Type: task
 Baseline: branch `claude/cutout-netcdf-lock` (the cutout cache's month check and merge under the process netCDF lock)
