@@ -1,4 +1,5 @@
-"""Planning-criteria contingencies: emergency ratings and the two-stage check.
+"""
+Planning-criteria contingencies: emergency ratings and the two-stage check.
 
 Planning criteria of the SAGC type go past plain N-1 on normal ratings: right
 after an outage a branch may run up to its EMERGENCY rating, and once the
@@ -177,11 +178,14 @@ ANGLE_BASES = frozenset({"assumed", "sagc"})
 
 @dataclasses.dataclass(frozen=True)
 class Controls:
-    """The remedial controls stage 2 may move: on-load tap changers by their
+    """
+    The remedial controls stage 2 may move: on-load tap changers by their
     branch id (``"{hv_bus}-{lv_bus}-{ckt}"``, as ``branch_contingencies``
     names them), switched shunts by ``net.shunt`` name, and redispatch units
     as ``(gen or sgen name, priority)`` moved in balanced pairs of up to
-    ``redispatch_step_mw`` (``redispatch_walk``)."""
+    ``redispatch_step_mw`` (``redispatch_walk``).
+    """
+
     oltc: tuple = ()
     switched_shunts: tuple = ()
     redispatch: tuple = ()
@@ -196,7 +200,8 @@ def _finite_number(v) -> bool:
 
 @dataclasses.dataclass(frozen=True)
 class AngleLimit:
-    """The voltage-angle limit across a branch or bus pair, in degrees.
+    """
+    The voltage-angle limit across a branch or bus pair, in degrees.
     ``basis`` is ``"assumed"`` or ``"sagc"``; ``"sagc"`` names the public
     SAGC clause in ``reference`` (one built from a profile reads
     ``"<profile>: <clause>"``). ``deg`` is bounded 0 < deg < 90, as the
@@ -204,7 +209,9 @@ class AngleLimit:
     name pairs; empty means every in-service branch on the net. A branch
     pair is measured net of a transformer's phase shift; a (bus, bus) pair
     is measured raw, since it may span several transformers, so name a
-    shifted transformer by its branch id."""
+    shifted transformer by its branch id.
+    """
+
     deg: float
     basis: str
     reference: str = ""
@@ -256,8 +263,10 @@ def _emergency(net) -> np.ndarray:
 
 
 def validate_emergency_ratings(net) -> None:
-    """Refuse an emergency rating below the normal one, at or below zero, or
-    present but not finite; equal to the normal rating is allowed."""
+    """
+    Refuse an emergency rating below the normal one, at or below zero, or
+    present but not finite; equal to the normal rating is allowed.
+    """
     names = _branch_ids(net)
     nl = len(net.line)
     for table, col, normal, offset in ((net.line, LINE_EMERGENCY, "max_i_ka", 0),
@@ -279,10 +288,12 @@ def validate_emergency_ratings(net) -> None:
 
 
 def emergency_loading_pct(net, i_from_ka, i_hv_ka) -> np.ndarray:
-    """``branch_loading_pct`` against each branch's emergency rating, its
+    """
+    ``branch_loading_pct`` against each branch's emergency rating, its
     normal rating where none is given: lines i_from / (max_i_ka_emergency x
     df x parallel), transformers i_hv x sqrt(3) x vn_hv / (sn_mva_emergency
-    x df x parallel)."""
+    x df x parallel).
+    """
     normal = branch_loading_pct(net, i_from_ka, i_hv_ka)
     rated = np.concatenate([net.line["max_i_ka"].to_numpy(dtype=float),
                             net.trafo["sn_mva"].to_numpy(dtype=float)])
@@ -291,8 +302,10 @@ def emergency_loading_pct(net, i_from_ka, i_hv_ka) -> np.ndarray:
 
 
 def _rating_note(net) -> str:
-    """The row's "no emergency rating given (k of n branches)", over the
-    branches in service after its outage; empty when every one has one."""
+    """
+    The row's "no emergency rating given (k of n branches)", over the
+    branches in service after its outage; empty when every one has one.
+    """
     on = _branches_on(net)
     k = int((on & np.isnan(_emergency(net))).sum())
     return f"no emergency rating given ({k} of {int(on.sum())} branches)" if k else ""
@@ -343,6 +356,7 @@ def _verdict(pct: float) -> str:
 @dataclasses.dataclass(frozen=True)
 class _Knob:
     """One named control: ``net[table].at[index, column]`` moves in lo..hi."""
+
     name: str
     table: str
     index: int
@@ -389,11 +403,13 @@ def _knobs(work, controls: Controls, trafo_pos: dict) -> list:
 
 
 def _bands(net, judged, profile: dict | None, by_kv: dict) -> tuple:
-    """``({bus name: (v_min, v_max)}, {bus name: (kv, profile band or None)})``
+    """
+    ``({bus name: (v_min, v_max)}, {bus name: (kv, profile band or None)})``
     for the ``judged`` buses: the profile's continuous band for each bus's
     ``vn_kv``, else the assumed ``(V_MIN_PU, V_MAX_PU)`` (no profile, or no
     band covering that kV; ``None``). ``by_kv`` caches the lookup per kV across
-    one screen."""
+    one screen.
+    """
     bands, used = {}, {}
     for b in judged:
         name, kv = str(net.bus.at[b, "name"]), float(net.bus.at[b, "vn_kv"])
@@ -411,8 +427,10 @@ def _bands(net, judged, profile: dict | None, by_kv: dict) -> tuple:
 
 
 def _band_note(used: dict, profile: dict | None) -> str:
-    """``"voltage band: 110 kV 0.95-1.05 pu (profile p, <clause>, code); 20 kV
-    0.9-1.1 pu (assumed)"``, one entry per nominal kV judged."""
+    """
+    ``"voltage band: 110 kV 0.95-1.05 pu (profile p, <clause>, code); 20 kV
+    0.9-1.1 pu (assumed)"``, one entry per nominal kV judged.
+    """
     by_kv = {}
     for kv, band in used.values():
         by_kv.setdefault(kv, band)
@@ -428,18 +446,22 @@ def _band_note(used: dict, profile: dict | None) -> str:
 
 
 def _key(state: _State, bands: dict, moved: int):
-    """The walk's key: (voltage excursion pu, worst overload above the normal
+    """
+    The walk's key: (voltage excursion pu, worst overload above the normal
     rating in percentage points, steps moved). ``_better`` takes a lower
-    excursion or overload only when it drops by more than ``STEP_TOL``."""
+    excursion or overload only when it drops by more than ``STEP_TOL``.
+    """
     over = max(0.0, float(np.nanmax(state.loading, initial=0.0)) - LOADING_MAX_PCT)
     return (excursion(state.vm, bands), over, moved)
 
 
 def remedial_walk(work, knobs: list, bands: dict, judged, state: _State):
-    """Walk the in-service ``knobs`` on ``work`` (module docstring) from
+    """
+    Walk the in-service ``knobs`` on ``work`` (module docstring) from
     ``state``, the solved post-outage state. Returns ``(state, moves)``: the
     last converged state, ``work`` left at its positions, and ``{name: steps
-    moved}``."""
+    moved}``.
+    """
     on = [k for k in knobs if k.in_service(work)]
     start = {k.name: k.get(work) for k in on}
     pos = dict(start)
@@ -474,6 +496,7 @@ def remedial_walk(work, knobs: list, bands: dict, judged, state: _State):
 @dataclasses.dataclass(frozen=True)
 class _Unit:
     """One named redispatch unit: ``net[table].at[index, "p_mw"]`` moves in lo..hi MW."""
+
     name: str
     table: str
     index: int
@@ -556,11 +579,13 @@ def _limits(net, on: list) -> str:
 
 
 def redispatch_walk(work, units: list, step: float, bands: dict, judged, state: _State):
-    """Move balanced pairs of the live ``units`` on ``work`` (module
+    """
+    Move balanced pairs of the live ``units`` on ``work`` (module
     docstring) from ``state`` while a branch is above its normal rating.
     Returns ``(state, {name: MW moved}, why)``: the last converged state,
     ``work`` left at its setpoints, and why an overload is left ("" when
-    none is)."""
+    none is).
+    """
     live = set(judged)
     start = {u.name: u.get(work) for u in units if u.live(work, live)}
     on = []
@@ -632,6 +657,7 @@ def redispatch_walk(work, units: list, step: float, bands: dict, judged, state: 
 @dataclasses.dataclass(frozen=True)
 class _Handles:
     """Where each contingency element sits on the net, by name."""
+
     branch: dict    # N-1 branch id -> (element_type, element_index)
     gen: dict
     sgen: dict
@@ -657,8 +683,10 @@ def _apply_branches(work, cid, elems, h: _Handles) -> None:
 
 
 def _apply_outage(work, r, h: _Handles) -> None:
-    """Take out the row's elements; a compound row's SECOND branch only, since
-    the screen takes out its first and re-adjusts before calling this."""
+    """
+    Take out the row's elements; a compound row's SECOND branch only, since
+    the screen takes out its first and re-adjusts before calling this.
+    """
     if r.kind == "branch":
         _apply_branches(work, r.contingency_id, r.element_ids, h)
     elif r.kind in COMPOUND_SEPARATORS:
@@ -699,10 +727,12 @@ def _units_off(base, work, gone, tbl) -> pd.Series:
 
 
 def _lost(base, work, gone) -> tuple:
-    """(load MW, generation MW) on ``gone`` buses plus units the outage took off.
+    """
+    (load MW, generation MW) on ``gone`` buses plus units the outage took off.
     Generation counts each unit's injection clipped at 0 before the sum: a
     charging storage unit (p < 0) lost is neither generation nor load lost
-    (``_draw_lost`` reports it), and netting it would hide a lost generator."""
+    (``_draw_lost`` reports it), and netting it would hide a lost generator.
+    """
     on = base.load["in_service"].astype(bool) & base.load["bus"].isin(gone)
     load = float(_p_mw(base.load)[on].sum())
     gen = 0.0
@@ -712,8 +742,10 @@ def _lost(base, work, gone) -> tuple:
 
 
 def _draw_lost(base, work, gone) -> float:
-    """MW of charging draw (sgen p < 0) the outage took off: still load-flowed
-    with the unit out, so its thermal and voltage effect is screened."""
+    """
+    MW of charging draw (sgen p < 0) the outage took off: still load-flowed
+    with the unit out, so its thermal and voltage effect is screened.
+    """
     p = _p_mw(base.sgen)[_units_off(base, work, gone, "sgen")]
     return float(-p.clip(upper=0.0).sum())
 
@@ -741,11 +773,13 @@ def _row(r, hour, **kw):
 # ---------------------------------------------------------------------------
 
 def _angle_pairs(net, angle_limit: AngleLimit | None, keys, ids, h: _Handles) -> list:
-    """``[(label, bus index, bus index, branch)]`` to measure: the limit's
+    """
+    ``[(label, bus index, bus index, branch)]`` to measure: the limit's
     pairs, or every branch when it names none (or no limit is set).
     ``branch`` is ``(element type, index, default)`` for a branch pair, where
     ``default`` marks one measured only while in service, and None for a
-    (bus, bus) pair."""
+    (bus, bus) pair.
+    """
     ends = {}
     for bid, t, i in zip(ids, keys["element_type"], keys["element_index"]):
         a, b = ("from_bus", "to_bus") if t == "line" else ("hv_bus", "lv_bus")
@@ -769,18 +803,22 @@ def _angle_pairs(net, angle_limit: AngleLimit | None, keys, ids, h: _Handles) ->
 
 
 def _trafo_shift(work, i) -> float:
-    """The phase shift, in degrees, the last load flow applied across
+    """
+    The phase shift, in degrees, the last load flow applied across
     transformer ``i`` (vector group and phase-shifting tap; 0 when the flow
-    ran without voltage angles), read from pandapower's branch matrix."""
+    ran without voltage angles), read from pandapower's branch matrix.
+    """
     start, _ = work._pd2ppc_lookups["branch"]["trafo"]
     return float(work._ppc["branch"][start + work.trafo.index.get_loc(i), SHIFT].real)
 
 
 def _angle(work, pairs, live: set):
-    """``(largest |angle difference| in degrees, its label, skipped labels)``
+    """
+    ``(largest |angle difference| in degrees, its label, skipped labels)``
     over ``pairs`` whose two buses are both in ``live``; NaN when none is.
     Across a transformer the difference is net of its phase shift; a default
-    branch pair out of service is not measured."""
+    branch pair out of service is not measured.
+    """
     va = work.res_bus["va_degree"]
     worst, label, skipped = np.nan, "", []
     for name, a, b, branch in pairs:
@@ -797,9 +835,11 @@ def _angle(work, pairs, live: set):
 
 
 def _angle_limit_from(profile: dict) -> tuple:
-    """``(AngleLimit or None, caveat)`` from the profile's ``angle_limit_deg``;
+    """
+    ``(AngleLimit or None, caveat)`` from the profile's ``angle_limit_deg``;
     the caveat names an extracted, unconfirmed figure ("" otherwise). The
-    reference names the profile, so another code's clause never reads as SAGC."""
+    reference names the profile, so another code's clause never reads as SAGC.
+    """
     lim = profile.get("angle_limit_deg")
     if lim is None:
         return None, ""
@@ -851,8 +891,10 @@ def _capped(cset: pd.DataFrame, max_compound) -> tuple:
 
 
 def _summary(results: pd.DataFrame, kinds, skipped: dict) -> dict:
-    """Per kind: the worst stage and angle verdicts; a kind with skipped rows
-    is ``incomplete`` unless a judged row already fails."""
+    """
+    Per kind: the worst stage and angle verdicts; a kind with skipped rows
+    is ``incomplete`` unless a judged row already fails.
+    """
     out = {}
     for kind in sorted(kinds):
         rows = results[results["kind"] == kind]
@@ -871,7 +913,8 @@ def _summary(results: pd.DataFrame, kinds, skipped: dict) -> dict:
 def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, controls: Controls | None = None,
                     max_compound: int | None = None, angle_limit: AngleLimit | None = None,
                     profile: dict | None = None):
-    """``(results, report)``: one ``validate_planning_results`` row per
+    """
+    ``(results, report)``: one ``validate_planning_results`` row per
     contingency judged, in the set's order, and ``{"counts": {kind: n judged},
     "skipped": {compound kind: n}, "summary": {kind: {...}}, "angle_limit":
     {deg, basis, reference, from: "argument" or "profile <name>"} or
@@ -879,7 +922,8 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
     {"profile": n, "assumed": n}} (the base case's live buses), "seconds"}``. Kinds judged: branch (any
     order), unit, bus_section, n_m_1, n_1_1. ``profile`` is a grid-code profile
     (``load_grid_code``); stage 2 takes each bus's band from it (``_bands``),
-    and its ``angle_limit_deg`` is the angle limit when ``angle_limit`` is None."""
+    and its ``angle_limit_deg`` is the angle limit when ``angle_limit`` is None.
+    """
     cset = validate_contingency_set(contingencies)
     dispatch = validate_dispatch(dispatch)
     loads = validate_loads(loads)
@@ -1021,16 +1065,20 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
 
 
 def _moved(moves: dict, mw: dict | None = None) -> str:
-    """``"SH1 +3, T1 -2, G1 +20.0 MW, G2 -20.0 MW"``: each control's steps and
-    each redispatch unit's MW from where it was, or "none"."""
+    """
+    ``"SH1 +3, T1 -2, G1 +20.0 MW, G2 -20.0 MW"``: each control's steps and
+    each redispatch unit's MW from where it was, or "none".
+    """
     parts = [f"{n} {d:+d}" for n, d in sorted(moves.items())]
     parts += [f"{n} {d:+.1f} MW" for n, d in sorted((mw or {}).items())]
     return ", ".join(parts) if parts else "none"
 
 
 def _controls_note(work, knobs: list, units: list, judged: set) -> str:
-    """The row's note on the controls named; without redispatch, today's
-    ``NO_CONTROLS`` / ``NO_REDISPATCH`` / ``NO_CONTROLS_ON``."""
+    """
+    The row's note on the controls named; without redispatch, today's
+    ``NO_CONTROLS`` / ``NO_REDISPATCH`` / ``NO_CONTROLS_ON``.
+    """
     taps_on = any(k.in_service(work) for k in knobs)
     if not units:
         return NO_CONTROLS if not knobs else NO_REDISPATCH if taps_on else NO_CONTROLS_ON

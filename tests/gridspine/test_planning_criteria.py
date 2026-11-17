@@ -1,4 +1,5 @@
-"""DC issue 13: emergency ratings, the two-stage check, bus-section loss (PR a);
+"""
+DC issue 13: emergency ratings, the two-stage check, bus-section loss (PR a);
 N-M-1 / N-1-1 with the user cap, and the angle-limit check (PR b).
 
 The hand-built net is generic and meshed (not radial): a 110 kV ring A-B-C
@@ -98,8 +99,10 @@ def _tables(net):
 
 
 def _rated(net, emergency=True):
-    """Rate the parallel A-B lines so that losing one loads the other to
-    SURVIVOR_LOADING of normal (measured, not guessed)."""
+    """
+    Rate the parallel A-B lines so that losing one loads the other to
+    SURVIVOR_LOADING of normal (measured, not guessed).
+    """
     probe = copy.deepcopy(net)
     probe.line.at[1, "in_service"] = False
     pp.runpp(probe)
@@ -512,8 +515,10 @@ def test_a_bad_profile_is_refused_before_the_base_solve(bad, match, monkeypatch)
 # --------------------------------------------------------------------------
 
 def _net16(g1_max=100.0):
-    """The rated fixture with a second unit G0 at the slack's bus: moving G0
-    down and G1 (at BUS_C) up relieves the surviving A-B line."""
+    """
+    The rated fixture with a second unit G0 at the slack's bus: moving G0
+    down and G1 (at BUS_C) up relieves the surviving A-B line.
+    """
     net = _rated(_net(), emergency=False)
     pp.create_gen(net, 0, p_mw=80, vm_pu=1.0, name="G0", min_p_mw=0, max_p_mw=100)
     net.gen.loc[net.gen["name"] == "G1", ["min_p_mw", "max_p_mw"]] = [0.0, g1_max]
@@ -1040,8 +1045,10 @@ def test_angle_matches_a_hand_computed_two_bus_case():
 
 
 def _shifted_pair():
-    """Two parallel 110/20 kV transformers of a vector group with a 150 degree
-    phase shift, feeding a 10 MW load."""
+    """
+    Two parallel 110/20 kV transformers of a vector group with a 150 degree
+    phase shift, feeding a 10 MW load.
+    """
     n = pp.create_empty_network(sn_mva=100)
     hv, lv = pp.create_bus(n, 110, name="BUS_H"), pp.create_bus(n, 20, name="BUS_L")
     pp.create_ext_grid(n, hv, vm_pu=1.0, name="SLK")
