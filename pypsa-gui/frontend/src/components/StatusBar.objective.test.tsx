@@ -1,6 +1,6 @@
 // Control-strategy walkthrough issue 07: the status bar's objective is read
 // from /simulation/status (set after every solve and after a reload), in the
-// solve toast's form, never as "0.003 B€".
+// one money notation (utils/money.ts), never as "0.003 B€".
 import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -28,11 +28,11 @@ beforeEach(() => {
 })
 
 describe('StatusBar objective (control-strategy 07)', () => {
-  it('shows the solved objective from the status endpoint, as the toast does', async () => {
+  it('shows the solved objective from the status endpoint, in the money notation', async () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValue(
       { status: 'completed', objective: 3473806.32, dispatch: 'fresh' } as never)
     renderBar()
-    expect(await screen.findByText('Obj: €3.47 M')).toBeTruthy()
+    expect(await screen.findByText('Obj: € 3.5 m')).toBeTruthy()
     expect(screen.queryByText(/B€/)).toBeNull()
   })
 
@@ -40,12 +40,19 @@ describe('StatusBar objective (control-strategy 07)', () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValue(
       { status: 'completed', objective: 115678228, dispatch: 'fresh' } as never)
     renderBar()
-    expect(await screen.findByText('Obj: €115.68 M')).toBeTruthy()
+    expect(await screen.findByText('Obj: € 120 m')).toBeTruthy()
   })
 
-  it('reads a dash when no fresh solve exists', async () => {
+  it('keeps the figure, marked out of date, after an edit since the solve', async () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValue(
       { status: 'completed', objective: 3473806.32, dispatch: 'stale' } as never)
+    renderBar()
+    expect(await screen.findByText('Obj: € 3.5 m · out of date')).toBeTruthy()
+  })
+
+  it('reads a dash when nothing is solved', async () => {
+    vi.mocked(simulationApi.getStatus).mockResolvedValue(
+      { status: 'idle', objective: null, dispatch: 'none' } as never)
     renderBar()
     await vi.waitFor(() => expect(simulationApi.getStatus).toHaveBeenCalled())
     expect(screen.getByText('Obj: —')).toBeTruthy()

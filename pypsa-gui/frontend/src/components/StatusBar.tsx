@@ -8,7 +8,7 @@ import { solveProgressLabel } from '../utils/solveProgress'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { formatRelativeTime } from '../utils/projectActions'
-import { formatObjective } from '../layout/AppHeader'
+import { money } from '../utils/money'
 
 const STATUS_COLORS: Record<string, string> = {
   idle: 'text-muted', running: 'text-warn', completed: 'text-success',
@@ -120,13 +120,16 @@ export default function StatusBar() {
     : null
 
   const color = STATUS_COLORS[status] ?? 'text-muted'
-  // The last fresh solve's objective, read from /simulation/status (set after
-  // every solve and after a reload); the store's value covers a reconnect.
-  // Same compact form as the "Solved · €X" toast (control-strategy 07).
-  const shownObjective = liveStatus?.dispatch === 'fresh' && liveStatus.objective != null
-    ? liveStatus.objective
-    : liveStatus?.dispatch && liveStatus.dispatch !== 'fresh' ? null : objective
-  const objStr = formatObjective(shownObjective) ?? '—'
+  // The last solve's objective, read from /simulation/status (set after every
+  // solve and after a reload); the store's value covers a reconnect. In the one
+  // money notation (utils/money.ts); a solve the network has since moved past
+  // keeps its figure, marked out of date. "—" only when nothing is solved
+  // (control-strategy 07).
+  const solvedObjective = liveStatus ? liveStatus.objective ?? null : objective
+  const outOfDate = liveStatus?.dispatch != null && liveStatus.dispatch !== 'fresh'
+  const objStr = solvedObjective != null && Number.isFinite(solvedObjective)
+    ? `${solvedObjective < 0 ? '−' : ''}${money(solvedObjective, 'EUR')}${outOfDate ? ' · out of date' : ''}`
+    : '—'
 
   // Prefer the UI store's project name (set on import/load/save) over PyPSA's
   // internal n.name, which defaults to "Unnamed Network" when not explicitly
