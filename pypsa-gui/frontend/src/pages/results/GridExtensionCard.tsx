@@ -92,10 +92,12 @@ const HORIZON_ROW = 'battery_storage_lifetime_years'
 const POLL_MS = 1500
 
 // Disabled: a muted surface and muted text (≥ 4.5 : 1 in both themes), never a
-// dimmed accent, which read dark-on-dark red (UX 2 (3), #1694 a).
+// dimmed accent, which read dark-on-dark red (UX 2 (3), #1694 a). The text is
+// `!important` because index.css's dark-theme rule re-points every `.bg-accent`
+// at the on-accent colour, which outranks a plain `disabled:` utility.
 const BTN_PRIMARY = 'self-start rounded border border-transparent bg-accent px-3 py-1.5 text-[12px] '
   + 'font-semibold text-white disabled:cursor-not-allowed disabled:border-border disabled:bg-bg '
-  + 'disabled:text-muted'
+  + 'disabled:text-muted!'
 const BTN_SECONDARY = 'self-start rounded-[6px] border border-border-2 bg-bg px-2 py-1 text-[11px] '
   + 'font-semibold text-text hover:border-border-3 disabled:opacity-50'
 const INPUT = 'w-32 rounded border border-border bg-bg px-1 py-0.5 text-[11px] text-text'

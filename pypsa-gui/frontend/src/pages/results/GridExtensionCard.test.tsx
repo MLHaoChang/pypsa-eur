@@ -97,7 +97,8 @@ describe('GridExtensionCard: when it shows', () => {
     // UX 2 (3) a: disabled is a muted surface and text, never a dimmed accent.
     const cls = within(card).getByRole('button', { name: W.compare }).className
     expect(cls).toContain('disabled:bg-bg')
-    expect(cls).toContain('disabled:text-muted')
+    // `!`: index.css's dark `.bg-accent` colour rule must not win (dark shot 12).
+    expect(cls).toContain('disabled:text-muted!')
     expect(cls).not.toMatch(/opacity/)
     // UX 2 (3) b: a readable width in the wide Expert panel too.
     expect(card.className).toContain('max-w-3xl')
