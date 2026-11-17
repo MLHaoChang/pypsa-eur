@@ -29,7 +29,7 @@ The same level of heading is 12, 12.5, 13, 14, 15 or 16 px depending on the sect
 - A shot script run (`node scripts/ui-cohesion-shots.mjs <dir> eh_datacenter eh_microgrid`) on the PR's head shows: one h2/h3 size per level across Guided sections, panels and Results (`facts.jsonl` headings column); one card radius (4 px controls, 8 px cards) in `cardRadii`; one monospace family and Inter loaded from the app, not the system (`document.fonts.check('11px Inter')` true with no system Inter: say how it was checked); no text under 9 px.
 - The PR carries before and after shots in Guided and Expert, light and dark, for the screens it moves (the audit's `shots/` names), plus the New project dialog and Home unchanged.
 - Unit tests: the fonts and tokens parse out of `index.css` and `spa.html` (the contrast and `brand.theme` tests keep passing); `EmptyState` per tab; the header component renders the same row from `FullPageTab` and from a `PageHeader` panel.
-- No colour value is changed. THEME-LIGHT (b)–(d) own colour; the PR names any literal it had to touch.
+- Colour: slice A adds `--color-link` and `--color-eyebrow` with today's values; THEME-LIGHT (b)/(d) flip them to ink. The ink selection ring (item 8) is a colour change and slice B says so. No other colour value changes; the PR names any literal it touches.
 
 ## Likely files
 
@@ -44,3 +44,16 @@ About 1,200 changed lines without shots, one PR (PR-SIZE-1), reviewer area UI. I
 - THEME-LIGHT (b) restyles the same header and `layout/` files with colour. Merge order: this slice's header (item 3) before (b), or (b) uses the header token from item 3. Tell the (b) builder when this lands.
 - #1565 changes `PropertiesPanel.tsx`/`AssetFields.tsx`; #1556 `ChatPanel.tsx`; #1561 `SolveQueuePanel.tsx`, which the Solve queue panel header (item 3) reaches only through `FullPageTab`. Do not edit those three files.
 - Not checked when this was written: whether any open PR changes `Results.tsx` or `pages/results/*`. Before item 5, compare each open PR's changed files with the Likely files below.
+
+## UX conditions (UX OK @5e8d60a2 on #1598; the four open choices are settled as recommended)
+
+Titles 15 px; links and eyebrows ink; selection = ink ring plus accent halo; eyebrow = flow section name.
+
+- Links are always underlined or carry "›", with a visible focus ring.
+- The eyebrow test lists the panels that are exceptions to the section-name rule.
+- Slice B owns the panel header; THEME-LIGHT (b) owns only the top bar and sidebar.
+- Add to slice B, or log as follow-ups: the Save-button mismatch (Goal card vs Solver & mode bar), the sidebar state dots without words, the €39.8 M against €39.75 M precision.
+- EmptyState: "Not yet available" gets a visible reason or next step, and all empty states share one wording pattern.
+- The banner shows once per session only if one assistant-setup entry remains elsewhere. The chat launcher gets a reserved gutter.
+- Shots required: the 8 px to 9 px canvas labels, and Section 5 as cards on the microgrid.
+- THEME-LIGHT (c) and expert-catalogue slice 04 are sequenced so the canvas hex tables move once, not twice.
