@@ -295,14 +295,21 @@ def _can_deliver(df, name, nom) -> bool:
         return True
 
 
+def _is_port(value) -> bool:
+    """False for an unset port: None, NaN, ``pd.NA``, a blank string or the text "nan"
+    (GK A 29)."""
+    if pd.api.types.is_scalar(value) and pd.isna(value):
+        return False
+    return str(value).strip() not in ("", "nan")
+
+
 def _ports(df, name) -> tuple[str, ...]:
-    """Every bus a branch row connects (``bus0``, ``bus1``, ``bus2``, ...), blanks left out."""
+    """Every bus a branch row connects (``bus0``, ``bus1``, ``bus2``, ...), unset ports left
+    out."""
     return tuple(
         str(df.at[name, col])
         for col in df.columns
-        if col.startswith("bus")
-        and col[3:].isdigit()
-        and str(df.at[name, col]) not in ("", "nan")
+        if col.startswith("bus") and col[3:].isdigit() and _is_port(df.at[name, col])
     )
 
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import pathlib
 import sys
 
+import pandas as pd
 import pytest
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
@@ -779,4 +780,54 @@ def test_a_link_with_every_port_off_the_island_is_not_named_unmarked():
     n.add("Link", "far_link", bus0="far_a", bus1="far_b", p_nom=5.0)
     out = S.tie_state(n, island)
     assert out["state"] == "no_tie"
+    assert out["unmarked_links"] == ["hospital_feeder", "subsea_tie"]
+
+
+# ── GK A (29): exact-zero availability, and a missing port is no port ──
+
+
+def test_an_hour_at_a_tiny_positive_availability_keeps_the_supply_detected():
+    """SH 56: "never available" means exactly 0 in every hour; 1e-9 in one hour is available."""
+    n, island = _idle_fixture()
+    n.generators_t.p_max_pu["parked"] = 0.0
+    n.generators_t.p_max_pu.iloc[
+        0, n.generators_t.p_max_pu.columns.get_loc("parked")
+    ] = 1e-9
+    out = S.tie_state(n, island)
+    assert out["state"] == "unit_on_mainland"
+    assert "parked" in out["reason"]
+    assert "idle_supplies" not in out
+
+
+@pytest.mark.parametrize("missing", [None, pd.NA])
+def test_a_missing_extra_port_is_not_a_phantom_tie(missing):
+    """SH 55: a Link whose bus2 reads None or NA joins only bus0 and bus1, both island buses, so
+    it is no tie: it is the island's own (unmarked) feeder."""
+    n, island = _three_port(missing)
+    out = S.tie_state(n, island)
+    assert (out["state"], out["ties"]) == ("no_tie", [])
+    assert out["unmarked_links"] == ["hospital_feeder", "subsea_tie"]
+
+
+@pytest.mark.parametrize("missing", [None, pd.NA])
+def test_a_missing_extra_port_still_reads_the_eh_poc_feed(missing):
+    """SH 54/55: a Link with bus2 None or NA and both ends on island buses is read as a two-port
+    Link, so its eh_poc end marks the mainland feed."""
+    n, island = _three_port(missing)
+    n.buses.at["mainland", "eh_poc"] = True
+    out = S.tie_state(n, island)
+    assert (out["state"], out["links"]) == ("unit_on_mainland", ["subsea_tie"])
+
+
+def test_user_columns_that_only_look_like_ports_are_not_ports():
+    """SH 55: only ``bus`` plus a digit suffix is a port; ``bus_label`` and ``eh_1`` holding an
+    off-island bus name make no tie."""
+    n, island = _untagged_r4(poc=False)
+    n.add("Bus", "far")
+    n.links["bus_label"] = ""
+    n.links["eh_1"] = ""
+    n.links.at["subsea_tie", "bus_label"] = "far"
+    n.links.at["subsea_tie", "eh_1"] = "far"
+    out = S.tie_state(n, island)
+    assert (out["state"], out["ties"]) == ("no_tie", [])
     assert out["unmarked_links"] == ["hospital_feeder", "subsea_tie"]
