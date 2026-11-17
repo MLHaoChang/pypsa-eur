@@ -80,3 +80,17 @@ The source is the base project's saved network. Named "supply architecture" (G11
 - C4: off-grid basis (currency, currency year, discount rate, horizon) is echoed; a different currency or year, or a missing basis, refuses (`test_c4_*`).
 - C5: every float finite, `eur_per_km >= 0`, `max_km > 0` (`test_c5_bad_numbers_are_not_established_never_zero`).
 - C6: service plus tests only. The tool and route are a follow-up slice, after the harness PRs land; `offgrid_npc` and its basis are then read from the stored 03a result by id, never typed by the model. Filed as [03d-grid-extension-break-even-tool.md](03d-grid-extension-break-even-tool.md).
+
+### 03b-1 plan GO, GK B (62), 2026-11-17
+
+Split by the coordinator (PR-SIZE-1): 03b-1 = runner, route, chat tools and confirmation data; 03b-2 = the map UI and reader (GK B + UX). Conditions and where each is held:
+- V1: each axis value is finite, above 0 and at most 10, 2 to 5 values, refused 422 otherwise (`test_bad_axes_are_refused_with_a_kind`, `test_an_axis_value_that_is_not_a_finite_multiplier_up_to_ten_is_refused`).
+- V2: a solar or wind multiplier is clipped at nameplate; each cell records the clipped share of the resource energy (`test_a_resource_multiplier_is_clipped_*`, `test_a_cell_names_its_clipped_resource`).
+- V3: a capital cost counts only on extendable assets; Load scales its static and time-series values; the fuel price leaves slacks out; membership is 03a's `classify` (`test_a_capital_cost_counts_*`, `test_load_scales_*`, `test_the_fuel_price_never_touches_a_shortfall_slack`).
+- V4: a multiplier makes a negative price more negative and keeps zero (`test_a_multiplier_makes_a_negative_price_*`).
+- V5: solves charged equal solves run; 120 allowed, 121 refused naming the count (`test_the_solve_budget_boundary_*`, `test_the_solves_charged_are_the_solves_run`).
+- V6: the cells run inside `PyPSAService.solving_context`; the saved project is unchanged after a run; forks are deleted on success, abort and exception (`test_a_run_leaves_the_saved_project_as_it_was`, `test_abort_*`, `test_a_worker_exception_*`).
+- V7: `all_solved` per cell, gap null under two ok rows; an unreadable or unknown record reads not_evaluated.
+- V8: route registry, disposition, ACL, write-surface and golden-coverage tests, assistant inventory, route parity and control matrix pass; the new kinds are in `tool-error-kinds.d/claude-homer-03b-system-type-map.json`.
+- V9 (option 1): `harness/system_map_card.py` carries the confirmation data. Its digest binds the shown arguments (variable ids, every axis value, the tool arguments) plus the saved base's revision and nothing else; the derived architectures and solve count must equal what the card computed at approval. The architecture labels and the solve count enter the digest in 03b-2, with their rendering.
+- V10: until 03b-2 the result surfaces only in the chat read; it shares the one study slot with 03a and the tornado.
