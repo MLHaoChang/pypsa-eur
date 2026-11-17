@@ -3,7 +3,7 @@
 
 # LC-48e — A card's resume refused by the goal-switch guard is shown, not swallowed
 
-Status: needs-triage
+Status: ready-for-agent
 Model tier: opus
 Size: S
 Blocked by: none
@@ -15,6 +15,8 @@ Type: task
 Parent: [48d-wire-recovery-rows.md](48d-wire-recovery-rows.md) (GK B N-b on #1515)
 
 Since #1515 (owner decision LC48D-GOAL-1), `resume_task` refuses with 409 `switch_in_progress` when the chat session's task is another task that runs. When the user answers a run's data request, `run_envelope` stores the answer and then calls `resume_task`. If another task of that chat runs at that moment, the 409 is caught by the broad `except` there and only logged. The answer stands, but the run it belongs to stays waiting, and nothing tells the user why.
+
+Owner decision LC48E-SURFACE-1: surface the refusal on the card (name the active task); no auto-resume.
 
 ## Done when
 

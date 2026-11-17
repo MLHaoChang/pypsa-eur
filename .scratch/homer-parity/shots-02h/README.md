@@ -1,0 +1,2 @@
+Shots for #1541 (homer-parity 02h). Expert only: the Capacity expansion tab is `expertOnly` in `pypsa-gui/frontend/src/pages/Results.tsx` (TABS row `capex`), so Guided never shows it. Run `node ../../ac-pf-banner-shots/fake.mjs` and Vite on :5173, then `node shoot.mjs <rows|notsolved|hidden>`; every /api route is mocked.
+Slope hint shots (#1541, 02i): Expert only, run `node shoot-slope.mjs expert <0.5|1.2>`. Guided has no asset form: see guided-note.txt.

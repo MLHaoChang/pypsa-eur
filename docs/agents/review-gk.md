@@ -301,3 +301,11 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A sizing or loop runner that reports a cost derived from the objective reverses the objective scale the way `run_simulation` does (`_rescale_results_for_objective`), with a test under auto scale and a user scale ≠ 1 (#1466 A2-1, GK A (27)).
 - A per-unit LP share whose exact form is a ratio of variables uses the share over the fixed units only (conservative) and gives extendable units the aggregate row only. The screen still judges them per unit, and the facts name the gap (#1486 R1, GK A (27)).
 - Loss data from an autotransformer source, applied to a unit whose winding type is unknown, is scaled by the co-ratio, states "autotransformer assumed" and discloses the two-winding multiple (#1500 C1, GK A (27)).
+
+## Standing rulings (GK B 59, recorded 2026-11-17)
+
+- A raw edit of composite investment parts moves the network-input fingerprint. A test pinning the opposite is a defect pin (#1547; extends #1533 T3).
+- After a discount-rate change, any write to a priced composite row re-derives it from its parts. That is intended: the stored cost becomes true, and the staged LP is bit-identical either way (TCU 09 N3).
+- A bit-identity claim is tested with an inexact operand pair (e.g. 0.187/0.4), exact `==`, at every site. Replacing `x / y` with `x * (1/y)` is not bit-identical (#1538 F1).
+- A race fix is pinned at the call site that reads the shared value, not only in the callee. Mutate each call site (#1548 F1, #1543 F1-t).
+- A guard with two parts ("differs from base" AND "equals new") needs a case where only the first fails. A test that trips the second part first leaves the first unkilled (#1544 F1/F2).
