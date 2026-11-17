@@ -135,6 +135,11 @@ def test_et01_two_lines_one_card_with_cell_lineage_and_verified_readback(grid):
                              "row": 3, "column": "C", "cell": "C3", "header": "reactance",
                              "raw": "7.25", "raw_unit": "Ohm"}
 
+    # RAW-NAMES-1: the card's summary names each row as the preview does (class, quoted name, field label).
+    says = cards[0]["edit_card"]["says"]
+    assert says.startswith("Line \u201cL1\u201d: ") and "Line \u201cL2\u201d: " in says
+    assert "L1 s_nom" not in says
+
     n = PyPSAService.get_network()
     assert n.lines.at["L1", "s_nom"] == 500 and n.lines.at["L2", "x"] == 7.25
     assert result["_edit_receipt"]["outcome"] == "verified"

@@ -701,6 +701,7 @@ def test_ride_through_reads_the_stored_island_study(tmp_path, status, verdict):
     row = _rows(G.grid_readiness(d, n, PROFILE))["ride_through:ups_bridged"]
     assert row["verdict"] == verdict and row["assumed"]
     assert "600" in row["limit"]
+    assert "'" not in row["limit"] and "\u201c" in row["limit"] and "ups_battery" not in row["limit"]
 
 
 # ── LOLE ────────────────────────────────────────────────────────────────────
