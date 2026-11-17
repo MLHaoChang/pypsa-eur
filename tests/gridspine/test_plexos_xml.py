@@ -37,11 +37,17 @@ WORLD_IRL_CLASSES = {
 
 # Every broken row of edge_cases.xml, by hand: (table, row id) -> reason fragment.
 EDGE_BROKEN = {
+    ("t_collection", "14"): "unknown parent or child class",  # parent class 99
+    ("t_collection", "15"): "unknown parent or child class",  # child class 99
+    ("t_collection", "16"): "or no name",
+    ("t_property", "12"): "unknown collection",
+    ("t_property", "13"): "without a name",
     ("t_object", "4"): "duplicate object_id",
     ("t_object", "13"): "unknown class id 99",
     ("t_object", "15"): "a second Node named 'X'",
     ("t_membership", "1"): "duplicate membership_id",
-    ("t_membership", "18"): "parent or child object does not exist",
+    ("t_membership", "18"): "parent or child object does not exist",  # child 999
+    ("t_membership", "23"): "parent or child object does not exist",  # parent 999
     ("t_membership", "19"): "unknown collection id 99",
     ("t_membership", "20"): "objects are Fuel/Node but the collection is Generator/Node",
     ("t_data", "1"): "duplicate data_id",
@@ -52,12 +58,18 @@ EDGE_BROKEN = {
     ("t_band", "999"): "data row 999 does not exist",
     ("t_band", "2"): "not a whole number",
     ("t_band", "3 (row 3)"): "a second t_band entry",
+    ("t_band", "1"): "band 0 is below 1",
+    ("t_band", "6"): "None is not a whole number",  # no band_id at all
+    ("t_date_from", "9 (row 1)"): "a second t_date_from entry",
+    ("t_memo_data", "9 (row 1)"): "a second t_memo_data entry",
+    ("t_memo_data", "row 2"): "data row None does not exist",  # no data_id
     ("t_text", "12"): "unknown class id 99",
     ("t_tag", "5 (row 5)"): "tag object 999 does not exist",
     ("t_tag", "999"): "data row 999 does not exist",
     ("t_tag", "6 (row 7)"): "unknown action id 77",
     ("t_attribute_data", "999/1 (row 1)"): "object or attribute does not exist",
     ("t_attribute_data", "3/1 (row 2)"): "attribute of Node set on a Generator",
+    ("t_attribute_data", "2/999 (row 3)"): "object or attribute does not exist",
 }
 
 
@@ -107,6 +119,14 @@ def test_external_entity_is_refused_as_a_dtd(tmp_path):
     ext = f'<!DOCTYPE MasterDataSet [<!ENTITY s SYSTEM "file://{secret}">]>'
     p = tmp_path / "xxe.xml"
     p.write_bytes(xml("<t_class><class_id>1</class_id><name>&s;</name></t_class>", header=ext))
+    with pytest.raises(PlexosRefused) as exc:
+        read_plexos_xml(str(p))
+    assert exc.value.kind == "dtd"
+
+
+def test_a_bare_doctype_is_refused(tmp_path):
+    p = tmp_path / "bare.xml"
+    p.write_bytes(xml(MINIMAL, header="<!DOCTYPE MasterDataSet>"))
     with pytest.raises(PlexosRefused) as exc:
         read_plexos_xml(str(p))
     assert exc.value.kind == "dtd"
@@ -184,6 +204,10 @@ def test_edge_rows_in_equal_resolved_plus_broken_against_a_raw_count(edge):
     assert any("t_report (1 rows)" in w for w in edge.warnings)
 
 
+def test_objects_of_lists_one_class(edge):
+    assert sorted(o.name for o in edge.objects_of("Generator")) == ["G2", "X"]
+
+
 def test_the_first_of_two_duplicate_ids_is_kept(edge):
     assert ("Generator", "G2") in edge.objects and ("Node", "Duplicate id") not in edge.objects
     assert row(edge, "1").raw_value == "100"
@@ -217,6 +241,12 @@ def test_an_unreadable_value_is_kept_with_a_reason_never_zero(edge, data_id, raw
     assert r.unreadable and raw in r.unreadable
 
 
+@pytest.mark.parametrize("data_id", ["23", "24"])  # whitespace only; no <value> at all
+def test_an_empty_value_is_unreadable_as_no_value(edge, data_id):
+    r = row(edge, data_id)
+    assert (r.value, r.unreadable) == (None, "no value")
+
+
 def test_a_readable_value_has_no_reason(edge):
     r = row(edge, "2")
     assert (r.value, r.unreadable) == (9.5, None)
@@ -236,10 +266,11 @@ def test_a_row_keeps_two_scenario_tags(edge):
 
 
 def test_band_dates_text_and_memo_are_kept(edge):
-    assert (row(edge, "3").band, row(edge, "2").band) == (2, 1)
+    assert (row(edge, "3").band, row(edge, "2").band, row(edge, "4").band) == (2, 1, 1)  # 4: band 1 stated
     r9 = row(edge, "9")
     assert (r9.date_from, r9.date_to, r9.memo) == ("2030-01-01T00:00:00", "2030-12-31T00:00:00", "from TSO plan")
     assert row(edge, "12").texts == [("Data File", "csv_files\\wind.csv")]
+    assert row(edge, "13").texts == [("Data File", "")]  # a text row without a value
 
 
 def test_attributes_resolve_to_their_object(edge):
@@ -255,6 +286,18 @@ def test_units_are_read_from_the_file(edge, tmp_path):
     p = tmp_path / "btu.xml"
     p.write_bytes(EDGE.read_bytes().replace(b"<value>GJ/MWh</value>", b"<value>MMBtu/MWh</value>"))
     assert row(read_plexos_xml(str(p)), "2").unit == "MMBtu/MWh"
+
+
+def test_a_file_without_a_unit_table_reads_with_unknown_units(tmp_path):
+    body = etree.parse(str(EDGE)).getroot()
+    for el in body.findall(f"{NS}t_unit"):
+        body.remove(el)
+    p = tmp_path / "nounit.xml"
+    p.write_bytes(etree.tostring(body))
+    model = read_plexos_xml(str(p))
+    assert row(model, "1").unit is None
+    assert any("no t_unit table" in w for w in model.warnings)
+    assert not any("t_unit" in w for w in read_plexos_xml(str(EDGE)).warnings)
 
 
 # P8: version
@@ -274,7 +317,7 @@ def _with_version(tmp_path, version):
 def test_an_unsupported_or_missing_version_warns_but_reads(tmp_path, version, fragment):
     model = _with_version(tmp_path, version)
     assert any(fragment in w for w in model.warnings)
-    assert len(model.rows) == 16
+    assert len(model.rows) == 18
 
 
 @pytest.mark.parametrize("version", ["7.000", "9.200", "10.900"])

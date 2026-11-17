@@ -151,8 +151,8 @@ class PlexosModel:
 # --------------------------------------------------------------------- parsing
 
 
-def _local(tag) -> str:
-    return tag.split("}", 1)[1] if isinstance(tag, str) and "}" in tag else str(tag)
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def _parse_tables(source) -> dict[str, list[dict[str, str | None]]]:
@@ -176,8 +176,9 @@ def _parse_tables(source) -> dict[str, list[dict[str, str | None]]]:
             if event == "start":
                 if root is None:
                     root = el
-                    docinfo = el.getroottree().docinfo
-                    if docinfo.internalDTD is not None or docinfo.externalDTD is not None or docinfo.system_url:
+                    # Any DOCTYPE at all (internal subset, entity, SYSTEM or
+                    # PUBLIC reference): PLEXOS never writes one.
+                    if el.getroottree().docinfo.doctype:
                         raise PlexosRefused("dtd", "The file declares a DTD; PLEXOS files never do, so it is refused.")
                     if _local(el.tag) != ROOT_TAG:
                         raise PlexosRefused(
@@ -192,10 +193,8 @@ def _parse_tables(source) -> dict[str, list[dict[str, str | None]]]:
                 el.clear()
                 while el.getprevious() is not None:
                     del el.getparent()[0]
-    except etree.XMLSyntaxError as exc:
+    except etree.XMLSyntaxError as exc:  # also an empty file: lxml finds no root
         raise PlexosRefused("not_xml", f"The file is not well-formed XML: {exc}") from exc
-    if root is None:
-        raise PlexosRefused("not_xml", "The file is empty.")
     return tables
 
 

@@ -135,4 +135,20 @@
   <t_attribute_data><object_id>999</object_id><attribute_id>1</attribute_id><value>1</value></t_attribute_data>
   <t_attribute_data><object_id>3</object_id><attribute_id>1</attribute_id><value>2</value></t_attribute_data>
   <t_report><object_id>1</object_id><property_id>1</property_id></t_report>
+  <t_collection><collection_id>14</collection_id><parent_class_id>99</parent_class_id><child_class_id>4</child_class_id><name>Bad Parent</name></t_collection>
+  <t_collection><collection_id>15</collection_id><parent_class_id>1</parent_class_id><child_class_id>99</child_class_id><name>Bad Child</name></t_collection>
+  <t_collection><collection_id>16</collection_id><parent_class_id>1</parent_class_id><child_class_id>4</child_class_id></t_collection>
+  <t_property><property_id>12</property_id><collection_id>99</collection_id><name>Orphan</name><unit_id>0</unit_id></t_property>
+  <t_property><property_id>13</property_id><collection_id>1</collection_id><unit_id>0</unit_id></t_property>
+  <t_membership><membership_id>23</membership_id><collection_id>4</collection_id><parent_object_id>999</parent_object_id><child_object_id>2</child_object_id></t_membership>
+  <t_data><data_id>23</data_id><membership_id>3</membership_id><property_id>1</property_id><value>  </value></t_data>
+  <t_data><data_id>24</data_id><membership_id>3</membership_id><property_id>1</property_id></t_data>
+  <t_band><data_id>4</data_id><band_id>1</band_id></t_band>
+  <t_band><data_id>1</data_id><band_id>0</band_id></t_band>
+  <t_band><data_id>6</data_id></t_band>
+  <t_date_from><data_id>9</data_id><date>2031-01-01T00:00:00</date></t_date_from>
+  <t_memo_data><data_id>9</data_id><value>second memo</value></t_memo_data>
+  <t_memo_data><value>memo without a row</value></t_memo_data>
+  <t_text><data_id>13</data_id><class_id>7</class_id></t_text>
+  <t_attribute_data><object_id>2</object_id><attribute_id>999</attribute_id><value>1</value></t_attribute_data>
 </MasterDataSet>
