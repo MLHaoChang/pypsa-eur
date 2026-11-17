@@ -305,11 +305,13 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
                 "includes_grid_connection": flags[0] if len(set(map(str, flags))) == 1 else "unknown",
                 "connection_fee_review": any(_review(f) for f in flags),
                 annual_key: capital + fom}
+    # Refused before any write, so the frame is untouched (TCU 10). By attribute, `lines` included: `has_parts`
+    # is False for a class without parts.
     from services.asset_schema.derive import has_parts
-    from services.asset_schema.schema import COMPOSITE
+    from services.asset_schema.schema import CLASS_ATTR
 
-    cls = _CLASS.get(component, component)
-    if cls in COMPOSITE and name in df.index and has_parts(cls, df.loc[name]):
+    cls = next((c for c, a in CLASS_ATTR.items() if a == component), component)
+    if name in df.index and has_parts(cls, df.loc[name]):
         raise PartsOwnCosts(f"{cls} '{name}': its costs are set by its investment parts; "
                             f"pricing it as '{technology}' would be re-derived away")
     over_row = _row(pack, f"{technology}.investment.overnight")

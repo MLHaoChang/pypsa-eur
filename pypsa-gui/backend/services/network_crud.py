@@ -27,7 +27,7 @@ from services.asset_schema.derive import (
     part_scales,
     split_parts,
 )
-from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, part_columns
 from services.asset_schema import fields as asset_fields
 from services.asset_schema import provenance as asset_provenance
 from services import component_identity
@@ -419,25 +419,32 @@ def rederive_scaled_parts(n, component_class: str, name: str) -> None:
                 discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
 
 
-def rederive_imported_parts(n) -> None:
+def rederive_imported_parts(n) -> list[str]:
     """An imported network's composite rows (TCU 10, N5): refuse (422, naming the row) a priced part without a
-    lifetime, as the create path does, before anything is written; then re-derive every priced row so its
-    parts own its costs, a stale sheet `capital_cost`, `fom_cost` or `lifetime` included. `n` is the import's
-    candidate, not yet open, so no lock is needed."""
+    lifetime, as the create path does, or with a non-finite value, before anything is written; then re-derive
+    every priced row so its parts own its costs (a stale `capital_cost`, `fom_cost` or `lifetime` from the file
+    included) at the discount rate in force: the asset's own, else the open project's. Returns the re-derived
+    rows as "Class 'name'". `n` is the import's candidate, not yet open, so no lock is needed."""
     priced = []
     for component_class in COMPOSITE:
         df = getattr(n, CLASS_ATTR[component_class])
+        cols = [c for c in part_columns(component_class) if c in df.columns]
         for name in df.index:
             row = df.loc[name]
             if not has_parts(component_class, row):
                 continue
             try:
+                for col in cols:
+                    v = _as_float(row[col])
+                    if v is not None and math.isinf(v):
+                        raise HTTPException(422, f"{col} must be a finite number")
                 _check_investment_parts(component_class, dict(row), row=dict(row))
             except HTTPException as exc:
                 raise HTTPException(422, f"{component_class} '{name}': {exc.detail}") from exc
             priced.append((component_class, name))
     for component_class, name in priced:
         rederive_scaled_parts(n, component_class, name)
+    return [f"{component_class} '{name}'" for component_class, name in priced]
 
 
 def _refuse_edit_during_live_study() -> None:
