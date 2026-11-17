@@ -143,3 +143,17 @@ def test_call_sites_use_run_pf():
     assert "pf_result = run_pf(" in acpf and "network.pf(" not in acpf
     assert "_run_pf(network, phase)" in inspect.getsource(solver_service.run_simulation)
     assert pf_seed.run_pf is run_pf
+
+
+@pytest.mark.parametrize("count, tail", [(5, "T4)."), (6, "T4...).")])
+def test_log_names_at_most_five_transformers(count, tail):
+    n = pypsa.Network()
+    n.add("Bus", "HV", v_nom=110.0)
+    for i in range(count):
+        n.add("Bus", f"B{i}", v_nom=20.0)
+        n.add("Transformer", f"T{i}", bus0="HV", bus1=f"B{i}", x=0.1, s_nom=1.0,
+              phase_shift=150.0)
+    n.lpf = n.pf = lambda **kw: None  # only the log line is under test
+    log: list[str] = []
+    run_pf(n, log.append)
+    assert f"{count} transformer(s)" in log[0] and log[0].endswith(tail)
