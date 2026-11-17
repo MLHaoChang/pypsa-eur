@@ -124,8 +124,10 @@ def prepared(session, monkeypatch):
     return dict(prep["result"]["apply_with"]["args"])
 
 
-def step(session, name="apply"):
-    return next(s for s in tasks._read(session.task_id)[1]["steps"] if s["id"] == name)
+def step(session, name="apply", task_id=None):
+    """A completed plan lets go of its chat (LC-48f, GK B E): read it by id then."""
+    task_id = task_id or session.task_id
+    return next(s for s in tasks._read(task_id)[1]["steps"] if s["id"] == name)
 
 
 # ── N2: the refs come from one prepare step ─────────────────────────────────
@@ -233,18 +235,20 @@ def test_under_a_brief_continue_at_the_boundary_is_no_card(
         session, monkeypatch, "site_scene_apply", args, "approve"
     )
     assert asked and not results[-1].get("is_error") and len(spy) == 1
-    assert step(session)["status"] == "completed"
+    assert step(session, task_id=task["task_id"])["status"] == "completed"
+    assert session.task_id is None  # the plan completed: the chat is free
     assert store.read_scene(geo, "campus")["revision"] == 2
 
 
 def test_an_approved_card_applies_the_prepared_preview_once(session, monkeypatch, spy):
-    plan()
+    task = plan()
     args = prepared(session, monkeypatch)
     _, results, asked = dispatch(
         session, monkeypatch, "site_scene_apply", args, "approve"
     )
     assert asked and not results[-1].get("is_error"), results[-1]
-    assert spy == [args["proposal_id"]] and step(session)["status"] == "completed"
+    assert spy == [args["proposal_id"]]
+    assert step(session, task_id=task["task_id"])["status"] == "completed"
 
 
 # ── N3 and N4: reconcile from the chain; a dead preview is never retried ────
@@ -336,7 +340,7 @@ def test_a_committed_receipt_with_the_prepared_hash_completes_the_step(
         **args
     )  # the commit did land (the receipt is in the chain)
     view = chat_tools.resolve_task_step(task_id, "completed")
-    done = step(session)
+    done = step(session, task_id=task_id)
     assert done["status"] == "completed" and view["status"] == "completed"
     assert done["result"]["receipt"]["input_hash"] == args["input_hash"]
     assert done["result"]["receipt"]["revision"] == 2
