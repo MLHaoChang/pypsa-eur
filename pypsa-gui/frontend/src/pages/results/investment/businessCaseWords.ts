@@ -128,7 +128,8 @@ export function ledgerKeyWords(key: string, full = false): string {
   const name = ID.test(last) ? idWords(last) : last
   if (full) {
     // Every segment but a component class ("Generator"), to tell two rows apart.
-    return parts.filter(p => ID.test(p) || p === last).map(p => (ID.test(p) ? idWords(p) : p)).join(' · ')
+    const w = parts.filter(p => ID.test(p) || p === last).map(p => (ID.test(p) ? idWords(p) : p))
+    return w.filter((x, i) => x !== w[i - 1]).join(' · ')
   }
   return parts[0] === 'bill_degradation' ? `Degradation, ${name}` : name
 }

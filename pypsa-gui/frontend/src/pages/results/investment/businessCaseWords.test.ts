@@ -66,6 +66,8 @@ describe('locked rows and model outputs in display names (walk 06, UX 2)', () =>
     // Two rows that would read alike read in full, never as twins.
     expect(ledgerKeysWords(['asset:export:Generator:pv_plant', 'bill:export:pv_plant', 'bill:network_charges']))
       .toEqual(['Asset · Export · PV plant', 'Bill · Export · PV plant', 'Network charges'])
+    // A segment repeated next to itself reads once.
+    expect(ledgerKeyWords('export_price:export_price:pv_plant', true)).toBe('Export price · PV plant')
   })
   it('words the asset at the end of an output label, and keeps other labels', () => {
     expect(outputLabelWords('Capacity in service: wind_farm')).toBe('Capacity in service: Wind farm')
