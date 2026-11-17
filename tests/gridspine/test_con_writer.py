@@ -6,11 +6,11 @@ the two sides share one grammar: every written contingency maps back onto
 the same kind and elements, with nothing unmatched. An element not on the
 network is refused (GK S2); compound kinds are returned as not written.
 """
+
 import pandas as pd
 import pytest
 
 from gridspine.handoff.contingencies import (
-    CON_NOT_WRITTEN,
     write_con,
     write_mon,
     write_sub,
@@ -61,19 +61,31 @@ def test_hand_written_records(net, cset, tmp_path):
 def test_an_n2_pair_is_one_block_with_two_openings(net, tmp_path):
     n1 = _set(net)
     a, b = n1["element_ids"].iloc[0][0], n1["element_ids"].iloc[1][0]
-    pair = pd.DataFrame({"contingency_id": ["N2"], "kind": ["branch"], "element_ids": [[a, b]], "order": [2]})
+    pair = pd.DataFrame(
+        {
+            "contingency_id": ["N2"],
+            "kind": ["branch"],
+            "element_ids": [[a, b]],
+            "order": [2],
+        }
+    )
     write_con(pair, net, tmp_path / "p.con")
     imp = read_contingency_list((tmp_path / "p.con").read_text(), net, fmt="con")
     assert _sets(imp.contingencies) == [("branch", (a, b))]
 
 
-@pytest.mark.parametrize("kind, el, reason", [
-    ("branch", "NO_SUCH_LINE", "branch NO_SUCH_LINE is not on the network"),
-    ("unit", "G9", "unit G9 is not a machine on the network"),
-    ("bus_section", "BUS_Z", "bus BUS_Z is not a bus on the network"),
-])
+@pytest.mark.parametrize(
+    "kind, el, reason",
+    [
+        ("branch", "NO_SUCH_LINE", "branch NO_SUCH_LINE is not on the network"),
+        ("unit", "G9", "unit G9 is not a machine on the network"),
+        ("bus_section", "BUS_Z", "bus BUS_Z is not a bus on the network"),
+    ],
+)
 def test_an_element_not_on_the_network_is_refused(net, tmp_path, kind, el, reason):
-    bad = pd.DataFrame({"contingency_id": ["X"], "kind": [kind], "element_ids": [[el]], "order": [1]})
+    bad = pd.DataFrame(
+        {"contingency_id": ["X"], "kind": [kind], "element_ids": [[el]], "order": [1]}
+    )
     with pytest.raises(ContractError, match=reason):
         write_con(bad, net, tmp_path / "x.con")
     assert not (tmp_path / "x.con").exists()
@@ -90,7 +102,9 @@ def test_compound_kinds_are_returned_not_written(net, tmp_path, build):
     n1 = branch_contingencies(net)
     compound = build(n1).head(3)
     assert len(compound)
-    skipped = write_con(pd.concat([n1.head(1), compound], ignore_index=True), net, tmp_path / "c.con")
+    skipped = write_con(
+        pd.concat([n1.head(1), compound], ignore_index=True), net, tmp_path / "c.con"
+    )
     assert skipped == list(compound["contingency_id"])
     text = (tmp_path / "c.con").read_text()
     assert text.count("CONTINGENCY ") == 1
@@ -102,15 +116,26 @@ def test_sub_and_mon(net, tmp_path):
     assert (tmp_path / "s.sub").read_text().startswith("SUBSYSTEM 'STUDY'\n   KVRANGE ")
     write_mon(tmp_path / "s.mon", 0.9, 1.1)
     text = (tmp_path / "s.mon").read_text()
-    assert "MONITOR VOLTAGE RANGE SUBSYSTEM 'STUDY' 0.900 1.100" in text and text.endswith("END\n")
+    assert (
+        "MONITOR VOLTAGE RANGE SUBSYSTEM 'STUDY' 0.900 1.100" in text
+        and text.endswith("END\n")
+    )
 
 
-@pytest.mark.parametrize("lo, hi, reason", [
-    (1.1, 0.9, "v_min < v_max"), (1.0, 1.0, "v_min < v_max"),
-    (float("nan"), 1.1, "finite and > 0"), (0.0, 1.1, "finite and > 0"),
-    (0.9, float("inf"), "finite and > 0"), (float("-inf"), 1.1, "finite and > 0"),
-    ("0.9", 1.1, "finite and > 0"), (True, 1.1, "finite and > 0"), (0.9, None, "finite and > 0"),
-])
+@pytest.mark.parametrize(
+    "lo, hi, reason",
+    [
+        (1.1, 0.9, "v_min < v_max"),
+        (1.0, 1.0, "v_min < v_max"),
+        (float("nan"), 1.1, "finite and > 0"),
+        (0.0, 1.1, "finite and > 0"),
+        (0.9, float("inf"), "finite and > 0"),
+        (float("-inf"), 1.1, "finite and > 0"),
+        ("0.9", 1.1, "finite and > 0"),
+        (True, 1.1, "finite and > 0"),
+        (0.9, None, "finite and > 0"),
+    ],
+)
 def test_a_bad_monitor_band_is_refused(tmp_path, lo, hi, reason):
     with pytest.raises(ContractError, match=reason):
         write_mon(tmp_path / "m.mon", lo, hi)
