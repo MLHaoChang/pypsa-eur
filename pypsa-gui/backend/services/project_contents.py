@@ -185,9 +185,7 @@ def entries(
 ) -> tuple[Entry, ...]:
     """The table entries `op` carries, in table order."""
     if op not in OPS:
-        raise ValueError(
-            f"unknown operation {op!r}"
-        )  # repr-ok: a programming error, never shown to a user
+        raise ValueError(f"unknown operation: {op}")
     return tuple(
         e
         for e in TABLE
