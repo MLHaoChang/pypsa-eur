@@ -1712,9 +1712,16 @@ def get_status():
     # invalidated by an edit and to re-run. Read-only (shape/column compare) —
     # no lock needed per the read-never-lock policy.
     try:
-        dispatch = _dispatch_status(PyPSAService.get_network())
+        network = PyPSAService.get_network()
+        dispatch = _dispatch_status(network)
     except Exception:
-        dispatch = "none"
+        network, dispatch = None, "none"
+    # When the solve behind the dispatch was recorded (UTC, saved with the project), while that dispatch
+    # exists; None for a project saved before the stamp (the source-run line then names no time).
+    solved_at = None
+    if dispatch != "none":
+        stamp = (getattr(network, "meta", None) or {}).get("assistant_solve_at")
+        solved_at = stamp if isinstance(stamp, str) else None
     return {
         "running": s["status"] == "running",
         "status": s["status"],
@@ -1727,6 +1734,7 @@ def get_status():
         "failure": s.get("last_failure"),
         # 'fresh' | 'stale' | 'none' — see comment above.
         "dispatch": dispatch,
+        "solved_at": solved_at,
     }
 
 

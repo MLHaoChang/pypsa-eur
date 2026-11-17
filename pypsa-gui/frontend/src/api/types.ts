@@ -652,6 +652,9 @@ export interface SimulationStatus {
   // exist but columns diverge), 'none' (no/cleared results). A topology edit on
   // a solved network clears it → the UI flags "results invalidated, re-run".
   dispatch?: 'fresh' | 'stale' | 'none'
+  /** When the solve behind the dispatch was recorded (ISO-8601 UTC), saved with the project; null when the
+   *  dispatch is gone or the project predates the stamp (control-strategy 06). */
+  solved_at?: string | null
 }
 export interface ValidationIssue {
   severity: 'error' | 'warning'
