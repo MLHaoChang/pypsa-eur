@@ -375,7 +375,8 @@ def _single_year_planning(template_id: str, raw: dict, start: int, end: int) -> 
     if SINGLE_YEAR[template_id] and end <= start:
         raise PlanningError(f"planning.end_year: the investment case runs from the start year "
                             f"to the end year, so it must be after the start year ({start}), "
-                            f"got {end}", "planning.end_year")
+                            f"got {end}. Enter an end year of {start + 1} or later",
+                            "planning.end_year")
     if end < start:
         raise PlanningError(f"planning.end_year: the start year ({start}) or later, got {end}",
                             "planning.end_year")

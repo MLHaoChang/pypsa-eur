@@ -355,13 +355,19 @@ def _require_link(n, name: str | None, what: str) -> None:
         raise CommercialBindingError(f"commercial.{what} {name!r} is not a Link in this network")
 
 
+_ONE_WAY_WHAT = {"poc_link": "grid connection link", "export_link": "export link",
+                 "group_members": "group member link"}
+
+
 def _require_one_way(n, name: str, what: str) -> None:
     static = float(n.links.at[name, "p_min_pu"])
     dyn = n.links_t.p_min_pu[name] if name in n.links_t.p_min_pu.columns else None
     if static < 0 or (dyn is not None and (dyn < 0).any()):
+        # Plain words with the fix (GK B2, WALK-IMPROVE-1 b): templates ship a commercial block.
         raise CommercialBindingError(
-            f"commercial.{what} {name!r} allows reverse flow (p_min_pu < 0); the PoC Links "
-            "must be one-way (model export with a separate export_link)")
+            f"The {_ONE_WAY_WHAT.get(what, what)} {name!r} allows reverse flow (power both "
+            "ways), so the tariff and prices cannot be applied to it. Make it one-way (set "
+            "its minimum power, p_min_pu, to 0) and model any export on a separate export link.")
 
 
 def _frame(n, attr: str) -> pd.DataFrame:

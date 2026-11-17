@@ -816,12 +816,23 @@ def test_compare_route_writes_nothing_and_answers_every_architecture(
     # The template ships a tariff (WALK-IMPROVE-1 b): no price entered, its energy rate prices.
     r = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={})
     assert r.status_code == 200, r.text
-    assert r.json()["price"]["assumed"] is False and "request" not in r.json()["price"]["source"]
+    price = r.json()["price"]
+    assert price["assumed"] is True and "the template's default tariff, assumed" in price["source"]
+    assert "request" not in price["source"]
     assert _snapshot(d) == before
-    # With no tariff and no price entered, it refuses and writes nothing.
+    # Once the user's own tariff stands, the price read from it is not assumed.
+    import copy
     import json
 
     cfg = d / "solver_config.json"
+    raw = json.loads(cfg.read_text())
+    own = copy.deepcopy(raw)
+    own["commercial"]["import_tariff"]["items"][0]["periods"][0]["rate"] += 0.001
+    cfg.write_text(json.dumps(own))
+    price = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={}).json()["price"]
+    assert price["assumed"] is False and "assumed" not in price["source"]
+    cfg.write_text(json.dumps(raw))
+    # With no tariff and no price entered, it refuses and writes nothing.
     cfg.write_text(json.dumps({k: v for k, v in json.loads(cfg.read_text()).items()
                                if k != "commercial"}))
     before = _snapshot(d)

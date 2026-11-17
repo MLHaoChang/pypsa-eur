@@ -273,6 +273,36 @@ def test_create_refuses_an_invalid_entry_with_nothing_created(tid, raw, field, c
     assert client.get(f"/api/projects/{tid}_bad").status_code == 404
 
 
+@pytest.mark.parametrize("body", [None, {"dc_load": {}}, {"dc_load": {"architecture": "mv_ups"}}])
+def test_every_default_data_centre_create_still_succeeds(body, client, tmp_projects_dir):
+    """GK B2 sweep item 2: the data centre refuses start == end now, so no
+    default create may send it. The gallery and the Guided DC form send no
+    planning (their body is empty or dc_load only); the native years apply."""
+    kw = {} if body is None else {"json": body}
+    r = client.post(f"/api/projects/from_template/{DC}", params={"name": "dc_default"}, **kw)
+    assert r.status_code == 200, r.text
+    cfg = client.get("/api/simulation/solver_config").json()
+    native = T.NATIVE_PLANNING[DC]
+    assert native.end_year > native.years[0]
+    assert cfg["finance"]["financial_close"]
+
+
+def test_the_chat_create_tool_default_data_centre_succeeds(client, tmp_projects_dir):
+    """...and chat's create tool with no params (the same handler, params None)."""
+    from services import chat_tools
+
+    out = chat_tools.create_project_from_template(DC, "dc_chat")
+    assert out.get("imported") or out.get("name"), out
+
+
+def test_the_start_equal_to_end_refusal_says_what_to_change():
+    with pytest.raises(T.PlanningError) as exc:
+        _plan(DC, {"start_year": 2033, "end_year": 2033})
+    msg = str(exc.value)
+    assert "must be after the start year (2033)" in msg and "got 2033" in msg
+    assert "Enter an end year of 2034 or later" in msg
+
+
 @pytest.mark.parametrize("tid", CASED)
 def test_create_refuses_start_equal_to_end_on_a_cased_example(tid, client, tmp_projects_dir):
     r = client.post(f"/api/projects/from_template/{tid}", params={"name": f"{tid}_one"},

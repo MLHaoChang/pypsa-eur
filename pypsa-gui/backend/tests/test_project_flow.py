@@ -622,6 +622,26 @@ def test_r4_study_with_voll_zero(client, tmp_projects_dir, monkeypatch):
     assert {x["section"] for x in body["notes"]} == {"project", "scenarios"}
 
 
+def test_a_two_way_grid_import_is_refused_by_the_commercial_binding_first(
+        client, tmp_projects_dir, monkeypatch):
+    """GK B2 sweep item 9: the data centre ships a commercial block, so a two-way
+    grid import is refused at section 7 before any study refusal, in plain words
+    that say what to change."""
+    name = _create(client, "eh_datacenter", "two_way")
+    link = client.get("/api/network/links").json()
+    grid = next(r for r in link if r["name"] == "grid_import")
+    assert client.put("/api/network/links/grid_import",
+                      json={**grid, "p_min_pu": -1.0}).status_code == 200
+    body = _flow(client, name)
+    assert body["run_ready"] is False
+    blocker = body["run_blocker"]
+    assert blocker["section"] == "commercial" and blocker["code"] == "commercial.binding_invalid"
+    msg = blocker["message"]
+    assert "grid connection link 'grid_import' allows reverse flow" in msg
+    assert "Make it one-way (set its minimum power, p_min_pu, to 0)" in msg
+    assert "commercial.poc_link" not in msg
+
+
 def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypatch,
                                              project_storage_dir):
     """The study's own refusal (here: an energy-import cap on a two-way import

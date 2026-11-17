@@ -1322,3 +1322,30 @@ def test_assess_route_returns_json_and_writes_nothing(
         dc_backup.NOT_REPRODUCED
     )
     assert {f: (d / f).read_bytes() for f in before} == before
+
+
+def test_a_new_data_centre_reads_the_template_wacc_as_assumed(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """WALK-IMPROVE-1 b (GK B2 sweep item 7): the template ships finance inputs,
+    so a new DC's backup case reads its 7 % nominal made real with its 2 %
+    inflation (4.90 %, was the pack's 7 % real on master), labelled assumed
+    while the stored wacc is the shipped one; a typed wacc is not assumed."""
+    import json
+
+    from project_templates import eh_templates as t
+
+    _served(monkeypatch)
+    d = _dc_project(client, tmp_path, monkeypatch, project_row, "dc_shipped")
+    c = dc_backup.assess_project(d, t, "hybrid")["cost"]
+    assert c["discount_rate"] == pytest.approx(1.07 / 1.02 - 1)
+    row = {r["key"]: r for r in c["inputs"]}["discount_rate"]
+    assert row["assumed"] is True and "the template's shipped wacc, assumed" in row["source"]
+
+    cfg = d / "solver_config.json"
+    raw = json.loads(cfg.read_text())
+    cfg.write_text(json.dumps({**raw, "finance": {**raw["finance"], "wacc_nominal": 0.08}}))
+    c = dc_backup.assess_project(d, t, "hybrid")["cost"]
+    assert c["discount_rate"] == pytest.approx(1.08 / 1.02 - 1)
+    row = {r["key"]: r for r in c["inputs"]}["discount_rate"]
+    assert row["assumed"] is False and "assumed" not in row["source"]
