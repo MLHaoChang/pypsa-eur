@@ -166,4 +166,5 @@
   <t_membership><membership_id>24</membership_id><collection_id>4</collection_id><parent_object_id>3</parent_object_id><child_object_id>6</child_object_id></t_membership>
   <t_attribute><attribute_id>2</attribute_id><class_id>4</class_id></t_attribute>
   <t_attribute><attribute_id>3</attribute_id><class_id>99</class_id><name>Longitude</name></t_attribute>
+  <t_property><property_id>15</property_id><collection_id>1</collection_id><name>Notes</name></t_property>
 </MasterDataSet>

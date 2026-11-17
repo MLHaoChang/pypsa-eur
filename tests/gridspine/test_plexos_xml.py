@@ -276,8 +276,13 @@ def test_objects_of_lists_one_class(edge):
 def test_a_dangling_unit_or_category_is_named_in_warnings(edge):
     assert edge.objects[("Generator", "G2")].category == "Wind"
     assert edge.objects[("Generator", "G3")].category is None
-    assert any("'G3' names category id 77" in w for w in edge.warnings)
-    assert any("'VO&M Charge' names unit id 55" in w for w in edge.warnings)
+    # exactly these: no warning for G2's known category, for objects without
+    # one, or for property "Notes", which states no unit at all
+    assert edge.warnings == [
+        "Property 'VO&M Charge' names unit id 55, which the file does not define; its unit is unknown.",
+        "Generator 'G3' names category id 77, which the file does not define; it has no category.",
+        "Table t_report (1 rows) holds settings this reader does not interpret.",
+    ]
     assert edge.config["Units"] == "Metric"  # the first of two is kept
 
 
@@ -392,7 +397,12 @@ def test_a_file_without_a_unit_table_reads_with_unknown_units(tmp_path):
     p.write_bytes(etree.tostring(body))
     model = read_plexos_xml(str(p))
     assert row(model, "1").unit is None
-    assert any("no t_unit table" in w for w in model.warnings)
+    assert (
+        model.warnings[0] == "The file has no t_unit table; property units are unknown."
+    )
+    assert not any(
+        "names unit id" in w for w in model.warnings
+    )  # one warning, not one per property
     assert not any("t_unit" in w for w in read_plexos_xml(str(EDGE)).warnings)
 
 
