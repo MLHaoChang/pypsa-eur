@@ -68,10 +68,11 @@ before #1556 merges; mounting into `ChatPanel.tsx` and the dock waits for it.
 
 ### 03b Dock context bar and download card (UI)
 
-- Header line under "Assistant": `Project <name> · Viewing <panel › tab>` then
+- Header line under "Assistant": `Project <name> · Viewing <panel>, <tab> tab` then
   `Discussing run <ISO time> · <ResultState word> · baseline run <ISO time>`.
-  "›" appears only where the item is a link (Viewing is plain text; the run is
-  a link through `showResultsTab(..., {from})`). An out-of-date run reads
+  "›" appears only where the item is a link: Viewing is plain text ("Viewing
+  Results, Load flow tab"); the run is a link through `showResultsTab(..., {from})`.
+  Links are ink and underlined; red is only for End and the active-state dot. An out-of-date run reads
   "Out of date". With no discussed run the second line is omitted.
 - Source: `GET /durable-conversations/{id}` refs, refetched when a turn ends or
   the generation changes.
@@ -95,6 +96,7 @@ before #1556 merges; mounting into `ChatPanel.tsx` and the dock waits for it.
 - Autoplay blocked: caption "Sound is blocked in this tab: answers show as
   text" with a "Play answers" button (a user gesture retries). Denied or stale
   microphone grant: "Microphone is off for this site" with "Type instead".
+  Each state line is a `role="status"` region and clears when its condition ends.
 - Tests: state machine (vitest, fake timers): every exit (End, unmount, hidden
   tab, project switch, rebind, stale generation) stops tracks and audio;
   barge-in drops queued playback; mute sends nothing.
@@ -143,6 +145,16 @@ Expert to open a target.
 `live-light`, `live-dark` (Live on the page: confirmation card and caption beside
 the companion, controls) and `console-light`, `console-dark` (console open
 during Live: context bar, live bar, #1556 monitor line, download card).
+
+## UX plan verdict (UX 24, GO)
+
+Q1 (a) caption links to #1556's monitor line, no Cancel button on the Live
+panel; Q2 (a) live bar in the dock header; Q3 (a) Viewing as plain text.
+Conditions: › only on links; links ink and underlined; Stop speaking only while
+speaking (mock retaken); state lines `role="status"` and never stale; "Link
+expired: export again"; 03e shots include the Discussing/baseline line,
+autoplay-blocked, mic-denied, console-open with the companion hidden, and the
+"Back to <origin>" pill after a jump.
 
 ## Risks
 
