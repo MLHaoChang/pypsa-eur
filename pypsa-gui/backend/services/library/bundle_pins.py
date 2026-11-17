@@ -258,7 +258,7 @@ def check_pins(
                     _issue(
                         "copy_modified",
                         pin,
-                        f"the project's copy of Library {pin['kind']} {pin['id']!r} "
+                        f"the project's copy of Library {pin['kind']} '{pin['id']}' "
                         f"v{pin['version']} ({PC.member_name(pin)}) does not match its pin "
                         "and is not used",
                     )
@@ -308,7 +308,7 @@ def _newer(db: DBSession, org_id: UUID, pin: dict) -> list[dict]:
             **_issue(
                 "newer_in_library",
                 pin,
-                f"the Library has {pin['kind']} {pin['id']!r} v{latest.version}; "
+                f"the Library has {pin['kind']} '{pin['id']}' v{latest.version}; "
                 f"this project keeps v{pin['version']} until you re-pin it",
             ),
             "code": NEWER_CODE,

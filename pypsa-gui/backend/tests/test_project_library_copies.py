@@ -446,7 +446,9 @@ def test_fill_skips_a_good_copy_and_a_shipped_common_item(tmp_path, monkeypatch)
     assert calls == []
 
 
-def test_a_pin_of_an_unknown_kind_has_no_copy_to_read_write_or_fill(tmp_path, monkeypatch):
+def test_a_pin_of_an_unknown_kind_has_no_copy_to_read_write_or_fill(
+    tmp_path, monkeypatch
+):
     from services.library import items
 
     pin = {**_series_pin(_CSV), "kind": "bogus"}
@@ -458,12 +460,18 @@ def test_a_pin_of_an_unknown_kind_has_no_copy_to_read_write_or_fill(tmp_path, mo
     assert calls == []
 
 
-def test_fill_copies_an_item_and_a_series_named_like_a_common_item(tmp_path, monkeypatch):
+def test_fill_copies_an_item_and_a_series_named_like_a_common_item(
+    tmp_path, monkeypatch
+):
     from services.library import common, items, series_store
 
     body = b'{"id": "c"}'
-    item = {"kind": "tariff", "id": "mine", "version": 1,
-            "hash": hashlib.sha256(body).hexdigest()}
+    item = {
+        "kind": "tariff",
+        "id": "mine",
+        "version": 1,
+        "hash": hashlib.sha256(body).hexdigest(),
+    }
     series = {**_series_pin(_CSV), "id": "c"}
     monkeypatch.setattr(common, "is_common", lambda kind, name: name == "c")
     monkeypatch.setattr(items, "payload_bytes", lambda *a, **k: body)

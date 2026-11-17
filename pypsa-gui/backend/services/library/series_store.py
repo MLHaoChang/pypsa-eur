@@ -223,7 +223,7 @@ def _row(db: DBSession, org_id: UUID, name: str, version: int) -> LibraryItem:
         )
     ).first()
     if row is None:
-        raise LibraryRefNotFound(f"no series {name!r} v{version} in this org")
+        raise LibraryRefNotFound(f"no series '{name}' v{version} in this org")
     return row
 
 
@@ -263,27 +263,27 @@ def payload_bytes(
     row = _row(db, org_id, name, version)
     if digest != row.hash:
         raise LibraryRefStale(
-            f"ref hash for {name!r} v{version} does not match the Library"
+            f"ref hash for '{name}' v{version} does not match the Library"
         )
     try:
         path = library_file(root or _default_root(), org_id, row.path)
     except ValueError as exc:
         raise LibraryRefStale(
-            f"Library path for {name!r} v{version} points outside "
+            f"Library path for '{name}' v{version} points outside "
             "the org's Library directory"
         ) from exc
     try:
         data = gzip.decompress(path.read_bytes())
     except FileNotFoundError as exc:
         raise LibraryRefStale(
-            f"Library file for {name!r} v{version} is missing"
+            f"Library file for '{name}' v{version} is missing"
         ) from exc
     except (OSError, EOFError, zlib.error) as exc:  # BadGzipFile is an OSError
         raise LibraryRefStale(
-            f"Library file for {name!r} v{version} is unreadable ({type(exc).__name__})"
+            f"Library file for '{name}' v{version} is unreadable ({type(exc).__name__})"
         ) from exc
     if hashlib.sha256(data).hexdigest() != row.hash:
-        raise LibraryRefStale(f"Library file for {name!r} v{version} was modified")
+        raise LibraryRefStale(f"Library file for '{name}' v{version} was modified")
     return data
 
 
@@ -328,7 +328,7 @@ def resolve(
     except (LibraryRefNotFound, LibraryRefStale) as exc:
         if modified:
             raise LibraryRefStale(
-                f"the project's copy of {ref.id!r} v{ref.version} was "
+                f"the project's copy of '{ref.id}' v{ref.version} was "
                 f"modified, and the Library cannot give it ({exc})"
             ) from exc
         raise

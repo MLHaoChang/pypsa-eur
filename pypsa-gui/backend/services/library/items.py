@@ -337,7 +337,7 @@ def payload_bytes(
             LibraryItem.version == version,
         )
     ).first()
-    label = f"{kind} {name!r} v{version}"
+    label = f"{kind} '{name}' v{version}"
     if row is None:
         raise LibraryRefNotFound(f"no {label} in this org")
     if digest != row.hash:
@@ -376,7 +376,7 @@ def resolve(
 
     if common.is_common(ref.kind, ref.id):
         shipped = common.ref(ref.kind, ref.id)
-        label = f"{ref.kind} {ref.id!r} v{ref.version}"
+        label = f"{ref.kind} '{ref.id}' v{ref.version}"
         if ref.version != shipped.version:
             raise LibraryRefNotFound(
                 f"no {label}: the shipped common item is v{shipped.version}"
@@ -399,7 +399,7 @@ def resolve(
     except (LibraryRefNotFound, LibraryRefStale) as exc:
         if modified:
             raise LibraryRefStale(
-                f"the project's copy of {ref.kind} {ref.id!r} v{ref.version} "
+                f"the project's copy of {ref.kind} '{ref.id}' v{ref.version} "
                 f"was modified, and the Library cannot give it ({exc})"
             ) from exc
         raise

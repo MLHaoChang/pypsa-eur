@@ -188,7 +188,7 @@ def staged_problems(
             or not 0 < len(ident) <= _ID_MAX
             or any(ord(c) < 32 or ord(c) == 127 for c in ident)
         ):
-            problems.append(f"{ident!r} in library_refs.json is not a Library name.")
+            problems.append(f"{ident!r} in library_refs.json is not a Library name.")  # repr-ok: a refused id may hold control characters; repr shows them escaped
             continue
         if read(staging, pin)[1]:
             problems.append(
