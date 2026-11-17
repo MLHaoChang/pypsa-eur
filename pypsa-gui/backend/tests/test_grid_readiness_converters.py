@@ -314,3 +314,27 @@ def test_a_stated_capacity_below_the_converters_says_it_predates_them_and_never_
     assert row["verdict"] == "warn"                          # 8.3 would pass; the stale value caps it
     assert "stated" in row["note"] and "IBR capacity" in row["note"]
     assert "below the converter-coupled assets" in row["note"] and "predates them" in row["note"]
+
+
+def test_a_bad_asset_rating_does_not_block_a_stated_capacity():
+    n = _site(ibr=30.0)
+    n.generators.at["pv", "p_nom"] = float("nan")
+    gate, status, payload, _ = S.evaluate_network_scr_gate(n)
+    assert status == "ok" and payload["buses"][0]["ibr_source"] == "stated"
+    assert payload["buses"][0]["ibr_derived_mva"] is None
+
+
+def test_pumped_hydro_is_not_a_converter_and_a_stated_zero_reads_blank():
+    n = _site(ibr=0.0)
+    n.add("StorageUnit", "phs", bus="mv", carrier="PHS", p_nom=100.0)
+    row = S.evaluate_network_scr_gate(n)[2]["buses"][0]
+    assert row["ibr_source"] == "derived" and "phs" not in row["ibr_assets"]
+
+
+def test_an_unknown_scr_names_the_input_it_needs(tmp_path):
+    d = tmp_path / "p"
+    n = T.BUILDERS["eh_datacenter"]()
+    T.write_sidecars(d, "eh_datacenter")
+    n.buses.at["grid", "eh_sk_mva"] = float("nan")
+    row = _rows(d, n)["scr"]
+    assert row["verdict"] == "unknown" and "Properties › IBR capacity" in row["note"]

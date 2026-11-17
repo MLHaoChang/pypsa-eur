@@ -289,7 +289,10 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
         return [_row("scr", "Short-circuit ratio at the PoC", project_value=None,
                      verdict="unknown", assumed=True,
                      note=("No short-circuit level and inverter capacity at every point of connection, "
-                           "so the SCR is not known"), **base)]
+                           "so the SCR is not known: enter the fault level and, where the network has no "
+                           "inverter-based generator or battery to derive it from (or has several points of "
+                           "connection), the IBR capacity on each point of connection's bus (Properties › "
+                           "IBR capacity)"), **base)]
     verdict = _judge(float(payload["min_scr"]), PASS_SCR, RULE_SCR)
     extra = "; below it an EMT study is recommended" if gates.emt_recommended else ""
     low = next(r for r in payload["buses"] if r["bus"] == payload["min_bus"])

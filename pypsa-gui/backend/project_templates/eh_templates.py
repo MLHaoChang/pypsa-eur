@@ -193,9 +193,9 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
     n.buses.at["grid", "eh_poc"] = True
     # SCR gate input at the PoC: a 250 MVA fault level. The inverter-based
     # capacity is not stated: the SCR gate derives it from the converter-coupled
-    # assets (PV, the BESS and any backup strings off the critical bus; the UPS
-    # feeds no fault upstream, its rectifier blocks it), so added strings lower
-    # the SCR (DC grid-readiness walkthrough 05). The connection is
+    # assets (PV, the BESS and any backup strings), so added strings lower the
+    # SCR (DC grid-readiness walkthrough 05). Under a set power architecture the
+    # UPS and the critical bus sit behind it and are left out. The connection is
     # CAPACITY-weak (40 MW), not SCR-weak.
     n.buses.at["grid", "eh_sk_mva"] = 250.0
     n.buses.at["dc_mv", "eh_sk_mva"] = 220.0

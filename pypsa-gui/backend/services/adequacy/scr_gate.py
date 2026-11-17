@@ -67,6 +67,9 @@ IBR_CARRIERS = frozenset({
     "inverter",
 })
 
+#: Storage that is synchronous, not converter-coupled: never in the IBR figure.
+SYNCHRONOUS_STORAGE = frozenset({"phs", "hydro", "pumped hydro", "pumped_hydro", "pumped-hydro"})
+
 METHOD = "eh_sk_mva_proxy"
 
 
@@ -116,17 +119,17 @@ def _rating(row) -> tuple[float, bool]:
 
 
 def _stated_ibr_mva(n, bus: str) -> float | None:
-    """The PoC bus's ``eh_ibr_mva``; None when blank (NaN). Infinite, zero or
-    negative raises ``_Invalid``."""
+    """The PoC bus's ``eh_ibr_mva``; None when blank (NaN or 0, as before).
+    Infinite or negative raises ``_Invalid``."""
     if "eh_ibr_mva" not in n.buses.columns:
         return None
     try:
         v = float(n.buses.at[bus, "eh_ibr_mva"])
     except (TypeError, ValueError):
         raise _Invalid("eh_ibr_mva") from None
-    if math.isnan(v):
+    if math.isnan(v) or v == 0:
         return None
-    if not math.isfinite(v) or v <= 0:
+    if not math.isfinite(v) or v < 0:
         raise _Invalid("eh_ibr_mva")
     return v
 
@@ -134,8 +137,9 @@ def _stated_ibr_mva(n, bus: str) -> float | None:
 def converter_assets(n, bus: str | None = None,
                      behind: frozenset[str] = frozenset()) -> dict[str, dict]:
     """The converter-coupled assets ``{name: {"mva", "unsized"}}`` (only those
-    on ``bus`` when given): IBR-carrier Generators and every StorageUnit,
-    except the units ``behind`` a set power architecture
+    on ``bus`` when given): IBR-carrier Generators and every StorageUnit but
+    synchronous (pumped hydro) storage, except the units ``behind`` a set
+    power architecture
     (``dc_architecture.behind_architecture``)."""
     out: dict[str, dict] = {}
     for frame, ibr_only in (("generators", True), ("storage_units", False)):
@@ -145,7 +149,8 @@ def converter_assets(n, bus: str | None = None,
         for name, row in df.iterrows():
             if str(name) in behind or (bus is not None and str(row.get("bus", "")) != bus):
                 continue
-            if ibr_only and str(row.get("carrier", "") or "").lower() not in IBR_CARRIERS:
+            carrier = str(row.get("carrier", "") or "").lower()
+            if (carrier not in IBR_CARRIERS) if ibr_only else (carrier in SYNCHRONOUS_STORAGE):
                 continue
             mva, unsized = _rating(row)
             out[str(name)] = {"mva": mva, "unsized": unsized}
@@ -156,9 +161,16 @@ def _ibr_mva_at_bus(n, bus: str, n_pocs: int, behind: frozenset[str]) -> dict[st
     """``{"mva", "source", "assets", "derived_mva", "unsized"}``: the stated
     ``eh_ibr_mva`` wins; else the converter-coupled assets' sum (the
     network's with one PoC, the bus's own with several); None when there are
-    none. Raises ``_Invalid`` on a non-finite value."""
+    none. Raises ``_Invalid`` on a non-finite value; a bad asset rating does
+    not block a stated value (its derived figure is then None)."""
     stated = _stated_ibr_mva(n, bus)
-    found = converter_assets(n, None if n_pocs == 1 else bus, behind)
+    try:
+        found = converter_assets(n, None if n_pocs == 1 else bus, behind)
+    except _Invalid:
+        if stated is None:
+            raise
+        return {"assets": {}, "derived_mva": None, "unsized": [], "excluded": sorted(behind),
+                "mva": stated, "source": "stated"}
     assets = {k: v["mva"] for k, v in found.items()}
     unsized = [k for k, v in found.items() if v["unsized"]]
     derived = float(sum(assets.values())) if assets else None
