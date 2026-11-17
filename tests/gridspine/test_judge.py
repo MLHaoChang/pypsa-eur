@@ -283,6 +283,33 @@ def test_reactive_current_inside_the_deadband_is_unknown_and_units_refused():
         )
 
 
+def test_reactive_current_is_the_change_from_its_pre_fault_mean():
+    v = np.where((T >= 0.2) & (T < 0.35), 0.5, 1.0)
+    fault = (T >= 0.2) & (T < 0.35)
+    iq = 0.3 + np.clip((T - 0.2) / 0.03 * 0.8, 0.0, 0.8) * fault  # pre-fault Iq 0.3 pu
+    r = _rows(_iq_case(T, v, iq))["reactive_current_rise"]
+    assert r["status"] == "pass" and r["measured"] == pytest.approx(0.027, abs=1e-4)
+    # 0.8 pu absolute, but only a 0.5 pu change: short of the 0.72 pu needed
+    r = _rows(_iq_case(T, v, 0.3 + 0.5 * fault))["reactive_current_rise"]
+    assert r["status"] == "fail" and r["measured"] is None
+
+
+def test_a_fault_window_without_a_sample_is_unknown():
+    t = np.arange(0.0, 1.0 + 1e-9, 0.01)
+    case = {
+        "id": "iq",
+        "kind": "lvrt",
+        "t_event": 0.201,
+        "t_clear": 0.205,  # no 10 ms sample in [0.201, 0.205)
+        "channels": {"v1": "V", "iq": "IQ"},
+    }
+    frame = _frame(t, V=np.ones_like(t), IQ=np.zeros_like(t))
+    r = _rows(judge(frame, case, {"reactive_current_injection": IQ}))[
+        "reactive_current_rise"
+    ]
+    assert r["status"] == "unknown" and "no sample between t_event" in r["detail"]
+
+
 # --- active power recovery ------------------------------------------------------------------------------------
 
 
@@ -340,6 +367,17 @@ def test_active_power_ramp_row():
     r = _p_case(flat, {**PREC, "ramp_min_pu_per_s": 4.0})["active_power_ramp"]
     assert r["status"] == "unknown" and "already recovered" in r["detail"]
     assert "active_power_ramp" not in _p_case(P_REC)
+
+
+def test_ramp_starts_from_the_power_at_clearing():
+    # 0.3 pu at clearing, 0.9 pu reached 0.6 / 0.7 x 0.2 s = 0.1714 s later: 3.5 pu/s
+    p = np.where(
+        T < 0.2,
+        1.0,
+        np.where(T < 0.35, 0.3, 0.3 + 0.7 * np.clip((T - 0.35) / 0.2, 0.0, 1.0)),
+    )
+    r = _p_case(p, {**PREC, "ramp_min_pu_per_s": 3.0})["active_power_ramp"]
+    assert r["status"] == "pass" and r["measured"] == pytest.approx(3.5, rel=2e-3)
 
 
 # --- case refusals --------------------------------------------------------------------------------------------
@@ -460,6 +498,56 @@ def test_shipped_profiles_validate_unchanged():
 def test_envelope_refusals(key, change, match):
     p = {**_base(), key: {**copy.deepcopy(PROFILE[key]), **change}}
     with pytest.raises(ContractError, match=match):
+        validate_profile("x", p)
+
+
+_TINY = float(np.nextafter(0.0, 1.0))
+_OVER_100 = float(np.nextafter(100.0, 200.0))
+_UNDER_0 = float(np.nextafter(0.0, -1.0))
+#: Hand list of every dynamic envelope field: (refused values, accepted edge values).
+_PCT_CASES = ([0.0, _OVER_100], [_TINY, 100.0])
+_FROM_ZERO_CASES = ([_UNDER_0], [0.0, 1e300])
+_POSITIVE_CASES = ([0.0, _UNDER_0], [_TINY, 1e300])
+ENVELOPE_FIELDS = {
+    ("reactive_current_injection", "k_gain"): _POSITIVE_CASES,
+    ("reactive_current_injection", "deadband_pu"): _FROM_ZERO_CASES,
+    ("reactive_current_injection", "target_pct"): _PCT_CASES,
+    ("reactive_current_injection", "rise_time_s"): _FROM_ZERO_CASES,
+    ("active_power_recovery", "recovery_pct"): _PCT_CASES,
+    ("active_power_recovery", "time_s"): _FROM_ZERO_CASES,
+    ("active_power_recovery", "ramp_min_pu_per_s"): _POSITIVE_CASES,
+    ("setpoint_step_response", "rise_level_pct"): _PCT_CASES,
+    ("setpoint_step_response", "rise_time_s"): _FROM_ZERO_CASES,
+    ("setpoint_step_response", "settling_time_s"): _FROM_ZERO_CASES,
+    ("setpoint_step_response", "settling_band_pct"): _PCT_CASES,
+    ("setpoint_step_response", "overshoot_max_pct"): (
+        [_UNDER_0, _OVER_100],
+        [0.0, 100.0],
+    ),
+    ("frequency_droop", "droop_pct"): _PCT_CASES,
+    ("frequency_droop", "deadband_hz"): _FROM_ZERO_CASES,
+    ("frequency_droop", "nominal_hz"): _POSITIVE_CASES,
+    ("frequency_droop", "tolerance_pct"): _PCT_CASES,
+}
+
+
+def test_the_field_list_covers_every_envelope_field():
+    from gridspine.templates import grid_codes
+
+    tables = [grid_codes.DYNAMIC_ENVELOPES, grid_codes._DYNAMIC_ENVELOPE_OPTIONAL]
+    fields = {(k, f) for table in tables for k, fs in table.items() for f in fs}
+    assert fields == set(ENVELOPE_FIELDS)
+
+
+@pytest.mark.parametrize(("key", "field"), sorted(ENVELOPE_FIELDS))
+def test_each_envelope_field_refuses_out_of_range_and_accepts_its_edges(key, field):
+    refused, accepted = ENVELOPE_FIELDS[(key, field)]
+    for v in refused:
+        p = {**_base(), key: {**copy.deepcopy(PROFILE[key]), field: v}}
+        with pytest.raises(ContractError, match=f"{field} must be"):
+            validate_profile("x", p)
+    for v in accepted:
+        p = {**_base(), key: {**copy.deepcopy(PROFILE[key]), field: v}}
         validate_profile("x", p)
 
 
