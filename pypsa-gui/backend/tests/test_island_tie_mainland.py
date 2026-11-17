@@ -68,6 +68,12 @@ def test_every_shipped_template_reads_the_tie_it_read_before_46(tid):
     assert S.tie_state(T.BUILDERS[tid](), _island(tid)) == _MASTER_TIE_STATES[tid]
 
 
+@pytest.mark.parametrize("tid", sorted(_MASTER_TIE_STATES))
+def test_no_shipped_template_unit_reads_as_on_the_mainland(tid):
+    """GK A C2 (#48): no template unit bus is an eh_poc or supply-marked mainland bus."""
+    assert S._units_on_mainland(T.BUILDERS[tid](), _island(tid)) is None
+
+
 def test_a_sidecar_genset_on_the_mainland_bus_is_refused_by_name():
     """The issue fixture: before #46 the mainland bus joined the island and the tie read no_tie."""
     island = _island("eh_microgrid")
@@ -294,3 +300,92 @@ def test_a_zero_capacity_grid_import_link_is_not_a_feed():
     n.links.at["subsea_tie", "p_nom"] = 0.0
     n.links.at["subsea_tie", "p_nom_extendable"] = False
     assert S.tie_state(n, island)["state"] == "no_tie"
+
+
+@pytest.mark.parametrize("flag", ["True", "true", "1", 1, True])
+def test_an_eh_poc_flag_read_back_from_csv_still_marks_the_grid_side(flag):
+    """GK A C1: eh_poc is read through archetypes' own reader, so a CSV round-trip string counts."""
+    n, island = _untagged_r4(poc=False)
+    n.buses["eh_poc"] = n.buses["eh_poc"].astype(object)
+    n.buses.at["mainland", "eh_poc"] = flag
+    assert S.tie_state(n, island)["links"] == ["subsea_tie"]
+
+
+@pytest.mark.parametrize("flag", ["False", "0", "", 0, False])
+def test_an_eh_poc_flag_that_reads_false_marks_nothing(flag):
+    n, island = _untagged_r4(poc=False)
+    n.buses["eh_poc"] = n.buses["eh_poc"].astype(object)
+    n.buses.at["mainland", "eh_poc"] = flag
+    assert S.tie_state(n, island)["state"] == "no_tie"
+
+
+def test_a_normally_open_eh_poc_feed_with_capacity_is_still_refused():
+    """GK A ruling on C5 (option A): the feed is read by its size alone. subsea_tie is normally
+    open (p_max_pu = p_min_pu = 0) with p_nom > 0, so it still marks the mainland."""
+    n, island = _untagged_r4(poc=True)
+    n.links.at["subsea_tie", "p_max_pu"] = 0.0
+    n.links.at["subsea_tie", "p_min_pu"] = 0.0
+    assert n.links.at["subsea_tie", "p_nom"] > 0
+    assert not S._carries(n, "Link", "subsea_tie")
+    out = S.tie_state(n, island)
+    assert (out["state"], out["links"]) == ("unit_on_mainland", ["subsea_tie"])
+
+
+def test_a_link_with_both_ends_on_eh_poc_buses_names_both_buses():
+    """GK A C3 (i): both ends read as the grid side, so units on either bus are refused. The
+    island's own hospital_feeder now has an eh_poc end too, so it is named as well."""
+    n, island = _untagged_r4(poc=True)
+    n.buses.at["island", "eh_poc"] = True
+    out = S.tie_state(n, island)
+    assert out["state"] == "unit_on_mainland"
+    assert sorted(out["links"]) == ["hospital_feeder", "subsea_tie"]
+    assert out["buses"] == ["island", "mainland"]
+    assert "diesel_new" in out["units"]
+    for bus in ("island", "mainland"):
+        assert (
+            f"bus {bus}, which reads as the mainland's: it is the eh_poc"
+            in out["reason"]
+        )
+    assert "the link subsea_tie" in out["reason"]
+
+
+def test_an_eh_poc_end_that_hosts_a_listed_unit_refuses_that_unit():
+    """GK A C3 (ii): the listed unit on the eh_poc end is the one refused, on that bus."""
+    n, island = _untagged_r4(poc=True)
+    out = S.tie_state(n, island)
+    assert (out["units"], out["buses"]) == (["diesel_new"], ["mainland"])
+    assert "diesel_new sits on bus mainland" in out["reason"]
+
+
+@pytest.mark.parametrize("extendable", [False, True])
+def test_a_supply_whose_size_reads_nan_stays_detected(extendable):
+    """GK A C4: only a size that is exactly 0 leaves a supply out; NaN fails closed."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    n.add(
+        "Generator",
+        "nan_supply",
+        bus="hospital",
+        p_nom=0.0,
+        p_nom_extendable=extendable,
+    )
+    n.generators.at["nan_supply", "p_nom_max" if extendable else "p_nom"] = float("nan")
+    out = S.tie_state(n, island)
+    assert (out["state"], out["buses"]) == ("unit_on_mainland", ["hospital"])
+
+
+def test_a_supply_with_a_missing_or_non_numeric_size_stays_detected():
+    df = __import__("pandas").DataFrame(
+        {"p_nom_extendable": [False, False], "p_nom": ["n/a", None]}, index=["a", "b"]
+    )
+    assert S._can_deliver(df, "a", "p_nom") and S._can_deliver(df, "b", "p_nom")
+    assert S._can_deliver(df.drop(columns="p_nom"), "a", "p_nom")
+    assert S._can_deliver(df.drop(columns="p_nom_extendable"), "a", "p_nom")
+
+
+def test_only_a_size_of_exactly_zero_leaves_a_supply_out():
+    """GK A C4/C6: a negative size is not "cannot deliver"; the supply stays detected."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    n.add("Generator", "odd_supply", bus="hospital", p_nom=-1.0)
+    assert S.tie_state(n, island)["state"] == "unit_on_mainland"

@@ -286,9 +286,13 @@ _SUPPLY_TABLES = {"generators": "p_nom", "storage_units": "p_nom", "stores": "e_
 
 def _can_deliver(df, name, nom) -> bool:
     """False when row ``name`` has no capacity and cannot grow any: its ``{nom}_max`` when
-    extendable, else ``nom``, is 0 (#49)."""
-    size = f"{nom}_max" if bool(df.at[name, f"{nom}_extendable"]) else nom
-    return float(df.at[name, size]) != 0.0
+    extendable, else ``nom``, is exactly 0 (#49). Fails closed (GK A C4): NaN, a missing column
+    or a non-numeric value reads as able to deliver."""
+    try:
+        size = f"{nom}_max" if bool(df.at[name, f"{nom}_extendable"]) else nom
+        return float(df.at[name, size]) != 0.0
+    except (KeyError, TypeError, ValueError):
+        return True
 
 
 def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
@@ -300,10 +304,11 @@ def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
     #48: an untagged Link with no end on an ``eh_poc`` bus is not a mainland feed. Topology alone
     cannot tell it from the island's own feeder (``hospital_feeder``, ``site_transformer``), and a
     Link from an unlisted supply is caught anyway: on a unit's bus by that supply, off the
-    island as a tie."""
-    from services.solver.process_uc import flag_column
+    island as a tie. A feed is read by its size alone: a normally-open feed with capacity is
+    still the mainland's, and whether it carries power is the tie's open or closed answer."""
+    from services.adequacy.archetypes import _poc_buses
 
-    poc = set(n.buses.index[flag_column(n.buses, "eh_poc")].astype(str))
+    poc = _poc_buses(n)
     role = n.links["eh_role"].astype(str) if "eh_role" in n.links.columns else None
     out = {}
     for name in n.links.index:
