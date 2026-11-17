@@ -189,7 +189,9 @@ class _Facts:
     loads: int
     carriers: list[str]
     connection_links: list[str]
-    import_p_nom_mw: float | None
+    # The network's import capacity (`import_capacity`): the readiness body's
+    # limit, the rail's MW and the connection row's `connection_limit`.
+    import_cap: ImportCapacity
     asset_count: int
     # What sections 2, 4, 5 and 6 hold, for display only (`_holds`).
     holds: dict[str, list[dict]]
@@ -316,43 +318,111 @@ def _archetype(template: dict | None, cfg: Any = None) -> str:
     return str((template or {}).get("recommended_archetype") or "strong_grid")
 
 
-def _request_for(template: dict | None, cfg: Any = None, n=None) -> dict:
-    """The cards' request, or the archetype alone where the frontend's body is
-    null (what the Site card's readiness then sends). ``cfg`` carries the
-    stored goal; a project without a template takes its site type alone.
-    With the network ``n``, a weak-grid request takes the import cap from the
-    import Links' capacity (``with_network_import``)."""
+def _template_request(template: dict | None, cfg: Any = None) -> dict:
+    """The cards' request from the template and the stored goal alone, or the
+    archetype alone where the frontend's body is null. Template-only: its
+    weak-grid import cap is the template's constant, so a run, readiness or
+    chat path never sends it as is (GK B C6). Its callers: `_request_for`
+    (which takes the cap from the network), `_connection` (the import Links'
+    selection, which reads only the site type's `import_carriers`) and
+    `_readiness` (with the facts' `import_capacity`) and `project_flow` (the
+    site type alone)."""
     if template is None:
         return {"archetype": _archetype(None, cfg)}
-    body = site_card_study_body(template, cfg) or {"archetype": _archetype(template, cfg)}
-    return with_network_import(body, n) if n is not None else body
+    return site_card_study_body(template, cfg) or {"archetype": _archetype(template, cfg)}
 
 
-def with_network_import(body: dict, n) -> dict:
-    """The connection limit is the import Links' capacity (template-e2e 02,
-    owner decision (a)): a weak-grid request's ``import_p_nom_mw`` is their
-    summed ``p_nom`` from the network, so an edit to the limit (Guided or
-    Expert) is what the study runs. The template's value is only the Links'
-    initial capacity. Any other site type, or no import Link, is unchanged.
-    Mirrors ``useTemplateForm`` (hubDesign/useHubData.ts)."""
+def _request_for(template: dict | None, cfg: Any, n) -> dict:
+    """The cards' request for this project's network ``n``: what the Site
+    card's readiness and a run send. ``cfg`` carries the stored goal; a
+    project without a template takes its site type alone. A weak-grid request
+    takes the import cap from the network (`with_network_import`): an
+    ImportCapacityError says why it can't, never the template's value."""
+    return with_network_import(_template_request(template, cfg), n)
+
+
+class ImportCapacityError(ValueError):
+    """A weak-grid study's connection limit can't be taken from the network
+    (`import_capacity`); the message says why in plain words."""
+
+
+@dataclass(frozen=True)
+class ImportCapacity:
+    """The network's grid import capacity: the import Links and their summed
+    ``p_nom`` in MW, or why it can't be read (``refusal``, ``mw`` None)."""
+
+    links: tuple[str, ...]
+    mw: float | None
+    refusal: str | None = None
+
+
+CAP_UNREADABLE = "The connection limit can't be read from the network."
+CAP_NO_LINK = ("There is no grid import link, so the site has no connection limit: "
+               "add one or choose another site type.")
+CAP_ZERO = "The connection limit is 0 MW: set one or choose another site type."
+
+
+def import_capacity(n, body: dict) -> ImportCapacity:
+    """The one reading of the network's import capacity (template-e2e 02,
+    owner decision (a); GK B C1-C4) that readiness, the Site card's facts,
+    the run's freeze and its admission all take. The import Links are the
+    ones the study's pack selects (`archetypes.select_import_links_with_rule`
+    with ``body``'s pack, as `eh_study` applies it), and the limit is their
+    summed ``p_nom``, read in MW. Refused, never a fallback: an unreadable
+    network, no import Link, a sum that is not above 0, a Link whose grid bus
+    does not count in MW (#1347), or an extendable Link (its ``p_nom`` is only
+    a starting size, so the network fixes no limit)."""
     from services.adequacy import archetypes as arch
+    from services.memory_parameters import _bus_unit_reason
 
+    try:
+        links, _rule = arch.select_import_links_with_rule(n, _pack_for(body).import_overlay)
+    except Exception:                                    # noqa: BLE001 — refused below
+        logger.exception("flow: import Link selection failed")
+        return ImportCapacity((), None, CAP_UNREADABLE)
+    if not links:
+        return ImportCapacity((), None, CAP_NO_LINK)
+    links = tuple(links)
+    try:
+        table = n.links
+        for name in links:
+            # A Link's p_nom is in its bus0's unit.
+            reason = _bus_unit_reason(n, table.at[name, "bus0"])
+            if reason:
+                return ImportCapacity(links, None, (
+                    f"The grid import link {name} {reason}: the connection limit is "
+                    "read in MW."))
+            if "p_nom_extendable" in table.columns and bool(table.at[name, "p_nom_extendable"]):
+                return ImportCapacity(links, None, (
+                    f"The grid import link {name} is sized by the optimisation, so its "
+                    "capacity is not a connection limit: fix its capacity (turn off "
+                    "extendable) or choose another site type."))
+        mw = float(table.loc[list(links), "p_nom"].astype(float).sum())
+    except Exception:                                    # noqa: BLE001 — refused, never the template's
+        logger.exception("flow: import capacity read failed")
+        return ImportCapacity(links, None, CAP_UNREADABLE)
+    if not math.isfinite(mw):
+        return ImportCapacity(links, None, CAP_UNREADABLE)
+    if not mw > 0:
+        return ImportCapacity(links, None, CAP_ZERO)
+    return ImportCapacity(links, mw)
+
+
+def with_network_import(body: dict, n=None, *, cap: ImportCapacity | None = None) -> dict:
+    """``body`` with a weak-grid request's ``import_p_nom_mw`` taken from the
+    network ``n`` (or an `import_capacity` already read, ``cap``), so an edit
+    to the limit (Guided or Expert) is what the study runs; the template's
+    value is only the Links' initial capacity. ImportCapacityError where the
+    network fixes no limit (GK B C2, C3). Any other site type is unchanged.
+    The frontend reads the same value from the flow's connection row
+    (`useTemplateForm`, hubDesign/useHubData.ts)."""
     if body.get("archetype") != "weak_flexible":
         return body
-    try:
-        imports, _rule = arch.select_import_links_with_rule(n, _pack_for(body).import_overlay)
-        mw = float(n.links.loc[list(imports), "p_nom"].sum()) if imports else 0.0
-    except Exception:                                    # noqa: BLE001 — the template's value stands
-        logger.exception("flow: import capacity read failed")
-        return body
-    return _with_import_mw(body, mw)
-
-
-def _with_import_mw(body: dict, mw: float | None) -> dict:
-    """``body`` with a weak-grid import cap of ``mw`` (the import Links' summed capacity)."""
-    if body.get("archetype") != "weak_flexible" or mw is None or not mw > 0:
-        return body
-    return {**body, "pack_overrides": {**(body.get("pack_overrides") or {}), "import_p_nom_mw": mw}}
+    if cap is None:
+        cap = import_capacity(n, body)
+    if cap.refusal is not None:
+        raise ImportCapacityError(cap.refusal)
+    return {**body, "pack_overrides": {**(body.get("pack_overrides") or {}), "import_p_nom_mw": cap.mw}}
 
 
 def _pack_for(body: dict):
@@ -364,26 +434,19 @@ def _pack_for(body: dict):
 
 # ── Facts under the lock ────────────────────────────────────────────────────
 
-def _connection(n, config, template: dict | None) -> tuple[list[str], set[str]]:
-    """``(import Links, connection Links)``: the Links the archetype selector
-    picks as imports (with the template's pack, as the Site card's readiness
-    does), plus the commercial config's PoC and export Links."""
-    from services.adequacy import archetypes as arch
-
-    body = _request_for(template, config)
-    try:
-        overlay = _pack_for(body).import_overlay
-        imports, _rule = arch.select_import_links_with_rule(n, overlay)
-    except Exception:                                    # noqa: BLE001 — presence reads "none"
-        logger.exception("flow: import Link selection failed")
-        imports = []
-    connection = set(imports)
+def _connection(n, config, template: dict | None) -> tuple[ImportCapacity, set[str]]:
+    """``(import capacity, connection Links)``: the import Links and their
+    capacity as `import_capacity` reads them for the request readiness sends
+    (the one selector the run takes too, GK B C1), plus the commercial
+    config's PoC and export Links."""
+    cap = import_capacity(n, _template_request(template, config))
+    connection = set(cap.links)
     commercial = getattr(config, "commercial", None)
     if isinstance(commercial, dict):
         for key in ("poc_link", "export_link"):
             if commercial.get(key) and str(commercial[key]) in set(map(str, n.links.index)):
                 connection.add(str(commercial[key]))
-    return list(imports), connection
+    return cap, connection
 
 
 def section_for_component(n, config, project_dir: pathlib.Path | None,
@@ -393,7 +456,7 @@ def section_for_component(n, config, project_dir: pathlib.Path | None,
     connection Links). For a caller outside the flow (the chat edit card) that
     names the section an edit lands in. Read under the caller's lock."""
     template = read_template(project_dir) if project_dir is not None else None
-    _imports, connection = _connection(n, config, template)
+    _cap, connection = _connection(n, config, template)
     return F.section_for(component_class, entity, frozenset(connection))
 
 
@@ -535,7 +598,8 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     from services import dirty_state
     from services.network_geometry import _bus_coord
 
-    imports, connection = _connection(n, config, template)
+    cap, connection = _connection(n, config, template)
+    imports = list(cap.links)
     commercial = getattr(config, "commercial", None)
     # The supply behind the fence (a market Generator on an import Link's grid
     # side) is the connection's, not an asset of the site.
@@ -548,12 +612,6 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     from services.pypsa_service import PyPSAService
 
     supplied = supplied_profiles(PyPSAService.get_active_context(), [str(g) for g in n.generators.index])
-    p_nom = None
-    if imports:
-        try:
-            p_nom = float(n.links.loc[list(imports), "p_nom"].sum())
-        except Exception:                                # noqa: BLE001
-            p_nom = None
     try:
         cfg_dict = asdict(config)
     except Exception:                                    # noqa: BLE001
@@ -576,7 +634,7 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     return _Facts(
         revision=revision, snapshots=len(n.snapshots), loads=len(n.loads),
         carriers=carriers,
-        connection_links=sorted(connection), import_p_nom_mw=p_nom,
+        connection_links=sorted(connection), import_cap=cap,
         asset_count=assets, holds=holds, holds_total=holds_total,
         buses=len(n.buses), buses_placed=placed,
         renewables_unplaced=unplaced_renewables(n, supplied), voll=voll,
@@ -670,8 +728,16 @@ def _readiness(facts: _Facts, template: dict, cache_key: str) -> dict | Exceptio
     from services.adequacy.eh_readiness import eh_readiness
     from services.adequacy.eh_study import readiness_refusal_classes
 
-    # The network's import capacity, as the run takes it (`with_network_import`).
-    body = _with_import_mw(_request_for(template, facts.cfg_dict), facts.import_p_nom_mw)
+    try:
+        # The network's import capacity, read as the run reads it (GK B C1):
+        # one that can't be read, or is 0 or absent, is a refusal (C2, C3).
+        body = with_network_import(_template_request(template, facts.cfg_dict),
+                                   cap=facts.import_cap)
+    except ImportCapacityError as exc:
+        result = exc
+        with _readiness_cache_lock:
+            _readiness_cache[cache_key] = (key, result)
+        return result
     try:
         # The Site card's request: archetype and pack overrides; stages and
         # DtC attribution left to the engine (`useHubReadiness`).
@@ -1185,7 +1251,7 @@ def _summary(section: str, facts: _Facts) -> str | None:
     if section == "connection":
         if not facts.connection_links:
             return None
-        mw = f", {facts.import_p_nom_mw:g} MW" if facts.import_p_nom_mw is not None else ""
+        mw = f", {facts.import_cap.mw:g} MW" if facts.import_cap.mw is not None else ""
         # No link ids (RAW-NAMES-1; template-e2e 02): a count in plain words until the
         # template display names exist (gap 05).
         return _count(len(facts.connection_links), "grid connection") + mw
@@ -1240,8 +1306,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     # The stored goal's site type (W3b-R) rides on the config the preflight read.
     if template is not None:
         from services.reliability_goal import stored_config
-        body = _request_for(template, facts.cfg_dict if facts is not None
-                            else stored_config(project_dir))
+        body = _template_request(template, facts.cfg_dict if facts is not None
+                                 else stored_config(project_dir))
     else:
         body = None
     islanded = body is not None and body["archetype"] == "off_grid"
@@ -1276,6 +1342,14 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             # not request has nothing to wait for.
             if study_requested:
                 deferred = {"deferred_reason": _LOCK_BUSY_REASON}
+        if (facts is not None and body["archetype"] == "weak_flexible"
+                and facts.import_cap.refusal is not None):
+            # template-e2e 02 (GK B C2, C3): a weak-grid study runs on the
+            # network's connection limit; one it can't read, 0 or no import
+            # Link blocks the study, in plain words, on the connection row.
+            study_items.append(_item(
+                "eh_connection_limit", "error", facts.import_cap.refusal, "eh_study",
+                "connection", component="Link", fld="p_nom", blocking=study_requested))
     n = PyPSAService.get_network()
     # A solve (/run or /run_ac_pf) is what runs the optimisation and the load
     # flow; `running` also counts a study, as the one `freshness` word does.
@@ -1340,6 +1414,11 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
         row: dict[str, Any] = {"section": s, "label": F.SECTION_LABELS[s],
                                "items": [_strip(it) for it in mine],
                                "summary": _summary(s, facts)}
+        if s == "connection":
+            # The connection limit as the study takes it (`import_capacity`):
+            # what the Site and Goal cards send, never re-summed on the client.
+            row["connection_limit"] = {"mw": facts.import_cap.mw,
+                                       "refusal": facts.import_cap.refusal}
         if s in facts.holds:
             row["holds"] = facts.holds[s]
             row["holds_total"] = facts.holds_total[s]

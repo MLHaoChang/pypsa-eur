@@ -594,7 +594,10 @@ def counted(profile, ctx):
     from harness import run_eh
     from services import flow_service, run_profiles
     try:
-        card = flow_service._request_for(run_eh._template(ctx), ctx.solver_state.get("solver_config"))
+        # The network's connection limit, as `run_eh.freeze` takes it (template-e2e 02);
+        # one it can't fix is not counted.
+        card = flow_service._request_for(run_eh._template(ctx), ctx.solver_state.get("solver_config"),
+                                         ctx.network)
         links, _ = run_eh.islanding(ctx.network, {"archetype": card["archetype"],
                                                   "pack_overrides": card.get("pack_overrides"),
                                                   "dtc_attribution": card.get("dtc_attribution")})

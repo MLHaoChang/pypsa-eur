@@ -20,6 +20,7 @@ import {
 import { dispatchSolved } from './chapters'
 import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { networkApi } from '../../api/network'
+import { useProjectFlow } from '../../hooks/useProjectFlow'
 import type { Link } from '../../api/types'
 
 /** The study record (`nk(project,'results','eh_study')`, 2 s poll while running). */
@@ -88,15 +89,36 @@ export function useImportLinks(): Link[] {
   return ((q.data ?? []) as Link[]).filter(l => l.eh_role === 'grid_import')
 }
 
-/** The template's pack form with the import cap read from the network (template-e2e 02, owner
- *  decision (a)): the connection limit is the import links' summed capacity, so an edit to it is what
- *  a weak-grid study runs. The template's value is only the links' initial capacity. Mirrors
- *  `flow_service.with_network_import`. */
-export function useTemplateForm(template: EhTemplateMeta | null): PackForm {
-  const links = useImportLinks()
+/** The template's pack form with the import cap the server reads from the network (template-e2e 02,
+ *  owner decision (a)): the connection limit is the import links' summed capacity, so an edit to it is
+ *  what a weak-grid study runs; the template's value is only the links' initial capacity. Read from the
+ *  flow's connection row (`flow_service.import_capacity`), never re-summed here (GK B, #1060).
+ *  `importPending` until the flow is read; `importRefusal` where the network fixes no limit (none,
+ *  0 MW, unreadable): a weak-grid study then sends nothing rather than the template's value. */
+export function useTemplateForm(template: EhTemplateMeta | null):
+  PackForm & { importPending: boolean, importRefusal: string | null } {
+  const { section, isPending, isError } = useProjectFlow()
+  const limit = section('connection')?.connection_limit
   const form = templateForm(template)
-  const mw = links.reduce((sum, l) => sum + (Number(l.p_nom) || 0), 0)
-  return template && mw > 0 ? { ...form, importMw: String(mw) } : form
+  if (!template) return { ...form, importPending: false, importRefusal: null }
+  if (isError) {
+    return { ...form, importMw: '', importPending: false,
+      importRefusal: 'The connection limit can\'t be read: the project\'s state did not load.' }
+  }
+  if (!limit) return { ...form, importMw: '', importPending: isPending || !section('connection'), importRefusal: null }
+  if (limit.refusal != null || limit.mw == null) {
+    return { ...form, importMw: '', importPending: false,
+      importRefusal: limit.refusal ?? 'The connection limit can\'t be read from the network.' }
+  }
+  return { ...form, importMw: String(limit.mw), importPending: false, importRefusal: null }
+}
+
+/** Why a weak-grid study can't be built from `form` yet: null when it can; `''` while the
+ *  connection limit is being read (wait, no message); else the server's refusal. */
+export function importBlock(archetype: string, form: ReturnType<typeof useTemplateForm>): string | null {
+  if (archetype !== 'weak_flexible') return null
+  if (form.importRefusal) return form.importRefusal
+  return form.importPending ? '' : null
 }
 
 /** Readiness for the chosen site type with the template's recommended
@@ -112,8 +134,12 @@ export function useHubReadiness(template: EhTemplateMeta | null, running: boolea
   // The stored site type (W3b-R); read before the first request so it never
   // asks for the default type's readiness first.
   const { goal, archetype, isPending: goalPending } = useReliabilityGoal()
+  const form = useTemplateForm(template)
+  // A weak-grid preview waits for the network's connection limit, and runs none without one: the
+  // flow's connection row says why (never the template's value).
+  const importBlocked = !!template && importBlock(archetype, form) !== null
   const overrides = buildEhStudyBody(archetype, {
-    ...useTemplateForm(template), loleTarget: goalText(goal, 'target_lole_h'),
+    ...form, loleTarget: goalText(goal, 'target_lole_h'),
     ensCap: goalText(goal, 'ens_cap_permyriad'), draws: '',
   }).body?.pack_overrides
   const q = useQuery({
@@ -123,7 +149,7 @@ export function useHubReadiness(template: EhTemplateMeta | null, running: boolea
       { stages: undefined, pack_overrides: overrides }),
     // `observeOnly` (the panel's load-error line, P30 B8): read the shared
     // cache entry's state without starting a request of its own.
-    enabled: !observeOnly && !!project && ready && !goalPending && !running,
+    enabled: !observeOnly && !!project && ready && !goalPending && !running && !importBlocked,
   })
   return { isError: q.isError, refetch: q.refetch, readiness: q.data ?? null }
 }

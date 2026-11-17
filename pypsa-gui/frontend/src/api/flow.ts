@@ -80,6 +80,11 @@ export interface FlowHeld {
   series: boolean
 }
 
+export interface FlowConnectionLimit {
+  mw: number | null
+  refusal: string | null
+}
+
 export interface FlowSection {
   section: FlowSectionId
   label: string
@@ -89,6 +94,10 @@ export interface FlowSection {
   items: FlowItem[]
   /** One line for the rail ("1 grid connection, 40 MW"); `readiness`: "n to do, m to check". */
   summary: string | null
+  /** `connection` only: the connection limit as the study takes it
+   *  (`flow_service.import_capacity`), the import links' summed capacity in MW,
+   *  or why the network fixes none (`refusal`, `mw` null). */
+  connection_limit?: FlowConnectionLimit
   /** Sections 2, 4, 5 and 6: what the section holds, for display only. */
   holds?: FlowHeld[]
   /** How many the section holds in all; `holds` stops at the server's cap. */

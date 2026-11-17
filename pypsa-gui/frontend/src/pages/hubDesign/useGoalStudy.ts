@@ -13,7 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import { buildGoalFreeStudyBody, ehStudyQueryKeys } from '../results/EhReferenceDesignPanel'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import {
-  useTemplateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
+  importBlock, useTemplateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
 } from './useHubData'
 
 export function useGoalStudy() {
@@ -30,8 +30,13 @@ export function useGoalStudy() {
   // Until the goal is read, the site type the rules below depend on is not
   // known: no body, so the Run waits rather than guess.
   const form = useTemplateForm(template)
-  const built = goal ? buildGoalFreeStudyBody(archetype, form)
-    : { body: null, error: goalError ? 'The reliability goal could not be read.' : null }
+  // A weak-grid study runs on the network's connection limit: none while it is read, and the
+  // server's reason where the network fixes none (template-e2e 02, GK B C3).
+  const importBlocked = template ? importBlock(archetype, form) : null
+  const built = !goal
+    ? { body: null, error: goalError ? 'The reliability goal could not be read.' : null }
+    : importBlocked !== null ? { body: null, error: importBlocked || null }
+      : buildGoalFreeStudyBody(archetype, form)
   const voll = typeof solverConfig?.voll === 'number' ? solverConfig.voll : null
   const vollMissing = voll != null && !(voll > 0)
 

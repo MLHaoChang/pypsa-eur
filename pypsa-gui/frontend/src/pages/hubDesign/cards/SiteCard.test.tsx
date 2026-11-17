@@ -36,7 +36,10 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
 const getReliabilityGoal = vi.fn()
 vi.mock('../../../api/flow', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/flow')>()
-  return { ...actual, getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a) }
+  // The connection limit the server reads from the network (template-e2e 02): the template's 40 MW.
+  return { ...actual, getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a),
+    getProjectFlow: async () => ({ run_ready: true, notes: [],
+      sections: [{ section: 'connection', connection_limit: { mw: 40, refusal: null } }] }) }
 })
 
 vi.mock('../../../api/campusElectrical', async (importOriginal) => {
