@@ -3,10 +3,10 @@
 
 # Expert mode on one parameter catalogue: spec
 
-Status: draft for the owner (EXPERT-CAT-1). Builders start after the owner has seen it as a page and answered the open questions (§9).
+Status: approved design (EXPERT-CAT-1); owner answered Q1–Q4 (§9) on 2026-11-17.
 Base: master `882d7114`. Paths are under `pypsa-gui/` unless they start with `.scratch/` or `docs/`.
 Review: UX NOT OK and GK NOT OK @0025d36b addressed in this revision (§13).
-Owner decisions applied: EXPERT-CAT-1, RAW-NAMES-1, WIKI-1, EXPERT-GUIDED-1, HOLISTIC-1, DENSITY-1, UI-COHESION-1, E2E-TEMPLATES-1.
+Owner decisions applied: EXPERT-CAT-1, EXPERT-CAT Q1–Q4 (all (a)), AI-IMPORT-1, RAW-NAMES-1, WIKI-1, EXPERT-GUIDED-1, HOLISTIC-1, DENSITY-1, UI-COHESION-1, E2E-TEMPLATES-1.
 
 ## 0. Goal, in the owner's words
 
@@ -118,7 +118,7 @@ Order is fixed for every asset type; a type shows only groups with entries. Guid
 
 - Every Component column the GUI or chat can write is an entry, or is listed in `not_offered.py` with a one-line reason (engine-internal, output, unsupported). A test walks `attribute_catalog.py`'s PyPSA input columns for the 11 classes and the `EH_CUSTOM_COLUMNS`, and fails on any column in neither.
 - Every project-level setting an endpoint accepts (flow targets in `FIELD_LABELS`, the reliability goal, optimisation levers `models/energy_hub.py:151`, connection agreement, finance inputs in section 7) is an entry in `settings.py`. Slice 01 starts with the ~35 `FIELD_LABELS` keys, the levers and the solver-config fields other streams report (homer-parity 04a: "Load growth" % per year per energy type, valid finite and above -100; "Load growth starts from year", default the first period; "Load multiplier" ×; its internal `load_scalers_derived` stays out as not offered); a test lists the remaining write routes without entries as `KNOWN_GAPS` (shrink-only).
-- Owner question Q3 (§9) decides whether Full detail offers every PyPSA input column or only the ones our engines read.
+- Q3 (a): Full detail offers every input our engines read; other PyPSA input columns are listed in `not_offered.py` with a reason.
 
 ### 3.6 Plain names (RAW-NAMES-1)
 
@@ -131,7 +131,7 @@ Order is fixed for every asset type; a type shows only groups with entries. Guid
 | `p_nom_extendable` | Let the optimiser size it | Investment |
 | `p_nom_min` / `p_nom_max` | Smallest size / Largest size | Investment |
 | `p_max_pu` / `p_min_pu` | Maximum output share / Minimum output share (unit %) | Size and limits |
-| `marginal_cost` | Running cost (unit €/MWh; Q1 decides vs "Marginal cost") | Running cost |
+| `marginal_cost` | Running cost (unit €/MWh; Q1 (a)) | Running cost |
 | `capital_cost` | Yearly capital cost (derived) | Investment |
 | `efficiency` | Efficiency | Operation |
 | `bus` / `bus0` / `bus1` | Connected to / From / To (ports name these per asset type: "Grid side", "Hydrogen out") | General |
@@ -181,7 +181,7 @@ Legend: (Assumed) value not set by you, from a Generic default
 
 ### 4.3 Parameter search
 
-One entry point (owner rule UX-flow), two scopes. Owner question Q2 picks between this and a dedicated bar.
+One entry point (owner rule UX-flow), two scopes (Q2 (a)).
 
 - **Global: the ⌘K palette** gains a "Parameters" source next to commands and projects. It indexes catalogue entries and the project's assets: a query matches plain name, aliases, short help, guide text, and model name ("p_nom" finds "Capacity"; the row shows "matches the model-file name", never the raw name). Ranking: exact plain name > alias > word prefix > guide text; entries the current lens needs rank first.
   - A row reads `Capacity · PV array · Size and limits` (an entry) or `PV roof › Capacity · 2.4 MW` (an asset's value). Enter opens the asset's panel, sets the depth needed to show the field, unfolds its group, scrolls, focuses the input and flashes it (request-then-scroll, review-ux.md Navigation). Shift+Enter opens the entry in the Parameter guide instead.
@@ -195,7 +195,7 @@ One entry point (owner rule UX-flow), two scopes. Owner question Q2 picks betwee
 ### 4.4 Function lens
 
 - A lens selector on the workbench (All · Dispatch · Capacity expansion · Load flow · Short circuit · Grid compliance · Adequacy · Finance) filters, in every view at once: canvas emphasis (assets the function ignores are dimmed, function-only assets appear), properties groups, search ranking, and the Readiness section's "needs" list.
-- Default lens: All. The scenario's run functions (section 8) offer their lens as a one-click chip. Owner question Q4 decides global vs per-panel.
+- Default lens: All. The scenario's run functions (section 8) offer their lens as a one-click chip. One workbench-wide lens (Q4 (a)).
 - **The lens never hides Guided content**: it may dim, fold or demote, but never removes an Essentials entry or a Guided blocker from any view (Expert never shows less than Guided, #1193).
 - Wherever the lens filters (canvas, panel, search) a visible chip reads "Showing for: Load flow · Clear".
 - The lens is a session convenience: never saved with the project, never shared. A snapshot or picture of a canvas or panel names the lens in its caption (#1421).
@@ -311,15 +311,15 @@ In model files      p_nom
 | Reports & Assumptions ledger | Plain names/units from the catalogue; guide appendix. | 03 (labels); appendix is a follow-up |
 | Templates | Ledgers reference entry ids; templates give values, not names. Every template must pass the template-e2e Expert pass. | 01 (ids), 03 (labels), template-e2e |
 | Library / Generic defaults | `default.source = library` marks Assumed; values stay in the Library. | 01 |
-| Import / export | Import maps file columns by `model_name` and `former_ids`; the mapping dialog shows plain name beside the file column. | 01 (data); dialog is a follow-up |
+| Import / export | Import maps file columns by `model_name` and `former_ids`; the mapping dialog shows plain name beside the file column. AI-IMPORT-1: importer and assistant suggestions (project-io core, session `session_01G7qCumV3StLEo5RMZgP3rd`) use catalogue plain names and defaults. | 01 (data); dialog is a follow-up |
 | THEME-LIGHT | Canvas colours become tokens in 04, after slice (c); 02/03 touch `components/` and `layout/` only after (b). | sequencing |
 | ui-cohesion audit | Its canvas findings feed slice 04's state list; 04 starts after the audit's canvas report. | sequencing |
 | template-e2e (E2E-TEMPLATES-1) | Adds an Expert pass driven by `GET /api/catalogue` (§10). | session `session_01G7qCukL5Afn6M67ai7Wyuf` |
 | grid-compliance, study-harness, adequacy | Their inputs become entries with `functions: grid_compliance / adequacy`; their profiles can read `needs` instead of hand lists. | follow-ups per stream |
 
-## 9. Open questions for the owner
+## 9. Owner questions (answered 2026-11-17)
 
-Each goes to the coordinator as options; the recommended option is first.
+The owner chose (a) on all four; recorded as EXPERT-CAT Q1–Q4. The options are kept below for the record.
 
 - **Q1 Naming depth.** (a, recommended) Plain planner words, keeping standard industry terms where a planner uses them ("Capacity", "Efficiency", "Capital cost"; "Running cost per MWh" for marginal cost): readable for newcomers, still familiar to engineers. (b) Industry terms everywhere ("Marginal cost", "Nominal power"): closest to textbooks, harder for non-modellers. (c) Everyday words only ("How big", "Cost to run"): friendliest, but engineers must translate.
 - **Q2 Search entry point.** (a, recommended) Extend the ⌘K palette with parameters + a filter field in the Properties panel: one global search the user already knows, one local filter. (b) A dedicated always-visible "Find a parameter" bar in the top bar: more discoverable, a second global search next to ⌘K. (c) Palette only: simplest, no in-panel narrowing.
