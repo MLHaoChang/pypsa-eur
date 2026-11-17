@@ -176,7 +176,7 @@ def test_a_flag_warns_with_the_worst_uif_its_bus_and_the_assumed_threshold(tmp_p
     # the worst converter bus, not the PCC row (information only, its UIF is larger here)
     assert row["note"] == (
         "Worst UIF 0.25 at bus MV (max fault level, machine GAS), above the assumed screening "
-        f"threshold 0.1: an EMT SSTI study is warranted. {SCREENING}"
+        f"threshold 0.1: an EMT SSTI study is warranted (grid-connected state only). {SCREENING}"
     )
 
 
@@ -190,7 +190,7 @@ def test_an_assumed_clear_passes_and_says_the_threshold_is_assumed(tmp_path):
         and row["assumed"] is True
     )
     assert (
-        "at or below the assumed screening threshold 0.1: no EMT SSTI study indicated."
+        "at or below the assumed screening threshold 0.1: no EMT SSTI study indicated (grid-connected state only)."
         in row["note"]
     )
 
@@ -483,11 +483,13 @@ def test_an_unreadable_record_reads_unknown(tmp_path, raw):
 # ── off-grid (R4) ─────────────────────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("verdict, worst", [("clear", 0.05), ("flag", 0.25)])
 def test_off_grid_with_an_open_tie_keeps_the_uif_row_unknown_and_drops_the_pcc_rows(
-    tmp_path,
+    tmp_path, verdict, worst
 ):
+    # R4a: neither a clear nor a lucky flag is shown as the island's judged result
     _template(tmp_path, "off_grid")
-    _write(tmp_path, uif=_uif_meta("clear", worst=0.05), uif_rows=_uif_table(0.05))
+    _write(tmp_path, uif=_uif_meta(verdict, worst=worst), uif_rows=_uif_table(worst))
     rows, out = _card(tmp_path, n=_open_tie(_site()))
     # the screen counted the grid's infeed, which understates the islanded UIF: never a pass
     row = rows["ssti_uif"]
@@ -510,6 +512,7 @@ def test_off_grid_by_label_only_keeps_the_uif_row_judged(tmp_path):
     _write(tmp_path)
     rows, _ = _card(tmp_path)
     assert rows["ssti_uif"]["verdict"] == "warn"
+    assert "(grid-connected state only)" in rows["ssti_uif"]["note"]
 
 
 def test_a_grid_project_keeps_all_three_rows(tmp_path):

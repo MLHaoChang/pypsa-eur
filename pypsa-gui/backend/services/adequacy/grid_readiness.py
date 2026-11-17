@@ -1325,6 +1325,8 @@ SUBSYNC_OFF_GRID = "off-grid, so there is no grid connection to scan from"
 #: Why the UIF row is unknown on an off-grid project whose tie is open: the screen counts the
 #: grid's infeed in every fault level, which understates the islanded UIF.
 SSTI_ISLAND = "the screen counts the grid's infeed; the islanded case is not evaluated"
+#: Every judged UIF row's scope (GK A2 R4d): a campus that can island is not screened islanded (GC-08b).
+SSTI_GRID_ONLY = "grid-connected state only"
 SSCI_REASON = "not evaluated: converter damping not modelled"
 NO_MODES = "no torsional modes given"
 NO_SERIES_CAP = "not evaluated: grid-side series compensation needs the TSP's data"
@@ -1390,8 +1392,8 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
     words = "above" if verdict == "flag" else "at or below"
     note = (f"Worst UIF {worst:.4g} at bus {top['bus']} ({top['case']} fault level, machine {top['machine']}), "
             f"{words} {against} {limit:g}: "
-            + ("an EMT SSTI study is warranted. " if verdict == "flag" else "no EMT SSTI study indicated. ")
-            + SSTI_SCREENING)
+            + ("an EMT SSTI study is warranted" if verdict == "flag" else "no EMT SSTI study indicated")
+            + f" ({SSTI_GRID_ONLY}). {SSTI_SCREENING}")
     return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], limit=limit, source=source, unit="UIF", rule=RULE_UIF,
                 project_value=worst, verdict=SSTI_VERDICTS[SSTI_UIF][verdict], note=note,
                 **{k: v for k, v in common.items() if k not in ("limit", "source", "unit", "rule")})
