@@ -221,6 +221,8 @@ def export_campus_bundle(outdir, campus, rows, hour, ledger=()) -> CampusBundle:
                 "event": {"kind": "islanding", "trip_machine": list(grid_id) if grid_id else None, "t_s": 0.0}}
     from gridspine.handoff.psse_pack import SUBDIR, write_psse_pack  # noqa: PLC0415 (GC-04 pack, one call)
     manifest["psse_pack"] = write_psse_pack(out / SUBDIR, hour_campus, case, lines, grid_id)
+    from gridspine.handoff.emt_pack import bundle_emt_pack  # GC-06 EMT pack; local import
+    manifest["emt_pack"] = bundle_emt_pack(out, hour_campus, rows)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return CampusBundle(out, records, drafted_df, omitted)
 
