@@ -29,6 +29,18 @@ unless they are looking at the queue panel.
 | Assistant runs | `components/runMonitor/`, `services/run_monitor.py` | their own stage card in chat (not changed here) |
 | Detached progress for chat/voice | live-voice issue 11 (`/api/chat/{id}/progress`) | the channel completion events reach chat on |
 
+## Journey fit
+
+Journey steps: **run → wait → read results** (HOLISTIC-REC-1), Guided and
+Expert alike. It starts where the Run button (readiness gate) hands off: the
+button's amber state gains the status line. It ends where results begin: the
+finish toast's "Open results" lands on the same results headline the Guided
+results-legibility package and the next-step flow's "Next" lead to, never on a
+separate page. A failure hands back to readiness ("See why" opens the run's
+error, with the field to fix where the readiness gate names one). Shared
+reference: `.scratch/ux-walkthrough-2026-11/README.md` once the walkthrough
+audit writes it.
+
 ## 1. Stages the user sees, per run type
 
 One status line per run, same words in Guided and Expert (EXPERT-GUIDED-1).
@@ -131,7 +143,7 @@ Each is one PR, ≤ 1,500 lines, in this order. Files in open PRs wait.
 
 | # | Slice | Files | Waits for |
 | - | ----- | ----- | --------- |
-| 1 | ETA service + route: `services/run_estimate.py` (median of past runs from `solve_job_store`), `GET /api/simulation/queue/estimates` | `services/run_estimate.py`, `routers/solve_queue.py`, `solve_job_store.py` (read helper), tests | none |
+| 1 | ETA service + route: `services/run_estimate.py` (median of past runs from `solve_job_store`), `GET /api/simulation/queue/{job_id}/estimate` | `services/run_estimate.py`, `routers/solve_queue.py`, `solve_job_store.py` (read helper), tests | none |
 | 2 | Run status line + Runs indicator in the header: stage, elapsed, ETA, unknown state, Guided/Expert | `layout/AppHeader.tsx`, new `components/runStatus/`, `hooks/useRunEstimate.ts` | slice 1 |
 | 3 | Finish/fail notification: toast, browser notification opt-in, one-tab claim, missed-while-away | `hooks/useJobTerminalInvalidation.ts` (or a sibling hook), new `hooks/useRunNotifications.ts`, user preference | slice 2 |
 | 4 | Read-only wording + "being re-run" mark on the running project's results | `utils/` mutation verdict wording, results header | none |

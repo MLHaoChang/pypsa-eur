@@ -157,3 +157,43 @@ def test_a_job_the_caller_cannot_see_is_indistinguishable_from_none(
 def test_a_malformed_job_id_is_the_same_404(client):
     r = client.get("/api/simulation/queue/not-a-uuid/estimate")
     assert r.status_code == 404
+
+
+def test_a_job_of_an_unknown_kind_is_unknown_not_an_error(
+    client, install_network, tmp_projects_dir, parked
+):
+    job = _enqueue(client, install_network, "EstimateOddKind")
+    _history_for(job["id"], [100, 200])
+    solve_queue._jobs[uuid.UUID(job["id"])].kind = "not_a_kind"
+    r = client.get(f"/api/simulation/queue/{job['id']}/estimate")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"kind": "not_a_kind", **run_estimate.unknown()}
+
+
+def test_a_reader_without_the_edit_lock_may_read_it(
+    client, install_network, tmp_projects_dir, parked, _auth_db, seeded_identity
+):
+    from fastapi.testclient import TestClient
+
+    import main
+    from tests.conftest import attach_session
+    from tests.test_solve_queue_authz import _drop_user, _seed_user
+
+    job = _enqueue(client, install_network, "EstimateShared")
+    _history_for(job["id"], [100, 200])
+    _engine, session_local = _auth_db
+    uid = _seed_user(
+        session_local,
+        seeded_identity["org_id"],
+        email="estimate-reader@example.com",
+        role="admin",
+        super_admin=False,
+    )
+    try:
+        with TestClient(main.app) as c:
+            reader = attach_session(c, session_local, uid)
+            r = reader.get(f"/api/simulation/queue/{job['id']}/estimate")
+    finally:
+        _drop_user(session_local, uid)
+    assert r.status_code == 200, r.text
+    assert r.json()["seconds"] == pytest.approx(150, abs=1e-3)

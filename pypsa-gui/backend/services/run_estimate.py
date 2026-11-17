@@ -27,6 +27,11 @@ Network size and snapshot count are not part of the key. The `solve_jobs` row
 does not record them, and a project's size rarely changes between runs; when
 it does, the median of five moves within a few runs, and the status line says
 "longer than usual" for a run past its estimate.
+
+Known limit: the store reads the latest `COMPLETED_RUNS_LIMIT` (50) completed
+runs of the project and kind, and the mode match happens here, after that
+cut. A project with more than 50 newer runs in another mode reads as unknown
+(or fewer samples) in the old mode until it has run twice in it again.
 """
 
 from __future__ import annotations
@@ -73,7 +78,9 @@ def mode_key(kind: str, solver_config: str | None) -> Any:
         config = _solver_config_from_dict(data)
         return tuple(getattr(config, f) for f in MODE_FIELDS)
     except Exception:  # noqa: BLE001 — an unreadable snapshot is excluded, never a 500
-        logger.warning("run_estimate: unreadable %s settings snapshot excluded", kind)
+        # Debug, not warning: the status line polls this, so a warning would
+        # repeat for every unreadable past row on every poll.
+        logger.debug("run_estimate: unreadable %s settings snapshot excluded", kind)
         return _UNREADABLE
 
 
@@ -101,6 +108,11 @@ def duration_s(row: dict) -> float | None:
     return seconds
 
 
+def unknown() -> dict:
+    """The estimate when there is nothing to base it on."""
+    return {"seconds": None, "samples": 0, "run_ids": []}
+
+
 def estimate(rows: list[dict], kind: str, key: Any) -> dict:
     """
     The estimate from `rows` (one project's runs of one kind, any order).
@@ -110,8 +122,10 @@ def estimate(rows: list[dict], kind: str, key: Any) -> dict:
     of their durations. For an even count that is the mean of the two middle
     values (`statistics.median`).
     """
+    if key is _UNREADABLE:
+        return unknown()
     eligible = []
-    for row in rows if key is not _UNREADABLE else ():
+    for row in rows:
         seconds = duration_s(row)
         row_key = mode_key(kind, row.get("solver_config"))
         if seconds is None or row_key is _UNREADABLE or row_key != key:

@@ -465,7 +465,7 @@ def job_estimate(
     kind = job.get("kind") or KIND_SOLVE
     project_key = job.get("project_key")
     if kind not in KINDS or not project_key:
-        return {"kind": kind, "seconds": None, "samples": 0, "run_ids": []}
+        return {"kind": kind, **run_estimate.unknown()}
     row = solve_job_store.load_job(_parse_job_id(job_id))
     return run_estimate.for_job(job_id, project_key, kind, (row or {}).get("solver_config"))
 
