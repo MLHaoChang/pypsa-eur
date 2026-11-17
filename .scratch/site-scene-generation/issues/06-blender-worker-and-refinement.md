@@ -123,3 +123,13 @@ The manual job ran on `ubuntu-24.04` (4 vCPU, 16 GiB, 3 GiB swap). Artifact `sc0
 - Contract: proposal create and cancel are `lock: True`. A test drives every contract row under a foreign lock.
 - GK B's four pins from #1561 have their own tests: the kill timeout, the kill except, the symlinked store, and META_CAP.
 - Artifact streaming and retention are filed as issue 10. The review UI (diff panel plus Apply) is not in this slice.
+
+### 2026-11-17: slice (b) review
+
+- GK B (62) NOT OK @781b75c7. Three items:
+  - an unhashable componentType gave a 500;
+  - a non-finite composed transform was not refused, and the footprint check through the return was unpinned;
+  - the revoked-owner case and the not-found parity case had no tests.
+- All three were fixed at f200722c.
+- GK B (62) OK @f200722c4060851cb5bf8f3d9cae07a736eed5d0, sent by message before the PR opened (#1561 had not merged). The OK carries to the PR head if that head is f200722c plus a clean master merge; a rebase or hand resolution gets a delta check.
+- GK B (62) was archived afterwards. GK B (63) is session_01G7qCundFLhgXpNk7ehKZQT.
