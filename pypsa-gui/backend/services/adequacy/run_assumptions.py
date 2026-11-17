@@ -19,6 +19,7 @@ arithmetic, and these rows describe exactly those fallbacks:
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 GOAL_SECTION = "scenarios"
@@ -145,6 +146,24 @@ def _efficiency_rows(n) -> list[dict]:
                         ASSET_SECTION, component="Link", entity=str(name),
                         field="efficiency"))
     return out
+
+
+def voll_is_set(cfg: Any) -> bool:
+    """A usable VOLL: a finite number above 0. Missing, None, NaN, inf and
+    0 are "not set" — never priced as 0.0 (template-e2e 06)."""
+    get = cfg.get if isinstance(cfg, dict) else (lambda k: getattr(cfg, k, None))
+    try:
+        v = float(get("voll"))
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(v) and v > 0
+
+
+def voll_missing_row() -> dict:
+    """The row a surface that serves unpriced figures carries (GK B Q1)."""
+    return _row("voll", "Value of lost load", None, "not set", "missing",
+                "unserved energy is not priced, so every cost of it is left blank",
+                GOAL_SECTION, field="voll")
 
 
 def run_assumptions(n, cfg: Any, template: dict | None) -> list[dict]:

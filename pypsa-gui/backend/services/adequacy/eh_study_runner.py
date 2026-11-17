@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextvars as _contextvars
 import logging
-import math
 import queue as _queue
 import threading as _threading
 import time
@@ -267,14 +266,6 @@ def _assumptions_recorder(record: dict, cfg, body, goal_sources: dict):
 VOLL_REFUSAL = "the reliability study requires a VOLL > 0 in solver settings"
 
 
-def _voll_set(cfg) -> bool:
-    try:
-        v = float(getattr(cfg, "voll", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        return False
-    return math.isfinite(v) and v > 0
-
-
 def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
                          lock_blocking: bool = True) -> dict:
     """Every refusal `POST /results/eh_study` makes before its worker exists
@@ -326,8 +317,10 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
     # Template-e2e 06: the frontier and stress stages price unserved energy,
     # so a missing VOLL is refused here — the API and assistant path — as the
     # Run button refuses it, never run as 0.0.
-    if not _voll_set(cfg):
-        raise HTTPException(422, VOLL_REFUSAL)
+    from services.adequacy.run_assumptions import voll_is_set
+    if not voll_is_set(cfg):
+        from services.adequacy.campaign import unsupported_scope
+        raise unsupported_scope(VOLL_REFUSAL)
 
     n = PyPSAService.get_network()
     if n is None:

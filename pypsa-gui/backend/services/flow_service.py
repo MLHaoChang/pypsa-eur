@@ -630,7 +630,9 @@ def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
                              solver_state=PyPSAService.get_solver_state(),
                              lock_blocking=False)
     except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
+        detail = exc.detail if isinstance(exc.detail, str) else (
+            exc.detail.get("message") if isinstance(exc.detail, dict)
+            and isinstance(exc.detail.get("message"), str) else json.dumps(exc.detail))
         # The VOLL refusal points at its field (template-e2e 06).
         fld = "voll" if detail == VOLL_REFUSAL else ""
         return [_item("eh_study_refused", "error",

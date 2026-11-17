@@ -54,9 +54,31 @@ def test_endpoint_serves_metrics_and_ranked_modes():
     assert out["fleet"]["netted_beyond_cap"] == []
     assert out["fidelity_note"] is None
     # VoLL comes from the live solver config; default config has voll=0 →
-    # € fields are zero but ΔEUE still ranks.
-    assert all(r["criticality_eur_per_year"] == 0.0 for r in out["per_mode"])
+    # the € fields are not priced (None, never €0: template-e2e 08, GK B Q1),
+    # ΔEUE still ranks, and the payload says VOLL is not set.
+    assert all(r["criticality_eur_per_year"] is None and r["severity_eur"] is None
+               for r in out["per_mode"])
+    assert all(r["delta_eue_mwh"] is not None for r in out["per_mode"])
+    # The configured value, as before: the FMEA tab's "unpriced ranking"
+    # warning reads it.
     assert out["voll_eur_per_mwh"] == 0.0
+    (voll,) = [a for a in out["assumptions"] if a["key"] == "voll"]
+    assert voll["source"] == "missing" and voll["field"] == "voll"
+    modes = R.get_fmea_modes()
+    assert modes["voll_eur_per_mwh"] == 0.0
+    assert all(r.get("criticality_eur_per_year") is None for r in modes["per_mode"])
+
+
+def test_a_set_voll_prices_the_modes():
+    PyPSAService.set_network(_network())
+    PyPSAService.get_solver_state()["solver_config"].voll = 1000.0
+    try:
+        out = R.get_copt()
+        assert out["voll_eur_per_mwh"] == 1000.0
+        assert all(isinstance(r["criticality_eur_per_year"], float) for r in out["per_mode"])
+        assert not [a for a in out["assumptions"] if a["key"] == "voll"]
+    finally:
+        PyPSAService.get_solver_state()["solver_config"].voll = 0.0
 
 
 def test_endpoint_reports_an_annual_basis_when_the_horizon_is_a_year():

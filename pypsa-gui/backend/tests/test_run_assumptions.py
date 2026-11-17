@@ -174,7 +174,9 @@ def test_the_study_start_refuses_without_a_voll(client, tmp_projects_dir):
     _voll(client, 0.0)
     r = client.post("/api/results/eh_study", json={"archetype": "strong_grid"})
     assert r.status_code == 422, r.text
-    assert "VOLL" in r.json()["detail"]
+    # Typed for the assistant, as the frontier's VOLL refusal is.
+    assert r.json()["detail"]["error_kind"] == "unsupported_scope"
+    assert "VOLL" in r.json()["detail"]["message"]
 
 
 def test_readiness_blocks_run_on_a_missing_voll_once(client, tmp_projects_dir):
@@ -375,3 +377,29 @@ def test_an_acknowledged_assumption_returns_when_its_value_changes(
                                      != "weak_flexible" else "strong_grid")
     path.write_text(json.dumps(meta))
     assert site_item()["acknowledged"] is False
+
+
+@pytest.mark.parametrize("voll", ["absent", None, float("nan"), float("inf"),
+                                  float("-inf"), 0.0, -1.0, "abc"])
+def test_every_unusable_voll_is_refused(voll):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from services.adequacy.eh_study_runner import VOLL_REFUSAL, check_eh_study_start
+
+    cfg = SimpleNamespace() if voll == "absent" else SimpleNamespace(voll=voll)
+    with pytest.raises(HTTPException) as exc:
+        check_eh_study_start(None, solver_state={"solver_config": cfg})
+    assert exc.value.status_code == 422
+    assert exc.value.detail == {"error_kind": "unsupported_scope", "message": VOLL_REFUSAL}
+
+
+def test_a_positive_voll_passes_the_voll_check():
+    from types import SimpleNamespace
+
+    from services.adequacy.run_assumptions import voll_is_set
+
+    assert voll_is_set(SimpleNamespace(voll=0.01))
+    assert voll_is_set(SimpleNamespace(voll=5000))
+    assert voll_is_set({"voll": 5000}) and not voll_is_set({})
