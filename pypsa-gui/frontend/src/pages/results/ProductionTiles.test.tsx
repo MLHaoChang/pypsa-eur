@@ -66,7 +66,7 @@ describe('ProductionTiles', () => {
       expect(nav[other]).not.toHaveBeenCalled()
     })
 
-  // Control-strategy walkthrough issue 10: the product bought in, so Made + Bought in + Lost = Delivered.
+  // Control-strategy walkthrough issue 10: the product bought in, shown beside Made and Delivered.
   it('shows the product bought in, priced, between Made and Delivered', () => {
     const p = { ...NH3, production: amount(900), buy_in: amount(60, { eur: 56_400_000, carriers: ['NH3 import'] }),
       lost: amount(40, { eur: 32_000, carriers: ['NH3 shortfall'] }) }
@@ -97,6 +97,16 @@ describe('the Bought in basis', () => {
     const text = screen.getByTestId('production-nh3-bought-in').textContent ?? ''
     expect(text).not.toContain('€')
     expect(text).toContain('buy-in assumed from its name')
+  })
+})
+
+describe('an unknown buy-in amount', () => {
+  it('reads as not known, never 0 t', () => {
+    render(<ProductionTiles view={view([{ ...NH3, buy_in: amount(null, { value: null, flag: 'buy_in_dispatch_missing',
+      t_flag: 'buy_in_dispatch_missing', eur: null, eur_flag: 'buy_in_dispatch_missing', carriers: ['NH3 import'] }) }])} />)
+    const tile = screen.getByTestId('production-nh3-bought-in')
+    expect(tile.getAttribute('data-state')).toBe('not_modelled')
+    expect(tile.textContent).toContain('no flow for a buy-in generator')
   })
 })
 

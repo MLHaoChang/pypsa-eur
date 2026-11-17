@@ -193,7 +193,10 @@ def _buy_in(n, view: _View, buy: list, gen_p, unit: str, tf: float | None, role_
     if not buy:
         eur_flag = "no_buy_in"
     elif any(s is None for s in flows.values()):
+        # A buy-in with no dispatch column: its amount is unknown too, never the others' sum (GK A).
         eur_flag = "buy_in_dispatch_missing"
+        out.update(value=None, by_period={}, flag=eur_flag, t=None, t_flag=eur_flag,
+                   mwh=None, mwh_flag=eur_flag if unit == "MWh" else out["mwh_flag"])
     else:
         mc = n.get_switchable_as_dense("Generator", "marginal_cost", view.sns, inds=buy)
         mq = n.get_switchable_as_dense("Generator", "marginal_cost_quadratic", view.sns, inds=buy) \

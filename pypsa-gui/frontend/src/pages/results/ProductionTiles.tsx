@@ -14,6 +14,7 @@ const REASON: Record<string, string> = {
   non_finite_values: 'The solve gave no finite value for this figure.',
   no_shortfall_slack: 'No shortfall is modelled for this product.',
   lost_production_value_missing: 'The shortfall has no price, so lost EUR is not known.',
+  buy_in_dispatch_missing: 'The solve recorded no flow for a buy-in generator, so the amount bought in is not known.',
 }
 const reasonFor = (flag: string | null | undefined) => (flag && REASON[flag]) || 'Not available for this solve.'
 
@@ -61,8 +62,8 @@ export function productionTiles(p: ProcessProduct): ProductionTile[] {
         reason: p.inventory.length ? reasonFor(p.t_per_unit == null ? 'tonne_factor_missing' : 'non_finite_values')
           : 'No store sits on this product bus.',
         fixBus: p.inventory.length && p.t_per_unit == null ? p.bus : undefined }
-  // Control-strategy walkthrough issue 10: Made + Bought in + Lost = Delivered. Hidden only when the bus
-  // has no buy-in generator (`carriers` empty); a real zero shows as one.
+  // Control-strategy walkthrough issue 10: the product bought in, beside Made and Delivered. Hidden only when
+  // the bus has no buy-in generator (`carriers` empty); a real zero shows as one. No balance is claimed (GK A B5).
   // A buy-in recognised only by its generator's name says so (role_from_name).
   const buyBasis = ['whole horizon',
     p.buy_in.eur != null && Number.isFinite(p.buy_in.eur) ? `${money(p.buy_in.eur, 'EUR')} at the buy-in price` : null,

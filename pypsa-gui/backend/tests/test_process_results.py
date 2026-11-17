@@ -409,6 +409,8 @@ def test_a_buy_in_with_no_dispatch_column_is_unknown_not_zero():
     n.generators_t.p = n.generators_t.p.drop(columns="__buy_nh3")
     nh3 = _product(compute_process_view(n), "nh3")
     assert nh3["buy_in"]["eur"] is None and nh3["buy_in"]["eur_flag"] == "buy_in_dispatch_missing"
+    assert nh3["buy_in"]["value"] is None and nh3["buy_in"]["t"] is None
+    assert nh3["buy_in"]["flag"] == nh3["buy_in"]["t_flag"] == "buy_in_dispatch_missing"
 
 
 def test_a_non_finite_buy_in_price_is_unknown_not_zero():
@@ -421,9 +423,10 @@ def test_a_non_finite_buy_in_price_is_unknown_not_zero():
 def test_a_quadratic_buy_in_cost_is_counted():
     n = _hb_network()
     n.generators.loc["__buy_nh3", "marginal_cost_quadratic"] = 0.5
+    n.snapshot_weightings["objective"] = 3.0
     nh3 = _product(compute_process_view(n), "nh3")
     p = n.generators_t.p["__buy_nh3"].clip(lower=0)
-    assert nh3["buy_in"]["eur"] == pytest.approx(float((p * 97.0 + 0.5 * p * p).sum()))
+    assert nh3["buy_in"]["eur"] == pytest.approx(float(((p * 97.0 + 0.5 * p * p) * 3.0).sum()))
 
 
 def test_the_buy_in_carries_a_name_guessed_role_as_assumed():
@@ -439,6 +442,10 @@ def test_the_payload_only_adds_keys():
     assert old <= set(nh3["buy_in"]) and old <= set(nh3["lost"])
     assert {"eur", "eur_flag", "eur_by_period", "eur_weighting", "carriers", "role_flag"} <= set(nh3["buy_in"])
     assert nh3["buy_in"]["eur_weighting"] == "objective"
+    p = hb_p = _hb_network().generators_t.p["__buy_nh3"].clip(lower=0)
+    assert nh3["buy_in"]["value"] == pytest.approx(float(p.sum())) and nh3["buy_in"]["unit"] == "MWh"
+    assert nh3["buy_in"]["weighting"] == "generators" and nh3["buy_in"]["flag"] is None
+    del hb_p
 
 
 def test_a_bus_with_its_own_source_makes_no_identity_claim():
@@ -449,6 +456,10 @@ def test_a_bus_with_its_own_source_makes_no_identity_claim():
     n.optimize(solver_name="highs")
     nh3 = _product(compute_process_view(n), "nh3")
     assert nh3["unused_supply"]["value"] is not None
+    spot_t = float(n.generators_t.p["nh3_spot"].clip(lower=0).sum()) / MWH_PER_T
+    assert spot_t > 1
+    terms = nh3["production"]["t"] + nh3["buy_in"]["t"] + nh3["lost"]["t"]
+    assert abs(terms - nh3["delivery"]["t"]) > 1  # the tiles' terms leave the bus's own source out
     assert not any(k in nh3 for k in ("balance", "identity", "balanced"))
 
 
