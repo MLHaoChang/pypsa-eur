@@ -66,7 +66,9 @@ def test_a_reopened_project_without_a_stamp_reads_none_not_a_failure(n, monkeypa
 def test_a_network_with_no_meta_reads_none(monkeypatch):
     # A network whose meta is None (not a dict): the status still answers, with no time.
     bare = type("Bare", (), {"meta": None})()
-    monkeypatch.setattr(simulation.PyPSAService, "get_network", staticmethod(lambda: bare))
+    monkeypatch.setattr(
+        simulation.PyPSAService, "get_network", staticmethod(lambda: bare)
+    )
     monkeypatch.setattr(simulation, "_dispatch_status", lambda _n: "fresh")
     assert simulation.get_status()["solved_at"] is None
 
@@ -91,5 +93,7 @@ def tokyo_clock(monkeypatch):
 
 def test_the_stamp_is_utc_on_a_server_in_another_zone(n, tokyo_clock):
     workflow_tools._record_solve_inputs(n, {})
-    stamped = calendar.timegm(time.strptime(n.meta["assistant_solve_at"], "%Y-%m-%dT%H:%M:%SZ"))
+    stamped = calendar.timegm(
+        time.strptime(n.meta["assistant_solve_at"], "%Y-%m-%dT%H:%M:%SZ")
+    )
     assert abs(stamped - time.time()) < 60
