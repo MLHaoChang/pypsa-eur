@@ -20,7 +20,10 @@ Also an asset's own `discount_rate` the annuity cannot take (-2 divides by zero,
 `rederive_imported_parts` refuses with the typed `invalid_edit_value` naming the row ("<Class> '<name>': its
 investment parts cannot be annuitised at rate <r> over <L> years"), before anything is written: the project
 bundle import, the native network import (`routers/io.py`) and the harness's import outcome. Tested on the bundle
-import. Still open: the single edit and create (`_check_investment_parts`, which catches only `ValueError`), the
+import. GK B (65) ask: the same function now also holds each row's effective rate (its own `discount_rate`,
+else the rate in force) to `discount_rate_problem` first ("its discount rate <r> cannot be used (<why>)"), so
+an own rate at or below -1 or one that overflows no longer imports or raises a TypeError on these paths. Still
+open: the single edit and create (`_check_investment_parts`, which catches only `ValueError`), the
 bulk edit, the assistant's edit and experiment copy (`assistant_tools`, through `_check_investment_parts`), and
 the re-derives that follow a length change (`rederive_scaled_parts`).
 

@@ -856,13 +856,21 @@ def test_every_owned_cost_an_experiment_can_name_is_refused():
 
 
 def _assert_refused_unwritten(
-    r, name, client, session_ctx, project_row, good, root, before
+    r,
+    name,
+    client,
+    session_ctx,
+    project_row,
+    good,
+    root,
+    before,
+    phrase="cannot be annuitised",
 ):
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
     msg = r.json()["detail"]["message"]
     assert "Storage 'bess2'" in msg
-    assert "cannot be annuitised" in msg
+    assert phrase in msg
     assert project_row(name) is None  # refused before the project row
     assert {p.name for p in root.iterdir()} == before  # and before its folder
     assert session_ctx(client).network is good
@@ -893,22 +901,103 @@ def test_a_bundle_rate_that_overflows_a_parts_lifetime_is_refused_before_anythin
     )
 
 
-@pytest.mark.parametrize("own_rate", [-2.0, 1e308])
-def test_an_assets_own_rate_the_annuity_cannot_take_is_refused_before_anything_is_written(
-    client, install_network, session_ctx, project_row, project_storage_dir, own_rate
-):
+def _own_rate_message(rate):
+    from services.solver.periodized_costs import discount_rate_problem
+
+    return (
+        f"Storage 'bess2': its discount rate {rate:g} cannot be used "
+        f"({discount_rate_problem(rate)}). The open network is unchanged."
+    )
+
+
+OWN_RATES = [
+    (-1.0, 11.0, 11.0),
+    (-2.0, 11.0, 10.5),  # (1 + r)^10.5 is complex: a TypeError, not an ArithmeticError
+    # (1 + r)^L = -1: imported with a negative cost before GK B (65)
+    (-2.0, 11.0, 11.0),
+    (-3.0, 11.0, 11.0),
+    (-2.0, 10.0, 20.0),
+    (1e308, 10.0, 20.0),
+    (1e308, 1.0, 1.0),  # was refused as "check max_hours"
+]
+
+
+def _own_rate_network(own_rate, power_life, energy_life):
     n = _network()
     n.storage_units["discount_rate"] = float("nan")
     n.storage_units.at["bess2", "discount_rate"] = own_rate
+    n.storage_units.at["bess2", "inv_power_lifetime"] = power_life
+    n.storage_units.at["bess2", "inv_energy_lifetime"] = energy_life
+    return n
+
+
+@pytest.mark.parametrize("own_rate,power_life,energy_life", OWN_RATES)
+def test_an_assets_own_rate_the_annuity_cannot_take_is_refused_before_anything_is_written(
+    client,
+    install_network,
+    session_ctx,
+    project_row,
+    project_storage_dir,
+    own_rate,
+    power_life,
+    energy_life,
+):
+    """GK B (65): the row's effective rate is held to the rate rule before its parts are derived."""
+    n = _own_rate_network(own_rate, power_life, energy_life)
     data = _bundle_of(client, install_network, n, name="tcu11_src4")
     root = project_storage_dir("tcu11_src4").parent
     before = {p.name for p in root.iterdir()}
     good = install_network(_network())
+    snapshot = good.copy()
     r = _import_bundle(client, data, "tcu11_ownrate")
     msg = _assert_refused_unwritten(
-        r, "tcu11_ownrate", client, session_ctx, project_row, good, root, before
+        r,
+        "tcu11_ownrate",
+        client,
+        session_ctx,
+        project_row,
+        good,
+        root,
+        before,
+        phrase=f"its discount rate {own_rate:g}",
     )
-    assert f"at rate {own_rate:g}" in msg
+    assert msg == _own_rate_message(own_rate)
+    pd.testing.assert_frame_equal(good.storage_units, snapshot.storage_units)
+
+
+@pytest.mark.parametrize("fmt", ["netcdf", "csv"])
+@pytest.mark.parametrize("own_rate,power_life,energy_life", OWN_RATES[:4])
+def test_a_native_import_of_an_assets_own_rate_the_annuity_cannot_take_is_refused(
+    client, install_network, session_ctx, fmt, own_rate, power_life, energy_life
+):
+    install_network(_own_rate_network(own_rate, power_life, energy_life))
+    data = client.get(f"/api/io/export/{fmt}").content
+    good = install_network(_network())
+    snapshot = good.copy()
+    r = client.post(
+        f"/api/io/import/{fmt}",
+        files={"file": (FORMATS[fmt][1], data, "application/octet-stream")},
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
+    assert r.json()["detail"]["message"] == _own_rate_message(own_rate)
+    assert session_ctx(client).network is good
+    pd.testing.assert_frame_equal(good.storage_units, snapshot.storage_units)
+
+
+def test_a_rows_effective_rate_falls_back_to_the_global_rate():
+    """No own rate: the rate in force is checked, and named, the same way."""
+    from fastapi import HTTPException
+
+    from services.network_crud import rederive_imported_parts
+
+    n = _network()
+    n.storage_units["discount_rate"] = float("nan")
+    with pytest.raises(HTTPException) as exc:
+        rederive_imported_parts(n, global_rate=-2.0)
+    assert exc.value.detail["message"] == _own_rate_message(-2.0).replace(
+        "bess2", "bess"
+    )
 
 
 @pytest.mark.parametrize("value", [10**400, -(10**400)], ids=["huge", "-huge"])

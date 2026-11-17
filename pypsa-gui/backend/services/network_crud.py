@@ -37,6 +37,7 @@ from services.carrier_catalog import ensure_carrier
 from services.component_names import require_valid_name
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
+from services.solver.periodized_costs import discount_rate_problem
 from services.study_state import refuse_edit_during_live_study
 from services.user_timeseries import (
     _user_ts_delete_asset,
@@ -430,6 +431,10 @@ def _imported_parts_problem(component_class: str, row, global_rate: float) -> st
             if v is not None and math.isinf(v):
                 return f"the {spec.name} part's {field.replace('_', ' ')} must be a finite number"
     rate = effective_discount_rate(row.get("discount_rate"), global_rate)
+    # The row's own rate, else the rate in force, held to the rate rule first (GK B 65): at -1 or below
+    # (1 + r)^L is zero, negative or complex, which the annuity below would not catch.
+    if why := discount_rate_problem(rate):
+        return f"its discount rate {rate:g} cannot be used ({why})"
     try:
         derived = derive_composite(component_class, dict(row), scales=part_scales(component_class, row),
                                    discount_rate=rate, asset_lifetime=row.get("lifetime"))
