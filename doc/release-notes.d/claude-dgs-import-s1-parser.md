@@ -1,0 +1,1 @@
+* Feat(gridspine): PowerFactory DGS import, step 1: an ASCII ``.dgs`` (DGS 5.x) file is read into typed tables, one per element class, with list-valued attributes, repeated class blocks merged and every malformed row refused with its line number (``gridspine/ingest/dgs_parse.py``). It loads no simulation engine.
