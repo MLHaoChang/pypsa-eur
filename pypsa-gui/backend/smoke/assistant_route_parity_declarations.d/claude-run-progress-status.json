@@ -1,0 +1,1 @@
+{"limitations": [{"method": "GET", "path": "/api/simulation/queue/{job_id}/estimate", "reason": "held-by-spec", "issue": ".scratch/run-progress/issues/06-chat-voice-finish-and-eta.md"}]}
