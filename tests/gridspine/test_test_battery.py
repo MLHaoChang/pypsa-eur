@@ -1,10 +1,12 @@
-"""GC-04 part 1: the tool-neutral DMAT / compliance test battery (TRGC 04/05).
+"""
+GC-04 part 1: the tool-neutral DMAT / compliance test battery (TRGC 04/05).
 
 The expected case ids below are listed by hand, not derived from the builder,
 so a builder that drops or renames a case fails here. Each refusal test
 asserts its own guard's reason, so a mutant of one guard is killed by its own
 test and not by a neighbour's.
 """
+
 import math
 
 import pytest
@@ -29,8 +31,16 @@ GRID = Thevenin("g", 1000.0, 5.0)
 
 
 def _case(**kw):
-    base = dict(case_id="c", kind="fault_3ph", trgc="04/05", grid=GRID, t_event_s=1.0, t_end_s=10.0,
-                channels=("v_poc_pu",), params={"v_retained_pu": 0.2, "duration_s": 0.15})
+    base = dict(
+        case_id="c",
+        kind="fault_3ph",
+        trgc="04/05",
+        grid=GRID,
+        t_event_s=1.0,
+        t_end_s=10.0,
+        channels=("v_poc_pu",),
+        params={"v_retained_pu": 0.2, "duration_s": 0.15},
+    )
     base.update(kw)
     return Case(**base)
 
@@ -41,20 +51,45 @@ def battery():
 
 
 EXPECTED_IDS = {
-    "flat_skmin_xrmin", "flat_skmin_xrmax", "flat_skmax_xrmin", "flat_skmax_xrmax",
-    "fault_3ph_skmin_xrmin_v000", "fault_3ph_skmin_xrmin_v020", "fault_3ph_skmin_xrmin_v050",
-    "fault_3ph_skmax_xrmax_v000", "fault_3ph_skmax_xrmax_v020", "fault_3ph_skmax_xrmax_v050",
-    "fault_1ph_skmin_xrmin_v000", "fault_1ph_skmin_xrmin_v020", "fault_1ph_skmin_xrmin_v050",
-    "fault_1ph_skmax_xrmax_v000", "fault_1ph_skmax_xrmax_v020", "fault_1ph_skmax_xrmax_v050",
-    "v_step_skmin_xrmin_up", "v_step_skmin_xrmin_down", "v_step_skmax_xrmax_up", "v_step_skmax_xrmax_down",
-    "q_step_skmin_xrmin_up", "q_step_skmin_xrmin_down", "q_step_skmax_xrmax_up", "q_step_skmax_xrmax_down",
-    "p_step_skmin_xrmin_up", "p_step_skmin_xrmin_down", "p_step_skmax_xrmax_up", "p_step_skmax_xrmax_down",
-    "f_step_skmax_xrmax_up", "f_step_skmax_xrmax_down", "f_ramp_skmax_xrmax_up", "f_ramp_skmax_xrmax_down",
-    "phase_jump_skmin_xrmin_up", "phase_jump_skmin_xrmin_down",
+    "flat_skmin_xrmin",
+    "flat_skmin_xrmax",
+    "flat_skmax_xrmin",
+    "flat_skmax_xrmax",
+    "fault_3ph_skmin_xrmin_v000",
+    "fault_3ph_skmin_xrmin_v020",
+    "fault_3ph_skmin_xrmin_v050",
+    "fault_3ph_skmax_xrmax_v000",
+    "fault_3ph_skmax_xrmax_v020",
+    "fault_3ph_skmax_xrmax_v050",
+    "fault_1ph_skmin_xrmin_v000",
+    "fault_1ph_skmin_xrmin_v020",
+    "fault_1ph_skmin_xrmin_v050",
+    "fault_1ph_skmax_xrmax_v000",
+    "fault_1ph_skmax_xrmax_v020",
+    "fault_1ph_skmax_xrmax_v050",
+    "v_step_skmin_xrmin_up",
+    "v_step_skmin_xrmin_down",
+    "v_step_skmax_xrmax_up",
+    "v_step_skmax_xrmax_down",
+    "q_step_skmin_xrmin_up",
+    "q_step_skmin_xrmin_down",
+    "q_step_skmax_xrmax_up",
+    "q_step_skmax_xrmax_down",
+    "p_step_skmin_xrmin_up",
+    "p_step_skmin_xrmin_down",
+    "p_step_skmax_xrmax_up",
+    "p_step_skmax_xrmax_down",
+    "f_step_skmax_xrmax_up",
+    "f_step_skmax_xrmax_down",
+    "f_ramp_skmax_xrmax_up",
+    "f_ramp_skmax_xrmax_down",
+    "phase_jump_skmin_xrmin_up",
+    "phase_jump_skmin_xrmin_down",
 }
 
 
 # --- the built battery -------------------------------------------------------
+
 
 def test_pinned_ids_and_count(battery):
     ids = [c.case_id for c in battery]
@@ -73,10 +108,20 @@ def test_every_case_well_formed(battery):
 
 def test_grids_carry_the_inputs(battery):
     by_id = {c.case_id: c for c in battery}
-    assert (by_id["flat_skmin_xrmax"].grid.sk_mva, by_id["flat_skmin_xrmax"].grid.x_over_r) == (1000.0, 10.0)
-    assert (by_id["flat_skmax_xrmin"].grid.sk_mva, by_id["flat_skmax_xrmin"].grid.x_over_r) == (3000.0, 3.0)
+    assert (
+        by_id["flat_skmin_xrmax"].grid.sk_mva,
+        by_id["flat_skmin_xrmax"].grid.x_over_r,
+    ) == (1000.0, 10.0)
+    assert (
+        by_id["flat_skmax_xrmin"].grid.sk_mva,
+        by_id["flat_skmax_xrmin"].grid.x_over_r,
+    ) == (3000.0, 3.0)
     f = by_id["fault_1ph_skmin_xrmin_v020"]
-    assert (f.grid.sk_mva, f.grid.x_over_r, f.params["v_retained_pu"]) == (1000.0, 3.0, 0.2)
+    assert (f.grid.sk_mva, f.grid.x_over_r, f.params["v_retained_pu"]) == (
+        1000.0,
+        3.0,
+        0.2,
+    )
 
 
 def test_fault_cases_name_current_channels(battery):
@@ -93,9 +138,15 @@ def test_channel_contract_states_unit_base_sign_point():
 
 # --- overrides ---------------------------------------------------------------
 
+
 def test_override_marks_supplied_and_applies():
-    b = build_battery(1000, 3000, 3, 10, overrides={"fault_3ph_skmin_xrmin_v000": {"duration_s": 0.2,
-                                                                                    "t_end_s": 5.0}})
+    b = build_battery(
+        1000,
+        3000,
+        3,
+        10,
+        overrides={"fault_3ph_skmin_xrmin_v000": {"duration_s": 0.2, "t_end_s": 5.0}},
+    )
     c = next(c for c in b if c.case_id == "fault_3ph_skmin_xrmin_v000")
     assert (c.params["duration_s"], c.t_end_s, c.source) == (0.2, 5.0, "supplied")
     assert all(o.source == "assumed" for o in b if o is not c)
@@ -108,10 +159,13 @@ def test_override_unknown_case_refused():
 
 def test_override_unknown_name_refused():
     with pytest.raises(ContractError, match="case takes no"):
-        build_battery(1000, 3000, 3, 10, overrides={"flat_skmin_xrmin": {"duration_s": 0.2}})
+        build_battery(
+            1000, 3000, 3, 10, overrides={"flat_skmin_xrmin": {"duration_s": 0.2}}
+        )
 
 
 # --- builder input guards ----------------------------------------------------
+
 
 def test_sk_min_above_max_refused():
     with pytest.raises(ContractError, match="exceeds sk_max_mva"):
@@ -137,6 +191,7 @@ def test_builder_nonfinite_refused(bad, pos):
 
 
 # --- Thevenin guards ---------------------------------------------------------
+
 
 def test_sk_zero_refused():
     with pytest.raises(ContractError, match="sk_mva=0.0 must be > 0"):
@@ -167,6 +222,7 @@ def test_thevenin_bool_refused():
 
 
 # --- Case guards -------------------------------------------------------------
+
 
 def test_minimal_case_ok():
     assert _case().params == {"duration_s": 0.15, "v_retained_pu": 0.2}
@@ -215,10 +271,18 @@ def test_time_nonfinite_refused(bad, name):
 
 
 @pytest.mark.parametrize("bad", BAD_NUMBERS)
-@pytest.mark.parametrize("kind,param", [(k, p) for k, ps in KIND_PARAMS.items() for p in ps])
+@pytest.mark.parametrize(
+    "kind,param", [(k, p) for k, ps in KIND_PARAMS.items() for p in ps]
+)
 def test_param_nonfinite_refused(bad, kind, param):
-    params = {"v_retained_pu": 0.2, "duration_s": 0.15, "step_pu": 0.1, "step_hz": 0.5,
-              "ramp_hz_per_s": 0.5, "angle_deg": 20.0}
+    params = {
+        "v_retained_pu": 0.2,
+        "duration_s": 0.15,
+        "step_pu": 0.1,
+        "step_hz": 0.5,
+        "ramp_hz_per_s": 0.5,
+        "angle_deg": 20.0,
+    }
     params = {p: params[p] for p in KIND_PARAMS[kind]}
     params[param] = bad
     with pytest.raises(ContractError, match=f"{param}=.* is not a finite number"):
@@ -262,11 +326,21 @@ def test_v_retained_out_of_range_refused(v):
 
 
 def test_v_retained_zero_allowed():
-    assert _case(params={"v_retained_pu": 0.0, "duration_s": 0.15}).params["v_retained_pu"] == 0.0
+    assert (
+        _case(params={"v_retained_pu": 0.0, "duration_s": 0.15}).params["v_retained_pu"]
+        == 0.0
+    )
 
 
-@pytest.mark.parametrize("kind,param", [("v_step", "step_pu"), ("q_step", "step_pu"), ("p_step", "step_pu"),
-                                        ("f_step", "step_hz")])
+@pytest.mark.parametrize(
+    "kind,param",
+    [
+        ("v_step", "step_pu"),
+        ("q_step", "step_pu"),
+        ("p_step", "step_pu"),
+        ("f_step", "step_hz"),
+    ],
+)
 def test_zero_step_refused(kind, param):
     with pytest.raises(ContractError, match=f"{param} must be nonzero"):
         _case(kind=kind, params={param: 0.0})
@@ -284,7 +358,10 @@ def test_phase_jump_bounds_refused(a):
 
 
 def test_phase_jump_inside_bounds_allowed():
-    assert _case(kind="phase_jump", params={"angle_deg": -179.9}).params["angle_deg"] == -179.9
+    assert (
+        _case(kind="phase_jump", params={"angle_deg": -179.9}).params["angle_deg"]
+        == -179.9
+    )
 
 
 def test_bad_source_refused():
@@ -304,10 +381,22 @@ def test_empty_battery_refused():
 
 # --- serialisation -----------------------------------------------------------
 
+
 def _edited():
-    return build_battery(800.5, 2500, 2.5, 12, overrides={
-        "fault_1ph_skmax_xrmax_v050": {"v_retained_pu": 0.35, "duration_s": 0.25, "t_event_s": 0.5},
-        "phase_jump_skmin_xrmin_up": {"angle_deg": 1 / 3}})
+    return build_battery(
+        800.5,
+        2500,
+        2.5,
+        12,
+        overrides={
+            "fault_1ph_skmax_xrmax_v050": {
+                "v_retained_pu": 0.35,
+                "duration_s": 0.25,
+                "t_event_s": 0.5,
+            },
+            "phase_jump_skmin_xrmin_up": {"angle_deg": 1 / 3},
+        },
+    )
 
 
 @pytest.mark.parametrize("make", [lambda: build_battery(1000, 3000, 3, 10), _edited])
@@ -316,8 +405,12 @@ def test_frame_round_trip_field_by_field(make):
     back = cases_from_frame(battery_frame(cases))
     assert len(back) == len(cases)
     for a, b in zip(cases, back):
-        assert a == b  # dataclass eq compares every field, params dict and grid included
-        assert a.params == b.params and a.channels == b.channels and a.source == b.source
+        assert (
+            a == b
+        )  # dataclass eq compares every field, params dict and grid included
+        assert (
+            a.params == b.params and a.channels == b.channels and a.source == b.source
+        )
 
 
 @pytest.mark.parametrize("make", [lambda: build_battery(1000, 3000, 3, 10), _edited])
@@ -338,7 +431,8 @@ def test_json_is_deterministic():
 
 def test_json_wrong_version_refused():
     text = battery_json(build_battery(1000, 3000, 3, 10)).replace(
-        f'"contract_version": "{CONTRACT_VERSION}"', '"contract_version": "0"')
+        f'"contract_version": "{CONTRACT_VERSION}"', '"contract_version": "0"'
+    )
     with pytest.raises(ContractError, match="contract_version '0'"):
         cases_from_json(text)
 
@@ -352,6 +446,7 @@ def test_json_changed_contract_refused():
 def test_json_malformed_case_refused():
     with pytest.raises(ContractError, match="malformed"):
         import json
+
         doc = json.loads(battery_json(build_battery(1000, 3000, 3, 10)))
         del doc["cases"][0]["grid"]
         cases_from_json(json.dumps(doc))
@@ -359,4 +454,78 @@ def test_json_malformed_case_refused():
 
 def test_frame_missing_column_refused():
     with pytest.raises(ContractError, match="lacks column"):
-        cases_from_frame(battery_frame(build_battery(1000, 3000, 3, 10)).drop(columns=["source"]))
+        cases_from_frame(
+            battery_frame(build_battery(1000, 3000, 3, 10)).drop(columns=["source"])
+        )
+
+
+# --- identity and type guards; pinned default values -------------------------
+
+
+def test_xr_min_equal_max_allowed():
+    assert build_battery(1000, 3000, 10, 10)
+
+
+@pytest.mark.parametrize("label", ["Weak", "", 7])
+def test_thevenin_bad_label_refused(label):
+    with pytest.raises(ContractError, match="thevenin label .*not a lower-case id"):
+        Thevenin(label, 1000.0, 5.0)
+
+
+@pytest.mark.parametrize("cid", ["Fault-1", "", None])
+def test_bad_case_id_refused(cid):
+    with pytest.raises(ContractError, match="case id .*not a lower-case id"):
+        _case(case_id=cid)
+
+
+@pytest.mark.parametrize("trgc", ["", None])
+def test_empty_trgc_refused(trgc):
+    with pytest.raises(ContractError, match="trgc reference is empty"):
+        _case(trgc=trgc)
+
+
+def test_grid_not_thevenin_refused():
+    with pytest.raises(ContractError, match="grid is not a Thevenin source"):
+        _case(grid=(1000.0, 5.0))
+
+
+def test_battery_holding_non_case_refused():
+    with pytest.raises(ContractError, match="holds a dict, not a Case"):
+        validate_battery([_case(), {"case_id": "d"}])
+
+
+def test_json_unparseable_refused():
+    with pytest.raises(ContractError, match="does not parse"):
+        cases_from_json("{not json")
+
+
+def test_json_not_object_refused():
+    with pytest.raises(ContractError, match="is not an object"):
+        cases_from_json("[]")
+
+
+# Hand-listed default event values: sizes and signs of every step, ramp and jump.
+EXPECTED_PARAMS = {
+    "v_step_skmin_xrmin_up": {"step_pu": 0.05},
+    "v_step_skmax_xrmax_down": {"step_pu": -0.05},
+    "q_step_skmin_xrmin_down": {"step_pu": -0.2},
+    "p_step_skmax_xrmax_up": {"step_pu": 0.2},
+    "f_step_skmax_xrmax_up": {"step_hz": 0.5},
+    "f_step_skmax_xrmax_down": {"step_hz": -0.5},
+    "f_ramp_skmax_xrmax_up": {"ramp_hz_per_s": 0.5, "duration_s": 2.0},
+    "f_ramp_skmax_xrmax_down": {"ramp_hz_per_s": -0.5, "duration_s": 2.0},
+    "phase_jump_skmin_xrmin_up": {"angle_deg": 20.0},
+    "phase_jump_skmin_xrmin_down": {"angle_deg": -20.0},
+    "fault_3ph_skmax_xrmax_v050": {"v_retained_pu": 0.5, "duration_s": 0.15},
+}
+
+
+def test_pinned_default_params(battery):
+    by_id = {c.case_id: c for c in battery}
+    for cid, params in EXPECTED_PARAMS.items():
+        assert by_id[cid].params == params, cid
+
+
+def test_numeric_string_refused():
+    with pytest.raises(ContractError, match="sk_mva='1000' is not a finite number"):
+        Thevenin("g", "1000", 5.0)
