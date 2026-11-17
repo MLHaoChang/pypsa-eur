@@ -205,8 +205,9 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
                         {v.services.counted.length + v.services.conditional.length === 0 && <span className="text-muted">none</span>}
                       </td>
                     )}
-                    <td><VerdictChip verdict={v.verdicts.frequency_support.verdict} /></td>
-                    <td><VerdictChip verdict={v.verdicts.voltage_control.verdict} /></td>
+                    {/* The units each credited service comes from (DC grid-readiness walkthrough 03). */}
+                    <td title={v.verdicts.frequency_support.project_value ?? undefined}><VerdictChip verdict={v.verdicts.frequency_support.verdict} /></td>
+                    <td title={v.verdicts.voltage_control.project_value ?? undefined}><VerdictChip verdict={v.verdicts.voltage_control.verdict} /></td>
                   </tr>
                   {!guided && open === v.architecture && (
                     <tr data-testid={`dc-architecture-chain-${v.architecture}`}>

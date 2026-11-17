@@ -235,6 +235,42 @@ def services(architecture: str, storage: bool) -> dict[str, list[str]]:
     return {"counted": counted, "conditional": conditional}
 
 
+def behind_architecture(n, island: dict | None, architecture: str | None) -> list[str]:
+    """The units behind a set power ``architecture`` (DC grid-readiness
+    walkthrough 03, 05): the island's ``ups`` units and every unit or
+    Generator/StorageUnit on an ``eh_critical`` bus. They reach the grid only
+    through the architecture's own converters, so neither their island-study
+    services nor their converters count at the PoC (the architecture's own
+    services stand in; its grid-facing front end is not in the IBR figure).
+    Loads never count. Empty when no architecture is set: ``eh_critical`` is a
+    reliability tag, not a topology fact, so alone it moves nothing."""
+    if architecture is None:
+        return []
+    from services.solver.process_uc import flag_column
+
+    critical: set[str] = set()
+    if n is not None and "eh_critical" in n.buses.columns:
+        critical = set(n.buses.index[flag_column(n.buses, "eh_critical")].astype(str))
+
+    def bus_of(name):
+        for frame in ("generators", "storage_units"):
+            df = getattr(n, frame, None) if n is not None else None
+            if df is not None and name in df.index:
+                return str(df.at[name, "bus"])
+        return None
+
+    out = []
+    for name, u in ((island or {}).get("units") or {}).items():
+        if u.get("kind") != "load" and (u.get("kind") == "ups" or bus_of(name) in critical):
+            out.append(str(name))
+    for frame in ("generators", "storage_units"):
+        df = getattr(n, frame, None) if n is not None else None
+        if df is None or df.empty:
+            continue
+        out += [str(x) for x in df.index[df["bus"].astype(str).isin(critical)] if str(x) not in out]
+    return out
+
+
 def ledger_rows(spec: DataCentreLoadSpec) -> list[tuple[str, str, str]]:
     """The ledger lines an explicitly set architecture carries in place of the
     "UPS and distribution losses" line (GK A C1, C2)."""
@@ -537,6 +573,7 @@ def compare(
     rate_kwargs: dict | None = None,
     island_offered: list[str] | None = None,
     finance_currency: str | None = None,
+    island_offered_text: str | None = None,
 ) -> dict[str, Any]:
     """Every architecture against the project's own on the saved network ``n``
     (read, never changed). See the module docstring for the algebra."""
@@ -736,6 +773,7 @@ def compare(
                 wanted=wanted,
                 conditional=svc["conditional"],
                 architecture=LABEL[a],
+                offered_text=island_offered_text,
             )
         variants.append(variant)
     own_v = next(v for v in variants if v["own"])
@@ -883,17 +921,17 @@ def compare_project(
         FinanceInputs.model_validate(finance).currency if finance else None
     )
     plan = planning or tpl.NATIVE_PLANNING[tid]
-    offered = None
+    offered = offered_text = None
     if isinstance(island, dict):
-        from services.adequacy.island_config import (
-            ContractError,
-            offered_services,
-            validate,
-        )
+        from services.adequacy.grid_readiness import grid_facing_offer, named_services
+        from services.adequacy.island_config import ContractError, validate
 
+        # Every variant is an architecture, so the units behind it (the UPS, the
+        # critical bus) are never credited at the PoC: its own services stand in
+        # (DC grid-readiness walkthrough 03).
         try:
-            got = offered_services(validate(island))
-            offered = got["services"] if got else None
+            got = grid_facing_offer(n, validate(island), spec.architecture)
+            offered, offered_text = got["services"], named_services(got)
         except (ContractError, ValueError):
             offered = None
     commercial = getattr(cfg, "commercial", None)
@@ -913,6 +951,7 @@ def compare_project(
         energy_price_per_mwh=energy_price_per_mwh,
         rate_kwargs=rate_kwargs,
         island_offered=offered,
+        island_offered_text=offered_text,
         finance_currency=finance_currency,
     )
     return {**out, "basis": dc_backup._basis(nc)}
