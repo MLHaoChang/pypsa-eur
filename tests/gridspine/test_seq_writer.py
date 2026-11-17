@@ -22,9 +22,9 @@ from gridspine.handoff.seq_writer import (
 )
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
-from gridspine.static.island_sc_seq import sequence_net
+from gridspine.static.island_sc_seq import genset_seq, sequence_net
 from tests.gridspine.test_campus import campus_spec, t
-from tests.gridspine.test_island_schema import genset
+from tests.gridspine.test_island_schema import genset, gfm_bess
 from tests.gridspine.test_raw_v35 import read_raw
 
 
@@ -421,3 +421,124 @@ def test_branch_and_transformer_ids_match_the_raw(tmp_path, version):
     assert all(
         t[0][2] == "0" for t in raw["TRANSFORMER"]
     )  # two-winding, as K = 0 in the .seq
+
+
+# --- assumptions, frequency, parallel, refusals (mutation survivors, review) ---------
+
+
+@pytest.mark.parametrize(
+    "given, drafted",
+    [
+        ({}, True),
+        ({"x2_pu": t(0.17)}, True),
+        ({"x0_pu": t(0.06)}, True),
+        ({"x2_pu": t(0.17), "x0_pu": t(0.06)}, False),
+    ],
+)
+def test_genset_x2_x0_draft_listed_only_when_drafted(tmp_path, given, drafted):
+    s = _spec()
+    g = genset()
+    g.update(given)
+    s["campus"]["units"]["GEN1"]["island"] = g
+    _, assumed = _write(build_campus(s), tmp_path)
+    assert any("x2 = x''d, x0 = 0.4 x''d" in a for a in assumed) is drafted
+
+
+def test_genset_draft_equals_the_island_draft(tmp_path):
+    """Z2 and Z0 are island_sc_seq.genset_seq's, not retyped."""
+    s = _spec()
+    s["campus"]["units"]["GEN1"]["island"] = genset()
+    c = build_campus(s)
+    x2, x0, _, _ = genset_seq(c.island["units"]["GEN1"], 0.15)
+    recs, _ = _write(c, tmp_path)
+    gen = recs["GENERATOR"][-1]
+    assert (float(gen[7]), float(gen[9])) == pytest.approx((x2, x0), rel=1e-6)
+
+
+@pytest.mark.parametrize("earthing, listed", [("isolated", True), ("solid", False)])
+def test_unearthed_genset_neutral_listed(tmp_path, earthing, listed):
+    s = _spec()
+    g = genset()
+    g.update(neutral_earthing=earthing)
+    s["campus"]["units"]["GEN1"]["island"] = g
+    _, assumed = _write(build_campus(s), tmp_path)
+    assert (
+        any("GEN1: unearthed neutral written as ZRG = OPEN_PU" in a for a in assumed)
+        is listed
+    )
+    assert not any("GEN1: no island data" in a for a in assumed)
+
+
+def test_genset_without_block_listed(tmp_path):
+    _, assumed = _write(build_campus(_spec()), tmp_path)
+    assert "seq: genset GEN1: no island data; neutral unearthed (assumed)" in assumed
+
+
+def test_synchronous_gen_without_campus_data_refused(tmp_path):
+    import pandapower as pp
+
+    c = build_campus(_spec())
+    pp.create_gen(c.net, c.net.bus.index[-1], p_mw=1.0, name="SG")
+    with pytest.raises(ContractError, match="machine SG is a synchronous gen"):
+        write_seq(c, tmp_path / "c.seq")
+
+
+def test_converter_negative_sequence_from_neg_seq(tmp_path):
+    s = _spec()
+    s["campus"]["units"]["BESS1"]["island"] = dict(gfm_bess(), neg_seq=t(2.0))
+    recs, assumed = _write(build_campus(s), tmp_path)
+    bess = recs["GENERATOR"][1]
+    assert (float(bess[6]), float(bess[7])) == pytest.approx(
+        (0.0, 0.5)
+    )  # j / neg_seq on MBASE
+    assert float(bess[3]) == OPEN_PU
+    assert not any("BESS1" in a and "negative sequence too" in a for a in assumed)
+    assert any("PV1" in a and "negative sequence too" in a for a in assumed)
+
+
+def test_f_hz_scales_zero_sequence_charging(tmp_path):
+    c = build_campus(_spec())
+    b = {}
+    for f in (50.0, 60.0):
+        write_seq(c, tmp_path / "c.seq", f_hz=f)
+        b[f] = float(
+            _read(tmp_path / "c.seq")["ZERO SEQ. NON-TRANSFORMER BRANCH"][0][5]
+        )
+    assert b[60.0] == pytest.approx(b[50.0] * 1.2, rel=1e-5)
+
+
+def test_parallel_cables_halve_z0_and_double_b0(tmp_path):
+    c = build_campus(_spec())
+    (one,) = _write(c, tmp_path)[0]["ZERO SEQ. NON-TRANSFORMER BRANCH"]
+    c.net.line["parallel"] = 2
+    (two,) = _write(c, tmp_path)[0]["ZERO SEQ. NON-TRANSFORMER BRANCH"]
+    assert [float(v) for v in two[3:6]] == pytest.approx(
+        [float(one[3]) / 2, float(one[4]) / 2, float(one[5]) * 2], rel=1e-5
+    )
+
+
+def test_grid_r0x0_missing_listed(tmp_path):
+    s = _spec()
+    s["campus"]["pcc"].update(x0x_max=t(1.5))
+    _, assumed = _write(build_campus(s), tmp_path)
+    assert "seq: grid GRID: no r0x0_max; R0/X0 = R/X (assumed)" in assumed
+    assert not any("no x0x_max" in a for a in assumed)
+
+
+def test_refusal_names_the_transformer(tmp_path):
+    c = build_campus(_spec())
+    c.windings["TR1"] = {"hv": "Z", "hv_earth": "solid", "lv": "Y", "lv_earth": "solid"}
+    with pytest.raises(
+        ContractError, match="seq: transformer TR1: .*not a vector group"
+    ):
+        write_seq(c, tmp_path / "c.seq")
+
+
+@pytest.mark.parametrize("version, listed", [(33, True), (35, False)])
+def test_v33_neutral_resistance_listed(tmp_path, version, listed):
+    s = _spec()
+    s["campus"]["transformers"]["TR2"].update(
+        vector_group="Dyn11", earthing_lv="resistance", r_n_lv_ohm=t(20.0)
+    )
+    _, assumed = _write(build_campus(s), tmp_path, version=version)
+    assert any("TR2: v33 RG1 / RG2 written under CC 3" in a for a in assumed) is listed

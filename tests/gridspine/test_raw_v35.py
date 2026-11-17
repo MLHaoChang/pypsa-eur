@@ -14,7 +14,7 @@ import io
 import numpy as np
 import pytest
 
-from gridspine.handoff.raw_writer import SBASE_MVA, write_raw
+from gridspine.handoff.raw_writer import SBASE_MVA, trafo_impedance, write_raw
 from gridspine.ingest.pandapower_source import load_case39
 from gridspine.schema.contracts import ContractError
 
@@ -342,3 +342,58 @@ def test_v35_switching_device_section_sits_between_branch_and_transformer(writte
 def test_unknown_version_refused(net, tmp_path, bad):
     with pytest.raises(ContractError, match="RAW version"):
         write_raw(net, tmp_path / "x.raw", version=bad)
+
+
+# --- trafo_impedance by hand (shared with the .seq) ---------------------------
+
+
+def _trafo_net(tap_side):
+    import pandapower as pp
+
+    n = pp.create_empty_network()
+    hv, lv = pp.create_bus(n, 110.0), pp.create_bus(n, 20.0)
+    pp.create_transformer_from_parameters(
+        n,
+        hv,
+        lv,
+        sn_mva=40.0,
+        vn_hv_kv=110.0,
+        vn_lv_kv=21.0,
+        vkr_percent=0.4,
+        vk_percent=12.0,
+        pfe_kw=0.0,
+        i0_percent=0.0,
+        parallel=2,
+        tap_side=tap_side,
+        tap_neutral=0,
+        tap_min=-5,
+        tap_max=5,
+        tap_step_percent=2.0,
+        tap_pos=1,
+        tap_changer_type="Ratio",
+    )
+    return n
+
+
+@pytest.mark.parametrize("tap_side", ["hv", "lv"])
+def test_trafo_impedance_by_hand(tap_side):
+    n = _trafo_net(tap_side)
+    r, x, t1, t2 = trafo_impedance(n, n.trafo.iloc[0])
+    lv_eff = 21.0 * (1.02 if tap_side == "lv" else 1.0)
+    conv = (
+        100.0 / 40.0 * (lv_eff / 20.0) ** 2 / 2
+    )  # SBASE / Sn, LV base, two in parallel
+    assert r == pytest.approx(0.004 * conv)
+    assert x == pytest.approx(np.sqrt((0.12 * conv) ** 2 - (0.004 * conv) ** 2))
+    assert (t1, t2) == pytest.approx(
+        (1.02, 21.0 / 20.0) if tap_side == "hv" else (1.0, 21.0 * 1.02 / 20.0)
+    )
+
+
+def test_v35_nan_line_name_written_blank(tmp_path):
+    n = load_case39()
+    n.line["name"] = np.nan
+    write_raw(n, tmp_path / "n.raw", version=35)
+    assert {r[6] for r in read_raw((tmp_path / "n.raw").read_text())[2]["BRANCH"]} == {
+        ""
+    }

@@ -13,8 +13,8 @@ Layout (``version=35``, the default, or ``33``). The record layouts follow
 .seq files PSS/E 34.0 and 35.0 wrote themselves (their ``@!`` header lines
 carry the manual's field names); the transformer connection codes are
 PSS/E's documented zero-sequence codes (generic engineering: the earth path
-each winding connection gives). A v36 RAW takes a v35 .seq. v35 opens with a SYSTEM-WIDE section (RPTFORMAT, MOV, SCMODEL at
-PSS/E 35.0's defaults) and adds REFDEG to the machine record; v33 has neither.
+each winding connection gives). A v36 RAW takes a v35 .seq. v35 opens with
+a SYSTEM-WIDE section (RPTFORMAT, MOV, SCMODEL at PSS/E 35.0's defaults) and adds REFDEG to the machine record; v33 has neither.
 
 What each element is:
 
@@ -71,7 +71,7 @@ assumptions it applied, one line each, for the pack's README.
 
 import math
 
-from gridspine.handoff.dyr_writer import _machines
+from gridspine.handoff.dyr_writer import machine_records
 from gridspine.handoff.raw_writer import SBASE_MVA, branch_ids, trafo_impedance
 from gridspine.schema.contracts import ContractError
 from gridspine.static.island_sc import _param
@@ -79,6 +79,7 @@ from gridspine.static.island_sc_seq import (
     DEFAULT_WINDINGS,
     GENSET_X0_RATIO,
     R_SCREEN_OHM_PER_KM,
+    _p,
     genset_seq,
     grid_zero_seq,
     line_zero_seq,
@@ -175,6 +176,8 @@ def _machine_record(campus, uid, bus_kv, mbase, case, assumed):
             assumed.append(
                 f"seq: grid {uid}: no x0x_{case}; X0 = X1, R0/X0 = R/X (assumed)"
             )
+        elif _p(campus, pcc, f"r0x0_{case}") is None:
+            assumed.append(f"seq: grid {uid}: no r0x0_{case}; R0/X0 = R/X (assumed)")
         z1 = complex(rx * x1, x1)
         return z1, z1, z0, 0j
     if uid not in campus.units.index:
@@ -218,14 +221,14 @@ def _machine_record(campus, uid, bus_kv, mbase, case, assumed):
     return complex(0, OPEN_PU), z2, complex(0, OPEN_PU), 0j
 
 
-def write_seq(campus, path, version=35, case="max") -> list:
-    """Write the .seq for ``campus.net`` (as ``write_raw`` numbers it); return the assumptions applied."""
+def write_seq(campus, path, version=35, case="max", f_hz=50.0) -> list:
+    """Write the .seq for ``campus.net`` (as ``write_raw`` numbers it, with the
+    same ``f_hz`` for the zero-sequence charging); return the assumptions applied."""
     if version not in VERSIONS:
         raise ContractError(f"SEQ version {version!r} not in {VERSIONS}")
     if case not in CASES:
         raise ContractError(f"SEQ case {case!r} not in {CASES}")
     net = campus.net
-    f_hz = float(getattr(net, "f_hz", 50.0) or 50.0)
     assumed = []
     sec = {name: [] for name in SECTIONS[version]}
     if version >= 35:
@@ -234,7 +237,7 @@ def write_seq(campus, path, version=35, case="max") -> list:
     kv_of_num = {
         k + 1: float(net.bus.at[i, "vn_kv"]) for k, i in enumerate(net.bus.index)
     }
-    for uid, num, mid, mbase, _sync in _machines(net):
+    for uid, num, mid, mbase, _sync in machine_records(net):
         z1, z2, z0, zg = _machine_record(
             campus, uid, kv_of_num[num], mbase, case, assumed
         )
@@ -303,11 +306,20 @@ def write_seq(campus, path, version=35, case="max") -> list:
             )
             w = DEFAULT_WINDINGS
         assumed.append(f"seq: transformer {name}: vk0 = vk (assumed)")
+        try:
+            cc = connection_code(w, version)
+        except ContractError as err:
+            raise ContractError(f"seq: transformer {name}: {err}") from err
         r_pu, x_pu, _, _ = trafo_impedance(net, tr)
         rg = {}
         for side, bus in (("hv", tr["hv_bus"]), ("lv", tr["lv_bus"])):
             rn = trafo_neutral_ohm(campus, name, w, side)
             rg[side] = (rn or 0.0) / (float(net.bus.at[bus, "vn_kv"]) ** 2 / SBASE_MVA)
+        if version == 33 and any(rg.values()):
+            assumed.append(
+                f"seq: transformer {name}: v33 RG1 / RG2 written under CC {cc} as PSS/E 30-33's "
+                "grounding impedance fields (assumed)"
+            )
         sec["ZERO SEQ. TRANSFORMER"].append(
             ",".join(
                 [
@@ -317,7 +329,7 @@ def write_seq(campus, path, version=35, case="max") -> list:
                     f"'{ckt:<2s}'",
                     "1",
                     "1",
-                    str(connection_code(w, version)),
+                    str(cc),
                     _f(rg["hv"]),
                     "0",
                     _f(r_pu),

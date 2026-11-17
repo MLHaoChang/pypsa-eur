@@ -441,3 +441,50 @@ def test_a_cable_without_c0_takes_its_c_for_the_capacitive_current():
     del s["campus"]["cables"]["CF"]["c0_nf_per_km"]
     fl = row(SEQ.unbalanced_fault_levels(build_campus(s)), "FAR")
     assert fl["ic_e_ka"] == pytest.approx(SQ3 * 2 * math.pi * 50 * 250e-9 * 5.0 * 33.0, rel=1e-12)
+
+
+# --- the helpers the .seq writer shares (GC-04) ----------------------------------
+
+
+@pytest.mark.parametrize("given", [(), ("r0",), ("x0",), ("c0",), ("r0", "x0"), ("r0", "x0", "c0")])
+def test_line_zero_seq_drafts_each_missing_value(given):
+    s = copy.deepcopy(campus_spec())
+    vals = {"r0": ("r0_ohm_per_km", 1.2), "x0": ("x0_ohm_per_km", 0.4), "c0": ("c0_nf_per_km", 200.0)}
+    s["campus"]["cables"]["CB1"].update({vals[k][0]: t(vals[k][1]) for k in given})
+    r0, x0, c0, drafted = SEQ.line_zero_seq(build_campus(s), "CB1", 0.1, 0.2, 300.0)
+    assert (r0, x0, c0) == pytest.approx((
+        1.2 if "r0" in given else 0.1 + 3 * SEQ.R_SCREEN_OHM_PER_KM,
+        0.4 if "x0" in given else 0.2,
+        200.0 if "c0" in given else 300.0,
+    ))
+    assert drafted is (len(given) < 3)
+
+
+@pytest.mark.parametrize("x0x, r0x0, want, drafted", [
+    (None, None, complex(0.1 * 2.0, 2.0), True),
+    (1.5, None, complex(0.1 * 3.0, 3.0), False),
+    (1.5, 0.2, complex(0.2 * 3.0, 3.0), False),
+])
+def test_grid_zero_seq(x0x, r0x0, want, drafted):
+    s = copy.deepcopy(campus_spec())
+    if x0x is not None:
+        s["campus"]["pcc"]["x0x_max"] = t(x0x)
+    if r0x0 is not None:
+        s["campus"]["pcc"]["r0x0_max"] = t(r0x0)
+    z0, d = SEQ.grid_zero_seq(build_campus(s), "PCC", "max", 2.0, 0.1)
+    assert z0 == pytest.approx(want)
+    assert d is drafted
+
+
+def test_genset_seq_without_block():
+    x2, x0, earthing, rn = SEQ.genset_seq(None, 0.15)
+    assert (x2, x0, earthing, rn) == (0.15, pytest.approx(0.06), "isolated", None)
+
+
+@pytest.mark.parametrize("earth, want", [("solid", 0.0), ("resistance", 20.0), ("isolated", None), (None, None)])
+def test_trafo_neutral_ohm(earth, want):
+    s = copy.deepcopy(campus_spec())
+    if earth == "resistance":
+        s["campus"]["transformers"]["TR2"].update(vector_group="Dyn11", earthing_lv="resistance", r_n_lv_ohm=t(20.0))
+    w = {"hv": "D", "hv_earth": None, "lv": "Y" if earth else "D", "lv_earth": earth}
+    assert SEQ.trafo_neutral_ohm(build_campus(s), "TR2", w, "lv") == want
