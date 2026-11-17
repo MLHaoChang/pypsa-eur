@@ -38,17 +38,20 @@ equivalent unit transformer and one equivalent unit per converter kind.
   the cables without it.
 
 Elements at a root bus itself (loads, compensation, units) stay as they
-are. What the aggregated model leaves out (island data, relays on removed
+are, and so does a tree that holds no converter unit (an auxiliary supply,
+say): it is not a plant collector. What the aggregated model leaves out (island data, relays on removed
 branches, unequal taps) is listed in ``Aggregation.assumptions``.
 
-**Refused** (``AggregationError``, naming the element): a converter unit in
-a tree with zero ``p_mw`` or ``s_mva``; a ring in a tree; a tree that
+The input is first checked as ``build_campus`` checks it (``ContractError``).
+Then **refused** (``AggregationError``, naming the element): a converter
+unit with zero ``p_mw`` or ``s_mva``; a ring in a tree (any branch that
+reaches a bus already reached); a tree that
 reaches the PCC another way, or holds two roots; a load, genset, UPS,
 compensation or earthing transformer inside a tree (below its root): an
 equivalent of them is not defined here; transformers cascaded in a tree, or
 fed from their LV side; unit transformers with different rated voltages,
-vector groups or earthing, or units at two voltage levels; a tree with no
-converter unit; an equivalent's name already taken.
+vector groups or earthing, or units at two voltage levels; a campus with no
+tree holding a converter unit; an equivalent's name already taken.
 
 ``freeze`` builds both variants and returns the frozen ``ModelSet``
 (``schema/model_set.py``); it lives here because ``schema/`` imports only
@@ -106,8 +109,6 @@ def _tag(value, *fields):
 
 
 def _bus_kv(c, bus):
-    if bus == c["pcc"]["bus"]:
-        return float(c["pcc"]["vn_kv"])
     return float(c["buses"][bus]["vn_kv"])
 
 
@@ -143,7 +144,7 @@ def _tree(c, root, main, roots):
         ("trafo", "transformers", "hv_bus", "lv_bus"),
     ):
         for name, br in (c.get(table) or {}).items():
-            if kind == "trafo" and name in main:
+            if name in main:
                 continue
             adj.setdefault(br[a], []).append((br[b], kind, name))
             adj.setdefault(br[b], []).append((br[a], kind, name))
@@ -159,7 +160,7 @@ def _tree(c, root, main, roots):
                     f"aggregation: the collector behind {root} reaches the PCC again "
                     f"through {kind} {name}; it must be radial"
                 )
-            if v in parent or v == root:
+            if v in parent:
                 raise AggregationError(
                     f"aggregation: the collector behind {root} is not radial: "
                     f"{kind} {name} closes a ring at {v}"
@@ -172,18 +173,15 @@ def _tree(c, root, main, roots):
             parent[v] = (u, kind, name)
             nodes.append(v)
             q.append(v)
-    if len(seen_edges) != len(nodes) - 1:
-        raise AggregationError(
-            f"aggregation: the collector behind {root} is not radial "
-            f"({len(seen_edges)} branches for {len(nodes)} buses)"
-        )
     return nodes, parent
 
 
 def _plan(c, root, main, roots):
     nodes, parent = _tree(c, root, main, roots)
     below = set(nodes) - {root}
-    units = {uid: u for uid, u in (c.get("units") or {}).items() if u["bus"] in below}
+    units = {uid: u for uid, u in c["units"].items() if u["bus"] in below}
+    if not any(u["kind"] in CONVERTER_KINDS for u in units.values()):
+        return None
     for uid, u in units.items():
         if u["kind"] not in CONVERTER_KINDS:
             raise AggregationError(
@@ -202,10 +200,6 @@ def _plan(c, root, main, roots):
                 f"aggregation: earthing transformer {name} sits inside the collector "
                 f"behind {root} (at {et['bus']})"
             )
-    if not units:
-        raise AggregationError(
-            f"aggregation: the collector behind {root} holds no converter unit"
-        )
     trafos = [(v, name) for v, (u, kind, name) in parent.items() if kind == "trafo"]
     for v, name in trafos:
         tr = c["transformers"][name]
@@ -341,7 +335,7 @@ def _unit_transformer(c, root, trafos, down, p_tot, assumptions):
                     f"differ in {f} ({first.get(f)!r} vs {tr.get(f)!r})"
                 )
         for f in ("r_n_hv_ohm", "r_n_lv_ohm"):
-            if (f in tr) != (f in first) or (f in tr and _v(tr[f]) != _v(first[f])):
+            if f in first and _v(tr[f]) != _v(first[f]):
                 raise AggregationError(
                     f"aggregation: unit transformers {trafos[0]} and {name} behind {root} "
                     f"differ in {f}"
@@ -443,6 +437,7 @@ def aggregate(campus_spec) -> Aggregation:
         raise ContractError("aggregation: expected a mapping with a 'campus' key")
     src = campus_spec["campus"]
     _check_ratings(src)
+    build_campus(campus_spec)
     c = copy.deepcopy(src)
     pcc = c["pcc"]["bus"]
     trafos = c.get("transformers") or {}
@@ -458,12 +453,12 @@ def aggregate(campus_spec) -> Aggregation:
     unit_map = {}
     plans = []
     for root in roots:
-        nodes, parent, units, utr = _plan(c, root, main, set(roots) - {root})
-        if len(nodes) > 1:
-            plans.append((root, nodes, parent, units, utr))
+        plan = _plan(c, root, main, set(roots) - {root})
+        if plan is not None:
+            plans.append((root, *plan))
     if not plans:
         raise AggregationError(
-            "aggregation: no collector behind the main transformers to aggregate"
+            "aggregation: no collector behind the main transformers holds a converter unit"
         )
     taken = {
         *c.get("buses", {}),
@@ -494,9 +489,15 @@ def aggregate(campus_spec) -> Aggregation:
             raise AggregationError(
                 f"aggregation: the equivalent name(s) {clash} are already taken"
             )
-        for u in list(c["units"]):
-            if u in units:
-                del c["units"][u]
+        lv_kv = _bus_kv(c, c["transformers"][utr[0]]["lv_bus"]) if utr else None
+        # the tree goes before its equivalent comes in: a name may be reused
+        for u in units:
+            del c["units"][u]
+        for b in below:
+            del c["buses"][b]
+        for name in branch_names:
+            c.get("cables", {}).pop(name, None)
+            c["transformers"].pop(name, None)
         mv_bus = root
         if cable is not None:
             c["buses"][names["mv"]] = {"vn_kv": _bus_kv(c, root)}
@@ -508,7 +509,6 @@ def aggregate(campus_spec) -> Aggregation:
             mv_bus = names["mv"]
         unit_bus = mv_bus
         if tr is not None:
-            lv_kv = _bus_kv(c, c["transformers"][utr[0]]["lv_bus"])
             c["buses"][names["lv"]] = {"vn_kv": lv_kv}
             c["transformers"][names["trafo"]] = {
                 "hv_bus": mv_bus,
@@ -526,11 +526,6 @@ def aggregate(campus_spec) -> Aggregation:
         unit_map.update(umap)
         removed_buses |= below
         removed_branches |= branch_names
-    for b in removed_buses:
-        c["buses"].pop(b, None)
-    for name in removed_branches:
-        (c.get("cables") or {}).pop(name, None)
-        c["transformers"].pop(name, None)
     unit_map.update({uid: [uid] for uid in c["units"] if uid not in unit_map})
     _drop_dangling(c, removed_buses, removed_branches, assumptions)
     return Aggregation(
@@ -548,7 +543,7 @@ def _drop_dangling(c, buses, branches, assumptions):
         if r.get("branch") not in branches and r.get("fault_bus") not in buses
     ]
     if len(kept) != len(relays):
-        dropped = sorted(r.get("relay", "?") for r in relays if r not in kept)
+        dropped = sorted(r["name"] for r in relays if r not in kept)
         assumptions.append(
             f"aggregation: relay(s) {dropped} protect collector branches the equivalent "
             "replaces; not carried"

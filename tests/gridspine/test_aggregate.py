@@ -26,6 +26,7 @@ from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.model_set import data_hash, manifest
 from gridspine.static.campus_sc import campus_fault_levels
+from tests.gridspine.test_island_schema import requirements
 
 
 def t(value, source="datasheet"):
@@ -182,6 +183,19 @@ def test_lv_cable_is_referred_to_the_root_voltage():
     assert eq["r_ohm_per_km"]["value"] == pytest.approx(r_hand, abs=1e-6)
     assert eq["c_nf_per_km"]["value"] == pytest.approx(
         200.0 * 9 + 500.0 * 0.2 / refer, abs=1e-6
+    )
+    w = (5 / 25) ** 2
+    assert eq["x_ohm_per_km"]["value"] == pytest.approx(
+        0.2112 + 0.08 * 0.2 * refer * w, abs=1e-6
+    )
+    assert eq["r0_ohm_per_km"]["value"] == pytest.approx(
+        0.176 * 3 + 0.1 * 0.2 * refer * w, abs=1e-6
+    )
+    assert eq["x0_ohm_per_km"]["value"] == pytest.approx(
+        0.2112 * 3 + 0.2 * 0.2 * refer * w, abs=1e-6
+    )
+    assert eq["c0_nf_per_km"]["value"] == pytest.approx(
+        150.0 * 9 + 300.0 * 0.2 / refer, abs=1e-6
     )
 
 
@@ -404,13 +418,24 @@ def test_a_ring_is_refused():
 
 def test_a_ring_with_a_detached_part_is_refused():
     """
-    Branches = buses - 1 overall (a ring plus a detached bus), but the
-    collector is still not a tree.
+    Branches = buses - 1 overall (a ring plus a detached bus): a count
+    alone would pass it. The detached bus is refused by the input check
+    (build_campus), and the ring by the branch walk on its own.
     """
     spec = plant()
     spec["campus"]["cables"]["TIE"] = cable("A2", "B3", 1.0)
     spec["campus"]["buses"]["ISO"] = {"vn_kv": 33.0}
+    with pytest.raises(ContractError, match=r"\['ISO'\] are not connected to the PCC"):
+        aggregate(spec)
+    del spec["campus"]["buses"]["ISO"]
     with pytest.raises(AggregationError, match="closes a ring"):
+        aggregate(spec)
+
+
+def test_a_second_cable_between_root_and_trunk_is_a_ring():
+    spec = plant()
+    spec["campus"]["cables"]["TRUNK2"] = cable("COL", "J", 2.0)
+    with pytest.raises(AggregationError, match=r"cable TRUNK2 closes a ring at J"):
         aggregate(spec)
 
 
@@ -425,8 +450,20 @@ def test_a_second_main_transformer_into_the_tree_is_refused():
 
 
 def test_a_branch_back_to_the_pcc_is_refused():
+    """
+    A step-up transformer inside the tree to a 132 kV bus cabled back to
+    the PCC: the tree reaches the PCC without going through a main
+    transformer.
+    """
     spec = plant()
-    spec["campus"]["cables"]["BACK"] = cable("B2", "PCC", 1.0)
+    c = spec["campus"]
+    c["buses"]["HVX"] = {"vn_kv": 132.0}
+    c["transformers"]["TUP"] = {
+        **copy.deepcopy(c["transformers"]["TRM"]),
+        "hv_bus": "HVX",
+        "lv_bus": "B2",
+    }
+    c["cables"]["BACK"] = {**cable("HVX", "PCC", 1.0), "max_i_ka": t(0.5)}
     with pytest.raises(
         AggregationError, match=r"reaches the PCC again through cable BACK"
     ):
@@ -465,6 +502,11 @@ def test_parallel_main_transformers_to_one_root_are_accepted():
                 "p_mw": t(1.0),
                 "e_mwh": t(0.5),
                 "s_mva": t(1.1),
+                "island": {
+                    "it_load": ["IT"],
+                    "walk_in_s": t(15.0),
+                    "f_window_hz": t(2.0),
+                },
             },
         ),
     ],
@@ -472,6 +514,12 @@ def test_parallel_main_transformers_to_one_root_are_accepted():
 def test_non_converter_unit_inside_the_tree_is_refused(kind, entry):
     spec = plant()
     spec["campus"]["units"]["X1"] = entry
+    spec["campus"]["units"]["IT"] = {
+        "kind": "load",
+        "bus": "COL",
+        "p_mw": t(1.0),
+        "pf": t(0.95),
+    }
     with pytest.raises(
         AggregationError,
         match=rf"{kind} X1 sits inside the collector behind COL \(at B2\)",
@@ -540,11 +588,11 @@ def test_units_on_and_behind_unit_transformers_are_refused():
 def test_cascaded_transformers_are_refused():
     spec = plant()
     c = spec["campus"]
-    c["buses"]["B3M"] = {"vn_kv": 0.69}
+    c["buses"]["B3M"] = {"vn_kv": 0.4}
     c["transformers"]["TB3B"] = {
         **unit_trafo("B3L", "B3M"),
         "vn_hv_kv": t(0.69),
-        "vn_lv_kv": t(0.69),
+        "vn_lv_kv": t(0.4),
     }
     c["units"]["UB3"]["bus"] = "B3M"
     with pytest.raises(
@@ -554,21 +602,53 @@ def test_cascaded_transformers_are_refused():
 
 
 def test_transformer_fed_from_its_lv_side_is_refused():
+    """B3 feeds TB3's LV winding; the unit sits on its 132 kV side."""
     spec = plant()
-    tr = spec["campus"]["transformers"]["TB3"]
-    tr["hv_bus"], tr["lv_bus"] = "B3L", "B3"
-    tr["vn_hv_kv"], tr["vn_lv_kv"] = t(0.69), t(33.0)
+    c = spec["campus"]
+    del c["buses"]["B3L"]
+    c["buses"]["B3H"] = {"vn_kv": 132.0}
+    c["transformers"]["TB3"] = {
+        **copy.deepcopy(c["transformers"]["TRM"]),
+        "hv_bus": "B3H",
+        "lv_bus": "B3",
+    }
+    c["units"]["UB3"]["bus"] = "B3H"
     with pytest.raises(AggregationError, match="TB3 is fed from its LV side"):
         aggregate(spec)
 
 
-def test_tree_without_converter_units_is_refused():
+def test_campus_without_a_converter_collector_is_refused():
     spec = plant()
     spec["campus"]["units"] = {
-        "AUX": {"kind": "load", "bus": "COL", "p_mw": t(0.5), "pf": t(0.95)}
+        "AUX": {"kind": "load", "bus": "B2", "p_mw": t(0.5), "pf": t(0.95)}
     }
-    with pytest.raises(AggregationError, match="holds no converter unit"):
+    with pytest.raises(
+        AggregationError,
+        match="no collector behind the main transformers holds a converter unit",
+    ):
         aggregate(spec)
+
+
+def test_a_tree_without_converter_units_stays_as_it_is():
+    """
+    A second main transformer feeding an auxiliary load feeder: not a
+    plant collector, so it is left alone (a load inside it is no refusal).
+    """
+    spec = plant()
+    c = spec["campus"]
+    c["buses"].update({"AUXB": {"vn_kv": 33.0}, "AUX2": {"vn_kv": 33.0}})
+    c["transformers"]["TRA"] = {
+        **copy.deepcopy(c["transformers"]["TRM"]),
+        "lv_bus": "AUXB",
+    }
+    c["cables"]["CAUX"] = cable("AUXB", "AUX2", 0.5)
+    c["units"]["AUX"] = {"kind": "load", "bus": "AUX2", "p_mw": t(0.5), "pf": t(0.95)}
+    out = aggregate(spec).spec["campus"]
+    assert (
+        out["cables"]["CAUX"] == c["cables"]["CAUX"]
+        and out["units"]["AUX"] == c["units"]["AUX"]
+    )
+    assert {"AUXB", "AUX2", "EQ_MV", "EQ_LV"} <= set(out["buses"])
 
 
 def test_equivalent_name_already_taken_is_refused():
@@ -586,20 +666,40 @@ def test_equivalent_name_already_taken_is_refused():
 # --- what the aggregate leaves out --------------------------------------------------------------
 
 
+TAP = {
+    "changer": "off_circuit",
+    "side": "hv",
+    "neutral": 0,
+    "min": -2,
+    "max": 2,
+    "step_percent": t(2.5),
+    "pos": 0,
+}
+
+
 def test_unequal_taps_are_dropped_with_an_assumption():
     spec = plant()
-    tap = {
-        "changer": "off_circuit",
-        "side": "hv",
-        "neutral": 0,
-        "min": -2,
-        "max": 2,
-        "step_percent": 2.5,
-    }
-    spec["campus"]["transformers"]["TA1"]["tap"] = dict(tap, pos=1)
+    spec["campus"]["transformers"]["TA1"]["tap"] = dict(TAP, pos=1)
     agg = aggregate(spec)
     assert "tap" not in agg.spec["campus"]["transformers"]["EQ_TR"]
     assert any("unequal taps" in a for a in agg.assumptions)
+
+
+def test_equal_taps_are_carried():
+    spec = plant()
+    for n in ("TA1", "TA2", "TB1", "TB2", "TB3"):
+        spec["campus"]["transformers"][n]["tap"] = dict(TAP)
+    agg = aggregate(spec)
+    assert agg.spec["campus"]["transformers"]["EQ_TR"]["tap"] == TAP
+    assert not any("tap" in a for a in agg.assumptions)
+
+
+def test_no_taps_no_tap_assumption():
+    agg = aggregate(plant())
+    assert (
+        "tap" not in agg.spec["campus"]["transformers"]["EQ_TR"]
+        and agg.assumptions == []
+    )
 
 
 # --- A9 aggregate_hour ------------------------------------------------------------------------------
@@ -698,3 +798,234 @@ def test_freeze_detailed_only_when_asked():
     assert ms.specs["aggregated"] is None and ms.unit_map == {}
     with pytest.raises(ContractError, match="aggregated variant was not frozen"):
         manifest(ms, "aggregated")
+
+
+# --- shapes without a medium-voltage collector ------------------------------------------------
+
+
+def no_mv_cables(lv_cables):
+    """
+    Every unit transformer straight on COL; with ``lv_cables`` each unit
+    sits behind a 0.1 km LV run of two parallel cables.
+    """
+    spec = plant()
+    c = spec["campus"]
+    c["cables"] = {}
+    del c["buses"]["J"]
+    for bus, _, _ in NODES:
+        del c["buses"][bus]
+        c["transformers"]["T" + bus]["hv_bus"] = "COL"
+        if lv_cables:
+            c["buses"][bus + "U"] = {"vn_kv": 0.69}
+            c["cables"]["L" + bus] = {
+                "from_bus": bus + "L",
+                "to_bus": bus + "U",
+                "parallel": 2,
+                "length_km": t(0.1),
+                "r_ohm_per_km": t(0.05),
+                "x_ohm_per_km": t(0.08),
+                "c_nf_per_km": t(500.0),
+                "max_i_ka": t(3.0),
+            }
+            c["units"]["U" + bus]["bus"] = bus + "U"
+    if not lv_cables:
+        del c["cables"]
+    return spec
+
+
+def test_no_cables_gives_no_equivalent_cable():
+    out = aggregate(no_mv_cables(lv_cables=False)).spec["campus"]
+    assert "EQ_COL" not in out.get("cables", {}) and "EQ_MV" not in out["buses"]
+    assert out["transformers"]["EQ_TR"]["hv_bus"] == "COL"
+    build_campus({"campus": out})
+
+
+def test_lv_runs_only_rating_is_referred_to_the_root_voltage():
+    eq = aggregate(no_mv_cables(lv_cables=True)).spec["campus"]["cables"]["EQ_COL"]
+    # Five LV runs of 2 x 3 kA at 0.69 kV, as current at 33 kV.
+    assert eq["max_i_ka"]["value"] == pytest.approx(5 * 2 * 3.0 * 0.69 / 33.0)
+    refer = (33.0 / 0.69) ** 2
+    assert eq["r_ohm_per_km"]["value"] == pytest.approx(
+        5 * 0.05 * 0.1 / 2 * refer * (5 / 25) ** 2, rel=1e-9
+    )
+
+
+def test_campus_without_transformers_has_no_collector():
+    spec = plant()
+    c = spec["campus"]
+    c["buses"] = {"COL": {"vn_kv": 132.0}}
+    del c["transformers"]
+    c["cables"] = {"CC": {**cable("PCC", "COL", 1.0), "max_i_ka": t(0.5)}}
+    c["units"] = {"UA1": unit("pv", "COL")}
+    with pytest.raises(
+        AggregationError, match="no collector behind the main transformers"
+    ):
+        aggregate(spec)
+
+
+# --- input checks -------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad", [[], {"plant": {}}, {"campus": []}], ids=["list", "no-campus", "campus-list"]
+)
+def test_input_that_is_not_a_campus_mapping_is_refused(bad):
+    with pytest.raises(ContractError, match="expected a mapping with a 'campus' key"):
+        aggregate(bad)
+
+
+@pytest.mark.parametrize("change", ["missing", "untagged"])
+def test_malformed_rating_is_a_contract_error_not_a_crash(change):
+    spec = plant()
+    if change == "missing":
+        del spec["campus"]["units"]["UA2"]["s_mva"]
+    else:
+        spec["campus"]["units"]["UA2"]["s_mva"] = 5.5
+    with pytest.raises(ContractError, match="UA2"):
+        aggregate(spec)
+
+
+def test_differing_neutral_resistance_is_refused():
+    spec = plant()
+    for n in ("TA1", "TA2", "TB1", "TB2", "TB3"):
+        spec["campus"]["transformers"][n].update(
+            vector_group="Dyn11", earthing_lv="resistance", r_n_lv_ohm=t(1.0)
+        )
+    assert aggregate(spec).spec["campus"]["transformers"]["EQ_TR"]["r_n_lv_ohm"] == t(
+        1.0
+    )
+    spec["campus"]["transformers"]["TB2"]["r_n_lv_ohm"] = t(2.0)
+    with pytest.raises(AggregationError, match="differ in r_n_lv_ohm"):
+        aggregate(spec)
+
+
+def aux_tree(spec, root="AUXB", cable_name="CAUX", trafo_name="TRA"):
+    """
+    A second main transformer feeding an auxiliary load feeder (kept as
+    it is: it holds no converter unit).
+    """
+    c = spec["campus"]
+    c["buses"].update({root: {"vn_kv": 33.0}, "AUX2": {"vn_kv": 33.0}})
+    c["transformers"][trafo_name] = {
+        **copy.deepcopy(c["transformers"]["TRM"]),
+        "lv_bus": root,
+    }
+    c["cables"][cable_name] = cable(root, "AUX2", 0.5)
+    c["units"]["AUX"] = {"kind": "load", "bus": "AUX2", "p_mw": t(0.5), "pf": t(0.95)}
+    return spec
+
+
+@pytest.mark.parametrize(
+    "name, make",
+    [
+        ("EQ_MV", lambda s: aux_tree(s, root="EQ_MV")),
+        ("EQ_LV", lambda s: aux_tree(s, root="EQ_LV")),
+        ("EQ_COL", lambda s: aux_tree(s, cable_name="EQ_COL")),
+        ("EQ_TR", lambda s: aux_tree(s, trafo_name="EQ_TR")),
+        (
+            "EQ_MV",
+            lambda s: s["campus"].update(
+                compensation=[
+                    {
+                        "name": "EQ_MV",
+                        "bus": "COL",
+                        "kind": "capacitor_bank",
+                        "q_mvar": t(2.0),
+                        "steps": 2,
+                    }
+                ]
+            ),
+        ),
+        (
+            "EQ_TR",
+            lambda s: s["campus"].update(
+                earthing_transformers={"EQ_TR": {"bus": "COL", "x0_ohm": t(30.0)}}
+            ),
+        ),
+    ],
+    ids=["bus-mv", "bus-lv", "cable", "transformer", "compensation", "earthing"],
+)
+def test_equivalent_name_taken_by_a_kept_element_is_refused(name, make):
+    spec = plant()
+    make(spec)
+    with pytest.raises(AggregationError, match=rf"\['{name}'\] are already taken"):
+        aggregate(spec)
+
+
+def test_names_inside_the_replaced_tree_may_be_reused():
+    spec = plant()
+    spec["campus"]["cables"]["EQ_COL"] = spec["campus"]["cables"].pop("TRUNK")
+    assert "EQ_COL" in aggregate(spec).spec["campus"]["cables"]
+
+
+# --- relays and island data -----------------------------------------------------------------------
+
+
+def test_relays_on_replaced_branches_are_dropped_and_named():
+    spec = plant()
+    spec["campus"]["relays"] = [
+        {
+            "name": "RMAIN",
+            "branch": "TRM",
+            "fault_bus": "COL",
+            "timing": "time_delayed",
+            "i_pickup_ka": t(0.5),
+        },
+        {
+            "name": "RFEED",
+            "branch": "CA1",
+            "fault_bus": "A1",
+            "timing": "time_delayed",
+            "i_pickup_ka": t(0.2),
+        },
+        {
+            "name": "RBUS",
+            "branch": "TRUNK",
+            "fault_bus": "COL",
+            "timing": "time_delayed",
+            "i_pickup_ka": t(0.3),
+        },
+    ]
+    agg = aggregate(spec)
+    assert [r["name"] for r in agg.spec["campus"]["relays"]] == ["RMAIN"]
+    assert any("['RBUS', 'RFEED']" in a for a in agg.assumptions)
+    aggregate_campus(spec)
+
+
+def test_relays_all_kept_means_no_relay_assumption():
+    spec = plant()
+    spec["campus"]["relays"] = [
+        {
+            "name": "RMAIN",
+            "branch": "TRM",
+            "fault_bus": "COL",
+            "timing": "time_delayed",
+            "i_pickup_ka": t(0.5),
+        }
+    ]
+    agg = aggregate(spec)
+    assert len(agg.spec["campus"]["relays"]) == 1 and not any(
+        "relay" in a for a in agg.assumptions
+    )
+
+
+@pytest.mark.parametrize("where", ["unit", "campus"])
+def test_island_data_is_dropped_with_an_assumption(where):
+    spec = plant()
+    c = spec["campus"]
+    c["units"]["AUX"] = {"kind": "load", "bus": "COL", "p_mw": t(0.5), "pf": t(0.95)}
+    if where == "unit":
+        c["units"]["AUX"]["island"] = {"critical": True}
+    else:
+        c["island"] = requirements()
+    build_campus(spec)
+    agg = aggregate(spec)
+    assert (
+        "island" not in agg.spec["campus"]
+        and "island" not in agg.spec["campus"]["units"]["AUX"]
+    )
+    assert any("island data is not carried" in a for a in agg.assumptions)
+
+
+def test_no_island_data_no_island_assumption():
+    assert not any("island" in a for a in aggregate(plant()).assumptions)
