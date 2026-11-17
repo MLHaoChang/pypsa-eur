@@ -9,7 +9,7 @@ Brief: "make sure the user interface through the different sections of the tool 
 ## What was shot
 
 Real app (API :8000, Vite :5173), no mocks, signed in as the dev admin, viewport 1280×800, one solve per project.
-`pypsa-gui/frontend/scripts/ui-cohesion-shots.mjs` took **312 screens** (and wrote one row of computed styles per screen):
+`pypsa-gui/frontend/scripts/ui-cohesion-shots.mjs` took **300 screens** over three templates, plus 12 canvas states for the data centre (and wrote one row of computed styles per screen):
 
 - three templates: **Data Center Energy Hub**, **Island Microgrid** and, because the brief asked for one more if a section looked different, **Industrial Hydrogen Hub**. The hub's sections use the same patterns as the other two; its only difference is a longer canvas legend. Findings below cite the data centre unless a template is named;
 - **Guided**: the 10 sections of `.scratch/project-workflow/design.md` §2.1, plus Results Summary, Reliability (Adequacy) and FMEA;
