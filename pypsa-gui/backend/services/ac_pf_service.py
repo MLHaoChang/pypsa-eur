@@ -51,10 +51,12 @@ _RESULT_DYNAMIC_ATTRS: tuple[tuple[str, tuple[str, ...]], ...] = (
     # the /results/unit_commitment endpoint serve them after the dispatch-fix
     # cycle of an auto-chained AC PF run.
     ("generators_t",    ("p", "q", "status", "start_up", "shut_down")),
-    ("storage_units_t", ("p", "state_of_charge")),
-    ("stores_t",        ("p", "e")),
+    ("storage_units_t", ("p", "q", "state_of_charge")),
+    ("stores_t",        ("p", "q", "e")),
     ("loads_t",         ("p", "q")),
-    ("buses_t",         ("marginal_price", "v_mag_pu", "v_ang")),
+    # p: the Bus "Net injection" metric; the flow's slack bus moves it.
+    ("buses_t",         ("p", "q", "marginal_price", "v_mag_pu", "v_ang")),
+    ("shunt_impedances_t", ("p", "q")),
     # PF-SAVE-1: every port's flow (p0, p1, p2, ...), read from the network
     # in `_attrs_of`; a multi-port link keeps its LP flow on each port.
     ("links_t",         ()),
@@ -64,10 +66,16 @@ _RESULT_DYNAMIC_ATTRS: tuple[tuple[str, tuple[str, ...]], ...] = (
 # LP snapshot holds them empty, so a q or |V| from an earlier flow never
 # reads as the LP's or lands back in the live network (GK A F3).
 _PF_ONLY_RESULTS = frozenset({
-    "generators_t.q", "loads_t.q",
+    "generators_t.q", "loads_t.q", "storage_units_t.q", "stores_t.q",
     "lines_t.q0", "lines_t.q1", "transformers_t.q0", "transformers_t.q1",
-    "buses_t.v_mag_pu",
+    "buses_t.q", "buses_t.v_mag_pu",
+    "shunt_impedances_t.p", "shunt_impedances_t.q",
 })
+
+# LP tables the flow overwrites that a record saved before PF-SAVE-1 lacks:
+# on such a project's reload they read as no data, never the flow's values
+# under the LP's name (GK A 1).
+_NOT_IN_LEGACY_RECORDS = frozenset({"buses_t.p"})
 
 
 def _attrs_of(accessor_name: str, accessor, attrs: tuple[str, ...]) -> tuple[str, ...]:
@@ -111,10 +119,34 @@ def _snapshot_result_state(n) -> dict:
 def _lp_snapshot(n) -> dict:
     """`_snapshot_result_state` with the PF-only tables emptied: the LP
     writes none of them, so whatever they hold came from an earlier flow."""
-    snap = _snapshot_result_state(n)
+    return _empty_pf_only(_snapshot_result_state(n))
+
+
+def _empty_pf_only(snap: dict) -> dict:
     for key in _PF_ONLY_RESULTS & snap.keys():
         snap[key] = snap[key].iloc[:, :0].copy()
     return snap
+
+
+def _output_tables(n, skip) -> dict:
+    """Deep copies of every time-varying output table of every component
+    not in `skip`, keyed `'<list_name>_t.<attr>'`: what the live network must
+    hold again after the flow, beyond the record's tables (GK A 1)."""
+    import copy
+    out: dict[str, pd.DataFrame] = {}
+    for c in n.components:
+        accessor_name = f"{c.list_name}_t"
+        try:
+            dynamic = getattr(n, accessor_name)
+            d = c.defaults
+            names = d.index[d["status"].astype(str).str.startswith("Output") & d["varying"].astype(bool)]
+        except Exception:
+            continue
+        for attr in names:
+            key = f"{accessor_name}.{attr}"
+            if key not in skip and attr in dynamic:
+                out[key] = copy.deepcopy(dynamic[attr])
+    return out
 
 
 def _restore_result_state(n, snapshot: dict) -> None:
@@ -140,7 +172,15 @@ def keep_lp_tables(n, lopf_results: dict) -> None:
     emptied. For a project saved before PF-SAVE-1, whose network.nc carries
     the flow's tables (GK A F5)."""
     snap = dict(lopf_results)
-    for key in _PF_ONLY_RESULTS & snap.keys():
+    # Every PF-only table is emptied, kept in the record or not, and an LP
+    # table the record lacks reads as no data (GK A 1).
+    for key in _PF_ONLY_RESULTS | (_NOT_IN_LEGACY_RECORDS - snap.keys()):
+        if key not in snap:
+            accessor_name, attr = key.split(".", 1)
+            live = getattr(getattr(n, accessor_name, None), attr, None)
+            if not isinstance(live, pd.DataFrame):
+                continue
+            snap[key] = live
         snap[key] = snap[key].iloc[:, :0].copy()
     _restore_result_state(n, snap)
 
@@ -460,12 +500,18 @@ def run_ac_pf_stage(
     # PF-SAVE-1: the live network gets the LP tables back on every outcome
     # (a flow, a non-converged flow, a raise inside or after it), so
     # network.nc and every default reader keep the LP dispatch; the flow's
-    # own values live only in `ac_pf_results`. Still in the caller's lock
-    # hold: no reader sees the PF-written frames (GK A F2, F6).
+    # own values live only in `ac_pf_results`. Every output table is put
+    # back, not only the record's, the PF-only ones emptied (GK A 1). Still
+    # in the caller's lock hold: no reader sees the PF-written frames (GK A
+    # F2, F6).
+    live_lp = {
+        **_empty_pf_only(_output_tables(network, lopf_snapshot.keys())),
+        **lopf_snapshot,
+    }
     try:
         return _flow_and_capture(network, config, phase, lopf_snapshot, revision)
     finally:
-        _restore_result_state(network, lopf_snapshot)
+        _restore_result_state(network, live_lp)
 
 
 def _flow_and_capture(network, config: SolverConfig, phase, lopf_snapshot: dict, revision) -> dict:
