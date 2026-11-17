@@ -1283,7 +1283,7 @@ def test_a_project_created_with_strings_assesses_as_a_genset_one_would(
 
     _served(monkeypatch)
     _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
-    g_name, _g = _dc_built(client, project_row, f"dc_g_{built}", "genset")
+    g_name, g_dir = _dc_built(client, project_row, f"dc_g_{built}", "genset")
     # Created last, so it is the session's loaded project.
     name, d = _dc_built(client, project_row, f"dc_{built}", built)
     meta = json.loads((d / "eh_template.json").read_text())
@@ -1320,6 +1320,23 @@ def test_a_project_created_with_strings_assesses_as_a_genset_one_would(
     ref = r.json()
     assert ref["built"] == {"mode": "genset", "notes": []}
     assert _assessed(out) == _assessed(ref)
+    # GK A: the saved files themselves, not only the answers. The strings
+    # project's saved network and sidecar, in genset form, are the genset
+    # project's saved ones (the create writes the same campus but the strings).
+    import pypsa
+
+    from tests.test_dc_backup_built import _same_network
+
+    def saved(p):
+        return (
+            pypsa.Network(str(p / "network.nc")),
+            json.loads((p / "island_config.json").read_text()),
+        )
+
+    (n_s, i_s), (n_g, i_g) = saved(d), saved(g_dir)
+    m, island, _notes, _strings = dc_backup.genset_form(n_s, i_s, built, n_g, i_g)
+    _same_network(m, n_g)
+    assert island == i_g
 
 
 def test_a_staged_project_assesses_with_its_own_build_plan(
