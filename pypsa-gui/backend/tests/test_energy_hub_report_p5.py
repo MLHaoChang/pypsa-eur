@@ -4,6 +4,7 @@ P5 — ReferenceDesignReport enrichment (sizing, TEA, export, GET store).
 Design: docs/superpowers/specs/2026-09-14-eh-reference-design.md §4
 Plan: Phase 5 — assembler enrichment for MVP-A.
 """
+
 from __future__ import annotations
 
 import json
@@ -38,12 +39,19 @@ def _ens_network() -> pypsa.Network:
     n.add("Carrier", "wind")
     n.add("Bus", "b", carrier="AC")
     n.add("Load", "l", bus="b", p_set=100.0)
-    n.add("Generator", "cheap", bus="b", carrier="gas",
-          p_nom=60.0, marginal_cost=10.0)
-    n.add("Generator", "backup", bus="b", carrier="gas",
-          p_nom=40.0, marginal_cost=200.0)
-    n.add("Generator", "wind1", bus="b", carrier="wind",
-          p_nom=25.0, marginal_cost=0.0, p_max_pu=0.3)
+    n.add("Generator", "cheap", bus="b", carrier="gas", p_nom=60.0, marginal_cost=10.0)
+    n.add(
+        "Generator", "backup", bus="b", carrier="gas", p_nom=40.0, marginal_cost=200.0
+    )
+    n.add(
+        "Generator",
+        "wind1",
+        bus="b",
+        carrier="wind",
+        p_nom=25.0,
+        marginal_cost=0.0,
+        p_max_pu=0.3,
+    )
     return n
 
 
@@ -61,36 +69,86 @@ def test_sizing_lists_each_asset_the_study_sized():
     assets are not rows; the carrier totals are unchanged."""
     n = _ens_network()
     n.add("Carrier", "battery")
-    n.add("Generator", "diesel_new", bus="b", carrier="gas", p_nom=0.0,
-          p_nom_extendable=True, p_nom_min=0.0, p_nom_max=12.0)
+    n.add(
+        "Generator",
+        "diesel_new",
+        bus="b",
+        carrier="gas",
+        p_nom=0.0,
+        p_nom_extendable=True,
+        p_nom_min=0.0,
+        p_nom_max=12.0,
+    )
     n.generators.loc["diesel_new", "p_nom_opt"] = 4.2
-    n.add("StorageUnit", "bess_new", bus="b", carrier="battery",
-          p_nom_extendable=True, p_nom_max=15.0, max_hours=4.0)
+    n.add(
+        "StorageUnit",
+        "bess_new",
+        bus="b",
+        carrier="battery",
+        p_nom_extendable=True,
+        p_nom_max=15.0,
+        max_hours=4.0,
+    )
     n.storage_units.loc["bess_new", "p_nom_opt"] = 2.5
     n.add("Bus", "h2", carrier="H2")
-    n.add("Link", "ely", bus0="b", bus1="h2", p_nom_extendable=True, p_nom_max=float("inf"))
+    n.add(
+        "Link",
+        "ely",
+        bus0="b",
+        bus1="h2",
+        p_nom_extendable=True,
+        p_nom_max=float("inf"),
+    )
     n.links.loc["ely", "p_nom_opt"] = 7.0
     n.add("Store", "tank", bus="h2", e_nom_extendable=True, e_nom_max=500.0)
     n.stores.loc["tank", "e_nom_opt"] = 30.0
-    n._objective = 1.0                     # solved (what an optimise sets)
+    n._objective = 1.0  # solved (what an optimise sets)
     sizing = R.sizing_summary_from_network(n)
     assert sizing["assets"] == [
-        {"component": "Generator", "name": "diesel_new", "carrier": "gas",
-         "built_mw": pytest.approx(4.2), "min_mw": 0.0, "max_mw": 12.0},
-        {"component": "StorageUnit", "name": "bess_new", "carrier": "battery",
-         "built_mw": pytest.approx(2.5), "min_mw": 0.0, "max_mw": 15.0,
-         "max_hours": 4.0, "built_mwh": pytest.approx(10.0)},
-        {"component": "Link", "name": "ely", "carrier": "", "built_mw": 7.0,
-         "min_mw": 0.0, "max_mw": None, "basis": "bus0"},
-        {"component": "Store", "name": "tank", "carrier": "", "built_mwh": 30.0,
-         "min_mwh": 0.0, "max_mwh": 500.0},
+        {
+            "component": "Generator",
+            "name": "diesel_new",
+            "carrier": "gas",
+            "built_mw": pytest.approx(4.2),
+            "min_mw": 0.0,
+            "max_mw": 12.0,
+        },
+        {
+            "component": "StorageUnit",
+            "name": "bess_new",
+            "carrier": "battery",
+            "built_mw": pytest.approx(2.5),
+            "min_mw": 0.0,
+            "max_mw": 15.0,
+            "max_hours": 4.0,
+            "built_mwh": pytest.approx(10.0),
+        },
+        {
+            "component": "Link",
+            "name": "ely",
+            "carrier": "",
+            "built_mw": 7.0,
+            "min_mw": 0.0,
+            "max_mw": None,
+            "basis": "bus0",
+        },
+        {
+            "component": "Store",
+            "name": "tank",
+            "carrier": "",
+            "built_mwh": 30.0,
+            "min_mwh": 0.0,
+            "max_mwh": 500.0,
+        },
     ]
     assert sizing["assets_solved"] is True
     # Not solved: no built size, never p_nom shown as built (GK A 30 A5).
     n._objective = None
     unsolved = R.sizing_summary_from_network(n)
     assert unsolved["assets_solved"] is False
-    assert [a.get("built_mw", a.get("built_mwh")) for a in unsolved["assets"]] == [None] * 4
+    assert [a.get("built_mw", a.get("built_mwh")) for a in unsolved["assets"]] == [
+        None
+    ] * 4
     assert unsolved["assets"][1]["built_mwh"] is None
     assert sizing["by_carrier"]["gas"] == pytest.approx(104.2)
 
@@ -99,19 +157,45 @@ def test_sizing_without_extendable_assets_has_no_rows():
     assert R.sizing_summary_from_network(_ens_network())["assets"] == []
 
 
-@pytest.mark.parametrize("name,carrier", [
-    ("__voll_b", "gas"), ("shed_b", "voll"), ("shed2_b", "load_shedding"),
-    ("flex_b", "dsr"), ("flex2_b", "demand_response")])
+@pytest.mark.parametrize(
+    "name,carrier",
+    [
+        ("__voll_b", "gas"),
+        ("shed_b", "voll"),
+        ("shed2_b", "load_shedding"),
+        ("flex_b", "dsr"),
+        ("flex2_b", "demand_response"),
+    ],
+)
 def test_slack_generators_are_not_sized_assets(name, carrier):
     """GK A 30 A7 survivor: the VOLL / load-shedding / demand-response slack
     the solve adds is extendable but never a unit the study sized; a real
     generator beside it still is a row."""
     n = _ens_network()
-    n.add("Generator", name, bus="b", carrier=carrier, p_nom_extendable=True,
-          marginal_cost=1e4)
+    n.add(
+        "Generator",
+        name,
+        bus="b",
+        carrier=carrier,
+        p_nom_extendable=True,
+        marginal_cost=1e4,
+    )
     n.add("Generator", "pv_new", bus="b", carrier="solar", p_nom_extendable=True)
     n._objective = 1.0
     assert [a["name"] for a in R.sizing_summary_from_network(n)["assets"]] == ["pv_new"]
+
+
+def test_a_sized_storage_with_no_duration_has_no_energy():
+    """GK A 30 A7 survivor: a built storage unit whose max_hours is not a
+    finite number has no MWh, rather than failing the summary."""
+    n = _ens_network()
+    n.add("StorageUnit", "bess_new", bus="b", p_nom_extendable=True, max_hours=4.0)
+    n.storage_units.loc["bess_new", "p_nom_opt"] = 2.5
+    n.storage_units.loc["bess_new", "max_hours"] = float("nan")
+    n._objective = 1.0
+    row = R.sizing_summary_from_network(n)["assets"][0]
+    assert row["built_mw"] == pytest.approx(2.5)
+    assert row["max_hours"] is None and row["built_mwh"] is None
 
 
 def test_tea_lcoe_is_cost_over_served_energy():
@@ -137,14 +221,12 @@ def test_tea_lcoe_none_when_energy_missing():
 
 def test_export_shape_is_stable_golden_keys():
     sections = empty_section_map(default="skipped")
-    sections["target"] = SectionState(
-        status="ok", payload={"binding": "system_cap"})
+    sections["target"] = SectionState(status="ok", payload={"binding": "system_cap"})
     sections["cost"] = SectionState(
         status="ok",
         payload={"total_system_cost_eur": 1.0, "period_basis": "single_period"},
     )
-    sections["frontier"] = SectionState(
-        status="not_established", note="not run")
+    sections["frontier"] = SectionState(status="not_established", note="not run")
     report = ReferenceDesignReport(
         archetype="strong_grid",
         pack_hash="deadbeef",
@@ -156,8 +238,9 @@ def test_export_shape_is_stable_golden_keys():
         pipeline=EHStudyPipeline(),
     )
     exported = R.export_reference_design(report)
-    expected_keys = json.loads(
-        (FIXTURES / "mvp_a_export_keys.json").read_text())["keys"]
+    expected_keys = json.loads((FIXTURES / "mvp_a_export_keys.json").read_text())[
+        "keys"
+    ]
     assert list(exported.keys()) == expected_keys
     again = json.loads(json.dumps(exported))
     assert list(again.keys()) == expected_keys
@@ -168,12 +251,16 @@ def test_mvp_a_study_fills_sizing_and_tea():
     from services.pypsa_service import PyPSAService
 
     n = _ens_network()
-    pack = default_strong_grid_pack().model_copy(update={
-        "availability": AvailabilityTarget(ens_cap_permyriad=1000.0),
-    })
+    pack = default_strong_grid_pack().model_copy(
+        update={
+            "availability": AvailabilityTarget(ens_cap_permyriad=1000.0),
+        }
+    )
     PyPSAService.set_network(n)
     report = S.run_eh_study(
-        n, pack, SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
+        n,
+        pack,
+        SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
         lock=PyPSAService.get_lock(),
         stop_event=threading.Event(),
         log_queue=queue.SimpleQueue(),
@@ -196,8 +283,7 @@ def test_mvp_a_study_fills_sizing_and_tea():
 
 def test_store_and_load_last_eh_report():
     sections = empty_section_map(default="skipped")
-    sections["cost"] = SectionState(
-        status="ok", payload={"total_system_cost_eur": 2.0})
+    sections["cost"] = SectionState(status="ok", payload={"total_system_cost_eur": 2.0})
     report = ReferenceDesignReport(
         archetype="strong_grid",
         pack_hash="a",
@@ -221,13 +307,27 @@ def test_get_eh_reference_design_payload_204_when_missing():
 
 def _fmea_report(rows, class_a_rows):
     sections = empty_section_map(default="skipped")
-    sections["fmea_top"] = SectionState(status="ok", payload={
-        "rows": rows, "class_a": {"status": "ok", "rows": class_a_rows,
-                                  "copt_fidelity_note": "netted: wind"}})
+    sections["fmea_top"] = SectionState(
+        status="ok",
+        payload={
+            "rows": rows,
+            "class_a": {
+                "status": "ok",
+                "rows": class_a_rows,
+                "copt_fidelity_note": "netted: wind",
+            },
+        },
+    )
     store: dict = {}
-    R.store_eh_report(store, ReferenceDesignReport(
-        archetype="strong_grid", pack_hash="a", assumptions_hash="b",
-        sections=sections))
+    R.store_eh_report(
+        store,
+        ReferenceDesignReport(
+            archetype="strong_grid",
+            pack_hash="a",
+            assumptions_hash="b",
+            sections=sections,
+        ),
+    )
     body, status = R.eh_reference_design_http_payload(store)
     assert status == 200
     return body["sections"]["fmea_top"]["payload"]
@@ -239,12 +339,16 @@ def test_a_saved_fmea_top_from_before_lc30_is_not_served_as_per_year():
     it first in the class-A note the panel shows beside the table."""
     payload = _fmea_report(
         [{"mode_id": "link:L1:forced_outage", "criticality_eur_per_year": 5.0}],
-        [{"mode_id": "generator:g:forced_outage", "criticality_eur_per_year": 9.0}])
+        [{"mode_id": "generator:g:forced_outage", "criticality_eur_per_year": 9.0}],
+    )
     assert [r["criticality_basis"] for r in payload["rows"]] == ["per_horizon_legacy"]
-    assert [r["criticality_basis"] for r in payload["class_a"]["rows"]] == ["per_horizon_legacy"]
+    assert [r["criticality_basis"] for r in payload["class_a"]["rows"]] == [
+        "per_horizon_legacy"
+    ]
     assert payload["criticality_caveat"] == R.LEGACY_CRITICALITY_NOTE
     assert payload["class_a"]["copt_fidelity_note"] == (
-        R.LEGACY_CRITICALITY_NOTE + "; netted: wind")
+        R.LEGACY_CRITICALITY_NOTE + "; netted: wind"
+    )
     # the numbers are kept as stored; only their basis is stated
     assert payload["rows"][0]["criticality_eur_per_year"] == 5.0
 
@@ -252,8 +356,11 @@ def test_a_saved_fmea_top_from_before_lc30_is_not_served_as_per_year():
 def test_a_saved_class_c_row_is_not_legacy():
     """Class C was per event before LC-30 and still is: an old C row is left
     alone, and a payload of only C rows carries no caveat."""
-    c_row = {"mode_id": "cold_snap", "failure_class": "C",
-             "criticality_eur_per_year": 7.0}
+    c_row = {
+        "mode_id": "cold_snap",
+        "failure_class": "C",
+        "criticality_eur_per_year": 7.0,
+    }
     payload = _fmea_report([c_row], [])
     assert payload["rows"] == [c_row] and "criticality_caveat" not in payload
 
@@ -264,11 +371,21 @@ def test_the_review_marks_a_legacy_report_read_from_the_study_record(monkeypatch
     from services.adequacy.eh_review import review_latest
 
     sections = empty_section_map(default="skipped")
-    sections["fmea_top"] = SectionState(status="ok", payload={"rows": [
-        {"mode_id": "link:L1:forced_outage", "name": "L1",
-         "criticality_eur_per_year": 5.0}]})
-    report = ReferenceDesignReport(archetype="strong_grid", pack_hash="a",
-                                   assumptions_hash="b", sections=sections)
+    sections["fmea_top"] = SectionState(
+        status="ok",
+        payload={
+            "rows": [
+                {
+                    "mode_id": "link:L1:forced_outage",
+                    "name": "L1",
+                    "criticality_eur_per_year": 5.0,
+                }
+            ]
+        },
+    )
+    report = ReferenceDesignReport(
+        archetype="strong_grid", pack_hash="a", assumptions_hash="b", sections=sections
+    )
     seen = {}
     real = R.mark_legacy_report
 
@@ -277,18 +394,31 @@ def test_the_review_marks_a_legacy_report_read_from_the_study_record(monkeypatch
         return seen["out"]
 
     monkeypatch.setattr(R, "mark_legacy_report", spy)
-    out = review_latest({}, {"status": "done",
-                             "report": R.export_reference_design(report)})
+    out = review_latest(
+        {}, {"status": "done", "report": R.export_reference_design(report)}
+    )
     assert out["stale"] is True
     rows = seen["out"]["sections"]["fmea_top"]["payload"]["rows"]
     assert [r["criticality_basis"] for r in rows] == ["per_horizon_legacy"]
 
 
 def test_a_current_fmea_top_is_served_unchanged():
-    rows = [{"mode_id": "link:L1:forced_outage", "criticality_eur_per_year": 5.0,
-             "criticality_basis": "annualised", "horizon_years": 0.5}]
-    a_rows = [{"mode_id": "generator:g:forced_outage", "criticality_eur_per_year": 9.0,
-               "criticality_basis": "annualised", "horizon_years": 0.5}]
+    rows = [
+        {
+            "mode_id": "link:L1:forced_outage",
+            "criticality_eur_per_year": 5.0,
+            "criticality_basis": "annualised",
+            "horizon_years": 0.5,
+        }
+    ]
+    a_rows = [
+        {
+            "mode_id": "generator:g:forced_outage",
+            "criticality_eur_per_year": 9.0,
+            "criticality_basis": "annualised",
+            "horizon_years": 0.5,
+        }
+    ]
     payload = _fmea_report(rows, a_rows)
     assert payload["rows"] == rows and payload["class_a"]["rows"] == a_rows
     assert "criticality_caveat" not in payload
