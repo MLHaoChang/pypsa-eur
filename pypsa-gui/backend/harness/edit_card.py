@@ -239,6 +239,7 @@ def _says(rows: list[dict], sets: list[dict] = ()) -> str:
         return f"{what} {old} → {new}{unit}{stored}"
     grouped = {(g["component_class"], name, g["attribute"]) for g in sets for name in g["names"]}
     return "; ".join([phrase(g) for g in sets] + [one(row) for row in rows if row["role"] == "typed"
+                                                   and not row.get("unchanged")
                                                    and (row.get("component_class"), row["name"], row["field"]) not in grouped])
 
 
@@ -1017,7 +1018,7 @@ _SOLVER_WORDS: dict[str, tuple[str, str, dict | None]] = {
     "reserve_share_wind": ("Reserve for wind output", "", None),
     # homer-parity 04a, as Model Horizon's period-economics step says them.
     "load_growth_pct_per_year": ("Load growth", "% per year", None),
-    "load_growth_base_year": ("Load growth starts from year", "", None),
+    "load_growth_base_year": ("Growth from year", "", None),
     "load_scalers_by_carrier": ("Load multiplier", "\u00d7", None),
 }
 # The load-growth inputs derive `load_scalers_by_carrier` (homer-parity 04a): the
@@ -1087,7 +1088,7 @@ def _settle(row: dict, value):
     return _setting(value)
 
 
-def _solver_row(key: str, old, new, *, applies: bool = True) -> dict:
+def _solver_row(key: str, old, new, *, applies: bool = True, unchanged: bool = False) -> dict:
     base = key.split(".")[0]
     label, unit, words = _SOLVER_WORDS.get(base, (key, "", None))
     if base != key:
@@ -1096,6 +1097,8 @@ def _solver_row(key: str, old, new, *, applies: bool = True) -> dict:
            "old": _setting(old), "new": _setting(new), "unit": unit, "role": "typed"}
     if not applies:
         row["old_applies"] = False
+    if unchanged:  # shown beside a changed growth input; no arrow, not in the headline
+        row["unchanged"] = True
     if words:
         row["words"] = {"old": words.get(old, old), "new": words.get(new, new)}
     if base in _SHARES and _numeric(new):
@@ -1143,9 +1146,11 @@ def _solver_preview(args: dict) -> list[dict]:
             old, new = old or {}, new or {}
             subs = [k for k in dict.fromkeys([*old, *new])
                     if key in shown or not _same(old.get(k), new.get(k))]
-            rows += [_solver_row(f"{key}.{k}", old.get(k), new.get(k)) for k in subs]
+            rows += [_solver_row(f"{key}.{k}", old.get(k), new.get(k), unchanged=key in shown)
+                     for k in subs]
             continue
-        rows.append(_solver_row(key, old, new, applies=key not in _ROLLING or rolling_before))
+        rows.append(_solver_row(key, old, new, applies=key not in _ROLLING or rolling_before,
+                                unchanged=key in shown))
     if after.get("solve_strategy") == "rolling" and not rolling_before:
         rows.append(_note("", "", "solve_strategy", ROLLING_NOTE))
     if not rows:

@@ -382,6 +382,23 @@ def test_solver_card_shows_the_stored_start_year_beside_a_rate_only_change(grid)
                          "load_scalers_by_carrier.electrical"}
     assert rows["load_growth_base_year"]["old"] == rows["load_growth_base_year"]["new"] == 2030
     assert rows["load_scalers_by_carrier.electrical"]["new"] == '{"2035":1.159274}'
+    # the start year the change leaves shows as unchanged: no "2030 → 2030" (UX)
+    assert rows["load_growth_base_year"]["unchanged"] is True
+    assert "unchanged" not in rows["load_growth_pct_per_year.electrical"]
+    assert "Growth from year" not in card["says"]
+    assert "2030 \u2192 2030" not in card["says"]
+
+
+def test_the_cards_load_growth_labels_are_model_horizons():
+    """The card says the rate and its start year in the panel's words (UX parity)."""
+    import pathlib
+
+    panel = (pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages"
+             / "modelHorizon" / "StepPeriodEconomics.tsx").read_text()
+    label, unit, _ = edit_card._SOLVER_WORDS["load_growth_pct_per_year"]
+    assert f"{label} ({unit})" in panel  # "Load growth (% per year)"
+    label, _, _ = edit_card._SOLVER_WORDS["load_growth_base_year"]
+    assert f'aria-label="{label}"' in panel  # "Growth from year"
 
 
 def test_solver_card_shows_the_stored_rate_beside_a_start_year_only_change(grid):
