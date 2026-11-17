@@ -23,7 +23,8 @@ import { Term, type TermKey } from '../shared/Term'
 import { useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
 import { displayName } from '../../../utils/displayName'
 import { openConnectionLimitEditor } from '../../../layout/flowNavigation'
-import { useImportLinks } from '../../../components/gridReadiness/ConnectionLimits'
+import { useCapacityUnit, useImportLinks, useStagedConnection } from '../../../components/gridReadiness/ConnectionLimits'
+import type { Link } from '../../../api/types'
 import { GridReadinessScorecard, summaryText, useGridReadiness, useScorecardOpen }
   from '../../../components/gridReadiness/GridReadinessScorecard'
 
@@ -99,24 +100,37 @@ function SiteRow({ k, term, label, row, liveStudy }: {
 }
 
 /** The connection limit (template-e2e 02): read here, edited on the Connection limits line in the field
- *  drawer, the same editor Expert's Connection & grid shows. */
-function ConnectionLimitRow({ liveStudy }: { liveStudy: boolean }) {
+ *  drawer, the same editor Expert's Connection & grid shows. One row per import link. A staged site's
+ *  energization schedule caps each period, so there the limit is shown with that reason and no Edit. */
+function ConnectionLimitRows({ liveStudy }: { liveStudy: boolean }) {
   // The import links themselves, the record the editor writes, so a save shows here at once.
   const links = useImportLinks()
-  if (!links.length) return null
-  const mwValue = links.reduce((sum, l) => sum + l.p_nom, 0)
+  const staged = useStagedConnection()
+  return <>{links.map(l => (
+    <ConnectionLimitRow key={l.name} link={l} named={links.length > 1} staged={staged} liveStudy={liveStudy} />
+  ))}</>
+}
+
+function ConnectionLimitRow({ link, named, staged, liveStudy }: {
+  link: Link; named: boolean; staged: boolean; liveStudy: boolean
+}) {
+  const unit = useCapacityUnit(link.name)
   return (
     <li className="flex flex-wrap items-center gap-2 text-[12px]">
       <span data-testid="hub-site-connection-limit" className="flex-1 min-w-[16rem]">
         <span className="mr-1 text-success">✓</span>
-        Connection limit: <span className="text-text">{mw(mwValue)}</span>
+        Connection limit{named ? ` · ${displayName(link.name)}` : ''}:{' '}
+        <span className="text-text">{`${Number(link.p_nom.toPrecision(6))} ${unit}`}</span>
+        {staged && <span className="text-muted"> (set per period by the energization schedule)</span>}
       </span>
-      <button type="button" data-testid="hub-site-connection-limit-edit" disabled={liveStudy}
-        title={liveStudy ? LIVE_STUDY_EDIT : 'Change the connection limit here'}
-        onClick={openConnectionLimitEditor}
-        className="shrink-0 text-[11px] text-accent hover:underline disabled:opacity-50">
-        Edit ›
-      </button>
+      {!staged && (
+        <button type="button" data-testid="hub-site-connection-limit-edit" disabled={liveStudy}
+          title={liveStudy ? LIVE_STUDY_EDIT : 'Change the connection limit here'}
+          onClick={openConnectionLimitEditor}
+          className="shrink-0 text-[11px] text-accent hover:underline disabled:opacity-50">
+          Edit ›
+        </button>
+      )}
     </li>
   )
 }
@@ -215,7 +229,7 @@ export function SiteCard() {
         ) : rows ? (
           <ul className="flex flex-col gap-2">
             {ROW_META.map(m => <SiteRow key={m.k} {...m} row={rows[m.k]} liveStudy={liveStudy} />)}
-            {archetype !== 'off_grid' && <ConnectionLimitRow liveStudy={liveStudy} />}
+            {archetype !== 'off_grid' && <ConnectionLimitRows liveStudy={liveStudy} />}
           </ul>
         ) : (
           isError ? (

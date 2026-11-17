@@ -11,6 +11,13 @@ vi.mock('../flowScope/useFlowScope', () => ({ useFlowScope: () => ({ registry: {
 vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolvedValue([
   { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]), updateBus: vi.fn(),
   getLinks: vi.fn().mockResolvedValue([]), updateLink: vi.fn() } }))
+const hub = vi.hoisted(() => ({ template: null as null | { energization: unknown[] } }))
+vi.mock('../../pages/hubDesign/useHubData', () => ({ useHubTemplate: () => ({ template: hub.template, isPending: false }) }))
+vi.mock('../../api/assetSchema', async (orig) => {
+  const actual = await orig<typeof import('../../api/assetSchema')>()
+  return { ...actual, assetSchemaApi: { ...actual.assetSchemaApi,
+    units: vi.fn(async (component: string, name: string) => ({ component, name, units: name === 'h2_import' ? { p_nom: 't/h' } : {} })) } }
+})
 vi.mock('../../api/campusElectrical', async (orig) => {
   const actual = await orig<typeof import('../../api/campusElectrical')>()
   return { ...actual, campusApi: { ...actual.campusApi, gridReadiness: vi.fn(), setGridLimit: vi.fn(), resetGridLimit: vi.fn() } }
@@ -27,7 +34,7 @@ function mount() {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <ConnectionLimits /></QueryClientProvider>)
 }
-afterEach(() => { cleanup(); useUIStore.setState({ uiMode: 'expert' }) })
+afterEach(() => { cleanup(); hub.template = null; useUIStore.setState({ uiMode: 'expert' }) })
 
 const setting = (item: string, over: Record<string, unknown> = {}) => ({
   item, user: null, default: { value: 5, source: 'assumed', origin: 'placeholder' }, ...over })
@@ -248,7 +255,7 @@ describe('ConnectionLimits', () => {
     const save = screen.getByRole('button', { name: 'Save connection limit' })
     expect(save).toHaveProperty('disabled', true)
     fireEvent.change(input, { target: { value: '0' } })
-    expect(screen.getByText('The connection limit must be above 0 MW.')).toBeTruthy()
+    expect(screen.getByText('Connection limit: must be above 0 MW.')).toBeTruthy()
     expect(save).toHaveProperty('disabled', true)
     fireEvent.change(input, { target: { value: '45' } })
     fireEvent.click(save)
@@ -262,5 +269,40 @@ describe('ConnectionLimits', () => {
     mount()
     expect(await screen.findByText(/No grid connection is tagged/)).toBeTruthy()
     expect(screen.queryByTestId('connection-limit-connection_limit')).toBeNull()
+  })
+
+  it('shows one line per import link, named and in its own unit', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([
+      { name: 'grid_import', eh_role: 'grid_import', p_nom: 40 }, { name: 'h2_import', eh_role: 'grid_import', p_nom: 2 }] as never)
+    mount()
+    await waitFor(() => expect(screen.getAllByTestId('connection-limit-connection_limit')).toHaveLength(2))
+    const [grid, h2] = screen.getAllByTestId('connection-limit-connection_limit')
+    expect(grid.textContent).toMatch(/Connection limit · Grid import: 40 MW/)
+    await waitFor(() => expect(h2.textContent).toMatch(/Connection limit · H2 import: 2 t\/h/))
+    expect(screen.getByLabelText('Connection limit (t/h), H2 import')).toBeTruthy()
+  })
+
+  it('on a staged site shows the limit with its reason and no editor', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
+      row('energization_peak:2027', { unit: 'MW', limit: 25 }), row('energization_peak:2030', { unit: 'MW', limit: 35 })] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'grid_import', eh_role: 'grid_import', p_nom: 35 }] as never)
+    hub.template = { energization: [{ year: 2027, available_import_mw: 25 }, { year: 2030, available_import_mw: 35 }] }
+    mount()
+    expect((await screen.findByTestId('connection-limit-staged')).textContent).toMatch(/Set per period: see Energization/)
+    expect(screen.queryByTestId('limit-editor-connection_limit')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save connection limit' })).toBeNull()
+  })
+
+  it('keeps the rejected entry and opens the refusal with the label', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'grid_import', eh_role: 'grid_import', p_nom: 40 }] as never)
+    vi.mocked(networkApi.updateLink).mockClear().mockRejectedValue(new Error('refused by the server'))
+    mount()
+    const input = await screen.findByLabelText('Connection limit (MW)')
+    fireEvent.change(input, { target: { value: '55' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save connection limit' }))
+    expect((await screen.findByTestId('limit-error-connection_limit')).textContent).toMatch(/^Connection limit: /)
+    expect((screen.getByLabelText('Connection limit (MW)') as HTMLInputElement).value).toBe('55')
   })
 })

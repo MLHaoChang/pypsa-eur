@@ -17,6 +17,8 @@ import {
 } from '../../api/campusElectrical'
 import { networkApi } from '../../api/network'
 import type { Link } from '../../api/types'
+import { assetSchemaApi } from '../../api/assetSchema'
+import { useHubTemplate } from '../../pages/hubDesign/useHubData'
 import { displayName } from '../../utils/displayName'
 import { updateAsset } from '../../utils/assetWrite'
 import { useUIStore } from '../../store/uiStore'
@@ -189,26 +191,37 @@ export function useImportLinks(): Link[] {
   return ((q.data ?? []) as Link[]).filter(l => l.eh_role === 'grid_import')
 }
 
-/** The connection limit (template-e2e 02): each import link's capacity in MW, written through the ordinary
- *  link update, so Expert's Properties shows the same number. A staged site is further capped per period by
- *  its energization schedule (the Energization line). */
-function ConnectionLimitLine({ links, staged }: { links: Link[]; staged: boolean }) {
+/** A staged site: its energization schedule caps every period, so the one connection limit is not
+ *  what binds and is shown, not edited, until per-period editing exists (template-e2e 02b). */
+export function useStagedConnection(): boolean {
+  const { template } = useHubTemplate()
+  return (template?.energization ?? []).length > 0
+}
+
+/** A link's capacity unit: it follows the bus (t/h on a tonne bus), MW on an electric one. */
+export function useCapacityUnit(link: string): string {
+  const q = useQuery({ queryKey: ['assetUnits', 'Link', link], queryFn: () => assetSchemaApi.units('Link', link),
+    staleTime: 60_000 })
+  return q.data?.units?.p_nom || 'MW'
+}
+
+/** The connection limit's label: "Connection limit (MW)", and the link's plain name when there are several. */
+export const connectionLimitLabel = (unit: string, link?: string) =>
+  `Connection limit (${unit})${link ? `, ${displayName(link)}` : ''}`
+
+/** The connection limit (template-e2e 02): an import link's capacity, written through the ordinary link
+ *  update, so Expert's Properties shows the same number. One line per import link. */
+function ConnectionLimitLine({ link, named, staged }: { link: Link; named: boolean; staged: boolean }) {
   const project = useUIStore(s => s.currentProject) ?? ''
   const qc = useQueryClient()
-  const [text, setText] = useState<Record<string, string>>(
-    () => Object.fromEntries(links.map(l => [l.name, String(l.p_nom)])))
+  const unit = useCapacityUnit(link.name)
+  const label = connectionLimitLabel(unit, named ? link.name : undefined)
+  const [text, setText] = useState(String(link.p_nom))
   const [error, setError] = useState<string | null>(null)
-  const rows = links.map(l => {
-    const t = text[l.name] ?? ''
-    const n = Number(t)
-    return { link: l, text: t, n, ok: t.trim() !== '' && Number.isFinite(n) && n > 0, changed: n !== l.p_nom }
-  })
-  const valid = rows.every(r => r.ok)
-  const dirty = rows.some(r => r.changed)
+  const n = Number(text)
+  const ok = text.trim() !== '' && Number.isFinite(n) && n > 0
   const save = useMutation({
-    mutationFn: async () => {
-      for (const r of rows) if (r.changed) await updateAsset(qc, project, 'links', r.link.name, { p_nom: r.n })
-    },
+    mutationFn: () => updateAsset(qc, project, 'links', link.name, { p_nom: n }),
     onMutate: () => setError(null),
     // The readiness rows, the Site card's readiness and the flow's checks read the capacity too.
     onSuccess: () => Promise.all([
@@ -216,34 +229,37 @@ function ConnectionLimitLine({ links, staged }: { links: Link[]; staged: boolean
       qc.invalidateQueries({ queryKey: nk(project, 'results', 'eh_readiness') }),
       qc.invalidateQueries({ queryKey: nk(project, 'flow') }),
     ]),
-    onError: (e: unknown) => setError(blockerMessage(e)),
+    onError: (e: unknown) => setError(`Connection limit: ${blockerMessage(e)}`),
   })
   return (
-    <li data-testid="connection-limit-connection_limit" className="text-[12px]">
-      <span className="font-semibold">Connection limit</span>
-      {': '}<span className="tabular-nums">{links.map(l => `${Number(l.p_nom.toPrecision(6))} MW`).join(' · ')}</span>
-      <span className="block text-muted">
-        The most the site can draw from the grid{staged ? ' once fully energized; Energization caps each period below it' : ''}.
-      </span>
-      <div className="mt-1 flex flex-col gap-1" data-testid="limit-editor-connection_limit">
-        {rows.map(r => (
-          <div key={r.link.name} className="flex items-center gap-1 text-[11px]">
-            <input aria-label={links.length > 1 ? `Connection limit (MW), ${displayName(r.link.name)}` : 'Connection limit (MW)'}
-              type="number" inputMode="decimal" min={0} step="any" value={r.text} aria-invalid={!r.ok}
-              onChange={e => setText(p => ({ ...p, [r.link.name]: e.target.value }))}
-              className="w-24 rounded border border-border bg-bg px-1 py-0.5 tabular-nums" />
-            <span className="text-muted">MW{links.length > 1 ? `, ${displayName(r.link.name)}` : ''}</span>
+    <li data-testid="connection-limit-connection_limit" data-link={link.name} className="text-[12px]">
+      <span className="font-semibold">Connection limit{named ? ` · ${displayName(link.name)}` : ''}</span>
+      {': '}<span className="tabular-nums">{`${Number(link.p_nom.toPrecision(6))} ${unit}`}</span>
+      {staged ? (
+        <span className="block text-muted" data-testid="connection-limit-staged">
+          Set per period: see Energization below, which caps each period. Editing it per period comes later.
+        </span>
+      ) : (
+        <>
+          <span className="block text-muted">The most the site can draw through this connection.</span>
+          <div className="mt-1 flex flex-col gap-1" data-testid="limit-editor-connection_limit">
+            <div className="flex items-center gap-1 text-[11px]">
+              <input aria-label={label} type="number" inputMode="decimal" min={0} step="any" value={text}
+                aria-invalid={!ok} onChange={e => setText(e.target.value)}
+                className="w-24 rounded border border-border bg-bg px-1 py-0.5 tabular-nums" />
+              <span className="text-muted">{unit}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <button type="button" disabled={!ok || n === link.p_nom || save.isPending} onClick={() => save.mutate()}
+                className="rounded border border-border px-2 py-0.5 disabled:opacity-50">
+                Save connection limit
+              </button>
+            </div>
+            {!ok && <p className="text-[11px] text-warn">Connection limit: must be above 0 {unit}.</p>}
+            {error && <p role="alert" className="text-[11px] text-warn" data-testid="limit-error-connection_limit">{error}</p>}
           </div>
-        ))}
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
-          <button type="button" disabled={!valid || !dirty || save.isPending} onClick={() => save.mutate()}
-            className="rounded border border-border px-2 py-0.5 disabled:opacity-50">
-            Save connection limit
-          </button>
-        </div>
-        {!valid && <p className="text-[11px] text-warn">The connection limit must be above 0 MW.</p>}
-        {error && <p role="alert" className="text-[11px] text-warn" data-testid="limit-error-connection_limit">{error}</p>}
-      </div>
+        </>
+      )}
     </li>
   )
 }
@@ -277,14 +293,14 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
   const excluded = (q.data?.excluded ?? []).filter(r => kindOf(r) in SHOWN && kindOf(r) !== 'scr')
   const importLinks = useImportLinks()
   const showLimit = importLinks.length > 0 && (!only || only.includes('connection_limit'))
-  const staged = (q.data?.rows ?? []).some(r => kindOf(r) === 'energization_peak')
+  const staged = useStagedConnection()
   return (
     <PageSection panelSection="connection_limits" title="Connection limits" hint="Set the ones you know">
       {showLimit && (
         <ul className="mb-3 flex flex-col gap-3">
           {/* Keyed on what is stored, so a save reloads the field. */}
-          <ConnectionLimitLine key={importLinks.map(l => `${l.name}:${l.p_nom}`).join('|')}
-            links={importLinks} staged={staged} />
+          {importLinks.map(l => <ConnectionLimitLine key={`${l.name}:${l.p_nom}`} link={l}
+            named={importLinks.length > 1} staged={staged} />)}
         </ul>
       )}
       {only && kinds.length === 0 && showLimit ? null

@@ -7,6 +7,7 @@ import {
   HelpCircle, ExternalLink,
 } from 'lucide-react'
 import { H2Icon } from '../components/AssetIcons'
+import { SkeletonLines } from '../components/Skeleton'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
@@ -952,6 +953,11 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   ]
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
+  // An edit asked for before the schema arrived (a drawer opened from a flow item): busy, never blank fields.
+  if (!open && mode === 'detail' && !schema && editRequest?.type === 'Link' && editRequest.name === link.name) {
+    return <div className="p-3"><SkeletonLines what="the link's fields" rows={4} testId="link-edit-loading" /></div>
+  }
+
   if (!open && mode === 'detail') {
     return (
       <>
@@ -1048,6 +1054,11 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
             (buses as Bus[]).find(b => b.name === form[k])?.carrier ?? ''), form, 'max_supply_temp_c', 'max_pressure_bar')}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
+            // template-e2e 02: one value, two views.
+            ...(link.eh_role === 'grid_import' ? { p_nom: (
+              <p className="col-span-2 -mt-0.5 text-[10px] text-muted" data-testid="link-capacity-connection-limit">
+                Same value as Connection limit under Connection &amp; grid.
+              </p>) } : {}),
             p_nom_max: (
               <div className="col-span-2 -mt-0.5">
                 <button type="button" onClick={() => setVintageOpen(true)}

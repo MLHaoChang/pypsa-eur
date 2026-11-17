@@ -87,7 +87,7 @@ export interface FlowSection {
   state: FlowSectionState | null
   required: boolean
   items: FlowItem[]
-  /** One line for the rail ("Grid import, 40 MW"); `readiness`: "n to do, m to check". */
+  /** One line for the rail ("1 grid connection, 40 MW"); `readiness`: "n to do, m to check". */
   summary: string | null
   /** Sections 2, 4, 5 and 6: what the section holds, for display only. */
   holds?: FlowHeld[]
