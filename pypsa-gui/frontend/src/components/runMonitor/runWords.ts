@@ -129,6 +129,7 @@ export const FIELD_WORDS: Record<string, { words: string; unit: string }> = {
 export const RUN_WORDS: Record<string, string> = {
   solve_queue_enqueue: 'Queued solves', run_simulation: 'Solves', run_ac_pf_stage: 'Load-flow checks',
   generate_report: 'Study reports', run_investment_case: 'Investment case',
+  update_solver_config: 'Switching Load flow on',
 }
 
 const number = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/\.?0+$/, ''))

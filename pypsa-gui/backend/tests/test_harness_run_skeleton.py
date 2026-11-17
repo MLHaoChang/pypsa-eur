@@ -446,6 +446,20 @@ def _eh_study_reads_the_run_project(run_ctx, project_id, monkeypatch):
     return seen == [str(project_id)]
 
 
+def _solver_config_writes_the_run_project(run_ctx, front):
+    """Study harness 15 (SH15-PF-1): grid_only's setup switches Load flow on in the run's
+    project's solver config, a merge of that one key; the foreground's config is untouched."""
+    from services.study.runner import _on_ctx
+    run_ctx.solver_state["solver_config"].voll = 1234.0  # a non-default value the merge must keep
+    run_cfg = run_ctx.solver_state["solver_config"]
+    voll, was_front = run_cfg.voll, front.solver_state["solver_config"].run_ac_pf_after_lopf
+    assert run_cfg.run_ac_pf_after_lopf is False
+    _on_ctx(run_ctx, chat_tools.update_solver_config, {"run_ac_pf_after_lopf": True})
+    after = run_ctx.solver_state["solver_config"]
+    return (after.run_ac_pf_after_lopf is True and after.voll == voll == 1234.0
+            and front.solver_state["solver_config"].run_ac_pf_after_lopf is was_front)
+
+
 def _case_tools_read_the_run_project(run_ctx, monkeypatch):
     """Study harness 14 (GK B (52) I1, #875): the investment case starts on the run's project, not the
     foreground's, and `solve_ppa_price` reads the run's own network; neither takes a project argument.
@@ -532,6 +546,7 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
             'run_eh_study': _eh_study_reads_the_run_project(run_ctx, project_id, monkeypatch),
             **_case_tools_read_the_run_project(run_ctx, monkeypatch),
             'site_scene_apply': _scene_apply_on_the_run_project(run_ctx, site[1]),
+            'update_solver_config': _solver_config_writes_the_run_project(run_ctx, front),
         }
         assert PyPSAService.get_network() is front.network  # the foreground is untouched
     assert seen == {tool: True for tool in run_profiles.BOUND_CONTEXT_TOOLS}
