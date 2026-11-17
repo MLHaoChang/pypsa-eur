@@ -26,6 +26,7 @@
 // shows as the new run's: it re-reads the state, warns while the backend says a
 // run is going on, and says once it ends whether the results it saved are the
 // run asked for.
+import GridComplianceSection from '../components/GridComplianceSection'
 import { assetLabel } from './results/investment/financeModel'
 import { SiteTypeSelect } from '../components/reliabilityGoal/SiteTypeSelect'
 import { useEffect, useRef, useState } from 'react'
@@ -279,6 +280,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
         <DcBackupSection name={name} />
         <DcArchitectureSection name={name} />
         <IntentComparisonSection name={name} gridCode={state.data.settings?.profile ?? null} />
+        <GridComplianceSection name={name} />
       </>)}
       {part === 'results' && (state.data.results
         ? <ResultsSection state={state.data} pending={pending} />
