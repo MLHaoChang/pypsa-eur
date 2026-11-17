@@ -324,3 +324,47 @@ def test_either_side_missing_alone_blocks_the_pass(case, tmp_path, drop):
     assert bool(summary["not_compared"]["bus"]) == (drop == "bus")
     assert bool(summary["not_compared"]["branches"]) == (drop == "branch")
     assert summary["pass"] is False
+
+
+def _small_run(tmp_path, rated):
+    """A campus whose plant alone passes the default profile's limits."""
+    run, _ = _run(tmp_path, _hub(rated=rated))
+    plant = harmonics_campus(run).query("level == 'poc'").iloc[0]
+    assert plant["verdict"] in ("pass", "unknown")
+    return run, sorted(plant["u_h_pct"])
+
+
+def _bg(orders, pct=0.01):
+    return "order,u_h_pct_p95\n" + "".join(f"{h},{pct}\n" for h in orders)
+
+
+def _bg_row(run, csv):
+    import_background_campus(run, csv, source="PQ survey", measured_on="2026-09-30")
+    return harmonics_campus(run).query("level == 'poc'").iloc[1]
+
+
+def test_within_limits_and_fully_measured_the_background_row_passes(tmp_path):
+    run, orders = _small_run(tmp_path, (1.0, 1.0))
+    assert _bg_row(run, _bg(orders))["verdict"] == "pass"
+
+
+def test_within_limits_a_unit_without_input_reads_exactly_unknown(tmp_path):
+    run, orders = _small_run(tmp_path, (1.0, None))  # PUMP has no rated MVA
+    bg = _bg_row(run, _bg(orders))
+    assert bg["verdict"] == "unknown" and "a missing unit blocks a pass" in bg["note"]
+
+
+def test_within_limits_an_unmeasured_order_reads_exactly_unknown(tmp_path):
+    run, orders = _small_run(tmp_path, (1.0, 1.0))
+    bg = _bg_row(run, _bg(orders[1:]))  # the survey skipped the lowest plant order
+    assert bg["verdict"] == "unknown"
+    assert (
+        f"no background measured at order(s) {orders[0]}: an unmeasured order blocks a pass"
+        in bg["note"]
+    )
+
+
+def test_an_unmeasured_order_never_turns_a_fail_into_unknown(tmp_path):
+    run, orders = _small_run(tmp_path, (1.0, 1.0))
+    bg = _bg_row(run, _bg(orders[1:], pct=50.0))
+    assert bg["verdict"] == "fail"

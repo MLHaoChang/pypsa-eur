@@ -1441,14 +1441,17 @@ def _with_background(run_dir: Path, pocs: pd.DataFrame, limits, law: str) -> pd.
         plant = row["u_h_pct"]
         j = hm.judge(combine(plant, rec["orders_pct"], law), limits)
         notes = [citation(rec), SAME_LIMIT, *j.pop("notes")]
+        # An order the survey did not measure is unknown, never zero: like a unit
+        # without input, it blocks a pass; a fail stays a fail.
         unmeasured = sorted(set(plant) - set(rec["orders_pct"]))
         if unmeasured:
-            notes.append("no background measured at order(s) " + ", ".join(map(str, unmeasured)))
+            notes.append("no background measured at order(s) " + ", ".join(map(str, unmeasured))
+                         + ": an unmeasured order blocks a pass")
         if row["no_input_units"]:
-            if j["verdict"] != "fail":
-                j["verdict"] = "unknown"
             notes.append("no input for " + ", ".join(map(str, row["no_input_units"]))
                          + ": a missing unit blocks a pass")
+        if (unmeasured or row["no_input_units"]) and j["verdict"] == "pass":
+            j["verdict"] = "unknown"
         out.update(j, note="; ".join(notes))
         rows.append(out)
     return pd.concat([pocs, pd.DataFrame(rows, columns=pocs.columns)], ignore_index=True) if rows else pocs
