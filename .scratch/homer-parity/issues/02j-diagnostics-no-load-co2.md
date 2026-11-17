@@ -1,6 +1,6 @@
 # 02j — The logged cost decomposition counts the no-load CO2
 
-Status: needs-triage
+Status: done
 
 Follow-up from homer-parity 02e. It was left out of 02e because the file overlapped open PRs #1521 and #1522.
 

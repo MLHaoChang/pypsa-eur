@@ -90,15 +90,31 @@ def test_reads_origin_master_not_the_working_tree(repo):
     assert whois(repo, "coordinator").stdout == "session_01COORD\n"
 
 
+def test_new_reviewer_lines_need_no_code_change(repo):
+    publish(
+        repo,
+        COORDINATOR_MD
+        + "\nEngine gatekeeper A2 (overflow): `session_01GKA2`\n\n"
+        + "Engine gatekeeper B2: `session_01GKB2`\n",
+    )
+    assert whois(repo, "gka2").stdout == "session_01GKA2\n"
+    assert whois(repo, "gkb2").stdout == "session_01GKB2\n"
+    assert "gka2\tsession_01GKA2" in whois(repo).stdout.splitlines()
+
+
 def test_a_missing_role_exits_non_zero_with_a_message(repo):
     publish(repo, COORDINATOR_MD.replace("`session_01GKB`", "`<session_…>`"))
     r = whois(repo, "gkb")
     assert r.returncode == 1 and r.stdout == ""
-    assert "no session id for gkb" in r.stderr
-    assert whois(repo).returncode == 1  # the full listing needs every role
+    assert "no session id for gkb" in r.stderr and "roles:" in r.stderr
+    assert (
+        "gkb" not in whois(repo).stdout
+    )  # the listing holds the roles that have an id
 
 
 def test_unknown_role_and_unreadable_file_fail(repo):
-    assert "usage" in whois(repo, "owner").stderr
-    r = whois(repo)  # nothing published: no origin/master
+    r = whois(repo, "owner")  # nothing published: no origin/master
     assert r.returncode == 1 and "cannot read origin/master" in r.stderr
+    publish(repo, COORDINATOR_MD)
+    assert "no session id for owner" in whois(repo, "owner").stderr
+    assert whois(repo, "a", "b").returncode == 1
