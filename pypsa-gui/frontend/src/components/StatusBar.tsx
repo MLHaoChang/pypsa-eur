@@ -8,6 +8,7 @@ import { solveProgressLabel } from '../utils/solveProgress'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { formatRelativeTime } from '../utils/projectActions'
+import { formatObjective } from '../layout/AppHeader'
 
 const STATUS_COLORS: Record<string, string> = {
   idle: 'text-muted', running: 'text-warn', completed: 'text-success',
@@ -66,7 +67,9 @@ export default function StatusBar() {
   const { data: liveStatus, dataUpdatedAt: liveAt } = useQuery({
     queryKey: nk(currentProject, 'simulationStatus'),
     queryFn: simulationApi.getStatus,
-    enabled: !!currentProject && watchDispatch,
+    // Fetched once on mount even when idle, so the objective survives a reload
+    // (control-strategy 07); polling stays limited to the watched states.
+    enabled: !!currentProject,
     refetchInterval: watchDispatch ? 3000 : false,
   })
   const prevDispatchRef = useRef<string | null>(null)
@@ -117,7 +120,13 @@ export default function StatusBar() {
     : null
 
   const color = STATUS_COLORS[status] ?? 'text-muted'
-  const objStr = objective != null ? `${(objective / 1e9).toFixed(3)} B€` : '—'
+  // The last fresh solve's objective, read from /simulation/status (set after
+  // every solve and after a reload); the store's value covers a reconnect.
+  // Same compact form as the "Solved · €X" toast (control-strategy 07).
+  const shownObjective = liveStatus?.dispatch === 'fresh' && liveStatus.objective != null
+    ? liveStatus.objective
+    : liveStatus?.dispatch && liveStatus.dispatch !== 'fresh' ? null : objective
+  const objStr = formatObjective(shownObjective) ?? '—'
 
   // Prefer the UI store's project name (set on import/load/save) over PyPSA's
   // internal n.name, which defaults to "Unnamed Network" when not explicitly
