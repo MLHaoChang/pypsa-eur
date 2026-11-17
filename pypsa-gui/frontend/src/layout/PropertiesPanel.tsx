@@ -795,8 +795,8 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
       ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       <SectionHdr title="Time Series" />
       <div className="flex items-center gap-2 py-1">
-        <div className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${hasProfile ? 'bg-success border-success' : 'bg-bg border-border'}`}>
-          {hasProfile && <span className="text-white text-[8px] leading-none">✓</span>}
+        <div className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${hasProfile ? 'bg-success border-success text-on-status' : 'bg-bg border-border'}`}>
+          {hasProfile && <span className="text-[8px] leading-none">✓</span>}
         </div>
         <span className="text-xs text-muted">
           {hasProfile && profileMeta.has_profile

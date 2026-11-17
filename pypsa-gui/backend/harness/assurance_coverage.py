@@ -233,6 +233,8 @@ ROUTE_SURFACES = {
     "POST /{session_id}/rewind": NO_ASSISTANT_TEXT,
     "POST /{session_id}/goal": NO_ASSISTANT_TEXT,
     "POST /{session_id}/abort": NO_ASSISTANT_TEXT,
+    # live-voice 11b: Stop monitoring answers {ok, stopped}; no assistant text.
+    "POST /{session_id}/progress/stop": NO_ASSISTANT_TEXT,
     "GET /{session_id}/continuations": NO_ASSISTANT_TEXT,
     "POST /{session_id}/continuations/{job_id}/dismiss": NO_ASSISTANT_TEXT,
 }

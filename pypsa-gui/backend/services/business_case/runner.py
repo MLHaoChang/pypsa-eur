@@ -253,6 +253,8 @@ def report_body(
     """The stored report: P&L by year by stream, the KPIs (gross and net of
     pass-through), break-even, the locked rows, each linked output's state and every
     assumed default the run used."""
+    from services.finance.business_case import row_reasons
+
     return {
         "business_case_hash": bc.hash,
         "inputs_digest": config_digest(raw),
@@ -272,6 +274,11 @@ def report_body(
             },
             "rows": _jsonable(p.rows),
             "not_finite": list(p.not_finite),
+            # A display key like the two above (BC 17): every input each row that reads
+            # None lacks. It moves no digest or staleness key.
+            "row_reason": row_reasons(
+                result, p, outputs, receivable_days=inputs.receivable_days
+            ),
         },
         "kpis": {name: _jsonable(dataclasses.asdict(v)) for name, v in k.items()},
         "break_even": _jsonable(be),

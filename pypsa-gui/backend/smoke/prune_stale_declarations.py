@@ -6,8 +6,10 @@ pass. This command removes them in one small sweep PR:
 
 * ``needs_tool`` / ``limitations`` rows in the route-parity declarations (the
   base file and its ``.d/`` fragments; a fragment left empty is deleted);
-* ``KNOWN_GAPS`` rows in ``tests/test_route_chat_disposition.py`` that a tool
-  serves, after which ``_KNOWN_GAPS_CEILING`` is lowered to the rows left.
+* ``KNOWN_GAPS`` rows that a tool serves, in ``tests/test_route_chat_disposition.py``
+  or in ``tests/route_chat_disposition.json`` and its ``.d/`` fragments (RETRO-FRAG-1;
+  a fragment left empty is deleted), after which ``_KNOWN_GAPS_CEILING`` is
+  lowered to the rows left.
 
 Run from ``pypsa-gui/backend`` with the backend environment:
 ``python -m smoke.prune_stale_declarations`` (dry run) or ``... --apply``.
@@ -60,7 +62,13 @@ def prune_known_gaps(apply: bool) -> list[str]:
     stale = disposition.stale_known_gaps()
     left = len(disposition.KNOWN_GAPS) - len(stale)
     source = DISPOSITION.read_text(encoding='utf-8')
+    in_json, done = [], []
     for method, path in stale:
+        where = disposition.known_gap_origin((method, path))
+        done.append(f'KNOWN_GAPS {method} {path}' + (f' ({where.name})' if where.suffix == '.json' else ''))
+        if where.suffix == '.json':  # a row from route_chat_disposition.json or a fragment of it
+            in_json.append((where, f'{method} {path}'))
+            continue
         row = re.compile(rf"^    \({re.escape(repr(method))}, {re.escape(repr(path))}\): .*\n", re.M)
         source, n = row.subn('', source, count=1)
         if n != 1:
@@ -69,13 +77,24 @@ def prune_known_gaps(apply: bool) -> list[str]:
     match = ceiling.search(source)
     if match is None:
         raise ValueError('_KNOWN_GAPS_CEILING not found')
-    done = [f'KNOWN_GAPS {m} {p}' for m, p in stale]
     if int(match.group(1)) != left:
         done.append(f'_KNOWN_GAPS_CEILING {match.group(1)} -> {left}')
         source = ceiling.sub(f'_KNOWN_GAPS_CEILING = {left}', source, count=1)
     if apply and done:
         DISPOSITION.write_text(source, encoding='utf-8')
+        for where, key in in_json:
+            _drop_json_row(where, 'known_gaps', key, keep=where == disposition.DISPOSITION_FILE)
     return done
+
+
+def _drop_json_row(path: Path, section: str, key: str, keep: bool) -> None:
+    """Delete one row; a fragment left with no rows is deleted, as for the declarations."""
+    data = json.loads(path.read_text(encoding='utf-8'))
+    del data[section][key]
+    if not keep and not any(v for k, v in data.items() if k != '$comment'):
+        path.unlink()
+    else:
+        path.write_text(_dump(data), encoding='utf-8')
 
 
 def main(argv=None) -> int:

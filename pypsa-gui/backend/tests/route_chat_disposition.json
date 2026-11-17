@@ -1,0 +1,6 @@
+{
+ "$comment": "Chat dispositions of live routes (tests/test_route_chat_disposition.py). Rows here and in route_chat_disposition.d/ join SERVED_BY_TOOL, UI_INTERNAL and KNOWN_GAPS there; see the folder's README (RETRO-FRAG-1).",
+ "served_by_tool": {},
+ "ui_internal": {},
+ "known_gaps": {}
+}
