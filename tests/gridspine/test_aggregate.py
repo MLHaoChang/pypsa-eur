@@ -189,14 +189,10 @@ def test_lv_cable_is_referred_to_the_root_voltage():
         0.2112 + 0.08 * 0.2 * refer * w, abs=1e-6
     )
     assert eq["r0_ohm_per_km"]["value"] == pytest.approx(
-        0.176 * 3 + 0.1 * 0.2 * refer * w, abs=1e-6
-    )
-    assert eq["x0_ohm_per_km"]["value"] == pytest.approx(
-        0.2112 * 3 + 0.2 * 0.2 * refer * w, abs=1e-6
-    )
-    assert eq["c0_nf_per_km"]["value"] == pytest.approx(
-        150.0 * 9 + 300.0 * 0.2 / refer, abs=1e-6
-    )
+        0.176 * 3, abs=1e-6
+    )  # the LV run is behind TB3's delta winding: no zero-sequence path
+    assert eq["x0_ohm_per_km"]["value"] == pytest.approx(0.2112 * 3, abs=1e-6)
+    assert eq["c0_nf_per_km"]["value"] == pytest.approx(150.0 * 9, abs=1e-6)
 
 
 # --- A5 unit transformer equivalent -----------------------------------------------------------
@@ -325,6 +321,11 @@ def test_poc_load_flow_matches_the_detailed_model(frac_p, frac_q):
     d = _dispatch(detailed, frac_p, frac_q, None)
     a = _dispatch(aggregated, frac_p, frac_q, None)
     assert abs(a[0] - d[0]) <= 0.005 * rating
+    if frac_p == 1.0:
+        # At full, uniform output the equal-loss equivalent reproduces the
+        # collector losses: a guard far tighter than the 0.5 % above, so a
+        # wrong impedance weighting cannot hide inside it (measured 5e-5 MW).
+        assert abs(a[0] - d[0]) <= 0.001 and abs(a[1] - d[1]) <= 0.002
     assert abs(a[1] - d[1]) <= 0.005 * rating
     assert abs(a[2] - d[2]) <= 0.005 and abs(a[3] - d[3]) <= 0.005
 
@@ -677,12 +678,22 @@ TAP = {
 }
 
 
-def test_unequal_taps_are_dropped_with_an_assumption():
+def test_unequal_taps_are_refused():
     spec = plant()
     spec["campus"]["transformers"]["TA1"]["tap"] = dict(TAP, pos=1)
-    agg = aggregate(spec)
-    assert "tap" not in agg.spec["campus"]["transformers"]["EQ_TR"]
-    assert any("unequal taps" in a for a in agg.assumptions)
+    with pytest.raises(
+        AggregationError, match=r"TA1 and TB1 behind COL differ in their tap"
+    ):
+        aggregate(spec)
+
+
+def test_a_tap_on_one_unit_transformer_only_is_refused():
+    spec = plant()
+    spec["campus"]["transformers"]["TB2"]["tap"] = dict(TAP)
+    with pytest.raises(
+        AggregationError, match=r"and TB2 behind COL differ in their tap"
+    ):
+        aggregate(spec)
 
 
 def test_equal_taps_are_carried():
@@ -887,6 +898,48 @@ def test_lv_runs_only_rating_is_referred_to_the_root_voltage():
     )
 
 
+def test_lv_runs_only_give_no_zero_sequence():
+    agg = aggregate(no_mv_cables(lv_cables=True))
+    assert "r0_ohm_per_km" not in agg.spec["campus"]["cables"]["EQ_COL"]
+    assert any(
+        "no zero sequence: no collector-side cable" in a for a in agg.assumptions
+    )
+
+
+def test_a_cable_from_the_root_to_itself_is_refused_by_the_input_check():
+    spec = plant()
+    spec["campus"]["cables"]["LOOP"] = cable("COL", "COL", 0.1)
+    with pytest.raises(ContractError, match="LOOP"):
+        aggregate(spec)
+
+
+def test_a_zero_rated_load_is_left_to_the_input_check():
+    spec = plant()
+    spec["campus"]["units"]["AUX"] = {
+        "kind": "load",
+        "bus": "COL",
+        "p_mw": t(0.0),
+        "pf": t(0.95),
+    }
+    with pytest.raises(ContractError) as err:
+        aggregate(spec)
+    assert not isinstance(err.value, AggregationError)
+
+
+def test_names_of_equivalents_not_made_are_free():
+    """
+    Units straight on the 33 kV nodes: no unit transformer, so EQ_LV and
+    EQ_TR are never made and may name other elements.
+    """
+    spec = aux_tree(plant(), root="EQ_LV", trafo_name="EQ_TR")
+    c = spec["campus"]
+    for bus, _, _ in NODES:
+        del c["buses"][bus + "L"], c["transformers"]["T" + bus]
+        c["units"]["U" + bus]["bus"] = bus
+    out = aggregate(spec).spec["campus"]
+    assert out["units"]["EQ_PV"]["bus"] == "EQ_MV" and "EQ_LV" in out["buses"]
+
+
 def test_campus_without_transformers_has_no_collector():
     spec = plant()
     c = spec["campus"]
@@ -1016,6 +1069,13 @@ def test_relays_on_replaced_branches_are_dropped_and_named():
             "i_pickup_ka": t(0.2),
         },
         {
+            "name": "RFAULT",
+            "branch": "TRM",
+            "fault_bus": "A2",
+            "timing": "time_delayed",
+            "i_pickup_ka": t(0.4),
+        },
+        {
             "name": "RBUS",
             "branch": "TRUNK",
             "fault_bus": "COL",
@@ -1025,7 +1085,7 @@ def test_relays_on_replaced_branches_are_dropped_and_named():
     ]
     agg = aggregate(spec)
     assert [r["name"] for r in agg.spec["campus"]["relays"]] == ["RMAIN"]
-    assert any("['RBUS', 'RFEED']" in a for a in agg.assumptions)
+    assert any("['RBUS', 'RFAULT', 'RFEED']" in a for a in agg.assumptions)
     aggregate_campus(spec)
 
 
