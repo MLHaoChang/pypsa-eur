@@ -159,9 +159,8 @@ def _attr_type(defaults: pd.DataFrame, key: str) -> type | None:
 
 
 def _inf_ok(defaults: pd.DataFrame, key: str) -> bool:
-    if key not in defaults.index:
-        return False
-    d = defaults.at[key, "default"]
+    """Infinity only where the model's own default is infinite (p_nom_max and the like)."""
+    d = defaults["default"].get(key)
     return isinstance(d, float) and math.isinf(d)
 
 
@@ -208,9 +207,8 @@ def _convert(v: Any, typ: type | None, *, scale: float, inf_ok: bool) -> Any:
         if hasattr(v, "isoformat"):
             return v.isoformat()
         return str(v)
-    # A custom column (no model type): kept as the cell holds it, NaN refused.
-    if isinstance(v, float) and math.isnan(v):
-        raise _Bad("not a number (NaN)")
+    # A custom column (no model type): kept as the cell holds it. An .xlsx cell
+    # cannot hold NaN, and a typed "nan" stays text.
     return v
 
 
@@ -274,7 +272,7 @@ class _Reader:
                     )
                 continue
             key = str(key)
-            if key != SIZE_UNIT_KEY and key not in allowed:
+            if key not in allowed and not (key == SIZE_UNIT_KEY and cls in SIZE_BUS):
                 self.unmapped(shown, f"'{key[:60]}' is not a parameter of {sheet}")
                 continue
             if not L.scale_ok(str(unit), scale):
@@ -412,13 +410,13 @@ class _Reader:
         self.report.counts[sheet] = len(names)
 
     def _check_size_units(self, sheet, cls, size_units) -> None:
-        col = SIZE_BUS.get(cls)
-        if not size_units or col is None:
+        if not size_units:
             return
+        col = SIZE_BUS[cls]
         table = getattr(self.n, L.LIST_NAME[cls])
         for name, unit in size_units.items():
             if name not in table.index:
-                continue
+                continue  # the model refused the row; already reported
             bus = table.at[name, col]
             bus_unit = self.n.buses.at[bus, "unit"] if bus in self.n.buses.index else ""
             expected = "t/h" if bus_unit == "t" else "MW"
@@ -715,7 +713,7 @@ class _Reader:
             ] = {"index": index, "values": values, **_index_name(extra)}
 
     def meta(self) -> None:
-        if L.LISTS not in self.s.rows or self.s.cell(L.LISTS, 1, 4) != "$meta":
+        if self.s.cell(L.LISTS, 1, 4) != "$meta":
             return
         meta = _json_dict(self.s.cell(L.LISTS, 2, 4))
         if meta is None:

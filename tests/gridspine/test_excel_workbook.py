@@ -668,3 +668,230 @@ def test_the_registry_finds_this_reader():
     spec = next(s for s in DECLARED if s.format_id == "excel")
     assert spec.is_available()
     assert spec.load_reader() is read_excel
+
+
+# ── edges the mutation run found untested (E8) ───────────────────────────────
+
+
+def _edit(path, fn):
+    wb = openpyxl.load_workbook(path)
+    fn(wb)
+    wb.save(path)
+    return _read(path)
+
+
+def _col(ws, key, row=L.ROW_KEY):
+    return [c.value for c in ws[row]].index(key) + 1
+
+
+def test_a_limit_equal_to_the_file_is_not_passed(tmp_path, monkeypatch):
+    import zipfile
+
+    path = _write(_network(False), tmp_path)
+    with zipfile.ZipFile(path) as zf:
+        infos = zf.infolist()
+    monkeypatch.setitem(L.LIMITS, "zip_members", len(infos))
+    monkeypatch.setitem(L.LIMITS, "uncompressed_bytes", sum(i.file_size for i in infos))
+    assert _um(_read(path)) == []
+
+
+def test_numbers_and_dates_in_a_text_column_read_as_text(tmp_path):
+    import datetime
+
+    def fn(wb):
+        ws = wb["Nodes"]
+        ws.cell(L.FIRST_DATA_ROW, 1).value = 7.0
+        ws.cell(L.FIRST_DATA_ROW + 1, 1).value = datetime.datetime(2030, 1, 2)
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert {"7", "2030-01-02T00:00:00"} <= set(res.network.buses.index)
+
+
+def test_a_date_in_a_number_column_is_reported(tmp_path):
+    import datetime
+
+    def fn(wb):
+        ws = wb["Generators"]
+        ws.cell(L.FIRST_DATA_ROW, _col(ws, "p_nom")).value = datetime.datetime(
+            2030, 1, 2
+        )
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert (
+        "Generators › wind 1 › Capacity",
+        "'2030-01-02 00:00:00' is not a number; the model default is kept",
+    ) in _um(res)
+
+
+def test_a_formula_with_a_saved_value_reads_the_value(tmp_path):
+    """E2: what Excel saved is read; the formula itself is never evaluated."""
+    import re
+    import zipfile
+
+    path = _write(_network(False), tmp_path)
+    ws = openpyxl.load_workbook(path)["Generators"]
+    ref = f"{openpyxl.utils.get_column_letter(_col(ws, 'p_nom'))}{L.FIRST_DATA_ROW}"
+    with zipfile.ZipFile(path) as zf:
+        parts = {i.filename: zf.read(i.filename) for i in zf.infolist()}
+    # openpyxl writes sheet N of the workbook as xl/worksheets/sheetN.xml.
+    sheet = f"xl/worksheets/sheet{openpyxl.load_workbook(path).sheetnames.index('Generators') + 1}.xml"
+    xml = parts[sheet].decode()
+    xml, k = re.subn(
+        rf'<c r="{ref}"([^>]*?)(?:/>|>.*?</c>)',
+        rf'<c r="{ref}"><f>2*21</f><v>42</v></c>',
+        xml,
+    )
+    assert k == 1
+    parts[sheet] = xml.encode()
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in parts.items():
+            zf.writestr(name, data)
+    res = _read(path)
+    assert _um(res) == []
+    assert res.network.generators.at["wind 1", "p_nom"] == 42.0
+
+
+def test_a_number_in_the_hidden_model_name_row_is_reported(tmp_path):
+    def fn(wb):
+        ws = wb["Generators"]
+        ws.cell(L.ROW_KEY, _col(ws, "marginal_cost")).value = 5
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert (
+        "Generators › Variable cost",
+        "'5' is not a parameter of Generators",
+    ) in _um(res)
+
+
+def test_a_sheet_without_a_name_column_is_reported(tmp_path):
+    def fn(wb):
+        wb["Loads"].cell(L.ROW_KEY, 1).value = "p_set"
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert ("Loads", "no Name column; the sheet's rows were not read") in _um(res)
+    assert res.network.loads.empty
+
+
+def test_an_empty_row_between_assets_is_skipped_quietly(tmp_path):
+    def fn(wb):
+        ws = wb["Loads"]
+        ws.insert_rows(L.FIRST_DATA_ROW)
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert _um(res) == []
+    assert list(res.network.loads.index) == ["d"]
+
+
+def test_a_size_unit_column_on_a_sheet_without_a_size_is_reported(tmp_path):
+    def fn(wb):
+        ws = wb["Lines"]
+        c = ws.max_column + 1
+        for r, v in (
+            (L.ROW_LABEL, "Size unit"),
+            (L.ROW_KEY, "~size_unit"),
+            (L.ROW_SCALE, 1.0),
+            (L.FIRST_DATA_ROW, "t/h"),
+        ):
+            ws.cell(r, c).value = v
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert ("Lines › Size unit", "'~size_unit' is not a parameter of Lines") in _um(res)
+
+
+def test_a_missing_weighting_column_keeps_the_default(tmp_path):
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        ws.delete_cols(_col(ws, "stores", L.TS_ROW_ATTR))
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert (res.network.snapshot_weightings["stores"] == 1.0).all()
+    assert (res.network.snapshot_weightings["objective"] == 2.0).all()
+
+
+def test_an_empty_time_series_cell_takes_the_fixed_value_and_says_so(tmp_path):
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        ws.cell(L.TS_FIRST_DATA_ROW + 1, _col(ws, "d", L.TS_ROW_ASSET)).value = None
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert ("d", "p_set", 0.0, "1 empty time step(s): the asset's fixed value") in _am(
+        res
+    )
+    assert res.network.loads_t.p_set["d"].tolist() == [10.0, 0.0, 12.0]
+
+
+def test_an_empty_time_series_sheet_is_reported(tmp_path):
+    def fn(wb):
+        del wb[L.TIME_SERIES]
+        wb.create_sheet(L.TIME_SERIES)
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert (L.TIME_SERIES, "no Time column; one time step is assumed") in _um(res)
+
+
+@pytest.mark.parametrize("mark", [5, True, "[1, 2]", "x" * 50])
+def test_an_upload_mark_that_is_not_a_small_json_object_warns(
+    tmp_path, monkeypatch, mark
+):
+    monkeypatch.setattr("gridspine.ingest.excel_import._MAX_JSON_CELL", 40)
+    n = _network(False)
+
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        ws.cell(L.TS_ROW_USER, _col(ws, "d", L.TS_ROW_ASSET)).value = mark
+
+    res = _edit(_write(n, tmp_path, sidecars={"user_ts.json": _user_ts(n)}), fn)
+    assert "loads" not in res.sidecars["user_ts.json"]
+    assert any("upload mark" in w for w in res.report.warnings)
+
+
+def test_an_upload_mark_at_the_size_cap_is_read(tmp_path, monkeypatch):
+    mark = '{"index_name": "snapshot"}'
+    monkeypatch.setattr("gridspine.ingest.excel_import._MAX_JSON_CELL", len(mark))
+    n = _network(False)
+    res = _read(_write(n, tmp_path, sidecars={"user_ts.json": _user_ts(n)}))
+    assert (
+        res.sidecars["user_ts.json"]["loads"]["p_set"]["d"]["index_name"] == "snapshot"
+    )
+
+
+@pytest.mark.parametrize("index", ["[broken", '["2030"'])
+def test_an_uploaded_profile_with_an_unreadable_time_step_is_reported(tmp_path, index):
+    n = _network(True)
+
+    def fn(wb):
+        wb[L.UPLOADED].cell(L.UP_FIRST_DATA_ROW, 1).value = index
+
+    res = _edit(_write(n, tmp_path, sidecars={"user_ts.json": _user_ts(n)}), fn)
+    assert any(item == "Uploaded profiles › other › p_max_pu" for item, _ in _um(res))
+    assert "generators" not in res.sidecars["user_ts.json"]
+
+
+def test_a_date_typed_as_an_excel_date_reads_and_a_number_is_refused(tmp_path):
+    import datetime
+
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        ws.cell(
+            L.TS_FIRST_DATA_ROW, _col(ws, "snapshot", L.TS_ROW_ATTR)
+        ).value = datetime.datetime(2030, 1, 1)
+        ws.cell(L.TS_FIRST_DATA_ROW + 2, _col(ws, "snapshot", L.TS_ROW_ATTR)).value = 5
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert (
+        f"{L.TIME_SERIES} row {L.TS_FIRST_DATA_ROW + 2}",
+        "time step: '5' is not a date",
+    ) in _um(res)
+    assert list(res.network.snapshots) == [
+        pd.Timestamp("2030-01-01 00:00"),
+        pd.Timestamp("2030-01-01 01:00"),
+    ]
+
+
+def test_read_excel_takes_a_plain_string_path_and_no_options(tmp_path):
+    path = _write(_network(False), tmp_path)
+    res = read_excel(str(path))
+    assert res.report.source_files == ["w.xlsx"]
+    # Without the allow-list, the custom columns are reported, never set.
+    assert any("is not a parameter of Generators" in why for _, why in _um(res))
+    assert "eh_flag" not in res.network.generators.columns
