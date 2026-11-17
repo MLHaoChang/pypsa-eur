@@ -151,4 +151,19 @@
   <t_memo_data><value>memo without a row</value></t_memo_data>
   <t_text><data_id>13</data_id><class_id>7</class_id></t_text>
   <t_attribute_data><object_id>2</object_id><attribute_id>999</attribute_id><value>1</value></t_attribute_data>
+  <t_config><element>Units</element><value>Metric</value></t_config>
+  <t_config><element>Units</element><value>Imperial</value></t_config>
+  <t_config><value>no element</value></t_config>
+  <t_unit><unit_id>8</unit_id></t_unit>
+  <t_action><action_id>7</action_id></t_action>
+  <t_category><category_id>2</category_id><class_id>2</class_id></t_category>
+  <t_class><class_id>11</class_id><name>Reserve</name></t_class>
+  <t_class><class_id>12</class_id><name>Transformer</name></t_class>
+  <t_object><object_id>17</object_id><class_id>11</class_id><name>Spin Up</name></t_object>
+  <t_object><object_id>18</object_id><class_id>12</class_id><name>T1</name></t_object>
+  <t_object><object_id>19</object_id><class_id>2</class_id><name>G3</name><category_id>77</category_id></t_object>
+  <t_property><property_id>14</property_id><collection_id>1</collection_id><name>VO&amp;M Charge</name><unit_id>55</unit_id></t_property>
+  <t_membership><membership_id>24</membership_id><collection_id>4</collection_id><parent_object_id>3</parent_object_id><child_object_id>6</child_object_id></t_membership>
+  <t_attribute><attribute_id>2</attribute_id><class_id>4</class_id></t_attribute>
+  <t_attribute><attribute_id>3</attribute_id><class_id>99</class_id><name>Longitude</name></t_attribute>
 </MasterDataSet>

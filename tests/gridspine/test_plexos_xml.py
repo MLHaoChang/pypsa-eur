@@ -62,6 +62,13 @@ WORLD_IRL_CLASSES = {
 
 # Every broken row of edge_cases.xml, by hand: (table, row id) -> reason fragment.
 EDGE_BROKEN = {
+    ("t_config", "Units"): "a second 'Units' setting",
+    ("t_config", "row 4"): "setting without a name",
+    ("t_unit", "8"): "without value",
+    ("t_action", "7"): "without action_symbol",
+    ("t_category", "2"): "without name",
+    ("t_attribute", "2"): "without a name",  # no name
+    ("t_attribute", "3"): "of an unknown class",  # class 99
     ("t_collection", "14"): "unknown parent or child class",  # parent class 99
     ("t_collection", "15"): "unknown parent or child class",  # child class 99
     ("t_collection", "16"): "or no name",
@@ -73,6 +80,10 @@ EDGE_BROKEN = {
     ("t_membership", "1"): "duplicate membership_id",
     ("t_membership", "18"): "parent or child object does not exist",  # child 999
     ("t_membership", "23"): "parent or child object does not exist",  # parent 999
+    (
+        "t_membership",
+        "24",
+    ): "objects are Generator/Fuel but the collection is Generator/Node",  # child only
     ("t_membership", "19"): "unknown collection id 99",
     (
         "t_membership",
@@ -257,7 +268,17 @@ def test_edge_rows_in_equal_resolved_plus_broken_against_a_raw_count(edge):
 
 
 def test_objects_of_lists_one_class(edge):
-    assert sorted(o.name for o in edge.objects_of("Generator")) == ["G2", "X"]
+    assert sorted(o.name for o in edge.objects_of("Generator")) == ["G2", "G3", "X"]
+    assert [o.name for o in edge.objects_of("Reserve")] == ["Spin Up"]
+    assert [o.name for o in edge.objects_of("Transformer")] == ["T1"]
+
+
+def test_a_dangling_unit_or_category_is_named_in_warnings(edge):
+    assert edge.objects[("Generator", "G2")].category == "Wind"
+    assert edge.objects[("Generator", "G3")].category is None
+    assert any("'G3' names category id 77" in w for w in edge.warnings)
+    assert any("'VO&M Charge' names unit id 55" in w for w in edge.warnings)
+    assert edge.config["Units"] == "Metric"  # the first of two is kept
 
 
 def test_the_first_of_two_duplicate_ids_is_kept(edge):
@@ -395,6 +416,9 @@ def _with_version(tmp_path, version):
         ("6.400", "outside"),
         ("11.000", "outside"),
         ("abc", "not a number"),
+        ("inf", "not a number"),
+        ("1e400", "not a number"),
+        ("nan", "not a number"),
     ],
 )
 def test_an_unsupported_or_missing_version_warns_but_reads(tmp_path, version, fragment):

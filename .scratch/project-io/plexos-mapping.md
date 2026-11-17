@@ -71,8 +71,8 @@ Every source row lands in exactly one place: the network, a sidecar, `report.unm
 
 ## Example models and fixtures
 
-- **PLEXOS-World 2015 Gold V1.1**, Brinkerink & Deane, Harvard Dataverse, doi:10.7910/DVN/CBYXBY, **CC0** ("made available under a Creative Commons CC0 license"). It is 130 MB, 258 nodes and 30,658 generators, saved with PLEXOS 8.300. Fixture: one country cut out of it (a few nodes, lines, ~30 generators, a battery, a hydro storage, three scenarios, one data file trimmed to 48 hours). `tests/gridspine/fixtures/plexos/make_fixture.py` documents how it was cut, and a `LICENCE.md` sits next to it.
-- A hand-written mini XML (same schema) for the edge cases the World model lacks: reactance lines, bands, dated rows, a constraint, a reserve, a transformer.
+- **PLEXOS-World 2015 Gold V1.1**, Brinkerink & Deane, Harvard Dataverse, doi:10.7910/DVN/CBYXBY, **CC0** ("made available under a Creative Commons CC0 license"). It is 130 MB, 258 nodes and 30,658 generators, saved with PLEXOS 8.300. Fixture (slice 1): node EU-IRL and everything that touches it: 3 nodes, 2 lines, 63 generators, 5 batteries, 7 fuels, all 20 scenarios, 11 models and 3 data-file objects. Ireland has no hydro storage. `tests/gridspine/fixtures/plexos/make_fixture.py` documents the cut; the licence and the hand checks are in that folder's `README.md`. Slice 2 adds a hydro-storage node and a CSV trimmed to 48 hours, for the time series.
+- A hand-written mini XML (`edge_cases.xml`, same schema) for the edge cases the World model lacks: reactance lines, bands, dated rows, several tags on one row, a constraint, a reserve and a transformer object, plus one broken row per reader guard.
 - Prior art for cross-checking, not vendored: NREL `plexosdb` (BSD-3) and Open Energy Transition's `plexos-to-pypsa-converter`.
 
 ## Slices (PR-SIZE-1, GK A)

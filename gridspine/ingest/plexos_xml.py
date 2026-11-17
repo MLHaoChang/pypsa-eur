@@ -239,9 +239,12 @@ def _version_warning(version: str | None) -> str | None:
     if version is None:
         return "The file does not state its PLEXOS version; it is read as PLEXOS 7-10."
     try:
-        major = int(float(version))
+        number = float(version)
     except ValueError:
+        number = math.nan
+    if not math.isfinite(number):
         return f"PLEXOS version {version!r} is not a number; it is read as PLEXOS 7-10."
+    major = int(number)
     if major not in SUPPORTED_MAJOR_VERSIONS:
         return f"PLEXOS version {version} is outside the versions this reader was checked against (7-10)."
     return None
@@ -283,6 +286,18 @@ def _index(tables, ledger, table, id_field):
     return out
 
 
+def _named(tables, ledger, table, id_field, name_field):
+    """``{id: name}`` for a lookup table; a row without a name is broken."""
+    out = {}
+    for rid, row in _index(tables, ledger, table, id_field).items():
+        if row.get(name_field):
+            out[rid] = row[name_field]
+            ledger.ok(table)
+        else:
+            ledger.bad(table, rid, f"{table} row without {name_field}")
+    return out
+
+
 def read_plexos_xml(source) -> PlexosModel:
     """Read a PLEXOS input XML (a path or a binary file object)."""
     tables = _parse_tables(source)
@@ -296,38 +311,26 @@ def read_plexos_xml(source) -> PlexosModel:
     ledger = _Ledger(tables)
     warnings: list[str] = []
 
-    config = {
-        r.get("element"): r.get("value")
-        for r in tables.get("t_config", [])
-        if r.get("element")
-    }
-    for _ in tables.get("t_config", []):
-        ledger.ok("t_config")
+    config = {}
+    for i, r in enumerate(tables.get("t_config", [])):
+        element = r.get("element")
+        if not element:
+            ledger.bad("t_config", f"row {i}", "setting without a name")
+        elif element in config:
+            ledger.bad("t_config", element, f"a second {element!r} setting")
+        else:
+            config[element] = r.get("value")
+            ledger.ok("t_config")
     version = config.get("Version")
     if (w := _version_warning(version)) is not None:
         warnings.append(w)
 
     # schema tables
-    classes = _index(tables, ledger, "t_class", "class_id")
-    class_name = {}
-    for cid, row in classes.items():
-        if row.get("name"):
-            class_name[cid] = row["name"]
-            ledger.ok("t_class")
-        else:
-            ledger.bad("t_class", cid, "class without a name")
-
-    units = _index(tables, ledger, "t_unit", "unit_id")
-    unit_name = {uid: row.get("value") for uid, row in units.items()}
-    for _ in units:
-        ledger.ok("t_unit")
+    class_name = _named(tables, ledger, "t_class", "class_id", "name")
+    unit_name = _named(tables, ledger, "t_unit", "unit_id", "value")
     if "t_unit" not in tables:
         warnings.append("The file has no t_unit table; property units are unknown.")
-
-    actions = _index(tables, ledger, "t_action", "action_id")
-    action_symbol = {aid: row.get("action_symbol") for aid, row in actions.items()}
-    for _ in actions:
-        ledger.ok("t_action")
+    action_symbol = _named(tables, ledger, "t_action", "action_id", "action_symbol")
 
     collections = _index(tables, ledger, "t_collection", "collection_id")
     collection_key = {}
@@ -356,19 +359,18 @@ def read_plexos_xml(source) -> PlexosModel:
                 "property of an unknown collection, or without a name",
             )
             continue
-        prop[pid] = (
-            row["name"],
-            row["collection_id"],
-            unit_name.get(row.get("unit_id")),
-        )
+        uid = row.get("unit_id")
+        if uid is not None and uid not in unit_name and "t_unit" in tables:
+            warnings.append(
+                f"Property {row['name']!r} names unit id {uid}, which the file does not define; its unit is unknown."
+            )
+        prop[pid] = (row["name"], row["collection_id"], unit_name.get(uid))
         ledger.ok("t_property")
 
     # objects
     objects_by_id: dict[str, PlexosObject] = {}
     objects: dict[tuple[str, str], PlexosObject] = {}
-    categories = _index(tables, ledger, "t_category", "category_id")
-    for _ in categories:
-        ledger.ok("t_category")
+    category_name = _named(tables, ledger, "t_category", "category_id", "name")
     for oid, row in _index(tables, ledger, "t_object", "object_id").items():
         cls = class_name.get(row.get("class_id"))
         if cls is None:
@@ -382,8 +384,14 @@ def read_plexos_xml(source) -> PlexosModel:
         if (cls, row["name"]) in objects:
             ledger.bad("t_object", oid, f"a second {cls} named {row['name']!r}")
             continue
-        cat = categories.get(row.get("category_id"), {}).get("name")
-        obj = PlexosObject(oid, cls, row["name"], cat, row.get("description"))
+        cat_id = row.get("category_id")
+        if cat_id is not None and cat_id not in category_name:
+            warnings.append(
+                f"{cls} {row['name']!r} names category id {cat_id}, which the file does not define; it has no category."
+            )
+        obj = PlexosObject(
+            oid, cls, row["name"], category_name.get(cat_id), row.get("description")
+        )
         objects_by_id[oid] = obj
         objects[obj.key] = obj
         ledger.ok("t_object")
@@ -541,6 +549,11 @@ def read_plexos_xml(source) -> PlexosModel:
     # object attributes (Node latitude/longitude, ...)
     attr_def = {}
     for aid, row in _index(tables, ledger, "t_attribute", "attribute_id").items():
+        if not row.get("name") or row.get("class_id") not in class_name:
+            ledger.bad(
+                "t_attribute", aid, "attribute without a name, or of an unknown class"
+            )
+            continue
         attr_def[aid] = (
             row.get("name"),
             unit_name.get(row.get("unit_id")),
