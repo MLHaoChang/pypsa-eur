@@ -1413,6 +1413,8 @@ export interface ProcessAmount {
   eur_flag?: string | null
   /** Set on `buy_in` and `lost`: the carriers of the buy-in / shortfall generators (empty: none on the bus). */
   carriers?: string[]
+  /** Set on `buy_in`: `role_from_name` when a generator's buy-in role was guessed from its name. */
+  role_flag?: string | null
 }
 export interface ProcessInventory { name: string; unit: string; e: (number | null)[]; flag: string | null }
 export interface ProcessProduct {

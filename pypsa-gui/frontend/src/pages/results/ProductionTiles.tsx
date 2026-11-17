@@ -63,10 +63,13 @@ export function productionTiles(p: ProcessProduct): ProductionTile[] {
         fixBus: p.inventory.length && p.t_per_unit == null ? p.bus : undefined }
   // Control-strategy walkthrough issue 10: Made + Bought in + Lost = Delivered. Hidden only when the bus
   // has no buy-in generator (`carriers` empty); a real zero shows as one.
+  // A buy-in recognised only by its generator's name says so (role_from_name).
+  const buyBasis = ['whole horizon',
+    p.buy_in.eur != null && Number.isFinite(p.buy_in.eur) ? `${money(p.buy_in.eur, 'EUR')} at the buy-in price` : null,
+    p.buy_in.role_flag === 'role_from_name' ? 'buy-in assumed from its name' : null,
+  ].filter(Boolean).join(' · ')
   const boughtIn: ProductionTile[] = p.buy_in.carriers?.length === 0 ? [] : [{
-    ...tonnes('bought-in', 'Bought in', p.buy_in, 'whole horizon', p.bus),
-    ...(p.buy_in.t != null && p.buy_in.eur != null && Number.isFinite(p.buy_in.eur)
-      ? { basis: `whole horizon · ${money(p.buy_in.eur, 'EUR')} at the buy-in price` } : {}),
+    ...tonnes('bought-in', 'Bought in', p.buy_in, buyBasis, p.bus),
   }]
   return [
     tonnes('made', 'Made', p.production, 'whole horizon', p.bus),

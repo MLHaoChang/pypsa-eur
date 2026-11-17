@@ -112,13 +112,14 @@ def _product(view: _View, bus: str) -> dict:
 
     gens = n.generators.index[n.generators["bus"] == bus]
     gen_p = getattr(n.generators_t, "p", None)
-    buy, sources, role_flags = [], [], set()
+    buy, sources, role_flags, buy_flags = [], [], set(), set()
     for g in gens:
         role, flag = generator_role(n, g)
         if role == BUY_IN:
             buy.append(g)
             if flag:
                 role_flags.add(flag)
+                buy_flags.add(flag)
         elif not role:
             sources.append(g)
     # The shortfall from the one accessor: a role Generator, else the solve's capture (ticket 08).
@@ -169,7 +170,7 @@ def _product(view: _View, bus: str) -> dict:
         "product_value": product_value(n, bus),
         "production": view.amount(made, unit, tf),
         "delivery": view.amount([s for s in delivered if s is not None], unit, tf),
-        "buy_in": _buy_in(n, view, buy, gen_p, unit, tf),
+        "buy_in": _buy_in(n, view, buy, gen_p, unit, tf, buy_flags),
         "lost": lost_amount,
         "unused_supply": view.amount([u for u in (_unused(view, g) for g in sources) if u is not None], unit, tf),
         "inventory": inventory,
@@ -182,16 +183,26 @@ def _carriers(n, gens) -> list[str]:
     return sorted({str(n.generators.at[g, "carrier"]) for g in gens if g in n.generators.index})
 
 
-def _buy_in(n, view: _View, buy: list, gen_p, unit: str, tf: float | None) -> dict:
+def _buy_in(n, view: _View, buy: list, gen_p, unit: str, tf: float | None, role_flags: set) -> dict:
     """The product bought in: its amount, and what it cost at the buy-in generators' marginal cost
-    (per snapshot, on the objective basis, as `lost.eur` is), control-strategy walkthrough issue 10."""
-    flows = [(g, s.clip(lower=0)) for g, s in ((g, _frame_col(gen_p, g, view.sns)) for g in buy) if s is not None]
-    out = view.amount([s for _, s in flows], unit, tf)
-    eur, eur_flag, eur_pp = 0.0, None, {}
-    if flows:
-        mc = n.get_switchable_as_dense("Generator", "marginal_cost", inds=[g for g, _ in flows])
-        for g, s in flows:
-            t, pp = view.wsum(s * mc[g].reindex(view.sns), view.w_cost)
+    (linear and quadratic, per snapshot, on the objective basis, as `lost.eur` is), control-strategy
+    walkthrough issue 10. An unknown cost is None with a flag, never 0."""
+    flows = {g: _frame_col(gen_p, g, view.sns) for g in buy}
+    out = view.amount([s.clip(lower=0) for s in flows.values() if s is not None], unit, tf)
+    eur, eur_flag, eur_pp = None, None, {}
+    if not buy:
+        eur_flag = "no_buy_in"
+    elif any(s is None for s in flows.values()):
+        eur_flag = "buy_in_dispatch_missing"
+    else:
+        mc = n.get_switchable_as_dense("Generator", "marginal_cost", view.sns, inds=buy)
+        mq = n.get_switchable_as_dense("Generator", "marginal_cost_quadratic", view.sns, inds=buy) \
+            if "marginal_cost_quadratic" in n.generators.columns else None
+        eur = 0.0
+        for g, s in flows.items():
+            p = s.clip(lower=0)
+            cost = p * mc[g] + (p * p * mq[g] if mq is not None else 0.0)
+            t, pp = view.wsum(cost, view.w_cost)
             if t is None:
                 eur, eur_flag, eur_pp = None, "non_finite_values", {}
                 break
@@ -199,7 +210,7 @@ def _buy_in(n, view: _View, buy: list, gen_p, unit: str, tf: float | None) -> di
             for k, v in pp.items():
                 eur_pp[k] = eur_pp.get(k, 0.0) + v
     out.update(eur=eur, eur_flag=eur_flag, eur_by_period=eur_pp, eur_weighting=COST_BASIS,
-               carriers=_carriers(n, buy))
+               carriers=_carriers(n, buy), role_flag=sorted(role_flags)[0] if role_flags else None)
     return out
 
 

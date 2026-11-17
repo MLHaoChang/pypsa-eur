@@ -87,6 +87,16 @@ describe('ProductionTiles', () => {
   })
 })
 
+describe('the Bought in basis', () => {
+  it('says an unknown cost in no money, and a name-guessed buy-in as assumed', () => {
+    render(<ProductionTiles view={view([{ ...NH3,
+      buy_in: amount(60, { eur: null, eur_flag: 'buy_in_dispatch_missing', carriers: ['NH3 import'], role_flag: 'role_from_name' }) }])} />)
+    const text = screen.getByTestId('production-nh3-bought-in').textContent ?? ''
+    expect(text).not.toContain('€')
+    expect(text).toContain('buy-in assumed from its name')
+  })
+})
+
 describe('processCarrierLabels', () => {
   it('names the buy-in and shortfall carriers in the tile words, with the product name', () => {
     const p = { ...NH3, buy_in: amount(60, { carriers: ['NH3 import'] }), lost: amount(40, { carriers: ['NH3 shortfall'] }) }
