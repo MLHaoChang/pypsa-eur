@@ -147,6 +147,7 @@ class _Mapper:
         self.counts: dict[str, int] = {}
         self.names: list[dict] = []  # DGS → network, every object
         self.switches: list[dict] = []
+        self.dgs_names: dict[str, list[str]] = {}  # bus → its terminals' names
         self.used_types: set = set()
         self.cub = self._cubicles()
         self.bus_of = {}  # ElmTerm ID → bus name
@@ -269,6 +270,7 @@ class _Mapper:
                     "source": self.source,
                     "names": self.names,
                     "switches": self.switches,
+                    "dgs_names": self.dgs_names,
                 }
             }
         }
@@ -351,6 +353,10 @@ class _Mapper:
         for tid, row in self.rows("ElmTerm"):
             root = self.root[tid]
             self.bus_of[tid] = self.bus_of[root]
+            # every terminal's own name, the merged ones included (GK A 28)
+            self.dgs_names.setdefault(self.bus_of[tid], []).append(
+                str(self.get(row, "loc_name", ""))
+            )
             self.record("ElmTerm", tid, row, "Bus", self.bus_of[tid])
             if root != tid:
                 self.counts[PLAIN["ElmTerm"]] -= 1  # one bus, two terminals
@@ -539,7 +545,7 @@ class _Mapper:
             self.assume(
                 star,
                 "Star point",
-                u["h"],
+                self.n.buses.at[star, "v_nom"],
                 "a three-winding transformer becomes three legs on a star bus at the HV voltage",
             )
             self.assume(
@@ -552,6 +558,14 @@ class _Mapper:
                 vh = self.n.buses.at[ends[0], "v_nom"]
                 off = (u["h"] / vh) / (u[k] / vb)
                 leg_name = self.unique("Transformer", f"{name} {k.upper()}V")
+                if not math.isclose(off, 1.0):
+                    self.assume(
+                        leg_name,
+                        "Off-nominal ratio",
+                        round(off, 9),
+                        f"rated {u['h']:g}/{u[k]:g} kV on buses of {vh:g}/{vb:g} kV: "
+                        "folded into the tap ratio, impedance on the bus voltage",
+                    )
                 self.n.add(
                     "Transformer",
                     leg_name,

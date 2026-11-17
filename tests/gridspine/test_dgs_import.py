@@ -176,6 +176,12 @@ def test_hand_buses_and_coupler_topology(hand):
         if r["dgs_class"] == "ElmTerm"
     }
     assert ("HV-B", "HV") in names and ("HV", "HV") in names  # merged keeps both
+    assert hand.sidecars["metadata.json"]["import"]["dgs_names"] == {
+        "HV": ["HV", "HV-B"],
+        "LV": ["LV"],
+        "Spare": ["Spare"],
+        "EHV": ["EHV"],
+    }
     sw = hand.sidecars["metadata.json"]["import"]["switches"]
     assert sw == [
         {"dgs_name": "C1", "kind": "coupler", "closed": True},
@@ -421,7 +427,7 @@ def test_round_trip_counts_and_spectra(tmp_path):
             got = comp.at[name, "harmonic_spectrum"] if name in HARMONICS else ""
             want = HARMONICS.get(name)
             if want is None:
-                assert got in ("", None) or (isinstance(got, float) and math.isnan(got))
+                assert got == ""
                 continue
             spec = hm.parse_spectrum(want["spectrum"])
             assert hm.parse_spectrum(got) == pytest.approx(spec)
@@ -595,3 +601,28 @@ def test_three_winding_copper_losses_split_into_the_legs(tmp_path):
     ):
         assert tr.at[leg, "r"] == pytest.approx(r)
         assert tr.at[leg, "x"] == pytest.approx(x)
+
+
+def test_a_three_winding_leg_rated_off_its_bus_voltage(tmp_path):
+    # LV winding rated 10 kV on the 11 kV LV bus: ratio (132/132)/(10/11) = 1.1
+    rows = _with(TypTr3=["34;T3 type;100.0;50.0;25.0;132.0;33.0;10.0;10.0;8.0;12.0"])
+    res = read_text(tmp_path, dgs_text(rows))
+    tr = res.network.transformers
+    assert tr.at["T3W LV", "tap_ratio"] == pytest.approx(1.1)
+    assert tr.at["T3W LV", "x"] == pytest.approx(0.075 * (10.0 / 11.0) ** 2)
+    assert tr.at["T3W HV", "tap_ratio"] == pytest.approx(1.0)
+    off = {(a.asset, a.parameter): a.value for a in res.report.assumed}
+    assert off[("T3W LV", "Off-nominal ratio")] == pytest.approx(1.1)
+    assert ("T3W MV", "Off-nominal ratio") not in off
+    assert off[("T3W star", "Star point")] == 132.0
+
+
+def test_the_star_point_is_reported_at_the_bus_voltage(tmp_path):
+    # HV winding rated 130 kV on the 132 kV bus: the star sits at 132 kV
+    rows = _with(TypTr3=["34;T3 type;100.0;50.0;25.0;130.0;33.0;11.0;10.0;8.0;12.0"])
+    res = read_text(tmp_path, dgs_text(rows))
+    assert res.network.buses.at["T3W star", "v_nom"] == 132.0
+    off = {(a.asset, a.parameter): a.value for a in res.report.assumed}
+    assert off[("T3W star", "Star point")] == 132.0
+    # (130/132)/(33/33) on the MV leg
+    assert off[("T3W MV", "Off-nominal ratio")] == pytest.approx(130.0 / 132.0)
