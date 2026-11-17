@@ -87,6 +87,10 @@ class DeliverableState(_Strict):
     #: None until the data list is first edited; the catalogue's items stand in.
     data: list[DataItem] | None = None
     freeze: Freeze | None = None
+    #: The model set each submission went out on, oldest first. A record is
+    #: appended when the deliverable reaches ``submitted`` and never rewritten;
+    #: moves after it are judged against the last one, not the current inputs.
+    submissions: list[Freeze] = Field(default_factory=list)
     comments: list[TsoComment] = Field(default_factory=list)
     #: The next comment number; never reused, so ids stay unique.
     next_comment: int = 1

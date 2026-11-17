@@ -8,13 +8,14 @@ A ZIP holding:
 * ``data_list.csv`` and ``revision_log.csv``;
 * ``tables/<package>-<table>.csv``: the judged tables the feeding packages
   produced (``sources``); a package with no output is ``pending`` in the
-  manifest and stated in the skeleton as not established;
+  manifest (``unavailable`` when its provider fails) and stated in the
+  skeleton as not established;
 * ``manifest.json``: the deliverable, the model set it was frozen on, each
   feeding source's state, what was skipped, and every other file with its
   byte size and sha256.
 
-The pack is built from a snapshot of the tracker taken under its lock, then
-rendered outside it (DOCX and PDF conversion are slow), then recorded on the
+The pack is built from a snapshot of the tracker read without its lock (the
+file is replaced atomically, so the read is whole), then rendered outside it (DOCX and PDF conversion are slow), then recorded on the
 deliverable as a ``RevisionRef`` (version and manifest digest) under the lock
 again, so a TSO response can cite the pack it went out in. A pack recorded by
 someone else in between is ``gc_pack_conflict``; nothing is recorded for a
@@ -63,7 +64,8 @@ from .tracker import (
     require_deliverable,
 )
 
-#: Fixed timestamp for ZIP entries, so the archive depends on content only.
+#: Fixed timestamp for ZIP entries. The pack is still not byte-for-byte
+#: reproducible: ``generated_at`` and the DOCX core properties carry the build time.
 _ZIP_TIME = (2020, 1, 1, 0, 0, 0)
 GRID_CODE = (
     "Saudi Arabian Grid Code (SAGC) and its Technical Requirements "
@@ -102,11 +104,29 @@ DOCUMENT_SECTIONS: dict[str, tuple[tuple[str, str, str], ...]] = {
 }
 
 
+#: Leading characters that make a spreadsheet read a cell as a formula.
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(value) -> str:
+    """The cell as text, with a leading ``'`` when a spreadsheet would read
+    it as a formula (CSV injection). A plain number, negative ones included,
+    stays as it is."""
+    text = "" if value is None else str(value)
+    if not text.startswith(_FORMULA_LEAD):
+        return text
+    try:
+        float(text)
+    except ValueError:
+        return "'" + text
+    return text
+
+
 def _csv(header, rows) -> bytes:
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
-    w.writerow(header)
-    w.writerows(rows)
+    w.writerow([_safe_cell(c) for c in header])
+    w.writerows([_safe_cell(c) for c in row] for row in rows)
     return buf.getvalue().encode()
 
 
@@ -114,10 +134,14 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _pending_callout(package: str) -> Callout:
-    return Callout(
-        kind="not_established", text=f"The {cat.PACKAGE_LABELS[package]} is not in yet."
+def _pending_callout(package: str, state: str = "pending") -> Callout:
+    label = cat.PACKAGE_LABELS[package]
+    text = (
+        f"The {label} could not be read for this pack."
+        if state == "unavailable"
+        else f"The {label} is not in yet."
     )
+    return Callout(kind="not_established", text=text)
 
 
 def _skeleton(
@@ -125,7 +149,7 @@ def _skeleton(
     entry: DeliverableState,
     fstate: str,
     tables: dict[str, Table],
-    pending: list[str],
+    pending: dict[str, str],
     version: int,
     stamp: str,
 ) -> ReportDocument:
@@ -204,7 +228,7 @@ def _skeleton(
         for t in tables
         if t not in ("data_list", "revision_log")
     ]
-    result_blocks += [_pending_callout(p) for p in pending]
+    result_blocks += [_pending_callout(p, st) for p, st in pending.items()]
     sections.append(
         Section(
             section_id="results",
@@ -275,18 +299,18 @@ def _render(
         ),
     }
     files: dict[str, bytes] = {}
-    source_states, pending = [], []
+    source_states, pending = [], {}
     for package in d.packages:
-        got = sources.tables(project, package)
+        state, got = sources.read(project, package)
         source_states.append(
             {
                 "package": package,
                 "label": cat.PACKAGE_LABELS[package],
-                "state": "pending" if got is None else "present",
+                "state": state,
             }
         )
         if got is None:
-            pending.append(package)
+            pending[package] = state
             continue
         for t in got:
             key = f"{package}-{t.table_id}"
@@ -319,6 +343,7 @@ def _render(
         "generated_at": stamp,
         "grid_code": GRID_CODE,
         "model_set": entry.freeze.model_dump() if entry.freeze else None,
+        "submissions": [f.model_dump() for f in entry.submissions],
         "freeze_state": fstate,
         "sources": source_states,
         "skipped": skipped,

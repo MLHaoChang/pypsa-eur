@@ -109,7 +109,12 @@ def test_the_state_lists_every_deliverable_with_its_next_step_and_blockers(clien
     )
     assert row["blocked_by"] == ["06", "07"] and row["freeze_state"] == "none"
     assert row["feeds"] == [
-        {"package": "GC-07", "label": cat.PACKAGE_LABELS["GC-07"], "available": False}
+        {
+            "package": "GC-07",
+            "label": cat.PACKAGE_LABELS["GC-07"],
+            "available": False,
+            "state": "pending",
+        }
     ]
 
 
@@ -753,6 +758,7 @@ def test_the_pack_contents_follow_the_tracker(client, hub, monkeypatch):
         "generated_at",
         "grid_code",
         "model_set",
+        "submissions",
         "freeze_state",
         "sources",
         "skipped",
@@ -761,3 +767,147 @@ def test_the_pack_contents_follow_the_tracker(client, hub, monkeypatch):
     _, z = _pack(client, "08")
     assert b"Requires TRGC 06" in _document(z, "08")
     assert b"Freeze: " not in _document(z, "08")
+
+
+# ── GK B2 review: the submission record, the network read, CSV cells ─────
+
+
+def test_the_model_set_a_deliverable_was_submitted_on_is_kept(client, hub):
+    _judge(client, "13")
+    submitted_on = _freeze(client, hub, "14")["freeze"]
+    resp = _set(client, "14", "submitted")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["submissions"] == [submitted_on]
+
+    _network(hub).add("Bus", "gc09-after-submission", v_nom=33.0)
+    assert _row(client, "14")["freeze_state"] == "stale"
+    # a re-freeze cannot replace the submitted model set ...
+    resp = client.post(f"{BASE}/deliverables/14/freeze")
+    assert resp.status_code == 409 and _kind(resp) == "gc_freeze_after_submission"
+    row = _row(client, "14")
+    assert row["freeze"] == submitted_on and row["submissions"] == [submitted_on]
+    # ... and later moves are judged against the record, not the edited inputs
+    for later in ("tso_comments", "accepted"):
+        resp = _set(client, "14", later)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["submissions"] == [submitted_on]
+
+
+def test_a_resubmission_keeps_the_earlier_record_next_to_the_new_one(client, hub):
+    _judge(client, "13")
+    first = _freeze(client, hub, "14")["freeze"]
+    assert _set(client, "14", "submitted").status_code == 200
+    _campus(hub, "campus: {name: revised}\n")
+    assert _set(client, "14", "judged").status_code == 200
+    # back below submitted, the edited inputs need a fresh freeze again
+    assert _kind(_set(client, "14", "submitted")) == "gc_freeze_not_fresh"
+    second = _freeze(client, hub, "14")["freeze"]
+    assert second["model_set_id"] != first["model_set_id"]
+    assert _set(client, "14", "submitted").status_code == 200
+    assert _row(client, "14")["submissions"] == [first, second]
+    _, z = _pack(client, "14")
+    assert json.loads(z.read("manifest.json"))["submissions"] == [first, second]
+
+
+class _EditOnRelease:
+    """A mutation lock that lets an edit land right after it is released."""
+
+    def __init__(self, ctx, times):
+        self.ctx, self.lock, self.times = ctx, ctx.mutation_lock, times
+
+    def acquire(self, blocking=True, timeout=-1):
+        return self.lock.acquire(blocking, timeout)
+
+    def release(self):
+        self.lock.release()
+        if self.times:
+            self.times -= 1
+            self.ctx.network.add("Bus", f"gc09-late-{self.times}", v_nom=33.0)
+            self.ctx.network_revision = (self.ctx.network_revision or 0) + 1
+
+
+def _ctx(project):
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_context(project_registry.registry_key(project))
+
+
+def test_the_freeze_reads_the_network_inside_the_edit_bracket(client, hub, monkeypatch):
+    _campus(hub)
+    ctx = _ctx(hub)
+    monkeypatch.setattr(ctx, "mutation_lock", _EditOnRelease(ctx, times=1))
+    row = _freeze(client, hub, "04")
+    # the edit that landed during the read was read again: the stamp matches
+    # the network as it is now, not the state before the edit
+    assert row["freeze_state"] == "fresh"
+    assert row["freeze"]["data_hash"] == tracker.data_hash(hub)
+
+
+def test_a_network_that_keeps_moving_during_the_read_is_not_frozen(
+    client, hub, monkeypatch
+):
+    _campus(hub)
+    ctx = _ctx(hub)
+    monkeypatch.setattr(ctx, "mutation_lock", _EditOnRelease(ctx, times=2))
+    resp = client.post(f"{BASE}/deliverables/04/freeze")
+    assert resp.status_code == 409 and _kind(resp) == "gc_inputs_unreadable"
+    assert _row(client, "04")["freeze"] is None
+
+
+@pytest.mark.parametrize("lead", ["=", "+", "-", "@", "\t", "\r"])
+def test_csv_cells_that_a_spreadsheet_reads_as_formulas_are_neutralised(
+    client, hub, lead
+):
+    import csv
+
+    payload = f'{lead}HYPERLINK("http://x")'
+    item = {"item_id": "x", "label": payload, "supplier": payload}
+    assert (
+        client.put(f"{BASE}/deliverables/06/data", json={"items": [item]}).status_code
+        == 200
+    )
+    resp = client.post(
+        f"{BASE}/deliverables/06/comments",
+        json={"date": "2026-11-01", "clause": payload, "comment": payload},
+    )
+    assert resp.status_code == 201, resp.text
+    _, z = _pack(client, "06")
+    data = list(csv.reader(io.StringIO(z.read("data_list.csv").decode())))
+    log = list(csv.reader(io.StringIO(z.read("revision_log.csv").decode())))
+    assert data[1][1] == data[1][2] == "'" + payload
+    assert log[1][2] == log[1][3] == "'" + payload
+
+
+def test_plain_numbers_in_a_csv_stay_numbers():
+    assert gc_pack._safe_cell("-3.1") == "-3.1"
+    assert gc_pack._safe_cell("+2") == "+2"
+    assert gc_pack._safe_cell("-1+1") == "'-1+1"
+    assert gc_pack._safe_cell("Sk min") == "Sk min"
+
+
+def test_a_source_that_raises_reads_unavailable_never_a_500(client, hub, monkeypatch):
+    def broken(project):
+        raise RuntimeError("provider bug")
+
+    monkeypatch.setitem(sources.SOURCES, "GC-03", broken)
+    feeds = _row(client, "15")["feeds"]
+    assert [(f["state"], f["available"]) for f in feeds] == [
+        ("unavailable", False),
+        ("pending", False),
+    ]
+    _, z = _pack(client, "15")
+    assert [s["state"] for s in json.loads(z.read("manifest.json"))["sources"]] == [
+        "unavailable",
+        "pending",
+    ]
+    assert b"could not be read" in _document(z, "15")
+
+
+def test_an_invalid_field_is_named_in_the_refusal(client, hub):
+    resp = client.put(
+        f"{BASE}/deliverables/15/data",
+        json={"items": [{"item_id": "x", "label": "y", "due": "next week"}]},
+    )
+    assert resp.status_code == 422 and _kind(resp) == "gc_invalid"
+    assert resp.json()["detail"]["field"] == "due"
+    assert resp.json()["detail"]["message"].startswith("due: ")

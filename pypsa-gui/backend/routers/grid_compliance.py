@@ -80,8 +80,20 @@ def _http(exc: Exception) -> HTTPException:
         if exc.blockers:
             detail["blockers"] = exc.blockers
         return HTTPException(exc.status, detail)
+    errors = exc.errors() if isinstance(exc, ValidationError) else []
+    if not errors:
+        return HTTPException(
+            422, {"error_kind": "gc_invalid", "message": str(exc).splitlines()[0]}
+        )
+    first = errors[0]
+    field = ".".join(str(p) for p in first.get("loc", ())) or "value"
     return HTTPException(
-        422, {"error_kind": "gc_invalid", "message": str(exc).splitlines()[0]}
+        422,
+        {
+            "error_kind": "gc_invalid",
+            "field": field,
+            "message": f"{field}: {first.get('msg', 'is not valid')}",
+        },
     )
 
 
