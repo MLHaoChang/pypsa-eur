@@ -91,12 +91,15 @@ def test_aborting_the_waiting_call_leaves_the_running_one_alone(cds_env):
         def downloader(bbox, year, month, target, stop_event):
             threading.current_thread().name = owner
             gated(bbox, year, month, target, stop_event)
+
         return downloader
 
     results: dict = {}
     stop_b = threading.Event()
     a = threading.Thread(
-        target=_run, args=(results, "a"), daemon=True,
+        target=_run,
+        args=(results, "a"),
+        daemon=True,
         kwargs=dict(cache_dir=cache, downloader=fetch_as("a")),
     )
     a.start()
@@ -106,7 +109,9 @@ def test_aborting_the_waiting_call_leaves_the_running_one_alone(cds_env):
     part.write_bytes(b"merging")
 
     b = threading.Thread(
-        target=_run, args=(results, "b"), daemon=True,
+        target=_run,
+        args=(results, "b"),
+        daemon=True,
         kwargs=dict(cache_dir=cache, downloader=fetch_as("b"), stop_event=stop_b),
     )
     b.start()
@@ -144,13 +149,17 @@ def test_a_different_cutout_does_not_wait(cds_env):
 
     results: dict = {}
     a = threading.Thread(
-        target=_run, args=(results, "a"), daemon=True,
+        target=_run,
+        args=(results, "a"),
+        daemon=True,
         kwargs=dict(cache_dir=cache, downloader=gated),
     )
     a.start()
     try:
         assert first_fetch.wait(10)
-        other = ensure_cutout((20.0, 40.0, 21.0, 41.0), YEAR, cache_dir=cache, downloader=quick)
+        other = ensure_cutout(
+            (20.0, 40.0, 21.0, 41.0), YEAR, cache_dir=cache, downloader=quick
+        )
         assert other.exists()
         assert a.is_alive()  # finished while the first cutout still fetched
     finally:
