@@ -15,6 +15,30 @@
     "system_map_preview_stale": {
       "surface": "inline",
       "why": "homer-parity 03b: the base project, the request or the derived architectures and solve count changed between the confirmation card and the run of compare_system_types. The assistant shows a new card."
+    },
+    "unknown_variable": {
+      "surface": "inline",
+      "why": "homer-parity 03b: compare_system_types named a variable that is not one of the map's choices. The refusal lists the choices; the assistant picks one and retries."
+    },
+    "axes_not_different": {
+      "surface": "inline",
+      "why": "homer-parity 03b: compare_system_types was given the same variable on both axes. The assistant chooses two different variables and retries."
+    },
+    "axis_values_invalid": {
+      "surface": "inline",
+      "why": "homer-parity 03b: an axis of compare_system_types did not hold 2 to 5 different multipliers above 0 and at most 10. The assistant fixes the values and retries."
+    },
+    "variable_not_in_network": {
+      "surface": "inline",
+      "why": "homer-parity 03b: a variable of compare_system_types would change nothing in the project (no such asset, none the optimiser sizes, or a zero value). The assistant tells the user and offers another variable."
+    },
+    "system_map_preview_unavailable": {
+      "surface": "inline",
+      "why": "homer-parity 03b: the confirmation data for compare_system_types could not be built, so no card is shown. The assistant reports it and does not retry unchanged."
+    },
+    "campaign_budget_invalid": {
+      "surface": "inline",
+      "why": "homer-parity 03b: compare_system_types would queue more solves than one campaign allows (cells x architectures, at most 120). The refusal names the count; the assistant proposes fewer values or fewer architectures."
     }
   }
 }

@@ -178,3 +178,20 @@ def test_an_unknown_architecture_is_422_and_a_missing_source_is_409(
     with pytest.raises(HTTPException) as exc:
         C.preview(_args("mc-status", sid, architectures=["wind"]))
     assert exc.value.status_code == 422
+
+
+def test_the_shown_arguments_are_exactly_what_the_card_shows(
+    client, studies_on, install_network
+):
+    """K3: nothing derived (solves, architecture labels) enters the digest."""
+    sid = _project(client, install_network, "mc-keys")
+    shown = C.preview(_args("mc-keys", sid))["shown"]
+    assert set(shown) == {
+        "project",
+        "study_id",
+        "x",
+        "y",
+        "architectures",
+        "budget_solves",
+    }
+    assert set(shown["x"]) == set(shown["y"]) == {"variable", "values"}

@@ -361,3 +361,14 @@ def test_two_solved_architectures_give_a_gap():
         assert c["runner_up_gap_eur_per_year"] == pytest.approx(
             200.0 * [1, 2, 3][c["j"]]
         )
+
+
+def test_the_clipped_share_weighs_snapshots_by_their_weighting():
+    """K1: unclipped 2+2+2+1 energy with weights 1,1,1,5 is 11, of which 3
+    is clipped; equal weights would read 3/7."""
+    n = _net()
+    n.set_snapshots(n.snapshots)
+    n.snapshot_weightings.loc[:, "objective"] = [1.0, 1.0, 1.0, 5.0]
+    n.generators_t.p_max_pu["pv"] = [1.0, 1.0, 1.0, 0.5]
+    got = M.apply_variable(n.copy(), M.VARIABLES["solar_resource"], 2.0)
+    assert got.clipped_share == pytest.approx(3.0 / 11.0)

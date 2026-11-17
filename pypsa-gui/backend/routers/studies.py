@@ -28,6 +28,7 @@ also had to be set was dropped in U3, after OPEN-ITEMS 1 closed. The refusal
 is a router dependency, so it runs before the project is resolved and cannot
 serve as an existence oracle.
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,7 +36,7 @@ import re
 import uuid
 from datetime import datetime, UTC
 from types import SimpleNamespace
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -66,6 +67,7 @@ from services.study import runner as study_runner
 
 logger = logging.getLogger(__name__)
 
+
 def require_decision_studies_enabled() -> None:
     """
     Router dependency: refuse unless local mode.
@@ -75,15 +77,18 @@ def require_decision_studies_enabled() -> None:
     not exist.
     """
     if not decision_studies_enabled():
-        raise HTTPException(status_code=404, detail={
-            "code": "decision_studies_unavailable",
-            "message": (
-                "Decision studies are not available in multi-user mode yet: a "
-                "study builds and solves its own projects in the background, "
-                "and that has not been reviewed for several users sharing one "
-                "server. Use the desktop app."
-            ),
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "decision_studies_unavailable",
+                "message": (
+                    "Decision studies are not available in multi-user mode yet: a "
+                    "study builds and solves its own projects in the background, "
+                    "and that has not been reviewed for several users sharing one "
+                    "server. Use the desktop app."
+                ),
+            },
+        )
 
 
 router = APIRouter(dependencies=[Depends(require_decision_studies_enabled)])
@@ -98,6 +103,7 @@ def _refuse_unless_enabled() -> None:
     test may replace it; `Depends` above captured the original.
     """
     require_decision_studies_enabled()
+
 
 # Load-modify-save of one sidecar is not atomic across the threadpool; two
 # per-step PATCHes to the same study must not drop each other's answers. The
@@ -195,10 +201,13 @@ def _load(project: AuthorizedProject, study_id: str) -> DecisionStudy:
     except store.StudyNotFound:
         raise HTTPException(404, "Study not found") from None
     except store.StudyUnreadable:
-        raise HTTPException(500, detail={
-            "code": "study_unreadable",
-            "message": "The study record on disk cannot be read.",
-        }) from None
+        raise HTTPException(
+            500,
+            detail={
+                "code": "study_unreadable",
+                "message": "The study record on disk cannot be read.",
+            },
+        ) from None
     return _adopt(study, project)
 
 
@@ -248,15 +257,22 @@ def _refuse_outside_mvp1(settings: StudySettingsPatch | None) -> None:
     """
     if settings is None:
         return
-    if (settings.perspective is not None
-            and settings.perspective not in MVP1_PERSPECTIVES):
-        raise HTTPException(422, (
-            f"perspective {settings.perspective.value!r} is not implemented; "
-            "MVP-1 models the site owner only."))
+    if (
+        settings.perspective is not None
+        and settings.perspective not in MVP1_PERSPECTIVES
+    ):
+        raise HTTPException(
+            422,
+            (
+                f"perspective {settings.perspective.value!r} is not implemented; "
+                "MVP-1 models the site owner only."
+            ),
+        )
     if settings.basis is not None and settings.basis != MVP1_BASIS:
-        raise HTTPException(422, (
-            "MVP-1 reports on one basis only: real terms, pre-tax, without "
-            "subsidy."))
+        raise HTTPException(
+            422,
+            ("MVP-1 reports on one basis only: real terms, pre-tax, without subsidy."),
+        )
 
 
 @router.get("/")
@@ -266,10 +282,12 @@ def list_studies(project: AuthorizedProject = ProjectAccessDep) -> list[dict]:
 
 
 @router.post("/", status_code=201)
-def create_study(body: StudyCreate,
-                 project: AuthorizedProject = ProjectAccessDep,
-                 db: DBSession = Depends(get_db),
-                 user: User | None = Depends(optional_user)) -> dict:
+def create_study(
+    body: StudyCreate,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Create a study.
 
@@ -287,15 +305,19 @@ def create_study(body: StudyCreate,
     now = _now()
     try:
         study = DecisionStudy(
-            study_id=store.new_study_id(), name=body.name,
-            question_id=body.question_id, base_project=project.uuid,
+            study_id=store.new_study_id(),
+            name=body.name,
+            question_id=body.question_id,
+            base_project=project.uuid,
             intake=body.intake,
             created_by=str(user.id) if user is not None else None,
-            created_at=now, updated_at=now,
+            created_at=now,
+            updated_at=now,
         )
     except ValidationError as exc:
-        raise HTTPException(422, exc.errors(include_url=False,
-                                            include_context=False)) from None
+        raise HTTPException(
+            422, exc.errors(include_url=False, include_context=False)
+        ) from None
     with _WRITE_LOCK:
         return _save(project, study)
 
@@ -303,6 +325,7 @@ def create_study(body: StudyCreate,
 # ── S8: what the guided flow's intake reads (no study needed) ────────────
 #
 # Declared before `/{study_id}` so `library` is never read as a study id.
+
 
 class PreviewRequest(BaseModel):
     """An intake, answered or not; nothing is stored."""
@@ -338,8 +361,9 @@ def _not_established(code: str, message: str) -> dict:
 
 
 @router.post("/preview")
-def preview_intake(body: PreviewRequest,
-                   project: AuthorizedProject = ProjectAccessDep) -> dict:
+def preview_intake(
+    body: PreviewRequest, project: AuthorizedProject = ProjectAccessDep
+) -> dict:
     """
     The intake's load read EXACTLY as the pack will read it (an upload
     through `packs.parse_load_upload`: timestamps, unit, time-series QA; a
@@ -364,12 +388,16 @@ def preview_intake(body: PreviewRequest,
 
     def resolve_upload(file_id: str) -> bytes:
         from services import upload_service
+
         try:
-            return upload_service.get_upload_bytes(project.name, file_id,
-                                                   project_dir=project.directory)
+            return upload_service.get_upload_bytes(
+                project.name, file_id, project_dir=project.directory
+            )
         except HTTPException:
-            raise packs.PackError("load_upload_unresolved",
-                                  f"no upload {file_id!r} in project {project.name!r}") from None
+            raise packs.PackError(
+                "load_upload_unresolved",
+                f"no upload {file_id!r} in project {project.name!r}",
+            ) from None
 
     load_out: dict[str, Any]
     series = None
@@ -379,43 +407,64 @@ def preview_intake(body: PreviewRequest,
         series = pd.Series(read.values, index=idx)
         conn = packs._connection_mw(intake)
         load_out = {
-            "status": "ok", "hours": int(len(read.values)), "unit": read.unit,
+            "status": "ok",
+            "hours": int(len(read.values)),
+            "unit": read.unit,
             "has_timestamps": read.has_timestamps,
-            "annual_mwh": float(read.values.sum()), "peak_mw": float(read.values.max()),
+            "annual_mwh": float(read.values.sum()),
+            "peak_mw": float(read.values.max()),
             "connection_mw": conn,
-            "peak_exceeds_connection": (conn is not None
-                                        and float(read.values.max()) > conn + 1e-9),
-            "notes": list(read.notes), "warnings": list(read.warnings),
+            "peak_exceeds_connection": (
+                conn is not None and float(read.values.max()) > conn + 1e-9
+            ),
+            "notes": list(read.notes),
+            "warnings": list(read.warnings),
         }
     except packs.PackError as exc:
         load_out = _not_established(exc.code, exc.message)
 
     if series is None:
         bill_out = _not_established(
-            "load_not_established", "the bill needs the load; see the load's reason")
+            "load_not_established", "the bill needs the load; see the load's reason"
+        )
     else:
         try:
-            question = study_questions.get_question("bess_at_site") or study_questions.BESS_AT_SITE
+            question = (
+                study_questions.get_question("bess_at_site")
+                or study_questions.BESS_AT_SITE
+            )
             ledger = study_library.seed_ledger(question, intake, library)
             tariff = packs.effective_tariff(intake, ledger, library, series.index)
             _t, tariff_notes = packs.intake_tariff(intake, library)
-            baseline = packs.build_site_network(intake, ledger, "none", library=library,
-                                                question=question,
-                                                resolve_upload=resolve_upload)
-            compiled = packs.option_commercial(intake, ledger, library, baseline.snapshots)
-            bill = study_engine.bill_meter(baseline, compiled, series,
-                                           np.zeros(len(baseline.snapshots)))
-            bill_out = {"status": "ok", "bill": bill.model_dump(mode="json"),
-                        "tariff": tariff.model_dump(mode="json"),
-                        "notes": list(tariff_notes)}
+            baseline = packs.build_site_network(
+                intake,
+                ledger,
+                "none",
+                library=library,
+                question=question,
+                resolve_upload=resolve_upload,
+            )
+            compiled = packs.option_commercial(
+                intake, ledger, library, baseline.snapshots
+            )
+            bill = study_engine.bill_meter(
+                baseline, compiled, series, np.zeros(len(baseline.snapshots))
+            )
+            bill_out = {
+                "status": "ok",
+                "bill": bill.model_dump(mode="json"),
+                "tariff": tariff.model_dump(mode="json"),
+                "notes": list(tariff_notes),
+            }
         except (packs.PackError, study_library.LibraryError) as exc:
-            bill_out = _not_established(getattr(exc, "code", "tariff_invalid"), str(exc))
+            bill_out = _not_established(
+                getattr(exc, "code", "tariff_invalid"), str(exc)
+            )
     return {"load": load_out, "bill": bill_out}
 
 
 @router.get("/{study_id}")
-def get_study(study_id: str,
-              project: AuthorizedProject = ProjectAccessDep) -> dict:
+def get_study(study_id: str, project: AuthorizedProject = ProjectAccessDep) -> dict:
     _refuse_unless_enabled()
     return _out(_load(project, study_id))
 
@@ -429,14 +478,22 @@ def _refuse_bad_patch(body: StudyPatch) -> None:
         # Gate S8 re-verification BC-S8-v2-2: `csv_text` carries a DRAFT's
         # file until creation writes it as an upload; a stored study reads
         # its load from an upload, never from text in its record.
-        raise HTTPException(422, (
-            "load.csv_text is only accepted while creating a study; upload the "
-            "file and set load.upload_id instead"))
+        raise HTTPException(
+            422,
+            (
+                "load.csv_text is only accepted while creating a study; upload the "
+                "file and set load.upload_id instead"
+            ),
+        )
     if body.step is not None:
         if body.intake is None or set(body.intake) - {body.step}:
-            raise HTTPException(422, (
-                f"a PATCH for step {body.step!r} may only carry "
-                f"intake[{body.step!r}]"))
+            raise HTTPException(
+                422,
+                (
+                    f"a PATCH for step {body.step!r} may only carry "
+                    f"intake[{body.step!r}]"
+                ),
+            )
 
 
 def _patched_study(study: DecisionStudy, body: StudyPatch) -> DecisionStudy:
@@ -453,8 +510,9 @@ def _patched_study(study: DecisionStudy, body: StudyPatch) -> DecisionStudy:
     try:
         updated = DecisionStudy.model_validate(data)
     except ValidationError as exc:
-        raise HTTPException(422, exc.errors(include_url=False,
-                                            include_context=False)) from None
+        raise HTTPException(
+            422, exc.errors(include_url=False, include_context=False)
+        ) from None
     if body.intake is not None and "tariff" in body.intake:
         _refuse_bad_tariff(updated.intake)
         if updated.ledger is not None:
@@ -462,36 +520,54 @@ def _patched_study(study: DecisionStudy, body: StudyPatch) -> DecisionStudy:
             # its tariff rows (the demand-charge price, the energy level)
             # follow the new tariff; a user value that no longer applies
             # is flagged `needs_attention`, and the run refuses it.
-            if (study.currency_year is not None
-                    and not (body.settings and body.settings.currency_year is not None)
-                    and updated.currency_year == study.currency_year
-                    and study_ledger.money_years(study.ledger) == [study.currency_year]):
+            if (
+                study.currency_year is not None
+                and not (body.settings and body.settings.currency_year is not None)
+                and updated.currency_year == study.currency_year
+                and study_ledger.money_years(study.ledger) == [study.currency_year]
+            ):
                 # Money-year 03: as the ledger PUT re-seed (02), a study year
                 # that followed the old ledger's money rows follows the pin;
                 # a year the user set apart, or this PATCH sets, stays.
-                updated = updated.model_copy(update={
-                    "currency_year": int(_library_or_500().finance["currency_year"])})
+                updated = updated.model_copy(
+                    update={
+                        "currency_year": int(_library_or_500().finance["currency_year"])
+                    }
+                )
             try:
-                updated = updated.model_copy(update={
-                    "ledger": study_ledger.reseed_ledger(
-                        updated.ledger, _key_drivers(updated), updated.intake,
-                        _library_or_500())})
+                updated = updated.model_copy(
+                    update={
+                        "ledger": study_ledger.reseed_ledger(
+                            updated.ledger,
+                            _key_drivers(updated),
+                            updated.intake,
+                            _library_or_500(),
+                        )
+                    }
+                )
             except study_library.LibraryError as exc:
                 raise HTTPException(422, str(exc)) from None
     if updated.ledger is not None:
         # S2: the badge reads the intake's load too, so an intake step
         # (e.g. a meter upload) moves it without waiting for a ledger PUT.
-        updated = updated.model_copy(update={
-            "maturity": study_ledger.maturity_from_ledger(
-                updated.ledger, study_ledger.load_provenance(updated.intake))})
+        updated = updated.model_copy(
+            update={
+                "maturity": study_ledger.maturity_from_ledger(
+                    updated.ledger, study_ledger.load_provenance(updated.intake)
+                )
+            }
+        )
     return updated
 
 
 @router.patch("/{study_id}")
-def patch_study(study_id: str, body: StudyPatch,
-                project: AuthorizedProject = ProjectAccessDep,
-                db: DBSession = Depends(get_db),
-                user: User | None = Depends(optional_user)) -> dict:
+def patch_study(
+    study_id: str,
+    body: StudyPatch,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     _refuse_unless_enabled()
     _check_lock(db, project, user)
     _refuse_bad_patch(body)
@@ -502,10 +578,12 @@ def patch_study(study_id: str, body: StudyPatch,
 
 
 @router.delete("/{study_id}", status_code=204)
-def delete_study(study_id: str,
-                 project: AuthorizedProject = ProjectAccessDep,
-                 db: DBSession = Depends(get_db),
-                 user: User | None = Depends(optional_user)) -> Response:
+def delete_study(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> Response:
     """
     Delete the study record and cascade to the option forks the study OWNS
     (S4) — verified server-side for every candidate (`forks.is_study_owned`:
@@ -530,11 +608,13 @@ def delete_study(study_id: str,
             _refuse_undeletable_fork(row, db)
         for row in forks:
             try:
-                study_forks.delete_fork(db, row, study_id=study_id,
-                                        base_uuid=project.uuid)
+                study_forks.delete_fork(
+                    db, row, study_id=study_id, base_uuid=project.uuid
+                )
             except study_forks.ForkError as exc:
-                raise HTTPException(exc.status, detail={
-                    "error_kind": exc.code, "message": exc.message}) from None
+                raise HTTPException(
+                    exc.status, detail={"error_kind": exc.code, "message": exc.message}
+                ) from None
         try:
             store.delete_study(_project_dir(project), study_id)
         except store.StudyNotFound:
@@ -545,13 +625,15 @@ def delete_study(study_id: str,
         # that fails here then leaves only Library rows (removed by the
         # startup sweep once the base row is gone), never a study whose
         # record survives without its series.
-        outcome = _cascade_export_series(db, project, study_id,
-                                         {str(r.id) for r in forks})
+        outcome = _cascade_export_series(
+            db, project, study_id, {str(r.id) for r in forks}
+        )
     return Response(status_code=204, headers={"X-Study-Export-Series": outcome})
 
 
-def _cascade_export_series(db: DBSession, project: AuthorizedProject, study_id: str,
-                           fork_ids: set[str]) -> str:
+def _cascade_export_series(
+    db: DBSession, project: AuthorizedProject, study_id: str, fork_ids: set[str]
+) -> str:
     """
     Delete every version of the study's export series unless a project of
     the org pins it, and return the outcome: ``deleted:<versions>``, the kept
@@ -570,11 +652,14 @@ def _cascade_export_series(db: DBSession, project: AuthorizedProject, study_id: 
 
     try:
         org_id = uuid.UUID(str(project.org_id))
-        dirs = [project_registry.project_dir(p) for p in db.scalars(
-            select(Project).where(Project.org_id == org_id)).all()
-            if str(p.id) not in fork_ids]
+        dirs = [
+            project_registry.project_dir(p)
+            for p in db.scalars(select(Project).where(Project.org_id == org_id)).all()
+            if str(p.id) not in fork_ids
+        ]
         out = study_compile.delete_export_series(
-            db, org_id, base_uuid=project.uuid, study_id=study_id, project_dirs=dirs)
+            db, org_id, base_uuid=project.uuid, study_id=study_id, project_dirs=dirs
+        )
     except Exception:  # noqa: BLE001 — never fail a delete that already happened
         try:
             db.rollback()
@@ -595,8 +680,9 @@ def _base_row(project: AuthorizedProject, db: DBSession, user: User | None):
     return project_registry.find_project(db, user, project.uuid)
 
 
-def _owned_fork_rows(study: DecisionStudy, project: AuthorizedProject,
-                     db: DBSession, user: User | None) -> list:
+def _owned_fork_rows(
+    study: DecisionStudy, project: AuthorizedProject, db: DBSession, user: User | None
+) -> list:
     """
     Candidates from the study's list AND from the base's children — every
     one verified by `forks.is_study_owned`, so the list alone never deletes.
@@ -613,7 +699,8 @@ def _owned_fork_rows(study: DecisionStudy, project: AuthorizedProject,
         except (TypeError, ValueError):
             continue
         if row is not None and study_forks.is_study_owned(
-                row, study_id=study.study_id, base_uuid=project.uuid):
+            row, study_id=study.study_id, base_uuid=project.uuid
+        ):
             rows[str(row.id)] = row
     return list(rows.values())
 
@@ -623,23 +710,39 @@ def _refuse_undeletable_fork(row, db: DBSession) -> None:
     from services.solve_queue import solve_queue
 
     key = project_registry.registry_key(row)
-    if any(j.get("project_key") == key and j.get("status") in ("queued", "running")
-           for j in solve_queue.list_jobs()):
-        raise HTTPException(409, detail={
-            "error_kind": "fork_solving",
-            "message": f"the study fork '{row.name}' has an active solve-queue job"})
+    if any(
+        j.get("project_key") == key and j.get("status") in ("queued", "running")
+        for j in solve_queue.list_jobs()
+    ):
+        raise HTTPException(
+            409,
+            detail={
+                "error_kind": "fork_solving",
+                "message": f"the study fork '{row.name}' has an active solve-queue job",
+            },
+        )
     if project_registry.direct_children(db, row):
-        raise HTTPException(409, detail={
-            "error_kind": "fork_has_children",
-            "message": (f"a project was branched from the study fork '{row.name}'; "
-                        "delete or move it first")})
+        raise HTTPException(
+            409,
+            detail={
+                "error_kind": "fork_has_children",
+                "message": (
+                    f"a project was branched from the study fork '{row.name}'; "
+                    "delete or move it first"
+                ),
+            },
+        )
 
 
-def _refuse_if_running(project: AuthorizedProject, db: DBSession,
-                       user: User | None, study_id: str, *,
-                       runs_only: bool = False,
-                       message: str = "the study is running; abort it before deleting it",
-                       ) -> None:
+def _refuse_if_running(
+    project: AuthorizedProject,
+    db: DBSession,
+    user: User | None,
+    study_id: str,
+    *,
+    runs_only: bool = False,
+    message: str = "the study is running; abort it before deleting it",
+) -> None:
     """
     409 while this study's run — or, unless ``runs_only``, its tornado —
     holds the base context. A read of the option forks (the case) passes
@@ -653,10 +756,15 @@ def _refuse_if_running(project: AuthorizedProject, db: DBSession,
         return
     with ctx.solver_state_lock:
         rec = ctx.solver_state.get(study_runner.STUDY_KEY)
-        if (rec and rec.get("study_id") == study_id and rec.get("status") == "running"
-                and (not runs_only or rec.get("kind", "run") == "run")):
-            raise HTTPException(409, detail={"error_kind": "study_running",
-                                             "message": message})
+        if (
+            rec
+            and rec.get("study_id") == study_id
+            and rec.get("status") == "running"
+            and (not runs_only or rec.get("kind", "run") == "run")
+        ):
+            raise HTTPException(
+                409, detail={"error_kind": "study_running", "message": message}
+            )
 
 
 # ── S4 M0: a question-first study creates its own base project ────────────
@@ -669,12 +777,14 @@ def _refuse_bad_tariff(intake: dict[str, Any]) -> None:
     try:
         packs.intake_tariff(intake, _library_or_500())
     except packs.PackError as exc:
-        raise HTTPException(422, detail={"error_kind": exc.code,
-                                         "message": exc.message}) from None
+        raise HTTPException(
+            422, detail={"error_kind": exc.code, "message": exc.message}
+        ) from None
 
 
-def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
-                       db: DBSession, user: User | None) -> dict:
+def _create_pack_study(
+    body: StudyCreate, project: AuthorizedProject, db: DBSession, user: User | None
+) -> dict:
     """
     M0 (plan S4, review v2 BC-5): ``project_registry.create_root`` →
     ``ensure_project_dir`` → ``PyPSAService.build_context()`` →
@@ -694,9 +804,13 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
     question = study_questions.get_question(body.question_id)
     base_name = (body.project_name or body.name).strip()
     if not _BASE_NAME_RE.fullmatch(base_name):
-        raise HTTPException(422, (
-            "the study's base project name must be 1-48 letters, digits, spaces, "
-            "'_', '-' or '.' (its option forks append '-opt-<option>')"))
+        raise HTTPException(
+            422,
+            (
+                "the study's base project name must be 1-48 letters, digits, spaces, "
+                "'_', '-' or '.' (its option forks append '-opt-<option>')"
+            ),
+        )
     if project_registry.find_project(db, user, base_name) is not None:
         raise HTTPException(409, f"Project '{base_name}' already exists")
     library = _library_or_500()
@@ -704,22 +818,32 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
 
     def resolve_upload(file_id: str) -> bytes:
         from services import upload_service
-        return upload_service.get_upload_bytes(project.name, file_id,
-                                               project_dir=project.directory)
+
+        return upload_service.get_upload_bytes(
+            project.name, file_id, project_dir=project.directory
+        )
 
     try:
         ledger = study_library.seed_ledger(question, body.intake, library)
-        network = packs.build_site_network(body.intake, ledger, "none",
-                                           library=library, question=question,
-                                           resolve_upload=resolve_upload)
+        network = packs.build_site_network(
+            body.intake,
+            ledger,
+            "none",
+            library=library,
+            question=question,
+            resolve_upload=resolve_upload,
+        )
         tariff = packs.effective_tariff(body.intake, ledger, library, network.snapshots)
     except (packs.PackError, study_library.LibraryError) as exc:
         code = getattr(exc, "code", "intake_invalid")
-        raise HTTPException(422, detail={"error_kind": code, "message": str(exc)}) from None
+        raise HTTPException(
+            422, detail={"error_kind": code, "message": str(exc)}
+        ) from None
     study_id = store.new_study_id()
     options = study_questions.options_for(question, body.intake)
-    solves = campaign.estimate_solves(None, study_runner.STUDY_KEY,
-                                      options=[o.option_id for o in options])
+    solves = campaign.estimate_solves(
+        None, study_runner.STUDY_KEY, options=[o.option_id for o in options]
+    )
 
     row = project_registry.create_root(db, user, base_name)
     base_dir = project_registry.ensure_project_dir(row)
@@ -735,24 +859,42 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
         try:
             minting = True
             ref = study_compile.mint_export_series(
-                db, row.org_id, base_uuid=row.id, study_id=study_id, study_name=body.name,
-                base_name=row.name, tariff=tariff, snapshots=network.snapshots)
+                db,
+                row.org_id,
+                base_uuid=row.id,
+                study_id=study_id,
+                study_name=body.name,
+                base_name=row.name,
+                tariff=tariff,
+                snapshots=network.snapshots,
+            )
             bound = packs.bind_option(
-                network, packs.option_commercial(body.intake, ledger, library,
-                                                 network.snapshots, export_series=ref),
-                resolve_ref=study_compile.library_series_resolver(db, row.org_id))
+                network,
+                packs.option_commercial(
+                    body.intake, ledger, library, network.snapshots, export_series=ref
+                ),
+                resolve_ref=study_compile.library_series_resolver(db, row.org_id),
+            )
             cfg = packs.option_solver_config(ledger, bound)
         except (study_compile.CompileError, packs.PackError) as exc:
-            raise HTTPException(422, detail={"error_kind": exc.code,
-                                             "message": exc.message}) from None
+            raise HTTPException(
+                422, detail={"error_kind": exc.code, "message": exc.message}
+            ) from None
         with PyPSAService.hydrate_or_adopt(key) as resident:
             if resident is not None:  # a fresh uuid cannot be resident
                 raise HTTPException(409, f"Project '{base_name}' is already open")
             ctx = PyPSAService.build_context()
             ctx.network = network
             ctx.solver_state["solver_config"] = cfg
-            _save_context(ctx, row.name, project_row=row, storage_dir=base_dir,
-                          persist_user_ts=False, db=db, user=user)
+            _save_context(
+                ctx,
+                row.name,
+                project_row=row,
+                storage_dir=base_dir,
+                persist_user_ts=False,
+                db=db,
+                user=user,
+            )
             # The first-save claim re-keys the build context INTO the registry
             # (`rekey_context`); it is a throw-away here, and a resident base
             # would count against the user's resident cap (gate S4 BC-S4-1).
@@ -763,10 +905,14 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
             # Gate S8 BC-S8-5: a draft's load file lands in the NEW base
             # project only, as an ordinary upload; the stored intake names it.
             from services import upload_service
+
             meta = upload_service.add_upload(
-                name=row.name, project_dir=base_dir,
+                name=row.name,
+                project_dir=base_dir,
                 file_bytes=load["csv_text"].encode("utf-8"),
-                filename=str(load.get("filename") or "load.csv"), sniffed_mime="text/csv")
+                filename=str(load.get("filename") or "load.csv"),
+                sniffed_mime="text/csv",
+            )
             load = {k: v for k, v in load.items() if k != "csv_text"}
             load["upload_id"] = meta.file_id
             intake["load"] = load
@@ -774,20 +920,28 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
             _copy_upload(project, base_dir, str(load["upload_id"]))
         now = _now()
         study = DecisionStudy(
-            study_id=study_id, name=body.name,
-            question_id=body.question_id, base_project=str(row.id),
-            pack_project=str(row.id), intake=intake,
-            ledger=ledger, ledger_version=ledger.ledger_version,
+            study_id=study_id,
+            name=body.name,
+            question_id=body.question_id,
+            base_project=str(row.id),
+            pack_project=str(row.id),
+            intake=intake,
+            ledger=ledger,
+            ledger_version=ledger.ledger_version,
             maturity=study_ledger.maturity_from_ledger(
-                ledger, study_ledger.load_provenance(intake)),
+                ledger, study_ledger.load_provenance(intake)
+            ),
             budget=StudyBudget(solves_max=solves),
             currency_year=int(library.finance["currency_year"]),
-            created_by=str(user.id), created_at=now, updated_at=now,
+            created_by=str(user.id),
+            created_at=now,
+            updated_at=now,
         )
         with _WRITE_LOCK:
             store.save_study(base_dir, study)
     except BaseException:
         from routers.projects import _force_rmtree
+
         try:
             PyPSAService.drop(key)
             project_registry.delete_project_row(db, row)
@@ -799,7 +953,9 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
             # base unless deleted here, after the base is gone (its own
             # binding would keep it). Never masks the original error.
             try:
-                _discard_minted_series(db, org_id, base_uuid=base_uuid, study_id=study_id)
+                _discard_minted_series(
+                    db, org_id, base_uuid=base_uuid, study_id=study_id
+                )
             except Exception:  # noqa: BLE001
                 pass
         raise
@@ -820,10 +976,15 @@ def _discard_minted_series(db: DBSession, org_id, *, base_uuid, study_id: str) -
     from services.study import compile as study_compile
 
     db.rollback()  # a failure inside the session leaves it unusable until rolled back
-    others = [project_registry.project_dir(p) for p in db.scalars(
-        select(Project).where(Project.org_id == org_id, Project.id != base_uuid)).all()]
+    others = [
+        project_registry.project_dir(p)
+        for p in db.scalars(
+            select(Project).where(Project.org_id == org_id, Project.id != base_uuid)
+        ).all()
+    ]
     study_compile.discard_export_series_of_failed_creation(
-        db, org_id, base_uuid=base_uuid, study_id=study_id, other_project_dirs=others)
+        db, org_id, base_uuid=base_uuid, study_id=study_id, other_project_dirs=others
+    )
 
 
 def _copy_upload(project: AuthorizedProject, base_dir, file_id: str) -> None:
@@ -838,15 +999,19 @@ def _copy_upload(project: AuthorizedProject, base_dir, file_id: str) -> None:
 
 # ── S4 M1: run, status, abort ─────────────────────────────────────────────
 
+
 def _run_error(exc: study_runner.RunRefused) -> HTTPException:
     return HTTPException(exc.status, detail=exc.detail)
 
 
 @router.post("/{study_id}/run", status_code=202)
-def run_study(study_id: str, body: RunRequest | None = None,
-              project: AuthorizedProject = ProjectAccessDep,
-              db: DBSession = Depends(get_db),
-              user: User | None = Depends(optional_user)) -> dict:
+def run_study(
+    study_id: str,
+    body: RunRequest | None = None,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Solve every option of a question-pack study on study-owned forks.
 
@@ -868,35 +1033,49 @@ def run_study(study_id: str, body: RunRequest | None = None,
     _load(project, study_id)
     try:
         return study_runner.start_study_run(
-            study_id, body.fidelity, base_row=base, user_id=user.id,
-            budget_solves=body.budget_solves)
+            study_id,
+            body.fidelity,
+            base_row=base,
+            user_id=user.id,
+            budget_solves=body.budget_solves,
+        )
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
 
 
 @router.get("/{study_id}/run")
-def get_study_run(study_id: str,
-                  project: AuthorizedProject = ProjectAccessDep,
-                  db: DBSession = Depends(get_db),
-                  user: User | None = Depends(optional_user)) -> dict:
+def get_study_run(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     _refuse_unless_enabled()
     _load(project, study_id)
     base = _base_row(project, db, user)
     if base is None:
         raise HTTPException(404, f"Project '{project.name}' not found")
-    rec = study_runner.get_study_run(study_id, base_row=base,
-                                     base_dir=_project_dir(project))
+    rec = study_runner.get_study_run(
+        study_id, base_row=base, base_dir=_project_dir(project)
+    )
     if rec is None:
-        raise HTTPException(404, detail={"error_kind": "study_never_run",
-                                         "message": "this study has not been run"})
+        raise HTTPException(
+            404,
+            detail={
+                "error_kind": "study_never_run",
+                "message": "this study has not been run",
+            },
+        )
     return rec
 
 
 @router.post("/{study_id}/run/abort")
-def abort_study_run(study_id: str,
-                    project: AuthorizedProject = ProjectAccessDep,
-                    db: DBSession = Depends(get_db),
-                    user: User | None = Depends(optional_user)) -> dict:
+def abort_study_run(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Ask a running study to stop: the running option's queue job is aborted,
     no further option starts, unsolved forks are removed and the options
@@ -912,8 +1091,9 @@ def abort_study_run(study_id: str,
     _enforce_project_lock(db, base, user)
     _load(project, study_id)
     try:
-        return study_runner.abort_study_run(study_id, base_row=base,
-                                            base_dir=_project_dir(project))
+        return study_runner.abort_study_run(
+            study_id, base_row=base, base_dir=_project_dir(project)
+        )
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
 
@@ -924,6 +1104,7 @@ def abort_study_run(study_id: str,
 # first PUT it is None and GET answers with a seed computed in memory from the
 # library and the intake (`stored: false`), so a read never writes. Every PUT
 # stores the ledger and recomputes `maturity` from it and the intake's load.
+
 
 class LedgerEdit(BaseModel):
     """One user row. The unit is required and must be the row's own."""
@@ -963,7 +1144,9 @@ def _key_drivers(study: DecisionStudy) -> tuple[str, ...]:
     not the library stand-in). A custom question has no template; MVP-1 has
     one, the BESS one, and seeds such a record with its drivers.
     """
-    question = study_questions.get_question(study.question_id) or study_questions.BESS_AT_SITE
+    question = (
+        study_questions.get_question(study.question_id) or study_questions.BESS_AT_SITE
+    )
     return tuple(question.key_drivers)
 
 
@@ -977,8 +1160,9 @@ def _library_or_500() -> study_library.Library:
     try:
         return study_library.load_defaults()
     except (study_library.LibraryError, OSError, LookupError, ValueError) as exc:
-        raise HTTPException(500, detail={
-            "code": "study_library_unreadable", "message": str(exc)}) from None
+        raise HTTPException(
+            500, detail={"code": "study_library_unreadable", "message": str(exc)}
+        ) from None
 
 
 def _library_for_or_500(ledger) -> study_library.Library:
@@ -991,8 +1175,9 @@ def _library_for_or_500(ledger) -> study_library.Library:
     try:
         return study_library.library_for_ledger(ledger)
     except (study_library.LibraryError, OSError, LookupError, ValueError) as exc:
-        raise HTTPException(500, detail={
-            "code": "study_library_unreadable", "message": str(exc)}) from None
+        raise HTTPException(
+            500, detail={"code": "study_library_unreadable", "message": str(exc)}
+        ) from None
 
 
 def _current_ledger(study: DecisionStudy):
@@ -1001,18 +1186,29 @@ def _current_ledger(study: DecisionStudy):
     names a study currency year that differs from the ledger's (BC-S2-4).
     """
     if study.ledger is not None:
-        return study_ledger.with_study_currency_year(study.ledger, study.currency_year), True
+        return study_ledger.with_study_currency_year(
+            study.ledger, study.currency_year
+        ), True
     try:
-        seeded = study_library.seed_ledger(_key_drivers(study), study.intake,
-                                           _library_or_500())
+        seeded = study_library.seed_ledger(
+            _key_drivers(study), study.intake, _library_or_500()
+        )
     except study_library.LibraryError as exc:
         raise HTTPException(422, str(exc)) from None
     return study_ledger.with_study_currency_year(seeded, study.currency_year), False
 
 
-def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None, stale=None, unchecked=None) -> dict:
+def _ledger_out(
+    study: DecisionStudy,
+    ledger,
+    stored: bool,
+    maturity=None,
+    stale=None,
+    unchecked=None,
+) -> dict:
     maturity = maturity or study_ledger.maturity_from_ledger(
-        ledger, study_ledger.load_provenance(study.intake))
+        ledger, study_ledger.load_provenance(study.intake)
+    )
     return {
         "study_id": study.study_id,
         "stored": stored,
@@ -1061,8 +1257,13 @@ def _fork_snapshot(row):
     return snap
 
 
-def _with_expert_edits(study: DecisionStudy, ledger, project: AuthorizedProject,
-                       db: DBSession, user: User | None):
+def _with_expert_edits(
+    study: DecisionStudy,
+    ledger,
+    project: AuthorizedProject,
+    db: DBSession,
+    user: User | None,
+):
     """
     Rule 5 (parent plan §3): the ledger as the guided face shows it. A field
     an Expert changed on an option fork (S1a's provenance store says
@@ -1082,8 +1283,13 @@ def _with_expert_edits(study: DecisionStudy, ledger, project: AuthorizedProject,
     return asset_view.mark_expert_edits(ledger, edits)
 
 
-def _ledger_stale(study: DecisionStudy, ledger, project: AuthorizedProject,
-                  db: DBSession, user: User | None) -> tuple[dict[str, list[dict]], list[dict]]:
+def _ledger_stale(
+    study: DecisionStudy,
+    ledger,
+    project: AuthorizedProject,
+    db: DBSession,
+    user: User | None,
+) -> tuple[dict[str, list[dict]], list[dict]]:
     """Per ledger row, each owned fork whose asset field the row compiles to reads out of date (the provenance
     graph's verdict, the one the fork's asset card shows):
     `{key: [{option_id, option_label, component, name, field, stale}]}`. The label names the option the
@@ -1096,7 +1302,11 @@ def _ledger_stale(study: DecisionStudy, ledger, project: AuthorizedProject,
 
     def label(option_id: str) -> str:
         try:
-            return study_questions.option(question, option_id).label if question else option_id
+            return (
+                study_questions.option(question, option_id).label
+                if question
+                else option_id
+            )
         except KeyError:
             return option_id
 
@@ -1111,50 +1321,76 @@ def _ledger_stale(study: DecisionStudy, ledger, project: AuthorizedProject,
             continue
         option_id = snap.option_id or row.name
         for key, hit in sorted(asset_view.ledger_stale(snap, ledger).items()):
-            out.setdefault(key, []).append({"option_id": option_id, "option_label": label(option_id), **hit})
+            out.setdefault(key, []).append(
+                {"option_id": option_id, "option_label": label(option_id), **hit}
+            )
     return out, sorted(unchecked, key=lambda u: u["option_id"])
 
 
 @router.get("/{study_id}/ledger")
-def get_ledger(study_id: str,
-               project: AuthorizedProject = ProjectAccessDep,
-               db: DBSession = Depends(get_db),
-               user: User | None = Depends(optional_user)) -> dict:
+def get_ledger(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     _refuse_unless_enabled()
     study = _load(project, study_id)
     ledger, stored = _current_ledger(study)
     # Maturity is the study's own: an Expert edit to a fork does not make the
     # study's inputs any better known, so it is read from the stored ledger.
     maturity = study_ledger.maturity_from_ledger(
-        ledger, study_ledger.load_provenance(study.intake))
-    return _ledger_out(study, _with_expert_edits(study, ledger, project, db, user), stored,
-                       maturity, *_ledger_stale(study, ledger, project, db, user))
+        ledger, study_ledger.load_provenance(study.intake)
+    )
+    return _ledger_out(
+        study,
+        _with_expert_edits(study, ledger, project, db, user),
+        stored,
+        maturity,
+        *_ledger_stale(study, ledger, project, db, user),
+    )
 
 
 @router.get("/{study_id}/ledger/{key}/why")
-def get_ledger_row_why(study_id: str, key: str, option_id: str,
-                       project: AuthorizedProject = ProjectAccessDep,
-                       db: DBSession = Depends(get_db),
-                       user: User | None = Depends(optional_user)) -> dict:
+def get_ledger_row_why(
+    study_id: str,
+    key: str,
+    option_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """Why a Guided ledger row's value is what option `option_id`'s fork holds (provenance-graph 03): the
     provenance graph's walk for each asset field the row compiles to, read from the fork's file as saved (the
     network the ledger's out-of-date note reads). Reads only (COPILOT-1). `why_target_unknown` (404) for a
     row the ledger does not hold, an option with no fork this study owns, or a row with no recorded field."""
-    from services.provenance_graph.explain import TargetUnknown, explain_ledger_row, ledger_fields
+    from services.provenance_graph.explain import (
+        TargetUnknown,
+        explain_ledger_row,
+        ledger_fields,
+    )
     from services.provenance_graph.memory import reader_for
 
     _refuse_unless_enabled()
     study = _load(project, study_id)
 
     def unknown(message: str, status: int = 404) -> HTTPException:
-        return HTTPException(status, detail={"error_kind": "why_target_unknown", "message": message})
+        return HTTPException(
+            status, detail={"error_kind": "why_target_unknown", "message": message}
+        )
 
     try:
         ledger_fields(key)
     except TargetUnknown as exc:
         raise unknown(str(exc)) from exc
-    fork = next((r for r in _owned_fork_rows(study, project, db, user)
-                 if r.name.rsplit(study_forks.FORK_SEPARATOR, 1)[-1] == option_id), None)
+    fork = next(
+        (
+            r
+            for r in _owned_fork_rows(study, project, db, user)
+            if r.name.rsplit(study_forks.FORK_SEPARATOR, 1)[-1] == option_id
+        ),
+        None,
+    )
     if fork is None:
         raise unknown(f"option {option_id} has no fork this study owns")
     network, _hash = study_runner.fork_network_from_disk(fork)
@@ -1162,10 +1398,15 @@ def get_ledger_row_why(study_id: str, key: str, option_id: str,
         out = explain_ledger_row(network, key, reader_for(db, user))
     except TargetUnknown as exc:
         raise unknown(str(exc), exc.status) from exc
-    return {**out, "target": {**out["target"], "study_id": study_id, "option_id": option_id}}
+    return {
+        **out,
+        "target": {**out["target"], "study_id": study_id, "option_id": option_id},
+    }
 
 
-def _ledger_after(study: DecisionStudy, ledger, body: "LedgerPut", changed_by: str | None, now):
+def _ledger_after(
+    study: DecisionStudy, ledger, body: LedgerPut, changed_by: str | None, now
+):
     """
     The ledger a ``PUT .../ledger`` would store, from the stored (or seeded) ``ledger``;
     nothing is saved. Raises ``LedgerEditError`` / ``LibraryError`` for a refused edit.
@@ -1173,58 +1414,93 @@ def _ledger_after(study: DecisionStudy, ledger, body: "LedgerPut", changed_by: s
     """
     if body.reseed:
         ledger = study_ledger.reseed_ledger(
-            ledger, _key_drivers(study), study.intake, _library_or_500())
+            ledger, _key_drivers(study), study.intake, _library_or_500()
+        )
     if body.reset:
         # The rows come back from the defaults the ledger (after any
         # re-seed above) was seeded from, never another money year.
         ledger = study_ledger.reset_rows(
-            ledger, body.reset, _key_drivers(study), study.intake,
-            _library_for_or_500(ledger))
+            ledger,
+            body.reset,
+            _key_drivers(study),
+            study.intake,
+            _library_for_or_500(ledger),
+        )
     ledger = study_ledger.with_study_currency_year(ledger, study.currency_year)
     for edit in body.rows:
         ledger = study_ledger.apply_user_row(
-            ledger, edit.key, edit.value, unit=edit.unit,
-            changed_by=changed_by, changed_at=now,
-            provenance=edit.provenance, source=edit.source,
-            source_year=edit.source_year, source_url=edit.source_url,
-            currency_year=edit.currency_year)
+            ledger,
+            edit.key,
+            edit.value,
+            unit=edit.unit,
+            changed_by=changed_by,
+            changed_at=now,
+            provenance=edit.provenance,
+            source=edit.source,
+            source_year=edit.source_year,
+            source_url=edit.source_url,
+            currency_year=edit.currency_year,
+        )
     return ledger
 
 
 @router.put("/{study_id}/ledger")
-def put_ledger(study_id: str, body: LedgerPut,
-               project: AuthorizedProject = ProjectAccessDep,
-               db: DBSession = Depends(get_db),
-               user: User | None = Depends(optional_user)) -> dict:
+def put_ledger(
+    study_id: str,
+    body: LedgerPut,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     _refuse_unless_enabled()
     _check_lock(db, project, user)
     with _WRITE_LOCK:
         study = _load(project, study_id)
         ledger, _stored = _current_ledger(study)
-        if body.reseed and study.currency_year is not None \
-                and study_ledger.money_years(ledger) == [study.currency_year]:
+        if (
+            body.reseed
+            and study.currency_year is not None
+            and study_ledger.money_years(ledger) == [study.currency_year]
+        ):
             # Money-year 02: a study year that followed the old ledger's
             # money rows follows the re-seed onto the pin; a year the user
             # set to something else stays (BC-S2-4 then names it).
-            study = study.model_copy(update={
-                "currency_year": int(_library_or_500().finance["currency_year"])})
+            study = study.model_copy(
+                update={
+                    "currency_year": int(_library_or_500().finance["currency_year"])
+                }
+            )
         try:
-            ledger = _ledger_after(study, ledger, body, str(user.id) if user is not None else None, _now())
+            ledger = _ledger_after(
+                study, ledger, body, str(user.id) if user is not None else None, _now()
+            )
         except (study_ledger.LedgerEditError, study_library.LibraryError) as exc:
             raise HTTPException(422, str(exc)) from None
         maturity = study_ledger.maturity_from_ledger(
-            ledger, study_ledger.load_provenance(study.intake))
-        updated = study.model_copy(update={
-            "ledger": ledger, "ledger_version": ledger.ledger_version,
-            "maturity": maturity, "updated_at": _now()})
+            ledger, study_ledger.load_provenance(study.intake)
+        )
+        updated = study.model_copy(
+            update={
+                "ledger": ledger,
+                "ledger_version": ledger.ledger_version,
+                "maturity": maturity,
+                "updated_at": _now(),
+            }
+        )
         _save(project, updated)
-        return _ledger_out(updated, ledger, True, maturity,
-                           *_ledger_stale(updated, ledger, project, db, user))
+        return _ledger_out(
+            updated,
+            ledger,
+            True,
+            maturity,
+            *_ledger_stale(updated, ledger, project, db, user),
+        )
 
 
 @router.get("/{study_id}/ledger.csv")
-def get_ledger_csv(study_id: str,
-                   project: AuthorizedProject = ProjectAccessDep) -> Response:
+def get_ledger_csv(
+    study_id: str, project: AuthorizedProject = ProjectAccessDep
+) -> Response:
     """
     The ledger as CSV, export only (import is MVP-2). Text cells a
     spreadsheet would evaluate as a formula are neutralised
@@ -1236,15 +1512,22 @@ def get_ledger_csv(study_id: str,
     return Response(
         content=study_ledger.ledger_to_csv(ledger),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": content_disposition(
-            f"{study.name} - ledger.csv")},
+        headers={
+            "Content-Disposition": content_disposition(f"{study.name} - ledger.csv")
+        },
     )
 
 
 # ── S5: the investment case (the engine's since U2), JSON and XLSX ─────────
 
-def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
-                 db: DBSession, user: User | None):
+
+def _option_case(
+    study_id: str,
+    option_id: str,
+    project: AuthorizedProject,
+    db: DBSession,
+    user: User | None,
+):
     """
     (study, ledger, bundle) for one solved option of a finished run: the
     engine's `CaseBundle` (its guided view is `bundle.view`).
@@ -1269,25 +1552,64 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
         run = store.load_aux(base_dir, study_id, "run")
         findings = store.load_aux(base_dir, study_id, "findings")
     except store.StudyUnreadable:
-        raise HTTPException(500, detail={"code": "study_unreadable",
-                                         "message": "The run record cannot be read."}) from None
+        raise HTTPException(
+            500,
+            detail={
+                "code": "study_unreadable",
+                "message": "The run record cannot be read.",
+            },
+        ) from None
     question = study_questions.get_question(study.question_id)
     if run is None or findings is None or question is None:
-        raise HTTPException(404, detail={"error_kind": "study_never_run",
-                                         "message": "this study has not been run"})
+        raise HTTPException(
+            404,
+            detail={
+                "error_kind": "study_never_run",
+                "message": "this study has not been run",
+            },
+        )
     if option_id not in {o.option_id for o in question.options}:
-        raise HTTPException(404, detail={"error_kind": "option_unknown",
-                                         "message": f"the question has no option {option_id!r}"})
+        raise HTTPException(
+            404,
+            detail={
+                "error_kind": "option_unknown",
+                "message": f"the question has no option {option_id!r}",
+            },
+        )
     if not any(o.free_assets for o in question.options if o.option_id == option_id):
-        raise HTTPException(422, detail={"error_kind": "baseline_has_no_case", "message": (
-            f"{option_id!r} is the baseline every case is measured against")})
-    _refuse_if_running(project, db, user, study_id, runs_only=True, message=(
-        "the study is running; its cases follow when the run finishes"))
-    result = next((o for o in findings.get("options") or []
-                   if o.get("option_id") == option_id), None)
-    if result is None or result.get("solve_status") != "ok" or not result.get("project_ref"):
-        raise HTTPException(404, detail={"error_kind": "option_not_solved", "message": (
-            f"the last run did not solve option {option_id!r}")})
+        raise HTTPException(
+            422,
+            detail={
+                "error_kind": "baseline_has_no_case",
+                "message": (
+                    f"{option_id!r} is the baseline every case is measured against"
+                ),
+            },
+        )
+    _refuse_if_running(
+        project,
+        db,
+        user,
+        study_id,
+        runs_only=True,
+        message=("the study is running; its cases follow when the run finishes"),
+    )
+    result = next(
+        (o for o in findings.get("options") or [] if o.get("option_id") == option_id),
+        None,
+    )
+    if (
+        result is None
+        or result.get("solve_status") != "ok"
+        or not result.get("project_ref")
+    ):
+        raise HTTPException(
+            404,
+            detail={
+                "error_kind": "option_not_solved",
+                "message": (f"the last run did not solve option {option_id!r}"),
+            },
+        )
     if _base_row(project, db, user) is None:
         raise HTTPException(404, f"Project '{project.name}' not found")
     try:
@@ -1295,19 +1617,39 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
     except (TypeError, ValueError):
         fork = None
     if fork is None or not study_forks.is_study_owned(
-            fork, study_id=study_id, base_uuid=project.uuid):
-        raise HTTPException(404, detail={"error_kind": "option_not_solved", "message": (
-            f"option {option_id!r} has no fork this study owns")})
+        fork, study_id=study_id, base_uuid=project.uuid
+    ):
+        raise HTTPException(
+            404,
+            detail={
+                "error_kind": "option_not_solved",
+                "message": (f"option {option_id!r} has no fork this study owns"),
+            },
+        )
     hashes = findings.get("hashes") or {}
     ledger, _stored = _current_ledger(study)
     if not run_hashes.ledger_matches(ledger, hashes):
-        raise HTTPException(409, detail={"error_kind": "ledger_changed_since_run", "message": (
-            "the assumptions ledger changed after the run; re-run the study "
-            "before reading its cases (the LP sized the options on the old one)")})
+        raise HTTPException(
+            409,
+            detail={
+                "error_kind": "ledger_changed_since_run",
+                "message": (
+                    "the assumptions ledger changed after the run; re-run the study "
+                    "before reading its cases (the LP sized the options on the old one)"
+                ),
+            },
+        )
     if not run_hashes.intake_matches(study.intake, hashes):
-        raise HTTPException(409, detail={"error_kind": "intake_changed_since_run", "message": (
-            "the study's answers (site, load, tariff or PV) changed after the run; "
-            "re-run the study before reading its cases")})
+        raise HTTPException(
+            409,
+            detail={
+                "error_kind": "intake_changed_since_run",
+                "message": (
+                    "the study's answers (site, load, tariff or PV) changed after the run; "
+                    "re-run the study before reading its cases"
+                ),
+            },
+        )
     # Gate S5 BC-S5-1: the fork's file, never its resident context, and only
     # when it is the network the run solved — the run record's bills and
     # asset economics belong to that network, and the case's model hash
@@ -1315,10 +1657,17 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
     network, disk_hash = study_runner.fork_network_from_disk(fork)
     recorded = (hashes.get("option_network_hashes") or {}).get(str(fork.id))
     if not run_hashes.fork_matches(recorded, disk_hash):
-        raise HTTPException(409, detail={"error_kind": "fork_changed_since_run", "message": (
-            f"option {option_id!r}'s network changed after the run (opened, "
-            "edited or re-solved outside the study); its case would price one "
-            "network with another's bills. Re-run the study.")})
+        raise HTTPException(
+            409,
+            detail={
+                "error_kind": "fork_changed_since_run",
+                "message": (
+                    f"option {option_id!r}'s network changed after the run (opened, "
+                    "edited or re-solved outside the study); its case would price one "
+                    "network with another's bills. Re-run the study."
+                ),
+            },
+        )
     # U2 WP8 (plan §2 C10, gate C6): the engine inputs the run gave the fork
     # are still its own, and the fork is the engine's (solved on its
     # commercial chain, the battery as its two upfront parts). A run before
@@ -1326,44 +1675,78 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
     # tariff or finance settings were edited since is refused with the plain
     # reason and a re-run offered — never valued on another calculation.
     if not run_hashes.engine_recorded(hashes, run):
-        raise HTTPException(409, detail={"error_kind": run_hashes.ENGINE_STALE,
-                                         "message": run_hashes.EARLIER_VERSION})
+        raise HTTPException(
+            409,
+            detail={
+                "error_kind": run_hashes.ENGINE_STALE,
+                "message": run_hashes.EARLIER_VERSION,
+            },
+        )
     if not study_engine.engine_ready(network):
         # U2 WP10 (gate WP8a N7): the run recorded its engine inputs, so the
         # fork itself lacks the engine's solve record — not an earlier version.
-        raise HTTPException(409, detail={"error_kind": run_hashes.ENGINE_STALE,
-                                         "message": run_hashes.not_engine_solved([option_id])})
-    if not run_hashes.compiled_matches(hashes, str(fork.id),
-                                       run_hashes.fork_engine_digest(fork)):
-        raise HTTPException(409, detail={"error_kind": run_hashes.ENGINE_STALE,
-                                         "message": run_hashes.edited_since_run([option_id])})
-    details = (run.get("details") or {})
+        raise HTTPException(
+            409,
+            detail={
+                "error_kind": run_hashes.ENGINE_STALE,
+                "message": run_hashes.not_engine_solved([option_id]),
+            },
+        )
+    if not run_hashes.compiled_matches(
+        hashes, str(fork.id), run_hashes.fork_engine_digest(fork)
+    ):
+        raise HTTPException(
+            409,
+            detail={
+                "error_kind": run_hashes.ENGINE_STALE,
+                "message": run_hashes.edited_since_run([option_id]),
+            },
+        )
+    details = run.get("details") or {}
     # The defaults the run's ledger was seeded from (money-year 01).
     library = _library_for_or_500(ledger)
     try:
         # The config the fork was solved with (the run's export series).
-        compiled = packs.option_commercial(study.intake, ledger, library, network.snapshots,
-                                           export_series=run.get("export_series"))
+        compiled = packs.option_commercial(
+            study.intake,
+            ledger,
+            library,
+            network.snapshots,
+            export_series=run.get("export_series"),
+        )
         cfg = packs.option_solver_config(ledger, compiled)
         econ = (details.get(option_id) or {}).get("asset_economics")
         # U2 WP7: the option's ONE FinanceCase on the Investment Case engine,
         # its bills the engine's (the counterfactual is the baseline).
         bundle = study_engine.option_case(
-            network, cfg, ledger, compiled=compiled, option_id=option_id,
-            study_id=study_id, fidelity=result.get("fidelity"), asset_economics=econ,
-            question=question, project_ref=str(fork.id), model_hash=disk_hash,
-            study_currency_year=study.currency_year)
+            network,
+            cfg,
+            ledger,
+            compiled=compiled,
+            option_id=option_id,
+            study_id=study_id,
+            fidelity=result.get("fidelity"),
+            asset_economics=econ,
+            question=question,
+            project_ref=str(fork.id),
+            model_hash=disk_hash,
+            study_currency_year=study.currency_year,
+        )
     except (packs.PackError, study_engine.EngineRefused) as exc:
-        raise HTTPException(422, detail={"error_kind": exc.code,
-                                         "message": exc.message}) from None
+        raise HTTPException(
+            422, detail={"error_kind": exc.code, "message": exc.message}
+        ) from None
     return study, ledger, bundle
 
 
 @router.get("/{study_id}/options/{option_id}/case")
-def get_option_case(study_id: str, option_id: str,
-                    project: AuthorizedProject = ProjectAccessDep,
-                    db: DBSession = Depends(get_db),
-                    user: User | None = Depends(optional_user)) -> dict:
+def get_option_case(
+    study_id: str,
+    option_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     The option's investment case (plan S5): a year-by-year cash flow on one
     basis, its KPIs, the bill's value streams and the market revenue at
@@ -1373,15 +1756,20 @@ def get_option_case(study_id: str, option_id: str,
     _refuse_unless_enabled()
     _study, _ledger, bundle = _option_case(study_id, option_id, project, db, user)
     case = bundle.view
-    return {"available": case.status == "ok",
-            **case.model_dump(mode="json", by_alias=True)}
+    return {
+        "available": case.status == "ok",
+        **case.model_dump(mode="json", by_alias=True),
+    }
 
 
 @router.get("/{study_id}/options/{option_id}/case.xlsx")
-def get_option_case_xlsx(study_id: str, option_id: str,
-                         project: AuthorizedProject = ProjectAccessDep,
-                         db: DBSession = Depends(get_db),
-                         user: User | None = Depends(optional_user)) -> Response:
+def get_option_case_xlsx(
+    study_id: str,
+    option_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> Response:
     """
     The same case as a workbook (U2 WP9): the Investment Case engine's own
     workbook, then the guided sheets — the KPIs, the live-formula view over
@@ -1396,12 +1784,16 @@ def get_option_case_xlsx(study_id: str, option_id: str,
     return Response(
         content=study_engine.case_workbook(bundle, ledger, project=study.name),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": content_disposition(
-            f"{study.name} - {option_id} - investment case.xlsx")},
+        headers={
+            "Content-Disposition": content_disposition(
+                f"{study.name} - {option_id} - investment case.xlsx"
+            )
+        },
     )
 
 
 # ── S6: findings — verdict, value streams, fixed-size tornado, explain ────
+
 
 class TornadoRequest(BaseModel):
     """``budget_solves`` caps the tornado's own campaign when none is open."""
@@ -1425,18 +1817,28 @@ def _refuse_while_a_run_runs(project: AuthorizedProject, study_id: str) -> None:
         return
     with ctx.solver_state_lock:
         rec = ctx.solver_state.get(study_runner.STUDY_KEY)
-        if (rec and rec.get("study_id") == study_id and rec.get("status") == "running"
-                and rec.get("kind", "run") == "run"):
-            raise HTTPException(409, detail={
-                "error_kind": "study_running",
-                "message": "the study is running; its findings follow when it finishes"})
+        if (
+            rec
+            and rec.get("study_id") == study_id
+            and rec.get("status") == "running"
+            and rec.get("kind", "run") == "run"
+        ):
+            raise HTTPException(
+                409,
+                detail={
+                    "error_kind": "study_running",
+                    "message": "the study is running; its findings follow when it finishes",
+                },
+            )
 
 
 @router.get("/{study_id}/findings")
-def get_findings(study_id: str,
-                 project: AuthorizedProject = ProjectAccessDep,
-                 db: DBSession = Depends(get_db),
-                 user: User | None = Depends(optional_user)) -> dict:
+def get_findings(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     The findings of the last run (plan S6, `services/study/findings.py::
     assemble_findings`): the battery's value per option, the verdict, the
@@ -1454,20 +1856,27 @@ def get_findings(study_id: str,
         raise HTTPException(404, f"Project '{project.name}' not found")
     _refuse_while_a_run_runs(project, study_id)
     try:
-        findings = study_findings.assemble_findings(study, _project_dir(project), db,
-                                                    project.uuid)
+        findings = study_findings.assemble_findings(
+            study, _project_dir(project), db, project.uuid
+        )
     except study_findings.FindingsRefused as exc:
         raise HTTPException(exc.status, detail=exc.detail) from None
-    return {"available": (findings.options_status == "ok"
-                          and findings.baseline.solve_status == "ok"),
-            **findings.model_dump(mode="json", by_alias=True)}
+    return {
+        "available": (
+            findings.options_status == "ok" and findings.baseline.solve_status == "ok"
+        ),
+        **findings.model_dump(mode="json", by_alias=True),
+    }
 
 
 @router.post("/{study_id}/findings/tornado", status_code=202)
-def start_findings_tornado(study_id: str, body: TornadoRequest | None = None,
-                           project: AuthorizedProject = ProjectAccessDep,
-                           db: DBSession = Depends(get_db),
-                           user: User | None = Depends(optional_user)) -> dict:
+def start_findings_tornado(
+    study_id: str,
+    body: TornadoRequest | None = None,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Start the fixed-size tornado (plan S6): the PV-only references, then
     each key driver at its bounds on the best battery option, sizes held
@@ -1490,17 +1899,24 @@ def start_findings_tornado(study_id: str, body: TornadoRequest | None = None,
     _enforce_project_lock(db, base, user)
     _load(project, study_id)
     try:
-        return tornado_runner.start_tornado(study_id, base_row=base, db=db, user_id=user.id,
-                                            budget_solves=body.budget_solves)
+        return tornado_runner.start_tornado(
+            study_id,
+            base_row=base,
+            db=db,
+            user_id=user.id,
+            budget_solves=body.budget_solves,
+        )
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
 
 
 @router.get("/{study_id}/findings/tornado")
-def get_findings_tornado(study_id: str,
-                         project: AuthorizedProject = ProjectAccessDep,
-                         db: DBSession = Depends(get_db),
-                         user: User | None = Depends(optional_user)) -> dict:
+def get_findings_tornado(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """The running tornado's progress, else the last one's record (404 if never run)."""
     from services.study import tornado_runner
 
@@ -1509,18 +1925,27 @@ def get_findings_tornado(study_id: str,
     base = _base_row(project, db, user)
     if base is None:
         raise HTTPException(404, f"Project '{project.name}' not found")
-    rec = tornado_runner.get_tornado(study_id, base_row=base, base_dir=_project_dir(project))
+    rec = tornado_runner.get_tornado(
+        study_id, base_row=base, base_dir=_project_dir(project)
+    )
     if rec is None:
-        raise HTTPException(404, detail={"error_kind": "tornado_never_run",
-                                         "message": "the tornado has not been run"})
+        raise HTTPException(
+            404,
+            detail={
+                "error_kind": "tornado_never_run",
+                "message": "the tornado has not been run",
+            },
+        )
     return rec
 
 
 @router.post("/{study_id}/findings/tornado/abort")
-def abort_findings_tornado(study_id: str,
-                           project: AuthorizedProject = ProjectAccessDep,
-                           db: DBSession = Depends(get_db),
-                           user: User | None = Depends(optional_user)) -> dict:
+def abort_findings_tornado(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Ask a running tornado to stop before its next solve: the bars computed
     so far are kept, the drivers never reached are named in
@@ -1537,13 +1962,15 @@ def abort_findings_tornado(study_id: str,
     _enforce_project_lock(db, base, user)
     _load(project, study_id)
     try:
-        return tornado_runner.abort_tornado(study_id, base_row=base,
-                                            base_dir=_project_dir(project))
+        return tornado_runner.abort_tornado(
+            study_id, base_row=base, base_dir=_project_dir(project)
+        )
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
 
 
 # ── homer-parity 03a: the best system per supply architecture ─────────────
+
 
 class SupplyArchitecturesRequest(BaseModel):
     """``architectures`` names the ones to compare (all when omitted);
@@ -1556,10 +1983,13 @@ class SupplyArchitecturesRequest(BaseModel):
 
 
 @router.post("/{study_id}/supply-architectures", status_code=202)
-def start_supply_architectures(study_id: str, body: SupplyArchitecturesRequest | None = None,
-                               project: AuthorizedProject = ProjectAccessDep,
-                               db: DBSession = Depends(get_db),
-                               user: User | None = Depends(optional_user)) -> dict:
+def start_supply_architectures(
+    study_id: str,
+    body: SupplyArchitecturesRequest | None = None,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Compare the study base project's supply architectures (homer-parity 03a):
     one throw-away fork per architecture with the other assets omitted, each
@@ -1580,17 +2010,24 @@ def start_supply_architectures(study_id: str, body: SupplyArchitecturesRequest |
     _load(project, study_id)
     try:
         return supply_architecture_runner.start(
-            study_id, base_row=base, db=db, user_id=user.id,
-            architecture_ids=body.architectures, budget_solves=body.budget_solves)
+            study_id,
+            base_row=base,
+            db=db,
+            user_id=user.id,
+            architecture_ids=body.architectures,
+            budget_solves=body.budget_solves,
+        )
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
 
 
 @router.get("/{study_id}/supply-architectures")
-def get_supply_architectures(study_id: str,
-                             project: AuthorizedProject = ProjectAccessDep,
-                             db: DBSession = Depends(get_db),
-                             user: User | None = Depends(optional_user)) -> dict:
+def get_supply_architectures(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """The running comparison's progress, else the last one's table with
     ``stale`` when the base project changed since (404 if never run)."""
     from services.study import supply_architecture_runner
@@ -1600,20 +2037,27 @@ def get_supply_architectures(study_id: str,
     base = _base_row(project, db, user)
     if base is None:
         raise HTTPException(404, f"Project '{project.name}' not found")
-    rec = supply_architecture_runner.get(study_id, base_row=base,
-                                         base_dir=_project_dir(project))
+    rec = supply_architecture_runner.get(
+        study_id, base_row=base, base_dir=_project_dir(project)
+    )
     if rec is None:
-        raise HTTPException(404, detail={
-            "error_kind": "supply_architectures_never_run",
-            "message": "the supply-architecture comparison has not been run"})
+        raise HTTPException(
+            404,
+            detail={
+                "error_kind": "supply_architectures_never_run",
+                "message": "the supply-architecture comparison has not been run",
+            },
+        )
     return rec
 
 
 @router.post("/{study_id}/supply-architectures/abort")
-def abort_supply_architectures(study_id: str,
-                               project: AuthorizedProject = ProjectAccessDep,
-                               db: DBSession = Depends(get_db),
-                               user: User | None = Depends(optional_user)) -> dict:
+def abort_supply_architectures(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """Stop a running comparison before its next solve; the rows not reached
     read ``not_reached`` and every throw-away fork is removed. Idempotent;
     404 when it never ran."""
@@ -1627,13 +2071,15 @@ def abort_supply_architectures(study_id: str,
     _enforce_project_lock(db, base, user)
     _load(project, study_id)
     try:
-        return supply_architecture_runner.abort(study_id, base_row=base,
-                                                base_dir=_project_dir(project))
+        return supply_architecture_runner.abort(
+            study_id, base_row=base, base_dir=_project_dir(project)
+        )
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
 
 
 # ── homer-parity 03b: the optimal system type map ──────────────────────────
+
 
 class SystemTypeMapAxis(BaseModel):
     """One axis: a variable id and the multipliers to try (3 when omitted)."""
@@ -1641,8 +2087,10 @@ class SystemTypeMapAxis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     variable: str = Field(min_length=1, max_length=64)
-    values: list[Annotated[float, Field(allow_inf_nan=False)]] | None = Field(
-        default=None, max_length=8)
+    # Any JSON values: `system_type_map.check_axes` judges type, finiteness,
+    # range and length, so every refusal carries an error kind (never a bare
+    # pydantic 422, and never a coerced True or "1.5").
+    values: list[Any] | None = None
 
 
 class SystemTypeMapRequest(BaseModel):
@@ -1658,10 +2106,13 @@ class SystemTypeMapRequest(BaseModel):
 
 
 @router.post("/{study_id}/system-type-map", status_code=202)
-def start_system_type_map(study_id: str, body: SystemTypeMapRequest,
-                          project: AuthorizedProject = ProjectAccessDep,
-                          db: DBSession = Depends(get_db),
-                          user: User | None = Depends(optional_user)) -> dict:
+def start_system_type_map(
+    study_id: str,
+    body: SystemTypeMapRequest,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     The optimal system type map (homer-parity 03b): over two variables, the
     cheapest supply architecture in each cell, each cell one 03a comparison on
@@ -1681,18 +2132,26 @@ def start_system_type_map(study_id: str, body: SystemTypeMapRequest,
     _load(project, study_id)
     try:
         return system_type_map_runner.start(
-            study_id, base_row=base, db=db, user_id=user.id,
-            x=body.x.model_dump(), y=body.y.model_dump(),
-            architecture_ids=body.architectures, budget_solves=body.budget_solves)
+            study_id,
+            base_row=base,
+            db=db,
+            user_id=user.id,
+            x=body.x.model_dump(),
+            y=body.y.model_dump(),
+            architecture_ids=body.architectures,
+            budget_solves=body.budget_solves,
+        )
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
 
 
 @router.get("/{study_id}/system-type-map")
-def get_system_type_map(study_id: str,
-                        project: AuthorizedProject = ProjectAccessDep,
-                        db: DBSession = Depends(get_db),
-                        user: User | None = Depends(optional_user)) -> dict:
+def get_system_type_map(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """The running map's progress, else the last one's cells with ``stale``
     when the base project changed since (404 if never run)."""
     from services.study import system_type_map_runner
@@ -1702,20 +2161,27 @@ def get_system_type_map(study_id: str,
     base = _base_row(project, db, user)
     if base is None:
         raise HTTPException(404, f"Project '{project.name}' not found")
-    rec = system_type_map_runner.get(study_id, base_row=base,
-                                     base_dir=_project_dir(project))
+    rec = system_type_map_runner.get(
+        study_id, base_row=base, base_dir=_project_dir(project)
+    )
     if rec is None:
-        raise HTTPException(404, detail={
-            "error_kind": "system_type_map_never_run",
-            "message": "the system type map has not been run"})
+        raise HTTPException(
+            404,
+            detail={
+                "error_kind": "system_type_map_never_run",
+                "message": "the system type map has not been run",
+            },
+        )
     return rec
 
 
 @router.post("/{study_id}/system-type-map/abort")
-def abort_system_type_map(study_id: str,
-                          project: AuthorizedProject = ProjectAccessDep,
-                          db: DBSession = Depends(get_db),
-                          user: User | None = Depends(optional_user)) -> dict:
+def abort_system_type_map(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """Stop a running map before its next solve; the cells not reached read
     ``not_reached`` and every throw-away fork is removed. Idempotent; 404
     when it never ran."""
@@ -1729,8 +2195,9 @@ def abort_system_type_map(study_id: str,
     _enforce_project_lock(db, base, user)
     _load(project, study_id)
     try:
-        return system_type_map_runner.abort(study_id, base_row=base,
-                                            base_dir=_project_dir(project))
+        return system_type_map_runner.abort(
+            study_id, base_row=base, base_dir=_project_dir(project)
+        )
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
 
@@ -1768,29 +2235,50 @@ def _report_record(project: AuthorizedProject, study_id: str):
     try:
         raw = store.load_aux(_project_dir(project), study_id, REPORT_AUX)
     except store.StudyUnreadable:
-        raise HTTPException(500, detail={"code": "study_unreadable",
-                                         "message": "The report record cannot be read."}) from None
+        raise HTTPException(
+            500,
+            detail={
+                "code": "study_unreadable",
+                "message": "The report record cannot be read.",
+            },
+        ) from None
     if raw is None:
-        raise HTTPException(404, detail={"error_kind": "report_never_assembled", "message": (
-            "the report has not been assembled; POST the report first")})
+        raise HTTPException(
+            404,
+            detail={
+                "error_kind": "report_never_assembled",
+                "message": ("the report has not been assembled; POST the report first"),
+            },
+        )
     try:
         report = DecisionReport.model_validate(raw["report"])
-        cases = {k: InvestmentCase.model_validate(v) for k, v in (raw.get("cases") or {}).items()}
+        cases = {
+            k: InvestmentCase.model_validate(v)
+            for k, v in (raw.get("cases") or {}).items()
+        }
         ledger = AssumptionsLedger.model_validate(raw["ledger"])
         engine_cash = dict(raw.get("engine_cash") or {})
     except (KeyError, TypeError, ValueError, ValidationError):
-        raise HTTPException(500, detail={"code": "study_unreadable",
-                                         "message": "The report record cannot be read."}) from None
+        raise HTTPException(
+            500,
+            detail={
+                "code": "study_unreadable",
+                "message": "The report record cannot be read.",
+            },
+        ) from None
     return study, report, cases, ledger, engine_cash
 
 
-def _report_stale(report, study: DecisionStudy, project: AuthorizedProject,
-                  db: DBSession) -> list[str]:
+def _report_stale(
+    report, study: DecisionStudy, project: AuthorizedProject, db: DBSession
+) -> list[str]:
     """Live stale reasons: the study's own, the ledger, each option fork (one hash rule)."""
     return _report_read(report, study, project, db)[1]
 
 
-def _report_read(report, study: DecisionStudy, project: AuthorizedProject, db: DBSession):
+def _report_read(
+    report, study: DecisionStudy, project: AuthorizedProject, db: DBSession
+):
     """The report's verdict on the provenance graph and its reasons (PG-05)."""
     from db.models import Project
     from services.provenance_graph import studies
@@ -1802,7 +2290,8 @@ def _report_read(report, study: DecisionStudy, project: AuthorizedProject, db: D
         except (TypeError, ValueError):
             return None
         if row is None or not study_forks.is_study_owned(
-                row, study_id=study.study_id, base_uuid=project.uuid):
+            row, study_id=study.study_id, base_uuid=project.uuid
+        ):
             return None
         return row
 
@@ -1814,8 +2303,13 @@ def _report_read(report, study: DecisionStudy, project: AuthorizedProject, db: D
         row = owned(fork_uuid)
         return None if row is None else run_hashes.fork_engine_digest(row)
 
-    return studies.report_verdict(report, study, study_findings.study_ledger(study),
-                                  fork_hash_now, fork_engine_now=fork_engine_now)
+    return studies.report_verdict(
+        report,
+        study,
+        study_findings.study_ledger(study),
+        fork_hash_now,
+        fork_engine_now=fork_engine_now,
+    )
 
 
 def _report_out(report, read) -> dict:
@@ -1825,17 +2319,22 @@ def _report_out(report, read) -> dict:
     from services.study import report as study_report
 
     verdict, reasons = read
-    return {"available": study_report.report_available(report),
-            **report.model_dump(mode="json", by_alias=True),
-            "stale": bool(reasons), "stale_reasons": reasons,
-            "verdict": studies.verdict_wire(verdict)}
+    return {
+        "available": study_report.report_available(report),
+        **report.model_dump(mode="json", by_alias=True),
+        "stale": bool(reasons),
+        "stale_reasons": reasons,
+        "verdict": studies.verdict_wire(verdict),
+    }
 
 
 @router.post("/{study_id}/report")
-def assemble_report(study_id: str,
-                    project: AuthorizedProject = ProjectAccessDep,
-                    db: DBSession = Depends(get_db),
-                    user: User | None = Depends(optional_user)) -> dict:
+def assemble_report(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """
     Assemble the decision report (plan S7) from the last run's findings and
     option cases, read from the option forks' files (no solve), and store
@@ -1855,32 +2354,45 @@ def assemble_report(study_id: str,
     _refuse_while_a_run_runs(project, study_id)
     try:
         report, inputs = study_report.assemble_decision_report(
-            study, _project_dir(project), db, project.uuid)
+            study, _project_dir(project), db, project.uuid
+        )
         study_report.validate_prose(report)
     except study_findings.FindingsRefused as exc:
         raise HTTPException(exc.status, detail=exc.detail) from None
     except study_report.ProseError as exc:
         raise HTTPException(422, detail=exc.detail) from None
-    record = {"report": report.model_dump(mode="json", by_alias=True),
-              "cases": {k: c.model_dump(mode="json", by_alias=True)
-                        for k, c in inputs.cases.items()},
-              "ledger": inputs.ledger.model_dump(mode="json", by_alias=True),
-              "engine_cash": inputs.engine_cash}
+    record = {
+        "report": report.model_dump(mode="json", by_alias=True),
+        "cases": {
+            k: c.model_dump(mode="json", by_alias=True) for k, c in inputs.cases.items()
+        },
+        "ledger": inputs.ledger.model_dump(mode="json", by_alias=True),
+        "engine_cash": inputs.engine_cash,
+    }
     with _WRITE_LOCK:
         try:
             store.save_aux(_project_dir(project), study_id, REPORT_AUX, record)
         except store.StudyTooLarge as exc:
             raise HTTPException(413, str(exc)) from None
         current = _load(project, study_id)
-        _save(project, current.model_copy(update={
-            "report_ref": store.aux_ref(study_id, REPORT_AUX), "updated_at": _now()}))
+        _save(
+            project,
+            current.model_copy(
+                update={
+                    "report_ref": store.aux_ref(study_id, REPORT_AUX),
+                    "updated_at": _now(),
+                }
+            ),
+        )
     return _report_out(report, _report_read(report, current, project, db))
 
 
 @router.get("/{study_id}/report")
-def get_report(study_id: str,
-               project: AuthorizedProject = ProjectAccessDep,
-               db: DBSession = Depends(get_db)) -> dict:
+def get_report(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+) -> dict:
     """
     The stored report with ``stale`` recomputed now. ``available``
     (ADR-0003) is true when its verdict is established; 404
@@ -1892,15 +2404,19 @@ def get_report(study_id: str,
 
 
 def _render_headers(filename: str) -> dict[str, str]:
-    return {"Content-Disposition": content_disposition(filename),
-            "Content-Security-Policy": "sandbox",
-            "X-Content-Type-Options": "nosniff"}
+    return {
+        "Content-Disposition": content_disposition(filename),
+        "Content-Security-Policy": "sandbox",
+        "X-Content-Type-Options": "nosniff",
+    }
 
 
 @router.get("/{study_id}/report.html")
-def get_report_html(study_id: str,
-                    project: AuthorizedProject = ProjectAccessDep,
-                    db: DBSession = Depends(get_db)) -> Response:
+def get_report_html(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+) -> Response:
     """The report as printable HTML (escaped, CSP sandbox, charts inline as PNG)."""
     from services.study import report as study_report
     from services.study.render_html import render_html
@@ -1912,14 +2428,19 @@ def get_report_html(study_id: str,
         html = render_html(report, stale=bool(reasons), stale_reasons=reasons)
     except study_report.ProseError as exc:
         raise HTTPException(422, detail=exc.detail) from None
-    return Response(content=html, media_type="text/html; charset=utf-8",
-                    headers=_render_headers(f"{study.name} - decision report.html"))
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers=_render_headers(f"{study.name} - decision report.html"),
+    )
 
 
 @router.get("/{study_id}/report.docx")
-def get_report_docx(study_id: str,
-                    project: AuthorizedProject = ProjectAccessDep,
-                    db: DBSession = Depends(get_db)) -> Response:
+def get_report_docx(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+) -> Response:
     """The report as a Word document (python-docx)."""
     from services.study import report as study_report
     from services.study.render_docx import render_docx
@@ -1934,13 +2455,16 @@ def get_report_docx(study_id: str,
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers=_render_headers(f"{study.name} - decision report.docx"))
+        headers=_render_headers(f"{study.name} - decision report.docx"),
+    )
 
 
 @router.get("/{study_id}/report.xlsx")
-def get_report_xlsx(study_id: str,
-                    project: AuthorizedProject = ProjectAccessDep,
-                    db: DBSession = Depends(get_db)) -> Response:
+def get_report_xlsx(
+    study_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+) -> Response:
     """
     The report workbook: verdict, streams, tornado, ledger, provenance and each
     case on the engine's cash series (U2 WP9).
@@ -1952,11 +2476,18 @@ def get_report_xlsx(study_id: str,
     study, report, cases, ledger, engine_cash = _report_record(project, study_id)
     reasons = _report_stale(report, study, project, db)
     try:
-        content = write_report_xlsx(report, cases, ledger, stale=bool(reasons),
-                                    stale_reasons=reasons, engine_cash=engine_cash)
+        content = write_report_xlsx(
+            report,
+            cases,
+            ledger,
+            stale=bool(reasons),
+            stale_reasons=reasons,
+            engine_cash=engine_cash,
+        )
     except study_report.ProseError as exc:
         raise HTTPException(422, detail=exc.detail) from None
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers=_render_headers(f"{study.name} - decision report.xlsx"))
+        headers=_render_headers(f"{study.name} - decision report.xlsx"),
+    )

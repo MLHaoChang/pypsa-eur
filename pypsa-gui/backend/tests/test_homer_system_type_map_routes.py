@@ -424,3 +424,51 @@ def test_an_unreadable_record_reads_not_evaluated(
             "aborting": False,
         }
         store._aux_path(base_dir, sid, "system_type_map").write_text("{not json")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [[True, 2.0], ["1.5", 2.0], [1.0], [1, 2, 3, 4, 5, 6], list(range(1, 101))],
+)
+def test_an_axis_the_rest_model_would_coerce_or_cap_is_refused_with_a_kind(
+    client, studies_on, install_network, arch_solver, values
+):
+    """K4: True and "1.5" are not multipliers, and every length refusal names
+    its kind (the check judges them, not a bare model error)."""
+    sid = _project(client, install_network, "tm-coerce")
+    r = client.post(
+        _url("tm-coerce", sid),
+        json=_body(
+            x={"variable": "load", "values": values},
+            y={"variable": "genset_fuel_price"},
+        ),
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "axis_values_invalid"
+    assert arch_solver.calls == []
+
+
+def test_the_cells_solve_in_the_base_context_and_leave_its_transient_state(
+    client, studies_on, install_network, arch_solver, registry_key_for, monkeypatch
+):
+    """K2: the worker binds the base project's context as the solving context
+    around the cells (a nullcontext would leave it unbound), and the base
+    context's transient rows are what they were after the run."""
+    from services.pypsa_service import PyPSAService
+    from services.study import system_type_map as M
+
+    sid = _project(client, install_network, "tm-ctx")
+    base = PyPSAService.get_context(registry_key_for("tm-ctx"))
+    before = {k: set(v) for k, v in base.transient_rows.items()}
+    seen = []
+    real = M.build_map
+
+    def spy(*a, **k):
+        seen.append(getattr(PyPSAService._solving_ctx, "ctx", None))
+        return real(*a, **k)
+
+    monkeypatch.setattr(M, "build_map", spy)
+    assert client.post(_url("tm-ctx", sid), json=_body()).status_code == 202
+    assert _wait(client, "tm-ctx", sid)["status"] == "done"
+    assert len(seen) == 1 and seen[0] is base
+    assert {k: set(v) for k, v in base.transient_rows.items()} == before

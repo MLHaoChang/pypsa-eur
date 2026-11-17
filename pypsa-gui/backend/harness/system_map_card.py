@@ -33,7 +33,15 @@ from fastapi import HTTPException
 VERSION = 1
 
 
-def _raise(kind: str, message: str, status: int = 409):
+def _refuse(kind: str, message: str, status: int = 409):
+    """A refusal with a literal kind (the error-kind manifest test reads it)."""
+    raise HTTPException(
+        status_code=status, detail={"error_kind": kind, "message": message}
+    )
+
+
+def _forward(kind: str, message: str, status: int):
+    """A refusal whose kind another module already named (axis, saved base)."""
     raise HTTPException(
         status_code=status, detail={"error_kind": kind, "message": message}
     )
@@ -65,25 +73,32 @@ def preview(args: dict) -> dict:
             {"variable": args.get("y_variable"), "values": args.get("y_values")},
         )
     except M.MapRefused as exc:
-        _raise(exc.code, exc.detail, 422)
+        _forward(exc.code, exc.detail, 422)
     ap = chat_tools._authorized_project(str(args.get("project") or ""))
     with chat_tools._acting() as (db, user):
         base = R._base_row(ap, db, user)
     if base is None:
-        _raise("project_not_found", "The study's base project was not found.", 404)
+        _refuse("project_not_found", "The study's base project was not found.", 404)
     resident = PyPSAService.get_context(project_registry.registry_key(base))
     try:
         SAR._refuse_unsaved(resident)
         network, _cfg, fingerprint = SAR._saved_base(base)
         archs = SA.select(network, args.get("architectures"))
     except study_runner.RunRefused as exc:
-        _raise(exc.code, exc.message, exc.status)
+        _forward(exc.code, exc.message, exc.status)
     except SA.ArchitectureUnsolved as exc:
-        _raise(exc.code, exc.detail, 422 if exc.code == "unknown_architecture" else 409)
+        _forward(
+            exc.code, exc.detail, 422 if exc.code == "unknown_architecture" else 409
+        )
+    except Exception:  # noqa: BLE001 — an unreadable saved base shows no card
+        _refuse(
+            "system_map_preview_unavailable",
+            "The saved base project could not be read; open and save it, then try again.",
+        )
     groups = SA.classify(network)
     for var, values in (xa, ya):
         if not M.apply_variable(network.copy(), var, values[0], groups).scaled:
-            _raise(
+            _refuse(
                 "variable_not_in_network",
                 f"{var.label} changes nothing in this project: it has no such "
                 "asset (or none the optimiser sizes) or its value is zero",
@@ -92,7 +107,7 @@ def preview(args: dict) -> dict:
     cells = len(xa[1]) * len(ya[1])
     too_many = M.solves_refusal(cells, len(archs), campaign.MAX_BUDGET_SOLVES)
     if too_many:
-        _raise("campaign_budget_invalid", too_many, 422)
+        _refuse("campaign_budget_invalid", too_many, 422)
     shown = {
         "project": str(args.get("project") or ""),
         "study_id": str(args.get("study_id") or ""),

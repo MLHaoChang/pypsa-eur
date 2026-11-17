@@ -104,13 +104,14 @@ VARIABLES: dict[str, Variable] = {
 
 
 class MapRefused(ValueError):
-    """The request names something the map cannot compute; ``code`` is the
-    error kind and ``detail`` the plain-words message."""
+    """The request names something the map cannot compute. ``error`` is the
+    detail dict ``{"error_kind": ..., "message": ...}``; ``code`` is its kind
+    and ``detail`` the plain-words message."""
 
-    def __init__(self, code: str, detail: str) -> None:
-        super().__init__(detail)
-        self.code = code
-        self.detail = detail
+    def __init__(self, error: dict) -> None:
+        super().__init__(error["message"])
+        self.code = error["error_kind"]
+        self.detail = error["message"]
 
 
 def check_axes(
@@ -122,9 +123,11 @@ def check_axes(
         var = VARIABLES.get(str(axis.get("variable")))
         if var is None:
             raise MapRefused(
-                "unknown_variable",
-                "unknown variable; the choices are "
-                + ", ".join(v.label for v in VARIABLES.values()),
+                {
+                    "error_kind": "unknown_variable",
+                    "message": "unknown variable; the choices are "
+                    + ", ".join(v.label for v in VARIABLES.values()),
+                }
             )
         values = axis.get("values")
         if values is None:
@@ -143,13 +146,20 @@ def check_axes(
         )
         if not ok:
             raise MapRefused(
-                "axis_values_invalid",
-                f"{var.label}: give {MIN_VALUES} to {MAX_VALUES} different multipliers "
-                f"above 0 and at most {MAX_FACTOR:g}",
+                {
+                    "error_kind": "axis_values_invalid",
+                    "message": f"{var.label}: give {MIN_VALUES} to {MAX_VALUES} "
+                    f"different multipliers above 0 and at most {MAX_FACTOR:g}",
+                }
             )
         out.append((var, [float(v) for v in values]))
     if out[0][0].variable_id == out[1][0].variable_id:
-        raise MapRefused("axes_not_different", "the two axes need different variables")
+        raise MapRefused(
+            {
+                "error_kind": "axes_not_different",
+                "message": "the two axes need different variables",
+            }
+        )
     return out[0], out[1]
 
 
@@ -293,9 +303,11 @@ def build_map(
     for var, values in (x, y):
         if not apply_variable(n.copy(), var, values[0], groups).scaled:
             raise MapRefused(
-                "variable_not_in_network",
-                f"{var.label} changes nothing in this project: it has no such "
-                "asset (or none the optimiser sizes) or its value is zero",
+                {
+                    "error_kind": "variable_not_in_network",
+                    "message": f"{var.label} changes nothing in this project: it "
+                    "has no such asset (or none the optimiser sizes) or its value is zero",
+                }
             )
     cells = []
     total = len(x[1]) * len(y[1])
