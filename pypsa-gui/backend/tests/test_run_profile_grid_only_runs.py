@@ -40,7 +40,12 @@ def baseline(request, client, session_ctx, tmp_path, monkeypatch):
     builder = {"3bus": classic.build_3bus, "ieee14": classic.build_ieee14}[
         request.param
     ]
-    builder().export_to_netcdf(str(built / "network.nc"))
+    n = builder()
+    # GK B 65: an efficiency below 1 on the emitting generators, so the emissions
+    # KPI's per-MWh_el factor (co2 / efficiency) is exercised, not 1.
+    emits = n.generators.carrier.map(n.carriers.co2_emissions).fillna(0.0) > 0
+    n.generators.loc[emits, "efficiency"] = 0.4
+    n.export_to_netcdf(str(built / "network.nc"))
     monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", built.parent)
     name = f"Grid {request.param}"
     response = client.post(
@@ -142,6 +147,7 @@ def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
     per_mwh = co2 / n.generators.efficiency
     want = float((lp_p.multiply(w, axis=0).sum() * per_mwh.reindex(lp_p.columns)).sum())
     assert want > 0, "fixture: the template emits"
+    assert (n.generators.efficiency[per_mwh > 0] == 0.4).all(), "fixture: efficiency"
     assert kpis["emissions"]["value"] == pytest.approx(want, rel=1e-9), kpis
     pf_p = state["ac_pf_results"]["generators_t.p"]
     assert want != pytest.approx(
