@@ -222,6 +222,8 @@ def test_run_gates_fresh_treats_no_recorded_inputs_as_not_fresh(solved):
     n, ctx = solved
     env = run_gates.Env.__new__(run_gates.Env)
     object.__setattr__(env, "ctx", ctx)
+    # An LP-only profile: `_fresh` reads the run's profile (study harness 15).
+    object.__setattr__(env, "task", {"run": {"profile": "eh_microgrid@1"}})
     assert run_gates._fresh(env) is True
     _unrecorded(n, ctx)
     assert workflow_tools.solve_freshness()["inputs_changed_since_solve"] is None
