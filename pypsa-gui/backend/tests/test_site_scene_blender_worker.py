@@ -43,7 +43,10 @@ RUNTIME = """\
 import json, os, resource, signal, subprocess, sys, time
 STATE = {state!r}
 REC = {rec!r}
+NOIMG = {noimg!r}
 a = sys.argv[1:]
+if a[:2] == ["image", "inspect"]:
+    sys.exit(1 if NOIMG else 0)
 if a[0] == "kill":
     try:
         pid = int(open(os.path.join(STATE, a[1])).read())
@@ -54,6 +57,7 @@ if a[0] == "kill":
 assert a[0] == "run", a
 with open(REC + ".cli", "w") as f:
     json.dump({{"env": dict(os.environ), "argv": a}}, f)
+assert a[a.index("--pull") + 1] == "never", a
 need = ["--rm", "--init", "--read-only", "--name", "--network", "--cap-drop", "--security-opt", "--user",
         "--memory", "--memory-swap", "--pids-limit", "--ulimit", "--mount", "--tmpfs"]
 assert all(n in a for n in need), a
@@ -192,13 +196,19 @@ def make(tmp_path, monkeypatch):
         stub.chmod(0o755)
         runtime = bin_dir / "docker"
         runtime.write_text(
-            RUNTIME.format(python=sys.executable, state=str(state), rec=str(rec))
+            RUNTIME.format(
+                python=sys.executable,
+                state=str(state),
+                rec=str(rec),
+                noimg=mode == "no_image",
+            )
         )
         runtime.chmod(0o755)
         monkeypatch.setattr(bw, "TREE_SHA256", bw.tree_sha256(tree))
         env = {bw.ENV_DIR: str(tree), bw.ENV_RUNTIME: str(runtime), bw.ENV_IMAGE: IMAGE}
         return env, rec
 
+    build.state = lambda mode="ok": tmp_path / mode / "state"
     return build
 
 
@@ -241,6 +251,12 @@ def test_any_changed_file_in_the_tree_not_only_the_executable_is_unavailable(mak
     )
     r = bw.readiness(env, FAST)
     assert not r.available and "pin" in r.reason
+
+
+def test_a_pinned_image_missing_locally_is_unavailable_and_never_pulled(make):
+    env, _ = make("no_image")
+    r = bw.readiness(env, FAST)
+    assert not r.available and "not present locally" in r.reason
 
 
 def test_a_wrong_version_is_unavailable(make):
@@ -335,6 +351,7 @@ def test_the_container_command_is_built_whole_with_every_isolation_flag(tmp_path
         ("--ulimit", "core=0:0"),
     ]:
         assert (flag, value) in pairs, flag
+    assert ("--pull", "never") in pairs
     for flag in ("--rm", "--init", "--read-only"):
         assert flag in head
     assert head.count("--network") == 1 and head.count("--mount") == 2
@@ -442,6 +459,47 @@ def test_b4_without_the_runtime_kill_the_detached_container_would_survive(
         assert _alive(pid)
     finally:
         os.killpg(pid, 9)
+
+
+def test_two_concurrent_runs_get_distinct_names_and_cancelling_one_leaves_the_other(
+    make,
+):
+    env, _ = make("hang")
+    ready = _ready(env)
+    state = make.state("hang")
+    stops = [threading.Event(), threading.Event()]
+    errors = []
+
+    def go(stop):
+        try:
+            bw.run(ready, b"g", stop, FAST, env)
+        except bw.WorkerError as exc:
+            errors.append(exc.kind)
+
+    before = {p.name for p in state.iterdir()}  # the readiness --version run
+    threads = [threading.Thread(target=go, args=(s,), daemon=True) for s in stops]
+    for t in threads:
+        t.start()
+    deadline = time.monotonic() + 15
+    while (
+        len({p.name for p in state.iterdir()} - before) < 2
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.05)
+    names = sorted({p.name for p in state.iterdir()} - before)
+    assert len(names) == 2 and names[0] != names[1]
+    assert all(
+        n.startswith("pypsa-blender-") and len(n) == len("pypsa-blender-") + 32
+        for n in names
+    )
+    pids = [int((state / n).read_text()) for n in names]
+    stops[0].set()
+    threads[0].join(15)
+    alive = [p for p in pids if _alive(p)]
+    assert len(alive) == 1, "cancelling one run must leave the other running"
+    stops[1].set()
+    threads[1].join(15)
+    assert _wait_dead(*pids) == [] and errors == [bw.CANCELLED, bw.CANCELLED]
 
 
 def test_b5_the_wall_timeout_is_typed_and_stops_the_container(make):

@@ -242,6 +242,7 @@ def readiness(env: dict[str, str] | None = None, caps: Caps = Caps()) -> Readine
                 UNAVAILABLE,
                 f"the Blender directory does not match the {PIN_VERSION} pin (sha256)",
             )
+        _check_image(runtime, image, env, caps)
         ready = Readiness(True, None, str(root), runtime, image)
         _check_version(ready, env, caps)
     except WorkerError as exc:
@@ -251,6 +252,26 @@ def readiness(env: dict[str, str] | None = None, caps: Caps = Caps()) -> Readine
     with _cache_lock:
         _ready_cache[key] = (time.monotonic(), ready)
     return ready
+
+
+def _check_image(runtime: str, image: str, env, caps: Caps) -> None:
+    """The pinned image must already be local: a run never pulls (`--pull never`)."""
+    try:
+        rc = subprocess.run(
+            [runtime, "image", "inspect", image],
+            env=child_env(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=caps.version_timeout_s,
+            check=False,
+        ).returncode
+    except subprocess.TimeoutExpired:
+        raise WorkerError(UNAVAILABLE, "the container runtime did not answer") from None
+    if rc != 0:
+        raise WorkerError(
+            UNAVAILABLE, "the pinned image is not present locally; pull it first"
+        )
 
 
 def _check_version(ready: Readiness, env, caps: Caps) -> None:
@@ -288,11 +309,15 @@ def _user() -> str:
 def _container_argv(
     ready: Readiness, name: str, work: Path, tail: list[str], caps: Caps
 ) -> list[str]:
-    """The whole command line. Nothing in it comes from a request or from operator free text."""
+    """The whole command line. Nothing in it comes from a request or from operator free text:
+    `name` is random per run, `work` comes from mkdtemp, and the tree, runtime and image are
+    the validated settings."""
     return [
         ready.runtime,
         "run",
         "--rm",
+        "--pull",
+        "never",
         "--name",
         name,
         "--init",
