@@ -204,3 +204,28 @@ def test_an_economics_row_says_whether_the_asset_sits_on_a_tonne_bus(n):
     rows = {(r["component"], r["name"]): r["tonne_bus"] for r in asset_cost_rows(n)}
     assert rows[("Generator", _tonne_generator(n))] is True
     assert rows[("Link", _first(n, "links", "bus0", False))] is False
+
+
+def test_the_units_for_a_bus_refuse_an_unknown_bus_and_an_empty_one(
+    client, install_network, n
+):
+    install_network(n)
+    url = "/api/network/asset_schema/Generator/units/new"
+    assert client.get(url, params={"bus": "no-such-bus"}).status_code == 404
+    assert client.get(url, params={"bus": ""}).status_code == 400
+    assert client.get(url, params={"bus": "  "}).status_code == 400
+
+
+def test_the_staged_concentrator_economics_row_pins_value_unit_and_flag(n):
+    """Economics shows this store as 25 EUR/t: the backend sends the stored 25.0, basis EUR/MWh and the tonne flag."""
+    from services.asset_schema.access import asset_cost_rows
+
+    row = next(
+        r for r in asset_cost_rows(n) if r["name"] == "coarse_ore_stockpile_new_2027"
+    )
+    assert (
+        row["component"],
+        row["basis"],
+        row["tonne_bus"],
+        row["upfront_per_unit"],
+    ) == ("Store", "EUR/MWh", True, 25.0)

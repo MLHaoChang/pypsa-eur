@@ -60,4 +60,14 @@ describe('CreationForm cost fields follow the bus', () => {
   it('still stores x1000 from EUR/kW on an energy bus', async () => {
     expect((await createOn('Elec A')).overnight_cost).toBe(123400)
   })
+  it('keeps Add to Network disabled while the bus units are unread or failed', async () => {
+    vi.mocked(assetSchemaApi.unitsForBus).mockRejectedValue(new Error('500'))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    client.setQueryData(nk('Demo', 'buses'), BUSES)
+    render(<QueryClientProvider client={client}><CreationForm item={{ id: 'thermal', label: 'Conventional' }} /></QueryClientProvider>)
+    await screen.findByText('Add to Network')
+    fireEvent.change(fieldInput(/^Attach to Bus/), { target: { value: 'NH3' } })
+    await waitFor(() => expect(assetSchemaApi.unitsForBus).toHaveBeenCalled())
+    expect((screen.getByText('Add to Network') as HTMLButtonElement).disabled).toBe(true)
+  })
 })

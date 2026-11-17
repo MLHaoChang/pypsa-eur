@@ -585,7 +585,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
   // A cost field's unit and scale follow the bus the new asset attaches to (a tonne bus: per tonne, scale 1;
   // 05d), so a value typed per tonne is not stored x1000. The initial values above stay in the class's units.
   const sizeBus = (form.bus ?? form.bus0 ?? '') || null
-  const { data: liveSchema } = useAssetSchema(SCHEMA_CLASSES.has(COMPONENT_TYPE[item.id] ?? '') ? COMPONENT_TYPE[item.id] : null, null, sizeBus)
+  const { data: liveSchema, unitsReady } = useAssetSchema(SCHEMA_CLASSES.has(COMPONENT_TYPE[item.id] ?? '') ? COMPONENT_TYPE[item.id] : null, null, sizeBus)
   const fields = useMemo(() => (FIELD_MAP[item.id] ?? []).map(f => withDescriptor(f, liveSchema ?? schema)), [item.id, liveSchema, schema])
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -936,7 +936,8 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
         </button>
         <button
           onClick={() => createMut.mutate()}
-          disabled={createMut.isPending}
+          disabled={createMut.isPending || !unitsReady}
+          title={unitsReady ? undefined : 'Reading the units of the chosen bus…'}
           className="flex-1 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50"
         >
           {createMut.isPending ? 'Adding…' : 'Add to Network'}

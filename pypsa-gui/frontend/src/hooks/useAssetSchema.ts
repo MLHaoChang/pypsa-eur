@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { assetSchemaApi, type AssetSchema } from '../api/assetSchema'
+import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 
@@ -26,12 +27,22 @@ export function useAssetSchema(componentClass: string | null, name?: string | nu
     staleTime: Infinity,
     gcTime: Infinity,
   })
+  // Every network write, undo, delete-undo and project restore moves the edit counter (`network_revision`), so
+  // keying the units on it re-reads them after ANY change to the asset, its bus or the bus's unit, wherever it
+  // was made (BottomPanel, header undo, chat). Shares the 3 s `undoInfo` read the app already polls.
+  const wantsUnits = !!componentClass && (!!name || !!bus)
+  const rev = useQuery({
+    queryKey: nk(project, 'undoInfo'),
+    queryFn: () => networkApi.undoInfo(),
+    enabled: wantsUnits && !!project,
+    staleTime: 2000,
+  }).data?.network_revision
   const units = useQuery<{ units: Record<string, string>; costs?: Record<string, { unit: string; scale: number }> }>({
-    queryKey: nk(project, 'assetUnits', componentClass ?? '', name ?? '', bus ?? ''),
+    queryKey: nk(project, 'assetUnits', componentClass ?? '', name ?? '', bus ?? '', rev ?? ''),
     queryFn: () => (name
       ? assetSchemaApi.units(componentClass as string, name)
       : assetSchemaApi.unitsForBus(componentClass as string, bus as string)),
-    enabled: !!componentClass && (!!name || !!bus),
+    enabled: wantsUnits,
     staleTime: 30_000,
     retry: false,
   })
@@ -40,6 +51,9 @@ export function useAssetSchema(componentClass: string | null, name?: string | nu
   const data = useMemo(() => {
     const noUnits = !over || Object.keys(over).length === 0
     const noCosts = !costs || Object.keys(costs).length === 0
+    // Until the units of the current network state are read, no schema: a cost typed under the class scale
+    // (EUR/kW, x1000) would be stored wrong on a tonne bus. A failed read leaves the form closed, never guessing.
+    if (wantsUnits && !units.isSuccess) return undefined
     if (!base.data || (noUnits && noCosts)) return base.data
     return {
       ...base.data,
@@ -52,6 +66,6 @@ export function useAssetSchema(componentClass: string | null, name?: string | nu
         }),
       })),
     }
-  }, [base.data, over, costs])
-  return { ...base, data }
+  }, [base.data, over, costs, wantsUnits, units.isSuccess])
+  return { ...base, data, unitsReady: !wantsUnits || units.isSuccess }
 }

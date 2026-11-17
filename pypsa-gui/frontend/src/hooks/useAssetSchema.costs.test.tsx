@@ -6,8 +6,10 @@ import { useAssetSchema } from './useAssetSchema'
 import { assetSchemaApi } from '../api/assetSchema'
 
 vi.unmock('./useAssetSchema')
+vi.mock('../api/network', () => ({ networkApi: { undoInfo: vi.fn() } }))
 vi.mock('../api/assetSchema', () => ({ assetSchemaApi: { get: vi.fn(), units: vi.fn() } }))
 import { useUIStore } from '../store/uiStore'
+import { networkApi } from '../api/network'
 import { buildPatch, seedForm } from '../utils/assetForm'
 
 const field = (key: string, unit_display: string, scale: number) =>
@@ -45,5 +47,36 @@ describe('useAssetSchema cost units on a tonne bus (ui-modern 05d)', () => {
     expect(e.result.current.data?.groups[0].fields[0].unit_note).toBeUndefined()
     // an energy asset still stores x1000 from EUR/kW
     expect(buildPatch([e.result.current.data!.groups[0].fields[0]], { overnight_cost: '123.4' }, { overnight_cost: 0 })).toEqual({ overnight_cost: 123400 })
+  })
+
+  const schema = { component: 'Generator', groups: [{ id: 'investment', label: 'x', fields: [field('overnight_cost', 'EUR/kW', 0.001)] }] } as never
+
+  it('gives no schema, so no cost can be written under the class scale, while the units load or have failed', async () => {
+    useUIStore.setState({ currentProject: 'Demo' })
+    vi.mocked(assetSchemaApi.get).mockResolvedValue(schema)
+    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0, unsaved: false, network_revision: 1 })
+    vi.mocked(assetSchemaApi.units).mockRejectedValue(new Error('500'))
+    const t = renderHook(() => useAssetSchema('Generator', 'g'), { wrapper: wrapper() })
+    await waitFor(() => expect(assetSchemaApi.units).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 50))
+    expect(t.result.current.data).toBeUndefined()
+    expect(t.result.current.unitsReady).toBe(false)
+  })
+
+  it('re-reads the units when the network revision moves (undo, a BottomPanel edit, a restore)', async () => {
+    useUIStore.setState({ currentProject: 'Demo' })
+    vi.mocked(assetSchemaApi.get).mockResolvedValue(schema)
+    vi.mocked(assetSchemaApi.units).mockReset().mockResolvedValue({ component: 'Generator', name: 'g', units: {}, costs: {} })
+    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0, unsaved: false, network_revision: 1 })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const w = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    const t = renderHook(() => useAssetSchema('Generator', 'g'), { wrapper: w })
+    await waitFor(() => expect(t.result.current.unitsReady).toBe(true))
+    const before = vi.mocked(assetSchemaApi.units).mock.calls.length
+    vi.mocked(assetSchemaApi.units).mockResolvedValue({ component: 'Generator', name: 'g', units: {},
+      costs: { overnight_cost: { unit: 'EUR/(t/h)', scale: 1 } } })
+    qc.setQueryData(['undoInfo', 'Demo'], { depth: 1, unsaved: true, network_revision: 2 })
+    await waitFor(() => expect(t.result.current.data?.groups[0].fields[0].unit_display).toBe('EUR/(t/h)'))
+    expect(vi.mocked(assetSchemaApi.units).mock.calls.length).toBeGreaterThan(before)
   })
 })
