@@ -73,3 +73,13 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
   (`10-assistant-tools.md`), owner decision GC09-CHAT-1.
 - 09/10/11 user guides and datasheets: their own skeleton sections now. Content arrives from
   GC-01/04/06 through `sources.SOURCES`.
+
+### GK B2 plan GO, slice (b) UI (2026-11-17), with conditions
+
+- U1. The types follow the server's return shapes (rule #1060). Fixtures are built from a real #1577 response, kept in sync by a backend test that dumps the view, never hand-made shapes (rule #1427). This covers `since_submission`, `submissions`, `feeds[].state`, `status_basis` and the `gc_*` error bodies.
+- U2. A 409 `gc_tracker_unreadable` read shows that state with every write control disabled and a reason. It never shows an empty table or a "start" action. Tested.
+- U3. Every write refetches from the server, with no optimistic updates. A refused status move keeps the old status and shows the server's text. Tested.
+- U4. Every refusal kind reaches the user as text, never swallowed by `quiet`. The lock-held and `gc_invalid` (with its field) cases are tested.
+- U5. The pack download uses the server's filename and bytes. The button is disabled while the pack builds, and a failed build shows the server's text.
+- U6. The screen shows no hash ids or file paths. The test covers `model_set_id` and `data_hash`.
+- A targeted mutant runs on each guard's test, and the PR body lists them. The PR opens after #1577 merges.
