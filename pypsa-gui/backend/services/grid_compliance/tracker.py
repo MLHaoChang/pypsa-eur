@@ -15,6 +15,14 @@ data freeze (GC-09).
   ``judged`` while a deliverable that needs it is submitted.
 * ``freeze``: hashes the project's inputs (campus input, asset library and the
   network's LP inputs) into a model-set id and stamps it on the deliverable.
+  A deliverable at ``submitted`` or later is not re-frozen
+  (``gc_freeze_after_submission``).
+
+Reaching ``submitted`` appends the fresh freeze to the deliverable's
+``submissions``, the record of what went to the TSO. It is never rewritten:
+later moves (TSO comments, accepted) are judged against it, not against the
+current inputs, so an edit after submission neither blocks them nor lets a new
+model set stand in for the submitted one.
 
 A freeze reads one of ``FREEZE_STATES``: ``fresh`` when the inputs still hash
 to it; ``stale`` after an edit; ``refreeze_needed`` when it was made by
@@ -31,7 +39,7 @@ from datetime import datetime, UTC
 from services import campus_electrical_service as ce
 
 from . import catalogue as cat
-from .sources import package_available
+from . import sources
 from .store import (
     DataItem,
     DeliverableState,
@@ -86,7 +94,7 @@ def network_fingerprint(project) -> str | None:
     resident context when the project is open (it holds unsaved edits), else
     from the network on disk. None when it cannot be read."""
     from services import project_registry, workflow_tools
-    from services.provenance_graph.runs import input_fingerprint
+    from services.provenance_graph import pins, runs
     from services.pypsa_service import PyPSAService
 
     ctx = PyPSAService.get_context(project_registry.registry_key(project))
@@ -95,7 +103,10 @@ def network_fingerprint(project) -> str | None:
             ctx = workflow_tools._load_context(project)
         except Exception:  # noqa: BLE001 — an unreadable network is no evidence
             return None
-    return input_fingerprint(ctx)
+    # Bracketed like the other fingerprint readers (rule #1384 N1): an edit
+    # that lands during the read is read again once, a second one is unreadable.
+    value = runs.locked_read(ctx, lambda: runs.input_fingerprint(ctx))
+    return None if value is pins.UNREADABLE else value
 
 
 def data_hash(project) -> str | None:
@@ -153,7 +164,7 @@ def _view(project, tracker, codes) -> list[dict]:
     statuses = _statuses(tracker)
     current = data_hash(project)
     wanted = [cat.BY_CODE[c] for c in codes]
-    available = {p: package_available(project, p) for d in wanted for p in d.packages}
+    source_state = {p: sources.read(project, p)[0] for d in wanted for p in d.packages}
     rows = []
     for d in wanted:
         s = tracker.deliverables.get(d.code) or DeliverableState()
@@ -177,11 +188,13 @@ def _view(project, tracker, codes) -> list[dict]:
                 "freeze": s.freeze.model_dump() if s.freeze else None,
                 "freeze_state": fstate,
                 "stale": fstate == "stale",
+                "submissions": [f.model_dump() for f in s.submissions],
                 "feeds": [
                     {
                         "package": p,
                         "label": cat.PACKAGE_LABELS[p],
-                        "available": available[p],
+                        "available": source_state[p] == "present",
+                        "state": source_state[p],
                     }
                     for p in d.packages
                 ],
@@ -201,9 +214,23 @@ def state(project) -> dict:
     }
 
 
-def check_move(code: str, status: str, statuses: dict[str, str], fstate: str) -> None:
+def on_record(entry: DeliverableState) -> bool:
+    """True when the deliverable is submitted (or later) on a kept record."""
+    return cat.RANK[entry.status] >= cat.RANK[cat.SUBMITTED] and bool(entry.submissions)
+
+
+def check_move(
+    code: str,
+    status: str,
+    statuses: dict[str, str],
+    fstate: str,
+    *,
+    submitted_on_record: bool = False,
+) -> None:
     """Refuse a move the guards forbid. ``statuses`` and ``fstate`` are read
-    under the tracker's lock, in the same critical section as the write."""
+    under the tracker's lock, in the same critical section as the write. A
+    deliverable already submitted on a kept record (``submitted_on_record``)
+    is judged against that record, so the current freeze does not apply."""
     rank = cat.RANK[status]
     if rank >= cat.RANK[cat.SUBMITTED]:
         blockers = _blockers(code, statuses)
@@ -216,7 +243,7 @@ def check_move(code: str, status: str, statuses: dict[str, str], fstate: str) ->
                 + " is not judged yet.",
                 blockers=blockers,
             )
-        if fstate != "fresh":
+        if not submitted_on_record and fstate != "fresh":
             raise GridComplianceError(
                 "gc_freeze_not_fresh",
                 409,
@@ -253,9 +280,16 @@ def set_status(project, code: str, status: str) -> dict:
     )
     with editing(project) as tracker:
         entry = tracker.deliverables.setdefault(code, DeliverableState())
+        kept = on_record(entry)
         check_move(
-            code, status, _statuses(tracker), freeze_state(entry.freeze, current)
+            code,
+            status,
+            _statuses(tracker),
+            freeze_state(entry.freeze, current),
+            submitted_on_record=kept,
         )
+        if cat.RANK[status] >= cat.RANK[cat.SUBMITTED] and not kept:
+            entry.submissions.append(entry.freeze.model_copy())
         entry.status = status
         entry.status_at = now()
     return _view(project, tracker, [code])[0]
@@ -290,7 +324,15 @@ def freeze(project, code: str) -> dict:
             "The project's network cannot be read, so its inputs cannot be frozen.",
         )
     with editing(project) as tracker:
-        tracker.deliverables.setdefault(code, DeliverableState()).freeze = Freeze(
+        entry = tracker.deliverables.setdefault(code, DeliverableState())
+        if cat.RANK[entry.status] >= cat.RANK[cat.SUBMITTED]:
+            raise GridComplianceError(
+                "gc_freeze_after_submission",
+                409,
+                f"TRGC {code} is {cat.STATUS_WORDS[entry.status]} on the frozen data, "
+                "and that record is kept. Move it back to judged before freezing again.",
+            )
+        entry.freeze = Freeze(
             model_set_id=f"ms-{digest[:12]}",
             data_hash=digest,
             frozen_at=now(),
