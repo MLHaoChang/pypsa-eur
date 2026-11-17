@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# GC-10 Benchmark: IEC 61400-27-2 pre-filter and transient / quasi-steady sub-windows
+# GC-11 Benchmark: IEC 61400-27-2 pre-filter and transient / quasi-steady sub-windows
 
 Status: needs-triage
 Type: task
