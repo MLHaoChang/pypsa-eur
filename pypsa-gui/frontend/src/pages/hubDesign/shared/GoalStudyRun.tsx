@@ -143,7 +143,7 @@ function OptimisationRun({ blocked, reason, hasProject }: {
           The optimisation finished.
           <button type="button" data-testid="hub-run-open-results"
             onClick={() => setStep('results', { user: true })}
-            className="text-accent hover:underline">
+            className="text-text underline underline-offset-2 hover:text-accent">
             Open the results ›
           </button>
         </p>
