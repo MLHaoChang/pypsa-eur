@@ -1765,12 +1765,13 @@ this network.
   - `process.mass_balance` (block, ≤ 1e-6): per tonne bus and period,
     Σ w·|Σ flows| over every component on the bus (one-ports by `sign`, Links
     at every port by −p_i) over the period's tonnes fed in from outside the
-    site (supply Generators on tonne buses; a `shortfall` role is not a
-    supply). Nothing fed in is no evidence. The LP enforces nodal balance, so
+    site (supply Generators on tonne buses; a `shortfall` role and any LP
+    slack, `slack_generator_mask`, are not a supply). Nothing fed in is no evidence. The LP enforces nodal balance, so
     this catches corrupt results, not a design flaw;
   - `process.motor_start` (warn, `eq pass`): the scorecard's own rows
     (`grid_readiness._motor_start_rows`) on the live network and the project's
-    campus grid code; a FAIL names the unit, its ΔU and the limit; an unknown
+    campus grid code (settings or a grid code it cannot read are no evidence,
+    `grid_code_unreadable`, never the default); a FAIL names the unit, its ΔU and the limit; an unknown
     row with no fail is no evidence;
   - `process.restart` (warn, `eq 0`): the units that fail to restart after a
     grid trip (`gridspine` restart sequence on the units the dip classes trip,
