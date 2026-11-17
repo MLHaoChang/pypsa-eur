@@ -34,7 +34,7 @@ _COMPONENTS = (
     ("links", "Link", "links"),
     # A split storage takes its outage rate from its Store, as the Monte Carlo
     # does (mc.py, eh_readiness); other Stores have none.
-    ("stores", "Store", "storage"),
+    ("stores", "Store", "storage units"),
 )
 
 

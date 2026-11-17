@@ -8,6 +8,7 @@ the report. One function, ``run_assumptions``, makes the rows."""
 from __future__ import annotations
 
 import json
+import re
 import pathlib
 import sys
 
@@ -181,6 +182,12 @@ def test_a_split_storages_outage_default_is_assumed_from_its_store():
         "Store",
         "bat",
         "carrier_default",
+    )
+    # UX: the same words as a StorageUnit's row, the store in the user's name.
+    assert row["label"] == "Outage rate of battery storage units (bat)"
+    assert row["shown"].startswith("2 % forced outage rate")
+    assert not re.search(
+        r"\b(FOR|EFORd|MTTR)\b|≈|_", row["label"] + row["shown"] + row["reason"]
     )
     # A plain Store is not a split storage, and the run reads no outage from it.
     n.add("Store", "tank", bus="h2", carrier="battery", e_nom=5)
