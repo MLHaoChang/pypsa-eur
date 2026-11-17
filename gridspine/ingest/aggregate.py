@@ -1,5 +1,5 @@
 """
-The aggregated plant model (GC-01, TRGC 01/02).
+The aggregated plant model and the model-set freeze (GC-01, TRGC 01/02).
 
 TRGC 01/02 ask for a detailed and an aggregated plant model. The detailed
 model is the campus description itself (``ingest/campus.py``). This module
@@ -53,8 +53,8 @@ fed from their LV side; unit transformers with different rated voltages,
 vector groups or earthing, or units at two voltage levels; a campus with no
 tree holding a converter unit; an equivalent's name already taken.
 
-``freeze`` (the model-set freeze, ``schema/model_set.py``) joins this
-module next: it needs ``build_campus``, and ``schema/`` imports only
+``freeze`` builds both variants and returns the frozen ``ModelSet``
+(``schema/model_set.py``); it lives here because ``schema/`` imports only
 ``schema/``.
 """
 
@@ -63,8 +63,11 @@ import dataclasses
 import math
 from collections import deque
 
+import pandas as pd
+
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.model_set import new_model_set
 
 #: The unit kinds an equivalent is built for: the converter-interfaced ones.
 CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell")
@@ -557,6 +560,36 @@ def _drop_dangling(c, buses, branches, assumptions):
         )
 
 
+def aggregate_hour(rows: pd.DataFrame, unit_map: dict) -> pd.DataFrame:
+    """
+    The detailed hourly rows (``unit_id``, ``p_mw``, ``status``, and any
+    key columns such as ``period`` and ``hour``) as rows of the aggregated
+    campus: ``p_mw`` summed over each equivalent's members, ``status`` 1
+    when any member is on. A row whose unit no equivalent stands for is
+    refused, never dropped.
+    """
+    member_of = {m: eq for eq, ms in unit_map.items() for m in ms}
+    stray = sorted(set(rows["unit_id"]) - set(member_of))
+    if stray:
+        raise AggregationError(
+            f"aggregation: the hourly rows have unit(s) {stray} the aggregated campus "
+            "does not map"
+        )
+    keys = [col for col in rows.columns if col not in ("unit_id", "p_mw", "status")]
+    df = rows.assign(
+        unit_id=rows["unit_id"].map(member_of),
+        status=(rows["status"].astype(int) == 1).astype(int),
+    )
+    out = df.groupby(keys + ["unit_id"], sort=True, as_index=False).agg(
+        p_mw=("p_mw", "sum"), status=("status", "max")
+    )
+    return (
+        out[["unit_id", *keys, "p_mw", "status"]]
+        if keys
+        else out[["unit_id", "p_mw", "status"]]
+    )
+
+
 def aggregate_campus(campus_spec):
     """
     ``(Campus, Aggregation)``: the aggregated campus built, with the
@@ -566,3 +599,24 @@ def aggregate_campus(campus_spec):
     campus = build_campus(agg.spec)
     campus.assumptions.extend(agg.assumptions)
     return campus, agg
+
+
+def freeze(campus_spec, params, *, aggregated=True, now=None):
+    """
+    Freeze ``campus_spec`` and ``params`` into a ``ModelSet``. Both
+    variants are built to check they load; an error in either is raised,
+    never turned into a missing variant. ``aggregated=False`` freezes the
+    detailed model only (the aggregated slot is then None).
+    """
+    build_campus(campus_spec)
+    agg = None
+    if aggregated:
+        _, agg = aggregate_campus(campus_spec)
+    return new_model_set(
+        campus_spec,
+        params,
+        aggregated=None if agg is None else agg.spec,
+        unit_map=None if agg is None else agg.unit_map,
+        assumptions=None if agg is None else agg.assumptions,
+        now=now,
+    )

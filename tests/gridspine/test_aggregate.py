@@ -1,5 +1,5 @@
 """
-The aggregated plant model (GC-01, ``ingest/aggregate.py``).
+The aggregated plant model and the freeze (GC-01, ``ingest/aggregate.py``).
 
 The fixture is a PV + BESS plant: PCC 132 kV -> one 100 MVA main
 transformer -> the 33 kV collector bus COL -> a shared trunk (two parallel
@@ -9,17 +9,22 @@ P_i**2 weighting is exercised (GK A2 condition A1).
 """
 
 import copy
+import datetime
 import math
 
+import pandas as pd
 import pytest
 
 from gridspine.ingest.aggregate import (
     AggregationError,
     aggregate,
     aggregate_campus,
+    aggregate_hour,
+    freeze,
 )
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.model_set import data_hash, manifest
 from gridspine.static.campus_sc import campus_fault_levels
 from tests.gridspine.test_island_schema import requirements
 
@@ -38,6 +43,7 @@ NODES = (
 )
 #: Units: PV at A1, A2, B1, B2; BESS at B3. 5 MW each.
 KIND = {"A1": "pv", "A2": "pv", "B1": "pv", "B2": "pv", "B3": "bess"}
+T0 = datetime.datetime(2026, 11, 17, 8, 0, tzinfo=datetime.UTC)
 
 
 def cable(a, b, length, parallel=1, zero=True):
@@ -694,6 +700,104 @@ def test_no_taps_no_tap_assumption():
         "tap" not in agg.spec["campus"]["transformers"]["EQ_TR"]
         and agg.assumptions == []
     )
+
+
+# --- A9 aggregate_hour ------------------------------------------------------------------------------
+
+
+def test_aggregate_hour_sums_members_and_status_is_any():
+    agg = aggregate(plant())
+    rows = pd.DataFrame(
+        {
+            "unit_id": ["UA1", "UA2", "UB1", "UB2", "UB3"],
+            "period": 2030,
+            "hour": 7,
+            "p_mw": [5.0, 4.0, 0.0, 3.0, -2.0],
+            "status": [1, 1, 0, 1, 1],
+        }
+    )
+    out = aggregate_hour(rows, agg.unit_map).set_index("unit_id")
+    assert (
+        out.at["EQ_PV", "p_mw"] == pytest.approx(12.0)
+        and out.at["EQ_PV", "status"] == 1
+    )
+    assert out.at["EQ_BESS", "p_mw"] == pytest.approx(-2.0)
+    assert list(out.columns) == ["period", "hour", "p_mw", "status"]
+
+
+def test_aggregate_hour_status_off_when_every_member_is_off():
+    agg = aggregate(plant())
+    rows = pd.DataFrame(
+        {
+            "unit_id": ["UA1", "UA2", "UB1", "UB2", "UB3"],
+            "p_mw": 0.0,
+            "status": [0, 0, 0, 0, 1],
+        }
+    )
+    out = aggregate_hour(rows, agg.unit_map).set_index("unit_id")
+    assert out.at["EQ_PV", "status"] == 0 and out.at["EQ_BESS", "status"] == 1
+
+
+def test_aggregate_hour_refuses_an_unmapped_unit():
+    agg = aggregate(plant())
+    rows = pd.DataFrame(
+        {"unit_id": ["UA1", "GHOST"], "p_mw": [1.0, 2.0], "status": [1, 1]}
+    )
+    with pytest.raises(AggregationError, match=r"unit\(s\) \['GHOST'\]"):
+        aggregate_hour(rows, agg.unit_map)
+
+
+# --- A8 freeze ------------------------------------------------------------------------------------
+
+
+def test_freeze_holds_both_variants_and_is_deterministic():
+    a = freeze(plant(), {"case": "max"}, now=T0)
+    b = freeze(plant(), {"case": "max"}, now=T0 + datetime.timedelta(hours=1))
+    assert a.data_hash == b.data_hash == data_hash(plant(), {"case": "max"})
+    assert a.spec("aggregated") == aggregate(plant()).spec
+    assert a.unit_map["EQ_PV"] == ["UA1", "UA2", "UB1", "UB2"]
+    assert manifest(a, "aggregated")["variant"] == "aggregated"
+    assert freeze(plant(), {"case": "min"}, now=T0).data_hash != a.data_hash
+
+
+def test_freeze_carries_the_aggregation_assumptions():
+    spec = plant()
+    del spec["campus"]["cables"]["CB2"]["r0_ohm_per_km"]
+    ms = freeze(spec, {}, now=T0)
+    assert any("CB2" in line for line in ms.assumptions)
+
+
+def test_freeze_refuses_when_the_aggregation_fails():
+    spec = plant()
+    spec["campus"]["units"]["X1"] = {
+        "kind": "load",
+        "bus": "B2",
+        "p_mw": t(1.0),
+        "pf": t(0.95),
+    }
+    with pytest.raises(AggregationError, match="sits inside the collector"):
+        freeze(spec, {}, now=T0)
+
+
+def test_freeze_refuses_when_the_detailed_model_fails():
+    spec = plant()
+    spec["campus"]["cables"]["CB2"]["to_bus"] = "NOWHERE"
+    with pytest.raises(ContractError):
+        freeze(spec, {}, now=T0)
+
+
+def test_freeze_detailed_only_when_asked():
+    spec = plant()
+    spec["campus"]["units"]["X1"] = {
+        "kind": "load",
+        "bus": "B2",
+        "p_mw": t(1.0),
+        "pf": t(0.95),
+    }
+    ms = freeze(spec, {}, aggregated=False, now=T0)
+    assert ms.specs["aggregated"] is None and ms.unit_map == {}
+    with pytest.raises(ContractError, match="aggregated variant was not frozen"):
+        manifest(ms, "aggregated")
 
 
 # --- shapes without a medium-voltage collector ------------------------------------------------

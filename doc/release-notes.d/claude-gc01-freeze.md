@@ -1,0 +1,1 @@
+* Feat(gridspine): `freeze` (`gridspine/ingest/aggregate.py`) builds and checks the detailed and aggregated plant models and returns the versioned model set (TRGC 01/02); an error in either variant is raised, never turned into a missing one. `aggregate_hour` maps the detailed hourly dispatch onto the aggregated equivalents and refuses a unit it cannot map.
