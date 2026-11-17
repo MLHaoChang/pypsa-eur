@@ -160,3 +160,7 @@ Q1: two PRs, S6a then S6b. Q2: an unbound building stays, with its `unbound_targ
 - S6b asserts the tool results against an independent `n.*_t` read, and the stale step asserts the gate's reason with no numbers.
 - S7 as planned.
 - S6d: `my_previews` stays `CHAT_ACTIONS` only. A pending return is a separate describe-only field on `site_scene_read` (owner-scoped, capped), `ROUTE_ONLY_ACTIONS` unchanged, with a test that no chat path applies it. The coordinator decides who builds it.
+
+## 2026-11-17: owner decision SC06C-CARD-1 (via the coordinator, about 13:15Z)
+
+Q1 (a) the Blender-return card in Generate, above the building corrections, only while a return is open. Q2 (a) the same card, words and buttons in Guided and Expert. Q3 (a) chat describes a pending return and never applies it; apply stays route-only. Q4 (a) SC-07 builds the chat part as S6d after #1619 merges, and the card itself too (no separate SC-06 (c) builder).
