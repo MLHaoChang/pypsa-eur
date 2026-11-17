@@ -96,3 +96,19 @@ other domain adapters, arbitrary-language completeness and calibration/release.
 ### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
 
 Was: `needs-triage`. Files: `pypsa-gui/backend/harness/calculations.py` (extend beyond generator/network/storage profiles), result-service validity masks, hand-worked fixtures under `tests/`. Blockers: 01 and 02 are done. Reviewer: GK B (finance metrics such as NPV also GK B). Shares metric definitions with 09. Plan OK from GK B first.
+
+### 2026-11-17: GK B plan GO, slices S1–S7 (builder session_01G7qCujEGst2EoC67pAmmXd)
+
+GK B (64) gave GO on the 09+10 plan at master 0ab07339. Slices, one PR each: S1 losses raw validity (10, A1.7); S2 solve-status/MIP-gap guard; S3 objective-to-cost bridge profile and an objective-vs-cost clarification; S4 cross-surface parity and metamorphic fixtures; S5 per-metric mapping ledger, with S5b oracle batches; S6 bounded sections above 20 slots; S7 definition hash in evidence and the validation-cache key. #1113's GK B OK @d36109ae is the section-1 contract review (AA-A04-REVIEW-1); independent_domain_approval stays false. Checked plausibility findings wait for Codex K (#851).
+
+Conditions:
+- G1: existing Losses fields byte-identical; `validity` is additive. Loads and branches are both classified; real 0, NaN, ±inf and absent are kept apart, pinned by exact equality.
+- G2: name the persisted status/gap source. A missing status is limited, never optimal. A pure LP has no gap; MIP-ness comes from the network. One tolerance constant, with a boundary test. Report the flip count before building.
+- G3: a public bridge wrapper; objective-scale reversal tested under auto and user scale ≠ 1; a residual tolerance constant with a boundary test; a penalty that can't be identified is `unavailable`, never 0; clarification choices pinned by exact list equality.
+- G4: the wrong service aggregate is injected by monkeypatch, and the refusal kind is asserted exactly.
+- G5: exact set equality between profile metrics and ledger rows, so both missing and orphan rows fail; a pending row has `oracle: null` and is never counted as verified.
+- G6: deterministic server-owned sections, each slot in exactly one; a contract change is re-reviewed under AA-A04-REVIEW-1.
+- G7: new kinds go in `tool-error-kinds.d/`; inventory, route-parity and control-matrix checks run at the trial merge; calculations.py registration only after asking the coordinator.
+- G8: one targeted mutant per guard, with its killing test listed in the PR body.
+- G9: Journey fit line per PR; UX leads S3/S6.
+- S7 ruling: the sealed chart keeps verifying as drawn. The definition hash goes in the evidence record and the cache key; one test shows a fresh answer misses the cache after a definition change, another that the sealed chart reports the old hash.
