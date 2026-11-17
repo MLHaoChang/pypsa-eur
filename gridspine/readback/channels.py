@@ -57,6 +57,9 @@ TIME_NAMES = ("time", "t")
 _HEADER = re.compile(r"^\s*(?P<name>.*?)\s*\[(?P<unit>[^\]]*)\]\s*$")
 #: COMTRADE data file types this reader takes, with the analog sample's dtype.
 COMTRADE_TYPES = {"ASCII": None, "BINARY": "<i2", "BINARY32": "<i4", "FLOAT32": "<f4"}
+#: A status sample that was not read (a failed poll, GC-12): what an empty cell
+#: of a ``status`` channel named in ``read_csv(blank_status=...)`` becomes.
+STATUS_NOT_READ = -1.0
 #: The value a binary COMTRADE file writes for a missing analog sample.
 _COMTRADE_MISSING = {"BINARY": -0x8000, "BINARY32": -0x80000000}
 #: Channels per PSCAD ``.out`` file.
@@ -180,10 +183,15 @@ def _split_header(col, where):
     return m["name"], m["unit"].strip()
 
 
-def read_csv(path) -> ChannelFrame:
+def read_csv(path, blank_status=()) -> ChannelFrame:
     """
     A CSV whose first column is the time in seconds and every other column
     is ``name [unit]``.
+
+    An empty cell is refused, except in a channel named in ``blank_status``
+    whose unit is ``status``: there it reads as :data:`STATUS_NOT_READ`, a
+    sample that was not read (never 0 or 1). A non-numeric cell is refused
+    everywhere.
     """
     path = Path(path)
     where = str(path.name)
@@ -218,6 +226,8 @@ def read_csv(path) -> ChannelFrame:
     for col in df.columns[1:]:
         name, unit = _split_header(col, where)
         values = pd.to_numeric(df[col], errors="coerce")
+        if name in blank_status and unit == "status":
+            values = values.mask(df[col].isna(), STATUS_NOT_READ)
         if values.isna().any():
             row = int(values.isna().to_numpy().argmax())
             raise ContractError(

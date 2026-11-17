@@ -46,3 +46,13 @@ So every fault case read back from a PSS/E or PSCAD pack reads **unknown**, neve
 - T7 Oracles: the frozen real v1 output, a hand-literal battery.json per version, a hand-literal Z0 per corner; the scalar-pair battery bytes pinned identical.
 
 Merge order: PR-A any time; PR-B after #1608 and #1609; PR-C after PR-A. Item 4 (read-back accepts v2, maps `connected`) waits for GC-07 PR3 (`judge_pack`), in its own PR; its owner is the coordinator's call.
+
+**2026-11-17, GK A2 plan GO for PR-D** (read-back v2; stacks on #1659 and #1650):
+- Q1: every judged kind gets a `stays_connected` obligation row; a trip from t_event to the end is a fail at the trip time. LVRT/HVRT keep J1's carve-out.
+- Q2: PR-B writes a blank `connected` cell with the reason in `status`; PR-D reads it per case, never refusing other channels or cases.
+- D-1: first 0 is the trip even if a later sample reads 1 (any tool); a 0 anywhere → fail at that time (subject to J1), even with blanks; pass only if every sample from t_event to the end is 1 and none is blank; blanks without a 0 → unknown "status poll failed at t=…". Each tested.
+- D-2: a v1 pack reads unknown "no connected channel (contract v1)" on every kind's stays_connected row, never pass; the v1 fixture is a real master EMT pack written before #1650; the v2 acceptance test uses a real write_emt_pack output.
+- D-3: unit not "status", or a value outside {0, 1, blank} → unknown naming the sample; the judge's raise is caught per case.
+- D-4: KNOWN_CONTRACT_VERSIONS = test_battery.CONTRACT_VERSIONS; an unknown version is still refused for the whole pack.
+- D-5: hand-written result CSVs with literal statuses and times, plus an f_step trip → fail, blank-then-0 → fail, 0-then-1 → fail at the first 0. Hand mutants: version gate, unit gate, v1 reason, 0/1 guard, "last sample decides", "blank → 1".
+- D-6: the body says the trip verdict reaches the user through the judgment.json rows GC-22 serves; a release-note fragment.
