@@ -984,7 +984,7 @@ def _eh_concentrator_staged() -> dict:
         "chapters": ["sizing", "investment_case", "grid_risk"],
         "missing_tools": [
             "NPV by stage: the case reports the project NPV and each stage's capex lines, no NPV per stage",
-            "N-1 on the site transformer: the template has no site transformer",
+            "N-1 on the site transformer: the project (the shipped template) has no site transformer",
             "a chat path to the process-unit form (G2P-07; the user fills it)",
             CONC_CASE_OUTSIDE,
         ],

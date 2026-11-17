@@ -668,6 +668,24 @@ def test_shipments_met_only_by_the_slack_show_the_lost_tonnes_and_their_value(
     )
     assert rows["2030"]["lost_t_per_year"] == 0.0
     assert r["facts"][0]["value"] == pytest.approx(2.0 * hours)
+    # GK A (28) ask 1: such a run never reads as fully delivered. The product
+    # shortfall accessor reads the whole 2027 shipment as lost, so delivered
+    # tonnes are 0 < shipments; the mass balance has nothing fed in (never a
+    # pass); and no rule of the profile reads a delivered or served product.
+    from services.process_products import shortfalls
+
+    w = n.snapshot_weightings["generators"]
+    [short] = [s for s in shortfalls(n) if s.bus == "concentrate"]
+    shipped = float((n.loads_t.p["shipments"] * w).loc[2027].sum())
+    lost = float((short.p * w).loc[2027].sum())
+    assert shipped == pytest.approx(2.0 * hours) and lost == pytest.approx(shipped)
+    assert shipped - lost < shipped
+    assert direct("conc.mass_balance", network=n)["verdict"] == "not_evaluated"
+    # (kpi.unserved_mwh is electrical load only: its basis says concentrate
+    # short of the shipments is never served.)
+    facts = {rule["fact"] for rule in _rules().values()} - {"kpi.unserved_mwh"}
+    assert not {f for f in facts if "deliver" in f or "served" in f}, facts
+    assert "never as served" in _rules()["kpi.unserved_mwh"]["basis"]
 
 
 def test_the_shed_level_reads_least_peak_and_last_per_period(n0, direct):
