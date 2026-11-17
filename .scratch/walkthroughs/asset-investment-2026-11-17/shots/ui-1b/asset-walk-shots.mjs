@@ -1,10 +1,10 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { devCredentials } from './dev-credentials.mjs'
+import { devCredentials } from '../../../../../pypsa-gui/frontend/scripts/dev-credentials.mjs'
 const { chromium } = createRequire(import.meta.url)('playwright')
 const BASE = 'http://127.0.0.1:5173'
-const OUT = '/home/user/ui-wt/.scratch/asset-walk-shots'
+const OUT = process.env.OUT || '/tmp/asset-walk-shots'
 const PROJECT = 'asset-walk-dc'
 const TEMPLATE = 'eh_datacenter'
 const ONLY = process.env.ONLY || ''
@@ -22,8 +22,9 @@ const MC = { status: 'done', error: null, started_at: 1, finished_at: 2, result:
     { kind: 'generator', name: 'CCGT-1', nameplate_mw: 400, elcc_mw: 312.5, elcc_share: 0.78125, status: 'ok', reason: null, baseline_lole_h: 9.3241, baseline_lole_ci: [9.1123, 9.5432] },
     { kind: 'vre', name: 'Wind-North', nameplate_mw: 4.85, elcc_mw: 1.2, elcc_share: 0.247, status: 'ok', reason: null, baseline_lole_h: 9.3241, baseline_lole_ci: [9.1123, 9.5432] },
     { kind: 'vre', name: 'Solar-East', nameplate_mw: 3.1, elcc_mw: 0.4, elcc_share: 0.129, status: 'ok', reason: null, baseline_lole_h: 9.3241, baseline_lole_ci: [9.1123, 9.5432] },
+    { kind: 'vre', name: 'Solar-New', nameplate_mw: 0, elcc_mw: 0, elcc_share: null, status: 'ok', reason: null, baseline_lole_h: 9.3241, baseline_lole_ci: [9.1123, 9.5432] },
   ],
-  elcc_installed: { 'Wind-North': { mw: 6, basis: 'p_nom' }, 'Solar-East': { mw: 4, basis: 'p_nom_opt' } },
+  elcc_installed: { 'Wind-North': { mw: 6, basis: 'p_nom' }, 'Solar-East': { mw: 4, basis: 'p_nom_opt' }, 'Solar-New': { mw: 0, basis: 'not_built' } },
 } }
 const SIZING = { status: 'ok', payload: { by_carrier: {}, total_p_nom_mw: 6.7, assets: [
   { component: 'Generator', name: 'diesel_new', carrier: 'diesel', built_mw: 4.2, min_mw: 0, max_mw: 12 },
@@ -103,7 +104,7 @@ try {
         await mcp.waitFor()
         await shot(page.getByTestId('mc-goal'), '1b-mc-draws')
         const top = page.getByText(/Sequential MC results rest on ONE/).first()
-        await top.evaluate(el => el.scrollIntoView({ block: 'start' })); await page.evaluate(() => { const sc = [...document.querySelectorAll('*')].filter(e => e.scrollHeight > e.clientHeight + 50 && /auto|scroll/.test(getComputedStyle(e).overflowY)); for (const e of sc) if (e.contains(document.querySelector('[data-testid=mc-goal-verdict]'))) e.scrollTop -= 170 })
+        await top.evaluate(el => el.scrollIntoView({ block: 'start' })); await page.evaluate(() => { const sc = [...document.querySelectorAll('*')].filter(e => e.scrollHeight > e.clientHeight + 50 && /auto|scroll/.test(getComputedStyle(e).overflowY)); for (const e of sc) if (e.contains(document.querySelector('[data-testid=mc-goal-verdict]'))) e.scrollTop -= 60 })
         await page.waitForTimeout(400)
         const a = await top.boundingBox(); const b = await page.getByTestId('elcc-table').boundingBox(); const w = await page.getByTestId('mc-goal-verdict').boundingBox()
         const y0 = w.y - 70; const clip = { x: Math.max(0, b.x - 16), y: y0, width: 1120, height: Math.min(b.y + b.height - y0 + 30, 868 - y0) }
