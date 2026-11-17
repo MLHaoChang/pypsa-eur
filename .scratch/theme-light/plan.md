@@ -139,3 +139,21 @@ the one that matters lands in slice (c).
   storage write added at import.
 - T6. The PR body lists surfaces that still hard-code dark colours.
 - T7. The PR body confirms GC-TEXT-1.
+
+## UI-COHESION-1 findings for slices (b)–(d) (appended 2026-11-17)
+
+Source: `.scratch/ui-cohesion/audit.md` (300 real-app screens: Guided, Expert, Results and Home, light and dark, three templates). The audit found few colour defects: page surfaces are `#ffffff` / `#151112` on all 147 screens per theme, and no large surface contradicts its theme. Four items belong to these slices; everything else is in the cohesion slice (`.scratch/ui-cohesion/issues/01-cohesion-slice.md`), which does not change a colour value.
+
+| Item | Slice | What and where | Shot (`.scratch/ui-cohesion/shots/`) |
+|---|---|---|---|
+| K1 | (c) | The React Flow attribution badge is a pale grey box on the dark canvas, its text unreadable. Style `.react-flow__attribution` with tokens in both themes; it sits beside `<Background>`/`<Controls>` at `pages/TopologyCanvas.tsx:3134-3142`. | `dc-expert-dark-canvas.jpg` (bottom right) |
+| K2 | (c) | Chart palettes are chosen per page: Capacity expansion is one orange and one charcoal bar in light, orange and pale pink in dark; the Sankey is grey-blue; heatmaps blue-grey. The plan's "greys for series, red for the one that matters" is the fix; the files are `CapacityExpansion.tsx`, `Dispatch.tsx`, `energyFlows.ts`, `StorageHeatmap.tsx`, `ResultsViewer.tsx`. | `dc-expert-light-res-capex.jpg`, `dc-expert-dark-res-capex.jpg`, `dc-expert-light-res-flows.jpg` |
+| K3 | (b) shell, (d) pages | Red has four jobs: primary action, active step/tab, link ("Open here ›", "Next: …") and eyebrow, and `--color-danger` is red too. `#d0021b` against `#b91c1c` is ΔE 11.6 in light (29.9 in dark). Proposal for the UX reviewer, not a decision: links and eyebrows in ink with an underline or "›", red kept for the primary action and the active state. Shell first (`layout/`, `components/`), pages in (d). | `dc-guided-light-s03.jpg`, `dc-expert-light-p-issues.jpg` |
+| K4 | (b) top bar, (d) Home | Home has the band gradient and glass cards; the workbench top bar and sidebar are flat white. The band header already planned for (b) closes the gap; Home moves onto the neutral `--brand-*` names in (d). | `home-light.jpg` against `dc-guided-light-s03.jpg` |
+
+Two couplings with the cohesion slice:
+
+- **The panel header.** Expert panels have two header systems (a 12 px breadcrumb in `App.tsx` `FullPageTab`, a 16 px `PageHeader` in `components/PageKit.tsx`). (b)'s band header lands on that one component, so the cohesion slice's header (item 3) goes first, or (b) takes the header's background token from it. Whichever merges second rebases onto the first.
+- **Radius and card surface.** The cohesion slice adds `--radius-card` / `--radius-control` and changes `rounded-[10px]` on cards. (b)–(d) must not add new `rounded-[Npx]` cards while it lands.
+
+Shots for (b)–(d) per UX condition 3 can reuse `pypsa-gui/frontend/scripts/ui-cohesion-shots.mjs`: `THEMES`, `MODES`, `ONLY` and `WAIT` pick what it takes, against the real API.
