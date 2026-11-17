@@ -151,3 +151,20 @@ def test_the_units_route_carries_the_cost_units(client, install_network, n):
     assert body["costs"]["marginal_cost"] == {"unit": "EUR/t", "scale": 1.0}
     energy = _first(n, "links", "bus0", False)
     assert client.get(f"/api/network/asset_schema/Link/units/{energy}").json()["costs"] == {}
+
+
+def test_a_link_prices_on_its_input_bus_and_a_storage_unit_on_its_bus():
+    from services.asset_schema.fields import cost_units
+
+    assert cost_units(_two_bus_net("t", "MWh"), "Link", "l")["overnight_cost"] == {
+        "unit": "EUR/(t/h)", "scale": 1.0}
+    assert cost_units(_two_bus_net("MWh", "t"), "Link", "l") == {}  # bus1 is not the size bus
+    import pypsa
+
+    m = pypsa.Network()
+    m.add("Bus", "b", carrier="X", unit="t")
+    m.add("StorageUnit", "s", bus="b", p_nom=1)
+    c = cost_units(m, "StorageUnit", "s")
+    assert c["capital_cost"] == {"unit": "EUR/(t/h)/yr", "scale": 1.0}
+    assert c["inv_energy_overnight"] == {"unit": "EUR/t", "scale": 1.0}
+    assert c["marginal_cost"] == {"unit": "EUR/t", "scale": 1.0}

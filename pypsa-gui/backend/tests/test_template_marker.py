@@ -1043,14 +1043,13 @@ def test_a_dc_backup_save_while_the_marker_is_busy_is_refused(eh_base, monkeypat
 
 
 def test_an_undo_while_the_marker_lock_is_held_is_refused_and_leaves_the_file(
-    eh_base, active_case, monkeypatch
+    eh_base, active_case
 ):
     """Issue 11: a restore that cannot take the lock reports ``busy`` and writes
     nothing; once the lock is free the same restore puts the rows back."""
     from services import growth_placeholders as gp
 
-    real = tm.write_lock
-    monkeypatch.setattr(tm, "write_lock", lambda d, **kw: real(d, timeout=0.1))
+    real = tm.write_lock  # the real lock, held below; the restore waits its default 5 s
     own = write_marker(active_case, {**eh_base.meta, "ledger": [_ph("it_mw", 2030)]})
     snapshot = gp.snapshot_meta()
     write_marker(active_case, {**eh_base.meta, "ledger": []})

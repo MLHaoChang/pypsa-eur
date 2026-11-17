@@ -8,9 +8,10 @@ import { assetSchemaApi } from '../api/assetSchema'
 vi.unmock('./useAssetSchema')
 vi.mock('../api/assetSchema', () => ({ assetSchemaApi: { get: vi.fn(), units: vi.fn() } }))
 import { useUIStore } from '../store/uiStore'
+import { buildPatch, seedForm } from '../utils/assetForm'
 
 const field = (key: string, unit_display: string, scale: number) =>
-  ({ key, unit_display, unit_storage: unit_display, scale }) as never
+  ({ key, unit_display, unit_storage: unit_display, scale, kind: 'number', derived: false }) as never
 
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -31,6 +32,9 @@ describe('useAssetSchema cost units on a tonne bus (ui-modern 05d)', () => {
     await waitFor(() => expect(t.result.current.data?.groups[0].fields[0].unit_display).toBe('EUR/(t/h)'))
     const [oc, mc] = t.result.current.data!.groups[0].fields
     expect([oc.scale, oc.unit_storage, mc.unit_display]).toEqual([1, 'EUR/(t/h)', 'EUR/t'])
+    // write path: 123.4 EUR/t is stored as exactly 123.4; stored 0.1234 reads back as 0.1234
+    expect(buildPatch([oc], { overnight_cost: '123.4' }, { overnight_cost: 0 })).toEqual({ overnight_cost: 123.4 })
+    expect(seedForm([oc], { overnight_cost: 0.1234 })).toEqual({ overnight_cost: '0.1234' })
     expect(oc.unit_note).toMatch(/stored as entered/)
 
     units.mockResolvedValue({ component: 'Generator', name: 'e', units: {}, costs: {} })
@@ -39,5 +43,7 @@ describe('useAssetSchema cost units on a tonne bus (ui-modern 05d)', () => {
     await waitFor(() => expect(e.result.current.data).toBeTruthy())
     expect(e.result.current.data?.groups[0].fields[0]).toMatchObject({ unit_display: 'EUR/kW', scale: 0.001 })
     expect(e.result.current.data?.groups[0].fields[0].unit_note).toBeUndefined()
+    // an energy asset still stores x1000 from EUR/kW
+    expect(buildPatch([e.result.current.data!.groups[0].fields[0]], { overnight_cost: '123.4' }, { overnight_cost: 0 })).toEqual({ overnight_cost: 123400 })
   })
 })
