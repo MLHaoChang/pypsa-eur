@@ -54,10 +54,34 @@ def _number(value):
     return float(value)
 
 
-def read_kpis(profile: dict) -> list[dict]:
+def _record_kpi(kpi: dict, task: dict | None) -> dict:
+    """Study harness 14 S-C (C9): a KPI kept in the run's own record (the
+    PPA price, `harness.run_ppa.read`), never from retained results: a
+    missing or malformed record is `not_evaluated`, a broken binding `stale`."""
+    from harness import run_ppa
+    from services.pypsa_service import PyPSAService
+
+    try:
+        ctx = PyPSAService.get_active_context()
+    except Exception:  # noqa: BLE001 -- no context: the read says the project is not open
+        ctx = None
+    got = run_ppa.read(task, ctx)
+    return {
+        "id": kpi["id"],
+        "label": kpi["label"],
+        "unit": got["unit"] or kpi["unit"],
+        "value": got["value"],
+        "source": f"run.{kpi['record']}",
+        "status": got["state"],
+        "reason": got["reason"],
+    }
+
+
+def read_kpis(profile: dict, task: dict | None = None) -> list[dict]:
     """Each profile KPI from its retained results section on the bound
     context: `{id, label, value, unit, source, status}`, `status` "read" or
-    why it is not (`not_current`, `unreadable`)."""
+    why it is not (`not_current`, `unreadable`). A KPI the profile keeps in
+    the run's record (`record`) is read from `task` only."""
     from services import retained_results
     from services.workflow_tools import solve_freshness
 
@@ -68,6 +92,9 @@ def read_kpis(profile: dict) -> list[dict]:
     sections: dict = {}
     rows = []
     for kpi in profile.get("kpis") or []:
+        if "record" in kpi:
+            rows.append(_record_kpi(kpi, task))
+            continue
         row = {
             "id": kpi["id"],
             "label": kpi["label"],
@@ -106,7 +133,7 @@ def kpis_read(task: dict, profile: dict) -> bool | None:
     stored = ((task.get("run") or {}).get("handoff") or {}).get("kpis")
     if not isinstance(stored, list) or not profile.get("kpis"):
         return None
-    fresh = read_kpis(profile)
+    fresh = read_kpis(profile, task)
     if any(r["status"] != "read" for r in fresh):
         return False
     by_id = {r.get("id"): r for r in stored if isinstance(r, dict)}
@@ -326,7 +353,7 @@ def run_step(path, ctx, step) -> str:
     )  # the task file's project (as `_advance_run` reads its template)
     report = run_report.report_step(task)
     handoff = {
-        "kpis": read_kpis(profile),
+        "kpis": read_kpis(profile, task),
         "coverage": coverage(task, profile, project_dir),
         "checks": checks(task["run"]),
         "revert": revert_preview(task["run"]),

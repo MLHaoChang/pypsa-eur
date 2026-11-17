@@ -110,3 +110,14 @@ GK B (58)'s S-B2b/c conditions stand (judge on kind plus witness; the battery go
 - 2: @1 byte-equal and startable, pinned; a run started on @1 resolves @1 at each later stage after @2 lands (tested).
 - 3: in `pick()`: ticked ⊆ the card's pickable ids; cases_digest re-checked against the current step; no duplicates; a second pick refuses; each its own killing test. The approval card names every picked case the digest binds, never a count; the re-freeze includes the pick.
 - P1–P7 otherwise stand.
+
+### GK B (61) S-C plan GO (Q-SC1 = A), conditions S1–S8
+Plan: a native runner step `ppa_price` (reads only, 0 solves) after the run's own `run_investment_case` step reads the PPA price from the report that step stored; no model tool call, `solve_ppa_price` is never listed. New profile `eh_ipp_hybrid@3`.
+- S1: read the IC report the run's own case step recorded (its job and `started_at`), never the project's latest; a newer human case between the steps reads stale (tested).
+- S2: a status allow-list: only `ok` with no `solve_ppa_*` flag and a finite positive price counts; every other status `solve_ppa` emits, a search-floor price, a clamped year or several IRRs read not_evaluated (a test each).
+- S3: zero solves: the step reserves and charges nothing and starts no LP; solves_used + probe_solves unchanged, with a spy on the solve entry points (tested).
+- S4: `run.ppa_price` binds run id, case id, assumptions_hash, network revision, fingerprint, target, contract, source path, price, currency, money year, status; each part has its own red case; the run id check is tested with the activity bindings cleared (#1123).
+- S5: the card shows the target IRR value and unit (post-tax equity, %), year, contract and source path in plain words; no `finance.solve_ppa` or a non-finite target or result reads not_evaluated with its reason, never a default.
+- S6: `read_kpis` gets the record source; one normaliser: malformed reads not_evaluated, mismatches stale, never a 500 and never retained_results; an edit after the step reads stale (tested).
+- S7: @1 and @2 stay byte-equal and startable; a run started on @2 resolves @2 at every later stage after @3 lands (tested).
+- S8: a new error kind goes in a `tool-error-kinds.d/` fragment; `test_tool_error_kind_manifest` and `test_harness_run_monitor` at the trial merge.

@@ -65,6 +65,11 @@ SITE_KIND = "site_context"
 # it runs only on its card's digest.
 SHIPPED = "shipped_cases"
 SHIPPED_KIND = "shipped_cases"
+# Study harness 14 S-C (GK B (61) Q-SC1 = A): the PPA price for the template's
+# target return, read from the report the run's own investment-case step
+# stored (`harness/run_ppa.py`). It solves nothing and writes only the run.
+PPA_PRICE = "ppa_price"
+PPA_KIND = "ppa_price"
 # The registry: each action's stage, whether it only reads, and its record
 # kind. Closed: a profile naming anything else is refused at load (D7).
 REGISTRY = {
@@ -74,6 +79,7 @@ REGISTRY = {
     # Reads only: it writes the run's own record, never the project (GK B (49) Q2).
     SITE_FETCH: {"stage": "inputs", "reads_only": True, "kind": SITE_KIND},
     SHIPPED: {"stage": "explore", "reads_only": False, "kind": SHIPPED_KIND},
+    PPA_PRICE: {"stage": STAGE, "reads_only": True, "kind": PPA_KIND},
 }
 FROZEN = {
     "frozen": DC_KIND
@@ -84,6 +90,7 @@ MARKERS = {
     MG_KIND: {"frozen": MG_KIND},
     SITE_KIND: {"frozen": SITE_KIND},
     SHIPPED_KIND: {"frozen": SHIPPED_KIND},
+    PPA_KIND: {"frozen": PPA_KIND},
 }
 JOB_KIND = "dc_campus"
 EVENT = "dc_campus"  # the envelope ledger row of the campus run's reservation
@@ -384,6 +391,13 @@ KINDS = {
         "prefix": "shipped_",
         "valid": lambda frozen: _shipped("valid")(frozen),
     },
+    PPA_KIND: {
+        "core": lambda frozen: _ppa("core")(frozen),
+        "card": lambda frozen: _ppa("card")(frozen),
+        "event": "ppa_price",  # no reservation: the read solves nothing
+        "prefix": "ppa_",
+        "valid": lambda frozen: _ppa("valid")(frozen),
+    },
 }
 
 
@@ -399,6 +413,13 @@ def _shipped(name):
     from harness import run_shipped_engine
 
     return getattr(run_shipped_engine, name)
+
+
+def _ppa(name):
+    """`harness.run_ppa`'s `name` (imported late, as `_site`)."""
+    from harness import run_ppa
+
+    return getattr(run_ppa, name)
 
 
 def stage_of(step) -> str:
@@ -879,6 +900,8 @@ def stage_frozen(task, kind=DC_KIND, path=None) -> dict:
         return _site("freeze")(task)
     if kind == SHIPPED_KIND:
         return _shipped("freeze")(task, path)
+    if kind == PPA_KIND:
+        return _ppa("freeze")(task)
     if kind not in MARKERS:
         return {
             "unfrozen": {
@@ -1094,6 +1117,18 @@ def _dispatch(path, ctx, step_id, attempt, approved=None, instance=None):
         )
     if kind == MG_KIND:
         return _mg_dispatch(path, step, task, frozen, attempt, ctx, instance)
+    if kind == PPA_KIND:
+        try:
+            return _ppa("dispatch")(path, step, frozen, attempt, instance, ctx)
+        except Exception as exc:  # noqa: BLE001 — a programming error stops for the user
+            logger.exception("the PPA price read failed for run %s", path.stem)
+            return _stop(
+                path,
+                step["id"],
+                "ppa_start_failed",
+                type(exc).__name__,
+                held=(attempt, instance),
+            )
     if kind == SITE_KIND:
         try:
             return _site("dispatch")(path, step, frozen, attempt, instance)

@@ -63,6 +63,10 @@ ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
 # single-owner investment case values the solved dispatch. It is admitted like
 # a run but never counts as a solve, so it never spends the solves budget.
 CASE_TOOLS = frozenset({"run_investment_case"})
+# Study harness 14 S-C (GK B (56) C8): the PPA price is the runner's native read
+# of the run's own case (`harness/run_ppa.py`); no call is ever its step, so a
+# model turn never solves one under the grant (#1123).
+PPA_TOOLS = frozenset({"solve_ppa_price"})
 # Study harness 07 (GK B B1-b): a grant that lists the run's report covers only
 # the stage-7 card (`cross`); the runner starts that job itself, so a chat
 # `generate_report` is never admitted on it, and it never counts as a solve.
@@ -1464,6 +1468,8 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         # the owner the case will be built for (`InvestmentCaseRequest.owner`), as the route reads it
         if _case_solves_baseline(ctx, args.get("owner") if isinstance(args, dict) else None):
             return "baseline_solve"
+    if tool in PPA_TOOLS:
+        return "own_step_only"
     if _deletes(tool, edit_card):
         return "delete"
     if tier == "destructive" and tool not in PLANNED_TOOLS:

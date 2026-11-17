@@ -439,7 +439,9 @@ def test_c3_handoff_kpis_read_fails_closed(monkeypatch):
     }
     monkeypatch.setattr(run_gates, "_on", lambda ctx, fn, *args: fn(*args))
     monkeypatch.setattr(
-        run_handoff, "read_kpis", lambda profile: [dict(r) for r in reads["rows"]]
+        run_handoff,
+        "read_kpis",
+        lambda profile, task=None: [dict(r) for r in reads["rows"]],
     )
     task = {"run": {"profile": "eh_site@1"}, "steps": []}
     assert (
@@ -458,7 +460,7 @@ def test_c3_handoff_kpis_read_fails_closed(monkeypatch):
     reads["rows"][1] = {"id": "emissions", "value": None, "status": "unreadable"}
     assert verdict("handoff.kpis_read", task, ctx=Ctx())["verdict"] == "fail"
 
-    def boom(profile):
+    def boom(profile, task=None):
         raise RuntimeError("reader down")
 
     monkeypatch.setattr(run_handoff, "read_kpis", boom)

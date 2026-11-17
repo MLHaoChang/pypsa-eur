@@ -327,6 +327,15 @@ def load(profile: dict) -> dict:
         stage = stages["explore"]
         if "skip" in stage or "agent" not in stage or EXPLORE_RULES[0]["id"] not in {r["id"] for r in stage["rules"]}:
             raise ProfileError("Stage explore: an exploring profile names its proposal turn and ex.cases.settled.")
+    # Study harness 14 S-C: the PPA price reads the case the step before it ran,
+    # and a KPI kept in the run's record needs the step that writes it.
+    solve_tools = [a["tool"] for a in stages["solve"].get("actions", [])]
+    if run_actions.PPA_PRICE in solve_tools and "run_investment_case" not in solve_tools[
+            :solve_tools.index(run_actions.PPA_PRICE)]:
+        raise ProfileError("Stage solve: ppa_price runs after the run's own run_investment_case step.")
+    for kpi in profile.get("kpis") or []:
+        if "record" in kpi and RECORD_KPIS.get(kpi["record"]) not in solve_tools:
+            raise ProfileError(f"KPI {kpi.get('id')}: its record is written by no step of the profile.")
     loaded = {**copy.deepcopy(profile), "stages": stages}
     if "explore" in profile:
         loaded["explore"] = explore
@@ -988,6 +997,29 @@ def _eh_ipp_hybrid_v2() -> dict:
 
 EH_IPP_HYBRID_V2 = _eh_ipp_hybrid_v2()
 
+# Study harness 14 S-C (GK B (61) Q-SC1 = A, S1-S8): eh_ipp_hybrid@3. After the
+# run's own investment case, the native `ppa_price` step reads the PPA price
+# that case solved for the template's target return (`harness/run_ppa.py`);
+# it solves nothing, so the budget stays @2's. The hand-off reads it back from
+# the run's record (`record`), never from retained results. @1 and @2 stay
+# byte-equal for the runs started on them (L8).
+PPA_KPI = {"id": "ppa_price", "label": "PPA price for the target return", "record": "ppa_price",
+           "unit": "currency/MWh"}
+RECORD_KPIS = {"ppa_price": run_actions.PPA_PRICE}  # a record KPI and the step that writes it
+
+
+def _eh_ipp_hybrid_v3() -> dict:
+    profile = copy.deepcopy(EH_IPP_HYBRID_V2)
+    profile["version"] = 3
+    profile["stages"]["solve"]["actions"].append(
+        {"tool": run_actions.PPA_PRICE, "args": dict(run_actions.MARKERS[run_actions.PPA_KIND]),
+         "native": run_actions.KIND})
+    profile["kpis"].append(copy.deepcopy(PPA_KPI))
+    return profile
+
+
+EH_IPP_HYBRID_V3 = _eh_ipp_hybrid_v3()
+
 # Study harness 12c (design §9.3 "eh_microgrid"; GK B (47) G1-G9): eh_microgrid@1
 # and eh_microgrid_staged@1. The solve, the EH study with the off-grid stress
 # (`dtc_stress`, one solve per islanding contingency) and the island check of
@@ -1142,6 +1174,7 @@ PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
                               "eh_ammonia_staged@1": EH_AMMONIA_STAGED,
                               "eh_ipp_hybrid@1": EH_IPP_HYBRID, "eh_ipp_hybrid@2": EH_IPP_HYBRID_V2,
+                              "eh_ipp_hybrid@3": EH_IPP_HYBRID_V3,
                               "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED}
 
 
