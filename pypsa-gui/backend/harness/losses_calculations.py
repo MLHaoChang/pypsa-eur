@@ -20,6 +20,7 @@ PROFILE = "branch-losses/1"
 NETWORK_PROFILE = "network-losses/1"
 PROFILES = (PROFILE, NETWORK_PROFILE)
 MAX_BRANCHES = 64
+MAX_LOADS = 64  # the share of demand reads every Load (lost_load bounds them alike)
 BRANCH_CLASSES = ("Line", "Transformer")
 # LP loss variables are bounded below by 0. A value this close below 0 is
 # solver noise and reads as 0 (disclosed); anything further below is invalid.
@@ -30,10 +31,10 @@ REFUSALS = frozenset(
         "ac_pf_present",
         "network_scope_required",
         "unsupported_branch_population",
+        "unsupported_load_population",
         "ambiguous_branch",
         "unknown_branch",
         "misaligned_source",
-        "reversed_window",
     }
 )
 METRICS = {
@@ -110,10 +111,15 @@ def source(ctx, entity, network, component_class=None):
         raise ValueError("ac_pf_present")
     if network != (entity == "network") and not component_class:
         raise ValueError("network_scope_required")
+    shadowed = []
     if network:
         names = {c: list(n.components[c].static.index) for c in BRANCH_CLASSES}
         if sum(len(v) for v in names.values()) > MAX_BRANCHES:
             raise ValueError("unsupported_branch_population")
+        if len(n.loads) > MAX_LOADS:
+            raise ValueError("unsupported_load_population")
+        # A branch literally named "network" is checkable only by naming its class.
+        shadowed = [c for c, members in names.items() if "network" in map(str, members)]
     else:
         classes = (component_class,) if component_class else BRANCH_CLASSES
         names = {c: [entity] for c in classes if entity in n.components[c].static.index}
@@ -140,6 +146,7 @@ def source(ctx, entity, network, component_class=None):
         "energy_weight": [_number(v) for v in weights],
         "branches": branches,
         "loads": loads,
+        "shadowed_branch_classes": shadowed,
         "valid_solve": common.lp_outputs_live(ctx),
     }
 
@@ -235,12 +242,19 @@ def notes(raw, scope):
         f"{classes.count('Line')} Lines and {classes.count('Transformer')} Transformers; "
         "Links are not branches here."
     ]
-    rounded = sum(
+    for component_class in raw.get("shadowed_branch_classes", []):
+        lines.append(
+            f"A {component_class} named network exists; name its class to check that branch."
+        )
+    # Only an answered value can have read a value as 0 (the same condition as calculate).
+    answered = raw["valid_solve"] and all(
+        _state(entry, a, b) == "complete" for entry in raw["branches"].values()
+    )
+    rounded = answered and sum(
         1
         for entry in raw["branches"].values()
-        if entry["values"] is not None
         for v in entry["values"][a : b + 1]
-        if v is not None and -NEGATIVE_TOLERANCE <= v < 0
+        if -NEGATIVE_TOLERANCE <= v < 0
     )
     if rounded:
         lines.append(

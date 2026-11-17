@@ -101,12 +101,11 @@ def validate(value):
             raise ValueError("component_class_required")
         if scope.get("cost_basis") or scope.get("comparison_evidence_id"):
             raise ValueError("unsupported_result_cost_scope")
-    if (scope["profile"] == "network-loading/1") != (scope["entity_id"] == "network") and (
-        scope["profile"] in ("branch-loading/1", "network-loading/1")
-    ) and not scope.get("component_class"):
-        raise ValueError("network_scope_required")
-    if (scope["profile"] == "network-losses/1") != (scope["entity_id"] == "network") and (
-        scope["profile"] in ("branch-losses/1", "network-losses/1")
+    # Branch/network profile pairs: the network profile takes exactly entity "network".
+    paired = {"branch-loading/1": False, "network-loading/1": True,
+              "branch-losses/1": False, "network-losses/1": True}
+    if scope["profile"] in paired and paired[scope["profile"]] != (
+        scope["entity_id"] == "network"
     ) and not scope.get("component_class"):
         raise ValueError("network_scope_required")
     return scope

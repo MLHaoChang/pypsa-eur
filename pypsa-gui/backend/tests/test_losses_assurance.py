@@ -471,3 +471,33 @@ def test_notes_count_only_values_just_below_zero():
     for line in [(0.0, 0.0, 0.0), (np.nan, 0.0, 1.0)]:
         _, raw, scope = _run(_net(line=line))
         assert len(lc.notes(raw, scope)) == 1
+
+
+# ── mp-code-review: load bound, shadowed name, rounding note ────────────────
+
+
+def test_exactly_the_load_bound_is_allowed_and_one_more_is_refused():
+    n = _net()
+    n.add("Load", [f"l{i}" for i in range(lc.MAX_LOADS - 1)], bus="b")
+    n.loads_t.p = pd.DataFrame(1.0, index=SNAPS, columns=n.loads.index)
+    assert len(_run(n)[1]["loads"]) == lc.MAX_LOADS
+    n.add("Load", "one_more", bus="b")
+    with pytest.raises(ValueError, match="^unsupported_load_population$"):
+        _run(n)
+    assert "unsupported_load_population" in lc.REFUSALS
+
+
+def test_a_branch_named_network_is_named_in_the_network_notes():
+    n = _net()
+    n.add("Transformer", "network", bus0="a", bus1="b", x=0.1, s_nom=5)
+    n.transformers_t.loss = pd.DataFrame({"network": [0.0] * 3}, index=SNAPS)
+    _, raw, scope = _run(n)
+    assert lc.notes(raw, scope)[1] == (
+        "A Transformer named network exists; name its class to check that branch."
+    )
+
+
+def test_no_rounding_note_when_no_value_was_answered():
+    tol = lc.NEGATIVE_TOLERANCE
+    _, raw, scope = _run(_net(line=(-tol, 2.0, 3.0), trafo=(np.nan, 0.0, 0.0)))
+    assert len(lc.notes(raw, scope)) == 1
