@@ -11,7 +11,7 @@ import json
 from typing import Any
 
 
-def sse_frame(event: str, data: dict[str, Any]) -> bytes:
+def sse_frame(event: str, data: dict[str, Any], *, event_id: str | None = None) -> bytes:
     """
     Render one SSE frame in the `event:`/`data:`/blank-line convention.
 
@@ -24,4 +24,7 @@ def sse_frame(event: str, data: dict[str, Any]) -> bytes:
     bug-by-omission elsewhere in the pipeline can't take the chat panel down.
     """
     payload = json.dumps(data, ensure_ascii=False, default=str)
-    return f"event: {event}\ndata: {payload}\n\n".encode()
+    # live-voice 11c: only the /progress stream passes an id (``<epoch>:<seq>``),
+    # so a client can resume with Last-Event-ID; turn frames carry none.
+    head = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{head}event: {event}\ndata: {payload}\n\n".encode()
