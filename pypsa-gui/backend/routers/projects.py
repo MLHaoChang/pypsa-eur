@@ -1435,9 +1435,13 @@ async def import_bundle(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
     session: SessionRow | None = Depends(current_session),
+    dry_run: bool = False,
 ):
     """
     Restore a project from a .pypsaproj.zip bundle.
+
+    ``dry_run=true`` runs every check a real import runs and answers what it
+    would create, writing nothing (project-io 02, GK B I8).
 
     Writes the bundle to ``projects/{name}/`` (defaulting to the bundle's
     metadata name or the uploaded filename) and loads it into the live network.
@@ -1475,8 +1479,13 @@ async def import_bundle(
     except zipfile.BadZipFile as exc:
         raise HTTPException(400, f"Not a valid zip bundle: {exc}") from exc
 
+    from services import bundle_manifest
+
     try:
         allowed, ignored = PC.screen_members(zf)
+        # The manifest (project-io 02, GK B I7): a damaged or newer bundle is
+        # refused here, before anything is unpacked; no manifest is a warning.
+        warnings = bundle_manifest.check(zf)
     except PC.BundleRefused as exc:
         raise HTTPException(400, exc.detail) from exc
     members = set(allowed)
@@ -1545,6 +1554,12 @@ async def import_bundle(
 
         refuse_invalid_names(invalid_names_in_netcdf(staged_nc))
 
+        if dry_run:
+            return _import_dry_run(
+                db, user, staging, target_name, project_kind, members,
+                ignored=ignored, stripped=stripped_fields, rederived=rederived,
+                rate_source=rate_source, warnings=warnings)
+
         # Carry the bundle's scenario labels onto the ROW, not just onto the
         # files: `_project_info_db` serves the DB row. The parent link is
         # deliberately NOT restored: a bundle is a single project, and its
@@ -1564,7 +1579,7 @@ async def import_bundle(
             return _open_imported_bundle(
                 db, session, _imported_project, dest, file.filename,
                 candidate=candidate, rederived=rederived, rate_source=rate_source,
-                stripped_fields=stripped_fields, ignored=ignored)
+                stripped_fields=stripped_fields, ignored=ignored, warnings=warnings)
         except BaseException:
             _discard_import(db, _imported_project, dest)
             raise
@@ -1572,10 +1587,53 @@ async def import_bundle(
         _force_rmtree(staging)
 
 
+def _carries_user_code(cfg_data: dict) -> bool:
+    """True when a bundle's solver settings carry `extra_functionality_code`,
+    which every import strips (see `_open_imported_bundle`)."""
+    return bool(str(cfg_data.get("extra_functionality_code") or "").strip())
+
+
+def _import_dry_run(db: DBSession, user, staging: pathlib.Path, target_name: str,
+                    project_kind: str | None, members: set[str], *, ignored: list[str],
+                    stripped: list[str], rederived: list[str], rate_source: str,
+                    warnings: list[str]) -> dict:
+    """What `import_bundle` would create from the checked, staged bundle.
+
+    Reads only: no row, no project folder; the caller removes `staging`.
+    The fields are the ones the real import reports; `would_conflict` is the
+    409 the real import would answer for a name already taken.
+    """
+    from services import project_registry
+
+    stripped = list(stripped)
+    cfg_path = staging / "solver_config.json"
+    if cfg_path.is_file():
+        try:
+            cfg_data = json.loads(cfg_path.read_text())
+        except ValueError:
+            cfg_data = {}
+        if isinstance(cfg_data, dict) and _carries_user_code(cfg_data):
+            stripped.append("extra_functionality_code")
+    clash = project_registry.find_project(db, user, target_name, name_only=True)
+    return {
+        "dry_run": True,
+        "name": target_name,
+        "project_kind": project_kind,
+        "members": sorted(members),
+        "would_conflict": clash is not None,
+        "stripped": stripped,
+        "ignored": list(ignored),
+        "rederived": list(rederived),
+        "rederived_at_default_rate": bool(rederived) and rate_source == "default",
+        "warnings": list(warnings),
+    }
+
+
 def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_project,
                           dest: pathlib.Path, filename: str | None, *,
                           candidate, rederived: list[str], rate_source: str,
-                          stripped_fields: list[str], ignored: list[str]) -> dict:
+                          stripped_fields: list[str], ignored: list[str],
+                          warnings: list[str]) -> dict:
     """The import's swap and hydration, once its files are in `dest`. Any
     failure here is undone by the caller (`_discard_import`)."""
     from services import project_registry
@@ -1640,7 +1698,7 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
         # is already extracted by this point, and refusing here would leave a
         # half-imported project. The response names the field so this is never
         # a silent difference between what was uploaded and what was imported.
-        if str(cfg_data.get("extra_functionality_code") or "").strip():
+        if _carries_user_code(cfg_data):
             cfg_data.pop("extra_functionality_code", None)
             stripped_fields.append("extra_functionality_code")
             cfg_path.write_text(json.dumps(cfg_data, indent=2))
@@ -1743,6 +1801,8 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
         **({"stripped": stripped_fields} if stripped_fields else {}),
         # Archive members no table entry names: reported, never written (GK B I2).
         **({"ignored": ignored} if ignored else {}),
+        # An old bundle with no manifest, so nothing was checked for damage (project-io 02).
+        **({"warnings": warnings} if warnings else {}),
         # Likewise each reliability-goal value the bundle carried that PUT
         # would refuse: imported as "not set" (W3b-R), named here.
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
@@ -5369,7 +5429,9 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
     change_log_service.log(
         "export", "Project", name, f"Downloaded project bundle '{name}.pypsaproj.zip'",
     )
-    return buf.getvalue()
+    from services import bundle_manifest
+
+    return bundle_manifest.add_to(buf.getvalue(), project_kind=project_kind)
 
 
 @router.get("/{name}/bundle")

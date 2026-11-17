@@ -219,6 +219,11 @@ def allows_member(member: str) -> bool:
     return member != top and top in names(BUNDLE, kind=DIR)
 
 
+#: A bundle's own record of its members (issue 02). Only `bundle_manifest`
+#: writes and reads it; it is never unpacked into a project.
+MANIFEST = "manifest.json"
+
+
 # ── Safe bundle staging (issue 01, GK B I2) ──────────────────────────────────
 
 #: The most a bundle may unpack to. The upload itself is capped by
@@ -252,7 +257,7 @@ def screen_members(
     symlink, two members that are one file on a case-folding file system
     (case, trailing dot or space), and members that unpack to more than
     `MAX_UNPACKED_BYTES`. Ignored (reported, never written): a member the
-    table does not list. Directory entries are neither.
+    table does not list. Directory entries and `MANIFEST` are neither.
     """
     cap = MAX_UNPACKED_BYTES if max_unpacked is None else max_unpacked
     allowed, ignored, seen, total = [], [], {}, 0
@@ -299,5 +304,6 @@ def screen_members(
                     "message": f"The bundle unpacks to more than {cap // 1024**2} MB. Nothing was imported.",
                 }
             )
-        (allowed if allows_member(name) else ignored).append(name)
+        if name != MANIFEST:
+            (allowed if allows_member(name) else ignored).append(name)
     return allowed, ignored

@@ -67,6 +67,7 @@ import static_gate
 from db import session as db_session_module
 from deps import bind_active_project, resolve_request_session, resolve_request_user
 from services import active_project
+from services.app_version import APP_VERSION
 from services import fs_permission
 from services import shutdown as shutdown_service
 from routers import (
@@ -723,7 +724,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PyPSA Studio API",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
     # Runs before every endpoint on every router: binds the caller's session to
     # its active project so the ~110 routes that name no project resolve
