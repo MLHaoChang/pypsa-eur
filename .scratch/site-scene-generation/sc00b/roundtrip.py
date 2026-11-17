@@ -18,7 +18,14 @@ bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=src, import_scene_extras=True)
 objs = [o for o in bpy.data.objects]
 for o in objs:
-    print("OBJ", o.name, "feature_id=", o.get("feature_id"), "loc=", tuple(round(v, 6) for v in o.location))
+    print(
+        "OBJ",
+        o.name,
+        "feature_id=",
+        o.get("feature_id"),
+        "loc=",
+        tuple(round(v, 6) for v in o.location),
+    )
 bpy.ops.export_scene.gltf(
     filepath=out_glb, export_format="GLB", export_extras=True, export_yup=True
 )
@@ -26,5 +33,7 @@ bpy.ops.wm.save_as_mainfile(filepath=out_blend, compress=False)
 print("DONE", len(objs), "objects")
 ru = resource.getrusage(resource.RUSAGE_SELF)
 # Linux reports ru_maxrss in KiB. Covers the whole Blender process so far.
-print(f"METRICS script_wall_s={time.monotonic() - t0:.3f} cpu_user_s={ru.ru_utime:.3f} "
-      f"cpu_sys_s={ru.ru_stime:.3f} peak_rss_kib={ru.ru_maxrss}")
+print(
+    f"METRICS script_wall_s={time.monotonic() - t0:.3f} cpu_user_s={ru.ru_utime:.3f} "
+    f"cpu_sys_s={ru.ru_stime:.3f} peak_rss_kib={ru.ru_maxrss}"
+)
