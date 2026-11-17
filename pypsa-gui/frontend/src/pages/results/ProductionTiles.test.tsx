@@ -76,6 +76,8 @@ describe('ProductionTiles', () => {
     const tile = screen.getByTestId('production-nh3-bought-in')
     expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('60.0 t')
     expect(tile.textContent).toContain('€\u00a056\u00a0m at the buy-in price')
+    expect(screen.getByTestId('production-nh3-sum').textContent)
+      .toBe('Delivered counts what fell short (Lost) too: the shortfall is supplied to the product at its price.')
   })
 
   it('shows a real zero bought in, and hides the tile only when the bus has no buy-in', () => {
@@ -84,6 +86,7 @@ describe('ProductionTiles', () => {
     cleanup()
     render(<ProductionTiles view={view([{ ...NH3, buy_in: amount(0, { eur: 0, carriers: [] }) }])} />)
     expect(screen.queryByTestId('production-nh3-bought-in')).toBeNull()
+    expect(screen.queryByTestId('production-nh3-sum')).toBeNull()
   })
 })
 

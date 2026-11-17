@@ -114,6 +114,13 @@ export default function ProductionTiles({ view }: { view: ProcessView | null | u
                 state={t.state} reason={t.fixBus ? undefined : t.reason} basis={t.basis} />
             ))}
           </div>
+          {productionTiles(p).some(t => t.id === 'bought-in') && (
+            // The shortfall is supplied to the bus too, so Lost is part of Delivered, not a loss beside it
+            // (control-strategy 10, UX review).
+            <p data-testid={`production-${p.bus}-sum`} className="text-[11px] text-muted">
+              Delivered counts what fell short (Lost) too: the shortfall is supplied to the product at its price.
+            </p>
+          )}
           {productionTiles(p).some(t => t.fixBus) && (
             <p data-testid={`production-${p.bus}-fix`} className="flex flex-wrap items-center gap-x-2 text-[11.5px] text-muted">
               {REASON.tonne_factor_missing}
