@@ -161,12 +161,14 @@ def solve_matches_inputs(ctx, after_pf=False):
     if flowed and (state.get("ac_pf_network_revision") != int(getattr(ctx, "network_revision", 0) or 0)
                    or state.get("condition") != "lopf+ac_pf_ok"):
         return False
+    from services.run_grid_pf import AC_PF_FAILED
+
     condition = state.get("condition")
     # A flow that failed restores the LP's result frames (`ac_pf_service.run_ac_pf_stage`), so
     # with `after_pf` the LP stays current and the failure is judged by the PF rules alone
     # (GK B SH-15 (1)); no other suffix is accepted.
     lp_only = condition == "optimal" or (
-        after_pf and isinstance(condition, str) and condition.startswith("optimal; ac_pf_failed: "))
+        after_pf and isinstance(condition, str) and condition.startswith(AC_PF_FAILED))
     return (
         (flowed or state.get("lopf_results") is None)
         and state.get("status") == "completed"

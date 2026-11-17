@@ -163,7 +163,8 @@ def lp_condition(condition):
     Any other suffix is unknown: it is not optimal (fail closed)."""
     if condition == AC_PF_OK:
         return "optimal"
-    if isinstance(condition, str) and condition.startswith("optimal; ac_pf_failed: "):
+    from services.run_grid_pf import AC_PF_FAILED
+    if isinstance(condition, str) and condition.startswith(AC_PF_FAILED):
         return "optimal"
     return condition
 

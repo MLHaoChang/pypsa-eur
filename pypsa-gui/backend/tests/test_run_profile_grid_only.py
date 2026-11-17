@@ -36,6 +36,8 @@ def test_one_profile_serves_the_four_grid_templates_with_no_params_or_levers():
     assert p["params"]["required"] == [] and p["params"]["ask"] == []
     assert p["tunable"] == [] and p["envelope"]["edits"] == [] and "eh_study" not in p
     assert "skip" in p["stages"]["explore"]
+    # GK B SH-15 A1: no KPI and no hand-off rule reads the PF-overwritten frames (issue 50).
+    assert p["kpis"] == [] and p["stages"]["handoff"]["rules"] == []
 
 
 def test_setup_switches_load_flow_on_with_the_one_setting_the_grant_admits():
@@ -274,6 +276,40 @@ def test_without_an_ac_pf_result_the_pf_rules_are_not_evaluated_whatever_the_lop
     ctx = _ctx(n, pf=False)
     out = direct(rule, ctx)
     assert out["verdict"] == "not_evaluated" and "AC power-flow" in out["reason"]
+
+
+def test_a_failed_flow_fails_convergence_and_leaves_the_other_pf_rules_unevaluated_with_its_reason(
+    direct,
+):
+    """GK B SH-15 (1): a flow that raised fails `grid.pf.converged` (never pass, missing or
+    not evaluated); loading and voltage read not evaluated with the failure's words; N-1 is
+    the LP's own and stays judged."""
+    n = _net(rating=100.0, vband=(0.95, 1.05))
+    n.lines_t.p0["l1"] = [1.0, 1.0]  # LOPF-like live flows within rating
+    cfg = {"sclopf": True, "sclopf_include_all_lines": True}
+    ctx = _ctx(
+        n,
+        pf=False,
+        condition="optimal; ac_pf_failed: singular Jacobian",
+        solver_config=cfg,
+    )
+    assert direct("grid.pf.converged", ctx)["verdict"] == "fail"
+    for rule in ("grid.pf.loading", "grid.pf.voltage"):
+        out = direct(rule, ctx)
+        assert out["verdict"] == "not_evaluated", (rule, out)
+        assert (
+            out["facts"][0]["value"] == "ac_pf_failed"
+            and "singular Jacobian" in out["reason"]
+        ), out
+    assert direct("grid.n1.secured", ctx)["verdict"] == "pass"
+
+
+@pytest.mark.parametrize(
+    "condition", ["optimal; ac_pf_unknown: x", "infeasible; ac_pf_failed: x"]
+)
+def test_another_suffix_is_no_failed_flow(direct, condition):
+    out = direct("grid.pf.converged", _ctx(_net(), pf=False, condition=condition))
+    assert out["verdict"] == "not_evaluated" and out["facts"][0]["value"] == "no_ac_pf"
 
 
 def test_a_live_lopf_frame_never_stands_in_for_the_stored_pf_snapshot(direct):

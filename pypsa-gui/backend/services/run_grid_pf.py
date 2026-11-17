@@ -23,6 +23,9 @@ NO_PF = (
     "the run has no AC power-flow result: switch Load flow on and re-run "
     "(LOPF flows never stand in for it)",
 )
+# The solve job's condition when the LP was optimal and its AC power flow raised
+# (`solver_service`); `run_gates.lp_condition` reads it as optimal.
+AC_PF_FAILED = "optimal; ac_pf_failed: "
 BRANCHES = (
     ("Line", "lines", "lines_t"),
     ("Transformer", "transformers", "transformers_t"),
@@ -59,6 +62,14 @@ def read(ctx) -> Evidence | Missing:
     state, n = ctx.solver_state, ctx.network
     snap = state.get("ac_pf_results")
     if not isinstance(snap, dict) or not snap:
+        condition = state.get("condition")
+        if isinstance(condition, str) and condition.startswith(AC_PF_FAILED):
+            # The flow ran and failed (GK B SH-15 (1)): convergence fails on it, and
+            # every other PF reading is not evaluated with the failure's own words.
+            return Missing(
+                "ac_pf_failed",
+                f"the AC power flow failed: {condition[len(AC_PF_FAILED) :]}",
+            )
         return Missing(*NO_PF)
     if state.get("status") != "completed":
         return Missing(
@@ -91,7 +102,7 @@ def converged(ev) -> Any:
     """True when every snapshot converged; False on a reported failure; no
     evidence while any snapshot's convergence is unknown (AA-12)."""
     if isinstance(ev, Missing):
-        return ev
+        return False if ev.code == "ac_pf_failed" else ev
     if ev.failed:
         return False
     if ev.unknown:
@@ -221,9 +232,11 @@ def n1(ctx) -> Any:
     state = ctx.solver_state
     if not _cfg(state, "sclopf", False):
         return Missing("n1_off", "the solver's N-1 security option is off")
-    if state.get("status") != "completed" or state.get("condition") not in (
-        "optimal",
-        "lopf+ac_pf_ok",
+    condition = state.get("condition")
+    # N-1 is the LP's own property: a failed flow after it leaves it judged (GK B SH-15 (1)).
+    if state.get("status") != "completed" or not (
+        condition in ("optimal", "lopf+ac_pf_ok")
+        or (isinstance(condition, str) and condition.startswith(AC_PF_FAILED))
     ):
         return Missing(
             "n1_no_solve", "the security-constrained solve did not finish optimal"

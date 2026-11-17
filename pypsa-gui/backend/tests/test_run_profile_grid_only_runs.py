@@ -94,6 +94,8 @@ def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
     }
     assert run["stages"]["explore"]["status"] == "skipped" and script.requests == []
     assert run["stages"]["handoff"]["gate"]["passed"] is True
+    # GK B SH-15 A1: no LP figure is read back after the flow rewrote the live dispatch (issue 50).
+    assert run["handoff"]["kpis"] == []
 
 
 def test_a_seeded_overload_fails_the_loading_rule_and_the_run_asks_the_user_with_no_edit(
