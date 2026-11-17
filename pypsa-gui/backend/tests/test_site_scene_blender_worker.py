@@ -592,12 +592,16 @@ def test_the_cli_process_group_is_killed_on_every_path(make, monkeypatch):
     ready = _ready(env)
     killed = []
     real = bw._killpg
-    monkeypatch.setattr(bw, "_killpg", lambda pid, grace: (killed.append(pid), real(pid, grace)))
+    monkeypatch.setattr(
+        bw, "_killpg", lambda pid, grace: (killed.append(pid), real(pid, grace))
+    )
     bw.run(ready, b"g", None, FAST, env)
     assert len(killed) == 1, "the CLI's group is killed after a clean run too"
 
 
-def test_neither_the_version_check_nor_a_run_leaves_a_temp_file(make, monkeypatch, tmp_path):
+def test_neither_the_version_check_nor_a_run_leaves_a_temp_file(
+    make, monkeypatch, tmp_path
+):
     import tempfile
 
     scratch = tmp_path / "scratch"
@@ -610,7 +614,9 @@ def test_neither_the_version_check_nor_a_run_leaves_a_temp_file(make, monkeypatc
     assert list(scratch.iterdir()) == [], "a run leaves no work dir or log"
 
 
-def test_an_output_over_the_cap_by_its_size_is_refused_before_any_read(tmp_path, monkeypatch):
+def test_an_output_over_the_cap_by_its_size_is_refused_before_any_read(
+    tmp_path, monkeypatch
+):
     (tmp_path / "out.glb").write_bytes(b"x" * 2000)
     reads = []
     real = os.read
