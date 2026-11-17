@@ -188,6 +188,8 @@ def _mapped_files(built: dict, journeys: dict = JOURNEYS) -> list[str]:
     files = {'pypsa-gui/backend/smoke/family_manifest.py', 'pypsa-gui/backend/smoke/release_evidence.py',
              '.github/workflows/test.yaml'}
     files |= {t.split('::')[0] for v in built['variants'] for t in v.get('tests', [])}
+    # The manifest's JSON rows and fragments (RETRO-FRAG-1) are evidence inputs too.
+    files |= {str(p.relative_to(ROOT)) for p in [fm.MANIFEST_FILE, *fm.fragment_files(fm.MANIFEST_FILE)]}
     for entry in [j for js in journeys.values() for j in js] + CROSS_FAMILY:
         files |= {n.split('::')[0] for n in entry.get('nodes', [])}
         files |= {entry['script']} if entry.get('script') else set()
