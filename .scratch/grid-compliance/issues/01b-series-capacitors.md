@@ -3,7 +3,7 @@
 
 # GC-01b Series capacitors in the campus description
 
-Status: ready-for-agent
+Status: done (#1656)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (follows GC-01)
