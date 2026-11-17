@@ -455,5 +455,7 @@ def test_the_effective_process_uc_mode_decides_lp_or_mip(process_uc, other, kind
 
 def test_a_linearised_solve_with_a_modular_asset_is_still_a_mip():
     n = _process()
-    n.add("Generator", "m", bus="a", p_nom_extendable=True, p_nom_mod=5.0, p_nom_max=20.0)
+    n.add(
+        "Generator", "m", bus="a", p_nom_extendable=True, p_nom_mod=5.0, p_nom_max=20.0
+    )
     assert sv.is_mip(n, _cfg(process_uc="linearised")) is True

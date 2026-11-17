@@ -68,7 +68,9 @@ def test_a_stale_mip_solve_still_reads_unverified(priced, checked):
 # ── GK B 65 B1: the checked chart never draws a MIP's 0.0 as a price ─────────
 
 
-@pytest.mark.parametrize("limit", ["mip_duals_not_marginal", "unsupported_stochastic_run"])
+@pytest.mark.parametrize(
+    "limit", ["mip_duals_not_marginal", "unsupported_stochastic_run"]
+)
 def test_a_bus_price_chart_with_a_solve_limit_is_not_drawn(limit, monkeypatch):
     from types import SimpleNamespace
 

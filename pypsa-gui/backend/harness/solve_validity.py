@@ -27,7 +27,11 @@ from types import SimpleNamespace
 from numbers import Real
 
 from services.solver.assumptions import _MIP_KEYS_BY_SOLVER, _resolve_mip_kwargs
-from services.solver.process_uc import committable_counts, other_committable, planning_uc_mode
+from services.solver.process_uc import (
+    committable_counts,
+    other_committable,
+    planning_uc_mode,
+)
 
 # A relative gap at or below this reads as optimal (GK B G2c).
 SOLVE_GAP_TOLERANCE = 1e-6
