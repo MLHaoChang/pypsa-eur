@@ -447,3 +447,136 @@ def test_a_statcom_missing_its_rating_is_a_gap():
     ]
     _, g = workbook(without(build_campus(s), "STC1", "q_mvar"))
     assert ("STC1", "q_mvar") in gaps_of(g, "converters")
+
+
+# --- GK A2 asks on 6c81fec1 -----------------------------------------------------
+
+#: Fields whose name carries no unit suffix, with their unit, listed by hand.
+UNSUFFIXED_UNITS = {
+    "xd_pp": "pu",
+    "k_gfm_min": "pu",
+    "k_sc": "pu",
+    "xd_sat": "pu",
+    "pf": "-",
+    "pf_rated": "-",
+    "rx_sc": "-",
+    "cos_phi": "-",
+    "cos_phi_r": "-",
+    "emt_model": "-",
+    "vector_group": "-",
+    "saturation_curve": "pu flux vs pu current",
+    "cable_geometry": "-",
+    "steps": "-",
+    "curve": "-",
+}
+
+
+@pytest.mark.parametrize("field, unit", sorted(UNSUFFIXED_UNITS.items()))
+def test_an_unsuffixed_field_has_its_hand_listed_unit(field, unit):
+    assert PARAM_UNITS[field] == unit
+    assert header(field) == f"{field} [{unit}]"
+
+
+def test_every_field_without_a_unit_suffix_is_hand_listed():
+    unsuffixed = {
+        f for f in PARAM_UNITS if not any(f.endswith(s) for s, _ in SUFFIX_UNITS)
+    }
+    assert unsuffixed == set(UNSUFFIXED_UNITS)
+
+
+#: Every required field the test campus holds, by sheet, listed by hand.
+REQUIRED_HELD = [
+    ("plant_units", "BESS1", "p_mw"),
+    ("plant_units", "BESS1", "e_mwh"),
+    ("plant_units", "BESS1", "s_mva"),
+    ("plant_units", "PV1", "p_mw"),
+    ("plant_units", "PV1", "s_mva"),
+    ("plant_units", "GEN1", "p_mw"),
+    ("plant_units", "GEN1", "s_mva"),
+    ("plant_units", "DC_LOAD", "p_mw"),
+    ("plant_units", "DC_LOAD", "pf"),
+    ("gensets", "GEN1", "s_mva"),
+    ("gensets", "GEN1", "xd_pp"),
+    ("gensets", "GEN1", "rx_sc"),
+    ("converters", "BESS1", "s_mva"),
+    ("converters", "PV1", "s_mva"),
+    *(
+        ("transformers", "TR1", f)
+        for f in (
+            "sn_mva",
+            "vn_hv_kv",
+            "vn_lv_kv",
+            "vk_percent",
+            "vkr_percent",
+            "pfe_kw",
+            "i0_percent",
+        )
+    ),
+    *(
+        ("cables", "CB1", f)
+        for f in (
+            "length_km",
+            "r_ohm_per_km",
+            "x_ohm_per_km",
+            "c_nf_per_km",
+            "max_i_ka",
+        )
+    ),
+]
+
+
+@pytest.mark.parametrize("sheet, element, param", REQUIRED_HELD)
+def test_each_required_field_once_missing_is_a_gap_with_an_empty_cell(
+    sheet, element, param
+):
+    frames, g = workbook(without(build_campus(campus_spec()), element, param))
+    assert (element, param) in gaps_of(g, sheet)
+    row = frames[sheet].set_index("element").loc[element]
+    assert pd.isna(row[header(param)])
+
+
+def test_every_pack_csv_has_lf_line_endings(tmp_path):
+    p = write_emt_pack(tmp_path, build_campus(campus_spec()))
+    csvs = sorted(p.path.glob("*.csv"))
+    assert {f"{s}.csv" for s in SHEET_FIELDS} <= {c.name for c in csvs}
+    for c in csvs:
+        data = c.read_bytes()
+        assert b"\n" in data and b"\r" not in data, c.name
+
+
+def test_a_stale_emt_pack_is_cleared_on_each_export(tmp_path):
+    rows = island_rows()
+    b = CB.export_campus_bundle(tmp_path, build_campus(island_spec()), rows, "h18")
+    stale = b.path / "emt" / "stale.csv"
+    stale.write_text("old\n")
+    CB.export_campus_bundle(tmp_path, build_campus(island_spec()), rows, "h18")
+    assert (b.path / "emt" / "manifest.json").exists()
+    assert not stale.exists()
+    s = island_spec()
+    s["campus"]["pcc"]["rx_min"] = t(0.0)
+    CB.export_campus_bundle(tmp_path, build_campus(s), rows, "h18")
+    assert not (b.path / "emt").exists()
+
+
+def test_a_workbook_contract_refusal_is_recorded_not_raised(tmp_path, monkeypatch):
+    monkeypatch.delitem(PARAM_UNITS, "pfe_kw")
+    b = CB.export_campus_bundle(
+        tmp_path, build_campus(island_spec()), island_rows(), "h18"
+    )
+    m = json.loads((b.path / "manifest.json").read_text())
+    assert "'pfe_kw' has no unit" in m["emt_pack"]["not_written"]
+    assert (b.path / f"{b.path.name}.raw").exists()
+    assert not (b.path / "emt").exists()
+
+
+def test_a_non_contract_error_in_the_pack_propagates(tmp_path, monkeypatch):
+    from gridspine.handoff import emt_pack
+
+    def boom(*a, **k):
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(emt_pack, "write_emt_pack", boom)
+    with pytest.raises(RuntimeError, match="bug"):
+        CB.export_campus_bundle(
+            tmp_path, build_campus(island_spec()), island_rows(), "h18"
+        )

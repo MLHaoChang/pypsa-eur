@@ -577,15 +577,16 @@ def bundle_emt_pack(bundle_dir, campus, rows) -> dict:
     The stage is the bundle's hour: the units with ``status == 1`` in
     ``rows``. Returns ``{"manifest": "emt/manifest.json", "data_hash": ...}``,
     or ``{"not_written": <reason>}`` when the campus data refuses the pack
-    (e.g. R/X = 0 at the PCC), so the PSS/E bundle is still written and the
-    refusal is recorded, not dropped.
+    (any :class:`ContractError`, e.g. R/X = 0 at the PCC or a workbook field
+    with no unit), so the PSS/E bundle is still written and the refusal is
+    recorded, not dropped. Any other exception propagates.
     """
     installed = set(rows.loc[rows["status"] == 1, "unit_id"])
     target = Path(bundle_dir) / BUNDLE_DIR
     shutil.rmtree(target, ignore_errors=True)  # no stale pack from an earlier export
     try:
         p = write_emt_pack(target, campus, stages={"hour": installed})
-    except EmtPackError as e:
+    except ContractError as e:  # EmtPackError and the workbook's refusals
         return {"not_written": str(e)}
     return {
         "manifest": f"{BUNDLE_DIR}/{MANIFEST}",
