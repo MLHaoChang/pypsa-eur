@@ -263,13 +263,19 @@ def build_network(case: RawCase):
         nm = f"Switched shunt {bname[r['I']]} {sid}"
         g, b = shunt_siemens(kv[r["I"]], 0.0, r["BINIT"])
         shunts.append((nm, r["I"], g, b, live(r["I"], r["STAT"]), "switched"))
+        reg = abs(r.get("SWREG", r.get("SWREM", 0)) or 0)
+        remote = (
+            f"; the file has it regulate remote bus {reg}"
+            if reg not in (0, r["I"])
+            else ""
+        )
         assumed.append(
             Assumed(
                 nm,
                 "susceptance setting",
                 float(r["BINIT"]),
                 "held at its initial setting BINIT (Mvar at 1.0 pu); "
-                "voltage-controlled switching is not modelled",
+                "voltage-controlled switching is not modelled" + remote,
             )
         )
 
@@ -379,10 +385,20 @@ def build_network(case: RawCase):
                     model="pi",
                     r=r["R"] * s_nom / sb,
                     x=r["X"] * s_nom / sb,
-                    b=r["B"] * s_nom / sb,
+                    b=r["B"] * sb / s_nom,
                     tap_ratio=1.0,
                     active=on,
                 )
+                if rate <= 0:
+                    assumed.append(
+                        Assumed(
+                            nm,
+                            "thermal rating (MVA)",
+                            sb,
+                            "no rating in the file; the system base SBASE is used as the "
+                            "transformer base, so set a real rating",
+                        )
+                    )
                 assumed.append(
                     Assumed(
                         nm,
@@ -461,6 +477,19 @@ def build_network(case: RawCase):
             n3 += 1
         else:
             n2 += 1
+        for k in range(1, 4 if three else 2):
+            cod = r.get(f"COD{k}", 0)
+            if cod > 0:  # a negative code is control switched off in the file
+                angle = abs(cod) == 3
+                assumed.append(
+                    Assumed(
+                        label,
+                        f"winding {k} {'phase angle (deg)' if angle else 'tap ratio'}",
+                        float(r[f"ANG{k}"] if angle else r[f"WINDV{k}"]),
+                        f"automatic control (COD{k} = {cod}) is not modelled; held at "
+                        "the file's setting",
+                    )
+                )
         for w in windings:
             nm = label if not three else f"{label} winding {w['winding']}"
             to = bname[w["to"]] if w["to"] is not None else star

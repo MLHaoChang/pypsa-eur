@@ -503,14 +503,12 @@ _PENDING = {
 
 
 @pytest.mark.parametrize("tap_side", ["hv", "lv"])
-def test_off_nominal_transformer_round_trip(tmp_path, tap_side):
+def test_off_nominal_transformer_round_trip(tmp_path, tap_side, monkeypatch):
     """
     A transformer whose LV rating differs from its bus kV (21 kV on a 20 kV bus), tapped
     on either side, against pandapower's own branch model (``_ppc``, Z at the to-bus base).
     """
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent))
+    monkeypatch.syspath_prepend(str(Path(__file__).parent))
     from test_raw_v35 import _trafo_net
 
     net = _trafo_net(tap_side)
@@ -767,8 +765,74 @@ def test_different_kv_branch_rating_and_charging(tmp_path):
     ).network
     tr = n.transformers
     assert list(tr["s_nom"]) == [100.0, 50.0]  # no rating: SBASE
+    # impedance re-bases with s_nom / SBASE, admittance with SBASE / s_nom
     assert list(tr["r"]) == pytest.approx([0.01, 0.005])
-    assert list(tr["b"]) == pytest.approx([0.02, 0.01])
+    assert list(tr["b"]) == pytest.approx([0.02, 0.04])
+    # on PyPSA's 1 MVA base the charging is B * SBASE, as a line's would be
+    n.calculate_dependent_values()
+    assert list(n.transformers["b_pu"]) == pytest.approx([2.0, 2.0])
+
+
+def test_unrated_one_to_one_transformer_assumed(tmp_path):
+    res = _case(
+        tmp_path,
+        BUS=_BUSES + ["3,'C', 20.0,1"],
+        GENERATOR=[_SWING],
+        BRANCH=[_LINE, "2,3,'1',0.01,0.1,0.0,0.0", "2,3,'2',0.01,0.1,0.0,50.0"],
+    )
+    assert _assumed(res.report, "thermal rating (MVA)") == ["Line B - C 1"]
+    (row,) = [a for a in res.report.assumed if a.parameter == "thermal rating (MVA)"]
+    assert row.value == 100.0
+
+
+def test_switched_shunt_regulating_a_remote_bus_says_so(tmp_path):
+    res = _case(
+        tmp_path,
+        BUS=_BUSES,
+        GENERATOR=[_SWING],
+        BRANCH=[_LINE],
+        SWITCHED_SHUNT=[
+            "2,1,0,1,1.05,0.95,1,100.0,'',12.0,2,6.0",
+            "2,1,0,1,1.05,0.95,2,100.0,'',6.0,1,6.0",
+        ],
+    )
+    rows = {
+        a.asset: a for a in res.report.assumed if a.parameter == "susceptance setting"
+    }
+    assert len(rows) == 2  # still one row per shunt
+    remote, local = sorted(rows.values(), key=lambda a: a.value)[::-1]
+    assert "regulate remote bus 1" in remote.why
+    assert "remote" not in local.why
+
+
+@pytest.mark.parametrize(
+    "cod, parameter, value",
+    [
+        (1, "winding 1 tap ratio", 1.05),
+        (3, "winding 1 phase angle (deg)", 30.0),
+        (-1, None, None),
+    ],
+)
+def test_transformer_control_held_at_file_setting(tmp_path, cod, parameter, value):
+    res = _case(
+        tmp_path,
+        BUS=_BUSES + ["3,'C', 20.0,1"],
+        GENERATOR=[_SWING],
+        BRANCH=[_LINE],
+        TRANSFORMER=[
+            "2,3,0,'1',1,1,1,0.0,0.0,2,'T',1",
+            "0.01,0.1,100.0",
+            f"1.05,0.0,30.0,0.0,0.0,0.0,{cod},3,1.1,0.9",
+            "1.0,0.0",
+        ],
+    )
+    rows = [a for a in res.report.assumed if a.parameter.startswith("winding 1")]
+    if parameter is None:
+        assert rows == []
+    else:
+        (row,) = rows
+        assert (row.asset, row.parameter, row.value) == ("T", parameter, value)
+        assert f"COD1 = {cod}" in row.why
 
 
 def test_unrated_line_assumed(tmp_path):
