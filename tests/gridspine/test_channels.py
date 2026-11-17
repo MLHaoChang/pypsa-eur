@@ -309,3 +309,158 @@ def test_frame_refusals_and_helpers():
         f.resample([-0.1, 0.1])
     with pytest.raises(ValueError):
         f.channel("v")[0] = 5.0
+
+
+# --- one targeted test per guard (GK A2 B8) ---------------------------------------------------------------------
+
+
+def test_readers_take_str_paths(tmp_path):
+    assert "VA" in read_comtrade(str(_write(tmp_path)))
+    p = tmp_path / "a.csv"
+    p.write_text("time,V [pu]\n0,1\n1,1\n")
+    assert "V" in read_csv(str(p))
+    inf = _pscad(tmp_path, 2)
+    assert "ch2" in read_pscad(str(inf))
+    assert "ch2" in read_pscad(str(inf), outs=[str(tmp_path / "run_01.out")])
+
+
+def _cfg(**swap):
+    cfg = CFG_1999
+    for old, new in swap.values():
+        assert old in cfg
+        cfg = cfg.replace(old, new)
+    return cfg
+
+
+ANALOG_ONLY = """\
+ST,REC
+1,1A,0D
+1,V,,,kV,1,0,0,-32767,32767
+50
+1
+100,2
+01/01/2026
+01/01/2026
+{ft}
+"""
+
+
+def test_comtrade_without_digitals_short_lines_and_no_timemult(tmp_path):
+    # two-field station line (no revision), 10-field analog line, one-field start time, no timemult line
+    f = read_comtrade(_write(tmp_path, cfg=ANALOG_ONLY, dat="1,0,3\n2,10000,4\n"))
+    np.testing.assert_allclose(f.channel("V"), [3, 4])
+    np.testing.assert_allclose(f.time, [0.0, 0.01])
+    f = read_comtrade(
+        _write(
+            tmp_path,
+            cfg=ANALOG_ONLY + "\n",
+            ft="BINARY",
+            dat=struct.pack("<IIhIIh", 1, 0, 3, 2, 0, 4),
+        )
+    )
+    np.testing.assert_allclose(f.channel("V"), [3, 4])
+    digital_only = ANALOG_ONLY.replace(
+        "1,1A,0D\n1,V,,,kV,1,0,0,-32767,32767\n", "1,0A,1D\n1,TRIP\n"
+    )
+    f = read_comtrade(_write(tmp_path, cfg=digital_only, dat="1,0,1\n2,10000,0\n"))
+    np.testing.assert_array_equal(f.channel("TRIP"), [1, 0])
+
+
+def test_comtrade_nrates_zero_without_endsamp(tmp_path):
+    cfg = CFG_1999.replace("1\n1000,3\n", "0\n0\n")
+    f = read_comtrade(_write(tmp_path, cfg=cfg, dat="1,0,10,0,0\n2,500,12,-2,1\n"))
+    np.testing.assert_allclose(f.time, [0.0, 0.0005])
+
+
+def test_comtrade_zero_rate_falls_back_to_stamps(tmp_path):
+    cfg = CFG_1999.replace("1\n1000,3\n", "1\n0,3\n")
+    f = read_comtrade(
+        _write(tmp_path, cfg=cfg, dat="1,0,10,0,0\n2,300,12,-2,1\n3,700,-4,4,0\n")
+    )
+    np.testing.assert_allclose(f.time, [0.0, 0.0003, 0.0007])
+
+
+def test_comtrade_missing_stamp_needs_a_rate(tmp_path):
+    rows = b"".join(
+        struct.pack("<IIhhH", i + 1, ts, 10, 0, 0)
+        for i, ts in enumerate((0, 0xFFFFFFFF, 2000))
+    )
+    f = read_comtrade(
+        _write(tmp_path, ft="BINARY", dat=rows)
+    )  # rate given: the stamps are not needed
+    np.testing.assert_allclose(f.time, [0.0, 0.001, 0.002])
+    cfg = CFG_1999.replace("1\n1000,3\n", "0\n0,3\n")
+    with pytest.raises(
+        ContractError, match="no sampling rate and a missing time stamp at sample 2"
+    ):
+        read_comtrade(_write(tmp_path, cfg=cfg, ft="BINARY", dat=rows))
+    with pytest.raises(
+        ContractError, match="no sampling rate and a missing time stamp at sample 2"
+    ):
+        read_comtrade(
+            _write(tmp_path, cfg=cfg, dat="1,0,10,0,0\n2,,12,-2,1\n3,700,-4,4,0\n")
+        )
+
+
+@pytest.mark.parametrize(
+    "old,new,match",
+    [
+        ("3,2A,1D", "3,xA,1D", "TT,##A,##D"),
+        ("3,2A,1D", "3,-1A,4D", "-1 analog"),
+        ("3,2A,1D", "3,4A,-1D", "-1 digital"),
+        (
+            "1,VA,A,,V,0.5,-1,0,-32767,32767,10000,100,S",
+            "1,VA,A,,V,0.5,-1,0,-32767",
+            "analog channel 1 line has 9",
+        ),
+        ("1,TRIP,,,0", "1", "digital channel 1 line has no name"),
+        ("1000,3", "1000", "sample rate 1 must be 'samp,endsamp'"),
+        ("1\n1000,3\n", "2\n1000,2\n500,2\n", "endsamp past the previous one"),
+        ("1\n1000,3\n", "1\n-5,3\n", "rate from 0"),
+        ("1,VA,A,,V,0.5,", "1,VA,A,,V,nan,", "multiplier a is not finite"),
+        (",10000,100,S", ",0,100,S", "needs both above zero"),
+    ],
+)
+def test_comtrade_cfg_guards(tmp_path, old, new, match):
+    assert old in CFG_1999
+    with pytest.raises(ContractError, match=match):
+        read_comtrade(_write(tmp_path, cfg=CFG_1999.replace(old, new)))
+
+
+def test_comtrade_unreadable_cfg(tmp_path):
+    with pytest.raises(ContractError, match="cannot read"):
+        read_comtrade(tmp_path / "absent.cfg")
+
+
+def test_csv_unreadable_and_nameless(tmp_path):
+    p = tmp_path / "e.csv"
+    p.write_text("")
+    with pytest.raises(ContractError, match="not a readable CSV"):
+        read_csv(p)
+    with pytest.raises(ContractError, match="not a readable CSV"):
+        read_csv(tmp_path / "absent.csv")
+    p.write_text("time,[pu]\n0,1\n1,1\n")
+    with pytest.raises(ContractError, match="has no unit"):
+        read_csv(p)
+
+
+def test_pscad_guards(tmp_path):
+    inf = _pscad(tmp_path, 2)
+    (tmp_path / "run_01.out").write_text("0 a b\n")
+    with pytest.raises(ContractError, match="not a whitespace-separated numeric table"):
+        read_pscad(inf)
+    inf.write_text('PGB(1) Output Desc=" "\n')
+    with pytest.raises(ContractError, match="no Desc name"):
+        read_pscad(inf)
+
+
+def test_frame_shape_name_and_resample_edges():
+    with pytest.raises(ContractError, match="at least two time points"):
+        ChannelFrame([[0.0, 0.1], [0.2, 0.3]], {}, {})
+    with pytest.raises(ContractError, match="non-empty text"):
+        ChannelFrame([0.0, 0.1], {5: [1, 1]}, {5: "pu"})
+    f = ChannelFrame([0.0, 0.1, 0.2], {"v": [0.0, 1.0, 2.0]}, {"v": "pu"})
+    assert f.source == "channel frame"
+    np.testing.assert_allclose(
+        f.resample([0.0, 0.2]).channel("v"), [0.0, 2.0]
+    )  # the ends are inside

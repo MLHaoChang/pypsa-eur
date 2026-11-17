@@ -180,7 +180,7 @@ def test_missing_channel_is_unknown_never_pass():
     )
     assert len(rows) == 9
     assert all(r["status"] == "unknown" and r["value"] is None for r in rows)
-    assert "test has no channel 'V_emt'" in rows[0]["detail"]
+    assert "test (test) has no channel 'V_emt'" in rows[0]["detail"]
 
 
 def test_channel_mapping_and_units():
@@ -244,3 +244,56 @@ def test_no_shared_span_refused():
     later = _frame(V, time=T + 2.0, source="late")
     with pytest.raises(ContractError, match="share no time span"):
         benchmark(_frame(V), later, ["V"], EVENTS)
+
+
+# --- one targeted test per guard (GK A2 B8) ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dt", [float("nan"), float("inf"), -0.1, "0.1"])
+def test_dt_refusals(dt):
+    with pytest.raises(ContractError, match="dt must be a number above zero"):
+        common_grid(_frame(V), _frame(V), dt=dt)
+
+
+def test_two_sample_grid_and_touching_spans():
+    assert len(common_grid(_frame(V), _frame(V), dt=1.0)) == 2
+    touching = _frame(V, time=T + 1.0, source="late")
+    with pytest.raises(ContractError, match="share no time span"):
+        common_grid(_frame(V), touching)
+
+
+@pytest.mark.parametrize("channels", [{"V": 5}, {5: "V"}])
+def test_channel_names_must_be_text(channels):
+    with pytest.raises(ContractError, match="must be text"):
+        benchmark(_frame(V), _frame(V, source="test"), channels, EVENTS)
+
+
+def test_missing_reference_channel_is_unknown():
+    rows = benchmark(_frame(V, name="U"), _frame(V, source="test"), ["V"], EVENTS)
+    assert all(r["status"] == "unknown" for r in rows)
+    assert "ref (reference) has no channel 'V'" in rows[0]["detail"]
+    assert rows[0]["unit"] == "pu"
+
+
+@pytest.mark.parametrize("lim", ["0.1", None])
+def test_tolerance_must_be_a_number(lim):
+    with pytest.raises(ContractError, match="number from 0"):
+        benchmark(
+            _frame(V),
+            _frame(V, source="test"),
+            ["V"],
+            EVENTS,
+            tolerances={"V": {"me": lim}},
+        )
+
+
+def test_zero_tolerance_is_allowed():
+    rows = benchmark(
+        _frame(V), _frame(V, source="test"), ["V"], EVENTS, tolerances={"V": {"me": 0}}
+    )
+    assert all(r["status"] == "pass" for r in _rows(rows, "me").values())
+
+
+def test_events_as_a_numpy_array():
+    rows = benchmark(_frame(V), _frame(V, source="test"), ["V"], np.array([1]) * 0.5)
+    assert [r["window"] for r in rows if r["metric"] == "me"] == ["w0", "w1"]

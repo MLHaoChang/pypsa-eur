@@ -74,8 +74,8 @@ def common_grid(reference: ChannelFrame, test: ChannelFrame, dt=None) -> np.ndar
     t1 = min(reference.time[-1], test.time[-1])
     if not t1 > t0:
         raise ContractError(
-            f"{reference.source or 'reference'} ({reference.time[0]!r}..{reference.time[-1]!r} s) and "
-            f"{test.source or 'test'} ({test.time[0]!r}..{test.time[-1]!r} s) share no time span"
+            f"{reference.source} ({reference.time[0]!r}..{reference.time[-1]!r} s) and "
+            f"{test.source} ({test.time[0]!r}..{test.time[-1]!r} s) share no time span"
         )
     if dt is None:
         dt = max(_median_step(reference), _median_step(test))
@@ -185,7 +185,7 @@ def benchmark(
     ref_on_grid, test_on_grid = reference.resample(grid), test.resample(grid)
     events = [float(e) for e in events]
     for e in events:
-        if not math.isfinite(e) or not grid[0] < e < grid[-1]:
+        if not grid[0] < e < grid[-1]:  # NaN fails this too
             raise ContractError(
                 f"event time {e!r} s is not inside the shared span {grid[0]!r}..{grid[-1]!r} s"
             )
@@ -204,7 +204,7 @@ def benchmark(
     rows = []
     for ref_name, test_name in pairs:
         missing = [
-            f"{f.source or role} has no channel {n!r}"
+            f"{f.source} ({role}) has no channel {n!r}"
             for f, n, role in (
                 (reference, ref_name, "reference"),
                 (test, test_name, "test"),
