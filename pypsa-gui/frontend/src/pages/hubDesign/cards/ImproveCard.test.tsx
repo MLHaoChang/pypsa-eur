@@ -24,7 +24,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
     resultsApi: {
       ...actual.resultsApi,
       getEhStudy: vi.fn(), getEhReview: vi.fn(), getEhTemplate: vi.fn(),
-      getFmeaModes: vi.fn(),
+      getFmeaModes: vi.fn(), getEhLevers: vi.fn(), getEhReferenceDesign: vi.fn(),
     },
   }
 })
@@ -49,6 +49,8 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', report: REPORT })
   vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
+  vi.mocked(resultsApi.getEhLevers).mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
   sweep.mutate.mockReset()
   sweep.reset.mockReset()
   sweep.isSuccess = false
@@ -345,5 +347,44 @@ describe('ImproveCard while a risk check runs (A1-FE)', () => {
     })
     await waitFor(() => expect(doBtn.disabled).toBe(false))
     expect(screen.queryByTestId('hub-live-study-note')).toBeNull()
+  })
+})
+
+// WALK-IMPROVE-1: the Results card's cheaper battery duration, repeated as one
+// row without a link.
+describe('ImproveCard cheaper battery duration', () => {
+  const SENTENCE = 'A 24 h battery also meets the energy-not-served cap for € 3.1 m (design: 4 h, € 3.5 m)'
+  function withLevers(meets: boolean | null = true) {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', report: { ...REPORT,
+      sections: { ...REPORT.sections, sizing: { status: 'ok', payload: { assets: [
+        { component: 'StorageUnit', name: 'battery', carrier: 'battery', built_mw: 2, built_mwh: 8, max_hours: 4 },
+      ] } } } } })
+    const rv = review()
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue({ ...rv, findings: [...rv.findings,
+      { id: 'levers_best_option', severity: 'info', title: 'Cheapest lever option',
+        evidence: { kind: 'storage_duration', value: 24, cost_at_target_eur: 3_100_000, spread_eur: 400_000 },
+        recommendation: '', actions: [] }] })
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({ kind: 'storage_duration', options: [
+      { kind: 'storage_duration', value: 4, unit: 'h', status: 'ok', cost_at_target_eur: 3_500_000, meets_target: true },
+      { kind: 'storage_duration', value: 24, unit: 'h', status: 'ok', cost_at_target_eur: 3_100_000, meets_target: meets },
+    ] })
+  }
+
+  it('shows the sentence as one row, without a link', async () => {
+    withLevers()
+    mount()
+    const row = await screen.findByTestId('hub-improve-cheaper-duration')
+    expect(row.textContent?.replace(/\u00a0/g, ' ')).toBe(SENTENCE)
+    expect(row.querySelector('button, a')).toBeNull()
+    // an info finding: still not in the findings list
+    expect(screen.queryByTestId('hub-improve-levers_best_option')).toBeNull()
+  })
+
+  it('nothing when the levers table does not say the option meets the cap', async () => {
+    withLevers(false)
+    mount()
+    await screen.findByTestId('hub-improve-certification_fail')
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    expect(screen.queryByTestId('hub-improve-cheaper-duration')).toBeNull()
   })
 })

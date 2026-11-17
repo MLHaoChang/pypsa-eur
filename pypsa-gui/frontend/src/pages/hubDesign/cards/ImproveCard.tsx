@@ -21,7 +21,8 @@ import { evidenceValue, plainWords } from '../plainWords'
 import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
-import { useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
+import { useHubLevers, useHubReport, useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
+import { cheaperDuration, leversFinding } from '../cheaperDuration'
 
 export function openFmeaTab(): void {
   const ui = useUIStore.getState()
@@ -93,8 +94,13 @@ function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
 }
 
 export function ImproveCard() {
-  const { study } = useHubStudy()
+  const { study, running } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
+  // The Verdict's cheaper battery duration, repeated as a row; its link stays
+  // on the Results card (WALK-IMPROVE-1).
+  const report = useHubReport(study, running)
+  const levers = useHubLevers(!running && leversFinding(review?.findings) != null)
+  const cheaper = cheaperDuration(review?.findings, levers, report)
   const { template } = useHubTemplate()
   const { archetype } = useReliabilityGoal()
   const sweep = useStartFmeaSweep()
@@ -148,6 +154,12 @@ export function ImproveCard() {
         <ul data-testid="hub-improve-list" className="flex flex-col gap-2">
           {findings.map(f => <Finding key={f.id} f={f} liveStudy={liveStudy} />)}
         </ul>
+      )}
+      {cheaper && (
+        <p data-testid="hub-improve-cheaper-duration"
+          className="rounded border border-border p-3 text-[12px] text-text">
+          {cheaper}
+        </p>
       )}
 
       <div className="flex flex-col gap-2 border-t border-border/60 pt-3 text-[12px]">

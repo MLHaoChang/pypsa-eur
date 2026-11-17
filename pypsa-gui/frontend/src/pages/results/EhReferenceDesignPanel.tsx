@@ -935,6 +935,10 @@ export function ehStudyQueryKeys(project: string | null) {
   ]
 }
 
+/** The `resultsSectionRequest` that opens this panel and scrolls its levers
+ *  block (the design options) into view (request-then-scroll). */
+export const LEVERS_SECTION = 'eh_levers'
+
 export function EhReferenceDesignPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
@@ -1102,6 +1106,19 @@ export function EhReferenceDesignPanel() {
   }, [open, hasReport])
   const redTable = running ? null : (redundancy ?? null) as EhRedundancyTable | null
   const levTable = running ? null : (levers ?? null) as EhLeverTable | null
+  // Request-then-scroll: the hub-design Results card's "Design options ›"
+  // opens the collapsed panel and scrolls the levers block once it renders.
+  const sectionRequest = useUIStore(s => s.resultsSectionRequest)
+  const hasLevers = (levTable?.options?.length ?? 0) > 0
+  useEffect(() => {
+    if (sectionRequest === LEVERS_SECTION) setOpen(true)
+  }, [sectionRequest])
+  useEffect(() => {
+    if (sectionRequest !== LEVERS_SECTION || !open || !hasLevers) return
+    useUIStore.getState().clearResultsSectionRequest()
+    requestAnimationFrame(() => document.querySelector('[data-testid="eh-levers"]')
+      ?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
+  }, [sectionRequest, open, hasLevers])
   const dtcTable = running ? null : (dtcStress ?? null) as EhDtcStressTable | null
   const dtcPlanTable = running ? null
     : (dtcPlanning ?? null) as EhDtcPlanningTable | null
