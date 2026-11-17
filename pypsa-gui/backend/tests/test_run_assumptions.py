@@ -252,3 +252,82 @@ def test_the_report_lists_what_the_run_assumed():
     plain = collect_evidence(study_report=None, eh_report=None, worksheet=None,
                              template_ledger=meta)
     assert "run_rows" not in plain.sections[C.TEMPLATE_LEDGER].payload
+
+
+# ── GK B plan conditions (Q2, A1, A3, A5) ────────────────────────────────────
+
+def test_a_conversion_link_at_exactly_one_is_assumed_lossless():
+    n = _net()
+    n.add("Link", "ely_blank", bus0="ac", bus1="h2", p_nom=5)            # PyPSA's 1.0
+    n.add("Link", "tie", bus0="ac", bus1="ac", p_nom=5)                  # same carrier
+    n.add("Link", "__voll_x", bus0="ac", bus1="h2", p_nom=5)             # a slack
+    n.add("Link", "n1", bus0="ac", bus1="h2", p_nom=5)
+    n.links["eh_role"] = ""
+    n.links.loc["n1", "eh_role"] = "eh_n1_conversion"                    # study-internal
+    keys = _keys(run_assumptions(n, {}, None))
+    assert "efficiency:ely_blank" in keys
+    assert not keys & {"efficiency:tie", "efficiency:__voll_x", "efficiency:n1"}
+
+
+def test_a_gap_in_an_efficiency_series_is_assumed():
+    n = _net()
+    n.add("Link", "ely", bus0="ac", bus1="h2", p_nom=5,
+          efficiency=[0.7, np.nan, 0.7])
+    assert "efficiency:ely" in _keys(run_assumptions(n, {}, None))
+    n.links_t.efficiency.loc[1, "ely"] = 0.7
+    assert "efficiency:ely" not in _keys(run_assumptions(n, {}, None))
+
+
+def test_a_carrier_row_names_every_unit():
+    n = _net()
+    for k in range(7):
+        n.add("StorageUnit", f"b{k}", bus="ac", carrier="battery", p_nom=1)
+    row = _row(run_assumptions(n, {}, None), "outage_rate:StorageUnit:battery")
+    for name in ["bess", *(f"b{k}" for k in range(7))]:
+        assert name in row["label"] and name in row["entity"].split(", ")
+    assert "more" not in row["label"]
+
+
+def test_run_assumptions_is_a_pure_read(tmp_path):
+    import copy
+    from types import SimpleNamespace
+
+    from services.workflow_tools import _network_input_fingerprint
+
+    n = _net()
+    n.add("Link", "blank", bus0="ac", bus1="h2", p_nom=5)
+    from dataclasses import asdict
+
+    from services.solver_service import SolverConfig
+
+    cfg = SolverConfig()
+    before_cfg = copy.deepcopy(asdict(cfg))
+    ctx = SimpleNamespace(network=n, solver_state={"solver_config": cfg},
+                          user_ts={}, storage_dir=str(tmp_path))
+    before = _network_input_fingerprint(ctx)
+    run_assumptions(n, cfg, {"recommended_archetype": "off_grid"})
+    assert _network_input_fingerprint(ctx) == before
+    assert asdict(cfg) == before_cfg
+
+
+def test_an_acknowledged_assumption_returns_when_its_value_changes(
+        client, tmp_projects_dir, project_storage_dir):
+    r = client.post("/api/projects/from_template/eh_h2_hub", params={"name": "ack"})
+    name = r.json().get("name", "ack")
+
+    def site_item():
+        body = client.get(f"/api/projects/{name}/flow").json()
+        return next(i for s in body["sections"] for i in s["items"]
+                    if i["code"] == "assumed_run_site_archetype")
+
+    assert site_item()["acknowledged"] is False
+    r = client.post(f"/api/projects/{name}/flow/ack",
+                    json={"code": "assumed_run_site_archetype", "entity": None})
+    assert r.status_code == 200, r.text
+    assert site_item()["acknowledged"] is True
+    path = project_storage_dir(name) / "eh_template.json"
+    meta = json.loads(path.read_text())
+    meta["recommended_archetype"] = ("weak_flexible" if meta.get("recommended_archetype")
+                                     != "weak_flexible" else "strong_grid")
+    path.write_text(json.dumps(meta))
+    assert site_item()["acknowledged"] is False

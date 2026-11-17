@@ -11,12 +11,14 @@ arithmetic, and these rows describe exactly those fallbacks:
   any source but ``stored``;
 * per-carrier outage rate and repair time — ``occurrence.resolve_outage_params``
   (``carrier_default``, or an asset rate whose repair time is the carrier's);
-* link efficiency — a non-finite value, which ``eh_stages._series`` reads
-  as 1.0 (lossless).
+* link efficiency — a value ``eh_stages.link_attr_series`` falls back on
+  (``LINK_EFFICIENCY_DEFAULT``, lossless), and a conversion Link (its two
+  buses carry different carriers) at exactly 1.0: PyPSA fills a blank
+  efficiency with 1.0 on import, and lossless conversion is never measured.
+  Slack and study-internal Links are left out.
 """
 from __future__ import annotations
 
-import math
 from typing import Any
 
 GOAL_SECTION = "scenarios"
@@ -26,7 +28,6 @@ CARD = "reliability"
 _COMPONENTS = (("generators", "Generator", "units"),
                ("storage_units", "StorageUnit", "storage units"),
                ("links", "Link", "links"))
-_LISTED = 5
 
 
 def _row(key: str, label: str, value: Any, shown: str, source: str, reason: str,
@@ -74,11 +75,6 @@ def _carrier_label(n, carrier: str) -> str:
     return _plain(carrier) if carrier else "Unnamed carrier"
 
 
-def _names(names: list[str]) -> str:
-    more = f" and {len(names) - _LISTED} more" if len(names) > _LISTED else ""
-    return ", ".join(names[:_LISTED]) + more
-
-
 def _outage_rows(n) -> list[dict]:
     from services.adequacy.occurrence import CARRIER_DEFAULTS, _is_set, resolve_outage_params
 
@@ -106,7 +102,7 @@ def _outage_rows(n) -> list[dict]:
             if kind == "rate":
                 out.append(_row(
                     f"outage_rate:{component}:{carrier}",
-                    f"Outage rate of {what.lower()} {noun} ({_names(names)})",
+                    f"Outage rate of {what.lower()} {noun} ({", ".join(names)})",
                     d.rate,
                     f"{_number(d.rate * 100)} % {d.basis}, repair {_number(d.mttr_hours)} h",
                     "carrier_default", reason, ASSET_SECTION,
@@ -114,7 +110,7 @@ def _outage_rows(n) -> list[dict]:
             else:
                 out.append(_row(
                     f"mttr:{component}:{carrier}",
-                    f"Repair time of {what.lower()} {noun} ({_names(names)})",
+                    f"Repair time of {what.lower()} {noun} ({", ".join(names)})",
                     d.mttr_hours, f"{_number(d.mttr_hours)} h",
                     "carrier_default", reason, ASSET_SECTION,
                     component=component, entity=entity, field="mttr_hours"))
@@ -122,24 +118,30 @@ def _outage_rows(n) -> list[dict]:
 
 
 def _efficiency_rows(n) -> list[dict]:
+    from models.energy_hub import EH_INTERNAL_ROLES
+    from services.adequacy.eh_stages import LINK_EFFICIENCY_DEFAULT, link_attr_series
+    from services.adequacy.slack import is_slack_name
+
     links = getattr(n, "links", None)
-    if links is None or links.empty or "efficiency" not in links.columns:
+    if links is None or links.empty:
         return []
-    series = getattr(getattr(n, "links_t", None), "efficiency", None)
-    varying = set(getattr(series, "columns", []))
+    bus_carrier = n.buses["carrier"].astype(str) if "carrier" in n.buses.columns else None
     out: list[dict] = []
     for name in links.index:
-        if name in varying:
+        role = str(links.at[name, "eh_role"]) if "eh_role" in links.columns else ""
+        if is_slack_name(str(name)) or role in EH_INTERNAL_ROLES:
             continue
-        try:
-            v = float(links.at[name, "efficiency"])
-        except (TypeError, ValueError):
-            v = float("nan")
-        if math.isfinite(v):
+        _, fell_back = link_attr_series(n, name, "efficiency", LINK_EFFICIENCY_DEFAULT)
+        if fell_back:
+            reason = "no efficiency is set, so the study reads it as lossless"
+        elif (bus_carrier is not None and name not in n.links_t.efficiency.columns
+              and bus_carrier.get(links.at[name, "bus0"]) != bus_carrier.get(links.at[name, "bus1"])
+              and float(links.at[name, "efficiency"]) == LINK_EFFICIENCY_DEFAULT):
+            reason = "a conversion at exactly 100 % is the value a blank efficiency gets"
+        else:
             continue
         out.append(_row(f"efficiency:{name}", f"Conversion efficiency of {name}",
-                        1.0, "100 % (lossless)", "default",
-                        "no efficiency is set, so the study reads it as lossless",
+                        LINK_EFFICIENCY_DEFAULT, "100 % (lossless)", "default", reason,
                         ASSET_SECTION, component="Link", entity=str(name),
                         field="efficiency"))
     return out

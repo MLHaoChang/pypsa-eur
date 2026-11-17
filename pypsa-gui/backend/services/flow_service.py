@@ -1017,7 +1017,7 @@ def _apply_scope(items: list[dict], scope: dict, *, study_requested: bool) -> No
     (`_study_start_items(requested=…)`); `test_flow_scope` pins that no item
     with ``in_scope: false`` blocks."""
     for it in items:
-        if it["source"] in ("eh_study", "eh_readiness"):
+        if it["source"] in ("eh_study", "eh_readiness", "run_defaults"):
             it["card"] = "reliability"
             it["in_scope"] = study_requested
         elif it["code"] in _BIND_CARD:
@@ -1324,7 +1324,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             items += _readiness_items(r, voll_noted=voll_refused or any(
                 i["code"] == "presence_voll" for i in presence))
         items += _assumed_items(template, facts.cfg_dict)
-        items += _run_default_items(facts.run_defaults, template)
+        if not loads_not_needed:
+            items += _run_default_items(facts.run_defaults, template)
     items += _bind_items(facts, db, org_id, project_dir, n)
     # Load flow and N-1 security are on exactly when their solver settings are.
     scope = S.apply_settings(scope, facts.cfg_dict)

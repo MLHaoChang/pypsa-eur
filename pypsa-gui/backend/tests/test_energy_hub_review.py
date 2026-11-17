@@ -308,6 +308,10 @@ def test_the_study_record_stores_the_whole_request(client, install_network,
     monkeypatch.setattr("services.adequacy.eh_study.run_eh_study", fake_run)
     from tests.test_energy_hub_frontier_fmea import _feeder_hub
     install_network(_feeder_hub())
+    # The study start refuses a missing VOLL (template-e2e 06).
+    cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config",
+                      json={**cfg, "voll": 5000.0}).status_code == 200
     body = {"archetype": "weak_flexible", "mc": {"draws": 300, "seed": 3},
             "dsr_buses": ["hub"],
             "dtc_config": {"critical_bus_ids": ["hub"],

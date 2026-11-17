@@ -298,6 +298,11 @@ def _connection_defaults(flow: dict) -> tuple[dict, list[dict]]:
     return conn, [i for i in conn["items"] if i["code"].startswith("assumed_")]
 
 
+def _run_defaults(flow: dict) -> int:
+    return sum(1 for s in flow["sections"] for i in s["items"]
+               if i["source"] == "run_defaults" and i["in_scope"])
+
+
 def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_projects_dir):
     """Section 3 is "not needed" off-grid: its four assumed rows stay listed (the
     audit trail) but are out of scope and counted nowhere; nothing else moves."""
@@ -310,7 +315,9 @@ def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_project
     assert [i["in_scope"] for i in defaults] == [False] * 4
     assert not any(i["blocking"] for i in defaults)
     by_id = {s["section"]: s for s in flow["sections"]}
-    assert by_id["readiness"]["summary"] == "0 to do, 14 to check"
+    # 14 as before, plus the study's three assumed run inputs (template-e2e 08).
+    assert _run_defaults(flow) == 3
+    assert by_id["readiness"]["summary"] == "0 to do, 17 to check"
     # The assumed rows of the sections the project does need are still asked for.
     assert all(i["in_scope"] for s in ("assets", "commercial", "scenarios")
                for i in by_id[s]["items"] if i["code"].startswith("assumed_"))
@@ -329,7 +336,9 @@ def test_the_staged_microgrid_keeps_its_feeder_losses_counted(client, tmp_projec
                      "subsea_tie": False}
     assert len(defaults) == 5
     readiness = next(s for s in flow["sections"] if s["section"] == "readiness")
-    assert readiness["summary"] == "0 to do, 11 to check"
+    # 11 as before, plus the study's three assumed run inputs (template-e2e 08).
+    assert _run_defaults(flow) == 3
+    assert readiness["summary"] == "0 to do, 14 to check"
 
 
 def test_a_section_the_scope_leaves_out_says_so(client, tmp_projects_dir, monkeypatch):
