@@ -481,3 +481,91 @@ def test_the_real_save_cleans_a_dirty_base_and_the_case_forks(
     assert not dirty_state.is_dirty(resident)
     assert _cases(path)["low_price"]["status"] == "running"
     assert len(queue) == 1
+
+
+# ── GK B (61): the cap under the lease; only the card's own rows ──────────────
+
+
+def test_a_solve_drop_at_lock_entry_refuses_the_pick(baseline, tmp_path, monkeypatch):
+    from harness import runner
+
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    before = _read(path)
+    real = runner._update
+
+    def drop_then_update(p, change):
+        # Another solve is spent just as the pick takes the lock.
+        monkeypatch.setattr(E, "cap", lambda profile, path, task: 1)
+        return real(p, change)
+
+    monkeypatch.setattr(runner, "_update", drop_then_update)
+    kind = _kind(lambda: _pick(path, ["low_price", "cannibalised"]))
+    assert kind == "shipped_cases_over_budget"
+    assert _read(path) == before
+
+
+def test_a_pick_within_the_dropped_cap_still_lands(baseline, tmp_path, monkeypatch):
+    from harness import runner
+
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    real = runner._update
+
+    def drop_then_update(p, change):
+        monkeypatch.setattr(E, "cap", lambda profile, path, task: 1)
+        return real(p, change)
+
+    monkeypatch.setattr(runner, "_update", drop_then_update)
+    _pick(path, ["low_price"])
+    assert _read(path)["run"]["explore"]["shipped_pick"] == ["low_price"]
+
+
+def test_a_tick_for_a_case_not_on_the_card_refuses(baseline, tmp_path):
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    task = _read(path)
+    shown = task["steps"][0]["unfrozen"]["pick"]
+    row = next(c for c in shown["cases"] if c["id"] == "cheap_battery")
+    row.update(status="not_run", why="shown as not runnable")  # the card the user saw
+    path.write_text(json.dumps(task))
+    before = _read(path)
+    assert _kind(lambda: _pick(path, ["cheap_battery"])) == "shipped_case_not_runnable"
+    assert _read(path) == before
+
+
+def test_the_approval_card_names_every_picked_case_never_a_count(baseline, tmp_path):
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    _pick(path, ["low_price", "cheap_battery"])
+    step = _step(path)
+    notes = {r["field"]: r["note"] for r in run_actions.approval_card(step)["rows"]}
+    for case in step["frozen"]["cases"]:
+        if case["id"] in step["frozen"]["run"]:
+            assert case["label"] in notes[f"case.{case['id']}"]
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda t: t["steps"][0].update(status="running"),  # the step already started
+        lambda t: t["steps"][0].update(tool=run_actions.CAMPUS),  # not a shipped step
+        lambda t: t["run"]["explore"].update(shipped_pick=["low_price"]),  # picked
+    ],
+    ids=["not_pending", "other_kind", "already_picked"],
+)
+def test_a_step_that_no_longer_awaits_its_pick_is_closed(baseline, tmp_path, tamper):
+    # Each conjunct of `awaiting` has a case where only it fails (mutants 11a/b/d).
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    card = run_actions.pick_card(_step(path))
+    task = _read(path)
+    tamper(task)
+    path.write_text(json.dumps(task))
+    before = _read(path)
+
+    def pick():
+        return E.pick(path, "explore.1", ["low_price"], card["digest"], INSTANCE)
+
+    assert _kind(pick) == "shipped_pick_closed"
+    assert _read(path) == before

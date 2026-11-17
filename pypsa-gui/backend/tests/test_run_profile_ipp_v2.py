@@ -122,3 +122,13 @@ def test_shipped_cases_with_an_explore_block_but_no_turn_refuse():
     profile["explore"] = {"levers": [lever]}
     with pytest.raises(R.ProfileError, match="proposal turn"):
         R.load(profile)
+
+
+def test_a_run_started_on_v1_resolves_v1_at_every_later_stage():
+    # GK B (61) 2: @2 landing changes nothing a run on @1 reads.
+    for _stage in ("solve", "result_gate", "explore", "report", "handoff"):
+        profile = R.resolve(V1)
+        assert profile["version"] == 1 and "skip" in profile["stages"]["explore"]
+        assert _sha(R.PROFILES[V1]) == V1_SHA
+    task = {"run": {"profile": V1}}
+    assert run_explore._profile(task)["version"] == 1

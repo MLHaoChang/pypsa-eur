@@ -232,7 +232,7 @@ def pick(path, step_id, ticked, digest, instance) -> str:
     import copy
     import json
 
-    from harness import runner
+    from harness import run_explore, runner
     from services import run_actions
 
     path = Path(path)
@@ -256,6 +256,28 @@ def pick(path, step_id, ticked, digest, instance) -> str:
             "shipped_pick_closed", "This step no longer waits on that pick."
         )
     shown = next(s for s in task["steps"] if s["id"] == step_id)["unfrozen"]["pick"]
+    pickable = [
+        c["id"]
+        for c in shown["cases"]
+        if c["status"] == "admissible" and c["kind"] == run_shipped.LP
+    ]
+    if isinstance(ticked, list) and any(
+        t not in pickable for t in ticked if isinstance(t, str)
+    ):
+        # GK B (61) 3: only the card's own rows; the kind says which way it is not one.
+        run_shipped.choose(
+            {
+                **shown,
+                "admissible": [
+                    c["id"] for c in shown["cases"] if c["status"] == "admissible"
+                ],
+            },
+            shown["cap"],
+            ticked,
+        )
+        raise run_shipped.ShippedError(
+            "shipped_pick_unknown", "Pick only the cases on the card."
+        )
     trial = copy.deepcopy(task)
     trial["run"].setdefault("explore", {})["shipped_pick"] = ticked
     frozen = freeze(trial, path)
@@ -269,10 +291,18 @@ def pick(path, step_id, ticked, digest, instance) -> str:
             f"{run_shipped.CASES_FILE}, a series it names or the solves left changed "
             "after the pick card was shown.",
         )
-    done = {}
+    done, out = {}, {}
+
+    profile = run_explore._profile(task)
+    solving = sum(1 for i in frozen["run"] if i in pickable)
 
     def change(t):
         if not awaiting(t):
+            return False
+        # GK B (61) 1: the solves left re-read under the lease; a drop since
+        # the card refuses the pick.
+        if solving > cap(profile, path, t):
+            out["refused"] = True
             return False
         step = next(s for s in t["steps"] if s["id"] == step_id)
         t["run"].setdefault("explore", {})["shipped_pick"] = list(ticked)
@@ -282,6 +312,11 @@ def pick(path, step_id, ticked, digest, instance) -> str:
         done["ok"] = True
 
     runner._update(path, change)
+    if out.get("refused"):
+        raise run_shipped.ShippedError(
+            "shipped_cases_over_budget",
+            "The run has fewer solves left than when the pick card was shown.",
+        )
     if not done:
         raise run_shipped.ShippedError(
             "shipped_pick_closed", "This step no longer waits on that pick."
