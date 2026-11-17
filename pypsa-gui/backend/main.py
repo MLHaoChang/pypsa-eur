@@ -86,6 +86,7 @@ from routers import (
     compare,
     gridspine,
     campus_electrical,
+    grid_compliance,
     geocode,
     guides,
     io,
@@ -1531,6 +1532,9 @@ app.include_router(gridspine.router, prefix="/api/gridspine", tags=["gridspine"]
 # The campus electrical study of a hub project (gridspine campus engine, plan
 # C6): its own prefix, like gridspine's, for the same reason.
 app.include_router(campus_electrical.router, prefix="/api/campus-electrical", tags=["campus-electrical"])
+# The grid-compliance workflow (GC-09): TRGC deliverable tracker, data list,
+# TSO revision log and report pack.
+app.include_router(grid_compliance.router, prefix="/api/grid-compliance", tags=["grid-compliance"])
 # Chatbot file uploads (Phase A) — per-project file storage at
 # `projects/<name>/uploads/`. Mounted under the same /api/projects prefix
 # so its routes (`/{name}/uploads`, `/{name}/uploads/{file_id}/...`) follow

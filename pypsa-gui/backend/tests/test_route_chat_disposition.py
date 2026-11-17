@@ -205,6 +205,20 @@ UI_INTERNAL: dict[str, dict] = {
             ('PUT', '/api/network/timeseries/{component}/{attribute}'),
         }),
     },
+    'grid_compliance_workflow': {
+        "reason": ('GC-09 compliance workflow: the TRGC tracker, data list, TSO revision log and '
+                   'report pack are worked in the Grid compliance section; GC-09 ships no '
+                   'assistant tool, so chat does not serve these yet.'),
+        "routes": frozenset({
+            ('GET', '/api/grid-compliance/{name}'),
+            ('PUT', '/api/grid-compliance/{name}/deliverables/{code}/status'),
+            ('PUT', '/api/grid-compliance/{name}/deliverables/{code}/data'),
+            ('POST', '/api/grid-compliance/{name}/deliverables/{code}/freeze'),
+            ('POST', '/api/grid-compliance/{name}/deliverables/{code}/comments'),
+            ('PATCH', '/api/grid-compliance/{name}/deliverables/{code}/comments/{comment_id}'),
+            ('POST', '/api/grid-compliance/{name}/deliverables/{code}/pack'),
+        }),
+    },
 }
 
 # Each gap names its existing manual surface; this is an explicit reviewed baseline.
