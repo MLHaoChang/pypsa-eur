@@ -323,7 +323,7 @@ describe('the volume factor strip', () => {
     expect(cell(2031).value).toBe('150')
     expect(cell(2031).getAttribute('aria-invalid')).toBe('true')
     expect(cell(2031).className).toContain('border-danger')
-    expect(screen.getByTestId('bc-vf-refusals').textContent).toBe('Volume factor 2031: must be between 0 and 100 %')
+    expect(screen.getByTestId('bc-vf-refusals').textContent).toBe('Volume factor (lease-up) 2031: must be between 0 and 100 %')
     expect((screen.getByRole('button', { name: 'Save the lines' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByTestId('bc-save-off').textContent).toMatch(/Fix the volume factor/)
     fireEvent.change(cell(2031), { target: { value: '' } })

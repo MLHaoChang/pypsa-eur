@@ -31,7 +31,7 @@ export default function VolumeFactorStrip({ years, value, bad, server, onChange 
 
   const refusals = [
     ...years.filter(y => String(y) in bad)
-      .map(y => ({ year: String(y), text: volumeRefusal(`Volume factor ${y}`, bad[String(y)])! })),
+      .map(y => ({ year: String(y), text: volumeRefusal(`Volume factor (lease-up) ${y}`, bad[String(y)])! })),
     ...server.map(p => ({ year: /\b(\d{4}):/.exec(p.message)?.[1] ?? '', text: p.message })),
   ]
   const first = refusals[0]?.year ?? ''
