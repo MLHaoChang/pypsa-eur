@@ -984,7 +984,12 @@ def test_pre_fault_power_not_above_zero_is_unknown():
 def test_subnormal_power_change_gives_no_infinite_droop():
     f = np.where(TS < 0.2, 50.0, 50.5)
     p = np.where(TS < 0.2, 0.0, -1e-310)  # a subnormal change: df / dp overflows
-    case = {"id": "d", "kind": "frequency_step", "t_event": 0.2, "channels": {"f": "F", "p": "P"}}
+    case = {
+        "id": "d",
+        "kind": "frequency_step",
+        "t_event": 0.2,
+        "channels": {"f": "F", "p": "P"},
+    }
     r = _rows(judge(_frame(TS, F=f, P=p), case, {"frequency_droop": DROOP}))["droop"]
     assert (
         r["status"] == "fail"
