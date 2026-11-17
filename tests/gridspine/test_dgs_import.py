@@ -16,6 +16,7 @@ grammar and generic engineering values; it copies no third-party file.
 import json
 import logging
 import math
+import re
 
 import pandapower as pp
 import pytest
@@ -900,3 +901,221 @@ def test_a_type_pointer_into_another_class_with_its_own_class_absent(tmp_path):
     del rows["TypLne"]
     got = _unmapped(read_text(tmp_path, dgs_text(rows)))
     assert ("ElmLne 'L1'", "no TypLne type") in got
+
+
+# --- GK A2 (4) review asks -----------------------------------------------------
+
+T3_FULL_HEAD = {
+    "General": HEAD["General"],
+    "ElmNet": HEAD["ElmNet"],
+    "ElmTerm": HEAD["ElmTerm"],
+    "TypTr3": HEAD["TypTr3"]
+    + ";pcut3_h(r);pcut3_m(r);pcut3_l(r);curm3(r);pfe(r);nt3ag_h(r);nt3ag_m(r);nt3ag_l(r)",
+    "ElmTr3": HEAD["ElmTr3"] + ";nt3nm(i)",
+    "ElmLod": "loc_name(a:40);fold_id(p);plini(r);qlini(r);outserv(i)",
+    "ElmXnet": "loc_name(a:40);fold_id(p);usetp(r);bustp(a:2);outserv(i)",
+    "StaCubic": HEAD["StaCubic"],
+}
+
+
+def _t3_rows(
+    t3="34;T3;100.0;50.0;25.0;132.0;33.0;11.0;10.0;8.0;12.0;300;50;100;0.5;40;0;11;5",
+    e3="35;T3W;2;34;0;1",
+):
+    return {
+        "General": ["1;Version;5.0"],
+        "ElmNet": ["2;Grid;50.0"],
+        "ElmTerm": ["10;HV;2;33.0;0", "12;LV;2;11.0;0", "14;EHV;2;132.0;0"],
+        "TypTr3": [t3],
+        "ElmTr3": [e3],
+        "ElmLod": ["40;MV load;2;20.0;5.0;0", "41;LV load;2;10.0;3.0;0"],
+        "ElmXnet": ["44;Grid;2;1.0;SL;0"],
+        "StaCubic": [
+            "108;c;14;35;0",
+            "109;c;10;35;1",
+            "110;c;12;35;2",
+            "111;c;10;40;0",
+            "112;c;12;41;0",
+            "114;c;14;44;0",
+        ],
+    }
+
+
+def test_three_winding_magnetising_and_vector_groups_match_pandapower(tmp_path):
+    res = read_text(tmp_path, dgs_text(_t3_rows(), T3_FULL_HEAD))
+    n = res.network
+    tr = n.transformers
+    # vector groups against HV: MV 11 → 330°, LV 5 → 150°
+    assert tr.phase_shift.to_dict() == {"T3W HV": 0.0, "T3W MV": 330.0, "T3W LV": 150.0}
+    # magnetising on the HV leg: y = 0.5 %, g = 40 kW / 100 MVA
+    assert tr.at["T3W HV", "g"] == pytest.approx(0.0004)
+    assert tr.at["T3W HV", "b"] == pytest.approx(-math.sqrt(0.005**2 - 0.0004**2))
+    assert (tr.at["T3W MV", "b"], tr.at["T3W LV", "g"]) == (0.0, 0.0)
+    n.lpf()
+    n.pf(use_seed=True)
+
+    net = pp.create_empty_network(sn_mva=1.0, f_hz=50.0)
+    ehv, hv, lv = (pp.create_bus(net, vn_kv=v) for v in (132.0, 33.0, 11.0))
+    pp.create_ext_grid(net, ehv, vm_pu=1.0)
+    pp.create_transformer3w_from_parameters(
+        net,
+        ehv,
+        hv,
+        lv,
+        vn_hv_kv=132.0,
+        vn_mv_kv=33.0,
+        vn_lv_kv=11.0,
+        sn_hv_mva=100.0,
+        sn_mv_mva=50.0,
+        sn_lv_mva=25.0,
+        vk_hv_percent=10.0,
+        vk_mv_percent=8.0,
+        vk_lv_percent=12.0,
+        # pcu / (1000 · min(S_i, S_j)) · 100
+        vkr_hv_percent=0.6,
+        vkr_mv_percent=0.2,
+        vkr_lv_percent=0.4,
+        pfe_kw=40.0,
+        i0_percent=0.5,
+        shift_mv_degree=330.0,
+        shift_lv_degree=150.0,
+    )
+    pp.create_load(net, hv, p_mw=20.0, q_mvar=5.0)
+    pp.create_load(net, lv, p_mw=10.0, q_mvar=3.0)
+    pp.runpp(net, trafo3w_losses="hv", calculate_voltage_angles=True)
+    vm = n.buses_t.v_mag_pu.iloc[0]
+    va = n.buses_t.v_ang.iloc[0].map(math.degrees)
+    for bus, i in (("EHV", ehv), ("HV", hv), ("LV", lv)):
+        assert vm[bus] == pytest.approx(net.res_bus.at[i, "vm_pu"], abs=1e-6), bus
+        d = (va[bus] - net.res_bus.at[i, "va_degree"] + 180.0) % 360.0 - 180.0
+        assert d == pytest.approx(0.0, abs=1e-6), bus  # angles agree modulo 360°
+
+
+@pytest.mark.parametrize(
+    "t3,e3,words",
+    [
+        (None, "35;T3W;2;34;0;2", "2 parallel three-winding units"),
+        (
+            "34;T3;100.0;50.0;25.0;132.0;33.0;11.0;10.0;8.0;12.0;300;50;100;0.01;40;0;11;5",
+            None,
+            "no-load losses give g 0.0004 above |y| 0.0001",
+        ),
+    ],
+)
+def test_three_winding_refusals(tmp_path, t3, e3, words):
+    kw = {k: v for k, v in (("t3", t3), ("e3", e3)) if v is not None}
+    with pytest.raises(ImportFormatError, match=re.escape(words)):
+        read_text(tmp_path, dgs_text(_t3_rows(**kw), T3_FULL_HEAD))
+
+
+def test_three_winding_defaults_are_listed_as_assumed(hand):
+    got = {(a.asset, a.parameter) for a in hand.report.assumed}
+    for p in (
+        "Parallel units",
+        "HV vector group number",
+        "MV vector group number",
+        "LV vector group number",
+        "Magnetising current (%)",
+        "No-load losses (kW)",
+    ):
+        assert ("T3W", p) in got, p
+
+
+def test_two_winding_and_line_defaults_are_listed_as_assumed(tmp_path):
+    head = dict(
+        HEAD,
+        TypTr2="loc_name(a:40);strn(r);utrn_h(r);utrn_l(r);uktr(r)",
+        ElmTr2="loc_name(a:40);fold_id(p);typ_id(p);outserv(i)",
+        TypLne="loc_name(a:40);uline(r);sline(r);rline(r);xline(r)",
+    )
+    rows = _with(
+        TypTr2=["32;T type;10.0;33.0;11.0;10.0"],
+        ElmTr2=["33;T2W;2;32;0"],
+        TypLne=["30;L1 type;33.0;0.5;0.1;0.4", "36;unused type;33.0;0.5;0.1;0.4"],
+    )
+    res = read_text(tmp_path, dgs_text(rows, head))
+    got = {(a.asset, a.parameter): a.value for a in res.report.assumed}
+    for p, v in (
+        ("Copper losses (kW)", 0.0),
+        ("No-load losses (kW)", 0.0),
+        ("Magnetising current (%)", 0.0),
+        ("Tap step (%)", 0.0),
+        ("Neutral tap position", 0),
+        ("Tap position", 0),
+        ("Tap side", 0),
+        ("Vector group number", 0.0),
+    ):
+        assert got[("T2W", p)] == v, p
+    assert got[("L1", "Susceptance")] == 0.0
+    assert got[("L1", "Conductance")] == 0.0
+
+
+def test_a_tap_side_other_than_hv_or_lv_is_refused(tmp_path):
+    t = "32;T type;10.0;33.0;11.0;10.0;50.0;10.0;0.5;11.0;2.5;0;2"
+    with pytest.raises(ImportFormatError, match="tap side 2 is not 0"):
+        read_text(tmp_path, dgs_text(_with(TypTr2=[t])))
+
+
+def test_out_of_service_transformers(tmp_path):
+    rows = _with(ElmTr2=["33;T2W;2;32;-2;1;1"], ElmTr3=["35;T3W;2;34;1"])
+    res = read_text(tmp_path, dgs_text(rows))
+    n = res.network
+    assert not bool(n.transformers.at["T2W", "active"])
+    # D6: an out-of-service three-winding unit leaves no star bus behind
+    assert "T3W star" not in n.buses.index
+    assert not n.transformers.index.str.startswith("T3W").any()
+    assert (
+        "ElmTr3 'T3W'",
+        "out of service: left out with its star point",
+    ) in _unmapped(res)
+
+
+def test_an_out_of_service_machine_leaves_the_bus_set_point(tmp_path):
+    rows = _with(
+        ElmSym=[*ROWS["ElmSym"], "48;Idle;2;42;0.0;1.05;0;1"],
+        StaCubic=[*ROWS["StaCubic"], "118;c;13;48;0"],
+    )
+    n = read_text(tmp_path, dgs_text(rows)).network
+    assert n.buses.at["Spare", "v_mag_pu_set"] == pytest.approx(1.02)
+
+
+@pytest.mark.parametrize(
+    "bustp,control,p,q,v",
+    [("PV", "PV", 7.0, 0.0, 1.03), ("PQ", "PQ", 7.0, -2.0, 1.0)],
+)
+def test_a_pv_or_pq_external_grid_reads_its_power(tmp_path, bustp, control, p, q, v):
+    head = dict(HEAD, ElmXnet=HEAD["ElmXnet"] + ";pgini(r);qgini(r)")
+    rows = _with(ElmXnet=[f"44;Grid;2;1.03;1000.0;500.0;0.1;0.2;{bustp};0;7.0;-2.0"])
+    n = read_text(tmp_path, dgs_text(rows, head)).network
+    g = n.generators.loc["Grid"]
+    assert (g.control, g.p_set, g.q_set) == (control, p, q)
+    # a PQ grid does not hold the bus voltage
+    assert n.buses.at["EHV", "v_mag_pu_set"] == pytest.approx(v)
+
+
+def test_a_text_conductance_is_refused(tmp_path):
+    head = dict(HEAD, TypLne=HEAD["TypLne"].replace("gline(r)", "gline(a:10)"))
+    rows = _with(TypLne=["30;L1 type;33.0;0.5;0.1;0.4;3.0;high", ROWS["TypLne"][1]])
+    with pytest.raises(
+        ImportFormatError, match="conductance per km is missing or not a number"
+    ):
+        read_text(tmp_path, dgs_text(rows, head))
+
+
+def test_a_switch_on_an_unknown_cubicle_is_reported(tmp_path):
+    rows = _with(StaSwitch=[*ROWS["StaSwitch"], "91;S-odd;10;0"])  # a terminal
+    res = read_text(tmp_path, dgs_text(rows))
+    assert (
+        "StaSwitch 'S-odd'",
+        "its cubicle belongs to no imported element",
+    ) in _unmapped(res)
+
+
+def test_the_spectra_count_counts_spectra_not_their_uses(tmp_path):
+    rows = _with(
+        ElmLod=[*ROWS["ElmLod"], "48;Load 2;2;1.0;0.0;1.0;50;0"],
+        StaCubic=[*ROWS["StaCubic"], "118;c;12;48;0"],
+    )
+    res = read_text(tmp_path, dgs_text(rows))
+    assert res.report.counts["Harmonic spectra"] == 1
+    assert res.report.counts["Loads given a harmonic spectrum"] == 2

@@ -126,7 +126,7 @@ def _finite(item: str, what: str, v, *, positive=False, at_least=None) -> float:
     try:
         v = float(v)
     except (TypeError, ValueError):
-        raise ContractError(f"{item}: {what} is missing") from None
+        raise ContractError(f"{item}: {what} is missing or not a number") from None
     if not math.isfinite(v):
         raise ContractError(f"{item}: {what} is missing or not finite")
     if positive and v <= 0:
@@ -176,6 +176,14 @@ class _Mapper:
     def get(self, row, attr, default=None):
         v = row.get(attr, default) if attr in row.index else default
         if v is None or (isinstance(v, float) and math.isnan(v)):
+            return default
+        return v
+
+    def opt(self, asset, row, attr, default, parameter):
+        """``row[attr]``, or ``default`` listed as assumed when the file omits it."""
+        v = self.get(row, attr)
+        if v is None:
+            self.assume(asset, parameter, default, f"the file gives no {attr}")
             return default
         return v
 
@@ -248,6 +256,7 @@ class _Mapper:
         self._lines()
         self._trafos()
         self._trafo3()
+        self._phase_warning()
         self._loads()
         self._sgens()
         self._machines()
@@ -352,7 +361,11 @@ class _Mapper:
                 }
             )
             self.counts[PLAIN["StaSwitch"]] = self.counts.get(PLAIN["StaSwitch"], 0) + 1
-            if not closed and obj is not None:
+            if obj is None:
+                self.skip(
+                    "StaSwitch", sid, row, "its cubicle belongs to no imported element"
+                )
+            elif not closed:
                 self.open_ends.add(obj)
 
     def _term_order(self, tid):
@@ -403,9 +416,13 @@ class _Mapper:
             )
             r = _finite(item, "resistance per km", self.get(typ, "rline"))
             x = _finite(item, "reactance per km", self.get(typ, "xline"))
-            b = _finite(item, "susceptance per km", self.get(typ, "bline", 0.0))
-            g = self.get(typ, "gline")
             name = self.unique("Line", str(self.get(row, "loc_name", f"line {oid}")))
+            b = _finite(
+                item,
+                "susceptance per km",
+                self.opt(name, typ, "bline", 0.0, "Susceptance"),
+            )
+            g = self.get(typ, "gline")
             if g is None:
                 g = 0.0
                 self.assume(name, "Conductance", 0.0, "the line type gives no gline")
@@ -436,6 +453,9 @@ class _Mapper:
             ends = self.ends("ElmTr2", oid, row, (0, 1)) if typ is not None else None
             if ends is None:
                 continue
+            name = self.unique(
+                "Transformer", str(self.get(row, "loc_name", f"trafo {oid}"))
+            )
             sn = _finite(item, "rating (MVA)", self.get(typ, "strn"), positive=True)
             uh = _finite(
                 item, "HV rated voltage (kV)", self.get(typ, "utrn_h"), positive=True
@@ -446,9 +466,21 @@ class _Mapper:
             uk = _finite(
                 item, "short-circuit voltage (%)", self.get(typ, "uktr"), positive=True
             )
-            pcu = _finite(item, "copper losses (kW)", self.get(typ, "pcutr", 0.0))
-            pfe = _finite(item, "no-load losses (kW)", self.get(typ, "pfe", 0.0))
-            i0 = _finite(item, "magnetising current (%)", self.get(typ, "curmg", 0.0))
+            pcu = _finite(
+                item,
+                "copper losses (kW)",
+                self.opt(name, typ, "pcutr", 0.0, "Copper losses (kW)"),
+            )
+            pfe = _finite(
+                item,
+                "no-load losses (kW)",
+                self.opt(name, typ, "pfe", 0.0, "No-load losses (kW)"),
+            )
+            i0 = _finite(
+                item,
+                "magnetising current (%)",
+                self.opt(name, typ, "curmg", 0.0, "Magnetising current (%)"),
+            )
             par = _finite(item, "parallel units", self.get(row, "ntnum", 1), at_least=1)
             z, r = uk / 100.0, pcu / (1000.0 * sn)
             if r < 0 or r > z:
@@ -460,16 +492,18 @@ class _Mapper:
                 )
             hv, lv = ends
             vh, vl = self.n.buses.at[hv, "v_nom"], self.n.buses.at[lv, "v_nom"]
-            step = _finite(item, "tap step (%)", self.get(typ, "dutap", 0.0))
-            n0 = int(self.get(typ, "nntap0", 0))
-            pos = int(self.get(row, "nntap", n0))
+            step = _finite(
+                item, "tap step (%)", self.opt(name, typ, "dutap", 0.0, "Tap step (%)")
+            )
+            n0 = int(self.opt(name, typ, "nntap0", 0, "Neutral tap position"))
+            pos = int(self.opt(name, row, "nntap", n0, "Tap position"))
             tap = 1.0 + step / 100.0 * (pos - n0)
             if tap <= 0:
                 raise ContractError(f"{item}: tap position {pos} gives ratio {tap:g}")
-            lv_side = int(self.get(typ, "tap_side", 0)) == 1
-            name = self.unique(
-                "Transformer", str(self.get(row, "loc_name", f"trafo {oid}"))
-            )
+            side = int(self.opt(name, typ, "tap_side", 0, "Tap side"))
+            if side not in (0, 1):
+                raise ContractError(f"{item}: tap side {side} is not 0 (HV) or 1 (LV)")
+            lv_side = side == 1
             off = (uh / vh) / (ul / vl)
             if not (math.isclose(uh, vh) and math.isclose(ul, vl)):
                 self.assume(
@@ -496,15 +530,14 @@ class _Mapper:
                 tap_side=0,
                 tap_position=pos - n0,
                 phase_shift=30.0
-                * _finite(item, "vector group number", self.get(typ, "nt2ag", 0.0)),
+                * _finite(
+                    item,
+                    "vector group number",
+                    self.opt(name, typ, "nt2ag", 0.0, "Vector group number"),
+                ),
                 active=self.active(oid, row),
             )
             self.record("ElmTr2", oid, row, "Transformer", name)
-        if self.rows("ElmTr2") and (self.n.transformers.phase_shift % 360 != 0).any():
-            self.warnings.append(
-                "Some transformers shift the phase angle (vector group). The AC load "
-                "flow converges from a linear-flow start, not from a flat start."
-            )
 
     def _trafo3(self):
         for oid, row in self.rows("ElmTr3"):
@@ -513,6 +546,23 @@ class _Mapper:
             ends = self.ends("ElmTr3", oid, row, (0, 1, 2)) if typ is not None else None
             if ends is None:
                 continue
+            if not self.active(oid, row):
+                # D6: pypsa honours a leg's ``active``, but the star bus would
+                # remain as an island, so the whole unit is left out
+                self.skip(
+                    "ElmTr3", oid, row, "out of service: left out with its star point"
+                )
+                continue
+            name = str(self.get(row, "loc_name", f"trafo3 {oid}"))
+            par = _finite(
+                item,
+                "parallel units",
+                self.opt(name, row, "nt3nm", 1, "Parallel units"),
+            )
+            if par != 1:
+                raise ContractError(
+                    f"{item}: {par:g} parallel three-winding units are not imported"
+                )
             w = ("h", "m", "l")
             s = {
                 k: _finite(
@@ -558,7 +608,38 @@ class _Mapper:
                     pair[frozenset(p)] for p in ((i, j), (k, i), (j, k))
                 )
                 leg[i] = ((r1 + r2 - r3) / 2.0, (x1 + x2 - x3) / 2.0)
-            name = str(self.get(row, "loc_name", f"trafo3 {oid}"))
+            # vector group: each leg shifts by its winding's group against HV,
+            # 30° · (nt3ag_k − nt3ag_h), as pandapower's PowerFactory import
+            group = {
+                k: _finite(
+                    item,
+                    f"{k.upper()}V vector group number",
+                    self.opt(
+                        name,
+                        typ,
+                        f"nt3ag_{k}",
+                        0.0,
+                        f"{k.upper()}V vector group number",
+                    ),
+                )
+                for k in w
+            }
+            # magnetising on the HV leg, on the HV rating
+            i0 = _finite(
+                item,
+                "magnetising current (%)",
+                self.opt(name, typ, "curm3", 0.0, "Magnetising current (%)"),
+            )
+            pfe = _finite(
+                item,
+                "no-load losses (kW)",
+                self.opt(name, typ, "pfe", 0.0, "No-load losses (kW)"),
+            )
+            y, g = i0 / 100.0, pfe / (1000.0 * s["h"])
+            if g < 0 or g > y:
+                raise ContractError(
+                    f"{item}: no-load losses give g {g:g} above |y| {y:g}"
+                )
             star = self.unique("Bus", f"{name} star")
             self.n.add("Bus", star, v_nom=self.n.buses.at[ends[0], "v_nom"])
             self.assume(
@@ -593,11 +674,20 @@ class _Mapper:
                     s_nom=s[k],
                     r=r * scale * (u[k] / vb) ** 2,
                     x=x * scale * (u[k] / vb) ** 2,
+                    g=g / (u[k] / vb) ** 2 if k == "h" else 0.0,
+                    b=-math.sqrt(y * y - g * g) / (u[k] / vb) ** 2 if k == "h" else 0.0,
                     tap_ratio=off,
                     tap_side=0,
-                    active=self.active(oid, row),
+                    phase_shift=30.0 * (group[k] - group["h"]),
                 )
             self.record("ElmTr3", oid, row, "Transformer", f"{name} HV/MV/LV")
+
+    def _phase_warning(self):
+        if (self.n.transformers.phase_shift % 360 != 0).any():
+            self.warnings.append(
+                "Some transformers shift the phase angle (vector group). The AC load "
+                "flow converges from a linear-flow start, not from a flat start."
+            )
 
     def _harmonics(self, cls, oid, row) -> str | None:
         hid = self.get(row, "phmc")
@@ -609,6 +699,7 @@ class _Mapper:
             )
             return None
         h = self.t["TypHmccur"].loc[hid]
+        new = hid not in self.used_types  # the count is of spectra, not of uses
         self.used_types.add(hid)
         orders, ampl = list(self.get(h, "norder", [])), list(self.get(h, "ampl", []))
         if len(orders) != len(ampl):
@@ -620,7 +711,8 @@ class _Mapper:
                 raise ContractError(
                     f"{self.label('TypHmccur', hid, h)}: order {o} amplitude {a:g}"
                 )
-        self.counts[PLAIN["TypHmccur"]] = self.counts.get(PLAIN["TypHmccur"], 0) + 1
+        if new:
+            self.counts[PLAIN["TypHmccur"]] = self.counts.get(PLAIN["TypHmccur"], 0) + 1
         return ", ".join(f"{o}:{a:g}" for o, a in pairs)
 
     def _injection(self, cls, component):
@@ -710,7 +802,8 @@ class _Mapper:
                 * sc,
                 active=self.active(oid, row),
             )
-            self._setpoint(item, bus, row)
+            if self.active(oid, row):  # an idle machine leaves the bus set-point
+                self._setpoint(item, bus, row)
             self.record("ElmSym", oid, row, "Generator", name)
 
     def _setpoint(self, item, bus, row):
@@ -726,15 +819,31 @@ class _Mapper:
             if control is None:
                 self.skip("ElmXnet", oid, row, f"bus type {kind!r} is not SL, PV or PQ")
                 continue
+            p = q = 0.0
+            if control != "Slack":
+                p = _finite(
+                    item,
+                    "active power (MW)",
+                    self.opt(name, row, "pgini", 0.0, "Active power (MW)"),
+                )
+            if control == "PQ":
+                q = _finite(
+                    item,
+                    "reactive power (Mvar)",
+                    self.opt(name, row, "qgini", 0.0, "Reactive power (Mvar)"),
+                )
             self.n.add(
                 "Generator",
                 name,
                 bus=bus,
                 control=control,
                 p_nom=math.inf,
+                p_set=p,
+                q_set=q,
                 active=self.active(oid, row),
             )
-            self._setpoint(item, bus, row)
+            if control != "PQ" and self.active(oid, row):
+                self._setpoint(item, bus, row)
             self._grid_strength(item, name, row)
             self.record("ElmXnet", oid, row, "Generator", name)
 
