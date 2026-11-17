@@ -753,3 +753,15 @@ def test_bool_time_refused(name):
 def test_bool_param_refused():
     with pytest.raises(ContractError, match="duration_s=True is not a finite number"):
         _case(params={"v_retained_pu": 0.2, "duration_s": True})
+
+
+@pytest.mark.parametrize("chans", [{"v_poc_pu"}, None])
+def test_channels_not_a_list_refused(chans):
+    with pytest.raises(ContractError, match="channels must be a list"):
+        _case(channels=chans)
+
+
+def test_thevenin_impedances_without_zero_sequence():
+    z1, z0 = thevenin_impedances_ohm(Thevenin("g", 1000.0, 10.0), 110.0)
+    assert z0 is None
+    assert z1 == pytest.approx(complex(1.2039950, 12.039950), rel=1e-7)

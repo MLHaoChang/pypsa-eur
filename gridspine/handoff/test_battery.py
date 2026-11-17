@@ -269,9 +269,7 @@ class Case:
 
     def _check_channels(self):
         cid = self.case_id
-        if isinstance(self.channels, str) or not isinstance(
-            self.channels, (tuple, list)
-        ):
+        if not isinstance(self.channels, (tuple, list)):
             raise ContractError(
                 f"case {cid}: channels must be a list of names, got {type(self.channels).__name__}"
             )
