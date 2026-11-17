@@ -6,6 +6,7 @@ handler because its body lazily imported `_build_snapshot_weights` from
 `routers.compare`. That helper is now `services.compare.support`, so the
 dependency is a plain service import and the layering rule holds.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -54,7 +55,9 @@ def _validity_rows(df_t, names, comp_name: str, snapshots) -> list[dict]:
             counts["finite"] = int(np.isfinite(raw).sum()) - counts["zero"]
             bad = counts["missing"] + counts["pos_inf"] + counts["neg_inf"]
             state = "incomplete" if bad else "complete"
-        rows.append({"component": comp_name, "name": str(name), "state": state, **counts})
+        rows.append(
+            {"component": comp_name, "name": str(name), "state": state, **counts}
+        )
     return rows
 
 
@@ -63,8 +66,13 @@ def _component_summary(rows) -> dict:
     The per-entity rows stay server-side until a reader needs them."""
     out = {}
     for row in rows:
-        entry = out.setdefault(row["component"], {
-            "entities": dict.fromkeys(_STATES, 0), "values": dict.fromkeys(_COUNTS, 0)})
+        entry = out.setdefault(
+            row["component"],
+            {
+                "entities": dict.fromkeys(_STATES, 0),
+                "values": dict.fromkeys(_COUNTS, 0),
+            },
+        )
         entry["entities"][row["state"]] += 1
         for key in _COUNTS:
             entry["values"][key] += row[key]
@@ -86,6 +94,7 @@ def compute_losses_summary(n, source, has_ac_pf_snapshot, *, result_df):
     and what `enabled` means for `source="ac_pf"`.
     """
     import math
+
     # Per-snapshot ENERGY weight = generators column × investment-period years.
     # The shared helper applies the generators→objective→1.0 fallback AND the
     # multi-period years scaling (the raw-column read used before omitted years).
@@ -114,14 +123,18 @@ def compute_losses_summary(n, source, has_ac_pf_snapshot, *, result_df):
         for name in clean.columns:
             v_mwh = float(mwh.get(name, 0.0))
             v_peak = float(peak.get(name, 0.0))
-            if not math.isfinite(v_mwh): v_mwh = 0.0
-            if not math.isfinite(v_peak): v_peak = 0.0
-            rows.append({
-                "component": comp_name,
-                "name": str(name),
-                "loss_mwh": v_mwh,
-                "peak_mw": v_peak,
-            })
+            if not math.isfinite(v_mwh):
+                v_mwh = 0.0
+            if not math.isfinite(v_peak):
+                v_peak = 0.0
+            rows.append(
+                {
+                    "component": comp_name,
+                    "name": str(name),
+                    "loss_mwh": v_mwh,
+                    "peak_mw": v_peak,
+                }
+            )
             total_mwh += v_mwh
             if v_peak > peak_mw:
                 peak_mw = v_peak
@@ -132,24 +145,45 @@ def compute_losses_summary(n, source, has_ac_pf_snapshot, *, result_df):
         # are signed; their sum is the resistive loss (both are positive
         # injections away from the buses). For lines that didn't converge
         # the snapshot will contain NaN, which `_branch_loss` masks to 0.
-        line_p0  = result_df(n, "lines_t",        "p0", "ac_pf") if not n.lines.empty        else None
-        line_p1  = result_df(n, "lines_t",        "p1", "ac_pf") if not n.lines.empty        else None
-        trafo_p0 = result_df(n, "transformers_t", "p0", "ac_pf") if not n.transformers.empty else None
-        trafo_p1 = result_df(n, "transformers_t", "p1", "ac_pf") if not n.transformers.empty else None
-        line_t  = (line_p0  + line_p1)  if line_p0  is not None and line_p1  is not None else None
-        trafo_t = (trafo_p0 + trafo_p1) if trafo_p0 is not None and trafo_p1 is not None else None
+        line_p0 = result_df(n, "lines_t", "p0", "ac_pf") if not n.lines.empty else None
+        line_p1 = result_df(n, "lines_t", "p1", "ac_pf") if not n.lines.empty else None
+        trafo_p0 = (
+            result_df(n, "transformers_t", "p0", "ac_pf")
+            if not n.transformers.empty
+            else None
+        )
+        trafo_p1 = (
+            result_df(n, "transformers_t", "p1", "ac_pf")
+            if not n.transformers.empty
+            else None
+        )
+        line_t = (
+            (line_p0 + line_p1) if line_p0 is not None and line_p1 is not None else None
+        )
+        trafo_t = (
+            (trafo_p0 + trafo_p1)
+            if trafo_p0 is not None and trafo_p1 is not None
+            else None
+        )
     else:
         # source='lopf' OR source='ac_pf' before Stage 2 has ever run — read
         # the LP loss variables. Returns empty when transmission_losses was
         # off on the last solve.
-        line_t  = result_df(n, "lines_t",        "loss", "lopf") if not n.lines.empty        else None
-        trafo_t = result_df(n, "transformers_t", "loss", "lopf") if not n.transformers.empty else None
+        line_t = result_df(n, "lines_t", "loss", "lopf") if not n.lines.empty else None
+        trafo_t = (
+            result_df(n, "transformers_t", "loss", "lopf")
+            if not n.transformers.empty
+            else None
+        )
     load_t = n.loads_t.p if hasattr(n.loads_t, "p") else None
-    branch_validity = (_validity_rows(line_t, n.lines.index, "Line", n.snapshots)
-                       + _validity_rows(trafo_t, n.transformers.index, "Transformer", n.snapshots))
+    branch_validity = _validity_rows(
+        line_t, n.lines.index, "Line", n.snapshots
+    ) + _validity_rows(trafo_t, n.transformers.index, "Transformer", n.snapshots)
     load_validity = _validity_rows(load_t, n.loads.index, "Load", n.snapshots)
-    line_rows,  line_snap,  line_mwh,  line_peak  = _branch_loss(line_t,  n.lines,        "Line")
-    trafo_rows, trafo_snap, trafo_mwh, trafo_peak = _branch_loss(trafo_t, n.transformers, "Transformer")
+    line_rows, line_snap, line_mwh, line_peak = _branch_loss(line_t, n.lines, "Line")
+    trafo_rows, trafo_snap, trafo_mwh, trafo_peak = _branch_loss(
+        trafo_t, n.transformers, "Transformer"
+    )
 
     # `enabled` reflects whether we actually have meaningful loss data:
     # for source='ac_pf' it means a Stage 2 snapshot exists; for source='lopf'
@@ -158,15 +192,16 @@ def compute_losses_summary(n, source, has_ac_pf_snapshot, *, result_df):
     # requested before Stage 2 has run (loss = p0 + p1 = 0 in DC OPF).
     if source == "ac_pf":
         enabled = has_ac_pf_snapshot and (
-            (line_t is not None and not line_t.empty) or
-            (trafo_t is not None and not trafo_t.empty)
+            (line_t is not None and not line_t.empty)
+            or (trafo_t is not None and not trafo_t.empty)
         )
     else:
-        enabled = (line_t is not None and not line_t.empty) or \
-                  (trafo_t is not None and not trafo_t.empty)
+        enabled = (line_t is not None and not line_t.empty) or (
+            trafo_t is not None and not trafo_t.empty
+        )
 
     total_mwh = line_mwh + trafo_mwh
-    peak_mw   = max(line_peak, trafo_peak)
+    peak_mw = max(line_peak, trafo_peak)
 
     # Per-branch share of total (for sorting / "where do losses come from").
     rows = line_rows + trafo_rows
@@ -185,6 +220,7 @@ def compute_losses_summary(n, source, has_ac_pf_snapshot, *, result_df):
     # Belt-and-suspenders: also coerce the final scalar through
     # `_safe_isfinite` so any residual non-finite value collapses to 0.
     import math as _math
+
     total_demand_mwh = 0.0
     try:
         if hasattr(n.loads_t, "p") and not n.loads_t.p.empty:
@@ -197,7 +233,9 @@ def compute_losses_summary(n, source, has_ac_pf_snapshot, *, result_df):
     except Exception:
         total_demand_mwh = 0.0
 
-    loss_pct_raw = (100.0 * total_mwh / total_demand_mwh) if total_demand_mwh > 0 else 0.0
+    loss_pct_raw = (
+        (100.0 * total_mwh / total_demand_mwh) if total_demand_mwh > 0 else 0.0
+    )
     loss_pct = loss_pct_raw if _math.isfinite(loss_pct_raw) else 0.0
     total_mwh_safe = total_mwh if _math.isfinite(total_mwh) else 0.0
     peak_mw_safe = peak_mw if _math.isfinite(peak_mw) else 0.0

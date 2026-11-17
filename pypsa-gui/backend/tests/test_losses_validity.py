@@ -88,10 +88,34 @@ def test_existing_fields_are_unchanged():
         "total_demand_mwh": 40.0,
         "loss_pct_of_demand": 6.25,
         "by_branch": [
-            {"component": "Line", "name": "L1", "loss_mwh": 2.0, "peak_mw": 1.0, "share_pct": 80.0},
-            {"component": "Transformer", "name": "T1", "loss_mwh": 0.5, "peak_mw": 0.5, "share_pct": 20.0},
-            {"component": "Line", "name": "L2", "loss_mwh": 0.0, "peak_mw": 0.0, "share_pct": 0.0},
-            {"component": "Line", "name": "L4", "loss_mwh": 0.0, "peak_mw": 0.0, "share_pct": 0.0},
+            {
+                "component": "Line",
+                "name": "L1",
+                "loss_mwh": 2.0,
+                "peak_mw": 1.0,
+                "share_pct": 80.0,
+            },
+            {
+                "component": "Transformer",
+                "name": "T1",
+                "loss_mwh": 0.5,
+                "peak_mw": 0.5,
+                "share_pct": 20.0,
+            },
+            {
+                "component": "Line",
+                "name": "L2",
+                "loss_mwh": 0.0,
+                "peak_mw": 0.0,
+                "share_pct": 0.0,
+            },
+            {
+                "component": "Line",
+                "name": "L4",
+                "loss_mwh": 0.0,
+                "peak_mw": 0.0,
+                "share_pct": 0.0,
+            },
         ],
     }
 
@@ -99,13 +123,28 @@ def test_existing_fields_are_unchanged():
 def test_rows_keep_zero_missing_infinite_and_absent_apart():
     n = _net()
     assert _validity_rows(n.lines_t["loss"], n.lines.index, "Line", n.snapshots) == [
-        {"component": "Line", "name": "L1", "state": "incomplete", **_counts(finite=1, zero=1, missing=1)},
+        {
+            "component": "Line",
+            "name": "L1",
+            "state": "incomplete",
+            **_counts(finite=1, zero=1, missing=1),
+        },
         {"component": "Line", "name": "L2", "state": "complete", **_counts(zero=3)},
         {"component": "Line", "name": "L3", "state": "absent", **_counts()},
-        {"component": "Line", "name": "L4", "state": "incomplete", **_counts(finite=1, pos_inf=1, neg_inf=1)},
+        {
+            "component": "Line",
+            "name": "L4",
+            "state": "incomplete",
+            **_counts(finite=1, pos_inf=1, neg_inf=1),
+        },
     ]
     assert _validity_rows(n.loads_t["p"], n.loads.index, "Load", n.snapshots) == [
-        {"component": "Load", "name": "D1", "state": "incomplete", **_counts(finite=2, missing=1)},
+        {
+            "component": "Load",
+            "name": "D1",
+            "state": "incomplete",
+            **_counts(finite=2, missing=1),
+        },
         {"component": "Load", "name": "D2", "state": "complete", **_counts(finite=3)},
         {"component": "Load", "name": "D3", "state": "absent", **_counts()},
     ]
@@ -122,7 +161,10 @@ def test_the_response_carries_a_per_component_summary_only():
                 "entities": _states(complete=1, incomplete=2, absent=1),
                 "values": _counts(finite=2, zero=4, missing=1, pos_inf=1, neg_inf=1),
             },
-            "Transformer": {"entities": _states(complete=1), "values": _counts(finite=1, zero=2)},
+            "Transformer": {
+                "entities": _states(complete=1),
+                "values": _counts(finite=1, zero=2),
+            },
             "Load": {
                 "entities": _states(complete=1, incomplete=1, absent=1),
                 "values": _counts(finite=5, missing=1),
@@ -133,10 +175,17 @@ def test_the_response_carries_a_per_component_summary_only():
 
 def test_a_transformer_is_read_from_the_transformer_frame():
     n = _net()
-    n.transformers_t["loss"] = pd.DataFrame({"T1": [np.nan, 0.0, 0.0]}, index=n.snapshots)
+    n.transformers_t["loss"] = pd.DataFrame(
+        {"T1": [np.nan, 0.0, 0.0]}, index=n.snapshots
+    )
     comp = _summary(n)["validity"]["components"]
-    assert comp["Transformer"] == {"entities": _states(incomplete=1), "values": _counts(zero=2, missing=1)}
-    assert comp["Line"]["values"] == _counts(finite=2, zero=4, missing=1, pos_inf=1, neg_inf=1)
+    assert comp["Transformer"] == {
+        "entities": _states(incomplete=1),
+        "values": _counts(zero=2, missing=1),
+    }
+    assert comp["Line"]["values"] == _counts(
+        finite=2, zero=4, missing=1, pos_inf=1, neg_inf=1
+    )
 
 
 def _complete_net():
@@ -163,7 +212,10 @@ def test_a_frame_missing_snapshots_is_never_complete():
     n.lines_t["loss"] = n.lines_t["loss"].iloc[[0]]  # 1 of 3 snapshots
     v = _summary(n)["validity"]
     assert v["complete"] is False
-    assert v["components"]["Line"] == {"entities": _states(incomplete=1), "values": _counts(zero=1, missing=2)}
+    assert v["components"]["Line"] == {
+        "entities": _states(incomplete=1),
+        "values": _counts(zero=1, missing=2),
+    }
 
 
 def test_a_zero_row_frame_is_never_complete():
@@ -171,7 +223,10 @@ def test_a_zero_row_frame_is_never_complete():
     n.lines_t["loss"] = n.lines_t["loss"].iloc[[]]
     v = _summary(n)["validity"]
     assert v["complete"] is False
-    assert v["components"]["Line"] == {"entities": _states(incomplete=1), "values": _counts(missing=3)}
+    assert v["components"]["Line"] == {
+        "entities": _states(incomplete=1),
+        "values": _counts(missing=3),
+    }
 
 
 def test_a_frame_with_foreign_or_repeated_rows_is_misaligned():
@@ -179,10 +234,14 @@ def test_a_frame_with_foreign_or_repeated_rows_is_misaligned():
     foreign = n.lines_t["loss"].copy()
     foreign.index = [0, 1, 7]
     rows = _validity_rows(foreign, ["L2"], "Line", n.snapshots)
-    assert rows == [{"component": "Line", "name": "L2", "state": "misaligned", **_counts()}]
+    assert rows == [
+        {"component": "Line", "name": "L2", "state": "misaligned", **_counts()}
+    ]
     repeated = n.lines_t["loss"].iloc[[0, 0, 1, 2]]
     rows = _validity_rows(repeated, ["L2"], "Line", n.snapshots)
-    assert rows == [{"component": "Line", "name": "L2", "state": "misaligned", **_counts()}]
+    assert rows == [
+        {"component": "Line", "name": "L2", "state": "misaligned", **_counts()}
+    ]
 
 
 def test_losses_switched_off_reports_every_branch_absent_not_zero():
@@ -198,8 +257,12 @@ def test_losses_switched_off_reports_every_branch_absent_not_zero():
 
 def test_ac_pf_nan_from_a_nonconverged_line_is_missing_not_zero():
     n = _net()
-    n.lines_t["p0"] = pd.DataFrame({"L1": [1.0, np.nan, 2.0], "L2": [1.0, 1.0, 1.0]}, index=n.snapshots)
-    n.lines_t["p1"] = pd.DataFrame({"L1": [-0.5, -1.0, -2.0], "L2": [-1.0, -1.0, -1.0]}, index=n.snapshots)
+    n.lines_t["p0"] = pd.DataFrame(
+        {"L1": [1.0, np.nan, 2.0], "L2": [1.0, 1.0, 1.0]}, index=n.snapshots
+    )
+    n.lines_t["p1"] = pd.DataFrame(
+        {"L1": [-0.5, -1.0, -2.0], "L2": [-1.0, -1.0, -1.0]}, index=n.snapshots
+    )
     n.transformers_t["p0"] = pd.DataFrame({"T1": [1.0, 1.0, 1.0]}, index=n.snapshots)
     n.transformers_t["p1"] = pd.DataFrame({"T1": [-1.0, -1.0, -1.0]}, index=n.snapshots)
     out = compute_losses_summary(n, "ac_pf", True, result_df=_result_df)
@@ -223,7 +286,9 @@ def test_a_network_without_branches_is_not_complete():
     n.loads_t["p"] = n.loads_t["p"][["D2"]]
     v = _summary(n)["validity"]
     # Every load is complete, yet with no branch there is nothing to certify.
-    assert v["components"] == {"Load": {"entities": _states(complete=1), "values": _counts(finite=3)}}
+    assert v["components"] == {
+        "Load": {"entities": _states(complete=1), "values": _counts(finite=3)}
+    }
     assert v["complete"] is False
 
 
