@@ -47,7 +47,7 @@ const SOURCES: { id: GridLimitSource; label: string }[] = [
 const SOURCE_WORDS: Record<string, string> = { code: 'grid code', datasheet: 'datasheet', measured: 'measured', assumed: 'assumed' }
 
 /** The row's kind: staged projects have one energization row per period, `energization_peak:2035`. */
-const kindOf = (r: GridReadinessRow) => r.id.split(':')[0]
+const kindOf = (r: { id: string }) => r.id.split(':')[0]
 
 const valueOf = (s: GridLimitSetting) => (s.user ?? s.default).value
 const sourceOf = (s: GridLimitSetting): GridLimitSource => {
@@ -204,11 +204,25 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
   // so a connection that grows from 20 to 60 MW is never shown as 20 MW.
   const link = rows.find(r => kindOf(r) === 'ramp_rate')?.target as FlowTarget | undefined
   const kinds = Object.keys(SHOWN).filter(k => rows.some(r => kindOf(r) === k))
+  // Connection rows the scorecard left out (an off-grid island with its tie open): named with their reason,
+  // never reported as "not tagged", since the connection is there.
+  const excluded = (q.data?.excluded ?? []).filter(r => kindOf(r) in SHOWN && kindOf(r) !== 'scr')
   return (
     <PageSection panelSection="connection_limits" title="Connection limits" hint="Set the ones you know">
       {q.isPending ? <p className="text-[12px] text-muted">Loading the connection limits…</p>
         : q.isError ? <p className="text-[12px] text-warn" data-testid="connection-limits-error">
             The connection limits could not be read.</p>
+        : kinds.length === 0 && excluded.length > 0 ? (
+            <div className="text-[12px] text-muted" data-testid="connection-limits-excluded">
+              <p>These connection limits are left out of the scorecard for this project:</p>
+              <ul className="mt-1 flex flex-col gap-1">
+                {[...new Set(excluded.map(r => r.reason))].map(why => (
+                  <li key={why}>
+                    <span className="text-text">{excluded.filter(r => r.reason === why).map(r => r.requirement).join(', ')}</span>: {why}
+                  </li>
+                ))}
+              </ul>
+            </div>)
         : kinds.length === 0 ? <p className="text-[12px] text-muted">No grid connection is tagged on this project.</p>
           : (
             <ul className="flex flex-col gap-3" data-testid="connection-limits">

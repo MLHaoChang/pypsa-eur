@@ -50,6 +50,27 @@ describe('ConnectionLimits', () => {
     expect(screen.queryByTestId('limit-editor-fault_level')).toBeNull()
   })
 
+  it('names excluded connection rows and their reason instead of "not tagged"', async () => {
+    const reason = 'off-grid: the tie is open, so the island draws nothing through the connection'
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [], excluded: [
+      { id: 'ramp_rate', requirement: 'Connection ramp rate', reason },
+      { id: 'energization_peak:2030', requirement: 'Energization peak 2030', reason },
+      { id: 'voltage_stability_pv', requirement: 'PV', reason: 'x' }] } as never)
+    mount()
+    const box = await screen.findByTestId('connection-limits-excluded')
+    expect(box.textContent).toContain('Connection ramp rate')
+    expect(box.textContent).toContain('Energization peak 2030')
+    expect(box.textContent).toContain(reason)
+    expect(box.textContent).not.toContain('PV')
+    expect(screen.queryByText(/No grid connection is tagged/)).toBeNull()
+  })
+
+  it('still says none is tagged when nothing is excluded either', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [], excluded: [] } as never)
+    mount()
+    expect(await screen.findByText(/No grid connection is tagged/)).toBeTruthy()
+  })
+
   it('a staged project lists every energization period, not just the first', async () => {
     const t = { section: 'connection', panel: null, component: 'Link', entity: 'import', field: 'eh_energization_mw' }
     vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
