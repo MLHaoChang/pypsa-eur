@@ -209,6 +209,10 @@ def build_fmea_modes_payload(
         _voll = float(getattr(_cfg, "voll", 0.0) or 0.0)
     except (TypeError, ValueError):
         _voll = 0.0
+    if not voll_is_set(_cfg):
+        # GK B Q1: no figure is priced without a VOLL — the sweep's rows from
+        # an earlier VOLL included — so each reads None, never €0.
+        per_mode = [{**r, **{k: None for k in _EUR_FIELDS}} for r in per_mode]
     return {"per_mode": per_mode,
             "voll_eur_per_mwh": _voll,
             "sweep_status": (sweep or {}).get("status"),

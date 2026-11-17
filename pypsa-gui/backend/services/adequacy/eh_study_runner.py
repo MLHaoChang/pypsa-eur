@@ -314,13 +314,6 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
     cfg = solver_state.get("solver_config")
     if cfg is None:
         raise HTTPException(422, "solver settings are not configured")
-    # Template-e2e 06: the frontier and stress stages price unserved energy,
-    # so a missing VOLL is refused here — the API and assistant path — as the
-    # Run button refuses it, never run as 0.0.
-    from services.adequacy.run_assumptions import voll_is_set
-    if not voll_is_set(cfg):
-        from services.adequacy.campaign import unsupported_scope
-        raise unsupported_scope(VOLL_REFUSAL)
 
     n = PyPSAService.get_network()
     if n is None:
@@ -371,6 +364,14 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
                                    ("mc_seed", mc_opts.seed),
                                    ("mc_cov_target", mc_opts.cov_target))
                  if v is not None}
+    # Template-e2e 06: the frontier and stress stages price unserved energy,
+    # so a missing VOLL is refused — the API and assistant path — as the Run
+    # button refuses it, never run as 0.0. Last, after the request's own
+    # checks, so a malformed request is told what is wrong with it first.
+    from services.adequacy.run_assumptions import voll_is_set
+    if not voll_is_set(cfg):
+        from services.adequacy.campaign import unsupported_scope
+        raise unsupported_scope(VOLL_REFUSAL)
     return {"body": body, "archetype": archetype, "budget": budget, "stages": stages,
             "goal_sources": goal_sources,
             "cfg": cfg, "n": n, "lock": lock, "pack": pack, "raw_dtc": raw_dtc,
