@@ -42,6 +42,10 @@ sequence differs to the battery case ids at that case's Sk.
 API: it loops the schedule, sets the source and event parameters and runs
 each case. It is never executed here or in CI.
 
+**Parameter workbook.** One CSV per sheet of
+:mod:`gridspine.handoff.emt_workbook` and ``RSCAD_NOTES.md``; its missing
+fields join ``to_be_supplied.csv``.
+
 **Manifest.** File list with a SHA-256 per file, a ``data_hash`` over them,
 the contract version, case ids, channel names, assumptions and the
 to-be-supplied list; ``model_set_id`` only when one is passed. Keys are
@@ -58,6 +62,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from gridspine.handoff.emt_workbook import RSCAD_NOTES, rscad_notes, workbook
 from gridspine.handoff.test_battery import (
     CHANNEL_SEP,
     CHANNELS,
@@ -525,6 +530,11 @@ def write_emt_pack(
         texts[SCHEDULE_JSON] = _dumps(schedule)
         texts[SCHEDULE_CSV] = _csv(schedule, SCHEDULE_COLUMNS)
         texts[STUB] = stub_text(len(schedule))
+    sheets, sheet_gaps = workbook(campus)
+    for name, frame in sheets.items():
+        texts[f"{name}.csv"] = frame.to_csv(index=False, lineterminator="\n")
+    texts[RSCAD_NOTES] = rscad_notes()
+    supply += sheet_gaps.to_dict("records")
     texts[SUPPLY_CSV] = _csv(supply, SUPPLY_COLUMNS)
 
     out.mkdir(parents=True, exist_ok=True)
@@ -554,3 +564,24 @@ def write_emt_pack(
     return EmtPack(
         out, (*files, MANIFEST), pd.DataFrame(supply, columns=SUPPLY_COLUMNS), manifest
     )
+
+
+BUNDLE_DIR = "emt"
+
+
+def bundle_emt_pack(bundle_dir, campus, rows) -> dict:
+    """
+    The EMT pack inside a campus bundle (``<bundle>/emt/``), for its manifest.
+
+    The stage is the bundle's hour: the units with ``status == 1`` in
+    ``rows``. Returns ``{"manifest": "emt/manifest.json", "data_hash": ...}``,
+    or ``{"not_written": <reason>}`` when the campus data refuses the pack
+    (e.g. R/X = 0 at the PCC), so the PSS/E bundle is still written and the
+    refusal is recorded, not dropped.
+    """
+    installed = set(rows.loc[rows["status"] == 1, "unit_id"])
+    try:
+        p = write_emt_pack(Path(bundle_dir) / BUNDLE_DIR, campus, stages={"hour": installed})
+    except EmtPackError as e:
+        return {"not_written": str(e)}
+    return {"manifest": f"{BUNDLE_DIR}/{MANIFEST}", "data_hash": p.manifest["data_hash"]}

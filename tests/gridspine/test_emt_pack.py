@@ -59,6 +59,12 @@ def rows(path, name):
     return json.loads((path / name).read_text())
 
 
+def grid_gaps(p):
+    """The to-be-supplied rows of the grid source (not the workbook's)."""
+    g = p.to_be_supplied
+    return g[g["sheet"].isin(["thevenin", "case_schedule"])]
+
+
 def by_label(p):
     return {r["label"]: r for r in rows(p.path, "thevenin_set.json")["sources"]}
 
@@ -156,7 +162,7 @@ def test_a_case_without_zero_sequence_is_to_be_supplied_not_borrowed(tmp_path):
     p = pack(tmp_path, spec(x0x_min=None, r0x0_min=None))
     s = by_label(p)
     assert s["min"]["x0_ohm"] is None and s["min"]["z0_over_z1"] is None
-    gaps = p.to_be_supplied
+    gaps = grid_gaps(p)
     assert set(gaps.loc[gaps["sheet"] == "thevenin", "param"]) == {
         "x0x_min",
         "r0x0_min",
@@ -170,14 +176,14 @@ def test_a_case_without_zero_sequence_is_to_be_supplied_not_borrowed(tmp_path):
 def test_r0x0_zero_is_a_gap_not_an_infinite_ratio(tmp_path):
     p = pack(tmp_path, spec(r0x0_min=0.0))
     assert by_label(p)["min"]["x0_over_r0"] is None
-    assert list(p.to_be_supplied["param"]) == ["r0x0_min"]
+    assert list(grid_gaps(p)["param"]) == ["r0x0_min"]
 
 
 def test_without_a_max_zero_sequence_no_schedule_is_written(tmp_path):
     p = pack(tmp_path, spec(x0x_max=None, r0x0_max=None))
     assert not (p.path / "case_schedule.json").exists()
     assert not (p.path / "run_schedule.py").exists()
-    assert "x0x_max, r0x0_max" in set(p.to_be_supplied["param"])
+    assert "x0x_max, r0x0_max" in set(grid_gaps(p)["param"])
     assert p.manifest["case_ids"] == []
     with pytest.raises(EmtPackError, match="max case has no zero sequence"):
         battery_from_campus(build_campus(spec(x0x_max=None, r0x0_max=None)))
@@ -399,12 +405,12 @@ def test_manifest_cites_the_contract(tmp_path):
 
 def test_normal_case_without_schema_zero_sequence_is_not_a_gap(tmp_path):
     p = pack(tmp_path, spec(sk_normal_mva=2500.0, rx_normal=0.11))
-    assert p.to_be_supplied.empty
+    assert grid_gaps(p).empty
 
 
 def test_x0x_without_r0x0_lists_only_the_missing_one(tmp_path):
     p = pack(tmp_path, spec(r0x0_min=None))
-    assert list(p.to_be_supplied["param"]) == ["r0x0_min"]
+    assert list(grid_gaps(p)["param"]) == ["r0x0_min"]
     assert by_label(p)["min"]["x0_ohm"] is None
 
 
@@ -536,4 +542,4 @@ def test_each_battery_corner_is_one_row(tmp_path):
 
 def test_r0x0_without_x0x_lists_only_the_missing_one(tmp_path):
     p = pack(tmp_path, spec(x0x_min=None))
-    assert list(p.to_be_supplied["param"]) == ["x0x_min"]
+    assert list(grid_gaps(p)["param"]) == ["x0x_min"]

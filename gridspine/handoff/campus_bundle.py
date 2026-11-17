@@ -219,6 +219,8 @@ def export_campus_bundle(outdir, campus, rows, hour, ledger=()) -> CampusBundle:
                 "records": records, "gfm_units": sorted(gfm_df["unit_id"].unique().tolist()),
                 "omitted": [u for u, _ in omitted], "pending_verification": PENDING,
                 "event": {"kind": "islanding", "trip_machine": list(grid_id) if grid_id else None, "t_s": 0.0}}
+    from gridspine.handoff.emt_pack import bundle_emt_pack  # GC-06: the PSCAD / EMT pack under emt/
+    manifest["emt_pack"] = bundle_emt_pack(out, hour_campus, rows)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return CampusBundle(out, records, drafted_df, omitted)
 

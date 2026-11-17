@@ -3,7 +3,7 @@
 
 # GC-06 PSCAD / EMT pack: parameters, Thevenin min/max, case schedule, automation stub, RSCAD notes
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: 04 (part 1 only, `gridspine/handoff/test_battery.py`); parts 2–3 can start at once
