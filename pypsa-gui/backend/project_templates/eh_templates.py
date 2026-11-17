@@ -727,7 +727,7 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
     # phases are read-only there, so no number is searched).
     single = not week
     bess = spec.backup.mode == "bess"
-    most = _largest_fitting_it(template_id, spec, planning) if single and bess else None
+    most = _search_fitting_it(template_id, spec, planning) if single and bess else None
     # Name another backup mode only where it builds (GK A review).
     alts = tuple(
         m for m in (("hybrid",) if single else ("hybrid", "genset"))
@@ -735,6 +735,17 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
     )
     raise DcLoadError(words + _peak_ways_out(spec, most, single=single, alts=alts),
                       "dc_load.phases")
+
+
+def _search_fitting_it(template_id: str, spec, planning: Planning | None) -> float | None:
+    """``_largest_fitting_it``, or None when the search raises: the refusal
+    stands without its "at most N MW" way out, and the error is logged, never
+    shown as the user's (GK A review)."""
+    try:
+        return _largest_fitting_it(template_id, spec, planning)
+    except Exception:
+        _log.warning("DC peak IT load search failed; not naming a number", exc_info=True)
+        return None
 
 
 def _mode_builds(template_id: str, spec, mode: str, planning: Planning | None) -> bool:
