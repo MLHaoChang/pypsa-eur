@@ -1035,7 +1035,11 @@ def test_a_valid_zip_with_a_damaged_sheet_is_a_format_error(tmp_path):
         _read(bad)
 
 
-def test_upload_provenance_past_the_size_cap_is_dropped_with_a_warning(tmp_path):
+def test_upload_provenance_longer_than_a_cell_holds_is_dropped_with_a_warning(tmp_path):
+    """openpyxl cuts a cell at 32,767 characters, so the JSON no longer parses.
+
+    The reader's own 1,000,000-character cap is therefore defence in depth (E8: equivalent).
+    """
     n = _network(False)
 
     def fn(wb):
