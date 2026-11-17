@@ -113,3 +113,16 @@ Slices:
     read-only, formulas kept, `keep_links=False`.
   - X6: `ImporterSpec.sniff` ("module:function") and `import_result.for_file(path)`: one
     importer for the extension wins outright; for `.xlsx` exactly one sniff must claim the file.
+- 2026-11-17, GK A2 (4): #1678 OK @9a9b4d7b. Added to S3:
+  - X10: ElmLod, ElmGenstat and ElmSym P/Q set-points the file omits are listed as assumed with
+    their default (0), never silently 0; one test per field.
+  - X11: a text value in an int field (tap_side, nntap, nntap0) is an ImportFormatError naming
+    the field, not a bare ValueError; tested. (Built for every int read in the mapper:
+    obj_bus, outserv, on_off, ip_ctrl, shtype too; a fraction is refused the same way.)
+  - D1a, amending D1: in r/d fields only, one comma between digits with no point reads as the
+    decimal mark ("158,7713" → 158.7713). Still refused, naming line, class and attribute: a comma
+    in an i field, mixed marks in one value ("1.234,5"), more than one comma, a leading or trailing
+    comma (a text field keeps its comma as text). One file, one mark: a file with a comma real and
+    a point real is refused naming the first of each; integers carry no mark. The report says
+    "Decimal comma read as decimal mark" once per file. Fixtures are hand-written; the third-party
+    file is neither committed nor named in the repo.

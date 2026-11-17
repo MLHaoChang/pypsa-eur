@@ -1130,3 +1130,82 @@ def test_an_out_of_service_external_grid_leaves_the_bus_set_point(tmp_path):
     rows = _with(ElmXnet=["44;Grid;2;1.05;1000.0;500.0;0.1;0.2;SL;1"])
     n = read_text(tmp_path, dgs_text(rows)).network
     assert n.buses.at["EHV", "v_mag_pu_set"] == 1.0
+
+
+def _drop(cls, attr, head=HEAD, rows=ROWS):
+    """The fixture without ``cls.attr`` (its header column and every value)."""
+    cols = head[cls].split(";")
+    i = [c.split("(")[0] for c in cols].index(attr)
+    new_head = dict(head, **{cls: ";".join(cols[:i] + cols[i + 1 :])})
+    lines = [r.split(";") for r in rows[cls]]
+    new_rows = dict(rows, **{cls: [";".join(f[: i + 1] + f[i + 2 :]) for f in lines]})
+    return new_rows, new_head
+
+
+@pytest.mark.parametrize(
+    "cls, attr, asset, component, column, parameter",
+    [
+        ("ElmLod", "plini", "Load", "loads", "p_set", "Active power (MW)"),
+        ("ElmLod", "qlini", "Load", "loads", "q_set", "Reactive power (Mvar)"),
+        ("ElmGenstat", "pgini", "PV", "generators", "p_set", "Active power (MW)"),
+        ("ElmGenstat", "qgini", "PV", "generators", "q_set", "Reactive power (Mvar)"),
+        ("ElmSym", "pgini", "Gen", "generators", "p_set", "Active power (MW)"),
+    ],
+)
+def test_a_missing_set_point_is_listed_as_assumed(
+    tmp_path, cls, attr, asset, component, column, parameter
+):
+    """GK A2 X10: a set-point the file omits is assumed 0 and says so."""
+    rows, head = _drop(cls, attr)
+    res = read_text(tmp_path, dgs_text(rows, head))
+    got = {(a.asset, a.parameter): a.value for a in res.report.assumed}
+    assert got[(asset, parameter)] == 0.0
+    assert getattr(res.network, component).at[asset, column] == 0.0
+    full = read_text(tmp_path, dgs_text(), name="full.dgs")
+    assert (asset, parameter) not in {
+        (a.asset, a.parameter) for a in full.report.assumed
+    }
+
+
+@pytest.mark.parametrize(
+    "cls, attr, row, where",
+    [
+        (
+            "TypTr2",
+            "tap_side",
+            "32;T type;10.0;33.0;11.0;10.0;50.0;10.0;0.5;11.0;2.5;0;HV",
+            "T2W",
+        ),
+        (
+            "TypTr2",
+            "nntap0",
+            "32;T type;10.0;33.0;11.0;10.0;50.0;10.0;0.5;11.0;2.5;mid;0",
+            "T2W",
+        ),
+        ("ElmTr2", "nntap", "33;T2W;2;32;up;1;0", "T2W"),
+    ],
+)
+def test_text_in_an_integer_field_is_refused_by_name(tmp_path, cls, attr, row, where):
+    """GK A2 X11: a text tap field is an import format error naming the field."""
+    head = dict(HEAD, **{cls: HEAD[cls].replace(f"{attr}(i)", f"{attr}(a:8)")})
+    rows = dict(ROWS, **{cls: [row]})
+    with pytest.raises(
+        ImportFormatError, match=rf"{where}.*: {attr} '\w+' is not an integer"
+    ):
+        read_text(tmp_path, dgs_text(rows, head))
+
+
+def test_a_fractional_tap_position_is_refused(tmp_path):
+    head = dict(HEAD, ElmTr2=HEAD["ElmTr2"].replace("nntap(i)", "nntap(r)"))
+    rows = dict(ROWS, ElmTr2=["33;T2W;2;32;-2.5;1;0"])
+    with pytest.raises(ImportFormatError, match=r"nntap -2.5 is not an integer"):
+        read_text(tmp_path, dgs_text(rows, head))
+
+
+def test_text_in_an_out_of_service_flag_is_refused_by_name(tmp_path):
+    head = dict(HEAD, ElmLod=HEAD["ElmLod"].replace("outserv(i)", "outserv(a:4)"))
+    rows = dict(ROWS, ElmLod=["40;Load;2;3.0;1.0;2.0;50;no"])
+    with pytest.raises(
+        ImportFormatError, match=r"ElmLod 'Load' \(line \d+\): outserv 'no'"
+    ):
+        read_text(tmp_path, dgs_text(rows, head))

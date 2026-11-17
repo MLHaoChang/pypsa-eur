@@ -117,7 +117,10 @@ def test_a_7_0_file_maps_to_the_same_network_as_its_5_0_twin(tmp_path):
         pd.testing.assert_frame_equal(a.sort_index(), b.sort_index())
     assert r5.report.counts == r7.report.counts
     assert _no_lines(r5.report.assumed) == _no_lines(r7.report.assumed)
-    assert r5.report.warnings == r7.report.warnings
+    # D1a: the 7.0 twin writes decimal commas, and the report says so once
+    comma = [w for w in r7.report.warnings if w.startswith("Decimal comma read")]
+    assert len(comma) == 1
+    assert r5.report.warnings == [w for w in r7.report.warnings if w not in comma]
     # the 7.0 file's one extra: its MATRIX columns, each listed once per class
     extra = [u for u in r7.report.unmapped if "MATRIX" in u.source_item]
     assert sorted(u.source_item for u in extra) == [
@@ -244,3 +247,53 @@ def test_a_matrix_drops_every_column_of_its_name():
     assert list(t.tables["ElmLne"].columns) == ["dline", "_line"]
     assert t.dropped == {"ElmLne": ["m:MATRIX", "m:SIZEROW", "m:SIZECOL", "m:0:0"]}
     assert t.tables["ElmLne"].loc["2", "dline"] == 3.0
+
+
+# --- D1a: decimal comma ------------------------------------------------------
+
+# Modelled on a real export's comma reals: every real with a comma, integers bare.
+COMMA = G7 + (
+    "$$ElmTerm;FID(a:40);OP(a:1);loc_name(a:80);uknom(r);unknom(r);outserv(i)\n"
+    "  6;C;KIL;275;158,7713;0\n"
+    "  7;C;MAH;275;158,7713;0\n"
+    "$$ElmShnt;FID(a:40);OP(a:1);loc_name(a:80);qcapn(r);ncapx(i)\n"
+    "  5;C;R1;58,33333;1\n"
+)
+
+
+def test_a_comma_file_reads_and_says_so():
+    t = parse_dgs_text(COMMA, "c.dgs")
+    assert t.decimal_comma
+    assert t.tables["ElmShnt"].loc["5", "qcapn"] == 58.33333
+    assert t.tables["ElmTerm"].loc["6", "uknom"] == 275.0
+    assert not parse_dgs_text(V5, "p.dgs").decimal_comma
+
+
+def test_a_comma_in_a_text_field_stays_text():
+    t = parse_dgs_text(COMMA.replace(";KIL;", ";Kil, north;"), "c.dgs")
+    assert t.tables["ElmTerm"].loc["6", "loc_name"] == "Kil, north"
+
+
+def test_a_file_mixing_comma_and_point_is_refused_naming_both():
+    text = COMMA.replace("7;C;MAH;275;158,7713", "7;C;MAH;275;158.7713")
+    with pytest.raises(ContractError) as e:
+        parse_dgs_text(text, "c.dgs")
+    msg = str(e.value)
+    assert "decimal marks are mixed" in msg
+    assert "ElmTerm.unknom '158,7713' (line 4)" in msg
+    assert "ElmTerm.unknom '158.7713' (line 5)" in msg
+
+
+def test_integers_carry_no_mark():
+    """A point-free file with integer reals is not "mixed" with its comma reals."""
+    t = parse_dgs_text(COMMA.replace("58,33333", "58"), "c.dgs")
+    assert t.decimal_comma
+
+
+def test_the_report_says_decimal_comma_once(tmp_path):
+    r = _read(tmp_path, V7, "v7.dgs")
+    assert sum(w.startswith("Decimal comma read") for w in r.report.warnings) == 1
+    assert not any(
+        w.startswith("Decimal comma")
+        for w in _read(tmp_path, V5, "v5.dgs").report.warnings
+    )

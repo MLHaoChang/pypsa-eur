@@ -57,8 +57,11 @@ A trailing empty field (a row ending in ``;``) is tolerated.
 A real may carry a decimal comma (``158,7713``), as PowerFactory writes it
 under a German locale: one comma between digits, with no point. Fields are
 ``;``-separated and DGS has no thousands separator, so that comma can only
-be the decimal mark. ``1.234,5``, two commas, or a comma in an integer field
-are still refused.
+be the decimal mark (D1a). ``1.234,5``, two commas, a leading or trailing
+comma, or a comma in an integer field are still refused; a text field keeps
+its comma as text. One file uses one decimal mark: a file with a comma real
+and a point real is refused, naming the first of each. ``DgsTables.
+decimal_comma`` says the file used commas, for the report to say so.
 """
 
 from __future__ import annotations
@@ -104,6 +107,8 @@ class DgsTables:
     source: str
     #: per class, the header columns read but not kept (7.x matrices)
     dropped: dict = dataclasses.field(default_factory=dict)
+    #: whether the file's reals use a decimal comma (D1a)
+    decimal_comma: bool = False
     #: text line -> where it came from, when not a line of a file
     #: (``dgs_xlsx``: "sheet ElmTerm, row 3")
     locations: dict = dataclasses.field(default_factory=dict)
@@ -158,6 +163,7 @@ def parse_dgs_text(
     headers: list = []  # (line, class, set of column names)
     ops: list = []  # (line, class, OP value)
     dropped: dict = {}  # class -> [column]
+    marks: dict = {}  # decimal mark -> (line, "Class.attr", field): its first use
 
     for lineno, line in enumerate(
         text.replace("\r\n", "\n").replace("\r", "\n").split("\n"), start=1
@@ -202,6 +208,10 @@ def parse_dgs_text(
         vectors: dict = {}
         for (col, attr, t, k), field in zip(cols, fields):
             v = _value(field, t, lineno, f"{cls}.{col}", fail)
+            if t in ("r", "d"):
+                mark = "," if "," in field else "." if "." in field else None
+                if mark:
+                    marks.setdefault(mark, (lineno, f"{cls}.{col}", field.strip()))
             if isinstance(k, int) and field.strip() == "":
                 v = None  # an unused vector slot, not a missing real
             if k == "MATRIX":
@@ -253,6 +263,14 @@ def parse_dgs_text(
         rows.get("General", []), fail
     )  # before pointers: a v6 file says so
     major = version.split(".")[0]
+    if len(marks) == 2:
+        (cl, ca, cf), (pl, pa, pf) = marks[","], marks["."]
+        fail(
+            max(cl, pl),
+            f"decimal marks are mixed: {ca} {cf!r} ({locations.get(cl, f'line {cl}')}) "
+            f"uses a comma, {pa} {pf!r} ({locations.get(pl, f'line {pl}')}) a point; "
+            "a file uses one decimal mark",
+        )
     for lineno, cls, names in headers:
         if major == "5":
             extra = [c for c in names if c in _V7_ONLY]
@@ -298,6 +316,7 @@ def parse_dgs_text(
         types=types,
         source=source,
         dropped=dropped,
+        decimal_comma="," in marks,
         locations=locations,
     )
 
