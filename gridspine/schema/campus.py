@@ -137,7 +137,7 @@ def check_vendor_models(block, kinds) -> dict:
     if block is None:
         return {}
     if not isinstance(block, dict):
-        raise ContractError("campus: vendor_models must be a mapping {unit_kind: reference}")
+        raise ContractError("vendor_models: must be a mapping {unit_kind: reference}")
     out = {}
     for kind, ref in block.items():
         where = f"vendor_models.{kind}"
@@ -158,8 +158,10 @@ def check_vendor_models(block, kinds) -> dict:
                 raise ContractError(f"{where}.{f}: must be a non-empty string")
             clean[f] = v.strip()
         sha = clean["sha256"].lower()
-        if len(sha) != 64 or not set(sha) <= _HEX:
+        if len(sha) != 64:
             raise ContractError(f"{where}.sha256: must be 64 hex digits, got {len(sha)} characters")
+        if not set(sha) <= _HEX:
+            raise ContractError(f"{where}.sha256: must be 64 hex digits, got non-hex {sorted(set(sha) - _HEX)}")
         clean["sha256"] = sha
         out[kind] = clean
     return out

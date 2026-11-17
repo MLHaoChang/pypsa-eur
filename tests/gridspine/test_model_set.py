@@ -13,6 +13,7 @@ from gridspine.schema.model_set import (
     canonical,
     data_hash,
     manifest,
+    model_hash,
     new_model_set,
 )
 from tests.gridspine.test_campus import campus_spec
@@ -165,8 +166,34 @@ def test_manifest_names_model_set_hash_and_variant():
             "model_set_id": ms.model_set_id,
             "data_hash": ms.data_hash,
             "variant": variant,
+            "model_hash": model_hash(ms.specs[variant]),
         }
     assert ms.unit_map == {"EQ_PV": ["PV1"]}
+
+
+def test_model_hash_names_the_variant_model_not_only_the_inputs():
+    """
+    Same inputs, a differently derived aggregated model (say, after an
+    aggregation-code change): same data_hash, different model_hash.
+    """
+    other = campus_spec()
+    other["campus"]["cables"]["CB1"]["r_ohm_per_km"]["value"] = 0.08
+    a = new_model_set(campus_spec(), PARAMS, aggregated=campus_spec(), now=T0)
+    b = new_model_set(campus_spec(), PARAMS, aggregated=other, now=T0)
+    assert (
+        manifest(a, "aggregated")["data_hash"] == manifest(b, "aggregated")["data_hash"]
+    )
+    assert (
+        manifest(a, "aggregated")["model_hash"]
+        != manifest(b, "aggregated")["model_hash"]
+    )
+    assert manifest(a, "detailed")["model_hash"] == model_hash(campus_spec())
+
+
+def test_spec_returns_a_copy():
+    ms = new_model_set(campus_spec(), PARAMS, now=T0)
+    ms.spec("detailed")["campus"]["name"] = "CHANGED"
+    assert ms.spec("detailed")["campus"]["name"] == "TEST_HUB"
 
 
 def test_manifest_refuses_unknown_variant():

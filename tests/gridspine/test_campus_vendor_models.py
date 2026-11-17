@@ -78,7 +78,7 @@ def test_non_string_field_is_refused():
     "sha, why",
     [
         ("a" * 63, "63 characters"),
-        ("g" * 64, "64 characters"),
+        ("g" * 64, r"non-hex \['g'\]"),
         ("a" * 65, "65 characters"),
     ],
     ids=["63", "non-hex", "65"],
@@ -106,8 +106,15 @@ def test_missing_field_is_refused():
         build_campus(spec_with({"bess": ref}))
 
 
+def test_load_kind_is_refused():
+    with pytest.raises(
+        ContractError, match=r"vendor_models\.load: unknown unit kind 'load'"
+    ):
+        build_campus(spec_with({"load": dict(REF)}))
+
+
 def test_block_that_is_not_a_mapping_is_refused():
-    with pytest.raises(ContractError, match="vendor_models must be a mapping"):
+    with pytest.raises(ContractError, match="vendor_models: must be a mapping"):
         build_campus(spec_with(["bess"]))
     with pytest.raises(ContractError, match=r"vendor_models\.bess: must be a mapping"):
         build_campus(spec_with({"bess": "file.dyr"}))
