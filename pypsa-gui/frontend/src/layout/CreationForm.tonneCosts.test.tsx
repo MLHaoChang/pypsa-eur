@@ -60,6 +60,20 @@ describe('CreationForm cost fields follow the bus', () => {
   it('still stores x1000 from EUR/kW on an energy bus', async () => {
     expect((await createOn('Elec A')).overnight_cost).toBe(123400)
   })
+  it('waits visibly (aria-busy, after 200 ms) while the bus units load', async () => {
+    vi.mocked(assetSchemaApi.unitsForBus).mockReturnValue(new Promise(() => {}))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(nk('Demo', 'buses'), BUSES)
+    render(<QueryClientProvider client={client}><CreationForm item={{ id: 'thermal', label: 'Conventional' }} /></QueryClientProvider>)
+    await screen.findByText('Add to Network')
+    fireEvent.change(fieldInput(/^Attach to Bus/), { target: { value: 'NH3' } })
+    const pending = await screen.findByTestId('units-pending')
+    expect(pending.getAttribute('role')).toBe('status')
+    expect(pending.getAttribute('aria-busy')).toBe('true')
+    expect(pending.className).toContain('invisible')
+    await waitFor(() => expect(pending.className).not.toContain('invisible'), { timeout: 1000 })
+  })
+
   it('keeps Add to Network disabled while the bus units are unread or failed', async () => {
     vi.mocked(assetSchemaApi.unitsForBus).mockRejectedValue(new Error('500'))
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -69,5 +83,12 @@ describe('CreationForm cost fields follow the bus', () => {
     fireEvent.change(fieldInput(/^Attach to Bus/), { target: { value: 'NH3' } })
     await waitFor(() => expect(assetSchemaApi.unitsForBus).toHaveBeenCalled())
     expect((screen.getByText('Add to Network') as HTMLButtonElement).disabled).toBe(true)
+    // the reason is visible text with a retry, not a tooltip
+    const alert = await screen.findByTestId('units-failed')
+    expect(alert.getAttribute('role')).toBe('alert')
+    expect(alert.textContent).toContain('Could not read the units of this bus')
+    vi.mocked(assetSchemaApi.unitsForBus).mockResolvedValue({ component: 'Generator', bus: 'NH3', units: {}, costs: {} })
+    await userEvent.click(screen.getByText('Retry'))
+    await waitFor(() => expect((screen.getByText('Add to Network') as HTMLButtonElement).disabled).toBe(false))
   })
 })

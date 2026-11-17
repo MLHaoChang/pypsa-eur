@@ -67,5 +67,7 @@ export function useAssetSchema(componentClass: string | null, name?: string | nu
       })),
     }
   }, [base.data, over, costs, wantsUnits, units.isSuccess])
-  return { ...base, data, unitsReady: !wantsUnits || units.isSuccess }
+  return { ...base, data, unitsReady: !wantsUnits || units.isSuccess,
+    /** The units read failed: nothing is guessed; `retryUnits` asks again. */
+    unitsFailed: wantsUnits && units.isError, retryUnits: () => { void units.refetch() } }
 }

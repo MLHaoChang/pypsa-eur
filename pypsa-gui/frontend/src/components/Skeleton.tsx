@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 
 export const SKELETON_DELAY_MS = 200
 
-function useDelayedShow(): boolean {
+export function useDelayedShow(): boolean {
   const [shown, setShown] = useState(false)
   useEffect(() => {
     const t = setTimeout(() => setShown(true), SKELETON_DELAY_MS)

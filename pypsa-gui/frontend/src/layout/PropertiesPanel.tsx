@@ -23,6 +23,7 @@ import { updateAsset } from '../utils/assetWrite'
 import { blockerMessage } from '../utils/blockerMessage'
 import { isRenewableCarrier } from '../utils/carriers'
 import { hiddenLevelFields } from '../utils/busCarriers'
+import FieldsPending from './properties/FieldsPending'
 import { ingestRescale } from '../utils/rescaleActions'
 import type { RescalePreview } from '../utils/rescale'
 import { networkApi } from '../api/network'
@@ -147,7 +148,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost; the annualised capital cost is
   // derived (overnight × annuity + fixed O&M) and shown read-only.
-  const { data: schema } = useAssetSchema('Generator', gen.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('Generator', gen.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Generator', gen.name)
   const editors = generatorSeriesEditors(profilesRead ? genMeta?.category ?? 'other' : undefined)
@@ -299,7 +300,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
             ),
           }}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Generator" name={gen.name} onClose={() => setVintageOpen(false)} />
       )}
@@ -331,7 +332,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // A battery is typed as its two overnight parts; capital cost, lifetime and
   // fixed O&M are derived from them and shown read-only.
-  const { data: schema } = useAssetSchema('StorageUnit', su.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('StorageUnit', su.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('StorageUnit', su.name)
   // Same query as the panel's Inflow section: a battery has no inflow editor, so no "Constant inflow" row.
@@ -474,7 +475,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
             ) : undefined,
           }}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="StorageUnit" name={su.name} onClose={() => setVintageOpen(false)} />
       )}
@@ -506,7 +507,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kWh; the annualised capital
   // cost is derived and shown read-only.
-  const { data: schema } = useAssetSchema('Store', store.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('Store', store.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Store', store.name)
   const specs = schemaFields(schema)
@@ -622,7 +623,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
             ),
           }}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Store" name={store.name} onClose={() => setVintageOpen(false)} />
       )}
@@ -669,7 +670,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   })
 
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
-  const { data: schema } = useAssetSchema('Load', load.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('Load', load.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Load', load.name)
   const series = useSeriesFields(currentProject, 'loads', load.name, { p_set: 'Profile' })
@@ -779,7 +780,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
           schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       <SectionHdr title="Time Series" />
       <div className="flex items-center gap-2 py-1">
         <div className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${hasProfile ? 'bg-success border-success' : 'bg-bg border-border'}`}>
@@ -869,7 +870,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kW of input; the annualised
   // capital cost is derived and shown read-only.
-  const { data: schema } = useAssetSchema('Link', link.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('Link', link.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Link', link.name)
   const series = useSeriesFields(currentProject, 'links', link.name, {
@@ -1056,7 +1057,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
             ),
           }}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Link" name={link.name} onClose={() => setVintageOpen(false)} />
       )}

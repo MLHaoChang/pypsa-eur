@@ -60,13 +60,15 @@ createRoot(document.getElementById('root')!).render(
   await server.listen()
   browser = await chromium.launch()
   const port = server.httpServer.address().port
-  for (const asset of ['tonne', 'energy']) for (const mode of ['guided', 'expert']) {
+  for (const [asset, state] of [['tonne', 'ready'], ['energy', 'ready'], ['tonne', 'waiting'], ['tonne', 'failed']]) for (const mode of ['guided', 'expert']) {
     const ctx = await browser.newContext({ viewport: { width: 420, height: 1400 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
     const page = await ctx.newPage()
     await page.route(u => u.protocol.startsWith('http') && u.hostname !== '127.0.0.1', r => r.abort())
     await page.route(u => u.pathname.startsWith('/api/'), r => {
       const p = new URL(r.request().url()).pathname
       const units = p.match(/^\/api\/network\/asset_schema\/Generator\/units\/(.+)$/)
+      if (units && state === 'waiting') return
+      if (units && state === 'failed') return r.fulfill({ status: 500, json: { detail: 'boom' } })
       if (units) return r.fulfill({ json: decodeURIComponent(units[1]) === TONNE ? tonneUnits
         : { component: 'Generator', name: decodeURIComponent(units[1]), units: {}, costs: {} } })
       if (p.includes('/provenance/')) return r.fulfill({ json: { component: 'Generator', name: 'x', fields: {} } })
@@ -82,9 +84,10 @@ createRoot(document.getElementById('root')!).render(
     page.on('console', m => m.type()==='error' && console.error(m.text().slice(0,300))); page.on('pageerror', e => console.error('pageerror', e.stack.split('\n').slice(0,4).join(' | ')))
     await page.goto(`http://127.0.0.1:${port}/${entry}.html?asset=${asset}&mode=${mode}`)
     await page.getByRole('button', { name: /Edit Generator/ }).click()
-    await page.getByText('Overnight cost').first().waitFor()
+    if (state === 'ready') await page.getByText('Overnight cost').first().waitFor()
+    else await page.getByTestId(state === 'waiting' ? 'units-pending' : 'units-failed').waitFor()
     await page.waitForTimeout(600)
-    const file = path.join(out, `${asset}-${mode}.png`)
+    const file = path.join(out, state === 'ready' ? `${asset}-${mode}.png` : `${asset}-${state}-${mode}.png`)
     await page.screenshot({ path: file, fullPage: true })
     console.log(file, 'note:', await page.getByTestId('asset-tonne-cost-note').count())
     await ctx.close()
