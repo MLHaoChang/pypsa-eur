@@ -71,6 +71,12 @@ SUBDIR = "psse_v35"
 BUSR_NOTE = "BUSR = BUS2, BUS1→BUS2 export: pending verification on first PSS/E load"
 #: The test battery's grid zero sequence when the caller gives no cases: the
 #: same Z0 = Z1 the .seq assumes for the grid, and X0/R0 at the grid's largest X/R.
+#: The .mon voltage band. The campus carries no planning band of its own, so
+#: the pack uses this one and lists it as assumed.
+MON_BAND_PU = (0.90, 1.10)
+MON_ASSUMED = (
+    ".mon: voltage band 0.90-1.10 pu (assumed; no planning band in the campus data)"
+)
 BATTERY_ASSUMED = (
     "test battery: grid |Z0|/|Z1| = 1.0 (as the .seq's grid X0 = X1)",
     "test battery: grid X0/R0 = the grid's largest X/R",
@@ -214,7 +220,7 @@ def write_psse_pack(
     cs = _contingency_set(campus) if contingency_set is None else contingency_set
     con_skipped = write_con(cs, net, out / names["con"])
     write_sub(net, out / names["sub"])
-    write_mon(out / names["mon"])
+    write_mon(out / names["mon"], *MON_BAND_PU)
 
     files = [*names.values(), "README.md", "manifest.json"]
     scripts, outputs, battery_notes = {}, {}, []
@@ -264,6 +270,7 @@ def write_psse_pack(
         },
         "scripts_not_written": None if plant is not None else _SCRIPTS_NEED_PLANT,
         "battery_assumed": battery_notes,
+        "mon_assumed": MON_ASSUMED,
         "pending_verification": [PIN_NOTE, BUSR_NOTE, PSSPY_NOTE],
     }
     if model_set is not None:
@@ -299,6 +306,7 @@ def _readme(m) -> str:
     ] or ["- none"]
     lines += [f"- .seq: {n}" for n in m["seq"]["assumed"]]
     lines += [f"- {n}" for n in m["battery_assumed"]]
+    lines.append(f"- {m['mon_assumed']}")
     lines += ["", "## Not written", ""]
     not_written = [f".seq: {n}" for n in m["seq"]["not_written"]]
     not_written += [

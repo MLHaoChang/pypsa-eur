@@ -283,3 +283,10 @@ def test_a_model_set_without_its_variant_is_refused(tmp_path):
     ms = new_model_set(spec(), {}, now=_NOW)
     with pytest.raises(ContractError, match="model_set and its variant together"):
         _write(tmp_path, model_set=ms)
+
+
+def test_the_mon_band_is_listed_as_assumed(tmp_path):
+    _hc, m, out = _write(tmp_path)
+    assert m["mon_assumed"] == PP.MON_ASSUMED
+    assert f"- {PP.MON_ASSUMED}" in (out / "README.md").read_text()
+    assert "0.900 1.100" in (out / f"{m['case']}.mon").read_text()
