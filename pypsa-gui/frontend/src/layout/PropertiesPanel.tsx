@@ -42,6 +42,7 @@ import { buildPatch, omitDerived, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, fieldHelp, fieldUnit, schemaFields } from './properties/AssetFields'
 import { useSaveAction } from '../components/memory/ParameterMemory'
 import { GuideButton } from '../components/GuidedTour'
+import RecipeCard from './properties/RecipeCard'
 import CarrierPanel from './properties/CarrierPanel'
 import ShuntPanel from './properties/ShuntPanel'
 import AssetFootprintEditor from '../components/AssetFootprintEditor'
@@ -952,6 +953,8 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   if (!open && mode === 'detail') {
     return (
       <>
+        {/* Gap 03: a process's recipe, the same card as Guided section 2's drawer, above the Port N efficiencies. */}
+        <RecipeCard name={link.name} />
         <Section title={title ?? 'Link Properties'}>
           <Row label="Carrier" value={link.carrier} tip={fieldHelp(schema, 'carrier')} />
           {categoryLabel && <Row label="Category" value={categoryLabel} />}

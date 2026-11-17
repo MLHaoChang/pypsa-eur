@@ -78,6 +78,21 @@ export interface FlowHeld {
   unit: string | null
   extendable: boolean
   series: boolean
+  /** Section 2's recipe rows only (gap 03): the inputs per unit of product. */
+  recipe?: FlowRecipe
+}
+
+/** A process's recipe, read from its Link's efficiencies (`services/recipes.py`). */
+export interface FlowRecipe {
+  /** The row's name in plain words, never the Link's id. */
+  label: string
+  product: { carrier: string; label: string }
+  /** What the recipe counts per: a tonne of product, or a MWh of it. */
+  per: 't' | 'MWh'
+  /** Units of the product bus per recipe unit (MWh per t on an energy bus counted in tonnes). */
+  product_per: number
+  electricity: { value: number; unit: 'kWh' | 'MWh' }
+  inputs: { port: number; carrier: string; label: string; value: number; unit: string }[]
 }
 
 export interface FlowSection {
