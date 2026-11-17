@@ -45,25 +45,33 @@ never a pass.
 **The grid** behind the PoC (``grid_equivalent``): the PoC of a campus is
 its ``ext_grid`` bus, where a slack would hold V_PoC fixed. The loop moves
 the source to a new bus behind the Thevenin impedance Z = c x Un^2 /
-S_k'' (IEC 60909), so V_PoC answers the plant's Q. ``"min"`` is the weak
-grid, S_k''min with c_max (1.1) and ``rx_min``: the largest Z, the most
-voltage per Mvar. ``"max"`` is the strong grid, S_k''max with c_min and
-``rx_max``: the smallest Z. Run both: the loop gain and the limit hits
+S_k'' (IEC 60909, ``island_sc_seq.c_factor``), so V_PoC answers the
+plant's Q. ``"min"`` is the weak grid, S_k''min with c_max (1.1) and
+``rx_min``: the largest Z, the most voltage per Mvar (the gatekeeper's
+conservative pairing, GC-02 V1). ``"max"`` is the strong grid, S_k''max
+with c_min (1.0, 0.95 at 1 kV and below) and ``rx_max``: the smallest Z. Run both: the loop gain and the limit hits
 differ between them. A campus without the PCC's S_k'' is refused, never
 solved against a stiff grid.
 
 **The PoC P-Q chart** (``poc_pq_chart``): at each V_PoC in ``V_POINTS``
 (held by the source at the PoC itself) and each P from 0 to P_n of every
 IBR unit, the reactive range the plant reaches at the PoC with every
-controllable unit at +-avail: after the collector and transformer
+controllable unit at +-avail, each inverter's S scaled by min(1, V_PoC)
+(a current-limited inverter gives less MVA below 1 pu; its terminal
+voltage is not known before the flow, so the PoC's stands in), and PV
+offering Q at P = 0 (Q at night): after the collector and transformer
 reactive losses, loads out of service and switched banks at step 0
 (their rated Mvar is listed in its own columns, not judged). STATCOMs
 count: they are the plant's own reactive capability. Gensets are out:
 their excitation is not the PPC's. Each row is judged against the
 profile's ``q_capability_pq`` at P_PoC / p_ref, in its site convention
 (+ the grid supplies the site): the plant must reach -hi .. -lo in the
-export convention. ``q_band_v_range_pu``, when the profile states it,
-narrows the voltages judged; the rest read ``reported``.
+export convention. A P_PoC within ``P_SNAP_PU`` of the band's P range
+(the P = 0 row imports the losses) is judged at the range's end; a P the
+band does not state fails, as ``campus_compliance``'s band row does, so a
+band that stops short is never a pass. ``q_band_v_range_pu``, when the
+profile states it, narrows the voltages judged; the rest read
+``reported``.
 
 Allowed to import pandapower (``static/``); never pypsa.
 """
@@ -79,6 +87,7 @@ import pandas as pd
 from scipy.optimize import brentq
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static.island_sc_seq import c_factor
 from gridspine.static.campus_reactive import IBR_KINDS, _circle_q
 from gridspine.templates.grid_codes import q_band_at
 
@@ -88,8 +97,10 @@ MODES = ("q_fixed", "pf", "v_control", "q_of_v")
 V_POINTS = (0.90, 0.95, 1.00, 1.05, 1.10)
 #: The active power steps of the P-Q chart, per unit of each IBR unit's P_n.
 P_POINTS = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
-#: IEC 60909 voltage factors for the grid equivalent (above 1 kV).
-C_MAX, C_MIN = 1.1, 1.0
+#: How far, per unit of p_ref, a chart point's P may sit outside the band's P range and still be judged at its end.
+P_SNAP_PU = 0.01
+#: The tolerance on a v_control target, pu: a shortfall at most this big is not a limit.
+V_TOL = 1e-6
 #: The name of the source bus the grid equivalent adds.
 SOURCE_BUS = "GRID_SOURCE"
 #: The base of the equivalent's per-unit impedance, MVA.
@@ -103,9 +114,10 @@ G_FLAT = 1e-9
 #: The columns of ``poc_pq_chart``'s table.
 CHART_COLUMNS = ("v_poc_pu", "p_frac", "p_poc_mw", "q_max_mvar", "q_min_mvar", "req_q_max_mvar", "req_q_min_mvar",
                  "shortfall_mvar", "status", "banks_cap_mvar", "banks_ind_mvar", "detail", "clause", "source", "basis")
-CHART_BASIS = ("PoC reactive range of the IBR units and STATCOMs at +-sqrt(S^2 - P^2) (a STATCOM: its rating), "
-               "after collector and transformer reactive losses, with the PoC held at V; loads and gensets out, "
-               "switched banks at step 0 and listed apart (rated Mvar, not judged)")
+CHART_BASIS = ("PoC reactive range of the IBR units and STATCOMs at +-sqrt(S'^2 - P^2), S' = S x min(1, V_PoC) "
+               "(a STATCOM: its rating x min(1, V_PoC)); PV offers Q at P = 0; after collector and transformer "
+               "reactive losses, with the PoC held at V; loads and gensets out, switched banks at step 0 and listed "
+               "apart (rated Mvar, not judged)")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -164,6 +176,14 @@ class ControlOutcome:
     note: str = ""
 
 
+def _number(v) -> float:
+    """``v`` as a float; NaN for None or anything that is not a number."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return math.nan
+
+
 def _finite(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
@@ -191,15 +211,14 @@ def grid_equivalent(net, case: str = "min") -> tuple[int, float, float]:
     if case not in ("min", "max"):
         raise ContractError(f"the grid equivalent is 'min' or 'max', got {case!r}")
     i = _ext_grid(net)
-    sk = float(net.ext_grid.at[i, f"s_sc_{case}_mva"])
-    rx = float(net.ext_grid.at[i, f"rx_{case}"])
+    sk, rx = _number(net.ext_grid.at[i, f"s_sc_{case}_mva"]), _number(net.ext_grid.at[i, f"rx_{case}"])
     if not (math.isfinite(sk) and sk > 0):
         raise ContractError(f"the PCC has no S_k''{case} (got {sk!r}): voltage control needs the grid's strength")
     if not (math.isfinite(rx) and rx >= 0):
         raise ContractError(f"the PCC's rx_{case} must be a number >= 0, got {rx!r}")
-    c = C_MAX if case == "min" else C_MIN
     pcc = int(net.ext_grid.at[i, "bus"])
     vn = float(net.bus.at[pcc, "vn_kv"])
+    c = c_factor(vn, "max" if case == "min" else "min")
     z_ohm = c * vn ** 2 / sk
     z_pu = c * Z_BASE_MVA / sk
     x_pu = z_pu / math.sqrt(1.0 + rx ** 2)
@@ -210,9 +229,10 @@ def grid_equivalent(net, case: str = "min") -> tuple[int, float, float]:
     return imp, z_ohm, c
 
 
-def ppc_units(net, campus) -> tuple[dict, list]:
+def ppc_units(net, campus, s_scale: float = 1.0) -> tuple[dict, list]:
     """``({sgen index: avail Mvar}, [units with no rating])`` of the
-    controllable units in service (module docstring)."""
+    controllable units in service (module docstring), each S times
+    ``s_scale`` (the chart's current limit below 1 pu)."""
     ibr = {str(u) for u, k in campus.units["kind"].items() if k in IBR_KINDS}
     comp = getattr(campus, "compensation", None)
     statcom = set() if comp is None or comp.empty else {str(n) for n, k in comp["kind"].items() if k == "statcom"}
@@ -221,11 +241,12 @@ def ppc_units(net, campus) -> tuple[dict, list]:
         name = str(net.sgen.at[i, "name"])
         if not bool(net.sgen.at[i, "in_service"]) or name not in ibr | statcom:
             continue
-        s = float(net.sgen.at[i, "sn_mva"]) if net.sgen.at[i, "sn_mva"] is not None else math.nan
+        s = _number(net.sgen.at[i, "sn_mva"])
         if not (math.isfinite(s) and s > 0):
             no_rating.append(name)
             avail[i] = 0.0
             continue
+        s *= s_scale
         avail[i] = s if name in statcom else _circle_q(s, abs(float(net.sgen.at[i, "p_mw"])))
     return avail, no_rating
 
@@ -291,10 +312,15 @@ def control_case(net, campus, imp: int, control: PlantControl, run=pp.runpp) -> 
                                 "lowers the PoC's Q or voltage, so the control loop has no meaning (check the "
                                 "units' and the grid's sign)")
         at_limit, shortfall = "", 0.0
-        if g_lo > 0:
-            x, at_limit, shortfall = -1.0, "lower", g_lo
+        tol = V_TOL if control.mode == "v_control" else Q_TOL
+        if g_lo > 0:                    # out of reach below; within the tolerance it is met, at the bound
+            x = -1.0
+            if g_lo > tol:
+                at_limit, shortfall = "lower", g_lo
         elif g_hi < 0:
-            x, at_limit, shortfall = 1.0, "upper", -g_hi
+            x = 1.0
+            if -g_hi > tol:
+                at_limit, shortfall = "upper", -g_hi
         else:
             x = brentq(g, -1.0, 1.0, xtol=X_TOL)
         g(x)
@@ -347,7 +373,7 @@ def poc_pq_chart(campus, profile: dict, p_ref_mw: float | None, v_points=V_POINT
                 name = str(net.sgen.at[i, "name"])
                 if name in ibr:
                     net.sgen.at[i, "p_mw"] = frac * ibr[name]
-            avail, _ = ppc_units(net, campus)
+            avail, _ = ppc_units(net, campus, s_scale=min(1.0, v))
             q_ends, p_poc = [], math.nan
             try:
                 for x in (1.0, -1.0):
@@ -375,9 +401,15 @@ def _judge(lim, v_range, p_ref, v, frac, p, q_max, q_min, cap, ind) -> dict:
         return {**row, "detail": f"{where} {reach}; the profile states no q_capability_pq"}
     if not (p_ref and p_ref > 0):
         return {**row, "detail": f"{where} {reach}; no connection capacity (p_ref) to scale the band"}
-    band = q_band_at(lim, -p / p_ref)                  # the band's P is the site's import
+    p_pu = -p / p_ref                                  # the band's P is the site's import
+    lo_p, hi_p = lim["points"][0][0], lim["points"][-1][0]
+    if lo_p - P_SNAP_PU <= p_pu < lo_p or hi_p < p_pu <= hi_p + P_SNAP_PU:
+        p_pu = min(max(p_pu, lo_p), hi_p)
+    band = q_band_at(lim, p_pu)
     if band is None:
-        return {**row, "detail": f"{where} ({-p / p_ref:.3f} pu import) {reach}; the band does not state this P"}
+        return {**row, "status": "fail",
+                "detail": f"{where} ({-p / p_ref:.3f} pu import) {reach}; the band does not state this P "
+                          f"(it covers {lo_p:g} to {hi_p:g} pu)"}
     need_hi, need_lo = -band[0] * p_ref, -band[1] * p_ref   # export convention: -hi .. -lo
     row.update(req_q_max_mvar=need_hi, req_q_min_mvar=need_lo)
     if v_range is not None and not v_range[0] <= v <= v_range[1]:
@@ -425,7 +457,8 @@ def droop_from(profile: dict, campus) -> tuple[PlantControl | None, str]:
                         slope_pct=float(profile["q_v_slope_pct"]["value"]), q_max_mvar=q_max), ""
 
 
-def scorecard_rows(profile: dict, chart: pd.DataFrame, outcomes: pd.DataFrame | None, droop_why: str) -> pd.DataFrame:
+def scorecard_rows(profile: dict, chart: pd.DataFrame, outcomes: pd.DataFrame | None, droop_why: str,
+                   grid_note: str = "") -> pd.DataFrame:
     """The voltage-control rows of the scorecard, in ``campus_compliance``'s
     row shape: the modes the code asks for (reported), the Q(V) droop in the
     load flow, and the PoC P-Q chart against the band. A row whose input the
@@ -464,6 +497,8 @@ def scorecard_rows(profile: dict, chart: pd.DataFrame, outcomes: pd.DataFrame | 
             status, value, where = "pass", 0.0, r
             detail = (f"the droop holds in every case on both grid equivalents; widest V {r['v_poc_pu']:.4f} pu "
                       f"({r['case']}, S_k''{r['grid']}) with Q {r['q_poc_mvar']:.2f} Mvar")
+        if grid_note:
+            detail += f"; {grid_note}"
         rows.append(_row("q_v_droop", status, status, value, 0.0, "Mvar",
                          (int(where["period"]), int(where["hour"])), slope.get("clause", ""),
                          slope.get("source", "assumed"), detail, case=where["case"]))
@@ -476,8 +511,9 @@ def scorecard_rows(profile: dict, chart: pd.DataFrame, outcomes: pd.DataFrame | 
     else:
         failed = judged[judged["status"] != "pass"]
         if len(failed):
-            nc = failed[failed["status"] == "not converged"]
-            r = nc.iloc[0] if len(nc) else failed.loc[failed["shortfall_mvar"].astype(float).idxmax()]
+            # a point with no shortfall number (not converged, or a P the band does not state) is named first
+            blind = failed[failed["shortfall_mvar"].isna()]
+            r = blind.iloc[0] if len(blind) else failed.loc[failed["shortfall_mvar"].astype(float).idxmax()]
             status = "fail"
         else:
             margin = pd.concat([judged["q_max_mvar"] - judged["req_q_max_mvar"],

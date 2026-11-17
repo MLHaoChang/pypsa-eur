@@ -87,8 +87,9 @@ A profile may carry these optional keys:
     The voltage-control deadband, % of nominal voltage either side, inside
     which a unit in voltage control does not change its reactive output; a
     positive number. Reported (``reported_requirements``), never checked
-    here; the voltage-control step uses it as the Q(V) droop's deadband
-    (``static/voltage_control.py``, plan GC-02).
+    here. When the profile also states ``q_v_slope_pct``, the
+    voltage-control step uses it as the deadband of the plant's Q(V) droop
+    at the PoC (``static/voltage_control.py``, plan GC-02).
 ``unbalance_limit_pct``
     The negative-sequence voltage unbalance limit at the connection point,
     % of the positive sequence (datacenter grid readiness issue 12), a
@@ -517,7 +518,7 @@ def reported_requirements(profile: dict) -> list:
                     "value": value, "clause": db["clause"], "source": db["source"], "applies_to": "unit",
                     "status": "reported",
                     "detail": f"voltage-control deadband {value}: reported, not enforced "
-                              "(the voltage-control step uses it as the Q(V) droop's deadband)"})
+                              "(with q_v_slope_pct, the voltage-control step applies it at the PoC)"})
     return out
 
 

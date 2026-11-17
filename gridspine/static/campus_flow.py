@@ -159,13 +159,17 @@ def apply_hour(campus, rows: pd.DataFrame) -> None:
             net.sgen.at[i, "in_service"] = on
 
 
+def _not_converged(control=None) -> HourFlow:
+    empty_t = pd.DataFrame(columns=["trafo", "s_mva", "loading_pct"])
+    empty_b = pd.DataFrame(columns=["bus", "vm_pu"])
+    return HourFlow(False, math.nan, math.nan, math.nan, empty_t, empty_b, control=control)
+
+
 def _solve(net) -> HourFlow:
     try:
         pp.runpp(net)
     except pp.LoadflowNotConverged:
-        empty_t = pd.DataFrame(columns=["trafo", "s_mva", "loading_pct"])
-        empty_b = pd.DataFrame(columns=["bus", "vm_pu"])
-        return HourFlow(False, math.nan, math.nan, math.nan, empty_t, empty_b)
+        return _not_converged()
     on = net.trafo["in_service"].astype(bool)
     rt = net.res_trafo[on]
     trafo = pd.DataFrame({
@@ -206,9 +210,7 @@ def _solve_controlled(net, campus, control, equivalent) -> HourFlow:
     imp, z_ohm, c = equivalent
     outcome = dataclasses.replace(control_case(net, campus, imp, control), z_ohm=z_ohm, c=c)
     if not outcome.converged:
-        empty_t = pd.DataFrame(columns=["trafo", "s_mva", "loading_pct"])
-        empty_b = pd.DataFrame(columns=["bus", "vm_pu"])
-        return HourFlow(False, math.nan, math.nan, math.nan, empty_t, empty_b, control=outcome)
+        return _not_converged(outcome)
     flow = _solve(net)
     if not flow.converged:                                         # pragma: no cover - the loop just solved it
         return dataclasses.replace(flow, control=outcome)
@@ -237,12 +239,16 @@ def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None, retap=
     controller's outer loop in every case, the N-1 ones too: a PPC is a
     continuous controller and re-dispatches Q after an outage. Each
     ``HourFlow`` then carries its ``control`` outcome. A reactive dispatch
-    on the units (``setpoints["sgen_q"]``) cannot also be given: the PPC
-    sets their Q."""
+    on the units (``setpoints["sgen_q"]``) cannot also be given, since the
+    PPC sets their Q, nor ``retap``, since the source no longer sits on the
+    PCC bus a tap hook reads."""
     work = copy.copy(campus)
     work.net = copy.deepcopy(campus.net)
     apply_hour(work, rows)
     net = work.net
+    if control is not None and retap is not None:
+        raise ContractError("a tap hook and a plant controller cannot run together: the controller moves the grid "
+                            "source off the PCC bus, which a PCC tap hook reads")
     if setpoints:
         if control is not None and setpoints.get("sgen_q"):
             raise ContractError("a reactive dispatch on the units and a plant controller cannot both set their Q")

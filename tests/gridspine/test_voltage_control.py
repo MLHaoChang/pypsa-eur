@@ -107,6 +107,9 @@ def test_the_droop_follows_its_reference_voltage():
     ({"mode": "q_fixed", "setpoint": math.inf}, "finite"),
     ({"mode": "q_of_v", "slope_pct": 0.0, "q_max_mvar": 10.0}, "slope_pct"),
     ({"mode": "q_of_v", "slope_pct": 4.0, "q_max_mvar": math.nan}, "q_max_mvar"),
+    ({"mode": "q_of_v", "slope_pct": math.inf, "q_max_mvar": 10.0}, "slope_pct"),
+    ({"mode": "q_of_v", "slope_pct": 4.0, "q_max_mvar": 10.0, "v_ref_pu": 0.0}, "v_ref_pu"),
+    ({"mode": "q_of_v", "slope_pct": 4.0, "q_max_mvar": 10.0, "deadband_pct": math.nan}, "deadband_pct"),
     ({"mode": "q_of_v", "slope_pct": 4.0, "q_max_mvar": 10.0, "deadband_pct": -1.0}, "deadband_pct"),
     ({"mode": "q_fixed", "grid": "mid"}, "'min' or 'max'"),
 ])
@@ -133,11 +136,39 @@ def test_the_grid_equivalent_is_c_un2_over_sk_behind_the_poc(case, z_ohm, c):
     assert net.bus.at[int(net.impedance.at[imp, "to_bus"]), "name"] == "PCC"
 
 
-def test_a_pcc_without_its_grid_strength_is_refused_never_solved_stiff():
+@pytest.mark.parametrize("value", [math.nan, None, 0.0, -5.0])
+def test_a_pcc_without_its_grid_strength_is_refused_never_solved_stiff(value):
     net = copy.deepcopy(one_unit().net)
-    net.ext_grid["s_sc_min_mva"] = math.nan
+    net.ext_grid["s_sc_min_mva"] = net.ext_grid["s_sc_min_mva"].astype(object)
+    net.ext_grid.at[net.ext_grid.index[0], "s_sc_min_mva"] = value
     with pytest.raises(ContractError, match="S_k''min"):
         grid_equivalent(net, "min")
+
+
+@pytest.mark.parametrize("value", [math.nan, None, -0.1])
+def test_an_impossible_grid_r_over_x_is_refused(value):
+    net = copy.deepcopy(one_unit().net)
+    net.ext_grid["rx_max"] = net.ext_grid["rx_max"].astype(object)
+    net.ext_grid.at[net.ext_grid.index[0], "rx_max"] = value
+    with pytest.raises(ContractError, match="rx_max"):
+        grid_equivalent(net, "max")
+
+
+def test_the_grid_equivalent_needs_one_grid_connection_and_a_known_case():
+    net = copy.deepcopy(one_unit().net)
+    with pytest.raises(ContractError, match="'min' or 'max'"):
+        grid_equivalent(net, "normal")
+    pp.create_ext_grid(net, 0, s_sc_max_mva=100.0, s_sc_min_mva=100.0, rx_max=0.1, rx_min=0.1)
+    with pytest.raises(ContractError, match="exactly one grid connection"):
+        grid_equivalent(net, "min")
+
+
+def test_at_low_voltage_the_strong_grids_c_is_iec_60909s_0_95():
+    net = pp.create_empty_network()
+    b = pp.create_bus(net, vn_kv=0.4)
+    pp.create_ext_grid(net, b, s_sc_max_mva=20.0, s_sc_min_mva=10.0, rx_max=0.1, rx_min=0.1)
+    assert grid_equivalent(copy.deepcopy(net), "max")[1:] == (pytest.approx(0.95 * 0.4 ** 2 / 20.0), 0.95)
+    assert grid_equivalent(copy.deepcopy(net), "min")[1:] == (pytest.approx(1.1 * 0.4 ** 2 / 10.0), 1.1)
 
 
 # ---- the closed loop --------------------------------------------------------------------------
@@ -178,10 +209,11 @@ def test_the_weak_grid_moves_the_poc_more_than_the_strong_one_for_the_same_droop
 
 @pytest.mark.parametrize("grid", ["min", "max"])
 def test_v_control_holds_the_poc_at_its_setpoint_when_q_is_available(grid):
-    o = intact(one_unit(), PlantControl("v_control", setpoint=1.004, grid=grid)).control
-    assert o.converged and o.at_limit == ""
-    assert abs(o.v_poc_pu - 1.004) < 1e-4
-    assert -1 < o.x < 1
+    for setpoint in (1.004, 0.997):               # two setpoints: a loop on anything but V cannot hold both
+        o = intact(one_unit(), PlantControl("v_control", setpoint=setpoint, grid=grid)).control
+        assert o.converged and o.at_limit == ""
+        assert abs(o.v_poc_pu - setpoint) < 1e-4
+        assert -1 < o.x < 1
 
 
 @pytest.mark.parametrize("grid", ["min", "max"])
@@ -278,6 +310,17 @@ def test_a_loop_whose_q_works_against_the_poc_is_refused_not_root_found():
         control_case(work.net, work, imp, PlantControl("q_fixed", setpoint=1.0), run=reversed_q)
 
 
+def test_a_tap_hook_and_a_controller_cannot_run_together():
+    with pytest.raises(ContractError, match="tap hook"):
+        solve_cases(one_unit(), hour(), retap=lambda case, net: None, control=PlantControl("q_fixed"))
+
+
+def test_the_limits_of_each_setting_are_accepted():
+    for ctl in (PlantControl("pf", setpoint=1.0), PlantControl("pf", setpoint=-1.0),
+                PlantControl("q_of_v", deadband_pct=0.0, slope_pct=4.0, q_max_mvar=10.0)):
+        assert ctl.mode in vc.MODES
+
+
 def test_a_dispatch_on_the_units_and_a_controller_cannot_both_set_q():
     with pytest.raises(ContractError, match="cannot both"):
         solve_cases(one_unit(), hour(), setpoints={"sgen_q": {"PV1": 1.0}}, control=PlantControl("q_fixed"))
@@ -328,7 +371,9 @@ def test_the_chart_at_1_pu_is_the_inverter_curve_less_the_transformers_q_loss():
     assert r["status"] == "reported" and "no q_capability_pq" in r["detail"]
 
 
-BAND = {"q_capability_pq": {"points": [[-1.0, -0.5, 0.5], [0.0, -0.5, 0.5]], "clause": "test band",
+#: Asymmetric on purpose, in the site's convention: the grid may take up to 0.3 x 20 = 6 Mvar from the
+#: plant and send it up to 0.1 x 20 = 2 Mvar, so the plant must reach -2 .. +6 Mvar in the export convention.
+BAND = {"q_capability_pq": {"points": [[-1.0, -0.3, 0.1], [0.0, -0.3, 0.1]], "clause": "test band",
                             "source": "assumed"}}
 
 
@@ -336,16 +381,49 @@ def test_the_chart_judges_every_voltage_against_the_band_in_the_export_conventio
     chart = poc_pq_chart(one_unit(), BAND, 20.0, p_points=(0.0, 1.0))
     assert list(chart["v_poc_pu"].unique()) == [0.90, 0.95, 1.00, 1.05, 1.10]
     full = chart[chart["p_frac"] == 1.0]
-    # +-0.5 x 20 = +-10 Mvar required; at full P the plant reaches about +12 / -17 Mvar
     assert set(full["status"]) == {"pass"}
-    assert (full["req_q_max_mvar"] == 10.0).all() and (full["req_q_min_mvar"] == -10.0).all()
-    # P = 0 is a small import (the losses), outside the band's P range: reported, not passed
+    assert list(full["req_q_max_mvar"]) == pytest.approx([6.0] * 5)
+    assert list(full["req_q_min_mvar"]) == pytest.approx([-2.0] * 5)
+    # P = 0 imports the losses (about 0.0035 pu), inside P_SNAP_PU of the band's end: judged there
     zero = chart[chart["p_frac"] == 0.0]
-    assert set(zero["status"]) == {"reported"} and zero["detail"].str.contains("does not state this P").all()
+    assert (zero["p_poc_mw"] < 0).all() and set(zero["status"]) == {"pass"}
+
+
+def test_a_band_that_stops_short_of_the_plants_p_fails_never_passes():
+    short = {"q_capability_pq": {**BAND["q_capability_pq"], "points": [[-0.5, -0.3, 0.1], [0.0, -0.3, 0.1]]}}
+    chart = poc_pq_chart(one_unit(), short, 20.0, v_points=(1.0,), p_points=(0.4, 1.0)).set_index("p_frac")
+    assert chart.at[0.4, "status"] == "pass"
+    assert chart.at[1.0, "status"] == "fail" and "does not state this P" in chart.at[1.0, "detail"]
+    card = scorecard_rows(short, chart.reset_index(), None, "").set_index("check")
+    assert card.at["poc_pq_band", "status_as_is"] == "fail"
+    assert "does not state this P" in card.at["poc_pq_band", "detail"]
+
+
+def test_below_1_pu_the_inverters_current_limit_shrinks_their_q_and_above_it_does_not():
+    chart = poc_pq_chart(one_unit(), {}, 20.0, v_points=(0.95, 1.0, 1.05), p_points=(1.0,)).set_index("v_poc_pu")
+    # at 0.95 pu S' = 0.95 x 25 = 23.75 MVA: sqrt(23.75^2 - 20^2) = 12.81 Mvar at the inverter, not 15
+    assert chart.at[1.0, "q_max_mvar"] - chart.at[0.95, "q_max_mvar"] > 1.5
+    assert abs(chart.at[1.05, "q_max_mvar"] - chart.at[1.0, "q_max_mvar"]) < 0.5
+
+
+def test_without_a_connection_capacity_the_chart_reports_and_the_row_is_unknown():
+    chart = poc_pq_chart(one_unit(), BAND, None, v_points=(1.0,), p_points=(1.0,))
+    assert set(chart["status"]) == {"reported"} and "p_ref" in chart["detail"].iloc[0]
+    card = scorecard_rows(BAND, chart, None, "").set_index("check")
+    assert card.at["poc_pq_band", "status_as_is"] == "unknown"
+
+
+def test_a_chart_point_that_did_not_converge_fails_the_row():
+    chart = poc_pq_chart(one_unit(), BAND, 20.0, v_points=(1.0,), p_points=(1.0,))
+    lost = pd.concat([chart, pd.DataFrame([{"v_poc_pu": 0.9, "p_frac": 1.0, "status": "not converged",
+                                            "detail": "V 0.90 pu: did not converge"}])], ignore_index=True)
+    row = scorecard_rows(BAND, lost, None, "").set_index("check").loc["poc_pq_band"]
+    assert row["status_as_is"] == "fail" and "did not converge" in row["detail"]
 
 
 def test_a_band_the_plant_cannot_reach_fails_and_names_the_voltage():
     tight = {"q_capability_pq": {**BAND["q_capability_pq"], "points": [[-1.0, -0.9, 0.9], [0.0, -0.9, 0.9]]}}
+    # +-18 Mvar asked: beyond the 15 Mvar inverter at full P
     chart = poc_pq_chart(one_unit(), tight, 20.0, p_points=(1.0,))
     assert set(chart["status"]) == {"fail"}
     assert (chart["shortfall_mvar"] > 1.0).all()
@@ -487,6 +565,7 @@ def test_the_step_writes_the_chart_the_droop_on_both_grids_and_the_scorecard(tmp
     card = out["scorecard"].set_index("check")
     assert card.at["q_v_droop", "status_as_is"] in ("pass", "fail")
     assert card.at["voltage_control_modes", "status_as_is"] == "reported"
+    assert "S_k''max" in card.at["q_v_droop", "detail"]
     bare = voltage_control_campus(run, "generic_assumed")["scorecard"].set_index("check")
     assert bare.at["q_v_droop", "status_as_is"] == "unknown"
     assert bare.loc["voltage_control_modes", "status_as_is"] == "unknown"

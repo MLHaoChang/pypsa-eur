@@ -1438,7 +1438,12 @@ def voltage_control_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs
                 flows = solve_cases(campus, rows, control=dataclasses.replace(control, grid=grid))
                 lf_rows += outcome_rows({"period": period, "hour": hour}, grid, flows)
     outcomes = pd.DataFrame(lf_rows, columns=list(OUTCOME_COLUMNS))
-    card = scorecard_rows(code, chart, outcomes, why)
+    eg = campus.net.ext_grid.iloc[0]
+    grid_note = (f"S_k''min {float(eg['s_sc_min_mva']):g} MVA (R/X {float(eg['rx_min']):g}), "
+                 f"S_k''max {float(eg['s_sc_max_mva']):g} MVA (R/X {float(eg['rx_max']):g})")
+    if float(eg["s_sc_max_mva"]) == float(eg["s_sc_min_mva"]):
+        grid_note += ": no separate S_k''max entered, so the strong grid differs from the weak one only by c"
+    card = scorecard_rows(code, chart, outcomes, why, grid_note=grid_note)
     _write_text_atomic(run_dir / POC_PQ_CSV, chart.to_csv(index=False))
     _write_text_atomic(run_dir / VOLTAGE_CONTROL_LF_CSV, outcomes.to_csv(index=False))
     _write_text_atomic(run_dir / VOLTAGE_CONTROL_CSV, card.to_csv(index=False))
