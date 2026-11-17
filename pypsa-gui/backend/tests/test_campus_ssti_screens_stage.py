@@ -195,3 +195,31 @@ def test_only_an_unexpected_failure_is_logged_with_its_trace(
     with caplog.at_level("ERROR"):
         ce._ssti_screens(tmp_path, "generic_assumed", ())
     assert any("SSTI screens failed" in r.message for r in caplog.records)
+
+
+def test_a_rerun_of_the_step_clears_stale_files_first(hub):  # noqa: F811
+    """The step starts by removing every file it owns: a stale error, CSV or meta from before never
+    survives a successful screen."""
+    import json
+
+    _publish(hub, ssti_uif_threshold=THRESHOLD)
+    _run(hub)
+    run = ce.campus_dir(hub) / "run"
+    (run / ce.SSTI_SCREENS_ERROR).write_text(json.dumps({"error": "stale"}))
+    (run / ce.SSTI_SCREENS_META).write_text(
+        json.dumps({"uif": {"verdict": "stale"}, "subsync": {}})
+    )
+    for name in (
+        ce.cs.SSTI_UIF_CSV,
+        ce.cs.SUBSYNC_SCAN_CSV,
+        ce.cs.SUBSYNC_RESONANCE_CSV,
+    ):
+        (run / name).write_text("stale\n1\n")
+    ce._ssti_screens(run, "pq_test", (ce.grid_codes_dir(hub),))
+    assert not (run / ce.SSTI_SCREENS_ERROR).exists()
+    res = ce._ssti_screens_results(run)
+    assert "error" not in res
+    assert (
+        res["uif"]["threshold"] == 0.2 and res["subsync"]["verdict"] == "not evaluated"
+    )
+    assert all("stale" not in r for r in res["subsync"]["resonance"])

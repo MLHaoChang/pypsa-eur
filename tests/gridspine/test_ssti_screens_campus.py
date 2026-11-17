@@ -95,6 +95,7 @@ def test_without_a_genset_the_uif_is_not_evaluated(tmp_path):
         (["clear", "check", "not evaluated"], "check"),
         (["clear", "not evaluated"], "not evaluated"),
         (["clear", "clear"], "clear"),
+        ([], "not evaluated"),  # no series row compared nothing: never clear
     ],
 )
 def test_the_subsync_verdict_is_the_worst_series_row(
