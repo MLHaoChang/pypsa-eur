@@ -297,7 +297,7 @@ def write_psse_pack(
             grid_machine=tuple(grid_machine),
             grid_mbase_mva=grid_mbase,
             f0_hz=f_hz,
-            plant_branch=(bus1, bus2, ckt),
+            plant_branch=(bus2, bus1, ckt),  # measured at the PoC (GK A2)
             plant_machine=(num, mid),
             plant_mbase_mva=mbase,
         )
