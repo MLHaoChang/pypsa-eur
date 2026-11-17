@@ -199,6 +199,24 @@ def _uc_rows() -> tuple[FieldSpec, ...]:
     )
 
 
+def _harmonic_rows(what: str) -> tuple[FieldSpec, ...]:
+    """The harmonic screen's inputs on a Load or Generator (DGS-EXTRAS-1), as the DGS import writes them."""
+    return (
+        FieldSpec("rated_mva", "performance", "Rated apparent power", f"Rated apparent power of the {what}, for "
+                  "the harmonic screen. Leave empty when unknown: the check then reads unknown. It is never taken "
+                  "from the capacity.", "MVA", "MVA"),
+        FieldSpec("harmonic_source", "performance", "Harmonic source", "The drive topology or converter that sets "
+                  f"the {what}'s harmonic currents. linear declares no harmonic emission. Leave empty when unknown: "
+                  "the check then reads unknown.", kind="enum", options=HARMONIC_SOURCES),
+        FieldSpec("harmonic_spectrum", "performance", "Harmonic spectrum", "Harmonic current per order, as "
+                  "order:% of rated current, e.g. 5:20, 7:14. Leave empty to use the default for the harmonic "
+                  "source.", kind="text"),
+    )
+
+
+_SLACK = {"control": "Slack"}
+
+
 # ── Generator (single part) ──────────────────────────────────────────────────
 
 GENERATOR: tuple[FieldSpec, ...] = (
@@ -265,6 +283,17 @@ GENERATOR: tuple[FieldSpec, ...] = (
               "modelled horizon, e.g. a fuel or water budget. Empty for no upper bound.", "MWh", "MWh"),
     FieldSpec("control", "performance", "AC control", "Control type in the AC power flow only: PQ fixes P and Q, "
               "PV holds the voltage, Slack absorbs the imbalance.", kind="enum", options=("PQ", "PV", "Slack")),
+    FieldSpec("sk_max_mva", "performance", "Maximum short-circuit power", "Short-circuit power of the external "
+              "grid at its strongest, for fault and harmonic studies. Leave empty when unknown.", "MVA", "MVA",
+              reveal_when=_SLACK),
+    FieldSpec("sk_min_mva", "performance", "Minimum short-circuit power", "Short-circuit power of the external "
+              "grid at its weakest, for fault and harmonic studies. Leave empty when unknown.", "MVA", "MVA",
+              reveal_when=_SLACK),
+    FieldSpec("rx_max", "performance", "R/X at maximum short circuit", "Resistance-to-reactance ratio of the "
+              "external grid at its strongest. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    FieldSpec("rx_min", "performance", "R/X at minimum short circuit", "Resistance-to-reactance ratio of the "
+              "external grid at its weakest. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    *_harmonic_rows("generator"),
     *_outages(with_cf_flag=True),
 )
 
@@ -380,6 +409,7 @@ LOAD: tuple[FieldSpec, ...] = (
               "MVAr"),
     FieldSpec("sign", "performance", "Sign", "Power sign convention: −1 for a consumer (the default), +1 to make the "
               "load inject power.", "", ""),
+    *_harmonic_rows("load"),
 )
 
 # ── Link (single part, priced per MW of its input, bus0) ─────────────────────
@@ -668,12 +698,15 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 # M5: per class. `empty` sends "" (a text column the write model types `str = ""`: an emptied country or display
 # name is a decision, and null would be refused); GlobalConstraint's optional columns clear to null.
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
-                   "Generator": {"process_role"},
+                   "Generator": {"process_role", "harmonic_source", "harmonic_spectrum"},
+                   "Load": {"harmonic_source", "harmonic_spectrum"},
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
                             "start_method", "ride_through_curve"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
                    "Generator": {"dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load", "fuel_price",
-                                 "om_cost_per_run_hour", "lifetime_run_hours"},
+                                 "om_cost_per_run_hour", "lifetime_run_hours", "rated_mva", "sk_max_mva",
+                                 "sk_min_mva", "rx_max", "rx_min"},
+                   "Load": {"rated_mva"},
                    "Bus": {"mwh_per_t", "product_value", "lost_production_value", "temperature_c", "pressure_bar"},
                    "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
                             "single_phase_share", "motor_kw", "i_start_pu", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"}}
