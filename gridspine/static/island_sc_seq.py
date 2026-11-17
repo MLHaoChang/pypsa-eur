@@ -167,6 +167,55 @@ def _assumed(campus, element):
     return any(a.startswith(f"{element}:") for a in campus.assumptions)
 
 
+#: A transformer with no ``Campus.windings`` entry: Dyn11, the LV star solidly earthed (assumed).
+DEFAULT_WINDINGS = {"hv": "D", "hv_earth": None, "lv": "Y", "lv_earth": "solid"}
+
+
+def line_zero_seq(campus, name, r, x, c):
+    """``(r0, x0, c0, drafted)`` of line ``name`` per km (ohm, ohm, nF): the
+    campus's ``r0_ohm_per_km`` / ``x0_ohm_per_km`` / ``c0_nf_per_km``, each
+    missing one drafted from the positive sequence ``r``, ``x``, ``c`` as
+    R0 = R + 3 R_SCREEN_OHM_PER_KM, X0 = X, C0 = C. ``drafted`` is True when
+    any one was."""
+    r0, x0, c0 = (_p(campus, name, f) for f in ("r0_ohm_per_km", "x0_ohm_per_km", "c0_nf_per_km"))
+    drafted = r0 is None or x0 is None or c0 is None
+    r0 = r + 3.0 * R_SCREEN_OHM_PER_KM if r0 is None else r0
+    x0 = x if x0 is None else x0
+    c0 = c if c0 is None else c0
+    return r0, x0, c0, drafted
+
+
+def grid_zero_seq(campus, pcc, case, x1, rx):
+    """``(z0, drafted)``: the grid's zero-sequence impedance at bus ``pcc``
+    from its ``x0x_<case>`` and ``r0x0_<case>``, else X0 = X1 and R0/X0 = R/X
+    (``drafted`` True when ``x0x`` is missing). Same unit as ``x1``."""
+    x0x, r0x0 = _p(campus, pcc, f"x0x_{case}"), _p(campus, pcc, f"r0x0_{case}")
+    x0 = (1.0 if x0x is None else x0x) * x1
+    return complex((rx if r0x0 is None else r0x0) * x0, x0), x0x is None
+
+
+def genset_seq(block, xd):
+    """``(x2, x0, earthing, r_n_ohm)`` of a genset from its island block
+    (None when it has none): x2 = ``x2_pu`` else x''d, x0 = ``x0_pu`` else
+    GENSET_X0_RATIO x''d (pu on the unit's rating), the neutral earthing
+    (``isolated`` without a block) and its resistance in ohm (0 when solid,
+    None when isolated)."""
+    vals = block["values"] if block else {}
+    earthing = block["neutral_earthing"] if block else "isolated"
+    rn = None if earthing == "isolated" else (vals["r_n_ohm"] if earthing == "resistance" else 0.0)
+    return vals.get("x2_pu", xd), vals.get("x0_pu", GENSET_X0_RATIO * xd), earthing, rn
+
+
+def trafo_neutral_ohm(campus, name, windings, side):
+    """The neutral resistance in ohm of transformer ``name``'s ``side``
+    (``hv`` or ``lv``) star: ``r_n_<side>_ohm`` when resistance-earthed, 0
+    when solid, None when the winding has no earthed neutral."""
+    e = windings[f"{side}_earth"]
+    if e not in ("solid", "resistance"):
+        return None
+    return _p(campus, name, f"r_n_{side}_ohm") if e == "resistance" else 0.0
+
+
 def _unit_trafos(campus, sources):
     """``{transformer index: genset id}`` for the online gensets behind their
     own unit transformer (the rule of ``ISC.machine_net``)."""
@@ -242,12 +291,7 @@ def sequence_net(campus, sources, island=True, case="max", gfl_min_case="drop", 
         a, b = at[int(net.line.at[k, "from_bus"])], at[int(net.line.at[k, "to_bus"])]
         length, par = float(net.line.at[k, "length_km"]), float(net.line.at[k, "parallel"])
         r, x = float(net.line.at[k, "r_ohm_per_km"]), float(net.line.at[k, "x_ohm_per_km"])
-        r0 = _p(campus, name, "r0_ohm_per_km")
-        x0 = _p(campus, name, "x0_ohm_per_km")
-        c0 = _p(campus, name, "c0_nf_per_km")
-        r0 = r + 3.0 * R_SCREEN_OHM_PER_KM if r0 is None else r0
-        x0 = x if x0 is None else x0
-        c0 = float(net.line.at[k, "c_nf_per_km"]) if c0 is None else c0
+        r0, x0, c0, _ = line_zero_seq(campus, name, r, x, float(net.line.at[k, "c_nf_per_km"]))
         yb1 = 1.0 / (complex(r * f_t, x) * length / par / zb[a])
         yb0 = 1.0 / (complex(r0 * f_t, x0) * length / par / zb[a])
         series(y1, a, b, yb1)
@@ -274,12 +318,11 @@ def sequence_net(campus, sources, island=True, case="max", gfl_min_case="drop", 
         series(y1, a, b, 1.0 / z, t)
         series(y2, a, b, 1.0 / z, t)
         br = Branch(name, "trafo", a, b, 1.0 / z, t=t)
-        w = campus.windings.get(name, {"hv": "D", "hv_earth": None, "lv": "Y", "lv_earth": "solid"})
+        w = campus.windings.get(name, DEFAULT_WINDINGS)
         zn = {}
         for side, bus in (("hv", a), ("lv", b)):
-            e = w[f"{side}_earth"]
-            if e in ("solid", "resistance"):
-                rn = _p(campus, name, f"r_n_{side}_ohm") if e == "resistance" else 0.0
+            rn = trafo_neutral_ohm(campus, name, w, side)
+            if rn is not None:
                 zn[side] = 3.0 * rn / zb[bus]
         assumed = _assumed(campus, name)
         if "hv" in zn and "lv" in zn:
@@ -304,10 +347,9 @@ def sequence_net(campus, sources, island=True, case="max", gfl_min_case="drop", 
             y1[bus, bus] += 1.0 / complex(rx * x1, x1)
             y2[bus, bus] += 1.0 / complex(rx * x1, x1)
             pcc = names[bus]
-            x0x, r0x0 = _p(campus, pcc, f"x0x_{case}"), _p(campus, pcc, f"r0x0_{case}")
-            x0 = (1.0 if x0x is None else x0x) * x1
-            y0[bus, bus] += 1.0 / complex((rx if r0x0 is None else r0x0) * x0, x0)
-            earth[bus].append((GRID, x0x is None))
+            z0, drafted = grid_zero_seq(campus, pcc, case, x1, rx)
+            y0[bus, bus] += 1.0 / z0
+            earth[bus].append((GRID, drafted))
 
     for uid, s_mva in sources.items():
         u = campus.units.loc[uid]
@@ -317,14 +359,10 @@ def sequence_net(campus, sources, island=True, case="max", gfl_min_case="drop", 
             xd, rx = ISC._param(campus, uid, "xd_pp"), ISC._param(campus, uid, "rx_sc")
             unit_trafo = next((k for k, g in units.items() if g == uid), None)
             kg = genset_k(campus, uid, None if u["bus"] == inside else unit_trafo)
-            vals = block["values"] if block else {}
-            x2 = vals.get("x2_pu", xd)
-            x0 = vals.get("x0_pu", GENSET_X0_RATIO * xd)
+            x2, x0, earthing, rn = genset_seq(block, xd)
             y1[bus, bus] += 1.0 / (kg * complex(rx * xd, xd) * sbase / s_mva)
             y2[bus, bus] += 1.0 / (kg * complex(rx * x2, x2) * sbase / s_mva)
-            earthing = block["neutral_earthing"] if block else "isolated"
             if earthing != "isolated":
-                rn = vals["r_n_ohm"] if earthing == "resistance" else 0.0
                 y0[bus, bus] += 1.0 / (kg * complex(rx * x0, x0) * sbase / s_mva + 3.0 * rn / zb[bus])
                 earth[bus].append((uid, False))
             continue

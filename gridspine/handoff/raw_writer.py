@@ -50,18 +50,66 @@ sgen (RES / IBR machine) decisions:
   fully specified by QT/QB above, and WMOD=2/3 would make PowerFactory
   re-derive Q limits from WPF, fighting the explicit fields. Tech
   classification (wind/solar) travels in the unit registry, not the RAW.
+
+RAW v35 / v36 (``version=35`` or ``36``; v33 stays the default and its output
+is unchanged). The layouts follow files PSS/E 35.3, 35.6, 36.0 and 36.1 wrote
+themselves, whose ``@!`` header lines carry the manual's field names (the
+PSS/E Program Operation Manual itself is licensed). What differs from v33:
+- line 1 carries REV 35 / 36; a SYSTEM-WIDE section (GENERAL, GAUSS, NEWTON,
+  ADJUST, TYSL, SOLVER and the 12 RATING names; v36 adds the 12 SWDRATNAM
+  names) sits between the titles and the buses, with PSS/E 35.6's defaults;
+- generator: NREG (0, the regulated node) right after IREG, BASLOD (0) right
+  after PB;
+- branch: 'NAME' (the line's canonical name) at field 7, then RATE1..RATE12
+  (the v33 rating in 1-3, 0 in 4-12);
+- transformer: line 1 NAME up to 40 characters (the same TR_<i>_<j> name);
+  line 3 RATE1-1..RATE1-12 then COD1, CONT1, NOD1 (0), RMA1, ...;
+- sections: SYSTEM SWITCHING DEVICE between branch and transformer and
+  SUBSTATION last (v35); v36 adds VOLTAGE DROOP CONTROL, SWITCHING DEVICE
+  RATING SET, LOAD TYPE, INTERFACE and INTERFACE ELEMENT. All are written
+  empty.
+Trailing optional fields new in v35/v36 (load DGENP/DGENQ/DGENF/LOAD TYPE,
+the v36 NAME / DROOPNAME fields, transformer ZCOD, which PSS/E itself leaves
+off two-winding records) are omitted, so the importer's defaults apply.
 """
 import numpy as np
 
+from gridspine.schema.contracts import ContractError
 from gridspine.static import series_caps as SC
 
 SBASE_MVA = 100.0
+VERSIONS = (33, 35, 36)
 
 _EMPTY_TAIL = [
     "AREA", "TWO-TERMINAL DC", "VSC DC LINE", "IMPEDANCE CORRECTION",
     "MULTI-TERMINAL DC", "MULTI-SECTION LINE", "ZONE", "INTER-AREA TRANSFER",
     "OWNER", "FACTS DEVICE", "SWITCHED SHUNT", "GNE", "INDUCTION MACHINE",
 ]
+
+#: Section order per RAW version; the file writes ``0 / END OF <a> DATA,
+#: BEGIN <b> DATA`` between neighbours, ``0 / END OF <last> DATA`` and ``Q``.
+SECTIONS = {
+    33: ["BUS", "LOAD", "FIXED SHUNT", "GENERATOR", "BRANCH", "TRANSFORMER", *_EMPTY_TAIL],
+    35: ["SYSTEM-WIDE", "BUS", "LOAD", "FIXED SHUNT", "GENERATOR", "BRANCH", "SYSTEM SWITCHING DEVICE",
+         "TRANSFORMER", *_EMPTY_TAIL, "SUBSTATION"],
+    36: ["SYSTEM-WIDE", "BUS", "LOAD", "FIXED SHUNT", "VOLTAGE DROOP CONTROL", "GENERATOR",
+         "SWITCHING DEVICE RATING SET", "BRANCH", "SYSTEM SWITCHING DEVICE", "TRANSFORMER", *_EMPTY_TAIL,
+         "LOAD TYPE", "INTERFACE", "INTERFACE ELEMENT", "SUBSTATION"],
+}
+
+#: The v35/v36 system-wide block, solution defaults as PSS/E 35.6 writes them.
+_SYSTEM_WIDE = [
+    "GENERAL, THRSHZ=0.0001, PQBRAK=0.7, BLOWUP=5.0, MaxIsolLvls=4, CAMaxReptSln=20, ChkDupCntLbl=0",
+    "GAUSS, ITMX=100, ACCP=1.6, ACCQ=1.6, ACCM=1.0, TOL=0.0001",
+    "NEWTON, ITMXN=20, ACCN=1.0, TOLN=0.1, VCTOLQ=0.1, VCTOLV=0.00001, DVLIM=0.99, NDVFCT=0.99",
+    "ADJUST, ADJTHR=0.005, ACCTAP=1.0, TAPLIM=0.05, SWVBND=100.0, MXTPSS=99, MXSWIM=10",
+    "TYSL, ITMXTY=20, ACCTY=1.0, TOLTY=0.00001",
+    "SOLVER, FNSL, ACTAPS=0, AREAIN=0, PHSHFT=0, DCTAPS=0, SWSHNT=0, FLATST=0, VARLIM=99, NONDIV=0",
+    *[f'RATING, {n:2d}, "{"RATE" + str(n):<6s}", "{"RATING SET " + str(n):<32s}"' for n in range(1, 13)],
+]
+_SWD_RATING_NAMES = [f'SWDRATNAM, {n:2d}, "{"RATE" + str(n):<6s}", 0, "MVA", "{"SWD RATING SET " + str(n):<32s}"'
+                     for n in range(1, 13)]
+_N_RATES = 12  # v35/v36 rating sets on branches and transformer windings
 
 
 def _bus_numbers(net):
@@ -112,7 +160,58 @@ class _IdCounter:
         return str(n)
 
 
-def write_raw(net, path, title="gridspine export", f_hz=50.0):
+def trafo_impedance(net, tr):
+    """``(r_pu, x_pu, windv1, windv2)`` of a two-winding transformer row as the
+    RAW writes it: R/X in pu on system SBASE at the winding's bus voltage base
+    (CZ=1), the windings' off-nominal ratios in pu of the bus voltage (CW=1).
+
+    pandapower vk/vkr are on (sn_mva, vn_lv) base. Probed against net._ppc:
+    with tap_side=="lv" pandapower uses the TAP-ADJUSTED lv nominal voltage as
+    the impedance base (r/x scale by tap**2); with tap_side=="hv" it does not.
+    """
+    sn = tr["sn_mva"]
+    par = int(tr.get("parallel", 1))
+    bus_vn_hv = net.bus.at[tr["hv_bus"], "vn_kv"]
+    bus_vn_lv = net.bus.at[tr["lv_bus"], "vn_kv"]
+    tap = _tap_ratio(tr)
+    vn_hv_eff, vn_lv_eff = tr["vn_hv_kv"], tr["vn_lv_kv"]
+    if str(tr.get("tap_side", "hv")) == "lv":
+        vn_lv_eff *= tap
+    else:
+        vn_hv_eff *= tap
+    conv = (SBASE_MVA / sn) * (vn_lv_eff / bus_vn_lv) ** 2 / par
+    r_pu = (tr["vkr_percent"] / 100.0) * conv
+    z_pu = (tr["vk_percent"] / 100.0) * conv
+    x_pu = np.sqrt(max(z_pu ** 2 - r_pu ** 2, 1e-12))
+    return r_pu, x_pu, vn_hv_eff / bus_vn_hv, vn_lv_eff / bus_vn_lv
+
+
+def branch_ids(net):
+    """``(lines, trafos)``: per row, in table order, the RAW's ``(I, J, CKT)``
+    for each line (from, to) and ``(I, J, CKT)`` for each transformer (hv, lv).
+    CKT comes from a per-pair counter over each table, as ``write_raw`` stamps it.
+    """
+    nums = _bus_numbers(net)
+    name_of = net.bus["name"]
+    out = []
+    for table, a, b in ((net.line, "from_bus", "to_bus"), (net.trafo, "hv_bus", "lv_bus")):
+        ckts = _IdCounter()
+        ids = []
+        for _, row in table.iterrows():
+            i, j = nums[name_of.at[row[a]]], nums[name_of.at[row[b]]]
+            ids.append((i, j, ckts.next((min(i, j), max(i, j)))))
+        out.append(ids)
+    return tuple(out)
+
+
+def _rates(rate):
+    """RATE1..RATE12 for v35/v36: the one known rating in sets 1-3 (v33's A, B, C), 0 elsewhere."""
+    return "".join(f"{rate if k < 3 else 0.0:8.2f}," for k in range(_N_RATES))
+
+
+def write_raw(net, path, title="gridspine export", f_hz=50.0, version=33):
+    if version not in VERSIONS:
+        raise ContractError(f"RAW version {version!r} not in {VERSIONS}")
     SC.refuse(net, "PSS/E RAW writer")  # GC-01b: not written yet (follow-up)
     nums = _bus_numbers(net)
     name_of = net.bus["name"]
@@ -121,10 +220,27 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
     sgen_buses = set(sgen["bus"]) if sgen is not None else set()
     gen_buses = set(net.gen["bus"]) | slack_buses | sgen_buses
     lines = [
-        f" 0, {SBASE_MVA:.2f}, 33, 0, 0, {f_hz:.2f}",
+        f" 0, {SBASE_MVA:.2f}, {version}, 0, 0, {f_hz:.2f}",
         str(title)[:60],
-        "gridspine v33 export",
+        f"gridspine v{version} export",
     ]
+    order = SECTIONS[version]
+    n_done = 0
+
+    def begin(name):
+        """Close every open section before ``name`` (empty ones included); ``None`` closes all."""
+        nonlocal n_done
+        stop = len(order) if name is None else order.index(name)
+        for k in range(n_done, stop):
+            nxt = f", BEGIN {order[k + 1]} DATA" if k + 1 < len(order) else ""
+            lines.append(f"0 / END OF {order[k]} DATA{nxt}")
+        n_done = stop
+
+    if version >= 35:
+        lines.extend(_SYSTEM_WIDE)
+        if version >= 36:
+            lines.extend(_SWD_RATING_NAMES)
+    begin("BUS")
 
     for i in net.bus.index:
         if not net.bus.at[i, "in_service"]:
@@ -135,7 +251,7 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
             f"{nums[name_of.at[i]]},'{name_of.at[i][:12]:<12s}',{net.bus.at[i, 'vn_kv']:9.4f},"
             f"{ide}, 1, 1, 1,1.00000, 0.00000,1.10000,0.90000,1.10000,0.90000"
         )
-    lines.append("0 / END OF BUS DATA, BEGIN LOAD DATA")
+    begin("LOAD")
 
     load_ids = _IdCounter()
     for _, ld in net.load.iterrows():
@@ -147,10 +263,11 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
             f"{ld['p_mw'] * scal:10.3f},{ld['q_mvar'] * scal:10.3f},"
             f" 0.000, 0.000, 0.000, 0.000, 1,1,0"
         )
-    lines.append("0 / END OF LOAD DATA, BEGIN FIXED SHUNT DATA")
-    lines.append("0 / END OF FIXED SHUNT DATA, BEGIN GENERATOR DATA")
+    begin("GENERATOR")
 
     mach_ids = _IdCounter()
+    # v35: NREG right after IREG, BASLOD right after PB (both 0)
+    nreg, baslod = (" 0,", " 0,") if version >= 35 else ("", "")
 
     def gen_record(bus_idx, p_mw, vm_pu, mbase, stat,
                    qg=0.0, qt=9999.0, qb=-9999.0):
@@ -158,8 +275,8 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
         return (
             f"{num},'{mach_ids.next(num):<2s}',{p_mw:10.3f},{qg:8.3f},"
             f"{qt:8.3f},{qb:9.3f},"
-            f"{vm_pu:7.5f}, 0,{mbase:9.3f}, 0.00000,0.15000, 0.00000, 0.00000,1.00000,"
-            f"{stat},100.0,{mbase:9.3f},   0.000, 1,1.0000"
+            f"{vm_pu:7.5f}, 0,{nreg}{mbase:9.3f}, 0.00000,0.15000, 0.00000, 0.00000,1.00000,"
+            f"{stat},100.0,{mbase:9.3f},   0.000,{baslod} 1,1.0000"
         )
 
     for _, g in net.gen.iterrows():
@@ -189,7 +306,7 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
             lines.append(gen_record(s["bus"], p_inst * scal, 1.0, mbase,
                                     1 if s["in_service"] else 0,
                                     qg=qg, qt=qt, qb=qb))
-    lines.append("0 / END OF GENERATOR DATA, BEGIN BRANCH DATA")
+    begin("BRANCH")
 
     branch_ckts = _IdCounter()
     for _, ln in net.line.iterrows():
@@ -202,37 +319,26 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
         rate = np.sqrt(3) * vn * ln["max_i_ka"] * ln["parallel"]
         i, j = nums[name_of.at[ln["from_bus"]]], nums[name_of.at[ln["to_bus"]]]
         ckt = branch_ckts.next((min(i, j), max(i, j)))
+        if version >= 35:
+            # 'NAME' at field 7, then RATE1..RATE12
+            name = ln.get("name")
+            name = "" if name is None or name != name else str(name).replace("'", "")[:40]
+            ratings = f"'{name:<40s}'," + _rates(rate)
+        else:
+            ratings = f"{rate:8.2f},{rate:8.2f},{rate:8.2f},"
         lines.append(
             f"{i},{j},'{ckt:<2s}',"
-            f"{r_pu:10.5f},{x_pu:10.5f},{b_pu:10.5f},{rate:8.2f},{rate:8.2f},{rate:8.2f},"
+            f"{r_pu:10.5f},{x_pu:10.5f},{b_pu:10.5f},{ratings}"
             f" 0.000, 0.000, 0.000, 0.000,{1 if ln['in_service'] else 0},1, 0.00, 1,1.0000"
         )
-    lines.append("0 / END OF BRANCH DATA, BEGIN TRANSFORMER DATA")
+    begin("TRANSFORMER")
 
     trafo_ckts = _IdCounter()
     for _, tr in net.trafo.iterrows():
         sn = tr["sn_mva"]
         par = int(tr.get("parallel", 1))
         hv_bus, lv_bus = tr["hv_bus"], tr["lv_bus"]
-        bus_vn_hv = net.bus.at[hv_bus, "vn_kv"]
-        bus_vn_lv = net.bus.at[lv_bus, "vn_kv"]
-        # pandapower vk/vkr are on (sn_mva, vn_lv) base; CZ=1 wants p.u. on
-        # system SBASE at the winding's bus voltage base. Probed against
-        # net._ppc: with tap_side=="lv" pandapower uses the TAP-ADJUSTED lv
-        # nominal voltage as the impedance base (r/x scale by tap**2); with
-        # tap_side=="hv" it does not.
-        tap = _tap_ratio(tr)
-        vn_hv_eff, vn_lv_eff = tr["vn_hv_kv"], tr["vn_lv_kv"]
-        if str(tr.get("tap_side", "hv")) == "lv":
-            vn_lv_eff *= tap
-        else:
-            vn_hv_eff *= tap
-        conv = (SBASE_MVA / sn) * (vn_lv_eff / bus_vn_lv) ** 2 / par
-        r_pu = (tr["vkr_percent"] / 100.0) * conv
-        z_pu = (tr["vk_percent"] / 100.0) * conv
-        x_pu = np.sqrt(max(z_pu ** 2 - r_pu ** 2, 1e-12))
-        windv1 = vn_hv_eff / bus_vn_hv
-        windv2 = vn_lv_eff / bus_vn_lv
+        r_pu, x_pu, windv1, windv2 = trafo_impedance(net, tr)
         shift = float(tr.get("shift_degree", 0.0) or 0.0)
         hv, lv = nums[name_of.at[hv_bus]], nums[name_of.at[lv_bus]]
         ckt = trafo_ckts.next((min(hv, lv), max(hv, lv)))
@@ -245,17 +351,18 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
             f"{hv},{lv},0,'{ckt:<2s}',1,1,1, 0.00000, 0.00000,2,'{xname:<12s}',{stat},1,1.0000"
         )
         lines.append(f"{r_pu:10.5f},{x_pu:10.5f},{sn:8.2f}")
+        if version >= 35:
+            # RATE1-1..RATE1-12, COD1, CONT1, NOD1 (0)
+            ratings = _rates(rate) + "0, 0, 0,"
+        else:
+            ratings = f"{rate:8.2f},{rate:8.2f},{rate:8.2f},0, 0,"
         lines.append(
             f"{windv1:7.5f},{tr['vn_hv_kv']:9.4f},{shift:7.3f},"
-            f"{rate:8.2f},{rate:8.2f},{rate:8.2f},0, 0,"
+            f"{ratings}"
             f"1.10000,0.90000,1.10000,0.90000,33,0, 0.00000, 0.00000, 0.000"
         )
         lines.append(f"{windv2:7.5f},{tr['vn_lv_kv']:9.4f}")
-    lines.append("0 / END OF TRANSFORMER DATA, BEGIN AREA DATA")
-
-    for k, name in enumerate(_EMPTY_TAIL[1:], start=1):
-        lines.append(f"0 / END OF {_EMPTY_TAIL[k - 1]} DATA, BEGIN {name} DATA")
-    lines.append(f"0 / END OF {_EMPTY_TAIL[-1]} DATA")
+    begin(None)
     lines.append("Q")
 
     with open(path, "w", newline="\n") as f:
