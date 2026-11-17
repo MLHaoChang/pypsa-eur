@@ -1,6 +1,6 @@
 # UX-flow audit: one entry point, owning section, visible next step
 
-Status: ready-for-agent
+Status: ready-for-agent (the UX-NEXT-1 findings are verified fixed, see the 2026-11-17 comment; W3b and R1 findings remain)
 Progress: Audit document (26 findings) merged; the fix tickets it routes are not shown done.
 Type: audit, which routes into fix tickets
 Owner of the audit: UX reviewer. The coordinator routes each fix to its package.
@@ -81,3 +81,5 @@ Each fix PR is gated on the three rules above, with screenshots of the old place
 ## Comments
 
 - 2026-10-26, R1-single-run (finding 4), done in #719: the AC PF Run had already left Solver settings (W4b, 67d42bb); #719 removes its unused frontend client, makes "Apply clustering…" ask first (ConfirmDialog) and adds a "Run the solve ›" next step through `requestRunSolve`. Open: the assistant's `run_ac_pf_stage` path, `.scratch/harness/issues/24` (#715).
+
+- 2026-11-17, UX-NEXT-1 close-out (code check on master c78a115e, not a live-app walk): fixed and verified in code: #12 (#539), #5 (#548), #6, #7, #23, #24, #25 (#543, #601, #604), #9 and #10 (#556), #1 (W3b-R, #741 and #750). Also found fixed in code: #8, #11, #16, #18, #19 (no duplicate entry points left), #21 (Decision study row is gated), #26 (Expert opens section 1 after a template). Still open here: the lasting "Open results" header link (part of #25), now with the run-progress package. #2, #3, #4, #13-15, #17, #20, #22 stay with W3b / R1 as routed above.
