@@ -145,6 +145,10 @@ describe('the served row reason (BC 17)', () => {
       .toBe('Not established. The figure is out of range.')
     expect(rowReason('ebit', { ...PNL, row_reason: { ebit: [item(null, 'not_finite:ebitda')] } }))
       .toBe('Not established: the EBITDA figure is out of range.')
+    // Two codes with the same words read once (two lines missing one escalation class).
+    expect(rowReason('revenue', { ...PNL, row_reason: { revenue: [
+      item('operating', 'escalation_missing:tariff:bill'), item('operating', 'escalation_missing:tariff:fee')] } }))
+      .toBe('Not established: the operating section needs an escalation rate for tariff.')
     expect(rowReason('x', { ...PNL, row_reason: { x: [item(null, 'not_established')] } }))
       .toBe('Not established.')
     mount({ ...DONE, report: { ...REPORT, pnl: served } })

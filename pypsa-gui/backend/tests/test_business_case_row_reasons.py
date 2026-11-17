@@ -190,6 +190,87 @@ def test_each_edge_alone_names_its_input(row, dep, knock):
     assert got[row] == got[dep] and want in got[row]
 
 
+_TAXED = [
+    "depreciation",
+    "ebit",
+    "equity_after_working_capital",
+    "equity_post_tax",
+    "net_income",
+    "project_after_working_capital",
+    "project_post_tax",
+    "tax",
+    "tax_equity",
+]
+_PRE = ["credits", "equity_pre_tax", "project_pre_tax"]
+#: GK B on #1559: exactly the rows each knockout leaves None, each reading exactly its
+#: leaf (deduplicated), so an edge the engine does not have fails here.
+KNOCK_ROWS = {
+    "op": sorted(
+        _TAXED
+        + _PRE
+        + [
+            "ebitda",
+            "ebitda_margin",
+            "ebitda_net_of_pass_through",
+            "opex",
+            "revenue",
+            "revenue_net_of_pass_through",
+            "working_capital_change",
+        ]
+    ),
+    "term": sorted(_TAXED + _PRE + ["terminal"]),
+    "tax": _TAXED,
+    "capex": sorted(_TAXED + _PRE + ["capex"]),
+    "debt": sorted(_TAXED + ["equity_pre_tax"]),
+    "inc": sorted(_TAXED + ["credits"]),
+    "rd": [
+        "equity_after_working_capital",
+        "project_after_working_capital",
+        "working_capital_change",
+    ],
+}
+
+
+@pytest.mark.parametrize("knock", sorted(KNOCK))
+def test_each_knockout_leaves_exactly_its_rows_each_naming_exactly_its_leaf(knock):
+    p, got, want = _knock(knock)
+    assert sorted(got) == KNOCK_ROWS[knock]
+    exact = [want]
+    if knock == "op":
+        exact.append(
+            {
+                "section": "operating",
+                "code": "linked_output_not_evaluated:served_product.nh3:stale",
+            }
+        )
+    for row, items in got.items():
+        assert items == exact, row
+
+
+def test_two_knockouts_read_in_table_order_each_input_once():
+    r, p, got = _case(
+        lines=[_line(), _capex(money_year=2028)],
+        ic=dict(
+            terminal_value=TerminalValueRule(method="fixed"),
+            escalation={k: v for k, v in ESC.items() if k != "capex"},
+        ),
+    )
+    term = {"section": "terminal", "code": "terminal_value_missing"}
+    capex = {"section": "capex", "code": "overnight_cost_missing:plant"}
+    for row in ("ebit", "net_income", "project_pre_tax", "credits", "equity_post_tax"):
+        assert got[row] == [term, capex], row
+    # The tax's own order: capex first, then the operating section's terminal.
+    assert got["tax"] == got["depreciation"] == [capex, term]
+
+
+def test_the_debt_rows_name_no_tax_input_they_do_not_read():
+    r, p, got = _case(ic=KNOCK["debt"][0]["ic"], pack=None)
+    debt = {"section": "debt", "code": "input_missing:upfront_fee:0:term_loan"}
+    tax = {"section": "tax", "code": "tax_pack_missing"}
+    assert got["equity_pre_tax"] == [debt]
+    assert got["tax"] == got["equity_post_tax"] == [debt, tax]
+
+
 def test_a_linked_output_not_evaluated_follows_its_line():
     _, _, got = _case(lines=[_LINKED], outputs=_STALE)
     assert got["revenue"] == [
