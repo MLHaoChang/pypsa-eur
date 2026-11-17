@@ -36,6 +36,7 @@ import datetime
 import hashlib
 import json
 import math
+import types
 
 import numpy as np
 
@@ -102,27 +103,45 @@ def data_hash(campus_spec, params) -> str:
 class ModelSet:
     """
     One frozen model set: its id, the hash of its inputs, when it was
-    frozen, the parameters, and the campus description of each variant
-    (``specs["aggregated"]`` is None when only the detailed model was
-    frozen). ``unit_map`` maps each aggregated unit to the detailed units
-    it stands for (empty without an aggregated variant).
+    frozen, and each variant's ``model_hash`` (computed at the freeze).
+
+    The frozen data is held privately and every accessor returns a copy, so
+    nothing a caller does to what it reads changes the model set or its
+    manifest: ``params``, ``specs`` (the campus description of each variant;
+    ``specs["aggregated"]`` is None when only the detailed model was
+    frozen), ``unit_map`` (each aggregated unit -> the detailed units it
+    stands for; empty without an aggregated variant) and ``assumptions``
+    (what the aggregation left out, one line each).
     """
 
     model_set_id: str
     data_hash: str
     created_utc: str
-    params: dict
-    specs: dict
-    unit_map: dict
+    model_hashes: types.MappingProxyType
+    _params: dict = dataclasses.field(repr=False)
+    _specs: dict = dataclasses.field(repr=False)
+    _unit_map: dict = dataclasses.field(repr=False)
+    assumptions: tuple = ()
+
+    @property
+    def params(self) -> dict:
+        return copy.deepcopy(self._params)
+
+    @property
+    def specs(self) -> dict:
+        return copy.deepcopy(self._specs)
+
+    @property
+    def unit_map(self) -> dict:
+        return copy.deepcopy(self._unit_map)
 
     def spec(self, variant: str) -> dict:
         """
-        A copy of the campus description of ``variant`` (the frozen one
-        stays as hashed); refused when the variant is unknown or was not
-        frozen.
+        A copy of the campus description of ``variant``; refused when the
+        variant is unknown or was not frozen.
         """
         _check_variant(self, variant)
-        return copy.deepcopy(self.specs[variant])
+        return copy.deepcopy(self._specs[variant])
 
 
 def _check_variant(ms, variant):
@@ -130,20 +149,27 @@ def _check_variant(ms, variant):
         raise ContractError(
             f"model set {ms.model_set_id}: unknown variant {variant!r}; allowed {list(VARIANTS)}"
         )
-    if ms.specs.get(variant) is None:
+    if ms.model_hashes.get(variant) is None:
         raise ContractError(
             f"model set {ms.model_set_id}: the {variant} variant was not frozen"
         )
 
 
+def model_hash(spec) -> str:
+    """SHA-256 (hex) of one variant's campus description, canonical form."""
+    return data_hash(spec, {})
+
+
 def new_model_set(
-    campus_spec, params, *, aggregated=None, unit_map=None, now=None
+    campus_spec, params, *, aggregated=None, unit_map=None, assumptions=None, now=None
 ) -> ModelSet:
     """
     A ``ModelSet`` from the detailed campus description and the study
-    parameters (both hashed), the aggregated description derived from them
-    (not hashed: it follows from the inputs), and the freeze time ``now``
-    (a timezone-aware datetime; default the current UTC time).
+    parameters (both in ``data_hash``), the aggregated description derived
+    from them (in its own ``model_hash``, not in ``data_hash``: it follows
+    from the inputs), and the freeze time ``now`` (a timezone-aware
+    datetime; default the current UTC time). Every hash is computed here,
+    once.
     """
     h = data_hash(campus_spec, params)
     now = now or datetime.datetime.now(datetime.UTC)
@@ -154,13 +180,16 @@ def new_model_set(
         "detailed": copy.deepcopy(campus_spec),
         "aggregated": None if aggregated is None else copy.deepcopy(aggregated),
     }
+    hashes = {v: None if specs[v] is None else model_hash(specs[v]) for v in VARIANTS}
     return ModelSet(
         model_set_id=ID_PREFIX + h[:ID_DIGITS],
         data_hash=h,
         created_utc=created,
-        params=copy.deepcopy(params),
-        specs=specs,
-        unit_map=copy.deepcopy(unit_map or {}),
+        model_hashes=types.MappingProxyType(hashes),
+        _params=copy.deepcopy(params),
+        _specs=specs,
+        _unit_map=copy.deepcopy(unit_map or {}),
+        assumptions=tuple(assumptions or ()),
     )
 
 
@@ -169,20 +198,15 @@ def manifest(ms: ModelSet, variant: str) -> dict:
     What every export pack (GC-04..06) embeds to name the model it was
     written from: ``model_set_id``, ``data_hash``, ``variant`` and
     ``model_hash``. ``data_hash`` names the inputs; ``model_hash`` (the
-    SHA-256 of the variant's own campus description, same canonical form)
-    names the model itself, so an aggregated model that a later version of
-    the aggregation code derives differently from the same inputs does not
-    pass under the same manifest.
+    SHA-256 of the variant's own campus description, same canonical form,
+    taken at the freeze) names the model itself, so an aggregated model that
+    a later version of the aggregation code derives differently from the
+    same inputs does not pass under the same manifest.
     """
     _check_variant(ms, variant)
     return {
         "model_set_id": ms.model_set_id,
         "data_hash": ms.data_hash,
         "variant": variant,
-        "model_hash": model_hash(ms.specs[variant]),
+        "model_hash": ms.model_hashes[variant],
     }
-
-
-def model_hash(spec) -> str:
-    """SHA-256 (hex) of one variant's campus description, canonical form."""
-    return data_hash(spec, {})
