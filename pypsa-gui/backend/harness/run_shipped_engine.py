@@ -223,7 +223,7 @@ def freeze(task, path=None) -> dict:
     return frozen
 
 
-def pick(path, step_id, ticked, digest, instance=None) -> str:
+def pick(path, step_id, ticked, digest, instance) -> str:
     """S-B2c (GK B (60) Q1 = A, P1): the user's pick from the pick card whose
     digest is `digest`. Checked against the cases as they are now, then written
     to `run.explore.shipped_pick` and the step frozen anew, in one update under
@@ -248,10 +248,7 @@ def pick(path, step_id, ticked, digest, instance=None) -> str:
             and isinstance(unfrozen.get("pick"), dict)
             and run_actions.digest(unfrozen["pick"]) == digest
             and "shipped_pick" not in (t["run"].get("explore") or {})
-            and (
-                instance is None
-                or (t["run"].get("runner") or {}).get("lease_owner") == instance
-            )
+            and (t["run"].get("runner") or {}).get("lease_owner") == instance
         )
 
     if not awaiting(task):

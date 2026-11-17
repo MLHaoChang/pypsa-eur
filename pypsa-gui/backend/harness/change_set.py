@@ -278,8 +278,9 @@ def validate_ticks(pc, decision: str, ticked: Any) -> list[str] | None:
         return None
     # Study harness 14 S-B2c (GK B (60) P2): among native steps only the shipped
     # cases' pick card takes ticks, at most its `pick_max` and at least one.
-    pick = pc.tool_name == SHIPPED_PICK_TOOL and isinstance(
-        (pc.args or {}).get("pick_max"), int
+    pick = (
+        pc.tool_name == SHIPPED_PICK_TOOL
+        and type((pc.args or {}).get("pick_max")) is int  # never a bool
     )
     if pc.tool_name != TOOL and not pick:
         raise HTTPException(

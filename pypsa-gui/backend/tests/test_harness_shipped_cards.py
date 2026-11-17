@@ -182,6 +182,10 @@ def test_a_pick_from_another_card_or_runner_or_a_second_pick_is_closed(
         _kind(lambda: _pick(path, ["low_price"], instance="other"))
         == "shipped_pick_closed"
     )
+    assert (
+        _kind(lambda: _pick(path, ["low_price"], instance=None))
+        == "shipped_pick_closed"
+    )
     assert _read(path) == before
     card = run_actions.pick_card(_step(path))
     _pick(path, ["low_price"])
@@ -305,6 +309,7 @@ def test_the_pick_card_takes_ticks_within_its_cases_and_cap():
     [
         (run_actions.SHIPPED, {"digest": "d"}),  # the approval card
         (run_actions.SHIPPED, {"digest": "d", "tool_use_ids": LP, "pick_max": "2"}),
+        (run_actions.SHIPPED, {"digest": "d", "tool_use_ids": LP, "pick_max": True}),
         (run_actions.CAMPUS, {"digest": "d", "tool_use_ids": LP, "pick_max": 2}),
     ],
 )
@@ -452,3 +457,7 @@ def test_a_finance_only_run_never_saves(baseline, tmp_path, queue, monkeypatch):
     )
     _start(path, pid)
     assert saved == [] and _step(path)["result"]["saved"] is None
+
+
+def test_the_cards_lp_kind_is_the_shipped_modules():
+    assert run_actions._LP == run_shipped.LP

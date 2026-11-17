@@ -440,6 +440,7 @@ def _note(field, note) -> dict:
 
 
 # S-B2c (GK B (60) P7): the unit of each field a shipped case changes.
+_LP = "lp"  # `harness.run_shipped.LP` (not imported here: harness imports services)
 SHIPPED_UNITS = {
     "price": "EUR/MWh",
     "share": "of output",
@@ -476,7 +477,7 @@ def _shipped_rows(frozen, ids, cap_now) -> list[dict]:
     for case in frozen["cases"]:
         if case["status"] != "admissible":
             what = f"not run: {case.get('why')}"
-        elif case["kind"] != "lp":
+        elif case["kind"] != _LP:
             what = (
                 "runs with no solve; read not evaluated (it moves only the settlement)"
             )
@@ -539,7 +540,7 @@ def pick_card(step) -> dict | None:
     pick = (step.get("unfrozen") or {}).get("pick")
     if not isinstance(pick, dict):
         return None
-    lp = [c for c in pick["cases"] if c["status"] == "admissible" and c["kind"] == "lp"]
+    lp = [c for c in pick["cases"] if c["status"] == "admissible" and c["kind"] == _LP]
     others = [c for c in pick["cases"] if c not in lp]
 
     def other(c):
