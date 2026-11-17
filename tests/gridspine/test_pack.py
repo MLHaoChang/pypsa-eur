@@ -381,6 +381,9 @@ def test_run_ratings_reads_the_campus_connection(tmp_path):
     with pytest.raises(ContractError, match="rated_mw needs a stated source"):
         run_ratings(tmp_path, rated_mw=90.0)
     assert run_ratings(tmp_path / "none").rated_mw is None
+    for text in ("", "name: x\n", "pcc:\n", "pcc:\n  vn_kv: 33\n"):
+        (tmp_path / "campus.yaml").write_text(text)
+        assert run_ratings(tmp_path).rated_mw is None
 
 
 # --- pack binding ---------------------------------------------------------------------------------------------
