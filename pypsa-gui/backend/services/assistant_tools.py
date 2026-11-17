@@ -354,7 +354,7 @@ def _candidate(ctx, changes):
                     _check_investment_parts(change.component_class, parts, row=row)
                 except HTTPException as exc:
                     workflow._refuse("invalid_edit_value",
-                                     f"{class_label(change.component_class)} {name!r}: {exc.detail}")
+                                     f"{class_label(change.component_class)} '{name}': {exc.detail}")
         component.static.loc[change.names, change.attribute] = change.value
         for name in change.names:
             stored = component.static.at[name, change.attribute]
