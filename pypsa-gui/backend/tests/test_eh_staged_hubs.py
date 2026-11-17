@@ -389,14 +389,53 @@ def test_a_sunk_existing_unit_does_not_call_its_zero_cost_a_pack_default(staged)
     tid, n = staged
     cls = {"generators": "Generator", "storage_units": "StorageUnit", "links": "Link",
            "stores": "Store"}
-    sunk = 0
+    sunk = kept = 0
     for frame, klass in cls.items():
         df = getattr(n, frame)
         for a in (a for a in EXISTING[tid] if a in df.index):
             if df.at[a, "overnight_cost"] == 0.0:
                 sunk += 1
-                assert "overnight_cost" not in provenance.get(n, klass, a), (tid, a)
+                stamps = provenance.get(n, klass, a)
+                assert stamps["overnight_cost"]["status"] == "default", (tid, a)
+                assert stamps["overnight_cost"]["source"] == H._site().SUNK_COST_SOURCE, (tid, a)
+                # only that stamp goes: the pack's lifetime still reads as a pack default
+                if "lifetime" in stamps:
+                    kept += 1
+                    assert stamps["lifetime"]["status"] == "default", (tid, a)
     assert sunk
+    if tid == "eh_h2_hub_staged":
+        assert kept  # the fuel cell is the pack-priced existing unit
+        # the 0 reads as the ledger's assumption, not as a user's value
+        rows = T.template_meta(tid)["ledger"]
+        assert any(r.get("source") == "assumed" and r.get("item") == "fuel cell"
+                   and "overnight cost 0" in str(r.get("value")) for r in rows)
+        assert n.links.at["fuel_cell", "overnight_cost"] == 0.0
+        assert provenance.get(n, "Link", "fuel_cell")["overnight_cost"]["source"].startswith(
+            "template assumption")
     # a candidate keeps its pack stamp
     cand = next(a for a in n.generators.index if a.startswith(("wind_new", "pv_new", "solar_new")))
     assert provenance.get(n, "Generator", cand)["overnight_cost"]["status"] == "default"
+
+
+def test_the_sunk_cost_stamp_feeds_no_input_fingerprint_or_case_digest():
+    """GK B D2: the re-stamp is provenance only. The exact and lossy input fingerprints
+    and the investment case's owner-asset digest read the same with the pack's stamp
+    (what master wrote) and with the template's."""
+    from types import SimpleNamespace
+
+    from services.asset_schema import provenance
+    from services.results.finance_case import owner_assets_digest
+    from services.solver_service import SolverConfig
+    from services.workflow_tools import _network_input_fingerprint
+
+    n = T.BUILDERS["eh_h2_hub_staged"]()
+    ctx = SimpleNamespace(network=n, solver_state={"solver_config": SolverConfig()}, user_ts={},
+                          name="t")
+    owners = {"value_flows": {"asset_owners": {"site": list(H.H2_EXISTING)}}}
+    before = (_network_input_fingerprint(ctx), _network_input_fingerprint(ctx, exact=True),
+              owner_assets_digest(n, owners))
+    provenance.record(n, "Link", "fuel_cell", "overnight_cost", status="default",
+                      source="defaults-pack@2026-10-26#0000000000000000")
+    after = (_network_input_fingerprint(ctx), _network_input_fingerprint(ctx, exact=True),
+             owner_assets_digest(n, owners))
+    assert before == after

@@ -111,7 +111,7 @@ def _sink_stores(n, existing) -> None:
     (the H2 tank) is sunk the same way."""
     rows = [a for a in existing if a in n.stores.index]
     n.stores.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, DISCOUNT_RATE]
-    _site()._forget_pack_price(n, "stores", rows)
+    _site()._stamp_sunk_cost(n, "stores", rows)
 
 
 def _in_service(n, existing) -> None:
@@ -686,7 +686,8 @@ def _h2_meta(T, planning=None) -> dict:
              "source": "assumed",
              "note": "each period is one representative week standing for several years, so no "
                      "energy is carried from one period into the next"},
-            {"item": "fuel cell", "value": "the existing 10 MW unit, no staged candidate",
+            {"item": "fuel cell", "value": "the existing 10 MW unit, overnight cost 0 (sunk), "
+                                          "no staged candidate",
              "source": "assumed",
              "note": "the pack's fuel cell lives 10 years: a staged one would retire before 2045"},
             *_h2_case_rows(y0),
