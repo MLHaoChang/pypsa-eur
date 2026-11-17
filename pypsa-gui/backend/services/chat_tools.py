@@ -3548,6 +3548,7 @@ _BC_CODES = {
     "business_case_inputs_invalid": "business_case_inputs_invalid",
     "solver_config_invalid": "business_case_inputs_invalid",
     "business_case_changed": "business_case_changed",
+    "network_busy": "business_case_busy",
     "investment_case_missing": "investment_case_missing",
     "solver_in_flight": "solver_in_flight",
     "finance_inputs_missing": "finance_inputs_missing",
@@ -3683,16 +3684,47 @@ def _bc_inputs() -> dict:
     return out
 
 
+# Cut first when the options outgrow the cap; each cut is named in `truncated`.
+_BC_OPTIONS_CUT_ORDER = ("offered_rows", "outputs", "units_by_source", "refusals")
+
+
+def _bc_options() -> dict:
+    """The line table's options and the refusals of the stored lines (bc 16), as the
+    table reads them. A busy model is `business_case_busy`."""
+    from routers.results import get_business_case_options as _h
+
+    with _bc_errors():
+        out = dict(_h())
+    cut = []
+    for section in _BC_OPTIONS_CUT_ORDER:
+        if _json_len(out) <= _BC_INPUTS_CHARS:
+            break
+        if out.get(section) is not None:
+            out[section] = None
+            cut.append(section)
+    if cut:
+        out["truncated"] = cut
+        out["truncated_note"] = ("cut to fit the chat: " + ", ".join(cut)
+                                 + "; say they were not read, never that there are none")
+    out["hint"] = ("offer a unit only from units_by_source; name each refusal in plain words "
+                   "(its field and why), and say a part that reads None was not read")
+    return out
+
+
 def get_business_case(detail: str = "summary") -> dict:
-    """The business-case run and its stored report (detail='summary'), or the
-    stored inputs with their digest and the citable turns (detail='inputs')."""
+    """The business-case run and its stored report (detail='summary'), the
+    stored inputs with their digest and the citable turns (detail='inputs'), or what
+    the line table offers and refuses (detail='options')."""
     from routers.results import get_business_case as _h
     from services.business_case.verdict import verdict as bc_verdict
 
-    if detail not in ("summary", "inputs"):
-        _ic_raise(422, "business_case_request_invalid", "detail is 'summary' or 'inputs'")
+    if detail not in ("summary", "inputs", "options"):
+        _ic_raise(422, "business_case_request_invalid",
+                  "detail is 'summary', 'inputs' or 'options'")
     if detail == "inputs":
         return _bc_inputs()
+    if detail == "options":
+        return _bc_options()
     body = _h()
     if getattr(body, "status_code", None) == 204:
         out = _no_data("business_case", _BC_NO_DATA)

@@ -1062,3 +1062,75 @@ def test_citations_that_are_not_a_list_are_invalid_citations(bc):
     assert d["error_kind"] == "price_not_from_user" and d["status"] == 422
     assert d["reason"] == "invalid_citations"
     assert chat_tools.get_business_case(detail="inputs")["business_case"] is None
+
+
+def test_options_read_offers_units_and_refuses_nothing_without_lines(bc):
+    out = chat_tools.get_business_case(detail="options")
+    assert set(out["units_by_source"]) == {"typed", "share_of", "linked"}
+    assert out["units_by_source"]["typed"]["revenue"]
+    assert out["refusals"] == [] or out["refusals"] is None
+    assert out["hint"] and "truncated" not in out
+
+
+def test_options_read_names_a_refusal_of_a_stored_line(bc, monkeypatch):
+    import routers.results as R
+
+    monkeypatch.setattr(R, "_bc_ic_horizon", lambda: ((2030, 2040), 2025))
+    monkeypatch.setattr(R, "_bc_ic_current", lambda: None)
+    monkeypatch.setattr(R, "_bc_raw", lambda: _bc(_line(start_year=1990)))
+    out = chat_tools.get_business_case(detail="options")
+    assert out["refusals"], out["refusals_reason"]
+    assert any("start_year" in str(r) for r in out["refusals"])
+
+
+def test_options_read_busy_keeps_the_refusal_kind(bc):
+    import routers.results as R
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(R, "_solver_in_flight", lambda: True)
+        assert _refused(chat_tools.get_business_case, detail="options")["error_kind"] == "solver_in_flight"
+    lock = R.PyPSAService.get_lock()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(R, "_IC_LOCK_WAIT_S", 0.01)
+        held, free = threading.Event(), threading.Event()
+
+        def hold():
+            with lock:
+                held.set()
+                free.wait(5)
+
+        t = threading.Thread(target=hold)
+        t.start()
+        held.wait(5)
+        try:
+            assert _refused(chat_tools.get_business_case, detail="options")["error_kind"] == "business_case_busy"
+        finally:
+            free.set()
+            t.join()
+
+
+def test_options_read_with_no_network_says_why_never_empty(bc):
+    import routers.results as R
+
+    ctx = R.PyPSAService.get_active_context()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ctx, "network", None)
+        out = chat_tools.get_business_case(detail="options")
+    assert out["outputs"] is None and out["outputs_reason"] == "no_network"
+
+
+def test_an_oversize_options_read_names_what_was_cut(bc, monkeypatch):
+    import routers.results as R
+
+    real = R.get_business_case_options
+    monkeypatch.setattr(
+        R, "get_business_case_options",
+        lambda: {**real(), "offered_rows": [{"name": "x" * 200} for _ in range(60)]},
+    )
+    out = chat_tools.get_business_case(detail="options")
+    assert out["truncated"][0] == "offered_rows" and out["offered_rows"] is None
+    assert "not read" in out["truncated_note"] or "cut" in out["truncated_note"]
+
+
+def test_the_options_route_is_bound_to_the_read_tool():
+    assert ("GET", "/api/results/business_case/options") in TOOL_ROUTES["get_business_case"]

@@ -4686,8 +4686,11 @@ TOOLS: list[dict[str, Any]] = [
         "stale. `truncated` lists any section cut to fit. detail='inputs': the stored "
         "lines {business_case, digest, status, citable_turns} — pass `digest` as "
         "set_business_case_lines' if_match; `citable_turns` are the user's own messages a "
-        "price may cite. Safety: read.",
-        {"detail": {"type": "string", "enum": ["summary", "inputs"]}},
+        "price may cite. detail='options': what the line table offers {variants, "
+        "offered_rows, units_by_source (typed / share_of / linked per output), outputs "
+        "(or outputs_reason), refusals (or refusals_reason), horizon}: offer a line only "
+        "a unit its source allows and name each refusal in plain words. Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "inputs", "options"]}},
         [],
     ),
     _t(
@@ -5944,7 +5947,8 @@ TOOL_ROUTES: dict[str, list] = {
     # business case (4) — business case 08b; the preset route stays panel-only (Q3)
     "run_business_case": [("POST", "/api/results/business_case")],
     "get_business_case": [("GET", "/api/results/business_case"),
-                          ("GET", "/api/results/business_case/inputs")],
+                          ("GET", "/api/results/business_case/inputs"),
+                          ("GET", "/api/results/business_case/options")],
     "set_business_case_lines": [("PUT", "/api/results/business_case/inputs")],
     "apply_business_case_preset": [("GET", "/api/results/business_case/preset"),
                                    ("PUT", "/api/results/business_case/inputs")],
