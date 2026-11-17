@@ -655,11 +655,164 @@ def test_a_workbook_that_is_not_the_input_workbook_is_refused(tmp_path):
     from gridspine.ingest.import_result import ImportFormatError
 
     wb = openpyxl.Workbook()
-    wb.active.title = "buses"
+    wb.active.title = "notes"
     path = tmp_path / "other.xlsx"
     wb.save(path)
-    with pytest.raises(ImportFormatError, match="not the app's input workbook"):
+    with pytest.raises(ImportFormatError, match="none of the sheets"):
         _read(path)
+
+
+# ── older layouts (S1b, E6) ──────────────────────────────────────────────────
+
+
+def _book(tmp_path, sheets: dict, name="legacy.xlsx"):
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for sheet, rows in sheets.items():
+        ws = wb.create_sheet(sheet)
+        for row in rows:
+            ws.append(row)
+    path = tmp_path / name
+    wb.save(path)
+    return path
+
+
+def _native(n, tmp_path):
+    """As today's /export/excel writes it: a text that reads as a formula gets a leading quote."""
+    path = tmp_path / "native.xlsx"
+    n.export_to_excel(str(path))
+    wb = openpyxl.load_workbook(path)
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.startswith(
+                    L.FORMULA_LEADS
+                ):
+                    cell.value, cell.data_type = "'" + cell.value, "s"
+    wb.save(path)
+    return path
+
+
+def test_pypsa_s_own_excel_export_reads_as_before(tmp_path):
+    n = _network(False)
+    res = _read(_native(n, tmp_path))
+    # PyPSA's own reader gives whole-number weightings an int dtype, as today's route does.
+    _assert_same(n, res.network, weight_dtype=False)
+    assert res.sidecars == {}
+    assert _um(res) == []
+    assert res.report.counts["Nodes"] == len(n.buses)
+
+
+def test_a_pypsa_export_column_off_the_allow_list_is_reported_not_set(tmp_path):
+    n = pypsa.Network()
+    n.add("Bus", "B1", v_nom=110.0)
+    n.buses["cmd"] = "x"
+    res = read_excel(_native(n, tmp_path))
+    assert "cmd" not in res.network.buses.columns
+    assert (
+        "buses › column cmd",
+        "not an input of this kind of asset; the column was not read",
+    ) in _um(res)
+
+
+def test_a_legacy_sheet_row_the_model_refuses_is_reported_not_dropped(tmp_path):
+    """The old /import/excel swallowed these rows (`except Exception: pass`)."""
+    path = _book(
+        tmp_path,
+        {
+            "buses": [["name", "v_nom"], ["B1", 110.0]],
+            "generators": [
+                ["name", "bus", "p_nom"],
+                ["G1", "B1", 5.0],
+                ["G1", "B1", 6.0],
+                [None, "B1", 7.0],
+                ["'=cmd", "B1", 1.0],
+            ],
+            "notes": [["x"]],
+        },
+    )
+    res = read_excel(path)
+    assert sorted(res.network.generators.index) == ["=cmd", "G1"]
+    assert res.network.generators.at["G1", "p_nom"] == 5.0
+    reasons = dict(_um(res))
+    assert reasons["generators row 3 (G1)"] == "a second row with the same name"
+    assert reasons["generators row 4"] == "the row has values but no name"
+    assert reasons["notes"] == "not a component sheet; its rows were not read"
+    assert res.report.counts == {"Nodes": 1, "Generators": 2}
+
+
+def test_a_legacy_column_off_the_allow_list_is_reported_not_set(tmp_path):
+    """E1 holds for raw sheets too: a header is a model input or on the allow-list."""
+    path = _book(
+        tmp_path,
+        {
+            "buses": [
+                ["name", "v_nom", "__class__", "eh_flag"],
+                ["B1", 110.0, "x", True],
+            ],
+        },
+    )
+    res = read_excel(path, {"custom_columns": {"Bus": ["eh_flag"]}})
+    assert "__class__" not in res.network.buses.columns
+    assert bool(res.network.buses.at["B1", "eh_flag"]) is True
+    assert _um(res) == [
+        (
+            "buses › column __class__",
+            "not an input of this kind of asset; the column was not read",
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [
+        (
+            "inf",
+            "p_nom: infinity is not allowed here",
+        ),  # an .xlsx cannot hold a float inf
+        (True, "p_nom: a TRUE/FALSE value in a number column"),
+        ("lots", "p_nom: 'lots' is not a number"),
+    ],
+)
+def test_a_legacy_cell_the_model_cannot_take_is_reported(tmp_path, value, reason):
+    """E3 on raw sheets: the row is reported with the reason, never half-added."""
+    path = _book(
+        tmp_path,
+        {
+            "buses": [["name", "v_nom"], ["B1", 110.0]],
+            "generators": [["name", "bus", "p_nom"], ["G1", "B1", value]],
+        },
+    )
+    res = read_excel(path)
+    assert res.network.generators.empty
+    assert _um(res) == [("generators › G1", reason)]
+
+
+def test_a_legacy_formula_with_no_saved_value_is_reported(tmp_path):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "buses"
+    ws.append(["name", "v_nom"])
+    ws.append(["B1", "=1+1"])
+    path = tmp_path / "f.xlsx"
+    wb.save(path)
+    res = read_excel(path)
+    assert "B1" in res.network.buses.index
+    assert (
+        "buses › cell B2",
+        "a formula with no saved value; open and save the file in Excel, "
+        "or type the value",
+    ) in _um(res)
+
+
+def test_unescape_undoes_only_the_export_s_quote():
+    from gridspine.ingest.excel_import import unescape_formula
+
+    assert unescape_formula("'=cmd") == "=cmd"
+    assert unescape_formula("'-5") == "'-5"
+    assert unescape_formula("'abc") == "'abc"
+    assert unescape_formula("=x") == "=x"
+    assert unescape_formula(3.0) == 3.0
 
 
 def test_the_registry_finds_this_reader():

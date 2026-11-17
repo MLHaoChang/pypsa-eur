@@ -7,8 +7,8 @@ entry with the reason; a blank it fills with the model default becomes a
 `report.assumed` entry.
 
 It reads the input workbook `excel_export.write_workbook` writes (About + Horizon
-and finance). The older layouts today's /import/excel reads (PyPSA's own export,
-raw-named sheets) follow in their own slice (S1b); until then they are refused.
+and finance), and the older layouts today's /import/excel reads: PyPSA's own
+export (a `network` sheet) and raw-named component sheets (`buses`, `generators`, …).
 
 Every workbook is untrusted, the hidden rows included (GK B E1–E3): a model name
 must be an input attribute of its class or on the caller's allow-list, a factor
@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import pathlib
+import tempfile
 import zipfile
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -856,6 +857,191 @@ def _read_input_workbook(
     return rd.n, sidecars
 
 
+# ── the older layouts today's /import/excel reads (S1b, GK B E6) ─────────────
+
+#: Raw-named component sheets: one header row of model names, then one row per asset.
+_LEGACY_SHEETS = {
+    "buses": "Bus",
+    "generators": "Generator",
+    "lines": "Line",
+    "links": "Link",
+    "loads": "Load",
+    "storage_units": "StorageUnit",
+    "stores": "Store",
+    "transformers": "Transformer",
+}
+
+
+def _is_number(text: str) -> bool:
+    try:
+        float(text)
+    except ValueError:
+        return False
+    return True
+
+
+def unescape_formula(value: Any) -> Any:
+    """Undo the `'` today's /export/excel puts before a text that would read as a formula."""
+    if (
+        isinstance(value, str)
+        and value.startswith("'")
+        and value[1:].startswith(L.FORMULA_LEADS)
+        and not _is_number(value[1:])
+    ):
+        return value[1:]
+    return value
+
+
+def _static_inputs(n: pypsa.Network, cls: str, custom: Mapping[str, set]) -> set[str]:
+    """The columns a file may set on `cls` (E1): its static input attributes and the caller's allow-list."""
+    d = n.components[L.LIST_NAME[cls]].defaults
+    inputs = d.index[d["static"] & d["status"].astype(str).str.startswith("Input")]
+    return set(inputs) | set(custom.get(cls, ()))
+
+
+def _report_formulas(sheets: _Sheets, report: ImportReport) -> None:
+    for sheet, r, c in sheets.unread_formulas():
+        report.unmapped.append(
+            Unmapped(
+                f"{sheet} › cell {get_column_letter(c)}{r}",
+                "a formula with no saved value; open and save the file in Excel, or type the value",
+            )
+        )
+
+
+def _read_native(
+    path: pathlib.Path, sheets: _Sheets, report: ImportReport, custom: Mapping[str, set]
+) -> pypsa.Network:
+    """
+    PyPSA's own Excel export, read by PyPSA as today's /import/excel does (cached
+    values, the `'` undone). A column that is not a model input of its class and
+    not on the caller's allow-list is dropped and reported (E1).
+    """
+    import openpyxl
+
+    n = pypsa.Network()
+    with tempfile.TemporaryDirectory() as directory:
+        copy = pathlib.Path(directory) / "network.xlsx"
+        wb = openpyxl.load_workbook(path, data_only=True)
+        for ws in wb.worksheets:
+            for row in ws.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        new = unescape_formula(cell.value)
+                        if new != cell.value:
+                            cell.value = new
+                            cell.data_type = "s"
+        wb.save(copy)
+        wb.close()
+        try:
+            n.import_from_excel(str(copy), engine="openpyxl")
+        except Exception as exc:  # noqa: BLE001 - PyPSA's reader failing is one refusal
+            logger.warning("PyPSA Excel layout refused", exc_info=True)
+            raise L.ImportFormatError(
+                "The workbook has a 'network' sheet but PyPSA could not read it."
+            ) from exc
+    for cls, sheet, ln in L.SHEETS:
+        table = getattr(n, ln)
+        if table.empty:
+            continue
+        allowed = _static_inputs(n, cls, custom)
+        attrs = n.components[ln].defaults
+        extra = [c for c in table.columns if c not in attrs.index and c not in allowed]
+        for col in extra:
+            report.unmapped.append(
+                Unmapped(
+                    f"{ln} › column {col}",
+                    "not an input of this kind of asset; the column was not read",
+                )
+            )
+        if extra:
+            table.drop(columns=extra, inplace=True)
+        report.counts[sheet] = len(table)
+    _report_formulas(sheets, report)
+    return n
+
+
+def _read_legacy_sheets(
+    sheets: _Sheets, report: ImportReport, custom: Mapping[str, set]
+) -> pypsa.Network:
+    """Raw-named component sheets: header row, then one row per asset."""
+    n = pypsa.Network()
+    for sheet in sheets.names:
+        cls = _LEGACY_SHEETS.get(sheet)
+        if cls is None:
+            report.unmapped.append(
+                Unmapped(sheet, "not a component sheet; its rows were not read")
+            )
+            continue
+        rows = sheets.rows[sheet]
+        if not rows:
+            continue
+        defaults = n.components[L.LIST_NAME[cls]].defaults
+        allowed = _static_inputs(n, cls, custom)
+        headers = list(rows[0])
+        name_col = headers.index("name") if "name" in headers else 0
+        columns: dict[int, str] = {}
+        for c, h in enumerate(headers):
+            if c == name_col or h is None:
+                continue
+            if not isinstance(h, str) or h not in allowed:
+                report.unmapped.append(
+                    Unmapped(
+                        f"{sheet} › column {str(h)[:40]}",
+                        "not an input of this kind of asset; the column was not read",
+                    )
+                )
+                continue
+            columns[c] = h
+        added = 0
+        for r, row in enumerate(rows[1:], start=2):
+            if all(v is None for v in row):
+                continue
+            raw = row[name_col] if name_col < len(row) else None
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                report.unmapped.append(
+                    Unmapped(f"{sheet} row {r}", "the row has values but no name")
+                )
+                continue
+            name = unescape_formula(_convert(raw, str))
+            if name in getattr(n, L.LIST_NAME[cls]).index:
+                # PyPSA skips a second add with a warning only: report it instead.
+                report.unmapped.append(
+                    Unmapped(
+                        f"{sheet} row {r} ({name})", "a second row with the same name"
+                    )
+                )
+                continue
+            values: dict[str, Any] = {}
+            bad = None
+            for c, key in columns.items():
+                v = row[c] if c < len(row) else None
+                if v is None:
+                    continue
+                try:
+                    values[key] = _convert(
+                        unescape_formula(v),
+                        _attr_type(defaults, key),
+                        inf=_allowed_inf(defaults, key),
+                    )
+                except _Bad as exc:
+                    bad = f"{key}: {exc}"
+                    break
+            if bad is not None:
+                report.unmapped.append(Unmapped(f"{sheet} › {name}", bad))
+                continue
+            try:
+                n.add(cls, name, **values)
+                added += 1
+            except Exception as exc:  # noqa: BLE001 - the model's refusal is the reason
+                report.unmapped.append(
+                    Unmapped(f"{sheet} › {name}", f"the model refused the row: {exc}")
+                )
+        report.counts[L.SHEET_OF[cls]] = report.counts.get(L.SHEET_OF[cls], 0) + added
+    _report_formulas(sheets, report)
+    return n
+
+
 # ── entry point ──────────────────────────────────────────────────────────────
 
 
@@ -881,10 +1067,18 @@ def read_excel(
     path = paths[0]
     report = ImportReport(source_format=FORMAT_ID, source_files=[path.name])
     sheets = _Sheets(path)
-    if not (L.ABOUT in sheets.names and L.HORIZON in sheets.names):
+    custom = {
+        cls: set(cols) for cls, cols in (options.get("custom_columns") or {}).items()
+    }
+    if L.ABOUT in sheets.names and L.HORIZON in sheets.names:
+        n, sidecars = _read_input_workbook(sheets, report, options)
+    elif "network" in sheets.names:
+        n, sidecars = _read_native(path, sheets, report, custom), {}
+    elif set(sheets.names) & set(_LEGACY_SHEETS):
+        n, sidecars = _read_legacy_sheets(sheets, report, custom), {}
+    else:
         raise L.ImportFormatError(
-            f"{path.name} is not the app's input workbook (it has no About and "
-            f"'{L.HORIZON}' sheets). Download the template from the Import dialog and fill it in."
+            f"{path.name} has none of the sheets an Excel import reads. Download the "
+            "template from the Import dialog and fill it in."
         )
-    n, sidecars = _read_input_workbook(sheets, report, options)
     return ImportResult(network=n, sidecars=sidecars, report=report)
