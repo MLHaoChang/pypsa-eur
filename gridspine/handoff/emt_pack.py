@@ -587,4 +587,7 @@ def bundle_emt_pack(bundle_dir, campus, rows) -> dict:
         p = write_emt_pack(target, campus, stages={"hour": installed})
     except EmtPackError as e:
         return {"not_written": str(e)}
-    return {"manifest": f"{BUNDLE_DIR}/{MANIFEST}", "data_hash": p.manifest["data_hash"]}
+    return {
+        "manifest": f"{BUNDLE_DIR}/{MANIFEST}",
+        "data_hash": p.manifest["data_hash"],
+    }
