@@ -135,7 +135,7 @@ def check(data, template_id: str) -> list[dict]:
         if not label:
             _invalid(f"Case {cid} needs a label.")
         if label in labels:
-            _invalid(f"Two cases share the label {case['label']!r}.")
+            _invalid(f"Two cases share the label “{case['label']}”.")
         labels.add(label)
         changes = case.get("changes")
         if not isinstance(changes, list) or not changes:
