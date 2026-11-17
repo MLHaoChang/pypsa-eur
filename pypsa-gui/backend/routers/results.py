@@ -701,6 +701,9 @@ def get_ac_pf_status():
         "available": True,
         "slack_bus_used": s.get("ac_pf_slack_bus_used"),
         "stripped_voll_slacks": s.get("ac_pf_stripped_voll_slacks") or [],
+        # DGS-SEED-1: non-empty when the flow was seeded by lpf() because
+        # these transformers shift phase.
+        "seeded_by": s.get("ac_pf_seeded_by") or [],
         # `converged_per_snapshot` is the legacy `{iso: bool}` dict; on
         # multi-period the same ISO can map to multiple periods so the map
         # is ambiguous. New consumers should use `converged_list` —

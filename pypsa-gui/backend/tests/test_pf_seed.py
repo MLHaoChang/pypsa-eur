@@ -54,10 +54,10 @@ def test_dyn11_chain_fails_flat_start():
 def test_dyn11_chain_converges_seeded_and_says_so():
     n = _chain()
     log: list[str] = []
-    result = run_pf(
+    result, seeded_by = run_pf(
         n, log.append, snapshots=n.snapshots, use_seed=False, distribute_slack=False
     )
-    assert _converged(result)
+    assert _converged(result) and seeded_by == ["T1", "T2"]
     assert len(log) == 1 and "lpf() then pf(use_seed=True)" in log[0]
     assert "T1, T2" in log[0]
     # The seeded solve lands on the shifted angle: two -30° hops below the slack.
@@ -69,7 +69,7 @@ def test_dyn11_chain_converges_seeded_and_says_so():
 def test_solver_service_call_shape_is_seeded_too():
     """``run_simulation``'s pf mode calls ``run_pf(network, phase)`` with no kwargs."""
     n = _chain()
-    assert _converged(run_pf(n, lambda _m: None))
+    assert _converged(run_pf(n, lambda _m: None)[0])
 
 
 class _Spy:
@@ -96,7 +96,8 @@ def test_no_shift_keeps_the_exact_flat_start_call(shift):
     spy = _Spy(n)
     log: list[str] = []
     kw = dict(snapshots=n.snapshots, x_tol=1e-6, use_seed=False, distribute_slack=False)
-    assert _converged(run_pf(n, log.append, **kw))
+    result, seeded_by = run_pf(n, log.append, **kw)
+    assert _converged(result) and seeded_by == []
     assert spy.calls == [("pf", kw)]
     assert log == []
 
@@ -115,7 +116,7 @@ def test_inactive_shifting_transformer_keeps_flat_start():
     n.add("Generator", "G2", bus="MV2", control="Slack")  # MV2 is its own island
     assert phase_shift_transformers(n) == []
     spy = _Spy(n)
-    assert _converged(run_pf(n, None, use_seed=False))
+    assert _converged(run_pf(n, None, use_seed=False)[0])
     assert spy.calls == [("pf", {"use_seed": False})]
 
 
@@ -156,7 +157,7 @@ def test_call_sites_use_run_pf():
     from services import ac_pf_service, solver_service
 
     acpf = inspect.getsource(ac_pf_service)
-    assert "pf_result = run_pf(" in acpf and "network.pf(" not in acpf
+    assert "pf_result, seeded_by = run_pf(" in acpf and "network.pf(" not in acpf
     assert "_run_pf(network, phase)" in inspect.getsource(solver_service.run_simulation)
     assert pf_seed.run_pf is run_pf
 
@@ -180,3 +181,22 @@ def test_log_names_at_most_five_transformers(count, tail):
     log: list[str] = []
     run_pf(n, log.append)
     assert f"{count} transformer(s)" in log[0] and log[0].endswith(tail)
+
+
+@pytest.mark.parametrize("shift, seeded_by", [(30.0, ["T1", "T2"]), (0.0, [])])
+def test_stage2_ac_pf_records_the_seed(shift, seeded_by):
+    """Stage 2 after LOPF converges on the Dyn11 chain and records the seed."""
+    import queue
+
+    from services.ac_pf_service import run_ac_pf_stage
+    from services.solver_service import SolverConfig
+
+    n = _chain(shift=shift)
+    n.generators.loc["G", ["p_nom", "marginal_cost"]] = [100.0, 10.0]
+    n.optimize(solver_name="highs")
+    log: queue.Queue = queue.Queue()
+    out = run_ac_pf_stage(n, SolverConfig(), log)
+    assert out["ac_pf_converged_count"] == out["ac_pf_total_snapshots"] == 2
+    assert out["ac_pf_seeded_by"] == seeded_by
+    lines = [log.get_nowait() for _ in range(log.qsize())]
+    assert any("pf(use_seed=True)" in m for m in lines) is bool(seeded_by)

@@ -47,10 +47,13 @@ def run_pf(network, phase: Callable[[str], None] | None = None, **pf_kwargs):
     ``network.pf(**pf_kwargs)``. With one, it runs ``network.lpf()`` on the
     same snapshots and then ``pf`` with ``use_seed=True``, and says so
     through ``phase``.
+
+    Returns ``(pf_result, seeded_by)``: ``seeded_by`` lists the transformers
+    that triggered the seed, empty for a flat start.
     """
     shifted = phase_shift_transformers(network, pf_kwargs.get("snapshots"))
     if not shifted:
-        return network.pf(**pf_kwargs)
+        return network.pf(**pf_kwargs), []
     if phase is not None:
         names = ", ".join(map(str, shifted[:5])) + ("..." if len(shifted) > 5 else "")
         phase(
@@ -61,4 +64,4 @@ def run_pf(network, phase: Callable[[str], None] | None = None, **pf_kwargs):
         {"snapshots": pf_kwargs["snapshots"]} if "snapshots" in pf_kwargs else {}
     )
     network.lpf(**lpf_kwargs)
-    return network.pf(**{**pf_kwargs, "use_seed": True})
+    return network.pf(**{**pf_kwargs, "use_seed": True}), shifted
