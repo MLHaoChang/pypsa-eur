@@ -88,3 +88,5 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 - L4: the PR body and release note name it as an engine change, and `tests/gridspine/test_planning_criteria.py` runs in full.
 
 **2026-11-17, GK A2 minor CSV notes folded into PR2:** an N-2 row naming the same branch twice is listed `not_representable`; an `order` other than 1 or 2 (0 included) is refused by name with its line.
+
+**2026-11-17, GK A2 ruling on P4: (A).** P4's intent is that no shared `campus_study.py` code changes. Private `_gc03_*` helpers and GC-03 constants beside the two steps meet it. Conditions: every addition is `_gc03_`-prefixed or a GC-03 constant; no existing line in `campus_study.py` changes; the PR body states "campus_study.py: additive only (+N/−0)".
