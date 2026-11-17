@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): An Excel import now re-derives the costs of a battery or line with priced investment parts from those parts, as creating it does, and refuses a priced part without a lifetime. Pricing a row with priced parts from the defaults pack as a plain technology is refused instead of being re-derived away.

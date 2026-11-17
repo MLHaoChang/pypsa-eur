@@ -459,6 +459,9 @@ async def import_excel(
                             pass
 
     n = _parse_candidate("Excel workbook", parse)
+    # TCU 10 (N5): the parts own their row's costs, as on create; a priced part without a lifetime is refused.
+    from services.network_crud import rederive_imported_parts
+    rederive_imported_parts(n)
     # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
     from services.adequacy.eh_columns import normalise_eh_columns
     normalise_eh_columns(n)
