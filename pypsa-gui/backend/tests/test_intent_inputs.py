@@ -310,3 +310,19 @@ def test_defaults_name_the_marked_grid_import(n):
         "source": ii.SOURCE_PROJECT,
         "kind": "project",
     }
+
+
+def test_the_import_cap_refusal_is_one_plain_sentence(n):
+    # UX 2: no engine id, no brackets, no "loss chord".
+    inputs, _ = _resolve(n, {"pq": {"p_cap_mw": 10.0}})
+    assert _refused(ii.apply_pq, n, inputs) == (
+        "Point of connection: import cap (MW) out of range. The flow can reach 40 MW, beyond the import cap "
+        "of 10 MW, where the loss approximation is no longer an upper bound."
+    )
+
+
+def test_a_tag_out_of_range_names_the_value_given(n):
+    inputs, _ = _resolve(n, {"pq": {"pf": 1.5}})
+    assert _refused(ii.apply_pq, n, inputs) == (
+        "Point of connection: load power factor out of range. Given: load power factor = 1.5."
+    )

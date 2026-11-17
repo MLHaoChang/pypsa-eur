@@ -346,7 +346,7 @@ def apply_pq(n, inputs: dict) -> dict:
         ]
         if named:
             raise IntentInputsRefusal(
-                f"Point of connection: {', '.join(named)} out of range ({_plain(text)})"
+                f"Point of connection: {', '.join(named)} out of range. {_sentence(text)}"
             )
         raise IntentInputsRefusal(f"Point of connection: {_plain(text)}")
     return rest
@@ -359,6 +359,19 @@ def _number(field: str, v) -> float:
             f"Point of connection: {PQ_LABELS[field]} must be a number, got {type(v).__name__}"
         )
     return float(v)
+
+
+def _sentence(text: str) -> str:
+    """The check's out-of-range message as one plain sentence (UX 2): no link name, no tag column, no brackets,
+    no "loss chord"."""
+    text = re.sub(r"^link \S+: ", "", text)
+    text = re.sub(
+        r"beyond pq_p_cap_mw = (\S+) MW", r"beyond the import cap of \1 MW", text
+    )
+    text = text.replace("loss chord", "loss approximation")
+    given = re.fullmatch(r"(.+) out of range", text)
+    text = _plain(f"Given: {given.group(1)}" if given else text)
+    return text[:1].upper() + text[1:].rstrip(".") + "."
 
 
 def _plain(text: str) -> str:

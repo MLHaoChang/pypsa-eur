@@ -440,3 +440,27 @@ def test_a_bool_point_of_connection_value_is_422_by_its_label(client, hub):
         r.json()["detail"]
         == "Point of connection: load power factor must be a number, got bool"
     )
+
+
+def test_a_link_with_no_maximum_capacity_is_refused_by_name_through_post(
+    client, hub, monkeypatch
+):
+    """GK B1 / P2: the form offers no rating the check would refuse; the POST names the link and the setting."""
+    import pypsa
+
+    name, project_dir = hub
+    nc = next(project_dir.rglob("network.nc"))
+    n = pypsa.Network(str(nc))
+    n.links.loc["grid_import", ["p_nom_extendable", "p_nom_max"]] = [True, float("inf")]
+    n.export_to_netcdf(str(nc))
+    _island_off(client)
+    d = _defaults(client, name)
+    assert d["pq"]["p_cap_mw"]["value"] is None
+    assert "Maximum capacity" in d["pq"]["p_cap_mw"]["reason"]
+    body = _body(d, "BC")
+    body["inputs"]["pq"] = {"s_n_mva": 40.0, "p_cap_mw": 40.0}
+    r = client.post(URL.format(name), json=body)
+    assert r.status_code == 422
+    assert r.json()["detail"].startswith(
+        "Campus link: grid_import has no maximum capacity"
+    )
