@@ -8,7 +8,7 @@ campus island report and the GFM settings, and passes them here. Each
 becomes one ``EvidenceSection`` with code-rendered tables, its numbers in the
 number audit's facts (IRRs as percent, ``*_pct``, so "8.5 %" verifies), and
 the disclosures a reader must see beside them: the counterfactual's basis,
-the island break-even as a threshold, the island study's screening caveat,
+the island-capability break-even as a threshold, the island study's screening caveat,
 the GFM settings as heuristic screening, capacity needed, a re-solve owed.
 
 A chapter is built only when its source was passed (``None`` = the project
@@ -20,6 +20,7 @@ from __future__ import annotations
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from services.finance.breakeven import LABEL as ISLAND_BREAKEVEN_LABEL
 from services.reports import formatting as F
 
 INVESTMENT = "investment_case"
@@ -120,7 +121,7 @@ def investment_table(payload: dict, source_path: str):
         ("Price basis", F.fmt_text(payload.get("basis_statement"))),
     ]
     if payload.get("island_breakeven_text"):
-        rows.append(("Island capability break-even", F.fmt_text(payload["island_breakeven_text"])))
+        rows.append((ISLAND_BREAKEVEN_LABEL, F.fmt_text(payload["island_breakeven_text"])))
     return EvidenceTable(table_id=INVESTMENT, columns=["Item", "Value"], rows=[list(r) for r in rows],
                          caption="Investment case: headline figures", source_path=source_path)
 
@@ -136,8 +137,8 @@ def investment_disclosures(payload: dict) -> list[str]:
         out.append(f"Investment case — {payload['no_counterfactual']}.")
     out += [f"Investment case — {n}" for n in payload.get("counterfactual_notes") or []]
     if payload.get("island_breakeven_text"):
-        out.append("Investment case — the island break-even is a threshold the island capability "
-                   "would have to reach, not a value the case earns; it is not in the NPV.")
+        out.append(f"Investment case — the {ISLAND_BREAKEVEN_LABEL.lower()} is a threshold the island "
+                   "capability would have to reach, not a value the case earns; it is not in the NPV.")
     return out
 
 

@@ -46,6 +46,13 @@ PROVENANCE = ("synthetic illustrative data (P19 template) — representative "
               "before any decision")
 
 
+def _island_breakeven_item() -> str:
+    """The ledger row's item: the one display name, lowercase like its neighbours."""
+    from services.finance.breakeven import LABEL
+
+    return LABEL.lower()
+
+
 def _solar(peak_hour: float = 13.0, width: float = 3.2,
            cloud: tuple[float, ...] = (1.0, 0.9, 0.55, 0.8, 1.0, 0.95, 0.7)
            ) -> np.ndarray:
@@ -1356,7 +1363,7 @@ def _mg_single_meta(planning: Planning | None = None) -> dict:
              "note": "the plan is not sized for the island requirements; the island checks "
                      "report what islanding would need. Turn them on to plan for it (owner: "
                      "island data on, rows off, the user opts in)"},
-            {"item": "island break-even", "value": "not applicable",
+            {"item": _island_breakeven_item(), "value": "not applicable",
              "source": "assumed",
              "note": "the island rows are off, so the comparison is not relaxed for them and the "
                      "case does not price an island capability"},

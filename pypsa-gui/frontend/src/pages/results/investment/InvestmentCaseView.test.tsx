@@ -195,7 +195,7 @@ describe('InvestmentCaseView', () => {
     expect(screen.getByTestId('ic-cf-notes').textContent).toMatch(/pv has no typed cost/)
   })
 
-  it('states the island capability break-even beside the NPV (owner decision 2026-10-15)', async () => {
+  it('states the island-capability break-even beside the NPV (owner decision 2026-10-15)', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true } })
     const rep = structuredClone(REPORT)
     const project = rep.sections!.project!.payload as Record<string, unknown>
