@@ -86,3 +86,10 @@ def test_the_loader_needs_no_site_packages():
     proc = subprocess.run([sys.executable, '-S', '-c', code, str(json_fragments.Path(json_fragments.__file__).parent)],
                           capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr
+
+
+def test_every_registry_base_merges_with_its_fragments():
+    """RETRO-FRAG-1's registries use the same loader; each real base and folder merges."""
+    from tests.test_registry_fragments import REGISTRY_FILES
+    for base in REGISTRY_FILES:
+        assert isinstance(load_merged(base), dict), base
