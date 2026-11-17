@@ -10,7 +10,7 @@ harness/
   protocol.py     the provider seam: LLMProvider, LLMRequest, LLMEvent, ERROR_KINDS
   catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES
   toolsets.py     ordered provider-neutral catalogue views and always-available controls
-  events.py       the closed vocabulary of frames the turn loop yields to the UI
+  events.py       the closed vocabulary of frames the turn loop yields to the UI; (live-voice 11c) `PROGRESS_FRAMES`, the separate vocabulary of the /progress stream (`tool_progress`, `job_snapshot`, `job_terminal`)
   assurance.py    opt-in checked input/result drafts and publication gate
   assurance_scope.py  typed requested metrics, windows, cost basis and retained/comparison IDs
   assurance_conversation.py  bounded checked-scope carryover, cost clarification and previous-run selection
@@ -37,6 +37,7 @@ harness/
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py); `dispatch_tool_call` is the one per-call path (allowlist → guard → validators → card → handler) every caller drives
   run_lifecycle.py  LC-19: a re-solve of current results is asked about before its card (`results_current`), and a failed solve names its triage reads; nothing re-runs by itself
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call; (live-voice 11b) each bridge ends when its session's `monitor_generation` moves (Stop monitoring, `POST /api/chat/{id}/progress/stop`, `ChatSession.stop_monitoring`), which ends this session's observation only, never the job (cancelling is the `cancel_job` tool). The generation is per session and is not the 11c event-ring epoch
+  progress_ids.py (live-voice 11c) /progress event ids `<epoch>:<seq>`: an epoch is a nonce signed with the server key and the session id, so a past epoch still verifies for its session after a restart (resumed with a `job_snapshot`) and another session's does not (409 `progress_cursor_foreign`)
   job_adapters.py the fg:/ad:/rpt: job handles for wait_for_job without holding the turn, and (live-voice 11a) `job_status` / `cancel_job`: one neutral view of every job family, solve queue and GridSpine included, with a cursor, start revision, outcome and a cancel that reports only what it verified. Cancel verdicts: `cancelled` (outcome cancelled and the worker exited), `cancel_requested` (sent, not yet confirmed within the settle bound, capped at `CANCEL_SETTLE_MAX_SECONDS`), `already_finished`, `finished_first`, `origin_lost` (a newer run took the record, the worker exited without a status, or the project was reopened as a new context: nothing is stopped; a switch to another project is 409 `job_project_mismatch`), `refused` (with `refusal.error_kind`: the queue refused the abort, or `not_stoppable`); a native handle with no owner is 409 `job_owner_unknown` on cancel. The stop is set on the handle's own record in the same solver-state-lock hold that checked its origin
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
@@ -62,7 +63,7 @@ harness/
   mcp_client.py   external tools from admin-listed MCP servers (issue 19): the server list, the stdio and HTTP JSON-RPC client, the per-session tool list and tiers, the dispatcher
   goals.py        a goal with a round budget: set/pause/complete, what stops it after a turn, the per-turn goal block (rounds run in loop.run_turn)
   ratelimit.py    the /stream token bucket
-  sse.py          the SSE framing of a yielded (event, payload)
+  sse.py          the SSE framing of a yielded (event, payload); an optional `id:` line, written only on the /progress stream (live-voice 11c)
   fence.py        the untrusted-content delimiters and the neutraliser
   results.py      tool-result shaping: coercion, truncation, the per-turn result budget, error content
   spill.py        oversized results kept whole per owner and session; the model gets a preview and a locator for `read_result`
@@ -821,10 +822,18 @@ merge in either order. The inventory, route parity
 (`smoke/assistant_route_parity.py`) and control matrix
 (`smoke/assistant_control_matrix.py`) are built in memory by their `--check`s and
 are not committed; `--write` saves a copy under `.scratch/live-voice/` (git
-ignores it) for reading. New entries in the shared hand-written JSON go in a new
-fragment file per PR: error kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity
-declarations in `smoke/assistant_route_parity_declarations.d/`
-(`smoke/json_fragments.py` merges them and fails on a duplicate). A declaration or
+ignores it) for reading. New entries in a shared list go in a new fragment file
+per PR, never a new row in the shared file (RETRO-COST-1, RETRO-FRAG-1): error
+kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity declarations in
+`smoke/assistant_route_parity_declarations.d/`, a write route's or tool's lock
+decision in `tests/write_surface_lock_policy.d/`, a route's chat disposition in
+`tests/route_chat_disposition.d/`, a feature chat cannot do (and its refusal
+goals) in `services/not_via_chat.d/`, a tool's LC-06 family, variant or evidence
+in `smoke/family_manifest.d/`, and a results route's golden surfaces in
+`tests/golden_route_surfaces.d/`. Each folder's README has the format.
+`smoke/json_fragments.py` merges them after the Python rows and fails on a key
+defined twice, so a fragment adds rows and never overrides one; every check
+(stale or unknown route, unknown tool, ceilings) runs on the merged table. A declaration or
 `KNOWN_GAPS` row whose route a tool now serves stays in place and passes as stale;
 the coordinator's sweep deletes it (`smoke/prune_stale_declarations.py`). New tool
 blocks go at the end of TOOLS (and of the matching chat_tools section). Existing tools then keep their selection tie-breaks, which `wiring._bounded_tools` resolves toward the earlier index. Two PRs that append at the same anchor conflict as text: resolve it by keeping both blocks, the earlier-merged PR's first, then run `assistant_inventory.py --check` and the tool-selection tests at the merge.
