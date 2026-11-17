@@ -1566,3 +1566,26 @@ def test_the_float_formatter_is_restored_when_the_save_fails(tmp_path, monkeypat
     assert seen == ["0.30000000000000004"]  # swapped during the save
     assert _writer.safe_string is original
     assert _writer.safe_string(0.1 + 0.2) == "0.3"
+
+
+def test_the_formula_pass_stops_at_the_cell_limit(tmp_path, monkeypatch):
+    """The cap holds in the first pass too: it refuses before reading the rest of the sheet."""
+    import re
+    import zipfile
+
+    small = b'<dimension ref="A1:A1"/>'
+    path = _write(_network(False), tmp_path)
+    assert openpyxl.load_workbook(path).sheetnames[0] == L.ABOUT
+    with zipfile.ZipFile(path) as zf:
+        members = [m for m in zf.namelist() if m.startswith("xl/worksheets/sheet")]
+    for m in members:  # every declared size passes, so only the passes count cells
+        _patch_xml(path, m, lambda d: re.sub(rb'<dimension ref="[^"]+"/>', small, d))
+    _patch_xml(  # the first sheet read is damaged past the limit
+        path,
+        "xl/worksheets/sheet1.xml",
+        lambda d: d[: int(d.index(b"</sheetData>") * 0.8)],
+    )
+    monkeypatch.setitem(L.LIMITS, "cells", 10)
+    with pytest.raises(L.ImportLimitError) as e:
+        _read(path)
+    assert e.value.limit == "cells"
