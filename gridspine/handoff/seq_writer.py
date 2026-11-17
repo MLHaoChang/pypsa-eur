@@ -70,13 +70,22 @@ from gridspine.handoff.dyr_writer import _machines
 from gridspine.handoff.raw_writer import SBASE_MVA, branch_ids, trafo_impedance
 from gridspine.schema.contracts import ContractError
 from gridspine.static.island_sc import _param
-from gridspine.static.island_sc_seq import GENSET_X0_RATIO, R_SCREEN_OHM_PER_KM, _p
+from gridspine.static.island_sc_seq import (
+    DEFAULT_WINDINGS,
+    GENSET_X0_RATIO,
+    R_SCREEN_OHM_PER_KM,
+    genset_seq,
+    grid_zero_seq,
+    line_zero_seq,
+    trafo_neutral_ohm,
+)
 
 VERSIONS = (33, 35)
+#: How an element the .seq cannot carry yet is listed (header line and return value).
+NOT_WRITTEN = "not written: zero-sequence source omitted"
 CASES = ("max", "min")
 #: An open circuit in a field that has no "absent" value: 9999 pu (generic engineering, assumed).
 OPEN_PU = 9999.0
-_DEFAULT_WINDINGS = {"hv": "D", "hv_earth": None, "lv": "Y", "lv_earth": "solid"}
 _EARTHED = ("solid", "resistance")
 
 SECTIONS = {
@@ -139,14 +148,13 @@ def _machine_record(campus, uid, bus_kv, mbase, case, assumed):
         rx = float(e[f"rx_{case}"])
         x1 = SBASE_MVA / float(e[f"s_sc_{case}_mva"]) / math.sqrt(1.0 + rx**2)
         pcc = str(net.bus.at[e["bus"], "name"])
-        x0x, r0x0 = _p(campus, pcc, f"x0x_{case}"), _p(campus, pcc, f"r0x0_{case}")
-        if x0x is None:
+        z0, drafted = grid_zero_seq(campus, pcc, case, x1, rx)
+        if drafted:
             assumed.append(
                 f"seq: grid {uid}: no x0x_{case}; X0 = X1, R0/X0 = R/X (assumed)"
             )
-        x0 = (1.0 if x0x is None else x0x) * x1
         z1 = complex(rx * x1, x1)
-        return z1, z1, complex((rx if r0x0 is None else r0x0) * x0, x0), 0j
+        return z1, z1, z0, 0j
     if uid not in campus.units.index:
         if uid in set(net.gen["name"]):
             raise ContractError(
@@ -164,20 +172,26 @@ def _machine_record(campus, uid, bus_kv, mbase, case, assumed):
             assumed.append(
                 f"seq: genset {uid}: x2 = x''d, x0 = {GENSET_X0_RATIO} x''d where not given (assumed)"
             )
-        x2 = vals.get("x2_pu", xd)
-        x0 = vals.get("x0_pu", GENSET_X0_RATIO * xd)
+        x2, x0, _, rn = genset_seq(block, xd)
+        assumed.append(
+            f"seq: genset {uid}: X' = Xs = x''d (assumed: the island data carry x''d only)"
+        )
         if not block:
             assumed.append(
                 f"seq: genset {uid}: no island data; neutral unearthed (assumed)"
             )
-        earthing = block["neutral_earthing"] if block else "isolated"
-        if earthing == "isolated":
-            zg = complex(OPEN_PU, 0.0)
-        else:
-            rn = vals["r_n_ohm"] if earthing == "resistance" else 0.0
-            zg = complex(rn / (bus_kv**2 / mbase), 0.0)
+        if rn is None:
+            assumed.append(
+                f"seq: genset {uid}: unearthed neutral written as ZRG = OPEN_PU = {OPEN_PU:g} pu (assumed)"
+            )
+        zg = complex(OPEN_PU if rn is None else rn / (bus_kv**2 / mbase), 0.0)
         return complex(rx * xd, xd), complex(rx * x2, x2), complex(rx * x0, x0), zg
     k2 = vals.get("neg_seq", 0.0)
+    assumed.append(
+        f"seq: converter {uid}: positive and zero sequence written as OPEN_PU = {OPEN_PU:g} pu"
+        + ("" if k2 > 0 else ", negative sequence too (no neg_seq)")
+        + " (assumed)"
+    )
     z2 = complex(0.0, 1.0 / k2) if k2 > 0 else complex(0, OPEN_PU)
     return complex(0, OPEN_PU), z2, complex(0, OPEN_PU), 0j
 
@@ -225,18 +239,18 @@ def write_seq(campus, path, version=35, case="max") -> list:
     for (i, j, ckt), (_, ln) in zip(line_ids, net.line.iterrows()):
         name = str(ln["name"])
         length, par = float(ln["length_km"]), float(ln["parallel"])
-        r0, x0, c0 = (
-            _p(campus, name, f)
-            for f in ("r0_ohm_per_km", "x0_ohm_per_km", "c0_nf_per_km")
+        r0, x0, c0, drafted = line_zero_seq(
+            campus,
+            name,
+            float(ln["r_ohm_per_km"]),
+            float(ln["x_ohm_per_km"]),
+            float(ln["c_nf_per_km"]),
         )
-        if r0 is None or x0 is None or c0 is None:
+        if drafted:
             assumed.append(
                 f"seq: line {name}: zero sequence drafted (R0 = R + 3 x {R_SCREEN_OHM_PER_KM} ohm/km, "
                 "X0 = X, C0 = C; assumed)"
             )
-        r0 = float(ln["r_ohm_per_km"]) + 3.0 * R_SCREEN_OHM_PER_KM if r0 is None else r0
-        x0 = float(ln["x_ohm_per_km"]) if x0 is None else x0
-        c0 = float(ln["c_nf_per_km"]) if c0 is None else c0
         zb = float(net.bus.at[ln["from_bus"], "vn_kv"]) ** 2 / SBASE_MVA
         b0 = 2.0 * math.pi * f_hz * c0 * 1e-9 * length * par * zb
         sec["ZERO SEQ. NON-TRANSFORMER BRANCH"].append(
@@ -265,15 +279,12 @@ def write_seq(campus, path, version=35, case="max") -> list:
             assumed.append(
                 f"seq: transformer {name}: no vector group; Dyn11 with the LV star solidly earthed (assumed)"
             )
-            w = _DEFAULT_WINDINGS
+            w = DEFAULT_WINDINGS
+        assumed.append(f"seq: transformer {name}: vk0 = vk (assumed)")
         r_pu, x_pu, _, _ = trafo_impedance(net, tr)
         rg = {}
         for side, bus in (("hv", tr["hv_bus"]), ("lv", tr["lv_bus"])):
-            rn = (
-                _p(campus, name, f"r_n_{side}_ohm")
-                if w[f"{side}_earth"] == "resistance"
-                else 0.0
-            )
+            rn = trafo_neutral_ohm(campus, name, w, side)
             rg[side] = (rn or 0.0) / (float(net.bus.at[bus, "vn_kv"]) ** 2 / SBASE_MVA)
         sec["ZERO SEQ. TRANSFORMER"].append(
             ",".join(
@@ -299,8 +310,12 @@ def write_seq(campus, path, version=35, case="max") -> list:
             )
         )
 
+    omitted = [str(n) for n in campus.earthing_transformers.index]
+    for n in omitted:
+        assumed.append(f"seq: earthing transformer {n}: {NOT_WRITTEN}")
+    note = f"; {NOT_WRITTEN}: {', '.join(omitted)}" if omitted else ""
     lines = (["@!IC, REV"] if version >= 35 else []) + [
-        f"0, {version}   / gridspine seq export"
+        f"0, {version}   / gridspine seq export{note}"
     ]
     order = SECTIONS[version]
     for k, name in enumerate(order):

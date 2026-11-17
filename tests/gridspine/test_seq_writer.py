@@ -11,12 +11,14 @@ import copy
 
 import pytest
 
-from gridspine.handoff.raw_writer import write_raw
-from gridspine.handoff.seq_writer import OPEN_PU, connection_code, write_seq
+from gridspine.handoff.raw_writer import SBASE_MVA, write_raw
+from gridspine.handoff.seq_writer import NOT_WRITTEN, OPEN_PU, connection_code, write_seq
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
+from gridspine.static.island_sc_seq import sequence_net
 from tests.gridspine.test_campus import campus_spec, t
 from tests.gridspine.test_island_schema import genset
+from tests.gridspine.test_raw_v35 import read_raw
 
 
 def _spec():
@@ -264,6 +266,18 @@ def test_line_zero_sequence_given(tmp_path):
 
 # --- layout ------------------------------------------------------------------
 
+#: Every v33 section, empty ones included, in the order PSS/E 34.0 wrote a rev-33 .seq.
+V33_TERMINATORS = [
+    "0 / END OF GENERATOR DATA, BEGIN LOAD DATA",
+    "0 / END OF LOAD DATA, BEGIN ZERO SEQ. NON-TRANSFORMER BRANCH DATA",
+    "0 / END OF ZERO SEQ. NON-TRANSFORMER BRANCH DATA, BEGIN ZERO SEQ. MUTUAL DATA",
+    "0 / END OF ZERO SEQ. MUTUAL DATA, BEGIN ZERO SEQ. TRANSFORMER DATA",
+    "0 / END OF ZERO SEQ. TRANSFORMER DATA, BEGIN ZERO SEQ. SWITCHED SHUNT DATA",
+    "0 / END OF ZERO SEQ. SWITCHED SHUNT DATA, BEGIN ZERO SEQ. FIXED SHUNT DATA",
+    "0 / END OF ZERO SEQ. FIXED SHUNT DATA, BEGIN INDUCTION MACHINE DATA",
+    "0 / END OF INDUCTION MACHINE DATA",
+]
+#: Every v35 section, empty ones included, in the order PSS/E 35.0 wrote it.
 V35_TERMINATORS = [
     "0 / END OF SYSTEM-WIDE DATA, BEGIN GENERATOR DATA",
     "0 / END OF GENERATOR DATA, BEGIN LOAD DATA",
@@ -301,9 +315,7 @@ def test_v33_layout_has_no_system_wide_and_no_refdeg(tmp_path):
     assert lines[0] == "0, 33   / gridspine seq export"
     assert lines[1].startswith("1,'1 ',")
     assert len(lines[1].split(",")) == 13  # I, ID .. ZXG: no REFDEG
-    terms = [ln for ln in lines if ln.startswith("0 /")]
-    assert terms[0] == "0 / END OF GENERATOR DATA, BEGIN LOAD DATA"
-    assert terms[-1] == "0 / END OF INDUCTION MACHINE DATA"
+    assert [ln for ln in lines if ln.startswith("0 /")] == V33_TERMINATORS
 
 
 @pytest.mark.parametrize(
@@ -312,3 +324,67 @@ def test_v33_layout_has_no_system_wide_and_no_refdeg(tmp_path):
 def test_bad_arguments_refused(tmp_path, kw, match):
     with pytest.raises(ContractError, match=match):
         write_seq(build_campus(_spec()), tmp_path / "x.seq", **kw)
+
+
+# --- nothing missing silently (GK A2 Q4) ------------------------------------------
+
+
+@pytest.mark.parametrize("version", [33, 35])
+def test_omitted_earthing_transformer_is_named_in_header_and_return(tmp_path, version):
+    s = _spec()
+    s["campus"]["earthing_transformers"] = {
+        "ET1": {"bus": "MV2", "x0_ohm": t(15.0, "datasheet"), "r_n_ohm": t(25.0)}
+    }
+    path = tmp_path / "c.seq"
+    assumed = write_seq(build_campus(s), path, version=version)
+    header = next(ln for ln in path.read_text().splitlines() if ln.startswith("0, "))
+    assert header.endswith(f"; {NOT_WRITTEN}: ET1")
+    assert f"seq: earthing transformer ET1: {NOT_WRITTEN}" in assumed
+
+
+def test_no_earthing_transformer_no_header_note(tmp_path):
+    path = tmp_path / "c.seq"
+    write_seq(build_campus(_spec()), path)
+    assert path.read_text().splitlines()[1] == "0, 35   / gridspine seq export"
+
+
+def test_assumed_values_are_listed(tmp_path):
+    s = _spec()
+    s["campus"]["units"]["GEN1"]["island"] = genset()  # neutral_earthing as genset() gives
+    _, assumed = _write(build_campus(s), tmp_path)
+    text = "\n".join(assumed)
+    assert "seq: grid GRID: no x0x_max; X0 = X1" in text
+    assert "seq: transformer TR1: vk0 = vk (assumed)" in text
+    assert "seq: genset GEN1: X' = Xs = x''d" in text
+    assert f"OPEN_PU = {OPEN_PU:g} pu" in text
+
+
+# --- against the island draft and the RAW (GK A2 Q3, test-side reader) -------------
+
+
+def test_line_zero_sequence_equals_the_island_draft(tmp_path):
+    """The drafted R0 / X0 are island_sc_seq's own (max case: no temperature
+    factor), taken from its sequence network, not retyped."""
+    c = build_campus(_spec())
+    sn = sequence_net(c, {}, island=False, case="max")
+    br = next(b for b in sn.branches if b.name == "CB1")
+    want = (1.0 / br.y0) * SBASE_MVA / sn.sbase  # pu on the RAW's SBASE
+    recs, _ = _write(c, tmp_path)
+    (r,) = recs["ZERO SEQ. NON-TRANSFORMER BRANCH"]
+    assert complex(float(r[3]), float(r[4])) == pytest.approx(want, rel=1e-5)
+
+
+@pytest.mark.parametrize("version", [33, 35])
+def test_branch_and_transformer_ids_match_the_raw(tmp_path, version):
+    c = build_campus(_spec())
+    write_raw(c.net, tmp_path / "c.raw", version=version)
+    _, _, raw, _ = read_raw((tmp_path / "c.raw").read_text())
+    recs, _ = _write(c, tmp_path, version=version)
+
+    def ids(rows):
+        return [(r[0], r[1], r[2].strip()) for r in rows]
+
+    assert ids(recs["ZERO SEQ. NON-TRANSFORMER BRANCH"]) == ids(raw["BRANCH"])
+    seq_tr = [(r[0], r[1], r[3]) for r in recs["ZERO SEQ. TRANSFORMER"]]
+    assert seq_tr == [(t[0][0], t[0][1], t[0][3].strip()) for t in raw["TRANSFORMER"]]
+    assert all(t[0][2] == "0" for t in raw["TRANSFORMER"])  # two-winding, as K = 0 in the .seq
