@@ -8,6 +8,7 @@ export const FIELD_LABELS: Record<string, string> = {
   eh_sk_mva: 'Short-circuit level (MVA)',
   site_anchor: 'Site coordinates',
   poc_xr: 'PoC X/R',
+  connection_limit: 'Connection limit (MW)',
   target_lole_h: 'LOLE target',
   p_nom: 'Capacity',
   p_nom_max: 'Maximum capacity',

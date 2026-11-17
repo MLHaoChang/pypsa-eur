@@ -1155,7 +1155,8 @@ def _summary(section: str, facts: _Facts) -> str | None:
         if not facts.connection_links:
             return None
         mw = f", {facts.import_p_nom_mw:g} MW" if facts.import_p_nom_mw is not None else ""
-        return ", ".join(facts.connection_links[:3]) + mw
+        # Plain names, never the link ids (RAW-NAMES-1; template-e2e 02).
+        return ", ".join(_humanise(x) for x in facts.connection_links[:3]) + mw
     if section == "loads":
         return _count(facts.loads, "load")
     if section == "assets":

@@ -298,6 +298,16 @@ export function openFaultLevelEditor(): void {
   else openFlowTargetInPlace(FAULT_LEVEL_TARGET)
 }
 
+/** The connection limit (template-e2e 02): the import link's capacity, edited on the Connection limits
+ *  line like the fault level. Expert opens the section's panel; Guided the field drawer over the card. */
+export const CONNECTION_LIMIT_TARGET: FlowTarget = {
+  section: 'connection', panel: 'campusElectrical', component: null, entity: null, field: 'connection_limit',
+}
+export function openConnectionLimitEditor(): void {
+  if (useUIStore.getState().uiMode === 'expert') openFlowTarget(CONNECTION_LIMIT_TARGET)
+  else openFlowTargetInPlace(CONNECTION_LIMIT_TARGET)
+}
+
 /** The site coordinate field (D01; UI contract rule 4): Guided, a drawer over
  *  the Project & site card; Expert, the horizon panel. */
 export const SITE_ANCHOR_TARGET: FlowTarget = {

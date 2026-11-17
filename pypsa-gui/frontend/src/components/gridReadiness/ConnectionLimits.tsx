@@ -16,6 +16,8 @@ import {
   campusApi, type GridLimitItem, type GridLimitSetting, type GridLimitSource, type GridReadinessRow,
 } from '../../api/campusElectrical'
 import { networkApi } from '../../api/network'
+import type { Link } from '../../api/types'
+import { displayName } from '../../utils/displayName'
 import { updateAsset } from '../../utils/assetWrite'
 import { useUIStore } from '../../store/uiStore'
 import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
@@ -180,6 +182,72 @@ function LimitEditor({ row, setting, label, faultBuses }: {
   )
 }
 
+/** The grid import links (eh_role grid_import): the connection the site draws through. */
+export function useImportLinks(): Link[] {
+  const project = useUIStore(s => s.currentProject)
+  const q = useQuery({ queryKey: nk(project, 'links'), queryFn: networkApi.getLinks, enabled: !!project, staleTime: 30_000 })
+  return ((q.data ?? []) as Link[]).filter(l => l.eh_role === 'grid_import')
+}
+
+/** The connection limit (template-e2e 02): each import link's capacity in MW, written through the ordinary
+ *  link update, so Expert's Properties shows the same number. A staged site is further capped per period by
+ *  its energization schedule (the Energization line). */
+function ConnectionLimitLine({ links, staged }: { links: Link[]; staged: boolean }) {
+  const project = useUIStore(s => s.currentProject) ?? ''
+  const qc = useQueryClient()
+  const [text, setText] = useState<Record<string, string>>(
+    () => Object.fromEntries(links.map(l => [l.name, String(l.p_nom)])))
+  const [error, setError] = useState<string | null>(null)
+  const rows = links.map(l => {
+    const t = text[l.name] ?? ''
+    const n = Number(t)
+    return { link: l, text: t, n, ok: t.trim() !== '' && Number.isFinite(n) && n > 0, changed: n !== l.p_nom }
+  })
+  const valid = rows.every(r => r.ok)
+  const dirty = rows.some(r => r.changed)
+  const save = useMutation({
+    mutationFn: async () => {
+      for (const r of rows) if (r.changed) await updateAsset(qc, project, 'links', r.link.name, { p_nom: r.n })
+    },
+    onMutate: () => setError(null),
+    // The readiness rows, the Site card's readiness and the flow's checks read the capacity too.
+    onSuccess: () => Promise.all([
+      qc.invalidateQueries({ queryKey: ['campusElectrical', 'grid_readiness', project] }),
+      qc.invalidateQueries({ queryKey: nk(project, 'results', 'eh_readiness') }),
+      qc.invalidateQueries({ queryKey: nk(project, 'flow') }),
+    ]),
+    onError: (e: unknown) => setError(blockerMessage(e)),
+  })
+  return (
+    <li data-testid="connection-limit-connection_limit" className="text-[12px]">
+      <span className="font-semibold">Connection limit</span>
+      {': '}<span className="tabular-nums">{links.map(l => `${Number(l.p_nom.toPrecision(6))} MW`).join(' · ')}</span>
+      <span className="block text-muted">
+        The most the site can draw from the grid{staged ? ' once fully energized; Energization caps each period below it' : ''}.
+      </span>
+      <div className="mt-1 flex flex-col gap-1" data-testid="limit-editor-connection_limit">
+        {rows.map(r => (
+          <div key={r.link.name} className="flex items-center gap-1 text-[11px]">
+            <input aria-label={links.length > 1 ? `Connection limit (MW), ${displayName(r.link.name)}` : 'Connection limit (MW)'}
+              type="number" inputMode="decimal" min={0} step="any" value={r.text} aria-invalid={!r.ok}
+              onChange={e => setText(p => ({ ...p, [r.link.name]: e.target.value }))}
+              className="w-24 rounded border border-border bg-bg px-1 py-0.5 tabular-nums" />
+            <span className="text-muted">MW{links.length > 1 ? `, ${displayName(r.link.name)}` : ''}</span>
+          </div>
+        ))}
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <button type="button" disabled={!valid || !dirty || save.isPending} onClick={() => save.mutate()}
+            className="rounded border border-border px-2 py-0.5 disabled:opacity-50">
+            Save connection limit
+          </button>
+        </div>
+        {!valid && <p className="text-[11px] text-warn">The connection limit must be above 0 MW.</p>}
+        {error && <p role="alert" className="text-[11px] text-warn" data-testid="limit-error-connection_limit">{error}</p>}
+      </div>
+    </li>
+  )
+}
+
 /** The point-of-connection buses and their fault levels; the readiness check takes the lowest. */
 function usePocFaultBuses(): FaultBus[] {
   const project = useUIStore(s => s.currentProject)
@@ -207,9 +275,20 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
   // Connection rows the scorecard left out (an off-grid island with its tie open): named with their reason,
   // never reported as "not tagged", since the connection is there.
   const excluded = (q.data?.excluded ?? []).filter(r => kindOf(r) in SHOWN && kindOf(r) !== 'scr')
+  const importLinks = useImportLinks()
+  const showLimit = importLinks.length > 0 && (!only || only.includes('connection_limit'))
+  const staged = (q.data?.rows ?? []).some(r => kindOf(r) === 'energization_peak')
   return (
     <PageSection panelSection="connection_limits" title="Connection limits" hint="Set the ones you know">
-      {q.isPending ? <p className="text-[12px] text-muted">Loading the connection limits…</p>
+      {showLimit && (
+        <ul className="mb-3 flex flex-col gap-3">
+          {/* Keyed on what is stored, so a save reloads the field. */}
+          <ConnectionLimitLine key={importLinks.map(l => `${l.name}:${l.p_nom}`).join('|')}
+            links={importLinks} staged={staged} />
+        </ul>
+      )}
+      {only && kinds.length === 0 && showLimit ? null
+        : q.isPending ? <p className="text-[12px] text-muted">Loading the connection limits…</p>
         : q.isError ? <p className="text-[12px] text-warn" data-testid="connection-limits-error">
             The connection limits could not be read.</p>
         : kinds.length === 0 && excluded.length > 0 ? (
@@ -223,7 +302,8 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
                 ))}
               </ul>
             </div>)
-        : kinds.length === 0 ? <p className="text-[12px] text-muted">No grid connection is tagged on this project.</p>
+        : kinds.length === 0 ? (showLimit ? null
+            : <p className="text-[12px] text-muted">No grid connection is tagged on this project.</p>)
           : (
             <ul className="flex flex-col gap-3" data-testid="connection-limits">
               {kinds.map(k => {

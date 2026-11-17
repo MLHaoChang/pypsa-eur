@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The grid connection limit of a template project can now be set in Guided set-up (section 3, "Connection limit") and in Expert's Connection limits, one editor for both; the "Import efficiency (assumed)" Edit opens the import link with its values filled instead of a blank form, and the section header names the connection in plain words.

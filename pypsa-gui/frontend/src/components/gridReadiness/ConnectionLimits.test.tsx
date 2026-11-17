@@ -9,7 +9,8 @@ import { ConnectionLimits, resetTarget } from './ConnectionLimits'
 vi.mock('../flowScope/useFlowScope', () => ({ useFlowScope: () => ({ registry: { preset_label: 'Data Center Energy Hub' } }) }))
 
 vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolvedValue([
-  { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]), updateBus: vi.fn() } }))
+  { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]), updateBus: vi.fn(),
+  getLinks: vi.fn().mockResolvedValue([]), updateLink: vi.fn() } }))
 vi.mock('../../api/campusElectrical', async (orig) => {
   const actual = await orig<typeof import('../../api/campusElectrical')>()
   return { ...actual, campusApi: { ...actual.campusApi, gridReadiness: vi.fn(), setGridLimit: vi.fn(), resetGridLimit: vi.fn() } }
@@ -228,5 +229,38 @@ describe('ConnectionLimits', () => {
     fireEvent.change(await screen.findByLabelText('Fault level value'), { target: { value: '0' } })
     expect(screen.getByText(/must be above 0 MVA/)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Save fault level' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  // template-e2e 02: the connection limit is the import link's capacity, set here in both modes.
+  it('edits the connection limit as the import link capacity, and only the import links', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([
+      { name: 'grid_import', eh_role: 'grid_import', p_nom: 40 }, { name: 'ups', eh_role: '', p_nom: 9 }] as never)
+    vi.mocked(networkApi.updateLink).mockClear().mockResolvedValue({ name: 'grid_import' } as never)
+    useUIStore.setState({ currentProject: 'Demo' })
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ConnectionLimits only={['connection_limit']} /></QueryClientProvider>)
+    const line = await screen.findByTestId('connection-limit-connection_limit')
+    expect(line.textContent).toMatch(/Connection limit: 40 MW/)
+    expect(screen.queryByTestId('connection-limit-ramp_rate')).toBeNull()
+    expect(screen.queryByText(/No grid connection is tagged/)).toBeNull()
+    const input = screen.getByLabelText('Connection limit (MW)')
+    const save = screen.getByRole('button', { name: 'Save connection limit' })
+    expect(save).toHaveProperty('disabled', true)
+    fireEvent.change(input, { target: { value: '0' } })
+    expect(screen.getByText('The connection limit must be above 0 MW.')).toBeTruthy()
+    expect(save).toHaveProperty('disabled', true)
+    fireEvent.change(input, { target: { value: '45' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(networkApi.updateLink).toHaveBeenCalledWith('grid_import', expect.objectContaining({ p_nom: 45 })))
+    expect(networkApi.updateLink).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows no connection limit line without an import link', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'ups', eh_role: '', p_nom: 9 }] as never)
+    mount()
+    expect(await screen.findByText(/No grid connection is tagged/)).toBeTruthy()
+    expect(screen.queryByTestId('connection-limit-connection_limit')).toBeNull()
   })
 })

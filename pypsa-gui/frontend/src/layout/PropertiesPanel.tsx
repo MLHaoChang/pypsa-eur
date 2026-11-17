@@ -927,11 +927,14 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   const editRequest = useUIStore(s => s.propertiesEditRequest)
   useEffect(() => {
     if (editRequest?.type !== 'Link' || editRequest.name !== link.name || mode !== 'detail') return
+    // A drawer opened from a flow item mounts this card cold: seeding before the schema
+    // arrives leaves every field blank (template-e2e 02), so wait for it.
+    if (!schema) return
     if (!open) startEdit()
     if (editRequest.field) setFocusField(editRequest.field)
     useUIStore.getState().clearPropertiesEditRequest()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editRequest, mode, link.name])
+  }, [editRequest, mode, link.name, schema])
 
   const bus0Obj = (buses as Bus[]).find(b => b.name === link.bus0)
   const bus1Obj = (buses as Bus[]).find(b => b.name === link.bus1)
