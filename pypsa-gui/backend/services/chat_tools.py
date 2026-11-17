@@ -650,8 +650,6 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     "renewable_fraction": "get_renewable_fraction",
     # homer-parity 01d.
     "operating_reserve": "get_operating_reserve",
-    # homer-parity 01d.
-    "operating_reserve": "get_operating_reserve",
     # Edge Investment Case P3 WP3.4.
     "value_flows": "get_value_flows",
 }

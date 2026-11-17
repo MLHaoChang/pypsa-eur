@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import queue
 
 import numpy as np
@@ -1043,7 +1044,7 @@ def test_holders_name_the_units_and_sum_to_the_held_reserve():
     for r in binding:
         hs = r["holders"]
         assert hs and {h["kind"] for h in hs} <= {"generator", "storage_unit"}
-        assert sum(h["held_mw"] for h in hs) == pytest.approx(r["held_mw"])
+        assert math.fsum(h["held_mw"] for h in hs) == r["held_mw"]
         assert all(h["held_mw"] > 0 for h in hs)
         assert [h["held_mw"] for h in hs] == sorted(
             (h["held_mw"] for h in hs), reverse=True
@@ -1105,17 +1106,17 @@ def _frozen(n, diesel_p, status=None):
 
 
 def test_the_units_add_up_to_held_when_one_is_large_and_one_tiny():
-    """H1: the units are the very terms `held` sums, so the sum agrees with held_mw to float
-    summation order only (hence approx at 1e-12), with a 1e6 MW unit beside a 1e-6 MW one."""
+    """H1: held is the exactly rounded sum of the units, so the units add up to held_mw with `==`,
+    with a 1e6 MW unit beside a 1e-3 MW one."""
     n = _network(committable=False)
     n.add(
-        "Generator", "tiny", bus="ac", carrier="diesel", p_nom=1e-6, marginal_cost=250.0
+        "Generator", "tiny", bus="ac", carrier="diesel", p_nom=1e-3, marginal_cost=250.0
     )
     n.generators.loc["diesel", "p_nom"] = 1e6
     sns = n.snapshots
     n.generators_t.p = pd.DataFrame({"pv": 0.0, "diesel": 0.0, "tiny": 0.0}, index=sns)
     n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
-    held = 1e6 + 1e-6
+    held = 1e6 + 1e-3
     res = operating_reserve_result(n, (held / LOAD_MW, 0.0, 0.0))["per_snapshot"][0]
     assert res["binding"]
     assert sum(h["held_mw"] for h in res["holders"]) == pytest.approx(
@@ -1244,3 +1245,61 @@ def test_the_chat_tool_answers_the_reserve_goal(monkeypatch):
     }
     monkeypatch.setattr(results_router, "get_operating_reserve", lambda: off)
     assert chat_tools.get_results("operating_reserve")["shares"] is None
+
+
+def test_solver_noise_over_the_cap_is_no_holder_and_a_real_overdraw_is_one():
+    n = _network(committable=False)
+    sns = n.snapshots
+    n.add("Generator", "b", bus="ac", carrier="diesel", p_nom=5.0, marginal_cost=250.0)
+    # diesel runs 1e-7 over its 12 MW cap (noise); b runs 2 MW over its 5 MW cap (a real overdraw)
+    n.generators_t.p = pd.DataFrame(
+        {"pv": 0.0, "diesel": 12.0 + 1e-7, "b": 7.0}, index=sns
+    )
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    row = operating_reserve_result(n, (-0.2, 0.0, 0.0))["per_snapshot"][0]
+    assert row["held_mw"] == -2.0 and not row["binding"]
+    n.generators_t.p["b"] = 5.0
+    row = operating_reserve_result(n, (0.0, 0.0, 0.0))["per_snapshot"][0]
+    assert row["held_mw"] == 0.0
+    n.loads_t.p = pd.DataFrame({"site": 1.0}, index=sns)
+    n.generators.loc["pv", "p_nom"] = 0.0
+    row = operating_reserve_result(n, (1.0, 0.0, 0.0))["per_snapshot"][
+        0
+    ]  # required 1 MW, held 0
+    assert row["binding"] and row["holders"] == []
+
+
+def test_a_negative_pmin_unit_holds_what_its_cap_leaves_over_its_dispatch():
+    n = _network(committable=False)
+    sns = n.snapshots
+    n.generators.loc["diesel", "p_min_pu"] = -1.0
+    n.generators_t.p = pd.DataFrame({"pv": 0.0, "diesel": -4.0}, index=sns)
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    row = operating_reserve_result(n, (1.6, 0.0, 0.0))["per_snapshot"][
+        0
+    ]  # 12 - (-4) = 16 = required
+    assert row["binding"] and row["held_mw"] == 16.0
+    assert row["holders"] == [{"name": "diesel", "kind": "generator", "held_mw": 16.0}]
+
+
+def test_holders_are_present_exactly_on_binding_rows_including_a_near_binding_hour():
+    n = _network(committable=False)
+    sns = n.snapshots
+    n.generators.loc["diesel", "p_min_pu"] = -1.0
+    # odd hours: held 12 = required 12 (binds); even hours: held 12.012 vs required 12 (a near miss, no bind)
+    n.generators_t.p = pd.DataFrame(
+        {"pv": 0.0, "diesel": [-0.012 if t % 2 == 0 else 0.0 for t in range(HOURS)]},
+        index=sns,
+    )
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    rows = operating_reserve_result(n, (1.2, 0.0, 0.0))["per_snapshot"]
+    assert [r["binding"] for r in rows] == [t % 2 == 1 for t in range(HOURS)]
+    assert all(("holders" in r) == r["binding"] for r in rows)
+
+
+def test_an_explicit_limit_is_clamped_to_the_page_size_in_the_chat_read():
+    from services.chat_tools import _operating_reserve_page
+
+    out = _operating_reserve_page(_payload(40, 1), limit=1000)
+    assert len(out["binding_hours"]) == 24 and out["binding_hours_total"] == 40
+    assert len(_operating_reserve_page(_payload(40, 1), limit=0)["binding_hours"]) == 1

@@ -413,7 +413,6 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
             unknown.append(name)
         return s
 
-    held = pd.Series(0.0, index=sns)
     # (name, kind, headroom) per unit: the terms `held` sums
     parts: list[tuple[str, str, pd.Series]] = []
     avail = _avail(n, "Generator", sns, sel["dispatchable"])
@@ -430,8 +429,10 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
             if st is None:
                 continue
             cap = cap * st
-        held += cap - p
-        parts.append((str(g), "generator", cap - p))
+        # Solver noise (a dispatch within _ABS of its cap) holds 0; a real overdraw stays negative, as in the
+        # LP row, so held and the units are one sum.
+        room = cap - p
+        parts.append((str(g), "generator", room.mask(room.abs() <= _ABS, 0.0)))
     su = n.storage_units
     su_t = n.storage_units_t
     w = n.snapshot_weightings["stores"].reindex(sns).astype(float)
@@ -456,8 +457,16 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
         hold = np.minimum(np.minimum(power, energy), cancel.fillna(np.inf)).clip(
             lower=0.0
         )
-        held += hold
         parts.append((str(s), "storage_unit", hold))
+    # held is the exactly rounded sum of the units' headroom (order-free), so a binding hour's units add up
+    # to held_mw with `==`.
+    cols = np.array([v.to_numpy(dtype=float) for _, _, v in parts]).reshape(
+        len(parts), len(sns)
+    )
+    held = pd.Series(
+        [math.fsum(c) if np.isfinite(c).all() else float(c.sum()) for c in cols.T],
+        index=sns,
+    )
     req = a * _load_mw(n, sel["loads"], sns)
     for share, names in ((b, sel["pv"]), (c, sel["wind"])):
         if not share:
@@ -484,7 +493,7 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
                 (
                     {"name": name, "kind": kind, "held_mw": float(v[t])}
                     for name, kind, v in parts
-                    if float(v[t]) > 0
+                    if float(v[t]) != 0
                 ),
                 key=lambda x: (-x["held_mw"], x["name"]),
             )
