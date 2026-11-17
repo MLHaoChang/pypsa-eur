@@ -1,7 +1,7 @@
 // P24-FE re-gate R8 and notes: every rule of the Improve card's glossary has a
 // case, including the review effects the three templates do not reach.
 import { describe, expect, it } from 'vitest'
-import { costTileLabel, evidenceValue, kpiMoney, plainIds, plainWords } from './plainWords'
+import { costTileLabel, evidenceValue, feederAdvice, kpiMoney, plainIds, plainWords } from './plainWords'
 import { GROUP_TITLES } from './holdWords'
 
 describe('plainWords', () => {
@@ -81,7 +81,7 @@ describe('plainWords: the dominant-risk line names the unit in plain words (UX a
   it('leads with the share of all ranked risk when the review states it', () => {
     // Hand check: 657,000 / (657,000 + 3 × 302,114) = 42 %.
     expect(plainWords('hospital_feeder carries 100% of ranked Link risk (42% of all ranked risk)'))
-      .toBe('Hospital feeder accounts for 42% of the outage risk (all of the risk from links)')
+      .toBe('Hospital feeder: 42% of the outage risk, and all of the risk from links')
   })
 })
 
@@ -90,7 +90,26 @@ describe('plainWords: the dominant-risk line names links as the Guided assets li
     const word = GROUP_TITLES.Link.toLowerCase()
     expect(plainWords('feeder_a carries 100% of ranked Link risk')).toContain(`risk from ${word}`)
     expect(plainWords('feeder_a carries 100% of ranked Link risk (42% of all ranked risk)'))
-      .toContain(`risk from ${word})`)
+      .toContain(`risk from ${word}`)
+  })
+})
+
+describe('plainWords: a Link share below 100% is stated, not rounded to "all"', () => {
+  it('names the share of links when it is not all of it', () => {
+    expect(plainWords('grid_import carries 62% of ranked Link risk (30% of all ranked risk)'))
+      .toBe('Grid import: 30% of the outage risk, and 62% of the risk from links')
+  })
+})
+
+describe('feederAdvice: the only feeder to a must-stay-on bus gets a feeder remedy', () => {
+  it('names the bus as the project shows it', () => {
+    expect(feederAdvice({ id: 'fmea_dominant_mode',
+      evidence: { mode: 'hospital_feeder', feeds_critical_buses: ['hospital'] } }))
+      .toBe('Add a second feeder or backup supply at Hospital. A spare unit or storage elsewhere cannot supply Hospital while Hospital feeder is out.')
+  })
+  it('says nothing for another finding or a Link that feeds no must-stay-on bus', () => {
+    expect(feederAdvice({ id: 'fmea_dominant_mode', evidence: { mode: 'grid_import' } })).toBeNull()
+    expect(feederAdvice({ id: 'dsr_off', evidence: { feeds_critical_buses: ['hospital'], mode: 'x' } })).toBeNull()
   })
 })
 

@@ -347,3 +347,23 @@ describe('ImproveCard while a risk check runs (A1-FE)', () => {
     expect(screen.queryByTestId('hub-live-study-note')).toBeNull()
   })
 })
+
+describe('Improve on the only feeder to a must-stay-on bus (asset-walk 2026-11-17, issue 04)', () => {
+  it('states the share with its scope and a feeder remedy, with no re-run button', async () => {
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [
+      { id: 'fmea_dominant_mode', severity: 'medium',
+        title: 'hospital_feeder carries 100% of ranked Link risk (42% of all ranked risk)',
+        evidence: { mode: 'hospital_feeder', share: 1.0, share_of_all_ranked: 0.42,
+          feeds_critical_buses: ['hospital'] },
+        recommendation: 'hospital_feeder is the only path to the must-stay-on bus hospital.',
+        actions: [] },
+    ] }))
+    mount()
+    const li = await screen.findByTestId('hub-improve-fmea_dominant_mode')
+    expect(li.textContent).toContain('Hospital feeder: 42% of the outage risk, and all of the risk from links')
+    expect(screen.getByTestId('hub-improve-advice-fmea_dominant_mode').textContent)
+      .toBe('Add a second feeder or backup supply at Hospital. A spare unit or storage elsewhere cannot supply Hospital while Hospital feeder is out.')
+    expect(li.textContent).not.toContain('spare unit or extra storage (rough estimate)')
+    expect(screen.queryByTestId('hub-improve-do-fmea_dominant_mode')).toBeNull()
+  })
+})
