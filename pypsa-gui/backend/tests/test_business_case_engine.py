@@ -1987,12 +1987,14 @@ def test_bc15_q1_a_typed_operating_line_refuses_under_a_factor_below_full():
         "lines[1].quantity_source",
         "lines[2].quantity_source",
     ]
-    # Not when the factor is 1 in its span, nor outside it, nor for capex.
+    # Not when the factor is 1 in its span, nor outside it, nor for capex, nor for a
+    # year outside the operating years (ignored, never both ignored and refused: C3).
     later = typed.model_copy(update={"start_year": 2033})
     for case in (
         _lease_case({2032: 1.0}, typed),
         _lease_case({2032: 0.5}, later),
         _lease_case({2032: 0.5}, _capex()),
+        _lease_case({2030: 0.5, 2036: 0.5}, typed),
     ):
         assert not [
             x
@@ -2045,8 +2047,38 @@ def test_bc15_v3_every_stream_and_linked_kind_has_exactly_one_volume_class():
     assert set(bcm.STREAM_VOLUME_CLASS) == ledger
     assert set(bcm.STREAM_VOLUME_CLASS.values()) == {"scale", "fixed", "undetermined"}
     kinds = {k for r in READERS.values() for k in r}
-    assert bcm.VOLUME_KINDS | bcm.FIXED_KINDS == kinds
-    assert not bcm.VOLUME_KINDS & bcm.FIXED_KINDS
+    sets = (bcm.VOLUME_KINDS, bcm.FIXED_KINDS, bcm.UNDETERMINED_KINDS)
+    assert set().union(*sets) == kinds
+    assert sum(len(x) for x in sets) == len(kinds)  # disjoint
+
+
+def test_bc15_a_typed_line_is_not_volume_and_a_linked_export_refuses():
+    assert bcm._volume_line(_line()) is False
+    assert bcm._volume_line(_line(**_NH3)) is True
+    cap = _line(**{**_NH3, "quantity_source": "linked:capacity.pv@1"})
+    assert bcm._volume_line(cap) is False
+    exp = _line(**{**_NH3, "quantity_source": "linked:export.grid@1"})
+    with pytest.raises(VolumeFactorUnclassified) as e:
+        bcm._volume_line(exp)
+    assert e.value.field == "linked:export"
+
+
+def test_bc15_a_difference_line_moves_both_legs_or_refuses():
+    """A difference line ((price - ref) x q) nets to zero only in its money year: an
+    undetermined one with a quantity refuses even at amount 0, and a scaled one scales
+    its quantity with its amount."""
+    cfd = TemplateLine(
+        "cfd", "cfd_settlement", 0.0, "ppa", price=50.0, price_qty_mwh=100.0
+    )
+    with pytest.raises(VolumeFactorUnclassified):
+        bcm._ic_scaled(cfd, 0.5)
+    assert bcm._ic_scaled(dataclasses.replace(cfd, price_qty_mwh=0.0), 0.5) is not None
+    bill = TemplateLine(
+        "bill", "energy_import", -300.0, "tariff", price=3.0, price_qty_mwh=100.0
+    )
+    got = bcm._ic_scaled(bill, 0.25)
+    assert (got.amount, got.price_qty_mwh, got.price) == (-75.0, 25.0, 3.0)
+    assert bcm._ic_scaled(TemplateLine("f", "fom", -20.0, "opex"), 0.25).amount == -20.0
 
 
 def test_bc15_v1_c3_the_display_keys_state_the_basis_and_the_ignored_years():

@@ -140,10 +140,10 @@ QUANTITY_SOURCE_PATTERN = (
 )
 PRESET_PATTERN = rf"^{_ID}@{_ID}$"
 MONEY_YEAR_MIN = 1990
+MONEY_YEAR_AFTER_BASE = 5
 #: The most years a volume factor may list (BC 15, GK B2 C3).
 VOLUME_FACTOR_YEARS_MAX = 100
 _YEAR_KEY = re.compile(r"[12][0-9]{3}")
-MONEY_YEAR_AFTER_BASE = 5
 
 # A typo is refused, never dropped; inf and NaN are refused in every float (#1320 F1).
 _FORBID = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -415,9 +415,11 @@ class BusinessCaseInputs(BaseModel):
         if len(v) > VOLUME_FACTOR_YEARS_MAX:
             raise ValueError(f"at most {VOLUME_FACTOR_YEARS_MAX} years")
         for k, f in v.items():
-            ok = (isinstance(k, int) and not isinstance(k, bool)) or (
-                isinstance(k, str) and _YEAR_KEY.fullmatch(k)
-            )
+            ok = (
+                isinstance(k, int)
+                and not isinstance(k, bool)
+                and _YEAR_KEY.fullmatch(str(k))
+            ) or (isinstance(k, str) and _YEAR_KEY.fullmatch(k))
             if not ok:
                 raise ValueError(f"year {k!r} is not a year")
             if isinstance(f, bool) or not isinstance(f, (int, float)):
@@ -535,7 +537,11 @@ class BusinessCaseInputs(BaseModel):
         if (
             ln.source == "typed"
             and ln.kind != "capex"
-            and any(self.volume_factor_at(y) != 1.0 for y in years)
+            and any(
+                self.volume_factor_at(y) != 1.0
+                for y in years
+                if horizon[0] <= y <= horizon[1]
+            )
         ):
             # Ruling 6 (GK B2 BC 15 Q1): a typed line states an amount, not its volume
             # class, so a lease-up below 100 % in its span refuses rather than guess.

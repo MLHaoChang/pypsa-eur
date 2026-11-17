@@ -1138,7 +1138,7 @@ def test_bc15_c3_a_json_year_key_must_be_a_plain_four_digit_year(key):
         )
 
 
-@pytest.mark.parametrize("key", [True, False, 2030.0, None])
+@pytest.mark.parametrize("key", [True, False, 2030.0, None, 5, -1, 203, 3030, 99999])
 def test_bc15_c3_a_python_year_key_must_be_an_int_never_bool_or_float(key):
     with pytest.raises(ValidationError):
         B.BusinessCaseInputs(volume_factor_by_year={key: 0.5})

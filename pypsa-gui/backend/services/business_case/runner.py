@@ -280,7 +280,7 @@ def report_body(
                 result, p, outputs, receivable_days=inputs.receivable_days
             ),
             # Display keys (BC 15): the lease-up applied, its basis and the stated
-            # years it ignored. None for a full-volume case, so its report is as it was.
+            # years it ignored. Absent for a full-volume case, so its report is as it was.
             **volume_factor_display(inputs, result.tl.operating_years),
         },
         "kpis": {name: _jsonable(dataclasses.asdict(v)) for name, v in k.items()},

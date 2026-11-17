@@ -38,6 +38,7 @@ import dataclasses
 import hashlib
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -155,7 +156,6 @@ VOLUME_KINDS = frozenset(
         "shipped",
         "derived_o2",
         "served_load",
-        "export",
         "it_energy",
         # The billed share of contracted IT kW is the spec's "contracted kW × lease-up".
         "contracted_it_kw",
@@ -163,10 +163,13 @@ VOLUME_KINDS = frozenset(
 )
 #: Installed capacity is not volume: lease-up never scales it.
 FIXED_KINDS = frozenset({"capacity"})
+#: Exported energy is generation-side: lower served load need not lower it (as the
+#: `energy_export` row), so a lease-up refuses a line on it.
+UNDETERMINED_KINDS = frozenset({"export"})
 
-#: The volume class of each IC ledger stream (ruling 6, review-gk.md:171). `scale`
-#: moves with the served volume, `fixed` does not; `undetermined` (generation-side, not
-#: load-proportional) refuses under a factor below full volume. A test pins the keys to
+#: The volume class of each IC ledger stream (ruling 6, review-gk.md
+#: "homer-parity 04"). `scale` moves with the served volume, `fixed` does not;
+#: `undetermined` (generation-side, not load-proportional) refuses under a factor below full volume. A test pins the keys to
 #: the ledger's `STREAM_CLASS` (exact set), so a new stream fails closed.
 #: Each `scale` row's basis (GK B2 V2):
 #: - energy_import, network_energy: the per-kWh import tariff item
@@ -205,7 +208,8 @@ STREAM_VOLUME_CLASS: dict[str, str] = {
 
 
 def _volume_line(ln: LineItem) -> bool:
-    """A linked operating line on served volume. A kind in neither set refuses."""
+    """A linked operating line on served volume. An undetermined kind, or one in no
+    set, refuses."""
     if ln.source != "linked":
         return False
     kind = _output_id(ln).partition(".")[0]
@@ -221,9 +225,17 @@ def _ic_scaled(ln: TemplateLine, f: float) -> TemplateLine:
     cls = STREAM_VOLUME_CLASS.get(ln.stream, "undetermined")
     if cls == "fixed" or ln.amount is None:
         return ln
+    q = ln.price_qty_mwh
     if cls == "scale":
-        return dataclasses.replace(ln, amount=_finite(ln.amount * f))
-    if ln.amount == 0.0:
+        # A difference line's quantity is scaled with it, so both legs move together.
+        return dataclasses.replace(
+            ln,
+            amount=_finite(ln.amount * f),
+            price_qty_mwh=None if q is None else _finite(q * f),
+        )
+    # A zero row passes; a difference line nets to zero only in its money year, so its
+    # quantity must be zero too.
+    if ln.amount == 0.0 and not q:
         return ln
     raise VolumeFactorUnclassified(ln.stream)
 
@@ -235,13 +247,15 @@ VOLUME_FACTOR_NOTE = (
 )
 
 
-def volume_factor_display(inputs: BusinessCaseInputs, operating_years) -> dict:
+def volume_factor_display(
+    inputs: BusinessCaseInputs, operating_years: Iterable[int]
+) -> dict[str, object]:
     """The report's lease-up display keys (BC 15): each operating year below full volume,
     the basis note, and each stated year outside the operating years, which changes
     nothing and is named as ignored (GK B2 C3). Empty for a full-volume case with no
     such year, so its report is as it was."""
     ops = {int(y) for y in operating_years}
-    out: dict = {}
+    out: dict[str, object] = {}
     scaled = volume_factors_below_full(inputs, sorted(ops))
     if scaled:
         out["volume_factor"] = {str(y): f for y, f in scaled.items()}
@@ -252,7 +266,9 @@ def volume_factor_display(inputs: BusinessCaseInputs, operating_years) -> dict:
     return out
 
 
-def volume_factors_below_full(inputs: BusinessCaseInputs, years) -> dict[int, float]:
+def volume_factors_below_full(
+    inputs: BusinessCaseInputs, years: Iterable[int]
+) -> dict[int, float]:
     """The operating years whose volume factor is below full volume (BC 15)."""
     out = {}
     for y in years:
