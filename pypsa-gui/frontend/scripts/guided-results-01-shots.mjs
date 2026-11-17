@@ -3,14 +3,15 @@
 /**
  * guided-results 01 screenshot harness: Guided section 10 (Results & reports) and Expert
  * Results > Summary on the real app, dark and light: `<proj>-<theme>-<state>.jpg`.
- *   dc  (Data Center Energy Hub, study done): ready, ready-tiles, expert-summary, then stale
- *       (after one generator's p_nom is nudged, so the study is out of date).
+ *   dc  (Data Center Energy Hub, study done): ready, ready-tiles.  dcx: expert-summary.
+ *   dcstale: stale (after one generator's p_nom is nudged, so the study is out of date).
  *   dcn (Data Center Energy Hub not run): not-run.
  *   mg  (Island Microgrid, created when missing): not-run, then the Guided "Run study" click
- *       in section 9, running (dark, when caught), and ready once the study is done.
+ *       in section 9, running (dark, when caught), and ready once the study is done (or
+ *       later with mgready, when the study outlasts STUDY_WAIT_MS).
  *
  * Needs the API on :8000 and Vite on :5173, signed in as the dev admin (scripts/dev-credentials.mjs).
- * Usage: node scripts/guided-results-01-shots.mjs [dc|dcn|mg ...] [--out dir]      env: BASE
+ * Usage: node scripts/guided-results-01-shots.mjs [dc|dcx|dcstale|dcn|mg|mgready ...] [--out dir]      env: BASE
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -26,12 +27,13 @@ const outAt = args.indexOf('--out')
 const OUT = path.resolve(outAt >= 0 ? args[outAt + 1]
   : path.join(here, '..', '..', '..', '.scratch', 'guided-results', 'shots-01'))
 const picked = args.filter((a, i) => !a.startsWith('--') && (outAt < 0 || i !== outAt + 1))
-const PHASES = picked.length ? picked : ['dc', 'dcn', 'mg']
+const PHASES = picked.length ? picked : ['dc', 'dcx', 'dcstale', 'dcn', 'mg', 'mgready']
 const DC = 'Data Center Energy Hub'
 const DCN = 'Data Center Energy Hub not run'
 const MG = 'Island Microgrid'
 const THEMES = ['dark', 'light']
-const STUDY_WAIT_MS = 480_000
+const STUDY_WAIT_MS = Number(process.env.STUDY_WAIT_MS || 420_000)
+let mgDone = false
 await fs.mkdir(OUT, { recursive: true })
 const browser = await chromium.launch()
 const problems = []
@@ -93,7 +95,13 @@ async function scrollTo(page, testId) {
     await page.screenshot({ path: path.join(OUT, `debug-missing-${testId}.jpg`), type: 'jpeg', quality: 70 })
     throw e
   }
-  await el.evaluate(n => n.scrollIntoView({ block: 'start' }))
+  await el.evaluate(n => {
+    n.scrollIntoView({ block: 'start' })
+    // Leave the heading above the element in view too.
+    for (let p = n.parentElement; p; p = p.parentElement) {
+      if (p.scrollHeight > p.clientHeight && getComputedStyle(p).overflowY !== 'visible') { p.scrollTop -= 40; break }
+    }
+  })
   await page.waitForTimeout(800)
 }
 
@@ -129,7 +137,7 @@ try {
   await login.locator('#password').fill(c.password)
   await login.getByRole('button', { name: 'Sign in', exact: true }).click()
   await login.waitForURL(/\/projects/, { timeout: 60000 })
-  if (PHASES.includes('mg')) {
+  if (PHASES.includes('mg') || PHASES.includes('mgready')) {
     await login.evaluate(async (name) => {
       const { projectsApi } = await import('/src/api/projects.ts')
       const have = (await projectsApi.list()).map(p => p.name ?? p)
@@ -143,6 +151,12 @@ try {
     for (const theme of THEMES) {
       const { ctx, page } = await open(auth, DC, theme)
       await shootReady(page, 'dc', theme)
+      await ctx.close()
+    }
+  }
+  if (PHASES.includes('dcx')) {
+    for (const theme of THEMES) {
+      const { ctx, page } = await open(auth, DC, theme)
       // Expert Results > Summary: the headline strip.
       await page.evaluate(async () => {
         const { useUIStore } = await import('/src/store/uiStore.ts')
@@ -155,6 +169,8 @@ try {
       await shoot(page, `dc-${theme}-expert-summary.jpg`)
       await ctx.close()
     }
+  }
+  if (PHASES.includes('dcstale')) {
     // Out of date: nudge one generator's p_nom, then section 10 again.
     for (const theme of THEMES) {
       const { ctx, page } = await open(auth, DC, theme)
@@ -222,8 +238,12 @@ try {
         await page.waitForTimeout(5000)
       }
       console.log(`mg study status ${status} after ${((Date.now() - t0) / 1000).toFixed(0)} s`)
+      mgDone = status === 'done'
       await ctx.close()
     }
+  }
+  // mgready: the study is done (this run's or an earlier one's, still running then).
+  if (PHASES.includes('mgready') || mgDone) {
     for (const theme of THEMES) {
       const { ctx, page } = await open(auth, MG, theme)
       await shootReady(page, 'mg', theme)
