@@ -358,10 +358,10 @@ def test_solver_card_shows_a_load_growth_rate_and_the_multipliers_it_derives(gri
         "load_growth_pct_per_year": {"electrical": 2.0}, "load_growth_base_year": 2030}})
     rows = {r["field"]: r for r in card["rows"]}
     assert set(rows) == {"load_growth_pct_per_year.electrical", "load_growth_base_year",
-                         "load_scalers_by_carrier.electrical"}
+                         "load_scalers_by_carrier.electrical.2035"}
     assert rows["load_growth_pct_per_year.electrical"]["label"] == "Load growth electrical"
     assert rows["load_growth_pct_per_year.electrical"]["unit"] == "% per year"
-    assert rows["load_scalers_by_carrier.electrical"]["new"] == '{"2035":1.104081}'
+    assert rows["load_scalers_by_carrier.electrical.2035"]["new"] == 1.104081
 
 
 def _grown(**kw):
@@ -379,9 +379,9 @@ def test_solver_card_shows_the_stored_start_year_beside_a_rate_only_change(grid)
         "load_growth_pct_per_year": {"electrical": 3.0}}})
     rows = {r["field"]: r for r in card["rows"]}
     assert set(rows) == {"load_growth_pct_per_year.electrical", "load_growth_base_year",
-                         "load_scalers_by_carrier.electrical"}
+                         "load_scalers_by_carrier.electrical.2035"}
     assert rows["load_growth_base_year"]["old"] == rows["load_growth_base_year"]["new"] == 2030
-    assert rows["load_scalers_by_carrier.electrical"]["new"] == '{"2035":1.159274}'
+    assert rows["load_scalers_by_carrier.electrical.2035"]["new"] == 1.159274
     # the start year the change leaves shows as unchanged: no "2030 → 2030" (UX)
     assert rows["load_growth_base_year"]["unchanged"] is True
     assert "unchanged" not in rows["load_growth_pct_per_year.electrical"]
@@ -405,17 +405,63 @@ def test_solver_card_shows_the_stored_rate_beside_a_start_year_only_change(grid)
     _grown()
     card = edit_card.preview("update_solver_config", {"partial": {"load_growth_base_year": 2025}})
     rows = {r["field"]: r for r in card["rows"]}
+    # 2030 grows from 2025 now: a period the change adds reads "not set" before it
     assert set(rows) == {"load_growth_pct_per_year.electrical", "load_growth_base_year",
-                         "load_scalers_by_carrier.electrical"}
+                         "load_scalers_by_carrier.electrical.2030", "load_scalers_by_carrier.electrical.2035"}
+    assert rows["load_scalers_by_carrier.electrical.2030"]["old"] is None
     assert rows["load_growth_pct_per_year.electrical"]["new"] == 2.0
 
 
+def test_solver_card_says_each_load_multiplier_period_in_words(grid):
+    """UX (#1604): one row per period, in words ("2035: 1.104 → 1.159"), never the stored JSON."""
+    _grown()
+    card = edit_card.preview("update_solver_config", {"partial": {
+        "load_growth_pct_per_year": {"electrical": 3.0}}})
+    row = next(r for r in card["rows"] if r["field"] == "load_scalers_by_carrier.electrical.2035")
+    assert row["label"] == "Load multiplier electrical 2035:"
+    assert (row["old"], row["new"], row["unit"]) == (1.104081, 1.159274, "\u00d7")
+    assert row["display"] == {"old": 1.104, "new": 1.159, "unit": "\u00d7"}
+    assert "2035: 1.104 \u2192 1.159" in card["says"]
+    assert "{" not in card["says"]
+
+
+def test_a_load_multiplier_card_reads_back_each_period_after_it_applies(grid):
+    """The receipt verifies the per-period rows against the stored config."""
+    _grown()
+    frames, cards, result = _dispatch(grid, "update_solver_config", {"partial": {
+        "load_growth_pct_per_year": {"electrical": 3.0}}})
+    fields = [r["field"] for r in cards[0]["edit_card"]["rows"]]
+    assert "load_scalers_by_carrier.electrical.2035" in fields
+    assert result["_edit_receipt"]["outcome"] == "verified"
+
+
+def test_a_growth_input_the_handler_changes_anyway_is_not_marked_unchanged(grid, monkeypatch):
+    """GK B: `unchanged` only when the value really is the same, not merely left out of the change."""
+    _grown()
+    real = chat_tools.update_solver_config
+
+    def moves_the_start_year(partial):
+        out = real(partial)
+        PyPSAService.get_active_context().solver_state["solver_config"].load_growth_base_year = 2025
+        return out
+    monkeypatch.setattr(chat_tools, "update_solver_config", moves_the_start_year)
+    card = edit_card.preview("update_solver_config", {"partial": {
+        "load_growth_pct_per_year": {"electrical": 3.0}}})
+    row = next(r for r in card["rows"] if r["field"] == "load_growth_base_year")
+    assert (row["old"], row["new"]) == (2030, 2025)
+    assert "unchanged" not in row
+
+
+_GROWN_2040 = {"2035": (1.104081, None), "2040": (None, 1.218994)}
+_CLEARED = {"2035": (1.104081, None)}
+
+
 @pytest.mark.parametrize("tool,args,new", [
-    ("set_investment_periods", {"periods": [2030, 2040]}, '{"2040":1.218994}'),
+    ("set_investment_periods", {"periods": [2030, 2040]}, _GROWN_2040),
     ("set_multi_period_snapshots", {"periods": [2040, 2030], "operational_from": "2025-01-01",
-                                    "operational_to": "2025-01-01 01:00"}, '{"2040":1.218994}'),
-    ("set_investment_periods", {"periods": []}, "{}"),
-    ("set_snapshots", {"start": "2025-01-01", "end": "2025-01-01 01:00"}, "{}"),
+                                    "operational_to": "2025-01-01 01:00"}, _GROWN_2040),
+    ("set_investment_periods", {"periods": []}, _CLEARED),
+    ("set_snapshots", {"start": "2025-01-01", "end": "2025-01-01 01:00"}, _CLEARED),
 ])
 def test_a_time_axis_card_shows_the_load_multipliers_its_period_change_rederives(grid, tool, args, new):
     _grown(periods=[])  # the network's periods rule (the config sets no override)
@@ -424,9 +470,13 @@ def test_a_time_axis_card_shows_the_load_multipliers_its_period_change_rederives
     PyPSAService.get_network().investment_periods = [2030, 2035]
     card = edit_card.preview(tool, args)
     rows = {r["field"]: r for r in card["rows"]}
-    assert rows["load_scalers_by_carrier.electrical"]["old"] == '{"2035":1.104081}'
-    assert rows["load_scalers_by_carrier.electrical"]["new"] == new
-    assert rows["load_scalers_by_carrier.electrical"]["label"] == "Load multiplier electrical"
+    # one derived row per period it changes, in the solver card's words (UX #1604)
+    scalers = {f: r for f, r in rows.items() if f.startswith("load_scalers_by_carrier.")}
+    assert {f: (r["old"], r["new"]) for f, r in scalers.items()} == {
+        f"load_scalers_by_carrier.electrical.{p}": v for p, v in new.items()}
+    assert {r["role"] for r in scalers.values()} == {"derived"}
+    assert rows["load_scalers_by_carrier.electrical.2035"]["label"] == "Load multiplier electrical 2035:"
+    assert rows["load_scalers_by_carrier.electrical.2035"]["display"]["old"] == 1.104
     assert set(args) <= set(rows)          # the arguments stay on the card
     assert card["complete"] is False       # the network change itself is not read back
 

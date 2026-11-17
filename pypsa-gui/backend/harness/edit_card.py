@@ -1106,6 +1106,33 @@ def _solver_row(key: str, old, new, *, applies: bool = True, unchanged: bool = F
     return row
 
 
+_SCALERS = "load_scalers_by_carrier"
+
+
+def _scaler_rows(old: dict, new: dict) -> list[dict]:
+    """The load multipliers a change moves, one row per carrier and period it changes
+    ("Load multiplier electrical 2035: 1.104 → 1.159"), never the stored map as JSON (UX #1604)."""
+    rows = []
+    for carrier in dict.fromkeys([*old, *new]):
+        before, after = old.get(carrier) or {}, new.get(carrier) or {}
+        for period in dict.fromkeys([*before, *after]):
+            was, now = before.get(period), after.get(period)
+            if _same(was, now):
+                continue
+            row = _solver_row(f"{_SCALERS}.{carrier}.{period}", was, now)
+            row["label"] = row["says_name"] = f"{_SOLVER_WORDS[_SCALERS][0]} {carrier} {period}:"
+            row["display"] = {"old": round(was, 3) if _numeric(was) else None,
+                              "new": round(now, 3) if _numeric(now) else None, "unit": row["unit"]}
+            rows.append(row)
+    return rows
+
+
+def _scaler_at(scalers: dict, field: str):
+    """The stored multiplier a `load_scalers_by_carrier.<carrier>.<period>` row names."""
+    carrier, _, period = field.partition(".")[2].rpartition(".")
+    return ((scalers or {}).get(carrier) or {}).get(period)
+
+
 def _solver_preview(args: dict) -> list[dict]:
     from pydantic import ValidationError
 
@@ -1142,15 +1169,19 @@ def _solver_preview(args: dict) -> list[dict]:
         keys.append("load_scalers_by_carrier")
     for key in keys:
         old, new = current.get(key), after.get(key)
+        if key == _SCALERS:
+            rows += _scaler_rows(old or {}, new or {})
+            continue
         if isinstance(old, dict) or isinstance(new, dict):
             old, new = old or {}, new or {}
             subs = [k for k in dict.fromkeys([*old, *new])
                     if key in shown or not _same(old.get(k), new.get(k))]
-            rows += [_solver_row(f"{key}.{k}", old.get(k), new.get(k), unchanged=key in shown)
+            rows += [_solver_row(f"{key}.{k}", old.get(k), new.get(k),
+                                 unchanged=key in shown and _same(old.get(k), new.get(k)))
                      for k in subs]
             continue
         rows.append(_solver_row(key, old, new, applies=key not in _ROLLING or rolling_before,
-                                unchanged=key in shown))
+                                unchanged=key in shown and _same(old, new)))
     if after.get("solve_strategy") == "rolling" and not rolling_before:
         rows.append(_note("", "", "solve_strategy", ROLLING_NOTE))
     if not rows:
@@ -1167,6 +1198,9 @@ def _solver_readback(args: dict, rows: list[dict]) -> list[Any]:
             continue
         key, _, sub = row["field"].partition(".")
         value = current.get(key)
+        if key == _SCALERS:
+            out.append(_setting(_scaler_at(value, row["field"])))
+            continue
         out.append(_setting((value or {}).get(sub) if sub else value))
     return out
 
@@ -1281,10 +1315,7 @@ def _time_axis_preview(tool: str) -> Callable[[dict], list[dict]]:
             return rows
         old = getattr(current, "load_scalers_by_carrier", None) or {}
         new = grown.load_scalers_by_carrier or {}
-        for carrier in dict.fromkeys([*old, *new]):
-            if not _same(old.get(carrier), new.get(carrier)):
-                row = _solver_row(f"load_scalers_by_carrier.{carrier}", old.get(carrier), new.get(carrier))
-                rows.append({**row, "role": "derived"})
+        rows += [{**row, "role": "derived"} for row in _scaler_rows(old, new)]
         return rows
     return preview
 
@@ -1294,8 +1325,8 @@ def _time_axis_readback(args: dict, rows: list[dict]) -> list[Any]:
 
     scalers = getattr(PyPSAService.get_active_context().solver_state.get("solver_config"),
                       "load_scalers_by_carrier", None) or {}
-    return [_setting(scalers.get(row["field"].partition(".")[2]))
-            if row["field"].startswith("load_scalers_by_carrier.") else None for row in rows]
+    return [_setting(_scaler_at(scalers, row["field"]))
+            if row["field"].startswith(f"{_SCALERS}.") else None for row in rows]
 
 
 for _tool in ("set_snapshots", "set_multi_period_snapshots", "set_investment_periods"):
