@@ -332,7 +332,6 @@ def _may_abort(db: DBSession, user: User, job: dict) -> bool:
         return False
 
     from db.models import Project
-    from services import project_acl
 
     project = db.get(Project, project_id)
     if project is None:
@@ -345,7 +344,6 @@ def _may_abort(db: DBSession, user: User, job: dict) -> bool:
 def _job_view_only(db: DBSession, user: User, job: dict) -> bool:
     """True when `job`'s project is one the caller only views."""
     from db.models import Project
-    from services import project_acl
 
     project_id = _project_uuid(job, _org_prefix(db, user))
     project = db.get(Project, project_id) if project_id is not None else None
@@ -386,7 +384,6 @@ def _visible_job_or_404(db: DBSession, user: User, job_id: str) -> dict:
     about stopping work, not about reading the deleted project's log, so the
     listing predicate is the right one here.
     """
-    from services import project_acl
 
     not_found = HTTPException(404, f"No solve job with id {job_id}.")
     parsed = _parse_job_id(job_id)
@@ -773,7 +770,7 @@ def list_queue(
     a hot path — and answering on org membership instead would leak names that
     `GET /api/projects/` already hides from the same caller.
     """
-    from services import project_acl, project_registry
+    from services import project_registry
 
     project_registry.require_user(user)
     prefix = _org_prefix(db, user)

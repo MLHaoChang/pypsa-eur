@@ -30,11 +30,12 @@ A caller with no access to the target, or in another org, is never told
 ``project_view_only``: the gate passes them through and the handler's own 404
 stands (GK B R2).
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session as DBSession
@@ -72,13 +73,16 @@ def is_viewer(db: DBSession, user: User | None, project_uuid: str | None) -> boo
     if user is None or not project_uuid:
         return False
     project = db.get(Project, uuid.UUID(str(project_uuid)))
-    return project is not None and project_acl.project_role(db, user, project) == project_acl.VIEW
+    return (
+        project is not None
+        and project_acl.project_role(db, user, project) == project_acl.VIEW
+    )
 
 
 @dataclass(frozen=True)
 class Rule:
-    kind: str     # "write" | "allow" | "none"
-    detail: str   # write: the target; allow/none: the reason
+    kind: str  # "write" | "allow" | "none"
+    detail: str  # write: the target; allow/none: the reason
 
 
 def _parse(table: str) -> dict[tuple[str, str], Rule]:
@@ -105,7 +109,7 @@ RULES = _parse(TABLE)
 _FAIL_CLOSED = Rule("write", "active")
 
 
-@lru_cache(maxsize=None)
+@cache
 def _full_paths(app) -> dict[int, tuple[tuple[str, re.Pattern], ...]]:
     """Map each route object to the full path(s) it is mounted at.
 
@@ -172,7 +176,9 @@ def _active_project(db: DBSession) -> Project | None:
     from services.pypsa_service import PyPSAService
 
     try:  # an unsaved (scratch) context has no project id: ValueError
-        return db.get(Project, uuid.UUID(str(PyPSAService.get_active_context().project_uuid)))
+        return db.get(
+            Project, uuid.UUID(str(PyPSAService.get_active_context().project_uuid))
+        )
     except ValueError:
         return None
 
