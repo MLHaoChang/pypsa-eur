@@ -190,13 +190,15 @@ def _release_sessions(task_id):
     read a finished task, which after a project switch it could not. Only a
     session whose `task_id` or `detached_task_id` is this task changes."""
     from harness import session as harness_session
-    from services import chat_tools
+    from services import chat_tools, run_envelope
     if not task_id:
         return
     with harness_session._SESSIONS_LOCK:
         sessions = list(harness_session._SESSIONS.values())
     current = chat_tools.chat_session()
     for session in ([current] if current is not None else []) + sessions:
+        if str(getattr(session, "session_id", "") or "").startswith(run_envelope.SESSION_PREFIX):
+            continue  # a runner session is its run's by identity (`_is_run_session`)
         if getattr(session, "task_id", None) == task_id:
             session.task_id = None
         if getattr(session, "detached_task_id", None) == task_id:
