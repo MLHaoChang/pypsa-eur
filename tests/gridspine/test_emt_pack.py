@@ -521,3 +521,19 @@ def test_manifest_and_thevenin_keys_are_pinned(tmp_path):
     assert set(th) == {"note", "stage_note", "pcc_bus", "vn_kv", "sources", "stages"}
     assert (th["note"], th["pcc_bus"], th["vn_kv"]) == (C_NOTE, "PCC", 110.0)
     assert th["stage_note"] == emt_pack.STAGE_NOTE
+
+
+def test_each_battery_corner_is_one_row(tmp_path):
+    srcs = rows(pack(tmp_path).path, "thevenin_set.json")["sources"]
+    labels = [r["label"] for r in srcs if r["group"] == "battery"]
+    assert sorted(labels) == [
+        "skmax_xrmax",
+        "skmax_xrmin",
+        "skmin_xrmax",
+        "skmin_xrmin",
+    ]
+
+
+def test_r0x0_without_x0x_lists_only_the_missing_one(tmp_path):
+    p = pack(tmp_path, spec(x0x_min=None))
+    assert list(p.to_be_supplied["param"]) == ["x0x_min"]
