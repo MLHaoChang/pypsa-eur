@@ -6,6 +6,10 @@ the grid source machine (a GENCLS with H = 0, an infinite bus) into the case's
 Thevenin source, applies the case's event at ``t_event_s`` and writes
 ``<case_id>.out`` plus ``<case_id>.csv`` next to itself (TRGC 04/05).
 
+**Precondition.** The RAW already holds the SMIB: the grid is one GENCLS
+machine (``grid_machine``) at the PoC side, whose impedance the script sets
+(Z1, and Z0 when given). The script adds no machine, bus or branch.
+
 **Channels.** PSS/E records ``raw_<name>`` channels as it measures them; after
 the run the script reads the ``.out`` back with ``dyntools.CHNF.get_data``,
 applies :data:`CONVERSIONS` in a pure ``_convert`` function and writes the CSV
@@ -25,7 +29,7 @@ numbers were made on. Z2 = Z1 (test_battery module docstring).
 **Pack-local files.** A script names files only by basename and resolves each
 against its own directory; :func:`check_script` (also used by the pack) parses
 a script with ``ast`` and refuses any other file, an absolute path, an import
-outside psspy/dyntools/os/sys, ``open``/``eval``/``exec``/``__import__``, and
+outside psspy/dyntools/os, ``open``/``eval``/``exec``/``__import__``, and
 any ``os`` call outside ``os.path`` (GK condition S1). The one ``open`` allowed
 is ``open(os.path.join(HERE, '<file>.csv'), 'w')`` on a pack file, with
 ``HERE`` bound once to the script's own directory.
@@ -95,7 +99,10 @@ CHANNEL_CALLS = {
     "raw_f_hz": ("bus_frequency_channel", "pu deviation from base frequency"),
     "raw_p_poc_mw": ("branch_p_and_q_channel", "MW at the from (plant) bus"),
     "raw_q_poc_mvar": ("branch_p_and_q_channel", "Mvar at the from (plant) bus"),
-    "raw_id_pu": ("machine_array_channel", "code 22, Ip command, pu on MBASE = plant rated"),
+    "raw_id_pu": (
+        "machine_array_channel",
+        "code 22, Ip command, pu on MBASE = plant rated",
+    ),
     "raw_iq_pu": (
         "machine_array_channel",
         "code 23, Iq command, pu on MBASE = plant rated; positive = capacitive "
@@ -123,7 +130,7 @@ CONVERSIONS = {
     ),
 }
 
-ALLOWED_IMPORTS = frozenset({"psspy", "dyntools", "os", "sys"})
+ALLOWED_IMPORTS = frozenset({"psspy", "dyntools", "os"})
 _FORBIDDEN_CALLS = frozenset(
     {"open", "eval", "exec", "__import__", "compile", "getattr", "globals", "vars"}
 )
@@ -207,7 +214,7 @@ def check_script(text, allowed_files, channels=()) -> set:
             for name in names:
                 if name.split(".")[0] not in ALLOWED_IMPORTS:
                     problems.append(f"import of {name!r}")
-            if isinstance(node, ast.ImportFrom) and node.module in ("os", "sys"):
+            if isinstance(node, ast.ImportFrom) and node.module == "os":
                 bad = [a.name for a in node.names if a.name != "path"]
                 if bad:
                     problems.append(f"import of {bad} from {node.module}")
@@ -217,16 +224,29 @@ def check_script(text, allowed_files, channels=()) -> set:
                 continue
             if name.split(".")[-1] in _FORBIDDEN_CALLS or "subprocess" in name:
                 problems.append(f"call to {name}")
-        elif isinstance(node, ast.Attribute) and not isinstance(node.value, ast.Attribute):
+        elif isinstance(node, ast.Attribute) and not isinstance(
+            node.value, ast.Attribute
+        ):
             root = _dotted(node).split(".")[0]
             if root == "os" and node.attr != "path":
                 problems.append(f"os call outside os.path: os.{node.attr}")
-            if root == "sys" and node.attr != "path":
-                problems.append(f"sys use outside sys.path: sys.{node.attr}")
-    here = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "HERE"
-            and not isinstance(n.ctx, ast.Load)]
-    binds = [n for n in tree.body if isinstance(n, ast.Assign)
-             and [ast.dump(t) for t in n.targets] == [ast.dump(here[0])]] if here else []
+    here = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Name)
+        and n.id == "HERE"
+        and not isinstance(n.ctx, ast.Load)
+    ]
+    binds = (
+        [
+            n
+            for n in tree.body
+            if isinstance(n, ast.Assign)
+            and [ast.dump(t) for t in n.targets] == [ast.dump(here[0])]
+        ]
+        if here
+        else []
+    )
     if len(here) != 1 or len(binds) != 1 or ast.unparse(binds[0].value) != _HERE_EXPR:
         problems.append(f"HERE must be bound once, to {_HERE_EXPR}")
     for ch in channels:
@@ -252,8 +272,10 @@ def _event_lines(case, poc_kv):
         return ["# flat run: no event"]
     if kind == "fault_3ph":
         zf = fault_impedance_ohm(case, poc_kv)
-        vals = "1, POC_KV, [0.0, -2.0e11]" if zf == 0 else (
-            f"2, POC_KV, [{zf.real!r}, {zf.imag!r}]"
+        vals = (
+            "1, POC_KV, [0.0, -2.0e11]"
+            if zf == 0
+            else (f"2, POC_KV, [{zf.real!r}, {zf.imag!r}]")
         )
         return [
             f"# three-phase fault, retained voltage {p['v_retained_pu']!r} pu",
@@ -313,7 +335,9 @@ def _channel_lines(case):
     elif "raw_v_poc_pu" in raw:
         out.append("psspy.voltage_channel([-1, -1, -1, POC_BUS], 'raw_v_poc_pu')")
     if "raw_theta_src" in raw:
-        out.append("psspy.machine_array_channel([-1, 1, GRID_BUS], GRID_ID, 'raw_theta_src')")
+        out.append(
+            "psspy.machine_array_channel([-1, 1, GRID_BUS], GRID_ID, 'raw_theta_src')"
+        )
     if "raw_f_hz" in raw:
         out.append("psspy.bus_frequency_channel([-1, POC_BUS], 'raw_f_hz')")
     if raw & {"raw_p_poc_mw", "raw_q_poc_mvar"}:
@@ -334,6 +358,10 @@ def _convert_lines(case):
     out = ["def _convert(rec, f0_hz, s_rated):", "    out = {'t_s': list(rec['t_s'])}"]
     for ch in case.channels:
         inputs, expr, formula = CONVERSIONS[ch]
+        if len(inputs) > len("abc"):
+            raise ContractError(
+                f"conversion of {ch!r}: {len(inputs)} inputs, at most 3"
+            )
         names = "abc"[: len(inputs)]
         cols = ", ".join(f"rec[{r!r}]" for r in inputs)
         out += [
@@ -343,8 +371,19 @@ def _convert_lines(case):
     return out + ["    return out", ""]
 
 
-def _script(case, files, csv, poc_bus, poc_kv, grid_machine, mbase, plant_branch,
-            plant_machine, f0_hz, plant_mbase):
+def _script(
+    case,
+    files,
+    csv,
+    poc_bus,
+    poc_kv,
+    grid_machine,
+    mbase,
+    plant_branch,
+    plant_machine,
+    f0_hz,
+    plant_mbase,
+):
     g, cid = case.grid, case.case_id
     z1, z0 = thevenin_impedances_ohm(g, poc_kv)
     to_pu = mbase / poc_kv**2
@@ -430,6 +469,22 @@ def _script(case, files, csv, poc_bus, poc_kv, grid_machine, mbase, plant_branch
     return "\n".join(lines)
 
 
+def _is_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _is_positive_int(v):
+    return _is_int(v) and v > 0
+
+
+def _check_machine(label, m):
+    ok = isinstance(m, tuple) and len(m) == 2
+    if not ok or not _is_positive_int(m[0]) or not isinstance(m[1], str):
+        raise ContractError(f"{label}={m!r} must be a (positive int bus, str id) tuple")
+    if not 1 <= len(m[1]) <= 2:
+        raise ContractError(f"{label} id {m[1]!r} must be 1 or 2 characters")
+
+
 def write_scripts(
     cases,
     pack_dir,
@@ -465,7 +520,27 @@ def write_scripts(
     cases = validate_battery(cases)
     for label, name in (("raw", raw), ("seq", seq), ("dyr", dyr)):
         _pack_local(label, name)
-    positive = [("poc_kv", poc_kv), ("grid_mbase_mva", grid_mbase_mva), ("f0_hz", f0_hz)]
+    if not _is_positive_int(poc_bus):
+        raise ContractError(f"poc_bus={poc_bus!r} must be a positive int bus number")
+    _check_machine("grid_machine", grid_machine)
+    if plant_machine is not None:
+        _check_machine("plant_machine", plant_machine)
+    if plant_branch is not None:
+        ok = isinstance(plant_branch, tuple) and len(plant_branch) == 3
+        if (
+            not ok
+            or not all(_is_int(b) for b in plant_branch[:2])
+            or not isinstance(plant_branch[2], str)
+        ):
+            raise ContractError(
+                f"plant_branch={plant_branch!r} must be a (from bus, to bus, ckt) "
+                "tuple of (int, int, str)"
+            )
+    positive = [
+        ("poc_kv", poc_kv),
+        ("grid_mbase_mva", grid_mbase_mva),
+        ("f0_hz", f0_hz),
+    ]
     if plant_mbase_mva is not None or any("i_poc_pu" in c.channels for c in cases):
         positive.append(("plant_mbase_mva", plant_mbase_mva))
     for label, v in positive:
@@ -473,8 +548,14 @@ def write_scripts(
         if not ok or not math.isfinite(v) or v <= 0:
             raise ContractError(f"{label}={v!r} must be a finite number > 0")
     for c in cases:
-        if plant_branch is None and set(c.channels) & {"p_poc_mw", "q_poc_mvar", "i_poc_pu"}:
-            raise ContractError(f"case {c.case_id}: P/Q/current channels need plant_branch")
+        if plant_branch is None and set(c.channels) & {
+            "p_poc_mw",
+            "q_poc_mvar",
+            "i_poc_pu",
+        }:
+            raise ContractError(
+                f"case {c.case_id}: P/Q/current channels need plant_branch"
+            )
         needs_machine = c.kind in _PLANT_KINDS or set(c.channels) & {"id_pu", "iq_pu"}
         if plant_machine is None and needs_machine:
             raise ContractError(
@@ -485,11 +566,24 @@ def write_scripts(
     for c in cases:
         files = {"RAW": raw, "SEQ": seq, "DYR": dyr, "OUT": f"{c.case_id}.out"}
         csv = f"{c.case_id}.csv"
-        text = _script(c, files, csv, poc_bus, poc_kv, grid_machine, grid_mbase_mva,
-                       plant_branch, plant_machine, f0_hz, plant_mbase_mva)
+        text = _script(
+            c,
+            files,
+            csv,
+            poc_bus,
+            poc_kv,
+            grid_machine,
+            grid_mbase_mva,
+            plant_branch,
+            plant_machine,
+            f0_hz,
+            plant_mbase_mva,
+        )
         check_script(text, {*files.values(), csv}, c.channels)
         name = f"run_{c.case_id}.py"
-        with open(os.path.join(pack_dir, name), "w", encoding="utf-8", newline="\n") as fh:
+        with open(
+            os.path.join(pack_dir, name), "w", encoding="utf-8", newline="\n"
+        ) as fh:
             fh.write(text)
         written[c.case_id] = name
     return written

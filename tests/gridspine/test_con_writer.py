@@ -100,7 +100,7 @@ def test_compound_kinds_are_returned_not_written(net, tmp_path, build):
 def test_sub_and_mon(net, tmp_path):
     write_sub(net, tmp_path / "s.sub")
     assert (tmp_path / "s.sub").read_text().startswith("SUBSYSTEM 'STUDY'\n   KVRANGE ")
-    write_mon(tmp_path / "s.mon")
+    write_mon(tmp_path / "s.mon", 0.9, 1.1)
     text = (tmp_path / "s.mon").read_text()
     assert "MONITOR VOLTAGE RANGE SUBSYSTEM 'STUDY' 0.900 1.100" in text and text.endswith("END\n")
 
@@ -108,7 +108,35 @@ def test_sub_and_mon(net, tmp_path):
 @pytest.mark.parametrize("lo, hi, reason", [
     (1.1, 0.9, "v_min < v_max"), (1.0, 1.0, "v_min < v_max"),
     (float("nan"), 1.1, "finite and > 0"), (0.0, 1.1, "finite and > 0"),
+    (0.9, float("inf"), "finite and > 0"), (float("-inf"), 1.1, "finite and > 0"),
+    ("0.9", 1.1, "finite and > 0"), (True, 1.1, "finite and > 0"), (0.9, None, "finite and > 0"),
 ])
 def test_a_bad_monitor_band_is_refused(tmp_path, lo, hi, reason):
     with pytest.raises(ContractError, match=reason):
         write_mon(tmp_path / "m.mon", lo, hi)
+
+
+@pytest.mark.parametrize("kv", [float("nan"), float("inf"), 0.0, -20.0])
+def test_a_bad_sub_kv_is_refused(net, tmp_path, kv):
+    bad = net.deepcopy()
+    bad.bus.loc[bad.bus.index[0], "vn_kv"] = kv
+    with pytest.raises(ContractError, match="every vn_kv finite and > 0"):
+        write_sub(bad, tmp_path / "s.sub")
+
+
+def test_an_empty_network_has_no_sub(net, tmp_path):
+    empty = net.deepcopy()
+    empty.bus = empty.bus.iloc[0:0]
+    with pytest.raises(ContractError, match="at least one bus"):
+        write_sub(empty, tmp_path / "s.sub")
+
+
+def test_an_unknown_kind_is_refused_not_written_as_a_bus(net, tmp_path, monkeypatch):
+    import gridspine.handoff.contingencies as C
+
+    cset = _set(net, ("bus_section",)).head(1).copy()
+    cset["kind"] = "breaker"
+    monkeypatch.setattr(C, "validate_contingency_set", lambda df: df)
+    with pytest.raises(ContractError, match="kind 'breaker' has no .con form"):
+        write_con(cset, net, tmp_path / "c.con")
+    assert not (tmp_path / "c.con").exists()

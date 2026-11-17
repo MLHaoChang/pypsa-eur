@@ -141,10 +141,12 @@ def write_con(contingency_set: pd.DataFrame, net, path) -> list:
                     raise ContractError(f"contingency {r.contingency_id}: unit {el} is not a machine on the network")
                 num, mid = machine[el]
                 body.append(f"   REMOVE MACHINE '{mid:<2s}' FROM BUS {num}")
-            else:  # bus_section
+            elif r.kind == "bus_section":
                 if el not in nums:
                     raise ContractError(f"contingency {r.contingency_id}: bus {el} is not a bus on the network")
                 body.append(f"   DISCONNECT BUS {nums[el]}")
+            else:
+                raise ContractError(f"contingency {r.contingency_id}: kind {r.kind!r} has no .con form")
         lines += [f"CONTINGENCY {_con_label(r.contingency_id)}", *body, "END"]
     lines.append("END")
     with open(path, "w", newline="\n") as f:
@@ -155,16 +157,20 @@ def write_con(contingency_set: pd.DataFrame, net, path) -> list:
 def write_sub(net, path) -> None:
     """The study subsystem: every bus of the network, by its kV range."""
     kv = net.bus["vn_kv"].astype(float)
+    if kv.empty or not np.isfinite(kv).all() or not (kv > 0).all():
+        raise ContractError("the .sub kV range needs at least one bus, every vn_kv finite and > 0")
     text = f"SUBSYSTEM '{SUBSYSTEM}'\n   KVRANGE {float(kv.min()):.3f} {float(kv.max()):.3f}\nEND\nEND\n"
     with open(path, "w", newline="\n") as f:
         f.write(text)
 
 
-def write_mon(path, v_min_pu=0.90, v_max_pu=1.10) -> None:
+def write_mon(path, v_min_pu, v_max_pu) -> None:
     """Monitor every branch and every bus voltage of the study subsystem
-    against ``[v_min_pu, v_max_pu]`` (the caller's planning band)."""
+    against ``[v_min_pu, v_max_pu]``, the caller's planning band (no default:
+    the band is the study's, not this writer's)."""
     for v in (v_min_pu, v_max_pu):
-        if not (np.isfinite(v) and v > 0):
+        bad_type = isinstance(v, bool) or not isinstance(v, (int, float, np.floating))
+        if bad_type or not (np.isfinite(v) and v > 0):
             raise ContractError(f"monitor voltage band must be finite and > 0, got {v}")
     if not v_min_pu < v_max_pu:
         raise ContractError(f"monitor band needs v_min < v_max, got {v_min_pu}, {v_max_pu}")
