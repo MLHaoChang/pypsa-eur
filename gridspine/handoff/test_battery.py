@@ -182,33 +182,21 @@ CHANNELS = {
     ),
 }
 
-#: Channels per contract version, in contract order; a reader accepts exactly these versions.
-CONTRACT_CHANNELS = {
-    "1": (
-        "v_poc_pu",
-        "theta_poc_deg",
-        "f_hz",
-        "p_poc_mw",
-        "q_poc_mvar",
-        "id_pu",
-        "iq_pu",
-        "i_poc_pu",
-    ),
-    "2": (
-        "v_poc_pu",
-        "theta_poc_deg",
-        "f_hz",
-        "p_poc_mw",
-        "q_poc_mvar",
-        "id_pu",
-        "iq_pu",
-        "i_poc_pu",
-        "connected",
-    ),
-}
-CONTRACT_VERSIONS = tuple(CONTRACT_CHANNELS)
 #: The channel version 2 adds; every case of a version-2 battery carries it.
 CONNECTED = "connected"
+_V1_CHANNELS = (
+    "v_poc_pu",
+    "theta_poc_deg",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu",
+)
+#: Channels per contract version, in contract order; a reader accepts exactly these versions.
+CONTRACT_CHANNELS = {"1": _V1_CHANNELS, "2": (*_V1_CHANNELS, CONNECTED)}
+CONTRACT_VERSIONS = tuple(CONTRACT_CHANNELS)
 
 #: Required event parameters per kind; no other parameter is accepted.
 KIND_PARAMS = {

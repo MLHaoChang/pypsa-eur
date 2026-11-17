@@ -406,7 +406,7 @@ def test_manifest_cites_the_contract(tmp_path):
         "iq_pu",
         "i_poc_pu",
     ]
-    assert m["contract_version"] == emt_pack.CONTRACT_VERSION
+    assert m["contract_version"] == emt_pack.EMT_CONTRACT_VERSION
     assert m["files"] and math.isfinite(m["vn_kv"])
 
 

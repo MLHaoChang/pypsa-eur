@@ -66,7 +66,6 @@ import pandas as pd
 from gridspine.handoff.emt_workbook import RSCAD_NOTES, rscad_notes, workbook
 from gridspine.handoff.test_battery import (
     CHANNEL_SEP,
-    CONTRACT_VERSION,
     PARAM_NAMES,
     Thevenin,
     battery_json,
@@ -79,6 +78,10 @@ from gridspine.handoff.test_battery import (
 from gridspine.schema.contracts import ContractError
 
 PACK_VERSION = "1"
+#: The battery contract this pack's schedule records: version 1 until the
+#: schedule writes `connected` (GC-12, GK A2 T1). Pinned here, not taken from
+#: the writers' default, so the pack never declares a channel it does not write.
+EMT_CONTRACT_VERSION = "1"
 #: The mhi.pscad API the stub is written for (PSCAD 5 automation library).
 MHI_PSCAD_API = "2"
 C_NOTE = "IEC 60909 c not applied (as the test battery); with c_max = 1.1 the max-case |Z| is 10 % higher"
@@ -527,7 +530,7 @@ def write_emt_pack(
     )
     if battery is not None:
         schedule = case_schedule(battery, vn_kv)
-        texts[BATTERY_JSON] = battery_json(battery)
+        texts[BATTERY_JSON] = battery_json(battery, EMT_CONTRACT_VERSION)
         texts[SCHEDULE_JSON] = _dumps(schedule)
         texts[SCHEDULE_CSV] = _csv(schedule, SCHEDULE_COLUMNS)
         texts[STUB] = stub_text(len(schedule))
@@ -545,14 +548,14 @@ def write_emt_pack(
     manifest = {
         "pack": "pscad_emt",
         "pack_version": PACK_VERSION,
-        "contract_version": CONTRACT_VERSION,
+        "contract_version": EMT_CONTRACT_VERSION,
         "f_hz": float(campus.net.f_hz),
         "pcc_bus": bus,
         "vn_kv": vn_kv,
         "files": files,
         "data_hash": _sha("".join(f"{n}:{h}\n" for n, h in files.items())),
         "case_ids": [c.case_id for c in battery] if battery is not None else [],
-        "channels": list(contract_channels(CONTRACT_VERSION)),
+        "channels": list(contract_channels(EMT_CONTRACT_VERSION)),
         "outputs": {f"{RESULTS_DIR}/": "PSCAD .inf/.out per case, named by case id"},
         "assumptions": assumptions,
         "z0_differs_from_battery": z0_differs,

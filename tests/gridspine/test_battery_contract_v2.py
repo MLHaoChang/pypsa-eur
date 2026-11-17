@@ -10,7 +10,6 @@ tuples, and a hand-written version-2 battery.json. A writer/reader round trip
 is never the only check. Each refusal test asserts its own guard's reason.
 """
 
-import copy
 import json
 from pathlib import Path
 
@@ -251,7 +250,6 @@ def test_v1_doc_with_the_v2_contract_refused():
 
 def test_v2_connected_entry_edited_refused():
     doc = _v2_doc()
-    doc = copy.deepcopy(doc)
     doc["channels"]["connected"]["unit"] = "pu"
     with pytest.raises(ContractError, match="channel contract differs"):
         cases_from_json(json.dumps(doc))
@@ -278,3 +276,20 @@ def test_emt_manifest_declares_exactly_what_its_schedule_records(tmp_path):
     assert manifest["contract_version"] == "1"
     assert set(manifest["channels"]) == recorded
     assert manifest["channels"] == list(V1)
+
+
+def test_emt_pack_refuses_a_v2_battery_until_its_schedule_records_connected(tmp_path):
+    from dataclasses import replace
+
+    from gridspine.handoff import emt_pack
+    from gridspine.ingest.campus import build_campus
+    from tests.gridspine.test_emt_pack import spec
+
+    assert emt_pack.EMT_CONTRACT_VERSION == "1"
+    camp = build_campus(spec())
+    v2 = tuple(
+        replace(c, channels=(*c.channels, "connected"))
+        for c in emt_pack.battery_from_campus(camp)
+    )
+    with pytest.raises(ContractError, match="not in contract version 1"):
+        emt_pack.write_emt_pack(tmp_path / "emt", camp, battery=v2)
