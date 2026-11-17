@@ -464,3 +464,51 @@ def test_no_mount_source_comes_from_the_project_or_the_request(
         assert Path(blender["source"]) == tree
         for m in mounts:
             assert str(geo) not in m and "campus" not in m and job["id"] not in m
+
+
+def test_a_timed_out_job_fails_typed_with_no_artifact_and_frees_the_dispatcher(
+    client, geo, worker, monkeypatch, tmp_path
+):
+    _scene_with_buildings(client, geo)
+    worker("hang")
+    monkeypatch.setitem(
+        blender_job.run_queued.__kwdefaults__,
+        "caps",
+        bw.Caps(wall_s=2.0, grace_s=1.0, poll_s=0.05, version_timeout_s=5.0),
+    )
+    started = []
+    monkeypatch.setattr(
+        sq.SolveQueue,
+        "_run_solve_job",
+        lambda self, job: (
+            started.append(time.monotonic()),
+            self._finish(job, "completed"),
+        ),
+    )
+    scene = client.post(JOBS).json()
+    solve = sq.solve_queue.enqueue(
+        "other", project_key="other", storage_dir=str(tmp_path)
+    )
+    assert _wait(lambda: _status(scene["id"]) in sq._TERMINAL, timeout=30)
+    got = sq.solve_queue.get_job(uuid.UUID(scene["id"]))
+    assert got["status"] == "failed" and got["error"].startswith(bw.TIMEOUT), got
+    assert not (geo / blender_job.ARTIFACTS / scene["id"]).exists()
+    assert not list((geo / blender_job.ARTIFACTS).glob(".tmp-*"))
+    assert _wait(lambda: bool(started), timeout=15), "the queued solve starts"
+    assert _status(str(solve.id)) == "completed"
+
+
+def test_a_symlinked_artifact_dir_is_404(client, geo, tmp_path):
+    _scene_with_buildings(client, geo)
+    aid = str(uuid.uuid4())
+    elsewhere = tmp_path / "elsewhere"
+    blender_job._store(
+        elsewhere,
+        aid,
+        bw.Result(b"g", b"b", ""),
+        {"artifact_id": aid, "site_id": "campus"},
+    )
+    store = geo / blender_job.ARTIFACTS
+    store.mkdir(parents=True, exist_ok=True)
+    (store / aid).symlink_to(elsewhere / blender_job.ARTIFACTS / aid)
+    assert client.get(ART + aid).status_code == 404

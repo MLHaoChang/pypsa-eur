@@ -33,6 +33,7 @@ from services.site_scene.contract import SceneError
 
 ARTIFACTS = "scene_artifacts"
 FILES = ("scene.blend", "scene.glb", "meta.json")
+META_CAP = 1 << 20
 
 
 def spec(site_id: str, project_name: str) -> str:
@@ -131,17 +132,19 @@ def read_artifact(
 ) -> tuple[bytes, dict[str, Any]]:
     """GET .../scene/artifacts/{id}: (zip bytes, meta). Not found unless it is this site's."""
     d = artifact_dir(project_dir, artifact_id)
+    # No symlink anywhere on the way: neither the store, nor the artifact dir,
+    # nor (through O_NOFOLLOW, regular files only, size-capped) any file.
+    if d.parent.is_symlink() or d.is_symlink() or not d.is_dir():
+        raise SceneError("not_found", "No such scene artifact")
     try:
-        meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+        meta = json.loads(bw._read_output(d, "meta.json", META_CAP))
         if not isinstance(meta, dict) or meta.get("site_id") != site_id:
             raise SceneError("not_found", "No such scene artifact")
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for name in FILES:
-                p = d / name
-                if p.is_symlink():
-                    raise SceneError("not_found", "No such scene artifact")
-                z.writestr(name, p.read_bytes())
-    except (OSError, ValueError):
+                cap = META_CAP if name == "meta.json" else bw.Caps().output_bytes
+                z.writestr(name, bw._read_output(d, name, cap))
+    except (OSError, ValueError, bw.WorkerError):
         raise SceneError("not_found", "No such scene artifact") from None
     return buf.getvalue(), meta

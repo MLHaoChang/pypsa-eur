@@ -44,7 +44,11 @@ import json, os, resource, signal, subprocess, sys, time
 STATE = {state!r}
 REC = {rec!r}
 NOIMG = {noimg!r}
+MODE = {mode!r}
 a = sys.argv[1:]
+if a[0] in ("image", "kill"):  # every runtime call records the env it was given
+    with open(REC + "." + a[0], "w") as f:
+        json.dump({{"env": dict(os.environ), "argv": a}}, f)
 if a[:2] == ["image", "inspect"]:
     sys.exit(1 if NOIMG else 0)
 if a[0] == "kill":
@@ -92,6 +96,11 @@ def limits():
 kid = subprocess.Popen([host(c) for c in cmd], cwd=mounts["/work"], start_new_session=True,
                        preexec_fn=limits, env={{"HOME": mounts["/work"], "FAKE_REC": REC}})
 open(os.path.join(STATE, opts["--name"][0]), "w").write(str(kid.pid))
+if MODE == "cli_dies" and "--version" not in cmd:  # the CLI dies while its container runs on
+    deadline = time.monotonic() + 10
+    while not os.path.exists(REC + ".kid") and time.monotonic() < deadline:
+        time.sleep(0.05)
+    os._exit(1)
 
 def rss(pgid):
     total = 0
@@ -114,6 +123,8 @@ try:
 except ProcessLookupError:
     pass
 rc = kid.returncode
+if MODE == "cli_sigkill" and "--version" not in cmd:  # the container succeeded, then the CLI was killed by a signal
+    os.kill(os.getpid(), signal.SIGKILL)
 sys.exit(128 - rc if rc < 0 else rc)
 """
 
@@ -131,7 +142,7 @@ if "--version" in args:
 src, out_glb, out_blend = args[args.index("--") + 1:]
 with open(REC, "w") as f:
     json.dump({{"env": dict(os.environ), "cwd": os.getcwd(), "pid": os.getpid(), "args": args}}, f)
-if MODE == "hang":
+if MODE in ("hang", "cli_dies"):
     kid = subprocess.Popen([sys.executable, "-c",
         "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(600)"])
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -160,7 +171,7 @@ open(out_glb, "wb").write(data * (100 if MODE == "big" else 1))
 if MODE == "symlink":
     os.symlink("/etc/hostname", out_blend)
 else:
-    open(out_blend, "wb").write(b"BLENDER-v502")
+    open(out_blend, "wb").write(b"x" * 5000 if MODE == "big_blend" else b"BLENDER-v502")
 print("DONE stub")
 if MODE == "late_fail":  # both outputs written, then a non-zero exit
     sys.exit(3)
@@ -203,6 +214,7 @@ def make(tmp_path, monkeypatch):
                 state=str(state),
                 rec=str(rec),
                 noimg=mode == "no_image",
+                mode=mode,
             )
         )
         runtime.chmod(0o755)
@@ -389,26 +401,41 @@ def test_a_run_returns_both_outputs_and_removes_its_work_dir(make):
     assert not Path(seen["cwd"]).exists()
 
 
+_SECRETS = {
+    "SENTINEL_SECRET": "s3cr3t",
+    "LD_PRELOAD": "/x.so",
+    "PYTHONPATH": "/evil",
+    "DATABASE_URL": "postgres://u:p@h/d",
+    "ANTHROPIC_API_KEY": "k",
+    "DOCKER_HOST": "unix:///run/docker.sock",
+}
+_ALLOWED = {
+    "PATH": "/usr/bin:/bin",
+    "LANG": "C.UTF-8",
+    "DOCKER_HOST": "unix:///run/docker.sock",
+}
+
+
+def _recorded_env(rec, call):
+    got = json.loads(Path(f"{rec}.{call}").read_text())["env"]
+    got.pop("LC_CTYPE", None)  # CPython may set it under C.UTF-8
+    return got
+
+
+def test_b3_every_runtime_call_sees_only_the_allowlisted_environment(make):
+    env, rec = make("crash")  # a failed run also calls `<runtime> kill`
+    env.update(_SECRETS)
+    with pytest.raises(bw.WorkerError):
+        bw.run(_ready(env), b"g", None, FAST, env)
+    for call in ("image", "cli", "kill"):
+        assert _recorded_env(rec, call) == _ALLOWED, call
+
+
 def test_b3_the_runtime_cli_sees_only_the_allowlisted_environment(make):
     env, rec = make()
-    env.update(
-        {
-            "SENTINEL_SECRET": "s3cr3t",
-            "LD_PRELOAD": "/x.so",
-            "PYTHONPATH": "/evil",
-            "DATABASE_URL": "postgres://u:p@h/d",
-            "ANTHROPIC_API_KEY": "k",
-            "DOCKER_HOST": "unix:///run/docker.sock",
-        }
-    )
+    env.update(_SECRETS)
     bw.run(_ready(env), b"g", None, FAST, env)
-    cli = json.loads(Path(str(rec) + ".cli").read_text())["env"]
-    cli.pop("LC_CTYPE", None)  # CPython may set it under C.UTF-8
-    assert cli == {
-        "PATH": "/usr/bin:/bin",
-        "LANG": "C.UTF-8",
-        "DOCKER_HOST": "unix:///run/docker.sock",
-    }
+    assert _recorded_env(rec, "cli") == _ALLOWED
     argv = json.loads(Path(str(rec) + ".cli").read_text())["argv"]
     assert [argv[i + 1] for i, a in enumerate(argv) if a == "--env"] == [
         "HOME=/work",
@@ -507,12 +534,21 @@ def test_two_concurrent_runs_get_distinct_names_and_cancelling_one_leaves_the_ot
     assert _wait_dead(*pids) == [] and errors == [bw.CANCELLED, bw.CANCELLED]
 
 
-def test_b5_the_wall_timeout_is_typed_and_stops_the_container(make):
+def test_b5_the_wall_timeout_is_typed_and_stops_the_container(
+    make, monkeypatch, tmp_path
+):
+    import tempfile
+
     env, rec = make("hang")
+    ready = _ready(env)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
     with pytest.raises(bw.WorkerError) as e:
-        bw.run(_ready(env), b"g", None, _caps(wall_s=1.5), env)
+        bw.run(ready, b"g", None, _caps(wall_s=1.5), env)
     assert e.value.kind == bw.TIMEOUT
     assert _wait_dead(json.loads(rec.read_text())["pid"]) == []
+    assert list(scratch.iterdir()) == [], "a timeout leaves no work dir or log"
 
 
 # ── B5: each cap is a typed kind ─────────────────────────────────────────────
@@ -526,6 +562,7 @@ def test_b5_the_wall_timeout_is_typed_and_stops_the_container(make):
         ("memory", bw.MEMORY_LIMIT),
         ("crash", bw.FAILED),
         ("late_fail", bw.FAILED),
+        ("cli_sigkill", bw.FAILED),
         ("no_output", bw.FAILED),
         ("symlink", bw.FAILED),
     ],
@@ -578,6 +615,8 @@ def test_every_resource_limit_reaches_the_container_command(tmp_path):
         ("--pids-limit", str(caps.pids)),
         ("--ulimit", f"fsize={caps.fsize_bytes}:{caps.fsize_bytes}"),
         ("--ulimit", f"nofile={caps.nofile}:{caps.nofile}"),
+        ("--tmpfs", "/tmp:size=64m"),
+        ("--workdir", "/work"),
     ]:
         assert (flag, value) in pairs, (flag, value)
 
@@ -623,7 +662,7 @@ def test_neither_the_version_check_nor_a_run_leaves_a_temp_file(
 def test_an_output_over_the_cap_by_its_size_is_refused_before_any_read(
     tmp_path, monkeypatch
 ):
-    (tmp_path / "out.glb").write_bytes(b"x" * 2000)
+    (tmp_path / "out.glb").write_bytes(b"x" * 1001)  # cap + 1
     reads = []
     real = os.read
     monkeypatch.setattr(os, "read", lambda fd, n: (reads.append(fd), real(fd, n))[1])
@@ -699,3 +738,54 @@ def test_a_cancel_kills_the_container_before_the_cli_group(make, monkeypatch):
         bw.run(ready, b"g", stop, FAST, env)
     assert e.value.kind == bw.CANCELLED
     assert calls == ["container", "group"]
+
+
+def test_a_cli_that_dies_while_its_container_runs_still_kills_the_container(make):
+    env, rec = make("cli_dies")
+    with pytest.raises(bw.WorkerError) as e:
+        bw.run(_ready(env), b"g", None, FAST, env)
+    assert e.value.kind == bw.FAILED
+    assert json.loads(Path(str(rec) + ".kill").read_text())["argv"][0] == "kill"
+    seen = json.loads(rec.read_text())
+    kid = int(Path(str(rec) + ".kid").read_text())
+    assert _wait_dead(seen["pid"], kid) == [], "the orphaned container is killed"
+    assert not Path(seen["cwd"]).exists()
+
+
+def test_a_clean_run_needs_no_container_kill(make):
+    env, rec = make()
+    bw.run(_ready(env), b"g", None, FAST, env)
+    assert not Path(str(rec) + ".kill").exists()
+
+
+def test_run_passes_blender_exactly_the_trusted_script_tail(make, monkeypatch):
+    env, _ = make()
+    ready = _ready(env)
+    seen = []
+    real = bw._container_argv
+    monkeypatch.setattr(
+        bw, "_container_argv", lambda *a: (seen.append(real(*a)), seen[-1])[1]
+    )
+    bw.run(ready, b"g", None, FAST, env)
+    argv = seen[-1]
+    assert argv[argv.index(IMAGE) + 1 :] == [
+        "/opt/blender/blender",
+        "--background",
+        "--factory-startup",
+        "--offline-mode",
+        "--python-exit-code",
+        "3",
+        "--python",
+        "/work/run.py",
+        "--",
+        "/work/in.glb",
+        "/work/out.glb",
+        "/work/out.blend",
+    ]
+
+
+def test_b5_an_oversize_blend_is_typed(make):
+    env, _ = make("big_blend")
+    with pytest.raises(bw.WorkerError) as e:
+        bw.run(_ready(env), b"x" * 10, None, _caps(output_bytes=1000), env)
+    assert e.value.kind == bw.OUTPUT_LIMIT and "out.blend" in str(e.value)

@@ -54,6 +54,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+try:  # POSIX only; the worker is Linux-only, but the module loads everywhere
+    import resource
+except ImportError:  # pragma: no cover - Windows
+    resource = None
+
 PIN_VERSION = "5.2.4"
 # blender.org's blender-5.2.4.sha256 for the release tarball.
 TARBALL_SHA256 = "2fd14c50987426897ba60237ee996edf2b4151f4b1a72a460ca20be58c1d2d86"
@@ -379,8 +384,7 @@ def child_env(env) -> dict[str, str]:
 
 
 def _cli_limits() -> None:
-    import resource
-
+    # Runs between fork and exec: no import here (`resource` is imported at the top).
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
@@ -464,7 +468,10 @@ def _run(
                 time.sleep(caps.poll_s)
         finally:
             # Every path, success included: the container and the CLI's group end here.
-            if proc.poll() is None:
+            # Only a clean exit of `run --rm` proves the container is gone; on any
+            # other path (cancel, timeout, a CLI that crashed or was killed while
+            # its container runs on) the container is killed by name.
+            if failure is not None or proc.poll() != 0:
                 _kill_container(ready, name, env, caps.grace_s)
             _killpg(proc.pid, caps.grace_s)
             try:
