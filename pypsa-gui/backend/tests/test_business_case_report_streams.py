@@ -13,7 +13,14 @@ import services.business_case.runner as RN
 import services.finance.business_case as BCM
 from models.business_case import CATEGORY_STREAM
 from services.finance.cashflow import BC_STREAM_CLASS, STREAM_CLASS
-from tests.test_business_case_routes import BC_URL, _bc, _bc_poll, _put, _with_ic
+from tests.test_business_case_routes import (
+    BC_URL,
+    INPUTS_URL,
+    _bc,
+    _bc_poll,
+    _put,
+    _with_ic,
+)
 
 
 def test_every_stream_pnl_can_emit_has_a_class_and_a_source():
@@ -152,3 +159,73 @@ def test_bc17_row_reason_is_a_display_key_that_moves_no_digest_or_staleness(
         body["pnl"].pop("row_reason")
         body.pop("created_at")
     assert a == b
+
+
+def test_bc15_a_lease_up_reaches_the_report_and_the_workbook(
+    client, install_network, monkeypatch
+):
+    """The run applies the stored volume factor; the report serves it per P&L year as a
+    display key, and the workbook writes it as a percent row of "P&L by year"."""
+    from openpyxl import Workbook
+
+    from services.results_workbook.business_case import (
+        LEASE_UP_ROW,
+        write_business_case_sheet,
+    )
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    assert client.post(BC_URL).status_code == 200
+    full = _bc_poll(client)
+    years = full["report"]["pnl"]["years"]
+    first = years[-2]
+    bc = _bc()
+    bc["inputs"]["volume_factor_by_year"] = {str(first): 0.25, "1990": 0.5}
+    assert _put(client, bc).status_code == 200
+    assert client.get(INPUTS_URL).json()["business_case"]["inputs"][
+        "volume_factor_by_year"
+    ] == {str(first): 0.25, "1990": 0.5}
+    assert client.post(BC_URL).status_code == 200
+    body = _bc_poll(client)
+    # This IC sells under a PPA: a generation-side row refuses, naming it (ruling 6).
+    assert body["status"] == "refused"
+    assert body["refusal"]["refusal"] == "volume_factor_unclassified"
+    assert body["refusal"]["field"] == "ppa_settlement"
+    # Read as fixed, the run completes: the rest of the path is what is pinned here.
+    for s, cls in BCM.STREAM_VOLUME_CLASS.items():
+        if cls == "undetermined":
+            monkeypatch.setitem(BCM.STREAM_VOLUME_CLASS, s, "fixed")
+    assert client.post(BC_URL).status_code == 200
+    body = _bc_poll(client)
+    assert body.get("status") == "done", json.dumps(body)[:600]
+    rep = body["report"]
+    assert rep["pnl"]["volume_factor"] == {str(first): 0.25}
+    assert rep["business_case_hash"] != full["report"]["business_case_hash"]
+    wb = Workbook()
+    ws = wb[
+        write_business_case_sheet(
+            wb, {**rep, "basis": {"label": "x"}}, {"stale": False}
+        )
+    ]
+    cells = [[c.value for c in row] for row in ws.iter_rows()]
+    at = next(i for i, r in enumerate(cells) if r[0] == "P&L by year")
+    assert cells[at + 1][0] == LEASE_UP_ROW
+    want = [25.0 if y == first else 100.0 for y in years]
+    assert cells[at + 1][1 : 1 + len(years)] == want
+    # A full-volume report writes no such row.
+    ws = wb[
+        write_business_case_sheet(
+            wb, {**full["report"], "basis": {"label": "x"}}, {"stale": False}
+        )
+    ]
+    assert LEASE_UP_ROW not in {c.value for row in ws.iter_rows() for c in row}
+
+
+def test_bc15_a_lease_up_outside_zero_to_one_is_a_422(
+    client, install_network, monkeypatch
+):
+    _with_ic(client, install_network, monkeypatch)
+    for bad in (1.5, -0.1):
+        bc = _bc()
+        bc["inputs"]["volume_factor_by_year"] = {"2031": bad}
+        assert _put(client, bc).status_code == 422

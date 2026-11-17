@@ -330,7 +330,10 @@ def _float_fields(model) -> set[str]:
 
 def test_float_column_list_is_complete():
     assert {c.removesuffix("[]") for _, c in FLOAT_COLUMNS} == _float_fields(B.LineItem)
-    assert _float_fields(B.BusinessCaseInputs) == {"receivable_days"}
+    assert _float_fields(B.BusinessCaseInputs) == {
+        "receivable_days",
+        "volume_factor_by_year",
+    }
     assert _float_fields(B.CostDefault) == {"value", "range_low", "range_high"}
     assert _float_fields(B.Hint) == {"low", "high"}
 
@@ -1089,3 +1092,37 @@ def test_facility_capex_default_is_the_converted_jll_figure():
     assert row.unit == "EUR/MW" and row.value == pytest.approx(10.7e6 / 1.13, rel=1e-4)
     assert row.range.low == pytest.approx(8.9e6 / 1.13, rel=1e-4)
     assert row.range.high == pytest.approx(23.3e6 / 1.13, rel=1e-4)
+
+
+# ── BC 15: the lease-up volume factor ───────────────────────────────────────
+
+
+def test_bc15_the_volume_factor_defaults_to_full_volume_every_year():
+    inputs = B.BusinessCaseInputs()
+    assert inputs.volume_factor_by_year == {}
+    assert inputs.volume_factor_at(2031) == 1.0
+    stated = B.BusinessCaseInputs(volume_factor_by_year={2031: 0.4})
+    assert stated.volume_factor_at(2031) == 0.4
+    assert stated.volume_factor_at(2032) == 1.0
+
+
+@pytest.mark.parametrize("ok", [0.0, 0.5, 1.0])
+def test_bc15_the_volume_factor_takes_zero_to_one_inclusive(ok):
+    assert (
+        B.BusinessCaseInputs(volume_factor_by_year={2031: ok}).volume_factor_at(2031)
+        == ok
+    )
+
+
+@pytest.mark.parametrize("bad", [-0.01, 1.01, 50.0, math.inf, -math.inf, math.nan])
+def test_bc15_the_volume_factor_refuses_outside_zero_to_one_or_non_finite(bad):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={2031: bad})
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity", "1e999"])
+def test_bc15_the_volume_factor_refuses_non_finite_json(bad):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs.model_validate_json(
+            '{"volume_factor_by_year": {"2031": ' + bad + "}}"
+        )

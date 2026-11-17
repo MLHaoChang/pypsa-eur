@@ -390,7 +390,19 @@ class BusinessCaseInputs(BaseModel):
     )  # preset_id@version
     # Days of revenue outstanding (cash bridge only, never EBITDA: GK B BC3). None = not stated.
     receivable_days: Finite | None = Field(default=None, ge=0.0, le=365.0)
+    # Lease-up (BC 15, BC15-BUILD-1): the share of the solved volume served in a year, a
+    # fraction 0..1 shown as a percent. A year not listed reads 1.0 (full volume from COD).
+    # It is a volume factor, never the sold share (`linked_share`, #1430 F2): it scales
+    # the dispatched-volume cost rows with the revenue (ruling 6).
+    volume_factor_by_year: dict[int, Annotated[Finite, Field(ge=0.0, le=1.0)]] = Field(
+        default_factory=dict,
+        description="lease-up: the share of the solved volume served in a year",
+    )
     lines: list[LineItem] = Field(default_factory=list)
+
+    def volume_factor_at(self, year: int) -> float:
+        """`year`'s volume factor: its cell, else 1.0."""
+        return self.volume_factor_by_year.get(year, 1.0)
 
     def refusals(
         self, *, horizon: tuple[int, int], base_year: int
@@ -692,6 +704,14 @@ class DoubleCount(BusinessCaseRefused):
     kind = "double_count"
 
 
+class VolumeFactorUnclassified(BusinessCaseRefused):
+    """A volume factor below full volume in a year an IC row whose volume class is not
+    determined (a generation-side stream) is non-zero: ruling 6 refuses rather than
+    guess (BC 15). `field` is the ledger stream."""
+
+    kind = "volume_factor_unclassified"
+
+
 # The DC spec names these two; every other required category is `capex_missing` (GK B Q2).
 _CAPEX_MISSING: dict[str, type[BusinessCaseRefused]] = {
     "it_hardware": ItCapexMissing,
@@ -723,6 +743,7 @@ REFUSAL_KINDS: tuple[str, ...] = (
     "linked_output_missing",
     "double_count",
     "default_unit_mismatch",
+    "volume_factor_unclassified",
 )
 
 # ------------------------------------------------------------------ helpers
