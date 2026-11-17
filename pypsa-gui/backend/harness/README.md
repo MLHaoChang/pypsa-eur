@@ -588,7 +588,17 @@ refuse whenever AC power-flow results exist. `branch-losses/1` and `network-loss
 LP transmission-loss energy, peak and (network) share of Load demand. They read the raw
 loss and load frames through `services/results/losses._validity_rows`, so a missing,
 infinite or misaligned value in the window gives no value while a real 0 is answered;
-they refuse when AC power-flow results exist. `lost-load/1` (`lost_load_calculations.py`,
+they refuse when AC power-flow results exist. `objective-bridge/1`
+(`objective_bridge_calculations.py`, opt-in, network only, whole run) reconciles the solver
+objective with the reported total system cost through
+`services/results/objective_decomposition.objective_bridge`: the objective after the
+objective scale is reversed, the total, its slack-penalty share, the non-extendable fixed
+cost, the period-weighting adjustment (built from the cost parts, so an error in the total
+lands in the residual), reserve revenue and the residual, reconciled within
+`RESIDUAL_TOLERANCE`. A slack penalty under an ordinary carrier, or an objective still
+scaled, is unavailable, never 0; myopic and rolling-horizon runs answer no row. A bare
+"what is the objective?" gets the `objective_or_cost_required` card
+(`assurance_conversation.OBJECTIVE_CHOICES`). `lost-load/1` (`lost_load_calculations.py`,
 opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted shed
 hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
 claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and

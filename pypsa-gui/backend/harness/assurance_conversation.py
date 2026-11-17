@@ -20,6 +20,14 @@ COMPARE = (
 BASIS = r"(?:use\s+)?price year\s+(\d{4});\s*annual fixed cost fraction\s+(0(?:\.\d+)?|1(?:\.0+)?)"
 CHOICES = ("Marginal dispatch expenditure", "Total declared-basis cost")
 STORAGE_CHOICES = ("Direct StorageUnit operating expenditure", "Total declared-basis cost")
+# assistant-assurance 10 S3 (UX 25): "objective" alone could mean the solver's
+# number or a cost. Final once merged; the second label is CHOICES' own.
+OBJECTIVE_CHOICES = ("Solver objective", "Total declared-basis cost", "Objective-to-cost reconciliation")
+OBJECTIVE = (
+    r"(?:please\s+)?(?:show me|give me|show|what is|what's)\s+(?:the\s+)?(?:solver\s+)?objective"
+    r"(\s+(?:vs\.?|versus|compared to)\s+(?:the\s+)?(?:total\s+)?(?:system\s+)?cost)?"
+    r"(?:\s+(?:for|of)\s+(?:the\s+)?network)?"
+)
 # AA03-FREEZE-1 item 3: a bare "capacity" has three meanings; each label maps to one slot.
 CAPACITY_CHOICES = {
     "Configured capacity": capacity.CONFIGURED,
@@ -37,9 +45,11 @@ QUESTIONS = {
     "unsupported_followup": "That follow-up contains constraints outside the supported scope grammar. Please specify an exact result scope; no constraint has been ignored.",
     "current_run_required": "This selection refers to a retained historical run. Specify the candidate and baseline explicitly to compare historical runs.",
     "capacity_meaning_required": "Which capacity do you mean: Configured capacity (the input before the solve), Optimized capacity (after the solve) or Available capacity?",
+    "objective_or_cost_required": "Which do you mean: Solver objective, Total declared-basis cost or Objective-to-cost reconciliation?",
     "capacity_component_required": "Please name the component class and its name: generator, link, line, transformer, StorageUnit or store, for example: What is the capacity of generator G1?",
 }
-PENDING = {"cost_quantity_required", "explicit_cost_basis_required", "capacity_meaning_required"}
+PENDING = {"cost_quantity_required", "explicit_cost_basis_required", "capacity_meaning_required",
+           "objective_or_cost_required"}
 
 
 def _match(pattern, message):
@@ -131,6 +141,32 @@ def cost_choices(scope):
     return STORAGE_CHOICES if scope["profile"] in calculations.STORAGE_PROFILES else CHOICES
 
 
+def _objective(turn, message, pending, state):
+    """The bare objective form, or an answer to its card; None when the message is neither."""
+    choice = message.strip().rstrip(".!?").lower()
+    if pending == "objective_or_cost_required" and choice in {c.lower() for c in OBJECTIVE_CHOICES}:
+        scope = deepcopy(state["scope"])
+        if choice == "total declared-basis cost":
+            scope.update(profile="network-linear-cost/1", metrics=["total_cost"])
+            if "cost_basis" not in scope:
+                return _needs(turn, assurance_scope.validate(scope), "explicit_cost_basis_required")
+        elif choice == "solver objective":
+            scope["metrics"] = ["objective_eur"]
+        else:
+            scope.pop("metrics", None)
+        return assurance_scope.validate(scope)
+    if _match(OBJECTIVE, message) is None:
+        return None
+    scope = {
+        "version": 1,
+        "project_id": turn.project_id,
+        "retain": False,
+        "profile": "objective-bridge/1",
+        "entity_id": "network",
+    }
+    return _needs(turn, assurance_scope.validate(scope), "objective_or_cost_required")
+
+
 def _capacity(turn, message, pending, state):
     """The bare capacity form, or an answer to its card; None when the message is neither."""
     text = re.sub(r"\s+", " ", message.strip().rstrip(".!?"))
@@ -180,6 +216,9 @@ def resolve(turn, message, ui, explicit):
     turn.conversation_state = state
     pending = state.get("pending") if state else None
     asked = _capacity(turn, message, pending, state)
+    if asked is not None:
+        return asked
+    asked = _objective(turn, message, pending, state)
     if asked is not None:
         return asked
     if pending and message.strip().rstrip(".!?").lower() in {

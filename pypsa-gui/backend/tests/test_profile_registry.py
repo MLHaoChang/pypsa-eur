@@ -7,7 +7,7 @@ twice would silently replace another profile's label, unit or formula id.
 from harness import (
     branch_calculations, calculations, copt_calculations, grid_readiness_calculations, capacity_calculations, carrier_calculations, energy_balance_calculations,
     curtailment_calculations, emissions_calculations, lost_load_calculations,
-    investment_calculations, losses_calculations, price_calculations, site_import_calculations, storage_calculations, storage_costs, storage_cycles_calculations,
+    investment_calculations, losses_calculations, objective_bridge_calculations, price_calculations, site_import_calculations, storage_calculations, storage_costs, storage_cycles_calculations,
     time_to_power_calculations,
 )
 
@@ -15,7 +15,8 @@ TABLES = (
     calculations.METRICS, calculations.COST_METRICS, calculations.COMPARISON_METRICS,
     storage_calculations.METRICS, storage_costs.METRICS, carrier_calculations.METRICS,
     branch_calculations.METRICS, branch_calculations.NETWORK_METRICS,
-    losses_calculations.NETWORK_METRICS, lost_load_calculations.METRICS,
+    losses_calculations.NETWORK_METRICS, objective_bridge_calculations.METRICS,
+    lost_load_calculations.METRICS,
     price_calculations.METRICS, emissions_calculations.GENERATOR_METRICS,
     emissions_calculations.NETWORK_METRICS, curtailment_calculations.METRICS,
     capacity_calculations.METRICS, storage_cycles_calculations.METRICS, energy_balance_calculations.METRICS,

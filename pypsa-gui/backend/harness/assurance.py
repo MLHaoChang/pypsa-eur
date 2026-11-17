@@ -341,14 +341,15 @@ class Turn:
                 from harness import (
                     branch_calculations, carrier_calculations, curtailment_calculations,
                     capacity_calculations, emissions_calculations, energy_balance_calculations,
-                    losses_calculations, lost_load_calculations, site_import_calculations,
+                    losses_calculations, lost_load_calculations, objective_bridge_calculations,
+                    site_import_calculations,
                     investment_calculations, copt_calculations,
                     grid_readiness_calculations, time_to_power_calculations,
                     price_calculations, storage_cycles_calculations,
                 )
 
                 refusals = (carrier_calculations.REFUSALS | branch_calculations.REFUSALS
-                            | losses_calculations.REFUSALS
+                            | losses_calculations.REFUSALS | objective_bridge_calculations.REFUSALS
                             | lost_load_calculations.REFUSALS | price_calculations.REFUSALS
                             | emissions_calculations.REFUSALS | curtailment_calculations.REFUSALS
                             | capacity_calculations.REFUSALS | storage_cycles_calculations.REFUSALS
@@ -529,6 +530,7 @@ class Turn:
             assurance_metrics.price.PROFILE: "Bus",
             assurance_metrics.losses.PROFILE: "Branch",
             assurance_metrics.losses.NETWORK_PROFILE: "Network",
+            assurance_metrics.objective_bridge.PROFILE: "Network",
             assurance_metrics.emissions.GENERATOR_PROFILE: "Generator",
             assurance_metrics.emissions.NETWORK_PROFILE: "Network",
             assurance_metrics.balance.PROFILE: "Network",
@@ -563,6 +565,8 @@ class Turn:
             lines.extend(assurance_metrics.branch.notes(record["raw"]))
         if profile in assurance_metrics.losses.PROFILES:
             lines.extend(assurance_metrics.losses.notes(record["raw"], self.request_scope))
+        if profile == assurance_metrics.objective_bridge.PROFILE:
+            lines.extend(assurance_metrics.objective_bridge.notes(record["raw"], self.request_scope))
         if shed:
             lines.extend(assurance_metrics.lost_load.notes(record["raw"], self.request_scope, _label))
         if profile in assurance_metrics.emissions.PROFILES:
@@ -1510,11 +1514,12 @@ class Turn:
                 self.session.assurance_context = None
 
     def clarification_choice(self):
-        from harness.assurance_conversation import CAPACITY_CHOICES, cost_choices
+        from harness.assurance_conversation import CAPACITY_CHOICES, OBJECTIVE_CHOICES, cost_choices
 
         card = {
             "cost_quantity_required": ("Cost quantity", lambda: cost_choices(self.pending_scope)),
             "capacity_meaning_required": ("Capacity meaning", lambda: tuple(CAPACITY_CHOICES)),
+            "objective_or_cost_required": ("Objective or cost", lambda: OBJECTIVE_CHOICES),
         }.get((self.clarification or {}).get("reason"))
         if card is None:
             return None

@@ -119,6 +119,10 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
             continue
     lp_basis = 0.0
     nonext_reported = 0.0
+    # The same charges on the reporting (years) basis, built from the parts and
+    # not from `cost_breakdown["total"]`: the S3 bridge needs a period-weighting
+    # term that cannot absorb an error in the total (see `objective_bridge`).
+    reported_basis = 0.0
     for p, f in fixed.items():
         if p is None:
             years, weight = 1.0, 1.0
@@ -130,11 +134,14 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
             # by_period OPEX is already × years; one period's worth is / years.
             opex_raw = (float(entry["opex"]) / years) if entry and years else 0.0
         lp_basis += weight * (opex_raw + f["extendable"])
+        reported_basis += years * (opex_raw + f["extendable"])
         nonext_reported += years * f["nonextendable"]
     # AS-12: the PCS/STATCOM capital cost is in the objective and in `cost_breakdown`, but in no component.
     from services.solver.pcs_statcom import cost_terms
 
-    lp_basis += sum(cost_terms(n).values())
+    pcs = sum(cost_terms(n).values())
+    lp_basis += pcs
+    reported_basis += pcs
     # DC 06: reserve capacity revenue is in the objective (negative), in no component.
     from services.solver.reserve_products import objective_revenue
 
@@ -151,6 +158,7 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
         "period_weighting_adjustment_eur": lp_basis - (cb_total - nonext_reported),
         "lp_basis_total": lp_basis - reserve,
         "is_multi_period": is_mp,
+        "reported_basis_eur": reported_basis,
         **({"reserve_revenue_eur": reserve} if reserve else {}),
     }
 
@@ -266,4 +274,109 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
     for k, v in list(out.items()):
         if isinstance(v, float) and not _math.isfinite(v):
             out[k] = None
+    return out
+
+
+# assistant-assurance 10 S3 (GK B 64, G3): the residual reconciles when
+# |residual| <= RESIDUAL_TOLERANCE * max(1 EUR, |objective|). Relative, with a
+# 1-EUR floor so a near-zero objective does not demand an exact zero.
+RESIDUAL_TOLERANCE = 1e-6
+
+
+def residual_tolerance(objective: float) -> float:
+    """The largest |residual| (EUR) that still reconciles with `objective`."""
+    return RESIDUAL_TOLERANCE * max(1.0, abs(objective))
+
+
+def _penalty_eur(n, cost_breakdown):
+    """Slack penalties (load shedding, VOLL, demand response, DC curtailment)
+    inside the reported total, from `by_carrier`. ``None`` when a slack row
+    cannot be separated: one found only by its name prefix sits under an
+    ordinary carrier, so its cost is in the total but not identifiable. Never 0
+    by default: 0 is returned only when no slack generator exists."""
+    import math
+
+    from services.adequacy.slack import SLACK_CARRIERS, slack_generator_mask
+
+    gens = n.generators
+    mask = slack_generator_mask(gens) if len(gens) else None
+    if mask is None or not mask.any():
+        return 0.0
+    if "carrier" not in gens.columns or not (
+        gens.loc[mask, "carrier"].astype(str).isin(SLACK_CARRIERS).all()
+    ):
+        return None
+    rows = cost_breakdown.get("by_carrier")
+    if not isinstance(rows, list):
+        return None
+    try:
+        values = [
+            float(r["total"])
+            for r in rows
+            if r.get("component") == "Generator" and r.get("carrier") in SLACK_CARRIERS
+        ]
+    except (KeyError, TypeError, ValueError):
+        return None
+    total = math.fsum(values)
+    return total if values and math.isfinite(total) else None
+
+
+def objective_bridge(n, cost_breakdown, cfg) -> dict:
+    """Public form of the objective-to-cost bridge (assistant-assurance 10 S3).
+
+    Identity: ``objective_eur = reported_total_eur − nonextendable_fixed_cost_eur
+    + period_weighting_adjustment_eur − reserve_revenue_eur + residual_eur``.
+    ``penalty_eur`` is the share of the reported total that is slack penalty.
+
+    Unlike `compute_objective_decomposition`, the period-weighting term here is
+    built from the cost parts (``Σ (objective weight − years) × charges``), not
+    from the reported total, so an error in the total lands in the residual
+    instead of being absorbed. On a single-period network it is 0.
+
+    Every value is a float or ``None`` (unknown), never a 0 standing in for
+    unknown. ``scope`` is ``"horizon"`` only when one LP priced the whole run;
+    under myopic foresight or a rolling horizon the objective is the last
+    period's or window's and nothing bridges. ``objective_scale`` is the scale
+    still applied to the objective: 1.0 once the post-solve rescale has divided
+    it back out; anything else leaves the objective unavailable.
+    """
+    import math
+
+    d = compute_objective_decomposition(n, cost_breakdown, cfg)
+    scale = d["pypsa_gui_objective_scale"]
+    horizon = d["lp_total_scope"] == "horizon"
+    objective = d["lp_total"] if scale == 1.0 else None
+    total = d["cost_breakdown_total"]
+    out = {
+        "scope": d["lp_total_scope"],
+        "objective_scale": scale,
+        "objective_eur": objective,
+        "reported_total_eur": total,
+        "nonextendable_fixed_cost_eur": None,
+        "period_weighting_adjustment_eur": None,
+        "reserve_revenue_eur": None,
+        "penalty_eur": None,
+        "residual_eur": None,
+    }
+    if not horizon or total is None:
+        return out
+    try:
+        b = _bridge(n, cost_breakdown, cfg)
+    except Exception:
+        logger.exception("objective_bridge: the bridge terms could not be computed")
+        return out
+    reserve = b.get("reserve_revenue_eur", 0.0)
+    terms = {
+        "nonextendable_fixed_cost_eur": b["nonextendable_fixed_cost_eur"],
+        "period_weighting_adjustment_eur": b["lp_basis_total"] + reserve - b["reported_basis_eur"],
+        "reserve_revenue_eur": reserve,
+    }
+    if all(math.isfinite(v) for v in terms.values()):
+        out.update(terms)
+        if objective is not None:
+            out["residual_eur"] = objective - (
+                total - terms["nonextendable_fixed_cost_eur"]
+                + terms["period_weighting_adjustment_eur"] - reserve
+            )
+    out["penalty_eur"] = _penalty_eur(n, cost_breakdown)
     return out

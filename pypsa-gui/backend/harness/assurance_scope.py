@@ -22,6 +22,7 @@ class RequestScope(BaseModel):
         "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1",
         "storage-unit-dispatch/1", "storage-unit-cost/1", "carrier-energy/1",
         "branch-loading/1", "network-loading/1", "branch-losses/1", "network-losses/1",
+        "objective-bridge/1",
         "lost-load/1", "bus-price/1",
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
@@ -92,7 +93,8 @@ def validate(value):
     if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
         raise ValueError("unsupported_component_class")
     if scope["profile"] in ("energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
-                            "copt-screening/1", "grid-readiness/1", "time-to-power/1") and (
+                            "copt-screening/1", "grid-readiness/1", "time-to-power/1",
+                            "objective-bridge/1") and (
         scope["entity_id"] != "network" or scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("network_scope_required")

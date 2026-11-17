@@ -4454,6 +4454,7 @@
         "network-loading/1",
         "branch-losses/1",
         "network-losses/1",
+        "objective-bridge/1",
         "lost-load/1",
         "bus-price/1",
         "generator-emissions/1",
@@ -6313,6 +6314,54 @@
     "loss_pct_of_demand"
    ]
   },
+  "objective-bridge/1": {
+   "definitions": {
+    "nonextendable_fixed_cost_eur": {
+     "formula_id": "nonextendable-fixed-cost/1",
+     "label": "Fixed cost of assets the solve could not size (not in the objective)",
+     "unit": "EUR"
+    },
+    "objective_eur": {
+     "formula_id": "solver-objective-unscaled/1",
+     "label": "Solver objective",
+     "unit": "EUR"
+    },
+    "penalty_cost_eur": {
+     "formula_id": "slack-penalty-in-total/1",
+     "label": "Load-shedding and slack penalties within the total",
+     "unit": "EUR"
+    },
+    "period_weighting_adjustment_eur": {
+     "formula_id": "period-weighting-adjustment/1",
+     "label": "Period-weighting adjustment",
+     "unit": "EUR"
+    },
+    "reported_total_cost_eur": {
+     "formula_id": "cost-breakdown-total/1",
+     "label": "Total system cost",
+     "unit": "EUR"
+    },
+    "reserve_revenue_eur": {
+     "formula_id": "reserve-revenue-in-objective/1",
+     "label": "Reserve revenue (subtracted in the objective)",
+     "unit": "EUR"
+    },
+    "residual_eur": {
+     "formula_id": "objective-bridge-residual/1",
+     "label": "Unexplained residual",
+     "unit": "EUR"
+    }
+   },
+   "metrics": [
+    "objective_eur",
+    "reported_total_cost_eur",
+    "penalty_cost_eur",
+    "nonextendable_fixed_cost_eur",
+    "period_weighting_adjustment_eur",
+    "reserve_revenue_eur",
+    "residual_eur"
+   ]
+  },
   "site-import/1": {
    "definitions": {
     "export_energy": {
@@ -6678,6 +6727,7 @@
      "network-loading/1",
      "branch-losses/1",
      "network-losses/1",
+     "objective-bridge/1",
      "lost-load/1",
      "bus-price/1",
      "generator-emissions/1",

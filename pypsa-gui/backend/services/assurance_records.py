@@ -1873,6 +1873,7 @@ def capture_scoped(owner, scope):
                 calculations.carrier.PROFILE,
                 *calculations.branch.PROFILES,
                 *calculations.losses.PROFILES,
+                calculations.objective_bridge.PROFILE,
                 calculations.lost_load.PROFILE,
                 calculations.price.PROFILE,
                 *calculations.emissions.PROFILES,

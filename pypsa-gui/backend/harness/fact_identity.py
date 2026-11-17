@@ -56,6 +56,14 @@ WEIGHT_BASIS: dict[str, str] = {
     "loss_mwh": "generators",
     "peak_loss_mw": "none",
     "loss_pct_of_demand": "generators",
+    # objective_bridge_calculations.py: whole-run totals on the objective's own basis
+    "objective_eur": "objective",
+    "reported_total_cost_eur": "objective",
+    "penalty_cost_eur": "objective",
+    "nonextendable_fixed_cost_eur": "objective",
+    "period_weighting_adjustment_eur": "objective",
+    "reserve_revenue_eur": "objective",
+    "residual_eur": "derived",
     # lost_load_calculations.py
     "lost_load_energy": "generators",
     "peak_shed": "none",

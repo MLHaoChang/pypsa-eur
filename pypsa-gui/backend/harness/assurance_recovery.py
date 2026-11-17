@@ -32,6 +32,7 @@ class Context(BaseModel):
             "cost_quantity_required",
             "explicit_cost_basis_required",
             "capacity_meaning_required",
+            "objective_or_cost_required",
         ]
         | None
     )
