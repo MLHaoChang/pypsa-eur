@@ -282,3 +282,93 @@ def test_no_other_native_card_takes_ticks(tool, args):
     with pytest.raises(HTTPException) as err:
         change_set.validate_ticks(_pc(tool, args), "approve", ["low_price"])
     assert err.value.status_code == 400
+
+
+# ── the runner's pick card ─────────────────────────────────────────────────────
+
+
+class _PickSession:
+    """The run's session, as far as the pick card uses it."""
+
+    session_id = "run:t"
+
+    def __init__(self, decision, ticked):
+        import threading
+
+        self.decision, self.go, self.withdrawn = decision, threading.Event(), []
+        self.confirmation_ticks = {"tok": ticked}
+
+    def issue_confirmation(self, *, tool_name, args, safety_tier):
+        self.issued = (tool_name, args, safety_tier)
+        from types import SimpleNamespace
+
+        return SimpleNamespace(token="tok")
+
+    def wait_for_decision(self, token):
+        self.go.wait(10)
+        return self.decision
+
+    def withdraw_confirmation(self, token):
+        self.withdrawn.append(token)
+
+
+def _runner_pick(path, monkeypatch, decision, ticked):
+    from harness import approvals, runner
+
+    monkeypatch.setattr(approvals, "asked", lambda *a, **k: True)
+    monkeypatch.setattr(approvals, "decided", lambda *a, **k: True)
+    r, session = runner.Runner(instance=INSTANCE), _PickSession(decision, ticked)
+    task = _read(path)
+    assert r._native_card(path, None, session, task, task["steps"][0]) == "waiting"
+    live = r.live_card(task["task_id"])
+    session.go.set()
+    r._inflight[task["task_id"]][1].join(10)
+    return live, session
+
+
+def test_the_runner_shows_the_pick_card_and_writes_the_approved_pick(
+    baseline, tmp_path, monkeypatch
+):
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    card = run_actions.pick_card(_step(path))
+    live, session = _runner_pick(path, monkeypatch, "approve", ["cannibalised"])
+    assert live["change_set"] == card and "edit_card" not in live
+    assert session.issued[1] == {
+        "digest": card["digest"], "tool_use_ids": LP, "pick_max": 2,
+    }
+    task = _read(path)
+    assert task["run"]["explore"]["shipped_pick"] == ["cannibalised"]
+    assert task["steps"][0]["status"] == "pending" and "frozen" in task["steps"][0]
+    assert session.confirmation_ticks == {}  # the ticks are taken once
+
+
+@pytest.mark.parametrize(
+    "decision, ticked, reason",
+    [
+        ("deny", None, "confirmation_denied"),
+        ("approve", ["merchant_heavy"], "shipped_pick_finance"),
+        ("approve", None, "shipped_cases_over_budget"),
+    ],
+)
+def test_a_denied_or_refused_pick_stops_the_step_and_writes_no_pick(
+    baseline, tmp_path, monkeypatch, decision, ticked, reason
+):
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    _runner_pick(path, monkeypatch, decision, ticked)
+    task = _read(path)
+    assert task["steps"][0]["status"] == "failed"
+    assert task["steps"][0]["error"].startswith(reason)
+    assert "shipped_pick" not in task["run"]["explore"]
+
+
+def test_a_closed_pick_leaves_the_step_as_it_is(baseline, tmp_path, monkeypatch):
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    task = _read(path)
+    task["run"]["runner"]["lease_owner"] = "someone-else"
+    path.write_text(json.dumps(task))
+    _runner_pick(path, monkeypatch, "approve", ["low_price"])
+    after = _read(path)
+    assert after["steps"][0]["status"] == "pending" and "unfrozen" in after["steps"][0]
