@@ -108,9 +108,21 @@ def test_a_new_version_in_the_library_does_not_move_the_pin(client, api_project,
     v2 = _put(client, offset=5.0)
     assert v2["version"] == 2
     body = _open(client, name)
-    assert body["library_issues"] == []  # v1 still resolves exactly
+    # v1 still resolves exactly; the newer version is a notice only (project-io 03).
+    assert [
+        (i["code"], i["reason"], i["version"], i["latest_version"])
+        for i in body["library_issues"]
+    ] == [("library_newer_version", "newer_in_library", 1, 2)]
     cfg = session_ctx(client).solver_state["solver_config"]
     assert cfg.commercial["export_price_ref"]["version"] == 1  # not substituted
+
+
+def _drop_copies(project_storage_dir, name):
+    """The project as saved before project-io 03: pins, but no `library/`
+    copies, so each pin resolves against the org's Library alone."""
+    import shutil
+
+    shutil.rmtree(project_storage_dir(name) / "library")
 
 
 def _library_rows(_auth_db):
@@ -120,10 +132,13 @@ def _library_rows(_auth_db):
     return session_local, LibraryItem
 
 
-def test_a_deleted_library_item_is_a_missing_issue(client, api_project, session_ctx, _auth_db):
+def test_a_deleted_library_item_is_a_missing_issue(
+    client, api_project, session_ctx, _auth_db, project_storage_dir
+):
     name = api_project("gone")
     ref = _put(client)
     _save_with_refs(client, session_ctx, name, [ref])
+    _drop_copies(project_storage_dir, name)
     session_local, LibraryItem = _library_rows(_auth_db)
     with session_local() as db:
         db.query(LibraryItem).delete()
@@ -136,9 +151,12 @@ def test_a_deleted_library_item_is_a_missing_issue(client, api_project, session_
     assert cfg.commercial["export_price_ref"]["hash"] == ref["hash"]
 
 
-def test_a_changed_hash_is_a_changed_issue(client, api_project, session_ctx, _auth_db):
+def test_a_changed_hash_is_a_changed_issue(
+    client, api_project, session_ctx, _auth_db, project_storage_dir
+):
     name = api_project("changed")
     _save_with_refs(client, session_ctx, name, [_put(client)])
+    _drop_copies(project_storage_dir, name)
     session_local, LibraryItem = _library_rows(_auth_db)
     with session_local() as db:
         row = db.query(LibraryItem).one()
@@ -148,8 +166,9 @@ def test_a_changed_hash_is_a_changed_issue(client, api_project, session_ctx, _au
     assert [i["reason"] for i in issues] == ["changed"]
 
 
-def test_a_lost_payload_file_is_an_unreadable_issue(client, api_project, session_ctx,
-                                                    seeded_identity):
+def test_a_lost_payload_file_is_an_unreadable_issue(
+    client, api_project, session_ctx, seeded_identity, project_storage_dir
+):
     import pathlib
 
     from services.library.series_store import _default_root
@@ -157,7 +176,10 @@ def test_a_lost_payload_file_is_an_unreadable_issue(client, api_project, session
 
     name = api_project("nofile")
     _save_with_refs(client, session_ctx, name, [_put(client)])
-    for f in pathlib.Path(library_dir(_default_root(), seeded_identity["org_id"])).rglob("*.gz"):
+    _drop_copies(project_storage_dir, name)
+    for f in pathlib.Path(
+        library_dir(_default_root(), seeded_identity["org_id"])
+    ).rglob("*.gz"):
         f.unlink()
     issues = _open(client, name)["library_issues"]
     assert [i["reason"] for i in issues] == ["payload_unreadable"]
@@ -232,11 +254,17 @@ def test_a_bundle_carries_the_pins_and_import_checks_them(client, other_org_clie
                        files={"file": ("b.zip", r.content, "application/zip")})
     assert same.status_code in (200, 201), same.text
     assert same.json()["library_issues"] == []
-    # Another org has no such item: reported, never resolved against their Library.
-    other = other_org_client.post("/api/projects/import_bundle?name=shared_there",
-                                  files={"file": ("b.zip", r.content, "application/zip")})
+    # Another org has no such item: the bundle's own copy serves the pin
+    # (project-io 03), and nothing is written into that org's Library (GK B3 L4).
+    other = other_org_client.post(
+        "/api/projects/import_bundle?name=shared_there",
+        files={"file": ("b.zip", r.content, "application/zip")},
+    )
     assert other.status_code in (200, 201), other.text
-    assert [i["reason"] for i in other.json()["library_issues"]] == ["missing"]
+    assert other.json()["library_issues"] == []
+    listed = other_org_client.get("/api/library/series")
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == []
 
 
 @pytest.mark.parametrize("pins", [None, {"schema": 1, "refs": []}])
@@ -251,8 +279,9 @@ def test_check_pins_with_nothing_to_check_is_empty(tmp_path, _auth_db, seeded_id
 # ── Review conditions (WP1.1c review round 1) ───────────────────────────────
 
 
-def test_a_corrupt_payload_is_an_issue_not_a_500(client, api_project, session_ctx,
-                                                  seeded_identity):
+def test_a_corrupt_payload_is_an_issue_not_a_500(
+    client, api_project, session_ctx, seeded_identity, project_storage_dir
+):
     """#1: junk bytes (not a missing file) must not escape as BadGzipFile."""
     import pathlib
 
@@ -261,7 +290,10 @@ def test_a_corrupt_payload_is_an_issue_not_a_500(client, api_project, session_ct
 
     name = api_project("junk")
     _save_with_refs(client, session_ctx, name, [_put(client)])
-    for f in pathlib.Path(library_dir(_default_root(), seeded_identity["org_id"])).rglob("*.gz"):
+    _drop_copies(project_storage_dir, name)
+    for f in pathlib.Path(
+        library_dir(_default_root(), seeded_identity["org_id"])
+    ).rglob("*.gz"):
         f.write_bytes(b"not gzip at all")
     issues = _open(client, name)["library_issues"]
     assert [i["reason"] for i in issues] == ["payload_unreadable"]
@@ -281,11 +313,13 @@ def test_opening_a_project_without_a_solver_config_does_not_inherit_the_previous
     assert session_ctx(client).solver_state["solver_config"].commercial is None
 
 
-def test_activating_a_resident_project_rechecks_its_refs(client, api_project, session_ctx,
-                                                        _auth_db):
+def test_activating_a_resident_project_rechecks_its_refs(
+    client, api_project, session_ctx, _auth_db, project_storage_dir
+):
     """#3: a context can be resident without ever having been checked."""
     name = api_project("resident")
     _save_with_refs(client, session_ctx, name, [_put(client)])
+    _drop_copies(project_storage_dir, name)
     session_local, LibraryItem = _library_rows(_auth_db)
     with session_local() as db:
         db.query(LibraryItem).delete()

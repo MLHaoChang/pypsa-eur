@@ -25,6 +25,14 @@ Issue reasons:
   * `payload_unreadable` the row matches but its file is gone or altered.
   * `unpinned`           the config names a ref the sidecar does not pin.
   * `sidecar_unreadable` the sidecar itself is not valid JSON of this shape.
+  * `copy_modified`      the project's own copy (project-io 03) is there but
+                         does not hash to the pin; it is never read, and the
+                         org's Library is checked instead.
+
+A pin whose project copy hashes to it is good whatever the org's Library holds
+(project-io 03: a project carries its pinned bytes in `library/`). A separate
+notice, code `library_newer_version`, says the org's Library has a later
+version than the pin; it changes nothing (the user re-pins).
 
 Pure service: imports neither routers nor `solver_service` (plan gate rubric).
 """
@@ -41,6 +49,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from models.commercial import LibraryItemRef, PriceSeriesRef
 from services.atomic_io import atomic_write_text
+from services.library import project_copies as PC
 from services.library import series_store as S
 
 SIDECAR_NAME = "library_refs.json"
@@ -49,6 +58,7 @@ SCHEMA_ITEMS = 2     # a `kind` per pin (P2 WP2.4a)
 SERIES = "series"
 ITEM_KINDS = ("tariff", "contract", "connection_agreement")
 ISSUE_CODE = "library_ref_stale"
+NEWER_CODE = "library_newer_version"
 
 _REF_KEYS = frozenset({"id", "version", "hash", "source"})
 
@@ -142,6 +152,16 @@ def write_pins(project_dir: Path, refs: Iterable[Any]) -> None:
     atomic_write_text(target, body)
 
 
+def write_copies(
+    db: DBSession, org_id: UUID, project_dir: Path, *, root: Path | None = None
+) -> list[str]:
+    """Copy each pinned payload the project lacks into its `library/` folder
+    from `org_id`'s Library (project-io 03; `project_copies.fill`). An
+    unreadable sidecar copies nothing. Returns the member names written."""
+    pins, _issues = read_pins(project_dir)
+    return PC.fill(db, org_id, Path(project_dir), pins, root=root)
+
+
 def _unreadable(label: str, exc: Exception) -> str:
     """A fixed message per refusal class. The issue goes back in the open and
     import responses, so it names the pin, never the exception's own text."""
@@ -195,13 +215,22 @@ def read_pins(project_dir: Path) -> tuple[list[dict], list[dict]]:
     return pins, []
 
 
-def check_pins(db: DBSession, org_id: UUID, project_dir: Path | None, *, config: Any,
-               root: Path | None = None) -> list[dict]:
+def check_pins(
+    db: DBSession,
+    org_id: UUID,
+    project_dir: Path | None,
+    *,
+    config: Any,
+    root: Path | None = None,
+    copies_dir: Path | None = None,
+) -> list[dict]:
     """Issues for every pin (and every config ref) that does not resolve to
     exactly its pinned bytes in `org_id`'s Library. Empty list = all good.
 
     `project_dir=None` checks the config's refs alone (a resident context,
-    whose in-memory config may be ahead of the sidecar on disk)."""
+    whose in-memory config may be ahead of the sidecar on disk); its project
+    copies are then read from `copies_dir`. By default the copies are
+    `project_dir`'s."""
     pins, issues = read_pins(project_dir) if project_dir is not None else ([], [])
     if project_dir is None:
         pins = collect_pins(config)
@@ -218,6 +247,22 @@ def check_pins(db: DBSession, org_id: UUID, project_dir: Path | None, *, config:
                                  f"the config references {pin['id']!r} v{pin['version']}, "
                                  f"which {SIDECAR_NAME} does not pin"))
     for pin in to_check:
+        issues += _newer(db, org_id, pin)
+        copies = copies_dir if copies_dir is not None else project_dir
+        if copies is not None:
+            data, modified = PC.read(copies, pin)
+            if data is not None:
+                continue
+            if modified:
+                issues.append(
+                    _issue(
+                        "copy_modified",
+                        pin,
+                        f"the project's copy of Library {pin['kind']} {pin['id']!r} "
+                        f"v{pin['version']} ({PC.member_name(pin)}) does not match its pin "
+                        "and is not used",
+                    )
+                )
         if pin["kind"] != SERIES:
             issues += _check_item_pin(db, org_id, pin, root)
             continue
@@ -244,7 +289,37 @@ def check_pins(db: DBSession, org_id: UUID, project_dir: Path | None, *, config:
     return issues
 
 
-def _check_item_pin(db: DBSession, org_id: UUID, pin: dict, root: Path | None) -> list[dict]:
+def _newer(db: DBSession, org_id: UUID, pin: dict) -> list[dict]:
+    """The `library_newer_version` notice when the org's Library has a later
+    version of `pin`'s item. Read-only (GK B3 L7)."""
+    from services.library import common
+    from services.library import items as I
+
+    if pin["kind"] == SERIES:
+        latest = S.latest_ref(db, org_id, pin["id"])
+    elif common.is_common(pin["kind"], pin["id"]):
+        return []
+    else:
+        latest = I.latest_ref(db, org_id, pin["kind"], pin["id"])
+    if latest is None or latest.version <= pin["version"]:
+        return []
+    return [
+        {
+            **_issue(
+                "newer_in_library",
+                pin,
+                f"the Library has {pin['kind']} {pin['id']!r} v{latest.version}; "
+                f"this project keeps v{pin['version']} until you re-pin it",
+            ),
+            "code": NEWER_CODE,
+            "latest_version": latest.version,
+        }
+    ]
+
+
+def _check_item_pin(
+    db: DBSession, org_id: UUID, pin: dict, root: Path | None
+) -> list[dict]:
     """The series checks for a Library item pin (P2 WP2.4a)."""
     from services.library import items as I
 

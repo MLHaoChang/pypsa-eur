@@ -777,11 +777,20 @@ def _bind_items(facts: _Facts, db, org_id, project_dir: pathlib.Path, n) -> list
 
             from services.library import bundle_pins
 
-            for issue in bundle_pins.check_pins(db, _uuid.UUID(str(org_id)), project_dir,
-                                                config=facts.cfg_dict):
-                add(issue.get("code", "library_pin_invalid"), issue.get("message", ""),
-                    issue.get("field") or "library", source="library")
-        except Exception:                                # noqa: BLE001
+            for issue in bundle_pins.check_pins(
+                db, _uuid.UUID(str(org_id)), project_dir, config=facts.cfg_dict
+            ):
+                # A newer Library version is a notice, not a fault (project-io 03).
+                add(
+                    issue.get("code", "library_pin_invalid"),
+                    issue.get("message", ""),
+                    issue.get("field") or "library",
+                    source="library",
+                    severity="warning"
+                    if issue.get("code") == bundle_pins.NEWER_CODE
+                    else "error",
+                )
+        except Exception:  # noqa: BLE001
             logger.exception("flow: library pin re-check failed")
     return out
 

@@ -238,8 +238,9 @@ def test_a_bundle_into_another_org_reports_its_tariff_pin(client, other_org_clie
     assert same.json()["library_issues"] == []
     other = other_org_client.post("/api/projects/import_bundle?name=tariffed_there",
                                   files={"file": ("b.zip", r.content, "application/zip")})
-    issues = other.json()["library_issues"]
-    assert [(i["reason"], i["kind"], i["id"]) for i in issues] == [("missing", "tariff", "nl")]
+    # The bundle's own copy serves the pin in the other org (project-io 03).
+    assert other.status_code == 200, other.text
+    assert other.json()["library_issues"] == []
 
 
 # ── WP2.4a review round 1 ──────────────────────────────────────────────────

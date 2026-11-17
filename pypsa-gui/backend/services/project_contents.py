@@ -146,6 +146,13 @@ TABLE: tuple[Entry, ...] = (
     Entry("studies", DIR, FOLDER, _ALL, "decision-study sidecars"),
     Entry("sites", DIR, FOLDER, _ALL, "3D site context"),
     Entry(
+        "library",
+        DIR,
+        FOLDER,
+        _ALL,
+        "copies of the pinned Library payloads (project-io 03)",
+    ),
+    Entry(
         "run_evidence",
         DIR,
         HISTORY,
