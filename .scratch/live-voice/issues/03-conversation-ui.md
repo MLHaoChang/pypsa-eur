@@ -27,3 +27,23 @@ Done when Chromium integration and real-device gates pass; microphone/speaker
 resources close on every exit. See [spec](../spec.md).
 
 ## Comments
+
+2026-11-17: plan in [03-plan.md](03-plan.md), slices 03a–03e. UX 24 GO (Q1 a, Q2 a,
+Q3 a, conditions in the plan). GK B 64 GO for 03a (refs.current written at
+admission, own PR) with conditions:
+- L1: per-value allow-list (panel, results_tab, mode closed enums; section enum or
+  bounded id; run_id/asset_id id pattern with cap; window typed and bounded); a
+  failing value is dropped, never stored; `at` is server time. Wrong type,
+  oversize, free text and bool tests per field.
+- L2: no new refusals; stale generation writes nothing and the turn answers as on
+  master (byte-equal test); no thread or no ui_context keeps the old record.
+- L3: name the admission lock and its order against `_LOCK`; no write under a
+  session or provider lock; concurrent admission + resume/bump never tears.
+- L4: refs.discussed byte-equal before and after in every write test.
+- L5: delivery `expires_at` = `uploaded_at + DELIVERY_TTL_SECONDS` for
+  `agent_export` only, null for other kinds; boundary tests at TTL (served) and
+  TTL + 1 s (410), expected values from the constant; inventory, route parity
+  and tool-result snapshots at the trial merge.
+- L6: non-owner, other-project (and viewer, if #1622 merged) refusals byte-equal.
+- L7: one targeted mutant per guard, listed in the PR body with killing tests.
+The loop hook waits for #1550 (it changes `harness/loop.py`).
