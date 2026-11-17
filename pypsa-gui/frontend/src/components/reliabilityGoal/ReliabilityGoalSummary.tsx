@@ -4,7 +4,7 @@
 // type. The study sends none of these: the backend fills them from the goal.
 import type { GoalValue } from '../../api/flow'
 import { openReliabilityGoal, openSiteType } from '../../layout/flowNavigation'
-import { goalWords, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { goalWords, MAX_GOAL_DRAWS, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { siteTypeLabel } from './SiteTypeSelect'
 
 export const NO_GOAL = 'No reliability goal set.'
@@ -12,7 +12,10 @@ export const NO_GOAL = 'No reliability goal set.'
  *  loop searches for the margin that meets a shortfall above zero. */
 export const ZERO_TARGET = 'The loop needs an allowed shortfall above 0 h/yr.'
 
-export type GoalItem = 'target' | 'ens' | 'draws' | 'site'
+export type GoalItem = 'target' | 'ens' | 'draws' | 'mc_budget' | 'site'
+
+/** The sequential MC's stopping rule (`mc_adequacy`'s default `cov_target`). */
+export const MC_COV_TARGET = 0.05
 
 const sourceNote = (f: GoalValue<unknown>): string =>
   f.source === 'template' ? ' (template)' : f.source === 'default' ? ' (default)' : ''
@@ -49,6 +52,11 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false }:
       if (it === 'target') parts.push(`allowed shortfall ${goalWords(goal, 'target_lole_h')}`)
       else if (it === 'ens') parts.push(`ENS target ${goalWords(goal, 'ens_cap_permyriad')}`)
       else if (it === 'draws') parts.push(`MC draws ${goalWords(goal, 'mc_draws')}`)
+      // The Expert MC batches adaptively (walkthrough asset-investment 08):
+      // the goal's draws are its first batch, not its whole run.
+      else if (it === 'mc_budget') parts.push(`MC draws ${goalWords(goal, 'mc_draws')} first, then more `
+        + `until the estimate's spread is under ${MC_COV_TARGET * 100} %, up to `
+        + MAX_GOAL_DRAWS.toLocaleString('en-GB'))
       else {
         // The select's own label and wording ("Grid connection: None — …").
         const l = siteTypeLabel(goal.site_archetype.value)

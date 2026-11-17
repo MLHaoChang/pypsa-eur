@@ -1,5 +1,7 @@
 import type { FlowHeld, FlowSectionId, FlowTarget } from '../../api/flow'
 import { componentLabel } from '../../utils/componentLabels'
+import type { EhSizedAsset } from '../../api/simulation'
+import { sizedBuilt } from '../results/SizedDesignTable'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
 
 // The words of a Guided section's list ("what this section holds"). Each word
@@ -28,13 +30,17 @@ export function heldKind(h: FlowHeld): string {
 
 /** The row's one figure in words, with its unit; null for a carrier. A missing
  *  figure says why instead of showing a dash. */
-export function heldFigure(section: FlowSectionId, h: FlowHeld): string | null {
+export function heldFigure(section: FlowSectionId, h: FlowHeld, sized?: EhSizedAsset): string | null {
   if (section === 'carriers') return null
   if (section === 'profiles') {
     const word = h.field && (SERIES_WORDS[h.field] ?? FIELD_LABELS[h.field])
     return word ? `${word} time series` : 'Time series'
   }
   const label = section === 'loads' ? PEAK_LOAD : (h.field && FIELD_LABELS[h.field]) || 'Size'
+  // After a study, the size it chose (walkthrough asset-investment 03).
+  if (h.extendable && sized && sizedBuilt(sized) !== 'not reported') {
+    return `${label}: ${sizedBuilt(sized)} (sized by the last study)`
+  }
   if (h.extendable) return `${label}: sized by the study`
   if (h.value === null) return `${label}: ${h.series ? 'its profile has no values yet' : 'not set'}`
   return `${label}: ${number(h.value)}${h.unit ? ` ${h.unit}` : ''}`

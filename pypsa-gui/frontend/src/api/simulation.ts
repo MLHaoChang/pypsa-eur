@@ -278,11 +278,29 @@ export interface ActivitySummary {
   note: string | null
 }
 
+/** The MC run judged against the project's goal (`lole_verdict`, the one
+ *  LOLE-vs-goal rule); `null` when no goal applies. */
+export interface McGoalVerdict {
+  /** The goal in h/yr. */
+  target_lole_h: number
+  verdict: 'pass' | 'miss' | 'not_confident'
+  confident: boolean
+  settle_draws: number | null
+  settle_reason: string | null
+}
+
 export interface McResult {
   engine: string
   fidelity: string
   metrics: McMetrics
+  /** Walkthrough asset-investment 01. Absent on older payloads. */
+  goal?: McGoalVerdict | null
+  /** Walkthrough 08: the first batch, the cap and the stopping CoV. */
+  draws?: { first_batch: number; max: number; cov_target: number }
   elcc: ElccRow[]
+  /** Walkthrough 07: installed MW of each priced vre asset; a vre row's
+   *  `nameplate_mw` is its peak output. */
+  elcc_installed_mw?: Record<string, number | null>
   /** MC_WARNING_V1, shipped with every payload — render it, never inline it. */
   warning: string
   /** Phase 12c-pre: units whose outages were sampled ON their availability
@@ -697,6 +715,22 @@ export interface EhSectionState {
   status: EhSectionStatus
   payload?: Record<string, unknown> | null
   note?: string | null
+}
+
+/** One asset the study sized: `sections.sizing.payload.assets` (walkthrough
+ *  asset-investment 03). A Store is sized in MWh (`*_mwh`); the others in MW.
+ *  An infinite bound reads null. */
+export interface EhSizedAsset {
+  component: 'Generator' | 'StorageUnit' | 'Link' | 'Store'
+  name: string
+  carrier: string
+  built_mw?: number | null
+  min_mw?: number | null
+  max_mw?: number | null
+  built_mwh?: number | null
+  min_mwh?: number | null
+  max_mwh?: number | null
+  max_hours?: number | null
 }
 
 /** TEA wrap (spec decision 9). LCOH is null + a flag when it cannot be

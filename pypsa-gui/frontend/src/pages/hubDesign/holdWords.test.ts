@@ -37,6 +37,13 @@ describe('a row in words', () => {
   })
   it('an extendable asset is sized by the study, whatever was entered', () => {
     expect(heldFigure('assets', held({ extendable: true, value: 2 }))).toBe('Capacity: sized by the study')
+    // After a study: the size it chose (walkthrough asset-investment 03).
+    expect(heldFigure('assets', held({ extendable: true, value: 2 }),
+      { component: 'StorageUnit', name: 'bess_new', carrier: 'battery', built_mw: 2.5, built_mwh: 10, max_hours: 4 }))
+      .toBe('Capacity: 2.5 MW · 10 MWh (4 h) (sized by the last study)')
+    // A study that left no size keeps the plain words.
+    expect(heldFigure('assets', held({ extendable: true }),
+      { component: 'Generator', name: 'g', carrier: '', built_mw: null })).toBe('Capacity: sized by the study')
   })
   it('a missing figure says why', () => {
     expect(heldFigure('assets', held({ value: null }))).toBe('Capacity: not set')

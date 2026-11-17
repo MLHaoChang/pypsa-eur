@@ -50,12 +50,17 @@ export function ReliabilityGoalEditor({
   }
   // An empty field reads what the goal says, the same in both modes and in
   // the Results summary: `not set`, `off`, or the default draws.
+  // A default LOLE with a value is the site type's own goal, the one the
+  // study certifies against (walkthrough asset-investment 01).
   const placeholder = (k: GoalNumberField): string =>
-    (k === 'mc_draws' ? goalWords(goal, k) || 'default' : GOAL_UNSET[k])
+    (k === 'mc_draws' ? goalWords(goal, k) || 'default'
+      : goal?.[k].value != null ? goalWords(goal, k) : GOAL_UNSET[k])
   const common = (k: GoalNumberField) => ({
     k, mode, label: label[k], placeholder: placeholder(k), disabled,
     value: edits[k] ?? goalText(goal, k),
     fromTemplate: !(k in edits) && goal?.[k].source === 'template',
+    assumed: !(k in edits) && k === 'target_lole_h' && goal?.[k].source === 'default'
+      && goal[k].value != null,
     onChange: (v: string) => onChange({ ...edits, [k]: v }),
   })
   const show = (k: GoalNumberField) => fields.includes(k)
@@ -78,12 +83,15 @@ export function ReliabilityGoalEditor({
   )
 }
 
+/** Under a LOLE field that shows the site type's own goal (walkthrough 01). */
+export const SITE_TYPE_GOAL_NOTE = 'Assumed for this site type; the reliability study certifies against it. Type a value to set your own.'
+
 const HINT: Partial<Record<GoalNumberField, string>> = {
   ens_cap_permyriad: ENS_HINT,
   mc_draws: `Samples of the sequential Monte Carlo every reliability study runs (1–${MAX_GOAL_DRAWS}).`,
 }
 
-function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromTemplate, onChange }: {
+function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromTemplate, assumed, onChange }: {
   k: GoalNumberField
   mode: 'guided' | 'expert'
   testId: string
@@ -92,6 +100,7 @@ function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromT
   value: string
   disabled: boolean
   fromTemplate: boolean
+  assumed: boolean
   onChange: (v: string) => void
 }) {
   const guided = mode === 'guided'
@@ -113,6 +122,11 @@ function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromT
       {fromTemplate && (
         <span data-testid={`${testId}-template`} className="text-[10px] text-muted">
           From the project template
+        </span>
+      )}
+      {assumed && (
+        <span data-testid={`${testId}-assumed`} className="text-[10px] text-muted">
+          {SITE_TYPE_GOAL_NOTE}
         </span>
       )}
     </label>

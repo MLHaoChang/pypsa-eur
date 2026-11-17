@@ -18,6 +18,7 @@ import { resultsApi } from '../../api/simulation'
 import { EDITED_TEXT } from '../hubDesign/cards/ResultsCard'
 import {
   McPanel, blockerMessage, ciRange, loleStatement, elccShare, capMessage,
+  elccSize, elccShareBase, mcGoalText,
 } from './McPanel'
 import type {
   McMetrics, McStatus, ElccRow, ElccCandidatesPayload,
@@ -434,7 +435,8 @@ describe('McPanel', () => {
   it('shows the goal\'s draws read-only and sends none: the backend fills them', async () => {
     const user = await openPanel()
     expect(screen.queryByLabelText(/draws/i)).toBeNull()
-    await waitFor(() => expect(screen.getByTestId('mc-goal-values').textContent).toBe('MC draws 250'))
+    await waitFor(() => expect(screen.getByTestId('mc-goal-values').textContent).toBe(
+      'allowed shortfall not set · MC draws 250 first, then more until the estimate\'s spread is under 5 %, up to 2,000'))
     expect(screen.getByTestId('mc-goal-change').textContent).toBe('Change in Scenarios & optimisation ›')
     await user.click(screen.getByRole('button', { name: /run study/i }))
     await waitFor(() => expect(resultsApi.startMc).toHaveBeenCalledWith({}))
@@ -491,6 +493,54 @@ describe('McPanel ELCC table', () => {
     await openPanel()
     expect((await screen.findByTestId('elcc-non-additivity')).textContent)
       .toMatch(/marginal.*last-in|last-in.*marginal/i)
+  })
+})
+
+// ── walkthrough asset-investment 01, 07: the goal verdict, sizes ──────────
+
+describe('mcGoalText', () => {
+  const g = { target_lole_h: 3, confident: true, settle_draws: null, settle_reason: null }
+  it('names the verdict against the goal in the loops\' words', () => {
+    expect(mcGoalText({ ...g, verdict: 'pass' })).toBe('Target met: at or under the 3 h/yr goal')
+    expect(mcGoalText({ ...g, verdict: 'miss' })).toBe('Goal missed: above the 3 h/yr goal')
+    expect(mcGoalText({ ...g, verdict: 'not_confident', confident: false, settle_draws: 4200 }))
+      .toBe('Not confident: at or under the 3 h/yr goal, but not by enough to call it a pass; '
+        + 'about 4,200 draws would settle it')
+  })
+})
+
+describe('elccSize', () => {
+  it('says a vre figure is its peak and puts the installed MW beside it', () => {
+    expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 }, 6)).toBe('6 MW installed · 4.85 MW peak')
+    expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 })).toBe('4.85 MW peak')
+    expect(elccSize({ kind: 'generator', nameplate_mw: 60 }, 99)).toBe('60 MW')
+    expect(elccShareBase('vre')).toBe('of peak')
+    expect(elccShareBase('storage_unit')).toBe('of nameplate')
+  })
+})
+
+describe('McPanel goal verdict', () => {
+  it('shows the run\'s verdict against the goal and the installed wind size', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue({
+      ...DONE,
+      result: {
+        ...DONE.result!,
+        goal: { target_lole_h: 3, verdict: 'miss', confident: false,
+          settle_draws: null, settle_reason: null },
+        elcc_installed_mw: { 'Wind-North': 6 },
+      },
+    })
+    await openPanel()
+    expect((await screen.findByTestId('mc-goal-verdict')).textContent)
+      .toBe('Goal missed: above the 3 h/yr goal')
+    expect(screen.getByTestId('elcc-size-Wind-North').textContent).toMatch(/6 MW installed · .* MW peak/)
+  })
+
+  it('shows no verdict when no goal applies', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue(DONE)
+    await openPanel()
+    await screen.findByTestId('elcc-table')
+    expect(screen.queryByTestId('mc-goal-verdict')).toBeNull()
   })
 })
 

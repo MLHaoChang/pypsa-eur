@@ -19,6 +19,7 @@ import { useDispatchSolved, useHubReport, useHubReview, useHubStudy } from '../u
 import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
 import { costTileLabel, kpiMoney } from '../plainWords'
+import { SizedDesignTable } from '../../results/SizedDesignTable'
 import { useQuery } from '@tanstack/react-query'
 import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
 import { networkApi } from '../../../api/network'
@@ -161,6 +162,9 @@ export function ResultsCard() {
             state="ready" dimmed={stale} />
         </div>
       )}
+
+      {/* What the study chose to build (walkthrough asset-investment 03). */}
+      <SizedDesignTable report={report} mode="guided" testId="hub-results-sized" />
 
       {(risks.length > 0 || coped.length > 0) && (
         <div className="flex flex-col gap-1 text-[12px]">

@@ -80,7 +80,9 @@ export function goalWords(goal: ReliabilityGoal | null, k: GoalNumberField): str
   const f = goal?.[k]
   if (!f || f.value == null) return k === 'mc_draws' ? '' : GOAL_UNSET[k]
   const unit = k === 'target_lole_h' ? ' h/yr' : k === 'ens_cap_permyriad' ? '‱' : ''
-  const note = f.source === 'template' ? ' (template)' : f.source === 'default' ? ' (default)' : ''
+  const note = f.source === 'template' ? ' (template)'
+    // A default LOLE with a value is the site type's own goal (walkthrough 01).
+    : f.source === 'default' ? (k === 'target_lole_h' ? ' (site type default)' : ' (default)') : ''
   return `${f.value}${unit}${note}`
 }
 

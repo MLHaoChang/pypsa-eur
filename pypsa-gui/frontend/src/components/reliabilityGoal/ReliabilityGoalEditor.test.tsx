@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { goal } from '../../test/fixtures/reliabilityGoal'
-import { ENS_HINT, ReliabilityGoalEditor } from './ReliabilityGoalEditor'
+import { ENS_HINT, ReliabilityGoalEditor, SITE_TYPE_GOAL_NOTE } from './ReliabilityGoalEditor'
 
 afterEach(() => cleanup())
 
@@ -18,6 +18,22 @@ const G = goal({ target_lole_h: [3, 'stored'], ens_cap_permyriad: [0.5, 'templat
 const input = (id: string) => screen.getByTestId(id) as HTMLInputElement
 
 describe('ReliabilityGoalEditor', () => {
+  // Walkthrough asset-investment 01: the site type's goal the study uses.
+  it.each([['guided', 'hub-goal'], ['expert', 'solver-goal']] as const)(
+    '%s shows the site type\'s goal as assumed, never "not set"', (mode, g) => {
+      render(<ReliabilityGoalEditor mode={mode} edits={{}} onChange={vi.fn()}
+        goal={goal({ target_lole_h: [3, 'default'], site_archetype: ['off_grid', 'template'] })} />)
+      expect(input(`${g}-lole`).value).toBe('')
+      expect(input(`${g}-lole`).placeholder).toBe('3 h/yr (site type default)')
+      expect(screen.getByTestId(`${g}-lole-assumed`).textContent).toBe(SITE_TYPE_GOAL_NOTE)
+    })
+
+  it('says "not set" with no note when no goal applies', () => {
+    render(<ReliabilityGoalEditor mode="guided" goal={goal()} edits={{}} onChange={vi.fn()} />)
+    expect(input('hub-goal-lole').placeholder).toBe('not set')
+    expect(screen.queryByTestId('hub-goal-lole-assumed')).toBeNull()
+  })
+
   it.each([['guided', 'hub-goal'], ['expert', 'solver-goal']] as const)(
     '%s shows the same goal values', (mode, g) => {
       render(<ReliabilityGoalEditor mode={mode} goal={G} edits={{}} onChange={vi.fn()} />)
