@@ -1148,14 +1148,18 @@ def _loadflow_requested(facts) -> bool:
 
 def _summary(section: str, facts: _Facts) -> str | None:
     if section == "project":
-        return f"{facts.snapshots} snapshots"
+        # A time step, never an unqualified "snapshot" (CONTEXT.md).
+        return _count(facts.snapshots, "time step")
     if section == "carriers":
         return ", ".join(facts.carriers[:6]) or None
     if section == "connection":
         if not facts.connection_links:
             return None
+        # Names as a person reads them, never the engine id (UX 2 on #1688), the same way Guided's Site card does.
+        from services.run_actions import _display_name
+
         mw = f", {facts.import_p_nom_mw:g} MW" if facts.import_p_nom_mw is not None else ""
-        return ", ".join(facts.connection_links[:3]) + mw
+        return ", ".join(_display_name(x) for x in facts.connection_links[:3]) + mw
     if section == "loads":
         return _count(facts.loads, "load")
     if section == "assets":
