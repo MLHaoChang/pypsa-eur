@@ -278,3 +278,13 @@ def test_stage2_restores_the_lp_state_when_pf_raises_after_the_seed():
     pd.testing.assert_frame_equal(n.transformers_t.p0, before["t_p0"])
     pd.testing.assert_frame_equal(n.generators_t.p, before["g_p"])
     pd.testing.assert_frame_equal(n.buses_t.v_ang, before["v_ang"])
+
+
+def test_seed_check_reads_only_the_solved_snapshots():
+    """A NaN angle left in a snapshot outside the flow does not skip the seed."""
+    n = _chain()
+    n.buses_t.v_ang.loc[n.snapshots[1], "MV1"] = float("nan")
+    log: list[str] = []
+    result, seeded_by = run_pf(n, log.append, snapshots=n.snapshots[:1])
+    assert seeded_by == ["T1", "T2"] and "seed skipped" not in log[0]
+    assert _converged(result)
