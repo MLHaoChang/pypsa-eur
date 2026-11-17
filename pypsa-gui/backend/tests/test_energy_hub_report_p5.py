@@ -99,6 +99,21 @@ def test_sizing_without_extendable_assets_has_no_rows():
     assert R.sizing_summary_from_network(_ens_network())["assets"] == []
 
 
+@pytest.mark.parametrize("name,carrier", [
+    ("__voll_b", "gas"), ("shed_b", "voll"), ("shed2_b", "load_shedding"),
+    ("flex_b", "dsr"), ("flex2_b", "demand_response")])
+def test_slack_generators_are_not_sized_assets(name, carrier):
+    """GK A 30 A7 survivor: the VOLL / load-shedding / demand-response slack
+    the solve adds is extendable but never a unit the study sized; a real
+    generator beside it still is a row."""
+    n = _ens_network()
+    n.add("Generator", name, bus="b", carrier=carrier, p_nom_extendable=True,
+          marginal_cost=1e4)
+    n.add("Generator", "pv_new", bus="b", carrier="solar", p_nom_extendable=True)
+    n._objective = 1.0
+    assert [a["name"] for a in R.sizing_summary_from_network(n)["assets"]] == ["pv_new"]
+
+
 def test_tea_lcoe_is_cost_over_served_energy():
     tea = R.compute_tea(cost_eur=9_720.0, served_energy_mwh=1_080.0)
     assert tea.lcoe_eur_per_mwh == pytest.approx(9_720.0 / 1_080.0)

@@ -132,13 +132,14 @@ def pack_target_lole_h(archetype: str) -> float | None:
     """The site type's own pack LOLE target (h/yr): the pack factory the EH
     study certifies with (``eh_study_runner._PACK_FACTORY``). None when the
     pack has none (strong_grid) or the site type is unknown."""
-    from services.adequacy.eh_study_runner import _PACK_FACTORY
-
-    factory = _PACK_FACTORY.get(archetype)
     try:
+        from services.adequacy.eh_study_runner import _PACK_FACTORY
+
+        factory = _PACK_FACTORY.get(archetype)
         availability = factory().availability if factory is not None else None
     except Exception:                                   # noqa: BLE001
-        # A pack that cannot be built assumes nothing; the study refuses it.
+        # A pack that cannot be built (or a runner that cannot be imported)
+        # assumes nothing; the study refuses it.
         logger.exception("site type %r: its pack could not be built", archetype)
         return None
     target = getattr(availability, "target_lole_h", None)
@@ -245,9 +246,10 @@ def loop_goal(body: Any, goal: dict, nyears: float | None) -> tuple[float | None
 
 def assumed_lole(goal: dict) -> float | None:
     """The site type's goal (h/yr) a screen names when none is set; None
-    when a goal is set or the site type has none."""
+    when a goal is set or the site type has none. A missing or non-number
+    `assumed` reads as none (GK B 65 C9)."""
     t = goal["target_lole_h"]
-    return t.get("assumed") if t["value"] is None else None
+    return _number(t.get("assumed")) if t["value"] is None else None
 
 
 def no_target_hint(solver_state: dict) -> str:
