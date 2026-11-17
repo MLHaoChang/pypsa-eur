@@ -22,3 +22,5 @@ GK B (63), 2026-11-17, plan GO with conditions:
 - I10. Call `network_crud.rederive_imported_parts` itself, never a fork, on the staged network before `create_root`. Tests: a non-finite part scale is a 422 with no row and no folder; a stale `capital_cost` is re-derived; a mutant that drops the call is killed by both. The PR body states whether snapshot restore or Save-As can bring back a priced composite row without this guard; if one can, guard it here or file it.
 
 Coordinator, 2026-11-17, owner decision on forks (option 1): forks leave `gridspine/` out entirely, since a fork does not take the project kind and a capacity-expansion project holds no `gridspine/`. Bundles and Save-As carry all of it, and snapshots carry it without `run/`. "A fork of a planning project keeps its kind" is issue 06.
+
+GK B (63), 2026-11-17: Q-A replaced, since the stale check it relied on does not exist. A copied `gridspine/run/` claims nothing new: it is byte-equal to the source and nothing marks it current (tested). Run freshness is issue 07. Leaving `gridspine/` out of forks is fine while the kind question is open (issue 06).

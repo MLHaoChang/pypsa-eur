@@ -271,6 +271,7 @@ def test_a_planning_bundle_keeps_its_kind_and_gridspine_but_not_its_source_paths
         )
     )
     (d / "gridspine" / "run" / "manifest.json").write_text("{}")
+    (d / "gridspine" / "run" / "dispatch.csv").write_bytes(b"h,p\r\n0,\x001.5\n")
     r = client.get(f"/api/projects/{name}/bundle")
     meta = json.loads(zipfile.ZipFile(io.BytesIO(r.content)).read("metadata.json"))
     assert meta["project_kind"] == gs.PLANNING_DYNAMICS
@@ -288,7 +289,14 @@ def test_a_planning_bundle_keeps_its_kind_and_gridspine_but_not_its_source_paths
         and cfg["from_dispatch"] is None
         and cfg["from_network"] is None
     )
-    assert (dst / "gridspine" / "run" / "manifest.json").exists()
+    # A copy claims nothing new (GK B, replacing Q-A): run/ arrives byte-equal
+    # and nothing in it is added or marked current by the import.
+    src_run, dst_run = d / "gridspine" / "run", dst / "gridspine" / "run"
+    assert sorted(p.name for p in dst_run.iterdir()) == sorted(
+        p.name for p in src_run.iterdir()
+    )
+    for f in src_run.iterdir():
+        assert (dst_run / f.name).read_bytes() == f.read_bytes(), f.name
     assert project_row("pc_plan_dst").project_kind == gs.PLANNING_DYNAMICS
 
 
