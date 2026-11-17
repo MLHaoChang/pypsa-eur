@@ -675,3 +675,90 @@ def test_csv_n2_row_naming_one_branch_twice_is_not_representable():
         for r in imp.unmatched.itertuples()
     ] == [("P", 2, "BUS_A-BUS_B-1", "not_representable")]
     assert imp.contingencies.empty
+
+
+# --------------------------------------------------------------------------
+# guards the mutation run found untested (GC-03 PR2)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "body, match",
+    [
+        (" TRIP MACHINE", r"line 2: expected 'TRIP MACHINE <id> FROM BUS <b>'"),
+        (" TRIP MACHINE 1 FOO BUS 3", r"line 2: expected 'TRIP MACHINE <id>"),
+        (" TRIP MACHINE 1 FROM BOX 3", r"line 2: expected 'TRIP MACHINE <id>"),
+        (" OPEN BRANCH FROM BUS 1 TO BUS 3\n END foo", r"line 3: expected END alone"),
+    ],
+    ids=["machine-two-tokens", "machine-no-from", "machine-no-bus", "end-with-text"],
+)
+def test_malformed_machine_and_end_lines_raise_naming_the_line(body, match):
+    with pytest.raises(ContractError, match=match):
+        _read(_con(f"CONTINGENCY X\n{body}\nEND"))
+
+
+def test_a_label_of_two_tokens_is_refused_by_its_own_message():
+    with pytest.raises(
+        ContractError, match=r"line 1: expected 'CONTINGENCY <label>', got"
+    ):
+        _read(_con("CONTINGENCY A B\n OPEN BRANCH FROM BUS 1 TO BUS 3\nEND"))
+
+
+@pytest.mark.parametrize(
+    "stmt",
+    [
+        "OPEN MACHINE 1 FROM BUS 3",  # a machine verb it is not
+        "REMOVE LOAD",  # two tokens
+        "OPEN BRANCH FROM BUS 1 TO BUS 3 TO BUS",  # a bare third-bus tail
+    ],
+)
+def test_more_psse_forms_outside_the_subset_are_unsupported(stmt):
+    imp = _read(
+        _con("CONTINGENCY X", f" {stmt}", " OPEN BRANCH FROM BUS 1 TO BUS 3", "END")
+    )
+    assert _reasons(imp) == [("X", 2, "unsupported"), ("X", 3, "partial")]
+
+
+def test_blank_and_comment_lines_inside_a_block_are_skipped():
+    imp = _read(
+        _con(
+            "CONTINGENCY X",
+            "",
+            "/ a comment",
+            " OPEN BRANCH FROM BUS 1 TO BUS 3",
+            "END",
+        )
+    )
+    assert list(imp.contingencies.iloc[0]["element_ids"]) == ["BUS_A-BUS_C-1"]
+
+
+@pytest.mark.parametrize("order", ["1.5", "abc"])
+def test_csv_order_that_is_not_an_integer_is_refused(order):
+    with pytest.raises(
+        ContractError, match=rf"line 2: order '{order}' is not an integer"
+    ):
+        read_contingency_list(
+            f"contingency_id,kind,order,bus\nX,bus_section,{order},BUS_S\n",
+            _net(),
+            fmt="csv",
+        )
+
+
+def test_csv_blank_circuit_is_circuit_1():
+    text = "contingency_id,kind,from_bus_number,to_bus_number,ckt\nX,branch,1,3,\n"
+    imp = read_contingency_list(text, _net(), fmt="csv")
+    assert list(imp.contingencies.iloc[0]["element_ids"]) == ["BUS_A-BUS_C-1"]
+
+
+def test_csv_compound_row_carries_its_two_branches():
+    text = "contingency_id,kind,order,element_ids\nBUS_A-BUS_C-1|BUS_A-BUS_B-1,n_m_1,2,BUS_A-BUS_C-1|BUS_A-BUS_B-1\n"
+    row = read_contingency_list(text, _net(), fmt="csv").contingencies.iloc[0]
+    assert row["kind"] == "n_m_1" and list(row["element_ids"]) == [
+        "BUS_A-BUS_C-1",
+        "BUS_A-BUS_B-1",
+    ]
+
+
+def test_a_source_that_is_neither_a_path_nor_text_is_refused():
+    with pytest.raises(ContractError, match=r"format must be 'con' or 'csv'"):
+        read_contingency_list(123, _net())
