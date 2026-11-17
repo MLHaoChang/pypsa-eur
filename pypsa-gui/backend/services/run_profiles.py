@@ -1154,7 +1154,10 @@ def _grid_only() -> dict:
                             "while the option is off or covers only listed lines."),
             ]},
             "explore": {"skip": "Grid-only runs explore no cases by default."},
-            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            # GK B (61) SH-15 A1: the stock report reads the live network, which the flow
+            # rewrites, so no report is published until the LP frames are kept (issue 50).
+            "report": {"skip": "No report from grid-only runs yet: the AC power flow rewrites the live "
+                               "dispatch the report reads (issue 50)."},
             # No `ho.kpis_read`: cost and emissions are read from the live network, which the
             # solve's AC power flow rewrites (the slack generator's dispatch), so no headline
             # KPI is read back for this profile until the engine keeps the LP's frames.
@@ -1163,8 +1166,7 @@ def _grid_only() -> dict:
         "tunable": [],
         # No lever to grant: the envelope covers the run's one solve and report, and the
         # L2 round diagnoses (a round with no change ends the loop, §6.2).
-        "envelope": {"edits": [], "runs": [{"tool": "update_solver_config"}, {"tool": "solve_queue_enqueue"},
-                                           {"tool": "generate_report"}],
+        "envelope": {"edits": [], "runs": [{"tool": "update_solver_config"}, {"tool": "solve_queue_enqueue"}],
                      "budget": {"solves": 1, "rounds": 2, "wall_time_h": 8.0}},
         "kpis": [],
         "chapters": [],

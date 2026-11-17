@@ -70,8 +70,15 @@ def _profile_dict():
 
 
 def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
-    granted, rated, site
+    granted, rated, site, monkeypatch
 ):
+    from routers import report_jobs
+
+    enqueued = []
+    real_start = report_jobs._start
+    monkeypatch.setattr(
+        report_jobs, "_start", lambda *a, **k: enqueued.append(k) or real_start(*a, **k)
+    )
     task, path, _ = granted(run={**RUN, "profile": REF})
     script = Script()
     record = go(harness_runner.Runner("a", agent_provider=script), path, task)
@@ -94,6 +101,10 @@ def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
     }
     assert run["stages"]["explore"]["status"] == "skipped" and script.requests == []
     assert run["stages"]["handoff"]["gate"]["passed"] is True
+    # GK B (61) SH-15: no report job is ever enqueued; the stage reads skipped, naming issue 50.
+    report = run["stages"]["report"]
+    assert enqueued == [] and report["status"] == "skipped", report
+    assert "issue 50" in report.get("reason", ""), report
     # GK B SH-15 A1: no LP figure is read back after the flow rewrote the live dispatch (issue 50).
     assert run["handoff"]["kpis"] == []
 
@@ -120,4 +131,4 @@ def test_a_seeded_overload_fails_the_loading_rule_and_the_run_asks_the_user_with
     assert not [
         s for s in record["steps"] if s["tool"] in ("update_component", "add_component")
     ]
-    assert run["stages"]["report"]["status"] == "pending"
+    assert run["stages"]["report"]["status"] == "skipped"

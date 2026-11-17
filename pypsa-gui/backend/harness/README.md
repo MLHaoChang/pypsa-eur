@@ -1817,8 +1817,10 @@ with no params, sidecars or levers (owner decisions SH-PILOT-1, SH15-PF-1).
   is exactly `lopf+ac_pf_ok` (`run_gates.lp_condition`,
   `calculations.solve_matches_inputs(after_pf=True)`), and only for a profile
   that sets `pf_results`.
-- **Hand-off.** No KPIs: the flow rewrites the live dispatch, so cost and CO2
-  read after it are not the LP's (issue 50, `missing_tools`).
+- **Report and hand-off.** The report stage is skipped, and the hand-off has
+  no KPIs. The flow rewrites the live dispatch the stock report and the KPI
+  readers use, so cost and CO2 read after it are not the LP's (issue 50,
+  `missing_tools`). The grant lists no report.
 
 ### The approval envelope (study harness issue 03)
 
