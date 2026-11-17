@@ -39,6 +39,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import re
+from pathlib import Path
 
 import pandas as pd
 
@@ -51,6 +52,10 @@ LINE_COLUMN = "_line"
 
 _HEAD = re.compile(r"^(?P<name>[^()]+)\((?P<type>[^()]*)\)$")
 _TYPES = {"a", "i", "r", "d", "p"}
+#: Numbers as written: ASCII digits, a point, an exponent. No ``nan``/``inf``,
+#: no ``_`` separators, no decimal comma, no ``1.0`` for an integer.
+_INT = re.compile(r"[+-]?[0-9]+")
+_REAL = re.compile(r"[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -73,13 +78,21 @@ class DgsTables:
 
 
 def parse_dgs(path) -> DgsTables:
-    """Parse the ASCII DGS file at ``path`` (UTF-8, else Windows-1252)."""
-    raw = open(path, "rb").read()
+    """
+    Parse the ASCII DGS file at ``path``: UTF-8, else Windows-1252 (the
+    encoding the tool writes on Windows). A file that is neither, or that
+    cannot be read, is refused naming the file.
+    """
     try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = raw.decode("cp1252")
-    return parse_dgs_text(text, source=str(path))
+        raw = Path(path).read_bytes()
+    except OSError as e:
+        raise ContractError(f"DGS {path}: cannot be read ({e.strerror or e})") from e
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            return parse_dgs_text(raw.decode(encoding), source=str(path))
+        except UnicodeDecodeError:
+            continue
+    raise ContractError(f"DGS {path}: neither UTF-8 nor Windows-1252 text")
 
 
 def parse_dgs_text(text: str, source: str = "<text>") -> DgsTables:
@@ -94,7 +107,9 @@ def parse_dgs_text(text: str, source: str = "<text>") -> DgsTables:
     pointers: list = []  # (line, class, attr, target ID)
     head = None  # (class, [(column, attr, type letter, vector index or None)])
 
-    for lineno, line in enumerate(text.splitlines(), start=1):
+    for lineno, line in enumerate(
+        text.replace("\r\n", "\n").replace("\r", "\n").split("\n"), start=1
+    ):
         if not line.strip() or line.startswith("*"):
             continue
         fields = line.split(";")
@@ -152,6 +167,8 @@ def parse_dgs_text(text: str, source: str = "<text>") -> DgsTables:
                 )
             rec[attr] = []
         oid = rec.get("ID")
+        oid = None if oid is None else str(oid)  # pointers are text; so is the key
+        rec["ID"] = oid
         if oid is None:
             fail(lineno, f"{cls} row without an ID")
         if oid in owner:
@@ -204,6 +221,10 @@ def _header(fields, lineno, fail):
     out = []
     for name, t in cols:
         base, _, sub = name.partition(":")
+        if name == "ID" and t not in ("a", "i"):
+            fail(lineno, f"{cls}: the ID column must be text or integer, not {t!r}")
+        if sub == "SIZEROW" and t != "i":
+            fail(lineno, f"{cls}.{name}: a vector length must be an integer, not {t!r}")
         if f"{base}:SIZEROW" in names and (sub == "SIZEROW" or sub.isdigit()):
             out.append((name, base, t, "SIZEROW" if sub == "SIZEROW" else int(sub)))
         else:
@@ -219,14 +240,12 @@ def _value(field, t, lineno, where, fail):
     if t in ("a", "p"):
         return s
     if t == "i":
-        try:
-            return int(s)
-        except ValueError:
+        if not _INT.fullmatch(s):
             fail(lineno, f"{where}: {s!r} is not an integer")
-    try:
-        return float(s)
-    except ValueError:
+        return int(s)
+    if not _REAL.fullmatch(s):
         fail(lineno, f"{where}: {s!r} is not a number")
+    return float(s)
 
 
 def _version(general, fail):

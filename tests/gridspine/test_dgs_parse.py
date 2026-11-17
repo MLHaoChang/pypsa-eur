@@ -216,6 +216,34 @@ GENERAL = "$$General;ID(a:40);Descr(a:40);Val(a:40)\n1;Version;5.0\n"
             4,
             "SIZEROW -1 but 1 vector columns",
         ),
+        *[
+            (
+                GENERAL + f"$$ElmTerm;ID(a:40);uknom(r)\n3;{v}\n",
+                4,
+                f"{v!r} is not a number",
+            )
+            for v in ("nan", "inf", "-inf", "1_0", "1e", ".", "0x1")
+        ],
+        *[
+            (
+                GENERAL + f"$$ElmTerm;ID(a:40);outserv(i)\n3;{v}\n",
+                4,
+                f"{v!r} is not an integer",
+            )
+            for v in ("1_0", "\u0663", "1e2")
+        ],
+        (GENERAL + "$$T;ID(r);x(r)\n", 3, "ID column must be text or integer"),
+        (
+            GENERAL + "$$T;ID(a:40);v:SIZEROW(r);v:0(r)\n",
+            3,
+            "vector length must be an integer",
+        ),
+        ("$$ElmNet;ID(a:40);loc_name(a:40)\n2;Grid\n", 1, "no General table Version"),
+        (
+            "$$General;ID(a:40);Descr(a:40);Val(a:40)\n1;Version;5abc\n",
+            2,
+            "version '5abc' found",
+        ),
         (
             "$$General;ID(a:40);Descr(a:40);Val(a:40)\n1;Version;\n",
             2,
@@ -261,6 +289,7 @@ def test_the_parser_imports_no_engine():
         "dataclasses",
         "math",
         "re",
+        "pathlib",
         "pandas",
         "gridspine.schema.contracts",
     }
@@ -307,3 +336,32 @@ def test_the_writers_one_block_harmonic_layout_parses():
     )
     hm = t.tables["TypHmccur"]
     assert hm.loc["3", "ampl"] == [20.0, 0.0] and hm.loc["4", "norder"] == [5, 7]
+
+
+def test_integer_ids_resolve_pointers_as_text():
+    t = parse_dgs_text(GENERAL + "$$T;ID(i);up(p)\n3;\n4;3\n")
+    assert (
+        list(t.tables["T"].index) == ["3", "4"] and t.tables["T"].loc["4", "up"] == "3"
+    )
+
+
+def test_line_numbers_count_only_line_breaks():
+    # a form feed or NEL inside a text field is not a new line
+    t = parse_dgs_text(GENERAL + "$$T;ID(a:40);x(a:40)\r\n3;a\x0cb\r\n4;c\x85d\n5;e\n")
+    assert list(t.tables["T"][LINE_COLUMN]) == [4, 5, 6]
+
+
+@pytest.mark.parametrize(
+    "content, words",
+    [
+        (None, "cannot be read"),
+        (b"$$General;ID(a:40)\n\x81\xff\n", "neither UTF-8 nor Windows-1252"),
+    ],
+)
+def test_an_unreadable_file_is_refused_naming_it(tmp_path, content, words):
+    path = tmp_path / "bad.dgs"
+    if content is not None:
+        path.write_bytes(content)
+    with pytest.raises(ContractError) as e:
+        parse_dgs(path)
+    assert str(path) in str(e.value) and words in str(e.value)
