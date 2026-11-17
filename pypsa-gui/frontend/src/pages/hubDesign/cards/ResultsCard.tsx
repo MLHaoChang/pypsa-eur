@@ -28,13 +28,14 @@ import DownloadReport from '../DownloadReport'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
 
 
+// It names the figures it covers: the investment case's NPV and LCOE above carry their own state (UX 23).
 export const STALE_TEXT =
-  'These results are from an earlier study; the network was solved since. Run again to refresh.'
+  'The verdict, expected shortfall, design cost and risks are from an earlier study; the network was solved since. Run again to refresh.'
 
 /** P33b (D-2): an edit seam was crossed since the study started. Says
  *  "edited", never "changed" — that is all the counter carries. */
 export const EDITED_TEXT =
-  'The network has been edited since this study, so these results describe the design as it was. Run again to refresh.'
+  'The network has been edited since this study, so its verdict, expected shortfall, design cost and risks describe the design as it was. Run again to refresh.'
 
 export function openFullReport(): void {
   const ui = useUIStore.getState()

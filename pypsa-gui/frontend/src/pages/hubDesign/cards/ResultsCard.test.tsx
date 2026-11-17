@@ -210,7 +210,7 @@ describe('ResultsCard body', () => {
     const stale = await screen.findByTestId('hub-results-stale')
     expect(stale.textContent).toContain('Out of date')
     expect(stale.textContent).toContain(
-      'These results are from an earlier study; the network was solved since. Run again to refresh.')
+      'The verdict, expected shortfall, design cost and risks are from an earlier study; the network was solved since. Run again to refresh.')
     // One mark per card: the tile dims but carries no second "Out of date" pill; the banner offers the way
     // to refresh (UX review N4).
     const tile = screen.getByTestId('hub-results-cost')
@@ -301,7 +301,7 @@ describe('ResultsCard: Set a goal (P26 gate)', () => {
 // seam was crossed since the study started. One amber line: the edited
 // banner subsumes the solved-since one; `false` / `null` / absent say nothing.
 describe('ResultsCard: edited since the study (P33b)', () => {
-  const EDITED = 'The network has been edited since this study, so these results describe the design as it was. Run again to refresh.'
+  const EDITED = 'The network has been edited since this study, so its verdict, expected shortfall, design cost and risks describe the design as it was. Run again to refresh.'
 
   it('edited_since_study: true → the edited banner', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...study(), edited_since_study: true })
