@@ -25,6 +25,11 @@ the typed errors (sent back over a pipe), the resume rule (`_valid_month`)
 and the merge under the process netCDF lock. An injected test downloader runs
 on a daemon thread instead, unless `fetch_in_subprocess=True`.
 
+One fetch per cutout (RP-21): a process-wide lock per `<key>.nc` is held
+across the month loop and the merge, so concurrent solves for the same bbox
+and year never share `<key>.parts/`. The second call waits (its stop_event
+still aborts the wait), then finds the finished `<key>.nc`.
+
 CDS credentials (spec D2): env `CDSAPI_URL` + `CDSAPI_KEY`, or a new-format
 `~/.cdsapirc` (`url:` + bare token `key:`). The legacy `UID:KEY` form 404s
 against the current CDS API and is refused up front. The key is never
