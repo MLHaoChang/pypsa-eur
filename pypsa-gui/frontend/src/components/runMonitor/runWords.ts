@@ -73,6 +73,12 @@ export const FACT_WORDS: Record<string, string> = {
   'ipp.export.over_limit_mw': 'The power exported never passes the export connection\'s rating',
   'ic.min_dscr': 'The investment case\'s lowest debt cover is at or above the assumed floor (not the lender\'s covenant)',
   'ic.project_pre_tax_irr': 'The investment case reports the project\'s pre-tax IRR',
+  // Study harness 15: the grid-only profile.
+  'grid.template.source': 'The grid template\'s source data is in place',
+  'grid.pf.converged': 'The load flow converged in every hour',
+  'grid.pf.loading_pct': 'Every line and transformer stays within its rating in the load flow',
+  'grid.pf.voltage_violations': 'Every bus voltage stays within its own band in the load flow',
+  'grid.n1.secured': 'The grid survives the loss of any one line or transformer',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,

@@ -674,13 +674,17 @@ def _both(n, monkeypatch, *, exact):
 
 
 def _branch_carriers(n):
-    return {c: set(n.components[c].static["carrier"]) for c in ("Line", "Transformer")
-            if "carrier" in n.components[c].static.columns and len(n.components[c].static)}
+    return {
+        c: set(n.components[c].static["carrier"])
+        for c in ("Line", "Transformer")
+        if "carrier" in n.components[c].static.columns and len(n.components[c].static)
+    }
 
 
 @pytest.mark.parametrize("exact", [False, True])
 def test_cb_a_every_shipped_template_without_an_empty_branch_carrier_hashes_as_on_master(
-        monkeypatch, exact):
+    monkeypatch, exact
+):
     import logging
 
     names = _templates()
@@ -692,8 +696,14 @@ def test_cb_a_every_shipped_template_without_an_empty_branch_carrier_hashes_as_o
         for name in names:
             from pathlib import Path
 
-            n = pypsa.Network(str(Path(__file__).resolve().parents[1] / "project_templates"
-                                  / name / "network.nc"))
+            n = pypsa.Network(
+                str(
+                    Path(__file__).resolve().parents[1]
+                    / "project_templates"
+                    / name
+                    / "network.nc"
+                )
+            )
             carriers = _branch_carriers(n)
             if any("" in s for s in carriers.values()):
                 continue  # an empty carrier is case (b)
@@ -717,7 +727,9 @@ def test_cb_a_a_network_with_no_branch_hashes_as_on_master(monkeypatch, exact):
 
 
 @pytest.mark.parametrize("exact", [False, True])
-def test_cb_b_a_shipped_grid_template_hashes_as_masters_same_network_with_ac(monkeypatch, exact):
+def test_cb_b_a_shipped_grid_template_hashes_as_masters_same_network_with_ac(
+    monkeypatch, exact
+):
     """The four grid templates ship Lines with carrier '' (ieee39's Transformers have no
     carrier column): each hashes as master hashes it with those carriers set to 'AC'."""
     import logging
@@ -754,7 +766,9 @@ def _with_transformer(line="", trafo=""):
 
 @pytest.mark.parametrize("exact", [False, True])
 @pytest.mark.parametrize("line, trafo", [("", ""), ("", "AC"), ("AC", "")])
-def test_cb_b_an_empty_branch_carrier_hashes_as_masters_ac(monkeypatch, exact, line, trafo):
+def test_cb_b_an_empty_branch_carrier_hashes_as_masters_ac(
+    monkeypatch, exact, line, trafo
+):
     now, _ = _both(_with_transformer(line, trafo), monkeypatch, exact=exact)
     _, master_ac = _both(_with_transformer("AC", "AC"), monkeypatch, exact=exact)
     assert now == master_ac
@@ -783,7 +797,9 @@ def _empty_carrier_on(component):
 
 @pytest.mark.parametrize("exact", [False, True])
 @pytest.mark.parametrize("component", ["Bus", "Generator", "Link", "Store"])
-def test_cb_c_an_empty_carrier_off_the_branches_hashes_as_on_master(monkeypatch, exact, component):
+def test_cb_c_an_empty_carrier_off_the_branches_hashes_as_on_master(
+    monkeypatch, exact, component
+):
     now, master = _both(_empty_carrier_on(component), monkeypatch, exact=exact)
     assert now == master
 
@@ -813,15 +829,25 @@ def pf_project(install_network, monkeypatch):
         with monkeypatch.context() as m:
             if pre_change:
                 m.setattr(workflow_tools, "_canonical_branch_carriers", lambda n: None)
-            n.meta["assistant_solve_input_fingerprint"] = workflow_tools._network_input_fingerprint(ctx)
+            n.meta["assistant_solve_input_fingerprint"] = (
+                workflow_tools._network_input_fingerprint(ctx)
+            )
             n.meta["assistant_solve_exact_input_fingerprint"] = (
-                workflow_tools._network_input_fingerprint(ctx, exact=True))
-        ctx.solver_state.update(status="completed", condition="optimal",
-                                lopf_results=None, ac_pf_results=None)
+                workflow_tools._network_input_fingerprint(ctx, exact=True)
+            )
+        ctx.solver_state.update(
+            status="completed",
+            condition="optimal",
+            lopf_results=None,
+            ac_pf_results=None,
+        )
         if flowed:
             ctx.solver_state.update(
-                condition="lopf+ac_pf_ok", lopf_results={}, ac_pf_results={},
-                ac_pf_network_revision=int(ctx.network_revision or 0))
+                condition="lopf+ac_pf_ok",
+                lopf_results={},
+                ac_pf_results={},
+                ac_pf_network_revision=int(ctx.network_revision or 0),
+            )
         runs._clear_cache_for_tests()
         return n.meta["assistant_solve_input_fingerprint"]
 
@@ -838,7 +864,9 @@ def test_cd_solve_matches_inputs_reads_a_pre_change_record_stale(pf_project, flo
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
 
 
-def test_cd_the_saved_results_verdict_reads_a_pre_change_record_stale_with_the_edge(pf_project):
+def test_cd_the_saved_results_verdict_reads_a_pre_change_record_stale_with_the_edge(
+    pf_project,
+):
     from services.provenance_graph import runs
 
     ctx, record = pf_project
@@ -848,19 +876,28 @@ def test_cd_the_saved_results_verdict_reads_a_pre_change_record_stale_with_the_e
     verdict = runs.results_verdicts(runs.read(ctx))["optimisation"]
     assert verdict.state == "stale"
     assert [(b.field, b.reason, b.recorded[0]) for b in verdict.broken] == [
-        ("input fingerprint", "changed", fp)]
+        ("input fingerprint", "changed", fp)
+    ]
 
 
-def test_cd_the_retained_run_binding_reads_a_pre_change_run_changed(pf_project, monkeypatch):
+def test_cd_the_retained_run_binding_reads_a_pre_change_run_changed(
+    pf_project, monkeypatch
+):
     from services import retained_results, run_evidence
 
     ctx, record = pf_project
     for pre_change, want in ((False, (True, False)), (True, (False, True))):
         fp = record(pre_change, flowed=True)
-        monkeypatch.setattr(run_evidence, "get_run_evidence",
-                            lambda rid, fp=fp: {"status": "completed", "fingerprint": fp})
-        monkeypatch.setattr(run_evidence, "list_project_runs",
-                            lambda **kw: {"items": [{"run_id": "r1"}]})
+        monkeypatch.setattr(
+            run_evidence,
+            "get_run_evidence",
+            lambda rid, fp=fp: {"status": "completed", "fingerprint": fp},
+        )
+        monkeypatch.setattr(
+            run_evidence,
+            "list_project_runs",
+            lambda **kw: {"items": [{"run_id": "r1"}]},
+        )
         ref, flags = retained_results.run_binding("r1")
         assert (flags["run_is_current"], flags["inputs_changed_since_run"]) == want
         assert (ref is not None) is want[0]
@@ -872,7 +909,10 @@ def test_cd_the_investment_case_fact_reads_a_pre_change_solve_not_current(pf_pro
     ctx, record = pf_project
     body = {"status": "done", "report": {"present": True, "stale": False}, "flags": []}
     record(False, flowed=False)
-    assert ic_counterfactual.read(ctx, lambda fn: body)["state"] == ic_counterfactual.ESTABLISHED
+    assert (
+        ic_counterfactual.read(ctx, lambda fn: body)["state"]
+        == ic_counterfactual.ESTABLISHED
+    )
     record(True, flowed=False)
     fact = ic_counterfactual.read(ctx, lambda fn: body)
     assert fact["state"] == ic_counterfactual.NOT_RUN
@@ -892,7 +932,12 @@ def solved_3bus(install_network):
     from services import workflow_tools
     from services.pypsa_service import PyPSAService
 
-    path = pathlib.Path(__file__).resolve().parents[1] / "project_templates" / "3bus" / "network.nc"
+    path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "project_templates"
+        / "3bus"
+        / "network.nc"
+    )
     if not path.exists():
         pytest.skip("3bus is not built here")
     logging.disable(logging.CRITICAL)
@@ -902,8 +947,9 @@ def solved_3bus(install_network):
     config.run_ac_pf_after_lopf = True
     assert n.optimize(solver_name="highs")[0] == "ok"
     workflow_tools._record_solve_inputs(n, config)
-    ctx.solver_state.update(status="completed", condition="optimal",
-                            lopf_results=None, ac_pf_results=None)
+    ctx.solver_state.update(
+        status="completed", condition="optimal", lopf_results=None, ac_pf_results=None
+    )
     yield n, ctx, config
     logging.disable(logging.NOTSET)
 
@@ -931,7 +977,9 @@ def test_a_revision_bump_after_the_flow_makes_the_real_run_not_current(solved_3b
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
 
 
-def test_an_edit_between_the_lp_and_the_flow_is_caught_by_the_input_fingerprint(solved_3bus):
+def test_an_edit_between_the_lp_and_the_flow_is_caught_by_the_input_fingerprint(
+    solved_3bus,
+):
     """The run holds the network lock from before the LP to after `n.pf()`
     (`solver_service.run_simulation`'s `with lock:`), so no edit lands there; an edit
     in that gap is simulated here. The flow then reads the edited counter, so the
@@ -942,11 +990,16 @@ def test_an_edit_between_the_lp_and_the_flow_is_caught_by_the_input_fingerprint(
     n.lines.loc[n.lines.index[0], "x"] *= 1.5
     dirty_state.bump_revision(ctx)
     out = _flow(n, ctx, config)
-    assert out["ac_pf_network_revision"] == int(ctx.network_revision or 0)  # not the catcher
-    assert (n.meta["assistant_solve_input_fingerprint"]
-            != workflow_tools._network_input_fingerprint(ctx))  # the catcher
+    assert out["ac_pf_network_revision"] == int(
+        ctx.network_revision or 0
+    )  # not the catcher
+    assert n.meta[
+        "assistant_solve_input_fingerprint"
+    ] != workflow_tools._network_input_fingerprint(ctx)  # the catcher
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
-    assert workflow_tools.solve_freshness(ctx, after_pf=True)["results_current"] is False
+    assert (
+        workflow_tools.solve_freshness(ctx, after_pf=True)["results_current"] is False
+    )
 
 
 def _saved_inputs(n):
@@ -978,7 +1031,12 @@ def test_the_flow_moves_no_saved_field_but_the_results(template):
     from services.ac_pf_service import run_ac_pf_stage
     from services.solver_service import SolverConfig
 
-    path = pathlib.Path(__file__).resolve().parents[1] / "project_templates" / template / "network.nc"
+    path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "project_templates"
+        / template
+        / "network.nc"
+    )
     if not path.exists():
         pytest.skip(f"{template} is not built here")
     logging.disable(logging.CRITICAL)
