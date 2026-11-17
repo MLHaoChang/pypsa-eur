@@ -20,12 +20,12 @@ import shutil
 import pytest
 
 from harness import compose, spill
-from services import chat_tools
+from services import chat_tools, llm_config
 from services import site_service as ss
 from services.pypsa_service import PyPSAService
 from services.site_scene import chat, proposals, store
 from tests.journey_wire import run_journey
-from tests.test_sc07_results_read import _leaves
+from tests.test_sc07_results_read import _leaves, _target
 from tests.test_site_scene_results import (
     A,
     B,
@@ -38,6 +38,7 @@ from tests.test_site_scene_results import (
     SITE,
     T3,
     _apply,
+    _bind,
     _propose,
     _solve,
     _url,
@@ -58,8 +59,17 @@ ASSOCIATIONS = [
     {"feature": C, "target": {"class": "Load", "name": "office"}},
 ]
 SETUP = "Map the hall, shed and office to their model parts."
-ASK = {"snapshot": T3, "building": "Proposed building 1"}
-EXPLAIN = "Explain these results for Proposed building 1 at 2030-01-01 03:00."
+EXPLAIN = "Explain these results for each building at 2030-01-01 03:00."
+# The buildings in their words, as Site 3D names them (never an id).
+HALL_WORDS, SHED_WORDS, OFFICE_WORDS = (f"Proposed building {i}" for i in (1, 2, 3))
+SITE_HINT = {"site_scene": {"site_id": "campus", "part": "generate"}}
+# What the binding writes, in the form `_bound` reads it back.
+EXPECTED = (
+    sorted(
+        (a["feature"], a["target"]["class"], a["target"]["name"]) for a in ASSOCIATIONS
+    ),
+    [(PLANT["id"], tuple(sorted(PLANT["members"])))],
+)
 
 
 @pytest.fixture
@@ -112,16 +122,8 @@ def _bound(client):
     )
 
 
-EXPECTED = (
-    sorted(
-        (a["feature"], a["target"]["class"], a["target"]["name"]) for a in ASSOCIATIONS
-    ),
-    [(PLANT["id"], tuple(sorted(PLANT["members"])))],
-)
-
-
 def _decide(decision, cards):
-    """The browser's half: read the card while the write is blocked, then decide."""
+    """The browser's half: keep each card shown while the write is blocked, then decide."""
 
     def on_frame(event, data):
         if event == "tool_pending_confirmation":
@@ -133,10 +135,23 @@ def _decide(decision, cards):
     return on_frame
 
 
+def _prepare(read):
+    """The model's bind call, on the revision its read returned."""
+    return (
+        "site_scene_prepare",
+        {
+            "site_id": "campus",
+            "action": "bind_targets",
+            "base_revision": read["revision"],
+            "inputs": {"associations": ASSOCIATIONS, "groups": [PLANT]},
+        },
+    )
+
+
 def _setup_steps():
     return [
         lambda r: ("get_project_flow", {"name": NAME}),
-        # The flow is long: the model pages its first blocker, as the spill says.
+        # The flow is long: the model pages its first item, as the spill says.
         lambda r: (
             "read_result",
             {"locator": r[0]["spill"]["locator"], "pointer": "/sections/0/items/0"},
@@ -144,15 +159,7 @@ def _setup_steps():
         lambda r: ("site_scene_read", {"site_id": "campus"}),
         # V63: the assistant has no way to tick a section complete.
         lambda r: ("advance_workflow", {"step": "site"}),
-        lambda r: (
-            "site_scene_prepare",
-            {
-                "site_id": "campus",
-                "action": "bind_targets",
-                "base_revision": r[2]["revision"],
-                "inputs": {"associations": ASSOCIATIONS, "groups": [PLANT]},
-            },
-        ),
+        lambda r: _prepare(r[2]),
         lambda r: ("site_scene_apply", dict(r[4]["apply_with"]["args"])),
         lambda r: (None, {}),
     ]
@@ -174,7 +181,7 @@ def _setup(kind, model, base_url, auth, mode, decision):
     return calls, results, frames, session, cards
 
 
-def _whole(session, result):
+def _unspilled(session, result):
     """A result as the tool returned it: a spilled one is read back from its spill file."""
     if isinstance(result, dict) and "spill" in result:
         return json.loads(
@@ -183,7 +190,7 @@ def _whole(session, result):
     return result
 
 
-def _shape(cards, receipt):
+def _card_and_receipt(cards, receipt):
     """What both modes must agree on: the card and the receipt, row by row."""
     card = cards[0]["edit_card"]
     return (
@@ -233,14 +240,17 @@ def test_the_chat_binds_the_site_through_its_card_and_reads_it_back_verified(
             "site_scene_apply",
             None,
         ]
-        # The first blocker is the flow's own, as the route serves it.
-        # The first blocker the model reads is the flow route's own.
-        assert results[1]["value"] == flow_before["sections"][0]["items"][0]
+        # The flow has no run blocker yet; the first item the model reads is the
+        # route's own: the Site has no location (a warning, not a blocker).
+        assert flow_before["run_blocker"] is None
+        first = flow_before["sections"][0]["items"][0]
+        assert first["code"] == "site_location_missing" and not first["blocking"]
+        assert results[1]["value"] == first
         # V63: advance_workflow is a skill-workflow step, never a section tick.
         assert results[3]["error"].startswith("no_active_workflow"), results[3]
         # V64: one card, before the write; the receipt reads every target back.
         assert len(cards) == 1
-        receipt = _whole(session, results[5])["_edit_receipt"]
+        receipt = _unspilled(session, results[5])["_edit_receipt"]
         assert receipt["outcome"] == "verified", receipt
         assert _bound(client) == EXPECTED
         # The only refusal on the way is advance_workflow's own.
@@ -249,7 +259,7 @@ def test_the_chat_binds_the_site_through_its_card_and_reads_it_back_verified(
             for e, d in frames
             if e in {"error", "tool_error"}
         ] == [("advance_workflow", "no_active_workflow")]
-        shapes[mode] = _shape(cards, receipt)
+        shapes[mode] = _card_and_receipt(cards, receipt)
     assert shapes["expert"] == shapes["guided"]
 
 
@@ -265,36 +275,37 @@ def test_a_denied_card_binds_nothing_and_the_routes_reach_the_same_site(
     assert calls[-2:] == ["site_scene_apply", None] and len(cards) == 1
     assert "_edit_receipt" not in json.dumps(results[5])
     assert _bound(client) == before == ([], [])
-    # V67: the same state by the Site 3D routes alone, no provider configured.
+    # V67: the same state by the Site 3D routes alone: no chat session, and the
+    # scripted provider's profile is gone.
     chat_tools.set_chat_session(None)
-    _apply(
-        client,
-        _propose(
-            client, "bind_targets", {"associations": ASSOCIATIONS, "groups": [PLANT]}
-        ),
-    )
+    llm_config.profiles_path().unlink()
+    assert "journey" not in [p.id for p in llm_config.load_profiles()[0]]
+    _bind(client, ASSOCIATIONS, [PLANT])
     assert _bound(client) == EXPECTED
 
 
 # ── run, results, stale (V61, V69) ──────────────────────────────────────────
 
 
-def _explain(results_args):
+def _explain():
+    """The model reads the run, then each building's results at the known hour."""
     return [
-        lambda r: ("site_scene_results", {"site_id": "campus", **results_args}),
+        lambda r: ("get_simulation_status", {}),
+        *(
+            (
+                lambda r, w=words: (
+                    "site_scene_results",
+                    {"site_id": "campus", "snapshot": T3, "building": w},
+                )
+            )
+            for words in (HALL_WORDS, SHED_WORDS, OFFICE_WORDS)
+        ),
         lambda r: (None, {}),
     ]
 
 
 def _ports(out, words, name):
-    target = next(
-        t
-        for f in out["features"]
-        if f["feature"] == words
-        for t in f["targets"]
-        if t["name"] == name
-    )
-    return {p["port"]: p for p in target["ports"]}
+    return {p["port"]: p for p in _target(out, words, name)["ports"]}
 
 
 def _said(frames):
@@ -302,89 +313,88 @@ def _said(frames):
 
 
 def _answer(results):
-    """The model's words from the tool's: the value with its unit, or the gate's reason."""
-    out = results[0]
+    """The model's words: the run's own words, then the hall's value with its unit."""
+    out = results[1]
     if out["stale"]:
         return out["run_words"]
-    rate = _ports(out, "Proposed building 1", "electrolyser")[0]["rate"]
+    rate = _ports(out, HALL_WORDS, "electrolyser")[0]["rate"]
     return f"{out['run_words']} The electrolyser draws {rate['value']} {rate['unit']}."
+
+
+def _floats(value):
+    if isinstance(value, float):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _floats(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _floats(v)
 
 
 @pytest.mark.parametrize("mode", MODES)
 def test_the_results_answer_is_the_networks_value_then_says_out_of_date(
     client, scene, mode
 ):
-    _apply(
-        client,
-        _propose(
-            client, "bind_targets", {"associations": ASSOCIATIONS, "groups": [PLANT]}
-        ),
-    )
-    # The solve is the ordinary run route's, never a chat call.
+    _bind(client, ASSOCIATIONS, [PLANT])
+    # The solve is the ordinary run route's, never a chat call; the chat reads the run.
     _solve(client)
     calls, results, frames, session = run_journey(
-        *WIRES[0], _explain(ASK), EXPLAIN, mode=mode, answer=_answer
+        *WIRES[0], _explain(), EXPLAIN, mode=mode, answer=_answer
     )
-    assert calls == ["site_scene_results", None]
-    out = results[0]
-    # V69: the value equals an independent read of the solved network.
-    p0 = float(scene.network.links_t.p0.at[T3, "electrolyser"])
-    assert out["stale"] is False and out["run_words"] == "From the current solve."
-    assert [f["feature"] for f in out["features"]] == ["Proposed building 1"]
-    rate = _ports(out, "Proposed building 1", "electrolyser")[0]["rate"]
-    assert rate["value"] == pytest.approx(p0) and rate["unit"] == "MW"
-    said = _said(frames)
-    assert f"draws {rate['value']} MW" in said, said
+    assert calls == ["get_simulation_status", *["site_scene_results"] * 3, None]
+    assert results[0]["status"] == "completed" and not results[0]["running"]
+    hall, shed, office = results[1:4]
+    assert all(
+        out["stale"] is False and out["run_words"] == "From the current solve."
+        for out in (hall, shed, office)
+    )
+    assert [f["feature"] for f in hall["features"]] == [HALL_WORDS]
+    # V69: each value equals an independent read of the solved network.
+    n = scene.network
+    rate = _ports(hall, HALL_WORDS, "electrolyser")[0]["rate"]
+    assert rate["value"] == pytest.approx(float(n.links_t.p0.at[T3, "electrolyser"]))
+    assert rate["unit"] == "MW"
+    haber = _ports(shed, SHED_WORDS, "haber")[1]
+    assert haber["role"] == "output"
+    assert haber["rate"]["value"] == pytest.approx(float(n.links_t.p1.at[T3, "haber"]))
+    load = _target(office, OFFICE_WORDS, "office")["ports"][0]
+    assert load["rate"]["value"] == pytest.approx(float(n.loads_t.p.at[T3, "office"]))
+    assert load["sign"] == "withdrawal_positive"
+    assert _said(frames).startswith("From the current solve.")
 
-    # An input edit, approved on its own card: the next answer has no numbers and says so.
+    # An input edit, approved on its own card: the next answers carry no numbers and say so.
     edit = {"component_class": "Load", "name": "office", "attrs": {"p_set": 9.0}}
     cards = []
     calls, results, frames, _ = run_journey(
         *WIRES[0],
-        [lambda r: ("update_component", edit), *_explain(ASK)],
+        [lambda r: ("update_component", edit), *_explain()[1:]],
         "Raise the office load to 9 MW, then explain these results again.",
         mode=mode,
-        answer=lambda r: _answer(r[1:]),
+        answer=_answer,
         on_frame=_decide("approve", cards),
         session=session,
     )
-    assert calls == ["update_component", "site_scene_results", None] and len(cards) == 1
-    assert results[0]["_edit_receipt"]["results_stale"] is True
-    results = results[1:]
-    out = results[0]
-    leaves = list(_leaves({"features": out["features"], "groups": out["groups"]}))
-    assert leaves and all(
-        x["available"] is False and x["value"] is None for x in leaves
-    )
-    assert {x["reason"] for x in leaves} <= {
-        "results_not_current",
-        "group_has_no_boundary",
-    }
-    assert out["run"]["reason"] == "results_not_current" and out["stale"] is True
-    said = _said(frames)
-    assert said.startswith("Out of date"), said
+    assert calls == ["update_component", *["site_scene_results"] * 3, None]
+    assert len(cards) == 1 and results[0]["_edit_receipt"]["results_stale"] is True
+    for out in results[1:4]:
+        # P1: the gate's reason on every leaf; no number anywhere in the answer.
+        leaves = list(_leaves({"features": out["features"], "groups": out["groups"]}))
+        assert leaves and all(x["available"] is False for x in leaves)
+        reasons = {x["reason"] for x in leaves} - {"group_has_no_boundary"}
+        assert reasons == {"results_not_current"}
+        assert not list(_floats({"features": out["features"], "groups": out["groups"]}))
+        assert out["run"]["reason"] == "results_not_current" and out["stale"] is True
+    assert _said(frames).startswith("Out of date")
 
 
 # ── session loss, reload and a project switch (V66) ─────────────────────────
-
-
-def _prepare(read):
-    return (
-        "site_scene_prepare",
-        {
-            "site_id": "campus",
-            "action": "bind_targets",
-            "base_revision": read["revision"],
-            "inputs": {"associations": ASSOCIATIONS, "groups": [PLANT]},
-        },
-    )
 
 
 @pytest.mark.parametrize("mode", MODES)
 def test_a_reload_resumes_the_open_preview_and_reexecutes_nothing(
     client, scene, install_network, mode
 ):
-    hint = {"site_scene": {"site_id": "campus", "part": "generate"}}
     # The first session prepares, then is lost before its card.
     _, first, _, _ = run_journey(
         *WIRES[0],
@@ -395,7 +405,7 @@ def test_a_reload_resumes_the_open_preview_and_reexecutes_nothing(
         ],
         SETUP,
         mode=mode,
-        ui_context_extra=hint,
+        ui_context_extra=SITE_HINT,
     )
     preview = first[1]["apply_with"]["args"]
     revision = client.get(_url()).json()["revision"]
@@ -411,20 +421,23 @@ def test_a_reload_resumes_the_open_preview_and_reexecutes_nothing(
         "Resume site setup.",
         mode=mode,
         on_frame=_decide("approve", cards),
-        ui_context_extra=hint,
+        ui_context_extra=SITE_HINT,
         session=None,
     )
-    mine = {p["id"]: p for p in results[0]["my_previews"]}
-    assert mine[preview["proposal_id"]]["status"] == "open"
-    # Nothing ran again on reload: the Site stood as the lost session left it.
+    # The reload lists the lost session's preview, the one open preview.
+    open_previews = [p for p in results[0]["my_previews"] if p["status"] == "open"]
+    assert [p["id"] for p in open_previews] == [preview["proposal_id"]]
+    # Nothing ran again on reload: the Site stood as the lost session left it,
+    # and the one apply moved it by exactly one revision.
     assert results[0]["revision"] == revision
     assert results[0]["counts"]["associations"] == 0
     assert len(cards) == 1
-    assert _whole(session, results[1])["_edit_receipt"]["outcome"] == "verified"
+    assert _unspilled(session, results[1])["_edit_receipt"]["outcome"] == "verified"
+    assert client.get(_url()).json()["revision"] == revision + 1
     assert _bound(client) == EXPECTED
 
     # The [site 3d] block is read for the open project; after a switch it shows nothing of this one.
-    assert "site 3d: revision: " in compose._format_ui_context(hint)
+    assert "site 3d: revision: " in compose._format_ui_context(SITE_HINT)
     install_network(oracle_network(), name="d07_other")
     assert (
         client.post(
@@ -432,5 +445,5 @@ def test_a_reload_resumes_the_open_preview_and_reexecutes_nothing(
         ).status_code
         == 200
     )
-    shown = compose._format_ui_context(hint)
+    shown = compose._format_ui_context(SITE_HINT)
     assert "site 3d: site: unavailable" in shown and "revision" not in shown
