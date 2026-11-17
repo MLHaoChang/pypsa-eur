@@ -4,7 +4,9 @@ The time is recorded beside the solve's input fingerprint in ``n.meta`` (so it i
 survives a reload), and /simulation/status reports it only while the dispatch exists.
 """
 
+import calendar
 import re
+import time
 
 import pypsa
 import pytest
@@ -59,3 +61,35 @@ def test_a_reopened_project_without_a_stamp_reads_none_not_a_failure(n, monkeypa
     monkeypatch.setattr(simulation.PyPSAService, "get_network", staticmethod(lambda: n))
     monkeypatch.setattr(simulation, "_dispatch_status", lambda _n: "fresh")
     assert simulation.get_status()["solved_at"] is None
+
+
+def test_a_network_with_no_meta_reads_none(monkeypatch):
+    # A network whose meta is None (not a dict): the status still answers, with no time.
+    bare = type("Bare", (), {"meta": None})()
+    monkeypatch.setattr(simulation.PyPSAService, "get_network", staticmethod(lambda: bare))
+    monkeypatch.setattr(simulation, "_dispatch_status", lambda _n: "fresh")
+    assert simulation.get_status()["solved_at"] is None
+
+
+def test_a_stamp_that_is_not_a_string_reads_none(n, monkeypatch):
+    # A hand-edited or corrupted project: a number in the stamp is not passed on as a time.
+    n.meta["assistant_solve_at"] = 1763394120
+    monkeypatch.setattr(simulation.PyPSAService, "get_network", staticmethod(lambda: n))
+    monkeypatch.setattr(simulation, "_dispatch_status", lambda _n: "fresh")
+    assert simulation.get_status()["solved_at"] is None
+
+
+@pytest.fixture
+def tokyo_clock(monkeypatch):
+    # A server whose local zone is not UTC (UTC+9 all year, no daylight saving).
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_the_stamp_is_utc_on_a_server_in_another_zone(n, tokyo_clock):
+    workflow_tools._record_solve_inputs(n, {})
+    stamped = calendar.timegm(time.strptime(n.meta["assistant_solve_at"], "%Y-%m-%dT%H:%M:%SZ"))
+    assert abs(stamped - time.time()) < 60
