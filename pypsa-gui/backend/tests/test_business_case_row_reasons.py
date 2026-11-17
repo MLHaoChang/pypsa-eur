@@ -30,22 +30,42 @@ PNL_ROWS = _INV / "businessCasePnlRows.json"
 #: gives each its words (C3).
 CODES = _INV / "businessCaseRowReasonCodes.json"
 
-_LINKED = _line(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1")
+_LINKED = _line(
+    name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1"
+)
 _STALE = {"nh3": NotEvaluated("served_product.nh3", "stale")}
-_TRANCHE = dict(kind="term_loan", rate=0.05, tenor_years=4, amount=100.0,
-                upfront_fee=0.0, dsra_months=0, grace_years=0)
+_TRANCHE = dict(
+    kind="term_loan",
+    rate=0.05,
+    tenor_years=4,
+    amount=100.0,
+    upfront_fee=0.0,
+    dsra_months=0,
+    grace_years=0,
+)
 
 #: One knockout per leaf: (case args, the (section, code) it must name).
 KNOCK = {
-    "op": (dict(lines=[_LINKED], outputs=_STALE), ("operating", "line_not_established:nh3")),
-    "term": (dict(ic=dict(terminal_value=TerminalValueRule(method="fixed"))),
-             ("terminal", "terminal_value_missing")),
+    "op": (
+        dict(lines=[_LINKED], outputs=_STALE),
+        ("operating", "line_not_established:nh3"),
+    ),
+    "term": (
+        dict(ic=dict(terminal_value=TerminalValueRule(method="fixed"))),
+        ("terminal", "terminal_value_missing"),
+    ),
     "tax": (dict(pack=None), ("tax", "tax_pack_missing")),
-    "capex": (dict(lines=[_line(), _capex(money_year=2028)],
-                   ic=dict(escalation={k: v for k, v in ESC.items() if k != "capex"})),
-              ("capex", "overnight_cost_missing:plant")),
-    "debt": (dict(ic=dict(debt=[DebtTranche(**{**_TRANCHE, "upfront_fee": None})])),
-             ("debt", "input_missing:upfront_fee:0:term_loan")),
+    "capex": (
+        dict(
+            lines=[_line(), _capex(money_year=2028)],
+            ic=dict(escalation={k: v for k, v in ESC.items() if k != "capex"}),
+        ),
+        ("capex", "overnight_cost_missing:plant"),
+    ),
+    "debt": (
+        dict(ic=dict(debt=[DebtTranche(**{**_TRANCHE, "upfront_fee": None})])),
+        ("debt", "input_missing:upfront_fee:0:term_loan"),
+    ),
     "inc": (dict(ic=dict(incentives=[Incentive(kind="grant")])), ("incentives", None)),
     "rd": (dict(rd=None), ("inputs", "input_missing:receivable_days")),
 }
@@ -88,21 +108,45 @@ def test_the_dependency_table_names_every_row_the_p_and_l_serves():
 #: equivalent and listed in the PR (stage_capex, replacement, grant are never None;
 #: a tax knockout takes depreciation and tax together).
 EDGES = [
-    ("revenue", "op"), ("opex", "op"), ("ebitda", "op"), ("terminal", "term"),
-    ("depreciation", "tax"), ("tax", "tax"), ("tax_equity", "tax"), ("capex", "capex"),
-    ("revenue_net_of_pass_through", "op"), ("ebitda_net_of_pass_through", "op"),
+    ("revenue", "op"),
+    ("opex", "op"),
+    ("ebitda", "op"),
+    ("terminal", "term"),
+    ("depreciation", "tax"),
+    ("tax", "tax"),
+    ("tax_equity", "tax"),
+    ("capex", "capex"),
+    ("revenue_net_of_pass_through", "op"),
+    ("ebitda_net_of_pass_through", "op"),
     ("ebitda_margin", "op"),
-    ("ebit", "op"), ("ebit", "term"), ("ebit", "tax"),
-    ("net_income", "op"), ("net_income", "term"), ("net_income", "tax"),
-    ("credits", "op"), ("credits", "term"), ("credits", "capex"), ("credits", "inc"),
-    ("project_pre_tax", "op"), ("project_pre_tax", "term"), ("project_pre_tax", "capex"),
-    ("project_post_tax", "op"), ("project_post_tax", "tax"), ("project_post_tax", "inc"),
-    ("equity_pre_tax", "op"), ("equity_pre_tax", "debt"),
-    ("equity_post_tax", "op"), ("equity_post_tax", "tax"), ("equity_post_tax", "inc"),
+    ("ebit", "op"),
+    ("ebit", "term"),
+    ("ebit", "tax"),
+    ("net_income", "op"),
+    ("net_income", "term"),
+    ("net_income", "tax"),
+    ("credits", "op"),
+    ("credits", "term"),
+    ("credits", "capex"),
+    ("credits", "inc"),
+    ("project_pre_tax", "op"),
+    ("project_pre_tax", "term"),
+    ("project_pre_tax", "capex"),
+    ("project_post_tax", "op"),
+    ("project_post_tax", "tax"),
+    ("project_post_tax", "inc"),
+    ("equity_pre_tax", "op"),
+    ("equity_pre_tax", "debt"),
+    ("equity_post_tax", "op"),
+    ("equity_post_tax", "tax"),
+    ("equity_post_tax", "inc"),
     ("equity_post_tax", "debt"),
-    ("working_capital_change", "op"), ("working_capital_change", "rd"),
-    ("project_after_working_capital", "rd"), ("project_after_working_capital", "tax"),
-    ("equity_after_working_capital", "rd"), ("equity_after_working_capital", "debt"),
+    ("working_capital_change", "op"),
+    ("working_capital_change", "rd"),
+    ("project_after_working_capital", "rd"),
+    ("project_after_working_capital", "tax"),
+    ("equity_after_working_capital", "rd"),
+    ("equity_after_working_capital", "debt"),
     ("equity_after_working_capital", "tax"),
 ]
 
@@ -113,7 +157,9 @@ def test_each_knockout_names_its_input_on_every_row_that_reads_it(row, knock):
     assert p.rows[row] is None
     assert want in got[row]
     # Completeness: no row the engine leaves None falls to the bare reason.
-    assert all({"section": None, "code": "not_established"} not in v for v in got.values())
+    assert all(
+        {"section": None, "code": "not_established"} not in v for v in got.values()
+    )
 
 
 #: C1 for the edges no real input knocks out alone (stage_capex, replacement and grant
@@ -121,11 +167,16 @@ def test_each_knockout_names_its_input_on_every_row_that_reads_it(row, knock):
 #: knocked-out case's own result with one input row set None in an otherwise whole P&L.
 #: Dropping the edge leaves the row with no cause, so it fails here.
 ONE_ROW = [
-    ("project_pre_tax", "grant", "inc"), ("project_pre_tax", "stage_capex", "capex"),
-    ("project_pre_tax", "replacement", "capex"), ("equity_post_tax", "tax_equity", "tax"),
-    ("ebit", "depreciation", "tax"), ("net_income", "tax", "tax"),
-    ("project_post_tax", "credits", "inc"), ("equity_post_tax", "credits", "inc"),
-    ("project_post_tax", "tax", "tax"), ("credits", "capex", "capex"),
+    ("project_pre_tax", "grant", "inc"),
+    ("project_pre_tax", "stage_capex", "capex"),
+    ("project_pre_tax", "replacement", "capex"),
+    ("equity_post_tax", "tax_equity", "tax"),
+    ("ebit", "depreciation", "tax"),
+    ("net_income", "tax", "tax"),
+    ("project_post_tax", "credits", "inc"),
+    ("equity_post_tax", "credits", "inc"),
+    ("project_post_tax", "tax", "tax"),
+    ("credits", "capex", "capex"),
 ]
 
 
@@ -143,8 +194,10 @@ def test_a_linked_output_not_evaluated_follows_its_line():
     _, _, got = _case(lines=[_LINKED], outputs=_STALE)
     assert got["revenue"] == [
         {"section": "operating", "code": "line_not_established:nh3"},
-        {"section": "operating",
-         "code": "linked_output_not_evaluated:served_product.nh3:stale"},
+        {
+            "section": "operating",
+            "code": "linked_output_not_evaluated:served_product.nh3:stale",
+        },
     ]
     # The tax waits on the operating section: the item is the operating input itself.
     assert got["revenue"][0] in got["tax"]
@@ -166,8 +219,10 @@ def test_sections_that_wait_on_each_other_end_instead_of_looping():
         reasons={"tax": ["debt_not_established"], "debt": ["tax_not_established", "x"]},
     )
     assert row_reasons(fake, PnL(p.years, p.streams, {"tax": None})) == {
-        "tax": [{"section": "debt", "code": "tax_not_established"},
-                {"section": "debt", "code": "x"}]
+        "tax": [
+            {"section": "debt", "code": "tax_not_established"},
+            {"section": "debt", "code": "x"},
+        ]
     }
 
 
@@ -189,8 +244,9 @@ def test_the_tax_waiting_on_the_debt_names_the_debt_input():
 
 
 def test_a_book_value_terminal_without_a_tax_basis_names_the_tax_inputs():
-    _, _, got = _case(ic=dict(terminal_value=TerminalValueRule(method="book_value")),
-                      pack=None)
+    _, _, got = _case(
+        ic=dict(terminal_value=TerminalValueRule(method="book_value")), pack=None
+    )
     assert got["terminal"][:2] == [
         {"section": "terminal", "code": "book_value_needs_tax_basis"},
         {"section": "tax", "code": "tax_pack_missing"},
@@ -209,7 +265,9 @@ def test_a_row_whose_section_reads_ok_gets_the_bare_reason_never_an_invented_cau
     rows = dict(p.rows, tax=None, capex=None, x=None)
     bare = [{"section": None, "code": "not_established"}]
     assert row_reasons(r, PnL(p.years, p.streams, rows)) == {
-        "tax": bare, "capex": bare, "x": bare
+        "tax": bare,
+        "capex": bare,
+        "x": bare,
     }
     fake = types.SimpleNamespace(op=r.op, sections={}, reasons={})
     assert row_reasons(fake, PnL(p.years, p.streams, {"tax": None})) == {
@@ -226,7 +284,9 @@ def test_c5_rows_are_all_or_nothing_and_a_ratio_s_none_year_is_no_row_reason():
             elif k == "debt_established":
                 assert isinstance(v, bool)
             else:
-                assert v is None or (isinstance(v, np.ndarray) and v.dtype.kind == "f"), k
+                assert v is None or (
+                    isinstance(v, np.ndarray) and v.dtype.kind == "f"
+                ), k
     r, p, _ = _case()
     rows = dict(p.rows, ebitda_margin=[0.5, None])
     assert row_reasons(r, PnL(p.years, p.streams, rows)) == {}
@@ -238,14 +298,27 @@ def test_c3_every_code_emitted_is_in_the_manifest_the_view_words():
     for name in KNOCK:
         _, got, _ = _knock(name)
         seen |= {i["code"].split(":")[0] for v in got.values() for i in v}
-    seen |= {"not_finite", "not_established", "linked_output_not_evaluated",
-             "book_value_needs_tax_basis"}
+    seen |= {
+        "not_finite",
+        "not_established",
+        "linked_output_not_evaluated",
+        "book_value_needs_tax_basis",
+    }
     assert seen <= families, seen - families
 
 
 #: Words that sit near "reason" in the engine but are not codes (section names, "ok").
-_NOT_CODES = {"capex", "counterfactual", "debt", "incentives", "operating", "ok", "tax",
-              "terminal", "not_established"}
+_NOT_CODES = {
+    "capex",
+    "counterfactual",
+    "debt",
+    "incentives",
+    "operating",
+    "ok",
+    "tax",
+    "terminal",
+    "not_established",
+}
 
 
 def test_c3_the_manifest_holds_every_reason_code_the_engine_writes():
@@ -257,6 +330,9 @@ def test_c3_the_manifest_holds_every_reason_code_the_engine_writes():
     for f in ("cashflow", "engine", "debt", "incentives", "replacements", "case"):
         for line in (src / f"{f}.py").read_text().splitlines():
             if "reason" in line and "flags" not in line:
-                found |= {m.group(1) for m in re.finditer(r'f?"([a-z][a-z0-9_]+)(?=[:"])', line)}
+                found |= {
+                    m.group(1)
+                    for m in re.finditer(r'f?"([a-z][a-z0-9_]+)(?=[:"])', line)
+                }
     families = set(json.loads(CODES.read_text()))
     assert found - _NOT_CODES <= families, (found - _NOT_CODES) - families

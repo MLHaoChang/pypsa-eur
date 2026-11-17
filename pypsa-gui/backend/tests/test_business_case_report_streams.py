@@ -128,7 +128,8 @@ def test_bc17_row_reason_is_a_display_key_that_moves_no_digest_or_staleness(
     kw = seen["kw"]
     a = real(**kw)
     monkeypatch.setattr(
-        BCM, "row_reasons",
+        BCM,
+        "row_reasons",
         lambda *_a, **_k: {"revenue": [{"section": "operating", "code": "x"}]},
     )
     b = real(**kw)
@@ -140,7 +141,12 @@ def test_bc17_row_reason_is_a_display_key_that_moves_no_digest_or_staleness(
             b, inputs_raw=kw["raw"], ic_current=cur
         )
     assert RN.staleness(b, inputs_raw=kw["raw"], ic_current=current)["stale"] is False
-    for k in ("business_case_hash", "inputs_digest", "ic_assumptions_hash", "ic_case_hash"):
+    for k in (
+        "business_case_hash",
+        "inputs_digest",
+        "ic_assumptions_hash",
+        "ic_case_hash",
+    ):
         assert a[k] == b[k], k
     for body in (a, b):
         body["pnl"].pop("row_reason")
