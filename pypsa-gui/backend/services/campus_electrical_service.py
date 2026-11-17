@@ -107,6 +107,7 @@ try:
     from gridspine.static import harmonic_scan as hs
     from gridspine.static import parallel
     from gridspine.static import restart_sequence as rs
+    from gridspine.static import subsync_scan as ss
     from gridspine.static import ride_through as rt
     from gridspine.static.parallel import Stopped
 
@@ -115,7 +116,7 @@ try:
 except ImportError as exc:                      # pragma: no cover - build-shape branch
     CAMPUS_AVAILABLE = False
     CAMPUS_IMPORT_ERROR = str(exc)
-    cs = SizingCriteria = parallel = hs = process_chain = rs = rt = None
+    cs = SizingCriteria = parallel = hs = process_chain = rs = rt = ss = None
 
     class ContractError(Exception):
         """Stand-in so the `except ContractError` clauses below still parse."""
@@ -406,8 +407,6 @@ def _ssti_screens(run: Path, profile: str, profile_dirs) -> None:
     ``campus_study.ssti_screens_campus``), the meta in ``SSTI_SCREENS_META``. Screening beside the
     sizing, so a failure never fails the run: the reason goes to ``SSTI_SCREENS_ERROR`` and no screen
     file stays."""
-    from gridspine.static import subsync_scan as ss
-
     files = (cs.SSTI_UIF_CSV, cs.SUBSYNC_SCAN_CSV, cs.SUBSYNC_RESONANCE_CSV, SSTI_SCREENS_META, SSTI_SCREENS_ERROR)
 
     def clear():
