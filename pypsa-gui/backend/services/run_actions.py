@@ -673,6 +673,12 @@ def _shipped_rows(frozen, ids, cap_now) -> list[dict]:
     return rows
 
 
+def _cap_words(cap_now) -> str:
+    if not cap_now:
+        return "No case can solve in this run: it has no solve left"
+    return f"Up to {cap_now} case{'' if cap_now == 1 else 's'} can solve in this run"
+
+
 def _shipped_card(step, frozen) -> dict:
     solves = frozen["solves"]
     rows = [
@@ -688,6 +694,8 @@ def _shipped_card(step, frozen) -> dict:
             else []
         ),
         _note("solves", f"Reserves {solves} solve{'' if solves == 1 else 's'}"),
+        # GK B (61) 5: the digest binds the cap, so the card shows it.
+        _note("cap", _cap_words(frozen.get("cap", 1))),
         _note(
             "source",
             f"Source: the template's shipped cases, {frozen['total']} cases",

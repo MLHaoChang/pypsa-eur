@@ -311,6 +311,7 @@ def test_the_approval_card_shows_every_case_and_change_in_file_order(
     )
     assert notes["case.low_price.1"].startswith("  Import price series · ")
     assert notes["solves"] == "Reserves 2 solves"
+    assert notes["cap"] == f"Up to {frozen['cap']} cases can solve in this run"
     assert notes["source"] == "Source: the template's shipped cases, 8 cases"
     _no_engine_words(list(notes.values()), frozen["cases"])
 
@@ -706,3 +707,81 @@ def test_a_shipped_cost_row_is_in_the_properties_panels_unit():
     # A field the panel shows in its stored unit keeps it.
     change = {"path": "Link.grid_export.p_nom", "old": 70.0, "new": 55.0}
     assert run_actions._shipped_change(change, {}, {}).endswith("70.0 → 55.0 MW")
+
+
+# ── GK B (61) NOT OK @ec45a021: one killing test per guard ────────────────────
+
+
+def test_a_lease_lost_at_lock_entry_closes_the_pick(baseline, tmp_path, monkeypatch):
+    # 1: the in-lock `awaiting` re-check (another runner took the lease).
+    from harness import runner
+
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    card = run_actions.pick_card(_step(path))
+    real = runner._update
+
+    def lose_lease_then_update(p, change):
+        task = _read(p)
+        task["run"].setdefault("runner", {})["lease_owner"] = "other-runner"
+        p.write_text(json.dumps(task))
+        return real(p, change)
+
+    monkeypatch.setattr(runner, "_update", lose_lease_then_update)
+    before = {**_read(path)}
+
+    def pick():
+        return E.pick(path, "explore.1", ["low_price"], card["digest"], INSTANCE)
+
+    assert _kind(pick) == "shipped_pick_closed"
+    after = _read(path)
+    assert "shipped_pick" not in after["run"].get("explore", {})
+    assert after["steps"][0].get("frozen") is None
+    assert after["steps"] == before["steps"]
+
+
+def test_a_stored_over_cap_pick_does_not_reopen_a_pick_card(baseline, tmp_path):
+    # 2: `or picked is not None` — a stored pick over the cap raises, never a
+    # new pick payload that could never close.
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    task = _read(path)
+    task["run"]["explore"]["shipped_pick"] = list(LP)  # 3 LP cases, cap 2
+    frozen = run_actions.stage_frozen(task, K, path=path)
+    step = frozen[0] if isinstance(frozen, list) else frozen
+    unfrozen = step.get("unfrozen") if isinstance(step, dict) else None
+    assert unfrozen is not None, frozen
+    assert unfrozen["state"] == "shipped_cases_over_budget"
+    assert "pick" not in unfrozen
+
+
+def test_a_cap_drop_between_the_card_and_the_pick_refuses(
+    baseline, tmp_path, monkeypatch
+):
+    # 3: the cap half of the card-vs-now guard; one tick stays under the new
+    # cap, so only that half refuses.
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    card = run_actions.pick_card(_step(path))
+    before = _read(path)
+    monkeypatch.setattr(E, "cap", lambda profile, path, task: 1)
+
+    def pick():
+        return E.pick(path, "explore.1", ["low_price"], card["digest"], INSTANCE)
+
+    assert _kind(pick) == "shipped_cases_changed"
+    assert _read(path) == before
+
+
+def test_the_approval_card_at_no_solve_left(baseline, tmp_path):
+    # 4: cap 0 needs no pick; each LP case says why it does not run.
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid, solves=0)
+    step = _step(path)
+    assert "frozen" in step, step.get("unfrozen")
+    notes = {r["field"]: r["note"] for r in run_actions.approval_card(step)["rows"]}
+    for name in LP:
+        assert notes[f"case.{name}"].endswith(
+            "not run: the run has no solve left for it"
+        )
+    assert notes["cap"] == "No case can solve in this run: it has no solve left"
