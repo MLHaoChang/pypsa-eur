@@ -220,6 +220,11 @@ def _judge(u: dict, limits: Limits) -> dict:
     }
 
 
+#: The per-order and THD judgement of a U_h spectrum, public for callers that
+#: build their own spectrum (the "with background" row, GC-05).
+judge = _judge
+
+
 def _empty_judgement() -> dict:
     return dict.fromkeys(("u_h_pct", "thd_pct", "thd_limit_pct", "thd_margin_pct", "worst_order",
                           "worst_u_h_pct", "worst_limit_pct"), None) | {"failing_orders": [],

@@ -45,3 +45,26 @@ reads, and the PQ screen assumes zero background distortion.
 - LF read-back of a synthetic PowerFactory CSV keyed by DGS names matches within tolerance.
 
 Release note: one new file under `doc/release-notes.d/` (see its README).
+
+## Comments
+
+- 2026-11-17, GK A2 plan verdict: GO, one PR, with these conditions (all met in the PR):
+  - Q5: public alias `judge = _judge` in `static/harmonics.py`, tested `hm.judge is hm._judge`.
+  - D1: golden test of the file header, General table and every section header line in order;
+    `ATTRIBUTE_SOURCES` names each class's documentation section (generic, GC-TEXT-1); the manifest
+    says "attribute names pending verification on first PowerFactory import" (tested).
+  - D2: identities both ways (every pp element ↔ exactly one DGS object; branch terminals match);
+    names colliding after 40-character truncation stay distinct and recorded.
+  - D3: per unit on system base against `net._ppc` within 1e-6 (off-neutral tap, transformer ≠ SBASE,
+    cable with B); Sk and R/X max/min each equal the ext_grid columns.
+  - D4: each source equals `hm.unit_inputs` (% of rated current, I_h = % / 100 · rated_mva);
+    alpha from `hm.alpha`, tested at h = 4, 5, 10, 11; a converter without one is listed "no spectrum".
+  - D5: GC-04's handoff files untouched; `branch_keys` called, not changed.
+  - B1: combine at h = 3, 7, 13 and the α 1.4 hand value with literals; the study's `law` is used.
+  - B2: one refusal test per reason; unit is % of nominal fundamental voltage.
+  - B3: `background_harmonics.json` is versioned; a wrong version or shape is refused as stale.
+  - B4: no background → unchanged output; one "with background" row with the pinned basis note;
+    a background measured at another PoC is refused.
+  - R1: a DGS element missing from the PowerFactory export is listed under `not_compared` and blocks
+    the pass; an unknown name is refused; without `dgs_names.csv` read-back is unchanged.
+  - R2: `readback/__init__.py` gets GC-05's exports only.
