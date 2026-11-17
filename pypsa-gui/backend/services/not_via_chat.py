@@ -329,9 +329,9 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
     },
     {
         'id': 'site_scene',
-        'title': 'Site 3D: legacy Site adoption and results overlay',
+        'title': 'Site 3D: legacy Site adoption',
         'disposition': 'unbuilt',
-        'reason': 'Chat reads and changes 3D site buildings (site_scene_read, site_scene_prepare, site_scene_apply). Adopting a Site saved before Site 3D, and the 3D results overlay, stay in Site 3D for now.',
+        'reason': 'Chat reads and changes 3D site buildings and reads the 3D results. Adopting a Site saved before Site 3D stays in Site 3D for now.',
         'page': 'Site 3D',
         'panel': 'map',
         'keywords': frozenset({
@@ -339,7 +339,6 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
         'routes': frozenset({
             ('POST', '/api/projects/{name}/sites/{site_id}/scene/adopt'),
-            ('GET', '/api/projects/{name}/sites/{site_id}/scene/results'),
         }),
     },
     {

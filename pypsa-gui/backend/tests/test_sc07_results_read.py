@@ -376,3 +376,25 @@ def test_the_route_lock_order_network_lock_held_scene_lock_released(
     monkeypatch.setattr(results, "project", spy(real_project))
     call(snapshot=T3)
     assert seen == [(True, False), (True, False)]
+
+
+def test_the_tool_is_registered_read_tier_on_the_results_route():
+    from harness import catalogue, edit_card
+    from services import chat_tools
+
+    assert any(t["name"] == "site_scene_results" for t in catalogue.TOOLS)
+    assert chat_tools.DISPATCHERS["site_scene_results"] is chat_tools.site_scene_results
+    assert catalogue.safety_tier_for("site_scene_results") == "read"
+    assert catalogue.TOOL_ROUTES["site_scene_results"] == [
+        ("GET", "/api/projects/{name}/sites/{site_id}/scene/results")
+    ]
+    assert not edit_card.is_edit("site_scene_results")
+
+
+@pytest.mark.usefixtures("solved")
+def test_the_dispatcher_answers_what_the_module_answers(client, bound_ctx, call):
+    from services import chat_tools
+
+    with bound_ctx(client):
+        via_tool = chat_tools.DISPATCHERS["site_scene_results"](site_id="campus", snapshot=T3)
+    assert via_tool == call(snapshot=T3)

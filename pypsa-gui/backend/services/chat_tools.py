@@ -1536,6 +1536,15 @@ def site_scene_cancel(site_id: str, proposal_id: str) -> dict:
     return chat.cancel(site_id, proposal_id)
 
 
+def site_scene_results(site_id: str, snapshot: str | None = None, period: str | None = None,
+                       window_from: str | None = None, window_to: str | None = None,
+                       run: str | None = None, building: str | None = None) -> dict:
+    """`GET .../scene/results` (SC-03): the route's numbers in words, bounded; the gate alone decides availability."""
+    from services.site_scene import chat_results
+    return chat_results.read(site_id, snapshot=snapshot, period=period, window_from=window_from,
+                             window_to=window_to, run=run, building=building)
+
+
 def get_process_view() -> dict:
     """`GET /api/results/process_view` on the network the route reads: the
     caller's foreground project, resolved per request as the route's is. A
@@ -10543,6 +10552,7 @@ DISPATCHERS.update({
     "site_scene_prepare": site_scene_prepare,
     "site_scene_apply": site_scene_apply,
     "site_scene_cancel": site_scene_cancel,
+    "site_scene_results": site_scene_results,
     "get_process_view": get_process_view,
     "get_grid_risk_production": get_grid_risk_production,
     "campus_save_campus": campus_save_campus,
