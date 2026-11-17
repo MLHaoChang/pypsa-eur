@@ -7,7 +7,7 @@ import { InvalidDecisionError, postChatConfirm } from '../api/chat'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { mismatchSentence } from '../utils/projectMismatch'
-import { CHANGE_SET_NONE_TICKED, ChangeSetRows, changeSetApplyLabel, changeSetOf, settledChangeSet } from './ChangeSetCard'
+import { CHANGE_SET_NONE_TICKED, ChangeSetRows, changeSetApplyLabel, changeSetOf, pickMaxOf, settledChangeSet } from './ChangeSetCard'
 import { SAYS_HEADLINE, EditCardTable, editCardOf, editCardWords } from './EditCard'
 import { SweepCardTable, sweepCardOf } from './SweepCard'
 
@@ -289,6 +289,8 @@ export function ConfirmationCard() {
   // A change-set card without well-formed rows is never approvable: an approval with no ticks means every row.
   const isChangeSet = pending?.change_set !== undefined || pending?.tool_name === 'change_set'
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set())
+  const pickMax = pickMaxOf(changeSet)
+  const overPick = pickMax !== null && ticked.size > pickMax
   const [refused, setRefused] = useState(false)
   // LC-04: a chat edit's card that arrived malformed is never approvable.
   const reviewUnavailable = (pending?.tool_name === 'apply_project_changes' && !review)
@@ -301,7 +303,9 @@ export function ConfirmationCard() {
   useEffect(() => { setTypedConfirmation('') }, [pending?.confirmation_token])
   // Every row of a new change set starts ticked.
   useEffect(() => {
-    setTicked(new Set(changeSetOf(useChatStore.getState().pending?.change_set)?.items.map(i => i.tool_use_id)))
+    const set = changeSetOf(useChatStore.getState().pending?.change_set)
+    // Study harness 14: a pick card starts with nothing ticked; the user chooses.
+    setTicked(new Set(pickMaxOf(set) === null ? set?.items.map(i => i.tool_use_id) : []))
     setRefused(false)
   }, [pending?.confirmation_token])
   const toggleTick = useCallback((id: string) => {
@@ -377,6 +381,7 @@ export function ConfirmationCard() {
     // LC-47: the ticked rows, in card order. Approving none is not offered.
     const rows = changeSet?.items.map(i => i.tool_use_id).filter(id => ticked.has(id))
     if (rows && rows.length === 0) return false
+    if (overPick) return false
     try {
       await postChatConfirm(target, {
         token, decision: 'approve', ...(rows ? { ticked: rows } : {}),
@@ -389,7 +394,7 @@ export function ConfirmationCard() {
       else toast.error(`confirmation failed: ${(err as Error).message}`)
       return false
     }
-  }, [pending, target, clearIfStill, reviewUnavailable, changeSet, ticked])
+  }, [pending, target, clearIfStill, reviewUnavailable, changeSet, ticked, overPick])
 
   const onDeny = useCallback(async (): Promise<boolean> => {
     if (!pending || !target) return false
@@ -489,7 +494,7 @@ export function ConfirmationCard() {
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
             data-testid="chat-confirmation-summary">
-            {(changeSet && `${changeSet.items.length} changes proposed for this step`)
+            {(changeSet && (pickMax !== null ? `Pick up to ${pickMax} of ${changeSet.items.length} cases to solve` : `${changeSet.items.length} changes proposed for this step`))
               || (edit && ((SAYS_HEADLINE.has(edit.tool) && edit.says) || editCardWords(edit) || edit.says))
               || sweep?.says || (pending.external
               ? shortMcpToolName(pending.tool_name)
@@ -510,7 +515,7 @@ export function ConfirmationCard() {
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
             {/* Study harness 10a (UX (14)): a runner-issued native card says what it runs, not "The assistant wants". */}
-            {(changeSet && `${changeSet.items.length} changes proposed for this step`)
+            {(changeSet && (pickMax !== null ? `Pick up to ${pickMax} of ${changeSet.items.length} cases to solve` : `${changeSet.items.length} changes proposed for this step`))
               || (edit?.kind === 'native' && edit.says) || (pending.external
               ? shortMcpToolName(pending.tool_name) : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
@@ -527,7 +532,12 @@ export function ConfirmationCard() {
         The changes of this card are unavailable. Cancel all and ask again.
       </p>}
       {changeSet && ticked.size === 0 && (
-        <p className="mb-2 text-[11px] text-warn" data-testid="chat-change-set-none">{CHANGE_SET_NONE_TICKED}</p>
+        <p className="mb-2 text-[11px] text-warn" data-testid="chat-change-set-none">{pickMax !== null ? 'Tick at least one case to solve.' : CHANGE_SET_NONE_TICKED}</p>
+      )}
+      {overPick && (
+        <p className="mb-2 text-[11px] text-warn" data-testid="chat-change-set-over-pick">
+          Tick at most {pickMax} {pickMax === 1 ? 'case' : 'cases'}: the run has {pickMax} {pickMax === 1 ? 'solve' : 'solves'} for them.
+        </p>
       )}
       {refused && <p role="alert" className="mb-2 text-xs text-warn" data-testid="chat-change-set-refused">
         These ticks no longer match the card, so nothing was applied. Cancel all and ask again.
@@ -582,11 +592,11 @@ export function ConfirmationCard() {
         <button
           className="px-2 py-1 text-xs rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
           onClick={onApprove}
-          disabled={!typedSatisfied || !!mismatchLine || reviewUnavailable || (!!changeSet && ticked.size === 0)}
+          disabled={!typedSatisfied || !!mismatchLine || reviewUnavailable || (!!changeSet && ticked.size === 0) || overPick}
           title={mismatchLine ?? undefined}
           data-testid="chat-confirm-approve"
         >
-          {changeSet ? changeSetApplyLabel(ticked.size) : 'Approve'}
+          {changeSet ? changeSetApplyLabel(ticked.size, pickMax !== null) : 'Approve'}
         </button>
         <button
           className="px-2 py-1 text-xs rounded bg-bg-2 hover:bg-bg-3 border border-border"

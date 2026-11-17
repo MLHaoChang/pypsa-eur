@@ -859,6 +859,8 @@ class Runner:
         from services import run_actions
         task_id = task["task_id"]
         edit_card = run_actions.approval_card(step)
+        if edit_card is None and run_actions.pick_card(step) is not None:
+            return self._pick_card(path, session, task, step)  # S-B2c (Q1 = A): pick first
         if edit_card is None:
             return run_actions.start(path, ctx, step, instance=self.instance)  # stops on the unfrozen reason
         call_id = f"native-{step['id']}-{uuid.uuid4().hex[:8]}"
@@ -899,6 +901,64 @@ class Runner:
                 self.wake(path)
         context = contextvars.copy_context()
         thread = threading.Thread(target=context.run, args=(wait,), name=f"harness-card-{task_id[:8]}", daemon=True)
+        self._inflight[task_id] = (path, thread)
+        thread.start()
+        return "waiting"
+
+    def _pick_card(self, path, session, task, step):
+        """S-B2c (GK B (60) Q1 = A): the shipped cases' pick card, a change-set
+        shaped card whose ticks are the LP cases to solve. On approval the pick
+        is checked and written under the run's lease (`run_shipped_engine.pick`),
+        which freezes the step anew; the next tick shows its approval card. A
+        refused pick stops the step with its own kind; nothing runs."""
+        from harness import approvals, run_shipped, run_shipped_engine
+        from harness import session as harness_session
+        from services import run_actions
+        task_id = task["task_id"]
+        card = run_actions.pick_card(step)
+        call_id = f"native-pick-{step['id']}-{uuid.uuid4().hex[:8]}"
+        tier = "write"
+        args = {"digest": card["digest"], "tool_use_ids": [i["tool_use_id"] for i in card["items"]],
+                "pick_max": card["pick_max"]}
+        pc = session.issue_confirmation(tool_name=step["tool"], args=args, safety_tier=tier)
+        if not approvals.asked(session, call_id=call_id, tool=step["tool"], tier=tier, token=pc.token):
+            session.withdraw_confirmation(pc.token)
+            raise _Stop("needs_user", "approval_unavailable")
+        self._cards[task_id] = {
+            "tool_use_id": call_id, "tool_name": step["tool"], "args": args,
+            "safety_tier": tier, "confirmation_token": pc.token,
+            "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS, "change_set": card,
+            "session_id": session.session_id,
+            "expires_at_epoch_ms": time.time() * 1000 + harness_session.CONFIRMATION_TTL_SECONDS * 1000}
+        self._wait_for_user(path, "card", step["id"])
+
+        def wait():
+            try:
+                decision = session.wait_for_decision(pc.token)
+                ticked = session.confirmation_ticks.pop(pc.token, None)
+                outcome, by = {"approve": ("approved", "user"), "deny": ("rejected", "user"),
+                               "expired": ("expired", "ttl"), "aborted": ("aborted", "session"),
+                               "revoked": ("revoked", "system")}.get(decision, ("unavailable", "system"))
+                recorded = approvals.decided(session, call_id=call_id, tool=step["tool"], tier=tier,
+                                             outcome=outcome, by=by)
+                if (self._cards.get(task_id) or {}).get("confirmation_token") == pc.token:
+                    self._cards.pop(task_id, None)
+                if decision == "approve" and recorded:
+                    self._go_on(path)
+                    try:
+                        run_shipped_engine.pick(path, step["id"], ticked, card["digest"], self.instance)
+                    except run_shipped.ShippedError as exc:
+                        if exc.kind != "shipped_pick_closed":  # a step that moved on is left as it is
+                            run_actions._stop(path, step["id"], exc.kind, str(exc))
+                elif decision == "deny":
+                    run_actions._stop(path, step["id"], "confirmation_denied",
+                                      "the user denied the shipped cases' pick card")
+            except Exception:  # noqa: BLE001 — a card that errors leaves the step to do, never run
+                logger.exception("harness runner: the pick card of %s on %s errored", step["id"], task_id)
+            finally:
+                self.wake(path)
+        context = contextvars.copy_context()
+        thread = threading.Thread(target=context.run, args=(wait,), name=f"harness-pick-{task_id[:8]}", daemon=True)
         self._inflight[task_id] = (path, thread)
         thread.start()
         return "waiting"

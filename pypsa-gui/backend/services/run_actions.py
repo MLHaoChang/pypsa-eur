@@ -439,6 +439,135 @@ def _note(field, note) -> dict:
     return {"role": "note", "field": field, "unit": "", "note": note}
 
 
+# S-B2c (GK B (60) P7): the unit of each field a shipped case changes.
+SHIPPED_UNITS = {
+    "price": "EUR/MWh",
+    "share": "of output",
+    "tenor_years": "years",
+    "inv_power_overnight": "EUR/MW",
+    "inv_energy_overnight": "EUR/MWh",
+    "p_nom": "MW",
+}
+
+
+def _shipped_change(change, frozen) -> str:
+    """One change, old → new with its unit; a price ref names its series' file
+    hash and the project's Library ref, as the digest binds them."""
+    path, old, new = change["path"], change.get("old"), change.get("new")
+    if path.endswith(".id") and isinstance(new, str):
+        def series(name):
+            sha = str((frozen.get("series") or {}).get(name) or "not shipped")[:12]
+            refs = (frozen.get("refs") or {}).get(name) or []
+            lib = (
+                ", ".join(f"Library v{v} {str(h)[:12]}" for v, h in refs)
+                or "no Library ref yet: added from the template file"
+            )
+            return f"{name} (file {sha}; {lib})"
+
+        return f"{path[: -len('.id')]}: series {series(old)} → {series(new)}"
+    unit = SHIPPED_UNITS.get(path.rsplit(".", 1)[-1], "")
+    return f"{path}: {old} → {new}{(' ' + unit) if unit else ''}"
+
+
+def _shipped_rows(frozen, ids, cap_now) -> list[dict]:
+    """Every case in file order with all its changes and what happens to it."""
+    rows = []
+    for case in frozen["cases"]:
+        if case["status"] != "admissible":
+            what = f"not run: {case.get('why')}"
+        elif case["kind"] != "lp":
+            what = "runs with no solve; read not evaluated (it moves only the settlement)"
+        elif case["id"] in ids:
+            what = "forks the project and solves once"
+        else:
+            what = "not run: " + (
+                "not picked" if cap_now else "the run has no solve left for it"
+            )
+        rows.append(_note(f"case.{case['id']}", f"{case['label']} ({case['id']}): {what}"))
+        rows.extend(
+            _note(f"case.{case['id']}.{n}", "  " + _shipped_change(c, frozen))
+            for n, c in enumerate(case["changes"])
+        )
+    return rows
+
+
+def _shipped_card(step, frozen) -> dict:
+    solves = frozen["solves"]
+    rows = [
+        *_shipped_rows(frozen, frozen["run"], frozen.get("cap", 1)),
+        _note("solves", f"Reserves {solves} solve{'' if solves == 1 else 's'}"),
+        _note(
+            "source",
+            f"Source: {frozen['template']} cases.json · digest {frozen['cases_digest'][:12]}"
+            f" · {frozen['total']} cases",
+        ),
+    ]
+    return {
+        "version": 1,
+        "kind": "native",
+        "tool": step["tool"],
+        "rows": rows,
+        "sets": [],
+        "says": f"Run {len(frozen['run'])} of the {frozen['total']} shipped cases",
+        "complete": True,
+        "digest": frozen["digest"],
+    }
+
+
+def pick_card(step) -> dict | None:
+    """S-B2c (Q1 = A): the pick card, shown when more cases need a solve than
+    the run can spend. A change-set shaped payload: one tickable item per LP
+    case that can run, every other case named in its words. None when the
+    step does not wait on a pick."""
+    if kind_of(step) != SHIPPED_KIND:
+        return None
+    pick = (step.get("unfrozen") or {}).get("pick")
+    if not isinstance(pick, dict):
+        return None
+    lp = [c for c in pick["cases"] if c["status"] == "admissible" and c["kind"] == "lp"]
+    others = [c for c in pick["cases"] if c not in lp]
+
+    def other(c):
+        if c["status"] != "admissible":
+            return f"{c['label']}: not run ({c['why']})"
+        return f"{c['label']}: runs with no solve, read not evaluated"
+
+    items = [
+        {
+            "tool_use_id": c["id"],
+            "tool": step["tool"],
+            "edit_card": {
+                "version": 1,
+                "kind": "native",
+                "tool": step["tool"],
+                "rows": [_note(f"case.{c['id']}", "Forks the project and solves once")],
+                "sets": [],
+                "says": f"{c['label']} ({c['id']})",
+                "complete": True,
+                "digest": c["id"],
+            },
+            "source": "Shipped case of the template",
+            "digest": c["id"],
+        }
+        for c in lp
+    ]
+    cap_now = pick["cap"]
+    return {
+        "version": 1,
+        "items": items,
+        "digest": digest(pick),
+        "pick_max": cap_now,
+        "requirements": {
+            "checked": 0,
+            "says": (
+                f"Pick up to {cap_now} of these {len(lp)} cases to solve (the run has "
+                f"{cap_now} solve{'' if cap_now == 1 else 's'} for them). "
+                + " ".join(other(c) + "." for c in others)
+            ).strip(),
+        },
+    }
+
+
 def approval_card(step) -> dict | None:
     """GK B (36) F1: the step's Confirmation card, as an edit card of note
     rows (the chat's card shows them as they are, no new UI). It names the
@@ -449,9 +578,10 @@ def approval_card(step) -> dict | None:
     frozen = step.get("frozen") if isinstance(step, dict) else None
     if not isinstance(frozen, dict) or not isinstance(frozen.get("digest"), str):
         return None
-    if (REGISTRY.get(step.get("tool")) or {}).get("kind") != DC_KIND or record_kind(
-        frozen
-    ) != DC_KIND:
+    row_kind = (REGISTRY.get(step.get("tool")) or {}).get("kind")
+    if row_kind == SHIPPED_KIND and record_kind(frozen) == SHIPPED_KIND:
+        return _shipped_card(step, frozen)  # S-B2c (Q1 = A): the approval card
+    if row_kind != DC_KIND or record_kind(frozen) != DC_KIND:
         return None  # M2: only the grid-code record has this card
     from services import campus_electrical_service as ce
 
@@ -520,7 +650,7 @@ def fill(steps, frozen, kind=DC_KIND) -> None:
             step["card"] = _card_for(kind, frozen)
 
 
-def stage_frozen(task, kind=DC_KIND) -> dict:
+def stage_frozen(task, kind=DC_KIND, path=None) -> dict:
     """At solve-stage entry, as the run's owner: the frozen record of `kind`,
     or `{"unfrozen": {state, message}}` when it cannot be fixed (the step then
     stops for the user with that reason). A stage
@@ -547,7 +677,7 @@ def stage_frozen(task, kind=DC_KIND) -> dict:
         # Issue 33 (GK B (49) S1): the site from the run's granted intake rows, never a model's.
         return _site("freeze")(task)
     if kind == SHIPPED_KIND:
-        return _shipped("freeze")(task)
+        return _shipped("freeze")(task, path)
     if kind not in MARKERS:
         return {
             "unfrozen": {

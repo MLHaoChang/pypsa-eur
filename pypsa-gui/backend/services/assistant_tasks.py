@@ -861,7 +861,7 @@ def _advance_run(path, ctx=None):
                     # Study harness 10a (GK B (36) D1): the grid-code profile, frozen now, shown on the stage card.
                     # Study harness 12b (M2): one record per kind, never crossed.
                     for kind in run_actions.kinds(steps):
-                        run_actions.fill(steps, run_actions.stage_frozen(task, kind), kind)
+                        run_actions.fill(steps, run_actions.stage_frozen(task, kind, path=path), kind)
                 short = run_eh.pass_short(path, steps)
                 if short is not None:
                     # Study harness 12c (Q1-i): a pass the solves left cannot finish never

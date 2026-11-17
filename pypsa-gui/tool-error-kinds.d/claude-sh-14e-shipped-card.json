@@ -1,0 +1,28 @@
+{
+ "kinds": {
+  "shipped_pick_invalid": {
+   "surface": "inline",
+   "why": "The shipped cases' pick card got a pick that is not a list of case ids. Nothing was picked; the card's step stops for the user."
+  },
+  "shipped_pick_empty": {
+   "surface": "inline",
+   "why": "The shipped cases' pick card was approved with no case ticked. Nothing was picked; the step stops for the user."
+  },
+  "shipped_pick_duplicate": {
+   "surface": "inline",
+   "why": "The shipped cases' pick named one case twice. Nothing was picked; the step stops for the user."
+  },
+  "shipped_pick_unknown": {
+   "surface": "inline",
+   "why": "The shipped cases' pick named an id that is not a case of the cases file. Nothing was picked; the step stops for the user."
+  },
+  "shipped_pick_finance": {
+   "surface": "inline",
+   "why": "The shipped cases' pick named a case that needs no solve; those always run (read not evaluated) and are never picked. Nothing was picked; the step stops for the user."
+  },
+  "shipped_pick_closed": {
+   "surface": "inline",
+   "why": "The shipped cases' step no longer waits on that pick card (another card, another runner, or already picked). Nothing was written."
+  }
+ }
+}

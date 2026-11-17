@@ -41,6 +41,7 @@ from collections.abc import Callable, Generator, Iterable
 ENABLED = True
 VERSION = 1
 TOOL = "change_set"
+SHIPPED_PICK_TOOL = "shipped_cases"  # S-B2c: the one native step whose card ticks
 SOURCE_ASSISTANT = "proposed by the assistant"
 # Written as `{"error_kind": ...}` literals so the kind manifest test sees them.
 _UNTICKED = {"error_kind": "change_unticked"}
@@ -275,12 +276,27 @@ def validate_ticks(pc, decision: str, ticked: Any) -> list[str] | None:
 
     if ticked is None:
         return None
-    if pc.tool_name != TOOL:
+    # Study harness 14 S-B2c (GK B (60) P2): among native steps only the shipped
+    # cases' pick card takes ticks, at most its `pick_max` and at least one.
+    pick = pc.tool_name == SHIPPED_PICK_TOOL and isinstance(
+        (pc.args or {}).get("pick_max"), int
+    )
+    if pc.tool_name != TOOL and not pick:
         raise HTTPException(
             400,
             {**_INVALID_TICKS, "message": "ticked applies only to a change-set card"},
         )
     ids = list((pc.args or {}).get("tool_use_ids") or [])
+    if pick and decision == "approve" and (
+        not isinstance(ticked, list) or not 1 <= len(ticked) <= pc.args["pick_max"]
+    ):
+        raise HTTPException(
+            400,
+            {
+                **_INVALID_TICKS,
+                "message": f"tick 1 to {pc.args['pick_max']} cases to solve",
+            },
+        )
     if (
         not isinstance(ticked, list)
         or not all(isinstance(t, str) for t in ticked)

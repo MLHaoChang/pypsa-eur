@@ -59,6 +59,12 @@ ERROR_KINDS = (
     {"error_kind": "shipped_case_not_runnable"},
     {"error_kind": "shipped_case_stale"},
     {"error_kind": "shipped_series_unresolved"},
+    # S-B2c (GK B (60) P1): a pick refused, each reason its own kind.
+    {"error_kind": "shipped_pick_invalid"},
+    {"error_kind": "shipped_pick_empty"},
+    {"error_kind": "shipped_pick_duplicate"},
+    {"error_kind": "shipped_pick_unknown"},
+    {"error_kind": "shipped_pick_finance"},
 )
 
 
@@ -438,8 +444,12 @@ def load(project_dir, template_id: str, *, template_dir, cfg, network) -> dict:
                 "why": " ".join(why) or None,
             }
         )
+    refs = _project_refs(cfg, named)
     return {
-        "digest": _digest(data, template_id, named, _project_refs(cfg, named)),
+        "digest": _digest(data, template_id, named, refs),
+        # S-B2c (P7): what each ref case's card row names; both are in the digest.
+        "series": dict(sorted(named.items())),
+        "refs": refs,
         "total": len(cases),
         "cases": cases,
         "admissible": [c["id"] for c in cases if c["status"] == "admissible"],
@@ -459,29 +469,51 @@ def require_current(approved: str, project_dir, template_id: str, **sources) -> 
 
 
 def choose(shipped: dict, cap: int, picked=None) -> list[str]:
-    """The case ids to run. All admissible ones when they fit `cap`; more than that
-    needs the user's pick, which must be admissible cases and at most `cap` of them.
-    Never the first `cap`."""
+    """The case ids to run, in file order. GK B (60) P3: only an LP case costs a
+    fork solve, so `cap` (the fork solves the run can spend) bounds the LP cases;
+    every admissible finance case costs none and always rides along. All LP
+    cases when they fit `cap`; more than that needs the user's pick of LP cases,
+    1 to `cap` of them, never the first `cap`. A `cap` of 0 admits no LP case
+    and needs no pick. P1: each refused pick has its own kind."""
+    cases = {c["id"]: c for c in shipped["cases"]}
     ok = shipped["admissible"]
+    lp = [i for i in ok if cases[i]["kind"] == LP]
+    finance = [i for i in ok if cases[i]["kind"] != LP]
     if picked is None:
-        if len(ok) > cap:
+        if cap <= 0:
+            return list(finance)
+        if len(lp) > cap:
             raise ShippedError(
                 "shipped_cases_over_budget",
-                f"{len(ok)} of {shipped['total']} cases can run but at most {cap} fit "
-                "the solve budget: pick which to run.",
+                f"{len(lp)} of {shipped['total']} cases need a solve but at most {cap} "
+                "fit the solve budget: pick which to run.",
             )
         return list(ok)
     if not isinstance(picked, list) or any(not isinstance(p, str) for p in picked):
-        raise ShippedError("shipped_case_not_runnable", "Pick cases by id.")
-    ids = list(dict.fromkeys(picked))
-    bad = [p for p in ids if p not in ok]
+        raise ShippedError("shipped_pick_invalid", "Pick cases by id.")
+    if not picked:
+        raise ShippedError("shipped_pick_empty", f"Pick 1 to {cap} cases to run.")
+    if len(set(picked)) != len(picked):
+        raise ShippedError("shipped_pick_duplicate", "Pick each case once.")
+    unknown = [p for p in picked if p not in cases]
+    if unknown:
+        raise ShippedError(
+            "shipped_pick_unknown", f"{', '.join(unknown)} is not a case of this file."
+        )
+    bad = [p for p in picked if p not in ok]
     if bad:
         raise ShippedError(
             "shipped_case_not_runnable", f"{', '.join(bad)} cannot run in this project."
         )
-    if not ids or len(ids) > cap:
+    paid = [p for p in picked if p in finance]
+    if paid:
+        raise ShippedError(
+            "shipped_pick_finance",
+            f"{', '.join(paid)} needs no solve and always runs; pick only cases that solve.",
+        )
+    if len(picked) > cap:
         raise ShippedError(
             "shipped_cases_over_budget",
-            f"Pick between 1 and {cap} cases (of {shipped['total']}).",
+            f"Pick 1 to {cap} of the {len(lp)} cases that solve (of {shipped['total']}).",
         )
-    return ids
+    return [i for i in ok if i in picked or i in finance]
