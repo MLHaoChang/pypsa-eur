@@ -1,0 +1,19 @@
+{
+ "acknowledged_shadows": [
+  {
+   "method": "POST",
+   "url": "/api/chat/{}/progress/stop",
+   "shadows": [
+    "/api/chat/runs/{task_id}/stop"
+   ],
+   "reason": "chat/runs/{task_id}/stop registers before chat/{session_id}/progress/stop; it matches only a session id equal to the literal 'runs', which a session id never is"
+  }
+ ],
+ "limitations": [
+  {
+   "method": "POST",
+   "path": "/api/chat/{session_id}/progress/stop",
+   "reason": "conversation-transport"
+  }
+ ]
+}

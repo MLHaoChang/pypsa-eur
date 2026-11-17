@@ -91,8 +91,11 @@ function renderPanel() {
   )
 }
 
+const initialUiMode = useUIStore.getState().uiMode
+
 beforeEach(() => {
   vi.clearAllMocks()
+  useUIStore.setState({ uiMode: initialUiMode })
   vi.mocked(getChatHistory).mockResolvedValue({
     turns: [], last_session_id: null, bound_project: null,
     history_gap: 0, pending_turn: null,
@@ -122,7 +125,7 @@ type Watch = {
 }
 
 /** Run a turn whose tool_result hands the solve to a detached monitor. */
-async function startWatching(): Promise<Watch> {
+async function startWatching({ requestRow = false } = {}): Promise<Watch> {
   const watch = { close: vi.fn() } as unknown as Watch
   vi.mocked(createResumableProgressStream).mockImplementation((_sid, onFrame, onEnd) => {
     watch.push = (frame) => act(() => onFrame(frame))
@@ -132,6 +135,7 @@ async function startWatching(): Promise<Watch> {
   vi.mocked(createChatStream).mockImplementation((_req, onFrame) => {
     queueMicrotask(() => {
       onFrame({ event: 'session_init', data: { session_id: 'sess-detached', model: 'claude', turn_id: 't1' } })
+      if (requestRow) onFrame({ event: 'tool_request', data: { tool_name: 'run_simulation', tool_use_id: 'tu-sim' } })
       onFrame({
         event: 'tool_result',
         data: { tool_name: 'run_simulation', tool_use_id: 'tu-sim', result: { status: 'started', detached_progress: true } },
@@ -205,6 +209,13 @@ describe('Stop monitoring', () => {
     // The state is words in a status region, not a colour.
     expect(screen.getByRole('status').textContent).toBe(MONITOR_WORDS.stopped)
   })
+})
+
+it('Expert: the request row and the result row share the tool id, and the line shows once', async () => {
+  useUIStore.setState({ uiMode: 'expert' })
+  await startWatching({ requestRow: true })
+  expect(screen.getAllByTestId('chat-monitor-line')).toHaveLength(1)
+  expect(screen.getAllByRole('button', { name: MONITOR_WORDS.stop })).toHaveLength(1)
 })
 
 describe('F1: the stream ending by itself', () => {

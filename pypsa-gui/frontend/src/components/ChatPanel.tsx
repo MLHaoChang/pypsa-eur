@@ -3462,6 +3462,15 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
 
   const cancelProfileSwitch = useCallback(() => setPendingProfilePick(null), [])
 
+  // The monitor line goes under the LAST row of its tool (the result row): in
+  // Expert the request row (→ tool) shares the tool_use_id and must not repeat it.
+  let monitorRowIndex = -1
+  if (monitorLine) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'tool' && messages[i].tool_use_id === monitorLine.toolUseId) { monitorRowIndex = i; break }
+    }
+  }
+
   return (
     <div
       className="flex flex-col h-full overflow-hidden bg-bg relative"
@@ -3902,7 +3911,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                   toolWords={uiMode === 'guided' ? guidedToolPhrase : undefined}
                   onRequest={(text, label) => useChatStore.getState().sendRequest(text, { source: 'assistant-task', ...(label ? { label } : {}) })} />
                 <ToolProgressDetails toolUseId={m.tool_use_id} />
-                {monitorLine?.toolUseId === m.tool_use_id && (
+                {monitorLine && index === monitorRowIndex && (
                   <DetachedMonitorLine line={monitorLine} onStop={stopMonitoring} />
                 )}
               </>
