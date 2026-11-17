@@ -424,6 +424,8 @@ class BusinessCaseInputs(BaseModel):
                 raise ValueError(f"year {k} is not a four-digit year")
             if isinstance(f, bool) or not isinstance(f, (int, float)):
                 raise ValueError(f"the factor of {k} is not a number")
+        if len({int(k) for k in v}) != len(v):
+            raise ValueError("a year is listed twice")
         return v
 
     def volume_factor_at(self, year: int) -> float:

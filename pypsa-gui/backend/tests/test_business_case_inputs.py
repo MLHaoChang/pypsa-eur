@@ -1175,3 +1175,8 @@ def test_bc15_the_volume_factor_round_trips_through_json():
 def test_bc15_c3_the_volume_factor_is_a_mapping(bad):
     with pytest.raises(ValidationError):
         B.BusinessCaseInputs(volume_factor_by_year=bad)
+
+
+def test_bc15_c3_a_year_listed_twice_is_refused():
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={2030: 0.5, "2030": 0.6})

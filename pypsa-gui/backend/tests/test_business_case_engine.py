@@ -2009,6 +2009,31 @@ def test_bc15_q1_a_typed_operating_line_refuses_under_a_factor_below_full():
         ]
 
 
+def test_bc15_n1_a_pre_cod_year_on_a_typed_line_is_ignored_never_refused():
+    """GK B2 N1: a typed line that starts before COD, with its only factor below 1 in
+    that pre-COD year, does not refuse for lease-up; the report names the year as
+    ignored."""
+    early = _line(name="service", category="service_fee", quantity=1.0, start_year=2029)
+    case = _lease_case({2029: 0.5}, early)
+    kinds = [x.kind for x in case.refusals(horizon=(2031, 2035), base_year=2031)]
+    assert "volume_factor_typed_line" not in kinds
+    shown = bcm.volume_factor_display(case, _OPS)
+    assert shown == {"volume_factor_ignored": [2029]}
+
+
+def test_bc15_n2_a_demand_charge_row_scales_with_the_factor():
+    ic = _ic(
+        lines=(
+            TemplateLine("peak", "demand_charge", -80.0, "tariff"),
+            TemplateLine("fom", "fom", -20.0, "opex"),
+        )
+    )
+    bc, _ = _run(_lease_case({2032: 0.5}), ic=ic, outputs=_NH3_OUT)
+    assert _amount(bc, "peak", 2032) == -40.0
+    assert _amount(bc, "peak", 2033) == -80.0
+    assert _amount(bc, "fom", 2032) == -20.0
+
+
 def test_bc15_c5_an_undetermined_ic_row_refuses_only_where_nonzero_and_below_full():
     """A generation-side row whose response to the served volume is unknown refuses
     under a factor below 100 % (fail closed) in a year it is non-zero."""
@@ -2068,7 +2093,42 @@ def test_bc15_v3_every_stream_and_linked_kind_has_exactly_one_volume_class():
 
     ledger = set(STREAM_CLASS) - set(BC_STREAM_CLASS)
     assert set(bcm.STREAM_VOLUME_CLASS) == ledger
-    assert set(bcm.STREAM_VOLUME_CLASS.values()) == {"scale", "fixed", "undetermined"}
+    # Each class pinned (GK B2 N2): a move between classes is a reviewed change.
+    assert bcm.STREAM_VOLUME_CLASS == {
+        "energy_import": "scale",
+        "network_energy": "scale",
+        "certificates": "scale",
+        "tax": "scale",
+        "demand_charge": "scale",
+        "vom": "scale",
+        "fuel": "scale",
+        "lost_production": "scale",
+        "energy_wholesale": "scale",
+        "network_capacity": "fixed",
+        "retail_fixed": "fixed",
+        "fom": "fixed",
+        "other": "fixed",
+        "capex": "fixed",
+        "lease": "fixed",
+        "eaas_fee": "fixed",
+        "dr_availability": "fixed",
+        "energy_export": "undetermined",
+        "ppa_settlement": "undetermined",
+        "cfd_settlement": "undetermined",
+        "ancillary": "undetermined",
+        "dr_activation": "undetermined",
+    }
+    assert bcm.VOLUME_KINDS == {
+        "served_product",
+        "served_h2",
+        "shipped",
+        "derived_o2",
+        "served_load",
+        "it_energy",
+        "contracted_it_kw",
+    }
+    assert bcm.FIXED_KINDS == {"capacity"}
+    assert bcm.UNDETERMINED_KINDS == {"export"}
     kinds = {k for r in READERS.values() for k in r}
     sets = (bcm.VOLUME_KINDS, bcm.FIXED_KINDS, bcm.UNDETERMINED_KINDS)
     assert set().union(*sets) == kinds
