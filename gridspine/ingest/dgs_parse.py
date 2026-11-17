@@ -86,7 +86,7 @@ def parse_dgs(path) -> DgsTables:
     try:
         raw = Path(path).read_bytes()
     except OSError as e:
-        raise ContractError(f"DGS {path}: cannot be read ({e.strerror or e})") from e
+        raise ContractError(f"DGS {path}: cannot be read ({e})") from e
     for encoding in ("utf-8-sig", "cp1252"):
         try:
             return parse_dgs_text(raw.decode(encoding), source=str(path))
