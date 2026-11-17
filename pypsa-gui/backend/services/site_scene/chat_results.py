@@ -171,29 +171,22 @@ def read(
             payload = results.project(scene, n, gate=verdict, query=query)
             words = chat.feature_words(scene, n)
 
-        order = [
-            f["id"]
-            for f in scene.get("buildings") or []
-            if isinstance(f, dict) and f.get("id")
-        ]
-        group_ids = [
-            g["id"]
-            for g in scene.get("groups") or []
-            if isinstance(g, dict) and g.get("id")
-        ]
-        feature_ids = order + [f for f in payload["features"] if f not in order]
+        # An enabled scene's buildings and groups are validated lists with ids (store.read_scene).
+        order = [f["id"] for f in scene["buildings"]]
+        group_ids = [g["id"] for g in scene["groups"]]
+        groups = {g["id"]: g for g in scene["groups"]}
+        # Only features the route answers for (an unbound building has no entry), in scene order.
+        feature_ids = [f for f in order if f in payload["features"]]
+        feature_ids += [f for f in payload["features"] if f not in order]
         group_order = [g for g in group_ids if g in payload["groups"]]
 
         asked = None
         if building is not None:
-            if not isinstance(building, str) or not building.strip():
+            if not isinstance(building, str):
                 raise SceneError(
                     "invalid_input", "Name a building or group, or leave it out"
                 )
             asked = _match(words, order + group_ids, building)
-            groups = {
-                g["id"]: g for g in scene.get("groups") or [] if isinstance(g, dict)
-            }
             if asked in groups:
                 members = results._members(groups, asked)
                 feature_ids = [f for f in feature_ids if f in members]
@@ -207,9 +200,7 @@ def read(
         truncated: list[dict[str, Any]] = []
         features = []
         for fid in feature_ids:
-            entry = payload["features"].get(fid)
-            if entry is None:
-                continue
+            entry = payload["features"][fid]
             targets = [_target(t, words) for t in entry["targets"]]
             features.append(
                 {

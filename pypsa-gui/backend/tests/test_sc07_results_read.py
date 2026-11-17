@@ -400,3 +400,82 @@ def test_the_dispatcher_answers_what_the_module_answers(client, bound_ctx, call)
             site_id="campus", snapshot=T3
         )
     assert via_tool == call(snapshot=T3)
+
+
+@pytest.mark.usefixtures("solved")
+def test_the_read_caps_every_user_string_it_returns(call, monkeypatch):
+    monkeypatch.setattr(chat, "MAX_NAME_CHARS", 8)
+    out = call(snapshot=T3)
+    strings = []
+
+    def walk(v):
+        if isinstance(v, str):
+            strings.append(v)
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                if k not in ("run_words", "signs", "data_fields", "limits"):
+                    walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+
+    walk({"features": out["features"], "groups": out["groups"]})
+    assert strings and max(len(s) for s in strings) <= 8
+    assert out["features"][0]["feature"] == "Propose…"
+
+
+@pytest.mark.usefixtures("solved")
+def test_a_site_with_no_3d_scene_is_not_found(client, call, project_storage_dir):
+    from services import site_service as ss
+    from tests.test_site_scene_results import NAME, SITE
+
+    doc = ss.read_sites(project_storage_dir(NAME))
+    extra = {**doc, "sites": doc["sites"] + [{**SITE, "id": "plain", "name": "Plain"}]}
+    assert client.put(f"/api/projects/{NAME}/sites", json=extra).status_code == 200
+    with pytest.raises(HTTPException) as exc:
+        call(site_id="plain", snapshot=T3)
+    assert (exc.value.status_code, _kind(exc)) == (404, "not_found")
+
+
+@pytest.mark.usefixtures("solved")
+def test_a_building_that_is_not_text_is_invalid_input(call):
+    with pytest.raises(HTTPException) as exc:
+        call(snapshot=T3, building=5)
+    assert _kind(exc) == "invalid_input"
+
+
+def test_a_shared_allocation_names_its_buildings_in_words_and_an_explicit_one_is_kept():
+    words = {"greenfield:hall": "Proposed building 1"}
+    shared = {
+        "class": "Load",
+        "uid": "u1",
+        "allocation": {"basis": "shared", "features": ["greenfield:hall", "gone"]},
+    }
+    assert chat_results._target(shared, words) == {
+        "class": "Load",
+        "allocation": {
+            "basis": "shared",
+            "features": ["Proposed building 1", "an item not on the site"],
+        },
+    }
+    explicit = {
+        "class": "Load",
+        "uid": "u1",
+        "allocation": {"basis": "explicit", "weight": 0.5},
+    }
+    assert chat_results._target(explicit, words)["allocation"] == {
+        "basis": "explicit",
+        "weight": 0.5,
+    }
+
+
+@pytest.mark.usefixtures("solved")
+def test_a_cap_below_the_fixed_fields_empties_the_lists_and_names_each_cut_once(
+    call, monkeypatch
+):
+    monkeypatch.setattr(chat, "MAX_READ_BYTES", 200)
+    out = call(snapshot=T3)
+    assert out["features"] == [] and out["groups"] == []
+    fields = [t["field"] for t in out["truncated"]]
+    assert sorted(fields) == ["features", "groups"]
+    assert {"field": "features", "shown": 0, "total": 3} in out["truncated"]
