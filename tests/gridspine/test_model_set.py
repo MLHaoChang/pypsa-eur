@@ -139,3 +139,19 @@ def test_manifest_refuses_a_variant_not_frozen():
         manifest(ms, "aggregated")
     with pytest.raises(ContractError, match="aggregated variant was not frozen"):
         ms.spec("aggregated")
+
+
+def test_none_is_plain_data():
+    assert canonical({"a": None}, {}) == '{"campus":{"a":null},"params":{}}'
+
+
+def test_default_freeze_time_is_now_in_utc():
+    before = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    ms = new_model_set(campus_spec(), PARAMS)
+    created = datetime.datetime.fromisoformat(ms.created_utc)
+    assert created.utcoffset() == datetime.timedelta(0)
+    assert before <= created <= datetime.datetime.now(datetime.timezone.utc)
+
+
+def test_unit_map_defaults_to_empty():
+    assert new_model_set(campus_spec(), PARAMS, now=T0).unit_map == {}

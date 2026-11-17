@@ -20,6 +20,11 @@ def test_reference_is_stored_and_hash_lower_cased():
     assert c.vendor_models == {"bess": {**REF, "sha256": "ab" * 32}}
 
 
+def test_hash_with_every_hex_digit_is_accepted():
+    sha = "0123456789abcdef" * 4
+    assert build_campus(spec_with({"pv": {**REF, "sha256": sha}})).vendor_models["pv"]["sha256"] == sha
+
+
 def test_campus_without_the_block_has_none():
     assert build_campus(campus_spec()).vendor_models == {}
 
