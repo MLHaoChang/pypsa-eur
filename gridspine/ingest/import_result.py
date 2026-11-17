@@ -75,7 +75,9 @@ def _require_json(value: Any, what: str) -> None:
     try:
         json.dumps(value, allow_nan=False)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{what} must be JSON-ready and finite, got {value!r}") from exc
+        raise ValueError(
+            f"{what} must be JSON-ready and finite, got {value!r}"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -164,7 +166,9 @@ class ImportReport:
         for name, n in self.counts.items():
             _require_text(name, "count name")
             if not isinstance(n, int) or isinstance(n, bool) or n < 0:
-                raise ValueError(f"count for {name!r} must be a non-negative int, got {n!r}")
+                raise ValueError(
+                    f"count for {name!r} must be a non-negative int, got {n!r}"
+                )
         for items, kind in (
             (self.unmapped, Unmapped),
             (self.assumed, Assumed),
@@ -229,7 +233,9 @@ class ImporterSpec:
         _require_text(self.help, "help")
         exts = tuple(_normalise_ext(e) for e in self.extensions)
         if not exts:
-            raise ValueError(f"{self.format_id!r} must name at least one file extension")
+            raise ValueError(
+                f"{self.format_id!r} must name at least one file extension"
+            )
         object.__setattr__(self, "extensions", exts)
 
     @property
@@ -241,9 +247,13 @@ class ImporterSpec:
         return importlib.util.find_spec(self.module) is not None
 
     def load_reader(self) -> Reader:
-        reader = getattr(importlib.import_module(self.module), f"read_{self.format_id}", None)
+        reader = getattr(
+            importlib.import_module(self.module), f"read_{self.format_id}", None
+        )
         if not callable(reader):
-            raise TypeError(f"{self.module} must define read_{self.format_id}(paths, options)")
+            raise TypeError(
+                f"{self.module} must define read_{self.format_id}(paths, options)"
+            )
         return reader
 
 
@@ -288,7 +298,9 @@ def importers(declared: Sequence[ImporterSpec] = DECLARED) -> tuple[ImporterSpec
         if spec.format_id in seen:
             raise ValueError(f"format id {spec.format_id!r} is declared twice")
         seen.add(spec.format_id)
-    return tuple(sorted((s for s in declared if s.is_available()), key=lambda s: s.format_id))
+    return tuple(
+        sorted((s for s in declared if s.is_available()), key=lambda s: s.format_id)
+    )
 
 
 def get(format_id: str, declared: Sequence[ImporterSpec] = DECLARED) -> ImporterSpec:
@@ -301,7 +313,9 @@ def get(format_id: str, declared: Sequence[ImporterSpec] = DECLARED) -> Importer
     raise KeyError(f"no importer {format_id!r} in this build; available: {known}")
 
 
-def for_extension(ext: str, declared: Sequence[ImporterSpec] = DECLARED) -> list[ImporterSpec]:
+def for_extension(
+    ext: str, declared: Sequence[ImporterSpec] = DECLARED
+) -> list[ImporterSpec]:
     """
     Importers that accept files with ``ext`` (case and leading dot ignored).
 
@@ -322,7 +336,9 @@ def read(
     spec = get(format_id, declared)
     result = spec.load_reader()([Path(p) for p in paths], dict(options or {}))
     if not isinstance(result, ImportResult):
-        raise TypeError(f"{spec.module} returned {type(result).__name__}, not ImportResult")
+        raise TypeError(
+            f"{spec.module} returned {type(result).__name__}, not ImportResult"
+        )
     if result.report.source_format != format_id:
         raise ValueError(
             f"{spec.module} reported source_format {result.report.source_format!r}, "
