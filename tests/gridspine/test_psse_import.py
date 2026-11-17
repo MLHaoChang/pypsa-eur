@@ -85,21 +85,6 @@ def test_counts_in_plain_names(name, counts):
     assert _read(name).report.counts == counts
 
 
-def test_every_record_accounted(tmp_path):
-    """Records read = assets made + rows listed as not mapped, section by section."""
-    case = read_raw(FIX / "case30.raw")
-    n = _read("case30").network
-    t = case.tables
-    assert len(n.buses) == len(t["bus"])
-    assert len(n.loads) == len(t["load"])
-    assert len(n.generators) == len(t["generator"])
-    assert len(n.lines) == len(t["branch"])
-    assert len(n.transformers) == len(t["transformer"])
-    assert (n.shunt_impedances["shunt_kind"] == "switched").sum() == len(
-        t["switched_shunt"]
-    )
-
-
 def test_unmapped_dc_link_listed():
     rep = _read("two-terminal-hvdc_test").report
     assert len(rep.unmapped) == 1 and "no DC link mapping" in rep.unmapped[0].reason
@@ -250,6 +235,22 @@ def test_three_winding_star():
     assert list(a["active"]) == [True, False, True]
 
 
+def test_three_winding_magnetising_at_winding1_bus():
+    """
+    MAG1/MAG2 on a three-winding unit go to bus I (the winding-1 bus), not the star point.
+    The PSS/E manual is licensed; this follows PowerModels.jl (magnetising on the winding-1
+    branch's bus-I end) and the analysis in eigenergy/powerio issue #741.
+    """
+    n = _read("three_winding_mag_test").network
+    (nm,) = n.shunt_impedances.index
+    sh = n.shunt_impedances.loc[nm]
+    assert sh["bus"] == "FAV SPOT 01" and sh["shunt_kind"] == "magnetising"
+    assert (sh["g"], sh["b"]) == pytest.approx(
+        (5.0e-3 * 100.0 / 250.0**2, 6.74e-3 * 100.0 / 250.0**2)
+    )
+    assert (n.transformers[["g", "b"]] == 0).all().all()
+
+
 def test_three_winding_star_lone_bus_warned():
     rep = _read("three_winding_test").report
     assert any("T1 3W star" in w and "cannot solve" in w for w in rep.warnings)
@@ -335,3 +336,197 @@ def test_case39_res_converters_are_pq(tmp_path):
     assert np.allclose(sg["p_set"], net.sgen["p_mw"]) and np.allclose(
         sg["p_nom"], net.sgen["sn_mva"]
     )
+
+
+# ---------------------------------------------------------------- assumed rows and row accounting
+#: Hand-written v33 case: every record below is counted by hand in the tests.
+_FEATURES = (
+    """ 0, 100.00, 33, 0, 0, 50.00
+features
+second
+1,'A', 110.0,3
+2,'B', 110.0,2
+3,'C', 20.0,1
+0 / END OF BUS DATA
+2,'Z',1,1,1,10.0,2.0,1.0,0.5,0.5,-0.25
+3,'1',1,1,1,5.0,1.0
+0 / END OF LOAD DATA
+3,'1',1,0.0,5.0
+0 / END OF FIXED SHUNT DATA
+1,'1',50.0,0.0,99.0,-99.0,1.0,0,100.0,0,1,0,0,1,1,100,200.0,0.0
+2,'1',20.0,0.0,50.0,-50.0,1.02,3,100.0,0,1,0,0,1,1,100,200.0,0.0
+0 / END OF GENERATOR DATA
+1,2,'1',0.01,0.1,0.02,100.0,100.0,100.0
+2,3,'1',0.01,0.1,0.0,100.0,100.0,100.0
+0 / END OF BRANCH DATA
+0 / END OF TRANSFORMER DATA
+"""
+    + "0\n" * 10
+    + """2,1,0,1,1.05,0.95,0,100.0,'',12.0,2,6.0
+3,1,0,1,1.05,0.95,0,100.0,'',-4.0,1,-4.0
+0 / END OF SWITCHED SHUNT DATA
+0
+0
+Q
+"""
+)
+
+
+@pytest.fixture
+def features(tmp_path):
+    p = tmp_path / "features.raw"
+    p.write_text(_FEATURES)
+    return read_psse([p], {})
+
+
+def _assumed(rep, parameter):
+    return sorted(a.asset for a in rep.assumed if a.parameter == parameter)
+
+
+def test_zip_load_listed_as_assumed(features):
+    rep, n = features.report, features.network
+    assert _assumed(rep, "voltage dependence") == ["Load B Z"]
+    # P = PL + IP + YP, Q = QL + IQ - YQ, at 1.0 pu
+    assert (
+        n.loads.at["Load B Z", "p_set"],
+        n.loads.at["Load B Z", "q_set"],
+    ) == pytest.approx((11.5, 2.75))
+
+
+def test_different_kv_branch_is_a_named_one_to_one_transformer(features):
+    rep, n = features.report, features.network
+    assert _assumed(rep, "branch type") == ["Line B - C 1"]
+    tr = n.transformers.loc["Line B - C 1"]
+    assert (tr["bus0"], tr["bus1"], tr["tap_ratio"], tr["s_nom"]) == (
+        "B",
+        "C",
+        1.0,
+        100.0,
+    )
+    assert (tr["r"], tr["x"]) == pytest.approx((0.01, 0.1))  # pu on s_nom = SBASE
+
+
+def test_each_switched_shunt_and_remote_regulator_assumed(features):
+    rep = features.report
+    assert _assumed(rep, "susceptance setting") == [
+        "Switched shunt B 1",
+        "Switched shunt C 2",
+    ]
+    assert _assumed(rep, "regulated bus") == ["Gen B 1"]
+    sh = features.network.shunt_impedances
+    assert sh.at["Switched shunt B 1", "b"] == pytest.approx(12.0 / 110.0**2)
+    assert sh.at["Switched shunt C 2", "b"] == pytest.approx(-4.0 / 20.0**2)
+
+
+def test_no_other_assumptions_in_features(features):
+    params = sorted({a.parameter for a in features.report.assumed})
+    assert params == [
+        "branch type",
+        "regulated bus",
+        "susceptance setting",
+        "voltage dependence",
+    ]
+    assert len(features.report.assumed) == 1 + 1 + 2 + 1
+
+
+def test_row_accounting_features(features):
+    """Rows in per section (hand-counted above) = assets made + unmapped; nothing refused here."""
+    rep, n = features.report, features.network
+    assert rep.counts == {
+        "Buses": 3,
+        "Loads": 2,
+        "Generators": 2,
+        "Lines": 1,
+        "Branches imported as transformers": 1,
+        "Fixed shunts": 1,
+        "Switched shunts": 2,
+    }
+    assert rep.unmapped == []
+    assert (
+        len(n.buses),
+        len(n.loads),
+        len(n.generators),
+        len(n.lines),
+        len(n.transformers),
+    ) == (3, 2, 2, 1, 1)
+    assert len(n.shunt_impedances) == 1 + 2
+
+
+def test_row_accounting_case30():
+    """
+    case30.raw, hand-counted: 30 buses, 21 loads, 6 machines, 34 branches, 7 transformers,
+    2 switched shunts, no fixed shunts, nothing unmapped.
+    """
+    res = _read("case30")
+    n = res.network
+    assert (
+        len(n.buses),
+        len(n.loads),
+        len(n.generators),
+        len(n.lines),
+        len(n.transformers),
+    ) == (30, 21, 6, 34, 7)
+    assert (n.shunt_impedances["shunt_kind"] == "switched").sum() == 2
+    assert len(n.shunt_impedances) == 2 and res.report.unmapped == []
+
+
+# ---------------------------------------------------------------- engine cage (GK A R8)
+def test_reader_and_registry_import_without_pypsa():
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; sys.modules['pypsa'] = None\n"
+        "import gridspine.ingest.psse_raw_parse, gridspine.ingest.import_result\n"
+        "from gridspine.ingest.psse_raw_parse import read_raw\n"
+        f"read_raw({str(FIX / 'case14.raw')!r})\n"
+        "print('ok')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).parents[2],
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "ok"
+
+
+# ---------------------------------------------------------------- off-nominal transformer round trip (GK A R7)
+#: Cases whose exact equality waits on a writer fix: id -> ticket. They are not skipped:
+#: the test pins today's error at exactly WINDV2**2, so the fix turns it red and the
+#: case moves to the equality branch.
+_PENDING = {
+    "hv": "GC-04 raw_writer.trafo_impedance WINDV2² fix",
+    "lv": "GC-04 raw_writer.trafo_impedance WINDV2² fix",
+}
+
+
+@pytest.mark.parametrize("tap_side", ["hv", "lv"])
+def test_off_nominal_transformer_round_trip(tmp_path, tap_side):
+    """
+    A transformer whose LV rating differs from its bus kV (21 kV on a 20 kV bus), tapped
+    on either side, against pandapower's own branch model (``_ppc``, Z at the to-bus base).
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_raw_v35 import _trafo_net
+
+    net = _trafo_net(tap_side)
+    pp.create_ext_grid(net, 0)
+    pp.create_load(net, 1, p_mw=5.0)
+    net.bus["name"] = ["HV", "LV"]
+    pp.runpp(net, numba=False)
+    br = net._ppc["branch"][-1]
+    x_pp = br[3].real * 100.0 / net._ppc["baseMVA"]
+    write_raw(net, tmp_path / "t.raw")
+    raw_case = read_raw(tmp_path / "t.raw")
+    windv2 = raw_case.tables["transformer"]["WINDV2"].iloc[0]
+    tr = read_psse([tmp_path / "t.raw"], {}).network.transformers.iloc[0]
+    x_ours = tr["x"] * 100.0 / tr["s_nom"]
+    assert tr["tap_ratio"] == pytest.approx(br[8].real, rel=1e-6)
+    if tap_side in _PENDING:
+        assert x_ours == pytest.approx(x_pp * windv2**2, rel=1e-4), _PENDING[tap_side]
+    else:
+        assert x_ours == pytest.approx(x_pp, rel=1e-4)

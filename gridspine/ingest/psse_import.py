@@ -27,7 +27,7 @@ the PSS/E conventions and their source).
 - Branch: a ``Line`` in ohms and siemens on the from-bus base. The line-end
   shunts GI/BI/GJ/BJ become ``ShuntImpedance`` rows at each end, so they stay
   exact. A branch joining buses of different base kV becomes a 1:1 transformer
-  (``warnings``). A branch with R = X = 0 gets X = THRSHZ (0.0001 pu).
+  (``assumed``). A branch with R = X = 0 gets X = THRSHZ (0.0001 pu).
 - Two-winding transformer: a ``Transformer`` from the winding-1 bus, ``r``/``x``
   on ``s_nom``, ``tap_ratio`` the ideal ratio at bus0, ``phase_shift`` = ANG1.
   The magnetising admittance is an exact ``ShuntImpedance`` at the winding-1 bus,
@@ -383,9 +383,14 @@ def build_network(case: RawCase):
                     tap_ratio=1.0,
                     active=on,
                 )
-                warnings.append(
-                    f"{nm} joins buses of {kv[i]:g} kV and {kv[j]:g} kV; imported as a "
-                    "1:1 transformer with the line's per-unit impedance"
+                assumed.append(
+                    Assumed(
+                        nm,
+                        "branch type",
+                        "1:1 transformer",
+                        f"joins buses of {kv[i]:g} kV and {kv[j]:g} kV; a line has one voltage, "
+                        "so the branch is a 1:1 transformer with its per-unit impedance",
+                    )
                 )
                 n_branch_tr += 1
                 phys = branch_physical(case, r)

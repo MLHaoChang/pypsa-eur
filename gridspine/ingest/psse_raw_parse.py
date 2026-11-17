@@ -715,16 +715,10 @@ def _transformers(case, recs, bus_by):
         for key in ("CW", "CZ", "CM"):
             allowed = (1, 2) if key == "CM" else (1, 2, 3)
             if rec[key] not in allowed:
-                case.assumed.append(
-                    (
-                        f"transformer {rec['I']}-{rec['J']}-{rec['K']} circuit {rec['CKT']}",
-                        _CODE_NAMES[key],
-                        1,
-                        f"{key}={rec[key]} in the file is not one of "
-                        f"{allowed}; PSS/E's default 1 used (line {ln})",
-                    )
+                raise ContractError(
+                    f"RAW line {ln}: transformer {_CODE_NAMES[key]} is {rec[key]}, not one of {allowed}; "
+                    "a wrong code misreads every impedance or ratio of this transformer"
                 )
-                rec[key] = 1
         out.append(rec)
         i += n_lines
     return pd.DataFrame(out)

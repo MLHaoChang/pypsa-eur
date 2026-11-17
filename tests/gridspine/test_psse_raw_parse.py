@@ -91,19 +91,6 @@ def test_unclosed_quote_names_the_line():
                 "owner": 1,
             },
         ),
-        (
-            "case5",
-            {
-                "bus": 5,
-                "load": 3,
-                "generator": 5,
-                "branch": 5,
-                "transformer": 4,
-                "area": 1,
-                "zone": 1,
-                "owner": 1,
-            },
-        ),
         ("three_winding_test", {"bus": 3, "load": 1, "generator": 2, "transformer": 5}),
         (
             "two_winding_mag_test",
@@ -225,12 +212,12 @@ def test_defaults_take_psse_values():
     ) == (1, 1, 1, 1.0, 1.0, 100.0)
 
 
-def test_out_of_range_codes_assumed_not_silent():
-    case = read_raw(FIX / "case5.raw")
-    names = [(a[1], a[2]) for a in case.assumed]
-    assert ("winding ratio units (CW)", 1) in names
-    assert ("impedance units (CZ)", 1) in names
-    assert ("magnetising admittance units (CM)", 1) in names
+def test_case5_out_of_range_code_refused():
+    """case5 carries CW = CZ = CM = 0 on its transformers: refused, never defaulted (GK A R1)."""
+    with pytest.raises(
+        ContractError, match=r"line 27: transformer winding ratio units \(CW\) is 0"
+    ):
+        read_raw(FIX / "case5.raw")
 
 
 # ---------------------------------------------------------------- refusals
@@ -407,6 +394,30 @@ def test_magnetising_cm2_from_loss_and_current():
     vs = (110.0 / 121.0) ** 2
     g = 30000.0 * 1e-6 / 100.0 * vs
     y = 0.01 * 40.0 / 100.0 * vs
+    assert w["g_pu"] == pytest.approx(g)
+    assert w["b_pu"] == pytest.approx(-math.sqrt(y**2 - g**2))
+
+
+@pytest.mark.parametrize(
+    "code, value, words",
+    [
+        ("cw", 0, "winding ratio units \\(CW\\) is 0"),
+        ("cw", 4, "winding ratio units \\(CW\\) is 4"),
+        ("cz", 0, "impedance units \\(CZ\\) is 0"),
+        ("cz", 4, "impedance units \\(CZ\\) is 4"),
+        ("cm", 0, "magnetising admittance units \\(CM\\) is 0"),
+        ("cm", 3, "magnetising admittance units \\(CM\\) is 3"),
+    ],
+)
+def test_out_of_range_code_refused(code, value, words):
+    with pytest.raises(ContractError, match=f"line 13: transformer {words}"):
+        _two_winding(**{code: value})
+
+
+def test_magnetising_cm2_nomv1_zero_means_bus_kv():
+    _, w = _two_winding(cm=2, mag=(30000.0, 0.01), sb=40.0, w1=(1.0, 0.0))
+    g = 30000.0 * 1e-6 / 100.0
+    y = 0.01 * 40.0 / 100.0
     assert w["g_pu"] == pytest.approx(g)
     assert w["b_pu"] == pytest.approx(-math.sqrt(y**2 - g**2))
 
