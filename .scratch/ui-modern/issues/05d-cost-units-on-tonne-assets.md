@@ -3,11 +3,8 @@
 
 # The edit drawer's cost units on tonne assets
 
-Status: ready-for-agent
-Model tier: sonnet
-Size: S
-Likely files: `pypsa-gui/backend/services/asset_schema/fields.py`, `pypsa-gui/backend/tests/test_asset_schema_units.py`, `pypsa-gui/frontend/src/hooks/useAssetSchema.ts`, `api/assetSchema.ts` (the files 05c touched)
-Blocked by: none (05c merged, #1448).
+Status: needs-triage
+Blocked by: 05c (PR #1448).
 Gated: GK B, UX.
 Type: bug
 
@@ -17,7 +14,3 @@ Follow-up to 05c (UX review of #1448). 05c makes the drawer's quantity fields (c
 
 - A cost field on an asset on a tonne bus shows a per-tonne unit; an energy-bus asset is unchanged.
 - A test pins one of each on `eh_concentrator_staged`; the scale for a tonne bus is decided first (no kWh scale applies).
-
-## Comments
-
-**2026-11-17 triage (SCALE-1).** The blocker 05c merged (#1448). Blocked by: none. The builder states the tonne scale in the plan to GK B before coding.
