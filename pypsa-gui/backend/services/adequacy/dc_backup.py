@@ -1536,6 +1536,16 @@ def _write_meta(project_dir, meta: dict) -> None:
     )
 
 
+#: The Backup mode words the create form and the Backup section show
+#: (frontend ``MODE_LABEL``), for the refusals a user reads.
+MODE_WORD = {"genset": "Gensets", "bess": "Batteries", "hybrid": "Hybrid"}
+
+
+def mode_word(mode: str) -> str:
+    """The mode as the form names it; an unknown stored mode as it is stored."""
+    return MODE_WORD.get(mode, mode)
+
+
 #: The sidecar requirements ``apply_backup`` rewrites, by the mode it applied:
 #: a Batteries campus loses the gensets' N+k, fuel and join scenarios too.
 _BACKUP_REQUIREMENTS = {
@@ -1583,7 +1593,7 @@ def genset_form(n, island: dict, built: str, genset_n, genset_island: dict):
     strings = built_strings(n, island)
     if not strings:
         raise DcBackupError(
-            f"backup: this project was created with {built} backup, but its saved "
+            f"backup: this project was created with {mode_word(built)} backup, but its saved "
             "sidecar does not list the battery strings, so the assessment cannot "
             "tell them from your own storage. Create the project again to assess it",
             "backup.mode",
@@ -1696,7 +1706,9 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
     tid, spec, planning = project_spec(d, tpl)
     built = (_meta(d).get("dc_load") or {}).get("network_backup_mode")
     if built and built not in _BACKUP_REQUIREMENTS:
-        raise DcBackupError(NOT_GENSET_FORM.format(mode=built), "backup.mode")
+        raise DcBackupError(
+            NOT_GENSET_FORM.format(mode=mode_word(built)), "backup.mode"
+        )
     if mode is not None:
         try:
             spec = spec.model_copy(

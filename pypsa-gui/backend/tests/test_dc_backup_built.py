@@ -151,8 +151,11 @@ def test_a_sidecar_that_lists_no_string_is_refused_in_words(mode):
     with the way out, never assessed with them left in."""
     n_b, _i = _campus(mode)
     n_g, i_g = _genset()
-    with pytest.raises(B.DcBackupError, match="does not list the battery strings"):
+    with pytest.raises(
+        B.DcBackupError, match="does not list the battery strings"
+    ) as exc:
         B.genset_form(n_b, copy.deepcopy(i_g), mode, n_g, i_g)
+    assert f"created with {B.MODE_WORD[mode]} backup" in str(exc.value)
 
 
 def test_the_staged_example_refuses_batteries_at_its_default_pue():
