@@ -26,3 +26,10 @@ owns the names, so it decides which word wins.
   figure with the same unit string.
 - **Chat.** Tool outputs carry keys (`project_post_tax_npv_at_wacc`, `lcoe_real_per_mwh`, `chat_tools.py:2972-2977`)
   with no label; the answer's words come from the model.
+
+## Comments
+
+Expert-catalogue design lead (2026-11-17): not in the catalogue's scope (inputs only). Recommends one
+HEADLINE_WORDS-style source read by the strip, Investment, Guided, reports, Compare and the harness, each figure with a
+plain name, unit and basis line, and a mode-parity test. Unlevered vs after-tax NPV needs a finance ruling (GK B)
+before any name is chosen. Left needs-triage for the coordinator.
