@@ -63,7 +63,12 @@ const STATES = [
   ['save-first', [STUDY], null, null, null, 'save-first'],
   ['input-error', [STUDY], DONE, null, null, 'input-error'],
   ['route-refusal', [STUDY], DONE, null, null, 'refusal'],
+  ['verdict-layout', [STUDY], DONE, null, null, 'verdict'],
 ]
+// A done Energy Hub study and its review, so Results shows #1611's headline above the card.
+const EH_REPORT = { archetype: 'off_grid', pack_hash: 'x', assumptions_hash: 'y', ens_cap_permyriad: 0.5, achieved_ens_permyriad: 0.3,
+  mc_lole_h: 2.1, certified: true, cost_at_target_eur: 1.2e6, period_basis: 'year', completeness: {}, sections: {},
+  pipeline: { stages: [], solves_consumed: 3, budget_solves: 10 } }
 
 const browser = await chromium.launch()
 try {
@@ -93,7 +98,7 @@ try {
    for (const scheme of ['light', 'dark']) {
     for (const mode of act ? ['guided'] : ['guided', 'expert']) {
      const tag = `${n}-${name}-${mode}-${scheme}`
-     const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, reducedMotion: 'reduce', colorScheme: scheme })
+     const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1440, height: act === 'verdict' ? 2400 : 900 }, deviceScaleFactor: 2, reducedMotion: 'reduce', colorScheme: scheme })
      await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
      await ctx.addInitScript(({ mode, project, scheme }) => {
        localStorage.setItem('network-diagram:current-project', project)
@@ -125,6 +130,11 @@ try {
      await page.route(u => /\/grid-extension-break-even$/.test(u.pathname), r => act === 'refusal'
        ? r.fulfill({ status: 409, json: { detail: { error_kind: 'supply_architectures_stale', message: 'the base project changed' } } })
        : r.fulfill({ json: be ?? result({}) }))
+     if (act === 'verdict') {
+       await page.route(u => u.pathname === '/api/results/eh_study', r => r.request().method() === 'GET' ? r.fulfill({ json: { status: 'done', report: EH_REPORT, error: null } }) : r.continue())
+       await page.route(u => u.pathname === '/api/results/eh_review', r => r.fulfill({ json: { status: 'ok', stale: false, summary: { verdict: 'pass', target_lole_h: 3, mc_lole_h_per_year: 2.1 }, findings: [] } }))
+       await page.route(u => u.pathname === '/api/results/eh_reference_design', r => r.fulfill({ json: EH_REPORT }))
+     }
      if (act === 'save-first') await page.route(u => u.pathname.endsWith('/network/undo/info'), r => r.fulfill({ json: { depth: 1, unsaved: true } }))
 
      try {
@@ -165,7 +175,12 @@ try {
        await card.evaluate(el => { const out = []; for (const x of document.body.querySelectorAll('*')) { if (el.contains(x) || x.contains(el)) continue
          if ((getComputedStyle(x).position === 'fixed' || x.matches('[data-testid="companion-launcher"]')) && x.style.visibility !== 'hidden') { x.style.visibility = 'hidden'; out.push(x) } } window.__h = out })
        const f = path.join(OUT, `${tag}.png`)
-       await card.screenshot({ path: f }); written.push(f)
+       if (act === 'verdict') {
+         const top = await page.getByTestId('hub-results-verdict').boundingBox(); const b = await card.boundingBox()
+         const y0 = Math.max(0, top.y - 120)
+         await page.screenshot({ path: f, clip: { x: b.x - 12, y: y0, width: b.width + 24, height: b.y + b.height - y0 + 12 } })
+       } else await card.screenshot({ path: f })
+       written.push(f)
      } catch (e) {
        problems.push(`${tag}: ${e.message.split('\n')[0]}`)
        await page.screenshot({ path: path.join(OUT, `failed-${tag}.png`) }).catch(() => {})
