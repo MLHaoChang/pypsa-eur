@@ -657,3 +657,92 @@ def test_edge_fixture_ledger_with_an_unreferenced_csv():
     assert ("data file extra.csv", "no imported property reads this file") in reasons(
         conv
     )
+
+
+# --------------------------------------------- boundaries (mutant survivors)
+
+
+def test_csv_cap_fits_the_largest_real_data_file():
+    from gridspine.ingest import plexos_csv
+
+    # PLEXOS-World's wind file is 216,981,296 bytes (Dataverse file 3985042)
+    assert 216_981_296 < plexos_csv.MAX_CSV_BYTES <= 512 * 2**20
+
+
+def test_row_cap_is_inclusive(monkeypatch):
+    from gridspine.ingest import plexos_csv
+
+    monkeypatch.setattr(plexos_csv, "MAX_CSV_ROWS", 3)
+    body = "Datetime,A\n01/01/2015 00:00,1\n01/01/2015 01:00,2\n01/01/2015 02:00,3\n"
+    assert series(body)["A"].tolist() == [1, 2, 3]
+
+
+def test_exact_column_wins_over_a_case_variant():
+    body = "Datetime,GEN-A,Gen-a\n2015-01-01 00:00,1,2\n"
+    assert series(body, names=("Gen-a",), snaps=HOURS[:1])["Gen-a"].tolist() == [2]
+
+
+@pytest.mark.parametrize(
+    "snaps, step",
+    [(pd.RangeIndex(3), 60), (HOURS[:3], None), (HOURS[:3], 0)],
+)
+def test_no_datetime_snapshots_or_no_step_reads_nothing(snaps, step):
+    got = read_series(text("Datetime,A\n"), ["A"], snaps, step)
+    assert got == {"A": "the network has no time horizon"}
+
+
+def test_snapshot_step_must_equal_the_horizon_step():
+    body = "Datetime,A\n01/01/2015 00:00,1\n01/01/2015 01:00,2\n01/01/2015 02:00,3\n"
+    assert (
+        series(body, step=30)["A"] == "the snapshots have no single step; none inferred"
+    )
+
+
+@pytest.mark.parametrize(
+    "dates, reason",
+    [
+        ("12/01/2015,12/02/2015", "no day is above 12"),
+        ("01/12/2015,02/12/2015", "no day is above 12"),
+    ],
+)
+def test_twelve_is_not_above_twelve(dates, reason):
+    body = "Datetime,A\n" + "".join(f"{d},1\n" for d in dates.split(","))
+    got = read_series(text(body), ["A"], HOURS[:1], 60, None)["A"]
+    assert isinstance(got, str) and reason in got
+
+
+def test_fractional_locale_is_no_locale():
+    body = "Datetime,A\n01/02/2015 00:00,1\n"
+    assert (
+        "the Data File has no Locale"
+        in series(body, snaps=HOURS[:1], locale=2057.5)["A"]
+    )
+
+
+@pytest.mark.parametrize(
+    "header",
+    ["NAME,A,B", "Object,M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11,M12"],
+)
+def test_monthly_header_needs_name_and_all_months(header):
+    assert series(header + "\n")["A"].startswith("layout not read")
+
+
+@pytest.mark.parametrize(
+    "row, reason",
+    [
+        ("2015,1,1,1.5,1", "Period '1.5' is not a whole number"),
+        ("2015,1,x,1,1", "Day 'x' is not a whole number"),
+        ("2015,1,1,0,1", "period 0 outside 1..24 for this horizon"),
+        ("2015,1,1,25,1", "period 25 outside 1..24 for this horizon"),
+        ("2015,2,30,1,1", "a Year/Month/Day is not a date"),
+    ],
+)
+def test_period_layout_refusals(row, reason):
+    got = series("Year,Month,Day,Period,A\n" + row + "\n", snaps=HOURS[:1])["A"]
+    assert got == reason
+
+
+def test_last_period_of_the_day():
+    body = "Year,Month,Day,Period,A\n2015,1,1,24,5\n"
+    snaps = pd.DatetimeIndex(["2015-01-01 23:00"])
+    assert series(body, snaps=snaps)["A"].tolist() == [5]
