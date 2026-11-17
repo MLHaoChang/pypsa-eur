@@ -101,7 +101,7 @@ def test_carrier_default_outage_rates_are_one_row_per_carrier():
         "outage_rate_value",
     )
     assert gas["section"] == "assets"
-    assert "5 %" in gas["shown"] and "50 h" in gas["shown"]
+    assert gas["shown"] == "5 % forced outage rate on demand, repair 50 h"
     assert _row(rows, "outage_rate:StorageUnit:battery")["entity"] == "bess"
 
 
@@ -614,3 +614,101 @@ def test_a_carrier_row_uses_the_carriers_own_name():
 def test_an_empty_network_assumes_only_the_goal():
     rows = run_assumptions(pypsa.Network(), {}, None)
     assert _keys(rows) == {"mc_draws", "site_archetype"}
+
+
+def test_an_asset_rate_on_an_unknown_carrier_assumes_nothing():
+    """A carrier with no default has no repair time to assume, so its unit's
+    own rate leaves no row (and no error)."""
+    n = _net()
+    n.add("Generator", "x", bus="ac", carrier="fusion", p_nom=10)
+    n.generators.loc["x", "outage_rate_value"] = 0.02
+    rows = run_assumptions(n, {}, None)
+    assert not [k for k in _keys(rows) if k.startswith("mttr:Generator:fusion")]
+
+
+def test_the_recorder_keeps_a_draws_row_the_request_repeats():
+    """Draws the request sets to the assumed default are still the default,
+    so the record keeps their row."""
+    from types import SimpleNamespace
+
+    from services.adequacy.eh_study_runner import _assumptions_recorder
+
+    d = _row(run_assumptions(_net(), {}, None), "mc_draws")["value"]
+    rec: dict = {}
+    body = SimpleNamespace(archetype="strong_grid", mc={"draws": d})
+    _assumptions_recorder(rec, {}, body, {"mc_draws": "override"})(_net())
+    assert "mc_draws" in _keys(rec["assumptions"])
+
+
+def test_a_non_finite_link_efficiency_reads_lossless():
+    from services.adequacy.eh_stages import LINK_EFFICIENCY_DEFAULT, link_attr_series
+
+    n = _net()
+    n.add("Link", "blank", bus0="ac", bus1="h2", p_nom=5)
+    n.links.loc["blank", "efficiency"] = np.nan
+    values, fell_back = link_attr_series(
+        n, "blank", "efficiency", LINK_EFFICIENCY_DEFAULT
+    )
+    assert fell_back is True
+    assert len(values) == len(n.snapshots) and (values == 1.0).all()
+
+
+def test_a_ledger_assumed_field_is_not_repeated_as_a_run_default():
+    """A field the template's ledger already raises as assumed is left to that
+    row; anything else in the ledger (junk, measured, no field) changes nothing."""
+    from services.flow_service import _run_default_items as items
+
+    rows = run_assumptions(_net(), {}, None)
+
+    def codes(template):
+        return {i["code"] for i in items(rows, template)}
+
+    full = codes(None)
+    assert codes({}) == full and codes({"ledger": None}) == full
+    ledger = [
+        "junk",
+        {"entity": "gt", "field": "outage_rate_value", "source": "assumed"},
+        {"entity": "", "field": "site_archetype", "source": "assumed"},
+        {"entity": "bess", "field": "outage_rate_value", "source": "measured"},
+        {"entity": None, "field": "mc_draws", "source": "assumed"},
+        {"entity": "", "source": "assumed"},
+    ]
+    assert codes({"ledger": ledger}) == full - {
+        "assumed_run_outage_rate:Generator:gas",
+        "assumed_run_site_archetype",
+        "assumed_run_mc_draws",
+    }
+
+
+def test_a_non_voll_refusal_keeps_the_voll_said_once(
+    client, tmp_projects_dir, monkeypatch
+):
+    """A study refusal about something else does not stand in for the missing
+    VOLL: the presence check still says it, and only that once."""
+    from services import flow_service
+
+    r = client.post(
+        "/api/projects/from_template/eh_microgrid", params={"name": "othervoll"}
+    )
+    name = r.json().get("name", "othervoll")
+    _voll(client, 0.0)
+
+    def refused(body, *, requested=True):
+        return [
+            flow_service._item(
+                "eh_study_refused",
+                "error",
+                "The reliability study would not start: something else",
+                "eh_study",
+                "scenarios",
+                fld="",
+                blocking=requested,
+            )
+        ]
+
+    monkeypatch.setattr(flow_service, "_study_start_items", refused)
+    body = client.get(f"/api/projects/{name}/flow").json()
+    codes = {i["code"] for s in body["sections"] for i in s["items"]}
+    assert "eh_study_refused" in codes
+    assert "presence_voll" in codes
+    assert "eh_voll_zero" not in codes
