@@ -1,5 +1,6 @@
 """The shared import contract: report types and the importer registry."""
 
+import ast
 import json
 import re
 import subprocess
@@ -161,10 +162,10 @@ def test_import_format_error_is_a_value_error():
     assert issubclass(ImportFormatError, ValueError)
 
 
-def _spec(fid="psse", exts=(".raw", ".dyr"), package="fake_ingest"):
+def _spec(fid="psse", exts=(".raw", ".dyr"), package="fake_ingest", name=None):
     return ImporterSpec(
         format_id=fid,
-        display_name=f"{fid} file",
+        display_name=name or f"{fid} file",
         extensions=exts,
         help="help",
         package=package,
@@ -254,9 +255,9 @@ def test_for_extension_returns_every_match(fake_package):
 def test_get_names_the_available_importers(fake_package):
     _write_importer(fake_package, "psse")
     declared = (_spec("psse"), _spec("plexos"))
-    with pytest.raises(KeyError, match="available: psse"):
+    with pytest.raises(ImportFormatError, match="available: psse"):
         ir.get("plexos", declared)
-    with pytest.raises(KeyError, match="available: none"):
+    with pytest.raises(ImportFormatError, match="available: none"):
         ir.get("psse", (_spec("plexos"),))
 
 
@@ -276,7 +277,7 @@ def test_read_runs_the_reader_and_checks_the_result(fake_package):
 
 def test_read_refuses_a_module_without_its_reader(fake_package):
     _write_importer(fake_package, "psse", "def read_other(paths, options):\n    pass\n")
-    with pytest.raises(TypeError, match="read_psse"):
+    with pytest.raises(ImportFormatError, match="read_psse"):
         ir.read("psse", ["case.raw"], declared=(_spec("psse"),))
 
 
@@ -319,8 +320,43 @@ def test_declared_importer_modules_are_frozen_into_the_app():
     the ones the spec names; a missing one would vanish from the frozen app.
     """
     spec_text = (ROOT / "pypsa-gui" / "pypsa-gui.spec").read_text(encoding="utf-8")
-    listed = set(re.findall(r'"(gridspine\.ingest\.\w+_import)"', spec_text))
-    assert listed == {s.module for s in ir.DECLARED}
+    assert _listed_importers(spec_text) == {s.module for s in ir.DECLARED}
+
+
+def _listed_importers(spec_text):
+    """
+    The `gridspine.ingest.*_import` strings in the spec's hiddenimports.
+
+    Parsed as Python, so a commented-out line does not count.
+    """
+    listed = set()
+    for node in ast.walk(ast.parse(spec_text)):
+        if isinstance(node, (ast.Assign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(
+                isinstance(t, ast.Name) and t.id == "hiddenimports" for t in targets
+            ):
+                for const in ast.walk(node.value):
+                    if isinstance(const, ast.Constant) and isinstance(const.value, str):
+                        if re.fullmatch(r"gridspine\.ingest\.\w+_import", const.value):
+                            listed.add(const.value)
+    return listed
+
+
+def test_listed_importers_ignores_comments_and_other_lists():
+    text = (
+        'datas = ["gridspine.ingest.x_import"]\n'
+        "hiddenimports = [\n"
+        '    "gridspine.ingest.a_import",\n'
+        '    # "gridspine.ingest.b_import",\n'
+        '    "gridspine.ingest.import_result",\n'
+        "]\n"
+        'hiddenimports += ["gridspine.ingest.c_import"]\n'
+    )
+    assert _listed_importers(text) == {
+        "gridspine.ingest.a_import",
+        "gridspine.ingest.c_import",
+    }
 
 
 def test_contract_module_imports_no_engine():
@@ -369,3 +405,99 @@ def test_get_does_not_import_the_reader(fake_package):
     ir.get("psse", (_spec("psse"),))
     ir.for_extension(".raw", (_spec("psse"),))
     assert "fake_ingest.psse_import" not in sys.modules
+
+
+def test_a_missing_reader_dependency_is_an_import_format_error(fake_package):
+    _write_importer(fake_package, "psse", "import not_a_real_dependency_xyz\n")
+    with pytest.raises(
+        ImportFormatError, match="PSS/E case importer cannot load"
+    ) as err:
+        ir.read("psse", ["case.raw"], declared=(_spec("psse", name="PSS/E case"),))
+    assert isinstance(err.value.__cause__, ModuleNotFoundError)
+
+
+def test_a_bug_while_loading_a_reader_is_not_hidden(fake_package):
+    _write_importer(fake_package, "psse", "raise RuntimeError('bug in the importer')\n")
+    with pytest.raises(RuntimeError, match="bug in the importer"):
+        ir.read("psse", ["case.raw"], declared=(_spec("psse"),))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "a/b.json",
+        "a\\b.json",
+        "..",
+        ".",
+        "/abs.json",
+        " x.json",
+        "network.nc",
+        "results_state.pkl",
+        "",
+        7,
+    ],
+)
+def test_sidecar_names_are_plain_unreserved_file_names(name):
+    with pytest.raises(ValueError, match="sidecar"):
+        ImportResult(network=None, report=_report(), sidecars={name: {}})
+
+
+@pytest.mark.parametrize("content", [{"x": float("nan")}, [float("inf")], object()])
+def test_sidecar_content_is_json_ready_or_bytes(content):
+    with pytest.raises(ValueError, match="sidecar"):
+        ImportResult(network=None, report=_report(), sidecars={"user_ts.json": content})
+
+
+def test_sidecar_bytes_and_json_are_accepted():
+    result = ImportResult(
+        network=None,
+        report=_report(),
+        sidecars={"user_ts.json": {"a": [1, 2]}, "layout.json": b"{}"},
+    )
+    assert set(result.sidecars) == {"user_ts.json", "layout.json"}
+
+
+def test_result_needs_a_report():
+    with pytest.raises(TypeError, match="ImportReport"):
+        ImportResult(network=None, report={"source_format": "psse"})
+
+
+def test_to_dict_revalidates_after_a_late_change():
+    value = [1.0]
+    report = _report(assumed=[Assumed("Line 1", "Rating", value, "missing")])
+    value.append(float("nan"))
+    with pytest.raises(ValueError, match="Assumed.value"):
+        report.to_dict()
+    report = _report()
+    report.counts["Buses"] = -1
+    with pytest.raises(ValueError, match="Buses"):
+        report.to_dict()
+    report = _report()
+    report.unmapped.append(("Row 3", "why"))
+    with pytest.raises(TypeError, match="Unmapped"):
+        report.to_dict()
+
+
+@pytest.mark.parametrize(
+    "late_change, error, match",
+    [
+        ("result.report.counts['Buses'] = True", ValueError, "Buses"),
+        ("result.sidecars['network.nc'] = b''", ValueError, "reserved"),
+        ("result.report.suggestions.append(None)", TypeError, "Suggestion"),
+    ],
+)
+def test_read_revalidates_what_the_reader_changed_late(
+    fake_package, late_change, error, match
+):
+    _write_importer(
+        fake_package,
+        "psse",
+        "from gridspine.ingest.import_result import ImportReport, ImportResult\n"
+        "def read_psse(paths, options):\n"
+        "    result = ImportResult(network=None, report=ImportReport("
+        "source_format='psse', source_files=[], counts={'Buses': 1}))\n"
+        f"    {late_change}\n"
+        "    return result\n",
+    )
+    with pytest.raises(error, match=match):
+        ir.read("psse", ["case.raw"], declared=(_spec("psse"),))

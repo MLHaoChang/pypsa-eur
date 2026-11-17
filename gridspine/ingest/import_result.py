@@ -25,7 +25,10 @@ Rules every importer keeps:
   survive ``json.dumps(..., allow_nan=False)``: no NaN, no infinity.
 - **Sidecars** hold everything the project stores outside ``network.nc``,
   keyed by the project file name they become (``user_ts.json``,
-  ``metadata.json``, ...), with JSON-ready content or ``bytes``.
+  ``metadata.json``, ...), with JSON-ready content or ``bytes``. Names are
+  plain file names (no folders, no ``..``) and never ``RESERVED_SIDECARS``.
+- **Errors.** Unreadable files, an unknown format and an importer that cannot
+  load all raise ``ImportFormatError`` with a reason the user can read.
 - **Hints.** An importer that suspects a value is wrong ("likely kV, not V")
   adds a ``Suggestion`` with ``by="importer"``; the assistant adds its own
   with ``by="assistant"``. Suggestions are proposals the user accepts or
@@ -54,6 +57,8 @@ if TYPE_CHECKING:  # pragma: no cover - type hint only, keeps the engine out
 DEFAULT_PACKAGE = "gridspine.ingest"
 CONFIDENCE = ("high", "medium", "low")
 SUGGESTED_BY = ("importer", "assistant")
+# Files the project writes itself; an importer's sidecar never replaces them.
+RESERVED_SIDECARS = frozenset({"network.nc", "results_state.pkl"})
 _FORMAT_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -88,6 +93,9 @@ class Unmapped:
     reason: str
 
     def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
         _require_text(self.source_item, "Unmapped.source_item")
         _require_text(self.reason, "Unmapped.reason")
 
@@ -102,6 +110,9 @@ class Assumed:
     why: str
 
     def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
         _require_text(self.asset, "Assumed.asset")
         _require_text(self.parameter, "Assumed.parameter")
         _require_json(self.value, "Assumed.value")
@@ -129,6 +140,9 @@ class Suggestion:
     by: str = "importer"
 
     def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
         _require_text(self.target, "Suggestion.target")
         _require_text(self.parameter, "Suggestion.parameter")
         _require_json(self.current, "Suggestion.current")
@@ -161,6 +175,11 @@ class ImportReport:
         self.assumed = list(self.assumed)
         self.warnings = list(self.warnings)
         self.suggestions = list(self.suggestions)
+        self.validate()
+
+    def validate(self) -> None:
+        """Check every field; run again before output, since lists stay mutable."""
+        _require_text(self.source_format, "ImportReport.source_format")
         for name in self.source_files:
             _require_text(name, "source file name")
         for name, n in self.counts.items():
@@ -177,11 +196,13 @@ class ImportReport:
             for item in items:
                 if not isinstance(item, kind):
                     raise TypeError(f"{kind.__name__} entry expected, got {item!r}")
+                item.validate()
         for text in self.warnings:
             _require_text(text, "warning")
 
     def to_dict(self) -> dict[str, Any]:
         """A JSON-ready dict; ``json.dumps(..., allow_nan=False)`` accepts it."""
+        self.validate()
         return asdict(self)
 
     @classmethod
@@ -204,6 +225,37 @@ class ImportResult:
     network: pypsa.Network
     report: ImportReport
     sidecars: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.sidecars = dict(self.sidecars)
+        self.validate()
+
+    def validate(self) -> None:
+        """Check the report and every sidecar; ``read`` runs it again."""
+        if not isinstance(self.report, ImportReport):
+            raise TypeError(f"report must be an ImportReport, got {self.report!r}")
+        self.report.validate()
+        for name, content in self.sidecars.items():
+            _require_sidecar_name(name)
+            if not isinstance(content, bytes):
+                _require_json(content, f"sidecar {name!r}")
+
+
+def _require_sidecar_name(name: Any) -> None:
+    """A plain file name in the project folder: no folders, no reserved files."""
+    _require_text(name, "sidecar file name")
+    if (
+        "/" in name
+        or "\\" in name
+        or name.strip() != name
+        or name in (".", "..")
+        or Path(name).is_absolute()
+    ):
+        raise ValueError(f"sidecar file name must be a plain file name, got {name!r}")
+    if name in RESERVED_SIDECARS:
+        raise ValueError(
+            f"sidecar file name {name!r} is reserved for the project itself"
+        )
 
 
 Reader = Callable[[Sequence[Path], Mapping[str, Any]], ImportResult]
@@ -247,12 +299,23 @@ class ImporterSpec:
         return importlib.util.find_spec(self.module) is not None
 
     def load_reader(self) -> Reader:
-        reader = getattr(
-            importlib.import_module(self.module), f"read_{self.format_id}", None
-        )
+        """
+        Import the reader; ImportFormatError when it cannot load.
+
+        Only ImportError is translated (a missing module or dependency); any
+        other error raised while importing the module is a bug and propagates.
+        """
+        try:
+            module = importlib.import_module(self.module)
+        except ImportError as exc:
+            raise ImportFormatError(
+                f"The {self.display_name} importer cannot load in this build: {exc}"
+            ) from exc
+        reader = getattr(module, f"read_{self.format_id}", None)
         if not callable(reader):
-            raise TypeError(
-                f"{self.module} must define read_{self.format_id}(paths, options)"
+            raise ImportFormatError(
+                f"The {self.display_name} importer is incomplete: {self.module} "
+                f"has no read_{self.format_id}(paths, options)"
             )
         return reader
 
@@ -304,13 +367,15 @@ def importers(declared: Sequence[ImporterSpec] = DECLARED) -> tuple[ImporterSpec
 
 
 def get(format_id: str, declared: Sequence[ImporterSpec] = DECLARED) -> ImporterSpec:
-    """The importer for ``format_id``; KeyError names the ones available."""
+    """The importer for ``format_id``; ImportFormatError names the ones available."""
     available = importers(declared)
     for spec in available:
         if spec.format_id == format_id:
             return spec
     known = ", ".join(s.format_id for s in available) or "none"
-    raise KeyError(f"no importer {format_id!r} in this build; available: {known}")
+    raise ImportFormatError(
+        f"No importer {format_id!r} in this build; available: {known}"
+    )
 
 
 def for_extension(
@@ -344,6 +409,5 @@ def read(
             f"{spec.module} reported source_format {result.report.source_format!r}, "
             f"expected {format_id!r}"
         )
-    for name in result.sidecars:
-        _require_text(name, "sidecar file name")
+    result.validate()
     return result

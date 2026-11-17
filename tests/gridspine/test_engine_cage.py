@@ -24,6 +24,16 @@ def _is_type_checking(test: ast.expr) -> bool:
     )
 
 
+def _is_dynamic_import(func: ast.expr) -> bool:
+    """`__import__(...)`, `import_module(...)` or `importlib.import_module(...)`."""
+    if isinstance(func, ast.Name):
+        return func.id in ("__import__", "import_module")
+    return isinstance(func, ast.Attribute) and func.attr in (
+        "import_module",
+        "__import__",
+    )
+
+
 def _pypsa_imports(tree: ast.AST) -> list[int]:
     """Line numbers of pypsa imports, skipping `if TYPE_CHECKING:` bodies."""
     found: list[int] = []
@@ -37,6 +47,13 @@ def _pypsa_imports(tree: ast.AST) -> list[int]:
             names = [a.name for a in node.names]
         elif isinstance(node, ast.ImportFrom):
             names = [node.module or ""]
+        elif isinstance(node, ast.Call) and _is_dynamic_import(node.func) and node.args:
+            arg = node.args[0]
+            names = (
+                [arg.value]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                else []
+            )
         else:
             names = []
         if any(n == "pypsa" or n.startswith("pypsa.") for n in names):
@@ -73,5 +90,12 @@ def test_the_scan_sees_nested_imports_and_skips_type_checking():
         "if TYPE_CHECKING:\n    import pypsa\nelse:\n    import pypsa.io\n"
         "def f():\n    from pypsa import Network\n"
         "import pypsatools\n"
+        "import importlib\n"
+        "importlib.import_module('pypsa')\n"
+        "__import__('pypsa.io')\n"
+        "import_module('pypsa')\n"
+        "builtins.__import__('pypsa')\n"
+        "importlib.import_module('pypsatools')\n"
+        "importlib.import_module(name)\n"
     )
-    assert _pypsa_imports(tree) == [5, 7]
+    assert _pypsa_imports(tree) == [5, 7, 10, 11, 12, 13]
