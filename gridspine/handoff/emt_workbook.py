@@ -8,7 +8,7 @@ invented and nothing is written as zero: a missing field is an empty cell
 and a row of ``to_be_supplied.csv`` (sheet, element, param, why).
 
 Sheets (:data:`SHEET_FIELDS`): ``plant_units``, ``gensets``, ``converters``,
-``transformers``, ``cables``, ``filters``, ``protection_relays``,
+``transformers``, ``earthing_transformers``, ``cables``, ``filters``, ``protection_relays``,
 ``insulation``. A row is one element. A value column is headed
 ``<param> [<unit>]`` and is followed by ``<param> source``. The source is the
 campus tag (measured, datasheet, assumed) or, for a value the campus holds
@@ -82,6 +82,15 @@ PARAM_UNITS = {
     "saturation_curve": "pu flux vs pu current",
     "knee_voltage_pu": "pu",
     "air_core_reactance_pu": "pu",
+    "x0_ohm": "ohm",
+    "r_n_hv_ohm": "ohm",
+    "r_n_lv_ohm": "ohm",
+    "tap_changer": "-",
+    "tap_side": "-",
+    "tap_neutral": "-",
+    "tap_min": "-",
+    "tap_max": "-",
+    "tap_step_percent": "%",
     "length_km": "km",
     "r_ohm_per_km": "ohm/km",
     "x_ohm_per_km": "ohm/km",
@@ -157,7 +166,16 @@ SHEET_FIELDS = {
         "saturation_curve",
         "knee_voltage_pu",
         "air_core_reactance_pu",
+        "r_n_hv_ohm",
+        "r_n_lv_ohm",
+        "tap_changer",
+        "tap_side",
+        "tap_neutral",
+        "tap_min",
+        "tap_max",
+        "tap_step_percent",
     ),
+    "earthing_transformers": ("x0_ohm", "r_n_ohm"),
     "cables": (
         "length_km",
         "r_ohm_per_km",
@@ -199,6 +217,19 @@ EMT_ONLY = {
 GENSET_DYNAMIC = ("xd_sat", "H_s", "T_g_s", "q_droop_pct", "cos_phi_r")
 #: Island control fields that are curves, not numbers (not a workbook column).
 _CURVES = ("qu_points",)
+_TAP_FIELDS = (
+    "tap_changer",
+    "tap_side",
+    "tap_neutral",
+    "tap_min",
+    "tap_max",
+    "tap_step_percent",
+)
+_NO_TAP_WHY = (
+    "tap-changer data (type, side, range, neutral tap, step) not held: supply it, "
+    "or confirm a fixed ratio, for the EMT model's ratio control (TRGC 05, 17)"
+)
+_NEUTRAL_R_WHY = "neutral resistor of a resistance-earthed winding, for zero-sequence and earth-fault studies (TRGC 17)"
 #: Per control mode, the island parameters an EMT converter model needs
 #: (the island schema's, less its curves).
 CONTROL_DYNAMIC = {
@@ -340,8 +371,32 @@ def workbook(campus) -> tuple:
                 _vector_group(w),
                 "assumed" if assumed else UNTAGGED,
             )
-        s.add(name, fixed, {**_schema(s.fields[:7]), **_emt(s.fields)})
+        tap = campus.taps.get(name)
+        if tap:
+            for f, k in zip(
+                _TAP_FIELDS[:5], ("changer", "side", "neutral", "min", "max")
+            ):
+                held[(name, f)] = (tap[k], UNTAGGED)
+            step = held.get((name, "tap.step_percent"))
+            if step:
+                held[(name, "tap_step_percent")] = step
+        need = {**_schema(s.fields[:7]), **_emt(s.fields)}
+        need["tap_changer"] = _NO_TAP_WHY
+        for side, kind in campus.earthing.get(name, {}).items():
+            if kind == "resistance":
+                need[f"r_n_{side}_ohm"] = _NEUTRAL_R_WHY
+        s.add(name, fixed, need)
     sheets["transformers"] = (s, ["hv_bus", "lv_bus"])
+
+    s = _Sheet("earthing_transformers", held)
+    for name, e in campus.earthing_transformers.sort_index().iterrows():
+        solid = pd.isna(e["r_n_ohm"])
+        s.add(
+            str(name),
+            {"bus": e["bus"], "neutral": "solid" if solid else "resistance"},
+            _schema(("x0_ohm",)),
+        )
+    sheets["earthing_transformers"] = (s, ["bus", "neutral"])
 
     s = _Sheet("cables", held)
     for _, ln in net.line.sort_values("name").iterrows():
@@ -418,7 +473,8 @@ def rscad_notes() -> str:
         "| gensets | `gensets.csv` | synchronous machine, governor and exciter data |",
         "| converters | `converters.csv` | converter ratings, control mode and limits; the manufacturer's "
         "real-time model replaces the EMT model in HIL |",
-        "| transformers | `transformers.csv` | transformer models incl. saturation (to be supplied) |",
+        "| transformers | `transformers.csv` | transformer models incl. saturation (to be supplied), tap changer and winding neutral resistors |",
+        "| earthing_transformers | `earthing_transformers.csv` | zero-sequence earth reference: source impedance and neutral resistor |",
         "| cables | `cables.csv` | PI or travelling-wave cable sections |",
         "| filters | `filters.csv` | capacitor banks and shunt reactors |",
         "| protection_relays | `protection_relays.csv` | relay settings for the protection under test |",
