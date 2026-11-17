@@ -545,7 +545,7 @@ def build_network(case: RawCase):
     if lone:
         warnings.append(
             f"{len(lone)} bus(es) have no in-service connection and no generator "
-            f"({', '.join(lone[:5])}{', ...' if len(lone) > 5 else ''}); PyPSA's power flow "
+            f"({', '.join(lone)}); PyPSA's power flow "
             "cannot solve such a bus on its own, so switch it out of the study or connect it"
         )
 

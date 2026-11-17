@@ -46,7 +46,11 @@ the PSS/E Program Application Guide eq. 4.21b):
   ``Y = I0 * SBASE1-2 / SBASE * (kV1 / NOMV1)**2``.
 - Three-winding transformers become a star: ``Z1 = (Z12 + Z31 - Z23) / 2`` and its
   rotations, each winding an ideal ``t_k`` ratio and ``Z_k`` from its bus to the star
-  point. STAT 2, 3 and 4 take winding 2, 3 and 1 out of service.
+  point. STAT 2, 3 and 4 take winding 2, 3 and 1 out of service. The magnetising
+  admittance of a three-winding unit sits at the winding-1 bus, as on a two-winding
+  one (PAG text not consulted: this follows PowerModels.jl ``src/io/psse.jl``, which
+  puts MAG1/MAG2 on the winding-1 branch's bus-I end; eigenergy/powerio issue #741,
+  still open, argues the same against a star-point placement).
 
 **Never silently.** Every record of a section this reader does not map (DC links,
 FACTS, GNE, induction machines, impedance-correction tables, inter-area transfers,
@@ -868,6 +872,8 @@ def transformer_windings(case: RawCase, tr) -> list:
                 "to": None,
                 "r_pu": star[w - 1][0],
                 "x_pu": star[w - 1][1],
+                # magnetising at the winding-1 bus, not the star point: PowerModels.jl
+                # psse.jl (g_fr/b_fr on winding 1); eigenergy/powerio #741 (open)
                 "g_pu": g if w == 1 else 0.0,
                 "b_pu": b if w == 1 else 0.0,
                 "tap": t,
