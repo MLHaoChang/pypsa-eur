@@ -8,8 +8,15 @@ Layouts read (the header decides; the column for an object is its name):
 
 - ``Datetime,<name>…``: one row per timestamp;
 - ``Year,Month,Day,Period,<name>…``: period p of a day starts (p − 1) steps
-  after midnight;
-- ``NAME,M1,…,M12``: one row per object, one value per calendar month.
+  after midnight.
+
+The monthly ``NAME,M1..M12`` layout is recognised but not read in this slice
+(GK A 30, 2b plan answer C).
+
+Day/month order is decided once per file, never per cell (GK A T1): the Data
+File's ``Locale`` when it is a known one, otherwise from the dates themselves
+(a first field above 12 means day first, a second field above 12 month first);
+a file where neither shows is ambiguous and not read.
 
 A series is used only when it has exactly one readable number for every
 snapshot (GK A Q10). A duplicate or unreadable timestamp, a missing snapshot,
@@ -39,6 +46,13 @@ _ISO = (
     "%Y-%m-%d",
 )
 _MONTHS = [f"M{i}" for i in range(1, 13)]
+_DAY_FIRST = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y")
+_MONTH_FIRST = ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y")
+
+#: Caps per CSV (GK A T5); the zip guards of slice 1 apply on top.
+MAX_CSV_BYTES = 256 * 2**20
+MAX_CSV_ROWS = 1_100_000  # a year of minutes is 527,040
+MAX_HEADER_BYTES = 2**24
 
 #: name -> the series over the snapshots, or the reason it cannot be used
 Result = dict[str, "pd.Series | str"]
@@ -49,37 +63,45 @@ def file_key(path: str) -> str:
     return path.replace("\\", "/").rsplit("/", 1)[-1].casefold()
 
 
-def date_formats(locale: float | None) -> tuple[tuple[str, ...], str | None]:
-    """The formats tried for this Data File locale, and why slash dates are not read."""
+def _order(text: pd.Series, locale: float | None) -> tuple[str, ...] | str:
+    """The slash-date formats for the whole file, or why its order is unknown."""
     loc = int(locale) if locale is not None and locale == int(locale) else None
     if loc in DAY_FIRST_LOCALES:
-        slash = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y")
-    elif loc in MONTH_FIRST_LOCALES:
-        slash = ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y")
-    else:
-        return _ISO, (
-            f"day/month order unknown (Data File Locale {loc})"
-            if loc is not None
-            else "day/month order unknown (the Data File has no Locale)"
-        )
-    return slash + _ISO, None
+        return _DAY_FIRST
+    if loc in MONTH_FIRST_LOCALES:
+        return _MONTH_FIRST
+    parts = text.str.extract(r"^(\d{1,2})/(\d{1,2})/").dropna().astype(int)
+    if parts.empty:
+        return ()
+    first, second = (parts[0] > 12).any(), (parts[1] > 12).any()
+    if first and not second:
+        return _DAY_FIRST
+    if second and not first:
+        return _MONTH_FIRST
+    known = (
+        f"Data File Locale {loc}" if loc is not None else "the Data File has no Locale"
+    )
+    return (
+        "day/month order unknown: "
+        + known
+        + (" and the dates fit neither order" if first else " and no day is above 12")
+    )
 
 
 def _parse_dates(cells: pd.Series, locale: float | None) -> pd.DatetimeIndex | str:
-    formats, why = date_formats(locale)
     text = cells.str.strip()
+    slash = _order(text, locale)
+    if isinstance(slash, str):
+        return slash
     out = pd.Series(pd.NaT, index=text.index, dtype="datetime64[ns]")
-    for fmt in formats:
+    for fmt in slash + _ISO:
         todo = out.isna()
         if not todo.any():
             break
         out[todo] = pd.to_datetime(text[todo], format=fmt, errors="coerce")
     bad = out.isna()
     if bad.any():
-        first = text[bad].iloc[0]
-        return f"timestamp {first!r} unreadable" + (
-            f": {why}" if why and "/" in first else ""
-        )
+        return f"timestamp {text[bad].iloc[0]!r} unreadable"
     return pd.DatetimeIndex(out)
 
 
@@ -115,9 +137,14 @@ def read_series(
     names = sorted(set(names))
     if not isinstance(snapshots, pd.DatetimeIndex) or not step_minutes:
         return dict.fromkeys(names, "the network has no time horizon")
+    steps = snapshots.to_series().diff().dropna().unique()
+    if len(steps) > 1 or (
+        len(steps) and steps[0] != pd.Timedelta(minutes=step_minutes)
+    ):
+        return dict.fromkeys(names, "the snapshots have no single step; none inferred")
     try:
         with opener() as raw:
-            first = raw.readline(2**24).decode("utf-8-sig")
+            first = raw.readline(MAX_HEADER_BYTES).decode("utf-8-sig")
         header = [h.strip() for h in next(csv.reader([first]), [])]
     except UnicodeDecodeError:
         return dict.fromkeys(names, "file is not UTF-8 text")
@@ -130,23 +157,20 @@ def read_series(
         return dict.fromkeys(names, f"column {dup!r} appears twice")
     low = [h.casefold() for h in header]
     if low[:1] in (["datetime"], ["date"]):
-        layout, keys = "wide", header[:1]
+        keys = header[:1]
     elif low[:4] == ["year", "month", "day", "period"]:
-        layout, keys = "wide", header[:4]
+        keys = header[:4]
     elif low[:1] == ["name"] and all(m.casefold() in low for m in _MONTHS):
-        layout = "monthly"
-        keys = header[:1] + [
-            next(h for h in header if h.casefold() == m.casefold()) for m in _MONTHS
-        ]
+        return dict.fromkeys(names, "monthly layout not read in this slice")
     else:
         return dict.fromkeys(
             names,
             f"layout not read (header starts {', '.join(header[:4])}); read are "
-            "Datetime, Year/Month/Day/Period and NAME/M1..M12",
+            "Datetime and Year/Month/Day/Period",
         )
-    cols = (
-        {n: _column(header[len(keys) :], n) for n in names} if layout == "wide" else {}
-    )
+    cols = {n: _column(header[len(keys) :], n) for n in names}
+    if all(c is None for c in cols.values()):
+        return {n: f"no column {n!r}" for n in names}  # not parsed further
     wanted = set(keys) | {c for c in cols.values() if c is not None}
     try:
         with opener() as raw:
@@ -157,16 +181,17 @@ def read_series(
                 keep_default_na=False,
                 encoding="utf-8-sig",
                 skipinitialspace=True,
+                nrows=MAX_CSV_ROWS + 1,
             )
     except (
         ValueError,
         UnicodeDecodeError,
     ) as exc:  # pandas ParserError is a ValueError
         return dict.fromkeys(names, f"not a readable CSV ({str(exc).splitlines()[0]})")
+    if len(body) > MAX_CSV_ROWS:
+        return dict.fromkeys(names, f"more than {MAX_CSV_ROWS:,} rows; not read")
     body.columns = [c.strip() for c in body.columns]
     body = body.fillna("")
-    if layout == "monthly":
-        return _monthly(body, keys, names, snapshots)
     if len(keys) == 1:
         index = _parse_dates(body[keys[0]], locale)
     else:
@@ -237,44 +262,21 @@ def _wide(
     return out
 
 
-def _monthly(
-    body: pd.DataFrame, header: list[str], names: list[str], snapshots: pd.DatetimeIndex
-) -> Result:
-    key = body[header[0]].str.strip()
-    months = header[1:]
-    out: Result = {}
-    for name in names:
-        hit = key == name
-        if not hit.any():
-            hit = key.str.casefold() == name.casefold()
-        if hit.sum() != 1:
-            out[name] = (
-                f"{int(hit.sum())} rows for {name!r}"
-                if hit.any()
-                else f"no row {name!r}"
-            )
-            continue
-        row = body[hit].iloc[0][months].reset_index(drop=True)
-        got = _numbers(row, pd.Index(_MONTHS))
-        if isinstance(got, str):
-            out[name] = got
-            continue
-        out[name] = pd.Series(got.to_numpy()[snapshots.month - 1], index=snapshots)
-    return out
+#: a given data file: how to open it, or why it is not read (over the cap)
+Given = Callable[[], IO[bytes]] | str
 
 
-def match_files(
-    wanted: Iterable[str], given: Mapping[str, Callable[[], IO[bytes]]]
-) -> dict[str, Callable[[], IO[bytes]] | str]:
+def match_files(wanted: Iterable[str], given: Mapping[str, Given]) -> dict[str, Given]:
     """Each wanted Data File path to the given file it names, or why none (Q10)."""
     by_key: dict[str, list[str]] = {}
     for name in given:
         by_key.setdefault(file_key(name), []).append(name)
-    out: dict[str, Callable[[], IO[bytes]] | str] = {}
+    out: dict[str, Given] = {}
     for path in wanted:
         hits = by_key.get(file_key(path), [])
         if len(hits) == 1:
-            out[path] = given[hits[0]]
+            got = given[hits[0]]
+            out[path] = f"data file {hits[0]!r} {got}" if isinstance(got, str) else got
         elif hits:
             out[path] = (
                 f"{len(hits)} given files are named {file_key(path)!r}: "

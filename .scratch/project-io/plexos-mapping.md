@@ -131,3 +131,13 @@ Generator: capacity, unit count, minimum stable level, rating profile, heat rate
   - Scenario rows are listed per object and scenario (full lists, per the contract), not as counts per scenario. A row tagged with an on and an off scenario counts as on.
   - Horizon: `Chrono Date From` (else `Date From`) × `Chrono Step Count` days × `Periods per Day` (default 24); weightings equal the step in hours. A horizon without a length gives one year, in `assumed`. Other horizon settings are unmapped.
   - Scenario-tagged rows are all unmapped in 2a: "not selected", or "is on in the chosen Model; applied in a later slice". Data-file, dated, variable and band > 1 rows likewise.
+- 2026-11-17, GK A (30), plan GO for slice 2b with T1–T9; answers A (1), B (1), C (2). Where each is met:
+  - Deviation (ruling A): a referenced data file that is not supplied gives each of its rows unmapped "data file '<path>' not supplied" and one warning per file. There is never a static fallback, because the `t_data` value on a data-file row is a placeholder in real files (PLEXOS-World: Load 0, Rating Factor 100). This replaces "A file that is missing → warning, with the load's static value as fallback in `assumed`" in the mapping table and under "Data files and Variables".
+  - B: a file step finer than the snapshots → unmapped, never resampled. C: `NAME,M1..M12` → unmapped "monthly layout not read in this slice".
+  - T1: day/month order is decided per file (`plexos_csv._order`): a known Data File `Locale`, else a first field above 12 means day first and a second field above 12 month first; neither or both → the file is not read. A bare date is midnight. Snapshots without a single step are refused.
+  - T2: `marginal_cost` series = heat rate (GJ/MWh, after 2a's BTU/kWh conversion) × fuel price series ($/GJ) + VO&M ($/MWh), with an assumed row naming the currency convention. Tested at two timestamps.
+  - T3: Rating Factor series cells in [0, 100] are ÷100; one cell outside → the row is unmapped naming it; never clipped.
+  - T4: storage Units from the file default (2a rule); Initial Volume through the same GWh/MWh factor and refused above Max Volume; `cyclic_state_of_charge` = False with an assumed row; an inflow series uses the same alignment rules.
+  - T5: per-CSV caps `MAX_CSV_BYTES` (256 MiB, loose files and zip members; over it → unmapped + warning) and `MAX_CSV_ROWS`; only the needed columns are parsed (`usecols`); a header naming no needed object is not read further.
+  - T6/T7: ledger tests on both fixtures with CSVs given; `plexos_csv` loads with `pypsa` blocked.
+  - Data-file rows of properties not read as series (`Max Capacity`, `Max Capacity Factor Month`, …) are unmapped and their placeholder value is never used (`_Converter.take`).

@@ -34,6 +34,7 @@ from gridspine.ingest.plexos_import import (  # noqa: E402
 )
 from gridspine.ingest.plexos_xml import Tag, read_plexos_xml  # noqa: E402
 from tests.gridspine.test_plexos_import import (  # noqa: E402
+    EDGE,
     IRL,
     build,
     check_ledger,
@@ -75,17 +76,45 @@ def test_datetime_layout_on_the_real_demand_file():
     assert s.sum() == column_sum(DEMAND, "EU-IRL") == 153155
 
 
+def test_bare_date_is_midnight():
+    body = "Datetime,A\n01/01/2015,1\n01/01/2015 01:00,2\n01/01/2015 02:00:00,3\n"
+    assert series(body)["A"].index[0] == pd.Timestamp("2015-01-01 00:00")
+    assert series(body)["A"].tolist() == [1, 2, 3]
+
+
 def test_locale_decides_day_and_month_order():
     body = "Datetime,A\n01/02/2015 00:00,1\n01/02/2015 01:00,2\n"
-    gb = series(body, snaps=pd.date_range("2015-02-01", periods=2, freq="h"))
-    us = series(
-        body, snaps=pd.date_range("2015-01-02", periods=2, freq="h"), locale=1033
-    )
-    assert gb["A"].tolist() == [1, 2] and us["A"].tolist() == [1, 2]
-    none = series(body, locale=None)["A"]
-    assert "day/month order unknown (the Data File has no Locale)" in none
+    feb1 = pd.date_range("2015-02-01", periods=2, freq="h")
+    jan2 = pd.date_range("2015-01-02", periods=2, freq="h")
+    assert series(body, snaps=feb1)["A"].tolist() == [1, 2]
+    assert series(body, snaps=jan2, locale=1033)["A"].tolist() == [1, 2]
     iso = "Datetime,A\n2015-01-01 00:00,1\n2015-01-01 01:00,2\n2015-01-01 02:00,3\n"
     assert series(iso, locale=None)["A"].tolist() == [1, 2, 3]
+
+
+def test_without_a_locale_the_whole_file_decides_the_order():
+    """GK A T1: per file, never per cell; no day above 12 means ambiguous."""
+    ambiguous = "Datetime,A\n01/02/2015 00:00,1\n01/02/2015 01:00,2\n"
+    assert series(ambiguous, locale=None)["A"] == (
+        "day/month order unknown: the Data File has no Locale and no day is above 12"
+    )
+    assert "Data File Locale 1031" in series(ambiguous, locale=1031)["A"]
+    # '13/01' shows day first, so '01/02' in the same file is 1 February
+    day_first = "Datetime,A\n13/01/2015 00:00,1\n01/02/2015 00:00,2\n"
+    snaps = pd.DatetimeIndex(["2015-01-13", "2015-02-01"])
+    got = read_series(text(day_first), ["A"], snaps, 60, None)["A"]
+    assert isinstance(got, str)  # two dates, no single step: refused, not inferred
+    assert got == "the snapshots have no single step; none inferred"
+    days = pd.date_range("2015-01-13", periods=2, freq="D")
+    d = "Datetime,A\n13/01/2015,1\n14/01/2015,2\n"
+    m = "Datetime,A\n01/13/2015,1\n01/14/2015,2\n"
+    assert read_series(text(d), ["A"], days, 1440, None)["A"].tolist() == [1, 2]
+    assert read_series(text(m), ["A"], days, 1440, None)["A"].tolist() == [1, 2]
+    both = "Datetime,A\n13/01/2015,1\n01/14/2015,2\n"
+    assert read_series(text(both), ["A"], days, 1440, None)["A"] == (
+        "day/month order unknown: the Data File has no Locale and the dates fit "
+        "neither order"
+    )
 
 
 def test_year_month_day_period_layout():
@@ -99,15 +128,9 @@ def test_year_month_day_period_layout():
     assert "period 25 outside 1..24" in series(bad)["A"]
 
 
-def test_monthly_layout():
+def test_monthly_layout_waits_for_slice_3():
     body = "NAME,M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11,M12\nA,1,2,3,4,5,6,7,8,9,10,11,12\n"
-    snaps = pd.DatetimeIndex(["2015-01-31 23:00", "2015-02-01 00:00", "2015-12-01"])
-    assert series(body, snaps=snaps)["A"].tolist() == [1, 2, 12]
-    assert series(body, names=("B",))["B"] == "no row 'B'"
-    twice = body + "a,1,1,1,1,1,1,1,1,1,1,1,1\n"
-    assert series(twice)["A"].tolist() == [1, 1, 1]  # exact name wins
-    dup = body + "A,1,1,1,1,1,1,1,1,1,1,1,1\n"
-    assert series(dup)["A"] == "2 rows for 'A'"
+    assert series(body)["A"] == "monthly layout not read in this slice"
 
 
 @pytest.mark.parametrize(
@@ -164,6 +187,25 @@ def test_columns_match_by_name_then_case_insensitively():
     assert got["Gen-a"].tolist() == [1] and got["gen-a"].tolist() == [1]
     assert got["gen-b"] == "no column 'gen-b'"  # two case-insensitive matches
     assert got["x"] == "no column 'x'"
+
+
+def test_row_cap(monkeypatch):
+    from gridspine.ingest import plexos_csv
+
+    monkeypatch.setattr(plexos_csv, "MAX_CSV_ROWS", 2)
+    body = "Datetime,A\n01/01/2015 00:00,1\n01/01/2015 01:00,2\n01/01/2015 02:00,3\n"
+    assert series(body)["A"] == "more than 2 rows; not read"
+
+
+def test_header_without_a_needed_column_is_not_parsed():
+    calls = []
+
+    def opener():
+        calls.append(1)
+        return io.BytesIO(b"Datetime,B\n01/01/2015 00:00,x\n")
+
+    assert read_series(opener, ["A"], HOURS[:1], 60, 2057) == {"A": "no column 'A'"}
+    assert len(calls) == 1  # header only
 
 
 def test_no_horizon_reads_nothing():
@@ -415,6 +457,11 @@ def test_head_storage_becomes_a_storage_unit():
     assert su.max_hours == pytest.approx(2 * 1000 / 100)
     assert su.state_of_charge_initial == pytest.approx(500)
     assert (su.p_min_pu, su.p_max_pu, su.efficiency_dispatch) == (0.0, 0.8, 1.0)
+    assert not su.cyclic_state_of_charge
+    assert any(
+        a.asset == "G" and a.parameter == "cyclic state of charge"
+        for a in conv.report.assumed
+    )
     assert conv.network.storage_units_t.inflow["G"].sum() == 24 * (10 + 30)
     assert conv.network.generators.empty
     assert conv.report.counts["hydro reservoirs"] == 1
@@ -573,4 +620,40 @@ def test_world_fixture_loose_csvs_over_a_full_year(tmp_path):
         "file has no value for 8688 of 8736 snapshots" in u.reason
         for u in res.report.unmapped
         if "EU-IRL" in u.source_item
+    )
+
+
+@pytest.mark.parametrize("packed", [False, True])
+def test_over_cap_csv_is_unmapped_with_a_warning(tmp_path, monkeypatch, packed):
+    """GK A T5: a file over the per-CSV cap is reported, not refused."""
+    from gridspine.ingest import plexos_import
+
+    monkeypatch.setattr(plexos_import, "MAX_CSV_BYTES", 100)
+    monkeypatch.setattr(plexos_import, "_TOO_BIG", "is larger than 100 B; not read")
+    csv = tmp_path / "All Demand UTC 2015.csv"
+    csv.write_bytes(DEMAND.read_bytes())
+    if packed:
+        path = tmp_path / "m.zip"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.write(IRL, "World.xml")
+            zf.write(csv, "csv_files/" + csv.name)
+        got = _read_input([path])
+        name = "csv_files/" + csv.name
+    else:
+        got = _read_input([IRL, csv])
+        name = csv.name
+    assert got.data_files[name] == "is larger than 100 B; not read"
+    conv = run_files(_two_days(got.xml), got.data_files)
+    why = f"data file {name!r} is larger than 100 B; not read"
+    assert unmapped_reason(conv, "Node 'EU-IRL'") == [f"data file: {why}"]
+    assert f"{why}: 4 time series not imported" in conv.report.warnings
+
+
+def test_edge_fixture_ledger_with_an_unreferenced_csv():
+    """GK A T6 on the second fixture: the given CSV lands once, as unmapped."""
+    m = read_plexos_xml(EDGE)
+    conv = convert(m, {}, None, {"extra.csv": text("Datetime,A\n")})
+    check_ledger(m, conv)
+    assert ("data file extra.csv", "no imported property reads this file") in reasons(
+        conv
     )

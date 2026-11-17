@@ -28,11 +28,11 @@ import re
 import stat
 import zipfile
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import IO, Any
+from typing import Any
 
 import pandas as pd
 import pypsa
@@ -45,7 +45,13 @@ from gridspine.ingest.import_result import (
     Suggestion,
     Unmapped,
 )
-from gridspine.ingest.plexos_csv import file_key, match_files, read_series
+from gridspine.ingest.plexos_csv import (
+    MAX_CSV_BYTES,
+    Given,
+    file_key,
+    match_files,
+    read_series,
+)
 from gridspine.ingest.plexos_xml import (
     PlexosModel,
     PlexosRefused,
@@ -244,7 +250,7 @@ def _label(obj: tuple[str, str]) -> str:
 class _Input:
     xml_name: str
     xml: bytes
-    data_files: dict[str, Callable[[], IO[bytes]]]  # zip member or loose CSV
+    data_files: dict[str, Given]  # zip member or loose CSV, or why not read
     source_files: list[str]
 
 
@@ -312,13 +318,20 @@ def _read_zip(path: Path) -> _Input:
             )
         info = xmls[0]
         xml = _read_member(zf, info, path.name)
-    files = {
+    files: dict[str, Given] = {
         i.filename.replace("\\", "/"): (
-            lambda i=i: io.BytesIO(_read_member(zipfile.ZipFile(path), i, path.name))
+            _TOO_BIG
+            if i.file_size > MAX_CSV_BYTES
+            else lambda i=i: io.BytesIO(
+                _read_member(zipfile.ZipFile(path), i, path.name)
+            )
         )
         for i in sorted(data, key=lambda i: i.filename)
     }
     return _Input(info.filename, xml, files, [path.name])
+
+
+_TOO_BIG = f"is larger than {MAX_CSV_BYTES // 2**20} MiB; not read"
 
 
 def _read_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo, label: str) -> bytes:
@@ -351,19 +364,18 @@ def _read_input(paths: Sequence[Path]) -> _Input:
     csvs = sorted(
         (p for p in paths if p.suffix.lower() == ".csv"), key=lambda p: p.name
     )
-    loose: dict[str, Callable[[], IO[bytes]]] = {}
+    loose: dict[str, Given] = {}
     for p in csvs:
         try:
             size = p.stat().st_size
         except OSError as exc:
             raise ImportFormatError(f"{p.name} cannot be read: {exc}") from exc
-        if size > MAX_MEMBER_BYTES:
-            raise ImportFormatError(
-                f"{p.name} refused: larger than {MAX_MEMBER_BYTES // 2**20} MiB"
-            )
         if p.name in loose:
             raise ImportFormatError(f"two data files are named {p.name}")
-        loose[p.name] = lambda p=p: open(p, "rb")  # noqa: SIM115
+        if size > MAX_CSV_BYTES:
+            loose[p.name] = _TOO_BIG
+        else:
+            loose[p.name] = lambda p=p: open(p, "rb")  # noqa: SIM115
     names = [p.name for p in csvs]
     if path.suffix.lower() == ".zip":
         got = _read_zip(path)
@@ -401,7 +413,7 @@ class _Converter:
         model: PlexosModel,
         options: Mapping[str, Any],
         report: ImportReport,
-        files: Mapping[str, Callable[[], IO[bytes]]] | None = None,
+        files: Mapping[str, Given] | None = None,
     ):
         self.m = model
         self.files = dict(files or {})
@@ -1592,7 +1604,14 @@ class _Converter:
             "carrier": carrier,
             "p_min_pu": 0.0,
             "efficiency_dispatch": 1.0,
+            "cyclic_state_of_charge": False,
         }
+        self.assume(
+            name,
+            "cyclic state of charge",
+            False,
+            "PLEXOS leaves the end volume free unless a target is set; not cyclic",
+        )
         self.assume(
             name,
             "efficiency dispatch",
@@ -1709,7 +1728,7 @@ def convert(
     model: PlexosModel,
     options: Mapping[str, Any] | None = None,
     report: ImportReport | None = None,
-    files: Mapping[str, Callable[[], IO[bytes]]] | None = None,
+    files: Mapping[str, Given] | None = None,
 ) -> Conversion:
     """Convert a read PLEXOS model; the ledger says where every row went."""
     report = report or ImportReport("plexos", [])
