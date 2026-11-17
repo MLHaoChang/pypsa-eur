@@ -610,7 +610,9 @@ def money(price, currency, year) -> str:
 def _when(ts) -> str:
     from datetime import UTC, datetime
 
-    return datetime.fromtimestamp(ts, UTC).strftime("%-d %b %Y, %H:%M UTC")
+    return datetime.fromtimestamp(ts, UTC).strftime(
+        "%Y-%m-%d %H:%M UTC"
+    )  # ISO dates (UX #1327)
 
 
 def words(got, rec) -> str:

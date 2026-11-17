@@ -609,7 +609,7 @@ def test_a_record_of_another_run_reads_stale_with_the_bindings_cleared(tmp_path,
         "value": None,
         "unit": None,
         "text": "Out of date: the PPA price record is another run's. It was solved "
-        "against the investment case of 17 Nov 2026, 10:30 UTC",
+        "against the investment case of 2026-11-17 10:30 UTC",
     }
 
 
@@ -1071,7 +1071,7 @@ def test_a_stale_price_at_handoff_says_out_of_date_and_what_it_was_solved_agains
     assert row["status"] == "stale"
     assert row["text"] == (
         "Out of date: the network was edited after the PPA price was read. It was solved "
-        "against the investment case of 17 Nov 2026, 10:30 UTC"
+        "against the investment case of 2026-11-17 10:30 UTC"
     )
     shown = run_ppa.monitor(task)
     assert (shown["state"], shown["text"]) == ("out_of_date", row["text"])

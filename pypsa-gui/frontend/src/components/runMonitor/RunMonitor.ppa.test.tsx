@@ -45,7 +45,7 @@ describe('RunMonitor PPA price', () => {
       ['priced', '€ 62.5 per MWh, 2024 money'],
       ['not_evaluated', 'Not evaluated: no target set'],
       ['out_of_date', 'Out of date: the network was edited after the PPA price was read. '
-        + 'It was solved against the investment case of 17 Nov 2026, 10:30 UTC'],
+        + 'It was solved against the investment case of 2026-11-17 10:30 UTC'],
     ]) {
       cleanup()
       show(key, mode)
