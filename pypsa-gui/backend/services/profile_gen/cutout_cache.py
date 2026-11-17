@@ -15,9 +15,15 @@ Layout under `<app data>/cutouts/` (or the `cache_dir` override):
 Downloads run MONTH BY MONTH (atlite's era5 backend requests per month when
 asked to; running one month per call gives the queue runner 12 natural
 progress steps a year, a stop check between months, and per-month resume).
-Each monthly call runs on a daemon thread with a hard timeout: CDS requests
-can wedge, and a stuck daemon thread must not block the queue — the job
-fails cleanly instead (spec §3.2).
+Each month is fetched in a `spawn` child process (RP-13): atlite's
+`prepare()` writes the month through xarray/netCDF4, and HDF5 is not
+thread-safe per process, so an in-process fetch could crash the API beside a
+project save. The child has its own HDF5 state and needs no lock. The parent
+keeps the hard timeout (kills the child: CDS requests can wedge, and the job
+fails cleanly instead, spec §3.2), the caller's stop_event (terminates it),
+the typed errors (sent back over a pipe), the resume rule (`_valid_month`)
+and the merge under the process netCDF lock. An injected test downloader runs
+on a daemon thread instead, unless `fetch_in_subprocess=True`.
 
 CDS credentials (spec D2): env `CDSAPI_URL` + `CDSAPI_KEY`, or a new-format
 `~/.cdsapirc` (`url:` + bare token `key:`). The legacy `UID:KEY` form 404s
@@ -28,9 +34,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import multiprocessing
 import os
 import shutil
 import threading
+import time
+import traceback
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -227,6 +236,129 @@ def _call_with_timeout(fn: Callable[[], None], timeout_s: float, month: int) -> 
         ) from exc
 
 
+# The typed errors a child may send back, rebuilt by class name in the parent.
+_CHILD_ERRORS: dict[str, type[ProfileGenError]] = {
+    cls.__name__: cls
+    for cls in (
+        ProfileGenError,
+        AtliteNotInstalledError,
+        CdsCredentialError,
+        CutoutDownloadAborted,
+        CutoutTimeoutError,
+        CutoutDownloadError,
+    )
+}
+
+_CHILD_POLL_S = 0.25
+
+
+def _month_child(
+    conn: Any,
+    downloader: Downloader,
+    bbox: tuple[float, float, float, float],
+    year: int,
+    month: int,
+    target: str,
+) -> None:
+    """Child entry point: fetch one month, answer ("ok",) or ("err", class
+    name, message, traceback, is_typed) down `conn`. The parent's stop_event
+    cannot cross the process boundary, so the downloader gets None; the
+    parent terminates the child instead."""
+    try:
+        downloader(bbox, year, month, Path(target), None)
+        reply: tuple = ("ok",)
+    except BaseException as exc:  # noqa: BLE001 — sent to the parent
+        reply = (
+            "err",
+            type(exc).__name__,
+            str(exc),
+            traceback.format_exc(),
+            isinstance(exc, ProfileGenError),
+        )
+    try:
+        conn.send(reply)
+    finally:
+        conn.close()
+
+
+def _fetch_month_in_child(
+    downloader: Downloader,
+    bbox: tuple[float, float, float, float],
+    year: int,
+    month: int,
+    target: Path,
+    timeout_s: float,
+    stop_event: Any | None,
+) -> None:
+    """Run one month's fetch in a `spawn` child (own HDF5 state, so no lock).
+
+    Same pattern as `services.document_values._parse`: a frozen desktop build
+    hands spawn children to `multiprocessing.freeze_support()`
+    (`desktop/gui.py`). The parent polls the pipe: the caller's stop_event
+    terminates the child, the timeout kills it, and a child that dies without
+    answering fails the month. A killed child may leave a partial month file;
+    the next run's `_valid_month` check deletes it before re-fetching."""
+    ctx = multiprocessing.get_context("spawn")
+    receive, send = ctx.Pipe(duplex=False)
+    child = ctx.Process(
+        target=_month_child,
+        args=(send, downloader, bbox, year, month, str(target)),
+        daemon=True,
+        name=f"cutout-m{month:02d}",
+    )
+    child.start()
+    send.close()
+    reply: tuple | None = None
+    try:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                child.terminate()
+                raise CutoutDownloadAborted(
+                    f"cutout download aborted during month {month}"
+                )
+            left = deadline - time.monotonic()
+            if left <= 0:
+                child.kill()
+                raise CutoutTimeoutError(
+                    f"ERA5 download timed out after {timeout_s:.0f}s (month {month}); "
+                    "the CDS request wedged — retrying usually resumes where it left off"
+                )
+            if receive.poll(min(_CHILD_POLL_S, left)):
+                try:
+                    reply = receive.recv()
+                except (EOFError, OSError):  # died before it answered
+                    reply = None
+                break
+    finally:
+        receive.close()
+        if child.is_alive():
+            child.kill()
+        child.join(5)
+
+    if reply is None:
+        logger.error(
+            "ERA5 download child for month %s died without answering (exit %s)",
+            month, child.exitcode,
+        )
+        raise CutoutDownloadError(
+            f"ERA5 download failed at month {month} (the fetch process exited "
+            f"with code {child.exitcode}); see the server log"
+        )
+    if reply[0] == "ok":
+        return
+    _, name, message, tb, typed = reply
+    cls = _CHILD_ERRORS.get(name) if typed else None
+    if cls is not None:
+        raise cls(message)
+    # Today's rule for untyped errors: the library's text can carry the
+    # request URL, so it stays in the server log and the caller sees the type.
+    logger.error("ERA5 download failed at month %s:\n%s", month, tb)
+    raise CutoutDownloadError(
+        f"ERA5 download failed at month {month} ({name}); see the server log"
+    )
+
+
 def _merge_months(parts: list[Path], final: Path) -> None:
     """Concat monthly files along time and atomically replace `final`.
 
@@ -272,6 +404,7 @@ def ensure_cutout(
     stop_event: Any | None = None,
     timeout_s: float = 900.0,
     pad: float = 0.5,
+    fetch_in_subprocess: bool | None = None,
 ) -> Path:
     """Return the cached cutout for `bbox`/`year`, downloading if needed.
 
@@ -279,6 +412,10 @@ def ensure_cutout(
     padded by `pad` degrees before keying so nearest-cell lookups at the edge
     still land inside the grid. Only the complete `<key>.nc` is ever
     returned — `.part`/`.parts` are internal staging.
+
+    `fetch_in_subprocess` (default: True for the real atlite downloader,
+    False for an injected one) runs each month in a spawn child; an injected
+    downloader must then be a module-level (picklable) function.
     """
     cache = Path(cache_dir) if cache_dir is not None else default_cutout_cache_dir()
     cache.mkdir(parents=True, exist_ok=True)
@@ -295,6 +432,7 @@ def ensure_cutout(
     Path(str(final) + ".part").unlink(missing_ok=True)  # never serve a .part
 
     dl = downloader or _atlite_month_downloader
+    in_child = downloader is None if fetch_in_subprocess is None else fetch_in_subprocess
 
     def stopped() -> bool:
         return bool(stop_event is not None and stop_event.is_set())
@@ -313,15 +451,26 @@ def ensure_cutout(
             else:
                 mpath.unlink(missing_ok=True)  # corrupt partial: never resume
                 # Not under the netCDF lock: a month can take minutes, and the
-                # lock would stall every project save. atlite's prepare() reads
-                # and writes the month through xarray/netCDF4 IN this process,
-                # so HDF5 is still shared; the fix is a subprocess fetch
-                # (.scratch/renewable-profiles/issues/13-cutout-fetch-subprocess.md).
-                _call_with_timeout(
-                    lambda m=month, p=mpath: dl(padded, int(year), m, p, stop_event),
-                    timeout_s,
-                    month,
-                )
+                # lock would stall every project save. The child has its own
+                # HDF5 state, so its xarray/netCDF4 writes cannot collide with
+                # this process's (RP-13).
+                if in_child:
+                    _fetch_month_in_child(
+                        dl, padded, int(year), month, mpath, timeout_s, stop_event
+                    )
+                else:
+                    _call_with_timeout(
+                        lambda m=month, p=mpath: dl(padded, int(year), m, p, stop_event),
+                        timeout_s,
+                        month,
+                    )
+                if not stopped() and not _valid_month(mpath):
+                    # The resume rule holds for a fresh month too: only a
+                    # readable month is ever merged.
+                    raise CutoutDownloadError(
+                        f"ERA5 download for month {month} left no readable data; "
+                        "retrying re-fetches it"
+                    )
                 written.append(mpath)
             if stopped():
                 raise CutoutDownloadAborted(
