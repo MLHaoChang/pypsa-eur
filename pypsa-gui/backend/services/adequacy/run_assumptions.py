@@ -29,7 +29,7 @@ ASSET_SECTION = "assets"
 CARD = "reliability"
 
 _COMPONENTS = (
-    ("generators", "Generator", "units"),
+    ("generators", "Generator", "generating units"),
     ("storage_units", "StorageUnit", "storage units"),
     ("links", "Link", "links"),
 )
@@ -203,7 +203,7 @@ def _outage_rows(n) -> list[dict]:
                     f"outage_basis:{component}",
                     f"Outage rate basis of {noun} ({', '.join(no_basis)})",
                     "FOR",
-                    _basis("FOR").capitalize(),
+                    _basis("FOR"),
                     "default",
                     "an outage rate without a basis is read as a forced outage rate",
                     ASSET_SECTION,

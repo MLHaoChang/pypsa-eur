@@ -130,6 +130,8 @@ def test_an_asset_rate_without_a_basis_is_assumed_forced_outage():
         "outage_rate_basis",
         "default",
     )
+    assert basis["label"] == "Outage rate basis of generating units (gt)"
+    assert basis["shown"] == "forced outage rate"
     n.generators.loc["gt", "outage_rate_basis"] = "EFOR"
     assert "outage_basis:Generator" not in _keys(run_assumptions(n, {}, None))
 
