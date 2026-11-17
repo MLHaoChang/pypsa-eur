@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): The steward skill (live and template), the chat-harness README and the agent-coordination LEARNINGS say that a new route or tool adds its own fragment file to each registry's `.d/` folder instead of a row in the shared list.
