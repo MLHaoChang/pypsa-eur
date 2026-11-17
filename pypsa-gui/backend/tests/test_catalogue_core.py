@@ -313,3 +313,32 @@ def test_a_bus_voltage_is_electrical_and_not_a_coordinate():
     assert by[("Bus", "v_nom")].functions["load_flow"] == "needs"
     assert by[("Bus", "y")].functions == {"dispatch": "uses"}
     assert by[("Transformer", "tap_ratio")].group == "electrical"
+
+
+def _entry(scope: str, model_name: str):
+    return next(e for e in ENTRIES if e.scope == scope and e.model_name == model_name)
+
+
+@pytest.mark.parametrize(
+    "scope, model_name",
+    [
+        ("Bus", "unit"),  # engine default "" is no default
+        ("Bus", "carrier"),  # a carrier picker never shows the engine's "AC"
+        ("Generator", "dc_ac_ratio"),  # no engine default at all
+    ],
+)
+def test_no_shown_default_reads_none_not_engine(scope, model_name):
+    assert _entry(scope, model_name).default == {"value": None, "source": "none"}
+
+
+def test_an_engine_default_is_shown_as_engine():
+    assert _entry("Generator", "control").default == {"value": "PQ", "source": "engine"}
+
+
+def test_entries_carry_the_shared_aliases():
+    assert "rating" in _entry("Generator", "p_nom").aliases
+
+
+def test_an_asset_type_lists_only_the_groups_its_classes_fill():
+    offtake = next(t for t in ASSET_TYPES if t.id == "offtake")
+    assert C._type_dict(offtake)["groups"] == ["general", "size_limits", "electrical", "operation"]

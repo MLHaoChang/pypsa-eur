@@ -192,3 +192,9 @@ def test_data_hall_ports_follow_the_class_it_is_drawn_from(client):
         ("Link", "bus0"),
         ("Load", "bus"),
     }
+
+
+def test_a_function_filter_keeps_only_the_types_that_serve_it(client):
+    ids = {t["id"] for t in client.get(f"{ROUTE}?function=short_circuit").json()["asset_types"]}
+    assert "pv" in ids
+    assert "electrolyser" not in ids and "offtake" not in ids
