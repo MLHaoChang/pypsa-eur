@@ -239,8 +239,10 @@ GOLDEN_V33 = Path(__file__).parent / "data" / "case39_v33.raw"
 
 
 def test_v33_default_matches_master_golden(net, tmp_path):
-    """The v33 default is byte-identical to what master wrote before the
-    ``version=`` argument existed (GK PR2 follow-up)."""
+    """
+    The v33 default is byte-identical to what master wrote before the
+    ``version=`` argument existed (GK PR2 follow-up).
+    """
     write_raw(net, tmp_path / "a.raw")
     assert (tmp_path / "a.raw").read_bytes() == GOLDEN_V33.read_bytes()
 
