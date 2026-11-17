@@ -228,3 +228,35 @@ def test_the_library_reference_routes_refuse_a_class_with_parts(client, install_
     assert r.json()["detail"]["error_kind"] == "reference_target_unsupported"
     pd.testing.assert_frame_equal(n.storage_units, before[0])
     pd.testing.assert_frame_equal(n.lines, before[1])
+
+
+# ── the import helper and its log note ──────────────────────────────────────
+
+def test_the_import_lists_only_the_priced_rows_it_rederived():
+    from services.network_crud import rederive_imported_parts
+
+    n = _network()
+    n.add("StorageUnit", "plain", bus="B1", p_nom=1.0, capital_cost=5.0)
+    assert rederive_imported_parts(n) == ["StorageUnit 'bess'", "StorageUnit 'bess2'", "Line 'ab'"]
+    assert n.storage_units.at["plain", "capital_cost"] == 5.0
+
+
+def test_a_blank_part_cell_on_a_priced_row_is_not_a_refusal():
+    """A sheet's empty cell reads as None in an object column; only the priced parts are checked."""
+    from services.network_crud import rederive_imported_parts
+
+    n = _network()
+    su = n.storage_units
+    for col in ("inv_energy_overnight", "inv_energy_lifetime", "inv_energy_fom_share"):
+        su[col] = su[col].astype(object)
+        su.at["bess", col] = None
+    assert "StorageUnit 'bess'" in rederive_imported_parts(n)
+
+
+def test_the_import_log_note_names_the_rederived_rows():
+    from routers.io import _rederived_note
+
+    assert _rederived_note([]) == ""
+    ten = [f"StorageUnit 's{i}'" for i in range(10)]
+    assert _rederived_note(ten).endswith("10 row(s): " + ", ".join(ten))
+    assert _rederived_note([*ten, "Line 'x'"]).endswith(", ".join(ten) + " and 1 more")
