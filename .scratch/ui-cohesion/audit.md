@@ -170,6 +170,8 @@ Each is a real choice for the whole tool, not for one screen. The recommended op
 3. **How is a selected canvas node shown?** (A) A 2 px ink ring plus a soft accent halo, the same on every carrier (recommended: independent of the carrier colour, works in dark). (B) Keep the carrier-coloured border, thicker, add a corner check. (C) Fill the node with its carrier tint only; weakest in dark.
 4. **What does a panel's eyebrow say?** (A) The flow section it belongs to ("SCENARIOS & OPTIMISATION", "READINESS AND RUN"), as the "Next:" buttons and the Guided stepper already do (recommended). (B) Keep the area words (RUN, REPORTS, TIME…) and add the section name to the sidebar only. (C) Drop the eyebrow; the title alone.
 
+**Owner answers (17 Nov 2026, via the coordinator; UX agreed):** UI-COHESION Q1 = (A) 15 px title with a 9 px eyebrow. Q2 = (A) ink with underline or "›" for links and eyebrows; red only for the primary action and the active state. Q3 = (A) 2 px ink ring plus accent halo on every carrier. Q4 = (A) the eyebrow is the flow section name. The UX conditions are in `issues/01-cohesion-slice.md`.
+
 ## Status of the ui-modern audit's findings (9 Nov, master `64686f9d`)
 
 | # | Finding | On `882d7114` |
