@@ -8,6 +8,7 @@
 C1 the settle mapping; C2 an old file's failed+aborted step still reads
 failed; C3 every reader treats a cancelled step as a failed one; C4 the
 campus-study reader; C5 the stored error text per path."""
+
 # ruff: noqa: F811 -- imported pytest fixtures
 import json
 import time
@@ -26,8 +27,12 @@ STOPPED = tasks.STOPPED_ERROR
 
 
 def _waiting():
-    step = {"id": "solve", "tool": "run_simulation", "status": "waiting",
-            "job": {"job_id": "j1", "continuation": "armed"}}
+    step = {
+        "id": "solve",
+        "tool": "run_simulation",
+        "status": "waiting",
+        "job": {"job_id": "j1", "continuation": "armed"},
+    }
     return {"task_id": "t", "status": "waiting_job", "steps": [step]}, step
 
 
@@ -39,9 +44,24 @@ def _waiting():
         ("unknown", "failed", None, "failed"),
         ("aborted", "uncertain", None, "uncertain"),
         ("completed", "completed", None, "completed"),
-        ("aborted", "failed", {"cases": [{"status": "aborted"}, {"status": "aborted"}]}, "cancelled"),
-        ("aborted", "failed", {"cases": [{"status": "failed"}, {"status": "aborted"}]}, "failed"),
-        ("aborted", "failed", {"cases": [{"status": "completed"}, {"status": "aborted"}]}, "failed"),
+        (
+            "aborted",
+            "failed",
+            {"cases": [{"status": "aborted"}, {"status": "aborted"}]},
+            "cancelled",
+        ),
+        (
+            "aborted",
+            "failed",
+            {"cases": [{"status": "failed"}, {"status": "aborted"}]},
+            "failed",
+        ),
+        (
+            "aborted",
+            "failed",
+            {"cases": [{"status": "completed"}, {"status": "aborted"}]},
+            "failed",
+        ),
         ("aborted", "failed", {"cases": []}, "failed"),  # no case is no proof of a stop
     ],
 )
@@ -73,7 +93,9 @@ def test_c1_a_failed_step_keeps_its_old_error():
 
 def _solve_plan(request_id):
     steps = [{"id": "solve", "tool": "run_simulation", "args": {}}]
-    return chat_tools.start_task(title="Solve", request_id=request_id, steps=steps, brief=brief(steps))
+    return chat_tools.start_task(
+        title="Solve", request_id=request_id, steps=steps, brief=brief(steps)
+    )
 
 
 def _settle_solve(session, native="aborted", status="failed"):
@@ -112,19 +134,42 @@ def test_c3_a_cancelled_step_offers_the_stopped_correction(session):
     assert view["next_step"]["status"] == "cancelled"
     assert view["next_step"]["error"] == STOPPED
     assert view["next_step"]["correction"] == tasks.STOPPED_CORRECTION
-    assert chat_tools.get_task(task["task_id"])["next_step"]["correction"] == tasks.STOPPED_CORRECTION
+    assert (
+        chat_tools.get_task(task["task_id"])["next_step"]["correction"]
+        == tasks.STOPPED_CORRECTION
+    )
 
 
 def test_c3_a_cancelled_scene_step_carries_the_edit_rows():
-    row = {"component_class": "Load", "name": "it", "field": "p_set", "label": "Active power"}
+    row = {
+        "component_class": "Load",
+        "name": "it",
+        "field": "p_set",
+        "label": "Active power",
+    }
     receipt = {"says": "it p_set 3 → 2 MW", "rows": [row]}
-    view = tasks._view({
-        "task_id": "t", "title": "Edit", "project_id": "p", "status": "ready",
-        "steps": [
-            {"id": "e", "tool": "update_component", "status": "completed", "result": {"_edit_receipt": receipt}},
-            {"id": "x", "tool": tasks.SCENE_APPLY, "status": "cancelled", "args": {}},
-        ],
-    })
+    view = tasks._view(
+        {
+            "task_id": "t",
+            "title": "Edit",
+            "project_id": "p",
+            "status": "ready",
+            "steps": [
+                {
+                    "id": "e",
+                    "tool": "update_component",
+                    "status": "completed",
+                    "result": {"_edit_receipt": receipt},
+                },
+                {
+                    "id": "x",
+                    "tool": tasks.SCENE_APPLY,
+                    "status": "cancelled",
+                    "args": {},
+                },
+            ],
+        }
+    )
     assert view["change_edits"] == [{"rows": [row]}]
 
 
@@ -132,7 +177,9 @@ def test_c3_retry_reopens_a_cancelled_step(session):
     task = _solve_plan("lv16-retry")
     _settle_solve(session)
     view = chat_tools.resolve_task_step(task["task_id"], "retry")
-    assert view["next_step"]["status"] == "pending" and view["next_step"]["retries"] == 1
+    assert (
+        view["next_step"]["status"] == "pending" and view["next_step"]["retries"] == 1
+    )
     stored = tasks._read(task["task_id"])[1]["steps"][0]
     assert stored["status"] == "pending" and "error" not in stored
 
@@ -143,14 +190,18 @@ def test_c3_a_cancelled_step_at_the_retry_limit_stops(session):
         view = _settle_solve(session)
         if attempt < 2:
             chat_tools.resolve_task_step(task["task_id"], "retry")
-    assert view["next_step"]["status"] == "cancelled" and view["next_step"]["retries"] == 2
+    assert (
+        view["next_step"]["status"] == "cancelled" and view["next_step"]["retries"] == 2
+    )
     assert view["next_step"]["correction"] == {
         "stop": "retry_limit",
         "then": "explain what failed; the user decides: fix the inputs, or cancel_task",
     }
     path, _ = tasks._read(task["task_id"])
     before = path.read_bytes()
-    refused("task_step_retry_limit", chat_tools.resolve_task_step, task["task_id"], "retry")
+    refused(
+        "task_step_retry_limit", chat_tools.resolve_task_step, task["task_id"], "retry"
+    )
     assert path.read_bytes() == before
 
 
@@ -168,19 +219,44 @@ def test_c3_a_cancelled_study_step_fails_its_explore_case(tmp_path):
     folder.mkdir(parents=True)
     path = folder / "t-1.json"
     lease = {"lease_owner": "a", "lease_until": time.time() + 90}
-    case = {"name": "bess", "engine": "study", "status": "running",
-            "deadline_epoch": time.time() + 3600, "solves": {"reserved": 1}}
-    step = {"id": "explore.1", "tool": "run_decision_study", "status": "cancelled",
-            "error": STOPPED, "explore": {"case": "bess", "phase": "run"}}
-    path.write_text(json.dumps({
-        "version": 3, "task_id": "t-1", "project_id": "p", "steps": [step],
-        "run": {"profile": "eh_site@1", "stage": "explore", "runner": lease,
-                "cases": [case], "ledger": [], "research": {"rows": []}},
-    }))
+    case = {
+        "name": "bess",
+        "engine": "study",
+        "status": "running",
+        "deadline_epoch": time.time() + 3600,
+        "solves": {"reserved": 1},
+    }
+    step = {
+        "id": "explore.1",
+        "tool": "run_decision_study",
+        "status": "cancelled",
+        "error": STOPPED,
+        "explore": {"case": "bess", "phase": "run"},
+    }
+    path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "task_id": "t-1",
+                "project_id": "p",
+                "steps": [step],
+                "run": {
+                    "profile": "eh_site@1",
+                    "stage": "explore",
+                    "runner": lease,
+                    "cases": [case],
+                    "ledger": [],
+                    "research": {"rows": []},
+                },
+            }
+        )
+    )
     assert run_explore.advance(path, boot="a", clock=time.time) is True
     saved = json.loads(path.read_text())
     assert saved["run"]["cases"][0]["status"] == "failed"
-    assert saved["run"]["cases"][0]["reason"] == f"run_decision_study cancelled: {STOPPED}"
+    assert (
+        saved["run"]["cases"][0]["reason"] == f"run_decision_study cancelled: {STOPPED}"
+    )
 
 
 # ── C4: the campus-study reader ──────────────────────────────────────────────
@@ -189,24 +265,46 @@ def test_c3_a_cancelled_study_step_fails_its_explore_case(tmp_path):
 def test_c4_a_cancelled_campus_step_reads_its_aborted_outcome():
     from services import run_actions, run_gates
 
-    step = {"id": "solve.3", "tool": run_actions.CAMPUS, "native": run_actions.KIND,
-            "status": "cancelled", "job": {"outcome": "aborted"}}
-    env = run_gates.Env(task={"steps": [step], "run": {}}, ctx=None, project=None, project_dir=None)
+    step = {
+        "id": "solve.3",
+        "tool": run_actions.CAMPUS,
+        "native": run_actions.KIND,
+        "status": "cancelled",
+        "job": {"outcome": "aborted"},
+    }
+    env = run_gates.Env(
+        task={"steps": [step], "run": {}}, ctx=None, project=None, project_dir=None
+    )
     assert run_gates._dc_campus_study(env) == "aborted"
 
 
 # ── C5: the stored error text per path ──────────────────────────────────────
 
 
-def test_c5_a_queue_whose_jobs_were_all_aborted_settles_cancelled(session, baseline, monkeypatch):
+def test_c5_a_queue_whose_jobs_were_all_aborted_settles_cancelled(
+    session, baseline, monkeypatch
+):
     from harness import continuation
 
     _, project_id, _ = baseline
-    task = chat_tools.start_task(title="Queue", request_id="lv16-queue", steps=[
-        {"id": "enq", "tool": "solve_queue_enqueue", "args": {"project_id": project_id}}])
-    ticket = tasks.begin_step(session, "solve_queue_enqueue", {"project_id": project_id})
-    jobs = [{"job_id": "q1", "name": "A", "project_id": project_id},
-            {"job_id": "q2", "name": "B", "project_id": project_id}]
+    task = chat_tools.start_task(
+        title="Queue",
+        request_id="lv16-queue",
+        steps=[
+            {
+                "id": "enq",
+                "tool": "solve_queue_enqueue",
+                "args": {"project_id": project_id},
+            }
+        ],
+    )
+    ticket = tasks.begin_step(
+        session, "solve_queue_enqueue", {"project_id": project_id}
+    )
+    jobs = [
+        {"job_id": "q1", "name": "A", "project_id": project_id},
+        {"job_id": "q2", "name": "B", "project_id": project_id},
+    ]
     path = tasks.await_job(ticket, None, session.session_id, jobs=jobs)
     monkeypatch.setattr(continuation, "_queue_job_status", lambda job: "aborted")
     assert continuation.queue_outcome(jobs)[:2] == ("failed", "aborted")

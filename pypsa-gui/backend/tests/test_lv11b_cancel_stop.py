@@ -621,8 +621,7 @@ def test_b2_a_step_solve_cancelled_by_cancel_job_after_stop_monitoring_settles_c
     from services import assistant_tasks
 
     assert (
-        task["next_step"]["id"] == "run"
-        and task["next_step"]["status"] == "cancelled"
+        task["next_step"]["id"] == "run" and task["next_step"]["status"] == "cancelled"
     )
     # Issue 16: a stopped job reads cancelled, not failed; the native outcome
     # stays `aborted` on the stored step.

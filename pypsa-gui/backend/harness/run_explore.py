@@ -1291,7 +1291,9 @@ def advance(path, *, boot, clock) -> bool:
             case = cases.get(mark.get("case"))
             if case is None:
                 continue
-            if step["status"] in ("failed", "cancelled", "uncertain") and case["status"] in (
+            if step["status"] in ("failed", "cancelled", "uncertain") and case[
+                "status"
+            ] in (
                 "admitted",
                 "running",
             ):
