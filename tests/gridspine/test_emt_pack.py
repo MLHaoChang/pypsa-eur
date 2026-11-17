@@ -666,3 +666,17 @@ def test_stub_only_reads_schedule_columns_the_pack_writes(tmp_path, monkeypatch)
     # the CSV the pack writes beside the JSON carries the same columns
     header = (p.path / "case_schedule.csv").read_text().splitlines()[0]
     assert header.split(",") == SCHEDULE_COLUMNS
+
+
+def test_stub_says_what_connected_means_only_when_the_contract_has_it(monkeypatch):
+    from gridspine.handoff.emt_pack import CONNECTED_NOTE, stub_text
+
+    monkeypatch.setattr(emt_pack, "EMT_CONTRACT_VERSION", "1")
+    assert "connected" not in stub_text(3)
+    monkeypatch.setattr(emt_pack, "EMT_CONTRACT_VERSION", "2")
+    text = stub_text(3)
+    assert text.count(CONNECTED_NOTE) == 1
+    head = ast.get_docstring(ast.parse(text))
+    assert CONNECTED_NOTE in head
+    assert "momentary cessation or current blocking is not a trip" in head
+    compile(text, "run_schedule.py", "exec")
