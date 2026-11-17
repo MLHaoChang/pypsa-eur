@@ -151,6 +151,8 @@ def test_a_moved_and_turned_building_is_a_reviewed_proposal_then_applied(client,
     ]
     assert review["unknowns"] == [] and review["reference_only"] == []
     assert review["export_base"]["revision"] == 2
+    assert review["glb_sha256"] == prop["preview"]["blender_return"]["glb_sha256"]
+    assert len(review["glb_sha256"]) == 64
     # Nothing is written until Apply.
     assert _scene(client)["revision"] == 2
     r = _apply(client, prop["id"], input_hash=prop["input_hash"])
@@ -232,6 +234,44 @@ def test_another_sites_artifact_is_not_found(client, geo):
     aid = _artifact(geo, meta_edit=lambda m: m.update({"site_id": "other"}))
     r = _create(client, aid)
     assert (r.status_code, _kind(r)) == (404, "not_found")
+    # No oracle: the answer is the one for an id that does not exist at all.
+    missing = _create(client, str(uuid.uuid4()))
+    assert (r.status_code, r.json()) == (missing.status_code, missing.json())
+
+
+def test_a_footprint_the_editor_refuses_is_refused_through_the_return(client, geo):
+    # G5: a finite but huge move leaves a footprint with no area; check_footprint refuses it.
+    _scene_with_buildings(client, geo)
+    r = _create(client, _artifact(geo, _move(dx=1e300)))
+    assert (r.status_code, _kind(r)) == (422, "invalid_geometry")
+    assert "no area" in r.json()["detail"]["message"]
+    assert _scene(client)["revision"] == 2
+
+
+def test_an_owner_whose_access_is_revoked_after_review_cannot_apply(
+    client, geo, _auth_db, seeded_identity
+):
+    from db.models import OrgMembership
+    from services.site_scene import store
+
+    _scene_with_buildings(client, geo)
+    prop = _create(client, _artifact(geo, _move(dx=2.0))).json()
+    _engine, session_local = _auth_db
+    key = {"user_id": seeded_identity["user_id"], "org_id": seeded_identity["org_id"]}
+    with session_local() as db:
+        row = db.query(OrgMembership).filter_by(**key).one()
+        saved = {"id": row.id, "role": row.role, **key}
+        db.delete(row)
+        db.commit()
+    try:
+        r = _apply(client, prop["id"])
+        assert r.status_code in (403, 404), r.text
+        # The scene is read from disk: nothing was committed.
+        assert store.read_scene(geo, "campus")["revision"] == 2
+    finally:
+        with session_local() as db:
+            db.add(OrgMembership(**saved))
+            db.commit()
 
 
 def test_extras_cannot_reach_the_model_or_the_bindings(client, geo):

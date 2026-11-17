@@ -13,8 +13,8 @@ does not trust, so every structure is bounded before it is used:
   and view: offset, length, stride and count times element size. POSITION is
   FLOAT VEC3 and every index is in range;
 * counts of nodes, meshes, accessors, primitives, vertices and triangles are
-  capped, the node graph is a forest with bounded depth, and every number read
-  is finite;
+  capped, the node graph is a forest with bounded depth, and every number read,
+  and every composed world transform, is finite;
 * transforms: a ``matrix`` and a scale other than 1 are refused (native size,
   V18);
 * ``extras`` are capped in size wherever they appear. Only a node's
@@ -257,7 +257,13 @@ def _read_accessor(doc, views, blob: bytes, i: Any, kind: str, room: int) -> lis
             raise _bad("bounds", "a stride is shorter than its element")
     else:
         ct = a.get("componentType")
-        if ct not in _INDEX_SIZE or a.get("type") != "SCALAR":
+        # An int check first: a list or dict is unhashable and would escape as a TypeError.
+        if (
+            not isinstance(ct, int)
+            or isinstance(ct, bool)
+            or ct not in _INDEX_SIZE
+            or a.get("type") != "SCALAR"
+        ):
             raise _bad("accessor", "indices must be unsigned SCALAR")
         if count > room:
             raise _limit(
@@ -396,6 +402,9 @@ def parse(data: bytes) -> list[Node]:
             r = rotate(q, lt)
             t = (t[0] + r[0], t[1] + r[1], t[2] + r[2])
             q = _qmul(q, lq)
+        # Each local number is finite, but their sum can overflow: the world transform is checked too.
+        if not all(math.isfinite(c) for c in (*t, *q)):
+            raise _bad("non_finite_transform", "a node's world transform is not finite")
         positions = None
         if "mesh" in n:
             m = _int(n["mesh"], "a node's mesh", len(doc.get("meshes", [])))

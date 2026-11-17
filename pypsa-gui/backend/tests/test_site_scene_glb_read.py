@@ -713,3 +713,33 @@ def test_a_general_rotation_composes_like_its_matrices():
     r1 = _matrix(q1)
     assert _matrix(n.rotation) == pytest.approx(r1 @ _matrix(q2))
     assert n.translation == pytest.approx(np.array(t1) + r1 @ np.array(t2))
+
+
+# ── GK B (62) NOT OK @781b75c7 ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("ct", [[5123], {"t": 5123}, True, "5123", None])
+def test_an_index_component_type_of_any_other_shape_is_a_typed_refusal(ct):
+    doc, blob = tri()
+    doc["accessors"][1]["componentType"] = ct
+    refused(doc, blob, reason="accessor")
+
+
+def test_translations_that_overflow_when_composed_are_refused():
+    doc, blob = tri(translation=[1.7e308, 0.0, 0.0])
+    doc["nodes"].append({"children": [0], "translation": [1.7e308, 0.0, 0.0]})
+    refused(doc, blob, reason="non_finite_transform")
+
+
+def test_a_nan_from_composition_is_refused():
+    # inf - inf: the child turns the parent's +X into -X, so the sum is +inf + -inf.
+    doc, blob = tri(translation=[1.7e308, 0.0, 0.0])
+    doc["nodes"].append(
+        {
+            "children": [0],
+            "translation": [1.7e308, 0.0, 0.0],
+            "rotation": [0.0, 1.0, 0.0, 0.0],
+        }
+    )
+    doc["nodes"].append({"children": [1], "translation": [1.7e308, 0.0, 0.0]})
+    refused(doc, blob, reason="non_finite_transform")

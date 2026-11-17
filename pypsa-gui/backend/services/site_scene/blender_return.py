@@ -229,6 +229,7 @@ def prepare(
     features, _omissions = export._features(snap)
     buildings, review = compare(scene, features, nodes)
     review["artifact_id"] = artifact_id
+    review["glb_sha256"] = sha
     review["export_base"] = {
         k: meta[k]
         for k in ("revision", "generation", "generation_sha256", "export_glb_sha256")
