@@ -464,3 +464,32 @@ def test_a_link_with_no_maximum_capacity_is_refused_by_name_through_post(
     assert r.json()["detail"].startswith(
         "Campus link: grid_import has no maximum capacity"
     )
+
+
+def test_a_backup_intent_is_refused_only_without_a_reserve_and_keeps_the_projects_floors(
+    monkeypatch,
+):
+    """The per-row refusal (walkthrough bug 05) fires only when no store holds the backup reserve; with one, the
+    intent's backup joins the project's own envelope floors in a copy of the config."""
+    from types import SimpleNamespace
+
+    from models.design_intent import DesignIntentSpec
+    from project_templates.eh_templates import build_eh_datacenter
+    from routers import compare
+    from services.adequacy.sizing_loop_runner import SizingLoopRefusal
+    from services.solver.envelope_floors import tag_store
+
+    monkeypatch.setattr(
+        "services.adequacy.sizing_loop_runner.SizingInputs", lambda **kw: kw
+    )
+    n = build_eh_datacenter()
+    config = SimpleNamespace(envelope_floors={"smoothing_mw": 1.0})
+    prepare = compare._intent_scenario(n, config, {}, 34.49)
+    with pytest.raises(SizingLoopRefusal, match="no battery set as the backup reserve"):
+        prepare(DesignIntentSpec(intent="A"))
+    n.add("Store", "reserve", bus="hub", e_nom=100.0)
+    tag_store(n, "reserve", backup_reserve=True)
+    _, cfg, _ = prepare(DesignIntentSpec(intent="A"))
+    assert cfg.envelope_floors["smoothing_mw"] == 1.0
+    assert cfg.envelope_floors["backup_mwh"] > 0
+    assert config.envelope_floors == {"smoothing_mw": 1.0}

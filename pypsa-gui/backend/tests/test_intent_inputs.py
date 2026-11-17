@@ -278,6 +278,7 @@ def test_a_non_finite_discount_rate_gives_no_assumed_statcom_cost(n):
     held = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=math.nan)["pq"]
     cost = held["statcom_capital_cost"]
     assert cost["value"] is None and "discount rate" in cost["reason"]
+    assert held["x_pu"]["value"] == ii.ASSUMED_X_PU  # only the cost needs the rate
 
 
 def test_apply_pq_moves_the_tags_to_the_chosen_link_in_the_copy(n):
