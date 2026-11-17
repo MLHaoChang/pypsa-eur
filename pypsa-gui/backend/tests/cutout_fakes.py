@@ -65,6 +65,24 @@ def typed_download_error(bbox, year, month, target, stop_event):
     raise CutoutDownloadError("CDS refused the request (typed)")
 
 
+def typed_base_error(bbox, year, month, target, stop_event):
+    from services.profile_gen.engine import ProfileGenError
+
+    raise ProfileGenError("a profile-generation refusal")
+
+
+def typed_aborted(bbox, year, month, target, stop_event):
+    from services.profile_gen.cutout_cache import CutoutDownloadAborted
+
+    raise CutoutDownloadAborted("aborted inside the fetch")
+
+
+def typed_timeout(bbox, year, month, target, stop_event):
+    from services.profile_gen.cutout_cache import CutoutTimeoutError
+
+    raise CutoutTimeoutError("CDS queue timed out")
+
+
 class CutoutDownloadError(Exception):
     """A foreign class that shares the typed error's bare name."""
 

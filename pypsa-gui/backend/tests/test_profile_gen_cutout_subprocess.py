@@ -33,7 +33,7 @@ from services.profile_gen.cutout_cache import (
     ensure_cutout,
 )
 from services.profile_gen import cutout_cache
-from services.profile_gen.engine import AtliteNotInstalledError
+from services.profile_gen.engine import AtliteNotInstalledError, ProfileGenError
 from tests import cutout_fakes
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -73,9 +73,16 @@ STARTED: list = []
 class _RecordedProcess(_SPAWN.Process):
     """The real spawn Process, remembered so a test can check it is dead."""
 
+    alive_at_close = exitcode_at_close = None
+
     def start(self):
         STARTED.append(self)
         super().start()
+
+    def close(self):
+        # A closed Process answers neither is_alive() nor exitcode: keep both.
+        self.alive_at_close, self.exitcode_at_close = self.is_alive(), self.exitcode
+        super().close()
 
 
 @pytest.fixture()
@@ -92,8 +99,8 @@ def recorded(monkeypatch):
 
 def _assert_dead(started):
     assert started, "no child was started"
-    for p in started:
-        assert not p.is_alive() and p.exitcode is not None
+    for p in started:  # reaped and closed by the parent
+        assert p.alive_at_close is False and p.exitcode_at_close is not None
     _no_children_left()
 
 
@@ -218,7 +225,7 @@ def test_an_answer_sent_just_before_the_child_exits_is_not_lost(recorded, monkey
         types.SimpleNamespace(get_context=lambda kind: ctx),
     )
     _run_child(cutout_fakes.writes_nothing)  # "ok", then exits at once
-    assert recorded[0].exitcode == 0
+    assert recorded[0].exitcode_at_close == 0
     _assert_dead(recorded)
 
 
@@ -242,6 +249,13 @@ def test_a_child_that_dies_without_answering_reports_its_exit_code(recorded):
             CutoutDownloadError,
             "CDS refused the request (typed)",
         ),
+        (
+            cutout_fakes.typed_base_error,
+            ProfileGenError,
+            "a profile-generation refusal",
+        ),
+        (cutout_fakes.typed_aborted, CutoutDownloadAborted, "aborted inside the fetch"),
+        (cutout_fakes.typed_timeout, CutoutTimeoutError, "CDS queue timed out"),
     ],
 )
 def test_typed_child_errors_round_trip_as_their_exact_class(fake, cls, message):
@@ -340,6 +354,25 @@ def test_stop_event_ends_the_child_and_keeps_done_months(cds_env, recorded):
 
 
 # --- the resume rule holds for a fresh month too -----------------------------
+
+
+def test_a_month_finished_as_the_stop_came_is_kept(cds_env):
+    """Thread path: the fetch lands a valid month, then the stop arrives. The
+    run aborts, and the finished month stays for resume."""
+    cache = cds_env / "c"
+    parts = _seed(cache, range(1, 12))
+    stop = threading.Event()
+
+    def lands_then_stops(bbox, year, month, target, stop_event):
+        cutout_fakes.write_month(target, year, month)
+        stop_event.set()
+
+    with pytest.raises(CutoutDownloadAborted, match="at month 12"):
+        ensure_cutout(
+            BBOX, YEAR, cache_dir=cache, downloader=lands_then_stops, stop_event=stop
+        )
+    assert (parts / "m12.nc").exists()
+    assert not list(parts.glob("*.fetch.nc"))
 
 
 @pytest.mark.parametrize("in_child", [True, False])

@@ -202,6 +202,21 @@ def _valid_month(path: Path) -> bool:
         return False
 
 
+def _timeout_error(timeout_s: float, month: int) -> CutoutTimeoutError:
+    return CutoutTimeoutError(
+        f"ERA5 download timed out after {timeout_s:.0f}s (month {month}); "
+        "the CDS request wedged — retrying usually resumes where it left off"
+    )
+
+
+def _untyped_error(month: int, type_name: str) -> CutoutDownloadError:
+    # The library's own text stays in the server log: it can carry the
+    # request URL, and a caller sees only the type (`refusals`).
+    return CutoutDownloadError(
+        f"ERA5 download failed at month {month} ({type_name}); see the server log"
+    )
+
+
 def _call_with_timeout(fn: Callable[[], None], timeout_s: float, month: int) -> None:
     """Run fn() on a daemon thread; a wedged CDS request fails the job
     instead of parking a queue worker forever. The daemon thread may linger
@@ -219,21 +234,13 @@ def _call_with_timeout(fn: Callable[[], None], timeout_s: float, month: int) -> 
     t.start()
     t.join(timeout_s)
     if t.is_alive():
-        raise CutoutTimeoutError(
-            f"ERA5 download timed out after {timeout_s:.0f}s (month {month}); "
-            "the CDS request wedged — retrying usually resumes where it left off"
-        )
+        raise _timeout_error(timeout_s, month)
     if error:
         exc = error[0]
         if isinstance(exc, ProfileGenError):
             raise exc
-        # The library's own text stays in the server log: it can carry the
-        # request URL, and a caller sees only the type (`refusals`).
         logger.error("ERA5 download failed at month %s", month, exc_info=exc)
-        raise CutoutDownloadError(
-            f"ERA5 download failed at month {month} ({type(exc).__name__}); "
-            "see the server log"
-        ) from exc
+        raise _untyped_error(month, type(exc).__name__) from exc
 
 
 # The typed errors a child may send back, rebuilt by exact class (module and
@@ -313,10 +320,10 @@ def _fetch_month_in_child(
         daemon=True,
         name=f"cutout-m{month:02d}",
     )
-    child.start()
-    send.close()
     reply: tuple | None = None
     try:
+        child.start()
+        send.close()
         deadline = time.monotonic() + timeout_s
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -325,10 +332,7 @@ def _fetch_month_in_child(
                 )
             left = deadline - time.monotonic()
             if left <= 0:
-                raise CutoutTimeoutError(
-                    f"ERA5 download timed out after {timeout_s:.0f}s (month {month}); "
-                    "the CDS request wedged — retrying usually resumes where it left off"
-                )
+                raise _timeout_error(timeout_s, month)
             if receive.poll(min(_CHILD_POLL_S, left)):
                 try:
                     reply = receive.recv()
@@ -337,18 +341,23 @@ def _fetch_month_in_child(
                 break
     finally:
         receive.close()
+        send.close()  # idempotent; still open only if start() failed
         if child.is_alive():
             child.kill()
-        child.join(5)
+        if child.pid is not None:
+            child.join(10)
+        exitcode = child.exitcode
+        if exitcode is not None:  # reaped: release its resources on every path
+            child.close()
 
     if reply is None:
         logger.error(
             "ERA5 download child for month %s exited without answering (exit %s)",
-            month, child.exitcode,
+            month, exitcode,
         )
         raise CutoutDownloadError(
             f"ERA5 download failed at month {month} (the fetch process exited "
-            f"with code {child.exitcode}); see the server log"
+            f"with code {exitcode}); see the server log"
         )
     if reply[0] == "ok":
         return
@@ -356,12 +365,8 @@ def _fetch_month_in_child(
     cls = _CHILD_ERRORS.get(class_id)
     if cls is not None:
         raise cls(message)
-    # Today's rule for untyped errors: the library's text can carry the
-    # request URL, so it stays in the server log and the caller sees the type.
     logger.error("ERA5 download failed at month %s:\n%s", month, tb)
-    raise CutoutDownloadError(
-        f"ERA5 download failed at month {month} ({name}); see the server log"
-    )
+    raise _untyped_error(month, name)
 
 
 def _merge_months(parts: list[Path], final: Path) -> None:
@@ -474,16 +479,20 @@ def ensure_cutout(
                             timeout_s,
                             month,
                         )
-                    if stopped():
+                    # A month that finished is kept even when a stop came
+                    # in meanwhile (the abort follows below); one that left
+                    # no readable data is never merged.
+                    if _valid_month(staging):
+                        os.replace(staging, mpath)
+                    elif stopped():
                         raise CutoutDownloadAborted(
                             f"cutout download aborted at month {month}"
                         )
-                    if not _valid_month(staging):
+                    else:
                         raise CutoutDownloadError(
                             f"ERA5 download for month {month} left no readable data; "
                             "retrying re-fetches it"
                         )
-                    os.replace(staging, mpath)
                 finally:
                     staging.unlink(missing_ok=True)
                 written.append(mpath)
