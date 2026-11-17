@@ -117,7 +117,7 @@ Order is fixed for every asset type; a type shows only groups with entries. Guid
 ### 3.5 Coverage rule ("every user-settable parameter")
 
 - Every Component column the GUI or chat can write is an entry, or is listed in `not_offered.py` with a one-line reason (engine-internal, output, unsupported). A test walks `attribute_catalog.py`'s PyPSA input columns for the 11 classes and the `EH_CUSTOM_COLUMNS`, and fails on any column in neither.
-- Every project-level setting an endpoint accepts (flow targets in `FIELD_LABELS`, the reliability goal, optimisation levers `models/energy_hub.py:151`, connection agreement, finance inputs in section 7) is an entry in `settings.py`. Slice 01 starts with the ~35 `FIELD_LABELS` keys and the levers; a test lists the remaining write routes without entries as `KNOWN_GAPS` (shrink-only).
+- Every project-level setting an endpoint accepts (flow targets in `FIELD_LABELS`, the reliability goal, optimisation levers `models/energy_hub.py:151`, connection agreement, finance inputs in section 7) is an entry in `settings.py`. Slice 01 starts with the ~35 `FIELD_LABELS` keys, the levers and the solver-config fields other streams report (homer-parity 04a: "Load growth" % per year per energy type, valid finite and above -100; "Load growth starts from year", default the first period; "Load multiplier" ×; its internal `load_scalers_derived` stays out as not offered); a test lists the remaining write routes without entries as `KNOWN_GAPS` (shrink-only).
 - Owner question Q3 (§9) decides whether Full detail offers every PyPSA input column or only the ones our engines read.
 
 ### 3.6 Plain names (RAW-NAMES-1)
@@ -159,7 +159,8 @@ Order is fixed for every asset type; a type shows only groups with entries. Guid
 Properties panel per asset, in Expert:
 
 ```
-PV roof · PV array                                 [ Find a parameter… ⌘K ]
+ASSETS & SIZING                                     (eyebrow: the flow section name)
+PV roof · PV array  (panel title 15 px)             [ Find a parameter… ⌘K ]
 Showing for: All ▾                       Essentials · Basic · Advanced · Full detail
 [ Filter fields…  / ]
 ▸ General             Connected to: Site LV bus · Energy type: Solar
@@ -170,6 +171,7 @@ Showing for: All ▾                       Essentials · Basic · Advanced · Fu
 Legend: (Assumed) value not set by you, from a Generic default
 ```
 
+- Panel head per the ui-cohesion audit (PR #1598): eyebrow is the flow section name, title 15 px; the guide drawer (§6.1) uses the same head.
 - **Essentials**: the Guided set. **Basic** (open by default in Expert): what most studies set. **Advanced**: folded per group (▸/▾, never "›"), with a count. **Full detail**: every remaining entry, shown with "built-in default" when unset.
 - The Assumed count in a group header uses the same chip style as the field's Assumed chip, with one visible key line per panel.
 - The depth selector is sticky per user (localStorage convenience), never per project. "Expert never shows less than Guided" (review-ux.md, #1193) holds by construction: Basic ⊇ Essentials.
@@ -211,7 +213,11 @@ Coordinated with the ui-cohesion audit (session `session_01G7qCunZpDhHZhfRd2msNM
 
 - One module `src/canvas/visuals.ts` (new) answers `assetVisual(typeId, view, state)` → `{glyph, colourToken, size, ports, stroke}` from the catalogue. SLD nodes, map markers, 3D labels/billboards and palette tiles all call it.
 - **Tokens only**: carrier colours (`--color-carrier-*`), asset-category colours (new `--color-asset-*`), state tokens and result bands. `LOADING_BANDS`, `NO_RESULT_COLOR`, `socColor` (`components/CanvasResultsContext.tsx:721-734`) move onto tokens. Canvas code that cannot read CSS variables (three.js, leaflet divIcon HTML) reads them through one `readToken()` helper, refreshed on theme change. The hex maps (`CARRIER_BUS_COLORS`, `CARRIER_LINK_COLORS`, `TYPES` colours) are replaced, and the existing pin test (`charts/chartThemeTokens.test.ts`) widens to "no hex literal in `pages/*Canvas.tsx`, `pages/topology*.ts`, `site3d/`".
-- **States, the same in all three views**: selected (accent ring), hovered, **Assumed values present** (small dot), **candidate** (capacity-expansion option: dashed outline, "+" badge; after a solve, solid if built, grey if not), out of service (hatched), **needs input for the current lens** (warn triangle; a different shape from the round Assumed dot, never colour alone), result overlays (loading band colour, flow direction animation honouring `prefers-reduced-motion`, review-ux.md #1335).
+- **States, the same in all three views**: selected (2 px ink ring plus a soft accent halo, the same on every carrier; ui-cohesion CV2, PR #1598), hovered, **Assumed values present** (small dot), **candidate** (capacity-expansion option: dashed outline, "+" badge; after a solve, solid if built, grey if not), out of service (hatched), **needs input for the current lens** (warn triangle; a different shape from the round Assumed dot, never colour alone), result overlays (loading band colour, flow direction animation honouring `prefers-reduced-motion`, review-ux.md #1335).
+- **One colour per asset type** (ui-cohesion CV1): the catalogue's `colour` token is the only colour source for an asset type in SLD, map, 3D, palette and charts (today gensets draw red `#dc2626` in `assetTypes.ts:98` while the gas token is blue; `site3d/assetLibrary.ts` has 22 literals of its own).
+- **One empty state** (CV3): the three canvases share one empty-state component (what is missing, one next step, a link to its flow section) instead of three different patterns.
+- **Label sizes** (CV4): canvas asset labels are at least 9 px (DENSITY-1 floor; today 8–8.5 px at `TopologyCanvas.tsx:715-768`), and legend heads use the shared legend style.
+- **Sequencing**: THEME-LIGHT slice (c) first moves the canvas hex tables onto tokens; slice 04 then moves them behind `assetVisual()`.
 - **One shared legend**: a canvas legend (same component in SLD, map and 3D) keys every state glyph shown: Assumed dot, needs-input triangle, candidate dashed, out of service hatched, loading bands. Hatching and dashes get light and dark pairs from THEME-LIGHT (c).
 - **Glyph parity**: the SLD symbol, the map marker and the palette tile use the same glyph; 3D shows the model plus the same glyph on its label. IEC symbols for network elements (transformer two circles, shunt, series reactor, switch) live in the glyph set and are used by SLD and map.
 
@@ -369,5 +375,6 @@ Four builder slices; the backend one is split in two PRs (GK B), so five PRs. Ea
 
 ## 13. Review log
 
+- **ui-cohesion audit (#1598) and UX alignment note**: selection ring, one colour per asset type, one empty state, 9 px labels, panel head, sequencing after THEME-LIGHT (c) (§4.2, §5.1).
 - **UX NOT OK @0025d36b** (13 asks), all taken: no units in plain names, symmetric output-share names (§3.6); rename diff table against every word map and Results/report wording (§3.6); display replacement limited to backticked tokens (§7.3); lens never hides Essentials or Guided blockers, "Showing for · Clear" chip, session-only, named in captions (§4.4); folds use ▸/▾, Assumed key, depth word "Essentials" (§1, §4.2); Expert link only on click through `withReturn` (§4.3); drawer stacking and chat-dock rule (§6.1); reveal keeps saved depth (§4.3); one canvas legend, Assumed dot vs needs-input triangle, light/dark hatching (§5.1); candidate ghost in 3D, shunt exemption stated (§5.2); visible shortcut hints, platform-aware label (§4.3); "None (unavailable until set)", "built-in default" (§6.2, §4.2); guard pin and shots rule (§7.2, §10.1).
 - **GK NOT OK @0025d36b** (8 edits + 3 answers), all taken: extend in place; guide markdown with one-file test, package data and raw HTML off (§3.1); chat side split into 05 (01b) after the harness PRs (§11); hard bounds refuse new writes only, accept engine `inf`, refuse NaN, one validator in every write path, templates pass (§3.2); project-free catalogue, per-asset units (§3.1); fingerprint pin (§3.1); defaults never written (§3.2); frozen ids (§3.2); display replacement backticks only, never fenced code or user text, transcript unchanged, TTS path too (§7.3); `find_parameter` cap, ACL, `former_ids`/`unknown_parameter`, navigate allow-list (§7.1); routes `not_project`, parity and golden rows, `{id}` validated (§3.1).

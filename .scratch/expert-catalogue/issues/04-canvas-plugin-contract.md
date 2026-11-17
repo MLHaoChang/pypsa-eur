@@ -7,7 +7,7 @@ Status: ready-for-agent
 Type: task
 Gated: yes (UX (23))
 Spec: [spec.md](../spec.md) §5, §4.4 (canvas side), §10.1 "Plug-in contract"
-Depends on: 01; 02 (lens store). Starts after THEME-LIGHT (c) merges and the ui-cohesion audit (session `session_01G7qCunZpDhHZhfRd2msNML`) has reported on the canvases; its findings feed the state list. Avoids #1578 (campus electrical) files.
+Depends on: 01; 02 (lens store). Starts after THEME-LIGHT (c) merges (it puts the canvas hex tables on tokens first) and the ui-cohesion audit (session `session_01G7qCunZpDhHZhfRd2msNML`) has reported on the canvases; its findings feed the state list. Avoids #1578 (campus electrical) files.
 
 ## What
 
@@ -16,10 +16,11 @@ Depends on: 01; 02 (lens store). Starts after THEME-LIGHT (c) merges and the ui-
 3. SLD (`pages/TopologyCanvas.tsx`, `pages/topologyAssets.ts`, `pages/topologyEdges.ts`): nodes from `assetVisual`; one handle per declared port; category if/else chains and `CARRIER_BUS_COLORS` / `CARRIER_LINK_COLORS` replaced by tokens.
 4. Map (`pages/MapCanvas.tsx`): one generic divIcon builder from glyph + token; `CATEGORY_STYLE` goes.
 5. 3D (`site3d/assetLibrary.ts`, `site3d/layout.ts`): `APPEARANCE` keyed by the catalogue's `symbols.site3d`; unknown types fall back to the category block + glyph label.
-6. States in all three views (selected, Assumed dot, candidate dashed with a 3D ghost route, out of service hatched, needs-input triangle: shape differs from the Assumed dot), one shared canvas legend component in SLD, map and 3D, light/dark pairs for hatching and dashes, and result bands on tokens (`CanvasResultsContext.tsx:721-734`).
-7. Lens on canvases: dim ignored assets, show `only_for` assets, overlays declare their function; "Showing for · Clear" chip; never hides Essentials or Guided blockers; snapshot captions name the lens.
-8. `utils/assetTypes.ts` reads the catalogue (keeps its function signatures for callers); its `TYPES` data goes.
-9. Plug-in fixtures: the three example types of spec §5.2 render in palette, SLD, map, 3D, panel, search and guide with no code change; no hex literal in canvas files (widen `charts/chartThemeTokens.test.ts`).
+6. ui-cohesion canvas findings (PR #1598): one colour token per asset type (CV1, incl. the 22 literals in `site3d/assetLibrary.ts`), one shared empty-state component for the three canvases (CV3), asset labels ≥ 9 px (CV4).
+7. States in all three views (selected = 2 px ink ring + soft accent halo on every carrier (CV2), Assumed dot, candidate dashed with a 3D ghost route, out of service hatched, needs-input triangle: shape differs from the Assumed dot), one shared canvas legend component in SLD, map and 3D, light/dark pairs for hatching and dashes, and result bands on tokens (`CanvasResultsContext.tsx:721-734`).
+8. Lens on canvases: dim ignored assets, show `only_for` assets, overlays declare their function; "Showing for · Clear" chip; never hides Essentials or Guided blockers; snapshot captions name the lens.
+9. `utils/assetTypes.ts` reads the catalogue (keeps its function signatures for callers); its `TYPES` data goes.
+10. Plug-in fixtures: the three example types of spec §5.2 render in palette, SLD, map, 3D, panel, search and guide with no code change; no hex literal in canvas files (widen `charts/chartThemeTokens.test.ts`).
 
 ## Likely files
 
