@@ -29,6 +29,8 @@ export interface AssetFieldSpec {
   unit_display: string
   unit_storage: string
   scale: number
+  /** Set on a tonne-bus cost field: says in words that the number is stored as entered, not rescaled. */
+  unit_note?: string
   kind: AssetFieldKind
   options: string[]
   required: boolean

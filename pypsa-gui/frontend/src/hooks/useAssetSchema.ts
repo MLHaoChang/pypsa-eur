@@ -4,6 +4,8 @@ import { assetSchemaApi, type AssetSchema } from '../api/assetSchema'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 
+export const TONNE_COST_NOTE = 'Costs on this tonne bus are per tonne (per t/h of capacity). The number is stored as entered, not rescaled from per-kW or per-kWh.'
+
 /**
  * The field descriptors of one component class (S1). Class-level and
  * immutable at runtime, so — like `useCatalog` — the key is NOT project-scoped
@@ -41,7 +43,7 @@ export function useAssetSchema(componentClass: string | null, name?: string | nu
         ...g,
         fields: g.fields.map(f => {
           const c = costs?.[f.key]
-          if (c) return { ...f, unit_display: c.unit, unit_storage: c.unit, scale: c.scale }
+          if (c) return { ...f, unit_display: c.unit, unit_storage: c.unit, scale: c.scale, unit_note: TONNE_COST_NOTE }
           return over?.[f.key] ? { ...f, unit_display: over[f.key], unit_storage: over[f.key] } : f
         }),
       })),

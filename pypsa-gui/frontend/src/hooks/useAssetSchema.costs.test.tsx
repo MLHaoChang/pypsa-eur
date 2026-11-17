@@ -31,11 +31,13 @@ describe('useAssetSchema cost units on a tonne bus (ui-modern 05d)', () => {
     await waitFor(() => expect(t.result.current.data?.groups[0].fields[0].unit_display).toBe('EUR/(t/h)'))
     const [oc, mc] = t.result.current.data!.groups[0].fields
     expect([oc.scale, oc.unit_storage, mc.unit_display]).toEqual([1, 'EUR/(t/h)', 'EUR/t'])
+    expect(oc.unit_note).toMatch(/stored as entered/)
 
     units.mockResolvedValue({ component: 'Generator', name: 'e', units: {}, costs: {} })
     const e = renderHook(() => useAssetSchema('Generator', 'e'), { wrapper: wrapper() })
     await waitFor(() => expect(units).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(e.result.current.data).toBeTruthy())
     expect(e.result.current.data?.groups[0].fields[0]).toMatchObject({ unit_display: 'EUR/kW', scale: 0.001 })
+    expect(e.result.current.data?.groups[0].fields[0].unit_note).toBeUndefined()
   })
 })
