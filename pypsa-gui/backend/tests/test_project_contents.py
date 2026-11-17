@@ -281,7 +281,7 @@ def test_a_round_trip_carries_the_marker_cases_importer_sidecars_and_kind(
 
 
 def test_a_planning_bundle_keeps_its_kind_and_gridspine_but_not_its_source_paths(
-    client, api_project, project_storage_dir, project_row, _auth_db
+    client, api_project, project_storage_dir, project_row, _auth_db, monkeypatch
 ):
     from services import gridspine_service as gs
 
@@ -306,8 +306,17 @@ def test_a_planning_bundle_keeps_its_kind_and_gridspine_but_not_its_source_paths
     meta = json.loads(zipfile.ZipFile(io.BytesIO(r.content)).read("metadata.json"))
     assert meta["project_kind"] == gs.PLANNING_DYNAMICS
 
+    logged = []
+    real_log = projects.change_log_service.log
+    monkeypatch.setattr(
+        projects.change_log_service,
+        "log",
+        lambda *a, **k: (logged.append(a), real_log(*a, **k))[1],
+    )
     r = _post(client, r.content, "pc_plan_dst")
     assert r.status_code in (200, 201), r.text
+    imported = [a[3] for a in logged if a[:2] == ("import", "Project")]
+    assert len(imported) == 1 and imported[0].endswith(". " + r.json()["stripped_note"])
     assert set(r.json()["stripped"]) == {
         "gridspine.from_dispatch",
         "gridspine.from_network",
@@ -799,3 +808,18 @@ def test_the_stripped_note_names_what_was_cleared(fields, says):
         assert "solver code" not in note
     if not any(f.startswith("gridspine.") for f in fields):
         assert "study" not in note
+
+
+def test_the_declared_names_guard_reads_annotated_assignments(tmp_path, monkeypatch):
+    import sys
+
+    mod = sys.modules[__name__]
+    (tmp_path / "services").mkdir()
+    (tmp_path / "services" / "x.py").write_text(
+        'from typing import Final\nSCOPE_FILE: Final = "scope.json"\nOTHER_FILE = "o.json"\nBARE_FILE: str\n'
+    )
+    monkeypatch.setattr(mod, "BACKEND", tmp_path)
+    assert _declared_names() == {
+        "scope.json": ["services/x.py:SCOPE_FILE"],
+        "o.json": ["services/x.py:OTHER_FILE"],
+    }
