@@ -15,7 +15,6 @@ convention ``selected.csv`` uses for ``reasons``.
 
 Nothing here imports an engine; the net is read for its tables only.
 """
-
 import re
 
 import numpy as np
@@ -30,21 +29,11 @@ from gridspine.static.contingency_set import branch_contingencies
 ELEMENT_SEP = "|"
 
 COLUMNS = [
-    "contingency_id",
-    "kind",
-    "order",
-    "element_ids",
+    "contingency_id", "kind", "order", "element_ids",
     # branch (order 1) identity — names, numbers, pandapower element type
-    "from_bus",
-    "to_bus",
-    "ckt",
-    "from_bus_number",
-    "to_bus_number",
-    "element_type",
+    "from_bus", "to_bus", "ckt", "from_bus_number", "to_bus_number", "element_type",
     # unit identity — the RAW's (I, ID); a bus section fills bus and bus_number only
-    "bus",
-    "bus_number",
-    "machine_id",
+    "bus", "bus_number", "machine_id",
 ]
 _FLOAT_COLS = ("from_bus_number", "to_bus_number", "bus_number")
 
@@ -59,9 +48,7 @@ def write_contingencies(contingency_set: pd.DataFrame, net, path) -> pd.DataFram
     for r in cset.itertuples(index=False):
         row = {c: np.nan for c in COLUMNS}
         row.update(
-            contingency_id=r.contingency_id,
-            kind=r.kind,
-            order=int(r.order),
+            contingency_id=r.contingency_id, kind=r.kind, order=int(r.order),
             element_ids=ELEMENT_SEP.join(r.element_ids),
         )
         if r.kind == "branch":
@@ -69,11 +56,8 @@ def write_contingencies(contingency_set: pd.DataFrame, net, path) -> pd.DataFram
             f, t = getattr(r, "from_bus", None), getattr(r, "to_bus", None)
             if int(r.order) == 1 and isinstance(f, str) and isinstance(t, str):
                 row.update(
-                    from_bus=f,
-                    to_bus=t,
-                    ckt=str(r.ckt),
-                    from_bus_number=float(nums[f]),
-                    to_bus_number=float(nums[t]),
+                    from_bus=f, to_bus=t, ckt=str(r.ckt),
+                    from_bus_number=float(nums[f]), to_bus_number=float(nums[t]),
                     element_type=r.element_type,
                 )
         elif r.kind == "unit":
@@ -87,16 +71,12 @@ def write_contingencies(contingency_set: pd.DataFrame, net, path) -> pd.DataFram
         elif r.kind == "bus_section":
             bus = r.element_ids[0]
             if bus not in nums:
-                raise ContractError(
-                    f"contingency {r.contingency_id}: bus {bus} is not a bus on the net"
-                )
+                raise ContractError(f"contingency {r.contingency_id}: bus {bus} is not a bus on the net")
             row.update(bus=bus, bus_number=float(nums[bus]))
         elif r.kind in COMPOUND_SEPARATORS:
             pass  # N-M-1 / N-1-1: the two branch ids in element_ids, as for an N-2 pair
         else:
-            raise ContractError(
-                f"contingency {r.contingency_id}: kind {r.kind!r} has no contingencies.csv form"
-            )
+            raise ContractError(f"contingency {r.contingency_id}: kind {r.kind!r} has no contingencies.csv form")
         rows.append(row)
 
     out = pd.DataFrame(rows, columns=COLUMNS)
@@ -123,9 +103,7 @@ def _con_label(cid: str) -> str:
     [A-Za-z0-9_-], at most 32 characters, so GC-03's reader maps it back to
     the same id."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", cid):
-        raise ContractError(
-            f"contingency {cid!r}: not a .con label ([A-Za-z0-9_-], 1-32 characters)"
-        )
+        raise ContractError(f"contingency {cid!r}: not a .con label ([A-Za-z0-9_-], 1-32 characters)")
     return cid
 
 
@@ -155,30 +133,20 @@ def write_con(contingency_set: pd.DataFrame, net, path) -> list:
         for el in r.element_ids:
             if r.kind == "branch":
                 if el not in branch:
-                    raise ContractError(
-                        f"contingency {r.contingency_id}: branch {el} is not on the network"
-                    )
+                    raise ContractError(f"contingency {r.contingency_id}: branch {el} is not on the network")
                 i, j, ckt = branch[el]
-                body.append(
-                    f"   OPEN BRANCH FROM BUS {i} TO BUS {j} CIRCUIT '{ckt:<2s}'"
-                )
+                body.append(f"   OPEN BRANCH FROM BUS {i} TO BUS {j} CIRCUIT '{ckt:<2s}'")
             elif r.kind == "unit":
                 if el not in machine:
-                    raise ContractError(
-                        f"contingency {r.contingency_id}: unit {el} is not a machine on the network"
-                    )
+                    raise ContractError(f"contingency {r.contingency_id}: unit {el} is not a machine on the network")
                 num, mid = machine[el]
                 body.append(f"   REMOVE MACHINE '{mid:<2s}' FROM BUS {num}")
             elif r.kind == "bus_section":
                 if el not in nums:
-                    raise ContractError(
-                        f"contingency {r.contingency_id}: bus {el} is not a bus on the network"
-                    )
+                    raise ContractError(f"contingency {r.contingency_id}: bus {el} is not a bus on the network")
                 body.append(f"   DISCONNECT BUS {nums[el]}")
             else:
-                raise ContractError(
-                    f"contingency {r.contingency_id}: kind {r.kind!r} has no .con form"
-                )
+                raise ContractError(f"contingency {r.contingency_id}: kind {r.kind!r} has no .con form")
         lines += [f"CONTINGENCY {_con_label(r.contingency_id)}", *body, "END"]
     lines.append("END")
     with open(path, "w", newline="\n") as f:
@@ -190,9 +158,7 @@ def write_sub(net, path) -> None:
     """The study subsystem: every bus of the network, by its kV range."""
     kv = net.bus["vn_kv"].astype(float)
     if kv.empty or not np.isfinite(kv).all() or not (kv > 0).all():
-        raise ContractError(
-            "the .sub kV range needs at least one bus, every vn_kv finite and > 0"
-        )
+        raise ContractError("the .sub kV range needs at least one bus, every vn_kv finite and > 0")
     text = f"SUBSYSTEM '{SUBSYSTEM}'\n   KVRANGE {float(kv.min()):.3f} {float(kv.max()):.3f}\nEND\nEND\n"
     with open(path, "w", newline="\n") as f:
         f.write(text)
@@ -203,16 +169,11 @@ def write_mon(path, v_min_pu, v_max_pu) -> None:
     against ``[v_min_pu, v_max_pu]``, the caller's planning band (no default:
     the band is the study's, not this writer's)."""
     for v in (v_min_pu, v_max_pu):
-        if (
-            isinstance(v, bool)
-            or not isinstance(v, (int, float, np.floating))
-            or not (np.isfinite(v) and v > 0)
-        ):
+        bad_type = isinstance(v, bool) or not isinstance(v, (int, float, np.floating))
+        if bad_type or not (np.isfinite(v) and v > 0):
             raise ContractError(f"monitor voltage band must be finite and > 0, got {v}")
     if not v_min_pu < v_max_pu:
-        raise ContractError(
-            f"monitor band needs v_min < v_max, got {v_min_pu}, {v_max_pu}"
-        )
+        raise ContractError(f"monitor band needs v_min < v_max, got {v_min_pu}, {v_max_pu}")
     text = (
         f"MONITOR BRANCHES IN SUBSYSTEM '{SUBSYSTEM}'\n"
         f"MONITOR VOLTAGE RANGE SUBSYSTEM '{SUBSYSTEM}' {v_min_pu:.3f} {v_max_pu:.3f}\n"
