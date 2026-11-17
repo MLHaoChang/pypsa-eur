@@ -250,9 +250,7 @@ def _voll(client, value):
 
 @pytest.mark.parametrize("tid", STUDY_IDS)
 def test_the_study_start_refuses_without_a_voll(client, tmp_projects_dir, tid):
-    r = client.post(
-        f"/api/projects/from_template/{tid}", params={"name": "novoll"}
-    )
+    r = client.post(f"/api/projects/from_template/{tid}", params={"name": "novoll"})
     assert r.status_code == 200, r.text
     _voll(client, 0.0)
     r = client.post("/api/results/eh_study", json={"archetype": "strong_grid"})
@@ -312,9 +310,7 @@ def test_the_study_record_carries_its_assumptions(client, tmp_projects_dir, tid)
     """E2E-TEMPLATES-1: each template's study, run with its inputs missing,
     records every assumed run input its network has (outage, basis, efficiency)."""
     expected = _keys(run_assumptions(build_for_solve(T, tid), {}, None)) - GOAL_KEYS
-    r = client.post(
-        f"/api/projects/from_template/{tid}", params={"name": "record"}
-    )
+    r = client.post(f"/api/projects/from_template/{tid}", params={"name": "record"})
     assert r.status_code == 200, r.text
     try:
         r = client.post(

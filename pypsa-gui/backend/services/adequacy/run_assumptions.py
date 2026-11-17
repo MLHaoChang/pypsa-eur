@@ -121,7 +121,10 @@ def _outage_rows(n) -> list[dict]:
             src = params.at[name, "source"]
             # "Outages already in availability" zeroes the rate the run uses,
             # so a carrier default the run does not apply is not assumed.
-            if src == "carrier_default" and not params.at[name, "outages_in_availability"]:
+            if (
+                src == "carrier_default"
+                and not params.at[name, "outages_in_availability"]
+            ):
                 groups.setdefault(("rate", carriers[name]), []).append(str(name))
             elif (
                 src == "asset"
@@ -132,7 +135,9 @@ def _outage_rows(n) -> list[dict]:
             ):
                 groups.setdefault(("mttr", carriers[name]), []).append(str(name))
             if src == "asset" and not _is_set(
-                df.at[name, "outage_rate_basis"] if "outage_rate_basis" in df.columns else None
+                df.at[name, "outage_rate_basis"]
+                if "outage_rate_basis" in df.columns
+                else None
             ):
                 no_basis.append(str(name))
         for (kind, carrier), names in groups.items():
