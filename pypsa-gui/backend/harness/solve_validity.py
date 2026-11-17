@@ -135,8 +135,7 @@ def classify(n, config) -> dict:
 
 
 def _effective(cls) -> float | None:
-    if cls["kind"] == "lp":
-        return 0.0
+    # An LP's classify() gap is 0.0, so it needs no branch of its own.
     if cls["gap"] is None:  # a stochastic run or an unrecorded MIP gap
         return None
     return 0.0 if cls["gap"] <= SOLVE_GAP_TOLERANCE else cls["gap"]
