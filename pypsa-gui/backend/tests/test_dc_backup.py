@@ -1295,6 +1295,27 @@ def test_a_project_created_with_strings_assesses_as_a_genset_one_would(
     assert _assessed(out) == _assessed(ref)
 
 
+def test_a_built_mode_the_assessment_cannot_undo_is_refused(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """Only Batteries and Hybrid builds are put back in genset form; any other
+    stored build mode is a typed 422 that names it."""
+    import json
+
+    _served(monkeypatch)
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    name, d = _dc_built(client, project_row, "dc_odd", "genset", it=36.0)
+    meta_path = d / "eh_template.json"
+    meta = json.loads(meta_path.read_text())
+    meta["dc_load"]["network_backup_mode"] = "flywheel"
+    meta_path.write_text(json.dumps(meta))
+    r = client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json={})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "dc_backup_invalid"
+    assert "created with flywheel backup" in detail["message"]
+
+
 def test_a_genset_create_copies_the_example_sidecars_byte_for_byte(
     client, tmp_path, monkeypatch, tmp_projects_dir, project_row
 ):

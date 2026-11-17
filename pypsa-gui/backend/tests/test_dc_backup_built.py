@@ -63,6 +63,8 @@ def test_a_built_campus_round_trips_to_genset_form(mode):
     assert island == i_g
     assert any("not assessed as built" in x for x in notes)
     assert any("example's genset fleet" in x for x in notes) is (mode == "bess")
+    # The load is the spec's: no edited-load note.
+    assert not any("not the edited load" in x for x in notes)
 
 
 def test_it_leaves_its_inputs_as_they_are():
@@ -162,3 +164,37 @@ def test_the_staged_example_refuses_batteries_at_its_default_pue():
 
     with pytest.raises(DcLoadError, match="peak is"):
         T.BUILDERS[tid](load_spec=T.dc_load_spec(tid, {"backup": {"mode": "bess"}}))
+
+
+@pytest.mark.parametrize("island", [None, {}, {"requirements": {}}, {"units": {}}])
+def test_a_sidecar_without_its_keys_lists_no_string(island):
+    n_b, _i = _campus("bess")
+    assert B.built_strings(n_b, island) == []
+
+
+def test_a_listed_string_not_in_the_network_is_not_one():
+    n_b, i_b = _campus("bess")
+    gone = B.STRING_PREFIX + "gone"
+    i_b["requirements"]["ride_through_storage"].append(gone)
+    i_b["units"][gone] = {"kind": "bess"}
+    assert gone not in B.built_strings(n_b, i_b)
+
+
+def test_the_note_gives_the_built_strings_power_and_energy():
+    n_b, i_b = _campus("bess")
+    n_g, i_g = _genset()
+    strings = B.built_strings(n_b, i_b)
+    su = n_b.storage_units.loc[strings]
+    _m, _i, notes, _s = B.genset_form(n_b, i_b, "bess", n_g, i_g)
+    want = f"({su.p_nom.sum():.4g} MW, {(su.p_nom * su.max_hours).sum():.4g} MWh)"
+    assert any(want in x for x in notes), (want, notes)
+
+
+@pytest.mark.parametrize("mode", ["bess", "hybrid"])
+def test_a_genset_sidecar_without_units_or_requirements_restores_none(mode):
+    """A genset-form sidecar with neither key restores nothing, never fails."""
+    n_b, i_b = _campus(mode)
+    n_g, _i = _genset()
+    m, island, _notes, strings = B.genset_form(n_b, i_b, mode, n_g, {})
+    assert strings and not set(strings) & set(m.storage_units.index)
+    assert "sustained_h" not in island["requirements"]
