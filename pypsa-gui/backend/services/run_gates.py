@@ -599,10 +599,11 @@ def _own_solve(env, read, typed=False):
     return _on(env.ctx, guarded)
 
 
-# GK A (28) Q9: the per-period unserved read's own bound, per investment period
-# (a leap year of hours). The sum is O(snapshots × captured loads) in memory and
-# time; MAX_SNAPSHOTS bounds the chat tool's rows, not this sum.
-UNSERVED_MAX_HOURS_PER_PERIOD = 8784
+# GK A (28) Q9, GK B (61): the per-period unserved read's own bound, checked on
+# each investment period's snapshot count (a leap year of hourly snapshots; a
+# sub-hourly year is over it). The sum is O(snapshots × captured loads) in memory
+# and time; MAX_SNAPSHOTS bounds the chat tool's rows, not this sum.
+UNSERVED_MAX_SNAPSHOTS_PER_PERIOD = 8784
 
 
 def _unserved_by_period(ctx):
@@ -620,8 +621,8 @@ def _unserved_by_period(ctx):
     from services.adequacy.metrics import electrical_columns
     n = ctx.network
     index = n.snapshots
-    bound = UNSERVED_MAX_HOURS_PER_PERIOD * len(n.investment_periods)
-    if not isinstance(index, pd.MultiIndex) or index.nlevels != 2 or not 1 <= len(index) <= bound:
+    if (not isinstance(index, pd.MultiIndex) or index.nlevels != 2 or not len(index)
+            or index.get_level_values(0).value_counts().max() > UNSERVED_MAX_SNAPSHOTS_PER_PERIOD):
         return NoEvidence("unsupported_snapshot_scope", "unsupported_snapshot_scope: unserved energy cannot be read")
     frame = (ctx.solver_state.get("last_lost_load") or {}).get("lost_load_t")
     if not isinstance(frame, pd.DataFrame) or frame.empty:

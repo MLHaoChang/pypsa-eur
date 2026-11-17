@@ -38,7 +38,7 @@ def periods_env(
 
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=len(weights[0]), freq="h"))
-    n.investment_periods = list(PERIODS)
+    n.investment_periods = list(PERIODS[: len(weights)])
     n.snapshot_weightings.loc[:, "generators"] = [w for p in weights for w in p]
     n.snapshot_weightings.loc[:, "objective"] = [w for p in weights for w in p]
     n.investment_period_weightings.loc[:, "years"] = list(years)
@@ -190,59 +190,131 @@ def test_a_snapshot_index_that_is_not_period_by_time_is_unsupported(
 def test_more_snapshots_than_the_per_period_bound_are_unsupported(
     tmp_path, monkeypatch, per_period, refused
 ):
-    """GK A (28) Q9: the bound is per investment period (2 periods × 2 h)."""
+    """GK A (28) Q9, GK B (61) (3): each period holds 2 snapshots; at the
+    bound they are read, one over it they are unsupported."""
     env = periods_env(tmp_path, monkeypatch)
-    monkeypatch.setattr(run_gates, "UNSERVED_MAX_HOURS_PER_PERIOD", per_period)
+    monkeypatch.setattr(run_gates, "UNSERVED_MAX_SNAPSHOTS_PER_PERIOD", per_period)
     value = _by_period(env)
     assert (
         isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
     ) is refused
 
 
+def test_one_period_over_the_bound_is_unsupported_though_the_total_is_not(
+    tmp_path, monkeypatch
+):
+    """The bound is per period: 3 + 1 snapshots against 2 per period."""
+    env = periods_env(tmp_path, monkeypatch)
+    n = env.ctx.network
+    index = pd.MultiIndex.from_arrays(
+        [[2030, 2030, 2030, 2040], list(n.snapshots.get_level_values(1))]
+    )
+    env.ctx.network = _Snapshots(n, index)
+    monkeypatch.setattr(run_gates, "UNSERVED_MAX_SNAPSHOTS_PER_PERIOD", 2)
+    value = _by_period(env)
+    assert isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
+
+
 HOURS = 8760
 
 
-def _year_capture(tmp_path, monkeypatch, hours=HOURS):
-    """Two periods of `hours` snapshots each, uneven non-unit weightings, and
-    shedding only after hour 512 of the second period."""
-    import numpy as np
-
+def _year(hours):
+    """Uneven non-unit weightings and shed in exact binary fractions, so
+    Σ w·p is exact; period 2 sheds only after hour 600."""
     w1 = tuple(float(1 + (i % 3)) for i in range(hours))
-    w2 = tuple(float(0.5 + (i % 7)) for i in range(hours))
+    w2 = tuple(0.5 + (i % 7) for i in range(hours))
     s1 = (0.0,) * hours
-    s2 = tuple(0.0 if i < 600 else float(1 + (i % 5)) / 10 for i in range(hours))
-    env = periods_env(
-        tmp_path, monkeypatch, shed=(s1, s2), weights=(w1, w2), years=(5.0, 5.0)
-    )
-    return env, float(np.dot(w2, s2)), sum(s2), float(np.dot(w2[:512], s2[:512]))
+    s2 = tuple(0.0 if i < 600 else (1 + (i % 5)) / 4 for i in range(hours))
+    return (s1, s2), (w1, w2)
 
 
 def test_a_year_per_period_capture_reads_every_snapshot_with_its_weighting(
     tmp_path, monkeypatch
 ):
-    """GK A (28) Q9 (2): 2 × 8760 snapshots, past MAX_SNAPSHOTS (512); the
-    second period's MWh is Σ w·p over the whole capture, so a capture cut at
-    512, or unit weightings, reads another number."""
+    """GK A (28) Q9 (2), GK B (61) (4): 2 × 8760 snapshots, past
+    MAX_SNAPSHOTS (512); the second period's MWh is exactly Σ w·p over the
+    whole capture, so a capture cut at 512, or unit weightings, reads another
+    number."""
+    from fractions import Fraction
+
     from harness.calculations import MAX_SNAPSHOTS
 
-    env, direct, unit, cut = _year_capture(tmp_path, monkeypatch)
-    assert cut == 0.0 and direct != pytest.approx(unit)
+    shed, weights = _year(HOURS)
+    env = periods_env(
+        tmp_path, monkeypatch, shed=shed, weights=weights, years=(5.0, 5.0)
+    )
+    exact = sum(Fraction(w) * Fraction(p) for w, p in zip(weights[1], shed[1]))
     assert len(env.ctx.network.snapshots) == 2 * HOURS > MAX_SNAPSHOTS
+    assert sum(shed[1][:MAX_SNAPSHOTS]) == 0 and exact != sum(map(Fraction, shed[1]))
     value = _by_period(env)
     assert isinstance(value, Scored), value
-    assert [(r["period"], r["worst"]) for r in value.rows] == [
-        (2030, False),
-        (2040, True),
+    assert [(r["period"], r["unserved_mwh"], r["worst"]) for r in value.rows] == [
+        (2030, 0.0, False),
+        (2040, float(exact), True),
     ]
-    assert value.rows[0]["unserved_mwh"] == 0.0
-    assert value.value == pytest.approx(direct, rel=1e-12)
+    assert value.value == float(exact)
 
 
-def test_a_capture_over_the_per_period_bound_is_unsupported(tmp_path, monkeypatch):
-    monkeypatch.setattr(run_gates, "UNSERVED_MAX_HOURS_PER_PERIOD", HOURS - 1)
-    env, *_ = _year_capture(tmp_path, monkeypatch)
+def test_a_single_period_year_reads_its_value(tmp_path, monkeypatch):
+    """GK B (61) (1): one investment period of 8760 snapshots (the
+    concentrator's first stage) reads; the bound never drops to 0."""
+    from fractions import Fraction
+
+    shed, weights = _year(HOURS)
+    env = periods_env(
+        tmp_path, monkeypatch, shed=shed[1:], weights=weights[1:], years=(5.0,)
+    )
+    assert list(env.ctx.network.investment_periods) == [PERIODS[0]]
+    value = _by_period(env)
+    exact = sum(Fraction(w) * Fraction(p) for w, p in zip(weights[1], shed[1]))
+    assert isinstance(value, Scored) and value.value == float(exact)
+
+
+def test_a_sub_hourly_year_is_over_the_bound(tmp_path, monkeypatch):
+    """GK B (61) (2): the bound counts snapshots, not hours: a year of
+    quarter-hours (35,040) is unsupported, never a truncated sum."""
+    quarters = 4 * HOURS
+    env = periods_env(
+        tmp_path,
+        monkeypatch,
+        shed=((0.0,) * quarters,),
+        weights=((0.25,) * quarters,),
+        years=(1.0,),
+    )
     value = _by_period(env)
     assert isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
+
+
+@pytest.mark.parametrize("hours, refused", [(512, False), (513, True)])
+def test_the_chat_read_keeps_its_own_snapshot_cap(
+    tmp_path, monkeypatch, hours, refused
+):
+    """GK B (61) (5): calculations.MAX_SNAPSHOTS still bounds the single-period
+    (chat) read: 512 snapshots read, 513 are unsupported."""
+    import pypsa
+
+    from harness import lost_load_calculations as lost_load
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=hours, freq="h"))
+    n.add("Bus", "b")
+    n.add("Load", "site", bus="b", p_set=5.0)
+    frame = pd.DataFrame({"site": [0.0] * hours}, index=n.snapshots)
+    ctx = ctx_for(
+        tmp_path, last_lost_load={"lost_load_t": frame, "voll_eur_per_mwh": 1000.0}
+    )
+    ctx.network = n
+    from harness import calculations
+
+    monkeypatch.setattr(calculations, "solve_matches_inputs", lambda c: True)
+    try:
+        lost_load.source(ctx, "network")
+        got = False
+    except ValueError as exc:
+        got = str(exc) == "unsupported_snapshot_scope"
+        if not got:
+            raise
+    assert got is refused
 
 
 def test_an_empty_capture_is_no_evidence(tmp_path, monkeypatch):
