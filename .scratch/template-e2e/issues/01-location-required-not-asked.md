@@ -24,3 +24,4 @@ Design §2.3 marks location **R** for every template. In the app (verified 2026-
 - Q1 is answered. Then, either the missing location blocks Run like any other required input, or it stays a note and the design's **R** for location becomes **opt**. Section 1's state follows the answer.
 - If it blocks: section 1 reads `incomplete` until a location is set, and the readiness line links to the same Latitude/Longitude drawer.
 - A test covers each template's section 1 state with and without a location.
+- (UX) If Q1 says block: New project asks for the location (DC form, Generic Site form, template cards), and the Readiness line links to the same Latitude/Longitude drawer.

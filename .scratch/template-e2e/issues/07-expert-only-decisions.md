@@ -29,3 +29,4 @@ Design §3.5 lets Expert hold fields that Guided does not show. Guided must then
 
 - Each "neither mode" item is found (and the inventory corrected) or added to its section's form in Expert.
 - Each "Expert only" item that matters for the run appears in Guided either as a decision (≤3 per card) or as a named line with "Open in Expert", per §3.5.
+- (UX) Section 10 business-case inputs (the investment case's own settings) are Expert-only with no Guided equivalent. List them, then name each in Guided or give it a Guided field.

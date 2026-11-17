@@ -43,7 +43,7 @@ The backend has no template list route. The id → name registry is `routers/pro
 5. **Raw names** in Expert panels and in the Guided drawers that reuse them. → [05](issues/05-raw-names-in-ui.md), Q2.
 6. **The goal shows two values at once** ("3 h/yr (assumed)" and an empty "No goal yet"). Backup and control-mode inputs sit only in Expert Scenarios → Grid study. → [06](issues/06-goal-and-backup-consistency.md).
 7. **Assumed defaults** come from the template ledger (`flow_service.py:855-899`). Each shows as "(assumed)" with **Keep all defaults** / **Edit ›** in its section ✓ (DC: 4 in section 3, 1 in section 8; microgrid: 2 in section 1, 7 in section 5, 2 in section 7, 1 in section 8). A value without a ledger row is pre-filled silently, with no "assumed" mark. That covers loads, candidate bounds, costs, tariff rates, VOLL and draws, so "set by the user" vs "accepted default" (§2.3, §3.2) is visible only for ledger values.
-8. **Silent fallbacks in the run** (code): `mc_draws` 500, `site_archetype` strong_grid, efficiency 1.0, VOLL 0.0 on the backend (`copt_endpoint.py:54`), carrier outage defaults. None is shown as assumed.
+8. **Silent fallbacks in the run** (code; [08](issues/08-silent-run-fallbacks.md)): `mc_draws` 500, `site_archetype` strong_grid, efficiency 1.0, VOLL 0.0 on the backend (`copt_endpoint.py:54`), carrier outage defaults. None is shown as assumed.
 
 ## 3. Decisions per section
 
@@ -120,8 +120,8 @@ Key, after §2.3: **R** required, **P** pre-filled, **opt** optional, **–** no
 | Currency, money year, price basis, financial close, analysis years, COD per asset | staged **P** | MG: Commercial shows them ✓ | Economics ✓ | ✓ | MG ✓ | – |
 | Contracts (PPA, swap, DR) | DC **opt**; IPP **P** | "New contract type" select ✓ | Economics | ✓ | no | – |
 | Investment case baseline | MG **P** | "Investment case: compared with the island as it stands today (assumed)" ✓ | Economics | ✓ | ✓ | – |
-| Grey-NH3 reference purchase | NH3 **P** (GTP-06) | pending | pending | pending | pending | – |
-| Parties, flex market | DC **opt** (C8, DC-06) | – | not checked | code | no | 07 |
+| Grey-NH3 reference purchase | NH3 **P** (GTP-06) | not yet checked in the app (template walk follow-up) | not yet checked | code | code | – |
+| Parties, flex market | DC **opt** (C8, DC-06) | – | not yet checked in the app | code | no | 07 |
 
 ### 8 Scenarios & optimisation
 
@@ -170,6 +170,7 @@ Sent to the coordinator as options (HOLISTIC-1).
 - **Q1 Location.** Should a missing location block Run? (a) Block Run until set, as §2.3's R says (recommended: profiles and market bundles need it); (b) keep it a note and make location opt.
 - **Q2 Component names.** Are template component ids (`it_load`, `genset_new`, `grid_import`) raw names under RAW-NAMES-1? (a) Yes: templates ship plain display names ("IT load", "New genset") and ids stay internal (recommended); (b) no: they are the user's own names.
 - **Q3 DC load and backup choices after creation.** (a) Editable later in sections 4 and 5, in both modes (recommended: §2.3 lists them there); (b) creation-only, with "start again" to change them.
+- **Q5 Adding carriers and process units in Guided** (issue 03). (a) Guided edits recipe values only; adding stays an Expert action behind a `withReturn` link (recommended, UX); (b) Guided can also add.
 - **Q4 Concentrator and IPP.** (a) Add both to design §2.3 and to the journeys (recommended: they are in the catalogue users see); (b) journeys for the §2.3 templates only.
 
 ## 7. Gap index
@@ -182,4 +183,5 @@ Sent to the coordinator as options (HOLISTIC-1).
 | [04](issues/04-load-editor-shows-defaults.md) load editor | 4, 5 | all | ready-for-agent |
 | [05](issues/05-raw-names-in-ui.md) raw names | all | all | ready-for-agent (Q2 part) |
 | [06](issues/06-goal-and-backup-consistency.md) goal, backup grouping | 5, 8 | DC, MG, Conc | ready-for-agent |
+| [08](issues/08-silent-run-fallbacks.md) silent run fallbacks | 5, 8, 10 | all | ready-for-agent |
 | [07](issues/07-expert-only-decisions.md) decisions in neither mode / Expert-only and unnamed | 1, 3, 4, 5, 7, 8 | all | needs-triage |

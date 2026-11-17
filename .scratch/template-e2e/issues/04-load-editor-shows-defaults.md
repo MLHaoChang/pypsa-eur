@@ -20,3 +20,4 @@ Journey fit: set up site (section 4) → readiness → results. Peaks per period
 - The load editor opens on the load's current profile source (template / measured / generated) and peak. Changing the archetype is an explicit replace.
 - The peak field takes the carrier's unit (t/h, t/d, MW_H2…).
 - PUE, critical share, backup mode and (DC only) power architecture are editable after creation, in section 4 (load) or section 5 (backup and architecture), in both modes.
+- (UX) Where each moved decision lands: IT load, PUE and critical share in section 4 (on the load row); backup mode and power architecture (DC only) in section 5. The unit is part of the field label ("Peak load (t/h)").

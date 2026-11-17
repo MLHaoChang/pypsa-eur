@@ -23,3 +23,5 @@ Design §2.3 makes "confirm limits and ramp" **R** for the data centre, and "con
 - Guided section 3 has a "Connection limit (MW)" field, per period on staged templates (energization schedule). Expert shows the same value under the same label.
 - The Import efficiency Edit opens the existing import link's efficiency.
 - A browser test sets the limit in Guided and reads it back in Expert.
+- (UX) On staged templates the per-period limit is edited as drawer rows, with the energization check (stage peaks, §2.2) beside them.
+- (UX) The section header drops the raw name `grid_import` and names the connection in plain words (05).

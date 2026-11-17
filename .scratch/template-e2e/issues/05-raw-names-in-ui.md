@@ -25,3 +25,4 @@ Journey fit: every set-up step (sections 1–8) in Expert, plus the Guided drawe
 
 - Each raw label above has a plain-language label in both modes (glossary: pypsa-gui/CONTEXT.md). Internal units such as `__lost_concentrate` are hidden or labelled as what they mean ("Concentrate shortfall").
 - A test scans the rendered Guided sections and Expert panels of each template for `/\b[a-z]+(_[a-z0-9]+)+\b/` outside allowed component names (per Q2).
+- (UX, Q2 (a)) Templates ship plain display names. Existing projects keep their ids (no renames). The names follow the expert-catalogue plain-name table (session expert-catalogue).

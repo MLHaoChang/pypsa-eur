@@ -19,3 +19,4 @@ For the electrolyser (H2 hub) and Haber-Bosch (ammonia) templates, the recipe is
 
 - Section 2's Edit opens the carrier, or the process unit's recipe, in a drawer (FieldDrawer pattern, as section 3 does) without leaving Guided.
 - A process unit's recipe (inputs per unit of product) can be read and changed from section 2 in Guided and in Expert, with the same labels and units.
+- (UX) Guided edits recipe values (inputs per unit of product) in a drawer. Adding a carrier or a process unit stays an Expert action, reached by a user-clicked "›" link with `withReturn` (owner question Q5: (a) values only, recommended; (b) Guided can also add). The card names its Essentials (≤3) and puts the rest behind "More settings".

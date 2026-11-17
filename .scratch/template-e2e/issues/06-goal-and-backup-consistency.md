@@ -22,3 +22,5 @@ Journey fit: set up the question (section 8) → run → results header ("the re
 - A template without a goal either gets one marked assumed or section 8 reads `incomplete`, per §2.3. (H2 hub: "the run asks".)
 - The backend refuses a run with no VOLL as the frontend does.
 - Backup and control-mode inputs live in section 5 in both modes. Section 8 may show them read-only with a link.
+- (UX) The goal editor shows the effective value with an "Assumed" chip until the user sets it.
+- (UX) Backup and control inputs have one editing home, section 5. Section 8 shows a read-only copy with a `withReturn` link that requests the section, then scrolls to the field.
