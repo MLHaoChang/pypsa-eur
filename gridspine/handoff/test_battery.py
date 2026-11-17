@@ -456,6 +456,28 @@ def _ordered(names) -> tuple:
     return tuple(c for c in CHANNELS if c in set(names))
 
 
+#: The two short-circuit levels a per-corner zero sequence is keyed by.
+_SK_LEVELS = ("skmin", "skmax")
+
+
+def _z0_at(name, value, level):
+    """``value`` for corner level ``level``: the number itself, or its entry in a per-level mapping."""
+    if not isinstance(value, Mapping):
+        return value
+    if set(value) != set(_SK_LEVELS):
+        raise ContractError(
+            f"{name}: a per-corner zero sequence maps exactly {list(_SK_LEVELS)}, got {sorted(map(str, value))}"
+        )
+    return value[level]
+
+
+def _z0_inputs(name, value):
+    """``(name, value)`` pairs to check: one for a number, one per level for a mapping."""
+    if not isinstance(value, Mapping):
+        return ((name, value),)
+    return tuple((f"{name}[{lv}]", value[lv]) for lv in _SK_LEVELS)
+
+
 def build_battery(
     sk_min_mva,
     sk_max_mva,
@@ -471,7 +493,10 @@ def build_battery(
     The default DMAT battery for a PoC with the given Sk and X/R range.
 
     ``z0_over_z1`` and ``x0_over_r0`` are the source's zero sequence, used by
-    the single-phase faults at every corner; both are required (no default).
+    the single-phase faults; both are required (no default). Each is either
+    one number for all four corners or a mapping ``{"skmin": v, "skmax": v}``
+    giving the two Sk-min corners and the two Sk-max corners their own value
+    (GC-06b): the zero sequence follows the short-circuit level, not X/R.
     Which cases run at which corner: module docstring, "Corners".
 
     ``overrides`` maps a case id to ``{name: value}`` for any of its event
@@ -484,13 +509,20 @@ def build_battery(
     schedule records every channel of that version.
     """
     status = (CONNECTED,) if CONNECTED in contract_channels(contract_version) else ()
+    z0 = {
+        level: (
+            _z0_at("z0_over_z1", z0_over_z1, level),
+            _z0_at("x0_over_r0", x0_over_r0, level),
+        )
+        for level in _SK_LEVELS
+    }
     inputs = (
         ("sk_min_mva", sk_min_mva),
         ("sk_max_mva", sk_max_mva),
         ("xr_min", xr_min),
         ("xr_max", xr_max),
-        ("z0_over_z1", z0_over_z1),
-        ("x0_over_r0", x0_over_r0),
+        *_z0_inputs("z0_over_z1", z0_over_z1),
+        *_z0_inputs("x0_over_r0", x0_over_r0),
     )
     for name, v in inputs:
         if not _finite(v):
@@ -500,7 +532,7 @@ def build_battery(
     if xr_min > xr_max:
         raise ContractError(f"xr_min={xr_min} exceeds xr_max={xr_max}")
     grids = {
-        label: Thevenin(label, sk, xr, z0_over_z1, x0_over_r0)
+        label: Thevenin(label, sk, xr, *z0[label.split("_")[0]])
         for label, sk, xr in (
             ("skmin_xrmin", sk_min_mva, xr_min),
             ("skmin_xrmax", sk_min_mva, xr_max),
