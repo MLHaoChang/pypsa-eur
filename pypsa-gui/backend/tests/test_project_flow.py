@@ -631,6 +631,11 @@ def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypat
     meta = json.loads(path.read_text())
     meta["pack_overrides"] = {**meta["pack_overrides"], "import_energy_mwh_per_year": 1000.0}
     path.write_text(json.dumps(meta))
+    # The template's PoC binding refuses a two-way import (WALK-IMPROVE-1 b ships a
+    # commercial block); without it the study's own refusal is the blocker.
+    _cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config",
+                      json={**_cfg, "commercial": None}).status_code == 200
     link = client.get("/api/network/links").json()
     grid = next(r for r in link if r["name"] == "grid_import")
     assert client.put("/api/network/links/grid_import",
@@ -670,11 +675,13 @@ def test_r4_in_flight(client, site, monkeypatch):
 TEMPLATE_STATES = {
     # R location → warning (site_location_missing). R connection limits and
     # ramp, R LOLE goal: DC 02's assumed ledger rows → connection and
-    # scenarios warning ("to check").
+    # scenarios warning ("to check"). Its shipped finance inputs and tax rule
+    # (WALK-IMPROVE-1 b) are assumed ledger rows → commercial warning; the
+    # existing campus typed sunk (overnight cost 0) is one → assets warning.
     "eh_datacenter": {"project": "warning", "carriers": "complete",
                       "connection": "warning", "loads": "complete",
-                      "assets": "complete", "profiles": "complete",
-                      "commercial": "complete", "scenarios": "warning"},
+                      "assets": "warning", "profiles": "complete",
+                      "commercial": "warning", "scenarios": "warning"},
     # Islanded: connection `not_needed`. Assumed island data → assets warning.
     # DC 02's assumed LOLE goal → scenarios warning.
     "eh_microgrid": {"project": "warning", "carriers": "complete",

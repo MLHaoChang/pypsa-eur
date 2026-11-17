@@ -246,8 +246,10 @@ def test_c1_the_inputs_move_no_fingerprint_digest_or_ic_key(
 def test_c1_goal_free_config_drops_only_the_named_field():
     from services.reliability_goal import NOT_LP_FIELDS, goal_free_config
 
-    assert NOT_LP_FIELDS == frozenset({"business_case"})
-    d = {"voll": 1.0, "business_case": {"x": 1}, "finance": {"y": 2}}
+    # ...and the template's assumed-value record (WALK-IMPROVE-1 b, GK B2 D2).
+    assert NOT_LP_FIELDS == frozenset({"business_case", "finance_assumed"})
+    d = {"voll": 1.0, "business_case": {"x": 1}, "finance": {"y": 2},
+         "finance_assumed": {"wacc_nominal": {"value": 0.07, "source": "s"}}}
     assert goal_free_config(d) == {"voll": 1.0, "finance": {"y": 2}}
 
 

@@ -813,6 +813,18 @@ def test_compare_route_writes_nothing_and_answers_every_architecture(
         for v in body["variants"]
     )
     assert _snapshot(d) == before and _network_input_fingerprint(ctx) == fp
+    # The template ships a tariff (WALK-IMPROVE-1 b): no price entered, its energy rate prices.
+    r = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["price"]["assumed"] is False and "request" not in r.json()["price"]["source"]
+    assert _snapshot(d) == before
+    # With no tariff and no price entered, it refuses and writes nothing.
+    import json
+
+    cfg = d / "solver_config.json"
+    cfg.write_text(json.dumps({k: v for k, v in json.loads(cfg.read_text()).items()
+                               if k != "commercial"}))
+    before = _snapshot(d)
     r = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={})
     assert r.status_code == 422
     assert r.json()["detail"]["error_kind"] == "dc_architecture_no_energy_price"

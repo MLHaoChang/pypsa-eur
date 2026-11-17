@@ -5,9 +5,9 @@ create body's ``planning`` {start_year, end_year}: one period, the start year,
 which dates the modelled week (or the IPP's hourly year); the end year is the
 horizon. The gatekeeper's E1d plan conditions (GK B) and owner E1D-IPP-1:
 
-1. the H2 hub, the microgrid and the IPP refuse start == end (their
-   investment case runs to the end year; the H2 hub's since study harness
-   issue 19); the data center takes it;
+1. every example refuses start == end: its investment case runs to the end
+   year (the H2 hub's since study harness issue 19; the data center's since it
+   ships finance inputs, WALK-IMPROVE-1 b);
 2. the IPP's money year is the start year: the example's 2030 illustrative
    money and the observed 2024 prices are taken as start-year money with no
    conversion; the finance ``currency_year`` and every series' ``currency_year``
@@ -39,7 +39,7 @@ import eh_templates as T  # noqa: E402
 DC, H2, MG, IPP = "eh_datacenter", "eh_h2_hub", "eh_microgrid", "eh_ipp_hybrid"
 IDS = (DC, H2, MG, IPP)
 #: Templates with an investment case to the end year.
-CASED = (H2, MG, IPP)
+CASED = (DC, H2, MG, IPP)
 SHIFTED = {"start_year": 2033, "end_year": 2051}
 #: A leap start year: the IPP's hourly year drops 29 Feb.
 LEAP = {"start_year": 2032, "end_year": 2050}
@@ -77,7 +77,7 @@ def _canonical(n) -> dict:
 
 @pytest.mark.parametrize("tid", IDS)
 def test_each_takes_one_period_at_the_entered_start_year(tid):
-    assert T.SINGLE_YEAR[tid] is (tid in CASED)
+    assert T.SINGLE_YEAR[tid] is True
     assert _plan(tid, SHIFTED) == T.Planning((2033,), 2051)
     native = T.NATIVE_PLANNING[tid]
     assert native.years == (2030,)
@@ -89,11 +89,6 @@ def test_a_cased_example_refuses_start_equal_to_end(tid):
     with pytest.raises(T.PlanningError, match="must be after the start year") as exc:
         _plan(tid, {"start_year": 2033, "end_year": 2033})
     assert exc.value.field == "planning.end_year"
-
-
-@pytest.mark.parametrize("tid", (DC,))
-def test_an_uncased_example_takes_start_equal_to_end(tid):
-    assert _plan(tid, {"start_year": 2033, "end_year": 2033}) == T.Planning((2033,), 2033)
 
 
 @pytest.mark.parametrize("raw, field", [
@@ -260,13 +255,6 @@ def test_create_builds_the_entered_year_and_writes_its_sidecars(
     cfg = json.loads((d / T.SOLVER_FILE).read_text())
     want = json.loads(json.dumps(T.solver_config(tid, p)))
     assert cfg.get("finance") == want.get("finance")
-
-
-@pytest.mark.parametrize("tid", (DC,))
-def test_create_takes_start_equal_to_end_on_an_uncased_example(tid, client, tmp_projects_dir):
-    r = client.post(f"/api/projects/from_template/{tid}", params={"name": f"{tid}_one"},
-                    json={"planning": {"start_year": 2033, "end_year": 2033}})
-    assert r.status_code == 200, r.text
 
 
 @pytest.mark.parametrize("raw, field", [

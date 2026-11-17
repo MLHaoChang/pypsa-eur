@@ -1223,6 +1223,13 @@ def test_assess_reads_the_finance_case_rate_on_its_basis(
     _served(monkeypatch)
     pack = dc_backup.pack_prices(t.TEMPLATE_PACK_VERSION)["discount_rate"]
     d = _dc_project(client, tmp_path, monkeypatch, project_row, "dc_rate", finance)
+    if finance is None:
+        # The template ships finance inputs (WALK-IMPROVE-1 b): unset means removed.
+        import json
+
+        cfg = d / "solver_config.json"
+        cfg.write_text(json.dumps({k: v for k, v in json.loads(cfg.read_text()).items()
+                                   if k != "finance"}))
     c = dc_backup.assess_project(d, t, "hybrid")["cost"]
     want = pack if assumed else rate
     assert c["discount_rate"] == pytest.approx(want)
