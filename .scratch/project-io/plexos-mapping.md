@@ -1,7 +1,7 @@
 # PLEXOS import: mapping plan
 
-Status: needs-triage (plan sent to GK A; scope options sent to the coordinator)
-Owner decisions: IMPORTS-1, IMPORT-FLOW-1, HOLISTIC-1, RAW-NAMES-1, PR-SIZE-1
+Status: ready-for-agent (slice 1 plan GO from GK A (29); scope settled by PLEXOS-SCOPE-1)
+Owner decisions: IMPORTS-1, IMPORT-FLOW-1, HOLISTIC-1, RAW-NAMES-1, PR-SIZE-1, PLEXOS-SCOPE-1
 
 ## What a PLEXOS model file is
 
@@ -87,6 +87,12 @@ Engine cage (owner, option A): pypsa is imported only in `gridspine/ingest/plexo
 ## Parameters PLEXOS brings (for the expert catalogue, HOLISTIC-1)
 
 Generator: capacity, unit count, minimum stable level, rating profile, heat rate, fuel price, variable O&M, start cost, commission/retirement year, ramp limits, maintenance rate, forced outage rate, mean time to repair. Battery: power, energy, charge/discharge efficiency, initial state of charge. Hydro: reservoir energy, natural inflow, initial level. Line: max/min flow, wheeling charge, reactance. Node: load profile, voltage, coordinates. Region: value of lost load. Fuel: price (static or series), CO2 rate.
+
+## Owner scope (PLEXOS-SCOPE-1, 2026-11-17)
+
+- Scenarios: the user picks one PLEXOS Model in the preview. Rows of other scenarios are listed as "not selected".
+- Inputs: an XML file, or a .zip of the XML plus its CSV data files. A missing CSV gives a warning and the static value as fallback. There is no xlsx reader in this package.
+- Generic constraints, reserves, energy limits and market objects are reported as unmapped with a reason, plus follow-up issues. Slice 4 is dropped.
 
 ## Comments
 
