@@ -3586,6 +3586,43 @@ def _dispatch_real_tool_call(
                 }
             )
             return
+    map_card = None
+    if (
+        tool_name == "compare_system_types"
+        and (args or {}).get("action", "start") == "start"
+        and session.assurance_turn is None
+    ):
+        # homer-parity 03b-1: the saved base, both variables and the solve
+        # count; a refusal here means no card.
+        from harness import system_map_card as map_cards
+
+        try:
+            map_card = map_cards.preview(args or {})
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            kind = (
+                detail.get("error_kind", "system_map_preview_unavailable")
+                if isinstance(detail, dict)
+                else "system_map_preview_unavailable"
+            )
+            yield (
+                "tool_error",
+                {
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "error_kind": kind,
+                    "message": _redact_for_log(detail or exc),
+                },
+            )
+            tool_results_collector.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": True,
+                    "content": _error_result_content(detail, exc, kind),
+                }
+            )
+            return
     if tool_name == "propose_memory":
         # Assistant memory §2.2–§2.4: a proposal is validated, capped and
         # checked against recent dismissals BEFORE its card, so a refused one
@@ -3654,6 +3691,7 @@ def _dispatch_real_tool_call(
         restriction_snapshot=restriction,
         edit_card=edit_card,
         sweep_card=sweep_card,
+        **({"map_card": map_card} if map_card is not None else {}),
         **({"repeat_card": repeat_card} if repeat_card is not None else {}),
     )
     if not approved:
@@ -3915,6 +3953,8 @@ def _dispatch_real_tool_call(
                         return out
                     if sweep_card is not None:
                         sweep_cards.require_current(args or {}, sweep_card)
+                    if map_card is not None:
+                        map_cards.require_current(args or {}, map_card)
                     return invoke(session, tool_name, args or {}, handler)
 
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.

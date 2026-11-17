@@ -11,6 +11,10 @@
     "axis_missing": {
       "surface": "inline",
       "why": "homer-parity 03b: compare_system_types was started without both x_variable and y_variable. The model's slip; it names the two variables and retries."
+    },
+    "system_map_preview_stale": {
+      "surface": "inline",
+      "why": "homer-parity 03b: the base project, the request or the derived architectures and solve count changed between the confirmation card and the run of compare_system_types. The assistant shows a new card."
     }
   }
 }
