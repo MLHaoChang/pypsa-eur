@@ -281,6 +281,7 @@ describe('refreshIfStillCurrent (F5: each clause has its own failing row)', () =
     ['the project was renamed during the job', ok, 'Demo (renamed)', 'Demo', 7, false],
     ['no project open', ok, null, 'Demo', 7, false],
     ['the revision moved', ok, 'Demo', 'Demo', 8, false],
+    ['no revision on either side (the counter is unknown)', { outcome: 'succeeded' }, 'Demo', 'Demo', undefined, false],
   ] as const)('%s', async (_name, job, current, origin, revision, refreshed) => {
     useUIStore.setState({ currentProject: current })
     vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 0, unsaved: false, network_revision: revision })
