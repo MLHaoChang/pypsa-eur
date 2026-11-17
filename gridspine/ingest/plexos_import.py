@@ -91,21 +91,64 @@ _UNSUPPORTED = {
     "Waterway": "hydro storage is imported in a later slice",
 }
 _MARKET = (
-    "Purchaser", "Contract", "Financial Contract", "Market", "Company",
-    "Physical Contract", "Cournot", "RSI", "Power Station",
+    "Purchaser",
+    "Contract",
+    "Financial Contract",
+    "Market",
+    "Company",
+    "Physical Contract",
+    "Cournot",
+    "RSI",
+    "Power Station",
 )
 _OTHER_CARRIERS = (
-    "Gas Node", "Gas Field", "Gas Pipeline", "Gas Storage", "Gas Demand",
-    "Gas Contract", "Gas Plant", "Gas Basin", "Gas Zone", "Gas Transport",
-    "Water Node", "Water Pipeline", "Water Storage", "Water Demand",
-    "Water Plant", "Heat Node", "Heat Plant", "Facility", "Commodity", "Flow Network",
-    "Flow Node", "Flow Path", "Flow Storage", "Process", "Entity", "Vehicle",
-    "Charging Station", "Fleet",
+    "Gas Node",
+    "Gas Field",
+    "Gas Pipeline",
+    "Gas Storage",
+    "Gas Demand",
+    "Gas Contract",
+    "Gas Plant",
+    "Gas Basin",
+    "Gas Zone",
+    "Gas Transport",
+    "Water Node",
+    "Water Pipeline",
+    "Water Storage",
+    "Water Demand",
+    "Water Plant",
+    "Heat Node",
+    "Heat Plant",
+    "Facility",
+    "Commodity",
+    "Flow Network",
+    "Flow Node",
+    "Flow Path",
+    "Flow Storage",
+    "Process",
+    "Entity",
+    "Vehicle",
+    "Charging Station",
+    "Fleet",
 )
 _SETTINGS = (
-    "Model", "Project", "Horizon", "Report", "LT Plan", "PASA", "MT Schedule",
-    "ST Schedule", "Transmission", "Production", "Competition", "Stochastic",
-    "Performance", "Diagnostic", "List", "Layout", "Global",
+    "Model",
+    "Project",
+    "Horizon",
+    "Report",
+    "LT Plan",
+    "PASA",
+    "MT Schedule",
+    "ST Schedule",
+    "Transmission",
+    "Production",
+    "Competition",
+    "Stochastic",
+    "Performance",
+    "Diagnostic",
+    "List",
+    "Layout",
+    "Global",
 )
 _ENERGY_LIMITS = re.compile(
     r"^(Max|Min) (Energy|Capacity Factor)( (Hour|Day|Week|Month|Year))?$"
@@ -196,7 +239,9 @@ def _read_zip(path: Path) -> _Input:
     try:
         zf = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError) as exc:
-        raise ImportFormatError(f"{path.name} is not a readable zip file: {exc}") from exc
+        raise ImportFormatError(
+            f"{path.name} is not a readable zip file: {exc}"
+        ) from exc
     with zf:
         infos = zf.infolist()
         if len(infos) > MAX_ZIP_MEMBERS:
@@ -264,8 +309,7 @@ def _read_input(paths: Sequence[Path]) -> _Input:
         )
     if len(main) != 1:
         raise ImportFormatError(
-            "A PLEXOS import needs exactly one .xml or .zip file; "
-            f"got {len(main)}"
+            f"A PLEXOS import needs exactly one .xml or .zip file; got {len(main)}"
         )
     path = main[0]
     csvs = sorted(p.name for p in paths if p.suffix.lower() == ".csv")
@@ -295,7 +339,9 @@ class Conversion:
 
 
 class _Converter:
-    def __init__(self, model: PlexosModel, options: Mapping[str, Any], report: ImportReport):
+    def __init__(
+        self, model: PlexosModel, options: Mapping[str, Any], report: ImportReport
+    ):
         self.m = model
         self.opt = options
         self.r = report
@@ -307,8 +353,8 @@ class _Converter:
         self._skip: dict[tuple[str, str], list[str]] = defaultdict(list)
         self.names: dict[str, set[str]] = defaultdict(set)
         self.base: dict[tuple[str, str], dict[str, PropertyRow]] = defaultdict(dict)
-        self.children: dict[tuple[str, str], dict[str, list[tuple[str, str]]]] = defaultdict(
-            lambda: defaultdict(list)
+        self.children: dict[tuple[str, str], dict[str, list[tuple[str, str]]]] = (
+            defaultdict(lambda: defaultdict(list))
         )
         for mem in model.memberships:
             self.children[mem.parent][mem.collection[2]].append(mem.child)
@@ -336,7 +382,9 @@ class _Converter:
             i += 1
             out = f"{name} ({source} {i})" if i > 2 else f"{name} ({source})"
         if out != name:
-            self.assume(out, "name", out, f"{component} name {name!r} is already used; renamed")
+            self.assume(
+                out, "name", out, f"{component} name {name!r} is already used; renamed"
+            )
         taken.add(out)
         return out
 
@@ -368,7 +416,9 @@ class _Converter:
 
     def sort_rows(self, on: set[str]) -> None:
         """Base rows go to ``self.base``; every other row to unmapped, with why."""
-        seen: dict[tuple[tuple[str, str], tuple[str, str], str], list[PropertyRow]] = defaultdict(list)
+        seen: dict[tuple[tuple[str, str], tuple[str, str], str], list[PropertyRow]] = (
+            defaultdict(list)
+        )
         for row in self.m.rows:
             scen = row.scenarios
             if row.value is None:
@@ -388,7 +438,10 @@ class _Converter:
             elif any(t.cls == "Data File" for t in row.tags):
                 self.skip(row, "time series from a data file: read in a later slice")
             elif row.tags:
-                self.skip(row, f"scaled by {row.tags[0].cls} {row.tags[0].name!r}: later slice")
+                self.skip(
+                    row,
+                    f"scaled by {row.tags[0].cls} {row.tags[0].name!r}: later slice",
+                )
             else:
                 seen[(row.parent, row.child, row.property)].append(row)
         for (parent, child, prop), rows in seen.items():
@@ -415,10 +468,15 @@ class _Converter:
         """True when the row's unit is one this code converts; otherwise unmapped (Q1)."""
         if row.unit in units:
             return True
-        self.skip(row, f"unit {row.unit!r} for {row.property!r} is not converted (expects {', '.join(units)})")
+        self.skip(
+            row,
+            f"unit {row.unit!r} for {row.property!r} is not converted (expects {', '.join(units)})",
+        )
         return False
 
-    def one_child(self, obj, collection: str, what: str) -> tuple[str, str] | None | str:
+    def one_child(
+        self, obj, collection: str, what: str
+    ) -> tuple[str, str] | None | str:
         kids = self.children.get(obj, {}).get(collection, [])
         if len(kids) == 1:
             return kids[0]
@@ -440,19 +498,32 @@ class _Converter:
             if len(hs) == 1:
                 chosen = hs[0]
             elif hs:
-                self.r.warnings.append(f"Model {model!r} has {len(hs)} horizons; none used")
+                self.r.warnings.append(
+                    f"Model {model!r} has {len(hs)} horizons; none used"
+                )
         for obj, by_name in attrs.items():
             for name, a in by_name.items():
                 key = _attr_key(obj, name)
                 if obj[0] == "Node" and name in ("Latitude", "Longitude"):
                     continue  # read with the nodes
                 if obj != chosen:
-                    why = "horizon of another Model" if obj[0] == "Horizon" else (
-                        "Model setting" if obj[0] == "Model" else "attribute not imported yet")
+                    why = (
+                        "horizon of another Model"
+                        if obj[0] == "Horizon"
+                        else (
+                            "Model setting"
+                            if obj[0] == "Model"
+                            else "attribute not imported yet"
+                        )
+                    )
                     self.skip_attr(obj, name, why)
         if chosen is None:
-            self.assume("network", "snapshots", "one snapshot",
-                        "the chosen Model has no horizon")
+            self.assume(
+                "network",
+                "snapshots",
+                "one snapshot",
+                "the chosen Model has no horizon",
+            )
             return
         h = attrs.get(chosen, {})
 
@@ -465,20 +536,40 @@ class _Converter:
         ppd = val("Periods per Day") or 24
         days = val("Chrono Step Count")
         minutes = 1440 / ppd if ppd > 0 else None
-        ok = start is not None and minutes and minutes == int(minutes) and ppd == int(ppd)
+        ok = (
+            start is not None
+            and minutes
+            and minutes == int(minutes)
+            and ppd == int(ppd)
+        )
         used = {"Chrono Date From", "Date From", "Periods per Day", "Chrono Step Count"}
         if not ok:
             for name in h:
-                self.skip_attr(chosen, name, "horizon start or periods per day unreadable")
-            self.assume("network", "snapshots", "one snapshot", f"horizon {chosen[1]!r} is unreadable")
+                self.skip_attr(
+                    chosen, name, "horizon start or periods per day unreadable"
+                )
+            self.assume(
+                "network",
+                "snapshots",
+                "one snapshot",
+                f"horizon {chosen[1]!r} is unreadable",
+            )
             return
         if days is None or days <= 0 or days != int(days):
             days = 366 if pd.Timestamp(start).is_leap_year else 365
-            self.assume("network", "snapshots", f"{int(days)} days",
-                        f"horizon {chosen[1]!r} gives no chronological length; one year used")
+            self.assume(
+                "network",
+                "snapshots",
+                f"{int(days)} days",
+                f"horizon {chosen[1]!r} gives no chronological length; one year used",
+            )
         if "Chrono Step Type" in h:
-            self.assume("network", "snapshots", "days",
-                        "Chrono Step Type is read as days (the PLEXOS default)")
+            self.assume(
+                "network",
+                "snapshots",
+                "days",
+                "Chrono Step Type is read as days (the PLEXOS default)",
+            )
         n_steps = int(days) * int(ppd)
         snaps = pd.date_range(start, periods=n_steps, freq=f"{int(minutes)}min")
         self.n.set_snapshots(snaps)
@@ -490,12 +581,17 @@ class _Converter:
             else:
                 self.skip_attr(chosen, name, "horizon setting not imported yet")
         if ppd != 24:
-            self.assume("network", "snapshot step", f"{int(minutes)} min",
-                        f"{int(ppd)} periods per day")
+            self.assume(
+                "network",
+                "snapshot step",
+                f"{int(minutes)} min",
+                f"{int(ppd)} periods per day",
+            )
 
     def nodes(self) -> None:
         coords = {
-            (a.object, a.name): a for a in self.m.attributes
+            (a.object, a.name): a
+            for a in self.m.attributes
             if a.object[0] == "Node" and a.name in ("Latitude", "Longitude")
         }
         self.voltage: dict[str, float | None] = {}
@@ -510,8 +606,12 @@ class _Converter:
                 else:
                     self.skip(v, "voltage must be above 0")
             if "v_nom" not in kw:
-                self.assume(node.name, "voltage", None,
-                            "voltage unknown; lines with reactance on this node are not converted")
+                self.assume(
+                    node.name,
+                    "voltage",
+                    None,
+                    "voltage unknown; lines with reactance on this node are not converted",
+                )
             for attr, col in (("Longitude", "x"), ("Latitude", "y")):
                 a = coords.get((obj, attr))
                 if a is None:
@@ -527,7 +627,12 @@ class _Converter:
             if units is not None:
                 self.used(units, "assumed" if units.value == 0 else "network")
                 if units.value == 0:
-                    self.assume(node.name, "in service", False, "Units = 0: node out of service in PLEXOS")
+                    self.assume(
+                        node.name,
+                        "in service",
+                        False,
+                        "Units = 0: node out of service in PLEXOS",
+                    )
             name = self.unique("Bus", node.name, "Node")
             self.n.add("Bus", name, **kw)
             self.voltage[node.name] = kw.get("v_nom")
@@ -535,7 +640,12 @@ class _Converter:
             if load is not None and self.unit_ok(load, "MW"):
                 self.used(load)
                 self.load_mw["network"] += load.value
-                self.n.add("Load", self.unique("Load", node.name, "Load"), bus=name, p_set=load.value)
+                self.n.add(
+                    "Load",
+                    self.unique("Load", node.name, "Load"),
+                    bus=name,
+                    p_set=load.value,
+                )
             self.leftovers(obj)
 
     def areas(self) -> None:
@@ -546,8 +656,11 @@ class _Converter:
                 for a in self.children.get(node.key, {}).get(coll, []):
                     members[a[1]].append(node.name)
             for obj in sorted(self.m.objects_of(cls), key=lambda o: o.name):
-                entry: dict[str, Any] = {"name": obj.name, "kind": cls.lower(),
-                                         "buses": sorted(members.get(obj.name, []))}
+                entry: dict[str, Any] = {
+                    "name": obj.name,
+                    "kind": cls.lower(),
+                    "buses": sorted(members.get(obj.name, [])),
+                }
                 voll = self.take(obj.key, "VoLL")
                 if voll is not None:
                     entry["voll"] = voll.value
@@ -560,19 +673,30 @@ class _Converter:
                 load = self.take(obj.key, "Load")
                 if load is not None:
                     self.load_mw["unmapped"] += load.value
-                    self.skip(load, "region-level load: distributing it by load participation factor is not supported yet")
+                    self.skip(
+                        load,
+                        "region-level load: distributing it by load participation factor is not supported yet",
+                    )
                 self.leftovers(obj.key)
                 out.append(entry)
         for node in self.m.objects_of("Node"):
             lpf = self.take(node.key, "Load Participation Factor")
             if lpf is not None:
-                self.skip(lpf, "load participation factor: region-level load is not distributed yet")
+                self.skip(
+                    lpf,
+                    "load participation factor: region-level load is not distributed yet",
+                )
         if out:
             self.sidecars[AREAS_SIDECAR] = {"source": "PLEXOS import", "areas": out}
 
     def mva_base(self) -> float:
         for obj in list(self.base):
-            if isinstance(obj, tuple) and len(obj) == 2 and isinstance(obj[0], str) and obj[0] in ("System", "Transmission"):
+            if (
+                isinstance(obj, tuple)
+                and len(obj) == 2
+                and isinstance(obj[0], str)
+                and obj[0] in ("System", "Transmission")
+            ):
                 for prop in MVA_BASE_PROPERTIES:
                     row = self.take(obj, prop)
                     if row is not None and row.unit in ("MVA", "MW") and row.value > 0:
@@ -580,8 +704,12 @@ class _Converter:
                         return row.value
                     if row is not None:
                         self.skip(row, "system MVA base unreadable")
-        self.assume("network", "MVA base", DEFAULT_MVA_BASE,
-                    "the file gives no MVA base; per-unit line impedances read on 100 MVA")
+        self.assume(
+            "network",
+            "MVA base",
+            DEFAULT_MVA_BASE,
+            "the file gives no MVA base; per-unit line impedances read on 100 MVA",
+        )
         return DEFAULT_MVA_BASE
 
     def lines(self) -> None:
@@ -606,7 +734,9 @@ class _Converter:
             if units is not None:
                 self.used(units, "network" if units.value == 1 else "unmapped")
                 if units.value != 1:
-                    self.drop_object(obj, f"{units.value:g} parallel units are not converted")
+                    self.drop_object(
+                        obj, f"{units.value:g} parallel units are not converted"
+                    )
                     continue
             mx = self.take(obj, "Max Flow")
             mn = self.take(obj, "Min Flow")
@@ -653,16 +783,25 @@ class _Converter:
                 self.skip(row, why, item=f"Line {name!r}")
             return
         z = va**2 / base
-        kw = {"bus0": a, "bus1": b, "s_nom": mx.value, "x": x.value * z,
-              "r": (r.value * z) if r is not None else 0.0}
+        kw = {
+            "bus0": a,
+            "bus1": b,
+            "s_nom": mx.value,
+            "x": x.value * z,
+            "r": (r.value * z) if r is not None else 0.0,
+        }
         for row in (mx, x, r):
             if row is not None:
                 self.used(row)
         if mn is not None:
             self.used(mn, "assumed")
             if mn.value != -mx.value:
-                self.assume(name, "Min Flow", mn.value,
-                            "an AC line's limit is symmetric; Max Flow used both ways")
+                self.assume(
+                    name,
+                    "Min Flow",
+                    mn.value,
+                    "an AC line's limit is symmetric; Max Flow used both ways",
+                )
         if wheel is not None:
             self.skip(wheel, "wheeling charge on an AC line has no PyPSA field")
         self.n.add("Line", self.unique("Line", name, "Line"), **kw)
@@ -674,7 +813,9 @@ class _Converter:
             if mn.value > mx.value:
                 self.skip(mn, "Min Flow above Max Flow")
                 kw["p_min_pu"] = -1.0
-                self.assume(name, "Min Flow", -mx.value, "Min Flow unusable; taken as −Max Flow")
+                self.assume(
+                    name, "Min Flow", -mx.value, "Min Flow unusable; taken as −Max Flow"
+                )
             else:
                 kw["p_min_pu"] = mn.value / mx.value
                 self.used(mn)
@@ -682,12 +823,16 @@ class _Converter:
             if mn is not None and mn.unit == "MW":
                 self.used(mn, "assumed")
             kw["p_min_pu"] = -1.0
-            self.assume(name, "Min Flow", -mx.value, "Min Flow not given; taken as −Max Flow")
+            self.assume(
+                name, "Min Flow", -mx.value, "Min Flow not given; taken as −Max Flow"
+            )
         if wheel is not None and self.unit_ok(wheel, "$/MWh"):
             kw["marginal_cost"] = wheel.value
             self.used(wheel)
         if r is not None:
-            self.skip(r, "resistance without reactance: transport model, losses not imported")
+            self.skip(
+                r, "resistance without reactance: transport model, losses not imported"
+            )
         self.n.add("Link", self.unique("Link", name, "Line"), carrier="DC", **kw)
         self.carriers.add("DC")
 
@@ -699,11 +844,20 @@ class _Converter:
             if row is not None and self.unit_ok(row, "$/GJ"):
                 self.price[fuel.name] = row.value
                 self.used(row, "sidecar")
-                prices.append({"fuel": fuel.name, "price": row.value, "unit": row.unit,
-                               "source": "static Price"})
+                prices.append(
+                    {
+                        "fuel": fuel.name,
+                        "price": row.value,
+                        "unit": row.unit,
+                        "source": "static Price",
+                    }
+                )
             self.leftovers(fuel.key)
         if prices:
-            self.sidecars[FUEL_PRICES_SIDECAR] = {"source": "PLEXOS import", "fuels": prices}
+            self.sidecars[FUEL_PRICES_SIDECAR] = {
+                "source": "PLEXOS import",
+                "fuels": prices,
+            }
         self.co2: dict[str, float] = {}
         for em in self.m.objects_of("Emission"):
             for fuel in self.children.get(em.key, {}).get("Fuels", []):
@@ -711,11 +865,17 @@ class _Converter:
                 if row is None:
                     continue
                 if "co2" not in em.name.lower().replace("₂", "2"):
-                    self.skip(row, "only CO2 emission rates are imported", item=f"Emission {em.name!r}")
+                    self.skip(
+                        row,
+                        "only CO2 emission rates are imported",
+                        item=f"Emission {em.name!r}",
+                    )
                 elif self.unit_ok(row, "kg/GJ"):
                     self.co2[fuel[1]] = row.value * KG_PER_GJ_TO_T_PER_MWH
                     self.used(row)
-            for key in [k for k in self.base if isinstance(k[0], tuple) and k[0] == em.key]:
+            for key in [
+                k for k in self.base if isinstance(k[0], tuple) and k[0] == em.key
+            ]:
                 for row in self.base.pop(key).values():
                     self.skip(row, "emission property not imported yet")
             self.leftovers(em.key)
@@ -724,18 +884,27 @@ class _Converter:
         u = self.take(obj, "Units")
         if u is None:
             # The file's own t_property default, never a hard-coded one (GK A).
-            found = [v for (coll, prop), v in self.m.defaults.items()
-                     if prop == "Units" and coll[0] == "System" and coll[1] == obj[0]]
+            found = [
+                v
+                for (coll, prop), v in self.m.defaults.items()
+                if prop == "Units" and coll[0] == "System" and coll[1] == obj[0]
+            ]
             if len(found) != 1 or found[0] is None:
-                self.drop_object(obj, "unit count unknown: no Units row and no default in the file")
+                self.drop_object(
+                    obj, "unit count unknown: no Units row and no default in the file"
+                )
                 return None
             if found[0] == 0:
                 self.drop_object(obj, "0 units (the file's default Units): not built")
                 return None
             if found[0] < 0 or found[0] != int(found[0]):
-                self.drop_object(obj, "the file's default Units is not a whole number above 0")
+                self.drop_object(
+                    obj, "the file's default Units is not a whole number above 0"
+                )
                 return None
-            self.assume(name, "units", found[0], "no Units row; the file's default Units used")
+            self.assume(
+                name, "units", found[0], "no Units row; the file's default Units used"
+            )
             return found[0]
         if u.value == 0:
             self.used(u, "unmapped")
@@ -796,7 +965,10 @@ class _Converter:
             if sc is not None and self.unit_ok(sc, "$"):
                 kw["start_up_cost"] = sc.value
                 self.used(sc)
-            for prop, col in (("Max Ramp Up", "ramp_limit_up"), ("Max Ramp Down", "ramp_limit_down")):
+            for prop, col in (
+                ("Max Ramp Up", "ramp_limit_up"),
+                ("Max Ramp Down", "ramp_limit_down"),
+            ):
                 row = self.take(obj, prop)
                 if row is not None and self.unit_ok(row, "MW/min"):
                     if row.value > 0:
@@ -806,7 +978,9 @@ class _Converter:
                         self.skip(row, "ramp limit must be above 0")
             self._dates(obj, gen.name, kw)
             self._outages(obj, gen.name, kw)
-            self.n.add("Generator", self.unique("Generator", gen.name, "Generator"), **kw)
+            self.n.add(
+                "Generator", self.unique("Generator", gen.name, "Generator"), **kw
+            )
             self.leftovers(obj)
 
     def _cost(self, obj, name: str, fuels) -> float:
@@ -816,38 +990,65 @@ class _Converter:
             cost = vom.value
             self.used(vom)
         hr = self.take(obj, "Heat Rate")
-        forms = [self.take(obj, p) for p in ("Heat Rate Base", "Heat Rate Incr", "Fuel Offtake")]
+        forms = [
+            self.take(obj, p)
+            for p in ("Heat Rate Base", "Heat Rate Incr", "Fuel Offtake")
+        ]
         for row in forms:
             if row is not None:
                 self.skip(row, "heat-rate curve form is not converted; no guessed cost")
         if hr is None:
             if fuels:
-                self.assume(name, "marginal cost", cost,
-                            "no plain Heat Rate: fuel cost not included, VO&M only")
+                self.assume(
+                    name,
+                    "marginal cost",
+                    cost,
+                    "no plain Heat Rate: fuel cost not included, VO&M only",
+                )
             return cost
         if len(fuels) != 1:
-            self.skip(hr, f"{len(fuels)} fuels: multi-fuel cost is not converted" if fuels
-                      else "heat rate without a fuel")
-            self.assume(name, "marginal cost", cost, "fuel cost not included, VO&M only")
+            self.skip(
+                hr,
+                f"{len(fuels)} fuels: multi-fuel cost is not converted"
+                if fuels
+                else "heat rate without a fuel",
+            )
+            self.assume(
+                name, "marginal cost", cost, "fuel cost not included, VO&M only"
+            )
             return cost
         if hr.unit == "GJ/MWh":
             rate = hr.value
         elif hr.unit == "BTU/kWh":
             rate = hr.value * BTU_PER_KWH_TO_GJ_PER_MWH
         else:
-            self.skip(hr, f"unit {hr.unit!r} for 'Heat Rate' is not converted (expects GJ/MWh, BTU/kWh)")
-            self.assume(name, "marginal cost", cost, "fuel cost not included, VO&M only")
+            self.skip(
+                hr,
+                f"unit {hr.unit!r} for 'Heat Rate' is not converted (expects GJ/MWh, BTU/kWh)",
+            )
+            self.assume(
+                name, "marginal cost", cost, "fuel cost not included, VO&M only"
+            )
             return cost
         fuel = fuels[0][1]
         if fuel not in self.price:
             self.used(hr, "assumed")
-            self.assume(name, "marginal cost", cost, f"fuel {fuel!r} has no static price; VO&M only")
+            self.assume(
+                name,
+                "marginal cost",
+                cost,
+                f"fuel {fuel!r} has no static price; VO&M only",
+            )
             return cost
         self.used(hr)
         total = rate * self.price[fuel] + cost
-        self.assume(name, "marginal cost", round(total, 6),
-                    f"heat rate {rate:g} GJ/MWh × {fuel} price {self.price[fuel]:g} $/GJ"
-                    f" + VO&M {cost:g} $/MWh; PLEXOS $ read as the project currency")
+        self.assume(
+            name,
+            "marginal cost",
+            round(total, 6),
+            f"heat rate {rate:g} GJ/MWh × {fuel} price {self.price[fuel]:g} $/GJ"
+            f" + VO&M {cost:g} $/MWh; PLEXOS $ read as the project currency",
+        )
         return total
 
     def _min_stable(self, obj, name: str, cap: float) -> None:
@@ -877,17 +1078,30 @@ class _Converter:
             return
         pu = max(v for v, _ in vals)
         if len(vals) == 2 and not math.isclose(vals[0][0], vals[1][0]):
-            self.assume(name, "minimum stable level", pu,
-                        "Min Stable Factor and Min Stable Level disagree; the larger is used")
+            self.assume(
+                name,
+                "minimum stable level",
+                pu,
+                "Min Stable Factor and Min Stable Level disagree; the larger is used",
+            )
         for _, row in vals:
-            self.skip(row, "minimum stable level needs unit commitment; offered as a suggestion")
-        self.r.suggestions.append(Suggestion(
-            target=name, parameter="minimum stable level (p_min_pu, unit commitment on)",
-            current=0.0, proposed=round(pu, 6),
-            why=f"PLEXOS minimum stable level: {pu:g} pu of Max Capacity ({pu * cap:g} MW). "
+            self.skip(
+                row,
+                "minimum stable level needs unit commitment; offered as a suggestion",
+            )
+        self.r.suggestions.append(
+            Suggestion(
+                target=name,
+                parameter="minimum stable level (p_min_pu, unit commitment on)",
+                current=0.0,
+                proposed=round(pu, 6),
+                why=f"PLEXOS minimum stable level: {pu:g} pu of Max Capacity ({pu * cap:g} MW). "
                 "It applies only while the unit runs, so it needs unit commitment, "
                 "which makes the solve slower",
-            source="PLEXOS Min Stable Factor / Min Stable Level", confidence="high"))
+                source="PLEXOS Min Stable Factor / Min Stable Level",
+                confidence="high",
+            )
+        )
 
     def _dates(self, obj, name: str, kw: dict) -> None:
         com = self.take(obj, "Commission Date")
@@ -908,7 +1122,9 @@ class _Converter:
             self.skip(ret, "Retirement Date without a Commission Date: no lifetime")
         elif end.year <= start.year:
             self.skip(ret, "Retirement Date not after Commission Date")
-            self.r.warnings.append(f"{name}: retirement {end.year} is not after commission {start.year}")
+            self.r.warnings.append(
+                f"{name}: retirement {end.year} is not after commission {start.year}"
+            )
         else:
             kw["lifetime"] = end.year - start.year
             self.used(ret)
@@ -937,7 +1153,11 @@ class _Converter:
     def batteries(self) -> None:
         for bat in sorted(self.m.objects_of("Battery"), key=lambda o: o.name):
             obj = bat.key
-            bus = self._node_of(obj, "Node") if "Node" in self.children.get(obj, {}) else self._node_of(obj, "Nodes")
+            bus = (
+                self._node_of(obj, "Node")
+                if "Node" in self.children.get(obj, {})
+                else self._node_of(obj, "Nodes")
+            )
             if bus is None:
                 continue
             units = self._units(obj, bat.name)
@@ -948,24 +1168,39 @@ class _Converter:
             bad = None
             if power is None or not self.unit_ok(power, "MW") or not power.value > 0:
                 bad = "no usable Max Power"
-            elif energy is None or not self.unit_ok(energy, "MWh") or not energy.value > 0:
+            elif (
+                energy is None
+                or not self.unit_ok(energy, "MWh")
+                or not energy.value > 0
+            ):
                 bad = "no usable Capacity (MWh)"
             if bad:
                 for row in (power, energy):
-                    if row is not None and (_ROW_TABLE, row.data_id) not in self.ledger.dest:
+                    if (
+                        row is not None
+                        and (_ROW_TABLE, row.data_id) not in self.ledger.dest
+                    ):
                         self.skip(row, bad)
                 self.drop_object(obj, bad)
                 continue
             self.used(power)
             self.used(energy)
-            kw: dict[str, Any] = {"bus": bus, "p_nom": power.value * units,
-                                  "max_hours": energy.value / power.value, "carrier": "battery"}
+            kw: dict[str, Any] = {
+                "bus": bus,
+                "p_nom": power.value * units,
+                "max_hours": energy.value / power.value,
+                "carrier": "battery",
+            }
             self.carriers.add("battery")
-            for prop, col in (("Charge Efficiency", "efficiency_store"),
-                              ("Discharge Efficiency", "efficiency_dispatch")):
+            for prop, col in (
+                ("Charge Efficiency", "efficiency_store"),
+                ("Discharge Efficiency", "efficiency_dispatch"),
+            ):
                 row = self.take(obj, prop)
                 if row is None:
-                    self.assume(bat.name, col, 1.0, f"{prop} not given; PLEXOS default 100 %")
+                    self.assume(
+                        bat.name, col, 1.0, f"{prop} not given; PLEXOS default 100 %"
+                    )
                     continue
                 if not self.unit_ok(row, "%"):
                     continue
@@ -985,7 +1220,9 @@ class _Converter:
                 else:
                     kw["state_of_charge_initial"] = f * energy.value * units
                     self.used(soc)
-            self.n.add("StorageUnit", self.unique("StorageUnit", bat.name, "Battery"), **kw)
+            self.n.add(
+                "StorageUnit", self.unique("StorageUnit", bat.name, "Battery"), **kw
+            )
             self.leftovers(obj)
 
     def rest(self, model: str | None) -> None:
@@ -1008,10 +1245,16 @@ class _Converter:
         for obj in self.m.objects.values():
             if obj.cls == "Scenario":
                 continue  # listed with their rows, per scenario
-            if obj.cls in _UNSUPPORTED or obj.cls in _MARKET or obj.cls in _OTHER_CARRIERS:
+            if (
+                obj.cls in _UNSUPPORTED
+                or obj.cls in _MARKET
+                or obj.cls in _OTHER_CARRIERS
+            ):
                 reason = _UNSUPPORTED.get(obj.cls) or (
-                    "market and contract objects are not imported" if obj.cls in _MARKET
-                    else "gas, water and heat systems are not imported")
+                    "market and contract objects are not imported"
+                    if obj.cls in _MARKET
+                    else "gas, water and heat systems are not imported"
+                )
                 self._skip.setdefault((_label(obj.key), reason), [])
 
     def run(self) -> None:
@@ -1031,23 +1274,34 @@ class _Converter:
             self.n.add("Carrier", name, **kw)
         for fuel, rate in self.co2.items():
             if fuel not in self.carriers:
-                self.r.warnings.append(f"CO2 rate of fuel {fuel!r} unused: no generator burns it")
+                self.r.warnings.append(
+                    f"CO2 rate of fuel {fuel!r} unused: no generator burns it"
+                )
         for (item, reason), props in self._skip.items():
             what = f" ({', '.join(sorted(set(props)))})" if props else ""
             if item.startswith("Scenario "):
                 what = f" ({len(props)} rows)"
             self.r.unmapped.append(Unmapped(item + what, reason))
         n = self.n
-        self.r.counts.update({
-            "grid nodes": len(n.buses), "lines": len(n.lines), "links": len(n.links),
-            "generators": len(n.generators), "batteries": len(n.storage_units),
-            "loads": len(n.loads), "fuels": len(self.m.objects_of("Fuel")),
-            "snapshots": len(n.snapshots),
-        })
+        self.r.counts.update(
+            {
+                "grid nodes": len(n.buses),
+                "lines": len(n.lines),
+                "links": len(n.links),
+                "generators": len(n.generators),
+                "batteries": len(n.storage_units),
+                "loads": len(n.loads),
+                "fuels": len(self.m.objects_of("Fuel")),
+                "snapshots": len(n.snapshots),
+            }
+        )
 
 
-def convert(model: PlexosModel, options: Mapping[str, Any] | None = None,
-            report: ImportReport | None = None) -> Conversion:
+def convert(
+    model: PlexosModel,
+    options: Mapping[str, Any] | None = None,
+    report: ImportReport | None = None,
+) -> Conversion:
     """Convert a read PLEXOS model; the ledger says where every row went."""
     report = report or ImportReport("plexos", ["model.xml"])
     conv = _Converter(model, options or {}, report)
@@ -1066,12 +1320,18 @@ def read_plexos(paths: Sequence[Path], options: Mapping[str, Any]) -> ImportResu
     except PlexosRefused as exc:
         raise ImportFormatError(f"{got.xml_name}: {exc}") from exc
     report = ImportReport("plexos", got.source_files)
-    report.assumed.append(Assumed(
-        "PLEXOS file", "version", model.version or "unknown",
-        f"saved with {model.saved_with or 'an unknown PLEXOS build'}"))
+    report.assumed.append(
+        Assumed(
+            "PLEXOS file",
+            "version",
+            model.version or "unknown",
+            f"saved with {model.saved_with or 'an unknown PLEXOS build'}",
+        )
+    )
     if got.data_files:
         report.warnings.append(
-            f"{len(got.data_files)} data file(s) given; data-file time series are read in a later slice")
+            f"{len(got.data_files)} data file(s) given; data-file time series are read in a later slice"
+        )
     conv = convert(model, options, report)
     json.dumps(conv.sidecars, allow_nan=False)
     return ImportResult(conv.network, conv.report, conv.sidecars)

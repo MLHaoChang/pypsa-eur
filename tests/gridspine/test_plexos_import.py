@@ -45,8 +45,14 @@ IRL = FIXTURES / "world2015_irl.xml"
 EDGE = FIXTURES / "edge_cases.xml"
 
 _COLL = {
-    "Node": "Nodes", "Generator": "Generators", "Line": "Lines", "Battery": "Batteries",
-    "Fuel": "Fuels", "Region": "Regions", "Zone": "Zones", "System": "Systems",
+    "Node": "Nodes",
+    "Generator": "Generators",
+    "Line": "Lines",
+    "Battery": "Batteries",
+    "Fuel": "Fuels",
+    "Region": "Regions",
+    "Zone": "Zones",
+    "System": "Systems",
 }
 
 
@@ -57,9 +63,15 @@ def build(objects, rows=(), memberships=(), attributes=()):
     memberships: (parent, child, collection), each side a (cls, name) pair.
     attributes: (cls, name, attribute, value[, unit]).
     """
-    objs = {(c, n): PlexosObject(str(i), c, n, cat, None)
-            for i, (c, n, *rest) in enumerate(objects) for cat in [rest[0] if rest else None]}
-    mems = [Membership(f"m{i}", (p[0], c[0], coll), p, c) for i, (p, c, coll) in enumerate(memberships)]
+    objs = {
+        (c, n): PlexosObject(str(i), c, n, cat, None)
+        for i, (c, n, *rest) in enumerate(objects)
+        for cat in [rest[0] if rest else None]
+    }
+    mems = [
+        Membership(f"m{i}", (p[0], c[0], coll), p, c)
+        for i, (p, c, coll) in enumerate(memberships)
+    ]
     prows = []
     for i, (cls, name, prop, value, unit, *extra) in enumerate(rows):
         parent = ("System", "System")
@@ -69,20 +81,36 @@ def build(objects, rows=(), memberships=(), attributes=()):
         if "parent" in kw:
             parent = kw.pop("parent")
             coll = (parent[0], cls, kw.pop("collection"))
-        prows.append(PropertyRow(
-            data_id=str(i + 1), membership_id="x", collection=coll, parent=parent, child=child,
-            property=prop, unit=unit, raw_value=None if value is None else str(value),
-            value=value, **kw))
-    attrs = [Attribute((c, n), a, (rest[1] if len(rest) > 1 else "-"), str(rest[0]), rest[0])
-             for (c, n, a, *rest) in attributes]
+        prows.append(
+            PropertyRow(
+                data_id=str(i + 1),
+                membership_id="x",
+                collection=coll,
+                parent=parent,
+                child=child,
+                property=prop,
+                unit=unit,
+                raw_value=None if value is None else str(value),
+                value=value,
+                **kw,
+            )
+        )
+    attrs = [
+        Attribute((c, n), a, (rest[1] if len(rest) > 1 else "-"), str(rest[0]), rest[0])
+        for (c, n, a, *rest) in attributes
+    ]
     return PlexosModel("8.300", "test", {}, objs, mems, prows, attrs, [], [], {})
 
 
 def bus_gen(gen_rows=(), extra_objects=(), extra_members=(), node_rows=()):
     """One 220 kV node 'A' and one generator 'G' on it."""
     objects = [("Node", "A"), ("Generator", "G"), *extra_objects]
-    rows = [("Node", "A", "Voltage", 220, "kV"), *node_rows,
-            ("Generator", "G", "Units", 1, "-"), *gen_rows]
+    rows = [
+        ("Node", "A", "Voltage", 220, "kV"),
+        *node_rows,
+        ("Generator", "G", "Units", 1, "-"),
+        *gen_rows,
+    ]
     members = [(("Generator", "G"), ("Node", "A"), "Nodes"), *extra_members]
     return build(objects, rows, members)
 
@@ -98,7 +126,10 @@ def unmapped_reason(conv, needle):
 def check_ledger(model, conv):
     """GK A Q9: every row exactly once (duplicates raise in Ledger.put)."""
     rows = {("t_data", r.data_id) for r in model.rows}
-    attrs = {("t_attribute_data", f"{a.object[0]}|{a.object[1]}|{a.name}") for a in model.attributes}
+    attrs = {
+        ("t_attribute_data", f"{a.object[0]}|{a.object[1]}|{a.name}")
+        for a in model.attributes
+    }
     assert set(conv.ledger.dest) == rows | attrs
     totals = conv.ledger.totals()
     assert sum(totals.get("t_data", {}).values()) == len(model.rows)
@@ -134,12 +165,18 @@ def test_irl_hand_checked_values(irl):
     assert g.p_nom == pytest.approx(916.0)
     assert g.bus == "EU-IRL" and g.carrier == "Europe_Coa"
     assert g.marginal_cost == pytest.approx(24.15)
-    assert n.generators.loc["IRL_Gas_Huntstown13284"].marginal_cost == pytest.approx(9.4 * 6.7)
+    assert n.generators.loc["IRL_Gas_Huntstown13284"].marginal_cost == pytest.approx(
+        9.4 * 6.7
+    )
     link = n.links.loc["GBR-IRL"]
     assert (link.p_nom, link.p_min_pu) == (800.0, -1.0)
     assert n.carriers.loc["Europe_Gas", "co2_emissions"] == pytest.approx(53.8 * 0.0036)
-    assert n.buses.loc["EU-IRL", ["x", "y"]].tolist() == pytest.approx([-8.24389, 53.41291])
-    assert "Max Flow 0 MW: line has no capacity" in unmapped_reason(conv, "Line 'FRA-IRL'")
+    assert n.buses.loc["EU-IRL", ["x", "y"]].tolist() == pytest.approx(
+        [-8.24389, 53.41291]
+    )
+    assert "Max Flow 0 MW: line has no capacity" in unmapped_reason(
+        conv, "Line 'FRA-IRL'"
+    )
     assert any("not selected" in r for _, r in reasons(conv))
 
 
@@ -147,9 +184,16 @@ def test_edge_fixture_accounting():
     model = read_plexos_xml(EDGE)
     conv = convert(model, {})
     check_ledger(model, conv)
-    assert unmapped_reason(conv, "Line 'L1'") == ["needs a node voltage to convert reactance"]
-    assert ("Constraint 'Cap Gas'", "generic constraint, no PyPSA equivalent yet") in reasons(conv)
-    assert len([u for u in conv.report.unmapped if u.source_item.startswith("t_")]) == len(model.broken)
+    assert unmapped_reason(conv, "Line 'L1'") == [
+        "needs a node voltage to convert reactance"
+    ]
+    assert (
+        "Constraint 'Cap Gas'",
+        "generic constraint, no PyPSA equivalent yet",
+    ) in reasons(conv)
+    assert len(
+        [u for u in conv.report.unmapped if u.source_item.startswith("t_")]
+    ) == len(model.broken)
 
 
 def test_ledger_refuses_a_row_twice():
@@ -165,7 +209,11 @@ def test_read_plexos_result_is_json_ready(tmp_path):
     assert set(res.sidecars) == {AREAS_SIDECAR, FUEL_PRICES_SIDECAR}
     areas = res.sidecars[AREAS_SIDECAR]["areas"]
     region = next(a for a in areas if a["kind"] == "region")
-    assert region["voll"] > 0 and sorted(region["buses"]) == ["EU-FRA", "EU-GBR", "EU-IRL"]
+    assert region["voll"] > 0 and sorted(region["buses"]) == [
+        "EU-FRA",
+        "EU-GBR",
+        "EU-IRL",
+    ]
 
 
 # -------------------------------------------------------------------- input
@@ -204,7 +252,10 @@ def _link_info(name):
         ([("C:\\m.xml", b"<a/>")], "absolute path"),
         ([("ok.xml", b"<a/>"), ("csv/../../x.csv", b"1")], r"leaves the archive"),
         ([("ok.xml", b"<a/>"), ("csv\\..\\..\\x.csv", b"1")], r"leaves the archive"),
-        ([("ok.xml", b"<a/>"), (_link_info("link.csv"), b"/etc/passwd")], "symbolic link"),
+        (
+            [("ok.xml", b"<a/>"), (_link_info("link.csv"), b"/etc/passwd")],
+            "symbolic link",
+        ),
         ([("a.xml", b"<a/>"), ("b.xml", b"<a/>")], "exactly one PLEXOS .xml"),
         ([("a.csv", b"1")], "exactly one PLEXOS .xml"),
         ([("bomb.xml", b"0" * (3 * 2**20))], "compressed more than"),
@@ -283,10 +334,18 @@ def test_registry_entry():
 
 def _models():
     return build(
-        [("Model", "B"), ("Model", "A"), ("Scenario", "On"), ("Scenario", "Off"),
-         ("Node", "N"), ("Generator", "G")],
-        [("Node", "N", "Load", 5, "MW", {"tags": [Tag("Scenario", "On", None)]}),
-         ("Node", "N", "Load", 7, "MW", {"tags": [Tag("Scenario", "Off", None)]})],
+        [
+            ("Model", "B"),
+            ("Model", "A"),
+            ("Scenario", "On"),
+            ("Scenario", "Off"),
+            ("Node", "N"),
+            ("Generator", "G"),
+        ],
+        [
+            ("Node", "N", "Load", 5, "MW", {"tags": [Tag("Scenario", "On", None)]}),
+            ("Node", "N", "Load", 7, "MW", {"tags": [Tag("Scenario", "Off", None)]}),
+        ],
         [(("Model", "B"), ("Scenario", "On"), "Scenarios")],
     )
 
@@ -295,15 +354,21 @@ def test_model_default_is_first_by_name_and_listed():
     conv = convert(_models(), {})
     a = next(a for a in conv.report.assumed if a.parameter == "Model")
     assert a.value == "A" and "Other Models: B" in a.why
-    assert ("Scenario 'On' (1 rows)", "rows of scenario 'On': not selected") in reasons(conv)
+    assert ("Scenario 'On' (1 rows)", "rows of scenario 'On': not selected") in reasons(
+        conv
+    )
 
 
 def test_model_option_switches_scenarios_on():
     conv = convert(_models(), {"model": "B"})
     assert not [a for a in conv.report.assumed if a.parameter == "Model"]
     on = unmapped_reason(conv, "Scenario 'On'")
-    assert on == ["rows of scenario 'On': is on in the chosen Model; scenario rows are applied in a later slice"]
-    assert unmapped_reason(conv, "Scenario 'Off'") == ["rows of scenario 'Off': not selected"]
+    assert on == [
+        "rows of scenario 'On': is on in the chosen Model; scenario rows are applied in a later slice"
+    ]
+    assert unmapped_reason(conv, "Scenario 'Off'") == [
+        "rows of scenario 'Off': not selected"
+    ]
     with pytest.raises(ImportFormatError, match="has: A, B"):
         convert(_models(), {"model": "C"})
 
@@ -352,8 +417,14 @@ def test_horizon_two_hour_step_weighs_two():
     conv = convert(model, {})
     n = conv.network
     assert len(n.snapshots) == 24
-    assert n.snapshots[1] - n.snapshots[0] == datetime(2020, 1, 1, 2) - datetime(2020, 1, 1)
-    assert (n.snapshot_weightings.loc[:, ["objective", "stores", "generators"]] == 2.0).all().all()
+    assert n.snapshots[1] - n.snapshots[0] == datetime(2020, 1, 1, 2) - datetime(
+        2020, 1, 1
+    )
+    assert (
+        (n.snapshot_weightings.loc[:, ["objective", "stores", "generators"]] == 2.0)
+        .all()
+        .all()
+    )
 
 
 def test_horizon_without_length_is_one_year_and_assumed():
@@ -366,7 +437,9 @@ def test_horizon_bad_periods_is_unmapped():
     model = _horizon(Date_From=43466, Periods_per_Day=7)
     conv = convert(model, {})
     assert len(conv.network.snapshots) == 1
-    assert unmapped_reason(conv, "Horizon 'H'") == ["horizon start or periods per day unreadable"]
+    assert unmapped_reason(conv, "Horizon 'H'") == [
+        "horizon start or periods per day unreadable"
+    ]
     check_ledger(model, conv)
 
 
@@ -376,24 +449,40 @@ def test_horizon_bad_periods_is_unmapped():
 def test_node_without_voltage_is_assumed_and_reactance_line_unmapped():
     model = build(
         [("Node", "A"), ("Node", "B"), ("Line", "L")],
-        [("Node", "A", "Voltage", 220, "kV"), ("Line", "L", "Max Flow", 100, "MW"),
-         ("Line", "L", "Reactance", 0.01, "pu")],
-        [(("Line", "L"), ("Node", "A"), "Node From"), (("Line", "L"), ("Node", "B"), "Node To")],
+        [
+            ("Node", "A", "Voltage", 220, "kV"),
+            ("Line", "L", "Max Flow", 100, "MW"),
+            ("Line", "L", "Reactance", 0.01, "pu"),
+        ],
+        [
+            (("Line", "L"), ("Node", "A"), "Node From"),
+            (("Line", "L"), ("Node", "B"), "Node To"),
+        ],
     )
     conv = convert(model, {})
     assert [a.asset for a in conv.report.assumed if a.parameter == "voltage"] == ["B"]
-    assert unmapped_reason(conv, "Line 'L'") == ["needs a node voltage to convert reactance"]
+    assert unmapped_reason(conv, "Line 'L'") == [
+        "needs a node voltage to convert reactance"
+    ]
     assert conv.network.lines.empty
 
 
 def _ac(extra_rows=(), extra_objects=()):
     return build(
         [("Node", "A"), ("Node", "B"), ("Line", "L"), *extra_objects],
-        [("Node", "A", "Voltage", 220, "kV"), ("Node", "B", "Voltage", 220, "kV"),
-         ("Line", "L", "Max Flow", 300, "MW"), ("Line", "L", "Min Flow", -300, "MW"),
-         ("Line", "L", "Reactance", 0.01, "pu"), ("Line", "L", "Resistance", 0.002, "pu"),
-         *extra_rows],
-        [(("Line", "L"), ("Node", "A"), "Node From"), (("Line", "L"), ("Node", "B"), "Node To")],
+        [
+            ("Node", "A", "Voltage", 220, "kV"),
+            ("Node", "B", "Voltage", 220, "kV"),
+            ("Line", "L", "Max Flow", 300, "MW"),
+            ("Line", "L", "Min Flow", -300, "MW"),
+            ("Line", "L", "Reactance", 0.01, "pu"),
+            ("Line", "L", "Resistance", 0.002, "pu"),
+            *extra_rows,
+        ],
+        [
+            (("Line", "L"), ("Node", "A"), "Node From"),
+            (("Line", "L"), ("Node", "B"), "Node To"),
+        ],
     )
 
 
@@ -402,8 +491,14 @@ def test_reactance_line_on_default_base_hand_checked():
     model = _ac()
     conv = convert(model, {})
     line = conv.network.lines.loc["L"]
-    assert (line.x, line.r, line.s_nom) == (pytest.approx(4.84), pytest.approx(0.968), 300)
-    assert any(a.parameter == "MVA base" and a.value == 100.0 for a in conv.report.assumed)
+    assert (line.x, line.r, line.s_nom) == (
+        pytest.approx(4.84),
+        pytest.approx(0.968),
+        300,
+    )
+    assert any(
+        a.parameter == "MVA base" and a.value == 100.0 for a in conv.report.assumed
+    )
     check_ledger(model, conv)
 
 
@@ -423,8 +518,12 @@ def test_link_min_flow_sign(mn, expected):
     if mn is not None:
         rows.append(("Line", "L", "Min Flow", mn, "MW"))
     model = build(
-        [("Node", "A"), ("Node", "B"), ("Line", "L")], rows,
-        [(("Line", "L"), ("Node", "A"), "Node From"), (("Line", "L"), ("Node", "B"), "Node To")],
+        [("Node", "A"), ("Node", "B"), ("Line", "L")],
+        rows,
+        [
+            (("Line", "L"), ("Node", "A"), "Node From"),
+            (("Line", "L"), ("Node", "B"), "Node To"),
+        ],
     )
     conv = convert(model, {})
     assert conv.network.links.loc["L", "p_min_pu"] == pytest.approx(expected)
@@ -435,17 +534,31 @@ def test_link_min_flow_sign(mn, expected):
     "rows, members, needle",
     [
         ([("Line", "L", "Max Flow", 0, "MW")], None, "no capacity"),
-        ([("Line", "L", "Max Flow", 100, "MW"), ("Line", "L", "Units", 0, "-")], None, "0 units"),
-        ([("Line", "L", "Max Flow", 100, "MW")],
-         [(("Line", "L"), ("Node", "A"), "Node From"), (("Line", "L"), ("Node", "A"), "Node To")],
-         "same node"),
-        ([("Line", "L", "Max Flow", 100, "MW")],
-         [(("Line", "L"), ("Node", "A"), "Node From")], "no node to"),
+        (
+            [("Line", "L", "Max Flow", 100, "MW"), ("Line", "L", "Units", 0, "-")],
+            None,
+            "0 units",
+        ),
+        (
+            [("Line", "L", "Max Flow", 100, "MW")],
+            [
+                (("Line", "L"), ("Node", "A"), "Node From"),
+                (("Line", "L"), ("Node", "A"), "Node To"),
+            ],
+            "same node",
+        ),
+        (
+            [("Line", "L", "Max Flow", 100, "MW")],
+            [(("Line", "L"), ("Node", "A"), "Node From")],
+            "no node to",
+        ),
     ],
 )
 def test_lines_unmapped(rows, members, needle):
-    members = members or [(("Line", "L"), ("Node", "A"), "Node From"),
-                          (("Line", "L"), ("Node", "B"), "Node To")]
+    members = members or [
+        (("Line", "L"), ("Node", "A"), "Node From"),
+        (("Line", "L"), ("Node", "B"), "Node To"),
+    ]
     model = build([("Node", "A"), ("Node", "B"), ("Line", "L")], rows, members)
     conv = convert(model, {})
     assert conv.network.links.empty and conv.network.lines.empty
@@ -457,7 +570,9 @@ def test_node_units_zero_kept_out_of_service():
     model = build([("Node", "A")], [("Node", "A", "Units", 0, "-")])
     conv = convert(model, {})
     assert "A" in conv.network.buses.index
-    assert any(a.asset == "A" and a.parameter == "in service" for a in conv.report.assumed)
+    assert any(
+        a.asset == "A" and a.parameter == "in service" for a in conv.report.assumed
+    )
 
 
 # ---------------------------------------------------------------- loads, Q3
@@ -466,10 +581,17 @@ def test_node_units_zero_kept_out_of_service():
 def test_load_in_equals_mapped_plus_unmapped():
     model = build(
         [("Node", "A"), ("Node", "B"), ("Region", "R")],
-        [("Node", "A", "Load", 40, "MW"), ("Node", "B", "Load", 60, "MW"),
-         ("Region", "R", "Load", 25, "MW"), ("Node", "A", "Load Participation Factor", 1, "-"),
-         ("Region", "R", "VoLL", 10000, "$/MWh")],
-        [(("Node", "A"), ("Region", "R"), "Region"), (("Node", "B"), ("Region", "R"), "Region")],
+        [
+            ("Node", "A", "Load", 40, "MW"),
+            ("Node", "B", "Load", 60, "MW"),
+            ("Region", "R", "Load", 25, "MW"),
+            ("Node", "A", "Load Participation Factor", 1, "-"),
+            ("Region", "R", "VoLL", 10000, "$/MWh"),
+        ],
+        [
+            (("Node", "A"), ("Region", "R"), "Region"),
+            (("Node", "B"), ("Region", "R"), "Region"),
+        ],
     )
     conv = convert(model, {})
     total_in = sum(r.value for r in model.rows if r.property == "Load")
@@ -486,9 +608,14 @@ def test_load_in_equals_mapped_plus_unmapped():
 
 
 def test_generator_units_zero_not_built():
-    m0 = build([("Node", "A"), ("Generator", "G")],
-               [("Generator", "G", "Units", 0, "-"), ("Generator", "G", "Max Capacity", 50, "MW")],
-               [(("Generator", "G"), ("Node", "A"), "Nodes")])
+    m0 = build(
+        [("Node", "A"), ("Generator", "G")],
+        [
+            ("Generator", "G", "Units", 0, "-"),
+            ("Generator", "G", "Max Capacity", 50, "MW"),
+        ],
+        [(("Generator", "G"), ("Node", "A"), "Nodes")],
+    )
     conv = convert(m0, {})
     assert conv.network.generators.empty
     assert any("0 units" in r for r in unmapped_reason(conv, "Generator 'G'"))
@@ -505,24 +632,31 @@ def test_generator_units_zero_not_built():
     ],
 )
 def test_missing_units_use_the_files_default(default, built, needle):
-    model = build([("Node", "A"), ("Generator", "G")],
-                  [("Generator", "G", "Max Capacity", 50, "MW")],
-                  [(("Generator", "G"), ("Node", "A"), "Nodes")])
+    model = build(
+        [("Node", "A"), ("Generator", "G")],
+        [("Generator", "G", "Max Capacity", 50, "MW")],
+        [(("Generator", "G"), ("Node", "A"), "Nodes")],
+    )
     if default != "absent":
         model.defaults[(("System", "Generator", "Generators"), "Units")] = default
     conv = convert(model, {})
     assert ("G" in conv.network.generators.index) is built
     if built:
         assert conv.network.generators.loc["G", "p_nom"] == 50
-        assert any(a.asset == "G" and a.parameter == "units" and a.value == 1
-                   for a in conv.report.assumed)
+        assert any(
+            a.asset == "G" and a.parameter == "units" and a.value == 1
+            for a in conv.report.assumed
+        )
     else:
         assert any(needle in r for r in unmapped_reason(conv, "Generator 'G'"))
     check_ledger(model, conv)
 
 
 def test_irl_file_default_units_is_zero():
-    assert read_plexos_xml(IRL).defaults[(("System", "Generator", "Generators"), "Units")] == 0
+    assert (
+        read_plexos_xml(IRL).defaults[(("System", "Generator", "Generators"), "Units")]
+        == 0
+    )
 
 
 def test_generator_p_nom_is_capacity_times_units():
@@ -540,18 +674,27 @@ def test_generator_nonpositive_capacity_unmapped(cap):
 
 
 def test_generator_on_two_nodes_unmapped():
-    model = bus_gen([("Generator", "G", "Max Capacity", 50, "MW")], [("Node", "B")],
-                    [(("Generator", "G"), ("Node", "B"), "Nodes")])
+    model = bus_gen(
+        [("Generator", "G", "Max Capacity", 50, "MW")],
+        [("Node", "B")],
+        [(("Generator", "G"), ("Node", "B"), "Nodes")],
+    )
     conv = convert(model, {})
     assert conv.network.generators.empty
-    assert unmapped_reason(conv, "Generator 'G'") == ["needs exactly one node (2 node memberships)"]
+    assert unmapped_reason(conv, "Generator 'G'") == [
+        "needs exactly one node (2 node memberships)"
+    ]
     check_ledger(model, conv)
 
 
 def _fuelled(hr, unit="GJ/MWh", extra=(), fuels=("F",)):
     objects = [("Fuel", f) for f in fuels]
-    rows = [("Generator", "G", "Max Capacity", 100, "MW"), ("Generator", "G", "VO&M Charge", 2, "$/MWh"),
-            *[("Fuel", f, "Price", 5, "$/GJ") for f in fuels], *extra]
+    rows = [
+        ("Generator", "G", "Max Capacity", 100, "MW"),
+        ("Generator", "G", "VO&M Charge", 2, "$/MWh"),
+        *[("Fuel", f, "Price", 5, "$/GJ") for f in fuels],
+        *extra,
+    ]
     if hr is not None:
         rows.append(("Generator", "G", "Heat Rate", hr, unit))
     members = [(("Generator", "G"), ("Fuel", f), "Fuels") for f in fuels]
@@ -564,20 +707,31 @@ def test_marginal_cost_and_assumed_row():
     a = next(a for a in conv.report.assumed if a.parameter == "marginal cost")
     assert a.value == 52 and "heat rate 10 GJ/MWh" in a.why
     assert conv.sidecars[FUEL_PRICES_SIDECAR]["fuels"] == [
-        {"fuel": "F", "price": 5, "unit": "$/GJ", "source": "static Price"}]
+        {"fuel": "F", "price": 5, "unit": "$/GJ", "source": "static Price"}
+    ]
 
 
 def test_heat_rate_btu_per_kwh_converted():
     conv = convert(_fuelled(9478.17, "BTU/kWh"), {})
-    assert conv.network.generators.loc["G", "marginal_cost"] == pytest.approx(10 * 5 + 2, rel=1e-5)
+    assert conv.network.generators.loc["G", "marginal_cost"] == pytest.approx(
+        10 * 5 + 2, rel=1e-5
+    )
 
 
 @pytest.mark.parametrize(
     "model, needle",
     [
         (_fuelled(10, "kJ/kWh"), "unit 'kJ/kWh' for 'Heat Rate' is not converted"),
-        (_fuelled(None, extra=[("Generator", "G", "Heat Rate Base", 3, "GJ/h"),
-                               ("Generator", "G", "Heat Rate Incr", 8, "GJ/MWh")]), "heat-rate curve"),
+        (
+            _fuelled(
+                None,
+                extra=[
+                    ("Generator", "G", "Heat Rate Base", 3, "GJ/h"),
+                    ("Generator", "G", "Heat Rate Incr", 8, "GJ/MWh"),
+                ],
+            ),
+            "heat-rate curve",
+        ),
         (_fuelled(10, fuels=("F", "H")), "2 fuels: multi-fuel"),
     ],
 )
@@ -591,12 +745,20 @@ def test_heat_rate_forms_never_guess(model, needle):
 def test_unknown_capacity_unit_unmapped():
     conv = convert(bus_gen([("Generator", "G", "Max Capacity", 0.1, "GW")]), {})
     assert conv.network.generators.empty
-    assert "unit 'GW' for 'Max Capacity' is not converted (expects MW)" in unmapped_reason(conv, "Generator 'G'")
+    assert (
+        "unit 'GW' for 'Max Capacity' is not converted (expects MW)"
+        in unmapped_reason(conv, "Generator 'G'")
+    )
 
 
 @pytest.mark.parametrize(
     "msf, msl, expected, disagree",
-    [(40, None, 0.4, False), (None, 30, 0.3, False), (40, 40, 0.4, False), (20, 50, 0.5, True)],
+    [
+        (40, None, 0.4, False),
+        (None, 30, 0.3, False),
+        (40, 40, 0.4, False),
+        (20, 50, 0.5, True),
+    ],
 )
 def test_min_stable_larger_wins_as_suggestion(msf, msl, expected, disagree):
     rows = [("Generator", "G", "Max Capacity", 100, "MW")]
@@ -608,34 +770,48 @@ def test_min_stable_larger_wins_as_suggestion(msf, msl, expected, disagree):
     (s,) = conv.report.suggestions
     assert s.proposed == pytest.approx(expected) and s.target == "G"
     assert conv.network.generators.loc["G", "p_min_pu"] == 0
-    assert any(a.parameter == "minimum stable level" for a in conv.report.assumed) is disagree
+    assert (
+        any(a.parameter == "minimum stable level" for a in conv.report.assumed)
+        is disagree
+    )
 
 
 @pytest.mark.parametrize("value", [0, 120, -5])
 def test_percent_out_of_range_unmapped(value):
-    rows = [("Generator", "G", "Max Capacity", 100, "MW"), ("Generator", "G", "Rating Factor", value, "%")]
+    rows = [
+        ("Generator", "G", "Max Capacity", 100, "MW"),
+        ("Generator", "G", "Rating Factor", value, "%"),
+    ]
     conv = convert(bus_gen(rows), {})
     assert conv.network.generators.loc["G", "p_max_pu"] == 1.0
     assert "Rating Factor outside (0, 100] %" in unmapped_reason(conv, "Generator 'G'")
 
 
 def test_ramp_dates_outages():
-    rows = [("Generator", "G", "Max Capacity", 100, "MW"),
-            ("Generator", "G", "Max Ramp Up", 0.5, "MW/min"),
-            ("Generator", "G", "Commission Date", 36526, "-"),  # 2000-01-01
-            ("Generator", "G", "Retirement Date", 47484, "-"),  # 2030-01-01
-            ("Generator", "G", "Forced Outage Rate", 6, "%"),
-            ("Generator", "G", "Mean Time to Repair", 48, "h"),
-            ("Generator", "G", "Maintenance Rate", 5, "%"),
-            ("Generator", "G", "Start Cost", 1000, "$")]
+    rows = [
+        ("Generator", "G", "Max Capacity", 100, "MW"),
+        ("Generator", "G", "Max Ramp Up", 0.5, "MW/min"),
+        ("Generator", "G", "Commission Date", 36526, "-"),  # 2000-01-01
+        ("Generator", "G", "Retirement Date", 47484, "-"),  # 2030-01-01
+        ("Generator", "G", "Forced Outage Rate", 6, "%"),
+        ("Generator", "G", "Mean Time to Repair", 48, "h"),
+        ("Generator", "G", "Maintenance Rate", 5, "%"),
+        ("Generator", "G", "Start Cost", 1000, "$"),
+    ]
     model = bus_gen(rows)
     conv = convert(model, {})
     g = conv.network.generators.loc["G"]
     assert g.ramp_limit_up == pytest.approx(0.3)
     assert (g.build_year, g.lifetime) == (2000, 30)
-    assert (g.outage_rate_value, g.outage_rate_basis, g.mttr_hours) == (pytest.approx(0.06), "FOR", 48)
+    assert (g.outage_rate_value, g.outage_rate_basis, g.mttr_hours) == (
+        pytest.approx(0.06),
+        "FOR",
+        48,
+    )
     assert g.start_up_cost == 1000
-    assert "planned maintenance has no network field yet" in unmapped_reason(conv, "Generator 'G'")
+    assert "planned maintenance has no network field yet" in unmapped_reason(
+        conv, "Generator 'G'"
+    )
     check_ledger(model, conv)
 
 
@@ -643,23 +819,36 @@ def test_ramp_dates_outages():
     "dates, needle",
     [
         ([("Retirement Date", 47484)], "without a Commission Date"),
-        ([("Commission Date", 47484), ("Retirement Date", 36526)], "not after Commission"),
-        ([("Commission Date", 36526), ("Retirement Date", 36800)], "not after Commission"),
+        (
+            [("Commission Date", 47484), ("Retirement Date", 36526)],
+            "not after Commission",
+        ),
+        (
+            [("Commission Date", 36526), ("Retirement Date", 36800)],
+            "not after Commission",
+        ),
         ([("Commission Date", 60)], "Commission Date unreadable"),
     ],
 )
 def test_lifetime_needs_both_dates_in_order(dates, needle):
-    rows = [("Generator", "G", "Max Capacity", 100, "MW"),
-            *[("Generator", "G", p, v, "-") for p, v in dates]]
+    rows = [
+        ("Generator", "G", "Max Capacity", 100, "MW"),
+        *[("Generator", "G", p, v, "-") for p, v in dates],
+    ]
     conv = convert(bus_gen(rows), {})
     assert math.isinf(conv.network.generators.loc["G", "lifetime"])
     assert any(needle in r for r in unmapped_reason(conv, "Generator 'G'"))
 
 
 def test_carrier_from_category_without_fuel():
-    model = build([("Node", "A"), ("Generator", "W", "Wind")],
-                  [("Generator", "W", "Units", 1, "-"), ("Generator", "W", "Max Capacity", 10, "MW")],
-                  [(("Generator", "W"), ("Node", "A"), "Nodes")])
+    model = build(
+        [("Node", "A"), ("Generator", "W", "Wind")],
+        [
+            ("Generator", "W", "Units", 1, "-"),
+            ("Generator", "W", "Max Capacity", 10, "MW"),
+        ],
+        [(("Generator", "W"), ("Node", "A"), "Nodes")],
+    )
     assert convert(model, {}).network.generators.loc["W", "carrier"] == "Wind"
 
 
@@ -669,20 +858,29 @@ def test_carrier_from_category_without_fuel():
 def _battery(*extra):
     return build(
         [("Node", "A"), ("Battery", "B")],
-        [("Battery", "B", "Units", 2, "-"), ("Battery", "B", "Max Power", 10, "MW"),
-         ("Battery", "B", "Capacity", 40, "MWh"), *extra],
+        [
+            ("Battery", "B", "Units", 2, "-"),
+            ("Battery", "B", "Max Power", 10, "MW"),
+            ("Battery", "B", "Capacity", 40, "MWh"),
+            *extra,
+        ],
         [(("Battery", "B"), ("Node", "A"), "Node")],
     )
 
 
 def test_battery_mapped():
-    model = _battery(("Battery", "B", "Charge Efficiency", 90, "%"),
-                     ("Battery", "B", "Discharge Efficiency", 95, "%"),
-                     ("Battery", "B", "Initial SoC", 50, "%"))
+    model = _battery(
+        ("Battery", "B", "Charge Efficiency", 90, "%"),
+        ("Battery", "B", "Discharge Efficiency", 95, "%"),
+        ("Battery", "B", "Initial SoC", 50, "%"),
+    )
     conv = convert(model, {})
     s = conv.network.storage_units.loc["B"]
     assert (s.p_nom, s.max_hours) == (20, 4)
-    assert (s.efficiency_store, s.efficiency_dispatch) == (pytest.approx(0.9), pytest.approx(0.95))
+    assert (s.efficiency_store, s.efficiency_dispatch) == (
+        pytest.approx(0.9),
+        pytest.approx(0.95),
+    )
     assert s.state_of_charge_initial == pytest.approx(40)
     check_ledger(model, conv)
 
@@ -692,7 +890,9 @@ def test_battery_efficiency_out_of_range(eff):
     model = _battery(("Battery", "B", "Charge Efficiency", eff, "%"))
     conv = convert(model, {})
     assert conv.network.storage_units.loc["B", "efficiency_store"] == 1.0
-    assert "Charge Efficiency outside (0, 100] %" in unmapped_reason(conv, "Battery 'B'")
+    assert "Charge Efficiency outside (0, 100] %" in unmapped_reason(
+        conv, "Battery 'B'"
+    )
 
 
 # ------------------------------------------------------------- names, Q7
