@@ -68,7 +68,7 @@ def rate_key_problems(rates, load_carriers) -> list[str]:
         key = _canonical_load_carrier_key(raw)
         if key in seen:
             problems.append(
-                f"Load growth: {seen[key]!r} and {raw!r} are the same carrier "
+                f"Load growth: {seen[key]} and {raw} are the same carrier "
                 f"({key}); give it one rate"
             )
             continue
