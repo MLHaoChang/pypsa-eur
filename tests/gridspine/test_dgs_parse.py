@@ -115,8 +115,15 @@ def test_the_writers_own_output_parses_to_hand_counted_tables(tmp_path):
         "TypHmccur": 2,
     }
     hm = t.tables["TypHmccur"].set_index("loc_name")
-    assert hm.loc["pv_spectrum", "norder"] == [4, 5, 10, 11]
-    assert hm.loc["pv_spectrum", "ampl"] == [1.0, 2.0, 0.5, 1.5]
+    # Either writer layout: one block per spectrum, or one block over the union
+    # of orders with zero padding (GC-05 follow-ups). A source's own orders
+    # are those with a non-zero amplitude.
+    pv = {
+        h: a
+        for h, a in zip(hm.loc["pv_spectrum", "norder"], hm.loc["pv_spectrum", "ampl"])
+        if a != 0.0
+    }
+    assert pv == {4: 1.0, 5: 2.0, 10: 0.5, 11: 1.5}
     # every pointer resolves to a held object of the expected class
     ids = {cls: set(df.index) for cls, df in t.tables.items()}
     cub = t.tables["StaCubic"]
@@ -232,6 +239,43 @@ GENERAL = "$$General;ID(a:40);Descr(a:40);Val(a:40)\n1;Version;5.0\n"
             )
             for v in ("1_0", "\u0663", "1e2")
         ],
+        (
+            GENERAL + "$$ElmTerm;ID(a:40);uknom(r)\n3;1e999\n",
+            4,
+            "'1e999' is not finite",
+        ),
+        (
+            GENERAL + "$$ElmTerm;ID(a:40);uknom(r)\n3;-1e999\n",
+            4,
+            "'-1e999' is not finite",
+        ),
+        (
+            GENERAL + "$$T;ID(a:40);v:SIZEROW(i);v:1(r);v:0(r)\n",
+            3,
+            "vector columns [1, 0] are not 0, 1, 2",
+        ),
+        (
+            GENERAL + "$$T;ID(a:40);v:SIZEROW(i);v:0(r);v:5(r)\n",
+            3,
+            "vector columns [0, 5] are not 0, 1, 2",
+        ),
+        (
+            GENERAL + "$$T;ID(a:40);x(r)\n3;1.0\n$$T;ID(a:40);x(i)\n",
+            5,
+            "T.x: type 'i' here, 'r' in an earlier header",
+        ),
+        (
+            GENERAL + "$$T;ID(a:40);v:SIZEROW(i);v:0(r)\n$$T;ID(a:40);v(r)\n",
+            4,
+            "T.v: type 'r' here, 'v' in an earlier header",
+        ),
+        (GENERAL + "$$T;ID(a:40);up(p)\n3;0\n", 4, "points at ID 0"),
+        (
+            "$$General;ID(a:40);Descr(a:40);Val(a:40)\n1;Version;6.0\n"
+            "$$T;ID(a:40);up(p)\n3;99\n",
+            2,
+            "version '6.0' found",
+        ),
         (GENERAL + "$$T;ID(r);x(r)\n", 3, "ID column must be text or integer"),
         (
             GENERAL + "$$T;ID(a:40);v:SIZEROW(r);v:0(r)\n",
@@ -365,3 +409,15 @@ def test_an_unreadable_file_is_refused_naming_it(tmp_path, content, words):
     with pytest.raises(ContractError) as e:
         parse_dgs(path)
     assert str(path) in str(e.value) and words in str(e.value)
+
+
+def test_a_file_with_a_byte_order_mark_is_read(tmp_path):
+    path = tmp_path / "bom.dgs"
+    path.write_bytes(b"\xef\xbb\xbf" + GOLDEN.encode("utf-8"))
+    t = parse_dgs(path)
+    assert t.version == "5.0" and t.counts()["ElmTerm"] == 2
+
+
+def test_an_empty_pointer_means_none_and_a_repeated_header_of_equal_types_merges():
+    t = parse_dgs_text(GENERAL + "$$T;ID(a:40);up(p)\n3;\n$$T;ID(a:40);up(p)\n4;3\n")
+    assert t.tables["T"].loc["3", "up"] is None and t.tables["T"].loc["4", "up"] == "3"

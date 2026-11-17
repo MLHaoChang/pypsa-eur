@@ -30,7 +30,12 @@ Refused, as ``ContractError`` naming the line: a version other than 5.x
 with an unknown type, a row whose field count differs from its header, a
 value that does not parse as its type (numbers are read as written: no
 decimal comma, no ``1.0`` for an integer), an empty SIZEROW, a vector longer than its columns,
-a duplicate ``ID``, and a pointer to an ``ID`` the file does not hold.
+a duplicate ``ID``, and a pointer to an ``ID`` the file does not hold. An
+empty pointer means "none"; any other value, ``0`` included, must be an
+``ID`` in the file. Also refused: vector columns not numbered 0, 1, 2, ...
+in order, a real that overflows to infinity (``1e999``), and a repeated
+class header that gives an attribute another type letter. The version is
+checked before pointers, so a file of another version is reported as such.
 A trailing empty field (a row ending in ``;``) is tolerated.
 """
 
@@ -118,8 +123,14 @@ def parse_dgs_text(text: str, source: str = "<text>") -> DgsTables:
             cls, cols = head
             rows.setdefault(cls, [])
             seen = types.setdefault(cls, {})
-            for _, attr, t, k in cols:
-                seen.setdefault(attr, "v" if k is not None else t)
+            for col, attr, t, k in cols:
+                letter = "v" if k is not None else t
+                if seen.setdefault(attr, letter) != letter:
+                    fail(
+                        lineno,
+                        f"{cls}.{col}: type {letter!r} here, {seen[attr]!r} in an "
+                        "earlier header of this class",
+                    )
             continue
         if head is None:
             fail(lineno, "a data row before any $$ class header")
@@ -177,14 +188,16 @@ def parse_dgs_text(text: str, source: str = "<text>") -> DgsTables:
         owner[oid] = (cls, lineno)
         rows[cls].append(rec)
 
+    version = _version(
+        rows.get("General", []), fail
+    )  # before pointers: a v6 file says so
+
     for lineno, cls, attr, target in pointers:
         if target not in owner:
             fail(
                 lineno,
                 f"{cls}.{attr} points at ID {target}, which the file does not hold",
             )
-
-    version = _version(rows.get("General", []), fail)
 
     tables = {}
     for cls, recs in rows.items():
@@ -230,6 +243,16 @@ def _header(fields, lineno, fail):
         else:
             # a plain attribute, or an indexed column with no SIZEROW: as it stands
             out.append((name, name, t, None))
+    order: dict = {}
+    for name, attr, _t, k in out:
+        if isinstance(k, int):
+            order.setdefault(attr, []).append(k)
+    for attr, ks in order.items():
+        if ks != list(range(len(ks))):
+            fail(
+                lineno,
+                f"{cls}.{attr}: vector columns {ks} are not 0, 1, 2, ... in order",
+            )
     return cls, out
 
 
@@ -245,7 +268,10 @@ def _value(field, t, lineno, where, fail):
         return int(s)
     if not _REAL.fullmatch(s):
         fail(lineno, f"{where}: {s!r} is not a number")
-    return float(s)
+    v = float(s)
+    if not math.isfinite(v):
+        fail(lineno, f"{where}: {s!r} is not finite")
+    return v
 
 
 def _version(general, fail):
