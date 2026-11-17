@@ -83,18 +83,28 @@ def _cut(items: list[Any], field: str, truncated: list[dict[str, Any]]) -> list[
 
 
 def _match(words: dict[str, str], ids: list[str], asked: str) -> str:
-    """The one building or group whose words are `asked` (case-insensitive), else invalid_input (P3)."""
-    want = " ".join(asked.split()).casefold()
+    """
+    The one building or group whose words are `asked`, else invalid_input (P3).
+
+    Case-insensitive, but an exact match wins: two labels that differ only in
+    case ("Plant", "plant") are not numbered by `feature_words`, so the user
+    picks one by its exact words. Several matches never pick one.
+    """
+    text = " ".join(asked.split())
+    exact = [i for i in ids if words.get(i) == text]
+    if len(exact) == 1:
+        return exact[0]
+    want = text.casefold()
     hits = [i for i in ids if words.get(i, "").casefold() == want]
     if len(hits) == 1:
         return hits[0]
-    numbered = [
-        words[i] for i in ids if words.get(i, "").casefold().startswith(want + " ")
+    choices = hits or [
+        i for i in ids if words.get(i, "").casefold().startswith(want + " ")
     ]
-    if numbered:
+    if choices:
+        listed = ", ".join(words[i] for i in choices[: chat.MAX_CANDIDATES])
         raise SceneError(
-            "invalid_input",
-            f"Several items are called that: name one of {', '.join(numbered[: chat.MAX_CANDIDATES])}",
+            "invalid_input", f"Several items are called that: name one of {listed}"
         )
     raise SceneError(
         "invalid_input", "No building or group on this site is called that"

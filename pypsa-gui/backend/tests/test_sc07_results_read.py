@@ -12,6 +12,7 @@ import pytest
 from fastapi import HTTPException
 
 from services.site_scene import chat, chat_results
+from services.site_scene.contract import SceneError
 from tests.test_site_scene_results import (  # noqa: F401  (fixtures)
     T3,
     _results,
@@ -479,3 +480,16 @@ def test_a_cap_below_the_fixed_fields_empties_the_lists_and_names_each_cut_once(
     fields = [t["field"] for t in out["truncated"]]
     assert sorted(fields) == ["features", "groups"]
     assert {"field": "features", "shown": 0, "total": 3} in out["truncated"]
+
+
+def test_labels_that_differ_only_in_case_are_picked_exactly_or_refused_with_both():
+    # GK B3 on #1674: feature_words numbers only exact-equal labels, so these two stay unnumbered.
+    words = {"g1": "group “Plant”", "g2": "group “plant”", "b1": "Proposed building"}
+    ids = ["b1", "g1", "g2"]
+    assert chat_results._match(words, ids, "group “Plant”") == "g1"
+    assert chat_results._match(words, ids, "group  “plant” ") == "g2"
+    assert chat_results._match(words, ids, "PROPOSED BUILDING") == "b1"
+    with pytest.raises(SceneError) as exc:
+        chat_results._match(words, ids, "group “PLANT”")
+    assert exc.value.kind == "invalid_input"
+    assert "name one of group “Plant”, group “plant”" in str(exc.value)
