@@ -446,6 +446,33 @@ def test_fill_skips_a_good_copy_and_a_shipped_common_item(tmp_path, monkeypatch)
     assert calls == []
 
 
+def test_a_pin_of_an_unknown_kind_has_no_copy_to_read_write_or_fill(tmp_path, monkeypatch):
+    from services.library import items
+
+    pin = {**_series_pin(_CSV), "kind": "bogus"}
+    assert PC.read(tmp_path, pin) == (None, False)
+    assert PC.write(tmp_path, pin, _CSV) is False
+    calls = []
+    monkeypatch.setattr(items, "payload_bytes", lambda *a, **k: calls.append(a) or _CSV)
+    assert PC.fill(None, None, tmp_path, [pin]) == []
+    assert calls == []
+
+
+def test_fill_copies_an_item_and_a_series_named_like_a_common_item(tmp_path, monkeypatch):
+    from services.library import common, items, series_store
+
+    body = b'{"id": "c"}'
+    item = {"kind": "tariff", "id": "mine", "version": 1,
+            "hash": hashlib.sha256(body).hexdigest()}
+    series = {**_series_pin(_CSV), "id": "c"}
+    monkeypatch.setattr(common, "is_common", lambda kind, name: name == "c")
+    monkeypatch.setattr(items, "payload_bytes", lambda *a, **k: body)
+    monkeypatch.setattr(series_store, "payload_bytes", lambda *a, **k: _CSV)
+    written = PC.fill(None, None, tmp_path, [item, series])
+    assert sorted(written) == sorted([PC.member_name(item), PC.member_name(series)])
+    assert PC.read(tmp_path, item) == (body, False)
+
+
 def test_an_item_pin_resolves_from_its_copy_and_a_modified_one_is_named(
     tmp_path, monkeypatch
 ):
