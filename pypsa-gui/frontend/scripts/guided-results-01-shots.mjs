@@ -5,14 +5,15 @@
  * Results > Summary on the real app, dark and light: `<proj>-<theme>-<state>.jpg`.
  *   dc  (Data Center Energy Hub, study done): ready, ready-tiles.  dcx: expert-summary.
  *   dcstale: stale (after one generator's p_nom is nudged, so the study is out of date).
+ *   dcunknown: freshness-unknown (the study and review answers mocked to `edited_since_study: null`).
  *   dcn (Data Center Energy Hub not run): not-run.
  *   mg  (Island Microgrid, created when missing): not-run, then the Guided "Run study" click
  *       in section 9, running (dark, when caught), and ready once the study is done (or
  *       later with mgready, when the study outlasts STUDY_WAIT_MS).
  *
  * Needs the API on :8000 and Vite on :5173, signed in as the dev admin (scripts/dev-credentials.mjs).
- * Usage: node scripts/guided-results-01-shots.mjs [dc|dcx|dcstale|dcn|mg|mgready ...] [--out dir]
- * env: BASE, DC_PROJECT (the dc/dcx/dcstale project, default "Data Center Energy Hub")
+ * Usage: node scripts/guided-results-01-shots.mjs [dc|dcx|dcstale|dcunknown|dcn|mg|mgready ...] [--out dir]
+ * env: BASE, DC_PROJECT (the dc/dcx/dcstale/dcunknown project, default "Data Center Energy Hub")
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -28,7 +29,7 @@ const outAt = args.indexOf('--out')
 const OUT = path.resolve(outAt >= 0 ? args[outAt + 1]
   : path.join(here, '..', '..', '..', '.scratch', 'guided-results', 'shots-01'))
 const picked = args.filter((a, i) => !a.startsWith('--') && (outAt < 0 || i !== outAt + 1))
-const PHASES = picked.length ? picked : ['dc', 'dcx', 'dcstale', 'dcn', 'mg', 'mgready']
+const PHASES = picked.length ? picked : ['dc', 'dcx', 'dcstale', 'dcunknown', 'dcn', 'mg', 'mgready']
 const DC = process.env.DC_PROJECT || 'Data Center Energy Hub'
 const DCN = 'Data Center Energy Hub not run'
 const MG = 'Island Microgrid'
@@ -241,6 +242,30 @@ try {
       }
       console.log(`mg study status ${status} after ${((Date.now() - t0) / 1000).toFixed(0)} s`)
       mgDone = status === 'done'
+      await ctx.close()
+    }
+  }
+  if (PHASES.includes('dcunknown')) {
+    // Freshness unknown (GK B F1): a study record with no captured revision answers
+    // `edited_since_study: null`. A fresh install can't save one, so the payload is mocked (#1470).
+    for (const theme of THEMES) {
+      const { ctx, page } = await open(auth, DC, theme, 1100)
+      await ctx.route(u => /\/api\/results\/eh_(study|review)(\?|$)/.test(u.pathname + u.search), async r => {
+        const res = await r.fetch()
+        const body = await res.json()
+        if (body && typeof body === 'object') {
+          body.edited_since_study = null
+          if ('stale' in body) body.stale = false
+        }
+        await r.fulfill({ response: res, json: body })
+      })
+      await page.reload({ waitUntil: 'networkidle', timeout: 60000 })
+      const view = await show(page, 'results')
+      await page.getByTestId('hub-results-freshness-unknown').first().waitFor({ timeout: 30000 })
+      await page.getByTestId('hub-results-reliability-chart').first().waitFor({ timeout: 30000 })
+      await view.evaluate(n => n.scrollIntoView({ block: 'start' }))
+      await page.waitForTimeout(800)
+      await shoot(page, `dc-${theme}-freshness-unknown.jpg`)
       await ctx.close()
     }
   }
