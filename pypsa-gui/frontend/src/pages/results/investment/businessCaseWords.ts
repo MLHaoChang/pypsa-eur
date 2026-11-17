@@ -1,0 +1,92 @@
+// The business case's ids in words (walk 2026-11-17 issue 06, RAW-NAMES-1): line
+// categories, escalation classes and the P&L streams. A test pins each list to the
+// backend's ids (`models/business_case.py`, `services/finance/cashflow.py`).
+
+export const CATEGORY_WORDS: Record<string, string> = {
+  // revenue
+  product_sale: 'Product sales',
+  by_product: 'By-product sales',
+  service_fee: 'Service fee',
+  lease: 'Lease',
+  capacity_payment: 'Capacity payment',
+  tariff: 'Tariff',
+  cost_recovery: 'Cost recovery (pass-through)',
+  incentive: 'Incentive or premium',
+  // opex
+  staff: 'Staff',
+  maintenance: 'Maintenance',
+  insurance: 'Insurance',
+  property_tax: 'Property tax',
+  feedstock: 'Feedstock',
+  consumables: 'Consumables',
+  network: 'Network charges',
+  land: 'Land lease',
+  sga: 'Overheads (SG&A)',
+  // capex
+  facility: 'Facility (shell and M&E)',
+  equipment: 'Equipment',
+  it_hardware: 'IT hardware',
+  other: 'Other',
+}
+
+/** Escalation classes: the finance-input rate each line moves with. */
+export const ESCALATION_WORDS: Record<string, string> = {
+  opex: 'Operating cost rate',
+  fuel: 'Fuel price rate',
+  tariff: 'Grid tariff rate',
+  ppa: 'PPA price rate',
+  export: 'Export price rate',
+  capex: 'Capex rate',
+  contract: 'Contract indexation (per line)',
+}
+
+/** The P&L streams: the ledger's and the business-case lines' (`bc_<category>`). */
+export const STREAM_WORDS: Record<string, string> = {
+  ancillary: 'Ancillary services',
+  capex: 'Capital cost',
+  certificates: 'Certificates',
+  cfd_settlement: 'CfD settlement',
+  demand_charge: 'Demand charge',
+  dr_activation: 'Demand response activation',
+  dr_availability: 'Demand response availability',
+  eaas_fee: 'Energy-as-a-service fee',
+  energy_export: 'Energy export',
+  energy_import: 'Energy import',
+  energy_wholesale: 'Wholesale market energy',
+  fom: 'Fixed O&M (energy assets)',
+  fuel: 'Fuel',
+  lease: 'Lease',
+  lost_production: 'Lost production',
+  network_capacity: 'Network capacity charge',
+  network_energy: 'Network energy charge',
+  other: 'Other',
+  ppa_settlement: 'PPA settlement',
+  retail_fixed: 'Retail fixed charge',
+  tax: 'Levies',
+  vom: 'Variable O&M (energy assets)',
+  byproduct_revenue: 'By-product revenue',
+  capacity_revenue: 'Capacity revenue',
+  lease_revenue: 'Lease revenue',
+  other_revenue: 'Other revenue',
+  power_passthrough: 'Power cost recovery',
+  premium_revenue: 'Premium revenue',
+  product_revenue: 'Product revenue',
+  service_revenue: 'Service revenue',
+  tariff_revenue: 'Tariff revenue',
+  // the locked-row ids the options route serves
+  bill: 'Energy bill',
+  export: 'Export sales',
+  ppa: 'PPA',
+  cfd: 'CfD settlement',
+}
+
+const plain = (id: string) => id.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
+
+export const categoryWords = (c: string) => CATEGORY_WORDS[c] ?? plain(c)
+export const escalationWords = (x: string) => ESCALATION_WORDS[x] ?? plain(x)
+/** A stream; `bc_<category>` reads its category's words. */
+export function streamWords(id: string): string {
+  if (STREAM_WORDS[id]) return STREAM_WORDS[id]
+  const cat = id.startsWith('bc_') ? id.slice(3) : null
+  return cat && CATEGORY_WORDS[cat] ? CATEGORY_WORDS[cat] : plain(id)
+}

@@ -1,0 +1,47 @@
+// Walk 2026-11-17 issue 06 (RAW-NAMES-1): every category, escalation class and P&L
+// stream the backend can serve reads in words, never a capitalised id ("Sga", "Ppa").
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { CATEGORY_WORDS, categoryWords, ESCALATION_WORDS, escalationWords, STREAM_WORDS, streamWords } from './businessCaseWords'
+
+const BACKEND = resolve(__dirname, '../../../../../backend')
+const read = (p: string) => readFileSync(resolve(BACKEND, p), 'utf8')
+const literal = (src: string, name: string) => {
+  const m = new RegExp(`${name} = Literal\\[([^\\]]*)\\]`).exec(src)
+  return [...(m?.[1] ?? '').matchAll(/"([a-z_]+)"/g)].map(x => x[1])
+}
+const dictKeys = (src: string, name: string) => {
+  const i = src.indexOf(`${name}: dict`)
+  return [...src.slice(i, src.indexOf('}', i)).matchAll(/"([a-z_]+)":/g)].map(x => x[1])
+}
+const MODEL = read('models/business_case.py')
+const CASHFLOW = read('services/finance/cashflow.py')
+const CATEGORIES = ['RevenueCategory', 'OpexCategory', 'CapexCategory'].flatMap(n => literal(MODEL, n))
+const ESCALATIONS = literal(MODEL, 'Escalation')
+const STREAMS = [...dictKeys(CASHFLOW, 'STREAM_CLASS'), ...dictKeys(CASHFLOW, 'BC_STREAM_CLASS'),
+  ...literal(MODEL, 'OpexCategory').map(c => `bc_${c}`)]
+
+describe('business-case ids in words (walk 06)', () => {
+  it('reads the backend lists', () => {
+    expect(CATEGORIES.length).toBeGreaterThan(20)
+    expect(ESCALATIONS).toContain('contract')
+    expect(STREAMS).toContain('energy_wholesale')
+  })
+  it('has words for every category and escalation class', () => {
+    expect(Object.keys(CATEGORY_WORDS).sort()).toEqual([...new Set(CATEGORIES)].sort())
+    expect(Object.keys(ESCALATION_WORDS).sort()).toEqual([...ESCALATIONS].sort())
+    expect(categoryWords('sga')).toBe('Overheads (SG&A)')
+    expect(escalationWords('ppa')).toBe('PPA price rate')
+  })
+  it('has words for every stream, never a raised id', () => {
+    // Each has its own words (no fallback that raises the id: "Fom", "Ppa settlement").
+    for (const s of STREAMS) {
+      expect(s in STREAM_WORDS || s.slice(3) in CATEGORY_WORDS, s).toBe(true)
+      expect(streamWords(s), s).not.toMatch(/_/)
+    }
+    expect(streamWords('energy_wholesale')).toBe('Wholesale market energy')
+    expect(streamWords('ppa_settlement')).toBe('PPA settlement')
+    expect(streamWords('bc_sga')).toBe('Overheads (SG&A)')
+  })
+})

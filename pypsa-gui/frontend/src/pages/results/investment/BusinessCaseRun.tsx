@@ -11,6 +11,7 @@ import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { useUIStore } from '../../../store/uiStore'
 import { ACTION } from './actionStyle'
 import { openPanel } from '../openPanel'
+import { streamWords } from './businessCaseWords'
 import {
   breakEvenReason, firstFix, fmtYear, hidden, KPI_ORDER, kpiText, NET_INCOME_NOTE, PNL_SECTIONS,
   refusedRunText, rowReason, series, staleText, stageText, streamGroups, yearReason,
@@ -226,7 +227,7 @@ function PnlTable({ pnl }: { pnl: BusinessCasePnl }) {
                 const v = pnl.streams[n]
                 return (
                   <tr key={n} data-testid={`bc-stream-${n}`}>
-                    <th scope="row" className={head + ' pl-3'}>{words(n.replace(/^bc_/, ''))}
+                    <th scope="row" className={head + ' pl-3'}>{streamWords(n)}
                       {!v && <Reason text={rowReason(`stream:${n}`, pnl)} />}</th>
                     {v ? cells(n, v) : <Gap span={years.length} />}
                   </tr>

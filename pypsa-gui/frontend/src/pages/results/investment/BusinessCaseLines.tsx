@@ -16,6 +16,7 @@ import {
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { openPanel } from '../openPanel'
+import { categoryWords, escalationWords, streamWords } from './businessCaseWords'
 import { ACTION } from './actionStyle'
 import BusinessCaseRun from './BusinessCaseRun'
 import { NumInput } from './NumInput'
@@ -32,13 +33,6 @@ const words = (id: string) => id.replace(/_/g, ' ').replace(/^./, c => c.toUpper
 const CELL = 'border border-border rounded px-1 py-0.5 bg-bg text-[11px]'
 const BAD = ' border-danger'
 
-/** The stream words for the locked rows (the ledger's stream ids, in words). */
-const STREAM_WORD: Record<string, string> = {
-  bill: 'Energy bill', export: 'Export sales', ppa: 'PPA', cfd: 'CfD settlement',
-  eaas_fee: 'Energy-as-a-service fee', ancillary: 'Ancillary services',
-  fom: 'Fixed O&M (energy assets)', vom: 'Variable O&M (energy assets)',
-  lost_production: 'Lost production',
-}
 
 function optionsErrorWords(e: unknown): string {
   const code = (e as { response?: { data?: { detail?: { code?: string } } } })?.response?.data?.detail?.code
@@ -72,7 +66,7 @@ function SourceSelect({ line, opts, onChange, invalid, label }: {
       <optgroup label="Share of">
         {KINDS.map(k => <option key={k} value={`share_of:${k}`}>Share of all {KIND_WORD[k].toLowerCase()}</option>)}
         {KINDS.flatMap(k => (opts?.categories[k] ?? []).map(c => (
-          <option key={`${k}/${c}`} value={`share_of:${k}/${c}`}>Share of {KIND_WORD[k].toLowerCase()} · {words(c)}</option>
+          <option key={`${k}/${c}`} value={`share_of:${k}/${c}`}>Share of {KIND_WORD[k].toLowerCase()} · {categoryWords(c)}</option>
         )))}
       </optgroup>
       {!known && <option value={current}>
@@ -244,7 +238,7 @@ function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean 
         <ul className="space-y-0.5">
           {(locked ?? []).map(r => (
             <li key={`${r.stream}/${r.key}`} data-testid="bc-locked-row">
-              <span>{STREAM_WORD[r.stream] ?? words(r.stream)}</span>
+              <span>{streamWords(r.stream)}</span>
               {r.key && r.key !== r.stream && <span className="text-muted"> · {r.key}</span>}
               {r.superseded_by.length > 0 && (
                 <span className="text-muted"> · replaced in {r.dropped.length} year{r.dropped.length === 1 ? '' : 's'} by {r.superseded_by.join(', ')}</span>
@@ -503,7 +497,7 @@ export default function BusinessCaseLines() {
                           <select aria-label={`Category, ${ln.name}`} className={CELL + ' max-w-[8rem]' + (bad('category') ? BAD : '')}
                                   aria-invalid={bad('category') ? true : undefined}
                                   value={ln.category} onChange={e => setLine(i, { category: e.target.value })}>
-                            {(opts?.categories[ln.kind] ?? [ln.category]).map(c => <option key={c} value={c}>{words(c)}</option>)}
+                            {(opts?.categories[ln.kind] ?? [ln.category]).map(c => <option key={c} value={c}>{categoryWords(c)}</option>)}
                           </select>
                         </td>
                         <td className="px-1">
@@ -539,7 +533,7 @@ export default function BusinessCaseLines() {
                         <td className="px-1">
                           <select aria-label={`Escalation, ${ln.name}`} className={CELL} value={ln.escalation}
                                   onChange={e => setLine(i, { escalation: e.target.value })}>
-                            {(opts?.escalations ?? [ln.escalation]).map(x => <option key={x} value={x}>{words(x)}</option>)}
+                            {(opts?.escalations ?? [ln.escalation]).map(x => <option key={x} value={x}>{escalationWords(x)}</option>)}
                           </select>
                         </td>
                         <td className="px-1 whitespace-nowrap">
