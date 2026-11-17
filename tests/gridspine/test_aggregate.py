@@ -747,6 +747,43 @@ def test_aggregate_hour_refuses_an_unmapped_unit():
         aggregate_hour(rows, agg.unit_map)
 
 
+@pytest.mark.parametrize(
+    "change, why",
+    [
+        (lambda r: r.assign(q_mvar=1.0), r"unknown \['q_mvar'\]"),
+        (lambda r: r.drop(columns="status"), r"missing \['status'\]"),
+        (
+            lambda r: r.assign(period=[2030, None, 2030, 2030, 2030]),
+            r"missing values in \['period'\]",
+        ),
+        (
+            lambda r: r.assign(p_mw=[1.0, None, 0.0, 0.0, 0.0]),
+            r"missing values in \['p_mw'\]",
+        ),
+    ],
+    ids=["extra-column", "missing-column", "blank-key", "blank-value"],
+)
+def test_aggregate_hour_refuses_rows_it_cannot_sum(change, why):
+    agg = aggregate(plant())
+    rows = pd.DataFrame(
+        {
+            "unit_id": ["UA1", "UA2", "UB1", "UB2", "UB3"],
+            "period": 2030,
+            "p_mw": 1.0,
+            "status": 1,
+        }
+    )
+    with pytest.raises(AggregationError, match=why):
+        aggregate_hour(change(rows), agg.unit_map)
+
+
+def test_freeze_detailed_only_still_checks_the_input():
+    spec = plant()
+    spec["campus"]["cables"]["CB2"]["to_bus"] = "NOWHERE"
+    with pytest.raises(ContractError):
+        freeze(spec, {}, aggregated=False, now=T0)
+
+
 # --- A8 freeze ------------------------------------------------------------------------------------
 
 

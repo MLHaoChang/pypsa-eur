@@ -560,14 +560,33 @@ def _drop_dangling(c, buses, branches, assumptions):
         )
 
 
+#: The hourly table's value columns and its optional keys (``schema/campus.py``).
+_HOUR_VALUES = ("unit_id", "p_mw", "status")
+_HOUR_KEYS = ("period", "hour")
+
+
 def aggregate_hour(rows: pd.DataFrame, unit_map: dict) -> pd.DataFrame:
     """
-    The detailed hourly rows (``unit_id``, ``p_mw``, ``status``, and any
-    key columns such as ``period`` and ``hour``) as rows of the aggregated
-    campus: ``p_mw`` summed over each equivalent's members, ``status`` 1
-    when any member is on. A row whose unit no equivalent stands for is
-    refused, never dropped.
+    The detailed hourly rows (``unit_id``, ``p_mw``, ``status``, and
+    optionally the keys ``period`` and ``hour``: ``schema/campus.py``) as
+    rows of the aggregated campus: ``p_mw`` summed over each equivalent's
+    members, ``status`` 1 when any member is on. Refused, never dropped: a
+    row whose unit no equivalent stands for, any other column, and a
+    missing key or value.
     """
+    missing = [col for col in _HOUR_VALUES if col not in rows.columns]
+    extra = sorted(set(rows.columns) - set(_HOUR_VALUES) - set(_HOUR_KEYS))
+    if missing or extra:
+        raise AggregationError(
+            f"aggregation: the hourly rows need {list(_HOUR_VALUES)} and may carry "
+            f"{list(_HOUR_KEYS)}; missing {missing}, unknown {extra}"
+        )
+    keys = [col for col in _HOUR_KEYS if col in rows.columns]
+    blank = [col for col in (*_HOUR_VALUES, *keys) if rows[col].isna().any()]
+    if blank:
+        raise AggregationError(
+            f"aggregation: the hourly rows have missing values in {blank}"
+        )
     member_of = {m: eq for eq, ms in unit_map.items() for m in ms}
     stray = sorted(set(rows["unit_id"]) - set(member_of))
     if stray:
@@ -575,7 +594,6 @@ def aggregate_hour(rows: pd.DataFrame, unit_map: dict) -> pd.DataFrame:
             f"aggregation: the hourly rows have unit(s) {stray} the aggregated campus "
             "does not map"
         )
-    keys = [col for col in rows.columns if col not in ("unit_id", "p_mw", "status")]
     df = rows.assign(
         unit_id=rows["unit_id"].map(member_of),
         status=(rows["status"].astype(int) == 1).astype(int),
@@ -608,10 +626,11 @@ def freeze(campus_spec, params, *, aggregated=True, now=None):
     never turned into a missing variant. ``aggregated=False`` freezes the
     detailed model only (the aggregated slot is then None).
     """
-    build_campus(campus_spec)
     agg = None
     if aggregated:
-        _, agg = aggregate_campus(campus_spec)
+        _, agg = aggregate_campus(campus_spec)  # checks the input first
+    else:
+        build_campus(campus_spec)
     return new_model_set(
         campus_spec,
         params,
