@@ -450,8 +450,7 @@ def read_comtrade(cfg, dat=None, primary: bool = True) -> ChannelFrame:
                 data["d"].reshape(len(data), words)[:, j // 16] >> (j % 16)
             ) & 1
         stamps = data["ts"].astype(float)
-        if np.any(data["ts"] == 0xFFFFFFFF):
-            stamps[data["ts"] == 0xFFFFFFFF] = math.nan
+        stamps[data["ts"] == 0xFFFFFFFF] = math.nan  # the 2013 "no time stamp" code
     stated = rates[-1][1]
     if stated and stated != len(stamps):
         raise ContractError(
