@@ -19,6 +19,7 @@ or objective deltas inside the combined gap band, and bus prices on a MIP. On
 master's solve path PyPSA writes 0.0 to `buses_t.marginal_price` for a MIP,
 since the solver returns no duals, so a MIP price is never a marginal price.
 """
+
 from __future__ import annotations
 
 import math
@@ -51,7 +52,7 @@ def _modular(n) -> bool:
         static = getattr(n, table)
         mod = f"{attr}_mod"
         ext = f"{attr}_extendable"
-        if static.empty or mod not in static.columns or ext not in static.columns:
+        if mod not in static.columns or ext not in static.columns:
             continue
         integer = static[ext].astype(bool) & (static[mod].astype(float) > 0)
         if bool(integer.any()):
@@ -86,8 +87,6 @@ def applied_gap(n, config) -> float | None:
     or Link is committable (a user-set key wins). `None` means no gap reached
     the solver, so its own default applied and nothing records it.
     """
-    if config is None:
-        return None
     solver = _field(config, "solver_name")
     if not isinstance(solver, str) or solver.lower() not in _MIP_KEYS_BY_SOLVER:
         return None
@@ -110,23 +109,35 @@ def applied_gap(n, config) -> float | None:
 def classify(n, config) -> dict:
     """`{"kind", "gap", "optimal", "disclosure"}` for the live solve."""
     if is_stochastic(n):
-        return {"kind": "stochastic", "gap": None, "optimal": False,
-                "disclosure": "Stochastic (scenario) runs are not supported by checked answers."}
+        return {
+            "kind": "stochastic",
+            "gap": None,
+            "optimal": False,
+            "disclosure": "Stochastic (scenario) runs are not supported by checked answers.",
+        }
     if not is_mip(n):
         return {"kind": "lp", "gap": 0.0, "optimal": True, "disclosure": None}
     gap = applied_gap(n, config)
     if gap is None:
-        return {"kind": "mip", "gap": None, "optimal": False,
-                "disclosure": "Integer (MIP) solve; the relative optimality gap was not recorded."}
-    return {"kind": "mip", "gap": gap, "optimal": gap <= SOLVE_GAP_TOLERANCE,
-            "disclosure": f"Integer (MIP) solve to a relative optimality gap of {gap:.3g}; "
-                          "costs may exceed the optimum by up to that share."}
+        return {
+            "kind": "mip",
+            "gap": None,
+            "optimal": False,
+            "disclosure": "Integer (MIP) solve; the relative optimality gap was not recorded.",
+        }
+    return {
+        "kind": "mip",
+        "gap": gap,
+        "optimal": gap <= SOLVE_GAP_TOLERANCE,
+        "disclosure": f"Integer (MIP) solve to a relative optimality gap of {gap:.3g}; "
+        "costs may exceed the optimum by up to that share.",
+    }
 
 
 def _effective(cls) -> float | None:
     if cls["kind"] == "lp":
         return 0.0
-    if cls["kind"] != "mip" or cls["gap"] is None:
+    if cls["gap"] is None:  # a stochastic run or an unrecorded MIP gap
         return None
     return 0.0 if cls["gap"] <= SOLVE_GAP_TOLERANCE else cls["gap"]
 
@@ -142,7 +153,11 @@ def band(cls_a, objective_a, cls_b, objective_b) -> float | None:
     for gap, objective in zip(gaps, (objective_a, objective_b)):
         if gap == 0.0:
             continue
-        if isinstance(objective, bool) or not isinstance(objective, Real) or not math.isfinite(objective):
+        if (
+            isinstance(objective, bool)
+            or not isinstance(objective, Real)
+            or not math.isfinite(objective)
+        ):
             return None
         total += gap * abs(float(objective))
     return total
@@ -187,7 +202,10 @@ def capture(ctx) -> dict:
     """The live solve's classification plus its objective, sealed with the raw
     record so a retained baseline carries its own."""
     n = ctx.network
-    return {**classify(n, ctx.solver_state.get("solver_config")), "objective": _objective(n)}
+    return {
+        **classify(n, ctx.solver_state.get("solver_config")),
+        "objective": _objective(n),
+    }
 
 
 def raw_delta_limit(delta, candidate, baseline) -> str | None:
@@ -195,7 +213,13 @@ def raw_delta_limit(delta, candidate, baseline) -> str | None:
     before this check) establishes no delta sign."""
     if not isinstance(candidate, dict) or not isinstance(baseline, dict):
         return GAP_NOT_RECORDED
-    return delta_limit(delta, candidate, candidate.get("objective"), baseline, baseline.get("objective"))
+    return delta_limit(
+        delta,
+        candidate,
+        candidate.get("objective"),
+        baseline,
+        baseline.get("objective"),
+    )
 
 
 def notes(raw) -> list[str]:

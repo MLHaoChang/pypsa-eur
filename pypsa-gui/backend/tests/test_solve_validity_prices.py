@@ -3,6 +3,7 @@
 On master's solve path HiGHS returns no duals for a MIP and PyPSA writes 0.0 to
 every bus price, so a committable network's prices must never be certified.
 """
+
 import pandas as pd
 import pytest
 
@@ -33,7 +34,13 @@ def test_a_committable_network_never_certifies_its_zero_prices(priced, checked):
     priced.network.generators.loc["G2", "committable"] = True
     ctx = solve(priced, voll=1000)
     assert (ctx.network.buses_t.marginal_price["B1"] == 0.0).all()
-    frames = ask(checked, ctx, "bus-price/1", "B1", {**PRICE, "mean_price": 0, "min_price": 0, "max_price": 0})
+    frames = ask(
+        checked,
+        ctx,
+        "bus-price/1",
+        "B1",
+        {**PRICE, "mean_price": 0, "min_price": 0, "max_price": 0},
+    )
     got = slots(frames)
     assert {m: (s["disposition"], s.get("reason")) for m, s in got.items()} == {
         m: ("unavailable", solve_validity.DUALS_NOT_MARGINAL) for m in PRICE
@@ -45,3 +52,13 @@ def test_the_same_network_without_commitment_still_answers(priced, checked):
     ctx = solve(priced, voll=1000)
     got = slots(ask(checked, ctx, "bus-price/1", "B1", PRICE))
     assert {s["disposition"] for s in got.values()} == {"answered"}
+
+
+def test_a_stale_mip_solve_still_reads_unverified(priced, checked):
+    priced.network.generators.loc["G2", "committable"] = True
+    ctx = solve(priced, voll=1000)
+    ctx.network.loads.at["L1", "p_set"] = (
+        9  # edit after the solve: the fingerprint no longer matches
+    )
+    got = slots(ask(checked, ctx, "bus-price/1", "B1", PRICE))
+    assert {s.get("reason") for s in got.values()} == {"unverified_solve"}
