@@ -184,6 +184,20 @@ describe('ExpertOnlyLines', () => {
     await waitFor(() => expect(lineText('dsr_share_of_load')).toContain('DSR volume: could not be read'))
   })
 
+  it('says the grid-code study does not apply, with no link, on a project that has none (409)', async () => {
+    setValues()
+    const conflict = Object.assign(new Error('409'), { response: { status: 409 } })
+    api.campus.mockRejectedValue(conflict)
+    api.codes.mockRejectedValue(conflict)
+    mount('connection')
+    await waitFor(() => expect(lineText('grid_code_profile')).toContain('not used by this project'))
+    expect(lineText('grid_code_document')).toContain('not used by this project')
+    expect(screen.queryByTestId('expert-only-open-grid_code_profile')).toBeNull()
+    expect(screen.queryByText(/could not be read/)).toBeNull()
+    // the site connection still links to its Expert place, once
+    expect(screen.getByTestId('expert-only-open-poc_link')).toBeTruthy()
+  })
+
   it('a chronological year reads as such', async () => {
     setValues()
     api.snapshots.mockResolvedValue({ count: 3, weightings: [], snapshots: [

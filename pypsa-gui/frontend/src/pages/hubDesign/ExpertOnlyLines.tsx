@@ -26,6 +26,10 @@ import { openFlowTarget, openSectionInExpert, withReturnFrom } from '../../layou
 const NOT_SET = 'not set'
 const LOADING = 'loading…'
 const FAILED = 'could not be read'
+const NOT_APPLICABLE = 'not used by this project (no grid-code study)'
+
+const statusOf = (e: unknown): number | undefined =>
+  (e as { response?: { status?: number } } | null)?.response?.status
 
 /** Where a line is edited in Expert: `place` keys the one link per place (#1194). */
 interface Home { place: string; open: () => void; label?: string }
@@ -97,6 +101,22 @@ function useConnectionLines(): ExpertOnlyLine[] {
   const config = useQuery({ queryKey: nk(project, 'commercial', 'config'), queryFn: () => commercialApi.getCommercial() })
   const home: Home = { place: 'campusElectrical', open: inExpert('connection') }
   const poc = config.data?.poc_link
+  // 409: not a hub (capacity-expansion) project, so the grid-code study does not
+  // apply: plain words and no link (#1252), not "could not be read".
+  const noStudy = [campus, codes].some(q => statusOf(q.error) === 409)
+  if (noStudy) {
+    return [
+      { key: 'grid_code_profile', label: FIELD_LABELS.grid_code_profile, home: null,
+        value: NOT_APPLICABLE },
+      { key: 'grid_code_document', label: FIELD_LABELS.grid_code_document, home: null,
+        value: NOT_APPLICABLE },
+      { key: 'poc_link', label: FIELD_LABELS.poc_link, home, value: read(config, d => d?.poc_link ?? null) },
+      { key: 'export_link', label: FIELD_LABELS.export_link, home,
+        value: read(config, d => (poc ? d?.export_link ?? null : null)) },
+      { key: 'timezone', label: FIELD_LABELS.timezone, home,
+        value: read(config, d => (poc ? d?.timezone ?? null : null)) },
+    ]
+  }
   return [
     { key: 'grid_code_profile', label: FIELD_LABELS.grid_code_profile, home,
       value: read(campus, d => {
