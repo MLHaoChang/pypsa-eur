@@ -663,7 +663,7 @@ def finance_rate(finance: dict | None, assumed: dict | None = None) -> dict[str,
         ) from None
     if fin.wacc_nominal is None:
         return {"rate": None, "rate_note": "the finance case sets no wacc_nominal"}
-    shipped = ((assumed or {}).get("wacc_nominal") or {}) if isinstance(assumed, dict) else {}
+    shipped = (assumed.get("wacc_nominal") or {}) if isinstance(assumed, dict) else {}
     flag = {"rate_assumed": True} if shipped.get("value") == fin.wacc_nominal else {}
     if fin.price_basis == "real":
         return {"rate": fin.wacc_nominal, "inflation": None, "rate_is_real": True, **flag}

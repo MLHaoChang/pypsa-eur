@@ -531,6 +531,43 @@ def test_the_price_follows_the_projects_finance_currency():
     )
 
 
+def test_the_rate_source_names_the_shipped_wacc_on_a_finance_rate_only():
+    # WALK-IMPROVE-1 b: the label rides on the finance case's wacc, never the pack's.
+    n, spec, tag = _net()[0], _spec(), " (the template's shipped wacc, assumed)"
+    nominal = {"rate": 0.07, "inflation": 0.02, "rate_assumed": True}
+    assert _compare(n, spec, rate_kwargs=nominal)["discount_rate_source"] == (
+        "finance case nominal wacc 0.07 made real with its inflation 0.02" + tag)
+    real = _compare(n, spec, rate_kwargs={"rate": 0.05, "rate_is_real": True,
+                                          "rate_assumed": True})
+    assert real["discount_rate_source"] == "finance case wacc 0.05 (real price basis)" + tag
+    typed = _compare(n, spec, rate_kwargs={"rate": 0.07, "inflation": 0.02})
+    assert "assumed" not in typed["discount_rate_source"]
+    pack = _compare(n, spec, rate_kwargs={"rate": None, "rate_assumed": True})
+    assert pack["discount_rate_source"] == "pack discount rate (real, assumed)"
+
+
+def test_the_tariff_is_shipped_only_while_it_equals_the_templates():
+    from project_templates import eh_templates as T
+
+    cfg = T.solver_config("eh_datacenter")
+    tpl = SimpleNamespace(solver_config=lambda tid, plan: cfg)
+    own = json.loads(json.dumps(cfg["commercial"]))
+    assert A._tariff_is_shipped(tpl, "eh_datacenter", None, own) is True
+    own["import_tariff"]["items"][0]["periods"][0]["rate"] += 0.001
+    assert A._tariff_is_shipped(tpl, "eh_datacenter", None, own) is False
+    for commercial in (None, {}, {"import_tariff": None}):
+        assert A._tariff_is_shipped(tpl, "eh_datacenter", None, commercial) is False
+    # A template that ships no tariff, or one its model refuses, marks nothing shipped.
+    bare = SimpleNamespace(solver_config=lambda tid, plan: {})
+    assert A._tariff_is_shipped(bare, "eh_datacenter", None, cfg["commercial"]) is False
+    none = {**cfg["commercial"], "import_tariff": None}
+    untariffed = SimpleNamespace(solver_config=lambda tid, plan: {"commercial": none})
+    assert A._tariff_is_shipped(untariffed, "eh_datacenter", None, none) is False
+    bad = {**cfg["commercial"], "poc_link": 7}
+    broken = SimpleNamespace(solver_config=lambda tid, plan: {"commercial": bad})
+    assert A._tariff_is_shipped(broken, "eh_datacenter", None, bad) is False
+
+
 def test_an_unset_architecture_leaves_the_scorecard_as_before(tmp_path, monkeypatch):
     from project_templates import eh_templates as T
     from services.adequacy import grid_readiness as G

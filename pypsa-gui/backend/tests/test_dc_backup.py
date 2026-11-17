@@ -293,6 +293,26 @@ def test_a_finance_rate_with_inflation_is_made_real():
     )
 
 
+def test_the_shipped_wacc_label_marks_a_finance_rate_only():
+    # WALK-IMPROVE-1 b: the label rides on the finance case's wacc, never the pack's.
+    out = _delta(rate=0.09, inflation=0.02, rate_assumed=True)
+    assert out["discount_rate_source"].endswith("(the template's shipped wacc, assumed)")
+    assert "assumed" not in _delta(rate=0.09, inflation=0.02)["discount_rate_source"]
+    pack = _delta(rate_assumed=True)
+    assert "shipped wacc" not in pack["discount_rate_source"]
+
+
+def test_finance_rate_flags_the_wacc_only_while_it_equals_the_shipped_record():
+    fin = {"wacc_nominal": 0.07, "inflation": 0.02, "financial_close": "2026-01-01"}
+    shipped = {"wacc_nominal": {"value": 0.07, "source": "assumed"}}
+    assert dc_backup.finance_rate(fin, shipped)["rate_assumed"] is True
+    assert "rate_assumed" not in dc_backup.finance_rate({**fin, "wacc_nominal": 0.08}, shipped)
+    # A record for other fields, a null record or none at all labels nothing.
+    for assumed in ({"inflation": {"value": 0.02, "source": "x"}}, {"wacc_nominal": None},
+                    {}, None, []):
+        assert "rate_assumed" not in dc_backup.finance_rate(fin, assumed)
+
+
 def test_augmentation_policies_on_one_fade_curve():
     fade = {"calendar_fade_per_year": 0.02, "cycle_fade_per_full_cycle": 0.001}
     restore = _delta(

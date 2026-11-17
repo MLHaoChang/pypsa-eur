@@ -173,6 +173,143 @@ def test_the_finance_read_marks_each_shipped_value_until_it_is_changed(reset_bac
     assert get_finance()["assumed"] == {}
 
 
+def test_the_finance_read_labels_nothing_without_inputs_or_with_a_refused_record(reset_backend):
+    import routers.simulation as sim_router
+    from routers.projects import _solver_config_from_dict
+    from routers.simulation import get_finance
+
+    cfg = T.solver_config("eh_datacenter")
+    sim_router._state["solver_config"] = _solver_config_from_dict({**cfg, "finance": None})
+    out = get_finance()
+    assert out["status"] == "not_set" and out["assumed"] == {}
+    typo = {"wacc_nominall": {"value": 0.07, "source": "assumed"}}
+    sim_router._state["solver_config"] = _solver_config_from_dict({**cfg, "finance_assumed": typo})
+    out = get_finance()
+    assert out["status"] == "ok" and out["assumed"] == {}
+
+
+def _bind(tmp_path, data):
+    """`_bind_template_solver_config` on ``data`` (no commercial block, so no
+    network): the issues, the stored config and the file it rewrote."""
+    import routers.simulation as sim_router
+    from routers.projects import _bind_template_solver_config, _solver_config_from_dict
+
+    path = tmp_path / "solver_config.json"
+    path.write_text(json.dumps(data))
+    sim_router._state["solver_config"] = _solver_config_from_dict(data)
+    issues = _bind_template_solver_config(None, path)
+    return issues, sim_router._state["solver_config"], json.loads(path.read_text())
+
+
+def test_a_new_project_keeps_a_valid_record_and_drops_a_refused_one(reset_backend, tmp_path):
+    cfg = {k: v for k, v in T.solver_config("eh_h2_hub").items() if k != "commercial"}
+    issues, stored, _ = _bind(tmp_path, cfg)
+    assert issues == [] and stored.finance_assumed == cfg["finance_assumed"]
+
+    typo = {**cfg["finance_assumed"], "wacc_nominall": {"value": 0.07, "source": "assumed"}}
+    issues, stored, data = _bind(tmp_path, {**cfg, "finance_assumed": typo})
+    assert [i["code"] for i in issues] == ["finance_assumed_invalid"]
+    assert stored.finance_assumed is None and "finance_assumed" not in data
+    assert stored.finance == cfg["finance"]
+
+
+def test_a_new_project_without_finance_inputs_keeps_no_record(reset_backend, tmp_path):
+    cfg = {k: v for k, v in T.solver_config("eh_h2_hub").items() if k != "commercial"}
+    issues, stored, _ = _bind(tmp_path, {**cfg, "finance": None})
+    assert issues == [] and stored.finance is None and stored.finance_assumed is None
+
+
+# ── The defaults, unit by unit ──────────────────────────────────────────────
+
+
+def test_an_unlisted_asset_takes_its_network_life_else_twenty_years():
+    import pypsa
+
+    n = pypsa.Network()
+    n.add("Bus", "b")
+    for name, carrier, life in (("pv", "solar", 30.0), ("el_25", "h2", 25.4),
+                                ("el_1", "h2", 1.0), ("el_short", "h2", 0.4),
+                                ("el_inf", "h2", math.inf)):
+        n.add("Generator", name, bus="b", carrier=carrier, lifetime=life)
+    got = {a: T._afa_class(n, "Generator", a)
+           for a in ("pv", "el_25", "el_1", "el_short", "el_inf", "not_in_the_network")}
+    assert got == {"pv": "afa_20", "el_25": "afa_25", "el_1": "afa_1", "el_short": "afa_20",
+                   "el_inf": "afa_20", "not_in_the_network": "afa_20"}
+
+
+_FIN = {"wacc_nominal": 0.07, "financial_close": "2029-01-01"}
+
+
+def test_the_defaults_fill_only_what_a_template_leaves_unset():
+    for built in ({"commercial": {}}, {"finance": None}):
+        assert T._with_finance_defaults("eh_h2_hub", built) == built
+    fin = {**_FIN, "cod_by_asset": {"a": "2031-01-01", "b": "2030-01-01"}}
+    built = {"finance": fin}
+    out = T._with_finance_defaults("no_builder", built)
+    assert built == {"finance": {**_FIN, "cod_by_asset": {"a": "2031-01-01", "b": "2030-01-01"}}}
+    # Read through the model: its defaults are written out, as the screens store them.
+    assert out["finance"]["acquisition_date"] == "2030-01-01"
+    assert out["finance"]["price_basis"] == "nominal" and out["finance"]["tax_pack_id"] == "eu_de"
+    stated = T._with_finance_defaults("no_builder",
+                                      {"finance": {**fin, "acquisition_date": "2032-01-01"}})
+    assert stated["finance"]["acquisition_date"] == "2032-01-01"
+    unset = T._with_finance_defaults("no_builder", {"finance": _FIN})
+    assert unset["finance"]["acquisition_date"] is None
+
+
+def test_classes_are_filled_for_owned_assets_under_the_german_pack_only():
+    owners = {"value_flows": {"asset_owners": [
+        {"asset_id": "genset_1", "component": "Generator"},
+        {"asset_id": "ups_battery", "component": "StorageUnit"}]}}
+    de = T._with_finance_defaults("eh_datacenter", {"commercial": owners, "finance": {
+        **_FIN, "depreciation_class_by_asset": {"genset_1": "afa_5"}}})
+    assert de["finance"]["depreciation_class_by_asset"] == {"genset_1": "afa_5",
+                                                            "ups_battery": "afa_10"}
+    nl = T._with_finance_defaults("eh_datacenter", {"commercial": owners,
+                                                    "finance": {**_FIN, "tax_pack_id": "eu_nl"}})
+    assert nl["finance"]["depreciation_class_by_asset"] == {}
+    # No owners: nothing to class and no network built ("no_builder" has none).
+    for commercial in (None, {}, {"value_flows": None}, {"value_flows": {"asset_owners": []}}):
+        out = T._with_finance_defaults("no_builder", {"commercial": commercial, "finance": _FIN})
+        assert out["finance"]["depreciation_class_by_asset"] == {}
+
+
+def test_a_planned_campus_case_runs_on_the_entered_years():
+    p = T.Planning((2033,), 2051)
+    fin = T.solver_config("eh_datacenter", p)["finance"]
+    assert fin["financial_close"] == "2032-01-01" and fin["analysis_years"] == 18
+    assert set(fin["cod_by_asset"].values()) == {"2033-01-01"}
+    assert T.solver_config("eh_datacenter")["finance"]["financial_close"] == "2029-01-01"
+
+
+def test_a_planned_template_ledger_states_its_grid_readiness_rows_once():
+    from collections import Counter
+
+    meta = T.template_meta("eh_datacenter", T.Planning((2033,), 2051))
+    items = Counter(r["item"] for r in meta["ledger"])
+    assert all(items[r["item"]] == 1 for r in T.grid_readiness_ledger("eh_datacenter"))
+
+
+def test_the_finance_ledger_states_the_tax_rule_only_where_it_is_the_default(monkeypatch):
+    def rows(fin, ledger=()):
+        monkeypatch.setattr(T, "solver_config",
+                            lambda tid, p=None: {} if fin is None else {"finance": fin})
+        return [r["item"] for r in T._finance_ledger("eh_h2_hub", None, {"ledger": list(ledger)})]
+
+    assert rows(None) == []
+    assert rows({"tax_pack_id": "eu_de", "hebesatz_pct": 400.0}) == ["tax"]
+    assert rows({"tax_pack_id": "eu_de", "hebesatz_pct": 400.0}, [{"item": "tax"}]) == []
+    assert rows({"tax_pack_id": "eu_nl"}) == []
+
+
+def test_the_campus_ledger_states_its_shipped_wacc_in_percent():
+    ledger = T.template_meta("eh_datacenter")["ledger"]
+    row = next(r for r in ledger if r["item"] == "finance inputs")
+    assert "all equity at 7 %" in row["value"]
+    assert [r["item"] for r in ledger].count("existing campus") == 1
+    assert all(r["item"] != "existing campus" for r in T.template_meta("eh_h2_hub")["ledger"])
+
+
 # ── The case on the shipped inputs (D4) ─────────────────────────────────────
 
 
