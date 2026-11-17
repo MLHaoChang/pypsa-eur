@@ -6,7 +6,7 @@
 Status: needs-triage
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: all steps
-Severity: medium
+Severity: medium (the chat-card focus items are high once confirmed live; chat-dock rows are to confirm)
 Send to: ui-cohesion
 
 ## What happens (Island Microgrid, Guided)

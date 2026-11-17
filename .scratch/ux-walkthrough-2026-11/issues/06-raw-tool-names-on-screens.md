@@ -7,7 +7,7 @@ Status: needs-triage
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J4 Run, J2 Set up, chat dock
 Severity: medium
-Send to: next-step flow; expert-catalogue
+Send to: next-step flow; expert-catalogue. Duplicate check: template-e2e gap 05 and the catalogue raw-name guard cover part of this; chat-card rows are to confirm live
 
 ## Seen on screen
 

@@ -44,6 +44,8 @@ Guided through all 10 sections, Run study, section 10, Download report, then Exp
 
 ## Findings (new, in this walk)
 
+Duplicates to merge at triage (ids from sibling work, not yet on master): issue 06 with template-e2e gap 05 and the expert-catalogue raw-name guard; the location part of issue 05 with template-e2e issue 01; issue 03 with the run-progress package (only the Mining run above 25 minutes and the 409 responses are new).
+
 Severity: high = misleads or blocks the journey, medium = costs the user time, low = polish. Status "open" = reproduced on master c78a115e. Issue files are in `issues/`.
 
 | Template | Screen | Finding | Sev | Status | Shot / issue |
@@ -66,20 +68,21 @@ Severity: high = misleads or blocks the journey, medium = costs the user time, l
 | # | Finding | Status now | Evidence |
 |---|---|---|---|
 | 1 | Guided Results has no chart | still-broken | `mg-after-run`: verdict, one tile, risk list |
-| 2 | Network canvas opens un-fitted | fixed | `chk-canvas`: fitted, legend open, nodes readable at 1280 px (labels still small) |
-| 3 | Section 7 raw form | fixed | `chk-guided-s07`: styled tariff and contracts cards |
+| 2 | Network canvas opens un-fitted | fixed on Island Microgrid (staged growth), dark | `chk-canvas`: fitted, legend open (labels still small). Not re-checked on the data centre or in light |
+| 3 | Section 7 raw form | fixed on Island Microgrid (staged growth), dark | `chk-guided-s07`: styled tariff and contracts cards. Not compared against the data centre or light shots; to reconcile with the ui-cohesion audit (#1598) |
 | 4 | Walls of "assumed" rows with raw keys | partly fixed | rows are plain sentences now ("Discount rate: 7 % nominal (assumed)"); every row still has an amber dot and "Edit ›"; "Keep all defaults" is the one bulk action |
 | 5 | Charts do not read as one system | not re-checked | Expert Operation not walked |
 | 6 | Stepper clipped at 1280 px | still-broken | every section shot cuts "5 A…" or the first steps |
 | 7 | Four sections are a sentence and a link | still-broken | sections 2, 4, 5, 6 list rows with "Edit ›" and "Open … in Expert ›" |
 | 8 | Always-on chrome | still-broken | "Every step below works by hand…" banner on every section; "Chat here" button on every screen |
-| 9 | Home ignores the theme | still-broken | set light inside a project, Home stays dark (`rgb(21,17,18)`) |
+| 9 | Home ignores the theme | still-broken | set light inside a project, Home stays dark (`rgb(21,17,18)`): Home does not re-render on the in-project toggle (THEME-LIGHT (b) in the ui-cohesion audit) |
 | 10 | Loading and empty states | still-broken | Summary "No results yet" plain; "Idle" pill during a run; section 3 shows tooltips only |
 | 11 | Wording rules | still-broken | em dashes in section 3 text; "(s)" plurals not seen this time |
 
 ### `.scratch/project-workflow/issues/UX-flow-expert-audit.md` (26 rows), re-checked in code
 
-Fixed: 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21, 23, 24, 25, 26 (26 opens the first section, not the first incomplete one).
+Fixed: 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21, 23, 24, 25.
+Partly fixed: 26 (a template created in Expert now opens a section, but the first one, not the first incomplete one).
 Still broken: **1** (the reliability goal is still typed in the EH pack, `EhReferenceDesignPanel.tsx:83-88`, and Solver settings, `SolverSettings.tsx:1533`; the loop panels now read the goal) and **22** (`paletteData.ts:15-17,55-57` still puts Bus, Line, Transformer and demand in the Assets palette).
 Unclear: 17 (commercial "Library" renamed "Commercial library"; campus rename and double mount not checked).
 
@@ -95,8 +98,8 @@ Unclear, needs a deeper walk: 3, 4, 5, 6, 7, 8, 9 (Expert jargon), 12, 14, 15.
 - `AssistantResultCard.tsx:194` "Project change preview · 1 values"; `ChatLaunchGreeting.tsx:197` "1 buses · 1 snapshots" (no singular).
 - Em dashes joining clauses in `ChatLaunchGreeting.tsx:79,80,90,101,206`.
 - Silent failures: greeting meta, status and hub-study queries show nothing on error (`ChatLaunchGreeting.tsx:116-137,181,195`); "Checking…" reverts after 15 s with no text (`AssistantResultCard.tsx:116-121`); options and Send are disabled while streaming with no visible reason (`ChatPanel.tsx:603-605,636`).
-Cards, choice cards and result cards in use need a fresh session once `ANTHROPIC_API_KEY` is set.
+All chat-dock rows in this README and in issues 06 and 07 are **to confirm** live. Cards, choice cards and result cards in use need a fresh session once `ANTHROPIC_API_KEY` is set.
 
 ## Not covered
 
-IEEE 39-Bus, the "Your own site" form beyond its first screen, Expert Operation and Compare tabs, light-theme Guided, and the template-e2e decision inventory (not on master when this ran). The Mining run was still going at the end of the walk.
+Follow-up walk: "Your own site" (Generic site form) beyond its first screen, IEEE 39-Bus, light-theme Guided, Expert Operation and Compare tabs, and the template-e2e decision inventory (not on master when this ran). The Mining run was still going at the end of the walk.

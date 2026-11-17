@@ -7,7 +7,7 @@ Status: needs-triage
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J4 Run, J5 Wait
 Severity: high
-Send to: run progress, ETA, notify
+Send to: run progress, ETA, notify. Duplicate check: mostly the run-progress package; only the Mining run above 25 minutes and the 409s are new
 
 ## What happens
 

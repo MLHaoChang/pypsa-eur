@@ -7,7 +7,7 @@ Status: needs-triage
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J3 Readiness, J6 Results
 Severity: medium
-Send to: Guided results legibility; next-step flow
+Send to: Guided results legibility; next-step flow. Duplicate check: the "no site location" part overlaps template-e2e issue 01
 
 ## What happens
 
