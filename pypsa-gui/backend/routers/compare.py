@@ -53,6 +53,7 @@ from routers.projects import (
 # `results -> compare` both import cleanly in either order. Hoisted so the
 # dependency is visible at the top of the file like every other one.
 from routers.deps import AuthorizedProject, ProjectAccessDep
+from services.compare import intent_inputs
 from routers.results import lp_scaled_load_frame
 
 router = APIRouter()
@@ -502,15 +503,30 @@ class IntentComparisonRequest(BaseModel):
         return self
 
 
+def _has_backup_reserve(network) -> bool:
+    """Whether a store is flagged to hold the backup reserve (`envelope_floors`' own flag)."""
+    from services.solver.envelope_floors import _flagged
+
+    return bool(_flagged(network.stores, "backup_reserve"))
+
+
 def _intent_scenario(network, config, inputs: dict, critical_mw: float):
     """A `prepare(spec)` for `compare_intents`: the intent's backup reserve goes into a copy of the config; the
     network and config the caller holds are not changed."""
     from services.adequacy.sizing_loop_runner import SizingInputs
     from services.solver.envelope_floors import backup_mwh
 
+    from services.adequacy.sizing_loop_runner import SizingLoopRefusal
+
     def prepare(spec):
         cfg = copy.deepcopy(config)
-        cfg.envelope_floors = {**(cfg.envelope_floors or {}), "backup_mwh": backup_mwh(spec, critical_mw)}
+        backup = backup_mwh(spec, critical_mw)
+        if backup is not None and not _has_backup_reserve(network):
+            # Walkthrough bug 05: say it in the row before the solver refuses it in its own words.
+            raise SizingLoopRefusal(f"intent {spec.intent} holds {backup:g} MWh of backup, but this project has no "
+                                    "battery set as the backup reserve (a split-storage battery with its "
+                                    "backup-reserve flag on), so the loop cannot place it")
+        cfg.envelope_floors = {**(cfg.envelope_floors or {}), "backup_mwh": backup}
         return network, cfg, SizingInputs(**inputs)
 
     return prepare
@@ -547,6 +563,55 @@ def _load_project_network(directory: pathlib.Path):
     return n
 
 
+#: `sizing_loop_runner.refusals` lines in the words the app uses for the setting (walkthrough bug 05).
+_PLAIN_REFUSALS = {
+    "sizing loop: island constraints": "Island limits in the optimisation: they are on for this project, and the "
+                                       "sizing loop does not reproduce them yet, so it cannot compare intents here",
+}
+
+
+def _plain_refusal(line: str) -> str:
+    return next((v for k, v in _PLAIN_REFUSALS.items() if line.startswith(k)), line)
+
+
+def _intent_inputs(row, project, network, config, req: dict | None = None):
+    """`intent_inputs.resolve` (or, without `req`, `defaults`) on the project's own ramp limit (the grid-readiness
+    scorecard's row) and stored DC load envelope, at the project's discount rate."""
+    from services.adequacy.grid_readiness import grid_readiness_for
+    from services.dc_load_profile import read_envelope
+
+    card = grid_readiness_for(row)
+    ramp = next((r for r in card.get("rows", []) if r.get("id") == "ramp_rate"), None)
+    kw = dict(ramp_row=ramp, envelope=read_envelope(project.directory), rate=float(config.discount_rate))
+    if req is None:
+        return intent_inputs.defaults(network, **kw), card.get("profile") or {}
+    return intent_inputs.resolve(network, req, **kw)
+
+
+@router.get("/{name}/intent-comparison/defaults")
+def get_intent_comparison_defaults(
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+) -> dict:
+    """What the comparison runs on when the request leaves the project-held inputs out, each as
+    {value, source}: the PoC link, ramp limit, DC load envelope, PoC values (`pq`), and the grid code the campus
+    study applies (its saved one, else its default). Read only."""
+    from services import campus_electrical_service as campus
+
+    row = db.get(ProjectRow, uuid.UUID(project.uuid))
+    if row is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    network = _load_project_network(project.directory)
+    config = _project_solver_config(project.directory)
+    out, profile = _intent_inputs(row, project, network, config)
+    from services.adequacy.grid_readiness import _read_json
+
+    saved = (_read_json(project.directory / campus.SUBDIR / campus.SETTINGS_FILE) or {}).get("profile")
+    out["grid_code"] = {"value": profile.get("id"), "title": profile.get("title"),
+                        "source": "saved" if saved else "default"}
+    return out
+
+
 @router.post("/{name}/intent-comparison", status_code=202)
 def post_intent_comparison(
     body: IntentComparisonRequest,
@@ -570,24 +635,31 @@ def post_intent_comparison(
     config = _project_solver_config(project.directory)
     # Refuse a bad request here, as 422, rather than as failed rows later.
     try:
+        # Walkthrough bugs 05/06: the link, ramp, envelope and PoC values the request leaves out come from the
+        # project (`intent_inputs.resolve`, the ladder GET .../defaults shows); the PoC values tag this copy only.
+        resolved, sources = _intent_inputs(row, project, network, config, body.inputs)
+        sizing = intent_inputs.apply_pq(network, resolved)
         # AS-17b: the PoC X/R resolved once (request, else the project's, else assumed); the pre-check and every
         # intent's run take the same inputs.
-        inputs = project_inputs(body.inputs, project.directory)
+        inputs = project_inputs(sizing, project.directory)
+        sources["xr"] = inputs["xr_source"]
         _check_inputs(network, SizingInputs(**inputs))
         if refusals(config):
-            raise SizingLoopRefusal("; ".join(refusals(config)))
+            raise SizingLoopRefusal("; ".join(_plain_refusal(line) for line in refusals(config)))
         for spec in body.intents:
             grid_code_warnings(spec, profile)
-    except (SizingLoopRefusal, TypeError, ValueError, KeyError, AttributeError) as exc:
+    except (SizingLoopRefusal, intent_inputs.IntentInputsRefusal, TypeError, ValueError, KeyError, AttributeError) as exc:
         raise HTTPException(422, f"The comparison cannot run: {exc}")
     prepare = _intent_scenario(network, config, inputs, body.critical_mw)
+    used = {"values": {k: resolved.get(k) for k in ("link", "ramp_mw_per_min", "envelope", "pq")} | {"xr": inputs["xr"]},
+            "sources": sources}
 
     def work(stop, on_progress):
         return compare_intents(prepare, body.intents, critical_mw=body.critical_mw, profile=profile,
                                runner=run_sizing, stop_event=stop, on_progress=on_progress)
 
     try:
-        return intent_jobs.start(project.uuid, body.intents, work)
+        return intent_jobs.start(project.uuid, body.intents, work, inputs=used)
     except intent_jobs.JobBusy as exc:
         raise HTTPException(409, str(exc))
 
