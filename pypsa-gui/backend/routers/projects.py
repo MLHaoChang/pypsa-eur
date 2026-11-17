@@ -1345,10 +1345,14 @@ def _gridspine_path_fields() -> tuple[str, ...]:
     import dataclasses
     from pathlib import Path
 
-    from gridspine.drivers.study import StudyConfig
+    from services import gridspine_service as gs
 
+    if gs.StudyConfig is None:
+        # No gridspine in this build: no planning kind imports, and a
+        # capacity-expansion import never writes gridspine/.
+        return _GRIDSPINE_GUI_SOURCES
     return tuple(
-        f.name for f in dataclasses.fields(StudyConfig)
+        f.name for f in dataclasses.fields(gs.StudyConfig)
         if f.type in (Path, "Path") and f.name not in _GRIDSPINE_REDERIVED
     ) + _GRIDSPINE_GUI_SOURCES
 
