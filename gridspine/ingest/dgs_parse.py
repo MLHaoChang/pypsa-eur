@@ -28,7 +28,8 @@ tool exports it):
 Refused, as ``ContractError`` naming the line: a version other than 5.x
 (or none), a row before any header, a header without an ``ID`` column or
 with an unknown type, a row whose field count differs from its header, a
-value that does not parse as its type, a vector longer than its columns,
+value that does not parse as its type (numbers are read as written: no
+decimal comma, no ``1.0`` for an integer), an empty SIZEROW, a vector longer than its columns,
 a duplicate ``ID``, and a pointer to an ``ID`` the file does not hold.
 A trailing empty field (a row ending in ``;``) is tolerated.
 """
@@ -132,7 +133,8 @@ def parse_dgs_text(text: str, source: str = "<text>") -> DgsTables:
                     pointers.append((lineno, cls, attr, v))
         for attr, items in vectors.items():
             n = sizes.get(attr)
-            n = len(items) if n is None else n
+            if n is None:
+                fail(lineno, f"{cls}.{attr}: SIZEROW is empty")
             if n < 0 or n > len(items):
                 fail(
                     lineno,
@@ -202,7 +204,7 @@ def _header(fields, lineno, fail):
     out = []
     for name, t in cols:
         base, _, sub = name.partition(":")
-        if sub and f"{base}:SIZEROW" in names and (sub == "SIZEROW" or sub.isdigit()):
+        if f"{base}:SIZEROW" in names and (sub == "SIZEROW" or sub.isdigit()):
             out.append((name, base, t, "SIZEROW" if sub == "SIZEROW" else int(sub)))
         else:
             # a plain attribute, or an indexed column with no SIZEROW: as it stands
@@ -220,24 +222,11 @@ def _value(field, t, lineno, where, fail):
         try:
             return int(s)
         except ValueError:
-            try:
-                f = float(s)
-            except ValueError:
-                fail(lineno, f"{where}: {s!r} is not an integer")
-            if not f.is_integer():
-                fail(lineno, f"{where}: {s!r} is not an integer")
-            return int(f)
+            fail(lineno, f"{where}: {s!r} is not an integer")
     try:
-        v = float(s)
+        return float(s)
     except ValueError:
-        try:
-            # a decimal comma, as a locale-set export may write it
-            if s.count(",") != 1 or "." in s:
-                raise ValueError
-            v = float(s.replace(",", "."))
-        except ValueError:
-            fail(lineno, f"{where}: {s!r} is not a number")
-    return v
+        fail(lineno, f"{where}: {s!r} is not a number")
 
 
 def _version(general, fail):

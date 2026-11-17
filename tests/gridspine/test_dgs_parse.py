@@ -27,14 +27,14 @@ $$ElmNet;ID(a:40);loc_name(a:40);frnom(r)
 2;Grid;50.0
 $$ElmTerm;ID(a:40);loc_name(a:40);fold_id(p);uknom(r);outserv(i)
 3;HV;2;132.0;0
-4;MV;2;33,0;1
+4;MV;2;33.0;1
 * a comment between rows
 $$TypHmccur;ID(a:40);loc_name(a:40);norder:SIZEROW(i);norder:0(i);norder:1(i);ampl:SIZEROW(i);ampl:0(r);ampl:1(r)
 5;two;2;5;7;2;20.0;14.0
 $$TypHmccur;ID(a:40);loc_name(a:40);norder:SIZEROW(i);norder:0(i);ampl:SIZEROW(i);ampl:0(r)
 6;one;1;11;1;9.5;
 
-$$ElmLod;ID(a:40);loc_name(a:40);fold_id(p);plini(r);qlini(r);phmc(p)
+$$ElmLod; ID(a:40) ;loc_name(a:40);fold_id(p);plini(r);qlini(r);phmc(p);
 7;load;2;3.0;;5
 """
 
@@ -70,7 +70,7 @@ def test_golden_file_parses_to_typed_tables():
         "outserv": 0,
         LINE_COLUMN: 7,
     }
-    assert term.loc["4", "uknom"] == 33.0  # decimal comma
+    assert term.loc["4", "uknom"] == 33.0
     assert term.loc["4", LINE_COLUMN] == 8
     hm = t.tables["TypHmccur"]
     assert hm.loc["5", "norder"] == [5, 7] and hm.loc["5", "ampl"] == [20.0, 14.0]
@@ -196,6 +196,31 @@ GENERAL = "$$General;ID(a:40);Descr(a:40);Val(a:40)\n1;Version;5.0\n"
             4,
             "SIZEROW 1 but no vector columns",
         ),
+        (
+            GENERAL + "$$ElmTerm;ID(a:40);uknom(r)\n3;33,0\n",
+            4,
+            "'33,0' is not a number",
+        ),
+        (
+            GENERAL + "$$ElmTerm;ID(a:40);outserv(i)\n3;1.0\n",
+            4,
+            "'1.0' is not an integer",
+        ),
+        (
+            GENERAL + "$$T;ID(a:40);v:SIZEROW(i);v:0(r)\n3;;1.0\n",
+            4,
+            "T.v: SIZEROW is empty",
+        ),
+        (
+            GENERAL + "$$T;ID(a:40);v:SIZEROW(i);v:0(r)\n3;-1;\n",
+            4,
+            "SIZEROW -1 but 1 vector columns",
+        ),
+        (
+            "$$General;ID(a:40);Descr(a:40);Val(a:40)\n1;Version;\n",
+            2,
+            "version '' found",
+        ),
     ],
 )
 def test_each_refusal_names_its_line(text, line, words):
@@ -250,3 +275,35 @@ def test_importing_the_parser_loads_no_engine():
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     )
     assert out.stdout.strip() == "[]"
+
+
+def test_sizerow_zero_with_padded_columns_is_an_empty_vector():
+    t = parse_dgs_text(GENERAL + "$$T;ID(a:40);v:SIZEROW(i);v:0(r);v:1(r)\n3;0;;\n")
+    assert t.tables["T"].loc["3", "v"] == []
+
+
+def test_a_matrix_column_count_is_kept_as_its_own_column():
+    t = parse_dgs_text(
+        GENERAL + "$$T;ID(a:40);v:SIZEROW(i);v:SIZECOL(i);v:0(r)\n3;1;1;2.5\n"
+    )
+    row = t.tables["T"].loc["3"]
+    assert row["v"] == [2.5] and row["v:SIZECOL"] == 1
+
+
+def test_the_writers_one_block_harmonic_layout_parses():
+    """
+    The GC-05 follow-up layout: one header over the union of orders, a
+    source's own orders are those with a non-zero amplitude (S2 filters).
+    """
+    head = (
+        "$$TypHmccur;ID(a:40);loc_name(a:40);norder:SIZEROW(i);norder:0(i);"
+        "norder:1(i);ampl:SIZEROW(i);ampl:0(r);ampl:1(r);alpha:SIZEROW(i);"
+        "alpha:0(r);alpha:1(r)\n"
+    )
+    t = parse_dgs_text(
+        GENERAL
+        + head
+        + "3;a;2;5;7;2;20.0;0.0;2;1.4;0.0\n4;b;2;5;7;2;0.0;14.0;2;0.0;1.4\n"
+    )
+    hm = t.tables["TypHmccur"]
+    assert hm.loc["3", "ampl"] == [20.0, 0.0] and hm.loc["4", "norder"] == [5, 7]
