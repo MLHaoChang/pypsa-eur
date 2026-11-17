@@ -137,7 +137,7 @@ def investment_disclosures(payload: dict) -> list[str]:
         out.append(f"Investment case — {payload['no_counterfactual']}.")
     out += [f"Investment case — {n}" for n in payload.get("counterfactual_notes") or []]
     if payload.get("island_breakeven_text"):
-        out.append(f"Investment case — the {ISLAND_BREAKEVEN_LABEL.lower()} is a threshold the island "
+        out.append(f"Investment case: the {ISLAND_BREAKEVEN_LABEL.lower()} is a threshold the island "
                    "capability would have to reach, not a value the case earns; it is not in the NPV.")
     return out
 

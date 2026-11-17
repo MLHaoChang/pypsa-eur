@@ -13,6 +13,7 @@ import json
 import pathlib
 
 import openpyxl
+import pytest
 
 from project_templates import eh_templates as T
 from services.finance.breakeven import LABEL
@@ -103,3 +104,24 @@ def test_no_digest_or_fingerprint_hashes_the_ledger_label(
     with bound_ctx(client):
         old = _hashes(client, session_ctx)
     assert new == old
+
+
+@pytest.mark.parametrize("item", ["island break-even", "island-capability break-even"])
+def test_a_project_stored_before_the_rename_shows_the_same_name(item):
+    """UX 2 on #1692: a project created before the rename keeps its stored
+    ledger text; the Assumptions card's flow message reads the current label
+    for both."""
+    from services.flow_service import _assumed_items
+
+    template = {
+        "ledger": [
+            {
+                "item": item,
+                "value": "not applicable",
+                "source": "assumed",
+                "note": "the island rows are off",
+            }
+        ]
+    }
+    (row,) = _assumed_items(template)
+    assert row["message"].startswith(f"{LABEL}: not applicable (assumed)")
