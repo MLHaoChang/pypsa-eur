@@ -143,3 +143,7 @@ GK B (65) gave GO on S1b (`branch-losses/1`, `harness/losses_calculations.py`), 
 - L10: above ~1,500 lines excluding fixtures, split into the reader first and the wiring second (PR-SIZE-1).
 
 Also from S2 (#1680, GK B 65 point c): ticket to record the solver options actually applied at the solve call in `solver_service.py` (owned by #1663 / DGS-SEED-1). Until then, a gap that cannot be read from the effective options reads `solve_gap_not_recorded`.
+
+### 2026-11-17: addendum to ticket 18 (GK B 65 on #1680 @fba8ff2d)
+
+To fold into `18-record-applied-solver-options.md` once #1680 merges: the island sidecar (`services/solver/island.py`, around line 531) solves committed islands with `linearized_unit_commitment=True`. `solve_validity.is_mip` reads only `process_uc.planning_uc_mode`, so such a run is classified as a MIP although its solve was an LP. Its cost deltas and bus prices are then refused needlessly. The refusal is safe, but too strict. Recording the applied options at the solve call (ticket 18) removes it.

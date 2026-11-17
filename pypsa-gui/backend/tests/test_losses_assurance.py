@@ -399,3 +399,75 @@ def test_the_contract_snapshot_and_the_frontend_list_both_profiles():
     frontend = Path(__file__).parents[2] / "frontend/src/api/checkedAnswers.ts"
     text = frontend.read_text()
     assert "'branch-losses/1'" in text and "'network-losses/1'" in text
+
+
+# ── G8: one test per remaining guard ────────────────────────────────────────
+
+
+def test_weights_not_on_the_snapshots_are_refused(monkeypatch):
+    from services import period_utils
+
+    monkeypatch.setattr(
+        period_utils,
+        "snapshot_weights",
+        lambda n, column: pd.Series(1.0, index=SNAPS[:2]),
+    )
+    with pytest.raises(ValueError, match="^misaligned_source$"):
+        _run(_net())
+
+
+def test_a_branch_named_network_is_checkable_by_its_class():
+    n = _net(line=None)
+    n.add("Line", "network", bus0="a", bus1="b", x=0.1)
+    n.lines_t.loss = pd.DataFrame({"L": [1.0] * 3, "network": [2.0] * 3}, index=SNAPS)
+    out, _, _ = _run(n, "network", metrics=("loss_mwh",), component_class="Line")
+    assert out == {"loss_mwh": 6.0}
+
+
+def test_exactly_the_branch_bound_is_allowed():
+    n = _net()
+    n.add(
+        "Line", [f"x{i}" for i in range(lc.MAX_BRANCHES - 1)], bus0="a", bus1="b", x=0.1
+    )
+    _, raw, _ = _run(n)
+    assert len(raw["branches"]) == lc.MAX_BRANCHES
+
+
+def test_a_raw_record_of_another_version_is_refused():
+    _, raw, scope = _run(_net())
+    with pytest.raises(ValueError, match="^losses_source_identity$"):
+        lc.calculate({**raw, "version": 2}, scope)
+
+
+def test_a_missing_weight_gives_no_value():
+    n = _net()
+    n.snapshot_weightings.loc[SNAPS[1], "generators"] = np.nan
+    assert _run(n)[0] == dict.fromkeys(ALL, "invalid_or_missing_weight")
+
+
+def test_a_zero_weight_is_a_valid_weight():
+    n = _net()
+    n.snapshot_weightings.loc[SNAPS[1], "generators"] = 0.0
+    # 1 + 3 MWh of loss over 200 MWh of demand.
+    assert _run(n)[0] == {
+        "loss_mwh": 4.0,
+        "peak_loss_mw": 3.0,
+        "loss_pct_of_demand": 2.0,
+    }
+
+
+def test_a_network_without_loads_has_no_share_of_demand():
+    n = _net(load=None)
+    n.remove("Load", "d")
+    out, _, _ = _run(n)
+    assert out == {
+        "loss_mwh": 6.0,
+        "peak_loss_mw": 3.0,
+        "loss_pct_of_demand": "load_demand_absent",
+    }
+
+
+def test_notes_count_only_values_just_below_zero():
+    for line in [(0.0, 0.0, 0.0), (np.nan, 0.0, 1.0)]:
+        _, raw, scope = _run(_net(line=line))
+        assert len(lc.notes(raw, scope)) == 1
