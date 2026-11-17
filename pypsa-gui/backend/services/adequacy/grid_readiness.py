@@ -291,8 +291,8 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
                      note=("No short-circuit level and inverter capacity at every point of connection, "
                            "so the SCR is not known: enter the fault level and, where the network has no "
                            "inverter-based generator or battery to derive it from (or has several points of "
-                           "connection), the IBR capacity on each point of connection's bus (Properties › "
-                           "IBR capacity)"), **base)]
+                           "connection), the IBR capacity field of each point of connection's bus"),
+                     **base)]
     verdict = _judge(float(payload["min_scr"]), PASS_SCR, RULE_SCR)
     extra = "; below it an EMT study is recommended" if gates.emt_recommended else ""
     low = next(r for r in payload["buses"] if r["bus"] == payload["min_bus"])
@@ -324,7 +324,7 @@ def _capacity_words(row: dict, architecture: str | None) -> str:
     mva, assets, derived = row["ibr_mva"], row.get("ibr_assets") or {}, row.get("ibr_derived_mva")
     listed = ", ".join(f"{_display(k)} {v:.4g}" for k, v in assets.items() if v > 0) or "none sized"
     if row.get("ibr_source") == "stated":
-        text = (f"Inverter capacity {mva:.4g} MVA, stated on the PoC bus (Properties › IBR capacity); "
+        text = (f"Inverter capacity {mva:.4g} MVA, stated in the PoC bus's IBR capacity field; "
                 "assumed unless you sourced it")
         if _stated_below(row):
             text += (f". It is below the converter-coupled assets the network now holds ({derived:.4g} MVA: "
@@ -1418,10 +1418,8 @@ def named_services(offer: dict | None) -> str | None:
     """``voltage control (rooftop_pv), ...``: each credited service and the units offering it."""
     if not offer or not offer.get("services"):
         return None
-    def who(names):
-        shown = ", ".join(_display(x) for x in names[:3])
-        return shown + (f" +{len(names) - 3} more" if len(names) > 3 else "")
-    return "; ".join(f"{SERVICE_WORDS.get(x, x)} ({who(offer['sources'][x])})" for x in offer["services"])
+    return " · ".join(f"{SERVICE_WORDS.get(x, x)} ({', '.join(map(_display, offer['sources'][x]))})"
+                      for x in offer["services"])
 
 
 def _no_island_note(inp: _Inputs) -> str:

@@ -61,7 +61,7 @@ describe('DcArchitectureSection', () => {
     expect(screen.getAllByTitle(SERVICE_CHIP.voltage_control.full).length).toBeGreaterThan(0)
     // Walkthrough 03: each service verdict names where its services come from.
     const mv = data.variants.find(v => v.architecture === 'mv_ups')!
-    expect(screen.getAllByTitle(mv.verdicts.voltage_control.project_value!).length).toBeGreaterThan(0)
+    expect(text(screen.getByTestId('dc-architecture-voltage_control-mv_ups'))).toBe(mv.verdicts.voltage_control.project_value)
     expect(text(screen.getByTestId('dc-architecture-footnote'))).toBe('A screening estimate, with no solve. Outage proof is in Backup.')
     expect(text(screen.getByTestId('dc-architecture-source'))).toBe(`Source: defaults pack ${data.pack_version}.`)
     expect(text(screen.getByTestId('dc-architecture-price-used'))).toContain('assumed')

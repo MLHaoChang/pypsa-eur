@@ -100,7 +100,8 @@ def test_a_grid_facing_battery_string_still_offers_frequency_support_and_is_name
     _with_strings_island(d)
     row = _rows(d, n)["frequency_support"]
     assert row["verdict"] == "pass"
-    assert "grid forming (Backup BESS 1" in row["project_value"]
+    assert "grid forming (Backup BESS 1, " in row["project_value"] and " · " in row["project_value"]
+    assert "more" not in row["project_value"]                     # every unit listed, none folded away
     assert "AC (LV UPS)" in row["note"]
 
 
@@ -312,7 +313,7 @@ def test_a_stated_capacity_below_the_converters_says_it_predates_them_and_never_
     row = _rows(d, n)["scr"]
     assert row["project_value"] == pytest.approx(250.0 / 30.0, rel=1e-3)
     assert row["verdict"] == "warn"                          # 8.3 would pass; the stale value caps it
-    assert "stated" in row["note"] and "IBR capacity" in row["note"]
+    assert "stated" in row["note"] and "IBR capacity field" in row["note"]
     assert "below the converter-coupled assets" in row["note"] and "predates them" in row["note"]
 
 
@@ -337,4 +338,4 @@ def test_an_unknown_scr_names_the_input_it_needs(tmp_path):
     T.write_sidecars(d, "eh_datacenter")
     n.buses.at["grid", "eh_sk_mva"] = float("nan")
     row = _rows(d, n)["scr"]
-    assert row["verdict"] == "unknown" and "Properties › IBR capacity" in row["note"]
+    assert row["verdict"] == "unknown" and "IBR capacity field" in row["note"]

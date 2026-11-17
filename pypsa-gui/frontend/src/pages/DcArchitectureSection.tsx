@@ -206,8 +206,14 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
                       </td>
                     )}
                     {/* The units each credited service comes from (DC grid-readiness walkthrough 03). */}
-                    <td title={v.verdicts.frequency_support.project_value ?? undefined}><VerdictChip verdict={v.verdicts.frequency_support.verdict} /></td>
-                    <td title={v.verdicts.voltage_control.project_value ?? undefined}><VerdictChip verdict={v.verdicts.voltage_control.verdict} /></td>
+                    {([['frequency_support', v.verdicts.frequency_support], ['voltage_control', v.verdicts.voltage_control]] as const).map(([k, sv]) => (
+                      <td key={k}>
+                        <VerdictChip verdict={sv.verdict} />
+                        {sv.project_value && (
+                          <div className="text-[10px] text-muted" data-testid={`dc-architecture-${k}-${v.architecture}`}>{sv.project_value}</div>
+                        )}
+                      </td>
+                    ))}
                   </tr>
                   {!guided && open === v.architecture && (
                     <tr data-testid={`dc-architecture-chain-${v.architecture}`}>
