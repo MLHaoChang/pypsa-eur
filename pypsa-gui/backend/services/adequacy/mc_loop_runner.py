@@ -140,13 +140,19 @@ def start_mc(
         vre_names = [nm for kind, nm in assets if kind == "vre"]
         # Walkthrough asset-investment 01: the goal's LOLE on this horizon,
         # by the loops' one conversion, for the verdict the result carries.
+        # A goal nobody set is the site type's ASSUMED one: the MC judges
+        # against it and says so (`target_source`), GK A 30 A2.
         from services.adequacy.metrics import horizon_years
-        from services.reliability_goal import loop_goal
-        target_horizon = loop_goal(body, goal, float(horizon_years(n)))[0]
+        from services.reliability_goal import assumed_lole, loop_goal
+        mc_goal = goal
+        if assumed_lole(goal) is not None:
+            mc_goal = {**goal, "target_lole_h": {
+                "value": assumed_lole(goal), "source": goal["target_lole_h"]["source"]}}
+        target_horizon = loop_goal(body, mc_goal, float(horizon_years(n)))[0]
         # Walkthrough 07: an ELCC vre row's `nameplate_mw` is its PEAK
         # must-take output (the bracket the bisection prices); the installed
         # capacity rides beside the rows so the table can state both.
-        installed = {nm: _installed_mw(n, nm) for nm in vre_names}
+        installed = {nm: _installed(n, nm) for nm in vre_names}
         # Adequacy loops 03: the study samples the loops' fleet
         # (`link_supply`): split at a trusted import Link, the hub side is
         # the fleet and the demand, the Link a sampled unit; the grid side
@@ -320,12 +326,12 @@ def start_mc(
                     "metrics": metrics,
                     # Walkthrough 01/08: the goal this run is judged against
                     # (the ONE LOLE-vs-goal rule) and the draws it may take.
-                    "goal": _goal_block(metrics, goal["target_lole_h"]["value"],
+                    "goal": _goal_block(metrics, mc_goal["target_lole_h"],
                                         target_horizon),
                     "draws": {"first_batch": draws, "max": MAX_DRAWS,
                               "cov_target": cov_target},
                     "elcc": rows,
-                    "elcc_installed_mw": installed,
+                    "elcc_installed": installed,
                     # Phase 12c: a SIBLING of `elcc`, never a row in it.
                     "elcc_portfolio": portfolio,
                     "warning": MC_WARNING_V1,
@@ -400,29 +406,33 @@ def start_mc(
             "elcc_portfolio": want_portfolio}
 
 
-def _goal_block(metrics: dict, target_h_per_year, target_horizon) -> dict | None:
+def _goal_block(metrics: dict, target: dict, target_horizon) -> dict | None:
     """``lole_verdict`` of this run against the project's goal, with the goal
-    in h/yr; None when no goal applies."""
+    in h/yr and where it came from (``default`` = the site type's assumed
+    goal); None when no goal applies. Stored with the result, so a later
+    goal change never re-labels it."""
     if target_horizon is None:
         return None
     from services.adequacy.lole_verdict import lole_verdict
     from services.adequacy.mc import MAX_DRAWS
 
-    return {"target_lole_h": float(target_h_per_year),
+    return {"target_lole_h": float(target["value"]),
+            "target_source": target["source"],
             **lole_verdict(metrics["lole_hours"], metrics.get("lole_ci"),
                            target_horizon, metrics.get("event_h"),
                            metrics["n_samples"], MAX_DRAWS)}
 
 
-def _installed_mw(n, name: str) -> float | None:
-    """A generator's installed capacity: ``p_nom_opt`` when it was sized,
-    else ``p_nom``; None when the network has no such generator."""
+def _installed(n, name: str) -> dict | None:
+    """A generator's installed capacity and which figure it is: ``p_nom_opt``
+    when it is extendable and the network is solved, else ``p_nom`` (GK A 30,
+    A6); None when the network has no such generator."""
     gens = n.generators
     if name not in gens.index:
         return None
     row = gens.loc[name]
-    if bool(row.get("p_nom_extendable", False)):
+    if bool(row.get("p_nom_extendable", False)) and bool(getattr(n, "is_solved", False)):
         opt = row.get("p_nom_opt")
         if opt is not None and opt == opt:
-            return float(opt)
-    return float(row.get("p_nom", 0.0) or 0.0)
+            return {"mw": float(opt), "basis": "p_nom_opt"}
+    return {"mw": float(row.get("p_nom", 0.0) or 0.0), "basis": "p_nom"}

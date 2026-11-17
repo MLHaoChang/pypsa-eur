@@ -75,6 +75,8 @@ def sizing_summary_from_network(n) -> dict[str, Any]:
         "by_carrier": {k: float(v) for k, v in sorted(by_carrier.items())},
         "total_p_nom_mw": float(total),
         "assets": sized_assets(n),
+        # False: the network was not solved, so `assets` carry no built size.
+        "assets_solved": bool(getattr(n, "is_solved", False)),
     }
 
 
@@ -94,9 +96,13 @@ _SIZED = (("Generator", "generators", "p"), ("StorageUnit", "storage_units", "p"
 def sized_assets(n) -> list[dict[str, Any]]:
     """One row per asset the solve sized (``*_extendable``), in component
     order then the network's: its built size (``*_opt``) and allowed range
-    (an infinite bound reads None). A storage unit adds its energy
-    (``built_mw × max_hours``); a store is sized in MWh. Slack generators
-    are not assets (walkthrough asset-investment 03)."""
+    (an infinite or non-finite figure reads None). A storage unit adds its
+    energy (``built_mw × max_hours``); a store has no MW, only MWh; a link's
+    MW is on its bus0 side (``basis``). One size per asset: on a
+    multi-period network ``*_opt`` is the asset's single build. On a network
+    that was not solved the built figures are None, never ``p_nom`` shown as
+    built (``solved``) (walkthrough asset-investment 03, GK A 30 A5)."""
+    solved = bool(getattr(n, "is_solved", False))
     rows: list[dict[str, Any]] = []
     for component, table, stem in _SIZED:
         df = getattr(n, table, None)
@@ -111,10 +117,12 @@ def sized_assets(n) -> list[dict[str, Any]]:
             unit = "mw" if stem == "p" else "mwh"
             out: dict[str, Any] = {
                 "component": component, "name": str(name), "carrier": carrier,
-                f"built_{unit}": _finite(row.get(f"{stem}_nom_opt")),
+                f"built_{unit}": _finite(row.get(f"{stem}_nom_opt")) if solved else None,
                 f"min_{unit}": _finite(row.get(f"{stem}_nom_min")),
                 f"max_{unit}": _finite(row.get(f"{stem}_nom_max")),
             }
+            if component == "Link":
+                out["basis"] = "bus0"
             if component == "StorageUnit":
                 hours = _finite(row.get("max_hours"))
                 out["max_hours"] = hours

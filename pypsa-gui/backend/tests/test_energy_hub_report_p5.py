@@ -67,6 +67,12 @@ def test_sizing_lists_each_asset_the_study_sized():
     n.add("StorageUnit", "bess_new", bus="b", carrier="battery",
           p_nom_extendable=True, p_nom_max=15.0, max_hours=4.0)
     n.storage_units.loc["bess_new", "p_nom_opt"] = 2.5
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Link", "ely", bus0="b", bus1="h2", p_nom_extendable=True, p_nom_max=float("inf"))
+    n.links.loc["ely", "p_nom_opt"] = 7.0
+    n.add("Store", "tank", bus="h2", e_nom_extendable=True, e_nom_max=500.0)
+    n.stores.loc["tank", "e_nom_opt"] = 30.0
+    n._objective = 1.0                     # solved (what an optimise sets)
     sizing = R.sizing_summary_from_network(n)
     assert sizing["assets"] == [
         {"component": "Generator", "name": "diesel_new", "carrier": "gas",
@@ -74,7 +80,18 @@ def test_sizing_lists_each_asset_the_study_sized():
         {"component": "StorageUnit", "name": "bess_new", "carrier": "battery",
          "built_mw": pytest.approx(2.5), "min_mw": 0.0, "max_mw": 15.0,
          "max_hours": 4.0, "built_mwh": pytest.approx(10.0)},
+        {"component": "Link", "name": "ely", "carrier": "", "built_mw": 7.0,
+         "min_mw": 0.0, "max_mw": None, "basis": "bus0"},
+        {"component": "Store", "name": "tank", "carrier": "", "built_mwh": 30.0,
+         "min_mwh": 0.0, "max_mwh": 500.0},
     ]
+    assert sizing["assets_solved"] is True
+    # Not solved: no built size, never p_nom shown as built (GK A 30 A5).
+    n._objective = None
+    unsolved = R.sizing_summary_from_network(n)
+    assert unsolved["assets_solved"] is False
+    assert [a.get("built_mw", a.get("built_mwh")) for a in unsolved["assets"]] == [None] * 4
+    assert unsolved["assets"][1]["built_mwh"] is None
     assert sizing["by_carrier"]["gas"] == pytest.approx(104.2)
 
 
