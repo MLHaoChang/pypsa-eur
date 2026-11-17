@@ -15,22 +15,38 @@ from services.compare.support import _build_snapshot_weights
 VALIDITY_VERSION = "losses-validity/1"
 
 
-def _validity_rows(df_t, names, comp_name: str) -> list[dict]:
-    """
-    Per-entity counts of the RAW values, read before any zero-fill.
+_COUNTS = ("finite", "zero", "missing", "pos_inf", "neg_inf")
+_STATES = ("complete", "incomplete", "absent", "misaligned")
 
-    A finite nonzero value, a real zero, a missing value (NaN), +inf and -inf
-    are counted apart, and an entity with no column at all is `absent`. Only
-    an entity whose every snapshot holds a finite value is `complete`, so a
-    later reader can tell a real 0 MW from a value the summary filled in.
+
+def _validity_rows(df_t, names, comp_name: str, snapshots) -> list[dict]:
     """
+    Per-entity counts of the RAW values over every snapshot, read before any
+    zero-fill.
+
+    The frame is first aligned to ``snapshots``: a snapshot it lacks counts as
+    `missing`, so a zero-row or short frame never reads complete. A frame whose
+    index repeats a row or holds rows outside ``snapshots`` cannot be aligned,
+    and every entity in it is `misaligned`. Otherwise a finite nonzero value, a
+    real zero, a missing value (NaN), +inf and -inf are counted apart, and an
+    entity with no column at all is `absent`. Only an entity whose every
+    snapshot holds a finite value is `complete`, so a later reader can tell a
+    real 0 MW from a value the summary filled in.
+    """
+    aligned = None
+    if df_t is not None:
+        index = df_t.index
+        if index.is_unique and index.isin(snapshots).all():
+            aligned = df_t.reindex(snapshots)
     rows = []
     for name in names:
-        counts = {"finite": 0, "zero": 0, "missing": 0, "pos_inf": 0, "neg_inf": 0}
+        counts = dict.fromkeys(_COUNTS, 0)
         if df_t is None or name not in df_t.columns:
             state = "absent"
+        elif aligned is None:
+            state = "misaligned"
         else:
-            raw = np.asarray(df_t[name], dtype=float)
+            raw = np.asarray(aligned[name], dtype=float)
             counts["missing"] = int(np.isnan(raw).sum())
             counts["pos_inf"] = int(np.isposinf(raw).sum())
             counts["neg_inf"] = int(np.isneginf(raw).sum())
@@ -40,6 +56,19 @@ def _validity_rows(df_t, names, comp_name: str) -> list[dict]:
             state = "incomplete" if bad else "complete"
         rows.append({"component": comp_name, "name": str(name), "state": state, **counts})
     return rows
+
+
+def _component_summary(rows) -> dict:
+    """Bounded per-component totals: entities per state and values per kind.
+    The per-entity rows stay server-side until a reader needs them."""
+    out = {}
+    for row in rows:
+        entry = out.setdefault(row["component"], {
+            "entities": dict.fromkeys(_STATES, 0), "values": dict.fromkeys(_COUNTS, 0)})
+        entry["entities"][row["state"]] += 1
+        for key in _COUNTS:
+            entry["values"][key] += row[key]
+    return out
 
 
 def compute_losses_summary(n, source, has_ac_pf_snapshot, *, result_df):
@@ -116,9 +145,9 @@ def compute_losses_summary(n, source, has_ac_pf_snapshot, *, result_df):
         line_t  = result_df(n, "lines_t",        "loss", "lopf") if not n.lines.empty        else None
         trafo_t = result_df(n, "transformers_t", "loss", "lopf") if not n.transformers.empty else None
     load_t = n.loads_t.p if hasattr(n.loads_t, "p") else None
-    branch_validity = (_validity_rows(line_t, n.lines.index, "Line")
-                       + _validity_rows(trafo_t, n.transformers.index, "Transformer"))
-    load_validity = _validity_rows(load_t, n.loads.index, "Load")
+    branch_validity = (_validity_rows(line_t, n.lines.index, "Line", n.snapshots)
+                       + _validity_rows(trafo_t, n.transformers.index, "Transformer", n.snapshots))
+    load_validity = _validity_rows(load_t, n.loads.index, "Load", n.snapshots)
     line_rows,  line_snap,  line_mwh,  line_peak  = _branch_loss(line_t,  n.lines,        "Line")
     trafo_rows, trafo_snap, trafo_mwh, trafo_peak = _branch_loss(trafo_t, n.transformers, "Transformer")
 
@@ -189,7 +218,6 @@ def compute_losses_summary(n, source, has_ac_pf_snapshot, *, result_df):
             # loss value to stand behind.
             "complete": bool(branch_validity)
             and all(r["state"] == "complete" for r in branch_validity + load_validity),
-            "branches": branch_validity,
-            "loads": load_validity,
+            "components": _component_summary(branch_validity + load_validity),
         },
     }

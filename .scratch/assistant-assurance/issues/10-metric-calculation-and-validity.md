@@ -116,3 +116,14 @@ Conditions:
 ### 2026-11-17: GK B S2 ruling (gap-aware limits)
 
 Option (a); no owner question, since only deltas and prices on MIP runs flip. G2a: the effective gap is the one solver_service passed for that solve and solver (committable → configured mip_gap under that solver's option name). Any other path (modular-only, an unmapped solver, a missing field) reads `solve_gap_not_recorded`, never a solver default. G2b: MIP-ness comes from the network (committable Generator/Link; extendable with *_nom_mod > 0), tested per component; a non-extendable unit with a mod value is not integer. G2c: the band is |Δ| ≤ gap_a·|obj_a| + gap_b·|obj_b| (an LP counts 0) on the user-unit objective, and it limits only total-cost/objective deltas and least-cost wording. Boundary tests sit at the band and one ULP above; SOLVE_GAP_TOLERANCE = 1e-6. G2d: fixed-commitment duals are answered as limited ("marginal given the fixed commitment"); absent duals stay unavailable; a small committable test shows which applies. G2e: the gap disclosure is additive and facts stay byte-identical. G2f: `unsupported_stochastic_run` is detected from the network's scenarios.
+
+### 2026-11-17: S1b, the harness reader for losses validity (named slice, GK B #1644 ask 3)
+
+S1 (#1644) adds `services/results/losses.py:_validity_rows` (per entity, aligned to `n.snapshots`: finite, zero, missing, ±inf, absent, misaligned). The `/results/losses` response carries only a bounded per-component summary, so per-entity rows stay off the chat `get_results` path until a reader exists. Nothing in the harness reads it yet.
+
+S1b adds that reader: a checked losses profile (`branch-losses/1`) built on `_validity_rows`. A1.7 acceptance for S1b:
+- a branch or load whose state is `incomplete`, `absent` or `misaligned` never yields a loss or demand fact; its slot is unavailable with the state as the reason;
+- a real zero is answered as 0 MWh, a missing value never is;
+- a short or zero-row frame never certifies;
+- `loss_pct_of_demand` needs every load complete; the denominator guard is the existing near-zero rule;
+- an independent hand-worked LP-with-losses oracle and the S5 ledger rows.
