@@ -22,6 +22,7 @@ from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.grid_compliance import pack, revision_log, tracker
 from services.grid_compliance.store import GridComplianceError
+from services.http_filenames import content_disposition
 
 router = APIRouter()
 
@@ -198,5 +199,5 @@ def build_pack(
     return Response(
         content=data,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition(filename)},
     )
