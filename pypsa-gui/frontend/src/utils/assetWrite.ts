@@ -17,7 +17,7 @@
  */
 import type { QueryClient } from '@tanstack/react-query'
 
-import { networkApi } from '../api/network'
+import { networkApi, type CostBasis } from '../api/network'
 import { useMapLayoutStore } from '../pages/mapLayoutStore'
 import { useSitesStore } from '../site3d/sitesStore'
 import { nk } from './queryKeys'
@@ -106,7 +106,7 @@ type AssetRow = { name: string } & Record<string, unknown>
 /** One row of the per-class dispatch table: how to list and how to PUT. */
 type Endpoints = {
   get: () => Promise<AssetRow[]>
-  put: (name: string, body: AssetRow) => Promise<unknown>
+  put: (name: string, body: AssetRow, basis?: CostBasis) => Promise<unknown>
 }
 
 /**
@@ -118,7 +118,7 @@ type Endpoints = {
  */
 function ep<G extends { name: string }, P>(
   get: () => Promise<G[]>,
-  put: (name: string, body: P) => Promise<unknown>,
+  put: (name: string, body: P, basis?: CostBasis) => Promise<unknown>,
 ): Endpoints {
   return {
     get: get as unknown as Endpoints['get'],
@@ -209,6 +209,9 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   // updateAsset<Generator>(...) for field-checked call sites — and defaults
   // to the open AssetRow for untyped ones.
   patch: Partial<NoInfer<T>> | ((current: NoInfer<T>) => Partial<NoInfer<T>>),
+  // The basis the typed costs were scaled under (`costBasisOf(schema)`): the server refuses the write when the
+  // asset's bus, as it will be stored, says otherwise, so a stale unit can never store a cost x1000 off (05d).
+  opts?: { costBasis?: CostBasis },
 ): Promise<unknown> {
   const e = ENDPOINTS[cls]
   const rows = await qc.ensureQueryData({
@@ -225,7 +228,8 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   // Return the PUT's response body: some endpoints answer with more than an
   // ack (updateBus carries a `rescale` preview the Bus card must ingest),
   // and a chokepoint that swallowed it would silently drop that behaviour.
-  const resp = await e.put(name, { ...current, ...resolved })
+  const body = { ...current, ...resolved }
+  const resp = opts?.costBasis ? await e.put(name, body, opts.costBasis) : await e.put(name, body)
   invalidateAssetQueries(qc, project)
   // The backend answers `{name: <new name>}`; the patch's `name` is what was
   // asked. Either says a rename happened, and the sidecar caches follow.

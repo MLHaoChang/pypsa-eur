@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, AlertTriangle } from 'lucide-react'
-import { networkApi } from '../api/network'
+import { networkApi, type CostBasis } from '../api/network'
 import { useUIStore, type CreationRequest } from '../store/uiStore'
 import { isRevealed } from '../utils/attributeCatalog'
 import { extrasPatch, useSolveMode } from './properties/cardKit'
@@ -9,7 +9,7 @@ import { useCatalog } from '../hooks/useCatalog'
 import { useAssetSchema } from '../hooks/useAssetSchema'
 import FieldsPending from './properties/FieldsPending'
 import { SCHEMA_CLASSES, type AssetSchema } from '../api/assetSchema'
-import { tidy, unitLabel } from '../utils/assetForm'
+import { costBasisOf, tidy, unitLabel } from '../utils/assetForm'
 import { creationScope, loadExtras, saveExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import BusAutocomplete from '../components/BusAutocomplete'
@@ -360,25 +360,25 @@ const QUERY_KEY: Record<string, string> = {
 // The class each palette item creates lives with the rest of the palette data.
 const COMPONENT_TYPE: Record<string, string> = PALETTE_COMPONENT_TYPE
 
-type CreateFn = (p: Record<string, unknown>) => Promise<unknown>
+type CreateFn = (p: Record<string, unknown>, basis?: CostBasis) => Promise<unknown>
 
 const CREATE_FN: Record<string, CreateFn> = {
   bus:           p => networkApi.createBus(p as Partial<Bus>),
   line:          p => networkApi.createLine(p as Partial<Line>),
   transformer:   p => networkApi.createTransformer(p as Partial<Transformer>),
-  electrolyzer:  p => networkApi.createLink(p as Partial<Link>),
-  fuel_cell:     p => networkApi.createLink(p as Partial<Link>),
-  process_unit:  p => networkApi.createLink(p as Partial<Link>),
-  power_to_heat: p => networkApi.createLink(p as Partial<Link>),
-  chp:           p => networkApi.createLink(p as Partial<Link>),
-  thermal:       p => networkApi.createGenerator(p as Partial<Generator>),
-  renewable:     p => networkApi.createGenerator(p as Partial<Generator>),
-  battery:       p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  psh:           p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  hydrogen:      p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  caes:          p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  flywheel:      p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  thermal_storage: p => networkApi.createStore(p as Partial<Store>),
+  electrolyzer:  (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  fuel_cell:     (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  process_unit:  (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  power_to_heat: (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  chp:           (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  thermal:       (p, b) => networkApi.createGenerator(p as Partial<Generator>, b),
+  renewable:     (p, b) => networkApi.createGenerator(p as Partial<Generator>, b),
+  battery:       (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  psh:           (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  hydrogen:      (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  caes:          (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  flywheel:      (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  thermal_storage: (p, b) => networkApi.createStore(p as Partial<Store>, b),
   load_elec:     p => networkApi.createLoad(p as Partial<Load>),
   load_h2:       p => networkApi.createLoad(p as Partial<Load>),
   load_heat:     p => networkApi.createLoad(p as Partial<Load>),
@@ -671,7 +671,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
       const fn = CREATE_FN[item.id]
       if (!fn) throw new Error(`Unknown asset type: ${item.id}`)
       const transform = SUBMIT_TRANSFORM[item.id]
-      return fn(transform ? transform(payload) : payload)
+      return fn(transform ? transform(payload) : payload, costBasisOf(liveSchema ?? schema))
     },
     onSuccess: () => {
       const proj = useUIStore.getState().currentProject

@@ -767,3 +767,18 @@ def on_tonne_bus(n, component: str, name: str) -> bool:
 
     size_bus = _size_bus_of(n, component, name, None)
     return size_bus is not None and _size_unit(n, size_bus, stock=False) in ("t", "t/h")
+
+
+def cost_basis_of_row(n, component: str, row) -> str | None:
+    """What the costs of a row (as it will be stored) are measured per: ``tonne`` or ``energy``, from the bus its
+    size is measured on; None where the class has no bus size or the bus is unreadable. The server's check of the
+    basis a client assumed when it scaled a typed cost (05d)."""
+    from services.flow_service import _size_unit
+
+    col = _SIZE_BUS.get(component)
+    if col is None:
+        return None
+    unit = _size_unit(n, row.get(col), stock=False)
+    if unit is None:
+        return None
+    return "tonne" if unit in ("t", "t/h") else "energy"

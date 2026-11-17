@@ -145,3 +145,18 @@ export function isRevealed(spec: AssetFieldSpec, fs: FS): boolean {
     return raw === String(want)
   })
 }
+
+
+/** The cost fields a bus unit changes the scale of (05d): the typed costs of an investment, O&M and operation. */
+const COST_KEYS = ['overnight_cost', 'capital_cost', 'fom_cost', 'marginal_cost', 'inv_power_overnight', 'inv_energy_overnight']
+
+/**
+ * What the costs on screen are per: `tonne` when the schema's cost units say so (EUR/t, EUR/(t/h)), `energy`
+ * otherwise, undefined without a cost field. Sent with a write as `X-Cost-Basis`; the server refuses it when the
+ * asset's bus, as it will be stored, is the other kind (a stale unit must never store a cost x1000 off).
+ */
+export function costBasisOf(schema: AssetSchema | undefined): 'tonne' | 'energy' | undefined {
+  const f = schema?.groups.flatMap(g => g.fields).find(x => COST_KEYS.includes(x.key) && x.unit_display)
+  if (!f) return undefined
+  return /^EUR\/(\(t\/h\)|t)(\/|$)/.test(f.unit_display.replace('€', 'EUR')) ? 'tonne' : 'energy'
+}

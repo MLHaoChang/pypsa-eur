@@ -84,6 +84,10 @@ export interface ProfileUploadResult {
     kind?: string; of?: string }[]
 }
 
+export type CostBasis = 'tonne' | 'energy'
+/** The basis a typed cost was scaled under; the server refuses the write when the asset's bus says otherwise (05d). */
+export const costBasisHeaders = (b?: CostBasis) => (b ? { headers: { 'X-Cost-Basis': b } } : undefined)
+
 export const networkApi = {
   // Buses
   getBuses: () => client.get<Bus[]>('/network/buses').then(r => r.data),
@@ -146,26 +150,26 @@ export const networkApi = {
 
   // Links
   getLinks: () => equipmentRows<Link>('links'),
-  createLink: (l: Partial<Link>) => client.post('/network/links', l),
-  updateLink: (name: string, l: Partial<Link>) => client.put(`/network/links/${encodeURIComponent(name)}`, l),
+  createLink: (l: Partial<Link>, basis?: CostBasis) => client.post('/network/links', l, costBasisHeaders(basis)),
+  updateLink: (name: string, l: Partial<Link>, basis?: CostBasis) => client.put(`/network/links/${encodeURIComponent(name)}`, l, costBasisHeaders(basis)),
   deleteLink: (name: string) => deleteEquipment('links', name),
 
   // Generators
   getGenerators: () => equipmentRows<Generator>('generators'),
-  createGenerator: (g: Partial<Generator>) => client.post('/network/generators', g),
-  updateGenerator: (name: string, g: Partial<Generator>) => client.put(`/network/generators/${encodeURIComponent(name)}`, g),
+  createGenerator: (g: Partial<Generator>, basis?: CostBasis) => client.post('/network/generators', g, costBasisHeaders(basis)),
+  updateGenerator: (name: string, g: Partial<Generator>, basis?: CostBasis) => client.put(`/network/generators/${encodeURIComponent(name)}`, g, costBasisHeaders(basis)),
   deleteGenerator: (name: string) => deleteEquipment('generators', name),
 
   // Storage Units
   getStorageUnits: () => equipmentRows<StorageUnit>('storage_units'),
-  createStorageUnit: (s: Partial<StorageUnit>) => client.post('/network/storage_units', s),
-  updateStorageUnit: (name: string, s: Partial<StorageUnit>) => client.put(`/network/storage_units/${encodeURIComponent(name)}`, s),
+  createStorageUnit: (s: Partial<StorageUnit>, basis?: CostBasis) => client.post('/network/storage_units', s, costBasisHeaders(basis)),
+  updateStorageUnit: (name: string, s: Partial<StorageUnit>, basis?: CostBasis) => client.put(`/network/storage_units/${encodeURIComponent(name)}`, s, costBasisHeaders(basis)),
   deleteStorageUnit: (name: string) => deleteEquipment('storage_units', name),
 
   // Stores
   getStores: () => equipmentRows<Store>('stores'),
-  createStore: (s: Partial<Store>) => client.post('/network/stores', s),
-  updateStore: (name: string, s: Partial<Store>) => client.put(`/network/stores/${encodeURIComponent(name)}`, s),
+  createStore: (s: Partial<Store>, basis?: CostBasis) => client.post('/network/stores', s, costBasisHeaders(basis)),
+  updateStore: (name: string, s: Partial<Store>, basis?: CostBasis) => client.put(`/network/stores/${encodeURIComponent(name)}`, s, costBasisHeaders(basis)),
   deleteStore: (name: string) => deleteEquipment('stores', name),
 
   // Loads

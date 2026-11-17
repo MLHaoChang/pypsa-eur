@@ -229,3 +229,81 @@ def test_the_staged_concentrator_economics_row_pins_value_unit_and_flag(n):
         row["tonne_bus"],
         row["upfront_per_unit"],
     ) == ("Store", "EUR/MWh", True, 25.0)
+
+
+# ── The server refuses a cost write whose assumed basis is not the asset's (GK B2 F2″) ──
+
+
+def _put_generator(client, name, changes, basis):
+    row = next(
+        r for r in client.get("/api/network/generators").json() if r["name"] == name
+    )
+    headers = {"X-Cost-Basis": basis} if basis else {}
+    return client.put(
+        f"/api/network/generators/{name}", json={**row, **changes}, headers=headers
+    )
+
+
+def _stored(client, name):
+    return next(
+        r for r in client.get("/api/network/generators").json() if r["name"] == name
+    )
+
+
+def test_a_cost_written_under_the_wrong_basis_is_refused_and_nothing_is_stored(
+    client, install_network, n
+):
+    """The race and the restore case: the form assumed energy for an asset whose bus is in tonnes."""
+    install_network(n)
+    name = _tonne_generator(n)
+    before = _stored(client, name)
+    r = _put_generator(client, name, {"overnight_cost": 123.4}, "energy")
+    assert r.status_code == 409, r.text
+    d = r.json()["detail"]
+    assert (d["error_kind"], d["claimed"], d["actual"]) == (
+        "cost_basis_mismatch",
+        "energy",
+        "tonne",
+    )
+    assert _stored(client, name) == before
+
+
+def test_a_matching_basis_and_a_write_without_one_are_accepted(
+    client, install_network, n
+):
+    install_network(n)
+    name = _tonne_generator(n)
+    assert (
+        _put_generator(client, name, {"overnight_cost": 123.4}, "tonne").status_code
+        == 200
+    )
+    assert _stored(client, name)["overnight_cost"] == 123.4
+    assert (
+        _put_generator(client, name, {"overnight_cost": 55.5}, None).status_code == 200
+    )
+
+
+def test_moving_the_bus_and_pricing_in_one_save_is_checked_against_the_new_bus(
+    client, install_network, n
+):
+    """A save that moves a tonne asset to an energy bus with costs typed per tonne is refused."""
+    install_network(n)
+    name = _tonne_generator(n)
+    energy_bus = n.links.at[_first(n, "links", "bus0", False), "bus0"]
+    before = _stored(client, name)
+    r = _put_generator(
+        client, name, {"bus": energy_bus, "overnight_cost": 123.4}, "tonne"
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["actual"] == "energy"
+    assert _stored(client, name) == before
+    ok = _put_generator(
+        client, name, {"bus": energy_bus, "overnight_cost": 123400.0}, "energy"
+    )
+    assert ok.status_code == 200, ok.text
+
+
+def test_an_unknown_basis_value_is_a_400(client, install_network, n):
+    install_network(n)
+    r = _put_generator(client, _tonne_generator(n), {}, "kg")
+    assert r.status_code == 400

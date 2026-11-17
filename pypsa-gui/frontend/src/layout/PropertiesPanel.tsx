@@ -39,7 +39,7 @@ import { vintageCloneToast, saveFailedToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
 import { useAssetProvenance } from '../hooks/useAssetProvenance'
-import { buildPatch, omitDerived, seedForm } from '../utils/assetForm'
+import { buildPatch, costBasisOf, omitDerived, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, fieldHelp, fieldUnit, schemaFields } from './properties/AssetFields'
 import { useSaveAction } from '../components/memory/ParameterMemory'
 import { GuideButton } from '../components/GuidedTour'
@@ -182,7 +182,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Generator'))))
       return payload
-    }),
+    }, { costBasis: costBasisOf(schema) }),
     onSuccess: () => {
       // Invalidation is the chokepoint's job now.
       setOpen(false)
@@ -282,7 +282,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={gen.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={gen.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       {schema ? (
         <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset}
@@ -368,7 +368,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('StorageUnit'))))
       return payload
-    }),
+    }, { costBasis: costBasisOf(schema) }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Storage unit saved')
@@ -451,7 +451,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={su.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={su.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       {schema ? (
         <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset}
@@ -534,7 +534,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Store'))))
       return payload
-    }),
+    }, { costBasis: costBasisOf(schema) }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Store saved')
@@ -600,7 +600,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={store.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={store.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       <div className="col-span-2 text-[9px] text-muted bg-border/20 rounded px-2 py-1.5 leading-tight">
         {isH2Store && fieldUnit(schema, 'e_nom', 'MWh') === 'MWh'
           ? <>A <strong>Store</strong> is a pure energy vessel — power throughput is unlimited and bounded only by connected Links (electrolyzers/fuel cells). Set the energy capacity for the tank. 1 MWh ≈ 29.8 kg H₂ (LHV).</>
@@ -774,7 +774,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       {schema ? (
         <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
@@ -905,7 +905,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Link'))))
       return payload
-    }),
+    }, { costBasis: costBasisOf(schema) }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Link saved')
@@ -1028,7 +1028,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={link.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={link.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       {(category === 'electrolyzer' || category === 'fuel_cell') && (
         <div className="col-span-2 text-[9px] text-muted bg-border/20 rounded px-2 py-1.5 leading-tight">
           {category === 'electrolyzer'

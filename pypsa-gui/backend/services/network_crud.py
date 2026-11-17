@@ -429,7 +429,24 @@ def _refuse_edit_during_live_study() -> None:
     refuse_edit_during_live_study()
 
 
-def _create_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
+def _refuse_cost_basis_mismatch(n, component_class: str, row: dict, claimed: str | None) -> None:
+    """05d: a client that scaled a typed cost sends the basis it assumed (``X-Cost-Basis``: tonne or energy). When the
+    asset's bus, as it will be stored, says otherwise (the bus or its unit changed under the form, a restore
+    rewound the network, or the same save moved the bus) nothing is written: 409 ``cost_basis_mismatch``."""
+    if claimed is None:
+        return
+    if claimed not in ("tonne", "energy"):
+        raise HTTPException(400, "X-Cost-Basis must be 'tonne' or 'energy'.")
+    actual = asset_fields.cost_basis_of_row(n, component_class, row)
+    if actual is not None and actual != claimed:
+        raise HTTPException(409, detail={
+            "error_kind": "cost_basis_mismatch", "claimed": claimed, "actual": actual,
+            "message": f"This asset's costs are per {actual}, but the form assumed per {claimed}. "
+                       "Nothing was saved; reopen the card and enter the costs again."})
+
+
+def _create_component(component_class: str, attr: str, name: str, kwargs: dict,
+                      cost_basis: str | None = None) -> dict:
     _refuse_edit_during_live_study()
     # Dispatch invalidation lives in the undo middleware (main.py) — it runs
     # after every successful /api/network/* mutation, so cascade-delete,
@@ -449,6 +466,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     _check_investment_parts(component_class, parts, row=kwargs)
     notice = check_fuel_curve(component_class, kwargs)
     with PyPSAService.get_lock():
+        _refuse_cost_basis_mismatch(n, component_class, kwargs, cost_basis)
         df = getattr(n, attr)
         if name in df.index:
             raise HTTPException(409, f"{component_class} '{name}' already exists")
@@ -649,7 +667,8 @@ def _same_value(a, b) -> bool:
     return math.isclose(fa, fb, rel_tol=1e-12, abs_tol=1e-12)
 
 
-def _update_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
+def _update_component(component_class: str, attr: str, name: str, kwargs: dict,
+                      cost_basis: str | None = None) -> dict:
     """
     Update by remove+add. `kwargs` should be the user's *partial* dict
     (produced via `model_dump(exclude_unset=True)`). Reads the current row from
@@ -672,6 +691,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # Read current row + overlay the user's partial dict (shared helper).
         merged = _merge_partial_update(n, attr, name, kwargs)
         merged, current_parts = split_parts(component_class, merged)
+        _refuse_cost_basis_mismatch(n, component_class, merged, cost_basis)
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, row=merged)
         stored = df.loc[name].to_dict()
