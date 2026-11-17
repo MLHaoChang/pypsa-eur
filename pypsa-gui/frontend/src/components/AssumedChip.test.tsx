@@ -12,14 +12,15 @@ describe('AssumedChip', () => {
     const a = screen.getByTestId('a')
     expect(a.dataset.state).toBe('assumed')
     expect(a.textContent).toContain('Assumed')
-    expect(screen.getByTestId('a-source').textContent).toBe('BMF AfA table, 2000 — batteries per 3.1.3')
+    expect(screen.getByTestId('a-source').textContent).toBe('BMF AfA table, 2000: batteries per 3.1.3')
     expect(a.querySelector('[title]')).toBeNull()
   })
 
   it('says the source is not recorded rather than showing nothing', () => {
     expect(assumedSourceText({ source: '  ' })).toBe('source not recorded')
     expect(assumedSourceText({ source: 'WACC', note: 'assumed, no primary source' }))
-      .toBe('WACC — assumed, no primary source')
+      .toBe('WACC: assumed, no primary source')
+    expect(assumedSourceText({ source: 'ENTSO-E', sourceYear: '2024-06-30' })).toBe('ENTSO-E, 2024-06-30')
   })
 
   it('reads "Stated" with no source once typed, even if it was confirmed', () => {
@@ -37,6 +38,13 @@ describe('AssumedChip', () => {
     expect(screen.getByTestId('c-source').textContent).toBe('BMF, 2000')
   })
 
+  it('carries its state as a word, not colour alone', () => {
+    for (const [p, word] of [[{}, 'Assumed'], [{ confirmed: true }, 'Confirmed'], [{ typed: true }, 'Stated']] as const) {
+      cleanup(); render(<AssumedChip testId="w" source="S" {...p} />)
+      expect(screen.getByTestId('w').firstElementChild!.textContent).toBe(word)
+    }
+  })
+
   it('orders the states typed > confirmed > assumed', () => {
     expect(assumedState({})).toBe('assumed')
     expect(assumedState({ confirmed: true })).toBe('confirmed')
@@ -45,11 +53,8 @@ describe('AssumedChip', () => {
 })
 
 describe('AssumedKey', () => {
-  it('names Assumed and Stated, and Confirmed only where a value can be kept', () => {
-    const { rerender } = render(<AssumedKey testId="k" />)
-    expect(screen.getByTestId('k').textContent).toMatch(/Assumed.*Stated/)
-    expect(screen.getByTestId('k').textContent).not.toContain('Confirmed')
-    rerender(<AssumedKey testId="k" confirmable />)
-    expect(screen.getByTestId('k').textContent).toMatch(/Assumed.*Confirmed.*Stated/)
+  it('explains all three chips in words', () => {
+    render(<AssumedKey testId="k" />)
+    expect(screen.getByTestId('k').textContent).toMatch(/Assumed.*source.*Confirmed.*kept.*Stated.*typed by you/)
   })
 })
