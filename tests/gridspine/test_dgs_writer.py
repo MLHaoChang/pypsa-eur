@@ -8,7 +8,14 @@ import math
 import pandapower as pp
 import pytest
 
-from gridspine.handoff.dgs_writer import NO_SPECTRUM, WITH_SPECTRUM, write_dgs
+from gridspine.handoff.dgs_writer import (
+    ATTRIBUTE_SOURCES,
+    ATTRIBUTES,
+    HARMONIC_CLASS,
+    NO_SPECTRUM,
+    WITH_SPECTRUM,
+    write_dgs,
+)
 from gridspine.readback.results import dgs_name_map
 from gridspine.schema.contracts import ContractError
 from gridspine.static.harmonics import DEFAULT_SPECTRA
@@ -163,7 +170,7 @@ HARMONICS = {
         "spectrum": DEFAULT_SPECTRA["6-pulse"],
         "source": "demo default (6-pulse)",
     },
-    "pv": {"spectrum": "5: 2, 7: 1.5", "source": "vendor"},
+    "pv": {"spectrum": "4: 1, 5: 2, 10: 0.5, 11: 1.5", "source": "vendor"},
 }
 
 
@@ -302,7 +309,16 @@ def test_each_source_carries_its_units_spectrum_and_a_missing_one_is_listed(writ
     assert hm[drive["phmc"]]["norder"] == sorted(six)
     assert hm[drive["phmc"]]["ampl"] == [six[h] for h in sorted(six)]
     assert hm[drive["phmc"]]["alpha"] == [1.4, 1.4, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
-    assert (hm[pv["phmc"]]["norder"], hm[pv["phmc"]]["ampl"]) == ([5, 7], [2.0, 1.5])
+    assert (hm[pv["phmc"]]["norder"], hm[pv["phmc"]]["ampl"]) == (
+        [4, 5, 10, 11],
+        [1.0, 2.0, 0.5, 1.5],
+    )
+    assert hm[pv["phmc"]]["alpha"] == [
+        1.0,
+        1.4,
+        1.4,
+        2.0,
+    ]  # the band edges of IEC 61000-3-6
     assert heater["phmc"] is None and bess["phmc"] is None
     hs = exp.harmonic_sources.set_index("pp_name")
     assert (
@@ -336,3 +352,82 @@ def test_an_unnamed_bus_gets_a_name(tmp_path):
     net.bus.loc[0, "name"] = None
     write_dgs(net, tmp_path / "d.dgs")
     assert read_dgs(tmp_path / "d.dgs")["ElmTerm"][0]["loc_name"] == "bus_0"
+
+
+GOLDEN_HEADERS = [
+    "$$General;ID(a:40);Descr(a:40);Val(a:40)",
+    "$$ElmNet;ID(a:40);loc_name(a:40);frnom(r)",
+    "$$ElmTerm;ID(a:40);loc_name(a:40);fold_id(p);uknom(r);outserv(i)",
+    "$$TypLne;ID(a:40);loc_name(a:40);uline(r);sline(r);rline(r);xline(r);bline(r);inAir(i);frnom(r)",
+    "$$ElmLne;ID(a:40);loc_name(a:40);fold_id(p);typ_id(p);dline(r);nlnum(i);outserv(i)",
+    "$$TypTr2;ID(a:40);loc_name(a:40);strn(r);utrn_h(r);utrn_l(r);uktr(r);pcutr(r);pfe(r);curmg(r);nt2ag(r);"
+    "dutap(r);nntap0(i);ntpmn(i);ntpmx(i);tap_side(i);frnom(r)",
+    "$$ElmTr2;ID(a:40);loc_name(a:40);fold_id(p);typ_id(p);nntap(i);ntnum(i);outserv(i)",
+    "$$ElmLod;ID(a:40);loc_name(a:40);fold_id(p);plini(r);qlini(r);scale0(r);phmc(p);outserv(i)",
+    "$$ElmGenstat;ID(a:40);loc_name(a:40);fold_id(p);sgn(r);pgini(r);qgini(r);scale0(r);phmc(p);outserv(i)",
+    "$$TypSym;ID(a:40);loc_name(a:40);sgn(r);ugn(r)",
+    "$$ElmSym;ID(a:40);loc_name(a:40);fold_id(p);typ_id(p);pgini(r);usetp(r);scale0(r);outserv(i)",
+    "$$ElmShnt;ID(a:40);loc_name(a:40);fold_id(p);shtype(i);ushnm(r);qtotn(r);ncapx(i);ncapa(i);outserv(i)",
+    "$$ElmXnet;ID(a:40);loc_name(a:40);fold_id(p);usetp(r);snss(r);snssmin(r);rntxn(r);rntxnmin(r);bustp(a:2);"
+    "outserv(i)",
+    "$$StaCubic;ID(a:40);loc_name(a:40);fold_id(p);obj_id(p);obj_bus(i)",
+    "$$TypHmccur;ID(a:40);loc_name(a:40);norder:SIZEROW(i);norder:0(i);norder:1(i);norder:2(i);norder:3(i);"
+    "ampl:SIZEROW(i);ampl:0(r);ampl:1(r);ampl:2(r);ampl:3(r);alpha:SIZEROW(i);alpha:0(r);alpha:1(r);alpha:2(r);"
+    "alpha:3(r)",
+]
+
+
+def test_the_file_header_and_every_section_header_are_golden(tmp_path):
+    path = tmp_path / "g.dgs"
+    write_dgs(fixture_net(), path, title="fixture", harmonics={"pv": HARMONICS["pv"]})
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[:3] == [
+        "$$General;ID(a:40);Descr(a:40);Val(a:40)",
+        "1;Version;5.0",
+        "2;Title;fixture",
+    ]
+    assert [ln for ln in lines if ln.startswith("$$")] == GOLDEN_HEADERS
+    assert path.read_bytes().endswith(b"\n") and b"\r" not in path.read_bytes()
+
+
+def test_every_class_names_where_its_attributes_come_from():
+    assert set(ATTRIBUTE_SOURCES) == {*ATTRIBUTES, HARMONIC_CLASS}
+    assert all(src.startswith("DGS 5.x") for src in ATTRIBUTE_SOURCES.values())
+
+
+TABLE_CLASS = {
+    "bus": "ElmTerm",
+    "line": "ElmLne",
+    "trafo": "ElmTr2",
+    "load": "ElmLod",
+    "sgen": "ElmGenstat",
+    "gen": "ElmSym",
+    "shunt": "ElmShnt",
+    "ext_grid": "ElmXnet",
+}
+
+
+def test_every_element_maps_to_exactly_one_dgs_object_both_ways(written):
+    net, dgs, exp = written
+    names = exp.names
+    for table, cls in TABLE_CLASS.items():
+        rows = names[names["pp_table"] == table]
+        assert sorted(rows["pp_index"]) == sorted(
+            getattr(net, table).index
+        )  # every pp element, once
+        assert sorted(rows["dgs_name"]) == sorted(
+            r["loc_name"] for r in dgs[cls]
+        )  # every DGS object, once
+        assert (rows["dgs_class"] == cls).all()
+    terms = {r["ID"]: r["loc_name"] for r in dgs["ElmTerm"]}
+    bus_map, _ = dgs_name_map(names)
+    for table, (a, b), cls in (
+        ("line", ("from_bus", "to_bus"), "ElmLne"),
+        ("trafo", ("hv_bus", "lv_bus"), "ElmTr2"),
+    ):
+        by_name = {r["loc_name"]: r["ID"] for r in dgs[cls]}
+        for r in names[names["pp_table"] == table].itertuples():
+            ends = _ends(dgs, by_name[r.dgs_name])
+            el = getattr(net, table).loc[r.pp_index]
+            assert bus_map[terms[ends[0]]] == net.bus.at[el[a], "name"]
+            assert bus_map[terms[ends[1]]] == net.bus.at[el[b], "name"]

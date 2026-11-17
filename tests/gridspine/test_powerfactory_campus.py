@@ -11,7 +11,9 @@ import pytest
 from gridspine.drivers.campus_study import (
     HARMONIC_SOURCES_CSV,
     HARMONICS_CSV,
+    SAME_LIMIT,
     campus_tables,
+    harmonic_units,
     harmonics_campus,
     import_background_campus,
     load_run_campus,
@@ -172,3 +174,87 @@ def test_a_bad_background_is_refused_and_stores_nothing(run):
             measured_on="2026-09-30",
         )
     assert len(harmonics_campus(run).query("level == 'poc'")) == 1
+
+
+def test_the_manifest_pins_the_attribute_ledger(case):
+    manifest = json.loads((case / "manifest.json").read_text())
+    assert manifest["pending_verification"] == [
+        "attribute names pending verification on first PowerFactory import"
+    ]
+
+
+def test_each_source_equals_its_units_spectrum_from_the_harmonic_screen(run, case):
+    from gridspine.drivers.campus_study import _unchanged_project
+    from gridspine.static import harmonics as hm
+
+    units = harmonic_units(_unchanged_project(run), "x").set_index("unit")
+    dgs = read_dgs(case / f"{case.name}.dgs")
+    by_id = {r["ID"]: r for r in dgs["TypHmccur"]}
+    for elm, link in (("COMPRESSOR", "compressor"), ("PUMP", "pump")):
+        _, spectrum, _, _ = hm.unit_inputs(units.loc[link].to_dict())
+        typ = by_id[next(r for r in dgs["ElmLod"] if r["loc_name"] == elm)["phmc"]]
+        assert dict(zip(typ["norder"], typ["ampl"])) == spectrum
+        assert typ["alpha"] == [hm.alpha(h) for h in typ["norder"]]
+
+
+def test_without_a_background_the_screen_is_unchanged(run):
+    first = harmonics_campus(run)
+    before = (run / HARMONICS_CSV).read_bytes()
+    import_background_campus(run, BG, source="PQ survey", measured_on="2026-09-30")
+    harmonics_campus(run)
+    (run / "background_harmonics.json").unlink()
+    again = harmonics_campus(run)
+    assert (run / HARMONICS_CSV).read_bytes() == before
+    pd.testing.assert_frame_equal(first, again)
+
+
+def test_the_background_row_states_its_basis_and_follows_the_studys_law(run):
+    import_background_campus(run, BG, source="PQ survey", measured_on="2026-09-30")
+    out = harmonics_campus(run)
+    bg = out[out["level"] == "poc"].iloc[1]
+    assert SAME_LIMIT in bg["note"]
+    assert SAME_LIMIT == (
+        "judged against the same limit as the plant alone (conservative where that limit is an "
+        "installation's emission share)"
+    )
+    arith = harmonics_campus(run, law="arithmetic")
+    plant, bga = (
+        arith[arith["level"] == "poc"].iloc[0],
+        arith[arith["level"] == "poc"].iloc[1],
+    )
+    assert bga["u_h_pct"][5] == pytest.approx(
+        plant["u_h_pct"][5] + 2.0
+    )  # alpha 1 at every order
+
+
+def test_a_background_measured_elsewhere_is_refused(run):
+    import json as _json
+
+    import_background_campus(run, BG, source="PQ survey", measured_on="2026-09-30")
+    path = run / "background_harmonics.json"
+    rec = _json.loads(path.read_text())
+    path.write_text(_json.dumps(rec | {"poc": "elsewhere"}))
+    with pytest.raises(
+        ContractError, match="'elsewhere', which is no PoC of this study"
+    ):
+        harmonics_campus(run)
+
+
+def test_an_element_powerfactory_did_not_export_is_listed_never_matched(case, tmp_path):
+    bus_csv, br_csv = _pf_exports(case, tmp_path)
+    bus = pd.read_csv(bus_csv, dtype=str)
+    dropped = bus.loc[0, "bus_name"]
+    bus.iloc[1:].to_csv(bus_csv, index=False)
+    br = pd.read_csv(br_csv, dtype=str)
+    br.iloc[1:].to_csv(br_csv, index=False)
+    summary = read_back(case, bus_csv, br_csv)
+    names = pd.read_csv(case / DGS_NAMES_CSV, keep_default_na=False)
+    assert (
+        summary["not_compared"]["bus"]
+        == names.loc[
+            (names["pp_table"] == "bus") & (names["dgs_name"] == dropped), "pp_name"
+        ].tolist()
+    )
+    assert len(summary["not_compared"]["branches"]) == 1
+    assert summary["bus"]["n"] == len(bus) - 1 and summary["bus"]["pass"]
+    assert summary["pass"] is False

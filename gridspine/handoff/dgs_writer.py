@@ -24,7 +24,8 @@ What is written, from the pandapower net:
   STATCOMs), ``TypSym`` + ``ElmSym`` per synchronous machine, ``ElmShnt``
   per shunt (capacitor bank, reactor or filter by the sign of Q);
 - ``TypHmccur`` per harmonic spectrum, pointed at by its element's ``phmc``:
-  orders, magnitude in % of the unit's rated current and the IEC 61000-3-6
+  orders, magnitude in % of the unit's rated current — the base the harmonic
+  screen uses, I_h = % / 100 * rated_mva at nominal voltage — and the IEC 61000-3-6
   summation exponent per order (``harmonics.alpha``), as vectors.
 
 Names: every DGS ``loc_name`` is the pandapower name, with ``;`` (the field
@@ -75,7 +76,9 @@ HARMONIC_COLUMNS = (
 )
 NO_SPECTRUM = "no spectrum"
 WITH_SPECTRUM = "spectrum"
-PENDING_VERIFICATION = "DGS attribute names: confirm on the first PowerFactory import"
+PENDING_VERIFICATION = (
+    "attribute names pending verification on first PowerFactory import"
+)
 
 #: Every class written and its attributes in column order, with the DGS
 #: type letter: a (text), i (integer), r (real), p (pointer to an ID).
@@ -187,6 +190,28 @@ ATTRIBUTES = {
         ("obj_id", "p"),
         ("obj_bus", "i"),
     ],
+}
+#: Where each class's attribute names come from (``ATTRIBUTES`` plus
+#: ``TypHmccur``): the public description of the DGS 5.x ASCII exchange format
+#: in the simulation tool's own documentation, by section. GC-TEXT-1: no
+#: company is named. Every name is pending verification on first import.
+_DGS_DOC = "DGS 5.x ASCII exchange format, tool documentation"
+ATTRIBUTE_SOURCES = {
+    "General": f"{_DGS_DOC}: file header (General table, Version)",
+    "ElmNet": f"{_DGS_DOC}: grid object",
+    "ElmTerm": f"{_DGS_DOC}: terminal (busbar) object",
+    "TypLne": f"{_DGS_DOC}: line type (per-km data)",
+    "ElmLne": f"{_DGS_DOC}: line element",
+    "TypTr2": f"{_DGS_DOC}: 2-winding transformer type",
+    "ElmTr2": f"{_DGS_DOC}: 2-winding transformer element",
+    "ElmLod": f"{_DGS_DOC}: general load",
+    "ElmGenstat": f"{_DGS_DOC}: static generator",
+    "TypSym": f"{_DGS_DOC}: synchronous machine type",
+    "ElmSym": f"{_DGS_DOC}: synchronous machine element",
+    "ElmShnt": f"{_DGS_DOC}: shunt / filter",
+    "ElmXnet": f"{_DGS_DOC}: external grid (short-circuit max and min)",
+    "StaCubic": f"{_DGS_DOC}: cubicle (connection of an element to a terminal)",
+    "TypHmccur": f"{_DGS_DOC}: harmonic current source type (vector attributes)",
 }
 #: ``TypHmccur`` is written separately: its vectors' length varies per row.
 HARMONIC_CLASS = "TypHmccur"

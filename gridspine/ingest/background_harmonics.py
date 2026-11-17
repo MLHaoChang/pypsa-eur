@@ -15,7 +15,9 @@ with ``alpha`` = 1 below order 5, 1.4 from 5 to 10 and 2 above 10.
 
 Input: a CSV in the style of an IEC 61000-4-30 power-quality report, one row
 per order, ``order`` and ``u_h_pct_p95`` (the 95th-percentile 10-minute value
-over the survey, in % of the nominal voltage). Every order the file names
+over the survey, in % of the NOMINAL fundamental voltage — the unit of the
+screen's ``u_h_pct`` — not of the measured fundamental; a report that gives
+% of the measured fundamental must be rescaled before import). Every order the file names
 must carry a finite value >= 0; an order is an integer 2..50, each once. An
 order the file does not name is "not measured", never taken as zero: the
 combined row says which orders had no background.
@@ -41,6 +43,9 @@ from gridspine.schema.contracts import ContractError
 from gridspine.static.harmonics import H_MAX, H_MIN, alpha
 
 BACKGROUND_JSON = "background_harmonics.json"
+#: The stored record's version; the reader refuses any other as stale.
+VERSION = 1
+UNIT = "% of nominal fundamental voltage"
 ORDER_COL = "order"
 VALUE_COL = "u_h_pct_p95"
 STATISTIC = "95th percentile of 10-minute values (IEC 61000-4-30 style)"
@@ -113,6 +118,8 @@ def parse_background(
             )
         orders[h] = pct
     return {
+        "version": VERSION,
+        "unit": UNIT,
         "poc": str(poc),
         "source": str(source).strip(),
         "measured_on": date.isoformat(),
@@ -154,16 +161,20 @@ def load_background(run_dir) -> dict | None:
     path = Path(run_dir) / BACKGROUND_JSON
     if not path.is_file():
         return None
+    stale = f"{path.name} is a stale or damaged background record"
     try:
         rec = json.loads(path.read_text())
+        if not isinstance(rec, dict) or rec.get("version") != VERSION:
+            raise ContractError(
+                f"{stale} (version {rec.get('version') if isinstance(rec, dict) else None!r}, "
+                f"expected {VERSION}); import the background again"
+            )
         rec["orders_pct"] = {int(h): float(v) for h, v in rec["orders_pct"].items()}
         missing = [
             k for k in ("poc", "source", "measured_on", "statistic") if k not in rec
         ]
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
-        raise ContractError(
-            f"{path.name} is not a background-harmonics record ({exc}); import it again"
-        ) from None
+        raise ContractError(f"{stale} ({exc}); import the background again") from None
     if missing:
-        raise ContractError(f"{path.name} lacks {missing}; import the background again")
+        raise ContractError(f"{stale}: it lacks {missing}; import the background again")
     return rec

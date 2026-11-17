@@ -1395,6 +1395,9 @@ HARMONIC_SOURCES_CSV = "harmonic_sources.csv"
 #: Converter-interfaced unit kinds: each should carry a harmonic spectrum.
 CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell", "ups")
 NOT_IN_MODEL = "not in the network model"
+#: The "with background" row's basis, pinned once.
+SAME_LIMIT = ("judged against the same limit as the plant alone (conservative where that limit is an "
+              "installation's emission share)")
 
 
 def import_background_campus(run_dir, data, source: str, measured_on, filename: str | None = None) -> dict:
@@ -1422,18 +1425,22 @@ def _with_background(run_dir: Path, pocs: pd.DataFrame, limits, law: str) -> pd.
     rec = load_background(run_dir)
     if rec is None:
         return pocs
+    studied = [str(p) for p in pocs["poc"]]
+    if rec["poc"] not in studied:
+        raise ContractError(f"the background was measured at {rec['poc']!r}, which is no PoC of this study "
+                            f"({', '.join(studied)}); import it again for the PoC")
     rows = []
     for row in pocs.to_dict("records"):
         if str(row["poc"]) != rec["poc"]:
             continue
         out = dict(row, label=f"{WITH_BACKGROUND}; {hm.LABEL}")
         if row["u_h_pct"] is None:
-            out["note"] = f"{citation(rec)}; {row['note']}"
+            out["note"] = f"{citation(rec)}; {SAME_LIMIT}; {row['note']}"
             rows.append(out)
             continue
         plant = row["u_h_pct"]
         j = hm.judge(combine(plant, rec["orders_pct"], law), limits)
-        notes = [citation(rec), *j.pop("notes")]
+        notes = [citation(rec), SAME_LIMIT, *j.pop("notes")]
         unmeasured = sorted(set(plant) - set(rec["orders_pct"]))
         if unmeasured:
             notes.append("no background measured at order(s) " + ", ".join(map(str, unmeasured)))

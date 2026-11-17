@@ -95,7 +95,7 @@ def _bus_summary(cmp: pd.DataFrame) -> dict:
         "n_ok": int(cmp["ok"].sum()),
         "max_vm_rel_err": float(cmp["vm_rel_err"].max()),
         "max_va_abs_err_deg": float(cmp["va_abs_err_deg"].max()),
-        "worst": str(worst.idxmax()),
+        "worst": str(worst.idxmax()) if len(cmp) else None,  # empty: every bus not compared (DGS)
         "pass": bool(cmp["ok"].all()),
     }
 
@@ -109,7 +109,7 @@ def _branch_summary(cmp: pd.DataFrame) -> dict:
         "n_ok": int(cmp["ok"].sum()),
         "max_p_rel_err": float(cmp["p_rel_err"].max()),
         "max_q_abs_err_mvar": float(cmp["q_abs_err_mvar"].max()),
-        "worst": [str(k) for k in worst.idxmax()],
+        "worst": [str(k) for k in worst.idxmax()] if len(cmp) else None,
         "pass": bool(cmp["ok"].all()),
     }
 
@@ -128,24 +128,32 @@ def _unmapped(kind: str, names) -> ContractError:
     return ContractError(f"PowerFactory {kind} name(s) not in the DGS export: {sorted(map(str, names))}")
 
 
-def _dgs_keyed(bundle_dir: Path, bus_csv, branch_csv):
-    """The two exports re-keyed from DGS names onto the bundle's load flow,
-    as CSV buffers; the paths unchanged when the bundle has no DGS map."""
+def _dgs_keyed(bundle_dir: Path, lf: BundleLF, bus_csv, branch_csv):
+    """``(lf, bus, branch, not_compared)``: the two exports re-keyed from DGS
+    names onto the bundle's load flow, as CSV buffers, and the load flow cut
+    to the elements the export holds. Every element the DGS wrote but the
+    export lacks is listed in ``not_compared`` (``{"bus": [...], "branches":
+    [...]}``), never counted as a match. Without a DGS map: everything as
+    given and ``not_compared`` None."""
     names_path = bundle_dir / DGS_NAMES_CSV
     if not names_path.is_file():
-        return bus_csv, branch_csv
+        return lf, bus_csv, branch_csv, None
     bus_map, branch_map = dgs_name_map(pd.read_csv(names_path, dtype=str, keep_default_na=False))
-    pf = pd.read_csv(bus_csv, dtype={"bus_name": str})          # a DGS name like "001" stays text
+    pf = pd.read_csv(bus_csv, dtype={"bus_name": str})  # a DGS name like "001" stays text
+    bus = lf.bus
     if "bus_name" in pf.columns:
         key = pf["bus_name"].astype(str).str.strip()
         unknown = set(key) - set(bus_map)
         if unknown:
             raise _unmapped("bus", unknown)
         pf["bus_name"] = key.map(bus_map)
+        bus = lf.bus[lf.bus.index.astype(str).isin(set(pf["bus_name"]))]
+    not_compared = {"bus": sorted(map(str, set(lf.bus.index) - set(bus.index))), "branches": []}
     bus_buf = io.StringIO(pf.to_csv(index=False))
     if branch_csv is None:
-        return bus_buf, None
-    br = pd.read_csv(branch_csv, dtype={DGS_BRANCH_COL: str})
+        return dataclasses.replace(lf, bus=bus), bus_buf, None, not_compared
+    br = pd.read_csv(branch_csv, dtype={DGS_BRANCH_COL: str, "ckt": str})
+    flow = lf.branch_flow
     if DGS_BRANCH_COL in br.columns:
         key = br.pop(DGS_BRANCH_COL).astype(str).str.strip()
         unknown = set(key) - set(branch_map)
@@ -154,7 +162,12 @@ def _dgs_keyed(bundle_dir: Path, bus_csv, branch_csv):
         triples = key.map(branch_map)
         for k, col in enumerate(("from_bus", "to_bus", "ckt")):
             br[col] = [t[k] for t in triples]
-    return bus_buf, io.StringIO(br.to_csv(index=False))
+        given = set(triples)
+        keys = list(zip(flow["from_bus"].astype(str), flow["to_bus"].astype(str), flow["ckt"].astype(str)))
+        present = [k in given for k in keys]
+        not_compared["branches"] = sorted([list(k) for k, p in zip(keys, present) if not p])
+        flow = flow[present]
+    return dataclasses.replace(lf, bus=bus, branch_flow=flow), bus_buf, io.StringIO(br.to_csv(index=False)), not_compared
 
 
 def read_back(bundle_dir, bus_csv, branch_csv=None) -> dict:
@@ -169,11 +182,13 @@ def read_back(bundle_dir, bus_csv, branch_csv=None) -> dict:
     A PowerFactory (DGS) bundle carries ``dgs_names.csv``: the export's
     ``bus_name`` is then the DGS terminal name, and a branch row may name its
     DGS element in ``branch_name`` instead of the triple. Both are re-keyed
-    onto the load flow first; a name the DGS never wrote is refused.
+    onto the load flow first; a name the DGS never wrote is refused. An
+    element the DGS wrote but the export lacks is listed under
+    ``not_compared`` and fails the overall ``pass``: it is never a match.
     """
     bundle_dir = Path(bundle_dir)
     lf = load_bundle_lf(bundle_dir)
-    bus_in, branch_in = _dgs_keyed(bundle_dir, bus_csv, branch_csv)
+    lf, bus_in, branch_in, not_compared = _dgs_keyed(bundle_dir, lf, bus_csv, branch_csv)
     bus_cmp = compare_lf(lf, bus_in, vm_tol=BUS_TOLERANCE["vm_rel_err"], va_tol_deg=BUS_TOLERANCE["va_abs_err_deg"])
     branch_cmp = (
         compare_branch_flows(lf, branch_in, p_tol=BRANCH_TOLERANCE["p_rel_err"],
@@ -203,6 +218,9 @@ def read_back(bundle_dir, bus_csv, branch_csv=None) -> dict:
         "sources": {"bus_csv": _source(bus_csv), "branch_csv": _source(branch_csv)},
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    if not_compared is not None:  # a DGS bundle: what PowerFactory did not export is listed, and blocks a pass
+        summary["not_compared"] = not_compared
+        summary["pass"] = bool(summary["pass"] and not (not_compared["bus"] or not_compared["branches"]))
     (bundle_dir / READBACK_JSON).write_text(json.dumps(summary, indent=2))
     return summary
 
