@@ -9,7 +9,7 @@
  * as well as by eye.
  *
  * Usage: node scripts/ui-cohesion-shots.mjs <outDir> [templateId ...]
- *   env: THEMES=light,dark  MODES=guided,expert  SKIP_RUN=1 (no solve)  ONLY=<substring of a screen name>  WAIT=<ms settle, default 700>
+ *   env: CANVAS=1 (add canvas states: selected, results overlay, Satellite, Hybrid, Site 3D)  THEMES=light,dark  MODES=guided,expert  SKIP_RUN=1 (no solve)  ONLY=<substring of a screen name>  WAIT=<ms settle, default 700>
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -186,6 +186,20 @@ try {
       } else {
         await store(page, `s.setSlidePanel(null)`)
         await shoot(page, `${base}-canvas`, { screen: 'expert canvas', tpl: short, mode, theme })
+        if (process.env.CANVAS) {
+          // Canvas states (UI-COHESION-1 extension): a selected node, the results overlay, then the map and 3D modes.
+          const nodes = page.locator('.react-flow__node')
+          if (await nodes.count()) { await nodes.nth(Math.min(3, (await nodes.count()) - 1)).click({ force: true }).catch(() => {}); await shoot(page, `${base}-canvas-selected`, { screen: 'expert canvas selected', tpl: short, mode, theme }) }
+          const res = page.getByRole('button', { name: /^Results/ }).first()
+          if (await res.count()) { await res.click().catch(() => {}); await shoot(page, `${base}-canvas-results`, { screen: 'expert canvas results overlay', tpl: short, mode, theme }); await res.click().catch(() => {}) }
+          for (const m of ['Satellite', 'Hybrid', 'Site 3D']) {
+            const b = page.getByRole('button', { name: m, exact: true }).first()
+            if (!(await b.count())) { problems.push(`${base}: no ${m} button`); continue }
+            await b.click().catch(() => {}); await page.waitForTimeout(2500)
+            await shoot(page, `${base}-canvas-${m.toLowerCase().replace(' ', '')}`, { screen: `expert canvas ${m}`, tpl: short, mode, theme })
+          }
+          await page.getByRole('button', { name: 'Blank', exact: true }).first().click().catch(() => {})
+        }
         for (const p of PANELS) {
           await store(page, `s.setSlidePanel(a)`, p)
           await shoot(page, `${base}-p-${p}`, { screen: `expert panel ${p}`, tpl: short, mode, theme })

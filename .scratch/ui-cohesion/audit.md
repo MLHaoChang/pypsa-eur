@@ -9,12 +9,12 @@ Brief: "make sure the user interface through the different sections of the tool 
 ## What was shot
 
 Real app (API :8000, Vite :5173), no mocks, signed in as the dev admin, viewport 1280×800, one solve per project.
-`pypsa-gui/frontend/scripts/ui-cohesion-shots.mjs` took **300 screens** (and wrote one row of computed styles per screen):
+`pypsa-gui/frontend/scripts/ui-cohesion-shots.mjs` took **312 screens** (and wrote one row of computed styles per screen):
 
 - three templates: **Data Center Energy Hub**, **Island Microgrid** and, because the brief asked for one more if a section looked different, **Industrial Hydrogen Hub**. The hub's sections use the same patterns as the other two; its only difference is a longer canvas legend. Findings below cite the data centre unless a template is named;
 - **Guided**: the 10 sections of `.scratch/project-workflow/design.md` §2.1, plus Results Summary, Reliability (Adequacy) and FMEA;
 - **Expert**: the canvas, 18 slide panels and 16 Results tabs;
-- plus Home, Sign-in and the New project dialog; each in **light and dark**.
+- plus Home, Sign-in and the New project dialog, and the canvas states (selected node, Satellite, Hybrid, Site 3D); each in **light and dark**.
 
 Only the shots a finding cites are committed (`shots/`, 800 px wide). The rest stay out of the repo; re-take with `node scripts/ui-cohesion-shots.mjs <outDir> eh_datacenter eh_microgrid eh_h2_hub`.
 Scored against `docs/agents/review-ux.md`, `src/index.css`, `public/brand.css`, and `ui-ux-pro-max --domain ux` (consistency, empty states, loading) and `--stack react`.
@@ -96,6 +96,39 @@ Slice: **cohesion** (stepper, banner); the floating button is a layout call for 
 The four KPI tiles show as empty grey rectangles on first open (`shots/dc-guided-light-res-summary-early.jpg`, taken at 1.4 s; `-settled` at 4 s). The ui-ux-pro-max rule is a skeleton shaped like the content, with `aria-busy`; this one is neither tile-shaped nor labelled. Expert's Summary showed tiles at the same wait.
 Slice: **cohesion** (skeleton shape), if it fits.
 
+### F9. Guided and Expert name the same section differently (high; EXPERT-GUIDED-1)
+
+Same section, both modes, side by side (light, data centre). The Guided sections and the Expert sidebar share the ten flow names; the Expert panels do not:
+
+| Section | Guided | Expert sidebar item | Expert panel: eyebrow / title (`App.tsx` `PANEL_META`) | What the page itself says |
+|---|---|---|---|---|
+| 1 Project & site | "Project & site" | Model Horizon | TIME / Model horizon | h1 "Snapshot range & weightings" |
+| 5 Assets & sizing | "Assets & sizing" | Capacity Bounds | BUILD / Capacity bounds | none |
+| 6 Time series & profiles | "Time series & profiles" | Time series… | TIME / Time series | h1 "Time series library"; Profile studio is BUILD |
+| 7 Commercial & parties | "Commercial & parties" | Economics, Commercial library | ECONOMICS / Economics; PROJECT / Commercial library | none |
+| 8 Scenarios & optimisation | "Scenarios & optimisation" | Solver Settings, Scenarios, Grid study | RUN / Solver settings; **REPORTS** / Scenarios; SCENARIOS & OPTIMISATION / Grid study | h1 "Solver & mode" |
+| 9 Readiness and run | "Readiness and run" | Issues, Solve Queue | RUN / Issues; RUN / Solve queue | none |
+| 10 Results & reports | "Results & reports" | Results, Grid study results, Reports | RESULTS / Results; REPORTS / Reports | h1 "Optimization results" (Guided: "Reliability results") |
+
+- The eyebrow vocabulary (PROJECT, TIME, BUILD, RUN, REPORTS, ECONOMICS, STUDIES, RESULTS, APPLICATION) is a third taxonomy beside the sections; only the two campus panels use a section name. Section 8's three panels carry three different eyebrows, and the "Next: Readiness and run ›" button on the Scenarios panel names the section its eyebrow ("REPORTS") does not.
+- One item has three names: sidebar "Solver Settings", panel meta "Solver settings", page h1 "Solver & mode".
+- The Hub design panel opened in Expert still reads `GUIDED / Hub design` (`PANEL_META.hubDesign`, `App.tsx:152`): a mode name on an Expert screen.
+- Looks differ for the same job: Guided's Goal card is neutral with a small "Save goal"; Expert's Solver & mode groups its options in red-bordered boxes and ends in a full-width red "Save settings" bar (`shots/pair-s08-guided-left-expert-right.jpg`). Guided lists state in words ("to check", "to do", "complete") on the stepper; the Expert sidebar shows a dot with no word in the shots, and the Expert Issues panel is "Errors 0 / Warnings 0 · Clear" against Guided's "0 to do, 6 to check" (`shots/pair-s09-guided-left-expert-right.jpg`). Time series: Guided lists rows with "Edit ›", Expert is a three-column library with a drop zone (`shots/pair-s06-guided-left-expert-right.jpg`); Section 1: `shots/pair-s01-guided-left-expert-right.jpg`.
+- Units and money agree in the pairs that were checked (MW, MWh, `€39.8 M`, `kt CO₂`, `h/yr`). One inside both modes: the Summary shows `€39.8 M` in the cost tile and `€39.75 M` in the "LP objective" line under it, the same number at two precisions (review-ux: one money notation per section).
+Responsible: `App.tsx` (`PANEL_META`, `FullPageTab`), `layout/Sidebar.tsx` (labels), `pages/hubDesign/sectionLabels.ts` (the flow names), each panel's own heading.
+Slice: **cohesion** (one name per section and panel, taken from `sectionLabels.ts`; test that every `PANEL_META` entry's eyebrow is a flow section name or a stated exception).
+
+### The canvases (owner extension): topology, map and site 3D
+
+Shot in light and dark (`ui-cohesion-shots.mjs` with `CANVAS=1`): the topology canvas empty, with a node selected, and the map modes Satellite and Hybrid and Site 3D. Not judged: the map basemap (the tiles are external and blocked in the sandbox, so the basemap is blank white in both themes), and the 3D scene itself (the templates have no site coordinates; only its empty state was shot). The map and scene colour code (`MapCanvas.tsx` 24 literals, `site3d/assetLibrary.ts` 22, `context.ts` 8) is in the inventory, not in a shot.
+
+- **CV1. The canvas does not use the app's carrier tokens, and red means three things (high).** Chart code reads `--color-carrier-*` (`components/charts/chartTheme.tsx:90`, pinned by `chartThemeTokens.test.ts`), but the canvas draws from its own hex tables (`utils/assetTypes.ts` 22 literals, `utils/carrierCatalog.ts` 30, `pages/topologyEdges.ts` 22). The gensets (carrier gas) are red `#dc2626` on the canvas (`assetTypes.ts:98`), while the gas token is blue `#0369a1` (`index.css:101`) and charts use the token. Red is therefore the generator colour, the accent (primary button, "Each" toggle, active step) and the danger colour at once. review-ux.md already says "a carrier colour has one token, and canvas hex maps are pinned to it by a test" (#1336); the canvas is the part that is not. Shots: `shots/dc-canvas-selected-light-left-dark-right.jpg`.
+- **CV2. A selected node is the same red as an unselected generator (high).** Selection is a 2 px border in the node's own colour plus a soft glow (`TopologyCanvas.tsx:686,693,881,890`). On the data centre the selected `grid_supply` and the unselected gensets are both red outlines; in dark the fills are near-black and the outline is the only cue. Selection should not depend on the carrier colour. This is a real choice: see Open choices, question 3.
+- **CV3. The three canvases have three empty states (medium).** The topology canvas says nothing (the right panel says "Click a bus, line, or asset on the canvas to inspect it"); the map shows a centred white card with a red primary and a secondary button ("No bus has a location yet"); Site 3D shows bare centred text with a red text link ("This project has no 3D site yet"). Shots: `shots/dc-expert-light-canvas-hybrid.jpg`, `shots/dc-expert-light-canvas-site3d.jpg`. → cohesion item 5 (one `EmptyState`).
+- **CV4. Canvas type is below the floor and a fourth heading style (medium).** Asset labels 8 and 8.5 px (F2); the legend heads ("BUSES & LINES · VOLTAGE", "LINKS · CARRIER", "ASSETS · TYPE") are 9 px uppercase tracked grey, a third kicker style beside the red mono eyebrow and Properties' red bold uppercase headings ("CONNECTED TO", "GENERATOR PROPERTIES"). In `shots/dc-canvas-selected-light-left-dark-right.jpg` the node labels are under 9 px at the default zoom.
+- **Held up:** the canvas, legend card, toolbar and "Blank / Satellite / Hybrid / Site 3D" switch share the app's surfaces, radius and hairlines; the canvas background and dots follow the theme (`--color-canvas`, `--color-canvas-dot`); Site 3D's background follows the theme; the "No bus has a location" card is themed correctly in dark.
+Slice: CV1 colours → **(c)** (canvas colours get a light/dark pair and read the carrier tokens, with the existing pinned test extended to `assetTypes.ts`); CV2 → **cohesion** once the owner picks; CV3 → **cohesion** item 5; CV4 → **cohesion** item 2.
+
 ### Colour findings (ride THEME-LIGHT)
 
 - **K1. React Flow attribution badge is a pale grey box on the dark canvas**, its text unreadable (`shots/dc-expert-dark-canvas.jpg`, bottom-right). It is React Flow's default style, left unthemed beside `<Background>`/`<Controls>` (`pages/TopologyCanvas.tsx:3134-3142`). Style it with tokens in both themes. → (c)
@@ -116,12 +149,26 @@ Slice: **cohesion** (skeleton shape), if it fits.
 | F6 empty states, Results frame | cohesion | Wording and layout |
 | F7 stepper, banner, floating button | cohesion | Layout |
 | F8 skeleton | cohesion (if it fits) | Loading state |
+| F9 Guided and Expert name sections differently | cohesion | Wording and eyebrows; `PANEL_META` |
+| CV1 canvas colours off the carrier tokens | (c) | Canvas colours; extend the #1336 pin |
+| CV2 selection looks like a carrier colour | cohesion | A design choice: question 3 below |
+| CV3 three canvas empty states | cohesion | Item 5 |
+| CV4 canvas type and legend heads | cohesion | Item 2 |
 | K1 attribution badge | (c) | Canvas colours |
 | K2 chart palettes | (c) | Plotly and canvas series colours |
 | K3 red for four jobs | (b) shell, (d) pages | Link and eyebrow tokens: shell first |
 | K4 band on the top bar, Home cards | (b), (d) | The plan's band header |
 
-The cohesion slice is one PR in `.scratch/ui-cohesion/issues/01-cohesion-slice.md`: F1–F7 at about 1,200 lines if F4's Section 7 form is limited to field styling, not a new layout. F8 is optional. If the UX review sizes it over the limit, the split is "tokens and fonts (F1, F2, F5)" then "headers, cards, empty states (F3, F4, F6, F7)"; the issue file says where.
+The cohesion slice is `.scratch/ui-cohesion/issues/01-cohesion-slice.md`: F1–F7, F9 and CV2–CV4, about 1,500 changed lines, which is the PR-SIZE-1 limit, so it ships in two PRs, (A) fonts, type and radius tokens, canvas labels, then (B) headers, names, cards, empty states, chrome and canvas selection. F8 is optional. The issue file says where the split falls.
+
+## Open choices (HOLISTIC-1)
+
+Each is a real choice for the whole tool, not for one screen. The recommended option goes into the cohesion slice unless the owner picks another.
+
+1. **One panel-title size.** (A) 15 px, the Guided section title, with a 9 px eyebrow, so Guided, panels and the band header share one title size; no new size (recommended). (B) 16 px, what `PageHeader` and Results use today; adds a second heading size beside Guided's 15. (C) 12 px, what 13 panels use; panel titles then sit below the Guided section title.
+2. **What colour are links and eyebrows?** (A) Ink with an underline or "›" for links and eyebrows; red only for the primary action and the active state (recommended: fixes the accent/danger overlap, ΔE 11.6 in light). (B) Keep accent red for all of them. (C) The deep red `#a8000f` for links, accent red for actions only; separates them a little, still red.
+3. **How is a selected canvas node shown?** (A) A 2 px ink ring plus a soft accent halo, the same on every carrier (recommended: independent of the carrier colour, works in dark). (B) Keep the carrier-coloured border, thicker, add a corner check. (C) Fill the node with its carrier tint only; weakest in dark.
+4. **What does a panel's eyebrow say?** (A) The flow section it belongs to ("SCENARIOS & OPTIMISATION", "READINESS AND RUN"), as the "Next:" buttons and the Guided stepper already do (recommended). (B) Keep the area words (RUN, REPORTS, TIME…) and add the section name to the sidebar only. (C) Drop the eyebrow; the title alone.
 
 ## Status of the ui-modern audit's findings (9 Nov, master `64686f9d`)
 
