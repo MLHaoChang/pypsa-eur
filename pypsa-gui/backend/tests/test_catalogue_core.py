@@ -341,4 +341,9 @@ def test_entries_carry_the_shared_aliases():
 
 def test_an_asset_type_lists_only_the_groups_its_classes_fill():
     offtake = next(t for t in ASSET_TYPES if t.id == "offtake")
-    assert C._type_dict(offtake)["groups"] == ["general", "size_limits", "electrical", "operation"]
+    assert C._type_dict(offtake)["groups"] == [
+        "general",
+        "size_limits",
+        "electrical",
+        "operation",
+    ]
