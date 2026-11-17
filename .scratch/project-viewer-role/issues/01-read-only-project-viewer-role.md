@@ -132,3 +132,10 @@ GK B (session_01G7qCunbvxN6JVyrzVTsisA) reviews this package (the brief names it
   - `GET /api/projects/{name}` (load) saves an evicted context's in-memory edits, which only editors could have made, and the session's active-project row.
   - `GET /api/chat/history` repairs the caller's own event log in app data.
   None writes project input data on a viewer's behalf. Tool tier source: the `Safety:` marker (`catalogue.safety_tier_for`). Undo, restore and snapshot writes are `destructive`/`write`. A test fails if a read-tier tool is bound to a route the viewer is refused.
+
+### 2026-11-17: owner rulings (VIEWER-ROLE-1, relayed by the coordinator)
+
+- Q1 scope: per project, set in the members dialog.
+- Q2 runs: a viewer runs no solve or study.
+- Q3 comments: a viewer may add a report comment and withdraw their own (`withdraw` checks the author for a viewer); addressing a comment stays an editor's write.
+- Q4 exports: a viewer downloads existing reports and deliveries and may export a report file (`POST …/reports/{id}/export`); building a delivery and generating or regenerating a report stay refused. In chat, the export and delivery tools are write-tier and stay refused: the chat is read-only for a viewer (brief), and the export button is the way.

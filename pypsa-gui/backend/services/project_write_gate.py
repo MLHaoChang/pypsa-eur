@@ -65,6 +65,16 @@ def require_writable(db: DBSession, user: User | None, project: Project | None) 
         raise refusal()
 
 
+def is_viewer(db: DBSession, user: User | None, project_uuid: str | None) -> bool:
+    """True when `user` only views the project with id `project_uuid`."""
+    import uuid
+
+    if user is None or not project_uuid:
+        return False
+    project = db.get(Project, uuid.UUID(str(project_uuid)))
+    return project is not None and project_acl.project_role(db, user, project) == project_acl.VIEW
+
+
 @dataclass(frozen=True)
 class Rule:
     kind: str     # "write" | "allow" | "none"

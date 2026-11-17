@@ -210,6 +210,9 @@ ALLOWED = {
     ("POST", "/api/projects/{project_id}/activate"), ("DELETE", "/api/projects/{project_id}/lock"),
     ("POST", "/api/projects/{name}/sites/{site_id}/scene/proposals"),
     ("POST", "/api/projects/{name}/studies/{study_id}/grid-extension-break-even"),
+    # Owner decision VIEWER-ROLE-1 (2026-11-17): Q3 comments, Q4 report export.
+    ("POST", "/api/projects/{name}/reports/{report_id}/comments"),
+    ("POST", "/api/projects/{name}/reports/{report_id}/export"),
 }
 
 
@@ -323,12 +326,13 @@ def test_a_non_member_and_another_org_see_the_plain_404(world, as_user, other_or
 
 def test_the_handler_rows_are_exactly_the_queue_routes():
     handler = sorted(k for k, r in RULES.items() if r.detail == "handler")
-    assert handler == [
+    assert sorted(handler) == sorted([
         ("POST", "/api/simulation/queue"),
         ("POST", "/api/simulation/queue/cancel_queued"),
         ("POST", "/api/simulation/queue/{job_id}/abort"),
         ("POST", "/api/simulation/queue/{job_id}/requeue"),
-    ]
+        ("POST", "/api/projects/{name}/reports/{report_id}/comments/{comment_id}/withdraw"),
+    ])
 
 
 def test_a_viewer_cannot_queue_a_solve_of_the_project(world, as_user):
@@ -490,3 +494,28 @@ def test_no_read_tier_tool_is_bound_to_a_route_a_viewer_is_refused():
                 if rule is not None and rule.kind == "write":
                     bound.append((tool, entry[0], entry[1]))
     assert bound == []
+
+
+# ── owner decision VIEWER-ROLE-1 Q3: a viewer comments, and withdraws only their own ──
+
+def test_a_viewer_comments_on_a_report_and_withdraws_only_their_own(world, as_user):
+    from services.reports import revisions, store
+    from tests import test_report_revisions as reports
+
+    store.create_report(world["path"], reports._doc())
+    rid = reports.RID
+    editors = revisions.add_comment(world["path"], rid, "editor note", reports._anchor(),
+                                    user="someone-else@example.com")
+    viewer = as_user(world["viewer"])
+    added = viewer.post(f"/api/projects/{world['project']}/reports/{rid}/comments",
+                        json={"text": "please shorten", "anchor": {"section_id": "grid", "block_index": 0}})
+    assert added.status_code == 200, added.text
+    mine = added.json()["comment_id"]
+    base = f"/api/projects/{world['project']}/reports/{rid}/comments"
+    refused = viewer.post(f"{base}/{editors.comment_id}/withdraw")
+    assert refused.status_code == 403 and _kind(refused) == KIND
+    assert viewer.post(f"{base}/{mine}/withdraw").status_code == 200
+    status = {c.comment_id: c.status for c in revisions.load_comments(world["path"], rid)}
+    assert status[editors.comment_id] == "open" and status[mine] == "withdrawn"
+    addressed = viewer.post(f"{base}/{editors.comment_id}/address", json={})
+    assert addressed.status_code == 403 and _kind(addressed) == KIND

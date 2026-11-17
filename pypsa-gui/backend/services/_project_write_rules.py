@@ -232,10 +232,10 @@ POST   /api/projects/{name}/reports  write path:name
 POST   /api/projects/{name}/reports/generate  write path:name
 POST   /api/projects/{name}/reports/generate/abort  write path:name
 DELETE /api/projects/{name}/reports/{report_id}  write path:name
-POST   /api/projects/{name}/reports/{report_id}/comments  write path:name
+POST   /api/projects/{name}/reports/{report_id}/comments  allow a viewer may comment on a report (owner decision VIEWER-ROLE-1, Q3); the report itself is unchanged
 POST   /api/projects/{name}/reports/{report_id}/comments/{comment_id}/address  write path:name
-POST   /api/projects/{name}/reports/{report_id}/comments/{comment_id}/withdraw  write path:name
-POST   /api/projects/{name}/reports/{report_id}/export  write path:name
+POST   /api/projects/{name}/reports/{report_id}/comments/{comment_id}/withdraw  write handler
+POST   /api/projects/{name}/reports/{report_id}/export  allow a viewer may export a report file (owner decision VIEWER-ROLE-1, Q4); the stored report is unchanged
 POST   /api/projects/{name}/reports/{report_id}/roundtrip  write path:name
 POST   /api/projects/{name}/reports/{report_id}/sections/{section_id}/regenerate  write path:name
 POST   /api/projects/{name}/reports/{report_id}/template  write path:name

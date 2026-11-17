@@ -86,6 +86,7 @@ from db.session import get_db
 from deps import optional_user
 from models.report import ReportDocument
 from routers.deps import AuthorizedProject, ProjectAccessDep
+from services import project_write_gate
 from services.http_filenames import content_disposition
 from services.reports import pdf, roundtrip_service, store, templates
 from services.reports.docx_reader import TemplateOutline
@@ -1152,6 +1153,12 @@ def withdraw_report_comment(report_id: str, comment_id: str,
 
     _latest_or_404(project, report_id)
     _check_lock(project, db, user)
+    # A viewer may withdraw only their own comment (owner decision VIEWER-ROLE-1, Q3).
+    if project_write_gate.is_viewer(db, user, project.uuid):
+        mine = [c for c in revisions.load_comments(project.directory, report_id)
+                if c.comment_id == comment_id and c.created_by == getattr(user, "email", None)]
+        if not mine:
+            raise project_write_gate.refusal()
     try:
         comment = revisions.withdraw(project.directory, report_id, comment_id)
     except (revisions.RevisionError, store.ReportStoreError) as exc:
