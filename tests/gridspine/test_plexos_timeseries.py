@@ -21,6 +21,7 @@ import pytest
 
 pypsa = pytest.importorskip("pypsa")
 
+from gridspine.ingest.import_result import ImportFormatError  # noqa: E402
 from gridspine.ingest.plexos_csv import (  # noqa: E402
     file_key,
     match_files,
@@ -746,3 +747,327 @@ def test_last_period_of_the_day():
     body = "Year,Month,Day,Period,A\n2015,1,1,24,5\n"
     snaps = pd.DatetimeIndex(["2015-01-01 23:00"])
     assert series(body, snaps=snaps)["A"].tolist() == [5]
+
+
+# ------------------------------------ plexos_import survivors (input, mapping)
+
+
+def _zip_of(path: Path, members: dict[str, bytes]) -> Path:
+    with zipfile.ZipFile(path, "w") as zf:
+        for arc, data in members.items():
+            zf.writestr(arc, data)
+    return path
+
+
+def test_csv_exactly_at_the_cap_is_read(tmp_path, monkeypatch):
+    from gridspine.ingest import plexos_import
+
+    body = b"Datetime,A\n"
+    monkeypatch.setattr(plexos_import, "MAX_CSV_BYTES", len(body))
+    csv = tmp_path / "a.csv"
+    csv.write_bytes(body)
+    with _read_input([IRL, csv]).data_files["a.csv"]() as fh:
+        assert fh.read() == body
+    path = _zip_of(tmp_path / "m.zip", {"m.xml": b"<a/>", "csv/a.csv": body})
+    assert _read_input([path]).data_files["csv/a.csv"]().read() == body
+
+
+def test_member_cap_is_checked_again_while_reading(tmp_path, monkeypatch):
+    from gridspine.ingest import plexos_import
+
+    path = _zip_of(tmp_path / "m.zip", {"m.xml": b"<a/>", "x.csv": b"1" * 10})
+    opener = _read_input([path]).data_files["x.csv"]
+    monkeypatch.setattr(plexos_import, "MAX_MEMBER_BYTES", 10)
+    assert opener().read() == b"1" * 10
+    monkeypatch.setattr(plexos_import, "MAX_MEMBER_BYTES", 9)
+    with pytest.raises(
+        ImportFormatError, match="m.zip refused: 'x.csv' unpacks larger than it states"
+    ):
+        opener()
+
+
+def test_loose_csv_refusals(tmp_path):
+    for d in ("a", "b"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "x.csv").write_bytes(b"1")
+    with pytest.raises(ImportFormatError, match="two data files are named x.csv"):
+        _read_input([IRL, tmp_path / "a" / "x.csv", tmp_path / "b" / "x.csv"])
+    with pytest.raises(ImportFormatError, match="gone.csv cannot be read"):
+        _read_input([IRL, tmp_path / "gone.csv"])
+    path = _zip_of(tmp_path / "m.zip", {"m.xml": b"<a/>", "x.csv": b"2"})
+    with pytest.raises(
+        ImportFormatError, match="x.csv is both in m.zip and given separately"
+    ):
+        _read_input([path, tmp_path / "a" / "x.csv"])
+
+
+def test_row_level_data_file_text_is_the_path():
+    text_row = {"texts": [("Data File", "csv_files\\load.csv")]}
+    m = model(rows=[("Node", "A", "Load", 9, "MW", text_row)], files=())
+    iso = "Datetime,A\n" + "".join(f"{t:%Y-%m-%d %H:%M},7\n" for t in HOURS)
+    conv = run(m, {"load.csv": iso.encode()})  # no Data File, so no Locale
+    assert conv.network.loads_t.p_set["A"].tolist() == [7.0] * 48
+    assert conv.ledger.dest[("t_data", "2")] == "network"
+    # the 9 MW is the file's placeholder, not a static load (GK A Q3)
+    assert sum(conv.load_mw.values()) == 0
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        None,
+        [],
+        [("Data File", "a.csv"), ("Data File", "load.csv")],
+        [("Data File", " ")],
+    ],
+)
+def test_data_file_without_one_file_name(texts):
+    m = model(rows=[("Node", "A", "Load", 0, "MW", filed())])
+    m.rows = [
+        dataclasses.replace(r, texts=texts) if r.property == "Filename" else r
+        for r in m.rows
+        if texts is not None or r.property != "Filename"
+    ]
+    conv = run(m, {"load.csv": hourly({"A": [1]})})
+    assert conv.network.loads.empty
+    assert unmapped_reason(conv, "Node 'A'") == [
+        "data file: Data File 'F' gives no file name"
+    ]
+    assert unmapped_reason(conv, "Data File 'F'") == [
+        "no time series was read from this file"
+    ]
+    assert conv.ledger.dest[("t_attribute_data", "Data File|F|Locale")] == "unmapped"
+
+
+def test_data_file_attributes_land_by_whether_the_file_was_read():
+    rows = [("Node", "A", "Load", 0, "MW", filed())]
+    other = [("Data File", "F", "Decimal Places", 2.0)]
+    conv = run(model(rows=rows, attrs=other), {"load.csv": hourly({"A": [1]})})
+    dest = conv.ledger.dest
+    assert dest[("t_attribute_data", "Data File|F|Locale")] == "network"
+    assert dest[("t_attribute_data", "Data File|F|Decimal Places")] == "unmapped"
+    assert unmapped_reason(conv, "Data File 'F'") == ["attribute not imported yet"]
+    conv = run(model(rows=rows, attrs=other), {"other.csv": hourly({"A": [1]})})
+    assert conv.ledger.dest[("t_attribute_data", "Data File|F|Locale")] == "unmapped"
+    assert sorted(unmapped_reason(conv, "Data File 'F'")) == [
+        "attribute not imported yet",
+        "no time series was read from this file",
+    ]
+
+
+def test_two_static_rows_for_one_property_are_both_refused():
+    rows = [("Node", "A", "Load", 5, "MW"), ("Node", "A", "Load", 6, "MW")]
+    conv = run(model(rows=rows))
+    assert conv.network.loads.empty
+    assert unmapped_reason(conv, "Node 'A'") == ["2 base values for 'Load'; none used"]
+    two = [
+        ("Node", "A", "Load", 0, "MW", filed()),
+        ("Node", "A", "Load", 0, "MW", filed()),
+    ]
+    conv = run(model(rows=two), {"load.csv": hourly({"A": [1]})})
+    assert unmapped_reason(conv, "Node 'A'") == ["2 base values for 'Load'; none used"]
+
+
+def test_filed_load_placeholder_is_not_tallied():
+    m = model(rows=[("Node", "A", "Load", 9, "MW", filed())])
+    conv = run(m, {"load.csv": hourly({"A": [1]})})
+    assert conv.network.loads_t.p_set["A"].sum() == 48
+    assert sum(conv.load_mw.values()) == 0
+
+
+def _fuel_price(*price):
+    objects = [("Generator", "G"), ("Fuel", "Gas")]
+    rows = [
+        ("Generator", "G", "Units", 1, "-"),
+        ("Generator", "G", "Max Capacity", 50, "MW"),
+        ("Generator", "G", "Heat Rate", 10, "GJ/MWh"),
+        *price,
+    ]
+    members = [
+        (("Generator", "G"), ("Node", "A"), "Nodes"),
+        (("Generator", "G"), ("Fuel", "Gas"), "Fuels"),
+    ]
+    return run(model(objects, rows, members), {"load.csv": hourly({"Gas": [3]})})
+
+
+def test_fuel_price_unit_and_absence():
+    conv = _fuel_price(("Fuel", "Gas", "Price", 0, "$/MWh", filed()))
+    assert unmapped_reason(conv, "Fuel 'Gas'") == [
+        "unit '$/MWh' for 'Price' is not converted (expects $/GJ)"
+    ]
+    assert conv.network.generators_t.marginal_cost.empty
+    conv = _fuel_price(("Fuel", "Gas", "Price", 4, "$/MWh"))
+    assert unmapped_reason(conv, "Fuel 'Gas'") == [
+        "unit '$/MWh' for 'Price' is not converted (expects $/GJ)"
+    ]
+    conv = _fuel_price(("Fuel", "Gas", "Price", 4, "$/GJ"))
+    assert conv.network.generators.loc["G", "marginal_cost"] == 40
+    assert conv.sidecars[FUEL_PRICES_SIDECAR]["fuels"][0]["source"] == "static Price"
+    conv = _fuel_price()
+    assert not unmapped_reason(conv, "Fuel 'Gas'")
+
+
+def _rated(rf):
+    rows = [
+        ("Generator", "G", "Units", 1, "-"),
+        ("Generator", "G", "Max Capacity", 50, "MW"),
+        rf,
+    ]
+    members = [(("Generator", "G"), ("Node", "A"), "Nodes")]
+    return run(
+        model([("Generator", "G")], rows, members),
+        {"load.csv": hourly({"G": [0, 100, 120]})},
+    )
+
+
+def test_rating_factor_unit_and_first_bad_cell():
+    conv = _rated(("Generator", "G", "Rating Factor", 50, "-"))
+    assert conv.network.generators.loc["G", "p_max_pu"] == 1.0
+    assert unmapped_reason(conv, "Generator 'G'") == [
+        "unit '-' for 'Rating Factor' is not converted (expects %)"
+    ]
+    conv = _rated(("Generator", "G", "Rating Factor", 0, "%", filed()))
+    assert unmapped_reason(conv, "Generator 'G'") == [
+        "Rating Factor 120 % at 2015-01-01 02:00:00 outside [0, 100] %"
+    ]
+
+
+def _hydro(store=None, gen=None, **kw):
+    """hydro_model() with some of its rows replaced: {property: (unit, value)}."""
+    m = hydro_model(**kw)
+    for obj, change in (
+        (("Storage", "S"), store or {}),
+        (("Generator", "G"), gen or {}),
+    ):
+        m.rows = [
+            dataclasses.replace(
+                r, unit=change[r.property][0], value=change[r.property][1]
+            )
+            if r.child == obj and r.property in change
+            else r
+            for r in m.rows
+            if not (r.child == obj and change.get(r.property, 0) is None)
+        ]
+    return m
+
+
+@pytest.mark.parametrize("gwh, mwh", [(0.0, 0.0), (2.0, 2000.0)])
+def test_initial_volume_bounds_are_inclusive(gwh, mwh):
+    conv = run(_hydro({"Initial Volume": ("GWh", gwh)}))
+    assert conv.network.storage_units.loc["G", "state_of_charge_initial"] == mwh
+    assert not unmapped_reason(conv, "Storage 'S'")
+
+
+@pytest.mark.parametrize(
+    "store, gen, reason",
+    [
+        ({"Max Volume": ("GWh", 0.0)}, {}, "Max Volume unlimited or not above 0"),
+        ({"Max Volume": ("GWh", 1e29)}, {}, "Max Volume unlimited or not above 0"),
+        ({}, {"Max Capacity": ("MW", 0.0)}, "no usable Max Capacity (MW, above 0)"),
+        ({}, {"Max Capacity": ("kW", 100.0)}, "no usable Max Capacity (MW, above 0)"),
+        ({}, {"Max Capacity": None}, "no usable Max Capacity (MW, above 0)"),
+    ],
+)
+def test_hydro_capacity_and_volume_refused(store, gen, reason):
+    conv = run(_hydro(store, gen))
+    assert conv.network.storage_units.empty
+    assert reason in unmapped_reason(conv, "Storage 'S'")
+    assert reason in unmapped_reason(conv, "Generator 'G'")
+
+
+def test_hydro_min_volume_zero_used_otherwise_unmapped():
+    rows = [("Storage", "S", "Min Volume", 0, "GWh")]
+    conv = run(hydro_model(store_rows=rows))
+    assert not unmapped_reason(conv, "Storage 'S'")
+    rows = [("Storage", "S", "Min Volume", 0.1, "GWh")]
+    conv = run(hydro_model(store_rows=rows))
+    assert unmapped_reason(conv, "Storage 'S'") == [
+        "minimum volume is not imported yet"
+    ]
+
+
+def test_hydro_inflow_in_another_unit_unmapped():
+    rows = [("Storage", "S", "Natural Inflow", 7, "GWh")]
+    conv = run(hydro_model(store_rows=rows))
+    assert conv.network.storage_units.loc["G", "inflow"] == 0
+    assert unmapped_reason(conv, "Storage 'S'") == [
+        "unit 'GWh' for 'Natural Inflow' is not converted (expects MW)"
+    ]
+
+
+def test_hydro_p_nom_is_capacity_times_units_and_carrier_falls_back():
+    m = _hydro(gen={"Units": ("-", 2.0)})
+    m.objects[("Generator", "G")] = dataclasses.replace(
+        m.objects[("Generator", "G")], category=None
+    )
+    su = run(m).network.storage_units.loc["G"]
+    assert (su.p_nom, su.max_hours, su.carrier) == (200.0, 10.0, "hydro")
+
+
+def test_storage_as_waterway_parent_is_a_cascade():
+    conv = run(
+        hydro_model(
+            objects=[("Waterway", "W")],
+            members=[(("Storage", "S"), ("Waterway", "W"), "Waterways")],
+        )
+    )
+    assert conv.network.storage_units.empty
+    reason = "storage on a waterway: cascades are not converted yet"
+    assert unmapped_reason(conv, "Storage 'S'") == [reason]
+    assert unmapped_reason(conv, "Generator 'G'") == [reason]
+
+
+def test_hydro_generator_without_node_or_units_lists_its_storage():
+    m = hydro_model()
+    m.memberships = [x for x in m.memberships if x.collection[2] != "Nodes"]
+    conv = run(m)
+    assert unmapped_reason(conv, "Storage 'S'") == ["generator needs exactly one node"]
+    assert unmapped_reason(conv, "Generator 'G'") == [
+        "needs exactly one node (no node)"
+    ]
+    conv = run(_hydro(gen={"Units": ("-", 0.0)}))
+    assert unmapped_reason(conv, "Storage 'S'") == ["generator not built"]
+    assert unmapped_reason(conv, "Generator 'G'") == ["0 units: not built"]
+    conv = run(_hydro({"Units": ("-", 0.0)}))
+    assert unmapped_reason(conv, "Generator 'G'") == ["storage not built"]
+    assert sorted(unmapped_reason(conv, "Storage 'S'")) == [
+        "0 units: not built",
+        "storage not built",
+    ]
+
+
+def test_cascade_lists_objects_without_rows():
+    m = model(
+        [("Generator", "G"), ("Storage", "S"), ("Storage", "T")],
+        [],
+        [
+            (("Generator", "G"), ("Node", "A"), "Nodes"),
+            (("Generator", "G"), ("Storage", "S"), "Head Storage"),
+            (("Generator", "G"), ("Storage", "T"), "Tail Storage"),
+        ],
+    )
+    conv = run(m)
+    reason = "tail storage (pumped or cascaded hydro) is not converted yet"
+    for item in ("Generator 'G'", "Storage 'S'", "Storage 'T'"):
+        assert unmapped_reason(conv, item) == [reason]
+
+
+def test_leftover_rows_say_why_by_kind():
+    rows = [
+        ("Generator", "G", "Pump Load", 10, "MW"),
+        ("Generator", "G", "Aux Base", 1, "MW"),
+        ("Generator", "G", "Aux Incr", 0, "%", filed()),
+    ]
+    conv = run(hydro_model(gen_rows=rows), {"load.csv": hourly({"G": [1]})})
+    assert sorted(r for r in reasons(conv) if r[0].startswith("Generator")) == [
+        ("Generator 'G' (Aux Base)", "property not imported yet"),
+        ("Generator 'G' (Aux Incr)", "time series for 'Aux Incr' is not imported yet"),
+        ("Generator 'G' (Pump Load)", "pumping is not imported yet"),
+    ]
+
+
+def test_convert_without_options_or_files():
+    m = hydro_model()
+    conv = convert(m)
+    check_ledger(m, conv)
+    assert conv.network.storage_units.loc["G", "p_nom"] == 100
