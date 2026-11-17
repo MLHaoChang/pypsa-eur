@@ -38,9 +38,11 @@ PROTECTION = "protection"
 
 
 def series_caps(net, live_only: bool = True) -> pd.DataFrame:
-    """The series-capacitor rows of ``net.impedance`` (empty when none): the
+    """
+    The series-capacitor rows of ``net.impedance`` (empty when none): the
     in-service ones, or with ``live_only=False`` also those
-    ``bypass_for_faults`` took out."""
+    ``bypass_for_faults`` took out.
+    """
     imp = getattr(net, "impedance", None)
     if imp is None or imp.empty or MARK not in imp.columns:
         return pd.DataFrame(columns=getattr(imp, "columns", []))
@@ -49,10 +51,12 @@ def series_caps(net, live_only: bool = True) -> pd.DataFrame:
 
 
 def refuse(net, what: str) -> None:
-    """Raise ``ContractError`` naming every series capacitor in ``net``: ``what``
+    """
+    Raise ``ContractError`` naming every series capacitor in ``net``: ``what``
     walks only lines and transformers, so it would see each capacitor's far
     side cut off. A bypassed one counts too: its bus-bus switch is no line
-    either."""
+    either.
+    """
     caps = series_caps(net, live_only=False)
     if not caps.empty:
         names = sorted(map(str, caps["name"]))
@@ -63,16 +67,24 @@ def refuse(net, what: str) -> None:
 
 
 def bypass_for_faults(net):
-    """Short every ``bypassed`` series capacitor of ``net`` in place, for an
+    """
+    Short every ``bypassed`` series capacitor of ``net`` in place, for an
     IEC 60909 / grid-strength calculation (IEC 60909-0 neglects a capacitor
     with a voltage-limiting device in parallel). Each one's impedance goes out
     of service and a closed bus-bus switch joins its buses. ``protection:
-    none`` keeps it in. Returns ``net``."""
+    none`` keeps it in. Returns ``net``.
+    """
     caps = series_caps(net)
     for i, row in caps.iterrows():
         if row[PROTECTION] == "none":
             continue
         net.impedance.at[i, "in_service"] = False
-        pp.create_switch(net, int(row["from_bus"]), int(row["to_bus"]), et="b", closed=True,
-                         name=f"{row['name']}~bypass")
+        pp.create_switch(
+            net,
+            int(row["from_bus"]),
+            int(row["to_bus"]),
+            et="b",
+            closed=True,
+            name=f"{row['name']}~bypass",
+        )
     return net

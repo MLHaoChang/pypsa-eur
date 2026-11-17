@@ -258,7 +258,8 @@ def write_seq(campus, path, version=35, case="max", f_hz=50.0) -> list:
     Write the .seq for ``campus.net`` (as ``write_raw`` numbers it, with the
     same ``f_hz`` for the zero-sequence charging); return the assumptions applied.
     """
-    SC.refuse(campus.net, "PSS/E sequence writer")  # GC-01b: not written yet (follow-up)
+    # GC-01b: a series capacitor is not written yet (follow-up)
+    SC.refuse(campus.net, "PSS/E sequence writer")
     if version not in VERSIONS:
         raise ContractError(f"SEQ version {version!r} not in {VERSIONS}")
     if case not in CASES:
