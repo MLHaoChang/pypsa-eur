@@ -51,6 +51,10 @@ const FREEZE_TONE: Record<FreezeState, Tone> = {
   none: 'neutral', fresh: 'ok', stale: 'warn', refreeze_needed: 'warn', unreadable: 'err',
 }
 
+const COMMENT_LABEL: Record<TsoComment['status'], string> = {
+  open: 'Open', responded: 'Responded', closed: 'Closed',
+}
+
 const SUBMITTED_RANK = 5 // index of 'submitted' in the backend's status ladder
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -64,6 +68,8 @@ function saveBlob(blob: Blob, filename: string) {
 
 const inputCls = 'h-6 px-1.5 rounded border border-border-2 bg-bg text-[11px] text-text '
   + 'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]'
+const linkCls = 'text-accent underline focus:outline-none focus-visible:ring-2 '
+  + 'focus-visible:ring-[var(--color-focus)]'
 const rowBtnCls = 'w-full grid grid-cols-[44px_1fr_auto] items-center gap-2 px-3 py-1.5 text-left '
   + 'hover:bg-panel focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]'
 
@@ -77,19 +83,47 @@ export default function GridComplianceSection({ name }: { name: string }) {
 
   const data = q.data
   const accepted = data?.deliverables.filter(d => d.status === 'accepted').length ?? 0
+  const started = data?.deliverables.filter(d => d.status !== 'not_started').length ?? 0
   return (
     <PageSection
       title="Grid compliance (TRGC)"
       count={data ? `${accepted} of ${data.deliverables.length} accepted` : undefined}
       hint="The grid-connection study chain: data, freeze, external study, judgment, TSO submission."
-      panelSection="grid-compliance"
+      panelSection="grid_compliance"
     >
       {q.isPending && <p className="text-[11px] text-muted px-4 py-3">Loading the deliverables…</p>}
       {q.isError && (
         <p role="alert" className="text-[12px] text-danger px-4 py-3">{errorText(q.error)}</p>
       )}
+      {data && (
+        <div className="px-3 py-2 border-b border-border text-[10.5px] text-muted space-y-1">
+          <p>
+            {started === 0
+              ? 'Not started: no deliverable has moved past “Not started” yet.'
+              : `Started: ${started} of ${data.deliverables.length} deliverables have moved past “Not started”; `
+                + `${accepted} accepted by the TSO.`}
+          </p>
+          <ChipKey />
+        </div>
+      )}
       {data && <Phases name={name} state={data} open={open} setOpen={setOpen} />}
     </PageSection>
+  )
+}
+
+/** The visible key of every chip style the section uses (UX #1199). */
+function ChipKey() {
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1" aria-label="Chip key">
+      <span>Key:</span>
+      <Tag tone="neutral">Not started</Tag><span>no work yet or collecting data</span>
+      <Tag tone="accent">Judged</Tag><span>in progress with you</span>
+      <Tag tone="warn">TSO comments</Tag><span>needs your answer</span>
+      <Tag tone="ok">Accepted</Tag><span>done</span>
+      <Tag tone="ok">Frozen</Tag><span>inputs unchanged since the freeze</span>
+      <Tag tone="warn">Out of date</Tag><span>inputs changed after the freeze</span>
+      <Tag tone="err">Inputs unreadable</Tag><span>the freeze cannot be checked</span>
+    </p>
   )
 }
 
@@ -108,6 +142,7 @@ function Phases({ name, state, open, setOpen }: {
             <ul>
               {rows.map(d => (
                 <DeliverableRow key={d.code} name={name} d={d} statuses={state.statuses}
+                  hasCampusInput={state.has_campus_input}
                   open={open === d.code} onToggle={() => setOpen(open === d.code ? null : d.code)} />
               ))}
             </ul>
@@ -123,8 +158,9 @@ export function blockedMessage(d: Deliverable, statuses: GcStatus[]): string | n
   return `Submission waits for ${d.blocked_by.map(c => `TRGC ${c}`).join(', ')} to be judged`
 }
 
-function DeliverableRow({ name, d, statuses, open, onToggle }: {
-  name: string; d: Deliverable; statuses: GcStatus[]; open: boolean; onToggle: () => void
+function DeliverableRow({ name, d, statuses, hasCampusInput, open, onToggle }: {
+  name: string; d: Deliverable; statuses: GcStatus[]; hasCampusInput: boolean
+  open: boolean; onToggle: () => void
 }) {
   const blocked = blockedMessage(d, statuses)
   const detailId = `gc-detail-${d.code}`
@@ -147,7 +183,7 @@ function DeliverableRow({ name, d, statuses, open, onToggle }: {
       </button>
       {open && (
         <div id={detailId} className="px-3 pb-3 pt-1 bg-panel space-y-3">
-          <Detail name={name} d={d} statuses={statuses} />
+          <Detail name={name} d={d} statuses={statuses} hasCampusInput={hasCampusInput} />
         </div>
       )}
     </li>
@@ -159,7 +195,9 @@ function useRefresh(name: string) {
   return () => qc.invalidateQueries({ queryKey: GRID_COMPLIANCE_KEY(name) })
 }
 
-function Detail({ name, d, statuses }: { name: string; d: Deliverable; statuses: GcStatus[] }) {
+function Detail({ name, d, statuses, hasCampusInput }: {
+  name: string; d: Deliverable; statuses: GcStatus[]; hasCampusInput: boolean
+}) {
   const refresh = useRefresh(name)
   const [error, setError] = useState<string | null>(null)
   const on = { onMutate: () => setError(null), onSuccess: refresh, onError: (e: unknown) => setError(errorText(e)) }
@@ -172,6 +210,11 @@ function Detail({ name, d, statuses }: { name: string; d: Deliverable; statuses:
     onError: (e: unknown) => setError(errorText(e)),
   })
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const requestPanelSection = useUIStore(s => s.requestPanelSection)
+  const toCampusFile = () => withReturnFrom(() => {
+    setSlidePanel('campusElectrical')
+    requestPanelSection('campusElectrical', 'campus_file')
+  })
   const pending = d.feeds.filter(f => !f.available)
   return (
     <>
@@ -181,7 +224,7 @@ function Detail({ name, d, statuses }: { name: string; d: Deliverable; statuses:
           disabled={status.isPending} onChange={e => status.mutate(e.target.value as GcStatus)}>
           {statuses.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
         </select>
-        <Btn onClick={() => freeze.mutate()} disabled={freeze.isPending}>
+        <Btn onClick={() => freeze.mutate()} disabled={freeze.isPending || !hasCampusInput}>
           {freeze.isPending ? 'Freezing…' : d.freeze ? 'Freeze again' : 'Freeze data'}
         </Btn>
         <Btn onClick={() => pack.mutate()} disabled={pack.isPending}>
@@ -189,19 +232,24 @@ function Detail({ name, d, statuses }: { name: string; d: Deliverable; statuses:
         </Btn>
         <span className="text-[10px] text-muted">Status is declared by you; the tool does not judge it.</span>
       </div>
+      {!hasCampusInput && (
+        <p className="text-[11px] text-muted">
+          Freeze is off: there is no campus file yet, and the freeze records it.{' '}
+          <button type="button" className={linkCls} onClick={toCampusFile}>Campus file ›</button>
+        </p>
+      )}
       {error && <p role="alert" className="text-[11px] text-danger">{error}</p>}
       <div className="text-[11px] text-ink-700 space-y-0.5">
         {d.freeze ? (
-          <p>Model set <span className="font-mono">{d.freeze.model_set_id}</span>, frozen {d.freeze.frozen_at}
-            {' '}<Tag tone={FREEZE_TONE[d.freeze_state]}>{FREEZE_LABEL[d.freeze_state]}</Tag></p>
+          <p>Data frozen on {d.freeze.frozen_at.slice(0, 10)}{' '}
+            <Tag tone={FREEZE_TONE[d.freeze_state]}>{FREEZE_LABEL[d.freeze_state]}</Tag></p>
         ) : <p className="text-muted">The data is not frozen for this deliverable.</p>}
-        {(d.freeze_state === 'stale' || d.freeze_state === 'unreadable') && (
+        {hasCampusInput && (d.freeze_state === 'stale' || d.freeze_state === 'unreadable') && (
           <p>
-            The campus file, asset library or network changed after the freeze.{' '}
-            <button type="button" className="text-accent underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
-              onClick={() => withReturnFrom(() => setSlidePanel('campusElectrical'))}>
-              Review the campus inputs ›
-            </button>, then freeze again.
+            {d.freeze_state === 'stale'
+              ? 'The campus file, asset library or network changed after the freeze: freeze again once they are right. '
+              : 'The inputs cannot be read, so the freeze cannot be checked. '}
+            <button type="button" className={linkCls} onClick={toCampusFile}>Campus file ›</button>
           </p>
         )}
         {pending.length > 0 && (
@@ -284,6 +332,9 @@ function CommentLog({ name, d, onError }: { name: string; d: Deliverable; onErro
           maxLength={4000} value={draft.comment} onChange={e => setDraft({ ...draft, comment: e.target.value })} />
         <Btn type="submit" disabled={add.isPending || !draft.comment.trim()}>Log comment</Btn>
       </form>
+      {!draft.comment.trim() && (
+        <p className="text-[10px] text-muted mt-0.5">Log comment is off until the TSO comment is typed.</p>
+      )}
     </div>
   )
 }
@@ -311,7 +362,7 @@ function CommentItem({ name, code, c, packs, onError }: {
       <div className="flex items-center gap-2">
         <span className="font-mono text-text">{c.comment_id}</span>
         <span className="text-muted">{c.date}{c.clause && ` · ${c.clause}`}</span>
-        <Tag tone={tone}>{c.status}</Tag>
+        <Tag tone={tone}>{COMMENT_LABEL[c.status]}</Tag>
       </div>
       <p className="text-text mt-0.5 whitespace-pre-wrap">{c.comment}</p>
       <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -333,6 +384,9 @@ function CommentItem({ name, code, c, packs, onError }: {
           <Btn onClick={() => close.mutate()} disabled={close.isPending}>Close</Btn>
         )}
       </div>
+      {!response.trim() && (
+        <p className="text-[10px] text-muted mt-0.5">Save response is off until a response is typed.</p>
+      )}
     </li>
   )
 }

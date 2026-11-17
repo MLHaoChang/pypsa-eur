@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ComplianceState, Deliverable } from '../api/gridCompliance'
 import GridComplianceSection, { blockedMessage } from './GridComplianceSection'
 
-const store = vi.hoisted(() => ({ setSlidePanel: vi.fn() }))
+const store = vi.hoisted(() => ({ setSlidePanel: vi.fn(), requestPanelSection: vi.fn() }))
 vi.mock('../store/uiStore', () => ({
   useUIStore: (sel: (s: typeof store) => unknown) => sel(store),
 }))
@@ -134,11 +134,33 @@ describe('GridComplianceSection', () => {
     const r = await screen.findByTestId('gc-row-04')
     expect(within(r).getByText('Out of date')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: /Study 04/ }))
-    await user.click(screen.getByRole('button', { name: 'Review the campus inputs ›' }))
+    expect(screen.queryByText(/ms-abc/)).toBeNull() // no hash-derived ids in rows
+    expect(screen.getByText(/Data frozen on 2026-11-17/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Campus file ›' }))
+    expect(nav.withReturnFrom).toHaveBeenCalledTimes(1)
     expect(store.setSlidePanel).toHaveBeenCalledWith('campusElectrical')
-    expect(nav.withReturnFrom).toHaveBeenCalled()
+    expect(store.requestPanelSection).toHaveBeenCalledWith('campusElectrical', 'campus_file')
     await user.click(screen.getByRole('button', { name: 'Freeze again' }))
     await waitFor(() => expect(api.freeze).toHaveBeenCalledWith('P', '04'))
+  })
+
+  it('turns Freeze off with a visible reason while there is no campus file', async () => {
+    const user = userEvent.setup()
+    api.state.mockResolvedValue({ ...state([row('04')]), has_campus_input: false })
+    renderSection()
+    await user.click(await screen.findByRole('button', { name: /Study 04/ }))
+    expect((screen.getByRole('button', { name: 'Freeze data' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/Freeze is off: there is no campus file yet/)).toBeTruthy()
+    expect(screen.getByText('Log comment is off until the TSO comment is typed.')).toBeTruthy()
+  })
+
+  it('shows a key for every chip style and what started means', async () => {
+    api.state.mockResolvedValue(state([row('01', { status: 'data' }), row('02')]))
+    renderSection()
+    const key = await screen.findByLabelText('Chip key')
+    for (const word of ['Not started', 'Judged', 'TSO comments', 'Accepted', 'Frozen', 'Out of date',
+      'Inputs unreadable']) expect(within(key).getByText(word)).toBeTruthy()
+    expect(screen.getByText(/Started: 1 of 2 deliverables have moved past/)).toBeTruthy()
   })
 
   it('logs a TSO comment and answers it', async () => {
