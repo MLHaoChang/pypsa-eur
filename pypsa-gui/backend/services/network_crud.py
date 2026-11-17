@@ -427,9 +427,10 @@ def _imported_parts_problem(component_class: str, row) -> str | None:
             v = _as_float(row.get(spec.column(field)))
             if v is not None and math.isinf(v):
                 return f"the {spec.name} part's {field.replace('_', ' ')} must be a finite number"
+    rate = effective_discount_rate(row.get("discount_rate"), _global_discount_rate())
     try:
         derived = derive_composite(component_class, dict(row), scales=part_scales(component_class, row),
-                                   discount_rate=_global_discount_rate(), asset_lifetime=row.get("lifetime"))
+                                   discount_rate=rate, asset_lifetime=row.get("lifetime"))
     except ValueError as exc:
         return str(exc)
     if not all(math.isfinite(derived[c]) for c in ("capital_cost", "fom_cost")):

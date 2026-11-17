@@ -115,6 +115,12 @@ def test_an_excel_bad_priced_row_after_a_good_one_refuses_and_leaves_the_network
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
     assert "Storage 's1'" in r.json()["detail"]["message"]
+    if (
+        bad.get("inv_energy_overnight") == "inf"
+        or bad.get("inv_power_lifetime") == "inf"
+    ):
+        # The finite check's own reason, not a downstream one ("no lifetime", a non-finite derived cost).
+        assert "must be a finite number" in r.json()["detail"]["message"]
     after = session_ctx(client).network
     assert after is n
     pd.testing.assert_frame_equal(after.storage_units, before.storage_units)
@@ -134,6 +140,33 @@ def test_an_import_derives_at_the_rate_in_force(client, install_network, session
         _expected(BATTERY, 0.10)["capital_cost"]
         != _expected(BATTERY, 0.07)["capital_cost"]
     )
+
+
+def test_an_import_derives_at_the_assets_own_rate(client, install_network, session_ctx):
+    install_network(_network())
+    r = _import(client, _legacy_workbook([{**BATTERY, "discount_rate": 0.05}]))
+    assert r.status_code == 200, r.text
+    _assert_derived(session_ctx(client).network.storage_units, "s0", rate=0.05)
+    assert (
+        _expected(BATTERY, 0.05)["capital_cost"] != _expected(BATTERY)["capital_cost"]
+    )
+
+
+def test_a_priced_row_is_checked_at_its_own_rate():
+    """The check derives at the rate the re-derive uses: an asset's own rate that makes the annuity fail
+    refuses, though the project's would not."""
+    from fastapi import HTTPException
+
+    from services.network_crud import rederive_imported_parts
+
+    n = _network()
+    n.storage_units["discount_rate"] = n.storage_units["discount_rate"].astype(float)
+    n.storage_units.at["bess", "discount_rate"] = float("nan")
+    rederive_imported_parts(n)  # blank own rate: the project's
+    n.storage_units.at["bess", "discount_rate"] = float("inf")
+    with pytest.raises(HTTPException) as exc:
+        rederive_imported_parts(n)
+    assert "Storage 'bess'" in exc.value.detail["message"]
 
 
 # ── the native exports: Excel, netCDF, CSV bundle ────────────────────────────
@@ -222,6 +255,8 @@ def test_a_native_import_of_a_bad_priced_part_is_refused(
     )
     assert r.status_code == 422, r.text
     assert "bess2" in r.text
+    if value == float("inf"):
+        assert "must be a finite number" in r.json()["detail"]["message"]
     assert session_ctx(client).network is good
     pd.testing.assert_frame_equal(good.storage_units, before.storage_units)
 
@@ -265,24 +300,43 @@ def test_pack_pricing_of_a_battery_onto_a_priced_row_still_rederives():
 
 def test_every_caller_prices_a_class_with_parts_only_as_a_battery():
     """`PartsOwnCosts` is a guard no caller reaches: each prices a row it has just added, and a storage unit
-    or line only as a battery. A new caller that breaks this must map the refusal to a typed kind."""
+    or line only as a battery. Every call of `price_from_pack` or a `_price` wrapper in the app (the wrappers'
+    own bodies forward their arguments) must name its class, and a class with parts must name "battery". A new
+    caller that breaks this must map the refusal to a typed kind."""
+    import ast
     import pathlib
-    import re
 
     root = pathlib.Path(__file__).resolve().parents[1]
-    call = re.compile(
-        r'_?price(?:_from_pack)?\(\s*\w+,\s*"(\w+)",\s*[^,]+,\s*"([\w-]+)"'
-    )
     seen = []
-    for path in [
-        *root.glob("project_templates/*.py"),
-        root / "services/adequacy/redundancy.py",
-    ]:
-        for attr, tech in call.findall(path.read_text()):
-            seen.append((path.name, attr, tech))
-            if attr in ("storage_units", "lines"):
-                assert tech == "battery", (path.name, attr, tech)
-    assert any(a == "storage_units" for _, a, _ in seen) and len(seen) > 10
+    for folder in ("services", "routers", "harness", "project_templates"):
+        for path in (root / folder).rglob("*.py"):
+            tree = ast.parse(path.read_text())
+            wrappers = {
+                id(node)
+                for fn in ast.walk(tree)
+                if isinstance(fn, ast.FunctionDef) and fn.name == "_price"
+                for node in ast.walk(fn)
+            }
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or id(node) in wrappers:
+                    continue
+                f = node.func
+                fname = f.id if isinstance(f, ast.Name) else getattr(f, "attr", None)
+                if fname not in ("price_from_pack", "_price"):
+                    continue
+                args = node.args
+                # (component, name, technology) on a bound wrapper, else (n, component, name, technology).
+                at = 0 if args and isinstance(args[0], ast.Constant) else 1
+                comp, tech = args[at], args[at + 2]
+                where = f"{path.name}:{node.lineno}"
+                assert isinstance(comp, ast.Constant), where
+                seen.append((where, comp.value))
+                if comp.value in ("storage_units", "lines"):
+                    assert isinstance(tech, ast.Constant) and tech.value == "battery", (
+                        where
+                    )
+    assert sum(c == "storage_units" for _, c in seen) >= 5 and len(seen) > 20, seen
+    assert any(w.startswith("redundancy.py") and c == "storage_units" for w, c in seen)
 
 
 # ── library reference apply ──────────────────────────────────────────────────
@@ -340,6 +394,20 @@ def test_a_blank_part_cell_on_a_priced_row_is_not_a_refusal():
         su[col] = su[col].astype(object)
         su.at["bess", col] = None
     assert "Storage 'bess'" in rederive_imported_parts(n)
+
+
+def test_a_nan_part_cell_on_a_priced_row_is_blank():
+    from services.network_crud import rederive_imported_parts
+
+    n = _network()
+    for col in ("inv_energy_overnight", "inv_energy_lifetime", "inv_energy_fom_share"):
+        n.storage_units.at["bess", col] = float("nan")
+    assert "Storage 'bess'" in rederive_imported_parts(n)
+    power = {k: v for k, v in BATTERY.items() if k.startswith("inv_power")}
+    want = _expected(power)
+    assert n.storage_units.at["bess", "capital_cost"] == pytest.approx(
+        want["capital_cost"], rel=1e-12
+    )
 
 
 def test_the_import_log_note_names_the_rederived_rows():
