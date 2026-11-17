@@ -310,6 +310,28 @@ def test_hand_network_solves_and_survives_netcdf(hand, tmp_path):
         ("ElmXnet", "44;Grid;2;1.0;-1000.0;500.0;0.1;0.2;SL;0", "sk max mva -1000"),
         ("ElmTerm", "14;EHV;2;0;0", "nominal voltage (kV) 0"),
         ("TypHmccur", "50;drive;3;1;7;11;3;20.0;0.0;9.0", "order 1"),
+        ("TypHmccur", "50;drive;3;5;7;11;3;-20.0;0.0;9.0", "amplitude -20"),
+        ("TypLne", "30;L1 type;33.0;0.5;-0.1;0.4;3.0;0.1", "must not be negative"),
+        ("TypLne", "30;L1 type;33.0;0.5;0.1;0;3.0;0.1", "x must be above zero"),
+        ("TypLne", "30;L1 type;33.0;0.5;0.1;0.4;-3.0;0.1", "must not be negative"),
+        ("TypLne", "30;L1 type;33.0;0.5;0.1;0.4;3.0;-0.1", "must not be negative"),
+        (
+            "TypTr2",
+            "32;T type;10.0;33.0;11.0;10.0;-10.0;10.0;0.5;11.0;2.5;0;0",
+            "copper losses give r -0.001",
+        ),
+        (
+            "TypTr2",
+            "32;T type;10.0;33.0;11.0;10.0;50.0;-1.0;0.5;11.0;2.5;0;0",
+            "no-load losses give g -0.0001",
+        ),
+        ("ElmShnt", "45;Cap;2;2;11.0;-6.0;3;2;0", "must be 0..rated"),
+        ("ElmShnt", "45;Cap;2;2;11.0;6.0;3;-1;0", "must be 0..rated"),
+        (
+            "ElmXnet",
+            "44;Grid;2;1.0;1000.0;500.0;-0.1;0.2;SL;0",
+            "rx_max -0.1 is negative",
+        ),
     ],
 )
 def test_each_guard_refuses_naming_the_item(tmp_path, cls, row, words):
@@ -626,3 +648,233 @@ def test_the_star_point_is_reported_at_the_bus_voltage(tmp_path):
     assert off[("T3W star", "Star point")] == 132.0
     # (130/132)/(33/33) on the MV leg
     assert off[("T3W MV", "Off-nominal ratio")] == pytest.approx(130.0 / 132.0)
+
+
+# --- every guard's boundary, and every skip, reached (mutant survivors) ---------
+
+
+@pytest.mark.parametrize(
+    "cls,row,component,name,attr,want",
+    [
+        # zero r, b and g are allowed on a line; only x must be above zero
+        ("TypLne", "30;L1 type;33.0;0.5;0;0.4;0;0", "Line", "L1", "r", 0.0),
+        ("TypLne", "30;L1 type;33.0;0.5;0;0.4;0;0", "Line", "L1", "b", 0.0),
+        ("TypLne", "30;L1 type;33.0;0.5;0;0.4;0;0", "Line", "L1", "g", 0.0),
+        # no copper losses: r 0; losses giving r exactly z: x 0
+        (
+            "TypTr2",
+            "32;T type;10.0;33.0;11.0;10.0;0;10.0;0.5;11.0;2.5;0;0",
+            "Transformer",
+            "T2W",
+            "r",
+            0.0,
+        ),
+        (
+            "TypTr2",
+            "32;T type;10.0;33.0;11.0;10.0;1000.0;10.0;0.5;11.0;2.5;0;0",
+            "Transformer",
+            "T2W",
+            "x",
+            0.0,
+        ),
+        # the 2nd harmonic is an order the screen takes
+        (
+            "TypHmccur",
+            "50;drive;3;2;7;11;3;20.0;0.0;9.0",
+            "Load",
+            "Load",
+            "harmonic_spectrum",
+            "2:20, 11:9",
+        ),
+        ("ElmGenstat", "41;PV;2;5.0;1.0;3.0;1.0;0", "Generator", "PV", "p_nom", 5.0),
+        # no reactive power, or no step in service: b 0
+        ("ElmShnt", "45;Cap;2;2;11.0;0;3;2;0", "ShuntImpedance", "Cap", "b", 0.0),
+        ("ElmShnt", "45;Cap;2;2;11.0;6.0;3;0;0", "ShuntImpedance", "Cap", "b", 0.0),
+        (
+            "ElmXnet",
+            "44;Grid;2;1.0;1000.0;500.0;0;0.2;SL;0",
+            "Generator",
+            "Grid",
+            "rx_max",
+            0.0,
+        ),
+        # two-winding parallel units multiply the rating
+        ("ElmTr2", "33;T2W;2;32;-2;2;0", "Transformer", "T2W", "s_nom", 20.0),
+        # an unnamed element is named by its class and ID
+        ("ElmLne", "31;;2;30;10.0;2;0", "Line", "line 31", "length", 10.0),
+    ],
+)
+def test_each_guard_boundary_is_accepted(
+    tmp_path, cls, row, component, name, attr, want
+):
+    oid = row.split(";")[0]
+    rows = _with(**{cls: [row if r.split(";")[0] == oid else r for r in ROWS[cls]]})
+    n = read_text(tmp_path, dgs_text(rows)).network
+    got = n.components[component].static.at[name, attr]
+    assert got == (pytest.approx(want) if isinstance(want, float) else want)
+
+
+def test_an_empty_short_circuit_field_is_left_out(tmp_path):
+    rows = _with(ElmXnet=["44;Grid;2;1.0;1000.0;;0.1;0.2;SL;0"])
+    g = read_text(tmp_path, dgs_text(rows)).network.generators.loc["Grid"]
+    assert g.sk_max_mva == 1000.0 and "sk_min_mva" not in g.index
+
+
+def test_a_second_external_grid_keeps_the_first_ones_strength(tmp_path):
+    rows = _with(
+        ElmXnet=[*ROWS["ElmXnet"], "48;Grid2;2;1.0;2000.0;800.0;0.3;0.4;SL;0"],
+        StaCubic=[*ROWS["StaCubic"], "118;c;10;48;0"],
+    )
+    g = read_text(tmp_path, dgs_text(rows)).network.generators
+    assert g.loc["Grid", ["sk_max_mva", "sk_min_mva", "rx_max", "rx_min"]].tolist() == [
+        1000.0,
+        500.0,
+        0.1,
+        0.2,
+    ]
+    assert g.at["Grid2", "sk_max_mva"] == 2000.0
+
+
+def test_a_tap_ratio_of_zero_is_refused(tmp_path):
+    rows = _with(
+        TypTr2=["32;T type;10.0;33.0;11.0;10.0;50.0;10.0;0.5;11.0;50.0;0;0"],
+        ElmTr2=["33;T2W;2;32;-2;1;0"],  # 1 + 50 % * (-2) = 0
+    )
+    with pytest.raises(ImportFormatError, match="tap position -2 gives ratio 0"):
+        read_text(tmp_path, dgs_text(rows))
+
+
+@pytest.mark.parametrize(
+    "typ,assumed",
+    [
+        ("32;T type;10.0;33.0;11.0;10.0;50.0;10.0;0.5;11.0;2.5;0;0", None),
+        ("32;T type;10.0;34.0;11.0;10.0;50.0;10.0;0.5;11.0;2.5;0;0", 34.0 / 33.0),
+        ("32;T type;10.0;33.0;10.0;10.0;50.0;10.0;0.5;11.0;2.5;0;0", 11.0 / 10.0),
+    ],
+)
+def test_a_two_winding_off_nominal_ratio_is_recorded(tmp_path, typ, assumed):
+    res = read_text(tmp_path, dgs_text(_with(TypTr2=[typ])))
+    got = [
+        a.value
+        for a in res.report.assumed
+        if (a.asset, a.parameter) == ("T2W", "Off-nominal ratio")
+    ]
+    assert got == ([] if assumed is None else [pytest.approx(assumed)])
+
+
+T3_PCU_HEAD = dict(HEAD, TypTr3=HEAD["TypTr3"] + ";pcut3_h(r);pcut3_m(r);pcut3_l(r)")
+
+
+@pytest.mark.parametrize("hm,ok", [(-1.0, False), (6000.0, False), (5000.0, True)])
+def test_three_winding_copper_losses_are_guarded(tmp_path, hm, ok):
+    # hm pair: 10 % on 50 MVA, so z = 0.1 and r = kW / 50 000; 5000 kW is r = z
+    t3 = f"34;T3 type;100.0;50.0;25.0;132.0;33.0;11.0;10.0;8.0;12.0;{hm};0;0"
+    text = dgs_text(_with(TypTr3=[t3]), T3_PCU_HEAD)
+    if ok:
+        assert len(read_text(tmp_path, text).network.transformers) == 4
+    else:
+        with pytest.raises(ImportFormatError, match="copper losses hm give r above z"):
+            read_text(tmp_path, text)
+
+
+def test_a_three_winding_leg_off_its_bus_voltage_scales_r_too(tmp_path):
+    t3 = "34;T3 type;100.0;50.0;25.0;132.0;33.0;10.0;10.0;8.0;12.0;300;50;100"
+    tr = read_text(tmp_path, dgs_text(_with(TypTr3=[t3]), T3_PCU_HEAD)).network
+    # the LV leg's r (0.0015 on its own rating, see the copper-loss test)
+    # moves from 10 kV to the 11 kV bus
+    assert tr.transformers.at["T3W LV", "r"] == pytest.approx(0.0015 * (10 / 11) ** 2)
+
+
+def test_scaling_applies_to_generators_and_machines(tmp_path):
+    head = dict(
+        HEAD,
+        ElmGenstat=HEAD["ElmGenstat"] + ";scale0(r)",
+        ElmSym=HEAD["ElmSym"] + ";scale0(r)",
+    )
+    rows = _with(
+        ElmGenstat=["41;PV;2;5.0;0.9;3.0;1.0;0;2.0"],
+        ElmSym=["43;Gen;2;42;4.0;1.02;0;0;0.5"],
+    )
+    g = read_text(tmp_path, dgs_text(rows, head)).network.generators
+    assert (g.at["PV", "p_set"], g.at["PV", "q_set"]) == (6.0, 2.0)
+    assert g.at["Gen", "p_set"] == 2.0
+
+
+def test_a_unit_without_a_spectrum_gets_no_harmonic_columns(hand):
+    cols = hand.network.generators.columns
+    assert not {"harmonic_spectrum", "harmonic_source", "rated_mva"} & set(cols)
+
+
+def _unmapped(res):
+    return sorted(
+        (u.source_item.split(" (line")[0], u.reason) for u in res.report.unmapped
+    )
+
+
+def test_an_element_with_a_loose_end_is_reported_and_left_out(tmp_path):
+    cubic = [
+        r
+        for r in ROWS["StaCubic"]
+        if r.split(";")[0] not in ("105", "107", "110", "111")
+    ]
+    cubic.append("111;c;2;40;0")  # the load's cubicle sits in the grid, not a terminal
+    res = read_text(tmp_path, dgs_text(_with(StaCubic=cubic)))
+    got = _unmapped(res)
+    for item, side in (
+        ("ElmLne 'L1'", 1),
+        ("ElmTr2 'T2W'", 1),
+        ("ElmTr3 'T3W'", 2),
+        ("ElmLod 'Load'", 0),
+    ):
+        assert (item, f"side {side} is not connected to a terminal") in got
+    n = res.network
+    assert n.lines.empty and n.loads.empty and n.transformers.empty
+
+
+def test_a_cubicle_missing_either_end_is_reported(tmp_path):
+    cubic = [*ROWS["StaCubic"], "118;c;;40;1", "119;c;12;;0"]
+    got = _unmapped(read_text(tmp_path, dgs_text(_with(StaCubic=cubic))))
+    reason = "a cubicle without its element or terminal"
+    assert got.count(("StaCubic 'c'", reason)) == 2
+
+
+def test_a_coupler_missing_either_side_is_reported(tmp_path):
+    rows = _with(
+        ElmCoup=[*ROWS["ElmCoup"], "22;C3;2;1", "23;C4;2;1"],
+        StaCubic=[*ROWS["StaCubic"], "118;c;10;22;0", "119;c;10;23;1"],
+    )
+    res = read_text(tmp_path, dgs_text(rows))
+    got = _unmapped(res)
+    for c in ("C3", "C4"):
+        assert (f"ElmCoup '{c}'", "a coupler not between two terminals") in got
+    assert res.report.counts["Couplers"] == 2
+
+
+def test_an_element_pointing_at_the_wrong_type_is_reported(tmp_path):
+    rows = _with(
+        ElmLne=["31;L1;2;32;10.0;2;0"],  # a transformer type
+        ElmSym=["43;Gen;2;32;4.0;1.02;0;0"],
+        ElmLod=["40;Load;2;3.0;1.0;2.0;42;0"],  # a machine type as spectrum
+    )
+    res = read_text(tmp_path, dgs_text(rows))
+    got = _unmapped(res)
+    assert ("ElmLne 'L1'", "no TypLne type") in got
+    assert ("ElmSym 'Gen'", "no TypSym type") in got
+    assert (
+        "ElmLod 'Load'",
+        "its harmonic source is not a harmonic current type",
+    ) in got
+    assert "Gen" not in res.network.generators.index
+
+
+def test_a_line_type_class_absent_from_the_file_is_reported(tmp_path):
+    rows = _with(ElmLne=["31;L1;2;;10.0;2;0"])
+    del rows["TypLne"]
+    got = _unmapped(read_text(tmp_path, dgs_text(rows)))
+    assert ("ElmLne 'L1'", "no TypLne type") in got
+
+
+def test_a_closed_switch_keeps_its_element_in_service(tmp_path):
+    rows = _with(StaSwitch=[*ROWS["StaSwitch"], "91;S-Gen;113;1"])
+    g = read_text(tmp_path, dgs_text(rows)).network.generators
+    assert bool(g.at["Gen", "active"]) and not bool(g.at["PV", "active"])
