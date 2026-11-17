@@ -520,3 +520,14 @@ def test_a_kept_series_capacitor_name_blocks_an_equivalent_of_the_same_name():
         match=r"the equivalent name\(s\) \['EQ_MV'\] are already taken",
     ):
         aggregate(_plant_with_aux_feeder("EQ_MV"))
+
+
+def test_a_bad_hourly_status_is_printed_as_a_plain_number():
+    import pandas as pd
+
+    from gridspine.schema.campus import HOURLY_COLUMNS, validate_hourly
+
+    row = {"unit_id": "PV1", "period": 0, "hour": 0, "status": 2, "p_mw": 0.0}
+    df = pd.DataFrame([{c: row.get(c, 0.0) for c in HOURLY_COLUMNS}])
+    with pytest.raises(ContractError, match=r"status must be 0 or 1, got \[2\]$"):
+        validate_hourly(df)
