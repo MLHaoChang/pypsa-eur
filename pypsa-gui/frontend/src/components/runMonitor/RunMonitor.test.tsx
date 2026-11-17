@@ -231,7 +231,7 @@ describe('RunMonitor', () => {
   it.each([
     ['ended', 'Plan <b>"A"</b>', 'Your answer is saved. \u201cPlan <b>"A"</b>\u201d has ended; ask to resume the run.'],
     ['waiting_job', 'Wait', 'Your answer is saved. This run waits for \u201cWait\u201d, which waits on a job; ask to resume the run once it ends.'],
-    ['unreadable', null, 'Your answer is saved. This run waits for the chat\u2019s other task, which this project cannot read because it belongs to another project; ask to resume the run once it ends.'],
+    ['unreadable', null, 'Your answer is saved. This run waits for the chat\u2019s other task, which can\u2019t be read here because it belongs to another project or needs repair; ask to resume the run once it ends.'],
   ])('the held line words a %s task as text, never markup (LC-48e)', async (status, title, words) => {
     const base = STATES.held_by_switch
     vi.mocked(api.getRun).mockResolvedValue({ ...base, run: { ...base.run,

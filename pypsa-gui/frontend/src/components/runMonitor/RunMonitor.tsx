@@ -104,7 +104,7 @@ function heldWords(active: { title: string | null; status: string }): string {
   const named = active.title ? `\u201c${active.title}\u201d` : 'the chat\u2019s other task'
   if (active.status === 'ended') return `Your answer is saved. ${active.title ? named : 'The chat\u2019s other task'} has ended; ask to resume the run.`
   const why = active.status === 'unreadable'
-    ? 'which this project cannot read because it belongs to another project'
+    ? 'which can\u2019t be read here because it belongs to another project or needs repair'
     : active.status === 'waiting_job' ? 'which waits on a job' : 'which is still running'
   return `Your answer is saved. This run waits for ${named}, ${why}; ask to resume the run once it ends.`
 }
