@@ -131,6 +131,10 @@ export function StepPeriodEconomics({
   capexBudgetPerPeriod, onCapexBudgetChange, capexBudgetPending,
 }: StepPeriodEconomicsProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  // The load growth row's own check (homer-parity 04a), shown above the table
+  // so a sideways-scrolled table never hides it.
+  const [growthProblem, setGrowthProblem] = useState<string | null>(null)
+  const growthAlert = growthProblem ?? loadGrowthError
 
   if (periods.length === 0) {
     return (
@@ -225,6 +229,9 @@ export function StepPeriodEconomics({
               carrier plus CAPEX budget — see the file header for why that's
               a conditional-render column split on this ONE table rather than
               a second table behind StepShell's `advanced` slot. */}
+          {advancedOpen && growthAlert && (
+            <div role="alert" className="text-[10px] text-danger mt-1">{growthAlert}</div>
+          )}
           <div className="border border-border rounded overflow-auto max-h-64 mt-1">
             <table
               className="w-full text-[11px] border-collapse"
@@ -262,7 +269,7 @@ export function StepPeriodEconomics({
                     onRateChange={onLoadGrowthChange}
                     onBaseYearChange={onLoadGrowthBaseYearChange}
                     pending={loadGrowthPending}
-                    serverProblem={loadGrowthError}
+                    onProblem={setGrowthProblem}
                   />
                 )}
                 {periodWeightings.map((row, i) => {
@@ -475,7 +482,7 @@ export function StepPeriodEconomics({
  * above that carrier's multiplier column, and the year growth compounds from.
  * The server derives the multipliers below; this row only edits the inputs. */
 function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, onBaseYearChange, pending,
-  serverProblem }: {
+  onProblem }: {
   loadCarriers: Array<{ key: string; label: string }>
   periods: number[]
   rates: Record<string, number>
@@ -483,9 +490,8 @@ function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, o
   onRateChange: (carrier: string, ratePct: number | null) => void
   onBaseYearChange: (year: number) => void
   pending: boolean
-  serverProblem: string | null
+  onProblem: (problem: string | null) => void
 }) {
-  const [problem, setProblem] = useState<string | null>(null)
   const first = periods.length > 0 ? Math.min(...periods) : null
   const shownYear = baseYear ?? first
   return (
@@ -508,7 +514,7 @@ function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, o
               const y = parseInt(e.target.value, 10)
               const msg = Number.isFinite(y) ? loadGrowthProblem(0, y, periods)
                 : 'Growth from year: must be a year'
-              setProblem(msg)
+              onProblem(msg)
               if (msg) { e.target.value = String(shownYear ?? ''); return }
               if (y !== shownYear) onBaseYearChange(y)
             }}
@@ -516,9 +522,7 @@ function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, o
           />
           {baseYear == null && <span>· defaults to the first investment period</span>}
         </div>
-        {(problem ?? serverProblem) && (
-          <div role="alert" className="text-danger mt-0.5">{problem ?? serverProblem}</div>
-        )}
+
       </td>
       {loadCarriers.map(({ key, label }) => {
         const rate = rates[key]
@@ -537,13 +541,14 @@ function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, o
                 onBlur={e => {
                   const raw = e.target.value.trim()
                   if (!raw) {
-                    setProblem(null)
+                    onProblem(null)
                     if (rate != null) onRateChange(key, null)
                     return
                   }
                   const v = parseFloat(raw)
                   const msg = loadGrowthProblem(v, baseYear, periods)
-                  setProblem(msg)
+                    ?.replace(/^Load growth:/, `Load growth (${label}):`) ?? null
+                  onProblem(msg)
                   if (msg) { e.target.value = rate != null ? String(rate) : ''; return }
                   if (v !== rate) onRateChange(key, v)
                 }}
