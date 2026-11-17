@@ -247,7 +247,9 @@ def test_reactive_current_rise_and_sign():
     assert r["status"] == "fail" and r["measured"] is None
     slow = np.clip((T - 0.2) / 0.05 * 0.8, 0.0, 0.8) * ((T >= 0.2) & (T < 0.35))
     r = _rows(_iq_case(T, v, slow))["reactive_current_rise"]
-    assert r["status"] == "fail" and r["measured"] == pytest.approx(0.045, abs=1.5e-4)  # within one 0.1 ms sample
+    assert r["status"] == "fail" and r["measured"] == pytest.approx(
+        0.045, abs=1.5e-4
+    )  # within one 0.1 ms sample
     # an overvoltage needs inductive (negative) current
     v_high = np.where(
         (T >= 0.2) & (T < 0.35), 1.3, 1.0
@@ -608,3 +610,322 @@ def test_100_pct_and_zero_times_are_in_range():
         },
     }
     validate_profile("x", p)
+
+
+# --- one targeted test per guard and boundary (GK A2 B8) --------------------------------------------------------
+
+
+def test_curve_interpolates_on_the_first_segment():
+    assert curve_at([[0.0, 0.0], [1.0, 1.0]], [0.5])[0] == 0.5
+
+
+FULL = {"v1": "V", "iq": "IQ", "p": "P", "connected": "CONN"}
+
+
+def _full_frame(v=None, iq=None, p=None, conn=None):
+    one = np.ones_like(T)
+    return _frame(
+        T,
+        V=one if v is None else v,
+        IQ=0 * one if iq is None else iq,
+        P=one if p is None else p,
+        CONN=one if conn is None else conn,
+    )
+
+
+def test_absent_envelopes_are_not_in_profile_even_with_every_channel():
+    res = judge(_full_frame(), _lvrt_case(**FULL), {})
+    assert {r["check"] for r in res["rows"]} >= {
+        "reactive_current_rise",
+        "active_power_recovery",
+    }
+    assert all(
+        r["detail"].endswith("not in profile") and r["clause"] == ""
+        for r in res["rows"]
+    )
+    step = judge(
+        _frame(TS, Y=0 * TS),
+        {"id": "s", "kind": "setpoint_step", "t_event": 0.2, "channels": {"y": "Y"}},
+        {},
+    )
+    assert all(
+        r["detail"] == "setpoint_step_response not in profile" for r in step["rows"]
+    )
+    droop = judge(
+        _frame(TS, F=50 + 0 * TS, P=0 * TS),
+        {
+            "id": "d",
+            "kind": "frequency_step",
+            "t_event": 0.2,
+            "channels": {"f": "F", "p": "P"},
+        },
+        {},
+    )
+    assert droop["rows"][0]["detail"] == "frequency_droop not in profile"
+
+
+def test_missing_step_and_droop_channels_are_unknown():
+    step = judge(
+        _frame(TS, F=0 * TS),
+        {"id": "s", "kind": "setpoint_step", "t_event": 0.2, "channels": {}},
+        PROFILE,
+    )
+    assert all(
+        r["status"] == "unknown" and "role 'y'" in r["detail"] for r in step["rows"]
+    )
+    droop = judge(
+        _frame(TS, F=50 + 0 * TS),
+        {"id": "d", "kind": "frequency_step", "t_event": 0.2, "channels": {"f": "F"}},
+        PROFILE,
+    )
+    assert (
+        droop["rows"][0]["status"] == "unknown"
+        and "role 'p'" in droop["rows"][0]["detail"]
+    )
+
+
+def test_clause_and_source_come_from_the_envelope():
+    r = _rows(judge(_full_frame(), _lvrt_case(**FULL), PROFILE))["voltage_within_curve"]
+    assert (r["clause"], r["source"]) == ("synthetic test clause", "assumed")
+
+
+def test_no_voltage_role_names_v1_and_v_ll_min_feeds_the_reactive_check():
+    rows = _rows(judge(_full_frame(), _lvrt_case(iq="IQ"), PROFILE))
+    assert "role 'v1'" in rows["reactive_current_rise"]["detail"]
+    v = np.where((T >= 0.2) & (T < 0.35), 0.5, 1.0)
+    iq = np.where((T >= 0.22) & (T < 0.35), 0.8, 0.0)
+    case = {**_lvrt_case(), "channels": {"v_ll_min": "V", "iq": "IQ"}}
+    assert (
+        _rows(judge(_full_frame(v=v, iq=iq), case, PROFILE))["reactive_current_rise"][
+            "status"
+        ]
+        == "pass"
+    )
+
+
+def test_pre_window_needs_a_sample_and_includes_its_start():
+    with pytest.raises(ContractError, match="no sample in the 4e-05 s before t_event"):
+        judge(
+            _full_frame(),
+            {**_lvrt_case(**FULL), "t_event": 0.20005, "pre_window_s": 0.00004},
+            PROFILE,
+        )
+    p = np.where(
+        T == 0.1, 0.0, P_REC
+    )  # the window's first sample, exactly t_event - 0.1 s
+    assert "pre-fault 0.999 pu" in _p_case(p)["active_power_recovery"]["detail"]
+
+
+def test_end_window_includes_its_start():
+    y = np.where(TS < 0.2, 0.0, 1.0)
+    y = np.where(np.isclose(TS, 0.9), 1.1, y)  # exactly t[-1] - 0.1 s
+    rows = _step(y, target=None)
+    assert (
+        "final value 1.00099 " in rows["rise_time"]["detail"]
+    )  # 101 samples, one at 1.1
+
+
+def test_fault_window_is_event_inclusive_and_clear_exclusive():
+    v = np.where((T >= 0.2) & (T < 0.35), 0.5, 1.0)
+    v = np.where((T == 0.2) | (T == 0.35), 0.0, v)  # distinct values on both edges
+    r = _rows(_iq_case(T, v, 0 * T))["reactive_current_rise"]
+    assert f"voltage deviation {1.0 - (0.0 + 1499 * 0.5) / 1500:g} pu" in r["detail"]
+
+
+def test_deadband_edges_are_unknown():
+    v = np.where(
+        (T >= 0.2) & (T < 0.35), 0.9, 1.0
+    v = np.where((T >= 0.2) & (T < 0.35), 0.75, 1.0)
+    r = _rows(
+        judge(
+            _full_frame(v=v),
+            _lvrt_case(**FULL),
+            {"reactive_current_injection": {**IQ, "deadband_pu": 0.25}},
+        )
+    )
+    assert r["reactive_current_rise"]["status"] == "unknown"
+    r = _droop(50.25, 0.35, {**DROOP, "deadband_hz": 0.25})
+    assert r["status"] == "unknown"
+
+
+def test_reactive_current_exactly_at_need_and_rise_at_limit():
+    v = np.where((T >= 0.2) & (T < 0.35), 0.5, 1.0)
+    need = IQ["target_pct"] / 100 * IQ["k_gain"] * (abs(1.0 - 0.5) - IQ["deadband_pu"])
+    iq = np.where((T >= 0.227) & (T < 0.35), need, 0.0)
+    r = _rows(_iq_case(T, v, iq))["reactive_current_rise"]
+    assert r["at_s"] == pytest.approx(0.227)
+    at_limit = {**IQ, "rise_time_s": r["measured"]}
+    res = judge(
+        _frame(T, V=v, IQ=iq),
+        {**_lvrt_case(v1="V", iq="IQ")},
+        {"reactive_current_injection": at_limit},
+    )
+    assert _rows(res)["reactive_current_rise"]["status"] == "pass"
+    under = {**IQ, "rise_time_s": float(np.nextafter(r["measured"], 0))}
+    res = judge(
+        _frame(T, V=v, IQ=iq),
+        {**_lvrt_case(v1="V", iq="IQ")},
+        {"reactive_current_injection": under},
+    )
+    assert _rows(res)["reactive_current_rise"]["status"] == "fail"
+
+
+def test_recovery_scales_with_pre_fault_power_and_exact_level_counts():
+    p = 0.8 * P_REC
+    r = _p_case(p)["active_power_recovery"]
+    assert r["measured"] == pytest.approx(0.18, abs=1e-4)
+    level = PREC["recovery_pct"] / 100 * 0.5  # an exact pre-fault mean
+    held = np.where(
+        T < 0.2, 0.5, np.where(T < 0.4, 0.0, level)
+    )  # sits exactly on the level
+    r = _p_case(held)["active_power_recovery"]
+    assert r["status"] == "pass" and r["at_s"] == pytest.approx(0.4)
+
+
+def test_recovery_and_ramp_at_their_limits():
+    took = _p_case(P_REC)["active_power_recovery"]["measured"]
+    assert (
+        _p_case(P_REC, {**PREC, "time_s": took})["active_power_recovery"]["status"]
+        == "pass"
+    )
+    under = float(np.nextafter(took, 0))
+    assert (
+        _p_case(P_REC, {**PREC, "time_s": under})["active_power_recovery"]["status"]
+        == "fail"
+    )
+    ramp = _p_case(P_REC, {**PREC, "ramp_min_pu_per_s": 1.0})["active_power_ramp"][
+        "measured"
+    ]
+    assert (
+        _p_case(P_REC, {**PREC, "ramp_min_pu_per_s": ramp})["active_power_ramp"][
+            "status"
+        ]
+        == "pass"
+    )
+    over = float(np.nextafter(ramp, 10))
+    assert (
+        _p_case(P_REC, {**PREC, "ramp_min_pu_per_s": over})["active_power_ramp"][
+            "status"
+        ]
+        == "fail"
+    )
+
+
+def test_ramp_fails_when_power_never_recovers():
+    r = _p_case(np.where(T >= 0.2, 0.0, 1.0), {**PREC, "ramp_min_pu_per_s": 1.0})[
+        "active_power_ramp"
+    ]
+    assert r["status"] == "fail" and r["measured"] is None
+
+
+def test_step_at_the_event_sample_and_exact_rise_level():
+    jump = np.where(TS < 0.2, 0.0, 1.0)
+    rows = _step(jump)
+    assert (
+        rows["rise_time"]["measured"] == 0.0
+        and rows["settling_time"]["measured"] == 0.0
+    )
+    ramp = np.where(
+        TS < 0.2, 0.0, np.where(TS < 0.23, 0.5, np.where(TS < 0.24, 0.9, 1.0))
+    )
+    assert _step(ramp)["rise_time"]["at_s"] == pytest.approx(0.23)
+
+
+def test_step_limits_at_the_edge():
+    rows = _step(_step_response())
+    rise, over = rows["rise_time"]["measured"], rows["overshoot"]["measured"]
+    assert (
+        _step(_step_response(), env={**STEP, "rise_time_s": rise})["rise_time"][
+            "status"
+        ]
+        == "pass"
+    )
+    assert (
+        _step(
+            _step_response(), env={**STEP, "rise_time_s": float(np.nextafter(rise, 0))}
+        )["rise_time"]["status"]
+        == "fail"
+    )
+    assert (
+        _step(_step_response(), env={**STEP, "overshoot_max_pct": over})["overshoot"][
+            "status"
+        ]
+        == "pass"
+    )
+    assert (
+        _step(
+            _step_response(),
+            env={**STEP, "overshoot_max_pct": float(np.nextafter(over, 0))},
+        )["overshoot"]["status"]
+        == "fail"
+    )
+
+
+def test_droop_tolerance_edge():
+    r = _droop(50.5, 0.35, {**DROOP, "tolerance_pct": 1.0})
+    margin = r["margin"]
+    tol = 1.0 - margin  # |measured - set|
+    assert _droop(50.5, 0.35, {**DROOP, "tolerance_pct": tol})["status"] == "pass"
+    assert (
+        _droop(50.5, 0.35, {**DROOP, "tolerance_pct": float(np.nextafter(tol, 0))})[
+            "status"
+        ]
+        == "fail"
+    )
+
+
+def test_trip_on_the_exit_sample_is_allowed_and_status_must_be_binary():
+    v = np.where(T < 0.2, 1.0, curve_at(LVRT["points"], T - 0.2) + 0.05)
+    v_out = np.where(T >= 0.6, 0.5, v)
+    trip = np.where(T >= 0.6, 0.0, 1.0)
+    r = _rows(
+        judge(
+            _frame(T, V=v_out, CONN=trip), _lvrt_case(v1="V", connected="CONN"), PROFILE
+        )
+    )
+    assert r["stays_connected"]["status"] == "pass"
+    with pytest.raises(ContractError, match="must be 0 or 1"):
+        judge(
+            _frame(T, V=v, CONN=0.5 + 0 * T),
+            _lvrt_case(v1="V", connected="CONN"),
+            PROFILE,
+        )
+
+
+@pytest.mark.parametrize(
+    "change,match",
+    [
+        ({"id": 5}, "needs an id"),
+        ({"t_event": "0.2"}, "finite time from 0"),
+        ({"t_event": True}, "finite time from 0"),
+        ({"t_event": 0.0}, "not inside the record"),
+        ({"t_event": 1.5}, "not inside the record"),
+        ({"t_clear": 0.2}, "must be after t_event"),
+        ({"t_clear": 1.6}, "must be after t_event"),
+        ({"target": True}, "target must be a finite number"),
+        ({"target": "1"}, "target must be a finite number"),
+    ],
+)
+def test_more_case_refusals(change, match):
+    with pytest.raises(ContractError, match=match):
+        judge(_full_frame(), {**_lvrt_case(**FULL), **change}, PROFILE)
+
+
+def test_clearing_at_the_last_sample_is_allowed():
+    judge(_full_frame(), {**_lvrt_case(**FULL), "t_clear": 1.5}, PROFILE)
+
+
+def test_profile_point_shapes_and_optional_ramp():
+    validate_profile("x", {**_base(), "active_power_recovery": PREC})
+    validate_profile(
+        "x", {**_base(), "lvrt_curve": {**LVRT, "points": [[0.0, 0.0], [0.2, 0.9]]}}
+    )
+    for points, match in [
+        ("ab", "non-empty list"),
+        ([[0, 0.2, 1]], r"points\[0\]"),
+        (["ab"], r"points\[0\]"),
+        ([{"t": 0}], r"points\[0\]"),
+        ([[0, -0.1]], r"points\[0\]"),
+    ]:
+        with pytest.raises(ContractError, match=match):
+            validate_profile("x", {**_base(), "lvrt_curve": {**LVRT, "points": points}})

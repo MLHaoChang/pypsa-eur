@@ -241,7 +241,7 @@ class _Case:
             if role not in self.channels:
                 return f"the case maps no channel to role {role!r}"
             if self.channels[role] not in self.frame:
-                return f"{self.frame.source or 'the frame'} has no channel {self.channels[role]!r} ({role})"
+                return f"{self.frame.source} has no channel {self.channels[role]!r} ({role})"
         return None
 
     def values(self, role):
@@ -374,7 +374,12 @@ def _ride_through(case, profile):
             ),
         ]
     held = after & (t < t_exit) if t_exit is not None else after
-    tripped = np.flatnonzero(case.values("connected")[held] < 0.5)
+    status = case.values("connected")
+    if not np.isin(status, (0.0, 1.0)).all():
+        raise ContractError(
+            f"{case.where}: the connected channel {case.channels['connected']!r} must be 0 or 1"
+        )
+    tripped = np.flatnonzero(status[held] == 0)
     if tripped.size:
         at = float(t[held][tripped[0]])
         crow = _row(
@@ -446,7 +451,7 @@ def _reactive_current(case, profile):
     side = "capacitive" if sign > 0 else "inductive"
     detail = (
         f"{side} change of {need:g} pu needed ({env['target_pct']:g} % of {env['k_gain']:g} x "
-        f"{beyond:g} pu beyond the deadband)"
+        f"{beyond:g} pu beyond the deadband; voltage deviation {dv:g} pu)"
     )
     if not reached.size:
         return [
@@ -603,7 +608,8 @@ def _step(case, profile):
     else:
         yf, basis = (
             case.end_mean("y"),
-            f"no target given: final value is the mean of the last {case.end_window:g} s",
+            f"no target given: final value {case.end_mean('y'):g} is the mean of the last "
+            f"{case.end_window:g} s",
         )
     change = yf - y0
     if change == 0:
