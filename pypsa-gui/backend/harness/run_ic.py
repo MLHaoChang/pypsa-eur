@@ -37,7 +37,9 @@ TIMED_OUT = (
 # the report (`judged_by`), so the run goes on to a report that lists the
 # investment chapter as a gap with that error. An unverifiable step stays
 # `uncertain` and stops the run, as before. A step without it is unchanged.
-ON_END, CHAPTER_GAP = "on_end", "chapter_gap"
+from services.run_envelope import IC_BUDGET_KIND  # noqa: E402 (A5 (a): one literal)
+from services.run_profiles import CHAPTER_GAP, ON_END  # noqa: E402 (the profile owns them)
+
 JUDGED = "report"
 # O4: a gap step's error is its typed kind and fixed user words, plus the
 # case's own error code when it is one (never its raw error text or a path).
@@ -53,10 +55,15 @@ WALL_TIME_KIND = "ic_wall_time"
 WALL_TIME = (
     f"{WALL_TIME_KIND}: the investment case did not finish within the run's wall time."
 )
-BUDGET_KIND = "ic_budget"  # `run_envelope.IC_BUDGET_KIND` (A2, A5)
+BUDGET_KIND = IC_BUDGET_KIND  # the envelope refuses with it (A2, A5)
 BUDGET = (
     f"{BUDGET_KIND}: the run's solves left do not cover the investment case's baseline "
     "solves, so it did not run."
+)
+# A5 (b): a gap step whose error carries no kind of the set (an uncertain step,
+# a lost record) is stated as a failed case it could not verify.
+UNVERIFIED = (
+    "ic_case_failed (unverified): the investment case's outcome could not be verified."
 )
 # GK B (61) A5: the one set of kinds a chapter-gap step's error carries (run_ic
 # owns it). They are never a `tool_error` frame's kind: a gap is the report's.
@@ -88,7 +95,14 @@ def _record(ctx):
             return None
         return {
             k: record.get(k)
-            for k in ("status", "started_at", "error", "error_code", "thread")
+            for k in (
+                "status",
+                "started_at",
+                "finished_at",
+                "error",
+                "error_code",
+                "thread",
+            )
         }
 
 
@@ -158,9 +172,10 @@ def chapter_gaps(task) -> dict[str, str]:
             and not step.get("superseded")
             and step.get("status") in ("failed", "uncertain")
         ):
-            out[INVESTMENT] = str(
-                step.get("error") or f"the investment case step {step['status']}"
-            )
+            error = str(step.get("error") or "")
+            if error.split(":", 1)[0].split(" ", 1)[0] not in CHAPTER_GAP_KINDS:
+                error = UNVERIFIED  # A5 (b): a gap row always carries a kind of the set
+            out[INVESTMENT] = error
     return out
 
 
@@ -263,6 +278,19 @@ def _wall_of(path, ticket):
     ):
         return None
     return deadline
+
+
+def _ended_by(record, begun, wall) -> bool:
+    """B1, O6: the step's own case ended (not running) no later than the
+    run's wall time, so its record settles the step, never a late finish."""
+    finished = record.get("finished_at") if isinstance(record, dict) else None
+    return (
+        isinstance(record, dict)
+        and record.get("started_at") == begun
+        and record.get("status") != "running"
+        and isinstance(finished, (int, float))
+        and finished <= wall
+    )
 
 
 def _running(record, begun) -> bool:
@@ -411,7 +439,13 @@ def recover(path, ctx, *, instance, now=None, lapsed_ok=False):
                     _start_follower(path, ticket, job_id, ctx, begun)
                     continue
         if walled:  # B1: the run's wall time ended with the case still out
-            if settle_walled(path, ticket, job_id) is not None:
+            record = _record(ctx) if mine else None
+            if _ended_by(
+                record, begun, deadline
+            ):  # it ended in time; a restart lost the follower
+                if settle(path, ticket, job_id, record, begun) is not None:
+                    swept += 1
+            elif settle_walled(path, ticket, job_id) is not None:
                 swept += 1
             continue
         if late:

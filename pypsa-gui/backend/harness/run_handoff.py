@@ -54,10 +54,12 @@ def _number(value):
     return float(value)
 
 
-def read_kpis(profile: dict) -> list[dict]:
+def read_kpis(profile: dict, task: dict | None = None) -> list[dict]:
     """Each profile KPI from its retained results section on the bound
     context: `{id, label, value, unit, source, status}`, `status` "read" or
-    why it is not (`not_current`, `unreadable`)."""
+    why it is not (`not_current`, `unreadable`). When `task`'s own case step
+    is the investment chapter's gap, its case KPIs read `not_established` with
+    that gap's kind, never a case the project stored before (follow-up (a))."""
     from services import retained_results
     from services.workflow_tools import solve_freshness
 
@@ -68,9 +70,10 @@ def read_kpis(profile: dict) -> list[dict]:
     sections: dict = {}
     rows = []
     case: dict = {}
+    gap = _ic_gap(task)
     for kpi in profile.get("kpis") or []:
         if kpi.get("source") == IC_SOURCE:
-            rows.append(_ic_kpi(kpi, case))
+            rows.append(_ic_kpi(kpi, case, gap))
             continue
         row = {
             "id": kpi["id"],
@@ -126,9 +129,20 @@ _IC_STALE = frozenset({"case_stale", "results_not_current"})
 NOT_ESTABLISHED = "not_established"  # an investment-case row only
 
 
-def _ic_kpi(kpi: dict, facts: dict) -> dict:
+def _ic_gap(task: dict | None) -> str | None:
+    """The kind of the run's own investment-chapter gap, if its case step is
+    one (`run_ic.chapter_gaps`), else None."""
+    from harness import run_ic
+    from services.reports.chapters import INVESTMENT
+
+    error = run_ic.chapter_gaps(task or {}).get(INVESTMENT)
+    return None if error is None else error.split(":", 1)[0].split(" ", 1)[0]
+
+
+def _ic_kpi(kpi: dict, facts: dict, gap: str | None = None) -> dict:
     """One investment-case KPI row; `facts` caches each reader's fact for
-    this read-back, so every row of one hand-off reads one case."""
+    this read-back, so every row of one hand-off reads one case. A run whose
+    own case is the chapter's gap reads none (`gap`: its kind)."""
     from services import ic_counterfactual as ic
     from services.pypsa_service import PyPSAService
 
@@ -142,6 +156,8 @@ def _ic_kpi(kpi: dict, facts: dict) -> dict:
     }
     if reader is None:
         return {**row, "status": "unreadable", "reasons": ["unknown_kpi"]}
+    if gap is not None:
+        return {**row, "status": NOT_ESTABLISHED, "reasons": [f"chapter_gap:{gap}"]}
     try:
         if reader not in facts:
             facts[reader] = getattr(ic, reader)(
@@ -178,7 +194,7 @@ def kpis_read(task: dict, profile: dict) -> bool | None:
     stored = ((task.get("run") or {}).get("handoff") or {}).get("kpis")
     if not isinstance(stored, list) or not profile.get("kpis"):
         return None
-    fresh = read_kpis(profile)
+    fresh = read_kpis(profile, task)
     if any(r["status"] not in ("read", NOT_ESTABLISHED) for r in fresh):
         return False
     by_id = {r.get("id"): r for r in stored if isinstance(r, dict)}
@@ -399,7 +415,7 @@ def run_step(path, ctx, step) -> str:
     )  # the task file's project (as `_advance_run` reads its template)
     report = run_report.report_step(task)
     handoff = {
-        "kpis": read_kpis(profile),
+        "kpis": read_kpis(profile, task),
         "coverage": coverage(task, profile, project_dir),
         "checks": checks(task["run"]),
         "revert": revert_preview(task["run"]),

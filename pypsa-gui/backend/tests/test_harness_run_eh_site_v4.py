@@ -1015,6 +1015,39 @@ def test_recovery_past_the_wall_time_settles_the_typed_refusal(tmp_path, settled
     assert step["error"] == run_ic.WALL_TIME and step["judged_by"] == run_ic.JUDGED
 
 
+@pytest.mark.parametrize(
+    "finished_offset, expect",
+    [
+        (-5, ("done", "completed")),
+        (+5, ("timed_out", "failed")),
+        (None, ("timed_out", "failed")),
+    ],
+)
+def test_recovery_past_the_wall_time_reads_a_case_that_ended_in_time(
+    tmp_path, settled, finished_offset, expect
+):
+    """B1, O6 (review): a case that ended done before the wall time, whose
+    follower a restart lost, settles from its own record; one that finished
+    after the wall time (or with no finish time) stays the typed refusal."""
+    wall = time.time() - 1
+    job = {
+        "job_id": "ad:1",
+        "continuation": "armed",
+        "kind": run_ic.STUDY,
+        "started_at": 1.0,
+        "call_id": "a1",
+        "deadline_at": wall,
+        "deadline_kind": run_ic.WALL_TIME_KIND,
+    }
+    path = _task(tmp_path, job=job)
+    finished = None if finished_offset is None else wall + finished_offset
+    record = _record("done", finished_at=finished)
+    assert run_ic.recover(path, _ctx(tmp_path, record), instance="i1") == 1
+    assert [c[:2] for c in settled] == [expect]
+    if expect[1] == "failed":
+        assert _step(path)["error"] == run_ic.WALL_TIME
+
+
 def test_recovery_past_a_plain_follow_deadline_stays_uncertain(tmp_path, settled):
     job = {
         "job_id": "ad:1",
@@ -1182,8 +1215,8 @@ def test_a_completed_case_is_never_run_again_on_re_entry(tmp_path, settled):
 
 
 def test_the_gap_step_and_its_text_are_read_defensively():
-    """O4: a missing step is no gap step; a failed gap step with no error
-    still names its status; a task with no steps has no gap."""
+    """O4, A5 (b): a missing step is no gap step; a failed gap step with no
+    error is the typed unverified gap; a task with no steps has no gap."""
     assert run_ic._gap_step({"steps": []}, STEP) is False
     assert run_ic.chapter_gaps({}) == {}
     step = {
@@ -1192,9 +1225,7 @@ def test_the_gap_step_and_its_text_are_read_defensively():
         "status": "failed",
         "on_end": "chapter_gap",
     }
-    assert run_ic.chapter_gaps({"steps": [step]}) == {
-        C.INVESTMENT: "the investment case step failed"
-    }
+    assert run_ic.chapter_gaps({"steps": [step]}) == {C.INVESTMENT: run_ic.UNVERIFIED}
 
 
 def test_an_ic_budget_refusal_of_a_non_case_step_is_no_gap(tmp_path):
@@ -1391,6 +1422,60 @@ def _established(npv=1.5e6, irr=0.091, pre=0.12, currency="EUR"):
 
 def _by_id(rows):
     return {r["id"]: r for r in rows}
+
+
+@pytest.mark.parametrize(
+    "error, kind",
+    [
+        (run_ic.BUDGET, "ic_budget"),
+        (run_ic.WALL_TIME, "ic_wall_time"),
+        ("ic_case_failed (engine_error): the investment case failed", "ic_case_failed"),
+    ],
+)
+def test_a_run_whose_case_is_the_gap_reads_no_stored_case(monkeypatch, error, kind):
+    """Follow-up (a) (review): a run whose own case step is the chapter's gap
+    reads no case figure, even over a current case the project stored before,
+    so the hand-off and the report agree; the gate accepts the stated rows."""
+    calls = _readers(monkeypatch, *_established())
+    step = {
+        "id": STEP,
+        "tool": run_ic.TOOL,
+        "status": "failed",
+        "error": error,
+        "on_end": run_ic.CHAPTER_GAP,
+        "judged_by": run_ic.JUDGED,
+    }
+    task = {"steps": [step], "run": {}}
+    rows = run_handoff.read_kpis(KPIS, task)
+    assert calls == []  # the stored case is never read
+    assert all(
+        r["value"] is None
+        and r["status"] == run_handoff.NOT_ESTABLISHED
+        and r["reasons"] == [f"chapter_gap:{kind}"]
+        for r in rows
+    ), rows
+    task["run"]["handoff"] = {"kpis": rows}
+    assert run_handoff.kpis_read(task, KPIS) is True
+    step["status"] = "completed"
+    assert all(r["status"] == "read" for r in run_handoff.read_kpis(KPIS, task))
+
+
+@pytest.mark.parametrize(
+    "status, error", [("uncertain", run_ic.TIMED_OUT), ("failed", None)]
+)
+def test_a_gap_step_without_a_kind_is_stated_unverified(status, error):
+    """A5 (b) (review): a gap row always carries a kind of the set, also for
+    an uncertain step or one with no error, never its free text."""
+    step = {
+        "id": STEP,
+        "tool": run_ic.TOOL,
+        "status": status,
+        "error": error,
+        "on_end": run_ic.CHAPTER_GAP,
+    }
+    gaps = run_ic.chapter_gaps({"steps": [step]})
+    assert gaps == {C.INVESTMENT: run_ic.UNVERIFIED}
+    assert run_ic.UNVERIFIED.split(" ", 1)[0] in run_ic.CHAPTER_GAP_KINDS
 
 
 def test_a_current_case_reads_its_stored_figures(monkeypatch):
