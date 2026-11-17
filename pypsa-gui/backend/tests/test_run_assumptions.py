@@ -212,13 +212,44 @@ def test_the_study_record_carries_its_assumptions(client, tmp_projects_dir):
     try:
         r = client.post("/api/results/eh_study", json={"stages": ["apply_pack", "ens_solve"]})
         assert r.status_code == 200, r.text
-        rec = client.get("/api/results/eh_study").json()
+        rec = _poll_until(client, lambda rec: "assumptions" in rec
+                          or rec.get("status") != "running")
+        # Read from the study's private copy, as it is made (run_eh_study's
+        # on_private_copy), so present before the first stage ends.
         keys = {a["key"] for a in rec["assumptions"]}
         assert "mc_draws" in keys
         assert any(a["source"] == "carrier_default" for a in rec["assumptions"])
     finally:
         client.post("/api/results/eh_study/abort")
         _poll_done(client)
+
+
+def _poll_until(client, done, timeout=120.0) -> dict:
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        rec = client.get("/api/results/eh_study").json()
+        if done(rec):
+            return rec
+        time.sleep(0.1)
+    raise AssertionError("the study record never carried its assumptions")
+
+
+def test_a_recorder_failure_leaves_the_record_saying_not_recorded():
+    from types import SimpleNamespace
+
+    from services.adequacy.eh_study_runner import _assumptions_recorder
+
+    record: dict = {}
+    body = SimpleNamespace(archetype="strong_grid", mc=None)
+    class Torn:                                   # a network that cannot be read
+        def __getattr__(self, name):
+            raise RuntimeError(name)
+
+    _assumptions_recorder(record, {}, body, {})(Torn())
+    assert "assumptions" not in record
+    _assumptions_recorder(record, {}, body, {})(_net())
+    assert record["assumptions"]
 
 
 def _poll_done(client, timeout=120.0):
@@ -240,7 +271,8 @@ def test_the_report_lists_what_the_run_assumed():
     rows = run_assumptions(_net(), {}, None)
     meta = {"ledger": [{"item": "pue", "value": 1.3, "source": "assumed"}]}
     ev = collect_evidence(study_report=None, eh_report=None, worksheet=None,
-                          template_ledger=meta, run_assumptions=rows)
+                          template_ledger=meta,
+                          run_assumptions={"recorded": True, "rows": rows})
     payload = ev.sections[C.TEMPLATE_LEDGER].payload
     table = C.template_ledger_table(payload, "/x")
     labels = [r[0] for r in table.rows]
@@ -251,7 +283,19 @@ def test_the_report_lists_what_the_run_assumed():
     # Without a run, the payload is as before (the evidence hash unchanged).
     plain = collect_evidence(study_report=None, eh_report=None, worksheet=None,
                              template_ledger=meta)
-    assert "run_rows" not in plain.sections[C.TEMPLATE_LEDGER].payload
+    assert "run" not in plain.sections[C.TEMPLATE_LEDGER].payload
+
+
+@pytest.mark.parametrize(("run", "said"), [
+    ({"recorded": True, "rows": []}, "none"),
+    ({"recorded": False, "rows": []}, "not recorded for this study"),
+])
+def test_the_report_tells_none_from_not_recorded(run, said):
+    from services.reports import chapters as C
+
+    payload = C.template_ledger_payload({"ledger": []}, run)
+    table = C.template_ledger_table(payload, "/x")
+    assert table.rows == [["Inputs the study run assumed", said, "", "assumed by the run", ""]]
 
 
 # ── GK B plan conditions (Q2, A1, A3, A5) ────────────────────────────────────

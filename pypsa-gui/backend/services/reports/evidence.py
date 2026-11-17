@@ -861,7 +861,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
                      ic_stale: bool | None = None, island: dict | None = None,
                      grid_readiness: dict | None = None, template_ledger: dict | None = None,
                      grid_risk: dict | None = None, network: dict | None = None, harness_run: dict | None = None,
-                     run_assumptions: list | None = None) -> Evidence:
+                     run_assumptions: dict | None = None) -> Evidence:
     """
     Union the adequacy write-up, the EH reference design and the worksheet.
 
@@ -878,8 +878,9 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     chapters (LC-21); None, a network never solved, adds none.
     ``harness_run`` (``{task, envelope, chapters, coverage}``, a harness
     run's report stage) adds the harness chapter (study harness issue 07).
-    ``run_assumptions`` (the EH study record's ``assumptions``, template-e2e
-    08) joins the template-assumptions chapter as the run's own rows.
+    ``run_assumptions`` (``{"recorded", "rows"}`` from the EH study record's
+    ``assumptions``, template-e2e 08) joins the template-assumptions chapter
+    as the run's own rows; None, no study run, adds nothing.
     """
     has_study = isinstance(study_report, dict)
     has_eh = isinstance(eh_report, dict)

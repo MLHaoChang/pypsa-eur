@@ -240,20 +240,28 @@ class EhStudyLockBusy(Exception):
     (a solve or an edit has it): the verdict is deferred, not a refusal."""
 
 
-def _assumptions_at_start(n, cfg, lock, body, goal_sources: dict) -> list[dict]:
-    """The run's assumed inputs, read under the lock from the network the
-    worker is about to copy, with the project's template."""
+def _assumptions_recorder(record: dict, cfg, body, goal_sources: dict):
+    """``on_private_copy`` for `run_eh_study`: puts on ``record`` every input
+    the run falls back on (template-e2e 08), read from the private copy the
+    study solves, with the project's template. A failure leaves the key
+    absent ("not recorded"), never an empty list ("none assumed")."""
     from services import network_lengths
     from services.adequacy.run_assumptions import run_assumptions, study_assumptions
     from services.flow_service import read_template
 
     project_dir = network_lengths.active_project_dir()
     template = read_template(project_dir) if project_dir is not None else None
-    with lock:
-        rows = run_assumptions(n, cfg, template)
     requested = {"site_archetype": body.archetype,
                  "mc_draws": (body.mc or {}).get("draws") if isinstance(body.mc, dict) else None}
-    return study_assumptions(rows, goal_sources, requested)
+
+    def record_from(network) -> None:
+        try:
+            record["assumptions"] = study_assumptions(
+                run_assumptions(network, cfg, template), goal_sources, requested)
+        except Exception:
+            logger.exception("eh_study: the run's assumed inputs could not be read")
+
+    return record_from
 
 
 VOLL_REFUSAL = "the reliability study requires a VOLL > 0 in solver settings"
@@ -415,9 +423,6 @@ def start_eh_study(
         "dtc_attribution": dtc_attribution,
         # Where each goal field came from: stored / template / default / override.
         "goal_sources": plan["goal_sources"],
-        # Template-e2e 08: every input this run falls back on, as readiness
-        # showed it before the run (`run_assumptions`).
-        "assumptions": _assumptions_at_start(n, cfg, lock, body, plan["goal_sources"]),
         # The rest of the request (P19–P22 gate): a re-run built from this
         # record must not silently drop the user's MC / DSR / DtC choices.
         "mc": dict(body.mc) if body.mc else None,
@@ -437,6 +442,10 @@ def start_eh_study(
     from services import dirty_state
     study_ctx = PyPSAService.get_active_context()
 
+    # The project's template is read here, on the request thread, for the
+    # project this request started on.
+    record_assumptions = _assumptions_recorder(record, cfg, body, plan["goal_sources"])
+
     def worker():
         try:
             # ★ Here, not on the request thread nor in `run_eh_study`: see `dirty_state.capture`.
@@ -455,6 +464,7 @@ def start_eh_study(
                 dtc_config=dtc_config,
                 dtc_attribution=dtc_attribution,
                 dsr_buses=dsr_buses,
+                on_private_copy=record_assumptions,
                 **mc_kwargs,
             )
             pipeline = getattr(report, "pipeline", None)
