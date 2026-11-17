@@ -6,6 +6,9 @@ provider names are not keywords: switching an existing profile is supported.
 from __future__ import annotations
 
 import re
+from pathlib import Path
+
+from smoke.json_fragments import extend, extend_items
 
 DISPOSITIONS = ("out of chat", "manual", "unbuilt", "unbuilt; owner to decide later")
 
@@ -504,6 +507,50 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
 
 NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; "
         "if panel is set you may open it with ui_open_panel. Do not look for another tool or an API for them.")
+
+# A new entry or refusal goal arrives as a fragment instead of a row above
+# (RETRO-FRAG-1): `not_via_chat.d/<branch>.json`, format in that folder's
+# README. Entries keep their order: the rows above, then `not_via_chat.json`,
+# then each fragment in file-name order; `matches` breaks ties by that order. A
+# malformed fragment, or one naming an id already declared, fails the import.
+ENTRIES_FILE = Path(__file__).with_name('not_via_chat.json')
+PYTHON_ENTRIES = NOT_VIA_CHAT
+_ENTRY_KEYS = {'id', 'title', 'disposition', 'reason', 'page', 'panel', 'keywords', 'routes'}
+
+
+def _entry(raw) -> dict:
+    if not (isinstance(raw, dict) and set(raw) == _ENTRY_KEYS):
+        raise ValueError(f'an entry has exactly the keys {sorted(_ENTRY_KEYS)}')
+    texts = ('id', 'title', 'reason', 'page')
+    if not all(isinstance(raw[k], str) and raw[k] for k in texts) or raw['disposition'] not in DISPOSITIONS:
+        raise ValueError(f'{texts} are text and disposition is one of {DISPOSITIONS}')
+    if raw['panel'] is not None and not isinstance(raw['panel'], str):
+        raise ValueError('panel is null or a panel id')
+    if not (isinstance(raw['keywords'], list) and raw['keywords'] and all(isinstance(k, str) for k in raw['keywords'])):
+        raise ValueError('keywords is a non-empty list of words')
+    if not (isinstance(raw['routes'], list) and raw['routes']
+            and all(isinstance(r, list) and len(r) == 2 and all(isinstance(x, str) for x in r) for r in raw['routes'])):
+        raise ValueError('routes is a non-empty list of ["METHOD", "/api/path"] pairs')
+    return {**raw, 'keywords': frozenset(raw['keywords']), 'routes': frozenset(map(tuple, raw['routes']))}
+
+
+def load_entries(base: Path = ENTRIES_FILE) -> tuple[dict, ...]:
+    """NOT_VIA_CHAT: the rows above, then the JSON base's and the fragments' entries."""
+    return tuple(extend_items(PYTHON_ENTRIES, base, 'entries', convert=_entry))
+
+
+def load_goals(base: Path = ENTRIES_FILE) -> dict[str, str]:
+    """Refusal goals the fragments pin to their entry (`tests/test_registry_fragments.py` asks each)."""
+    ids = {e['id'] for e in load_entries(base)}
+
+    def goal(text, entry_id):
+        if entry_id not in ids:
+            raise ValueError(f'names no entry: {entry_id!r}')  # repr-ok: names a JSON key in a CI/import error
+        return text, entry_id
+    return extend({}, base, 'goals', goal)
+
+
+NOT_VIA_CHAT = load_entries()
 
 
 # A saved field value. Three asks reach it:

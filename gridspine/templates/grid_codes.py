@@ -69,6 +69,14 @@ A profile may carry these optional keys:
     seen from the connection point and an order that counts (6k +- 1 and
     the units' spectra) (datacenter grid readiness issue 12, the harmonic
     impedance scan), a positive number.
+``ssti_uif_threshold``
+    The unit interaction factor above which a synchronous machine near a
+    converter plant needs an EMT SSTI study (grid-compliance GC-08, TRGC 19),
+    a positive number.
+``subsync_torsional_clearance_hz``
+    The least distance, in Hz, between the complement f0 - f_er of a series
+    resonance seen from the connection point and a machine's torsional mode
+    (grid-compliance GC-08, TRGC 20), a positive number.
 ``pst_limit``, ``plt_limit``
     The short-term and long-term flicker severity limits at the connection
     point (grid-to-process issue 17), positive numbers. The flicker screen
@@ -174,6 +182,7 @@ _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_
                   "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
                   "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
                   "unbalance_limit_pct",
+                  "ssti_uif_threshold", "subsync_torsional_clearance_hz",
                   "current_tdd_standard",
                   "q_capability_unit",
                   "voltage_deadband_pct",
@@ -185,6 +194,7 @@ _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
                           "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct", "harmonic_resonance_clearance_h",
+                          "ssti_uif_threshold", "subsync_torsional_clearance_hz",
                           "dynamic_requirements", "notes",
                           "document", "name", "pst_limit", "plt_limit",
                           "unbalance_limit_pct",
@@ -299,6 +309,7 @@ def _check_profile(name, p):
     for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct", "thd_limit_pct",
                 "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
                 "unbalance_limit_pct",
+                "ssti_uif_threshold", "subsync_torsional_clearance_hz",
                 "voltage_deadband_pct",
                 "angle_limit_deg",
                 "pv_margin_min_pct"):

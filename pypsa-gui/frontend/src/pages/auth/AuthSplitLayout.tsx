@@ -23,18 +23,12 @@ export function AuthSplitLayout({
       <div
         aria-hidden
         className="pointer-events-none fixed inset-0 bg-[url('/img/login-bg.jpg')] bg-cover bg-[center_55%]"
-        style={{ filter: 'saturate(1.15) contrast(1.08) brightness(1.12)' }}
+        style={{ filter: 'var(--brand-backdrop-filter)' }}
       />
       <div
         aria-hidden
         className="pointer-events-none fixed inset-0"
-        style={{
-          background: [
-            'radial-gradient(1100px 720px at 8% 45%, rgba(21,17,18,0.78) 0%, rgba(21,17,18,0.62) 34%, rgba(21,17,18,0.18) 62%, transparent 100%)',
-            'linear-gradient(90deg, rgba(21,17,18,0.78) 0%, rgba(21,17,18,0.28) 42%, rgba(21,17,18,0.12) 62%, rgba(21,17,18,0.55) 100%)',
-            'linear-gradient(180deg, rgba(21,17,18,0.42) 0%, transparent 26%, transparent 62%, rgba(21,17,18,0.6) 100%)',
-          ].join(','),
-        }}
+        style={{ background: 'var(--brand-scrim)' }}
       />
 
       <div className="relative grid min-h-dvh gap-6 px-6 py-10 md:grid-cols-[1.15fr_0.85fr] md:px-10 md:py-14">
@@ -44,7 +38,7 @@ export function AuthSplitLayout({
               className="grid h-[34px] w-[34px] place-items-center rounded-[11px] text-[15px] font-black text-[var(--brand-on-red)]"
               style={{
                 background: 'linear-gradient(140deg,var(--brand-red),var(--brand-red-deeper) 70%)',
-                boxShadow: '0 8px 28px rgba(255,82,82,0.35)',
+                boxShadow: 'var(--brand-mark-glow)',
               }}
             >
               P
@@ -55,7 +49,7 @@ export function AuthSplitLayout({
           </div>
 
           <div className="max-w-[min(620px,100%)]">
-            <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/14 bg-[rgba(33,27,28,0.62)] px-3 py-1.5 text-[0.72rem] uppercase tracking-[0.14em] text-[var(--brand-ink-dim)] backdrop-blur">
+            <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--brand-line)] bg-[var(--brand-chip-bg)] px-3 py-1.5 text-[0.72rem] uppercase tracking-[0.14em] text-[var(--brand-ink-dim)] backdrop-blur">
               <span className="h-[7px] w-[7px] rounded-full bg-[var(--brand-red)]" />
               Energy system planning
             </span>
@@ -79,8 +73,8 @@ export function AuthSplitLayout({
 
         <section className="flex items-center justify-center">
           <div
-            className="w-full max-w-[440px] rounded-3xl border border-white/14 bg-[var(--brand-panel)] p-7 backdrop-blur-[26px] md:p-8"
-            style={{ boxShadow: '0 30px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)' }}
+            className="w-full max-w-[440px] rounded-3xl border border-[var(--brand-line)] bg-[var(--brand-panel)] p-7 backdrop-blur-[26px] md:p-8"
+            style={{ boxShadow: 'var(--brand-card-shadow)' }}
           >
             <div className="mb-7 space-y-2">
               <p className="text-[0.72rem] font-semibold uppercase tracking-[0.2em] text-[var(--brand-ink-dim)]">
@@ -107,8 +101,8 @@ export function AuthMessage({
   // `info` is deliberately NOT red. On a red-accented page a red chip reads as
   // a failure, and this tone carries confirmations ("Password set — sign in").
   const classes = tone === 'error'
-    ? 'rounded-2xl border border-[var(--brand-danger)]/40 bg-[rgba(90,20,22,0.3)] px-4 py-3 text-sm leading-6 text-[var(--brand-danger)]'
-    : 'rounded-2xl border border-white/14 bg-white/[0.06] px-4 py-3 text-sm leading-6 text-[var(--brand-ink)]'
+    ? 'rounded-2xl border border-[var(--brand-error-line)] bg-[var(--brand-error-bg)] px-4 py-3 text-sm leading-6 text-[var(--brand-danger)]'
+    : 'rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-ok-bg)] px-4 py-3 text-sm leading-6 text-[var(--brand-ink)]'
   return (
     <div aria-live="polite" className={classes} role="status">
       {children}
@@ -125,7 +119,7 @@ export function AuthInput(
       <span className="text-[0.82rem] font-semibold tracking-[0.02em] text-[var(--brand-ink-dim)]">{label}</span>
       <input
         {...inputProps}
-        className={`w-full rounded-2xl border border-white/14 bg-[rgba(16,13,14,0.66)] px-4 py-3 text-sm text-[var(--brand-ink)] outline-none transition placeholder:text-[var(--brand-ink-dim)]/60 focus:border-[var(--brand-red)]/65 focus:bg-[rgba(24,19,20,0.88)] focus:ring-4 focus:ring-[var(--brand-red)]/16 ${className ?? ''}`}
+        className={`w-full rounded-2xl border border-[var(--brand-line)] bg-[var(--brand-input-bg)] px-4 py-3 text-sm text-[var(--brand-ink)] outline-none transition placeholder:text-[var(--brand-placeholder)] focus:border-[var(--brand-input-line-focus)] focus:bg-[var(--brand-input-bg-focus)] focus:ring-4 focus:ring-[var(--brand-red)]/16 ${className ?? ''}`}
       />
     </label>
   )
@@ -156,7 +150,7 @@ export function AuthSecondaryButton(
   return (
     <button
       {...buttonProps}
-      className={`inline-flex w-full items-center justify-center rounded-2xl border border-white/14 bg-white/[0.04] px-4 py-3 text-sm font-medium text-[var(--brand-ink)] transition hover:border-white/25 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--brand-red)]/25 disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}
+      className={`inline-flex w-full items-center justify-center rounded-2xl border border-[var(--brand-line)] bg-transparent px-4 py-3 text-sm font-medium text-[var(--brand-ink)] transition hover:border-[var(--brand-line-strong)] hover:bg-[var(--brand-ok-bg)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--brand-red)]/25 disabled:cursor-not-allowed disabled:opacity-60 ${className ?? ''}`}
     >
       {children}
     </button>

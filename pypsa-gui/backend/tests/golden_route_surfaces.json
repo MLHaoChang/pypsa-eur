@@ -1,0 +1,4 @@
+{
+ "$comment": "Economics surfaces of route handlers (ROUTE_SURFACES in tests/test_golden_coverage.py). Rows here and in golden_route_surfaces.d/ join it; see the folder's README (RETRO-FRAG-1).",
+ "routes": {}
+}
