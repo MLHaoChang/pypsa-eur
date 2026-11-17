@@ -27,9 +27,21 @@ FIXTURES = (granted, rated, profile)
 
 
 @pytest.fixture(params=["3bus", "ieee14"])
-def baseline(request, client, session_ctx):
+def baseline(request, client, session_ctx, tmp_path, monkeypatch):
     """The shipped template created through the route as a user does, Load flow
-    on, saved once as the run's hand-over does, then bound as the run's project."""
+    on, saved once as the run's hand-over does, then bound as the run's project.
+    The template's network.nc is built here as `project_templates/_build.py`
+    does: it is gitignored and CI builds no template."""
+    import project_templates._build as classic
+    from routers import projects as projects_router
+
+    built = tmp_path / "templates" / request.param
+    built.mkdir(parents=True)
+    builder = {"3bus": classic.build_3bus, "ieee14": classic.build_ieee14}[
+        request.param
+    ]
+    builder().export_to_netcdf(str(built / "network.nc"))
+    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", built.parent)
     name = f"Grid {request.param}"
     response = client.post(
         f"/api/projects/from_template/{request.param}", params={"name": name}
