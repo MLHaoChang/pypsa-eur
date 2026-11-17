@@ -2389,7 +2389,17 @@ def answering(session, call_id, edit_card):
                             decision={"id": call_id, "by": "user"}, diff=diff,
                             before=before.get("fingerprint"), after=after)
         if row is not None and row["complete"]:
-            assistant_tasks.resume_task(task_id)
+            try:
+                assistant_tasks.resume_task(task_id)
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                if exc.status_code != 409 or detail.get("error_kind") != "switch_in_progress":
+                    raise
+                # LC-48e: the answer stands; the run waits for the chat's active
+                # task, and its card says so (LC48E-SURFACE-1, no auto-resume).
+                logger.info("run envelope: the answered run waits for the active task %s",
+                            (detail.get("active") or {}).get("id"))
+                assistant_tasks.note_held(task_id, detail)
     except Exception:  # noqa: BLE001 — the write stands; the run reads it as drift
         logger.warning("run envelope: the answer to the data request could not be settled", exc_info=True)
 

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): ERA5 cutout months for renewable profiles are now fetched in a separate process, so a download can no longer crash the app when it writes its netCDF file while a project is being saved or a profile preview is written. Timeouts, aborts and download errors behave as before.
