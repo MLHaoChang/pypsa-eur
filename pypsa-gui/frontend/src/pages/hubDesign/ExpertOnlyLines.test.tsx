@@ -125,7 +125,7 @@ const FILLED: Record<string, Record<string, string>> = {
   project: { investment_years: 'Investment years: 2030, 2040', representative_weeks: 'Representative weeks: sampled' },
   connection: {
     grid_code_profile: 'Grid code: EU RfG DCC', grid_code_document: 'Grid-code document: code.pdf',
-    poc_link: 'Point of connection: grid_import', export_link: 'Export link: grid_export',
+    poc_link: 'Point of connection: Grid import', export_link: 'Export link: Grid export',
     timezone: 'Site time zone: Europe/Berlin',
   },
   loads: { dsr_share_of_load: 'DSR volume: 20% of bus peak · b1, b2',

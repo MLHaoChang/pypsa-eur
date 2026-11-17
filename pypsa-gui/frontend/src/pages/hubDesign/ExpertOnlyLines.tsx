@@ -12,6 +12,7 @@ import { useAssetSchema } from '../../hooks/useAssetSchema'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
+import { displayName } from '../../utils/displayName'
 import { STEP_LABELS } from '../modelHorizon/StepShell'
 import { CAMPUS_KEY } from '../CampusElectricalPanel'
 import { GRID_CODES_KEY } from '../CampusGridCodeSection'
@@ -110,9 +111,9 @@ function useConnectionLines(): ExpertOnlyLine[] {
         value: NOT_APPLICABLE },
       { key: 'grid_code_document', label: FIELD_LABELS.grid_code_document, home: null,
         value: NOT_APPLICABLE },
-      { key: 'poc_link', label: FIELD_LABELS.poc_link, home, value: read(config, d => d?.poc_link ?? null) },
+      { key: 'poc_link', label: FIELD_LABELS.poc_link, home, value: read(config, d => (d?.poc_link ? displayName(d.poc_link) : null)) },
       { key: 'export_link', label: FIELD_LABELS.export_link, home,
-        value: read(config, d => (poc ? d?.export_link ?? null : null)) },
+        value: read(config, d => (poc && d?.export_link ? displayName(d.export_link) : null)) },
       { key: 'timezone', label: FIELD_LABELS.timezone, home,
         value: read(config, d => (poc ? d?.timezone ?? null : null)) },
     ]
@@ -125,9 +126,9 @@ function useConnectionLines(): ExpertOnlyLine[] {
       }) },
     { key: 'grid_code_document', label: FIELD_LABELS.grid_code_document, home,
       value: read(codes, d => names((d?.documents ?? []).map(doc => doc.filename))) },
-    { key: 'poc_link', label: FIELD_LABELS.poc_link, home, value: read(config, d => d?.poc_link ?? null) },
+    { key: 'poc_link', label: FIELD_LABELS.poc_link, home, value: read(config, d => (d?.poc_link ? displayName(d.poc_link) : null)) },
     { key: 'export_link', label: FIELD_LABELS.export_link, home,
-      value: read(config, d => (poc ? d?.export_link ?? null : null)) },
+      value: read(config, d => (poc && d?.export_link ? displayName(d.export_link) : null)) },
     { key: 'timezone', label: FIELD_LABELS.timezone, home,
       value: read(config, d => (poc ? d?.timezone ?? null : null)) },
   ]
@@ -175,14 +176,14 @@ function useAssetsLines(): ExpertOnlyLine[] {
         [labelOf(cls, 'min_up_time'), `${u.min_up_time ?? 0} h`],
         [labelOf(cls, 'min_down_time'), `${u.min_down_time ?? 0} h`],
       ].filter(([l]) => !!l).map(([l, v]) => `${l} ${v}`)
-      return [u.name, ...fields].join(' · ')
+      return [displayName(u.name), ...fields].join(' · ')
     })))
     const first = units[0]
     const label = genSchema.data ? labelOf('Generator', 'committable') : labelOf('Link', 'committable')
     return [{
       key: 'committable', label: label ?? FIELD_LABELS.committable, value,
       home: first ? {
-        place: `unit:${first.cls}:${first.u.name}`, label: `Open ${first.u.name} in Expert`,
+        place: `unit:${first.cls}:${first.u.name}`, label: `Open ${displayName(first.u.name)} in Expert`,
         open: () => openFlowTarget({ section: 'assets', panel: null, component: first.cls, entity: first.u.name,
                                      field: 'committable' }),
       } : { place: 'assets', open: inExpert('assets') },
