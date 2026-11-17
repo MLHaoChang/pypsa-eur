@@ -93,12 +93,12 @@ def _ride_through(connected=True):
     return ch
 
 
-def _csv(path, channels):
+def _csv(path, channels, times=T):
     names = list(channels)
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["time [s]"] + [f"{n} [{channels[n][0]}]" for n in names])
-        for k, t in enumerate(T):
+        for k, t in enumerate(times):
             w.writerow(
                 [repr(float(t))] + [repr(float(channels[n][1][k])) for n in names]
             )
@@ -215,9 +215,12 @@ def test_one_phase_fault_says_positive_sequence_and_why_connection_is_unknown(tm
     assert all(ONE_PHASE in r["detail"] for r in rows.values())
     sc = rows["stays_connected"]
     assert sc["status"] == "unknown" and NO_CONNECTED in sc["detail"]
+    others = [r for k, r in rows.items() if k != "stays_connected"]
+    assert others and not any(NO_CONNECTED in r["detail"] for r in others)
     three = _rows(_by_id(j)["fault_3ph_skmin_xrmin_v030"])
     assert not any(ONE_PHASE in r["detail"] for r in three.values())
     assert three["stays_connected"]["status"] == "pass"
+    assert not any(NO_CONNECTED in r["detail"] for r in three.values())
 
 
 def test_every_row_and_case_carries_the_pack_binding(tmp_path):
@@ -336,6 +339,7 @@ def test_a_missing_rating_is_unknown_never_mw_as_pu(tmp_path):
         ({"rated_mw": "100", "mw_source": "x"}, "rated_mw must be a finite number > 0"),
         ({"rated_mw": 100.0}, "rated_mw needs a stated source"),
         ({"rated_mw": 100.0, "mw_source": "  "}, "rated_mw needs a stated source"),
+        ({"rated_mw": 100.0, "mw_source": 5}, "rated_mw needs a stated source"),
         (
             {"rated_mva": 0.0, "mva_source": "x"},
             "rated_mva must be a finite number > 0",
@@ -415,6 +419,7 @@ def test_each_known_version_is_accepted(tmp_path, pack, version, contract):
         ({"files": {"battery.json": "0" * 64}}, "SHA-256 is not the manifest's entry"),
         ({"data_hash": ""}, "needs files"),
         ({"files": None}, "needs files"),
+        ({"data_hash": 123}, "needs files"),
     ],
 )
 def test_manifest_refusals(tmp_path, change, match):
@@ -569,3 +574,65 @@ def test_driver_writes_json_and_csv_and_a_rerun_replaces_both(tmp_path):
     f = [r for r in rows if r["case_id"] == "f_step_skmin_xrmin_up"]
     assert len(f) == 1 and f[0]["detail"] == "no result file"
     assert sorted(p.name for p in out.iterdir()) == ["judgment.csv", "judgment.json"]
+
+
+def test_a_string_pack_path_is_accepted(tmp_path):
+    j = judge_pack(str(_full_pack(tmp_path)), PROFILE, RATINGS)
+    assert status_counts(j) == {"pass": 4, "fail": 1, "unknown": 3}
+
+
+def test_extra_files_are_exactly_the_ones_no_case_claims(tmp_path):
+    pack = _pack(tmp_path, [P_UP])
+    res = pack / "results"
+    cid = P_UP.case_id
+    _csv(res / f"{cid}.csv", {"p_poc_mw": ("MW", _rise(50.0, 60.0))})
+    claimed = []  # only the CSV, the one result present, is claimed
+    extra = [
+        f"{cid}.txt",  # the case's stem, not a result extension
+        "other.csv",  # a result extension, not the case's stem
+        f"{cid}_01.csv",  # numbered, but not .out
+        f"{cid}_ab.out",  # not a two-digit number
+        f"{cid}_001.out",  # three digits
+        f"{'z' * len(cid)}_01.out",  # another case's numbering
+        "notes",
+    ]
+    for name in claimed + extra:
+        (res / name).write_text("x")
+    j = judge_pack(pack, PROFILE, RATINGS)
+    assert j["header"]["extra_files"] == sorted(extra)
+
+
+def test_pscad_files_are_claimed(tmp_path):
+    pack = _pack(tmp_path, [P_UP])
+    _pscad(
+        pack / "results",
+        P_UP.case_id,
+        {"p_poc_mw": ("MW", _rise(50.0, 60.0))},
+        numbered=True,
+    )
+    j = judge_pack(pack, PROFILE, RATINGS)
+    assert j["header"]["extra_files"] == [] and j["cases"][0]["status"] == "pass"
+
+
+def test_the_pre_step_mean_window_includes_its_start_and_excludes_the_step(tmp_path):
+    # 0.1 s before the 0.2 s step: samples 0.100 .. 0.199 (100 of them); 150 MW at 0.100
+    p = np.where(T >= 0.2, 60.0, 50.0)
+    p = np.where(np.isclose(T, 0.1), 150.0, p)
+    c = _one(tmp_path, P_UP, P_UP.case_id, {"p_poc_mw": ("MW", p)}, RATINGS)
+    # (99 x 50 + 150) / 100 = 51 MW = 0.51 pu
+    assert "pre-step mean 0.51 pu" in _rows(c)["rise_time"]["detail"]
+
+
+def test_no_sample_before_the_step_is_unknown(tmp_path):
+    times = np.array([0.0, 0.05, 0.25, 0.5, 1.0, 1.5])
+    pack = _pack(tmp_path, [P_UP])
+    _csv(
+        pack / "results" / f"{P_UP.case_id}.csv",
+        {"p_poc_mw": ("MW", np.full(times.shape, 50.0))},
+        times,
+    )
+    c = judge_pack(pack, PROFILE, RATINGS)["cases"][0]
+    assert (
+        c["status"] == "unknown"
+        and "no sample in the 0.1 s before the step" in c["detail"]
+    )

@@ -212,7 +212,7 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
     """The judgment of one battery case on its result frame."""
     channels, units = {}, {}
     p = case.params
-    jc = {"id": case.case_id, "t_event": case.t_event_s, "pre_window_s": PRE_WINDOW_S}
+    jc = {"id": case.case_id, "t_event": case.t_event_s}  # judge default pre-window
     note = ""
     p_rows = ()  # the checks that read P in pu of the rated P
 
