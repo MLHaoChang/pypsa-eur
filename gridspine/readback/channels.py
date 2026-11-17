@@ -82,7 +82,9 @@ class ChannelFrame:
 
     def __post_init__(self):
         time = np.asarray(self.time, dtype=float)
-        where = self.source or "channel frame"
+        if not self.source:
+            object.__setattr__(self, "source", "channel frame")
+        where = self.source
         if time.ndim != 1 or time.size < 2:
             raise ContractError(
                 f"{where}: needs at least two time points, got {time.size}"
@@ -137,7 +139,7 @@ class ChannelFrame:
     def channel(self, name: str) -> np.ndarray:
         if name not in self.channels:
             raise ContractError(
-                f"{self.source or 'channel frame'}: no channel {name!r}; "
+                f"{self.source}: no channel {name!r}; "
                 f"channels are {sorted(self.channels)}"
             )
         return self.channels[name]
@@ -148,9 +150,9 @@ class ChannelFrame:
         this frame's time span (no extrapolation).
         """
         times = np.asarray(times, dtype=float)
-        if times.size and (times[0] < self.time[0] or times[-1] > self.time[-1]):
+        if times[0] < self.time[0] or times[-1] > self.time[-1]:
             raise ContractError(
-                f"{self.source or 'channel frame'}: cannot resample to "
+                f"{self.source}: cannot resample to "
                 f"{times[0]!r}..{times[-1]!r} s outside the recorded "
                 f"{self.time[0]!r}..{self.time[-1]!r} s"
             )
@@ -333,7 +335,13 @@ def _parse_cfg(text, where, primary):
         f = take(f"sample rate {i + 1}")
         if len(f) < 2:
             raise ContractError(f"{where}: sample rate {i + 1} must be 'samp,endsamp'")
-        rates.append((_num(f[0], "samp", where), int(_num(f[1], "endsamp", where))))
+        samp, end = _num(f[0], "samp", where), int(_num(f[1], "endsamp", where))
+        if samp < 0 or end <= (rates[-1][1] if rates else 0):
+            raise ContractError(
+                f"{where}: sample rate {i + 1} ({f[0]},{f[1]}) needs a rate from 0 and an "
+                "endsamp past the previous one"
+            )
+        rates.append((samp, end))
     if nrates == 0:  # the standard writes one '0,endsamp' line after nrates = 0
         f = take("sample rate")
         rates.append((0.0, int(_num(f[1], "endsamp", where)) if len(f) > 1 else 0))
@@ -359,24 +367,14 @@ def _parse_cfg(text, where, primary):
     return analogs, digitals, rates, ft, timemult * stamp_s, rev
 
 
-def _comtrade_time(stamps, rates, timemult, where):
-    n = stamps.size
-    if rates and all(samp > 0 for samp, _ in rates):
-        time = np.empty(n)
-        start, t0 = 0, 0.0
-        for samp, end in rates:
-            end = min(end, n)
-            k = np.arange(end - start)
-            time[start:end] = t0 + k / samp
-            if end > start:
-                t0 = time[end - 1] + 1.0 / samp
-            start = end
-        if start < n:
-            raise ContractError(
-                f"{where}: the sample rates cover {start} samples but the data has {n}"
-            )
-        return time
-    return stamps * timemult
+def _rate_time(rates):
+    """Sample times from the sampling rates, each segment at its own rate."""
+    segments, t0, start = [], 0.0, 0
+    for samp, end in rates:
+        seg = t0 + np.arange(end - start) / samp
+        segments.append(seg)
+        t0, start = seg[-1] + 1.0 / samp, end
+    return np.concatenate(segments)
 
 
 def read_comtrade(cfg, dat=None, primary: bool = True) -> ChannelFrame:
@@ -454,18 +452,18 @@ def read_comtrade(cfg, dat=None, primary: bool = True) -> ChannelFrame:
         stamps = data["ts"].astype(float)
         if np.any(data["ts"] == 0xFFFFFFFF):
             stamps[data["ts"] == 0xFFFFFFFF] = math.nan
-    stated = rates[-1][1] if rates else 0
+    stated = rates[-1][1]
     if stated and stated != len(stamps):
         raise ContractError(
             f"{dwhere}: {where} states {stated} samples, the data file has {len(stamps)}"
         )
-    use_rates = bool(rates) and all(samp > 0 for samp, _ in rates)
+    use_rates = all(samp > 0 for samp, _ in rates)
     if not use_rates and np.isnan(stamps).any():
         raise ContractError(
             f"{dwhere}: no sampling rate and a missing time stamp at sample "
             f"{int(np.isnan(stamps).argmax()) + 1}"
         )
-    time = _comtrade_time(stamps, rates, timemult, dwhere)
+    time = _rate_time(rates) if use_rates else stamps * timemult
     channels, units = {}, {}
     for j, a in enumerate(analogs):
         channels[a.name] = (a.a * raw_a[:, j] + a.b) * a.ratio
@@ -546,7 +544,7 @@ def read_pscad(inf, outs=None) -> ChannelFrame:
         data = _read_out(out, len(block))
         if time is None:
             time = data[:, 0]
-        elif data.shape[0] != time.size or not np.array_equal(data[:, 0], time):
+        elif not np.array_equal(data[:, 0], time):
             raise ContractError(
                 f"{out.name}: its time column differs from {outs[0].name}'s"
             )
