@@ -1,7 +1,7 @@
 // S1b: the pure form logic behind the schema-rendered asset cards.
 import { describe, expect, it } from 'vitest'
 import type { AssetFieldSpec } from '../api/assetSchema'
-import { annuity, buildPatch, derivedStored, displayValue, isRevealed, omitDerived, seedForm } from './assetForm'
+import { annuity, buildPatch, costBasisOf, derivedStored, displayValue, isRevealed, omitDerived, seedForm } from './assetForm'
 
 function spec(key: string, over: Partial<AssetFieldSpec> = {}): AssetFieldSpec {
   return {
@@ -130,5 +130,26 @@ describe('omitDerived: a composite PUT never echoes a derived cost (TCU 09)', ()
     omitDerived([OVERNIGHT, CAPEX, P_NOM], patch)
     const body = JSON.parse(JSON.stringify({ ...current, ...patch }))
     expect(body).toEqual({ name: 'bess', inv_power_overnight: 300_000, p_nom: 12 })
+  })
+})
+
+
+describe('costBasisOf (05d): what the costs on screen are per', () => {
+  const schema = (fields: AssetFieldSpec[]) => ({ component: 'Generator', groups: [{ key: 'g', label: 'g', fields }] }) as never
+
+  it('reads tonne from a tonne cost unit, per hour of flow or per tonne', () => {
+    expect(costBasisOf(schema([P_NOM, spec('overnight_cost', { unit_display: 'EUR/(t/h)' })]))).toBe('tonne')
+    expect(costBasisOf(schema([spec('fom_cost', { unit_display: 'EUR/(t/h)/yr' })]))).toBe('tonne')
+    expect(costBasisOf(schema([spec('marginal_cost', { unit_display: '€/t' })]))).toBe('tonne')
+  })
+
+  it('reads energy from a per-energy cost unit', () => {
+    expect(costBasisOf(schema([spec('overnight_cost', { unit_display: 'EUR/kW' })]))).toBe('energy')
+    expect(costBasisOf(schema([spec('marginal_cost', { unit_display: 'EUR/MWh' })]))).toBe('energy')
+  })
+
+  it('claims nothing without a schema or a cost field', () => {
+    expect(costBasisOf(undefined)).toBeUndefined()
+    expect(costBasisOf(schema([P_NOM, spec('start_up_cost', { unit_display: 'EUR' })]))).toBeUndefined()
   })
 })

@@ -1,7 +1,7 @@
 // 05d, GK B2 F1a: a new asset's cost field follows the bus it attaches to. A value typed per tonne must be
 // stored as typed; the same typing on an energy bus is per kW and stored x1000.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
@@ -59,6 +59,14 @@ describe('CreationForm cost fields follow the bus', () => {
   })
   it('still stores x1000 from EUR/kW on an energy bus', async () => {
     expect((await createOn('Elec A')).overnight_cost).toBe(123400)
+  })
+  it('claims the basis it scaled under, so the server can refuse a stale one (05d)', async () => {
+    await createOn('NH3')
+    expect(vi.mocked(networkApi).createGenerator.mock.calls[0][1]).toBe('tonne')
+    vi.mocked(networkApi).createGenerator.mockClear()
+    cleanup()
+    await createOn('Elec A')
+    expect(vi.mocked(networkApi).createGenerator.mock.calls[0][1]).toBe('energy')
   })
   it('waits visibly (aria-busy, after 200 ms) while the bus units load', async () => {
     vi.mocked(assetSchemaApi.unitsForBus).mockReturnValue(new Promise(() => {}))

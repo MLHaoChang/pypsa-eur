@@ -86,8 +86,13 @@ const QUIET_MUTATION_URLS = ['/simulation/preflight']
 // `project_mismatch` — the client-side refusal below, while this tab's project
 // and the backend's binding disagree. ProjectMismatchBanner names both
 // projects and offers the way out; a toast per refused write would bury it.
+//
+// `cost_basis_mismatch` — an asset save whose costs were typed under the other
+// bus unit (05d). Only the edit cards and the creation form send the claim, and
+// each toasts the backend's sentence itself; a second toast would repeat it.
 const QUIET_TOAST_CODES = new Set([
   'solver_in_flight', 'project_locked', 'study_in_flight', PROJECT_MISMATCH,
+  'cost_basis_mismatch',
 ])
 
 const AUTH_API_PREFIX = '/auth/'

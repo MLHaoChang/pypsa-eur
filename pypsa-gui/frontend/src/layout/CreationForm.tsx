@@ -12,6 +12,7 @@ import { SCHEMA_CLASSES, type AssetSchema } from '../api/assetSchema'
 import { costBasisOf, tidy, unitLabel } from '../utils/assetForm'
 import { creationScope, loadExtras, saveExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
+import { blockerMessage } from '../utils/blockerMessage'
 import BusAutocomplete from '../components/BusAutocomplete'
 import { useSitesStore } from '../site3d/sitesStore'
 import { primaryBus } from '../site3d/siteModel'
@@ -719,7 +720,8 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
       }
     },
     onError: (e: Error) => {
-      if (e.message !== 'validation') toast.error(e.message)
+      // blockerMessage: a refused write (e.g. 409 cost_basis_mismatch, quiet in the interceptor) shows the backend's sentence.
+      if (e.message !== 'validation') toast.error(blockerMessage(e))
     },
   })
 

@@ -175,6 +175,24 @@ describe('updateAsset — the chokepoint (Task 3)', () => {
   })
 })
 
+describe('updateAsset carries the cost basis claim (05d)', () => {
+  const api = () => (globalThis as never as { __awMock: Record<string, ReturnType<typeof vi.fn>> }).__awMock
+  beforeEach(() => vi.clearAllMocks())
+
+  it('passes the basis as the third PUT argument, and leaves it off when none is claimed', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [{ name: 'g1', p_nom: 100 }])
+    api().updateGenerator.mockResolvedValue({})
+
+    await updateAsset(qc, 'p1', 'generators', 'g1', { marginal_cost: 7 }, { costBasis: 'tonne' })
+    expect(api().updateGenerator).toHaveBeenLastCalledWith('g1', { name: 'g1', p_nom: 100, marginal_cost: 7 }, 'tonne')
+
+    await updateAsset(qc, 'p1', 'generators', 'g1', { marginal_cost: 8 })
+    expect(api().updateGenerator.mock.lastCall).toHaveLength(2)
+  })
+})
+
 describe('updateAsset with a patch BUILDER', () => {
   const api = () => (globalThis as never as { __awMock: Record<string, ReturnType<typeof vi.fn>> }).__awMock
 

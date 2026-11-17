@@ -307,3 +307,34 @@ def test_an_unknown_basis_value_is_a_400(client, install_network, n):
     install_network(n)
     r = _put_generator(client, _tonne_generator(n), {}, "kg")
     assert r.status_code == 400
+
+
+def test_a_snapshot_restore_that_puts_the_asset_back_on_a_tonne_bus_refuses_the_energy_claim(
+    client, install_network, n
+):
+    """The project-restore case: the form loaded the asset on an energy bus, then a snapshot restore rewound the
+    network to the tonne bus. The stale form's claim (energy) is refused and nothing is stored."""
+    name = _tonne_generator(n)
+    energy_bus = n.links.at[_first(n, "links", "bus0", False), "bus0"]
+    install_network(n, name="restore05d")
+    r = client.post("/api/projects/restore05d", params={"force": True, "rebind": True})
+    assert r.status_code == 200, r.text
+    assert client.post("/api/projects/restore05d/snapshots", json={"label": "tonne"}).status_code == 200
+    moved = _put_generator(client, name, {"bus": energy_bus}, None)
+    assert moved.status_code == 200, moved.text
+    assert _stored(client, name)["bus"] == energy_bus  # the form now reads this asset as per energy
+
+    snap_id = client.get("/api/projects/restore05d/snapshots").json()[0]["id"]
+    restored = client.post(f"/api/projects/restore05d/snapshots/{snap_id}/restore")
+    assert restored.status_code == 200, restored.text
+    before = _stored(client, name)
+    assert before["bus"] != energy_bus
+
+    r = client.put(
+        f"/api/network/generators/{name}",
+        json={**before, "bus": before["bus"], "overnight_cost": 123400.0},
+        headers={"X-Cost-Basis": "energy"},
+    )
+    assert r.status_code == 409, r.text
+    assert (r.json()["detail"]["claimed"], r.json()["detail"]["actual"]) == ("energy", "tonne")
+    assert _stored(client, name) == before
