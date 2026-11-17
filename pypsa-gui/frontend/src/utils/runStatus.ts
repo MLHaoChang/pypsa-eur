@@ -16,6 +16,7 @@ export const RUN_NAME: Record<SolveJobKind, string> = {
   campus: 'Campus study',
   gridspine: 'Grid study',
   profile_gen: 'Generating profiles',
+  blender_scene: 'Blender scene export',
 }
 
 export interface RunView {
