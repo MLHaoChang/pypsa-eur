@@ -578,6 +578,34 @@ def test_an_experiment_case_changing_a_priced_scale_rederives_the_copy(install_n
     )  # the open network is untouched
 
 
+def test_a_sweep_case_setting_a_cost_the_parts_own_is_refused_and_an_unpriced_one_is_not():
+    """TCU 09's sweep guard, on the problem it shares with the experiment copy."""
+    from fastapi import HTTPException
+
+    from services import assistant_tools, workflow_tools
+
+    n = _bounded()
+    n.add("StorageUnit", "plain", bus="B1", p_nom=5.0, max_hours=2.0, capital_cost=10.0)
+
+    def change(name):
+        return assistant_tools._changes(
+            [
+                {
+                    "component_class": "StorageUnit",
+                    "names": [name],
+                    "attribute": "capital_cost",
+                    "value": 5.0,
+                }
+            ]
+        )[0]
+
+    with pytest.raises(HTTPException) as exc:
+        workflow_tools._refuse_cost_the_parts_own(n, change("bess"))
+    assert exc.value.detail["error_kind"] == "invalid_sensitivity_cases"
+    assert "StorageUnit bess" in exc.value.detail["message"]
+    assert workflow_tools._refuse_cost_the_parts_own(n, change("plain")) is None
+
+
 # ── GK B (62) conditions on TCU 11 ───────────────────────────────────────────
 
 
