@@ -18,7 +18,7 @@ import {
 import { networkApi } from '../../api/network'
 import type { Link } from '../../api/types'
 import { assetSchemaApi } from '../../api/assetSchema'
-import { useHubTemplate } from '../../pages/hubDesign/useHubData'
+import { useHubTemplate, useImportLinks } from '../../pages/hubDesign/useHubData'
 import { displayName } from '../../utils/displayName'
 import { updateAsset } from '../../utils/assetWrite'
 import { useUIStore } from '../../store/uiStore'
@@ -184,12 +184,7 @@ function LimitEditor({ row, setting, label, faultBuses }: {
   )
 }
 
-/** The grid import links (eh_role grid_import): the connection the site draws through. */
-export function useImportLinks(): Link[] {
-  const project = useUIStore(s => s.currentProject)
-  const q = useQuery({ queryKey: nk(project, 'links'), queryFn: networkApi.getLinks, enabled: !!project, staleTime: 30_000 })
-  return ((q.data ?? []) as Link[]).filter(l => l.eh_role === 'grid_import')
-}
+export { useImportLinks }
 
 /** A staged site: its energization schedule caps every period, so the one connection limit is not
  *  what binds and is shown, not edited, until per-period editing exists (template-e2e 02b). */

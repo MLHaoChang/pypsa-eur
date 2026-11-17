@@ -101,6 +101,8 @@ try {
   await page.screenshot({ path: path.join(artifacts, 'tj-02-guided-limit.png') })
   await page.getByTestId('field-drawer-close').click()
   await row.getByText('45 MW').waitFor()
+  // The readiness and the run take the same value (owner decision (a)): the connection point reads it too.
+  await page.getByTestId('hub-site-grid').getByText(/\(45 MW/).waitFor()
 
   // Expert reads back the same value under the same label (EXPERT-GUIDED-1): the switch keeps the
   // section, so Connection & grid's panel opens with its Connection limits.

@@ -12,7 +12,9 @@ vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolv
   { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]), updateBus: vi.fn(),
   getLinks: vi.fn().mockResolvedValue([]), updateLink: vi.fn() } }))
 const hub = vi.hoisted(() => ({ template: null as null | { energization: unknown[] } }))
-vi.mock('../../pages/hubDesign/useHubData', () => ({ useHubTemplate: () => ({ template: hub.template, isPending: false }) }))
+vi.mock('../../pages/hubDesign/useHubData', async (orig) => ({
+  ...await orig<typeof import('../../pages/hubDesign/useHubData')>(),
+  useHubTemplate: () => ({ template: hub.template, isPending: false }) }))
 vi.mock('../../api/assetSchema', async (orig) => {
   const actual = await orig<typeof import('../../api/assetSchema')>()
   return { ...actual, assetSchemaApi: { ...actual.assetSchemaApi,

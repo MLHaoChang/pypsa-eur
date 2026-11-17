@@ -316,13 +316,43 @@ def _archetype(template: dict | None, cfg: Any = None) -> str:
     return str((template or {}).get("recommended_archetype") or "strong_grid")
 
 
-def _request_for(template: dict | None, cfg: Any = None) -> dict:
+def _request_for(template: dict | None, cfg: Any = None, n=None) -> dict:
     """The cards' request, or the archetype alone where the frontend's body is
     null (what the Site card's readiness then sends). ``cfg`` carries the
-    stored goal; a project without a template takes its site type alone."""
+    stored goal; a project without a template takes its site type alone.
+    With the network ``n``, a weak-grid request takes the import cap from the
+    import Links' capacity (``with_network_import``)."""
     if template is None:
         return {"archetype": _archetype(None, cfg)}
-    return site_card_study_body(template, cfg) or {"archetype": _archetype(template, cfg)}
+    body = site_card_study_body(template, cfg) or {"archetype": _archetype(template, cfg)}
+    return with_network_import(body, n) if n is not None else body
+
+
+def with_network_import(body: dict, n) -> dict:
+    """The connection limit is the import Links' capacity (template-e2e 02,
+    owner decision (a)): a weak-grid request's ``import_p_nom_mw`` is their
+    summed ``p_nom`` from the network, so an edit to the limit (Guided or
+    Expert) is what the study runs. The template's value is only the Links'
+    initial capacity. Any other site type, or no import Link, is unchanged.
+    Mirrors ``useTemplateForm`` (hubDesign/useHubData.ts)."""
+    from services.adequacy import archetypes as arch
+
+    if body.get("archetype") != "weak_flexible":
+        return body
+    try:
+        imports, _rule = arch.select_import_links_with_rule(n, _pack_for(body).import_overlay)
+        mw = float(n.links.loc[list(imports), "p_nom"].sum()) if imports else 0.0
+    except Exception:                                    # noqa: BLE001 — the template's value stands
+        logger.exception("flow: import capacity read failed")
+        return body
+    return _with_import_mw(body, mw)
+
+
+def _with_import_mw(body: dict, mw: float | None) -> dict:
+    """``body`` with a weak-grid import cap of ``mw`` (the import Links' summed capacity)."""
+    if body.get("archetype") != "weak_flexible" or mw is None or not mw > 0:
+        return body
+    return {**body, "pack_overrides": {**(body.get("pack_overrides") or {}), "import_p_nom_mw": mw}}
 
 
 def _pack_for(body: dict):
@@ -640,7 +670,8 @@ def _readiness(facts: _Facts, template: dict, cache_key: str) -> dict | Exceptio
     from services.adequacy.eh_readiness import eh_readiness
     from services.adequacy.eh_study import readiness_refusal_classes
 
-    body = _request_for(template, facts.cfg_dict)
+    # The network's import capacity, as the run takes it (`with_network_import`).
+    body = _with_import_mw(_request_for(template, facts.cfg_dict), facts.import_p_nom_mw)
     try:
         # The Site card's request: archetype and pack overrides; stages and
         # DtC attribution left to the engine (`useHubReadiness`).

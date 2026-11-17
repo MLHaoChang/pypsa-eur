@@ -117,7 +117,8 @@ def freeze(ctx, profile, solves_left) -> dict:
         goal = reliability_goal.effective_goal(cfg, template)
         # The Goal card's own request for this project (its template's site
         # overrides, the stored goal over them): what a user's study would send.
-        card = flow_service._request_for(template, cfg)
+        # The import cap is the network's import Links' capacity (template-e2e 02).
+        card = flow_service._request_for(template, cfg, getattr(ctx, "network", None))
     except Exception as exc:  # noqa: BLE001 — an unreadable goal fixes nothing
         raise FreezeError("The project's reliability goal cannot be read.") from exc
     budget = min(int(block["budget_solves"]), int(solves_left))

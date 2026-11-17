@@ -13,7 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import { buildGoalFreeStudyBody, ehStudyQueryKeys } from '../results/EhReferenceDesignPanel'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import {
-  templateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
+  useTemplateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
 } from './useHubData'
 
 export function useGoalStudy() {
@@ -29,7 +29,8 @@ export function useGoalStudy() {
 
   // Until the goal is read, the site type the rules below depend on is not
   // known: no body, so the Run waits rather than guess.
-  const built = goal ? buildGoalFreeStudyBody(archetype, templateForm(template))
+  const form = useTemplateForm(template)
+  const built = goal ? buildGoalFreeStudyBody(archetype, form)
     : { body: null, error: goalError ? 'The reliability goal could not be read.' : null }
   const voll = typeof solverConfig?.voll === 'number' ? solverConfig.voll : null
   const vollMissing = voll != null && !(voll > 0)

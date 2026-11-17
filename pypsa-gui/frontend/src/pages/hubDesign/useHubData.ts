@@ -19,6 +19,8 @@ import {
 } from '../results/EhReferenceDesignPanel'
 import { dispatchSolved } from './chapters'
 import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { networkApi } from '../../api/network'
+import type { Link } from '../../api/types'
 
 /** The study record (`nk(project,'results','eh_study')`, 2 s poll while running). */
 export function useHubStudy() {
@@ -79,6 +81,24 @@ export function templateForm(template: EhTemplateMeta | null): PackForm {
   return template ? formFromTemplate(template) : EMPTY_PACK_FORM
 }
 
+/** The grid import links (eh_role grid_import): the connection the site draws through. */
+export function useImportLinks(): Link[] {
+  const project = useUIStore(s => s.currentProject)
+  const q = useQuery({ queryKey: nk(project, 'links'), queryFn: networkApi.getLinks, enabled: !!project, staleTime: 30_000 })
+  return ((q.data ?? []) as Link[]).filter(l => l.eh_role === 'grid_import')
+}
+
+/** The template's pack form with the import cap read from the network (template-e2e 02, owner
+ *  decision (a)): the connection limit is the import links' summed capacity, so an edit to it is what
+ *  a weak-grid study runs. The template's value is only the links' initial capacity. Mirrors
+ *  `flow_service.with_network_import`. */
+export function useTemplateForm(template: EhTemplateMeta | null): PackForm {
+  const links = useImportLinks()
+  const form = templateForm(template)
+  const mw = links.reduce((sum, l) => sum + (Number(l.p_nom) || 0), 0)
+  return template && mw > 0 ? { ...form, importMw: String(mw) } : form
+}
+
 /** Readiness for the chosen site type with the template's recommended
  *  overrides and the stored goal's LOLE and ENS targets, as the study will
  *  run them (W3b-R; the same preview as Expert's EH panel) — independent of
@@ -93,7 +113,7 @@ export function useHubReadiness(template: EhTemplateMeta | null, running: boolea
   // asks for the default type's readiness first.
   const { goal, archetype, isPending: goalPending } = useReliabilityGoal()
   const overrides = buildEhStudyBody(archetype, {
-    ...templateForm(template), loleTarget: goalText(goal, 'target_lole_h'),
+    ...useTemplateForm(template), loleTarget: goalText(goal, 'target_lole_h'),
     ensCap: goalText(goal, 'ens_cap_permyriad'), draws: '',
   }).body?.pack_overrides
   const q = useQuery({
