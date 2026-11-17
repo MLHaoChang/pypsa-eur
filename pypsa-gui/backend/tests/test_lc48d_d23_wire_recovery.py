@@ -429,6 +429,21 @@ def test_an_ended_task_leaves_a_later_task_of_the_chat_alone(chat):
     chat.detached_task_id = None
 
 
+def test_a_runner_session_keeps_its_run_when_the_task_ends(chat):
+    """A runner session is its run's by identity (`_is_run_session`)."""
+    from services import run_envelope
+
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    runner = harness_session.ChatSession(
+        session_id=run_envelope.SESSION_PREFIX + first["task_id"]
+    )
+    runner.task_id = first["task_id"]
+    chat_tools.set_chat_session(runner)
+    _set_stored(first["task_id"], status="completed")
+    assert runner.task_id == first["task_id"]
+    chat_tools.set_chat_session(chat)
+
+
 def test_a_task_that_has_not_ended_keeps_its_chat(chat):
     first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
     for status in ("ready", "running", "waiting_job", "needs_review"):

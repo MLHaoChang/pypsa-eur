@@ -596,9 +596,8 @@ def note_held(task_id, refusal):
         # A resume can land between the guard's refusal and this note (the
         # active task ended, the user resumed): only a run still at the answer
         # is held (GK B 59, call-site race).
-        if not isinstance(run, dict) or run.get("status") != "needs_user" or run.get("waiting") \
-                or task.get("status") in _ENDED_TASK:
-            return
+        if not isinstance(run, dict) or run.get("status") != "needs_user" or run.get("waiting"):
+            return  # a cancelled or completed run has left `needs_user` too
         run["held"] = {"kind": refusal["error_kind"], "active": refusal["active"],
                        "since": _now()}
         _save(path, task)
@@ -1053,8 +1052,8 @@ def _run_view(task):
             **({"intake": _intake_view(run)} if isinstance(run.get("intake"), dict) else {}),
             **({"handed_over": run["handed_over"]} if run.get("handed_over") else {}),
             **({"reason": run["reason"]} if run.get("reason") else {}),
-            **({"held": _held_view(run["held"])} if run.get("held") and run["status"] == "needs_user"
-               and task["status"] not in ("cancelled", "completed") else {}),
+            # Only while the run waits on the user: never on a cancelled or completed run.
+            **({"held": _held_view(run["held"])} if run.get("held") and run["status"] == "needs_user" else {}),
             "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
             "stages": stages,
             **({"loop": {**{k: run["loop"][k] for k in ("kind", "stage", "rounds", "limit", "refusals", "ended")
@@ -1181,8 +1180,6 @@ def cancel_task(task_id: str) -> dict:
         session = chat_tools.chat_session()
         if session and getattr(session, "task_id", None) == task_id:
             session.task_id = None
-        if session and getattr(session, "detached_task_id", None) == task_id:
-            session.detached_task_id = None
         view = _view(task)
     _wake(path)  # the runner lets go of the project
     # Outside the task lock: the scene cancel takes its own project and proposal locks.

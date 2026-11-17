@@ -922,6 +922,18 @@ def test_a_run_resumed_before_the_note_is_never_held(waiting):
     assert json.loads(path.read_text())["run"]["held"]["active"] == refusal["active"]
 
 
+def test_a_held_run_counts_an_active_harness_run_as_running(waiting):
+    """A run's task stays `ready` while its run executes (GK B F2 on #1515)."""
+    path, record, _ = waiting
+    chat, other = _answer_while_another_task_runs(waiting)
+    with tasks._LOCK:
+        other_path, task = tasks._read(other["task_id"])
+        task.update(status="ready", run={"status": "waiting_job"})
+        tasks._save(other_path, task)
+    held = tasks.get_task(record["task_id"])["run"]["held"]
+    assert held["active"]["status"] == "waiting_job"
+
+
 def test_a_cancelled_run_never_shows_the_held_note(waiting):
     """GK B E-b: a stale note on a run that is over."""
     from services import run_monitor
@@ -956,11 +968,15 @@ def test_the_held_note_names_a_task_the_reader_cannot_read_by_id_only(waiting):
     }
 
 
+ACTIVE = {"kind": "task", "id": "t-2", "title": "T", "status": "running"}
+
+
 @pytest.mark.parametrize(
     "failure",
     [
-        HTTPException(409, {"error_kind": "task_step_running", "message": "busy"}),
-        HTTPException(400, {"error_kind": "switch_in_progress", "message": "odd"}),
+        # Each carries an `active`, so a catch wider than the guard's 409 would note it.
+        HTTPException(409, {"error_kind": "task_step_running", "active": ACTIVE}),
+        HTTPException(400, {"error_kind": "switch_in_progress", "active": ACTIVE}),
         RuntimeError("boom"),
     ],
 )
