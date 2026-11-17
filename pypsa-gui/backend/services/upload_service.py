@@ -45,7 +45,7 @@ import contextvars
 import hashlib
 import logging
 import math
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import os
 import pathlib
 import re
@@ -323,7 +323,7 @@ def delivery_expires_at(meta: UploadMeta) -> str | None:
     if meta.kind != "agent_export" or not math.isfinite(meta.uploaded_at):
         return None
     instant = meta.uploaded_at + DELIVERY_TTL_SECONDS
-    return datetime.fromtimestamp(instant, timezone.utc).isoformat()
+    return datetime.fromtimestamp(instant, UTC).isoformat()
 
 
 def refuse_expired_delivery(meta: UploadMeta, *, now: float | None = None) -> None:
