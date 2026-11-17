@@ -33,7 +33,7 @@ function row(code: string, over: Partial<Deliverable> = {}): Deliverable {
     status: 'not_started', status_basis: 'declared', status_at: null,
     next_step: 'Collect the data list',
     data: [{ item_id: 'item-1', label: 'Single-line diagram', supplier: '', due: null, status: 'requested' }],
-    freeze: null, freeze_state: 'none', stale: false, submissions: [],
+    freeze: null, freeze_state: 'none', stale: false, submissions: [], inputs_changed_since_submission: false,
     feeds: [{ package: 'GC-04', label: 'PSS/E study results', available: false, state: 'pending' }],
     comments: [], packs: [], ...over,
   }
@@ -148,7 +148,8 @@ describe('GridComplianceSection', () => {
     const user = userEvent.setup()
     const frozen = { model_set_id: 'ms-abc', data_hash: 'h', frozen_at: '2026-11-10T00:00:00+00:00', source: 'interim' }
     api.state.mockResolvedValue(state([row('14', {
-      status: 'submitted', freeze: frozen, submissions: [frozen], freeze_state: 'stale', stale: true,
+      status: 'submitted', freeze: frozen, submissions: [frozen], freeze_state: 'submitted', stale: false,
+      inputs_changed_since_submission: true,
       feeds: [{ package: 'GC-03', label: 'grid strength results', available: false, state: 'unavailable' }],
     })]))
     renderSection()
@@ -156,6 +157,8 @@ describe('GridComplianceSection', () => {
     expect((screen.getByRole('button', { name: 'Freeze again' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText(/submitted on the data frozen on 2026-11-10, and that record is kept/)).toBeTruthy()
     expect(screen.getByText(/What was submitted stays as frozen/)).toBeTruthy()
+    expect(within(screen.getByTestId('gc-row-14')).getAllByText('As submitted').length).toBeGreaterThan(0)
+    expect(within(screen.getByTestId('gc-row-14')).queryByText('Out of date')).toBeNull()
     expect(screen.queryByText(/freeze again once they are right/)).toBeNull()
     expect(screen.getByText('Could not be read: grid strength results.')).toBeTruthy()
     expect(screen.queryByText(/ms-abc/)).toBeNull()

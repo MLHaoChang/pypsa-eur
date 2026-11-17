@@ -45,10 +45,11 @@ export const FREEZE_LABEL: Record<FreezeState, string> = {
   stale: 'Out of date',
   refreeze_needed: 'Refreeze needed',
   unreadable: 'Inputs unreadable',
+  submitted: 'As submitted',
 }
 
 const FREEZE_TONE: Record<FreezeState, Tone> = {
-  none: 'neutral', fresh: 'ok', stale: 'warn', refreeze_needed: 'warn', unreadable: 'err',
+  none: 'neutral', fresh: 'ok', stale: 'warn', refreeze_needed: 'warn', unreadable: 'err', submitted: 'ok',
 }
 
 const COMMENT_LABEL: Record<TsoComment['status'], string> = {
@@ -252,7 +253,7 @@ function Detail({ name, d, statuses, hasCampusInput }: {
           <p>Data frozen on {d.freeze.frozen_at.slice(0, 10)}{' '}
             <Tag tone={FREEZE_TONE[d.freeze_state]}>{FREEZE_LABEL[d.freeze_state]}</Tag></p>
         ) : <p className="text-muted">The data is not frozen for this deliverable.</p>}
-        {submittedOn && (d.freeze_state === 'stale' || d.freeze_state === 'unreadable') && (
+        {submittedOn && d.inputs_changed_since_submission && (
           <p className="text-muted">
             The inputs changed after submission. What was submitted stays as frozen; later steps follow that record.
           </p>

@@ -6,7 +6,7 @@ export type GcStatus =
   | 'not_started' | 'data' | 'exported' | 'results_in'
   | 'judged' | 'submitted' | 'tso_comments' | 'accepted'
 
-export type FreezeState = 'none' | 'fresh' | 'stale' | 'refreeze_needed' | 'unreadable'
+export type FreezeState = 'none' | 'fresh' | 'stale' | 'refreeze_needed' | 'unreadable' | 'submitted'
 
 export interface Freeze { model_set_id: string; data_hash: string; frozen_at: string; source: string }
 
@@ -48,6 +48,8 @@ export interface Deliverable {
   stale: boolean
   /** The model set each submission went out on, oldest first; never rewritten. */
   submissions: Freeze[]
+  /** Submitted rows only: the inputs moved after submission (the record stands). */
+  inputs_changed_since_submission: boolean
   feeds: { package: string; label: string; available: boolean; state: 'present' | 'pending' | 'unavailable' }[]
   comments: TsoComment[]
   packs: { version: number; digest: string }[]
