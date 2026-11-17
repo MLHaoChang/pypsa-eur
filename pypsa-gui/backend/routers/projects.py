@@ -2101,6 +2101,16 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
             src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
             if src.is_file():
                 atomic_copy(src, dest / sidecar)
+    from services import flow_scope
+
+    if "load_flow" in flow_scope.preset_for({"id": template_key})[1].get("grid", ()):
+        # Issue 51: the grid preset's Load flow is on exactly when the solver
+        # flag it owns is (`flow_scope.OWNED`), and a grid template ships no
+        # config, so the project starts with the flag on.
+        cfg_path = dest / "solver_config.json"
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.is_file() else {}
+        atomic_write_text(cfg_path, json.dumps({**cfg, "run_ac_pf_after_lopf": True},
+                                               indent=2, sort_keys=True) + "\n")
     if site is None and template_series:
         from services.library import bundle_pins
         from services.library import template_series as TS
@@ -2173,6 +2183,9 @@ def _finish_created_project(made: _Materialised, db: DBSession, user: User | Non
         "network_revision": int(PyPSAService.get_active_context().network_revision or 0),
         "parent_project": None,
         "scenario_description": None,
+        # The template the project was made from: a grid template ships no
+        # marker, and its scope preset reads this (`flow_scope.preset_template`).
+        "template_id": template_id,
     })
     # A template's commercial config and finance inputs (slice D4) are bound
     # and validated as their PUT routes do; one that does not is dropped and
@@ -2625,7 +2638,8 @@ def _saves_its_own_directory(bound_dir, loaded: str | None, name: str,
 def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: str,
                       dest: pathlib.Path) -> dict:
     """
-    The `settings` entry a save writes into ``dest``'s metadata.json.
+    The `settings` and `template_id` entries a save writes into ``dest``'s
+    metadata.json.
 
     A save of a directory's own network keeps that directory's table. A save
     of another bound project's network (Save-As, Save-a-Copy, a forced Save-As
@@ -2643,7 +2657,10 @@ def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: 
     else:
         source_meta = {}
     table = source_meta.get("settings")
-    return {"settings": table} if isinstance(table, dict) else {}
+    out = {"settings": table} if isinstance(table, dict) else {}
+    if isinstance(source_meta.get("template_id"), str):
+        out["template_id"] = source_meta["template_id"]
+    return out
 
 
 def _check_save_allowed(

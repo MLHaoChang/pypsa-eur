@@ -887,7 +887,7 @@ def _advance_run(path, ctx=None):
     written only if (stage, attempts, fingerprint) did not move meanwhile; a
     caller that may not edit the project writes nothing (`gate_due`)."""
     from harness import run_eh, run_explore, run_loops
-    from services import flow_service, run_gates, run_profiles
+    from services import flow_scope, run_gates, run_profiles
     ctx = ctx or RUN_CONTEXT.get() or PyPSAService.get_active_context()
     for _ in range(2 * len(run_profiles.STAGES)):
         with _LOCK:
@@ -990,7 +990,7 @@ def _advance_run(path, ctx=None):
                     run_loops.after_passed_gate(task, name)
                 stage.update(status="passed", exited_at=_now())
                 if name == "setup":
-                    run["scope"] = run_profiles.scope_for(flow_service.read_template(path.parent.parent))
+                    run["scope"] = run_profiles.scope_for(flow_scope.preset_template(path.parent.parent))
                 if following is None:
                     run["status"], task["status"] = "completed", "completed"
                 else:
