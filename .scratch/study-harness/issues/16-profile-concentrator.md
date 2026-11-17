@@ -18,8 +18,8 @@ Profile `eh_concentrator_staged@1` once the template exists: mass balance to 1e-
 
 ## Acceptance criteria
 
-- [ ] Re-triaged against the shipped template; rules and facts confirmed with GK A.
-- [ ] A run reaches hand-off on the demo data.
+- [x] Re-triaged against the shipped template; rules and facts confirmed with GK A (28), Q1-Q9.
+- [x] A run reaches hand-off on the demo data (`tests/test_run_profile_concentrator_runs.py`).
 
 ## Likely files
 
