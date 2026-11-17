@@ -1,0 +1,166 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+#
+# SPDX-License-Identifier: MIT
+#
+# DRAFT (GC-04 PR4, owner decision GC04-DEFAULTS-1 "Generic, tagged"): one public generic
+# WECC parameter set for converters with no supplied parameters. Every value is assumed;
+# not for submission until replaced with OEM data. Transcribed from public WECC/EPRI
+# documents (cited per block); not yet loaded or validated by gridspine.
+source_note: "Generic WECC 2nd-gen IBR parameters transcribed from public WECC/EPRI example records (illustrative, not any real plant); PSLF-named example values mapped to PSS/E REGCA1/REECA1/REECC1/REPCA1 keys."
+blocks:
+  regc:
+    source: "WECC MVWG, 'Solar Photovoltaic Power Plant Modeling and Validation Guideline', December 9, 2019, Section 'Model Invocation', example regc_a record, p.27 (illustration only), https://www.wecc.org/sites/default/files/documents/meeting/2024/Solar%20PV%20Plant%20Modeling%20and%20Validation%20Guidline.pdf ; khv only: NREL-Sienna PowerSystemsTestData, psse_dyr/240busWECC_2018_PSS.dyr, REGCA1 record l.789-792 (master, accessed 2026-11-17), https://github.com/NREL-Sienna/PowerSystemsTestData/blob/master/psse_dyr/240busWECC_2018_PSS.dyr"
+    values:
+      lvplsw: {value: 0, from: "WECC 2019 p.27 example regc_a lvplsw=0 (also p.31: set lvplsw=0 so LVPL does not contradict VDL tables)"}
+      tg: {value: 0.02, from: "WECC 2019 p.27 example regc_a tg"}
+      rrpwr: {value: 1.4, from: "WECC 2019 p.27 example regc_a rrpwr"}
+      brkpt: {value: 0.9, from: "WECC 2019 p.27 example regc_a brkpt"}
+      zerox: {value: 0.5, from: "WECC 2019 p.27 example regc_a zerox"}
+      lvpl1: {value: 1.0, from: "WECC 2019 p.27 example regc_a lvpl1"}
+      volim: {value: 1.1, from: "WECC 2019 p.27 example regc_a vtmax (PSLF name of PSS/E Volim)"}
+      lvpnt1: {value: 0.05, from: "WECC 2019 p.27 example regc_a lvpnt1"}
+      lvpnt0: {value: 0.01, from: "WECC 2019 p.27 example regc_a lvpnt0"}
+      iolim: {value: -1.0, from: "WECC 2019 p.27 example regc_a qmin (PSLF name of PSS/E Iolim)"}
+      tfltr: {value: 0.01, from: "WECC 2019 p.27 example regc_a tfltr"}
+      khv: {value: 0.0, from: "NREL-Sienna 240busWECC_2018_PSS.dyr REGCA1 l.791 CON(11) Khv=0.0 (not a PSLF regc_a parameter, so absent from WECC 2019 example)"}
+      iqrmax: {value: 20.0, from: "WECC 2019 p.27 example regc_a iqrmax"}
+      iqrmin: {value: -20.0, from: "WECC 2019 p.27 example regc_a iqrmin"}
+      accel: {value: 0.7, from: "WECC 2019 p.27 example regc_a accel"}
+  reec:
+    source: "WECC MVWG, 'Solar Photovoltaic Power Plant Modeling and Validation Guideline', December 9, 2019, Section 'Model Invocation', example reec_a record, pp.27-28 (illustration only), https://www.wecc.org/sites/default/files/documents/meeting/2024/Solar%20PV%20Plant%20Modeling%20and%20Validation%20Guidline.pdf"
+    values:
+      pfflag: {value: 0, from: "WECC 2019 p.28 example reec_a pfflag (Table 3 p.29: 0 under plant control)"}
+      vflag: {value: 1, from: "WECC 2019 p.28 example reec_a vflag"}
+      qflag: {value: 1, from: "WECC 2019 p.28 example reec_a qflag"}
+      pflag: {value: 0, from: "WECC 2019 p.28 example reec_a pflag (Table 10 p.62: always 0 for PV)"}
+      pqflag: {value: 0, from: "WECC 2019 p.28 example reec_a pqflag (Q priority)"}
+      vdip: {value: 0.5, from: "WECC 2019 p.27 example reec_a vdip"}
+      vup: {value: 1.1, from: "WECC 2019 p.27 example reec_a vup"}
+      trv: {value: 0.01, from: "WECC 2019 p.27 example reec_a trv"}
+      dbd1: {value: -0.05, from: "WECC 2019 p.27 example reec_a dbd1"}
+      dbd2: {value: 0.05, from: "WECC 2019 p.27 example reec_a dbd2"}
+      kqv: {value: 2.0, from: "WECC 2019 p.27 example reec_a kqv"}
+      iqh1: {value: 1.0, from: "WECC 2019 p.27 example reec_a iqh1"}
+      iql1: {value: -1.0, from: "WECC 2019 p.27 example reec_a iql1"}
+      vref0: {value: 1.0, from: "WECC 2019 p.27 example reec_a vref0"}
+      iqfrz: {value: 0.0, from: "WECC 2019 p.27 example reec_a iqfrz"}
+      thld: {value: 0.0, from: "WECC 2019 p.27 example reec_a thld"}
+      thld2: {value: 0.0, from: "WECC 2019 p.27 example reec_a thld2"}
+      tp: {value: 0.01, from: "WECC 2019 p.27 example reec_a tp"}
+      qmax: {value: 0.6, from: "WECC 2019 p.28 example reec_a qmax"}
+      qmin: {value: -0.6, from: "WECC 2019 p.28 example reec_a qmin"}
+      vmax: {value: 1.2, from: "WECC 2019 p.28 example reec_a vmax"}
+      vmin: {value: 0.8, from: "WECC 2019 p.28 example reec_a vmin"}
+      kqp: {value: 1.0, from: "WECC 2019 p.28 example reec_a kqp"}
+      kqi: {value: 1.0, from: "WECC 2019 p.28 example reec_a kqi"}
+      kvp: {value: 1.0, from: "WECC 2019 p.28 example reec_a kvp"}
+      kvi: {value: 1.0, from: "WECC 2019 p.28 example reec_a kvi"}
+      vbias: {value: 0.0, from: "WECC 2019 p.28 example reec_a vref1"}
+      tiq: {value: 0.01, from: "WECC 2019 p.28 example reec_a 'tip' (typo for tiq; Table 10 p.62 lists tiq)"}
+      dpmax: {value: 1.0, from: "WECC 2019 p.28 example reec_a dpmax"}
+      dpmin: {value: -1.0, from: "WECC 2019 p.28 example reec_a dpmin"}
+      pmax: {value: 1.0, from: "WECC 2019 p.28 example reec_a pmax"}
+      pmin: {value: 0.0, from: "WECC 2019 p.28 example reec_a pmin"}
+      imax: {value: 1.0, from: "WECC 2019 p.28 example reec_a imax"}
+      tpord: {value: 0.01, from: "WECC 2019 p.28 example reec_a tpord"}
+      vq1: {value: 0.4, from: "WECC 2019 p.28 example reec_a vq1"}
+      iq1: {value: 0.4, from: "WECC 2019 p.28 example reec_a iq1"}
+      vq2: {value: 0.9, from: "WECC 2019 p.28 example reec_a vq2"}
+      iq2: {value: 1.0, from: "WECC 2019 p.28 example reec_a iq2"}
+      vq3: {value: 1.2, from: "WECC 2019 p.28 example reec_a vq3"}
+      iq3: {value: 1.0, from: "WECC 2019 p.28 example reec_a iq3"}
+      vq4: {value: 1.3, from: "adjusted: source vq4=0.0 is an unused trailing pair of a 3-point table; strictly increasing breakpoints required, so set just above vq3"}
+      iq4: {value: 1.0, from: "adjusted: source iq4=0.0 (unused pair); held at iq3 so the curve equals the source 3-point table"}
+      vp1: {value: 0.4, from: "WECC 2019 p.28 example reec_a vp1"}
+      ip1: {value: 0.0, from: "WECC 2019 p.28 example reec_a ip1"}
+      vp2: {value: 0.9, from: "WECC 2019 p.28 example reec_a vp2"}
+      ip2: {value: 1.0, from: "WECC 2019 p.28 example reec_a ip2"}
+      vp3: {value: 1.2, from: "WECC 2019 p.28 example reec_a vp3"}
+      ip3: {value: 1.0, from: "WECC 2019 p.28 example reec_a ip3"}
+      vp4: {value: 1.3, from: "adjusted: source vp4=0.0 is an unused trailing pair; strictly increasing breakpoints required, so set just above vp3"}
+      ip4: {value: 1.0, from: "adjusted: source ip4=0.0 (unused pair); held at ip3 so the curve equals the source 3-point table"}
+  reecc:
+    source: "WECC REMTF, 'WECC Battery Storage Dynamic Modeling Guideline', November 2016 (file rev. 4-7-17), pp.6, 11-12, 20 (Table 5) and Appendix A p.38, https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC%20Battery%20Storage%20Guideline%20updates%204-7-17%20.pdf ; Appendix A states REEC_C = REEC_A plus T/SOC parameters, so shared parameters are taken from the WECC 2019 PV guideline example reec_a record pp.27-28 (URL as reec block); pmin from EPRI, 'Model User Guide for Generic Renewable Energy System Models', 3002006525, Technical Update June 2015, Section 3 p.3-8, https://transmission.bpa.gov/business/operations/GridModeling/Model%20User%20Guide%20for%20Generic%20Renewable%20Energy%20System%20Models.pdf"
+    values:
+      pfflag: {value: 0, from: "WECC BESS 2016 Table 5 p.20 ('Pflag' = PF control flag set 0)"}
+      vflag: {value: 1, from: "WECC BESS 2016 Table 5 p.20 Vflag=1"}
+      qflag: {value: 1, from: "WECC BESS 2016 Table 5 p.20 Qflag=1"}
+      pqflag: {value: 1, from: "WECC BESS 2016 Table 5 p.20 PQflag=1 (P priority for frequency support)"}
+      vdip: {value: 0.5, from: "WECC 2019 p.27 example reec_a vdip (BESS 2016 App. A: same as REEC_A)"}
+      vup: {value: 1.1, from: "WECC 2019 p.27 example reec_a vup"}
+      trv: {value: 0.01, from: "WECC 2019 p.27 example reec_a trv"}
+      dbd1: {value: -0.05, from: "WECC 2019 p.27 example reec_a dbd1"}
+      dbd2: {value: 0.05, from: "WECC 2019 p.27 example reec_a dbd2"}
+      kqv: {value: 2.0, from: "WECC 2019 p.27 example reec_a kqv"}
+      iqh1: {value: 1.0, from: "WECC 2019 p.27 example reec_a iqh1"}
+      iql1: {value: -1.0, from: "WECC 2019 p.27 example reec_a iql1"}
+      vref0: {value: 1.0, from: "WECC 2019 p.27 example reec_a vref0"}
+      tp: {value: 0.01, from: "WECC 2019 p.27 example reec_a tp"}
+      qmax: {value: 0.6, from: "WECC 2019 p.28 example reec_a qmax"}
+      qmin: {value: -0.6, from: "WECC 2019 p.28 example reec_a qmin"}
+      vmax: {value: 1.2, from: "WECC 2019 p.28 example reec_a vmax"}
+      vmin: {value: 0.8, from: "WECC 2019 p.28 example reec_a vmin"}
+      kqp: {value: 1.0, from: "WECC 2019 p.28 example reec_a kqp"}
+      kqi: {value: 1.0, from: "WECC 2019 p.28 example reec_a kqi"}
+      kvp: {value: 1.0, from: "WECC 2019 p.28 example reec_a kvp"}
+      kvi: {value: 1.0, from: "WECC 2019 p.28 example reec_a kvi"}
+      tiq: {value: 0.01, from: "WECC 2019 p.28 example reec_a 'tip' (tiq)"}
+      dpmax: {value: 1.0, from: "WECC 2019 p.28 example reec_a dpmax"}
+      dpmin: {value: -1.0, from: "WECC 2019 p.28 example reec_a dpmin"}
+      pmax: {value: 1.0, from: "WECC 2019 p.28 example reec_a pmax (BESS 2016 Fig. 2 p.6: P from -1 to 1 pu)"}
+      pmin: {value: -1.0, from: "EPRI 3002006525 p.3-8 reec_c example 'Pmin = -Pmax' (Ipmin = -Ipmax, p.3-7); BESS 2016 Fig. 2 p.6 P=-1 charging"}
+      imax: {value: 1.0, from: "WECC 2019 p.28 example reec_a imax"}
+      tpord: {value: 0.01, from: "WECC 2019 p.28 example reec_a tpord"}
+      vq1: {value: 0.4, from: "WECC 2019 p.28 example reec_a vq1"}
+      iq1: {value: 0.4, from: "WECC 2019 p.28 example reec_a iq1"}
+      vq2: {value: 0.9, from: "WECC 2019 p.28 example reec_a vq2"}
+      iq2: {value: 1.0, from: "WECC 2019 p.28 example reec_a iq2"}
+      vq3: {value: 1.2, from: "WECC 2019 p.28 example reec_a vq3"}
+      iq3: {value: 1.0, from: "WECC 2019 p.28 example reec_a iq3"}
+      vq4: {value: 1.3, from: "adjusted: source vq4=0.0 is an unused trailing pair; set above vq3 for strictly increasing breakpoints"}
+      iq4: {value: 1.0, from: "adjusted: source iq4=0.0 (unused pair); held at iq3"}
+      vp1: {value: 0.4, from: "WECC 2019 p.28 example reec_a vp1"}
+      ip1: {value: 0.0, from: "WECC 2019 p.28 example reec_a ip1"}
+      vp2: {value: 0.9, from: "WECC 2019 p.28 example reec_a vp2"}
+      ip2: {value: 1.0, from: "WECC 2019 p.28 example reec_a ip2"}
+      vp3: {value: 1.2, from: "WECC 2019 p.28 example reec_a vp3"}
+      ip3: {value: 1.0, from: "WECC 2019 p.28 example reec_a ip3"}
+      vp4: {value: 1.3, from: "adjusted: source vp4=0.0 is an unused trailing pair; set above vp3 for strictly increasing breakpoints"}
+      ip4: {value: 1.0, from: "adjusted: source ip4=0.0 (unused pair); held at ip3"}
+      t: {value: 7200.0, from: "WECC BESS 2016 p.11 worked SOC example T = 2 h = 7200 s (App. A p.38 range 3600-36000 s)"}
+      socini: {value: 0.5, from: "WECC BESS 2016 App. A p.38 typical range 20%-80%; midpoint chosen"}
+      socmax: {value: 0.8, from: "WECC BESS 2016 p.12 item C: SOCmax about 80% (App. A range 75-85%)"}
+      socmin: {value: 0.2, from: "WECC BESS 2016 p.12 item C: SOCmin about 20% (App. A range 10-20%)"}
+  repc:
+    source: "WECC MVWG, 'Solar Photovoltaic Power Plant Modeling and Validation Guideline', December 9, 2019, Section 'Model Invocation', example repc_a record, p.28 (illustration only), https://www.wecc.org/sites/default/files/documents/meeting/2024/Solar%20PV%20Plant%20Modeling%20and%20Validation%20Guidline.pdf"
+    values:
+      vcflag: {value: 0, from: "WECC 2019 p.28 example repc_a vcmpflg (reactive droop, kc)"}
+      refflag: {value: 1, from: "WECC 2019 p.28 example repc_a refflg (plant voltage control)"}
+      fflag: {value: 1, from: "WECC 2019 p.28 example repc_a frqflg"}
+      tfltr: {value: 0.02, from: "WECC 2019 p.28 example repc_a tfltr"}
+      kp: {value: 18.0, from: "WECC 2019 p.28 example repc_a kp"}
+      ki: {value: 5.0, from: "WECC 2019 p.28 example repc_a ki"}
+      tft: {value: 0.0, from: "WECC 2019 p.28 example repc_a tft"}
+      tfv: {value: 0.05, from: "WECC 2019 p.28 example repc_a tfv"}
+      vfrz: {value: 0.0, from: "WECC 2019 p.28 example repc_a vfrz"}
+      rc: {value: 0.0, from: "WECC 2019 p.28 example repc_a rc"}
+      xc: {value: 0.0, from: "WECC 2019 p.28 example repc_a xc"}
+      kc: {value: 0.02, from: "WECC 2019 p.28 example repc_a kc"}
+      emax: {value: 0.5, from: "WECC 2019 p.28 example repc_a emax"}
+      emin: {value: -0.5, from: "WECC 2019 p.28 example repc_a emin"}
+      dbd1: {value: 0.0, from: "WECC 2019 p.28 example repc_a dbd=0.00 (single symmetric PSLF deadband mapped to PSS/E dbd1=-dbd)"}
+      dbd2: {value: 0.0, from: "WECC 2019 p.28 example repc_a dbd=0.00 (mapped to PSS/E dbd2=+dbd)"}
+      qmax: {value: 0.575, from: "WECC 2019 p.28 example repc_a qmax"}
+      qmin: {value: -0.575, from: "WECC 2019 p.28 example repc_a qmin"}
+      kpg: {value: 0.1, from: "WECC 2019 p.28 example repc_a kpg"}
+      kig: {value: 0.05, from: "WECC 2019 p.28 example repc_a kig"}
+      tp: {value: 0.25, from: "WECC 2019 p.28 example repc_a tp"}
+      fdbd1: {value: -0.0006, from: "WECC 2019 p.28 example repc_a fdbd1"}
+      fdbd2: {value: 0.0006, from: "WECC 2019 p.28 example repc_a fdbd2"}
+      femax: {value: 99.0, from: "WECC 2019 p.28 example repc_a femax"}
+      femin: {value: -99.0, from: "WECC 2019 p.28 example repc_a femin"}
+      pmax: {value: 1.0, from: "WECC 2019 p.28 example repc_a pmax"}
+      pmin: {value: 0.0, from: "WECC 2019 p.28 example repc_a pmin"}
+      tg: {value: 0.1, from: "WECC 2019 p.28 example repc_a tlag (PSLF name of PSS/E Tg)"}
+      ddn: {value: 20.0, from: "WECC 2019 p.28 example repc_a ddn"}
+      dup: {value: 0.0, from: "WECC 2019 p.28 example repc_a dup"}
