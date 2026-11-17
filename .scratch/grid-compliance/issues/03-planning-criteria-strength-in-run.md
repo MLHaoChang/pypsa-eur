@@ -86,3 +86,5 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 - L2: a removed charging draw is not load lost; the note "charging storage lost: X MW of draw removed" is pinned by a test.
 - L3: any other sgen sum in the module is clipped or its netting justified.
 - L4: the PR body and release note name it as an engine change, and `tests/gridspine/test_planning_criteria.py` runs in full.
+
+**2026-11-17, GK A2 minor CSV notes folded into PR2:** an N-2 row naming the same branch twice is listed `not_representable`; an `order` other than 1 or 2 (0 included) is refused by name with its line.

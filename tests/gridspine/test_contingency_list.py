@@ -457,6 +457,14 @@ def test_one_unmatched_branch_is_listed_and_the_rest_still_screens():
             "contingency_id,kind,order,element_ids\nX,branch,2,BUS_A-BUS_B-1\n",
             r"line 2: a branch row of order 2 needs two",
         ),
+        (
+            "contingency_id,kind,order,bus\nX,bus_section,0,BUS_S\n",
+            r"line 2: order '0' is not 1 or 2",
+        ),
+        (
+            "contingency_id,kind,order,bus\nX,bus_section,3,BUS_S\n",
+            r"line 2: order '3' is not 1 or 2",
+        ),
     ],
     ids=[
         "missing-kind",
@@ -466,6 +474,8 @@ def test_one_unmatched_branch_is_listed_and_the_rest_still_screens():
         "fractional-bus",
         "unit-no-id",
         "n2-one-id",
+        "order-zero",
+        "order-three",
     ],
 )
 def test_malformed_csv_raises_naming_the_line(text, match):
@@ -654,4 +664,14 @@ def test_csv_n2_row_with_an_unknown_branch_is_listed_with_its_line_and_partial()
         ("P", 2, "BUS_A-BUS_B-9", "unknown_branch"),
         ("P", 2, "BUS_A-BUS_B-1", "partial"),
     ]
+    assert imp.contingencies.empty
+
+
+def test_csv_n2_row_naming_one_branch_twice_is_not_representable():
+    text = "contingency_id,kind,order,element_ids\nP,branch,2,BUS_A-BUS_B-1|BUS_A-BUS_B-1\n"
+    imp = read_contingency_list(text, _net(), fmt="csv")
+    assert [
+        (r.contingency_id, r.line, r.element, r.reason)
+        for r in imp.unmatched.itertuples()
+    ] == [("P", 2, "BUS_A-BUS_B-1", "not_representable")]
     assert imp.contingencies.empty
