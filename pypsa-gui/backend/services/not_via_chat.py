@@ -530,7 +530,7 @@ def load_goals(base: Path = ENTRIES_FILE) -> dict[str, str]:
 
     def goal(text, entry_id):
         if entry_id not in ids:
-            raise ValueError(f'names no entry: {entry_id!r}')
+            raise ValueError(f'names no entry: {entry_id!r}')  # repr-ok: names a JSON key in a CI/import error
         return text, entry_id
     return extend({}, base, 'goals', goal)
 

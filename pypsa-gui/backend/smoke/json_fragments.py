@@ -92,14 +92,14 @@ def route_key(text: str) -> tuple[str, str]:
     """``"POST /api/x"`` -> ``("POST", "/api/x")``: how a fragment spells a route key."""
     method, _, path = text.partition(' ')
     if not (method.isalpha() and method.isupper() and path.startswith('/') and ' ' not in path):
-        raise ValueError(f'a route key is "METHOD /path", not {text!r}')
+        raise ValueError(f'a route key is "METHOD /path", not {text!r}')  # repr-ok: names a JSON key in a CI/import error
     return method, path
 
 
 def _section(base: Path, section: str, kind: type) -> None:
     load_merged(base)  # every load_merged rule: unknown key, bad file, duplicate across fragments
     if not isinstance(_read_object(base).get(section), kind):
-        raise ValueError(f'{base}: needs a {kind.__name__} {section!r}')
+        raise ValueError(f'{base}: needs a {kind.__name__} {section!r}')  # repr-ok: names a JSON key in a CI/import error
 
 
 def extend(table: dict, base: Path, section: str, convert=None) -> dict:
@@ -118,9 +118,9 @@ def extend(table: dict, base: Path, section: str, convert=None) -> dict:
             try:
                 key, value = convert(raw, row) if convert else (raw, row)
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError(f'{path}: {section} {raw!r}: {exc}') from exc
+                raise ValueError(f'{path}: {section} {raw!r}: {exc}') from exc  # repr-ok: names a JSON key in a CI/import error
             if key in out:
-                raise ValueError(f'{path}: {section} {raw!r} is already defined; a fragment adds '
+                raise ValueError(f'{path}: {section} {raw!r} is already defined; a fragment adds '  # repr-ok: names a JSON key in a CI/import error
                                  'rows, so change that row where it is')
             out[key] = value
     return out
@@ -137,9 +137,9 @@ def extend_items(items, base: Path, section: str, key: str = 'id', convert=None)
                 item = convert(raw) if convert else raw
                 ident = item[key]
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError(f'{path}: {section} item {raw!r}: {exc}') from exc
+                raise ValueError(f'{path}: {section} item {raw!r}: {exc}') from exc  # repr-ok: names a JSON key in a CI/import error
             if ident in seen:
-                raise ValueError(f'{path}: {section} {ident!r} is already defined; a fragment adds '
+                raise ValueError(f'{path}: {section} {ident!r} is already defined; a fragment adds '  # repr-ok: names a JSON key in a CI/import error
                                  'rows, so change that row where it is')
             seen.add(ident)
             out.append(item)

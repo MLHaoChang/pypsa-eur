@@ -906,7 +906,7 @@ def merged_tables(base: Path = MANIFEST_FILE) -> tuple[dict, list, dict]:
 
     def tool_family(tool, family):
         if family not in FAMILIES:
-            raise ValueError(f'no family {family!r}; one of {sorted(FAMILIES)}')
+            raise ValueError(f'no family {family!r}; one of {sorted(FAMILIES)}')  # repr-ok: names a JSON key in a CI/import error
         if tool in owner:
             raise ValueError(f'{tool} is already in {owner[tool]}')
         return tool, family
@@ -916,7 +916,7 @@ def merged_tables(base: Path = MANIFEST_FILE) -> tuple[dict, list, dict]:
     variants = extend_items(PYTHON_VARIANTS, base, 'variants', convert=_variant)
     for section in ('settles', 'variant_additions'):
         if not isinstance(load_merged(base).get(section), list):
-            raise ValueError(f'{base}: needs a list {section!r}')
+            raise ValueError(f'{base}: needs a list {section!r}')  # repr-ok: names a JSON key in a CI/import error
     files = [(path, json.loads(path.read_text(encoding='utf-8'))) for path in [base, *fragment_files(base)]]
     index = {v['id']: i for i, v in enumerate(variants)}
     settled: dict[str, Path] = {}
@@ -925,13 +925,13 @@ def merged_tables(base: Path = MANIFEST_FILE) -> tuple[dict, list, dict]:
             try:
                 variant = _variant(raw)
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError(f'{path}: settles item {raw!r}: {exc}') from exc
+                raise ValueError(f'{path}: settles item {raw!r}: {exc}') from exc  # repr-ok: names a JSON key in a CI/import error
             vid = variant['id']
             if vid in settled:
                 raise ValueError(f'{path}: {vid} is already settled by {settled[vid].name}')
             base_status = variants[index[vid]]['status'] if vid in index else None
             if base_status != 'pending' or variant['status'] == 'pending':
-                raise ValueError(f'{path}: settles {vid!r}: only a pending variant can be settled, '
+                raise ValueError(f'{path}: settles {vid!r}: only a pending variant can be settled, '  # repr-ok: names a JSON key in a CI/import error
                                  'and only to covered or unavailable')
             variants[index[vid]], settled[vid] = variant, path
     for path, data in files:
@@ -939,7 +939,7 @@ def merged_tables(base: Path = MANIFEST_FILE) -> tuple[dict, list, dict]:
             vid = raw.get('id') if isinstance(raw, dict) else None
             try:
                 if vid not in index or set(raw) - {'id', 'tools', 'tests'}:
-                    raise ValueError(f'names no variant {vid!r}, or has keys beyond id, tools, tests')
+                    raise ValueError(f'names no variant {vid!r}, or has keys beyond id, tools, tests')  # repr-ok: names a JSON key in a CI/import error
                 old = variants[index[vid]]
                 if old['status'] != 'covered':
                     raise ValueError(f'{vid} is not covered')
@@ -948,7 +948,7 @@ def merged_tables(base: Path = MANIFEST_FILE) -> tuple[dict, list, dict]:
                 if again or len(set(more_tools)) < len(more_tools) or len(set(more_tests)) < len(more_tests):
                     raise ValueError(f'{vid} already lists {again or "a name twice"}')
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError(f'{path}: variant_additions item {raw!r}: {exc}') from exc
+                raise ValueError(f'{path}: variant_additions item {raw!r}: {exc}') from exc  # repr-ok: names a JSON key in a CI/import error
             grown = old['tools'] + more_tools
             variants[index[vid]] = {**old, 'tools': grown, 'tests': old['tests'] + more_tests,
                                     'seam': 'chat tools' if grown else CHECKED_STREAM}
