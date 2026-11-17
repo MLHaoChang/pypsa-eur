@@ -383,3 +383,32 @@ def test_the_admission_check_reads_only_a_weak_grid_study(tmp_path):
         ctx, {"archetype": "weak_flexible", "pack_overrides": None}
     )
     assert stale is not None and "no limit" in stale and "40 MW" in stale
+
+
+def _with_grid2(poc):
+    n = build_eh_datacenter()
+    n.add("Bus", "grid2", carrier="AC")
+    n.buses["eh_poc"] = n.buses["eh_poc"].astype(object)
+    n.buses.loc["grid2", "eh_poc"] = poc
+    n.add("Line", "grid2_line", bus0="grid2", bus1="dc_mv", s_nom=30.0, x=0.1, r=0.01)
+    return n
+
+
+def test_a_line_at_a_tagged_poc_bus_that_is_not_bus0_refuses():
+    """GK B 65 B1: the PoC buses as the selector reads them, numpy bools included."""
+    import numpy as np
+
+    n = _with_grid2(np.True_)
+    assert "line grid2_line" in _refusal(n) and "bus grid2" in _refusal(n)
+
+
+@pytest.mark.parametrize("poc", [float("nan"), "true", "no", None])
+def test_an_odd_eh_poc_value_reads_as_the_selector_reads_it(poc):
+    from services.adequacy import archetypes as arch
+
+    n = _with_grid2(poc)
+    tagged = "grid2" in arch._poc_buses(n)
+    cap = F.import_capacity(n, F._template_request(WEAK, None))
+    assert (cap.refusal is not None) == tagged
+    if not tagged:
+        assert cap.mw == 40.0

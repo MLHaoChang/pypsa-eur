@@ -404,8 +404,8 @@ def import_capacity(n, body: dict) -> ImportCapacity:
         # Transformer there carries power the import Links' capacity does not
         # count, so the limit can't be read from the Links alone (GK B (64) 6).
         pcc = {str(table.at[name, "bus0"]) for name in links}
-        if "eh_poc" in n.buses.columns:
-            pcc |= {str(b) for b in n.buses.index if n.buses.at[b, "eh_poc"] is True}
+        # The PoC buses as the selector reads them (numpy bools included, GK B 65 B1).
+        pcc |= arch._poc_buses(n)
         for word, branches in (("line", n.lines), ("transformer", n.transformers)):
             for b in branches.index:
                 ends = (str(branches.at[b, "bus0"]), str(branches.at[b, "bus1"]))

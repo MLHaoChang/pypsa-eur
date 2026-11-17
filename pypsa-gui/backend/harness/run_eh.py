@@ -157,12 +157,12 @@ def freeze(ctx, profile, solves_left) -> dict:
         )
     ):
         raise FreezeError(
-            f"The run profile sets an import cap of {asked:g} MW but the network's "
-            f"connection limit is {cap:g} MW: set the limit on the grid import link, "
+            f"The run profile sets an import cap of {asked:.12g} MW but the network's "
+            f"connection limit is {cap:.12g} MW: set the limit on the grid import link, "
             "or remove the profile's import cap."
             if isinstance(asked, (int, float)) and not isinstance(asked, bool)
             else f"The run profile's import cap ({asked}) is not a number; the "
-            f"network's connection limit is {cap:g} MW."
+            f"network's connection limit is {cap:.12g} MW."
         )
     body = EhStudyRequest(
         archetype=card["archetype"],
