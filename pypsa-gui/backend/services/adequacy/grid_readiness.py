@@ -1824,11 +1824,15 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
                       "input is missing, never a pass")}
 
 
-def grid_readiness_for(project, profile: str | None = None) -> dict:
-    """The scorecard of a registered project: its saved network, its
-    published grid codes, and the active session's reliability study when
-    this project is the active one. ``profile`` defaults to the campus
-    study's last-run profile, else its default."""
+def grid_readiness_for(project, profile: str | None = None, *, source: str = "live") -> dict:
+    """The scorecard of a registered project: its network, its published
+    grid codes, and the active session's reliability study when this project
+    is the active one. ``profile`` defaults to the campus study's last-run
+    profile, else its default. ``source="live"`` (the screen) reads the loaded
+    network when the project is loaded, unsaved edits included (DC
+    grid-readiness walkthrough 04); ``"saved"`` (the report, whose other
+    chapters read the saved project) reads the saved file only. The answer's
+    ``network`` names which: ``live``, ``saved`` or ``out_of_date``."""
     import pypsa
     from fastapi import HTTPException
 
@@ -1845,16 +1849,52 @@ def grid_readiness_for(project, profile: str | None = None) -> dict:
         raise HTTPException(status_code=422, detail={
             "error_kind": "unknown_grid_code_profile",
             "message": f"unknown grid-code profile {profile!r}; known {sorted(known)}"})
-    nc = d / ce.NETWORK_FILE
-    n = None
-    if nc.is_file():
-        with ce._netcdf_lock():
-            n = pypsa.Network(str(nc))
+    # DC grid-readiness walkthrough 04: unsaved edits are read, not the saved file.
+    n, unsaved = _live_network(project) if source == "live" else (None, "saved")
+    if n is None:
+        nc = d / ce.NETWORK_FILE
+        if nc.is_file():
+            with ce._netcdf_lock():
+                n = pypsa.Network(str(nc))
     record, edited = _active_study(d)
     out = grid_readiness(d, n, profile, profile_dirs=(codes,), eh_study=record, study_edited=edited)
+    # "live": the rows read the loaded network, unsaved edits included;
+    # "out_of_date": it was busy, so the saved file was read and may lag them.
+    out["network"] = unsaved
     # SCORECARD-STALE-1: whether this profile is still the code the last campus run was held to.
     out["profile"]["since_run"] = ce.grid_code_since_run(project, profile)
     return out
+
+
+#: How long the scorecard waits for a busy network before it reads the saved file.
+LIVE_LOCK_TIMEOUT_S = 2.0
+
+
+def _live_network(project) -> tuple[Any, str]:
+    """A copy of the project's in-memory network when it is loaded, with
+    ``"live"`` (it holds every edit, saved or not); ``(None, "saved")`` when
+    it is not loaded; ``(None, "out_of_date")`` when its mutation lock stays
+    held (a solve), so the saved file is read and may lag unsaved edits."""
+    try:
+        from services import project_registry
+        from services.pypsa_service import PyPSAService
+
+        ctx = PyPSAService.get_context(project_registry.registry_key(project))
+        if ctx is None:
+            active = PyPSAService.get_active_context()
+            if str(getattr(active, "project_uuid", "") or "") == str(project.id):
+                ctx = active
+    except Exception:  # noqa: BLE001 — not loaded reads the saved file
+        return None, "saved"
+    if ctx is None:
+        return None, "saved"
+    lock = ctx.mutation_lock
+    if not lock.acquire(timeout=LIVE_LOCK_TIMEOUT_S):
+        return None, "out_of_date"
+    try:
+        return ctx.network.copy(), "live"
+    finally:
+        lock.release()
 
 
 def _known_profiles(codes: pathlib.Path) -> set | None:

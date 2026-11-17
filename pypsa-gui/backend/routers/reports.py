@@ -432,7 +432,8 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
         row = SimpleNamespace(name=project.name, storage_path=str(d), project_kind=None,
                               org_id=project.org_id, id=project.uuid)
         try:
-            out["grid_readiness"] = grid_readiness_for(row)
+            # The saved project, as the report's other chapters read it (walkthrough 04).
+            out["grid_readiness"] = grid_readiness_for(row, source="saved")
         except Exception as exc:                            # noqa: BLE001 - stated as not established
             logger.info("reports: grid readiness not read: %s", exc)
             out["grid_readiness"] = {}

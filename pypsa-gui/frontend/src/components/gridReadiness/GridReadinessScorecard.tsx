@@ -11,7 +11,9 @@
 // Nothing here blocks Run (project workflow R1). A row's verdict is a word and
 // an icon, never a colour alone; an unknown row says first what is missing.
 import { FIELD_LABELS } from '../../utils/fieldLabels'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { networkApi } from '../../api/network'
+import { nk } from '../../utils/queryKeys'
 import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, HelpCircle,
   MessageCircleQuestion } from 'lucide-react'
 import { create } from 'zustand'
@@ -60,14 +62,25 @@ export const useScorecardOpen = create<OpenState>(set => ({
 
 export function useGridReadiness(enabled = true) {
   const project = useUIStore(s => s.currentProject)
+  // The project's edit counter, the sample the always-mounted readers poll
+  // (useNetworkRevisionInvalidation): any network edit, saved or not, moves it,
+  // and the scorecard reads the loaded network (DC grid-readiness walkthrough 04).
+  const { data: undo } = useQuery({
+    queryKey: nk(project, 'undoInfo'),
+    queryFn: () => networkApi.undoInfo(),
+    refetchInterval: 3000,
+    enabled: !!project && enabled,
+  })
+  const revision = typeof undo?.network_revision === 'number' ? undo.network_revision : null
   // Under the campus root, so a campus run's invalidation refreshes it too;
-  // read again on each mount, since a network or island edit changes it.
+  // read again on each mount and each edit. The last verdicts stay shown while the next loads.
   return useQuery({
-    queryKey: ['campusElectrical', 'grid_readiness', project],
+    queryKey: ['campusElectrical', 'grid_readiness', project, revision],
     queryFn: () => campusApi.gridReadiness(project ?? ''),
     enabled: !!project && enabled,
     staleTime: 0,
     refetchOnMount: 'always',
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -342,6 +355,11 @@ export function GridReadinessScorecard({ data, mode, onJump = () => {}, fieldLab
         <div className="text-[11px] text-muted">Advisory: nothing here blocks Run.</div>
         {sinceRunText(data.profile.since_run) && (
           <div data-testid="gr-since-run" className="text-[11px] text-warn">{sinceRunText(data.profile.since_run)}</div>
+        )}
+        {data.network === 'out_of_date' && (
+          <div data-testid="gr-out-of-date" className="text-[11px] text-warn">
+            Out of date: the project is busy, so this reads the saved project. Save the project to update.
+          </div>
         )}
         {data.profile.error && (
           <div data-testid="gr-profile-error" className="text-[11px] text-warn">{data.profile.error}</div>
