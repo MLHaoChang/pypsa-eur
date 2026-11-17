@@ -165,7 +165,7 @@ Nothing to decide: Readiness lists each section's state and offers **Run study**
 ## 6. Owner questions
 
 <a id="owner-questions"></a>
-Sent to the coordinator as options (HOLISTIC-1).
+Sent to the coordinator as options (HOLISTIC-1). **Answered 2026-11-17 (TEMPLATE-GAPS-1): Q1–Q4 option (a).** Q5 is open. Q4 (a) also asks for design §2.3 to gain concentrator and IPP columns; that edit belongs to the design doc's owner and is not made here.
 
 - **Q1 Location.** Should a missing location block Run? (a) Block Run until set, as §2.3's R says (recommended: profiles and market bundles need it); (b) keep it a note and make location opt.
 - **Q2 Component names.** Are template component ids (`it_load`, `genset_new`, `grid_import`) raw names under RAW-NAMES-1? (a) Yes: templates ship plain display names ("IT load", "New genset") and ids stay internal (recommended); (b) no: they are the user's own names.
@@ -177,11 +177,11 @@ Sent to the coordinator as options (HOLISTIC-1).
 
 | Issue | Sections | Templates | Status |
 |---|---|---|---|
-| [01](issues/01-location-required-not-asked.md) location | 1, 6, 9 | all | needs-triage (Q1) |
+| [01](issues/01-location-required-not-asked.md) location | 1, 6, 9 | all | ready-for-agent (Q1 a) |
 | [02](issues/02-connection-limit-in-guided.md) connection limit | 3 | DC, Site, H2, NH3, Conc, IPP | ready-for-agent |
 | [03](issues/03-carriers-processes-jump.md) carriers, recipes | 2 | all; H2, NH3, Conc recipes | ready-for-agent |
 | [04](issues/04-load-editor-shows-defaults.md) load editor | 4, 5 | all | ready-for-agent |
-| [05](issues/05-raw-names-in-ui.md) raw names | all | all | ready-for-agent (Q2 part) |
+| [05](issues/05-raw-names-in-ui.md) raw names | all | all | ready-for-agent (Q2 a) |
 | [06](issues/06-goal-and-backup-consistency.md) goal, backup grouping | 5, 8 | DC, MG, Conc | ready-for-agent |
 | [08](issues/08-silent-run-fallbacks.md) silent run fallbacks | 5, 8, 10 | all | ready-for-agent |
 | [07](issues/07-expert-only-decisions.md) decisions in neither mode / Expert-only and unnamed | 1, 3, 4, 5, 7, 8 | all | needs-triage |

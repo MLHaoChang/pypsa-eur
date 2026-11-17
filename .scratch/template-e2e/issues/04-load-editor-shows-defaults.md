@@ -6,6 +6,7 @@
 Status: ready-for-agent
 Size: M
 Gated: UX
+Decided: TEMPLATE-GAPS-1 Q3 (a), PUE, critical share, backup mode and architecture editable after creation in sections 4–5, both modes
 Likely files: pypsa-gui/frontend/src/layout/PropertiesPanel.tsx (Load PROFILE block); pypsa-gui/frontend/src/components/series/ (load profile generator form); pypsa-gui/frontend/src/pages/hubDesign/cards/DcLoadForm.tsx; pypsa-gui/backend/services/flow_service.py (loads section)
 Journey fit: set up site (section 4) → readiness → results. Peaks per period feed the connection check (3) and the reliability goal (8).
 

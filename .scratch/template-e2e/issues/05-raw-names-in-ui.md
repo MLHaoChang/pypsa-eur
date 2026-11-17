@@ -6,7 +6,7 @@
 Status: ready-for-agent
 Size: M
 Gated: UX
-Blocked by: owner question Q2 for the component-name part only
+Decided: TEMPLATE-GAPS-1 Q2 (a), component ids count as raw names; templates ship plain display names, ids stay internal
 Likely files: pypsa-gui/frontend/src/layout/PropertiesPanel.tsx; pypsa-gui/frontend/src/components/series/ (generator advanced fields); pypsa-gui/frontend/src/pages/CampusElectricalPanel.tsx and the Scenarios "Grid study" panel; pypsa-gui/backend/project_templates/eh_concentrator.py (`__lost_concentrate`); price-series library labels
 Journey fit: every set-up step (sections 1–8) in Expert, plus the Guided drawers that reuse the same editors.
 

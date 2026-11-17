@@ -3,10 +3,10 @@
 
 # 01 — Location is a required input, but no template asks for it and Run does not wait for it
 
-Status: needs-triage
+Status: ready-for-agent
 Size: S
 Gated: UX; GK B (run gate)
-Blocked by: owner question Q1 in [decisions.md](../decisions.md#owner-questions)
+Decided: TEMPLATE-GAPS-1 Q1 (a), a missing location blocks Run until it is set (2026-11-17)
 Likely files: pypsa-gui/backend/services/flow_service.py (project section state, ~l.1214-1335); pypsa-gui/backend/services/run_gates.py (readiness); pypsa-gui/frontend/src/layout/NewProjectWizard.tsx (DcLoadForm); pypsa-gui/frontend/src/pages/hubDesign/cards/GenericSiteForm.tsx; pypsa-gui/frontend/src/components/site3d/SiteAnchorField.tsx
 Journey fit: pick template → set up site (section 1) → readiness. Hands on to the profiles (6), which need coordinates, and to the readiness line in 9.
 
