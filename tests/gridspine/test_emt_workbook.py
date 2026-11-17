@@ -17,7 +17,9 @@ from gridspine.handoff.emt_workbook import (
     EMT_ONLY,
     PARAM_UNITS,
     RSCAD_NOTES,
+    SHEET_FIELDS,
     SHEETS,
+    UNTAGGED,
     header,
     rscad_notes,
     workbook,
@@ -170,7 +172,7 @@ def test_vector_group_is_tagged_assumed_when_the_campus_defaulted_it():
     tr = workbook(build_campus(s))[0]["transformers"].set_index("element")
     assert (tr.at["TR1", "vector_group [-]"], tr.at["TR1", "vector_group source"]) == (
         "YNd5",
-        "given",
+        "campus (untagged)",
     )
 
 
@@ -267,4 +269,146 @@ def test_a_refused_pack_is_recorded_and_the_psse_bundle_still_written(tmp_path):
     b = CB.export_campus_bundle(tmp_path, build_campus(s), island_rows(), "h18")
     m = json.loads((b.path / "manifest.json").read_text())
     assert "X/R not given / infinite" in m["emt_pack"]["not_written"]
-    assert (b.path / "h18.raw").exists() or any(f.endswith(".raw") for f in m["files"])
+    assert (b.path / f"{b.path.name}.raw").exists()
+    assert not (b.path / "emt").exists()
+
+
+# --- W2 (GK A2): unit coverage, mechanically ------------------------------------
+
+#: A schema field-name suffix and the unit it fixes, longest first.
+SUFFIX_UNITS = (
+    ("_kj_per_kv", "kJ/kV"),
+    ("_mw_per_hz", "MW/Hz"),
+    ("_mw_per_s", "MW/s"),
+    ("_ohm_per_km", "ohm/km"),
+    ("_nf_per_km", "nF/km"),
+    ("_percent", "%"),
+    ("_pct", "%"),
+    ("_mwh", "MWh"),
+    ("_mvar", "Mvar"),
+    ("_mva", "MVA"),
+    ("_mw", "MW"),
+    ("_kw", "kW"),
+    ("_kv", "kV"),
+    ("_ka", "kA"),
+    ("_km", "km"),
+    ("_pu", "pu"),
+    ("_hz", "Hz"),
+    ("_ohm", "ohm"),
+    ("_s", "s"),
+)
+
+
+def test_every_field_any_sheet_writes_has_a_unit():
+    for sheet, fields in SHEET_FIELDS.items():
+        for f in fields:
+            assert f in PARAM_UNITS, (sheet, f)
+            assert header(f) == f"{f} [{PARAM_UNITS[f]}]"
+
+
+def test_each_unit_matches_its_field_name_suffix():
+    checked = 0
+    for f, unit in PARAM_UNITS.items():
+        for suffix, expected in SUFFIX_UNITS:
+            if f.endswith(suffix):
+                assert unit == expected, (f, unit, expected)
+                checked += 1
+                break
+    assert checked >= 40
+
+
+def test_values_the_campus_holds_untagged_say_so():
+    s = campus_spec()
+    s["campus"]["compensation"] = [
+        {
+            "name": "CAP1",
+            "bus": "MV1",
+            "kind": "capacitor_bank",
+            "q_mvar": t(2.0),
+            "steps": 4,
+        }
+    ]
+    frames, _ = workbook(build_campus(s))
+    assert (
+        frames["insulation"].set_index("element").at["MV1", "vn_kv source"] == UNTAGGED
+    )
+    assert frames["filters"].set_index("element").at["CAP1", "steps source"] == UNTAGGED
+    assert UNTAGGED in rscad_notes()
+
+
+# --- gensets and converters: island data ------------------------------------------
+
+
+def test_a_genset_with_island_data_carries_it():
+    frames, g = workbook(build_campus(island_spec()))
+    gen = frames["gensets"].set_index("element")
+    assert list(gen.index) == ["GEN1"]
+    assert gen.at["GEN1", "governor"] in ("droop", "isochronous")
+    assert gen.at["GEN1", "H_s [s]"] > 0 and gen.at["GEN1", "xd_pp [pu]"] > 0
+    assert not {p for e, p in gaps_of(g, "gensets")}
+
+
+def test_a_genset_without_island_data_lists_its_dynamics():
+    frames, g = workbook(build_campus(campus_spec()))
+    assert gaps_of(g, "gensets") == {
+        ("GEN1", f) for f in ("xd_sat", "H_s", "T_g_s", "q_droop_pct", "cos_phi_r")
+    }
+    gen = frames["gensets"].set_index("element")
+    assert gen.at["GEN1", "xd_pp [pu]"] == 0.15 and gen.at["GEN1", "rx_sc [-]"] == 0.07
+    assert pd.isna(gen.at["GEN1", "H_s [s]"])
+
+
+def test_converter_control_data_follows_its_mode():
+    frames, g = workbook(build_campus(island_spec()))
+    conv = frames["converters"].set_index("element")
+    assert conv.at["BESS1", "control"] == "gfm_droop"
+    assert (
+        conv.at["BESS1", "droop_pct [%]"] > 0 and conv.at["BESS1", "k_gfm_min [pu]"] > 0
+    )
+    gaps = gaps_of(g, "converters")
+    assert not {p for e, p in gaps if e == "BESS1"} - {"emt_model"}
+    # PV1 has no island data: its control mode and current limit are to be supplied
+    assert {("PV1", "control"), ("PV1", "i_max_pu")} <= gaps
+    why = g.set_index(["sheet", "element", "param"])["why"]
+    assert why[("converters", "PV1", "control")].startswith(
+        "converter control mode not held"
+    )
+
+
+def test_a_gfm_converter_missing_a_control_parameter_is_a_gap():
+    camp = without(build_campus(island_spec()), "BESS1", "tau_f_s")
+    _, g = workbook(camp)
+    assert ("BESS1", "tau_f_s") in gaps_of(g, "converters")
+
+
+def test_a_statcom_keeps_its_rating():
+    s = campus_spec()
+    s["campus"]["compensation"] = [
+        {"name": "STC1", "bus": "MV2", "kind": "statcom", "q_mvar": t(5.0, "datasheet")}
+    ]
+    frames, g = workbook(build_campus(s))
+    conv = frames["converters"].set_index("element")
+    assert (conv.at["STC1", "q_mvar [Mvar]"], conv.at["STC1", "q_mvar source"]) == (
+        5.0,
+        "datasheet",
+    )
+    assert ("STC1", "q_mvar") not in gaps_of(g, "converters")
+    assert ("STC1", "control") not in gaps_of(g, "converters")
+
+
+# --- the bundle's hour stage --------------------------------------------------------
+
+
+def _stage(b):
+    th = json.loads((b.path / "emt" / "thevenin_set.json").read_text())
+    return {r["stage"]: r for r in th["stages"]}
+
+
+def test_the_bundle_stage_is_the_hour_with_its_running_units(tmp_path):
+    camp = build_campus(island_spec())
+    on = island_rows()
+    off = on.assign(status=[1, 1, 1, 0])  # GEN1 off in this hour
+    a = CB.export_campus_bundle(tmp_path / "on", camp, on, "h18")
+    b = CB.export_campus_bundle(tmp_path / "off", camp, off, "h18")
+    assert set(_stage(a)) == {"hour"}
+    assert _stage(a)["hour"]["sk_max_mva"] > _stage(b)["hour"]["sk_max_mva"]

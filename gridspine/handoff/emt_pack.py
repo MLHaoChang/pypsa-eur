@@ -58,6 +58,7 @@ import dataclasses
 import hashlib
 import json
 import math
+import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -580,8 +581,10 @@ def bundle_emt_pack(bundle_dir, campus, rows) -> dict:
     refusal is recorded, not dropped.
     """
     installed = set(rows.loc[rows["status"] == 1, "unit_id"])
+    target = Path(bundle_dir) / BUNDLE_DIR
+    shutil.rmtree(target, ignore_errors=True)  # no stale pack from an earlier export
     try:
-        p = write_emt_pack(Path(bundle_dir) / BUNDLE_DIR, campus, stages={"hour": installed})
+        p = write_emt_pack(target, campus, stages={"hour": installed})
     except EmtPackError as e:
         return {"not_written": str(e)}
     return {"manifest": f"{BUNDLE_DIR}/{MANIFEST}", "data_hash": p.manifest["data_hash"]}

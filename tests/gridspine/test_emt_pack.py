@@ -543,3 +543,12 @@ def test_each_battery_corner_is_one_row(tmp_path):
 def test_r0x0_without_x0x_lists_only_the_missing_one(tmp_path):
     p = pack(tmp_path, spec(x0x_min=None))
     assert list(grid_gaps(p)["param"]) == ["x0x_min"]
+
+
+def test_json_files_have_sorted_keys(tmp_path):
+    p = pack(tmp_path)
+    for name in ("manifest.json", "thevenin_set.json", "case_schedule.json"):
+        text = (p.path / name).read_text()
+        assert text == json.dumps(json.loads(text), sort_keys=True, indent=1) + "\n", (
+            name
+        )
