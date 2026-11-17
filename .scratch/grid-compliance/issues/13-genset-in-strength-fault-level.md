@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# GC-10 A running genset in the strength fault level (S_k''min)
+# GC-13 A running genset in the strength fault level (S_k''min)
 
 Status: needs-triage
 Type: task

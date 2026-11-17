@@ -267,6 +267,60 @@ def test_load_q_reaches_the_net_and_the_tables():
     assert loads.set_index("bus").at["MV1", "q_mvar"] == pytest.approx(q)
 
 
+def _switched_off(unit):
+    c = build_campus(_spec())
+    rows = _hourly(c)[["unit_id", "p_mw", "status"]]
+    rows.loc[rows["unit_id"] == unit, "status"] = 0
+    return _gc03_hour_net(c, rows, 0)
+
+
+def test_a_switched_off_load_draws_nothing_in_the_net_and_the_tables():
+    net, _, loads, _ = _switched_off("L1")
+    assert float(net.load["p_mw"].abs().sum()) == 0.0
+    assert float(net.load["q_mvar"].abs().sum()) == 0.0
+    mv1 = loads.set_index("bus").loc["MV1"]
+    assert (float(mv1["p_mw"]), float(mv1["q_mvar"])) == (0.0, 0.0)
+
+
+def test_a_switched_off_converter_injects_nothing_in_the_net_and_the_tables():
+    net, dispatch, _, _ = _switched_off("PV")
+    pv = net.sgen[net.sgen["name"].astype(str) == "PV"].iloc[0]
+    assert (float(pv["p_mw"]), float(pv["q_mvar"])) == (0.0, 0.0)
+    row = dispatch.set_index("unit_id").loc["PV"]
+    assert (float(row["p_mw"]), float(row["q_mvar"]), int(row["status"])) == (
+        0.0,
+        0.0,
+        0,
+    )
+    # the units left on keep their power
+    assert float(dispatch.set_index("unit_id").at["WT", "p_mw"]) == 1.0
+
+
+def _pcc(tmp_path, p_mw):
+    pd.DataFrame(
+        {
+            "period": 2030,
+            "hour": range(len(p_mw)),
+            "case": "intact",
+            "converged": True,
+            "p_mw": p_mw,
+        }
+    ).to_csv(tmp_path / LF_PCC_CSV, index=False)
+    return _gc03_hours(tmp_path, [2030])[2030]
+
+
+def test_a_period_that_never_exports_has_no_max_export_hour(tmp_path):
+    assert _pcc(tmp_path, [5.0, 2.0, 8.0]) == [("max_import", 2), ("min_import", 1)]
+
+
+def test_a_period_that_exports_names_its_max_export_hour(tmp_path):
+    assert _pcc(tmp_path, [5.0, -3.0, 8.0]) == [("max_import", 2), ("max_export", 1)]
+
+
+def test_a_period_at_exactly_zero_exchange_does_not_export(tmp_path):
+    assert _pcc(tmp_path, [5.0, 0.0]) == [("max_import", 0), ("min_import", 1)]
+
+
 # --------------------------------------------------------------------------
 # the campus run on the shared hub fixture
 # --------------------------------------------------------------------------
@@ -297,7 +351,8 @@ def test_the_run_writes_both_csvs_and_islanding_is_never_skipped(sized):
 
     planning = planning_campus(sized)
     table = pd.read_csv(sized / PLANNING_CSV)
-    assert set(table["hour_kind"]) == {"max_import", "max_export"}
+    # the hub imports in every hour, so its second hour is the least import, not an export
+    assert set(table["hour_kind"]) == {"max_import", "min_import"}
     trafo = table[table["contingency_id"] == "GRID-MV-1"]
     assert len(trafo) and (trafo["verdict"] == "fail").all() and trafo["islanded"].all()
     assert planning["verdict"] == "fail" and planning["failures"] == len(trafo)

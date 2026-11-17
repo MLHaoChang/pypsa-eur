@@ -1448,7 +1448,8 @@ def _gc03_hour_net(campus, rows, hour: int):
 
 def _gc03_hours(run_dir, periods):
     """Per period, the max-import and max-export intact converged hours of
-    the sized run (``LF_PCC_CSV``, ``p_mw`` > 0 imports), or the reason none."""
+    the sized run (``LF_PCC_CSV``, ``p_mw`` > 0 imports), or the reason none.
+    A period that never exports labels its second hour "min_import"."""
     pcc = pd.read_csv(_require(Path(run_dir), LF_PCC_CSV))
     out = {}
     for period in periods:
@@ -1458,7 +1459,9 @@ def _gc03_hours(run_dir, periods):
             continue
         p = rows["p_mw"].astype(float)
         imp, exp = int(rows.loc[p.idxmax(), "hour"]), int(rows.loc[p.idxmin(), "hour"])
-        out[period] = [("max_import", imp)] + ([] if exp == imp else [("max_export", exp)])
+        # A period that never exports has no export hour: its least-import hour is named so.
+        low = "max_export" if float(p.min()) < 0 else "min_import"
+        out[period] = [("max_import", imp)] + ([] if exp == imp else [(low, exp)])
     return out
 
 
