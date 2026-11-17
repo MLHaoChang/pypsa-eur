@@ -54,7 +54,14 @@ from .store import (
 FROZEN_FILES = (ce.CAMPUS_FILE, ce.LIBRARY_FILE)
 #: The freeze method in force. A freeze made by another reads ``refreeze_needed``.
 FREEZE_SOURCE = "interim"
-FREEZE_STATES = ("none", "fresh", "stale", "refreeze_needed", "unreadable")
+FREEZE_STATES = (
+    "none",
+    "fresh",
+    "stale",
+    "refreeze_needed",
+    "unreadable",
+    "submitted",
+)
 #: How each freeze state reads in user-facing text ("out of date", never "stale").
 FREEZE_WORDS = {
     "none": "not frozen",
@@ -62,6 +69,7 @@ FREEZE_WORDS = {
     "stale": "out of date",
     "refreeze_needed": "made by an older freeze method",
     "unreadable": "not checkable: the inputs cannot be read",
+    "submitted": "kept as submitted",
 }
 
 NEXT_STEP = {
@@ -138,6 +146,17 @@ def freeze_state(freeze: Freeze | None, current: str | None) -> str:
     return "fresh" if freeze.data_hash == current else "stale"
 
 
+def record_state(entry: DeliverableState, current: str | None) -> tuple[str, bool]:
+    """The freeze state the view and the pack show, and whether the inputs
+    changed since submission. A deliverable submitted on a kept record reads
+    ``submitted``: it is judged against that record, so "out of date" (which
+    asks for a re-freeze the server refuses) never applies to it."""
+    if on_record(entry):
+        changed = freeze_state(entry.submissions[-1], current) != "fresh"
+        return "submitted", changed
+    return freeze_state(entry.freeze, current), False
+
+
 def default_items(d: cat.Deliverable) -> list[DataItem]:
     return [
         DataItem(item_id=f"item-{i + 1}", label=label)
@@ -168,7 +187,7 @@ def _view(project, tracker, codes) -> list[dict]:
     rows = []
     for d in wanted:
         s = tracker.deliverables.get(d.code) or DeliverableState()
-        fstate = freeze_state(s.freeze, current)
+        fstate, changed = record_state(s, current)
         rows.append(
             {
                 "code": d.code,
@@ -189,6 +208,7 @@ def _view(project, tracker, codes) -> list[dict]:
                 "freeze_state": fstate,
                 "stale": fstate == "stale",
                 "submissions": [f.model_dump() for f in s.submissions],
+                "inputs_changed_since_submission": changed,
                 "feeds": [
                     {
                         "package": p,
