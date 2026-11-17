@@ -73,6 +73,14 @@ export const FACT_WORDS: Record<string, string> = {
   'ipp.export.over_limit_mw': 'The power exported never passes the export connection\'s rating',
   'ic.min_dscr': 'The investment case\'s lowest debt cover is at or above the assumed floor (not the lender\'s covenant)',
   'ic.project_pre_tax_irr': 'The investment case reports the project\'s pre-tax IRR',
+  // Study harness 16: the staged mining concentrator's process and comparison facts.
+  'process.mass_balance': 'The ore and concentrate tonnes balance at every tonne bus in every period',
+  'process.motor_start': 'The large process motors start without breaking the site\'s voltage dip limit',
+  'process.restart': 'Every process unit restarts in time after a grid trip',
+  'process.n_1.site_transformer': 'Losing one site transformer cuts off no process unit',
+  'ic.counterfactual.basis': 'The comparison case is the site as it runs today',
+  'process.lost_production': 'The concentrate lost to grid events is reported (lost production, not shipped)',
+  'process.shed_level': 'The highest process load shed is reported',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,
@@ -112,6 +120,8 @@ export const NAME_WORDS: Record<string, string> = {
   bess: 'The battery',
   // Study harness 13: the ammonia hub's levers.
   'wind_new_*': 'New wind', 'solar_new_*': 'New solar', nh3_tank: 'The ammonia tank',
+  // Study harness 16: the concentrator's buffer lever.
+  'coarse_ore_stockpile_new_*': 'New coarse-ore stockpiles',
 }
 
 /** An envelope edit's field: the panels' own word (`FIELD_LABELS`) and its unit. */

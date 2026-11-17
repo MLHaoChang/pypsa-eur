@@ -302,10 +302,13 @@ def restart_of(inp):
     """Q3: `Detailed(fail count, rows)` of the restart after a grid trip of the units the dip classes trip
     (`ride_through.trip_table`, as the campus run's screen), each motor start screened on the PoC source of the
     motor-start rows. An unknown unit with no fail is no evidence."""
-    from gridspine.drivers.process_chain import restart_units
-    from gridspine.static import motor_start as ms
-    from gridspine.static import restart_sequence as rs
-    from gridspine.static import ride_through as rt
+    try:
+        from gridspine.drivers.process_chain import restart_units
+        from gridspine.static import motor_start as ms
+        from gridspine.static import restart_sequence as rs
+        from gridspine.static import ride_through as rt
+    except ImportError as exc:  # pragma: no cover - build-shape branch (test_packaging_requirements)
+        return G.NoEvidence("restart_unknown", f"the restart screen needs gridspine ({exc})")
 
     from services.adequacy import grid_readiness as gr
 

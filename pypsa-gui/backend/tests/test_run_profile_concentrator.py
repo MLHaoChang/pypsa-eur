@@ -745,7 +745,12 @@ def test_a_link_port_with_no_flow_frame_is_unreadable_dispatch(direct):
 def test_only_bus_n_columns_are_link_ports():
     n = _chain()
     n.links["bus_note"] = "ore"
-    assert RC._link_ports(n) == [(0, "bus0"), (1, "bus1"), (2, "bus2")]
+    # PyPSA keeps a `busN` Link column another network in this process added (e.g. bus5), so the exact list
+    # depends on test order: every port is a `bus<i>` column at its index, in order, and bus_note is none.
+    ports = RC._link_ports(n)
+    assert ports[:3] == [(0, "bus0"), (1, "bus1"), (2, "bus2")]
+    assert ports == sorted(ports) and all(col == f"bus{i}" for i, col in ports)
+    assert {col for _, col in ports} == {c for c in n.links.columns if c[:3] == "bus" and c[3:].isdigit()}
 
 
 def test_no_tonne_bus_is_named(direct):
