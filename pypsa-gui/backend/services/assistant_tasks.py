@@ -1302,7 +1302,7 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
         path, task = _read(task_id)
         step = _next(task)
         if not step or task["status"] in ("completed", "cancelled") or step["status"] not in ("uncertain", "failed", "cancelled"):
-            _refuse("task_resolution_not_needed", "Only a failed or uncertain step can be reconciled.")
+            _refuse("task_resolution_not_needed", "Only a failed, stopped or uncertain step can be reconciled.")
         from harness.session import get_session
         origin = get_session(step.get("session_id"))
         worker = _WORKERS.get((task_id, step["id"], step.get("attempt_id")))
@@ -1472,7 +1472,10 @@ def _gate_brief(task, step):
     if task["status"] == "paused_at_card":
         _refuse("task_paused_at_card", f"The plan is paused before the {task['pause']['card']} card; "
                 "the user continues from the plan card.")
-    if task.get("brief") and step["status"] in ("failed", "cancelled") and _effectful(step["tool"]):
+    if task.get("brief") and step["status"] == "cancelled" and _effectful(step["tool"]):
+        _refuse("task_step_needs_retry", "This step's job was stopped; ask the user whether to run it "
+                "again, then resolve_task_step(retry) reopens it.")
+    if task.get("brief") and step["status"] == "failed" and _effectful(step["tool"]):
         _refuse("task_step_needs_retry", "This step failed; draft the fix from next_step.correction, "
                 "then resolve_task_step(retry) reopens it.")
     if _effectful(step["tool"]) and _stale(task):
@@ -1532,8 +1535,8 @@ def _stopped(native_status, step_status, result):
     if native_status != "aborted" or step_status != "failed":
         return False
     cases = result.get("cases") if isinstance(result, dict) else None
-    return cases is None or bool(cases) and all(
-        isinstance(c, dict) and c.get("status") == "aborted" for c in cases)
+    return cases is None or (bool(cases) and all(
+        isinstance(c, dict) and c.get("status") == "aborted" for c in cases))
 
 
 def _settle(task, step, native_status, step_status, result):

@@ -210,6 +210,15 @@ def test_c3_a_cancelled_effectful_step_needs_a_retry_before_it_runs(session):
     _settle_solve(session)
     refused("task_step_needs_retry", tasks.begin_step, session, "run_simulation", {})
     refused("task_step_needs_retry", tasks.admit, session, "run_simulation", {})
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as gate:
+        tasks.begin_step(session, "run_simulation", {})
+    # Neutral, as the stopped error and correction: ask, never "draft the fix".
+    assert gate.value.detail["message"] == (
+        "This step's job was stopped; ask the user whether to run it "
+        "again, then resolve_task_step(retry) reopens it."
+    )
 
 
 def test_c3_a_cancelled_study_step_fails_its_explore_case(tmp_path):
@@ -335,3 +344,26 @@ def test_c5_a_study_abort_settles_cancelled_with_the_studys_own_text(tmp_path):
     assert step["job"]["outcome"] == "aborted"
     # run_eh overwrites the settle's neutral text with its own.
     assert step["error"] == "The study ended aborted: stopped by the user"
+
+
+def test_c5_an_investment_case_abort_settles_cancelled_with_its_own_text(tmp_path):
+    from harness import run_ic
+    from tests.test_run_profile_ipp_runs import TICKET, _record, _task, _waiting_job
+
+    from services.run_profiles import STAGES
+
+    path = _task(tmp_path, status="waiting", job=_waiting_job())
+    saved = json.loads(path.read_text())  # what the settle's own view reads
+    saved.update(title="Run", brief={"objective": "x", "cards": [], "cases": []})
+    saved["run"].update(mode="step", stages={s: {"status": "pending"} for s in STAGES})
+    for step in saved["steps"]:
+        step.setdefault("args", {})
+    path.write_text(json.dumps(saved))
+    run_ic.settle(path, TICKET, "ad:1", _record("aborted", error_code="user_stop"), 1.0)
+    step = next(
+        s for s in json.loads(path.read_text())["steps"] if s["id"] == TICKET[1]
+    )
+    assert step["status"] == "cancelled"
+    assert step["job"]["outcome"] == "aborted"
+    # run_ic overwrites the settle's neutral text with its own.
+    assert step["error"] == "The investment case ended aborted: user_stop"

@@ -180,6 +180,7 @@ it('live-voice 16: a step whose job was stopped reads stopped, not failed, and t
   cleanup()
   useUIStore.setState({ uiMode: 'expert' })
   render(<AssistantResultCard result={{ _task: plan }} disabled={false} onRequest={vi.fn()} />)
-  expect(screen.getByText('Next: run_simulation (cancelled)')).toBeTruthy()
+  expect(screen.getByText('Next: run_simulation (stopped)')).toBeTruthy()
+  expect(screen.queryByText(/cancelled/)).toBeNull()
   expect(screen.getAllByTestId('assistant-task-step')[1].textContent).toBe('run_simulation · stopped')
 })

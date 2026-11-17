@@ -371,7 +371,7 @@ def test_queue_step_with_inputs_edited_after_the_solve_is_uncertain(session, bas
 
 
 @pytest.mark.parametrize('native,status', [('failed', 'failed'), ('aborted', 'cancelled')])
-def test_queue_step_whose_only_job_failed_is_failed(session, baseline, monkeypatch, native, status):
+def test_queue_step_whose_only_job_failed_or_was_stopped(session, baseline, monkeypatch, native, status):
     """A stopped (aborted) job did not fail: its step reads cancelled (live-voice 16)."""
     from harness import continuation
     from services import assistant_tasks
