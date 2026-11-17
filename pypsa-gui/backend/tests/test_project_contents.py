@@ -555,3 +555,96 @@ def test_the_unpacked_cap_defaults_to_four_gib(monkeypatch):
         assert importlib.reload(PC).MAX_UNPACKED_BYTES == 4 * 1024**3
     finally:
         importlib.reload(PC)
+
+
+def test_restoring_a_snapshot_taken_without_gridspine_keeps_only_the_live_run(
+    client, api_project, project_storage_dir
+):
+    name = api_project("pc-gabsent")
+    d = project_storage_dir(name)
+    r = client.post(f"/api/projects/{name}/snapshots", json={"label": "v0"})
+    assert r.status_code == 200, r.text
+    sid = r.json()["id"]
+    (d / "gridspine" / "run").mkdir(parents=True)
+    (d / "gridspine" / "config.json").write_text("{}")
+    (d / "gridspine" / "run" / "manifest.json").write_text("{}")
+    r = client.post(f"/api/projects/{name}/snapshots/{sid}/restore")
+    assert r.status_code == 200, r.text
+    assert not (d / "gridspine" / "config.json").exists()
+    assert (d / "gridspine" / "run" / "manifest.json").exists()
+
+
+def test_a_capacity_expansion_kind_is_the_default(
+    client, api_project, project_storage_dir, project_row
+):
+    d = project_storage_dir(api_project("pc-cekind"))
+    data = _bundle_from(
+        d, {"gridspine/config.json": b"{}"}, meta={"project_kind": "capacity_expansion"}
+    )
+    r = _post(client, data, "pc_cekind_dst")
+    assert r.status_code in (200, 201), r.text
+    assert project_row("pc_cekind_dst").project_kind is None
+    assert "gridspine/config.json" in r.json()["ignored"]
+
+
+def test_an_unreadable_gridspine_config_imports_unchanged(tmp_path):
+    for body in (b"[1]", b"not json"):
+        (tmp_path / "gridspine").mkdir(exist_ok=True)
+        (tmp_path / "gridspine" / "config.json").write_bytes(body)
+        assert projects._clear_gridspine_sources(tmp_path) == []
+        assert (tmp_path / "gridspine" / "config.json").read_bytes() == body
+
+
+def test_a_failure_before_the_folder_exists_raises_the_original_error(
+    client, api_project, project_storage_dir, project_row, projects_root, monkeypatch
+):
+    from services import project_registry
+
+    d = project_storage_dir(api_project("pc-nodir"))
+
+    def boom(*a, **k):
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(project_registry, "ensure_project_dir", boom)
+    with pytest.raises(RuntimeError, match="injected"):
+        _post(client, _bundle_from(d), "pc_nodir_dst")
+    assert project_row("pc_nodir_dst") is None
+
+
+def test_a_capacity_expansion_export_names_no_kind_and_keeps_its_metadata(
+    client, api_project
+):
+    name = api_project("pc-cemeta")
+    r = client.get(f"/api/projects/{name}/bundle")
+    meta = json.loads(zipfile.ZipFile(io.BytesIO(r.content)).read("metadata.json"))
+    assert "project_kind" not in meta
+
+
+def test_the_export_keeps_the_metadata_beside_the_kind(tmp_path, monkeypatch):
+    (tmp_path / "network.nc").write_bytes(b"x")
+    (tmp_path / "metadata.json").write_text(json.dumps({"name": "keep me"}))
+    monkeypatch.setattr(projects.change_log_service, "log", lambda *a, **k: None)
+    blob = projects._project_bundle_bytes(
+        "p", src=tmp_path, project_kind="planning_dynamics"
+    )
+    meta = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("metadata.json"))
+    assert meta == {"name": "keep me", "project_kind": "planning_dynamics"}
+
+
+def test_replace_dir_keeping_unlinks_a_linked_folder_and_copies_deeper_runs(tmp_path):
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (target / "keep.txt").write_text("k")
+    live = tmp_path / "gridspine"
+    live.mkdir()
+    (live / "linked").symlink_to(target, target_is_directory=True)
+    src = tmp_path / "snap"
+    (src / "sub" / "run").mkdir(parents=True)
+    (src / "sub" / "run" / "x").write_text("x")
+    (src / "run").mkdir()
+    (src / "run" / "y").write_text("y")
+    projects._replace_dir_keeping(src, live, ("run",))
+    assert (target / "keep.txt").exists(), "followed a link into another folder"
+    assert not (live / "linked").exists()
+    assert (live / "sub" / "run" / "x").exists(), "only the top-level run/ is kept out"
+    assert not (live / "run").exists()
