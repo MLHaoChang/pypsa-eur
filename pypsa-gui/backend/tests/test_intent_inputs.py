@@ -197,3 +197,32 @@ def test_apply_pq_tags_the_given_network_and_returns_the_sizing_fields(n):
     rest = ii.apply_pq(n, inputs)
     assert "pq" not in rest and rest["link"] == "grid_import"
     assert n.links.at["grid_import", "pq_x_pu"] == ii.ASSUMED_X_PU
+
+
+def test_an_unbounded_extendable_link_reads_its_p_nom(n):
+    n.links.loc["grid_import", ["p_nom_extendable", "p_nom_max"]] = [True, math.inf]
+    inputs, _ = _resolve(n, {"pq": {}})
+    assert inputs["pq"]["s_n_mva"] == n.links.at["grid_import", "p_nom"]
+
+
+def test_a_link_with_no_finite_rating_asks_for_it(n):
+    n.links.loc["grid_import", ["p_nom_extendable", "p_nom_max", "p_nom"]] = [
+        True,
+        math.inf,
+        0.0,
+    ]
+    held = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=0.07)["pq"]
+    assert held["s_n_mva"]["value"] is None and held["s_n_mva"]["reason"]
+    text = _refused(_resolve, n, {"pq": {"p_cap_mw": 40.0}})
+    assert text.startswith("Point of connection: transformer rating (MVA):")
+    inputs, _ = _resolve(n, {"pq": {"p_cap_mw": 40.0, "s_n_mva": 40.0}})
+    assert inputs["pq"]["s_n_mva"] == 40.0
+
+
+def test_apply_pq_moves_the_tags_to_the_chosen_link_in_the_copy(n):
+    tag_pq_link(n, "site_transformer", **TAGS)
+    n.links.loc["site_transformer", "pq_q_margin_mvar"] = 1.0
+    inputs, _ = _resolve(n, {"pq": {}})
+    ii.apply_pq(n, inputs)
+    assert n.links.loc["site_transformer", ["pq_x_pu", "pq_q_margin_mvar"]].isna().all()
+    assert n.links.at["grid_import", "pq_x_pu"] == ii.ASSUMED_X_PU

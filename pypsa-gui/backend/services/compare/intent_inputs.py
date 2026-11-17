@@ -70,15 +70,19 @@ def poc_link(n) -> str | None:
     return str(hits[0]) if len(hits) else None
 
 
-def _reach_mw(n, link: str) -> float:
-    """How far the link's flow can reach, in MW: its rating times its largest per-unit bound."""
+def _reach_mw(n, link: str) -> float | None:
+    """How far the link's flow can reach, in MW: its rating times its largest per-unit bound. An extendable
+    link with no finite `p_nom_max` reads its `p_nom`; None when that gives no finite, positive reach."""
     s = n.links.loc[link]
-    p_nom = float(s["p_nom_max"] if s["p_nom_extendable"] else s["p_nom"])
+    p_nom = float(s["p_nom"])
+    if s["p_nom_extendable"] and math.isfinite(float(s["p_nom_max"])):
+        p_nom = float(s["p_nom_max"])
     pu = max(
         n.get_switchable_as_dense("Link", "p_max_pu")[link].abs().max(),
         n.get_switchable_as_dense("Link", "p_min_pu")[link].abs().max(),
     )
-    return p_nom * float(pu)
+    reach = p_nom * float(pu)
+    return reach if math.isfinite(reach) and reach > 0 else None
 
 
 def statcom_cost(rate: float) -> tuple[float, str]:
@@ -133,7 +137,15 @@ def _project_pq(n, link: str, rate: float) -> dict:
             out[field] = {"value": value, "source": note, "kind": "assumed"}
         else:
             value, note = assumed[field]
-            out[field] = {"value": float(value), "source": note, "kind": "assumed"}
+            if value is None:
+                out[field] = {
+                    "value": None,
+                    "source": None,
+                    "kind": "assumed",
+                    "reason": "The connection has no finite rating; enter it.",
+                }
+            else:
+                out[field] = {"value": float(value), "source": note, "kind": "assumed"}
     return out
 
 
@@ -208,6 +220,10 @@ def resolve(
     for field in PQ_COLUMNS:
         if given is not None and given.get(field) is not None:
             pq[field], pq_sources[field] = given[field], SOURCE_REQUEST
+        elif project[field]["value"] is None:
+            raise IntentInputsRefusal(
+                f"Point of connection: {PQ_LABELS[field]}: the connection has no finite rating; enter it"
+            )
         else:
             pq[field], pq_sources[field] = (
                 project[field]["value"],
@@ -275,6 +291,15 @@ def apply_pq(n, inputs: dict) -> dict:
         raise IntentInputsRefusal(
             f"Point of connection: {', '.join(bad)} must be a finite number"
         )
+    # The chosen link is the one grid connection the PQ cut reads: tags saved on any other link are cleared in
+    # this copy, so the check does not refuse two tagged links.
+    tag_cols = [
+        c
+        for c in pcs_statcom.LINK_COLUMNS + pcs_statcom.OPTIONAL_LINK_COLUMNS
+        if c in n.links.columns
+    ]
+    others = n.links.index != inputs["link"]
+    n.links.loc[others, tag_cols] = float("nan")
     pcs_statcom.tag_pq_link(n, inputs["link"], **values)
     try:
         pcs_statcom._check(n)

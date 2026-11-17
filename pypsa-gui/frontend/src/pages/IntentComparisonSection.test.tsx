@@ -352,6 +352,17 @@ describe('IntentComparisonSection prefill from the project (walkthrough bug 06)'
     expect(screen.getByTestId('intent-pq-cost-money').textContent).toBe('€\u00a011.2\u00a0k per Mvar per year')
   })
 
+  it('leaves a PoC value the link cannot give empty, with its reason and no source chip', async () => {
+    dcNet(); api.get.mockResolvedValue(null)
+    api.defaults.mockResolvedValue({ ...HELD_DC, pq: { ...PQ,
+      s_n_mva: { value: null, source: null, kind: 'assumed', reason: 'The connection has no finite rating; enter it.' } } })
+    renderIt(null)
+    await waitFor(() => expect((screen.getByTestId('intent-pq-x_pu') as HTMLInputElement).value).toBe('0.12'))
+    expect((screen.getByTestId('intent-pq-s_n_mva') as HTMLInputElement).value).toBe('')
+    expect(screen.getByTestId('intent-why-pq-s_n_mva').textContent).toContain('no finite rating')
+    expect(screen.queryByTestId('intent-pq-src-s_n_mva')).toBeNull()
+  })
+
   it('leaves untouched project values out of the request and sends only the typed PoC values', async () => {
     const user = userEvent.setup()
     dcNet(); api.get.mockResolvedValue(null); api.start.mockResolvedValue(job([row('B'), row('C')]))

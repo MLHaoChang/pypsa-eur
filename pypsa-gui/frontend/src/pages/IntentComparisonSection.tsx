@@ -148,8 +148,8 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
     mutationFn: () => {
       const swing = num(f.swing), amp = num(f.amp), period = num(f.period)
       // A value the project holds and the user left alone is left out: the backend takes it from the project
-      // (the same ladder the prefill shows) and records its source. `pq` is always sent: the values the form
-      // shows, assumed or the project's, are what this run takes; the typed ones override them.
+      // (the same ladder the prefill shows) and records its source. `pq` is always sent, holding only the typed
+      // values; the backend fills the others from the same ladder, so the run takes what the form shows.
       const envTyped = typed.swing !== undefined || typed.amp !== undefined || typed.period !== undefined
       const fromProject = (k: Typed, v?: unknown) => typed[k] === undefined && v != null
       return intentComparisonApi.start(name, {
@@ -268,10 +268,13 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
             <Field key={k} label={label}>
               <input className={INPUT} inputMode="decimal" value={pqValue(k, d)} disabled={running}
                 onChange={e => { const v = e.target.value; setPq(p => ({ ...p, [k]: v })) }} data-testid={`intent-pq-${k}`} />
-              {(pqTyped[k] !== undefined || held.data?.pq[k]) && (
+              {(pqTyped[k] !== undefined || held.data?.pq[k]?.value != null) && (
                 <span className={`${SOURCE_CHIP} ml-1`} data-testid={`intent-pq-src-${k}`}
                   title={pqTyped[k] === undefined ? held.data?.pq[k]?.source ?? undefined : undefined}>
                   {sourceWord(held.data?.pq[k]?.kind, pqTyped[k] !== undefined)}</span>
+              )}
+              {pqValue(k, d) === '' && held.data?.pq[k]?.reason && (
+                <p className="text-[11px] text-muted" data-testid={`intent-why-pq-${k}`}>{held.data.pq[k]?.reason}</p>
               )}
               {k === 'statcom_capital_cost' && Number(pqValue(k, d)) > 0 && (
                 <p className="text-[11px] text-muted" data-testid="intent-pq-cost-money">

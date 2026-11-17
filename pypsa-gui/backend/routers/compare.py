@@ -513,10 +513,8 @@ def _has_backup_reserve(network) -> bool:
 def _intent_scenario(network, config, inputs: dict, critical_mw: float):
     """A `prepare(spec)` for `compare_intents`: the intent's backup reserve goes into a copy of the config; the
     network and config the caller holds are not changed."""
-    from services.adequacy.sizing_loop_runner import SizingInputs
+    from services.adequacy.sizing_loop_runner import SizingInputs, SizingLoopRefusal
     from services.solver.envelope_floors import backup_mwh
-
-    from services.adequacy.sizing_loop_runner import SizingLoopRefusal
 
     def prepare(spec):
         cfg = copy.deepcopy(config)
@@ -673,8 +671,8 @@ def post_intent_comparison(
     except (SizingLoopRefusal, TypeError, ValueError, KeyError, AttributeError) as exc:
         raise HTTPException(422, f"The comparison cannot run: {exc}")
     prepare = _intent_scenario(network, config, inputs, body.critical_mw)
-    used = {"values": {k: resolved.get(k) for k in ("link", "ramp_mw_per_min", "envelope", "pq")} | {"xr": inputs["xr"]},
-            "sources": sources}
+    held = ("link", "ramp_mw_per_min", "envelope", "pq")
+    used = {"values": {k: resolved.get(k) for k in held} | {"xr": inputs["xr"]}, "sources": sources}
 
     def work(stop, on_progress):
         return compare_intents(prepare, body.intents, critical_mw=body.critical_mw, profile=profile,
