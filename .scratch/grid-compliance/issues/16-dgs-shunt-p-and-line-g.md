@@ -21,7 +21,7 @@ lossy line or shunt reaches the tool without its losses, and nothing says so.
   `p_mw` ≠ 0 is listed in `DgsExport.not_written` with its value and the reason. p = 0 and p = -0.0 are not
   listed. A non-finite p is refused by name.
 - Queued: putting `not_written` into the campus study's export manifest needs `gridspine/drivers/campus_study.py`,
-  which open PRs #1578, #1584 and #1589 change. That one line waits until they merge.
+  which open PRs #1578, #1584 and #1589 change. That one line waits until they merge; tracked as GC-18 (`18-campus-manifest-not-written.md`).
 
 ## Comments
 

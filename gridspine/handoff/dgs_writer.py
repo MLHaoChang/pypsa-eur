@@ -27,8 +27,8 @@ What is written, from the pandapower net:
   orders, magnitude in % of the unit's rated current — the base the harmonic
   screen uses, I_h = % / 100 * rated_mva at nominal voltage — and the IEC 61000-3-6
   summation exponent per order (``harmonics.alpha``), as vectors. One block over the
-  union of every source's orders: an order a source does not name is amplitude 0 and
-  alpha 0 there (GC-15).
+  union of every source's orders: an order a source does not name is amplitude 0 there,
+  with that order's normal alpha (GC-15).
 
 A value no verified attribute can carry is listed in ``DgsExport.not_written``, never
 guessed: a shunt's active power ``p_mw`` (GC-16).
@@ -641,7 +641,8 @@ def write_dgs(
                 )
             )
     # GC-15 (GK A2): one TypHmccur block over the union of every source's orders. A source with no value at an
-    # order gets amplitude 0 and alpha 0 there (physically the same as absent), so every row has the same
+    # order gets amplitude 0 there, with that order's normal alpha (never 0: a reader summing I^alpha would
+    # meet 0^0 and a 1/0 exponent), as gridspine.static.harmonics does, so every row has the same
     # SIZEROW: no repeated header and no empty fields, neither of which a reader is known to accept.
     union = sorted({h for r in rows[HARMONIC_CLASS] for h in r[2]})
     if rows[HARMONIC_CLASS]:
@@ -664,8 +665,8 @@ def write_dgs(
     for r in rows[HARMONIC_CLASS]:
         hid, hname, orders, mags, alphas = r
         own = {h: (float(m), float(a)) for h, m, a in zip(orders, mags, alphas)}
-        mags = [own.get(h, (0.0, 0.0))[0] for h in union]
-        alphas = [own.get(h, (0.0, 0.0))[1] for h in union]
+        mags = [own.get(h, (0.0, alpha(h)))[0] for h in union]
+        alphas = [own.get(h, (0.0, alpha(h)))[1] for h in union]
         lines.append(
             ";".join(
                 [

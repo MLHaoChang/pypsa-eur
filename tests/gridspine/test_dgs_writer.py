@@ -481,8 +481,11 @@ def test_the_tap_side_is_written(tmp_path):
 def test_every_harmonic_source_shares_one_block_over_the_union_of_orders(tmp_path):
     """
     Neither a repeated header nor padded fields: one header, every row the same SIZEROW; an order a source
-    does not name is 0 amplitude and 0 alpha, physically the same as absent.
+    does not name is 0 amplitude with that order's normal alpha (never 0, which risks 0^0 and a 1/0
+    exponent in a reader), as gridspine.static.harmonics sums it.
     """
+    from gridspine.static.harmonics import alpha
+
     net = fixture_net()
     path = tmp_path / "u.dgs"
     write_dgs(net, path, title="fixture", harmonics=HARMONICS, converters=["bess"])
@@ -495,9 +498,9 @@ def test_every_harmonic_source_shares_one_block_over_the_union_of_orders(tmp_pat
     for row in rows:
         assert row["norder"] == union
         assert len(row["ampl"]) == len(row["alpha"]) == len(union)
-        for h, a, al in zip(row["norder"], row["ampl"], row["alpha"]):
-            if a == 0:
-                assert al == 0.0, h
+        assert row["alpha"] == [alpha(h) for h in union]
+        assert all(al > 0 for al in row["alpha"])
+        assert any(a == 0 for a in row["ampl"])
 
 
 def test_the_merge_leaves_each_sources_own_entries_unchanged(written):
@@ -531,7 +534,12 @@ def test_one_block_per_class_in_the_whole_file(tmp_path):
 
 def test_line_conductance_matches_pandapower(tmp_path):
     net = fixture_net()
-    net.line.loc[:, "g_us_per_km"] = [0.0, 4.0, 2.5]
+    net.line["g_us_per_km"] = 0.0
+    # the parallel=2 cable carries a non-zero g, so g x parallel is checked (GK A2)
+    net.line.loc[net.line["name"] == "cable", "g_us_per_km"] = 4.0
+    net.line.loc[net.line.index[-1], "g_us_per_km"] = 2.5
+    assert (net.line["g_us_per_km"] == 0).any()
+    want = [float(g) for g in net.line["g_us_per_km"]]
     path = tmp_path / "g.dgs"
     write_dgs(net, path, title="fixture")
     dgs = read_dgs(path)
@@ -547,7 +555,7 @@ def test_line_conductance_matches_pandapower(tmp_path):
         zb = kv**2 / SBASE
         g = typ["gline"] * 1e-6 * elm["dline"] * elm["nlnum"] * zb
         assert abs(g - ppc_br[k, BR_G].real) < 1e-6
-    assert [r["gline"] for r in dgs["TypLne"]] == [0.0, 4.0, 2.5]
+    assert [r["gline"] for r in dgs["TypLne"]] == want
 
 
 def test_a_line_without_conductance_writes_zero(written):
