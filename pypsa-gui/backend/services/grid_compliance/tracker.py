@@ -146,15 +146,33 @@ def freeze_state(freeze: Freeze | None, current: str | None) -> str:
     return "fresh" if freeze.data_hash == current else "stale"
 
 
-def record_state(entry: DeliverableState, current: str | None) -> tuple[str, bool]:
-    """The freeze state the view and the pack show, and whether the inputs
-    changed since submission. A deliverable submitted on a kept record reads
-    ``submitted``: it is judged against that record, so "out of date" (which
-    asks for a re-freeze the server refuses) never applies to it."""
+#: How the current inputs compare with the submitted record, by the state of
+#: the submitted freeze against them: ``(inputs, reason)``. A record made by
+#: another freeze method, or inputs that cannot be read, are not compared.
+SINCE_SUBMISSION = {
+    "fresh": ("unchanged", None),
+    "stale": ("changed", None),
+    "refreeze_needed": (
+        "not_compared",
+        "The submitted record was made by an older freeze method.",
+    ),
+    "unreadable": ("not_compared", "The current inputs cannot be read."),
+}
+
+
+def record_state(
+    entry: DeliverableState, current: str | None
+) -> tuple[str, dict | None]:
+    """The freeze state the view and the pack show, and, for a deliverable
+    submitted on a kept record, how the current inputs compare with that
+    record: ``{"inputs": "unchanged" | "changed" | "not_compared", "reason"}``
+    (None otherwise). Such a deliverable reads ``submitted``: it is judged
+    against that record, so "out of date" (which asks for a re-freeze the
+    server refuses) never applies to it."""
     if on_record(entry):
-        changed = freeze_state(entry.submissions[-1], current) != "fresh"
-        return "submitted", changed
-    return freeze_state(entry.freeze, current), False
+        inputs, reason = SINCE_SUBMISSION[freeze_state(entry.submissions[-1], current)]
+        return "submitted", {"inputs": inputs, "reason": reason}
+    return freeze_state(entry.freeze, current), None
 
 
 def default_items(d: cat.Deliverable) -> list[DataItem]:
@@ -187,7 +205,7 @@ def _view(project, tracker, codes) -> list[dict]:
     rows = []
     for d in wanted:
         s = tracker.deliverables.get(d.code) or DeliverableState()
-        fstate, changed = record_state(s, current)
+        fstate, since = record_state(s, current)
         rows.append(
             {
                 "code": d.code,
@@ -208,7 +226,7 @@ def _view(project, tracker, codes) -> list[dict]:
                 "freeze_state": fstate,
                 "stale": fstate == "stale",
                 "submissions": [f.model_dump() for f in s.submissions],
-                "inputs_changed_since_submission": changed,
+                "since_submission": since,
                 "feeds": [
                     {
                         "package": p,

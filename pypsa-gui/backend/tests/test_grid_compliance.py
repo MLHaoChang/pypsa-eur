@@ -761,7 +761,7 @@ def test_the_pack_contents_follow_the_tracker(client, hub, monkeypatch):
         "model_set",
         "submissions",
         "freeze_state",
-        "inputs_changed_since_submission",
+        "since_submission",
         "sources",
         "skipped",
         "files",
@@ -783,17 +783,17 @@ def test_the_model_set_a_deliverable_was_submitted_on_is_kept(client, hub):
 
     row = _row(client, "14")
     assert row["freeze_state"] == "submitted"
-    assert row["inputs_changed_since_submission"] is False
+    assert row["since_submission"] == {"inputs": "unchanged", "reason": None}
     _network(hub).add("Bus", "gc09-after-submission", v_nom=33.0)
     # judged against the submission record: never "out of date", which would
     # ask for a re-freeze the server refuses
     row = _row(client, "14")
     assert row["freeze_state"] == "submitted" and row["stale"] is False
-    assert row["inputs_changed_since_submission"] is True
+    assert row["since_submission"] == {"inputs": "changed", "reason": None}
     _, z = _pack(client, "14")
     manifest = json.loads(z.read("manifest.json"))
     assert manifest["freeze_state"] == "submitted"
-    assert manifest["inputs_changed_since_submission"] is True
+    assert manifest["since_submission"] == {"inputs": "changed", "reason": None}
     doc = _document(z, "14")
     assert b"follows the model set it was submitted on" in doc
     assert b"out of date" not in doc and b"no longer match" not in doc
@@ -807,6 +807,54 @@ def test_the_model_set_a_deliverable_was_submitted_on_is_kept(client, hub):
         resp = _set(client, "14", later)
         assert resp.status_code == 200, resp.text
         assert resp.json()["submissions"] == [submitted_on]
+
+
+def _submit_14(client, hub):
+    _judge(client, "13")
+    _freeze(client, hub, "14")
+    assert _set(client, "14", "submitted").status_code == 200
+
+
+def _since_in_pack(client):
+    _, z = _pack(client, "14")
+    return json.loads(z.read("manifest.json"))["since_submission"], _document(z, "14")
+
+
+def test_unreadable_inputs_are_not_compared_with_the_submission(
+    client, hub, monkeypatch
+):
+    _submit_14(client, hub)
+    monkeypatch.setattr(tracker, "network_fingerprint", lambda project: None)
+    want = {"inputs": "not_compared", "reason": "The current inputs cannot be read."}
+    row = _row(client, "14")
+    assert row["freeze_state"] == "submitted" and row["since_submission"] == want
+    since, doc = _since_in_pack(client)
+    assert since == want
+    assert b"were not compared with the submitted record" in doc
+    assert b"changed after submission" not in doc
+
+
+def test_a_record_by_another_method_is_not_compared_with_the_submission(client, hub):
+    _submit_14(client, hub)
+    t = store.load(hub)
+    t.deliverables["14"].submissions[-1].source = "gc-01"
+    _tracker_file(hub).write_text(t.model_dump_json())
+    want = {
+        "inputs": "not_compared",
+        "reason": "The submitted record was made by an older freeze method.",
+    }
+    assert _row(client, "14")["since_submission"] == want
+    since, doc = _since_in_pack(client)
+    assert since == want
+    assert b"were not compared" in doc and b"changed after submission" not in doc
+
+
+def test_unchanged_inputs_say_so_in_the_pack(client, hub):
+    _submit_14(client, hub)
+    since, doc = _since_in_pack(client)
+    assert since == {"inputs": "unchanged", "reason": None}
+    assert b"unchanged since submission" in doc
+    assert _row(client, "13")["since_submission"] is None
 
 
 def test_a_resubmission_keeps_the_earlier_record_next_to_the_new_one(client, hub):
