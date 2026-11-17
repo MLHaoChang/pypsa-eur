@@ -321,6 +321,8 @@ def _changes(changes):
 
 def _candidate(ctx, changes):
     from services import chat_tools
+    from services.asset_schema.schema import COMPOSITE
+    from services.network_crud import rederive_scaled_parts
     candidate = PyPSAService.build_context()
     candidate.network = workflow._network_copy(ctx.network)
     candidate.user_ts = copy.deepcopy(ctx.user_ts)
@@ -338,6 +340,9 @@ def _candidate(ctx, changes):
             diffs.append({"component_class": change.component_class, "name": name, "attribute": change.attribute,
                           "before": before.item() if hasattr(before, "item") else before,
                           "after": change.value, "unit": unit})
+        # TCU 11: a cost the parts own would be re-derived away at staging, so the case would solve as the baseline.
+        if problem := workflow.cost_the_parts_own_problem(candidate.network, change):
+            workflow._refuse("derived_field", problem)
         component.static.loc[change.names, change.attribute] = change.value
         for name in change.names:
             stored = component.static.at[name, change.attribute]
@@ -345,6 +350,12 @@ def _candidate(ctx, changes):
             if stored != change.value:
                 workflow._refuse('invalid_change_value', 'The native input field would round this value; choose an exactly representable value and create a new preview.', 409)
     with workflow._isolated(candidate):
+        # A changed scale (a battery's max_hours) moves the cost its parts own: re-derived on the copy at the
+        # copy's own rate, as the native edit does (a no-op on a row without priced parts).
+        for change in changes:
+            if change.component_class in COMPOSITE:
+                for name in change.names:
+                    rederive_scaled_parts(candidate.network, change.component_class, name)
         validation = chat_tools.validate_network()
     if not validation.get("ok") or validation.get("deferred"):
         workflow._refuse("change_preflight_failed", "The candidate fails network validation; the project was not modified.", 409)

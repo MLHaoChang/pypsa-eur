@@ -1,7 +1,7 @@
 """The project contents table and the safe bundle import (project-io issue 01).
 
 GK B (63) plan conditions: I1 project kind, I2 safe staging, I3 cleanup, I4 the
-guard both ways, I5 old snapshots and bundles, I10 TCU 10 on the staged network.
+guard both ways, I5 old snapshots and bundles, I10 the cost guard (#1628) refuses before the row.
 """
 
 from __future__ import annotations
@@ -347,7 +347,7 @@ def test_an_ignored_member_is_never_written(client, api_project, project_storage
 _STEPS = [
     ("routers.projects._move_staged", None),
     ("routers.projects._reports_copy_guard", None),
-    ("services.pypsa_service.PyPSAService.import_network_from_netcdf", "staticmethod"),
+    ("services.pypsa_service.PyPSAService.reset_network", "classattr"),
     ("services.project_registry.bind_context", None),
     ("services.active_project.set_active_project", None),
     ("routers.projects._restore_results_state", None),
@@ -371,28 +371,15 @@ def test_a_late_failure_removes_row_and_folder_and_a_retry_succeeds(
     d = project_storage_dir(api_project("pc-fail"))
     data = _bundle_from(d)
     dst = f"pc_fail_{target.rsplit('.', 1)[-1].lower()}"
-    real_import = __import__(
-        "services.pypsa_service", fromlist=["x"]
-    ).PyPSAService.import_network_from_netcdf
-    calls = {"n": 0}
 
     def boom(*a, **k):
-        calls["n"] += 1
         raise RuntimeError("injected")
 
     mod_path, attr = target.rsplit(".", 1)
-    if how == "staticmethod":
+    if how == "classattr":
         from services.pypsa_service import PyPSAService
 
-        def boom_after_staging(n, path):
-            # The staged-network read (TCU 10) runs before the row; fail only the swap.
-            if ".bundle-staging" in str(path):
-                return real_import(n, path)
-            return boom()
-
-        monkeypatch.setattr(
-            PyPSAService, "import_network_from_netcdf", staticmethod(boom_after_staging)
-        )
+        monkeypatch.setattr(PyPSAService, attr, boom)
     else:
         import importlib
 
@@ -423,7 +410,7 @@ def test_an_import_that_loses_the_name_race_gets_a_clean_409(
 
     d = project_storage_dir(api_project("pc-race"))
     data = _bundle_from(d)
-    real = projects._rederive_staged_network
+    real = projects._bundle_network_owning_its_costs
 
     def other_import_wins(*a, **k):
         out = real(*a, **k)
@@ -435,7 +422,7 @@ def test_an_import_that_loses_the_name_race_gets_a_clean_409(
             (project_registry.project_dir(winner) / "winner.txt").write_text("w")
         return out
 
-    monkeypatch.setattr(projects, "_rederive_staged_network", other_import_wins)
+    monkeypatch.setattr(projects, "_bundle_network_owning_its_costs", other_import_wins)
     r = _post(client, data, "pc_race_dst")
     assert r.status_code == 409, r.text
     winner = project_storage_dir("pc_race_dst")
@@ -447,7 +434,7 @@ def test_an_import_that_loses_the_name_race_gets_a_clean_409(
     assert not staging.exists() or not any(staging.iterdir())
 
 
-# ── I10: TCU 10 on the staged network ───────────────────────────────────────
+# ── I10: the cost guard (#1628) refuses before the row ──────────────────────
 
 
 def _priced_bundle(tmp_path, mutate) -> bytes:
@@ -471,26 +458,6 @@ def test_a_non_finite_part_is_a_422_with_no_row_and_no_folder(
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
     assert _left_behind(project_row, projects_root, "pc_inf_dst") == []
-
-
-def test_a_stale_capital_cost_is_rederived_at_the_bundles_rate(
-    client, project_storage_dir, tmp_path
-):
-    import pypsa
-
-    from tests.test_bulk_part_rederive import _network
-
-    expected = _network().storage_units.at["bess", "capital_cost"]
-
-    def stale(n):
-        n.storage_units.at["bess", "capital_cost"] = 1.0
-
-    data = _priced_bundle(tmp_path, stale)
-    r = _post(client, data, "pc_stale_dst")
-    assert r.status_code in (200, 201), r.text
-    assert "Storage 'bess'" in r.json()["rederived"]
-    n = pypsa.Network(str(project_storage_dir("pc_stale_dst") / "network.nc"))
-    assert n.storage_units.at["bess", "capital_cost"] == pytest.approx(expected)
 
 
 # ── I5: old snapshots and Q-A: gridspine/run/ in snapshots ──────────────────

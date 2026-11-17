@@ -1353,34 +1353,6 @@ def _clear_gridspine_sources(staging: pathlib.Path) -> list[str]:
     return [f"gridspine.{f}" for f in cleared]
 
 
-def _rederive_staged_network(nc_path: pathlib.Path, cfg_path: pathlib.Path) -> list[str]:
-    """TCU 10 on a staged bundle (GK B I10): refuse a priced row whose parts
-    cannot be derived (422), re-derive the rest at the bundle's own project
-    rate, and write the network back only when a value changed."""
-    import pypsa
-
-    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
-    from services.network_crud import rederive_imported_parts
-    from services.solver_service import SolverConfig
-
-    rate = SolverConfig().discount_rate
-    try:
-        cfg = json.loads(cfg_path.read_text()) if cfg_path.is_file() else {}
-        if isinstance(cfg, dict) and cfg.get("discount_rate") is not None:
-            rate = float(cfg["discount_rate"])
-    except (OSError, ValueError, TypeError):
-        pass
-    n = pypsa.Network()
-    with PyPSAService.get_netcdf_io_lock():
-        PyPSAService.import_network_from_netcdf(n, nc_path)
-    before = {c: getattr(n, CLASS_ATTR[c]).copy() for c in COMPOSITE}
-    rows = rederive_imported_parts(n, global_rate=rate)
-    if any(not before[c].equals(getattr(n, CLASS_ATTR[c])) for c in COMPOSITE):
-        with PyPSAService.get_netcdf_io_lock():
-            atomic_write_with(nc_path, lambda p: PyPSAService.export_network_to_netcdf(n, p))
-    return rows
-
-
 def _discard_import(db: DBSession, project, dest: pathlib.Path | None) -> None:
     """Undo a bundle import that failed after its row was created (GK B I3)."""
     from services import project_registry
@@ -1393,6 +1365,66 @@ def _discard_import(db: DBSession, project, dest: pathlib.Path | None) -> None:
     if dest is not None and dest.exists():
         _force_rmtree(dest)
 
+
+
+def _bundle_network_owning_its_costs(zf: zipfile.ZipFile):
+    """A bundle's `network.nc` parsed into a network that is not open yet, with its priced rows checked and
+    re-derived (`network_crud.rederive_imported_parts`, 422 on a bad row) at the bundle's own discount rate:
+    the project it restores brings its solver settings, read as every load reads them
+    (`_solver_config_from_dict`). A `solver_config.json` that is present but cannot be read refuses the
+    import (422); only an absent one uses the defaults. Returns the network, the rows whose owned cost the
+    re-derive moved, and the rate's source ("bundle" or "default")."""
+    import tempfile
+
+    import pypsa
+
+    from services.network_crud import rederive_imported_parts
+    from services.solver_service import SolverConfig
+
+    if "solver_config.json" in zf.namelist():
+        try:
+            loaded = json.loads(zf.read("solver_config.json").decode("utf-8"))
+            if not isinstance(loaded, dict):
+                raise ValueError("not an object")
+            rate = float(_solver_config_from_dict(loaded).discount_rate)
+            if not math.isfinite(rate):
+                raise ValueError("discount rate is not a finite number")
+        except Exception as exc:  # noqa: BLE001 - any unreadable settings file refuses, by name
+            raise HTTPException(422, {
+                "error_kind": "import_unreadable",
+                "message": f"The bundle's solver settings (solver_config.json) cannot be read "
+                           f"({type(exc).__name__}); nothing was imported.",
+            }) from exc
+        source = "bundle"
+    else:
+        rate, source = float(SolverConfig().discount_rate), "default"
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "network.nc"
+        path.write_bytes(zf.read("network.nc"))
+        candidate = pypsa.Network()
+        with PyPSAService.get_netcdf_io_lock():
+            PyPSAService.import_network_from_netcdf(candidate, path)
+    before = _owned_costs(candidate)
+    rederive_imported_parts(candidate, global_rate=rate)
+    after = _owned_costs(candidate)
+    # Only the rows whose owned cost moved: a bundle saved with its costs current re-derives to the same values,
+    # so it reads as saved and lists nothing.
+    moved = [label for label, value in after.items() if not before[label].equals(value)]
+    return candidate, moved, source
+
+
+def _owned_costs(n) -> dict:
+    """{"Storage 'name'": the row's part-owned cost columns} for every row of a class with investment parts."""
+    from services.asset_schema.derive import class_label, owned_columns
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+
+    out = {}
+    for component_class in COMPOSITE:
+        df = getattr(n, CLASS_ATTR[component_class])
+        cols = [c for c in owned_columns(component_class) if c in df.columns]
+        for name in df.index:
+            out[f"{class_label(component_class)} '{name}'"] = df.loc[name, cols].copy()
+    return out
 
 @router.post("/import_bundle")
 async def import_bundle(
@@ -1472,6 +1504,11 @@ async def import_bundle(
                 break
         target_name = base or "imported_project"
 
+    # TCU 11: the bundle's network is an upload like the network imports, so its investment parts own their
+    # rows' costs. A priced part that cannot be derived refuses the import here, before the project row or
+    # any file exists; the priced rows are re-derived at the bundle's own rate.
+    candidate, rederived, rate_source = _bundle_network_owning_its_costs(zf)
+
     # `target_name` may come from a zip's metadata.json — never trust it.
     # `_safe_project_dir` rejects path traversal and shell-metachar names.
     from services import project_registry
@@ -1505,8 +1542,6 @@ async def import_bundle(
         from services.component_names import invalid_names_in_netcdf, refuse_invalid_names
 
         refuse_invalid_names(invalid_names_in_netcdf(staged_nc))
-        # TCU 10, as the upload routes do (GK B I10).
-        rederived = _rederive_staged_network(staged_nc, staging / "solver_config.json")
 
         # Carry the bundle's scenario labels onto the ROW, not just onto the
         # files: `_project_info_db` serves the DB row. The parent link is
@@ -1526,7 +1561,8 @@ async def import_bundle(
                 _move_staged(staging, dest)
             return _open_imported_bundle(
                 db, session, _imported_project, dest, file.filename,
-                stripped_fields=stripped_fields, ignored=ignored, rederived=rederived)
+                candidate=candidate, rederived=rederived, rate_source=rate_source,
+                stripped_fields=stripped_fields, ignored=ignored)
         except BaseException:
             _discard_import(db, _imported_project, dest)
             raise
@@ -1536,25 +1572,25 @@ async def import_bundle(
 
 def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_project,
                           dest: pathlib.Path, filename: str | None, *,
-                          stripped_fields: list[str], ignored: list[str],
-                          rederived: list[str]) -> dict:
+                          candidate, rederived: list[str], rate_source: str,
+                          stripped_fields: list[str], ignored: list[str]) -> dict:
     """The import's swap and hydration, once its files are in `dest`. Any
     failure here is undone by the caller (`_discard_import`)."""
     from services import project_registry
 
     target_name = _imported_project.name
-    nc_path = dest / "network.nc"
     from services import dirty_state, undo_service
     with PyPSAService.get_lock():
         # A different project: a fresh context (own undo, counter 0, no result
         # state of the project being left — P33b gate B-1). The clears apply
         # to the new context, never to the resident one being left.
-        PyPSAService.reset_network()
+        # The network checked and re-derived above, parsed from this same network.nc.
+        PyPSAService.reset_network(network=candidate)
         undo_service.clear()
         dirty_state.clear()  # memory and disk now agree
+        if rederived:
+            dirty_state.mark_dirty()  # unless costs were re-derived: then the file still holds the stale ones
         n = PyPSAService.get_network()
-        with PyPSAService.get_netcdf_io_lock():
-            PyPSAService.import_network_from_netcdf(n, nc_path)
         # Bind identity atomically with the swap (see load_project for the
         # rationale on why this must be inside the lock, not after).
         project_registry.bind_context(
@@ -1685,10 +1721,12 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
     # stale pointer on the next request and silently reverts the switch.
     if session is not None:
         active_project.set_active_project(db, session, _imported_project)
+    from routers.io import _rederived_note
+
     change_log_service.log(
         "import", "Project", target_name,
         f"Imported project bundle '{filename}' as '{target_name}' "
-        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)",
+        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)" + _rederived_note(rederived),
     )
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(
@@ -1703,11 +1741,13 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
         **({"stripped": stripped_fields} if stripped_fields else {}),
         # Archive members no table entry names: reported, never written (GK B I2).
         **({"ignored": ignored} if ignored else {}),
-        # Priced rows whose costs were re-derived from their parts (TCU 10).
-        **({"rederived": rederived} if rederived else {}),
         # Likewise each reliability-goal value the bundle carried that PUT
         # would refuse: imported as "not set" (W3b-R), named here.
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
+        # The priced rows whose costs were re-derived from their parts (TCU 11).
+        **({"rederived": rederived} if rederived else {}),
+        # The bundle had no solver settings, so the costs were re-derived at the default discount rate.
+        **({"rederived_at_default_rate": True} if rederived and rate_source == "default" else {}),
         "summary": ImportSummary(
             buses=len(n.buses),
             generators=len(n.generators),

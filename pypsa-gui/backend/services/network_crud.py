@@ -410,26 +410,25 @@ def rederive_scaled_parts(n, component_class: str, name: str, *, global_rate: fl
     """
     Re-derive a composite asset's cost columns after one of its parts' scales changed outside the edit form
     (a line's `length` rewritten from coordinates or map geometry). A no-op for an asset without priced
-    parts. The caller holds `PyPSAService.get_lock()`. `global_rate`: the project rate in force when it is
-    not the open project's (a bundle import reads its own solver settings).
+    parts. The caller holds `PyPSAService.get_lock()`. `global_rate`: the project rate when the asset has
+    none of its own (default: the open project's).
     """
     df = getattr(n, CLASS_ATTR[component_class])
     if not has_parts(component_class, df.loc[name]):
         return
     own_rate = df.at[name, "discount_rate"] if "discount_rate" in df.columns else None
-    rate = _global_discount_rate() if global_rate is None else global_rate
-    apply_parts(n, component_class, name, {}, discount_rate=effective_discount_rate(own_rate, rate))
+    project_rate = _global_discount_rate() if global_rate is None else global_rate
+    apply_parts(n, component_class, name, {}, discount_rate=effective_discount_rate(own_rate, project_rate))
 
 
-def _imported_parts_problem(component_class: str, row, global_rate: float | None = None) -> str | None:
+def _imported_parts_problem(component_class: str, row, global_rate: float) -> str | None:
     """Why an imported priced row's parts cannot be derived, in words; None when they can."""
     for spec in composite_parts(component_class):
         for field in spec.fields:
             v = _as_float(row.get(spec.column(field)))
             if v is not None and math.isinf(v):
                 return f"the {spec.name} part's {field.replace('_', ' ')} must be a finite number"
-    rate = effective_discount_rate(row.get("discount_rate"),
-                                   _global_discount_rate() if global_rate is None else global_rate)
+    rate = effective_discount_rate(row.get("discount_rate"), global_rate)
     try:
         derived = derive_composite(component_class, dict(row), scales=part_scales(component_class, row),
                                    discount_rate=rate, asset_lifetime=row.get("lifetime"))
@@ -447,8 +446,10 @@ def rederive_imported_parts(n, *, global_rate: float | None = None) -> list[str]
     the import (422 `invalid_edit_value`, naming it) before anything is written. Then every priced row is
     re-derived so its parts own its costs (a stale `capital_cost`, `fom_cost` or `lifetime` from the file
     included) at the rate in force: the asset's own, else the open project's (a network file carries no
-    solver settings). Returns the re-derived rows as "Storage 'name'". `n` is the import's candidate, not yet
-    open, so no lock is needed. `global_rate` replaces the open project's rate (a bundle carries its own)."""
+    solver settings; a project bundle does, and passes its rate as `global_rate`). Returns the re-derived rows
+    as "Storage 'name'". `n` is the import's candidate, not yet open, so no lock is needed."""
+    if global_rate is None:
+        global_rate = _global_discount_rate()
     priced = []
     for component_class in COMPOSITE:
         df = getattr(n, CLASS_ATTR[component_class])
