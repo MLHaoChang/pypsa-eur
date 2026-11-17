@@ -614,3 +614,140 @@ def test_the_row_matches_a_hand_computed_uif_on_a_two_genset_campus(tmp_path):
         "series compensation needs the TSP's data"
         in rows["subsync_series_resonance"]["note"]
     )
+
+
+# ── guards the mutant run found unfed (R7) ────────────────────────────────────
+
+
+def _run_dir(d):
+    return d / "campus_electrical" / "run"
+
+
+def test_a_grid_project_with_an_open_tie_keeps_the_uif_row_judged(tmp_path):
+    # the island override is for off-grid projects only; an open tie alone does not trigger it
+    _template(tmp_path, "strong_grid")
+    _write(tmp_path)
+    rows, _ = _card(tmp_path, n=_open_tie(_site()))
+    assert rows["ssti_uif"]["verdict"] == "warn"
+
+
+def test_an_open_tie_keeps_the_engines_own_reason_when_it_could_not_evaluate(tmp_path):
+    _template(tmp_path, "off_grid")
+    note = "no synchronous machine (genset) in the campus: no SSTI screen"
+    _write(
+        tmp_path, uif=_uif_meta("not evaluated", worst=None, notes=[note]), uif_rows=[]
+    )
+    row = _card(tmp_path, n=_open_tie(_site()))[0]["ssti_uif"]
+    assert row["verdict"] == "unknown" and row["note"] == f"{note}. {SCREENING}"
+
+
+def test_a_not_evaluated_uif_without_notes_says_so(tmp_path):
+    _write(tmp_path, uif=_uif_meta("not evaluated", worst=None, notes=[]), uif_rows=[])
+    row = _card(tmp_path)[0]["ssti_uif"]
+    assert row["note"] == f"the screen was not evaluated. {SCREENING}"
+
+
+def test_a_threshold_that_is_not_a_number_reads_unknown(tmp_path):
+    _write(tmp_path, uif=_uif_meta("flag", threshold=None))
+    row = _card(tmp_path)[0]["ssti_uif"]
+    assert row["verdict"] == "unknown" and row["limit"] is None
+    assert (
+        row["note"] == f"The run's threshold is not a finite number (None). {SCREENING}"
+    )
+
+
+def test_a_clearance_that_is_not_a_number_reads_unknown(tmp_path):
+    _write(tmp_path, subsync=_sub_meta("flag", clearance="1"))
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown"
+    assert (
+        row["note"]
+        == f"The run's torsional clearance is not a finite number ('1'). {SCREENING}"
+    )
+
+
+@pytest.mark.parametrize("damage", ["missing", "no_column"])
+def test_a_missing_or_malformed_table_reads_unknown(tmp_path, damage):
+    from gridspine.drivers.campus_study import SSTI_UIF_CSV, SUBSYNC_RESONANCE_CSV
+
+    _write(tmp_path, subsync=_sub_meta("flag"))
+    for name in (SSTI_UIF_CSV, SUBSYNC_RESONANCE_CSV):
+        path = _run_dir(tmp_path) / name
+        if damage == "missing":
+            path.unlink()
+        else:
+            path.write_text("other\n1\n")
+    rows = _card(tmp_path)[0]
+    assert (
+        rows["ssti_uif"]["note"]
+        == f"The run wrote no UIF rows at a converter bus. {SCREENING}"
+    )
+    assert rows["subsync_series_resonance"]["note"] == (
+        f"The run wrote no torsional margin for a series resonance. {SCREENING}"
+    )
+
+
+@pytest.mark.parametrize(
+    "content, why",
+    [
+        ("{not json", "its error file is unreadable"),
+        ("[1]", "its error file is unreadable"),
+        (json.dumps({"error": None}), ""),
+        (json.dumps({}), ""),
+    ],
+    ids=["not_json", "not_a_dict", "null_error", "no_error_key"],
+)
+def test_any_error_file_reads_unknown(tmp_path, content, why):
+    # an error file of any shape wins over a meta beside it: never a judged row
+    _write(tmp_path)
+    (_run_dir(tmp_path) / ce.SSTI_SCREENS_ERROR).write_text(content)
+    for row in _three(_card(tmp_path)[0]):
+        assert row["verdict"] == "unknown"
+        assert row["note"] == f"The SSTI screens could not run: {why}. {SCREENING}"
+
+
+def test_an_empty_run_directory_is_no_run(tmp_path):
+    _run_dir(tmp_path).mkdir(parents=True)
+    for row in _three(_card(tmp_path)[0]):
+        assert (
+            row["note"]
+            == f"No grid study with the SSTI screens yet: run the grid study. {SCREENING}"
+        )
+
+
+def test_a_record_without_the_subsync_screen_is_unreadable(tmp_path):
+    _write(tmp_path, raw_meta=json.dumps({"uif": _uif_meta()}))
+    for row in _three(_card(tmp_path)[0]):
+        assert (
+            row["note"]
+            == f"The SSTI screens' record is unreadable: rerun the grid study. {SCREENING}"
+        )
+
+
+@pytest.mark.parametrize(
+    "source, clause, want, assumed_note",
+    [
+        ("code", "TRGC 19 c", ": TRGC 19 c", False),
+        ("assumed", "TRGC 19 c", ": TRGC 19 c (assumed)", True),
+        (None, "TRGC 19 c", ": TRGC 19 c (assumed)", True),
+        ("code", None, "Assumed screening threshold (the grid code sets none)", True),
+    ],
+    ids=["code", "assumed_clause", "no_source", "code_without_clause"],
+)
+def test_the_limit_source_follows_the_runs_citation(
+    tmp_path, source, clause, want, assumed_note
+):
+    keys = (
+        {"ssti_uif_threshold": {"value": 0.1, "clause": clause, "source": source}}
+        if clause
+        else {}
+    )
+    dirs = _profile_dir(tmp_path, **keys)
+    _write(
+        tmp_path,
+        uif=_uif_meta("clear", worst=0.05, source=source, clause=clause),
+        uif_rows=_uif_table(0.05),
+    )
+    row = _card(tmp_path, "gc08_card", dirs)[0]["ssti_uif"]
+    assert row["verdict"] == "pass" and row["source"].endswith(want)
+    assert ("the assumed screening threshold" in row["note"]) is assumed_note

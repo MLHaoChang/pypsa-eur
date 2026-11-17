@@ -1373,7 +1373,8 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
                     **unknown)
     if verdict == "not evaluated":
         why = "; ".join(str(x) for x in screen.get("notes") or []) or "the screen was not evaluated"
-        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=f"{why}. {SSTI_SCREENING}", **unknown)
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=f"{why}. {SSTI_SCREENING}",
+                    **dict(unknown, verdict=SSTI_VERDICTS[SSTI_UIF][verdict]))
     worst = _finite_number(screen.get("worst_uif"))
     if limit is None or worst is None:
         bad = "threshold" if limit is None else "worst UIF"
@@ -1413,7 +1414,7 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     if verdict in ("check", "not evaluated"):
         why = NO_MODES if verdict == "check" else NO_SERIES_CAP
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"{why[0].upper()}{why[1:]}. {SSTI_SCREENING}",
-                    **unknown)
+                    **dict(unknown, verdict=SSTI_VERDICTS[SUBSYNC_SR][verdict]))
     if limit is None:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"The run's torsional clearance is not a finite "
                     f"number ({screen.get('clearance_hz')!r}). {SSTI_SCREENING}", **unknown)
