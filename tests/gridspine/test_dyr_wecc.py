@@ -443,3 +443,20 @@ def test_two_controlled_machines_each_get_exactly_one_repca1(tmp_path):
     regca = sorted((b, i) for b, m, i, _ in recs if m == "REGCA1")
     repca = sorted((b, i) for b, m, i, _ in recs if m == "REPCA1")
     assert len(regca) == 2 and repca == regca
+
+
+@pytest.mark.parametrize("ibr", [
+    REECC1 | {"reec_socmin": 0.0},                              # 0 <= SOCmin
+    REECC1 | {"reec_socmax": 1.0},                              # SOCmax <= 1
+    REECC1 | {"reec_socini": 0.2},                              # SOCini == SOCmin
+    REECC1 | {"reec_socini": 0.8},                              # SOCini == SOCmax
+    PLANT | {"repc_tfltr": 0.0},                                # a lag at 0 is a bypass
+    PLANT | {"repc_dbd1": 0.0, "repc_dbd2": 0.0},               # equal deadband edges
+], ids=["socmin0", "socmax1", "socini_lo", "socini_hi", "tfltr0", "dbd_equal"])
+def test_range_boundaries_that_are_legal_load(tmp_path, ibr):
+    _load(tmp_path, ibr)
+
+
+def test_htfrac_zero_is_refused(tmp_path):
+    with pytest.raises(ContractError, match="wtdt_htfrac .* must lie in \\(0, 1\\)"):
+        _load(tmp_path, WIND3 | {"wtdt_htfrac": 0.0})
