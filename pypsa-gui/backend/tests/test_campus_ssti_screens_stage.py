@@ -119,3 +119,78 @@ def test_a_run_from_before_the_stage_has_no_screens(hub):  # noqa: F811
     run = ce.campus_dir(hub) / "run"
     (run / ce.SSTI_SCREENS_META).unlink()
     assert ce.get_state(hub)["results"]["ssti_screens"] is None
+
+
+def test_the_results_carry_every_meta_field_and_the_rows(tmp_path):
+    """Read back from a run's files: the meta's fields, the UIF rows and the resonance rows; a missing
+    CSV reads as no rows."""
+    import json
+
+    meta = {
+        "uif": {
+            "verdict": "flag",
+            "worst_uif": 0.14,
+            "threshold": 0.1,
+            "source": None,
+            "clause": None,
+            "notes": ["n1"],
+        },
+        "subsync": {
+            "verdict": "not evaluated",
+            "clearance_hz": 1.0,
+            "source": None,
+            "clause": None,
+            "notes": ["n2"],
+        },
+        "label": "screening; binding answer is the EMT study",
+    }
+    (tmp_path / ce.SSTI_SCREENS_META).write_text(json.dumps(meta))
+    (tmp_path / ce.cs.SSTI_UIF_CSV).write_text(
+        "bus,machine,uif,verdict\nMV,GAS,0.14,flag\n"
+    )
+    (tmp_path / ce.cs.SUBSYNC_RESONANCE_CSV).write_text(
+        "case,kind,verdict\nmax,SSCI,not evaluated\n"
+    )
+    res = ce._ssti_screens_results(tmp_path)
+    assert res["uif"]["rows"] == [
+        {"bus": "MV", "machine": "GAS", "uif": 0.14, "verdict": "flag"}
+    ]
+    assert res["subsync"]["resonance"] == [
+        {"case": "max", "kind": "SSCI", "verdict": "not evaluated"}
+    ]
+    assert res["uif"]["worst_uif"] == 0.14 and res["subsync"]["notes"] == ["n2"]
+    (tmp_path / ce.cs.SSTI_UIF_CSV).unlink()
+    (tmp_path / ce.cs.SUBSYNC_RESONANCE_CSV).unlink()
+    res = ce._ssti_screens_results(tmp_path)
+    assert res["uif"]["rows"] == [] and res["subsync"]["resonance"] == []
+
+
+def test_the_meta_keeps_worst_uif_and_both_notes(hub):  # noqa: F811
+    from gridspine.static import subsync_scan as ss
+
+    _publish(hub)
+    _run(hub)
+    res = ce.get_state(hub)["results"]["ssti_screens"]
+    assert "worst_uif" in res["uif"] and isinstance(res["uif"]["notes"], list)
+    assert ss.NO_MACHINES in res["subsync"]["notes"]
+
+
+def test_only_an_unexpected_failure_is_logged_with_its_trace(
+    tmp_path, monkeypatch, caplog
+):
+    def fail(exc):
+        def f(*a, **kw):
+            raise exc
+
+        return f
+
+    monkeypatch.setattr(
+        ce.cs, "ssti_screens_campus", fail(ce.ContractError("expected"))
+    )
+    with caplog.at_level("ERROR"):
+        ce._ssti_screens(tmp_path, "generic_assumed", ())
+    assert not any("SSTI screens failed" in r.message for r in caplog.records)
+    monkeypatch.setattr(ce.cs, "ssti_screens_campus", fail(RuntimeError("boom")))
+    with caplog.at_level("ERROR"):
+        ce._ssti_screens(tmp_path, "generic_assumed", ())
+    assert any("SSTI screens failed" in r.message for r in caplog.records)

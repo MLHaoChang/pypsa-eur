@@ -130,5 +130,9 @@ def test_the_judged_threshold_and_clearance(tmp_path):
             "source": "code",
         },
     )
-    out = cs.ssti_screens_campus(run, "gc08_test", dirs)
+    out = cs.ssti_screens_campus(
+        str(run), "gc08_test", dirs
+    )  # a str run dir is taken too
     assert (out.threshold, out.clearance_hz) == (0.3, 1.5)
+    # both are the code's: nothing is assumed
+    assert not out.subsync.resonance["assumed"].any()
