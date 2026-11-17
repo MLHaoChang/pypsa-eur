@@ -13,11 +13,11 @@ vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolv
   getLinks: vi.fn().mockResolvedValue([]), updateLink: vi.fn() } }))
 const hub = vi.hoisted(() => ({ template: null as null | { energization: unknown[] },
   // The import links as the server selects them for the connection limit (`connection_limit.links`).
-  links: ['grid_import', 'h2_import'] as string[] }))
+  links: ['grid_import', 'h2_import'] as string[], refusal: null as string | null }))
 vi.mock('../../api/flow', async (orig) => ({
   ...await orig<typeof import('../../api/flow')>(),
   getProjectFlow: async () => ({ run_ready: true, notes: [],
-    sections: [{ section: 'connection', connection_limit: { mw: null, refusal: null, links: hub.links } }] }) }))
+    sections: [{ section: 'connection', connection_limit: { mw: null, refusal: hub.refusal, links: hub.links } }] }) }))
 vi.mock('../../pages/hubDesign/useHubData', async (orig) => ({
   ...await orig<typeof import('../../pages/hubDesign/useHubData')>(),
   useHubTemplate: () => ({ template: hub.template, isPending: false }) }))
@@ -290,6 +290,16 @@ describe('ConnectionLimits', () => {
       await waitFor(() => expect(screen.getAllByTestId('connection-limit-connection_limit')).toHaveLength(1))
       expect(screen.getByTestId('connection-limit-connection_limit').textContent).toMatch(/30/)
     } finally { hub.links = ['grid_import', 'h2_import'] }
+  })
+
+  it("says the server's reason when the network fixes no limit", async () => {
+    hub.refusal = 'The connection limit is 0 MW: set one or choose another site type.'
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'grid_import', eh_role: 'grid_import', p_nom: 0 }] as never)
+    try {
+      mount()
+      expect((await screen.findByTestId('connection-limit-refusal')).textContent).toBe(hub.refusal)
+    } finally { hub.refusal = null }
   })
 
   it('shows one line per import link, named and in its own unit', async () => {

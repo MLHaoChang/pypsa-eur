@@ -18,7 +18,7 @@ import {
 import { networkApi } from '../../api/network'
 import type { Link } from '../../api/types'
 import { assetSchemaApi } from '../../api/assetSchema'
-import { useHubTemplate, useImportLinks } from '../../pages/hubDesign/useHubData'
+import { useConnectionLimit, useHubTemplate, useImportLinks } from '../../pages/hubDesign/useHubData'
 import { displayName } from '../../utils/displayName'
 import { updateAsset } from '../../utils/assetWrite'
 import { useUIStore } from '../../store/uiStore'
@@ -289,8 +289,14 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
   const importLinks = useImportLinks()
   const showLimit = importLinks.length > 0 && (!only || only.includes('connection_limit'))
   const staged = useStagedConnection()
+  // The server's reason the network fixes no limit (`flow_service.import_capacity`): the same sentence
+  // that blocks a weak-grid study, so Guided's drawer and Expert say the same thing (template-e2e 02).
+  const refusal = useConnectionLimit()?.refusal
   return (
     <PageSection panelSection="connection_limits" title="Connection limits" hint="Set the ones you know">
+      {refusal && (!only || only.includes('connection_limit')) && (
+        <p role="alert" className="mb-2 text-[12px] text-warn" data-testid="connection-limit-refusal">{refusal}</p>
+      )}
       {showLimit && (
         <ul className="mb-3 flex flex-col gap-3">
           {/* Keyed on what is stored, so a save reloads the field. */}
