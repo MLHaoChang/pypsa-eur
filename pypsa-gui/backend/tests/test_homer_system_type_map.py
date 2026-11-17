@@ -337,3 +337,27 @@ def test_five_values_make_a_five_by_five_grid():
         {"variable": "genset_fuel_price", "values": [1, 2, 3, 4, 5]},
     )
     assert len(xv) == len(yv) == 5
+
+
+def test_the_progress_names_the_cell_and_the_total():
+    n = _net()
+    seen = []
+    M.build_map(
+        n,
+        *_axes(n),
+        lambda net, arch: None,
+        archs=SA.select(n)[:1],
+        progress=lambda **kw: seen.append(kw["current"]),
+    )
+    assert seen[0] == "cell 1 of 9" and seen[-1] == "cell 9 of 9" and len(seen) == 9
+
+
+def test_two_solved_architectures_give_a_gap():
+    n = _net()
+    two = [a for a in SA.select(n) if a.architecture_id in ("grid", "pv+battery")]
+    out = M.build_map(n, *_axes(n), _stub, archs=two)
+    assert {c["winner_architecture_id"] for c in out["cells"]} == {"pv+battery"}
+    for c in out["cells"]:
+        assert c["runner_up_gap_eur_per_year"] == pytest.approx(
+            200.0 * [1, 2, 3][c["j"]]
+        )

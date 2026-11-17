@@ -186,7 +186,7 @@ def apply_variable(
     """Multiply the variable's field on its assets of ``n`` in place (static
     values and time series; a resource clipped at 1.0, see the module
     docstring). ``n`` must be a private copy."""
-    pass
+    groups = SA.classify(n) if groups is None else groups
     scaled = 0
     kept = lost = 0.0
     for component, name in _members(n, var, groups):
