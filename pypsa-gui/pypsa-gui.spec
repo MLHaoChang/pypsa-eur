@@ -86,6 +86,11 @@ datas = [
     # below puts `services/llm_config.py` at _MEIPASS-root/`services/`, so its
     # `parent.parent` is _MEIPASS root itself).
     (str(BACKEND / "presets.json"), "."),
+    # Features chat cannot do: `services/not_via_chat.py` reads its JSON base and
+    # fragment folder beside itself at import (RETRO-FRAG-1), so both keep the
+    # `services/` layout under _MEIPASS. Without them the app does not start.
+    (str(BACKEND / "services" / "not_via_chat.json"), "services"),
+    (str(BACKEND / "services" / "not_via_chat.d"), "services/not_via_chat.d"),
     # Class-C synthetic profile packs (P15): `services/adequacy/stress.py`
     # resolves `parents[2] / "data" / "eh_class_c"`, i.e. _MEIPASS root.
     (str(BACKEND / "data" / "eh_class_c"), "data/eh_class_c"),
