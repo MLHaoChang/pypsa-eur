@@ -278,9 +278,43 @@ def _unit_buses(n, island) -> dict[str, str]:
     return out
 
 
-#: The tables whose rows supply a bus directly. A row the sidecar does not name on a bus that
-#: holds a sidecar unit marks that bus as the mainland's (#46).
-_SUPPLY_TABLES = ("generators", "storage_units", "stores")
+#: The tables whose rows supply a bus directly, each with its nominal capacity column. A row the
+#: sidecar does not name on a bus that holds a sidecar unit marks that bus as the mainland's (#46),
+#: when it can deliver (#49).
+_SUPPLY_TABLES = {"generators": "p_nom", "storage_units": "p_nom", "stores": "e_nom"}
+
+
+def _can_deliver(df, name, nom) -> bool:
+    """False when row ``name`` has no capacity and cannot grow any: its ``{nom}_max`` when
+    extendable, else ``nom``, is 0 (#49)."""
+    size = f"{nom}_max" if bool(df.at[name, f"{nom}_extendable"]) else nom
+    return float(df.at[name, size]) != 0.0
+
+
+def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
+    """``{link: (marker, grid-side buses)}`` for each Link with both ends on the units' buses
+    ``own`` that feeds the mainland's supply in and can deliver: tagged
+    ``eh_role == "grid_import"`` (its ``bus0`` the grid side), or with an end on a bus tagged
+    ``eh_poc`` (that end the grid side, as ``archetypes.select_import_links`` reads it).
+
+    #48: an untagged Link with no end on an ``eh_poc`` bus is not a mainland feed. Topology alone
+    cannot tell it from the island's own feeder (``hospital_feeder``, ``site_transformer``), and a
+    Link from an unlisted supply is caught anyway: on a unit's bus by that supply, off the
+    island as a tie."""
+    from services.solver.process_uc import flag_column
+
+    poc = set(n.buses.index[flag_column(n.buses, "eh_poc")].astype(str))
+    role = n.links["eh_role"].astype(str) if "eh_role" in n.links.columns else None
+    out = {}
+    for name in n.links.index:
+        ends = (str(n.links.at[name, "bus0"]), str(n.links.at[name, "bus1"]))
+        if not set(ends) <= own or not _can_deliver(n.links, name, "p_nom"):
+            continue
+        if role is not None and role.at[name] == "grid_import":
+            out[str(name)] = ("grid_import", (ends[0],))
+        elif set(ends) & poc:
+            out[str(name)] = ("eh_poc", tuple(sorted(set(ends) & poc)))
+    return out
 
 
 def _units_on_mainland(n, island) -> dict | None:
@@ -288,15 +322,15 @@ def _units_on_mainland(n, island) -> dict | None:
     else None. The island is never repaired here: a unit on the mainland is a sidecar error, and
     the gate says so (#1079: what cannot be read is no evidence, never ``no_tie``).
 
-    A bus reads as the mainland's when it also hosts a supply the sidecar does not list. When the
-    mainland's supply arrives only through a Link, the grid-import Link (``eh_role ==
-    "grid_import"``, its ``bus0`` the grid side) with both ends on the units' buses names it."""
+    A bus reads as the mainland's when it also hosts a supply the sidecar does not list and that
+    can deliver (#49). When the mainland's supply arrives only through a Link, the grid side of a
+    Link ``_mainland_links`` reads as the mainland feed names it (#48)."""
     unit_bus = _unit_buses(n, island)
     named = set(island["units"])
     foreign: dict[str, list[str]] = {}
     from services.adequacy.slack import is_slack_name, slack_generator_mask
 
-    for table in _SUPPLY_TABLES:
+    for table, nom in _SUPPLY_TABLES.items():
         df = getattr(n, table)
         # An LP slack (load shedding, DSR, VoLL) is not a real asset: never a mainland supply (GK A S1).
         slack = slack_generator_mask(df) if table == "generators" else None
@@ -304,16 +338,17 @@ def _units_on_mainland(n, island) -> dict | None:
             if (slack is not None and bool(slack.at[name])) or is_slack_name(name):
                 continue
             bus = str(df.at[name, "bus"])
-            if name not in named and bus in unit_bus.values():
+            if (
+                name not in named
+                and bus in unit_bus.values()
+                and _can_deliver(df, name, nom)
+            ):
                 foreign.setdefault(bus, []).append(str(name))
-    links = []
-    if "eh_role" in n.links.columns:
-        own = set(unit_bus.values())
-        for name in n.links.index[n.links["eh_role"].astype(str) == "grid_import"]:
-            ends = {str(n.links.at[name, c]) for c in ("bus0", "bus1")}
-            if ends <= own:
-                links.append(str(name))
-                foreign.setdefault(str(n.links.at[name, "bus0"]), [])
+    feeds = _mainland_links(n, set(unit_bus.values()))
+    links = list(feeds)
+    for _marker, grid in feeds.values():
+        for bus in grid:
+            foreign.setdefault(bus, [])
     if not foreign:
         return None
     units = sorted(u for u, b in unit_bus.items() if b in foreign)
@@ -326,10 +361,16 @@ def _units_on_mainland(n, island) -> dict | None:
             reasons.append(
                 f"it hosts {', '.join(sorted(foreign[bus]))}, which the island sidecar does not list"
             )
-        imports = [link for link in links if str(n.links.at[link, "bus0"]) == bus]
-        if imports:
+        imports = [link for link in links if bus in feeds[link][1]]
+        tagged = [link for link in imports if feeds[link][0] == "grid_import"]
+        poc_fed = [link for link in imports if feeds[link][0] == "eh_poc"]
+        if tagged:
             reasons.append(
-                f"it is the grid side (bus0) of the grid-import link {', '.join(imports)}"
+                f"it is the grid side (bus0) of the grid-import link {', '.join(tagged)}"
+            )
+        if poc_fed:
+            reasons.append(
+                f"it is the eh_poc (point-of-connection) end of the link {', '.join(poc_fed)}"
             )
         why.append(
             f"{on} sits on bus {bus}, which reads as the mainland's: {' and '.join(reasons)}"
@@ -379,8 +420,7 @@ def _carries(n, comp, name) -> bool:
         "Transformer": ("transformers", "s_nom"),
     }[comp]
     df = getattr(n, table)
-    size = f"{nom}_max" if bool(df.at[name, f"{nom}_extendable"]) else nom
-    if float(df.at[name, size]) == 0.0:
+    if not _can_deliver(df, name, nom):
         return False
     limits = ("p_max_pu", "p_min_pu") if comp == "Link" else ("s_max_pu",)
     for attr in limits:
