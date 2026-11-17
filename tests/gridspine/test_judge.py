@@ -927,3 +927,19 @@ def test_profile_point_shapes_and_optional_ramp():
     ]:
         with pytest.raises(ContractError, match=match):
             validate_profile("x", {**_base(), "lvrt_curve": {**LVRT, "points": points}})
+
+
+def test_ride_through_judges_the_event_sample():
+    v = np.where(T < 0.2, 1.0, curve_at(LVRT["points"], T - 0.2))
+    v = np.where(T == 0.2, 0.1, v)  # below the 0.2 pu curve only at fault inception
+    r = _rows(judge(_frame(T, V=v), _lvrt_case(v1="V"), PROFILE))[
+        "voltage_within_curve"
+    ]
+    assert r["status"] == "fail" and r["at_s"] == 0.2
+
+
+def test_curve_point_must_be_a_list_not_a_two_key_mapping():
+    with pytest.raises(ContractError, match=r"points\[0\]"):
+        validate_profile(
+            "x", {**_base(), "lvrt_curve": {**LVRT, "points": [{0: 0.0, 1: 0.2}]}}
+        )
