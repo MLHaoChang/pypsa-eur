@@ -1,7 +1,0 @@
-{"kinds": {
-  "ic_budget": {"surface": "inline", "why": "A harness run's investment case (eh_site@4, harness/run_ic.py) needs its baseline re-solved, and the run's solves left do not cover the solves its grant reserves for that (run_envelope.CASE_BASELINE_SOLVES). No LP ran. The step fails with this kind, and the run's report lists the investment chapter as a gap."},
-  "ic_wall_time": {"surface": "inline", "why": "A harness run's investment case was still running when the run's wall time (the envelope's expires_at) ended. The step fails with this kind, never completed. A late finish settles nothing more, and the report lists the investment chapter as a gap."},
-  "ic_case_refused": {"surface": "inline", "why": "A harness run's investment case was refused for its inputs (its typed code in brackets). The step fails with this kind, and the run's report lists the investment chapter as a gap. The user fixes the named input and runs the case again."},
-  "ic_case_failed": {"surface": "inline", "why": "A harness run's investment case failed (its typed code in brackets). The step fails with this kind, and the run's report lists the investment chapter as a gap."},
-  "ic_case_aborted": {"surface": "inline", "why": "A harness run's investment case was stopped before it finished. The step fails with this kind, and the run's report lists the investment chapter as a gap."}
-}}

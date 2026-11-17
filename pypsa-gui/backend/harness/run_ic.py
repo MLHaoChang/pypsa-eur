@@ -58,6 +58,11 @@ BUDGET = (
     f"{BUDGET_KIND}: the run's solves left do not cover the investment case's baseline "
     "solves, so it did not run."
 )
+# GK B (61) A5: the one set of kinds a chapter-gap step's error carries (run_ic
+# owns it). They are never a `tool_error` frame's kind: a gap is the report's.
+CHAPTER_GAP_KINDS = frozenset(
+    {BUDGET_KIND, WALL_TIME_KIND, *(kind for kind, _ in GAP_KINDS.values())}
+)
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 
