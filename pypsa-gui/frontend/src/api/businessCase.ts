@@ -163,6 +163,9 @@ export interface BusinessCasePnl {
   stream_source?: Record<string, string>
   rows: Record<string, YearSeries | boolean>
   not_finite?: string[]
+  /** Display key (BC 17): why each row that reads None is not established, naming the
+   *  missing input; absent on a report stored before it. */
+  row_reason?: Record<string, string>
 }
 
 export interface BusinessCaseKpi {

@@ -10,7 +10,7 @@ import {
 } from '../../../api/businessCase'
 import { useUIStore } from '../../../store/uiStore'
 import BusinessCaseRun, { type BusinessCaseRunProps } from './BusinessCaseRun'
-import { fmtYear, kpiText, PNL_SECTIONS, reasonWords, ROW_NEEDS, streamGroups } from './businessCaseReport'
+import { fmtYear, kpiText, PNL_SECTIONS, reasonWords, ROW_NEEDS, rowReason, streamGroups } from './businessCaseReport'
 import PNL_ROWS from './businessCasePnlRows.json'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
@@ -118,6 +118,23 @@ describe('the row list (GK B W1)', () => {
   it('ROW_NEEDS names every row the report serves, and the view shows only those', () => {
     expect(Object.keys(ROW_NEEDS).sort()).toEqual(PNL_ROWS)
     for (const sec of PNL_SECTIONS) for (const r of sec.rows) expect(PNL_ROWS).toContain(r.key)
+  })
+})
+
+describe('the served row reason (BC 17)', () => {
+  it('shows the served reason, and ROW_NEEDS only for a report stored before it', () => {
+    const served = { ...PNL, row_reason: { tax: 'tax_not_established: tax_pack_missing' } }
+    expect(rowReason('tax', served))
+      .toBe('Not established: the tax section is not established (tax_pack_missing).')
+    expect(rowReason('working_capital_change', { ...PNL, row_reason: {
+      working_capital_change: 'input_missing:receivable_days' } }))
+      .toBe('Not established: the receivable days are not set.')
+    expect(rowReason('tax', PNL)).toBe('Not established. It needs the tax section.')
+    expect(rowReason('tax', { ...PNL, not_finite: ['tax'], row_reason: served.row_reason }))
+      .toBe('Not established. The figure is out of range.')
+    mount({ ...DONE, report: { ...REPORT, pnl: served } })
+    expect(screen.getByTestId('bc-row-tax').textContent ?? '')
+      .toContain('the tax section is not established (tax_pack_missing)')
   })
 })
 

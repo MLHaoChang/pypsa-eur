@@ -78,8 +78,9 @@ export const PNL_SECTIONS: PnlSection[] = [
 export const NET_INCOME_NOTE = 'Net income is before financing (unlevered).'
 
 /** What each P&L row is built from (GK B W1): a statement of its inputs, not a diagnosis
- *  of which one is missing; the report serves no per-row reason. Its keys equal
- *  `businessCasePnlRows.json`, which a backend test pins to the rows the report serves. */
+ *  of which one is missing. Shown only for a report stored before the report served a
+ *  per-row reason (`pnl.row_reason`, BC 17). Its keys equal `businessCasePnlRows.json`,
+ *  which a backend test pins to the rows the report serves. */
 export const ROW_NEEDS: Record<string, string> = {
   revenue: 'the operating section',
   opex: 'the operating section',
@@ -117,6 +118,8 @@ export const ROW_NEEDS: Record<string, string> = {
 export function rowReason(key: string, pnl: BusinessCasePnl): string {
   if ((pnl.not_finite ?? []).includes(key)) return 'Not established. The figure is out of range.'
   if (key.startsWith('stream:')) return 'Not established. It needs the stream\'s lines.'
+  const served = pnl.row_reason?.[key]
+  if (served) return `Not established: ${reasonWords(served)}.`
   return ROW_NEEDS[key] ? `Not established. It needs ${ROW_NEEDS[key]}.` : 'Not established.'
 }
 
@@ -196,6 +199,7 @@ const KPI_REASON: Record<string, string> = {
   never_recovers: 'the cash never recovers the investment',
   no_debt: 'there is no debt',
   not_finite: 'the figure is out of range',
+  'input_missing:receivable_days': 'the receivable days are not set',
   wacc_nominal_missing: 'the WACC is not set',
   cost_of_equity_missing: 'the cost of equity is not set',
   irr_not_established: 'the cash flows have no IRR',

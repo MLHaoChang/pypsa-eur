@@ -253,6 +253,8 @@ def report_body(
     """The stored report: P&L by year by stream, the KPIs (gross and net of
     pass-through), break-even, the locked rows, each linked output's state and every
     assumed default the run used."""
+    from services.finance.business_case import row_reasons
+
     return {
         "business_case_hash": bc.hash,
         "inputs_digest": config_digest(raw),
@@ -272,6 +274,9 @@ def report_body(
             },
             "rows": _jsonable(p.rows),
             "not_finite": list(p.not_finite),
+            # A display key like the two above (BC 17): why each row that reads None
+            # is not established, naming the missing input. It moves no digest.
+            "row_reason": row_reasons(result, p, outputs),
         },
         "kpis": {name: _jsonable(dataclasses.asdict(v)) for name, v in k.items()},
         "break_even": _jsonable(be),

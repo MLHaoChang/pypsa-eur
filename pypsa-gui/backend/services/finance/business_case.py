@@ -828,6 +828,119 @@ def pnl(result, *, receivable_days: float | None = None) -> PnL:
     )
 
 
+#: What each P&L row is built from (BC 17): (the rows it reads, its own section). A row
+#: that is None reads the reason of its first missing input row, else its own section's.
+#: Mirrors `pnl` and `cash_bridge`; a test pins the keys to the rows `pnl` serves.
+_ROW_INPUTS: dict[str, tuple[tuple[str, ...], str | None]] = {
+    "revenue": ((), "operating"),
+    "opex": ((), "operating"),
+    "ebitda": ((), "operating"),
+    "pass_through": ((), "operating"),
+    "revenue_net_of_pass_through": (("revenue",), None),
+    "ebitda_net_of_pass_through": (("ebitda",), None),
+    "ebitda_margin": (("ebitda",), None),
+    "terminal": ((), "terminal"),
+    "depreciation": ((), "tax"),
+    "ebit": (("ebitda", "terminal", "depreciation"), None),
+    "tax": ((), "tax"),
+    "tax_equity": ((), "tax"),
+    "net_income": (("ebit", "tax"), None),
+    "capex": ((), "capex"),
+    "stage_capex": ((), "capex"),
+    "replacement": ((), "capex"),
+    "grant": ((), "incentives"),
+    # The engine's credits need its operating cash, terminal and capex (`run_case`).
+    "credits": (("ebitda", "terminal", "capex"), "incentives"),
+    "fees": ((), "debt"),
+    "debt_service": ((), "debt"),
+    "draws": ((), "debt"),
+    "reserve_interest": ((), "debt"),
+    "dsra_funding": ((), "debt"),
+    "debt_established": ((), "debt"),
+    "project_pre_tax": (
+        ("ebitda", "terminal", "capex", "stage_capex", "replacement", "grant"),
+        None,
+    ),
+    "project_post_tax": (("project_pre_tax", "tax", "credits"), None),
+    "equity_pre_tax": (("project_pre_tax",), "debt"),
+    "equity_post_tax": (("equity_pre_tax", "tax_equity", "credits"), None),
+    "working_capital_change": (("revenue",), "receivable_days"),
+    "project_after_working_capital": (
+        ("working_capital_change", "project_post_tax"),
+        None,
+    ),
+    "equity_after_working_capital": (
+        ("working_capital_change", "equity_post_tax"),
+        None,
+    ),
+}
+
+#: The sections the operating build states (`Operating.reasons`); the rest are the
+#: engine's (`FinanceResult.reasons`, `sections`).
+_OP_SECTIONS = ("operating", "capex", "terminal")
+
+
+def _codes(result, section: str) -> list[str]:
+    src = result.op.reasons if section in _OP_SECTIONS else result.reasons
+    return list(src.get(section) or [])
+
+
+def _section_reason(result, section: str, outputs: dict) -> str:
+    """`<section>_not_established: <codes>`, the codes naming the missing inputs. A
+    code that is another section's `<s>_not_established` (tax waits on debt) is
+    followed by that section's own codes, one level deep."""
+    if section == "receivable_days":
+        return "input_missing:receivable_days"
+    ok = (
+        result.op.established(section)
+        if section in _OP_SECTIONS
+        else result.sections.get(section) == "ok"
+    )
+    if ok:
+        return "not_established"
+    codes = _codes(result, section)
+    if "book_value_needs_tax_basis" in codes:
+        codes.append("tax_not_established")
+    deep = []
+    for c in codes:
+        deep.append(c)
+        inner = c.removesuffix("_not_established")
+        if inner != c and inner != section:
+            deep += _codes(result, inner)
+    named = []
+    for c in deep:
+        named.append(c)
+        line = c.removeprefix("line_not_established:")
+        out = outputs.get(line) if line != c else None
+        if isinstance(out, NotEvaluated):
+            named.append(f"linked_output_not_evaluated:{out.output_id}:{out.reason}")
+    return f"{section}_not_established" + (f": {', '.join(named)}" if named else "")
+
+
+def row_reasons(result, p: PnL, outputs: dict | None = None) -> dict[str, str]:
+    """Why each P&L row that reads None is not established, naming the missing input
+    for this case (BC 17): the engine's own reason codes for the first input the row
+    lacks, never a recomputation. A display key: it moves no digest. A row that
+    overflowed reads `not_finite` (it is in `p.not_finite`), and so does a row whose
+    input did. `outputs` maps a linked line to its output, so a line that is not
+    established names the linked output it waits on."""
+    outputs = outputs or {}
+    nf = set(p.not_finite)
+
+    def why(row: str) -> str:
+        if row in nf:
+            return f"not_finite:{row}"
+        deps, own = _ROW_INPUTS.get(row, ((), None))
+        for d in deps:
+            if p.rows.get(d) is None:
+                return why(d)
+        return "not_established" if own is None else _section_reason(result, own, outputs)
+
+    return {
+        k: why(k) for k, v in p.rows.items() if v is None and k not in nf
+    }
+
+
 # ── KPIs (BC2, BC8, C5) ──────────────────────────────────────────────────────
 
 
