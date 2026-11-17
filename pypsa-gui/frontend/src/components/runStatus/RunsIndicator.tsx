@@ -52,7 +52,7 @@ export function RunsIndicator() {
         aria-haspopup={guided ? 'dialog' : undefined}
         title={guided ? 'Show the runs going on' : 'Open the Solve queue'}
         onClick={() => (guided ? setOpen(o => !o) : setSlidePanel('solveQueue'))}
-        className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-[10px] font-semibold text-amber-700 dark:text-amber-300 whitespace-nowrap">
+        className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-warn/40 bg-warn/10 text-[10px] font-semibold text-warn whitespace-nowrap">
         <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-warn" />
         {label}
       </button>

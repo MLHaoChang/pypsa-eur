@@ -43,6 +43,9 @@ describe('RunsIndicator', () => {
     jobs = [job('a', 'Demo'), job('b', 'Other', 'queued'), job('c', null)]
     renderIt()
     expect(screen.getByTestId('runs-indicator').textContent).toBe('2 runs active')
+    // Theme tokens, so it follows the app's theme switch, not the OS (UX 24).
+    expect(screen.getByTestId('runs-indicator').className).toContain('text-warn')
+    expect(screen.getByTestId('runs-indicator').className).not.toMatch(/dark:|amber-/)
   })
 
   it('counts the Guided study of the project on screen', () => {
