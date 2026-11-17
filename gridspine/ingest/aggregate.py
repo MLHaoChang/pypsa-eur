@@ -66,6 +66,7 @@ from collections import deque
 import pandas as pd
 
 from gridspine.ingest.campus import build_campus
+from gridspine.schema.campus import validate_hourly
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.model_set import new_model_set
 
@@ -581,8 +582,10 @@ def aggregate_hour(rows: pd.DataFrame, unit_map: dict) -> pd.DataFrame:
     optionally the keys ``period`` and ``hour``: ``schema/campus.py``) as
     rows of the aggregated campus: ``p_mw`` summed over each equivalent's
     members, ``status`` 1 when any member is on. Refused, never dropped: a
-    row whose unit no equivalent stands for, any other column, and a
-    missing key or value.
+    row whose unit no equivalent stands for, any other column, a missing
+    or empty key or value, and whatever ``validate_hourly`` refuses (a
+    non-finite ``p_mw``, a ``status`` other than 0 or 1, power on an off
+    unit, a duplicate (unit_id, period, hour)).
     """
     missing = [col for col in _HOUR_VALUES if col not in rows.columns]
     extra = sorted(set(rows.columns) - set(_HOUR_VALUES) - set(_HOUR_KEYS))
@@ -592,22 +595,32 @@ def aggregate_hour(rows: pd.DataFrame, unit_map: dict) -> pd.DataFrame:
             f"{list(_HOUR_KEYS)}; missing {missing}, unknown {extra}"
         )
     keys = [col for col in _HOUR_KEYS if col in rows.columns]
-    blank = [col for col in (*_HOUR_VALUES, *keys) if rows[col].isna().any()]
+    blank = [
+        col
+        for col in (*_HOUR_VALUES, *keys)
+        if (rows[col].isna() | rows[col].astype(str).str.strip().eq("")).any()
+    ]
     if blank:
         raise AggregationError(
             f"aggregation: the hourly rows have missing values in {blank}"
         )
+    # The hourly table's own checks (finite p_mw, integral keys, status 0/1,
+    # no power when off, no duplicate (unit_id, period, hour)); a key the
+    # rows leave out is one value for every row.
+    try:
+        checked = validate_hourly(
+            rows.assign(**{k: 0 for k in _HOUR_KEYS if k not in keys})
+        )
+    except ContractError as err:
+        raise AggregationError(f"aggregation: {err}") from err
     member_of = {m: eq for eq, ms in unit_map.items() for m in ms}
-    stray = sorted(set(rows["unit_id"]) - set(member_of))
+    stray = sorted(set(checked["unit_id"]) - set(member_of))
     if stray:
         raise AggregationError(
             f"aggregation: the hourly rows have unit(s) {stray} the aggregated campus "
             "does not map"
         )
-    df = rows.assign(
-        unit_id=rows["unit_id"].map(member_of),
-        status=(rows["status"].astype(int) == 1).astype(int),
-    )
+    df = checked.assign(unit_id=checked["unit_id"].map(member_of))
     out = df.groupby(keys + ["unit_id"], sort=True, as_index=False).agg(
         p_mw=("p_mw", "sum"), status=("status", "max")
     )
