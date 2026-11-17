@@ -1,13 +1,15 @@
 // The preference comparison (AS-10): one sizing loop per design intent, one table row each, run as a
 // background job the section polls. Thin: every number is the backend's. A loop that is not converged,
 // unresolved, failed or stopped is never shown as a pass, and a converged row says how many checks did not run.
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { errorText } from '../api/campusElectrical'
 import { networkApi } from '../api/network'
 import { nk } from '../utils/queryKeys'
 import { intentDefaults } from './intentDefaults'
-import { sourceWord, usedWord } from './intentSources'
+import { SOURCE_KEY, sourceWord, usedWord } from './intentSources'
+import { SOURCE_CHIP } from './DcArchitectureSection'
+import { money } from '../utils/money'
 import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 import {
@@ -226,9 +228,15 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
           {saveAutonomy.isError && <p className="text-[11px] text-err" role="alert" data-testid="intent-autonomy-save-error">{errorText(saveAutonomy.error)}</p>}
         </Field>
       )}
+      <p className="text-[11px] text-muted" data-testid="intent-source-key">
+        Where each value comes from:{' '}
+        {SOURCE_KEY.map(([word, meaning], i) => (
+          <span key={word}>{i > 0 && '; '}<span className={SOURCE_CHIP}>{word}</span> {meaning}</span>
+        ))}.
+      </p>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
         {([['critical', 'Critical load (MW)'], ['link', 'Campus link'], ['ramp', 'Grid ramp limit (MW/min)'],
-          ['sk', 'Short-circuit power (MVA)'], ['pst', 'Pst limit'], ['library', 'Transformer sizes (MVA, comma list)'],
+          ['sk', 'Short-circuit power (MVA)'], ['pst', 'Pst limit (unitless)'], ['library', 'Transformer sizes (MVA, comma list)'],
           ['swing', 'Load swing (MW)'], ['amp', 'Oscillation amplitude (MW)'], ['period', 'Oscillation period (s)']] as const)
           .map(([k, label]) => (
             <Field key={k} label={label}>
@@ -240,7 +248,7 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
               ) : (
                 <input className={INPUT} inputMode="decimal" value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
               )}
-              {fieldSource(k) && <span className="text-[11px] text-muted" data-testid={`intent-src-${k}`}>{fieldSource(k)}</span>}
+              {fieldSource(k) && <span className={`${SOURCE_CHIP} ml-1`} data-testid={`intent-src-${k}`}>{fieldSource(k)}</span>}
               {(k === 'critical' || k === 'link' || k === 'sk' || k === 'pst') && f[k] === '' && defaults[k].reason && (
                 <p className="text-[11px] text-muted" data-testid={`intent-why-${k}`}>{defaults[k].reason}</p>
               )}
@@ -252,8 +260,8 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
         <p className="text-[11px] text-muted" data-testid="intent-poc-scope">
           These values apply to this comparison only; the saved network is not changed. The PQ and flicker checks
           read them at {f.link === defaults.link.value ? 'the point of connection' : (f.link || 'the campus link')}.
-          The ramp limit, load swing and oscillation come from Grid connection › Connection limits and the DC load:
-          change them there for the project.
+          The ramp limit, load swing and oscillation are the project's own: change them for the project in the
+          connection limits under Grid connection, and in the DC load.
         </p>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
           {PQ_FIELDS.map(([k, label, d]) => (
@@ -261,9 +269,13 @@ export default function IntentComparisonSection({ name, gridCode: savedCode }: {
               <input className={INPUT} inputMode="decimal" value={pqValue(k, d)} disabled={running}
                 onChange={e => { const v = e.target.value; setPq(p => ({ ...p, [k]: v })) }} data-testid={`intent-pq-${k}`} />
               {(pqTyped[k] !== undefined || held.data?.pq[k]) && (
-                <span className="text-[11px] text-muted" data-testid={`intent-pq-src-${k}`}
+                <span className={`${SOURCE_CHIP} ml-1`} data-testid={`intent-pq-src-${k}`}
                   title={pqTyped[k] === undefined ? held.data?.pq[k]?.source ?? undefined : undefined}>
                   {sourceWord(held.data?.pq[k]?.kind, pqTyped[k] !== undefined)}</span>
+              )}
+              {k === 'statcom_capital_cost' && Number(pqValue(k, d)) > 0 && (
+                <p className="text-[11px] text-muted" data-testid="intent-pq-cost-money">
+                  {money(Number(pqValue(k, d)), 'EUR')} per Mvar per year</p>
               )}
             </Field>
           ))}
@@ -362,12 +374,15 @@ const USED_LABELS: Record<string, string> = {
 }
 /** What the run took for each project-held input, and from where (a run on assumed values says so). */
 function InputsUsed({ inputs }: { inputs: NonNullable<IntentJob['inputs']> }) {
-  const { pq, xr, ...rest } = inputs.sources
-  const parts = Object.entries(rest).map(([k, v]) => `${USED_LABELS[k] ?? k} (${usedWord(v as string)})`)
-  const poc = Object.entries((pq ?? {}) as Record<string, string>).map(([k, v]) => `${USED_LABELS[k] ?? k} (${usedWord(v)})`)
+  const { pq, xr: _xr, ...rest } = inputs.sources
+  const item = ([k, v]: [string, unknown]) => (
+    <span key={k}>{USED_LABELS[k] ?? k} <span className={SOURCE_CHIP}>{usedWord(v as string)}</span></span>)
+  const join = (xs: ReactNode[]) => xs.flatMap((x, i) => (i ? [', ', x] : [x]))
+  const poc = Object.entries((pq ?? {}) as Record<string, string>)
   return (
     <p className="text-[11px] text-muted" data-testid="intent-inputs-used">
-      Inputs used: {parts.join(', ')}{poc.length ? `; point of connection: ${poc.join(', ')}` : ''}.
+      Inputs used: {join(Object.entries(rest).map(item))}
+      {poc.length > 0 && <>; point of connection: {join(poc.map(item))}</>}.
     </p>
   )
 }

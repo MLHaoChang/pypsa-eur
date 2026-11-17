@@ -10,6 +10,15 @@ export const SOURCE_WORDS: Record<SourceKind | 'typed', string> = {
   typed: 'entered here',
 }
 
+/** The key shown once above the inputs: what each source word means. */
+export const SOURCE_KEY: [string, string][] = [
+  [SOURCE_WORDS.project, 'held by the project'],
+  [SOURCE_WORDS.assumed, 'a typical value, not yet checked for this site'],
+  [SOURCE_WORDS.load_envelope, "the DC load's dynamic envelope"],
+  [SOURCE_WORDS.grid_code, 'the grid code the project applies'],
+  [SOURCE_WORDS.typed, 'typed in this form for this comparison'],
+]
+
 /** The source word for a field: what the user typed wins, else the value's own kind; none when unknown. */
 export function sourceWord(kind: SourceKind | undefined, typed: boolean): string | null {
   if (typed) return SOURCE_WORDS.typed

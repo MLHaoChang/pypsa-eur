@@ -347,6 +347,9 @@ describe('IntentComparisonSection prefill from the project (walkthrough bug 06)'
     expect(val('intent-pq-x_pu')).toBe('0.12'); expect(val('intent-pq-statcom_capital_cost')).toBe('11195')
     expect(screen.getByTestId('intent-pq-src-pf').textContent).toBe('assumed')
     expect(screen.getByTestId('intent-poc-scope').textContent).toContain('apply to this comparison only')
+    expect(screen.getByTestId('intent-poc-scope').textContent).not.toContain('›')
+    expect(screen.getByTestId('intent-source-key').textContent).toContain('assumed a typical value')
+    expect(screen.getByTestId('intent-pq-cost-money').textContent).toBe('€\u00a011.2\u00a0k per Mvar per year')
   })
 
   it('leaves untouched project values out of the request and sends only the typed PoC values', async () => {
@@ -390,9 +393,9 @@ describe('IntentComparisonSection prefill from the project (walkthrough bug 06)'
     renderIt()
     await waitFor(() => expect(screen.getByTestId('intent-inputs-used')).toBeTruthy())
     const text = screen.getByTestId('intent-inputs-used').textContent
-    expect(text).toContain('Grid ramp limit (assumed)')
-    expect(text).toContain('transformer reactance (entered here)')
-    expect(text).toContain('load power factor (assumed)')
+    expect(text).toContain('Grid ramp limit assumed')
+    expect(text).toContain('transformer reactance entered here')
+    expect(text).toContain('load power factor assumed')
   })
 })
 
