@@ -266,7 +266,10 @@ def _collector(c, root, parent, units, down, p_tot, assumptions):
             cb["x_ohm_per_km"],
             cb["c_nf_per_km"],
         ]
-        if all(f in cb for f in ("r0_ohm_per_km", "x0_ohm_per_km", "c0_nf_per_km")):
+        if _bus_kv(c, v) != v_root:
+            # behind a unit transformer: its delta winding blocks the zero sequence
+            pass
+        elif all(f in cb for f in ("r0_ohm_per_km", "x0_ohm_per_km", "c0_nf_per_km")):
             r0 += _v(cb["r0_ohm_per_km"]) * ln / n * refer * w
             x0 += _v(cb["x0_ohm_per_km"]) * ln / n * refer * w
             c0 += _v(cb["c0_nf_per_km"]) * ln * n / refer
@@ -297,16 +300,20 @@ def _collector(c, root, parent, units, down, p_tot, assumptions):
         "c_nf_per_km": _tag(cap, *fields),
         "max_i_ka": _tag(i_max, *fields),
     }
-    if not missing:
+    if missing or not zero_fields:
+        assumptions.append(
+            f"aggregation: the equivalent collector behind {root} has no zero sequence: "
+            + (
+                f"cable(s) {sorted(missing)} carry none"
+                if missing
+                else "no collector-side cable"
+            )
+        )
+    else:
         out.update(
             r0_ohm_per_km=_tag(r0, *zero_fields),
             x0_ohm_per_km=_tag(x0, *zero_fields),
             c0_nf_per_km=_tag(c0, *zero_fields),
-        )
-    else:
-        assumptions.append(
-            f"aggregation: the equivalent collector behind {root} has no zero sequence: "
-            f"cable(s) {sorted(missing)} carry none"
         )
     return out
 
@@ -384,14 +391,15 @@ def _unit_transformer(c, root, trafos, down, p_tot, assumptions):
     for f in _TRAFO_FLAGS + ("r_n_hv_ohm", "r_n_lv_ohm"):
         if f in first:
             out[f] = copy.deepcopy(first[f])
-    taps = [c["transformers"][n].get("tap") for n in trafos]
-    if taps[0] is not None and all(t == taps[0] for t in taps):
-        out["tap"] = copy.deepcopy(taps[0])
-    elif any(t is not None for t in taps):
-        assumptions.append(
-            f"aggregation: the unit transformers behind {root} have unequal taps; the "
-            "equivalent is at its nominal ratio"
-        )
+    taps = {n: c["transformers"][n].get("tap") for n in trafos}
+    for n, tap in taps.items():
+        if tap != taps[trafos[0]]:
+            raise AggregationError(
+                f"aggregation: unit transformers {trafos[0]} and {n} behind {root} differ in "
+                "their tap: the effective ratios differ"
+            )
+    if taps[trafos[0]] is not None:
+        out["tap"] = copy.deepcopy(taps[trafos[0]])
     return out
 
 
@@ -462,7 +470,7 @@ def aggregate(campus_spec) -> Aggregation:
         pcc,
         *trafos,
         *(c.get("cables") or {}),
-        *(c.get("units") or {}),
+        *c["units"],
         *(x["name"] for x in c.get("compensation") or []),
         *(c.get("earthing_transformers") or {}),
     }
@@ -481,7 +489,9 @@ def aggregate(campus_spec) -> Aggregation:
         }
         below = set(nodes) - {root}
         branch_names = {name for (_, _, name) in parent.values()}
-        clash = sorted(set(names.values()) & (taken - below - branch_names))
+        made = {names["mv"], names["cable"]} if cable is not None else set()
+        made |= {names["lv"], names["trafo"]} if tr is not None else set()
+        clash = sorted(made & (taken - below - branch_names))
         if clash:
             raise AggregationError(
                 f"aggregation: the equivalent name(s) {clash} are already taken"
