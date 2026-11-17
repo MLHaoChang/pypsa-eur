@@ -14,6 +14,7 @@ import pytest
 from gridspine.handoff import campus_bundle as CB
 from gridspine.handoff.emt_pack import write_emt_pack
 from gridspine.handoff.emt_workbook import (
+    CONTROL_DYNAMIC,
     EMT_ONLY,
     PARAM_UNITS,
     RSCAD_NOTES,
@@ -412,3 +413,37 @@ def test_the_bundle_stage_is_the_hour_with_its_running_units(tmp_path):
     b = CB.export_campus_bundle(tmp_path / "off", camp, off, "h18")
     assert set(_stage(a)) == {"hour"}
     assert _stage(a)["hour"]["sk_max_mva"] > _stage(b)["hour"]["sk_max_mva"]
+
+
+def test_every_control_mode_maps_to_converter_columns():
+    from gridspine.schema.island import CONTROLS
+
+    assert set(CONTROL_DYNAMIC) == set(CONTROLS)
+    assert CONTROL_DYNAMIC["gfm_vsm"] == (
+        "droop_pct",
+        "q_droop_pct",
+        "H_v_s",
+        "i_max_pu",
+        "k_gfm_min",
+    )
+    assert CONTROL_DYNAMIC["gfl_qu"] == ()
+    for fields in CONTROL_DYNAMIC.values():
+        assert set(fields) <= set(SHEET_FIELDS["converters"])
+
+
+@pytest.mark.parametrize(
+    "sheet, element, param",
+    [("gensets", "GEN1", "xd_pp"), ("cables", "CB1", "length_km")],
+)
+def test_a_missing_schema_field_is_a_gap_on_every_sheet(sheet, element, param):
+    _, g = workbook(without(build_campus(campus_spec()), element, param))
+    assert (element, param) in gaps_of(g, sheet)
+
+
+def test_a_statcom_missing_its_rating_is_a_gap():
+    s = campus_spec()
+    s["campus"]["compensation"] = [
+        {"name": "STC1", "bus": "MV2", "kind": "statcom", "q_mvar": t(5.0)}
+    ]
+    _, g = workbook(without(build_campus(s), "STC1", "q_mvar"))
+    assert ("STC1", "q_mvar") in gaps_of(g, "converters")

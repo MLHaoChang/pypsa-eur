@@ -36,6 +36,7 @@ import pandas as pd
 
 from gridspine.ingest.campus import _UNIT_FIELDS
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.island import _CONTROL_FIELDS
 from gridspine.schema.island import CONVERTER_KINDS as _ISLAND_CONVERTERS
 
 #: The unit of each field, fixed by the campus schema's field name.
@@ -196,21 +197,13 @@ EMT_ONLY = {
 #: A genset's island data an EMT machine model needs (inertia, governor,
 #: excitation ceiling, AVR droop, rated power factor).
 GENSET_DYNAMIC = ("xd_sat", "H_s", "T_g_s", "q_droop_pct", "cos_phi_r")
+#: Island control fields that are curves, not numbers (not a workbook column).
+_CURVES = ("qu_points",)
 #: Per control mode, the island parameters an EMT converter model needs
-#: (the schema's numeric ones; ``qu_points`` is a curve, not a number).
+#: (the island schema's, less its curves).
 CONTROL_DYNAMIC = {
-    "gfl_pq": (),
-    "gfl_qu": (),
-    "gfl_pf": (),
-    "gfl_fw": (
-        "fw_k_mw_per_hz",
-        "fw_deadband_hz",
-        "fw_delay_s",
-        "fw_ramp_mw_per_s",
-        "fw_p_limit_mw",
-    ),
-    "gfm_droop": ("droop_pct", "q_droop_pct", "tau_f_s", "i_max_pu", "k_gfm_min"),
-    "gfm_vsm": ("droop_pct", "q_droop_pct", "H_v_s", "i_max_pu", "k_gfm_min"),
+    mode: tuple(f for f in fields if f not in _CURVES)
+    for mode, fields in _CONTROL_FIELDS.items()
 }
 _CABLE_ZERO_WHY = "cable zero sequence for unbalanced faults and auto-reclose (TRGC 17)"
 _CURVE_WHY = "a time-delayed relay's characteristic (curve type and time multiplier) for auto-reclose (TRGC 17)"
