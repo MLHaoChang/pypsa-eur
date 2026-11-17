@@ -478,7 +478,7 @@ def test_bad_case_id_refused(cid):
         _case(case_id=cid)
 
 
-@pytest.mark.parametrize("trgc", ["", None])
+@pytest.mark.parametrize("trgc", ["", None, 5])
 def test_empty_trgc_refused(trgc):
     with pytest.raises(ContractError, match="trgc reference is empty"):
         _case(trgc=trgc)
