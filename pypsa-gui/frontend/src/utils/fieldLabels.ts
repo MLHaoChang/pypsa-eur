@@ -46,10 +46,7 @@ export const FIELD_LABELS: Record<string, string> = {
   timezone: 'Site time zone',
   dsr_share_of_load: 'DSR volume', // SolverSettings "Demand-response tier"
   dsr_price_eur_per_mwh: 'Demand-response price',
-  participants: 'Participants', // Results › Investment case; Commercial & parties
-  contracts: 'Contracts',
-  import_tariff: 'Import tariff',
-  finance: 'Finance inputs',
+  business_case: 'Business case', // Results › Investment case, its "Business case" section
   committable: 'Unit commitment', // the asset form (asset_schema/fields.py); its schema label wins
   variants: 'Project variants', // ScenariosPanel "project variants"
 }

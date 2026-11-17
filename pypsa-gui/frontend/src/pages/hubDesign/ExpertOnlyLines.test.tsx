@@ -27,9 +27,9 @@ vi.mock('../../api/commercial', async orig => {
   const m = await orig<typeof import('../../api/commercial')>()
   return { ...m, commercialApi: { ...m.commercialApi, getCommercial: api.commercial } }
 })
-vi.mock('../../api/finance', async orig => {
-  const m = await orig<typeof import('../../api/finance')>()
-  return { ...m, financeApi: { ...m.financeApi, getFinance: api.finance } }
+vi.mock('../../api/businessCase', async orig => {
+  const m = await orig<typeof import('../../api/businessCase')>()
+  return { ...m, businessCaseApi: { ...m.businessCaseApi, getInputs: api.finance } }
 })
 vi.mock('../../api/campusElectrical', async orig => {
   const m = await orig<typeof import('../../api/campusElectrical')>()
@@ -80,8 +80,9 @@ function setValues() {
   api.schema.mockImplementation((cls: string) => Promise.resolve(UC_SCHEMA(cls)))
   api.projects.mockResolvedValue([{ name: 'Demo' }, { name: 'Demo high', parent_project: 'Demo' },
                                   { name: 'Demo low', parent_project: 'Demo' }, { name: 'Other' }])
-  api.finance.mockResolvedValue({ finance: { financial_close: '2027-01-01', currency: 'EUR' }, digest: 'd',
-                                  status: 'ok' })
+  api.finance.mockResolvedValue({ business_case: { inputs: { lines: [
+    { name: 'Compute revenue', kind: 'revenue' }, { name: 'Staff', kind: 'cost' }] },
+    break_even_line: 'Compute revenue' }, digest: 'd', status: 'ok' })
 }
 
 /** Every reader empty. */
@@ -96,7 +97,7 @@ function setEmpty() {
   api.links.mockResolvedValue([])
   api.schema.mockImplementation((cls: string) => Promise.resolve(UC_SCHEMA(cls)))
   api.projects.mockResolvedValue([{ name: 'Demo' }, { name: 'Other' }])
-  api.finance.mockResolvedValue({ finance: null, digest: 'd', status: 'not_set' })
+  api.finance.mockResolvedValue({ business_case: null, digest: 'd', status: 'not_set' })
 }
 
 function mount(section: FlowSectionId) {
@@ -131,11 +132,19 @@ const FILLED: Record<string, Record<string, string>> = {
            dsr_price_eur_per_mwh: 'Demand-response price: 150 €/MWh' },
   assets: { committable: 'Unit commitment: Haber-Bosch · Minimum flow 30% · Minimum up time 4 h · Minimum down time 2 h' },
   scenarios: { variants: 'Project variants: Demo high, Demo low' },
-  results: { participants: 'Participants: Owner, Bank', contracts: 'Contracts: ppa1, cfd1',
-             import_tariff: 'Import tariff: DE C&I', finance: 'Finance inputs: Financial close 2027-01-01 · Currency EUR' },
+  results: { business_case: 'Business case: Compute revenue, Staff · break-even on Compute revenue' },
 }
 
 describe('ExpertOnlyLines', () => {
+  it('section 10 names only the business case: the inputs Guided section 7 edits are not named twice', async () => {
+    setValues()
+    mount('results')
+    const box = await settled('results')
+    for (const word of ['Participants', 'Contracts', 'Import tariff', 'Finance inputs']) {
+      expect(box.textContent).not.toContain(word)
+    }
+  })
+
   for (const [section, lines] of Object.entries(FILLED)) {
     it(`section ${section}: each line names its field and value, one link per Expert place`, async () => {
       setValues()
@@ -159,7 +168,7 @@ describe('ExpertOnlyLines', () => {
       connection: ['grid_code_profile', 'grid_code_document', 'poc_link', 'export_link', 'timezone'],
       loads: ['dsr_share_of_load', 'dsr_price_eur_per_mwh'],
       scenarios: ['variants'],
-      results: ['participants', 'contracts', 'import_tariff', 'finance'],
+      results: ['business_case'],
     }
     for (const [section, keys] of Object.entries(expected)) {
       const { unmount } = mount(section as FlowSectionId)
@@ -212,7 +221,7 @@ describe('ExpertOnlyLines', () => {
     useUIStore.setState({ activeSection: 'results' })
     mount('results')
     await settled('results')
-    fireEvent.click(screen.getByTestId('expert-only-open-participants'))
+    fireEvent.click(screen.getByTestId('expert-only-open-business_case'))
     expect(withReturnFrom).toHaveBeenCalledTimes(1)
     const ui = useUIStore.getState()
     expect(ui.uiMode).toBe('expert')

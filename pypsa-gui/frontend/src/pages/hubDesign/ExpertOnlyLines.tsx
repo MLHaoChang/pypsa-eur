@@ -4,8 +4,8 @@ import type { FlowSectionId } from '../../api/flow'
 import type { Generator, Link } from '../../api/types'
 import { networkApi } from '../../api/network'
 import { simulationApi } from '../../api/simulation'
+import { businessCaseApi } from '../../api/businessCase'
 import { commercialApi } from '../../api/commercial'
-import { financeApi } from '../../api/finance'
 import { campusApi } from '../../api/campusElectrical'
 import { projectsApi } from '../../api/projects'
 import { useAssetSchema } from '../../hooks/useAssetSchema'
@@ -205,25 +205,22 @@ function useScenariosLines(): ExpertOnlyLine[] {
   }]
 }
 
-// ── 10 Results: the investment-case inputs (Expert: Results › Investment case) ──
+// ── 10 Results: the business case (Expert: Results › Investment case) ────────
+// Tariff, contracts, finance inputs and participants are edited in Guided
+// section 7, so they are not named here; the business case's own lines and its
+// break-even line are post-solve inputs with no Guided home (DCBC-SCOPE-1).
 function useResultsLines(): ExpertOnlyLine[] {
   const project = useProject()
-  const config = useQuery({ queryKey: nk(project, 'commercial', 'config'), queryFn: () => commercialApi.getCommercial() })
-  const finance = useQuery({ queryKey: nk(project, 'simulation', 'finance'), queryFn: () => financeApi.getFinance() })
+  const inputs = useQuery({ queryKey: nk(project, 'results', 'business_case', 'inputs'),
+                            queryFn: () => businessCaseApi.getInputs() })
   const home: Home = { place: 'investment', open: inExpert('results', () => useUIStore.getState().requestResultsTab('investment')) }
   return [
-    { key: 'participants', label: FIELD_LABELS.participants, home,
-      value: read(config, d => names((d?.value_flows?.participants ?? []).map(p => p.name))) },
-    { key: 'contracts', label: FIELD_LABELS.contracts, home,
-      value: read(config, d => names((d?.contracts ?? []).map(c => c.id))) },
-    { key: 'import_tariff', label: FIELD_LABELS.import_tariff, home,
-      value: read(config, d => d?.import_tariff?.name ?? d?.import_tariff_ref?.id ?? d?.import_tariff_id ?? null) },
-    { key: 'finance', label: FIELD_LABELS.finance, home,
-      value: read(finance, d => {
-        const f = d?.finance
-        if (!f) return null
-        return [f.financial_close && `Financial close ${f.financial_close}`, f.currency && `Currency ${f.currency}`]
-          .filter(Boolean).join(' · ') || 'set'
+    { key: 'business_case', label: FIELD_LABELS.business_case, home,
+      value: read(inputs, d => {
+        const bc = d?.status === 'not_set' ? null : d?.business_case
+        const lines = names((bc?.inputs?.lines ?? []).map(l => l.name))
+        if (!lines) return null
+        return bc?.break_even_line ? `${lines} · break-even on ${bc.break_even_line}` : lines
       }) },
   ]
 }
