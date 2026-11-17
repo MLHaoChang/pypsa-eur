@@ -420,8 +420,9 @@ def test_a_ring_is_refused():
 def test_a_ring_with_a_detached_part_is_refused():
     """
     Branches = buses - 1 overall (a ring plus a detached bus): a count
-    alone would pass it. The detached bus is refused by the input check
-    (build_campus), and the ring by the branch walk on its own.
+    alone would pass it. The combined case is refused by build_campus
+    (the detached bus), before aggregate's walk runs; the ring on its own
+    is refused by the walk.
     """
     spec = plant()
     spec["campus"]["cables"]["TIE"] = cable("A2", "B3", 1.0)
