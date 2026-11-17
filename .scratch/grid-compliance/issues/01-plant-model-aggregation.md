@@ -3,7 +3,7 @@
 
 # GC-01 Plant model aggregation and a versioned model set with data freeze
 
-Status: ready-for-agent
+Status: done (#1571, #1585, #1595)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none
