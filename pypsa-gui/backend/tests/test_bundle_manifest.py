@@ -386,7 +386,40 @@ def test_a_dry_run_needs_a_signed_in_user(
     anon = _dry(anon_client, data, "bm_dry_anon_dst")
     real = _post(anon_client, data, "bm_dry_anon_dst")
     assert anon.status_code == real.status_code
-    assert anon.status_code in (401, 403)
+    assert anon.status_code == 401
+
+
+@pytest.mark.parametrize("dry", [False, True], ids=["import", "dry-run"])
+def test_the_route_refuses_no_user_before_the_study_guard_and_the_upload(
+    monkeypatch, dry
+):
+    """GK B3 (M3/M4): `require_user` runs first. Called directly, since the
+    auth middleware answers an anonymous HTTP caller before the route runs.
+    A running study and an upload that must not be read are both faked, so
+    moving the sign-in check below either of them changes the answer."""
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from routers import projects
+    from services import upload_guard
+    from services.pypsa_service import PyPSAService
+
+    def running(cls, action="", *, ctx=None):
+        raise HTTPException(409, f"Cannot {action} while a study is running.")
+
+    async def never(*a, **k):
+        raise AssertionError("the upload was read before the sign-in check")
+
+    monkeypatch.setattr(PyPSAService, "refuse_if_study_running", classmethod(running))
+    monkeypatch.setattr(upload_guard, "read_capped", never)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            projects.import_bundle(
+                file=None, name="x", db=None, user=None, session=None, dry_run=dry
+            )
+        )
+    assert exc.value.status_code == 401
 
 
 # ── GK B3 M1–M5 ─────────────────────────────────────────────────────────────
