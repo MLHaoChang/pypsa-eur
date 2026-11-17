@@ -3,7 +3,7 @@
 
 # PSS/E RAW fixtures
 
-The `.raw` files are PSS/E v33 case files copied unchanged from the test data of
+The `.raw` files are PSS/E v33 case files copied (line endings normalised to LF) from the test data of
 PowerModels.jl (`test/data/pti/`, commit `4c14405670fe85596388a23320ad9d3660e1c033`),
 licensed BSD-3-Clause; the full licence is `LICENSE.PowerModels.md`. Each file has
 a `.license` sidecar for REUSE.
