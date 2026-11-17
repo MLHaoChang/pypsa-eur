@@ -516,9 +516,13 @@ def _server_verdict(client, monkeypatch, name) -> bool:
     if meta.status_code == 200:
         monkeypatch.setattr("services.adequacy.eh_study.run_eh_study",
                             lambda *a, **k: {})
+        # What the Goal card sends: the template's request with the connection limit
+        # the flow's connection row reads from the network (template-e2e 02).
+        flow = client.get(f"/api/projects/{name}/flow").json()
+        limit = next(s for s in flow["sections"] if s["section"] == "connection")["connection_limit"]
         try:
-            # What the Goal card sends: the network's connection limit (template-e2e 02).
-            body = S._request_for(meta.json(), None, PyPSAService.get_network())
+            body = S.with_network_import(S._template_request(meta.json()), cap=S.ImportCapacity(
+                (), limit["mw"], limit["refusal"]))
         except S.ImportCapacityError:
             return False                         # the card sends nothing: no study can start
         r = client.post("/api/results/eh_study", json=body)
