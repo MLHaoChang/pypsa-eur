@@ -379,6 +379,8 @@ def test_step_rise_time_and_overshoot_within_one_sample():
 def test_downward_step_is_judged_in_its_direction():
     rows = _step(_step_response(y0=1.0, y1=0.0), target=0.0)
     assert abs(rows["rise_time"]["measured"] - 0.050) <= 1e-3
+    assert rows["settling_time"]["status"] == "pass"
+    assert rows["settling_time"]["measured"] == pytest.approx(0.146, abs=1e-3)
     assert rows["overshoot"]["measured"] == pytest.approx(5.0, abs=1e-9)
     assert rows["overshoot"]["status"] == "pass"
     assert (
@@ -429,14 +431,16 @@ def test_step_target_centres_the_band_and_shows_steady_state_error():
     y = _step_response() * 0.95  # settles 5 % short of the target
     rows = _step(y, target=1.0)
     assert rows["settling_time"]["status"] == "fail"
+    assert rows["overshoot"]["measured"] == 0.0  # never passes the target
+    assert rows["overshoot"]["status"] == "pass"
     assert _step(y, target=None)["settling_time"]["status"] == "pass"
 
 
 # --- frequency droop ------------------------------------------------------------------------------------------
 
 
-def _droop(f1, p1, env=DROOP):
-    f = np.where(TS < 0.2, 50.0, f1)
+def _droop(f1, p1, env=DROOP, f0=50.0):
+    f = np.where(TS < 0.2, f0, f1)
     p = np.where(TS < 0.2, 0.5, p1)
     return _rows(
         judge(
@@ -457,6 +461,36 @@ def test_droop_measured_against_set():
     assert r["status"] == "pass" and r["measured"] == pytest.approx(4.0)
     assert _droop(50.5, 0.40)["status"] == "fail"  # 6 %
     assert _droop(49.5, 0.65)["status"] == "pass"  # under-frequency: more power
+    r = _droop(50.5, 0.30)  # (0.5 - 0.2) / 50 / 0.2 = 3 %: 1 pp below the set 4 %
+    assert r["status"] == "fail" and r["measured"] == pytest.approx(3.0)
+    assert r["margin"] == pytest.approx(-0.5)
+
+
+def test_droop_on_a_60_hz_system():
+    env = {**DROOP, "nominal_hz": 60.0}
+    r = _droop(60.5, 0.375, env=env, f0=60.0)  # (0.5 - 0.2) / 60 / 0.125 = 4 %
+    assert r["status"] == "pass" and r["measured"] == pytest.approx(4.0)
+    # the same trace judged on 50 Hz reads 4.8 %, outside the 0.5 pp tolerance
+    r = _droop(60.5, 0.375, f0=60.0)
+    assert r["status"] == "fail" and r["measured"] == pytest.approx(4.8)
+
+
+def test_end_window_must_lie_after_the_step():
+    y = _step_response()
+    last = float(TS[-1])
+    with pytest.raises(ContractError, match="reaches back to t_event"):
+        _step(y, target=None, end_window_s=last - 0.2)  # exactly back to t_event
+    with pytest.raises(ContractError, match="reaches back to t_event"):
+        _step(y, target=None, end_window_s=last)
+    rows = _step(y, target=None, end_window_s=float(np.nextafter(last - 0.2, 0.0)))
+    assert all("no target given" in r["detail"] for r in rows.values())
+
+
+def test_overshoot_of_a_subnormal_change_is_finite_or_fails():
+    y = np.where(TS < 0.2, 0.0, 1.0)
+    r = _step(y, target=1e-308)["overshoot"]
+    assert r["status"] == "fail" and r["measured"] is None
+    assert "too small to give a finite overshoot" in r["detail"]
 
 
 def test_droop_guards_never_inf_or_nan():

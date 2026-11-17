@@ -173,6 +173,14 @@ class _Case:
             )
         self.pre_window = self._window(case, "pre_window_s", PRE_WINDOW_S)
         self.end_window = self._window(case, "end_window_s", END_WINDOW_S)
+        if (
+            self.kind in ("setpoint_step", "frequency_step")
+            and frame.time[-1] - self.end_window <= self.t_event
+        ):
+            raise ContractError(
+                f"{where}: end_window_s {self.end_window!r} s reaches back to t_event; "
+                "the end-of-record mean must lie after the event"
+            )
         self.target = case.get("target")
         if self.target is not None and (
             isinstance(self.target, bool)
@@ -769,6 +777,21 @@ def _step(case, profile):
     limit = env["overshoot_max_pct"]
     k = int(np.argmax(frac))
     over = max(0.0, (float(frac[k]) - 1.0) * 100)
+    if not math.isfinite(over):
+        rows.append(
+            _row(
+                case,
+                "overshoot",
+                OBLIGATION,
+                env,
+                FAIL,
+                None,
+                limit,
+                unit="%",
+                detail=f"change {change:g} is too small to give a finite overshoot; {basis}",
+            )
+        )
+        return rows
     rows.append(
         _at_most(
             case,
