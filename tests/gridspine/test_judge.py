@@ -733,8 +733,6 @@ def test_fault_window_is_event_inclusive_and_clear_exclusive():
 
 
 def test_deadband_edges_are_unknown():
-    v = np.where(
-        (T >= 0.2) & (T < 0.35), 0.9, 1.0
     v = np.where((T >= 0.2) & (T < 0.35), 0.75, 1.0)
     r = _rows(
         judge(
