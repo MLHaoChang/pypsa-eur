@@ -24,3 +24,12 @@ GK B plan GO (2026-11-17), with conditions:
 - E6. Valid legacy fixtures give the same network (frames and `_network_input_fingerprint`) as today's /import/excel.
 - E7. The copied injection-safe writer and `workbook_view.text` run one shared case table.
 - E8. One killing mutant per guard (E1–E3), listed in the PR body.
+
+Design lead (session_01G7qCuo4TtQpLUWDE5GKpny, 2026-11-17), on the expert catalogue:
+
+- The source is `services/asset_schema/fields.py`. It is read through `schema_payload` / `fields_for`, not copied. `label` is the plain name, `unit_display` the unit, `scale` = display / stored.
+- A plain name never carries its unit. Each sheet has a visible header row of plain names and a visible unit row under it.
+- Raw names go only in the hidden mapping row.
+- The column list is keyed by model name, so catalogue slice 01 (#1597) can swap the strings without a format change.
+- Carrier stays "Carrier" until slice 01's rename table lands. Sheet names Nodes, Lines, Transformers, Generators, Storage, Loads, Links are fine; slice 01 lists them for UX OK.
+- A column with no catalogue entry (eh_* and others) is a hidden column in the template, kept in the hidden mapping and in export round-trips.
