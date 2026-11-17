@@ -55,7 +55,26 @@ _RESULT_DYNAMIC_ATTRS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("stores_t",        ("p", "e")),
     ("loads_t",         ("p", "q")),
     ("buses_t",         ("marginal_price", "v_mag_pu", "v_ang")),
+    # PF-SAVE-1: every port's flow (p0, p1, p2, ...), read from the network
+    # in `_attrs_of`; a multi-port link keeps its LP flow on each port.
+    ("links_t",         ()),
 )
+
+# Result tables only the AC power flow writes: the LP leaves them unset. The
+# LP snapshot holds them empty, so a q or |V| from an earlier flow never
+# reads as the LP's or lands back in the live network (GK A F3).
+_PF_ONLY_RESULTS = frozenset({
+    "generators_t.q", "loads_t.q",
+    "lines_t.q0", "lines_t.q1", "transformers_t.q0", "transformers_t.q1",
+    "buses_t.v_mag_pu",
+})
+
+
+def _attrs_of(accessor_name: str, accessor, attrs: tuple[str, ...]) -> tuple[str, ...]:
+    if accessor_name != "links_t":
+        return attrs
+    import re
+    return tuple(sorted(k for k in accessor.keys() if re.fullmatch(r"p\d+", k)))
 
 
 def _snapshot_result_state(n) -> dict:
@@ -73,7 +92,7 @@ def _snapshot_result_state(n) -> dict:
             continue
         if accessor is None:
             continue
-        for attr in attrs:
+        for attr in _attrs_of(accessor_name, accessor, attrs):
             try:
                 df = getattr(accessor, attr, None)
             except Exception:
@@ -89,17 +108,41 @@ def _snapshot_result_state(n) -> dict:
     return out
 
 
+def _lp_snapshot(n) -> dict:
+    """`_snapshot_result_state` with the PF-only tables emptied: the LP
+    writes none of them, so whatever they hold came from an earlier flow."""
+    snap = _snapshot_result_state(n)
+    for key in _PF_ONLY_RESULTS & snap.keys():
+        snap[key] = snap[key].iloc[:, :0].copy()
+    return snap
+
+
 def _restore_result_state(n, snapshot: dict) -> None:
-    """Put the LP result tables of `snapshot` back into `n`. A PF that raised
-    midway may have overwritten some of them; the network must keep the LP
-    values so a retry snapshots the true LP baseline."""
+    """Put the LP result tables of `snapshot` back into `n`, so the live
+    network (and the network.nc saved from it) holds the LP dispatch after
+    the AC PF (owner decision PF-SAVE-1), and after a PF that raised midway.
+    Columns of a component the stage removed (a stripped VOLL slack) are
+    left out. A result table, not an input: no revision, no fingerprint."""
     import copy
     for key, df in snapshot.items():
         accessor_name, attr = key.split(".", 1)
         try:
+            static = getattr(n, accessor_name[: -len("_t")], None)
+            if isinstance(static, pd.DataFrame):
+                df = df.loc[:, df.columns.isin(static.index)]
             setattr(getattr(n, accessor_name), attr, copy.deepcopy(df))
         except Exception:
             pass
+
+
+def keep_lp_tables(n, lopf_results: dict) -> None:
+    """Put a stored LP snapshot's tables back into `n`, the PF-only tables
+    emptied. For a project saved before PF-SAVE-1, whose network.nc carries
+    the flow's tables (GK A F5)."""
+    snap = dict(lopf_results)
+    for key in _PF_ONLY_RESULTS & snap.keys():
+        snap[key] = snap[key].iloc[:, :0].copy()
+    _restore_result_state(n, snap)
 
 
 def _pick_ac_pf_slack_bus(n, cfg: SolverConfig) -> str:
@@ -413,7 +456,21 @@ def run_ac_pf_stage(
 
     # 1. Snapshot LP results BEFORE n.pf() overwrites them.
     phase("Stage 2: Snapshotting LOPF result state...")
-    lopf_snapshot = _snapshot_result_state(network)
+    lopf_snapshot = _lp_snapshot(network)
+    # PF-SAVE-1: the live network gets the LP tables back on every outcome
+    # (a flow, a non-converged flow, a raise inside or after it), so
+    # network.nc and every default reader keep the LP dispatch; the flow's
+    # own values live only in `ac_pf_results`. Still in the caller's lock
+    # hold: no reader sees the PF-written frames (GK A F2, F6).
+    try:
+        return _flow_and_capture(network, config, phase, lopf_snapshot, revision)
+    finally:
+        _restore_result_state(network, lopf_snapshot)
+
+
+def _flow_and_capture(network, config: SolverConfig, phase, lopf_snapshot: dict, revision) -> dict:
+    """Steps 2-6 of `run_ac_pf_stage`: run the flow and capture its tables.
+    Leaves the PF values in the live frames; the caller restores the LP's."""
 
     # 2. Strip VOLL slack generators (defensive — usually already removed
     #    by run_simulation's restore_modelling, but be robust for standalone
@@ -458,7 +515,6 @@ def run_ac_pf_stage(
             # zero-impedance lines, missing slack) does. Surface and re-raise so
             # the caller's `[PHASE] Failed` branch picks it up.
             phase(f"Stage 2: AC PF errored before completion: {exc}")
-            _restore_result_state(network, lopf_snapshot)
             raise
     finally:
         # Revert *_t.p_set so autosave writes a clean network. PyPSA's PF has

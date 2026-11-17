@@ -70,7 +70,7 @@ def _profile_dict():
 
 
 def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
-    granted, rated, site, monkeypatch
+    granted, rated, site, monkeypatch, fake_report
 ):
     from routers import report_jobs
 
@@ -101,23 +101,24 @@ def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
     }
     assert run["stages"]["explore"]["status"] == "skipped" and script.requests == []
     assert run["stages"]["handoff"]["gate"]["passed"] is True
-    # GK B (61) SH-15: no report job is ever enqueued; the stage reads skipped with the reason
-    # (issue 50), in user words: no tracker number reaches the user (UX).
+    # Issue 50 (PF-SAVE-1): the live network keeps the LP's tables after the flow, so the
+    # run's own report is made and passes, and the headline KPIs read back are the LP's.
     report = run["stages"]["report"]
-    assert enqueued == [] and report["status"] == "skipped", report
-    assert "load flow has overwritten" in report.get("reason", ""), report
-    assert "issue" not in report["reason"].lower(), report
-    # GK B SH-15 A1: no LP figure is read back after the flow rewrote the live dispatch (issue 50).
-    assert run["handoff"]["kpis"] == []
-    # GK B (61) condition 7: the receipt names the skipped report with its reason, never a gap.
-    rows = run["handoff"]["coverage"]
-    assert {
-        "part": "Report",
-        "kind": "deliverable",
-        "status": "skipped",
-        "basis": report["reason"],
-    } in rows, rows
-    assert all(r["status"] != "gap" for r in rows), rows
+    assert len(enqueued) == 1 and report["status"] == "passed", report
+    kpis = {k["id"]: k for k in run["handoff"]["kpis"]}
+    assert {k["status"] for k in kpis.values()} == {"read"}, kpis
+    state = PyPSAService.get_solver_state()
+    assert state["condition"] == "lopf+ac_pf_ok" and state["ac_pf_results"] is not None
+    # The LP objective, not the flow's cost (3bus: 61733.46 against 61734.29 before).
+    assert kpis["total_cost"]["value"] == pytest.approx(state["objective"], abs=1e-2), kpis
+    rows = {r["part"]: r["status"] for r in run["handoff"]["coverage"]}
+    assert rows == {
+        "Report": "covered",
+        "Chapter headline_results": "covered",
+        "Chapter dispatch": "covered",
+        "Chapter load_flow": "covered",
+        "Stated targets": "partly",
+    }, rows
 
 
 def test_a_skipped_report_names_its_reason_for_the_report_and_its_chapters(tmp_path):
@@ -166,7 +167,8 @@ def test_a_seeded_overload_fails_the_loading_rule_and_the_run_asks_the_user_with
     assert not [
         s for s in record["steps"] if s["tool"] in ("update_component", "add_component")
     ]
-    assert run["stages"]["report"]["status"] == "skipped"
+    # The run stops at the result gate: no report is made for a failed grid.
+    assert run["stages"]["report"]["status"] == "pending"
 
 
 @pytest.mark.parametrize(

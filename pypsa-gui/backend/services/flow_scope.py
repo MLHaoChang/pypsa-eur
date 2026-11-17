@@ -200,6 +200,10 @@ _OWN_SITE: Preset = {
 _HOSPITAL: Preset = {**_OWN_SITE, "reliability": ("goal_study", "stress")}
 BLANK_PRESET: Final[Preset] = {
     "capacity": _CAPACITY, "commercial": ("tariffs",), "handoff": ("reports",)}
+# The grid templates (study harness 51): a grid study, so the grid card with
+# its load flow, which grid_only@1's setup switches on (SH15-PF-1); no EH
+# reliability study or investment case.
+_GRID: Preset = {**BLANK_PRESET, "grid": ("load_flow",)}
 
 TEMPLATE_PRESETS: Final[dict[str, Preset]] = {
     "eh_datacenter": _DATACENTER, "eh_datacenter_staged": _DATACENTER,
@@ -209,6 +213,7 @@ TEMPLATE_PRESETS: Final[dict[str, Preset]] = {
     # The concentrator (grid-to-process ticket 10): a process plant as the ammonia hub.
     "eh_concentrator_staged": _AMMONIA,
     "eh_ipp_hybrid": _IPP,
+    "3bus": _GRID, "ieee14": _GRID, "belgium": _GRID, "ieee39": _GRID,
 }
 # `eh_site` by its `site_type` (`project_templates/eh_site.SITE_TYPES`).
 SITE_TYPE_PRESETS: Final[dict[str, Preset]] = {

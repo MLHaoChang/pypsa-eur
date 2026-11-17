@@ -734,6 +734,7 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
     _restore_network_revision(PyPSAService.get_active_context(), project_dir)
     results_path = project_dir / "results_state.pkl"
     if not results_path.exists():
+        _keep_lp_dispatch({}, project_name)
         return
     try:
         restored = _safe_unpickle_results(results_path.read_bytes())
@@ -750,10 +751,12 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
                     f"{_RESULTS_STATE_SCHEMA}); skipped. Re-run the solve to "
                     f"repopulate side results (cost / dispatch unaffected).",
                 )
+            _keep_lp_dispatch({}, project_name)
             return
         applied = {k: v for k, v in data.items() if k in _RESULTS_STATE_KEYS}
         if applied:
             _sim_state_update(**applied)
+        _keep_lp_dispatch(applied, project_name)
         with PyPSAService.get_solver_state_lock():
             _map_eh_study_mirror(PyPSAService.get_solver_state())
     except Exception as exc:
@@ -762,6 +765,34 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
             f"Couldn't restore results_state.pkl ({type(exc).__name__}: {exc}). "
             f"Re-run the solve to repopulate side results (cost / dispatch "
             f"unaffected — they come from the netcdf).",
+        )
+        _keep_lp_dispatch({}, project_name)
+
+
+def _keep_lp_dispatch(data: dict, project_name: str, ctx=None) -> None:
+    """PF-SAVE-1 (GK A F5): a project saved before it carries the AC power
+    flow's tables in network.nc. When its record keeps the LP's tables, the
+    LP's win; when it keeps only the flow's, say the dispatch came from the
+    load flow instead of showing it as the LP's. `ctx` defaults to the active
+    context."""
+    ctx = ctx or PyPSAService.get_active_context()
+    lp = data.get("lopf_results")
+    with ctx.mutation_lock:
+        if isinstance(lp, dict) and lp and data.get("ac_pf_results"):
+            from services.ac_pf_service import keep_lp_tables
+            keep_lp_tables(ctx.network, lp)
+            return
+        # The LP never writes |V| and a PF-SAVE-1 save holds it empty, so a
+        # saved |V| means the saved tables are a flow's (standalone or chained).
+        from_flow = "ac_pf" in str(ctx.solver_state.get("condition") or "") or (
+            not ctx.network.buses_t.v_mag_pu.columns.empty
+        )
+    if from_flow:
+        change_log_service.log(
+            "warn", "Project", project_name,
+            "Dispatch saved from load flow: this project's results come from "
+            "the AC power flow, not the LP, and its LP dispatch was not kept. "
+            "Re-run the solve to see the LP dispatch.",
         )
 
 
@@ -3441,6 +3472,10 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str, *, allow_netwo
         ctx.solver_state["condition"] = None
         ctx.solver_state["objective"] = None
         ctx.solver_state["solve_time"] = None
+    _keep_lp_dispatch(
+        {k: ctx.solver_state.get(k) for k in ("lopf_results", "ac_pf_results")},
+        name, ctx,
+    )
 
 
 @router.post("/{project_id}/activate")

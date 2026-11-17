@@ -1156,23 +1156,22 @@ def _grid_only() -> dict:
                             "while the option is off or covers only listed lines."),
             ]},
             "explore": {"skip": "Grid-only runs explore no cases by default."},
-            # GK B (61) SH-15 A1: the stock report reads the live network, which the flow
-            # rewrites, so no report is published until the LP frames are kept (issue 50).
-            "report": {"skip": "No report from grid-only runs yet: the report would read results "
-                               "the load flow has overwritten."},
-            # No `ho.kpis_read`: cost and emissions are read from the live network, which the
-            # solve's AC power flow rewrites (the slack generator's dispatch), so no headline
-            # KPI is read back for this profile until the engine keeps the LP's frames.
-            "handoff": {"actions": [_native("handoff")], "rules": []},
+            # Issue 50 (owner decision PF-SAVE-1): the live network keeps the LP's tables after
+            # the flow, so the report and the headline KPIs read the LP dispatch; the load flow
+            # chapter reads the flow's own result (`retained_results`, source ac_pf).
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
         },
         "tunable": [],
         # No lever to grant: the envelope covers the run's one solve and report, and the
         # L2 round diagnoses (a round with no change ends the loop, §6.2).
-        "envelope": {"edits": [], "runs": [{"tool": "update_solver_config"}, {"tool": "solve_queue_enqueue"}],
+        "envelope": {"edits": [], "runs": [{"tool": "update_solver_config"}, {"tool": "solve_queue_enqueue"},
+                              {"tool": "generate_report"}],
                      "budget": {"solves": 1, "rounds": 2, "wall_time_h": 8.0}},
-        "kpis": [],
-        "chapters": [],
-        "missing_tools": ["headline KPIs after an AC power flow (the flow rewrites the live dispatch)"],
+        "kpis": copy.deepcopy(EH_SITE["kpis"]),
+        # The network-study chapters (`reports.network_chapters`) a grid study rests on.
+        "chapters": ["headline_results", "dispatch", "load_flow"],
+        "missing_tools": [],
     }
 
 

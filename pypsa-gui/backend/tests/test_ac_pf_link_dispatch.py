@@ -76,15 +76,23 @@ def test_ac_pf_keeps_the_lp_link_flow(multi_period, efficiency2):
     out = run_ac_pf_stage(n, SolverConfig(), queue.Queue())
 
     assert out["ac_pf_converged_count"] == out["ac_pf_total_snapshots"]
+    pf = out["ac_pf_results"]
     for p in ports:
-        np.testing.assert_allclose(n.links_t[p]["poc"], lp[p], atol=1e-9, err_msg=p)
+        np.testing.assert_allclose(pf[f"links_t.{p}"]["poc"], lp[p], atol=1e-9, err_msg=p)
+        # PF-SAVE-1: every port's LP flow is kept, exactly, live and under lopf.
+        pd.testing.assert_series_equal(n.links_t[p]["poc"], lp[p], check_exact=True)
+        pd.testing.assert_series_equal(
+            out["lopf_results"][f"links_t.{p}"]["poc"], lp[p], check_exact=True
+        )
     # The grid bus is a sub-network of its own: its slack serves exactly the import.
-    np.testing.assert_allclose(n.generators_t.p["grid_import"], lp["p0"], atol=1e-9)
+    np.testing.assert_allclose(pf["generators_t.p"]["grid_import"], lp["p0"], atol=1e-9)
     # The site slack moves from its LP dispatch by the feeder's AC losses only
     # (the LP has none), never by the import.
-    loss = _feeder_loss(n)
+    loss = pf["lines_t.p0"]["feeder"] + pf["lines_t.p1"]["feeder"]
     assert (loss > 0).all() and (loss < 0.01).all()
-    np.testing.assert_allclose(n.generators_t.p["site_backup"] - lp_backup, loss, atol=1e-6)
+    np.testing.assert_allclose(pf["generators_t.p"]["site_backup"] - lp_backup, loss, atol=1e-6)
+    # PF-SAVE-1: the live network keeps the LP dispatch, not the flow's.
+    pd.testing.assert_series_equal(n.generators_t.p["site_backup"], lp_backup, check_exact=True)
     # The dispatch fix is reverted, so the next LOPF is not pinned.
     assert "poc" not in n.links_t.p_set.columns
 
