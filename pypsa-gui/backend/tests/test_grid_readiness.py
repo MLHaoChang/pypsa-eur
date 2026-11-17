@@ -643,7 +643,7 @@ def test_the_reactive_range_counts_gfm_and_gfl_qu_units_at_rated_p(tmp_path):
     # bess_new (gfm_droop) is extendable and unsized: only the 4 MW PV counts so far
     assert row["project_value"] == pytest.approx(4.0 * math.tan(math.acos(0.95)), rel=1e-4)
     assert row["limit"] == pytest.approx(0.48 * 40.0)
-    assert row["verdict"] == "unknown" and "bess_new" in row["note"]
+    assert row["verdict"] == "unknown" and "\u201cBESS new\u201d" in row["note"]
     n.storage_units.at["bess_new", "p_nom_extendable"] = False
     n.storage_units.at["bess_new", "p_nom"] = 60.0
     row = _rows(G.grid_readiness(d, n, PROFILE))["reactive_range"]
