@@ -115,10 +115,12 @@ def _no_uri(obj: Any, depth: int = 0) -> None:
             _no_uri(v, depth + 1)
 
 
-def _extras_capped(obj: Any, depth: int = 0) -> None:
-    """Every `extras` value, wherever it is, encodes to at most MAX_EXTRAS_BYTES. It is never read further."""
-    if depth > 64:
-        raise _bad("depth", "the document nests too deep")
+def _extras_capped(obj: Any) -> None:
+    """Every `extras` value, wherever it is, encodes to at most MAX_EXTRAS_BYTES. It is never read further.
+
+    It runs after `_no_uri`, which walks every path this walks and has already
+    refused any nesting past 64, so it needs no depth guard of its own.
+    """
     if isinstance(obj, dict):
         for k, v in obj.items():
             if k == "extras":
@@ -126,10 +128,10 @@ def _extras_capped(obj: Any, depth: int = 0) -> None:
                 if size > MAX_EXTRAS_BYTES:
                     raise _limit("extras_bytes", MAX_EXTRAS_BYTES, size)
             else:
-                _extras_capped(v, depth + 1)
+                _extras_capped(v)
     elif isinstance(obj, list):
         for v in obj:
-            _extras_capped(v, depth + 1)
+            _extras_capped(v)
 
 
 class _Duplicate(ValueError):
@@ -221,11 +223,9 @@ def _views(doc: dict[str, Any], blob: bytes) -> list[tuple[int, int, int | None]
                 raise _bad("bounds", "a bufferView's offset or length is invalid")
         if off + ln > buffers[0]["byteLength"]:
             raise _bad("bounds", "a bufferView runs past its buffer")
+        # A bool is 0 or 1, outside the grid, so it needs no check of its own.
         if stride is not None and (
-            not isinstance(stride, int)
-            or isinstance(stride, bool)
-            or not 4 <= stride <= 252
-            or stride % 4
+            not isinstance(stride, int) or not 4 <= stride <= 252 or stride % 4
         ):
             raise _bad("bounds", "a bufferView's stride is invalid")
         out.append((off, ln, stride))
@@ -376,7 +376,8 @@ def parse(data: bytes) -> list[Node]:
             raise _bad("json", "a node's children is not a list")
         for c in kids:
             c = _int(c, "a child", len(nodes))
-            if c == i or c in parent:
+            # A node that is its own child is a cycle, refused by the depth walk below.
+            if c in parent:
                 raise _bad("graph", "the node graph is not a tree")
             parent[c] = i
     budget = [MAX_PRIMITIVES, MAX_VERTICES, 3 * MAX_TRIANGLES]

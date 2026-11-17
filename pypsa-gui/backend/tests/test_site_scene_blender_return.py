@@ -17,8 +17,10 @@ import uuid
 
 import pytest
 
-from services.site_scene import blender_job, export, proposals
+from services.site_scene import blender_job, export, glb_read, proposals
+from services.site_scene import blender_return as br
 from services.site_scene import blender_worker as bw
+from services.site_scene.contract import SceneError
 from tests.test_site_scene_blender_job import geo  # noqa: F401 - fixture
 from tests.test_site_scene_export import _scene_with_buildings
 from tests.test_site_scene_routes import BOX, _kind, _propose
@@ -461,3 +463,117 @@ def test_the_client_cannot_supply_the_reviewed_hash_itself(client, geo):
         },
     )
     assert (r.status_code, _kind(r)) == (422, "invalid_input")
+
+
+# ── GK B G2: each guard of the comparison at its exact boundary ─────────────
+
+FOOT = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]
+PIVOT = (5.0, 0.0, -5.0)  # glTF (e, 0, -n) of the footprint's centre
+
+
+def _prism(h=8.0):
+    return tuple((x - 5.0, y, -(n - 5.0)) for x, n in FOOT for y in (0.0, h))
+
+
+def _yaw(deg):
+    h = math.radians(deg) / 2
+    return (0.0, math.sin(h), 0.0, math.cos(h))
+
+
+def _one(t=PIVOT, q=(0.0, 0.0, 0.0, 1.0), h=8.0):
+    """(reason, changes, buildings) for one building whose node comes back as given."""
+    b = {"id": "b", "height_m": 8.0, "footprint": FOOT}
+    want = {br._key(p) for p in _prism()}
+    node = glb_read.Node(0, None, "b", t, q, _prism(h))
+    changes, buildings = [], []
+    reason = br._apply_one(b, want, PIVOT, node, changes, buildings)
+    return reason, changes, buildings
+
+
+def test_a_z_only_tilt_is_tilted():
+    assert _one(q=(0.0, 0.0, math.sin(0.1), math.cos(0.1)))[0] == "tilted"
+
+
+@pytest.mark.parametrize("axis", [0, 2])
+def test_a_tilt_exactly_at_the_tolerance_is_not_tilted(axis):
+    q = [0.0, 0.0, 0.0, math.sqrt(1 - br.TILT_TOLERANCE**2)]
+    q[axis] = br.TILT_TOLERANCE
+    assert _one(q=tuple(q)) == (
+        None,
+        [],
+        [{"id": "b", "height_m": 8.0, "footprint": FOOT}],
+    )
+
+
+def test_a_lift_exactly_at_the_tolerance_is_not_lifted(monkeypatch):
+    monkeypatch.setattr(br, "TOLERANCE_M", 0.25)  # exact in binary
+    assert _one(t=(5.0, 0.25, -5.0))[0] is None
+
+
+def test_a_move_and_a_height_change_exactly_at_the_tolerance_are_no_change(
+    monkeypatch,
+):
+    monkeypatch.setattr(br, "TOLERANCE_M", 0.25)
+    assert _one(t=(5.25, 0.0, -5.0))[1] == []
+    assert _one(h=8.25)[1] == []
+
+
+def test_a_turn_exactly_at_the_tolerance_is_a_change(monkeypatch):
+    q = _yaw(0.02)
+    monkeypatch.setattr(br, "TURN_TOLERANCE_DEG", abs(br._yaw_deg(q)))
+    assert len(_one(q=q)[1]) == 1
+
+
+def test_a_move_with_no_turn_is_a_change():
+    reason, changes, (nb,) = _one(t=(7.0, 0.0, -5.0))
+    assert reason is None
+    assert changes == [
+        {
+            "id": "b",
+            "moved_m": 2.0,
+            "turned_deg": 0.0,
+            "height_m": {"before": 8.0, "after": 8.0},
+        }
+    ]
+    assert nb["footprint"] == [[x + 2, y] for x, y in FOOT]
+
+
+def test_a_30_degree_turn_with_no_move_turns_the_footprint_about_its_pivot():
+    reason, changes, (nb,) = _one(q=_yaw(30.0))
+    assert reason is None and changes[0]["moved_m"] == 0.0
+    assert changes[0]["turned_deg"] == 30.0
+    c, s = math.cos(math.radians(30)), math.sin(math.radians(30))
+    want = [
+        [5 + c * (x - 5) - s * (y - 5), 5 + s * (x - 5) + c * (y - 5)] for x, y in FOOT
+    ]
+    got = [c for p in nb["footprint"] for c in p]
+    assert got == pytest.approx([c for p in want for c in p])
+
+
+def test_an_equipment_node_is_named_and_not_applied():
+    features = [
+        {
+            "id": "eq",
+            "kind": "equipment",
+            "positions": [(0, 0, 0)],
+            "translation": PIVOT,
+        },
+        {"id": "x", "kind": "building", "positions": [(0, 0, 0)], "translation": PIVOT},
+    ]
+    nodes = [
+        glb_read.Node(i, None, fid, PIVOT, (0, 0, 0, 1), ((0, 0, 0),))
+        for i, fid in enumerate(("eq", "x"))
+    ]
+    buildings, review = br.compare({"buildings": []}, features, nodes)
+    assert buildings == [] and review["changes"] == []
+    assert review["unknowns"] == [
+        {"id": "eq", "reason": "equipment_not_applied"},
+        {"id": "x", "reason": "not_a_building"},
+    ]
+
+
+def test_a_snapshot_behind_the_scene_is_stale():
+    base = {"revision": 2, "generation": "g1", "generation_sha256": "0" * 64}
+    with pytest.raises(SceneError) as e:
+        br.check_base(dict(base), dict(base), {"revision": 3})
+    assert (e.value.kind, e.value.detail["field"]) == ("revision_conflict", "revision")

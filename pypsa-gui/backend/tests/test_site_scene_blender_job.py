@@ -563,3 +563,53 @@ def test_an_oversized_meta_json_is_404(geo):
     with pytest.raises(SceneError) as e:
         blender_job.read_artifact(geo, "campus", aid)
     assert e.value.kind == "not_found"
+
+
+# ── GK B G2: read_return's refusals ─────────────────────────────────────────
+
+
+def _stored(tmp_path, glb=b"0123456789"):
+    aid = str(uuid.uuid4())
+    meta = {"artifact_id": aid, "site_id": "campus"}
+    blender_job._store(tmp_path, aid, bw.Result(glb, b"b", ""), meta)
+    return aid
+
+
+def test_a_return_at_its_cap_is_read_and_one_byte_over_is_a_typed_limit(tmp_path):
+    aid = _stored(tmp_path)
+    assert blender_job.read_return(tmp_path, "campus", aid, 10)[0] == b"0123456789"
+    with pytest.raises(SceneError) as e:
+        blender_job.read_return(tmp_path, "campus", aid, 9)
+    assert e.value.kind == "resource_limit"
+    assert e.value.detail == {"limit": "return_bytes", "max": 9}
+
+
+def test_a_return_with_no_glb_is_not_found(tmp_path):
+    aid = _stored(tmp_path)
+    (blender_job.artifact_dir(tmp_path, aid) / "scene.glb").unlink()
+    with pytest.raises(SceneError) as e:
+        blender_job.read_return(tmp_path, "campus", aid, 10)
+    assert e.value.kind == "not_found"
+
+
+def test_an_io_error_reading_the_return_is_not_found(tmp_path, monkeypatch):
+    aid = _stored(tmp_path)
+
+    def broken(work, name, cap):
+        if name == "scene.glb":
+            raise OSError(5, "Input/output error")
+        return real(work, name, cap)
+
+    real = bw._read_output
+    monkeypatch.setattr(bw, "_read_output", broken)
+    with pytest.raises(SceneError) as e:
+        blender_job.read_return(tmp_path, "campus", aid, 10)
+    assert e.value.kind == "not_found"
+
+
+def test_a_meta_json_that_is_not_an_object_is_not_found(tmp_path):
+    aid = _stored(tmp_path)
+    (blender_job.artifact_dir(tmp_path, aid) / "meta.json").write_text("[]")
+    with pytest.raises(SceneError) as e:
+        blender_job.read_return(tmp_path, "campus", aid, 10)
+    assert e.value.kind == "not_found"
