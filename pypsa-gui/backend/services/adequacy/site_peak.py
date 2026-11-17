@@ -479,6 +479,8 @@ def snapshot_words(snap) -> str:
     ``(period, timestamp)`` snapshot gives its timestamp (DC walkthrough 02:
     never the tuple's Python text)."""
     ts = snap[-1] if isinstance(snap, tuple) else snap
+    if not isinstance(ts, (pd.Timestamp, np.datetime64)) and not hasattr(ts, "strftime"):
+        return str(ts)   # an integer or text snapshot index (GK A D3)
     return pd.Timestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
@@ -488,7 +490,10 @@ def describe(row: dict) -> str:
     shown = f" (× {eff:.4g} efficiency)" if abs(eff - 1.0) > 1e-12 else ""
     # A source that adds nothing is left out of the words (no gensets on a
     # Battery-backup site: DC walkthrough 02).
-    sources = [f for f in row["firm"] if f["mw"] > 0]
-    firm = "".join(f" plus {f['mw']:g} MW of firm {f['source']} ({f['rule']})" for f in sources)
+    # An unknown (NaN) size is said, not dropped (GK A D4).
+    sources = [f for f in row["firm"] if not f["mw"] <= 0]
+    firm = "".join(
+        f" plus {'an unknown amount' if f['mw'] != f['mw'] else format(f['mw'], 'g') + ' MW'} "
+        f"of firm {f['source']} ({f['rule']})" for f in sources)
     return (f"the {row['energized_mw']:g} MW energized import{shown}{firm} "
             f"= {row['cap_mw']:.4g} MW")

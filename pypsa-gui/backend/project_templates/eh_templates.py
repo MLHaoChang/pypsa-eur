@@ -709,17 +709,10 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
     the plan could only shed (gatekeeper review of DC grid readiness 01).
     The one check the grid-readiness scorecard also reports
     (``services.adequacy.site_peak.peak_check``)."""
-    from services.adequacy.site_peak import describe, peak_check, unset_periods
+    from services.adequacy.site_peak import describe
     from services.dc_load_profile import DcLoadError
 
-    if planning is None:
-        n = BUILDERS[template_id](load_spec=spec)
-    else:
-        n = BUILDERS[template_id](load_spec=spec, planning=planning)
-    # A period whose energization is a placeholder is unknown, never refused.
-    unset = unset_periods(template_meta(template_id, planning, load_spec=spec))
-    rows = peak_check(n, island_config(template_id, planning, load_spec=spec), unset=unset)
-    over = [r for r in rows if r["headroom_mw"] is not None and r["headroom_mw"] < -1e-9]
+    n, over = _peak_over(template_id, spec, planning)
     if not over:
         return
     row = over[0]
@@ -727,27 +720,69 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
     week = " of the modelled week" if isinstance(n.snapshots, pd.MultiIndex) else ""
     words = (f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
              f"{row['binding_snapshot']}{week}), above {describe(row)}.")
-    raise DcLoadError(words + _peak_ways_out(spec, over, single=len(spec.phases) == 1 and not week),
+    most = None
+    if spec.backup.mode == "bess" and len(spec.phases) == 1 and not week:
+        most = _largest_fitting_it(template_id, spec, planning, over)
+    raise DcLoadError(words + _peak_ways_out(spec, most, single=len(spec.phases) == 1 and not week),
                       "dc_load.phases")
 
 
-def _peak_ways_out(spec, over: list[dict], *, single: bool) -> str:
-    """Why the peak is refused and each way out, with its number (DC grid-readiness
-    walkthrough 01). The load scales with the IT load (``dc_load_profile.hourly_profile``)
-    and, without ride-through shaving, the cap does not, so the largest IT load that fits is
-    IT × min(cap / load); with shaving the cap moves with the load and no number is given."""
+def _peak_over(template_id: str, spec, planning: Planning | None = None):
+    """The built network and the periods whose peak is above the cap
+    (``site_peak.peak_check``; an unset energization is unknown, never over)."""
+    from services.adequacy.site_peak import peak_check, unset_periods
+
+    if planning is None:
+        n = BUILDERS[template_id](load_spec=spec)
+    else:
+        n = BUILDERS[template_id](load_spec=spec, planning=planning)
+    unset = unset_periods(template_meta(template_id, planning, load_spec=spec))
+    rows = peak_check(n, island_config(template_id, planning, load_spec=spec), unset=unset)
+    return n, [r for r in rows if r["headroom_mw"] is not None and r["headroom_mw"] < -1e-9]
+
+
+#: The New project form takes the IT load in decimals; the way out names it to this step (MW).
+IT_STEP_MW = 0.1
+
+
+def _largest_fitting_it(template_id: str, spec, planning, over: list[dict]) -> float:
+    """The largest IT load, on the form's 0.1 MW step, whose peak fits: a bisection
+    on the same check (GK A D1: the load is not exactly proportional to the IT
+    load, so the linear IT × cap / load overstates it). 0 when none fits. The
+    linear figure brackets it from above, so ~6 builds of the network."""
     import math
 
+    def fits(it_mw: float) -> bool:
+        phase = spec.phases[0].model_copy(update={"it_mw": it_mw})
+        return not _peak_over(template_id, spec.model_copy(update={"phases": [phase]}), planning)[1]
+
+    steps = lambda mw: int(math.floor(mw / IT_STEP_MW + 1e-9))  # noqa: E731
+    it = float(spec.phases[0].it_mw)
+    ratio = min(r["cap_mw"] / r["load_mw"] for r in over if r["load_mw"] > 0)
+    lo, hi = 0, min(steps(it * ratio) + 1, int(math.ceil(it / IT_STEP_MW - 1e-9)))  # lo fits (0 MW), hi refused
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if fits(mid * IT_STEP_MW):
+            lo = mid
+        else:
+            hi = mid
+    return round(lo * IT_STEP_MW, 1)
+
+
+def _peak_ways_out(spec, most: float | None, *, single: bool) -> str:
+    """Why the peak is refused and each way out (DC grid-readiness walkthrough 01).
+    ``most`` is the largest IT load that fits (``_largest_fitting_it``), searched for
+    Battery backup only: with gensets the firm cap may move with the IT load, so no
+    number is given (GK A D1). 0 says no IT load fits."""
     bess = spec.backup.mode == "bess"
     out = (" Battery strings carry outages only, so the normal peak must fit the import."
            if bess else "")
     ways = []
-    shaved = any(f["mw"] > 0 for r in over for f in r["firm"][1:])
-    if single and not shaved:
-        it = float(spec.phases[0].it_mw)
-        most = math.floor(it * min(r["cap_mw"] / r["load_mw"] for r in over) + 1e-9)
-        if most >= 1:
-            ways.append(f"set IT load to at most {most} MW")
+    if most is not None:
+        if most > 0:
+            ways.append(f"set IT load to at most {most:g} MW")
+        else:
+            out += " No IT load fits the energized import."
     if bess:
         ways.append("pick Hybrid backup" if single else "pick Hybrid or Gensets backup")
     ways.append("raise the connection after you create the project" if single
