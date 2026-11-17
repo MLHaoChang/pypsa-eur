@@ -185,6 +185,67 @@ def test_slack_generators_are_not_sized_assets(name, carrier):
     assert [a["name"] for a in R.sizing_summary_from_network(n)["assets"]] == ["pv_new"]
 
 
+@pytest.mark.parametrize("carrier", ["dsr", "demand_response"])
+@pytest.mark.parametrize("component", ["StorageUnit", "Store"])
+def test_dsr_modelled_as_storage_is_a_sized_asset(component, carrier):
+    """GK A 30 2: only a slack GENERATOR is dropped. DSR modelled as a
+    StorageUnit or a Store, with a slack carrier or a ``__voll`` name, is a
+    unit the study sized and stays a row."""
+    n = _ens_network()
+    n.add("Carrier", carrier)
+    if component == "StorageUnit":
+        n.add(
+            "StorageUnit",
+            "__voll_flex",
+            bus="b",
+            carrier=carrier,
+            p_nom_extendable=True,
+            max_hours=2.0,
+        )
+        n.storage_units.loc["__voll_flex", "p_nom_opt"] = 3.0
+    else:
+        n.add("Store", "__voll_flex", bus="b", carrier=carrier, e_nom_extendable=True)
+        n.stores.loc["__voll_flex", "e_nom_opt"] = 6.0
+    n._objective = 1.0
+    rows = R.sizing_summary_from_network(n)["assets"]
+    assert [(a["component"], a["name"], a["carrier"]) for a in rows] == [
+        (component, "__voll_flex", carrier)
+    ]
+
+
+def test_a_multi_period_asset_is_one_row_per_build():
+    """GK A 30 3: on a multi-period network each asset has one ``*_opt``,
+    so one row with that size; a later build is its own asset and row."""
+    n = _ens_network()
+    n.set_investment_periods([2030, 2040])
+    assert n.has_investment_periods
+    n.add(
+        "Generator",
+        "pv_2030",
+        bus="b",
+        carrier="solar",
+        p_nom_extendable=True,
+        build_year=2030,
+        lifetime=30,
+    )
+    n.add(
+        "Generator",
+        "pv_2040",
+        bus="b",
+        carrier="solar",
+        p_nom_extendable=True,
+        build_year=2040,
+        lifetime=30,
+    )
+    n.generators.loc[["pv_2030", "pv_2040"], "p_nom_opt"] = [5.0, 2.0]
+    n._objective = 1.0
+    rows = R.sizing_summary_from_network(n)["assets"]
+    assert [(a["name"], a["built_mw"]) for a in rows] == [
+        ("pv_2030", 5.0),
+        ("pv_2040", 2.0),
+    ]
+
+
 def test_a_sized_storage_with_no_duration_has_no_energy():
     """GK A 30 A7 survivor: a built storage unit whose max_hours is not a
     finite number has no MWh, rather than failing the summary."""

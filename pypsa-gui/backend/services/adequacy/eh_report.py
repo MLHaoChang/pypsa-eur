@@ -45,6 +45,16 @@ EXPORT_KEYS: tuple[str, ...] = (
 )
 
 
+#: Carriers of the VOLL / load-shedding / demand-response slack GENERATORS the
+#: solve adds: never a unit anyone sized or installed.
+_SLACK_CARRIERS = frozenset({"voll", "load_shedding", "dsr", "demand_response"})
+
+
+def _is_slack(name: Any, carrier: str) -> bool:
+    """A slack generator, by its ``__voll`` name or its carrier."""
+    return str(name).startswith("__voll") or carrier in _SLACK_CARRIERS
+
+
 def sizing_summary_from_network(n) -> dict[str, Any]:
     """Installed p_nom by generator carrier (MVP-A sizing section)."""
     by_carrier: dict[str, float] = {}
@@ -53,8 +63,7 @@ def sizing_summary_from_network(n) -> dict[str, Any]:
         for name, row in n.generators.iterrows():
             # Skip VOLL / DSR slack generators if tagged.
             carrier = str(row.get("carrier", "") or "")
-            if str(name).startswith("__voll") or carrier in {
-                    "voll", "load_shedding", "dsr", "demand_response"}:
+            if _is_slack(name, carrier):
                 continue
             try:
                 p_nom = float(row.get("p_nom", 0.0) or 0.0)
@@ -99,7 +108,9 @@ def sized_assets(n) -> list[dict[str, Any]]:
     (an infinite or non-finite figure reads None). A storage unit adds its
     energy (``built_mw × max_hours``); a store has no MW, only MWh; a link's
     MW is on its bus0 side (``basis``). One size per asset: on a
-    multi-period network ``*_opt`` is the asset's single build. On a network
+    multi-period network PyPSA keeps one ``*_opt`` per asset (a build in
+    another period is another asset, with its own ``build_year``), so each
+    row is that asset's one build. On a network
     that was not solved the built figures are None, never ``p_nom`` shown as
     built (``solved``) (walkthrough asset-investment 03, GK A 30 A5)."""
     solved = bool(getattr(n, "is_solved", False))
@@ -111,8 +122,9 @@ def sized_assets(n) -> list[dict[str, Any]]:
             continue
         for name, row in df[df[ext].fillna(False).astype(bool)].iterrows():
             carrier = str(row.get("carrier", "") or "")
-            if component == "Generator" and (str(name).startswith("__voll") or carrier in {
-                    "voll", "load_shedding", "dsr", "demand_response"}):
+            # Only a GENERATOR is slack: DSR modelled as a StorageUnit or a
+            # Store is a sized asset and stays a row (GK A 30 2).
+            if component == "Generator" and _is_slack(name, carrier):
                 continue
             unit = "mw" if stem == "p" else "mwh"
             out: dict[str, Any] = {

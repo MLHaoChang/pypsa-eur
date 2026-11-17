@@ -424,15 +424,28 @@ def _goal_block(metrics: dict, target: dict, target_horizon) -> dict | None:
 
 
 def _installed(n, name: str) -> dict | None:
-    """A generator's installed capacity and which figure it is: ``p_nom_opt``
-    when it is extendable and the network is solved, else ``p_nom`` (GK A 30,
-    A6); None when the network has no such generator."""
+    """A generator's installed capacity as the MC samples it: ``mw`` is
+    ``copt.solved_capacity`` (the one capacity rule, never a second copy) and
+    ``basis`` names the figure it is (GK A 30 A6, GK B3 1):
+
+    - ``p_nom_opt``: the solved size (or PyPSA's copy of a fixed p_nom);
+    - ``not_built``: an extendable unit the solve declined, or one no solve
+      has sized (PyPSA's 0.0 default): 0 MW, never its p_nom;
+    - ``p_nom``: the nameplate, when there is no solved size.
+
+    ``mw`` is None when the unit has no finite size at all; the result is
+    None when the network has no such generator."""
+    from services.adequacy.copt import _finite_at, _is_extendable, solved_capacity
+
     gens = n.generators
     if name not in gens.index:
         return None
     row = gens.loc[name]
-    if bool(row.get("p_nom_extendable", False)) and bool(getattr(n, "is_solved", False)):
-        opt = row.get("p_nom_opt")
-        if opt is not None and opt == opt:
-            return {"mw": float(opt), "basis": "p_nom_opt"}
-    return {"mw": float(row.get("p_nom", 0.0) or 0.0), "basis": "p_nom"}
+    mw = solved_capacity(row)
+    if _is_extendable(row) and _finite_at(row, "p_nom_opt") is not None:
+        return {"mw": mw, "basis": "p_nom_opt" if mw > 0 else "not_built"}
+    for col in ("p_nom_opt", "p_nom"):
+        v = _finite_at(row, col)
+        if v is not None and v > 0:
+            return {"mw": mw, "basis": col}
+    return {"mw": mw if _finite_at(row, "p_nom") is not None else None, "basis": "p_nom"}

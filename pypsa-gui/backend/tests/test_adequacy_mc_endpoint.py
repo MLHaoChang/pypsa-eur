@@ -805,13 +805,16 @@ def test_mc_without_draws_takes_the_goals_and_names_its_source(client, install_n
     assert body["result"]["draws"]["first_batch"] == DRAWS
 
 
-def test_installed_reads_the_solved_size_only_when_there_is_one():
-    """GK A 30 A6 / A7 survivors: `p_nom_opt` for an extendable generator on
-    a solved network; a NaN size, an unsolved network or a fixed unit read
-    `p_nom`; an unknown name is None."""
+def test_installed_is_the_capacity_the_mc_draws_with_its_basis():
+    """GK A 30 A6 / GK B3 1: `mw` is `copt.solved_capacity` (the size the MC
+    samples), and `basis` names the figure it is. An extendable unit the
+    solve declined, or one no solve has sized (PyPSA's 0.0 default), is 0 MW
+    `not_built`, never its p_nom. A unit with no finite size reads null; an
+    unknown name is None."""
     import pandas as pd
     import pypsa
 
+    from services.adequacy.copt import solved_capacity
     from services.adequacy.mc_loop_runner import _installed
 
     n = pypsa.Network()
@@ -819,13 +822,26 @@ def test_installed_reads_the_solved_size_only_when_there_is_one():
     n.add("Bus", "b")
     n.add("Generator", "wind", bus="b", p_nom=4.0, p_nom_extendable=True)
     n.add("Generator", "fixed", bus="b", p_nom=5.0)
+    # Unsolved: p_nom_opt is PyPSA's 0.0 default.
+    assert _installed(n, "wind") == {"mw": 0.0, "basis": "not_built"}
+    assert _installed(n, "fixed") == {"mw": 5.0, "basis": "p_nom"}
     n.generators.loc["wind", "p_nom_opt"] = 6.0
-    n.generators.loc["fixed", "p_nom_opt"] = 9.0
-    n._objective = None
-    assert _installed(n, "wind") == {"mw": 4.0, "basis": "p_nom"}
+    n.generators.loc["fixed", "p_nom_opt"] = 5.0
     n._objective = 1.0
     assert _installed(n, "wind") == {"mw": 6.0, "basis": "p_nom_opt"}
-    assert _installed(n, "fixed") == {"mw": 5.0, "basis": "p_nom"}
+    assert _installed(n, "fixed") == {"mw": 5.0, "basis": "p_nom_opt"}
+    # Declined by the solve: 0 MW, not the 4 MW nameplate.
+    n.generators.loc["wind", "p_nom_opt"] = 0.0
+    assert _installed(n, "wind") == {"mw": 0.0, "basis": "not_built"}
+    # No solved size at all: the MC's p_nom fallback, named as such.
     n.generators.loc["wind", "p_nom_opt"] = float("nan")
     assert _installed(n, "wind") == {"mw": 4.0, "basis": "p_nom"}
+    # Nothing finite: null, with the figure it would have read.
+    n.generators.loc["fixed", ["p_nom", "p_nom_opt"]] = [float("inf"), float("nan")]
+    assert _installed(n, "fixed") == {"mw": None, "basis": "p_nom"}
+    # Every finite answer is the MC's own capacity, never a second rule.
+    for name in ("wind", "fixed"):
+        got = _installed(n, name)["mw"]
+        if got is not None:
+            assert got == solved_capacity(n.generators.loc[name])
     assert _installed(n, "nope") is None
