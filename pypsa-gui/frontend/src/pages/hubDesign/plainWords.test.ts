@@ -70,10 +70,17 @@ describe('plainWords', () => {
 
 describe('plainWords: the dominant-risk line names the unit in plain words (UX audit M5)', () => {
   it('a raw id before "carries … of ranked Link risk" becomes its display name', () => {
+    // The share is of the ranked connections only: the plain line keeps
+    // that scope (asset-investment walkthrough 2026-11-17, issue 04).
     expect(plainWords('site_transformer carries 100% of ranked Link risk'))
-      .toBe('Site transformer accounts for 100% of the outage risk')
+      .toBe('Site transformer accounts for 100% of the outage risk from connections')
     expect(plainWords('grid_import carries 62.5% of ranked Link risk'))
-      .toBe('Grid import accounts for 62.5% of the outage risk')
+      .toBe('Grid import accounts for 62.5% of the outage risk from connections')
+  })
+  it('leads with the share of all ranked risk when the review states it', () => {
+    // Hand check: 657,000 / (657,000 + 3 × 302,114) = 42 %.
+    expect(plainWords('hospital_feeder carries 100% of ranked Link risk (42% of all ranked risk)'))
+      .toBe('Hospital feeder accounts for 42% of the ranked outage risk (all of the risk from connections)')
   })
 })
 

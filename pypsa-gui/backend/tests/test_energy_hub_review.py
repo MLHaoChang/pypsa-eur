@@ -347,3 +347,49 @@ def test_review_reports_a_knee_from_three_points():
     out = review_report(_frontier_report(3))
     ids = [f.get("id") for f in (out.get("findings") or [])]
     assert "frontier_knee" in ids, ids
+
+
+# ── asset-investment walkthrough 2026-11-17, issue 04 ───────────────────────
+# Island Microgrid: the hospital's only feeder is the one ranked Link, beside
+# three diesels in the class-A ranking. Hand check: 657,000 / (657,000 +
+# 3 × 302,114) = 42 % of all ranked risk, though 100 % of the Link risk.
+def _island_fmea_report(*, critical_feeder: bool = True):
+    rep = _report()
+    rep["sections"]["fmea_top"] = {"status": "ok", "payload": {
+        "rows": [{"name": "hospital_feeder",
+                  "criticality_eur_per_year": 657_000.0}],
+        "class_a": {"status": "ok", "rows": [
+            {"name": f"diesel_{i}", "criticality_eur_per_year": 302_114.0}
+            for i in (1, 2, 3)]}}}
+    cert = rep["sections"].setdefault("certification", {
+        "status": "ok", "payload": {}})
+    cert.setdefault("payload", {})["fleet_scope"] = {"critical_feeders": [
+        {"name": "hospital_feeder", "buses": ["hospital"]}]
+        if critical_feeder else []}
+    return rep
+
+
+def test_dominant_link_states_its_share_of_all_ranked_risk():
+    dom = _by_id(review_report(_island_fmea_report(), RECORD),
+                 "fmea_dominant_mode")
+    assert dom["title"] == ("hospital_feeder carries 100% of ranked Link risk "
+                            "(42% of all ranked risk)")
+    assert dom["evidence"]["share"] == pytest.approx(1.0)
+    assert dom["evidence"]["share_of_all_ranked"] == pytest.approx(0.42, abs=0.005)
+
+
+def test_a_critical_feeder_gets_a_feeder_remedy_not_generic_spare_capacity():
+    # A spare unit or storage on the island cannot serve the hospital while
+    # its only feeder is out: the remedy is a second feeder or local backup.
+    dom = _by_id(review_report(_island_fmea_report(), RECORD),
+                 "fmea_dominant_mode")
+    rec = dom["recommendation"]
+    assert "second feeder" in rec and "hospital" in rec
+    assert "N+1" not in rec
+    assert dom["actions"] == []
+
+
+def test_a_dominant_link_that_feeds_no_critical_bus_keeps_the_redundancy_rerun():
+    dom = _by_id(review_report(_island_fmea_report(critical_feeder=False),
+                               RECORD), "fmea_dominant_mode")
+    assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
