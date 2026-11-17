@@ -2147,10 +2147,15 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
     (``_ic_growth_flags``). On a run's own step (`assistant_tasks.RUN_CONTEXT` set,
     study harness 14) the case never re-solves the baseline: the envelope counts
     no solve for it, and a kept asset added after its admission is refused here,
-    under the lock that plans it (`baseline_solve`)."""
+    under the lock that plans it (`baseline_solve`), unless the run's grant
+    reserved the baseline's solves at the case's admission (study harness 36,
+    GK B (60) A2: `run_envelope.case_baseline_reserved`)."""
     from services import assistant_tasks
 
     in_run = assistant_tasks.RUN_CONTEXT.get() is not None
+    if in_run:
+        from services import harness_locks, run_envelope
+        in_run = not run_envelope.case_baseline_reserved(harness_locks.in_run())
 
     def build():
         from models.finance import FinanceInputs

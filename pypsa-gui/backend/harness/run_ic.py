@@ -13,6 +13,7 @@ The case solves no LP, so the step reserves and spends no solve."""
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 
@@ -38,10 +39,29 @@ TIMED_OUT = (
 # `uncertain` and stops the run, as before. A step without it is unchanged.
 ON_END, CHAPTER_GAP = "on_end", "chapter_gap"
 JUDGED = "report"
+# O4: a gap step's error is its typed kind and fixed user words, plus the
+# case's own error code when it is one (never its raw error text or a path).
+GAP_KINDS = {
+    "refused": ("ic_case_refused", "the investment case was refused for its inputs"),
+    "failed": ("ic_case_failed", "the investment case failed"),
+    "aborted": ("ic_case_aborted", "the investment case was stopped before it finished"),
+}
 WALL_TIME_KIND = "ic_wall_time"
-WALL_TIME = (
-    f"{WALL_TIME_KIND}: the investment case did not finish within the run's wall time."
+WALL_TIME = f"{WALL_TIME_KIND}: the investment case did not finish within the run's wall time."
+BUDGET_KIND = "ic_budget"  # `run_envelope.IC_BUDGET_KIND` (A2, A5)
+BUDGET = (
+    f"{BUDGET_KIND}: the run's solves left do not cover the investment case's baseline "
+    "solves, so it did not run."
 )
+_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
+def gap_error(native, record) -> str:
+    """The typed error of a gap step whose case ended `native`."""
+    kind, words = GAP_KINDS[native]
+    code = (record or {}).get("error_code")
+    code = f" ({code})" if isinstance(code, str) and _CODE.fullmatch(code) else ""
+    return f"{kind}{code}: {words}, so this chapter is not established."
 
 
 def is_ic_step(step) -> bool:
@@ -239,17 +259,39 @@ def _running(record, begun) -> bool:
     )
 
 
-def _judge(path, step_id, error):
-    """The step's typed error; a `chapter_gap` step is judged by the report."""
+def _judge(path, step_id, error, gap=None):
+    """The step's error; a failed `chapter_gap` step takes its typed `gap`
+    error and is judged by the report (the run goes on)."""
     from harness import runner
 
     def mark(task):
         step = next(s for s in task["steps"] if s["id"] == step_id)
         step["error"] = error
         if step.get(ON_END) == CHAPTER_GAP and step["status"] == "failed":
+            step["error"] = gap or error
             step["judged_by"] = JUDGED
 
     runner._update(path, mark)
+
+
+def budget_gap(path, step_id) -> bool:
+    """A2: admission refused the gap step `ic_budget` (no LP ran): the step
+    fails with that kind and is judged by the report. False for any other
+    step, which keeps its card."""
+    from harness import runner
+
+    done = []
+
+    def mark(task):
+        step = next((s for s in task["steps"] if s["id"] == step_id), None)
+        if step is None or not is_ic_step(step) or step.get(ON_END) != CHAPTER_GAP \
+                or step["status"] in ("completed", "failed", "uncertain"):
+            return False
+        step.update(status="failed", error=BUDGET, judged_by=JUDGED)
+        done.append(step_id)
+
+    runner._update(path, mark)
+    return bool(done)
 
 
 def settle_walled(path, ticket, job_id):
@@ -263,6 +305,21 @@ def settle_walled(path, ticket, job_id):
     return view
 
 
+def reserved(path) -> int:
+    """The solves the run's grant reserved for its latest admitted case (the
+    baseline, study harness 36 A2; one case runs at a time), else `SOLVES`:
+    the case itself solves no LP."""
+    from services import run_envelope
+
+    try:
+        audit = (run_envelope._load(path) or {}).get("audit") or []
+    except Exception:  # noqa: BLE001 -- no envelope to read: nothing was reserved
+        return SOLVES
+    last = next((a for a in reversed(audit) if a.get("event") == "used" and a.get("tool") == TOOL), None)
+    solves = (last or {}).get("solves")
+    return solves if type(solves) is int else SOLVES
+
+
 def settle(path, ticket, job_id, record, begun):
     """Settle the step from `record`; the case is never started again."""
     from harness import runner
@@ -270,13 +327,13 @@ def settle(path, ticket, job_id, record, begun):
 
     native, status, error = outcome(record, begun)
     result = (
-        {"study": STUDY, "started_at": begun, "solves": SOLVES}
+        {"study": STUDY, "started_at": begun, "solves": reserved(path)}
         if status == "completed"
         else None
     )
     view = assistant_tasks.settle_job(path, ticket, job_id, native, status, result)
     if view is not None and error:
-        _judge(path, ticket[1], error)
+        _judge(path, ticket[1], error, gap_error(native, record) if native in GAP_KINDS else None)
     return view
 
 

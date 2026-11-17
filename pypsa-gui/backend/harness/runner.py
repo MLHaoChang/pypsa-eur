@@ -1158,8 +1158,11 @@ class Runner:
         """The envelope did not admit the step (issue 03): an ended envelope
         or a broken freshness chain pauses the run and notifies; any other
         refusal waits for the user's card on that step."""
+        from harness import run_ic
         from services import run_envelope
         reason = run_envelope.last_refusal(path)
+        if reason == run_envelope.IC_BUDGET_KIND and run_ic.budget_gap(path, step["id"]):
+            return  # study harness 36 (A2): the case did not run; the report lists its chapter's gap
         if reason in run_envelope.PAUSING:
             if reason in ("expired", "exhausted"):
                 run_envelope.end(path, reason, reason)

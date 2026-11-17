@@ -264,10 +264,10 @@ def load(profile: dict) -> dict:
         for action in actions:
             if set(action) - {"native", ON_END} != {"tool", "args"} or not isinstance(action["args"], dict):
                 raise ProfileError(f"Stage {name}: each action has tool and args.")
-            if ON_END in action and (name != "solve" or action["tool"] != "run_investment_case"
+            if ON_END in action and (name != "report" or action["tool"] != "run_investment_case"
                                      or action[ON_END] != CHAPTER_GAP):
-                # Study harness 36 (GK B (60) follow-up (a)): only the solve stage's case.
-                raise ProfileError(f"Stage {name}: on_end is chapter_gap, on the solve stage's "
+                # Study harness 36 (GK B (60) follow-up (a), O1): only the report stage's case.
+                raise ProfileError(f"Stage {name}: on_end is chapter_gap, on the report stage's "
                                    "run_investment_case only.")
             if action.get("native") == run_actions.KIND or action["tool"] in run_actions.REGISTRY:
                 # Study harness 10a (GK B (36) D7): the runner's closed native-action registry.
@@ -577,10 +577,11 @@ def _eh_site_v3() -> dict:
 
 EH_SITE_V3 = _eh_site_v3()
 
-# Study harness 36 (GK B (60) plan GO, Q1, B1, 36-K1, K2): eh_site@4. The solve
-# stage runs the investment case after the queued solve (`harness/run_ic.py`,
-# as eh_ipp_hybrid@1): it values the solved dispatch and solves no LP, so it
-# spends no solve; its sends and wall time are the run's. The hand-off reads
+# Study harness 36 (GK B (60) plan GO, Q1, Q2 (a), B1, 36-K1, K2): eh_site@4. The
+# investment case runs after the solve, the result gate and its loop, at the head
+# of the report stage (`harness/run_ic.py`), so it values the final dispatch. Its
+# baseline re-solve (the site keeps existing assets) is reserved at admission
+# (`run_envelope.CASE_BASELINE_SOLVES`); its sends and wall time are the run's. The hand-off reads
 # the stored case's figures (`run_handoff.IC_KPIS`), so the investment chapter
 # is established when the case ran and stays a listed gap when it did not.
 # eh_site@1-@3 stay byte-equal (L8).
@@ -595,14 +596,21 @@ EH_SITE_IC_KPIS = [
 
 
 def _eh_site_v4() -> dict:
+    from services import run_envelope
+
     profile = copy.deepcopy(EH_SITE_V3)
     profile["version"] = 4
-    solve = profile["stages"].get("solve", GENERIC["solve"])
-    profile["stages"]["solve"] = {"actions": [*copy.deepcopy(solve["actions"]),
-                                              {**_call("run_investment_case"), ON_END: CHAPTER_GAP}],
-                                  "rules": copy.deepcopy(solve["rules"])}
+    # The case values the final dispatch: it runs in the report stage, before the
+    # report, so the result gate's loop (which re-solves) never leaves it stale.
+    report = profile["stages"]["report"]
+    report["actions"] = [{**_call("run_investment_case"), ON_END: CHAPTER_GAP}, *report["actions"]]
     runs = profile["envelope"]["runs"]
-    runs.insert(runs.index({"tool": "generate_report"}), {"tool": "run_investment_case"})
+    # Q2 (a), A4: the case's baseline (the site keeps existing gensets, PV and
+    # UPS) is reserved at the bound; the budget grows by exactly that, so the
+    # queued solve, the coupling loop's worst case and the case still fit.
+    runs.insert(runs.index({"tool": "generate_report"}),
+                {"tool": "run_investment_case", "baseline_solves": run_envelope.CASE_BASELINE_SOLVES})
+    profile["envelope"]["budget"]["solves"] += run_envelope.CASE_BASELINE_SOLVES
     profile["kpis"] = [*profile["kpis"], *copy.deepcopy(EH_SITE_IC_KPIS)]
     return profile
 

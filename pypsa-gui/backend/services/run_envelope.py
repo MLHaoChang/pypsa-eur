@@ -63,6 +63,13 @@ ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
 # single-owner investment case values the solved dispatch. It is admitted like
 # a run but never counts as a solve, so it never spends the solves budget.
 CASE_TOOLS = frozenset({"run_investment_case"})
+# Study harness 36 (GK B (60) Q2 (a), A1-A5): a grant whose case entry names
+# `baseline_solves` admits a case that re-solves its baseline, reserving that
+# many solves at admission (the bound: `results.baseline.solve_baseline` tries
+# at most twice), atomically with the check; with fewer left it is refused
+# `ic_budget` and no LP runs. Without the key, (53) B2's refusal stands.
+CASE_BASELINE_SOLVES = 2
+IC_BUDGET_KIND = "ic_budget"
 # Study harness 07 (GK B B1-b): a grant that lists the run's report covers only
 # the stage-7 card (`cross`); the runner starts that job itself, so a chat
 # `generate_report` is never admitted on it, and it never counts as a solve.
@@ -207,14 +214,19 @@ def _check_edit(entry):
 
 
 def _check_run(entry):
-    if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind", "restore"} \
+    if not isinstance(entry, dict) or "tool" not in entry \
+            or not set(entry) <= {"tool", "kind", "restore", "baseline_solves"} \
             or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS \
+            or ("baseline_solves" in entry and (entry["tool"] not in CASE_TOOLS
+                                                or entry["baseline_solves"] != CASE_BASELINE_SOLVES
+                                                or type(entry["baseline_solves"]) is not int)) \
             or not isinstance(entry.get("kind", ""), str) \
             or ("kind" in entry and entry["tool"] in REPORT_TOOLS) \
             or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
         raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS)} and an optional "
                             "kind (none for the report); a "
-                            f"loop-driving tool may carry restore \"final\": {entry!r}")
+                            "loop-driving tool may carry restore \"final\", and the case "
+                            f"baseline_solves {CASE_BASELINE_SOLVES}: {entry!r}")
     if entry["tool"] in NEVER_LISTED:
         raise EnvelopeError(f"{entry['tool']} is never in an envelope; it is always its own card.")
     return dict(entry)
@@ -1441,6 +1453,42 @@ def _case_solves_baseline(ctx, owner=None) -> bool:
         return True
 
 
+def _case_baseline_solves(envelope):
+    """The solves a grant reserves for the case's baseline (its runs entry's
+    `baseline_solves`), or None when the grant does not cover a baseline."""
+    entry = next((r for r in envelope.get("runs") or [] if r.get("tool") in CASE_TOOLS), None)
+    value = (entry or {}).get("baseline_solves")
+    return value if type(value) is int and value == CASE_BASELINE_SOLVES else None
+
+
+def case_budget_refusal(envelope, note):
+    """A2: `ic_budget` when the case's baseline solves (`note["case_solves"]`)
+    do not fit in the solves left; None when they fit or none are needed."""
+    if "case_solves" not in note:
+        return None
+    if solves_used(envelope) + note["case_solves"] > envelope["budget"]["solves"]:
+        return IC_BUDGET_KIND
+    return None
+
+
+def case_baseline_reserved(task_id) -> bool:
+    """A2: the run's latest admitted case reserved its baseline's solves (its
+    `used` row carries `reserved`), so the case may solve the baseline. False
+    for no run, no envelope, or a case admitted with nothing reserved."""
+    from services import assistant_tasks
+    if not task_id:
+        return False
+    try:
+        with assistant_tasks._LOCK:
+            path, _ = assistant_tasks._read(task_id)
+            envelope = _load(path)
+    except (HTTPException, OSError, ValueError):
+        return False
+    last = next((a for a in reversed((envelope or {}).get("audit", []))
+                 if a.get("event") == "used" and a.get("tool") in CASE_TOOLS), None)
+    return last is not None and last.get("reserved") == CASE_BASELINE_SOLVES
+
+
 def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx, note):
     from harness.catalogue import TOOLS
     if external:
@@ -1463,7 +1511,10 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
             return "own_step_only"
         # the owner the case will be built for (`InvestmentCaseRequest.owner`), as the route reads it
         if _case_solves_baseline(ctx, args.get("owner") if isinstance(args, dict) else None):
-            return "baseline_solve"
+            granted = _case_baseline_solves(envelope)
+            if granted is None:
+                return "baseline_solve"
+            note["case_solves"] = granted  # reserved where it is recorded (A2)
     if _deletes(tool, edit_card):
         return "delete"
     if tier == "destructive" and tool not in PLANNED_TOOLS:
@@ -1617,6 +1668,8 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
             # C4: checked again where it is recorded, under the held locks: two solves
             # admitted at budget - 1 never both pass.
             reason = "exhausted"
+        if reason is None:
+            reason = case_budget_refusal(envelope, note)  # A2: checked where it is reserved, under the held locks
         if reason is None and loop_round and tool not in RUN_TOOLS \
                 and _changes_in(envelope, loop_round["loop"], loop_round["round"]) >= scope["changes"]:
             reason = CHANGE_CAP_KIND  # C2: counted at admission, under the envelope's lock
@@ -1626,10 +1679,12 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
             _audit(envelope, "used" if recorded else "refused", call_id=call_id, tool=tool,
                    reason=None if recorded else "approval_unavailable",
                    **({"source": note["source"]} if "source" in note else {}),
-                   **({"prepare": note["prepare"]} if "prepare" in note else {}), **loop_round)
+                   **({"prepare": note["prepare"]} if "prepare" in note else {}),
+                   **({"reserved": note["case_solves"], "solves": note["case_solves"]}
+                      if recorded and "case_solves" in note else {}), **loop_round)
             try:
                 _save(path, envelope)
-                if tool in RUN_TOOLS:
+                if tool in RUN_TOOLS or (recorded and "case_solves" in note):
                     _count_solves(path, envelope)
             except OSError:
                 logger.warning("run envelope: audit for %s could not be written", tool, exc_info=True)
