@@ -7,13 +7,13 @@ Status: needs-triage
 Owner: unassigned
 Size: S (a) or S (b)
 Gated: UX (a); GK A (b)
-Likely files: pypsa-gui/frontend/src/pages/hubDesign/shared/GoalStudyRun.tsx (the "up to N calculation steps" line, Abort); pypsa-gui/frontend/src/pages/results/EhReferenceDesignPanel.tsx (the only `budget_solves` field, 1 to 120); pypsa-gui/backend/services/run_profiles.py (`eh_study` profile, `budget_solves: 2`)
+Likely files: pypsa-gui/frontend/src/pages/hubDesign/shared/GoalStudyRun.tsx (the progress line and Abort); pypsa-gui/frontend/src/pages/results/EhReferenceDesignPanel.tsx (the only `budget_solves` field, 1 to 120); pypsa-gui/backend/services/run_profiles.py (`eh_study` profile, `budget_solves: 2`)
 Journey fit: set up the question (section 8) → run (section 9) → wait → results. The wait is where a user needs to know how big the study is, and the PR-CI journeys need a small one.
 Expected-fail id: `budget` (template-journeys.mjs; PR #1629).
 
 ## What
 
-Guided section 9 shows "Studying… up to N calculation steps" and offers only Abort. The study size (`budget_solves`, 1 to 120) is settable only in Expert's reference-design panel. For most templates the default is small. For `eh_concentrator_staged` it is not: 26,280 snapshots (3 periods, hourly) and up to 30 steps, and the study had not finished after 15 minutes.
+When a user starts the study in Guided (section 9), the page says "Studying… up to N calculation steps" and offers only Abort. There is no way to see the size before the run or to choose a smaller one. The same size can be set only in Expert, in the reference-design panel (1 to 120). For most templates the default is small. For the Mining Concentrator (staged growth) it is not: 26,280 hourly snapshots over three periods and up to 30 steps, and the study had not finished after 15 minutes, with the user watching a progress line and an Abort button.
 
 Run times measured by the short journeys (local container, default settings):
 
@@ -33,10 +33,10 @@ Consequence for CI: PR CI cannot wait for the concentrator verdict, so its short
 
 ## Candidate fixes
 
-**a) A study-size line in Guided section 9** (recommended first: it also serves the user). Show the study size as an editable line next to "Run study", using the existing `budget_solves` value. GAP03-ADD-1 applies: Guided edits existing values.
-- Journey steps once built: section 9 has a field labelled "calculation steps" (the `budget` predicate); set it to 2; run the concentrator; the verdict arrives within the short budget; the progress line reads "of 2 calculation steps". The concentrator short journey then waits for the verdict instead of aborting.
+**a) A study-size line in Guided section 9** (recommended first: it also serves the user). Show the study size as an editable line labelled "calculation steps" next to "Run study", using the existing study-size value. GAP03-ADD-1 applies: Guided edits existing values.
+- Journey steps once built: section 9 has a field labelled "calculation steps" (the `budget` predicate); set it to 2; run; the progress line reads "of 2 calculation steps" (the `budget` predicate); for the concentrator the verdict arrives within the short budget; the progress line reads "of 2 calculation steps". The concentrator short journey then waits for the verdict instead of aborting.
 
-**b) A smaller default budget for `eh_concentrator_staged`.** One line in the pack profile, but it changes the study results the template produces, so GK A reviews it.
+**b) A smaller default study size for the staged concentrator.** One line in the template's run profile, but it changes the study results the template produces, so GK A reviews it.
 - Journey steps once built: the concentrator's short journey waits for the verdict within 300 s; the abort branch (`slow: true`) is removed.
 
 Both can ship; (a) alone leaves the concentrator slow by default.

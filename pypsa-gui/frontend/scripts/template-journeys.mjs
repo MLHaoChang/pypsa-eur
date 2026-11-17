@@ -129,12 +129,16 @@ async function journey(t) {
       await page.getByTestId('field-drawer').waitFor({ timeout: 1500 })
       return page.getByTestId('field-drawer').innerText()
     }
-    await L.gap(ctx, '01', 'section 1 reads incomplete without a location, Run is blocked and the readiness line links to the location drawer', async () => {
+    await L.gap(ctx, '01', 'section 1 reads incomplete without a location, Run is blocked and the readiness line opens the Latitude/Longitude drawer', async () => {
       await L.goSection(ctx, 'Project & site')
-      assert.match(await page.getByTestId('section-state-site').innerText(), /incomplete|to do/i)
+      assert.match(await page.getByTestId('section-state-site').innerText(), /incomplete/i)
       await L.goSection(ctx, 'Readiness and run')
       assert.ok(await page.getByTestId('hub-run-start').isDisabled(), 'Run is not blocked')
-      await page.getByTestId('hub-card-readiness').getByRole('button', { name: /location|latitude/i }).first().waitFor({ timeout: 1500 })
+      await page.getByTestId('hub-card-readiness').getByRole('button', { name: /location|latitude/i }).first().click({ timeout: 1500 })
+      const drawer = page.getByTestId('field-drawer')
+      await drawer.waitFor({ timeout: 1500 })
+      await drawer.getByLabel(/Latitude/i).first().waitFor({ timeout: 1500 })
+      await drawer.getByLabel(/Longitude/i).first().waitFor({ timeout: 1500 })
     })
     await L.resetOverlays(ctx)
     if (!t.offgrid) await L.gap(ctx, '02', 'Guided section 3 edits "Connection limit (MW)" and Expert shows the new value under the same label', async () => {
@@ -186,14 +190,15 @@ async function journey(t) {
       assert.equal(raw.length, 0, `raw names: ${[...new Set(raw)].slice(0, 5).join(', ')}`)
     })
     await L.resetOverlays(ctx)
-    if (t.goal) await L.gap(ctx, '06', 'the goal editor shows the value the run will use with an "Assumed" chip, and Expert shows the goal', async () => {
+    if (t.goal) await L.gap(ctx, '06', 'the goal editor shows the assumed value the run will use ("No goal yet" gone), and Expert shows the goal', async () => {
+      const assumed = (texts[8] || '').match(/Reliability goal \(LOLE\): ([\d.]+) h\/yr/)?.[1]
+      assert.ok(assumed, 'the template shows no assumed goal')
       await L.goSection(ctx, 'Scenarios & optimisation')
-      const goal = page.getByTestId('hub-goal-lole')
-      assert.ok(Number(await goal.inputValue()) > 0, 'the editor shows no goal value')
-      assert.match(await panelText(ctx), /Assumed/)
+      assert.equal(await page.getByTestId('hub-goal-lole').inputValue(), assumed, 'the editor does not show the assumed goal')
+      assert.doesNotMatch(await panelText(ctx), /No goal yet/)
       await L.chooseMode(ctx, 'Expert')
       await page.locator('[data-testid="flow-section-scenarios"]').getByText('Grid study', { exact: true }).first().click({ timeout: 1500 })
-      assert.match(await page.locator('body').innerText(), /allowed shortfall|LOLE|reliability goal/i)
+      assert.match(await page.locator('body').innerText(), new RegExp(`(allowed shortfall|LOLE|reliability goal)[^\\n]{0,80}\\b${assumed}\\b`, 'i'))
     })
     await L.resetOverlays(ctx)
     await L.gap(ctx, '07', 'Guided names the Expert-only fields ("Open in Expert") in sections 1, 3, 5, 7 and 8, and load flexibility in section 4', async () => {
@@ -212,10 +217,16 @@ async function journey(t) {
       assert.equal(ctx.problems.length, 0, `page errors: ${ctx.problems.slice(0, 2).join(' | ')}`)
       return ctx
     }
-    await L.gap(ctx, 'budget', 'Guided offers a study size (calculation steps) the user can lower', async () => {
+    await L.gap(ctx, 'budget', 'Guided section 9 lets the user set the study size to 2 and the run reports "of 2 calculation steps"', async () => {
       await L.goSection(ctx, 'Readiness and run')
-      await page.getByLabel(/calculation steps|study budget/i).first().waitFor({ timeout: 1500 })
+      const size = page.getByLabel(/calculation steps/i).first()
+      await size.waitFor({ timeout: 1500 })
+      await size.fill('2')
+      await page.getByTestId('hub-run-start').click()
+      await page.getByText(/of 2 calculation steps/).first().waitFor({ timeout: 30000 })
+      await page.getByRole('button', { name: 'Abort' }).click()
     })
+    await L.resetOverlays(ctx)
     if (t.slow && mode === 'short') {
       // 3 periods x hourly, up to 30 calculation steps: minutes to hours. PR CI starts it, sees
       // the progress line and aborts; the full journey on the schedule waits for the verdict.
@@ -283,7 +294,9 @@ async function journey(t) {
         assert.ok(await page.locator('[data-testid^="flow-section-"]').count() === 10, 'Expert does not show ten flow sections')
       })
       if (t.goal) {
-        await L.step(ctx, 'back in Guided after Expert: the saved goal is still 2', async () => {
+        await L.gap(ctx, '06', 'Expert shows the saved goal of 2 and Guided shows the same value', async () => {
+          await page.locator('[data-testid="flow-section-scenarios"]').getByText('Grid study', { exact: true }).first().click({ timeout: 1500 })
+          assert.match(await page.locator('body').innerText(), /(allowed shortfall|LOLE|reliability goal)[^\n]{0,80}\b2\b/i)
           await L.chooseMode(ctx, 'Guided')
           await L.goSection(ctx, 'Scenarios & optimisation')
           assert.equal(await page.getByTestId('hub-goal-lole').inputValue(), '2')
