@@ -20,7 +20,6 @@ count rows in against rows out.
 from __future__ import annotations
 
 import io
-import json
 import math
 import re
 import stat
@@ -74,6 +73,16 @@ BTU_PER_KWH_TO_GJ_PER_MWH = 1.055056e-3
 KG_PER_GJ_TO_T_PER_MWH = 0.0036
 
 DESTINATIONS = ("network", "sidecar", "unmapped", "assumed")
+
+#: Plain names for the PyPSA components, for text a user reads (RAW-NAMES-1).
+_PLAIN = {
+    "Bus": "grid node",
+    "Line": "line",
+    "Link": "link",
+    "Generator": "generator",
+    "StorageUnit": "storage unit",
+    "Load": "load",
+}
 
 #: Classes listed as unmapped as a whole, with the reason a user reads.
 _UNSUPPORTED = {
@@ -348,7 +357,12 @@ class _Converter:
         self.ledger = Ledger()
         self.n = pypsa.Network()
         self.sidecars: dict[str, Any] = {}
-        self.load_mw = {"network": 0.0, "unmapped": 0.0}
+        self.load_mw = dict.fromkeys(DESTINATIONS, 0.0)
+        # filled by the handlers, in the order run() calls them
+        self.carriers: set[str] = set()
+        self.voltage: dict[str, float | None] = {}
+        self.price: dict[str, float] = {}
+        self.co2: dict[str, float] = {}
         # grouped unmapped entries: (source item, reason) -> property names
         self._skip: dict[tuple[str, str], list[str]] = defaultdict(list)
         self.names: dict[str, set[str]] = defaultdict(set)
@@ -383,7 +397,10 @@ class _Converter:
             out = f"{name} ({source} {i})" if i > 2 else f"{name} ({source})"
         if out != name:
             self.assume(
-                out, "name", out, f"{component} name {name!r} is already used; renamed"
+                out,
+                "name",
+                out,
+                f"the name {name!r} is already used by another {_PLAIN.get(component, component)}; renamed",
             )
         taken.add(out)
         return out
@@ -424,13 +441,17 @@ class _Converter:
             if row.value is None:
                 self.skip(row, f"value unreadable ({row.unreadable or 'empty'})")
             elif scen:
-                s = scen[0]
-                why = (
-                    "is on in the chosen Model; scenario rows are applied in a later slice"
-                    if s in on
-                    else "not selected"
-                )
-                self.skip(row, f"rows of scenario {s!r}: {why}", item=f"Scenario {s!r}")
+                on_here = [x for x in scen if x in on]
+                if on_here:
+                    why = (
+                        f"scenario {on_here[0]!r} is on in the chosen Model; "
+                        "scenario rows are applied in a later slice"
+                    )
+                else:
+                    why = (
+                        "scenario " + ", ".join(repr(x) for x in scen) + " not selected"
+                    )
+                self.skip(row, why)
             elif row.band != 1:
                 self.skip(row, f"band {row.band}: only band 1 is used")
             elif row.date_from or row.date_to:
@@ -503,7 +524,6 @@ class _Converter:
                 )
         for obj, by_name in attrs.items():
             for name, a in by_name.items():
-                key = _attr_key(obj, name)
                 if obj[0] == "Node" and name in ("Latitude", "Longitude"):
                     continue  # read with the nodes
                 if obj != chosen:
@@ -568,7 +588,7 @@ class _Converter:
                 "network",
                 "snapshots",
                 "days",
-                "Chrono Step Type is read as days (the PLEXOS default)",
+                "Chrono Step Type is not read; the step count is taken as days",
             )
         n_steps = int(days) * int(ppd)
         snaps = pd.date_range(start, periods=n_steps, freq=f"{int(minutes)}min")
@@ -576,7 +596,7 @@ class _Converter:
         self.n.snapshot_weightings.loc[:, :] = minutes / 60.0
         for name in h:
             key = _attr_key(chosen, name)
-            if name in used or (name == "Chrono Step Type"):
+            if name in used:
                 self.ledger.put(_ATTR_TABLE, key, "network")
             else:
                 self.skip_attr(chosen, name, "horizon setting not imported yet")
@@ -594,7 +614,6 @@ class _Converter:
             for a in self.m.attributes
             if a.object[0] == "Node" and a.name in ("Latitude", "Longitude")
         }
-        self.voltage: dict[str, float | None] = {}
         for node in sorted(self.m.objects_of("Node"), key=lambda o: o.name):
             obj = node.key
             kw: dict[str, Any] = {}
@@ -639,7 +658,6 @@ class _Converter:
             load = self.take(obj, "Load")
             if load is not None and self.unit_ok(load, "MW"):
                 self.used(load)
-                self.load_mw["network"] += load.value
                 self.n.add(
                     "Load",
                     self.unique("Load", node.name, "Load"),
@@ -672,7 +690,6 @@ class _Converter:
                     self.used(units, "sidecar")
                 load = self.take(obj.key, "Load")
                 if load is not None:
-                    self.load_mw["unmapped"] += load.value
                     self.skip(
                         load,
                         "region-level load: distributing it by load participation factor is not supported yet",
@@ -837,7 +854,6 @@ class _Converter:
         self.carriers.add("DC")
 
     def fuels(self) -> None:
-        self.price: dict[str, float] = {}
         prices = []
         for fuel in sorted(self.m.objects_of("Fuel"), key=lambda o: o.name):
             row = self.take(fuel.key, "Price")
@@ -858,7 +874,6 @@ class _Converter:
                 "source": "PLEXOS import",
                 "fuels": prices,
             }
-        self.co2: dict[str, float] = {}
         for em in self.m.objects_of("Emission"):
             for fuel in self.children.get(em.key, {}).get("Fuels", []):
                 row = self.take((em.key, fuel), "Production Rate")
@@ -1092,7 +1107,7 @@ class _Converter:
         self.r.suggestions.append(
             Suggestion(
                 target=name,
-                parameter="minimum stable level (p_min_pu, unit commitment on)",
+                parameter="minimum stable level (per unit of capacity, needs unit commitment)",
                 current=0.0,
                 proposed=round(pu, 6),
                 why=f"PLEXOS minimum stable level: {pu:g} pu of Max Capacity ({pu * cap:g} MW). "
@@ -1197,17 +1212,26 @@ class _Converter:
                 ("Discharge Efficiency", "efficiency_dispatch"),
             ):
                 row = self.take(obj, prop)
+                plain = prop.lower()
                 if row is None:
-                    self.assume(
-                        bat.name, col, 1.0, f"{prop} not given; PLEXOS default 100 %"
+                    default = self.m.defaults.get(
+                        (("System", "Battery", "Batteries"), prop)
                     )
+                    f = _percent(default) if default is not None else None
+                    if f is None:
+                        f = 1.0
+                        why = f"{prop} not given and the file has no usable default; 100 % used"
+                    else:
+                        why = f"{prop} not given; the file's default {default:g} % used"
+                    kw[col] = f
+                    self.assume(bat.name, plain, f, why)
                     continue
                 if not self.unit_ok(row, "%"):
                     continue
                 f = _percent(row.value)
                 if f is None:
                     self.skip(row, f"{prop} outside (0, 100] %")
-                    self.assume(bat.name, col, 1.0, f"{prop} unusable; 100 % used")
+                    self.assume(bat.name, plain, 1.0, f"{prop} unusable; 100 % used")
                 else:
                     kw[col] = f
                     self.used(row)
@@ -1225,7 +1249,7 @@ class _Converter:
             )
             self.leftovers(obj)
 
-    def rest(self, model: str | None) -> None:
+    def rest(self) -> None:
         """Rows of objects no handler took: one grouped entry per object and reason."""
         for key in list(self.base):
             obj = key[1] if isinstance(key[0], tuple) else key
@@ -1259,7 +1283,6 @@ class _Converter:
 
     def run(self) -> None:
         model, on = self.pick_model()
-        self.carriers: set[str] = set()
         self.sort_rows(on)
         self.horizon(model)
         self.nodes()
@@ -1268,7 +1291,7 @@ class _Converter:
         self.fuels()
         self.generators()
         self.batteries()
-        self.rest(model)
+        self.rest()
         for name in sorted(self.carriers):
             kw = {"co2_emissions": self.co2[name]} if name in self.co2 else {}
             self.n.add("Carrier", name, **kw)
@@ -1277,10 +1300,12 @@ class _Converter:
                 self.r.warnings.append(
                     f"CO2 rate of fuel {fuel!r} unused: no generator burns it"
                 )
+        # GK A Q3: every readable Load row's MW, by where the row went
+        for row in self.m.rows:
+            if row.property == "Load" and row.value is not None:
+                self.load_mw[self.ledger.dest[(_ROW_TABLE, row.data_id)]] += row.value
         for (item, reason), props in self._skip.items():
             what = f" ({', '.join(sorted(set(props)))})" if props else ""
-            if item.startswith("Scenario "):
-                what = f" ({len(props)} rows)"
             self.r.unmapped.append(Unmapped(item + what, reason))
         n = self.n
         self.r.counts.update(
@@ -1303,7 +1328,7 @@ def convert(
     report: ImportReport | None = None,
 ) -> Conversion:
     """Convert a read PLEXOS model; the ledger says where every row went."""
-    report = report or ImportReport("plexos", ["model.xml"])
+    report = report or ImportReport("plexos", [])
     conv = _Converter(model, options or {}, report)
     conv.run()
     for b in model.broken:
@@ -1329,9 +1354,12 @@ def read_plexos(paths: Sequence[Path], options: Mapping[str, Any]) -> ImportResu
         )
     )
     if got.data_files:
-        report.warnings.append(
-            f"{len(got.data_files)} data file(s) given; data-file time series are read in a later slice"
-        )
+        for name in got.data_files:
+            report.unmapped.append(
+                Unmapped(
+                    f"data file {name}",
+                    "data-file time series are read in a later slice",
+                )
+            )
     conv = convert(model, options, report)
-    json.dumps(conv.sidecars, allow_nan=False)
     return ImportResult(conv.network, conv.report, conv.sidecars)

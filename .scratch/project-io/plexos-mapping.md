@@ -124,6 +124,10 @@ Generator: capacity, unit count, minimum stable level, rating profile, heat rate
 - 2026-11-17, core session (project-io) on where the sidecars live: outage rates go on the generators' own columns (`outage_rate_value`, `outage_rate_basis` = "FOR", `mttr_hours`), which adequacy reads through `occurrence.resolve_outage_params`; never `asset_health.json`. Areas go to `plexos_areas.json` and static fuel prices to `plexos_fuel_prices.json`; the core session adds both to `_BUNDLE_FILES`. Fuel prices are also folded into `marginal_cost`, each derived cost listed in `report.assumed` with the heat rate used.
 - Slice 2a choices, for review:
   - Min Stable Factor / Level bind only with unit commitment, so they are not set as `p_min_pu` (that would make the unit must-run in an LP). The larger of the two is offered as a `Suggestion`; the rows are listed as unmapped with that reason.
-  - A missing generator or battery `Units` is read as the PLEXOS default 0 (not built) and listed as unmapped, never assumed 1.
+  - A missing generator or battery `Units` takes the file's `t_property` default (GK A, 2026-11-17): 1 builds the unit (assumed row), 0 lists it as not built, and no default gives unmapped "unit count unknown". The same rule applies to a missing battery efficiency (the file's default, otherwise 100 % with an assumed row).
+  - Min Stable (GK A ruling): one `Suggestion` per generator with the value in pu and MW; `p_min_pu` stays at its default; both tested.
+  - Non-CO2 emission rates go to unmapped, not to an `emissions` sidecar, in 2a.
+  - `Chrono Step Type` is not read: the step count is taken as days, with an assumed row, and the attribute is listed as unmapped.
+  - Scenario rows are listed per object and scenario (full lists, per the contract), not as counts per scenario. A row tagged with an on and an off scenario counts as on.
   - Horizon: `Chrono Date From` (else `Date From`) × `Chrono Step Count` days × `Periods per Day` (default 24); weightings equal the step in hours. A horizon without a length gives one year, in `assumed`. Other horizon settings are unmapped.
   - Scenario-tagged rows are all unmapped in 2a: "not selected", or "is on in the chosen Model; applied in a later slice". Data-file, dated, variable and band > 1 rows likewise.

@@ -236,7 +236,10 @@ def test_zip_reads_like_the_xml(tmp_path):
     res = read_plexos([path], {})
     assert res.report.counts == read_plexos([IRL], {}).report.counts
     assert res.report.source_files == ["m.zip"]
-    assert any("data file" in w for w in res.report.warnings)
+    assert (
+        "data file model/csv_files/a.csv",
+        "data-file time series are read in a later slice",
+    ) in [(u.source_item, u.reason) for u in res.report.unmapped]
 
 
 def _link_info(name):
@@ -354,20 +357,15 @@ def test_model_default_is_first_by_name_and_listed():
     conv = convert(_models(), {})
     a = next(a for a in conv.report.assumed if a.parameter == "Model")
     assert a.value == "A" and "Other Models: B" in a.why
-    assert ("Scenario 'On' (1 rows)", "rows of scenario 'On': not selected") in reasons(
-        conv
-    )
+    assert ("Node 'N' (Load)", "scenario 'On' not selected") in reasons(conv)
 
 
 def test_model_option_switches_scenarios_on():
     conv = convert(_models(), {"model": "B"})
     assert not [a for a in conv.report.assumed if a.parameter == "Model"]
-    on = unmapped_reason(conv, "Scenario 'On'")
-    assert on == [
-        "rows of scenario 'On': is on in the chosen Model; scenario rows are applied in a later slice"
-    ]
-    assert unmapped_reason(conv, "Scenario 'Off'") == [
-        "rows of scenario 'Off': not selected"
+    assert sorted(unmapped_reason(conv, "Node 'N'")) == [
+        "scenario 'Off' not selected",
+        "scenario 'On' is on in the chosen Model; scenario rows are applied in a later slice",
     ]
     with pytest.raises(ImportFormatError, match="has: A, B"):
         convert(_models(), {"model": "C"})
@@ -905,3 +903,56 @@ def test_name_clash_gets_a_fixed_suffix():
     assert conv.unique("StorageUnit", "X", "Hydro") == "X (Hydro 3)"
     assert [a.value for a in conv.r.assumed] == ["X (Hydro)", "X (Hydro 3)"]
     assert all("'X' is already used" in a.why for a in conv.r.assumed)
+
+
+def test_row_with_an_on_and_an_off_scenario_is_on():
+    model = _models()
+    model.rows[1].tags = [Tag("Scenario", "Off", None), Tag("Scenario", "On", None)]
+    conv = convert(model, {"model": "B"})
+    assert all(
+        "is on in the chosen Model" in r for r in unmapped_reason(conv, "Node 'N'")
+    )
+
+
+def test_load_tally_counts_every_readable_load_row():
+    model = build(
+        [("Node", "A"), ("Scenario", "S")],
+        [
+            ("Node", "A", "Load", 10, "MW"),
+            ("Node", "A", "Load", 7, "GW", {"band": 2}),
+            ("Node", "A", "Load", 3, "MW", {"tags": [Tag("Scenario", "S", None)]}),
+        ],
+    )
+    conv = convert(model, {})
+    assert conv.load_mw["network"] == 10 and conv.load_mw["unmapped"] == 10
+
+
+def test_chrono_step_type_is_not_booked_as_read():
+    model = _horizon(Chrono_Date_From=43831, Chrono_Step_Count=1, Chrono_Step_Type=2)
+    conv = convert(model, {})
+    assert (
+        conv.ledger.dest[("t_attribute_data", "Horizon|H|Chrono Step Type")]
+        == "unmapped"
+    )
+    assert any("Chrono Step Type is not read" in a.why for a in conv.report.assumed)
+
+
+@pytest.mark.parametrize("default, built", [(1.0, True), (0.0, False), (None, False)])
+def test_battery_units_use_the_files_default(default, built):
+    model = _battery()
+    model.rows.pop(0)  # no Units row
+    if default is not None:
+        model.defaults[(("System", "Battery", "Batteries"), "Units")] = default
+    conv = convert(model, {})
+    assert ("B" in conv.network.storage_units.index) is built
+    check_ledger(model, conv)
+
+
+def test_battery_efficiency_default_comes_from_the_file():
+    model = _battery()
+    model.defaults[(("System", "Battery", "Batteries"), "Charge Efficiency")] = 70.0
+    conv = convert(model, {})
+    s = conv.network.storage_units.loc["B"]
+    assert (s.efficiency_store, s.efficiency_dispatch) == (pytest.approx(0.7), 1.0)
+    params = {a.parameter for a in conv.report.assumed if a.asset == "B"}
+    assert params == {"charge efficiency", "discharge efficiency"}
