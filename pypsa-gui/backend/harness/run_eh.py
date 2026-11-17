@@ -128,9 +128,15 @@ def freeze(ctx, profile, solves_left) -> dict:
         # network's connection limit, over the template's and the profile's;
         # one the network doesn't fix refuses, never a constant.
         card = flow_service.with_network_import(
-            {**card, "pack_overrides": {**(card.get("pack_overrides") or {}),
-                                        **dict(block.get("pack_overrides") or {})}},
-            getattr(ctx, "network", None))
+            {
+                **card,
+                "pack_overrides": {
+                    **(card.get("pack_overrides") or {}),
+                    **dict(block.get("pack_overrides") or {}),
+                },
+            },
+            getattr(ctx, "network", None),
+        )
     except flow_service.ImportCapacityError as exc:
         raise FreezeError(str(exc)) from exc
     body = EhStudyRequest(
@@ -324,14 +330,20 @@ def _connection_limit_change(ctx, args) -> str | None:
     then = (args.get("pack_overrides") or {}).get("import_p_nom_mw")
     cap = flow_service.import_capacity(
         getattr(ctx, "network", None),
-        {"archetype": args["archetype"], "pack_overrides": args.get("pack_overrides")})
-    if (cap.refusal is None and isinstance(then, (int, float))
-            and math.isclose(cap.mw, float(then), rel_tol=1e-9, abs_tol=1e-9)):
+        {"archetype": args["archetype"], "pack_overrides": args.get("pack_overrides")},
+    )
+    if (
+        cap.refusal is None
+        and isinstance(then, (int, float))
+        and math.isclose(cap.mw, float(then), rel_tol=1e-9, abs_tol=1e-9)
+    ):
         return None
     shown = f"{float(then):g} MW" if isinstance(then, (int, float)) else "no limit"
     now = f"it is now {cap.mw:g} MW" if cap.refusal is None else cap.refusal
-    return (f"The connection limit changed since the study's card was drawn "
-            f"(it showed {shown}; {now}). Review the run again.")
+    return (
+        f"The connection limit changed since the study's card was drawn "
+        f"(it showed {shown}; {now}). Review the run again."
+    )
 
 
 def admit(path, task, step, args, ctx):

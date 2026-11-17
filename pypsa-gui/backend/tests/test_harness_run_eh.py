@@ -1795,7 +1795,10 @@ def test_the_freeze_takes_the_profiles_block_over_the_goal_card_and_falls_back_t
     (template-e2e 02, GK B C3)."""
     block = {
         "budget_solves": 2,
-        "pack_overrides": {"import_p_nom_mw": 55.0, "import_energy_mwh_per_year": 1000.0},
+        "pack_overrides": {
+            "import_p_nom_mw": 55.0,
+            "import_energy_mwh_per_year": 1000.0,
+        },
         "mc": {"seed": 7},
     }
     template = {**TEMPLATE, "stages": ["apply_pack", "ens_solve"]}

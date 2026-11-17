@@ -40,8 +40,13 @@ def _imports(n):
 def _ctx(tmp_path, n, meta=WEAK):
     (tmp_path / F.TEMPLATE_FILE).write_text(json.dumps(meta))
     return types.SimpleNamespace(
-        storage_dir=str(tmp_path), project_uuid="p", network=n, network_revision=0,
-        solver_state_lock=threading.RLock(), solver_state={"solver_config": {}})
+        storage_dir=str(tmp_path),
+        project_uuid="p",
+        network=n,
+        network_revision=0,
+        solver_state_lock=threading.RLock(),
+        solver_state={"solver_config": {}},
+    )
 
 
 def _freeze(tmp_path, n, meta=WEAK):
@@ -61,13 +66,17 @@ def test_an_edited_limit_reaches_the_run_body(tid, build):
     meta = _meta(tid)
     n = build()
     # As built, the network carries the template's capacity: nothing changes.
-    assert F._request_for(meta, None, n)["pack_overrides"]["import_p_nom_mw"] == pytest.approx(
-        float(n.links.loc[_imports(n), "p_nom"].sum()))
+    assert F._request_for(meta, None, n)["pack_overrides"][
+        "import_p_nom_mw"
+    ] == pytest.approx(float(n.links.loc[_imports(n), "p_nom"].sum()))
     n.links.loc[_imports(n), "p_nom"] = 45.0
     body = F._request_for(meta, None, n)
     assert body["archetype"] == "weak_flexible"
-    assert body["pack_overrides"]["import_p_nom_mw"] == pytest.approx(45.0) != meta[
-        "pack_overrides"]["import_p_nom_mw"]
+    assert (
+        body["pack_overrides"]["import_p_nom_mw"]
+        == pytest.approx(45.0)
+        != meta["pack_overrides"]["import_p_nom_mw"]
+    )
 
 
 def test_only_the_import_cap_moves_in_the_request():
@@ -75,17 +84,23 @@ def test_only_the_import_cap_moves_in_the_request():
     n.links.loc[_imports(n), "p_nom"] = 45.0
     base = F._template_request(WEAK, None)
     body = F._request_for(WEAK, None, n)
-    assert {k: v for k, v in body["pack_overrides"].items() if k != "import_p_nom_mw"} == {
-        k: v for k, v in base["pack_overrides"].items() if k != "import_p_nom_mw"}
+    assert {
+        k: v for k, v in body["pack_overrides"].items() if k != "import_p_nom_mw"
+    } == {k: v for k, v in base["pack_overrides"].items() if k != "import_p_nom_mw"}
     assert {k: v for k, v in body.items() if k != "pack_overrides"} == {
-        k: v for k, v in base.items() if k != "pack_overrides"}
+        k: v for k, v in base.items() if k != "pack_overrides"
+    }
 
 
 def test_a_strong_grid_request_ignores_the_network():
     meta = {**WEAK, "recommended_archetype": "strong_grid"}
     n = build_eh_datacenter()
-    n.links.loc[_imports(n), "p_nom"] = 0.0      # no limit to read: a strong grid needs none
-    assert "import_p_nom_mw" not in (F._request_for(meta, None, n).get("pack_overrides") or {})
+    n.links.loc[_imports(n), "p_nom"] = (
+        0.0  # no limit to read: a strong grid needs none
+    )
+    assert "import_p_nom_mw" not in (
+        F._request_for(meta, None, n).get("pack_overrides") or {}
+    )
 
 
 # ── C1: one selector for the facts, readiness, the freeze and the run ─────────
@@ -103,11 +118,18 @@ def test_the_facts_the_freeze_and_the_run_take_the_same_import_links(tmp_path):
     n.add("Link", "grid_import_b", bus0="grid", bus1="dc_mv", carrier="AC", p_nom=15.0)
     n.add("Link", "site_tie", bus0="dc_mv", bus1="it_bus", carrier="AC", p_nom=7.0)
     facts_cap, connection = F._connection(n, None, WEAK)
-    assert sorted(facts_cap.links) == ["grid_import", "grid_import_b"] and facts_cap.mw == 55.0
+    assert (
+        sorted(facts_cap.links) == ["grid_import", "grid_import_b"]
+        and facts_cap.mw == 55.0
+    )
     frozen = _freeze(tmp_path, n)["args"]
     assert frozen["pack_overrides"]["import_p_nom_mw"] == 55.0
-    pack = F._pack_for({"archetype": frozen["archetype"], "pack_overrides": frozen["pack_overrides"]})
-    assert sorted(arch.select_import_links(n, pack.import_overlay)) == sorted(facts_cap.links)
+    pack = F._pack_for(
+        {"archetype": frozen["archetype"], "pack_overrides": frozen["pack_overrides"]}
+    )
+    assert sorted(arch.select_import_links(n, pack.import_overlay)) == sorted(
+        facts_cap.links
+    )
     assert "site_tie" not in connection
 
 
@@ -141,7 +163,10 @@ def test_a_selector_fault_refuses():
         def links(self):
             raise RuntimeError("store unreadable")
 
-    assert F.import_capacity(Broken(), F._template_request(WEAK, None)).refusal == F.CAP_UNREADABLE
+    assert (
+        F.import_capacity(Broken(), F._template_request(WEAK, None)).refusal
+        == F.CAP_UNREADABLE
+    )
 
 
 def test_a_zero_limit_refuses_never_the_template_value(tmp_path):
@@ -160,7 +185,7 @@ def test_no_import_link_refuses_never_the_template_value(tmp_path):
     n = build_eh_datacenter()
     n.remove("Link", "grid_import")
     n.buses["eh_poc"] = False
-    n.links.loc["site_transformer", "carrier"] = "site AC"   # no import carrier either
+    n.links.loc["site_transformer", "carrier"] = "site AC"  # no import carrier either
     assert _refusal(n) == F.CAP_NO_LINK
     with pytest.raises(run_eh.FreezeError, match="no grid import link"):
         _freeze(tmp_path, n)
@@ -185,8 +210,13 @@ def test_readiness_says_the_limit_cannot_be_read():
     n = build_eh_datacenter()
     n.links.loc[_imports(n), "p_nom"] = 0.0
     facts = types.SimpleNamespace(
-        revision=1, voll=1.0, cfg_hash="x", cfg_dict={}, copy=None,
-        import_cap=F._connection(n, None, WEAK)[0])
+        revision=1,
+        voll=1.0,
+        cfg_hash="x",
+        cfg_dict={},
+        copy=None,
+        import_cap=F._connection(n, None, WEAK)[0],
+    )
     result = F._readiness(facts, WEAK, "c2-test")
     assert isinstance(result, F.ImportCapacityError) and str(result) == F.CAP_ZERO
     [item] = F._readiness_items(result, voll_noted=False)
@@ -217,10 +247,26 @@ def test_admit_refuses_a_run_whose_limit_moved(tmp_path):
     n = build_eh_datacenter()
     ctx = _ctx(tmp_path, n)
     frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
-    step = {"id": "solve.2", "tool": "run_eh_study", "args": dict(frozen["args"]),
-            "frozen": frozen, "status": "pending", "attempt_id": "a1"}
-    task = {"task_id": "t1", "project_id": "p", "status": "running", "steps": [step],
-            "run": {"profile": "eh_site@1", "status": "running", "stage": "solve", "stages": {}}}
+    step = {
+        "id": "solve.2",
+        "tool": "run_eh_study",
+        "args": dict(frozen["args"]),
+        "frozen": frozen,
+        "status": "pending",
+        "attempt_id": "a1",
+    }
+    task = {
+        "task_id": "t1",
+        "project_id": "p",
+        "status": "running",
+        "steps": [step],
+        "run": {
+            "profile": "eh_site@1",
+            "status": "running",
+            "stage": "solve",
+            "stages": {},
+        },
+    }
     n.links.loc[_imports(n), "p_nom"] = 30.0
     kind, message = run_eh.admit(tmp_path / "task.json", task, step, step["args"], ctx)
     assert kind == run_eh.ARGS_KIND and "connection limit changed" in message
@@ -232,7 +278,10 @@ def test_admit_refuses_a_run_whose_limit_moved(tmp_path):
 def test_request_for_needs_the_network():
     import inspect
 
-    assert inspect.signature(F._request_for).parameters["n"].default is inspect.Parameter.empty
+    assert (
+        inspect.signature(F._request_for).parameters["n"].default
+        is inspect.Parameter.empty
+    )
 
 
 def test_the_frozen_run_takes_the_edited_limit(tmp_path):
@@ -240,4 +289,6 @@ def test_the_frozen_run_takes_the_edited_limit(tmp_path):
     n.links.loc[_imports(n), "p_nom"] = 45.0
     args = _freeze(tmp_path, n)["args"]
     assert args["archetype"] == "weak_flexible"
-    assert args["pack_overrides"]["import_p_nom_mw"] == pytest.approx(45.0) != TEMPLATE_MW
+    assert (
+        args["pack_overrides"]["import_p_nom_mw"] == pytest.approx(45.0) != TEMPLATE_MW
+    )
