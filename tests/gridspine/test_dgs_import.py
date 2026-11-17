@@ -1000,6 +1000,11 @@ def test_three_winding_magnetising_and_vector_groups_match_pandapower(tmp_path):
             None,
             "no-load losses give g 0.0004 above |y| 0.0001",
         ),
+        (
+            "34;T3;100.0;50.0;25.0;132.0;33.0;11.0;10.0;8.0;12.0;300;50;100;0.5;-40;0;11;5",
+            None,
+            "no-load losses give g -0.0004 above |y| 0.005",
+        ),
     ],
 )
 def test_three_winding_refusals(tmp_path, t3, e3, words):
@@ -1119,3 +1124,9 @@ def test_the_spectra_count_counts_spectra_not_their_uses(tmp_path):
     res = read_text(tmp_path, dgs_text(rows))
     assert res.report.counts["Harmonic spectra"] == 1
     assert res.report.counts["Loads given a harmonic spectrum"] == 2
+
+
+def test_an_out_of_service_external_grid_leaves_the_bus_set_point(tmp_path):
+    rows = _with(ElmXnet=["44;Grid;2;1.05;1000.0;500.0;0.1;0.2;SL;1"])
+    n = read_text(tmp_path, dgs_text(rows)).network
+    assert n.buses.at["EHV", "v_mag_pu_set"] == 1.0
