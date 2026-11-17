@@ -15,7 +15,6 @@ comparison has succeeded, so a bad export leaves an earlier read-back intact.
 
 Engine cage: pandas on CSVs only — no pandapower behind this module.
 """
-
 from __future__ import annotations
 
 import dataclasses
@@ -64,9 +63,7 @@ def load_bundle_lf(bundle_dir) -> BundleLF:
     bundle_dir = Path(bundle_dir)
     for name in ("manifest.json", "lf_bus.csv", "lf_branch_flow.csv"):
         if not (bundle_dir / name).is_file():
-            raise ContractError(
-                f"{bundle_dir} is not a complete handoff bundle: {name} missing"
-            )
+            raise ContractError(f"{bundle_dir} is not a complete handoff bundle: {name} missing")
     manifest = json.loads((bundle_dir / "manifest.json").read_text())
     bus = pd.read_csv(bundle_dir / "lf_bus.csv").set_index("bus")
     branch_flow = pd.read_csv(bundle_dir / "lf_branch_flow.csv", dtype={"ckt": str})
@@ -86,11 +83,7 @@ def _source(path) -> dict | None:
     if path is None:
         return None
     path = Path(path)
-    return {
-        "filename": path.name,
-        "sha256": _sha256(path),
-        "bytes": path.stat().st_size,
-    }
+    return {"filename": path.name, "sha256": _sha256(path), "bytes": path.stat().st_size}
 
 
 def _bus_summary(cmp: pd.DataFrame) -> dict:
@@ -102,9 +95,7 @@ def _bus_summary(cmp: pd.DataFrame) -> dict:
         "n_ok": int(cmp["ok"].sum()),
         "max_vm_rel_err": float(cmp["vm_rel_err"].max()),
         "max_va_abs_err_deg": float(cmp["va_abs_err_deg"].max()),
-        "worst": str(worst.idxmax())
-        if len(cmp)
-        else None,  # empty: every bus not compared (DGS)
+        "worst": str(worst.idxmax()) if len(cmp) else None,  # empty: every bus not compared (DGS)
         "pass": bool(cmp["ok"].all()),
     }
 
@@ -129,19 +120,12 @@ def dgs_name_map(names: pd.DataFrame) -> tuple[dict, dict]:
     to_bus, ckt)``."""
     bus = names[names["pp_table"] == "bus"]
     br = names[names["pp_table"].isin(["line", "trafo"])]
-    return (
-        dict(zip(bus["dgs_name"].astype(str), bus["pp_name"].astype(str))),
-        {
-            str(r.dgs_name): (str(r.from_bus), str(r.to_bus), str(r.ckt))
-            for r in br.itertuples()
-        },
-    )
+    return (dict(zip(bus["dgs_name"].astype(str), bus["pp_name"].astype(str))),
+            {str(r.dgs_name): (str(r.from_bus), str(r.to_bus), str(r.ckt)) for r in br.itertuples()})
 
 
 def _unmapped(kind: str, names) -> ContractError:
-    return ContractError(
-        f"PowerFactory {kind} name(s) not in the DGS export: {sorted(map(str, names))}"
-    )
+    return ContractError(f"PowerFactory {kind} name(s) not in the DGS export: {sorted(map(str, names))}")
 
 
 def _dgs_keyed(bundle_dir: Path, lf: BundleLF, bus_csv, branch_csv):
@@ -154,12 +138,8 @@ def _dgs_keyed(bundle_dir: Path, lf: BundleLF, bus_csv, branch_csv):
     names_path = bundle_dir / DGS_NAMES_CSV
     if not names_path.is_file():
         return lf, bus_csv, branch_csv, None
-    bus_map, branch_map = dgs_name_map(
-        pd.read_csv(names_path, dtype=str, keep_default_na=False)
-    )
-    pf = pd.read_csv(
-        bus_csv, dtype={"bus_name": str}
-    )  # a DGS name like "001" stays text
+    bus_map, branch_map = dgs_name_map(pd.read_csv(names_path, dtype=str, keep_default_na=False))
+    pf = pd.read_csv(bus_csv, dtype={"bus_name": str})  # a DGS name like "001" stays text
     bus = lf.bus
     if "bus_name" in pf.columns:
         key = pf["bus_name"].astype(str).str.strip()
@@ -168,10 +148,7 @@ def _dgs_keyed(bundle_dir: Path, lf: BundleLF, bus_csv, branch_csv):
             raise _unmapped("bus", unknown)
         pf["bus_name"] = key.map(bus_map)
         bus = lf.bus[lf.bus.index.astype(str).isin(set(pf["bus_name"]))]
-    not_compared = {
-        "bus": sorted(map(str, set(lf.bus.index) - set(bus.index))),
-        "branches": [],
-    }
+    not_compared = {"bus": sorted(map(str, set(lf.bus.index) - set(bus.index))), "branches": []}
     bus_buf = io.StringIO(pf.to_csv(index=False))
     if branch_csv is None:
         return dataclasses.replace(lf, bus=bus), bus_buf, None, not_compared
@@ -186,24 +163,11 @@ def _dgs_keyed(bundle_dir: Path, lf: BundleLF, bus_csv, branch_csv):
         for k, col in enumerate(("from_bus", "to_bus", "ckt")):
             br[col] = [t[k] for t in triples]
         given = set(triples)
-        keys = list(
-            zip(
-                flow["from_bus"].astype(str),
-                flow["to_bus"].astype(str),
-                flow["ckt"].astype(str),
-            )
-        )
+        keys = list(zip(flow["from_bus"].astype(str), flow["to_bus"].astype(str), flow["ckt"].astype(str)))
         present = [k in given for k in keys]
-        not_compared["branches"] = sorted(
-            [list(k) for k, p in zip(keys, present) if not p]
-        )
+        not_compared["branches"] = sorted([list(k) for k, p in zip(keys, present) if not p])
         flow = flow[present]
-    return (
-        dataclasses.replace(lf, bus=bus, branch_flow=flow),
-        bus_buf,
-        io.StringIO(br.to_csv(index=False)),
-        not_compared,
-    )
+    return dataclasses.replace(lf, bus=bus, branch_flow=flow), bus_buf, io.StringIO(br.to_csv(index=False)), not_compared
 
 
 def read_back(bundle_dir, bus_csv, branch_csv=None) -> dict:
@@ -224,24 +188,12 @@ def read_back(bundle_dir, bus_csv, branch_csv=None) -> dict:
     """
     bundle_dir = Path(bundle_dir)
     lf = load_bundle_lf(bundle_dir)
-    lf, bus_in, branch_in, not_compared = _dgs_keyed(
-        bundle_dir, lf, bus_csv, branch_csv
-    )
-    bus_cmp = compare_lf(
-        lf,
-        bus_in,
-        vm_tol=BUS_TOLERANCE["vm_rel_err"],
-        va_tol_deg=BUS_TOLERANCE["va_abs_err_deg"],
-    )
+    lf, bus_in, branch_in, not_compared = _dgs_keyed(bundle_dir, lf, bus_csv, branch_csv)
+    bus_cmp = compare_lf(lf, bus_in, vm_tol=BUS_TOLERANCE["vm_rel_err"], va_tol_deg=BUS_TOLERANCE["va_abs_err_deg"])
     branch_cmp = (
-        compare_branch_flows(
-            lf,
-            branch_in,
-            p_tol=BRANCH_TOLERANCE["p_rel_err"],
-            q_tol_mvar=BRANCH_TOLERANCE["q_abs_err_mvar"],
-        )
-        if branch_csv is not None
-        else None
+        compare_branch_flows(lf, branch_in, p_tol=BRANCH_TOLERANCE["p_rel_err"],
+                             q_tol_mvar=BRANCH_TOLERANCE["q_abs_err_mvar"])
+        if branch_csv is not None else None
     )
 
     # Comparison done: now, and only now, write. Uploads first, byte-for-byte,
@@ -253,9 +205,7 @@ def read_back(bundle_dir, bus_csv, branch_csv=None) -> dict:
         branch_cmp.to_csv(bundle_dir / READBACK_BRANCHES_CSV)
     else:
         for name in (PF_BRANCHES_CSV, READBACK_BRANCHES_CSV):
-            (bundle_dir / name).unlink(
-                missing_ok=True
-            )  # an older branch read-back no longer applies
+            (bundle_dir / name).unlink(missing_ok=True)      # an older branch read-back no longer applies
 
     bus = _bus_summary(bus_cmp)
     branches = _branch_summary(branch_cmp) if branch_cmp is not None else None
@@ -268,13 +218,9 @@ def read_back(bundle_dir, bus_csv, branch_csv=None) -> dict:
         "sources": {"bus_csv": _source(bus_csv), "branch_csv": _source(branch_csv)},
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
-    if (
-        not_compared is not None
-    ):  # a DGS bundle: what PowerFactory did not export is listed, and blocks a pass
+    if not_compared is not None:  # a DGS bundle: what PowerFactory did not export is listed, and blocks a pass
         summary["not_compared"] = not_compared
-        summary["pass"] = bool(
-            summary["pass"] and not (not_compared["bus"] or not_compared["branches"])
-        )
+        summary["pass"] = bool(summary["pass"] and not (not_compared["bus"] or not_compared["branches"]))
     (bundle_dir / READBACK_JSON).write_text(json.dumps(summary, indent=2))
     return summary
 
@@ -286,13 +232,8 @@ def readback_summary(bundle_dir) -> dict | None:
 
 def _rows(cmp: pd.DataFrame, pp_col: str, pf_col: str, err_col: str, label) -> list:
     return [
-        {
-            "element": label(idx),
-            "pandapower": float(r[pp_col]),
-            "powerfactory": float(r[pf_col]),
-            "err": float(r[err_col]),
-            "ok": bool(r["ok"]),
-        }
+        {"element": label(idx), "pandapower": float(r[pp_col]), "powerfactory": float(r[pf_col]),
+         "err": float(r[err_col]), "ok": bool(r["ok"])}
         for idx, r in cmp.iterrows()
     ]
 
@@ -307,43 +248,19 @@ def readback_figure(bundle_dir, name: str) -> dict:
     hour = int(json.loads((bundle_dir / "manifest.json").read_text())["hour"])
     summary = readback_summary(bundle_dir)
     if summary is None:
-        return {
-            "available": False,
-            "name": name,
-            "hour": hour,
-            "reason": f"no PowerFactory results uploaded for hour {hour} yet",
-        }
+        return {"available": False, "name": name, "hour": hour,
+                "reason": f"no PowerFactory results uploaded for hour {hour} yet"}
     if name in ("vm", "va"):
         cmp = pd.read_csv(bundle_dir / READBACK_BUS_CSV).set_index("bus")
-        col, tol_key = (
-            ("vm_pu", "vm_rel_err") if name == "vm" else ("va_degree", "va_abs_err_deg")
-        )
+        col, tol_key = ("vm_pu", "vm_rel_err") if name == "vm" else ("va_degree", "va_abs_err_deg")
         rows = _rows(cmp, f"{col}_pp", f"{col}_pf", tol_key, str)
         tolerance = {tol_key: BUS_TOLERANCE[tol_key]}
     else:
         if not (bundle_dir / READBACK_BRANCHES_CSV).is_file():
-            return {
-                "available": False,
-                "name": name,
-                "hour": hour,
-                "reason": f"no PowerFactory branch export uploaded for hour {hour}",
-            }
-        cmp = pd.read_csv(
-            bundle_dir / READBACK_BRANCHES_CSV, dtype={"ckt": str}
-        ).set_index(["from_bus", "to_bus", "ckt"])
-        col, tol_key = (
-            ("p_from_mw", "p_rel_err")
-            if name == "branch_p"
-            else ("q_from_mvar", "q_abs_err_mvar")
-        )
-        rows = _rows(
-            cmp, f"{col}_pp", f"{col}_pf", tol_key, lambda k: f"{k[0]}→{k[1]} ({k[2]})"
-        )
+            return {"available": False, "name": name, "hour": hour,
+                    "reason": f"no PowerFactory branch export uploaded for hour {hour}"}
+        cmp = pd.read_csv(bundle_dir / READBACK_BRANCHES_CSV, dtype={"ckt": str}).set_index(["from_bus", "to_bus", "ckt"])
+        col, tol_key = ("p_from_mw", "p_rel_err") if name == "branch_p" else ("q_from_mvar", "q_abs_err_mvar")
+        rows = _rows(cmp, f"{col}_pp", f"{col}_pf", tol_key, lambda k: f"{k[0]}→{k[1]} ({k[2]})")
         tolerance = {tol_key: BRANCH_TOLERANCE[tol_key]}
-    return {
-        "available": True,
-        "name": name,
-        "hour": hour,
-        "tolerance": tolerance,
-        "rows": rows,
-    }
+    return {"available": True, "name": name, "hour": hour, "tolerance": tolerance, "rows": rows}

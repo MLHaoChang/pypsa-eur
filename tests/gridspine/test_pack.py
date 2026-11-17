@@ -68,16 +68,7 @@ FAULT = (T >= 0.2) & (T < 0.35)
 
 
 def _case(case_id, kind, params, trgc="07"):
-    return Case(
-        case_id,
-        kind,
-        trgc,
-        GRID,
-        0.2,
-        1.5,
-        tuple(c for c in CHANNELS if c != "connected"),
-        params,
-    )
+    return Case(case_id, kind, trgc, GRID, 0.2, 1.5, tuple(c for c in CHANNELS if c != "connected"), params)
 
 
 def _rise(y0, y1):
