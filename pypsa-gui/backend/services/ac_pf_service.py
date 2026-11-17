@@ -173,8 +173,11 @@ def keep_lp_tables(n, lopf_results: dict) -> None:
     the flow's tables (GK A F5)."""
     snap = dict(lopf_results)
     # Every PF-only table is emptied, kept in the record or not, and an LP
-    # table the record lacks reads as no data (GK A 1).
-    for key in _PF_ONLY_RESULTS | (_NOT_IN_LEGACY_RECORDS - snap.keys()):
+    # table the record lacks reads as no data (GK A 1). A record saved before
+    # links were kept has no link port: the live one holds the flow's (GK A 29).
+    ports = {f"links_t.{p}" for p in _attrs_of("links_t", n.links_t, ())}
+    lacking = (_NOT_IN_LEGACY_RECORDS | ports) - snap.keys()
+    for key in _PF_ONLY_RESULTS | lacking:
         if key not in snap:
             accessor_name, attr = key.split(".", 1)
             live = getattr(getattr(n, accessor_name, None), attr, None)

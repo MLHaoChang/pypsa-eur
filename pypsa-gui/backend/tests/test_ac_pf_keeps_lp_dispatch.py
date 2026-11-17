@@ -23,6 +23,25 @@ site, set_cfg = _flow.site, _flow.set_cfg
 
 PF_ONLY = sorted(ac_pf_service._PF_ONLY_RESULTS)
 
+# The tables only the AC power flow writes, pinned here rather than read from
+# the production set, so dropping one from it fails the sweep (GK A 29).
+PF_ONLY_PINNED = frozenset(
+    {
+        "generators_t.q",
+        "loads_t.q",
+        "storage_units_t.q",
+        "stores_t.q",
+        "lines_t.q0",
+        "lines_t.q1",
+        "transformers_t.q0",
+        "transformers_t.q1",
+        "buses_t.q",
+        "buses_t.v_mag_pu",
+        "shunt_impedances_t.p",
+        "shunt_impedances_t.q",
+    }
+)
+
 
 def _ieee14() -> pypsa.Network:
     """Built here, as `test_project_flow.test_r4_ieee14` does: the shipped
@@ -48,7 +67,7 @@ def _assert_lp_or_emptied(n, before: dict):
     after = _every_frame(n)
     assert after.keys() == before.keys()
     for key, df in after.items():
-        if key in ac_pf_service._PF_ONLY_RESULTS:
+        if key in PF_ONLY_PINNED:
             assert df.columns.empty, key
         else:
             pd.testing.assert_frame_equal(df, before[key], check_exact=True, obj=key)
@@ -155,6 +174,9 @@ def test_every_dynamic_frame_is_the_lps_or_an_emptied_pf_only_one(earlier_flow):
     before = _every_frame(n)
     out = ac_pf_service.run_ac_pf_stage(n, SolverConfig(), queue.Queue())
     _assert_lp_or_emptied(n, before)
+    for key in PF_ONLY_PINNED:
+        acc, attr = key.split(".", 1)
+        assert getattr(getattr(n, acc), attr).columns.empty, key
     # The flow moved the bus injections and wrote q; both are kept under its name.
     pf, lp = out["ac_pf_results"], out["lopf_results"]
     assert (pf["buses_t.p"] - before["buses_t.p"]).abs().to_numpy().max() > 1e-3
@@ -410,7 +432,7 @@ def _master_snapshot_result_state(n) -> dict:
     return out
 
 
-def _legacy_save(client, site, monkeypatch, project_storage_dir, name):
+def _legacy_save(client, site, monkeypatch, project_storage_dir, name, build=None):
     """A project saved before PF-SAVE-1: master's writer keeps the record, the
     stage leaves the flow's tables live (as master did), the real save route
     writes them to network.nc, and metadata.json has no PF-SAVE-1 marker."""
@@ -418,7 +440,7 @@ def _legacy_save(client, site, monkeypatch, project_storage_dir, name):
 
     from routers.projects import LP_DISPATCH_SAVED
 
-    site(_ieee14(), name=name)
+    site((build or _ieee14)(), name=name)
     with monkeypatch.context() as m:
         m.setattr(ac_pf_service, "_lp_snapshot", _master_snapshot_result_state)
         m.setattr(
@@ -466,6 +488,60 @@ def test_a_legacy_project_reloads_with_the_lp_dispatch(
         for key in [*PF_ONLY, "buses_t.p"]:
             acc, attr = key.split(".", 1)
             assert getattr(getattr(n, acc), attr).columns.empty, key
+
+
+def test_a_legacy_projects_links_read_as_no_data_not_the_flows(
+    client, site, bound_ctx, monkeypatch, project_storage_dir
+):
+    """GK A 29: master's record has no link port, so network.nc's links_t
+    hold the flow's values; after reload every port is empty and the LP
+    source gives no link data, never the flow's under the LP label."""
+    _legacy_save(
+        client,
+        site,
+        monkeypatch,
+        project_storage_dir,
+        "pf_legacy_links",
+        build=_three_port_hub,
+    )
+    with bound_ctx(client):
+        assert not PyPSAService.get_network().links_t.p0.columns.empty, "fixture"
+        record = PyPSAService.get_solver_state()["lopf_results"]
+        assert not any(k.startswith("links_t.") for k in record), "fixture"
+    _reload(client, "pf_legacy_links")
+    with bound_ctx(client):
+        n = PyPSAService.get_network()
+        ports = [k for k in n.links_t.keys() if k[1:].isdigit() and k[0] == "p"]
+        assert {"p0", "p1", "p2"} <= set(ports)
+        for port in ports:
+            assert n.links_t[port].columns.empty, port
+    r = client.get("/api/results/links", params={"source": "lopf"})
+    assert r.status_code in (200, 204), r.text
+    assert r.status_code == 204 or not r.json().get("columns"), r.text
+
+
+def test_a_new_save_keeps_every_link_port_the_lps(client, site, bound_ctx):
+    """GK A 29: a PF-SAVE-1 save keeps the LP's flow on every link port."""
+    site(_three_port_hub(), name="pf_new_links")
+    _run_and_pf(client)
+    with bound_ctx(client):
+        lp = {
+            k: df.copy()
+            for k, df in PyPSAService.get_solver_state()["lopf_results"].items()
+            if k.startswith("links_t.")
+        }
+    assert {"links_t.p0", "links_t.p1", "links_t.p2"} <= lp.keys()
+    _reload(client, "pf_new_links")
+    with bound_ctx(client):
+        n = PyPSAService.get_network()
+        for key, df in lp.items():
+            pd.testing.assert_frame_equal(
+                n.links_t[key.split(".", 1)[1]],
+                df,
+                check_exact=True,
+                check_freq=False,
+                obj=key,
+            )
 
 
 def test_a_legacy_project_without_its_lp_record_says_so(
