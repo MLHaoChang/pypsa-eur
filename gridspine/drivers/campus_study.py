@@ -1512,8 +1512,8 @@ def planning_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), co
                 for t, c in ((net.line, "max_i_ka_emergency"), (net.trafo, "sn_mva_emergency")))
             emergency = emergency or emergency_h
             if not imported:
-                parts = [branch_contingencies(net), unit_contingencies(registry)]
-                cset_h = pd.concat([p for p in parts if len(p)], ignore_index=True)
+                parts = [p for p in (branch_contingencies(net), unit_contingencies(registry)) if len(p)]
+                cset_h = pd.concat(parts, ignore_index=True) if parts else None
             else:
                 cset_h = cset
             if cset_h is None or len(cset_h) == 0:

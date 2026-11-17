@@ -7,6 +7,7 @@ fixture checks the run writes both CSVs and fails closed.
 """
 
 import math
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -21,6 +22,7 @@ from gridspine.drivers.campus_study import (
     _gc03_case_verdict,
     _gc03_hour_net,
     _gc03_hours,
+    _gc03_source,
     _gc03_strength,
     _vs_period,
     campus_tables,
@@ -32,7 +34,9 @@ from gridspine.drivers.campus_study import (
     size_campus,
     strength_campus,
 )
+from gridspine.drivers import campus_study
 from gridspine.ingest.campus import build_campus
+from gridspine.schema.contracts import ContractError
 from gridspine.ingest.contingency_list import read_contingency_list
 from gridspine.static.campus_sc import campus_fault_levels
 from tests.gridspine.test_campus_hourly import solved_hub
@@ -370,6 +374,10 @@ def test_an_imported_list_with_an_excluded_contingency_never_reads_pass(sized):
             {"stage2_verdict": "pass", "angle_verdict": "unknown", "load_lost_mw": 0.5},
             "fail",
         ),
+        (
+            {"stage2_verdict": "pass", "angle_verdict": "pass", "load_lost_mw": 1e-3},
+            "pass",
+        ),
     ],
     ids=[
         "passes",
@@ -377,6 +385,7 @@ def test_an_imported_list_with_an_excluded_contingency_never_reads_pass(sized):
         "stage2-fails",
         "angle-fails",
         "load-lost-fails",
+        "load-lost-at-tolerance-passes",
     ],
 )
 def test_case_verdict_fails_closed(row, verdict):
@@ -414,3 +423,120 @@ def test_a_period_with_no_converged_hour_fails(sized):
     )
     # nothing screened at all, but the failed intact flow is a violation
     assert out["verdict"] == "fail" and out["not_converged"] == ["period 2040"]
+
+
+def test_a_poc_at_exactly_1_kv_carries_no_c_min():
+    spec = _spec(caps=())
+    spec["campus"]["buses"]["LV"] = {"vn_kv": 1.0}
+    spec["campus"]["transformers"]["TL"] = _trafo(
+        "MV2", "LV", kv=1.0, sn=1000.0, vk=1.0
+    )
+    spec["campus"]["units"]["PVL"] = _ibr("pv", "LV", 1.0)
+    lv = _at(_strength(spec)[0], "LV")
+    # pandapower applies c_min = 0.95 strictly below 1 kV only
+    z_tl = 0.01 / 1000.0 * 0.95 * 1.1 / (1 + 0.6 * 0.01)
+    assert lv["sk_intact_mva"] == pytest.approx(1 / (1 / SK_MV2 + z_tl), rel=5e-4)
+    assert LV_C_NOTE not in str(lv["note"])
+
+
+def test_source_tags_come_from_the_spec():
+    params = pd.DataFrame(
+        [
+            ("WT", "k_sc", "measured"),
+            ("WT", "rx_sc", "vendor sheet"),
+            ("PV", "k_sc", "assumed"),
+        ],
+        columns=["element", "param", "source"],
+    )
+    c = SimpleNamespace(params=params)
+    assert _gc03_source(c, "WT", "k_sc") == "measured"  # a template tag is kept
+    assert _gc03_source(c, "WT", "rx_sc") == "datasheet"  # another entered value
+    assert _gc03_source(c, "PV", "rx_sc") == "assumed"  # not given
+    assert _gc03_source(c, "XX", "k_sc") == "assumed"
+
+
+def test_strength_refuses_a_normally_open_tie_and_a_campus_with_no_converter():
+    with pytest.raises(ContractError, match="normally open"):
+        campus_study._gc03_strength(SimpleNamespace(tie_normally_open=True), None)
+    units = pd.DataFrame({"kind": ["load", "genset"], "bus": ["MV1", "MV1"]})
+    with pytest.raises(ContractError, match="no converter-interfaced unit"):
+        campus_study._gc03_strength(
+            SimpleNamespace(tie_normally_open=False, units=units), None
+        )
+
+
+def test_the_strength_step_takes_a_str_run_dir(sized):
+    assert strength_campus(str(sized))["pocs"]
+
+
+def _patched_hour_net(monkeypatch, ratings):
+    """Each call of ``_gc03_hour_net`` gives the trafos the next emergency rating column."""
+    orig, calls = campus_study._gc03_hour_net, []
+
+    def wrapped(*a, **k):
+        out = orig(*a, **k)
+        net = out[0]
+        rated = ratings(len(calls))
+        net.trafo["sn_mva_emergency"] = net.trafo["sn_mva"] if rated else float("nan")
+        calls.append(rated)
+        return out
+
+    monkeypatch.setattr(campus_study, "_gc03_hour_net", wrapped)
+    return calls
+
+
+def test_an_all_nan_emergency_column_is_no_emergency_rating(sized, monkeypatch):
+    _patched_hour_net(monkeypatch, lambda i: False)
+    out = planning_campus(sized)
+    assert out["notes"].count(NO_EMERGENCY_NOTE) == 1
+    table = pd.read_csv(sized / PLANNING_CSV)
+    assert (table["note"].fillna("").str.count(NO_EMERGENCY_NOTE) == 1).all()
+
+
+def test_the_emergency_note_follows_each_hour_s_ratings(sized, monkeypatch):
+    calls = _patched_hour_net(
+        monkeypatch, lambda i: i == 0
+    )  # only the first hour is rated
+    out = planning_campus(sized)
+    assert len(calls) > 1
+    assert NO_EMERGENCY_NOTE not in out["notes"]  # some hour had a rating
+    table = pd.read_csv(sized / PLANNING_CSV)
+    first = (table["period"] == table["period"].min()) & (
+        table["hour_kind"] == "max_import"
+    )
+    counts = table["note"].fillna("").str.count(NO_EMERGENCY_NOTE)
+    assert (counts[first] == 0).all() and (counts[~first] == 1).all()
+
+
+def test_an_hour_with_no_contingency_makes_an_otherwise_passing_screen_incomplete(
+    sized, monkeypatch
+):
+    from gridspine.static import contingency_set
+
+    orig, n = contingency_set.branch_contingencies, []
+
+    def first_empty(net):
+        n.append(1)
+        return orig(net).iloc[0:0] if len(n) == 1 else orig(net)
+
+    monkeypatch.setattr(contingency_set, "branch_contingencies", first_empty)
+    monkeypatch.setattr(
+        contingency_set, "unit_contingencies", lambda reg: pd.DataFrame()
+    )
+    monkeypatch.setattr(campus_study, "_gc03_case_verdict", lambda r: "pass")
+    out = planning_campus(sized)
+    assert out["cases"] > 0 and out["failures"] == 0
+    assert out["verdict"] == "incomplete" and len(out["unscreened"]) == 1
+
+
+def test_the_planning_csv_leads_with_its_key_columns(sized):
+    planning_campus(sized)
+    cols = pd.read_csv(sized / PLANNING_CSV).columns
+    assert list(cols[:6]) == [
+        "period",
+        "hour_kind",
+        "contingency_id",
+        "kind",
+        "hour",
+        "verdict",
+    ]
