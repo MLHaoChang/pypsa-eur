@@ -193,6 +193,21 @@ describe('GoalStudyRun optimisation-only states (GENONLY-RUN-1)', () => {
   }
   afterEach(() => { useSimulationStore.setState({ status: 'idle' }) })
 
+  it('a grid template (study needs an Energy Hub site) gets the same Run and the same plain line', async () => {
+    getFlowScope.mockResolvedValue({
+      ...IPP_SCOPE, preset_id: 'ieee14', preset_label: 'IEEE 14-bus',
+      cards: [{ ...IPP_SCOPE.cards[0], options: [{ id: 'goal_study', label: 'Reliability goal & study',
+        status: 'not_yet_available', reason: 'Needs an Energy Hub site.' }] }],
+    })
+    mount()
+    const btn = await screen.findByTestId('hub-run-solve') as HTMLButtonElement
+    expect(btn.textContent).toBe('Run the optimisation')
+    expect(screen.queryByTestId('hub-run-start')).toBeNull()
+    expect(screen.getByTestId('hub-run-solve-why').textContent).toBe(
+      'This site has no reliability study to run: the run is the optimisation, which sizes and dispatches the assets.')
+    expect(document.body.textContent).not.toMatch(/Energy Hub|generates and has no load/)
+  })
+
   it('running: the button is disabled and the line says Running with the elapsed time', async () => {
     getFlowScope.mockResolvedValue(IPP_SCOPE)
     useSimulationStore.setState({ status: 'running' })
