@@ -1,38 +1,54 @@
 """GC-09: the compliance workflow through `/api/grid-compliance`.
 
-The tracker's dependency guard both ways, the data freeze and its staleness,
-the TSO revision log round-trip, and the report pack's manifest and
-confidentiality (GC-TEXT-1), all through the API on a real project.
+The tracker's guards (prerequisites both ways, the freeze, under the lock),
+the data freeze and its states, the TSO revision log, the report pack's
+manifest and confidentiality (GC-TEXT-1), unreadable files, the edit lock and
+unknown deliverables, all through the API on a real project with a network.
 """
 
 import hashlib
 import io
 import json
+import threading
 import zipfile
+from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import select
 
-from db.models import Project, User
+from db.models import Project
 from services import campus_electrical_service as ce
 from services import project_registry
 from services.grid_compliance import catalogue as cat
 from services.grid_compliance import pack as gc_pack
-from services.grid_compliance import sources
+from services.grid_compliance import revision_log, sources, store, tracker
+from tests.test_worksheet_foreign_lock import _is_lock_refusal, same_org_other_user  # noqa: F401
 
-NAME = "Compliance Hub"
+#: A distinctive name, so the no-identity check cannot pass by accident.
+NAME = "Zq7 Sentinel Plant"
 BASE = f"/api/grid-compliance/{NAME}"
 
 
 @pytest.fixture
-def hub(client, _auth_db, seeded_identity):
+def hub(client, api_project, _auth_db):
+    """A real project with a saved network, open (resident) in the app."""
+    api_project(NAME)
     _engine, session_local = _auth_db
     with session_local() as db:
-        user = db.get(User, seeded_identity["user_id"])
-        project_registry.create_root(db, user, NAME)
         project = db.execute(select(Project).where(Project.name == NAME)).scalar_one()
         db.expunge(project)
     return project
+
+
+@pytest.fixture(autouse=True)
+def _no_pdf(monkeypatch):
+    monkeypatch.setattr(gc_pack.report_pdf, "pdf_available", lambda: False)
+
+
+def _network(project):
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_context(project_registry.registry_key(project)).network
 
 
 def _campus(project, text="campus: {name: x}\n"):
@@ -43,13 +59,34 @@ def _set(client, code, status):
     return client.put(f"{BASE}/deliverables/{code}/status", json={"status": status})
 
 
+def _kind(resp):
+    return resp.json()["detail"]["error_kind"]
+
+
 def _row(client, code):
     resp = client.get(BASE)
     assert resp.status_code == 200, resp.text
     return next(r for r in resp.json()["deliverables"] if r["code"] == code)
 
 
-# ── catalogue ─────────────────────────────────────────────────────────────
+def _judge(client, *codes):
+    for code in codes:
+        assert _set(client, code, "judged").status_code == 200, code
+
+
+def _freeze(client, hub, code):
+    if not (ce.campus_dir(hub) / ce.CAMPUS_FILE).is_file():
+        _campus(hub)
+    resp = client.post(f"{BASE}/deliverables/{code}/freeze")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _tracker_file(hub):
+    return store.tracker_path(hub)
+
+
+# ── catalogue and state ───────────────────────────────────────────────────
 
 
 def test_the_catalogue_is_the_25_trgc_deliverables_with_known_prerequisites():
@@ -59,7 +96,7 @@ def test_the_catalogue_is_the_25_trgc_deliverables_with_known_prerequisites():
     assert set(cat.BY_CODE["08"].depends_on) == {"06", "07"}
     for d in cat.DELIVERABLES:
         assert set(d.depends_on) <= set(cat.BY_CODE) and d.code not in d.depends_on
-        assert d.phase in cat.PHASES
+        assert d.phase in cat.PHASES and set(d.packages) <= set(cat.PACKAGE_LABELS)
 
 
 def test_the_state_lists_every_deliverable_with_its_next_step_and_blockers(client, hub):
@@ -68,31 +105,35 @@ def test_the_state_lists_every_deliverable_with_its_next_step_and_blockers(clien
     assert len(body["deliverables"]) == 25
     row = next(r for r in body["deliverables"] if r["code"] == "08")
     assert row["status"] == "not_started" and row["next_step"] == "Collect the data list"
-    assert row["blocked_by"] == ["06", "07"]
-    assert row["feeds"] == [{"package": "GC-07", "available": False}]
+    assert row["blocked_by"] == ["06", "07"] and row["freeze_state"] == "none"
+    assert row["feeds"] == [{"package": "GC-07", "label": cat.PACKAGE_LABELS["GC-07"],
+                             "available": False}]
 
 
-# ── status guard, both ways ───────────────────────────────────────────────
+def test_a_status_is_user_declared_and_a_pending_source_never_reads_judged(client, hub):
+    row = _row(client, "06")
+    assert row["status"] == "not_started" and row["status_basis"] == "declared"
+    _judge(client, "06")
+    row = _row(client, "06")
+    assert row["status"] == "judged" and row["status_basis"] == "declared"
+    assert all(not f["available"] for f in row["feeds"])
+    assert _row(client, "07")["status"] == "not_started"
 
 
-def test_a_deliverable_is_not_submitted_while_a_prerequisite_is_not_judged(client, hub):
-    _set(client, "06", "judged")
+# ── the guards ────────────────────────────────────────────────────────────
+
+
+def test_submission_waits_for_every_prerequisite_to_be_judged(client, hub):
+    _judge(client, "04", "05", "06")
     _set(client, "07", "results_in")
+    _freeze(client, hub, "08")  # fresh freeze: only the prerequisite part fails
     resp = _set(client, "08", "submitted")
-    assert resp.status_code == 409
-    assert resp.json()["detail"]["error_kind"] == "gc_prerequisite_not_judged"
+    assert resp.status_code == 409 and _kind(resp) == "gc_prerequisite_not_judged"
     assert resp.json()["detail"]["blockers"] == ["07"]
     assert _row(client, "08")["status"] == "not_started"
-    # every status at or past submitted is guarded, not only "submitted"
     for later in ("tso_comments", "accepted"):
-        assert _set(client, "08", later).status_code == 409
-
-
-def test_a_deliverable_is_submitted_once_every_prerequisite_is_judged(client, hub):
-    _set(client, "04", "judged")
-    _set(client, "05", "judged")
-    _set(client, "06", "judged")
-    assert _set(client, "07", "accepted").status_code == 200
+        assert _kind(_set(client, "08", later)) == "gc_prerequisite_not_judged"
+    _judge(client, "07")
     resp = _set(client, "08", "submitted")
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "submitted" and resp.json()["blocked_by"] == []
@@ -100,70 +141,196 @@ def test_a_deliverable_is_submitted_once_every_prerequisite_is_judged(client, hu
     assert _set(client, "25", "results_in").status_code == 200
 
 
+def test_submission_waits_for_a_fresh_freeze(client, hub):
+    _judge(client, "13")  # 14's one prerequisite: only the freeze part fails
+    resp = _set(client, "14", "submitted")
+    assert resp.status_code == 409 and _kind(resp) == "gc_freeze_not_fresh"
+    _freeze(client, hub, "14")
+    _campus(hub, "campus: {name: edited}\n")
+    resp = _set(client, "14", "submitted")
+    assert resp.status_code == 409 and _kind(resp) == "gc_freeze_not_fresh"
+    _freeze(client, hub, "14")
+    assert _set(client, "14", "submitted").status_code == 200
+
+
 def test_a_prerequisite_does_not_drop_below_judged_under_a_submitted_dependent(client, hub):
-    _set(client, "04", "judged")
-    _set(client, "05", "judged")
-    _set(client, "06", "judged")
-    _set(client, "07", "judged")
-    _set(client, "08", "submitted")
+    _judge(client, "04", "05", "06", "07")
+    _freeze(client, hub, "08")
+    assert _set(client, "08", "submitted").status_code == 200
     resp = _set(client, "07", "results_in")
-    assert resp.status_code == 409
-    assert resp.json()["detail"]["error_kind"] == "gc_dependent_submitted"
+    assert resp.status_code == 409 and _kind(resp) == "gc_dependent_submitted"
     assert resp.json()["detail"]["blockers"] == ["08"]
-    # moving it forward is fine
+    assert _row(client, "07")["status"] == "judged"
+    _freeze(client, hub, "07")
     assert _set(client, "07", "accepted").status_code == 200
 
 
-def test_unknown_deliverable_and_status_are_refused(client, hub):
-    assert _set(client, "26", "data").status_code == 404
+def _race(monkeypatch, hub, code, status):
+    """At lock entry, another writer sets ``code`` to ``status`` in the file."""
+    real = store._lock
+
+    @contextmanager
+    def racing(path):
+        with real(path):
+            t = store.load(hub)
+            t.deliverables.setdefault(code, store.DeliverableState()).status = status
+            path.write_text(t.model_dump_json())
+            yield
+
+    monkeypatch.setattr(store, "_lock", racing)
+
+
+def test_the_demote_guard_reads_statuses_under_the_lock(client, hub, monkeypatch):
+    _judge(client, "04", "05", "06", "07")
+    _race(monkeypatch, hub, "08", "submitted")
+    resp = _set(client, "07", "results_in")
+    assert resp.status_code == 409 and _kind(resp) == "gc_dependent_submitted"
+
+
+def test_the_promote_guard_reads_statuses_under_the_lock(client, hub, monkeypatch):
+    _judge(client, "04", "05", "06", "07")
+    _freeze(client, hub, "08")
+    _race(monkeypatch, hub, "07", "results_in")
+    resp = _set(client, "08", "submitted")
+    assert resp.status_code == 409 and _kind(resp) == "gc_prerequisite_not_judged"
+
+
+def test_an_unknown_status_is_refused(client, hub):
     resp = _set(client, "01", "finished")
-    assert resp.status_code == 422
-    assert resp.json()["detail"]["error_kind"] == "gc_unknown_status"
+    assert resp.status_code == 422 and _kind(resp) == "gc_unknown_status"
+
+
+@pytest.mark.parametrize("method, path, payload", [
+    ("put", "status", {"status": "data"}),
+    ("put", "data", {"items": []}),
+    ("post", "freeze", None),
+    ("post", "comments", {"date": "2026-11-01", "comment": "x"}),
+    ("patch", "comments/C-001", {"response": "x"}),
+    ("post", "pack", None),
+])
+def test_every_code_route_refuses_an_unknown_deliverable(client, hub, method, path, payload):
+    _campus(hub)
+    resp = getattr(client, method)(f"{BASE}/deliverables/26/{path}",
+                                   **({"json": payload} if payload is not None else {}))
+    assert resp.status_code == 404 and _kind(resp) == "gc_unknown_deliverable"
 
 
 # ── data list and freeze ──────────────────────────────────────────────────
 
 
-def test_the_data_list_round_trips_and_rejects_duplicate_ids(client, hub):
+def test_the_data_list_round_trips_and_rejects_bad_items(client, hub):
     assert _row(client, "15")["data"][0]["label"] == "TSO contingency list"
     items = [{"item_id": "contingencies", "label": "TSO contingency list",
               "supplier": "TSO", "due": "2026-12-01", "status": "received"}]
-    resp = client.put(f"{BASE}/deliverables/15/data", json={"items": items})
-    assert resp.status_code == 200, resp.text
+    url = f"{BASE}/deliverables/15/data"
+    assert client.put(url, json={"items": items}).status_code == 200
     assert _row(client, "15")["data"] == items
-    resp = client.put(f"{BASE}/deliverables/15/data", json={"items": items * 2})
-    assert resp.status_code == 422
-    bad = [{**items[0], "due": "next week"}]
-    assert client.put(f"{BASE}/deliverables/15/data", json={"items": bad}).status_code == 422
+    resp = client.put(url, json={"items": items * 2})
+    assert resp.status_code == 422 and _kind(resp) == "gc_duplicate_item"
+    for bad in ({"due": "next week"}, {"supplier": "x" * 81}, {"label": "x" * 201},
+                {"status": "lost"}, {"item_id": "Bad Id"}):
+        assert client.put(url, json={"items": [{**items[0], **bad}]}).status_code == 422, bad
+    assert _row(client, "15")["data"] == items
 
 
-def test_freeze_stores_the_model_set_id_and_a_later_input_edit_marks_it_stale(client, hub):
+def test_freeze_stores_the_model_set_id_and_a_campus_edit_marks_it_stale(client, hub):
     resp = client.post(f"{BASE}/deliverables/04/freeze")
-    assert resp.status_code == 409
-    assert resp.json()["detail"]["error_kind"] == "gc_no_campus_input"
-
-    _campus(hub)
-    resp = client.post(f"{BASE}/deliverables/04/freeze")
-    assert resp.status_code == 200, resp.text
-    frozen = resp.json()["freeze"]
+    assert resp.status_code == 409 and _kind(resp) == "gc_no_campus_input"
+    row = _freeze(client, hub, "04")
+    frozen = row["freeze"]
     assert frozen["model_set_id"] == "ms-" + frozen["data_hash"][:12]
-    assert resp.json()["stale"] is False
-    assert _row(client, "04")["freeze"] == frozen and _row(client, "05")["freeze"] is None
+    assert row["freeze_state"] == "fresh" and row["stale"] is False
+    assert _row(client, "05")["freeze"] is None
 
     _campus(hub, "campus: {name: y}\n")
     row = _row(client, "04")
-    assert row["stale"] is True and row["freeze"] == frozen
-    # refreezing the edited input gives another id and clears the flag
-    again = client.post(f"{BASE}/deliverables/04/freeze").json()
+    assert row["freeze_state"] == "stale" and row["stale"] is True and row["freeze"] == frozen
+    again = _freeze(client, hub, "04")
     assert again["freeze"]["model_set_id"] != frozen["model_set_id"]
-    assert again["stale"] is False
+    assert again["freeze_state"] == "fresh"
 
 
-def test_the_freeze_hash_covers_the_asset_library_too(client, hub):
-    _campus(hub)
-    client.post(f"{BASE}/deliverables/04/freeze")
+def test_the_freeze_covers_the_asset_library(client, hub):
+    _freeze(client, hub, "04")
     (ce.campus_dir(hub) / ce.LIBRARY_FILE).write_text("discount_rate: 0.1\n")
-    assert _row(client, "04")["stale"] is True
+    assert _row(client, "04")["freeze_state"] == "stale"
+
+
+def test_the_freeze_covers_the_network_inputs(client, hub):
+    _freeze(client, hub, "04")
+    _network(hub).add("Bus", "gc09-extra", v_nom=33.0)
+    assert _row(client, "04")["freeze_state"] == "stale"
+
+
+def test_a_freeze_by_another_method_reads_refreeze_needed(client, hub):
+    _judge(client, "13")
+    _freeze(client, hub, "14")
+    t = store.load(hub)
+    t.deliverables["14"].freeze.source = "gc-01"
+    _tracker_file(hub).write_text(t.model_dump_json())
+    assert _row(client, "14")["freeze_state"] == "refreeze_needed"
+    assert _kind(_set(client, "14", "submitted")) == "gc_freeze_not_fresh"
+
+
+def test_unreadable_inputs_never_read_fresh(client, hub, monkeypatch):
+    _judge(client, "13")
+    _freeze(client, hub, "14")
+    monkeypatch.setattr(tracker, "network_fingerprint", lambda project: None)
+    assert _row(client, "14")["freeze_state"] == "unreadable"
+    assert _kind(_set(client, "14", "submitted")) == "gc_freeze_not_fresh"
+    resp = client.post(f"{BASE}/deliverables/14/freeze")
+    assert resp.status_code == 409 and _kind(resp) == "gc_inputs_unreadable"
+
+
+# ── unreadable or unwritable tracker ──────────────────────────────────────
+
+
+@pytest.mark.parametrize("content", [
+    b"not json",
+    b"[]",
+    b'{"schema_version": 2, "deliverables": {}}',
+    b'{"schema_version": 1, "deliverables": {"01": {"status": "done"}}}',
+    b'{"schema_version": 1, "deliverables": {"99": {}}}',
+    b'{"schema_version": 1, "deliverables": {}, "extra": 1}',
+    b'{"schema_version": 1, "deliverables": {"06": {"comments": [{"comment_id": "C-001"}]}}}',
+])
+def test_an_unreadable_tracker_is_refused_and_never_overwritten(client, hub, content):
+    path = _tracker_file(hub)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    for resp in (client.get(BASE), _set(client, "01", "data"),
+                 client.post(f"{BASE}/deliverables/06/comments",
+                             json={"date": "2026-11-01", "comment": "x"})):
+        assert resp.status_code == 409 and _kind(resp) == "gc_tracker_unreadable"
+    assert path.read_bytes() == content
+
+
+def test_a_failed_write_stores_nothing_and_the_id_was_never_issued(client, hub, monkeypatch):
+    def broken(path, text, encoding="utf-8"):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "atomic_write_text", broken)
+    resp = client.post(f"{BASE}/deliverables/06/comments",
+                       json={"date": "2026-11-01", "comment": "x"})
+    assert resp.status_code == 503 and _kind(resp) == "gc_tracker_write_failed"
+    monkeypatch.undo()
+    monkeypatch.setattr(gc_pack.report_pdf, "pdf_available", lambda: False)
+    assert _row(client, "06")["comments"] == []
+    ok = client.post(f"{BASE}/deliverables/06/comments",
+                     json={"date": "2026-11-01", "comment": "y"})
+    # The failed one was never stored nor returned, so C-001 is first issued here.
+    assert ok.json()["comment_id"] == "C-001"
+
+
+def test_a_busy_lock_is_a_typed_refusal(client, hub, monkeypatch):
+    @contextmanager
+    def busy(path, **kwargs):
+        raise TimeoutError
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(store, "file_lock", busy)
+    resp = _set(client, "01", "data")
+    assert resp.status_code == 409 and _kind(resp) == "gc_tracker_busy"
 
 
 # ── TSO revision log ──────────────────────────────────────────────────────
@@ -177,31 +344,51 @@ def test_the_revision_log_round_trips_with_unique_ids_per_deliverable(client, hu
     assert a.status_code == b.status_code == c.status_code == 201
     assert (a.json()["comment_id"], b.json()["comment_id"], c.json()["comment_id"]) == \
         ("C-001", "C-002", "C-001")
-
     resp = client.patch(f"{BASE}/deliverables/06/comments/C-001",
                         json={"response": "Added in section 4.", "revision": "Rev B",
                               "status": "responded"})
     assert resp.status_code == 200, resp.text
     log = _row(client, "06")["comments"]
-    assert [c["comment_id"] for c in log] == ["C-001", "C-002"]
+    assert [x["comment_id"] for x in log] == ["C-001", "C-002"]
     assert log[0] | {"updated_at": None} == {
         **a.json(), "response": "Added in section 4.", "revision": "Rev B",
         "status": "responded", "updated_at": None}
     assert log[1]["status"] == "open"
 
 
-def test_a_comment_is_closed_only_with_a_response_and_must_exist(client, hub):
-    client.post(f"{BASE}/deliverables/06/comments",
-                json={"date": "2026-11-01", "comment": "Check settling."})
-    resp = client.patch(f"{BASE}/deliverables/06/comments/C-001", json={"status": "closed"})
-    assert resp.status_code == 422
-    assert resp.json()["detail"]["error_kind"] == "gc_comment_invalid"
-    assert client.patch(f"{BASE}/deliverables/06/comments/C-009",
-                        json={"response": "x"}).status_code == 404
-    assert client.post(f"{BASE}/deliverables/06/comments",
-                       json={"date": "1 Nov", "comment": "x"}).status_code == 422
-    assert client.post(f"{BASE}/deliverables/06/comments",
-                       json={"date": "2026-11-01", "comment": ""}).status_code == 422
+def test_concurrent_comments_get_distinct_ids(client, hub):
+    ids, errors = [], []
+
+    def post(i):
+        try:
+            ids.append(revision_log.add(hub, "06", {"date": "2026-11-01",
+                                                    "comment": f"c{i}"})["comment_id"])
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=post, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert sorted(ids) == [f"C-{i:03d}" for i in range(1, 9)]
+    assert len(_row(client, "06")["comments"]) == 8
+
+
+def test_a_comment_is_closed_only_with_a_response_and_fields_are_capped(client, hub):
+    url = f"{BASE}/deliverables/06/comments"
+    client.post(url, json={"date": "2026-11-01", "comment": "Check settling."})
+    resp = client.patch(f"{url}/C-001", json={"status": "closed"})
+    assert resp.status_code == 422 and _kind(resp) == "gc_comment_invalid"
+    resp = client.patch(f"{url}/C-009", json={"response": "x"})
+    assert resp.status_code == 404 and _kind(resp) == "gc_comment_not_found"
+    for bad in ({"date": "1 Nov"}, {"comment": ""}, {"comment": "x" * 4001},
+                {"clause": "x" * 65}, {"revision": "x" * 17}, {"owner": "x"}):
+        body = {"date": "2026-11-01", "comment": "x", **bad}
+        assert client.post(url, json=body).status_code == 422, bad
+    assert client.patch(f"{url}/C-001", json={"response": "x" * 4001}).status_code == 422
+    assert [c["comment_id"] for c in _row(client, "06")["comments"]] == ["C-001"]
 
 
 # ── report pack ───────────────────────────────────────────────────────────
@@ -224,16 +411,14 @@ def _pack(client, code):
     resp = client.post(f"{BASE}/deliverables/{code}/pack")
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"] == "application/zip"
-    return zipfile.ZipFile(io.BytesIO(resp.content))
+    return resp, zipfile.ZipFile(io.BytesIO(resp.content))
 
 
-def test_the_pack_lists_every_file_with_its_hash_and_names_no_party(client, hub, monkeypatch):
-    monkeypatch.setattr(gc_pack.report_pdf, "pdf_available", lambda: False)
-    _campus(hub)
-    client.post(f"{BASE}/deliverables/06/freeze")
+def test_the_pack_lists_every_file_with_its_hash_and_names_no_party(client, hub):
+    _freeze(client, hub, "06")
     client.post(f"{BASE}/deliverables/06/comments",
                 json={"date": "2026-11-01", "clause": "§4", "comment": "Recovery time."})
-    z = _pack(client, "06")
+    resp, z = _pack(client, "06")
     manifest = json.loads(z.read("manifest.json"))
     listed = {f["path"]: f for f in manifest["files"]}
     assert set(listed) == set(z.namelist()) - {"manifest.json"}
@@ -244,27 +429,47 @@ def test_the_pack_lists_every_file_with_its_hash_and_names_no_party(client, hub,
         assert entry["bytes"] == len(data)
     assert manifest["deliverable"]["trgc"] == "06"
     assert manifest["model_set"]["model_set_id"].startswith("ms-")
-    assert manifest["pending"] == ["GC-04", "GC-07"]
-    assert manifest["skipped"] == ["report/TRGC-06.pdf: PDF conversion is not available"]
+    assert manifest["freeze_state"] == "fresh"
+    assert [(s["package"], s["state"]) for s in manifest["sources"]] == \
+        [("GC-04", "pending"), ("GC-07", "pending")]
+    assert manifest["skipped"] == [{"path": "report/TRGC-06.pdf",
+                                    "reason": "PDF conversion is not available"}]
     assert b"Recovery time." in z.read("revision_log.csv")
 
-    # GC-TEXT-1: no name field, and the project's name appears in no file.
+    # GC-TEXT-1: no name field; the project's name is in no file, member name
+    # or download name.
     assert not [k for k in _keys(manifest) if any(w in k.lower() for w in FORBIDDEN_KEYS)]
+    words = [NAME, "Zq7", "Sentinel"]
+    assert not any(w in resp.headers["content-disposition"] for w in words)
     for path in z.namelist():
+        assert not any(w in path for w in words), path
         blob = z.read(path)
         if path.endswith(".docx"):
             inner = zipfile.ZipFile(io.BytesIO(blob))
-            blob = b"".join(inner.read(n) for n in inner.namelist() if n.endswith(".xml"))
-        assert NAME.encode() not in blob, path
+            assert not any(w in n for n in inner.namelist() for w in words)
+            blob = b"".join(inner.read(n) for n in inner.namelist())
+        assert not any(w.encode() in blob for w in words), path
+    # package ids stay out of the report text (CODING_STANDARDS UI #2)
+    docx = zipfile.ZipFile(io.BytesIO(z.read("report/TRGC-06.docx")))
+    assert b"GC-0" not in docx.read("word/document.xml")
 
 
-def test_each_pack_is_recorded_and_a_response_can_cite_it(client, hub, monkeypatch):
-    monkeypatch.setattr(gc_pack.report_pdf, "pdf_available", lambda: False)
-    first = json.loads(_pack(client, "11").read("manifest.json"))
-    second = json.loads(_pack(client, "11").read("manifest.json"))
+def test_the_user_guides_and_datasheets_carry_their_own_sections(client, hub):
+    for code, heading in (("09", b"RMS model overview"), ("10", b"EMT model overview"),
+                          ("11", b"Plant and unit data")):
+        _, z = _pack(client, code)
+        docx = zipfile.ZipFile(io.BytesIO(z.read(f"report/TRGC-{code}.docx")))
+        assert heading in docx.read("word/document.xml"), code
+
+
+def test_each_pack_is_recorded_and_a_response_can_cite_it(client, hub):
+    _, z1 = _pack(client, "11")
+    _, z2 = _pack(client, "11")
+    first, second = (json.loads(z.read("manifest.json")) for z in (z1, z2))
     assert (first["pack_version"], second["pack_version"]) == (1, 2)
     packs = _row(client, "11")["packs"]
     assert [p["version"] for p in packs] == [1, 2]
+    assert packs[1]["digest"] == hashlib.sha256(z2.read("manifest.json")).hexdigest()
     client.post(f"{BASE}/deliverables/11/comments",
                 json={"date": "2026-11-02", "comment": "Add the transformer datasheet."})
     resp = client.patch(f"{BASE}/deliverables/11/comments/C-001",
@@ -272,38 +477,71 @@ def test_each_pack_is_recorded_and_a_response_can_cite_it(client, hub, monkeypat
     assert resp.status_code == 200, resp.text
     assert resp.json()["pack"] == packs[1]
     bad = client.patch(f"{BASE}/deliverables/11/comments/C-001", json={"pack_version": 7})
-    assert bad.status_code == 422
-    assert bad.json()["detail"]["error_kind"] == "gc_pack_not_found"
+    assert bad.status_code == 422 and _kind(bad) == "gc_pack_not_found"
+
+
+def test_a_pack_that_fails_to_build_records_no_version(client, hub, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(gc_pack, "render_document_docx", boom)
+    with pytest.raises(RuntimeError):
+        gc_pack.build(hub, "11")
+    assert _row(client, "11")["packs"] == []
+
+
+def test_a_pack_made_meanwhile_is_a_conflict(client, hub, monkeypatch):
+    real = gc_pack._render
+
+    def render_then_race(*args, **kwargs):
+        out = real(*args, **kwargs)
+        with store.editing(hub) as t:
+            t.deliverables.setdefault("11", store.DeliverableState()).packs.append(
+                gc_pack.RevisionRef(version=1, digest="0" * 64))
+        return out
+
+    monkeypatch.setattr(gc_pack, "_render", render_then_race)
+    resp = client.post(f"{BASE}/deliverables/11/pack")
+    assert resp.status_code == 409 and _kind(resp) == "gc_pack_conflict"
+    assert [p["digest"] for p in _row(client, "11")["packs"]] == ["0" * 64]
 
 
 def test_a_package_that_registers_output_lights_up_its_row_and_pack(client, hub, monkeypatch):
     from models.report import Table
 
-    monkeypatch.setattr(gc_pack.report_pdf, "pdf_available", lambda: False)
     table = Table(table_id="escr", columns=["case", "ESCR", "verdict"],
                   rows=[["Sk min", "3.1", "pass"]], caption="Strength at the PoC")
     monkeypatch.setitem(sources.SOURCES, "GC-03", lambda project: [table])
-    feeds = _row(client, "15")["feeds"]
-    assert feeds == [{"package": "GC-03", "available": True},
-                     {"package": "GC-04", "available": False}]
-    z = _pack(client, "15")
+    assert [f["available"] for f in _row(client, "15")["feeds"]] == [True, False]
+    _, z = _pack(client, "15")
     assert z.read("tables/GC-03-escr.csv") == b"case,ESCR,verdict\nSk min,3.1,pass\n"
-    assert json.loads(z.read("manifest.json"))["pending"] == ["GC-04"]
+    assert [s["state"] for s in json.loads(z.read("manifest.json"))["sources"]] == \
+        ["present", "pending"]
 
 
-def test_writes_are_refused_while_another_user_holds_the_edit_lock(client, hub, monkeypatch):
-    from fastapi import HTTPException
-    import routers.projects as projects
-
-    def locked(db, project, user):
-        raise HTTPException(status_code=423, detail="locked")
-
-    monkeypatch.setattr(projects, "_check_project_lock", locked)
-    assert _set(client, "01", "data").status_code == 423
-    assert client.post(f"{BASE}/deliverables/01/freeze").status_code == 423
-    assert client.post(f"{BASE}/deliverables/01/pack").status_code == 423
-    assert client.get(BASE).status_code == 200
+# ── edit lock and access ──────────────────────────────────────────────────
 
 
-def test_another_orgs_project_is_not_found(client, hub):
+@pytest.mark.parametrize("method, path, payload", [
+    ("put", "deliverables/01/status", {"status": "data"}),
+    ("put", "deliverables/01/data", {"items": []}),
+    ("post", "deliverables/01/freeze", None),
+    ("post", "deliverables/06/comments", {"date": "2026-11-01", "comment": "x"}),
+    ("patch", "deliverables/06/comments/C-001", {"response": "x"}),
+    ("post", "deliverables/01/pack", None),
+])
+def test_every_write_is_refused_under_a_foreign_lock(client, hub, same_org_other_user,
+                                                     method, path, payload):
+    _campus(hub)
+    client.post(f"{BASE}/deliverables/06/comments", json={"date": "2026-11-01", "comment": "x"})
+    before = _tracker_file(hub).read_bytes()
+    assert client.post(f"/api/projects/{NAME}/lock").status_code == 200
+    resp = getattr(same_org_other_user, method)(
+        f"{BASE}/{path}", **({"json": payload} if payload is not None else {}))
+    assert _is_lock_refusal(resp), f"{resp.status_code} {resp.text[:200]}"
+    assert _tracker_file(hub).read_bytes() == before
+    assert same_org_other_user.get(BASE).status_code == 200
+
+
+def test_an_unknown_project_is_not_found(client, hub):
     assert client.get("/api/grid-compliance/No Such Project").status_code == 404

@@ -15,7 +15,6 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session as DBSession
-from starlette.concurrency import run_in_threadpool
 
 from db.models import Project, User
 from db.session import get_db
@@ -58,7 +57,7 @@ class CommentPatch(BaseModel):
     pack_version: int | None = Field(default=None, ge=1)
 
 
-def _row(proj: AuthorizedProject, db: DBSession) -> Project:
+def _project(proj: AuthorizedProject, db: DBSession) -> Project:
     project = db.get(Project, uuid.UUID(proj.uuid))
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project '{proj.name}' not found")
@@ -95,7 +94,7 @@ def _call(fn, *args):
 @router.get("/{name}")
 def get_state(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """Every TRGC deliverable with status, blockers, data list, freeze, comments."""
-    return _call(tracker.state, _row(proj, db))
+    return _call(tracker.state, _project(proj, db))
 
 
 @router.put("/{name}/deliverables/{code}/status")
@@ -107,7 +106,7 @@ def set_status(
 ):
     """Move a deliverable along the status ladder, guarded by its prerequisites."""
     _check_lock(proj, db, user)
-    return _call(tracker.set_status, _row(proj, db), code, body.status)
+    return _call(tracker.set_status, _project(proj, db), code, body.status)
 
 
 @router.put("/{name}/deliverables/{code}/data")
@@ -119,7 +118,7 @@ def set_data(
 ):
     """Replace a deliverable's data list."""
     _check_lock(proj, db, user)
-    return _call(tracker.set_data, _row(proj, db), code, body.items)
+    return _call(tracker.set_data, _project(proj, db), code, body.items)
 
 
 @router.post("/{name}/deliverables/{code}/freeze")
@@ -131,7 +130,7 @@ def freeze(
 ):
     """Freeze the campus input and stamp its model-set id on the deliverable."""
     _check_lock(proj, db, user)
-    return _call(tracker.freeze, _row(proj, db), code)
+    return _call(tracker.freeze, _project(proj, db), code)
 
 
 @router.post("/{name}/deliverables/{code}/comments", status_code=201)
@@ -143,7 +142,7 @@ def add_comment(
 ):
     """Log a TSO comment on a deliverable."""
     _check_lock(proj, db, user)
-    return _call(revision_log.add, _row(proj, db), code, body.model_dump())
+    return _call(revision_log.add, _project(proj, db), code, body.model_dump())
 
 
 @router.patch("/{name}/deliverables/{code}/comments/{comment_id}")
@@ -155,24 +154,21 @@ def update_comment(
 ):
     """Answer or edit a TSO comment."""
     _check_lock(proj, db, user)
-    return _call(revision_log.update, _row(proj, db), code, comment_id,
+    return _call(revision_log.update, _project(proj, db), code, comment_id,
                  body.model_dump(exclude_none=True))
 
 
 @router.post("/{name}/deliverables/{code}/pack")
-async def build_pack(
+def build_pack(
     code: str,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
-    """The deliverable's report pack as a ZIP, recorded as its next pack version."""
+    """The deliverable's report pack as a ZIP, recorded as its next pack version.
+    A sync handler: FastAPI runs it in its threadpool, DB calls included."""
     _check_lock(proj, db, user)
-    project = _row(proj, db)
-    try:
-        data, manifest = await run_in_threadpool(pack.build, project, code)
-    except GridComplianceError as exc:
-        raise _http(exc) from exc
+    data, manifest = _call(pack.build, _project(proj, db), code)
     filename = f"TRGC-{code}-pack-v{manifest['pack_version']}.zip"
     return Response(content=data, media_type="application/zip", headers={
         "Content-Disposition": f'attachment; filename="{filename}"'})

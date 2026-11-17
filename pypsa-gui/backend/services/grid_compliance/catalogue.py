@@ -40,6 +40,19 @@ PHASES: dict[int, str] = {
     4: "Testing and field validation",
 }
 
+#: What each feeding package delivers, in words a report reader knows
+#: (package ids stay out of user-facing text).
+PACKAGE_LABELS: dict[str, str] = {
+    "GC-01": "plant model set (detailed and aggregated)",
+    "GC-02": "voltage-control strategy study",
+    "GC-03": "planning-criteria and grid-strength screens",
+    "GC-04": "PSS/E study results",
+    "GC-05": "PowerFactory study results",
+    "GC-06": "PSCAD study results",
+    "GC-07": "judged dynamic results and benchmarks",
+    "GC-08": "sub-synchronous interaction screens",
+}
+
 
 @dataclass(frozen=True)
 class Deliverable:

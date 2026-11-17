@@ -206,9 +206,8 @@ UI_INTERNAL: dict[str, dict] = {
         }),
     },
     'grid_compliance_workflow': {
-        "reason": ('GC-09 compliance workflow: the TRGC tracker, data list, TSO revision log and '
-                   'report pack are worked in the Grid compliance section; GC-09 ships no '
-                   'assistant tool, so chat does not serve these yet.'),
+        "reason": ('Grid compliance section: TRGC tracker, data list, TSO log and report pack. No chat tool '
+                   'yet; GC-10 adds them.'),
         "routes": frozenset({
             ('GET', '/api/grid-compliance/{name}'),
             ('PUT', '/api/grid-compliance/{name}/deliverables/{code}/status'),
@@ -323,7 +322,8 @@ def test_served_by_names_real_tools():
 
 
 def test_ui_internal_stays_small():
-    assert len(UI_INTERNAL) <= 11 and 'series_json_put' in UI_INTERNAL
+    # 12: grid_compliance_workflow until GC-10 ships its chat tools (then back to 11).
+    assert len(UI_INTERNAL) <= 12 and 'series_json_put' in UI_INTERNAL
     assert all(20 <= len(entry['reason']) <= 160 for entry in UI_INTERNAL.values())
 
 

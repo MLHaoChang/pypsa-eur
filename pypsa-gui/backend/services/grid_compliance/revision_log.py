@@ -12,24 +12,26 @@ issued in, not its anchor machinery.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from .store import DeliverableState, GridComplianceError, TsoComment, editing
+from .tracker import now as _now
 from .tracker import require_deliverable
 
-_EDITABLE = ("clause", "comment", "response", "revision", "status", "date")
+#: The fields a caller sets; the id, timestamps and pack are the log's own.
+EDITABLE = ("date", "clause", "comment", "response", "revision", "status")
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def add(project, code: str, fields: dict) -> dict:
-    require_deliverable(code)
-    unknown = set(fields) - set(_EDITABLE)
+def _only_editable(fields: dict, extra: tuple[str, ...] = ()) -> None:
+    unknown = set(fields) - set(EDITABLE) - set(extra)
     if unknown:
         raise GridComplianceError("gc_comment_invalid", 422,
                                   f"Unknown comment field(s): {sorted(unknown)}.")
+
+
+def add(project, code: str, fields: dict) -> dict:
+    """Log a comment. Its id is assigned under the tracker's lock from the
+    deliverable's counter, which only grows, so ids are unique."""
+    require_deliverable(code)
+    _only_editable(fields)
     with editing(project) as tracker:
         entry = tracker.deliverables.setdefault(code, DeliverableState())
         now = _now()
@@ -44,10 +46,7 @@ def add(project, code: str, fields: dict) -> dict:
 
 def update(project, code: str, comment_id: str, fields: dict) -> dict:
     require_deliverable(code)
-    unknown = set(fields) - set(_EDITABLE) - {"pack_version"}
-    if unknown:
-        raise GridComplianceError("gc_comment_invalid", 422,
-                                  f"Unknown comment field(s): {sorted(unknown)}.")
+    _only_editable(fields, ("pack_version",))
     with editing(project) as tracker:
         entry = tracker.deliverables.get(code) or DeliverableState()
         i = next((i for i, c in enumerate(entry.comments)

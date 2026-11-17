@@ -49,3 +49,27 @@ needs, where its inputs come from, which tool runs it, what came back, and what 
 - Frontend tests cover status rendering, the blocked-by message, and keyboard access.
 
 Release note: one new file under `doc/release-notes.d/` (see its README).
+
+## Comments
+
+- 2026-11-17, GK B2 plan GO for the backend slice, with conditions:
+  - G1. The interim freeze hash covers the network's LP inputs (`_network_input_fingerprint`),
+    not only the campus files.
+  - G2. A freeze made by another method reads `refreeze_needed`. One that can't be checked reads
+    `unreadable`. Neither ever reads fresh.
+  - G3. Moving to submitted or beyond also needs a fresh freeze (`gc_freeze_not_fresh`).
+  - G4. Statuses are user-declared (`status_basis: declared`). A pending source never reads as
+    judged.
+  - G5. Both guards check and write under the tracker's file lock. Each guard has a race test.
+  - G6. An unreadable tracker gets a typed refusal and is never overwritten.
+  - G7. Comment ids are assigned under the lock. A concurrency test covers it.
+  - G8. The manifest records each source's state and any PDF skip. The no-identity check also
+    covers member names and the download name. Free-text fields are capped.
+  - G9. Route-policy tests at the trial merge. Every write route has a foreign-lock test. Every
+    `{code}` route has an unknown-deliverable 404 test.
+- Revision log: reuses `RevisionRef` from `services/reports/revisions.py` to tie a response to
+  its pack. It does not reuse the report anchors.
+- Chat disposition: UI_INTERNAL group, cap 11 to 12, with follow-up GC-10
+  (`10-assistant-tools.md`). Waiting on the owner's answer.
+- 09/10/11 user guides and datasheets: their own skeleton sections now. Content arrives from
+  GC-01/04/06 through `sources.SOURCES`.

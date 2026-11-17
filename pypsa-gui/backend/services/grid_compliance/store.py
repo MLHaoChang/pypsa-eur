@@ -2,28 +2,32 @@
 
 One JSON file per project holds every deliverable's status, data list, data
 freeze, TSO comment log and pack history. Writes are atomic
-(``services.atomic_io``) and serialised per file, so two edits never lose
+(``services.atomic_io``) and serialised across processes by
+``harness.durable.file_lock`` on a sibling lock file, so two edits never lose
 each other. A file that is not this version's shape is refused
-(``gc_tracker_unreadable``), never read as empty.
+(``gc_tracker_unreadable``), never read as empty or overwritten; a busy lock
+is ``gc_tracker_busy`` and a failed write ``gc_tracker_write_failed``.
 """
 
 from __future__ import annotations
 
-import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from harness.durable import file_lock
 from services import project_registry
 from services.atomic_io import atomic_write_text
 from services.reports.revisions import RevisionRef
 
-from .catalogue import STATUSES
+from .catalogue import BY_CODE, STATUSES
 
 SUBDIR = "grid_compliance"
 TRACKER_FILE = "tracker.json"
+LOCK_FILE = "tracker.lock"
+LOCK_TIMEOUT_S = 10
 
 Status = Literal[STATUSES]  # type: ignore[valid-type]
 
@@ -91,14 +95,25 @@ class TrackerFile(_Strict):
     schema_version: Literal[1] = 1
     deliverables: dict[str, DeliverableState] = Field(default_factory=dict)
 
+    @field_validator("deliverables")
+    @classmethod
+    def _known_codes(cls, value: dict) -> dict:
+        unknown = sorted(set(value) - set(BY_CODE))
+        if unknown:
+            raise ValueError(f"unknown deliverable(s) {unknown}")
+        return value
 
-_LOCKS: dict[Path, threading.Lock] = {}
-_LOCKS_GUARD = threading.Lock()
 
-
-def _lock(path: Path) -> threading.Lock:
-    with _LOCKS_GUARD:
-        return _LOCKS.setdefault(path, threading.Lock())
+@contextmanager
+def _lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with file_lock(path.parent / LOCK_FILE, timeout=LOCK_TIMEOUT_S):
+            yield
+    except TimeoutError as exc:
+        raise GridComplianceError(
+            "gc_tracker_busy", 409,
+            "Another edit of the compliance tracker is in progress. Try again.") from exc
 
 
 def tracker_path(project) -> Path:
@@ -126,5 +141,11 @@ def editing(project) -> Iterator[TrackerFile]:
     with _lock(path):
         tracker = load(project)
         yield tracker
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(path, tracker.model_dump_json(indent=1))
+        text = TrackerFile.model_validate(tracker.model_dump()).model_dump_json(indent=1)
+        try:
+            atomic_write_text(path, text)
+        except OSError as exc:
+            raise GridComplianceError(
+                "gc_tracker_write_failed", 503,
+                f"The compliance tracker could not be saved ({type(exc).__name__}). "
+                "Nothing was changed.") from exc
