@@ -11,7 +11,9 @@
  * `undo-reload` (the detach receipt comes back from the scene after a reload), `results-building` (SC-03: the Eye on, a
  * building selected and its group open, quarter-hourly labels), `results-unavailable` (SC-03: the run out of date, every
  * value unavailable in words), `companion-*` (SC-07 S2: the "Ask the assistant" row with no selection, a selection, the
- * Model blocker, the dock prefilled after "Explain", and the same with no provider). Add a state to STATES to extend.
+ * Model blocker, the dock prefilled after "Explain", and the same with no provider), `s6c-*` (SC-07 S6c: the Results
+ * part's "Explain these results" with current, out-of-date and unsolved results, a building selected, no provider, and
+ * a /flow run blocker with its "Ask for help"; each in light and dark). Add a state to STATES to extend.
  *
  * Usage: node scripts/site3d-shots.mjs [outDir]      env: BASE, ONLY=<state prefix>, DEBUG=1
  */
@@ -52,11 +54,11 @@ const BUILDINGS = [
 const LABELS = ['2030-01-01T00:00:00', '2030-01-01T00:15:00', '2030-01-01T00:30:00', '2030-01-01T00:45:00']
 const Qn = (value, unit) => ({ value, available: true, reason: null, unit })
 const NA = (reason, unit = null) => ({ value: null, available: false, reason, unit })
-const sceneResults = (snapshot, current) => {
-  const v = (x, unit) => (current ? Qn(x, unit) : NA('results_not_current', unit))
+const sceneResults = (snapshot, current, reason = 'results_not_current') => {
+  const v = (x, unit) => (current ? Qn(x, unit) : NA(reason, unit))
   const port = (port, bus, carrier, role, rate, extra = {}) => ({ port, bus, carrier, role, reversed: false, sign: 'withdrawal_positive', rate, ...extra })
   return {
-    project: PROJECT, site_id: SITE, scene_revision: 4, run: { digest: 'd', current, reason: current ? null : 'results_not_current' },
+    project: PROJECT, site_id: SITE, scene_revision: 4, run: { digest: current ? 'd' : null, current, reason: current ? null : reason },
     snapshot: { index: LABELS.indexOf(snapshot), label: snapshot, period: null, weight_generators: Qn(0.25, 'h'), period_years: Qn(1, 'a') },
     window: null,
     features: {
@@ -75,7 +77,7 @@ const sceneResults = (snapshot, current) => {
       internal_buses: ['h2'],
       totals: [{ carrier: 'AC', net_import: v(10.25, 'MW') }, { carrier: 'heat', net_import: v(-1, 'MW') },
         { carrier: 'N2', net_import: v(1, 't/h') }, { carrier: 'NH3', net_import: v(-4, 'MW') }],
-      total: NA(current ? 'mixed_units' : 'results_not_current'), unavailable_member: null,
+      total: NA(current ? 'mixed_units' : reason), unavailable_member: null,
     } },
   }
 }
@@ -94,7 +96,19 @@ const STATES = {
   'companion-blocker': { lastReceipt: null, readOnly: false, blocked: true, provider: 'ready' },
   'companion-asked': { lastReceipt: null, readOnly: false, blocked: true, provider: 'ready', click: 'site-companion-explain' },
   'companion-no-provider': { lastReceipt: null, readOnly: false, blocked: true, provider: 'none', click: 'site-companion-explain' },
+  // SC-07 S6c (UX U2, U3, U7): the Results part. "Ask for help" only with a /flow run blocker, never for out of date alone.
+  ...Object.fromEntries(['light', 'dark'].flatMap(theme => Object.entries({
+    current: { results: { current: true }, click: 'site-companion-explain' },
+    'out-of-date': { results: { current: false } },
+    unsolved: { results: { current: false, reason: 'run_not_solved', status: 'idle' } },
+    building: { results: { current: true }, select: 'b1', click: 'site-companion-explain' },
+    'no-provider': { results: { current: true }, provider: 'none', click: 'site-companion-explain' },
+    'run-blocker': { results: { current: false, reason: 'run_not_solved', status: 'idle' }, runBlocker: true },
+  }).map(([k, v]) => [`s6c-${k}-${theme}`, { lastReceipt: null, readOnly: false, part: 'Results', provider: 'ready', theme, ...v }]))),
 }
+const RUN_BLOCKER = { section: 'readiness', message: 'Readiness and run: Bus “mv” has no voltage: set v_nom above 0', target: {} }
+const FLOW_SECTIONS = [{ section: 'readiness', label: 'Readiness and run', state: null, required: true, items: [], summary: null },
+  { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null, freshness: 'stale' }]
 const OSM_BUILDING = { id: 'osm:104', footprint: [[-40, -20], [-24, -20], [-24, -6], [-40, -6]], height_m: 7, height_evidence: 'levels',
   source: { namespace: 'osm', source_id: '104' }, levels: 2 }
 const PROFILE = { id: 'anthropic', label: 'Claude', wire: 'anthropic' }
@@ -120,12 +134,13 @@ try {
     if (process.env.ONLY && !key.startsWith(process.env.ONLY)) continue
     const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, reducedMotion: 'reduce' })
     await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
-    await ctx.addInitScript(({ mode, project }) => {
+    await ctx.addInitScript(({ mode, project, theme }) => {
       localStorage.setItem('network-diagram:current-project', project)
       localStorage.setItem('network-diagram:assistant-dock', 'closed')
       localStorage.setItem('network-diagram:ui-mode', mode)
       localStorage.setItem('network-diagram:ui-mode-explicit', '1')
-    }, { mode, project: PROJECT })
+      if (theme) { localStorage.setItem('network-diagram:theme', theme); localStorage.setItem('network-diagram:theme-schema', '2') }
+    }, { mode, project: PROJECT, theme: st.theme ?? null })
     const page = await ctx.newPage()
     page.setDefaultTimeout(15000)
     page.on('pageerror', e => problems.push(`${mode}/${key}: page error: ${(e.stack||e.message).split('\n').slice(0,4).join(' / ')}`))
@@ -139,7 +154,7 @@ try {
       if (st.provider && p === '/api/chat/health') return ok(chatHealth(st.provider === 'ready'))
       if (st.provider && p === '/api/chat/profiles') return ok({ profiles: [{ ...PROFILE, chat_ready: st.provider === 'ready' }], active_profile_id: PROFILE.id })
       if (p.startsWith('/api/chat/') || p.startsWith('/api/dictation/')) return r.abort()
-      if (/\/flow$/.test(p)) return ok({ sections: [], run_request: { optimisation: true, study: false, loadflow: false }, notes: [], deferred: false, deferred_reason: null,
+      if (/\/flow$/.test(p)) return ok({ sections: st.theme ? FLOW_SECTIONS : [], run_ready: !st.runBlocker, run_blocker: st.runBlocker ? RUN_BLOCKER : null, run_request: { optimisation: true, study: false, loadflow: false }, notes: [], deferred: false, deferred_reason: null,
         scene: { entry: 'available', anchor_moved: [], actions: ['generate', 'assign_native'].map(action => (st.blocked && action === 'assign_native'
           ? { action, available: false, blocker: LOADS_BLOCKER, required_inputs: [], computes: '' }
           : { action, available: true, blocker: null, required_inputs: [], computes: '' })) } })
@@ -148,13 +163,13 @@ try {
       if (sch) return SCHEMAS[sch[1]] ? ok(SCHEMAS[sch[1]]) : r.fulfill({ status: 404, json: { detail: 'none' } })
       if (p === '/api/health') return ok({ status: 'ok', auth_enabled: false })
       if (p === '/api/projects/' || p === '/api/projects') return ok([{ name: PROJECT, bus_count: 2, snapshot_count: 24, has_results: false, created_at: '2026-01-01T00:00:00Z', is_root: true, parent: null }])
-      if (st.select && p.endsWith(`/sites/${SITE}/scene`)) return ok({ ...scene(st.lastReceipt), buildings: [OSM_BUILDING] })
+      if (st.select && !st.results && p.endsWith(`/sites/${SITE}/scene`)) return ok({ ...scene(st.lastReceipt), buildings: [OSM_BUILDING] })
       if (p.endsWith(`/sites/${SITE}/scene`)) return ok(st.results
         ? { ...scene(st.lastReceipt), buildings: BUILDINGS, groups: [{ id: 'plant', label: 'Ammonia plant', members: ['b1', 'b2'] }] }
         : scene(st.lastReceipt))
-      if (st.results && p.endsWith(`/sites/${SITE}/scene/results`)) return ok(sceneResults(new URL(r.request().url()).searchParams.get('snapshot'), st.results.current))
+      if (st.results && p.endsWith(`/sites/${SITE}/scene/results`)) return ok(sceneResults(new URL(r.request().url()).searchParams.get('snapshot'), st.results.current, st.results.reason))
       // A solved run, so the Results pill is enabled; out of date in the unavailable state.
-      if (st.results && p === '/api/simulation/status') return ok({ running: false, status: 'completed', condition: 'optimal', objective: 1234.5,
+      if (st.results && p === '/api/simulation/status') return ok({ running: false, status: st.results.status ?? 'completed', condition: st.results.status ? null : 'optimal', objective: 1234.5,
         solve_time: 2.5, dispatch: st.results.current ? 'fresh' : 'stale' })
       // The placed objects' own series are out of scope for these shots: none, as for a run that wrote none.
       if (st.results && p.startsWith('/api/results/')) return r.fulfill({ status: 200, contentType: 'application/json', body: 'null' })
@@ -182,7 +197,10 @@ try {
       await page.evaluate(async () => { (await import('/src/store/uiStore.ts')).useUIStore.getState().setCanvasView('site') }) }
     // The mock backend has no assistant or map-context service, so their error toasts are not part of the shot.
     await page.addStyleTag({ content: 'div[style*="z-index: 9999"] { display: none !important }' })
-    if (st.results) {
+    if (st.results && st.part === 'Results') {
+      await page.evaluate(async () => { (await import('/src/store/uiStore.ts')).useUIStore.getState().setResultsOverlay(true) })
+      await page.getByRole('tab', { name: 'Results', exact: true }).click()
+    } else if (st.results) {
       await page.evaluate(async () => {
         const ui = (await import('/src/store/uiStore.ts')).useUIStore.getState()
         ui.setResultsOverlay(true)
