@@ -13,9 +13,11 @@ import pytest
 
 from gridspine.handoff.raw_writer import SBASE_MVA, write_raw
 from gridspine.handoff.seq_writer import (
+    CONNECTION_CODES,
     NOT_WRITTEN,
     OPEN_PU,
     connection_code,
+    vector_group,
     write_seq,
 )
 from gridspine.ingest.campus import build_campus
@@ -55,45 +57,65 @@ def _write(campus, tmp_path, **kw):
 # --- connection codes (winding 1 = HV) ---------------------------------------
 
 
+def _w(hv, hv_earth, lv, lv_earth):
+    return {"hv": hv, "hv_earth": hv_earth, "lv": lv, "lv_earth": lv_earth}
+
+
+# One row per vector group the campus schema allows: (windings, v33 CC, v35 CC).
+GROUPS = {
+    "YNyn": (_w("Y", "resistance", "Y", "solid"), 1, 11),  # series path
+    "YNd": (_w("Y", "solid", "D", None), 2, 12),  # earth path on winding 1
+    "Dyn": (_w("D", None, "Y", "solid"), 3, 13),  # earth path on winding 2
+    "YNy": (_w("Y", "solid", "Y", "isolated"), 4, 14),  # open, as island_sc_seq
+    "Yyn": (_w("Y", "isolated", "Y", "resistance"), 4, 14),
+    "Yy": (_w("Y", "isolated", "Y", "isolated"), 4, 14),
+    "Yd": (_w("Y", "isolated", "D", None), 4, 14),
+    "Dy": (_w("D", None, "Y", "isolated"), 4, 14),
+    "Dd": (_w("D", None, "D", None), 4, 14),
+}
+
+
+@pytest.mark.parametrize("group", list(GROUPS))
+def test_connection_code_per_group(group):
+    w, cc33, cc35 = GROUPS[group]
+    assert vector_group(w) == group
+    assert connection_code(w, 33) == cc33
+    assert connection_code(w, 35) == cc35
+    assert connection_code(w) == cc35
+
+
+def test_every_schema_group_has_a_code():
+    assert set(CONNECTION_CODES[33]) == set(CONNECTION_CODES[35]) == set(GROUPS)
+
+
 @pytest.mark.parametrize(
-    "w, cc",
+    "w",
     [
-        (
-            {"hv": "Y", "hv_earth": "solid", "lv": "D", "lv_earth": None},
-            12,
-        ),  # YNd: earth path on winding 1
-        (
-            {"hv": "D", "hv_earth": None, "lv": "Y", "lv_earth": "solid"},
-            13,
-        ),  # Dyn: earth path on winding 2
-        (
-            {"hv": "Y", "hv_earth": "resistance", "lv": "Y", "lv_earth": "solid"},
-            11,
-        ),  # YNyn: series path
-        (
-            {"hv": "Y", "hv_earth": "isolated", "lv": "D", "lv_earth": None},
-            14,
-        ),  # Yd unearthed: no path
-        ({"hv": "D", "hv_earth": None, "lv": "D", "lv_earth": None}, 14),
-        (
-            {"hv": "Y", "hv_earth": "solid", "lv": "Y", "lv_earth": "isolated"},
-            14,
-        ),  # YNy: open, as island_sc_seq
+        _w("Z", "solid", "Y", "solid"),  # zig-zag: not in the schema
+        _w("Y", None, "D", None),  # a star with no earthing stated
+        _w("D", "solid", "Y", "solid"),  # an earthed delta
+        {"hv": "Y", "lv": "D"},  # earthing missing
     ],
 )
-def test_connection_code(w, cc):
-    assert connection_code(w) == cc
+def test_unknown_windings_refused(w):
+    with pytest.raises(
+        ContractError, match="not a vector group the campus schema allows"
+    ):
+        connection_code(w)
 
 
-@pytest.mark.parametrize("group, cc", [("YNd5", 12), ("Dyn11", 13), ("YNyn0", 11)])
-def test_vector_group_reaches_the_file(tmp_path, group, cc):
+@pytest.mark.parametrize("version", [33, 35])
+@pytest.mark.parametrize(
+    "group, cc", [("YNd5", (2, 12)), ("Dyn11", (3, 13)), ("YNyn0", (1, 11))]
+)
+def test_vector_group_reaches_the_file(tmp_path, group, cc, version):
     s = _spec()
     s["campus"]["transformers"]["TR1"].update(vector_group=group)
-    recs, _ = _write(build_campus(s), tmp_path)
+    recs, _ = _write(build_campus(s), tmp_path, version=version)
     tr = recs["ZERO SEQ. TRANSFORMER"]
     assert [r[3] for r in tr] == ["1", "2"]
-    assert tr[0][6] == str(cc)
-    assert tr[1][6] == "13"  # TR2 keeps the default Dyn11
+    assert tr[0][6] == str(cc[version == 35])
+    assert tr[1][6] == str((3, 13)[version == 35])  # TR2 keeps the default Dyn11
 
 
 def test_transformer_without_windings_takes_the_default_and_says_so(tmp_path):

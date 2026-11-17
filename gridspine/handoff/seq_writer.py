@@ -44,22 +44,27 @@ What each element is:
   winding 1 = HV (as the RAW writes I = hv bus). CZ0 = CZG = 1: pu on SBASE at
   the winding's bus voltage. R01 + j X01 = the transformer's Zk, as the RAW
   converts it (vk0 = vk, assumed, as island_sc_seq); RG1 / RG2 = each star's
-  neutral resistance (``r_n_<side>_ohm``, 0 when solid). The connection code
-  from ``Campus.windings`` (the island_sc_seq default Dyn11, LV solidly
-  earthed, when a transformer has none), impedance-earthed codes 11-14:
+  neutral resistance (``r_n_<side>_ohm``, 0 when solid): the physical R_N,
+  not 3 R_N, since PSS/E's zero-sequence equivalent circuits apply the 3 Z_G
+  themselves (as a public utility transformer-modelling guide draws them and
+  fills RG1 / RG2 with the neutral impedance). The connection code CC per
+  vector group is ``CONNECTION_CODES`` (v33: 1-4, v35: 11-14), from
+  ``Campus.windings`` (the island_sc_seq default Dyn11, LV solidly earthed,
+  when a transformer has none); windings outside the schema are refused:
 
-  ======  ==========================================  =====
-  HV      LV                                          CC
-  ======  ==========================================  =====
-  YN      yn                                          11  series path, earthed both sides
-  YN      d                                           12  earth path on winding 1 (HV)
-  D       yn                                          13  earth path on winding 2 (LV)
-  other   other (unearthed star, D-d, Y-y ...)        14  no zero-sequence path
-  ======  ==========================================  =====
+  =================================  ===  ===  ==============================
+  group                              v33  v35  zero-sequence path
+  =================================  ===  ===  ==============================
+  YNyn                               1    11   series, earthed both sides
+  YNd                                2    12   earth path on winding 1 (HV)
+  Dyn                                3    13   earth path on winding 2 (LV)
+  YNy, Yyn, Yy, Yd, Dy, Dd           4    14   none (as island_sc_seq)
+  =================================  ===  ===  ==============================
 
 Not written: loads (IEC 60909 leaves them out; PSS/E's defaults apply), the
 campus's earthing transformers (a zero-sequence fixed shunt needs a RAW fixed
-shunt, which the RAW does not carry yet), mutual couplings and the
+shunt, which the RAW does not carry yet; each is named in the header line and
+the return value as ``NOT_WRITTEN``), mutual couplings and the
 non-conventional-source tables (empty sections). ``write_seq`` returns the
 assumptions it applied, one line each, for the pack's README.
 """
@@ -86,7 +91,6 @@ NOT_WRITTEN = "not written: zero-sequence source omitted"
 CASES = ("max", "min")
 #: An open circuit in a field that has no "absent" value: 9999 pu (generic engineering, assumed).
 OPEN_PU = 9999.0
-_EARTHED = ("solid", "resistance")
 
 SECTIONS = {
     33: [
@@ -120,20 +124,38 @@ _SYSTEM_WIDE = [
 ]
 
 
-def connection_code(windings: dict) -> int:
-    """
-    The PSS/E zero-sequence connection code (11-14) of a two-winding
-    transformer with winding 1 = HV, from its ``Campus.windings`` entry.
-    """
-    hv = windings["hv"] == "Y" and windings["hv_earth"] in _EARTHED
-    lv = windings["lv"] == "Y" and windings["lv_earth"] in _EARTHED
-    if hv and lv:
-        return 11
-    if hv and windings["lv"] == "D":
-        return 12
-    if lv and windings["hv"] == "D":
-        return 13
-    return 14
+#: A winding's letter from its ``Campus.windings`` entry: ``(winding, earth) -> letter``.
+_LETTER = {("D", None): "D", ("Y", "isolated"): "Y", ("Y", "solid"): "YN", ("Y", "resistance"): "YN"}
+
+#: The PSS/E zero-sequence connection code of each vector group the campus
+#: schema allows (HV D/Y/YN, LV d/y/yn; no zig-zag), winding 1 = HV. The earth
+#: paths are island_sc_seq's: YNyn a series path, YNd an earth path on winding
+#: 1, Dyn on winding 2, every other group none. v33 takes PSS/E 30-33's codes
+#: 1-4; v35 the impedance-earthed codes 11-14 (the same paths, with CZ0 / CZG
+#: and RNUTRL honoured). Code meanings: PSS/E's zero-sequence transformer
+#: code table as a public utility transformer-modelling guide reproduces it.
+CONNECTION_CODES = {
+    33: {"YNyn": 1, "YNd": 2, "Dyn": 3, "YNy": 4, "Yyn": 4, "Yy": 4, "Yd": 4, "Dy": 4, "Dd": 4},
+    35: {"YNyn": 11, "YNd": 12, "Dyn": 13, "YNy": 14, "Yyn": 14, "Yy": 14, "Yd": 14, "Dy": 14, "Dd": 14},
+}
+
+
+def vector_group(windings: dict) -> str:
+    """The vector group without its clock number (``Dyn``, ``YNd`` ...) of a
+    ``Campus.windings`` entry; ContractError for a winding outside the schema."""
+    try:
+        hv = _LETTER[(windings["hv"], windings["hv_earth"])]
+        lv = _LETTER[(windings["lv"], windings["lv_earth"])].lower()
+    except (KeyError, TypeError) as err:
+        raise ContractError(f"seq: windings {windings!r} are not a vector group the campus schema allows") from err
+    return hv + lv
+
+
+def connection_code(windings: dict, version: int = 35) -> int:
+    """The PSS/E zero-sequence connection code of a two-winding transformer
+    with winding 1 = HV (``CONNECTION_CODES``); ContractError, from
+    ``vector_group``, for windings outside the schema."""
+    return CONNECTION_CODES[version][vector_group(windings)]
 
 
 def _f(v) -> str:
@@ -295,7 +317,7 @@ def write_seq(campus, path, version=35, case="max") -> list:
                     f"'{ckt:<2s}'",
                     "1",
                     "1",
-                    str(connection_code(w)),
+                    str(connection_code(w, version)),
                     _f(rg["hv"]),
                     "0",
                     _f(r_pu),
