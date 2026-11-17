@@ -101,6 +101,8 @@ function useConnectionLines(): ExpertOnlyLine[] {
                            retry: false, enabled: !!project })
   const config = useQuery({ queryKey: nk(project, 'commercial', 'config'), queryFn: () => commercialApi.getCommercial() })
   const home: Home = { place: 'campusElectrical', open: inExpert('connection') }
+  // The point of connection and the export link are not named: the section 3
+  // card already shows them (UX 24), and a second entry point would repeat it.
   const poc = config.data?.poc_link
   // 409: not a hub (capacity-expansion) project, so the grid-code study does not
   // apply: plain words and no link (#1252), not "could not be read".
@@ -111,9 +113,6 @@ function useConnectionLines(): ExpertOnlyLine[] {
         value: NOT_APPLICABLE },
       { key: 'grid_code_document', label: FIELD_LABELS.grid_code_document, home: null,
         value: NOT_APPLICABLE },
-      { key: 'poc_link', label: FIELD_LABELS.poc_link, home, value: read(config, d => (d?.poc_link ? displayName(d.poc_link) : null)) },
-      { key: 'export_link', label: FIELD_LABELS.export_link, home,
-        value: read(config, d => (poc && d?.export_link ? displayName(d.export_link) : null)) },
       { key: 'timezone', label: FIELD_LABELS.timezone, home,
         value: read(config, d => (poc ? d?.timezone ?? null : null)) },
     ]
@@ -126,9 +125,6 @@ function useConnectionLines(): ExpertOnlyLine[] {
       }) },
     { key: 'grid_code_document', label: FIELD_LABELS.grid_code_document, home,
       value: read(codes, d => names((d?.documents ?? []).map(doc => doc.filename))) },
-    { key: 'poc_link', label: FIELD_LABELS.poc_link, home, value: read(config, d => (d?.poc_link ? displayName(d.poc_link) : null)) },
-    { key: 'export_link', label: FIELD_LABELS.export_link, home,
-      value: read(config, d => (poc && d?.export_link ? displayName(d.export_link) : null)) },
     { key: 'timezone', label: FIELD_LABELS.timezone, home,
       value: read(config, d => (poc ? d?.timezone ?? null : null)) },
   ]
@@ -242,7 +238,7 @@ function Lines({ section, useLines }: { section: FlowSectionId; useLines: () => 
   const linked = new Set<string>()
   return (
     <div data-testid={`expert-only-${section}`} className="flex flex-col gap-1">
-      <h3 className="text-[11px] font-medium text-muted">Set in Expert</h3>
+      <h3 className="text-[11px] font-semibold text-text">Set in Expert</h3>
       <ul className="flex flex-col gap-0.5">
         {lines.map(l => {
           const link = l.home && !linked.has(l.home.place) ? l.home : null
@@ -257,7 +253,7 @@ function Lines({ section, useLines }: { section: FlowSectionId; useLines: () => 
                 <button type="button" data-testid={`expert-only-open-${l.key}`} onClick={link.open}
                   aria-label={link.label}
                   className="shrink-0 text-[11px] text-text underline">
-                  Open in Expert &gt;
+                  {'Open in Expert >'}
                 </button>
               )}
             </li>

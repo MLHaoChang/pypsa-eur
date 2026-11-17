@@ -125,7 +125,6 @@ const FILLED: Record<string, Record<string, string>> = {
   project: { investment_years: 'Investment years: 2030, 2040', representative_weeks: 'Representative weeks: sampled' },
   connection: {
     grid_code_profile: 'Grid code: EU RfG DCC', grid_code_document: 'Grid-code document: code.pdf',
-    poc_link: 'Point of connection: Grid import', export_link: 'Export link: Grid export',
     timezone: 'Site time zone: Europe/Berlin',
   },
   loads: { dsr_share_of_load: 'DSR volume: 20% of bus peak · b1, b2',
@@ -165,7 +164,7 @@ describe('ExpertOnlyLines', () => {
     setEmpty()
     const expected: Record<string, string[]> = {
       project: ['investment_years', 'representative_weeks'],
-      connection: ['grid_code_profile', 'grid_code_document', 'poc_link', 'export_link', 'timezone'],
+      connection: ['grid_code_profile', 'grid_code_document', 'timezone'],
       loads: ['dsr_share_of_load', 'dsr_price_eur_per_mwh'],
       scenarios: ['variants'],
       results: ['business_case'],
@@ -193,6 +192,13 @@ describe('ExpertOnlyLines', () => {
     await waitFor(() => expect(lineText('dsr_share_of_load')).toContain('DSR volume: could not be read'))
   })
 
+  it('does not name the point of connection or export link: the section 3 card shows them', async () => {
+    setValues()
+    mount('connection')
+    const box = await settled('connection')
+    expect(box.textContent).not.toMatch(/Point of connection|Export link|Grid import/)
+  })
+
   it('says the grid-code study does not apply, with no link, on a project that has none (409)', async () => {
     setValues()
     const conflict = Object.assign(new Error('409'), { response: { status: 409 } })
@@ -203,8 +209,8 @@ describe('ExpertOnlyLines', () => {
     expect(lineText('grid_code_document')).toContain('not used by this project')
     expect(screen.queryByTestId('expert-only-open-grid_code_profile')).toBeNull()
     expect(screen.queryByText(/could not be read/)).toBeNull()
-    // the site connection still links to its Expert place, once
-    expect(screen.getByTestId('expert-only-open-poc_link')).toBeTruthy()
+    // the site time zone still links to its Expert place, once
+    expect(screen.getByTestId('expert-only-open-timezone')).toBeTruthy()
   })
 
   it('a chronological year reads as such', async () => {
