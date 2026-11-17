@@ -722,3 +722,18 @@ def test_a_bad_hourly_status_is_printed_as_a_plain_number():
     df = pd.DataFrame([{c: row.get(c, 0.0) for c in HOURLY_COLUMNS}])
     with pytest.raises(ContractError, match=r"status must be 0 or 1, got \[2\]$"):
         validate_hourly(df)
+
+
+def test_far_side_walks_a_closed_bus_bus_switch():
+    from gridspine.static import harmonic_scan as hs
+    from gridspine.static import series_caps as SC
+
+    campus = build_campus(cap_spec())
+    net = campus.net
+    bus = {n: i for i, n in net.bus["name"].items()}
+    pcc, _, _ = hs.campus_cases(campus)
+    # TR1 now feeds MVX, and only a closed coupler joins MVX to MV1 (the capacitor's near end)
+    mvx = pp.create_bus(net, vn_kv=20.0, name="MVX")
+    net.trafo.loc[net.trafo["lv_bus"] == bus["MV1"], "lv_bus"] = mvx
+    pp.create_switch(net, mvx, bus["MV1"], et="b", closed=True)
+    assert SC.far_side(net, pcc) == [("SC1", bus["MV1C"])]
