@@ -500,7 +500,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
   const [picking, setPicking] = useState(false)
   const { data: catalog } = useCatalog(COMPONENT_TYPE[item.id] ?? null)
 
-  const fields = useMemo(() => (FIELD_MAP[item.id] ?? []).map(f => withDescriptor(f, schema)), [item.id, schema])
+  const baseFields = useMemo(() => (FIELD_MAP[item.id] ?? []).map(f => withDescriptor(f, schema)), [item.id, schema])
   const qKey = QUERY_KEY[item.id] ?? ''
   const prefix = AUTO_PREFIX[item.id] ?? 'Asset'
 
@@ -527,7 +527,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
   const [form, setForm] = useState<Record<string, string>>(() => {
     const existingCount = (qc.getQueryData<unknown[]>(nk(useUIStore.getState().currentProject, qKey)) ?? []).length
     const init: Record<string, string> = {}
-    fields.forEach(f => { init[f.key] = f.defaultValue ?? '' })
+    baseFields.forEach(f => { init[f.key] = f.defaultValue ?? '' })
     init.name = `${prefix} ${existingCount + 1}`
     // Terminal prefill from a drop-on-a-bus (spec D27). Applied only when the
     // target bus passes the field's own carrier filter — otherwise the form
@@ -540,7 +540,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
     // comment on FIELD_MAP.bus's x/y fields.
     const terminal = TERMINAL_FIELD[item.id]
     if (item.dropBusName && terminal) {
-      const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+      const spec = baseFields.find(f => f.key === terminal) as BusFieldSpec | undefined
       if (spec && filteredBusNames(spec.busCarrierFilter).includes(item.dropBusName)) {
         init[terminal] = item.dropBusName
       }
@@ -554,7 +554,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
         init.x = String(Math.round(item.dropLatLng.lng * 1e6) / 1e6)
         init.y = String(Math.round(item.dropLatLng.lat * 1e6) / 1e6)
       } else if (terminal && !init[terminal]) {
-        const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+        const spec = baseFields.find(f => f.key === terminal) as BusFieldSpec | undefined
         const allowed = new Set(filteredBusNames(spec?.busCarrierFilter))
         const nearest = nearestPlacedBus(item.dropLatLng, allBuses.filter(b => allowed.has(b.name)))
         if (nearest) init[terminal] = nearest
@@ -565,7 +565,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
       // the field's carrier filter; nothing if none does (the mismatch line
       // explains, as for a bus drop).
       if (terminal) {
-        const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+        const spec = baseFields.find(f => f.key === terminal) as BusFieldSpec | undefined
         const allowed = spec ? filteredBusNames(spec.busCarrierFilter) : []
         const candidates = [primaryBus(dropSite), ...dropSite.buses].filter((b): b is string => !!b)
         const pick = candidates.find(b => allowed.includes(b))
@@ -582,6 +582,11 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
     }
     return init
   })
+  // A cost field's unit and scale follow the bus the new asset attaches to (a tonne bus: per tonne, scale 1;
+  // 05d), so a value typed per tonne is not stored x1000. The initial values above stay in the class's units.
+  const sizeBus = (form.bus ?? form.bus0 ?? '') || null
+  const { data: liveSchema } = useAssetSchema(SCHEMA_CLASSES.has(COMPONENT_TYPE[item.id] ?? '') ? COMPONENT_TYPE[item.id] : null, null, sizeBus)
+  const fields = useMemo(() => (FIELD_MAP[item.id] ?? []).map(f => withDescriptor(f, liveSchema ?? schema)), [item.id, liveSchema, schema])
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const set = (k: string, v: string) => {

@@ -85,6 +85,13 @@ describe('invalidateAssetQueries', () => {
     }
   })
 
+  it('marks a cached asset-units read stale, so a cost edit after a bus change reads the new unit (05d)', () => {
+    const qc = new QueryClient()
+    qc.setQueryData(['assetUnits', 'proj-a', 'Generator', 'g', ''], { units: {}, costs: {} })
+    invalidateAssetQueries(qc, 'proj-a')
+    expect(qc.getQueryState(['assetUnits', 'proj-a', 'Generator', 'g', ''])?.isInvalidated).toBe(true)
+  })
+
   it('works for a null project (desktop single-project mode keys)', () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')

@@ -13,9 +13,11 @@ export const TONNE_COST_NOTE = 'Costs on this tonne bus are per tonne (per t/h o
  *
  * With an asset `name`, a size field's unit follows that asset's bus (t/h, t on
  * a tonne bus; a cost field's unit is per tonne with scale 1, no kW or kWh factor), read from `/asset_schema/{class}/units/{name}`; that read is
- * project-scoped, since the bus is the asset's own.
+ * project-scoped, since the bus is the asset's own. With a `bus` and no name (the creation form) the same
+ * overrides come from the bus the new asset will attach to. The key's root `assetUnits` is in
+ * `COMPONENT_QUERY_ROOTS`, so every asset write refetches it.
  */
-export function useAssetSchema(componentClass: string | null, name?: string | null) {
+export function useAssetSchema(componentClass: string | null, name?: string | null, bus?: string | null) {
   const project = useUIStore(s => s.currentProject)
   const base = useQuery<AssetSchema>({
     queryKey: ['assetSchema', componentClass],
@@ -24,10 +26,12 @@ export function useAssetSchema(componentClass: string | null, name?: string | nu
     staleTime: Infinity,
     gcTime: Infinity,
   })
-  const units = useQuery({
-    queryKey: nk(project, 'assetUnits', componentClass ?? '', name ?? ''),
-    queryFn: () => assetSchemaApi.units(componentClass as string, name as string),
-    enabled: !!componentClass && !!name,
+  const units = useQuery<{ units: Record<string, string>; costs?: Record<string, { unit: string; scale: number }> }>({
+    queryKey: nk(project, 'assetUnits', componentClass ?? '', name ?? '', bus ?? ''),
+    queryFn: () => (name
+      ? assetSchemaApi.units(componentClass as string, name)
+      : assetSchemaApi.unitsForBus(componentClass as string, bus as string)),
+    enabled: !!componentClass && (!!name || !!bus),
     staleTime: 30_000,
     retry: false,
   })

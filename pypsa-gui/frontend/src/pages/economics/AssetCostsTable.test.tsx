@@ -48,4 +48,15 @@ describe('AssetCostsTable out-of-date costs', () => {
     await waitFor(() => screen.getByTestId('asset-cost-Generator-pv_b'))
     expect(screen.queryByTestId('asset-costs-out-of-date')).toBeNull()
   })
+
+  it('shows a tonne-bus asset per tonne and an energy-bus asset per kW, from the same stored number', async () => {
+    useUIStore.setState({ currentProject: 'p' } as never)
+    costs.mockResolvedValue({ discount_rate: 0.07, assets: [
+      { ...row('ammonia', {}), tonne_bus: true }, { ...row('gas', {}), tonne_bus: false }] })
+    render(<QueryClientProvider client={new QueryClient()}><AssetCostsTable /></QueryClientProvider>)
+    await waitFor(() => screen.getByTestId('asset-cost-Generator-ammonia'))
+    // upfront 800000 stored: per t/h unscaled; per kW it is 800
+    expect(screen.getByTestId('asset-cost-Generator-ammonia').textContent).toContain('800,000 €/(t/h)')
+    expect(screen.getByTestId('asset-cost-Generator-gas').textContent).toContain('800 €/kW')
+  })
 })

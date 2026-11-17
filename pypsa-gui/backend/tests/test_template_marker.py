@@ -1054,8 +1054,19 @@ def test_an_undo_while_the_marker_lock_is_held_is_refused_and_leaves_the_file(
     snapshot = gp.snapshot_meta()
     write_marker(active_case, {**eh_base.meta, "ledger": []})
     before = own.read_bytes()
-    with real(active_case):
-        assert gp.restore_meta(snapshot) == "busy"
+    import signal
+
+    def _hung(*_):
+        raise AssertionError("the restore did not give up on the held lock within 30 s")
+
+    old = signal.signal(signal.SIGALRM, _hung)
+    signal.alarm(30)  # explicit bound; the lock itself times out at 5 s
+    try:
+        with real(active_case):
+            assert gp.restore_meta(snapshot) == "busy"
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
     assert own.read_bytes() == before
     assert gp.restore_meta(snapshot) is None
     assert json.loads(own.read_text())["ledger"] == [_ph("it_mw", 2030)]

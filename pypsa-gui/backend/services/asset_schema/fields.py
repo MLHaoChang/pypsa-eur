@@ -706,21 +706,34 @@ def schema_payload(component: str) -> dict[str, Any]:
 _SIZE_BUS = {"Generator": "bus", "StorageUnit": "bus", "Store": "bus", "Load": "bus", "Link": "bus0"}
 
 
-def size_units(n, component: str, name: str) -> dict[str, str]:
+def _size_bus_of(n, component: str, name: str | None, bus: str | None):
+    """The bus a size is measured on: ``bus`` for an asset not yet created, else the asset's own (`_SIZE_BUS`).
+    None for a class with no bus size or an unknown asset."""
+    col = _SIZE_BUS.get(component)
+    if col is None:
+        return None
+    if bus is not None:
+        return bus
+    table = getattr(n, CLASS_ATTR.get(component, ""), None)
+    if table is None or name not in table.index:
+        return None
+    return table.at[name, col]
+
+
+def size_units(n, component: str, name: str | None, bus: str | None = None) -> dict[str, str]:
     """Per-asset display units for the quantity fields (size, initial energy, bounds) that differ from the class-level MW / MWh: t/h (t for a
     stock) on a tonne bus, as `flow_service._size_unit` reads the bus. Empty on an energy bus, an unreadable
     bus or a class with no bus size."""
     from services.flow_service import _size_unit
 
-    col = _SIZE_BUS.get(component)
-    table = getattr(n, CLASS_ATTR.get(component, ""), None)
-    if col is None or table is None or name not in table.index:
+    size_bus = _size_bus_of(n, component, name, bus)
+    if size_bus is None:
         return {}
     out: dict[str, str] = {}
     for f in fields_for(component):
         if f.unit_display not in ("MW", "MWh"):
             continue
-        unit = _size_unit(n, table.at[name, col], stock=f.unit_display == "MWh")
+        unit = _size_unit(n, size_bus, stock=f.unit_display == "MWh")
         if unit in ("t", "t/h"):
             out[f.key] = unit
     return out
@@ -734,17 +747,23 @@ _TONNE_COST_UNIT = {
 }
 
 
-def cost_units(n, component: str, name: str) -> dict[str, dict]:
+def cost_units(n, component: str, name: str | None, bus: str | None = None) -> dict[str, dict]:
     """Per-asset display unit and scale for the cost fields (overnight cost, fixed O&M, capital cost, marginal
     and curtailment cost) of an asset on a tonne bus: EUR/(t/h), EUR/(t/h)/yr, EUR/t, EUR/t/yr, scale 1.0.
-    Empty on an energy bus, an unreadable bus or a class with no bus size, so the class-level EUR/kW etc. stay."""
+    Empty on an energy bus, an unreadable bus or a class with no bus size, so the class-level EUR/kW etc. stay.
+    ``bus`` stands for the size bus of an asset that does not exist yet (the creation form)."""
     from services.flow_service import _size_unit
 
-    col = _SIZE_BUS.get(component)
-    table = getattr(n, CLASS_ATTR.get(component, ""), None)
-    if col is None or table is None or name not in table.index:
-        return {}
-    if _size_unit(n, table.at[name, col], stock=False) not in ("t", "t/h"):
+    size_bus = _size_bus_of(n, component, name, bus)
+    if size_bus is None or _size_unit(n, size_bus, stock=False) not in ("t", "t/h"):
         return {}
     return {f.key: {"unit": _TONNE_COST_UNIT[f.unit_display], "scale": 1.0}
             for f in fields_for(component) if f.unit_display in _TONNE_COST_UNIT}
+
+
+def on_tonne_bus(n, component: str, name: str) -> bool:
+    """True when the asset's size is measured in t/h or t (the Economics rows show it per tonne)."""
+    from services.flow_service import _size_unit
+
+    size_bus = _size_bus_of(n, component, name, None)
+    return size_bus is not None and _size_unit(n, size_bus, stock=False) in ("t", "t/h")

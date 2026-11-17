@@ -41,6 +41,8 @@ export const COMPONENT_QUERY_ROOTS = [
   'loads',
   'transformers',
   'shunt_impedances',
+  // An asset's per-bus cost units (hooks/useAssetSchema): a write to the asset or its bus can change them.
+  'assetUnits',
   // Writable by the generic `update_component` / `delete_component` chat
   // tools (chat_tools_schema `_COMP_UPDATE_ROUTES` / `_COMP_DELETE_ROUTES`
   // both list it) and cached by SolverSettings, so a chat edit to a CO2 cap

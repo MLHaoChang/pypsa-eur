@@ -98,6 +98,8 @@ export interface AssetCostRow {
   name: string
   carrier: string
   basis: 'EUR/MW' | 'EUR/MWh' | 'EUR/MVA'
+  /** The size is in t/h or t: the money is per tonne, not per kW or kWh. */
+  tonne_bus?: boolean
   size_column: string
   size: number | null
   extendable: boolean
@@ -118,6 +120,12 @@ export const assetSchemaApi = {
   costs: () => client.get<AssetCostsPayload>('/network/asset_costs').then(r => r.data),
   get: (component: string) =>
     client.get<AssetSchema>(`/network/asset_schema/${component}`).then(r => r.data),
+  /** The same overrides for an asset not yet created, from the bus it will attach to. */
+  unitsForBus: (component: string, bus: string) =>
+    client.get<{ component: string; bus: string; units: Record<string, string>;
+      costs?: Record<string, { unit: string; scale: number }> }>(
+      `/network/asset_schema/${component}/units`, { params: { bus } }).then(r => r.data),
+
   /** Size-field units that follow the asset's bus (t/h, t on a tonne bus); empty on an energy bus. */
   units: (component: string, name: string) =>
     client.get<{ component: string; name: string; units: Record<string, string>;
