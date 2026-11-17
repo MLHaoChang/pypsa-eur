@@ -76,6 +76,7 @@ def test_the_issue_rows_are_declared():
         'report_comment_revisions': ('unbuilt', None),
         'operating_reserve_result': ('unbuilt', None),
         'report_chart_snapshots': ('manual', 'results'),
+        'energization_per_period': ('unbuilt', None),  # template-e2e 02b (not_via_chat.d/)
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected

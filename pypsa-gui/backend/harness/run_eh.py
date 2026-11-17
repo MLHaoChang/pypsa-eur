@@ -199,8 +199,48 @@ def freeze(ctx, profile, solves_left) -> dict:
         "args": args,
         "goal": _goal_snapshot(goal),
         "digest": digest(args),
+        # template-e2e 02b (GK B E4): the energization schedule per period the
+        # card was drawn on, which `admit` compares exactly.
+        "energization": _energization(getattr(ctx, "network", None)),
         **({"contingencies": held} if held is not None else {}),
     }
+
+
+def _energization(network):
+    """``{link: {by_period, not_flat}}`` of the network's energization schedule
+    (`energization.all_by_period`); None when it can't be read."""
+    from services.adequacy.energization import all_by_period
+
+    try:
+        return all_by_period(network)
+    except Exception:  # noqa: BLE001 — unreadable is never the frozen schedule
+        logger.exception("run_eh: energization schedule read failed")
+        return None
+
+
+#: A record frozen before 02b, on a network that now carries a schedule.
+ENERGIZATION_UNRECORDED = (
+    "The study's card was drawn before the connection's energization schedule was "
+    "recorded with it. Review the run again so the card is drawn with the schedule."
+)
+
+
+def _energization_change(ctx, frozen) -> str | None:
+    """template-e2e 02b (GK B E4): why the network's energization schedule is
+    no longer the one the study's card was drawn on (compared exactly, period
+    by period), or None when it still is. A record frozen before 02b holds
+    none: it refuses where the network carries a schedule."""
+    now = _energization(getattr(ctx, "network", None))
+    if "energization" not in frozen:
+        return None if now == {} else ENERGIZATION_UNRECORDED
+    then = frozen["energization"]
+    if now is not None and now == then:
+        return None
+    if now is None or not isinstance(then, dict):
+        return "The connection's energization schedule can't be compared now. Review the run again."
+    moved = sorted(link for link in {*then, *now} if then.get(link) != now.get(link))
+    return (f"The connection's energization schedule changed since the study's card was "
+            f"drawn ({', '.join(moved)}). Review the run again.")
 
 
 def islanding(network, args):
@@ -407,6 +447,10 @@ def admit(path, task, step, args, ctx):
             "review the run again."
         )
     stale = _connection_limit_change(ctx, args)
+    if stale is not None:
+        _stop(task, ARGS_KIND)
+        return ARGS_KIND, stale
+    stale = _energization_change(ctx, frozen)
     if stale is not None:
         _stop(task, ARGS_KIND)
         return ARGS_KIND, stale
