@@ -1598,6 +1598,10 @@ def _gc03_templates(campus, net):
     )
 
 
+#: pandapower's IEC 60909 minimum case adds no sgen current; the campus net
+#: carries a genset as an sgen, so a genset adds nothing to S_k''min.
+GENSET_SK_NOTE = ("a genset is carried as a static generator, which the IEC 60909 minimum case here "
+                  "neglects: S_k'' is the grid side alone, so SCR is low if a genset runs (conservative)")
 #: The SCR of a PoC below 1 kV: pandapower's minimum case applies c_min there.
 LV_C_NOTE = ("PoC below 1 kV: S_k'' carries the IEC 60909 voltage factor c_min = 0.95 (IEC 60909-0 Table 1), "
              "so SCR and ESCR read 5 % low (conservative)")
@@ -1663,10 +1667,12 @@ def _gc03_strength(campus, hourly):
         per_poc.append(rows)
         groups.append(study.groups.assign(period=period))
         method = ofl.method
-    notes.append("S_k'' is the IEC 60909 minimum case with every converter off (gensets in), network "
+    if gensets:
+        notes.append(GENSET_SK_NOTE)
+    notes.append("S_k'' is the IEC 60909 minimum case with every converter off, network "
                  "transformers with the impedance correction K_T (IEC 60909-0 6.3.3); "
                  "P is the rated power of the converters built in the period; the fault state does not depend "
-                 "on the hour (IEC 60909 neglects load; every genset built in the period is energised)")
+                 "on the hour (IEC 60909 neglects load)")
     return pd.concat(per_poc, ignore_index=True), pd.concat(groups, ignore_index=True), method, notes
 
 
@@ -1679,7 +1685,7 @@ def strength_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) ->
     RMS/EMT study.
 
     S_k'' is the IEC 60909 minimum case of the grid side alone: every
-    converter (``IBR_KINDS``) is off, gensets stay in, and the grid is the
+    converter (``IBR_KINDS``) is off, a genset adds nothing (``GENSET_SK_NOTE``), and the grid is the
     campus spec's S_k''min and rx_min. A PoC is each bus carrying a converter;
     a stage is a period, with P the RATED power of the converters built in it.
     Capacitor banks off every PoC are subtracted at every PoC (worst case)."""

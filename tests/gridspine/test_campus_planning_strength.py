@@ -14,6 +14,7 @@ import pytest
 
 from gridspine.drivers import campus_study
 from gridspine.drivers.campus_study import (
+    GENSET_SK_NOTE,
     LF_PCC_CSV,
     LV_C_NOTE,
     NO_EMERGENCY_NOTE,
@@ -327,7 +328,34 @@ def test_the_import_hour_is_the_voltage_stability_pick(sized):
 
 def test_an_empty_set_is_not_evaluated_never_pass(sized):
     empty = pd.DataFrame(columns=["contingency_id", "kind", "element_ids", "order"])
-    assert planning_campus(sized, contingencies=empty)["verdict"] == "not_evaluated"
+    out = planning_campus(str(sized), contingencies=empty)  # a str run dir is taken too
+    assert out["verdict"] == "not_evaluated"
+    # every screened hour is named as having nothing to screen, never passed over
+    assert out["unscreened"] and len(out["unscreened"]) == sum(
+        "no contingency to screen" in n for n in out["notes"]
+    )
+
+
+def test_each_hour_is_screened_on_its_own_period_s_slice(sized, monkeypatch):
+    hourly = campus_tables(sized)[0]
+    orig, seen = campus_study._gc03_hour_net, []
+
+    def spy(campus, rows, hour):
+        seen.append((hour, rows.copy()))
+        return orig(campus, rows, hour)
+
+    monkeypatch.setattr(campus_study, "_gc03_hour_net", spy)
+    planning_campus(sized)
+    picks = [
+        (p, h) for p, hs in _gc03_hours(sized, [2030, 2040]).items() for _, h in hs
+    ]
+    assert [h for h, _ in seen] == [h for _, h in picks]
+    for (period, hour), (_, rows) in zip(picks, seen):
+        want = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)]
+        pd.testing.assert_frame_equal(
+            rows.reset_index(drop=True),
+            want[["unit_id", "p_mw", "status"]].reset_index(drop=True),
+        )
 
 
 def test_an_imported_list_with_an_excluded_contingency_never_reads_pass(sized):
@@ -540,3 +568,31 @@ def test_the_planning_csv_leads_with_its_key_columns(sized):
         "hour",
         "verdict",
     ]
+
+
+GENSET = {
+    "kind": "genset",
+    "p_mw": _v(10.0),
+    "s_mva": _v(12.5),
+    "xd_pp": _v(0.15),
+    "rx_sc": _v(0.1),
+}
+
+
+@pytest.mark.parametrize("bus", ["MV3", "MV2"])  # off every PoC, and on one
+def test_a_genset_adds_nothing_to_the_minimum_fault_level_and_says_so(bus):
+    spec = _spec(extra_bus=True)
+    plain = _strength(spec)
+    spec["campus"]["units"]["GEN"] = {**GENSET, "bus": bus}
+    c = build_campus(spec)
+    hourly = _hourly(c)
+    built = _gc03_strength(c, hourly)
+    unbuilt = _gc03_strength(
+        c, hourly.assign(status=(hourly["unit_id"] != "GEN").astype(int))
+    )
+    for poc in ("GRID", "MV1", "MV2"):
+        for got in (built, unbuilt):
+            assert _at(got[0], poc)["sk_intact_mva"] == pytest.approx(
+                _at(plain[0], poc)["sk_intact_mva"], rel=1e-9
+            )
+    assert built[3].count(GENSET_SK_NOTE) == 1 and GENSET_SK_NOTE not in plain[3]
