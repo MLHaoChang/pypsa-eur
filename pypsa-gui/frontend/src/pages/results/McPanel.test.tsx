@@ -537,6 +537,9 @@ describe('McPanel goal verdict', () => {
     await openPanel()
     expect((await screen.findByTestId('mc-goal-verdict')).textContent)
       .toBe('Goal missed: above the 3 h/yr goal (assumed for the site type)')
+    expect(screen.getByTestId('mc-fleet-note').textContent).toBe(
+      'Samples the network as entered: assets the study sizes count at their entered size, '
+      + 'not the study\'s sizes; the Guided verdict uses the sized design.')
     expect(screen.getByTestId('elcc-size-Wind-North').textContent).toMatch(/6 MW installed · .* MW peak/)
   })
 
@@ -545,6 +548,7 @@ describe('McPanel goal verdict', () => {
     await openPanel()
     await screen.findByTestId('elcc-table')
     expect(screen.queryByTestId('mc-goal-verdict')).toBeNull()
+    expect(screen.queryByTestId('mc-fleet-note')).toBeNull()
   })
 })
 

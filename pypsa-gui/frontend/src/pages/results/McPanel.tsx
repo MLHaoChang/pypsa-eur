@@ -121,6 +121,11 @@ export function mcGoalText(g: McGoalVerdict): string {
   return `${NATIVE_OUTCOME_WORDS.not_confident}: at or under the ${goal}, but not by enough to call it a pass${settle}`
 }
 
+/** Why the Expert verdict can differ from the Guided one (HOLISTIC-1, fleet
+ *  note): MC samples the fleet as entered, the Guided verdict the sized one. */
+export const MC_FLEET_NOTE = 'Samples the network as entered: assets the study sizes count at their '
+  + 'entered size, not the study\'s sizes; the Guided verdict uses the sized design.'
+
 /** An ELCC row's capacity (walkthrough 07): a vre row's `nameplate_mw` is its
  *  PEAK output, so it says so, with the installed capacity beside it. */
 export function elccSize(r: { kind: string; nameplate_mw: number }, installed?: number | null): string {
@@ -670,6 +675,11 @@ export function McPanel() {
                 <span data-testid="mc-goal-verdict"
                   className={`text-[11px] self-end ${result.goal.verdict === 'pass' ? 'text-success' : 'text-warn'}`}>
                   {mcGoalText(result.goal)}
+                </span>
+              )}
+              {result?.goal && (
+                <span data-testid="mc-fleet-note" className="text-[10px] text-muted self-end">
+                  {MC_FLEET_NOTE}
                 </span>
               )}
               {m.converged === false && (

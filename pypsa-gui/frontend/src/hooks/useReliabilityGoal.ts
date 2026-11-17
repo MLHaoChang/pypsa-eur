@@ -71,6 +71,13 @@ export const RELIABILITY_GOAL_LABEL = 'Reliability goal (LOLE)'
  *  the Goal field's key line, template-e2e PR-C, says the same). */
 export const ASSUMED_GOAL_NOTE = 'assumed for the site type'
 
+/** The site type's assumed LOLE goal (h/yr), or null: a missing or
+ *  non-number `assumed` reads as not set (GK B 65 C9). */
+export function assumedLole(goal: ReliabilityGoal | null): number | null {
+  const a: unknown = goal?.target_lole_h?.assumed
+  return typeof a === 'number' && Number.isFinite(a) ? a : null
+}
+
 /** What an unset field reads, in both modes and in the Results summary. */
 export const GOAL_UNSET: Record<'target_lole_h' | 'ens_cap_permyriad', string> = {
   target_lole_h: 'not set', ens_cap_permyriad: 'off',
@@ -83,7 +90,7 @@ export const GOAL_UNSET: Record<'target_lole_h' | 'ens_cap_permyriad', string> =
 export function goalWords(goal: ReliabilityGoal | null, k: GoalNumberField): string {
   const f = goal?.[k]
   // An unset LOLE names the site type's assumed goal (walkthrough 01).
-  const assumed = k === 'target_lole_h' && f?.value == null ? goal?.target_lole_h.assumed : null
+  const assumed = k === 'target_lole_h' && f?.value == null ? assumedLole(goal) : null
   if (assumed != null) return `${assumed} h/yr (${ASSUMED_GOAL_NOTE})`
   if (!f || f.value == null) return k === 'mc_draws' ? '' : GOAL_UNSET[k]
   const unit = k === 'target_lole_h' ? ' h/yr' : k === 'ens_cap_permyriad' ? '‱' : ''
