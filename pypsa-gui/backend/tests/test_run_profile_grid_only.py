@@ -170,6 +170,10 @@ def test_belgium_and_ieee39_are_refused_with_a_reason_when_their_source_is_missi
     assert out["verdict"] == "not_evaluated" and (
         "not built" in out["reason"] or "gridspine" in out["reason"]
     )
+    # GK B (61) condition 8: the reason names this template, never the other one.
+    names = {"belgium": "Belgium", "ieee39": "IEEE 39-bus"}
+    assert names[template] in out["reason"], out["reason"]
+    assert all(v not in out["reason"] for k, v in names.items() if k != template)
     assert _setup(monkeypatch, template, exists=True)["verdict"] == "pass"
 
 
@@ -493,6 +497,7 @@ def test_n1_is_not_evaluated_when_the_solve_did_not_finish_optimal(direct):
         ("lopf+ac_pf_ok", "optimal"),
         ("optimal; ac_pf_failed: singular matrix", "optimal"),
         ("lopf+ac_pf_unknown", "lopf+ac_pf_unknown"),
+        ("optimal; ac_pf_unknown: x", "optimal; ac_pf_unknown: x"),
         ("infeasible; ac_pf_failed: x", "infeasible; ac_pf_failed: x"),
         ("lopf+ac_pf_ok; extra", "lopf+ac_pf_ok; extra"),
         (None, None),
@@ -853,3 +858,123 @@ def test_cd_the_investment_case_fact_reads_a_pre_change_solve_not_current(pf_pro
     fact = ic_counterfactual.read(ctx, lambda fn: body)
     assert fact["state"] == ic_counterfactual.NOT_RUN
     assert "results_not_current" in fact["reasons"]
+
+
+# ── GK B (61) item 2: an LP-only reader never takes the flow's frames as current ───
+
+
+def test_a_flow_rewritten_network_is_not_current_to_an_lp_only_reader(pf_project):
+    """`solve_freshness` without `after_pf` (retained results, the KPI read-back, the
+    network chapters, the investment-case fact) reads the flow's state not current."""
+    from services import ic_counterfactual, workflow_tools
+
+    ctx, record = pf_project
+    record(False, flowed=True)
+    assert workflow_tools.solve_freshness(ctx, after_pf=True)["results_current"] is True
+    assert workflow_tools.solve_freshness(ctx)["results_current"] is False
+    body = {"status": "done", "report": {"present": True, "stale": False}, "flags": []}
+    fact = ic_counterfactual.read(ctx, lambda fn: body)
+    assert fact["state"] == ic_counterfactual.NOT_RUN
+    assert "results_not_current" in fact["reasons"]
+
+
+# ── each fail-closed guard of the PF reader has its own red case ───
+
+
+_UNALIGNED = [
+    {"ac_pf_convergence_list": "x"},
+    {"ac_pf_convergence_list": [{"snapshot": "0", "ok": True}]},
+    {"ac_pf_convergence_list": [{"snapshot": "0", "ok": True}, "x"]},
+]
+
+
+@pytest.mark.parametrize(
+    "over,code",
+    [
+        ({"ac_pf_results": {}}, "no_ac_pf"),
+        ({"ac_pf_results": "x"}, "no_ac_pf"),
+        ({"status": "running"}, "solve_not_completed"),
+        *[(o, "convergence_unaligned") for o in _UNALIGNED],
+    ],
+)
+@pytest.mark.parametrize(
+    "rule", ["grid.pf.converged", "grid.pf.loading", "grid.pf.voltage"]
+)
+def test_a_missing_or_malformed_pf_record_is_no_evidence(direct, over, code, rule):
+    ctx = _ctx(_net(vband=(0.95, 1.05)))
+    ctx.solver_state.update(over)
+    out = direct(rule, ctx)
+    assert out["verdict"] == "not_evaluated" and out["facts"][0]["value"] == code, out
+
+
+@pytest.mark.parametrize("rule", ["grid.pf.loading", "grid.pf.voltage"])
+def test_no_converged_snapshot_certifies_no_loading_or_voltage(direct, rule):
+    out = direct(rule, _ctx(_net(vband=(0.95, 1.05)), ok=(False, False)))
+    assert out["verdict"] == "not_evaluated"
+    assert out["facts"][0]["value"] == "no_converged_snapshot"
+
+
+@pytest.mark.parametrize("key", ["lines_t.p0", "lines_t.q0"])
+@pytest.mark.parametrize("empty", [False, True])
+def test_a_missing_or_empty_flow_frame_is_no_evidence(direct, key, empty):
+    ctx = _ctx(_net())
+    snap = ctx.solver_state["ac_pf_results"]
+    if empty:
+        snap[key] = pd.DataFrame()
+    else:
+        del snap[key]
+    out = direct("grid.pf.loading", ctx)
+    assert (
+        out["verdict"] == "not_evaluated"
+        and out["facts"][0]["value"] == "no_reactive_flows"
+    )
+
+
+def test_a_network_without_branches_has_no_loading(direct):
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(2))
+    n.add("Bus", "a")
+    out = direct("grid.pf.loading", _ctx(n))
+    assert (
+        out["verdict"] == "not_evaluated"
+        and out["facts"][0]["value"] == "no_ac_branches"
+    )
+
+
+@pytest.mark.parametrize("drop", ["frame", "column"])
+def test_a_missing_bus_voltage_is_no_evidence(direct, drop):
+    ctx = _ctx(_net(vband=(0.95, 1.05)))
+    snap = ctx.solver_state["ac_pf_results"]
+    if drop == "frame":
+        del snap["buses_t.v_mag_pu"]
+    else:
+        snap["buses_t.v_mag_pu"] = snap["buses_t.v_mag_pu"][["a"]]
+    out = direct("grid.pf.voltage", ctx)
+    assert (
+        out["verdict"] == "not_evaluated" and out["facts"][0]["value"] == "no_voltage"
+    )
+
+
+@pytest.mark.parametrize(
+    "status,condition",
+    [
+        ("failed", "optimal"),
+        ("completed", "infeasible"),
+        ("completed", "lopf+ac_pf_unknown"),
+    ],
+)
+def test_n1_needs_a_completed_optimal_solve(direct, status, condition):
+    ctx = _recorded(
+        _ctx(
+            _net(),
+            pf=False,
+            condition=condition,
+            status=status,
+            lopf_results=None,
+            solver_config={"sclopf": True, "sclopf_include_all_lines": True},
+        )
+    )
+    out = direct("grid.n1.secured", ctx)
+    assert (
+        out["verdict"] == "not_evaluated" and out["facts"][0]["value"] == "n1_no_solve"
+    )
