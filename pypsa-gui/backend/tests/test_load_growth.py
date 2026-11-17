@@ -631,3 +631,92 @@ def test_a_network_import_rederives_on_its_periods(grown_network, tmp_path):
     assert _cfg(grown_network)["load_scalers_by_carrier"] == {
         "electrical": {"2040": round(1.02**10, 6)}
     }
+
+
+# ── C6: tests that kill the mutants the first run left ──────────────────────
+
+_P = [2030, 2035]
+_GROWN = 1.104081  # 2 % per year from 2030, in 2035
+
+
+def _grown_cfg(**kw):
+    base = dict(
+        multi_investment_periods=True,
+        investment_periods=list(_P),
+        load_growth_pct_per_year={"electrical": 2.0},
+        load_growth_base_year=2030,
+        load_scalers_by_carrier={"electrical": {"2035": _GROWN}},
+        load_scalers_derived={"electrical": ["2035"]},
+    )
+    base.update(kw)
+    return SolverConfig(**base)
+
+
+def test_without_a_rate_nothing_is_stale_or_refreshed():
+    plain = SolverConfig()
+    assert LG.stale_problem(plain, None) is None
+    assert LG.refreshed_config(None, _P) is None
+    assert LG.refreshed_config(plain, _P) is plain
+    assert LG.apply({}, plain, _P) == {}
+
+
+def test_a_rate_whose_factors_are_all_one_is_not_stale_on_an_unset_map():
+    cfg = _grown_cfg(
+        load_growth_pct_per_year={"electrical": 0.0},
+        load_scalers_by_carrier=None,
+        load_scalers_derived={},
+    )
+    assert LG.stale_problem(cfg, None) is None
+
+
+def test_refreshed_config_keeps_a_fresh_config_and_replaces_a_stale_one():
+    fresh = _grown_cfg()
+    assert LG.refreshed_config(fresh, _P) is fresh
+    stale = _grown_cfg(investment_periods=[2030, 2040])
+    grown = LG.refreshed_config(stale, [2030, 2040])
+    assert grown is not stale
+    assert grown.load_scalers_by_carrier == {"electrical": {"2040": round(1.02**10, 6)}}
+    assert grown.load_scalers_derived == {"electrical": ["2040"]}
+
+
+def test_clearing_the_rate_removes_the_derived_entries():
+    out = LG.apply(
+        {
+            "load_growth_pct_per_year": {},
+            "load_growth_base_year": 2030,
+            "load_scalers_by_carrier": {"electrical": {"2035": _GROWN}},
+        },
+        _grown_cfg(),
+        _P,
+    )
+    # an empty block reads as no entry (each period falls back to 1.0)
+    assert out["load_scalers_by_carrier"].get("electrical", {}) == {}
+    assert out["load_scalers_derived"] == {}
+
+
+def test_a_period_the_all_carrier_multiplier_holds_is_not_derived_through_apply():
+    out = LG.apply(
+        {
+            "load_growth_pct_per_year": {"electrical": 2.0},
+            "load_growth_base_year": 2030,
+            "load_scalers": {"2035": 1.5},
+            "load_scalers_by_carrier": {},
+        },
+        SolverConfig(),
+        _P,
+    )
+    assert out["load_scalers_derived"] == {}
+    assert "2035" not in out["load_scalers_by_carrier"].get("electrical", {})
+
+
+def test_no_periods_leave_a_valid_start_year_valid():
+    assert load_growth_problems({"electrical": 2.0}, 2030, []) == []
+
+
+def test_the_derivation_and_mark_reader_take_a_missing_map():
+    scalers, derived = LG.derive_load_scalers(
+        _P, 2030, {"electrical": 2.0}, None, None, None
+    )
+    assert scalers == {"electrical": {"2035": _GROWN}}
+    assert derived == {"electrical": ["2035"]}
+    assert derived_marks({"electrical": ["2035"]}, None) == {}
