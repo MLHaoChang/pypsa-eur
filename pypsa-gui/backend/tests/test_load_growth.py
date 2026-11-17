@@ -720,3 +720,11 @@ def test_the_derivation_and_mark_reader_take_a_missing_map():
     assert scalers == {"electrical": {"2035": _GROWN}}
     assert derived == {"electrical": ["2035"]}
     assert derived_marks({"electrical": ["2035"]}, None) == {}
+
+
+def test_no_network_and_no_rate_skip_the_carrier_check():
+    from types import SimpleNamespace
+
+    assert LG.load_carriers_of(None) is None
+    assert LG.load_carriers_of(SimpleNamespace()) is None
+    assert LG.rate_key_problems(None, {"electrical"}) == []
