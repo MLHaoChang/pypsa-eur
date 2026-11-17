@@ -12,7 +12,7 @@ Engine gatekeeper A2 (grid-compliance packages GC-01..GC-08 and the PowerFactory
 
 Engine gatekeeper B3 (new template-e2e, ux-next, project-io app side, project-viewer-role and site-scene reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCukV4A4W5DYMfAwDrQW`
 
-UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01G7qCujaR6UW7jg3oSDRSxE`
+UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01G7qCunwLXP862Ro5Epncix`
 
 UX reviewer 2 (new template-e2e, ux-next and ui-cohesion UI reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCukikR93QrY7d2YFJ1c`
 
