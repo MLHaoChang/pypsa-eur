@@ -90,9 +90,10 @@ def test_the_bundle_writes_the_pack_and_keeps_its_own_files(tmp_path):
         "manifest.json",
     ]
     assert sorted(p.name for p in b.path.iterdir()) == sorted(
-        man["files"] + [PP.SUBDIR]
+        man["files"] + [PP.SUBDIR, "emt"]
     )
     assert man["psse_pack"] == _manifest(b)
+    assert "emt_pack" in man
     for f in man["psse_pack"]["files"]:
         assert (_pack_of(b) / f).is_file(), f
 
