@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 // SPDX-License-Identifier: MIT
 /** Dev-only UX-review shots for run progress slice 2: the run strip's status
- * line (under the header) in each state, in Guided and Expert, at 1280 and 1024 px. Drives the
+ * line (under the header) in each state, in Guided and Expert, at 1280 and 1024 px,
+ * plus dark-theme shots of the four estimate states (`-dark` suffix). Drives the
  * running app (API on :8000, Vite on :5173), signs in as the dev admin,
  * creates a project from a template, and rewrites `GET /api/simulation/queue`,
  * the job estimate and `GET /api/results/eh_study`. No solve and no model call.
@@ -31,6 +32,7 @@ const STATES = {
     study: () => ({ status: 'running', started_at: now() - 29, budget_solves: 30,
       report: { pipeline: { solves_consumed: 11, budget_solves: 30 } } }) },
 }
+const DARK_STATES = ['eta', 'overrun', 'queued', 'unknown']
 const EXPECT = {
   queued: 'Optimisation · Waiting in queue #2',
   eta: 'about 4 min left',
@@ -92,8 +94,15 @@ try {
     return route.fulfill({ json: s() })
   })
 
-  for (const name_ of Object.keys(STATES)) {
+  // Light: every state. Dark (UX 24): the four estimate states.
+  const RUNS = [
+    ...Object.keys(STATES).map(n => [n, 'light']),
+    ...DARK_STATES.map(n => [n, 'dark']),
+  ]
+  for (const [name_, theme] of RUNS) {
     state = name_
+    // The app reads its theme from localStorage on load (uiStore THEME_KEY).
+    await page.evaluate(t => localStorage.setItem('network-diagram:theme', t), theme)
     for (const mode of ['guided', 'expert']) {
       for (const width of [1280, 1024]) {
         await page.setViewportSize({ width, height: 800 })
@@ -107,7 +116,8 @@ try {
         const shown = (await line.innerText()).replace(/\s+/g, ' ').trim()
         const box = await line.boundingBox()
         await page.mouse.move(width / 2, 600)
-        const file = path.join(out, `run-status-${name_}-${mode}-${width}.png`)
+        const suffix = theme === 'dark' ? '-dark' : ''
+        const file = path.join(out, `run-status-${name_}-${mode}-${width}${suffix}.png`)
         await page.screenshot({ path: file, clip: { x: 0, y: 0, width, height: HEADER } })
         console.log(`${file} | shown: ${shown} | right edge ${Math.round(box.x + box.width)}/${width}`)
       }

@@ -40,7 +40,7 @@ export function RunStatusLine({ run }: { run: RunView }) {
       </span>
       {expert && run.jobId && (
         <button type="button" data-testid="run-status-log" onClick={() => requestBottomTab('Log')}
-          className="hidden sm:inline shrink-0 underline-offset-2 hover:underline">
+          className="hidden sm:inline shrink-0 underline underline-offset-2">
           Log
         </button>
       )}

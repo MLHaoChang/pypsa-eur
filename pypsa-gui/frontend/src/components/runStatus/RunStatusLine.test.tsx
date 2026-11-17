@@ -66,7 +66,11 @@ describe('RunStatusLine', () => {
     vi.spyOn(runEstimateApi, 'get').mockResolvedValue({ kind: 'solve', seconds: null, samples: 0, run_ids: [] })
     useUIStore.setState({ uiMode: 'expert', bottomTabRequest: null })
     const { unmount } = renderLine(running)
-    fireEvent.click(screen.getByTestId('run-status-log'))
+    // UI-COHESION-1: a text link is always underlined and never turns red.
+    const log = screen.getByTestId('run-status-log')
+    expect(log.className.split(' ')).toContain('underline')
+    expect(log.className).not.toMatch(/hover:underline|text-(red|danger|error)/)
+    fireEvent.click(log)
     expect(useUIStore.getState().bottomTabRequest).toBe('Log')
     unmount()
     useUIStore.setState({ uiMode: 'guided' })
