@@ -60,6 +60,22 @@ COMTRADE_TYPES = {"ASCII": None, "BINARY": "<i2", "BINARY32": "<i4", "FLOAT32": 
 #: A status sample that was not read (a failed poll, GC-12): what an empty cell
 #: of a ``status`` channel named in ``read_csv(blank_status=...)`` becomes.
 STATUS_NOT_READ = -1.0
+
+
+def refuse_status_marker(values, name: str, where: str) -> None:
+    """
+    Refuse a status sample that reads literally :data:`STATUS_NOT_READ`: it
+    could not be told from a blank cell once read, so a sample outside
+    {0, 1, blank} would pass as "not read".
+    """
+    hit = np.flatnonzero(np.asarray(values, dtype=float) == STATUS_NOT_READ)
+    if hit.size:
+        raise ContractError(
+            f"{where}: status channel {name!r} must be 0, 1 or blank, "
+            f"got {STATUS_NOT_READ!r} at row {int(hit[0])}"
+        )
+
+
 #: The value a binary COMTRADE file writes for a missing analog sample.
 _COMTRADE_MISSING = {"BINARY": -0x8000, "BINARY32": -0x80000000}
 #: Channels per PSCAD ``.out`` file.
@@ -227,6 +243,7 @@ def read_csv(path, blank_status=()) -> ChannelFrame:
         name, unit = _split_header(col, where)
         values = pd.to_numeric(df[col], errors="coerce")
         if name in blank_status and unit == "status":
+            refuse_status_marker(values.to_numpy(), name, where)
             values = values.mask(df[col].isna(), STATUS_NOT_READ)
         if values.isna().any():
             row = int(values.isna().to_numpy().argmax())

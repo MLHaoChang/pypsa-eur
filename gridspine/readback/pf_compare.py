@@ -27,7 +27,9 @@ def compare_lf(lf, pf_csv, vm_tol=0.01, va_tol_deg=0.5) -> pd.DataFrame:
     out = pd.DataFrame(index=lf.bus.index.copy())
     out["vm_pu_pp"] = lf.bus["vm_pu"]
     out["vm_pu_pf"] = pf["vm_pu"]
-    out["vm_rel_err"] = (out["vm_pu_pp"] - out["vm_pu_pf"]).abs() / out["vm_pu_pf"].abs()
+    out["vm_rel_err"] = (out["vm_pu_pp"] - out["vm_pu_pf"]).abs() / out[
+        "vm_pu_pf"
+    ].abs()
     out["va_degree_pp"] = lf.bus["va_degree"]
     out["va_degree_pf"] = pf["va_degree"]
     out["va_abs_err_deg"] = (out["va_degree_pp"] - out["va_degree_pf"]).abs()
@@ -55,9 +57,7 @@ BRANCH_CSV_COLUMNS = BRANCH_KEY + ["p_from_mw", "q_from_mvar", "loading_percent"
 def _branch_indexed(df, side):
     missing = [c for c in BRANCH_CSV_COLUMNS if c not in df.columns]
     if missing:
-        raise ContractError(
-            f"{side} branch CSV missing required columns: {missing}"
-        )
+        raise ContractError(f"{side} branch CSV missing required columns: {missing}")
     out = df.copy()
     # `ckt` is a RAW text field, but a column of all-numeric ids reads back
     # from pandas as int64. Comparing that against the LF result's str keys

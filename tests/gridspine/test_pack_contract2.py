@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 from gridspine.handoff.test_battery import (
+    CHANNELS,
     CONTRACT_VERSIONS,
     Case,
     battery_json,
@@ -39,6 +40,7 @@ from tests.gridspine.test_pack import (
     T,
     _by_id,
     _emt_pack,
+    _pscad,
     _ride_through,
     _rows,
 )
@@ -193,19 +195,35 @@ def test_connected_not_in_status_is_unknown_naming_the_unit(tmp_path):
     assert c["status"] == "unknown"
 
 
-@pytest.mark.parametrize("value", [2.0, 0.5, -1.0])
+@pytest.mark.parametrize("value", [2.0, 0.5])
 def test_a_value_outside_0_1_blank_is_unknown_naming_the_sample(tmp_path, value):
-    # -1 is the reader's own "not read" marker; written literally it is still not 0, 1 or blank
-    j, c = _judge(tmp_path, FAULT, _fault_channels(), _status((0.4, value), (0.41, 1.0)))
-    if value == -1.0:
-        # a literal -1 cannot be told from a blank once read; it is unknown, never pass
-        assert _rows(c)["stays_connected"]["status"] == "unknown"
-        return
+    j, c = _judge(
+        tmp_path, FAULT, _fault_channels(), _status((0.4, value), (0.41, 1.0))
+    )
     assert c["status"] == "unknown" and c["rows"] == []
     assert c["detail"].startswith("not judged: ")
     assert f"got {value!r} at 0.4 s" in c["detail"]
     # the pack is still judged: the error stays with its case
     assert j["header"]["contract_version"] == "2"
+
+
+def test_a_literal_minus_one_in_a_csv_is_refused_not_read_as_blank(tmp_path):
+    # -1 is the reader's own "not read" marker; written literally it is not 0, 1 or blank
+    j, c = _judge(tmp_path, FAULT, _fault_channels(), _status((0.4, -1.0), (0.41, 1.0)))
+    assert c["status"] == "unknown" and c["rows"] == []
+    assert "unreadable" in c["detail"] and "must be 0, 1 or blank" in c["detail"]
+    assert "got -1.0 at row 400" in c["detail"]
+
+
+def test_a_literal_minus_one_in_a_pscad_result_is_refused(tmp_path):
+    pack = _pack2(tmp_path, [FAULT])
+    ch = dict(_fault_channels())
+    ch["connected"] = ("status", np.array(_status((0.4, -1.0), (0.41, 1.0))))
+    _pscad(pack / "results", FAULT_ID, ch)
+    c = _by_id(judge_pack(pack, PROFILE, RATINGS))[FAULT_ID]
+    assert c["status"] == "unknown" and c["rows"] == []
+    assert c["detail"].startswith(f"{FAULT_ID}.inf unreadable: ")
+    assert "got -1.0 at row 400" in c["detail"]
 
 
 # --- D-2: a v1 pack never passes stays_connected ---------------------------------------------------------------
@@ -225,26 +243,47 @@ def test_the_frozen_v1_pack_is_real_v1():
     assert all("connected" not in c["channels"] for c in b["cases"])
 
 
+#: one case of each kind GC-07 judges (pack.NOT_JUDGED are the others)
+JUDGED_KINDS = ("fault_3ph", "fault_1ph", "p_step", "q_step", "v_step", "f_step")
+
+
+def _every_v1_channel():
+    """Every v1 channel, flat, in its contract unit: enough for each kind to be judged."""
+    flat = {
+        "v_poc_pu": 1.0,
+        "theta_poc_deg": 0.0,
+        "f_hz": 50.0,
+        "p_poc_mw": 50.0,
+        "q_poc_mvar": 5.0,
+        "id_pu": 0.5,
+        "iq_pu": 0.0,
+        "i_poc_pu": 0.5,
+    }
+    units = {n: CHANNELS[n].unit for n in contract_channels("1")}
+    assert set(flat) == set(units)
+    return {n: (units[n], np.full_like(T, v)) for n, v in flat.items()}
+
+
 def test_a_v1_pack_reads_unknown_on_every_stays_connected_row(tmp_path):
     pack = _frozen_v1(tmp_path)
-    ids = json.loads((pack / "manifest.json").read_text())["case_ids"]
-    fault = next(i for i in ids if i.startswith("fault_3ph_"))
-    f_step = next(i for i in ids if i.startswith("f_step_") and i.endswith("_up"))
+    battery = json.loads((pack / "battery.json").read_text())["cases"]
+    picked = {}
+    for c in battery:
+        picked.setdefault(c["kind"], c["case_id"])
+    assert set(JUDGED_KINDS) <= set(picked)
     (pack / "results").mkdir()
-    # both results carry a 'connected' column of 1s; v1 does not read it
-    _write(pack / "results" / f"{fault}.csv", _fault_channels(), _status())
-    _write(pack / "results" / f"{f_step}.csv", _f_step_channels(), _status())
+    for kind in JUDGED_KINDS:
+        # every result carries a 'connected' column of 1s; v1 does not read it
+        _write(pack / "results" / f"{picked[kind]}.csv", _every_v1_channel(), _status())
     j = judge_pack(pack, PROFILE, RATINGS)
     assert j["header"]["contract_version"] == "1"
     assert j["header"]["connected"] == NO_CONNECTED
     cases = _by_id(j)
-    judged = [c for c in cases.values() if c["rows"]]
-    assert {c["case_id"] for c in judged} == {fault, f_step}
-    for c in judged:
+    for kind in JUDGED_KINDS:
+        c = cases[picked[kind]]
         sc = _rows(c)["stays_connected"]
-        assert sc["status"] == "unknown"
-        assert "no connected channel (contract v1)" in sc["detail"]
-        assert c["status"] != "pass"
+        assert sc["status"] == "unknown", kind
+        assert "no connected channel (contract v1)" in sc["detail"], kind
     assert not any(c["status"] == "pass" for c in cases.values())
 
 

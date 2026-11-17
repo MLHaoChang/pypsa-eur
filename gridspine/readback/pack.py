@@ -61,7 +61,12 @@ from gridspine.handoff.test_battery import (
     cases_from_json,
     contract_channels,
 )
-from gridspine.readback.channels import ChannelFrame, read_csv, read_pscad
+from gridspine.readback.channels import (
+    ChannelFrame,
+    read_csv,
+    read_pscad,
+    refuse_status_marker,
+)
 from gridspine.readback.judge import PRE_WINDOW_S, UNKNOWN, case_status, judge
 from gridspine.schema.contracts import ContractError
 
@@ -161,6 +166,14 @@ def read_manifest(pack_dir) -> dict:
     return manifest
 
 
+def _pscad_result(inf, outs) -> ChannelFrame:
+    """A PSCAD result; it has no blank cells, so no status sample may read as one."""
+    frame = read_pscad(inf, outs)
+    if CONNECTED in frame and frame.units[CONNECTED] == "status":
+        refuse_status_marker(frame.channel(CONNECTED), CONNECTED, inf.name)
+    return frame
+
+
 def _result_files(results: Path, case_id: str):
     """``(reader, label)`` for the case's result, or ``None`` when there is none."""
     inf = results / f"{case_id}.inf"
@@ -175,7 +188,7 @@ def _result_files(results: Path, case_id: str):
                 "which run is the result is ambiguous"
             )
         outs = [single] if single.is_file() else None
-        found.append((lambda: read_pscad(inf, outs), inf.name))
+        found.append((lambda: _pscad_result(inf, outs), inf.name))
     if csv.is_file():
         found.append((lambda: read_csv(csv, blank_status=(CONNECTED,)), csv.name))
     if len(found) > 1:
@@ -237,6 +250,7 @@ def _judge_one(
     """The judgment of one battery case on its result frame."""
     channels, units = {}, {}
     p = case.params
+    # judge default pre-window; stays_connected is an obligation on every kind (GK A2 D-2)
     jc = {"id": case.case_id, "t_event": case.t_event_s, "connected_required": True}
     note = ""
     p_rows = ()  # the checks that read P in pu of the rated P
