@@ -155,11 +155,24 @@ _SENTINEL = "SENTINEL-free-text"
 
 def _job_view(**extra):
     return {
-        "id": "fg:1", "family": "fg", "kind": "solve", "tool_use_id": "tu1",
-        "status": "running", "terminal": False, "outcome": None, "cursor": 7,
-        "progress": 0.5, "created_at": 1, "started_at": 2, "updated_at": 3,
-        "finished_at": None, "phase": _SENTINEL, "detail": _SENTINEL,
-        "warnings": [_SENTINEL], "input_revision_note": _SENTINEL, **extra,
+        "id": "fg:1",
+        "family": "fg",
+        "kind": "solve",
+        "tool_use_id": "tu1",
+        "status": "running",
+        "terminal": False,
+        "outcome": None,
+        "cursor": 7,
+        "progress": 0.5,
+        "created_at": 1,
+        "started_at": 2,
+        "updated_at": 3,
+        "finished_at": None,
+        "phase": _SENTINEL,
+        "detail": _SENTINEL,
+        "warnings": [_SENTINEL],
+        "input_revision_note": _SENTINEL,
+        **extra,
     }
 
 
@@ -170,22 +183,37 @@ def _checked_turn():
 def test_checked_job_snapshot_drops_free_text_and_unknown_fields():
     out = _checked_turn().project_frame(
         "job_snapshot",
-        {"epoch": "e", "seq": 4, "monitor_active": True, "extra": _SENTINEL,
-         "jobs": [_job_view(brand_new_field=_SENTINEL)]},
+        {
+            "epoch": "e",
+            "seq": 4,
+            "monitor_active": True,
+            "extra": _SENTINEL,
+            "jobs": [_job_view(brand_new_field=_SENTINEL)],
+        },
     )
     assert _SENTINEL not in repr(out)
     assert out["epoch"] == "e" and out["seq"] == 4 and out["monitor_active"] is True
     assert out["jobs"][0]["status"] == "running" and out["jobs"][0]["cursor"] == 7
     assert out["jobs"][0]["progress"] == 0.5
-    assert not {"phase", "detail", "warnings", "input_revision_note",
-                "brand_new_field"} & set(out["jobs"][0])
+    assert not {
+        "phase",
+        "detail",
+        "warnings",
+        "input_revision_note",
+        "brand_new_field",
+    } & set(out["jobs"][0])
 
 
 def test_checked_job_terminal_drops_free_text_and_unknown_fields():
     out = _checked_turn().project_frame(
         "job_terminal",
-        {"job_id": "fg:1", "tool_use_id": "tu1", "cursor": 9, "extra": _SENTINEL,
-         "job": _job_view(brand_new_field=_SENTINEL)},
+        {
+            "job_id": "fg:1",
+            "tool_use_id": "tu1",
+            "cursor": 9,
+            "extra": _SENTINEL,
+            "job": _job_view(brand_new_field=_SENTINEL),
+        },
     )
     assert _SENTINEL not in repr(out)
     assert (out["job_id"], out["tool_use_id"], out["cursor"]) == ("fg:1", "tu1", 9)
@@ -195,7 +223,8 @@ def test_checked_job_terminal_drops_free_text_and_unknown_fields():
 
 def test_checked_job_terminal_without_a_view_keeps_null():
     out = _checked_turn().project_frame(
-        "job_terminal", {"job_id": "fg:1", "tool_use_id": None, "cursor": 1, "job": None}
+        "job_terminal",
+        {"job_id": "fg:1", "tool_use_id": None, "cursor": 1, "job": None},
     )
     assert out["job"] is None
 
