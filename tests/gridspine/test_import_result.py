@@ -538,3 +538,18 @@ def test_missing_dependency_message_names_the_format_and_module(fake_package):
         ir.read("psse", ["case.raw"], declared=(_spec("psse", name="PSS/E case"),))
     assert "PSS/E case" in str(err.value)
     assert "'not_a_real_dependency_xyz'" in str(err.value)
+
+
+def test_inner_spaces_in_sidecar_names_are_allowed():
+    result = ImportResult(
+        network=None, report=_report(), sidecars={"area map.json": {}}
+    )
+    assert "area map.json" in result.sidecars
+
+
+def test_an_import_error_without_a_module_name_names_the_importer(fake_package):
+    _write_importer(
+        fake_package, "psse", "raise ImportError('broken optional backend')\n"
+    )
+    with pytest.raises(ImportFormatError, match="'fake_ingest.psse_import'"):
+        ir.read("psse", ["case.raw"], declared=(_spec("psse"),))
