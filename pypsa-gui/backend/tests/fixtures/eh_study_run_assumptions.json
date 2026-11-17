@@ -65,6 +65,19 @@
   "field": "outage_rate_basis"
  },
  {
+  "key": "outage_rate:StorageUnit:battery",
+  "label": "Outage rate of battery storage units (bat)",
+  "value": 0.02,
+  "shown": "2 % forced outage rate, repair 24 h",
+  "source": "carrier_default",
+  "reason": "the typical value for battery units, about utility-scale BESS availability surveys (forced outage rate; sparse public data)",
+  "section": "assets",
+  "card": "reliability",
+  "component": "StorageUnit",
+  "entity": "bat",
+  "field": "outage_rate_value"
+ },
+ {
   "key": "efficiency:boiler",
   "label": "Conversion efficiency of boiler",
   "value": 1.0,

@@ -762,7 +762,7 @@ def test_a_long_walk_is_cut_at_max_steps_and_marked_truncated(study):
 
 # `run_assumptions(_assumed_net(), {}, None)` from #1645 (services/adequacy/run_assumptions.py @ 8995402d), saved
 # as it returned: two goal rows (no component), a carrier outage rate joining two units, a repair time and a
-# basis left blank on a unit with its own rate, and a lossless conversion.
+# basis left blank on a unit with its own rate, a storage unit's carrier outage rate, and a lossless conversion.
 ASSUMED_ROWS = json.loads(
     (Path(__file__).parent / "fixtures" / "eh_study_run_assumptions.json").read_text()
 )
@@ -777,6 +777,7 @@ def _assumed_net():
     n.add("Generator", "d2", bus="b", carrier="gas", p_nom=5.0)
     n.add("Generator", "o1", bus="b", carrier="oil", p_nom=3.0)
     n.add("Link", "boiler", bus0="b", bus1="h", p_nom=4.0)
+    n.add("StorageUnit", "bat", bus="b", carrier="battery", p_nom=2.0, max_hours=2)
     n.add("Load", "l", bus="b", p_set=5)
     n.generators["outage_rate_value"] = [math.nan, math.nan, 0.05]
     n.generators["mttr_hours"] = math.nan
@@ -803,31 +804,54 @@ def _row_steps(out) -> dict[str, str]:
     }
 
 
-def test_real_run_assumptions_rows_read_as_expected_when_unchanged(assumed):
+def test_real_run_assumptions_rows_read_fresh_when_unchanged(assumed):
     out = explain_study_figure("expected_shortfall")
-    steps = _row_steps(out)
-    # The goal rows name no network field: uncompared (the goal pins compare draws and site type).
-    assert steps["Simulation runs per reliability check"] == "uncompared"
-    assert steps["Site type"] == "uncompared"
-    for node in (
-        S.input_id("assumption/mc_draws"),
-        S.input_id("assumption/site_archetype"),
-    ):
-        assert "names no network field" in json.dumps(_step(out, node)), node
-    assert out["outcome"]["state"] == "uncompared"
-    # Every other row is pinned, one pin per unit, and each is fresh.
-    pinned = {
-        k: v
-        for k, v in steps.items()
-        if k not in ("Simulation runs per reliability check", "Site type")
-    }
-    assert pinned == {
+    assert out["outcome"]["state"] == "fresh"
+    # One pin per row, one per unit of a joined row; the goal rows compare with the current goal (GK B 65).
+    assert _row_steps(out) == {
+        "Simulation runs per reliability check": "fresh",
+        "Site type": "fresh",
         "Outage rate of gas generating units (d1, d2): d1": "fresh",
         "Outage rate of gas generating units (d1, d2): d2": "fresh",
         "Repair time of oil generating units (o1)": "fresh",
         "Outage rate basis of generating units (o1)": "fresh",
+        "Outage rate of battery storage units (bat)": "fresh",
         "Conversion efficiency of boiler": "fresh",
-    }, steps
+    }
+
+
+@pytest.mark.parametrize(
+    "over, broken",
+    [
+        pytest.param(
+            {"mc_draws": 1000}, "Simulation runs per reliability check", id="draws"
+        ),
+        pytest.param({"site_archetype": "off_grid"}, "Site type", id="site-type"),
+    ],
+)
+def test_a_goal_change_breaks_its_goal_row(assumed, over, broken):
+    _goal(assumed, **over)
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "stale"
+    assert broken in _broken_labels(out)
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        pytest.param({"field": "target_lole_h"}, id="another-field"),
+        pytest.param({"entity": "g"}, id="goal-key-with-an-entity"),
+    ],
+)
+def test_a_row_with_no_component_that_is_not_a_goal_row_stays_uncompared(assumed, over):
+    assumed.solver_state["eh_study"]["assumptions"] = [
+        {**ASSUMED_ROWS[0], "key": "other", "label": "Other", **over}
+    ]
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "uncompared"
+    assert "names no network field" in json.dumps(
+        _step(out, S.input_id("assumption/other"))
+    )
 
 
 def test_without_goal_rows_the_real_rows_read_fresh(assumed):
@@ -840,6 +864,11 @@ def test_without_goal_rows_the_real_rows_read_fresh(assumed):
 @pytest.mark.parametrize(
     "edit, broken",
     [
+        pytest.param(
+            lambda n: n.storage_units.__setitem__("outage_rate_value", 0.02),
+            "Outage rate of battery storage units (bat)",
+            id="storage-unit-rate-set",
+        ),
         pytest.param(
             lambda n: n.generators.__setitem__(
                 "outage_rate_value", [math.nan, 0.05, 0.05]

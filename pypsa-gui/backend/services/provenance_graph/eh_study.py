@@ -21,7 +21,8 @@ choices no edit seam moves the revision for (pack overrides beyond the goal, sta
 buses, DtC config and attribution), against the request Guided would send now; and each row of the record's
 `assumptions` list against the network field the row names, one pin per unit of a row that joins several; a
 defaulted outage field (rate, repair time, basis) is pinned as still blank, a blank efficiency reads as the default
-the study used, and a row naming no network field (the goal's) reads uncompared. A record with no `assumptions` key
+the study used, a goal row (draws, site type) compares with the current goal, and any other row naming no
+network field reads uncompared. A record with no `assumptions` key
 did not record them and reads uncompared; `[]` is none assumed. A field the record did not capture,
 or holds with the wrong type, records `Unrecorded` and reads uncompared, never fresh and never a default (W4).
 
@@ -172,14 +173,29 @@ def _row_names(row: dict) -> list[str]:
     return [x.strip() for x in row["entity"].split(", ") if x.strip()]
 
 
+# A goal row (#1645 `_goal_rows`): no component or entity, its field the goal key. It compares with the current
+# goal input of the same name, so an unchanged Guided study can read fresh (GK B 65).
+GOAL_ROWS = {"site_archetype": "site_archetype", "mc_draws": "mc/draws"}
+
+
+def _is_goal_row(row: dict) -> bool:
+    return not row["component"] and not row["entity"] and row["field"] in GOAL_ROWS
+
+
+def _row_units(row: dict) -> list[str]:
+    """One name per pin: the goal key for a goal row, else each unit the row names."""
+    return [row["field"]] if _is_goal_row(row) else _row_names(row)
+
+
 def _row_problem(row: Any) -> Unrecorded | None:
     """Why a recorded assumption row cannot be pinned, or None."""
     if not isinstance(row, dict):
         return Unrecorded("assumption row: not an object")
     if not all(isinstance(row.get(k), str) for k in ("component", "entity", "field")):
         return Unrecorded("assumption row: names no network field")
-    if not row["component"] or not row["field"] or not _row_names(row):
-        # A goal row (draws, site type) names no network field.
+    if not _is_goal_row(row) and (
+        not row["component"] or not row["field"] or not _row_names(row)
+    ):
         return Unrecorded("assumption row: names no network field")
     if not _scalar(row.get("value")):
         return Unrecorded("assumption row: no comparable value")
@@ -415,6 +431,8 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
     return current, tuple(
         ()
         if _row_problem(r) is not None
+        else (current[GOAL_ROWS[r["field"]]],)
+        if _is_goal_row(r)
         else tuple(
             _try(lambda r=r, x=x: _row_value(ctx.network, r, x)) for x in _row_names(r)
         )
@@ -594,7 +612,7 @@ def study_graph(r: StudyRead) -> StudyGraph:
             link(RUN, key, label, problem, None)
             continue
         # One pin per unit the row names (GK B 65 B1): an outage row joins every unit of its carrier.
-        names = _row_names(row)
+        names = _row_units(row)
         now = r.rows[i] if i < len(r.rows) else ()
         for j, unit in enumerate(names):
             link(
