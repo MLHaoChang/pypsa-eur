@@ -109,6 +109,15 @@ describe('GridExtensionCard: when it shows', () => {
     mount()
     expect((await screen.findByTestId('grid-ext-needs-local')).textContent).toBe(W.needsLocalMode)
   })
+
+  it('reads the last comparison behind the shared skeleton, a busy status region (UX 2 (3))', async () => {
+    api.list.mockReturnValue(new Promise(() => {}))
+    mount()
+    const busy = await screen.findByTestId('grid-ext-loading')
+    expect(busy.getAttribute('role')).toBe('status')
+    expect(busy.getAttribute('aria-busy')).toBe('true')
+    expect(busy.textContent).toBe('Loading the last comparison…')
+  })
 })
 
 describe('GridExtensionCard: the comparison', () => {

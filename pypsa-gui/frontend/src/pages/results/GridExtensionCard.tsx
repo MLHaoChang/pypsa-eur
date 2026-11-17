@@ -22,6 +22,7 @@ import {
 import { networkApi } from '../../api/network'
 import { useAuthMode } from '../../auth/AuthModeProvider'
 import { STATE_PILL } from '../../components/ResultState'
+import { SkeletonLines } from '../../components/Skeleton'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { pointAtHeaderSave } from '../../site3d/SiteEntryAction'
 import { useUIStore } from '../../store/uiStore'
@@ -276,7 +277,8 @@ export default function GridExtensionCard() {
     return shell(<><button type="button" disabled className={BTN_PRIMARY}>{W.compare}</button><SaveFirst /></>)
   }
   if (studyQ.isPending || (studyId && archQ.isPending)) {
-    return shell(<p className="text-[11px] text-muted" aria-busy="true">Reading the last comparison…</p>)
+    // The shared skeleton: after ~200 ms, a busy status region, reduced motion honoured (UX 2 (3)).
+    return shell(<SkeletonLines what="the last comparison" rows={3} testId="grid-ext-loading" />)
   }
   if (studyQ.isError || archQ.isError) {
     return shell(
