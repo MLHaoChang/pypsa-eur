@@ -3,9 +3,10 @@
 # SPDX-License-Identifier: MIT
 """Study harness 16 (design §9.3 "eh_concentrator_staged"; GK A (28) GO,
 Q1-Q6): eh_concentrator_staged@1 on the shipped template. The result gate
-blocks on the tonne buses' mass balance and on an investment case not
-established against the site as today; the motor start, the restart and N-1
-on the site transformer warn with their numbers; the KPIs read as warn rules.
+blocks on the tonne buses' mass balance; the investment case (a case the user
+ran on this network, GK A (28) Q8, study-harness issue 52), the motor start,
+the restart and N-1 on the site transformer warn with their numbers; the KPIs
+read as warn rules.
 The readers are pinned here on contexts of the test's own; the run to the
 hand-off is `test_run_profile_concentrator_runs.py`."""
 
@@ -91,43 +92,44 @@ def direct(monkeypatch):
 # ── the profile ──────────────────────────────────────────────────────────────
 
 
-def test_the_profile_serves_the_concentrator_template_with_the_case_after_the_solve():
+def test_the_profile_serves_the_concentrator_template_with_the_case_outside_the_run():
     p = run_profiles.resolve(REF)
     assert run_profiles.PROFILES[REF] is run_profiles.EH_CONCENTRATOR_STAGED
     assert p["templates"] == [TEMPLATE] and "eh_study" not in p
-    assert [a["tool"] for a in p["stages"]["solve"]["actions"]][
-        -1
-    ] == "run_investment_case"
+    solve_tools = [a["tool"] for a in p["stages"]["solve"]["actions"]]
+    assert "run_investment_case" not in solve_tools
+    assert [r["tool"] for r in p["envelope"]["runs"]] == [
+        "solve_queue_enqueue",
+        "generate_report",
+    ]
     assert not any(r.get("engine") for r in p["stages"]["result_gate"]["rules"])
     assert _rules("setup")["set.project.template"]["value"] == TEMPLATE
     assert p["chapters"] == ["sizing", "investment_case", "grid_risk"]
     assert any(m.startswith("NPV by stage") for m in p["missing_tools"])
     assert any(m.startswith("N-1 on the site transformer") for m in p["missing_tools"])
-    assert run_profiles.CONC_BASELINE_UNCOUNTED in p["missing_tools"]
-    assert (
-        "not counted by the envelope (run_ic.SOLVES = 0"
-        in run_profiles.CONC_BASELINE_UNCOUNTED
-    )
+    assert run_profiles.CONC_CASE_OUTSIDE in p["missing_tools"]
+    assert "study-harness issue 52" in run_profiles.CONC_CASE_OUTSIDE
+    assert not hasattr(run_profiles, "CONC_BASELINE_UNCOUNTED")
 
 
-def test_the_mass_balance_and_the_case_block_and_the_screens_and_kpis_warn():
+def test_the_mass_balance_blocks_and_the_case_the_screens_and_kpis_warn():
     rules = _rules()
     block = {k for k, r in rules.items() if r["severity"] == "block"}
-    assert {
-        "conc.mass_balance",
-        "conc.ic.counterfactual",
-        "conc.ic.basis",
-        "kpi.unserved_mwh",
-    } <= block
+    assert {"conc.mass_balance", "kpi.unserved_mwh"} <= block
+    assert not {"conc.ic.counterfactual", "conc.ic.basis", "conc.kpi.npv"} & block
     for rid in (
         "conc.motor_start",
         "conc.restart",
         "conc.n_1.site_transformer",
+        "conc.ic.counterfactual",
+        "conc.ic.basis",
         "conc.kpi.lost_tonnes",
         "conc.kpi.shed_level",
         "conc.kpi.npv",
     ):
         assert rules[rid]["severity"] == "warn", rid
+    for rid in ("conc.ic.counterfactual", "conc.ic.basis", "conc.kpi.npv"):
+        assert "study-harness issue 52" in rules[rid]["basis"], rid
     assert (rules["conc.mass_balance"]["op"], rules["conc.mass_balance"]["value"]) == (
         "le",
         1e-6,
@@ -547,7 +549,7 @@ def test_the_case_passes_only_established_against_the_site_as_today(
 
     monkeypatch.setattr(ic, "read", lambda ctx, on: fact)
     r = direct("conc.ic.basis")
-    assert r["verdict"] == verdict and r["severity"] == "block"
+    assert r["verdict"] == verdict and r["severity"] == "warn"
     if verdict == "not_evaluated":
         assert r["reason"] == ic.reason_words(fact)
 
@@ -604,3 +606,156 @@ def test_no_shed_is_no_evidence(n0, direct):
     n = n0.copy()
     n.stores_t.e = pd.DataFrame(index=n.snapshots)
     assert direct("conc.kpi.shed_level", network=n)["verdict"] == "not_evaluated"
+
+
+# ── the no-evidence states, by name (mutants: each guard's own state) ────────
+
+
+def _state(r):
+    return r["verdict"], r["facts"][0]["value"]
+
+
+@pytest.mark.parametrize("frame,attr,name", KINDS, ids=[k[2] + "." + k[1] for k in KINDS])
+def test_a_missing_flow_column_is_unreadable_dispatch(direct, frame, attr, name):
+    n = _chain()
+    setattr(getattr(n, frame), attr, getattr(getattr(n, frame), attr).drop(columns=[name]))
+    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "unreadable_dispatch")
+
+
+def test_a_link_port_with_no_flow_frame_is_unreadable_dispatch(direct):
+    n = _chain()
+    n.links["bus3"] = ""
+    n.links.loc["grind", "bus3"] = "ore"
+    assert getattr(n.links_t, "p3", None) is None or "grind" not in n.links_t.p3.columns
+    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "unreadable_dispatch")
+
+
+def test_only_bus_n_columns_are_link_ports():
+    n = _chain()
+    n.links["bus_note"] = "ore"
+    assert RC._link_ports(n) == [(0, "bus0"), (1, "bus1"), (2, "bus2")]
+
+
+def test_no_tonne_bus_is_named(direct):
+    n = _chain()
+    n.buses["unit"] = ""
+    n.buses["carrier"] = "AC"
+    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "no_tonne_bus")
+
+
+def test_an_infinite_weight_is_unreadable_and_a_zero_weight_is_read(direct):
+    n = _chain()
+    n.snapshot_weightings.loc[n.snapshots[0], "generators"] = float("inf")
+    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "unreadable_weights")
+    m = _chain()
+    m.snapshot_weightings.loc[m.snapshots[0], "generators"] = 0.0
+    assert direct("conc.mass_balance", network=m)["verdict"] == "pass"
+
+
+def test_a_missing_supply_column_is_unreadable_dispatch(direct):
+    n = _chain()
+    n.generators_t.p = n.generators_t.p.drop(columns=["mine"])
+    assert _state(direct("conc.mass_balance", network=n)) == ("not_evaluated", "unreadable_dispatch")
+
+
+def test_the_screens_read_the_projects_saved_grid_code_else_the_default(n0, tmp_path, monkeypatch):
+    import json
+
+    from services import campus_electrical_service as ce
+    from services import project_registry
+
+    from services.adequacy import grid_readiness as gr
+
+    monkeypatch.setattr(project_registry, "project_dir", lambda project: tmp_path)
+    load, asked = gr._load_profile, []
+    monkeypatch.setattr(gr, "_load_profile", lambda pid, dirs: asked.append(pid) or load(pid, dirs))
+    env = SimpleNamespace(project="p")
+    default = RC._scorecard_inputs(env, n0)
+    assert default.profile == load(ce.DEFAULTS["profile"], ())[0] and default.profile_error is None
+    (tmp_path / ce.SUBDIR).mkdir()
+    (tmp_path / ce.SUBDIR / ce.SETTINGS_FILE).write_text(json.dumps({"profile": "us_ieee2800_nerc"}))
+    saved = RC._scorecard_inputs(env, n0)
+    assert saved.profile == load("us_ieee2800_nerc", ())[0] != default.profile
+    (tmp_path / ce.SUBDIR / ce.SETTINGS_FILE).write_text(json.dumps({"profile": None}))
+    RC._scorecard_inputs(env, n0)
+    assert asked == [ce.DEFAULTS["profile"], "us_ieee2800_nerc", ce.DEFAULTS["profile"]]
+
+
+@pytest.mark.parametrize("ctx,project", [(None, "p"), (SimpleNamespace(network="n"), None), (None, None)])
+def test_the_screens_need_the_runs_context_and_project(monkeypatch, ctx, project):
+    seen = []
+    out = RC._on_network(SimpleNamespace(ctx=ctx, project=project), seen.append)
+    assert isinstance(out, run_gates.NoEvidence) and out.value == "not_run" and seen == []
+
+
+def test_the_screens_read_the_live_network_under_its_guard(monkeypatch):
+    monkeypatch.setattr(run_gates, "_on", lambda ctx, fn, *args: fn(*args))
+    seen = []
+    RC._on_network(SimpleNamespace(ctx=SimpleNamespace(network="n"), project="p"), seen.append)
+    assert seen == ["n"]
+
+
+def _rows(monkeypatch, rows):
+    from services.adequacy import grid_readiness as gr
+    monkeypatch.setattr(gr, "_motor_start_rows", lambda inp: rows)
+
+
+def test_a_row_without_its_motor_detail_still_reads(n0, monkeypatch):
+    _rows(monkeypatch, [{"id": "motor_start:m", "verdict": "pass", "project_value": 1.0, "limit": 3.0}])
+    assert RC.motor_start_of(_inputs(n0)).detail == ["m: ΔU 1.00 % ≤ 3 % (None): PASS"]
+
+
+@pytest.mark.parametrize("verdict,value", [("warn", None), ("unknown", 5.0)])
+def test_only_a_computed_dip_over_the_limit_fails(n0, monkeypatch, verdict, value):
+    _rows(monkeypatch, [{"id": "motor_start:m", "verdict": verdict, "project_value": value, "limit": 3.0,
+                         "note": "n"}])
+    out = RC.motor_start_of(_inputs(n0))
+    assert isinstance(out, run_gates.NoEvidence) and out.value == "motor_start_unknown"
+
+
+def test_no_process_unit_has_nothing_to_restart_or_lose(n0, direct):
+    n = n0.copy()
+    n.remove("Link", [u for u in n.links.index if bool(n.links.at[u, "eh_process"])])
+    out = RC.restart_of(_inputs(n))
+    assert isinstance(out, run_gates.NoEvidence) and out.value == "no_process_unit"
+    assert _state(direct("conc.kpi.lost_tonnes", network=n, solver_state={})) == ("not_evaluated", "no_process_unit")
+
+
+def test_every_unit_restarting_on_a_vfd_passes_with_none_failing(n0, screens):
+    n = _all_vfd(n0)
+    units = [u for u in n.links.index if bool(n.links.at[u, "eh_process"])]
+    n.links.loc[[u for u in units if u not in C.MILLS], "restart_time_h"] = 0.5
+    r = screens("conc.restart", n)
+    assert (r["verdict"], r["facts"][0]["value"]) == ("pass", 0), r
+
+
+def test_no_lost_production_value_names_what_is_missing(n0, direct):
+    n = _shipped_by_slack(n0, 2.0)
+    n.remove("Generator", "__lost_concentrate")
+    n.buses.loc["concentrate", "product_value"] = float("nan")
+    r = direct("conc.kpi.lost_tonnes", network=n, solver_state={})
+    assert _state(r) == ("not_evaluated", "lost_production_missing")
+    assert "lost-production value" in r["reason"]
+
+
+def test_a_period_with_unreadable_tonnes_is_no_evidence(n0, monkeypatch):
+    from services.results import grid_risk_production as grp
+    line = {"key": "connection", "status": "ok", "missing": [],
+            "by_period": {"2027": {"t_per_year": None, "eur_per_year": None}}}
+    monkeypatch.setattr(grp, "grid_risk_production", lambda n, lost: {"lines": [line]})
+    out = RC.lost_production_of(n0, None)
+    assert isinstance(out, run_gates.NoEvidence) and out.value == "lost_production_missing"
+
+
+def test_a_shed_store_removed_or_unreadable_is_no_evidence(n0, direct):
+    n = n0.copy()
+    e = pd.DataFrame(0.0, index=n.snapshots, columns=n.stores.index)
+    n.stores_t.e = e
+    m = n.copy()
+    m.remove("Store", RC.SHED)
+    m.stores_t.e = e  # its level kept, the store gone: still no shed
+    assert _state(direct("conc.kpi.shed_level", network=m)) == ("not_evaluated", "no_shed")
+    e2 = e.copy()
+    e2.iloc[3, e2.columns.get_loc(RC.SHED)] = float("nan")
+    n.stores_t.e = e2
+    assert _state(direct("conc.kpi.shed_level", network=n)) == ("not_evaluated", "unreadable_dispatch")

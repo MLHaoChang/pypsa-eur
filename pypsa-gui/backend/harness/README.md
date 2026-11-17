@@ -1753,10 +1753,12 @@ C1-C7). The scope is the template's; there is no EH study and no LOLE loop.
 ### The concentrator profile (study harness 16)
 
 `eh_concentrator_staged@1` (`run_profiles._eh_concentrator_staged`; GK A (28)
-GO, Q1-Q6). The readers are `services/run_gates_concentrator.py`, registered
+GO, Q1-Q8). The readers are `services/run_gates_concentrator.py`, registered
 in `run_gates.FACTS` through `_concentrator(name)` (imported when read). No EH
-study and no LOLE loop; the solve stage runs `run_investment_case` after the
-queued solve.
+study and no LOLE loop; the solve stage is the queued solve only. The
+investment case stays out of the run (Q8): a run's case refuses its baseline
+re-solve (`baseline_solve`), so the case rules read a case the user ran on
+this network.
 
 - **Result gate.** The core rules, `kpi.unserved_mwh` (electrical load only:
   concentrate short of the shipments is lost production, never served), and:
@@ -1776,20 +1778,21 @@ queued solve.
   - `process.n_1.site_transformer` (warn, `empty`): the site transformers
     whose outage stops a process unit (`process_loss.units_cut_off`); the
     shipped template has none, so it is not evaluated and listed missing;
-  - `ic.counterfactual` and `ic.counterfactual.basis` (block): established,
-    and against `site_today`;
+  - `ic.counterfactual` and `ic.counterfactual.basis` (warn): established,
+    and against `site_today`, from a stored case current for this run's solve
+    and inputs (`ic_counterfactual.read`); with none they are not evaluated
+    with their reason, never a pass;
   - KPIs as warn rules that pass when read: `process.lost_production` (the
     grid-risk `connection` line, t/yr and EUR/yr per period),
-    `process.shed_level` (least, peak, last per period) and `ic.returns`. NPV
-    by stage is listed missing.
+    `process.shed_level` (least, peak, last per period) and `ic.returns` (not
+    evaluated, no number, without that case). NPV by stage is listed missing.
 - **Levers.** `pv_new_*`, `bess_new_*` and `coarse_ore_stockpile_new_*` caps,
   each up to twice the template's. The process units, the mine, the
   shipments, the services load, the grid import, the shed and the slack are
   never levers.
-- **Solves.** The plan is the envelope's solve. Each case run adds one
-  baseline re-solve (0 on a cache hit) that the envelope does not count
-  (`run_ic.SOLVES = 0`); `missing_tools` says so, and study-harness issue 50
-  counts it.
+- **Solves.** The plan is the envelope's solve (`CONC_SOLVES = 1`). The case
+  in the run, with its baseline re-solve counted, is study-harness issue 52;
+  `missing_tools` names it (`CONC_CASE_OUTSIDE`).
 
 ### The IPP hybrid profile (study harness 14)
 
