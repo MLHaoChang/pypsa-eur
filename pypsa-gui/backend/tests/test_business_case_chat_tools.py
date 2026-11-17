@@ -1088,7 +1088,10 @@ def test_options_read_busy_keeps_the_refusal_kind(bc):
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(R, "_solver_in_flight", lambda: True)
-        assert _refused(chat_tools.get_business_case, detail="options")["error_kind"] == "solver_in_flight"
+        assert (
+            _refused(chat_tools.get_business_case, detail="options")["error_kind"]
+            == "solver_in_flight"
+        )
     lock = R.PyPSAService.get_lock()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(R, "_IC_LOCK_WAIT_S", 0.01)
@@ -1103,7 +1106,10 @@ def test_options_read_busy_keeps_the_refusal_kind(bc):
         t.start()
         held.wait(5)
         try:
-            assert _refused(chat_tools.get_business_case, detail="options")["error_kind"] == "business_case_busy"
+            assert (
+                _refused(chat_tools.get_business_case, detail="options")["error_kind"]
+                == "business_case_busy"
+            )
         finally:
             free.set()
             t.join()
@@ -1123,13 +1129,21 @@ def test_an_oversize_options_read_drops_whole_entries_refusals_last(bc, monkeypa
     import routers.results as R
 
     real = R.get_business_case_options()
-    outs = [{"id": f"o{i}", "label": "x" * 100, "units": ["MWh", "t"], "derived": False}
-            for i in range(80)]
+    outs = [
+        {"id": f"o{i}", "label": "x" * 100, "units": ["MWh", "t"], "derived": False}
+        for i in range(80)
+    ]
     rows = [{"name": "r" * 150} for _ in range(40)]
-    fake = {**real, "offered_rows": rows, "outputs": outs,
-            "units_by_source": {**real["units_by_source"],
-                                "linked": {o["id"]: {"revenue": ["MWh"]} for o in outs}},
-            "refusals": [{"code": "unit_not_allowed", "field": "lines[0].unit"}]}
+    fake = {
+        **real,
+        "offered_rows": rows,
+        "outputs": outs,
+        "units_by_source": {
+            **real["units_by_source"],
+            "linked": {o["id"]: {"revenue": ["MWh"]} for o in outs},
+        },
+        "refusals": [{"code": "unit_not_allowed", "field": "lines[0].unit"}],
+    }
     monkeypatch.setattr(R, "get_business_case_options", lambda: fake)
     out = chat_tools.get_business_case(detail="options")
     cut = out["truncated"]
@@ -1147,8 +1161,11 @@ def test_an_oversize_options_read_drops_whole_entries_refusals_last(bc, monkeypa
 def test_options_parity_with_the_route(bc):
     import routers.results as R
 
-    assert {k: v for k, v in chat_tools.get_business_case(detail="options").items()
-            if k not in ("hint",)} == R.get_business_case_options()
+    assert {
+        k: v
+        for k, v in chat_tools.get_business_case(detail="options").items()
+        if k not in ("hint",)
+    } == R.get_business_case_options()
 
 
 def test_options_none_stays_none_with_its_reasons(bc, monkeypatch):
@@ -1163,13 +1180,19 @@ def test_options_none_stays_none_with_its_reasons(bc, monkeypatch):
         mp.setattr(R, "_bc_raw", lambda: _bc(_line()))
         mp.setattr(R, "_bc_ic_horizon", lambda: None)
         out = chat_tools.get_business_case(detail="options")
-    assert out["refusals"] is None and out["refusals_reason"] == "investment_case_missing"
+    assert (
+        out["refusals"] is None and out["refusals_reason"] == "investment_case_missing"
+    )
 
 
 def test_the_set_tool_tells_the_model_to_read_the_options_first():
-    desc = next(t for t in TOOLS if t["name"] == "set_business_case_lines")["description"]
+    desc = next(t for t in TOOLS if t["name"] == "set_business_case_lines")[
+        "description"
+    ]
     assert "get_business_case(detail='options')" in desc
 
 
 def test_the_options_route_is_bound_to_the_read_tool():
-    assert ("GET", "/api/results/business_case/options") in TOOL_ROUTES["get_business_case"]
+    assert ("GET", "/api/results/business_case/options") in TOOL_ROUTES[
+        "get_business_case"
+    ]
