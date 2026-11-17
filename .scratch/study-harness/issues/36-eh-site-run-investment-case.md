@@ -50,3 +50,11 @@ The build runs the case at the head of the report stage, not on the solve stage.
 - M3: A2's reservation and B1's deadline are tested at the report-stage position.
 - F1: `_ic_build_case` reserves and checks under one lock; a refused reservation runs no LP; nothing is refunded below what ran; and a mutant that skips the call goes red.
 Profile load accepts `on_end` on the report stage's case only (O1, adjusted from "solve stage" above).
+
+### 2026-11-17: GK B (61) amends A5
+
+The gap kinds (`ic_budget`, `ic_wall_time`, `ic_case_refused`, `ic_case_failed` and `ic_case_aborted`) are step errors, not tool errors. The manifest guard (`test_tool_error_kind_manifest`) is right to refuse them a tool-error-kinds.d fragment, so there is no fragment. In its place:
+- (a) `run_ic` owns the set, pinned by exact equality; `run_envelope.IC_BUDGET_KIND` is `run_ic.BUDGET_KIND`.
+- (b) Every chapter-gap row carries a kind from the set. A foreign exception maps to `ic_case_failed`, never raw text and never a 500.
+- (c) No tool_error frame on the run path carries one of these kinds. Should one ever need to, it gets a fragment in that PR.
+- (d) Each kind has a test of its own trigger.
