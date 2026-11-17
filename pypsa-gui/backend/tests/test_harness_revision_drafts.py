@@ -1053,7 +1053,9 @@ _NAN, _INF = float("nan"), float("inf")
         ("limit", False),
     ],
 )
-def test_a_revision_refuses_a_spend_or_cap_that_is_not_a_finite_number(made, field, value):
+def test_a_revision_refuses_a_spend_or_cap_that_is_not_a_finite_number(
+    made, field, value
+):
     """GK B (65) R1: a bad spend or cap fails closed with `budget`, before
     any comparison could admit it."""
     path, _root, _c = made
@@ -1111,7 +1113,9 @@ def test_a_revision_with_finite_inputs_and_room_left_is_admitted(made):
     r = req()
     update(
         path,
-        lambda t: harness_runner._budget(t)["limit"].update(cost_eur=bound_eur(r) + 1e-6),
+        lambda t: harness_runner._budget(t)["limit"].update(
+            cost_eur=bound_eur(r) + 1e-6
+        ),
     )
     assert send_reservation.admit(path, r, boot=BOOT, scope="revision")
 
