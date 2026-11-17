@@ -183,17 +183,30 @@ def test_without_point_of_connection_values_the_refusal_names_the_fields(client,
     ],
 )
 def test_a_bad_point_of_connection_value_is_422(client, hub, field, value):
+    from services.compare.intent_inputs import PQ_LABELS
+
     name, _ = hub
+    _island_off(client)  # so the refusal is the value's own, not the island limits'
     body = _body(_defaults(client, name), "BC")
     body["inputs"]["pq"] = {field: value}
-    assert client.post(URL.format(name), json=body).status_code == 422
+    r = client.post(URL.format(name), json=body)
+    assert r.status_code == 422
+    assert (
+        r.json()["detail"].startswith("Point of connection: ")
+        and PQ_LABELS[field] in r.json()["detail"]
+    )
 
 
 def test_an_unknown_point_of_connection_field_is_422(client, hub):
     name, _ = hub
+    _island_off(client)
     body = _body(_defaults(client, name), "BC")
     body["inputs"]["pq"] = {"surprise": 1.0}
-    assert client.post(URL.format(name), json=body).status_code == 422
+    r = client.post(URL.format(name), json=body)
+    assert (
+        r.status_code == 422
+        and r.json()["detail"] == "Point of connection: unknown value(s) surprise"
+    )
 
 
 def test_a_post_that_leaves_the_project_values_out_runs_exactly_the_defaults_and_records_their_sources(
@@ -290,6 +303,14 @@ def test_the_defaults_carry_the_grid_code_the_campus_study_applies(client, hub):
         and code["source"] == "default"
         and code["title"]
     )
+    # The applied code's Pst limit comes with it: the published-code route serves only a project's own codes,
+    # so the form reads a shipped code's limit here.
+    from gridspine.drivers.campus_study import load_grid_code
+
+    want = load_grid_code(code["value"])["pst_limit"]
+    pst = _defaults(client, name)["pst_limit"]
+    assert pst["value"] == want["value"]
+    assert pst["kind"] == ("assumed" if want["source"] == "assumed" else "grid_code")
 
 
 def test_the_statcom_cost_is_the_pack_unit_annualised_at_the_project_rate():

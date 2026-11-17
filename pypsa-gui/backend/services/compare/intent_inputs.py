@@ -29,7 +29,7 @@ SOURCE_REQUEST = "request"
 SOURCE_PROJECT = "project"
 #: What `defaults` says each value is, for the form's one word after the field (`intentSources.ts` maps them;
 #: its parity test reads this tuple).
-KINDS = ("project", "assumed", "load_envelope")
+KINDS = ("project", "assumed", "load_envelope", "grid_code")
 #: Request `pq` field → the Link tag column it sets.
 PQ_COLUMNS = {
     "x_pu": "pq_x_pu",
@@ -143,7 +143,6 @@ def resolve(
     """(inputs, sources). `inputs` is `req` with `link`, `ramp_mw_per_min`, `envelope` and `pq` filled from the
     project where `req` leaves them out; `sources[field]` says where each of those came from (`pq` per field).
     `req` is not changed."""
-    req = dict(req)
     inputs, sources = dict(req), {}
 
     if req.get("link") is not None:
