@@ -496,6 +496,20 @@ def _reactive_current(case, profile):
     v, iq = case.values(vrole), case.values("iq")
     v_pre, iq_pre = case.pre_mean(vrole), case.pre_mean("iq")
     fault = (t >= case.t_event) & (t < case.t_clear)
+    if not fault.any():
+        return [
+            _row(
+                case,
+                "reactive_current_rise",
+                OBLIGATION,
+                env,
+                UNKNOWN,
+                unit="s",
+                quantity=quantity,
+                detail=f"no sample between t_event {case.t_event:g} s and t_clear "
+                f"{case.t_clear:g} s; the fault voltage cannot be measured",
+            )
+        ]
     dv = v_pre - float(np.mean(v[fault]))  # > 0 for an undervoltage
     beyond = abs(dv) - env["deadband_pu"]
     if beyond <= 0:
