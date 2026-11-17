@@ -307,8 +307,10 @@ def restart_of(inp):
         from gridspine.static import motor_start as ms
         from gridspine.static import restart_sequence as rs
         from gridspine.static import ride_through as rt
-    except ImportError as exc:  # pragma: no cover - build-shape branch (test_packaging_requirements)
-        return G.NoEvidence("restart_unknown", f"the restart screen needs gridspine ({exc})")
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        return G.NoEvidence(
+            "restart_unknown", f"the restart screen needs gridspine ({exc})"
+        )
 
     from services.adequacy import grid_readiness as gr
 

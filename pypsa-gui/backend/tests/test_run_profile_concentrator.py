@@ -750,7 +750,9 @@ def test_only_bus_n_columns_are_link_ports():
     ports = RC._link_ports(n)
     assert ports[:3] == [(0, "bus0"), (1, "bus1"), (2, "bus2")]
     assert ports == sorted(ports) and all(col == f"bus{i}" for i, col in ports)
-    assert {col for _, col in ports} == {c for c in n.links.columns if c[:3] == "bus" and c[3:].isdigit()}
+    assert {col for _, col in ports} == {
+        c for c in n.links.columns if c[:3] == "bus" and c[3:].isdigit()
+    }
 
 
 def test_no_tonne_bus_is_named(direct):
