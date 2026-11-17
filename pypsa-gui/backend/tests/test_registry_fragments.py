@@ -111,7 +111,9 @@ def test_extend_items_keeps_base_then_file_name_order_and_refuses_a_known_id(tab
         extend_items([{"id": "a"}], table, "items")
 
 
-@pytest.mark.parametrize("text", ["post /x", "POST x", "POST", "POST /a b", " /x"])
+@pytest.mark.parametrize(
+    "text", ["post /x", "POST x", "POST", "POST /a b", " /x", "G-T /x"]
+)
 def test_a_route_key_is_method_space_path(text):
     with pytest.raises(ValueError):
         route_key(text)
@@ -342,6 +344,10 @@ def test_tied_not_via_chat_matches_rank_base_then_fragment_file_name(copy, monke
         {"keywords": "zzqx"},
         {"routes": [["GET", "/api/x", "extra"]]},
         {"extra_field": 1},
+        {"disposition": "not a disposition"},
+        {"title": ""},
+        {"reason": 3},
+        {"panel": 3},
     ],
 )
 def test_a_bad_not_via_chat_fragment_fails_the_import(copy, over):
@@ -460,7 +466,51 @@ def test_family_fragments_add_tools_variants_and_additions(copy):
                     }
                 ]
             },
-            "already lists",
+            r"already lists \['pypsa-gui",
+        ),
+        ({"variants": [{**_covered("LC-D01.a", "t"), "extra": 1}]}, "exactly the keys"),
+        (
+            {"variants": [{"id": "LC-D01.a", "status": "done", "reason": "r"}]},
+            "exactly the keys",
+        ),
+        (
+            {"variants": [{"id": 3, "status": "pending", "reason": "r"}]},
+            "exactly the keys",
+        ),
+        ({"variants": [{**_covered("LC-D01.a", "t"), "tools": "t"}]}, "list of names"),
+        (
+            {"variants": [{**_covered("LC-D01.a", "t"), "tools": ["a b"]}]},
+            "list of names",
+        ),
+        ({"variants": [{**_covered("LC-D01.a", "t"), "tools": [""]}]}, "list of names"),
+        ({"variants": [{**_covered("LC-D01.a", "t"), "tools": [3]}]}, "list of names"),
+        ({"settles": [{"id": "LC-D01.a"}]}, "settles item"),
+        (
+            {
+                "variants": [_PENDING],
+                "settles": [{**_PENDING, "reason": "still not built"}],
+            },
+            "only a pending variant",
+        ),
+        (
+            lambda: {"variant_additions": [{"id": _first("covered")["id"], "oops": 1}]},
+            "keys beyond",
+        ),
+        (
+            lambda: {
+                "variant_additions": [
+                    {"id": _first("covered")["id"], "tools": ["t", "t"]}
+                ]
+            },
+            "a name twice",
+        ),
+        (
+            lambda: {
+                "variant_additions": [
+                    {"id": _first("covered")["id"], "tests": ["a::b", "a::b"]}
+                ]
+            },
+            "a name twice",
         ),
     ],
 )
@@ -636,3 +686,12 @@ def test_the_sweep_prunes_a_stale_fragment_known_gap_and_its_empty_file(
     assert (
         source.read_text() == prune.DISPOSITION.read_text()
     )  # the Python rows are untouched
+
+
+def test_the_family_base_needs_its_list_sections(tmp_path):
+    base = tmp_path / "family_manifest.json"
+    data = json.loads(fm.MANIFEST_FILE.read_text())
+    del data["settles"]
+    base.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="needs a list 'settles'"):
+        fm.merged_tables(base)
