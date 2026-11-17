@@ -113,7 +113,8 @@ def test_an_excel_bad_priced_row_after_a_good_one_refuses_and_leaves_the_network
     before = n.copy()
     r = _import(client, _legacy_workbook([BATTERY, bad]))
     assert r.status_code == 422, r.text
-    assert "s1" in r.text
+    assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
+    assert "Storage 's1'" in r.json()["detail"]["message"]
     after = session_ctx(client).network
     assert after is n
     pd.testing.assert_frame_equal(after.storage_units, before.storage_units)
@@ -177,6 +178,25 @@ def test_a_native_import_rederives_a_stale_cost_and_moves_the_fingerprint(
     assert _fingerprint(got) != stale_print
 
 
+@pytest.mark.parametrize("fmt", ["netcdf", "csv"])
+def test_a_native_import_of_a_priced_line_with_an_infinite_length_is_refused(
+    client, install_network, session_ctx, fmt
+):
+    """A scale is checked too: an infinite length makes the derived cost infinite."""
+    n = _network()
+    n.lines.at["ab", "length"] = float("inf")
+    install_network(n)
+    data = client.get(f"/api/io/export/{fmt}").content
+    good = install_network(_network())
+    r = client.post(
+        f"/api/io/import/{fmt}",
+        files={"file": (FORMATS[fmt][1], data, "application/octet-stream")},
+    )
+    assert r.status_code == 422, r.text
+    assert "Line 'ab'" in r.json()["detail"]["message"]
+    assert session_ctx(client).network is good
+
+
 @pytest.mark.parametrize(
     "fmt,col,value",
     [
@@ -223,18 +243,15 @@ def test_pack_pricing_refuses_a_row_whose_parts_own_its_costs_and_writes_nothing
 
 
 def test_pack_pricing_does_not_refuse_an_unpriced_storage_unit():
-    """Only priced parts refuse: an unpriced row of the same class goes on to be priced (or refused on its
-    capacity basis, as before), never `PartsOwnCosts`."""
-    from services.library.defaults_pack.pricing import PartsOwnCosts, price_from_pack
+    """Only priced parts refuse: an unpriced row of the same class is priced as before."""
+    from services.library.defaults_pack.pricing import price_from_pack
 
     n = _network()
     n.add("StorageUnit", "plain", bus="B1", p_nom=10.0, max_hours=2.0)
-    try:
-        price_from_pack(n, "storage_units", "plain", "gas-genset", version="2026-10-22")
-    except PartsOwnCosts:
-        pytest.fail("an unpriced row was refused as priced")
-    except Exception:  # noqa: BLE001 - any other refusal is the pricing's own, unchanged
-        pass
+    out = price_from_pack(
+        n, "storage_units", "plain", "gas-genset", version="2026-10-22"
+    )
+    assert n.storage_units.at["plain", "overnight_cost"] == out["overnight_cost"] > 0
 
 
 def test_pack_pricing_of_a_battery_onto_a_priced_row_still_rederives():
@@ -306,8 +323,8 @@ def test_the_import_lists_only_the_priced_rows_it_rederived():
     n = _network()
     n.add("StorageUnit", "plain", bus="B1", p_nom=1.0, capital_cost=5.0)
     assert rederive_imported_parts(n) == [
-        "StorageUnit 'bess'",
-        "StorageUnit 'bess2'",
+        "Storage 'bess'",
+        "Storage 'bess2'",
         "Line 'ab'",
     ]
     assert n.storage_units.at["plain", "capital_cost"] == 5.0
@@ -322,7 +339,7 @@ def test_a_blank_part_cell_on_a_priced_row_is_not_a_refusal():
     for col in ("inv_energy_overnight", "inv_energy_lifetime", "inv_energy_fom_share"):
         su[col] = su[col].astype(object)
         su.at["bess", col] = None
-    assert "StorageUnit 'bess'" in rederive_imported_parts(n)
+    assert "Storage 'bess'" in rederive_imported_parts(n)
 
 
 def test_the_import_log_note_names_the_rederived_rows():

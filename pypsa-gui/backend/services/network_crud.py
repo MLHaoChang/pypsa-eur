@@ -20,6 +20,7 @@ from services import attribute_catalog, change_log_service, fuel_curve, vintage_
 from services.adequacy.occurrence import BLANK_SPELLINGS as _BLANK_SPELLINGS
 from services.asset_schema.derive import (
     apply_parts,
+    class_label,
     derive_composite,
     effective_discount_rate,
     has_parts,
@@ -27,7 +28,7 @@ from services.asset_schema.derive import (
     part_scales,
     split_parts,
 )
-from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, part_columns
+from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, composite_parts
 from services.asset_schema import fields as asset_fields
 from services.asset_schema import provenance as asset_provenance
 from services import component_identity
@@ -419,32 +420,48 @@ def rederive_scaled_parts(n, component_class: str, name: str) -> None:
                 discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
 
 
+def _imported_parts_problem(component_class: str, row) -> str | None:
+    """Why an imported priced row's parts cannot be derived, in words; None when they can."""
+    for spec in composite_parts(component_class):
+        for field in spec.fields:
+            v = _as_float(row.get(spec.column(field)))
+            if v is not None and math.isinf(v):
+                return f"the {spec.name} part's {field.replace('_', ' ')} must be a finite number"
+    try:
+        derived = derive_composite(component_class, dict(row), scales=part_scales(component_class, row),
+                                   discount_rate=_global_discount_rate(), asset_lifetime=row.get("lifetime"))
+    except ValueError as exc:
+        return str(exc)
+    if not all(math.isfinite(derived[c]) for c in ("capital_cost", "fom_cost")):
+        scale = ", ".join(sorted({s.scale_by for s in composite_parts(component_class) if s.scale_by}))
+        return f"its derived cost is not finite (check {scale or 'the parts'})"
+    return None
+
+
 def rederive_imported_parts(n) -> list[str]:
-    """An imported network's composite rows (TCU 10, N5): refuse (422, naming the row) a priced part without a
-    lifetime, as the create path does, or with a non-finite value, before anything is written; then re-derive
-    every priced row so its parts own its costs (a stale `capital_cost`, `fom_cost` or `lifetime` from the file
-    included) at the discount rate in force: the asset's own, else the open project's. Returns the re-derived
-    rows as "Class 'name'". `n` is the import's candidate, not yet open, so no lock is needed."""
+    """An imported network's composite rows (TCU 10, N5). Every priced row is checked first, as the create path
+    checks one (`_check_investment_parts`), and also for a non-finite part or scale: the first bad row refuses
+    the import (422 `invalid_edit_value`, naming it) before anything is written. Then every priced row is
+    re-derived so its parts own its costs (a stale `capital_cost`, `fom_cost` or `lifetime` from the file
+    included) at the rate in force: the asset's own, else the open project's (a network file carries no
+    solver settings). Returns the re-derived rows as "Storage 'name'". `n` is the import's candidate, not yet
+    open, so no lock is needed."""
     priced = []
     for component_class in COMPOSITE:
         df = getattr(n, CLASS_ATTR[component_class])
-        cols = [c for c in part_columns(component_class) if c in df.columns]
         for name in df.index:
             row = df.loc[name]
             if not has_parts(component_class, row):
                 continue
-            try:
-                for col in cols:
-                    v = _as_float(row[col])
-                    if v is not None and math.isinf(v):
-                        raise HTTPException(422, f"{col} must be a finite number")
-                _check_investment_parts(component_class, dict(row), row=dict(row))
-            except HTTPException as exc:
-                raise HTTPException(422, f"{component_class} '{name}': {exc.detail}") from exc
+            if problem := _imported_parts_problem(component_class, row):
+                raise HTTPException(422, {
+                    "error_kind": "invalid_edit_value",
+                    "message": f"{class_label(component_class)} '{name}': {problem}. "
+                               "The open network is unchanged."})
             priced.append((component_class, name))
     for component_class, name in priced:
         rederive_scaled_parts(n, component_class, name)
-    return [f"{component_class} '{name}'" for component_class, name in priced]
+    return [f"{class_label(component_class)} '{name}'" for component_class, name in priced]
 
 
 def _refuse_edit_during_live_study() -> None:
