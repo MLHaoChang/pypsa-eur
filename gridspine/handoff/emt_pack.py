@@ -66,12 +66,12 @@ import pandas as pd
 from gridspine.handoff.emt_workbook import RSCAD_NOTES, rscad_notes, workbook
 from gridspine.handoff.test_battery import (
     CHANNEL_SEP,
-    CHANNELS,
     CONTRACT_VERSION,
     PARAM_NAMES,
     Thevenin,
     battery_json,
     build_battery,
+    contract_channels,
     fault_impedance_ohm,
     thevenin_impedances_ohm,
     validate_battery,
@@ -552,7 +552,7 @@ def write_emt_pack(
         "files": files,
         "data_hash": _sha("".join(f"{n}:{h}\n" for n, h in files.items())),
         "case_ids": [c.case_id for c in battery] if battery is not None else [],
-        "channels": list(CHANNELS),
+        "channels": list(contract_channels(CONTRACT_VERSION)),
         "outputs": {f"{RESULTS_DIR}/": "PSCAD .inf/.out per case, named by case id"},
         "assumptions": assumptions,
         "z0_differs_from_battery": z0_differs,

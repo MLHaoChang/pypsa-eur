@@ -73,10 +73,19 @@ data); nothing about the grid is defaulted.
 
 **Serialisation.** :func:`battery_frame` / :func:`cases_from_frame` give a
 flat table; :func:`battery_json` / :func:`cases_from_json` give the
-manifest form. The JSON carries :data:`CONTRACT_VERSION` and the channel
-contract, has sorted keys and Python's shortest round-trip float repr, so the
-same battery always gives byte-equal JSON. A reader refuses a different
-contract version.
+manifest form. The JSON carries its contract version and that version's
+channel contract, has sorted keys and Python's shortest round-trip float
+repr, so the same battery always gives byte-equal JSON. A reader accepts each
+version in :data:`CONTRACT_VERSIONS` and refuses any other.
+
+**Contract versions** (:data:`CONTRACT_CHANNELS`). Version 1 has the eight
+measured channels. Version 2 adds ``connected``, the PoC breaker status
+(GC-12): every case of a version-2 battery carries it, and a version-1 battery
+never names it. A pack declares a version only once its script or schedule
+writes every channel of it, so writers default to :data:`CONTRACT_VERSION`
+(still ``"1"``) and a pack passes ``contract_version="2"`` when it records
+``connected``. A version-1 battery written before version 2 existed reads back
+and re-serialises byte-equal.
 """
 
 import cmath
@@ -91,6 +100,7 @@ import pandas as pd
 
 from gridspine.schema.contracts import ContractError
 
+#: The version a writer uses unless it passes another (see "Contract versions").
 CONTRACT_VERSION = "1"
 
 
@@ -162,7 +172,43 @@ CHANNELS = {
         _POC,
         "positive-sequence current magnitude",
     ),
+    "connected": Channel(
+        "status",
+        "0/1",
+        "1 = PoC breaker closed and the plant not tripped; 0 = open or tripped",
+        _POC,
+        "breaker status only: momentary cessation or current blocking is not a "
+        "trip and does not show on this channel; sampled with the other channels",
+    ),
 }
+
+#: Channels per contract version, in contract order; a reader accepts exactly these versions.
+CONTRACT_CHANNELS = {
+    "1": (
+        "v_poc_pu",
+        "theta_poc_deg",
+        "f_hz",
+        "p_poc_mw",
+        "q_poc_mvar",
+        "id_pu",
+        "iq_pu",
+        "i_poc_pu",
+    ),
+    "2": (
+        "v_poc_pu",
+        "theta_poc_deg",
+        "f_hz",
+        "p_poc_mw",
+        "q_poc_mvar",
+        "id_pu",
+        "iq_pu",
+        "i_poc_pu",
+        "connected",
+    ),
+}
+CONTRACT_VERSIONS = tuple(CONTRACT_CHANNELS)
+#: The channel version 2 adds; every case of a version-2 battery carries it.
+CONNECTED = "connected"
 
 #: Required event parameters per kind; no other parameter is accepted.
 KIND_PARAMS = {
@@ -364,8 +410,23 @@ def fault_impedance_ohm(case: Case, vn_kv: float) -> complex:
     return v * (2.0 * z1 + z0) / (3.0 * (1.0 - v))
 
 
-def validate_battery(cases) -> tuple:
-    """Return ``cases`` as a tuple after checking each is a Case and ids are unique."""
+def contract_channels(version) -> tuple:
+    """The channel names of contract ``version``; an unknown version is refused."""
+    if not isinstance(version, str) or version not in CONTRACT_CHANNELS:
+        raise ContractError(
+            f"battery contract_version {version!r} is not one of {list(CONTRACT_VERSIONS)}"
+        )
+    return CONTRACT_CHANNELS[version]
+
+
+def validate_battery(cases, contract_version=None) -> tuple:
+    """
+    Return ``cases`` as a tuple after checking each is a Case and ids are unique.
+
+    With ``contract_version``, also check every case against that version:
+    each channel is in it, and under version 2 each case carries ``connected``.
+    """
+    names = None if contract_version is None else contract_channels(contract_version)
     cases = tuple(cases)
     if not cases:
         raise ContractError("test battery is empty")
@@ -376,6 +437,18 @@ def validate_battery(cases) -> tuple:
         if c.case_id in seen:
             raise ContractError(f"duplicate case id {c.case_id!r}")
         seen.add(c.case_id)
+        if names is None:
+            continue
+        outside = [ch for ch in c.channels if ch not in names]
+        if outside:
+            raise ContractError(
+                f"case {c.case_id}: channel(s) {outside} not in contract version {contract_version}"
+            )
+        if CONNECTED in names and CONNECTED not in c.channels:
+            raise ContractError(
+                f"case {c.case_id}: contract version {contract_version} needs the "
+                f"{CONNECTED!r} channel on every case"
+            )
     return cases
 
 
@@ -396,7 +469,15 @@ def _ordered(names) -> tuple:
 
 
 def build_battery(
-    sk_min_mva, sk_max_mva, xr_min, xr_max, *, z0_over_z1, x0_over_r0, overrides=None
+    sk_min_mva,
+    sk_max_mva,
+    xr_min,
+    xr_max,
+    *,
+    z0_over_z1,
+    x0_over_r0,
+    overrides=None,
+    contract_version=CONTRACT_VERSION,
 ) -> tuple:
     """
     The default DMAT battery for a PoC with the given Sk and X/R range.
@@ -409,7 +490,12 @@ def build_battery(
     parameters, ``t_event_s`` or ``t_end_s``; an edited case is marked
     ``source='supplied'``. An unknown id or a name the case does not take is
     refused.
+
+    ``contract_version`` picks the channel contract; under ``"2"`` every case
+    also carries ``connected``. Pass it only from a pack whose script or
+    schedule records every channel of that version.
     """
+    status = (CONNECTED,) if CONNECTED in contract_channels(contract_version) else ()
     inputs = (
         ("sk_min_mva", sk_min_mva),
         ("sk_max_mva", sk_max_mva),
@@ -520,12 +606,12 @@ def build_battery(
                 g,
                 times["t_event_s"],
                 times["t_end_s"],
-                _ordered(chans),
+                _ordered(chans + status),
                 params,
                 source,
             )
         )
-    return validate_battery(cases)
+    return validate_battery(cases, contract_version)
 
 
 _FRAME_HEAD = [
@@ -605,15 +691,16 @@ def cases_from_frame(frame: pd.DataFrame) -> tuple:
     return validate_battery(cases)
 
 
-def _contract_dict() -> dict:
-    return {name: vars(ch) for name, ch in CHANNELS.items()}
+def _contract_dict(version) -> dict:
+    return {name: vars(CHANNELS[name]) for name in contract_channels(version)}
 
 
-def battery_json(cases) -> str:
-    """Deterministic manifest form: same cases give byte-equal text."""
+def battery_json(cases, contract_version=CONTRACT_VERSION) -> str:
+    """Deterministic manifest form at ``contract_version``: same cases give byte-equal text."""
+    cases = validate_battery(cases, contract_version)
     doc = {
-        "contract_version": CONTRACT_VERSION,
-        "channels": _contract_dict(),
+        "contract_version": contract_version,
+        "channels": _contract_dict(contract_version),
         "cases": [
             {
                 "case_id": c.case_id,
@@ -632,14 +719,18 @@ def battery_json(cases) -> str:
                 "params": dict(c.params),
                 "source": c.source,
             }
-            for c in validate_battery(cases)
+            for c in cases
         ],
     }
     return json.dumps(doc, sort_keys=True, indent=1, allow_nan=False) + "\n"
 
 
 def cases_from_json(text: str) -> tuple:
-    """Inverse of :func:`battery_json`; refuses another contract version or channel contract."""
+    """
+    Inverse of :func:`battery_json`. Accepts each version in
+    :data:`CONTRACT_VERSIONS` and checks the cases against it; refuses any
+    other version, or a channel contract that differs from that version's.
+    """
     try:
         doc = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -647,32 +738,31 @@ def cases_from_json(text: str) -> tuple:
     if not isinstance(doc, dict):
         raise ContractError("battery JSON is not an object")
     version = doc.get("contract_version")
-    if version != CONTRACT_VERSION:
-        raise ContractError(
-            f"battery contract_version {version!r} is not {CONTRACT_VERSION!r}"
-        )
-    if doc.get("channels") != _contract_dict():
+    if doc.get("channels") != _contract_dict(version):
         raise ContractError("battery channel contract differs from this reader's")
     try:
         return validate_battery(
-            Case(
-                c["case_id"],
-                c["kind"],
-                c["trgc"],
-                Thevenin(
-                    c["grid"]["label"],
-                    c["grid"]["sk_mva"],
-                    c["grid"]["x_over_r"],
-                    c["grid"].get("z0_over_z1"),
-                    c["grid"].get("x0_over_r0"),
-                ),
-                c["t_event_s"],
-                c["t_end_s"],
-                c["channels"],
-                c["params"],
-                c["source"],
-            )
-            for c in doc.get("cases", [])
+            (
+                Case(
+                    c["case_id"],
+                    c["kind"],
+                    c["trgc"],
+                    Thevenin(
+                        c["grid"]["label"],
+                        c["grid"]["sk_mva"],
+                        c["grid"]["x_over_r"],
+                        c["grid"].get("z0_over_z1"),
+                        c["grid"].get("x0_over_r0"),
+                    ),
+                    c["t_event_s"],
+                    c["t_end_s"],
+                    c["channels"],
+                    c["params"],
+                    c["source"],
+                )
+                for c in doc.get("cases", [])
+            ),
+            version,
         )
     except (KeyError, TypeError, AttributeError) as exc:
         raise ContractError(f"battery JSON case is malformed: {exc!r}") from exc
