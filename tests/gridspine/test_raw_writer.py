@@ -262,10 +262,13 @@ def test_lv_tapped_trafo_impedance_matches_pandapower(tmp_path):
     trafo = _records((tmp_path / "t.raw").read_text(), 5)
     l2, l3, l4 = trafo[1], trafo[2], trafo[3]
     n = 1.025
-    r_exp = 0.01 * (100.0 / 200.0) * n ** 2             # 0.005253125
-    z_exp = 0.10 * (100.0 / 200.0) * n ** 2
+    # GC-04 PR6: the file holds Z at the tapped winding voltage; PSS/E applies
+    # WINDV2**2 = n**2 itself, which gives pandapower's r/x on the bus base.
+    r_exp = 0.01 * (100.0 / 200.0)                      # 0.005
+    z_exp = 0.10 * (100.0 / 200.0)
     assert float(l2[0]) == pytest.approx(r_exp, rel=1e-3)
     assert float(l2[1]) == pytest.approx(np.sqrt(z_exp**2 - r_exp**2), rel=1e-3)
+    assert float(l2[0]) * float(l4[0]) ** 2 == pytest.approx(r_exp * n**2, rel=1e-3)
     # tap ratio lands on winding 2; WINDV1/WINDV2 == pandapower ppc ratio 1/n
     assert float(l3[0]) == pytest.approx(1.0)           # WINDV1
     assert float(l4[0]) == pytest.approx(1.025)         # WINDV2 carries lv tap

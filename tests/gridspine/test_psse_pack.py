@@ -391,3 +391,10 @@ def test_the_campus_bundle_dyr_bytes_are_masters(tmp_path):
     _camp, b = bundle(tmp_path)
     data = (b.path / f"{b.path.name}.dyr").read_bytes()
     assert hashlib.sha256(data).hexdigest() == _CAMPUS_DYR_SHA256
+
+
+def test_the_readme_states_the_transformer_impedance_convention(tmp_path):
+    _hc, _m, out = _write(tmp_path)
+    readme = (out / "README.md").read_text()
+    assert "## Transformer impedance\n\n" + PP.TRAFO_NOTE in readme
+    assert "Packs written before this fix carry an impedance too high" in PP.TRAFO_NOTE

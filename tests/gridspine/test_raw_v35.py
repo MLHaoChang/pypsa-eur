@@ -394,10 +394,9 @@ def _trafo_net(tap_side):
 def test_trafo_impedance_by_hand(tap_side):
     n = _trafo_net(tap_side)
     r, x, t1, t2 = trafo_impedance(n, n.trafo.iloc[0])
-    lv_eff = 21.0 * (1.02 if tap_side == "lv" else 1.0)
-    conv = (
-        100.0 / 40.0 * (lv_eff / 20.0) ** 2 / 2
-    )  # SBASE / Sn, LV base, two in parallel
+    # SBASE / Sn, two in parallel; on the winding's own (tapped) LV voltage, so
+    # no bus-base factor: PSS/E applies WINDV2**2 itself (GC-04 PR6).
+    conv = 100.0 / 40.0 / 2
     assert r == pytest.approx(0.004 * conv)
     assert x == pytest.approx(np.sqrt((0.12 * conv) ** 2 - (0.004 * conv) ** 2))
     assert (t1, t2) == pytest.approx(
@@ -412,3 +411,91 @@ def test_v35_nan_line_name_written_blank(tmp_path):
     assert {r[6] for r in read_raw((tmp_path / "n.raw").read_text())[2]["BRANCH"]} == {
         ""
     }
+
+
+# GC-04 PR6 (GK A2 V1, V2): the RAW read as PSS/E reads a two-winding record
+# (CW=1, CZ=1). The series Z sits between the two ideal windings, so the branch
+# seen from bus J is Z * WINDV2**2 with ratio WINDV1/WINDV2 at bus I (generic
+# two-winding model; PowerModels.jl src/io/psse.jl, _psse2pm_transformer!).
+def as_read_by_psse(r, x, windv1, windv2):
+    """``(r, x, ratio)`` of the branch PSS/E builds from a two-winding record."""
+    return r * windv2**2, x * windv2**2, windv1 / windv2
+
+
+def _solved_trafo_net(tap_side, tap_pos=1, vn_lv_kv=21.0):
+    import pandapower as pp
+
+    n = _trafo_net(tap_side)
+    n.trafo["tap_pos"] = tap_pos
+    n.trafo["vn_lv_kv"] = vn_lv_kv
+    n.sn_mva = SBASE_MVA  # ppc on the RAW's SBASE
+    n.bus["name"] = ["HV", "LV"]
+    pp.create_ext_grid(n, 0)
+    pp.create_load(n, 1, p_mw=10.0, q_mvar=2.0)
+    pp.runpp(n)
+    return n
+
+
+def _ppc_branch(n):
+    start, _end = n._pd2ppc_lookups["branch"]["trafo"]
+    br = n._ppc["branch"][start]
+    return br[2].real, br[3].real, br[4].real, br[8].real
+
+
+# (tap side, tap position, vn_lv_kv): an HV tap, an LV tap, and no tap with an
+# LV rating (21 kV) off the 20 kV bus.
+_OFF_NOMINAL = [("hv", 1, 21.0), ("lv", 1, 21.0), ("hv", 0, 21.0)]
+
+
+@pytest.mark.parametrize("tap_side, tap_pos, vn_lv_kv", _OFF_NOMINAL)
+def test_trafo_impedance_read_as_psse_is_the_ppc_branch(tap_side, tap_pos, vn_lv_kv):
+    n = _solved_trafo_net(tap_side, tap_pos, vn_lv_kv)
+    r, x, windv1, windv2 = trafo_impedance(n, n.trafo.iloc[0])
+    pr, px, pb, pratio = _ppc_branch(n)
+    assert windv2 != 1.0  # the case the bug is in
+    assert as_read_by_psse(r, x, windv1, windv2) == pytest.approx(
+        (pr, px, pratio), rel=1e-6
+    )
+    assert pb == 0.0  # MAG1 = MAG2 = 0 in the RAW: no magnetising branch
+
+
+@pytest.mark.parametrize("tap_side, tap_pos, vn_lv_kv", _OFF_NOMINAL)
+@pytest.mark.parametrize("version", [33, 35])
+def test_the_written_raw_read_as_psse_is_the_ppc_branch(
+    tmp_path, tap_side, tap_pos, vn_lv_kv, version
+):
+    n = _solved_trafo_net(tap_side, tap_pos, vn_lv_kv)
+    write_raw(n, tmp_path / "t.raw", version=version)
+    _h, _sw, recs, _t = read_raw((tmp_path / "t.raw").read_text())
+    (rec,) = recs["TRANSFORMER"]
+    got = as_read_by_psse(
+        float(rec[1][0]), float(rec[1][1]), float(rec[2][0]), float(rec[3][0])
+    )
+    pr, px, _pb, pratio = _ppc_branch(n)
+    # the file holds five decimals
+    assert got == pytest.approx((pr, px, pratio), rel=2e-4)
+
+
+def test_the_importers_example_by_hand():
+    # HV tap +1 (2 %), 40 MVA, vk 12 %, vkr 0.4 %, 110/21 kV on a 20 kV bus, two in
+    # parallel, SBASE 100 MVA:
+    #   x on (40 MVA, 21 kV) = sqrt(0.12**2 - 0.004**2) = 0.1199333
+    #   on SBASE, two in parallel: 0.1199333 * 100 / 40 / 2 = 0.1499167
+    #   seen from the 20 kV bus: * (21 / 20)**2 = * 1.1025 -> 0.1652831
+    # The old writer gave 0.1652831 * 1.1025 = 0.1822246 once read by PSS/E.
+    n = _trafo_net("hv")
+    r, x, windv1, windv2 = trafo_impedance(n, n.trafo.iloc[0])
+    _r, x_read, _ratio = as_read_by_psse(r, x, windv1, windv2)
+    assert x == pytest.approx(0.1499167, abs=1e-7)
+    assert x_read == pytest.approx(0.1652831, abs=1e-7)
+
+
+def test_an_hv_tap_does_not_scale_the_impedance():
+    n = _trafo_net("hv")
+    at = {}
+    for pos in (-3, 0, 3):
+        n.trafo["tap_pos"] = pos
+        at[pos] = trafo_impedance(n, n.trafo.iloc[0])
+    assert at[-3][:2] == at[0][:2] == at[3][:2]
+    assert at[-3][3] == at[0][3] == at[3][3] == 21.0 / 20.0
+    assert at[-3][2] < at[0][2] < at[3][2]

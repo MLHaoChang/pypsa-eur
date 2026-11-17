@@ -134,9 +134,10 @@ def test_transformer_zero_sequence_on_system_base(tmp_path):
     r = recs["ZERO SEQ. TRANSFORMER"][0]
     # I, J, K, CKT, CZ0, CZG: HV bus 1, LV bus 2, two-winding, system base
     assert r[:6] == ["1", "2", "0", "1", "1", "1"]
-    # conv = 100/40 * (21/20)**2 = 2.75625; R = 0.004 * conv; X = sqrt((0.12 conv)**2 - R**2)
-    assert float(r[9]) == pytest.approx(0.011025, rel=1e-5)
-    assert float(r[10]) == pytest.approx(0.330566, rel=1e-5)
+    # conv = 100/40 = 2.5 at the winding's own 21 kV (PSS/E applies WINDV2**2,
+    # GC-04 PR6); R = 0.004 * conv; X = sqrt((0.12 conv)**2 - R**2)
+    assert float(r[9]) == pytest.approx(0.01, rel=1e-5)
+    assert float(r[10]) == pytest.approx(0.299833, rel=1e-5)
     assert [float(x) for x in (r[7], r[8], r[11], r[12])] == [
         0.0,
         0.0,
@@ -157,6 +158,13 @@ def test_transformer_neutral_resistance_on_system_base(tmp_path):
     assert float(r[11]) == pytest.approx(
         20.0 / (20.0**2 / 100.0)
     )  # RG2 = 5 pu on 100 MVA at 20 kV
+    # GC-04 PR6 (GK A2 V4): TR2 is 21 kV on a 20 kV bus (WINDV2 = 1.05). R01/X01
+    # sit between the windings, at 21 kV (100/40 = 2.5, no (21/20)**2); RG2 sits
+    # at the bus and stays on the 20 kV bus base above.
+    assert float(r[9]) == pytest.approx(0.004 * 2.5, rel=1e-5)
+    assert float(r[10]) == pytest.approx(
+        ((0.12 * 2.5) ** 2 - (0.004 * 2.5) ** 2) ** 0.5, rel=1e-5
+    )
 
 
 # --- machines ------------------------------------------------------------------

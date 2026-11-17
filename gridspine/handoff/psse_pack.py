@@ -81,6 +81,14 @@ BATTERY_ASSUMED = (
     "test battery: grid |Z0|/|Z1| = 1.0 (as the .seq's grid X0 = X1)",
     "test battery: grid X0/R0 = the grid's largest X/R",
 )
+#: GC-04 PR6: the README says which transformer convention this pack uses, since
+#: the manifest has no writer-version field to tell old packs apart.
+TRAFO_NOTE = (
+    "Transformer R/X are written at the winding's own voltage and PSS/E applies "
+    "WINDV2² itself. Packs written before this fix carry an impedance too high by "
+    "WINDV2² for every transformer with an LV tap or an LV rating off its bus "
+    "voltage; regenerate them."
+)
 _SCRIPTS_NEED_PLANT = (
     "psspy scripts not written: the SMIB cases need the aggregated plant's PoC branch and "
     "machine (GC-01)"
@@ -338,6 +346,10 @@ def _readme(m) -> str:
         "## Pending verification",
         "",
         *(f"- {n}" for n in m["pending_verification"]),
+        "",
+        "## Transformer impedance",
+        "",
+        TRAFO_NOTE,
         "",
     ]
     return "\n".join(lines)

@@ -128,3 +128,11 @@ REPCA1 and the scripts are written only for a `Plant` (the GC-01 aggregated mach
 - A battery plant's REPCA1 takes `pmin = -1` and `dup = ddn` (`repc_bess`, generic engineering): the PV example's `pmin = 0`, `dup = 0` would block charging and low-frequency response.
 - Wind gets the type 4 set (REGCA1 + REECA1), as PV; the type 3 set (WTDTA1/WTARA1/WTPTA1/WTTQA1) needs OEM data and is not defaulted.
 - Inherited from the test battery: no IEC 60909 factor c in the Thevenin source, filed as `14-thevenin-voltage-factor-c.md`.
+
+**GK A2 on the PR6 plan (2026-11-17): GO with conditions** (transformer WINDV2² applied twice; owner chose a separate PR6).
+- V1 Model source: the series Z sits between the ideal windings, so from bus J it is Z·WINDV2² (CW=1, CZ=1). Cite only public sources: PowerModels.jl `src/io/psse.jl` `_psse2pm_transformer!` and generic engineering, with no vendor manual text (GC-TEXT-1). The test-side Z·WINDV2² step lives in one function.
+- V2 Oracle: compare with `net._ppc['branch']` to 1e-6 (r, x, b, ratio) for an HV tap, an LV tap, and vn_lv ≠ bus kV with no tap. Add a hand literal (x 0.1653, not 0.1822) and an explicit test that an HV tap does not scale Z.
+- V3 Callers: list every caller of `trafo_impedance` and of the bus-base scaling, each fixed or excluded with a reason. A three-winding path, if one exists, gets the same ppc test.
+- V4 Zero sequence: R01/X01 take the same 1/WINDV2², while RG/XG stay on the bus base. Test both on an off-nominal LV transformer, with a killed mutant that scales RG.
+- V5 Goldens: case39 v33 and every WINDV2 = 1 case stay byte-identical. List any other changed golden with its old and new value and a reason.
+- V6 HOLISTIC: the old-pack line goes in the pack README, and in a manifest version field if one exists (if none, say so and don't add one). Tell the PSS/E importer session when the PR opens.

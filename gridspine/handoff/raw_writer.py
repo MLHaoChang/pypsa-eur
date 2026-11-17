@@ -167,6 +167,13 @@ def trafo_impedance(net, tr):
     pandapower vk/vkr are on (sn_mva, vn_lv) base. Probed against net._ppc:
     with tap_side=="lv" pandapower uses the TAP-ADJUSTED lv nominal voltage as
     the impedance base (r/x scale by tap**2); with tap_side=="hv" it does not.
+
+    R/X are written at that winding voltage, not referred to the LV bus base.
+    With CW=1 and CZ=1 the series impedance sits between the two ideal windings
+    (generic two-winding transformer model; PowerModels.jl ``src/io/psse.jl``,
+    ``_psse2pm_transformer!``, converts a RAW record this way), so the branch
+    seen from bus J is Z * WINDV2**2 with ratio WINDV1/WINDV2 at bus I.
+    Referring Z to the bus base here as well applied WINDV2**2 twice (GC-04 PR6).
     """
     sn = tr["sn_mva"]
     par = int(tr.get("parallel", 1))
@@ -178,7 +185,7 @@ def trafo_impedance(net, tr):
         vn_lv_eff *= tap
     else:
         vn_hv_eff *= tap
-    conv = (SBASE_MVA / sn) * (vn_lv_eff / bus_vn_lv) ** 2 / par
+    conv = (SBASE_MVA / sn) / par
     r_pu = (tr["vkr_percent"] / 100.0) * conv
     z_pu = (tr["vk_percent"] / 100.0) * conv
     x_pu = np.sqrt(max(z_pu ** 2 - r_pu ** 2, 1e-12))
