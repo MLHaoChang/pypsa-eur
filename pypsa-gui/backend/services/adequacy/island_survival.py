@@ -319,7 +319,7 @@ def _never_available(n, table, name) -> bool:
     try:
         hourly = n.get_switchable_as_dense(comp, "p_max_pu")[name]
         values = pd.to_numeric(hourly, errors="coerce")
-        return len(values) > 0 and bool(values.notna().all()) and bool((values == 0.0).all())
+        return len(values) > 0 and bool((values == 0.0).all())  # a NaN hour is not 0: available
     except Exception:  # noqa: BLE001 - unreadable availability is no evidence of none (GK A C4)
         return False
 
