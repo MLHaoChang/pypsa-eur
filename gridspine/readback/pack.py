@@ -353,7 +353,10 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
                 _unknown_case(case.case_id, case.kind, f"{label} unreadable: {exc}")
             )
             continue
-        cases.append(_judge_one(case, frame, profile, ratings))
+        try:
+            cases.append(_judge_one(case, frame, profile, ratings))
+        except ContractError as exc:
+            cases.append(_unknown_case(case.case_id, case.kind, f"not judged: {exc}"))
     stamp = {
         "data_hash": manifest["data_hash"],
         "contract_version": manifest["contract_version"],

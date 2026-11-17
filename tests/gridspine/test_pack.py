@@ -570,6 +570,63 @@ def test_an_unreadable_result_is_unknown_for_that_case_only(tmp_path):
     assert cases["p_step_skmin_xrmin_up"]["status"] == "pass"
 
 
+def _bad_records():
+    fault = "fault_3ph_skmin_xrmin_v030"
+    early = T < 0.25  # ends inside the fault, before clearance
+    iq_pct = dict(_ride_through(connected=False))
+    iq_pct["iq_pu"] = ("%", iq_pct["iq_pu"][1] * 100.0)
+    f = np.where(T < 0.2, 50.0, 50.5)
+    p = np.where(T < 0.2, 50.0, 35.0)
+    before = T < 0.1  # ends before t_event
+    return [
+        (
+            fault,
+            T[early],
+            {k: (u, v[early]) for k, (u, v) in _ride_through(False).items()},
+        ),
+        (fault, T, iq_pct),
+        (
+            "f_step_skmin_xrmin_up",
+            T,
+            {"f_hz": ("pu", f / 50.0), "p_poc_mw": ("MW", p)},
+        ),
+        (
+            "p_step_skmin_xrmin_up",
+            T[before],
+            {"p_poc_mw": ("MW", _rise(50.0, 60.0)[before])},
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "case_id, times, channels",
+    _bad_records(),
+    ids=["truncated_fault", "iq_in_percent", "f_hz_in_pu", "ends_before_t_event"],
+)
+def test_a_case_the_judge_cannot_take_is_unknown_and_the_rest_are_judged(
+    tmp_path, case_id, times, channels
+):
+    good = {
+        k: c["status"]
+        for k, c in _by_id(
+            judge_pack(_full_pack(tmp_path / "a"), PROFILE, RATINGS)
+        ).items()
+    }
+    pack = _full_pack(tmp_path / "b")
+    for f in (pack / "results").glob(f"{case_id}*"):
+        f.unlink()
+    _csv(pack / "results" / f"{case_id}.csv", channels, times)
+    cases = _by_id(judge_pack(pack, PROFILE, RATINGS))
+    bad = cases[case_id]
+    assert bad["status"] == "unknown"
+    assert {k: c["status"] for k, c in cases.items() if k != case_id} == {
+        k: v for k, v in good.items() if k != case_id
+    }
+    assert bad["rows"] == [] and bad["detail"]
+    if case_id != "p_step_skmin_xrmin_up":
+        assert bad["detail"].startswith("not judged: ")
+
+
 def test_fault_without_p_or_iq_judges_what_it_has(tmp_path):
     case = _case(
         "fault_3ph_skmin_xrmin_v030",
