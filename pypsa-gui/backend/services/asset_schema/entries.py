@@ -134,8 +134,6 @@ RENAMES: dict[Any, str] = {
     "e_nom_max": "Largest size",
     "s_nom_min": "Smallest size",
     "s_nom_max": "Largest size",
-    ("Generator", "p_max_pu"): "Maximum output share",
-    ("Generator", "p_min_pu"): "Minimum output share",
     "marginal_cost": "Running cost",
     "capital_cost": "Yearly capital cost",
     "bus": "Connected to",

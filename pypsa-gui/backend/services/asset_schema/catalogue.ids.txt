@@ -20,6 +20,7 @@ carrier.display_name
 carrier.name
 carrier.unit
 generator.ac_control
+generator.availability
 generator.availability_includes_outages
 generator.build_year
 generator.capacity
@@ -38,11 +39,10 @@ generator.let_the_optimiser_size_it
 generator.lifetime
 generator.lifetime_in_running_hours
 generator.maximum_energy
-generator.maximum_output_share
 generator.mean_time_to_repair
 generator.minimum_down_time
 generator.minimum_energy
-generator.minimum_output_share
+generator.minimum_output
 generator.minimum_up_time
 generator.must_start_and_stop_unit_commitment
 generator.name
