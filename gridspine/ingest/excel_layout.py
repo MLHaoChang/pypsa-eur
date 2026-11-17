@@ -25,6 +25,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from openpyxl.cell.cell import ERROR_CODES
+
 from gridspine.ingest.import_result import ImportFormatError as _ContractFormatError
 
 FORMAT_VERSION = 1
@@ -193,12 +195,15 @@ def scale_for_unit(unit: str) -> float:
 
 
 def scale_ok(unit: str, scale: Any) -> bool:
-    """A hidden factor is trusted only when it is the unit table's factor for the shown unit."""
+    """
+    A hidden factor is trusted only when it is exactly the unit table's factor for the
+    shown unit; the reader then uses the table's factor, never the file's (E1).
+    """
     if isinstance(scale, bool) or not isinstance(scale, int | float):
         return False
     if not math.isfinite(scale) or scale <= 0:
         return False
-    return math.isclose(float(scale), scale_for_unit(unit), rel_tol=1e-12)
+    return float(scale) == scale_for_unit(unit)
 
 
 def rescale(value: float, factor: float) -> float:
@@ -211,6 +216,46 @@ def rescale(value: float, factor: float) -> float:
     if factor == 1.0:
         return value
     return float(Decimal(repr(float(value))) * Decimal(repr(float(factor))))
+
+
+EXACT = "Exact values"
+"""
+The reserved hidden sheet that keeps a scaled cell exact (GK B ask 1, option A, X1-X6).
+A float shown per kW or in % cannot always come back as the same stored float: two
+stored values can show as the same float. For each such cell the writer records the
+key, the float it wrote and the stored float; the reader uses the stored float only
+while the visible cell still equals what was written and the stored float still
+shows as it, so a tampered entry moves a value by at most the gap between two floats
+that show alike.
+"""
+EXACT_COLUMNS = ("sheet", "name", "parameter", "time step", "shown", "stored")
+
+
+def step_key(period: Any, step: Any) -> str:
+    """One time step as the hidden sheet keys it: the same text from the network and from the file."""
+    if hasattr(step, "isoformat"):
+        text = step.isoformat()
+    elif (
+        isinstance(step, int | float)
+        and not isinstance(step, bool)
+        or hasattr(step, "item")
+    ):
+        f = float(step)
+        text = str(int(f)) if f.is_integer() else repr(f)
+    else:
+        text = str(step)
+    return ("" if period is None else str(int(period))) + "|" + text
+
+
+def exact_text(text: Any) -> float | None:
+    """A hidden float, read strictly: a finite float in its repr form, else None (X3)."""
+    if not isinstance(text, str):
+        return None
+    try:
+        f = float(text)
+    except ValueError:
+        return None
+    return f if math.isfinite(f) and repr(f) == text else None
 
 
 # ── cells ────────────────────────────────────────────────────────────────────
@@ -234,7 +279,7 @@ def put(ws, row: int, col: int, value: Any):
     if isinstance(value, str):
         value = safe_text(value)
         cell.value = value
-        if value.startswith(FORMULA_LEADS):
+        if value.startswith(FORMULA_LEADS) or value in ERROR_CODES:
             cell.data_type = "s"
     else:
         cell.value = value

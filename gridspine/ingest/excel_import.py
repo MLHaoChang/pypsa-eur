@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import pathlib
+import re
 import tempfile
 import zipfile
 from collections.abc import Mapping, Sequence
@@ -41,6 +42,7 @@ FORMAT_ID = "excel"
 
 _MAX_JSON_CELL = 1_000_000
 _BOOL_TEXT = {"true": True, "false": False}
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?\Z")
 
 
 # ── reading the file safely (E2) ─────────────────────────────────────────────
@@ -65,6 +67,30 @@ def _check_zip(path: pathlib.Path) -> None:
     total = sum(i.file_size for i in infos)
     if total > L.LIMITS["uncompressed_bytes"]:
         raise L.ImportLimitError("uncompressed_bytes", total)
+
+
+def _declared_within_limits(ws) -> None:
+    """
+    Refuse a sheet whose declared size passes the limits before any cell is read
+    (E2): a small file can declare A1:XFD1048576.
+    """
+    rows, cols = ws.max_row or 0, ws.max_column or 0
+    if rows > L.LIMITS["rows"]:
+        raise L.ImportLimitError("rows", rows)
+    if cols > L.LIMITS["columns"]:
+        raise L.ImportLimitError("columns", cols)
+    if rows * cols > L.LIMITS["cells"]:
+        raise L.ImportLimitError("cells", rows * cols)
+
+
+def _capped(rows):
+    """Each (row number, row), refusing past the row and column limits."""
+    for r, row in enumerate(rows, start=1):
+        if r > L.LIMITS["rows"]:
+            raise L.ImportLimitError("rows", r)
+        if len(row) > L.LIMITS["columns"]:
+            raise L.ImportLimitError("columns", len(row))
+        yield r, row
 
 
 class _Sheets:
@@ -94,22 +120,23 @@ class _Sheets:
             self.rows: dict[str, list[tuple]] = {}
             self.formula_cells: dict[str, set[tuple[int, int]]] = {}
             self.reported: set[tuple[str, int, int]] = set()
-            cells = 0
+            for name in self.names:
+                _declared_within_limits(values[name])
+                values[name].reset_dimensions()
+                formulas[name].reset_dimensions()
+            cells = scanned = 0
             for name in self.names:
                 f_cells: set[tuple[int, int]] = set()
-                for r, row in enumerate(formulas[name].iter_rows(), start=1):
+                for r, row in _capped(formulas[name].iter_rows()):
+                    scanned += len(row)
+                    if scanned > L.LIMITS["cells"]:
+                        raise L.ImportLimitError("cells", scanned)
                     for c, cell in enumerate(row, start=1):
                         if getattr(cell, "data_type", None) == "f":
                             f_cells.add((r, c))
                 self.formula_cells[name] = f_cells
                 rows = []
-                for r, row in enumerate(
-                    values[name].iter_rows(values_only=True), start=1
-                ):
-                    if r > L.LIMITS["rows"]:
-                        raise L.ImportLimitError("rows", r)
-                    if len(row) > L.LIMITS["columns"]:
-                        raise L.ImportLimitError("columns", len(row))
+                for r, row in _capped(values[name].iter_rows(values_only=True)):
                     cells += len(row)
                     if cells > L.LIMITS["cells"]:
                         raise L.ImportLimitError("cells", cells)
@@ -185,6 +212,8 @@ def _number(v: Any, *, inf: float | None = None) -> float:
         f = float(v)
     elif isinstance(v, str):
         try:
+            if "_" in v:
+                raise ValueError(v)
             f = float(v.strip())
         except ValueError:
             raise _Bad(f"'{v[:40]}' is not a number") from None
@@ -198,6 +227,13 @@ def _number(v: Any, *, inf: float | None = None) -> float:
             if inf is None
             else f"only {inf} is allowed here"
         )
+    return f
+
+
+def _weighting(v: Any) -> float:
+    f = _number(v)
+    if f < 0:
+        raise _Bad("a weighting cannot be negative")
     return f
 
 
@@ -251,6 +287,83 @@ class _Reader:
         }
         self.n = pypsa.Network()
         self.uploaded: dict = {}
+        self._step_keys: dict[int, str] = {}
+        self.exact: dict[tuple[str, str, str, str], tuple[float, float, int]] = {}
+        self._exact_seen: set[tuple[str, str, str, str]] = set()
+
+    # the hidden Exact values sheet (GK B ask 1, X2-X5): untrusted like every sheet
+    def load_exact(self) -> None:
+        sheet = L.EXACT
+        if sheet not in self.s.rows:
+            return  # deleted in Excel, or nothing needed it: the cells are rescaled
+        if sheet not in self.s.hidden:
+            self.unmapped(
+                sheet,
+                f"'{sheet}' is a reserved name for the workbook's hidden sheet; "
+                "this visible sheet was not read",
+            )
+            return
+        rows = self.s.rows[sheet]
+        formulas = self.s.formula_cells.get(sheet, set())
+        width = len(L.EXACT_COLUMNS)
+        duplicates: set[tuple[str, str, str, str]] = set()
+        for r in range(2, len(rows) + 1):
+            cells = [self.s.cell(sheet, r, c) for c in range(1, width + 1)]
+            if all(v is None for v in cells):
+                continue
+            item = f"{sheet} row {r}"
+            if any((r, c) in formulas for c in range(1, width + 1)):
+                self.unmapped(item, "a formula in the exact values; ignored")
+                self.s.reported.update((sheet, r, c) for c in range(1, width + 1))
+                continue
+            where, name, param, step, shown, stored = cells
+            name = "" if name is None else name
+            step = "" if step is None else step
+            fs, ft = L.exact_text(shown), L.exact_text(stored)
+            if (
+                not all(isinstance(x, str) for x in (where, name, param, step))
+                or fs is None
+                or ft is None
+            ):
+                self.unmapped(item, "not a readable exact value; ignored")
+                continue
+            key = (where, name, param, step)
+            if key in self.exact or key in duplicates:
+                self.unmapped(
+                    item, "a second exact value for the same cell; both ignored"
+                )
+                duplicates.add(key)
+                self.exact.pop(key, None)
+                continue
+            self.exact[key] = (fs, ft, r)
+
+    def exact_value(self, key, v: Any, scale: float) -> float | None:
+        """
+        The stored float for a scaled cell left as the writer wrote it, else None
+        (the visible value is rescaled). The entry counts only when the cell still
+        equals the float written and the stored float still shows as that float.
+        """
+        entry = self.exact.get(key)
+        if entry is None:
+            return None
+        self._exact_seen.add(key)
+        shown, stored, r = entry
+        if isinstance(v, bool) or not isinstance(v, int | float) or float(v) != shown:
+            return None  # edited in Excel: the visible value wins
+        if scale == 1.0 or L.rescale(stored, scale) != shown:
+            self.unmapped(
+                f"{L.EXACT} row {r}",
+                "the exact value does not show as its cell; ignored",
+            )
+            return None
+        return stored
+
+    def unused_exact(self) -> None:
+        for key, (_, _, r) in self.exact.items():
+            if key not in self._exact_seen:
+                self.unmapped(
+                    f"{L.EXACT} row {r}", "no cell matches this exact value; ignored"
+                )
 
     def unmapped(self, item: str, reason: str) -> None:
         self.report.unmapped.append(Unmapped(item, reason))
@@ -325,7 +438,7 @@ class _Reader:
                 self.unmapped(shown, "a second column for the same parameter")
                 continue
             seen.add(key)
-            out.append((c, key, str(label or key), float(scale)))
+            out.append((c, key, str(label or key), L.scale_for_unit(str(unit))))
         if "name" not in seen:
             self.unmapped(sheet, "no Name column; the sheet's rows were not read")
             return []
@@ -376,11 +489,16 @@ class _Reader:
                     size_units[name] = str(v)
                     continue
                 try:
-                    values[key] = _convert(
-                        v,
-                        _attr_type(defaults, key),
-                        scale=scale,
-                        inf=_allowed_inf(defaults, key),
+                    exact = self.exact_value((sheet, name, key, ""), v, scale)
+                    values[key] = (
+                        exact
+                        if exact is not None
+                        else _convert(
+                            v,
+                            _attr_type(defaults, key),
+                            scale=scale,
+                            inf=_allowed_inf(defaults, key),
+                        )
                     )
                 except _Bad as exc:
                     self.unmapped(
@@ -481,12 +599,19 @@ class _Reader:
         }
         solver: dict[str, Any] = {}
         period_header = None
+        seen: set[str] = set()
         for r, row in enumerate(rows, start=1):
             key = self.s.cell(sheet, r, 4)
             if key in settings:
                 label, unit, scale = settings[key]
                 v = self.s.cell(sheet, r, 2)
                 shown = f"{sheet} › {label}"
+                if key in seen:
+                    self.unmapped(
+                        f"{sheet} row {r}", f"a second row for the setting '{label}'"
+                    )
+                    continue
+                seen.add(key)
                 if v is None:
                     if key == "investment_periods":
                         solver[key] = []
@@ -495,7 +620,12 @@ class _Reader:
                     if key == "discount_rate":
                         if (self.s.cell(sheet, r, 3) or "") != unit:
                             raise _Bad(f"the unit must be '{unit}'")
-                        solver[key] = _convert(v, float, scale=scale)
+                        exact = self.exact_value((sheet, "", key, ""), v, scale)
+                        solver[key] = (
+                            exact
+                            if exact is not None
+                            else _convert(v, float, scale=scale)
+                        )
                     elif key == "multi_investment_periods":
                         solver[key] = _convert(v, bool, scale=1.0)
                     elif key == "investment_periods":
@@ -515,6 +645,11 @@ class _Reader:
                 k for k, _, _ in L.PERIOD_COLUMNS
             ]:
                 period_header = r
+            elif period_header is None and key not in (None, "key"):
+                self.unmapped(
+                    f"{sheet} row {r}",
+                    f"'{str(key)[:40]}' is not a setting this workbook uses",
+                )
         if period_header is not None:
             periods: dict[int, tuple[float, float]] = {}
             for r in range(period_header + 1, len(rows) + 1):
@@ -522,10 +657,10 @@ class _Reader:
                 if p is None and obj is None and yrs is None:
                     continue
                 try:
-                    periods[_convert(p, int, scale=1.0)] = (
-                        _number(obj),
-                        _number(yrs),
-                    )
+                    period = _convert(p, int, scale=1.0)
+                    if period in periods:
+                        raise _Bad(f"a second row for period {period}")
+                    periods[period] = (_weighting(obj), _weighting(yrs))
                 except _Bad as exc:
                     self.unmapped(
                         f"{sheet} row {r}", f"investment period weighting: {exc}"
@@ -542,6 +677,7 @@ class _Reader:
         width = max((len(r) for r in rows), default=0)
         time_cols: dict[str, int] = {}
         series_cols: list[tuple[int, str, str, str, float, Any]] = []
+        seen_series: set[tuple[Any, str, str]] = set()
         for c in range(1, width + 1):
             cls, attr = (
                 self.s.cell(sheet, L.TS_ROW_CLASS, c),
@@ -553,7 +689,10 @@ class _Reader:
                 "  ", " "
             )
             if cls == "snapshots" and attr in {k for k, _, _ in L.SNAPSHOT_COLUMNS}:
-                time_cols[attr] = c
+                if attr in time_cols:
+                    self.unmapped(shown, "a second column for the same time step data")
+                else:
+                    time_cols[attr] = c
                 continue
             if cls is None and attr is None:
                 if label is not None or asset is not None:
@@ -583,13 +722,17 @@ class _Reader:
             if asset is None:
                 self.unmapped(shown, "no asset name in row 2")
                 continue
+            if (cls, str(attr), str(asset)) in seen_series:
+                self.unmapped(shown, "a second column for the same profile")
+                continue
+            seen_series.add((cls, str(attr), str(asset)))
             series_cols.append(
                 (
                     c,
                     cls,
                     str(attr),
                     str(asset),
-                    float(scale),
+                    L.scale_for_unit(str(unit)),
                     self.s.cell(sheet, L.TS_ROW_USER, c),
                 )
             )
@@ -621,6 +764,7 @@ class _Reader:
             steps.append(step)
             periods.append(period)
             keep_rows.append(r)
+            self._step_keys[r] = L.step_key(period, step)
         if not keep_rows:
             return
         if "period" in time_cols:
@@ -644,7 +788,7 @@ class _Reader:
             vals = []
             for r in keep_rows:
                 try:
-                    vals.append(_number(self.s.cell(sheet, r, time_cols[key])))
+                    vals.append(_weighting(self.s.cell(sheet, r, time_cols[key])))
                 except _Bad as exc:
                     self.unmapped(f"{sheet} row {r} › weighting", f"{exc}; 1 is used")
                     vals.append(1.0)
@@ -676,7 +820,12 @@ class _Reader:
                         blanks += 1
                         vals.append(static)
                         continue
-                    vals.append(_convert(v, float, scale=scale))
+                    exact = self.exact_value(
+                        (sheet, f"{cls}:{asset}", attr, self._step_keys[r]), v, scale
+                    )
+                    vals.append(
+                        exact if exact is not None else _convert(v, float, scale=scale)
+                    )
             except _Bad as exc:
                 self.unmapped(shown, f"{exc}; the column was not read")
                 continue
@@ -810,9 +959,14 @@ def _index_name(extra: Mapping) -> dict:
 def _snapshot(v: Any, kind: str) -> Any:
     if kind == "dates":
         if hasattr(v, "isoformat") and not isinstance(v, str):
+            if getattr(v, "tzinfo", None) is not None:
+                raise _Bad(f"'{v}' carries a time zone; give local time without one")
             return pd.Timestamp(v)
-        if not isinstance(v, str):
-            raise _Bad(f"'{v}' is not a date")
+        if not isinstance(v, str) or not _ISO_DATE.match(v.strip()):
+            raise _Bad(
+                f"'{str(v)[:40]}' is not a date as YYYY-MM-DD or YYYY-MM-DD hh:mm[:ss], "
+                "without a time zone"
+            )
         return pd.Timestamp(v.strip())
     if kind == "numbers":
         f = _number(v)
@@ -824,9 +978,10 @@ def _read_input_workbook(
     sheets: _Sheets, report: ImportReport, options: Mapping[str, Any]
 ) -> tuple[pypsa.Network, dict]:
     rd = _Reader(sheets, report, options)
+    rd.load_exact()
     solver = rd.horizon()
     kind = solver.pop("snapshot_kind", "dates")
-    known = {L.ABOUT, L.TIME_SERIES, L.HORIZON, L.LISTS, L.UPLOADED} | set(
+    known = {L.ABOUT, L.TIME_SERIES, L.HORIZON, L.LISTS, L.UPLOADED, L.EXACT} | set(
         L.CLASS_OF_SHEET
     )
     for name in sheets.names:
@@ -840,6 +995,7 @@ def _read_input_workbook(
     rd.periods(solver)
     rd.uploaded_sheet()
     rd.meta()
+    rd.unused_exact()
     for sheet, r, c in sheets.unread_formulas():
         rd.unmapped(
             f"{sheet} › cell {get_column_letter(c)}{r}",
