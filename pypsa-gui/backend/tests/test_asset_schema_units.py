@@ -265,6 +265,11 @@ def test_a_cost_written_under_the_wrong_basis_is_refused_and_nothing_is_stored(
         "energy",
         "tonne",
     )
+    # The ordinary refusal (no bus move in this save): reopen and re-enter, not "save the bus first".
+    assert d["message"] == (
+        "This asset's costs are per t/h or t, but the form assumed per kW or kWh. "
+        "Nothing was saved; reopen the card and enter the costs again."
+    )
     assert _stored(client, name) == before
 
 

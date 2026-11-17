@@ -102,6 +102,7 @@ function mount(c: Case) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   client.setQueryData(nk('Demo', c.root), [c.row])
   render(<QueryClientProvider client={client}>{c.el(c.row as never)}</QueryClientProvider>)
+  return client
 }
 const put = (c: Case) => vi.mocked(networkApi[c.api])
 async function openEdit() {
@@ -186,6 +187,24 @@ describe.each(['Generator', 'Link'])('the %s claim and patch come from one schem
     await waitFor(() => expect(put(c)).toHaveBeenCalled())
     const [, body, basis] = put(c).mock.calls[0] as [string, Record<string, unknown>, string]
     expect([body.overnight_cost, basis]).toEqual([123400, 'energy'])
+  })
+})
+
+describe('the units flip between opening the card and Save (T3)', () => {
+  it('the claim follows the schema the patch is scaled with, not the one the card opened with', async () => {
+    const c = CASES.Generator
+    units.mockResolvedValueOnce({ component: 'Generator', name: 'crusher', units: {} })
+    units.mockResolvedValue(tonneUnits('Generator', 'crusher'))
+    const client = mount(c)
+    await openEdit()
+    await waitFor(() => expect(screen.getAllByText(/€\/kW/).length).toBeGreaterThan(0))
+    await client.invalidateQueries()
+    await waitFor(() => expect(screen.getAllByText(/€\/\(t\/h\)/).length).toBeGreaterThan(0))
+    fireEvent.change(inputStarting('Overnight cost'), { target: { value: '123.4' } })
+    await saveWhenReady()
+    await waitFor(() => expect(put(c)).toHaveBeenCalled())
+    const [, body, basis] = put(c).mock.calls[0] as [string, Record<string, unknown>, string]
+    expect([body.overnight_cost, basis]).toEqual([123.4, 'tonne'])
   })
 })
 
