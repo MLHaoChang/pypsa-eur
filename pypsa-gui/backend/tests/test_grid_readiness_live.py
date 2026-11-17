@@ -1,6 +1,7 @@
 """DC grid-readiness walkthrough 04: the scorecard reads the project's live
 network, so an edit shows in its verdict before the project is saved (it read
 only the saved netCDF, and an SCR of 8.3 passed for a 60 MVA grid until Ctrl+S)."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,7 +11,9 @@ BASE = "/api/campus-electrical"
 
 @pytest.fixture
 def hub(client, tmp_projects_dir, project_storage_dir):
-    r = client.post("/api/projects/from_template/eh_datacenter", params={"name": "live_hub"})
+    r = client.post(
+        "/api/projects/from_template/eh_datacenter", params={"name": "live_hub"}
+    )
     assert r.status_code == 200, r.text
     return r.json().get("name", "live_hub")
 
@@ -29,14 +32,19 @@ def test_an_unsaved_fault_level_edit_reaches_the_scr_row(client, hub):
     rows = rows.get("items", rows) if isinstance(rows, dict) else rows
     row = next(b for b in rows if b["name"] == bus)
     sk = float(row["eh_sk_mva"])
-    r = client.put(f"/api/network/buses/{bus}", json={**row, "eh_sk_mva": sk * 60 / 250})
+    r = client.put(
+        f"/api/network/buses/{bus}", json={**row, "eh_sk_mva": sk * 60 / 250}
+    )
     assert r.status_code == 200, r.text
     after = _scr(client, hub)
-    assert after["project_value"] == pytest.approx(before["project_value"] * 60 / 250, rel=1e-3)
+    assert after["project_value"] == pytest.approx(
+        before["project_value"] * 60 / 250, rel=1e-3
+    )
     assert after["verdict"] != "pass"
 
 
 # ── GK A L1–L6 ──────────────────────────────────────────────────────────────
+
 
 def _project(name):
     import db.session as S
@@ -53,7 +61,10 @@ def _edit_fault(client, name, factor):
     rows = client.get("/api/network/buses").json()
     rows = rows.get("items", rows) if isinstance(rows, dict) else rows
     row = next(b for b in rows if b["name"] == bus)
-    r = client.put(f"/api/network/buses/{bus}", json={**row, "eh_sk_mva": float(row["eh_sk_mva"]) * factor})
+    r = client.put(
+        f"/api/network/buses/{bus}",
+        json={**row, "eh_sk_mva": float(row["eh_sk_mva"]) * factor},
+    )
     assert r.status_code == 200, r.text
 
 
@@ -63,7 +74,9 @@ def _get(client, name):
     return r.json()
 
 
-def test_a_busy_network_reads_the_saved_file_and_says_out_of_date(client, hub, monkeypatch):
+def test_a_busy_network_reads_the_saved_file_and_says_out_of_date(
+    client, hub, monkeypatch
+):
     import threading
     import time
 
@@ -101,12 +114,16 @@ def test_a_busy_network_reads_the_saved_file_and_says_out_of_date(client, hub, m
 
 
 def test_another_resident_project_is_never_read(client, hub):
-    r = client.post("/api/projects/from_template/eh_datacenter", params={"name": "live_other"})
+    r = client.post(
+        "/api/projects/from_template/eh_datacenter", params={"name": "live_other"}
+    )
     assert r.status_code == 200, r.text
     other = r.json().get("name", "live_other")
     before = _scr(client, hub)["project_value"]
-    _edit_fault(client, other, 60 / 250)   # the active project is the one just made
-    assert _scr(client, other)["project_value"] == pytest.approx(before * 60 / 250, rel=1e-3)
+    _edit_fault(client, other, 60 / 250)  # the active project is the one just made
+    assert _scr(client, other)["project_value"] == pytest.approx(
+        before * 60 / 250, rel=1e-3
+    )
     assert _scr(client, hub)["project_value"] == before
 
 
@@ -123,9 +140,14 @@ def test_the_saved_source_is_todays_answer_plus_its_name(client, hub):
     out = G.grid_readiness_for(p, source="saved")
     assert out.pop("network") == "saved"
     profile = ce.DEFAULTS["profile"]
-    want = G.grid_readiness(d, pypsa.Network(str(d / ce.NETWORK_FILE)), profile,
-                            profile_dirs=(d / ce.SUBDIR / ce.GRID_CODES_SUBDIR,),
-                            eh_study=G._active_study(d)[0], study_edited=G._active_study(d)[1])
+    want = G.grid_readiness(
+        d,
+        pypsa.Network(str(d / ce.NETWORK_FILE)),
+        profile,
+        profile_dirs=(d / ce.SUBDIR / ce.GRID_CODES_SUBDIR,),
+        eh_study=G._active_study(d)[0],
+        study_edited=G._active_study(d)[1],
+    )
     want["profile"]["since_run"] = ce.grid_code_since_run(p, profile)
     assert out == want
 
@@ -140,9 +162,13 @@ def test_the_report_reads_the_saved_project_while_the_screen_reads_live(client, 
     _edit_fault(client, hub, 60 / 250)
     assert _get(client, hub)["network"] == "live"
     assert _scr(client, hub)["project_value"] != saved
-    ap = AuthorizedProject(name=p.name, directory=project_registry.project_dir(p),
-                           uuid=str(p.id), org_id=str(p.org_id),
-                           registry_key=project_registry.registry_key(p))
+    ap = AuthorizedProject(
+        name=p.name,
+        directory=project_registry.project_dir(p),
+        uuid=str(p.id),
+        org_id=str(p.org_id),
+        registry_key=project_registry.registry_key(p),
+    )
     gr = reports._current_chapter_sources(ap)["grid_readiness"]
     assert gr["network"] == "saved"
     assert next(r for r in gr["rows"] if r["id"] == "scr")["project_value"] == saved
