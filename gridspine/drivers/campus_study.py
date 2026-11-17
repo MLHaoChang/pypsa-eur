@@ -1266,11 +1266,17 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     ``campus_subsync_scan.csv`` and ``campus_subsync_resonance.csv``.
 
     The campus's series capacitors (``Campus.series_caps``, GC-01b) enter the
-    scan; without one the series-resonance verdict reads ``not evaluated``
-    (grid-side series compensation needs the TSP's data). No torsional mode
-    is entered. Screening only: the binding answer is
-    the EMT study."""
+    scan. Seen from the PCC a campus capacitor only adds impedance to an open
+    branch, so each one is also scanned from its far-side bus
+    (``series_caps.far_side``), where the units behind it see grid,
+    transformer and capacitor in series. Every row carries the ``bus`` it was
+    scanned from, and the verdict is the worst over all rows. A capacitor
+    scanned with no crossing reads ``clear`` within the scan band. Without
+    any capacitor the series verdict reads ``not evaluated`` (grid-side series
+    compensation needs the TSP's data). No torsional mode is entered.
+    Screening only: the binding answer is the EMT study."""
     from gridspine.static import harmonic_scan as hs
+    from gridspine.static import series_caps as SC
     from gridspine.static import ssti_uif as su
     from gridspine.static import subsync_scan as ss
 
@@ -1281,12 +1287,30 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     uif = su.campus_uif(campus, threshold, assumed=bool(t_cited) and t_cited[0]["source"] != "code")
     bus, cases, notes = hs.campus_cases(campus)
     clearance, c_cited = ss.clearance_from_profile(code)
-    sub = ss.subsync_scan(campus.net, bus, cases, series_caps=campus.series_caps, clearance_hz=clearance,
-                          clearance_assumed=bool(c_cited) and c_cited[0]["source"] != "code", notes=notes)
+    assumed = bool(c_cited) and c_cited[0]["source"] != "code"
+    net, caps = campus.net, campus.series_caps
+    points = [bus] + [b for _, b in SC.far_side(net, bus) if b != bus]
+    studies = [(b, ss.subsync_scan(net, b, cases, series_caps=caps, clearance_hz=clearance,
+                                   clearance_assumed=assumed, notes=notes))
+               for b in dict.fromkeys(points)]
+    name = net.bus["name"].astype(str)
+    scan = pd.concat([s.scan.assign(bus=name[b]) for b, s in studies], ignore_index=True)
+    resonance = pd.concat([s.resonance.assign(bus=name[b]) for b, s in studies], ignore_index=True)
+    if caps and not (resonance["kind"] == ss.SERIES).any():
+        band = f"{ss.F_MIN_HZ:g}-{float(net.f_hz) - ss.F_MIN_HZ:g} Hz"
+        scanned = sorted(campus.series_capacitors.index.astype(str))
+        clear = [{"case": case, "kind": ss.SERIES, "verdict": "clear", "bus": name[b],
+                  "clearance_hz": ss.DEFAULT_CLEARANCE_HZ if clearance is None else clearance,
+                  "assumed": clearance is None or assumed, "label": ss.LABEL,
+                  "note": f"clear in the {band} scan band: series capacitor(s) {scanned} scanned, "
+                          f"no series resonance"}
+                 for b, _ in studies[1:] or studies for case in cases]
+        resonance = pd.concat([resonance, pd.DataFrame(clear)], ignore_index=True)
+    sub = ss.SubsyncStudy(scan=scan, resonance=resonance, notes=studies[0][1].notes)
     series = sub.resonance[sub.resonance["kind"] == ss.SERIES]["verdict"]
     verdict = next(v for v in SUBSYNC_VERDICT_ORDER if v in set(series)) if len(series) else "not evaluated"
-    for name, df in ((SSTI_UIF_CSV, uif.rows), (SUBSYNC_SCAN_CSV, sub.scan), (SUBSYNC_RESONANCE_CSV, sub.resonance)):
-        _write_text_atomic(run_dir / name, df.to_csv(index=False))
+    for fname, df in ((SSTI_UIF_CSV, uif.rows), (SUBSYNC_SCAN_CSV, sub.scan), (SUBSYNC_RESONANCE_CSV, sub.resonance)):
+        _write_text_atomic(run_dir / fname, df.to_csv(index=False))
     return SstiScreens(uif=uif, subsync=sub, subsync_verdict=verdict,
                        threshold=su.DEFAULT_THRESHOLD if threshold is None else threshold, uif_threshold=t_cited,
                        clearance_hz=ss.DEFAULT_CLEARANCE_HZ if clearance is None else clearance,
