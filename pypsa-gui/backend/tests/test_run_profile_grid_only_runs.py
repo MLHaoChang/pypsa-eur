@@ -110,7 +110,9 @@ def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
     state = PyPSAService.get_solver_state()
     assert state["condition"] == "lopf+ac_pf_ok" and state["ac_pf_results"] is not None
     # The LP objective, not the flow's cost (3bus: 61733.46 against 61734.29 before).
-    assert kpis["total_cost"]["value"] == pytest.approx(state["objective"], abs=1e-2), kpis
+    assert kpis["total_cost"]["value"] == pytest.approx(state["objective"], abs=1e-2), (
+        kpis
+    )
     rows = {r["part"]: r["status"] for r in run["handoff"]["coverage"]}
     assert rows == {
         "Report": "covered",

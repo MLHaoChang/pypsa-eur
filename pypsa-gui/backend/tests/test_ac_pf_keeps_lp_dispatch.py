@@ -14,8 +14,11 @@ import pytest
 from services import ac_pf_service
 from services.pypsa_service import PyPSAService
 from tests.test_ac_pf_second_run import _run_and_pf
-from tests.test_project_flow import set_cfg, site  # noqa: F401  (fixtures)
+from tests import test_project_flow as _flow
 from tests.test_run_separability import _wait_idle
+
+# Fixtures shared with the project-flow tests.
+site, set_cfg = _flow.site, _flow.set_cfg
 
 TEMPLATES = pathlib.Path(__file__).resolve().parents[1] / "project_templates"
 PF_ONLY = sorted(ac_pf_service._PF_ONLY_RESULTS)
@@ -29,7 +32,9 @@ def _ieee14() -> pypsa.Network:
 
 
 def _reload(client, name):
-    assert client.post(f"/api/projects/{name}", params={"force": True}).status_code == 200
+    assert (
+        client.post(f"/api/projects/{name}", params={"force": True}).status_code == 200
+    )
     _reopen(client, name)
 
 
@@ -64,7 +69,9 @@ def test_the_saved_dispatch_is_the_lps_on_a_lossy_template(
         )
     # The fixture is lossy: the flow's slack moves off the LP dispatch.
     assert (pf - lp).abs().to_numpy().max() > 1e-3
-    assert client.post("/api/projects/pf_lossy", params={"force": True}).status_code == 200
+    assert (
+        client.post("/api/projects/pf_lossy", params={"force": True}).status_code == 200
+    )
     # The saved file itself, read without the app's reload.
     saved = pypsa.Network(project_storage_dir("pf_lossy") / "network.nc").generators_t.p
     pd.testing.assert_frame_equal(
@@ -76,9 +83,13 @@ def test_the_saved_dispatch_is_the_lps_on_a_lossy_template(
         state = PyPSAService.get_solver_state()
         # F1: bit-equal, live and in the record.
         pd.testing.assert_frame_equal(n.generators_t.p, lp, check_exact=True)
-        pd.testing.assert_frame_equal(state["lopf_results"]["generators_t.p"], lp, check_exact=True)
+        pd.testing.assert_frame_equal(
+            state["lopf_results"]["generators_t.p"], lp, check_exact=True
+        )
         # The flow's values survive the reload under their own name only.
-        pd.testing.assert_frame_equal(state["ac_pf_results"]["generators_t.p"], pf, check_exact=True)
+        pd.testing.assert_frame_equal(
+            state["ac_pf_results"]["generators_t.p"], pf, check_exact=True
+        )
         assert len(state["ac_pf_results"]["buses_t.v_mag_pu"].columns) == len(n.buses)
         assert n.buses_t.v_mag_pu.columns.empty
     # A load-flow screen reads the flow; the default screens read the LP.
@@ -100,7 +111,9 @@ def test_the_chained_stage_keeps_the_lp_dispatch_live(client, site, bound_ctx, s
 
 
 @pytest.mark.parametrize("where", ["inside_pf", "after_the_pf_snapshot"])
-def test_every_outcome_leaves_the_lp_tables(client, site, bound_ctx, monkeypatch, where):
+def test_every_outcome_leaves_the_lp_tables(
+    client, site, bound_ctx, monkeypatch, where
+):
     """F2: a raise inside the flow and a raise after its snapshot both leave
     the live tables equal to the LP snapshot."""
     site(_ieee14(), name=f"pf_raise_{where}")
@@ -175,7 +188,9 @@ def test_every_link_port_keeps_its_lp_flow():
     for p, df in lp.items():
         pd.testing.assert_frame_equal(n.links_t[p], df, check_exact=True, obj=p)
         assert f"links_t.{p}" in out["ac_pf_results"], p
-        pd.testing.assert_frame_equal(out["lopf_results"][f"links_t.{p}"], df, check_exact=True)
+        pd.testing.assert_frame_equal(
+            out["lopf_results"][f"links_t.{p}"], df, check_exact=True
+        )
 
 
 def test_the_restore_is_not_an_edit():
@@ -237,16 +252,22 @@ def _legacy_save(client, site, monkeypatch, name):
     with monkeypatch.context() as m:
         m.setattr(ac_pf_service, "_restore_result_state", lambda n, snap: None)
         _run_and_pf(client)
-    assert client.post(f"/api/projects/{name}", params={"force": True}).status_code == 200
+    assert (
+        client.post(f"/api/projects/{name}", params={"force": True}).status_code == 200
+    )
 
 
-def test_a_legacy_project_reloads_with_the_lp_dispatch(client, site, bound_ctx, monkeypatch):
+def test_a_legacy_project_reloads_with_the_lp_dispatch(
+    client, site, bound_ctx, monkeypatch
+):
     """F5: network.nc carries the flow's dispatch; the record's LP tables win."""
     _legacy_save(client, site, monkeypatch, "pf_legacy")
     with bound_ctx(client):
         state = PyPSAService.get_solver_state()
         lp = state["lopf_results"]["generators_t.p"].copy()
-        assert not PyPSAService.get_network().generators_t.p.equals(lp), "fixture: PF live"
+        assert not PyPSAService.get_network().generators_t.p.equals(lp), (
+            "fixture: PF live"
+        )
     _reload(client, "pf_legacy")
     with bound_ctx(client):
         n = PyPSAService.get_network()
@@ -282,7 +303,9 @@ def test_a_flow_record_without_links_reads_as_no_data(client, site, bound_ctx):
     r = client.get("/api/results/links", params={"source": "ac_pf"})
     assert r.status_code in (200, 204), r.text
     assert r.status_code == 204 or not r.json().get("columns"), r.text
-    assert client.get("/api/results/links", params={"source": "lopf"}).status_code == 200
+    assert (
+        client.get("/api/results/links", params={"source": "lopf"}).status_code == 200
+    )
 
 
 def test_a_flow_on_a_network_carrying_an_earlier_flows_q_and_v_empties_them(

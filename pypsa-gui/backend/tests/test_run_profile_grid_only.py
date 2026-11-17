@@ -994,10 +994,19 @@ def test_each_grid_template_has_the_grid_scope_preset(template):
 
     scope = run_profiles.scope_for({"id": template})
     assert scope["preset"] == template
-    assert scope["cards"] == {"capacity": ["sizing", "dispatch"], "commercial": ["tariffs"],
-                              "handoff": ["reports"], "grid": ["load_flow"]}
+    assert scope["cards"] == {
+        "capacity": ["sizing", "dispatch"],
+        "commercial": ["tariffs"],
+        "handoff": ["reports"],
+        "grid": ["load_flow"],
+    }
     assert "grid" not in scope["skipped"] and "reliability" in scope["skipped"]
-    assert flow_scope.option_status("grid", "load_flow", has_template=True)[0] == flow_scope.AVAILABLE
+    assert (
+        flow_scope.option_status("grid", "load_flow", has_template=True)[0]
+        == flow_scope.AVAILABLE
+    )
     assert run_profiles.GRID_TEMPLATES == tuple(
-        t for t, p in flow_scope.TEMPLATE_PRESETS.items() if p.get("grid") == ("load_flow",)
+        t
+        for t, p in flow_scope.TEMPLATE_PRESETS.items()
+        if p.get("grid") == ("load_flow",)
     )
