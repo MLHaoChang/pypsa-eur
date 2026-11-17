@@ -354,7 +354,11 @@ def test_an_assumed_site_type_goal_alone_still_refuses_goal_missing(
     assert goal["target_lole_h"]["value"] is None
     monkeypatch.setattr(reliability_goal, "active_goal", lambda _state: goal)
     task = start()
-    assert task["envelope"]["goal"] == {"value": None, "unit": "h/yr", "source": "default"}
+    assert task["envelope"]["goal"] == {
+        "value": None,
+        "unit": "h/yr",
+        "source": "default",
+    }
     assert "No reliability goal is set" in task["envelope"]["detail"]
     with pytest.raises(HTTPException) as exc:
         run_envelope.decide(session, task["task_id"], "unattended")
