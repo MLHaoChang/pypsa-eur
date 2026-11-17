@@ -15,8 +15,8 @@ import { REPORT, review } from '../testFixtures'
 import captured from '../../../test/fixtures/headlineKpis.json'
 import { ResultsCard } from './ResultsCard'
 import { chartFigure } from '../../../components/charts/chartTheme'
-import { headlineFigure } from '../../results/headlineWords'
-import { mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
+import { HEADLINE_WORDS, headlineFigure } from '../../results/headlineWords'
+import { LCOE_NOT_APPLICABLE, mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
 
 vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
 vi.mock('../../../api/finance', async (importOriginal) => {
@@ -42,9 +42,12 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
 
 /** The captured `/results/headline_kpis` response (GK B G2): the LCOE card as the server sends it. */
 const HEADLINE = captured as HeadlineKpis
-const LCOE = HEADLINE.cards.find(c => c.id === 'lcoe') as HeadlineCard
+// A default installation has checked figures switched off, so the captured LCOE card is unavailable;
+// a figure is laid over it, in the unit the server's card type names ("<ISO code>/MWh").
 const withLcoe = (over: Partial<HeadlineCard>): HeadlineKpis =>
   ({ ...HEADLINE, cards: HEADLINE.cards.map(c => (c.id === 'lcoe' ? { ...c, ...over } : c)) })
+const LCOE_READY: Partial<HeadlineCard> = { state: 'ready', value: 61.23, unit: 'EUR/MWh', reason: null }
+const LCOE = withLcoe(LCOE_READY).cards.find(c => c.id === 'lcoe') as HeadlineCard
 
 beforeEach(() => {
   vi.mocked(useProjectFlow).mockReturnValue({ flow: null } as unknown as ReturnType<typeof useProjectFlow>)
@@ -56,7 +59,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
   vi.mocked(resultsApi.getProcessView).mockResolvedValue(null as never)
-  vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(HEADLINE)
+  vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(withLcoe(LCOE_READY))
   vi.mocked(financeApi.getInvestmentCase).mockResolvedValue({ status: 'done' } as never)
   vi.mocked(financeApi.getReport).mockResolvedValue({ npv_at_wacc: 4_200_000 } as never)
   vi.mocked(campusApi.state).mockRejectedValue(Object.assign(new Error('409'), { response: { status: 409 } }))
@@ -142,19 +145,55 @@ describe('Results headline', () => {
     expect(npv.querySelector('[data-kpi-value]')).toBeNull()
   })
 
-  it('a project type without an LCOE card shows no LCOE slot', async () => {
+  it('the captured default installation: LCOE unavailable, with the server\'s reason', async () => {
+    vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(HEADLINE)
+    const card = HEADLINE.cards.find(c => c.id === 'lcoe') as HeadlineCard
+    mount()
+    const lcoe = await screen.findByTestId('hub-results-lcoe')
+    expect(lcoe.getAttribute('data-state')).toBe('unavailable')
+    expect(lcoe.textContent).toContain(card.reason)
+  })
+
+  it('a project type without an LCOE card says so in words, under the label Expert uses', async () => {
     vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue({ ...HEADLINE, cards: HEADLINE.cards.filter(c => c.id !== 'lcoe') })
     mount()
-    await screen.findByTestId('hub-results-npv')
-    expect(screen.queryByTestId('hub-results-lcoe')).toBeNull()
+    const lcoe = await screen.findByTestId('hub-results-lcoe')
+    expect(lcoe.getAttribute('data-state')).toBe('not_applicable')
+    expect(lcoe.textContent).toContain(HEADLINE_WORDS.lcoe.label)
+    expect(lcoe.textContent).toContain(LCOE_NOT_APPLICABLE)
+    expect(lcoe.querySelector('[data-kpi-value]')).toBeNull()
+  })
+
+  it('each figure keeps its own state: a stale NPV carries its own mark beside a current study', async () => {
+    vi.mocked(financeApi.getInvestmentCase).mockResolvedValue({ status: 'done', report: { stale: true } } as never)
+    mount()
+    const npv = await screen.findByTestId('hub-results-npv')
+    await waitFor(() => expect(npv.getAttribute('data-state')).toBe('stale'))
+    expect(screen.getByTestId('hub-results-reliability').getAttribute('data-state')).toBe('ready')
+  })
+
+  it('a stale study: the banner is the study figure\'s one mark, the tile only dims', async () => {
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ stale: true }))
+    mount()
+    expect(await screen.findByTestId('hub-results-stale')).toBeTruthy()
+    await waitFor(() => expect(screen.getByTestId('hub-results-reliability').textContent).toContain('the goal is 3 h/yr'))
+    expect(screen.getByTestId('hub-results-reliability').getAttribute('data-state')).toBe('ready')
+  })
+
+  it('one entry point per destination: headlined tiles drop their own Open link', async () => {
+    mount()
+    await screen.findByTestId('hub-chapter-reliability-headlined')
+    expect(screen.queryByTestId('hub-chapter-reliability-open')).toBeNull()
+    expect(screen.queryByTestId('hub-chapter-investment-open')).toBeNull()
+    expect(screen.getByTestId('hub-chapter-operation-open')).toBeTruthy()
   })
 
   it('mixed revisions: a stale LCOE beside a current study says so once (G1)', async () => {
-    vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(withLcoe({ state: 'stale' }))
+    vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(withLcoe({ ...LCOE_READY, state: 'stale' }))
     mount()
     const note = await screen.findByTestId('hub-results-mixed')
     expect(note.textContent).toContain('is out of date')
-    expect(note.textContent).toContain(LCOE ? 'LCOE' : '')
+    expect(note.textContent).toContain(HEADLINE_WORDS.lcoe.label)
     expect(screen.getAllByTestId('hub-results-mixed')).toHaveLength(1)
   })
 
@@ -175,12 +214,21 @@ describe('ReliabilityBullet', () => {
     expect(screen.getByRole('img').getAttribute('aria-label')).toContain('likely between 10 h/yr and 14.5 h/yr')
     expect(screen.getByTestId('hub-results-reliability-goal')).toBeTruthy()
     expect(screen.getByTestId('hub-results-reliability-bar').className).toContain('bg-danger')
+    // The band is not the only cue (UX 23, 7).
+    expect(screen.getByTestId('hub-results-reliability-against').textContent).toBe('Above goal')
+    expect(frame.textContent).toContain('Expected shortfall (h/yr) · lower is better')
+    expect(frame.textContent).toContain('Goal')
+  })
+  it('within the goal says so in words', () => {
+    render(<ReliabilityBullet lole={0.4} target={1} ci={null} stale={false} />)
+    expect(screen.getByTestId('hub-results-reliability-against').textContent).toBe('Within goal')
   })
   it('with no goal: the bar alone, no pass or fail colour', () => {
     render(<ReliabilityBullet lole={0.4} target={null} ci={null} stale={false} />)
     expect(screen.getByTestId('hub-results-reliability-chart').textContent).toContain('no goal set')
     expect(screen.queryByTestId('hub-results-reliability-goal')).toBeNull()
     expect(screen.getByTestId('hub-results-reliability-bar').className).toContain('bg-accent')
+    expect(screen.queryByTestId('hub-results-reliability-against')).toBeNull()
   })
   it('out of date: the source line carries the one mark', () => {
     render(<ReliabilityBullet lole={0.4} target={1} ci={null} stale />)

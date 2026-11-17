@@ -120,10 +120,13 @@ export function ChaptersSection({ reliability, headlined = [] }: {
                 ? <RunGridChecks project={project} again={t.state !== 'not_run'} disabled={t.state === 'running'} />
                 : <AddToScope card="grid" option="grid_code" testId="hub-run-grid-checks-out-of-scope" />
             )}
-            <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
-              className="self-start text-[11.5px] text-accent hover:underline">
-              {OPEN_LABEL(t.open)}
-            </button>
+            {/* A headlined figure's way in is its link in the headline: one entry point per destination. */}
+            {!headlined.includes(t.id) && (
+              <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
+                className="self-start text-[11.5px] text-accent hover:underline">
+                {OPEN_LABEL(t.open)}
+              </button>
+            )}
           </div>
         ))}
       </div>

@@ -55,15 +55,20 @@ function OpenLink({ label, onClick, testId }: { label: string; onClick: () => vo
   )
 }
 
-function TileFigure({ tile, testId }: { tile: ChapterTile; testId: string }) {
+/** Each figure carries its own state (UX 23, 1). The study's figure is the one exception: the card's
+ *  banner ("These results are from an earlier study") is its mark, so it only dims under it. */
+function shown(state: ResultStateKind, studyBanner: boolean): { state: ResultStateKind; dimmed: boolean } {
+  return state === 'stale' && studyBanner ? { state: 'ready', dimmed: true } : { state, dimmed: false }
+}
+
+function TileFigure({ tile, testId, studyBanner = false }: { tile: ChapterTile; testId: string; studyBanner?: boolean }) {
   const setStep = useHubDesignStore(s => s.setStep)
   const o = tile.open
   const tab = 'step' in o ? null : o.panel === 'results' ? tabLabel(o.tab) : null
   return (
     <div className="flex flex-col gap-1">
       <Kpi headline testId={testId} label={tile.label} value={tile.value} unit={tile.unit} basis={tile.basis}
-        // "Out of date" is said once for the card (the banner or the mixed-source line); the tile only dims.
-        state={tile.state === 'stale' ? 'ready' : tile.state} dimmed={tile.state === 'stale'}
+        {...shown(tile.state, studyBanner)}
         reason={tile.reason} fromStudy={tile.fromStudy} hint={tile.fromStudy ? FROM_STUDY_HINT : undefined}
         action={'step' in o ? { label: 'Go to Goal', onClick: () => openTile(o, setStep) } : undefined} />
       {tab && <OpenLink label={tab} testId={`${testId}-open`} onClick={() => openTile(o, setStep)} />}
@@ -71,13 +76,20 @@ function TileFigure({ tile, testId }: { tile: ChapterTile; testId: string }) {
   )
 }
 
-function LcoeFigure({ card }: { card: HeadlineCard }) {
+/** A project type whose Expert strip has no LCOE card: said in words, never a blank tile (UX 23, 2). */
+export const LCOE_NOT_APPLICABLE = 'Not applicable for this project type.'
+
+function LcoeFigure({ card }: { card: HeadlineCard | null }) {
   const words = HEADLINE_WORDS.lcoe
+  if (!card) {
+    return <Kpi headline testId="hub-results-lcoe" label={words.label} value="" state="not_applicable"
+      reason={LCOE_NOT_APPLICABLE} />
+  }
   const { value, basis } = headlineFigure(card)
   return (
     <div className="flex flex-col gap-1">
       <Kpi headline testId="hub-results-lcoe" label={words.label} value={value} basis={basis}
-        state={card.state === 'stale' ? 'ready' : cardState(card)} dimmed={card.state === 'stale'}
+        state={cardState(card)}
         reason={card.reason ?? undefined} />
       <OpenLink label={words.tabLabel} testId="hub-results-lcoe-open"
         onClick={() => showResultsTab(words.tab, { from: 'Results' })} />
@@ -96,10 +108,18 @@ export function ReliabilityBullet({ lole, target, ci, stale }: {
   const title = target != null
     ? `Expected shortfall ${words(lole)}, goal ${words(target)}`
     : `Expected shortfall ${words(lole)}, no goal set`
+  // The band is not the only cue: the result is also said in words (UX 23, 7).
+  const against = target == null ? null : pass ? 'Within goal' : 'Above goal'
   return (
     <ChartSourceProvider value={{ line: 'Reliability study · Monte Carlo', stale }}>
-      <ChartFrame testId="hub-results-reliability-chart" title={title} bodyClassName="px-4 py-3">
-        <div role="img" aria-label={title + (ci ? `, likely between ${words(ci[0])} and ${words(ci[1])}` : '')}
+      <ChartFrame testId="hub-results-reliability-chart" title={title} bodyClassName="px-4 py-3"
+        right={against && (
+          <span data-testid="hub-results-reliability-against"
+            className={`text-[11.5px] font-semibold ${pass ? 'text-success' : 'text-danger'}`}>{against}</span>
+        )}>
+        <div role="img"
+          aria-label={[title, against, ci && `likely between ${words(ci[0])} and ${words(ci[1])}`, 'lower is better']
+            .filter(Boolean).join(', ')}
           className="relative h-6">
           <div className="absolute inset-y-2 left-0 right-0 rounded-sm bg-bg-2" />
           {target != null && (
@@ -118,11 +138,14 @@ export function ReliabilityBullet({ lole, target, ci, stale }: {
               style={{ left: x(target) }} />
           )}
         </div>
-        <div className="mt-1 flex justify-between" aria-hidden="true" style={CHART_TICK}>
-          <span>0</span>
-          {target != null && <span>goal {words(target)}</span>}
-          <span>{words(top)}</span>
+        <div className="relative mt-1 h-3" aria-hidden="true" style={CHART_TICK}>
+          <span className="absolute left-0">0</span>
+          {target != null && (
+            <span className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: x(target) }}>Goal</span>
+          )}
+          <span className="absolute right-0">{words(top)}</span>
         </div>
+        <p className="mt-1 text-[10.5px] text-muted" aria-hidden="true">Expected shortfall (h/yr) · lower is better</p>
       </ChartFrame>
     </ChartSourceProvider>
   )
@@ -135,7 +158,8 @@ export function ResultsHeadline({ reliability, cost, ci }: {
   ci: [number, number] | null
 }) {
   const { tiles } = useChapterTiles(reliability)
-  const lcoe = useHeadlineKpis().data?.cards.find(c => c.id === 'lcoe') ?? null
+  const headline = useHeadlineKpis()
+  const lcoe = headline.data?.cards.find(c => c.id === 'lcoe') ?? null
   const rel = tiles.find(t => t.id === 'reliability')
   const npv = tiles.find(t => t.id === 'investment')
   const figures: HeadlineFigureState[] = [
@@ -146,10 +170,10 @@ export function ResultsHeadline({ reliability, cost, ci }: {
   return (
     <section aria-label="Headline figures" data-testid="hub-results-headline" className="flex flex-col gap-2">
       <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]">
-        {rel && <TileFigure tile={rel} testId="hub-results-reliability" />}
+        {rel && <TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true} />}
         {cost}
         {npv && <TileFigure tile={npv} testId="hub-results-npv" />}
-        {lcoe && <LcoeFigure card={lcoe} />}
+        {headline.isSuccess && <LcoeFigure card={lcoe} />}
       </div>
       {note && <p role="note" data-testid="hub-results-mixed" className="text-[11.5px] text-muted">{note}</p>}
       {reliability.lole != null && (
