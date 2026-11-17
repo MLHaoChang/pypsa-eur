@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import numpy as np
+
 
 def phase_shift_transformers(network, snapshots=None) -> list[str]:
     """Transformers active in ``snapshots`` whose ``phase_shift % 360 != 0``.
@@ -46,13 +48,33 @@ def run_pf(network, phase: Callable[[str], None] | None = None, **pf_kwargs):
     Without an active shifting transformer this is exactly
     ``network.pf(**pf_kwargs)``. With one, it runs ``network.lpf()`` on the
     same snapshots and then ``pf`` with ``use_seed=True``, and says so
-    through ``phase``.
+    through ``phase``. When ``lpf()`` raises or leaves a non-finite angle,
+    it logs that and makes the caller's unseeded call instead.
 
     Returns ``(pf_result, seeded_by)``: ``seeded_by`` lists the transformers
-    that triggered the seed, empty for a flat start.
+    that triggered the seed, empty for a flat start
+    (no shift, or the seed skipped).
     """
     shifted = phase_shift_transformers(network, pf_kwargs.get("snapshots"))
     if not shifted:
+        return network.pf(**pf_kwargs), []
+    lpf_kwargs = (
+        {"snapshots": pf_kwargs["snapshots"]} if "snapshots" in pf_kwargs else {}
+    )
+    # A seed that fails or is not finite must not cost the flow its flat
+    # start: fall back to the caller's own call (GK A on #1663).
+    try:
+        network.lpf(**lpf_kwargs)
+        v_ang = network.buses_t.v_ang
+        if "snapshots" in pf_kwargs:
+            v_ang = v_ang.reindex(pf_kwargs["snapshots"])
+        finite = np.isfinite(v_ang.to_numpy(dtype=float)).all()
+        problem = None if finite else "non-finite voltage angles"
+    except Exception as exc:
+        problem = f"{type(exc).__name__}: {exc}"
+    if problem is not None:
+        if phase is not None:
+            phase(f"AC PF seed skipped: lpf() failed ({problem}); flat start.")
         return network.pf(**pf_kwargs), []
     if phase is not None:
         names = ", ".join(map(str, shifted[:5])) + ("..." if len(shifted) > 5 else "")
@@ -60,8 +82,4 @@ def run_pf(network, phase: Callable[[str], None] | None = None, **pf_kwargs):
             f"AC PF seeded: lpf() then pf(use_seed=True), since {len(shifted)} "
             f"transformer(s) shift phase ({names})."
         )
-    lpf_kwargs = (
-        {"snapshots": pf_kwargs["snapshots"]} if "snapshots" in pf_kwargs else {}
-    )
-    network.lpf(**lpf_kwargs)
     return network.pf(**{**pf_kwargs, "use_seed": True}), shifted

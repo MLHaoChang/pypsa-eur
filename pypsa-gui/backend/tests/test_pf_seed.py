@@ -200,3 +200,81 @@ def test_stage2_ac_pf_records_the_seed(shift, seeded_by):
     assert out["ac_pf_seeded_by"] == seeded_by
     lines = [log.get_nowait() for _ in range(log.qsize())]
     assert any("pf(use_seed=True)" in m for m in lines) is bool(seeded_by)
+
+
+def _fake_lpf(n, effect):
+    """Replace ``n.lpf`` with one that raises or leaves a NaN angle."""
+    real_lpf = n.lpf
+
+    def lpf(**kw):
+        if effect == "raise":
+            raise RuntimeError("singular B matrix")
+        real_lpf(**kw)
+        n.buses_t.v_ang.loc[:, "MV1"] = float("nan")
+
+    n.lpf = lpf
+
+
+@pytest.mark.parametrize(
+    "effect, why", [("raise", "RuntimeError"), ("nan", "non-finite")]
+)
+def test_failed_seed_falls_back_to_the_callers_call(effect, why):
+    n = _chain(shift=0.0)  # converges flat, so the fallback's result is real
+    n.transformers["phase_shift"] = [360.0, 30.0]
+    _fake_lpf(n, effect)
+    spy_calls: list[dict] = []
+    real_pf = n.pf
+
+    def pf(**kw):
+        spy_calls.append(kw)
+        return real_pf(**kw)
+
+    n.pf = pf
+    log: list[str] = []
+    kw = dict(snapshots=n.snapshots, use_seed=False, distribute_slack=False)
+    result, seeded_by = run_pf(n, log.append, **kw)
+    assert seeded_by == [] and spy_calls == [kw]
+    assert len(log) == 1 and "seed skipped" in log[0] and why in log[0]
+    assert "use_seed=True" not in log[0]
+    assert result is not None
+
+
+def test_nan_phase_shift_counts_as_no_shift():
+    n = _chain(shift=0.0)
+    n.transformers.loc["T1", "phase_shift"] = float("nan")
+    assert phase_shift_transformers(n) == []
+    n.transformers.loc["T2", "phase_shift"] = 30.0
+    assert phase_shift_transformers(n) == ["T2"]
+
+
+def test_stage2_restores_the_lp_state_when_pf_raises_after_the_seed():
+    import queue
+
+    from services.ac_pf_service import run_ac_pf_stage
+    from services.solver_service import SolverConfig
+
+    n = _chain()
+    n.generators.loc["G", ["p_nom", "marginal_cost"]] = [100.0, 10.0]
+    n.optimize(solver_name="highs")
+    before = {
+        "t_p0": n.transformers_t.p0.copy(),
+        "g_p": n.generators_t.p.copy(),
+        "v_ang": n.buses_t.v_ang.copy(),
+    }
+    lpf_ran: list[bool] = []
+    real_lpf = n.lpf
+
+    def lpf(**kw):
+        lpf_ran.append(True)
+        return real_lpf(**kw)
+
+    def pf(**kw):
+        raise RuntimeError("Jacobian singular")
+
+    n.lpf, n.pf = lpf, pf
+    with pytest.raises(RuntimeError, match="Jacobian singular"):
+        run_ac_pf_stage(n, SolverConfig(), queue.Queue())
+    assert lpf_ran == [True]
+    pd.testing.assert_frame_equal(n.transformers_t.p0, before["t_p0"])
+    pd.testing.assert_frame_equal(n.generators_t.p, before["g_p"])
+    pd.testing.assert_frame_equal(n.buses_t.v_ang, before["v_ang"])
