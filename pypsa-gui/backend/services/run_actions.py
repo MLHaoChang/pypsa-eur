@@ -501,7 +501,7 @@ SHIPPED_WHY_WORDS = (
             "is not a commercial field a case may change",
             "is not a battery field a case may change",
         ),
-        "it changes something not on the list of things a shipped case may change",
+        "it changes something that is not one of the settings a shipped case may change",
     ),
     (
         ("which the template does not ship",),
@@ -559,14 +559,43 @@ def _asset_words(component, name) -> str:
     return f"{SHIPPED_COMPONENT_WORDS.get(component, 'Asset')} “{_display_name(name)}”"
 
 
-def _field_words(component, attr) -> str:
+def _field_spec(component, attr):
+    """The Properties panel's spec of an asset field (label, display unit,
+    scale), or None when the schema has no such field."""
     from services.asset_schema.fields import fields_for
 
     try:
         specs = fields_for(component)
     except (KeyError, ValueError):
         specs = ()
-    return next((s.label for s in specs if s.key == attr), "a design value")
+    return next((s for s in specs if s.key == attr), None)
+
+
+def _field_words(component, attr) -> str:
+    spec = _field_spec(component, attr)
+    return spec.label if spec else "a design value"
+
+
+def _shipped_shown(spec, old, new) -> str | None:
+    """UX (#1575): an asset value in the Properties panel's unit (EUR/kW for a
+    stored EUR/MW), money in the one money notation; None keeps the stored
+    unit (no spec, no display unit, or a value that is not a number)."""
+    from services.reports.chapters import fmt_eur_short
+
+    if spec is None or not spec.unit_display or not all(
+        isinstance(v, (int, float)) and not isinstance(v, bool) for v in (old, new)
+    ):
+        return None
+    old, new = old * spec.scale, new * spec.scale
+    currency, _, per = spec.unit_display.partition("/")
+    if currency == "EUR" and per:
+        def eur(v):  # the notation is unsigned: callers write the minus
+            return ("−" if v < 0 else "") + fmt_eur_short(v)
+
+        return f"{eur(old)} → {eur(new)} per {per}"
+    if spec.scale == 1.0:
+        return None
+    return f"{old:g} → {new:g} {spec.unit_display}"
 
 
 def _shipped_change(change, frozen, labels) -> str:
@@ -591,6 +620,9 @@ def _shipped_change(change, frozen, labels) -> str:
         what = (
             f"{_asset_words(parts[0], parts[1])} · {_field_words(parts[0], parts[2])}"
         )
+        shown = _shipped_shown(_field_spec(parts[0], parts[2]), old, new)
+        if shown:
+            return f"{what} · {shown}"
     else:
         what = "A value"
     if path.endswith(".id") and isinstance(new, str):

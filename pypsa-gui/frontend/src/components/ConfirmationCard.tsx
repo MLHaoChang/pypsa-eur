@@ -519,7 +519,8 @@ export function ConfirmationCard() {
               || (edit?.kind === 'native' && edit.says) || (pending.external
               ? shortMcpToolName(pending.tool_name) : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
-          {!isChangeSet && Object.keys(pending.args ?? {}).length > 0 && (
+          {/* UX (#1332, #1575): a runner-issued native card's args are only its digest; a hash is never a user row. */}
+          {!isChangeSet && edit?.kind !== 'native' && Object.keys(pending.args ?? {}).length > 0 && (
             <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
               {JSON.stringify(pending.args, null, 2)}
             </pre>

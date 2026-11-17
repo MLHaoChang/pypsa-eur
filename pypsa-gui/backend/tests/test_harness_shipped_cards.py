@@ -91,8 +91,8 @@ def test_more_lp_cases_than_the_solves_left_wait_on_a_pick_card(baseline, tmp_pa
             assert c["label"] in says  # every other case is named on the card
     assert "Merchant-heavy runs with no solve: its read is not evaluated." in says
     assert (
-        "Tight connection is not run: it changes something not on the list of "
-        "things a shipped case may change." in says
+        "Tight connection is not run: it changes something that is not one of the "
+        "settings a shipped case may change." in says
     )
     assert "Pick up to" not in says  # the title's words, not repeated (UX)
     shown_text = [says, *(i["edit_card"]["says"] for i in card["items"])]
@@ -268,8 +268,8 @@ def test_the_approval_card_shows_every_case_and_change_in_file_order(
     for name in NOT_RUN:
         why = next(c["why"] for c in frozen["cases"] if c["id"] == name)
         assert notes[f"case.{name}"].endswith(
-            "not run: it changes something not on the list of things a shipped "
-            "case may change"
+            "not run: it changes something that is not one of the settings a "
+            "shipped case may change"
         )
         assert why not in notes[f"case.{name}"]  # never the server's text
     for case in frozen["cases"]:  # every change, old -> new
@@ -283,12 +283,13 @@ def test_the_approval_card_shows_every_case_and_change_in_file_order(
         "  Wind PPA · share of the plant's output (0–1) · 0.7 → 0.3"
     )
     assert notes["case.longer_ppa.0"] == "  Wind PPA · tenor (years) · 10 → 15 years"
+    # UX (#1575): the Properties panel's unit (EUR/kW), the one money notation.
     assert notes["case.cheap_battery.0"] == (
-        "  The battery · Power part: overnight cost · 213927.9 → 149749.53 EUR/MW"
+        "  The battery · Power part: overnight cost · €\u00a0214 → €\u00a0150 per kW"
     )
     assert notes["case.cheap_battery.1"].startswith(
-        "  The battery · Energy part: overnight cost · "
-    ) and notes["case.cheap_battery.1"].endswith(" EUR/MWh")
+        "  The battery · Energy part: overnight cost · €\u00a0"
+    ) and notes["case.cheap_battery.1"].endswith(" per kWh")
     assert notes["case.tight_connection.0"] == (
         "  Link “Grid export” · Capacity · 70.0 → 55.0 MW"
     )
@@ -330,7 +331,7 @@ def _no_engine_words(texts, cases):
 def test_a_not_runnable_reason_reads_in_plain_words():
     words = run_actions._shipped_why
     assert words("Link.grid_export.p_nom is outside what a case may change here.") == (
-        "it changes something not on the list of things a shipped case may change"
+        "it changes something that is not one of the settings a shipped case may change"
     )
     assert words(
         "commercial.x.id names the series ipp_da_x, which the template does not ship."
@@ -684,3 +685,24 @@ def test_a_step_that_no_longer_awaits_its_pick_is_closed(baseline, tmp_path, tam
 
     assert _kind(pick) == "shipped_pick_closed"
     assert _read(path) == before
+
+
+def test_a_shipped_cost_row_is_in_the_properties_panels_unit():
+    """UX (#1575): a battery cost row reads in the unit the Properties panel
+    shows (the schema's display unit), never the stored EUR/MW."""
+    from services.asset_schema.fields import fields_for
+    from services.reports.chapters import fmt_eur_short
+
+    for attr in ("inv_power_overnight", "inv_energy_overnight"):
+        spec = next(s for s in fields_for("StorageUnit") if s.key == attr)
+        change = {"path": f"StorageUnit.bess.{attr}", "old": 200000.0, "new": 150000.0}
+        row = run_actions._shipped_change(change, {}, {})
+        per = spec.unit_display.split("/")[1]
+        assert row.endswith(
+            f"{fmt_eur_short(200000.0 * spec.scale)} → "
+            f"{fmt_eur_short(150000.0 * spec.scale)} per {per}"
+        )
+        assert spec.unit_storage not in row
+    # A field the panel shows in its stored unit keeps it.
+    change = {"path": "Link.grid_export.p_nom", "old": 70.0, "new": 55.0}
+    assert run_actions._shipped_change(change, {}, {}).endswith("70.0 → 55.0 MW")

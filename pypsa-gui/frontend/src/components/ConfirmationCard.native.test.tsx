@@ -51,3 +51,10 @@ it('shows no column header over note rows only, and the notes', () => {
   expect(screen.getAllByTestId('chat-edit-card-note').map(n => n.textContent))
     .toEqual(['Grid-code profile: SAGC data centre', 'Reserves 1 solve'])
 })
+
+it('shows no digest args block on a native card in Expert (UX #1332)', () => {
+  setPending(CARD)
+  render(<ConfirmationCard />)
+  expect(document.body.textContent).not.toContain('d'.repeat(12))
+  expect(document.querySelector('pre')).toBeNull()
+})

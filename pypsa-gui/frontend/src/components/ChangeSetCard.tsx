@@ -117,7 +117,7 @@ export function ChangeSetRows({ set, ticked, onToggle, disabled = false }: {
               </div>
               {/* UX C5: the panel's field labels in both modes. */}
               <EditCardTable card={item.edit_card} guided
-                labels={{ header: '', caption: `Change ${i + 1} of ${total}` }} />
+                labels={{ header: '', caption: `${pickMaxOf(set) === null ? 'Change' : 'Case'} ${i + 1} of ${total}` }} />
               {item.source !== 'rows' && (
                 <div className="text-[11px] text-muted" data-testid="chat-change-set-source">
                   Source: {item.source}

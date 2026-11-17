@@ -212,7 +212,7 @@ const PICK = {
   requirements: {
     checked: 0,
     says: 'The other cases: Merchant-heavy runs with no solve: its read is not evaluated. '
-      + 'Tight connection is not run: it changes something not on the list of things a shipped case may change.',
+      + 'Tight connection is not run: it changes something that is not one of the settings a shipped case may change.',
   },
 }
 
