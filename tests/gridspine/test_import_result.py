@@ -204,3 +204,25 @@ def test_contract_module_imports_no_engine():
         "assert not bad, bad\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_zero_counts_are_allowed():
+    assert _report(counts={"Transformers": 0}).counts == {"Transformers": 0}
+
+
+def test_non_string_names_are_refused_as_values():
+    with pytest.raises(ValueError):
+        Unmapped(7, "why")
+    with pytest.raises(ValueError):
+        ImporterSpec(
+            format_id=None,
+            display_name="x",
+            extensions=(".x",),
+            help="h",
+            reader=lambda paths, options: None,
+        )
+
+
+def test_get_with_no_importers_says_none(fake_package):
+    with pytest.raises(KeyError, match="known: none"):
+        ir.get("psse", package="fake_ingest")
