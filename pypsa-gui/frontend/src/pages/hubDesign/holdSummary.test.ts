@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { FlowHeld } from '../../api/flow'
 import { SERIES_WORDS } from './holdWords'
-import { LOAD_PROFILES, fixedCharts, holdSummary, isHelper, seriesWord } from './holdSummary'
+import { HELPER_WORDS, LOAD_PROFILES, fixedCharts, helperName, holdSummary, isHelper, seriesWord } from './holdSummary'
 
 const src = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf8')
 const held = (over: Partial<Omit<FlowHeld, 'helper'>> & { helper?: unknown }): FlowHeld => ({
@@ -105,5 +105,30 @@ describe('section 5 bars', () => {
   })
   it('no chart for one carrier in a unit', () => {
     expect(fixedCharts([held({}), held({ entity: 'x', unit: 't/h', carrier: 'h2' })])).toEqual([])
+  })
+})
+
+describe('a helper in plain words, never its engine id (RAW-NAMES-1)', () => {
+  it.each([
+    ['__lost_steel', 'lost production (steel)'],
+    ['__buy_steel', 'buy-in (steel)'],
+    ['__voll_site', 'unserved energy (site)'],
+    ['voll_slack_bus1', 'unserved energy (bus1)'],
+    ['__dsr_campus', 'demand response (campus)'],
+    ['__dccurt_hall', 'curtailment (hall)'],
+  ])('%s reads "%s"', (name, words) => {
+    expect(helperName(name)).toBe(words)
+    expect(helperName(name)).not.toContain('_'.repeat(2))
+  })
+  it('one word per server prefix (slack.py SLACK_NAME_PREFIXES, process_products _NAME_PREFIX)', () => {
+    const slack = src('../../../../backend/services/adequacy/slack.py')
+    const products = src('../../../../backend/services/process_products.py')
+    for (const p of ['__voll_', 'voll_slack_', '__dsr_', '__dccurt_']) expect(slack).toContain(`"${p}"`)
+    expect(products).toContain('"__buy_"')
+    expect(slack).toContain('LOST_SLACK_PREFIX = "__lost_"')
+    expect(Object.keys(HELPER_WORDS).sort()).toEqual(['__buy_', '__dccurt_', '__dsr_', '__lost_', '__voll_', 'voll_slack_'])
+  })
+  it('a helper with no known prefix (flagged by its role) reads "added by the model"', () => {
+    expect(helperName('steel_shortfall')).toBe('added by the model (steel_shortfall)')
   })
 })

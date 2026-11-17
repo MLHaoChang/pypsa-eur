@@ -48,7 +48,7 @@ describe('section 5: line and bars', () => {
     assets(ASSETS)
     expect(screen.getByTestId('assets-sized').textContent).toBe('Sized by the study, not drawn: bat')
     expect(screen.getByTestId('assets-helpers').textContent)
-      .toBe('Added by the model, left out of the sums and the chart: __lost_steel')
+      .toBe('Added by the model, left out of the sums and the chart: lost production (steel)')
     for (const c of screen.getAllByTestId('assets-chart')) expect(c.textContent).not.toContain('steel')
   })
 

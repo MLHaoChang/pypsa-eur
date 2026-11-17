@@ -18,6 +18,25 @@ const plural = (n: number, one: string, many = `${one}s`): string => `${number(n
  *  `true` is one: a missing or other value reads as an asset of the site. */
 export const isHelper = (h: FlowHeld): boolean => (h as { helper?: unknown }).helper === true
 
+/** A helper's kind by its name prefix, as the server names them
+ *  (`adequacy/slack.py` SLACK_NAME_PREFIXES and LOST_SLACK_PREFIX,
+ *  `process_products._NAME_PREFIX`; parity: holdSummary.test.ts). */
+export const HELPER_WORDS: Record<string, string> = {
+  __lost_: 'lost production',
+  __buy_: 'buy-in',
+  __voll_: 'unserved energy',
+  voll_slack_: 'unserved energy',
+  __dsr_: 'demand response',
+  __dccurt_: 'curtailment',
+}
+
+/** A helper in plain words, never its engine id: "lost production (steel)".
+ *  A name with no known prefix (flagged by its role) reads "added by the model (<name>)". */
+export function helperName(name: string): string {
+  const prefix = Object.keys(HELPER_WORDS).find(p => name.startsWith(p))
+  return prefix ? `${HELPER_WORDS[prefix]} (${name.slice(prefix.length)})` : `added by the model (${name})`
+}
+
 /** A series in the owning panel's words, never the raw field. */
 export function seriesWord(h: FlowHeld): string {
   if (h.field === 'p_set' && h.component === 'Load') return LOAD_PROFILES

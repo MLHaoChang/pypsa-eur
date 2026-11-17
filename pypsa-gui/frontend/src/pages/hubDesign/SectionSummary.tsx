@@ -1,6 +1,6 @@
 import type { FlowHeld, FlowSectionId } from '../../api/flow'
 import { ChartFrame, carrierColour } from '../../components/charts/chartTheme'
-import { fixedCharts, holdSummary, isHelper, type FixedChart } from './holdSummary'
+import { fixedCharts, helperName, holdSummary, isHelper, type FixedChart } from './holdSummary'
 
 // The answer above a Guided section's list (guided-results 03, spec §3): one
 // summary line, and in section 5 one small chart of fixed capacity per
@@ -9,8 +9,8 @@ import { fixedCharts, holdSummary, isHelper, type FixedChart } from './holdSumma
 
 const number = (v: number): string => v.toLocaleString('en-GB', { maximumFractionDigits: 2 })
 const NAMES_SHOWN = 6
-const names = (rows: FlowHeld[]): string =>
-  rows.slice(0, NAMES_SHOWN).map(h => h.entity).join(', ')
+const names = (rows: FlowHeld[], word: (name: string) => string = n => n): string =>
+  rows.slice(0, NAMES_SHOWN).map(h => word(h.entity)).join(', ')
   + (rows.length > NAMES_SHOWN ? `, and ${number(rows.length - NAMES_SHOWN)} more` : '')
 
 function Bars({ chart, capNote }: { chart: FixedChart; capNote: string | null }) {
@@ -59,7 +59,7 @@ function AssetsChart({ holds, total }: { holds: FlowHeld[]; total?: number }) {
       )}
       {helpers.length > 0 && (
         <p data-testid="assets-helpers" className="text-[11px] text-muted">
-          Added by the model, left out of the sums and the chart: {names(helpers)}
+          Added by the model, left out of the sums and the chart: {names(helpers, helperName)}
         </p>
       )}
     </div>
