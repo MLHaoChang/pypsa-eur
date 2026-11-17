@@ -112,3 +112,7 @@ Conditions:
 - G8: one targeted mutant per guard, with its killing test listed in the PR body.
 - G9: Journey fit line per PR; UX leads S3/S6.
 - S7 ruling: the sealed chart keeps verifying as drawn. The definition hash goes in the evidence record and the cache key; one test shows a fresh answer misses the cache after a definition change, another that the sealed chart reports the old hash.
+
+### 2026-11-17: GK B S2 ruling (gap-aware limits)
+
+Option (a); no owner question, since only deltas and prices on MIP runs flip. G2a: the effective gap is the one solver_service passed for that solve and solver (committable → configured mip_gap under that solver's option name). Any other path (modular-only, an unmapped solver, a missing field) reads `solve_gap_not_recorded`, never a solver default. G2b: MIP-ness comes from the network (committable Generator/Link; extendable with *_nom_mod > 0), tested per component; a non-extendable unit with a mod value is not integer. G2c: the band is |Δ| ≤ gap_a·|obj_a| + gap_b·|obj_b| (an LP counts 0) on the user-unit objective, and it limits only total-cost/objective deltas and least-cost wording. Boundary tests sit at the band and one ULP above; SOLVE_GAP_TOLERANCE = 1e-6. G2d: fixed-commitment duals are answered as limited ("marginal given the fixed commitment"); absent duals stay unavailable; a small committable test shows which applies. G2e: the gap disclosure is additive and facts stay byte-identical. G2f: `unsupported_stochastic_run` is detected from the network's scenarios.
