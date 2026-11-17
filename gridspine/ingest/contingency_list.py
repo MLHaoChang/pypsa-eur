@@ -65,17 +65,41 @@ from gridspine.static.contingency_set import branch_contingencies
 UNMATCHED_COLUMNS = ["contingency_id", "line", "element", "reason"]
 
 #: Why an element is in ``unmatched``.
-REASONS = frozenset({
-    "unknown_bus", "ambiguous_bus", "unknown_branch", "unknown_circuit",
-    "unknown_machine", "unsupported", "not_representable", "partial",
-})
+REASONS = frozenset(
+    {
+        "unknown_bus",
+        "ambiguous_bus",
+        "unknown_branch",
+        "unknown_circuit",
+        "unknown_machine",
+        "unsupported",
+        "not_representable",
+        "partial",
+    }
+)
 
 #: Valid PSS/E contingency commands that this subset does not map. They are
 #: listed as ``unsupported``, never treated as malformed.
-_PSSE_UNSUPPORTED = frozenset({
-    "CLOSE", "SET", "CHANGE", "ALTER", "MODIFY", "INCREASE", "DECREASE", "MOVE", "INCLUDE",
-    "SINGLE", "DOUBLE", "PARALLEL", "BLOCK", "ADD", "DISPATCH", "BYPASS",
-})
+_PSSE_UNSUPPORTED = frozenset(
+    {
+        "CLOSE",
+        "SET",
+        "CHANGE",
+        "ALTER",
+        "MODIFY",
+        "INCREASE",
+        "DECREASE",
+        "MOVE",
+        "INCLUDE",
+        "SINGLE",
+        "DOUBLE",
+        "PARALLEL",
+        "BLOCK",
+        "ADD",
+        "DISPATCH",
+        "BYPASS",
+    }
+)
 _BRANCH_VERBS = {"OPEN", "TRIP", "DISCONNECT"}
 _BUS_VERBS = {"DISCONNECT", "TRIP"}
 _MACHINE_VERBS = {"REMOVE", "TRIP", "DISCONNECT"}
@@ -143,12 +167,11 @@ class _NetIndex:
 
 def _contingency_id(label: str) -> str:
     """The label in the contingency-set charset: other characters become ``_``."""
-    out = _ID_UNSAFE.sub("_", label.strip())
-    return out or "_"
+    return _ID_UNSAFE.sub("_", label.strip())
 
 
 def _unquote(tok: str) -> str:
-    if (not (len(tok) >= 2 and tok[0] == tok[-1] and (tok[0] in '\'"'))):
+    if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in "'\"":
         return tok[1:-1].strip()
     return tok.strip()
 
@@ -171,7 +194,9 @@ def _bus_token(tok: str, lineno: int):
     try:
         return int(tok)
     except ValueError:
-        raise ContractError(f"line {lineno}: bus {tok!r} is neither a bus number nor a quoted name") from None
+        raise ContractError(
+            f"line {lineno}: bus {tok!r} is neither a bus number nor a quoted name"
+        ) from None
 
 
 # --- the .con form ---------------------------------------------------------
@@ -179,7 +204,7 @@ def _bus_token(tok: str, lineno: int):
 
 @dataclass
 class _Element:
-    kind: str          # "branch" | "bus" | "machine" | "unsupported"
+    kind: str  # "branch" | "bus" | "machine" | "unsupported"
     line: int
     text: str
     from_bus: object = None
@@ -194,8 +219,16 @@ def _parse_statement(toks: list[str], lineno: int, text: str) -> _Element:
     verb = up[0]
     if len(up) >= 2 and up[1] in ("BRANCH", "LINE") and verb in _BRANCH_VERBS:
         rest = up[2:]
-        if len(rest) < 6 or rest[0] != "FROM" or rest[1] != "BUS" or rest[3] != "TO" or rest[4] != "BUS":
-            raise ContractError(f"line {lineno}: expected 'FROM BUS <b> TO BUS <b>' in {text!r}")
+        if (
+            len(rest) < 6
+            or rest[0] != "FROM"
+            or rest[1] != "BUS"
+            or rest[3] != "TO"
+            or rest[4] != "BUS"
+        ):
+            raise ContractError(
+                f"line {lineno}: expected 'FROM BUS <b> TO BUS <b>' in {text!r}"
+            )
         f, t = _bus_token(toks[4], lineno), _bus_token(toks[7], lineno)
         tail = toks[8:]
         if len(tail) >= 2 and tail[0].upper() == "TO" and tail[1].upper() == "BUS":
@@ -203,24 +236,36 @@ def _parse_statement(toks: list[str], lineno: int, text: str) -> _Element:
         ckt = "1"
         if tail:
             if tail[0].upper() not in ("CKT", "CIRCUIT") or len(tail) != 2:
-                raise ContractError(f"line {lineno}: expected 'CKT <c>' after the buses in {text!r}")
+                raise ContractError(
+                    f"line {lineno}: expected 'CKT <c>' after the buses in {text!r}"
+                )
             ckt = _unquote(tail[1])
             if not ckt:
                 raise ContractError(f"line {lineno}: empty circuit id")
         return _Element("branch", lineno, text, from_bus=f, to_bus=t, ckt=ckt)
     if len(up) >= 2 and up[1] == "BUS" and verb in _BUS_VERBS:
         if len(up) != 3:
-            raise ContractError(f"line {lineno}: expected '{toks[0]} BUS <b>' in {text!r}")
+            raise ContractError(
+                f"line {lineno}: expected '{toks[0]} BUS <b>' in {text!r}"
+            )
         return _Element("bus", lineno, text, bus=_bus_token(toks[2], lineno))
     if len(up) >= 2 and up[1] in ("MACHINE", "UNIT") and verb in _MACHINE_VERBS:
         if len(up) != 6 or up[3] not in ("FROM", "AT") or up[4] != "BUS":
-            raise ContractError(f"line {lineno}: expected '{toks[0]} {toks[1]} <id> FROM BUS <b>' in {text!r}")
+            raise ContractError(
+                f"line {lineno}: expected '{toks[0]} {toks[1]} <id> FROM BUS <b>' in {text!r}"
+            )
         mid = _unquote(toks[2])
         if not mid:
             raise ContractError(f"line {lineno}: empty machine id")
-        return _Element("machine", lineno, text, bus=_bus_token(toks[5], lineno), machine_id=mid)
-    if verb in _PSSE_UNSUPPORTED or verb in _BRANCH_VERBS | _BUS_VERBS | _MACHINE_VERBS:
-        return _Element("unsupported", lineno, text)  # e.g. REMOVE LOAD, OPEN on a DC line
+        return _Element(
+            "machine", lineno, text, bus=_bus_token(toks[5], lineno), machine_id=mid
+        )
+    if len(up) >= 2 and (
+        verb in _PSSE_UNSUPPORTED or verb in _BRANCH_VERBS | _BUS_VERBS | _MACHINE_VERBS
+    ):
+        return _Element(
+            "unsupported", lineno, text
+        )  # e.g. REMOVE LOAD, OPEN on a DC line
     raise ContractError(f"line {lineno}: not a contingency command: {text!r}")
 
 
@@ -235,14 +280,16 @@ def _parse_con(text: str):
             continue
         toks = _tokens(line)
         if not toks:
-            continue
+            raise ContractError(f"line {lineno}: unbalanced quote: {line!r}")
         if closed:
             raise ContractError(f"line {lineno}: text after the final END: {line!r}")
         head = toks[0].upper()
         if current is None:
             if head == "CONTINGENCY":
                 if len(toks) > 2:
-                    raise ContractError(f"line {lineno}: expected 'CONTINGENCY <label>', got {line!r}")
+                    raise ContractError(
+                        f"line {lineno}: expected 'CONTINGENCY <label>', got {line!r}"
+                    )
                 label = _unquote(toks[1]) if len(toks) == 2 else ""
                 if not label:
                     raise ContractError(f"line {lineno}: CONTINGENCY without a label")
@@ -252,13 +299,17 @@ def _parse_con(text: str):
             elif head in _PSSE_UNSUPPORTED:
                 top_unsupported.append((lineno, line))
             else:
-                raise ContractError(f"line {lineno}: expected CONTINGENCY or END, got {line!r}")
+                raise ContractError(
+                    f"line {lineno}: expected CONTINGENCY or END, got {line!r}"
+                )
             continue
         if head == "END":
             if len(toks) != 1:
                 raise ContractError(f"line {lineno}: expected END alone, got {line!r}")
             if not current[2]:
-                raise ContractError(f"line {lineno}: contingency {current[0]!r} (line {current[1]}) is empty")
+                raise ContractError(
+                    f"line {lineno}: contingency {current[0]!r} (line {current[1]}) is empty"
+                )
             blocks.append(current)
             current = None
             continue
@@ -268,9 +319,13 @@ def _parse_con(text: str):
             )
         current[2].append(_parse_statement(toks, lineno, line))
     if current is not None:
-        raise ContractError(f"line {current[1]}: contingency {current[0]!r} has no END before the end of the file")
+        raise ContractError(
+            f"line {current[1]}: contingency {current[0]!r} has no END before the end of the file"
+        )
     if not closed:
-        raise ContractError("END missing at the end of the file: the list must end with a final END")
+        raise ContractError(
+            "END missing at the end of the file: the list must end with a final END"
+        )
     return blocks, top_unsupported
 
 
@@ -298,7 +353,10 @@ def _machine(idx: _NetIndex, el: _Element):
         return None, "unknown_machine"
     uid, kind = hit
     if kind == "ext_grid":
-        return None, "unsupported"  # the slack: the screen does not outage the grid infeed
+        return (
+            None,
+            "unsupported",
+        )  # the slack: the screen does not outage the grid infeed
     return uid, None
 
 
@@ -310,17 +368,38 @@ def _row_of(cid, matched):
         ids = [f"{r.from_bus}-{r.to_bus}-{r.ckt}" for r in rows]
         if len(set(ids)) != len(ids):
             return None
-        out = {"contingency_id": cid, "kind": "branch", "element_ids": ids, "order": len(ids)}
+        out = {
+            "contingency_id": cid,
+            "kind": "branch",
+            "element_ids": ids,
+            "order": len(ids),
+        }
         if len(rows) == 1:
             r = rows[0]
-            out.update(from_bus=r.from_bus, to_bus=r.to_bus, ckt=str(r.ckt),
-                       element_type=r.element_type, element_index=int(r.element_index))
+            out.update(
+                from_bus=r.from_bus,
+                to_bus=r.to_bus,
+                ckt=str(r.ckt),
+                element_type=r.element_type,
+                element_index=int(r.element_index),
+            )
         return out
     if len(matched) == 1 and kinds == {"machine"}:
         uid, bus = matched[0][1]
-        return {"contingency_id": cid, "kind": "unit", "element_ids": [uid], "order": 1, "bus": bus}
+        return {
+            "contingency_id": cid,
+            "kind": "unit",
+            "element_ids": [uid],
+            "order": 1,
+            "bus": bus,
+        }
     if len(matched) == 1 and kinds == {"bus"}:
-        return {"contingency_id": cid, "kind": "bus_section", "element_ids": [matched[0][1]], "order": 1}
+        return {
+            "contingency_id": cid,
+            "kind": "bus_section",
+            "element_ids": [matched[0][1]],
+            "order": 1,
+        }
     return None
 
 
@@ -336,7 +415,13 @@ def _settle(idx: _NetIndex, label: str, line: int, cid: str, elements, unmatched
             item = ("branch", hit)
         elif el.kind == "machine":
             uid, why = _machine(idx, el)
-            item = ("machine", (uid, idx.name_at_num.get(el.bus) if isinstance(el.bus, int) else el.bus))
+            item = (
+                "machine",
+                (
+                    uid,
+                    idx.name_at_num.get(el.bus) if isinstance(el.bus, int) else el.bus,
+                ),
+            )
             hit = uid
         else:  # bus
             hit, why = idx.bus(el.bus)
@@ -350,22 +435,49 @@ def _settle(idx: _NetIndex, label: str, line: int, cid: str, elements, unmatched
             done.append(el)
     if missed:
         for el, why in missed:
-            unmatched.append({"contingency_id": cid, "line": el.line, "element": el.text, "reason": why})
+            unmatched.append(
+                {
+                    "contingency_id": cid,
+                    "line": el.line,
+                    "element": el.text,
+                    "reason": why,
+                }
+            )
         for el in done:
-            unmatched.append({"contingency_id": cid, "line": el.line, "element": el.text, "reason": "partial"})
+            unmatched.append(
+                {
+                    "contingency_id": cid,
+                    "line": el.line,
+                    "element": el.text,
+                    "reason": "partial",
+                }
+            )
         return None
     row = _row_of(cid, matched)
     if row is None:
-        unmatched.append({"contingency_id": cid, "line": line, "element": label, "reason": "not_representable"})
+        unmatched.append(
+            {
+                "contingency_id": cid,
+                "line": line,
+                "element": label,
+                "reason": "not_representable",
+            }
+        )
     return row
 
 
 def _finish(rows, unmatched) -> ImportedContingencies:
     extra = ["from_bus", "to_bus", "ckt", "element_type", "element_index", "bus"]
     if rows:
-        cset = validate_contingency_set(pd.DataFrame(rows, columns=["contingency_id", "kind", "element_ids", "order", *extra]))
+        cset = validate_contingency_set(
+            pd.DataFrame(
+                rows, columns=["contingency_id", "kind", "element_ids", "order", *extra]
+            )
+        )
     else:
-        cset = pd.DataFrame(columns=["contingency_id", "kind", "element_ids", "order", *extra])
+        cset = pd.DataFrame(
+            columns=["contingency_id", "kind", "element_ids", "order", *extra]
+        )
     um = pd.DataFrame(unmatched, columns=UNMATCHED_COLUMNS)
     um["line"] = um["line"].astype("int64")
     return ImportedContingencies(cset.reset_index(drop=True), um)
@@ -376,7 +488,14 @@ def _from_con(text: str, net) -> ImportedContingencies:
     idx = _NetIndex(net)
     seen, rows, unmatched = {}, [], []
     for lineno, line in top:
-        unmatched.append({"contingency_id": "", "line": lineno, "element": line, "reason": "unsupported"})
+        unmatched.append(
+            {
+                "contingency_id": "",
+                "line": lineno,
+                "element": line,
+                "reason": "unsupported",
+            }
+        )
     for label, line, elements in blocks:
         cid = _contingency_id(label)
         if cid in seen:
@@ -395,7 +514,11 @@ def _from_con(text: str, net) -> ImportedContingencies:
 
 
 def _num(v):
-    if v is None or (isinstance(v, float) and pd.isna(v)) or (isinstance(v, str) and not v.strip()):
+    if (
+        v is None
+        or (isinstance(v, float) and pd.isna(v))
+        or (isinstance(v, str) and not v.strip())
+    ):
         return None
     f = float(v)
     if not f.is_integer():
@@ -413,7 +536,9 @@ def _csv_bus(row, num_col, name_col, lineno):
     try:
         num = _num(row.get(num_col))
     except (TypeError, ValueError):
-        raise ContractError(f"line {lineno}: {num_col} {row.get(num_col)!r} is not a bus number") from None
+        raise ContractError(
+            f"line {lineno}: {num_col} {row.get(num_col)!r} is not a bus number"
+        ) from None
     if num is not None:
         return num
     name = _text(row.get(name_col))
@@ -428,7 +553,9 @@ def _from_csv(text: str, net) -> ImportedContingencies:
     df = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False)
     missing = {"contingency_id", "kind"} - set(df.columns)
     if missing:
-        raise ContractError(f"line 1: contingency CSV is missing column(s) {sorted(missing)}")
+        raise ContractError(
+            f"line 1: contingency CSV is missing column(s) {sorted(missing)}"
+        )
     idx = _NetIndex(net)
     seen, rows, unmatched = {}, [], []
     known_branch = {f"{r.from_bus}-{r.to_bus}-{r.ckt}" for r in idx.branch.values()}
@@ -439,52 +566,89 @@ def _from_csv(text: str, net) -> ImportedContingencies:
         if not label:
             raise ContractError(f"line {lineno}: empty contingency_id")
         if label in seen:
-            raise ContractError(f"line {lineno}: contingency_id {label!r} repeats the one at line {seen[label]}")
+            raise ContractError(
+                f"line {lineno}: contingency_id {label!r} repeats the one at line {seen[label]}"
+            )
         seen[label] = lineno
         try:
             order = _num(rec.get("order")) or 1
         except (TypeError, ValueError):
-            raise ContractError(f"line {lineno}: order {rec.get('order')!r} is not an integer") from None
+            raise ContractError(
+                f"line {lineno}: order {rec.get('order')!r} is not an integer"
+            ) from None
         cid = _contingency_id(label) if kind not in COMPOUND_SEPARATORS else label
         text_of = ",".join(_text(rec.get(c)) for c in df.columns)
         if kind == "branch" and order == 1:
-            el = _Element("branch", lineno, text_of,
-                          from_bus=_csv_bus(rec, "from_bus_number", "from_bus", lineno),
-                          to_bus=_csv_bus(rec, "to_bus_number", "to_bus", lineno),
-                          ckt=_text(rec.get("ckt")) or "1")
+            el = _Element(
+                "branch",
+                lineno,
+                text_of,
+                from_bus=_csv_bus(rec, "from_bus_number", "from_bus", lineno),
+                to_bus=_csv_bus(rec, "to_bus_number", "to_bus", lineno),
+                ckt=_text(rec.get("ckt")) or "1",
+            )
         elif kind == "unit":
             mid = _text(rec.get("machine_id"))
             if not mid:
                 raise ContractError(f"line {lineno}: a unit row needs machine_id")
-            el = _Element("machine", lineno, text_of,
-                          bus=_csv_bus(rec, "bus_number", "bus", lineno), machine_id=mid)
+            el = _Element(
+                "machine",
+                lineno,
+                text_of,
+                bus=_csv_bus(rec, "bus_number", "bus", lineno),
+                machine_id=mid,
+            )
         elif kind == "bus_section":
-            el = _Element("bus", lineno, text_of, bus=_csv_bus(rec, "bus_number", "bus", lineno))
+            el = _Element(
+                "bus", lineno, text_of, bus=_csv_bus(rec, "bus_number", "bus", lineno)
+            )
         elif kind == "branch" or kind in COMPOUND_SEPARATORS:
             # N-2 and compound rows carry their branches in element_ids only
             ids = [e for e in _text(rec.get("element_ids")).split("|") if e]
             if len(ids) != 2:
-                raise ContractError(f"line {lineno}: a {kind} row of order 2 needs two element_ids, got {ids}")
+                raise ContractError(
+                    f"line {lineno}: a {kind} row of order 2 needs two element_ids, got {ids}"
+                )
             bad = [e for e in ids if e not in known_branch]
             if bad:
                 for e in bad:
-                    unmatched.append({"contingency_id": cid, "line": lineno, "element": e, "reason": "unknown_branch"})
+                    unmatched.append(
+                        {
+                            "contingency_id": cid,
+                            "line": lineno,
+                            "element": e,
+                            "reason": "unknown_branch",
+                        }
+                    )
                 for e in ids:
                     if e not in bad:
-                        unmatched.append({"contingency_id": cid, "line": lineno, "element": e, "reason": "partial"})
+                        unmatched.append(
+                            {
+                                "contingency_id": cid,
+                                "line": lineno,
+                                "element": e,
+                                "reason": "partial",
+                            }
+                        )
                 continue
-            rows.append({"contingency_id": cid, "kind": kind, "element_ids": ids, "order": 2})
+            rows.append(
+                {"contingency_id": cid, "kind": kind, "element_ids": ids, "order": 2}
+            )
             continue
         else:
-            raise ContractError(f"line {lineno}: kind {kind!r} is not branch, unit, bus_section, "
-                                f"{', '.join(sorted(COMPOUND_SEPARATORS))}")
+            raise ContractError(
+                f"line {lineno}: kind {kind!r} is not branch, unit, bus_section, "
+                f"{', '.join(sorted(COMPOUND_SEPARATORS))}"
+            )
         row = _settle(idx, label, lineno, cid, [el], unmatched)
         if row is not None:
             rows.append(row)
     return _finish(rows, unmatched)
 
 
-def read_contingency_list(source, net, *, fmt: str | None = None) -> ImportedContingencies:
+def read_contingency_list(
+    source, net, *, fmt: str | None = None
+) -> ImportedContingencies:
     """
     Read a TSO contingency list (``.con`` or CSV) onto ``net``.
 

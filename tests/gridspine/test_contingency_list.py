@@ -4,6 +4,7 @@ mapped onto the net under the RAW's identity, failing closed.
 """
 
 import pandapower as pp
+import pandas as pd
 import pytest
 
 from gridspine.handoff.contingencies import write_contingencies
@@ -29,7 +30,10 @@ def _sets(cset):
 
 
 def _reasons(imp):
-    return [(r.contingency_id, r.line, r.reason) for r in imp.unmatched.itertuples(index=False)]
+    return [
+        (r.contingency_id, r.line, r.reason)
+        for r in imp.unmatched.itertuples(index=False)
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -64,7 +68,10 @@ END
 def test_pom_fixture_maps_every_element_onto_the_net():
     imp = _read(POM_FIXTURE)
     assert imp.unmatched.empty
-    by_id = {r.contingency_id: (r.kind, list(r.element_ids), r.order) for r in imp.contingencies.itertuples()}
+    by_id = {
+        r.contingency_id: (r.kind, list(r.element_ids), r.order)
+        for r in imp.contingencies.itertuples()
+    }
     assert by_id == {
         "A-B_1": ("branch", ["BUS_A-BUS_B-1"], 1),
         "A-B_2": ("branch", ["BUS_A-BUS_B-2"], 1),
@@ -78,7 +85,14 @@ def test_pom_fixture_maps_every_element_onto_the_net():
 def test_imported_set_screens_unchanged():
     net = _net()
     results, _report = _screen(net, _read(POM_FIXTURE, net).contingencies)
-    assert set(results["contingency_id"]) == {"A-B_1", "A-B_2", "TRAFO_C", "N2_AB", "GEN_G1", "BUS_S"}
+    assert set(results["contingency_id"]) == {
+        "A-B_1",
+        "A-B_2",
+        "TRAFO_C",
+        "N2_AB",
+        "GEN_G1",
+        "BUS_S",
+    }
 
 
 def test_omitted_circuit_is_one_and_keywords_are_case_insensitive():
@@ -127,7 +141,9 @@ def test_csv_unknown_bus_number_is_listed_with_its_line(tmp_path):
     lines[2] = ",".join(cells)
     path.write_text("\n".join(lines) + "\n")
     imp = read_contingency_list(path, net)
-    assert [(r.line, r.reason) for r in imp.unmatched.itertuples()] == [(3, "unknown_bus")]
+    assert [(r.line, r.reason) for r in imp.unmatched.itertuples()] == [
+        (3, "unknown_bus")
+    ]
     assert len(imp.contingencies) == len(lines) - 2
 
 
@@ -163,13 +179,28 @@ def test_numbering_matches_write_raw(tmp_path):
     write_raw(net, raw)
     buses, branches, machines = _raw_records(raw)
     assert len(buses) == len(net.bus) and branches and machines
-    blocks = [f"CONTINGENCY B{i}\n DISCONNECT BUS '{name}'\nEND" for i, (_n, name) in enumerate(buses)]
-    blocks += [f"CONTINGENCY N{i}\n DISCONNECT BUS {n}\nEND" for i, (n, _name) in enumerate(buses)]
-    blocks += [f"CONTINGENCY L{k}\n OPEN BRANCH FROM BUS {i} TO BUS {j} CKT '{c}'\nEND"
-               for k, (i, j, c) in enumerate(branches)]
-    blocks += [f"CONTINGENCY M{k}\n REMOVE MACHINE '{m}' FROM BUS {i}\nEND" for k, (i, m) in enumerate(machines)]
+    blocks = [
+        f"CONTINGENCY B{i}\n DISCONNECT BUS '{name}'\nEND"
+        for i, (_n, name) in enumerate(buses)
+    ]
+    blocks += [
+        f"CONTINGENCY N{i}\n DISCONNECT BUS {n}\nEND"
+        for i, (n, _name) in enumerate(buses)
+    ]
+    blocks += [
+        f"CONTINGENCY L{k}\n OPEN BRANCH FROM BUS {i} TO BUS {j} CKT '{c}'\nEND"
+        for k, (i, j, c) in enumerate(branches)
+    ]
+    blocks += [
+        f"CONTINGENCY M{k}\n REMOVE MACHINE '{m}' FROM BUS {i}\nEND"
+        for k, (i, m) in enumerate(machines)
+    ]
     imp = _read(_con(*blocks), net)
-    got = imp.contingencies.set_index("contingency_id")["element_ids"].map(tuple).to_dict()
+    got = (
+        imp.contingencies.set_index("contingency_id")["element_ids"]
+        .map(tuple)
+        .to_dict()
+    )
     # bus by name and by number land on the same bus; only the slack's are unsupported
     for k, (_n, name) in enumerate(buses):
         if name == "BUS_A":
@@ -188,7 +219,13 @@ def test_numbering_matches_write_raw(tmp_path):
 def test_name_on_two_buses_is_ambiguous_never_the_first():
     net = _net()
     net.bus.at[5, "name"] = "BUS_S"  # BUS_D2 renamed: two buses named BUS_S
-    imp = _read(_con("CONTINGENCY X\n DISCONNECT BUS 'BUS_S'\nEND", "CONTINGENCY Y\n OPEN BRANCH FROM BUS 1 TO BUS 3\nEND"), net)
+    imp = _read(
+        _con(
+            "CONTINGENCY X\n DISCONNECT BUS 'BUS_S'\nEND",
+            "CONTINGENCY Y\n OPEN BRANCH FROM BUS 1 TO BUS 3\nEND",
+        ),
+        net,
+    )
     assert _reasons(imp) == [("X", 2, "ambiguous_bus")]
     assert list(imp.contingencies["contingency_id"]) == ["Y"]
 
@@ -196,7 +233,9 @@ def test_name_on_two_buses_is_ambiguous_never_the_first():
 def test_line_and_transformer_sharing_a_circuit_id_are_refused_not_guessed():
     net = _net()
     lt = dict(r_ohm_per_km=0.2, x_ohm_per_km=0.35, c_nf_per_km=10, max_i_ka=1.0)
-    pp.create_line_from_parameters(net, 1, 4, 5, **lt)  # BUS_B-BUS_D1 line, RAW ckt '1' as the trafo
+    pp.create_line_from_parameters(
+        net, 1, 4, 5, **lt
+    )  # BUS_B-BUS_D1 line, RAW ckt '1' as the trafo
     with pytest.raises(ContractError, match=r"duplicate branch keys"):
         _read(_con("CONTINGENCY X\n OPEN BRANCH FROM BUS 2 TO BUS 5 CKT 1\nEND"), net)
 
@@ -206,19 +245,58 @@ def test_line_and_transformer_sharing_a_circuit_id_are_refused_not_guessed():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text, match", [
-    (_con("CONTINGENCY X\n OPEN BRANCH FROM 1 TO BUS 2\nEND"), r"line 2: expected 'FROM BUS"),
-    (_con("CONTINGENCY X\n OPEN BRANCH FROM BUS 1 TO BUS 2 CKT\nEND"), r"line 2: expected 'CKT"),
-    (_con("CONTINGENCY X\n OPEN BRANCH FROM BUS one TO BUS 2\nEND"), r"line 2: bus 'one' is neither"),
-    (_con("CONTINGENCY X\n REMOVE MACHINE 1 BUS 3\nEND"), r"line 2: expected 'REMOVE MACHINE"),
-    (_con("CONTINGENCY X\n DISCONNECT BUS\nEND"), r"line 2: expected 'DISCONNECT BUS"),
-    (_con("CONTINGENCY X\n FROBNICATE BUS 3\nEND"), r"line 2: not a contingency command"),
-    (_con("OPEN BRANCH FROM BUS 1 TO BUS 2"), r"line 1: expected CONTINGENCY or END"),
-    (_con("CONTINGENCY\nEND"), r"line 1: CONTINGENCY without a label"),
-    (_con("CONTINGENCY X\n OPEN BRANCH FROM BUS 1 TO BUS 2\nEND", final="END\nCONTINGENCY Y"),
-     r"line 5: text after the final END"),
-], ids=["no-bus-keyword", "ckt-without-id", "bus-not-a-number", "machine-without-from",
-        "bus-without-id", "unknown-verb", "statement-outside-block", "no-label", "after-final-end"])
+@pytest.mark.parametrize(
+    "text, match",
+    [
+        (
+            _con("CONTINGENCY X\n OPEN BRANCH FROM 1 TO BUS 2\nEND"),
+            r"line 2: expected 'FROM BUS",
+        ),
+        (
+            _con("CONTINGENCY X\n OPEN BRANCH FROM BUS 1 TO BUS 2 CKT\nEND"),
+            r"line 2: expected 'CKT",
+        ),
+        (
+            _con("CONTINGENCY X\n OPEN BRANCH FROM BUS one TO BUS 2\nEND"),
+            r"line 2: bus 'one' is neither",
+        ),
+        (
+            _con("CONTINGENCY X\n REMOVE MACHINE 1 BUS 3\nEND"),
+            r"line 2: expected 'REMOVE MACHINE",
+        ),
+        (
+            _con("CONTINGENCY X\n DISCONNECT BUS\nEND"),
+            r"line 2: expected 'DISCONNECT BUS",
+        ),
+        (
+            _con("CONTINGENCY X\n FROBNICATE BUS 3\nEND"),
+            r"line 2: not a contingency command",
+        ),
+        (
+            _con("OPEN BRANCH FROM BUS 1 TO BUS 2"),
+            r"line 1: expected CONTINGENCY or END",
+        ),
+        (_con("CONTINGENCY\nEND"), r"line 1: CONTINGENCY without a label"),
+        (
+            _con(
+                "CONTINGENCY X\n OPEN BRANCH FROM BUS 1 TO BUS 2\nEND",
+                final="END\nCONTINGENCY Y",
+            ),
+            r"line 5: text after the final END",
+        ),
+    ],
+    ids=[
+        "no-bus-keyword",
+        "ckt-without-id",
+        "bus-not-a-number",
+        "machine-without-from",
+        "bus-without-id",
+        "unknown-verb",
+        "statement-outside-block",
+        "no-label",
+        "after-final-end",
+    ],
+)
 def test_malformed_syntax_raises_naming_the_line(text, match):
     with pytest.raises(ContractError, match=match):
         _read(text)
@@ -227,32 +305,52 @@ def test_malformed_syntax_raises_naming_the_line(text, match):
 def test_end_missing_at_eof_raises():
     with pytest.raises(ContractError, match=r"END missing at the end of the file"):
         _read("CONTINGENCY X\n OPEN BRANCH FROM BUS 1 TO BUS 2\nEND\n")
-    with pytest.raises(ContractError, match=r"line 3: CONTINGENCY inside contingency 'X' \(line 1\); END missing"):
+    with pytest.raises(
+        ContractError,
+        match=r"line 3: CONTINGENCY inside contingency 'X' \(line 1\); END missing",
+    ):
         _read("CONTINGENCY X\n OPEN BRANCH FROM BUS 1 TO BUS 2\nCONTINGENCY Y\n")
     with pytest.raises(ContractError, match=r"line 1: contingency 'Y' has no END"):
         _read("CONTINGENCY Y\n OPEN BRANCH FROM BUS 1 TO BUS 2\n")
 
 
 def test_empty_contingency_block_raises():
-    with pytest.raises(ContractError, match=r"line 3: contingency 'E' \(line 2\) is empty"):
+    with pytest.raises(
+        ContractError, match=r"line 3: contingency 'E' \(line 2\) is empty"
+    ):
         _read(_con("COM x\nCONTINGENCY E\nEND"))
 
 
 def test_duplicate_label_raises_naming_both_lines():
-    with pytest.raises(ContractError, match=r"line 4: contingency label 'X' repeats the one at line 1"):
-        _read(_con("CONTINGENCY X\n DISCONNECT BUS 4\nEND", "CONTINGENCY X\n DISCONNECT BUS 5\nEND"))
+    with pytest.raises(
+        ContractError, match=r"line 4: contingency label 'X' repeats the one at line 1"
+    ):
+        _read(
+            _con(
+                "CONTINGENCY X\n DISCONNECT BUS 4\nEND",
+                "CONTINGENCY X\n DISCONNECT BUS 5\nEND",
+            )
+        )
     with pytest.raises(ContractError, match=r"both read as 'A_B'"):
-        _read(_con("CONTINGENCY 'A B'\n DISCONNECT BUS 4\nEND", "CONTINGENCY 'A/B'\n DISCONNECT BUS 5\nEND"))
+        _read(
+            _con(
+                "CONTINGENCY 'A B'\n DISCONNECT BUS 4\nEND",
+                "CONTINGENCY 'A/B'\n DISCONNECT BUS 5\nEND",
+            )
+        )
 
 
-@pytest.mark.parametrize("stmt, reason", [
-    ("DISCONNECT BUS 99", "unknown_bus"),
-    ("DISCONNECT BUS 'NOWHERE'", "unknown_bus"),
-    ("OPEN BRANCH FROM BUS 1 TO BUS 2 CKT 7", "unknown_circuit"),
-    ("OPEN BRANCH FROM BUS 1 TO BUS 4", "unknown_branch"),
-    ("REMOVE MACHINE 2 FROM BUS 3", "unknown_machine"),
-    ("REMOVE MACHINE 1 FROM BUS 4", "unknown_machine"),
-])
+@pytest.mark.parametrize(
+    "stmt, reason",
+    [
+        ("DISCONNECT BUS 99", "unknown_bus"),
+        ("DISCONNECT BUS 'NOWHERE'", "unknown_bus"),
+        ("OPEN BRANCH FROM BUS 1 TO BUS 2 CKT 7", "unknown_circuit"),
+        ("OPEN BRANCH FROM BUS 1 TO BUS 4", "unknown_branch"),
+        ("REMOVE MACHINE 2 FROM BUS 3", "unknown_machine"),
+        ("REMOVE MACHINE 1 FROM BUS 4", "unknown_machine"),
+    ],
+)
 def test_unknown_element_is_listed_with_its_line(stmt, reason):
     imp = _read(_con("COM x", "CONTINGENCY X", f"   {stmt}", "END"))
     assert _reasons(imp) == [("X", 3, reason)]
@@ -260,31 +358,45 @@ def test_unknown_element_is_listed_with_its_line(stmt, reason):
     assert list(imp.unmatched.columns) == UNMATCHED_COLUMNS
 
 
-@pytest.mark.parametrize("stmt", [
-    "CLOSE BRANCH FROM BUS 1 TO BUS 2 CKT 1",
-    "SET BUS 3 LOAD TO 10 MW",
-    "CHANGE BUS 3 LOAD BY 10 PERCENT",
-    "MOVE 10 MW LOAD FROM BUS 2 TO BUS 3",
-    "REMOVE LOAD 1 FROM BUS 2",
-    "OPEN BRANCH FROM BUS 2 TO BUS 5 TO BUS 6 CKT 1",
-    "REMOVE MACHINE 1 FROM BUS 1",
-    "DISCONNECT BUS 1",
-])
+@pytest.mark.parametrize(
+    "stmt",
+    [
+        "CLOSE BRANCH FROM BUS 1 TO BUS 2 CKT 1",
+        "SET BUS 3 LOAD TO 10 MW",
+        "CHANGE BUS 3 LOAD BY 10 PERCENT",
+        "MOVE 10 MW LOAD FROM BUS 2 TO BUS 3",
+        "REMOVE LOAD 1 FROM BUS 2",
+        "OPEN BRANCH FROM BUS 2 TO BUS 5 TO BUS 6 CKT 1",
+        "REMOVE MACHINE 1 FROM BUS 1",
+        "DISCONNECT BUS 1",
+    ],
+)
 def test_valid_psse_command_outside_the_subset_is_unsupported_not_malformed(stmt):
-    imp = _read(_con("CONTINGENCY X", f" {stmt}", " OPEN BRANCH FROM BUS 1 TO BUS 3", "END"))
+    imp = _read(
+        _con("CONTINGENCY X", f" {stmt}", " OPEN BRANCH FROM BUS 1 TO BUS 3", "END")
+    )
     assert _reasons(imp) == [("X", 2, "unsupported"), ("X", 3, "partial")]
     assert imp.contingencies.empty
 
 
 def test_top_level_automatic_contingencies_are_listed_unsupported():
-    imp = _read("SINGLE BRANCH IN SUBSYSTEM AREA1\nINCLUDE other.con\n"
-                + _con("CONTINGENCY X\n OPEN BRANCH FROM BUS 1 TO BUS 3\nEND"))
+    imp = _read(
+        "SINGLE BRANCH IN SUBSYSTEM AREA1\nINCLUDE other.con\n"
+        + _con("CONTINGENCY X\n OPEN BRANCH FROM BUS 1 TO BUS 3\nEND")
+    )
     assert _reasons(imp) == [("", 1, "unsupported"), ("", 2, "unsupported")]
     assert list(imp.contingencies["contingency_id"]) == ["X"]
 
 
 def test_combination_with_no_contingency_set_form_is_not_representable():
-    imp = _read(_con("CONTINGENCY X", " OPEN BRANCH FROM BUS 1 TO BUS 3", " REMOVE MACHINE 1 FROM BUS 3", "END"))
+    imp = _read(
+        _con(
+            "CONTINGENCY X",
+            " OPEN BRANCH FROM BUS 1 TO BUS 3",
+            " REMOVE MACHINE 1 FROM BUS 3",
+            "END",
+        )
+    )
     assert _reasons(imp) == [("X", 1, "not_representable")]
     assert imp.contingencies.empty
 
@@ -317,23 +429,194 @@ def test_one_unmatched_branch_is_listed_and_the_rest_still_screens():
     assert not any("BUS_A-BUS_B-1" in list(e) for e in imp.contingencies["element_ids"])
 
 
-@pytest.mark.parametrize("text, match", [
-    ("contingency_id,order\nX,1\n", r"line 1: contingency CSV is missing column\(s\) \['kind'\]"),
-    ("contingency_id,kind,bus\nX,shunt,BUS_S\n", r"line 2: kind 'shunt' is not"),
-    ("contingency_id,kind,bus\nX,bus_section,BUS_S\nX,bus_section,BUS_B\n", r"line 3: contingency_id 'X' repeats the one at line 2"),
-    ("contingency_id,kind,bus\n,bus_section,BUS_S\n", r"line 2: empty contingency_id"),
-    ("contingency_id,kind,bus_number\nX,bus_section,2.5\n", r"line 2: bus_number '2.5' is not a bus number"),
-    ("contingency_id,kind,bus_number\nX,unit,3\n", r"line 2: a unit row needs machine_id"),
-    ("contingency_id,kind,order,element_ids\nX,branch,2,BUS_A-BUS_B-1\n", r"line 2: a branch row of order 2 needs two"),
-], ids=["missing-kind", "bad-kind", "duplicate-id", "empty-id", "fractional-bus", "unit-no-id", "n2-one-id"])
+@pytest.mark.parametrize(
+    "text, match",
+    [
+        (
+            "contingency_id,order\nX,1\n",
+            r"line 1: contingency CSV is missing column\(s\) \['kind'\]",
+        ),
+        ("contingency_id,kind,bus\nX,shunt,BUS_S\n", r"line 2: kind 'shunt' is not"),
+        (
+            "contingency_id,kind,bus\nX,bus_section,BUS_S\nX,bus_section,BUS_B\n",
+            r"line 3: contingency_id 'X' repeats the one at line 2",
+        ),
+        (
+            "contingency_id,kind,bus\n,bus_section,BUS_S\n",
+            r"line 2: empty contingency_id",
+        ),
+        (
+            "contingency_id,kind,bus_number\nX,bus_section,2.5\n",
+            r"line 2: bus_number '2.5' is not a bus number",
+        ),
+        (
+            "contingency_id,kind,bus_number\nX,unit,3\n",
+            r"line 2: a unit row needs machine_id",
+        ),
+        (
+            "contingency_id,kind,order,element_ids\nX,branch,2,BUS_A-BUS_B-1\n",
+            r"line 2: a branch row of order 2 needs two",
+        ),
+    ],
+    ids=[
+        "missing-kind",
+        "bad-kind",
+        "duplicate-id",
+        "empty-id",
+        "fractional-bus",
+        "unit-no-id",
+        "n2-one-id",
+    ],
+)
 def test_malformed_csv_raises_naming_the_line(text, match):
     with pytest.raises(ContractError, match=match):
         read_contingency_list(text, _net(), fmt="csv")
 
 
 def test_csv_by_bus_name_without_numbers_maps_like_the_numbers():
-    text = ("contingency_id,kind,from_bus,to_bus,ckt,bus,machine_id\n"
-            "L,branch,BUS_C,BUS_A,1,,\nU,unit,,,,BUS_C,1\nS,bus_section,,,,BUS_S,\n")
+    text = (
+        "contingency_id,kind,from_bus,to_bus,ckt,bus,machine_id\n"
+        "L,branch,BUS_C,BUS_A,1,,\nU,unit,,,,BUS_C,1\nS,bus_section,,,,BUS_S,\n"
+    )
     imp = read_contingency_list(text, _net(), fmt="csv")
     assert imp.unmatched.empty
-    assert _sets(imp.contingencies) == [("branch", ("BUS_A-BUS_C-1",)), ("bus_section", ("BUS_S",)), ("unit", ("G1",))]
+    assert _sets(imp.contingencies) == [
+        ("branch", ("BUS_A-BUS_C-1",)),
+        ("bus_section", ("BUS_S",)),
+        ("unit", ("G1",)),
+    ]
+
+
+# --------------------------------------------------------------------------
+# guards the mutation run found untested
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "stmt, match",
+    [
+        ("OPEN BRANCH FROM BUS 1 TO BUS 2 CKT ''", r"line 2: empty circuit id"),
+        ("DISCONNECT BUS ''", r"line 2: empty bus name"),
+        ("REMOVE MACHINE '' FROM BUS 3", r"line 2: empty machine id"),
+        ("OPEN BRANCH", r"line 2: expected 'FROM BUS"),
+        ("OPEN", r"line 2: not a contingency command"),
+        ("OPEN BRANCH AT BUS 1 TO BUS 2", r"line 2: expected 'FROM BUS"),
+        ("OPEN BRANCH FROM NODE 1 TO BUS 2", r"line 2: expected 'FROM BUS"),
+        ("OPEN BRANCH FROM BUS 1 AND BUS 2", r"line 2: expected 'FROM BUS"),
+        ("OPEN BRANCH FROM BUS 1 TO NODE 2", r"line 2: expected 'FROM BUS"),
+        ("OPEN BRANCH FROM BUS 1 TO BUS 2 TO 5", r"line 2: expected 'CKT"),
+        ("OPEN BRANCH FROM BUS 1 TO BUS 2 AT BUS 5", r"line 2: expected 'CKT"),
+        ("DISCONNECT BUS 3 4", r"line 2: expected 'DISCONNECT BUS"),
+        ("REMOVE MACHINE 1 FROM NODE 3", r"line 2: expected 'REMOVE MACHINE"),
+        ("'", r"line 2: unbalanced quote"),
+    ],
+)
+def test_more_malformed_statements_raise_naming_the_line(stmt, match):
+    with pytest.raises(ContractError, match=match):
+        _read(_con("CONTINGENCY X", f" {stmt}", "END"))
+
+
+def test_quotes_are_stripped_only_when_they_match():
+    imp = _read(_con("CONTINGENCY X", " OPEN BRANCH FROM BUS 1 TO BUS 2 CKT 22", "END"))
+    assert _reasons(imp) == [
+        ("X", 2, "unknown_circuit")
+    ]  # '22' is a circuit id, not a quoted one
+    imp = _read(
+        _con("CONTINGENCY X", ' OPEN BRANCH FROM BUS 1 TO BUS 2 CKT "2"', "END")
+    )
+    assert list(imp.contingencies.iloc[0]["element_ids"]) == ["BUS_A-BUS_B-2"]
+
+
+def test_unit_and_at_spellings_map_like_machine_from():
+    imp = _read(_con("CONTINGENCY X", " TRIP UNIT 1 AT BUS 3", "END"))
+    assert list(imp.contingencies.iloc[0]["element_ids"]) == ["G1"]
+    imp = _read(
+        _con("CONTINGENCY X", " OPEN BUS 3", "END")
+    )  # OPEN is a branch verb: not a bus command here
+    assert _reasons(imp) == [("X", 2, "unsupported")]
+
+
+@pytest.mark.parametrize(
+    "stmt",
+    [
+        "OPEN BRANCH FROM BUS 99 TO BUS 2",
+        "OPEN BRANCH FROM BUS 1 TO BUS 99",
+        "REMOVE MACHINE 1 FROM BUS 99",
+    ],
+)
+def test_an_unknown_bus_on_a_branch_or_machine_is_listed(stmt):
+    assert _reasons(_read(_con("CONTINGENCY X", f" {stmt}", "END"))) == [
+        ("X", 2, "unknown_bus")
+    ]
+
+
+@pytest.mark.parametrize(
+    "stmts",
+    [
+        [
+            " OPEN BRANCH FROM BUS 1 TO BUS 3",
+            " OPEN BRANCH FROM BUS 1 TO BUS 2",
+            " OPEN BRANCH FROM BUS 2 TO BUS 4",
+        ],
+        [" OPEN BRANCH FROM BUS 1 TO BUS 3", " OPEN BRANCH FROM BUS 3 TO BUS 1"],
+        [" DISCONNECT BUS 4", " DISCONNECT BUS 5"],
+    ],
+    ids=["three-branches", "same-branch-twice", "two-buses"],
+)
+def test_more_than_one_row_s_worth_is_not_representable(stmts):
+    imp = _read(_con("CONTINGENCY X", *stmts, "END"))
+    assert _reasons(imp) == [("X", 1, "not_representable")]
+
+
+def test_two_machines_are_not_representable():
+    net = _net()
+    pp.create_sgen(net, 1, p_mw=5, name="W1")  # BUS_B, RAW bus 2, machine id '1'
+    imp = _read(
+        _con(
+            "CONTINGENCY X",
+            " REMOVE MACHINE 1 FROM BUS 3",
+            " REMOVE MACHINE 1 FROM BUS 2",
+            "END",
+        ),
+        net,
+    )
+    assert _reasons(imp) == [("X", 1, "not_representable")]
+
+
+def test_a_single_branch_row_carries_its_identity():
+    row = _read(
+        _con("CONTINGENCY X", " OPEN BRANCH FROM BUS 2 TO BUS 1 CKT 2", "END")
+    ).contingencies.iloc[0]
+    assert (row["from_bus"], row["to_bus"], row["ckt"], row["element_type"]) == (
+        "BUS_A",
+        "BUS_B",
+        "2",
+        "line",
+    )
+    n2 = _read(
+        _con(
+            "CONTINGENCY X",
+            " OPEN BRANCH FROM BUS 1 TO BUS 2 CKT 1",
+            " OPEN BRANCH FROM BUS 1 TO BUS 2 CKT 2",
+            "END",
+        )
+    ).contingencies.iloc[0]
+    assert n2["order"] == 2 and pd.isna(n2["from_bus"])
+
+
+def test_csv_blank_numbers_fall_back_to_names_and_neither_is_refused():
+    text = "contingency_id,kind,from_bus,to_bus,ckt,from_bus_number,to_bus_number\nL,branch,BUS_C,BUS_A,1,,\n"
+    imp = read_contingency_list(text, _net(), fmt="csv")
+    assert _sets(imp.contingencies) == [("branch", ("BUS_A-BUS_C-1",))]
+    with pytest.raises(
+        ContractError, match=r"line 2: neither from_bus_number nor from_bus is given"
+    ):
+        read_contingency_list(
+            "contingency_id,kind,to_bus\nL,branch,BUS_A\n", _net(), fmt="csv"
+        )
+
+
+def test_a_path_given_as_text_is_read_by_its_suffix(tmp_path):
+    path = tmp_path / "list.con"
+    path.write_text(POM_FIXTURE)
+    assert len(read_contingency_list(str(path), _net()).contingencies) == 6
