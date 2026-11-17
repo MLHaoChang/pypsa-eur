@@ -370,12 +370,12 @@ def test_after_a_project_switch_the_running_task_still_blocks_a_start(
     assert chat.task_id == first["task_id"]
     assert not _stored("second").exists()
     # The same plan again is no switch: it reads as not found in this project.
-    refused(
-        lambda: tasks.resume_task(first["task_id"]), 404, "task_not_found"
-    )
+    refused(lambda: tasks.resume_task(first["task_id"]), 404, "task_not_found")
 
 
-def test_a_detached_task_keeps_blocking_until_it_reads_as_ended(chat, monkeypatch, tmp_path):
+def test_a_detached_task_keeps_blocking_until_it_reads_as_ended(
+    chat, monkeypatch, tmp_path
+):
     """GK B D: the first ordinary tool call after the switch detaches the
     task; the start guard keeps reading it until it reads as not running."""
     first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)

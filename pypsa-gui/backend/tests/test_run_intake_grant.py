@@ -899,7 +899,12 @@ def test_a_run_resumed_before_the_note_is_never_held(waiting):
     chat_tools.set_acting_user(record["owner_id"])
     refusal = {
         "error_kind": "switch_in_progress",
-        "active": {"kind": "task", "id": str(uuid.uuid4()), "title": "T", "status": "running"},
+        "active": {
+            "kind": "task",
+            "id": str(uuid.uuid4()),
+            "title": "T",
+            "status": "running",
+        },
     }
     task = json.loads(path.read_text())
     task["run"].update(status="running", waiting=None)
@@ -935,7 +940,12 @@ def test_the_held_note_names_a_task_the_reader_cannot_read_by_id_only(waiting):
     hidden = str(uuid.uuid4())  # no such task in this project for this owner
     held = {
         "kind": "switch_in_progress",
-        "active": {"kind": "task", "id": hidden, "title": "Secret", "status": "running"},
+        "active": {
+            "kind": "task",
+            "id": hidden,
+            "title": "Secret",
+            "status": "running",
+        },
         "since": "2026-11-17T02:00:00+00:00",
     }
     assert tasks._held_view(held)["active"] == {
