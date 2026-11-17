@@ -175,6 +175,29 @@ def test_strength_matches_the_hand_calculation():
     assert groups.iloc[0]["wscr_intact"] == pytest.approx(wscr, rel=1e-4)  # 6.5574
 
 
+def test_worst_outage_scr_is_never_above_intact():
+    spec = _spec()
+    spec["campus"]["transformers"]["T2B"] = _trafo("GRID", "MV2")  # no PoC islands
+    per_poc, _, _, _ = _strength(spec)
+    assert set(per_poc["poc"]) == {"GRID", "MV1", "MV2"}
+    assert per_poc["scr_worst"].notna().all()
+    assert (per_poc["scr_worst"] <= per_poc["scr_intact"] + 1e-9).all()
+    for poc, p in (("MV1", P_PV), ("MV2", P_WT)):  # each PoC keeps one transformer
+        assert _at(per_poc, poc)["scr_worst"] == pytest.approx(SK_MV2 / p, rel=1e-4)
+        assert _at(per_poc, poc)["scr_worst"] < _at(per_poc, poc)["scr_intact"]
+
+
+def test_the_fault_state_does_not_depend_on_the_hour():
+    c = build_campus(_spec())
+    one = _hourly(c)
+    # an earlier first hour with ten times the load and every converter idle
+    first = one.assign(status=0, p_mw=one["p_mw"] * 10)
+    two = pd.concat([first, one.assign(hour=1)], ignore_index=True)
+    a, b = _gc03_strength(c, one)[0], _gc03_strength(c, two)[0]
+    pd.testing.assert_series_equal(a["sk_intact_mva"], b["sk_intact_mva"])
+    pd.testing.assert_series_equal(a["sk_worst_mva"], b["sk_worst_mva"])
+
+
 def test_scr_at_the_pcc_is_the_entered_fault_level_over_rated_power():
     grid = _at(_strength(_spec())[0], "GRID")
     assert grid["sk_intact_mva"] == pytest.approx(SK_GRID, rel=1e-9)
@@ -274,6 +297,8 @@ def test_the_run_writes_both_csvs_and_islanding_is_never_skipped(sized):
     assert len(trafo) and (trafo["verdict"] == "fail").all() and trafo["islanded"].all()
     assert planning["verdict"] == "fail" and planning["failures"] == len(trafo)
     assert planning["notes"].count(NO_EMERGENCY_NOTE) == 1
+    # H5: and once in every row note
+    assert (table["note"].fillna("").str.count(NO_EMERGENCY_NOTE) == 1).all()
 
 
 def test_the_import_hour_is_the_voltage_stability_pick(sized):
@@ -363,3 +388,29 @@ def test_hourly_tables_are_unchanged_by_the_steps(sized):
     planning_campus(sized)
     strength_campus(sized)
     pd.testing.assert_frame_equal(campus_tables(sized)[0], before)
+
+
+def test_a_base_case_that_does_not_converge_fails(sized, monkeypatch):
+    from gridspine.static import planning_criteria
+    from gridspine.static.contingency import BaseCaseNotConverged
+
+    def boom(*a, **k):
+        raise BaseCaseNotConverged("base case does not converge")
+
+    monkeypatch.setattr(planning_criteria, "screen_planning", boom)
+    out = planning_campus(sized)
+    assert out["verdict"] == "fail" and out["cases"] == 0 and out["not_converged"]
+
+
+def test_a_period_with_no_converged_hour_fails(sized):
+    pcc = pd.read_csv(sized / LF_PCC_CSV)
+    pcc.loc[pcc["period"] == 2040, "converged"] = False
+    pcc.to_csv(sized / LF_PCC_CSV, index=False)
+    out = planning_campus(
+        sized,
+        contingencies=pd.DataFrame(
+            columns=["contingency_id", "kind", "element_ids", "order"]
+        ),
+    )
+    # nothing screened at all, but the failed intact flow is a violation
+    assert out["verdict"] == "fail" and out["not_converged"] == ["period 2040"]

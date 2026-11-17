@@ -79,3 +79,10 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 - H3: a capacitor bank on no PoC is subtracted at every PoC (worst case) and named in a note, or ESCR reads "unknown". One option is picked and tested.
 - H4: on the shared fixture, an islanding contingency reads fail (SCR 0 or not evaluated), never skipped. Tested.
 - H5: "Judged on normal ratings: no emergency rating given" appears in the row note, exactly once.
+
+**2026-11-17, GK A2 ruling (A) on the PR2 engine fix in `static/planning_criteria._lost`.** Conditions:
+
+- L1: each unit is clipped at 0 before the sum; a test with +5 and −3 gives 5.
+- L2: a removed charging draw is not load lost; the note "charging storage lost: X MW of draw removed" is pinned by a test.
+- L3: any other sgen sum in the module is clipped or its netting justified.
+- L4: the PR body and release note name it as an engine change, and `tests/gridspine/test_planning_criteria.py` runs in full.

@@ -1496,18 +1496,21 @@ def planning_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), co
     cset = getattr(contingencies, "contingencies", contingencies)
     excluded = list(getattr(contingencies, "excluded", []) or [])
     periods = sorted(int(x) for x in hourly["period"].unique())
-    rows, notes = [], []
+    rows, notes, not_converged, unscreened = [], [], [], []
     emergency = False
     for period, hours in _gc03_hours(run_dir, periods).items():
         if isinstance(hours, str):
+            # the intact load flow failed at every hour: a violation, never a skip
             notes.append(f"period {period}: {hours}; not screened")
+            not_converged.append(f"period {period}")
             continue
         for which, hour in hours:
             sl = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)][["unit_id", "p_mw", "status"]]
             net, dispatch, loads, registry = _gc03_hour_net(campus, sl.reset_index(drop=True), hour)
-            emergency = emergency or any(
+            emergency_h = any(
                 c in t.columns and t[c].notna().any()
                 for t, c in ((net.line, "max_i_ka_emergency"), (net.trafo, "sn_mva_emergency")))
+            emergency = emergency or emergency_h
             if not imported:
                 parts = [branch_contingencies(net), unit_contingencies(registry)]
                 cset_h = pd.concat([p for p in parts if len(p)], ignore_index=True)
@@ -1515,13 +1518,18 @@ def planning_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), co
                 cset_h = cset
             if cset_h is None or len(cset_h) == 0:
                 notes.append(f"period {period} hour {hour}: no contingency to screen")
+                unscreened.append(f"period {period} hour {hour}")
                 continue
             try:
                 res, _report = screen_planning(net, cset_h, dispatch, loads, hour, registry, profile=grid_code)
             except BaseCaseNotConverged as exc:
                 notes.append(f"period {period} hour {hour} ({which}): {exc}")
+                not_converged.append(f"period {period} hour {hour} ({which})")
                 continue
             res = res.assign(period=period, hour_kind=which)
+            if not emergency_h:
+                res["note"] = ["; ".join(x for x in (t if isinstance(t, str) else "", NO_EMERGENCY_NOTE) if x)
+                               for t in res["note"]]
             res["verdict"] = [_gc03_case_verdict(r) for r in res.to_dict("records")]
             rows.append(res)
     table = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(
@@ -1531,11 +1539,11 @@ def planning_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), co
     _write_text_atomic(run_dir / PLANNING_CSV, table.to_csv(index=False))
     cases = int(len(table))
     failures = int((table["verdict"] == PLANNING_CASE_FAIL).sum()) if cases else 0
-    if cases == 0:
-        verdict = "not_evaluated"
-    elif failures:
+    if not_converged or failures:
         verdict = "fail"
-    elif excluded:
+    elif cases == 0:
+        verdict = "not_evaluated"
+    elif excluded or unscreened:
         verdict = "incomplete"
     else:
         verdict = "pass"
@@ -1543,6 +1551,7 @@ def planning_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), co
         notes.append(NO_EMERGENCY_NOTE)
     notes.append(UNIT_Q_NOTE)
     return {"verdict": verdict, "cases": cases, "failures": failures, "excluded": excluded,
+            "not_converged": not_converged, "unscreened": unscreened,
             "source": "TSO list" if imported else "campus N-1 (branches and units)",
             "profile": grid_code.get("name"), "notes": notes}
 
@@ -1634,6 +1643,9 @@ def _gc03_strength(campus, hourly):
         stage_ibr = ibr[ibr.index.astype(str).isin(built)]
         p = stage_ibr.groupby(stage_ibr["bus"].astype(str))["p_mw"].sum().reindex(poc_buses).fillna(0.0)
         stages = pd.DataFrame({"stage": str(period), "poc": poc_buses, "p_mw": p.values})
+        # The fault state is hour-independent: IEC 60909 neglects load, and
+        # apply_fault_state energises every remaining unit whatever its
+        # dispatch, so the period's first hour only carries the tables.
         hour = int(block["hour"].min())
         sl = block[block["hour"] == hour][["unit_id", "p_mw", "status"]].reset_index(drop=True)
         net, dispatch, loads, registry = _gc03_hour_net(copy.deepcopy(campus), sl, hour)
@@ -1653,7 +1665,8 @@ def _gc03_strength(campus, hourly):
         method = ofl.method
     notes.append("S_k'' is the IEC 60909 minimum case with every converter off (gensets in), network "
                  "transformers with the impedance correction K_T (IEC 60909-0 6.3.3); "
-                 "P is the rated power of the converters built in the period")
+                 "P is the rated power of the converters built in the period; the fault state does not depend "
+                 "on the hour (IEC 60909 neglects load; every genset built in the period is energised)")
     return pd.concat(per_poc, ignore_index=True), pd.concat(groups, ignore_index=True), method, notes
 
 
