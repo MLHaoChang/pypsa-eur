@@ -519,3 +519,177 @@ def test_a_viewer_comments_on_a_report_and_withdraws_only_their_own(world, as_us
     assert status[editors.comment_id] == "open" and status[mine] == "withdrawn"
     addressed = viewer.post(f"{base}/{editors.comment_id}/address", json={})
     assert addressed.status_code == 403 and _kind(addressed) == KIND
+
+
+# ── guard branches, one test each (mutation survivors, GK B R8) ──────────────
+
+@pytest.fixture
+def db(world):
+    with world["session_local"]() as session:
+        yield session
+
+
+def _project(db, world) -> Project:
+    return db.get(Project, uuid.UUID(world["project"]))
+
+
+def test_require_writable_passes_without_a_user_or_project(db, world):
+    viewer = db.get(User, world["viewer"])
+    project_write_gate.require_writable(db, None, _project(db, world))
+    project_write_gate.require_writable(db, viewer, None)
+    with pytest.raises(HTTPException):
+        project_write_gate.require_writable(db, viewer, _project(db, world))
+
+
+def test_is_viewer(db, world):
+    viewer, editor = db.get(User, world["viewer"]), db.get(User, world["editor"])
+    assert project_write_gate.is_viewer(db, viewer, world["project"]) is True
+    assert project_write_gate.is_viewer(db, editor, world["project"]) is False
+    assert project_write_gate.is_viewer(db, None, world["project"]) is False
+    assert project_write_gate.is_viewer(db, viewer, None) is False
+    assert project_write_gate.is_viewer(db, viewer, "") is False
+    assert project_write_gate.is_viewer(db, viewer, str(uuid.uuid4())) is False
+
+
+def test_the_table_parser_refuses_a_bad_table():
+    parse = project_write_gate._parse
+    rules = parse("""
+        # a comment, then a blank line
+
+        POST /a  write active
+        GET  /b  allow because
+    """)
+    assert rules == {("POST", "/a"): project_write_gate.Rule("write", "active"),
+                     ("GET", "/b"): project_write_gate.Rule("allow", "because")}
+    for bad in ("POST /a write active\nPOST /a none twice",
+                "POST /a maybe reason",
+                "POST /a write somewhere",
+                "POST /a write path:"):
+        with pytest.raises(ValueError):
+            parse(bad)
+
+
+def test_route_path_names_the_full_path_of_a_route_mounted_twice():
+    from fastapi import APIRouter, FastAPI
+    from starlette.requests import Request
+
+    router = APIRouter()
+
+    @router.post("/{name}/x")
+    def handler(name: str):  # pragma: no cover - never called
+        return name
+
+    app = FastAPI()
+    app.include_router(router, prefix="/one")
+    app.include_router(router, prefix="/two")
+    route = router.routes[0]
+
+    def request(path, with_route=True):
+        scope = {"type": "http", "method": "POST", "path": path, "app": app, "headers": []}
+        if with_route:
+            scope["route"] = route
+        return Request(scope)
+
+    assert project_write_gate.route_path(request("/one/p/x")) == "/one/{name}/x"
+    assert project_write_gate.route_path(request("/two/p/x")) == "/two/{name}/x"
+    assert project_write_gate.route_path(request("/two/p/x", with_route=False)) is None
+
+
+def test_full_paths_skips_a_route_without_a_path():
+    class _Route:
+        path = None
+
+    class _App:
+        routes = [_Route()]
+
+    assert project_write_gate._full_paths(_App()) == {}
+
+
+def test_rule_for_an_unknown_route_is_a_write_to_the_active_project():
+    assert project_write_gate.rule_for("POST", None) == project_write_gate.Rule("write", "active")
+    assert project_write_gate.rule_for("POST", "/nowhere") == project_write_gate.Rule("write", "active")
+
+
+def test_path_projects_lists_each_project_once_and_nothing_unknown(db, world):
+    viewer = db.get(User, world["viewer"])
+    assert project_write_gate._path_projects(db, viewer, world["project"]) == [_project(db, world)]
+    assert project_write_gate._path_projects(db, viewer, "No Such Project") == []
+
+
+def test_the_gate_lets_an_anonymous_write_through_to_the_handler(db, world, monkeypatch):
+    """No user: the handler's own 401 decides, the gate neither refuses nor crashes."""
+    from starlette.requests import Request
+
+    import deps
+
+    monkeypatch.setattr(deps, "optional_user", lambda request, db: None)
+    scope = {"type": "http", "method": "PATCH", "headers": [], "app": main.app,
+             "path": f"/api/projects/{world['project']}/settings",
+             "path_params": {"name": world["project"]}}
+    request = Request(scope)
+    monkeypatch.setattr(project_write_gate, "route_path", lambda r: "/api/projects/{name}/settings")
+    project_write_gate.require_project_write(request, db)
+
+
+def test_a_viewer_reads_the_project(world, as_user):
+    viewer = as_user(world["viewer"])
+    assert viewer.post(f"/api/projects/{world['project']}/activate").status_code == 200
+    for url in (f"/api/projects/{world['project']}", "/api/network/generators",
+                f"/api/projects/{world['project']}/snapshots"):
+        response = viewer.get(url)
+        assert response.status_code == 200, (url, response.text[:160])
+
+
+@pytest.mark.parametrize("org_role, expected", [("admin", "edit"), ("member", None)])
+def test_an_org_admin_edits_without_a_membership_row(world, org_role, expected):
+    someone = _member(world["session_local"], _org_of(world), org_role=org_role)
+    assert _role(world["session_local"], world["project"], someone) == expected
+
+
+def test_a_user_outside_every_org_has_no_role(world):
+    uid = uuid.uuid4()
+    with world["session_local"]() as session:
+        session.add(User(id=uid, email=f"lone-{uid.hex}@example.com", password_hash="unused",
+                         status="active", is_super_admin=False, created_at=datetime.now(UTC)))
+        session.commit()
+    assert _role(world["session_local"], world["project"], uid) is None
+
+
+def test_no_project_snapshot_admits_every_tier():
+    """An unsaved draft has no project rule and no role (capture returns None)."""
+    for tier in catalogue.SAFETY_TIERS:
+        restrictions.require_allowed(None, tier)
+
+
+def test_a_rule_lost_without_a_snapshot_is_a_plain_revocation(monkeypatch):
+    monkeypatch.setattr(restrictions, "capture", lambda s: {"mode": "standard", "project_role": "view"})
+    with pytest.raises(HTTPException) as refused:
+        restrictions.require_current(None, object())
+    assert refused.value.detail["error_kind"] == "confirmation_revoked"
+
+
+def test_job_view_only_for_a_deleted_project_is_false(db, world):
+    from routers import solve_queue as queue_router
+
+    viewer = db.get(User, world["viewer"])
+    org = _project(db, world).org_id
+    gone = {"project_key": f"{org}:{uuid.uuid4()}"}
+    assert queue_router._job_view_only(db, viewer, gone) is False
+    real = {"project_key": f"{org}:{world['project']}"}
+    assert queue_router._job_view_only(db, viewer, real) is True
+
+
+def test_enqueuer_views_project_judges_only_a_complete_job(world):
+    from services import solve_queue as queue_service
+
+    job = _job(world, world["viewer"])
+    assert queue_service._enqueuer_views_project(job) is True
+    org_key = job.project_key
+    for project_key, requester in [
+        (None, world["viewer"]), ("", world["viewer"]), (org_key, None),
+        ("no-colon", world["viewer"]), ("org:not-a-uuid", world["viewer"]),
+        (org_key, "not-a-uuid"), (org_key, uuid.uuid4()),
+        (f"{org_key.split(':')[0]}:{uuid.uuid4()}", world["viewer"]),
+    ]:
+        job.project_key, job.enqueued_by_user_id = project_key, requester
+        assert queue_service._enqueuer_views_project(job) is False, (project_key, requester)

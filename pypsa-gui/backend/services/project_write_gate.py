@@ -92,9 +92,9 @@ def _parse(table: str) -> dict[tuple[str, str], Rule]:
         if key in rules:
             raise ValueError(f"route listed twice: {method} {path}")
         if kind not in {"write", "allow", "none"}:
-            raise ValueError(f"unknown kind {kind!r} for {method} {path}")
+            raise ValueError(f"unknown kind {kind} for {method} {path}")
         if kind == "write" and not re.fullmatch(r"active|handler|path:\w+", detail):
-            raise ValueError(f"unknown write target {detail!r} for {method} {path}")
+            raise ValueError(f"unknown write target {detail} for {method} {path}")
         rules[key] = Rule(kind, detail)
     return rules
 
@@ -145,8 +145,7 @@ def route_path(request: Request) -> str | None:
 
 
 def rule_for(method: str, path: str | None) -> Rule:
-    if path is None:
-        return _FAIL_CLOSED
+    """The route's row; a route the table does not know is a write to the active project."""
     return RULES.get((method, path), _FAIL_CLOSED)
 
 
@@ -172,11 +171,8 @@ def _active_project(db: DBSession) -> Project | None:
 
     from services.pypsa_service import PyPSAService
 
-    project_uuid = PyPSAService.get_active_context().project_uuid
-    if not project_uuid:
-        return None
-    try:
-        return db.get(Project, uuid.UUID(str(project_uuid)))
+    try:  # an unsaved (scratch) context has no project id: ValueError
+        return db.get(Project, uuid.UUID(str(PyPSAService.get_active_context().project_uuid)))
     except ValueError:
         return None
 

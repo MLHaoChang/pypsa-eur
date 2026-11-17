@@ -973,10 +973,8 @@ def requeue_job(
         project = db.get(Project, project_uuid)
         if project is None:
             raise not_found
-        # Requeue solves and saves this project: the caller must be able to
-        # see it (404, like enqueue's resolve_project) and edit it.
-        if project_acl.project_role(db, user, project) is None:
-            raise not_found
+        # Requeue solves and saves this project; `_visible_job_or_404` above
+        # already hid it from anyone who cannot see it. A viewer may not.
         project_write_gate.require_writable(db, user, project)
         project_name = project.name
         # HOLDER CHECK — the precondition for this route's foreign-lock
