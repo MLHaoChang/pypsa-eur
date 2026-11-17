@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { hintCurrencyNote, CATEGORY_WORDS, categoryWords, ESCALATION_WORDS, escalationWords, STREAM_WORDS, streamWords } from './businessCaseWords'
+import { hintCurrencyNote, ledgerKeyWords, outputLabelWords, CATEGORY_WORDS, categoryWords, ESCALATION_WORDS, escalationWords, STREAM_WORDS, streamWords } from './businessCaseWords'
 
 const BACKEND = resolve(__dirname, '../../../../../backend')
 const read = (p: string) => readFileSync(resolve(BACKEND, p), 'utf8')
@@ -52,5 +52,22 @@ describe('a public range in another currency (walk 04)', () => {
     expect(hintCurrencyNote('EUR/kg', 'eur')).toBeNull()
     expect(hintCurrencyNote('GBP/kW_year', null)).toBeNull()
     expect(hintCurrencyNote('kg', 'EUR')).toBeNull()
+  })
+})
+
+describe('locked rows and model outputs in display names (walk 06, UX 2)', () => {
+  it('words a ledger key by the item it names', () => {
+    expect(ledgerKeyWords('bill:network_charges')).toBe('Network charges')
+    expect(ledgerKeyWords('asset:fom:Generator:pv_plant')).toBe('PV plant')
+    expect(ledgerKeyWords('contract:ppa:ppa_energy')).toBe('PPA energy')
+    expect(ledgerKeyWords('bill_degradation:pv_plant')).toBe('Degradation, PV plant')
+    // A name a person typed is kept.
+    expect(ledgerKeyWords('contract:ppa:Wind PPA 2030')).toBe('Wind PPA 2030')
+  })
+  it('words the asset at the end of an output label, and keeps other labels', () => {
+    expect(outputLabelWords('Capacity in service: wind_farm')).toBe('Capacity in service: Wind farm')
+    expect(outputLabelWords('Capacity in service: bess')).toBe('Capacity in service: BESS')
+    expect(outputLabelWords('Served IT energy')).toBe('Served IT energy')
+    expect(outputLabelWords('Capacity in service: Rooftop PV')).toBe('Capacity in service: Rooftop PV')
   })
 })

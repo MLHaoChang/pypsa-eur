@@ -2,6 +2,8 @@
 // categories, escalation classes and the P&L streams. A test pins each list to the
 // backend's ids (`models/business_case.py`, `services/finance/cashflow.py`).
 
+import { displayName } from '../../../utils/displayName'
+
 export const CATEGORY_WORDS: Record<string, string> = {
   // revenue
   product_sale: 'Product sales',
@@ -99,4 +101,29 @@ export function hintCurrencyNote(hintUnit: string, projectCurrency: string | nul
   const proj = projectCurrency?.trim().toUpperCase()
   if (!cur || !proj || cur === proj || !/^[A-Z]{3}$/.test(cur)) return null
   return `In ${cur}, not converted: type the price in ${proj}, the project currency.`
+}
+
+const ID = /^[a-z0-9]+(?:[_-][a-z0-9]+)*$/
+/** An id in its display name, with "ppa" read as PPA (`ppa_energy` → "PPA energy"). */
+const idWords = (id: string) => displayName(id).replace(/\bPpa\b|\bppa\b/g, 'PPA')
+
+/** A model-output label whose tail is a raw asset id ("Capacity in service: wind_farm")
+ *  reads the asset's display name ("Capacity in service: Wind farm"); any other label
+ *  is the server's words, kept (walk 06, UX 2). */
+export function outputLabelWords(label: string): string {
+  const i = label.lastIndexOf(': ')
+  if (i < 0) return label
+  const tail = label.slice(i + 2)
+  return ID.test(tail) ? `${label.slice(0, i + 2)}${idWords(tail)}` : label
+}
+
+/** The ledger key of a locked energy-model row in words (walk 06, UX 2):
+ *  `bill:network_charges` → "Network charges", `asset:fom:Generator:pv_plant` →
+ *  "PV plant", `contract:ppa:ppa_energy` → "PPA energy", `bill_degradation:pv_plant`
+ *  → "Degradation, PV plant". The last segment names the item; never an id. */
+export function ledgerKeyWords(key: string): string {
+  const parts = key.split(':').filter(Boolean)
+  const last = parts[parts.length - 1] ?? ''
+  const name = ID.test(last) ? idWords(last) : last
+  return parts[0] === 'bill_degradation' ? `Degradation, ${name}` : name
 }

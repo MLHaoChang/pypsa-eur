@@ -16,7 +16,9 @@ import {
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { openPanel } from '../openPanel'
-import { categoryWords, escalationWords, hintCurrencyNote, streamWords } from './businessCaseWords'
+import {
+  categoryWords, escalationWords, hintCurrencyNote, ledgerKeyWords, outputLabelWords, streamWords,
+} from './businessCaseWords'
 import { financeApi } from '../../../api/finance'
 import { ACTION } from './actionStyle'
 import BusinessCaseRun from './BusinessCaseRun'
@@ -54,13 +56,13 @@ function SourceSelect({ line, opts, onChange, invalid, label }: {
   const known = current === 'typed' || current.startsWith('share_of:')
     || outputs.some(o => linkedSource(o.id, opts?.catalogue_version ?? '1') === current)
   return (
-    <select aria-label={label} className={CELL + ' max-w-[11rem]' + (invalid ? BAD : '')} value={current}
+    <select aria-label={label} className={CELL + ' max-w-[16rem]' + (invalid ? BAD : '')} value={current}
             aria-invalid={invalid || undefined} onChange={e => onChange(e.target.value)}>
       <option value="typed">Typed</option>
       {outputs.length > 0 && (
         <optgroup label="From the model">
           {outputs.map(o => (
-            <option key={o.id} value={linkedSource(o.id, opts?.catalogue_version ?? '1')}>{o.label}</option>
+            <option key={o.id} value={linkedSource(o.id, opts?.catalogue_version ?? '1')}>{outputLabelWords(o.label)}</option>
           ))}
         </optgroup>
       )}
@@ -243,7 +245,7 @@ function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean 
           {(locked ?? []).map(r => (
             <li key={`${r.stream}/${r.key}`} data-testid="bc-locked-row">
               <span>{streamWords(r.stream)}</span>
-              {r.key && r.key !== r.stream && <span className="text-muted"> · {r.key}</span>}
+              {r.key && r.key !== r.stream && <span className="text-muted" title={r.key}> · {ledgerKeyWords(r.key)}</span>}
               {r.superseded_by.length > 0 && (
                 <span className="text-muted"> · replaced in {r.dropped.length} year{r.dropped.length === 1 ? '' : 's'} by {r.superseded_by.join(', ')}</span>
               )}
