@@ -141,6 +141,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         set_finance_inputs solve_ppa_price start_decision_study update_decision_study set_study_parameter
         get_study_findings get_poc_state get_value_flow_designer
         get_supply_architectures compare_supply_architectures
+        get_system_type_map compare_system_types
         get_grid_extension_break_even
         run_business_case get_business_case set_business_case_lines abort_business_case
         apply_business_case_preset""",

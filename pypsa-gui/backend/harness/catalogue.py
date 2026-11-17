@@ -5386,6 +5386,45 @@ TOOLS.extend([
        ["project", "study_id"]),
 ])
 TOOLS.extend([
+    # homer-parity 03b: HOMER's optimal system type map, the winning supply
+    # architecture over two sensitivity variables.
+    _t("compare_system_types",
+       "Map which supply architecture wins over two sensitivity variables (HOMER's optimal system type map), in "
+       "the background. Each cell applies both multipliers to a copy of the base project's SAVED network and "
+       "compares the supply architectures (PV, wind, battery, genset, grid; the others OMITTED, each sized by the "
+       "optimiser), so a 3x3 map with 4 architectures is 36 solves, charged to the campaign (at most 120: use "
+       "fewer values or `architectures` to name fewer). x_variable and y_variable (different) are one of "
+       "genset_fuel_price, grid_energy_price, solar_resource, wind_resource, load, pv_capital_cost, "
+       "battery_capital_cost, genset_capital_cost; x_values and y_values are 2-5 multipliers above 0 and at most 10 on the "
+       "project's own value (default 0.5, 1, 1.5). action='abort' stops it before its next solve. `project` is "
+       "the study's base project. Returns {status, solves_estimated, architectures, axes} at once; poll "
+       "get_system_type_map. Refusals: study_running, solver_in_flight, baseline_not_saved, unknown_variable, "
+       "axes_not_different, axis_values_invalid, variable_not_in_network (the project has no such asset or its "
+       "value is zero), campaign_budget_invalid (names the solve count), no_architectures, "
+       "unknown_architecture, system_type_map_never_run (abort). Safety: execution_long_running.",
+       {"project": {"type": "string"},
+        "study_id": {"type": "string"},
+        "action": {"type": "string", "enum": ["start", "abort"]},
+        "x_variable": {"type": "string", "maxLength": 64},
+        "y_variable": {"type": "string", "maxLength": 64},
+        "x_values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+                     "minItems": 2, "maxItems": 5},
+        "y_values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+                     "minItems": 2, "maxItems": 5},
+        "architectures": {"type": "array", "items": {"type": "string", "maxLength": 64},
+                          "minItems": 1, "maxItems": 16},
+        "budget_solves": {"type": "integer", "minimum": 1, "maximum": 120}},
+       ["project", "study_id"]),
+    _t("get_system_type_map",
+       "Read a decision study's system type map. While it runs: {running: {status, current, solves_charged}}. "
+       "Afterwards: {status, stale (the base project changed since: map again), axes: [{label, values}], cells: "
+       "[{i, j, winner_label, runner_up_gap_eur_per_year, all_solved, clipped: [{label, share}], rows: [{label, status, total_cost_eur_per_year}]}]}. "
+       "i runs along the first axis, j along the second. A cell with no winner had no architecture solved; a "
+       "null gap or cost was not computed: NEVER report it as 0. 404 system_type_map_never_run. Safety: read.",
+       {"project": {"type": "string"}, "study_id": {"type": "string"}},
+       ["project", "study_id"]),
+])
+TOOLS.extend([
     # homer-parity 03d: the grid-extension break-even distance for one 03a row.
     _t("get_grid_extension_break_even",
        "How far could the grid be extended before an off-grid supply architecture is cheaper (HOMER's "
@@ -5980,6 +6019,11 @@ TOOL_ROUTES: dict[str, list] = {
         ("POST", "/api/projects/{name}/studies/{study_id}/supply-architectures/abort")],
     "get_supply_architectures": [
         ("GET", "/api/projects/{name}/studies/{study_id}/supply-architectures")],
+    "compare_system_types": [
+        ("POST", "/api/projects/{name}/studies/{study_id}/system-type-map"),
+        ("POST", "/api/projects/{name}/studies/{study_id}/system-type-map/abort")],
+    "get_system_type_map": [
+        ("GET", "/api/projects/{name}/studies/{study_id}/system-type-map")],
     "get_grid_extension_break_even": [
         ("POST", "/api/projects/{name}/studies/{study_id}/grid-extension-break-even")],
     # project settings and scope (5) — LV08 B1

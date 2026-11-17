@@ -1,0 +1,16 @@
+{
+  "kinds": {
+    "system_type_map_action_invalid": {
+      "surface": "inline",
+      "why": "homer-parity 03b: compare_system_types was asked for an action other than start or abort. The model's slip; it reads the message and retries with a valid action."
+    },
+    "system_type_map_never_run": {
+      "surface": "inline",
+      "why": "homer-parity 03b: reading or aborting a study's system type map before it was ever run. A sequencing slip; the assistant starts it with compare_system_types first."
+    },
+    "axis_missing": {
+      "surface": "inline",
+      "why": "homer-parity 03b: compare_system_types was started without both x_variable and y_variable. The model's slip; it names the two variables and retries."
+    }
+  }
+}

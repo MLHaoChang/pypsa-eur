@@ -35,7 +35,7 @@ import re
 import uuid
 from datetime import datetime, UTC
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -1629,6 +1629,108 @@ def abort_supply_architectures(study_id: str,
     try:
         return supply_architecture_runner.abort(study_id, base_row=base,
                                                 base_dir=_project_dir(project))
+    except study_runner.RunRefused as exc:
+        raise _run_error(exc) from None
+
+
+# ── homer-parity 03b: the optimal system type map ──────────────────────────
+
+class SystemTypeMapAxis(BaseModel):
+    """One axis: a variable id and the multipliers to try (3 when omitted)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    variable: str = Field(min_length=1, max_length=64)
+    values: list[Annotated[float, Field(allow_inf_nan=False)]] | None = Field(
+        default=None, max_length=8)
+
+
+class SystemTypeMapRequest(BaseModel):
+    """Two different variables, each a multiplier on the base project's own
+    value; ``architectures`` names the ones to compare (all when omitted)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    x: SystemTypeMapAxis
+    y: SystemTypeMapAxis
+    architectures: list[str] | None = Field(default=None, min_length=1, max_length=16)
+    budget_solves: int | None = Field(default=None, ge=1, le=120)
+
+
+@router.post("/{study_id}/system-type-map", status_code=202)
+def start_system_type_map(study_id: str, body: SystemTypeMapRequest,
+                          project: AuthorizedProject = ProjectAccessDep,
+                          db: DBSession = Depends(get_db),
+                          user: User | None = Depends(optional_user)) -> dict:
+    """
+    The optimal system type map (homer-parity 03b): over two variables, the
+    cheapest supply architecture in each cell, each cell one 03a comparison on
+    a copy of the saved base (`system_type_map_runner.start`). 409 while any
+    study or a solve holds the base project or it has unsaved edits; 422 for
+    a variable the project cannot vary, a bad axis or a budget over the
+    campaign's limit.
+    """
+    from routers.projects import _enforce_project_lock
+    from services.study import system_type_map_runner
+
+    _refuse_unless_enabled()
+    base = _base_row(project, db, user)
+    if base is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    _enforce_project_lock(db, base, user)
+    _load(project, study_id)
+    try:
+        return system_type_map_runner.start(
+            study_id, base_row=base, db=db, user_id=user.id,
+            x=body.x.model_dump(), y=body.y.model_dump(),
+            architecture_ids=body.architectures, budget_solves=body.budget_solves)
+    except study_runner.RunRefused as exc:
+        raise _run_error(exc) from None
+
+
+@router.get("/{study_id}/system-type-map")
+def get_system_type_map(study_id: str,
+                        project: AuthorizedProject = ProjectAccessDep,
+                        db: DBSession = Depends(get_db),
+                        user: User | None = Depends(optional_user)) -> dict:
+    """The running map's progress, else the last one's cells with ``stale``
+    when the base project changed since (404 if never run)."""
+    from services.study import system_type_map_runner
+
+    _refuse_unless_enabled()
+    _load(project, study_id)
+    base = _base_row(project, db, user)
+    if base is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    rec = system_type_map_runner.get(study_id, base_row=base,
+                                     base_dir=_project_dir(project))
+    if rec is None:
+        raise HTTPException(404, detail={
+            "error_kind": "system_type_map_never_run",
+            "message": "the system type map has not been run"})
+    return rec
+
+
+@router.post("/{study_id}/system-type-map/abort")
+def abort_system_type_map(study_id: str,
+                          project: AuthorizedProject = ProjectAccessDep,
+                          db: DBSession = Depends(get_db),
+                          user: User | None = Depends(optional_user)) -> dict:
+    """Stop a running map before its next solve; the cells not reached read
+    ``not_reached`` and every throw-away fork is removed. Idempotent; 404
+    when it never ran."""
+    from routers.projects import _enforce_project_lock
+    from services.study import system_type_map_runner
+
+    _refuse_unless_enabled()
+    base = _base_row(project, db, user)
+    if base is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    _enforce_project_lock(db, base, user)
+    _load(project, study_id)
+    try:
+        return system_type_map_runner.abort(study_id, base_row=base,
+                                            base_dir=_project_dir(project))
     except study_runner.RunRefused as exc:
         raise _run_error(exc) from None
 

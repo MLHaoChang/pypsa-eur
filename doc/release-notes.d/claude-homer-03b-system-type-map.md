@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The optimal system type map (backend): over two sensitivity variables (for example the genset fuel price and the load), the cheapest supply architecture in each cell with its cost gap to the runner-up, from one architecture comparison per cell. Start, read and stop it from the assistant (compare system types, get the system type map).

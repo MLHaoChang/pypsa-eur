@@ -4090,6 +4090,60 @@ def get_supply_architectures(project: str, study_id: str) -> dict:
                      "has no best system.")}
 
 
+def compare_system_types(project: str, study_id: str, action: str = "start",
+                         x_variable: str | None = None, y_variable: str | None = None,
+                         x_values: list[float] | None = None,
+                         y_values: list[float] | None = None,
+                         architectures: list[str] | None = None,
+                         budget_solves: int | None = None) -> dict:
+    """
+    homer-parity 03b: start (`POST .../system-type-map`) or stop (`.../abort`)
+    the optimal system type map; poll `get_system_type_map`.
+    """
+    from routers import studies as R
+
+    if action not in ("start", "abort"):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "system_type_map_action_invalid",
+            "message": f"action must be 'start' or 'abort', got '{_cut(action, 40)}'"})
+    ap = _authorized_project(project)
+    if action == "abort":
+        return {"action": action, **_route(R.abort_system_type_map, study_id, project=ap)}
+    if not x_variable or not y_variable:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "axis_missing",
+            "message": "name both variables: x_variable and y_variable"})
+    body = R.SystemTypeMapRequest(
+        x=R.SystemTypeMapAxis(variable=x_variable, values=x_values),
+        y=R.SystemTypeMapAxis(variable=y_variable, values=y_values),
+        architectures=architectures, budget_solves=budget_solves)
+    out = _route(R.start_system_type_map, study_id, body, project=ap)
+    return {"action": action, **out,
+            "next_step": ("get_system_type_map says how far it is, and reads the map "
+                          "once it has finished.")}
+
+
+def get_system_type_map(project: str, study_id: str) -> dict:
+    """`GET .../system-type-map`: progress while it runs, else each cell's winner
+    and its cost gap to the runner-up, with every architecture's status."""
+    from routers import studies as R
+
+    rec = _route(R.get_system_type_map, study_id, project=_authorized_project(project))
+    if rec.get("status") == "running":
+        return {"running": {k: rec.get(k) for k in (
+            "status", "current", "architectures", "axes", "solves_estimated",
+            "solves_charged")}}
+    return {"status": rec.get("status"), "stale": rec.get("stale"),
+            "axes": rec.get("axes"), "cells": rec.get("cells"),
+            "error": rec.get("error"), "reason": rec.get("reason"),
+            "note": ("A cell with no winner had no architecture solved there; all_solved "
+                     "false means some architecture did not solve in it. A gap is per "
+                     "year and null when fewer than two architectures solved: never "
+                     "report it as 0. A cell's clipped list names a solar or wind "
+                     "multiplier held at nameplate and the share of the resource "
+                     "energy that removed.")}
+
+
 def get_grid_extension_break_even(project: str, study_id: str, architecture_id: str,
                                   eur_per_km: float, grid_supply_npc: float,
                                   grid_basis: dict, fixed_eur: float = 0.0,
@@ -10388,6 +10442,8 @@ DISPATCHERS: dict[str, Any] = {
     # supply architectures (2) — homer-parity 03a
     "compare_supply_architectures": compare_supply_architectures,
     "get_supply_architectures": get_supply_architectures,
+    "compare_system_types": compare_system_types,
+    "get_system_type_map": get_system_type_map,
     "get_grid_extension_break_even": get_grid_extension_break_even,
     # project settings and scope (5) — LV08 B1
     "get_site_template_form": get_site_template_form,

@@ -309,6 +309,9 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/studies.py", "start_supply_architectures"): frozenset(),
     ("routers/studies.py", "get_supply_architectures"):   frozenset(),
     ("routers/studies.py", "abort_supply_architectures"): frozenset(),
+    ("routers/studies.py", "start_system_type_map"): frozenset(),
+    ("routers/studies.py", "get_system_type_map"):   frozenset(),
+    ("routers/studies.py", "abort_system_type_map"): frozenset(),
     # S7: the decision report — assembled once, then rendered; every
     # rendering shows the same verdict facts and case KPIs.
     ("routers/studies.py", "assemble_report"):        frozenset({"decision_report"}),
