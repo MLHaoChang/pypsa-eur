@@ -125,11 +125,15 @@ function ConnectionLimitRow({ link, named, staged, liveStudy }: {
       </span>
       {!staged && (
         <button type="button" data-testid="hub-site-connection-limit-edit" disabled={liveStudy}
-          title={liveStudy ? LIVE_STUDY_EDIT : 'Change the connection limit here'}
           onClick={openConnectionLimitEditor}
-          className="shrink-0 text-[11px] text-accent hover:underline disabled:opacity-50">
+          className="shrink-0 text-[11px] text-text underline disabled:opacity-50">
           Edit ›
         </button>
+      )}
+      {!staged && liveStudy && (
+        <span data-testid="hub-site-connection-limit-paused" className="basis-full text-[11px] text-muted">
+          {LIVE_STUDY_EDIT}
+        </span>
       )}
     </li>
   )
