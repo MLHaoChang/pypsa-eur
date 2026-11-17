@@ -69,6 +69,14 @@ A profile may carry these optional keys:
     seen from the connection point and an order that counts (6k +- 1 and
     the units' spectra) (datacenter grid readiness issue 12, the harmonic
     impedance scan), a positive number.
+``ssti_uif_threshold``
+    The unit interaction factor above which a synchronous machine near a
+    converter plant needs an EMT SSTI study (grid-compliance GC-08, TRGC 19),
+    a positive number.
+``subsync_torsional_clearance_hz``
+    The least distance, in Hz, between the complement f0 - f_er of a series
+    resonance seen from the connection point and a machine's torsional mode
+    (grid-compliance GC-08, TRGC 20), a positive number.
 ``pst_limit``, ``plt_limit``
     The short-term and long-term flicker severity limits at the connection
     point (grid-to-process issue 17), positive numbers. The flicker screen
@@ -131,6 +139,27 @@ A profile may carry these optional keys:
     and optionally a ``kind`` (``DYNAMIC_KINDS``) and a ``unit``.
     ``reported_requirements`` lists them with status ``reported``, as
     "needs an RMS study"; they are never passed and never counted in a verdict.
+Dynamic envelopes (GC-07; ``readback/judge.py`` judges read-back results
+against them; each a limit with ``clause`` and ``source`` like every other)
+    ``lvrt_curve`` / ``hvrt_curve``: ``points`` ``[[t_s, v_pu], ...]``, the
+    time from fault inception and the voltage the plant must ride through
+    (on or above the LVRT curve, on or below the HVRT curve). Times start at 0
+    and never decrease; linear between distinct times, a repeated time is a
+    vertical step (the later point holds from that time on), the last value
+    holds after the last point.
+    ``reactive_current_injection``: ``k_gain`` (additional reactive current
+    per voltage deviation beyond the deadband, pu/pu), ``deadband_pu``,
+    ``target_pct`` of that current to reach within ``rise_time_s``.
+    ``active_power_recovery``: back to ``recovery_pct`` of the pre-fault
+    active power within ``time_s`` of fault clearing, optionally at an average
+    rate of at least ``ramp_min_pu_per_s``.
+    ``setpoint_step_response``: ``rise_level_pct`` of the change reached
+    within ``rise_time_s``, inside ``settling_band_pct`` of the change within
+    ``settling_time_s``, overshoot at most ``overshoot_max_pct`` of the change.
+    ``frequency_droop``: ``droop_pct`` on ``nominal_hz`` beyond
+    ``deadband_hz``, measured droop within ``tolerance_pct`` percentage points.
+    Every number is finite; percentages in (0, 100] (``overshoot_max_pct``
+    from 0); times from 0. An absent key leaves the check ``unknown``.
 ``notes``
     Text the report carries with the profile (scope, what is unverified).
 
@@ -174,6 +203,7 @@ _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_
                   "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
                   "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
                   "unbalance_limit_pct",
+                  "ssti_uif_threshold", "subsync_torsional_clearance_hz",
                   "current_tdd_standard",
                   "q_capability_unit",
                   "voltage_deadband_pct",
@@ -185,6 +215,7 @@ _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
                           "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct", "harmonic_resonance_clearance_h",
+                          "ssti_uif_threshold", "subsync_torsional_clearance_hz",
                           "dynamic_requirements", "notes",
                           "document", "name", "pst_limit", "plt_limit",
                           "unbalance_limit_pct",
@@ -210,6 +241,27 @@ DYNAMIC_KINDS = ("vrt", "post_fault_recovery", "dynamic_voltage_support", "rocof
                  "fast_frequency_response", "pod")
 _log = logging.getLogger(__name__)
 _BAND_PATH = re.compile(r"voltage_bands\[(0|[1-9][0-9]*)\]")
+#: The dynamic envelopes (GC-07): the field each must carry, with its range.
+#: A range is (low, high, low_inclusive); high is inclusive, None is unbounded.
+_PCT = (0.0, 100.0, False)
+_FROM_ZERO = (0.0, None, True)
+_POSITIVE = (0.0, None, False)
+DYNAMIC_ENVELOPES = {
+    "lvrt_curve": {},
+    "hvrt_curve": {},
+    "reactive_current_injection": {"k_gain": _POSITIVE, "deadband_pu": _FROM_ZERO, "target_pct": _PCT,
+                                   "rise_time_s": _FROM_ZERO},
+    "active_power_recovery": {"recovery_pct": _PCT, "time_s": _FROM_ZERO},
+    "setpoint_step_response": {"rise_level_pct": _PCT, "rise_time_s": _FROM_ZERO, "settling_time_s": _FROM_ZERO,
+                               "settling_band_pct": _PCT, "overshoot_max_pct": (0.0, 100.0, True)},
+    "frequency_droop": {"droop_pct": _PCT, "deadband_hz": _FROM_ZERO, "nominal_hz": _POSITIVE,
+                        "tolerance_pct": _PCT},
+}
+#: Optional fields of a dynamic envelope.
+_DYNAMIC_ENVELOPE_OPTIONAL = {"active_power_recovery": {"ramp_min_pu_per_s": _POSITIVE}}
+DYNAMIC_ENVELOPE_KEYS = tuple(DYNAMIC_ENVELOPES)
+_SINGLE_LIMITS += DYNAMIC_ENVELOPE_KEYS
+PROFILE_KEYS = PROFILE_KEYS | frozenset(DYNAMIC_ENVELOPE_KEYS)
 
 
 def _is_number(v) -> bool:
@@ -299,6 +351,7 @@ def _check_profile(name, p):
     for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct", "thd_limit_pct",
                 "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
                 "unbalance_limit_pct",
+                "ssti_uif_threshold", "subsync_torsional_clearance_hz",
                 "voltage_deadband_pct",
                 "angle_limit_deg",
                 "pv_margin_min_pct"):
@@ -359,6 +412,7 @@ def _check_profile(name, p):
     _check_load_variation(p, where)
     if "dynamic_requirements" in p:
         _check_dynamic(p["dynamic_requirements"], where)
+    _check_dynamic_envelopes(p, where)
     if "notes" in p and not isinstance(p["notes"], str):
         raise ContractError(f"{where}: notes must be text, got {type(p['notes']).__name__}")
     unknown = sorted(set(p) - PROFILE_KEYS)
@@ -454,6 +508,52 @@ def _check_dynamic(rows, where):
         if r["id"] in seen:
             raise ContractError(f"{where}: {at} has duplicate id {r['id']!r}")
         seen.add(r["id"])
+
+
+def _in_range(v, rng) -> bool:
+    low, high, low_inclusive = rng
+    return (v >= low if low_inclusive else v > low) and (high is None or v <= high)
+
+
+def _range_text(rng) -> str:
+    low, high, low_inclusive = rng
+    return f"{'[' if low_inclusive else '('}{low:g}, {'inf)' if high is None else f'{high:g}]'}"
+
+
+def _check_curve(key, lim, where):
+    points = lim.get("points")
+    if not isinstance(points, list) or not points:
+        raise ContractError(f"{where}: {key}.points must be a non-empty list of [t_s, v_pu]")
+    for i, pt in enumerate(points):
+        if (not isinstance(pt, (list, tuple)) or len(pt) != 2 or not all(_is_number(x) for x in pt)
+                or pt[0] < 0 or pt[1] < 0):
+            raise ContractError(f"{where}: {key}.points[{i}] must be [t_s, v_pu], both finite numbers from 0, "
+                                f"got {pt!r}")
+        if i == 0 and pt[0] != 0:
+            raise ContractError(f"{where}: {key}.points must start at t = 0 s (fault inception), got {pt[0]!r}")
+        if i and pt[0] < points[i - 1][0]:
+            raise ContractError(f"{where}: {key}.points[{i}] is at {pt[0]!r} s, before the point ahead of it "
+                                f"({points[i - 1][0]!r} s); times never decrease")
+
+
+def _check_dynamic_envelopes(p, where):
+    for key, fields in DYNAMIC_ENVELOPES.items():
+        if key not in p:
+            continue
+        lim = p[key]
+        _check_limit(key, lim, where)
+        if key.endswith("_curve"):
+            _check_curve(key, lim, where)
+        optional = _DYNAMIC_ENVELOPE_OPTIONAL.get(key, {})
+        for field, rng in {**fields, **optional}.items():
+            if field not in lim:
+                if field in optional:
+                    continue
+                raise ContractError(f"{where}: {key} has no {field}; it states {sorted(fields)}")
+            v = lim[field]
+            if not _is_number(v) or not _in_range(v, rng):
+                raise ContractError(f"{where}: {key}.{field} must be a finite number in {_range_text(rng)}, "
+                                    f"got {v!r}")
 
 
 def reported_requirements(profile: dict) -> list:

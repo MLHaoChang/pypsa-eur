@@ -103,6 +103,9 @@ const THEME_KEY = 'network-diagram:theme'
 // on the old default pick up the new one instead of being pinned forever.
 // Generation 2 = the dark identity that matches the sign-in page (retuned
 // from mint to red without changing the DEFAULT, so no bump was needed).
+// THEME-LIGHT-1 moved the default to OS-preference-then-light without a bump:
+// since generation 2 only setTheme/toggleTheme write THEME_KEY, so a stored
+// value is an explicit choice and is kept.
 const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
 const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
@@ -265,10 +268,14 @@ function storedTheme(): Theme {
     const v = localStorage.getItem(THEME_KEY)
     if (v === 'light' || v === 'dark') return v
   } catch { /* noop */ }
-  // Dark is the product identity — it is what the sign-in page hands off to,
-  // so the workbench opens in it regardless of the OS preference. The toggle
-  // (and its localStorage write) still lets anyone stay in light.
-  return 'dark'
+  // No explicit choice (THEME_KEY is only written by setTheme/toggleTheme):
+  // follow the OS, else light (THEME-LIGHT-1). The boot scripts in spa.html
+  // and index.html make the same decision before first paint;
+  // uiStore.theme.test.ts runs all three against the same cases.
+  try {
+    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark'
+  } catch { /* noop */ }
+  return 'light'
 }
 
 function storedDensity(): Density {

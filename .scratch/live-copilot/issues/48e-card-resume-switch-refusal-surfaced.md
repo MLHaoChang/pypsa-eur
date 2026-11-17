@@ -3,7 +3,7 @@
 
 # LC-48e — A card's resume refused by the goal-switch guard is shown, not swallowed
 
-Status: ready-for-agent
+Status: done
 Model tier: opus
 Size: S
 Blocked by: none
@@ -22,3 +22,7 @@ Owner decision LC48E-SURFACE-1: surface the refusal on the card (name the active
 
 - The refusal reaches the user: the card or the chat shows that the run waits for the active task, naming it as the 409's `active` does. Alternatively the run resumes on its own once the active task ends; pick one with the owner.
 - A test drives the data-request answer while another task of the same chat runs. It asserts the answer is stored, the run is not resumed, and the user-visible signal is present. The test is red before the fix.
+
+## Resolution
+
+Owner decision LC48E-SURFACE-1: show the refusal, no auto-resume. `run_envelope.answering` catches the 409 `switch_in_progress` from `resume_task` and records `run.held` (the 409's `active`) through `assistant_tasks.note_held`; `_run_view` carries it and the RunMonitor's "Waiting for you" block shows `run-held`. The next resume the guard lets through drops it; `note_held` writes only while the run still sits at the answer (a resume can land first). The view reads the active task now: "has ended" once it ends, its title only for a reader who can read it, and nothing on a cancelled or completed run. Tests: `test_a_resume_refused_by_the_switch_guard_is_shown_on_the_run_card`, `test_the_held_note_goes_once_the_run_resumes` (tests/test_run_intake_grant.py); the RunMonitor vitest `held_by_switch`.

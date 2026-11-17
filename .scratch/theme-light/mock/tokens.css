@@ -1,0 +1,38 @@
+/* Proposed THEME-LIGHT-1 tokens for the mock. Accent and band values are
+   PLACEHOLDERS until the style extract arrives; dark = current shipped theme. */
+:root, :root[data-theme="light"] {
+  --bg: #ffffff; --bg-2: #f8f7f7; --panel: #ffffff; --nav: #faf8f8;
+  --canvas: #fcfbfb; --canvas-dot: #e4dfe0;
+  --border: #ebe6e7; --border-2: #d9d2d4; --grid: #efebec;
+  --ink: #17181c; --ink-dim: #5a5f69; --ink-faint: #6b707a; --axis: #5f6672; --legend: #474c56;
+  --accent: #c41230; --accent-700: #9e0e26; --accent-100: #f6d3d8; --accent-50: #fdf0f2; --on-accent: #ffffff;
+  --accent-gradient: linear-gradient(135deg, #e0344f, #c41230 55%, #9e0e26);
+  --tint: #fbf4f5;
+  --band-gradient:
+    radial-gradient(ellipse 700px 160px at 85% 0%, rgba(196, 18, 48, 0.07), transparent 70%),
+    linear-gradient(180deg, #ffffff 0%, #fbf3f4 100%);
+  --success: #15803d;
+  --shadow-sm: 0 1px 2px rgba(23, 24, 28, 0.06), 0 1px 1px rgba(23, 24, 28, 0.03);
+  --ring-accent: 0 0 0 3px rgba(196, 18, 48, 0.16);
+  --map-water: #eef3f7; --map-land: #faf9f8;
+  --carrier-electricity: #2563eb; --carrier-h2: #7c3aed; --carrier-wind: #16a34a; --carrier-solar: #b45309;
+  --carrier-hydro: #1e40af; --carrier-ccgt: #0284c7; --carrier-coal: #57534e;
+}
+:root[data-theme="dark"] {
+  --bg: #151112; --bg-2: #1b1617; --panel: #211b1c; --nav: #131011;
+  --canvas: #100d0e; --canvas-dot: #3a3133;
+  --border: #2e2729; --border-2: #3d3437; --grid: #2e2729;
+  --ink: #f4eaea; --ink-dim: #b9a7a9; --ink-faint: #9e8a8d; --axis: #9e8a8d; --legend: #c6b3b5;
+  --accent: #ff5252; --accent-700: #e03131; --accent-100: #3a1214; --accent-50: #260c0e; --on-accent: #14090a;
+  --accent-gradient: linear-gradient(135deg, #ff8a8a, #ff5252 55%, #e03131);
+  --tint: #1e1718;
+  --band-gradient:
+    radial-gradient(ellipse 700px 160px at 85% 0%, rgba(255, 82, 82, 0.10), transparent 70%),
+    linear-gradient(180deg, #1b1617 0%, #151112 100%);
+  --success: #4ade80;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45), 0 1px 1px rgba(0, 0, 0, 0.3);
+  --ring-accent: 0 0 0 3px rgba(255, 82, 82, 0.22);
+  --map-water: #0f1416; --map-land: #1b1617;
+  --carrier-electricity: #60a5fa; --carrier-h2: #c084fc; --carrier-wind: #16a34a; --carrier-solar: #b45309;
+  --carrier-hydro: #3b82f6; --carrier-ccgt: #38bdf8; --carrier-coal: #a8a29e;
+}
