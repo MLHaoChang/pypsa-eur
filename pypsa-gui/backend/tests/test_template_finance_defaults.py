@@ -253,3 +253,41 @@ def test_the_single_year_hub_and_island_cases_establish_tax(reset_backend, tid, 
     _case_, res = _case(tid)
     assert res.reasons == {}
     assert res.metrics["project_post_tax_npv"] == pytest.approx(npv, rel=1e-6)
+
+
+def test_the_data_centre_network_differs_from_master_only_in_the_sunk_typing(monkeypatch):
+    """GK B2 condition 2 (a): typing the campus as sunk changes `overnight_cost`
+    and `discount_rate` on the 7 existing rows and nothing else in any `n.*`
+    frame; `capital_cost` stays 0, so the LP and the system cost are master's.
+
+    Without the typing (`DC_EXISTING` empty) the build is master's network:
+    checked once against a1ce55d89, where a digest of every static and
+    time-varying frame matched with those 14 cells masked."""
+    import pandas as pd
+
+    typed = T.build_eh_datacenter()
+    monkeypatch.setattr(T, "DC_EXISTING", ())
+    untyped = {c.name: c for c in T.build_eh_datacenter().components}
+    changed = set()
+    for c in typed.components:
+        u = untyped.pop(c.name)
+        a, b = c.static, u.static
+        assert list(a.index) == list(b.index) and list(a.columns) == list(b.columns), c.name
+        for col in a.columns:
+            same = a[col].eq(b[col]) | (a[col].isna() & b[col].isna())
+            changed |= {(c.list_name, row, col) for row in a.index[~same]}
+        assert sorted(k for k, v in c.dynamic.items() if not v.empty) == \
+            sorted(k for k, v in u.dynamic.items() if not v.empty), c.name
+        for k, ts in c.dynamic.items():
+            if not ts.empty:
+                pd.testing.assert_frame_equal(ts, u.dynamic[k], obj=f"{c.list_name}_t.{k}")
+    assert not untyped
+    existing = {"genset_1", "genset_2", "genset_3", "genset_4", "rooftop_pv", "ups_battery",
+                "site_transformer"}
+    assert {col for *_, col in changed} == {"overnight_cost", "discount_rate"}
+    assert {r for _, r, _ in changed} == existing and len(changed) == 14
+    for f, r in {(f, r) for f, r, _ in changed}:
+        df = getattr(typed, f)
+        assert (df.at[r, "overnight_cost"], df.at[r, "discount_rate"]) == (0.0, 0.07)
+        assert df.at[r, "capital_cost"] == 0.0
+        assert not df.at[r, "p_nom_extendable"]
