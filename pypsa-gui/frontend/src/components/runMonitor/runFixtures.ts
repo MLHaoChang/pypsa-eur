@@ -116,6 +116,11 @@ export const STATES: Record<string, RunMonitorView> = {
     stages: stages('handoff', {}, true).map(s => s.stage in GRID_SKIPPED
       ? { stage: s.stage, status: 'skipped', reason: GRID_SKIPPED[s.stage] } : s) }),
     envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
+  // GK B (62): a reason on a stage that was not skipped (passed, failed) is never shown as a skip reason.
+  finished_with_stage_reasons: view({ status: 'completed', run: run('handoff', { status: 'completed',
+    stages: stages('handoff', {}, true).map(s => s.stage === 'solve' ? { ...s, reason: 'A solve note' }
+      : s.stage === 'input_gate' ? { ...s, status: 'failed', reason: 'A gate note' } : s) }),
+    envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   over_budget: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'budget', stages: stages('solve') }),
     monitor: { ...MONITOR, budgets: { cost_eur: { used: 5.01, limit: 5, unmetered: false } } } }),
   lost_send: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'uncertain', stages: stages('input_gate') }),

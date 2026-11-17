@@ -167,3 +167,30 @@ def test_a_seeded_overload_fails_the_loading_rule_and_the_run_asks_the_user_with
         s for s in record["steps"] if s["tool"] in ("update_component", "add_component")
     ]
     assert run["stages"]["report"]["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [{"why": "x"}, ["x"], 7, "   ", "", None, "missing"],
+)
+def test_a_skipped_report_without_words_reads_as_a_gap(tmp_path, reason):
+    """GK B (62): only a non-blank str reason reads skipped; any other shape, or none, is a gap."""
+    from harness import run_handoff
+
+    stage = {"status": "skipped", "by": "profile"}
+    if reason != "missing":
+        stage["reason"] = reason
+    rows = run_handoff.coverage(
+        {"run": {"stages": {"report": stage}}}, {"chapters": ["network"]}, tmp_path
+    )
+    assert [r["status"] for r in rows[:2]] == ["gap", "gap"], rows
+
+
+def test_a_skipped_reason_is_read_stripped(tmp_path):
+    from harness import run_handoff
+
+    stage = {"status": "skipped", "by": "profile", "reason": "  No report yet.  "}
+    rows = run_handoff.coverage(
+        {"run": {"stages": {"report": stage}}}, {"chapters": []}, tmp_path
+    )
+    assert (rows[0]["status"], rows[0]["basis"]) == ("skipped", "No report yet.")

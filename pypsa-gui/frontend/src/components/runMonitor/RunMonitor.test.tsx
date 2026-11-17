@@ -186,6 +186,17 @@ describe('RunMonitor', () => {
     expect(screen.getAllByTestId('run-stage-reason')).toHaveLength(2)
   })
 
+  it('a reason on a stage that was not skipped never shows a reason line', async () => {
+    show('finished_with_stage_reasons')
+    await screen.findByTestId('run-state')
+    const rows = screen.getAllByTestId('run-stage')
+    for (const stage of ['solve', 'input_gate']) {
+      const row = rows.find(r => r.getAttribute('data-stage') === stage)!
+      expect(row.querySelector('[data-testid="run-stage-reason"]')).toBeNull()
+    }
+    expect(screen.getByTestId('run-monitor').textContent).not.toMatch(/A solve note|A gate note/)
+  })
+
   it('a finished grid-only run says why it has no report, in words without a tracker number', async () => {
     show('finished_grid_only')
     await screen.findByTestId('run-state')

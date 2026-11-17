@@ -209,9 +209,14 @@ def coverage(task: dict, profile: dict, project_dir) -> list[dict]:
     if project_dir is not None:
         doc = None
         stage = (run.get("stages") or {}).get("report") or {}
+        reason = stage.get("reason") if isinstance(stage, dict) else None
+        # Only a profile's own non-blank words count; any other shape reads as a gap (#1390 F2).
         skipped = (
-            stage.get("reason")
-            if stage.get("status") == "skipped" and stage.get("by") == "profile"
+            reason.strip()
+            if isinstance(reason, str)
+            and reason.strip()
+            and stage.get("status") == "skipped"
+            and stage.get("by") == "profile"
             else None
         )
 
