@@ -155,6 +155,7 @@ export const REFUSAL_WORDS: Record<string, string> = {
   linked_output_missing: 'Quantity from: this model has no such output',
   double_count: 'Quantity from: the energy model rows already price this output',
   default_unit_mismatch: 'Price: the cost default is in another unit, not filled',
+  volume_factor_typed_line: 'Lease-up: a typed quantity does not say whether it moves with served volume, so a lease-up below 100 % cannot scale it',
   volume_factor_unclassified: 'Lease-up: this energy model row does not move with served volume, so a lease-up below 100 % cannot scale it',
 }
 

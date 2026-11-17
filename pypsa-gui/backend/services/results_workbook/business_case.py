@@ -88,6 +88,17 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
         ("Business case hash", report.get("business_case_hash")),
         ("Investment case key", report.get("ic_assumptions_hash")),
     ]
+    pnl = report.get("pnl") or {}
+    if pnl.get("volume_factor_note"):
+        rows.append(("Volume factor (lease-up)", pnl["volume_factor_note"]))
+    if pnl.get("volume_factor_ignored"):
+        rows.append(
+            (
+                "Volume factor years ignored",
+                "outside the operating years: "
+                + ", ".join(str(y) for y in pnl["volume_factor_ignored"]),
+            )
+        )
     r = 3
     for k, v in rows:
         put(ws, r, 1, k)
@@ -116,7 +127,6 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
         put(ws, r, 2, be.get(key) if (ok or key == "line") else None)
         put(ws, r, 3, "ok" if ok else (be.get("status") or NOT_ESTABLISHED))
     r = _assumed_rows(ws, r + 2, report.get("assumed"))
-    pnl = report.get("pnl") or {}
     years = pnl.get("years") or []
     for title, table in (
         ("P&L by year", pnl.get("rows") or {}),

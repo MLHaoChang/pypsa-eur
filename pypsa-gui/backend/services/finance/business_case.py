@@ -167,7 +167,17 @@ FIXED_KINDS = frozenset({"capacity"})
 #: The volume class of each IC ledger stream (ruling 6, review-gk.md:171). `scale`
 #: moves with the served volume, `fixed` does not; `undetermined` (generation-side, not
 #: load-proportional) refuses under a factor below full volume. A test pins the keys to
-#: the ledger's `STREAM_CLASS`, so a new stream fails closed.
+#: the ledger's `STREAM_CLASS` (exact set), so a new stream fails closed.
+#: Each `scale` row's basis (GK B2 V2):
+#: - energy_import, network_energy: the per-kWh import tariff item
+#:   (`commercial/participants.py` `_item_stream`), per MWh of metered import;
+#: - certificates, tax: the `certificate` and `tax_levy` tariff kinds, unit per kWh of
+#:   metered import (`commercial/tariff_engine.py`); income tax is the engine's, never a row;
+#: - demand_charge: per peak kW-month (`tariff_engine.py` accepts only `per_kw_month`),
+#:   scaled as if the peak scales with the factor;
+#: - vom, fuel, lost_production: solved dispatch × the LP's cost (`results/value_flows.py`);
+#: - energy_wholesale: imported MWh × the market price (`value_flows.py` `_import_cost`).
+#: Pro rata only: the dispatch is not re-solved at reduced load (`VOLUME_FACTOR_NOTE`).
 STREAM_VOLUME_CLASS: dict[str, str] = {
     "energy_import": "scale",
     "network_energy": "scale",
@@ -216,6 +226,30 @@ def _ic_scaled(ln: TemplateLine, f: float) -> TemplateLine:
     if ln.amount == 0.0:
         return ln
     raise VolumeFactorUnclassified(ln.stream)
+
+
+#: The basis every lease-up report and workbook states (GK B2 BC 15 V1).
+VOLUME_FACTOR_NOTE = (
+    "volume-tied costs and revenue scaled pro rata by the factor; "
+    "the dispatch was not re-solved at reduced load"
+)
+
+
+def volume_factor_display(inputs: BusinessCaseInputs, operating_years) -> dict:
+    """The report's lease-up display keys (BC 15): each operating year below full volume,
+    the basis note, and each stated year outside the operating years, which changes
+    nothing and is named as ignored (GK B2 C3). Empty for a full-volume case with no
+    such year, so its report is as it was."""
+    ops = {int(y) for y in operating_years}
+    out: dict = {}
+    scaled = volume_factors_below_full(inputs, sorted(ops))
+    if scaled:
+        out["volume_factor"] = {str(y): f for y, f in scaled.items()}
+        out["volume_factor_note"] = VOLUME_FACTOR_NOTE
+    ignored = sorted(y for y in inputs.volume_factor_by_year if y not in ops)
+    if ignored:
+        out["volume_factor_ignored"] = ignored
+    return out
 
 
 def volume_factors_below_full(inputs: BusinessCaseInputs, years) -> dict[int, float]:

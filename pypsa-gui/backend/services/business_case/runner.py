@@ -253,7 +253,7 @@ def report_body(
     """The stored report: P&L by year by stream, the KPIs (gross and net of
     pass-through), break-even, the locked rows, each linked output's state and every
     assumed default the run used."""
-    from services.finance.business_case import row_reasons, volume_factors_below_full
+    from services.finance.business_case import row_reasons, volume_factor_display
 
     return {
         "business_case_hash": bc.hash,
@@ -279,13 +279,9 @@ def report_body(
             "row_reason": row_reasons(
                 result, p, outputs, receivable_days=inputs.receivable_days
             ),
-            # A display key (BC 15): each P&L year's volume factor below full volume.
-            # Only when one is, so a full-volume report is as it was.
-            **(
-                {"volume_factor": {str(y): f for y, f in lease.items()}}
-                if (lease := volume_factors_below_full(inputs, p.years))
-                else {}
-            ),
+            # Display keys (BC 15): the lease-up applied, its basis and the stated
+            # years it ignored. None for a full-volume case, so its report is as it was.
+            **volume_factor_display(inputs, result.tl.operating_years),
         },
         "kpis": {name: _jsonable(dataclasses.asdict(v)) for name, v in k.items()},
         "break_even": _jsonable(be),

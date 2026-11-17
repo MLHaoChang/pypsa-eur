@@ -26,6 +26,7 @@ Nothing here imports ``services``: the pack is passed in.
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any, Literal, NamedTuple, Protocol, get_args
 
 from pydantic import (
@@ -139,6 +140,9 @@ QUANTITY_SOURCE_PATTERN = (
 )
 PRESET_PATTERN = rf"^{_ID}@{_ID}$"
 MONEY_YEAR_MIN = 1990
+#: The most years a volume factor may list (BC 15, GK B2 C3).
+VOLUME_FACTOR_YEARS_MAX = 100
+_YEAR_KEY = re.compile(r"[12][0-9]{3}")
 MONEY_YEAR_AFTER_BASE = 5
 
 # A typo is refused, never dropped; inf and NaN are refused in every float (#1320 F1).
@@ -400,6 +404,26 @@ class BusinessCaseInputs(BaseModel):
     )
     lines: list[LineItem] = Field(default_factory=list)
 
+    @field_validator("volume_factor_by_year", mode="before")
+    @classmethod
+    def _strict_volume_factor(cls, v: Any) -> Any:
+        """GK B2 C3: a year is a four-digit int or its exact JSON string, never a bool,
+        a float or padded text; a value is a number, never a bool or a string; at most
+        `VOLUME_FACTOR_YEARS_MAX` years. Finiteness and 0..1 are the field's own."""
+        if not isinstance(v, dict):
+            return v
+        if len(v) > VOLUME_FACTOR_YEARS_MAX:
+            raise ValueError(f"at most {VOLUME_FACTOR_YEARS_MAX} years")
+        for k, f in v.items():
+            ok = (isinstance(k, int) and not isinstance(k, bool)) or (
+                isinstance(k, str) and _YEAR_KEY.fullmatch(k)
+            )
+            if not ok:
+                raise ValueError(f"year {k!r} is not a year")
+            if isinstance(f, bool) or not isinstance(f, (int, float)):
+                raise ValueError(f"the factor of {k} is not a number")
+        return v
+
     def volume_factor_at(self, year: int) -> float:
         """`year`'s volume factor: its cell, else 1.0."""
         return self.volume_factor_by_year.get(year, 1.0)
@@ -508,6 +532,14 @@ class BusinessCaseInputs(BaseModel):
                             f"{at}.preset_rule.requires[{c}]"
                         )
                     )
+        if (
+            ln.source == "typed"
+            and ln.kind != "capex"
+            and any(self.volume_factor_at(y) != 1.0 for y in years)
+        ):
+            # Ruling 6 (GK B2 BC 15 Q1): a typed line states an amount, not its volume
+            # class, so a lease-up below 100 % in its span refuses rather than guess.
+            out.append(VolumeFactorTypedLine(f"{at}.quantity_source"))
         if not share and ln.price is None and not _covers(ln.price_by_year, years):
             cls = PriceNotEstablished if ln.kind == "revenue" else CostNotEstablished
             out.append(cls(f"{at}.price"))
@@ -704,6 +736,13 @@ class DoubleCount(BusinessCaseRefused):
     kind = "double_count"
 
 
+class VolumeFactorTypedLine(BusinessCaseRefused):
+    """A typed revenue or opex line in a year whose volume factor is below 100 %: its
+    volume class is not stated, so ruling 6 refuses (GK B2 BC 15 Q1)."""
+
+    kind = "volume_factor_typed_line"
+
+
 class VolumeFactorUnclassified(BusinessCaseRefused):
     """A volume factor below full volume in a year an IC row whose volume class is not
     determined (a generation-side stream) is non-zero: ruling 6 refuses rather than
@@ -744,6 +783,7 @@ REFUSAL_KINDS: tuple[str, ...] = (
     "double_count",
     "default_unit_mismatch",
     "volume_factor_unclassified",
+    "volume_factor_typed_line",
 )
 
 # ------------------------------------------------------------------ helpers

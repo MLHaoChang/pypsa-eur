@@ -1126,3 +1126,46 @@ def test_bc15_the_volume_factor_refuses_non_finite_json(bad):
         B.BusinessCaseInputs.model_validate_json(
             '{"volume_factor_by_year": {"2031": ' + bad + "}}"
         )
+
+
+@pytest.mark.parametrize(
+    "key", ["2030.5", "x", "true", " 2030", "+2030", "02030", "203", "", "3030"]
+)
+def test_bc15_c3_a_json_year_key_must_be_a_plain_four_digit_year(key):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs.model_validate_json(
+            json.dumps({"volume_factor_by_year": {key: 0.5}})
+        )
+
+
+@pytest.mark.parametrize("key", [True, False, 2030.0, None])
+def test_bc15_c3_a_python_year_key_must_be_an_int_never_bool_or_float(key):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={key: 0.5})
+
+
+@pytest.mark.parametrize("value", ["true", '"0.5"', "null", "[0.5]"])
+def test_bc15_c3_a_factor_must_be_a_number_never_bool_or_text(value):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs.model_validate_json(
+            '{"volume_factor_by_year": {"2031": ' + value + "}}"
+        )
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={2031: json.loads(value)})
+
+
+def test_bc15_c3_the_year_count_is_capped():
+    cap = B.VOLUME_FACTOR_YEARS_MAX
+    ok = {2000 + i: 0.5 for i in range(cap)}
+    assert (
+        len(B.BusinessCaseInputs(volume_factor_by_year=ok).volume_factor_by_year) == cap
+    )
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={**ok, 2000 + cap: 0.5})
+
+
+def test_bc15_the_volume_factor_round_trips_through_json():
+    inputs = B.BusinessCaseInputs(volume_factor_by_year={2031: 0.25, 2032: 1})
+    again = B.BusinessCaseInputs.model_validate_json(inputs.model_dump_json())
+    assert again.volume_factor_by_year == {2031: 0.25, 2032: 1.0}
+    assert again == inputs

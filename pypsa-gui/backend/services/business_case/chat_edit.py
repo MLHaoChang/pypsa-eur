@@ -88,6 +88,8 @@ _WORDS = {
     "break_even_line": "Break-even line",
     "inputs.preset": "Preset",
     "inputs.receivable_days": "Receivable days",
+    # Lease-up (BC 15): a volume factor, never the sold share above.
+    "inputs.volume_factor_by_year": "Lease-up volume factor",
 }
 
 
@@ -172,12 +174,20 @@ def _is_price(path: tuple) -> bool:
 
 def _label(line: str | None, path: tuple) -> str:
     joined = ".".join(path)
+    # A case-level grid ("inputs.volume_factor_by_year", BC 15) keeps its year as tail.
+    pair = ".".join(path[:2]) if len(path) > 2 and path[0] == "inputs" else None
     head = (
         _WORDS.get(joined)
+        or (pair and _WORDS.get(pair))
         or _WORDS.get(path[0])
         or path[0].replace("_", " ").capitalize()
     )
-    tail = [p for p in path[1:]] if joined not in _WORDS else []
+    if joined in _WORDS:
+        tail = []
+    elif pair in _WORDS:
+        tail = list(path[2:])
+    else:
+        tail = list(path[1:])
     words = " ".join([head, *tail])
     return f"{line} · {words}" if line is not None else words
 

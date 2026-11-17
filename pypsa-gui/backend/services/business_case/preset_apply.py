@@ -346,6 +346,10 @@ def plan(args: dict) -> dict:
     inputs, stamp = _inputs(template_id, variant, rows, _currency(cfg))
     merged: dict[str, Any] = {k: v for k, v in (old or {}).items() if k != "inputs"}
     merged["inputs"] = inputs.model_dump(mode="json")
+    # The stored lease-up is case-level, not the preset's: it stays (BC 15, GK B2 C7).
+    stored_factor = ((old or {}).get("inputs") or {}).get("volume_factor_by_year")
+    if stored_factor:
+        merged["inputs"]["volume_factor_by_year"] = stored_factor
     merged["break_even_line"] = _break_even_line(
         merged.get("break_even_line"), merged["inputs"]["lines"]
     )

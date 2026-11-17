@@ -1275,3 +1275,40 @@ def test_an_invalid_merged_case_passes_its_message_and_errors_on(
     d = _refused(preset_apply.plan, _args(variant="gpu_cloud"))
     assert d["error_kind"] == "business_case_inputs_invalid"
     assert d["message"] == message and d["errors"] == errors
+
+
+# ── BC 15: the stored lease-up survives chat edits (GK B2 C7) ────────────────
+
+
+def _store_factor(factor):
+    import routers.results as R
+
+    R._state["solver_config"].business_case["inputs"]["volume_factor_by_year"] = factor
+
+
+def test_bc15_a_preset_apply_and_a_set_keep_the_stored_lease_up(bc, template):
+    chat_tools.apply_business_case_preset(_digest(), variant="gpu_cloud")
+    _store_factor({"2031": 0.5})
+    # A preset applied again replaces the lines, never the case-level lease-up.
+    chat_tools.apply_business_case_preset(_digest(), variant="gpu_cloud")
+    assert _config()["inputs"]["volume_factor_by_year"] == {"2031": 0.5}
+    tid = _say(bc, "GPU-hours sell at 2.5 USD/GPU_h.")
+    chat_tools.set_business_case_lines(
+        _digest(),
+        set={"GPU-hours": {"price": 2.5}},
+        citations=[_cite(tid, "2.5 USD/GPU_h", line="GPU-hours", unit="USD/GPU_h")],
+    )
+    assert _config()["inputs"]["volume_factor_by_year"] == {"2031": 0.5}
+    # get_business_case round-trips it.
+    assert _stored()["inputs"]["volume_factor_by_year"] == {"2031": 0.5}
+
+
+def test_bc15_a_whole_object_write_shows_a_lease_up_change_on_the_card():
+    from services.business_case.chat_edit import _label
+
+    assert (
+        _label(None, ("inputs", "volume_factor_by_year", "2031"))
+        == "Lease-up volume factor 2031"
+    )
+    assert _label(None, ("inputs", "receivable_days")) == "Receivable days"
+    assert _label("x", ("price_by_year", "2031")) == "x · Price 2031"
