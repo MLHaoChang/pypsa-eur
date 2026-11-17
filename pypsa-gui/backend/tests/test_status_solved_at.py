@@ -3,6 +3,7 @@
 The time is recorded beside the solve's input fingerprint in ``n.meta`` (so it is saved with the project and
 survives a reload), and /simulation/status reports it only while the dispatch exists.
 """
+
 import re
 
 import pypsa
@@ -17,13 +18,17 @@ def n(monkeypatch):
     net = pypsa.Network()
     net.set_snapshots(range(2))
     monkeypatch.setattr(workflow_tools, "_owning_context", lambda _n: None)
-    monkeypatch.setattr(workflow_tools, "_network_input_fingerprint", lambda ctx, exact=False: "fp")
+    monkeypatch.setattr(
+        workflow_tools, "_network_input_fingerprint", lambda ctx, exact=False: "fp"
+    )
     return net
 
 
 def test_recording_a_solve_stamps_its_time_in_utc(n):
     workflow_tools._record_solve_inputs(n, {})
-    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", n.meta["assistant_solve_at"])
+    assert re.fullmatch(
+        r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", n.meta["assistant_solve_at"]
+    )
 
 
 def test_a_new_solve_moves_the_stamp(n, monkeypatch):
@@ -32,9 +37,17 @@ def test_a_new_solve_moves_the_stamp(n, monkeypatch):
     assert n.meta["assistant_solve_at"] != "2000-01-01T00:00:00Z"
 
 
-@pytest.mark.parametrize("dispatch, expected", [("fresh", "2026-11-17T15:42:00Z"), ("stale", "2026-11-17T15:42:00Z"),
-                                                ("none", None)])
-def test_the_status_reports_the_solve_time_while_its_dispatch_exists(n, monkeypatch, dispatch, expected):
+@pytest.mark.parametrize(
+    "dispatch, expected",
+    [
+        ("fresh", "2026-11-17T15:42:00Z"),
+        ("stale", "2026-11-17T15:42:00Z"),
+        ("none", None),
+    ],
+)
+def test_the_status_reports_the_solve_time_while_its_dispatch_exists(
+    n, monkeypatch, dispatch, expected
+):
     n.meta["assistant_solve_at"] = "2026-11-17T15:42:00Z"
     monkeypatch.setattr(simulation.PyPSAService, "get_network", staticmethod(lambda: n))
     monkeypatch.setattr(simulation, "_dispatch_status", lambda _n: dispatch)
