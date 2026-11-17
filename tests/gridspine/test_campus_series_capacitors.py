@@ -76,6 +76,7 @@ def test_the_table_lists_the_capacitor_with_its_tag_and_the_scan_form_uses_panda
         "xc_ohm": 0.1,
         "source": "datasheet",
         "protection": "bypassed",
+        "pypsa_name": None,
     }
     bus = {n: i for i, n in campus.net.bus["name"].items()}
     assert campus.series_caps == [(bus["MV1"], bus["MV1C"], 0.1)]
@@ -124,9 +125,16 @@ def test_a_campus_without_the_key_builds_unchanged():
         "xc_ohm",
         "source",
         "protection",
+        "pypsa_name",
     ]
     assert campus.series_caps == []
     assert campus.net.impedance.empty
+
+
+def test_a_series_capacitors_pypsa_name_is_kept_in_its_table():
+    caps = build_campus(cap_spec(pypsa_name="SC-north")).series_capacitors
+    assert caps.loc["SC1", "pypsa_name"] == "SC-north"
+    assert build_campus(cap_spec()).series_capacitors.loc["SC1", "pypsa_name"] is None
 
 
 def test_protection_none_is_kept_and_the_default_is_bypassed():
@@ -620,7 +628,12 @@ def test_with_two_capacitors_the_worst_row_decides(tmp_path, monkeypatch):
     out = _screens(tmp_path, monkeypatch, spec)
     res = out.subsync.resonance
     series = res[res["kind"] == ss.SERIES]
-    assert set(series["bus"]) == {"MV3C"}  # only SC2 crosses inside the band
+    crossing = series[series["verdict"] != "clear"]
+    assert set(crossing["bus"]) == {"MV3C"}  # only SC2 crosses inside the band
+    # SC1's far side has no crossing: it reads clear, naming SC1 alone
+    clear = series[series["verdict"] == "clear"]
+    assert set(clear["bus"]) == {"MV1C"}
+    assert clear["note"].str.contains(r"series capacitor\(s\) \['SC1'\] scanned").all()
     assert out.subsync_verdict == "check"
 
 
@@ -635,8 +648,24 @@ def test_a_capacitor_in_a_ring_has_no_far_side_and_is_refused(tmp_path, monkeypa
     c["transformers"]["TR3"] = dict(c["transformers"]["TR1"], lv_bus="MVB")
     with pytest.raises(
         ContractError,
-        match=r"series capacitor SC1: neither end is behind it seen from the PCC "
-        r"\(graph distances 1 and 1\)",
+        match=r"series capacitor SC1: both ends stay connected to the PCC without it "
+        r"\(a ring through it\)",
+    ):
+        _screens(tmp_path, monkeypatch, spec)
+
+
+def test_a_capacitor_in_a_ring_with_unequal_distances_is_refused_too(
+    tmp_path, monkeypatch
+):
+    # MV1 -> SC1 -> MV1C as before, and MV1C also fed from the PCC by TR3 -> MVB -> CB3:
+    # MV1 is one branch from the PCC and MV1C two, yet MV1C is not behind the capacitor.
+    spec = cap_spec()
+    c = spec["campus"]
+    c["buses"]["MVB"] = {"vn_kv": 20.0}
+    c["transformers"]["TR3"] = dict(c["transformers"]["TR1"], lv_bus="MVB")
+    c["cables"]["CB3"] = dict(c["cables"]["CB1"], from_bus="MVB", to_bus="MV1C")
+    with pytest.raises(
+        ContractError, match=r"series capacitor SC1: both ends stay connected"
     ):
         _screens(tmp_path, monkeypatch, spec)
 

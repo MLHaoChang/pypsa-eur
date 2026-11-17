@@ -1289,22 +1289,24 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     clearance, c_cited = ss.clearance_from_profile(code)
     assumed = bool(c_cited) and c_cited[0]["source"] != "code"
     net, caps = campus.net, campus.series_caps
-    points = [bus] + [b for _, b in SC.far_side(net, bus) if b != bus]
+    far = [(c, b) for c, b in SC.far_side(net, bus) if b != bus]
+    points = [bus] + [b for _, b in far]
     studies = [(b, ss.subsync_scan(net, b, cases, series_caps=caps, clearance_hz=clearance,
                                    clearance_assumed=assumed, notes=notes))
                for b in dict.fromkeys(points)]
     name = net.bus["name"].astype(str)
     scan = pd.concat([s.scan.assign(bus=name[b]) for b, s in studies], ignore_index=True)
     resonance = pd.concat([s.resonance.assign(bus=name[b]) for b, s in studies], ignore_index=True)
-    if caps and not (resonance["kind"] == ss.SERIES).any():
-        band = f"{ss.F_MIN_HZ:g}-{float(net.f_hz) - ss.F_MIN_HZ:g} Hz"
-        scanned = sorted(campus.series_capacitors.index.astype(str))
-        # the same clearance, assumed flag and label as the scan's own rows
-        base = resonance.iloc[0][["clearance_hz", "assumed", "label"]].to_dict()
-        clear = [{"case": case, "kind": ss.SERIES, "verdict": "clear", "bus": name[b], **base,
-                  "note": f"clear in the {band} scan band: series capacitor(s) {scanned} scanned, "
-                          f"no series resonance"}
-                 for b, _ in studies[1:] for case in cases]
+    # each far-side bus with no series crossing reads clear, naming the capacitors scanned from it
+    crossed = set(resonance.loc[resonance["kind"] == ss.SERIES, "bus"])
+    band = f"{ss.F_MIN_HZ:g}-{float(net.f_hz) - ss.F_MIN_HZ:g} Hz"
+    # the same clearance, assumed flag and label as the scan's own rows
+    base = resonance.iloc[0][["clearance_hz", "assumed", "label"]].to_dict() if len(resonance) else {}
+    clear = [{"case": case, "kind": ss.SERIES, "verdict": "clear", "bus": name[b], **base,
+              "note": f"clear in the {band} scan band: series capacitor(s) "
+                      f"{sorted(c for c, fb in far if fb == b)} scanned, no series resonance"}
+             for b, _ in studies[1:] if name[b] not in crossed for case in cases]
+    if clear:
         resonance = pd.concat([resonance, pd.DataFrame(clear)], ignore_index=True)
     sub = ss.SubsyncStudy(scan=scan, resonance=resonance, notes=studies[0][1].notes)
     series = sub.resonance[sub.resonance["kind"] == ss.SERIES]["verdict"]

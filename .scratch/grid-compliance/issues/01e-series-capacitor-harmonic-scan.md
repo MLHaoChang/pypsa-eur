@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# GC-01c Series capacitors in the harmonic impedance scan
+# GC-01e Series capacitors in the harmonic impedance scan
 
 Status: needs-triage
 Type: task

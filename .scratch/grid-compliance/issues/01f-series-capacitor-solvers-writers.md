@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# GC-01d Series capacitors in the fault solvers, screens and writers
+# GC-01f Series capacitors in the fault solvers, screens and writers
 
 Status: needs-triage
 Type: task

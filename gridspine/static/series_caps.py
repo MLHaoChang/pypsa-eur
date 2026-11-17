@@ -93,48 +93,61 @@ def bypass_for_faults(net):
 def far_side(net, root_bus: int) -> list:
     """
     ``[(cap name, far-side bus index)]`` for each in-service series
-    capacitor: the end with the greater graph distance from ``root_bus``
-    (the PCC) over in-service lines, transformers, impedances and closed
+    capacitor: the end that the PCC (``root_bus``) reaches only through the
+    capacitor, over in-service lines, transformers, impedances and closed
     bus-bus switches. That is where the units behind the capacitor see grid,
-    transformer and capacitor in series (GC-08's sub-synchronous scan). A tie
-    (a ring) is refused, naming the capacitor, because neither end is behind it.
+    transformer and capacitor in series (GC-08's sub-synchronous scan). A
+    capacitor whose ends stay connected without it (a ring through it, at any
+    distances) is refused, naming it, because neither end is behind it alone.
     """
     from collections import deque
 
-    adj = {int(b): set() for b in net.bus.index}
+    edges = []  # (key, a, b); a capacitor's key is its impedance index
 
-    def join(tbl, a, b, live):
+    def join(tbl, kind, a, b, live):
         for i in tbl.index[live(tbl)]:
-            x, y = int(tbl.at[i, a]), int(tbl.at[i, b])
-            adj[x].add(y)
-            adj[y].add(x)
+            edges.append(((kind, i), int(tbl.at[i, a]), int(tbl.at[i, b])))
 
     def on(t):
         return t["in_service"].astype(bool)
 
-    join(net.line, "from_bus", "to_bus", on)
-    join(net.trafo, "hv_bus", "lv_bus", on)
-    join(net.impedance, "from_bus", "to_bus", on)
+    join(net.line, "line", "from_bus", "to_bus", on)
+    join(net.trafo, "trafo", "hv_bus", "lv_bus", on)
+    join(net.impedance, "impedance", "from_bus", "to_bus", on)
     join(
         net.switch,
+        "switch",
         "bus",
         "element",
         lambda t: (t["et"] == "b") & t["closed"].astype(bool),
     )
-    dist, todo = {int(root_bus): 0}, deque([int(root_bus)])
-    while todo:
-        x = todo.popleft()
-        for y in adj[x] - dist.keys():
-            dist[y] = dist[x] + 1
-            todo.append(y)
+
+    def reach(skip):
+        adj = {int(b): set() for b in net.bus.index}
+        for key, x, y in edges:
+            if key != skip:
+                adj[x].add(y)
+                adj[y].add(x)
+        seen, todo = {int(root_bus)}, deque([int(root_bus)])
+        while todo:
+            for y in adj[todo.popleft()] - seen:
+                seen.add(y)
+                todo.append(y)
+        return seen
+
     out = []
-    for _, row in series_caps(net).iterrows():
+    for i, row in series_caps(net).iterrows():
         a, b = int(row["from_bus"]), int(row["to_bus"])
-        da, db = dist.get(a), dist.get(b)
-        if da is None or db is None or da == db:
-            raise ContractError(
-                f"series capacitor {row['name']}: neither end is behind it seen from the PCC "
-                f"(graph distances {da} and {db}); a capacitor in a ring is not scanned"
+        seen = reach(("impedance", i))
+        if (a in seen) == (b in seen):
+            where = (
+                "both ends stay connected to the PCC without it (a ring through it)"
+                if a in seen
+                else "neither end reaches the PCC"
             )
-        out.append((str(row["name"]), b if db > da else a))
+            raise ContractError(
+                f"series capacitor {row['name']}: {where}; only a capacitor with its far side "
+                f"behind it is scanned"
+            )
+        out.append((str(row["name"]), a if b in seen else b))
     return out

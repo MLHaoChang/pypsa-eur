@@ -192,8 +192,8 @@ from gridspine.schema.island import (
 )
 from gridspine.schema.network import validate_canonical
 from gridspine.schema.transformer import VECTOR_GROUP, check_tap
-from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 from gridspine.static import series_caps as SC
+from gridspine.static.shortcircuit import LINE_ENDTEMP_DEGREE
 
 SOURCES = frozenset({"measured", "datasheet", "assumed"})
 UNIT_KINDS = ("load", "bess", "pv", "wind", "fuel_cell", "genset", "ups")
@@ -269,7 +269,7 @@ _SERIES_CAP_STRUCTURAL = ("from_bus", "to_bus", "line", "protection", "pypsa_nam
 #: ``bypassed``: a voltage-limiting device in parallel, so IEC 60909-0 lets the
 #: fault-level paths neglect the capacitor; ``none`` keeps it in them.
 SERIES_CAP_PROTECTIONS = ("bypassed", "none")
-_SERIES_CAP_COLUMNS = ["name", "from_bus", "to_bus", "xc_ohm", "source", "protection"]
+_SERIES_CAP_COLUMNS = ["name", "from_bus", "to_bus", "xc_ohm", "source", "protection", "pypsa_name"]
 #: Fields that may be zero. Every other tagged field must be strictly positive.
 _MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "rx_sc", "rx_max", "rx_min", "rx_normal", "c0_nf_per_km",
                           "r0x0_max", "r0x0_min"})
@@ -405,7 +405,7 @@ def _series_capacitors(caps, buses, idx, net, rows, edges):
         net.impedance.loc[i, SC.PROTECTION] = protection
         edges.append((a, b))
         out.append({"name": str(cname), "from_bus": a, "to_bus": b, "xc_ohm": xc, "source": source,
-                    "protection": protection})
+                    "protection": protection, "pypsa_name": cs.get("pypsa_name")})
     return pd.DataFrame(out, columns=_SERIES_CAP_COLUMNS).set_index("name") if out else _empty_series_capacitors()
 
 
