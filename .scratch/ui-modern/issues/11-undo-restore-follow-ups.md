@@ -3,7 +3,7 @@
 
 # 11 — ui-modern 10 follow-ups: lock-held restore test, 409 doc
 
-Status: needs-triage
+Status: done (#PR)
 Gated: GK B
 Type: test
 Parent: ui-modern 10 (#1479) follow-ups

@@ -110,3 +110,44 @@ def test_the_units_route_refuses_an_unknown_class_and_an_unknown_asset(
     assert client.get("/api/network/asset_schema/Nope/units/x").status_code == 400
     r = client.get("/api/network/asset_schema/Generator/units/no-such-generator")
     assert r.status_code == 404
+
+
+# ── Cost units on a tonne bus (ui-modern 05d): per tonne, scale 1 (no kW / kWh factor) ──
+
+
+def test_a_generator_on_a_tonne_bus_prices_per_tonne(n):
+    from services.asset_schema.fields import cost_units
+
+    name = _first(n, "generators", "bus", True)
+    c = cost_units(n, "Generator", name)
+    assert c["overnight_cost"] == {"unit": "EUR/(t/h)", "scale": 1.0}
+    assert c["fom_cost"] == {"unit": "EUR/(t/h)/yr", "scale": 1.0}
+    assert c["marginal_cost"] == {"unit": "EUR/t", "scale": 1.0}
+    assert "fuel_price" not in c and "start_up_cost" not in c
+
+
+def test_a_store_on_a_tonne_bus_prices_per_tonne_of_stock(n):
+    from services.asset_schema.fields import cost_units
+
+    for name in n.stores.index:
+        if _size_unit(n, n.stores.at[name, "bus"], stock=True) == "t":
+            c = cost_units(n, "Store", name)
+            assert c["overnight_cost"]["unit"] == "EUR/t" and c["fom_cost"]["unit"] == "EUR/t/yr"
+            return
+    pytest.skip("no store on a tonne bus")
+
+
+def test_an_asset_on_an_energy_bus_keeps_the_per_energy_cost_units(n):
+    from services.asset_schema.fields import cost_units
+
+    assert cost_units(n, "Link", _first(n, "links", "bus0", False)) == {}
+    assert cost_units(n, "Generator", "nope") == {} and cost_units(n, "Line", "x") == {}
+
+
+def test_the_units_route_carries_the_cost_units(client, install_network, n):
+    name = _tonne_generator(n)
+    install_network(n)
+    body = client.get(f"/api/network/asset_schema/Generator/units/{name}").json()
+    assert body["costs"]["marginal_cost"] == {"unit": "EUR/t", "scale": 1.0}
+    energy = _first(n, "links", "bus0", False)
+    assert client.get(f"/api/network/asset_schema/Link/units/{energy}").json()["costs"] == {}

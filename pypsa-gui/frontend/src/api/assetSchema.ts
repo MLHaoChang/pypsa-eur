@@ -118,7 +118,9 @@ export const assetSchemaApi = {
     client.get<AssetSchema>(`/network/asset_schema/${component}`).then(r => r.data),
   /** Size-field units that follow the asset's bus (t/h, t on a tonne bus); empty on an energy bus. */
   units: (component: string, name: string) =>
-    client.get<{ component: string; name: string; units: Record<string, string> }>(
+    client.get<{ component: string; name: string; units: Record<string, string>;
+      /** Cost-field unit and scale on a tonne bus (EUR/t, scale 1); empty on an energy bus. */
+      costs?: Record<string, { unit: string; scale: number }> }>(
       `/network/asset_schema/${component}/units/${encodeURIComponent(name)}`).then(r => r.data),
   provenance: (component: string, name: string) =>
     client.get<{ component: string; name: string; fields: Record<string, ProvenanceEntry> }>(

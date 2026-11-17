@@ -800,7 +800,8 @@ def get_asset_units(component: str, name: str) -> dict:
     n = PyPSAService.get_network()
     if name not in getattr(n, CLASS_ATTR[component]).index:
         raise HTTPException(404, f"{component} '{name}' not found")
-    return {"component": component, "name": name, "units": asset_fields.size_units(n, component, name)}
+    return {"component": component, "name": name, "units": asset_fields.size_units(n, component, name),
+            "costs": asset_fields.cost_units(n, component, name)}
 
 
 @router.get("/asset_costs")

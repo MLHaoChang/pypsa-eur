@@ -10,7 +10,7 @@ import { nk } from '../utils/queryKeys'
  * and `staleTime` is Infinity (the same named exception, spec D24).
  *
  * With an asset `name`, a size field's unit follows that asset's bus (t/h, t on
- * a tonne bus), read from `/asset_schema/{class}/units/{name}`; that read is
+ * a tonne bus; a cost field's unit is per tonne with scale 1, no kW or kWh factor), read from `/asset_schema/{class}/units/{name}`; that read is
  * project-scoped, since the bus is the asset's own.
  */
 export function useAssetSchema(componentClass: string | null, name?: string | null) {
@@ -30,15 +30,22 @@ export function useAssetSchema(componentClass: string | null, name?: string | nu
     retry: false,
   })
   const over = units.data?.units
+  const costs = units.data?.costs
   const data = useMemo(() => {
-    if (!base.data || !over || Object.keys(over).length === 0) return base.data
+    const noUnits = !over || Object.keys(over).length === 0
+    const noCosts = !costs || Object.keys(costs).length === 0
+    if (!base.data || (noUnits && noCosts)) return base.data
     return {
       ...base.data,
       groups: base.data.groups.map(g => ({
         ...g,
-        fields: g.fields.map(f => (over[f.key] ? { ...f, unit_display: over[f.key], unit_storage: over[f.key] } : f)),
+        fields: g.fields.map(f => {
+          const c = costs?.[f.key]
+          if (c) return { ...f, unit_display: c.unit, unit_storage: c.unit, scale: c.scale }
+          return over?.[f.key] ? { ...f, unit_display: over[f.key], unit_storage: over[f.key] } : f
+        }),
       })),
     }
-  }, [base.data, over])
+  }, [base.data, over, costs])
   return { ...base, data }
 }

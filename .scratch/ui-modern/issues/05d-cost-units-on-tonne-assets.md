@@ -3,7 +3,7 @@
 
 # The edit drawer's cost units on tonne assets
 
-Status: needs-triage
+Status: done (#PR)
 Blocked by: 05c (PR #1448).
 Gated: GK B, UX.
 Type: bug

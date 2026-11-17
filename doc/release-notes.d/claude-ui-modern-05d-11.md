@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The edit drawer shows per-tonne cost units (EUR/(t/h), EUR/(t/h)/yr, EUR/t) on an asset on a tonne bus; energy-bus assets and stored values are unchanged. Adds a lock-held undo test and names the `409 dc_backup_busy` reply on `setDcBackup`.

@@ -724,3 +724,27 @@ def size_units(n, component: str, name: str) -> dict[str, str]:
         if unit in ("t", "t/h"):
             out[f.key] = unit
     return out
+
+
+# Tonne-bus cost units (05d). Stored values are per t/h of capacity or per t of stock, so no kW or kWh
+# scale applies: display = stored × 1. Only the per-energy cost rows change; EUR/MWh fuel, EUR/h and EUR stay.
+_TONNE_COST_UNIT = {
+    "EUR/kW": "EUR/(t/h)", "EUR/kW/yr": "EUR/(t/h)/yr",
+    "EUR/kWh": "EUR/t", "EUR/kWh/yr": "EUR/t/yr", "EUR/MWh": "EUR/t",
+}
+
+
+def cost_units(n, component: str, name: str) -> dict[str, dict]:
+    """Per-asset display unit and scale for the cost fields (overnight cost, fixed O&M, capital cost, marginal
+    and curtailment cost) of an asset on a tonne bus: EUR/(t/h), EUR/(t/h)/yr, EUR/t, EUR/t/yr, scale 1.0.
+    Empty on an energy bus, an unreadable bus or a class with no bus size, so the class-level EUR/kW etc. stay."""
+    from services.flow_service import _size_unit
+
+    col = _SIZE_BUS.get(component)
+    table = getattr(n, CLASS_ATTR.get(component, ""), None)
+    if col is None or table is None or name not in table.index:
+        return {}
+    if _size_unit(n, table.at[name, col], stock=False) not in ("t", "t/h"):
+        return {}
+    return {f.key: {"unit": _TONNE_COST_UNIT[f.unit_display], "scale": 1.0}
+            for f in fields_for(component) if f.unit_display in _TONNE_COST_UNIT}
