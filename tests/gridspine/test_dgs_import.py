@@ -892,3 +892,11 @@ def test_a_closed_switch_keeps_its_element_in_service(tmp_path):
     rows = _with(StaSwitch=[*ROWS["StaSwitch"], "91;S-Gen;113;1"])
     g = read_text(tmp_path, dgs_text(rows)).network.generators
     assert bool(g.at["Gen", "active"]) and not bool(g.at["PV", "active"])
+
+
+def test_a_type_pointer_into_another_class_with_its_own_class_absent(tmp_path):
+    # the line points at the transformer type while no TypLne table exists
+    rows = _with(ElmLne=["31;L1;2;32;10.0;2;0"])
+    del rows["TypLne"]
+    got = _unmapped(read_text(tmp_path, dgs_text(rows)))
+    assert ("ElmLne 'L1'", "no TypLne type") in got
