@@ -322,9 +322,7 @@ def _read_zip(path: Path) -> _Input:
         i.filename.replace("\\", "/"): (
             _TOO_BIG
             if i.file_size > MAX_CSV_BYTES
-            else lambda i=i: io.BytesIO(
-                _read_member(zipfile.ZipFile(path), i, path.name)
-            )
+            else lambda i=i: io.BytesIO(_read_zip_member(path, i))
         )
         for i in sorted(data, key=lambda i: i.filename)
     }
@@ -334,10 +332,15 @@ def _read_zip(path: Path) -> _Input:
 _TOO_BIG = f"is larger than {MAX_CSV_BYTES // 2**20} MiB; not read"
 
 
+def _read_zip_member(path: Path, info: zipfile.ZipInfo) -> bytes:
+    with zipfile.ZipFile(path) as zf:
+        return _read_member(zf, info, path.name)
+
+
 def _read_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo, label: str) -> bytes:
     """A member's bytes; the stated size is checked again while reading."""
     buf = bytearray()
-    with zf, zf.open(info) as fh:
+    with zf.open(info) as fh:
         while chunk := fh.read(2**20):
             buf += chunk
             if len(buf) > MAX_MEMBER_BYTES or len(buf) > info.file_size:
@@ -1563,6 +1566,12 @@ class _Converter:
     def _hydro_unit(self, gen, st) -> str | None:
         """Add the storage unit; the reason it is not converted otherwise."""
         obj, name = gen.key, gen.name
+        hydro_model = self.m.config.get("Hydro Model")
+        if hydro_model not in (None, "Energy"):
+            return (
+                f"hydro model {hydro_model!r}: only the energy model "
+                "(t_config Hydro Model = Energy) is converted"
+            )
         bus = self._node_of(obj, "Nodes")
         if bus is None:
             return "generator needs exactly one node"

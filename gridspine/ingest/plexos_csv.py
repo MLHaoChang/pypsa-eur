@@ -28,9 +28,11 @@ resampled. Timestamps outside the horizon are ignored.
 from __future__ import annotations
 
 import csv
+import math
 from collections.abc import Callable, Iterable, Mapping
 from typing import IO
 
+import numpy as np
 import pandas as pd
 
 #: Windows locale ids (the Data File ``Locale`` attribute) whose short dates put
@@ -65,7 +67,8 @@ def file_key(path: str) -> str:
 
 def _order(text: pd.Series, locale: float | None) -> tuple[str, ...] | str:
     """The slash-date formats for the whole file, or why its order is unknown."""
-    loc = int(locale) if locale is not None and locale == int(locale) else None
+    whole = locale is not None and math.isfinite(locale) and locale == int(locale)
+    loc = int(locale) if whole else None
     if loc in DAY_FIRST_LOCALES:
         return _DAY_FIRST
     if loc in MONTH_FIRST_LOCALES:
@@ -115,7 +118,7 @@ def _column(header: list[str], name: str) -> str | None:
 
 def _numbers(cells: pd.Series, where: pd.Index) -> pd.Series | str:
     values = pd.to_numeric(cells.str.strip(), errors="coerce")
-    bad = values.isna()
+    bad = ~np.isfinite(values.astype(float))  # NaN, empty, text and ±INF
     if bad.any():
         at = where[bad.to_numpy()][0]
         raw = cells[bad].iloc[0]

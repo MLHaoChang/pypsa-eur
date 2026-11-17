@@ -1071,3 +1071,48 @@ def test_convert_without_options_or_files():
     conv = convert(m)
     check_ledger(m, conv)
     assert conv.network.storage_units.loc["G", "p_nom"] == 100
+
+
+# ------------------------------------------------------------ review fixes
+
+
+@pytest.mark.parametrize("cell", ["inf", "-INF", "Infinity"])
+def test_infinite_cells_are_unreadable(cell):
+    body = (
+        f"Datetime,A\n01/01/2015 00:00,1\n01/01/2015 01:00,{cell}\n01/01/2015 02:00,3\n"
+    )
+    assert series(body)["A"] == f"value {cell!r} at 2015-01-01 01:00:00 is not a number"
+
+
+def test_nan_locale_is_no_locale():
+    body = "Datetime,A\n01/02/2015 00:00,1\n"
+    got = series(body, snaps=HOURS[:1], locale=float("nan"))["A"]
+    assert "the Data File has no Locale" in got
+
+
+def test_storage_units_from_the_file_default():
+    m = hydro_model()
+    m.rows = [
+        r for r in m.rows if not (r.child == ("Storage", "S") and r.property == "Units")
+    ]
+    m.defaults = {(("System", "Storage", "Storages"), "Units"): 1.0}
+    conv = run(m)
+    assert conv.network.storage_units.loc["G", "p_nom"] == 100.0
+    assert any(a.asset == "S" and a.parameter == "units" for a in conv.report.assumed)
+    m.defaults = {}
+    conv = run(m)
+    assert conv.network.storage_units.empty
+    assert any("unit count unknown" in r for r in unmapped_reason(conv, "Storage 'S'"))
+
+
+def test_non_energy_hydro_model_is_not_converted():
+    m = hydro_model()
+    m.config = {"Hydro Model": "Volume"}
+    conv = run(m)
+    assert conv.network.storage_units.empty and conv.network.generators.empty
+    reason = (
+        "hydro model 'Volume': only the energy model "
+        "(t_config Hydro Model = Energy) is converted"
+    )
+    assert reason in unmapped_reason(conv, "Generator 'G'")
+    assert reason in unmapped_reason(conv, "Storage 'S'")
