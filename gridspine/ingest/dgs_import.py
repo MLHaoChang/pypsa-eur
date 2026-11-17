@@ -139,6 +139,7 @@ def _finite(item: str, what: str, v, *, positive=False, at_least=None) -> float:
 class _Mapper:
     def __init__(self, tables: DgsTables, source: str):
         self.t = tables.tables
+        self.dropped = tables.dropped
         self.source = source
         self.n = pypsa.Network()
         self.unmapped: list[Unmapped] = []
@@ -928,6 +929,15 @@ class _Mapper:
                 self.filled["short_circuit"].append(name)
 
     def _leftovers(self):
+        for cls, cols in self.dropped.items():
+            if cls in ELEMENTS or cls in TYPES:  # other classes are listed whole
+                for col in cols:
+                    self.unmapped.append(
+                        Unmapped(
+                            f"{cls} column {col!r}",
+                            "a DGS 7.x matrix attribute is not imported",
+                        )
+                    )
         for cls, df in self.t.items():
             if cls in STRUCTURE or cls in ELEMENTS:
                 continue
