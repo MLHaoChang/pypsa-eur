@@ -1353,8 +1353,8 @@ def _grid_loading(ctx, ev):
     if isinstance(out, pf.Missing):
         return out
     peak, over = out
-    return Detailed(round(peak, 2), over, "peak apparent-power loading of any line or transformer, % of its "
-                                          "rating, on the converged AC power-flow snapshots")
+    return Detailed(round(peak, 2), over, "peak apparent power at either end of any line or transformer, % of "
+                                          "its MVA rating x s_max_pu, on the converged AC power-flow snapshots")
 
 
 def _grid_voltage(ctx, ev):

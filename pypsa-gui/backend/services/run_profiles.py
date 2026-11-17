@@ -1142,8 +1142,10 @@ def _grid_only() -> dict:
                                "result; with none the rule is not evaluated and LOPF flows never satisfy it."),
                  "unevaluated": run_gates.UNEVALUATED_TO_USER},
                 {**_rule("grid.pf.loading", "grid.pf.loading_pct", "le", GRID_LOADING_MAX_PCT,
-                         basis="No line or transformer carries more than its rating in the AC power flow "
-                               "(apparent power, converged snapshots). Read only from the AC PF result."),
+                         basis="No line or transformer carries more than its rating in the AC power flow: "
+                               "the apparent power at either end against the MVA rating x s_max_pu, per "
+                               "converged snapshot (a current-based rating at depressed voltage reads higher). "
+                               "Read only from the AC PF result."),
                  "unit": "%", "unevaluated": run_gates.UNEVALUATED_TO_USER},
                 {**_rule("grid.pf.voltage", "grid.pf.voltage_violations", "le", 0, severity="warn",
                          basis="No bus voltage leaves the bus's own v_mag_pu_min/max band in the AC power "

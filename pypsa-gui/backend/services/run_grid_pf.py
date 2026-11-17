@@ -124,8 +124,10 @@ def _frame(ev, key, index):
 
 
 def loading(ctx, ev) -> Any:
-    """Peak apparent-power loading (% of rating x s_max_pu) of every line and
-    transformer on the converged snapshots, with the branches over 100 %."""
+    """Peak apparent-power loading of every line and transformer on the
+    converged snapshots: the larger apparent power at either end against the MVA
+    rating x that snapshot's s_max_pu, with the branches over 100 %. A
+    current-based rating at depressed voltage would read higher."""
     if isinstance(ev, Missing):
         return ev
     n = ctx.network
@@ -139,6 +141,12 @@ def loading(ctx, ev) -> Any:
         static = getattr(n, comp)
         if static is None or static.empty:
             continue
+        # The per-snapshot limit (GK A F2): a time-varying s_max_pu below the
+        # static one would otherwise understate the loading.
+        try:
+            smax_t = n.get_switchable_as_dense(cls, "s_max_pu").reindex(index=index).astype(float)
+        except Exception:  # noqa: BLE001 — an unreadable limit rates no branch
+            smax_t = pd.DataFrame(index=index)
         p0, q0 = _frame(ev, f"{t}.p0", index), _frame(ev, f"{t}.q0", index)
         p1, q1 = _frame(ev, f"{t}.p1", index), _frame(ev, f"{t}.q1", index)
         if p0 is None or q0 is None:
@@ -150,12 +158,16 @@ def loading(ctx, ev) -> Any:
             row = static.loc[name]
             field = "s_nom_opt" if bool(row.get("s_nom_extendable", False)) else "s_nom"
             rating = pd.to_numeric(row.get(field), errors="coerce")
-            smax = pd.to_numeric(row.get("s_max_pu", 1.0), errors="coerce")
+            smax = (
+                smax_t[name].to_numpy()
+                if name in smax_t.columns
+                else np.array([np.nan])
+            )
             if not (
                 math.isfinite(rating)
                 and rating > 1e-9
-                and math.isfinite(smax)
-                and smax > 0
+                and np.isfinite(smax).all()
+                and (smax > 0).all()
             ):
                 unrated.append(str(name))
                 continue
@@ -173,7 +185,7 @@ def loading(ctx, ev) -> Any:
                 return Missing(
                     "flow_not_finite", f"{cls} {name}'s AC flow is not finite"
                 )
-            util = float(s.max()) / (rating * smax) * 100.0
+            util = float((s / (rating * smax)).max()) * 100.0
             branches += 1
             peak = max(peak, util)
             if util > 100.0:
@@ -216,12 +228,21 @@ def voltage(ctx, ev) -> Any:
     v = _frame(ev, "buses_t.v_mag_pu", n.snapshots[ev.converged])
     if v is None or any(b not in v.columns for b in banded):
         return Missing("no_voltage", "the AC power flow left no bus voltages")
+    # A non-finite voltage on a banded bus compares False both ways: no evidence (GK A F1).
+    for b in banded:
+        if not np.isfinite(v[b].to_numpy()).all():
+            return Missing("voltage_not_finite", f"bus {b}'s AC power-flow voltage is not finite")
     out, names = 0, []
     for b in banded:
         bad = int(((v[b] < lo[b] - 1e-9) | (v[b] > hi[b] + 1e-9)).sum())
         if bad:
             out += bad
             names.append(f"{b} ({bad} snapshot(s))")
+    # The rule claims only the buses it read (GK A F4).
+    unbanded = [str(b) for b in buses.index if b not in banded]
+    if unbanded:
+        more = f" and {len(unbanded) - 5} more" if len(unbanded) > 5 else ""
+        names.append(f"not judged: no band on {', '.join(unbanded[:5])}{more}")
     return out, names
 
 
@@ -240,6 +261,16 @@ def n1(ctx) -> Any:
     ):
         return Missing(
             "n1_no_solve", "the security-constrained solve did not finish optimal"
+        )
+    # The flags above are read from the editable config: they are the solve's own
+    # only while the live inputs, that config included, are still the ones the
+    # solve recorded (GK A F3). A config flipped after the solve is no evidence.
+    from harness.calculations import solve_matches_inputs
+
+    if not solve_matches_inputs(ctx, after_pf=True):
+        return Missing(
+            "n1_config_changed",
+            "the inputs or the solver config changed since the solve, so its N-1 setting is not known",
         )
     n = ctx.network
     for flag, frame, name in (
