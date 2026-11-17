@@ -404,3 +404,51 @@ def test_a_closed_pick_leaves_the_step_as_it_is(baseline, tmp_path, monkeypatch)
     _runner_pick(path, monkeypatch, "approve", ["low_price"])
     after = _read(path)
     assert after["steps"][0]["status"] == "pending" and "unfrozen" in after["steps"][0]
+
+
+# ── the base saved before an LP case forks it (P5) ────────────────────────────
+
+
+def _spy_save(monkeypatch, dirty):
+    from services import chat_tools, dirty_state
+
+    saved = []
+    monkeypatch.setattr(dirty_state, "is_dirty", lambda ctx: dirty)
+    monkeypatch.setattr(
+        chat_tools, "save_project", lambda name, **k: saved.append(name)
+    )
+    return saved
+
+
+def test_an_lp_pick_saves_a_dirty_base_once_before_forking(
+    baseline, tmp_path, queue, monkeypatch
+):
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    _pick(path, ["low_price"])
+    saved = _spy_save(monkeypatch, True)
+    _start(path, pid)
+    assert len(saved) == 1
+    assert _step(path)["result"]["saved"] is True
+    rows = run_actions.approval_card(_step(path))["rows"]
+    assert any(r["field"] == "save" for r in rows)
+
+
+def test_a_clean_base_is_not_saved(baseline, tmp_path, queue, monkeypatch):
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid)
+    _pick(path, ["low_price"])
+    saved = _spy_save(monkeypatch, False)
+    _start(path, pid)
+    assert saved == [] and _step(path)["result"]["saved"] is False
+
+
+def test_a_finance_only_run_never_saves(baseline, tmp_path, queue, monkeypatch):
+    _, pid, _ = baseline
+    path = _pick_task(tmp_path, pid, solves=0)
+    saved = _spy_save(monkeypatch, True)
+    assert not any(
+        r["field"] == "save" for r in run_actions.approval_card(_step(path))["rows"]
+    )
+    _start(path, pid)
+    assert saved == [] and _step(path)["result"]["saved"] is None

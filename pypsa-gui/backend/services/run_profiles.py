@@ -304,7 +304,18 @@ def load(profile: dict) -> dict:
         stages[name] = {"actions": actions, "rules": rules}
         if "agent" in stage:
             stages[name]["agent"] = _check_agent(name, stage["agent"])
-    if "skip" not in stages["explore"] or "explore" in profile:
+    explore_stage = stages["explore"]
+    shipped = "skip" not in explore_stage and any(
+        a["tool"] == run_actions.SHIPPED for a in explore_stage["actions"])
+    if shipped and "explore" not in profile and "agent" not in explore_stage:
+        # Study harness 14 S-B2c (GK B (60) Q2 = A, P6): the shipped cases explore
+        # with no proposal turn; the stage still settles every case.
+        if EXPLORE_RULES[0]["id"] not in {r["id"] for r in explore_stage["rules"]}:
+            raise ProfileError("Stage explore: the shipped cases' stage names ex.cases.settled.")
+        forks = (profile.get("shipped") or {}).get("forks")
+        if type(forks) is not int or not 1 <= forks <= EXPLORE_CASES:
+            raise ProfileError(f"Shipped: forks is a whole number from 1 to {EXPLORE_CASES}.")
+    elif "skip" not in stages["explore"] or "explore" in profile:
         # Issue 06: a run explores only with the profile's levers, its one
         # proposal turn and the settled-cases rule.
         from harness import run_explore
@@ -954,6 +965,29 @@ def _eh_ipp_hybrid() -> dict:
 
 EH_IPP_HYBRID = _eh_ipp_hybrid()
 
+# Study harness 14 S-B2c (GK B (60) Q2 = A, P3-P6): eh_ipp_hybrid@2. The explore
+# stage runs the template's shipped cases (`run_shipped_engine`, no proposal
+# turn); the user picks which cases that need a solve run when more need one
+# than `shipped.forks`. The budget is the solve, two L2 rounds and the forks:
+# 1 + 2 + 2 = 5. eh_ipp_hybrid@1 stays byte-equal for the runs started on it (L8).
+IPP_SHIPPED_FORKS = 2
+
+
+def _eh_ipp_hybrid_v2() -> dict:
+    profile = copy.deepcopy(EH_IPP_HYBRID)
+    profile["version"] = 2
+    profile["stages"]["explore"] = {
+        "actions": [{"tool": run_actions.SHIPPED, "args": dict(run_actions.MARKERS[run_actions.SHIPPED_KIND]),
+                     "native": run_actions.KIND}],
+        "rules": copy.deepcopy(EXPLORE_RULES)}
+    profile["shipped"] = {"forks": IPP_SHIPPED_FORKS}
+    rounds = profile["envelope"]["budget"]["rounds"]
+    profile["envelope"]["budget"]["solves"] = 1 + rounds + IPP_SHIPPED_FORKS
+    return profile
+
+
+EH_IPP_HYBRID_V2 = _eh_ipp_hybrid_v2()
+
 # Study harness 12c (design §9.3 "eh_microgrid"; GK B (47) G1-G9): eh_microgrid@1
 # and eh_microgrid_staged@1. The solve, the EH study with the off-grid stress
 # (`dtc_stress`, one solve per islanding contingency) and the island check of
@@ -1107,7 +1141,7 @@ PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
                               "eh_ammonia_staged@1": EH_AMMONIA_STAGED,
-                              "eh_ipp_hybrid@1": EH_IPP_HYBRID,
+                              "eh_ipp_hybrid@1": EH_IPP_HYBRID, "eh_ipp_hybrid@2": EH_IPP_HYBRID_V2,
                               "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED}
 
 

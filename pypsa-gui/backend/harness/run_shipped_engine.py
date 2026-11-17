@@ -128,11 +128,10 @@ def valid(frozen) -> bool:
 
 def forks(profile) -> int:
     """The profile's fork-solve allowance for the shipped cases (GK B (60) P3/P4):
-    `explore.shipped.forks`, else the explore case cap as before."""
+    `shipped.forks`, else the explore case cap as before."""
     from harness import run_explore
 
-    shipped = (profile.get("explore") or {}).get("shipped") or {}
-    allowance = shipped.get("forks")
+    allowance = (profile.get("shipped") or {}).get("forks")
     return (
         int(allowance) if isinstance(allowance, int) else run_explore.caps(profile)[0]
     )
@@ -371,6 +370,31 @@ def _release_all(path, rows):
             run_actions.release(path, row["solves"]["call_id"], 0, EVENT)
 
 
+def _save_base(path) -> bool | None:
+    """S-B2c (GK B (60) P5): the base saved before an LP case forks it, as the
+    explore stage's own save step does (`run_explore.steps_for`): True when it
+    had unsaved edits and was saved, False when it had none, None when the save
+    failed. `run_case` still refuses an unsaved base (`shipped_base_unsaved`)."""
+    import logging
+
+    from harness import run_explore
+    from services import chat_tools, dirty_state, project_registry
+    from services.pypsa_service import PyPSAService
+
+    task = json.loads(Path(path).read_text())
+    try:
+        with chat_tools._acting() as (db, user):
+            base = project_registry.resolve_project(db, user, task["project_id"])
+            resident = PyPSAService.get_context(project_registry.registry_key(base))
+        if resident is None or not dirty_state.is_dirty(resident):
+            return False
+        chat_tools.save_project(run_explore.project_name(task))
+        return True
+    except Exception:  # noqa: BLE001 — the backstop refuses each case instead
+        logging.getLogger(__name__).exception("shipped cases: the base save failed")
+        return None
+
+
 def dispatch(path, step, frozen, attempt, instance) -> str:
     """The step: admit, then fork and queue each admitted case in turn."""
     from harness import runner
@@ -380,6 +404,7 @@ def dispatch(path, step, frozen, attempt, instance) -> str:
     ids = _admit(path, step["id"], frozen, held)
     if ids is None:
         return "taken_over"
+    saved = _save_base(path) if ids else None  # P5: only when an LP case forks
     for case_id in ids:
         try:
             run_case(path, case_id, frozen["cases_digest"])
@@ -393,7 +418,10 @@ def dispatch(path, step, frozen, attempt, instance) -> str:
         shipped = [c for c in task["run"]["cases"] if c.get("engine") == SHIPPED]
         s.update(
             status="completed",
-            result={"cases": {c["name"]: c["status"] for c in shipped}},
+            result={
+                "cases": {c["name"]: c["status"] for c in shipped},
+                "saved": saved,
+            },
         )
 
     runner._update(path, done)

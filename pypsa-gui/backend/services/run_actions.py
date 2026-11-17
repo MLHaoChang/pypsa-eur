@@ -500,6 +500,16 @@ def _shipped_card(step, frozen) -> dict:
     solves = frozen["solves"]
     rows = [
         *_shipped_rows(frozen, frozen["run"], frozen.get("cap", 1)),
+        *(
+            [
+                _note(
+                    "save",
+                    "Saves the project before forking the cases, if it has unsaved edits",
+                )
+            ]
+            if solves
+            else []
+        ),
         _note("solves", f"Reserves {solves} solve{'' if solves == 1 else 's'}"),
         _note(
             "source",
