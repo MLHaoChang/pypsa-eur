@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { IntentJob, IntentRow } from '../api/intentComparison'
+import type { IntentInputDefaults, IntentJob, IntentRow } from '../api/intentComparison'
 import IntentComparisonSection, { assetLabel, checkLabel } from './IntentComparisonSection'
 
-const api = vi.hoisted(() => ({ start: vi.fn(), get: vi.fn(), abort: vi.fn() }))
+const api = vi.hoisted(() => ({ start: vi.fn(), get: vi.fn(), abort: vi.fn(), defaults: vi.fn() }))
 vi.mock('../api/intentComparison', async () => {
   const real = await vi.importActual<typeof import('../api/intentComparison')>('../api/intentComparison')
   return { ...real, intentComparisonApi: api }
@@ -35,6 +35,30 @@ const job = (rows: IntentRow[], over: Partial<IntentJob> = {}): IntentJob => ({
   status: 'done', progress: Object.fromEntries(rows.map(r => [r.intent, 'done'])), rows, error: null, ...over,
 })
 
+const PQ = {
+  x_pu: { value: 0.12, source: 'assumed: a typical transformer short-circuit reactance', kind: 'assumed' as const },
+  pf: { value: 0.95, source: 'assumed: a typical load power factor', kind: 'assumed' as const },
+  pf_req: { value: 0.95, source: 'assumed: no grid code value', kind: 'assumed' as const },
+  s_n_mva: { value: 40, source: "assumed: the connection's rating", kind: 'assumed' as const },
+  p_cap_mw: { value: 40, source: "assumed: the connection's rating", kind: 'assumed' as const },
+  statcom_capital_cost: { value: 11195.36331689301, source: 'assumed (defaults pack …)', kind: 'assumed' as const },
+}
+/** A project that holds none of the inputs but the assumed point-of-connection values. */
+const HELD_NONE: IntentInputDefaults = {
+  link: { value: null, source: null, reason: 'No link is marked as the grid import.' },
+  ramp_mw_per_min: { value: null, source: null, reason: 'The project has no ramp limit.' },
+  envelope: { value: null, source: null, reason: 'The project has no DC load envelope.' },
+  pq: PQ, grid_code: { value: 'eu_rfg_dcc_ce', title: 'EU RfG and DCC', source: 'default' },
+}
+/** The Data Center Energy Hub template as shipped (walkthrough bug 06). */
+const HELD_DC: IntentInputDefaults = {
+  link: { value: 'poc', source: 'project', kind: 'project' },
+  ramp_mw_per_min: { value: 4, source: 'Template assumption: 10% of the connection per minute', kind: 'assumed' },
+  envelope: { value: { phases: [{}], max: { swing_mw: 23.4, oscillation_amplitude_mw: 7.2, oscillation_period_s: 2 } },
+    source: "the DC load's dynamic envelope", kind: 'load_envelope' },
+  pq: PQ, grid_code: { value: 'eu_rfg_dcc_ce', title: 'EU RfG and DCC', source: 'default' },
+}
+
 async function fill(user: ReturnType<typeof userEvent.setup>) {
   const v: Record<string, string> = { critical: '80', ramp: '10', sk: '1000', pst: '1', library: '50,100', swing: '20', amp: '5', period: '2' }
   for (const [k, val] of Object.entries(v)) await user.type(screen.getByTestId(`intent-in-${k}`), val)
@@ -58,6 +82,7 @@ beforeEach(() => {
   net.getBuses.mockResolvedValue([]); net.getLoads.mockResolvedValue([])
   net.getLinks.mockResolvedValue([{ name: 'poc', bus0: 'grid', bus1: 'hub', p_min_pu: 0 }])
   codes.getPublishedGridCode.mockResolvedValue({ profile: {} })
+  api.defaults.mockResolvedValue(HELD_NONE)
 })
 const stored = (h?: number) => proj.list.mockResolvedValue([{ name: 'Hub A', settings: h == null ? {} : { backup_autonomy_h: h } }])
 
@@ -122,6 +147,7 @@ describe('IntentComparisonSection', () => {
   it('D with no grid code says so and links to the grid-code section; D rows show the backend warning', async () => {
     const user = userEvent.setup()
     api.get.mockResolvedValue(job([row('D', { warnings: ['This grid code may not count transfer to BESS.'] }), row('B')]))
+    api.defaults.mockResolvedValue({ ...HELD_NONE, grid_code: { value: null, title: null, source: 'default' } })
     renderIt(null)
     await user.click(await screen.findByLabelText(/^D\. /))
     expect(screen.getByTestId('intent-d-nocode').textContent).toContain('No grid code set')
@@ -273,6 +299,7 @@ describe('IntentComparisonSection', () => {
 
     it('leaves a field blank with its reason when the source is missing', async () => {
       api.get.mockResolvedValue(null)
+      api.defaults.mockResolvedValue({ ...HELD_NONE, grid_code: { value: null, title: null, source: 'default' } })
       renderIt(null)
       await waitFor(() => expect(screen.getByTestId('intent-why-critical')).toBeTruthy())
       for (const k of ['critical', 'sk', 'pst']) {
@@ -295,3 +322,78 @@ describe('IntentComparisonSection', () => {
     })
   })
 })
+
+describe('IntentComparisonSection prefill from the project (walkthrough bug 06)', () => {
+  const dcNet = () => {
+    net.getBuses.mockResolvedValue([{ name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_critical: true }])
+    net.getLoads.mockResolvedValue([{ name: 'it', bus: 'it', p_set: 34.4937816188 }])
+    net.getLinks.mockResolvedValue([{ name: 'poc', bus0: 'grid', bus1: 'hub', eh_role: 'grid_import' },
+      { name: 'site_transformer', bus0: 'hub', bus1: 'it' }])
+    api.defaults.mockResolvedValue(HELD_DC)
+  }
+
+  it('prefills ramp, envelope, PoC values and the PoC link, each with its source, and rounds the critical load', async () => {
+    dcNet(); api.get.mockResolvedValue(null)
+    renderIt(null)
+    await waitFor(() => expect((screen.getByTestId('intent-in-ramp') as HTMLInputElement).value).toBe('4'))
+    const val = (id: string) => (screen.getByTestId(id) as HTMLInputElement).value
+    expect(val('intent-in-critical')).toBe('34.49')
+    expect(val('intent-in-swing')).toBe('23.4'); expect(val('intent-in-amp')).toBe('7.2'); expect(val('intent-in-period')).toBe('2')
+    expect(val('intent-in-link')).toBe('poc')
+    const select = screen.getByTestId('intent-in-link') as HTMLSelectElement
+    expect(select.selectedOptions[0].textContent).toBe('Point of connection')
+    expect(screen.getByTestId('intent-src-ramp').textContent).toBe('assumed')
+    expect(screen.getByTestId('intent-src-swing').textContent).toBe('load envelope')
+    expect(screen.getByTestId('intent-src-link').textContent).toBe('project')
+    expect(val('intent-pq-x_pu')).toBe('0.12'); expect(val('intent-pq-statcom_capital_cost')).toBe('11195')
+    expect(screen.getByTestId('intent-pq-src-pf').textContent).toBe('assumed')
+    expect(screen.getByTestId('intent-poc-scope').textContent).toContain('apply to this comparison only')
+  })
+
+  it('leaves untouched project values out of the request and sends only the typed PoC values', async () => {
+    const user = userEvent.setup()
+    dcNet(); api.get.mockResolvedValue(null); api.start.mockResolvedValue(job([row('B'), row('C')]))
+    renderIt(null)
+    await waitFor(() => expect((screen.getByTestId('intent-in-ramp') as HTMLInputElement).value).toBe('4'))
+    await user.type(screen.getByTestId('intent-in-pst'), '1')
+    await user.type(screen.getByTestId('intent-in-library'), '40,63')
+    await user.clear(screen.getByTestId('intent-pq-x_pu')); await user.type(screen.getByTestId('intent-pq-x_pu'), '0.08')
+    expect(screen.getByTestId('intent-pq-src-x_pu').textContent).toBe('entered here')
+    await user.click(screen.getByLabelText(/^B\. /)); await user.click(screen.getByLabelText(/^C\. /))
+    await user.click(screen.getByTestId('intent-run'))
+    await waitFor(() => expect(api.start).toHaveBeenCalled())
+    const body = api.start.mock.calls[0][1]
+    expect(body.inputs).not.toHaveProperty('link'); expect(body.inputs).not.toHaveProperty('ramp_mw_per_min')
+    expect(body.inputs).not.toHaveProperty('envelope')
+    expect(body.inputs.pq).toEqual({ x_pu: 0.08 })
+    expect(body.critical_mw).toBe(34.49)
+    expect(body.grid_code).toBe('eu_rfg_dcc_ce')                      // the code the backend applies
+  })
+
+  it('says "No grid code set" only when the backend applies none', async () => {
+    const user = userEvent.setup()
+    api.get.mockResolvedValue(null)
+    renderIt(null)
+    await waitFor(() => expect(api.defaults).toHaveBeenCalled())
+    await user.click(screen.getByLabelText(/^D\. /))
+    expect(screen.queryByTestId('intent-d-nocode')).toBeNull()
+    cleanup()
+    api.defaults.mockResolvedValue({ ...HELD_NONE, grid_code: { value: null, title: null, source: 'default' } })
+    renderIt(null)
+    await user.click(screen.getByLabelText(/^D\. /))
+    await waitFor(() => expect(screen.getByTestId('intent-d-nocode')).toBeTruthy())
+  })
+
+  it('says which inputs a finished run took from where', async () => {
+    api.get.mockResolvedValue(job([row('B'), row('C')], { inputs: { values: {}, sources: {
+      link: 'project', ramp_mw_per_min: 'Template assumption: 10%', envelope: "the DC load's dynamic envelope",
+      pq: { x_pu: 'request', pf: 'assumed: a typical load power factor' }, xr: 'assumed' } } }))
+    renderIt()
+    await waitFor(() => expect(screen.getByTestId('intent-inputs-used')).toBeTruthy())
+    const text = screen.getByTestId('intent-inputs-used').textContent
+    expect(text).toContain('Grid ramp limit (assumed)')
+    expect(text).toContain('transformer reactance (entered here)')
+    expect(text).toContain('load power factor (assumed)')
+  })
+})
+

@@ -7,10 +7,12 @@ import { campusApi, errorText } from '../api/campusElectrical'
 import { networkApi } from '../api/network'
 import { nk } from '../utils/queryKeys'
 import { intentDefaults } from './intentDefaults'
+import { sourceWord, usedWord } from './intentSources'
 import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 import {
-  DESIGN_INTENTS, intentComparisonApi, type CheckState, type DesignIntent, type IntentRow, type Outcome,
+  DESIGN_INTENTS, intentComparisonApi, type CheckState, type DesignIntent, type IntentJob, type IntentRow, type Outcome,
+  type PqField,
 } from '../api/intentComparison'
 import { Btn, Field, PageSection, Tag } from '../components/PageKit'
 import { withReturnFrom } from '../layout/flowNavigation'
@@ -58,6 +60,15 @@ const NEED_TWO = 'Pick at least two intents.'
 const NO_CODE_LINK = 'Set grid code ›'
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
 const POLL_MS = 2000
+/** The point-of-connection values, in the form's words, with the decimals each field shows. */
+const PQ_FIELDS: [PqField, string, number][] = [
+  ['x_pu', 'Transformer reactance (p.u.)', 3], ['pf', 'Load power factor', 3], ['pf_req', 'Required power factor', 3],
+  ['s_n_mva', 'Transformer rating (MVA)', 2], ['p_cap_mw', 'Import cap (MW)', 2],
+  ['statcom_capital_cost', 'STATCOM cost (€/Mvar/yr)', 0],
+]
+/** A prefill as the field shows it: rounded to the field's precision, never a long float. */
+export const shown = (v: number | null | undefined, d: number) => (v == null ? '' : String(Number(v.toFixed(d))))
+type Typed = 'critical' | 'link' | 'sk' | 'pst' | 'ramp' | 'swing' | 'amp' | 'period'
 
 const AUTONOMY_DEFAULT_H = 4
 const AUTONOMY_MAX_H = 720 // the backend's ceiling (0 < h <= 720)
@@ -68,7 +79,7 @@ const fmt = (v: number | null | undefined, d = 1) => (v == null ? '—' : v.toLo
 const isFinal = (r: IntentRow) => r.status === 'converged'
 const notRun = (r: IntentRow) => r.checks.filter(c => c.state === 'not_run').length
 
-export default function IntentComparisonSection({ name, gridCode }: { name: string; gridCode: string | null }) {
+export default function IntentComparisonSection({ name, gridCode: savedCode }: { name: string; gridCode: string | null }) {
   const qc = useQueryClient()
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const requestGridCodeScroll = useUIStore(s => s.requestGridCodeScroll)
@@ -79,9 +90,17 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
   const [edited, setAutonomy] = useState<string | null>(null)
   const autonomy = edited ?? String(storedAutonomy ?? AUTONOMY_DEFAULT_H)
   // Fields with a network or grid-code source hold only what the user typed (undefined = the prefill shows).
-  const [typed, setF] = useState<Partial<Record<'critical' | 'link' | 'sk' | 'pst', string>>>({})
-  const [g, setG] = useState({ ramp: '', library: '', swing: '', amp: '', period: '' })
+  const [typed, setF] = useState<Partial<Record<Typed, string>>>({})
+  const [pqTyped, setPq] = useState<Partial<Record<PqField, string>>>({})
+  const [g, setG] = useState({ library: '' })
   const q = (root: string, queryFn: () => Promise<unknown>) => ({ queryKey: nk(name, root), queryFn, staleTime: 30_000, retry: false })
+  // What a run takes for each input the request leaves out (one ladder with the run: intent_inputs.resolve).
+  const held = useQuery({ queryKey: ['intentInputDefaults', name], queryFn: () => intentComparisonApi.defaults(name),
+    staleTime: 30_000, retry: false })
+  // The grid code the campus study applies: the saved one, else the backend's default (never a second copy here).
+  const gridCode = savedCode ?? held.data?.grid_code.value ?? null
+  const codeKnown = savedCode != null || held.isSuccess || held.isError
+  const env = held.data?.envelope.value?.max
   const buses = useQuery(q('buses', networkApi.getBuses))
   const loads = useQuery(q('loads', networkApi.getLoads))
   const links = useQuery(q('links', networkApi.getLinks))
@@ -99,12 +118,26 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
   })
   const f = {
     critical: typed.critical ?? defaults.critical.value, link: typed.link ?? defaults.link.value,
-    sk: typed.sk ?? defaults.sk.value, pst: typed.pst ?? defaults.pst.value, ...g,
+    sk: typed.sk ?? defaults.sk.value, pst: typed.pst ?? defaults.pst.value,
+    ramp: typed.ramp ?? shown(held.data?.ramp_mw_per_min.value, 2),
+    swing: typed.swing ?? shown(env?.swing_mw, 2), amp: typed.amp ?? shown(env?.oscillation_amplitude_mw, 2),
+    period: typed.period ?? shown(env?.oscillation_period_s, 2), ...g,
   }
+  const pqValue = (k: PqField, d: number) => pqTyped[k] ?? shown(held.data?.pq[k]?.value, d)
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const v = e.target.value
-    if (k === 'critical' || k === 'link' || k === 'sk' || k === 'pst') setF(p => ({ ...p, [k]: v }))
-    else setG(p => ({ ...p, [k]: v }))
+    if (k === 'library') setG(p => ({ ...p, [k]: v }))
+    else setF(p => ({ ...p, [k]: v }))
+  }
+  /** The word after a field for where its value comes from. */
+  const fieldSource = (k: Typed | 'library'): string | null => {
+    if (k === 'library') return null
+    const isTyped = typed[k] !== undefined
+    if (f[k] === '' && !isTyped) return null
+    if (k === 'critical' || k === 'sk' || k === 'link') return sourceWord('project', isTyped)
+    if (k === 'pst') return sourceWord('grid_code', isTyped)
+    if (k === 'ramp') return sourceWord(held.data?.ramp_mw_per_min.kind, isTyped)
+    return sourceWord(held.data?.envelope.kind, isTyped)
   }
   const key = ['intentComparison', name]
   const job = useQuery({
@@ -115,14 +148,23 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
   const start = useMutation({
     mutationFn: () => {
       const swing = num(f.swing), amp = num(f.amp), period = num(f.period)
+      // A value the project holds and the user left alone is left out: the backend takes it from the project
+      // (the same ladder the prefill shows) and records its source. `pq` is always sent: the values the form
+      // shows, assumed or the project's, are what this run takes; the typed ones override them.
+      const envTyped = typed.swing !== undefined || typed.amp !== undefined || typed.period !== undefined
+      const fromProject = (k: Typed, v?: unknown) => typed[k] === undefined && v != null
       return intentComparisonApi.start(name, {
         intents: chosen.map(intent => (intent === 'A' ? { intent, backup_autonomy_h: num(autonomy) } : { intent })),
         critical_mw: num(f.critical), grid_code: gridCode,
         inputs: {
-          link: f.link.trim(), ramp_mw_per_min: num(f.ramp), sk_mva: num(f.sk), pst_limit: num(f.pst),
+          ...(fromProject('link', held.data?.link.value) && f.link === held.data?.link.value ? {} : { link: f.link.trim() }),
+          ...(fromProject('ramp', held.data?.ramp_mw_per_min.value) ? {} : { ramp_mw_per_min: num(f.ramp) }),
+          sk_mva: num(f.sk), pst_limit: num(f.pst),
           transformer_library_mva: f.library.split(',').map(s => Number(s.trim())).filter(Number.isFinite),
-          envelope: { phases: [{ swing_mw: swing, oscillation: { amplitude_mw: amp, period_s: period } }],
-            max: { swing_mw: swing, oscillation_amplitude_mw: amp, oscillation_period_s: period } },
+          ...(!envTyped && held.data?.envelope.value != null ? {} : {
+            envelope: { phases: [{ swing_mw: swing, oscillation: { amplitude_mw: amp, period_s: period } }],
+              max: { swing_mw: swing, oscillation_amplitude_mw: amp, oscillation_period_s: period } } }),
+          pq: Object.fromEntries(Object.entries(pqTyped).map(([k, v]) => [k, num(v as string)])),
         },
       })
     },
@@ -143,7 +185,8 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
     },
   })
   const complete = [f.critical, f.ramp, f.sk, f.pst, f.swing, f.amp, f.period].every(v => Number(v) > 0) &&
-    f.link.trim() !== '' && f.library.trim() !== ''
+    f.link.trim() !== '' && f.library.trim() !== '' &&
+    PQ_FIELDS.every(([k, , d]) => Number(pqValue(k, d)) > 0 || (k === 'x_pu' && Number(pqValue(k, d)) === 0))
   const blocked = chosen.length < 2 ? NEED_TWO : autonomyBad ? null : !complete ? 'Fill in every input below, all greater than zero.' : null
   const rows = job.data?.rows ?? []
 
@@ -161,7 +204,7 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
               <input type="checkbox" checked={chosen.includes(i.id)} disabled={running} onChange={() => toggle(i.id)} />
               {i.id}. {i.label}
             </label>
-            {i.id === 'D' && chosen.includes('D') && gridCode == null && (
+            {i.id === 'D' && chosen.includes('D') && codeKnown && gridCode == null && (
               <p className="ml-5 text-[11px] text-warn" data-testid="intent-d-nocode">
                 No grid code set: whether transfer to BESS counts as ride-through is unknown.{' '}
                 <button type="button" className="underline" data-testid="intent-set-grid-code"
@@ -195,16 +238,40 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
               {k === 'link' ? (
                 <select className={INPUT} value={f.link} onChange={set('link')} disabled={running} data-testid="intent-in-link">
                   <option value="">Choose a link</option>
-                  {defaults.links.map(n => <option key={n} value={n}>{n}</option>)}
+                  {defaults.links.map(n => <option key={n} value={n}>{n === defaults.link.value ? 'Point of connection' : n}</option>)}
                 </select>
               ) : (
-                <input className={INPUT} value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
+                <input className={INPUT} inputMode="decimal" value={f[k]} onChange={set(k)} disabled={running} data-testid={`intent-in-${k}`} />
               )}
+              {fieldSource(k) && <span className="text-[11px] text-muted" data-testid={`intent-src-${k}`}>{fieldSource(k)}</span>}
               {(k === 'critical' || k === 'link' || k === 'sk' || k === 'pst') && f[k] === '' && defaults[k].reason && (
                 <p className="text-[11px] text-muted" data-testid={`intent-why-${k}`}>{defaults[k].reason}</p>
               )}
             </Field>
           ))}
+      </div>
+      <div className="space-y-1.5" role="group" aria-label="Point of connection" data-testid="intent-poc">
+        <p className="text-[12px] font-medium">Point of connection</p>
+        <p className="text-[11px] text-muted" data-testid="intent-poc-scope">
+          These values apply to this comparison only; the saved network is not changed. The PQ and flicker checks
+          read them at {f.link === defaults.link.value ? 'the point of connection' : (f.link || 'the campus link')}.
+          The ramp limit, load swing and oscillation come from Grid connection › Connection limits and the DC load:
+          change them there for the project.
+        </p>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+          {PQ_FIELDS.map(([k, label, d]) => (
+            <Field key={k} label={label}>
+              <input className={INPUT} inputMode="decimal" value={pqValue(k, d)} disabled={running}
+                onChange={e => { const v = e.target.value; setPq(p => ({ ...p, [k]: v })) }} data-testid={`intent-pq-${k}`} />
+              {(pqTyped[k] !== undefined || held.data?.pq[k]) && (
+                <span className="text-[11px] text-muted" data-testid={`intent-pq-src-${k}`}
+                  title={pqTyped[k] === undefined ? held.data?.pq[k]?.source ?? undefined : undefined}>
+                  {sourceWord(held.data?.pq[k]?.kind, pqTyped[k] !== undefined)}</span>
+              )}
+            </Field>
+          ))}
+        </div>
+        {held.isError && <p className="text-[11px] text-err" data-testid="intent-held-error">The project's values could not be read: {errorText(held.error)}</p>}
       </div>
       {(start.isError || job.isError) && !(start.isError && start.error && (start.error as { response?: { status?: number } }).response?.status === 409) && (
         <p className="text-[12px] text-err" role="alert" data-testid="intent-error">{errorText(start.error ?? job.error)}</p>
@@ -213,6 +280,7 @@ export default function IntentComparisonSection({ name, gridCode }: { name: stri
         <p className="text-[12px] text-err" role="alert" data-testid="intent-job-failed">Failed: {job.data.error}</p>
       )}
       {job.data && <Progress progress={job.data.progress} />}
+      {job.data?.inputs && <InputsUsed inputs={job.data.inputs} />}
       {rows.length > 0 && <ResultTable rows={rows} />}
     </PageSection>
   )
@@ -287,5 +355,22 @@ function ResultTable({ rows }: { rows: IntentRow[] }) {
           are marked as such in the note.
         </p>)}
     </div>
+  )
+}
+
+const USED_LABELS: Record<string, string> = {
+  link: 'Campus link', ramp_mw_per_min: 'Grid ramp limit', envelope: 'Load swing and oscillation', xr: 'X/R',
+  x_pu: 'transformer reactance', pf: 'load power factor', pf_req: 'required power factor', s_n_mva: 'transformer rating',
+  p_cap_mw: 'import cap', statcom_capital_cost: 'STATCOM cost',
+}
+/** What the run took for each project-held input, and from where (a run on assumed values says so). */
+function InputsUsed({ inputs }: { inputs: NonNullable<IntentJob['inputs']> }) {
+  const { pq, xr, ...rest } = inputs.sources
+  const parts = Object.entries(rest).map(([k, v]) => `${USED_LABELS[k] ?? k} (${usedWord(v as string)})`)
+  const poc = Object.entries((pq ?? {}) as Record<string, string>).map(([k, v]) => `${USED_LABELS[k] ?? k} (${usedWord(v)})`)
+  return (
+    <p className="text-[11px] text-muted" data-testid="intent-inputs-used">
+      Inputs used: {parts.join(', ')}{poc.length ? `; point of connection: ${poc.join(', ')}` : ''}.
+    </p>
   )
 }

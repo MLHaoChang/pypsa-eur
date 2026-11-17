@@ -65,7 +65,10 @@ def test_defaults_prefill_from_the_project(client, hub):
     assert got["envelope"]["value"]["max"] == env["max"]
     assert got["envelope"]["value"]["phases"] == env["phases"]
     assert set(got["pq"]) == PQ_FIELDS
-    assert all(v["source"].startswith("assumed") and v["value"] > 0 for v in got["pq"].values())
+    assert all(v["source"].startswith("assumed") and v["kind"] == "assumed" and v["value"] > 0
+               for v in got["pq"].values())
+    assert got["ramp_mw_per_min"]["kind"] == ("assumed" if ramp["assumed"] else "project")
+    assert got["envelope"]["kind"] == "load_envelope" and got["link"]["kind"] == "project"
     assert got["pq"]["s_n_mva"]["value"] == got["pq"]["p_cap_mw"]["value"] == 40.0
 
 
@@ -115,7 +118,7 @@ def test_without_point_of_connection_values_the_refusal_names_the_fields(client,
     assert r.status_code == 422
     text = r.json()["detail"]
     assert "AS-05" not in text and "PQ tags" not in text
-    assert text.lower().startswith("the comparison cannot run: point of connection:") and "power factor" in text and "STATCOM cost" in text
+    assert text.startswith("Point of connection: ") and "power factor" in text and "STATCOM cost" in text
 
 
 @pytest.mark.parametrize("field,value", [("pf", 1.5), ("pf_req", 0.0), ("s_n_mva", -1.0), ("x_pu", -0.1),

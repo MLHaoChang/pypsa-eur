@@ -26,6 +26,9 @@ from services.solver import pcs_statcom
 
 SOURCE_REQUEST = "request"
 SOURCE_PROJECT = "project"
+#: What `defaults` says each value is, for the form's one word after the field (`intentSources.ts` maps them;
+#: its parity test reads this tuple).
+KINDS = ("project", "assumed", "load_envelope")
 #: Request `pq` field → the Link tag column it sets.
 PQ_COLUMNS = {"x_pu": "pq_x_pu", "pf": "pq_pf", "s_n_mva": "pq_s_n_mva", "p_cap_mw": "pq_p_cap_mw",
               "pf_req": "pq_pf_req", "statcom_capital_cost": "statcom_capital_cost"}
@@ -98,13 +101,13 @@ def _project_pq(n, link: str, rate: float) -> dict:
     for field, col in PQ_COLUMNS.items():
         v = None if tags is None else tags.get(col)
         if v is not None and math.isfinite(float(v)):
-            out[field] = {"value": float(v), "source": SOURCE_PROJECT}
+            out[field] = {"value": float(v), "source": SOURCE_PROJECT, "kind": "project"}
         elif field == "statcom_capital_cost":
             value, note = statcom_cost(rate)
-            out[field] = {"value": value, "source": note}
+            out[field] = {"value": value, "source": note, "kind": "assumed"}
         else:
             value, note = assumed[field]
-            out[field] = {"value": float(value), "source": note}
+            out[field] = {"value": float(value), "source": note, "kind": "assumed"}
     return out
 
 
@@ -167,13 +170,15 @@ def defaults(n, *, ramp_row: dict | None, envelope: dict | None, rate: float) ->
     a field the project cannot supply is {value: None, source: None, reason}."""
     out: dict = {}
     link = poc_link(n)
-    out["link"] = ({"value": link, "source": SOURCE_PROJECT} if link is not None else
+    out["link"] = ({"value": link, "source": SOURCE_PROJECT, "kind": "project"} if link is not None else
                    {"value": None, "source": None, "reason": "No link is marked as the grid import."})
     if ramp_row is not None and ramp_row.get("limit") is not None:
-        out["ramp_mw_per_min"] = {"value": float(ramp_row["limit"]), "source": ramp_row["source"]}
+        out["ramp_mw_per_min"] = {"value": float(ramp_row["limit"]), "source": ramp_row["source"],
+                                  "kind": "assumed" if ramp_row.get("assumed") else "project"}
     else:
         out["ramp_mw_per_min"] = {"value": None, "source": None, "reason": "The project has no ramp limit."}
-    out["envelope"] = ({"value": envelope, "source": "the DC load's dynamic envelope"} if envelope is not None
+    out["envelope"] = ({"value": envelope, "source": "the DC load's dynamic envelope", "kind": "load_envelope"}
+                       if envelope is not None
                        else {"value": None, "source": None, "reason": "The project has no DC load envelope."})
     out["pq"] = _project_pq(n, link, rate) if link is not None else {}
     return out

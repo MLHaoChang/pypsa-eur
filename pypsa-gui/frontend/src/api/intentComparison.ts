@@ -40,11 +40,31 @@ export interface IntentComparisonRequest {
 }
 export type JobStatus = 'running' | 'done' | 'failed' | 'aborted'
 export type RowProgress = 'queued' | 'running' | 'done'
+/** The point-of-connection values the PQ and Pst checks read (`intent_inputs.PQ_COLUMNS`). */
+export type PqField = 'x_pu' | 'pf' | 'pf_req' | 's_n_mva' | 'p_cap_mw' | 'statcom_capital_cost'
+/** One project-held input: its value, where it came from in words, and its kind (`intent_inputs.KINDS`). */
+export interface Sourced<T> { value: T | null; source: string | null; kind?: SourceKind; reason?: string }
+export type SourceKind = 'project' | 'assumed' | 'load_envelope'
+export interface Envelope {
+  phases: unknown[]
+  max: { swing_mw: number; oscillation_amplitude_mw: number; oscillation_period_s: number }
+}
+/** `GET .../intent-comparison/defaults`: what a run takes for each input the request leaves out. */
+export interface IntentInputDefaults {
+  link: Sourced<string>
+  ramp_mw_per_min: Sourced<number>
+  envelope: Sourced<Envelope>
+  pq: Partial<Record<PqField, Sourced<number>>>
+  /** The grid code the campus study applies: its saved one, else its default. */
+  grid_code: { value: string | null; title: string | null; source: 'saved' | 'default' }
+}
 export interface IntentJob {
   status: JobStatus
   progress: Record<string, RowProgress>
   rows: IntentRow[]
   error: string | null
+  /** The inputs the run used, each with its source ("project", "request", or an "assumed ..." note). */
+  inputs?: { values: Record<string, unknown>; sources: Record<string, string | Record<string, string>> } | null
 }
 
 const base = (project: string) => `/projects/${encodeURIComponent(project)}/intent-comparison`
@@ -59,5 +79,7 @@ export const intentComparisonApi = {
       if ((e as { response?: { status?: number } })?.response?.status === 404) return null
       throw e
     }),
+  defaults: (project: string) =>
+    client.get<IntentInputDefaults>(`${base(project)}/defaults`, quiet).then(r => r.data),
   abort: (project: string) => client.post<{ status: string; aborting: boolean }>(`${base(project)}/abort`, {}, quiet).then(r => r.data),
 }

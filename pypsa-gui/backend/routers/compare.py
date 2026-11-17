@@ -648,7 +648,9 @@ def post_intent_comparison(
             raise SizingLoopRefusal("; ".join(_plain_refusal(line) for line in refusals(config)))
         for spec in body.intents:
             grid_code_warnings(spec, profile)
-    except (SizingLoopRefusal, intent_inputs.IntentInputsRefusal, TypeError, ValueError, KeyError, AttributeError) as exc:
+    except intent_inputs.IntentInputsRefusal as exc:
+        raise HTTPException(422, str(exc))           # opens with the field's label (review-ux.md)
+    except (SizingLoopRefusal, TypeError, ValueError, KeyError, AttributeError) as exc:
         raise HTTPException(422, f"The comparison cannot run: {exc}")
     prepare = _intent_scenario(network, config, inputs, body.critical_mw)
     used = {"values": {k: resolved.get(k) for k in ("link", "ramp_mw_per_min", "envelope", "pq")} | {"xr": inputs["xr"]},
