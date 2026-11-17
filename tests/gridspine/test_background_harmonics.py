@@ -144,3 +144,15 @@ def test_the_harmonic_screen_judge_is_public_and_unchanged():
     from gridspine.static import harmonics as hm
 
     assert hm.judge is hm._judge
+
+
+def test_an_unreadable_file_and_absent_provenance_are_refused(tmp_path):
+    with pytest.raises(ContractError, match="not a readable CSV"):
+        _parse("")
+    with pytest.raises(ContractError, match="source is required"):
+        _parse(source=None)
+    with pytest.raises(ContractError, match="point of connection"):
+        _parse(poc=None)
+    csv = tmp_path / "pq.csv"
+    csv.write_text(CSV)
+    assert _parse(csv, filename="survey-2026.csv")["filename"] == "survey-2026.csv"

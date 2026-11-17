@@ -258,3 +258,69 @@ def test_an_element_powerfactory_did_not_export_is_listed_never_matched(case, tm
     assert len(summary["not_compared"]["branches"]) == 1
     assert summary["bus"]["n"] == len(bus) - 1 and summary["bus"]["pass"]
     assert summary["pass"] is False
+
+
+def test_a_failing_background_stays_fail_with_a_unit_missing(run):
+    import_background_campus(
+        str(run),
+        "order,u_h_pct_p95\n5,50\n",
+        source="PQ survey",
+        measured_on="2026-09-30",
+    )
+    bg = harmonics_campus(str(run)).query("level == 'poc'").iloc[1]
+    assert (
+        bg["verdict"] == "fail"
+    )  # a missing unit downgrades only a pass, never a fail
+    assert "worst order 5" in bg["note"] and "no input for pump" in bg["note"]
+
+
+def test_the_manifest_lists_exactly_its_files(case):
+    manifest = json.loads((case / "manifest.json").read_text())
+    assert manifest["files"] == [
+        f"{case.name}.dgs",
+        DGS_NAMES_CSV,
+        HARMONIC_SOURCES_CSV,
+        "lf_bus.csv",
+        "lf_branch_flow.csv",
+        "manifest.json",
+    ]
+
+
+def test_a_statcom_is_a_converter_to_list(tmp_path):
+    def edit(spec):
+        spec["campus"].setdefault("compensation", []).append(
+            {
+                "name": "ST1",
+                "bus": spec["campus"]["pcc"]["bus"],
+                "kind": "statcom",
+                "q_mvar": {"value": 4.0, "source": "assumed"},
+            }
+        )
+
+    run, _ = _run(tmp_path, _hub(), edit)
+    (out,) = powerfactory_campus(str(run), hours=[_hour(run)])
+    hs = pd.read_csv(out / HARMONIC_SOURCES_CSV, keep_default_na=False).set_index(
+        "pp_name"
+    )
+    assert hs.at["ST1", "status"] == "no spectrum"
+
+
+def test_a_branch_name_the_dgs_never_wrote_is_refused(case, tmp_path):
+    bus_csv, br_csv = _pf_exports(case, tmp_path)
+    br = pd.read_csv(br_csv, dtype=str)
+    br.loc[0, "branch_name"] = "Line(9)"
+    br.to_csv(br_csv, index=False)
+    with pytest.raises(ContractError, match="branch name.*not in the DGS export"):
+        read_back(case, bus_csv, br_csv)
+
+
+@pytest.mark.parametrize("drop", ["bus", "branch"])
+def test_either_side_missing_alone_blocks_the_pass(case, tmp_path, drop):
+    bus_csv, br_csv = _pf_exports(case, tmp_path)
+    path = bus_csv if drop == "bus" else br_csv
+    df = pd.read_csv(path, dtype=str)
+    df.iloc[1:].to_csv(path, index=False)
+    summary = read_back(case, bus_csv, br_csv)
+    assert bool(summary["not_compared"]["bus"]) == (drop == "bus")
+    assert bool(summary["not_compared"]["branches"]) == (drop == "branch")
+    assert summary["pass"] is False

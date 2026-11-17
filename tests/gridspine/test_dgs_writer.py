@@ -431,3 +431,39 @@ def test_every_element_maps_to_exactly_one_dgs_object_both_ways(written):
             el = getattr(net, table).loc[r.pp_index]
             assert bus_map[terms[ends[0]]] == net.bus.at[el[a], "name"]
             assert bus_map[terms[ends[1]]] == net.bus.at[el[b], "name"]
+
+
+def test_a_non_finite_value_is_refused_not_written(tmp_path):
+    net = fixture_net()
+    net.line.loc[0, "r_ohm_per_km"] = float("inf")
+    with pytest.raises(ContractError, match="not finite"):
+        write_dgs(net, tmp_path / "e.dgs")
+
+
+def test_empty_classes_get_no_header_and_fallback_names_hold(tmp_path):
+    net = fixture_net()
+    net.name = ""
+    net.gen = net.gen.iloc[0:0]
+    net.bus.loc[1, "name"] = "   "
+    write_dgs(net, tmp_path / "f.dgs")
+    text = (tmp_path / "f.dgs").read_text()
+    assert "$$ElmSym" not in text and "$$TypSym" not in text
+    dgs = read_dgs(tmp_path / "f.dgs")
+    assert dgs["ElmNet"][0]["loc_name"] == "Grid"
+    assert (
+        dgs["ElmTerm"][1]["loc_name"] == "ElmTerm"
+    )  # a blank name: the class name, never empty
+
+
+def test_a_machine_without_a_rating_takes_its_output_as_rating(tmp_path):
+    net = fixture_net()
+    net.gen["sn_mva"] = float("nan")
+    write_dgs(net, tmp_path / "g.dgs")
+    assert read_dgs(tmp_path / "g.dgs")["TypSym"][0]["sgn"] == 5.0
+
+
+def test_the_tap_side_is_written(tmp_path):
+    net = fixture_net()
+    net.trafo.loc[1, "tap_side"] = "lv"
+    write_dgs(net, tmp_path / "h.dgs")
+    assert [r["tap_side"] for r in read_dgs(tmp_path / "h.dgs")["TypTr2"]] == [0, 1]
