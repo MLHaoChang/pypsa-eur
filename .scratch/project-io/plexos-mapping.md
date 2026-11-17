@@ -31,7 +31,7 @@ Plain names in the report follow RAW-NAMES-1: "grid nodes", "lines", "generators
 
 | PLEXOS | Our network / sidecar | Notes |
 |---|---|---|
-| Node | `Bus` | `Voltage` → `v_nom`. If there is no voltage, use 380 kV and record it in `report.assumed`. Latitude/Longitude attributes → `x`/`y`. `Units` = 0 → the bus is kept but reported as out of service. |
+| Node | `Bus` | `Voltage` → `v_nom`. There is no default voltage. A node without `Voltage` is listed in `report.assumed`, one entry per bus, as "voltage unknown". A line with reactance that touches such a bus is not converted: it goes to `report.unmapped` ("needs a node voltage to convert reactance"). Links do not need a voltage. Latitude/Longitude attributes → `x`/`y`. `Units` = 0 → the bus is kept but reported as out of service. |
 | Node `Load` | `Load` on that bus | Static → `p_set`. Data-file-backed → `loads_t.p_set` over the snapshots. A file that is missing → warning, with the load's static value as fallback in `assumed`. |
 | Region, Zone | sidecar `areas` (name, kind, member buses) | Region `VoLL` → `areas[].voll` and the project's load-shedding cost, if the project has one; otherwise sidecar only. |
 | Line with `Reactance` | `Line` | `Max Flow` → `s_nom`, `Resistance`/`Reactance` (pu on 100 MVA) → ohms on `v_nom`. |
@@ -76,6 +76,8 @@ Every source row lands in exactly one place: the network, a sidecar, `report.unm
 - Prior art for cross-checking, not vendored: NREL `plexosdb` (BSD-3) and Open Energy Transition's `plexos-to-pypsa-converter`.
 
 ## Slices (PR-SIZE-1, GK A)
+
+Engine cage (owner, option A): pypsa is imported only in `gridspine/ingest/plexos_import.py`. `plexos_xml.py` and the registry entry load without pypsa.
 
 1. **XML reader** `gridspine/ingest/plexos_xml.py`: streaming parse of the tables into a name-resolved model (objects, memberships, property rows with scenario, band, date, file and variable tags). Pure, with no network. Tests: fixture counts per table, checked by hand. This PR also carries this plan.
 2. **Network** `gridspine/ingest/plexos_import.py` `read_plexos(paths, options) -> ImportResult`: nodes, lines/links, generators, fuels/carriers, batteries, hydro storage, loads, horizon snapshots, data-file time series, plus the registry entry (`plexos`, "PLEXOS model", `.xml .zip`). Base rows only; tagged rows go to unmapped. Codes against the contract text until the core session lands `import_result.py`, then switches to it.
