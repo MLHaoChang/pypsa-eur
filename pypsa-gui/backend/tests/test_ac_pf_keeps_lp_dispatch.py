@@ -164,6 +164,26 @@ def test_every_dynamic_frame_is_the_lps_or_an_emptied_pf_only_one(earlier_flow):
     )
 
 
+def test_an_output_table_outside_the_record_is_put_back_too(monkeypatch):
+    """The restore covers every output table, not only the record's: a table a
+    flow writes beyond today's PyPSA set is put back as the LP left it."""
+    from services.solver_service import SolverConfig
+
+    n = _solved_ieee14()
+    assert "generators_t.mu_upper" not in ac_pf_service._lp_snapshot(n), "fixture"
+    before = _every_frame(n)
+    real = pypsa.Network.pf
+
+    def _pf_writing_more(self, *a, **k):
+        out = real(self, *a, **k)
+        self.generators_t["mu_upper"] = self.generators_t.p * 0 + 7.0
+        return out
+
+    monkeypatch.setattr(pypsa.Network, "pf", _pf_writing_more)
+    ac_pf_service.run_ac_pf_stage(n, SolverConfig(), queue.Queue())
+    _assert_lp_or_emptied(n, before)
+
+
 def test_a_flow_that_does_not_converge_leaves_the_lp_tables():
     """F2: a flow that runs to its iteration limit without converging."""
     from services.solver_service import SolverConfig
