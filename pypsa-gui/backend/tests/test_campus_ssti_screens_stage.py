@@ -66,8 +66,9 @@ def test_the_profile_keys_and_their_clauses_reach_the_results(hub):  # noqa: F81
 
 
 def test_a_screen_error_reads_error_never_fails_the_run_and_clears_on_success(
-    hub, monkeypatch
-):  # noqa: F811
+    hub,  # noqa: F811
+    monkeypatch,
+):
     _publish(hub)
     _run(hub)
     run = ce.campus_dir(hub) / "run"
