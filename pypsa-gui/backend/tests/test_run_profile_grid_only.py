@@ -518,9 +518,11 @@ def test_the_lp_condition_is_optimal_only_for_the_known_pf_suffixes(
 
 
 def _fresh_ctx(**over):
+    """A flow keeps the LP's record beside its own (`run_ac_pf_stage`)."""
     n = _net()
     ctx = _ctx(n, **over)
-    ctx.solver_state.setdefault("lopf_results", None)
+    flowed = ctx.solver_state.get("ac_pf_results") is not None
+    ctx.solver_state.setdefault("lopf_results", {} if flowed else None)
     return ctx
 
 
@@ -597,6 +599,36 @@ def test_without_a_flow_only_the_lp_or_a_failed_flow_is_current(
     ctx = _fresh_ctx(condition=condition, pf=False)
     fingerprints(ctx)
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
+
+
+@pytest.mark.parametrize("after_pf", [False, True])
+def test_a_flowed_record_without_the_lps_is_not_current(fingerprints, after_pf):
+    """GK B M2: a record that kept only the flow's tables (a legacy save) has no
+    LP to read: the live tables may be the flow's."""
+    ctx = _fresh_ctx(condition="lopf+ac_pf_ok", lopf_results=None)
+    fingerprints(ctx)
+    assert _calc.solve_matches_inputs(ctx, after_pf=after_pf) is False
+
+
+def test_an_lp_record_without_a_flow_is_not_current(fingerprints):
+    ctx = _fresh_ctx(condition="optimal", pf=False, lopf_results={})
+    fingerprints(ctx)
+    assert _calc.solve_matches_inputs(ctx) is False
+
+
+@pytest.mark.parametrize(
+    "stale",
+    ["assistant_solve_input_fingerprint", "assistant_solve_exact_input_fingerprint"],
+)
+@pytest.mark.parametrize("condition, pf", [("optimal", False), ("lopf+ac_pf_ok", True)])
+def test_each_fingerprint_alone_makes_the_solve_not_current(
+    fingerprints, stale, condition, pf
+):
+    ctx = _fresh_ctx(condition=condition, pf=pf)
+    fingerprints(ctx)
+    assert _calc.solve_matches_inputs(ctx) is True, "fixture: current"
+    ctx.network.meta[stale] = "old"
+    assert _calc.solve_matches_inputs(ctx) is False
 
 
 def test_a_changed_input_is_never_current_after_a_pf(fingerprints):

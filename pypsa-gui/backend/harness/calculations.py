@@ -152,9 +152,11 @@ def solve_matches_inputs(ctx, after_pf=False):
     and the exact one the Load flow tab requires. After an AC power flow the
     live network keeps the LP's tables (owner decision PF-SAVE-1: the flow's
     live only in `ac_pf_results`), so the LP solve stays current through a
-    flow, a failed one included. `after_pf` (study harness 15) also asks that
-    a flow there ran on the current edit counter and succeeded (a PF result,
-    never an LP one)."""
+    flow chained to it (`lopf+ac_pf_ok`) and through a failed one; a flow
+    record needs the LP's record beside it. A standalone flow (condition
+    `ac_pf_ok`) reads not current to an LP-only reader: it fails closed.
+    `after_pf` (study harness 15) also asks that a flow there ran on the
+    current edit counter and succeeded (a PF result, never an LP one)."""
     n, state = ctx.network, ctx.solver_state
     flowed = state.get("ac_pf_results") is not None
     condition = state.get("condition")
@@ -173,7 +175,8 @@ def solve_matches_inputs(ctx, after_pf=False):
         or (isinstance(condition, str) and condition.startswith(AC_PF_FAILED))
     )
     return (
-        (flowed or state.get("lopf_results") is None)
+        # A flow keeps the LP's record beside its own; an LP record alone is no solve's.
+        flowed == (state.get("lopf_results") is not None)
         and state.get("status") == "completed"
         and lp_kept
         and n.meta.get("assistant_solve_input_fingerprint")
