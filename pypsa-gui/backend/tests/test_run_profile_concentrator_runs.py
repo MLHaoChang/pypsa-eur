@@ -30,7 +30,7 @@ from tests.test_harness_envelope import envelope_of, granted, profile  # noqa: F
 from tests.test_harness_run_loops import Script, go, rated, refused, say  # noqa: F401
 from tests.test_harness_run_report_handoff import fake_report  # noqa: F401
 from tests.test_harness_run_skeleton import RUN
-from tests.test_harness_runner import detached, fake_report_provider  # noqa: F401
+from tests.test_harness_runner import Clicks, detached, fake_report_provider  # noqa: F401
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND / "project_templates"))
@@ -109,7 +109,12 @@ def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site, monke
     monkeypatch.setattr(baseline_mod, "solve_baseline", spy)
     task, path, _ = granted(run={**RUN, "profile": REF})
     script = Script()  # never consulted: no L2 round on a passing gate
-    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    # The envelope never admits a case that re-solves its baseline (`baseline_solve`,
+    # GK B (53) B1: the budget does not count it); the run waits on the case's card
+    # and the user approves it (study-harness issue 50 counts it, then it is admitted).
+    clicks = Clicks(refs={"solve.2"})
+    runner = harness_runner.Runner("a", agent_provider=script, decisions=clicks)
+    record = go(runner, path, task)
     run = record["run"]
     rules = {
         r["rule"]: r
@@ -152,6 +157,8 @@ def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site, monke
     # miss), and the envelope counts only the plan: the anchor study-harness
     # issue 50 turns into 2 (`run_ic.SOLVES = 0`).
     assert solved == [1]
+    assert clicks.used == ["solve.2"]
+    assert [a["reason"] for a in envelope_of(path)["audit"] if a["event"] == "refused"] == ["baseline_solve"]
     envelope = envelope_of(path)
     assert run_envelope.solves_used(envelope) == 1
     assert run["budget"]["used"]["solves"] == 1
