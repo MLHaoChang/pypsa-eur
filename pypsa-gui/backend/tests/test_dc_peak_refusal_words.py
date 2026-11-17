@@ -240,3 +240,44 @@ def test_the_staged_refusal_names_each_mode_that_builds(alts, want):
 def test_only_a_battery_refusal_names_another_mode(mode):
     words = T._peak_ways_out(_spec(mode), None, single=True, alts=("hybrid", "genset"))
     assert "Pick" not in words and "backup" not in words, words
+
+
+@pytest.mark.parametrize("err", [RuntimeError("boom"), DcLoadError("hybrid words", "x")])
+def test_a_probe_that_raises_is_not_named_and_is_logged(err, monkeypatch, caplog):
+    """GK A ask: building another mode to name it may raise. That mode is not
+    named, the error is logged, and the user still gets their own refusal."""
+    fits = T.dc_load_spec(
+        "eh_datacenter", {**BESS, "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]}
+    )
+    # IT 36 with Battery backup is refused, and Hybrid would build there.
+    phase = fits.phases[0].model_copy(update={"it_mw": 36.0})
+    spec = fits.model_copy(update={"phases": [phase]})
+    real = T._peak_over
+
+    def peak_over(tid, s, p=None):
+        if s.backup.mode == "hybrid":
+            raise err
+        return real(tid, s, p)
+
+    monkeypatch.setattr(T, "_peak_over", peak_over)
+    with caplog.at_level("WARNING", logger=T.__name__):
+        with pytest.raises(DcLoadError) as exc:
+            T._check_dc_peak("eh_datacenter", spec)
+    msg = str(exc.value)
+    assert exc.value.field == "dc_load.phases"
+    assert "hybrid words" not in msg and "Hybrid" not in msg, msg
+    assert "Battery strings carry outages only" in msg, msg
+    assert any(
+        "hybrid backup failed" in r.getMessage() and r.exc_info for r in caplog.records
+    )
+
+
+def test_the_search_fails_fast_when_the_bracket_stops_shrinking(monkeypatch):
+    """GK A loop guard: a capped bisection raises instead of hanging."""
+    spec = T.dc_load_spec(
+        "eh_datacenter", {**BESS, "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]}
+    )
+    monkeypatch.setattr(T, "_BISECT_CAP", 3)
+    monkeypatch.setattr(T, "_peak_over", lambda tid, s, p: (None, []))
+    with pytest.raises(RuntimeError, match="did not converge"):
+        T._largest_fitting_it("eh_datacenter", spec, None)

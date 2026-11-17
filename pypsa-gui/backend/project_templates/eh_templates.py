@@ -25,6 +25,7 @@ hourly dispatch move 52 hours of stored energy.
 """
 from __future__ import annotations
 
+import logging
 import math
 from datetime import date
 from typing import NamedTuple
@@ -32,6 +33,8 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 import pypsa
+
+_log = logging.getLogger(__name__)
 
 HOURS = 168
 SNAPSHOTS = pd.date_range("2030-07-01", periods=HOURS, freq="h")
@@ -728,10 +731,22 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
     # Name another backup mode only where it builds (GK A review).
     alts = tuple(
         m for m in (("hybrid",) if single else ("hybrid", "genset"))
-        if bess and not _peak_over(template_id, _with_backup(spec, m), planning)[1]
+        if bess and _mode_builds(template_id, spec, m, planning)
     )
     raise DcLoadError(words + _peak_ways_out(spec, most, single=single, alts=alts),
                       "dc_load.phases")
+
+
+def _mode_builds(template_id: str, spec, mode: str, planning: Planning | None) -> bool:
+    """Whether ``spec`` with backup ``mode`` passes the same peak check. A probe
+    that raises counts as "doesn't build": the mode is not named, and the
+    error is logged, never shown as the user's (GK A review)."""
+    try:
+        return not _peak_over(template_id, _with_backup(spec, mode), planning)[1]
+    except Exception:
+        _log.warning("DC peak probe with %s backup failed; not naming it", mode,
+                     exc_info=True)
+        return False
 
 
 def _with_backup(spec, mode: str):
@@ -759,6 +774,9 @@ _MODE_WORD = {"hybrid": "Hybrid", "genset": "Gensets"}
 #: The New project form takes the IT load in decimals; the way out names it to this step (MW).
 IT_STEP_MW = 0.1
 
+#: The bisection's step cap: far above log2 of any IT load the form takes.
+_BISECT_CAP = 64
+
 
 def _largest_fitting_it(template_id: str, spec, planning) -> float:
     """The largest IT load, on the form's 0.1 MW step, whose peak fits: a bisection
@@ -774,13 +792,17 @@ def _largest_fitting_it(template_id: str, spec, planning) -> float:
 
     it = float(spec.phases[0].it_mw)
     lo, hi = 0, int(math.ceil(it / IT_STEP_MW - 1e-9))  # lo fits (0 MW), hi refused
-    while hi - lo > 1:
+    # A bisection ends in ceil(log2(hi)) steps; the cap makes a regression
+    # that stops shrinking the bracket fail fast instead of hanging (GK A review).
+    for _ in range(_BISECT_CAP):
+        if hi - lo <= 1:
+            return round(lo * IT_STEP_MW, 1)
         mid = (lo + hi) // 2
         if fits(mid * IT_STEP_MW):
             lo = mid
         else:
             hi = mid
-    return round(lo * IT_STEP_MW, 1)
+    raise RuntimeError(f"IT load search did not converge in {_BISECT_CAP} steps")
 
 
 def _peak_ways_out(spec, most: float | None, *, single: bool,
