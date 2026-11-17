@@ -179,9 +179,11 @@ UI_INTERNAL: dict[str, dict] = {
         }),
     },
     'log_feeds': {
-        "reason": 'Solver log feeds for the log panel; the assistant follows jobs with wait_for_job.',
+        "reason": ('Solver log feeds and the run estimate for the log panel and run status line; '
+                   'the assistant follows jobs with wait_for_job.'),
         "routes": frozenset({
             ('GET', '/api/simulation/log_stream'),
+            ('GET', '/api/simulation/queue/{job_id}/estimate'),
             ('GET', '/api/simulation/queue/{job_id}/log_stream'),
         }),
     },
