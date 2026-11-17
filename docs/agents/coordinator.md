@@ -14,6 +14,6 @@ Engine gatekeeper B3 (new template-e2e, ux-next, project-io app side, project-vi
 
 UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01G7qCunwLXP862Ro5Epncix`
 
-UX reviewer 2 (new template-e2e, ux-next and ui-cohesion UI reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCukqunk8HxojDL8G4zc`
+UX reviewer 2 (new template-e2e, ux-next and ui-cohesion UI reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCujuyad4EbFMnN3DRhE`
 
 Send every coordinator message to this id. A rotating coordinator (`.claude/skills/coordinator/SKILL.md`, "Rotation") replaces its line in a tiny PR (and does the same when a gatekeeper or UX reviewer rotates), and tells each live session the new id.
