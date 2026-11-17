@@ -359,6 +359,20 @@ def test_a_bypassed_capacitor_leaves_the_fault_levels_of_the_uncompensated_feede
     assert _ik(capped, "MV1C") == pytest.approx(_ik(plain, "MV1"), abs=1e-6)
 
 
+def test_each_fault_level_row_says_a_bypassed_capacitor_assumes_its_bypass_conducts():
+    from gridspine.static.campus_sc import campus_fault_levels
+
+    note = (
+        "series capacitor(s) ['SC1'] neglected: assumes the MOV or bypass conducts "
+        "for every fault"
+    )
+    capped = campus_fault_levels(build_campus(cap_spec()), ALL_UNITS)
+    assert capped["detail"].str.endswith(note).all()
+    for spec in (campus_spec(), cap_spec(protection="none")):
+        fl = campus_fault_levels(build_campus(spec), ALL_UNITS)
+        assert not fl["detail"].str.contains("series capacitor").any()
+
+
 def test_protection_none_keeps_the_capacitor_in_and_raises_the_far_fault_level():
     plain = build_campus(campus_spec())
     kept = build_campus(cap_spec(xc_ohm=t(0.2), protection="none"))
@@ -411,8 +425,11 @@ def _refuses(call, what):
         call()
 
 
-def test_every_line_and_transformer_walker_refuses_a_campus_with_a_series_capacitor():
+def test_every_line_and_transformer_walker_refuses_a_campus_with_a_series_capacitor(
+    tmp_path,
+):
     from gridspine.handoff.dgs_writer import write_dgs
+    from gridspine.handoff.emt_pack import write_emt_pack
     from gridspine.handoff.raw_writer import write_raw
     from gridspine.handoff.seq_writer import write_seq
     from gridspine.producers.pypsa_nodal import to_pypsa
@@ -435,10 +452,31 @@ def test_every_line_and_transformer_walker_refuses_a_campus_with_a_series_capaci
         lambda: SEQ.sequence_net(campus, {}),
         r"sequence networks \(unbalanced faults, earthing\)",
     )
-    _refuses(lambda: write_raw(campus.net, "unused.raw"), "PSS/E RAW writer")
+    _refuses(lambda: write_raw(campus.net, tmp_path / "unused.raw"), "PSS/E RAW writer")
     _refuses(lambda: to_pypsa(campus.net), "PyPSA nodal export")
-    _refuses(lambda: write_dgs(campus.net, "unused.dgs"), "PowerFactory DGS writer")
-    _refuses(lambda: write_seq(campus, "unused.seq"), "PSS/E sequence writer")
+    _refuses(
+        lambda: write_dgs(campus.net, tmp_path / "unused.dgs"),
+        "PowerFactory DGS writer",
+    )
+    _refuses(
+        lambda: write_seq(campus, tmp_path / "unused.seq"), "PSS/E sequence writer"
+    )
+    _refuses(lambda: write_emt_pack(tmp_path / "emt", campus), "EMT pack")
+    assert list(tmp_path.iterdir()) == []  # every walker refused before writing
+
+
+def test_island_hours_lists_an_assumed_series_capacitor_input():
+    from gridspine.static.island_hours import assumed_inputs
+
+    for cap, param in (
+        (dict(xc_ohm=t(0.1, "assumed")), "xc_ohm"),
+        (dict(xc_ohm=None, k=t(0.5, "assumed"), line="CB1"), "k"),
+    ):
+        campus = build_campus(cap_spec(**cap))
+        for model in ("flow", "sc"):
+            assert f"SC1.{param}" in assumed_inputs(campus, [], model)
+    datasheet = build_campus(cap_spec())
+    assert not any(a.startswith("SC1.") for a in assumed_inputs(datasheet, [], "flow"))
 
 
 def test_the_walkers_still_take_a_campus_without_capacitors():
