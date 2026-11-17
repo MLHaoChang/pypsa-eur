@@ -80,7 +80,7 @@ describe('plainWords: the dominant-risk line names the unit in plain words (UX a
   it('leads with the share of all ranked risk when the review states it', () => {
     // Hand check: 657,000 / (657,000 + 3 × 302,114) = 42 %.
     expect(plainWords('hospital_feeder carries 100% of ranked Link risk (42% of all ranked risk)'))
-      .toBe('Hospital feeder accounts for 42% of the ranked outage risk (all of the risk from connections)')
+      .toBe('Hospital feeder accounts for 42% of the outage risk (all of the risk from connections)')
   })
 })
 
