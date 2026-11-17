@@ -348,6 +348,11 @@ def test_tied_not_via_chat_matches_rank_base_then_fragment_file_name(copy, monke
         {"title": ""},
         {"reason": 3},
         {"panel": 3},
+        {"keywords": []},
+        {"keywords": [3]},
+        {"routes": []},
+        {"routes": [["GET", 3]]},
+        {"routes": ["GE"]},
     ],
 )
 def test_a_bad_not_via_chat_fragment_fails_the_import(copy, over):
@@ -811,3 +816,9 @@ def test_not_via_chat_order_is_python_rows_then_the_json_base_then_fragments(
     ]
     monkeypatch.setattr(nvc, "NOT_VIA_CHAT", entries)
     assert [m["title"] for m in nvc.matches({"zzqx"})] == ["Base thing", "A thing"]
+
+
+def test_a_not_via_chat_fragment_may_name_a_panel(copy):
+    base, fragment = copy(nvc.ENTRIES_FILE)
+    fragment("claude-x.json", {"entries": [_entry("x_thing", panel="some_panel")]})
+    assert nvc.load_entries(base)[-1]["panel"] == "some_panel"
