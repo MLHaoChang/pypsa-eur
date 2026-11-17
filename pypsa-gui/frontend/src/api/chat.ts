@@ -106,6 +106,8 @@ export interface ChatStreamRequest {
 export interface ChatFrame {
   event: string
   data: Record<string, unknown>
+  /** The SSE `id:` line, when the frame has one (GET /progress: `<epoch>:<seq>`). */
+  id?: string
 }
 
 /**
@@ -144,6 +146,7 @@ async function readSseResponse(
     }
     const err = new Error(detailMsg ?? `${label} HTTP ${resp.status}`)
     ;(err as Error & { kind?: string }).kind = kind
+    ;(err as Error & { status?: number }).status = resp.status
     onError?.(err)
     return
   }
@@ -165,16 +168,18 @@ async function readSseResponse(
       buffer = buffer.slice(idx + 2)
       let event = ''
       let dataRaw = ''
+      let id: string | undefined
       for (const line of block.split('\n')) {
         if (line.startsWith('event:')) event = line.slice(6).trim()
         else if (line.startsWith('data:')) dataRaw += line.slice(5).trim()
+        else if (line.startsWith('id:')) id = line.slice(3).trim()
       }
       if (!event) continue
       let data: Record<string, unknown> = {}
       try { data = dataRaw ? JSON.parse(dataRaw) : {} } catch {
         data = { raw: dataRaw }
       }
-      onFrame({ event, data })
+      onFrame(id ? { event, data, id } : { event, data })
     }
   }
 }
@@ -244,6 +249,135 @@ export function createChatProgressStream(
   return () => {
     try { controller.abort() } catch { /* idempotent */ }
   }
+}
+
+/** Waits before each reconnect of a resumable progress stream; its length is the try budget. */
+export const PROGRESS_BACKOFF_MS: readonly number[] = [1000, 2000, 4000, 8000, 15000, 15000]
+
+/**
+ * How a resumable progress stream ended by itself. `monitor_ended`: the server
+ * closed it because the session's monitor is gone, or a `job_snapshot` said so.
+ * `gave_up`: the stream could not be kept (the tries ran out, the server refused
+ * the request, or a second foreign-epoch refusal). Never sent after `close()`.
+ */
+export type ProgressStreamEnd = 'monitor_ended' | 'gave_up'
+
+function splitProgressId(id: string): [string, number] | null {
+  const at = id.lastIndexOf(':')
+  const seq = id.slice(at + 1)
+  if (at <= 0 || !/^[0-9]+$/.test(seq)) return null
+  return [id.slice(0, at), Number(seq)]
+}
+
+/**
+ * Live-voice 11c — the detached progress stream, kept across drops.
+ *
+ * Every frame of GET /api/chat/{id}/progress carries `id: <epoch>:<seq>`. A
+ * dropped stream reconnects with `Last-Event-ID`, waiting `PROGRESS_BACKOFF_MS`
+ * between tries (the count starts again once a frame arrives), so the server
+ * replays only what follows or answers with a `job_snapshot`. Frames at or
+ * below the highest seq seen for their epoch are dropped, so a replayed
+ * overlap is never shown twice; a `job_snapshot` sets that mark to its own seq.
+ *
+ * It stops, without reconnecting, when the server closes the stream (the
+ * monitor is gone), on a `job_snapshot` with `monitor_active: false`, and on a
+ * 4xx. A 409 `progress_cursor_foreign` (the server key changed) gets one
+ * reconnect without an id. The returned function closes the stream: it aborts
+ * the fetch and clears any pending wait, and `onEnd` is not called.
+ */
+export function createResumableProgressStream(
+  sessionId: string,
+  onFrame: (frame: ChatFrame) => void,
+  onEnd?: (end: ProgressStreamEnd) => void,
+): () => void {
+  let closed = false
+  let controller: AbortController | null = null
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let lastId: string | null = null
+  let tries = 0
+  let foreignRetried = false
+  const hwm = new Map<string, number>()
+
+  const shut = () => {
+    closed = true
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+    try { controller?.abort() } catch { /* idempotent */ }
+  }
+  const finish = (end: ProgressStreamEnd) => {
+    if (closed) return
+    shut()
+    onEnd?.(end)
+  }
+
+  const accept = (frame: ChatFrame) => {
+    tries = 0
+    const parsed = frame.id ? splitProgressId(frame.id) : null
+    if (parsed) {
+      const [epoch, seq] = parsed
+      if (frame.event !== 'job_snapshot') {
+        const top = hwm.get(epoch)
+        if (top !== undefined && seq <= top) return
+      }
+      hwm.set(epoch, seq)
+      lastId = frame.id as string
+    }
+    onFrame(frame)
+    if (frame.event === 'job_snapshot' && frame.data.monitor_active === false) {
+      finish('monitor_ended')
+    }
+  }
+
+  const connect = async () => {
+    timer = null
+    if (closed) return
+    controller = new AbortController()
+    const headers: Record<string, string> = { ...rawFetchHeaders('GET') }
+    if (lastId) headers['Last-Event-ID'] = lastId
+    let failure: (Error & { status?: number; kind?: string }) | null = null
+    try {
+      const resp = await fetch(`/api/chat/${encodeURIComponent(sessionId)}/progress`, {
+        method: 'GET', headers, signal: controller.signal,
+      })
+      await readSseResponse(resp, (frame) => { if (!closed) accept(frame) }, (err) => {
+        failure = err as Error & { status?: number; kind?: string }
+      }, 'chat progress')
+    } catch (err) {
+      failure = err as Error & { status?: number; kind?: string }
+    }
+    if (closed) return
+    if (failure === null) {
+      finish('monitor_ended')
+      return
+    }
+    const { status, kind } = failure as Error & { status?: number; kind?: string }
+    if (status === 409 && kind === 'progress_cursor_foreign' && !foreignRetried) {
+      // The server no longer knows this epoch: start again without an id, and
+      // drop the refused epoch's mark with it.
+      foreignRetried = true
+      const refused = lastId ? splitProgressId(lastId) : null
+      if (refused) hwm.delete(refused[0])
+      lastId = null
+      timer = setTimeout(() => { void connect() }, 0)
+      return
+    }
+    if ((typeof status === 'number' && status >= 400 && status < 500)
+        || tries >= PROGRESS_BACKOFF_MS.length) {
+      finish('gave_up')
+      return
+    }
+    timer = setTimeout(() => { void connect() }, PROGRESS_BACKOFF_MS[tries])
+    tries += 1
+  }
+
+  void connect()
+  return () => { if (!closed) shut() }
+}
+
+/** Live-voice 11b — Stop monitoring: this session stops watching its jobs; they keep running. */
+export async function postChatProgressStop(sessionId: string): Promise<{ ok: boolean; stopped?: boolean }> {
+  const r = await client.post(`/chat/${encodeURIComponent(sessionId)}/progress/stop`)
+  return r.data
 }
 
 export interface ConfirmRequest {

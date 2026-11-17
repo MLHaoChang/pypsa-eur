@@ -3,7 +3,7 @@
 
 # Nonblocking domain jobs, recoverable monitoring and results refresh
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 02, 08, 09
 
@@ -165,3 +165,17 @@ snapshot recovery, results refresh).
    in the mismatch cases.
 - Shots: the line with Stop monitoring, the state after Stop, and the card next to
   Cancel, in Guided and Expert.
+
+2026-11-17: GK B (60) plan GO for 11c-2. After Stop the button is removed (option A); "Watch
+again" is a follow-up if UX wants it. Conditions:
+- F1: a stream that stops by itself (tries used up, a 400, a second 409) no longer reads
+  "monitoring"; a muted terminal line shows and no timer is left. Each cause tested.
+- F2: close(), unmount and a session switch clear the backoff timer and abort the fetch.
+- F3: the reconnect after a foreign 409 drops the refused epoch's mark (tested, mutant).
+- F4: a snapshot below the mark resets it; mutants on `<=`, the per-epoch key and the reset.
+- F5: the C3 matrix adds a rename (fails closed) and input_revision 0; each clause has a
+  row where only it fails, and a mutant that row kills.
+- F6: a failing stop POST still closes the stream, cancels nothing, throws nothing.
+- F7: the button has an accessible name, works by keyboard, and its state is words.
+- F8: at the trial merge, tsc, the manifest tests and the inventory, route-parity and
+  control-matrix checks.

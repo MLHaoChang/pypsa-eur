@@ -45,11 +45,12 @@ import type { HarnessTurn, SourceGapDraft } from '../store/chatStore'
 import { shortMcpToolName } from '../api/mcpSettings'
 import { CHECKED_ANSWERS_QUERY_KEY, getCheckedAnswerCapabilities } from '../api/reliability'
 import toast from 'react-hot-toast'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
-  createChatProgressStream,
+  createResumableProgressStream,
+  postChatProgressStop,
   getChatHistory,
   postChatAbort,
   postChatConfirm,
@@ -60,7 +61,7 @@ import { useChatProfiles, useChatReadiness, CHAT_PROFILES_QUERY_KEY } from '../h
 import { applyUiNavigate } from './uiNavigate'
 import { nk } from '../utils/queryKeys'
 import { mismatchSentence } from '../utils/projectMismatch'
-import { moveProjectLock } from '../utils/projectActions'
+import { invalidateNetworkQueries, moveProjectLock } from '../utils/projectActions'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
 import { parseApproval, verifyApprovedText, type ApprovedAnswerFrame } from '../utils/answerAssurance'
 import {
@@ -81,6 +82,7 @@ import { CONTINUATION_MESSAGE, continuationMarker, usePlanContinuation } from '.
 import type { ContinuationLine } from './AssistantResultCard'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
+import { networkApi } from '../api/network'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
 import { isNearBottom } from '../utils/chatUi'
@@ -1189,6 +1191,95 @@ function ToolProgressDetails({ toolUseId }: { toolUseId: string }) {
 
 const EMPTY_TOOL_PROGRESS: { kind: string; line: string }[] = []
 
+/** Live-voice 11c — the state of the panel's detached progress observer. */
+export interface MonitorLineState {
+  toolUseId: string
+  /** monitoring: the stream is open · stopped: Stop monitoring was pressed ·
+   *  lost: the stream gave up · ended: the server closed it (the monitor is gone). */
+  state: 'monitoring' | 'stopped' | 'lost' | 'ended'
+  /** One muted line after a gap; replaced, never repeated. */
+  note?: string
+}
+
+export const MONITOR_WORDS = {
+  stop: 'Stop monitoring',
+  keepsRunning: 'the job keeps running',
+  stopped: 'Not monitoring. The job is still running.',
+  lost: 'Lost the progress stream. The job keeps running.',
+  caughtUp: 'Reconnected. Showing where the job stands now.',
+} as const
+
+/**
+ * The line under the watched tool row: Stop monitoring while the stream is
+ * open, then what happened to it. Cancelling the job is the separate cancel
+ * card; this line never cancels anything.
+ */
+function DetachedMonitorLine({ line, onStop }: { line: MonitorLineState; onStop: () => void }) {
+  const note = line.note
+    ? <div className="text-[10px] text-muted" data-testid="chat-monitor-note">{line.note}</div>
+    : null
+  if (line.state === 'ended') return note
+  return (
+    <div className="mt-1" data-testid="chat-monitor-line" data-state={line.state}>
+      {note}
+      {line.state === 'monitoring' ? (
+        <div className="flex items-center gap-2 text-[10px] text-muted">
+          <button
+            type="button"
+            onClick={onStop}
+            className="rounded border border-border px-1.5 py-0.5 text-[10px] text-text hover:bg-bg-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+            data-testid="chat-stop-monitoring"
+          >
+            {MONITOR_WORDS.stop}
+          </button>
+          <span>{MONITOR_WORDS.keepsRunning}</span>
+        </div>
+      ) : (
+        <div className="text-[10px] text-muted" role="status">
+          {line.state === 'stopped' ? MONITOR_WORDS.stopped : MONITOR_WORDS.lost}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The fields of a 11a job view that the results refresh reads. */
+export interface TerminalJobView {
+  outcome?: string | null
+  input_revision?: number | null
+}
+
+/**
+ * Live-voice 11c (C3/R1): after a watched job ends, refresh the open project's
+ * network and results in place, only when all of these hold:
+ * - the job succeeded;
+ * - it recorded the edit counter it started from (`input_revision`, 11a);
+ * - the tab still shows the project the turn ran in (by name, so a rename
+ *   during the job fails closed);
+ * - that project's edit counter is still the one the job started from (a
+ *   Solve does not move it, so a match means nothing was edited since).
+ * Never navigates and shows no toast. The server sends `job` only for the
+ * session's own project and only to its owner (null otherwise).
+ */
+export async function refreshIfStillCurrent(
+  qc: QueryClient, job: TerminalJobView | null, originProject: string | null,
+): Promise<boolean> {
+  if (!job || job.outcome !== 'succeeded') return false
+  if (typeof job.input_revision !== 'number') return false
+  const project = useUIStore.getState().currentProject
+  if (!project || project !== originProject) return false
+  let revision: number | undefined
+  try {
+    revision = (await networkApi.undoInfo()).network_revision
+  } catch {
+    return false
+  }
+  if (useUIStore.getState().currentProject !== project) return false
+  if (revision !== job.input_revision) return false
+  invalidateNetworkQueries(qc, project)
+  return true
+}
+
 // `ChatEmptyState` used to live here — the no-project primer, with the two
 // CustomEvent buttons Sidebar listens for. It is now the no-project BRANCH of
 // ChatLaunchGreeting, which carries both its copy and its testids, so the
@@ -1403,9 +1494,23 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
   // Issue 11 — detached solver progress observer (GET …/progress). Independent
   // of the turn SSE so reads can continue while the solve still emits lines.
   const progressCleanupRef = useRef<(() => void) | null>(null)
+  // Live-voice 11c: the line under the watched tool row (Stop monitoring, and
+  // what the stream did), for the one observer this panel holds.
+  const [monitorLine, setMonitorLine] = useState<MonitorLineState | null>(null)
   const stopProgressObserver = useCallback(() => {
     try { progressCleanupRef.current?.() } catch { /* idempotent */ }
     progressCleanupRef.current = null
+    setMonitorLine(null)
+  }, [])
+  // Stop monitoring (11b R3): close this stream and tell the server this
+  // session stops watching. The job keeps running; nothing is cancelled. A
+  // failed POST changes nothing on screen: this panel is no longer watching.
+  const stopMonitoring = useCallback(() => {
+    const sid = useChatStore.getState().sessionId
+    try { progressCleanupRef.current?.() } catch { /* idempotent */ }
+    progressCleanupRef.current = null
+    setMonitorLine((line) => (line ? { toolUseId: line.toolUseId, state: 'stopped' } : line))
+    if (sid) postChatProgressStop(sid).catch(() => { /* the stream is closed either way */ })
   }, [])
   // SC-07 S5b R6: each Site 3D navigate's ACK state, by tool_use_id.
   const [site3dOpen, setSite3dOpen] = useState<Record<string, Site3dOpenState>>({})
@@ -2398,9 +2503,25 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             const sid = useChatStore.getState().sessionId
             if (sid) {
               stopProgressObserver()
-              progressCleanupRef.current = createChatProgressStream(
+              const toolUseId = d.tool_use_id
+              const originProject = streamProjectRef.current
+              setMonitorLine({ toolUseId, state: 'monitoring' })
+              progressCleanupRef.current = createResumableProgressStream(
                 sid,
                 (progressFrame) => {
+                  if (progressFrame.event === 'job_snapshot') {
+                    // A gap in the stream: the server sent where things stand now.
+                    setMonitorLine((line) => (line && line.toolUseId === toolUseId
+                      ? { ...line, note: MONITOR_WORDS.caughtUp } : line))
+                    return
+                  }
+                  if (progressFrame.event === 'job_terminal') {
+                    void refreshIfStillCurrent(
+                      qc, (progressFrame.data as { job?: TerminalJobView | null }).job ?? null,
+                      originProject,
+                    )
+                    return
+                  }
                   if (progressFrame.event !== 'tool_progress') return
                   const p = progressFrame.data as {
                     tool_use_id?: string; kind?: string; line?: string
@@ -2410,6 +2531,10 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                       p.tool_use_id, { kind: p.kind, line: p.line },
                     )
                   }
+                },
+                (end) => {
+                  setMonitorLine((line) => (line && line.toolUseId === toolUseId
+                    ? { ...line, state: end === 'gave_up' ? 'lost' : 'ended' } : line))
                 },
               )
             }
@@ -3777,6 +3902,9 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                   toolWords={uiMode === 'guided' ? guidedToolPhrase : undefined}
                   onRequest={(text, label) => useChatStore.getState().sendRequest(text, { source: 'assistant-task', ...(label ? { label } : {}) })} />
                 <ToolProgressDetails toolUseId={m.tool_use_id} />
+                {monitorLine?.toolUseId === m.tool_use_id && (
+                  <DetachedMonitorLine line={monitorLine} onStop={stopMonitoring} />
+                )}
               </>
             )}
             {m.role === 'assistant' && m.interrupted && (

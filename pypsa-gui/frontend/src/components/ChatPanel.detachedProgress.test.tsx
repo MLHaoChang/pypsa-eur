@@ -7,7 +7,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
-import { createChatProgressStream, createChatStream, getChatHistory } from '../api/chat'
+import { createResumableProgressStream, createChatStream, getChatHistory } from '../api/chat'
 import ChatPanel from './ChatPanel'
 
 vi.mock('../hooks/useSpeechToText', () => ({
@@ -27,7 +27,7 @@ vi.mock('../api/chat', async (importOriginal) => {
   return {
     ...actual,
     createChatStream: vi.fn(() => () => {}),
-    createChatProgressStream: vi.fn(() => () => {}),
+    createResumableProgressStream: vi.fn(() => () => {}),
     getChatHistory: vi.fn().mockResolvedValue({
       turns: [], last_session_id: null, bound_project: null,
       history_gap: 0, pending_turn: null,
@@ -97,7 +97,7 @@ afterEach(() => cleanup())
 
 it('opens a progress observer when a tool_result reports detached_progress', async () => {
   let onProgress: ((frame: { event: string; data: Record<string, unknown> }) => void) | null = null
-  vi.mocked(createChatProgressStream).mockImplementation((_sid, onFrame) => {
+  vi.mocked(createResumableProgressStream).mockImplementation((_sid, onFrame) => {
     onProgress = onFrame
     return () => { onProgress = null }
   })
@@ -129,8 +129,8 @@ it('opens a progress observer when a tool_result reports detached_progress', asy
     useChatStore.getState().sendRequest('solve please', { source: 'hub-card' })
   })
   await waitFor(() => expect(vi.mocked(createChatStream)).toHaveBeenCalled())
-  await waitFor(() => expect(vi.mocked(createChatProgressStream)).toHaveBeenCalled())
-  expect(vi.mocked(createChatProgressStream).mock.calls[0][0]).toBe('sess-detached')
+  await waitFor(() => expect(vi.mocked(createResumableProgressStream)).toHaveBeenCalled())
+  expect(vi.mocked(createResumableProgressStream).mock.calls[0][0]).toBe('sess-detached')
 
   act(() => {
     onProgress?.({
