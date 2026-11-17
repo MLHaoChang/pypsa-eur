@@ -231,6 +231,22 @@ def test_curtailment_splits_by_cause_on_the_base_case(solved):
     assert causes["export_limit"] > 0 and causes["negative_price"] > 0, causes
 
 
+def test_curtailment_by_cause_without_the_export_flow_is_not_established(solved):
+    """Study harness 50: a project saved before link flows were kept reloads with its
+    link ports emptied; the split then names why, it never raises."""
+    from services.results.curtailment import curtailment_by_cause
+
+    n, cfg, _da = solved
+    kept = n.links_t.p0
+    try:
+        n.links_t.p0 = kept.iloc[:, 0:0]
+        out = curtailment_by_cause(n, cfg.commercial)
+    finally:
+        n.links_t.p0 = kept
+    assert out["status"] == "not_established" and out["reason"] == "export_flow_missing"
+    assert set(out["plants"]) == set(curtailment_by_cause(n, cfg.commercial)["plants"])
+
+
 @pytest.mark.live_solve
 def test_curtailment_by_cause_survives_a_reload(solved, tmp_path):
     """The split reads the price the dispatch was solved with; the solve's record and the

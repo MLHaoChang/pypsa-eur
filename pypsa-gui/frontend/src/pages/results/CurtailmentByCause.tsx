@@ -21,6 +21,7 @@ export const NOT_ESTABLISHED_REASON: Record<string, string> = {
   export_price_missing: 'No export price is set, so curtailment is not split by cause.',
   no_commercial_solve_record: 'The last run did not price the export, so curtailment is not split by cause.',
   export_price_changed_since_solve: 'The export price changed since the last run; run again to split curtailment by cause.',
+  export_flow_missing: 'The saved results hold no export flow; run again to split curtailment by cause.',
 }
 
 /** For a reason this view has no sentence for: the code is logged, never shown (UX). */
