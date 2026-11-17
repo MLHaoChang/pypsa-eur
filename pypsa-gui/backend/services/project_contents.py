@@ -250,7 +250,8 @@ class BundleRefused(ValueError):
 def _folded(member: str) -> str:
     # NFC as well: macOS stores names decomposed, so "é" and "e\u0301" are one file there.
     return "/".join(
-        _unicodedata.normalize("NFC", p.rstrip(". ")).casefold() for p in member.split("/")
+        _unicodedata.normalize("NFC", p.rstrip(". ")).casefold()
+        for p in member.split("/")
     )
 
 

@@ -155,7 +155,11 @@ def test_members_that_fold_to_one_file_are_refused(a, b):
 
 @pytest.mark.parametrize(
     "a, b",
-    [("uploads/a", "uploads/a/b"), ("uploads/a/b/c", "uploads/A"), ("uploads/a", "uploads/a./x")],
+    [
+        ("uploads/a", "uploads/a/b"),
+        ("uploads/a/b/c", "uploads/A"),
+        ("uploads/a", "uploads/a./x"),
+    ],
 )
 def test_a_member_that_is_also_a_folder_is_refused(a, b):
     with pytest.raises(PC.BundleRefused) as exc:
@@ -165,7 +169,9 @@ def test_a_member_that_is_also_a_folder_is_refused(a, b):
 
 def test_nfc_and_nfd_spellings_are_one_file():
     with pytest.raises(PC.BundleRefused) as exc:
-        PC.screen_members(_zip({"uploads/caf\u00e9.csv": b"1", "uploads/cafe\u0301.csv": b"2"}))
+        PC.screen_members(
+            _zip({"uploads/caf\u00e9.csv": b"1", "uploads/cafe\u0301.csv": b"2"})
+        )
     assert exc.value.kind == "bundle_name_clash"
 
 
@@ -421,7 +427,14 @@ def test_a_late_failure_removes_row_and_folder_and_a_retry_succeeds(
 
 @pytest.mark.parametrize("step", ["_restore_results_state", "_library_pin_issues"])
 def test_a_failure_after_the_swap_leaves_no_context_and_restores_the_pointer(
-    client, api_project, project_storage_dir, project_row, projects_root, _auth_db, monkeypatch, step
+    client,
+    api_project,
+    project_storage_dir,
+    project_row,
+    projects_root,
+    _auth_db,
+    monkeypatch,
+    step,
 ):
     """GK B 64, ask 2: no ghost context bound to the deleted project, the
     session's pointer back where it was, and an eviction flush writes nothing."""
@@ -436,7 +449,9 @@ def test_a_failure_after_the_swap_leaves_no_context_and_restores_the_pointer(
 
     def pointers():
         with session_local() as db:
-            return sorted(str(x) for x in db.scalars(select(SessionRow.active_project_id)))
+            return sorted(
+                str(x) for x in db.scalars(select(SessionRow.active_project_id))
+            )
 
     before = pointers()
 
@@ -733,7 +748,9 @@ def test_the_cleared_gridspine_fields_are_every_path_field_of_study_config():
     from pathlib import Path
 
     StudyConfig = _study_config()
-    path_fields = {f.name for f in dataclasses.fields(StudyConfig) if f.type in (Path, "Path")}
+    path_fields = {
+        f.name for f in dataclasses.fields(StudyConfig) if f.type in (Path, "Path")
+    }
     assert projects._gridspine_path_fields() == (
         "from_dispatch",
         "from_network",
@@ -753,7 +770,9 @@ def test_every_path_field_is_cleared_and_the_rest_kept(tmp_path):
     (tmp_path / "gridspine").mkdir()
     cfg = tmp_path / "gridspine" / "config.json"
     cfg.write_text(json.dumps({"hours": 3, **{f: f"/x/{f}" for f in fields}}))
-    assert projects._clear_gridspine_sources(tmp_path) == [f"gridspine.{f}" for f in fields]
+    assert projects._clear_gridspine_sources(tmp_path) == [
+        f"gridspine.{f}" for f in fields
+    ]
     data = json.loads(cfg.read_text())
     assert data == {"hours": 3, **dict.fromkeys(fields)}
 
@@ -761,9 +780,15 @@ def test_every_path_field_is_cleared_and_the_rest_kept(tmp_path):
 @pytest.mark.parametrize(
     "fields, says",
     [
-        (["gridspine.from_external"], ["(from_external)", "Choose the study's sources again"]),
+        (
+            ["gridspine.from_external"],
+            ["(from_external)", "Choose the study's sources again"],
+        ),
         (["extra_functionality_code"], ["custom solver code"]),
-        (["gridspine.from_network", "extra_functionality_code"], ["(from_network)", "custom solver code"]),
+        (
+            ["gridspine.from_network", "extra_functionality_code"],
+            ["(from_network)", "custom solver code"],
+        ),
     ],
 )
 def test_the_stripped_note_names_what_was_cleared(fields, says):
