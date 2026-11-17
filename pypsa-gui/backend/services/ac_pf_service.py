@@ -447,7 +447,11 @@ def run_ac_pf_stage(
           f"(x_tol={config.ac_pf_x_tol:g})...")
     try:
         try:
-            pf_result = network.pf(
+            from services.solver.pf_seed import run_pf
+
+            pf_result = run_pf(
+                network,
+                phase,
                 snapshots=network.snapshots,
                 x_tol=config.ac_pf_x_tol,
                 use_seed=False,
