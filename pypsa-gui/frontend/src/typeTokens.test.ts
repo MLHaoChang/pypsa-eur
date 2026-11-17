@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 // SPDX-License-Identifier: MIT
 // UI-COHESION-1 slice A: fonts, type/radius tokens and the link/eyebrow colours parse out of index.css.
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -16,15 +16,39 @@ describe('index.css design tokens', () => {
     expect(theme).toMatch(/--font-mono:\s*'JetBrains Mono'/)
     expect(css).not.toContain('--font-family-')
   })
-  it('ships Inter and JetBrains Mono as swapped woff2 faces from the bundle', () => {
+  it('ships Inter and JetBrains Mono as swapped woff2 faces that exist under public/fonts', () => {
     for (const family of ['Inter', 'JetBrains Mono']) {
       const faces = css.split('@font-face').filter(f => f.includes(`font-family: '${family}'`))
-      expect(faces.length).toBeGreaterThan(0)
+      expect(faces.length).toBe(3)
       for (const f of faces) {
         expect(f).toContain('font-display: swap')
-        expect(f).toMatch(/url\('@fontsource-variable\/[^']+\.woff2'\)/)
+        const file = /url\('\/fonts\/([^']+\.woff2)'\)/.exec(f)?.[1]
+        expect(file).toBeTruthy()
+        expect(existsSync(resolve(here, '../public/fonts', file!))).toBe(true)
       }
     }
+  })
+  it('keeps each licence text and a provenance note beside the font files', () => {
+    for (const f of ['OFL-Inter.txt', 'OFL-JetBrainsMono.txt', 'README.md']) {
+      expect(existsSync(resolve(here, '../public/fonts', f))).toBe(true)
+    }
+  })
+  it('names a metric-matched local fallback in each font token', () => {
+    expect(theme).toMatch(/--font-sans:[^;]*'Inter Fallback'[^;]*system-ui/)
+    expect(theme).toMatch(/--font-mono:[^;]*'JetBrains Mono Fallback'[^;]*ui-monospace/)
+    expect(css).toMatch(/font-family: 'Inter Fallback';[^}]*size-adjust/)
+  })
+  it('preloads only the Latin Inter file from spa.html', () => {
+    const html = readFileSync(resolve(here, '../spa.html'), 'utf8')
+    const preloads = html.match(/<link rel="preload"[^>]*>/g) ?? []
+    expect(preloads).toHaveLength(1)
+    expect(preloads[0]).toContain('/fonts/inter-latin-wght-normal.woff2')
+  })
+  it('does not shadow a Tailwind default text key', () => {
+    const tw = ['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl', '4xl', '5xl', '6xl', '7xl', '8xl', '9xl']
+    const keys = [...theme.matchAll(/--text-([a-z0-9]+):/g)].map(m => m[1])
+    expect(keys.length).toBeGreaterThan(0)
+    for (const k of keys) expect(tw).not.toContain(k)
   })
   it('has the type scale, radii and link/eyebrow tokens', () => {
     const px = (n: string) => new RegExp(`--text-${n}:\\s*(\\d+)px`).exec(theme)?.[1]
