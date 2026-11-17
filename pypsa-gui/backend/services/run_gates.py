@@ -1307,7 +1307,7 @@ def _mg_frequency(env):
 # profile's setup and AC power-flow facts. The PF readers sit in `run_grid_pf`
 # and read only the PF snapshot the engine stored.
 def _grid_template_source(env):
-    """belgium and ieee39 are built from sources a checkout may lack
+    """The belgium and ieee39 templates are built from sources a checkout may lack
     (`project_templates/_build.py`): the template's own network file, or the
     source it is built from, must be there; no evidence names what is missing."""
     import importlib.util

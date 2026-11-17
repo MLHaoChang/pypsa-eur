@@ -31,9 +31,13 @@ def baseline(request, client, session_ctx):
     """The shipped template created through the route as a user does, Load flow
     on, saved once as the run's hand-over does, then bound as the run's project."""
     name = f"Grid {request.param}"
-    response = client.post(f"/api/projects/from_template/{request.param}", params={"name": name})
+    response = client.post(
+        f"/api/projects/from_template/{request.param}", params={"name": name}
+    )
     assert response.status_code == 200, response.text
-    response = client.put("/api/simulation/solver_config", json={"run_ac_pf_after_lopf": False})
+    response = client.put(
+        "/api/simulation/solver_config", json={"run_ac_pf_after_lopf": False}
+    )
     assert response.status_code == 200, response.text
     response = client.post(f"/api/projects/{name}")
     assert response.status_code == 200, response.text
@@ -53,27 +57,41 @@ def baseline(request, client, session_ctx):
 @pytest.fixture
 def site(baseline, request):
     _, project_id, root = baseline
-    (root / flow_service.TEMPLATE_FILE).write_text(json.dumps({"id": request.node.callspec.params["baseline"]}))
+    (root / flow_service.TEMPLATE_FILE).write_text(
+        json.dumps({"id": request.node.callspec.params["baseline"]})
+    )
     return project_id, root
 
 
 def _profile_dict():
     from services import run_profiles
+
     return run_profiles.resolve(REF)
 
 
-def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(granted, rated, site):
+def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
+    granted, rated, site
+):
     task, path, _ = granted(run={**RUN, "profile": REF})
     script = Script()
     record = go(harness_runner.Runner("a", agent_provider=script), path, task)
     run = record["run"]
     assert run["status"] == "completed" and run["stage"] == "handoff", (
-        run["status"], run["stage"],
-        [(s["id"], s["status"], s.get("error")) for s in record["steps"]])
-    rules = {r["rule"]: r["verdict"] for r in run["stages"]["result_gate"]["gate"]["rules"]}
-    assert rules == {"res.solve.status": "pass", "res.fresh": "pass", "grid.pf.converged": "pass",
-                     "grid.pf.loading": "pass", "grid.pf.voltage": "not_evaluated",
-                     "grid.n1.secured": "not_evaluated"}
+        run["status"],
+        run["stage"],
+        [(s["id"], s["status"], s.get("error")) for s in record["steps"]],
+    )
+    rules = {
+        r["rule"]: r["verdict"] for r in run["stages"]["result_gate"]["gate"]["rules"]
+    }
+    assert rules == {
+        "res.solve.status": "pass",
+        "res.fresh": "pass",
+        "grid.pf.converged": "pass",
+        "grid.pf.loading": "pass",
+        "grid.pf.voltage": "not_evaluated",
+        "grid.n1.secured": "not_evaluated",
+    }
     assert run["stages"]["explore"]["status"] == "skipped" and script.requests == []
     assert run["stages"]["handoff"]["gate"]["passed"] is True
 
@@ -85,7 +103,9 @@ def test_a_seeded_overload_fails_the_loading_rule_and_the_run_asks_the_user_with
     solve keeps every line within its P rating, so the overload is seeded at the reader."""
     from services import run_grid_pf
 
-    monkeypatch.setattr(run_grid_pf, "loading", lambda ctx, ev: (118.4, ["Line 0-1 118.4 %"]))
+    monkeypatch.setattr(
+        run_grid_pf, "loading", lambda ctx, ev: (118.4, ["Line 0-1 118.4 %"])
+    )
     task, path, _ = granted(run={**RUN, "profile": REF})
     script = Script()  # no change to propose: the L2 round diagnoses and ends
     record = go(harness_runner.Runner("a", agent_provider=script), path, task)
@@ -95,5 +115,7 @@ def test_a_seeded_overload_fails_the_loading_rule_and_the_run_asks_the_user_with
     assert rules["grid.pf.loading"]["verdict"] == "fail"
     assert rules["grid.pf.loading"]["facts"][0]["value"] == 118.4
     assert rules["grid.pf.converged"]["verdict"] == "pass"
-    assert not [s for s in record["steps"] if s["tool"] in ("update_component", "add_component")]
+    assert not [
+        s for s in record["steps"] if s["tool"] in ("update_component", "add_component")
+    ]
     assert run["stages"]["report"]["status"] == "pending"

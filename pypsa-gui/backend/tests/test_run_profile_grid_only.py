@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import numpy as np
 import pandas as pd
 import pypsa
 import pytest
@@ -46,8 +45,14 @@ def test_setup_switches_load_flow_on_with_the_one_setting_the_grant_admits():
 
     p = _profile()
     assert p["stages"]["setup"]["actions"] == [
-        {"tool": "update_solver_config", "args": {"partial": {"run_ac_pf_after_lopf": True}}}]
-    assert run_envelope.SETTING_TOOLS == {"update_solver_config": p["stages"]["setup"]["actions"][0]["args"]}
+        {
+            "tool": "update_solver_config",
+            "args": {"partial": {"run_ac_pf_after_lopf": True}},
+        }
+    ]
+    assert run_envelope.SETTING_TOOLS == {
+        "update_solver_config": p["stages"]["setup"]["actions"][0]["args"]
+    }
     assert {"tool": "update_solver_config"} in p["envelope"]["runs"]
     run_envelope.check_block(p["envelope"])
 
@@ -58,39 +63,67 @@ def _setting_refusal(monkeypatch, args, call="c", step="c"):
     monkeypatch.setattr(run_envelope, "_standing", lambda *a, **k: None)
     monkeypatch.setattr(run_envelope, "_names_another_project", lambda *a: False)
     envelope = {"runs": [{"tool": "update_solver_config"}], "edits": []}
-    return run_envelope._refusal(SimpleNamespace(run_step_call=step), envelope, {}, "update_solver_config",
-                                 args, "write", False, None, SimpleNamespace(network=None, solver_state={}),
-                                 {"call_id": call})
+    return run_envelope._refusal(
+        SimpleNamespace(run_step_call=step),
+        envelope,
+        {},
+        "update_solver_config",
+        args,
+        "write",
+        False,
+        None,
+        SimpleNamespace(network=None, solver_state={}),
+        {"call_id": call},
+    )
 
 
 def test_the_harness_own_load_flow_step_is_admitted(monkeypatch):
-    assert _setting_refusal(monkeypatch, {"partial": {"run_ac_pf_after_lopf": True}}) is None
+    assert (
+        _setting_refusal(monkeypatch, {"partial": {"run_ac_pf_after_lopf": True}})
+        is None
+    )
 
 
-@pytest.mark.parametrize("call,step", [("model-call", "c"), ("c", None), (None, None), ("", "")])
-def test_a_model_turns_solver_config_write_is_refused_under_the_grant(monkeypatch, call, step):
+@pytest.mark.parametrize(
+    "call,step", [("model-call", "c"), ("c", None), (None, None), ("", "")]
+)
+def test_a_model_turns_solver_config_write_is_refused_under_the_grant(
+    monkeypatch, call, step
+):
     args = {"partial": {"run_ac_pf_after_lopf": True}}
     assert _setting_refusal(monkeypatch, args, call=call, step=step) == "own_step_only"
 
 
-@pytest.mark.parametrize("args", [
-    {"partial": {"run_ac_pf_after_lopf": False}},
-    {"partial": {"run_ac_pf_after_lopf": True, "solver_name": "highs"}},
-    {"partial": {"run_ac_pf_after_lopf": True}, "reset": True},
-    {"config": {"run_ac_pf_after_lopf": True}},
-    {},
-])
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"partial": {"run_ac_pf_after_lopf": False}},
+        {"partial": {"run_ac_pf_after_lopf": True, "solver_name": "highs"}},
+        {"partial": {"run_ac_pf_after_lopf": True}, "reset": True},
+        {"config": {"run_ac_pf_after_lopf": True}},
+        {},
+    ],
+)
 def test_the_own_step_with_any_other_args_is_outside_the_entry(monkeypatch, args):
     assert _setting_refusal(monkeypatch, args) == "outside_entry"
 
+
 def test_the_result_gate_is_the_core_rules_and_the_four_grid_rules():
     r = _rules()
-    assert set(r) == {"res.solve.status", "res.fresh", "grid.pf.converged", "grid.pf.loading",
-                      "grid.pf.voltage", "grid.n1.secured"}
+    assert set(r) == {
+        "res.solve.status",
+        "res.fresh",
+        "grid.pf.converged",
+        "grid.pf.loading",
+        "grid.pf.voltage",
+        "grid.n1.secured",
+    }
     for rid in ("grid.pf.converged", "grid.pf.loading"):
         assert r[rid]["severity"] == "block" and r[rid]["unevaluated"] == "needs_user"
     assert (r["grid.pf.loading"]["op"], r["grid.pf.loading"]["value"]) == ("le", 100.0)
-    assert r["grid.pf.voltage"]["severity"] == r["grid.n1.secured"]["severity"] == "warn"
+    assert (
+        r["grid.pf.voltage"]["severity"] == r["grid.n1.secured"]["severity"] == "warn"
+    )
 
 
 # ── setup ─────────────────────────────────────────────────
@@ -99,7 +132,9 @@ def test_the_result_gate_is_the_core_rules_and_the_four_grid_rules():
 def _template(monkeypatch, template):
     from services import flow_service
 
-    monkeypatch.setattr(flow_service, "read_template", lambda project_dir: {"id": template})
+    monkeypatch.setattr(
+        flow_service, "read_template", lambda project_dir: {"id": template}
+    )
 
 
 def _setup(monkeypatch, template, exists, gridspine=True):
@@ -108,8 +143,14 @@ def _setup(monkeypatch, template, exists, gridspine=True):
 
     _template(monkeypatch, template)
     real = pathlib.Path.exists
-    monkeypatch.setattr(pathlib.Path, "exists", lambda self: exists if self.name.endswith(".nc") else real(self))
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if gridspine else None)
+    monkeypatch.setattr(
+        pathlib.Path,
+        "exists",
+        lambda self: exists if self.name.endswith(".nc") else real(self),
+    )
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda name: object() if gridspine else None
+    )
     env = run_gates.Env(task={}, ctx=None, project=None, project_dir=None)
     return run_gates.evaluate([_rules("setup")["set.template.source"]], env)[0]
 
@@ -120,9 +161,13 @@ def test_the_built_in_templates_always_have_a_source(monkeypatch, template):
 
 
 @pytest.mark.parametrize("template", ["belgium", "ieee39"])
-def test_belgium_and_ieee39_are_refused_with_a_reason_when_their_source_is_missing(monkeypatch, template):
+def test_belgium_and_ieee39_are_refused_with_a_reason_when_their_source_is_missing(
+    monkeypatch, template
+):
     out = _setup(monkeypatch, template, exists=False, gridspine=False)
-    assert out["verdict"] == "not_evaluated" and ("not built" in out["reason"] or "gridspine" in out["reason"])
+    assert out["verdict"] == "not_evaluated" and (
+        "not built" in out["reason"] or "gridspine" in out["reason"]
+    )
     assert _setup(monkeypatch, template, exists=True)["verdict"] == "pass"
 
 
@@ -138,7 +183,11 @@ def test_a_template_outside_the_four_is_refused(monkeypatch):
 
 @pytest.fixture
 def direct(monkeypatch):
-    monkeypatch.setattr(run_gates, "_own_solve", lambda env, read, typed=False, after_pf=False: read(env.ctx))
+    monkeypatch.setattr(
+        run_gates,
+        "_own_solve",
+        lambda env, read, typed=False, after_pf=False: read(env.ctx),
+    )
 
     def gate(rule_id, ctx):
         env = run_gates.Env(task={}, ctx=ctx, project=None, project_dir=None)
@@ -158,14 +207,33 @@ def _net(rating=100.0, vband=None):
     return n
 
 
-def _ctx(n, p=(60.0, 60.0), q=(0.0, 0.0), v=(1.0, 1.0), ok=(True, True), pf=True, revision=0, **state):
+def _ctx(
+    n,
+    p=(60.0, 60.0),
+    q=(0.0, 0.0),
+    v=(1.0, 1.0),
+    ok=(True, True),
+    pf=True,
+    revision=0,
+    **state,
+):
     idx = n.snapshots
-    snap = {"lines_t.p0": pd.DataFrame({"l1": p}, index=idx), "lines_t.q0": pd.DataFrame({"l1": q}, index=idx),
-            "lines_t.p1": pd.DataFrame({"l1": [-x for x in p]}, index=idx),
-            "lines_t.q1": pd.DataFrame({"l1": [-x for x in q]}, index=idx),
-            "buses_t.v_mag_pu": pd.DataFrame({"a": v, "b": v}, index=idx)}
-    st = {"status": "completed", "condition": "lopf+ac_pf_ok", "ac_pf_network_revision": 0,
-          "ac_pf_convergence_list": [{"snapshot": str(i), "period": None, "ok": o} for i, o in zip(idx, ok)], **state}
+    snap = {
+        "lines_t.p0": pd.DataFrame({"l1": p}, index=idx),
+        "lines_t.q0": pd.DataFrame({"l1": q}, index=idx),
+        "lines_t.p1": pd.DataFrame({"l1": [-x for x in p]}, index=idx),
+        "lines_t.q1": pd.DataFrame({"l1": [-x for x in q]}, index=idx),
+        "buses_t.v_mag_pu": pd.DataFrame({"a": v, "b": v}, index=idx),
+    }
+    st = {
+        "status": "completed",
+        "condition": "lopf+ac_pf_ok",
+        "ac_pf_network_revision": 0,
+        "ac_pf_convergence_list": [
+            {"snapshot": str(i), "period": None, "ok": o} for i, o in zip(idx, ok)
+        ],
+        **state,
+    }
     if pf:
         st["ac_pf_results"] = snap
     return SimpleNamespace(network=n, solver_state=st, network_revision=revision)
@@ -179,18 +247,28 @@ def test_a_converged_pf_within_rating_passes_convergence_and_loading(direct):
 
 
 def test_a_seeded_overload_fails_the_loading_rule_and_names_the_branch(direct):
-    out = direct("grid.pf.loading", _ctx(_net(rating=100.0), p=(60.0, 90.0), q=(0.0, 60.0)))
-    assert out["verdict"] == "fail" and out["facts"][0]["value"] == pytest.approx(108.17, abs=0.01)
+    out = direct(
+        "grid.pf.loading", _ctx(_net(rating=100.0), p=(60.0, 90.0), q=(0.0, 60.0))
+    )
+    assert out["verdict"] == "fail" and out["facts"][0]["value"] == pytest.approx(
+        108.17, abs=0.01
+    )
     assert "Line l1" in out["facts"][0]["detail"][0]
 
 
 def test_loading_uses_apparent_power_not_active_power(direct):
-    out = direct("grid.pf.loading", _ctx(_net(rating=100.0), p=(80.0, 80.0), q=(80.0, 80.0)))
+    out = direct(
+        "grid.pf.loading", _ctx(_net(rating=100.0), p=(80.0, 80.0), q=(80.0, 80.0))
+    )
     assert out["verdict"] == "fail"
 
 
-@pytest.mark.parametrize("rule", ["grid.pf.converged", "grid.pf.loading", "grid.pf.voltage"])
-def test_without_an_ac_pf_result_the_pf_rules_are_not_evaluated_whatever_the_lopf_flows_say(direct, rule):
+@pytest.mark.parametrize(
+    "rule", ["grid.pf.converged", "grid.pf.loading", "grid.pf.voltage"]
+)
+def test_without_an_ac_pf_result_the_pf_rules_are_not_evaluated_whatever_the_lopf_flows_say(
+    direct, rule
+):
     n = _net(rating=100.0, vband=(0.95, 1.05))
     n.lines_t.p0["l1"] = [1.0, 1.0]  # LOPF-like live flows within rating
     ctx = _ctx(n, pf=False)
@@ -200,7 +278,10 @@ def test_without_an_ac_pf_result_the_pf_rules_are_not_evaluated_whatever_the_lop
 
 def test_a_live_lopf_frame_never_stands_in_for_the_stored_pf_snapshot(direct):
     n = _net(rating=100.0)
-    n.lines_t.p0["l1"] = [1.0, 1.0]  # the live frames are small; the PF snapshot is the overload
+    n.lines_t.p0["l1"] = [
+        1.0,
+        1.0,
+    ]  # the live frames are small; the PF snapshot is the overload
     out = direct("grid.pf.loading", _ctx(n, p=(150.0, 150.0)))
     assert out["verdict"] == "fail"
 
@@ -212,7 +293,10 @@ def test_an_unconverged_snapshot_fails_convergence_and_is_left_out_of_loading(di
 
 
 def test_an_unknown_convergence_is_not_evaluated(direct):
-    assert direct("grid.pf.converged", _ctx(_net(), ok=(True, None)))["verdict"] == "not_evaluated"
+    assert (
+        direct("grid.pf.converged", _ctx(_net(), ok=(True, None)))["verdict"]
+        == "not_evaluated"
+    )
 
 
 def test_a_pf_older_than_the_inputs_is_not_evaluated(direct):
@@ -228,7 +312,10 @@ def test_an_unrated_branch_is_named_never_assumed(direct):
 
 def test_the_voltage_band_is_the_buses_own_and_unset_is_not_evaluated(direct):
     unset = direct("grid.pf.voltage", _ctx(_net()))
-    assert unset["verdict"] == "not_evaluated" and unset["facts"][0]["value"] == "no_voltage_band"
+    assert (
+        unset["verdict"] == "not_evaluated"
+        and unset["facts"][0]["value"] == "no_voltage_band"
+    )
     n = _net(vband=(0.95, 1.05))
     assert direct("grid.pf.voltage", _ctx(n, v=(1.0, 1.0)))["verdict"] == "pass"
     bad = direct("grid.pf.voltage", _ctx(n, v=(1.0, 1.08)))
@@ -245,7 +332,10 @@ def test_n1_is_judged_only_when_the_solver_option_is_on_over_every_branch(direct
     off = _n1(direct, _net(), **{**on, "sclopf": False})
     assert off["verdict"] == "not_evaluated" and off["facts"][0]["value"] == "n1_off"
     partial = _n1(direct, _net(), **{**on, "sclopf_include_all_lines": False})
-    assert partial["verdict"] == "not_evaluated" and partial["facts"][0]["value"] == "n1_partial"
+    assert (
+        partial["verdict"] == "not_evaluated"
+        and partial["facts"][0]["value"] == "n1_partial"
+    )
 
 
 def test_n1_needs_the_transformer_flag_only_when_the_network_has_a_transformer(direct):
@@ -254,27 +344,39 @@ def test_n1_needs_the_transformer_flag_only_when_the_network_has_a_transformer(d
     n.add("Transformer", "t1", bus0="b", bus1="c", x=0.1, s_nom=100.0)
     both = {"sclopf": True, "sclopf_include_all_lines": True}
     assert _n1(direct, n, **both)["facts"][0]["value"] == "n1_partial"
-    assert _n1(direct, n, **both, sclopf_include_all_transformers=True)["verdict"] == "pass"
+    assert (
+        _n1(direct, n, **both, sclopf_include_all_transformers=True)["verdict"]
+        == "pass"
+    )
 
 
 def test_n1_is_not_evaluated_when_the_solve_did_not_finish_optimal(direct):
-    ctx = _ctx(_net(), solver_config={"sclopf": True, "sclopf_include_all_lines": True}, condition="infeasible")
+    ctx = _ctx(
+        _net(),
+        solver_config={"sclopf": True, "sclopf_include_all_lines": True},
+        condition="infeasible",
+    )
     assert direct("grid.n1.secured", ctx)["facts"][0]["value"] == "n1_no_solve"
 
 
 # ── the LP's condition under an AC power flow ─────────────
 
 
-@pytest.mark.parametrize("condition,expected", [
-    ("optimal", "optimal"),
-    ("lopf+ac_pf_ok", "optimal"),
-    ("optimal; ac_pf_failed: singular matrix", "optimal"),
-    ("lopf+ac_pf_unknown", "lopf+ac_pf_unknown"),
-    ("infeasible; ac_pf_failed: x", "infeasible; ac_pf_failed: x"),
-    ("lopf+ac_pf_ok; extra", "lopf+ac_pf_ok; extra"),
-    (None, None),
-])
-def test_the_lp_condition_is_optimal_only_for_the_known_pf_suffixes(condition, expected):
+@pytest.mark.parametrize(
+    "condition,expected",
+    [
+        ("optimal", "optimal"),
+        ("lopf+ac_pf_ok", "optimal"),
+        ("optimal; ac_pf_failed: singular matrix", "optimal"),
+        ("lopf+ac_pf_unknown", "lopf+ac_pf_unknown"),
+        ("infeasible; ac_pf_failed: x", "infeasible; ac_pf_failed: x"),
+        ("lopf+ac_pf_ok; extra", "lopf+ac_pf_ok; extra"),
+        (None, None),
+    ],
+)
+def test_the_lp_condition_is_optimal_only_for_the_known_pf_suffixes(
+    condition, expected
+):
     assert run_gates.lp_condition(condition) == expected
 
 
@@ -292,29 +394,47 @@ def _fresh_ctx(**over):
 def fingerprints(monkeypatch):
     from services import workflow_tools
 
-    monkeypatch.setattr(workflow_tools, "_network_input_fingerprint", lambda ctx, exact=False: "fp")
-    monkeypatch.setattr(_calc.workflow_tools, "_network_input_fingerprint", lambda ctx, exact=False: "fp")
-    return lambda ctx: ctx.network.meta.update(assistant_solve_input_fingerprint="fp",
-                                               assistant_solve_exact_input_fingerprint="fp")
+    monkeypatch.setattr(
+        workflow_tools, "_network_input_fingerprint", lambda ctx, exact=False: "fp"
+    )
+    monkeypatch.setattr(
+        _calc.workflow_tools,
+        "_network_input_fingerprint",
+        lambda ctx, exact=False: "fp",
+    )
+    return lambda ctx: ctx.network.meta.update(
+        assistant_solve_input_fingerprint="fp",
+        assistant_solve_exact_input_fingerprint="fp",
+    )
 
 
 from harness import calculations as _calc  # noqa: E402
 
 
-def test_a_pf_state_is_current_only_after_pf_and_only_for_the_solves_own_flow(fingerprints):
+def test_a_pf_state_is_current_only_after_pf_and_only_for_the_solves_own_flow(
+    fingerprints,
+):
     ctx = _fresh_ctx(condition="lopf+ac_pf_ok")
     fingerprints(ctx)
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is True
     assert _calc.solve_matches_inputs(ctx) is False  # the LP-only guard is unchanged
 
 
-@pytest.mark.parametrize("over", [
-    {"condition": "optimal"},  # an LP result with a PF snapshot: not the PF-ok condition
-    {"condition": "lopf+ac_pf_unknown"},
-    {"condition": "optimal; ac_pf_failed: x"},
-    {"condition": "lopf+ac_pf_ok", "ac_pf_network_revision": 4},  # the flow ran on another edit counter
-    {"condition": "lopf+ac_pf_ok", "status": "running"},
-])
+@pytest.mark.parametrize(
+    "over",
+    [
+        {
+            "condition": "optimal"
+        },  # an LP result with a PF snapshot: not the PF-ok condition
+        {"condition": "lopf+ac_pf_unknown"},
+        {"condition": "optimal; ac_pf_failed: x"},
+        {
+            "condition": "lopf+ac_pf_ok",
+            "ac_pf_network_revision": 4,
+        },  # the flow ran on another edit counter
+        {"condition": "lopf+ac_pf_ok", "status": "running"},
+    ],
+)
 def test_each_part_of_the_pf_freshness_guard_refuses_on_its_own(fingerprints, over):
     ctx = _fresh_ctx(**over)
     fingerprints(ctx)
@@ -323,7 +443,10 @@ def test_each_part_of_the_pf_freshness_guard_refuses_on_its_own(fingerprints, ov
 
 def test_a_changed_input_is_never_current_after_a_pf(fingerprints):
     ctx = _fresh_ctx(condition="lopf+ac_pf_ok")
-    ctx.network.meta.update(assistant_solve_input_fingerprint="old", assistant_solve_exact_input_fingerprint="old")
+    ctx.network.meta.update(
+        assistant_solve_input_fingerprint="old",
+        assistant_solve_exact_input_fingerprint="old",
+    )
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
 
 
@@ -331,8 +454,13 @@ def test_only_a_profile_that_reads_the_pf_counts_its_flow_as_fresh(monkeypatch):
     seen = []
     from services import workflow_tools
 
-    monkeypatch.setattr(workflow_tools, "solve_freshness",
-                        lambda ctx=None, after_pf=False: seen.append(after_pf) or {"results_current": after_pf})
+    monkeypatch.setattr(
+        workflow_tools,
+        "solve_freshness",
+        lambda ctx=None, after_pf=False: (
+            seen.append(after_pf) or {"results_current": after_pf}
+        ),
+    )
     monkeypatch.setattr(run_gates, "_profile", lambda env: {"pf_results": True})
     env = run_gates.Env(task={}, ctx=None, project=None, project_dir=None)
     assert run_gates._fresh(env) is True
@@ -355,7 +483,12 @@ def test_a_solve_leaves_the_input_fingerprint_where_it_was(template, with_pf):
     from services.pypsa_service import PyPSAService
     from services.solver_service import SolverConfig
 
-    path = pathlib.Path(__file__).resolve().parents[1] / "project_templates" / template / "network.nc"
+    path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "project_templates"
+        / template
+        / "network.nc"
+    )
     if not path.exists():
         pytest.skip(f"{template} is not built here")
     logging.disable(logging.CRITICAL)
@@ -363,12 +496,18 @@ def test_a_solve_leaves_the_input_fingerprint_where_it_was(template, with_pf):
         n = pypsa.Network(str(path))
         ctx = PyPSAService.build_context()
         ctx.network = n
-        before = [workflow_tools._network_input_fingerprint(ctx, exact=e) for e in (False, True)]
+        before = [
+            workflow_tools._network_input_fingerprint(ctx, exact=e)
+            for e in (False, True)
+        ]
         status, _ = n.optimize(solver_name="highs")
         assert status == "ok"
         if with_pf:
             run_ac_pf_stage(n, SolverConfig(), queue.Queue())
-        after = [workflow_tools._network_input_fingerprint(ctx, exact=e) for e in (False, True)]
+        after = [
+            workflow_tools._network_input_fingerprint(ctx, exact=e)
+            for e in (False, True)
+        ]
     finally:
         logging.disable(logging.NOTSET)
     assert before == after
