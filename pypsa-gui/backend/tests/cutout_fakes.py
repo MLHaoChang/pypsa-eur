@@ -92,10 +92,12 @@ def foreign_same_name(bbox, year, month, target, stop_event):
 
 
 def report_pid(bbox, year, month, target, stop_event):
-    """Write the fetching process's pid and the CDS env it sees to the file
-    named by `CUTOUT_FAKE_REPORT`, then leave a valid month."""
+    """Write the fetching process's pid, and whether the CDS key it sees
+    equals `CUTOUT_FAKE_EXPECT_KEY` (never the key itself), to the file named
+    by `CUTOUT_FAKE_REPORT`, then leave a valid month."""
+    seen = os.environ.get("CDSAPI_KEY") == os.environ.get("CUTOUT_FAKE_EXPECT_KEY")
     Path(os.environ["CUTOUT_FAKE_REPORT"]).write_text(
-        f"{os.getpid()}\n{os.environ.get('CDSAPI_KEY', '')}"
+        f"{os.getpid()}\n{'match' if seen else 'mismatch'}"
     )
     write_month(target, year, month)
 

@@ -172,6 +172,7 @@ def test_the_child_sees_credentials_set_after_import(cds_env, monkeypatch):
     report = cds_env / "report.txt"
     monkeypatch.setenv("CUTOUT_FAKE_REPORT", str(report))
     monkeypatch.setenv("CDSAPI_KEY", "set-after-import")
+    monkeypatch.setenv("CUTOUT_FAKE_EXPECT_KEY", "set-after-import")
     _seed(cds_env / "c", range(1, 12))
     ensure_cutout(
         BBOX,
@@ -181,7 +182,7 @@ def test_the_child_sees_credentials_set_after_import(cds_env, monkeypatch):
         fetch_in_subprocess=True,
     )
     pid, key = report.read_text().split("\n")
-    assert int(pid) != os.getpid() and key == "set-after-import"
+    assert int(pid) != os.getpid() and key == "match"
 
 
 # --- the child's answer: exit race, typed errors -----------------------------
