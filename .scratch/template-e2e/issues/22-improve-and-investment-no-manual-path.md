@@ -17,3 +17,7 @@ Improve cards offer only 'Let the assistant do this' (disabled without a key, KE
 - Every Improve card has a manual action that runs without the assistant.
 - Guided shows how to run the investment case, and it is labelled with what it compares.
 - Lever costs reconcile with the base or say why not.
+
+## Comments
+
+Extended by the investment/business-case walk (PR #1668, its issue 02): a manual investment path meets value_flows_not_configured, then cod_missing, then tax and degradation blockers on the data-centre template, and Guided section 7 reads "complete" while finance inputs are empty. Keep this issue's acceptance in step with that issue.
