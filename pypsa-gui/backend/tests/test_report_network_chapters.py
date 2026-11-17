@@ -496,3 +496,64 @@ def test_an_unreadable_reader_leaves_its_chapter_not_established_with_a_hint(
         ].status
         == "ok"
     )
+
+
+@pytest.mark.parametrize(
+    "state, flow_answers, tokens",
+    [
+        ({}, True, [{}]),
+        (
+            {"ac_pf_results": {}, "ac_pf_network_revision": 3},
+            True,
+            [{"solver_kind": "ac_pf"}],
+        ),
+        # A flow on another edit counter, or one whose read does not answer: the LP's proxy.
+        ({"ac_pf_results": {}, "ac_pf_network_revision": 2}, True, [{}]),
+        (
+            {"ac_pf_results": {}, "ac_pf_network_revision": 3},
+            False,
+            [{"solver_kind": "ac_pf"}, {}],
+        ),
+    ],
+)
+def test_the_load_flow_chapter_reads_the_flow_of_the_current_inputs(
+    monkeypatch, state, flow_answers, tokens
+):
+    """GK B B1: the chapter reads `ac_pf` when a flow ran on the current edit
+    counter; otherwise the LOPF proxy, with its disclosure."""
+    from types import SimpleNamespace
+
+    from services import retained_results, workflow_tools
+    from services.pypsa_service import PyPSAService
+
+    ctx = SimpleNamespace(
+        network=SimpleNamespace(meta={"assistant_solve_input_fingerprint": "f"}),
+        solver_state=state,
+        network_revision=3,
+        project_uuid="p",
+    )
+    monkeypatch.setattr(PyPSAService, "get_active_context", staticmethod(lambda: ctx))
+    monkeypatch.setattr(
+        workflow_tools, "solve_freshness", lambda: {"results_current": True}
+    )
+    seen = []
+    lopf = {**_sources()["reads"]["loadflow"], "source": "lopf"}
+
+    def capture(token):
+        seen.append(token)
+        if token.get("solver_kind") == "ac_pf":
+            return {**lopf, "source": "ac_pf"} if flow_answers else None
+        return lopf
+
+    monkeypatch.setattr(
+        retained_results,
+        "ADAPTERS",
+        (SimpleNamespace(section="loadflow", capture=capture),),
+    )
+    sources = NC.read_sources()
+    assert seen == tokens
+    payload, _ = NC.payloads(sources)[NC.LOAD_FLOW]
+    proxy = NC.LOADFLOW_PROXY in NC.disclosures({NC.LOAD_FLOW: payload})
+    assert (payload["source"], proxy) == (
+        ("ac_pf", False) if tokens == [{"solver_kind": "ac_pf"}] else ("lopf", True)
+    )

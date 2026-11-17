@@ -27,9 +27,21 @@ FIXTURES = (granted, rated, profile, fake_report)
 
 
 @pytest.fixture(params=["3bus", "ieee14"])
-def baseline(request, client, session_ctx):
+def baseline(request, client, session_ctx, tmp_path, monkeypatch):
     """The shipped template created through the route as a user does, Load flow
-    on, saved once as the run's hand-over does, then bound as the run's project."""
+    on, saved once as the run's hand-over does, then bound as the run's project.
+    The template's network.nc is built here as `project_templates/_build.py`
+    does: it is gitignored and CI builds no template (GK A 2)."""
+    import project_templates._build as classic
+    from routers import projects as projects_router
+
+    built = tmp_path / "templates" / request.param
+    built.mkdir(parents=True)
+    builder = {"3bus": classic.build_3bus, "ieee14": classic.build_ieee14}[
+        request.param
+    ]
+    builder().export_to_netcdf(str(built / "network.nc"))
+    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", built.parent)
     name = f"Grid {request.param}"
     response = client.post(
         f"/api/projects/from_template/{request.param}", params={"name": name}
@@ -73,11 +85,21 @@ def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
     granted, rated, site, monkeypatch, fake_report
 ):
     from routers import report_jobs
+    from services.reports import network_chapters as NC
 
     enqueued = []
     real_start = report_jobs._start
     monkeypatch.setattr(
         report_jobs, "_start", lambda *a, **k: enqueued.append(k) or real_start(*a, **k)
+    )
+    chapter_sources = []
+    real_read = NC.read_sources
+    monkeypatch.setattr(
+        NC,
+        "read_sources",
+        lambda *a, **k: (
+            chapter_sources.append(real_read(*a, **k)) or chapter_sources[-1]
+        ),
     )
     task, path, _ = granted(run={**RUN, "profile": REF})
     script = Script()
@@ -109,10 +131,28 @@ def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
     assert {k["status"] for k in kpis.values()} == {"read"}, kpis
     state = PyPSAService.get_solver_state()
     assert state["condition"] == "lopf+ac_pf_ok" and state["ac_pf_results"] is not None
-    # The LP objective, not the flow's cost (3bus: 61733.46 against 61734.29 before).
-    assert kpis["total_cost"]["value"] == pytest.approx(state["objective"], abs=1e-2), (
-        kpis
-    )
+    # The LP objective, not the flow's cost (3bus: 61733.46 against 61734.29 before);
+    # the KPI is rounded to 5 dp.
+    assert kpis["total_cost"]["value"] == round(state["objective"], 5), kpis
+    # The emissions KPI is the LP dispatch's, summed here independently.
+    n = PyPSAService.get_network()
+    lp_p = state["lopf_results"]["generators_t.p"]
+    w = n.snapshot_weightings.generators.reindex(lp_p.index)
+    co2 = n.generators.carrier.map(n.carriers.co2_emissions).fillna(0.0)
+    per_mwh = co2 / n.generators.efficiency
+    want = float((lp_p.multiply(w, axis=0).sum() * per_mwh.reindex(lp_p.columns)).sum())
+    assert want > 0, "fixture: the template emits"
+    assert kpis["emissions"]["value"] == pytest.approx(want, rel=1e-9), kpis
+    pf_p = state["ac_pf_results"]["generators_t.p"]
+    assert want != pytest.approx(
+        float((pf_p.multiply(w, axis=0).sum() * per_mwh.reindex(pf_p.columns)).sum()),
+        rel=1e-9,
+    ), "fixture: the flow moves the emissions"
+    # GK B B1: the load flow chapter reads the flow, so no proxy disclosure.
+    assert len(chapter_sources) == 1, chapter_sources
+    payload, why = NC.payloads(chapter_sources[0])[NC.LOAD_FLOW]
+    assert why is None and payload["source"] == "ac_pf", (payload, why)
+    assert NC.LOADFLOW_PROXY not in NC.disclosures({NC.LOAD_FLOW: payload})
     rows = {r["part"]: r["status"] for r in run["handoff"]["coverage"]}
     assert rows == {
         "Report": "covered",
