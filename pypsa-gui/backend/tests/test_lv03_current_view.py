@@ -329,3 +329,34 @@ def test_the_expiry_instant_is_the_last_served_one():
         upload_service.refuse_expired_delivery(meta, now=last + 1)
     assert gone.value.status_code == 410
     assert gone.value.detail['error_kind'] == 'delivery_expired'
+
+
+# --- mutant killers (L7) -----------------------------------------------------
+
+@pytest.mark.parametrize('source', ['run-a', ['run-a'], 7, True])
+def test_a_results_source_that_is_not_an_object_is_ignored(source):
+    view = dc.current_view_from_ui_context({**FULL_CONTEXT, 'results_source': source})
+    assert view['results_tab'] == 'loadflow' and 'run_id' not in view and 'window' not in view
+
+
+@pytest.mark.parametrize('value', [{'Line': 1}, ['Line'], {'results'}])
+def test_an_unhashable_value_is_dropped_not_raised(value):
+    view = dc.current_view_from_ui_context({
+        **FULL_CONTEXT, 'panel': value, 'selected_component': {'class': value, 'name': 'L3'},
+    })
+    assert 'panel' not in view and 'asset' not in view
+
+
+def test_a_one_snapshot_window_is_kept():
+    source = {**FULL_CONTEXT['results_source'], 'window_from': 12, 'window_to': 12}
+    view = dc.current_view_from_ui_context({**FULL_CONTEXT, 'results_source': source})
+    assert view['window'] == {'from': 12, 'to': 12}
+
+
+def test_an_episode_rotated_after_lookup_writes_nothing(monkeypatch):
+    thread_id = _bound_thread('ep-1')
+    before = _file_bytes(thread_id)
+    # The thread's episode moved on between the lookup and the lock.
+    monkeypatch.setattr(dc, 'find_thread_for_episode', lambda episode_id, **_: thread_id)
+    assert dc.record_current_view('ep-old', FULL_CONTEXT) is False
+    assert _file_bytes(thread_id) == before
