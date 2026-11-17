@@ -185,7 +185,8 @@ export const REASON_CODE_WORDS: Record<string, (args: string[]) => string> = {
   terminal_needs_part_lifetimes: a => `part lifetimes${forThe(a)}`,
   terminal_not_established: () => 'the terminal value',
   // `<asset or line>:<part>`: the remaining-life rule values each part by its cost and life.
-  terminal_part_unknown: a => `a cost and lifetime for ${displayName(a[0] ?? '') || 'each part'}${a[1] ? ` (its ${plain(a[1])} part)` : ''}`,
+  // The remaining-life rule cannot price this part: another terminal-value method can.
+  terminal_part_unknown: a => `a terminal-value method that can price ${displayName(a[0] ?? '') || 'each part'}${a[1] ? ` (its ${plain(a[1])} part)` : ''}`,
   terminal_value_missing: () => 'a terminal value',
   upfront_only_from_capital_cost: a => `an upfront cost${forThe(a)}`,
 }
@@ -264,7 +265,14 @@ function fixPlace(it: BusinessCaseRowReasonItem): 'finance' | 'lines' {
 function firstBlocker(items: BusinessCaseRowReasonItem[]): { phrase: string; place: 'finance' | 'lines' } | null {
   const real = items.filter(it => it.code !== 'not_established' && it.section !== null)
   if (!real.length) return null
-  const first = real.find(it => !/_not_established$/.test(it.code.split(':', 1)[0])) ?? real[0]
+  // A section that only waits on another, or the generic "a terminal value" beside the
+  // part that causes it, yields to a more specific cause.
+  const generic = (code: string) => {
+    const fam = code.split(':', 1)[0]
+    return /_not_established$/.test(fam) || (fam === 'terminal_value_missing'
+      && real.some(it => it.code.startsWith('terminal_part_unknown:')))
+  }
+  const first = real.find(it => !generic(it.code)) ?? real[0]
   const fam = first.code.split(':', 1)[0]
   const same = real.filter(it => it.code.split(':', 1)[0] === fam && it.section === first.section)
   return { phrase: joinAnd(familyWords(same.map(it => it.code))), place: fixPlace(first) }

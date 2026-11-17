@@ -34,7 +34,10 @@ describe('a not-established KPI names the first blocker (walk 03)', () => {
       + 'degradation rate for Genset 1, Genset 2, Genset new and Rooftop PV')
     expect(kpiText(NE, 'pct', DC, 'ebitda_margin_gross'))
       .toBe('Not established: needs a degradation rate for Genset 1')
-    expect(kpiText(NE, 'amount', IPP, 'project_npv')).toBe('Not established: needs a terminal value')
+    expect(kpiText(NE, 'amount', IPP, 'project_npv'))
+      .toBe('Not established: needs a terminal-value method that can price Plant capex (its investment part)')
+    expect(kpiText(NE, 'amount', pnl({ project_post_tax: [item('terminal', 'terminal_value_missing')] }), 'project_npv'))
+      .toBe('Not established: needs a terminal value')
     // A section that only waits on another yields to a cause.
     expect(kpiText(NE, 'amount', TAX, 'project_npv')).toBe('Not established: needs tax losses')
     for (const p of [DC, IPP, TAX]) {
@@ -56,7 +59,7 @@ describe('a not-established KPI names the first blocker (walk 03)', () => {
       .toBe('Not established: the operating section needs a degradation rate for Genset 1, '
         + 'Genset 2, Genset new and Rooftop PV.')
     expect(servedReasonText(IPP.row_reason!.project_post_tax)).toBe('Not established: the terminal '
-      + 'value section needs a terminal value and a cost and lifetime for Plant capex (its investment part).')
+      + 'value section needs a terminal value and a terminal-value method that can price Plant capex (its investment part).')
   })
 
   it('says what to do first and where', () => {

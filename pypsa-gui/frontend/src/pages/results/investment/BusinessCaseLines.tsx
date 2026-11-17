@@ -492,7 +492,9 @@ export default function BusinessCaseLines() {
                           <button type="button" className={ACTION + ' mr-1'} aria-expanded={open.has(i)}
                                   aria-label={`${open.has(i) ? 'Hide' : 'Show'} details of ${ln.name}`}
                                   onClick={() => toggle(i)}>{open.has(i) ? '▾' : '▸'}</button>
-                          <input aria-label={`Name, line ${i + 1}`} className={CELL + ' w-32' + (bad('name') ? BAD : '')}
+                          <input aria-label={`Name, line ${i + 1}`} title={ln.name} className={CELL + (bad('name') ? BAD : '')}
+                                 // Wide enough for the whole name (walk 06: "Capacity payment (BES"), 12–40 characters.
+                                 style={{ width: `${Math.min(40, Math.max(12, ln.name.length + 2))}ch` }}
                                  maxLength={80} value={ln.name} aria-invalid={bad('name') ? true : undefined}
                                  onChange={e => setLine(i, { name: e.target.value })} />
                         </td>
