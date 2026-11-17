@@ -986,3 +986,112 @@ def test_a_custom_column_off_the_allow_list_is_exported_and_reported_on_import(
     res = _read(_write(n, tmp_path))
     assert ("Loads › Site note", "'site_note' is not a parameter of Loads") in _um(res)
     assert "site_note" not in res.network.loads.columns
+
+
+# ── E8: one test per guard a targeted mutant showed unkilled ─────────────────
+
+
+def test_a_second_column_for_the_same_parameter_is_reported_not_overwritten(tmp_path):
+    def fn(wb):
+        ws = wb["Generators"]
+        src, dst = _col(ws, "p_nom"), _col(ws, "marginal_cost")
+        for row in (L.ROW_UNIT, L.ROW_KEY, L.ROW_SCALE):
+            ws.cell(row, dst).value = ws.cell(row, src).value
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert any(why == "a second column for the same parameter" for _, why in _um(res))
+    assert res.network.generators.at["wind 1", "p_nom"] == 50.0
+
+
+def test_a_formula_without_a_saved_value_in_a_time_series_names_its_column(tmp_path):
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        ws.cell(L.TS_FIRST_DATA_ROW, _col(ws, "d", row=L.TS_ROW_ASSET)).value = "=1+1"
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert any(
+        item.startswith(f"{L.TIME_SERIES} › d")
+        and why.startswith(
+            f"row {L.TS_FIRST_DATA_ROW} is a formula with no saved value"
+        )
+        for item, why in _um(res)
+    )
+
+
+def test_a_valid_zip_with_a_damaged_sheet_is_a_format_error(tmp_path):
+    import zipfile
+
+    from gridspine.ingest.import_result import ImportFormatError
+
+    src = _write(_network(False), tmp_path)
+    bad = tmp_path / "bad.xlsx"
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(bad, "w") as zout:
+        for info in zin.infolist():
+            data = zin.read(info)
+            if info.filename == "xl/worksheets/sheet2.xml":
+                data = data[: len(data) // 2]
+            zout.writestr(info, data)
+    with pytest.raises(ImportFormatError, match="not a readable Excel workbook"):
+        _read(bad)
+
+
+def test_upload_provenance_past_the_size_cap_is_dropped_with_a_warning(tmp_path):
+    n = _network(False)
+
+    def fn(wb):
+        wb[L.LISTS]["D2"] = '{"x": "' + "a" * 1_000_001 + '"}'
+
+    res = _edit(_write(n, tmp_path, sidecars={"user_ts.json": _user_ts(n)}), fn)
+    assert "$meta" not in res.sidecars["user_ts.json"]
+    assert any("provenance" in w for w in res.report.warnings)
+
+
+def test_an_uploaded_time_step_that_is_not_json_ready_is_reported(tmp_path):
+    n = _network(False)
+
+    def fn(wb):
+        wb[L.UPLOADED].cell(L.UP_FIRST_DATA_ROW, 1).value = "[NaN, 1]"
+
+    res = _edit(_write(n, tmp_path, sidecars={"user_ts.json": _user_ts(n)}), fn)
+    assert (
+        f"{L.UPLOADED} › other › p_max_pu",
+        "uploaded profile: '[NaN, 1]' is not a time step",
+    ) in _um(res)
+    assert "generators" not in res.sidecars["user_ts.json"]
+
+
+def test_an_unknown_snapshot_kind_is_reported(tmp_path):
+    def fn(wb):
+        ws = wb[L.HORIZON]
+        r = next(c.row for c in ws["D"] if c.value == "snapshot_kind")
+        ws.cell(r, 2).value = "bogus"
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert any(why.startswith("'bogus' is not one of") for _, why in _um(res))
+
+
+def test_an_infinite_value_is_written_as_text_and_refused_where_the_engine_does(
+    tmp_path,
+):
+    n = _network(False)
+    n.generators.loc["wind 1", "p_nom"] = float("inf")
+    path = _write(n, tmp_path)
+    ws = openpyxl.load_workbook(path)["Generators"]
+    assert ws.cell(L.FIRST_DATA_ROW, _col(ws, "p_nom")).value == "inf"
+    assert any(
+        item == "Generators › wind 1 › Capacity"
+        and why.startswith("infinity is not allowed here")
+        for item, why in _um(_read(path))
+    )
+
+
+def test_an_upload_with_a_gap_is_still_the_sheet_s_own_series(tmp_path):
+    """NaN in the series and null in user_ts.json are the same value."""
+    n = _network(False)
+    n.loads_t.p_set.iloc[1, 0] = float("nan")
+    ts = _user_ts(n)
+    ts["loads"]["p_set"]["d"]["values"][1] = None
+    ws = openpyxl.load_workbook(_write(n, tmp_path, sidecars={"user_ts.json": ts}))[
+        L.UPLOADED
+    ]
+    assert "d" not in [c.value for c in ws[L.UP_ROW_ASSET]]
