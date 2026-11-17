@@ -60,8 +60,13 @@ link_node_modules() {
   ln -s "$src" "$dst"
 }
 
-# Overlap in these paths is harmless when the merge itself is clean.
-docs_only_re='^(docs/superpowers/OPEN-ITEMS\.md|docs/superpowers/plans/.*|doc/release-notes\.d/.*|doc/release_notes\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md|pypsa-gui/backend/harness/README\.md)$'
+# docs_only_re, catalogue_re and inventory_overlap_re come from waivers.conf,
+# which frontier.py and brief.py read too (one list of what overlap is soft).
+docs_only_re='' catalogue_re='' inventory_overlap_re=''
+while IFS= read -r _l; do
+  [[ $_l =~ ^(docs_only_re|catalogue_re|inventory_overlap_re)=(.*)$ ]] \
+    && printf -v "${BASH_REMATCH[1]}" %s "${BASH_REMATCH[2]}"
+done <"$script_dir/waivers.conf"
 # A PR touching these must pass the semantic tests on the trial merge: backend
 # routes (project routes and routers/mcp among them), chat tools, the project
 # ACL services, the harness MCP server, and every module the frozen assurance
@@ -77,12 +82,6 @@ semantic_tests=(
   tests/test_harness_mcp_server.py
   tests/test_assurance_contracts.py
 )
-# A PR touching these must also pass the assistant inventory check, which builds
-# the inventory in memory (nothing generated is committed; RETRO-COST-1).
-catalogue_re='(^|/)harness/catalogue'
-# Overlap only in this file does not block when the trial merge is clean and
-# the semantic tests and the assistant inventory check pass on it.
-inventory_overlap_re='^pypsa-gui/backend/harness/catalogue\.py$'
 # New error kinds arrive as fragments in tool-error-kinds.d/, which never
 # overlap; a PR touching the manifest or a fragment also runs these.
 kinds_re='^pypsa-gui/tool-error-kinds(\.json$|\.d/)'

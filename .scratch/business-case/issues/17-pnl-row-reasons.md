@@ -3,7 +3,7 @@
 
 # 17 — Per-row reasons for a P&L row that is not established
 
-Status: needs-triage
+Status: done
 Gated: GK B
 Type: enhancement
 Parent: business-case 10 (the P&L and KPI view), GK B W1 (F4)
