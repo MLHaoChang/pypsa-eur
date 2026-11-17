@@ -105,12 +105,27 @@ def _solved(n) -> bool:
         return False
 
 
+def _solved_assets(n, frame: str) -> frozenset[str]:
+    """The ``frame`` assets the last solve covered: the columns of its solved
+    output (``<frame>_t.p``); empty on a never-solved network. An asset added
+    after the solve has no column, so its ``p_nom_opt`` of 0 is PyPSA's
+    default, not a size the solve chose (GK A 31)."""
+    if not _solved(n):
+        return frozenset()
+    dynamic = getattr(n, f"{frame}_t", None)
+    p = dynamic.get("p") if dynamic is not None else None
+    if p is None:
+        return frozenset()
+    return frozenset(str(c) for c in p.columns)
+
+
 def _rating(row, solved: bool = False) -> tuple[float, bool]:
     """``(MVA, unsized)``: installed MW read as MVA. An extendable asset reads
     its ``p_nom_opt`` (the saved network's last solve), and without one it is
     an unsized candidate counting 0; any other asset reads ``p_nom``. A
-    ``p_nom_opt`` of 0 is PyPSA's default on a network never ``solved`` (an
-    unsized candidate), but a size the solve chose on a solved one. A
+    ``p_nom_opt`` of 0 is PyPSA's default on an asset the last solve did not
+    cover (an unsized candidate), but a size the solve chose on one it
+    did (``solved``). A
     non-finite or negative value raises ``_Invalid``."""
     def num(key):
         try:
@@ -154,18 +169,18 @@ def converter_assets(n, bus: str | None = None,
     power architecture
     (``dc_architecture.behind_architecture``)."""
     out: dict[str, dict] = {}
-    solved = _solved(n)
     for frame, ibr_only in (("generators", True), ("storage_units", False)):
         df = getattr(n, frame, None)
         if df is None or df.empty or "bus" not in df.columns:
             continue
+        covered = _solved_assets(n, frame)
         for name, row in df.iterrows():
             if str(name) in behind or (bus is not None and str(row.get("bus", "")) != bus):
                 continue
             carrier = str(row.get("carrier", "") or "").lower()
             if (carrier not in IBR_CARRIERS) if ibr_only else (carrier in SYNCHRONOUS_STORAGE):
                 continue
-            mva, unsized = _rating(row, solved)
+            mva, unsized = _rating(row, str(name) in covered)
             out[str(name)] = {"mva": mva, "unsized": unsized, "bus": str(row.get("bus", "")),
                               "solved": _truthy(row.get("p_nom_extendable", False)) and not unsized}
     return out
@@ -326,14 +341,23 @@ def evaluate_network_scr_gate(
     capped = [r["bus"] for r in rows if stated_below(r) or unsized(r)]
     payload["capped_pocs"] = capped
     if gate.scr == "pass" and capped:
-        why = "; ".join(
-            f"{r['bus']}: " + (f"not sized yet: {', '.join(r['ibr_unsized'])}" if unsized(r)
-                               else f"stated {r['ibr_mva']:g} MVA below its converters' "
-                                    f"{r['ibr_derived_mva']:g} MVA")
-            for r in rows if r["bus"] in capped)
+        # UX 2 (walkthrough 05): this note reaches the study report and the
+        # readiness card, so it names assets and buses as a person reads them.
+        from services.run_actions import _display_name as shown
+
+        def why(r: dict[str, Any]) -> str:
+            if unsized(r):
+                names = ", ".join(shown(a) for a in r["ibr_unsized"])
+                return (f"at {shown(r['bus'])}, {names} "
+                        f"{'is' if len(r['ibr_unsized']) == 1 else 'are'} not sized yet; "
+                        "a solve sizes it")
+            return (f"at {shown(r['bus'])}, the stated inverter capacity of {r['ibr_mva']:g} MVA "
+                    f"is below the {r['ibr_derived_mva']:g} MVA of its converters; "
+                    "clear it to derive the capacity from them")
         return (None, "not_established", payload,
-                f"SCR pass not established (min SCR={min_scr:.3g} at {min_row['bus']}): "
-                f"the inverter capacity is incomplete at {why}")
+                f"Grid strength not confirmed: the lowest short-circuit ratio is {min_scr:.3g} "
+                f"at {shown(min_row['bus'])}, but the inverter capacity behind it is incomplete: "
+                + "; ".join(why(r) for r in rows if r["bus"] in capped) + ".")
     return gate, "ok", payload, note
 
 
