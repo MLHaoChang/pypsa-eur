@@ -272,8 +272,14 @@ def grid_readiness_payload(source: dict | None) -> dict | None:
         if isinstance(after, dict):          # DC 03: the value once the battery/UPS has smoothed
             row["after_battery"] = {"value": after.get("value"), "verdict": after.get("verdict")}
         rows.append(row)
-    return {"profile": dict(source.get("profile") or {}), "rows": rows,
-            "summary": dict(source.get("summary") or {}), "envelope": bool(source.get("envelope"))}
+    payload = {"profile": dict(source.get("profile") or {}), "rows": rows,
+               "summary": dict(source.get("summary") or {}), "envelope": bool(source.get("envelope"))}
+    # Only when there are some, so a report without excluded rows keeps its evidence hash.
+    excluded = [{"id": e.get("id"), "requirement": e.get("requirement"), "reason": e.get("reason")}
+                for e in source.get("excluded") or [] if isinstance(e, dict)]
+    if excluded:
+        payload["excluded"] = excluded
+    return payload
 
 
 def _cell(v: Any, unit: str | None) -> str:
@@ -324,6 +330,10 @@ def grid_readiness_disclosures(payload: dict) -> list[str]:
            "never a pass.",
            f"{head} — {s.get('red_flags', 0)} red flag(s), {s.get('unknown', 0)} unknown, "
            f"{s.get('assumed', 0)} on an assumed limit."]
+    if payload.get("excluded"):
+        out.append(f"{head} — left out as not applicable to this project, with no verdict and outside "
+                   "the counts: " + "; ".join(f"{e['requirement'] or e['id']} ({e['reason']})"
+                                                for e in payload["excluded"]) + ".")
     if payload.get("envelope"):
         out.append(f"{head} — the ramp, oscillation and voltage-change rows read the AI-training load "
                    "envelope IT-side at the point of connection, before UPS/BESS smoothing: before "

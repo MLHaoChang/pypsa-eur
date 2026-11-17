@@ -36,7 +36,8 @@
     "allow": [
       "Bash(DO_NOT_TRACK=1 npx --yes impeccable@4.7.0 detect:*)",
       "Bash(git push origin *:claude/campus-ic-02-05-shots)",
-      "mcp__claude-code-remote__archive_session"
+      "mcp__claude-code-remote__archive_session",
+      "Bash(*/blender-5.2.4-linux-x64/blender:*)"
     ],
     "deny": [
       "mcp__claude-code-remote__create_environment",

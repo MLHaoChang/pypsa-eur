@@ -113,7 +113,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         upload_load_profiles_file upload_series_file upload_snapshot_weightings_csv upload_timeseries
         list_vintage_bounds set_vintage_bounds delete_vintage_bounds cleanup_orphan_vintages""",
     'solver-simulation': """
-        abort_simulation check_solver_availability dispatch_status force_reset_simulation
+        abort_simulation cancel_job check_solver_availability dispatch_status force_reset_simulation
         get_simulation_lock_status get_simulation_log_history get_simulation_status get_solver_capabilities
         get_solver_config run_ac_pf_stage run_simulation solve_queue_abort solve_queue_cancel_queued
         solve_queue_clear_finished solve_queue_dismiss solve_queue_enqueue solve_queue_job_log

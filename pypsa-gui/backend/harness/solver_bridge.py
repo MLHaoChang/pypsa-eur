@@ -67,6 +67,7 @@ def start_detached_solver_monitor(
     on_terminal: Callable[[], None] | None = None,
     on_superseded: Callable[[], None] | None = None,
     is_pending: Callable[[], bool] | None = None,
+    monitor_generation: int | None = None,
 ) -> None:
     """Run ``solver_log_bridge`` on a daemon thread after turn handoff (issue 11).
 
@@ -109,6 +110,14 @@ def start_detached_solver_monitor(
             return True
         return False
 
+    # live-voice 11b: the generation is the caller's (one read shared with any
+    # in-turn hold) or read here, on the caller's thread, so a Stop monitoring
+    # sent before the thread starts still ends this watch.
+    generation = monitor_generation
+    if generation is None:
+        generation_of = getattr(session, "monitor_generation", None)
+        generation = generation_of() if generation_of is not None else None
+
     def _run() -> None:
         session.mark_detached_monitor(tool_use_id, tool_name, active=True)
         settled = on_terminal is None
@@ -117,6 +126,7 @@ def start_detached_solver_monitor(
                 session, ctx,
                 poll_interval=poll_interval,
                 is_solver_done=_done,
+                monitor_generation=generation,
             ):
                 session.append_detached_progress({
                     "tool_use_id": tool_use_id,
@@ -149,6 +159,7 @@ def solver_log_bridge(
     *,
     poll_interval: float = 0.05,
     is_solver_done: Callable[[], bool] | None = None,
+    monitor_generation: int | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """
     Subscribe to the ACTIVE solver's BufferedLogQueue for the lifetime of one
@@ -168,7 +179,9 @@ def solver_log_bridge(
     (Phase 0 BufferedLogQueue.put: the fanout sits INSIDE the
     `if item is not None:` block). The bridge therefore never sees None and
     keeps polling until `is_solver_done()` returns True OR the session
-    abort_event fires.
+    abort_event fires OR the session stops monitoring (live-voice 11b: its
+    monitor generation moves past `monitor_generation`, read at the first poll when
+    not given). Stopping ends the observation only, never the solve.
     """
     # F10: snapshot under solver_state_lock so a concurrent project switch
     # cannot swap the queue out from under us.
@@ -177,10 +190,15 @@ def solver_log_bridge(
     if log_queue is None:
         return  # no active solver to bridge
 
+    generation_of = getattr(session, "monitor_generation", None)
+    if monitor_generation is None and generation_of is not None:
+        monitor_generation = generation_of()
     sub_id, dq = log_queue.subscribe()
     try:
         while True:
             if session.abort_event.is_set():
+                return
+            if generation_of is not None and generation_of() != monitor_generation:
                 return
             drained = 0
             while dq:
