@@ -274,6 +274,15 @@ def test_a_pin_with_no_copy_imports_and_the_library_serves_it(client, pinned_bun
     assert r.json()["library_issues"] == []
 
 
+def test_a_bundle_without_its_sidecar_keeps_the_copies_its_config_names(
+    client, pinned_bundle
+):
+    # The config's refs pin their copies too, so the copy is not a stray.
+    data, ref = pinned_bundle
+    r = _import(client, _edited(data, {P.SIDECAR_NAME: None}), "lc_nosidecar")
+    assert r.status_code == 200, r.text
+
+
 # ── L7: the newer-version notice is read-only ──────────────────────────────
 
 
@@ -399,12 +408,13 @@ def test_an_item_copy_is_read_as_is_not_unzipped(tmp_path):
     "ident, ok",
     [
         ("x" * 128, True),
+        ("", False),
         ("a b", True),
         (7, False),
         ("a\x7fb", False),
         ("a\x1fb", False),
     ],
-    ids=["at-cap", "space", "not-a-string", "del", "unit-sep"],
+    ids=["at-cap", "empty", "space", "not-a-string", "del", "unit-sep"],
 )
 def test_the_id_rule_boundaries(tmp_path, ident, ok):
     pin = {**_series_pin(_CSV), "id": ident}
