@@ -278,3 +278,19 @@ def test_mutating_the_callers_input_after_freeze_leaves_the_manifest_byte_equal(
     assert ms.spec("aggregated")["campus"]["name"] == "TEST_HUB" and ms.params == {
         "case": ["max"]
     }
+
+
+def test_mutating_the_callers_unit_map_after_freeze_leaves_it_unchanged():
+    umap = {"EQ_PV": ["PV1"]}
+    ms = new_model_set(
+        campus_spec(), PARAMS, aggregated=campus_spec(), unit_map=umap, now=T0
+    )
+    umap["EQ_PV"].append("X")
+    assert ms.unit_map == {"EQ_PV": ["PV1"]}
+
+
+def test_assumptions_are_kept_as_a_tuple():
+    lines = ["aggregation: line one", "aggregation: line two"]
+    assert new_model_set(
+        campus_spec(), PARAMS, assumptions=lines, now=T0
+    ).assumptions == tuple(lines)
