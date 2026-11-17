@@ -85,7 +85,8 @@ export function useGridReadiness(enabled = true) {
     enabled: !!project && enabled && !undoPending,
     staleTime: 0,
     refetchOnMount: 'always',
-    placeholderData: keepPreviousData,
+    // The last verdicts stay shown while the same project's next read loads; never another project's (GK B3).
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[2] === project ? keepPreviousData(prev) : undefined),
     refetchInterval: q => (q.state.data?.network === 'out_of_date' ? OUT_OF_DATE_REFETCH_MS : false),
   })
 }

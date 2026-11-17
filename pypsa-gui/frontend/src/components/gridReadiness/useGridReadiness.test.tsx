@@ -2,19 +2,23 @@
 // is read again when the project's edit counter moves (and only then), and a
 // busy network's saved-file answer says it is out of date.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { GridReadiness } from '../../api/campusElectrical'
 import { useUIStore } from '../../store/uiStore'
 
-const api = vi.hoisted(() => ({ revision: 1, reads: 0, busy: false }))
+const api = vi.hoisted(() => ({
+  revision: 1, reads: 0, busy: false,
+  hold: null as Promise<unknown> | null, release: () => {},
+}))
 vi.mock('../../api/network', () => ({
   networkApi: { undoInfo: async () => ({ depth: 0, unsaved: false, network_revision: api.revision }) },
 }))
 vi.mock('../../api/campusElectrical', async orig => ({
   ...(await orig<typeof import('../../api/campusElectrical')>()),
   campusApi: { gridReadiness: async () => {
+    if (api.hold) { const h = api.hold; api.hold = null; await h }
     api.reads += 1
     return api.busy ? { reads: api.reads, network: 'out_of_date' } : { reads: api.reads }
   } },
@@ -45,7 +49,28 @@ describe('useGridReadiness', () => {
     expect(api.reads).toBe(1)
     // An edit moves the counter: read again, the last answer shown meanwhile.
     api.revision = 2
+    api.hold = new Promise(r => { api.release = r })
     await qc.refetchQueries({ queryKey: ['undoInfo', 'p1'] })
+    await waitFor(() => expect(result.current.isFetching).toBe(true))
+    expect(result.current.data).toEqual({ reads: 1 })
+    expect(result.current.isPlaceholderData).toBe(true)
+    api.release()
+    await waitFor(() => expect(result.current.data).toEqual({ reads: 2 }))
+    expect(result.current.isPlaceholderData).toBe(false)
+  })
+
+  it('never shows another project\'s verdicts while a newly opened project loads', async () => {
+    useUIStore.setState({ currentProject: 'pA' })
+    api.revision = 1
+    api.reads = 0
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useGridReadiness(), { wrapper: wrapper(qc) })
+    await waitFor(() => expect(result.current.data).toEqual({ reads: 1 }))
+    api.hold = new Promise(r => { api.release = r })
+    act(() => { useUIStore.setState({ currentProject: 'pB' }) })
+    await waitFor(() => expect(result.current.isFetching).toBe(true))
+    expect(result.current.data).toBeUndefined()
+    api.release()
     await waitFor(() => expect(result.current.data).toEqual({ reads: 2 }))
   })
 
