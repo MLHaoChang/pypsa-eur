@@ -455,7 +455,7 @@ def _approved(project, tpl, built):
         lambda d: d.update(note="edited"),
         lambda d: d.update(base="edited"),
         lambda d: d["cases"].pop(),
-        lambda d: d["cases"].append({**d["cases"][0], "id": "added"}),
+        lambda d: d["cases"].append({**d["cases"][0], "id": "added", "label": "Added"}),
         lambda d: d["cases"].reverse(),
     ],
 )
@@ -1151,3 +1151,46 @@ def test_an_invalid_project_block_that_the_case_would_fix_is_still_not_run(
     assert case["kind"] == "unknown" and case["status"] == "not_run"
     assert case["why"] == "What this case moves is not known, so it is not run."
     assert "merchant_heavy" not in shipped["admissible"]
+
+
+# ── GK B (61): the cards name cases by label ──────────────────────────────────
+
+
+def _relabel(project, *labels):
+    path = project / "cases.json"
+    data = json.loads(path.read_text())
+    for case, label in zip(data["cases"], labels):
+        case["label"] = label
+    path.write_text(json.dumps(data))
+
+
+@pytest.mark.parametrize(
+    "labels, match",
+    [
+        (("",), "needs a label"),
+        (("   ",), "needs a label"),
+        (("Same", "Same"), "share the label"),
+        (("Same", "same "), "share the label"),
+    ],
+)
+def test_an_empty_or_shared_label_refuses_never_picks_the_first(
+    project, tpl, built, labels, match
+):
+    original = (project / "cases.json").read_text()
+    try:
+        _relabel(project, *labels)
+        with pytest.raises(S.ShippedError, match=match) as err:
+            _load(project, tpl, built)
+        assert err.value.kind == "shipped_cases_invalid"
+    finally:
+        (project / "cases.json").write_text(original)
+
+
+def test_a_relabel_changes_the_digest(project, tpl, built):
+    original = (project / "cases.json").read_text()
+    try:
+        before = _load(project, tpl, built)["digest"]
+        _relabel(project, "Low price level, relabelled")
+        assert _load(project, tpl, built)["digest"] != before
+    finally:
+        (project / "cases.json").write_text(original)

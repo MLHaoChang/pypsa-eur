@@ -116,6 +116,7 @@ def check(data, template_id: str) -> list[dict]:
     if not isinstance(cases, list) or not cases:
         _invalid(f"{CASES_FILE} needs a non-empty list of cases.")
     seen: set[str] = set()
+    labels: set[str] = set()
     for case in cases:
         if not isinstance(case, dict):
             _invalid("Every case must be an object.")
@@ -128,6 +129,14 @@ def check(data, template_id: str) -> list[dict]:
         for key in ("label", "answers", "reason"):
             if not isinstance(case.get(key), str):
                 _invalid(f"Case {cid} needs a text {key}.")
+        # GK B (61) (1): the cards name each case by its label, so a label is
+        # never empty and never shared, whatever its case.
+        label = case["label"].strip().casefold()
+        if not label:
+            _invalid(f"Case {cid} needs a label.")
+        if label in labels:
+            _invalid(f"Two cases share the label {case['label']!r}.")
+        labels.add(label)
         changes = case.get("changes")
         if not isinstance(changes, list) or not changes:
             _invalid(f"Case {cid} needs a list of changes.")
