@@ -10,6 +10,7 @@ only with the v33 export, so a bug shared by all versions still fails.
 
 import csv
 import io
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -230,6 +231,18 @@ def test_v33_default_unchanged(net, tmp_path):
     assert (tmp_path / "a.raw").read_bytes() == (tmp_path / "b.raw").read_bytes()
     text = (tmp_path / "a.raw").read_text()
     assert "SYSTEM-WIDE" not in text and "SUBSTATION" not in text
+
+
+#: Written by master's ``write_raw(load_case39())`` at master
+#: 58d4eb5ae738d697236575580fd2b0d7e83615e3 (before the v35/v36 work merged).
+GOLDEN_V33 = Path(__file__).parent / "data" / "case39_v33.raw"
+
+
+def test_v33_default_matches_master_golden(net, tmp_path):
+    """The v33 default is byte-identical to what master wrote before the
+    ``version=`` argument existed (GK PR2 follow-up)."""
+    write_raw(net, tmp_path / "a.raw")
+    assert (tmp_path / "a.raw").read_bytes() == GOLDEN_V33.read_bytes()
 
 
 # --- golden header, system-wide block and terminators -------------------------
