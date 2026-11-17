@@ -536,3 +536,11 @@ def test_case39_export_reads_back(case39, tmp_path, version):
         assert list(c.tables["branch"]["NAME"]) == [
             str(n)[:40] for n in net.line["name"].fillna("")
         ]
+
+
+def test_cm2_current_below_loss_refused():
+    # I0 = 0.0001 pu on 40 MVA is 0.004 MW-equivalent; a 30 kW loss exceeds it
+    with pytest.raises(
+        ContractError, match="exciting current .* below its no-load loss"
+    ):
+        _two_winding(cm=2, mag=(30000.0, 0.0001), sb=40.0)
