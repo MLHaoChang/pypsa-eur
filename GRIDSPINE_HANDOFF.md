@@ -130,6 +130,22 @@ solar_cf(hours=8760)       -> Series
 PROFILE_LEDGER                          # for the manifest
 ```
 
+### Model importers (`gridspine/ingest/*_import.py`) — may import pypsa
+
+Owner ruling 2026-11-17 (IMPORTS-1, engine cage option A): the
+`ingest/*_import.py` modules are the only ones outside `producers/` allowed to
+import pypsa, because each returns a `pypsa.Network`. Every other `ingest/`
+module stays pypsa-free; `tests/gridspine/test_engine_cage.py` enforces both.
+
+```python
+# ingest/import_result.py — the shared contract; imports no engine
+read_<id>(paths, options) -> ImportResult(network, report, sidecars)
+ImportReport(source_format, source_files, counts, unmapped, assumed, warnings, suggestions)
+DECLARED                       # excel, psse, dgs, plexos: <id>_import.read_<id>
+importers() / get(id) / for_extension(ext)   # lists without importing a reader
+read(id, paths, options)       # runs the reader, checks the result
+```
+
 ### Templates (`gridspine/templates/`) — no engine imports
 
 ```python

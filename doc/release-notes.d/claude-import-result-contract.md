@@ -1,1 +1,1 @@
-* Feat(gridspine): Shared import contract (`gridspine/ingest/import_result.py`): the report every model importer returns (counts, unmapped items with reasons, assumed values) and a registry that finds each `*_import.py` importer.
+* Feat(gridspine): Shared import contract (`gridspine/ingest/import_result.py`): the report every model importer returns (counts, unmapped items with reasons, assumed values) and a registry of the four planned importers (Excel workbook, PSS/E, PowerFactory DGS, PLEXOS) that lists them without importing `pypsa`.
