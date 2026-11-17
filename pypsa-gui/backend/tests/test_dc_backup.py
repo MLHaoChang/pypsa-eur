@@ -1230,34 +1230,108 @@ def test_assess_reads_the_finance_case_rate_on_its_basis(
     assert row["assumed"] is assumed and words in row["source"]
 
 
-def test_a_project_created_with_strings_is_refused_with_the_way_out(
-    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
-):
-    """GK A Q1: the saved network already has the strings; assess is a typed
-    422 that says to switch with PUT /dc-backup on a genset-form project,
-    and the meta marks it for the card."""
-    import json
-
+def _dc_built(client, project_row, name, mode, it=30.0):
+    """A project created through the route with ``mode`` backup at IT ``it``."""
     from services import project_registry
+
+    r = client.post(
+        "/api/projects/from_template/eh_datacenter",
+        params={"name": name},
+        json={
+            "dc_load": {
+                "backup": {"mode": mode},
+                "phases": [{"cod": "2030-01-01", "it_mw": it}],
+            }
+        },
+    )
+    assert r.status_code < 300, r.text
+    name = r.json().get("name", name)
+    return name, pathlib.Path(project_registry.project_dir(project_row(name)))
+
+
+def _sidecar_bytes(d):
+    return {p.name: p.read_bytes() for p in sorted(d.iterdir()) if p.is_file()}
+
+
+def _assessed(out):
+    """The assessment without what names the project's own file and build."""
+    return {k: v for k, v in out.items() if k not in ("basis", "built")}
+
+
+@pytest.mark.parametrize(
+    "built,mode", [("bess", None), ("bess", "genset"), ("hybrid", "genset"), ("hybrid", "hybrid")]
+)
+def test_a_project_created_with_strings_assesses_as_a_genset_one_would(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, built, mode
+):
+    """DC walkthrough 01 (GK A G1-G8): a Batteries or Hybrid project is
+    assessed in genset form, and its answer equals a genset-built project's
+    in the same mode; the saved network and sidecars are left byte for byte
+    (G1), and the result names the built mode with its notes."""
+    import json
 
     _served(monkeypatch)
     _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
-    r = client.post(
-        "/api/projects/from_template/eh_datacenter",
-        params={"name": "dc_hy"},
-        json={"dc_load": {"backup": {"mode": "hybrid"}}},
-    )
-    assert r.status_code < 300, r.text
-    d = pathlib.Path(
-        project_registry.project_dir(project_row(r.json().get("name", "dc_hy")))
-    )
+    name, d = _dc_built(client, project_row, f"dc_{built}", built)
+    g_name, _g = _dc_built(client, project_row, f"dc_g_{built}", "genset")
     meta = json.loads((d / "eh_template.json").read_text())
-    assert meta["dc_load"]["network_backup_mode"] == "hybrid"
-    r = client.post(f"/api/campus-electrical/{d.name}/dc-backup/assess", json={})
-    assert r.status_code == 422, r.text
-    detail = r.json()["detail"]
-    assert detail["error_kind"] == "dc_backup_invalid"
-    assert "PUT /dc-backup" in str(detail) and "created with hybrid" in str(detail)
+    assert meta["dc_load"]["network_backup_mode"] == built
+    before = _sidecar_bytes(d)
+    body = {} if mode is None else {"mode": mode}
+    r = client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["built"]["mode"] == built
+    assert any("not assessed as built" in x for x in out["built"]["notes"])
+    assert _sidecar_bytes(d) == before
+    r = client.post(
+        f"/api/campus-electrical/{g_name}/dc-backup/assess", json={"mode": mode or built}
+    )
+    assert r.status_code == 200, r.text
+    ref = r.json()
+    assert ref["built"] == {"mode": "genset", "notes": []}
+    assert _assessed(out) == _assessed(ref)
+
+
+def test_a_genset_create_copies_the_example_sidecars_byte_for_byte(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """GK A G6: the single-year sidecar fix leaves a genset create as it was:
+    the example's sidecars, copied, with only the spec's ``dc_load`` block
+    added to the metadata (no built backup mode)."""
+    import json
+
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    _name, d = _dc_built(client, project_row, "dc_g6", "genset", it=36.0)
+    src = tmp_path / "eh_datacenter"
+    for f in ("island_config.json", "adequacy_stress_scenarios.json", "solver_config.json"):
+        assert (d / f).read_bytes() == (src / f).read_bytes(), f
+    meta, example = (json.loads((p / "eh_template.json").read_text()) for p in (d, src))
+    block = meta.pop("dc_load")
+    assert "network_backup_mode" not in block
+    assert meta == example
+
+
+def test_a_batteries_create_writes_a_sidecar_that_lists_its_strings(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """DW-A's finding: a single-year Batteries create wrote the example's
+    genset sidecar; it now lists the strings in the network as ride-through
+    storage, and no genset."""
+    import json
+
+    import pypsa
+
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    _name, d = _dc_built(client, project_row, "dc_bs", "bess")
+    island = json.loads((d / "island_config.json").read_text())
+    n = pypsa.Network(str(d / "network.nc"))
+    strings = dc_backup.built_strings(n, island)
+    assert strings
+    assert sorted(strings) == sorted(
+        s for s in n.storage_units.index if s.startswith(dc_backup.STRING_PREFIX)
+    )
+    assert not [u for u, v in island["units"].items() if v.get("kind") == "genset"]
 
 
 def test_a_nominal_finance_rate_without_inflation_is_refused(

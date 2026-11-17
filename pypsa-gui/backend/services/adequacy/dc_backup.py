@@ -1535,9 +1535,6 @@ def _write_meta(project_dir, meta: dict) -> None:
     )
 
 
-#: The refusal for a project whose saved network already has the backup
-#: strings (created in that mode, GK A Q1); the card shows it in place of
-#: Assess.
 #: The sidecar requirements ``apply_backup`` rewrites, by the mode it applied:
 #: a Batteries campus loses the gensets' N+k, fuel and join scenarios too.
 _BACKUP_REQUIREMENTS = {
@@ -1653,6 +1650,8 @@ def genset_form(n, island: dict, built: str, genset_n, genset_island: dict):
     return m, out, notes, strings
 
 
+#: The refusal for a project built with a backup mode the assessment cannot
+#: put back in genset form (Batteries and Hybrid can: walkthrough 01).
 NOT_GENSET_FORM = (
     "backup: this project was created with {mode} backup, which the assessment "
     "cannot put back in genset form"

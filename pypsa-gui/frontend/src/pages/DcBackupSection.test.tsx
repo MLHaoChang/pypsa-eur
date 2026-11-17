@@ -118,21 +118,41 @@ describe('DcBackupSection', () => {
     expect(screen.getByTestId('dc-backup-lines').textContent).toContain('Gensets kept')
   })
 
-  it('offers no Assess on a project created with the strings, and says why', async () => {
-    results.getEhTemplate.mockResolvedValue({ ...meta('bess'), dc_load: { spec: { backup: { mode: 'bess' } }, network_backup_mode: 'bess' } })
+  it.each(['bess', 'hybrid'] as const)('assesses a project created with %s and says how (DC walkthrough 01)', async built => {
+    const user = userEvent.setup()
+    results.getEhTemplate.mockResolvedValue({ ...meta(built), dc_load: { spec: { backup: { mode: built } }, network_backup_mode: built } })
+    campus.assessDcBackup.mockResolvedValue(assessment({ mode: built, built: { mode: built,
+      notes: ['The project\'s 7 built strings are not assessed as built.'] } }))
     renderIt()
-    expect(text(await screen.findByTestId('dc-backup-not-assessable')))
-      .toContain(`created with ${BACKUP_MODE_FIELD} set to ${MODE_LABEL.bess}, so its saved network already has the battery strings`)
-    expect(text(screen.getByTestId('dc-backup-not-assessable')))
-      .toContain(`create the project with ${MODE_LABEL.genset} and switch the ${BACKUP_MODE_FIELD} here`)
-    expect(screen.queryByTestId('dc-backup-assess')).toBeNull()
+    await user.click(await screen.findByTestId('dc-backup-assess'))
+    const line = text(await screen.findByTestId('dc-backup-built'))
+    expect(line).toContain(`created with ${BACKUP_MODE_FIELD} set to ${MODE_LABEL[built]}, so it is assessed as if created with ${MODE_LABEL.genset}.`)
+    expect(line).toContain('not assessed as built')
+    expect(screen.queryByTestId('dc-backup-not-assessable')).toBeNull()
   })
 
-  it('names the hybrid build in the same words', async () => {
-    results.getEhTemplate.mockResolvedValue({ ...meta('hybrid'), dc_load: { spec: { backup: { mode: 'hybrid' } }, network_backup_mode: 'hybrid' } })
+  it('says nothing about the build on a genset-built project', async () => {
+    const user = userEvent.setup()
+    results.getEhTemplate.mockResolvedValue(meta('bess'))
+    campus.assessDcBackup.mockResolvedValue(assessment({ built: { mode: 'genset', notes: [] } }))
     renderIt()
-    expect(text(await screen.findByTestId('dc-backup-not-assessable')))
-      .toContain(`${BACKUP_MODE_FIELD} set to ${MODE_LABEL.hybrid}`)
+    await user.click(await screen.findByTestId('dc-backup-assess'))
+    await screen.findByTestId('dc-backup-result')
+    expect(screen.queryByTestId('dc-backup-built')).toBeNull()
+  })
+
+  it('gives a disabled Assess its reason while the mode saves', async () => {
+    const user = userEvent.setup()
+    results.getEhTemplate.mockResolvedValue(meta('genset'))
+    campus.setDcBackup.mockReturnValue(new Promise(() => {}))
+    renderIt()
+    expect(screen.queryByTestId('dc-backup-assess-wait')).toBeNull()
+    await user.click(await screen.findByRole('button', { name: MODE_LABEL.hybrid }))
+    const wait = await screen.findByTestId('dc-backup-assess-wait')
+    expect(text(wait)).toBe(`Saving the ${BACKUP_MODE_FIELD}. Assess is ready once it is saved.`)
+    const btn = screen.getByTestId('dc-backup-assess').closest('button')!
+    expect(btn.disabled).toBe(true)
+    expect(btn.getAttribute('aria-describedby')).toBe(wait.id)
   })
 
   it.each(['guided', 'expert'] as const)('names the unreadable input, never a raw key (%s)', async mode => {
