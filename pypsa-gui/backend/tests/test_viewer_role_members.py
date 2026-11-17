@@ -11,6 +11,7 @@ report ``my_access`` from ``project_acl.project_role`` (V4).
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
@@ -198,3 +199,43 @@ def test_my_access_is_edit_for_a_creator_with_a_viewer_row(world, as_user):
         db.get(Project, uuid.UUID(world["project"])).created_by = world["viewer"]
         db.commit()
     assert _access(as_user(world["viewer"]), world) == ("edit",) * 3
+
+
+# ── mutant kills: the defaults and who reads as fixed ───────────────────────
+
+
+def test_set_root_members_without_roles_keeps_every_stored_role(world, seeded_identity):
+    from db.models import Project, User
+    from services import project_registry
+
+    with world["session_local"]() as db:
+        actor = db.get(User, uuid.UUID(str(seeded_identity["user_id"])))
+        project = db.get(Project, uuid.UUID(world["project"]))
+        rows = project_registry.set_root_members(
+            db, actor, project, [world["viewer"], world["editor"]])
+    assert {r["user_id"]: r["role"] for r in rows} == {
+        str(world["viewer"]): "viewer", str(world["editor"]): "editor"}
+
+
+def test_role_is_fixed_for_an_org_admin_and_a_creator_only(world):
+    from db.models import Project, User
+    from services import project_acl
+
+    other_admin = _member(world["session_local"], _org_of(world), org_role="admin")
+    outsider = uuid.uuid4()
+    with world["session_local"]() as db:
+        db.add(User(id=outsider, email=f"lone-{outsider.hex}@example.com", password_hash="unused",
+                    status="active", is_super_admin=False, created_at=datetime.now(UTC)))
+        db.commit()
+    with world["session_local"]() as db:
+        project = db.get(Project, uuid.UUID(world["project"]))
+
+        def fixed(uid):
+            return project_acl.role_is_fixed(db, db.get(User, uid), project)
+
+        assert fixed(other_admin) is True
+        assert fixed(world["viewer"]) is False
+        assert fixed(outsider) is False
+        project.created_by = world["viewer"]
+        db.flush()
+        assert fixed(world["viewer"]) is True

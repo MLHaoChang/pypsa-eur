@@ -2371,8 +2371,7 @@ def _run_turn_body(
     viewer_snapshot = _role_snapshot(session)
     tools = [
         t for t in selected_tools
-        if not isinstance(t, dict)
-        or restrictions.role_admits(viewer_snapshot, _tool_tier(session, t.get("name")))
+        if restrictions.role_admits(viewer_snapshot, _tool_tier(session, t["name"]))
     ]
     # C-1 — the ALLOWLIST the dispatch loop below enforces.
     #
