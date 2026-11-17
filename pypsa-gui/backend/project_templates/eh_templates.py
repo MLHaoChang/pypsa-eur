@@ -718,11 +718,42 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
         n = BUILDERS[template_id](load_spec=spec, planning=planning)
     # A period whose energization is a placeholder is unknown, never refused.
     unset = unset_periods(template_meta(template_id, planning, load_spec=spec))
-    for row in peak_check(n, island_config(template_id, planning, load_spec=spec), unset=unset):
-        if row["headroom_mw"] is not None and row["headroom_mw"] < -1e-9:
-            raise DcLoadError(
-                f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
-                f"{row['binding_snapshot']}), above {describe(row)}", "dc_load.phases")
+    rows = peak_check(n, island_config(template_id, planning, load_spec=spec), unset=unset)
+    over = [r for r in rows if r["headroom_mw"] is not None and r["headroom_mw"] < -1e-9]
+    if not over:
+        return
+    row = over[0]
+    # The staged plan reuses one modelled week for every phase (walkthrough 02).
+    week = " of the modelled week" if isinstance(n.snapshots, pd.MultiIndex) else ""
+    words = (f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
+             f"{row['binding_snapshot']}{week}), above {describe(row)}.")
+    raise DcLoadError(words + _peak_ways_out(spec, over, single=len(spec.phases) == 1 and not week),
+                      "dc_load.phases")
+
+
+def _peak_ways_out(spec, over: list[dict], *, single: bool) -> str:
+    """Why the peak is refused and each way out, with its number (DC grid-readiness
+    walkthrough 01). The load scales with the IT load (``dc_load_profile.hourly_profile``)
+    and, without ride-through shaving, the cap does not, so the largest IT load that fits is
+    IT × min(cap / load); with shaving the cap moves with the load and no number is given."""
+    import math
+
+    bess = spec.backup.mode == "bess"
+    out = (" Battery strings carry outages only, so the normal peak must fit the import."
+           if bess else "")
+    ways = []
+    shaved = any(f["mw"] > 0 for r in over for f in r["firm"][1:])
+    if single and not shaved:
+        it = float(spec.phases[0].it_mw)
+        most = math.floor(it * min(r["cap_mw"] / r["load_mw"] for r in over) + 1e-9)
+        if most >= 1:
+            ways.append(f"set IT load to at most {most} MW")
+    if bess:
+        ways.append("pick Hybrid backup" if single else "pick Hybrid or Gensets backup")
+    ways.append("raise the connection after you create the project" if single
+                else "change the build plan after you create the project")
+    said = ways[0] if len(ways) == 1 else ", ".join(ways[:-1]) + ", or " + ways[-1]
+    return f"{out} {said[0].upper()}{said[1:]}."
 
 
 def dc_load_meta(template_id: str, spec) -> dict:
