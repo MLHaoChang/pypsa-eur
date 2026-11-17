@@ -517,6 +517,9 @@ def test_an_unreadable_reader_leaves_its_chapter_not_established_with_a_hint(
             True,
             [{"solver_kind": "ac_pf"}],
         ),
+        # A flow with no recorded edit counter is not current, even at counter 0 (GK B 65).
+        ({"ac_pf_results": {}, "ac_pf_network_revision": None}, 0, True, [{}]),
+        ({"ac_pf_results": {}, "ac_pf_network_revision": None}, None, True, [{}]),
         # A flow on another edit counter, or one whose read does not answer: the LP's proxy.
         ({"ac_pf_results": {}, "ac_pf_network_revision": 2}, 3, True, [{}]),
         (

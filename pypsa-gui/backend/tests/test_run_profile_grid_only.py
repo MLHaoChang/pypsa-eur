@@ -349,6 +349,12 @@ def test_a_pf_older_than_the_inputs_is_not_evaluated(direct):
     assert out["verdict"] == "not_evaluated" and "re-run" in out["reason"]
 
 
+def test_a_pf_with_no_recorded_edit_counter_is_not_evaluated(direct):
+    """GK B 65: a None counter never matches edit counter 0."""
+    out = direct("grid.pf.loading", _ctx(_net(), ac_pf_network_revision=None))
+    assert out["verdict"] == "not_evaluated" and "re-run" in out["reason"]
+
+
 def test_an_unrated_branch_is_named_never_assumed(direct):
     out = direct("grid.pf.loading", _ctx(_net(rating=0.0)))
     assert out["verdict"] == "not_evaluated" and "l1" in out["reason"]
@@ -569,6 +575,10 @@ def test_a_pf_state_is_current_after_pf_and_to_an_lp_only_reader(
             "condition": "lopf+ac_pf_ok",
             "ac_pf_network_revision": 4,
         },  # the flow ran on another edit counter
+        {
+            "condition": "lopf+ac_pf_ok",
+            "ac_pf_network_revision": None,
+        },  # no recorded edit counter: not current at counter 0 (GK B 65)
         {"condition": "lopf+ac_pf_ok", "status": "running"},
     ],
 )
