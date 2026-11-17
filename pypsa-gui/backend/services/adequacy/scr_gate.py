@@ -153,7 +153,29 @@ def converter_assets(n, bus: str | None = None,
             if (carrier not in IBR_CARRIERS) if ibr_only else (carrier in SYNCHRONOUS_STORAGE):
                 continue
             mva, unsized = _rating(row)
-            out[str(name)] = {"mva": mva, "unsized": unsized}
+            out[str(name)] = {"mva": mva, "unsized": unsized, "bus": str(row.get("bus", "")),
+                              "solved": _truthy(row.get("p_nom_extendable", False)) and not unsized}
+    return out
+
+
+def unattributed_converters(n, behind: frozenset[str] | set[str] = frozenset()) -> list[str]:
+    """With several PoCs, the counted converter-coupled assets on none of their
+    buses (their PoC is unknown); empty with one PoC or none. A converter with
+    a bad rating still sits somewhere, so it is listed too."""
+    pocs = set(_poc_buses(n))
+    if len(pocs) < 2:
+        return []
+    out = []
+    for frame, ibr_only in (("generators", True), ("storage_units", False)):
+        df = getattr(n, frame, None)
+        if df is None or df.empty or "bus" not in df.columns:
+            continue
+        for name, row in df.iterrows():
+            carrier = str(row.get("carrier", "") or "").lower()
+            if (carrier not in IBR_CARRIERS) if ibr_only else (carrier in SYNCHRONOUS_STORAGE):
+                continue
+            if str(name) not in behind and str(row.get("bus", "")) not in pocs:
+                out.append(str(name))
     return out
 
 
@@ -169,12 +191,13 @@ def _ibr_mva_at_bus(n, bus: str, n_pocs: int, behind: frozenset[str]) -> dict[st
     except _Invalid:
         if stated is None:
             raise
-        return {"assets": {}, "derived_mva": None, "unsized": [], "excluded": sorted(behind),
+        return {"assets": {}, "derived_mva": None, "unsized": [], "solved": [], "excluded": sorted(behind),
                 "mva": stated, "source": "stated"}
     assets = {k: v["mva"] for k, v in found.items()}
     unsized = [k for k, v in found.items() if v["unsized"]]
+    solved = [k for k, v in found.items() if v["solved"]]
     derived = float(sum(assets.values())) if assets else None
-    out = {"assets": assets, "derived_mva": derived, "unsized": unsized,
+    out = {"assets": assets, "derived_mva": derived, "unsized": unsized, "solved": solved,
            "excluded": sorted(behind)}
     if stated is not None:
         return {**out, "mva": stated, "source": "stated"}
@@ -213,11 +236,16 @@ def evaluate_network_scr_gate(
 
     rows: list[dict[str, Any]] = []
     missing: list[str] = []
+    # GK A (walkthrough 05, D2): with several PoCs a converter on none of their
+    # buses cannot be attributed, so no PoC's capacity is derived without it.
+    off = unattributed_converters(n, behind)
     for bus in pocs:
         sk = _sk_mva_at_bus(n, bus)
         try:
             basis = _ibr_mva_at_bus(n, bus, len(pocs), behind)
         except _Invalid:
+            basis = None
+        if basis is not None and basis["source"] == "derived" and off:
             basis = None
         if sk is None or basis is None:
             missing.append(bus)
@@ -235,6 +263,7 @@ def evaluate_network_scr_gate(
             "ibr_assets": basis["assets"],
             "ibr_derived_mva": basis["derived_mva"],
             "ibr_unsized": basis["unsized"],
+            "ibr_solved": basis["solved"],
             "ibr_excluded": basis["excluded"],
             "scr": value,
             "band": scr_band(value),
@@ -249,7 +278,8 @@ def evaluate_network_scr_gate(
             "eh_sk_mva (and IBR capacity) required on ALL eh_poc buses for SCR "
             f"gate; missing/invalid at: {', '.join(missing)}"
             + ("; with several PoCs only the converters on each PoC bus count: "
-               "state eh_ibr_mva on each" if len(pocs) > 1 else ""),
+               "state eh_ibr_mva on each" if len(pocs) > 1 else "")
+            + (f"; converters on no PoC bus: {', '.join(off)}" if off else ""),
         )
     if not rows:
         return (

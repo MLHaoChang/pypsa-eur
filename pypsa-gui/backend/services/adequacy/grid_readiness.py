@@ -286,12 +286,16 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
     behind = behind_architecture(inp.n, inp.island, arch[0] if arch else None)
     gates, status, payload, note = evaluate_network_scr_gate(inp.n, behind=behind)
     if status != "ok" or gates is None:
+        from services.adequacy.scr_gate import unattributed_converters
+        off = unattributed_converters(inp.n, behind)
         return [_row("scr", "Short-circuit ratio at the PoC", project_value=None,
                      verdict="unknown", assumed=True,
                      note=("No short-circuit level and inverter capacity at every point of connection, "
                            "so the SCR is not known: enter the fault level and, where the network has no "
                            "inverter-based generator or battery to derive it from (or has several points of "
-                           "connection), the IBR capacity field of each point of connection's bus"),
+                           "connection), the IBR capacity field of each point of connection's bus"
+                           + (f". Converters on no point of connection's bus, so their point of connection is "
+                              f"unknown: {', '.join(map(_display, off))}" if off else "")),
                      **base)]
     verdict = _judge(float(payload["min_scr"]), PASS_SCR, RULE_SCR)
     extra = "; below it an EMT study is recommended" if gates.emt_recommended else ""
@@ -328,7 +332,9 @@ def _unsized(row: dict) -> bool:
 def _capacity_words(row: dict, architecture: str | None) -> str:
     """Where the SCR's inverter capacity comes from (DC grid-readiness walkthrough 05)."""
     mva, assets, derived = row["ibr_mva"], row.get("ibr_assets") or {}, row.get("ibr_derived_mva")
-    listed = ", ".join(f"{_display(k)} {v:.4g}" for k, v in assets.items() if v > 0) or "none sized"
+    solved = set(row.get("ibr_solved") or ())
+    listed = ", ".join(f"{_display(k)} {v:.4g}" + (" (from the last solve)" if k in solved else "")
+                       for k, v in assets.items() if v > 0) or "none sized"
     if row.get("ibr_source") == "stated":
         text = (f"Inverter capacity {mva:.4g} MVA, stated in the PoC bus's IBR capacity field; "
                 "assumed unless you sourced it")
