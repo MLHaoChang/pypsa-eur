@@ -736,6 +736,23 @@ def test_a_bundle_rate_the_annuity_takes_imports_at_that_rate(
     _assert_derived(session_ctx(client).network.storage_units, "bess", rate=rate)
 
 
+def test_a_bundle_settings_file_without_a_rate_imports_at_the_default_rate(
+    client, install_network, session_ctx
+):
+    """A settings file that names no rate is readable: its rate is the default, as every load reads it."""
+    n = _network()
+    n.storage_units.at["bess", "capital_cost"] = 1.0
+    data = _with_member(
+        _bundle_of(client, install_network, n, rate=0.05),
+        "solver_config.json",
+        b'{"mode": "lopf"}',
+    )
+    install_network(_network())
+    r = _import_bundle(client, data, "tcu11_norate")
+    assert r.status_code in (200, 201), r.text
+    _assert_derived(session_ctx(client).network.storage_units, "bess", rate=0.07)
+
+
 @pytest.mark.parametrize(
     "value,ok",
     [
