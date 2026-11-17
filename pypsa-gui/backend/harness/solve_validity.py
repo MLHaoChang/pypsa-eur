@@ -171,3 +171,35 @@ def price_limit(cls) -> str | None:
     if cls["kind"] == "mip":
         return DUALS_NOT_MARGINAL
     return None
+
+
+def _objective(n):
+    """The objective as the solver bounded it, in user units: solver_service
+    reverses its objective scale on `n.objective` right after the solve."""
+    value = getattr(n, "objective", None)
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
+
+
+def capture(ctx) -> dict:
+    """The live solve's classification plus its objective, sealed with the raw
+    record so a retained baseline carries its own."""
+    n = ctx.network
+    return {**classify(n, ctx.solver_state.get("solver_config")), "objective": _objective(n)}
+
+
+def raw_delta_limit(delta, candidate, baseline) -> str | None:
+    """`delta_limit` over two captured records; a record without one (captured
+    before this check) establishes no delta sign."""
+    if not isinstance(candidate, dict) or not isinstance(baseline, dict):
+        return GAP_NOT_RECORDED
+    return delta_limit(delta, candidate, candidate.get("objective"), baseline, baseline.get("objective"))
+
+
+def notes(raw) -> list[str]:
+    """The answer line naming the MIP gap (or that it was not recorded)."""
+    solve = raw.get("solve") if isinstance(raw, dict) else None
+    text = solve.get("disclosure") if isinstance(solve, dict) else None
+    return [text] if isinstance(text, str) and text else []
