@@ -572,7 +572,7 @@ def _build_tables(case: RawCase, raw: dict):
         for ln, f in raw[section]:
             rec = _decode(f, spec, ln, what)
             for key in bus_keys:
-                if key in rec and rec[key] not in (0, None):
+                if key in rec and rec[key] is not None:
                     rec[key] = abs(rec[key])
                     bus_of(rec[key], ln, what)
             rows.append(_resolve(rec, bus_by.get(rec.get("I")), sbase))
