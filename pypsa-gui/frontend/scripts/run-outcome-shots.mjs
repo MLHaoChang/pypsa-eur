@@ -77,8 +77,15 @@ try {
   })
   await page.route(u => u.pathname.endsWith('/estimate'), route =>
     route.fulfill({ json: { kind: 'solve', run_ids: [], seconds: 400, samples: 3 } }))
-  await page.route(u => u.pathname.includes('/api/simulation/queue/') && u.pathname.includes('/log'), route =>
-    route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }))
+  // The header follows the run's log stream: while the run goes on the stream
+  // is empty (the browser reconnects); once it has ended, the stream sends the
+  // same `done` frame a real run sends, so the header settles as it would
+  // (UX 24: no "Running…" pill or Abort in an ended run's shots).
+  await page.route(u => u.pathname.includes('log_stream') || u.pathname.endsWith('/log_history'), route => {
+    if (route.request().url().includes('log_history')) return route.fulfill({ json: { lines: [], status: end ?? 'running' } })
+    const body = end ? `event: done\ndata: ${JSON.stringify({ status: end })}\n\n` : 'retry: 500\n\n'
+    return route.fulfill({ status: 200, contentType: 'text/event-stream', body })
+  })
 
   for (const [shot, status, mode, theme, width, click] of SHOTS) {
     end = null
@@ -91,6 +98,8 @@ try {
       end = status
       await page.getByTestId('run-outcome').waitFor({ timeout: 20000 })
     }
+    // An ended run's header: no Abort, no "Running…" (the done frame landed).
+    if (status) await page.getByRole('button', { name: /^Abort/ }).waitFor({ state: 'detached', timeout: 20000 })
     if (click) await page.getByTestId(click).click()
     await page.waitForTimeout(2500)
     const what = status
