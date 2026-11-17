@@ -704,6 +704,19 @@ def test_a_shipped_cost_row_is_in_the_properties_panels_unit():
             f"{fmt_eur_short(150000.0 * spec.scale)} per {per}"
         )
         assert spec.unit_storage not in row
+    # GK B (61): a non-round stored value reads as the edit drawer's value
+    # (stored × the FieldSpec's scale) in the money notation's rounding.
+    spec = next(s for s in fields_for("StorageUnit") if s.key == "inv_power_overnight")
+    assert (spec.unit_storage, spec.unit_display) == ("EUR/MW", "EUR/kW")
+    change = {
+        "path": "StorageUnit.bess.inv_power_overnight",
+        "old": 123456.0,
+        "new": 98765.4,
+    }
+    assert 123456.0 * spec.scale == pytest.approx(123.456)
+    assert run_actions._shipped_change(change, {}, {}).endswith(
+        "€\u00a0123 → €\u00a098.8 per kW"
+    )
     # A field the panel shows in its stored unit keeps it.
     change = {"path": "Link.grid_export.p_nom", "old": 70.0, "new": 55.0}
     assert run_actions._shipped_change(change, {}, {}).endswith("70.0 → 55.0 MW")
