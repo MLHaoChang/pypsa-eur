@@ -37,7 +37,7 @@
   /* Red ramp */
   --brand-red: #ff5252;
   --brand-red-soft: #ff8a8a;
-  --brand-red-deep: #e03131;
+  --brand-red-deep: #e63b3b; /* --brand-on-red on it 4.7:1 (was #e03131, 4.3:1) */
   --brand-red-deeper: #b02226;
   --brand-on-red: #14090a;
 
@@ -54,6 +54,6 @@
   --brand-warn: #f6c68a;
 
   /* Composites reused by both entry points */
-  --brand-red-gradient: linear-gradient(135deg, #ff8a8a, #ff5252 55%, #e03131);
+  --brand-red-gradient: linear-gradient(135deg, #ff8a8a, #ff5252 55%, #e63b3b);
   --brand-red-glow: 0 14px 34px rgba(255, 82, 82, 0.28);
 }

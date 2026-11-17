@@ -10,6 +10,28 @@
     <!-- Identity palette. Single source of truth for the red/black brand
          colours, shared with spa.html — see public/brand.css. -->
     <link rel="stylesheet" href="/brand.css" />
+    <script>
+      // Mirror uiStore's opening theme onto <html> before first paint:
+      // the stored explicit choice, else the OS preference, else light
+      // (THEME-LIGHT-1). Kept in sync with storedTheme() in
+      // src/store/uiStore.ts by uiStore.theme.test.ts; both migrations are
+      // idempotent, so whichever runs first wins.
+      ;(function pypsaBootTheme() {
+        var theme = 'light'
+        try {
+          if (localStorage.getItem('network-diagram:theme-schema') !== '2') {
+            localStorage.removeItem('network-diagram:theme')
+            localStorage.setItem('network-diagram:theme-schema', '2')
+          }
+          var stored = localStorage.getItem('network-diagram:theme')
+          if (stored === 'light' || stored === 'dark') theme = stored
+          else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) theme = 'dark'
+        } catch (err) {
+          /* storage blocked: fall back to light */
+        }
+        document.documentElement.dataset.theme = theme
+      })()
+    </script>
     <style>
       :root {
         color-scheme: dark;

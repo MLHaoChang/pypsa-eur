@@ -28,6 +28,11 @@
   --color-panel-2: #eef0f3;
   --color-canvas: #f8f9fb;
   --color-canvas-dot: #dde0e5;
+  /* Tinted backgrounds (THEME-LIGHT-1): `band` washes header strips and hero
+     areas, `tint` fills soft cards inside panels. Text on them meets AA
+     (theme.contrast.test.ts). The matching gradient is --band-gradient. */
+  --color-band: #fbf3f4;
+  --color-tint: #fbf4f5;
 
   /* Borders / hairlines — fine to strong */
   --color-border: #e6e8ec;
@@ -40,14 +45,14 @@
   --color-ink-800: #1a202b;
   --color-ink-700: #303843;
   --color-ink-600: #475061;
-  --color-ink-500: #6a7384;
+  --color-ink-500: #5f6876;
   --color-ink-400: #97a0ae;
   --color-ink-300: #c2c8d2;
   --color-ink-200: #dde1e7;
   /* Aliases — keep existing `text-text` / `text-muted` working, now on the
      design ink scale. */
   --color-text: #0a0e14;
-  --color-muted: #6a7384;
+  --color-muted: #5f6876; /* ≥ 4.9 : 1 on every light surface and band (theme.contrast.test.ts) */
   --color-axis: #5f6876; /* ≥ 4.9 : 1 on every light surface (UX S4, A1); was #97a0ae, 2.6 : 1 */
   --color-legend: #475061;
 
@@ -70,7 +75,7 @@
      action is labelled and confirmed. */
   --color-success: #16a34a;
   --color-warn: #d97706;
-  --color-danger: #dc2626;
+  --color-danger: #c81e1e; /* ≥ 5.0 : 1 on every light surface; #dc2626 was 4.2 : 1 on panel-2 */
   --color-purple: #7c3aed;
   /* Result states (components/ResultState.tsx): not run / running. */
   --color-info: #2563eb;
@@ -209,6 +214,8 @@
   --color-panel-2: #282122;
   --color-canvas: #100d0e;
   --color-canvas-dot: #3a3133;
+  --color-band: #1b1617;
+  --color-tint: #1e1718;
 
   --color-border: #2e2729;
   --color-border-2: #3d3437;
@@ -231,7 +238,8 @@
   /* accent-100 / accent-50 back accent-coloured text (chips, rings, active
      tool buttons), so in dark they have to be dark red tints, not pastels. */
   --color-accent: #ff5252;
-  --color-accent-700: #e03131;
+  --color-accent-700: #e63b3b; /* on-accent ink on it ≥ 4.7 : 1; #e03131 was 4.3 : 1 */
+  --color-danger: #ff8b8b; /* ≥ 7 : 1 on every dark surface; #dc2626 was 3.3 : 1 */
   --color-accent-100: #3a1214;
   --color-accent-50: #260c0e;
   --color-on-accent: #14090a;
