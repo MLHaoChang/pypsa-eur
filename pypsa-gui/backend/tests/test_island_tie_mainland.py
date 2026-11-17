@@ -715,3 +715,14 @@ def test_a_link_joining_exactly_the_islands_two_buses_still_warns():
     out = S.tie_state(n, island)
     assert out["state"] == "no_tie"
     assert out["unmarked_links"] == ["subsea_tie"]
+
+
+def test_a_link_with_every_port_off_the_island_is_not_named_unmarked():
+    """SH 50 / GK A C1: a mainland-internal Link joins no island bus, so it is no island feeder."""
+    n, island = _untagged_r4(poc=False)
+    n.add("Bus", "far_a")
+    n.add("Bus", "far_b")
+    n.add("Link", "far_link", bus0="far_a", bus1="far_b", p_nom=5.0)
+    out = S.tie_state(n, island)
+    assert out["state"] == "no_tie"
+    assert out["unmarked_links"] == ["hospital_feeder", "subsea_tie"]
