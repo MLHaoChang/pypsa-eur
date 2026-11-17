@@ -126,7 +126,12 @@ _SYSTEM_WIDE = [
 
 
 #: A winding's letter from its ``Campus.windings`` entry: ``(winding, earth) -> letter``.
-_LETTER = {("D", None): "D", ("Y", "isolated"): "Y", ("Y", "solid"): "YN", ("Y", "resistance"): "YN"}
+_LETTER = {
+    ("D", None): "D",
+    ("Y", "isolated"): "Y",
+    ("Y", "solid"): "YN",
+    ("Y", "resistance"): "YN",
+}
 
 #: The PSS/E zero-sequence connection code of each vector group the campus
 #: schema allows (HV D/Y/YN, LV d/y/yn; no zig-zag), winding 1 = HV. The earth
@@ -136,26 +141,52 @@ _LETTER = {("D", None): "D", ("Y", "isolated"): "Y", ("Y", "solid"): "YN", ("Y",
 #: and RNUTRL honoured). Code meanings: PSS/E's zero-sequence transformer
 #: code table as a public utility transformer-modelling guide reproduces it.
 CONNECTION_CODES = {
-    33: {"YNyn": 1, "YNd": 2, "Dyn": 3, "YNy": 4, "Yyn": 4, "Yy": 4, "Yd": 4, "Dy": 4, "Dd": 4},
-    35: {"YNyn": 11, "YNd": 12, "Dyn": 13, "YNy": 14, "Yyn": 14, "Yy": 14, "Yd": 14, "Dy": 14, "Dd": 14},
+    33: {
+        "YNyn": 1,
+        "YNd": 2,
+        "Dyn": 3,
+        "YNy": 4,
+        "Yyn": 4,
+        "Yy": 4,
+        "Yd": 4,
+        "Dy": 4,
+        "Dd": 4,
+    },
+    35: {
+        "YNyn": 11,
+        "YNd": 12,
+        "Dyn": 13,
+        "YNy": 14,
+        "Yyn": 14,
+        "Yy": 14,
+        "Yd": 14,
+        "Dy": 14,
+        "Dd": 14,
+    },
 }
 
 
 def vector_group(windings: dict) -> str:
-    """The vector group without its clock number (``Dyn``, ``YNd`` ...) of a
-    ``Campus.windings`` entry; ContractError for a winding outside the schema."""
+    """
+    The vector group without its clock number (``Dyn``, ``YNd`` ...) of a
+    ``Campus.windings`` entry; ContractError for a winding outside the schema.
+    """
     try:
         hv = _LETTER[(windings["hv"], windings["hv_earth"])]
         lv = _LETTER[(windings["lv"], windings["lv_earth"])].lower()
     except (KeyError, TypeError) as err:
-        raise ContractError(f"seq: windings {windings!r} are not a vector group the campus schema allows") from err
+        raise ContractError(
+            f"seq: windings {windings!r} are not a vector group the campus schema allows"
+        ) from err
     return hv + lv
 
 
 def connection_code(windings: dict, version: int = 35) -> int:
-    """The PSS/E zero-sequence connection code of a two-winding transformer
+    """
+    The PSS/E zero-sequence connection code of a two-winding transformer
     with winding 1 = HV (``CONNECTION_CODES``); ContractError, from
-    ``vector_group``, for windings outside the schema."""
+    ``vector_group``, for windings outside the schema.
+    """
     return CONNECTION_CODES[version][vector_group(windings)]
 
 
@@ -222,8 +253,10 @@ def _machine_record(campus, uid, bus_kv, mbase, case, assumed):
 
 
 def write_seq(campus, path, version=35, case="max", f_hz=50.0) -> list:
-    """Write the .seq for ``campus.net`` (as ``write_raw`` numbers it, with the
-    same ``f_hz`` for the zero-sequence charging); return the assumptions applied."""
+    """
+    Write the .seq for ``campus.net`` (as ``write_raw`` numbers it, with the
+    same ``f_hz`` for the zero-sequence charging); return the assumptions applied.
+    """
     if version not in VERSIONS:
         raise ContractError(f"SEQ version {version!r} not in {VERSIONS}")
     if case not in CASES:
