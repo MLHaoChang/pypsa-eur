@@ -162,3 +162,17 @@ autoplay-blocked, mic-denied, console-open with the companion hidden, and the
   call at admission.
 - Playback timing (≤250 ms stop) is checked only with mocks until issue 01's
   probe runs.
+
+## 03a mutants (for the PR body)
+
+Mutants (scripts/coord/mutants.py, base origin/master):
+- upload_service.py: 6 of 6 killed.
+- durable_conversation.py: 65 of 73 killed on the first run; 5 survivors killed by the tests added in the follow-up commit (checked by hand):
+  - `tab and isinstance(source, dict)` → `tab`: test_a_results_source_that_is_not_an_object_is_ignored
+  - `isinstance(value, str) and value in allowed` → `value in allowed`: test_an_unhashable_value_is_dropped_not_raised
+  - `start <= end` → `start < end`: test_a_one_snapshot_window_is_kept
+  - the episode re-check under `_LOCK` → `if False` / `return True`: test_an_episode_rotated_after_lookup_writes_nothing
+- 3 equivalent:
+  - dropping `not isinstance(episode_id, str)`: a non-string never equals a stored episode id, so find_thread_for_episode returns None.
+  - dropping `not episode_id`: find_thread_for_episode('') returns None first.
+  - `if not thread_id` → `if False`: `_read(None)` refuses with an HTTPException, which is caught, so it still returns False and writes nothing.
