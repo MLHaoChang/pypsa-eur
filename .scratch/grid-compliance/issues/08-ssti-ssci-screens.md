@@ -40,3 +40,14 @@ user early which nearby machines or series-compensated lines warrant them.
 - Existing harmonic-scan tests pass unchanged.
 
 Release note: one new file under `doc/release-notes.d/` (see its README).
+
+## Comments
+
+**2026-11-17, GK A2 plan GO** (two PRs: engine, then campus step + service wiring).
+
+- SC_i is the fault level at the evaluation bus with machine i out, SC_tot with every machine in (EPRI). The "with and without the plant" wording under What to build is wrong; read it as with and without machine i.
+- UIF is evaluated at each converter connection bus with its own S_plant (BESS, PV, wind, fuel cell, UPS and the rectifier-fed load, counted conservatively), not only at the PCC, where the grid's infeed understates it. The PCC row is information only. The verdict is the worst over buses and over the max and min fault-level cases, with c stated per case.
+- SC_i above SC_tot within a stated tolerance clamps (noted); beyond it refuses. Every input is checked finite.
+- The scanned network is passive, so R at a crossing is information only; SSCI rows read "not evaluated: converter damping not modelled". Verdict states: flag, clear, check (no torsional modes), not evaluated (no series capacitor in the model: "grid-side series compensation needs the TSP's data"). The torsional margin uses the complement f0 − f_er.
+- The campus has no series-capacitor entry (that is `ingest/`, GC-01): the follow-up goes to the coordinator.
+- PR2 adds the two frontend lines a new run stage needs (CampusRunStage, STAGE_LABEL) and no UI section.

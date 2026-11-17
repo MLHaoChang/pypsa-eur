@@ -464,3 +464,16 @@ def test_frame_shape_name_and_resample_edges():
     np.testing.assert_allclose(
         f.resample([0.0, 0.2]).channel("v"), [0.0, 2.0]
     )  # the ends are inside
+
+
+def test_pscad_time_compare_is_exact(tmp_path):
+    inf = _pscad(tmp_path, 12)
+    data = np.loadtxt(tmp_path / "run_02.out", ndmin=2)
+    data[1, 0] = np.nextafter(data[1, 0], 1.0)  # one sample, one ulp later
+    np.savetxt(tmp_path / "run_02.out", data, fmt="%.17g")
+    with pytest.raises(ContractError, match="time column differs"):
+        read_pscad(inf)
+    data[1, 0] = 5e-5 + 1e-9
+    np.savetxt(tmp_path / "run_02.out", data, fmt="%.17g")
+    with pytest.raises(ContractError, match="time column differs"):
+        read_pscad(inf)

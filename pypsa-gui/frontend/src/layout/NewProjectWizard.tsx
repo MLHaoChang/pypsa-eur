@@ -268,7 +268,7 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
           disabled={!trimmed || isPending}
           className={`px-4 py-1.5 rounded text-xs font-semibold transition-colors disabled:opacity-40
             ${willOverwrite
-              ? 'bg-warn text-white hover:bg-warn/90'
+              ? 'bg-warn text-on-status hover:bg-warn/90'
               : 'bg-accent text-white hover:bg-accent/90'}`}
         >
           {isPending ? 'Creating…' : willOverwrite ? 'Overwrite & Create' : 'Create blank project'}
@@ -690,10 +690,10 @@ function CloneTab({ existingProjects, onClose }: {
         <button
           onClick={() => sourceId && canClone && cloneMut.mutate({ src: sourceId, dest: trimmed })}
           disabled={!canClone || cloneMut.isPending}
-          className={`px-4 py-1.5 rounded text-xs font-semibold transition-colors disabled:opacity-40 text-white ${
+          className={`px-4 py-1.5 rounded text-xs font-semibold transition-colors disabled:opacity-40 ${
             willOverwrite || willDropDirty
-              ? 'bg-warn hover:bg-warn/90'
-              : 'bg-accent hover:bg-accent/90'
+              ? 'bg-warn text-on-status hover:bg-warn/90'
+              : 'bg-accent text-white hover:bg-accent/90'
           }`}
         >
           {cloneMut.isPending
