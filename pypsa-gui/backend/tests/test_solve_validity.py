@@ -275,6 +275,27 @@ def test_the_applied_gap_is_what_the_solver_received(
 
 
 @pytest.mark.live_solve
+def test_a_user_gap_override_is_read_as_applied_never_the_config_gap(
+    reset_backend, monkeypatch
+):
+    # GK B 65 (c): committable units, config gap 0.01, user mip_rel_gap 0.1.
+    # The user key wins at the solve call, so the configured 0.01 must not be
+    # reported as applied.
+    live, cfg, kwargs = _solve(
+        _committable(),
+        {
+            "solver_name": "highs",
+            "mip_gap": 0.01,
+            "solver_options": {"mip_rel_gap": 0.1},
+        },
+        monkeypatch,
+    )
+    assert kwargs["solver_options"]["mip_rel_gap"] == 0.1
+    assert sv.applied_gap(live, cfg) == 0.1
+    assert sv.classify(live, cfg)["gap"] == 0.1
+
+
+@pytest.mark.live_solve
 def test_a_mip_solve_on_master_writes_zero_prices_not_duals(reset_backend, monkeypatch):
     # HiGHS returns no duals for a MIP; PyPSA fills marginal_price with 0.0.
     live, cfg, _ = _solve(
