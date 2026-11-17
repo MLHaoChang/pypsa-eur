@@ -73,21 +73,21 @@ def input_id(key: str) -> str:
 # ── the one normalising reader ───────────────────────────────────────────────
 
 
-def _number(d: Any, key: str, *, none: Any = None) -> Any:
+def _number(d: dict, key: str, *, none: Any = None) -> Any:
     """A finite int or float at `d[key]`, or `Unrecorded` naming why not. `none`: what a recorded null pins as
     (None: a null is not recorded)."""
-    if not isinstance(d, dict) or key not in d:
+    if key not in d:
         return Unrecorded(f"{key}: not recorded")
     v = d[key]
-    if v is None and none is not None:
-        return none
+    if v is None:
+        return Unrecorded(f"{key}: null") if none is None else none
     if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
         return Unrecorded(f"{key}: not a finite number")
     return v
 
 
-def _int(d: Any, key: str) -> Any:
-    if not isinstance(d, dict) or key not in d:
+def _int(d: dict, key: str) -> Any:
+    if key not in d:
         return Unrecorded(f"{key}: not recorded")
     v = d[key]
     if isinstance(v, bool) or not isinstance(v, int):
@@ -95,15 +95,15 @@ def _int(d: Any, key: str) -> Any:
     return v
 
 
-def _text(d: Any, key: str) -> Any:
-    if not isinstance(d, dict) or key not in d:
+def _text(d: dict, key: str) -> Any:
+    if key not in d:
         return Unrecorded(f"{key}: not recorded")
     v = d[key]
     return v if isinstance(v, str) else Unrecorded(f"{key}: not text")
 
 
 def _scalar(v: Any) -> bool:
-    return v is None or isinstance(v, (str, bool)) or (isinstance(v, (int, float)) and math.isfinite(v))
+    return isinstance(v, (str, bool)) or (isinstance(v, (int, float)) and math.isfinite(v))
 
 
 @dataclass(frozen=True)
@@ -325,9 +325,11 @@ def study_graph(r: StudyRead) -> StudyGraph:
     for figure in FIGURES:
         fid = figure_id(figure)
         b.node(Node("derived", fid))
-        value = rec.figures.get(figure)
-        stamp = {"unreadable": value.reason} if isinstance(value, Unrecorded) and rec.unreadable is None else None
-        if figure == "design_cost" and stamp is None:
+        value = rec.figures.get(figure)  # none at all when the whole record is unreadable
+        stamp = None
+        if isinstance(value, Unrecorded):
+            stamp = {"unreadable": value.reason}
+        elif figure == "design_cost":
             stamp = {"period_basis": rec.period_basis if isinstance(rec.period_basis, str) else None}
         info[fid] = {"label": figure, "value": _shown(value), "unit": _UNITS[figure], "stamp": stamp}
         b.edge(Edge("derived_from", fid, RESULTS))
@@ -352,7 +354,7 @@ def study_graph(r: StudyRead) -> StudyGraph:
     info[RUN] = {"label": "study run", "value": rec.status, "unit": None, "stamp": None}
 
     for key, label in _LABELS.items():
-        if key == "mc/seed" and not rec.has_seed and rec.unreadable is None:
+        if key == "mc/seed" and not rec.has_seed:
             continue  # a seed is pinned only when the record holds one
         unit = {"goal/value": GOAL_UNIT, "mc/horizon_years": "years"}.get(key)
         link(RUN, key, label, rec.fields.get(key, Unrecorded(f"{label}: not recorded")), r.current.get(key), unit)

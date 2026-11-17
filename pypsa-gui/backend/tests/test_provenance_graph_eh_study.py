@@ -122,6 +122,7 @@ def test_a_current_study_reads_fresh_outcome_first(study):
     assert out["node"] == S.figure_id("expected_shortfall")
     first = out["steps"][0]
     assert first["value"] == 0.05 and first["unit"] == "h/yr"
+    assert first["stamp"] is None
     ci = _step(out, S.LOLE_CI)  # lole_ci is a step
     assert ci["value"] == [0.0001, 0.0002]
     run = _step(out, S.RUN)
@@ -144,6 +145,7 @@ def test_design_cost_never_reads_fresh_on_the_revision_alone(study):
     assert out["outcome"]["state"] == "uncompared"
     assert set(out["outcome"]["uncompared"]) == {S.input_id("finance"), S.input_id("pack_prices")}
     assert out["steps"][0]["value"] == 1234.5 and out["steps"][0]["unit"] == "EUR"
+    assert out["steps"][0]["stamp"] == {"period_basis": "single_period"}
     for key in ("finance", "pack_prices"):
         step = _step(out, S.input_id(key))
         assert step["state"] == "uncompared" and "unrecorded" in step["via"]["recorded"]
@@ -362,6 +364,7 @@ def test_the_read_never_blocks_on_the_mutation_lock(study, monkeypatch):
     "mutate, why",
     [
         pytest.param(lambda r: {**r, "version": 2}, "version", id="wrong-version"),
+        pytest.param(lambda r: {**r, "version": True}, "version", id="bool-version"),
         pytest.param(lambda r: ["not", "a", "dict"], "not an object", id="non-dict"),
         pytest.param(lambda r: {**r, "status": "exploded"}, "status", id="unknown-status"),
         pytest.param(lambda r: {**r, "status": None}, "status", id="no-status"),
@@ -391,6 +394,7 @@ def test_a_record_of_the_wrong_version_or_shape_reads_uncompared_never_500(study
         ("payload", "draws", 500.0),
         ("payload", "draws", True),
         ("payload", "horizon_years", "0.1"),
+        ("payload", "horizon_years", None),
         ("payload", "seed", "0"),
         ("record", "archetype", 3),
         ("record", "network_revision", 3.0),
@@ -427,6 +431,64 @@ def test_a_figure_of_the_wrong_type_is_shown_as_unreadable_not_coerced(study):
     assert out["steps"][0]["stamp"]["unreadable"]
 
 
+@pytest.mark.parametrize("ci", [[1.0, 2.0, 3.0], ["a", "b"], "0.1-0.2"])
+def test_a_lole_ci_of_the_wrong_shape_is_shown_as_nothing(study, ci):
+    _payload(study)["lole_ci"] = ci
+    assert _step(explain_study_figure("expected_shortfall"), S.LOLE_CI)["value"] is None
+
+
+def test_a_null_figure_is_named_not_coerced(study):
+    study.solver_state["eh_study"]["report"]["mc_lole_h"] = None
+    out = explain_study_figure("expected_shortfall")
+    assert out["steps"][0]["value"] is None and out["steps"][0]["stamp"] == {"unreadable": "mc_lole_h: null"}
+
+
+def test_a_current_input_that_cannot_be_read_reads_stale(study, monkeypatch):
+    from services.adequacy import metrics
+
+    def boom(*_a, **_k):
+        raise RuntimeError("no snapshots")
+
+    monkeypatch.setattr(metrics, "horizon_years", boom)
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "stale"
+    step = _step(out, S.input_id("mc/horizon_years"))
+    assert step["broken"]["reason"] == "cannot be read now: no snapshots"
+
+
+def test_the_record_is_read_under_the_solver_state_lock(study, monkeypatch):
+    entered = []
+    real = study.solver_state_lock
+
+    class Spy:
+        def __enter__(self):
+            entered.append(True)
+            return real.__enter__()
+
+        def __exit__(self, *exc):
+            return real.__exit__(*exc)
+
+    monkeypatch.setattr(study, "solver_state_lock", Spy())
+    explain_study_figure("verdict")
+    assert entered == [True]
+
+
+def test_a_context_with_no_locks_is_read_with_nothing_to_wait_for(study):
+    import types
+
+    bare = types.SimpleNamespace(network=study.network, solver_state=study.solver_state,
+                                 network_revision=study.network_revision)
+    assert explain_study_figure("expected_shortfall", ctx=bare)["outcome"]["state"] == "fresh"
+
+
+def test_a_text_assumption_row_compares_exactly(study):
+    study.network.generators.loc["g", "carrier"] = "solar"
+    study.solver_state["eh_study"]["assumptions"] = [_row(key="g_carrier", value="solar", field="carrier")]
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+    study.network.generators.loc["g", "carrier"] = "wind"
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "stale"
+
+
 # ── W6: a walk that compared nothing ────────────────────────────────────────
 
 
@@ -459,6 +521,7 @@ def test_each_assumption_row_is_an_input_pinned_to_its_value(study):
         pytest.param(_row(component=None), id="no-component"),
         pytest.param(_row(value=None), id="no-value"),
         pytest.param(_row(value={"x": 1}), id="value-not-scalar"),
+        pytest.param(_row(value=float("nan")), id="value-nan"),
         pytest.param("a string row", id="row-not-dict"),
     ],
 )
