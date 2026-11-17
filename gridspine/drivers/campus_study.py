@@ -220,6 +220,11 @@ IBR_CAPABILITY_CSV = "campus_ibr_capability.csv"
 IBR_Q_CURVE_CSV = "campus_ibr_q_curve.csv"
 #: What the profile requires that a steady-state study cannot show.
 REPORTED_REQUIREMENTS_JSON = "campus_reported_requirements.json"
+#: The voltage-control step (plan GC-02): the PoC P-Q chart across voltage, the Q(V) droop in the load flow
+#: and their scorecard rows.
+POC_PQ_CSV = "campus_poc_pq.csv"
+VOLTAGE_CONTROL_LF_CSV = "campus_voltage_control_lf.csv"
+VOLTAGE_CONTROL_CSV = "campus_voltage_control.csv"
 INVESTMENT_CSV = "campus_investment.csv"
 COST_CSV = "campus_cost.csv"
 INVESTED_YAML = "campus_invested.yaml"
@@ -1383,3 +1388,58 @@ def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_di
               "source EMF: 1.0 pu, or the period's lowest converged PCC voltage when lower"]
     return {"ledger": ledger, "notes": notes, "basis": SCREENING_BASIS, "sk_min_mva": sk, "rx_min": rx,
             "c": c, "vn_kv": vn}
+
+
+def voltage_control_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> dict:
+    """The plant's voltage-control strategy on a prepared run (plan GC-02,
+    ``static/voltage_control.py``): the PoC P-Q chart across voltage
+    (``campus_poc_pq.csv``), the profile's Q(V) droop in the load flow at
+    every selected hour, intact and N-1, on the S_k''min and S_k''max grid
+    equivalents (``campus_voltage_control_lf.csv``), and the scorecard rows
+    (``campus_voltage_control.csv``). A setting the profile does not state
+    makes its row "unknown"; a normally open tie or a PCC without S_k''
+    leaves the droop unrun, with the reason in its row."""
+    import copy
+
+    from gridspine.static.voltage_control import (
+        OUTCOME_COLUMNS,
+        droop_from,
+        grid_equivalent,
+        outcome_rows,
+        poc_pq_chart,
+        scorecard_rows,
+    )
+
+    run_dir = Path(run_dir)
+    code = load_grid_code(profile, extra_dirs=profile_dirs)
+    hourly, pcc = campus_tables(run_dir)
+    campus = load_run_campus(run_dir)
+    p_ref = _p_ref(campus, pcc)[0]
+    chart = poc_pq_chart(campus, code, p_ref)
+    control, why = droop_from(code, campus)
+    if control is not None and campus.tie_normally_open:
+        control, why = None, "the tie to the grid is normally open: no grid voltage to droop against"
+    if control is not None and _sk_source(yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text()),
+                                          _unchanged_project(run_dir))[1]:
+        control, why = None, NO_SK_MIN + ": the droop needs the grid's strength, not the typical fallback"
+    if control is not None:
+        try:                                    # the grid's strength, both equivalents, before any hour runs
+            for grid in ("min", "max"):
+                grid_equivalent(copy.deepcopy(campus.net), grid)
+        except ContractError as e:
+            control, why = None, str(e)
+    lf_rows = []
+    if control is not None:
+        selection = selected_hours(run_dir)
+        for period, hour in selection[["period", "hour"]].itertuples(index=False):
+            period, hour = int(period), int(hour)
+            rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)]
+            for grid in ("min", "max"):
+                flows = solve_cases(campus, rows, control=dataclasses.replace(control, grid=grid))
+                lf_rows += outcome_rows({"period": period, "hour": hour}, grid, flows)
+    outcomes = pd.DataFrame(lf_rows, columns=list(OUTCOME_COLUMNS))
+    card = scorecard_rows(code, chart, outcomes, why)
+    _write_text_atomic(run_dir / POC_PQ_CSV, chart.to_csv(index=False))
+    _write_text_atomic(run_dir / VOLTAGE_CONTROL_LF_CSV, outcomes.to_csv(index=False))
+    _write_text_atomic(run_dir / VOLTAGE_CONTROL_CSV, card.to_csv(index=False))
+    return {"chart": chart, "outcomes": outcomes, "scorecard": card, "p_ref_mw": p_ref}

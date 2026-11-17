@@ -86,8 +86,9 @@ A profile may carry these optional keys:
 ``voltage_deadband_pct``
     The voltage-control deadband, % of nominal voltage either side, inside
     which a unit in voltage control does not change its reactive output; a
-    positive number. Reported (``reported_requirements``), never checked:
-    the static study has no voltage-control loop.
+    positive number. Reported (``reported_requirements``), never checked
+    here; the voltage-control step uses it as the Q(V) droop's deadband
+    (``static/voltage_control.py``, plan GC-02).
 ``unbalance_limit_pct``
     The negative-sequence voltage unbalance limit at the connection point,
     % of the positive sequence (datacenter grid readiness issue 12), a
@@ -195,6 +196,15 @@ PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit
                           "pv_margin_min_pct", "qv_margin_min_mvar",
                           "load_ramp_mw_per_min", "load_variation_limit", "lcl_ride_through_band", "stage1_ds_over_ssc_pct",
                   "ride_through_transfer_counts",})
+#: The voltage-control keys (plan GC-02, ``static/voltage_control.py``): ``q_v_slope_pct`` (the Q(V)
+#: droop's slope, % voltage for the full Q_max), ``voltage_control_modes`` (the modes the code asks the
+#: plant to offer) and ``q_band_v_range_pu`` (``min``/``max``: the PoC voltages over which the code states
+#: ``q_capability_pq``; the P-Q chart judges only those). Absent, the step reads "unknown", never pass.
+VOLTAGE_CONTROL_KEYS = ("q_v_slope_pct", "voltage_control_modes", "q_band_v_range_pu")
+#: The control modes ``voltage_control_modes`` may name (``voltage_control.MODES``).
+VOLTAGE_CONTROL_MODES = ("q_fixed", "pf", "v_control", "q_of_v")
+_SINGLE_LIMITS += VOLTAGE_CONTROL_KEYS
+PROFILE_KEYS = PROFILE_KEYS | set(VOLTAGE_CONTROL_KEYS)
 #: ``angle_limit_deg`` stays below this: past 90 degrees a branch is beyond its steady-state transfer limit
 #: (P = V1 V2 / X sin delta peaks at 90).
 ANGLE_LIMIT_MAX_DEG = 90.0
@@ -331,6 +341,7 @@ def _check_profile(name, p):
             _check_q_capability(p[key], where, key)
     if "harmonic_limits_pct" in p:
         _check_harmonic_orders(p["harmonic_limits_pct"], where)
+    _check_voltage_control(p, where)
     if "current_tdd_standard" in p:
         _check_limit("current_tdd_standard", p["current_tdd_standard"], where)
         if p["current_tdd_standard"].get("value") not in CURRENT_TDD_STANDARDS:
@@ -418,6 +429,32 @@ def _check_harmonic_orders(lim, where):
             raise ContractError(f"{where}: harmonic_limits_pct.orders[{h}] must be a positive number, got {v!r}")
 
 
+def _check_voltage_control(p, where):
+    """The voltage-control keys (``VOLTAGE_CONTROL_KEYS``)."""
+    if "q_v_slope_pct" in p:
+        _check_limit("q_v_slope_pct", p["q_v_slope_pct"], where)
+        v = p["q_v_slope_pct"].get("value")
+        if not (_is_number(v) and v > 0):
+            raise ContractError(f"{where}: q_v_slope_pct value must be a finite number > 0, got {v!r}")
+    if "voltage_control_modes" in p:
+        _check_limit("voltage_control_modes", p["voltage_control_modes"], where)
+        modes = p["voltage_control_modes"].get("value")
+        if not isinstance(modes, list) or not modes:
+            raise ContractError(f"{where}: voltage_control_modes value must be a non-empty list, got {modes!r}")
+        unknown = [m for m in modes if m not in VOLTAGE_CONTROL_MODES]
+        if unknown:
+            raise ContractError(f"{where}: voltage_control_modes names unknown mode(s) {unknown}; "
+                                f"allowed {list(VOLTAGE_CONTROL_MODES)}")
+        if len(set(modes)) != len(modes):
+            raise ContractError(f"{where}: voltage_control_modes repeats a mode: {modes}")
+    if "q_band_v_range_pu" in p:
+        r = p["q_band_v_range_pu"]
+        _check_limit("q_band_v_range_pu", r, where)
+        lo, hi = r.get("min"), r.get("max")
+        if not (_is_number(lo) and _is_number(hi) and 0 < lo < hi):
+            raise ContractError(f"{where}: q_band_v_range_pu needs finite 0 < min < max, got min={lo!r} max={hi!r}")
+
+
 def q_band_at(lim: dict, p_pu: float):
     """``(q_min_pu, q_max_pu)`` of a ``q_capability_pq`` limit at ``p_pu``,
     interpolated linearly between its points; None outside their p range."""
@@ -480,7 +517,7 @@ def reported_requirements(profile: dict) -> list:
                     "value": value, "clause": db["clause"], "source": db["source"], "applies_to": "unit",
                     "status": "reported",
                     "detail": f"voltage-control deadband {value}: reported, not enforced "
-                              "(the static study has no voltage-control loop)"})
+                              "(the voltage-control step uses it as the Q(V) droop's deadband)"})
     return out
 
 

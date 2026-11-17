@@ -141,6 +141,8 @@ HARMONIC_SCAN_META = "campus_harmonic_scan.json"
 HARMONIC_SCAN_ERROR = "harmonic_scan_error.json"
 VOLTAGE_STABILITY_META = "campus_voltage_stability.json"
 VOLTAGE_STABILITY_ERROR = "voltage_stability_error.json"
+#: The voltage-control step (plan GC-02) could not run: why.
+VOLTAGE_CONTROL_ERROR = "voltage_control_error.json"
 #: The dip and restart screens (grid-to-process issue 12b): each process unit's restart, ride-through and motor
 #: inputs as the run read them, so a field changed since marks that unit out of date; or, when the screens could
 #: not run, why.
@@ -329,6 +331,43 @@ def _voltage_stability(run: Path, profile: str, profile_dirs) -> None:
         (run / VOLTAGE_STABILITY_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
         return
     (run / VOLTAGE_STABILITY_META).write_text(json.dumps(summary))
+
+
+def _voltage_control(run: Path, profile: str, profile_dirs) -> None:
+    """The plant's voltage-control strategy on the sized run in ``run`` (plan
+    GC-02, ``campus_study.voltage_control_campus``): the PoC P-Q chart, the
+    Q(V) droop in the load flow and their scorecard rows. Run inside the
+    voltage-stability stage, so ``RUN_STAGES`` is unchanged. As that screen,
+    its failure never fails the run: the reason goes to
+    ``VOLTAGE_CONTROL_ERROR`` and none of its files stays."""
+    files = (cs.POC_PQ_CSV, cs.VOLTAGE_CONTROL_LF_CSV, cs.VOLTAGE_CONTROL_CSV, VOLTAGE_CONTROL_ERROR)
+
+    def clear():
+        for name in files:
+            (run / name).unlink(missing_ok=True)
+
+    clear()
+    try:
+        cs.voltage_control_campus(run, profile, profile_dirs)
+    except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
+        if not isinstance(exc, ContractError):
+            logger.exception("campus run: the voltage-control step failed in %s", run)
+        clear()
+        (run / VOLTAGE_CONTROL_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
+
+
+def _voltage_control_results(run: Path) -> dict | None:
+    """The voltage-control step for ``get_state``: ``{error}`` when it could not
+    run, else its scorecard rows, the PoC P-Q chart and the droop's load-flow
+    outcomes; None for a run from before the step."""
+    error = run / VOLTAGE_CONTROL_ERROR
+    if error.is_file():
+        return json.loads(error.read_text())
+    if not (run / cs.VOLTAGE_CONTROL_CSV).is_file():
+        return None
+    return {"scorecard": _read_csv(run / cs.VOLTAGE_CONTROL_CSV) or [],
+            "poc_pq": _read_csv(run / cs.POC_PQ_CSV) or [],
+            "droop": _read_csv(run / cs.VOLTAGE_CONTROL_LF_CSV) or []}
 
 
 def _dips_restart_inputs(n) -> dict:
@@ -565,6 +604,8 @@ def _results(run: Path):
         "harmonic_scan": _harmonic_scan_results(run),
         # Study harness 18: the P–V/Q–V margin at the PCC (``_voltage_stability_results``).
         "voltage_stability": _voltage_stability_results(run),
+        # Plan GC-02: the voltage-control strategy (``_voltage_control_results``).
+        "voltage_control": _voltage_control_results(run),
         # Grid-to-process 12b: dips to trips to lost tonnes, and the restart sequence (``_dips_restart_results``).
         "dips_restart": _dips_restart_results(run),
     }
@@ -1769,6 +1810,7 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                 _harmonic_scan(work, s["profile"], profile_dirs)
                 stage("voltage_stability")
                 _voltage_stability(work, s["profile"], profile_dirs)
+                _voltage_control(work, s["profile"], profile_dirs)      # plan GC-02, inside this stage
                 stage("dips_restart")
                 _dips_restart(work, s["profile"], profile_dirs, nc)
             except ContractError as exc:

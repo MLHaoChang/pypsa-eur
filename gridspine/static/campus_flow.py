@@ -95,6 +95,9 @@ class HourFlow:
     bus: pd.DataFrame            # bus, vm_pu
     line: pd.DataFrame = dataclasses.field(
         default_factory=lambda: pd.DataFrame(columns=["cable", "i_ka", "loading_pct"]))   # cable loading
+    #: What the plant power controller reached (plan GC-02, ``voltage_control.ControlOutcome``);
+    #: None when the case ran without one.
+    control: object = None
 
 
 def trafo_groups(campus) -> dict:
@@ -193,7 +196,31 @@ def apply_setpoints(net, setpoints) -> None:
             net[table].at[idx[name], col] = v
 
 
-def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None, retap=None) -> dict:
+def _solve_controlled(net, campus, control, equivalent) -> HourFlow:
+    """One case under the plant power controller (plan GC-02): the outer
+    loop on the PoC, then the flow read as ``_solve`` reads it, with the PCC
+    exchange taken at the PoC end of the grid equivalent and its source bus
+    left out."""
+    from gridspine.static.voltage_control import control_case
+
+    imp, z_ohm, c = equivalent
+    outcome = dataclasses.replace(control_case(net, campus, imp, control), z_ohm=z_ohm, c=c)
+    if not outcome.converged:
+        empty_t = pd.DataFrame(columns=["trafo", "s_mva", "loading_pct"])
+        empty_b = pd.DataFrame(columns=["bus", "vm_pu"])
+        return HourFlow(False, math.nan, math.nan, math.nan, empty_t, empty_b, control=outcome)
+    flow = _solve(net)
+    if not flow.converged:                                         # pragma: no cover - the loop just solved it
+        return dataclasses.replace(flow, control=outcome)
+    src = int(net.impedance.at[imp, "from_bus"])
+    p_grid, q_grid = -outcome.p_poc_mw, -outcome.q_poc_mvar
+    injected = float(net.res_sgen["p_mw"].sum()) - float(net.res_load["p_mw"].sum())
+    bus = flow.bus[flow.bus["bus"] != str(net.bus.at[src, "name"])].reset_index(drop=True)
+    return dataclasses.replace(flow, pcc_p_mw=p_grid, pcc_q_mvar=q_grid, losses_mw=p_grid + injected, bus=bus,
+                               control=outcome)
+
+
+def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None, retap=None, control=None) -> dict:
     """``{"intact": HourFlow, "N-1:<trafo>": HourFlow, ...}`` for one hour,
     with an optional reactive dispatch in place (module docstring). Works on
     a copy; ``campus.net`` is not changed. ``inspect(case, net)``, if given,
@@ -203,18 +230,33 @@ def solve_cases(campus, rows: pd.DataFrame, setpoints=None, inspect=None, retap=
     ``retap(case, net)``, if given (plan C15, ``campus_taps.Taps.hook``), is
     called on each case's net before it is solved, and may set its taps:
     the case is then solved, and inspected, at those taps. Every N-1 case
-    starts from the intact case's taps, which are put back after it."""
+    starts from the intact case's taps, which are put back after it.
+
+    ``control`` (plan GC-02, ``voltage_control.PlantControl``), if given,
+    puts the grid behind its Thevenin equivalent and runs the plant power
+    controller's outer loop in every case, the N-1 ones too: a PPC is a
+    continuous controller and re-dispatches Q after an outage. Each
+    ``HourFlow`` then carries its ``control`` outcome. A reactive dispatch
+    on the units (``setpoints["sgen_q"]``) cannot also be given: the PPC
+    sets their Q."""
     work = copy.copy(campus)
     work.net = copy.deepcopy(campus.net)
     apply_hour(work, rows)
     net = work.net
     if setpoints:
+        if control is not None and setpoints.get("sgen_q"):
+            raise ContractError("a reactive dispatch on the units and a plant controller cannot both set their Q")
         apply_setpoints(net, setpoints)
+    equivalent = None
+    if control is not None:
+        from gridspine.static.voltage_control import grid_equivalent
+
+        equivalent = grid_equivalent(net, control.grid)
 
     def run(case):
         if retap is not None:
             retap(case, net)
-        out[case] = _solve(net)
+        out[case] = _solve(net) if control is None else _solve_controlled(net, work, control, equivalent)
         if inspect is not None and out[case].converged:
             inspect(case, net)
 
