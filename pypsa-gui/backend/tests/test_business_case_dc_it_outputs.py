@@ -264,10 +264,30 @@ def test_a1_the_digest_moves_with_the_it_spec_and_with_nothing_else():
     assert _hash_of(other_backup, None) == base
 
 
-@pytest.mark.parametrize(
-    "bad",
-    ["{not json", '{"id": "eh_datacenter", "dc_load": {"spec": {"phases": "x"}}}'],
-)
+def _corrupt(d, bad: str) -> None:
+    """Spoil the project's marker one way (GK B2 A2, N1)."""
+    import json
+
+    from services.template_marker import source_path
+
+    path = source_path(d)
+    if bad == "not_json":
+        path.write_text("{not json")
+        return
+    meta = json.loads(path.read_text())
+    if bad == "bad_phases":
+        meta["dc_load"]["spec"]["phases"] = "x"
+    elif bad == "planning_no_end_year":
+        meta["planning"] = {"periods": [2030]}  # KeyError in project_spec
+    elif bad == "planning_bad_year":
+        meta["planning"] = {"periods": ["x"], "end_year": 2040}  # ValueError
+    path.write_text(json.dumps(meta))
+
+
+CORRUPT = ["not_json", "bad_phases", "planning_no_end_year", "planning_bad_year"]
+
+
+@pytest.mark.parametrize("bad", CORRUPT)
 def test_a2_a_corrupt_spec_drops_only_the_it_outputs(
     client,
     tmp_path,
@@ -281,16 +301,36 @@ def test_a2_a_corrupt_spec_drops_only_the_it_outputs(
     d = _dc_project(
         client, tmp_path, monkeypatch, project_row, install_network, "eh_datacenter", {}
     )
-    from services.template_marker import source_path
-
-    source_path(d).write_text(bad)
+    _corrupt(d, bad)
     with caplog.at_level("WARNING"):
         body = client.get(OPTIONS_URL).json()
     assert body["outputs_reason"] is None
     ids = {o["id"] for o in body["outputs"]}
     assert any(i.startswith("capacity.") for i in ids) and not IT_OUTPUTS & ids
-    if bad.startswith('{"id"'):
+    if bad != "not_json":  # an unreadable marker is no template, not a bad spec
         assert "data-centre load spec does not read" in caplog.text
+
+
+@pytest.mark.parametrize("bad", CORRUPT)
+def test_a2_a_corrupt_spec_still_runs_a_case_with_no_it_line(
+    client, tmp_path, monkeypatch, project_row, tmp_projects_dir, install_network, bad
+):
+    """GK B2 N1: the run route binds too (`results.py` 2693): a project whose spec or
+    planning does not read still runs a business case that links no IT output."""
+    from tests.test_business_case_routes import _bc, _line
+
+    d = _dc_project(
+        client, tmp_path, monkeypatch, project_row, install_network, "eh_datacenter", {}
+    )
+    _fake_build(monkeypatch)
+    assert _put_fin(client, _s2_inputs()).status_code == 200
+    assert client.post(IC_URL, json={}).status_code == 200
+    assert _poll(client)["status"] == "done"
+    _corrupt(d, bad)
+    assert _put(client, _bc(_line())).status_code == 200
+    assert client.post(BC_URL).status_code == 200
+    out = _bc_poll(client)
+    assert out["status"] == "done", out.get("error")
 
 
 def test_a3_a_non_dc_template_reads_as_before(
