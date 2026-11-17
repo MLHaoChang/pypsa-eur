@@ -888,9 +888,11 @@ EH_AMMONIA_STAGED = _eh_ammonia_staged()
 
 # Study harness 16 (design §9.3 "eh_concentrator_staged"; GK A (28) GO,
 # Q1-Q6): eh_concentrator_staged@1 on the shipped template (g2p 10-12, 18).
-# The solve, then the investment case against the site as it stands today
-# (g2p 11: a baseline re-solve). The result gate blocks on the mass balance
-# and on a case not established on that basis; the motor start, the restart
+# The result gate blocks on the mass balance; the investment case against
+# the site as it stands today (g2p 11: a baseline re-solve) is read from a
+# case the user ran on this network and warns only, since a run's case
+# refuses that re-solve (GK A (28) Q8 = A; study-harness issue 52); the
+# motor start, the restart
 # and N-1 on the site transformer warn (the start method and the transformer
 # are the user's, §6.0), each FAIL shown with its numbers. The KPIs are warn
 # rules that read as established: lost tonnes and EUR by period, the shed's
@@ -899,9 +901,12 @@ EH_AMMONIA_STAGED = _eh_ammonia_staged()
 # levers: the envelope names the per-year candidates, each up to twice its
 # template cap (`eh_concentrator.py`: PV 40, BESS 20 MW, stockpile 60,000 t).
 CONC_MASS_BALANCE_TOL = 1e-6  # design §3.B
-CONC_SOLVES = 1  # the plan; the case's baseline re-solve is not an envelope solve (run_ic.SOLVES; SH issue 50)
-CONC_BASELINE_UNCOUNTED = ("+1 baseline solve per investment-case run (0 on a cache hit), not counted by the "
-                           "envelope (run_ic.SOLVES = 0; study harness issue 50)")
+CONC_SOLVES = 1  # the plan
+CONC_CASE_OUTSIDE = ("the investment case against the site as today: a run's case refuses its baseline re-solve "
+                     "(run_envelope `baseline_solve`, routers/results.py; the budget does not count it), so the "
+                     "run reads a case the user ran on this network (study-harness issue 52)")
+_CASE_WORDS = (" A run's case refuses the baseline re-solve this needs (study-harness issue 52): the rule reads "
+               "a case the user ran on this network, current for its solve and inputs; else not evaluated.")
 
 
 def _conc_levers():
@@ -933,8 +938,6 @@ def _eh_concentrator_staged() -> dict:
                       basis="The process units are the user's inputs (the process-unit form): a committable unit "
                             "with a capacity and an efficiency to a product counted in tonnes."),
             ]},
-            "solve": {"actions": [*GENERIC["solve"]["actions"], _call("run_investment_case")],
-                      "rules": GENERIC["solve"]["rules"]},
             "result_gate": {**GENERIC["result_gate"], "rules": [
                 *CORE_RESULT_RULES,
                 {**unserved, "basis": "No electrical load is shed in normal operation (the run's own solve). "
@@ -952,19 +955,20 @@ def _eh_concentrator_staged() -> dict:
                 _rule("conc.n_1.site_transformer", "process.n_1.site_transformer", "empty", severity="warn",
                       basis="No single site transformer's outage stops a process unit (N-1, first order). "
                             "A project with no site transformer is not evaluated."),
-                _rule("conc.ic.counterfactual", "ic.counterfactual", "eq", "established",
-                      basis="The investment case compares against an established counterfactual."),
-                _rule("conc.ic.basis", "ic.counterfactual.basis", "eq", "site_today",
+                _rule("conc.ic.counterfactual", "ic.counterfactual", "eq", "established", severity="warn",
+                      basis="The investment case compares against an established counterfactual." + _CASE_WORDS),
+                _rule("conc.ic.basis", "ic.counterfactual.basis", "eq", "site_today", severity="warn",
                       basis="The counterfactual is the site as it stands today (existing connection, no PV or "
-                            "BESS, the same process), re-solved by the case."),
+                            "BESS, the same process), re-solved by the case." + _CASE_WORDS),
                 _rule("conc.kpi.lost_tonnes", "process.lost_production", "ge", 0.0, severity="warn",
                       basis="KPI: concentrate lost to the grid per year (t/yr), the worst period's; each "
                             "period's tonnes and lost-production EUR are listed."),
                 _rule("conc.kpi.shed_level", "process.shed_level", "ge", 0.0, severity="warn",
                       basis="KPI: the concentrate shed's peak level (t); each period's least, peak and last."),
                 _rule("conc.kpi.npv", "ic.returns", "nonempty", severity="warn",
-                      basis="KPI: the project NPV at the WACC and IRR against the site as today. NPV by stage "
-                            "is not established (missing tools)."),
+                      basis="KPI: the project NPV at the WACC and IRR against the site as today, from the "
+                            "case the user ran on this network; no number otherwise. NPV by stage is not "
+                            "established (missing tools)." + _CASE_WORDS),
             ]},
             "report": {"actions": [_native("report")], "rules": REPORT_RULES},
             "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
@@ -972,9 +976,8 @@ def _eh_concentrator_staged() -> dict:
         "tunable": [{"component": c, "attr": a} for c, a in tunable],
         "envelope": {
             "edits": edits,
-            "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "run_investment_case"}, {"tool": "generate_report"}],
-            # The solve and each L2 round's re-solve (L2_ROUNDS = 2); each case
-            # run adds its baseline re-solve, uncounted (CONC_BASELINE_UNCOUNTED).
+            "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
+            # The solve and each L2 round's re-solve (L2_ROUNDS = 2).
             "budget": {"solves": CONC_SOLVES + 2, "rounds": 2, "wall_time_h": 8.0},
         },
         "kpis": copy.deepcopy(EH_SITE["kpis"]),
@@ -983,7 +986,7 @@ def _eh_concentrator_staged() -> dict:
             "NPV by stage: the case reports the project NPV and each stage's capex lines, no NPV per stage",
             "N-1 on the site transformer: the template has no site transformer",
             "a chat path to the process-unit form (G2P-07; the user fills it)",
-            CONC_BASELINE_UNCOUNTED,
+            CONC_CASE_OUTSIDE,
         ],
     }
 
