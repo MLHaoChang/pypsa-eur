@@ -27,7 +27,10 @@ KW = dict(
     grid_mbase_mva=100.0,
     plant_branch=(101, 900, "1"),
     plant_machine=(201, "1"),
+    f0_hz=50.0,
+    plant_mbase_mva=80.0,
 )
+CID = "flat_skmin_xrmin"
 
 
 def _battery(overrides=None):
@@ -116,11 +119,20 @@ def test_files_resolve_against_the_script_dir(pack):
         (lambda t: t + "\nos.system('x')\n", "os call outside os.path"),
         (lambda t: t + "\nimport subprocess\n", "import of 'subprocess'"),
         (lambda t: t.replace("'f_hz'", "'f'"), "channel 'f_hz' has no ident literal"),
+        (lambda t: t + "\nopen(os.path.join(HERE, 'pack.raw'), 'w')\n", "call to open"),
+        (lambda t: t + "\nopen(os.path.join(HERE, 'x.csv'), 'w')\n", "'x.csv' is not in"),
+        (lambda t: t.replace("), 'w')", "), 'a')"), "call to open"),
+        (lambda t: t + f"\nopen(os.path.join(HERE, '{CID}.csv'), 'r')\n", "call to open"),
+        (lambda t: t + f"\nopen('{CID}.csv', 'w')\n", "call to open"),
+        (lambda t: t + f"\nopen(os.path.join(OUT, '{CID}.csv'), 'w')\n", "call to open"),
+        (lambda t: t + f"\nopen(os.path.join(HERE, '{CID}.csv'), 'w', 1)\n", "call to open"),
+        (lambda t: t + "\nHERE = '..'\n", "HERE must be bound once"),
+        (lambda t: t.replace("HERE = os.path.dirname(", "HERE = (", 1), "HERE must be bound"),
     ],
 )
 def test_checker_refuses_a_tampered_script(pack, mutate, reason):
     cases, texts = pack
-    cid = "flat_skmin_xrmin"
+    cid = CID
     with pytest.raises(ContractError, match=reason.replace("(", r"\(")):
         check_script(mutate(texts[cid]), _allowed(cid), cases[cid].channels)
 
@@ -178,3 +190,49 @@ def test_refuses_pq_channels_without_plant_branch(tmp_path):
 
 def test_refuses_setpoint_steps_without_plant_machine(tmp_path):
     _refuse(tmp_path, "need plant_machine", plant_machine=None)
+
+
+def test_refuses_non_positive_f0(tmp_path):
+    _refuse(tmp_path, "f0_hz=0.0 must be", f0_hz=0.0)
+
+
+def test_refuses_i_poc_without_plant_mbase(tmp_path):
+    _refuse(tmp_path, "plant_mbase_mva=None must be", plant_mbase_mva=None)
+
+
+def test_csv_header_is_contract_names_in_case_order(pack):
+    cases, texts = pack
+    for cid, text in texts.items():
+        line = next(ln for ln in text.splitlines() if ln.startswith("HEADER = "))
+        assert ast.literal_eval(line.split("=", 1)[1]) == ["t_s", *cases[cid].channels]
+        assert f"open(os.path.join(HERE, '{cid}.csv'), 'w')" in text
+        assert not {"'v_poc_pu'", "'f_hz'"} & set(
+            ln.rsplit(",", 1)[-1].strip(" )]") for ln in text.splitlines()
+            if "_channel(" in ln
+        )
+
+
+def test_convert_gives_contract_units_on_hand_values(pack):
+    _, texts = pack
+    tree = ast.parse(texts["phase_jump_skmin_xrmin_up"])
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_convert")
+    ns = {}
+    exec(compile(ast.Module([fn], []), "convert", "exec"), ns)  # pure: no psspy
+    rec = {
+        "t_s": [0.0, 1.0],
+        "raw_v_poc_pu": [0.5, 0.0],
+        "raw_theta_poc_deg": [30.0, 10.0],
+        "raw_theta_src": [10.0, 10.0],
+        "raw_f_hz": [0.01, 0.0],
+        "raw_p_poc_mw": [30.0, 3.0],
+        "raw_q_poc_mvar": [-40.0, 4.0],
+        "raw_id_pu": [0.6, 0.0],
+        "raw_iq_pu": [0.8, 1.0],
+    }
+    out = ns["_convert"](rec, 50.0, 80.0)
+    assert out["f_hz"] == [pytest.approx(50.5), 50.0]  # 50 * (1 + 0.01)
+    assert out["i_poc_pu"][0] == pytest.approx(50.0 / (0.5 * 80.0))  # |S| / (V S_rated)
+    assert math.isnan(out["i_poc_pu"][1])  # V = 0: undefined, not inf
+    assert out["theta_poc_deg"] == [20.0, 0.0]
+    assert out["q_poc_mvar"] == [-40.0, 4.0] and out["p_poc_mw"] == [30.0, 3.0]
+    assert out["iq_pu"] == [0.8, 1.0] and out["t_s"] == [0.0, 1.0]

@@ -4,9 +4,17 @@ psspy run scripts for the test battery: one script per case (GC-04 item 6).
 Each ``run_<case_id>.py`` loads the pack's RAW, ``.seq`` and ``.dyr``, turns
 the grid source machine (a GENCLS with H = 0, an infinite bus) into the case's
 Thevenin source, applies the case's event at ``t_event_s`` and writes
-``<case_id>.out`` plus ``<case_id>.csv`` next to itself. Every output channel
-carries the contract name from ``test_battery.CHANNELS`` as its IDENT, so a
-result maps back to a case with no translation table (TRGC 04/05).
+``<case_id>.out`` plus ``<case_id>.csv`` next to itself (TRGC 04/05).
+
+**Channels.** PSS/E records ``raw_<name>`` channels as it measures them; after
+the run the script reads the ``.out`` back with ``dyntools.CHNF.get_data``,
+applies :data:`CONVERSIONS` in a pure ``_convert`` function and writes the CSV
+with the header ``t_s`` plus the case's channels by their contract names, in
+contract units (``test_battery.CHANNELS``). So the read-back never sees a PSS/E
+unit. id/iq come from the plant converter's current commands, pu on the plant
+machine's MBASE: the pack sets MBASE = plant rated apparent power, which is
+the contract base. P and Q are the PoC branch flow measured at its from bus
+(the plant side) towards the grid: export, i.e. injection, is positive.
 
 **Thevenin source.** ``thevenin_impedances_ohm`` gives Z1 (and Z0) in ohms at
 the PoC base kV; the generator converts them to pu on the grid machine's MBASE
@@ -18,7 +26,9 @@ numbers were made on. Z2 = Z1 (test_battery module docstring).
 against its own directory; :func:`check_script` (also used by the pack) parses
 a script with ``ast`` and refuses any other file, an absolute path, an import
 outside psspy/dyntools/os/sys, ``open``/``eval``/``exec``/``__import__``, and
-any ``os`` call outside ``os.path`` (GK condition S1).
+any ``os`` call outside ``os.path`` (GK condition S1). The one ``open`` allowed
+is ``open(os.path.join(HERE, '<file>.csv'), 'w')`` on a pack file, with
+``HERE`` bound once to the script's own directory.
 
 The psspy calls were written without a PSS/E licence: :data:`PENDING` is
 repeated in every script, and :data:`EVENT_CALLS` / :data:`CHANNEL_CALLS`
@@ -77,16 +87,40 @@ EVENT_CALLS = {
     ),
 }
 
-#: channel -> (psspy call, note)
+#: recorded PSS/E channel -> (psspy call, note)
 CHANNEL_CALLS = {
-    "v_poc_pu": ("voltage_channel", "or voltage_and_angle_channel with theta"),
-    "theta_poc_deg": ("voltage_and_angle_channel", "absolute angle, not vs source"),
-    "f_hz": ("bus_frequency_channel", "PSS/E records pu deviation, not Hz"),
-    "p_poc_mw": ("branch_p_and_q_channel", "flow from plant side (from bus)"),
-    "q_poc_mvar": ("branch_p_and_q_channel", "flow from plant side (from bus)"),
-    "id_pu": ("machine_array_channel", "code 22 (active current command)"),
-    "iq_pu": ("machine_array_channel", "code 23 (reactive current command)"),
-    "i_poc_pu": ("branch_mva_channel", "MVA; read-back divides by V and rating"),
+    "raw_v_poc_pu": ("voltage_channel", "pu of bus base kV (= POC_KV)"),
+    "raw_theta_poc_deg": ("voltage_and_angle_channel", "absolute bus angle, deg"),
+    "raw_theta_src": ("machine_array_channel", "code 1 ANGLE of the grid GENCLS, deg"),
+    "raw_f_hz": ("bus_frequency_channel", "pu deviation from base frequency"),
+    "raw_p_poc_mw": ("branch_p_and_q_channel", "MW at the from (plant) bus"),
+    "raw_q_poc_mvar": ("branch_p_and_q_channel", "Mvar at the from (plant) bus"),
+    "raw_id_pu": ("machine_array_channel", "code 22, Ip command, pu on MBASE = plant rated"),
+    "raw_iq_pu": (
+        "machine_array_channel",
+        "code 23, Iq command, pu on MBASE = plant rated; positive = capacitive "
+        "injection assumed (REEC_A convention), unverified",
+    ),
+}
+
+#: contract channel -> (recorded inputs a, b, c..., per-sample expression, formula)
+CONVERSIONS = {
+    "v_poc_pu": (("raw_v_poc_pu",), "a", "v_poc_pu = V"),
+    "theta_poc_deg": (
+        ("raw_theta_poc_deg", "raw_theta_src"),
+        "a - b",
+        "theta = bus angle - source EMF angle",
+    ),
+    "f_hz": (("raw_f_hz",), "f0_hz * (1.0 + a)", "f = f0 * (1 + dev_pu)"),
+    "p_poc_mw": (("raw_p_poc_mw",), "a", "P plant -> grid, export positive"),
+    "q_poc_mvar": (("raw_q_poc_mvar",), "a", "Q plant -> grid, injection positive"),
+    "id_pu": (("raw_id_pu",), "a", "Ip command on MBASE = plant rated"),
+    "iq_pu": (("raw_iq_pu",), "a", "Iq command on MBASE = plant rated"),
+    "i_poc_pu": (
+        ("raw_p_poc_mw", "raw_q_poc_mvar", "raw_v_poc_pu"),
+        "(a * a + b * b) ** 0.5 / (c * s_rated) if c > 1e-6 else float('nan')",
+        "|I| = sqrt(P^2 + Q^2) / (V * S_rated), S_rated = plant MBASE; NaN at V = 0",
+    ),
 }
 
 ALLOWED_IMPORTS = frozenset({"psspy", "dyntools", "os", "sys"})
@@ -108,6 +142,30 @@ def _dotted(node):
     if isinstance(node, ast.Name):
         parts.append(node.id)
     return ".".join(reversed(parts))
+
+
+_HERE_EXPR = "os.path.dirname(os.path.abspath(__file__))"
+
+
+def _open_ok(node, allowed):
+    """True for exactly ``open(os.path.join(HERE, '<allowed>.csv'), 'w')``."""
+    if node.keywords or len(node.args) != 2:
+        return False
+    path, mode = node.args
+    if not (isinstance(mode, ast.Constant) and mode.value == "w"):
+        return False
+    if not (isinstance(path, ast.Call) and _dotted(path.func) == "os.path.join"):
+        return False
+    if path.keywords or len(path.args) != 2:
+        return False
+    here, name = path.args
+    return (
+        isinstance(here, ast.Name)
+        and here.id == "HERE"
+        and isinstance(name, ast.Constant)
+        and name.value in allowed
+        and str(name.value).endswith(".csv")
+    )
 
 
 def check_script(text, allowed_files, channels=()) -> set:
@@ -155,6 +213,8 @@ def check_script(text, allowed_files, channels=()) -> set:
                     problems.append(f"import of {bad} from {node.module}")
         elif isinstance(node, ast.Call):
             name = _dotted(node.func)
+            if name == "open" and _open_ok(node, allowed):
+                continue
             if name.split(".")[-1] in _FORBIDDEN_CALLS or "subprocess" in name:
                 problems.append(f"call to {name}")
         elif isinstance(node, ast.Attribute) and not isinstance(node.value, ast.Attribute):
@@ -163,6 +223,12 @@ def check_script(text, allowed_files, channels=()) -> set:
                 problems.append(f"os call outside os.path: os.{node.attr}")
             if root == "sys" and node.attr != "path":
                 problems.append(f"sys use outside sys.path: sys.{node.attr}")
+    here = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "HERE"
+            and not isinstance(n.ctx, ast.Load)]
+    binds = [n for n in tree.body if isinstance(n, ast.Assign)
+             and [ast.dump(t) for t in n.targets] == [ast.dump(here[0])]] if here else []
+    if len(here) != 1 or len(binds) != 1 or ast.unparse(binds[0].value) != _HERE_EXPR:
+        problems.append(f"HERE must be bound once, to {_HERE_EXPR}")
     for ch in channels:
         if ch not in literals:
             problems.append(f"channel {ch!r} has no ident literal")
@@ -233,35 +299,52 @@ def _event_lines(case, poc_kv):
     ]
 
 
+def _recorded(case):
+    return {r for ch in case.channels for r in CONVERSIONS[ch][0]}
+
+
 def _channel_lines(case):
-    ch, out = set(case.channels), []
-    if "theta_poc_deg" in ch:
+    raw, out = _recorded(case), []
+    if "raw_theta_poc_deg" in raw:
         out.append(
             "psspy.voltage_and_angle_channel([-1, -1, -1, POC_BUS], "
-            "['v_poc_pu', 'theta_poc_deg'])"
+            "['raw_v_poc_pu', 'raw_theta_poc_deg'])"
         )
-    elif "v_poc_pu" in ch:
-        out.append("psspy.voltage_channel([-1, -1, -1, POC_BUS], 'v_poc_pu')")
-    if "f_hz" in ch:
-        out.append("psspy.bus_frequency_channel([-1, POC_BUS], 'f_hz')")
-    if ch & {"p_poc_mw", "q_poc_mvar"}:
+    elif "raw_v_poc_pu" in raw:
+        out.append("psspy.voltage_channel([-1, -1, -1, POC_BUS], 'raw_v_poc_pu')")
+    if "raw_theta_src" in raw:
+        out.append("psspy.machine_array_channel([-1, 1, GRID_BUS], GRID_ID, 'raw_theta_src')")
+    if "raw_f_hz" in raw:
+        out.append("psspy.bus_frequency_channel([-1, POC_BUS], 'raw_f_hz')")
+    if raw & {"raw_p_poc_mw", "raw_q_poc_mvar"}:
         out.append(
             "psspy.branch_p_and_q_channel([-1, -1, -1, BR_FROM, BR_TO], BR_CKT, "
-            "['p_poc_mw', 'q_poc_mvar'])"
+            "['raw_p_poc_mw', 'raw_q_poc_mvar'])"
         )
-    for name, code in (("id_pu", 22), ("iq_pu", 23)):
-        if name in ch:
+    for name, code in (("raw_id_pu", 22), ("raw_iq_pu", 23)):
+        if name in raw:
             out.append(
                 f"psspy.machine_array_channel([-1, {code}, PLANT_BUS], PLANT_ID, {name!r})"
             )
-    if "i_poc_pu" in ch:
-        out.append(
-            "psspy.branch_mva_channel([-1, -1, -1, BR_FROM, BR_TO], BR_CKT, 'i_poc_pu')"
-        )
     return out
 
 
-def _script(case, files, poc_bus, poc_kv, grid_machine, mbase, plant_branch, plant_machine):
+def _convert_lines(case):
+    """A pure ``_convert(rec, f0_hz, s_rated)``: recorded lists -> contract units."""
+    out = ["def _convert(rec, f0_hz, s_rated):", "    out = {'t_s': list(rec['t_s'])}"]
+    for ch in case.channels:
+        inputs, expr, formula = CONVERSIONS[ch]
+        names = "abc"[: len(inputs)]
+        cols = ", ".join(f"rec[{r!r}]" for r in inputs)
+        out += [
+            f"    # {formula}",
+            f"    out[{ch!r}] = [{expr} for ({', '.join(names)},) in zip({cols})]",
+        ]
+    return out + ["    return out", ""]
+
+
+def _script(case, files, csv, poc_bus, poc_kv, grid_machine, mbase, plant_branch,
+            plant_machine, f0_hz, plant_mbase):
     g, cid = case.grid, case.case_id
     z1, z0 = thevenin_impedances_ohm(g, poc_kv)
     to_pu = mbase / poc_kv**2
@@ -292,12 +375,18 @@ def _script(case, files, poc_bus, poc_kv, grid_machine, mbase, plant_branch, pla
         f"{float(mbase)!r}",
         f"Z1_PU = ({z1p.real!r}, {z1p.imag!r})  # Thevenin Z1 on GRID_MBASE",
         f"T_EVENT, T_END = {case.t_event_s!r}, {case.t_end_s!r}",
+        f"F0_HZ, PLANT_MBASE = {float(f0_hz)!r}, "
+        f"{None if plant_mbase is None else float(plant_mbase)!r}",
+        f"HEADER = {['t_s', *case.channels]!r}",
     ]
     if plant_branch is not None:
         lines.append("BR_FROM, BR_TO, BR_CKT = {!r}, {!r}, {!r}".format(*plant_branch))
     if plant_machine is not None:
         lines.append("PLANT_BUS, PLANT_ID = {!r}, {!r}".format(*plant_machine))
     lines += [
+        "",
+        "",
+        *_convert_lines(case),
         "",
         "psspy.psseinit()",
         "psspy.read(0, RAW)",
@@ -328,7 +417,14 @@ def _script(case, files, poc_bus, poc_kv, grid_machine, mbase, plant_branch, pla
         "psspy.run(0, T_EVENT, 1000, 1, 0)",
         *_event_lines(case, poc_kv),
         "psspy.run(0, T_END, 1000, 1, 0)",
-        "dyntools.CHNF(OUT).csvout(channels='', csvfile=CSV)",
+        "_title, idents, values = dyntools.CHNF(OUT).get_data()",
+        "rec = {idents[k]: values[k] for k in idents if k != 'time'}",
+        "rec['t_s'] = values['time']",
+        "data = _convert(rec, F0_HZ, PLANT_MBASE)",
+        f"with open(os.path.join(HERE, {csv!r}), 'w') as fh:",
+        "    fh.write(','.join(HEADER) + '\\n')",
+        "    for row in zip(*[data[h] for h in HEADER]):",
+        "        fh.write(','.join(repr(float(x)) for x in row) + '\\n')",
         "",
     ]
     return "\n".join(lines)
@@ -345,8 +441,10 @@ def write_scripts(
     poc_kv,
     grid_machine,
     grid_mbase_mva,
+    f0_hz,
     plant_branch=None,
     plant_machine=None,
+    plant_mbase_mva=None,
 ) -> dict:
     """
     Write ``run_<case_id>.py`` into ``pack_dir`` for each case; return
@@ -357,7 +455,9 @@ def write_scripts(
     ``(bus, id)`` with MBASE ``grid_mbase_mva``; ``plant_branch`` the PoC branch
     ``(from_bus = plant side, to_bus, ckt)`` for P/Q/current channels;
     ``plant_machine`` the ``(bus, id)`` whose references the V/Q/P steps move
-    and whose current commands id/iq record.
+    and whose current commands id/iq record; ``f0_hz`` the base frequency that
+    turns PSS/E's pu frequency deviation into Hz; ``plant_mbase_mva`` the plant
+    machine's MBASE (= plant rated), needed when a case records ``i_poc_pu``.
     """
     cases = tuple(cases)
     if not cases:
@@ -365,7 +465,10 @@ def write_scripts(
     cases = validate_battery(cases)
     for label, name in (("raw", raw), ("seq", seq), ("dyr", dyr)):
         _pack_local(label, name)
-    for label, v in (("poc_kv", poc_kv), ("grid_mbase_mva", grid_mbase_mva)):
+    positive = [("poc_kv", poc_kv), ("grid_mbase_mva", grid_mbase_mva), ("f0_hz", f0_hz)]
+    if plant_mbase_mva is not None or any("i_poc_pu" in c.channels for c in cases):
+        positive.append(("plant_mbase_mva", plant_mbase_mva))
+    for label, v in positive:
         ok = isinstance(v, (int, float)) and not isinstance(v, bool)
         if not ok or not math.isfinite(v) or v <= 0:
             raise ContractError(f"{label}={v!r} must be a finite number > 0")
@@ -380,16 +483,11 @@ def write_scripts(
     os.makedirs(pack_dir, exist_ok=True)
     written = {}
     for c in cases:
-        files = {
-            "RAW": raw,
-            "SEQ": seq,
-            "DYR": dyr,
-            "OUT": f"{c.case_id}.out",
-            "CSV": f"{c.case_id}.csv",
-        }
-        text = _script(c, files, poc_bus, poc_kv, grid_machine, grid_mbase_mva,
-                       plant_branch, plant_machine)
-        check_script(text, set(files.values()), c.channels)
+        files = {"RAW": raw, "SEQ": seq, "DYR": dyr, "OUT": f"{c.case_id}.out"}
+        csv = f"{c.case_id}.csv"
+        text = _script(c, files, csv, poc_bus, poc_kv, grid_machine, grid_mbase_mva,
+                       plant_branch, plant_machine, f0_hz, plant_mbase_mva)
+        check_script(text, {*files.values(), csv}, c.channels)
         name = f"run_{c.case_id}.py"
         with open(os.path.join(pack_dir, name), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
