@@ -15,7 +15,7 @@
 #
 # Then: frontier.py --open-prs prs.txt --sessions sessions-issues.txt [--stages]
 # A PR whose head cannot be fetched is named on stderr and left out.
-# Env: PREMERGE_REMOTE (default origin), PREMERGE_BASE (default {{BASE_BRANCH}}).
+# Env: PREMERGE_REMOTE (default origin), PREMERGE_BASE (default master).
 
 set -euo pipefail
 
@@ -44,7 +44,8 @@ PY
 while read -r pr; do
   [[ $pr =~ ^[0-9]+$ ]] || continue
   if git fetch -q "$remote" "refs/pull/$pr/head" 2>/dev/null; then
-    git diff --name-only "$remote/$base...FETCH_HEAD" | sed "s/^/$pr /" >>"$out/prs.txt"
+    { git diff --name-only "$remote/$base...FETCH_HEAD" 2>/dev/null \
+      || echo "inputs: no merge base for #$pr, left out" >&2; } | sed "s/^/$pr /" >>"$out/prs.txt"
   else
     echo "inputs: cannot fetch refs/pull/$pr/head, left out" >&2
   fi

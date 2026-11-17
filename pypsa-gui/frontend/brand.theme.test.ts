@@ -29,33 +29,55 @@ function cssVar(source: string, name: string): string | null {
 }
 
 /**
- * Read a `--name: value;` out of the dark ramp block. The selector list also
- * carries `[data-pypsa-surface="brand-dark"]` (the always-dark projects-home
- * subtree), so match up to the opening brace rather than a fixed selector.
+ * The body of the first block whose selector list starts with
+ * `:root[data-theme="dark"]`. The list also carries
+ * `[data-pypsa-surface="brand-dark"]`, so match up to the opening brace rather
+ * than a fixed selector.
  */
-function darkThemeVar(source: string, name: string): string | null {
+function darkBlock(source: string): string {
   const block = source.match(/:root\[data-theme="dark"\][^{]*\{([\s\S]*?)\n\}/)
-  return block ? cssVar(block[1], name) : null
+  if (!block) throw new Error('no :root[data-theme="dark"] block')
+  return block[1]
 }
 
+/** Everything before the dark block: the light (default) declarations. */
+const lightPart = (source: string) => source.slice(0, source.indexOf(':root[data-theme="dark"]'))
+
 describe('brand palette', () => {
-  // The workbench's dark theme IS the brand surface — a mismatch here is what
-  // makes the handoff from sign-in to the app flash a different colour.
+  // The sign-in page and the workbench must agree in BOTH themes — a mismatch
+  // is what makes the handoff from sign-in to the app flash a different colour.
   const shared: ReadonlyArray<readonly [string, string]> = [
-    ['brand-black', 'color-bg'],
-    ['brand-red', 'color-accent'],
-    ['brand-red-deep', 'color-accent-700'],
-    ['brand-on-red', 'color-on-accent'],
+    ['brand-bg', 'color-bg'],
+    ['brand-accent', 'color-accent'],
+    ['brand-accent-deep', 'color-accent-700'],
+    ['brand-on-accent', 'color-on-accent'],
     ['brand-ink', 'color-text'],
     ['brand-ink-dim', 'color-muted'],
+    ['brand-band', 'color-band'],
   ]
+  const themes = [
+    ['light', lightPart],
+    ['dark', darkBlock],
+  ] as const
 
-  it.each(shared)('--%s matches the dark theme\'s --%s', (brandName, themeName) => {
-    const brandValue = cssVar(brandCss, brandName)
-    const themeValue = darkThemeVar(indexCss, themeName)
-    expect(brandValue, `--${brandName} missing from public/brand.css`).not.toBeNull()
-    expect(themeValue, `--${themeName} missing from index.css dark block`).not.toBeNull()
-    expect(brandValue?.toLowerCase()).toBe(themeValue?.toLowerCase())
+  for (const [theme, part] of themes) {
+    it.each(shared)(`${theme}: --%s matches index.css --%s`, (brandName, themeName) => {
+      const brandValue = cssVar(part(brandCss), brandName)
+      const themeValue = cssVar(part(indexCss), themeName)
+      expect(brandValue, `--${brandName} missing from public/brand.css (${theme})`).not.toBeNull()
+      expect(themeValue, `--${themeName} missing from index.css (${theme})`).not.toBeNull()
+      expect(brandValue?.toLowerCase()).toBe(themeValue?.toLowerCase())
+    })
+  }
+
+  it('declares every light brand token in the dark block too', () => {
+    const names = (src: string) => new Set([...src.matchAll(/(--brand-[a-z0-9-]+)\s*:/g)].map(m => m[1]))
+    const light = names(lightPart(brandCss))
+    const dark = names(darkBlock(brandCss))
+    for (const n of light) {
+      if (/^--brand-(black|red|on-red)/.test(n)) continue // legacy aliases, declared once for both
+      expect(dark, `${n} has no dark value`).toContain(n)
+    }
   })
 
   it('keeps the mint palette out of both files', () => {

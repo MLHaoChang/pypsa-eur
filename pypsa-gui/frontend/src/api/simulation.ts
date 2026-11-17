@@ -1339,11 +1339,21 @@ export interface HeadlineKpis {
   comparison: HeadlineComparison | null
 }
 
+export interface OperatingReserveResult {
+  shares: { load: number; pv: number; wind: number } | null
+  not_counted: string[]
+  per_snapshot: { snapshot: string; required_mw: number; held_mw: number; binding: boolean }[]
+  binding: string[]
+  reason: string | null
+}
+
 export const resultsApi = {
   // The strip says so itself when this fails (one message, not a toast as well).
   getHeadlineKpis: () => client.get<HeadlineKpis>('/results/headline_kpis', { skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
   // The same cards with the base case read as well; slower, so the strip asks after it has painted.
   getHeadlineComparison: () => client.get<HeadlineKpis>('/results/headline_kpis', { params: { compare: 1 }, skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
+  // Operating reserve of the last solve (homer-parity 01b/01c): shares are fractions of load / PV / wind; null when off.
+  getOperatingReserve: () => client.get<OperatingReserveResult>('/results/operating_reserve', { skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
   getGeneratorResults: (source?: ResultSource, range?: TSRange) => client.get('/results/generators', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),

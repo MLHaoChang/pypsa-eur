@@ -1,37 +1,47 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-store" />
-    <meta name="theme-color" content="#151112" />
+    <meta name="theme-color" content="#ffffff" />
     <title>PyPSA Studio</title>
     <!-- Identity palette, shared with the static sign-in page. -->
     <link rel="stylesheet" href="/brand.css" />
     <style>
       /* Paint the themed surface before the bundle's CSS arrives, so the
          handoff from the sign-in page never flashes white. */
-      html { background: #151112; color-scheme: dark; }
-      html[data-theme="light"] { background: #fdfdfe; color-scheme: light; }
+      html { background: #ffffff; color-scheme: light; }
+      html[data-theme="dark"] { background: #151112; color-scheme: dark; }
     </style>
     <script>
-      // Mirror uiStore's persisted theme onto <html> before first paint —
-      // React only writes data-theme once it mounts, which is several hundred
-      // ms of wrong-coloured screen. Kept in sync with storedTheme() in
-      // src/store/uiStore.ts; both migrations are idempotent, so whichever
-      // runs first wins.
+      // Mirror uiStore's opening theme onto <html> before first paint:
+      // the stored explicit choice, else the OS preference, else light
+      // (THEME-LIGHT-1). Kept in sync with storedTheme() in
+      // src/store/uiStore.ts by uiStore.theme.test.ts; both migrations are
+      // idempotent, so whichever runs first wins.
       ;(function pypsaBootTheme() {
+        var theme = null
         try {
           if (localStorage.getItem('network-diagram:theme-schema') !== '2') {
             localStorage.removeItem('network-diagram:theme')
             localStorage.setItem('network-diagram:theme-schema', '2')
           }
-          if (localStorage.getItem('network-diagram:theme') === 'light') {
-            document.documentElement.dataset.theme = 'light'
-          }
+          var stored = localStorage.getItem('network-diagram:theme')
+          if (stored === 'light' || stored === 'dark') theme = stored
         } catch (err) {
-          /* keep the dark default already on the markup */
+          /* storage blocked: no stored choice */
         }
+        if (theme === null) {
+          try {
+            theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          } catch (err) {
+            theme = 'light'
+          }
+        }
+        document.documentElement.dataset.theme = theme
+        var meta = document.querySelector('meta[name="theme-color"]')
+        if (meta) meta.setAttribute('content', theme === 'dark' ? '#151112' : '#ffffff')
       })()
     </script>
     <script>

@@ -11,6 +11,7 @@ import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import FuelRunHours from './FuelRunHours'
+import OperatingReserve from './OperatingReserve'
 import type { Generator, Line as LineT, Link as LinkT, StorageUnit, Store, Transformer } from '../../api/types'
 import { fmtCurrency, fmtPower, fmtEnergy, downloadCSV, KPI, isRenewableCarrier, ChartActions,
   Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
@@ -1053,6 +1054,8 @@ export default function CapacityExpansion() {
       </section>
 
       <FuelRunHours cost={cost} />
+
+      <OperatingReserve />
 
       {/* ── System-cost waterfall ──────────────────────────────── */}
       {costWaterfall.length > 1 && (

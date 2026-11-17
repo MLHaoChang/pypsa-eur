@@ -163,6 +163,15 @@ export interface BusinessCasePnl {
   stream_source?: Record<string, string>
   rows: Record<string, YearSeries | boolean>
   not_finite?: string[]
+  /** Display key (BC 17): every input each row that reads None lacks, in the engine's
+   *  reason codes; absent on a report stored before it. */
+  row_reason?: Record<string, BusinessCaseRowReasonItem[]>
+}
+
+export interface BusinessCaseRowReasonItem {
+  /** The section that needs the input; null for a figure out of range or no cause. */
+  section: string | null
+  code: string
 }
 
 export interface BusinessCaseKpi {

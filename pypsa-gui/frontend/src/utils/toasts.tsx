@@ -49,7 +49,7 @@ export function confirmToast(
           className={
             'px-2 py-1 rounded text-[11px] font-semibold transition-colors ' +
             (danger
-              ? 'bg-danger text-white hover:bg-danger/80'
+              ? 'bg-danger text-on-status hover:bg-danger/90'
               : 'bg-accent text-white hover:bg-accent/80')
           }
         >

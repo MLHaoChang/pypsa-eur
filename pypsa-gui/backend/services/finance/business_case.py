@@ -828,6 +828,148 @@ def pnl(result, *, receivable_days: float | None = None) -> PnL:
     )
 
 
+#: What each P&L row is built from (BC 17): (the rows it reads, its own section). A row
+#: that is None reads the reason of its first missing input row, else its own section's.
+#: Mirrors `pnl` and `cash_bridge`; a test pins the keys to the rows `pnl` serves.
+_ROW_INPUTS: dict[str, tuple[tuple[str, ...], str | None]] = {
+    "revenue": ((), "operating"),
+    "opex": ((), "operating"),
+    "ebitda": ((), "operating"),
+    "pass_through": ((), "operating"),
+    "revenue_net_of_pass_through": (("revenue",), None),
+    "ebitda_net_of_pass_through": (("ebitda",), None),
+    "ebitda_margin": (("ebitda",), None),
+    "terminal": ((), "terminal"),
+    "depreciation": ((), "tax"),
+    "ebit": (("ebitda", "terminal", "depreciation"), None),
+    "tax": ((), "tax"),
+    "tax_equity": ((), "tax"),
+    "net_income": (("ebit", "tax"), None),
+    "capex": ((), "capex"),
+    "stage_capex": ((), "capex"),
+    "replacement": ((), "capex"),
+    "grant": ((), "incentives"),
+    # The engine's credits need its operating cash, terminal and capex (`run_case`).
+    "credits": (("ebitda", "terminal", "capex"), "incentives"),
+    "fees": ((), "debt"),
+    "debt_service": ((), "debt"),
+    "draws": ((), "debt"),
+    "reserve_interest": ((), "debt"),
+    "dsra_funding": ((), "debt"),
+    "debt_established": ((), "debt"),
+    "project_pre_tax": (
+        ("ebitda", "terminal", "capex", "stage_capex", "replacement", "grant"),
+        None,
+    ),
+    "project_post_tax": (("project_pre_tax", "tax", "credits"), None),
+    "equity_pre_tax": (("project_pre_tax",), "debt"),
+    "equity_post_tax": (("equity_pre_tax", "tax_equity", "credits"), None),
+    "working_capital_change": (("revenue",), "receivable_days"),
+    "project_after_working_capital": (
+        ("working_capital_change", "project_post_tax"),
+        None,
+    ),
+    "equity_after_working_capital": (
+        ("working_capital_change", "equity_post_tax"),
+        None,
+    ),
+}
+
+#: The sections the operating build states (`Operating.reasons`); the rest are the
+#: engine's (`FinanceResult.reasons`, `sections`).
+_OP_SECTIONS = ("operating", "capex", "terminal")
+
+
+def _codes(result, section: str) -> list[str]:
+    src = result.op.reasons if section in _OP_SECTIONS else result.reasons
+    return list(src.get(section) or [])
+
+
+def _established(result, section: str) -> bool:
+    if section in _OP_SECTIONS:
+        return result.op.established(section)
+    return result.sections.get(section) == "ok"
+
+
+def _leaf_codes(result, section: str, seen: frozenset = frozenset()):
+    """(section, code) for each input `section` lacks, in the engine's order. A code
+    that is another section's `<s>_not_established` (the tax waits on the debt, the
+    debt on the capex) is replaced by that section's own codes, recursively, or kept
+    when it has none. The engine's operating section also fails on the terminal."""
+    seen = seen | {section}
+    codes = _codes(result, section)
+    if "book_value_needs_tax_basis" in codes:
+        codes.append("tax_not_established")
+    out: list[tuple[str, str]] = []
+    for c in codes:
+        inner = c.removesuffix("_not_established")
+        deeper: list[tuple[str, str]] = []
+        if inner != c and inner not in seen:
+            for sec in (inner, "terminal") if inner == "operating" else (inner,):
+                deeper += _leaf_codes(result, sec, seen)
+        out += deeper or [(section, c)]
+    return out
+
+
+def _section_items(result, section: str, outputs: dict) -> list[tuple[str, str]]:
+    """The inputs `section` lacks (`_leaf_codes`); none when it is established. A line
+    not established is followed by the linked output it waits on."""
+    if section == "inputs":
+        return [("inputs", "input_missing:receivable_days")]
+    if _established(result, section):
+        return []
+    items = _leaf_codes(result, section) or [(section, f"{section}_not_established")]
+    out: list[tuple[str, str]] = []
+    for sec, c in items:
+        out.append((sec, c))
+        line = c.removeprefix("line_not_established:")
+        got = outputs.get(line) if line != c else None
+        if isinstance(got, NotEvaluated):
+            out.append(
+                (sec, f"linked_output_not_evaluated:{got.output_id}:{got.reason}")
+            )
+    return out
+
+
+def row_reasons(
+    result, p: PnL, outputs: dict | None = None, *, receivable_days=None
+) -> dict[str, list[dict]]:
+    """Why each P&L row that reads None is not established (BC 17): every input the
+    row lacks for this case, as `{"section", "code"}` items in the engine's own reason
+    codes, never a recomputation. The items are the union over the row's missing input
+    rows (`_ROW_INPUTS`, depth first in table order) and its own section when that is
+    not established, deduplicated in first-seen order. An input row that overflowed
+    reads `{"section": None, "code": "not_finite:<row>"}`; a row that overflowed itself
+    is in `p.not_finite` and gets no entry. Rows are all-or-nothing (an array or None);
+    a ratio's None year is not a row reason. A display key: it moves no digest.
+    `outputs` maps a linked line to its output, so a line names its linked output."""
+    outputs = outputs or {}
+    nf = set(p.not_finite)
+
+    def items(row: str) -> list[tuple[str | None, str]]:
+        if row in nf:
+            return [(None, f"not_finite:{row}")]
+        deps, own = _ROW_INPUTS.get(row, ((), None))
+        got: list[tuple[str | None, str]] = []
+        for d in deps:
+            if p.rows.get(d) is None:
+                got += items(d)
+        if own == "receivable_days":
+            if receivable_days is None:
+                got += _section_items(result, "inputs", outputs)
+        elif own is not None:
+            got += _section_items(result, own, outputs)
+        return got
+
+    out: dict[str, list[dict]] = {}
+    for k, v in p.rows.items():
+        if v is not None or k in nf:
+            continue
+        seen = list(dict.fromkeys(items(k))) or [(None, "not_established")]
+        out[k] = [{"section": sec, "code": c} for sec, c in seen]
+    return out
+
+
 # ── KPIs (BC2, BC8, C5) ──────────────────────────────────────────────────────
 
 

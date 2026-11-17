@@ -1816,3 +1816,22 @@ def test_the_emission_reports_of_a_plain_emitter_are_bit_identical_to_master():
     assert cmp.total_kt.total == float(p.sum()) * (INEXACT_CO2 / INEXACT_EFF) / 1000.0
     ctx = build_ctx(n, "Generator", "plain", source="lopf", sns=n.snapshots)
     assert gen_co2_rate(ctx).equals(p / INEXACT_EFF * INEXACT_CO2)
+
+
+def test_the_logged_cost_decomposition_co2_matches_compute_emissions():
+    """homer-parity 02j: the log reads the same slope and no-load terms as the Results emissions."""
+    import re
+
+    from services.results.emissions import compute_emissions
+    from routers.results import _result_df as result_df
+
+    n = _network(curve=True, committable=True)
+    # Scaled up so the log's 0.1 kt rounding cannot hide the no-load term (about 1.2 kt here).
+    n.add("Carrier", "diesel", co2_emissions=1000.0)
+    n.generators.at["genset", "efficiency"] = EFF
+    status, cond, log = _run_sim(n, SolverConfig())
+    assert status in ("ok", "optimal"), (cond, log[-800:])
+    em = compute_emissions(n, "lopf", result_df=result_df)
+    assert em["by_generator"][0]["no_load_tCO2"] > 0
+    (kt,) = re.findall(r"\[COST-DECOMP\] ALL:.*?\(([\d.]+) kt\)", log)
+    assert float(kt) * 1e3 == pytest.approx(em["total_tCO2"], abs=60.0)
