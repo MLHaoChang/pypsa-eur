@@ -1269,7 +1269,9 @@ def _time_axis_preview(tool: str) -> Callable[[dict], list[dict]]:
         try:
             grown = LG.refreshed_config(current, periods)
         except LG.LoadGrowthError as exc:
-            _refuse(exc.kind, f"{exc.detail['message']}; change it first")
+            # The route's own refusal (`_check_load_growth`), its kind kept.
+            raise HTTPException(422, {**exc.detail, "message": f"{exc.detail['message']}; change it first"}) \
+                from None
         if grown is current:
             return rows
         old = getattr(current, "load_scalers_by_carrier", None) or {}
