@@ -1455,7 +1455,17 @@ async def import_bundle(
     # route has already committed the project row and written its files. Worse, the retry the
     # refusal advises then fails FOREVER, because the committed row makes
     # every attempt 409 with "already exists" instead.
-    PyPSAService.refuse_if_study_running("import a project bundle")
+    from services import project_registry
+
+    project_registry.require_user(user)
+    # A dry run reports a running study as a warning: it swaps nothing.
+    study_warnings: list[str] = []
+    try:
+        PyPSAService.refuse_if_study_running("import a project bundle")
+    except HTTPException as exc:
+        if not dry_run:
+            raise
+        study_warnings.append(str(exc.detail))
     from services.upload_guard import read_capped
     data = await read_capped(file)
 
@@ -1485,7 +1495,7 @@ async def import_bundle(
         allowed, ignored = PC.screen_members(zf)
         # The manifest (project-io 02, GK B I7): a damaged or newer bundle is
         # refused here, before anything is unpacked; no manifest is a warning.
-        warnings = bundle_manifest.check(zf)
+        warnings = bundle_manifest.check(zf) + study_warnings
     except PC.BundleRefused as exc:
         raise HTTPException(400, exc.detail) from exc
     members = set(allowed)
@@ -1522,9 +1532,6 @@ async def import_bundle(
 
     # `target_name` may come from a zip's metadata.json — never trust it.
     # `_safe_project_dir` rejects path traversal and shell-metachar names.
-    from services import project_registry
-
-    project_registry.require_user(user)
     # Every refusal comes BEFORE the project row exists (project-io 01, GK B
     # I3): the bundle is unpacked into a private staging folder and checked
     # there, so a refused import leaves no row and no folder behind.

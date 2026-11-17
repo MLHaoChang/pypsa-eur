@@ -34,6 +34,8 @@ NO_MANIFEST_WARNING = (
     "damage. It was made by an older version of the app."
 )
 
+#: The most a manifest may be: a list of names and hashes, never large.
+MAX_MANIFEST_BYTES = 1024 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _CHUNK = 1024 * 1024
 
@@ -84,9 +86,13 @@ def _corrupt(message: str) -> BundleRefused:
 
 
 def _read(zf: zipfile.ZipFile) -> dict:
+    if zf.getinfo(MANIFEST).file_size > MAX_MANIFEST_BYTES:
+        raise _corrupt("Its manifest is too large to be one.")
     try:
-        manifest = json.loads(zf.read(MANIFEST).decode("utf-8"))
-    except (UnicodeDecodeError, ValueError, zipfile.BadZipFile) as exc:
+        with zf.open(MANIFEST) as fh:
+            raw = fh.read(MAX_MANIFEST_BYTES + 1)
+        manifest = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, zipfile.BadZipFile, zlib.error, EOFError) as exc:
         raise _corrupt("Its manifest cannot be read.") from exc
     if not isinstance(manifest, dict):
         raise _corrupt("Its manifest cannot be read.")
@@ -109,6 +115,7 @@ def _read(zf: zipfile.ZipFile) -> dict:
         if not (
             isinstance(rec, dict)
             and type(rec.get("size")) is int
+            and rec["size"] >= 0
             and isinstance(rec.get("sha256"), str)
             and _SHA256.fullmatch(rec["sha256"])
         ):

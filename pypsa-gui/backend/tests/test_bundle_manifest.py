@@ -304,3 +304,127 @@ def test_a_dry_run_needs_a_signed_in_user(anon_client, client, api_project, proj
     real = _post(anon_client, data, "bm_dry_anon_dst")
     assert anon.status_code == real.status_code
     assert anon.status_code in (401, 403)
+
+
+# ── GK B3 M1–M5 ─────────────────────────────────────────────────────────────
+
+
+def test_an_oversized_manifest_is_refused_before_it_is_parsed():
+    big = json.dumps(_manifest(pad="x" * BM.MAX_MANIFEST_BYTES)).encode()
+    exc = _refusal(_zip(_GOOD, big))
+    assert exc.kind == "bundle_corrupt"
+    assert "too large" in exc.message
+
+
+def test_a_manifest_at_the_cap_is_read():
+    base = json.dumps(_manifest(pad="")).encode()
+    exact = json.dumps(_manifest(pad="x" * (BM.MAX_MANIFEST_BYTES - len(base)))).encode()
+    assert len(exact) == BM.MAX_MANIFEST_BYTES
+    assert BM.check(_zip(_GOOD, exact)) == []
+
+
+def test_a_negative_size_is_refused():
+    m = _manifest()
+    m["members"]["network.nc"]["size"] = -1
+    assert "entry for 'network.nc'" in _refusal(_zip(_GOOD, m)).message
+
+
+def test_a_zero_size_member_is_fine():
+    members = {**_GOOD, "layout.json": b""}
+    assert BM.check(_zip(members, _manifest(members))) == []
+
+
+def test_a_member_the_screen_would_ignore_still_counts_as_extra():
+    exc = _refusal(_zip({**_GOOD, "stray.txt": b"x"}, _manifest()))
+    assert "'stray.txt' is in the bundle but not in its manifest" in exc.message
+
+
+def test_export_builds_a_fresh_manifest_and_never_copies_one_from_disk(
+    client, api_project, project_storage_dir
+):
+    name = api_project("bm-stray")
+    (project_storage_dir(name) / PC.MANIFEST).write_text('{"stale": true}')
+    zf = zipfile.ZipFile(io.BytesIO(client.get(f"/api/projects/{name}/bundle").content))
+    assert zf.namelist().count(PC.MANIFEST) == 1
+    assert json.loads(zf.read(PC.MANIFEST))["schema_version"] == BM.SCHEMA_VERSION
+    assert BM.check(zf) == []
+
+
+def test_a_snapshot_and_its_restore_never_carry_a_manifest(
+    client, api_project, project_storage_dir
+):
+    name = api_project("bm-snap")
+    d = project_storage_dir(name)
+    (d / PC.MANIFEST).write_text('{"stale": true}')
+    r = client.post(f"/api/projects/{name}/snapshots", json={"label": "v1"})
+    assert r.status_code == 200, r.text
+    snap = d / "snapshots" / r.json()["id"]
+    assert not any(p.name == PC.MANIFEST for p in snap.rglob("*"))
+    (d / PC.MANIFEST).unlink()
+    r = client.post(f"/api/projects/{name}/snapshots/{snap.name}/restore")
+    assert r.status_code == 200, r.text
+    assert not (d / PC.MANIFEST).exists()
+    assert all(PC.MANIFEST not in PC.names(op) for op in PC.OPS)
+
+
+def _active_state(_auth_db):
+    from db.models import Session as SessionRow
+    from sqlalchemy import select
+    from services.pypsa_service import PyPSAService
+
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        pointers = sorted(str(x) for x in db.scalars(select(SessionRow.active_project_id)))
+    ctx = PyPSAService._active
+    return pointers, id(ctx), id(ctx.network) if ctx is not None else None
+
+
+def test_a_dry_run_swaps_nothing_and_never_reaches_the_commit_path(
+    client, api_project, project_storage_dir, _auth_db, monkeypatch
+):
+    from routers import projects
+    from services import active_project
+
+    d = project_storage_dir(api_project("bm-dry-swap"))
+    data = _bundle_from(d)
+    before = _active_state(_auth_db)
+
+    def never(*a, **k):
+        raise AssertionError("the dry run reached the commit path")
+
+    monkeypatch.setattr(projects, "_open_imported_bundle", never)
+    monkeypatch.setattr(projects, "_move_staged", never)
+    monkeypatch.setattr(active_project, "set_active_project", never)
+    r = _dry(client, data, "bm_dry_swap_dst")
+    assert r.status_code == 200, r.text
+    assert _active_state(_auth_db) == before
+
+
+def test_would_conflict_matches_the_real_409_both_ways(client, api_project, project_storage_dir):
+    d = project_storage_dir(api_project("bm-clash"))
+    data = _bundle_from(d)
+    # Taken: the dry run says so and the real import answers 409.
+    assert _dry(client, data, "bm-clash").json()["would_conflict"] is True
+    assert _post(client, data, "bm-clash").status_code == 409
+    # Free, though a near-miss in case: the dry run says free and the import succeeds.
+    assert _dry(client, data, "BM-CLASH-2").json()["would_conflict"] is False
+    assert _post(client, data, "BM-CLASH-2").status_code in (200, 201)
+
+
+def test_a_running_study_is_a_dry_run_warning_but_refuses_the_import(
+    client, api_project, project_storage_dir, monkeypatch
+):
+    from fastapi import HTTPException
+    from services.pypsa_service import PyPSAService
+
+    d = project_storage_dir(api_project("bm-study"))
+    data = _bundle_from(d)
+
+    def running(cls, action="", *, ctx=None):
+        raise HTTPException(409, f"Cannot {action} while a study is running.")
+
+    monkeypatch.setattr(PyPSAService, "refuse_if_study_running", classmethod(running))
+    r = _dry(client, data, "bm_study_dst")
+    assert r.status_code == 200, r.text
+    assert "Cannot import a project bundle while a study is running." in r.json()["warnings"]
+    assert _post(client, data, "bm_study_dst").status_code == 409
