@@ -60,6 +60,7 @@ def _record(ctx, **payload_over):
         "mc_lole_h": 0.05,
         "draws": 500,
         "seed": 0,
+        "cov_target": 0.05,
         "verdict": "pass",
     }
     payload.update(payload_over)
@@ -68,6 +69,13 @@ def _record(ctx, **payload_over):
         "study": "eh_study",
         "archetype": "strong_grid",
         "network_revision": int(ctx.network_revision or 0),
+        # The run choices, as the runner records them for the request Guided sends now.
+        "pack_overrides": {"target_lole_h": 1.0, "certification_metric": "mc_lole"},
+        "stages": None,
+        "budget_solves": 30,
+        "dsr_buses": None,
+        "dtc_config": None,
+        "dtc_attribution": None,
         "report": {
             "mc_lole_h": 0.05,
             "cost_at_target_eur": 1234.5,
@@ -299,6 +307,65 @@ def test_an_mc_setting_the_study_did_not_record_reads_uncompared(study, key):
     out = explain_study_figure("expected_shortfall")
     assert out["outcome"]["state"] == "uncompared"
     assert out["outcome"]["uncompared"] == [S.input_id(f"mc/{key}")]
+
+
+# ── the run choices: none moves the revision, so each is pinned ─────────────
+
+_CHOICES = {
+    "pack_overrides": ("record", {"target_lole_h": 1.0, "certification_metric": "mc_lole", "levers": {"sizing": False}},
+                       "pack overrides beyond the goal"),
+    "stages": ("record", ["apply_pack", "ens_solve", "assemble"], "stages"),
+    "budget_solves": ("record", 12, "solve budget"),
+    "dsr_buses": ("record", ["b"], "demand-response buses"),
+    "dtc_config": ("record", {"attribution": "aggregate"}, "DtC config"),
+    "dtc_attribution": ("record", "aggregate", "DtC attribution"),
+    "cov_target": ("payload", 0.02, "MC convergence target"),
+}
+
+
+@pytest.mark.parametrize("key", list(_CHOICES))
+def test_a_run_choice_other_than_today_s_request_reads_stale_without_a_revision_bump(study, key):
+    where, value, label = _CHOICES[key]
+    target = _payload(study) if where == "payload" else study.solver_state["eh_study"]
+    revision = study.network_revision
+    target[key] = value
+    out = explain_study_figure("expected_shortfall")
+    assert study.network_revision == revision  # a run choice is no edit: the revision cannot catch it
+    assert out["outcome"]["state"] == "stale"
+    assert _broken_labels(out) == {label}
+
+
+@pytest.mark.parametrize(
+    "request_now, label",
+    [({"pack_overrides": {"levers": {"sizing": False}}}, "pack overrides beyond the goal"),
+     ({"stages": ["apply_pack", "ens_solve", "assemble"]}, "stages"),
+     ({"dtc_attribution": "aggregate"}, "DtC attribution")],
+)
+def test_a_changed_request_guided_would_send_now_reads_stale(study, monkeypatch, request_now, label):
+    from services import flow_service
+
+    monkeypatch.setattr(flow_service, "_request_for", lambda t, c=None: {"archetype": "strong_grid", **request_now})
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "stale"
+    assert label in _broken_labels(out)
+
+
+@pytest.mark.parametrize("key", list(_CHOICES))
+def test_a_run_choice_the_study_did_not_record_reads_uncompared(study, key):
+    where, _value, _label = _CHOICES[key]
+    (_payload(study) if where == "payload" else study.solver_state["eh_study"]).pop(key)
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "uncompared"
+    assert len(out["outcome"]["uncompared"]) == 1
+    step = next(s for s in out["steps"] if s["node"] == out["outcome"]["uncompared"][0])
+    assert step["via"]["recorded"]["unrecorded"].startswith("the study did not record")
+
+
+@pytest.mark.parametrize("key, value", [("stages", "all"), ("budget_solves", 30.0), ("dsr_buses", "b"),
+                                        ("dtc_config", ["x"]), ("pack_overrides", "x"), ("dtc_attribution", 1)])
+def test_a_run_choice_of_the_wrong_type_reads_uncompared(study, key, value):
+    study.solver_state["eh_study"][key] = value
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "uncompared"
 
 
 # ── W2: one bounded locked read ─────────────────────────────────────────────

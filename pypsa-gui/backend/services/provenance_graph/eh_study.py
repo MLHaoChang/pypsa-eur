@@ -16,7 +16,9 @@ waits for that lock: a held lock reads every comparison as `BUSY`, uncompared, n
 
 `run:study` -derived_from-> its inputs, each a `pins.Pin` of what the record holds against what a study started now
 would read, compared exactly by `pins.compare_pin` (W3): the goal's value, basis and unit; the site type; the Monte
-Carlo draws, horizon years and seed (only when recorded); the network revision; and each row of the record's
+Carlo draws, horizon years, seed (only when recorded) and convergence target; the network revision; the run
+choices no edit seam moves the revision for (pack overrides beyond the goal, stages, solve budget, demand-response
+buses, DtC config and attribution), against the request Guided would send now; and each row of the record's
 `assumptions` list, when it has one, against the network field the row names. A field the record did not capture,
 or holds with the wrong type, records `Unrecorded` and reads uncompared, never fresh and never a default (W4).
 
@@ -45,6 +47,19 @@ GOAL_BASIS = "h_per_year"
 GOAL_UNIT = "h"
 #: How "no LOLE goal" is pinned, on both sides: None is "not recorded" to `compare_pin`.
 NO_GOAL = "no goal set"
+#: How a run choice left at the study's default (recorded null) is pinned, on both sides.
+DEFAULT_CHOICE = "none (the study's default)"
+#: The run choices: none crosses an edit seam, so the revision never catches one; each is pinned against the
+#: request Guided would send now (`flow_service._request_for` through `eh_request_with_goal`). Key → (record key,
+#: plain words, accepted types).
+CHOICES = {
+    "run/pack_overrides": ("pack_overrides", "pack overrides beyond the goal", (dict,)),
+    "run/stages": ("stages", "stages", (list,)),
+    "run/budget_solves": ("budget_solves", "solve budget", (int,)),
+    "run/dsr_buses": ("dsr_buses", "demand-response buses", (list,)),
+    "run/dtc_config": ("dtc_config", "DtC config", (dict,)),
+    "run/dtc_attribution": ("dtc_attribution", "DtC attribution", (str,)),
+}
 FINANCE_UNCOMPARED = (
     "the study did not record the finance and currency settings, and PUT /finance does not move the revision"
 )
@@ -102,6 +117,30 @@ def _text(d: dict, key: str) -> Any:
     return v if isinstance(v, str) else Unrecorded(f"{key}: not text")
 
 
+def _choice(d: dict, key: str, words: str, types: tuple, *, nullable: bool = True) -> Any:
+    """A run choice as recorded: the value, `DEFAULT_CHOICE` for a recorded null, or `Unrecorded`."""
+    if key not in d:
+        return Unrecorded(f"the study did not record its {words}")
+    v = d[key]
+    if v is None and nullable:
+        return DEFAULT_CHOICE
+    if isinstance(v, bool) or not isinstance(v, types):
+        return Unrecorded(f"{key}: not {' or '.join(t.__name__ for t in types)}")
+    return v
+
+
+#: Pack overrides the goal pins already compare (`goal/value`; a target sets the certification metric).
+_GOAL_OVERRIDES = ("target_lole_h", "certification_metric")
+
+
+def beyond_goal(overrides: Any) -> Any:
+    """Pack overrides without the goal's own keys; none left is the study's default."""
+    if not isinstance(overrides, dict):
+        return overrides
+    rest = {k: v for k, v in overrides.items() if k not in _GOAL_OVERRIDES}
+    return rest or DEFAULT_CHOICE
+
+
 def _scalar(v: Any) -> bool:
     return isinstance(v, (str, bool)) or (isinstance(v, (int, float)) and math.isfinite(v))
 
@@ -151,6 +190,10 @@ def normalise(raw: Any) -> Record:
         "mc/horizon_years": _number(payload, "horizon_years"),
         "network_revision": _int(raw, "network_revision"),
     }
+    for node, (key, words, types) in CHOICES.items():
+        fields[node] = _choice(raw, key, words, types, nullable=key != "budget_solves")
+    fields["run/pack_overrides"] = beyond_goal(fields["run/pack_overrides"])
+    fields["mc/cov_target"] = _choice(payload, "cov_target", "MC convergence target", (int, float), nullable=False)
     has_seed = payload.get("seed") is not None
     if has_seed:
         fields["mc/seed"] = _int(payload, "seed")
@@ -231,7 +274,42 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
         value = goal_or_pack("target_lole_h", lambda p: p.availability.target_lole_h)
         return NO_GOAL if value is None else value
 
+    def request():
+        from services import network_lengths
+        from services.adequacy.eh_study_runner import EhStudyRequest
+        from services.flow_service import _request_for, read_template
+
+        d = network_lengths.active_project_dir()
+        template = read_template(d) if d is not None else None
+        body = EhStudyRequest(**_request_for(template, state.get("solver_config")))
+        return rg.eh_request_with_goal(body, goal)[0]
+
+    req = _try(request)
+
+    def choices() -> dict[str, Any]:
+        from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES
+        from services.adequacy.eh_study import DEFAULT_MC_COV_TARGET, validate_stages
+        from services.adequacy.eh_study_runner import normalised_overrides, resolve_dtc_attribution
+
+        def tok(v):
+            return DEFAULT_CHOICE if v is None else v
+
+        raw_dtc, attribution = resolve_dtc_attribution(req.dtc_config, req.dtc_attribution)
+        stages = validate_stages(req.stages)
+        cov = (req.mc or {}).get("cov_target")
+        return {
+            "run/pack_overrides": beyond_goal(tok(normalised_overrides(req.pack_overrides))),
+            "run/stages": tok(list(stages) if stages is not None else None),
+            "run/budget_solves": int(req.budget_solves if req.budget_solves is not None else DEFAULT_EH_BUDGET_SOLVES),
+            "run/dsr_buses": tok(list(dict.fromkeys(str(b) for b in req.dsr_buses)) if req.dsr_buses else None),
+            "run/dtc_config": tok(dict(raw_dtc) if raw_dtc else None),
+            "run/dtc_attribution": tok(attribution),
+            "mc/cov_target": cov if cov is not None else getattr(pack, "mc_cov_target", DEFAULT_MC_COV_TARGET),
+        }
+
+    chosen = _try(choices)
     current = {
+        **{k: (chosen if isinstance(chosen, Exception) else chosen[k]) for k in (*CHOICES, "mc/cov_target")},
         "goal/value": _try(target),
         "goal/basis": GOAL_BASIS,
         "goal/unit": GOAL_UNIT,
@@ -287,7 +365,9 @@ _LABELS = {
     "mc/draws": "MC draws",
     "mc/horizon_years": "horizon years",
     "mc/seed": "MC seed",
+    "mc/cov_target": "MC convergence target",
     "network_revision": "network revision",
+    **{k: words for k, (_key, words, _types) in CHOICES.items()},
 }
 
 
