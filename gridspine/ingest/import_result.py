@@ -1,4 +1,5 @@
-"""The shared import contract: what every model importer returns, and the registry.
+"""
+The shared import contract: what every model importer returns, and the registry.
 
 Every importer (Excel input workbook, PSS/E, PowerFactory, PLEXOS, ...) lives
 in ``gridspine/ingest/<format>_import.py`` and provides::
@@ -24,14 +25,16 @@ This module imports no engine; ``pypsa`` appears only as a type hint. The
 ``*_import.py`` importers are the one place in ``ingest/`` allowed to import
 ``pypsa``, because their output is a ``pypsa.Network``.
 """
+
 from __future__ import annotations
 
 import importlib
 import pkgutil
 import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - type hint only, keeps the engine out
     import pypsa
@@ -41,7 +44,8 @@ _FORMAT_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class ImportFormatError(ValueError):
-    """The files cannot be read as the format the importer handles.
+    """
+    The files cannot be read as the format the importer handles.
 
     The message is shown to the user, so it names the file and what is wrong
     in plain words.
@@ -103,7 +107,9 @@ class ImportReport:
         for name, n in self.counts.items():
             _require_text(name, "count name")
             if not isinstance(n, int) or isinstance(n, bool) or n < 0:
-                raise ValueError(f"count for {name!r} must be a non-negative int, got {n!r}")
+                raise ValueError(
+                    f"count for {name!r} must be a non-negative int, got {n!r}"
+                )
         for item in self.unmapped:
             if not isinstance(item, Unmapped):
                 raise TypeError(f"unmapped entries must be Unmapped, got {item!r}")
@@ -162,7 +168,9 @@ class ImporterSpec:
             raise ValueError(f"reader for {self.format_id!r} must be callable")
         exts = tuple(_normalise_ext(e) for e in self.extensions)
         if not exts:
-            raise ValueError(f"{self.format_id!r} must name at least one file extension")
+            raise ValueError(
+                f"{self.format_id!r} must name at least one file extension"
+            )
         object.__setattr__(self, "extensions", exts)
 
 
@@ -173,7 +181,8 @@ def _normalise_ext(ext: str) -> str:
 
 
 def importers(package: str = DEFAULT_PACKAGE) -> tuple[ImporterSpec, ...]:
-    """Every registered importer, sorted by format id.
+    """
+    Every registered importer, sorted by format id.
 
     Imports each ``*_import`` module of ``package`` and reads its ``IMPORTER``.
     """
@@ -185,7 +194,9 @@ def importers(package: str = DEFAULT_PACKAGE) -> tuple[ImporterSpec, ...]:
         module = importlib.import_module(f"{package}.{info.name}")
         spec = getattr(module, "IMPORTER", None)
         if not isinstance(spec, ImporterSpec):
-            raise TypeError(f"{module.__name__} must define IMPORTER = ImporterSpec(...)")
+            raise TypeError(
+                f"{module.__name__} must define IMPORTER = ImporterSpec(...)"
+            )
         if spec.format_id in specs:
             raise ValueError(f"format id {spec.format_id!r} is registered twice")
         specs[spec.format_id] = spec

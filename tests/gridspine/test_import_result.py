@@ -1,4 +1,5 @@
 """The shared import contract: report types and the importer registry."""
+
 import subprocess
 import sys
 import textwrap
@@ -168,7 +169,9 @@ def test_registry_discovers_import_modules(fake_package):
         "excel",
         "plexos",
     ]
-    assert [s.format_id for s in ir.for_extension(".RAW", package="fake_ingest")] == ["psse"]
+    assert [s.format_id for s in ir.for_extension(".RAW", package="fake_ingest")] == [
+        "psse"
+    ]
     assert ir.for_extension(".csv", package="fake_ingest") == []
 
 
