@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Dices, Square } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import type {
-  ElccCandidate, ElccRow, McGoalVerdict, McMetrics, McRequestBody, McStatus, ElccPortfolioBlock, ElccPortfolioPeriod,
+  ElccCandidate, ElccInstalled, ElccRow, McGoalVerdict, McMetrics, McRequestBody, McStatus, ElccPortfolioBlock, ElccPortfolioPeriod,
 } from '../../api/simulation'
 import { blockerMessage } from '../../utils/blockerMessage'
 import { NATIVE_OUTCOME_WORDS } from '../../components/activityWords'
@@ -124,16 +124,20 @@ export function mcGoalText(g: McGoalVerdict): string {
 }
 
 /** Why the Expert verdict can differ from the Guided one (HOLISTIC-1, fleet
- *  note): MC samples the fleet as entered, the Guided verdict the sized one. */
-export const MC_FLEET_NOTE = 'Samples the network as entered: assets the study sizes count at their '
-  + 'entered size, not the study\'s sizes; the Guided verdict uses the sized design.'
+ *  note): MC samples the open network, where a sizable asset counts at its
+ *  last solve's size (`copt.solved_capacity`), 0 MW before one; the Guided
+ *  verdict uses the study's sized design. */
+export const MC_FLEET_NOTE = 'Samples the network as it stands: an asset a solve sizes counts at the '
+  + 'last solve\'s size, and as 0 MW until a solve builds it; the Guided verdict uses the sized design.'
 
 /** An ELCC row's capacity (walkthrough 07): a vre row's `nameplate_mw` is its
  *  PEAK output, so it says so, with the installed capacity beside it. */
-export function elccSize(r: { kind: string; nameplate_mw: number }, installed?: number | null): string {
+export function elccSize(r: { kind: string; nameplate_mw: number }, installed?: ElccInstalled | null): string {
   if (r.kind !== 'vre') return `${trim(r.nameplate_mw)} MW`
   const peak = `${trim(r.nameplate_mw)} MW peak`
-  return installed != null ? `${trim(installed)} MW installed · ${peak}` : peak
+  // GK A 30 A6: the MC's own capacity; a sizable unit no solve built is 0 MW.
+  if (installed?.basis === 'not_built') return `not built by the solve · ${peak}`
+  return installed?.mw != null ? `${trim(installed.mw)} MW installed · ${peak}` : peak
 }
 
 /** What an ELCC share is a share of: a vre credit is priced against its peak. */
@@ -729,7 +733,7 @@ export function McPanel() {
                         <td className="py-1 pr-3">{r.name}</td>
                         <td className="py-1 pr-3 font-sans">{r.kind}</td>
                         <td className="py-1 pr-3 text-right" data-testid={`elcc-size-${r.name}`}>
-                          {elccSize(r, result?.elcc_installed?.[r.name]?.mw)}
+                          {elccSize(r, result?.elcc_installed?.[r.name])}
                         </td>
                         {/* A refusal is DATA. The bisection either resolved a
                             credit or it did not, and when it did not the engine

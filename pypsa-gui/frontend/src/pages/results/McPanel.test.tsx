@@ -515,9 +515,17 @@ describe('mcGoalText', () => {
 
 describe('elccSize', () => {
   it('says a vre figure is its peak and puts the installed MW beside it', () => {
-    expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 }, 6)).toBe('6 MW installed · 4.85 MW peak')
+    expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 }, { mw: 6, basis: 'p_nom_opt' }))
+      .toBe('6 MW installed · 4.85 MW peak')
+    expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 }, { mw: 6, basis: 'p_nom' }))
+      .toBe('6 MW installed · 4.85 MW peak')
     expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 })).toBe('4.85 MW peak')
-    expect(elccSize({ kind: 'generator', nameplate_mw: 60 }, 99)).toBe('60 MW')
+    expect(elccSize({ kind: 'generator', nameplate_mw: 60 }, { mw: 99, basis: 'p_nom' })).toBe('60 MW')
+  })
+  it('says a sizable unit no solve built is not built, and drops a size it cannot read (GK A 30 A6)', () => {
+    expect(elccSize({ kind: 'vre', nameplate_mw: 0 }, { mw: 0, basis: 'not_built' }))
+      .toBe('not built by the solve · 0 MW peak')
+    expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 }, { mw: null, basis: 'p_nom' })).toBe('4.85 MW peak')
     expect(elccShareBase('vre')).toBe('of peak')
     expect(elccShareBase('storage_unit')).toBe('of nameplate')
   })
@@ -541,8 +549,8 @@ describe('McPanel goal verdict', () => {
     expect(screen.getByTestId('mc-goal-assumed').dataset.state).toBe('assumed')
     expect(screen.getByTestId('mc-goal-assumed-source').textContent).toBe('site type default')
     expect(screen.getByTestId('mc-fleet-note').textContent).toBe(
-      'Samples the network as entered: assets the study sizes count at their entered size, '
-      + 'not the study\'s sizes; the Guided verdict uses the sized design.')
+      'Samples the network as it stands: an asset a solve sizes counts at the last solve\'s size, '
+      + 'and as 0 MW until a solve builds it; the Guided verdict uses the sized design.')
     expect(screen.getByTestId('elcc-size-Wind-North').textContent).toMatch(/6 MW installed · .* MW peak/)
   })
 
