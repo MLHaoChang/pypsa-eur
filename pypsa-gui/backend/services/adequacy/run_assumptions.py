@@ -32,6 +32,9 @@ _COMPONENTS = (
     ("generators", "Generator", "generating units"),
     ("storage_units", "StorageUnit", "storage units"),
     ("links", "Link", "links"),
+    # A split storage takes its outage rate from its Store, as the Monte Carlo
+    # does (mc.py, eh_readiness); other Stores have none.
+    ("stores", "Store", "storage"),
 )
 
 
@@ -129,9 +132,16 @@ def _outage_rows(n) -> list[dict]:
         resolve_outage_params,
     )
 
+    from services.solver.storage_inventory import SPLIT, list_storages
+
     out: list[dict] = []
     for attr, component, noun in _COMPONENTS:
         df = getattr(n, attr)
+        if attr == "stores":
+            split = {e.name for e in list_storages(n) if e.layout == SPLIT}
+            df = df[df.index.isin(split)]
+            if df.empty:
+                continue
         params = resolve_outage_params(n, attr)
         carriers = df["carrier"].astype(str).str.strip().str.lower()
         groups: dict[tuple[str, str], list[str]] = {}
@@ -139,15 +149,15 @@ def _outage_rows(n) -> list[dict]:
         for name in df.index:
             src = params.at[name, "source"]
             # "Outages already in availability" zeroes the rate the run uses,
-            # so a carrier default the run does not apply is not assumed.
-            if (
-                src == "carrier_default"
-                and not params.at[name, "outages_in_availability"]
-            ):
+            # so nothing about that unit's outages is assumed.
+            if params.at[name, "outages_in_availability"]:
+                continue
+            if src == "carrier_default":
                 groups.setdefault(("rate", carriers[name]), []).append(str(name))
+            # Otherwise the unit has its own rate (source "asset") or none at
+            # all, and then its carrier has no default either.
             elif (
-                src == "asset"
-                and not _is_set(
+                not _is_set(
                     df.at[name, "mttr_hours"] if "mttr_hours" in df.columns else None
                 )
                 and carriers[name] in CARRIER_DEFAULTS

@@ -148,6 +148,83 @@ def test_a_carrier_rate_zeroed_by_the_availability_flag_is_not_assumed():
     assert "outage_rate:Generator:gas" in _keys(run_assumptions(n, {}, None))
 
 
+def test_a_unit_whose_rate_the_availability_flag_zeroes_assumes_nothing():
+    """GK B: with the flag on, neither the zeroed carrier default nor a
+    repair-time or basis row is listed for that unit."""
+    from services.adequacy.occurrence import FLAG_COL
+
+    n = _net()
+    n.add("Generator", "gt2", bus="ac", carrier="gas", p_nom=10)
+    n.generators.loc[["gt", "gt2"], "p_max_pu"] = 0.9
+    n.generators.loc[["gt", "gt2"], FLAG_COL] = True
+    n.generators.loc["gt2", "outage_rate_value"] = 0.05
+    keys = _keys(run_assumptions(n, {}, None))
+    assert not {k for k in keys if k.endswith(":Generator:gas")}, keys
+    assert "outage_basis:Generator" not in keys
+    # Off again, the unit with its own rate gets the repair-time and basis rows.
+    n.generators.loc[["gt", "gt2"], FLAG_COL] = False
+    rows = run_assumptions(n, {}, None)
+    assert _row(rows, "mttr:Generator:gas")["entity"] == "gt2"
+    assert _row(rows, "outage_basis:Generator")["entity"] == "gt2"
+    assert _row(rows, "outage_rate:Generator:gas")["entity"] == "gt"
+
+
+def test_a_split_storages_outage_default_is_assumed_from_its_store():
+    """The Monte Carlo takes a split storage's outage rate from its Store."""
+    from services.solver.split_storage import add_split_storage
+
+    n = _net()
+    n.remove("StorageUnit", "bess")
+    add_split_storage(n, "bat", "ac", "energy_bess", p_nom=2, carrier="battery")
+    row = _row(run_assumptions(n, {}, None), "outage_rate:Store:battery")
+    assert (row["component"], row["entity"], row["source"]) == (
+        "Store",
+        "bat",
+        "carrier_default",
+    )
+    # A plain Store is not a split storage, and the run reads no outage from it.
+    n.add("Store", "tank", bus="h2", carrier="battery", e_nom=5)
+    assert (
+        _row(run_assumptions(n, {}, None), "outage_rate:Store:battery")["entity"]
+        == "bat"
+    )
+
+
+def test_the_recorder_reads_the_studys_private_copy():
+    """GK B: the run's assumptions come from the study's own copy, so an edit
+    to the shared network after the copy does not reach the record."""
+    import threading
+
+    from services.adequacy.eh_study import run_eh_study
+    from services.adequacy.eh_study_runner import _PACK_FACTORY
+
+    n = _net()
+    seen = []
+
+    def read(copy):
+        seen.append(copy)
+        # An edit lands on the shared network once the copy is made.
+        n.add("Generator", "late", bus="ac", carrier="coal", p_nom=1)
+
+    stop = threading.Event()
+    stop.set()  # abort at the first stage boundary: only the copy matters here
+    try:
+        run_eh_study(
+            n,
+            _PACK_FACTORY["strong_grid"](),
+            None,
+            lock=threading.RLock(),
+            stop_event=stop,
+            stages=["apply_pack", "ens_solve"],
+            on_private_copy=read,
+        )
+    except Exception as exc:  # noqa: BLE001 - only the copy hand-off is under test
+        assert seen, exc
+    assert len(seen) == 1 and seen[0] is not n
+    assert "late" in n.generators.index
+    assert "outage_rate:Generator:coal" not in _keys(run_assumptions(seen[0], {}, None))
+
+
 def test_a_link_without_an_efficiency_is_assumed_lossless():
     n = _net()
     n.add("Link", "ely", bus0="ac", bus1="h2", p_nom=5, efficiency=0.7)
@@ -457,9 +534,12 @@ def test_the_report_tells_none_from_not_recorded(run, said):
     ],
     ids=["no-study", "stored-report-record-gone", "old-record", "none-assumed"],
 )
+@pytest.mark.parametrize("open_uuid", ["p1", "other"])
 def test_the_report_reads_the_runs_rows_or_says_not_recorded(
-    monkeypatch, tmp_path, record, stored, want
+    monkeypatch, tmp_path, record, stored, want, open_uuid
 ):
+    """Only the open project's study record is read (GK B): a report for
+    another project says nothing about the run."""
     from types import SimpleNamespace
 
     from fastapi import HTTPException
@@ -467,6 +547,15 @@ def test_the_report_reads_the_runs_rows_or_says_not_recorded(
     from routers import reports
     from routers import results as results_router
     from services import flow_service
+    from services.pypsa_service import PyPSAService
+
+    monkeypatch.setattr(
+        PyPSAService,
+        "get_active_context",
+        classmethod(lambda cls: SimpleNamespace(project_uuid=open_uuid)),
+    )
+    if open_uuid != "p1":
+        want = None
 
     def no_case(**_):
         raise HTTPException(404, "no case")
@@ -475,7 +564,9 @@ def test_the_report_reads_the_runs_rows_or_says_not_recorded(
     monkeypatch.setattr(results_router, "_state", {"eh_study": record})
     monkeypatch.setattr(flow_service, "read_template", lambda d: {"id": "t"})
     monkeypatch.setattr(reports, "_current_eh_report", lambda: stored)
-    out = reports._current_chapter_sources(SimpleNamespace(directory=tmp_path))
+    out = reports._current_chapter_sources(
+        SimpleNamespace(directory=tmp_path, uuid="p1")
+    )
     assert out.get("run_assumptions") == want
 
 
