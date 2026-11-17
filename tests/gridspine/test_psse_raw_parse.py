@@ -770,9 +770,36 @@ def test_cw2_empty_windv_is_the_bus_base_kv():
     assert w["tap"] == pytest.approx((110.0 / 110.0) / (100.0 / 110.0))
 
 
+@pytest.mark.parametrize(
+    "record",
+    [
+        "1,0,0,'1',1,1,1\n0.0,0.1,100\n1.0\n1.0",  # two-winding, J = 0
+        "0.0,2,0,'1',1,1,1\n0.0,0.1,100\n1.0\n1.0",  # two-winding, I = 0
+        "1,0,2,'1',1,1,1\n0.0,0.1,100,0.0,0.1,100,0.0,0.1,100\n1.0\n1.0\n1.0",  # three-winding, J = 0
+    ],
+)
+def test_transformer_end_at_bus_zero_refused(record):
+    """I and J always name a bus; only K = 0 has a meaning (a two-winding unit)."""
+    text = _mini(branch="1,2,'1',0.01,0.1,0.02\n0\n" + record)
+    with pytest.raises(
+        ContractError,
+        match="line 13: transformer refers to bus 0, which is not in BUS DATA",
+    ):
+        read_raw_text(text)
+
+
 def test_transformer_unknown_bus_refused():
     text = _mini(
         branch="1,2,'1',0.01,0.1,0.02\n0\n1,9,0,'1',1,1,1\n0.0,0.1,100\n1.0\n1.0"
+    )
+    with pytest.raises(ContractError, match="line 13: transformer refers to bus 9"):
+        read_raw_text(text)
+
+
+def test_three_winding_unknown_k_bus_refused():
+    text = _mini(
+        branch="1,2,'1',0.01,0.1,0.02\n0\n1,2,9,'1',1,1,1\n"
+        "0.0,0.1,100,0.0,0.1,100,0.0,0.1,100\n1.0\n1.0\n1.0"
     )
     with pytest.raises(ContractError, match="line 13: transformer refers to bus 9"):
         read_raw_text(text)

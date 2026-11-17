@@ -497,8 +497,8 @@ def test_reader_and_registry_import_without_pypsa():
 #: the test pins today's error at exactly WINDV2**2, so the fix turns it red and the
 #: case moves to the equality branch.
 _PENDING = {
-    "hv": "GC-04 raw_writer.trafo_impedance WINDV2² fix",
-    "lv": "GC-04 raw_writer.trafo_impedance WINDV2² fix",
+    "hv": "#1609: GC-04 raw_writer.trafo_impedance WINDV2² fix",
+    "lv": "#1609: GC-04 raw_writer.trafo_impedance WINDV2² fix",
 }
 
 

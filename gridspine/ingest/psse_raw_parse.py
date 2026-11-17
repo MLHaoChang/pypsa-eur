@@ -674,8 +674,8 @@ def _transformers(case, recs, bus_by):
                 f"RAW line {ln}: transformer record needs {n_lines} lines; "
                 "TRANSFORMER DATA ends first"
             )
-        for key in ("I", "J", "K"):
-            if rec[key]:
+        for key in ("I", "J", "K") if three else ("I", "J"):  # only K = 0 has a meaning
+            if rec[key] is not None:
                 rec[key] = abs(rec[key])
                 if rec[key] not in bus_by:
                     raise ContractError(
