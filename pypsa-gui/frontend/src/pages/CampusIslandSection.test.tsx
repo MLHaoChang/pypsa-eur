@@ -131,7 +131,7 @@ describe('island section: the report', () => {
     const heads = (id: string) => [...screen.getByTestId(`island-table-${id}`).querySelectorAll('th')].map(h => h.textContent)
     await screen.findByTestId('island-table-requirements')
     expect(heads('requirements')).toEqual(['Setting', 'Value', 'Source', ''])
-    expect(heads('costs')).toContain('Cost of island capability (€ per year)')
+    expect(heads('costs')).toContain('Cost of island capability (per year)')
     expect(heads('static_flow')).toEqual(['Period', 'Hour', 'Viable', 'Assumed inputs', ''])
     const first = screen.getByTestId('island-table-requirements').querySelector('tbody tr td')
     expect(first?.textContent).toBe('UPS bridge (s)')
@@ -152,10 +152,11 @@ describe('island section: the report', () => {
       assumed_rows: [] }
     renderReport({ ...REPORT, tables: [...REPORT.tables, binding] })
     const costs = await screen.findByTestId('island-table-costs')
-    expect(costs.textContent).toContain('Cost of island capability (€ per year)')
+    expect(costs.textContent).toContain('Cost of island capability (per year)')
+    expect(costs.textContent).toMatch(/€\u00a0\d/)
     const table = await screen.findByTestId('island-table-binding')
     expect(table.textContent).toContain('Island N-1: loss of bess new, downward reserve')
-    expect(table.textContent).toContain('Cost of the limit (€ per year)')
+    expect(table.textContent).toContain('Cost of the limit (per year)')
     expect(within(table).getByTestId('island-binding-note').textContent).toContain('do not add up')
   })
 

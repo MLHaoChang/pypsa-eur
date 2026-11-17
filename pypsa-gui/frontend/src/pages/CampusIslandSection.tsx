@@ -24,6 +24,7 @@ import { Btn, PageSection, Tag } from '../components/PageKit'
 import CampusIslandCutsSection, { scenarioWords } from './CampusIslandCutsSection'
 import { showResultsTab, withReturnFrom } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
+import { money } from '../utils/money'
 
 export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name] as const
 export const ISLAND_REPORT_KEY = (name: string) => ['campusElectrical', 'islandReport', name] as const
@@ -52,9 +53,9 @@ const GROUP_TITLES: Record<IslandGroup, string> = {
 /** Column headers in the user's words. The report's columns are the engine's contract
  *  (kept as they are in the data); a column not listed reads as its name with spaces. */
 const COLUMN_WORDS: Record<string, string> = {
-  field: 'Setting', value: 'Value', source: 'Source', unit: 'Unit', kind: 'Kind', scenario: 'Scenario', row: 'Limit', 'cost of island capability': 'Cost of island capability (€ per year)',
-  'hours binding': 'Hours reached', 'sum of duals': 'Cost of the limit (€ per year)',
-  status: 'Status', objective: 'Objective (€ per year)', period: 'Period', hour: 'Hour', event: 'Event', case: 'Case',
+  field: 'Setting', value: 'Value', source: 'Source', unit: 'Unit', kind: 'Kind', scenario: 'Scenario', row: 'Limit', 'cost of island capability': 'Cost of island capability (per year)',
+  'hours binding': 'Hours reached', 'sum of duals': 'Cost of the limit (per year)',
+  status: 'Status', objective: 'Objective (per year)', period: 'Period', hour: 'Hour', event: 'Event', case: 'Case',
   viable: 'Viable', reason: 'Reason', assumed: 'Assumed inputs', ok: 'Passes', verdict: 'Verdict', detail: 'Detail',
   df_hz: 'Frequency shift (Hz)', delta_p_ac_mw: 'Power step (MW)', sync_df_hz: 'Sync frequency gap (Hz)',
   sync_dv_pu: 'Sync voltage gap (pu)', gate_ok: 'Gate passes', gate_problems: 'Gate problems',
@@ -109,7 +110,6 @@ const fieldWords = (f: string) => {
 }
 
 const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
-const intFmt = (v: number) => Math.round(v).toLocaleString('en-US')
 
 /** An island limit's engine name in words: `Island-n1-down-bess_new` is "Island N-1: loss of
  *  bess new, downward reserve". A name that matches none stays as the old sentence form. */
@@ -163,7 +163,7 @@ function ReportTable({ table }: { table: IslandTable }) {
                     : col === 'scenario' && typeof v === 'string' ? scenarioWords(v)
                     : col === 'status' && v === 'ok' ? 'OK'
                     : col === 'row' && typeof v === 'string' ? limitWords(v)
-                    : (table.id === 'costs' || (table.id === 'binding' && col === 'sum of duals')) && typeof v === 'number' ? intFmt(v)
+                    : (table.id === 'costs' || (table.id === 'binding' && col === 'sum of duals')) && typeof v === 'number' ? money(v, 'EUR')
                     : cell(v)
                   return text.length > LONG
                     ? <td key={j} className="px-2 max-w-[320px] truncate" title={text}>{text}</td>
