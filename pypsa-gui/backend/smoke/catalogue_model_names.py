@@ -19,7 +19,8 @@ TARGET = BACKEND.parent / "frontend" / "src" / "catalogue" / "modelNames.generat
 
 
 def render() -> str:
-    sys.path.insert(0, str(BACKEND))
+    if str(BACKEND) not in sys.path:
+        sys.path.insert(0, str(BACKEND))
     from services.asset_schema.catalogue import model_names
 
     names = {scope: dict(sorted(cols.items())) for scope, cols in sorted(model_names().items())}

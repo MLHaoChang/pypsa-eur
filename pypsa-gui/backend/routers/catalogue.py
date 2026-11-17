@@ -30,9 +30,10 @@ def _etag(body: bytes) -> str:
 def get_catalogue(request: Request, function: str | None = None, depth: str | None = None) -> Response:
     """Every asset type, group, function and parameter entry; `?function=` and `?depth=` narrow the entries."""
     try:
-        body = C.payload_bytes(function=function, depth=depth)
-    except ValueError as e:
+        C.check_filters(function, depth)
+    except C.UnknownFilter as e:
         raise HTTPException(422, str(e)) from None
+    body = C.payload_bytes(function=function, depth=depth)
     tag = _etag(body)
     headers = {"ETag": tag, "Cache-Control": "no-cache"}
     match = request.headers.get("if-none-match", "")

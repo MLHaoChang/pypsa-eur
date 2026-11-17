@@ -23,7 +23,7 @@ from typing import Any
 from services.asset_schema import entries as E
 from services.asset_schema.asset_types import ASSET_TYPES, functions_of as type_functions
 from services.asset_schema.fields import FieldSpec, fields_for, known_components
-from services.asset_schema.functions import FUNCTION_HELP, FUNCTION_NAMES, Function
+from services.asset_schema.functions import FUNCTION_HELP, FUNCTION_IDS, FUNCTION_NAMES, Function
 
 GUIDE_DIR = pathlib.Path(__file__).parent / "guide"
 IDS_FILE = pathlib.Path(__file__).parent / "catalogue.ids.txt"
@@ -38,8 +38,22 @@ DEPTH_FILTER = {
 }
 
 
-class CatalogueError(ValueError):
+class CatalogueError(RuntimeError):
     """The catalogue cannot be assembled (an id collision): a build-time bug, never a user error."""
+
+
+class UnknownFilter(ValueError):
+    """A `?function=` or `?depth=` value the catalogue does not know: the caller's error (422)."""
+
+
+def guide_id(kind: str, ident: str) -> str:
+    """The guide id of an asset type, group or function (an entry's guide id is its entry id)."""
+    return f"{kind}.{ident}"
+
+
+def reveal_when_wire(rule: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A rule naming several values is a tuple in Python and a list on the wire."""
+    return {k: list(v) if isinstance(v, tuple) else v for k, v in rule.items()} if rule else None
 
 
 @dataclass(frozen=True)
@@ -121,27 +135,25 @@ def entries() -> tuple[Entry, ...]:
     return tuple(out)
 
 
-def entry_by_id() -> dict[str, Entry]:
-    return {e.id: e for e in entries()}
-
-
 def guide_ids() -> tuple[str, ...]:
     """Every id that has exactly one guide file: entries, asset types, groups, functions."""
     return (tuple(e.id for e in entries())
-            + tuple(f"asset_type.{t.id}" for t in ASSET_TYPES)
-            + tuple(f"group.{g}" for g in E.GROUP_IDS)
-            + tuple(f"function.{f.value}" for f in Function))
+            + tuple(guide_id("asset_type", t.id) for t in ASSET_TYPES)
+            + tuple(guide_id("group", g) for g in E.GROUP_IDS)
+            + tuple(guide_id("function", f.value) for f in Function))
 
 
 @lru_cache(maxsize=1)
 def _guide_bodies() -> dict[str, str]:
-    return {gid: (GUIDE_DIR / f"{gid}.md").read_text("utf-8") if (GUIDE_DIR / f"{gid}.md").is_file() else ""
-            for gid in guide_ids()}
+    """Every guide file, read once. A missing file is left out, so its id answers 404 rather than a
+    blank 200 (a frozen app without the folder fails loudly; `test_catalogue_guide` pins one file each)."""
+    return {gid: (GUIDE_DIR / f"{gid}.md").read_text("utf-8") for gid in guide_ids()
+            if (GUIDE_DIR / f"{gid}.md").is_file()}
 
 
-def guide_body(guide_id: str) -> str | None:
+def guide_body(gid: str) -> str | None:
     """The guide markdown for a known id, else None. The id is a dict key, never a path."""
-    return _guide_bodies().get(guide_id)
+    return _guide_bodies().get(gid)
 
 
 def _entry_dict(e: Entry) -> dict[str, Any]:
@@ -152,8 +164,7 @@ def _entry_dict(e: Entry) -> dict[str, Any]:
         "depth": e.depth, "unit_display": s.unit_display, "unit_storage": s.unit_storage, "scale": s.scale,
         "kind": s.kind, "options": list(s.options), "options_plain": list(s.options_plain or s.options),
         "range": None, "default": e.default, "functions": e.functions, "aliases": list(e.aliases),
-        "reveal_when": ({k: list(v) if isinstance(v, tuple) else v for k, v in s.reveal_when.items()}
-                        if s.reveal_when else None),
+        "reveal_when": reveal_when_wire(s.reveal_when),
         "derived": s.derived, "required": s.required, "blank": s.blank, "part": s.part,
         "related": list(s.related), "former_ids": list(s.former_ids),
         "guide": guide_body(e.id),
@@ -168,32 +179,41 @@ def _type_dict(t) -> dict[str, Any]:
         "symbols": dict(t.symbols), "ports": [p.as_dict() for p in t.ports], "groups": groups,
         "functions": list(type_functions(t)), "only_for": list(t.only_for),
         "palette": {"category": t.category}, "colour": t.colour, "internal": t.internal,
-        "guide": guide_body(f"asset_type.{t.id}"),
+        "guide": guide_body(guide_id("asset_type", t.id)),
     }
 
 
-def payload(*, function: str | None = None, depth: str | None = None) -> dict[str, Any]:
-    """The `GET /api/catalogue` body. Filters narrow entries and asset types; groups and functions stay whole.
-    ValueError on an unknown filter value (the route turns it into a 422)."""
-    if function is not None and function not in {f.value for f in Function}:
-        raise ValueError(f"Unknown function '{function}'. Expected one of: {', '.join(f.value for f in Function)}.")
+def check_filters(function: str | None, depth: str | None) -> None:
+    """UnknownFilter on a filter value the catalogue does not know (the route turns it into a 422)."""
+    if function is not None and function not in FUNCTION_IDS:
+        raise UnknownFilter(f"Unknown function '{function}'. Expected one of: {', '.join(FUNCTION_IDS)}.")
     if depth is not None and depth not in DEPTH_FILTER:
-        raise ValueError(f"Unknown depth '{depth}'. Expected one of: {', '.join(DEPTH_FILTER)}.")
+        raise UnknownFilter(f"Unknown depth '{depth}'. Expected one of: {', '.join(DEPTH_FILTER)}.")
+
+
+def _body(function: str | None, depth: str | None) -> dict[str, Any]:
+    """The payload without its `version`. Filters narrow entries and asset types; groups and functions stay whole."""
     shown = DEPTH_FILTER[depth] if depth else E.DEPTHS
     rows = [e for e in entries() if e.depth in shown and (function is None or function in e.functions)]
     types = [t for t in ASSET_TYPES if function is None or function in type_functions(t)]
     return {
-        "version": content_hash(),
         "groups": [{"id": g, "plain_name": E.GROUP_NAMES[g], "short_help": E.GROUP_HELP[g], "order": i,
-                    "guide": guide_body(f"group.{g}")} for i, g in enumerate(E.GROUP_IDS)],
+                    "guide": guide_body(guide_id("group", g))} for i, g in enumerate(E.GROUP_IDS)],
         "functions": [{"id": f.value, "plain_name": FUNCTION_NAMES[f], "short_help": FUNCTION_HELP[f],
-                       "guide": guide_body(f"function.{f.value}")} for f in Function],
+                       "guide": guide_body(guide_id("function", f.value))} for f in Function],
         "asset_types": [_type_dict(t) for t in types],
         "entries": [_entry_dict(e) for e in rows],
     }
 
 
+def payload(*, function: str | None = None, depth: str | None = None) -> dict[str, Any]:
+    """The `GET /api/catalogue` body: `version` (the whole catalogue's content hash) and `_body`."""
+    check_filters(function, depth)
+    return {"version": content_hash(), **_body(function, depth)}
+
+
 def payload_bytes(*, function: str | None = None, depth: str | None = None) -> bytes:
+    check_filters(function, depth)
     return _payload_bytes(function, depth)
 
 
@@ -205,19 +225,16 @@ def _payload_bytes(function: str | None, depth: str | None) -> bytes:
 
 @lru_cache(maxsize=1)
 def content_hash() -> str:
-    """sha256 of the whole catalogue's content (the unfiltered payload without this field)."""
-    raw = json.dumps(_unversioned(), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    """sha256 of the whole, unfiltered catalogue body (everything the payload carries but this hash)."""
+    raw = json.dumps(_body(None, None), ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                     allow_nan=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _unversioned() -> dict[str, Any]:
-    return {
-        "groups": [[g, E.GROUP_NAMES[g], E.GROUP_HELP[g], guide_body(f"group.{g}")] for g in E.GROUP_IDS],
-        "functions": [[f.value, FUNCTION_NAMES[f], FUNCTION_HELP[f], guide_body(f"function.{f.value}")]
-                      for f in Function],
-        "asset_types": [_type_dict(t) for t in ASSET_TYPES],
-        "entries": [_entry_dict(e) for e in entries()],
-    }
+def clear_caches() -> None:
+    """Drop every derived cache (tests that patch the inputs call this)."""
+    for f in (entries, _guide_bodies, _payload_bytes, content_hash):
+        f.cache_clear()
 
 
 def model_names() -> dict[str, dict[str, str]]:

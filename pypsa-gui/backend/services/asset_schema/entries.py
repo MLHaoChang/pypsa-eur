@@ -67,9 +67,14 @@ _INVESTMENT_SIZING = re.compile(r"^(p|e|s)_nom_(extendable|min|max)$")
 _REPLACEMENT = frozenset({"build_year", "lifetime_run_hours"})
 
 
+def is_bus_coordinate(scope: str, spec: FieldSpec) -> bool:
+    """A Bus's `x`/`y` are its longitude and latitude; on a branch `x` is a reactance."""
+    return scope == "Bus" and spec.key in ("x", "y")
+
+
 def group_of(scope: str, spec: FieldSpec) -> str:
     key = spec.key
-    if key == "x" and scope != "Bus" or key in _ELECTRICAL:
+    if key == "x" and not is_bus_coordinate(scope, spec) or key in _ELECTRICAL:
         return "electrical"
     if key in _RELIABILITY:
         return "reliability"
@@ -183,7 +188,7 @@ _NEEDS: dict[str, dict[str, str]] = {
 
 
 def functions_of(scope: str, spec: FieldSpec, group: str) -> dict[str, str]:
-    if spec.key == "x" and scope == "Bus":           # the bus's longitude, not a reactance
+    if is_bus_coordinate(scope, spec):
         rows = _FUNCTIONS_BY_GROUP["general"]
     else:
         rows = _NEEDS.get(spec.key) or _FUNCTIONS_BY_GROUP[group]

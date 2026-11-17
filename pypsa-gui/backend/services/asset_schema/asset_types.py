@@ -176,6 +176,3 @@ def functions_of(t: AssetTypeSpec) -> tuple[str, ...]:
         return t.only_for
     return tuple(f.value for f in _CATEGORY_FUNCTIONS[t.category])
 
-
-def asset_type_ids() -> tuple[str, ...]:
-    return tuple(t.id for t in ASSET_TYPES)

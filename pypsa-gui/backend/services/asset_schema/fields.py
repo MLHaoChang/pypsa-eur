@@ -87,7 +87,7 @@ class FieldSpec:
             # A rule naming several values is a tuple here and a list on the wire.
             d["reveal_when"] = {k: list(v) if isinstance(v, tuple) else v for k, v in self.reveal_when.items()}
         else:
-            d["reveal_when"] = self.reveal_when
+            d["reveal_when"] = self.reveal_when      # None or {} exactly as stored (byte pin)
         d["technical_name"] = self.key
         return d
 

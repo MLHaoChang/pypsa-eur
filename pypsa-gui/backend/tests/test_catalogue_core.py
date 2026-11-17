@@ -50,9 +50,16 @@ def test_entry_is_complete(e):
 
 
 def test_essentials_is_todays_guided_set():
-    """`depth: essentials` replaces `key_param`; the Guided face lists exactly the same fields."""
-    for e in ENTRIES:
-        assert (e.depth == "essentials") == e.spec.key_param, e.id
+    """`depth: essentials` replaces `key_param`: the Guided face lists exactly the fields it listed before
+    the move, read from the recording taken on master (not from the table under test)."""
+    import json
+
+    from tests.test_catalogue_legacy_schema_pin import FIXTURE
+
+    recorded = json.loads(FIXTURE.read_text("utf-8"))
+    before = {(c, f["key"]) for c, p in recorded.items() for g in p["groups"] for f in g["fields"] if f["key_param"]}
+    now = {(e.scope, e.model_name) for e in ENTRIES if e.depth == "essentials"}
+    assert now == before
 
 
 def test_plain_names_carry_no_unit_and_no_model_name():
@@ -107,12 +114,12 @@ def test_slug_collision_is_refused_never_suffixed(monkeypatch):
     twin = (FieldSpec("p_nom", "size", "Capacity", "x"), FieldSpec("p_set", "size", "Capacity", "y"))
     monkeypatch.setattr(C, "known_components", lambda: ["Generator"])
     monkeypatch.setattr(C, "fields_for", lambda c: twin)
-    C.entries.cache_clear()
+    C.clear_caches()
     try:
         with pytest.raises(C.CatalogueError, match="generator.capacity"):
             C.entries()
     finally:
-        C.entries.cache_clear()
+        C.clear_caches()
 
 
 def test_case_only_collision_is_refused(monkeypatch):
@@ -120,12 +127,12 @@ def test_case_only_collision_is_refused(monkeypatch):
             FieldSpec("b_x", "size", "Other", "y", id="generator.THING"))
     monkeypatch.setattr(C, "known_components", lambda: ["Generator"])
     monkeypatch.setattr(C, "fields_for", lambda c: twin)
-    C.entries.cache_clear()
+    C.clear_caches()
     try:
         with pytest.raises(C.CatalogueError):
             C.entries()
     finally:
-        C.entries.cache_clear()
+        C.clear_caches()
 
 
 def test_explicit_id_wins_over_the_derived_one():

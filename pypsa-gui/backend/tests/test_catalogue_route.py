@@ -120,3 +120,23 @@ def test_catalogue_is_project_free_while_units_stay_per_asset(client, install_ne
         pytest.skip("template has no generator on a tonne bus")
     units = client.get(f"/api/network/asset_schema/Generator/units/{name}").json()
     assert json.dumps(units).count("t/h") >= 1
+
+
+def test_a_build_bug_is_not_a_422(client, monkeypatch):
+    """Only an unknown filter value is the caller's error; a catalogue that cannot build is a 500 (review-gk #1452 I2)."""
+    def broken(**_kw):
+        raise C.CatalogueError("entry id 'generator.x' collides")
+
+    monkeypatch.setattr(C, "payload_bytes", broken)
+    with pytest.raises(C.CatalogueError):
+        client.get(ROUTE)
+
+
+def test_a_missing_guide_file_is_a_404_not_a_blank_page(monkeypatch):
+    C.clear_caches()
+    monkeypatch.setattr(C, "GUIDE_DIR", C.GUIDE_DIR / "nowhere")
+    try:
+        assert C.guide_body("function.dispatch") is None
+    finally:
+        monkeypatch.undo()
+        C.clear_caches()
