@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<!-- Hand-written edge cases for gridspine/ingest/plexos_xml.py; expected counts are in tests/gridspine/test_plexos_xml.py. -->
+<MasterDataSet xmlns="http://tempuri.org/MasterDataSet.xsd">
+  <t_config><element>Version</element><value>9.200</value></t_config>
+  <t_config><element>Saved With</element><value>hand-written test fixture</value></t_config>
+  <t_action><action_id>0</action_id><action_symbol>=</action_symbol></t_action>
+  <t_action><action_id>1</action_id><action_symbol>×</action_symbol></t_action>
+  <t_action><action_id>2</action_id><action_symbol>÷</action_symbol></t_action>
+  <t_action><action_id>3</action_id><action_symbol>+</action_symbol></t_action>
+  <t_action><action_id>4</action_id><action_symbol>-</action_symbol></t_action>
+  <t_action><action_id>5</action_id><action_symbol>^</action_symbol></t_action>
+  <t_action><action_id>6</action_id><action_symbol>?</action_symbol></t_action>
+  <t_class><class_id>1</class_id><name>System</name></t_class>
+  <t_class><class_id>2</class_id><name>Generator</name></t_class>
+  <t_class><class_id>3</class_id><name>Fuel</name></t_class>
+  <t_class><class_id>4</class_id><name>Node</name></t_class>
+  <t_class><class_id>5</class_id><name>Line</name></t_class>
+  <t_class><class_id>6</class_id><name>Scenario</name></t_class>
+  <t_class><class_id>7</class_id><name>Data File</name></t_class>
+  <t_class><class_id>8</class_id><name>Variable</name></t_class>
+  <t_class><class_id>9</class_id><name>Region</name></t_class>
+  <t_class><class_id>10</class_id><name>Constraint</name></t_class>
+  <t_collection><collection_id>1</collection_id><parent_class_id>1</parent_class_id><child_class_id>2</child_class_id><name>Generators</name></t_collection>
+  <t_collection><collection_id>2</collection_id><parent_class_id>1</parent_class_id><child_class_id>4</child_class_id><name>Nodes</name></t_collection>
+  <t_collection><collection_id>3</collection_id><parent_class_id>1</parent_class_id><child_class_id>3</child_class_id><name>Fuels</name></t_collection>
+  <t_collection><collection_id>4</collection_id><parent_class_id>2</parent_class_id><child_class_id>4</child_class_id><name>Nodes</name></t_collection>
+  <t_collection><collection_id>5</collection_id><parent_class_id>2</parent_class_id><child_class_id>3</child_class_id><name>Fuels</name></t_collection>
+  <t_collection><collection_id>6</collection_id><parent_class_id>1</parent_class_id><child_class_id>5</child_class_id><name>Lines</name></t_collection>
+  <t_collection><collection_id>7</collection_id><parent_class_id>5</parent_class_id><child_class_id>4</child_class_id><name>Node From</name></t_collection>
+  <t_collection><collection_id>8</collection_id><parent_class_id>5</parent_class_id><child_class_id>4</child_class_id><name>Node To</name></t_collection>
+  <t_collection><collection_id>9</collection_id><parent_class_id>1</parent_class_id><child_class_id>6</child_class_id><name>Scenarios</name></t_collection>
+  <t_collection><collection_id>10</collection_id><parent_class_id>1</parent_class_id><child_class_id>7</child_class_id><name>Data Files</name></t_collection>
+  <t_collection><collection_id>11</collection_id><parent_class_id>1</parent_class_id><child_class_id>8</child_class_id><name>Variables</name></t_collection>
+  <t_collection><collection_id>12</collection_id><parent_class_id>4</parent_class_id><child_class_id>9</child_class_id><name>Region</name></t_collection>
+  <t_collection><collection_id>13</collection_id><parent_class_id>1</parent_class_id><child_class_id>9</child_class_id><name>Regions</name></t_collection>
+  <t_unit><unit_id>0</unit_id><value>-</value></t_unit>
+  <t_unit><unit_id>1</unit_id><value>MW</value></t_unit>
+  <t_unit><unit_id>2</unit_id><value>%</value></t_unit>
+  <t_unit><unit_id>3</unit_id><value>GJ/MWh</value></t_unit>
+  <t_unit><unit_id>4</unit_id><value>$/GJ</value></t_unit>
+  <t_unit><unit_id>5</unit_id><value>pu</value></t_unit>
+  <t_unit><unit_id>6</unit_id><value>kV</value></t_unit>
+  <t_unit><unit_id>7</unit_id><value>°</value></t_unit>
+  <t_property><property_id>1</property_id><collection_id>1</collection_id><name>Max Capacity</name><unit_id>1</unit_id></t_property>
+  <t_property><property_id>2</property_id><collection_id>1</collection_id><name>Heat Rate</name><unit_id>3</unit_id></t_property>
+  <t_property><property_id>3</property_id><collection_id>1</collection_id><name>Rating Factor</name><unit_id>2</unit_id></t_property>
+  <t_property><property_id>4</property_id><collection_id>1</collection_id><name>Units</name><unit_id>0</unit_id></t_property>
+  <t_property><property_id>5</property_id><collection_id>2</collection_id><name>Voltage</name><unit_id>6</unit_id></t_property>
+  <t_property><property_id>6</property_id><collection_id>2</collection_id><name>Load</name><unit_id>1</unit_id></t_property>
+  <t_property><property_id>7</property_id><collection_id>3</collection_id><name>Price</name><unit_id>4</unit_id></t_property>
+  <t_property><property_id>8</property_id><collection_id>6</collection_id><name>Max Flow</name><unit_id>1</unit_id></t_property>
+  <t_property><property_id>9</property_id><collection_id>6</collection_id><name>Reactance</name><unit_id>5</unit_id></t_property>
+  <t_property><property_id>10</property_id><collection_id>10</collection_id><name>Filename</name><unit_id>0</unit_id></t_property>
+  <t_property><property_id>11</property_id><collection_id>11</collection_id><name>Profile</name><unit_id>0</unit_id></t_property>
+  <t_category><category_id>1</category_id><class_id>2</class_id><name>Wind</name></t_category>
+  <t_object><object_id>1</object_id><class_id>1</class_id><name>System</name></t_object>
+  <t_object><object_id>2</object_id><class_id>4</class_id><name>X</name></t_object>
+  <t_object><object_id>3</object_id><class_id>2</class_id><name>X</name></t_object>
+  <t_object><object_id>4</object_id><class_id>2</class_id><name>G2</name><category_id>1</category_id></t_object>
+  <t_object><object_id>5</object_id><class_id>4</class_id><name>N2</name></t_object>
+  <t_object><object_id>6</object_id><class_id>3</class_id><name>Gas</name></t_object>
+  <t_object><object_id>7</object_id><class_id>5</class_id><name>L1</name></t_object>
+  <t_object><object_id>8</object_id><class_id>6</class_id><name>High Gas</name></t_object>
+  <t_object><object_id>9</object_id><class_id>6</class_id><name>Low Wind</name></t_object>
+  <t_object><object_id>10</object_id><class_id>7</class_id><name>Wind Profile</name></t_object>
+  <t_object><object_id>11</object_id><class_id>8</class_id><name>Wind Scaler</name></t_object>
+  <t_object><object_id>12</object_id><class_id>9</class_id><name>R1</name></t_object>
+  <t_object><object_id>16</object_id><class_id>10</class_id><name>Cap Gas</name></t_object>
+  <t_object><object_id>13</object_id><class_id>99</class_id><name>Ghost</name></t_object>
+  <t_object><object_id>4</object_id><class_id>4</class_id><name>Duplicate id</name></t_object>
+  <t_object><object_id>15</object_id><class_id>4</class_id><name>X</name></t_object>
+  <t_membership><membership_id>1</membership_id><collection_id>2</collection_id><parent_object_id>1</parent_object_id><child_object_id>2</child_object_id></t_membership>
+  <t_membership><membership_id>2</membership_id><collection_id>2</collection_id><parent_object_id>1</parent_object_id><child_object_id>5</child_object_id></t_membership>
+  <t_membership><membership_id>3</membership_id><collection_id>1</collection_id><parent_object_id>1</parent_object_id><child_object_id>3</child_object_id></t_membership>
+  <t_membership><membership_id>4</membership_id><collection_id>1</collection_id><parent_object_id>1</parent_object_id><child_object_id>4</child_object_id></t_membership>
+  <t_membership><membership_id>5</membership_id><collection_id>3</collection_id><parent_object_id>1</parent_object_id><child_object_id>6</child_object_id></t_membership>
+  <t_membership><membership_id>6</membership_id><collection_id>6</collection_id><parent_object_id>1</parent_object_id><child_object_id>7</child_object_id></t_membership>
+  <t_membership><membership_id>7</membership_id><collection_id>7</collection_id><parent_object_id>7</parent_object_id><child_object_id>2</child_object_id></t_membership>
+  <t_membership><membership_id>8</membership_id><collection_id>8</collection_id><parent_object_id>7</parent_object_id><child_object_id>5</child_object_id></t_membership>
+  <t_membership><membership_id>9</membership_id><collection_id>4</collection_id><parent_object_id>3</parent_object_id><child_object_id>2</child_object_id></t_membership>
+  <t_membership><membership_id>10</membership_id><collection_id>5</collection_id><parent_object_id>3</parent_object_id><child_object_id>6</child_object_id></t_membership>
+  <t_membership><membership_id>11</membership_id><collection_id>4</collection_id><parent_object_id>4</parent_object_id><child_object_id>5</child_object_id></t_membership>
+  <t_membership><membership_id>12</membership_id><collection_id>9</collection_id><parent_object_id>1</parent_object_id><child_object_id>8</child_object_id></t_membership>
+  <t_membership><membership_id>13</membership_id><collection_id>9</collection_id><parent_object_id>1</parent_object_id><child_object_id>9</child_object_id></t_membership>
+  <t_membership><membership_id>14</membership_id><collection_id>10</collection_id><parent_object_id>1</parent_object_id><child_object_id>10</child_object_id></t_membership>
+  <t_membership><membership_id>15</membership_id><collection_id>11</collection_id><parent_object_id>1</parent_object_id><child_object_id>11</child_object_id></t_membership>
+  <t_membership><membership_id>16</membership_id><collection_id>12</collection_id><parent_object_id>2</parent_object_id><child_object_id>12</child_object_id></t_membership>
+  <t_membership><membership_id>17</membership_id><collection_id>13</collection_id><parent_object_id>1</parent_object_id><child_object_id>12</child_object_id></t_membership>
+  <t_membership><membership_id>18</membership_id><collection_id>4</collection_id><parent_object_id>4</parent_object_id><child_object_id>999</child_object_id></t_membership>
+  <t_membership><membership_id>19</membership_id><collection_id>99</collection_id><parent_object_id>1</parent_object_id><child_object_id>2</child_object_id></t_membership>
+  <t_membership><membership_id>20</membership_id><collection_id>4</collection_id><parent_object_id>6</parent_object_id><child_object_id>2</child_object_id></t_membership>
+  <t_membership><membership_id>1</membership_id><collection_id>2</collection_id><parent_object_id>1</parent_object_id><child_object_id>5</child_object_id></t_membership>
+  <t_data><data_id>1</data_id><membership_id>3</membership_id><property_id>1</property_id><value>100</value></t_data>
+  <t_data><data_id>2</data_id><membership_id>3</membership_id><property_id>2</property_id><value>9.5</value></t_data>
+  <t_data><data_id>3</data_id><membership_id>3</membership_id><property_id>2</property_id><value>8.0</value></t_data>
+  <t_data><data_id>4</data_id><membership_id>4</membership_id><property_id>1</property_id><value>50</value></t_data>
+  <t_data><data_id>5</data_id><membership_id>4</membership_id><property_id>3</property_id><value>0</value></t_data>
+  <t_data><data_id>6</data_id><membership_id>5</membership_id><property_id>7</property_id><value>6.0</value></t_data>
+  <t_data><data_id>7</data_id><membership_id>5</membership_id><property_id>7</property_id><value>9.0</value></t_data>
+  <t_data><data_id>8</data_id><membership_id>1</membership_id><property_id>5</property_id><value>220</value></t_data>
+  <t_data><data_id>9</data_id><membership_id>1</membership_id><property_id>6</property_id><value>300</value></t_data>
+  <t_data><data_id>10</data_id><membership_id>6</membership_id><property_id>8</property_id><value>400</value></t_data>
+  <t_data><data_id>11</data_id><membership_id>6</membership_id><property_id>9</property_id><value>0.01</value></t_data>
+  <t_data><data_id>12</data_id><membership_id>14</membership_id><property_id>10</property_id><value>0</value></t_data>
+  <t_data><data_id>13</data_id><membership_id>15</membership_id><property_id>11</property_id><value>1.2</value></t_data>
+  <t_data><data_id>14</data_id><membership_id>2</membership_id><property_id>6</property_id><value>abc</value></t_data>
+  <t_data><data_id>15</data_id><membership_id>2</membership_id><property_id>5</property_id><value>NaN</value></t_data>
+  <t_data><data_id>16</data_id><membership_id>4</membership_id><property_id>4</property_id><value>INF</value></t_data>
+  <t_data><data_id>18</data_id><membership_id>999</membership_id><property_id>1</property_id><value>1</value></t_data>
+  <t_data><data_id>19</data_id><membership_id>1</membership_id><property_id>999</property_id><value>1</value></t_data>
+  <t_data><data_id>20</data_id><membership_id>1</membership_id><property_id>1</property_id><value>1</value></t_data>
+  <t_data><data_id>1</data_id><membership_id>3</membership_id><property_id>1</property_id><value>999</value></t_data>
+  <t_data><data_id>22</data_id><membership_id>18</membership_id><property_id>1</property_id><value>1</value></t_data>
+  <t_band><data_id>3</data_id><band_id>2</band_id></t_band>
+  <t_band><data_id>999</data_id><band_id>2</band_id></t_band>
+  <t_band><data_id>2</data_id><band_id>two</band_id></t_band>
+  <t_band><data_id>3</data_id><band_id>3</band_id></t_band>
+  <t_date_from><data_id>9</data_id><date>2030-01-01T00:00:00</date></t_date_from>
+  <t_date_to><data_id>9</data_id><date>2030-12-31T00:00:00</date></t_date_to>
+  <t_tag><data_id>5</data_id><object_id>10</object_id></t_tag>
+  <t_tag><data_id>5</data_id><object_id>9</object_id></t_tag>
+  <t_tag><data_id>5</data_id><object_id>11</object_id><action_id>1</action_id></t_tag>
+  <t_tag><data_id>7</data_id><object_id>8</object_id></t_tag>
+  <t_tag><data_id>7</data_id><object_id>9</object_id></t_tag>
+  <t_tag><data_id>5</data_id><object_id>999</object_id></t_tag>
+  <t_tag><data_id>999</data_id><object_id>8</object_id></t_tag>
+  <t_tag><data_id>6</data_id><object_id>8</object_id><action_id>77</action_id></t_tag>
+  <t_text><data_id>12</data_id><class_id>7</class_id><value>csv_files\wind.csv</value></t_text>
+  <t_text><data_id>12</data_id><class_id>99</class_id><value>orphan</value></t_text>
+  <t_memo_data><data_id>9</data_id><value>from TSO plan</value></t_memo_data>
+  <t_attribute><attribute_id>1</attribute_id><class_id>4</class_id><name>Latitude</name><unit_id>7</unit_id></t_attribute>
+  <t_attribute_data><object_id>2</object_id><attribute_id>1</attribute_id><value>53.3</value></t_attribute_data>
+  <t_attribute_data><object_id>999</object_id><attribute_id>1</attribute_id><value>1</value></t_attribute_data>
+  <t_attribute_data><object_id>3</object_id><attribute_id>1</attribute_id><value>2</value></t_attribute_data>
+  <t_report><object_id>1</object_id><property_id>1</property_id></t_report>
+</MasterDataSet>

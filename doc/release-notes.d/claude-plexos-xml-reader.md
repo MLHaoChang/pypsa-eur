@@ -1,0 +1,1 @@
+* Feat(gridspine): PLEXOS input XML reader (`gridspine/ingest/plexos_xml.py`), the first step of PLEXOS import. It resolves objects, memberships and property rows by name, together with their scenario, data-file and variable tags, bands, dates and units. Hostile XML (DTDs, entities) is refused. Every row is either resolved or listed as broken with a reason.

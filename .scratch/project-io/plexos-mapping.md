@@ -87,3 +87,18 @@ Engine cage (owner, option A): pypsa is imported only in `gridspine/ingest/plexo
 ## Parameters PLEXOS brings (for the expert catalogue, HOLISTIC-1)
 
 Generator: capacity, unit count, minimum stable level, rating profile, heat rate, fuel price, variable O&M, start cost, commission/retirement year, ramp limits, maintenance rate, forced outage rate, mean time to repair. Battery: power, energy, charge/discharge efficiency, initial state of charge. Hydro: reservoir energy, natural inflow, initial level. Line: max/min flow, wheeling charge, reactance. Node: load profile, voltage, coordinates. Region: value of lost load. Fuel: price (static or series), CO2 rate.
+
+## Comments
+
+- 2026-11-17, GK A (29), plan GO for slice 1 @24c8a52a, on these conditions. Where each is met:
+  - P1 Hostile XML: any DTD is refused as kind `dtd` (billion laughs, external entity and external DTD tests), and elements are cleared as they stream. Deviation: `defusedxml` is not in the pixi `default` environment that `gridspine-tests` runs in (only `dev` and the GUI requirements have it), and adding it means editing `pixi.toml`/`pixi.lock`, which other PRs touch. So the reader uses `lxml` with `resolve_entities=False`, `load_dtd=False`, `no_network=True` and `huge_tree=False`, and refuses on the root's `docinfo` (internal DTD, external DTD or system URL) before any row is read.
+  - P2 Scoped names: objects are keyed by (class, name), collections by (parent, child, name). Test: Node "X" and Generator "X".
+  - P3 Fail closed: duplicate ids, dangling objects, unknown classes, collections and properties, collection mismatches, and qualifiers of missing rows go into `broken` with a reason, one test row each in `edge_cases.xml`. A missing required table is refused as `missing_table`, naming the table, with one parametrised test per table.
+  - P4 Accounting: per table, in = resolved + broken + not_read. `not_read` is used only for tables the reader does not interpret (t_report, t_message, …), which are also named in `warnings`. Expected counts come from a raw lxml tag count and from `make_fixture.py`'s printout.
+  - P5 Values: `abc`, `NaN` and `INF` give value None, with the raw text and a reason.
+  - P6 Tags: every tag, with its `t_action` symbol, plus band, dates, texts and memo.
+  - P7 Units: each row's unit comes from t_property → t_unit. A test rewrites the unit in the file and reads the new one back.
+  - P8 Version: missing, below 7, above 10 and non-numeric versions warn, not refuse.
+  - P9 Cage: a subprocess imports `plexos_xml` with `sys.modules['pypsa'] = None`.
+  - Later-slice notes are carried into slice 2: zip traversal and size caps; Units = 0 means not built; lifetime = retirement − build year; the sign of Min Flow; VoLL stays in the sidecar.
+- Memory: the full 130 MB World file reads in about 12 s with a peak of about 580 MB, because the raw row dicts are held until resolution. That is fine for slice 1; if GK wants it lower, the fix is two-pass streaming.
