@@ -361,9 +361,13 @@ def write_dgs(
         dname = nm("ElmLne", ln["name"] if _val(ln, "name", None) else f"line_{i}")
         vn = float(net.bus.at[ln["from_bus"], "vn_kv"])
         b_us = 2 * math.pi * f_hz * float(ln["c_nf_per_km"]) * 1e-3  # nF/km -> uS/km
-        g_us = float(
-            _val(ln, "g_us_per_km", 0.0)
-        )  # GC-16: written even when 0, so every row has it
+        # GC-16: written even when 0, so every row has it. A line without the column has no
+        # conductance; a NaN or inf is refused by name, never read as 0.
+        g_us = float(ln["g_us_per_km"]) if "g_us_per_km" in ln.index else 0.0
+        if not math.isfinite(g_us):
+            raise ContractError(
+                f"DGS: line {dname!r} conductance g_us_per_km is not finite ({g_us})"
+            )
         cable = str(_val(ln, "type", "ol")) == "cs"
         rows["TypLne"].append(
             (
@@ -545,16 +549,14 @@ def write_dgs(
         eid = next(ids)
         dname = nm("ElmShnt", sh["name"] if _val(sh, "name", None) else f"shunt_{i}")
         q = float(sh["q_mvar"])  # pandapower load convention: negative is capacitive
-        p = (
-            float(sh["p_mw"]) if "p_mw" in sh.index else 0.0
-        )  # a NaN is refused below, never read as 0
+        # A NaN is refused below, never read as 0.
+        p = float(sh["p_mw"]) if "p_mw" in sh.index else 0.0
         if not math.isfinite(p):
             raise ContractError(
                 f"DGS: shunt {dname!r} active power p_mw is not finite ({p})"
             )
-        if (
-            p != 0.0
-        ):  # GK A2 option 1: no public source names the shunt's loss attribute, so it is listed
+        # GK A2 option 1: no public source names the shunt's loss attribute, so it is listed.
+        if p != 0.0:
             not_written.append(
                 (
                     "shunt",

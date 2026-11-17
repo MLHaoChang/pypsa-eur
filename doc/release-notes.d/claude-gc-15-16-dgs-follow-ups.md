@@ -1,1 +1,1 @@
-* Feat(gridspine): The DGS export now writes a line's shunt conductance, and lists a shunt's active power instead of dropping it silently. It also writes every harmonic source in one block over the union of their orders.
+* Feat(gridspine): The DGS export now writes a line's shunt conductance, and lists a shunt's active power instead of dropping it silently. A NaN or infinite conductance or shunt power is refused by name. It also writes every harmonic source in one block over the union of their orders.

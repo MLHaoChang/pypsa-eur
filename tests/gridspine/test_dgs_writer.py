@@ -478,9 +478,7 @@ def test_the_tap_side_is_written(tmp_path):
 # ── GC-15: one TypHmccur block over the union of orders (GK A2) ──
 
 
-def test_every_harmonic_source_shares_one_block_over_the_union_of_orders(
-    written, tmp_path
-):
+def test_every_harmonic_source_shares_one_block_over_the_union_of_orders(tmp_path):
     """
     Neither a repeated header nor padded fields: one header, every row the same SIZEROW; an order a source
     does not name is 0 amplitude and 0 alpha, physically the same as absent.
@@ -515,7 +513,7 @@ def test_the_merge_leaves_each_sources_own_entries_unchanged(written):
         assert _own(hm[elm["phmc"]]) == want, name
 
 
-def test_one_block_per_class_in_the_whole_file(written, tmp_path):
+def test_one_block_per_class_in_the_whole_file(tmp_path):
     path = tmp_path / "b.dgs"
     write_dgs(
         fixture_net(), path, title="fixture", harmonics=HARMONICS, converters=["bess"]
@@ -555,6 +553,17 @@ def test_line_conductance_matches_pandapower(tmp_path):
 def test_a_line_without_conductance_writes_zero(written):
     _, dgs, _ = written
     assert [r["gline"] for r in dgs["TypLne"]] == [0.0, 0.0, 0.0]
+
+
+@pytest.mark.parametrize("g", [float("nan"), float("inf")])
+def test_a_line_with_non_finite_conductance_is_refused_by_name(tmp_path, g):
+    net = fixture_net()
+    net.line["g_us_per_km"] = 0.0
+    net.line.loc[net.line.index[1], "g_us_per_km"] = g
+    name = str(net.line.at[net.line.index[1], "name"])
+    with pytest.raises(ContractError, match="conductance") as err:
+        write_dgs(net, tmp_path / "g.dgs")
+    assert name in str(err.value)
 
 
 @pytest.mark.parametrize("p", [0.0, -0.0])
