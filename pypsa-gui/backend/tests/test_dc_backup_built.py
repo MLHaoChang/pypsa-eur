@@ -29,10 +29,24 @@ def _genset(it=30.0):
 
 
 def _same_network(a, b):
-    for c in ("Generator", "StorageUnit", "Load", "Link", "Bus"):
+    """Every component (Carrier and the standard types too) with the same rows
+    and columns, every series, the snapshots and their weightings, and the
+    network's own attributes (GK A G6)."""
+    pd.testing.assert_index_equal(a.snapshots, b.snapshots)
+    pd.testing.assert_frame_equal(a.snapshot_weightings, b.snapshot_weightings)
+    pd.testing.assert_index_equal(a.investment_periods, b.investment_periods)
+    pd.testing.assert_frame_equal(
+        a.investment_period_weightings, b.investment_period_weightings
+    )
+    for attr in ("name", "meta", "srid", "crs"):
+        assert getattr(a, attr) == getattr(b, attr), attr
+    names = sorted(c.name for c in a.components)
+    assert names == sorted(c.name for c in b.components)
+    for c in names:
         sa, sb = a.static(c), b.static(c)
         assert sorted(sa.index) == sorted(sb.index), c
-        cols = [k for k in sa.columns if k in sb.columns]
+        assert sorted(sa.columns) == sorted(sb.columns), c
+        cols = sorted(sa.columns)
         pd.testing.assert_frame_equal(
             sa.loc[sorted(sa.index), cols],
             sb.loc[sorted(sb.index), cols],
@@ -103,6 +117,29 @@ def test_a_restored_genset_never_overwrites_a_project_component():
     n_b.add("Generator", "genset_1", bus=n_b.buses.index[0], p_nom=3.0)
     with pytest.raises(B.DcBackupError, match="already has genset_1"):
         B.genset_form(n_b, i_b, "bess", n_g, i_g)
+
+
+def test_a_restored_genset_never_overwrites_a_sidecar_unit():
+    """A clash in the sidecar's units alone (no such component) is refused too."""
+    n_b, i_b = _campus("bess")
+    n_g, i_g = _genset()
+    assert "genset_1" not in n_b.generators.index
+    i_b["units"]["genset_1"] = {"kind": "pv"}
+    with pytest.raises(B.DcBackupError, match="already has genset_1"):
+        B.genset_form(n_b, i_b, "bess", n_g, i_g)
+
+
+@pytest.mark.parametrize("scale,said", [(1.004, False), (1.01, True)])
+def test_the_edited_load_note_starts_above_half_a_percent(scale, said):
+    """The note's threshold: within 0.5 % of the spec's critical peak is the
+    spec's load (rounding), above it the restored gensets are said to be sized
+    for the spec."""
+    n_b, i_b = _campus("bess")
+    n_g, i_g = _genset()
+    crit = B.critical_loads(i_g)[0]
+    n_b.loads_t.p_set[crit] = n_b.loads_t.p_set[crit] * scale
+    _m, _i, notes, _s = B.genset_form(n_b, i_b, "bess", n_g, i_g)
+    assert any("not the edited load" in x for x in notes) is said
 
 
 def test_an_edited_critical_load_is_said():

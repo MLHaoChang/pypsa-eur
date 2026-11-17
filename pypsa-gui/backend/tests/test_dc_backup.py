@@ -1289,6 +1289,7 @@ def test_a_project_created_with_strings_assesses_as_a_genset_one_would(
     meta = json.loads((d / "eh_template.json").read_text())
     assert meta["dc_load"]["network_backup_mode"] == built
     before = _sidecar_bytes(d)
+    assert {"network.nc", "island_config.json", "eh_template.json"} <= set(before)
     ctx = session_ctx(client)
     assert any(
         s.startswith(dc_backup.STRING_PREFIX) for s in ctx.network.storage_units.index
@@ -1321,6 +1322,52 @@ def test_a_project_created_with_strings_assesses_as_a_genset_one_would(
     assert _assessed(out) == _assessed(ref)
 
 
+def test_a_staged_project_assesses_with_its_own_build_plan(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """The staged example: the genset form is built with the project's own
+    build plan (here not the example's), so a Batteries-created staged project
+    assesses as a genset-created one with the same plan, and its files are
+    left as they are."""
+    from services import project_registry
+
+    _served(monkeypatch)
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter_staged")
+    phases = [
+        {"cod": f"{y}-01-01", "it_mw": it}
+        for y, it in ((2028, 12.0), (2031, 24.0), (2036, 36.0))
+    ]
+    made = {}
+    for mode in ("genset", "bess"):
+        r = client.post(
+            "/api/projects/from_template/eh_datacenter_staged",
+            params={"name": f"dc_staged_{mode}"},
+            json={
+                "planning": {"start_year": 2028, "end_year": 2040},
+                "dc_load": {"backup": {"mode": mode}, "phases": phases},
+            },
+        )
+        assert r.status_code < 300, r.text
+        name = r.json().get("name", f"dc_staged_{mode}")
+        made[mode] = (
+            name,
+            pathlib.Path(project_registry.project_dir(project_row(name))),
+        )
+    name, d = made["bess"]
+    before = _sidecar_bytes(d)
+    r = client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json={})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["built"]["mode"] == "bess"
+    assert _sidecar_bytes(d) == before
+    r = client.post(
+        f"/api/campus-electrical/{made['genset'][0]}/dc-backup/assess",
+        json={"mode": "bess"},
+    )
+    assert r.status_code == 200, r.text
+    assert _assessed(out) == _assessed(r.json())
+
+
 @pytest.mark.parametrize("built,word", [("bess", "Batteries"), ("hybrid", "Hybrid")])
 def test_a_project_created_before_its_sidecar_listed_the_strings_is_refused(
     client, tmp_path, monkeypatch, tmp_projects_dir, project_row, built, word
@@ -1337,6 +1384,8 @@ def test_a_project_created_before_its_sidecar_listed_the_strings_is_refused(
         tmp_path / "eh_datacenter" / "island_config.json", d / "island_config.json"
     )
     before = _sidecar_bytes(d)
+    # The byte check covers the saved network as well as the sidecars (GK A).
+    assert {"network.nc", "island_config.json", "eh_template.json"} <= set(before)
     r = client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json={})
     assert r.status_code == 422, r.text
     detail = r.json()["detail"]
