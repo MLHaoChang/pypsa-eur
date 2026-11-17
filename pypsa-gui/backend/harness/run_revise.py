@@ -250,14 +250,18 @@ def _finish(path, row_id: str, boot: str, status: str, **fields) -> bool:
     """A `drafting` row of `boot` ends `status`; a row recovered meanwhile
     (`lost`) is left alone."""
 
+    done: list[bool] = []
+
     def change(task):
         row = _row(task, row_id)
         if row is None or row.get("status") != "drafting" or row.get("boot") != boot:
             return False
         row.update(status=status, ended_at=_now(), **fields)
+        done.append(True)
         return None
 
-    return _locked(path, change) is not None
+    _locked(path, change)  # returns the task whether or not `change` wrote
+    return bool(done)
 
 
 def _refuse(

@@ -817,3 +817,371 @@ def test_the_routes_refuse_another_users_run_a_bad_id_and_a_foreign_lock(
             r.status_code == 409
             and r.json()["detail"]["error_kind"] == "project_locked"
         ), url
+
+
+# ── D10: one test per guard the mutants found unpinned ──────────────────────
+
+from harness.protocol import LLMRequest  # noqa: E402
+from harness.providers.fake import FakeProvider  # noqa: E402
+
+
+def test_a_run_without_a_completed_report_step_names_no_report(made):
+    path, root, comment = made
+    update(path, lambda t: t["steps"][-1].update(status="running"))
+    with pytest.raises(run_revise.DraftError) as exc:
+        ask(path, root, comment)
+    assert exc.value.kind == "revision_draft_not_run_report"
+    update(path, lambda t: t["steps"].pop())
+    with pytest.raises(run_revise.DraftError) as exc:
+        ask(path, root, comment)
+    assert exc.value.kind == "revision_draft_not_run_report"
+
+
+def test_a_requested_row_on_a_run_that_is_not_completed_is_not_due(made):
+    path, root, comment = made
+    ask(path, root, comment)
+    assert run_revise.due(record(path))
+    update(path, lambda t: t["run"].update(status="paused"))
+    assert not run_revise.due(record(path))
+    update(path, lambda t: t["run"].update(status="completed"))
+    assert run_revise.claim(path, boot=BOOT) is None  # no lease yet
+
+
+def test_a_request_names_a_run_file_that_exists(made, tmp_path):
+    path, root, comment = made
+    with pytest.raises(run_revise.DraftError) as exc:
+        run_revise.request(
+            tmp_path / "missing.json", root, RID, comment.comment_id, by="u"
+        )
+    assert exc.value.kind == "task_not_found" and exc.value.status == 404
+    update(path, lambda t: t.pop("run"))
+    with pytest.raises(run_revise.DraftError) as exc:
+        ask(path, root, comment)
+    assert exc.value.kind == "task_not_found"
+
+
+def test_the_request_row_says_who_asked_and_when(made):
+    path, root, comment = made
+    row = run_revise.request(path, root, RID, comment.comment_id, by="user-7")
+    assert row["by"] == "user-7" and row["at"]
+
+
+def leased(path, owner, until):
+    update(
+        path,
+        lambda t: (
+            t["run"]
+            .setdefault("runner", {})
+            .update(lease_owner=owner, lease_until=until)
+        ),
+    )
+
+
+def test_a_claim_is_refused_off_the_lease_on_its_edge_and_with_nothing_to_claim(made):
+    path, root, comment = made
+    ask(path, root, comment)
+    leased(path, "boot-b", 2e12)
+    assert run_revise.claim(path, boot=BOOT) is None
+    leased(path, BOOT, 1000.0)
+    assert run_revise.claim(path, boot=BOOT, clock=lambda: 1000.0) is None
+    leased(path, BOOT, 2e12)
+    update(path, lambda t: t["run"].update(status="paused"))
+    assert run_revise.claim(path, boot=BOOT) is None
+    update(path, lambda t: t["run"].update(status="completed"))
+    update(
+        path, lambda t: t["run"]["revisions"]["requests"][0].update(status="drafted")
+    )
+    assert run_revise.claim(path, boot=BOOT) is None
+    assert rows(path)[0]["status"] == "drafted"
+
+
+def test_a_row_lost_meanwhile_stays_lost_and_its_comment_is_not_noted_again(made):
+    path, root, comment = made
+    ask(path, root, comment)
+    leased(path, BOOT, 2e12)
+    row = run_revise.claim(path, boot=BOOT)
+    update(path, lambda t: t["run"]["revisions"]["requests"][0].update(status="lost"))
+    run_revise._refuse(path, root, row, BOOT, "budget", R.DRAFT_BUDGET)
+    assert rows(path)[0]["status"] == "lost" and "error" not in rows(path)[0]
+    assert comment_of(root, comment.comment_id).reasons == []
+    update(
+        path,
+        lambda t: t["run"]["revisions"]["requests"][0].update(
+            status="drafting", boot="boot-b"
+        ),
+    )
+    assert run_revise._finish(path, row["id"], BOOT, "drafted") is False
+    assert rows(path)[0]["status"] == "drafting"
+
+
+@pytest.mark.parametrize(
+    "provider, model", [(Provider(), None), (None, "claude-sonnet-5-5")]
+)
+def test_a_turn_without_a_provider_or_a_model_refuses(made, provider, model):
+    path, root, comment = made
+    ask(path, root, comment)
+    leased(path, BOOT, 2e12)
+    row = run_revise.claim(path, boot=BOOT)
+    assert (
+        run_revise.run_turn(path, root, row, provider=provider, model=model, boot=BOOT)
+        == "refused"
+    )
+    assert rows(path)[0]["error"] == "no_provider"
+    assert comment_of(root, comment.comment_id).reasons == [R.DRAFT_UNAVAILABLE]
+
+
+def test_a_reply_in_the_final_blocks_only_is_drafted(made):
+    path, _root, _c = made
+    drafted(
+        made,
+        FakeProvider(
+            [
+                {
+                    "blocks": [{"type": "text", "text": para()}],
+                    "usage": {"input_tokens": 900, "output_tokens": 60},
+                }
+            ]
+        ),
+    )
+    assert rows(path)[0]["status"] == "drafted"
+
+
+class NoDone:
+    name = "no-done"
+
+    def stream(self, request):
+        yield LLMEvent(type="text_delta", text=para())
+
+
+def test_a_stream_with_no_final_message_is_rejected_as_truncated(made):
+    path, _root, _c = made
+    drafted(made, NoDone())
+    assert rows(path)[0]["status"] == "rejected"
+    assert rows(path)[0]["reasons"] == [run_revise.DRAFT_TRUNCATED]
+
+
+def test_recover_treats_a_lease_at_its_edge_as_lapsed_and_leaves_its_own_rows(made):
+    path, root, comment = made
+    stuck(path, root, comment, owner="boot-old", until=1000.0)
+    assert run_revise.recover(path, boot="boot-old", now=999.0) == 0  # its own row
+    assert run_revise.recover(path, boot=BOOT, now=1000.0) == 1
+    assert rows(path)[0]["status"] == "lost"
+
+
+def test_a_stale_confirm_records_no_reasons(made):
+    path, root, _c = made
+    drafted(made)
+    other = R.add_comment(
+        root, RID, "tidy", R.Anchor(section_id="summary", block_index=1)
+    )
+    R.address(
+        root,
+        RID,
+        other.comment_id,
+        store.version_sha256(root, RID, 1),
+        R.ParagraphEdit(kind="paragraph_text", md="Three units, in all."),
+    )
+    with pytest.raises(R.RevisionError):
+        run_revise.confirm(path, root, rows(path)[0]["id"], report_id=RID, by="u")
+    assert rows(path)[0]["reasons"] == []
+
+
+def test_settling_leaves_a_row_that_is_no_longer_applying_alone(made):
+    path, _root, _c = made
+    drafted(made)
+    row_id = rows(path)[0]["id"]
+    run_revise._settle_applying(path, row_id, "applied")
+    assert rows(path)[0]["status"] == "drafted"
+
+
+# send_reservation: the exact edge of each cap, and a spent metered budget
+
+
+def req(model="claude-sonnet-5-5"):
+    return LLMRequest(
+        model=model,
+        max_tokens=1000,
+        system_blocks=[{"type": "text", "text": "s"}],
+        tools=[],
+        tools_stable=True,
+        messages=[{"role": "user", "content": "x"}],
+        history_stable_anchor=None,
+    )
+
+
+def bound_eur(r):
+    return send_reservation.amount(send_reservation.shape(r), "eur", r.model)
+
+
+def test_a_revision_hold_that_exactly_fills_the_cap_is_admitted(made):
+    path, _root, _c = made
+    leased(path, BOOT, 2e12)
+    r = req()
+    update(
+        path, lambda t: harness_runner._budget(t)["limit"].update(cost_eur=bound_eur(r))
+    )
+    assert send_reservation.admit(path, r, boot=BOOT, scope="revision")
+
+
+def test_a_revision_is_refused_when_the_metered_budget_is_unmetered_with_eur_left(made):
+    path, _root, _c = made
+    leased(path, BOOT, 2e12)
+    update(path, lambda t: harness_runner._budget(t)["used"].update(unmetered=True))
+    with pytest.raises(send_reservation.SendRefused) as exc:
+        send_reservation.admit(path, req(), boot=BOOT, scope="revision")
+    assert exc.value.reason == "budget"
+
+
+def test_run_and_research_holds_that_exactly_fill_their_caps_are_admitted(
+    made, monkeypatch
+):
+    from services import run_envelope
+
+    monkeypatch.setenv(send_reservation.MODE_ENV, "money_eur")
+    path, _root, _c = made
+    update(path, lambda t: t["run"].update(status="running"))
+    leased(path, BOOT, 2e12)
+    r = req()
+    update(
+        path, lambda t: harness_runner._budget(t)["limit"].update(cost_eur=bound_eur(r))
+    )
+    assert send_reservation.admit(path, r, boot=BOOT)
+    update(path, lambda t: t["run"].pop("budgets"))
+    envelope = {
+        "state": "granted",
+        "research": {"allowed": True, "cost_cap_eur": bound_eur(r)},
+    }
+    monkeypatch.setattr(run_envelope, "read", lambda p: envelope)
+    assert send_reservation.admit(path, r, boot=BOOT, scope="research")
+
+
+# runner: nothing to claim, and no provider at all
+
+
+def test_a_revise_with_nothing_claimable_is_idle_and_starts_no_thread(made):
+    path, _root, _c = made
+    runner = harness_runner.Runner(BOOT)
+    assert runner._revise(path, record(path)) == "idle"
+    assert record(path)["task_id"] not in runner._inflight
+
+
+def test_a_run_with_no_provider_refuses_the_draft(made, monkeypatch):
+    from harness.providers import wiring
+
+    path, root, comment = made
+    monkeypatch.setattr(wiring, "_provider_for_profile", lambda profile: (None, None))
+    ask(path, root, comment)
+    drive(harness_runner.Runner(BOOT), path)
+    assert rows(path)[0]["error"] == "no_provider"
+
+
+# revisions: draftable, edit_kinds, preview, note_draft_refused
+
+
+def test_draftable_refuses_a_changed_or_vanished_block(made):
+    path, root, comment = made
+    twin = R.add_comment(root, RID, "also", R.Anchor(section_id="grid", block_index=0))
+    R.address(
+        root,
+        RID,
+        twin.comment_id,
+        store.version_sha256(root, RID, 1),
+        R.ParagraphEdit(kind="paragraph_text", md=SHORTER),
+    )
+    with pytest.raises(R.RevisionError) as exc:
+        R.draftable(root, RID, comment.comment_id)
+    assert exc.value.kind == "revision_stale_base"
+    last = R.add_comment(root, RID, "x", R.Anchor(section_id="summary", block_index=1))
+    doc = store.load_report(root, RID)
+    doc.sections[1].blocks.pop()
+    store.save_version(root, doc)
+    with pytest.raises(R.RevisionError) as exc:
+        R.draftable(root, RID, last.comment_id)
+    assert exc.value.kind == "revision_stale_base"
+
+
+def test_edit_kinds_and_preview_name_each_anchor():
+    doc = _doc()
+    grid = doc.sections[0]
+    assert R.edit_kinds(("table", doc.tables["t1"])) == ("table_text", "table_cells")
+    assert R.edit_kinds(("block", grid.blocks[0])) == ("paragraph_text",)
+    assert R.edit_kinds(("block", grid.blocks[2])) == ()
+    edit = R.ParagraphEdit(kind="paragraph_text", md="x")
+    assert R.preview(doc, R.Anchor(section_id="nope", block_index=0), edit) == [
+        R.NO_EDIT_TARGET
+    ]
+    assert R.preview(doc, R.Anchor(section_id="grid", block_index=2), edit) == [
+        R.OUTSIDE_EDIT_SET
+    ]
+    assert R.preview(doc, R.Anchor(section_id="grid", block_index=1), edit) == [
+        R.EDIT_KIND_MISMATCH
+    ]
+
+
+def test_note_draft_refused_writes_only_an_open_comment_with_a_draft_reason(made):
+    _path, root, comment = made
+    with pytest.raises(ValueError):
+        R.note_draft_refused(root, RID, comment.comment_id, "changes_number")
+    assert R.note_draft_refused(root, RID, "f" * 16, R.DRAFT_BUDGET) is False
+    assert R.note_draft_refused(root, RID, comment.comment_id, R.DRAFT_BUDGET) is True
+    R.withdraw(root, RID, comment.comment_id)
+    before = comment_of(root, comment.comment_id)
+    assert (
+        R.note_draft_refused(root, RID, comment.comment_id, R.DRAFT_UNAVAILABLE)
+        is False
+    )
+    assert comment_of(root, comment.comment_id) == before
+
+
+# routes: every miss is the same 404; the job slot; a refused confirm
+
+
+def test_the_routes_give_one_404_for_every_run_that_is_not_the_callers(
+    client, api_project, project_storage_dir, project_row, seeded_identity, monkeypatch
+):
+    import uuid
+
+    name, root, path, task_id, cid = _route_run(
+        client,
+        api_project,
+        project_storage_dir,
+        project_row,
+        seeded_identity,
+        "rev-drafts-404",
+    )
+    url = f"/api/projects/{name}/reports/{RID}/comments/{cid}/drafts"
+    task = json.loads(path.read_text())
+    bodies = {
+        "version": {**task, "version": 2},
+        "no_run": {k: v for k, v in task.items() if k != "run"},
+        "a_list": [task],
+        "elsewhere": {**task, "project_id": str(uuid.uuid4())},
+    }
+    for label, body in bodies.items():
+        tid = str(uuid.uuid4())
+        (root / "assistant_tasks" / f"{tid}.json").write_text(json.dumps(body))
+        r = client.post(url, json={"task_id": tid})
+        assert (
+            r.status_code == 404
+            and r.json()["detail"]["error_kind"] == "task_not_found"
+        ), label
+    for tid in (task_id.upper(), str(uuid.uuid4())):
+        r = client.post(url, json={"task_id": tid})
+        assert (
+            r.status_code == 404
+            and r.json()["detail"]["error_kind"] == "task_not_found"
+        ), tid
+    base = f"/api/projects/{name}/reports/{RID}/drafts/{'a' * 16}/confirm"
+    gone = client.post(base, json={"task_id": task_id})
+    assert (
+        gone.status_code == 404
+        and gone.json()["detail"]["error_kind"] == "revision_draft_not_found"
+    )
+    from routers import reports as reports_router
+
+    monkeypatch.setattr(reports_router, "_job_slot_busy", lambda: True)
+    busy = client.post(base, json={"task_id": task_id})
+    assert (
+        busy.status_code == 409
+        and busy.json()["detail"]["error_kind"] == "report_job_in_flight"
+    )
