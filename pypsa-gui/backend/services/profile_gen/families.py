@@ -195,7 +195,7 @@ def _load_guard(ctx, component_type: str, component: str,
         )
     if component in DC_SPLIT_LOADS:
         raise DcLoadOwnedError(
-            f"{component!r} carries this project's data-centre load, which follows "
+            f"{component} carries this project's data-centre load, which follows "
             "its data-centre set-up (the IT load and PUE chosen when the "
             "project was created), so a profile cannot replace it"
         )
