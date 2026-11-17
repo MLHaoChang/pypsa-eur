@@ -19,3 +19,10 @@ Gated: GK B (62), UX (23). GK B conditions G2 and G3 in `01-headline-card.md` ap
   for the same project Expert Results reads "not run yet" while Guided reads "Certified". Expert's Summary has no
   study verdict or expected-shortfall figure (`SummaryTab.tsx:262` only links to Adequacy). The parity answer for
   condition 3 should cover the verdict and the reliability figure too, not only "why".
+
+### Owner decision WHY-FULL-1 (2026-11-17, via the coordinator)
+
+Option 2, the full walk first: add a provenance-graph target for the Guided study's figures (backend). Send the plan to
+GK B (63) before any code, and build it TDD. Then the disclosure on top: each input's source and whether it is current,
+the run and its settings, and the unconfirmed Assumed defaults with Edit. The same component goes on Expert's Results
+headline. Slice 03 may run in parallel where it does not overlap.

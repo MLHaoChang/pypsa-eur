@@ -33,3 +33,8 @@ Expert-catalogue design lead (2026-11-17): not in the catalogue's scope (inputs 
 HEADLINE_WORDS-style source read by the strip, Investment, Guided, reports, Compare and the harness, each figure with a
 plain name, unit and basis line, and a mode-parity test. Unlevered vs after-tax NPV needs a finance ruling (GK B)
 before any name is chosen. Left needs-triage for the coordinator.
+
+GK B (63) ruling, 2026-11-17: NPV is one figure. `npv_at_wacc` = `project_post_tax_npv`, unlevered AND after tax, at
+the WACC. Its name is "Project NPV at the WACC, after tax (unlevered)", with "after tax" as the single tax word on every
+surface. The names are fixed in this issue's naming slice, not in #1611. Also: the LCOE card carries no money year
+(`/results/headline_kpis` sends none); add it here.
