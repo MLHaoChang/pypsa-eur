@@ -517,3 +517,41 @@ def test_replace_dir_keeping_empties_all_but_the_kept(tmp_path):
     (live / "sub").mkdir()
     projects._replace_dir_keeping(None, live, ("run",))
     assert sorted(p.name for p in live.iterdir()) == ["run"]
+
+
+# ── mutant survivors (scripts/coord/mutants.py) ─────────────────────────────
+
+
+def test_an_unknown_operation_is_a_programming_error():
+    with pytest.raises(ValueError):
+        PC.entries("copy")
+
+
+def test_a_kind_filter_keeps_folders_out_of_the_file_lists():
+    assert "uploads" not in PC.names(PC.BUNDLE, kind=PC.FILE)
+    assert "network.nc" not in PC.names(PC.BUNDLE, kind=PC.DIR)
+
+
+def test_a_bare_folder_name_is_not_a_member_of_that_folder():
+    assert not PC.allows_member("uploads")
+    assert PC.allows_member("uploads/a.txt")
+
+
+def test_directory_entries_and_one_letter_names_are_neither_allowed_nor_refused():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("network.nc", b"x")
+        zf.writestr(zipfile.ZipInfo("uploads/"), b"")
+        zf.writestr("x", b"one letter, not a drive")
+    allowed, ignored = PC.screen_members(zipfile.ZipFile(io.BytesIO(buf.getvalue())))
+    assert allowed == ["network.nc"] and ignored == ["x"]
+
+
+def test_the_unpacked_cap_defaults_to_four_gib(monkeypatch):
+    import importlib
+
+    monkeypatch.delenv("PYPSA_GUI_MAX_BUNDLE_UNPACKED_BYTES", raising=False)
+    try:
+        assert importlib.reload(PC).MAX_UNPACKED_BYTES == 4 * 1024**3
+    finally:
+        importlib.reload(PC)
