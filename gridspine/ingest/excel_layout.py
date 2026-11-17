@@ -218,6 +218,46 @@ def rescale(value: float, factor: float) -> float:
     return float(Decimal(repr(float(value))) * Decimal(repr(float(factor))))
 
 
+EXACT = "Exact values"
+"""
+The reserved hidden sheet that keeps a scaled cell exact (GK B ask 1, option A, X1-X6).
+A float shown per kW or in % cannot always come back as the same stored float: two
+stored values can show as the same float. For each such cell the writer records the
+key, the float it wrote and the stored float; the reader uses the stored float only
+while the visible cell still equals what was written and the stored float still
+shows as it, so a tampered entry moves a value by at most the gap between two floats
+that show alike.
+"""
+EXACT_COLUMNS = ("sheet", "name", "parameter", "time step", "shown", "stored")
+
+
+def step_key(period: Any, step: Any) -> str:
+    """One time step as the hidden sheet keys it: the same text from the network and from the file."""
+    if hasattr(step, "isoformat"):
+        text = step.isoformat()
+    elif (
+        isinstance(step, int | float)
+        and not isinstance(step, bool)
+        or hasattr(step, "item")
+    ):
+        f = float(step)
+        text = str(int(f)) if f.is_integer() else repr(f)
+    else:
+        text = str(step)
+    return ("" if period is None else str(int(period))) + "|" + text
+
+
+def exact_text(text: Any) -> float | None:
+    """A hidden float, read strictly: a finite float in its repr form, else None (X3)."""
+    if not isinstance(text, str):
+        return None
+    try:
+        f = float(text)
+    except ValueError:
+        return None
+    return f if math.isfinite(f) and repr(f) == text else None
+
+
 # ── cells ────────────────────────────────────────────────────────────────────
 
 #: A text cell starting with one of these could be read as a formula by a spreadsheet.

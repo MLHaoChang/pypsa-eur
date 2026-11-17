@@ -215,24 +215,27 @@ def _am(res) -> list[tuple]:
 def _assert_same(
     a: pypsa.Network, b: pypsa.Network, *, weight_dtype: bool = True
 ) -> None:
+    """Bit for bit: every float compares with ==, no tolerance (GK B ask 1, X6)."""
     pd.testing.assert_index_equal(a.snapshots, b.snapshots)
     pd.testing.assert_frame_equal(
         a.snapshot_weightings,
         b.snapshot_weightings,
         check_freq=False,
         check_dtype=weight_dtype,
+        check_exact=True,
     )
     pd.testing.assert_frame_equal(
         a.investment_period_weightings,
         b.investment_period_weightings,
         check_dtype=False,
         check_index_type=False,
+        check_exact=True,
     )
     for _, _, ln in L.SHEETS:
         x, y = getattr(a, ln), getattr(b, ln)
         assert list(x.index) == list(y.index), ln
         pd.testing.assert_frame_equal(
-            x, y.reindex(columns=x.columns), check_dtype=False, obj=ln
+            x, y.reindex(columns=x.columns), check_dtype=False, check_exact=True, obj=ln
         )
         for attr, frame in getattr(a, f"{ln}_t").items():
             if frame.empty:
@@ -242,6 +245,7 @@ def _assert_same(
                 getattr(b, f"{ln}_t")[attr],
                 check_freq=False,
                 check_dtype=False,
+                check_exact=True,
                 obj=f"{ln}_t.{attr}",
             )
 
@@ -1335,3 +1339,230 @@ def test_an_error_code_text_is_written_as_text(tmp_path, text):
     cell = ws.cell(L.FIRST_DATA_ROW + 1, _col(ws, "nice_name"))
     assert (cell.value, cell.data_type) == (text, "s")
     assert _read(path).network.carriers.at["wind", "nice_name"] == text
+
+
+# ── GK B ask 1, option A (X1-X6): an unedited round trip is bit for bit ──────
+
+#: Values %.16g or a decimal shift would change; the two collision pairs show as
+#: one float at their scale (1e-3, 100), so only the Exact values sheet tells them apart.
+HARD = [
+    0.1 + 0.2,
+    0.187 / 0.4,
+    1.2345678901234567e130,
+    -9.876543210987654e-130,
+    0.001918771917354847,
+    0.0019187719173548471,
+    190446.44222042646,
+    190446.44222042648,
+]
+
+
+def _hard_network(v: float) -> pypsa.Network:
+    n = _network(False)
+    n.generators.loc[
+        "wind 1", ["p_nom", "capital_cost", "efficiency", "marginal_cost"]
+    ] = v
+    n.generators_t.efficiency = pd.DataFrame(
+        {"wind 1": [v, 0.5, 0.25]}, index=n.snapshots
+    )
+    n.loads_t.p_set.iloc[0, 0] = v
+    n.snapshot_weightings.iloc[0, 0] = abs(v)
+    return n
+
+
+@pytest.mark.parametrize("v", HARD, ids=repr)
+def test_an_unedited_round_trip_is_exact_at_every_site(tmp_path, v):
+    n = _hard_network(v)
+    solver = {
+        "discount_rate": v,
+        "multi_investment_periods": False,
+        "investment_periods": [],
+    }
+    res = _read(_write(n, tmp_path, sidecars={"solver_config.json": solver}))
+    out = res.network
+    g = out.generators.loc["wind 1"]
+    assert g["p_nom"] == v  # unscaled static
+    assert g["marginal_cost"] == v  # unscaled static
+    assert g["capital_cost"] == v  # x 1e-3
+    assert g["efficiency"] == v  # x 100
+    assert (
+        out.generators_t.efficiency.at[n.snapshots[0], "wind 1"] == v
+    )  # scaled series
+    assert out.loads_t.p_set.iat[0, 0] == v  # unscaled series
+    assert out.snapshot_weightings.iat[0, 0] == abs(v)  # weighting
+    assert res.sidecars["solver_config.json"]["discount_rate"] == v  # x 100, Horizon
+    assert not [u for u in _um(res) if u[0].startswith(L.EXACT)]
+
+
+def test_a_collision_pair_is_told_apart_only_by_the_exact_sheet(tmp_path):
+    a, b = 0.001918771917354847, 0.0019187719173548471
+    assert L.rescale(a, 1e-3) == L.rescale(b, 1e-3)
+    n = _network(False)
+    n.generators.loc["wind 1", "capital_cost"] = b
+    path = _write(n, tmp_path)
+    wb = openpyxl.load_workbook(path)
+    assert L.EXACT in wb.sheetnames and wb[L.EXACT].sheet_state == "hidden"
+    assert _read(path).network.generators.at["wind 1", "capital_cost"] == b
+    del wb[L.EXACT]  # a user may delete it: a clean fallback to the visible value
+    wb.save(path)
+    res = _read(path)
+    assert res.network.generators.at["wind 1", "capital_cost"] == L.rescale(
+        L.rescale(b, 1e-3), 1e3
+    )
+    assert _um(res) == []
+
+
+def _exact_rows(path):
+    ws = openpyxl.load_workbook(path)[L.EXACT]
+    return ws, [[c.value for c in row] for row in ws.iter_rows(min_row=2)]
+
+
+def _collision(tmp_path, name="w.xlsx"):
+    n = _network(False)
+    n.generators.loc["wind 1", "capital_cost"] = 0.0019187719173548471
+    return _write(n, tmp_path, name=name)
+
+
+def test_an_edited_cell_ignores_its_stale_exact_value(tmp_path):
+    path = _collision(tmp_path)
+    _tamper(path, "Generators", L.FIRST_DATA_ROW, "capital_cost", 2.5)
+    res = _read(path)
+    assert res.network.generators.at["wind 1", "capital_cost"] == 2500.0
+    assert _um(res) == []
+
+
+def test_a_moved_row_keeps_its_exact_value_by_name(tmp_path):
+    path = _collision(tmp_path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb["Generators"]
+    a, b = L.FIRST_DATA_ROW, L.FIRST_DATA_ROW + 1
+    for c in range(1, ws.max_column + 1):  # swap the two rows: a sort in Excel
+        x, y = ws.cell(a, c), ws.cell(b, c)
+        x.value, y.value = y.value, x.value
+        for cell in (x, y):
+            if isinstance(cell.value, str) and cell.value.startswith("="):
+                cell.data_type = "s"
+    wb.save(path)
+    res = _read(path)
+    assert res.network.generators.at["wind 1", "capital_cost"] == 0.0019187719173548471
+    assert _um(res) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "reported"),
+    [
+        ("electrolyser out", False),  # that cell differs: a stale copy, ignored
+        ("ghost", True),  # no such cell: an orphan, reported
+    ],
+)
+def test_an_exact_value_keyed_to_another_asset_is_not_applied(tmp_path, name, reported):
+    path = _collision(tmp_path)
+    wb = openpyxl.load_workbook(path)
+    wb[L.EXACT].cell(2, 2).value = name
+    wb.save(path)
+    res = _read(path)
+    v = res.network.generators.at["wind 1", "capital_cost"]
+    assert v == L.rescale(L.rescale(0.0019187719173548471, 1e-3), 1e3)
+    assert res.network.generators.at["electrolyser out", "capital_cost"] == 0.0
+    orphan = ("Exact values row 2", "no cell matches this exact value; ignored")
+    assert (orphan in _um(res)) is reported
+
+
+@pytest.mark.parametrize(
+    ("col", "value", "reason"),
+    [
+        (6, "5.0", "the exact value does not show as its cell; ignored"),
+        (6, "0.0019187719173548472", "not a readable exact value; ignored"),
+        (6, "nan", "not a readable exact value; ignored"),
+        (6, "inf", "not a readable exact value; ignored"),
+        (6, True, "not a readable exact value; ignored"),
+        (6, 0.0019187719173548471, "not a readable exact value; ignored"),
+        (5, "=1+1", "a formula in the exact values; ignored"),
+    ],
+)
+def test_a_tampered_exact_value_is_reported_and_moves_nothing(
+    tmp_path, col, value, reason
+):
+    """X3: a bad entry falls back to the visible value, so it moves a value by at most 1 ulp."""
+    path = _collision(tmp_path)
+    wb = openpyxl.load_workbook(path)
+    wb[L.EXACT].cell(2, col).value = value
+    wb.save(path)
+    res = _read(path)
+    v = res.network.generators.at["wind 1", "capital_cost"]
+    assert v in (0.001918771917354847, 0.0019187719173548471)
+    assert ("Exact values row 2", reason) in _um(res)
+
+
+def test_a_tampered_exact_value_can_pick_only_a_float_that_shows_alike(tmp_path):
+    """The other collision partner shows as the same cell, so it is accepted: 1 ulp."""
+    path = _collision(tmp_path)
+    wb = openpyxl.load_workbook(path)
+    wb[L.EXACT].cell(2, 6).value = repr(0.001918771917354847)
+    wb.save(path)
+    v = _read(path).network.generators.at["wind 1", "capital_cost"]
+    assert v == 0.001918771917354847
+    assert abs(v - 0.0019187719173548471) == math.ulp(v)
+
+
+def test_a_second_exact_value_for_one_cell_drops_both(tmp_path):
+    path = _collision(tmp_path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[L.EXACT]
+    for c in range(1, len(L.EXACT_COLUMNS) + 1):
+        ws.cell(3, c).value = ws.cell(2, c).value
+    wb.save(path)
+    res = _read(path)
+    assert res.network.generators.at["wind 1", "capital_cost"] == L.rescale(
+        L.rescale(0.0019187719173548471, 1e-3), 1e3
+    )
+    assert (
+        "Exact values row 3",
+        "a second exact value for the same cell; both ignored",
+    ) in _um(res)
+
+
+def test_a_visible_sheet_with_the_reserved_name_is_not_read(tmp_path):
+    path = _collision(tmp_path)
+    wb = openpyxl.load_workbook(path)
+    wb[L.EXACT].sheet_state = "visible"
+    wb.save(path)
+    res = _read(path)
+    assert any(item == L.EXACT and "reserved name" in why for item, why in _um(res))
+    assert res.network.generators.at["wind 1", "capital_cost"] == L.rescale(
+        L.rescale(0.0019187719173548471, 1e-3), 1e3
+    )
+
+
+def test_the_exact_sheet_counts_toward_the_limits(tmp_path, monkeypatch):
+    path = _collision(tmp_path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[L.EXACT]
+    for r in range(3, 40):
+        ws.cell(r, 1).value = "x"
+    wb.save(path)
+    rows = max(
+        openpyxl.load_workbook(path)[s].max_row for s in wb.sheetnames if s != L.EXACT
+    )
+    monkeypatch.setitem(L.LIMITS, "rows", max(rows, 38))
+    with pytest.raises(L.ImportLimitError) as e:
+        _read(path)
+    assert e.value.limit == "rows"
+
+
+def test_the_float_formatter_is_restored_when_the_save_fails(tmp_path, monkeypatch):
+    from openpyxl.cell import _writer
+
+    original = _writer.safe_string
+    seen = []
+
+    def boom(self, *a, **k):
+        seen.append(_writer.safe_string(0.1 + 0.2))
+        raise OSError("disk full")
+
+    monkeypatch.setattr(openpyxl.Workbook, "save", boom)
+    with pytest.raises(OSError):
+        _write(_network(False), tmp_path)
+    assert seen == ["0.30000000000000004"]  # swapped during the save
+    assert _writer.safe_string is original
+    assert _writer.safe_string(0.1 + 0.2) == "0.3"

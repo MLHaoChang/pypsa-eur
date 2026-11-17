@@ -286,6 +286,83 @@ class _Reader:
         }
         self.n = pypsa.Network()
         self.uploaded: dict = {}
+        self._step_keys: dict[int, str] = {}
+        self.exact: dict[tuple[str, str, str, str], tuple[float, float, int]] = {}
+        self._exact_seen: set[tuple[str, str, str, str]] = set()
+
+    # the hidden Exact values sheet (GK B ask 1, X2-X5): untrusted like every sheet
+    def load_exact(self) -> None:
+        sheet = L.EXACT
+        if sheet not in self.s.rows:
+            return  # deleted in Excel, or nothing needed it: the cells are rescaled
+        if sheet not in self.s.hidden:
+            self.unmapped(
+                sheet,
+                f"'{sheet}' is a reserved name for the workbook's hidden sheet; "
+                "this visible sheet was not read",
+            )
+            return
+        rows = self.s.rows[sheet]
+        formulas = self.s.formula_cells.get(sheet, set())
+        width = len(L.EXACT_COLUMNS)
+        duplicates: set[tuple[str, str, str, str]] = set()
+        for r in range(2, len(rows) + 1):
+            cells = [self.s.cell(sheet, r, c) for c in range(1, width + 1)]
+            if all(v is None for v in cells):
+                continue
+            item = f"{sheet} row {r}"
+            if any((r, c) in formulas for c in range(1, width + 1)):
+                self.unmapped(item, "a formula in the exact values; ignored")
+                self.s.reported.update((sheet, r, c) for c in range(1, width + 1))
+                continue
+            where, name, param, step, shown, stored = cells
+            name = "" if name is None else name
+            step = "" if step is None else step
+            fs, ft = L.exact_text(shown), L.exact_text(stored)
+            if (
+                not all(isinstance(x, str) for x in (where, name, param, step))
+                or fs is None
+                or ft is None
+            ):
+                self.unmapped(item, "not a readable exact value; ignored")
+                continue
+            key = (where, name, param, step)
+            if key in self.exact or key in duplicates:
+                self.unmapped(
+                    item, "a second exact value for the same cell; both ignored"
+                )
+                duplicates.add(key)
+                self.exact.pop(key, None)
+                continue
+            self.exact[key] = (fs, ft, r)
+
+    def exact_value(self, key, v: Any, scale: float) -> float | None:
+        """
+        The stored float for a scaled cell left as the writer wrote it, else None
+        (the visible value is rescaled). The entry counts only when the cell still
+        equals the float written and the stored float still shows as that float.
+        """
+        entry = self.exact.get(key)
+        if entry is None:
+            return None
+        self._exact_seen.add(key)
+        shown, stored, r = entry
+        if isinstance(v, bool) or not isinstance(v, int | float) or float(v) != shown:
+            return None  # edited in Excel: the visible value wins
+        if scale == 1.0 or L.rescale(stored, scale) != shown:
+            self.unmapped(
+                f"{L.EXACT} row {r}",
+                "the exact value does not show as its cell; ignored",
+            )
+            return None
+        return stored
+
+    def unused_exact(self) -> None:
+        for key, (_, _, r) in self.exact.items():
+            if key not in self._exact_seen:
+                self.unmapped(
+                    f"{L.EXACT} row {r}", "no cell matches this exact value; ignored"
+                )
 
     def unmapped(self, item: str, reason: str) -> None:
         self.report.unmapped.append(Unmapped(item, reason))
@@ -411,11 +488,16 @@ class _Reader:
                     size_units[name] = str(v)
                     continue
                 try:
-                    values[key] = _convert(
-                        v,
-                        _attr_type(defaults, key),
-                        scale=scale,
-                        inf=_allowed_inf(defaults, key),
+                    exact = self.exact_value((sheet, name, key, ""), v, scale)
+                    values[key] = (
+                        exact
+                        if exact is not None
+                        else _convert(
+                            v,
+                            _attr_type(defaults, key),
+                            scale=scale,
+                            inf=_allowed_inf(defaults, key),
+                        )
                     )
                 except _Bad as exc:
                     self.unmapped(
@@ -537,7 +619,12 @@ class _Reader:
                     if key == "discount_rate":
                         if (self.s.cell(sheet, r, 3) or "") != unit:
                             raise _Bad(f"the unit must be '{unit}'")
-                        solver[key] = _convert(v, float, scale=scale)
+                        exact = self.exact_value((sheet, "", key, ""), v, scale)
+                        solver[key] = (
+                            exact
+                            if exact is not None
+                            else _convert(v, float, scale=scale)
+                        )
                     elif key == "multi_investment_periods":
                         solver[key] = _convert(v, bool, scale=1.0)
                     elif key == "investment_periods":
@@ -676,6 +763,7 @@ class _Reader:
             steps.append(step)
             periods.append(period)
             keep_rows.append(r)
+            self._step_keys[r] = L.step_key(period, step)
         if not keep_rows:
             return
         if "period" in time_cols:
@@ -731,7 +819,12 @@ class _Reader:
                         blanks += 1
                         vals.append(static)
                         continue
-                    vals.append(_convert(v, float, scale=scale))
+                    exact = self.exact_value(
+                        (sheet, f"{cls}:{asset}", attr, self._step_keys[r]), v, scale
+                    )
+                    vals.append(
+                        exact if exact is not None else _convert(v, float, scale=scale)
+                    )
             except _Bad as exc:
                 self.unmapped(shown, f"{exc}; the column was not read")
                 continue
@@ -884,9 +977,10 @@ def _read_input_workbook(
     sheets: _Sheets, report: ImportReport, options: Mapping[str, Any]
 ) -> tuple[pypsa.Network, dict]:
     rd = _Reader(sheets, report, options)
+    rd.load_exact()
     solver = rd.horizon()
     kind = solver.pop("snapshot_kind", "dates")
-    known = {L.ABOUT, L.TIME_SERIES, L.HORIZON, L.LISTS, L.UPLOADED} | set(
+    known = {L.ABOUT, L.TIME_SERIES, L.HORIZON, L.LISTS, L.UPLOADED, L.EXACT} | set(
         L.CLASS_OF_SHEET
     )
     for name in sheets.names:
@@ -900,6 +994,7 @@ def _read_input_workbook(
     rd.periods(solver)
     rd.uploaded_sheet()
     rd.meta()
+    rd.unused_exact()
     for sheet, r, c in sheets.unread_formulas():
         rd.unmapped(
             f"{sheet} › cell {get_column_letter(c)}{r}",

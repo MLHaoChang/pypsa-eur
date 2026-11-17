@@ -12,9 +12,11 @@ contract (export, import, the same network and sidecars).
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import math
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -71,6 +73,59 @@ def _cell_value(v: Any, scale: float) -> Any:
     if isinstance(v, pd.Timestamp):
         return v.isoformat()
     return str(v)
+
+
+def _scaled(v: Any, scale: float, exact: list, key: tuple[str, str, str, str]) -> Any:
+    """
+    The cell value for a stored `v` shown at `scale`. When the shown float would not
+    read back as `v` (two stored floats can show alike), the hidden Exact values
+    sheet gets (key, shown, stored) so an unedited round trip stays exact.
+    """
+    shown = _cell_value(v, scale)
+    if scale != 1.0 and isinstance(shown, float) and not isinstance(v, bool):
+        stored = float(v)
+        if L.rescale(shown, 1.0 / scale) != stored:
+            exact.append((*key, repr(shown), repr(stored)))
+    return shown
+
+
+def _write_exact(wb, exact: list) -> None:
+    ws = wb.create_sheet(L.EXACT)
+    ws.sheet_state = "hidden"
+    for j, label in enumerate(L.EXACT_COLUMNS, start=1):
+        L.put(ws, 1, j, label)
+    for i, row in enumerate(exact, start=2):
+        for j, v in enumerate(row, start=1):
+            L.put(ws, i, j, str(v))
+
+
+_SAVE_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _repr_floats():
+    """
+    Save floats with repr (17 significant digits) instead of openpyxl's "%.16g", so a
+    cell holds the stored float exactly (X1). openpyxl has no supported hook for
+    this, so the writer module's `safe_string` is swapped under a lock and always
+    restored. Another openpyxl save in this process during the swap also writes
+    repr floats: harmless, as the text is more exact, not different.
+    """
+    from openpyxl.cell import _writer
+
+    with _SAVE_LOCK:
+        original = _writer.safe_string
+
+        def exact(value):
+            if isinstance(value, float) and math.isfinite(value):
+                return repr(float(value))
+            return original(value)
+
+        _writer.safe_string = exact
+        try:
+            yield
+        finally:
+            _writer.safe_string = original
 
 
 def _sheet_columns(
@@ -162,7 +217,7 @@ def _size_units(n, cls: str, names, size_unit_of) -> list[str] | None:
 
 
 def _write_component(
-    wb, n, cls: str, catalogue, *, template: bool, custom, lists, size_unit_of
+    wb, n, cls: str, catalogue, *, template: bool, custom, lists, size_unit_of, exact
 ) -> int:
     table = getattr(n, L.LIST_NAME[cls])
     if not template and table.empty and cls not in ("Bus", "Generator", "Load", "Line"):
@@ -182,7 +237,12 @@ def _write_component(
             elif c.key == L.SIZE_UNIT_KEY:
                 v = sizes[i]
             elif c.key in table.columns:
-                v = _cell_value(table.at[name, c.key], c.scale)
+                v = _scaled(
+                    table.at[name, c.key],
+                    c.scale,
+                    exact,
+                    (L.SHEET_OF[cls], name, c.key, ""),
+                )
             else:
                 v = None
             L.put(ws, r, j, v)
@@ -260,7 +320,7 @@ def _snapshot_kind(index) -> str:
 
 
 def _write_time_series(
-    wb, n, catalogue: Mapping[str, Sequence[L.Column]], user_ts: Mapping
+    wb, n, catalogue: Mapping[str, Sequence[L.Column]], user_ts: Mapping, exact: list
 ) -> int:
     from openpyxl.styles import Font
 
@@ -317,8 +377,10 @@ def _write_time_series(
                 jj,
                 v.isoformat() if isinstance(v, pd.Timestamp) else _cell_value(v, 1.0),
             )
-        for k, (_, _, _, col, s) in enumerate(series):
-            L.put(ws, r, first_series + k, _cell_value(s.iat[i], col.scale))
+        step = L.step_key(period, step)
+        for k, (cls, _, name, col, s) in enumerate(series):
+            key = (L.TIME_SERIES, f"{cls}:{name}", col.key, step)
+            L.put(ws, r, first_series + k, _scaled(s.iat[i], col.scale, exact, key))
     ws.freeze_panes = ws.cell(row=L.TS_FIRST_DATA_ROW, column=first_series)
     if elsewhere:
         _write_uploaded(wb, elsewhere)
@@ -382,7 +444,7 @@ def _write_uploaded(wb, elsewhere: list) -> None:
 # ── horizon and finance ──────────────────────────────────────────────────────
 
 
-def _write_horizon(wb, n, solver: Mapping, template: bool) -> None:
+def _write_horizon(wb, n, solver: Mapping, template: bool, exact: list) -> None:
     from openpyxl.styles import Font
 
     ws = wb.create_sheet(L.HORIZON)
@@ -405,7 +467,9 @@ def _write_horizon(wb, n, solver: Mapping, template: bool) -> None:
             ws,
             i,
             2,
-            v * scale if isinstance(v, int | float) and not isinstance(v, bool) else v,
+            _scaled(v, scale, exact, (L.HORIZON, "", key, ""))
+            if isinstance(v, int | float) and not isinstance(v, bool)
+            else v,
         )
         L.put(ws, i, 3, unit or None)
         L.put(ws, i, 4, key)
@@ -518,6 +582,7 @@ def write_workbook(
     about = wb.active
     about.title = L.ABOUT
     lists = _write_lists(wb, n)
+    exact: list[tuple[str, ...]] = []
     counts: dict[str, int] = {}
     sheets: list[str] = []
     for cls, sheet, _ in L.SHEETS:
@@ -531,6 +596,7 @@ def write_workbook(
             custom=tuple(custom_columns.get(cls, ())),
             lists=lists,
             size_unit_of=size_unit_of,
+            exact=exact,
         )
         if len(wb.sheetnames) > before:
             sheets.append(sheet)
@@ -548,18 +614,21 @@ def write_workbook(
         counts[L.TIME_SERIES] = 0
     else:
         counts[L.TIME_SERIES] = _write_time_series(
-            wb, n, columns, sidecars.get(L.SIDECAR_USER_TS) or {}
+            wb, n, columns, sidecars.get(L.SIDECAR_USER_TS) or {}, exact
         )
     sheets.append(L.TIME_SERIES)
-    _write_horizon(wb, n, sidecars.get(L.SIDECAR_SOLVER) or {}, template)
+    _write_horizon(wb, n, sidecars.get(L.SIDECAR_SOLVER) or {}, template, exact)
     sheets.append(L.HORIZON)
     meta = (sidecars.get(L.SIDECAR_USER_TS) or {}).get("$meta")
     if meta:
         # Provenance of uploaded series: kept for the round trip, in the hidden Lists sheet.
         L.put(wb[L.LISTS], 1, 4, "$meta")
         L.put(wb[L.LISTS], 2, 4, json.dumps(meta, sort_keys=True, default=str))
+    if exact:
+        _write_exact(wb, exact)
     wb.move_sheet(L.LISTS, offset=len(wb.sheetnames))
     _write_about(about, n, sheets, counts, template)
     buf = io.BytesIO()
-    wb.save(buf)
+    with _repr_floats():
+        wb.save(buf)
     return buf.getvalue()
