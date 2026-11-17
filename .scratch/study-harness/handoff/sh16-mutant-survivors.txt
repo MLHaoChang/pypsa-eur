@@ -1,0 +1,43 @@
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:116  if not buses: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:123  if feed is None: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:182  if env.ctx is None or env.project is None: → if not (env.ctx is None or env.project is None):
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:182  if env.ctx is None or env.project is None: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:232  if units.empty: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:312  if out is None: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:315  if line['status'] == 'missing': → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:320  if any((r['lost_t_per_year'] is None for r in rows)): → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:337  if store not in n.stores.index or store not in n.stores_t.e.columns: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:340  if not all((math.isfinite(float(v)) for v in e)): → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:50  if name not in frame.columns: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:128  if terms is None: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:174  (saved if isinstance(saved, dict) else {}).get('profile') or ce.DEFAULTS['profile'] → (saved if isinstance(saved, dict) else {}).get('profile') and ce
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:174  (saved if isinstance(saved, dict) else {}).get('profile') or ce.DEFAULTS['profile'] → ce.DEFAULTS['profile']
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:174  (saved if isinstance(saved, dict) else {}).get('profile') or ce.DEFAULTS['profile'] → (saved if isinstance(saved, dict) else {}).get('profile')
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:182  env.ctx is None or env.project is None → env.ctx is None and env.project is None
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:182  env.ctx is None or env.project is None → env.project is None
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:182  env.ctx is None or env.project is None → env.ctx is None
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:249  not fails and int(total['unknown_count']) → not fails
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:337  store not in n.stores.index or store not in n.stores_t.e.columns → store not in n.stores.index and store not in n.stores_t.e.columns
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:337  store not in n.stores.index or store not in n.stores_t.e.columns → store not in n.stores_t.e.columns
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:337  store not in n.stores.index or store not in n.stores_t.e.columns → store not in n.stores.index
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:64  col.startswith('bus') and col[3:].isdigit() → col.startswith('bus') or col[3:].isdigit()
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:64  col.startswith('bus') and col[3:].isdigit() → col[3:].isdigit()
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:64  col.startswith('bus') and col[3:].isdigit() → col.startswith('bus')
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:80  if values is None: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:88  if frame is None: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:91  if values is None: → if False:
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:182  env.ctx is None → env.ctx is not None
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:182  env.project is None → env.project is not None
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:198  r.get('motor_start') or {} → r.get('motor_start')
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:202  r['verdict'] == gr.RULE_MOTOR_START['otherwise'] and r['project_value'] is not None → r['verdict'] == gr.RULE_MOTOR_START['otherwise'] or r['project_v
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:202  r['verdict'] == gr.RULE_MOTOR_START['otherwise'] and r['project_value'] is not None → r['project_value'] is not None
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:202  r['verdict'] == gr.RULE_MOTOR_START['otherwise'] and r['project_value'] is not None → r['verdict'] == gr.RULE_MOTOR_START['otherwise']
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:316  '; '.join(line['missing']) or 'the lost production is not readable' → '; '.join(line['missing']) and 'the lost production is not readable'
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:316  '; '.join(line['missing']) or 'the lost production is not readable' → 'the lost production is not readable'
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:316  '; '.join(line['missing']) or 'the lost production is not readable' → '; '.join(line['missing'])
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:120  math.isfinite(v) and v >= 0 → v >= 0
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:240  vn is not None → vn is None
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:120  v >= 0 → v > 0
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:331  ctx.solver_state or {} → ctx.solver_state and {}
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:331  ctx.solver_state or {} → {}
+SURVIVED  pypsa-gui/backend/services/run_gates_concentrator.py:331  ctx.solver_state or {} → ctx.solver_state
