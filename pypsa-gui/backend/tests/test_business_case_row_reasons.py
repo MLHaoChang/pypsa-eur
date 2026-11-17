@@ -9,6 +9,7 @@ all-or-nothing)."""
 
 from __future__ import annotations
 
+import functools
 import json
 import types
 from pathlib import Path
@@ -62,9 +63,14 @@ def _case(lines=None, outputs=None, ic=None, pack=PACK, rd=30.0):
     return r, p, got
 
 
+@functools.cache
+def _knocked(name):
+    return _case(**KNOCK[name][0])
+
+
 def _knock(name):
-    args, want = KNOCK[name]
-    r, p, got = _case(**args)
+    want = KNOCK[name][1]
+    r, p, got = _knocked(name)
     if want[1] is None:  # the incentives' own first code
         want = (want[0], r.reasons["incentives"][0])
     return p, got, {"section": want[0], "code": want[1]}
@@ -120,6 +126,26 @@ def test_a_linked_output_not_evaluated_follows_its_line():
     # The tax waits on the operating section: the item is the operating input itself.
     assert got["revenue"][0] in got["tax"]
     assert {"section": "tax", "code": "operating_not_established"} not in got["tax"]
+
+
+def test_a_linked_line_without_the_outputs_map_names_the_line_alone():
+    r, p, _ = _knocked("op")
+    assert row_reasons(r, p)["revenue"] == [
+        {"section": "operating", "code": "line_not_established:nh3"}
+    ]
+
+
+def test_sections_that_wait_on_each_other_end_instead_of_looping():
+    r, p, _ = _case()
+    fake = types.SimpleNamespace(
+        op=r.op,
+        sections={"tax": "not_established", "debt": "not_established"},
+        reasons={"tax": ["debt_not_established"], "debt": ["tax_not_established", "x"]},
+    )
+    assert row_reasons(fake, PnL(p.years, p.streams, {"tax": None})) == {
+        "tax": [{"section": "debt", "code": "tax_not_established"},
+                {"section": "debt", "code": "x"}]
+    }
 
 
 def test_c2_two_missing_inputs_are_both_named_in_table_order():
