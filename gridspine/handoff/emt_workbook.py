@@ -90,6 +90,7 @@ PARAM_UNITS = {
     "tap_neutral": "-",
     "tap_min": "-",
     "tap_max": "-",
+    "tap_pos": "-",
     "tap_step_percent": "%",
     "length_km": "km",
     "r_ohm_per_km": "ohm/km",
@@ -173,6 +174,7 @@ SHEET_FIELDS = {
         "tap_neutral",
         "tap_min",
         "tap_max",
+        "tap_pos",
         "tap_step_percent",
     ),
     "earthing_transformers": ("x0_ohm", "r_n_ohm"),
@@ -223,11 +225,14 @@ _TAP_FIELDS = (
     "tap_neutral",
     "tap_min",
     "tap_max",
+    "tap_pos",
     "tap_step_percent",
 )
-_NO_TAP_WHY = (
-    "tap-changer data (type, side, range, neutral tap, step) not held: supply it, "
-    "or confirm a fixed ratio, for the EMT model's ratio control (TRGC 05, 17)"
+_TAP_KEYS = ("changer", "side", "neutral", "min", "max", "pos")
+_NO_TAP_WHY = "no tap changer entered; modelled at nominal ratio"
+_TAP_NOTE = (
+    "tap_pos is the position the study used (neutral when none was entered); a campus "
+    "study that moves on-load taps lists its re-check positions in campus_invest_taps.csv"
 )
 _NEUTRAL_R_WHY = "neutral resistor of a resistance-earthed winding, for zero-sequence and earth-fault studies (TRGC 17)"
 #: Per control mode, the island parameters an EMT converter model needs
@@ -373,9 +378,7 @@ def workbook(campus) -> tuple:
             )
         tap = campus.taps.get(name)
         if tap:
-            for f, k in zip(
-                _TAP_FIELDS[:5], ("changer", "side", "neutral", "min", "max")
-            ):
+            for f, k in zip(_TAP_FIELDS, _TAP_KEYS):
                 held[(name, f)] = (tap[k], UNTAGGED)
             step = held.get((name, "tap.step_percent"))
             if step:
@@ -385,18 +388,25 @@ def workbook(campus) -> tuple:
         for side, kind in campus.earthing.get(name, {}).items():
             if kind == "resistance":
                 need[f"r_n_{side}_ohm"] = _NEUTRAL_R_WHY
+        fixed.update(_earthing_columns(name, w, campus.assumptions))
+        fixed["tap_note"] = _TAP_NOTE if tap else None
         s.add(name, fixed, need)
-    sheets["transformers"] = (s, ["hv_bus", "lv_bus"])
+    sheets["transformers"] = (s, _TRAFO_FIXED)
 
     s = _Sheet("earthing_transformers", held)
     for name, e in campus.earthing_transformers.sort_index().iterrows():
         solid = pd.isna(e["r_n_ohm"])
+        kv = float(net.bus.loc[net.bus["name"] == e["bus"], "vn_kv"].iloc[0])
         s.add(
             str(name),
-            {"bus": e["bus"], "neutral": "solid" if solid else "resistance"},
+            {
+                "bus": e["bus"],
+                "referred_to_kv": kv,
+                "neutral": "solid" if solid else "resistance",
+            },
             _schema(("x0_ohm",)),
         )
-    sheets["earthing_transformers"] = (s, ["bus", "neutral"])
+    sheets["earthing_transformers"] = (s, ["bus", "referred_to_kv", "neutral"])
 
     s = _Sheet("cables", held)
     for _, ln in net.line.sort_values("name").iterrows():
@@ -447,6 +457,39 @@ def workbook(campus) -> tuple:
     return frames, pd.DataFrame(gaps, columns=SUPPLY_COLUMNS)
 
 
+_TRAFO_FIXED = [
+    "hv_bus",
+    "lv_bus",
+    "earthing_hv",
+    "earthing_hv source",
+    "earthing_lv",
+    "earthing_lv source",
+    "assumed",
+    "tap_note",
+]
+
+
+def _earthing_columns(name, w, assumptions) -> dict:
+    """
+    Each winding's neutral earthing mode (``delta``, ``isolated``, ``solid`` or
+    ``resistance``), its source (``assumed`` when the ingest took it, with the
+    reason in ``assumed``), and every assumption the campus made for the unit.
+    """
+    own = [a for a in assumptions if a.startswith(f"{name}: ")]
+    out = {"assumed": "; ".join(own) or None}
+    for side in ("hv", "lv"):
+        mode = (w or {}).get(f"{side}_earth")
+        given = None if not w else "delta" if w[side] == "D" else mode
+        took = any(
+            a.startswith(f"{name}: {side.upper()} neutral earthing") for a in own
+        )
+        out[f"earthing_{side}"] = given
+        out[f"earthing_{side} source"] = (
+            None if given is None else "assumed" if took else UNTAGGED
+        )
+    return out
+
+
 def _vector_group(w) -> str:
     """
     The IEC vector group of the campus windings (``YN`` when the star
@@ -473,8 +516,8 @@ def rscad_notes() -> str:
         "| gensets | `gensets.csv` | synchronous machine, governor and exciter data |",
         "| converters | `converters.csv` | converter ratings, control mode and limits; the manufacturer's "
         "real-time model replaces the EMT model in HIL |",
-        "| transformers | `transformers.csv` | transformer models incl. saturation (to be supplied), tap changer and winding neutral resistors |",
-        "| earthing_transformers | `earthing_transformers.csv` | zero-sequence earth reference: source impedance and neutral resistor |",
+        "| transformers | `transformers.csv` | transformer models incl. saturation (to be supplied), winding neutral earthing modes and resistors, tap changer |",
+        "| earthing_transformers | `earthing_transformers.csv` | zero-sequence earth reference: source impedance and neutral resistor, referred to the bus kV (header only when none entered) |",
         "| cables | `cables.csv` | PI or travelling-wave cable sections |",
         "| filters | `filters.csv` | capacitor banks and shunt reactors |",
         "| protection_relays | `protection_relays.csv` | relay settings for the protection under test |",
