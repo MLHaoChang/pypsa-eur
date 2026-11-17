@@ -23,7 +23,7 @@ from tests.test_harness_run_skeleton import RUN
 from tests.test_harness_runner import detached, fake_report_provider  # noqa: F401
 
 REF = "grid_only@1"
-FIXTURES = (granted, rated, profile)
+FIXTURES = (granted, rated, profile, fake_report)
 
 
 @pytest.fixture(params=["3bus", "ieee14"])
