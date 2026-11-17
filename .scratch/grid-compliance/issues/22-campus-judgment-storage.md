@@ -20,6 +20,9 @@ mark a deliverable "judged" from it.
 
 ## What to build
 
+0. **The trigger is this issue's.** Nothing calls `judge_pack_results` yet: no route, job or
+   UI action runs the read-back. This issue adds the call (when a pack's results are added to
+   a campus run, or on an explicit "judge pack" action) as well as the storage below.
 1. Backend: after a pack read-back, record the judgment against the campus run it was judged
    for (the pack manifest's `data_hash` and contract version, the ratings and their source, the
    per-case status and rows), reading `judgment.json` as written by GC-07, not re-judging.
@@ -29,6 +32,8 @@ mark a deliverable "judged" from it.
 
 ## Done when
 
+- The read-back runs from the app on a campus run's pack; a test drives it end to end through
+  the trigger, not by calling `judge_pack_results` directly.
 - A judged pack's judgment is stored against its campus run and served, with the data hash,
   contract version and rating sources it carries; a test reads back exactly what
   `judgment.json` holds.

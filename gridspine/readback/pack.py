@@ -329,10 +329,7 @@ def _judge_one(
     if why is None:
         take("connected", frame.channel(CONNECTED), "status")
     view = ChannelFrame(frame.time, channels, units, frame.source)
-    try:
-        result = judge(view, jc, profile)
-    except ContractError as exc:
-        return _unknown_case(case.case_id, case.kind, f"not judged: {exc}")
+    result = judge(view, jc, profile)
     for row in result["rows"]:
         if note:
             row["detail"] = f"{row['detail']}; {note}" if row["detail"] else note
@@ -382,9 +379,12 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
                 _unknown_case(case.case_id, case.kind, f"{label} unreadable: {exc}")
             )
             continue
-        cases.append(
-            _judge_one(case, frame, profile, ratings, manifest["contract_version"])
-        )
+        try:
+            cases.append(
+                _judge_one(case, frame, profile, ratings, manifest["contract_version"])
+            )
+        except ContractError as exc:
+            cases.append(_unknown_case(case.case_id, case.kind, f"not judged: {exc}"))
     stamp = {
         "data_hash": manifest["data_hash"],
         "contract_version": manifest["contract_version"],

@@ -19,13 +19,18 @@ and reads every MVA-based case "unknown" unless the caller states a rated MVA an
 
 ## What to build
 
-1. GC-06: write `rated_mw`, `rated_mva` and `rating_source` into `manifest.json`, under the
-   `data_hash` (in a hashed file, so the hash binds them).
+1. GC-06: write `rated_mw`, `rated_mva`, `rating_source` and the identity of the campus run the
+   pack was built from (`campus_data_hash`, the campus model set's `data_hash`) into
+   `manifest.json`, under the pack's `data_hash` (in a hashed file, so the hash binds them).
 2. GC-07 pack read-back: take the ratings from the manifest when present, name
    `rating_source` in every P- and Q-based row and the judgment header, and refuse a pack whose
-   manifest rating is not finite or is ≤ 0.
+   manifest rating is not finite or is ≤ 0. When judged for a campus run
+   (`judge_pack_results`), refuse a pack whose `campus_data_hash` is not that run's, so a
+   pack is never judged on another run's ratings.
 
 ## Done when
 
 - A pack written with ratings is judged on them without caller input, and a changed rating
   changes the `data_hash`.
+- A pack whose `campus_data_hash` differs from the campus run it is judged for is refused,
+  naming both hashes; a test covers it.
