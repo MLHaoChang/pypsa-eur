@@ -22,7 +22,7 @@ function object(value: unknown): Record<string, unknown> | null {
 
 /** LC-02: a plan step's state in words; an unknown state shows as stored. */
 const STEP_WORDS: Record<string, string> = {
-  pending: 'to do', running: 'running', waiting: 'waiting for a job', completed: 'done', failed: 'failed', uncertain: 'needs review',
+  pending: 'to do', running: 'running', waiting: 'waiting for a job', completed: 'done', failed: 'failed', cancelled: 'stopped', uncertain: 'needs review',
 }
 
 /** LC-02: a plan's state in Guided's words; Expert shows the stored state. */

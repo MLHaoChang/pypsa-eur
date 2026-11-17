@@ -370,15 +370,18 @@ def test_queue_step_with_inputs_edited_after_the_solve_is_uncertain(session, bas
     assert stored(root, task['task_id'])['steps'][0]['status'] == 'uncertain'
 
 
-@pytest.mark.parametrize('native', ['failed', 'aborted'])
-def test_queue_step_whose_only_job_failed_is_failed(session, baseline, monkeypatch, native):
+@pytest.mark.parametrize('native,status', [('failed', 'failed'), ('aborted', 'cancelled')])
+def test_queue_step_whose_only_job_failed_is_failed(session, baseline, monkeypatch, native, status):
+    """A stopped (aborted) job did not fail: its step reads cancelled (live-voice 16)."""
     from harness import continuation
+    from services import assistant_tasks
     _, project_id, root = baseline
     task, ticket, path, _ = sweep_step(session, project_id, 'q-' + native, [sweep_case()])
     monkeypatch.setattr(continuation, '_queue_job_status', lambda job: native)
     continuation.settle_queue_from_record(path, ticket)
     step = stored(root, task['task_id'])['steps'][0]
-    assert step['status'] == 'failed' and native in step['error']
+    assert step['status'] == status and step['job']['outcome'] == native
+    assert native in step['error'] if status == 'failed' else step['error'] == assistant_tasks.STOPPED_ERROR
 
 
 def test_queue_step_with_mixed_outcomes_is_uncertain_not_failed(session, baseline, monkeypatch):

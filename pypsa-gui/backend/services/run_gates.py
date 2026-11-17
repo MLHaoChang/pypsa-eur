@@ -1099,7 +1099,7 @@ def _dc_campus_study(env):
     """The run's own campus job: `done` only once its step settled completed."""
     from services import run_actions
     step = run_actions.latest(env.task, run_actions.CAMPUS)
-    if step is None or step["status"] not in ("completed", "failed"):
+    if step is None or step["status"] not in ("completed", "failed", "cancelled"):
         return None
     return "done" if step["status"] == "completed" else ((step.get("job") or {}).get("outcome") or "failed")
 
