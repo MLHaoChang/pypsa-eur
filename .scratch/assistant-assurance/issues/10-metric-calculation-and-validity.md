@@ -127,3 +127,19 @@ S1b adds that reader: a checked losses profile (`branch-losses/1`) built on `_va
 - a short or zero-row frame never certifies;
 - `loss_pct_of_demand` needs every load complete; the denominator guard is the existing near-zero rule;
 - an independent hand-worked LP-with-losses oracle and the S5 ledger rows.
+
+### 2026-11-17: GK B S1b plan GO, conditions L1–L10 (builder session_01G7qCujZDfEnPrXW8Munor4)
+
+GK B (65) gave GO on S1b (`branch-losses/1`, `harness/losses_calculations.py`), to open after #1644 merges. The coordinator allowed registration in `harness/calculations.py` (G7, option 1: opt-in like the other post-pilot profiles).
+- L1: validity is read inside the answer's window only. The answer names its window, and an empty window refuses `unsupported_snapshot_scope`. Tests: a NaN outside the window does not block; one inside does.
+- L2: LP loss variables are ≥ 0. A value below −tolerance makes the branch `losses_invalid` (unavailable, never clipped). A value within tolerance rounds to 0 and is disclosed. Boundary tested on both sides.
+- L3: one weighting, the same column and helper as branch-loading. A test pins a case where generator and objective weights differ.
+- L4: the disclosure states the demand denominator exactly (energy-weighted `loads_t.p`, loads only; storage and link consumption excluded, said in the answer and tested). A negative or non-finite load counts as incomplete.
+- L5: `ac_pf_present` refuses on presence, read with the predicate the other readers use.
+- L6: the assurance_contracts.v1.json profile/definitions and the assurance_scope Literal get a GK B contract re-review (AA-A04-REVIEW-1), listed in the PR body. A test shows every contract reader accepts the entry (#1132 F1), and the existing profiles are pinned byte-equal.
+- L7: slot reasons are registered exactly as branch-loading's are. Any reason that can surface as a tool_error frame gets a `tool-error-kinds.d` fragment, with the manifest test at the trial merge.
+- L8: an independent oracle, hand-worked from the solved flows and piecewise parameters in the test, never via the reader's helpers. Losses off reads unavailable, not 0.
+- L9: reader-only, with no LP input or fingerprint change. Smoke inventory and control matrix `--check` at the trial merge.
+- L10: above ~1,500 lines excluding fixtures, split into the reader first and the wiring second (PR-SIZE-1).
+
+Also from S2 (#1680, GK B 65 point c): ticket to record the solver options actually applied at the solve call in `solver_service.py` (owned by #1663 / DGS-SEED-1). Until then, a gap that cannot be read from the effective options reads `solve_gap_not_recorded`.
