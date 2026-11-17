@@ -853,6 +853,10 @@ def test_the_step_writes_the_chart_the_droop_on_both_grids_and_the_scorecard(tmp
     assert card.at["q_v_droop", "status_as_is"] in ("pass", "fail")
     assert card.at["voltage_control_modes", "status_as_is"] == "reported"
     assert "S_k''max" in card.at["q_v_droop", "detail"]
+    assert (
+        "c_max on S_k''min / c_min on S_k''max (conservative bracket, not the IEC 60909 pairing)"
+        in card.at["q_v_droop", "detail"]
+    )
     bare = voltage_control_campus(run, "generic_assumed")["scorecard"].set_index(
         "check"
     )

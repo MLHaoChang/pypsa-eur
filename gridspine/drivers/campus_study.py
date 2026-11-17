@@ -225,6 +225,8 @@ REPORTED_REQUIREMENTS_JSON = "campus_reported_requirements.json"
 POC_PQ_CSV = "campus_poc_pq.csv"
 VOLTAGE_CONTROL_LF_CSV = "campus_voltage_control_lf.csv"
 VOLTAGE_CONTROL_CSV = "campus_voltage_control.csv"
+#: How the voltage-control step pairs IEC 60909's c with S_k'' (GK A2, GC-02 V1), stated in its droop row.
+C_BRACKET_NOTE = "c_max on S_k''min / c_min on S_k''max (conservative bracket, not the IEC 60909 pairing)"
 INVESTMENT_CSV = "campus_investment.csv"
 COST_CSV = "campus_cost.csv"
 INVESTED_YAML = "campus_invested.yaml"
@@ -1440,7 +1442,8 @@ def voltage_control_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs
     outcomes = pd.DataFrame(lf_rows, columns=list(OUTCOME_COLUMNS))
     eg = campus.net.ext_grid.iloc[0]
     grid_note = (f"S_k''min {float(eg['s_sc_min_mva']):g} MVA (R/X {float(eg['rx_min']):g}), "
-                 f"S_k''max {float(eg['s_sc_max_mva']):g} MVA (R/X {float(eg['rx_max']):g})")
+                 f"S_k''max {float(eg['s_sc_max_mva']):g} MVA (R/X {float(eg['rx_max']):g}); "
+                 f"{C_BRACKET_NOTE}")
     if float(eg["s_sc_max_mva"]) == float(eg["s_sc_min_mva"]):
         grid_note += ": no separate S_k''max entered, so the strong grid differs from the weak one only by c"
     card = scorecard_rows(code, chart, outcomes, why, grid_note=grid_note)
