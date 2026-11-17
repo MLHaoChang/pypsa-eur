@@ -27,6 +27,7 @@ The rate is finite and above -100 %, the start year is a whole year, required
 with a rate and not after the first period (R5), and every derived factor
 must come out finite and above 0, as a multiplier must.
 """
+
 from __future__ import annotations
 
 import math
@@ -57,10 +58,14 @@ def canonical_rates(rates) -> dict:
 def effective_periods(cfg, n) -> list[int]:
     """The periods the LP solves: the config's ``investment_periods`` override
     when multi-period and set (``assumptions`` step 4), else the network's."""
-    if getattr(cfg, "multi_investment_periods", False) and getattr(cfg, "investment_periods", None):
+    if getattr(cfg, "multi_investment_periods", False) and getattr(
+        cfg, "investment_periods", None
+    ):
         return sorted(int(p) for p in cfg.investment_periods)
     periods = getattr(n, "investment_periods", None) if n is not None else None
-    return sorted(int(p) for p in periods) if periods is not None and len(periods) else []
+    return (
+        sorted(int(p) for p in periods) if periods is not None and len(periods) else []
+    )
 
 
 def load_growth_problems(rates: dict, base_year, periods: list) -> list[str]:
@@ -71,10 +76,14 @@ def load_growth_problems(rates: dict, base_year, periods: list) -> list[str]:
         if isinstance(rate, bool) or not isinstance(rate, (int, float)):
             problems.append(f"Load growth ({carrier}): must be a number in % per year")
         elif not math.isfinite(rate):
-            problems.append(f"Load growth ({carrier}): must be a finite number in % per year")
+            problems.append(
+                f"Load growth ({carrier}): must be a finite number in % per year"
+            )
         elif rate <= -100.0:
-            problems.append(f"Load growth ({carrier}): must be above -100 % per year "
-                            f"(a fall of 100 % or more leaves no load)")
+            problems.append(
+                f"Load growth ({carrier}): must be above -100 % per year "
+                f"(a fall of 100 % or more leaves no load)"
+            )
     if not rates:
         return problems
     if base_year is None:
@@ -82,7 +91,9 @@ def load_growth_problems(rates: dict, base_year, periods: list) -> list[str]:
     elif isinstance(base_year, bool) or not isinstance(base_year, int):
         problems.append("Growth from year: must be a whole year")
     elif periods and base_year > min(periods):
-        problems.append(f"Growth from year: must not be after the first period ({min(periods)})")
+        problems.append(
+            f"Growth from year: must not be after the first period ({min(periods)})"
+        )
     return problems
 
 
@@ -112,17 +123,27 @@ def _factor(rate: float, years: int, carrier: str, period: int) -> float:
     except OverflowError:
         factor = math.inf
     if not math.isfinite(factor) or factor <= 0.0:
-        raise LoadGrowthError({
-            "code": "load_growth_factor_invalid", "error_kind": "load_growth_factor_invalid",
-            "message": f"Load growth ({carrier}): {rate:g} % per year gives a load multiplier of "
-                       f"{factor:g} in {period}; a multiplier must be a finite number above 0. "
-                       f"Use a smaller rate."})
+        raise LoadGrowthError(
+            {
+                "code": "load_growth_factor_invalid",
+                "error_kind": "load_growth_factor_invalid",
+                "message": f"Load growth ({carrier}): {rate:g} % per year gives a load multiplier of "
+                f"{factor:g} in {period}; a multiplier must be a finite number above 0. "
+                f"Use a smaller rate.",
+            }
+        )
     return factor
 
 
-def derive_load_scalers(periods: list, base_year: int | None, rates: dict,
-                        submitted, stored, stored_derived,
-                        legacy: dict | None = None) -> tuple[dict, dict]:
+def derive_load_scalers(
+    periods: list,
+    base_year: int | None,
+    rates: dict,
+    submitted,
+    stored,
+    stored_derived,
+    legacy: dict | None = None,
+) -> tuple[dict, dict]:
     """``(load_scalers_by_carrier, load_scalers_derived)`` after applying the
     rates. ``submitted`` is the map as this change leaves it (the stored one
     when the change does not touch it); ``stored`` and ``stored_derived`` are
@@ -135,10 +156,18 @@ def derive_load_scalers(periods: list, base_year: int | None, rates: dict,
     out: dict[str, dict] = {}
     out_derived: dict[str, list[str]] = {}
     for carrier in sorted(set(submitted) | set(rates or {})):
-        block_in = submitted.get(carrier) if isinstance(submitted.get(carrier), dict) else {}
-        stored_block = stored.get(carrier) if isinstance(stored.get(carrier), dict) else {}
+        block_in = (
+            submitted.get(carrier) if isinstance(submitted.get(carrier), dict) else {}
+        )
+        stored_block = (
+            stored.get(carrier) if isinstance(stored.get(carrier), dict) else {}
+        )
         was = marks.get(carrier, set())
-        typed = {p: v for p, v in block_in.items() if not (p in was and v == stored_block.get(p))}
+        typed = {
+            p: v
+            for p, v in block_in.items()
+            if not (p in was and v == stored_block.get(p))
+        }
         block = dict(typed)
         new_marks: list[str] = []
         rate = (rates or {}).get(carrier)
@@ -172,20 +201,39 @@ def apply(after: dict, stored_cfg, periods: list) -> dict:
     base_year = after.get("load_growth_base_year")
     problems = load_growth_problems(rates, base_year, periods)
     if problems:
-        raise LoadGrowthError({"code": "load_growth_invalid", "error_kind": "load_growth_invalid",
-                               "message": "; ".join(problems)})
+        raise LoadGrowthError(
+            {
+                "code": "load_growth_invalid",
+                "error_kind": "load_growth_invalid",
+                "message": "; ".join(problems),
+            }
+        )
     scalers, derived = derive_load_scalers(
-        periods, base_year, rates, after.get("load_scalers_by_carrier") or {},
+        periods,
+        base_year,
+        rates,
+        after.get("load_scalers_by_carrier") or {},
         getattr(stored_cfg, "load_scalers_by_carrier", None) or {},
-        getattr(stored_cfg, "load_scalers_derived", None), after.get("load_scalers") or {})
-    return {"load_growth_pct_per_year": rates, "load_scalers_by_carrier": scalers,
-            "load_scalers_derived": derived}
+        getattr(stored_cfg, "load_scalers_derived", None),
+        after.get("load_scalers") or {},
+    )
+    return {
+        "load_growth_pct_per_year": rates,
+        "load_scalers_by_carrier": scalers,
+        "load_scalers_derived": derived,
+    }
 
 
 def _stored_after(cfg) -> dict:
-    return {k: getattr(cfg, k, None) for k in (
-        "load_scalers", "load_scalers_by_carrier", "load_growth_pct_per_year",
-        "load_growth_base_year")}
+    return {
+        k: getattr(cfg, k, None)
+        for k in (
+            "load_scalers",
+            "load_scalers_by_carrier",
+            "load_growth_pct_per_year",
+            "load_growth_base_year",
+        )
+    }
 
 
 def refresh(cfg, periods: list) -> dict:
@@ -207,8 +255,10 @@ def stale_problem(cfg, n) -> str | None:
     except LoadGrowthError as exc:
         return str(exc)
     if fresh["load_scalers_by_carrier"] != (cfg.load_scalers_by_carrier or {}):
-        return ("Load growth: the period load multipliers are out of date for the periods "
-                f"{periods}; open Model Horizon's period economics and set the rate again")
+        return (
+            "Load growth: the period load multipliers are out of date for the periods "
+            f"{periods}; open Model Horizon's period economics and set the rate again"
+        )
     return None
 
 
@@ -222,8 +272,27 @@ def refreshed_config(cfg, network_periods: list):
     from dataclasses import replace
     from types import SimpleNamespace
 
-    periods = effective_periods(cfg, SimpleNamespace(investment_periods=network_periods))
+    periods = effective_periods(
+        cfg, SimpleNamespace(investment_periods=network_periods)
+    )
     fresh = refresh(cfg, periods)
     if all(getattr(cfg, k, None) == v for k, v in fresh.items()):
         return cfg
     return replace(cfg, **fresh)
+
+
+def follow_network(ctx) -> None:
+    """Re-derive the live session's stored multipliers for its network's
+    current periods (homer-parity 04a), for a writer that replaces the network
+    but keeps the solver config: undo, a network import. A refusal leaves the
+    config as it is; the solve's pre-flight check (``stale_problem``) names it."""
+    cfg = ctx.solver_state.get("solver_config")
+    periods = getattr(ctx.network, "investment_periods", None)
+    try:
+        grown = refreshed_config(
+            cfg, [int(p) for p in periods] if periods is not None else []
+        )
+    except LoadGrowthError:
+        return
+    if grown is not cfg:
+        ctx.solver_state["solver_config"] = grown

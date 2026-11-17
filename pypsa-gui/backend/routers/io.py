@@ -261,6 +261,11 @@ def _replace_with(candidate) -> None:
     # The same workspace gets a new network: a COPY of the undo stack keeps the
     # import undoable without touching the outgoing context's own history.
     PyPSAService.reset_network(carry="copy", network=candidate)
+    # The imported network brings its own periods; the kept solver config's
+    # load growth multipliers follow them (homer-parity 04a).
+    from services.solver.load_growth import follow_network
+
+    follow_network(PyPSAService.get_active_context())
     _restore_user_ts({})
 
 

@@ -174,6 +174,11 @@ def apply_undo():
     # An undone series edit leaves its growth placeholder as it was (C3).
     with PyPSAService.get_lock():
         not_restored = growth_placeholders.restore_meta(result["template_meta"])
+        # The undo stack holds the network, not the solver config: the load
+        # growth multipliers follow the restored periods (homer-parity 04a).
+        from services.solver.load_growth import follow_network
+
+        follow_network(PyPSAService.get_active_context())
     change_log_service.log("undo", "Network", "", "Undone last action")
     out = {"undone": True, "remaining": undo_service.depth()}
     if not_restored:
