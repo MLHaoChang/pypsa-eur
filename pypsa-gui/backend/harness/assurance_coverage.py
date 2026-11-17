@@ -157,6 +157,8 @@ FRAME_PROJECTIONS = {
     "tool_result": "projected",
     "tool_error": "projected",
     "tool_progress": "projected",
+    "job_snapshot": "projected",
+    "job_terminal": "projected",
     "ui_event": "projected",
     "session_init": "projected",
     "answer_progress": "software_progress",
