@@ -55,4 +55,16 @@ describe('RunStrip', () => {
     expect(screen.getByTestId('run-strip-readonly')).toBeTruthy()
     expect(screen.queryByTestId('run-status')).toBeNull()
   })
+
+  it('keeps an empty live region mounted, so the first stage is announced', () => {
+    const spy = vi.spyOn(projectRun, 'useProjectRun').mockReturnValue(null)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={qc}><RunStrip /></QueryClientProvider>)
+    const region = screen.getByRole('status')
+    expect(region.textContent).toBe('')
+    spy.mockReturnValue(run)
+    view.rerender(<QueryClientProvider client={qc}><RunStrip /></QueryClientProvider>)
+    expect(screen.getByRole('status')).toBe(region)
+    expect(region.textContent).toBe('Optimisation: Solving')
+  })
 })

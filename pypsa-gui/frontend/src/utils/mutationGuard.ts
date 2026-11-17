@@ -16,8 +16,10 @@ import { canMutate, type ReadOnlyReason } from './lockState'
 export const READ_ONLY_MUTATION_MESSAGE =
   'Read-only: another user is editing this project.'
 
+// Run progress (UX plan GO 4): a blocked control refers to the run strip's
+// line at the top of the tab, in the same words.
 export const SOLVING_MUTATION_MESSAGE =
-  'Read-only: this project is solving in the queue. It becomes editable when the solve finishes.'
+  'Being solved: edits open again when the run ends. The line at the top of the tab shows its progress.'
 
 const MESSAGE_BY_REASON: Record<ReadOnlyReason, string | null> = {
   writable: null,

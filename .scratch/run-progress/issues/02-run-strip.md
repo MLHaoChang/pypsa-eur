@@ -20,6 +20,10 @@ Spec: [../spec.md](../spec.md) §1, §2, §4; UX plan GO conditions (a), 3, 4, 8
   read-only banner sits): the status line plus, while the project is being
   solved, "Being solved: edits open again when the run ends." (RUN-READONLY-1).
   `LockBanner` yields for the solving reason, so it is one line, not two.
+- Expert adds a "Log" link (opens the bottom panel's Log tab), dropped with the
+  step count below 640 px. Blocked controls refer to the strip in the same
+  words (`SOLVING_MUTATION_MESSAGE`). The strip keeps an empty `role="status"`
+  region mounted so the first stage is announced; the clock is not.
 - Header pill stays compact ("Running…", "Queued #2"); it now says "Running…"
   for the Guided goal study (walkthrough J4/J5: it read "Idle").
 

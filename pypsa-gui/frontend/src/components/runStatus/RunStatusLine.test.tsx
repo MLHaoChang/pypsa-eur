@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { useUIStore } from '../../store/uiStore'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RunStatusLine } from './RunStatusLine'
 import { runEstimateApi } from '../../api/runEstimate'
@@ -55,10 +56,28 @@ describe('RunStatusLine', () => {
     expect(get).not.toHaveBeenCalled()
   })
 
-  it('announces name and stage only, not the clock', () => {
+  it('announces nothing itself: the clock is not read out (the strip announces the stage)', () => {
     vi.spyOn(runEstimateApi, 'get').mockResolvedValue({ kind: 'solve', seconds: null, samples: 0, run_ids: [] })
     renderLine(running)
-    expect(screen.getByRole('status').textContent).toMatch(/^Optimisation: Solving$/)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('Expert gets a Log link that opens the Log tab; Guided does not', () => {
+    vi.spyOn(runEstimateApi, 'get').mockResolvedValue({ kind: 'solve', seconds: null, samples: 0, run_ids: [] })
+    useUIStore.setState({ uiMode: 'expert', bottomTabRequest: null })
+    const { unmount } = renderLine(running)
+    fireEvent.click(screen.getByTestId('run-status-log'))
+    expect(useUIStore.getState().bottomTabRequest).toBe('Log')
+    unmount()
+    useUIStore.setState({ uiMode: 'guided' })
+    renderLine(running)
+    expect(screen.queryByTestId('run-status-log')).toBeNull()
+  })
+
+  it('a Guided study (no job) has no Log link in Expert either', () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    renderLine({ ...running, jobId: null })
+    expect(screen.queryByTestId('run-status-log')).toBeNull()
   })
 
   it('drops parts in the agreed order on narrow headers', async () => {

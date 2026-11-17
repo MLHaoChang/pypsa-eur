@@ -54,7 +54,7 @@ No raw tool or kind names on screen (RAW-NAMES-1): never `gridspine`,
 | `gridspine` | "Grid study" | Waiting in queue → Running → Saving results (study stages later, slice 5) |
 | `profile_gen` | "Generating profiles" | Waiting in queue → Generating |
 | AC power flow (foreground) | "Power flow" | Running (phase text later, slice 5) |
-| Guided goal study (`eh_study`, not a queue job) | "Reliability study" | Studying *step 12 of up to 30* (its `pipeline.solves_consumed` / `budget_solves`) |
+| Guided goal study (`eh_study`, not a queue job) | "Reliability study" | Studying *step 12 of up to 30* (the step in progress: `pipeline.solves_consumed` + 1, of `budget_solves`) |
 
 Expert adds, on the same line: the step count for staged work (*12 of 35*) and a
 "Log" link to the existing log stream. Guided shows stage + time only.

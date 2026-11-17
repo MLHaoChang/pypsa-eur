@@ -2,16 +2,16 @@
  * The run status line's words (run progress spec §1–§2, UX plan GO 3).
  *
  * One model for every run of the project on screen, queue job or Guided goal
- * study, so the header says the same thing in Guided and Expert. Pure: the
- * pill component renders these parts and drops them in the stated order
- * (ETA, then steps, then stage) when the header is narrow.
+ * study, so Guided and Expert say the same thing. Pure: `RunStatusLine` in
+ * the run strip renders these parts and drops them in the stated order (ETA,
+ * then steps and the Log link) when the window is narrow.
  */
-import type { SolveJob } from '../api/solveQueue'
+import type { SolveJob, SolveJobKind } from '../api/solveQueue'
 import type { EhStudyPayload } from '../api/simulation'
 import type { RunEstimate } from '../api/runEstimate'
 
 /** Plain names for each run type (RAW-NAMES-1: never the kind string). */
-export const RUN_NAME: Record<string, string> = {
+export const RUN_NAME: Record<SolveJobKind, string> = {
   solve: 'Optimisation',
   campus: 'Campus study',
   gridspine: 'Grid study',
@@ -23,7 +23,7 @@ export interface RunView {
   name: string
   /** "Waiting in queue #2", "Solving", "Studying" */
   stage: string
-  /** "step 4 of up to 30"; '' when the run has no step count. */
+  /** "step 4 of up to 30" (the step in progress); '' when the run has no step count. */
   steps: string
   /** Epoch seconds the run started; null while it waits. */
   startedAt: number | null
@@ -36,7 +36,7 @@ export function runFromJob(job: SolveJob): RunView {
   const kind = job.kind ?? 'solve'
   const queued = job.status === 'queued'
   return {
-    name: RUN_NAME[kind] ?? 'Run',
+    name: RUN_NAME[kind as SolveJobKind] ?? 'Run',
     stage: queued
       ? `Waiting in queue${job.position != null ? ` #${job.position}` : ''}`
       : kind === 'solve' ? 'Solving' : 'Running',
@@ -107,7 +107,7 @@ export function etaText(estimate: RunEstimate | null | undefined, elapsed: numbe
   return { text: words, muted: false, basis }
 }
 
-/** The whole line as one string: the pill's tooltip and its test oracle. */
+/** The whole line as one string: the line's tooltip and its test oracle. */
 export function runStatusText(run: RunView, elapsed: number | null, eta: EtaText | null): string {
   return [run.name, run.stage, run.steps, elapsed != null ? clock(elapsed) : '', eta?.text ?? '']
     .filter(Boolean)
