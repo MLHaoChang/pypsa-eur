@@ -358,6 +358,21 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'site_scene_blender_worker',
+        'title': 'Blender scene output (.blend)',
+        'disposition': 'unbuilt',
+        'reason': 'A .blend made by Blender runs only where an administrator set up the Blender container; not from chat. To open the site in Blender yourself, use "Export for Blender" on the Site canvas.',
+        'page': 'Site 3D',
+        'panel': 'map',
+        'keywords': frozenset({
+            'blend',
+        }),
+        'routes': frozenset({
+            ('POST', '/api/projects/{name}/sites/{site_id}/scene/blender-jobs'),
+            ('GET', '/api/projects/{name}/sites/{site_id}/scene/artifacts/{artifact_id}'),
+        }),
+    },
+    {
         'id': 'library_uploads_and_tariff_edit',
         'title': 'Library series sent as JSON values',
         'disposition': 'manual',
