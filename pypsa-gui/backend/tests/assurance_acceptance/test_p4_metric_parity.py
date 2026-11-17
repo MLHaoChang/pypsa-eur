@@ -338,6 +338,21 @@ def _surfaces(client, profile, names):
     )
 
 
+def _mismatches(record, surfaces):
+    """Each (metric, surface) whose value or unit differs from the checked fact."""
+    facts = {f["metric"]: f for f in record["facts"]}
+    out = set()
+    for metric, (route, cell) in surfaces.items():
+        if route != facts[metric]["value"]:
+            out.add((metric, "route"))
+        if cell is not None and tuple(cell) != (
+            facts[metric]["value"],
+            facts[metric]["unit"],
+        ):
+            out.add((metric, "workbook"))
+    return out
+
+
 def _assert_parity(record, surfaces, index, route_reasons):
     facts = {f["metric"]: f for f in record["facts"]}
     for metric, (route, cell) in surfaces.items():
@@ -530,13 +545,45 @@ INJECTIONS = {
 }
 
 
+# Exactly the (metric, surface) pairs the injection reaches. A surface missing
+# here does not read the patched service (its workbook sheet builds the value
+# on another path), so the injection proves nothing about it. bus-price/1
+# compares only min and max across surfaces: the route serves no weighted
+# mean and the workbook mean is unweighted (ticket 22).
+CAUGHT = {
+    "bus-price/1": {
+        ("max_price", "route"),
+        ("max_price", "workbook"),
+        ("min_price", "route"),
+        ("min_price", "workbook"),
+    },
+    "carrier-energy/1": {("carrier_generator_energy", "route")},
+    "curtailment/1": {("curtailed_energy", "route")},
+    "network-emissions/1": {
+        ("total_emissions", "route"),
+        ("total_emissions", "workbook"),
+    },
+    "lost-load/1": {
+        ("lost_load_energy", "route"),
+        ("lost_load_energy", "workbook"),
+    },
+}
+CAUGHT_FIRST = {
+    profile: "|".join(
+        f"^{metric}: route " for metric, surface in pairs if surface == "route"
+    )
+    for profile, pairs in CAUGHT.items()
+}
+
+
 @pytest.mark.parametrize("profile", PROFILES)
 def test_an_injected_wrong_aggregate_fails_the_parity_check(
     solved, client, monkeypatch, profile
 ):
     """The service a surface reads is off by one unit. No surface refuses (none
     has a runtime cross-check); the parity check against the checked answer
-    is what catches it."""
+    catches it on exactly the surfaces in CAUGHT, and fails on the injected
+    metric's route comparison first."""
     import importlib
 
     ctx, entity = solved(profile)
@@ -546,5 +593,6 @@ def test_an_injected_wrong_aggregate_fails_the_parity_check(
         target = importlib.import_module(module)
         monkeypatch.setattr(target, name, _shift(target, name, change))
     surfaces, index, route_reasons = _surfaces(client, profile, PLAIN)
-    with pytest.raises(AssertionError, match="route"):
+    assert _mismatches(record, surfaces) == CAUGHT[profile]
+    with pytest.raises(AssertionError, match=CAUGHT_FIRST[profile]):
         _assert_parity(record, surfaces, index, route_reasons)

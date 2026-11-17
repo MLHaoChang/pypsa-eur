@@ -99,19 +99,19 @@ Was: `needs-triage`. Files: `pypsa-gui/backend/harness/calculations.py` (extend 
 
 ### 2026-11-17 — S4: A4.6 metric parity and metamorphic fixtures (tests only)
 
-Branch `claude/aa-10-s4-metric-parity`, plan GK B GO. `tests/assurance_acceptance/test_p4_metric_parity.py` checks five profiles on one hand network (3 snapshots, weights 1, 0.5, 2): checked answer = `/results/*` route = results-workbook cell = hand arithmetic, on value, unit, window and unavailable reasons; doubled weightings, reordered/renamed components and a window split; an injected +1 on each surface's service fails the parity check (no surface has a runtime cross-check, so no refusal is claimed). `tests/test_price_assurance.py` holds one hand case per bus-price/1 guard; `scripts/coord/mutants.py` on `calculate` (all lines, the checkout being shallow): 34 mutants, 34 killed after one added case. No production code changed.
+Branch `claude/aa-10-s4-metric-parity`, plan GK B GO. `tests/assurance_acceptance/test_p4_metric_parity.py` checks five profiles on one hand network (3 snapshots, weights 1, 0.5, 2): checked answer = `/results/*` route = results-workbook cell = hand arithmetic, on value, unit, window and unavailable reasons; doubled weightings, reordered/renamed components and a window split; an injected +1 on the service a surface reads fails the parity check on exactly the (metric, surface) pairs that service feeds: every route, and the workbook for prices, emissions and lost load (the Dispatch and Curtailment sheets build their figures on another path). No surface has a runtime cross-check, so no refusal is claimed. `tests/test_price_assurance.py` holds one hand case per bus-price/1 guard; `scripts/coord/mutants.py` on `calculate` (all lines, the checkout being shallow): 34 mutants, 34 killed after one added case. No production code changed.
 
 | Case | Status | Note |
 |------|--------|------|
 | AA10-S4-1 bus-price/1 min_price, max_price | `_covered` | `/results/prices` series and the Prices sheet's Min/Max price cells |
 | AA10-S4-2 bus-price/1 mean_price on the workbook | `_pending` (ticket 22) | the sheet's "Mean price" is the plain mean (40/3), the checked mean is weighted (65/3.5); only the unit is asserted |
-| AA10-S4-3 bus-price/1 hours_at_voll | `_pending` | no route or workbook figure to compare; checked against hand arithmetic only |
+| AA10-S4-3 bus-price/1 hours_at_voll | `_pending` (no surface to compare; not a disagreement) | no route or workbook figure to compare; checked against hand arithmetic only |
 | AA10-S4-4 carrier-energy/1 carrier_generator_energy | `_covered` | `/results/carrier_kpis` energy_mwh and the Dispatch sheet's "Generation — gas" |
-| AA10-S4-5 carrier-energy/1 peak and StorageUnit energies | `_pending` | no route or workbook figure per carrier; hand and metamorphic checks only |
+| AA10-S4-5 carrier-energy/1 peak and StorageUnit energies | `_pending` (no surface to compare; not a disagreement) | no route or workbook figure per carrier; hand and metamorphic checks only |
 | AA10-S4-6 curtailment/1 curtailed and available energy, share | `_covered` | `/results/curtailment/by_cause`, `/results/carrier_kpis` curtailment_pct, the Curtailment sheet (no share cell) |
 | AA10-S4-7 network-emissions/1 total_emissions, static efficiency | `_covered` | `/results/emissions` total_tCO2 and the Emissions sheet's "Total emissions"; no_co2_cap ↔ route cap inactive |
 | AA10-S4-8 network-emissions/1 with a time-varying efficiency | `_pending` (ticket 23) | route and sheet divide by the static efficiency (37.5), the checked answer and the LP by the per-snapshot one (57.5) |
-| AA10-S4-9 network-emissions/1 co2_cap_shadow_price on the workbook | `_pending` | the Emissions sheet has no shadow-price cell |
+| AA10-S4-9 network-emissions/1 co2_cap_shadow_price on the workbook | `_pending` (no surface to compare; not a disagreement) | the Emissions sheet has no shadow-price cell |
 | AA10-S4-10 lost-load/1 energy, cost, shed hours, peak | `_covered` | `/results/lost_load` and the Lost load sheet (peak from the route series only) |
 
 Filed from the plan review, not found by these tests: ticket 21 (adequacy total system cost reads 0 for a non-finite objective).
