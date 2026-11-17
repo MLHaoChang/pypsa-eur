@@ -473,3 +473,21 @@ it('splits the cost build-up into existing and new build when the split was comp
   expect(rows.map(r => r[0])).toEqual(['Existing CAPEX', 'New-build CAPEX', 'OPEX', 'Total'])
   expect(rows[1][1]).toBe(1_000)
 })
+
+it('shows the Fuel & run hours section only when the cost breakdown carries a fuel-curve generator', async () => {
+  const plain = await resultsApi.getCostBreakdown()
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue({
+    ...plain!, fuel: [], run_hours: [],
+  })
+  const first = renderPage()
+  await screen.findByText(/Total annual system cost|Total system cost/i, undefined, { timeout: 3000 }).catch(() => undefined)
+  expect(screen.queryByTestId('fuel-run-hours')).toBeNull()
+  first.unmount()
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue({
+    ...plain!,
+    fuel: [{ generator: 'genset', carrier: 'diesel', fuel_mwh: 1200, no_load_fuel_mwh: 100, fuel_cost_eur: 36000, no_load_cost_eur: 3000 }],
+    run_hours: [{ generator: 'genset', carrier: 'diesel', counted_from: 'status', hours_run: 800, om_cost_eur: 4000 }],
+  })
+  renderPage()
+  expect(await screen.findByTestId('fuel-run-hours')).toBeTruthy()
+})
