@@ -94,6 +94,13 @@ describe('GridExtensionCard: when it shows', () => {
     expect(within(card).getByText(W.title)).toBeTruthy()
     expect(within(card).getByTestId('grid-ext-needs-local').textContent).toBe(W.needsLocalMode)
     expect((within(card).getByRole('button', { name: W.compare }) as HTMLButtonElement).disabled).toBe(true)
+    // UX 2 (3) a: disabled is a muted surface and text, never a dimmed accent.
+    const cls = within(card).getByRole('button', { name: W.compare }).className
+    expect(cls).toContain('disabled:bg-bg')
+    expect(cls).toContain('disabled:text-muted')
+    expect(cls).not.toMatch(/opacity/)
+    // UX 2 (3) b: a readable width in the wide Expert panel too.
+    expect(card.className).toContain('max-w-3xl')
     expect(api.list).not.toHaveBeenCalled()
   })
 
@@ -184,6 +191,8 @@ describe('GridExtensionCard: the comparison', () => {
     const stale = await screen.findByTestId('grid-ext-stale')
     expect(stale.textContent).toContain('Out of date: the network changed since this comparison')
     expect(screen.queryByTestId('grid-ext-form')).toBeNull()
+    // UX 2 (3) d: the old numbers keep full contrast; the line says they are out of date.
+    expect(screen.getByTestId('grid-ext-table').className).not.toMatch(/opacity/)
     fireEvent.click(within(stale).getByRole('button', { name: W.rerun }))
     await waitFor(() => expect(api.startSupplyArchitectures).toHaveBeenCalledWith('Island A', 'ge1', {}))
   })
@@ -218,15 +227,22 @@ describe('GridExtensionCard: the break-even distance', () => {
     [{ status: 'beyond_max_km', km: 81.3 }, '50', 'Break-even at 81 km, beyond the 50 km searched.'],
     [{ status: 'break_even_not_established', km: null, reason: 'input_not_finite_or_out_of_range',
        invalid: ['max_km'], message: 'Not computed.' }, undefined,
-      'No break-even distance: a value is out of range (Maximum distance (km)).'],
+      'No break-even distance. A value is out of range: Maximum distance (km).'],
   ] as const)('%o reads as words', async (over, maxKm, line) => {
     await ask(over as Partial<GridExtensionResult>, maxKm)
     const res = await screen.findByTestId('grid-ext-result')
     expect(screen.getByTestId('grid-ext-result-line').textContent).toBe(line)
+    expect(res.textContent).not.toMatch(/\b0 km|NPC|break_even|_|\(.*\(/)
+    // UX 2 (3) c: a result with no distance from an input error shows no
+    // costs; every other status (beyond max included) compared real numbers.
+    if (over.status === 'break_even_not_established') {
+      expect(screen.queryByTestId('grid-ext-npc-line')).toBeNull()
+      expect(screen.queryByTestId('grid-ext-approximation')).toBeNull()
+      return
+    }
     expect(res.textContent).toContain('Island net present cost: € 163 k')
     expect(res.textContent).toContain('Grid supply net present cost: € 1 k')
     expect(res.textContent).toContain(W.approximation)
-    expect(res.textContent).not.toMatch(/\b0 km|NPC|break_even|_/)
   })
 
   it('a refusal reads in words, never its code', async () => {

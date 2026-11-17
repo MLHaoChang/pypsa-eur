@@ -90,8 +90,11 @@ const RATE_ROW = 'discount_rate'
 const HORIZON_ROW = 'battery_storage_lifetime_years'
 const POLL_MS = 1500
 
-const BTN_PRIMARY = 'self-start rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white '
-  + 'disabled:cursor-not-allowed disabled:opacity-50'
+// Disabled: a muted surface and muted text (≥ 4.5 : 1 in both themes), never a
+// dimmed accent, which read dark-on-dark red (UX 2 (3), #1694 a).
+const BTN_PRIMARY = 'self-start rounded border border-transparent bg-accent px-3 py-1.5 text-[12px] '
+  + 'font-semibold text-white disabled:cursor-not-allowed disabled:border-border disabled:bg-bg '
+  + 'disabled:text-muted'
 const BTN_SECONDARY = 'self-start rounded-[6px] border border-border-2 bg-bg px-2 py-1 text-[11px] '
   + 'font-semibold text-text hover:border-border-3 disabled:opacity-50'
 const INPUT = 'w-32 rounded border border-border bg-bg px-1 py-0.5 text-[11px] text-text'
@@ -144,9 +147,17 @@ export function resultSentence(r: GridExtensionResult, maxKm: number): string {
       const why = r.reason ? NOT_ESTABLISHED_WORDS[r.reason] : undefined
       const fields = (r.invalid ?? []).map(k => FIELD_WORDS[k]).filter(Boolean)
       if (!why) return 'The break-even distance could not be established.'
-      return `No break-even distance: ${why}${fields.length ? ` (${fields.join(', ')})` : ''}.`
+      const cause = why.charAt(0).toUpperCase() + why.slice(1)
+      return `No break-even distance. ${cause}${fields.length ? `: ${fields.join(', ')}` : ''}.`
     }
   }
+}
+
+/** Whether a 03d answer's net present costs describe anything: every status but
+ *  `break_even_not_established` (an input or basis error) compared real numbers, beyond
+ *  max included (UX 2 (3), #1694 c). */
+export function hasFigures(r: GridExtensionResult): boolean {
+  return r.status !== 'break_even_not_established'
 }
 
 /** A refusal in words: the app's copy for a known code, else the route's message. */
@@ -246,7 +257,7 @@ export default function GridExtensionCard() {
   const unavailable = authEnabled || studyError(studyQ.error).code === 'decision_studies_unavailable'
   const shell = (body: ReactNode) => (
     <section data-testid="grid-extension-card" aria-label={W.title}
-      className="flex flex-col gap-2 rounded-[8px] border border-border bg-bg-2 px-3 py-2.5">
+      className="flex w-full max-w-3xl flex-col gap-2 rounded-[8px] border border-border bg-bg-2 px-3 py-2.5">
       <h3 className="text-[12px] font-semibold text-text">{W.title}</h3>
       <p className="text-[11px] text-muted">{W.lead}</p>
       {body}
@@ -331,15 +342,17 @@ export default function GridExtensionCard() {
       )}
       {stale && refusal}
       {rec.status === 'aborted' && <p className="text-[11px] text-muted">{W.aborted}</p>}
-      <ArchitectureTable rows={rows} dimmed={stale} />
+      <ArchitectureTable rows={rows} />
       {!stale && <BreakEvenForm project={project} study={study!} rec={rec} />}
     </>,
   )
 }
 
-function ArchitectureTable({ rows, dimmed }: { rows: SupplyArchitectureRow[]; dimmed: boolean }) {
+/** Full contrast even when out of date: dimming dragged the warn text under
+ *  4.5 : 1; the "Out of date" line with Re-run says it (UX 2 (3), #1694 d). */
+function ArchitectureTable({ rows }: { rows: SupplyArchitectureRow[] }) {
   return (
-    <table data-testid="grid-ext-table" className={`w-full text-[11px] ${dimmed ? 'opacity-60' : ''}`}>
+    <table data-testid="grid-ext-table" className="w-full text-[11px]">
       <thead>
         <tr className="text-muted">
           <th scope="col" className="text-left font-semibold">{W.colArchitecture}</th>
@@ -447,11 +460,15 @@ function BreakEvenForm({ project, study, rec }: {
             <p data-testid="grid-ext-result-line" className="text-[12px] font-semibold text-text">
               {resultSentence(res, req.max_km ?? 10_000)}
             </p>
-            <p className="text-[11px] text-text">
-              {W.offgridNpc}: {money(res.offgrid_npc, 'EUR')} · {W.gridSupplyNpcShort}:{' '}
-              {req.grid_supply_npc < 0 ? '−' : ''}{money(req.grid_supply_npc, 'EUR')}
-            </p>
-            <p className="text-[11px] text-muted">{W.approximation}</p>
+            {hasFigures(res) && (
+              <>
+                <p data-testid="grid-ext-npc-line" className="text-[11px] text-text">
+                  {W.offgridNpc}: {money(res.offgrid_npc, 'EUR')} · {W.gridSupplyNpcShort}:{' '}
+                  {req.grid_supply_npc < 0 ? '−' : ''}{money(req.grid_supply_npc, 'EUR')}
+                </p>
+                <p data-testid="grid-ext-approximation" className="text-[11px] text-muted">{W.approximation}</p>
+              </>
+            )}
           </div>
         )}
       </div>
