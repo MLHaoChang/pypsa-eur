@@ -120,9 +120,16 @@ class ImportedContingencies:
 
     @property
     def excluded(self) -> list[str]:
-        """The contingencies that were left out, as labelled in the list."""
-        ids = self.unmatched["contingency_id"]
-        return sorted({c for c in ids if isinstance(c, str) and c})
+        """
+        Everything in the list that is not screened: each left-out
+        contingency by its label, and each top-level command outside the
+        subset (an automatic ``SINGLE`` …, an ``INCLUDE``) as ``line <n>``,
+        since it stands for contingencies that cannot be counted here.
+        """
+        out = set()
+        for cid, line in zip(self.unmatched["contingency_id"], self.unmatched["line"]):
+            out.add(cid if isinstance(cid, str) and cid else f"line {int(line)}")
+        return sorted(out)
 
 
 class _NetIndex:
@@ -296,7 +303,7 @@ def _parse_con(text: str):
                 current = (label, lineno, [])
             elif head == "END":
                 closed = True
-            elif head in _PSSE_UNSUPPORTED:
+            elif head in _PSSE_UNSUPPORTED and len(toks) >= 2:
                 top_unsupported.append((lineno, line))
             else:
                 raise ContractError(
@@ -557,7 +564,7 @@ def _from_csv(text: str, net) -> ImportedContingencies:
             f"line 1: contingency CSV is missing column(s) {sorted(missing)}"
         )
     idx = _NetIndex(net)
-    seen, rows, unmatched = {}, [], []
+    seen, seen_id, rows, unmatched = {}, {}, [], []
     known_branch = {f"{r.from_bus}-{r.to_bus}-{r.ckt}" for r in idx.branch.values()}
     for i, rec in enumerate(df.to_dict("records")):
         lineno = i + 2  # the header is line 1
@@ -577,6 +584,11 @@ def _from_csv(text: str, net) -> ImportedContingencies:
                 f"line {lineno}: order {rec.get('order')!r} is not an integer"
             ) from None
         cid = _contingency_id(label) if kind not in COMPOUND_SEPARATORS else label
+        if cid in seen_id:
+            raise ContractError(
+                f"line {lineno}: contingency_id {label!r} reads as {cid!r}, as the one at line {seen_id[cid]}"
+            )
+        seen_id[cid] = lineno
         text_of = ",".join(_text(rec.get(c)) for c in df.columns)
         if kind == "branch" and order == 1:
             el = _Element(

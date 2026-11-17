@@ -620,3 +620,38 @@ def test_a_path_given_as_text_is_read_by_its_suffix(tmp_path):
     path = tmp_path / "list.con"
     path.write_text(POM_FIXTURE)
     assert len(read_contingency_list(str(path), _net()).contingencies) == 6
+
+
+def test_top_level_unsupported_commands_count_as_excluded():
+    imp = _read(
+        "SINGLE BRANCH IN SUBSYSTEM AREA1\n"
+        + _con("CONTINGENCY X\n OPEN BRANCH FROM BUS 1 TO BUS 9\nEND")
+    )
+    assert imp.excluded == ["X", "line 1"]
+
+
+def test_a_bare_psse_verb_at_top_level_is_malformed():
+    with pytest.raises(ContractError, match=r"line 1: expected CONTINGENCY or END"):
+        _read(_con("CLOSE"))
+
+
+def test_csv_ids_that_read_the_same_are_refused_naming_both_lines():
+    text = "contingency_id,kind,bus\nA B,bus_section,BUS_S\nA/B,bus_section,BUS_B\n"
+    with pytest.raises(
+        ContractError,
+        match=r"line 3: contingency_id 'A/B' reads as 'A_B', as the one at line 2",
+    ):
+        read_contingency_list(text, _net(), fmt="csv")
+
+
+def test_csv_n2_row_with_an_unknown_branch_is_listed_with_its_line_and_partial():
+    text = "contingency_id,kind,order,element_ids\nP,branch,2,BUS_A-BUS_B-1|BUS_A-BUS_B-9\n"
+    imp = read_contingency_list(text, _net(), fmt="csv")
+    assert [
+        (r.contingency_id, r.line, r.element, r.reason)
+        for r in imp.unmatched.itertuples()
+    ] == [
+        ("P", 2, "BUS_A-BUS_B-9", "unknown_branch"),
+        ("P", 2, "BUS_A-BUS_B-1", "partial"),
+    ]
+    assert imp.contingencies.empty
