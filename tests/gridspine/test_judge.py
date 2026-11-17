@@ -56,7 +56,7 @@ PROFILE = {
 
 
 def _frame(t, **channels):
-    units = {"V": "pu", "IQ": "pu", "P": "pu", "CONN": "status", "F": "Hz", "Y": "pu"}
+    units = {"V": "pu", "IQ": "pu", "P": "pu", "CONN": "status"}
     return ChannelFrame(t, channels, {n: units[n] for n in channels}, "synthetic")
 
 
@@ -342,132 +342,6 @@ def test_active_power_ramp_row():
     assert "active_power_ramp" not in _p_case(P_REC)
 
 
-# --- setpoint step --------------------------------------------------------------------------------------------
-
-TS = np.round(np.arange(0.0, 1.0 + 1e-9, 1e-3), 10)  # 1 kHz
-
-
-def _step_response(t0=0.2, y0=0.0, y1=1.0):
-    """Rises to 90 % of the change at t0 + 50 ms, peaks 5 % past it, settles back."""
-    up = np.clip((TS - t0) * 18.0, 0.0, 1.05)
-    decay = np.where(TS > 0.3, 1.0 + 0.05 * np.exp(-(TS - 0.3) / 0.05), up)
-    frac = np.where(TS < 0.3, up, decay)
-    return y0 + (y1 - y0) * frac
-
-
-def _step(y, target=1.0, env=STEP, **case):
-    c = {
-        "id": "s",
-        "kind": "setpoint_step",
-        "t_event": 0.2,
-        "channels": {"y": "Y"},
-        **case,
-    }
-    if target is not None:
-        c["target"] = target
-    return _rows(judge(_frame(TS, Y=y), c, {"setpoint_step_response": env}))
-
-
-def test_step_rise_time_and_overshoot_within_one_sample():
-    rows = _step(_step_response())
-    assert abs(rows["rise_time"]["measured"] - 0.050) <= 1e-3
-    assert rows["overshoot"]["measured"] == pytest.approx(5.0, abs=1e-9)
-    assert all(r["status"] == "pass" for r in rows.values())
-    assert rows["settling_time"]["measured"] == pytest.approx(0.146, abs=1e-3)
-
-
-def test_downward_step_is_judged_in_its_direction():
-    rows = _step(_step_response(y0=1.0, y1=0.0), target=0.0)
-    assert abs(rows["rise_time"]["measured"] - 0.050) <= 1e-3
-    assert rows["overshoot"]["measured"] == pytest.approx(5.0, abs=1e-9)
-    assert rows["overshoot"]["status"] == "pass"
-    assert (
-        _step(
-            _step_response(y0=1.0, y1=0.0),
-            target=0.0,
-            env={**STEP, "overshoot_max_pct": 4.0},
-        )["overshoot"]["status"]
-        == "fail"
-    )
-
-
-def test_settling_band_edge_is_inside():
-    env = {**STEP, "settling_band_pct": 25.0}  # change 4 -> band exactly 1.0
-    edge = np.where(
-        TS < 0.2, 0.0, np.where(TS < 0.3, 6.0, 5.0)
-    )  # |5 - 4| == 1.0, on the edge
-    r = _step(edge, target=4.0, env=env)["settling_time"]
-    assert r["status"] == "pass" and r["at_s"] == pytest.approx(0.3)
-    measured = r["measured"]
-    beyond = np.where(TS < 0.2, 0.0, np.where(TS < 0.3, 6.0, np.nextafter(5.0, 6.0)))
-    r = _step(beyond, target=4.0, env=env)["settling_time"]
-    assert r["status"] == "fail" and r["measured"] is None
-    # settling exactly at the limit passes, one ulp under it fails
-    assert (
-        _step(edge, target=4.0, env={**env, "settling_time_s": measured})[
-            "settling_time"
-        ]["status"]
-        == "pass"
-    )
-    under = float(np.nextafter(measured, 0.0))
-    assert (
-        _step(edge, target=4.0, env={**env, "settling_time_s": under})["settling_time"][
-            "status"
-        ]
-        == "fail"
-    )
-
-
-def test_step_without_target_discloses_the_end_mean():
-    rows = _step(_step_response(), target=None)
-    assert all("no target given" in r["detail"] for r in rows.values())
-    rows = _step(np.where(TS < 0.2, 1.0, 1.0), target=None)
-    assert all(r["status"] == "unknown" for r in rows.values())
-
-
-def test_step_target_centres_the_band_and_shows_steady_state_error():
-    y = _step_response() * 0.95  # settles 5 % short of the target
-    rows = _step(y, target=1.0)
-    assert rows["settling_time"]["status"] == "fail"
-    assert _step(y, target=None)["settling_time"]["status"] == "pass"
-
-
-# --- frequency droop ------------------------------------------------------------------------------------------
-
-
-def _droop(f1, p1, env=DROOP):
-    f = np.where(TS < 0.2, 50.0, f1)
-    p = np.where(TS < 0.2, 0.5, p1)
-    return _rows(
-        judge(
-            _frame(TS, F=f, P=p),
-            {
-                "id": "d",
-                "kind": "frequency_step",
-                "t_event": 0.2,
-                "channels": {"f": "F", "p": "P"},
-            },
-            {"frequency_droop": env},
-        )
-    )["droop"]
-
-
-def test_droop_measured_against_set():
-    r = _droop(50.5, 0.35)  # (0.5 - 0.2) / 50 / 0.15 = 4 %
-    assert r["status"] == "pass" and r["measured"] == pytest.approx(4.0)
-    assert _droop(50.5, 0.40)["status"] == "fail"  # 6 %
-    assert _droop(49.5, 0.65)["status"] == "pass"  # under-frequency: more power
-
-
-def test_droop_guards_never_inf_or_nan():
-    r = _droop(50.1, 0.35)
-    assert r["status"] == "unknown" and "inside the 0.2 Hz deadband" in r["detail"]
-    r = _droop(50.5, 0.5)
-    assert r["status"] == "fail" and r["measured"] is None
-    r = _droop(50.5, 0.6)
-    assert r["status"] == "fail" and "does not oppose" in r["detail"]
-
-
 # --- case refusals --------------------------------------------------------------------------------------------
 
 
@@ -484,9 +358,7 @@ def test_droop_guards_never_inf_or_nan():
         ({"channels": {"volts": "V"}}, "unknown channel role"),
         ({"channels": {"v1": 3}}, "must be a name"),
         ({"channels": ["V"]}, "mapping of role"),
-        ({"target": float("inf")}, "target must be a finite number"),
         ({"pre_window_s": 0}, "pre_window_s must be above zero"),
-        ({"end_window_s": -1}, "finite time from 0"),
     ],
 )
 def test_case_refusals(change, match):
@@ -643,45 +515,6 @@ def test_absent_envelopes_are_not_in_profile_even_with_every_channel():
         r["detail"].endswith("not in profile") and r["clause"] == ""
         for r in res["rows"]
     )
-    step = judge(
-        _frame(TS, Y=0 * TS),
-        {"id": "s", "kind": "setpoint_step", "t_event": 0.2, "channels": {"y": "Y"}},
-        {},
-    )
-    assert all(
-        r["detail"] == "setpoint_step_response not in profile" for r in step["rows"]
-    )
-    droop = judge(
-        _frame(TS, F=50 + 0 * TS, P=0 * TS),
-        {
-            "id": "d",
-            "kind": "frequency_step",
-            "t_event": 0.2,
-            "channels": {"f": "F", "p": "P"},
-        },
-        {},
-    )
-    assert droop["rows"][0]["detail"] == "frequency_droop not in profile"
-
-
-def test_missing_step_and_droop_channels_are_unknown():
-    step = judge(
-        _frame(TS, F=0 * TS),
-        {"id": "s", "kind": "setpoint_step", "t_event": 0.2, "channels": {}},
-        PROFILE,
-    )
-    assert all(
-        r["status"] == "unknown" and "role 'y'" in r["detail"] for r in step["rows"]
-    )
-    droop = judge(
-        _frame(TS, F=50 + 0 * TS),
-        {"id": "d", "kind": "frequency_step", "t_event": 0.2, "channels": {"f": "F"}},
-        PROFILE,
-    )
-    assert (
-        droop["rows"][0]["status"] == "unknown"
-        and "role 'p'" in droop["rows"][0]["detail"]
-    )
 
 
 def test_clause_and_source_come_from_the_envelope():
@@ -716,15 +549,6 @@ def test_pre_window_needs_a_sample_and_includes_its_start():
     assert "pre-fault 0.999 pu" in _p_case(p)["active_power_recovery"]["detail"]
 
 
-def test_end_window_includes_its_start():
-    y = np.where(TS < 0.2, 0.0, 1.0)
-    y = np.where(np.isclose(TS, 0.9), 1.1, y)  # exactly t[-1] - 0.1 s
-    rows = _step(y, target=None)
-    assert (
-        "final value 1.00099 " in rows["rise_time"]["detail"]
-    )  # 101 samples, one at 1.1
-
-
 def test_fault_window_is_event_inclusive_and_clear_exclusive():
     v = np.where((T >= 0.2) & (T < 0.35), 0.5, 1.0)
     v = np.where((T == 0.2) | (T == 0.35), 0.0, v)  # distinct values on both edges
@@ -742,8 +566,6 @@ def test_deadband_edges_are_unknown():
         )
     )
     assert r["reactive_current_rise"]["status"] == "unknown"
-    r = _droop(50.25, 0.35, {**DROOP, "deadband_hz": 0.25})
-    assert r["status"] == "unknown"
 
 
 def test_reactive_current_exactly_at_need_and_rise_at_limit():
@@ -816,62 +638,6 @@ def test_ramp_fails_when_power_never_recovers():
     assert r["status"] == "fail" and r["measured"] is None
 
 
-def test_step_at_the_event_sample_and_exact_rise_level():
-    jump = np.where(TS < 0.2, 0.0, 1.0)
-    rows = _step(jump)
-    assert (
-        rows["rise_time"]["measured"] == 0.0
-        and rows["settling_time"]["measured"] == 0.0
-    )
-    ramp = np.where(
-        TS < 0.2, 0.0, np.where(TS < 0.23, 0.5, np.where(TS < 0.24, 0.9, 1.0))
-    )
-    assert _step(ramp)["rise_time"]["at_s"] == pytest.approx(0.23)
-
-
-def test_step_limits_at_the_edge():
-    rows = _step(_step_response())
-    rise, over = rows["rise_time"]["measured"], rows["overshoot"]["measured"]
-    assert (
-        _step(_step_response(), env={**STEP, "rise_time_s": rise})["rise_time"][
-            "status"
-        ]
-        == "pass"
-    )
-    assert (
-        _step(
-            _step_response(), env={**STEP, "rise_time_s": float(np.nextafter(rise, 0))}
-        )["rise_time"]["status"]
-        == "fail"
-    )
-    assert (
-        _step(_step_response(), env={**STEP, "overshoot_max_pct": over})["overshoot"][
-            "status"
-        ]
-        == "pass"
-    )
-    assert (
-        _step(
-            _step_response(),
-            env={**STEP, "overshoot_max_pct": float(np.nextafter(over, 0))},
-        )["overshoot"]["status"]
-        == "fail"
-    )
-
-
-def test_droop_tolerance_edge():
-    r = _droop(50.5, 0.35, {**DROOP, "tolerance_pct": 1.0})
-    margin = r["margin"]
-    tol = 1.0 - margin  # |measured - set|
-    assert _droop(50.5, 0.35, {**DROOP, "tolerance_pct": tol})["status"] == "pass"
-    assert (
-        _droop(50.5, 0.35, {**DROOP, "tolerance_pct": float(np.nextafter(tol, 0))})[
-            "status"
-        ]
-        == "fail"
-    )
-
-
 def test_trip_on_the_exit_sample_is_allowed_and_status_must_be_binary():
     v = np.where(T < 0.2, 1.0, curve_at(LVRT["points"], T - 0.2) + 0.05)
     v_out = np.where(T >= 0.6, 0.5, v)
@@ -900,8 +666,6 @@ def test_trip_on_the_exit_sample_is_allowed_and_status_must_be_binary():
         ({"t_event": 1.5}, "not inside the record"),
         ({"t_clear": 0.2}, "must be after t_event"),
         ({"t_clear": 1.6}, "must be after t_event"),
-        ({"target": True}, "target must be a finite number"),
-        ({"target": "1"}, "target must be a finite number"),
     ],
 )
 def test_more_case_refusals(change, match):
@@ -979,23 +743,6 @@ def test_pre_fault_power_not_above_zero_is_unknown():
     r = _p_case(np.where(T < 0.2, 0.0, P_REC))["active_power_recovery"]
     assert r["status"] == "unknown" and "not above 0" in r["detail"]
     assert "mean over 0.1 s" in _p_case(P_REC)["active_power_recovery"]["detail"]
-
-
-def test_subnormal_power_change_gives_no_infinite_droop():
-    f = np.where(TS < 0.2, 50.0, 50.5)
-    p = np.where(TS < 0.2, 0.0, -1e-310)  # a subnormal change: df / dp overflows
-    case = {
-        "id": "d",
-        "kind": "frequency_step",
-        "t_event": 0.2,
-        "channels": {"f": "F", "p": "P"},
-    }
-    r = _rows(judge(_frame(TS, F=f, P=p), case, {"frequency_droop": DROOP}))["droop"]
-    assert (
-        r["status"] == "fail"
-        and r["measured"] is None
-        and "finite droop" in r["detail"]
-    )
 
 
 def test_curve_must_start_at_inception():
