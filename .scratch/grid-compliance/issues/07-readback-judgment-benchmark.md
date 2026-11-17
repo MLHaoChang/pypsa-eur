@@ -76,3 +76,14 @@ PR2 (envelopes + judge)
 - J7 Droop: droop_pct > 0 finite; ΔP≈0 or Δf inside deadband → unknown or finite guard, never inf/NaN.
 - J8 Case status: fail if any row fails, else unknown if any unknown, else pass; zero rows unknown; absent profile key unknown "not in profile".
 - J9 Profile values finite and in range (pct in (0,100], times ≥ 0, points non-empty, t non-decreasing), each refusal tested; grid_codes.py change additive, existing PROFILE_KEYS and shipped profiles validate unchanged; line order coordinated with GC-02.
+
+**2026-11-17, GK A2 plan GO for PR3** (part 5, pack read-back; build after PR2 has its OK). Conditions:
+
+- K1 Pack binding: `judge_pack` takes the pack's manifest (or its directory), not a loose battery.json; refuse when battery.json's sha256 is not the manifest's entry. Each judgment row and the judgment.json header record the manifest data_hash and contract version. An unknown battery or contract version is refused; each known version has an acceptance test.
+- K2 Ratings: rated MW/MVA come from the campus run the pack was built from, with their source recorded; an explicit argument only with a stated source. Non-finite or ≤ 0 refused. Hand test of MW → pu and Mvar → pu with literals.
+- K3 connected: no inference. FRT cases read unknown from pack output alone and judgment.json states why. Contract gap filed as `12-contract-connected-channel.md` (GC-04, GC-06), blocking any FRT pass.
+- K4 1-phase faults: the LVRT row on positive-sequence V says "positive-sequence voltage; per-phase ride-through not judged". Step target is the battery's commanded step (pre-step mean + step_pu), stated in the row (J6).
+- K5 Files: both PSCAD namings present → refuse as ambiguous; missing → unknown "no result file"; extra files listed; a file lacking a contract channel the case needs → unknown naming it. Each tested.
+- K6 Output: judgment.csv/json written atomically; a re-run replaces both. Case summary follows J8. End-to-end status counts with literals.
+- K7 Shared files: `drivers/readback.py` additive only; `readback/__init__.py` gets GC-07's exports only.
+- Mutants on pack.py and the driver function, survivors argued in the PR body.
