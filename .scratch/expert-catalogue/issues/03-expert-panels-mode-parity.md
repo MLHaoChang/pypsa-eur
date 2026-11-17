@@ -12,11 +12,12 @@ Depends on: 01, 02. Starts after #1565 (PropertiesPanel, AssetFields, assetSchem
 ## What
 
 1. `src/catalogue/CatalogueField.tsx`: plain name, unit, input by kind, range check, Assumed chip, (i) → guide drawer, provenance chip, short help at Advanced; `data-testid="param-<entry id>"`.
-2. `layout/properties/AssetFields.tsx` and `layout/PropertiesPanel.tsx`: groups and order from the asset type, depth selector (Key · Basic · Advanced · Full detail), folded group summaries, in-panel filter ("/"), lens filter; the per-type `hidden=` props go (types declare their groups).
-3. Guided cards (`pages/hubDesign/cards/*`) and `components/FieldDrawer.tsx` render `CatalogueField` for catalogued entries; `depth: key` decides what a card shows.
+2. `layout/properties/AssetFields.tsx` and `layout/PropertiesPanel.tsx`: groups and order from the asset type, depth selector (Essentials · Basic · Advanced · Full detail; saved per user, a search reveal opens a group temporarily without changing it), folds with ▸/▾, group summaries with the Assumed chip and one legend line, in-panel filter ("/" hint visible), lens filter with the "Showing for · Clear" chip (never hides Essentials entries or Guided blockers); the per-type `hidden=` props go (types declare their groups).
+3. Guided cards (`pages/hubDesign/cards/*`) and `components/FieldDrawer.tsx` render `CatalogueField` for catalogued entries; `depth: essentials` decides what a card shows. The "Also in Expert ›" link switches mode only on click, through `withReturn`.
 4. Readiness "needs" per lens function: each missing entry by plain name with "›" via `openParameter` (both modes).
-5. Remove `utils/fieldLabels.ts` `FIELD_LABELS` and `ledgerFieldLabels()` once callers read entries (`FieldDrawer`, `ProvenanceChip`, `runWords`, `GridReadinessScorecard`, `AssumptionsCard`); template ledgers keep values, ranges, sources.
-6. Mode-parity test (spec §10.1) over every template fixture, plus the static "no label for a catalogued model name in `pages/hubDesign/` or `layout/properties/`" test.
+5. Apply the frontend side of slice 01's rename diff table (word maps, Results, legends, reports) so no word has two names.
+6. Remove `utils/fieldLabels.ts` `FIELD_LABELS` and `ledgerFieldLabels()` once callers read entries (`FieldDrawer`, `ProvenanceChip`, `runWords`, `GridReadinessScorecard`, `AssumptionsCard`); template ledgers keep values, ranges, sources.
+7. Mode-parity test (spec §10.1) over every template fixture, plus the static "no label for a catalogued model name in `pages/hubDesign/` or `layout/properties/`" test.
 
 ## Likely files
 
@@ -25,9 +26,9 @@ Depends on: 01, 02. Starts after #1565 (PropertiesPanel, AssetFields, assetSchem
 ## Acceptance
 
 - Mode parity: identical plain name, unit, value and Assumed mark in Guided and Expert for every shared entry, every template.
-- "Expert never shows less than Guided" holds (Basic ⊇ Key) and is tested.
+- "Expert never shows less than Guided" holds (Basic ⊇ Essentials) and is tested; no lens removes an Essentials entry or a Guided blocker (test).
 - Shots per state in Guided and Expert: each depth, a folded group summary, the lens on Load flow with a "needs" line, a field refusal, an Assumed chip with its key.
-- If over PR-SIZE-1, split: 03a Expert panel (1, 2, 4), 03b Guided cards + label removal + parity (3, 5, 6). Both land before template-e2e's Expert pass.
+- If over PR-SIZE-1, split: 03a Expert panel (1, 2, 4), 03b Guided cards + renames + label removal + parity (3, 5, 6, 7). Both land before template-e2e's Expert pass.
 
 ## Keeping both modes in step
 

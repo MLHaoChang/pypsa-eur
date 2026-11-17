@@ -5,18 +5,18 @@
 
 Status: ready-for-agent
 Type: task
-Gated: yes (UX (23); GK B for the client and chat renderer)
+Gated: yes (UX (23); GK B for the client and navigate kind)
 Spec: [spec.md](../spec.md) §4.3, §6, §7.1 (navigate kind), §7.2
-Depends on: 01. `CommandPalette.tsx` and `uiNavigate.ts` edits after THEME-LIGHT (b) merges; `ChatPanel.tsx` render-time names after #1556 merges.
+Depends on: 01 (05 for the chat link end-to-end). `CommandPalette.tsx` and `uiNavigate.ts` edits after THEME-LIGHT (b) merges; `ChatPanel.tsx` guide-link hook after #1556 merges.
 
 ## What
 
 1. `src/catalogue/`: `api.ts` (fetch `GET /api/catalogue`, ETag), `useCatalogue.ts` (react-query, keyed by hash), `searchIndex.ts` (plain name, aliases, short help, guide text, model name; ranking per spec §4.3), `openParameter.ts` (one jump: asset panel or Guided field drawer, depth, unfold, scroll, focus, flash; through `withReturn`).
-2. `src/catalogue/GuideDrawer.tsx`: right drawer, searchable, browse by asset type, group, function; entry layout of spec §6.2; Esc closes, focus returns.
-3. ⌘K palette: a "Parameters" source (entries and asset values), Enter → `openParameter`, Shift+Enter → guide. In Guided, hits open the field drawer (EXPERT-GUIDED-1).
-4. `uiNavigate.ts`: handle navigate kind `parameter` from `open_parameter`.
-5. Chat render-time names: `ChatPanel` markdown renders any token exactly matching a catalogue model name as its plain name; links `guide:<id>` open the drawer.
-6. `uiCopyGuard.test.ts` covers all of `src/` (spec §7.2) with `src/uiCopyGuard.allow.json` (shrink-only); fix `CapacityBoundsEditor.tsx:170` and "MC" (`PropertiesPanel.tsx:263`, only if #1565 has merged, else allowlist row naming slice 03).
+2. `src/catalogue/GuideDrawer.tsx`: right drawer, searchable, browse by asset type, group, function; entry layout of spec §6.2; guide markdown rendered with raw HTML off. Stacking per spec §6.1: one drawer at a time, replaces the Guided field drawer's content with Back, opens left of the chat dock, Esc closes the guide first, focus returns.
+3. ⌘K palette: a "Parameters" source (entries and asset values), Enter → `openParameter`, Shift+Enter → guide, both hinted in the footer; platform-aware shortcut label. In Guided, hits open the field drawer (EXPERT-GUIDED-1). A reveal into Advanced does not change the saved depth.
+4. `uiNavigate.ts`: handle navigate kind `parameter` from `open_parameter`; add it to the navigate allow-list (vitest).
+5. Chat links `guide:<id>` open the drawer (the display replacement itself is issue 05).
+6. `uiCopyGuard.test.ts` covers all of `src/` (spec §7.2) with `src/uiCopyGuard.allow.json` (shrink-only) and the pin that only the guide's "In model files" line and the import mapping dialog show model names; fix `CapacityBoundsEditor.tsx:170` and "MC" (`PropertiesPanel.tsx:263`, only if #1565 has merged, else allowlist row naming slice 03).
 
 ## Likely files
 
