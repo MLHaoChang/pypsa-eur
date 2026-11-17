@@ -865,13 +865,90 @@ def test_a_resume_refused_by_the_switch_guard_is_shown_on_the_run_card(waiting):
     }
     assert task["run"]["held"]["kind"] == "switch_in_progress"
     assert task["run"]["held"]["active"] == active
-    # The card reads it from the run view.
+    # The card reads it from the run view, as the guard named it.
     view = run_monitor.view(record["task_id"], provider_ready=True)
     assert view["run"]["held"] == {
         "kind": "switch_in_progress",
         "active": active,
         "since": task["run"]["held"]["since"],
     }
+
+
+def test_the_held_note_says_when_the_active_task_has_ended(waiting):
+    """UX 2: once the other task ends the card does not call it running."""
+    from services import run_monitor
+
+    path, record, _ = waiting
+    chat, other = _answer_while_another_task_runs(waiting)
+    tasks.cancel_task(other["task_id"])
+    held = run_monitor.view(record["task_id"], provider_ready=True)["run"]["held"]
+    assert held["active"] == {
+        "kind": "task",
+        "id": other["task_id"],
+        "title": "Wait for result",
+        "status": "ended",
+    }
+
+
+def test_a_cancelled_run_never_shows_the_held_note(waiting):
+    """GK B E-b: a stale note on a run that is over."""
+    from services import run_monitor
+
+    path, record, _ = waiting
+    _answer_while_another_task_runs(waiting)
+    tasks.cancel_task(record["task_id"])
+    assert "held" in json.loads(path.read_text())["run"]
+    assert "held" not in run_monitor.view(record["task_id"], provider_ready=True)["run"]
+    assert "held" not in tasks.get_task(record["task_id"])["run"]
+
+
+def test_the_held_note_names_a_task_the_reader_cannot_read_by_id_only(waiting):
+    """GK B E-c: the title shows only to a reader who can read that task."""
+    path, record, _ = waiting
+    hidden = str(uuid.uuid4())  # no such task in this project for this owner
+    held = {
+        "kind": "switch_in_progress",
+        "active": {"kind": "task", "id": hidden, "title": "Secret", "status": "running"},
+        "since": "2026-11-17T02:00:00+00:00",
+    }
+    assert tasks._held_view(held)["active"] == {
+        "kind": "task",
+        "id": hidden,
+        "title": None,
+        "status": "unreadable",
+    }
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        HTTPException(409, {"error_kind": "task_step_running", "message": "busy"}),
+        HTTPException(400, {"error_kind": "switch_in_progress", "message": "odd"}),
+        RuntimeError("boom"),
+    ],
+)
+def test_another_resume_failure_keeps_the_log_only_path(waiting, monkeypatch, failure):
+    """GK B E-a: only the guard's 409 `switch_in_progress` writes the note."""
+    from harness import session as harness_session
+    from services import chat_tools
+
+    path, record, _ = waiting
+    chat_tools.set_acting_user(record["owner_id"])
+    chat = harness_session.ChatSession(
+        session_id="chat-1", owner_user_id=record["owner_id"]
+    )
+
+    def fail(task_id):
+        raise failure
+
+    monkeypatch.setattr(tasks, "resume_task", fail)
+    card = {"rows": [_typed("p_nom"), _typed("marginal_cost")]}
+    ctx = PyPSAService.get_active_context()
+    with run_envelope.answering(chat, "call-card", card):
+        ctx.network.generators.loc["G1", ["p_nom", "marginal_cost"]] = [25.0, 12.0]
+    run = json.loads(path.read_text())["run"]
+    assert run["answers"][0]["decision_id"] == "call-card"
+    assert "held" not in run
 
 
 def test_the_held_note_goes_once_the_run_resumes(waiting, monkeypatch):

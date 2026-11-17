@@ -375,6 +375,60 @@ def test_after_a_project_switch_the_running_task_still_blocks_a_start(
     )
 
 
+def test_a_detached_task_keeps_blocking_until_it_reads_as_ended(chat, monkeypatch, tmp_path):
+    """GK B D: the first ordinary tool call after the switch detaches the
+    task; the start guard keeps reading it until it reads as not running."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    home = tasks._authority()
+    away = (tmp_path, str(uuid.uuid4()), home[2])
+    monkeypatch.setattr(tasks, "_authority", lambda: away)
+    assert tasks.begin_step(chat, "project_readiness", {}) is None
+    assert chat.task_id is None and chat.detached_task_id == first["task_id"]
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+    assert chat.task_id is None and not _stored("second").exists()
+    # Back in its project, the user cancels it: the detach is let go.
+    monkeypatch.setattr(tasks, "_authority", lambda: home)
+    tasks.cancel_task(first["task_id"])
+    assert chat.detached_task_id is None
+    second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert chat.task_id == second["task_id"]
+
+
+def test_a_detached_task_that_reads_as_ended_lets_go(chat, monkeypatch, tmp_path):
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    _set_stored(first["task_id"], status="completed")
+    chat.task_id, chat.detached_task_id = None, first["task_id"]
+    second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert chat.task_id == second["task_id"] and chat.detached_task_id is None
+
+
+@pytest.mark.parametrize("error", [OSError("disk"), ValueError("bad json")])
+def test_a_read_error_blocks_a_start_for_another_plan(chat, monkeypatch, error):
+    """GK B F-a: a non-HTTP read failure fails closed too."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    read = tasks._read
+
+    def failing(task_id):
+        if task_id == first["task_id"]:
+            raise error
+        return read(task_id)
+
+    monkeypatch.setattr(tasks, "_read", failing)
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+    assert chat.task_id == first["task_id"]
+
+
 def test_an_unreadable_task_file_blocks_a_start_for_another_plan(chat):
     first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
     tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})

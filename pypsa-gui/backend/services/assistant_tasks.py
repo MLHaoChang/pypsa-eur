@@ -526,31 +526,36 @@ def _refuse_switch(session, task_id):
 
     A task this project cannot read (the chat switched projects, or its file
     needs repair) may still run where it lives, so it refuses too: fail closed
-    (owner decision LC48F-REFUSE-1)."""
-    active = getattr(session, "task_id", None)
-    if not active or active == task_id:
-        return
-    try:
-        _, task = _read(active)
-    except HTTPException:
+    (owner decision LC48F-REFUSE-1). `begin_step` detaches a task it cannot
+    find after a switch; it keeps the id as `session.detached_task_id`, which
+    this guard reads the same way until it reads as not running (GK B D)."""
+    for active, detached in ((getattr(session, "task_id", None), False),
+                             (getattr(session, "detached_task_id", None), True)):
+        if not active or active == task_id:
+            continue
+        try:
+            _, task = _read(active)
+        except (HTTPException, OSError, ValueError):
+            raise HTTPException(409, {
+                "error_kind": "switch_in_progress",
+                "active": {"kind": "task", "id": active, "title": None, "status": "unreadable"},
+                "message": "this chat's task cannot be read in this project and may still run in its own; "
+                           "cancel it there, or open a new chat, before starting another",
+            }) from None
+        status = task.get("status")
+        run_status = (task.get("run") or {}).get("status")
+        if status not in _RUNNING_TASK and run_status not in _RUNNING_TASK:
+            if detached:
+                session.detached_task_id = None  # it reads as ended: nothing runs that a switch would cut
+            continue
+        shown = status if status in _RUNNING_TASK else run_status
         raise HTTPException(409, {
             "error_kind": "switch_in_progress",
-            "active": {"kind": "task", "id": active, "title": None, "status": "unreadable"},
-            "message": "this chat's task cannot be read in this project and may still run in its own; "
-                       "cancel it there, or open a new chat, before starting another",
-        }) from None
-    status = task.get("status")
-    run_status = (task.get("run") or {}).get("status")
-    if status not in _RUNNING_TASK and run_status not in _RUNNING_TASK:
-        return
-    shown = status if status in _RUNNING_TASK else run_status
-    raise HTTPException(409, {
-        "error_kind": "switch_in_progress",
-        "active": {"kind": "task", "id": active, "title": task.get("title"),
-                   "status": shown},
-        "message": f"the task \u201c{task.get('title') or active}\u201d is {shown}; wait for it, "
-                   "or cancel it, before starting another",
-    })
+            "active": {"kind": "task", "id": active, "title": task.get("title"),
+                       "status": shown},
+            "message": f"the task \u201c{task.get('title') or active}\u201d is {shown}; wait for it, "
+                       "or cancel it, before starting another",
+        })
 
 
 def note_held(task_id, refusal):
@@ -977,6 +982,23 @@ def _intake_view(run):
             **({"request": intake["request"]} if intake.get("request") else {})}
 
 
+def _held_view(held):
+    """LC-48e: what the held run waits for, read now, so the card never names
+    a task that has ended as running. The title shows only when the reader
+    can read that task (`_read` checks project and owner, GK B E-c)."""
+    active = held.get("active") or {}
+    out = {"kind": held.get("kind"), "since": held.get("since"),
+           "active": {"kind": "task", "id": active.get("id"), "title": None, "status": "unreadable"}}
+    try:
+        _, task = _read(active.get("id"))
+    except Exception:  # noqa: BLE001 — not readable here: the card says so, and nothing else
+        return out
+    status, run_status = task.get("status"), (task.get("run") or {}).get("status")
+    shown = status if status in _RUNNING_TASK else run_status if run_status in _RUNNING_TASK else "ended"
+    out["active"].update(title=task.get("title"), status=shown)
+    return out
+
+
 def _run_view(task):
     run = task["run"]
     stages = []
@@ -1000,7 +1022,8 @@ def _run_view(task):
             **({"intake": _intake_view(run)} if isinstance(run.get("intake"), dict) else {}),
             **({"handed_over": run["handed_over"]} if run.get("handed_over") else {}),
             **({"reason": run["reason"]} if run.get("reason") else {}),
-            **({"held": {k: run["held"][k] for k in ("kind", "active", "since")}} if run.get("held") else {}),
+            **({"held": _held_view(run["held"])} if run.get("held") and run["status"] == "needs_user"
+               and task["status"] not in ("cancelled", "completed") else {}),
             "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
             "stages": stages,
             **({"loop": {**{k: run["loop"][k] for k in ("kind", "stage", "rounds", "limit", "refusals", "ended")
@@ -1127,6 +1150,8 @@ def cancel_task(task_id: str) -> dict:
         session = chat_tools.chat_session()
         if session and getattr(session, "task_id", None) == task_id:
             session.task_id = None
+        if session and getattr(session, "detached_task_id", None) == task_id:
+            session.detached_task_id = None
         view = _view(task)
     _wake(path)  # the runner lets go of the project
     # Outside the task lock: the scene cancel takes its own project and proposal locks.
@@ -1693,7 +1718,9 @@ def begin_step(session, tool, args):
             path, task = _read(task_id)
         except HTTPException as exc:
             if exc.status_code == 404:
-                session.task_id = None  # A legitimate project switch detaches the task.
+                # A legitimate project switch detaches the task; the start and
+                # resume guard keeps reading it (LC-48f, `_refuse_switch`).
+                session.detached_task_id, session.task_id = task_id, None
                 return None
             raise
         if task["status"] in ("cancelled", "completed"):

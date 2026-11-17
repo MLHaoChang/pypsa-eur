@@ -98,11 +98,15 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
 }
 
 // A run that waits on the user, not one that stopped.
-// LC-48e: the active task's status as the 409 `switch_in_progress` names it.
-const HELD_WORDS: Record<string, string> = {
-  running: 'which is still running',
-  waiting_job: 'which waits on a job',
-  unreadable: 'which this project cannot read',
+// LC-48e: what a run whose resume the goal-switch guard refused waits for,
+// read now on the server (`_held_view`); the task named by its title only.
+function heldWords(active: { title: string | null; status: string }): string {
+  const named = active.title ? `\u201c${active.title}\u201d` : 'the chat\u2019s other task'
+  if (active.status === 'ended') return `Your answer is saved. ${active.title ? named : 'The chat\u2019s other task'} has ended; ask to resume the run.`
+  const why = active.status === 'unreadable'
+    ? 'which this project cannot read because it belongs to another project'
+    : active.status === 'waiting_job' ? 'which waits on a job' : 'which is still running'
+  return `Your answer is saved. This run waits for ${named}, ${why}; ask to resume the run once it ends.`
 }
 
 const WAITS = new Set(['waiting_card', 'waiting_research_confirm'])
@@ -356,7 +360,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
         </li>}
         {card && <li data-testid="run-waiting-card">A step needs your approval: see the card below</li>}
         {!card && view.monitor.waiting && !research && !pausedAt && <li data-testid="run-waiting-step">A step waits for your decision; its card opens here</li>}
-        {held && <li data-testid="run-held">Your answer is saved. This run waits for {held.title ? `\u201c${held.title}\u201d` : 'the chat\u2019s other task'}, {HELD_WORDS[held.status] ?? 'which is still going'}; ask to resume the run once it ends</li>}
+        {held && <li data-testid="run-held">{heldWords(held)}</li>}
       </ul>
       {research && <ResearchCard row={research} busy={busy}
         others={(view.monitor.research?.rows ?? []).filter(r => r.gap === research.gap && r.row !== research.row && r.status === 'proposed').length}

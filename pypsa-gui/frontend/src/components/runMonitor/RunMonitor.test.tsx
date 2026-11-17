@@ -221,11 +221,32 @@ describe('RunMonitor', () => {
   it('a resume the goal-switch guard refused names the task the run waits for (LC-48e)', async () => {
     show('held_by_switch')
     expect((await screen.findByTestId('run-held')).textContent).toBe(
-      'Your answer is saved. This run waits for \u201cWait for result\u201d, which is still running; ask to resume the run once it ends')
+      'Your answer is saved. This run waits for \u201cWait for result\u201d, which is still running; ask to resume the run once it ends.')
     expect(screen.getByTestId('run-state').textContent).toBe('Waiting for you')
     expect(screen.queryByTestId('run-waiting-step')).toBeNull()
     expect(card()).not.toMatch(INTERNAL)
     expect(card()).not.toMatch(/switch_in_progress|task-2/)
+  })
+
+  it.each([
+    ['ended', 'Plan <b>"A"</b>', 'Your answer is saved. \u201cPlan <b>"A"</b>\u201d has ended; ask to resume the run.'],
+    ['waiting_job', 'Wait', 'Your answer is saved. This run waits for \u201cWait\u201d, which waits on a job; ask to resume the run once it ends.'],
+    ['unreadable', null, 'Your answer is saved. This run waits for the chat\u2019s other task, which this project cannot read because it belongs to another project; ask to resume the run once it ends.'],
+  ])('the held line words a %s task as text, never markup (LC-48e)', async (status, title, words) => {
+    const base = STATES.held_by_switch
+    vi.mocked(api.getRun).mockResolvedValue({ ...base, run: { ...base.run,
+      held: { ...base.run.held!, active: { kind: 'task', id: 'task-2', title, status } } } })
+    render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+    const line = await screen.findByTestId('run-held')
+    expect(line.textContent).toBe(words)
+    expect(line.querySelector('b')).toBeNull()
+    expect(card()).not.toMatch(/task-2|unreadable|waiting_job/)
+  })
+
+  it('a run without a held note shows no held line', async () => {
+    show('research_confirm')
+    await screen.findByTestId('run-waiting')
+    expect(screen.queryByTestId('run-held')).toBeNull()
   })
 
   it('research: the value waits beside its page and verbatim quote; Use this value settles it (issue 09)', async () => {
