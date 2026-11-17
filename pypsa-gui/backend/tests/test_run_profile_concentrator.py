@@ -82,6 +82,8 @@ def test_the_profile_serves_the_concentrator_template_with_the_case_after_the_so
     assert p["chapters"] == ["sizing", "investment_case", "grid_risk"]
     assert any(m.startswith("NPV by stage") for m in p["missing_tools"])
     assert any(m.startswith("N-1 on the site transformer") for m in p["missing_tools"])
+    assert run_profiles.CONC_BASELINE_UNCOUNTED in p["missing_tools"]
+    assert "not counted by the envelope (run_ic.SOLVES = 0" in run_profiles.CONC_BASELINE_UNCOUNTED
 
 
 def test_the_mass_balance_and_the_case_block_and_the_screens_and_kpis_warn():

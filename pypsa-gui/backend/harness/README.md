@@ -1786,8 +1786,10 @@ queued solve.
   each up to twice the template's. The process units, the mine, the
   shipments, the services load, the grid import, the shed and the slack are
   never levers.
-- **Solves.** The plan is the envelope's solve; the case's baseline re-solve
-  is not counted (`run_ic.SOLVES`).
+- **Solves.** The plan is the envelope's solve. Each case run adds one
+  baseline re-solve (0 on a cache hit) that the envelope does not count
+  (`run_ic.SOLVES = 0`); `missing_tools` says so, and study-harness issue 50
+  counts it.
 
 ### The IPP hybrid profile (study harness 14)
 

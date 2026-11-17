@@ -74,13 +74,28 @@ def site(baseline):
 
 
 @pytest.mark.live_solve
-def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site):
+def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site, monkeypatch):
     """Acceptance 2: solve, the case against the site as today, the result
     gate (the mass balance holds; the DOL mills' motor start and restart FAIL
     as warnings with their numbers; N-1 not evaluated: no site transformer),
     report and hand-off."""
     from services import run_envelope
 
+    from services.results import baseline as baseline_mod
+
+    # GK A (28) Q7: a spy on the case's baseline re-solve, on a cold cache.
+    monkeypatch.setattr(baseline_mod, "_CACHE", {})
+    real_solve = baseline_mod.solve_baseline
+    solved = []
+
+    def spy(n, cfg, plan, *, solve=None):
+        from services.solver_service import run_simulation
+
+        def counted(*args, **kwargs):
+            solved.append(1)
+            return (solve or run_simulation)(*args, **kwargs)
+        return real_solve(n, cfg, plan, solve=counted)
+    monkeypatch.setattr(baseline_mod, "solve_baseline", spy)
     task, path, _ = granted(run={**RUN, "profile": REF})
     script = Script()  # never consulted: no L2 round on a passing gate
     record = go(harness_runner.Runner("a", agent_provider=script), path, task)
@@ -102,8 +117,10 @@ def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site):
     assert verdicts["conc.n_1.site_transformer"] == "not_evaluated"
     for kpi in ("conc.kpi.lost_tonnes", "conc.kpi.shed_level", "conc.kpi.npv"):
         assert verdicts[kpi] == "pass", (kpi, rules[kpi].get("reason"))
-    # GK A (28) Q5: the run's solve count is the real one. The case's baseline
-    # re-solve is not an envelope solve (`run_ic.SOLVES`); the plan is.
+    # GK A (28) Q5, Q7 = C: the case re-solved its baseline once (a cache
+    # miss), and the envelope counts only the plan: the anchor study-harness
+    # issue 50 turns into 2 (`run_ic.SOLVES = 0`).
+    assert solved == [1]
     envelope = envelope_of(path)
     assert run_envelope.solves_used(envelope) == 1
     assert run["budget"]["used"]["solves"] == 1

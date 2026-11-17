@@ -899,7 +899,9 @@ EH_AMMONIA_STAGED = _eh_ammonia_staged()
 # levers: the envelope names the per-year candidates, each up to twice its
 # template cap (`eh_concentrator.py`: PV 40, BESS 20 MW, stockpile 60,000 t).
 CONC_MASS_BALANCE_TOL = 1e-6  # design §3.B
-CONC_SOLVES = 1  # the plan; the case's baseline re-solve is not an envelope solve (run_ic.SOLVES)
+CONC_SOLVES = 1  # the plan; the case's baseline re-solve is not an envelope solve (run_ic.SOLVES; SH issue 50)
+CONC_BASELINE_UNCOUNTED = ("+1 baseline solve per investment-case run (0 on a cache hit), not counted by the "
+                           "envelope (run_ic.SOLVES = 0; study harness issue 50)")
 
 
 def _conc_levers():
@@ -972,7 +974,8 @@ def _eh_concentrator_staged() -> dict:
         "envelope": {
             "edits": edits,
             "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "run_investment_case"}, {"tool": "generate_report"}],
-            # The solve and each L2 round's re-solve (L2_ROUNDS = 2).
+            # The solve and each L2 round's re-solve (L2_ROUNDS = 2); each case
+            # run adds its baseline re-solve, uncounted (CONC_BASELINE_UNCOUNTED).
             "budget": {"solves": CONC_SOLVES + 2, "rounds": 2, "wall_time_h": 8.0},
         },
         "kpis": copy.deepcopy(EH_SITE["kpis"]),
@@ -981,6 +984,7 @@ def _eh_concentrator_staged() -> dict:
             "NPV by stage: the case reports the project NPV and each stage's capex lines, no NPV per stage",
             "N-1 on the site transformer: the template has no site transformer",
             "a chat path to the process-unit form (G2P-07; the user fills it)",
+            CONC_BASELINE_UNCOUNTED,
         ],
     }
 
