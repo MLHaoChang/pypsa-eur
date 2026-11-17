@@ -31,7 +31,10 @@ from services.pypsa_service import PyPSAService
 from tests.test_run_profile_ipp_runs import REF, baseline  # noqa: F401
 
 INSTANCE = "i-shipped"
-PICK = ["low_price", "ppa_price_minus_10", "cheap_battery"]  # two LP cases, one finance
+PICK = [
+    "low_price",
+    "cheap_battery",
+]  # two LP cases; every finance case rides along (P3)
 LP_IDS = ["low_price", "cheap_battery"]
 TPL = Path(__file__).resolve().parents[1] / "project_templates" / "eh_ipp_hybrid"
 
@@ -245,12 +248,14 @@ def test_every_case_is_admitted_with_its_status_and_only_lp_cases_fork(
     cases = _cases(path)
     assert len(cases) == 8  # the true total: every case of the file
     assert {n for n, c in cases.items() if c["status"] == "running"} == set(LP_IDS)
-    assert cases["ppa_price_minus_10"]["status"] == "not_evaluated"
-    assert "Investment case per case not run" in cases["ppa_price_minus_10"]["reason"]
-    for name in ("cannibalised", "merchant_heavy", "longer_ppa"):
-        assert (
-            cases[name]["status"] == "not_run" and cases[name]["reason"] == E.NOT_PICKED
-        )
+    for name in ("ppa_price_minus_10", "merchant_heavy", "longer_ppa"):
+        # P3: a finance case costs no solve, so it is never picked away.
+        assert cases[name]["status"] == "not_evaluated"
+        assert "Investment case per case not run" in cases[name]["reason"]
+    assert (
+        cases["cannibalised"]["status"] == "not_run"
+        and cases["cannibalised"]["reason"] == E.NOT_PICKED
+    )
     for name in ("tight_connection", "faster_degradation"):
         assert cases[name]["status"] == "not_run" and cases[name]["reason"]
     # G5: only the LP cases forked, wrote and queued; the others reserved nothing.
@@ -973,7 +978,15 @@ def test_a_dirty_base_refuses_with_its_kind_before_any_fork(
     assert resident is not None
     dirty_state.mark_dirty(resident)
     monkeypatch.setattr(shipped_fork, "create", lambda *a, **k: pytest.fail("forked"))
+
+    def save_fails(name, **k):
+        raise OSError("disk full")
+
+    # S-B2c P5: the step saves the base first; when that save fails the
+    # backstop still refuses each case.
+    monkeypatch.setattr(chat_tools, "save_project", save_fails)
     _start(path, pid)
+    assert _read(path)["steps"][0]["result"]["saved"] is None
     case = _cases(path)["low_price"]
     assert case["status"] == "failed"
     assert case["reason"].startswith("require_current: shipped_base_unsaved:")
