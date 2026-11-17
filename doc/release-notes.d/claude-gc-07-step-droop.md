@@ -1,0 +1,1 @@
+* Feat(gridspine): Read-back compliance judgment also covers setpoint step tests (rise time, settling time, overshoot) and frequency step tests (measured frequency droop against the set droop within its tolerance), each judged pass, fail or unknown per check; a missing envelope or channel is "unknown", never "pass".
