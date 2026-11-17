@@ -4771,6 +4771,39 @@ def solve_queue_abort(job_id: str) -> dict:
     return _route(_h, job_id)
 
 
+def cancel_job(job_id: str) -> dict:
+    """live-voice 11b: cancel one job by handle, as the acting user.
+
+    `job_adapters.cancel_job` runs the family's own abort and re-reads the
+    job. A verdict that stopped nothing it can prove is an error with its own
+    kind, never a success (GK B on 11b): `refused` is `job_cancel_refused`,
+    `origin_lost` is `job_origin_lost`. Its ACL refusals (`job_not_found`,
+    `job_project_mismatch`, `job_owner_unknown`) pass through as raised.
+    """
+    from harness import job_adapters as ja
+
+    out = ja.cancel_job(str(job_id), actor_id=acting_user_id())
+    verdict = out["cancel"]
+    if verdict == "refused":
+        refusal = out["refusal"]  # job_adapters._refusal: always a kind and a message
+        raise HTTPException(409, {
+            "error_kind": "job_cancel_refused",
+            "message": "Nothing was cancelled: the job's abort refused the request"
+                       f" ({refusal['error_kind']}: {refusal['message']}).",
+            "refusal": refusal,
+            "job": out["job"],
+        })
+    if verdict == "origin_lost":
+        raise HTTPException(409, {
+            "error_kind": "job_origin_lost",
+            "message": "Nothing was cancelled: this handle no longer owns a live run"
+                       " (a newer run replaced it, or its worker is gone). Read the"
+                       " current run before acting on it.",
+            "job": out["job"],
+        })
+    return out
+
+
 def solve_queue_clear_finished() -> dict:
     """Write tier (B3; it was read): the POST drops every org's finished
     listing entries. Idempotent, no disk or solver effect."""
@@ -10238,6 +10271,7 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_enqueue": solve_queue_enqueue,
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
+    "cancel_job": cancel_job,
     "solve_queue_clear_finished": solve_queue_clear_finished,
     # live-voice 08 B3
     "solve_queue_job_log": solve_queue_job_log,

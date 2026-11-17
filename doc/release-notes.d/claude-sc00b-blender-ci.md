@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Add a manual CI job that round-trips the site-scene export GLB through pinned Blender 5.2.4 headless and uploads its time, memory and comparison results (site-scene issue 06, SC-00 B evidence).

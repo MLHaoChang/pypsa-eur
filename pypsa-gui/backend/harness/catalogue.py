@@ -2542,6 +2542,21 @@ TOOLS: list[dict[str, Any]] = [
         {"job_id": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 25}}, ["job_id"],
     ),
     _t(
+        "cancel_job",
+        "Cancel one job by the handle you were given: fg:… (run_simulation / "
+        "run_ac_pf_stage), ad:… (study jobs), rpt:… (report jobs) or a "
+        "solve-queue/GridSpine UUID. Runs that family's own abort as you and "
+        "reports only what it verified: `cancel` is cancelled (stopped and the "
+        "worker exited), cancel_requested (sent; it stops at its next boundary), "
+        "already_finished (nothing sent) or finished_first (it ended another way; "
+        "job.outcome says how). It errors, and nothing is cancelled, when the "
+        "abort was refused (job_cancel_refused), the handle no longer owns its run "
+        "(job_origin_lost) or the job has no recorded owner (job_owner_unknown). "
+        "This does not stop monitoring; it stops the job. Safety: destructive.",
+        {"job_id": {"type": "string", "maxLength": 80}},
+        ["job_id"],
+    ),
+    _t(
         "get_study_evidence",
         "Read bounded evidence from a completed GridSpine run: connection, capacity, or ranked_snapshots. "
         "Supports check, status, hour, assessment_id, bus filters and offset/limit pagination (default 10, max 50). "
@@ -5747,6 +5762,7 @@ TOOL_ROUTES: dict[str, list] = {
     "ask_user": _UI_EVENT,
     "project_readiness": _SERVICE_CALL,
     "wait_for_job": _SERVICE_CALL,
+    "cancel_job": _SERVICE_CALL,
     "get_study_evidence": _SERVICE_CALL,
     "run_sensitivity_sweep": _SERVICE_CALL,
     "use_toolset": _SERVICE_CALL,
@@ -6066,6 +6082,8 @@ _SERVICE_CALL_NETWORK_WRITES = frozenset({
 # rest are chat / upload / profile state).
 _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     "propose_memory",
+    # live-voice 11b: stops a job through its family's own abort; edits nothing.
+    "cancel_job",
     "gridspine_create_study", "gridspine_set_dispatch_source",
     "gridspine_update_config", "gridspine_edit_template_param",
     "gridspine_export_handoff_bundle", "gridspine_compute_capacity",
