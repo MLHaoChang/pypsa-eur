@@ -1303,6 +1303,188 @@ def _vs_rows(inp: _Inputs) -> list[dict]:
     return rows
 
 
+# ── the SSTI and sub-synchronous screens (grid-compliance GC-08, TRGC 19, 20) ──
+
+SSTI_SCREENING = "Screening; the binding answer is the EMT study."
+#: The engine's own comparisons, exactly (tolerance 0): UIF above the threshold flags (equal clears); a torsional
+#: margin below the clearance flags. The row takes the engine's verdict; the rule lets a checker recompute it.
+RULE_UIF = {"comparator": "<=", "otherwise": "warn", "tolerance": 0.0}
+RULE_SUBSYNC = {"comparator": ">=", "otherwise": "warn", "tolerance": 0.0}
+SSTI_UIF, SUBSYNC_SR, SSCI = "ssti_uif", "subsync_series_resonance", "ssci"
+_SSTI_REQ = {SSTI_UIF: "Sub-synchronous torsional interaction: unit interaction factor (TRGC 19)",
+             SUBSYNC_SR: "Sub-synchronous resonance: series resonance against torsional modes (TRGC 20)",
+             SSCI: "Sub-synchronous control interaction (TRGC 20)"}
+#: The engine's verdict → the row's: a flag warns (screening), a clear passes, and a screen that
+#: could not decide (``check``: no torsional modes; ``not evaluated``) is unknown with its reason.
+#: Any other verdict is unknown with the raw string (fail closed, GK A2 R2).
+SSTI_VERDICTS = {SSTI_UIF: {"flag": "warn", "clear": "pass", "not evaluated": "unknown"},
+                 SUBSYNC_SR: {"flag": "warn", "clear": "pass", "check": "unknown", "not evaluated": "unknown"}}
+#: The rows scanned from the PCC: off-grid there is no PCC to scan from, so they leave the scorecard.
+SUBSYNC_PCC_ROWS = (SUBSYNC_SR, SSCI)
+SUBSYNC_OFF_GRID = "off-grid, so there is no grid connection to scan from"
+#: Why the UIF row is unknown on an off-grid project whose tie is open: the screen counts the
+#: grid's infeed in every fault level, which understates the islanded UIF.
+SSTI_ISLAND = "the screen counts the grid's infeed; the islanded case is not evaluated"
+SSCI_REASON = "not evaluated: converter damping not modelled"
+NO_MODES = "no torsional modes given"
+NO_SERIES_CAP = "not evaluated: grid-side series compensation needs the TSP's data"
+UIF_CHANGED = "the UIF threshold changed since the run: rerun the grid study"
+CLEARANCE_CHANGED = "the torsional clearance changed since the run: rerun the grid study"
+
+
+def _finite_number(v) -> float | None:
+    """A JSON number that is finite (never a bool or a numeric string: the engine writes numbers)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        return None
+    return float(v)
+
+
+def _ssti_limit_source(inp: _Inputs, screen: dict, what: str) -> tuple[str, bool]:
+    """(the source of the limit the run judged on, assumed): the profile clause the run cited, else the
+    assumed screening default. Read from the run's meta, never from today's profile (GK A2 R1)."""
+    clause, source = screen.get("clause"), screen.get("source")
+    if source == "code" and clause:
+        return f"{_profile_title(inp)}: {clause}", False
+    if clause:
+        return f"{_profile_title(inp)}: {clause} ({source or 'assumed'})", True
+    return f"Assumed screening {what} (the grid code sets none)", True
+
+
+def _profile_moved(inp: _Inputs, key: str, default: float, judged_on) -> bool:
+    """True when today's profile sets ``key`` (or its absence the ``default``) to other than what the run
+    judged on."""
+    lim = (inp.profile or {}).get(key)
+    now = _finite_number(lim.get("value")) if isinstance(lim, dict) else default
+    return now is None or judged_on is None or abs(now - judged_on) > 1e-12
+
+
+def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
+    """The UIF row from the run's meta ``screen`` and UIF table (GK A2 R1, R2, R9)."""
+    from gridspine.static.ssti_uif import DEFAULT_THRESHOLD, PROFILE_KEY
+
+    limit = _finite_number(screen.get("threshold"))
+    source, assumed_limit = _ssti_limit_source(inp, screen, "threshold")
+    unknown = dict(common, limit=limit, source=source, unit="UIF", project_value=None, verdict="unknown")
+    verdict = screen.get("verdict")
+    if verdict not in SSTI_VERDICTS[SSTI_UIF]:
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=f"The screen returned {verdict!r}. {SSTI_SCREENING}",
+                    **unknown)
+    if verdict == "not evaluated":
+        why = "; ".join(str(x) for x in screen.get("notes") or []) or "the screen was not evaluated"
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=f"{why}. {SSTI_SCREENING}", **unknown)
+    worst = _finite_number(screen.get("worst_uif"))
+    if limit is None or worst is None:
+        bad = "threshold" if limit is None else "worst UIF"
+        raw = screen.get("threshold" if limit is None else "worst_uif")
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
+                    note=f"The run's {bad} is not a finite number ({raw!r}). {SSTI_SCREENING}", **unknown)
+    if _profile_moved(inp, PROFILE_KEY, DEFAULT_THRESHOLD, limit):
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=f"{UIF_CHANGED[0].upper()}{UIF_CHANGED[1:]}. "
+                    f"{SSTI_SCREENING}", **unknown)
+    judged = table[table["role"].astype(str) == "converter bus"] if table is not None and "role" in table else None
+    if judged is None or judged.empty:
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
+                    note=f"The run wrote no UIF rows at a converter bus. {SSTI_SCREENING}", **unknown)
+    top = judged.loc[judged["uif"].astype(float).idxmax()]
+    against = "the assumed screening threshold" if assumed_limit else "the threshold"
+    words = "above" if verdict == "flag" else "at or below"
+    note = (f"Worst UIF {worst:.4g} at bus {top['bus']} ({top['case']} fault level, machine {top['machine']}), "
+            f"{words} {against} {limit:g}: "
+            + ("an EMT SSTI study is warranted. " if verdict == "flag" else "no EMT SSTI study indicated. ")
+            + SSTI_SCREENING)
+    return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], limit=limit, source=source, unit="UIF", rule=RULE_UIF,
+                project_value=worst, verdict=SSTI_VERDICTS[SSTI_UIF][verdict], note=note,
+                **{k: v for k, v in common.items() if k not in ("limit", "source", "unit", "rule")})
+
+
+def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
+    """The series-resonance row from the run's meta ``screen`` and resonance table (GK A2 R1-R3)."""
+    from gridspine.static.subsync_scan import DEFAULT_CLEARANCE_HZ, PROFILE_KEY, SERIES
+
+    limit = _finite_number(screen.get("clearance_hz"))
+    source, _ = _ssti_limit_source(inp, screen, "torsional clearance")
+    unknown = dict(common, limit=limit, source=source, unit="Hz", project_value=None, verdict="unknown")
+    verdict = screen.get("verdict")
+    if verdict not in SSTI_VERDICTS[SUBSYNC_SR]:
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"The screen returned {verdict!r}. {SSTI_SCREENING}",
+                    **unknown)
+    if verdict in ("check", "not evaluated"):
+        why = NO_MODES if verdict == "check" else NO_SERIES_CAP
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"{why[0].upper()}{why[1:]}. {SSTI_SCREENING}",
+                    **unknown)
+    if limit is None:
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"The run's torsional clearance is not a finite "
+                    f"number ({screen.get('clearance_hz')!r}). {SSTI_SCREENING}", **unknown)
+    if _profile_moved(inp, PROFILE_KEY, DEFAULT_CLEARANCE_HZ, limit):
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"{CLEARANCE_CHANGED[0].upper()}"
+                    f"{CLEARANCE_CHANGED[1:]}. {SSTI_SCREENING}", **unknown)
+    series = (resonance[resonance["kind"].astype(str) == SERIES] if resonance is not None and "kind" in resonance
+              else None)
+    margins = ([(m, r) for _, r in series.iterrows() if (m := _num(r.get("margin_hz"))) is not None]
+               if series is not None else [])
+    if not margins:
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"The run wrote no torsional margin for a series "
+                    f"resonance. {SSTI_SCREENING}", **unknown)
+    margin, r = min(margins, key=lambda mr: mr[0])
+    words = "below" if verdict == "flag" else "at or above"
+    note = (f"Least margin {margin:.4g} Hz: the electrical resonance's complement {r.get('f_comp_hz')} Hz "
+            f"against the torsional mode {r.get('mode_hz')} Hz of {r.get('machine')} ({r.get('case')}), {words} "
+            f"the clearance {limit:g} Hz. {SSTI_SCREENING}")
+    return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], limit=limit, source=source, unit="Hz", rule=RULE_SUBSYNC,
+                project_value=margin, verdict=SSTI_VERDICTS[SUBSYNC_SR][verdict], note=note,
+                **{k: v for k, v in common.items() if k not in ("limit", "source", "unit", "rule")})
+
+
+def _ssti_rows(inp: _Inputs) -> list[dict]:
+    """The SSTI unit-interaction-factor screen and the sub-synchronous scan of the campus run (grid-compliance
+    GC-08, ``campus_study.ssti_screens_campus``): three screening rows, judged as the run judged them (the
+    threshold and clearance from the run's meta), so a flag warns and anything the screens could not decide
+    reads unknown with its reason. SSCI is never evaluated here (converter damping is not modelled)."""
+    import pandas as pd
+
+    target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
+    common = dict(rule=None, limit=None, unit=None, source="the campus run", assumed=True,
+                  section="connection", target=target)
+
+    def all_unknown(reason: str) -> list[dict]:
+        return [_row(rid, req, project_value=None, verdict="unknown", note=f"{reason}. {SSTI_SCREENING}",
+                     **common) for rid, req in _SSTI_REQ.items()]
+
+    try:
+        from gridspine.drivers.campus_study import SSTI_UIF_CSV, SUBSYNC_RESONANCE_CSV
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        return all_unknown(f"The SSTI screens need gridspine ({exc})")
+    from services import campus_electrical_service as ce
+
+    run = inp.dir / ce.SUBDIR / "run"
+    error = _read_json(run / ce.SSTI_SCREENS_ERROR)
+    if isinstance(error, dict) or (run / ce.SSTI_SCREENS_ERROR).is_file():
+        text = str(error.get("error") or "") if isinstance(error, dict) else "its error file is unreadable"
+        return all_unknown(f"The SSTI screens could not run: {text}")
+    meta = _read_json(run / ce.SSTI_SCREENS_META)
+    if not (run / ce.SSTI_SCREENS_META).is_file():
+        ran = run.is_dir() and any(run.iterdir())
+        return all_unknown("The grid study ran before the SSTI screens were added: rerun the grid study" if ran
+                           else "No grid study with the SSTI screens yet: run the grid study")
+    if not (isinstance(meta, dict) and isinstance(meta.get("uif"), dict) and isinstance(meta.get("subsync"), dict)):
+        return all_unknown("The SSTI screens' record is unreadable: rerun the grid study")
+
+    def table(name):
+        try:
+            return pd.read_csv(run / name)
+        except (OSError, ValueError):
+            return None
+
+    uif = _uif_row(inp, meta["uif"], table(SSTI_UIF_CSV), common)
+    if (uif["verdict"] in ("pass", "warn") and _archetype(inp) == "off_grid" and _tie_open(inp)):
+        uif.update(verdict="unknown", project_value=None,
+                   note=f"{SSTI_ISLAND[0].upper()}{SSTI_ISLAND[1:]}. {SSTI_SCREENING}")
+    sub = _subsync_row(inp, meta["subsync"], table(SUBSYNC_RESONANCE_CSV), common)
+    ssci = _row(SSCI, _SSTI_REQ[SSCI], project_value=None, verdict="unknown",
+                note=f"{SSCI_REASON[0].upper()}{SSCI_REASON[1:]}. {SSTI_SCREENING}", **common)
+    return [uif, sub, ssci]
+
+
 def readiness_fact(card: dict, row_id: str):
     """A scorecard row as a gate fact (study harness 10's ``dc.readiness.<id>``): the row's verdict, or
     ``run_gates.NoEvidence`` with the reason when the row was excluded or is not on the scorecard, so an
@@ -1734,7 +1916,7 @@ SK_OFF_GRID = ("off-grid: the tie is open, so the PoC's fault level does not app
 #: The scorecard's row builders, in the scorecard's order.
 _BUILDERS = (_scr_rows, _peak_rows, _ramp_row, _oscillation_row, _rvc_row, _rvc_infrequent_row,
              _harmonic_row, _tdd_row, _flicker_row, _motor_start_rows, _unbalance_row, _vs_rows,
-             _reactive_row, _support_rows, _island_rows, _lole_row)
+             _ssti_rows, _reactive_row, _support_rows, _island_rows, _lole_row)
 #: The builders whose rows are judged against the PoC's fault level: the SCR
 #: row and each builder that reads ``_poc_sk_mva`` (pinned by a test that
 #: reads the builders' source, so a new S_k''-built row cannot stay on an
@@ -1793,7 +1975,8 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
         rows += out
     excluded = []
     if _archetype(inp) == "off_grid":
-        why = {**dict.fromkeys(sk_built, SK_OFF_GRID), **dict.fromkeys(_VS, VS_OFF_GRID)}
+        why = {**dict.fromkeys(sk_built, SK_OFF_GRID), **dict.fromkeys(_VS, VS_OFF_GRID),
+               **dict.fromkeys(SUBSYNC_PCC_ROWS, SUBSYNC_OFF_GRID)}
         if _tie_open(inp):
             why.update(dict.fromkeys(conn_built, CONN_OFF_GRID))
         elif inp.links:

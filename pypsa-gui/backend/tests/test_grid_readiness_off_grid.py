@@ -126,7 +126,8 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
     assert any(i == "motor_start" or i.startswith("motor_start:") for i in sk)
     out = G.grid_readiness(tmp_path, _site(), PROFILE)
     excluded = {e["id"]: e for e in out["excluded"]}
-    assert set(excluded) == sk | set(VS_IDS)
+    # The sub-synchronous rows are scanned from the PCC and leave by their own rule (GC-08).
+    assert set(excluded) == sk | set(VS_IDS) | set(G.SUBSYNC_PCC_ROWS)
     assert all(
         excluded[i]["reason"] == G.SK_OFF_GRID and excluded[i]["requirement"]
         for i in sk
@@ -199,7 +200,7 @@ def test_off_grid_with_an_open_tie_excludes_the_ramp_oscillation_and_peak_rows(
     )
     # The other rows leave by their own rules, unchanged.
     reasons = {e["reason"] for e in out["excluded"]}
-    assert reasons == {G.SK_OFF_GRID, G.VS_OFF_GRID, G.CONN_OFF_GRID}
+    assert reasons == {G.SK_OFF_GRID, G.VS_OFF_GRID, G.CONN_OFF_GRID, G.SUBSYNC_OFF_GRID}
 
 
 def test_off_grid_excludes_every_energization_period_it_emitted(tmp_path, monkeypatch):

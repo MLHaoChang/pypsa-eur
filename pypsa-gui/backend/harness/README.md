@@ -1587,7 +1587,7 @@ solve stage uses.
   readiness step's frozen id, and gives no evidence on every row once the
   digest moved. A block row passing on assumed inputs is `not_evaluated`. A
   warn row reading `unknown` is "not evaluated". `ride_through:` and
-  `dynamic:` never pass. `run_profiles.DC_SCORECARD` lists each row or
+  `dynamic:` and `ssci` never pass. `run_profiles.DC_SCORECARD` lists each row or
   family with its severity, basis and the run that produces its input;
   `lole` is listed as not gated.
 - **Facts.** `dc.gridcode.published` (stage 2 waits on "publish the
