@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { FlowHeld, FlowRecipe } from '../../api/flow'
+import { fieldWords } from '../../utils/flowItems'
 import { PEAK_LOAD, SERIES_WORDS, groupTitle, heldFigure, heldGroups, heldHome, heldKind, heldRest, RECIPE_FIELD } from './holdWords'
 
 const src = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf8')
@@ -94,7 +95,15 @@ describe('where "Edit" goes, by kind', () => {
 
   it('a recipe row opens the recipe card in the drawer (gap 03)', () => {
     expect(heldHome('carriers', held({ entity: 'haber_bosch', recipe: HB }))).toEqual({ kind: 'drawer',
-      target: { section: 'carriers', panel: null, component: 'Link', entity: 'haber_bosch', field: RECIPE_FIELD } })
+      target: { section: 'carriers', panel: null, component: 'Link', entity: 'haber_bosch', field: RECIPE_FIELD,
+        entityLabel: `${HB.label} recipe` } })
+  })
+
+  it("the recipe drawer's title names the recipe as the list does, never its Link id", () => {
+    const home = heldHome('carriers', held({ entity: 'haber_bosch', recipe: HB }))
+    const title = home.kind === 'drawer' ? fieldWords(home.target) : null
+    expect(title).toBe(`Carriers & processes › ${HB.label} recipe`)
+    expect(title).not.toContain('haber_bosch')
   })
 })
 

@@ -41,6 +41,8 @@ export interface FlowTarget {
   component: string | null
   entity: string | null
   field: string | null
+  /** Display words for the entity where the row has them (a recipe's "Haber-Bosch recipe", gap 03). */
+  entityLabel?: string
 }
 
 export interface FlowItem {

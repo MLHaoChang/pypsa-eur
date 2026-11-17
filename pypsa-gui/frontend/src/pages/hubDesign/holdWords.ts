@@ -60,7 +60,8 @@ export function heldHome(section: FlowSectionId, h: FlowHeld): HeldHome {
   // Section 2 (gap 03): a carrier opens its own Properties card, a recipe row the recipe card,
   // both in the drawer over the card.
   if (h.recipe) {
-    return { kind: 'drawer', target: { section, panel: null, component: 'Link', entity: h.entity, field: RECIPE_FIELD } }
+    return { kind: 'drawer', target: { section, panel: null, component: 'Link', entity: h.entity, field: RECIPE_FIELD,
+      entityLabel: `${h.recipe.label} recipe` } }
   }
   if (section === 'profiles' && h.field && SERIES_TYPES.has(h.component)) {
     return { kind: 'series', type: h.component as 'Load' | 'Generator' | 'Link', name: h.entity, field: h.field }

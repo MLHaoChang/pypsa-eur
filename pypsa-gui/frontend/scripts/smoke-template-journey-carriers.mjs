@@ -95,6 +95,7 @@ try {
   await list.getByRole('button', { name: 'Add a process unit in Expert ›' }).click()
   const back = page.getByTestId('flow-return')
   assert.equal(await back.innerText(), 'Back to Carriers & processes')
+  await page.getByRole('button', { name: 'Add to Network' }).waitFor()  // the form, not its "Loading…"
   await page.screenshot({ path: path.join(artifacts, 'tj-03-expert-add-back.png') })
   await back.click()
   await list.waitFor()
@@ -110,6 +111,8 @@ try {
   await list.getByRole('button', { name: 'Edit Haber-Bosch recipe' }).click()
   const drawer = page.getByTestId('field-drawer')
   await drawer.getByTestId('recipe-card').waitFor()
+  // The drawer's title names the recipe as the list does, never the Link id.
+  assert.match(await drawer.innerText(), /Carriers & processes › Haber-Bosch recipe/)
   await drawer.getByTestId('recipe-edit').click()
   const h2 = drawer.getByLabel('H2 per tonne of NH3', { exact: true })
   assert.equal(await h2.inputValue(), '5.93')
