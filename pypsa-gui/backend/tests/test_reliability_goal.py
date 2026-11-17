@@ -514,3 +514,68 @@ def test_a_pack_that_cannot_be_built_assumes_nothing(monkeypatch):
     monkeypatch.setitem(eh_study_runner._PACK_FACTORY, "off_grid", broken)
     assert G.effective_goal({"site_archetype": "off_grid"}, None)["target_lole_h"] == {
         "value": None, "source": "default", "assumed": None}
+
+
+def test_the_assumed_goal_never_reaches_the_fingerprint_or_the_digest(
+        client, install_network, session_ctx, monkeypatch):
+    """GK B 65 C5: `assumed` is read, never stored, so the solve fingerprints
+    and the investment-case digest are byte-identical whatever the site type's
+    pack assumes; the goal fields stay out of `goal_free_config`."""
+    from services.finance.investment_case_runner import assumptions_digest
+
+    install_network(_network())
+    _put(client, solver_name="highs", voll=150.0, site_archetype="off_grid")
+    ctx = session_ctx(client)
+    assert G.active_goal(ctx.solver_state)["target_lole_h"]["assumed"] == 3.0
+
+    def snapshot():
+        solver = G.goal_free_config(ctx.solver_state["solver_config"])
+        return _fingerprint(ctx), assumptions_digest(
+            finance=None, commercial=None, dispatch=None, packs={}, solver=solver)
+    before = snapshot()
+    assert not {"assumed", "target_lole_h", "site_archetype", "mc_draws"} & set(
+        G.goal_free_config(ctx.solver_state["solver_config"]))
+    for other in (7.5, None):
+        monkeypatch.setattr(G, "pack_target_lole_h", lambda _a, v=other: v)
+        assert G.active_goal(ctx.solver_state)["target_lole_h"]["assumed"] == other
+        assert snapshot() == before
+
+
+def test_a_pack_failing_with_any_exception_assumes_nothing(monkeypatch):
+    """GK B 65 C8: not only the module's own ValueError; any failure building
+    the pack leaves the goal readable with `assumed: None`."""
+    from services.adequacy import eh_study_runner
+
+    class ForeignError(Exception):
+        pass
+
+    def broken():
+        raise ForeignError("pack library missing")
+    monkeypatch.setitem(eh_study_runner._PACK_FACTORY, "off_grid", broken)
+    assert G.effective_goal({"site_archetype": "off_grid"}, None)["target_lole_h"] == {
+        "value": None, "source": "default", "assumed": None}
+
+
+def test_a_runner_that_cannot_be_imported_assumes_nothing(monkeypatch):
+    """GK B 65 C8: the pack import is lazy; its failure is no goal either."""
+    import builtins
+
+    real = builtins.__import__
+
+    def refuse(name, *a, **k):
+        if name == "services.adequacy.eh_study_runner":
+            raise ImportError("runner unavailable")
+        return real(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", refuse)
+    assert G.pack_target_lole_h("off_grid") is None
+
+
+@pytest.mark.parametrize("bad", ["3", True, float("nan"), float("inf"), {}, None])
+def test_a_non_number_assumed_goal_reads_as_none(bad, monkeypatch):
+    """GK B 65 C9: every reader treats a missing or non-number `assumed` as
+    not set: no assumed goal, no hint in the loops' refusal."""
+    goal = {"target_lole_h": {"value": None, "source": "default", "assumed": bad}}
+    assert G.assumed_lole(goal) is None
+    monkeypatch.setattr(G, "active_goal", lambda state: goal)
+    assert G.no_target_hint({}) == ""
+    assert G.assumed_lole({"target_lole_h": {"value": None, "source": "default"}}) is None
