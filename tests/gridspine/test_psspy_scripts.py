@@ -292,7 +292,8 @@ def test_csv_header_is_contract_names_in_case_order(pack):
     cases, texts = pack
     for cid, text in texts.items():
         line = next(ln for ln in text.splitlines() if ln.startswith("HEADER = "))
-        assert ast.literal_eval(line.split("=", 1)[1]) == ["t_s", *cases[cid].channels]
+        header = ast.literal_eval(line.split("=", 1)[1])
+        assert header == ["t_s", *cases[cid].channels, "status"]
         assert f"open(os.path.join(HERE, '{cid}.csv'), 'w')" in text
         assert not {"'v_poc_pu'", "'f_hz'"} & set(
             ln.rsplit(",", 1)[-1].strip(" )]")
@@ -301,14 +302,22 @@ def test_csv_header_is_contract_names_in_case_order(pack):
         )
 
 
+def _pure(text):
+    """The script's pure ``_convert`` and ``_csv_text``, run without psspy."""
+    tree = ast.parse(text)
+    fns = [
+        n
+        for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name in ("_convert", "_csv_text")
+    ]
+    ns = {}
+    exec(compile(ast.Module(fns, []), "convert", "exec"), ns)
+    return ns
+
+
 def test_convert_gives_contract_units_on_hand_values(pack):
     _, texts = pack
-    tree = ast.parse(texts["phase_jump_skmin_xrmin_up"])
-    fn = next(
-        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_convert"
-    )
-    ns = {}
-    exec(compile(ast.Module([fn], []), "convert", "exec"), ns)  # pure: no psspy
+    ns = _pure(texts["phase_jump_skmin_xrmin_up"])
     rec = {
         "t_s": [0.0, 1.0],
         "raw_v_poc_pu": [0.5, 0.0],
@@ -320,19 +329,74 @@ def test_convert_gives_contract_units_on_hand_values(pack):
         "raw_id_pu": [0.6, 0.0],
         "raw_iq_pu": [0.8, 1.0],
     }
-    # V = 0 (bolted fault at the PoC): |I| from P, Q and V is undefined; refused
-    with pytest.raises(
-        ValueError, match="not evaluated, no CSV written: i_poc_pu: V = 0"
-    ):
-        ns["_convert"](rec, 50.0, 80.0)
     rec["raw_v_poc_pu"] = [0.5, 1.0]
     out = ns["_convert"](rec, 50.0, 80.0)
     assert out["f_hz"] == [pytest.approx(50.5), 50.0]  # 50 * (1 + 0.01)
     assert out["i_poc_pu"] == [pytest.approx(50.0 / (0.5 * 80.0)), 5.0 / 80.0]
     assert all(math.isfinite(v) for v in out["i_poc_pu"])
     assert out["theta_poc_deg"] == [20.0, 0.0]
-    assert out["q_poc_mvar"] == [-40.0, 4.0] and out["p_poc_mw"] == [30.0, 3.0]
+    # measured at the PoC into the plant branch; the contract is plant -> grid
+    assert out["q_poc_mvar"] == [40.0, -4.0] and out["p_poc_mw"] == [-30.0, -3.0]
     assert out["iq_pu"] == [0.8, 1.0] and out["t_s"] == [0.0, 1.0]
+    assert out["status"] == ["", ""]
+
+
+def test_export_from_the_plant_is_positive(pack):
+    """
+    A plant exporting 60 MW and 20 Mvar: PSS/E at the PoC (from) end of
+    the plant branch sees -60 MW / -20 Mvar flowing into it; the CSV must
+    read +60 / +20.
+    """
+    _, texts = pack
+    ns = _pure(texts["phase_jump_skmin_xrmin_up"])
+    rec = {
+        "t_s": [0.0],
+        "raw_v_poc_pu": [1.0],
+        "raw_theta_poc_deg": [0.0],
+        "raw_theta_src": [0.0],
+        "raw_f_hz": [0.0],
+        "raw_p_poc_mw": [-60.0],
+        "raw_q_poc_mvar": [-20.0],
+        "raw_id_pu": [0.75],
+        "raw_iq_pu": [0.25],
+    }
+    out = ns["_convert"](rec, 50.0, 80.0)
+    assert out["p_poc_mw"] == [60.0] and out["q_poc_mvar"] == [20.0]
+    assert out["p_poc_mw"][0] > 0 and out["q_poc_mvar"][0] > 0
+
+
+def test_v0_at_the_poc_keeps_the_row_with_i_poc_not_evaluated(pack):
+    """
+    A bolted PoC fault (V = 0): the CSV is still written, the row keeps
+    every other channel, i_poc_pu is empty (never NaN) and status says why.
+    """
+    cases, texts = pack
+    cid = "phase_jump_skmin_xrmin_up"
+    ns = _pure(texts[cid])
+    rec = {
+        "t_s": [0.0, 1.0],
+        "raw_v_poc_pu": [1.0, 0.0],
+        "raw_theta_poc_deg": [10.0, 10.0],
+        "raw_theta_src": [10.0, 10.0],
+        "raw_f_hz": [0.0, 0.0],
+        "raw_p_poc_mw": [-40.0, -3.0],
+        "raw_q_poc_mvar": [-30.0, 4.0],
+        "raw_id_pu": [0.5, 0.0],
+        "raw_iq_pu": [0.0, 1.0],
+    }
+    data = ns["_convert"](rec, 50.0, 80.0)
+    header = ["t_s", *cases[cid].channels, "status"]
+    text = ns["_csv_text"](data, header)
+    lines = text.splitlines()
+    assert lines[0] == ",".join(header) and len(lines) == 3
+    rows = [dict(zip(header, ln.split(","))) for ln in lines[1:]]
+    assert all(len(ln.split(",")) == len(header) for ln in lines)
+    assert rows[0]["i_poc_pu"] == repr(50.0 / 80.0) and rows[0]["status"] == ""
+    assert rows[1]["i_poc_pu"] == ""
+    assert rows[1]["status"] == "not evaluated: V = 0 at PoC"
+    assert rows[1]["v_poc_pu"] == "0.0" and rows[1]["p_poc_mw"] == "3.0"
+    assert rows[1]["q_poc_mvar"] == "-4.0" and rows[1]["iq_pu"] == "1.0"
+    assert "nan" not in text.lower() and "inf" not in text.lower()
 
 
 def _check(text):
@@ -592,6 +656,12 @@ def test_refuses_a_plant_branch_not_from_the_poc(tmp_path):
         "plant_branch from bus 102 is not poc_bus 101",
         plant_branch=(102, 900, "1"),
     )
+    # the PoC as the to bus (plant side first) is the old, reversed order
+    _refuse(
+        tmp_path,
+        "plant_branch from bus 201 is not poc_bus 101",
+        plant_branch=(201, 101, "1"),
+    )
 
 
 def _top_index(lines, start):
@@ -754,17 +824,23 @@ GRID_BUS, GRID_ID, GRID_MBASE = 900, 'G2', 250.0
 Z1_PU = (0.39999999999999997, 0.3)  # Thevenin Z1 on GRID_MBASE
 T_EVENT, T_END = 1.0, 10.0
 F0_HZ, PLANT_MBASE = 50.0, None
-HEADER = ['t_s', 'v_poc_pu']
+HEADER = ['t_s', 'v_poc_pu', 'status']
 
 
 def _convert(rec, f0_hz, s_rated):
-    def _refuse(why):
-        raise ValueError('not evaluated, no CSV written: ' + why)
-
     out = {'t_s': list(rec['t_s'])}
     # v_poc_pu = V
     out['v_poc_pu'] = [a for (a,) in zip(rec['raw_v_poc_pu'])]
+    out['status'] = ['' for _ in out['t_s']]
     return out
+
+
+def _csv_text(data, header):
+    def cell(x):
+        return x if isinstance(x, str) else repr(float(x))
+
+    rows = [header, *zip(*[data[h] for h in header])]
+    return ''.join(','.join(cell(x) for x in row) + '\n' for row in rows)
 
 
 psspy.psseinit()
@@ -797,9 +873,7 @@ rec = {idents[k]: values[k] for k in idents if k != 'time'}
 rec['t_s'] = values['time']
 data = _convert(rec, F0_HZ, PLANT_MBASE)
 with open(os.path.join(HERE, 'flat_skmin_xrmin.csv'), 'w') as fh:
-    fh.write(','.join(HEADER) + '\n')
-    for row in zip(*[data[h] for h in HEADER]):
-        fh.write(','.join(repr(float(x)) for x in row) + '\n')
+    fh.write(_csv_text(data, HEADER))
 '''
 
 
