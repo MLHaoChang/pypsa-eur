@@ -641,17 +641,24 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
  *  profile's own peak and mean (matching the Guided card) instead of the stale
  *  constant; `sign` is PyPSA's own word, so Guided hides it and Expert says it
  *  in words. */
+/** The words the load readout uses, in one place so the drawer, its tests and
+ *  any card showing the same facts say them alike. */
+export const LOAD_READOUT_WORDS = {
+  profileSuffix: '(from the profile)',
+  sign: { '-1': 'consumes power', '1': 'supplies power' },
+} as const
+
 export function loadReadoutItems(items: ExpandedItem[], profile: { peak: number; mean: number } | null,
   mode: string): ExpandedItem[] {
   const fmt1 = (v: number) => Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 1 })
   return items.flatMap((i): ExpandedItem[] => {
     if (i.field === 'p_set' && profile) {
-      return [{ ...i, value: `${fmt1(profile.peak)} MW peak · ${fmt1(profile.mean)} MW mean (from the profile)`, unit: undefined }]
+      return [{ ...i, value: `${fmt1(profile.peak)} MW peak · ${fmt1(profile.mean)} MW mean ${LOAD_READOUT_WORDS.profileSuffix}`, unit: undefined }]
     }
     if (i.field === 'sign') {
       if (mode !== 'expert') return []
       const v = Number(i.value)
-      return [{ ...i, value: v === 1 ? 'supplies power' : 'consumes power', unit: undefined }]
+      return [{ ...i, value: LOAD_READOUT_WORDS.sign[v === 1 ? '1' : '-1'], unit: undefined }]
     }
     return [i]
   })

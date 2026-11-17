@@ -107,8 +107,8 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
     return (
       <div className="text-xs" data-testid="load-series-editor">
         <p className="text-muted" data-testid="dc-owned-note">
-          This load follows the data-centre set-up{detail ? ` (${detail})` : ''}, chosen when the project was created.
-          A profile cannot replace it.
+          This load follows the data-centre set-up{detail ? ` (${detail})` : ''}. The IT load and PUE are fixed when the project is
+          created and cannot be changed afterwards, so a profile cannot replace them.
         </p>
       </div>
     )
