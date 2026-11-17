@@ -154,6 +154,19 @@ def origin(base: Path, section: str, raw_key: str) -> Path | None:
     return None
 
 
+
+def named_with_file(base: Path, sections: tuple[str, ...], keys) -> list[str]:
+    """Each key as a failure message shows it, with the JSON file that adds it, if one does.
+
+    A key is a name or a ``(METHOD, path)`` route; rows from the Python table show bare.
+    """
+    out = []
+    for key in keys:
+        raw = f'{key[0]} {key[1]}' if isinstance(key, tuple) else str(key)
+        path = next((o for o in (origin(base, s, raw) for s in sections) if o), None)
+        out.append(f'{raw} ({path.name})' if path else raw)
+    return out
+
 TOOL_ERROR_KINDS = Path(__file__).resolve().parents[2] / 'tool-error-kinds.json'
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from smoke.json_fragments import extend
+from smoke.json_fragments import extend, named_with_file
 from tests.golden import coverage as cov
 
 
@@ -385,7 +385,8 @@ def test_every_route_handler_is_declared_in_the_surfaces_allowlist():
     assert scanned == declared, (
         "routers/{results,simulation,compare,asset_results}.py route "
         "handlers drifted from ROUTE_SURFACES in this file -- new routes: "
-        f"{scanned - declared}, routes removed/renamed: {declared - scanned}. "
+        f"{scanned - declared}, routes removed/renamed: "
+        f"{named_with_file(ROUTE_SURFACES_FILE, ('routes',), [f'{f}::{n}' for f, n in sorted(declared - scanned)])}. "
         "Add (or remove) the entry, and if it's a new economics endpoint "
         "give it a coverage.SURFACES id (or an empty frozenset with a "
         "reason if it deliberately reports none)."

@@ -66,7 +66,7 @@ from pathlib import Path
 import pytest
 
 import main
-from smoke.json_fragments import extend, route_key
+from smoke.json_fragments import extend, named_with_file, route_key
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _LOCK_PRIMITIVES = frozenset({"_check_project_lock", "_enforce_project_lock"})
@@ -623,7 +623,7 @@ def test_no_route_policy_entry_is_stale_or_redundant():
     """
     routes = _write_routes()
     gone = sorted(k for k in ROUTE_POLICY if k not in routes)
-    assert not gone, f"ROUTE_POLICY names routes that no longer exist: {gone}"
+    assert not gone, f"ROUTE_POLICY names routes that no longer exist: {named_with_file(POLICY_FILE, ('routes',), gone)}"
     gated = sorted(k for k in ROUTE_POLICY if _middleware_gated(k[1]))
     assert not gated, f"ROUTE_POLICY names middleware-gated routes: {gated}"
     checked = sorted(k for k in ROUTE_POLICY if _lock_check_path(routes[k]))
@@ -723,7 +723,7 @@ def test_no_tool_policy_entry_is_stale_or_redundant():
     chat_tools, TOOL_ROUTES, nonread, gated = _tool_tables()
     for table, label in ((TOOL_POLICY, "TOOL_POLICY"), (KNOWN_GAPS, "KNOWN_GAPS")):
         gone = sorted(n for n in table if n not in chat_tools.DISPATCHERS)
-        assert not gone, f"{label} names tools that no longer exist: {gone}"
+        assert not gone, f"{label} names tools that no longer exist: {named_with_file(POLICY_FILE, ('tools', 'known_gaps'), gone)}"
     covered = sorted(n for n in TOOL_POLICY
                      if _tool_is_covered(n, chat_tools, TOOL_ROUTES, gated))
     assert not covered, f"these are covered now; delete their TOOL_POLICY entries: {covered}"

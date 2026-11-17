@@ -695,3 +695,60 @@ def test_the_family_base_needs_its_list_sections(tmp_path):
     base.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="needs a list 'settles'"):
         fm.merged_tables(base)
+
+
+def _first_key(table):
+    key = next(iter(table))
+    return f"{key[0]} {key[1]}" if isinstance(key, tuple) else key
+
+
+@pytest.mark.parametrize(
+    "module, index, section, row",
+    [
+        (lock, 1, "tools", {"category": "not-project-data", "reason": "r"}),
+        (lock, 2, "known_gaps", "another defect"),
+        (disposition, 1, "ui_internal", {"reason": "r", "routes": ["GET /x"]}),
+        (disposition, 2, "known_gaps", "Another panel"),
+    ],
+    ids=["lock-tools", "lock-gaps", "ui-internal", "disposition-gaps"],
+)
+def test_no_security_table_row_can_be_overridden_by_a_fragment(
+    copy, module, index, section, row
+):
+    python = module.PYTHON_TABLES[index]
+    if not python:  # lock KNOWN_GAPS is empty today: a fragment's own row stands in for the base row
+        python = {"some_tool": "a defect"}
+        file = module.POLICY_FILE
+        base, fragment = copy(file)
+        fragment("claude-a.json", {section: python})
+    else:
+        base, fragment = copy(
+            module.POLICY_FILE if module is lock else module.DISPOSITION_FILE
+        )
+    fragment("claude-x.json", {section: {_first_key(python): row}})
+    load = lock.policy_tables if module is lock else disposition.disposition_tables
+    with pytest.raises(
+        ValueError, match="already defin"
+    ):  # load_merged: "defines", extend: "defined"
+        load(base)
+
+
+def test_a_stale_fragment_row_is_named_with_its_file(copy, monkeypatch):
+    base, fragment = copy(lock.POLICY_FILE)
+    fragment(
+        "claude-x.json",
+        {
+            "routes": {
+                "POST /api/no/such/route": {
+                    "category": lock.NOT_PROJECT_DATA,
+                    "reason": "r",
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(lock, "POLICY_FILE", base)
+    monkeypatch.setattr(lock, "ROUTE_POLICY", lock.policy_tables(base)[0])
+    with pytest.raises(
+        AssertionError, match=r"POST /api/no/such/route \(claude-x\.json\)"
+    ):
+        lock.test_no_route_policy_entry_is_stale_or_redundant()

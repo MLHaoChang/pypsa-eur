@@ -11,7 +11,7 @@ import main
 from harness.catalogue import TOOLS, TOOL_ROUTES
 from routers import network_library_reference as reference_routes
 from services.not_via_chat import NOT_VIA_CHAT
-from smoke.json_fragments import extend, origin, route_key
+from smoke.json_fragments import extend, named_with_file, origin, route_key
 from tests.test_write_surface_lock_policy import _walk_routes
 
 # D declares preview_router when moving this one known read route. Select the
@@ -342,7 +342,8 @@ def test_no_disposition_names_a_missing_route():
     declared = set(SERVED_BY_TOOL) | set(KNOWN_GAPS)
     declared.update(r for entry in NOT_VIA_CHAT for r in entry['routes'])
     declared.update(r for entry in UI_INTERNAL.values() for r in entry['routes'])
-    assert not declared - _routes().keys(), f'Stale route dispositions: {sorted(declared - _routes().keys())}'
+    stale = sorted(declared - _routes().keys())
+    assert not stale, f'Stale route dispositions: {named_with_file(DISPOSITION_FILE, ("served_by_tool", "known_gaps"), stale)}'
 
 
 def test_served_by_names_real_tools():
