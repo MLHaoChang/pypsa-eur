@@ -9,6 +9,7 @@ Fixtures (licences in ``fixtures/plexos/README.md``):
 - ``edge_cases.xml``: hand-written. Each broken row in it is listed below by
   hand, with the guard that must catch it.
 """
+
 import subprocess
 import sys
 from collections import Counter
@@ -26,13 +27,37 @@ NS = "{http://tempuri.org/MasterDataSet.xsd}"
 
 # printed by make_fixture.py when it cut the fixture (2026-11-17)
 WORLD_IRL_COUNTS = {
-    "t_config": 18, "t_action": 7, "t_class": 82, "t_collection": 23, "t_unit": 85, "t_category": 21,
-    "t_property": 27, "t_object": 125, "t_membership": 386, "t_data": 534, "t_tag": 256, "t_text": 8,
-    "t_memo_data": 110, "t_attribute_data": 179, "t_attribute": 20,
+    "t_config": 18,
+    "t_action": 7,
+    "t_class": 82,
+    "t_collection": 23,
+    "t_unit": 85,
+    "t_category": 21,
+    "t_property": 27,
+    "t_object": 125,
+    "t_membership": 386,
+    "t_data": 534,
+    "t_tag": 256,
+    "t_text": 8,
+    "t_memo_data": 110,
+    "t_attribute_data": 179,
+    "t_attribute": 20,
 }
 WORLD_IRL_CLASSES = {
-    "Battery": 5, "Data File": 3, "Emission": 1, "Fuel": 7, "Generator": 63, "Horizon": 4, "Line": 2,
-    "Model": 11, "Node": 3, "Region": 1, "Scenario": 20, "System": 1, "Variable": 1, "Zone": 3,
+    "Battery": 5,
+    "Data File": 3,
+    "Emission": 1,
+    "Fuel": 7,
+    "Generator": 63,
+    "Horizon": 4,
+    "Line": 2,
+    "Model": 11,
+    "Node": 3,
+    "Region": 1,
+    "Scenario": 20,
+    "System": 1,
+    "Variable": 1,
+    "Zone": 3,
 }
 
 # Every broken row of edge_cases.xml, by hand: (table, row id) -> reason fragment.
@@ -49,7 +74,10 @@ EDGE_BROKEN = {
     ("t_membership", "18"): "parent or child object does not exist",  # child 999
     ("t_membership", "23"): "parent or child object does not exist",  # parent 999
     ("t_membership", "19"): "unknown collection id 99",
-    ("t_membership", "20"): "objects are Fuel/Node but the collection is Generator/Node",
+    (
+        "t_membership",
+        "20",
+    ): "objects are Fuel/Node but the collection is Generator/Node",
     ("t_data", "1"): "duplicate data_id",
     ("t_data", "18"): "membership 999 does not exist",
     ("t_data", "19"): "property 999 does not exist",
@@ -84,7 +112,9 @@ def world():
 
 
 def raw_counts(path):
-    root = etree.parse(str(path), etree.XMLParser(resolve_entities=False, no_network=True)).getroot()
+    root = etree.parse(
+        str(path), etree.XMLParser(resolve_entities=False, no_network=True)
+    ).getroot()
     return Counter(el.tag.replace(NS, "") for el in root if isinstance(el.tag, str))
 
 
@@ -94,7 +124,9 @@ def row(model, data_id):
 
 
 def xml(body: str, header: str = "") -> bytes:
-    return (header + f'<MasterDataSet xmlns="{NS[1:-1]}">{body}</MasterDataSet>').encode()
+    return (
+        header + f'<MasterDataSet xmlns="{NS[1:-1]}">{body}</MasterDataSet>'
+    ).encode()
 
 
 MINIMAL = "".join(f"<{t}><x>1</x></{t}>" for t in REQUIRED_TABLES)
@@ -104,10 +136,14 @@ MINIMAL = "".join(f"<{t}><x>1</x></{t}>" for t in REQUIRED_TABLES)
 
 
 def test_billion_laughs_is_refused_as_a_dtd(tmp_path):
-    lol = '<!DOCTYPE MasterDataSet [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">' \
-          '<!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;"><!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">]>'
+    lol = (
+        '<!DOCTYPE MasterDataSet [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">'
+        '<!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;"><!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">]>'
+    )
     p = tmp_path / "lol.xml"
-    p.write_bytes(xml("<t_class><class_id>1</class_id><name>&d;</name></t_class>", header=lol))
+    p.write_bytes(
+        xml("<t_class><class_id>1</class_id><name>&d;</name></t_class>", header=lol)
+    )
     with pytest.raises(PlexosRefused) as exc:
         read_plexos_xml(str(p))
     assert exc.value.kind == "dtd"
@@ -118,7 +154,9 @@ def test_external_entity_is_refused_as_a_dtd(tmp_path):
     secret.write_text("TOP SECRET")
     ext = f'<!DOCTYPE MasterDataSet [<!ENTITY s SYSTEM "file://{secret}">]>'
     p = tmp_path / "xxe.xml"
-    p.write_bytes(xml("<t_class><class_id>1</class_id><name>&s;</name></t_class>", header=ext))
+    p.write_bytes(
+        xml("<t_class><class_id>1</class_id><name>&s;</name></t_class>", header=ext)
+    )
     with pytest.raises(PlexosRefused) as exc:
         read_plexos_xml(str(p))
     assert exc.value.kind == "dtd"
@@ -134,7 +172,12 @@ def test_a_bare_doctype_is_refused(tmp_path):
 
 def test_external_dtd_reference_is_refused(tmp_path):
     p = tmp_path / "sys.xml"
-    p.write_bytes(xml(MINIMAL, header='<!DOCTYPE MasterDataSet SYSTEM "http://example.invalid/x.dtd">'))
+    p.write_bytes(
+        xml(
+            MINIMAL,
+            header='<!DOCTYPE MasterDataSet SYSTEM "http://example.invalid/x.dtd">',
+        )
+    )
     with pytest.raises(PlexosRefused) as exc:
         read_plexos_xml(str(p))
     assert exc.value.kind == "dtd"
@@ -142,8 +185,12 @@ def test_external_dtd_reference_is_refused(tmp_path):
 
 @pytest.mark.parametrize(
     "content, kind",
-    [(b"", "not_xml"), (b"<MasterDataSet><t_class>", "not_xml"), (b"PK\x03\x04 zip bytes", "not_xml"),
-     (b"<Workbook><t_class/></Workbook>", "not_plexos")],
+    [
+        (b"", "not_xml"),
+        (b"<MasterDataSet><t_class>", "not_xml"),
+        (b"PK\x03\x04 zip bytes", "not_xml"),
+        (b"<Workbook><t_class/></Workbook>", "not_plexos"),
+    ],
 )
 def test_a_file_that_is_not_a_plexos_xml_is_refused_by_kind(tmp_path, content, kind):
     p = tmp_path / "f.xml"
@@ -200,7 +247,12 @@ def test_edge_rows_in_equal_resolved_plus_broken_against_a_raw_count(edge):
     for table, a in edge.accounting.items():
         assert a["broken"] == broken.get(table, 0), table
         assert a["in"] == a["resolved"] + a["broken"] + a["not_read"], table
-    assert edge.accounting["t_report"] == {"in": 1, "resolved": 0, "broken": 0, "not_read": 1}
+    assert edge.accounting["t_report"] == {
+        "in": 1,
+        "resolved": 0,
+        "broken": 0,
+        "not_read": 1,
+    }
     assert any("t_report (1 rows)" in w for w in edge.warnings)
 
 
@@ -209,7 +261,10 @@ def test_objects_of_lists_one_class(edge):
 
 
 def test_the_first_of_two_duplicate_ids_is_kept(edge):
-    assert ("Generator", "G2") in edge.objects and ("Node", "Duplicate id") not in edge.objects
+    assert ("Generator", "G2") in edge.objects and (
+        "Node",
+        "Duplicate id",
+    ) not in edge.objects
     assert row(edge, "1").raw_value == "100"
 
 
@@ -227,7 +282,11 @@ def test_world_hand_checked_generator(world):
     props = {r.property: r for r in world.rows if r.child == gen}
     assert (props["Max Capacity"].value, props["Max Capacity"].unit) == (137.0, "MW")
     assert props["Commission Date"].scenarios == ["Include LT Commission Date"]
-    fuels = [m.child for m in world.memberships if m.parent == gen and m.collection[2] == "Fuels"]
+    fuels = [
+        m.child
+        for m in world.memberships
+        if m.parent == gen and m.collection[2] == "Fuels"
+    ]
     assert len(fuels) == 1 and fuels[0][0] == "Fuel"
 
 
@@ -257,7 +316,11 @@ def test_a_readable_value_has_no_reason(edge):
 
 def test_a_row_keeps_scenario_data_file_and_variable_tags_together(edge):
     tags = {(t.cls, t.name, t.action) for t in row(edge, "5").tags}
-    assert tags == {("Data File", "Wind Profile", None), ("Scenario", "Low Wind", None), ("Variable", "Wind Scaler", "×")}
+    assert tags == {
+        ("Data File", "Wind Profile", None),
+        ("Scenario", "Low Wind", None),
+        ("Variable", "Wind Scaler", "×"),
+    }
 
 
 def test_a_row_keeps_two_scenario_tags(edge):
@@ -266,15 +329,25 @@ def test_a_row_keeps_two_scenario_tags(edge):
 
 
 def test_band_dates_text_and_memo_are_kept(edge):
-    assert (row(edge, "3").band, row(edge, "2").band, row(edge, "4").band) == (2, 1, 1)  # 4: band 1 stated
+    assert (row(edge, "3").band, row(edge, "2").band, row(edge, "4").band) == (
+        2,
+        1,
+        1,
+    )  # 4: band 1 stated
     r9 = row(edge, "9")
-    assert (r9.date_from, r9.date_to, r9.memo) == ("2030-01-01T00:00:00", "2030-12-31T00:00:00", "from TSO plan")
+    assert (r9.date_from, r9.date_to, r9.memo) == (
+        "2030-01-01T00:00:00",
+        "2030-12-31T00:00:00",
+        "from TSO plan",
+    )
     assert row(edge, "12").texts == [("Data File", "csv_files\\wind.csv")]
     assert row(edge, "13").texts == [("Data File", "")]  # a text row without a value
 
 
 def test_attributes_resolve_to_their_object(edge):
-    assert [(a.object, a.name, a.value, a.unit) for a in edge.attributes] == [(("Node", "X"), "Latitude", 53.3, "°")]
+    assert [(a.object, a.name, a.value, a.unit) for a in edge.attributes] == [
+        (("Node", "X"), "Latitude", 53.3, "°")
+    ]
 
 
 # P7: units come from the file
@@ -284,7 +357,9 @@ def test_units_are_read_from_the_file(edge, tmp_path):
     assert (row(edge, "1").property, row(edge, "1").unit) == ("Max Capacity", "MW")
     assert (row(edge, "2").property, row(edge, "2").unit) == ("Heat Rate", "GJ/MWh")
     p = tmp_path / "btu.xml"
-    p.write_bytes(EDGE.read_bytes().replace(b"<value>GJ/MWh</value>", b"<value>MMBtu/MWh</value>"))
+    p.write_bytes(
+        EDGE.read_bytes().replace(b"<value>GJ/MWh</value>", b"<value>MMBtu/MWh</value>")
+    )
     assert row(read_plexos_xml(str(p)), "2").unit == "MMBtu/MWh"
 
 
@@ -313,7 +388,15 @@ def _with_version(tmp_path, version):
     return read_plexos_xml(str(p))
 
 
-@pytest.mark.parametrize("version, fragment", [(None, "does not state"), ("6.400", "outside"), ("11.000", "outside"), ("abc", "not a number")])
+@pytest.mark.parametrize(
+    "version, fragment",
+    [
+        (None, "does not state"),
+        ("6.400", "outside"),
+        ("11.000", "outside"),
+        ("abc", "not a number"),
+    ],
+)
 def test_an_unsupported_or_missing_version_warns_but_reads(tmp_path, version, fragment):
     model = _with_version(tmp_path, version)
     assert any(fragment in w for w in model.warnings)
@@ -322,11 +405,16 @@ def test_an_unsupported_or_missing_version_warns_but_reads(tmp_path, version, fr
 
 @pytest.mark.parametrize("version", ["7.000", "9.200", "10.900"])
 def test_a_supported_version_does_not_warn(tmp_path, version):
-    assert not any("version" in w.lower() for w in _with_version(tmp_path, version).warnings)
+    assert not any(
+        "version" in w.lower() for w in _with_version(tmp_path, version).warnings
+    )
 
 
 def test_world_reports_its_version(world):
-    assert (world.version, world.saved_with) == ("8.300", "PLEXOS 8.300 R01 x64 Edition")
+    assert (world.version, world.saved_with) == (
+        "8.300",
+        "PLEXOS 8.300 R01 x64 Edition",
+    )
 
 
 # P9: engine cage A
@@ -334,5 +422,10 @@ def test_world_reports_its_version(world):
 
 def test_the_reader_imports_without_pypsa():
     code = "import sys; sys.modules['pypsa'] = None; import gridspine.ingest.plexos_xml; print('ok')"
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=Path(__file__).parents[2])
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).parents[2],
+    )
     assert out.returncode == 0 and out.stdout.strip() == "ok", out.stderr

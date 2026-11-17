@@ -25,6 +25,7 @@ Hostile input is refused, never expanded: any DTD (and so any entity
 declaration or external reference) is a ``PlexosRefused`` of kind ``"dtd"``,
 and the parser runs with entity resolution, DTD loading and network access off.
 """
+
 from __future__ import annotations
 
 import math
@@ -36,18 +37,34 @@ NAMESPACE = "http://tempuri.org/MasterDataSet.xsd"
 ROOT_TAG = "MasterDataSet"
 
 #: Tables without which the file cannot be read at all.
-REQUIRED_TABLES = ("t_class", "t_collection", "t_property", "t_object", "t_membership", "t_data")
+REQUIRED_TABLES = (
+    "t_class",
+    "t_collection",
+    "t_property",
+    "t_object",
+    "t_membership",
+    "t_data",
+)
 
 #: Tables that qualify a data row (one entry per row, keyed by data_id).
-_DATA_ROW_TABLES = ("t_band", "t_date_from", "t_date_to", "t_text", "t_memo_data", "t_tag")
+_DATA_ROW_TABLES = (
+    "t_band",
+    "t_date_from",
+    "t_date_to",
+    "t_text",
+    "t_memo_data",
+    "t_tag",
+)
 
 #: Versions whose file layout this reader was written against.
 SUPPORTED_MAJOR_VERSIONS = range(7, 11)
 
 
 class PlexosRefused(ValueError):
-    """The file cannot be read as a PLEXOS model. ``kind`` names why:
-    ``"not_xml"``, ``"dtd"``, ``"not_plexos"`` or ``"missing_table"``."""
+    """
+    The file cannot be read as a PLEXOS model. ``kind`` names why:
+    ``"not_xml"``, ``"dtd"``, ``"not_plexos"`` or ``"missing_table"``.
+    """
 
     def __init__(self, kind: str, message: str):
         super().__init__(message)
@@ -77,9 +94,11 @@ class Membership:
 
 @dataclass(frozen=True, slots=True)
 class Tag:
-    """A data row tagged with an object: a Scenario (the row applies only when
+    """
+    A data row tagged with an object: a Scenario (the row applies only when
     that scenario is on), a Data File (the value comes from that file) or a
-    Variable (the value is combined with that variable by ``action``)."""
+    Variable (the value is combined with that variable by ``action``).
+    """
 
     cls: str
     name: str
@@ -179,10 +198,14 @@ def _parse_tables(source) -> dict[str, list[dict[str, str | None]]]:
                     # Any DOCTYPE at all (internal subset, entity, SYSTEM or
                     # PUBLIC reference): PLEXOS never writes one.
                     if el.getroottree().docinfo.doctype:
-                        raise PlexosRefused("dtd", "The file declares a DTD; PLEXOS files never do, so it is refused.")
+                        raise PlexosRefused(
+                            "dtd",
+                            "The file declares a DTD; PLEXOS files never do, so it is refused.",
+                        )
                     if _local(el.tag) != ROOT_TAG:
                         raise PlexosRefused(
-                            "not_plexos", f"The root element is <{_local(el.tag)}>, not <{ROOT_TAG}>: not a PLEXOS input file."
+                            "not_plexos",
+                            f"The root element is <{_local(el.tag)}>, not <{ROOT_TAG}>: not a PLEXOS input file.",
                         )
                 depth += 1
                 continue
@@ -194,7 +217,9 @@ def _parse_tables(source) -> dict[str, list[dict[str, str | None]]]:
                 while el.getprevious() is not None:
                     del el.getparent()[0]
     except etree.XMLSyntaxError as exc:  # also an empty file: lxml finds no root
-        raise PlexosRefused("not_xml", f"The file is not well-formed XML: {exc}") from exc
+        raise PlexosRefused(
+            "not_xml", f"The file is not well-formed XML: {exc}"
+        ) from exc
     return tables
 
 
@@ -228,7 +253,10 @@ def _version_warning(version: str | None) -> str | None:
 class _Ledger:
     def __init__(self, tables):
         self.broken: list[Broken] = []
-        self.accounting = {t: {"in": len(rows), "resolved": 0, "broken": 0} for t, rows in tables.items()}
+        self.accounting = {
+            t: {"in": len(rows), "resolved": 0, "broken": 0}
+            for t, rows in tables.items()
+        }
 
     def ok(self, table):
         self.accounting[table]["resolved"] += 1
@@ -239,8 +267,10 @@ class _Ledger:
 
 
 def _index(tables, ledger, table, id_field):
-    """Rows of ``table`` by id; a duplicate or missing id is broken, never
-    silently overwritten. Returns {id: row}; does NOT mark rows resolved."""
+    """
+    Rows of ``table`` by id; a duplicate or missing id is broken, never
+    silently overwritten. Returns {id: row}; does NOT mark rows resolved.
+    """
     out = {}
     for row in tables.get(table, []):
         rid = row.get(id_field)
@@ -258,12 +288,19 @@ def read_plexos_xml(source) -> PlexosModel:
     tables = _parse_tables(source)
     missing = [t for t in REQUIRED_TABLES if t not in tables]
     if missing:
-        raise PlexosRefused("missing_table", f"The file has no {', '.join(missing)} table: not a complete PLEXOS model.")
+        raise PlexosRefused(
+            "missing_table",
+            f"The file has no {', '.join(missing)} table: not a complete PLEXOS model.",
+        )
 
     ledger = _Ledger(tables)
     warnings: list[str] = []
 
-    config = {r.get("element"): r.get("value") for r in tables.get("t_config", []) if r.get("element")}
+    config = {
+        r.get("element"): r.get("value")
+        for r in tables.get("t_config", [])
+        if r.get("element")
+    }
     for _ in tables.get("t_config", []):
         ledger.ok("t_config")
     version = config.get("Version")
@@ -295,9 +332,16 @@ def read_plexos_xml(source) -> PlexosModel:
     collections = _index(tables, ledger, "t_collection", "collection_id")
     collection_key = {}
     for cid, row in collections.items():
-        parent, child = class_name.get(row.get("parent_class_id")), class_name.get(row.get("child_class_id"))
+        parent, child = (
+            class_name.get(row.get("parent_class_id")),
+            class_name.get(row.get("child_class_id")),
+        )
         if parent is None or child is None or not row.get("name"):
-            ledger.bad("t_collection", cid, "collection with an unknown parent or child class, or no name")
+            ledger.bad(
+                "t_collection",
+                cid,
+                "collection with an unknown parent or child class, or no name",
+            )
             continue
         collection_key[cid] = (parent, child, row["name"])
         ledger.ok("t_collection")
@@ -306,9 +350,17 @@ def read_plexos_xml(source) -> PlexosModel:
     prop = {}
     for pid, row in properties.items():
         if row.get("collection_id") not in collection_key or not row.get("name"):
-            ledger.bad("t_property", pid, "property of an unknown collection, or without a name")
+            ledger.bad(
+                "t_property",
+                pid,
+                "property of an unknown collection, or without a name",
+            )
             continue
-        prop[pid] = (row["name"], row["collection_id"], unit_name.get(row.get("unit_id")))
+        prop[pid] = (
+            row["name"],
+            row["collection_id"],
+            unit_name.get(row.get("unit_id")),
+        )
         ledger.ok("t_property")
 
     # objects
@@ -320,7 +372,9 @@ def read_plexos_xml(source) -> PlexosModel:
     for oid, row in _index(tables, ledger, "t_object", "object_id").items():
         cls = class_name.get(row.get("class_id"))
         if cls is None:
-            ledger.bad("t_object", oid, f"object of unknown class id {row.get('class_id')}")
+            ledger.bad(
+                "t_object", oid, f"object of unknown class id {row.get('class_id')}"
+            )
             continue
         if not row.get("name"):
             ledger.bad("t_object", oid, "object without a name")
@@ -338,13 +392,22 @@ def read_plexos_xml(source) -> PlexosModel:
     memberships: dict[str, Membership] = {}
     for mid, row in _index(tables, ledger, "t_membership", "membership_id").items():
         coll = collection_key.get(row.get("collection_id"))
-        parent, child = objects_by_id.get(row.get("parent_object_id")), objects_by_id.get(row.get("child_object_id"))
+        parent, child = (
+            objects_by_id.get(row.get("parent_object_id")),
+            objects_by_id.get(row.get("child_object_id")),
+        )
         if coll is None:
-            ledger.bad("t_membership", mid, f"unknown collection id {row.get('collection_id')}")
+            ledger.bad(
+                "t_membership", mid, f"unknown collection id {row.get('collection_id')}"
+            )
         elif parent is None or child is None:
             ledger.bad("t_membership", mid, "parent or child object does not exist")
         elif (parent.cls, child.cls) != coll[:2]:
-            ledger.bad("t_membership", mid, f"objects are {parent.cls}/{child.cls} but the collection is {coll[0]}/{coll[1]}")
+            ledger.bad(
+                "t_membership",
+                mid,
+                f"objects are {parent.cls}/{child.cls} but the collection is {coll[0]}/{coll[1]}",
+            )
         else:
             memberships[mid] = Membership(mid, coll, parent.key, child.key)
             ledger.ok("t_membership")
@@ -355,19 +418,35 @@ def read_plexos_xml(source) -> PlexosModel:
         m = memberships.get(row.get("membership_id"))
         p = prop.get(row.get("property_id"))
         if m is None:
-            ledger.bad("t_data", did, f"membership {row.get('membership_id')} does not exist")
+            ledger.bad(
+                "t_data", did, f"membership {row.get('membership_id')} does not exist"
+            )
             continue
         if p is None:
-            ledger.bad("t_data", did, f"property {row.get('property_id')} does not exist")
+            ledger.bad(
+                "t_data", did, f"property {row.get('property_id')} does not exist"
+            )
             continue
         pname, pcoll, punit = p
         if collection_key[pcoll] != m.collection:
-            ledger.bad("t_data", did, f"property {pname!r} belongs to another collection than its membership")
+            ledger.bad(
+                "t_data",
+                did,
+                f"property {pname!r} belongs to another collection than its membership",
+            )
             continue
         value, why = _number(row.get("value"))
         rows[did] = PropertyRow(
-            data_id=did, membership_id=m.membership_id, collection=m.collection, parent=m.parent, child=m.child,
-            property=pname, unit=punit, raw_value=row.get("value"), value=value, unreadable=why,
+            data_id=did,
+            membership_id=m.membership_id,
+            collection=m.collection,
+            parent=m.parent,
+            child=m.child,
+            property=pname,
+            unit=punit,
+            raw_value=row.get("value"),
+            value=value,
+            unreadable=why,
         )
         ledger.ok("t_data")
 
@@ -385,7 +464,9 @@ def read_plexos_xml(source) -> PlexosModel:
 
     def once(table, did, i):
         if did in seen[table]:
-            ledger.bad(table, f"{did} (row {i})", f"a second {table} entry for data row {did}")
+            ledger.bad(
+                table, f"{did} (row {i})", f"a second {table} entry for data row {did}"
+            )
             return False
         seen[table].add(did)
         return True
@@ -396,7 +477,11 @@ def read_plexos_xml(source) -> PlexosModel:
         try:
             band = int(row.get("band_id") or "")
         except ValueError:
-            ledger.bad("t_band", target.data_id, f"band {row.get('band_id')!r} is not a whole number")
+            ledger.bad(
+                "t_band",
+                target.data_id,
+                f"band {row.get('band_id')!r} is not a whole number",
+            )
             continue
         if band < 1:
             ledger.bad("t_band", target.data_id, f"band {band} is below 1")
@@ -417,23 +502,37 @@ def read_plexos_xml(source) -> PlexosModel:
             continue
         target.memo = row.get("value")
         ledger.ok("t_memo_data")
-    for i, row, target in each_qualifier("t_text"):  # several texts per row are allowed (one per class)
+    for i, row, target in each_qualifier(
+        "t_text"
+    ):  # several texts per row are allowed (one per class)
         cls = class_name.get(row.get("class_id"))
         if cls is None:
-            ledger.bad("t_text", target.data_id, f"text of unknown class id {row.get('class_id')}")
+            ledger.bad(
+                "t_text",
+                target.data_id,
+                f"text of unknown class id {row.get('class_id')}",
+            )
             continue
         target.texts.append((cls, row.get("value") or ""))
         ledger.ok("t_text")
     for i, row, target in each_qualifier("t_tag"):  # several tags per row are allowed
         obj = objects_by_id.get(row.get("object_id"))
         if obj is None:
-            ledger.bad("t_tag", f"{target.data_id} (row {i})", f"tag object {row.get('object_id')} does not exist")
+            ledger.bad(
+                "t_tag",
+                f"{target.data_id} (row {i})",
+                f"tag object {row.get('object_id')} does not exist",
+            )
             continue
         aid = row.get("action_id")
         if aid is not None and aid not in action_symbol:
-            ledger.bad("t_tag", f"{target.data_id} (row {i})", f"unknown action id {aid}")
+            ledger.bad(
+                "t_tag", f"{target.data_id} (row {i})", f"unknown action id {aid}"
+            )
             continue
-        target.tags.append(Tag(obj.cls, obj.name, action_symbol.get(aid) if aid is not None else None))
+        target.tags.append(
+            Tag(obj.cls, obj.name, action_symbol.get(aid) if aid is not None else None)
+        )
         ledger.ok("t_tag")
 
     for t in ("t_data", "t_membership", "t_object", *_DATA_ROW_TABLES):
@@ -442,32 +541,54 @@ def read_plexos_xml(source) -> PlexosModel:
     # object attributes (Node latitude/longitude, ...)
     attr_def = {}
     for aid, row in _index(tables, ledger, "t_attribute", "attribute_id").items():
-        attr_def[aid] = (row.get("name"), unit_name.get(row.get("unit_id")), class_name.get(row.get("class_id")))
+        attr_def[aid] = (
+            row.get("name"),
+            unit_name.get(row.get("unit_id")),
+            class_name.get(row.get("class_id")),
+        )
         ledger.ok("t_attribute")
     attributes = []
     for i, row in enumerate(tables.get("t_attribute_data", [])):
-        obj, adef = objects_by_id.get(row.get("object_id")), attr_def.get(row.get("attribute_id"))
+        obj, adef = (
+            objects_by_id.get(row.get("object_id")),
+            attr_def.get(row.get("attribute_id")),
+        )
         rid = f"{row.get('object_id')}/{row.get('attribute_id')} (row {i})"
         if obj is None or adef is None:
             ledger.bad("t_attribute_data", rid, "object or attribute does not exist")
             continue
         if adef[2] != obj.cls:
-            ledger.bad("t_attribute_data", rid, f"attribute of {adef[2]} set on a {obj.cls}")
+            ledger.bad(
+                "t_attribute_data", rid, f"attribute of {adef[2]} set on a {obj.cls}"
+            )
             continue
         value, why = _number(row.get("value"))
-        attributes.append(Attribute(obj.key, adef[0], adef[1], row.get("value"), value, why))
+        attributes.append(
+            Attribute(obj.key, adef[0], adef[1], row.get("value"), value, why)
+        )
         ledger.ok("t_attribute_data")
 
     # Tables this reader does not interpret (reports, messages, custom columns,
     # ...) are still counted, so the report can say they were seen.
-    handled = set(REQUIRED_TABLES) | set(_DATA_ROW_TABLES) | {
-        "t_config", "t_unit", "t_action", "t_category", "t_attribute", "t_attribute_data",
-    }
+    handled = (
+        set(REQUIRED_TABLES)
+        | set(_DATA_ROW_TABLES)
+        | {
+            "t_config",
+            "t_unit",
+            "t_action",
+            "t_category",
+            "t_attribute",
+            "t_attribute_data",
+        }
+    )
     for t, a in ledger.accounting.items():
         a["not_read"] = 0
         if t not in handled:
             a["not_read"] = a["in"]
-            warnings.append(f"Table {t} ({a['in']} rows) holds settings this reader does not interpret.")
+            warnings.append(
+                f"Table {t} ({a['in']} rows) holds settings this reader does not interpret."
+            )
 
     return PlexosModel(
         version=version,
