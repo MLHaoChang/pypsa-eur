@@ -39,6 +39,50 @@ def test_one_profile_serves_the_four_grid_templates_with_no_params_or_levers():
     assert "skip" in p["stages"]["explore"]
 
 
+def test_setup_switches_load_flow_on_with_the_one_setting_the_grant_admits():
+    """SH15-PF-1 (Q1 = C): setup writes `run_ac_pf_after_lopf` alone, with the
+    args `run_envelope.SETTING_TOOLS` freezes, and the envelope lists it."""
+    from services import run_envelope
+
+    p = _profile()
+    assert p["stages"]["setup"]["actions"] == [
+        {"tool": "update_solver_config", "args": {"partial": {"run_ac_pf_after_lopf": True}}}]
+    assert run_envelope.SETTING_TOOLS == {"update_solver_config": p["stages"]["setup"]["actions"][0]["args"]}
+    assert {"tool": "update_solver_config"} in p["envelope"]["runs"]
+    run_envelope.check_block(p["envelope"])
+
+
+def _setting_refusal(monkeypatch, args, call="c", step="c"):
+    from services import run_envelope
+
+    monkeypatch.setattr(run_envelope, "_standing", lambda *a, **k: None)
+    monkeypatch.setattr(run_envelope, "_names_another_project", lambda *a: False)
+    envelope = {"runs": [{"tool": "update_solver_config"}], "edits": []}
+    return run_envelope._refusal(SimpleNamespace(run_step_call=step), envelope, {}, "update_solver_config",
+                                 args, "write", False, None, SimpleNamespace(network=None, solver_state={}),
+                                 {"call_id": call})
+
+
+def test_the_harness_own_load_flow_step_is_admitted(monkeypatch):
+    assert _setting_refusal(monkeypatch, {"partial": {"run_ac_pf_after_lopf": True}}) is None
+
+
+@pytest.mark.parametrize("call,step", [("model-call", "c"), ("c", None), (None, None), ("", "")])
+def test_a_model_turns_solver_config_write_is_refused_under_the_grant(monkeypatch, call, step):
+    args = {"partial": {"run_ac_pf_after_lopf": True}}
+    assert _setting_refusal(monkeypatch, args, call=call, step=step) == "own_step_only"
+
+
+@pytest.mark.parametrize("args", [
+    {"partial": {"run_ac_pf_after_lopf": False}},
+    {"partial": {"run_ac_pf_after_lopf": True, "solver_name": "highs"}},
+    {"partial": {"run_ac_pf_after_lopf": True}, "reset": True},
+    {"config": {"run_ac_pf_after_lopf": True}},
+    {},
+])
+def test_the_own_step_with_any_other_args_is_outside_the_entry(monkeypatch, args):
+    assert _setting_refusal(monkeypatch, args) == "outside_entry"
+
 def test_the_result_gate_is_the_core_rules_and_the_four_grid_rules():
     r = _rules()
     assert set(r) == {"res.solve.status", "res.fresh", "grid.pf.converged", "grid.pf.loading",

@@ -1795,6 +1795,31 @@ the preset turns off (grid, control, reliability), with its reason, read from
 - **Explore.** Skipped, with its reason, until the shipped `cases.json` run as
   explore cases (the next slice).
 
+### The grid-only profile (study harness 15)
+
+`grid_only@1` serves the `3bus`, `ieee14`, `belgium` and `ieee39` templates,
+with no params, sidecars or levers (owner decisions SH-PILOT-1, SH15-PF-1).
+
+- **Setup.** One action: `update_solver_config` with exactly
+  `{"partial": {"run_ac_pf_after_lopf": true}}`, switching Load flow on. It is
+  a `BOUND_CONTEXT_TOOLS` member, carded in stepwise mode; a grant admits it
+  only through `run_envelope.SETTING_TOOLS`, as the runner's own step
+  (`session.run_step_call`, else `own_step_only`) with those args alone (else
+  `outside_entry`). Setup also refuses a template whose source is missing.
+- **Result gate.** The core rules and the PF rules, read only from the stored
+  AC PF result (`services/run_grid_pf.py`), never from LOPF flows; a stale,
+  unknown or absent PF is no evidence. `grid.pf.converged` and
+  `grid.pf.loading` (at most 100 %, apparent power) block and go to the user
+  when not evaluated; `grid.pf.voltage` (each bus's own band, none set: not
+  evaluated) and `grid.n1.secured` (the solver's N-1 option over every line,
+  and every transformer when there is one) warn. A solve with Load flow on is
+  fresh only while `ac_pf_network_revision` is the network's and the condition
+  is exactly `lopf+ac_pf_ok` (`run_gates.lp_condition`,
+  `calculations.solve_matches_inputs(after_pf=True)`), and only for a profile
+  that sets `pf_results`.
+- **Hand-off.** No KPIs: the flow rewrites the live dispatch, so cost and CO2
+  read after it are not the LP's (issue 50, `missing_tools`).
+
 ### The approval envelope (study harness issue 03)
 
 `services/run_envelope.py` (design §7; SH-ENVELOPE-1). "Approve once, run
