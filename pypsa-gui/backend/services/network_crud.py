@@ -434,6 +434,13 @@ def _imported_parts_problem(component_class: str, row, global_rate: float) -> st
                                    discount_rate=rate, asset_lifetime=row.get("lifetime"))
     except ValueError as exc:
         return str(exc)
+    except ArithmeticError:  # (1 + r)^L overflows, or 1 + r = ±1 divides by zero (GK B 64)
+        lives = sorted({life for spec in composite_parts(component_class)
+                        if _as_float(row.get(spec.column("overnight"))) is not None
+                        and (life := _as_float(row.get(spec.column("lifetime")) if spec.own_lifetime
+                                               else row.get("lifetime"))) is not None})
+        over = " and ".join(f"{life:g}" for life in lives)
+        return f"its investment parts cannot be annuitised at rate {rate:g} over {over} years"
     if not all(math.isfinite(derived[c]) for c in ("capital_cost", "fom_cost")):
         scale = ", ".join(sorted({s.scale_by for s in composite_parts(component_class) if s.scale_by}))
         return f"its derived cost is not finite (check {scale or 'the parts'})"

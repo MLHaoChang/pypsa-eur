@@ -55,12 +55,16 @@ def discount_rate_problem(value) -> str | None:
     stays finite (no overflow) and differs from 1 (a rate too small to move 1 + r divides by zero). A bundle's settings file is held to it (`routers/projects.import_bundle`)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return "the discount rate is not a number"
-    if not math.isfinite(value):
+    try:
+        rate = float(value)
+    except OverflowError:  # an int too large for a float (10**400)
         return "the discount rate is not a finite number"
-    if value <= -1:
+    if not math.isfinite(rate):
+        return "the discount rate is not a finite number"
+    if rate <= -1:
         return "the discount rate must be above -1"
     try:
-        finite = math.isfinite(_annuity(float(value), RATE_RULE_LIFETIME))
+        finite = math.isfinite(_annuity(rate, RATE_RULE_LIFETIME))
     except (OverflowError, ZeroDivisionError):
         finite = False
     if not finite:

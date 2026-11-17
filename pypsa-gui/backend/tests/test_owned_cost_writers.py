@@ -850,3 +850,67 @@ def test_every_owned_cost_an_experiment_can_name_is_refused():
         cls: _ATTRIBUTES.get(cls, set()) & set(owned_columns(cls)) for cls in COMPOSITE
     }
     assert reachable == {cls: {"capital_cost"} for cls in COMPOSITE}, reachable
+
+
+# ── GK B (64) ask on TCU 11 ──────────────────────────────────────────────────
+
+
+def _assert_refused_unwritten(r, name, client, session_ctx, project_row, good, root, before):
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
+    msg = r.json()["detail"]["message"]
+    assert "Storage 'bess2'" in msg
+    assert "cannot be annuitised" in msg
+    assert project_row(name) is None  # refused before the project row
+    assert {p.name for p in root.iterdir()} == before  # and before its folder
+    assert session_ctx(client).network is good
+    return msg
+
+
+def test_a_bundle_rate_that_overflows_a_parts_lifetime_is_refused_before_anything_is_written(
+    client, install_network, session_ctx, project_row, project_storage_dir
+):
+    """The rate rule holds the rate to 200 years; a 300-year part at rate 10 overflows (1 + r)^L."""
+    n = _network()
+    n.storage_units.at["bess2", "inv_energy_lifetime"] = 300.0
+    data = _with_member(
+        _bundle_of(client, install_network, n, name="tcu11_src3"),
+        "solver_config.json",
+        json.dumps({"discount_rate": 10}).encode(),
+    )
+    root = project_storage_dir("tcu11_src3").parent
+    before = {p.name for p in root.iterdir()}
+    good = install_network(_network())
+    r = _import_bundle(client, data, "tcu11_overflow")
+    msg = _assert_refused_unwritten(
+        r, "tcu11_overflow", client, session_ctx, project_row, good, root, before
+    )
+    assert msg == (
+        "Storage 'bess2': its investment parts cannot be annuitised at rate 10 "
+        "over 10 and 300 years. The open network is unchanged."
+    )
+
+
+@pytest.mark.parametrize("own_rate", [-2.0, 1e308])
+def test_an_assets_own_rate_the_annuity_cannot_take_is_refused_before_anything_is_written(
+    client, install_network, session_ctx, project_row, project_storage_dir, own_rate
+):
+    n = _network()
+    n.storage_units["discount_rate"] = float("nan")
+    n.storage_units.at["bess2", "discount_rate"] = own_rate
+    data = _bundle_of(client, install_network, n, name="tcu11_src4")
+    root = project_storage_dir("tcu11_src4").parent
+    before = {p.name for p in root.iterdir()}
+    good = install_network(_network())
+    r = _import_bundle(client, data, "tcu11_ownrate")
+    msg = _assert_refused_unwritten(
+        r, "tcu11_ownrate", client, session_ctx, project_row, good, root, before
+    )
+    assert f"at rate {own_rate:g}" in msg
+
+
+@pytest.mark.parametrize("value", [10**400, -(10**400)], ids=["huge", "-huge"])
+def test_the_rate_rule_refuses_an_int_too_large_for_a_float(value):
+    from services.solver.periodized_costs import discount_rate_problem
+
+    assert discount_rate_problem(value) is not None
