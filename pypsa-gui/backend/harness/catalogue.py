@@ -5945,7 +5945,7 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_ppa_price": [("GET", "/api/simulation/finance")],
     "explain_cashflow": [("GET", "/api/results/investment_case"),
                          ("GET", "/api/results/investment_case/report")],
-    # business case (4) — business case 08b; the preset route stays panel-only (Q3)
+    # business case (4) — business case 08b; the preset and options reads are chat reads (bc 14, bc 16)
     "run_business_case": [("POST", "/api/results/business_case")],
     "get_business_case": [("GET", "/api/results/business_case"),
                           ("GET", "/api/results/business_case/inputs"),

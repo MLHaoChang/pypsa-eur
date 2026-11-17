@@ -47,8 +47,8 @@ lists which Phase 2 turns into Messages-API content blocks.
 """
 from __future__ import annotations
 
-import copy
 import contextlib
+import copy
 import inspect
 import json
 import logging

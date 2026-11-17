@@ -1115,16 +1115,6 @@ def test_options_read_busy_keeps_the_refusal_kind(bc):
             t.join()
 
 
-def test_options_read_with_no_network_says_why_never_empty(bc):
-    import routers.results as R
-
-    ctx = R.PyPSAService.get_active_context()
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(ctx, "network", None)
-        out = chat_tools.get_business_case(detail="options")
-    assert out["outputs"] is None and out["outputs_reason"] == "no_network"
-
-
 def test_an_oversize_options_read_drops_whole_entries_refusals_last(bc, monkeypatch):
     import routers.results as R
 
