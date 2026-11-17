@@ -61,6 +61,12 @@ try {
     try { await projectsApi.createFromTemplate(tid, name); return 'made' } catch (e) { return `failed: ${e.message}` }
   }, { tid: TEMPLATE, name: PROJECT })
   if (made.startsWith('failed')) problems.push(`create: ${made}`)
+  // Load it on the server before any shot tab opens, so no tab's save meets an empty network (409 toast).
+  const loaded = await login.evaluate(async ({ name }) => {
+    const { projectsApi } = await import('/src/api/projects.ts')
+    try { await projectsApi.load(name); return 'ok' } catch (e) { return `failed: ${e.message}` }
+  }, { name: PROJECT })
+  if (loaded !== 'ok') problems.push(`load: ${loaded}`)
   const auth = await owner.storageState()
   await owner.close()
 
@@ -73,10 +79,13 @@ try {
         localStorage.setItem('network-diagram:ui-mode', mode)
         localStorage.setItem('network-diagram:ui-mode-explicit', '1')
         localStorage.setItem('network-diagram:theme', theme)
+        // The shots only read: no autosave, so no save can race the project's load (409 toast, #1470).
+        localStorage.setItem('network-diagram:autosave', 'false')
       }, { mode, theme, project: PROJECT })
       const page = await ctx.newPage()
       page.setDefaultTimeout(15000)
       page.on('pageerror', e => problems.push(`${mode}/${theme}: page error: ${e.message}`))
+      page.on('response', r => { if (r.status() === 409) problems.push(`${mode}/${theme}: 409 on ${r.url()}`) })
       await page.route(u => u.pathname === '/api/results/fmea_modes', r => r.fulfill({ json: PRICED ? PRICED_MODES : MODES }))
       // Unpriced means no VOLL: the real solver config, with VOLL 0, so the VOLL link lands on the empty field.
       await page.route(u => u.pathname === '/api/simulation/solver_config', async r => {

@@ -29,7 +29,7 @@ import {
   unpricedRankingWarning,
   unpricedModeCount,
   unpricedNote,
-  SET_VOLL_TEXT,
+  setVollText,
   type WorksheetRow,
   type WorksheetSidecar,
   CRITICALITY_PER_YEAR_LABEL,
@@ -193,7 +193,7 @@ export default function FmeaTab() {
   }
 
   const exportCsv = () =>
-    downloadCSV('fmea_worksheet.csv', WORKSHEET_CSV_HEADER, worksheetCsvRows(rows))
+    downloadCSV('fmea_worksheet.csv', WORKSHEET_CSV_HEADER, worksheetCsvRows(rows, guided))
 
   return (
     <div className="flex flex-col h-full overflow-auto p-4 gap-3">
@@ -227,7 +227,7 @@ export default function FmeaTab() {
           <button type="button" data-testid="fmea-unpriced-set-voll"
             onClick={() => openVollField(FMEA_RETURN_LABEL)}
             className="text-accent hover:underline">
-            {SET_VOLL_TEXT} ›
+            {setVollText(guided)} ›
           </button>
         </p>
       ) : unpricedRankingWarning(modes as ModesPayload | null | undefined) && (

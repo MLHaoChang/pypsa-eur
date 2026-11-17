@@ -106,7 +106,9 @@ describe.each(['guided', 'expert'] as const)('FMEA tab, unpriced modes (%s)', (m
     const line = screen.getByTestId('fmea-unpriced-line')
     expect(line.textContent).toContain('Not priced: 2 modes are listed last and left out of the ranking.')
     const link = screen.getByTestId('fmea-unpriced-set-voll')
-    expect(link.textContent).toBe('Set the Value of Lost Load (VOLL) in Solver settings ›')
+    expect(link.textContent).toBe(mode === 'guided'
+      ? 'Set the price of undelivered energy on the Goal card ›'
+      : 'Set the Value of Lost Load (VOLL) in Solver settings ›')
     fireEvent.click(link)
     expect(openVollField).toHaveBeenCalledWith('FMEA')
   })

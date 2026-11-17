@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL } from './fmea'
+import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
 import type { CoptPayload } from './adequacy'
 
 const copt: CoptPayload = {
@@ -83,6 +84,8 @@ describe('mergeWorksheet — unpriced modes (no VOLL)', () => {
     expect(csv[2]).toEqual(['Not priced: 2 modes are listed last and left out of the ranking. ' +
       'Set the Value of Lost Load (VOLL) in Solver settings.'])
     expect(worksheetCsvRows(mergeWorksheet(copt, sidecar))).toHaveLength(3)
+    expect(worksheetCsvRows(mergeWorksheet(unpriced, null), true)[2][0])
+      .toContain('Set the price of undelivered energy on the Goal card.')
   })
 })
 
@@ -215,5 +218,20 @@ describe('criticality column label', () => {
       expect(src).toContain('CRITICALITY_PER_YEAR_LABEL')
       expect(src).not.toMatch(/Criticality[ (]*€\/yr/)
     }
+  })
+})
+
+// UX 2 on #1662: the VOLL link names the input as the place it lands names
+// it, in each mode (EXPERT-GUIDED-1). Each label is pinned to its owner.
+describe('setVollText names the VOLL input as its landing place does', () => {
+  const read = (rel: string) => readFileSync(`${__dirname}/${rel}`, 'utf8')
+  it('Expert: Solver settings\' own field label', () => {
+    expect(read('../SolverSettings.tsx')).toContain(`label="${SOLVER_VOLL_LABEL}"`)
+    expect(setVollText(false)).toBe('Set the Value of Lost Load (VOLL) in Solver settings')
+  })
+  it('Guided: the Goal card\'s own row label and title', () => {
+    expect(read('../hubDesign/cards/GoalCard.tsx')).toContain('<Term k="voll_plain">{GOAL_VOLL_LABEL}</Term>')
+    expect(read('../hubDesign/shared/CardShell.tsx')).toContain(`goal: '${GOAL_CARD_TITLE}'`)
+    expect(setVollText(true)).toBe('Set the price of undelivered energy on the Goal card')
   })
 })

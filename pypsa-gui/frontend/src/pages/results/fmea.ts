@@ -2,6 +2,8 @@
 // merge and the CSV shape are unit-testable without mounting anything.
 // The merge only needs a per_mode carrier — /results/copt and the Phase 4
 // aggregator /results/fmea_modes both satisfy it.
+import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
+
 export interface ModesPayload {
   per_mode: Array<Record<string, unknown>>
   // Criticality is ΔEUE × VoLL × occurrence. With no VoLL the entire ranking
@@ -162,7 +164,15 @@ export function mergeWorksheet(
 export function unpricedNote(count: number): string {
   return `Not priced: ${count} mode${count === 1 ? ' is' : 's are'} listed last and left out of the ranking.`
 }
-export const SET_VOLL_TEXT = 'Set the Value of Lost Load (VOLL) in Solver settings'
+// The VOLL input's name where the link lands, in each mode: Solver settings'
+// field label (Expert; pinned to SolverSettings.tsx by a parity test) and the
+// Goal card's row (Guided). One word per input per place it is edited.
+export const SOLVER_VOLL_LABEL = 'Value of Lost Load (VOLL)'
+export function setVollText(guided: boolean): string {
+  return guided
+    ? `Set the ${GOAL_VOLL_LABEL.toLowerCase()} on the ${GOAL_CARD_TITLE} card`
+    : `Set the ${SOLVER_VOLL_LABEL} in Solver settings`
+}
 
 /** How many rows the backend could not price (no VOLL). */
 export function unpricedModeCount(rows: WorksheetRow[]): number {
@@ -179,7 +189,7 @@ export const WORKSHEET_CSV_HEADER = [
   'in_metric_scope', 'mitigability', 'engine', 'fidelity',
 ]
 
-export function worksheetCsvRows(rows: WorksheetRow[]): unknown[][] {
+export function worksheetCsvRows(rows: WorksheetRow[], guided = false): unknown[][] {
   const out: unknown[][] = rows.map(r => [
     r.mode_id, r.failure_class, r.component_class, r.name,
     r.occurrence_per_year, r.occurrence_basis,
@@ -188,7 +198,7 @@ export function worksheetCsvRows(rows: WorksheetRow[]): unknown[][] {
   ])
   // The empty € cells say nothing on their own: a closing note row says why.
   const unpriced = unpricedModeCount(rows)
-  if (unpriced > 0) out.push([`${unpricedNote(unpriced)} ${SET_VOLL_TEXT}.`])
+  if (unpriced > 0) out.push([`${unpricedNote(unpriced)} ${setVollText(guided)}.`])
   return out
 }
 
