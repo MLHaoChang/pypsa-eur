@@ -487,10 +487,22 @@ def _check_run(task, run, unit, hold, eur, research_limit) -> None:
 
 def _check_revision(task, hold) -> None:
     """07d: a revision hold counts once against `budget.cost_eur`, with the
-    metered spend and the other unmetered sends (GK B (64) D4)."""
+    metered spend and the other unmetered sends (GK B (64) D4). It fails
+    closed (GK B (65) R1): unless the metered spend, the total spend and the
+    hold are finite numbers >= 0 and the cap a finite number > 0, the send is
+    refused, so a NaN, an infinity, a negative or a non-number never admits."""
     from harness import runner
-    if runner.budget_spent(task) or cost_eur(task) + hold > cap(task, "eur"):
-        raise SendRefused("budget", "The run's model budget is spent; the send is refused.")
+    refused = SendRefused("budget", "The run's model budget is spent; the send is refused.")
+    try:
+        metered = runner._budget(task)["used"]["cost_eur"]
+        limit = runner._budget(task)["limit"]["cost_eur"]
+        used = cost_eur(task) if _number(metered) else None
+    except (KeyError, TypeError, ValueError):
+        raise refused from None
+    if not (_number(metered) and _number(used) and _number(hold) and _number(limit) and limit > 0):
+        raise refused
+    if runner.budget_spent(task) or used + hold > limit:
+        raise refused
 
 
 def _settle_row(run: dict, hold: dict, amount_, flags: list[str] | None, eur=None) -> None:

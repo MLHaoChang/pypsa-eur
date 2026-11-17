@@ -1032,6 +1032,90 @@ def test_a_revision_is_refused_when_the_metered_budget_is_unmetered_with_eur_lef
     assert exc.value.reason == "budget"
 
 
+_NAN, _INF = float("nan"), float("inf")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("used", _NAN),
+        ("used", _INF),
+        ("used", -0.01),
+        ("used", "0"),
+        ("used", None),
+        ("used", True),
+        ("limit", _NAN),
+        ("limit", _INF),
+        ("limit", 0.0),
+        ("limit", -5.0),
+        ("limit", "100"),
+        ("limit", None),
+        ("limit", False),
+    ],
+)
+def test_a_revision_refuses_a_spend_or_cap_that_is_not_a_finite_number(made, field, value):
+    """GK B (65) R1: a bad spend or cap fails closed with `budget`, before
+    any comparison could admit it."""
+    path, _root, _c = made
+    leased(path, BOOT, 2e12)
+    update(path, harness_runner._budget)
+    # Written raw: the task store refuses to save a NaN or an infinity, but a
+    # file on disk can still hold one, and the reader accepts it.
+    task = record(path)
+    task["run"]["budget"][field]["cost_eur"] = value
+    Path(path).write_text(json.dumps(task))
+    with pytest.raises(send_reservation.SendRefused) as exc:
+        send_reservation.admit(path, req(), boot=BOOT, scope="revision")
+    assert exc.value.reason == "budget"
+
+
+@pytest.mark.parametrize("field", ["used", "limit"])
+def test_a_revision_refuses_a_budget_missing_its_eur_field(made, field):
+    path, _root, _c = made
+    leased(path, BOOT, 2e12)
+    update(path, lambda t: harness_runner._budget(t)[field].pop("cost_eur"))
+    with pytest.raises(send_reservation.SendRefused) as exc:
+        send_reservation.admit(path, req(), boot=BOOT, scope="revision")
+    assert exc.value.reason == "budget"
+
+
+@pytest.mark.parametrize("unmetered", [_NAN, _INF, -0.01])
+def test_a_revision_refuses_a_total_spend_that_is_not_a_finite_number(
+    made, monkeypatch, unmetered
+):
+    """The metered spend is fine but the total with the ledger's sends is
+    not (the ledger sum is mocked): the total is checked on its own."""
+    path, _root, _c = made
+    leased(path, BOOT, 2e12)
+    monkeypatch.setattr(send_reservation, "_unmetered_eur", lambda run: unmetered)
+    with pytest.raises(send_reservation.SendRefused) as exc:
+        send_reservation.admit(path, req(), boot=BOOT, scope="revision")
+    assert exc.value.reason == "budget"
+
+
+@pytest.mark.parametrize("hold", [_NAN, _INF, -0.01, "0.01", None])
+def test_a_revision_refuses_a_hold_that_is_not_a_finite_number(made, monkeypatch, hold):
+    path, _root, _c = made
+    leased(path, BOOT, 2e12)
+    monkeypatch.setattr(send_reservation, "amount", lambda *a, **k: hold)
+    with pytest.raises(send_reservation.SendRefused) as exc:
+        send_reservation.admit(path, req(), boot=BOOT, scope="revision")
+    assert exc.value.reason == "budget"
+
+
+def test_a_revision_with_finite_inputs_and_room_left_is_admitted(made):
+    """The control for the refusals above: a tiny positive cap still admits
+    a hold that fits it."""
+    path, _root, _c = made
+    leased(path, BOOT, 2e12)
+    r = req()
+    update(
+        path,
+        lambda t: harness_runner._budget(t)["limit"].update(cost_eur=bound_eur(r) + 1e-6),
+    )
+    assert send_reservation.admit(path, r, boot=BOOT, scope="revision")
+
+
 def test_run_and_research_holds_that_exactly_fill_their_caps_are_admitted(
     made, monkeypatch
 ):
