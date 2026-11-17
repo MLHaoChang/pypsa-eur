@@ -257,7 +257,10 @@ def _recorded_grid_template(project_dir) -> dict | None:
     except (OSError, ValueError, UnicodeDecodeError):
         return None
     tid = meta.get("template_id") if isinstance(meta, dict) else None
-    return {"id": tid} if tid in GRID_TEMPLATES else None
+    if tid not in GRID_TEMPLATES:
+        return None
+    from routers.projects import _TEMPLATE_DEFAULT_NAMES  # its "Reset to <name>" label
+    return {"id": tid, "name": _TEMPLATE_DEFAULT_NAMES.get(tid, tid)}
 
 
 def _preset_source(project_dir, template: dict | None) -> dict | None:
@@ -503,7 +506,8 @@ def registry(template: dict | None, settings: dict | None = None, *,
     availability, the effective preset and what the preset intends.
     ``project_dir``: where a grid template's recorded id is read."""
     has_template = template is not None
-    preset_id, preset = preset_for(_preset_source(project_dir, template))
+    source = _preset_source(project_dir, template)
+    preset_id, preset = preset_for(source)
     cards = []
     for card in CARDS:
         opts = []
@@ -515,7 +519,7 @@ def registry(template: dict | None, settings: dict | None = None, *,
                       "locked_reason": locked, "sections": list(card.sections),
                       "chip": card.chip,
                       "intended": list(preset.get(card.id, ()))})
-    return {"cards": cards, "preset_id": preset_id, "preset_label": preset_label(template),
+    return {"cards": cards, "preset_id": preset_id, "preset_label": preset_label(source),
             "preset": effective_preset(preset, has_template=has_template, no_load=no_load)}
 
 

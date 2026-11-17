@@ -41,6 +41,7 @@ def test_a_grid_template_project_reads_the_grid_preset(client, project_storage_d
 
     body = client.get(f"/api/projects/{name}/flow/scope").json()
     assert body["preset_id"] == tid
+    assert body["preset_label"] == {"3bus": "3-Bus Tutorial", "ieee14": "IEEE 14-Bus"}[tid]
     assert body["scope"]["preset_id"] == tid
     assert "grid" in body["scope"]["groups"]
     assert "load_flow" in body["scope"]["options"]["grid"]
