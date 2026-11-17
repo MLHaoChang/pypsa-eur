@@ -47,6 +47,14 @@ FROZEN_FILES = (ce.CAMPUS_FILE, ce.LIBRARY_FILE)
 #: The freeze method in force. A freeze made by another reads ``refreeze_needed``.
 FREEZE_SOURCE = "interim"
 FREEZE_STATES = ("none", "fresh", "stale", "refreeze_needed", "unreadable")
+#: How each freeze state reads in user-facing text ("out of date", never "stale").
+FREEZE_WORDS = {
+    "none": "not frozen",
+    "fresh": "up to date",
+    "stale": "out of date",
+    "refreeze_needed": "made by an older freeze method",
+    "unreadable": "not checkable: the inputs cannot be read",
+}
 
 NEXT_STEP = {
     "not_started": "Collect the data list",
@@ -203,7 +211,7 @@ def check_move(code: str, status: str, statuses: dict[str, str], fstate: str) ->
             raise GridComplianceError(
                 "gc_prerequisite_not_judged",
                 409,
-                f"TRGC {code} cannot be {status} while "
+                f"TRGC {code} cannot be {cat.STATUS_WORDS[status]} while "
                 + ", ".join(f"TRGC {b}" for b in blockers)
                 + " is not judged yet.",
                 blockers=blockers,
@@ -212,8 +220,8 @@ def check_move(code: str, status: str, statuses: dict[str, str], fstate: str) ->
             raise GridComplianceError(
                 "gc_freeze_not_fresh",
                 409,
-                f"TRGC {code} cannot be {status} on data that is not frozen "
-                f"(freeze: {fstate.replace('_', ' ')}). Freeze the data first.",
+                f"TRGC {code} cannot be {cat.STATUS_WORDS[status]} on data that is not frozen "
+                f"(freeze: {FREEZE_WORDS[fstate]}). Freeze the data first.",
             )
     if rank < cat.RANK[cat.PREREQUISITE_MIN]:
         submitted = [
@@ -225,7 +233,7 @@ def check_move(code: str, status: str, statuses: dict[str, str], fstate: str) ->
             raise GridComplianceError(
                 "gc_dependent_submitted",
                 409,
-                f"TRGC {code} cannot go back to {status}: "
+                f"TRGC {code} cannot go back to {cat.STATUS_WORDS[status]}: "
                 + ", ".join(f"TRGC {d}" for d in submitted)
                 + " was submitted on its judged result.",
                 blockers=submitted,
@@ -236,7 +244,7 @@ def set_status(project, code: str, status: str) -> dict:
     require_deliverable(code)
     if status not in cat.RANK:
         raise GridComplianceError(
-            "gc_unknown_status", 422, f'"{status}" is not a deliverable status.'
+            "gc_unknown_status", 422, f"“{status}” is not a deliverable status."
         )
     # Hashing the network is slow, so it is done before the lock; the freeze
     # it is compared with, and every status, are read under the lock.

@@ -54,7 +54,14 @@ from services.reports.revisions import RevisionRef
 from . import catalogue as cat
 from . import sources
 from .store import DeliverableState, GridComplianceError, editing, load
-from .tracker import data_hash, default_items, freeze_state, now, require_deliverable
+from .tracker import (
+    FREEZE_WORDS,
+    data_hash,
+    default_items,
+    freeze_state,
+    now,
+    require_deliverable,
+)
 
 #: Fixed timestamp for ZIP entries, so the archive depends on content only.
 _ZIP_TIME = (2020, 1, 1, 0, 0, 0)
@@ -156,7 +163,7 @@ def _skeleton(
             freeze_blocks.append(
                 Callout(
                     kind="gap",
-                    text=f"Freeze state: {fstate.replace('_', ' ')}. "
+                    text=f"Freeze: {FREEZE_WORDS[fstate]}. "
                     "The inputs no longer match this freeze.",
                 )
             )

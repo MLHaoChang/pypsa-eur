@@ -732,7 +732,7 @@ def test_the_pack_contents_follow_the_tracker(client, hub, monkeypatch):
         b"contingencies,TSO contingency list,TSO,,received\n"
     )
     doc = _document(z, "15")
-    assert b"Freeze state: stale" in doc
+    assert b"Freeze: out of date" in doc
     assert b"Strength at the PoC" in doc
     assert b"No prerequisite deliverable" in doc
     manifest = json.loads(z.read("manifest.json"))
@@ -760,4 +760,4 @@ def test_the_pack_contents_follow_the_tracker(client, hub, monkeypatch):
     }
     _, z = _pack(client, "08")
     assert b"Requires TRGC 06" in _document(z, "08")
-    assert b"Freeze state" not in _document(z, "08")
+    assert b"Freeze: " not in _document(z, "08")

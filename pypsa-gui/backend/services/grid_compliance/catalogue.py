@@ -28,6 +28,17 @@ STATUSES: tuple[str, ...] = (
     "accepted",
 )
 RANK = {s: i for i, s in enumerate(STATUSES)}
+#: How each status reads in user-facing text (the UI's own labels).
+STATUS_WORDS = {
+    "not_started": "not started",
+    "data": "data",
+    "exported": "exported",
+    "results_in": "results in",
+    "judged": "judged",
+    "submitted": "submitted",
+    "tso_comments": "TSO comments",
+    "accepted": "accepted",
+}
 #: A prerequisite must be at least this far before a dependent is submitted.
 PREREQUISITE_MIN = "judged"
 #: A deliverable at or past this status counts as submitted.
