@@ -582,13 +582,18 @@ def _shipped_shown(spec, old, new) -> str | None:
     unit (no spec, no display unit, or a value that is not a number)."""
     from services.reports.chapters import fmt_eur_short
 
-    if spec is None or not spec.unit_display or not all(
-        isinstance(v, (int, float)) and not isinstance(v, bool) for v in (old, new)
+    if (
+        spec is None
+        or not spec.unit_display
+        or not all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in (old, new)
+        )
     ):
         return None
     old, new = old * spec.scale, new * spec.scale
     currency, _, per = spec.unit_display.partition("/")
     if currency == "EUR" and per:
+
         def eur(v):  # the notation is unsigned: callers write the minus
             return ("−" if v < 0 else "") + fmt_eur_short(v)
 
