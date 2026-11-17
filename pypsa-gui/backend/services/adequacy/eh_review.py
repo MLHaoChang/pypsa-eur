@@ -34,6 +34,32 @@ def _num(v) -> float | None:
     return f if math.isfinite(f) else None
 
 
+
+def _share_of_all_ranked(c: float, class_b: list, class_a) -> float | None:
+    """``c`` over the criticality of every ranked row: the class-B rows plus
+    the class-A rows (``fmea_top.class_a.rows`` when its status is ``ok``).
+    None when the class-A ranking is absent, a row is not finite, or the
+    total is not positive — never a guess."""
+    if not isinstance(class_a, dict) or class_a.get("status") != "ok":
+        return None
+    vals = [_num(r.get("criticality_eur_per_year"))
+            for r in list(class_b) + list(class_a.get("rows") or [])]
+    if any(v is None for v in vals):
+        return None
+    total = sum(vals)
+    return c / total if total > 0 else None
+
+
+def _critical_feeder(sections: dict, name) -> dict | None:
+    """The certification's critical-feeder row for Link ``name`` when its
+    outages were composed into the LOLE (``model == "composed"``)."""
+    scope = (((sections.get("certification") or {}).get("payload") or {})
+             .get("fleet_scope") or {})
+    for f in scope.get("critical_feeders") or []:
+        if f.get("name") == name and f.get("model") == "composed":
+            return f
+    return None
+
 def _fmt(v, unit: str = "", digits: int = 2) -> str:
     f = _num(v)
     if f is None:
@@ -269,30 +295,55 @@ def review_report(report: dict, record: dict | None = None,
                     f"re-plan at the knee target {kt:g} ‱")])
 
     # ── fmea_top concentration ─────────────────────────────────────────
-    rows = ((sections.get("fmea_top") or {}).get("payload") or {}).get("rows") or []
+    fmea = (sections.get("fmea_top") or {}).get("payload") or {}
+    rows = fmea.get("rows") or []
     crit = [(r, _num(r.get("criticality_eur_per_year")) or 0.0) for r in rows]
     total = sum(c for _, c in crit)
     if total > 0:
         top, c = max(crit, key=lambda rc: rc[1])
         share = c / total
         if share >= 0.5:
-            add("fmea_dominant_mode", "medium",
-                f"{top.get('name')} carries {share:.0%} of ranked Link risk",
-                {"mode": top.get("name"), "criticality_eur_per_year": c,
-                 "share": round(share, 3), "occurrence_per_year":
-                 top.get("occurrence_per_year"), "severity_eur":
-                 top.get("severity_eur")},
-                f"One failure mode dominates: consider a redundant path or a "
-                f"spare for {top.get('name')}, or reduce its outage rate / "
-                "repair time. The redundancy stage prices GENERIC N+1 "
-                "generation / conversion / storage options (indicative "
-                f"costs), not a spare {top.get('name')} itself — use it as "
-                "an order of magnitude.",
-                [_action("run_eh_study",
-                         rerun.with_(levers={"redundancy": True},
-                                     add_stages=["redundancy"]),
-                         "price generic N / N+1 / storage scenarios "
-                         "(indicative)")])
+            name = top.get("name")
+            # The share above is of the ranked Links (class B) only. Beside it,
+            # the share of ALL ranked risk: the class-B rows plus the class-A
+            # rows, as the FMEA table shows them (asset-investment walkthrough
+            # 2026-11-17, issue 04). None when any row is unreadable.
+            share_all = _share_of_all_ranked(c, rows, fmea.get("class_a"))
+            title = f"{name} carries {share:.0%} of ranked Link risk"
+            if share_all is not None:
+                title += f" ({share_all:.0%} of all ranked risk)"
+            evidence = {"mode": name, "criticality_eur_per_year": c,
+                        "share": round(share, 3),
+                        "share_of_all_ranked": (None if share_all is None
+                                                else round(share_all, 3)),
+                        "occurrence_per_year": top.get("occurrence_per_year"),
+                        "severity_eur": top.get("severity_eur")}
+            feeder = _critical_feeder(sections, name)
+            if feeder is not None:
+                # Spare generation or storage in the hub cannot serve a
+                # must-stay-on bus while its only path is out.
+                buses = ", ".join(str(b) for b in feeder.get("buses") or [])
+                evidence["feeds_critical_buses"] = feeder.get("buses") or []
+                add("fmea_dominant_mode", "medium", title, evidence,
+                    f"{name} is the only path to the must-stay-on bus "
+                    f"{buses}: add a second feeder or backup supply at "
+                    f"{buses}, or reduce its outage rate / repair time. A "
+                    "spare unit or storage elsewhere in the hub cannot serve "
+                    f"{buses} while {name} is out.",
+                    [])
+            else:
+                add("fmea_dominant_mode", "medium", title, evidence,
+                    f"One failure mode dominates: consider a redundant path or a "
+                    f"spare for {name}, or reduce its outage rate / "
+                    "repair time. The redundancy stage prices GENERIC N+1 "
+                    "generation / conversion / storage options (indicative "
+                    f"costs), not a spare {name} itself — use it as "
+                    "an order of magnitude.",
+                    [_action("run_eh_study",
+                             rerun.with_(levers={"redundancy": True},
+                                         add_stages=["redundancy"]),
+                             "price generic N / N+1 / storage scenarios "
+                             "(indicative)")])
 
     # ── DtC ────────────────────────────────────────────────────────────
     dtc = (sections.get("dtc") or {}).get("payload") or {}

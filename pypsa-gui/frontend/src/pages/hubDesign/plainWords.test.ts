@@ -2,6 +2,7 @@
 // case, including the review effects the three templates do not reach.
 import { describe, expect, it } from 'vitest'
 import { costTileLabel, evidenceValue, kpiMoney, plainIds, plainWords } from './plainWords'
+import { GROUP_TITLES } from './holdWords'
 
 describe('plainWords', () => {
   it('a bare dtc_planning (dtc_critical_unserved effect)', () => {
@@ -73,14 +74,23 @@ describe('plainWords: the dominant-risk line names the unit in plain words (UX a
     // The share is of the ranked connections only: the plain line keeps
     // that scope (asset-investment walkthrough 2026-11-17, issue 04).
     expect(plainWords('site_transformer carries 100% of ranked Link risk'))
-      .toBe('Site transformer accounts for 100% of the outage risk from connections')
+      .toBe('Site transformer accounts for 100% of the outage risk from links')
     expect(plainWords('grid_import carries 62.5% of ranked Link risk'))
-      .toBe('Grid import accounts for 62.5% of the outage risk from connections')
+      .toBe('Grid import accounts for 62.5% of the outage risk from links')
   })
   it('leads with the share of all ranked risk when the review states it', () => {
     // Hand check: 657,000 / (657,000 + 3 × 302,114) = 42 %.
     expect(plainWords('hospital_feeder carries 100% of ranked Link risk (42% of all ranked risk)'))
-      .toBe('Hospital feeder accounts for 42% of the outage risk (all of the risk from connections)')
+      .toBe('Hospital feeder accounts for 42% of the outage risk (all of the risk from links)')
+  })
+})
+
+describe('plainWords: the dominant-risk line names links as the Guided assets list does', () => {
+  it('uses the same word as the assets list group title for a Link', () => {
+    const word = GROUP_TITLES.Link.toLowerCase()
+    expect(plainWords('feeder_a carries 100% of ranked Link risk')).toContain(`risk from ${word}`)
+    expect(plainWords('feeder_a carries 100% of ranked Link risk (42% of all ranked risk)'))
+      .toContain(`risk from ${word})`)
   })
 })
 

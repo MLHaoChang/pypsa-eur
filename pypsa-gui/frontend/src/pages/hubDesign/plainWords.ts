@@ -5,10 +5,18 @@ import { SECTION_LABEL } from './sectionLabels'
 import { displayName } from '../../utils/displayName'
 import { fmtCurrency } from '../results/shared'
 import { kpiFigure, splitValueUnit } from '../../utils/format'
+import { GROUP_TITLES } from './holdWords'
+
+/** Links as the Guided assets list names them (UX: one word per concept). */
+const LINKS = GROUP_TITLES.Link.toLowerCase()
 
 const RULES: [RegExp, string][] = [
   // Whole review phrasings first (eh_review.py: fmea_dominant_mode).
-  [/\bcarries (\d+(?:\.\d+)?%) of ranked Link risk\b/g, 'accounts for $1 of the outage risk'],
+  // The share is of the ranked Links only; the review may add the share of
+  // all ranked risk (asset-investment walkthrough 2026-11-17, issue 04).
+  [/\bcarries (\d+(?:\.\d+)?%) of ranked Link risk \((\d+(?:\.\d+)?%) of all ranked risk\)/g,
+    `accounts for $2 of the outage risk (all of the risk from ${LINKS})`],
+  [/\bcarries (\d+(?:\.\d+)?%) of ranked Link risk\b/g, `accounts for $1 of the outage risk from ${LINKS}`],
   [/\bprice generic N\s*\/\s*N\+1\s*\/\s*storage scenarios \(indicative\)/g,
     'compare the cost with and without a spare unit or extra storage (rough estimate)'],
   [/\boutage-driven\b/g, 'caused by equipment outages'],
@@ -46,8 +54,8 @@ export function plainWords(text: string): string {
   const ne = /^(\w+): not established$/.exec(text.trim())
   if (ne) return `${SECTION_LABEL[ne[1]] ?? 'A part of the study'} could not be worked out`
   // The dominant-risk line names its unit in plain words (UX audit M5).
-  let out = text.replace(/\b([a-z0-9]+(?:_[a-z0-9]+)+) carries (\d+(?:\.\d+)?%) of ranked Link risk\b/g,
-    (_m, id: string, pct: string) => `${displayName(id)} accounts for ${pct} of the outage risk`)
+  let out = text.replace(/\b([a-z0-9]+(?:_[a-z0-9]+)+) (carries \d+(?:\.\d+)?% of ranked Link risk)/g,
+    (_m, id: string, rest: string) => `${displayName(id)} ${rest}`)
   for (const [re, plain] of RULES) out = out.replace(re, plain)
   return out
 }

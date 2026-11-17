@@ -353,7 +353,8 @@ def test_review_reports_a_knee_from_three_points():
 # Island Microgrid: the hospital's only feeder is the one ranked Link, beside
 # three diesels in the class-A ranking. Hand check: 657,000 / (657,000 +
 # 3 × 302,114) = 42 % of all ranked risk, though 100 % of the Link risk.
-def _island_fmea_report(*, critical_feeder: bool = True):
+def _island_fmea_report(*, critical_feeder: bool = True,
+                        feeder_model: str = "composed"):
     rep = _report()
     rep["sections"]["fmea_top"] = {"status": "ok", "payload": {
         "rows": [{"name": "hospital_feeder",
@@ -364,7 +365,8 @@ def _island_fmea_report(*, critical_feeder: bool = True):
     cert = rep["sections"].setdefault("certification", {
         "status": "ok", "payload": {}})
     cert.setdefault("payload", {})["fleet_scope"] = {"critical_feeders": [
-        {"name": "hospital_feeder", "buses": ["hospital"]}]
+        {"name": "hospital_feeder", "buses": ["hospital"],
+         "model": feeder_model}]
         if critical_feeder else []}
     return rep
 
@@ -393,3 +395,25 @@ def test_a_dominant_link_that_feeds_no_critical_bus_keeps_the_redundancy_rerun()
     dom = _by_id(review_report(_island_fmea_report(critical_feeder=False),
                                RECORD), "fmea_dominant_mode")
     assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
+
+
+@pytest.mark.parametrize("class_a", [
+    None,                                               # no class-A block
+    {"status": "not_established", "rows": []},          # ranking failed
+    {"status": "ok", "rows": [{"name": "diesel_1",
+                               "criticality_eur_per_year": float("nan")}]},
+])
+def test_share_of_all_ranked_is_none_when_it_cannot_be_stated(class_a):
+    rep = _island_fmea_report()
+    rep["sections"]["fmea_top"]["payload"]["class_a"] = class_a
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert dom["evidence"]["share_of_all_ranked"] is None
+    assert dom["title"] == "hospital_feeder carries 100% of ranked Link risk"
+
+
+def test_a_feeder_without_outage_data_keeps_the_generic_advice():
+    # F9: the feeder remedy needs a computed pocket, not a missing input.
+    rep = _island_fmea_report(feeder_model="no_outage_data")
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
+    assert "second feeder" not in dom["recommendation"]
