@@ -12,6 +12,7 @@ import { Skeleton } from '../../../components/Skeleton'
 import type { ResultStateKind } from '../../../components/ResultState'
 import { ChartFrame, chartFigure, ChartSourceProvider, CHART_TICK } from '../../../components/charts/chartTheme'
 import { showResultsTab } from '../../../layout/flowNavigation'
+import { SECTION_META } from '../../../layout/flowSections'
 import type { HeadlineCard } from '../../../api/simulation'
 import { HEADLINE_WORDS, headlineFigure } from '../../results/headlineWords'
 import { useHeadlineKpis } from '../../results/HeadlineStrip'
@@ -81,7 +82,9 @@ function TileFigure({ tile, testId, studyBanner = false }: { tile: ChapterTile; 
 export const LCOE_NOT_APPLICABLE = 'Not applicable for this project type.'
 
 /** No figures from `/results/headline_kpis` yet: it answers 204 until the project itself is solved. */
-export const LCOE_NO_SOLVE = 'LCOE needs a solve of the project and its investment case.'
+const READINESS = SECTION_META.find(m => m.id === 'readiness')?.label ?? 'Readiness and run'
+/** The step in plain words, no second link (the NPV figure already opens the Investment case; UX 23, 3). */
+export const LCOE_NO_SOLVE = `To get it, solve the project in ${READINESS}, then run its investment case.`
 /** The strip's own words when the read fails. */
 export const LCOE_UNREAD = 'The headline figures could not be read.'
 
