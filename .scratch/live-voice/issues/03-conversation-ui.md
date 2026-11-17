@@ -47,3 +47,12 @@ admission, own PR) with conditions:
 - L6: non-owner, other-project (and viewer, if #1622 merged) refusals byte-equal.
 - L7: one targeted mutant per guard, listed in the PR body with killing tests.
 The loop hook waits for #1550 (it changes `harness/loop.py`).
+
+2026-11-17: L3 amended after GK B 65 NOT OK on #1657 @a29d42f3 (a rebind after
+session_init let an obsolete turn's view land in refs.current). The loop now
+reads the bound thread's generation before `session_init`
+(`current_view_generation`) and passes it to `record_current_view`, which
+re-checks it under `_LOCK`; the write is skipped when the turn is obsolete or the
+start generation is unreadable, and runs only after every refusal, once the user
+message is kept. Tests: rebind after session_init (typed and spoken), utterance
+bump alone, unreadable start generation. Fixed at ddd4f75f.
