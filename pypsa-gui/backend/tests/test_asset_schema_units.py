@@ -319,10 +319,17 @@ def test_a_snapshot_restore_that_puts_the_asset_back_on_a_tonne_bus_refuses_the_
     install_network(n, name="restore05d")
     r = client.post("/api/projects/restore05d", params={"force": True, "rebind": True})
     assert r.status_code == 200, r.text
-    assert client.post("/api/projects/restore05d/snapshots", json={"label": "tonne"}).status_code == 200
+    assert (
+        client.post(
+            "/api/projects/restore05d/snapshots", json={"label": "tonne"}
+        ).status_code
+        == 200
+    )
     moved = _put_generator(client, name, {"bus": energy_bus}, None)
     assert moved.status_code == 200, moved.text
-    assert _stored(client, name)["bus"] == energy_bus  # the form now reads this asset as per energy
+    assert (
+        _stored(client, name)["bus"] == energy_bus
+    )  # the form now reads this asset as per energy
 
     snap_id = client.get("/api/projects/restore05d/snapshots").json()[0]["id"]
     restored = client.post(f"/api/projects/restore05d/snapshots/{snap_id}/restore")
@@ -336,5 +343,8 @@ def test_a_snapshot_restore_that_puts_the_asset_back_on_a_tonne_bus_refuses_the_
         headers={"X-Cost-Basis": "energy"},
     )
     assert r.status_code == 409, r.text
-    assert (r.json()["detail"]["claimed"], r.json()["detail"]["actual"]) == ("energy", "tonne")
+    assert (r.json()["detail"]["claimed"], r.json()["detail"]["actual"]) == (
+        "energy",
+        "tonne",
+    )
     assert _stored(client, name) == before
