@@ -19,6 +19,17 @@ The cut keeps every table row that touches node EU-IRL, which means:
 - each kept data row's band, dates, tags, texts and memo; attributes of kept
   objects; the schema tables, with t_property/t_attribute/t_collection/t_category cut to the ids used.
 
+CSV data files (slice 2b) are trimmed to the first 48 hours and to the columns
+that name an object of the cut, keeping each cell's text as written:
+
+    python make_fixture.py --csv world2015_irl.xml <source.csv> csv_files/<name>.csv
+
+The sources are the dataset's own CSVs (``All Demand UTC 2015.csv`` file id
+3985039, ``Renewables.ninja.wind.output.Full.csv`` 3985042,
+``renewables.ninja.Csp.output.full`` 4300174, CC0 as above). The CSP file keeps
+the dataset's spelling ``Csp``, while the XML names it ``CSP``: the import
+matches file names case-insensitively.
+
 The script is deliberately independent of ``gridspine.ingest.plexos_xml``, so
 the counts it prints are a check on the reader, not a copy of it. They are
 pinned in ``tests/gridspine/test_plexos_xml.py`` (``WORLD_IRL_COUNTS``).
@@ -30,6 +41,7 @@ from collections import Counter
 from lxml import etree
 
 NS = "{http://tempuri.org/MasterDataSet.xsd}"
+HEAD_STORAGE_UNIT = "ESP_Csp_ANDASOL316855"
 SCHEMA = ("t_config", "t_action", "t_class", "t_collection", "t_unit", "t_category")
 
 
@@ -76,6 +88,15 @@ def cut(t):
         if pc(m)[0] in ("Generator", "Battery")
         and pc(m)[1] == "Node"
         and g(m, "child_object_id") == irl
+    }
+    # one Head Storage unit (PLEXOS-World's are CSP thermal stores; Ireland has
+    # none) with its node only, for the hydro-storage path (slice 2b)
+    csp = byname[("Generator", HEAD_STORAGE_UNIT)]
+    units.add(csp)
+    keep |= {
+        g(m, "child_object_id")
+        for m in mem
+        if g(m, "parent_object_id") == csp and pc(m)[1] == "Node"
     }
     keep |= units
     keep |= {
@@ -165,7 +186,23 @@ def write(tables, path):
         f.write(header + etree.tostring(tree, pretty_print=True, encoding="utf-8"))
 
 
-if __name__ == "__main__":
+def trim_csv(fixture, source, out, hours=48):
+    names = {
+        dict(r).get("name") for r in load(fixture).get("t_object", [])
+    }
+    with open(source, encoding="utf-8-sig", newline="") as f:
+        lines = [f.readline() for _ in range(hours + 1)]
+    rows = [line.rstrip("\r\n").split(",") for line in lines]
+    cols = [0] + [i for i, h in enumerate(rows[0]) if i and h in names]
+    with open(out, "w", encoding="utf-8", newline="\n") as f:
+        for row in rows:
+            f.write(",".join(row[i] for i in cols) + "\n")
+    print(out, len(cols) - 1, "columns,", len(rows) - 1, "rows")
+
+
+if __name__ == "__main__" and sys.argv[1] == "--csv":
+    trim_csv(*sys.argv[2:5])
+elif __name__ == "__main__":
     tables, classes = cut(load(sys.argv[1]))
     write(tables, sys.argv[2] if len(sys.argv) > 2 else "world2015_irl.xml")
     print({k: len(v) for k, v in tables.items()})
