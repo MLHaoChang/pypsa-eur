@@ -274,7 +274,7 @@ def test_two_machines_on_one_poc_branch_are_refused(tmp_path):
     net = _net()
     pp.create_sgen(net, bus=1, p_mw=20.0, sn_mva=50.0, name="W2")
     poc = {"W_BUS_02": PocBranch("line", 1, 0), "W2": PocBranch("line", 1, 0)}
-    with pytest.raises(ContractError, match="share PoC branch .* one REPCA1 per plant"):
+    with pytest.raises(ContractError, match="share PoC branch .* export the GC-01 aggregated model"):
         dyr_writer._poc_ids(net, poc)
 
 
@@ -460,3 +460,10 @@ def test_range_boundaries_that_are_legal_load(tmp_path, ibr):
 def test_htfrac_zero_is_refused(tmp_path):
     with pytest.raises(ContractError, match="wtdt_htfrac .* must lie in \\(0, 1\\)"):
         _load(tmp_path, WIND3 | {"wtdt_htfrac": 0.0})
+
+
+def test_a_ten_column_con_line_keeps_its_separators(tmp_path):
+    """A REPCA1 line holding femax 999 and femin -998 (both fill ten columns)
+    is written with a blank before each, so it reads back as two values."""
+    _, text = _write(tmp_path, PLANT, POC)
+    assert "   999.00000 -998.00000" in text
