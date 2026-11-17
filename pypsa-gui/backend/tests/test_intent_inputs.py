@@ -226,3 +226,32 @@ def test_apply_pq_moves_the_tags_to_the_chosen_link_in_the_copy(n):
     ii.apply_pq(n, inputs)
     assert n.links.loc["site_transformer", ["pq_x_pu", "pq_q_margin_mvar"]].isna().all()
     assert n.links.at["grid_import", "pq_x_pu"] == ii.ASSUMED_X_PU
+
+
+def test_a_fixed_link_reads_its_p_nom_not_its_p_nom_max(n):
+    n.links.loc["grid_import", ["p_nom_extendable", "p_nom_max"]] = [False, 999.0]
+    inputs, _ = _resolve(n, {"pq": {}})
+    assert inputs["pq"]["s_n_mva"] == n.links.at["grid_import", "p_nom"]
+
+
+def test_an_unbounded_fixed_link_has_no_assumed_rating(n):
+    n.links.loc["grid_import", ["p_nom_extendable", "p_nom"]] = [False, math.inf]
+    held = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=0.07)["pq"]
+    assert held["s_n_mva"]["value"] is None
+
+
+def test_the_statcom_cost_is_the_packs_overnight_per_mvar_as_an_annuity_plus_fom():
+    from services.finance.replacements import annuity
+
+    value, _ = ii.statcom_cost(0.07)
+    assert value == pytest.approx(450_000 / 5 * (annuity(0.07, 20) + 0.03), rel=1e-3)
+    assert value == pytest.approx(11_195.36, rel=1e-4)
+
+
+def test_defaults_name_the_marked_grid_import(n):
+    d = ii.defaults(n, ramp_row=RAMP, envelope=ENV, rate=0.07)
+    assert d["link"] == {
+        "value": "grid_import",
+        "source": ii.SOURCE_PROJECT,
+        "kind": "project",
+    }
