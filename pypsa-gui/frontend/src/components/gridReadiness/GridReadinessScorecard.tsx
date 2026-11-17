@@ -60,6 +60,10 @@ export const useScorecardOpen = create<OpenState>(set => ({
   toggle: (key, fallback) => set(s => ({ open: { ...s.open, [key]: !(s.open[key] ?? fallback) } })),
 }))
 
+/** While a run holds the network the answer is the saved file's ("out_of_date"). A solve does not move
+ *  the edit counter, so the scorecard asks again on this beat until the run lets go (GK A review). */
+export const OUT_OF_DATE_REFETCH_MS = 3000
+
 export function useGridReadiness(enabled = true) {
   const project = useUIStore(s => s.currentProject)
   // The project's edit counter, the sample the always-mounted readers poll
@@ -82,6 +86,7 @@ export function useGridReadiness(enabled = true) {
     staleTime: 0,
     refetchOnMount: 'always',
     placeholderData: keepPreviousData,
+    refetchInterval: q => (q.state.data?.network === 'out_of_date' ? OUT_OF_DATE_REFETCH_MS : false),
   })
 }
 
@@ -359,7 +364,7 @@ export function GridReadinessScorecard({ data, mode, onJump = () => {}, fieldLab
         )}
         {data.network === 'out_of_date' && (
           <div data-testid="gr-out-of-date" role="status" className="text-[11px] text-warn">
-            A run is using the project, so this reads the last saved project. Save the project to update.
+            A run is using the project, so this reads the last saved project. It updates when the run finishes.
           </div>
         )}
         {data.profile.error && (

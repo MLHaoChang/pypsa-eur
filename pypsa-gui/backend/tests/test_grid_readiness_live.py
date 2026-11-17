@@ -127,6 +127,35 @@ def test_another_resident_project_is_never_read(client, hub):
     assert _scr(client, hub)["project_value"] == before
 
 
+def test_a_same_named_project_in_another_org_is_never_read(
+    client, other_org_client, hub
+):
+    """GK A L2: the live context is found by org and uuid, never by name. Two
+    orgs each hold a resident project of the same name; an edit in one leaves
+    the other's scorecard as it was."""
+    r = other_org_client.post(
+        "/api/projects/from_template/eh_datacenter", params={"name": hub}
+    )
+    assert r.status_code == 200, r.text
+    twin = r.json().get("name", hub)
+    assert twin == hub
+    before = _scr(client, hub)["project_value"]
+    assert _scr(other_org_client, twin)["project_value"] == pytest.approx(before)
+    _edit_fault(other_org_client, twin, 60 / 250)
+    assert _scr(other_org_client, twin)["project_value"] == pytest.approx(
+        before * 60 / 250, rel=1e-3
+    )
+    assert _scr(client, hub)["project_value"] == before
+    # And the other way round.
+    _edit_fault(client, hub, 60 / 250)
+    assert _scr(client, hub)["project_value"] == pytest.approx(
+        before * 60 / 250, rel=1e-3
+    )
+    assert _scr(other_org_client, twin)["project_value"] == pytest.approx(
+        before * 60 / 250, rel=1e-3
+    )
+
+
 def test_the_saved_source_is_todays_answer_plus_its_name(client, hub):
     import pypsa
 
