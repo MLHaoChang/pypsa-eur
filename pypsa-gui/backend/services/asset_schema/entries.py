@@ -51,18 +51,51 @@ GROUP_HELP = {
 
 #: Legacy group (still on `asset_schema/{component}` until slice 03) → plain group.
 LEGACY_GROUP = {
-    "identity": "general", "size": "size_limits", "investment": "investment", "fom": "investment",
-    "variable": "running_cost", "performance": "operation", "replacement": "replacement",
+    "identity": "general",
+    "size": "size_limits",
+    "investment": "investment",
+    "fom": "investment",
+    "variable": "running_cost",
+    "performance": "operation",
+    "replacement": "replacement",
     "provenance": "source",
 }
 
-_ELECTRICAL = frozenset({
-    "b", "g", "r", "phase_shift", "tap_ratio", "v_nom", "v_nom_0", "v_nom_1", "control", "q_set",
-    "flicker_changes_per_min", "flicker_step_mva", "harmonic_source", "harmonic_spectrum", "i_start_pu",
-    "rated_mva", "ride_through_curve", "single_phase_share", "spectrum_post_filter", "start_method", "motor_kw",
-})
-_RELIABILITY = frozenset({"mttr_hours", "outage_rate_basis", "outage_rate_value", "p_max_pu_includes_outages",
-                          "criticality_tier", "restart_time_h"})
+_ELECTRICAL = frozenset(
+    {
+        "b",
+        "g",
+        "r",
+        "phase_shift",
+        "tap_ratio",
+        "v_nom",
+        "v_nom_0",
+        "v_nom_1",
+        "control",
+        "q_set",
+        "flicker_changes_per_min",
+        "flicker_step_mva",
+        "harmonic_source",
+        "harmonic_spectrum",
+        "i_start_pu",
+        "rated_mva",
+        "ride_through_curve",
+        "single_phase_share",
+        "spectrum_post_filter",
+        "start_method",
+        "motor_kw",
+    }
+)
+_RELIABILITY = frozenset(
+    {
+        "mttr_hours",
+        "outage_rate_basis",
+        "outage_rate_value",
+        "p_max_pu_includes_outages",
+        "criticality_tier",
+        "restart_time_h",
+    }
+)
 _INVESTMENT_SIZING = re.compile(r"^(p|e|s)_nom_(extendable|min|max)$")
 _REPLACEMENT = frozenset({"build_year", "lifetime_run_hours"})
 
@@ -92,17 +125,23 @@ RENAMES: dict[Any, str] = {
     "p_nom_extendable": "Let the optimiser size it",
     "e_nom_extendable": "Let the optimiser size it",
     "s_nom_extendable": "Let the optimiser size it",
-    "p_nom_min": "Smallest size", "p_nom_max": "Largest size",
-    "e_nom_min": "Smallest size", "e_nom_max": "Largest size",
-    "s_nom_min": "Smallest size", "s_nom_max": "Largest size",
+    "p_nom_min": "Smallest size",
+    "p_nom_max": "Largest size",
+    "e_nom_min": "Smallest size",
+    "e_nom_max": "Largest size",
+    "s_nom_min": "Smallest size",
+    "s_nom_max": "Largest size",
     ("Generator", "p_max_pu"): "Maximum output share",
     ("Generator", "p_min_pu"): "Minimum output share",
     "marginal_cost": "Running cost",
     "capital_cost": "Yearly capital cost",
     "bus": "Connected to",
-    ("Line", "bus0"): "From", ("Line", "bus1"): "To",
-    ("Transformer", "bus0"): "High-voltage side", ("Transformer", "bus1"): "Low-voltage side",
-    ("Line", "s_nom"): "Rating", ("Transformer", "s_nom"): "Rating",
+    ("Line", "bus0"): "From",
+    ("Line", "bus1"): "To",
+    ("Transformer", "bus0"): "High-voltage side",
+    ("Transformer", "bus1"): "Low-voltage side",
+    ("Line", "s_nom"): "Rating",
+    ("Transformer", "s_nom"): "Rating",
     "committable": "Must start and stop (unit commitment)",
 }
 
@@ -118,7 +157,14 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "p_nom": ("rating", "Pmax", "nameplate", "installed capacity", "size"),
     "s_nom": ("thermal rating", "MVA rating", "capacity"),
     "e_nom": ("energy capacity", "storage size"),
-    "marginal_cost": ("VOM", "variable cost", "fuel cost", "OPEX", "marginal cost", "SRMC"),
+    "marginal_cost": (
+        "VOM",
+        "variable cost",
+        "fuel cost",
+        "OPEX",
+        "marginal cost",
+        "SRMC",
+    ),
     "capital_cost": ("CAPEX", "annuity", "annualised cost"),
     "overnight_cost": ("CAPEX", "investment cost", "build cost"),
     "fom_cost": ("fixed O&M", "FOM", "OPEX"),
@@ -142,8 +188,14 @@ ALIASES: dict[str, tuple[str, ...]] = {
 
 #: Depth by plain group when the row does not say (essentials is always set on the row).
 _DEPTH_BY_GROUP = {
-    "general": "basic", "size_limits": "basic", "running_cost": "basic", "investment": "basic",
-    "operation": "advanced", "electrical": "advanced", "reliability": "advanced", "replacement": "advanced",
+    "general": "basic",
+    "size_limits": "basic",
+    "running_cost": "basic",
+    "investment": "basic",
+    "operation": "advanced",
+    "electrical": "advanced",
+    "reliability": "advanced",
+    "replacement": "advanced",
     "source": "detail",
 }
 DEPTHS = ("essentials", "basic", "advanced", "detail")
@@ -161,9 +213,18 @@ _F = Function
 #: What each plain group feeds, by default ("needs" only where a missing value blocks the run).
 _FUNCTIONS_BY_GROUP: dict[str, dict[str, str]] = {
     "general": {_F.DISPATCH: "uses"},
-    "size_limits": {_F.DISPATCH: "uses", _F.EXPANSION: "uses", _F.LOAD_FLOW: "uses", _F.ADEQUACY: "uses",
-                    _F.FINANCE: "uses"},
-    "electrical": {_F.LOAD_FLOW: "uses", _F.SHORT_CIRCUIT: "uses", _F.GRID_COMPLIANCE: "uses"},
+    "size_limits": {
+        _F.DISPATCH: "uses",
+        _F.EXPANSION: "uses",
+        _F.LOAD_FLOW: "uses",
+        _F.ADEQUACY: "uses",
+        _F.FINANCE: "uses",
+    },
+    "electrical": {
+        _F.LOAD_FLOW: "uses",
+        _F.SHORT_CIRCUIT: "uses",
+        _F.GRID_COMPLIANCE: "uses",
+    },
     "operation": {_F.DISPATCH: "uses", _F.ADEQUACY: "uses"},
     "running_cost": {_F.DISPATCH: "uses", _F.EXPANSION: "uses", _F.FINANCE: "uses"},
     "investment": {_F.EXPANSION: "uses", _F.FINANCE: "uses"},
@@ -173,15 +234,35 @@ _FUNCTIONS_BY_GROUP: dict[str, dict[str, str]] = {
 }
 _PORTS = frozenset({"bus", "bus0", "bus1"})
 _NEEDS: dict[str, dict[str, str]] = {
-    **{k: {_F.DISPATCH: "needs", _F.LOAD_FLOW: "needs", _F.SHORT_CIRCUIT: "needs", _F.ADEQUACY: "needs"}
-       for k in _PORTS},
-    **{k: {_F.DISPATCH: "needs", _F.LOAD_FLOW: "uses", _F.ADEQUACY: "uses", _F.FINANCE: "uses"}
-       for k in ("p_nom", "e_nom", "s_nom")},
-    **{k: {_F.EXPANSION: "needs", _F.FINANCE: "uses"}
-       for k in ("p_nom_extendable", "e_nom_extendable", "s_nom_extendable")},
+    **{
+        k: {
+            _F.DISPATCH: "needs",
+            _F.LOAD_FLOW: "needs",
+            _F.SHORT_CIRCUIT: "needs",
+            _F.ADEQUACY: "needs",
+        }
+        for k in _PORTS
+    },
+    **{
+        k: {
+            _F.DISPATCH: "needs",
+            _F.LOAD_FLOW: "uses",
+            _F.ADEQUACY: "uses",
+            _F.FINANCE: "uses",
+        }
+        for k in ("p_nom", "e_nom", "s_nom")
+    },
+    **{
+        k: {_F.EXPANSION: "needs", _F.FINANCE: "uses"}
+        for k in ("p_nom_extendable", "e_nom_extendable", "s_nom_extendable")
+    },
     "x": {_F.LOAD_FLOW: "needs", _F.SHORT_CIRCUIT: "needs", _F.GRID_COMPLIANCE: "uses"},
     "r": {_F.LOAD_FLOW: "needs", _F.SHORT_CIRCUIT: "uses"},
-    "v_nom": {_F.LOAD_FLOW: "needs", _F.SHORT_CIRCUIT: "needs", _F.GRID_COMPLIANCE: "uses"},
+    "v_nom": {
+        _F.LOAD_FLOW: "needs",
+        _F.SHORT_CIRCUIT: "needs",
+        _F.GRID_COMPLIANCE: "uses",
+    },
     "harmonic_spectrum": {_F.GRID_COMPLIANCE: "needs"},
     "flicker_step_mva": {_F.GRID_COMPLIANCE: "needs"},
 }
@@ -193,26 +274,62 @@ def functions_of(scope: str, spec: FieldSpec, group: str) -> dict[str, str]:
     else:
         rows = _NEEDS.get(spec.key) or _FUNCTIONS_BY_GROUP[group]
     order = {f: i for i, f in enumerate(Function)}
-    return {Function(f).value: v for f, v in sorted(rows.items(), key=lambda kv: order[Function(kv[0])])}
+    return {
+        Function(f).value: v
+        for f, v in sorted(rows.items(), key=lambda kv: order[Function(kv[0])])
+    }
 
 
 #: One-line help where the row's first sentence is too long or names a model column.
 SHORT_HELP: dict[Any, str] = {
-    ("Generator", "stand_by_cost"): "Derived: cost per hour while the unit is on at any output (no-load fuel and hourly O&M).",
-    ("GlobalConstraint", "type"): "What the constraint caps: primary energy (a CO₂ cap), new capacity, dispatch, or new transmission.",
-    ("Link", "bus2"): "Optional extra port 2: receives energy (CHP heat) or draws it (a process feed), by the sign of its efficiency.",
-    ("Link", "bus3"): "Optional extra port 3: receives energy or draws it, by the sign of its efficiency.",
-    ("Link", "bus4"): "Optional extra port 4: receives energy or draws it, by the sign of its efficiency.",
-    ("Link", "eh_process"): "Tick when this link is a production step: the input side is the main input and the output side the product.",
-    ("Link", "criticality_tier"): "How this unit's supply is ranked when it must be cut, from safety-critical to deferrable.",
+    (
+        "Generator",
+        "stand_by_cost",
+    ): "Derived: cost per hour while the unit is on at any output (no-load fuel and hourly O&M).",
+    (
+        "GlobalConstraint",
+        "type",
+    ): "What the constraint caps: primary energy (a CO₂ cap), new capacity, dispatch, or new transmission.",
+    (
+        "Link",
+        "bus2",
+    ): "Optional extra port 2: receives energy (CHP heat) or draws it (a process feed), by the sign of its efficiency.",
+    (
+        "Link",
+        "bus3",
+    ): "Optional extra port 3: receives energy or draws it, by the sign of its efficiency.",
+    (
+        "Link",
+        "bus4",
+    ): "Optional extra port 4: receives energy or draws it, by the sign of its efficiency.",
+    (
+        "Link",
+        "eh_process",
+    ): "Tick when this link is a production step: the input side is the main input and the output side the product.",
+    (
+        "Link",
+        "criticality_tier",
+    ): "How this unit's supply is ranked when it must be cut, from safety-critical to deferrable.",
     ("Link", "p_nom"): "Rating on the input side.",
-    ("Link", "efficiency"): "Output per unit of input (the COP for a heat pump, above 100 %).",
+    (
+        "Link",
+        "efficiency",
+    ): "Output per unit of input (the COP for a heat pump, above 100 %).",
     ("Link", "efficiency2"): "Flow on port 2 per unit drawn on the input side.",
     ("Link", "efficiency3"): "Flow on port 3 per unit drawn on the input side.",
     ("Link", "efficiency4"): "Flow on port 4 per unit drawn on the input side.",
-    ("Link", "start_method"): "How the motor is started: direct on line (about 6 × rated current), soft starter (3 ×) or drive (1 ×).",
-    ("Link", "ride_through_curve"): "The voltage dips the unit rides through, as dip depth and duration pairs.",
-    ("StorageUnit", "capital_cost"): "Derived: each part's overnight cost annualised over its own life, plus fixed O&M.",
+    (
+        "Link",
+        "start_method",
+    ): "How the motor is started: direct on line (about 6 × rated current), soft starter (3 ×) or drive (1 ×).",
+    (
+        "Link",
+        "ride_through_curve",
+    ): "The voltage dips the unit rides through, as dip depth and duration pairs.",
+    (
+        "StorageUnit",
+        "capital_cost",
+    ): "Derived: each part's overnight cost annualised over its own life, plus fixed O&M.",
 }
 
 
@@ -223,7 +340,11 @@ def _first_sentence(text: str) -> str:
 def short_help_of(scope: str, spec: FieldSpec) -> str:
     if spec.short_help:
         return spec.short_help
-    return SHORT_HELP.get((scope, spec.key)) or SHORT_HELP.get(spec.key) or _first_sentence(spec.help)
+    return (
+        SHORT_HELP.get((scope, spec.key))
+        or SHORT_HELP.get(spec.key)
+        or _first_sentence(spec.help)
+    )
 
 
 _SCOPE_SLUG = re.compile(r"(?<!^)(?=[A-Z])")

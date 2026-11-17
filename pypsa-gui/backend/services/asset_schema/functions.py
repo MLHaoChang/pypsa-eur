@@ -9,10 +9,10 @@ is missing) or "uses" (it improves the run). The long text is in
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Function(str, Enum):
+class Function(StrEnum):
     DISPATCH = "dispatch"
     EXPANSION = "expansion"
     LOAD_FLOW = "load_flow"

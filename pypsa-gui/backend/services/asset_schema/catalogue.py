@@ -21,9 +21,17 @@ from functools import lru_cache
 from typing import Any
 
 from services.asset_schema import entries as E
-from services.asset_schema.asset_types import ASSET_TYPES, functions_of as type_functions
+from services.asset_schema.asset_types import (
+    ASSET_TYPES,
+    functions_of as type_functions,
+)
 from services.asset_schema.fields import FieldSpec, fields_for, known_components
-from services.asset_schema.functions import FUNCTION_HELP, FUNCTION_IDS, FUNCTION_NAMES, Function
+from services.asset_schema.functions import (
+    FUNCTION_HELP,
+    FUNCTION_IDS,
+    FUNCTION_NAMES,
+    Function,
+)
 
 GUIDE_DIR = pathlib.Path(__file__).parent / "guide"
 IDS_FILE = pathlib.Path(__file__).parent / "catalogue.ids.txt"
@@ -53,7 +61,11 @@ def guide_id(kind: str, ident: str) -> str:
 
 def reveal_when_wire(rule: dict[str, Any] | None) -> dict[str, Any] | None:
     """A rule naming several values is a tuple in Python and a list on the wire."""
-    return {k: list(v) if isinstance(v, tuple) else v for k, v in rule.items()} if rule else None
+    return (
+        {k: list(v) if isinstance(v, tuple) else v for k, v in rule.items()}
+        if rule
+        else None
+    )
 
 
 @dataclass(frozen=True)
@@ -123,32 +135,48 @@ def entries() -> tuple[Entry, ...]:
             folded = eid.lower()
             if folded in seen:
                 # Refused, never suffixed or truncated (#1127): set `id=` on one of the rows.
-                raise CatalogueError(f"entry id {eid!r} ({scope}.{spec.key}) collides with {seen[folded]}")
+                raise CatalogueError(
+                    f"entry id '{eid}' ({scope}.{spec.key}) collides with {seen[folded]}"
+                )
             seen[folded] = f"{scope}.{spec.key}"
             group = E.group_of(scope, spec)
-            out.append(Entry(
-                id=eid, scope=scope, spec=spec, plain_name=E.plain_name_of(scope, spec),
-                short_help=E.short_help_of(scope, spec), group=group, order=order,
-                depth=E.depth_of(scope, spec, group), functions=E.functions_of(scope, spec, group),
-                aliases=spec.aliases or E.ALIASES.get(spec.key, ()), default=_default_of(scope, spec),
-            ))
+            out.append(
+                Entry(
+                    id=eid,
+                    scope=scope,
+                    spec=spec,
+                    plain_name=E.plain_name_of(scope, spec),
+                    short_help=E.short_help_of(scope, spec),
+                    group=group,
+                    order=order,
+                    depth=E.depth_of(scope, spec, group),
+                    functions=E.functions_of(scope, spec, group),
+                    aliases=spec.aliases or E.ALIASES.get(spec.key, ()),
+                    default=_default_of(scope, spec),
+                )
+            )
     return tuple(out)
 
 
 def guide_ids() -> tuple[str, ...]:
     """Every id that has exactly one guide file: entries, asset types, groups, functions."""
-    return (tuple(e.id for e in entries())
-            + tuple(guide_id("asset_type", t.id) for t in ASSET_TYPES)
-            + tuple(guide_id("group", g) for g in E.GROUP_IDS)
-            + tuple(guide_id("function", f.value) for f in Function))
+    return (
+        tuple(e.id for e in entries())
+        + tuple(guide_id("asset_type", t.id) for t in ASSET_TYPES)
+        + tuple(guide_id("group", g) for g in E.GROUP_IDS)
+        + tuple(guide_id("function", f.value) for f in Function)
+    )
 
 
 @lru_cache(maxsize=1)
 def _guide_bodies() -> dict[str, str]:
     """Every guide file, read once. A missing file is left out, so its id answers 404 rather than a
     blank 200 (a frozen app without the folder fails loudly; `test_catalogue_guide` pins one file each)."""
-    return {gid: (GUIDE_DIR / f"{gid}.md").read_text("utf-8") for gid in guide_ids()
-            if (GUIDE_DIR / f"{gid}.md").is_file()}
+    return {
+        gid: (GUIDE_DIR / f"{gid}.md").read_text("utf-8")
+        for gid in guide_ids()
+        if (GUIDE_DIR / f"{gid}.md").is_file()
+    }
 
 
 def guide_body(gid: str) -> str | None:
@@ -159,26 +187,58 @@ def guide_body(gid: str) -> str | None:
 def _entry_dict(e: Entry) -> dict[str, Any]:
     s = e.spec
     return {
-        "id": e.id, "model_name": s.key, "scope": e.scope, "plain_name": e.plain_name,
-        "short_help": e.short_help, "group": e.group, "legacy_group": s.group, "order": e.order,
-        "depth": e.depth, "unit_display": s.unit_display, "unit_storage": s.unit_storage, "scale": s.scale,
-        "kind": s.kind, "options": list(s.options), "options_plain": list(s.options_plain or s.options),
-        "range": None, "default": e.default, "functions": e.functions, "aliases": list(e.aliases),
+        "id": e.id,
+        "model_name": s.key,
+        "scope": e.scope,
+        "plain_name": e.plain_name,
+        "short_help": e.short_help,
+        "group": e.group,
+        "legacy_group": s.group,
+        "order": e.order,
+        "depth": e.depth,
+        "unit_display": s.unit_display,
+        "unit_storage": s.unit_storage,
+        "scale": s.scale,
+        "kind": s.kind,
+        "options": list(s.options),
+        "options_plain": list(s.options_plain or s.options),
+        "range": None,
+        "default": e.default,
+        "functions": e.functions,
+        "aliases": list(e.aliases),
         "reveal_when": reveal_when_wire(s.reveal_when),
-        "derived": s.derived, "required": s.required, "blank": s.blank, "part": s.part,
-        "related": list(s.related), "former_ids": list(s.former_ids),
+        "derived": s.derived,
+        "required": s.required,
+        "blank": s.blank,
+        "part": s.part,
+        "related": list(s.related),
+        "former_ids": list(s.former_ids),
         "guide": guide_body(e.id),
     }
 
 
 def _type_dict(t) -> dict[str, Any]:
-    groups = [g for g in E.GROUP_IDS if any(e.group == g for e in entries() if e.scope in t.components)]
+    groups = [
+        g
+        for g in E.GROUP_IDS
+        if any(e.group == g for e in entries() if e.scope in t.components)
+    ]
     return {
-        "id": t.id, "plain_name": t.plain_name, "plural": t.plural, "category": t.category,
-        "components": list(t.components), "match": [m.as_dict() for m in t.match], "icon": t.icon,
-        "symbols": dict(t.symbols), "ports": [p.as_dict() for p in t.ports], "groups": groups,
-        "functions": list(type_functions(t)), "only_for": list(t.only_for),
-        "palette": {"category": t.category}, "colour": t.colour, "internal": t.internal,
+        "id": t.id,
+        "plain_name": t.plain_name,
+        "plural": t.plural,
+        "category": t.category,
+        "components": list(t.components),
+        "match": [m.as_dict() for m in t.match],
+        "icon": t.icon,
+        "symbols": dict(t.symbols),
+        "ports": [p.as_dict() for p in t.ports],
+        "groups": groups,
+        "functions": list(type_functions(t)),
+        "only_for": list(t.only_for),
+        "palette": {"category": t.category},
+        "colour": t.colour,
+        "internal": t.internal,
         "guide": guide_body(guide_id("asset_type", t.id)),
     }
 
@@ -186,21 +246,46 @@ def _type_dict(t) -> dict[str, Any]:
 def check_filters(function: str | None, depth: str | None) -> None:
     """UnknownFilter on a filter value the catalogue does not know (the route turns it into a 422)."""
     if function is not None and function not in FUNCTION_IDS:
-        raise UnknownFilter(f"Unknown function '{function}'. Expected one of: {', '.join(FUNCTION_IDS)}.")
+        raise UnknownFilter(
+            f"Unknown function '{function}'. Expected one of: {', '.join(FUNCTION_IDS)}."
+        )
     if depth is not None and depth not in DEPTH_FILTER:
-        raise UnknownFilter(f"Unknown depth '{depth}'. Expected one of: {', '.join(DEPTH_FILTER)}.")
+        raise UnknownFilter(
+            f"Unknown depth '{depth}'. Expected one of: {', '.join(DEPTH_FILTER)}."
+        )
 
 
 def _body(function: str | None, depth: str | None) -> dict[str, Any]:
     """The payload without its `version`. Filters narrow entries and asset types; groups and functions stay whole."""
     shown = DEPTH_FILTER[depth] if depth else E.DEPTHS
-    rows = [e for e in entries() if e.depth in shown and (function is None or function in e.functions)]
-    types = [t for t in ASSET_TYPES if function is None or function in type_functions(t)]
+    rows = [
+        e
+        for e in entries()
+        if e.depth in shown and (function is None or function in e.functions)
+    ]
+    types = [
+        t for t in ASSET_TYPES if function is None or function in type_functions(t)
+    ]
     return {
-        "groups": [{"id": g, "plain_name": E.GROUP_NAMES[g], "short_help": E.GROUP_HELP[g], "order": i,
-                    "guide": guide_body(guide_id("group", g))} for i, g in enumerate(E.GROUP_IDS)],
-        "functions": [{"id": f.value, "plain_name": FUNCTION_NAMES[f], "short_help": FUNCTION_HELP[f],
-                       "guide": guide_body(guide_id("function", f.value))} for f in Function],
+        "groups": [
+            {
+                "id": g,
+                "plain_name": E.GROUP_NAMES[g],
+                "short_help": E.GROUP_HELP[g],
+                "order": i,
+                "guide": guide_body(guide_id("group", g)),
+            }
+            for i, g in enumerate(E.GROUP_IDS)
+        ],
+        "functions": [
+            {
+                "id": f.value,
+                "plain_name": FUNCTION_NAMES[f],
+                "short_help": FUNCTION_HELP[f],
+                "guide": guide_body(guide_id("function", f.value)),
+            }
+            for f in Function
+        ],
         "asset_types": [_type_dict(t) for t in types],
         "entries": [_entry_dict(e) for e in rows],
     }
@@ -219,15 +304,24 @@ def payload_bytes(*, function: str | None = None, depth: str | None = None) -> b
 
 @lru_cache(maxsize=64)
 def _payload_bytes(function: str | None, depth: str | None) -> bytes:
-    return json.dumps(payload(function=function, depth=depth), ensure_ascii=False,
-                      separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return json.dumps(
+        payload(function=function, depth=depth),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
 
 
 @lru_cache(maxsize=1)
 def content_hash() -> str:
     """sha256 of the whole, unfiltered catalogue body (everything the payload carries but this hash)."""
-    raw = json.dumps(_body(None, None), ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-                     allow_nan=False)
+    raw = json.dumps(
+        _body(None, None),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

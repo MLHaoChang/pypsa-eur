@@ -20,7 +20,11 @@ ENTRIES = C.entries()
 
 
 def _pinned_ids() -> list[str]:
-    return [ln.strip() for ln in C.IDS_FILE.read_text("utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
+    return [
+        ln.strip()
+        for ln in C.IDS_FILE.read_text("utf-8").splitlines()
+        if ln.strip() and not ln.startswith("#")
+    ]
 
 
 def _model_names() -> set[str]:
@@ -29,7 +33,9 @@ def _model_names() -> set[str]:
 
 
 def _mentions(text: str, names: set[str]) -> list[str]:
-    return sorted(n for n in names if re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", text))
+    return sorted(
+        n for n in names if re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", text)
+    )
 
 
 def test_one_entry_per_field_row():
@@ -57,7 +63,13 @@ def test_essentials_is_todays_guided_set():
     from tests.test_catalogue_legacy_schema_pin import FIXTURE
 
     recorded = json.loads(FIXTURE.read_text("utf-8"))
-    before = {(c, f["key"]) for c, p in recorded.items() for g in p["groups"] for f in g["fields"] if f["key_param"]}
+    before = {
+        (c, f["key"])
+        for c, p in recorded.items()
+        for g in p["groups"]
+        for f in g["fields"]
+        if f["key_param"]
+    }
     now = {(e.scope, e.model_name) for e in ENTRIES if e.depth == "essentials"}
     assert now == before
 
@@ -99,9 +111,12 @@ def test_ids_pinned_by_ids_txt():
     missing = sorted(pinned - now - former)
     assert not missing, (
         f"entry ids moved: {missing}. A plain-name change re-derives the id; set `id=` on the FieldSpec row "
-        "to the old id (or list it in `former_ids` if the entry really is new).")
+        "to the old id (or list it in `former_ids` if the entry really is new)."
+    )
     new = sorted(now - pinned)
-    assert not new, f"new entry ids {new}: append them to services/asset_schema/catalogue.ids.txt"
+    assert not new, (
+        f"new entry ids {new}: append them to services/asset_schema/catalogue.ids.txt"
+    )
 
 
 def test_ids_txt_is_sorted_and_has_no_duplicates():
@@ -111,7 +126,10 @@ def test_ids_txt_is_sorted_and_has_no_duplicates():
 
 def test_slug_collision_is_refused_never_suffixed(monkeypatch):
     """#1127: two rows deriving the same id stop the build; nothing is renamed to make room."""
-    twin = (FieldSpec("p_nom", "size", "Capacity", "x"), FieldSpec("p_set", "size", "Capacity", "y"))
+    twin = (
+        FieldSpec("p_nom", "size", "Capacity", "x"),
+        FieldSpec("p_set", "size", "Capacity", "y"),
+    )
     monkeypatch.setattr(C, "known_components", lambda: ["Generator"])
     monkeypatch.setattr(C, "fields_for", lambda c: twin)
     C.clear_caches()
@@ -123,8 +141,10 @@ def test_slug_collision_is_refused_never_suffixed(monkeypatch):
 
 
 def test_case_only_collision_is_refused(monkeypatch):
-    twin = (FieldSpec("a_x", "size", "Thing", "x", id="generator.thing"),
-            FieldSpec("b_x", "size", "Other", "y", id="generator.THING"))
+    twin = (
+        FieldSpec("a_x", "size", "Thing", "x", id="generator.thing"),
+        FieldSpec("b_x", "size", "Other", "y", id="generator.THING"),
+    )
     monkeypatch.setattr(C, "known_components", lambda: ["Generator"])
     monkeypatch.setattr(C, "fields_for", lambda c: twin)
     C.clear_caches()
@@ -141,20 +161,37 @@ def test_explicit_id_wins_over_the_derived_one():
 
 
 def test_group_order_is_fixed():
-    assert E.GROUP_IDS == ("general", "size_limits", "electrical", "operation", "running_cost", "investment",
-                           "reliability", "replacement", "source")
+    assert E.GROUP_IDS == (
+        "general",
+        "size_limits",
+        "electrical",
+        "operation",
+        "running_cost",
+        "investment",
+        "reliability",
+        "replacement",
+        "source",
+    )
 
 
 def test_every_legacy_group_maps_to_a_plain_group():
     from services.asset_schema.fields import GROUPS
+
     assert set(E.LEGACY_GROUP) == set(GROUPS)
 
 
-@pytest.mark.parametrize("model,scope,group", [
-    ("x", "Transformer", "electrical"), ("x", "Bus", "general"), ("p_nom_extendable", "Generator", "investment"),
-    ("mttr_hours", "Generator", "reliability"), ("build_year", "Generator", "replacement"),
-    ("marginal_cost", "Generator", "running_cost"), ("p_nom", "Generator", "size_limits"),
-])
+@pytest.mark.parametrize(
+    "model,scope,group",
+    [
+        ("x", "Transformer", "electrical"),
+        ("x", "Bus", "general"),
+        ("p_nom_extendable", "Generator", "investment"),
+        ("mttr_hours", "Generator", "reliability"),
+        ("build_year", "Generator", "replacement"),
+        ("marginal_cost", "Generator", "running_cost"),
+        ("p_nom", "Generator", "size_limits"),
+    ],
+)
 def test_group_rules(model, scope, group):
     e = next(e for e in ENTRIES if e.scope == scope and e.model_name == model)
     assert e.group == group
@@ -180,7 +217,7 @@ def test_functions_needs_where_a_missing_value_blocks_the_run():
     assert by[("Generator", "bus")]["dispatch"] == "needs"
     assert by[("Generator", "p_nom_extendable")]["expansion"] == "needs"
     assert by[("Transformer", "x")]["load_flow"] == "needs"
-    assert "load_flow" not in by[("Bus", "x")]            # the longitude
+    assert "load_flow" not in by[("Bus", "x")]  # the longitude
 
 
 def test_defaults_shown_with_a_source_and_inf_kept_as_text():
@@ -199,7 +236,11 @@ def test_asset_types_complete():
         assert t.colour.startswith("--color-asset-") and "#" not in t.colour
         for m in t.match:
             assert m.component in known_components()
-            for pattern in (m.carrier, m.generic_unless, m.far_carrier and m.far_carrier[1]):
+            for pattern in (
+                m.carrier,
+                m.generic_unless,
+                m.far_carrier and m.far_carrier[1],
+            ):
                 if pattern:
                     re.compile(pattern, re.I)
 

@@ -37,7 +37,9 @@ def test_guide_ids_are_unique():
 @pytest.mark.parametrize("gid", IDS)
 def test_guide_body_shape(gid):
     body = FILES[gid].read_text("utf-8")
-    assert re.fullmatch(r"## What it means\n\n.+\n\n## Example\n\n.+\n", body, flags=re.S), gid
+    assert re.fullmatch(
+        r"## What it means\n\n.+\n\n## Example\n\n.+\n", body, flags=re.S
+    ), gid
     assert C.guide_body(gid) == body
 
 
@@ -47,12 +49,17 @@ def test_no_raw_html_and_no_model_names_in_any_body():
         body = path.read_text("utf-8")
         assert not re.search(r"<[a-zA-Z/!]", body), f"{gid}: raw HTML"
         assert "`" not in body, f"{gid}: code span"
-        hits = [n for n in raw if re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", body)]
+        hits = [
+            n for n in raw if re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", body)
+        ]
         assert not hits, f"{gid}: model names {hits}"
 
 
 def test_frozen_app_ships_the_guide_folder():
     from tests.test_packaging_requirements import _check_bundle, _spec_backend_datas
 
-    assert _spec_backend_datas().get("services/asset_schema/guide") == "services/asset_schema/guide"
+    assert (
+        _spec_backend_datas().get("services/asset_schema/guide")
+        == "services/asset_schema/guide"
+    )
     assert "group.general.md" in _check_bundle().EXPECTED

@@ -12,7 +12,11 @@ import pytest
 
 from services.asset_schema import fields as F
 
-FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "asset_schema_payload_pre_catalogue.json"
+FIXTURE = (
+    pathlib.Path(__file__).parent
+    / "fixtures"
+    / "asset_schema_payload_pre_catalogue.json"
+)
 RECORDED = json.loads(FIXTURE.read_text("utf-8"))
 
 
@@ -32,5 +36,6 @@ def test_route_body_equal_to_the_recording(client, component):
     assert r.status_code == 200
     assert r.json() == RECORDED[component]
     # Key order on the wire is part of "byte-identical".
-    assert [list(f) for g in r.json()["groups"] for f in g["fields"]] == \
-        [list(f) for g in RECORDED[component]["groups"] for f in g["fields"]]
+    assert [list(f) for g in r.json()["groups"] for f in g["fields"]] == [
+        list(f) for g in RECORDED[component]["groups"] for f in g["fields"]
+    ]

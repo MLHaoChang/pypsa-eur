@@ -23,7 +23,10 @@ def render() -> str:
         sys.path.insert(0, str(BACKEND))
     from services.asset_schema.catalogue import model_names
 
-    names = {scope: dict(sorted(cols.items())) for scope, cols in sorted(model_names().items())}
+    names = {
+        scope: dict(sorted(cols.items()))
+        for scope, cols in sorted(model_names().items())
+    }
     return json.dumps(names, indent=2, ensure_ascii=False) + "\n"
 
 
@@ -34,7 +37,10 @@ def main(argv: list[str]) -> int:
         TARGET.write_text(text, encoding="utf-8")
         return 0
     if not TARGET.is_file() or TARGET.read_text("utf-8") != text:
-        print(f"{TARGET.name} is stale: run python smoke/catalogue_model_names.py --write", file=sys.stderr)
+        print(
+            f"{TARGET.name} is stale: run python smoke/catalogue_model_names.py --write",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

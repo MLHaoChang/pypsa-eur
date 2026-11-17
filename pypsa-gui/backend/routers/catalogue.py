@@ -27,7 +27,9 @@ def _etag(body: bytes) -> str:
 
 
 @router.get("")
-def get_catalogue(request: Request, function: str | None = None, depth: str | None = None) -> Response:
+def get_catalogue(
+    request: Request, function: str | None = None, depth: str | None = None
+) -> Response:
     """Every asset type, group, function and parameter entry; `?function=` and `?depth=` narrow the entries."""
     try:
         C.check_filters(function, depth)

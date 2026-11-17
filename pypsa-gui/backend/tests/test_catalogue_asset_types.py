@@ -13,13 +13,21 @@ import re
 
 from services.asset_schema.asset_types import ASSET_TYPES
 
-TS = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "utils" / "assetTypes.ts"
-ROW = re.compile(r"id: '(?P<id>\w+)', label: (?:'(?P<label>[^']*)'|\w+), color: '#[0-9a-f]{6}', icon: '(?P<icon>\w+)'")
+TS = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "frontend"
+    / "src"
+    / "utils"
+    / "assetTypes.ts"
+)
+ROW = re.compile(
+    r"id: '(?P<id>\w+)', label: (?:'(?P<label>[^']*)'|\w+), color: '#[0-9a-f]{6}', icon: '(?P<icon>\w+)'"
+)
 
 
 def _ts_rows() -> list[re.Match]:
     text = TS.read_text("utf-8")
-    body = text[text.index("const TYPES: AssetTypeSpec[] = ["):]
+    body = text[text.index("const TYPES: AssetTypeSpec[] = [") :]
     return list(ROW.finditer(body[: body.index("\n]\n")]))
 
 
@@ -39,8 +47,14 @@ def test_same_icons_and_literal_labels():
 def test_every_literal_carrier_pattern_in_the_ts_table_is_ported():
     """Each inline `/…/i` regex of the TypeScript table appears verbatim as a pattern here."""
     text = TS.read_text("utf-8")
-    body = text[text.index("const TYPES: AssetTypeSpec[] = ["):]
+    body = text[text.index("const TYPES: AssetTypeSpec[] = [") :]
     body = body[: body.index("\n]\n")]
     ts_patterns = set(re.findall(r"carrier: /((?:[^/\\]|\\.)+)/i", body))
-    ours = {p for t in ASSET_TYPES for m in t.match for p in (m.carrier, m.generic_unless) if p}
+    ours = {
+        p
+        for t in ASSET_TYPES
+        for m in t.match
+        for p in (m.carrier, m.generic_unless)
+        if p
+    }
     assert ts_patterns <= ours, sorted(ts_patterns - ours)

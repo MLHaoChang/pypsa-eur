@@ -11,4 +11,6 @@ def test_generated_model_names_are_current():
         import catalogue_model_names as gen
     finally:
         sys.path.pop(0)
-    assert gen.TARGET.read_text("utf-8") == gen.render(), "run python smoke/catalogue_model_names.py --write"
+    assert gen.TARGET.read_text("utf-8") == gen.render(), (
+        "run python smoke/catalogue_model_names.py --write"
+    )
