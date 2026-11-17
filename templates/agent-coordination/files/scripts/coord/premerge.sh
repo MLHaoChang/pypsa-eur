@@ -33,7 +33,10 @@ cd "$root"
 
 # --- Project settings ----------------------------------------------------
 # Overlap in these paths is harmless when the merge itself is clean.
-docs_only_re='^({{RELEASE_NOTES_DIR}}/.*|docs/.*\.md|(.*/)?(CONTEXT|GLOSSARY)\.md|GLOSSARY-MAP\.md)$'
+docs_only_re=''
+while IFS= read -r _l; do # shared with frontier.py and brief.py
+  [[ $_l =~ ^docs_only_re=(.*)$ ]] && docs_only_re=${BASH_REMATCH[1]}
+done <"$script_dir/waivers.conf"
 # A PR touching a path matching semantic_re must pass semantic_cmd on a trial
 # merge with the base branch. Leave semantic_re empty to skip this check.
 # semantic_cmd runs from the trial-merge worktree root. A test that pins a

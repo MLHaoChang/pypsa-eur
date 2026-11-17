@@ -27,6 +27,8 @@ Hand oracle on the baseline project (G1 20 MW):
 """
 
 # ruff: noqa: F811 -- shared public harness fixtures
+import uuid
+
 import pytest
 
 from harness import session as harness_session
@@ -331,6 +333,179 @@ def test_a_run_start_for_another_plan_is_refused_while_a_task_runs(chat, monkeyp
         "running",
     )
     assert chat.task_id == first["task_id"]
+    assert not _stored("run-1").exists()  # GK B N-a on #1515
+
+
+def _stored(request_id):
+    """Where `start_task` keeps the plan of `request_id` in the open project."""
+    root, project, owner = tasks._authority()
+    task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
+    return root / "assistant_tasks" / (task_id + ".json")
+
+
+# LC-48f (owner decision LC48F-REFUSE-1): a task this project cannot read
+# may still run where it lives, so a start for another plan is refused.
+
+
+def test_after_a_project_switch_the_running_task_still_blocks_a_start(
+    chat, monkeypatch, tmp_path
+):
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    _, _, owner = tasks._authority()
+    # The chat now works in another project: the first task's file is not there.
+    monkeypatch.setattr(
+        tasks, "_authority", lambda: (tmp_path, str(uuid.uuid4()), owner)
+    )
+    with pytest.raises(chat_router.HTTPException) as switch:
+        chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert switch.value.status_code == 409
+    assert switch.value.detail["error_kind"] == "switch_in_progress"
+    assert switch.value.detail["active"] == {
+        "kind": "task",
+        "id": first["task_id"],
+        "title": None,
+        "status": "unreadable",
+    }
+    assert chat.task_id == first["task_id"]
+    assert not _stored("second").exists()
+    # The same plan again is no switch: it reads as not found in this project.
+    refused(lambda: tasks.resume_task(first["task_id"]), 404, "task_not_found")
+
+
+def test_a_detached_task_keeps_blocking_until_it_reads_as_ended(
+    chat, monkeypatch, tmp_path
+):
+    """GK B D: the first ordinary tool call after the switch detaches the
+    task; the start guard keeps reading it until it reads as not running."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    home = tasks._authority()
+    away = (tmp_path, str(uuid.uuid4()), home[2])
+    monkeypatch.setattr(tasks, "_authority", lambda: away)
+    assert tasks.begin_step(chat, "project_readiness", {}) is None
+    assert chat.task_id is None and chat.detached_task_id == first["task_id"]
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+    assert chat.task_id is None and not _stored("second").exists()
+    # Back in its project, the user cancels it: the detach is let go.
+    monkeypatch.setattr(tasks, "_authority", lambda: home)
+    tasks.cancel_task(first["task_id"])
+    assert chat.detached_task_id is None
+    second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert chat.task_id == second["task_id"]
+
+
+def test_a_task_that_ended_before_the_switch_never_blocks_a_start(
+    chat, monkeypatch, tmp_path
+):
+    """GK B E: the task's terminal write lets go of the chat, so after a
+    project switch the guard has nothing to read."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    _set_stored(first["task_id"], status="completed")
+    assert chat.task_id is None
+    _, _, owner = tasks._authority()
+    monkeypatch.setattr(
+        tasks, "_authority", lambda: (tmp_path, str(uuid.uuid4()), owner)
+    )
+    second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert chat.task_id == second["task_id"]
+
+
+def test_an_ended_task_leaves_a_later_task_of_the_chat_alone(chat):
+    """GK B E: only the session ids that name the ended task change."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    later = str(uuid.uuid4())
+    chat.task_id, chat.detached_task_id = later, first["task_id"]
+    _set_stored(first["task_id"], status="cancelled")
+    assert chat.task_id == later and chat.detached_task_id is None
+    chat.task_id, chat.detached_task_id = first["task_id"], later
+    _set_stored(first["task_id"], status="completed")
+    assert chat.task_id is None and chat.detached_task_id == later
+    chat.detached_task_id = None
+
+
+def test_an_ended_task_releases_a_chat_that_is_not_the_current_one(chat, monkeypatch):
+    """GK B E: the task ends on another thread (a job, a runner tick), so its
+    chat is found in the session registry, not as the current session."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    away = harness_session.ChatSession(session_id="chat-away")
+    away.detached_task_id = first["task_id"]
+    monkeypatch.setitem(harness_session._SESSIONS, chat.session_id or "chat", chat)
+    monkeypatch.setitem(harness_session._SESSIONS, "chat-away", away)
+    chat_tools.set_chat_session(None)
+    _set_stored(first["task_id"], status="completed")
+    assert chat.task_id is None and away.detached_task_id is None
+    chat_tools.set_chat_session(chat)
+
+
+def test_a_runner_session_keeps_its_run_when_the_task_ends(chat):
+    """A runner session is its run's by identity (`_is_run_session`)."""
+    from services import run_envelope
+
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    runner = harness_session.ChatSession(
+        session_id=run_envelope.SESSION_PREFIX + first["task_id"]
+    )
+    runner.task_id = first["task_id"]
+    chat_tools.set_chat_session(runner)
+    _set_stored(first["task_id"], status="completed")
+    assert runner.task_id == first["task_id"]
+    chat_tools.set_chat_session(chat)
+
+
+def test_a_task_that_has_not_ended_keeps_its_chat(chat):
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    for status in ("ready", "running", "waiting_job", "needs_review"):
+        _set_stored(first["task_id"], status=status)
+        assert chat.task_id == first["task_id"]
+
+
+def test_a_detached_task_that_reads_as_ended_lets_go(chat, monkeypatch, tmp_path):
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    _set_stored(first["task_id"], status="completed")
+    chat.task_id, chat.detached_task_id = None, first["task_id"]
+    second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert chat.task_id == second["task_id"] and chat.detached_task_id is None
+
+
+@pytest.mark.parametrize("error", [OSError("disk"), ValueError("bad json")])
+def test_a_read_error_blocks_a_start_for_another_plan(chat, monkeypatch, error):
+    """GK B F-a: a non-HTTP read failure fails closed too."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    read = tasks._read
+
+    def failing(task_id):
+        if task_id == first["task_id"]:
+            raise error
+        return read(task_id)
+
+    monkeypatch.setattr(tasks, "_read", failing)
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+    assert chat.task_id == first["task_id"]
+
+
+def test_an_unreadable_task_file_blocks_a_start_for_another_plan(chat):
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    tasks.begin_step(chat, "wait_for_job", {"job_id": "job"})
+    _stored("first").write_text("{not json")
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+    assert chat.task_id == first["task_id"]
+    assert not _stored("second").exists()
 
 
 def test_resuming_another_task_is_refused_while_one_runs(chat):

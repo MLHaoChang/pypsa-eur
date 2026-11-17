@@ -4,18 +4,48 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-store" />
-    <meta name="theme-color" content="#151112" />
+    <meta name="theme-color" content="#ffffff" />
     <title>PyPSA Studio — Sign in</title>
     <link rel="preload" as="image" href="/img/login-bg.jpg" />
     <!-- Identity palette. Single source of truth for the red/black brand
          colours, shared with spa.html — see public/brand.css. -->
     <link rel="stylesheet" href="/brand.css" />
+    <script>
+      // Mirror uiStore's opening theme onto <html> before first paint:
+      // the stored explicit choice, else the OS preference, else light
+      // (THEME-LIGHT-1). Kept in sync with storedTheme() in
+      // src/store/uiStore.ts by uiStore.theme.test.ts; both migrations are
+      // idempotent, so whichever runs first wins.
+      ;(function pypsaBootTheme() {
+        var theme = null
+        try {
+          if (localStorage.getItem('network-diagram:theme-schema') !== '2') {
+            localStorage.removeItem('network-diagram:theme')
+            localStorage.setItem('network-diagram:theme-schema', '2')
+          }
+          var stored = localStorage.getItem('network-diagram:theme')
+          if (stored === 'light' || stored === 'dark') theme = stored
+        } catch (err) {
+          /* storage blocked: no stored choice */
+        }
+        if (theme === null) {
+          try {
+            theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          } catch (err) {
+            theme = 'light'
+          }
+        }
+        document.documentElement.dataset.theme = theme
+        var meta = document.querySelector('meta[name="theme-color"]')
+        if (meta) meta.setAttribute('content', theme === 'dark' ? '#151112' : '#ffffff')
+      })()
+    </script>
     <style>
       :root {
-        color-scheme: dark;
+        color-scheme: var(--brand-scheme);
         --ink: var(--brand-ink);
         --ink-dim: var(--brand-ink-dim);
-        --accent: var(--brand-red);
+        --accent: var(--brand-accent);
         --line: var(--brand-line);
         --danger: var(--brand-danger);
         --panel: var(--brand-panel);
@@ -29,7 +59,7 @@
         margin: 0;
         font-family: "Inter", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
         color: var(--ink);
-        background: var(--brand-black);
+        background: var(--brand-bg);
         overflow: hidden;
       }
 
@@ -47,7 +77,7 @@
         background-image: url("/img/login-bg.jpg");
         background-size: cover;
         background-position: center 55%;
-        filter: saturate(1.15) contrast(1.08) brightness(1.18);
+        filter: var(--brand-backdrop-filter);
         transform: scale(1.06);
         animation: drift 46s ease-in-out infinite alternate;
       }
@@ -62,17 +92,15 @@
         position: absolute;
         inset: 0;
         background:
-          radial-gradient(1100px 720px at 8% 45%, rgba(21, 17, 18, 0.78) 0%, rgba(21, 17, 18, 0.62) 34%, rgba(21, 17, 18, 0.18) 62%, transparent 100%),
-          linear-gradient(90deg, rgba(21, 17, 18, 0.78) 0%, rgba(21, 17, 18, 0.28) 42%, rgba(21, 17, 18, 0.12) 62%, rgba(21, 17, 18, 0.55) 100%),
-          linear-gradient(180deg, rgba(21, 17, 18, 0.42) 0%, transparent 26%, transparent 62%, rgba(21, 17, 18, 0.6) 100%);
+          var(--brand-scrim);
       }
 
       .grid-lines {
         position: absolute;
         inset: 0;
         background-image:
-          linear-gradient(rgba(255, 82, 82, 0.06) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255, 82, 82, 0.06) 1px, transparent 1px);
+          linear-gradient(var(--brand-grid-line) 1px, transparent 1px),
+          linear-gradient(90deg, var(--brand-grid-line) 1px, transparent 1px);
         background-size: 64px 64px;
         mask-image: radial-gradient(900px 600px at 20% 50%, #000 0%, transparent 75%);
         pointer-events: none;
@@ -100,18 +128,18 @@
         width: 34px;
         height: 34px;
         border-radius: 11px;
-        background: linear-gradient(140deg, var(--accent), var(--brand-red-deeper) 70%);
-        box-shadow: 0 8px 28px rgba(255, 82, 82, 0.35);
+        background: linear-gradient(140deg, var(--accent), var(--brand-accent-deeper) 70%);
+        box-shadow: var(--brand-mark-glow);
         display: grid;
         place-items: center;
         font-size: 0.95rem;
-        color: var(--brand-on-red);
+        color: var(--brand-on-accent);
         font-weight: 900;
       }
 
       /* Wordmark: "PyPSA" carries the accent, "Studio" stays ink — the same
          split the SPA header and the projects home use. */
-      .mark .pypsa { color: var(--brand-red); }
+      .mark .pypsa { color: var(--brand-accent); }
 
       /* `ch` resolves against THIS element's font-size (16px inherited), not
          the h1's clamped 3.6rem — so 30ch was a ~270px column and the headline
@@ -127,7 +155,7 @@
         padding: 6px 12px;
         border: 1px solid var(--line);
         border-radius: 999px;
-        background: rgba(33, 27, 28, 0.62);
+        background: var(--brand-chip-bg);
         backdrop-filter: blur(8px);
         font-size: 0.72rem;
         letter-spacing: 0.14em;
@@ -141,13 +169,13 @@
         height: 7px;
         border-radius: 50%;
         background: var(--accent);
-        box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7);
+        box-shadow: 0 0 0 0 var(--brand-pulse);
         animation: pulse 2.4s infinite;
       }
 
       @keyframes pulse {
-        70% { box-shadow: 0 0 0 9px rgba(255, 82, 82, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0); }
+        70% { box-shadow: 0 0 0 9px var(--brand-pulse-out); }
+        100% { box-shadow: 0 0 0 0 var(--brand-pulse-out); }
       }
 
       h1 {
@@ -159,7 +187,7 @@
       }
 
       h1 .grad {
-        background: linear-gradient(100deg, var(--brand-red-soft), var(--brand-red) 45%, var(--brand-red-deep));
+        background: linear-gradient(100deg, var(--brand-accent-soft), var(--brand-accent) 45%, var(--brand-accent-deep));
         -webkit-background-clip: text;
         background-clip: text;
         color: transparent;
@@ -209,9 +237,7 @@
         border: 1px solid var(--line);
         border-radius: 24px;
         padding: clamp(24px, 2.4vw, 34px);
-        box-shadow:
-          0 30px 80px rgba(0, 0, 0, 0.6),
-          inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        box-shadow: var(--brand-card-shadow);
       }
 
       .card h2 {
@@ -240,7 +266,7 @@
       input {
         width: 100%;
         border: 1px solid var(--line);
-        background: rgba(16, 13, 14, 0.66);
+        background: var(--brand-input-bg);
         color: var(--ink);
         border-radius: 14px;
         padding: 13px 15px;
@@ -249,13 +275,13 @@
         transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
       }
 
-      input::placeholder { color: rgba(185, 167, 169, 0.6); }
+      input::placeholder { color: var(--brand-placeholder); }
 
       input:focus {
         outline: none;
-        border-color: rgba(255, 82, 82, 0.65);
-        background: rgba(24, 19, 20, 0.88);
-        box-shadow: 0 0 0 4px rgba(255, 82, 82, 0.16);
+        border-color: var(--brand-input-line-focus);
+        background: var(--brand-input-bg-focus);
+        box-shadow: var(--brand-focus-ring);
       }
 
       button {
@@ -267,11 +293,11 @@
         font: inherit;
         font-weight: 700;
         letter-spacing: 0.01em;
-        color: var(--brand-on-red);
-        background: var(--brand-red-gradient);
+        color: var(--brand-on-accent);
+        background: var(--brand-accent-gradient);
         cursor: pointer;
         transition: transform 0.14s ease, filter 0.18s ease, box-shadow 0.18s ease;
-        box-shadow: var(--brand-red-glow);
+        box-shadow: var(--brand-accent-glow);
       }
 
       button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05); }
@@ -290,8 +316,8 @@
 
       .msg.error {
         display: block;
-        background: rgba(90, 20, 22, 0.3);
-        border-color: rgba(255, 139, 139, 0.4);
+        background: var(--brand-error-bg);
+        border-color: var(--brand-error-line);
         color: var(--danger);
       }
 
@@ -300,7 +326,7 @@
          ink on a plain glass panel is unambiguous. */
       .msg.ok {
         display: block;
-        background: rgba(255, 255, 255, 0.06);
+        background: var(--brand-ok-bg);
         border-color: var(--line);
         color: var(--ink);
       }
@@ -317,12 +343,12 @@
       code {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.76rem;
-        color: var(--brand-red-soft);
+        color: var(--brand-code);
       }
 
       .foot {
         font-size: 0.74rem;
-        color: rgba(185, 167, 169, 0.75);
+        color: var(--brand-foot);
         letter-spacing: 0.02em;
       }
 
