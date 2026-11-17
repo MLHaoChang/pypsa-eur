@@ -16,7 +16,7 @@ function plainReason(reason: string): string {
     return 'The reserve could not be checked: the solve has no dispatch results for some units.'
   if (reason.includes('missing values'))
     return 'The reserve could not be checked: the dispatch has missing values.'
-  return `The reserve could not be checked: ${reason}.`
+  return 'The reserve could not be checked for this run.'
 }
 
 /** The hours where the operating reserve binds (homer-parity 01c). Read-only; hidden when the reserve was off. */
