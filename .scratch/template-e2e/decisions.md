@@ -182,4 +182,4 @@ Sent to the coordinator as options (HOLISTIC-1).
 | [04](issues/04-load-editor-shows-defaults.md) load editor | 4, 5 | all | ready-for-agent |
 | [05](issues/05-raw-names-in-ui.md) raw names | all | all | ready-for-agent (Q2 part) |
 | [06](issues/06-goal-and-backup-consistency.md) goal, backup grouping | 5, 8 | DC, MG, Conc | ready-for-agent |
-| [07](issues/07-expert-only-decisions.md) decisions only Expert can make | 1, 3, 4, 5, 7, 8 | all | ready-for-agent |
+| [07](issues/07-expert-only-decisions.md) decisions in neither mode / Expert-only and unnamed | 1, 3, 4, 5, 7, 8 | all | needs-triage |
