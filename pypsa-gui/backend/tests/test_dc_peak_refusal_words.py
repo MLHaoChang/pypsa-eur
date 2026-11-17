@@ -285,7 +285,8 @@ def test_the_search_fails_fast_when_the_bracket_stops_shrinking(monkeypatch):
         T._largest_fitting_it("eh_datacenter", spec, None)
 
 
-def test_a_search_that_raises_drops_the_number_and_is_logged(monkeypatch, caplog):
+@pytest.mark.parametrize("err", [RuntimeError("boom"), DcLoadError("boom", "x")])
+def test_a_search_that_raises_drops_the_number_and_is_logged(err, monkeypatch, caplog):
     """GK A ruling: an exception inside the IT load search stops the search; the
     refusal stands without "at most N MW", and the error is logged."""
     fits = T.dc_load_spec(
@@ -299,7 +300,7 @@ def test_a_search_that_raises_drops_the_number_and_is_logged(monkeypatch, caplog
     def peak_over(tid, s, p=None):
         # The entered spec (36 MW) and the Hybrid probe build; a probe below raises.
         if s.backup.mode == "bess" and s.phases[0].it_mw < 36.0:
-            raise RuntimeError("boom")
+            raise err
         return real(tid, s, p)
 
     monkeypatch.setattr(T, "_peak_over", peak_over)
@@ -314,4 +315,29 @@ def test_a_search_that_raises_drops_the_number_and_is_logged(monkeypatch, caplog
     ), msg
     assert any(
         "IT load search failed" in r.getMessage() and r.exc_info for r in caplog.records
+    )
+
+
+def test_a_search_past_its_cap_drops_the_number_and_is_logged(monkeypatch, caplog):
+    """GK A (31): the cap's own error, reached through ``_check_dc_peak``, is
+    logged and the user's refusal stands without "at most N MW"."""
+    fits = T.dc_load_spec(
+        "eh_datacenter", {**BESS, "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]}
+    )
+    spec = fits.model_copy(
+        update={"phases": [fits.phases[0].model_copy(update={"it_mw": 36.0})]}
+    )
+    monkeypatch.setattr(T, "_BISECT_CAP", 2)
+    with caplog.at_level("WARNING", logger=T.__name__):
+        with pytest.raises(DcLoadError) as exc:
+            T._check_dc_peak("eh_datacenter", spec)
+    msg = str(exc.value)
+    assert exc.value.field == "dc_load.phases"
+    assert "at most" not in msg and "converge" not in msg, msg
+    assert "Pick Hybrid backup" in msg, msg
+    assert any(
+        "IT load search failed" in r.getMessage()
+        and r.exc_info
+        and "did not converge" in str(r.exc_info[1])
+        for r in caplog.records
     )
