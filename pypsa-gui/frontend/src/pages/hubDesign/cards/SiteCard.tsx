@@ -20,7 +20,7 @@ import { siteFixText, type SiteFix } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term, type TermKey } from '../shared/Term'
-import { useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
+import { useConnectionLimit, useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
 import { displayName } from '../../../utils/displayName'
 import { openConnectionLimitEditor } from '../../../layout/flowNavigation'
 import { useCapacityUnit, useImportLinks, useStagedConnection } from '../../../components/gridReadiness/ConnectionLimits'
@@ -37,7 +37,10 @@ const mw = (v: number) => `${Number(v.toPrecision(6))} MW`
 interface Row { value: string; gap: boolean; fix?: string }
 
 /** The four rows in words. Exported for the smoke's expectations. */
-export function siteRows(r: EhReadiness, archetype: EhArchetype): Record<SiteFix, Row> {
+/** `limitMw`: the connection limit the server reads from the network (`useConnectionLimit`), never
+ *  readiness's own sum of the links' capacity (GK B (64) 4). */
+export function siteRows(r: EhReadiness, archetype: EhArchetype,
+  limitMw: number | null = null): Record<SiteFix, Row> {
   const island = archetype === 'off_grid'
   const links = r.import?.links ?? []
   // Plain names in Guided, never the raw ids (UX S6, G1).
@@ -47,8 +50,8 @@ export function siteRows(r: EhReadiness, archetype: EhArchetype): Record<SiteFix
       ? `${names(links)} — normally open; the study runs the site as an island`
       : 'none — the study runs the site as an island', gap: false }
     : links.length
-      ? { value: `${names(links)}${r.import_p_nom_mw != null ? ` (${mw(r.import_p_nom_mw)}${
-          r.import_firm_mw != null && r.import_firm_mw < r.import_p_nom_mw
+      ? { value: `${names(links)}${limitMw != null ? ` (${mw(limitMw)}${
+          r.import_firm_mw != null && r.import_firm_mw < limitMw
             ? `; ${mw(r.import_firm_mw)} until fully energized` : ''})` : ''}`, gap: false }
       : { value: 'none tagged', gap: true, fix: siteFixText('grid') }
 
@@ -212,7 +215,8 @@ export function SiteCard() {
   const { archetype } = useReliabilityGoal()
   const { readiness, isError } = useHubReadiness(template, running,
     !studyPending && !templatePending)
-  const rows = readiness ? siteRows(readiness, archetype) : null
+  const limitMw = useConnectionLimit()?.mw ?? null
+  const rows = readiness ? siteRows(readiness, archetype, limitMw) : null
   // A generic site says what was entered, not a bus name (UX G2 note 7).
   const critical = template ? genericCritical(template) : null
   if (rows && critical) rows.critical = { value: critical, gap: false }

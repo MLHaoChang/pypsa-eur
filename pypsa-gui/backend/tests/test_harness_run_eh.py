@@ -1819,7 +1819,7 @@ def test_the_freeze_takes_the_profiles_block_over_the_goal_card_and_falls_back_t
 
 @pytest.mark.parametrize(
     "asked, words",
-    [(55.0, ["55 MW", "40 MW"]), (0.0, ["0 MW", "40 MW"]), ("40", ["'40'", "40 MW"])],
+    [(55.0, ["55 MW", "40 MW"]), (0.0, ["0 MW", "40 MW"]), ("40", ["(40)", "40 MW"])],
 )
 def test_a_profile_import_cap_that_is_not_the_networks_refuses(tmp_path, asked, words):
     """template-e2e 02, GK B (64): the network's connection limit wins, but a

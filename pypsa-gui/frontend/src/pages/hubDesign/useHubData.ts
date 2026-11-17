@@ -21,6 +21,7 @@ import { dispatchSolved } from './chapters'
 import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { networkApi } from '../../api/network'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import type { FlowConnectionLimit } from '../../api/flow'
 import type { Link } from '../../api/types'
 
 /** The study record (`nk(project,'results','eh_study')`, 2 s poll while running). */
@@ -82,11 +83,23 @@ export function templateForm(template: EhTemplateMeta | null): PackForm {
   return template ? formFromTemplate(template) : EMPTY_PACK_FORM
 }
 
-/** The grid import links (eh_role grid_import): the connection the site draws through. */
+/** The connection limit the server reads from the network (`flow_service.import_capacity`, the flow's
+ *  connection row): its MW, its import links, or why the network fixes none. `undefined` until the
+ *  flow is read. The one reader on the client: nothing here re-selects links or re-sums capacity. */
+export function useConnectionLimit(): FlowConnectionLimit | undefined {
+  const { section } = useProjectFlow()
+  return section('connection')?.connection_limit
+}
+
+/** The grid import links, as the server selects them for the connection limit (any rule: eh_role,
+ *  the PoC bus or the import carrier), with their records for the editor. Empty until the flow is read. */
 export function useImportLinks(): Link[] {
   const project = useUIStore(s => s.currentProject)
   const q = useQuery({ queryKey: nk(project, 'links'), queryFn: networkApi.getLinks, enabled: !!project, staleTime: 30_000 })
-  return ((q.data ?? []) as Link[]).filter(l => l.eh_role === 'grid_import')
+  const names = useConnectionLimit()?.links
+  if (!names?.length) return []
+  const chosen = new Set(names)
+  return ((q.data ?? []) as Link[]).filter(l => chosen.has(l.name))
 }
 
 /** The template's pack form with the import cap the server reads from the network (template-e2e 02,
@@ -98,7 +111,7 @@ export function useImportLinks(): Link[] {
 export function useTemplateForm(template: EhTemplateMeta | null):
   PackForm & { importPending: boolean, importRefusal: string | null } {
   const { section, isPending, isError } = useProjectFlow()
-  const limit = section('connection')?.connection_limit
+  const limit = useConnectionLimit()
   const form = templateForm(template)
   if (!template) return { ...form, importPending: false, importRefusal: null }
   if (isError) {

@@ -118,6 +118,9 @@ def test_a_filled_site_is_complete_and_ready(client, site):
     assert rows["readiness"]["state"] is None and rows["readiness"]["summary"] == "0 to do, 0 to check"
     assert rows["results"]["state"] is None and rows["results"]["freshness"] == "not_run"
     assert rows["connection"]["summary"] == "1 grid connection, 50 MW"
+    # The limit as the study takes it, with the links it is read from (template-e2e 02).
+    assert rows["connection"]["connection_limit"] == {
+        "mw": 50.0, "refusal": None, "links": ["grid_import"]}
     assert rows["project"]["required"] and not rows["commercial"]["required"]
 
 
@@ -1125,3 +1128,20 @@ def test_load_flow_freshness_survives_a_save_and_reload(client, site, set_cfg, b
     assert _kinds(_flow(client, name))["loadflow"] == "fresh"
     _bump(client, bound_ctx)
     assert _kinds(_flow(client, name))["loadflow"] == "stale"
+
+
+def test_a_weak_grid_site_without_a_readable_limit_blocks_the_study(client, tmp_projects_dir):
+    """template-e2e 02 (GK B C2-C4): where the network fixes no connection limit,
+    the connection row says why and the study is blocked; the rail shows no MW."""
+    name = _create(client, "eh_datacenter", "nolimit")
+    assert _flow(client, name)["run_ready"] is True
+    _put(client, "links", "grid_import", p_nom_extendable=True)
+    body = _flow(client, name)
+    row = next(s for s in body["sections"] if s["section"] == "connection")
+    assert row["connection_limit"]["mw"] is None
+    assert "sized by the optimisation" in row["connection_limit"]["refusal"]
+    [item] = [i for i in row["items"] if i["code"] == "eh_connection_limit"]
+    assert item["blocking"] and item["severity"] == "error"
+    assert item["message"] == row["connection_limit"]["refusal"]
+    assert body["run_ready"] is False
+    assert all("connection_limit" not in s for s in body["sections"] if s["section"] != "connection")

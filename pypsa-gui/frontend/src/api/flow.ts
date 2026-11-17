@@ -83,6 +83,8 @@ export interface FlowHeld {
 export interface FlowConnectionLimit {
   mw: number | null
   refusal: string | null
+  /** The grid import links the limit is read from, as the study selects them. */
+  links: string[]
 }
 
 export interface FlowSection {

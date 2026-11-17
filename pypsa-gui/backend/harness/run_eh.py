@@ -153,7 +153,7 @@ def freeze(ctx, profile, solves_left) -> dict:
         and not (
             isinstance(asked, (int, float))
             and not isinstance(asked, bool)
-            and math.isclose(float(asked), float(cap), rel_tol=1e-9, abs_tol=1e-9)
+            and float(asked) == float(cap)
         )
     ):
         raise FreezeError(
@@ -161,7 +161,7 @@ def freeze(ctx, profile, solves_left) -> dict:
             f"connection limit is {cap:g} MW: set the limit on the grid import link, "
             "or remove the profile's import cap."
             if isinstance(asked, (int, float)) and not isinstance(asked, bool)
-            else f"The run profile's import cap ({asked!r}) is not a number; the "
+            else f"The run profile's import cap ({asked}) is not a number; the "
             f"network's connection limit is {cap:g} MW."
         )
     body = EhStudyRequest(
@@ -360,11 +360,11 @@ def _connection_limit_change(ctx, args) -> str | None:
     if (
         cap.refusal is None
         and isinstance(then, (int, float))
-        and math.isclose(cap.mw, float(then), rel_tol=1e-9, abs_tol=1e-9)
+        and cap.mw == float(then)  # exact: the frozen value is the network's own
     ):
         return None
-    shown = f"{float(then):g} MW" if isinstance(then, (int, float)) else "no limit"
-    now = f"it is now {cap.mw:g} MW" if cap.refusal is None else cap.refusal
+    shown = f"{float(then):.12g} MW" if isinstance(then, (int, float)) else "no limit"
+    now = f"it is now {cap.mw:.12g} MW" if cap.refusal is None else cap.refusal
     return (
         f"The connection limit changed since the study's card was drawn "
         f"(it showed {shown}; {now}). Review the run again."

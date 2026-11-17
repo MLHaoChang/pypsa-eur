@@ -369,9 +369,12 @@ def import_capacity(n, body: dict) -> ImportCapacity:
     ones the study's pack selects (`archetypes.select_import_links_with_rule`
     with ``body``'s pack, as `eh_study` applies it), and the limit is their
     summed ``p_nom``, read in MW. Refused, never a fallback: an unreadable
-    network, no import Link, a sum that is not above 0, a Link whose grid bus
-    does not count in MW (#1347), or an extendable Link (its ``p_nom`` is only
-    a starting size, so the network fixes no limit)."""
+    network, no import Link (a Line-only connection included), a sum that is
+    not above 0, a Link whose grid bus does not count in MW (#1347), an
+    extendable Link (its ``p_nom`` is only a starting size, so the network
+    fixes no limit), or a Line or Transformer at the grid connection beside
+    the Links. Several Links are summed; the weak-grid pack then splits the
+    sum evenly over them (`archetypes.apply_archetype_pack_detailed`)."""
     from services.adequacy import archetypes as arch
     from services.memory_parameters import _bus_unit_reason
 
@@ -397,11 +400,29 @@ def import_capacity(n, body: dict) -> ImportCapacity:
                     f"The grid import link {name} is sized by the optimisation, so its "
                     "capacity is not a connection limit: fix its capacity (turn off "
                     "extendable) or choose another site type."))
-        mw = float(table.loc[list(links), "p_nom"].astype(float).sum())
+        # The grid side (each Link's bus0, and a bus tagged eh_poc): a Line or a
+        # Transformer there carries power the import Links' capacity does not
+        # count, so the limit can't be read from the Links alone (GK B (64) 6).
+        pcc = {str(table.at[name, "bus0"]) for name in links}
+        if "eh_poc" in n.buses.columns:
+            pcc |= {str(b) for b in n.buses.index if n.buses.at[b, "eh_poc"] is True}
+        for word, branches in (("line", n.lines), ("transformer", n.transformers)):
+            for b in branches.index:
+                ends = (str(branches.at[b, "bus0"]), str(branches.at[b, "bus1"]))
+                at = next((e for e in ends if e in pcc), None)
+                if at is not None:
+                    return ImportCapacity(links, None, (
+                        f"The grid connection at bus {at} also runs through {word} {b}, "
+                        "which the connection limit (the grid import links' capacity) "
+                        "does not count: connect the grid through the import link only, "
+                        "or choose another site type."))
+        sizes = [float(v) for v in table.loc[list(links), "p_nom"]]
+        if not all(math.isfinite(v) for v in sizes):
+            # A NaN would sum as 0 (pandas skips it): unreadable, never 0 MW.
+            return ImportCapacity(links, None, CAP_UNREADABLE)
+        mw = float(sum(sizes))
     except Exception:                                    # noqa: BLE001 — refused, never the template's
         logger.exception("flow: import capacity read failed")
-        return ImportCapacity(links, None, CAP_UNREADABLE)
-    if not math.isfinite(mw):
         return ImportCapacity(links, None, CAP_UNREADABLE)
     if not mw > 0:
         return ImportCapacity(links, None, CAP_ZERO)
@@ -1418,7 +1439,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             # The connection limit as the study takes it (`import_capacity`):
             # what the Site and Goal cards send, never re-summed on the client.
             row["connection_limit"] = {"mw": facts.import_cap.mw,
-                                       "refusal": facts.import_cap.refusal}
+                                       "refusal": facts.import_cap.refusal,
+                                       "links": list(facts.import_cap.links)}
         if s in facts.holds:
             row["holds"] = facts.holds[s]
             row["holds_total"] = facts.holds_total[s]

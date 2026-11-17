@@ -11,7 +11,13 @@ vi.mock('../flowScope/useFlowScope', () => ({ useFlowScope: () => ({ registry: {
 vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolvedValue([
   { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]), updateBus: vi.fn(),
   getLinks: vi.fn().mockResolvedValue([]), updateLink: vi.fn() } }))
-const hub = vi.hoisted(() => ({ template: null as null | { energization: unknown[] } }))
+const hub = vi.hoisted(() => ({ template: null as null | { energization: unknown[] },
+  // The import links as the server selects them for the connection limit (`connection_limit.links`).
+  links: ['grid_import', 'h2_import'] as string[] }))
+vi.mock('../../api/flow', async (orig) => ({
+  ...await orig<typeof import('../../api/flow')>(),
+  getProjectFlow: async () => ({ run_ready: true, notes: [],
+    sections: [{ section: 'connection', connection_limit: { mw: null, refusal: null, links: hub.links } }] }) }))
 vi.mock('../../pages/hubDesign/useHubData', async (orig) => ({
   ...await orig<typeof import('../../pages/hubDesign/useHubData')>(),
   useHubTemplate: () => ({ template: hub.template, isPending: false }) }))
@@ -271,6 +277,19 @@ describe('ConnectionLimits', () => {
     mount()
     expect(await screen.findByText(/No grid connection is tagged/)).toBeTruthy()
     expect(screen.queryByTestId('connection-limit-connection_limit')).toBeNull()
+  })
+
+  it('takes the import links the server selects, not the eh_role label', async () => {
+    // An untagged feeder the PoC rule selects gets a line; a link only labelled grid_import does not.
+    hub.links = ['poc_feed']
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([
+      { name: 'poc_feed', eh_role: '', p_nom: 30 }, { name: 'old_tag', eh_role: 'grid_import', p_nom: 9 }] as never)
+    try {
+      mount()
+      await waitFor(() => expect(screen.getAllByTestId('connection-limit-connection_limit')).toHaveLength(1))
+      expect(screen.getByTestId('connection-limit-connection_limit').textContent).toMatch(/30/)
+    } finally { hub.links = ['grid_import', 'h2_import'] }
   })
 
   it('shows one line per import link, named and in its own unit', async () => {

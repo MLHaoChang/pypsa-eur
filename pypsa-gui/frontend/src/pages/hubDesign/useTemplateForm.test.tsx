@@ -32,7 +32,7 @@ function render() {
 
 describe('useTemplateForm', () => {
   it("takes the weak-grid import cap from the server's connection limit, not the template", async () => {
-    vi.mocked(getProjectFlow).mockResolvedValue(flowWith({ mw: 45, refusal: null }))
+    vi.mocked(getProjectFlow).mockResolvedValue(flowWith({ mw: 45, refusal: null, links: ['grid_import'] }))
     const result = render()
     expect(templateForm(DC_TEMPLATE).importMw).toBe('40')
     await waitFor(() => expect(result.current.importMw).toBe('45'))
@@ -51,7 +51,7 @@ describe('useTemplateForm', () => {
 
   it("refuses with the server's words where the network fixes no limit, never the template's value", async () => {
     const refusal = 'The connection limit is 0 MW: set one or choose another site type.'
-    vi.mocked(getProjectFlow).mockResolvedValue(flowWith({ mw: null, refusal }))
+    vi.mocked(getProjectFlow).mockResolvedValue(flowWith({ mw: null, refusal, links: [] }))
     const result = render()
     await waitFor(() => expect(result.current.importRefusal).toBe(refusal))
     expect(result.current.importMw).toBe('')

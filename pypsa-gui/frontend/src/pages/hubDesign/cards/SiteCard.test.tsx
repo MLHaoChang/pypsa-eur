@@ -39,7 +39,7 @@ vi.mock('../../../api/flow', async (importOriginal) => {
   // The connection limit the server reads from the network (template-e2e 02): the template's 40 MW.
   return { ...actual, getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a),
     getProjectFlow: async () => ({ run_ready: true, notes: [],
-      sections: [{ section: 'connection', connection_limit: { mw: 40, refusal: null } }] }) }
+      sections: [{ section: 'connection', connection_limit: { mw: 40, refusal: null, links: ['grid_import'] } }] }) }
 })
 
 vi.mock('../../../api/campusElectrical', async (importOriginal) => {

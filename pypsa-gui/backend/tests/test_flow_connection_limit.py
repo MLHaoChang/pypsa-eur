@@ -292,3 +292,94 @@ def test_the_frozen_run_takes_the_edited_limit(tmp_path):
     assert (
         args["pack_overrides"]["import_p_nom_mw"] == pytest.approx(45.0) != TEMPLATE_MW
     )
+
+
+def test_admit_compares_the_frozen_limit_exactly(tmp_path):
+    """GK B (64) 3: a limit equal only after rounding is a changed limit."""
+    from harness import run_eh
+
+    n = build_eh_datacenter()
+    n.links.loc[_imports(n), "p_nom"] = 45.0
+    ctx = _ctx(tmp_path, n)
+    args = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)["args"]
+    n.links.loc[_imports(n), "p_nom"] = 45.0 + 1e-6
+    stale = run_eh._connection_limit_change(ctx, args)
+    assert stale is not None and "45.000001 MW" in stale
+
+
+# ── GK B (64) 6: the shapes of a grid connection ─────────────────────────────
+
+
+@pytest.mark.parametrize("component", ["Line", "Transformer"])
+def test_a_line_or_transformer_beside_the_import_link_refuses(component):
+    n = build_eh_datacenter()
+    n.add(component, "pcc_branch", bus0="grid", bus1="dc_mv", s_nom=30.0, x=0.1, r=0.01)
+    message = _refusal(n)
+    word = component.lower()
+    assert f"{word} pcc_branch" in message and "bus grid" in message
+
+
+def test_a_line_on_the_site_side_is_not_the_connection():
+    n = build_eh_datacenter()
+    n.add("Line", "site_cable", bus0="dc_mv", bus1="it_bus", s_nom=80.0, x=0.1, r=0.01)
+    assert F._request_for(WEAK, None, n)["pack_overrides"]["import_p_nom_mw"] == 40.0
+
+
+def test_several_import_links_are_summed_then_split_evenly_by_the_pack():
+    from services.adequacy import archetypes as arch
+
+    n = build_eh_datacenter()
+    n.add("Link", "grid_import_b", bus0="grid", bus1="dc_mv", carrier="AC", p_nom=15.0)
+    n.links.loc["grid_import_b", "eh_role"] = "grid_import"
+    body = F._request_for(WEAK, None, n)
+    assert body["pack_overrides"]["import_p_nom_mw"] == 55.0
+    # The engine splits the cap evenly over the links (pinned here, not chosen here).
+    result = arch.apply_archetype_pack_detailed(n, F._pack_for(body))
+    assert n.links.loc[["grid_import", "grid_import_b"], "p_nom"].tolist() == [
+        27.5,
+        27.5,
+    ]
+    assert any("split over 2 Links" in w for w in result.warnings)
+
+
+def test_a_line_only_grid_connection_has_no_import_link():
+    n = build_eh_datacenter()
+    n.remove("Link", "grid_import")
+    n.links.loc["site_transformer", "carrier"] = "site AC"
+    n.add("Line", "grid_line", bus0="grid", bus1="dc_mv", s_nom=40.0, x=0.1, r=0.01)
+    assert _refusal(n) == F.CAP_NO_LINK
+
+
+def test_a_non_finite_capacity_is_unreadable_not_zero():
+    n = build_eh_datacenter()
+    n.links.loc["grid_import", "p_nom"] = float("nan")
+    assert _refusal(n) == F.CAP_UNREADABLE
+
+
+def test_the_network_cap_joins_the_other_overrides():
+    n = build_eh_datacenter()
+    body = {"archetype": "weak_flexible", "pack_overrides": {"target_lole_h": 2.0}}
+    assert F.with_network_import(body, n)["pack_overrides"] == {
+        "target_lole_h": 2.0,
+        "import_p_nom_mw": 40.0,
+    }
+    bare = F.with_network_import(
+        {"archetype": "weak_flexible", "pack_overrides": None}, n
+    )
+    assert bare["pack_overrides"] == {"import_p_nom_mw": 40.0}
+
+
+def test_the_admission_check_reads_only_a_weak_grid_study(tmp_path):
+    from harness import run_eh
+
+    n = build_eh_datacenter()
+    ctx = _ctx(tmp_path, n)
+    n.links.loc[_imports(n), "p_nom"] = 0.0  # no limit: only a weak-grid study cares
+    assert run_eh._connection_limit_change(ctx, {"archetype": "strong_grid"}) is None
+    n.links.loc[_imports(n), "p_nom"] = 40.0
+    args = {"archetype": "weak_flexible", "pack_overrides": {"import_p_nom_mw": 40.0}}
+    assert run_eh._connection_limit_change(ctx, args) is None
+    stale = run_eh._connection_limit_change(
+        ctx, {"archetype": "weak_flexible", "pack_overrides": None}
+    )
+    assert stale is not None and "no limit" in stale and "40 MW" in stale

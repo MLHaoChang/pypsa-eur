@@ -46,6 +46,7 @@ import { GuideButton } from '../components/GuidedTour'
 import CarrierPanel from './properties/CarrierPanel'
 import ShuntPanel from './properties/ShuntPanel'
 import AssetFootprintEditor from '../components/AssetFootprintEditor'
+import { useConnectionLimit } from '../pages/hubDesign/useHubData'
 
 import {
   TOOLTIP_VIEWPORT_MARGIN,
@@ -867,6 +868,8 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] }    = useQuery({ queryKey: nk(currentProject, 'buses'),    queryFn: networkApi.getBuses,    staleTime: 30_000 })
+  // template-e2e 02: the import links as the server selects them for the connection limit (any rule).
+  const importLinkNames = new Set(useConnectionLimit()?.links ?? [])
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kW of input; the annualised
   // capital cost is derived and shown read-only.
@@ -1055,7 +1058,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             // template-e2e 02: one value, two views.
-            ...(link.eh_role === 'grid_import' ? { p_nom: (
+            ...(importLinkNames.has(link.name) ? { p_nom: (
               <p className="col-span-2 -mt-0.5 text-[10px] text-muted" data-testid="link-capacity-connection-limit">
                 Same value as Connection limit under Connection &amp; grid.
               </p>) } : {}),

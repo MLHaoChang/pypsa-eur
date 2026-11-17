@@ -31,6 +31,11 @@ vi.mock('../api/network', async (importOriginal) => {
     },
   }
 })
+vi.mock('../api/flow', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../api/flow')>(),
+  // The server's import links for the connection limit (template-e2e 02).
+  getProjectFlow: async () => ({ run_ready: true, notes: [],
+    sections: [{ section: 'connection', connection_limit: { mw: 40, refusal: null, links: ['grid_import'] } }] }) }))
 vi.mock('../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulation')>()
   return { ...actual, simulationApi: { ...actual.simulationApi, getSolverConfig: vi.fn(async () => ({ mode: 'lopf' })) } }
@@ -65,8 +70,9 @@ describe('a Link edit asked for before the schema loads', () => {
     expect(screen.getAllByDisplayValue('grid_import').some(e => e.tagName === 'INPUT')).toBe(true)
     expect(screen.getByDisplayValue('40')).toBeTruthy()
     expect(screen.queryByTestId('link-edit-loading')).toBeNull()
-    // One value, two views: the import link's Capacity names the Connection limit line.
-    expect(screen.getByTestId('link-capacity-connection-limit').textContent).toMatch(/Connection limit/)
+    // One value, two views: the import link's Capacity names the Connection limit line (once the
+    // server's import links are read).
+    expect((await screen.findByTestId('link-capacity-connection-limit')).textContent).toMatch(/Connection limit/)
   })
 
   it('shows the read-out, not the busy state, when no edit was asked for', () => {
