@@ -886,7 +886,8 @@ def test_a_date_typed_as_an_excel_date_reads_and_a_number_is_refused(tmp_path):
     res = _edit(_write(_network(False), tmp_path), fn)
     assert (
         f"{L.TIME_SERIES} row {L.TS_FIRST_DATA_ROW + 2}",
-        "time step: '5' is not a date",
+        "time step: '5' is not a date as YYYY-MM-DD or YYYY-MM-DD hh:mm[:ss], "
+        "without a time zone",
     ) in _um(res)
     assert list(res.network.snapshots) == [
         pd.Timestamp("2030-01-01 00:00"),
@@ -1100,3 +1101,237 @@ def test_an_upload_with_a_gap_is_still_the_sheet_s_own_series(tmp_path):
         L.UPLOADED
     ]
     assert "d" not in [c.value for c in ws[L.UP_ROW_ASSET]]
+
+
+# ── GK B review of df4497ad ──────────────────────────────────────────────────
+
+
+def _patch_xml(path, member, fn):
+    import zipfile
+
+    with zipfile.ZipFile(path) as zin:
+        items = [(i, zin.read(i)) for i in zin.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info, data in items:
+            zout.writestr(info, fn(data) if info.filename == member else data)
+    return path
+
+
+def test_a_tiny_file_declaring_a_huge_sheet_is_refused_at_once(tmp_path):
+    import re
+    import time
+
+    path = _patch_xml(
+        _write(_network(False), tmp_path),
+        "xl/worksheets/sheet1.xml",
+        lambda d: re.sub(
+            rb'<dimension ref="[^"]+"/>', b'<dimension ref="A1:XFD1048576"/>', d
+        ),
+    )
+    assert path.stat().st_size < 100_000
+    t = time.monotonic()
+    with pytest.raises(L.ImportLimitError) as e:
+        _read(path)
+    assert e.value.limit == "cells"
+    assert time.monotonic() - t < 10
+
+
+def test_a_declared_size_smaller_than_the_sheet_still_reads_every_row(tmp_path):
+    import re
+
+    n = _network(False)
+    ws_index = [
+        s for s in openpyxl.load_workbook(_write(n, tmp_path)).sheetnames
+    ].index("Generators")
+    path = _patch_xml(
+        _write(n, tmp_path, name="small.xlsx"),
+        f"xl/worksheets/sheet{ws_index + 1}.xml",
+        lambda d: re.sub(rb'<dimension ref="[^"]+"/>', b'<dimension ref="A1:A1"/>', d),
+    )
+    res = _read(path)
+    assert list(res.network.generators.index) == list(n.generators.index)
+
+
+def test_a_factor_only_close_to_the_unit_s_is_reported(tmp_path):
+    path = _write(_network(False), tmp_path)
+    _tamper(path, "Generators", L.ROW_SCALE, "capital_cost", 0.001 * (1 + 5e-13))
+    res = _read(path)
+    assert any(
+        item == "Generators › Annualised investment" and "hidden unit factor" in why
+        for item, why in _um(res)
+    )
+    assert res.network.generators.at["wind 1", "capital_cost"] == 0.0
+
+
+def test_a_second_time_series_column_for_one_profile_is_reported(tmp_path):
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        src = _col(ws, "d", row=L.TS_ROW_ASSET)
+        dst = ws.max_column + 1
+        for r in range(1, ws.max_row + 1):
+            ws.cell(r, dst).value = ws.cell(r, src).value
+        ws.cell(L.TS_FIRST_DATA_ROW, dst).value = 999.0
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert any(why == "a second column for the same profile" for _, why in _um(res))
+    assert 999.0 not in res.network.loads_t.p_set["d"].tolist()
+
+
+def test_a_second_weighting_column_is_reported(tmp_path):
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        src = _col(ws, "objective", row=L.TS_ROW_ATTR)
+        dst = ws.max_column + 1
+        for r in range(1, ws.max_row + 1):
+            ws.cell(r, dst).value = ws.cell(r, src).value
+        ws.cell(L.TS_FIRST_DATA_ROW, dst).value = 7.0
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert any(
+        why == "a second column for the same time step data" for _, why in _um(res)
+    )
+    assert res.network.snapshot_weightings["objective"].iloc[0] == 2.0
+
+
+def _horizon_row(ws, key):
+    return next(c.row for c in ws["D"] if c.value == key)
+
+
+def test_an_unknown_setting_row_is_reported(tmp_path):
+    def fn(wb):
+        ws = wb[L.HORIZON]
+        ws.cell(_horizon_row(ws, "discount_rate"), 4).value = "discount_rte"
+
+    res = _edit(
+        _write(_network(False), tmp_path, sidecars={"solver_config.json": SOLVER}), fn
+    )
+    assert any(
+        why == "'discount_rte' is not a setting this workbook uses"
+        for _, why in _um(res)
+    )
+    assert "discount_rate" not in res.sidecars["solver_config.json"]
+
+
+def test_a_second_row_for_a_setting_is_reported_and_the_first_kept(tmp_path):
+    def fn(wb):
+        ws = wb[L.HORIZON]
+        r = _horizon_row(ws, "snapshot_kind")
+        ws.cell(r, 4).value = "discount_rate"
+        ws.cell(r, 2).value = 99.0
+        ws.cell(r, 3).value = "%"
+
+    res = _edit(
+        _write(_network(False), tmp_path, sidecars={"solver_config.json": SOLVER}), fn
+    )
+    assert any(
+        why == "a second row for the setting 'Discount rate'" for _, why in _um(res)
+    )
+    assert (
+        res.sidecars["solver_config.json"]["discount_rate"] == SOLVER["discount_rate"]
+    )
+
+
+def test_a_repeated_period_row_is_reported_and_the_first_kept(tmp_path):
+    def fn(wb):
+        ws = wb[L.HORIZON]
+        last = ws.max_row
+        ws.cell(last + 1, 1).value = ws.cell(last, 1).value
+        ws.cell(last + 1, 2).value = 9.0
+        ws.cell(last + 1, 3).value = 9.0
+
+    n = _network(True)
+    res = _edit(_write(n, tmp_path), fn)
+    assert any("a second row for period 2040" in why for _, why in _um(res))
+    assert res.network.investment_period_weightings.at[2040, "objective"] == 0.5
+
+
+def test_the_same_time_step_twice_is_refused(tmp_path):
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        c = _col(ws, "snapshot", row=L.TS_ROW_ATTR)
+        ws.cell(L.TS_FIRST_DATA_ROW + 1, c).value = ws.cell(
+            L.TS_FIRST_DATA_ROW, c
+        ).value
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert (
+        L.TIME_SERIES,
+        "the same time step appears twice; the time series were not read",
+    ) in _um(res)
+    assert res.network.loads_t.p_set.empty
+
+
+def test_upload_provenance_past_the_reader_s_cap_is_dropped_with_a_warning(tmp_path):
+    """A crafted file can hold a cell longer than Excel or openpyxl ever writes."""
+    import zipfile
+
+    n = _network(False)
+    path = _write(n, tmp_path, sidecars={"user_ts.json": _user_ts(n)})
+    head = b'<t>{"loads": {"p_set": {"d": {"provenance"'
+    with zipfile.ZipFile(path) as zf:
+        member = next(m for m in zf.namelist() if head in zf.read(m))
+
+    def fn(d):
+        i = d.index(head) + 3
+        j = d.index(b"</t>", i)
+        return d[:i] + b'{"x": "' + b"a" * 1_100_000 + b'"}' + d[j:]
+
+    _patch_xml(path, member, fn)
+    res = _read(path)
+    assert "$meta" not in res.sidecars["user_ts.json"]
+    assert any("provenance" in w for w in res.report.warnings)
+
+
+@pytest.mark.parametrize(
+    "text", ["now", "today", "2030-01-01T00:00:00+02:00", "1/2/2030"]
+)
+def test_a_time_step_that_is_not_a_plain_iso_date_is_refused(tmp_path, text):
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        ws.cell(
+            L.TS_FIRST_DATA_ROW, _col(ws, "snapshot", row=L.TS_ROW_ATTR)
+        ).value = text
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert any(f"'{text}' is not a date as YYYY-MM-DD" in why for _, why in _um(res))
+
+
+def test_a_number_with_underscores_is_refused(tmp_path):
+    path = _write(_network(False), tmp_path)
+    _tamper(path, "Generators", L.FIRST_DATA_ROW, "p_nom", "1_000")
+    assert ("'1_000' is not a number") in " ".join(why for _, why in _um(_read(path)))
+
+
+def test_a_negative_weighting_is_refused_and_1_used(tmp_path):
+    def fn(wb):
+        ws = wb[L.TIME_SERIES]
+        ws.cell(
+            L.TS_FIRST_DATA_ROW, _col(ws, "objective", row=L.TS_ROW_ATTR)
+        ).value = -2.0
+
+    res = _edit(_write(_network(False), tmp_path), fn)
+    assert any(why.startswith("a weighting cannot be negative") for _, why in _um(res))
+    assert res.network.snapshot_weightings["objective"].iloc[0] == 1.0
+
+
+def test_a_repeated_period_with_a_negative_weighting_is_reported(tmp_path):
+    def fn(wb):
+        ws = wb[L.HORIZON]
+        ws.cell(ws.max_row, 3).value = -10.0
+
+    res = _edit(_write(_network(True), tmp_path), fn)
+    assert any(
+        why == "investment period weighting: a weighting cannot be negative"
+        for _, why in _um(res)
+    )
+
+
+@pytest.mark.parametrize("text", ["#N/A", "#REF!", "#DIV/0!"])
+def test_an_error_code_text_is_written_as_text(tmp_path, text):
+    n = _network(False)
+    n.carriers.loc["wind", "nice_name"] = text
+    path = _write(n, tmp_path)
+    ws = openpyxl.load_workbook(path)["Carriers"]
+    cell = ws.cell(L.FIRST_DATA_ROW + 1, _col(ws, "nice_name"))
+    assert (cell.value, cell.data_type) == (text, "s")
+    assert _read(path).network.carriers.at["wind", "nice_name"] == text

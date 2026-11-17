@@ -25,6 +25,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from openpyxl.cell.cell import ERROR_CODES
+
 from gridspine.ingest.import_result import ImportFormatError as _ContractFormatError
 
 FORMAT_VERSION = 1
@@ -193,12 +195,15 @@ def scale_for_unit(unit: str) -> float:
 
 
 def scale_ok(unit: str, scale: Any) -> bool:
-    """A hidden factor is trusted only when it is the unit table's factor for the shown unit."""
+    """
+    A hidden factor is trusted only when it is exactly the unit table's factor for the
+    shown unit; the reader then uses the table's factor, never the file's (E1).
+    """
     if isinstance(scale, bool) or not isinstance(scale, int | float):
         return False
     if not math.isfinite(scale) or scale <= 0:
         return False
-    return math.isclose(float(scale), scale_for_unit(unit), rel_tol=1e-12)
+    return float(scale) == scale_for_unit(unit)
 
 
 def rescale(value: float, factor: float) -> float:
@@ -234,7 +239,7 @@ def put(ws, row: int, col: int, value: Any):
     if isinstance(value, str):
         value = safe_text(value)
         cell.value = value
-        if value.startswith(FORMULA_LEADS):
+        if value.startswith(FORMULA_LEADS) or value in ERROR_CODES:
             cell.data_type = "s"
     else:
         cell.value = value
