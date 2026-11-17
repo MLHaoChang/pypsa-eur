@@ -72,3 +72,18 @@ with it. A cable between the same buses would sit in parallel and is refused. Co
 - S7: the subsync campus test asserts f0·√(Xc/X_total) with literal numbers.
 - The collector-tree refusal goes in GC-01's `gridspine/ingest/aggregate.py` `_plan` after
   `claude/gc01-aggregate` merges (agreed with GC-01); branch after #1578.
+
+**2026-11-17. S7 amendment, GO (A) from GK A2.** From the PCC a campus series cap only adds impedance
+to an open branch, so GC-08's PCC-only scan never sees it. The campus step keeps the PCC scan and adds
+one scan per series cap:
+
+- S7a: the scan runs from the cap's far-side bus, the end with the greater graph distance from the
+  PCC over in-service branches. A tie (a ring) is refused, naming the cap, with a test.
+- S7b: on the test campus, f_er = f0·√(Xc/X_total) with hand-computed literals, within the scan step.
+  A two-cap case is decided by the worst row.
+- S7c: rows gain a `bus` column, and PCC rows carry the PCC name. #1578's frontend parser test runs
+  against the new CSV in this PR. A parser change, if needed, is a UI follow-up for GK B2 / UX.
+- S7d: a scanned cap with no crossing in 5–45 Hz reads "clear in the 5–45 Hz scan band" and names the
+  caps, with a note row. With no cap the step still reads "not evaluated". Tests cover f_er below
+  5 Hz (clear), in band (flag/check) and no cap (not evaluated).
+- S7e: the PR body says how the per-cap rows appear in the report, chat and app.
