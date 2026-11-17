@@ -364,6 +364,9 @@ def test_the_results_answer_is_the_networks_value_then_says_out_of_date(
     assert _said(frames).startswith("From the current solve.")
 
     # An input edit, approved on its own card: the next answers carry no numbers and say so.
+    # The card, not the network route: a route edit reads "Not solved yet" today
+    # (.scratch/site-scene-generation/issues/10-put-edit-resets-solve-to-idle.md),
+    # which the test below pins without asserting the wrong reason.
     edit = {"component_class": "Load", "name": "office", "attrs": {"p_set": 9.0}}
     cards = []
     calls, results, frames, _ = run_journey(
@@ -380,12 +383,42 @@ def test_the_results_answer_is_the_networks_value_then_says_out_of_date(
     for out in results[1:4]:
         # P1: the gate's reason on every leaf; no number anywhere in the answer.
         leaves = list(_leaves({"features": out["features"], "groups": out["groups"]}))
-        assert leaves and all(x["available"] is False for x in leaves)
+        assert leaves and all(
+            x["available"] is False and x["value"] is None for x in leaves
+        )
         reasons = {x["reason"] for x in leaves} - {"group_has_no_boundary"}
         assert reasons == {"results_not_current"}
         assert not list(_floats({"features": out["features"], "groups": out["groups"]}))
         assert out["run"]["reason"] == "results_not_current" and out["stale"] is True
     assert _said(frames).startswith("Out of date")
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_an_edit_through_the_network_route_leaves_no_number(client, scene, mode):
+    """
+    The same input edit through `PUT /api/network/loads/{name}`: what is right is
+    asserted here. The reason the gate gives is not (it reads the solve as never
+    run): manifest row `LC-D01.site_scene_results_after_route_edit`, ticket
+    .scratch/site-scene-generation/issues/10-put-edit-resets-solve-to-idle.md.
+    """
+    _bind(client, ASSOCIATIONS, [PLANT])
+    _solve(client)
+    bus = str(scene.network.loads.at["office", "bus"])
+    edit = client.put(
+        "/api/network/loads/office", json={"name": "office", "bus": bus, "p_set": 9.0}
+    )
+    assert edit.status_code == 200, edit.text
+    calls, results, _, _ = run_journey(
+        *WIRES[0], _explain()[1:], EXPLAIN, mode=mode, answer="No numbers."
+    )
+    assert calls == [*["site_scene_results"] * 3, None]
+    for out in results[:3]:
+        leaves = list(_leaves({"features": out["features"], "groups": out["groups"]}))
+        assert leaves and all(
+            x["available"] is False and x["value"] is None for x in leaves
+        )
+        assert not list(_floats({"features": out["features"], "groups": out["groups"]}))
+        assert out["run"]["current"] is False and out["run"]["digest"] is None
 
 
 # ── session loss, reload and a project switch (V66) ─────────────────────────
