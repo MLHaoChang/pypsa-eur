@@ -281,7 +281,8 @@ def test_an_architecture_service_alone_never_passes():
     assert service_verdict([])["verdict"] == "warn"
     assert service_verdict(["grid_forming"])["verdict"] == "pass"
     got = service_verdict([], ["fast_frequency_response"], architecture="MV UPS")
-    assert got["verdict"] == "warn" and "assumed, MV UPS" in got["project_value"]
+    assert got["verdict"] == "warn" and got["project_value"] == (
+        "fast frequency response (assumed, MV UPS: not counted)")
     got = service_verdict(None, [], conditional=["grid_forming"])
     assert got["verdict"] == "warn" and got["conditional"] == ["grid_forming"]
     assert (

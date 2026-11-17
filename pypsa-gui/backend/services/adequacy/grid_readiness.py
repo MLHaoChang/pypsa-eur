@@ -1543,7 +1543,8 @@ def service_verdict(offered, arch_counted=(), *, wanted=None, conditional=(),
         parts.append(" · ".join(f"{r['label']} ({', '.join(r['units'])})" for r in sources)
                      if sources else _services_text(own))
     if arch:
-        parts.append(f"{_services_text(arch)} (assumed, {architecture or 'architecture'})")
+        # never counted toward a Pass (GK A C6), said in the value, not only the note (UX 2)
+        parts.append(f"{_services_text(arch)} (assumed, {architecture or 'architecture'}: not counted)")
     if cond_shown:
         parts.append(f"{_services_text(cond_shown)} (conditional on DC-bus storage)")
     value = "; ".join(parts) if parts else "none"
