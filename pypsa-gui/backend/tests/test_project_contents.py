@@ -30,13 +30,16 @@ def _declared_names() -> dict[str, list[str]]:
         for path in sorted((BACKEND / root).rglob("*.py")):
             tree = ast.parse(path.read_text())
             for node in tree.body:
-                if not (
-                    isinstance(node, ast.Assign)
-                    and len(node.targets) == 1
-                    and isinstance(node.targets[0], ast.Name)
-                ):
+                # `X_FILE = "..."` and the annotated `X_FILE: Final = "..."`.
+                if isinstance(node, ast.AnnAssign) and node.value is not None:
+                    target = node.target
+                elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+                    target = node.targets[0]
+                else:
                     continue
-                var = node.targets[0].id
+                if not isinstance(target, ast.Name):
+                    continue
+                var = target.id
                 if not (var == "SIDECAR_NAME" or var.endswith("_FILE")):
                     continue
                 if isinstance(node.value, ast.Constant) and isinstance(
@@ -148,6 +151,27 @@ def test_members_that_fold_to_one_file_are_refused(a, b):
     with pytest.raises(PC.BundleRefused) as exc:
         PC.screen_members(_zip({a: b"1", b: b"2"}))
     assert exc.value.kind == "bundle_name_clash"
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [("uploads/a", "uploads/a/b"), ("uploads/a/b/c", "uploads/A"), ("uploads/a", "uploads/a./x")],
+)
+def test_a_member_that_is_also_a_folder_is_refused(a, b):
+    with pytest.raises(PC.BundleRefused) as exc:
+        PC.screen_members(_zip({a: b"1", b: b"2"}))
+    assert exc.value.kind == "bundle_unsafe_path"
+
+
+def test_nfc_and_nfd_spellings_are_one_file():
+    with pytest.raises(PC.BundleRefused) as exc:
+        PC.screen_members(_zip({"uploads/caf\u00e9.csv": b"1", "uploads/cafe\u0301.csv": b"2"}))
+    assert exc.value.kind == "bundle_name_clash"
+
+
+def test_a_folder_beside_a_file_with_a_longer_name_is_fine():
+    allowed, _ = PC.screen_members(_zip({"uploads/a": b"1", "uploads/ab/c": b"2"}))
+    assert sorted(allowed) == ["uploads/a", "uploads/ab/c"]
 
 
 def test_a_bundle_over_the_unpacked_cap_is_refused():
@@ -282,6 +306,8 @@ def test_a_planning_bundle_keeps_its_kind_and_gridspine_but_not_its_source_paths
         "gridspine.from_dispatch",
         "gridspine.from_network",
     }
+    assert "from_dispatch" in r.json()["stripped_note"]
+    assert "Choose the study's sources again" in r.json()["stripped_note"]
     dst = project_storage_dir("pc_plan_dst")
     cfg = json.loads((dst / "gridspine" / "config.json").read_text())
     assert (
@@ -391,6 +417,45 @@ def test_a_late_failure_removes_row_and_folder_and_a_retry_succeeds(
     r = _post(client, data, dst)
     assert r.status_code in (200, 201), r.text
     assert (project_storage_dir(dst) / "network.nc").exists()
+
+
+@pytest.mark.parametrize("step", ["_restore_results_state", "_library_pin_issues"])
+def test_a_failure_after_the_swap_leaves_no_context_and_restores_the_pointer(
+    client, api_project, project_storage_dir, project_row, projects_root, _auth_db, monkeypatch, step
+):
+    """GK B 64, ask 2: no ghost context bound to the deleted project, the
+    session's pointer back where it was, and an eviction flush writes nothing."""
+    from db.models import Session as SessionRow
+    from sqlalchemy import select
+    from services.pypsa_service import PyPSAService
+
+    d = project_storage_dir(api_project("pc-ghost"))
+    data = _bundle_from(d)
+    dst = f"pc_ghost{step.lower()}"
+    _engine, session_local = _auth_db
+
+    def pointers():
+        with session_local() as db:
+            return sorted(str(x) for x in db.scalars(select(SessionRow.active_project_id)))
+
+    before = pointers()
+
+    def boom(*a, **k):
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(projects, step, boom)
+    with pytest.raises(RuntimeError):
+        _post(client, data, dst)
+    assert _left_behind(project_row, projects_root, dst) == []
+    assert pointers() == before
+    resident = dict(PyPSAService._contexts)
+    assert [k for k, c in resident.items() if c.loaded_project == dst] == []
+    for key, ctx in resident.items():
+        PyPSAService._save_evicted_ctx(key, ctx)
+    active = PyPSAService._active
+    if active is not None and active.registry_key:
+        PyPSAService._save_evicted_ctx(active.registry_key, active)
+    assert _left_behind(project_row, projects_root, dst) == []
 
 
 def test_an_import_that_loses_the_name_race_gets_a_clean_409(
@@ -648,3 +713,64 @@ def test_replace_dir_keeping_unlinks_a_linked_folder_and_copies_deeper_runs(tmp_
     assert not (live / "linked").exists()
     assert (live / "sub" / "run" / "x").exists(), "only the top-level run/ is kept out"
     assert not (live / "run").exists()
+
+
+# ── GK B 64, ask 3: the cleared gridspine fields follow StudyConfig ─────────
+
+
+def _study_config():
+    from services import gridspine_service as gs
+
+    if not gs.GRIDSPINE_AVAILABLE:
+        pytest.skip("gridspine is not in this build")
+    from gridspine.drivers.study import StudyConfig
+
+    return StudyConfig
+
+
+def test_the_cleared_gridspine_fields_are_every_path_field_of_study_config():
+    import dataclasses
+    from pathlib import Path
+
+    StudyConfig = _study_config()
+    path_fields = {f.name for f in dataclasses.fields(StudyConfig) if f.type in (Path, "Path")}
+    assert projects._gridspine_path_fields() == (
+        "from_dispatch",
+        "from_network",
+        "from_external",
+        "from_external_loads",
+        "from_project",
+    )
+    assert set(projects._gridspine_path_fields()) == (
+        path_fields - projects._GRIDSPINE_REDERIVED
+    ) | {"from_project"}
+    assert projects._GRIDSPINE_REDERIVED <= path_fields
+
+
+def test_every_path_field_is_cleared_and_the_rest_kept(tmp_path):
+    _study_config()
+    fields = projects._gridspine_path_fields()
+    (tmp_path / "gridspine").mkdir()
+    cfg = tmp_path / "gridspine" / "config.json"
+    cfg.write_text(json.dumps({"hours": 3, **{f: f"/x/{f}" for f in fields}}))
+    assert projects._clear_gridspine_sources(tmp_path) == [f"gridspine.{f}" for f in fields]
+    data = json.loads(cfg.read_text())
+    assert data == {"hours": 3, **dict.fromkeys(fields)}
+
+
+@pytest.mark.parametrize(
+    "fields, says",
+    [
+        (["gridspine.from_external"], ["(from_external)", "Choose the study's sources again"]),
+        (["extra_functionality_code"], ["custom solver code"]),
+        (["gridspine.from_network", "extra_functionality_code"], ["(from_network)", "custom solver code"]),
+    ],
+)
+def test_the_stripped_note_names_what_was_cleared(fields, says):
+    note = projects._stripped_note(fields)
+    for s in says:
+        assert s in note
+    if "extra_functionality_code" not in fields:
+        assert "solver code" not in note
+    if not any(f.startswith("gridspine.") for f in fields):
+        assert "study" not in note

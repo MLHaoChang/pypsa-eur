@@ -1328,11 +1328,29 @@ def _bundle_project_kind(meta: dict) -> str | None:
     return raw
 
 
-#: The gridspine study fields that name a server path. A bundle's values name
-#: folders on the machine it came from (or, crafted, any folder here), so an
-#: import clears them; the user picks the source again.
-_GRIDSPINE_PATH_FIELDS = ("from_network", "from_dispatch", "from_external",
-                          "from_external_loads", "from_project")
+#: `StudyConfig` path fields every read derives from the project folder
+#: (`gridspine_service.config_for_dir`), so a bundle's value is never used.
+_GRIDSPINE_REDERIVED = frozenset({"outdir", "templates_overlay"})
+#: Not a `StudyConfig` field: the GUI's name of the project a dispatch source
+#: came from, which names a project on the exporting machine.
+_GRIDSPINE_GUI_SOURCES = ("from_project",)
+
+
+def _gridspine_path_fields() -> tuple[str, ...]:
+    """The gridspine study fields that name a server path: every `StudyConfig`
+    field typed `Path` (less the re-derived ones), plus `from_project`. A
+    bundle's values name folders on the machine it came from (or, crafted, any
+    folder here), so an import clears them; the user picks the source again.
+    Derived, so a new `Path` field is cleared without a change here (GK B 64)."""
+    import dataclasses
+    from pathlib import Path
+
+    from gridspine.drivers.study import StudyConfig
+
+    return tuple(
+        f.name for f in dataclasses.fields(StudyConfig)
+        if f.type in (Path, "Path") and f.name not in _GRIDSPINE_REDERIVED
+    ) + _GRIDSPINE_GUI_SOURCES
 
 
 def _clear_gridspine_sources(staging: pathlib.Path) -> list[str]:
@@ -1346,19 +1364,50 @@ def _clear_gridspine_sources(staging: pathlib.Path) -> list[str]:
         return []
     if not isinstance(data, dict):
         return []
-    cleared = [f for f in _GRIDSPINE_PATH_FIELDS if data.get(f) is not None]
+    cleared = [f for f in _gridspine_path_fields() if data.get(f) is not None]
     if cleared:
         data.update(dict.fromkeys(cleared))
         atomic_write_text(cfg, json.dumps(data, indent=2))
     return [f"gridspine.{f}" for f in cleared]
 
 
-def _discard_import(db: DBSession, project, dest: pathlib.Path | None) -> None:
-    """Undo a bundle import that failed after its row was created (GK B I3)."""
+def _stripped_note(fields: list[str]) -> str:
+    """The import result's plain words for what it cleared (GK B 64, ask 3)."""
+    paths = [f.removeprefix("gridspine.") for f in fields if f.startswith("gridspine.")]
+    parts = []
+    if paths:
+        parts.append(
+            "Cleared the planning study's source settings ("
+            + ", ".join(paths)
+            + "): they named folders on the machine the bundle came from. "
+            "Choose the study's sources again before running it."
+        )
+    if "extra_functionality_code" in fields:
+        parts.append(
+            "Removed the custom solver code (extra_functionality_code): a bundle's "
+            "code is never run. Set it again in the solver settings if you wrote it."
+        )
+    return " ".join(parts)
+
+
+def _discard_import(db: DBSession, project, dest: pathlib.Path | None, *,
+                    session: SessionRow | None = None, prev_pointer=None) -> None:
+    """Undo a bundle import that failed after its row was created (GK B I3).
+
+    A failure after the swap also leaves the project's context resident and
+    the session pointing at it; both go, or an eviction flush would write the
+    deleted project's folder back (GK B 64, ask 2)."""
     from services import project_registry
+    from services.auth_service import set_session_active_project
 
     try:
+        PyPSAService.drop(project_registry.registry_key(project))
+    except Exception:  # noqa: BLE001 — the original failure is the one to raise
+        logger.exception("import_bundle: could not drop the context of %s", project.name)
+    try:
         db.rollback()
+        if session is not None and session.active_project_id == project.id:
+            set_session_active_project(db, session, prev_pointer)
         project_registry.delete_project_row(db, project)
     except Exception:  # noqa: BLE001 — the original failure is the one to raise
         logger.exception("import_bundle: could not remove the row of %s", project.name)
@@ -1550,6 +1599,7 @@ async def import_bundle(
         # deliberately NOT restored: a bundle is a single project, and its
         # `parent_project` names a project that may not exist here. Imports
         # land as roots. A second import of the same name gets the 409.
+        prev_pointer = session.active_project_id if session is not None else None
         _imported_project = project_registry.create_root(
             db, user, target_name, **_scenario_fields_from_meta(bundle_meta),
         )
@@ -1566,7 +1616,8 @@ async def import_bundle(
                 candidate=candidate, rederived=rederived, rate_source=rate_source,
                 stripped_fields=stripped_fields, ignored=ignored)
         except BaseException:
-            _discard_import(db, _imported_project, dest)
+            _discard_import(db, _imported_project, dest,
+                            session=session, prev_pointer=prev_pointer)
             raise
     finally:
         _force_rmtree(staging)
@@ -1728,7 +1779,8 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
     change_log_service.log(
         "import", "Project", target_name,
         f"Imported project bundle '{filename}' as '{target_name}' "
-        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)" + _rederived_note(rederived),
+        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)" + _rederived_note(rederived)
+        + (f". {_stripped_note(stripped_fields)}" if stripped_fields else ""),
     )
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(
@@ -1740,7 +1792,8 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
         # Present only when the import dropped something the caller was not
         # authorized to set, so a stripped field is never a silent difference
         # between the uploaded bundle and the imported project.
-        **({"stripped": stripped_fields} if stripped_fields else {}),
+        **({"stripped": stripped_fields,
+            "stripped_note": _stripped_note(stripped_fields)} if stripped_fields else {}),
         # Archive members no table entry names: reported, never written (GK B I2).
         **({"ignored": ignored} if ignored else {}),
         # Likewise each reliability-goal value the bundle carried that PUT

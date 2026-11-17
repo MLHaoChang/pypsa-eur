@@ -771,7 +771,12 @@ ALLOWED = {
 #: Per-function exemptions, so a new direct read elsewhere in the file is
 #: still seen. `sidecars()` names the marker in its tuple; `_source` reads
 #: that entry through the helper (pinned by the capture tests above).
-EXEMPT_FUNCTIONS = {"services/solve_capture.py": {"sidecars"}}
+#: `_marker_entry()` names it in the project contents table, which says which
+#: copy paths carry it and reads nothing (project-io 01).
+EXEMPT_FUNCTIONS = {
+    "services/solve_capture.py": {"sidecars"},
+    "services/project_contents.py": {"_marker_entry"},
+}
 ALLOWED_DIRS = ("project_templates/", "tests/", "smoke/")
 #: The names the marker file goes by.
 NAMES = {"MARKER_FILE", "TEMPLATE_FILE", "META_FILE"}
