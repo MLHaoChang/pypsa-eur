@@ -359,12 +359,12 @@ function JobRow({ job, onAbort, onRequeue, onDismiss }: {
                 {REDACTED_PROJECT_LABEL}
               </span>
             )}
-            {(job.kind === 'gridspine' || job.kind === 'campus' || job.kind === 'profile_gen') && (
+            {(job.kind === 'gridspine' || job.kind === 'campus' || job.kind === 'profile_gen' || job.kind === 'blender_scene') && (
               // A study/generation has no objective and no network to preview; the
               // label is what tells the reader why this row's completed line is empty.
               <span className="text-[9.5px] font-semibold uppercase tracking-wide px-1.5 py-px rounded border border-border text-muted"
-                    title={job.kind === 'campus' ? 'Grid study' : job.kind === 'profile_gen' ? 'Renewable profile generation' : 'Planning → dynamics study'}>
-                {job.kind === 'campus' ? 'campus' : job.kind === 'profile_gen' ? 'profile' : 'study'}
+                    title={job.kind === 'campus' ? 'Grid study' : job.kind === 'profile_gen' ? 'Renewable profile generation' : job.kind === 'blender_scene' ? 'Blender scene export' : 'Planning → dynamics study'}>
+                {job.kind === 'campus' ? 'campus' : job.kind === 'profile_gen' ? 'profile' : job.kind === 'blender_scene' ? 'scene' : 'study'}
               </span>
             )}
             {job.status === 'queued' && job.position != null && (
@@ -372,7 +372,7 @@ function JobRow({ job, onAbort, onRequeue, onDismiss }: {
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted">
-            {job.status === 'completed' && job.kind !== 'gridspine' && job.kind !== 'campus' && job.kind !== 'profile_gen' && <span>{fmtObjective(job.objective)}{job.solve_time != null ? ` · ${job.solve_time}s` : ''}</span>}
+            {job.status === 'completed' && job.kind !== 'gridspine' && job.kind !== 'campus' && job.kind !== 'profile_gen' && job.kind !== 'blender_scene' && <span>{fmtObjective(job.objective)}{job.solve_time != null ? ` · ${job.solve_time}s` : ''}</span>}
             {job.status === 'completed' && job.kind === 'gridspine' && <span>Study finished — open Planning → dynamics for the results</span>}
             {job.status === 'completed' && job.kind === 'campus' && <span>Grid study finished — open Grid study results</span>}
             {job.status === 'completed' && job.kind === 'profile_gen' && <span>{uiMode === 'expert' ? 'Profile generated — open Profile Studio to apply it' : 'Profile generated — the assistant can apply it for you'}</span>}

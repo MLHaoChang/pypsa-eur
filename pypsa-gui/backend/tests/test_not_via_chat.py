@@ -64,6 +64,7 @@ def test_the_issue_rows_are_declared():
         'solve_queue_instance_controls': ('out of chat', 'solveQueue'), 'map_layout_and_sites': ('manual', 'map'),
         'site_scene': ('unbuilt', 'map'),
         'site_scene_export': ('manual', 'map'),
+        'site_scene_blender_worker': ('unbuilt', 'map'),
         'accept_assumed_defaults': ('unbuilt', None),
         'intent_comparison': ('unbuilt', None),
         'business_case_table_options': ('unbuilt', None),  # 09: the line table's options (issue 16)

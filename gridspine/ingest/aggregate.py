@@ -1,5 +1,5 @@
 """
-The aggregated plant model (GC-01, TRGC 01/02).
+The aggregated plant model and the model-set freeze (GC-01, TRGC 01/02).
 
 TRGC 01/02 ask for a detailed and an aggregated plant model. The detailed
 model is the campus description itself (``ingest/campus.py``). This module
@@ -54,8 +54,8 @@ fed from their LV side; unit transformers with different rated voltages,
 vector groups or earthing, or units at two voltage levels; a campus with no
 tree holding a converter unit; an equivalent's name already taken.
 
-``freeze`` (the model-set freeze, ``schema/model_set.py``) joins this
-module next: it needs ``build_campus``, and ``schema/`` imports only
+``freeze`` builds both variants and returns the frozen ``ModelSet``
+(``schema/model_set.py``); it lives here because ``schema/`` imports only
 ``schema/``.
 """
 
@@ -64,8 +64,12 @@ import dataclasses
 import math
 from collections import deque
 
+import pandas as pd
+
 from gridspine.ingest.campus import build_campus
+from gridspine.schema.campus import validate_hourly
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.model_set import new_model_set
 
 #: The unit kinds an equivalent is built for: the converter-interfaced ones.
 CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell")
@@ -577,6 +581,66 @@ def _drop_dangling(c, buses, branches, assumptions):
         )
 
 
+#: The hourly table's value columns and its optional keys (``schema/campus.py``).
+_HOUR_VALUES = ("unit_id", "p_mw", "status")
+_HOUR_KEYS = ("period", "hour")
+
+
+def aggregate_hour(rows: pd.DataFrame, unit_map: dict) -> pd.DataFrame:
+    """
+    The detailed hourly rows (``unit_id``, ``p_mw``, ``status``, and
+    optionally the keys ``period`` and ``hour``: ``schema/campus.py``) as
+    rows of the aggregated campus: ``p_mw`` summed over each equivalent's
+    members, ``status`` 1 when any member is on. Refused, never dropped: a
+    row whose unit no equivalent stands for, any other column, a missing
+    or empty key or value, and whatever ``validate_hourly`` refuses (a
+    non-finite ``p_mw``, a ``status`` other than 0 or 1, power on an off
+    unit, a duplicate (unit_id, period, hour)).
+    """
+    missing = [col for col in _HOUR_VALUES if col not in rows.columns]
+    extra = sorted(set(rows.columns) - set(_HOUR_VALUES) - set(_HOUR_KEYS))
+    if missing or extra:
+        raise AggregationError(
+            f"aggregation: the hourly rows need {list(_HOUR_VALUES)} and may carry "
+            f"{list(_HOUR_KEYS)}; missing {missing}, unknown {extra}"
+        )
+    keys = [col for col in _HOUR_KEYS if col in rows.columns]
+    blank = [
+        col
+        for col in (*_HOUR_VALUES, *keys)
+        if (rows[col].isna() | rows[col].astype(str).str.strip().eq("")).any()
+    ]
+    if blank:
+        raise AggregationError(
+            f"aggregation: the hourly rows have missing values in {blank}"
+        )
+    # The hourly table's own checks (finite p_mw, integral keys, status 0/1,
+    # no power when off, no duplicate (unit_id, period, hour)); a key the
+    # rows leave out is one value for every row.
+    try:
+        checked = validate_hourly(
+            rows.assign(**{k: 0 for k in _HOUR_KEYS if k not in keys})
+        )
+    except ContractError as err:
+        raise AggregationError(f"aggregation: {err}") from err
+    member_of = {m: eq for eq, ms in unit_map.items() for m in ms}
+    stray = sorted(set(checked["unit_id"]) - set(member_of))
+    if stray:
+        raise AggregationError(
+            f"aggregation: the hourly rows have unit(s) {stray} the aggregated campus "
+            "does not map"
+        )
+    df = checked.assign(unit_id=checked["unit_id"].map(member_of))
+    out = df.groupby(keys + ["unit_id"], sort=True, as_index=False).agg(
+        p_mw=("p_mw", "sum"), status=("status", "max")
+    )
+    return (
+        out[["unit_id", *keys, "p_mw", "status"]]
+        if keys
+        else out[["unit_id", "p_mw", "status"]]
+    )
+
+
 def aggregate_campus(campus_spec):
     """
     ``(Campus, Aggregation)``: the aggregated campus built, with the
@@ -586,3 +650,25 @@ def aggregate_campus(campus_spec):
     campus = build_campus(agg.spec)
     campus.assumptions.extend(agg.assumptions)
     return campus, agg
+
+
+def freeze(campus_spec, params, *, aggregated=True, now=None):
+    """
+    Freeze ``campus_spec`` and ``params`` into a ``ModelSet``. Both
+    variants are built to check they load; an error in either is raised,
+    never turned into a missing variant. ``aggregated=False`` freezes the
+    detailed model only (the aggregated slot is then None).
+    """
+    agg = None
+    if aggregated:
+        _, agg = aggregate_campus(campus_spec)  # checks the input first
+    else:
+        build_campus(campus_spec)
+    return new_model_set(
+        campus_spec,
+        params,
+        aggregated=None if agg is None else agg.spec,
+        unit_map=None if agg is None else agg.unit_map,
+        assumptions=None if agg is None else agg.assumptions,
+        now=now,
+    )

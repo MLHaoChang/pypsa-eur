@@ -1,0 +1,7 @@
+{
+ "$comment": "LC-06 family manifest rows (smoke/family_manifest.py). Rows here and in family_manifest.d/ join TOOLS_BY_FAMILY and VARIANTS there; see the folder's README (RETRO-FRAG-1).",
+ "tool_families": {},
+ "variants": [],
+ "settles": [],
+ "variant_additions": []
+}
