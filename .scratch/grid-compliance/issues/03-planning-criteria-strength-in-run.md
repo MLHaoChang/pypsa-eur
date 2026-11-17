@@ -45,3 +45,25 @@ calls them. TRGC 15 is run against the TSO's own contingency list, which cannot 
 - Service and scorecard tests show the new rows; a missing profile band reads "unknown".
 
 Release note: one new file under `doc/release-notes.d/` (see its README).
+
+## Comments
+
+**2026-11-17, GK A2 plan GO** (three PRs: PR1 contingency-list import, PR2 campus steps, PR3 service and scorecard). Conditions:
+
+- (a) "`.con` round-trip" now means the CSV round-trip through `write_contingencies`, plus the `.con` parser tested on fixture text in real PSS/E syntax (POM contingency description data). The true `.con` round-trip is a follow-up once GC-04 lands a `.con` writer to the shared grammar in `ingest/contingency_list.py`. Accept `CKT` and `CIRCUIT`, and `REMOVE MACHINE id FROM BUS n`. A valid PSS/E command outside the subset is listed as `unsupported` with its line number, never as malformed, and its contingency is handled like a partial one.
+- (b) Fail closed. A partly matched contingency is excluded and listed. The planning row never reads pass while any imported contingency went unscreened (partial, unmatched, unsupported); it shows the count. A test pins this.
+- (c) A new optional profile key `scr_min` ({value, clause, source}) is added to `PROFILE_KEYS`. No value ships unless the public code states one, cited by clause. A missing key reads "unknown", never pass.
+- PR1:
+  - C1: a bus name matching more than one bus is listed, never matched to the first. A test checks that the importer and `write_raw` number buses identically.
+  - C2: each refusal and each unmatched reason has its own test with its line number.
+  - C3: the unmatched-element test also checks that the matched rest of that contingency is not screened and that other contingencies are.
+- PR2:
+  - P1: run at the max-import and the max-export hour per period.
+  - P2: a non-converged case is a violation, and an empty set or zero screened cases never reads pass.
+  - P3: strength values are hand-calculated with literal expected values. SCR = S_k,min / P_rated, and ESCR subtracts the PoC's shunt and filter Mvar (tested with a capacitor). WSCR = Σ(S_k,i·P_i)/(ΣP_i)², checked on two PoCs with unequal P. Cite the c factor (IEC 60909 c_min).
+  - P4: only the two new step functions are added to `campus_study.py`.
+- PR3:
+  - S1: a failed step writes ERROR and its rows read error or unknown, never pass.
+  - S2: the RMS/EMT note appears exactly once per strength row, and the existing `_scr_rows` stay byte-identical.
+  - S3: only this package's wrappers, sections and two `RUN_STAGES` entries go into the service. A merge with GC-08 keeps both sets of entries.
+- Every PR: a release-note fragment, a GC-TEXT-1 grep of the diff, and the targeted mutants with their killing tests listed in the PR body.
