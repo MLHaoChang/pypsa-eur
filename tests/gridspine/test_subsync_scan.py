@@ -274,3 +274,12 @@ def test_long_line_note_judged_at_f0():
     study = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)])
     assert len(study.notes) == 1 and "quarter wavelength at 50 Hz" in study.notes[0]
     assert all(study.notes[0] in n for n in study.resonance.loc[study.resonance["kind"] == ss.SERIES, "note"])
+
+
+def test_a_grid_on_another_island_is_not_the_poc_grid():
+    net, b1, b2 = _radial()
+    net.ext_grid["in_service"] = False
+    i1 = pp.create_bus(net, vn_kv=110.0)
+    pp.create_ext_grid(net, i1, s_sc_max_mva=500.0, s_sc_min_mva=500.0, rx_max=0.1, rx_min=0.1)
+    with pytest.raises(ContractError, match="no path to the grid"):
+        ss.z_poc(net, b2, 1210.0, 0.0, FS, [(b1, b2, 25.0)])
