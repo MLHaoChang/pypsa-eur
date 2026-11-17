@@ -355,6 +355,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("DELETE", "/api/mcp"): (CHAT_SESSION, _R_MCP),
     ("POST", "/api/chat/{session_id}/rewind"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/abort"): (CHAT_SESSION, _R_CHAT_OWNED),
+    ("POST", "/api/chat/{session_id}/progress/stop"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/continuations/{job_id}/dismiss"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/goal"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/runs/{task_id}/pause"): (STOPS_WORK, _R_RUN_STOP),
@@ -413,6 +414,7 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
     "advance_experiment": (CHAT_SESSION, "arms one owned case ledger and offers an ordinary call; no case effect or execution approval"),
     "refresh_experiment": (CHAT_SESSION, "checkpoints authorized job/evidence reads in the owner's ledger; no live network writes"),
     "cancel_experiment": (CHAT_SESSION, "stops future owned case advancement; neither edits inputs nor aborts a job"),
+    "cancel_job": (STOPS_WORK, _R_STOP),
     "prepare_experiment": (CHAT_SESSION, (
         "validates an owner-scoped experiment plan on private network copies "
         "and records input/evidence fingerprints in `experiments/`. It "

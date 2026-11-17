@@ -133,6 +133,7 @@ UI_INTERNAL: dict[str, dict] = {
             ('POST', '/api/chat/stream'),
             ('POST', '/api/chat/ui-ack'),
             ('POST', '/api/chat/{session_id}/abort'),
+            ('POST', '/api/chat/{session_id}/progress/stop'),
             ('POST', '/api/chat/{session_id}/confirm'),
             ('POST', '/api/chat/{session_id}/continuations/{job_id}/dismiss'),
             ('POST', '/api/chat/{session_id}/goal'),

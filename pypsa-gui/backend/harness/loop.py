@@ -4257,11 +4257,16 @@ def _dispatch_real_tool_call(
                 except Exception:  # noqa: BLE001 — the step then stays a start receipt: uncertain
                     logger.exception("chat: plan step could not wait on job %s", job_id)
                     task_path = None
+                # live-voice 11b (B2): Stop monitoring ends this watch and the
+                # plan step's in-turn hold below together; the step still
+                # settles from the native record through `follow_job`.
+                monitor_generation = session.monitor_generation()
                 start_detached_solver_monitor(
                     session,
                     active_ctx,
                     tool_use_id=tool_use_id,
                     tool_name=tool_name,
+                    monitor_generation=monitor_generation,
                     **({} if task_path else _publish_hooks(active_ctx, run_token)),
                 )
                 if task_path:
@@ -4296,6 +4301,7 @@ def _dispatch_real_tool_call(
                         is_solver_done=lambda: (
                             settled.is_set() or time.monotonic() >= deadline
                         ),
+                        monitor_generation=monitor_generation,
                     ):
                         yield (
                             "tool_progress",
