@@ -1,5 +1,41 @@
 @import "tailwindcss";
 
+/* Fonts (UI-COHESION-1 F1): Inter and JetBrains Mono, variable, self-hosted from
+   @fontsource-variable (SIL OFL 1.1) so the desktop build renders offline. The
+   family names are the plain "Inter" and "JetBrains Mono" the tokens below ask for. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    Design tokens — "PyPSA Studio" design system.
    Red accent shared with the sign-in landing page, engineering-clean
@@ -145,9 +181,28 @@
   --color-nav-hover: #f4f4f4;
   --color-nav-active: #d0021b;
 
+  /* Type scale (UI-COHESION-1 F2). Names that do not shadow Tailwind's text-xs / text-sm,
+     so the existing text-[Npx] and text-xs uses stay put. Headings: h1 is the Home and
+     dialog display size, h2 the panel and Guided section title, h3 an inner block title. */
+  --text-micro: 9px;
+  --text-small: 10px;
+  --text-body: 11px;
+  --text-lead: 12px;
+  --text-h3: 13px;
+  --text-h2: 15px;
+  --text-h1: 16px;
+
+  /* Radii: controls (inputs, buttons, chips) 4 px; cards and panels 8 px. */
+  --radius-control: 4px;
+  --radius-card: 8px;
+
+  /* Link and eyebrow ink, at today's value (the accent). THEME-LIGHT (b)/(d) flip them to ink. */
+  --color-link: var(--color-accent);
+  --color-eyebrow: var(--color-accent);
+
   /* Typography */
-  --font-family-sans: 'Inter', system-ui, sans-serif;
-  --font-family-mono: 'JetBrains Mono', monospace;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
   /* Density vars — tuned for "comfortable" (default). Compact overrides below.
      Comfortable values mirror the Tailwind utility classes rows used before
@@ -336,7 +391,7 @@
 body {
   background: var(--color-bg);
   color: var(--color-text);
-  font-family: var(--font-family-sans);
+  font-family: var(--font-sans);
   margin: 0;
   overflow: hidden;
   /* Design system: subtle negative tracking on body text. */
@@ -401,7 +456,7 @@ html {
   border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 1px 6px;
-  font-family: var(--font-family-mono);
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   box-shadow: var(--shadow-sm);
@@ -425,7 +480,7 @@ html {
   border: 1px solid var(--color-border);
   border-radius: 3px;
   padding: 0 4px;
-  font-family: var(--font-family-mono);
+  font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 600;
   line-height: 1.4;
@@ -445,7 +500,7 @@ html {
   border: 1px solid var(--color-warn);
   border-radius: 3px;
   padding: 1px 5px;
-  font-family: var(--font-family-mono);
+  font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 600;
   line-height: 1.4;
