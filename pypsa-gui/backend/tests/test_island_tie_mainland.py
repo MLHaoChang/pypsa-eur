@@ -258,7 +258,9 @@ def _three_port(bus2):
 
 def test_a_third_port_on_the_eh_poc_bus_marks_the_mainland_feed():
     n, island = _three_port("hospital")
-    n.links.at["subsea_tie", "bus0"] = "island"  # bus0 and bus1 are both off the eh_poc bus
+    n.links.at["subsea_tie", "bus0"] = (
+        "island"  # bus0 and bus1 are both off the eh_poc bus
+    )
     n.links.at["subsea_tie", "bus1"] = "mainland"
     n.buses.at["hospital", "eh_poc"] = True
     out = S.tie_state(n, island)
@@ -267,7 +269,9 @@ def test_a_third_port_on_the_eh_poc_bus_marks_the_mainland_feed():
         ["hospital"],
         ["hospital_feeder", "subsea_tie"],
     )
-    assert "bus hospital, which reads as the mainland's: it is the eh_poc" in out["reason"]
+    assert (
+        "bus hospital, which reads as the mainland's: it is the eh_poc" in out["reason"]
+    )
     assert "subsea_tie" in out["reason"]
 
 
@@ -534,7 +538,9 @@ def test_the_warning_names_five_links_then_the_true_total():
     out = S.tie_state(n, island)
     every = sorted(["hospital_feeder", "subsea_tie", *extra])
     assert out["unmarked_links"] == every
-    assert out["warning"].startswith(", ".join(every[:5]) + " and 2 more join island buses")
+    assert out["warning"].startswith(
+        ", ".join(every[:5]) + " and 2 more join island buses"
+    )
 
 
 def test_a_normally_open_unmarked_internal_link_still_warns():
@@ -553,8 +559,13 @@ def test_a_grid_import_link_with_a_third_port_on_eh_poc_names_both_grid_sides():
     out = S.tie_state(n, island)
     assert out["state"] == "unit_on_mainland"
     assert "mainland" in out["buses"] and "hospital" in out["buses"]
-    assert "bus mainland, which reads as the mainland's: it is the grid side (bus0) of the grid-import link subsea_tie" in out["reason"]
-    assert "bus hospital, which reads as the mainland's: it is the eh_poc" in out["reason"]
+    assert (
+        "bus mainland, which reads as the mainland's: it is the grid side (bus0) of the grid-import link subsea_tie"
+        in out["reason"]
+    )
+    assert (
+        "bus hospital, which reads as the mainland's: it is the eh_poc" in out["reason"]
+    )
 
 
 # ── SH 56 (owner decision, option 3): a supply never available is left out, and named ──
@@ -588,7 +599,9 @@ def test_a_zero_hourly_availability_series_is_left_out_too():
 def test_any_available_or_unreadable_hour_keeps_the_supply_detected(hour_value):
     n, island = _idle_fixture()
     n.generators_t.p_max_pu["parked"] = 0.0
-    n.generators_t.p_max_pu.iloc[0, n.generators_t.p_max_pu.columns.get_loc("parked")] = hour_value
+    n.generators_t.p_max_pu.iloc[
+        0, n.generators_t.p_max_pu.columns.get_loc("parked")
+    ] = hour_value
     out = S.tie_state(n, island)
     assert out["state"] == "unit_on_mainland"
     assert "parked" in out["reason"]
@@ -605,3 +618,100 @@ def test_an_available_unlisted_supply_is_still_refused():
     n, island = _idle_fixture()
     out = S.tie_state(n, island)
     assert out["state"] == "unit_on_mainland" and "parked" in out["reason"]
+
+
+def test_an_availability_with_no_hours_keeps_the_unlisted_supply_detected(monkeypatch):
+    """SH 56 / GK A C4: with no hours there is no evidence of zero availability, so the supply
+    still marks its bus as the mainland's. PyPSA refuses empty snapshots, so the hourly table
+    is stubbed empty."""
+    n, island = _idle_fixture()
+    n.generators.at["parked", "p_max_pu"] = 0.0
+    columns = list(n.generators.index)
+    monkeypatch.setattr(
+        n,
+        "get_switchable_as_dense",
+        lambda *_a, **_k: __import__("pandas").DataFrame(columns=columns, dtype=float),
+    )
+    out = S.tie_state(n, island)
+    assert out["state"] == "unit_on_mainland"
+    assert "parked" in out["reason"]
+
+
+def test_an_unreadable_availability_keeps_the_supply_detected(monkeypatch):
+    """SH 56 / GK A C4: when the hourly availability cannot be read, the supply is available."""
+    n, island = _idle_fixture()
+    n.generators.at["parked", "p_max_pu"] = 0.0
+
+    def broken(*_a, **_k):
+        raise RuntimeError("unreadable")
+
+    monkeypatch.setattr(n, "get_switchable_as_dense", broken)
+    out = S.tie_state(n, island)
+    assert out["state"] == "unit_on_mainland"
+    assert "parked" in out["reason"]
+
+
+@pytest.mark.parametrize(
+    "component,name,kw",
+    [
+        ("Generator", "hospital_shed", {"carrier": "load_shedding", "p_nom": 4.0}),
+        ("StorageUnit", "__dsr_hospital_su", {"carrier": "AC", "p_nom": 4.0}),
+    ],
+)
+def test_an_idle_lp_slack_is_not_named_as_an_idle_supply(component, name, kw):
+    """SH 56 with GK A S1: a slack is never a supply, so it is not named even at 0 %."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    if kw["carrier"] not in n.carriers.index:
+        n.add("Carrier", kw["carrier"])
+    n.add(component, name, bus="hospital", p_max_pu=0.0, **kw)
+    assert "idle_supplies" not in S.tie_state(n, island)
+
+
+def test_an_idle_sidecar_listed_unit_is_not_named_as_an_idle_supply():
+    """SH 56: only units the sidecar does not list are named; a listed unit is the island's."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    n.generators.at["diesel_1", "p_max_pu"] = 0.0
+    assert "idle_supplies" not in S.tie_state(n, island)
+
+
+def test_an_idle_supply_off_the_islands_buses_is_not_named():
+    """SH 56: a supply on a bus without a sidecar unit is not an island idle supply."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    n.add("Bus", "far")
+    n.add("Generator", "far_parked", bus="far", p_nom=4.0, p_max_pu=0.0)
+    assert "idle_supplies" not in S.tie_state(n, island)
+
+
+def test_an_idle_supply_that_cannot_deliver_is_not_named():
+    """SH 56 with #49: a 0 MW supply is left out for its size, so it is not named as idle."""
+    n, island = _idle_fixture()
+    n.generators.at["parked", "p_nom"] = 0.0
+    n.generators.at["parked", "p_max_pu"] = 0.0
+    assert "idle_supplies" not in S.tie_state(n, island)
+
+
+def test_exactly_five_idle_supplies_are_named_without_a_remainder():
+    """GK A C3: five names fit, so there is no "and 0 more"."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    names = [f"parked_{i}" for i in range(5)]
+    for name in names:
+        n.add("Generator", name, bus="island", p_nom=1.0, p_max_pu=0.0)
+    out = S.tie_state(n, island)
+    assert out["idle_supplies"] == names
+    assert out["idle_warning"].startswith(", ".join(names) + " sit on island buses")
+    assert "more" not in out["idle_warning"]
+
+
+def test_a_link_joining_exactly_the_islands_two_buses_still_warns():
+    """SH 50 / GK A C1: a Link whose ports are all of the island's buses is internal and unmarked."""
+    n, island = _untagged_r4(poc=False)
+    n.loads.at["hospital_load", "bus"] = "island"
+    n.remove("Link", "hospital_feeder")
+    assert S.island_buses(n, island) == {"island", "mainland"}
+    out = S.tie_state(n, island)
+    assert out["state"] == "no_tie"
+    assert out["unmarked_links"] == ["subsea_tie"]
