@@ -67,3 +67,35 @@ Slices:
   a source does not name is written as amplitude 0 and alpha 0, so S2 keeps only non-zero
   amplitudes. Line g is TypLne `gline(r)` in uS/km. Shunt P is not written, so S2 records it as an
   assumed 0.
+- 2026-11-17, owner decision Q6 (via the coordinator): S3 accepts both DGS 7.0 ASCII and Excel.
+  GK A2 (4) plan verdict: GO, on these conditions.
+  - X1, 7.x references: pointer attributes (p:…; bus, typ_id, cubicle) hold FID values. Resolve
+    them through the FID column and refuse a dangling FID by name. Test: a 7.0 file whose FIDs
+    differ from its 5.0 twin's IDs gives the same network.
+  - X2, 7.0 oracle: "same tables as the 5.0 twin" compares the parser with itself, so also assert
+    literal values from the 7.0 file (a bus kV, a line length, a pointer target). The 7.0 fixture
+    is hand-written, never produced by our writer (ruling 4).
+  - X3, version gate: refuse 6.x and the rest by name. Pin with tests: 4.x, 6.x, 7.x without FID,
+    and 5.x with FID, OP or MATRIX.
+  - X4, Excel cell types, each handled explicitly: a formula cell is refused naming sheet, row and
+    column (open with data_only=False, or refuse a missing cached value; never read it as empty);
+    dates, booleans and error cells (#N/A) are refused by cell; exponent floats (1e-05) tested
+    through parse_dgs_text; wholly empty trailing rows and columns ignored, a partly empty row
+    keeps its empty cells; an extra non-DGS-class sheet is refused or unmapped (say which);
+    hidden sheets are treated like any other (say so).
+  - X5, safety: reuse the repo's safe xlsx opening (defusedxml, keep_links=False, read_only) and
+    the other xlsx importers' size and row caps; no second, looser path. Run
+    tests/test_packaging_requirements.py and test_openpyxl_parses_uploads_with_defusedxml* if
+    imports change (the latter is a known container-only failure: report it, don't fix it).
+  - X6, .xlsx dispatch: dgs, excel and plexos all take .xlsx, so the registry decides by content.
+    A workbook with a DGS General sheet and typed headers is DGS. The app's own network workbook
+    is never claimed by DGS, and a DGS workbook never by excel. Test both directions, plus an
+    ambiguous workbook refused naming both candidates. The body says how an upload reaches the
+    right importer (HOLISTIC).
+  - X7, Excel oracle: the S2 hand fixture as .xlsx maps to the same network and report as the .dgs
+    apart from locations; assert the "sheet <class>, row <n>" text in a refusal.
+  - X8, disclosure: the PR body and release note say the xlsx layout is third-party-documented and
+    untested against a real PowerFactory export.
+  - X9, mutants: mutants.py on both modules; hand-mutate the OP≠"C" refusal, the 5.x FID refusal,
+    the formula refusal, the integral-float formatting (5.0 → "5.0") and the dispatch sniff, each
+    with its killing test. Release-note fragment. About 600 lines is within PR-SIZE-1.
