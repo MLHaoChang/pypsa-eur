@@ -12,7 +12,14 @@ import pytest
 
 from services import bundle_manifest as BM
 from services import project_contents as PC
-from tests.test_project_contents import _bundle_from, _left_behind, _post, projects_root  # noqa: F401
+from tests.test_project_contents import _bundle_from, _left_behind, _post
+
+
+@pytest.fixture
+def projects_root():
+    from settings import get_settings
+
+    return pathlib.Path(get_settings().projects_root)
 
 
 def _zip(
@@ -248,7 +255,7 @@ def test_a_damaged_or_newer_bundle_is_refused_and_leaves_nothing(
     project_storage_dir,
     project_row,
     projects_root,
-    how,  # noqa: F811
+    how,
 ):
     name = api_project(f"bm-bad-{how}")
     good = client.get(f"/api/projects/{name}/bundle").content
@@ -279,7 +286,7 @@ def test_a_dry_run_writes_nothing_and_answers_what_the_import_does(
     project_storage_dir,
     project_row,
     projects_root,
-    row_count,  # noqa: F811
+    row_count,
 ):
     d = project_storage_dir(api_project("bm-dry"))
     data = _bundle_from(
@@ -338,7 +345,7 @@ def test_a_dry_run_refuses_what_the_import_refuses_and_leaves_nothing(
     project_storage_dir,
     project_row,
     projects_root,
-    row_count,  # noqa: F811
+    row_count,
 ):
     d = project_storage_dir(api_project("bm-dry-bad"))
     rows, tree = row_count(), _tree(projects_root)
@@ -355,7 +362,7 @@ def test_a_dry_run_cleans_its_staging_when_a_late_check_fails(
     api_project,
     project_storage_dir,
     projects_root,
-    monkeypatch,  # noqa: F811
+    monkeypatch,
 ):
     from routers import projects
 

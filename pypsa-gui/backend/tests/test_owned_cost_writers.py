@@ -658,7 +658,9 @@ def _with_member(data: bytes, member: str, body: bytes | None) -> bytes:
                 out.writestr(item, src.read(item))
         if body is not None:
             out.writestr(member, body)
-    return refresh_manifest(buf.getvalue())  # the edit changes members, so the manifest is rebuilt (project-io 02)
+    return refresh_manifest(
+        buf.getvalue()
+    )  # the edit changes members, so the manifest is rebuilt (project-io 02)
 
 
 def test_a_bundle_without_solver_settings_derives_at_the_default_rate_and_says_so(
