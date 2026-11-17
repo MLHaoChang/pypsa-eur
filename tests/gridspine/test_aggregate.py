@@ -1,5 +1,5 @@
 """
-The aggregated plant model (GC-01, ``ingest/aggregate.py``).
+The aggregated plant model and the freeze (GC-01, ``ingest/aggregate.py``).
 
 The fixture is a PV + BESS plant: PCC 132 kV -> one 100 MVA main
 transformer -> the 33 kV collector bus COL -> a shared trunk (two parallel
@@ -9,17 +9,23 @@ P_i**2 weighting is exercised (GK A2 condition A1).
 """
 
 import copy
+import datetime
 import math
 
+import pandas as pd
 import pytest
 
+import gridspine.ingest.aggregate as aggregate_mod
 from gridspine.ingest.aggregate import (
     AggregationError,
     aggregate,
     aggregate_campus,
+    aggregate_hour,
+    freeze,
 )
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
+from gridspine.schema.model_set import data_hash, manifest
 from gridspine.static.campus_sc import campus_fault_levels
 from tests.gridspine.test_island_schema import requirements
 
@@ -38,6 +44,7 @@ NODES = (
 )
 #: Units: PV at A1, A2, B1, B2; BESS at B3. 5 MW each.
 KIND = {"A1": "pv", "A2": "pv", "B1": "pv", "B2": "pv", "B3": "bess"}
+T0 = datetime.datetime(2026, 11, 17, 8, 0, tzinfo=datetime.UTC)
 
 
 def cable(a, b, length, parallel=1, zero=True):
@@ -414,8 +421,9 @@ def test_a_ring_is_refused():
 def test_a_ring_with_a_detached_part_is_refused():
     """
     Branches = buses - 1 overall (a ring plus a detached bus): a count
-    alone would pass it. The detached bus is refused by the input check
-    (build_campus), and the ring by the branch walk on its own.
+    alone would pass it. The combined case is refused by build_campus
+    (the detached bus), before aggregate's walk runs; the ring on its own
+    is refused by the walk.
     """
     spec = plant()
     spec["campus"]["cables"]["TIE"] = cable("A2", "B3", 1.0)
@@ -705,6 +713,244 @@ def test_no_taps_no_tap_assumption():
         "tap" not in agg.spec["campus"]["transformers"]["EQ_TR"]
         and agg.assumptions == []
     )
+
+
+# --- A9 aggregate_hour ------------------------------------------------------------------------------
+
+
+def test_aggregate_hour_sums_members_and_status_is_any():
+    agg = aggregate(plant())
+    rows = pd.DataFrame(
+        {
+            "unit_id": ["UA1", "UA2", "UB1", "UB2", "UB3"],
+            "period": 2030,
+            "hour": 7,
+            "p_mw": [5.0, 4.0, 0.0, 3.0, -2.0],
+            "status": [1, 1, 0, 1, 1],
+        }
+    )
+    out = aggregate_hour(rows, agg.unit_map).set_index("unit_id")
+    assert (
+        out.at["EQ_PV", "p_mw"] == pytest.approx(12.0)
+        and out.at["EQ_PV", "status"] == 1
+    )
+    assert out.at["EQ_BESS", "p_mw"] == pytest.approx(-2.0)
+    assert list(out.columns) == ["period", "hour", "p_mw", "status"]
+
+
+def test_aggregate_hour_status_off_when_every_member_is_off():
+    agg = aggregate(plant())
+    rows = pd.DataFrame(
+        {
+            "unit_id": ["UA1", "UA2", "UB1", "UB2", "UB3"],
+            "p_mw": 0.0,
+            "status": [0, 0, 0, 0, 1],
+        }
+    )
+    out = aggregate_hour(rows, agg.unit_map).set_index("unit_id")
+    assert out.at["EQ_PV", "status"] == 0 and out.at["EQ_BESS", "status"] == 1
+
+
+def test_aggregate_hour_refuses_an_unmapped_unit():
+    agg = aggregate(plant())
+    rows = pd.DataFrame(
+        {"unit_id": ["UA1", "GHOST"], "p_mw": [1.0, 2.0], "status": [1, 1]}
+    )
+    with pytest.raises(AggregationError, match=r"unit\(s\) \['GHOST'\]"):
+        aggregate_hour(rows, agg.unit_map)
+
+
+@pytest.mark.parametrize(
+    "change, why",
+    [
+        (lambda r: r.assign(q_mvar=1.0), r"unknown \['q_mvar'\]"),
+        (lambda r: r.drop(columns="status"), r"missing \['status'\]"),
+        (
+            lambda r: r.assign(period=[2030, None, 2030, 2030, 2030]),
+            r"missing values in \['period'\]",
+        ),
+        (
+            lambda r: r.assign(p_mw=[1.0, None, 0.0, 0.0, 0.0]),
+            r"missing values in \['p_mw'\]",
+        ),
+        (
+            lambda r: r.assign(hour=[7, 7, None, 7, 7]),
+            r"missing values in \['hour'\]",
+        ),
+        (
+            lambda r: r.assign(status=[1, None, 1, 1, 1]),
+            r"missing values in \['status'\]",
+        ),
+        (
+            lambda r: r.assign(unit_id=["UA1", None, "UB1", "UB2", "UB3"]),
+            r"missing values in \['unit_id'\]",
+        ),
+        (
+            lambda r: r.assign(p_mw=[1.0, "", 0.0, 0.0, 0.0]),
+            r"missing values in \['p_mw'\]",
+        ),
+        (
+            lambda r: r.assign(unit_id=["UA1", " ", "UB1", "UB2", "UB3"]),
+            r"missing values in \['unit_id'\]",
+        ),
+    ],
+    ids=[
+        "extra-column",
+        "missing-column",
+        "blank-key",
+        "blank-value",
+        "blank-hour",
+        "blank-status",
+        "blank-unit",
+        "empty-string-value",
+        "empty-string-unit",
+    ],
+)
+def test_aggregate_hour_refuses_rows_it_cannot_sum(change, why):
+    agg = aggregate(plant())
+    rows = pd.DataFrame(
+        {
+            "unit_id": ["UA1", "UA2", "UB1", "UB2", "UB3"],
+            "period": 2030,
+            "hour": 7,
+            "p_mw": 1.0,
+            "status": 1,
+        }
+    )
+    with pytest.raises(AggregationError, match=why):
+        aggregate_hour(change(rows), agg.unit_map)
+
+
+def _hour_rows(**cols):
+    rows = {
+        "unit_id": ["UA1", "UA2", "UB1", "UB2", "UB3"],
+        "period": 2030,
+        "hour": 7,
+        "p_mw": 1.0,
+        "status": 1,
+    }
+    rows.update(cols)
+    return pd.DataFrame(rows)
+
+
+@pytest.mark.parametrize(
+    "rows, why",
+    [
+        (_hour_rows(p_mw=[1.0, math.inf, 0.0, 0.0, 0.0]), r"p_mw must be finite"),
+        (
+            _hour_rows(p_mw=[1.0, math.inf, -math.inf, 0.0, 0.0]),
+            r"p_mw must be finite",
+        ),
+        (_hour_rows(p_mw=[1.0, "x", 0.0, 0.0, 0.0]), r"p_mw must be finite"),
+        (
+            _hour_rows(status=[1, 2, 1, 1, 1]),
+            r"status must be 0 or 1, got \[(np\.int64\()?2\)?\]",
+        ),
+        (_hour_rows(status=[1, 0.5, 1, 1, 1]), r"status must be integral"),
+        (
+            _hour_rows(status=[1, 0, 1, 1, 1], p_mw=[1.0, 2.0, 0.0, 0.0, 0.0]),
+            r"status 0 carry power: \['UA2'\]",
+        ),
+        (
+            _hour_rows(unit_id=["UA1", "UA1", "UB1", "UB2", "UB3"]),
+            r"duplicate \(unit_id, period, hour\) rows: \[\['UA1', 2030, 7\]\]",
+        ),
+    ],
+    ids=["inf", "inf-minus-inf", "text", "status-2", "status-half", "off-power", "dup"],
+)
+def test_aggregate_hour_refuses_values_the_hourly_table_refuses(rows, why):
+    with pytest.raises(AggregationError, match=why):
+        aggregate_hour(rows, aggregate(plant()).unit_map)
+
+
+def test_aggregate_hour_without_keys_refuses_two_rows_for_one_unit():
+    rows = _hour_rows(unit_id=["UA1", "UA1", "UB1", "UB2", "UB3"]).drop(
+        columns=["period", "hour"]
+    )
+    with pytest.raises(AggregationError, match=r"duplicate .*\['UA1'"):
+        aggregate_hour(rows, aggregate(plant()).unit_map)
+
+
+def test_aggregate_hour_sums_numbers_given_as_text():
+    out = aggregate_hour(
+        _hour_rows(p_mw=["1", "2", "0", "0", "0"]), aggregate(plant()).unit_map
+    ).set_index("unit_id")
+    assert out.at["EQ_PV", "p_mw"] == pytest.approx(3.0)
+
+
+def test_freeze_detailed_only_still_checks_the_input():
+    spec = plant()
+    spec["campus"]["cables"]["CB2"]["to_bus"] = "NOWHERE"
+    with pytest.raises(ContractError):
+        freeze(spec, {}, aggregated=False, now=T0)
+
+
+# --- A8 freeze ------------------------------------------------------------------------------------
+
+
+def test_freeze_holds_both_variants_and_is_deterministic():
+    a = freeze(plant(), {"case": "max"}, now=T0)
+    b = freeze(plant(), {"case": "max"}, now=T0 + datetime.timedelta(hours=1))
+    assert a.data_hash == b.data_hash == data_hash(plant(), {"case": "max"})
+    assert a.spec("aggregated") == aggregate(plant()).spec
+    assert a.unit_map["EQ_PV"] == ["UA1", "UA2", "UB1", "UB2"]
+    assert manifest(a, "aggregated")["variant"] == "aggregated"
+    assert freeze(plant(), {"case": "min"}, now=T0).data_hash != a.data_hash
+
+
+def test_freeze_carries_the_aggregation_assumptions():
+    spec = plant()
+    del spec["campus"]["cables"]["CB2"]["r0_ohm_per_km"]
+    ms = freeze(spec, {}, now=T0)
+    assert any("CB2" in line for line in ms.assumptions)
+
+
+def test_freeze_refuses_when_the_aggregation_fails():
+    spec = plant()
+    spec["campus"]["units"]["X1"] = {
+        "kind": "load",
+        "bus": "B2",
+        "p_mw": t(1.0),
+        "pf": t(0.95),
+    }
+    with pytest.raises(AggregationError, match="sits inside the collector"):
+        freeze(spec, {}, now=T0)
+
+
+def test_freeze_refuses_when_the_detailed_model_fails():
+    spec = plant()
+    spec["campus"]["cables"]["CB2"]["to_bus"] = "NOWHERE"
+    with pytest.raises(ContractError, match="NOWHERE"):
+        freeze(spec, {}, now=T0)
+
+
+def test_freeze_refuses_when_only_the_aggregated_model_fails(monkeypatch):
+    real = aggregate_mod.build_campus
+    aggregated = aggregate(plant()).spec
+
+    def refuse_aggregated(spec):
+        if spec == aggregated:
+            raise ContractError("aggregated build refused")
+        return real(spec)
+
+    monkeypatch.setattr(aggregate_mod, "build_campus", refuse_aggregated)
+    with pytest.raises(ContractError, match="aggregated build refused"):
+        freeze(plant(), {}, now=T0)
+    assert freeze(plant(), {}, aggregated=False, now=T0).specs["aggregated"] is None
+
+
+def test_freeze_detailed_only_when_asked():
+    spec = plant()
+    spec["campus"]["units"]["X1"] = {
+        "kind": "load",
+        "bus": "B2",
+        "p_mw": t(1.0),
+        "pf": t(0.95),
+    }
+    ms = freeze(spec, {}, aggregated=False, now=T0)
+    assert ms.specs["aggregated"] is None and ms.unit_map == {}
+    with pytest.raises(ContractError, match="aggregated variant was not frozen"):
+        manifest(ms, "aggregated")
 
 
 # --- shapes without a medium-voltage collector ------------------------------------------------
