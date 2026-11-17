@@ -44,3 +44,12 @@ Contract (#1600, project-io core):
 - `source_format` is "excel".
 - Sidecar keys are project file names: `user_ts.json`, and `solver_config.json`, which is partial and merged over the defaults on create.
 - Report values are JSON-finite.
+
+GK B 64 review of #1646 @df4497ad (2026-11-17): NOT OK, asks 1-5 plus minor items. Ask 1 (exact round trip): openpyxl writes %.16g, and a scaled cell (×1e-3, ×100) cannot be exact on its own, because two stored floats can show as the same float (0.001918771917354847 / 0.0019187719173548471 at 1e-3; 190446.44222042646 / 190446.44222042648 at 100). GK B ruling: option A is GO, with conditions:
+
+- X1. repr float writing through a scoped, locked swap of openpyxl's formatter, restored in `finally`, with a test where the save fails.
+- X2. A hidden "Exact values" sheet keyed by sheet, asset, parameter and time step, carrying the shown float. It applies only when the visible cell equals that float. Tests: a moved row, a sorted sheet, an edited cell.
+- X3. Entries are untrusted. They are parsed strictly (repr form, finite, no bool or coercion). A malformed, duplicate or orphan entry is reported and ignored. A tampered entry moves a value by at most 1 ulp.
+- X4. The hidden sheet is under the same caps and formula pass as every sheet.
+- X5. The name is reserved. A visible sheet with that name is not read. A missing sheet falls back to rescaling the visible value.
+- X6. `==` pins at every site (statics, series, weightings, discount_rate). One targeted mutant per new guard, in the E8 table.
