@@ -12,6 +12,8 @@ contract in :data:`CHANNELS`, so a result file maps back to a case id with no
 translation table.
 
 Nothing here imports an engine or a tool API; it is data plus its checks.
+A :class:`Case` is immutable (``params`` is a read-only mapping) and is keyed
+by ``case_id``, which is unique in a battery and safe as a file name.
 
 **Thevenin source.** Each case runs against an ideal source behind an
 impedance set by ``sk_mva`` (three-phase short-circuit level at the PoC) and
@@ -56,6 +58,7 @@ import json
 import math
 import re
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 import pandas as pd
 
@@ -192,7 +195,9 @@ class Case:
     t_event_s: float
     t_end_s: float
     channels: tuple
-    params: dict = field(default_factory=dict)
+    params: MappingProxyType = field(
+        default_factory=dict
+    )  # read-only after construction
     source: str = "assumed"
 
     def __post_init__(self):
@@ -278,7 +283,9 @@ class Case:
             raise ContractError(
                 f"case {cid}: angle_deg={params['angle_deg']} must satisfy 0 < |angle| < 180"
             )
-        object.__setattr__(self, "params", dict(sorted(params.items())))
+        object.__setattr__(
+            self, "params", MappingProxyType(dict(sorted(params.items())))
+        )
 
 
 def validate_battery(cases) -> tuple:
@@ -519,7 +526,7 @@ def battery_json(cases) -> str:
                 "t_event_s": c.t_event_s,
                 "t_end_s": c.t_end_s,
                 "channels": list(c.channels),
-                "params": c.params,
+                "params": dict(c.params),
                 "source": c.source,
             }
             for c in validate_battery(cases)

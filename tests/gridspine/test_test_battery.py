@@ -529,3 +529,62 @@ def test_pinned_default_params(battery):
 def test_numeric_string_refused():
     with pytest.raises(ContractError, match="sk_mva='1000' is not a finite number"):
         Thevenin("g", "1000", 5.0)
+
+
+def test_params_read_only(battery):
+    with pytest.raises(TypeError):
+        battery[0].params["step_pu"] = 1.0
+
+
+# Hand-listed channels per kind, in contract order.
+_BASE = ("v_poc_pu", "f_hz", "p_poc_mw", "q_poc_mvar")
+_CUR = ("id_pu", "iq_pu", "i_poc_pu")
+EXPECTED_CHANNELS = {
+    "flat": _BASE,
+    "fault_3ph": _BASE + _CUR,
+    "fault_1ph": _BASE + _CUR,
+    "v_step": _BASE + ("iq_pu",),
+    "q_step": _BASE + ("iq_pu",),
+    "p_step": _BASE + ("id_pu",),
+    "f_step": _BASE,
+    "f_ramp": _BASE,
+    "phase_jump": ("v_poc_pu", "theta_poc_deg", "f_hz", "p_poc_mw", "q_poc_mvar")
+    + _CUR,
+}
+
+
+def test_pinned_channels_per_kind(battery):
+    for c in battery:
+        assert c.channels == EXPECTED_CHANNELS[c.kind], c.case_id
+
+
+def test_json_golden_case_text():
+    text = battery_json(build_battery(1000, 3000, 3, 10))
+    golden = """  {
+   "case_id": "phase_jump_skmin_xrmin_down",
+   "channels": [
+    "v_poc_pu",
+    "theta_poc_deg",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 1000.0,
+    "x_over_r": 3.0
+   },
+   "kind": "phase_jump",
+   "params": {
+    "angle_deg": -20.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  }
+ ]"""
+    assert golden in text
