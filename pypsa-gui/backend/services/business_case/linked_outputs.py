@@ -22,6 +22,7 @@ preset row's kW per GPU. The one new constant is `O2_KG_PER_KG_H2`.
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections.abc import Callable
@@ -95,12 +96,21 @@ def _project_dc(ctx) -> tuple | None:
     storage = getattr(ctx, "storage_dir", None)
     if not storage:
         return None
+    from pydantic import ValidationError
+
     from project_templates import eh_templates
     from services.adequacy.dc_backup import DcBackupError, project_spec
 
     try:
         tid, spec, _planning = project_spec(storage, eh_templates)
     except DcBackupError:
+        return None  # not a data-centre project made with the form's body
+    except ValidationError as exc:
+        # A stored spec that no longer reads: the IT outputs only are not offered.
+        logging.getLogger(__name__).warning(
+            "business case: the data-centre load spec does not read, no IT output: %s",
+            exc.errors()[0].get("msg") if exc.errors() else exc,
+        )
         return None
     return spec, eh_templates._dc_timezone(tid)
 
