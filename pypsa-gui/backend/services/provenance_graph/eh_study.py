@@ -19,7 +19,10 @@ would read, compared exactly by `pins.compare_pin` (W3): the goal's value, basis
 Carlo draws, horizon years, seed (only when recorded) and convergence target; the network revision; the run
 choices no edit seam moves the revision for (pack overrides beyond the goal, stages, solve budget, demand-response
 buses, DtC config and attribution), against the request Guided would send now; and each row of the record's
-`assumptions` list, when it has one, against the network field the row names. A field the record did not capture,
+`assumptions` list against the network field the row names, one pin per unit of a row that joins several; a
+defaulted outage field (rate, repair time, basis) is pinned as still blank, a blank efficiency reads as the default
+the study used, and a row naming no network field (the goal's) reads uncompared. A record with no `assumptions` key
+did not record them and reads uncompared; `[]` is none assumed. A field the record did not capture,
 or holds with the wrong type, records `Unrecorded` and reads uncompared, never fresh and never a default (W4).
 
 Reads only (COPILOT-1): a locked read of the record, the solver config and the network; nothing is written.
@@ -147,6 +150,46 @@ def _scalar(v: Any) -> bool:
     )
 
 
+NOT_RECORDED = object()
+ASSUMPTIONS_NOT_RECORDED = "the study did not record its assumed inputs"
+
+# A defaulted outage row (#1645 `run_assumptions`): the unit's own field is blank and the run read the carrier's
+# or the basis default. Its pin is that the field is still blank; a value set since is a change.
+STILL_UNSET = frozenset({"outage_rate_value", "mttr_hours", "outage_rate_basis"})
+UNSET = "unset"
+
+
+def _is_unset(v: Any) -> bool:
+    return (
+        v is None
+        or (isinstance(v, float) and math.isnan(v))
+        or (isinstance(v, str) and not v.strip())
+    )
+
+
+def _row_names(row: dict) -> list[str]:
+    """The units a row names: one, or several joined with ", " (an outage row per carrier)."""
+    return [x.strip() for x in row["entity"].split(", ") if x.strip()]
+
+
+def _row_problem(row: Any) -> Unrecorded | None:
+    """Why a recorded assumption row cannot be pinned, or None."""
+    if not isinstance(row, dict):
+        return Unrecorded("assumption row: not an object")
+    if not all(isinstance(row.get(k), str) for k in ("component", "entity", "field")):
+        return Unrecorded("assumption row: names no network field")
+    if not row["component"] or not row["field"] or not _row_names(row):
+        # A goal row (draws, site type) names no network field.
+        return Unrecorded("assumption row: names no network field")
+    if not _scalar(row.get("value")):
+        return Unrecorded("assumption row: no comparable value")
+    return None
+
+
+def _row_recorded(row: dict) -> Any:
+    return UNSET if row["field"] in STILL_UNSET else row["value"]
+
+
 @dataclass(frozen=True)
 class Record:
     """A finished study record, normalised: each field a plain value or `Unrecorded`. `unreadable` names why the
@@ -219,7 +262,8 @@ def normalise(raw: Any) -> Record:
         if payload.get("verdict") is not None
         else Unrecorded("verdict: not recorded")
     )
-    assumptions = raw.get("assumptions", ())
+    # An older record has no key: it did not record them (#1645's "not recorded"); `[]` means none assumed.
+    assumptions = raw.get("assumptions", NOT_RECORDED)
     return Record(
         status=status,
         raw=raw,
@@ -234,6 +278,8 @@ def normalise(raw: Any) -> Record:
         has_seed=has_seed,
         assumptions=tuple(assumptions)
         if isinstance(assumptions, (list, tuple))
+        else Unrecorded(ASSUMPTIONS_NOT_RECORDED)
+        if assumptions is NOT_RECORDED
         else Unrecorded("assumptions: not a list"),
     )
 
@@ -260,13 +306,20 @@ def _try(fn) -> Any:
         return exc
 
 
-def _row_value(n, row: Any) -> Any:
-    """What the network holds now for the field an assumption row names; raises when it cannot be read."""
+def _row_value(n, row: dict, name: str) -> Any:
+    """What the network holds now for one unit an assumption row names, in the row's terms; raises when it
+    cannot be read (a unit since removed). A defaulted outage field reads `UNSET` while still blank; a blank
+    field of another row (an efficiency) reads as the default the study used, the row's value."""
     from services.asset_schema.schema import CLASS_ATTR
 
     table = getattr(n, CLASS_ATTR[row["component"]])
-    value = table.at[row["entity"], row["field"]]
-    return value.item() if hasattr(value, "item") else value
+    if name not in table.index:
+        raise KeyError(name)
+    value = table.at[name, row["field"]] if row["field"] in table.columns else None
+    value = value.item() if hasattr(value, "item") else value
+    if _is_unset(value):
+        return UNSET if row["field"] in STILL_UNSET else row["value"]
+    return value
 
 
 def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
@@ -359,7 +412,14 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
         "network_revision": runs._revision(ctx),
     }
     rows = record.assumptions if isinstance(record.assumptions, tuple) else ()
-    return current, tuple(_try(lambda r=r: _row_value(ctx.network, r)) for r in rows)
+    return current, tuple(
+        ()
+        if _row_problem(r) is not None
+        else tuple(
+            _try(lambda r=r, x=x: _row_value(ctx.network, r, x)) for x in _row_names(r)
+        )
+        for r in rows
+    )
 
 
 def read(ctx=None) -> StudyRead:
@@ -529,17 +589,21 @@ def study_graph(r: StudyRead) -> StudyGraph:
         key = f"assumption/{name}" if name not in seen else f"assumption/{name}#{i}"
         seen.add(name)
         label = str(row.get("label") or name) if ok else name
-        if not ok:
-            recorded: Any = Unrecorded("assumption row: not an object")
-        elif not all(
-            isinstance(row.get(k), str) for k in ("component", "entity", "field")
-        ):
-            recorded = Unrecorded("assumption row: names no network field")
-        elif not _scalar(row.get("value")):
-            recorded = Unrecorded("assumption row: no comparable value")
-        else:
-            recorded = row["value"]
-        link(RUN, key, label, recorded, r.rows[i] if i < len(r.rows) else None)
+        problem = _row_problem(row)
+        if problem is not None:
+            link(RUN, key, label, problem, None)
+            continue
+        # One pin per unit the row names (GK B 65 B1): an outage row joins every unit of its carrier.
+        names = _row_names(row)
+        now = r.rows[i] if i < len(r.rows) else ()
+        for j, unit in enumerate(names):
+            link(
+                RUN,
+                key if len(names) == 1 else f"{key}/{unit}",
+                label if len(names) == 1 else f"{label}: {unit}",
+                _row_recorded(row),
+                now[j] if j < len(now) else None,
+            )
 
     cost = figure_id("design_cost")
     link(

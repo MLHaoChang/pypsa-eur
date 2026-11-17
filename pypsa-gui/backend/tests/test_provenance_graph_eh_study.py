@@ -11,8 +11,10 @@ import contextlib
 import copy
 import dataclasses
 import json
+import math
 import threading
 import time
+from pathlib import Path
 
 import pypsa
 import pytest
@@ -80,6 +82,7 @@ def _record(ctx, **payload_over):
         "dsr_buses": None,
         "dtc_config": None,
         "dtc_attribution": None,
+        "assumptions": [],
         "report": {
             "mc_lole_h": 0.05,
             "cost_at_target_eur": 1234.5,
@@ -697,6 +700,9 @@ def test_each_assumption_row_is_an_input_pinned_to_its_value(study):
     "row",
     [
         pytest.param(_row(component=None), id="no-component"),
+        pytest.param(_row(component=""), id="empty-component"),
+        pytest.param(_row(field=""), id="empty-field"),
+        pytest.param(_row(entity=""), id="empty-entity"),
         pytest.param(_row(value=None), id="no-value"),
         pytest.param(_row(value={"x": 1}), id="value-not-scalar"),
         pytest.param(_row(value=float("nan")), id="value-nan"),
@@ -708,6 +714,7 @@ def test_an_assumption_row_it_cannot_compare_reads_uncompared(study, row):
     out = explain_study_figure("expected_shortfall")
     assert out["outcome"]["state"] == "uncompared"
     assert len(out["outcome"]["uncompared"]) == 1
+    assert "assumption row: " in json.dumps(_step(out, out["outcome"]["uncompared"][0]))
 
 
 def test_assumptions_that_are_not_a_list_read_uncompared(study):
@@ -749,6 +756,166 @@ def test_a_long_walk_is_cut_at_max_steps_and_marked_truncated(study):
     assert out["outcome"]["steps_total"] > MAX_STEPS == len(out["steps"])
     assert out["outcome"]["state"] == "stale"
     assert _step(out, S.RUN)  # the run step survives the cut
+
+
+# ── #1645's row shapes (GK B 65 B1) ─────────────────────────────────────────
+
+# `run_assumptions(_assumed_net(), {}, None)` from #1645 (services/adequacy/run_assumptions.py @ 8995402d), saved
+# as it returned: two goal rows (no component), a carrier outage rate joining two units, a repair time and a
+# basis left blank on a unit with its own rate, and a lossless conversion.
+ASSUMED_ROWS = json.loads(
+    (Path(__file__).parent / "fixtures" / "eh_study_run_assumptions.json").read_text()
+)
+
+
+def _assumed_net():
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    n.add("Bus", "b", carrier="AC")
+    n.add("Bus", "h", carrier="heat")
+    n.add("Generator", "d1", bus="b", carrier="gas", p_nom=10.0)
+    n.add("Generator", "d2", bus="b", carrier="gas", p_nom=5.0)
+    n.add("Generator", "o1", bus="b", carrier="oil", p_nom=3.0)
+    n.add("Link", "boiler", bus0="b", bus1="h", p_nom=4.0)
+    n.add("Load", "l", bus="b", p_set=5)
+    n.generators["outage_rate_value"] = [math.nan, math.nan, 0.05]
+    n.generators["mttr_hours"] = math.nan
+    n.generators["outage_rate_basis"] = ""
+    return n
+
+
+@pytest.fixture
+def assumed(install_network):
+    """A study on the fixture's network, recording #1645's rows for it."""
+    install_network(_assumed_net())
+    ctx = PyPSAService.get_active_context()
+    _goal(ctx)
+    ctx.solver_state["eh_study"] = _record(ctx)
+    ctx.solver_state["eh_study"]["assumptions"] = copy.deepcopy(ASSUMED_ROWS)
+    return ctx
+
+
+def _row_steps(out) -> dict[str, str]:
+    return {
+        s["label"]: s["state"]
+        for s in out["steps"]
+        if s["node"].startswith(S.input_id("assumption/"))
+    }
+
+
+def test_real_run_assumptions_rows_read_as_expected_when_unchanged(assumed):
+    out = explain_study_figure("expected_shortfall")
+    steps = _row_steps(out)
+    # The goal rows name no network field: uncompared (the goal pins compare draws and site type).
+    assert steps["Simulation runs per reliability check"] == "uncompared"
+    assert steps["Site type"] == "uncompared"
+    for node in (
+        S.input_id("assumption/mc_draws"),
+        S.input_id("assumption/site_archetype"),
+    ):
+        assert "names no network field" in json.dumps(_step(out, node)), node
+    assert out["outcome"]["state"] == "uncompared"
+    # Every other row is pinned, one pin per unit, and each is fresh.
+    pinned = {
+        k: v
+        for k, v in steps.items()
+        if k not in ("Simulation runs per reliability check", "Site type")
+    }
+    assert pinned == {
+        "Outage rate of gas generating units (d1, d2): d1": "fresh",
+        "Outage rate of gas generating units (d1, d2): d2": "fresh",
+        "Repair time of oil generating units (o1)": "fresh",
+        "Outage rate basis of generating units (o1)": "fresh",
+        "Conversion efficiency of boiler": "fresh",
+    }, steps
+
+
+def test_without_goal_rows_the_real_rows_read_fresh(assumed):
+    assumed.solver_state["eh_study"]["assumptions"] = [
+        r for r in ASSUMED_ROWS if r["component"]
+    ]
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+
+
+@pytest.mark.parametrize(
+    "edit, broken",
+    [
+        pytest.param(
+            lambda n: n.generators.__setitem__(
+                "outage_rate_value", [math.nan, 0.05, 0.05]
+            ),
+            "Outage rate of gas generating units (d1, d2): d2",
+            id="joined-rate-set-on-second-unit",
+        ),
+        pytest.param(
+            lambda n: n.generators.loc.__setitem__(("d1", "outage_rate_value"), 0.05),
+            "Outage rate of gas generating units (d1, d2): d1",
+            id="rate-set-to-the-default-itself",
+        ),
+        pytest.param(
+            lambda n: n.generators.loc.__setitem__(("o1", "mttr_hours"), 50.0),
+            "Repair time of oil generating units (o1)",
+            id="mttr-set",
+        ),
+        pytest.param(
+            lambda n: n.generators.loc.__setitem__(("o1", "outage_rate_basis"), "FOR"),
+            "Outage rate basis of generating units (o1)",
+            id="basis-set",
+        ),
+        pytest.param(
+            lambda n: n.links.loc.__setitem__(("boiler", "efficiency"), 0.9),
+            "Conversion efficiency of boiler",
+            id="efficiency-set",
+        ),
+        pytest.param(
+            lambda n: n.remove("Generator", "d2"),
+            "Outage rate of gas generating units (d1, d2): d2",
+            id="unit-removed",
+        ),
+    ],
+)
+def test_an_edit_to_each_row_kind_reads_stale(assumed, edit, broken):
+    assumed.solver_state["eh_study"]["assumptions"] = [
+        r for r in ASSUMED_ROWS if r["component"]
+    ]
+    edit(assumed.network)
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "stale"
+    assert _broken_labels(out) == {broken}
+
+
+def test_a_blank_efficiency_reads_as_the_lossless_default_it_was(assumed):
+    assumed.solver_state["eh_study"]["assumptions"] = [
+        r for r in ASSUMED_ROWS if r["component"]
+    ]
+    assumed.network.links.loc["boiler", "efficiency"] = math.nan
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+
+
+def test_a_defaulted_field_the_network_has_no_column_for_is_still_unset(assumed):
+    assumed.solver_state["eh_study"]["assumptions"] = [
+        r for r in ASSUMED_ROWS if r["component"]
+    ]
+    assumed.network.generators.drop(columns=["mttr_hours"], inplace=True)
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+
+
+def test_a_record_without_assumptions_did_not_record_them(study):
+    del study.solver_state["eh_study"]["assumptions"]
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "uncompared"
+    assert out["outcome"]["uncompared"] == [S.input_id("assumptions")]
+    step = _step(out, S.input_id("assumptions"))
+    assert S.ASSUMPTIONS_NOT_RECORDED in json.dumps(step)
+
+
+def test_an_empty_assumptions_list_is_none_assumed(study):
+    study.solver_state["eh_study"]["assumptions"] = []
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "fresh"
+    assert not [
+        s for s in out["steps"] if s["node"].startswith(S.input_id("assumption"))
+    ]
 
 
 # ── W5: the route ───────────────────────────────────────────────────────────
