@@ -777,3 +777,14 @@ def test_each_ordered_pair_is_refused_at_its_boundary(tmp_path, lo, hi, op):
     with pytest.raises(ContractError, match=f"unit .*: {lo} must be {op} {hi}: "):
         _load(tmp_path, _FULL | {lo: bad})
     _load(tmp_path, _FULL | {lo: _FULL[hi] - 0.001 if op == "<" else _FULL[hi]})
+
+
+def test_converter_records_skips_a_converter_with_no_ibr_row(tmp_path):
+    net, ibr = _converter_inputs(tmp_path)
+    assert dyr_writer.converter_records(
+        net, ibr.drop(index="W_BUS_02"), version=35
+    ) == (
+        [],
+        {},
+        {},
+    )
