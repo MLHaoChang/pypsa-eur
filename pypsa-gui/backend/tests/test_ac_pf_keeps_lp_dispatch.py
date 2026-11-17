@@ -49,16 +49,28 @@ def _assert_live_is_lp(n, lp: dict):
         pd.testing.assert_frame_equal(live, df, check_exact=True, obj=key)
 
 
-def test_the_saved_dispatch_is_the_lps_on_a_lossy_template(client, site, bound_ctx):
+def test_the_saved_dispatch_is_the_lps_on_a_lossy_template(
+    client, site, bound_ctx, project_storage_dir
+):
     site(_ieee14(), name="pf_lossy")
     _run_and_pf(client)
     with bound_ctx(client):
         state = PyPSAService.get_solver_state()
         lp = state["lopf_results"]["generators_t.p"].copy()
         pf = state["ac_pf_results"]["generators_t.p"].copy()
+        # Live right after the flow, before any save or reload.
+        pd.testing.assert_frame_equal(
+            PyPSAService.get_network().generators_t.p, lp, check_exact=True
+        )
     # The fixture is lossy: the flow's slack moves off the LP dispatch.
     assert (pf - lp).abs().to_numpy().max() > 1e-3
-    _reload(client, "pf_lossy")
+    assert client.post("/api/projects/pf_lossy", params={"force": True}).status_code == 200
+    # The saved file itself, read without the app's reload.
+    saved = pypsa.Network(project_storage_dir("pf_lossy") / "network.nc").generators_t.p
+    pd.testing.assert_frame_equal(
+        saved, lp, check_exact=True, check_freq=False, check_names=False
+    )
+    _reopen(client, "pf_lossy")
     with bound_ctx(client):
         n = PyPSAService.get_network()
         state = PyPSAService.get_solver_state()
@@ -271,3 +283,24 @@ def test_a_flow_record_without_links_reads_as_no_data(client, site, bound_ctx):
     assert r.status_code in (200, 204), r.text
     assert r.status_code == 204 or not r.json().get("columns"), r.text
     assert client.get("/api/results/links", params={"source": "lopf"}).status_code == 200
+
+
+def test_a_flow_on_a_network_carrying_an_earlier_flows_q_and_v_empties_them(
+    client, site, bound_ctx, monkeypatch, project_storage_dir
+):
+    """F3: a network that carries an earlier flow's q and |V| (a project saved before
+    PF-SAVE-1 with no record) runs LOPF→PF: the LP snapshot and the live network hold
+    those tables empty, never the earlier flow's values."""
+    _legacy_save(client, site, monkeypatch, "pf_stale_qv")
+    (project_storage_dir("pf_stale_qv") / "results_state.pkl").unlink()
+    _reopen(client, "pf_stale_qv")
+    with bound_ctx(client):
+        assert not PyPSAService.get_network().buses_t.v_mag_pu.columns.empty, "fixture"
+    _run_and_pf(client)
+    with bound_ctx(client):
+        n = PyPSAService.get_network()
+        lp = PyPSAService.get_solver_state()["lopf_results"]
+        for key in PF_ONLY:
+            acc, attr = key.split(".", 1)
+            assert lp[key].columns.empty, key
+            assert getattr(getattr(n, acc), attr).columns.empty, key
