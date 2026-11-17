@@ -752,7 +752,8 @@ class SolverConfigSchema(BaseModel):
     # (`services/solver/load_growth.py`); `load_scalers_derived` names the
     # derived ones. `gt=-100`: a fall of 100 % or more leaves no load.
     load_growth_pct_per_year: dict[str, Annotated[float, Field(gt=-100, allow_inf_nan=False)]] = {}
-    load_growth_base_year: int | None = None
+    # Strict: a bool or a text year is refused, not read as 1 / 0 or parsed.
+    load_growth_base_year: Annotated[int, Field(strict=True)] | None = None
     load_scalers_derived: dict[str, list[str]] = {}
     # Per-period auto-discount via ipw.objective. When True, the LP applies a
     # uniform PV factor (1+discount_rate)^-(P-ref_year) to every period's

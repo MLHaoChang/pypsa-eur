@@ -522,6 +522,37 @@ def update_snapshot_weightings(body: dict):
         "count": len(n.snapshot_weightings),
         "weightings": df_to_json(n.snapshot_weightings),
     }
+def _check_load_growth(periods: list[int]) -> None:
+    """Refuse, before anything is written, a period change that the stored load
+    growth cannot follow (homer-parity 04a: the growth start year after the new
+    first period, or a multiplier that is not finite and above 0)."""
+    from services.solver import load_growth as LG
+
+    try:
+        LG.refreshed_config(PyPSAService.get_active_context().solver_state.get("solver_config"),
+                            periods)
+    except LG.LoadGrowthError as exc:
+        raise HTTPException(422, {**exc.detail,
+                                  "message": f"{exc.detail['message']}; change it first"}) from None
+
+
+def _apply_load_growth(periods: list[int]) -> None:
+    """Re-derive the stored load-growth multipliers for the network's new
+    periods (homer-parity 04a), so none is left from the old period set. A
+    refusal here (a config changed since `_check_load_growth`) leaves the
+    config as it is; the solve's pre-flight check then names it."""
+    from services.solver import load_growth as LG
+
+    ctx = PyPSAService.get_active_context()
+    cfg = ctx.solver_state.get("solver_config")
+    try:
+        grown = LG.refreshed_config(cfg, periods)
+    except LG.LoadGrowthError:
+        return
+    if grown is not cfg:
+        ctx.solver_state["solver_config"] = grown
+
+
 @router.post("/snapshots")
 def set_snapshots(config: SnapshotConfig):
     import pandas as pd
@@ -559,6 +590,7 @@ def set_snapshots(config: SnapshotConfig):
             n.snapshot_weightings[col] = float(w_all)
         # Re-apply full profiles (from _user_ts) aligned to the new snapshot range.
         _reapply_user_ts_to_network(n)
+        _apply_load_growth([])  # flat: no period keeps a derived multiplier
     change_log_service.log(
         "update", "Network", "snapshots",
         f"Updated snapshots: {config.start} → {config.end} at {config.freq} ({len(n.snapshots)} steps)",
@@ -601,6 +633,7 @@ def set_multi_period_snapshots(body: dict):
     if len(set(periods_int)) != len(periods_int):
         raise HTTPException(400, "`periods` must be unique.")
     periods_sorted = sorted(periods_int)
+    _check_load_growth(periods_sorted)
 
     per_period = body.get("per_period")
     if per_period is not None:
@@ -667,6 +700,7 @@ def set_multi_period_snapshots(body: dict):
         # MultiIndex's level-0 values. Set snapshots first, then sync periods.
         n.set_snapshots(mi)
         n.investment_periods = periods_sorted
+        _apply_load_growth(periods_sorted)
         # Re-broadcast the captured weights under each new period — or, after
         # a resolution change, set every row to its block's step length.
         per_row = pd.Series(
@@ -913,6 +947,7 @@ def set_investment_periods(body: InvestmentPeriods):
     n = PyPSAService.get_network()
 
     new_periods = sorted({int(p) for p in body.periods})
+    _check_load_growth(new_periods)
 
     # Pair every weight with the period the CALLER submitted it beside, and do
     # it before anything is mutated. `new_periods` is sorted and de-duplicated,
@@ -958,6 +993,7 @@ def set_investment_periods(body: InvestmentPeriods):
             else:
                 # Already flat. PyPSA accepts an empty pd.Index for this.
                 n.investment_periods = pd.Index([], dtype="int64")
+            _apply_load_growth([])
             return {"count": 0}
 
         # Determine each period's operational block. A period that exists both
@@ -996,6 +1032,7 @@ def set_investment_periods(body: InvestmentPeriods):
 
         # Set / re-set the periods list. PyPSA validates it matches level-0.
         n.investment_periods = new_periods
+        _apply_load_growth(new_periods)
 
         # By label, never by position — see `pending_weights` above.
         ipw = n.investment_period_weightings

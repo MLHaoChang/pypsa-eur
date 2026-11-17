@@ -375,25 +375,24 @@ export function isDerivedScaler(cfg: LoadGrowthCfg, carrier: string, period: num
   return (cfg.load_scalers_derived?.[carrier] ?? []).includes(String(period))
 }
 
-/** The PUT body for typing a multiplier (or `null` to reset it to the rate).
- * A typed cell leaves the derived list; 1.00 is dropped only while the carrier
- * has no rate (an absent key means 1.00 then, but the rate's value otherwise). */
+/** The PUT body for typing a multiplier (or `null` to return it to the rate).
+ * Whether a cell is typed or derived is the server's call from what it stored
+ * (a value differing from the derived one becomes typed), so no flag is sent.
+ * 1.00 is dropped only while the carrier has no rate (an absent key means
+ * 1.00 then, but the rate's value otherwise). */
 export function loadScalerEdit(
   cfg: LoadGrowthCfg, carrier: string, period: number, value: number | null,
-): { load_scalers_by_carrier: Record<string, Record<string, number>>; load_scalers_derived: Record<string, string[]> } {
+): { load_scalers_by_carrier: Record<string, Record<string, number>> } {
   const key = String(period)
   const next: Record<string, Record<string, number>> = {}
   for (const [c, m] of Object.entries(cfg.load_scalers_by_carrier ?? {})) next[c] = { ...m }
-  const derived: Record<string, string[]> = {}
-  for (const [c, ps] of Object.entries(cfg.load_scalers_derived ?? {})) derived[c] = [...ps]
   const slot = next[carrier] ?? {}
   const hasRate = cfg.load_growth_pct_per_year?.[carrier] != null
   if (value === null || (value === 1 && !hasRate)) delete slot[key]
   else slot[key] = value
   if (Object.keys(slot).length === 0) delete next[carrier]
   else next[carrier] = slot
-  if (derived[carrier]) derived[carrier] = derived[carrier].filter(p => p !== key)
-  return { load_scalers_by_carrier: next, load_scalers_derived: derived }
+  return { load_scalers_by_carrier: next }
 }
 
 /** The PUT body for setting (or clearing, `null`) a carrier's growth rate.
@@ -417,11 +416,11 @@ export function loadGrowthEdit(
 export function loadGrowthProblem(
   ratePct: number, baseYear: number | null | undefined, periods: number[],
 ): string | null {
-  if (!Number.isFinite(ratePct)) return 'Enter a number, in % per year'
-  if (ratePct <= -100) return 'Enter a rate above -100 % per year'
+  if (!Number.isFinite(ratePct)) return 'Load growth: must be a number, in % per year'
+  if (ratePct <= -100) return 'Load growth: must be above -100 %'
   const first = periods.length > 0 ? Math.min(...periods) : null
   if (baseYear != null && first != null && baseYear > first) {
-    return `Growth must start in a year not after ${first}, the first period`
+    return `Growth from year: must not be after the first period (${first})`
   }
   return null
 }

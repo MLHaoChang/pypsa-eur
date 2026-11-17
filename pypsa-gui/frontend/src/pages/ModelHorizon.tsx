@@ -355,15 +355,18 @@ export default function ModelHorizon() {
       toast.error(e.response?.data?.detail ?? 'Failed to update per-carrier load scaler'),
   })
 
+  const growthErrorMessage = (e: unknown): string | null => {
+    const d = (e as { response?: { data?: { detail?: { message?: string } | string } } } | null)
+      ?.response?.data?.detail
+    return d == null ? null : typeof d === 'string' ? d : d.message ?? null
+  }
   // Load growth, % per year (homer-parity 04a): the server derives the
   // multipliers from it and answers 422 with a plain-words message.
   const updateLoadGrowth = useMutation({
     mutationFn: (body: Partial<SolverConfig>) => simulationApi.updateSolverConfig(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
-    onError: (e: { response?: { data?: { detail?: { message?: string } | string } } }) => {
-      const d = e.response?.data?.detail
-      toast.error((typeof d === 'string' ? d : d?.message) ?? 'Failed to update the load growth')
-    },
+    // The refusal shows beside the field (StepPeriodEconomics' growth row).
+    onError: () => {},
   })
 
   // Pull loads to detect which carriers exist in the network. The per-carrier
@@ -922,6 +925,7 @@ export default function ModelHorizon() {
             updateLoadGrowth.mutate(loadGrowthEdit(cfg ?? {}, carrier, ratePct, periods))}
           onLoadGrowthBaseYearChange={year => updateLoadGrowth.mutate({ load_growth_base_year: year })}
           loadGrowthPending={updateLoadGrowth.isPending || updateLoadScalersByCarrier.isPending}
+          loadGrowthError={growthErrorMessage(updateLoadGrowth.error)}
           capexBudgetPerPeriod={cfg?.capex_budget_per_period ?? {}}
           onCapexBudgetChange={(period, valueEur) => {
             const next: Record<string, number> = { ...(cfg?.capex_budget_per_period ?? {}) }

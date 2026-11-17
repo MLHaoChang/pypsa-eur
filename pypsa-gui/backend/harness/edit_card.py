@@ -1021,7 +1021,7 @@ _SOLVER_WORDS: dict[str, tuple[str, str, dict | None]] = {
 # The load-growth inputs derive `load_scalers_by_carrier` (homer-parity 04a): the
 # card shows the multipliers they change; the derived-entry bookkeeping is no
 # setting and gets no row.
-_LOAD_GROWTH_INPUTS = frozenset({"investment_periods", "load_growth_pct_per_year",
+_LOAD_GROWTH_INPUTS = frozenset({"multi_investment_periods", "investment_periods", "load_growth_pct_per_year",
                                  "load_growth_base_year"})
 _NO_ROW = frozenset({"load_scalers_derived"})
 _SHARES = frozenset({

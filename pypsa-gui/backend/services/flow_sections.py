@@ -58,6 +58,8 @@ BY_COMPONENT: Final = "by_component"
 CODE_SECTION: Final[dict[str, str]] = {
     # 1 Project & site: snapshots and weightings.
     "snapshots_empty": "project",
+    # homer-parity 04a: the rate and its multipliers are Model Horizon's.
+    "load_growth_stale": "project",
     "snapshot_weighting_nan": "project",
     "snapshot_weights_nyears_off": "project",
     "multi_period_no_periods": "project",

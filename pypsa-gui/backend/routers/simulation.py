@@ -405,34 +405,35 @@ _LOAD_SCALER_KEYS = ("multi_investment_periods", "load_scalers", "load_scalers_b
 
 # The keys load growth reads (homer-parity 04a): a PUT touching one of them
 # re-derives the multipliers while a rate is stored or submitted.
-_LOAD_GROWTH_KEYS = ("investment_periods", "load_scalers", "load_scalers_by_carrier",
-                     "load_growth_pct_per_year", "load_growth_base_year", "load_scalers_derived")
+_LOAD_GROWTH_KEYS = ("multi_investment_periods", "investment_periods", "load_scalers",
+                     "load_scalers_by_carrier", "load_growth_pct_per_year", "load_growth_base_year")
 
 
 def _derive_load_growth(submitted: dict, stored_cfg) -> None:
     """Validate the load-growth inputs as they stand after this PUT and write
     the derived multipliers into ``submitted`` (``services.solver.load_growth``),
-    before the FCA rebind reads the scalers. No rate stored or submitted, or no
-    growth key touched: nothing is read or written, so the config is unchanged."""
+    before the FCA rebind reads the scalers. Which multiplier is derived is the
+    server's call from the stored state, so a submitted ``load_scalers_derived``
+    is dropped (GK B C2). No rate stored or submitted, or no growth key touched:
+    nothing is read or written, so the config is unchanged."""
+    submitted.pop("load_scalers_derived", None)
     if not any(k in submitted for k in _LOAD_GROWTH_KEYS):
         return
+    from types import SimpleNamespace
+
+    from services.solver import load_growth as LG
+
     after = {k: submitted[k] if k in submitted else getattr(stored_cfg, k, None)
              for k in _LOAD_GROWTH_KEYS}
-    rates = after["load_growth_pct_per_year"] or {}
-    if not rates and not getattr(stored_cfg, "load_growth_pct_per_year", None):
-        return
-    from services.solver.load_growth import derive_load_scalers, load_growth_problems
-    problems = load_growth_problems(rates, after["load_growth_base_year"],
-                                    after["investment_periods"] or [])
-    if problems:
-        raise HTTPException(422, {"code": "load_growth_invalid", "error_kind": "load_growth_invalid",
-                                  "message": "; ".join(problems)})
-    scalers, derived = derive_load_scalers(
-        after["investment_periods"] or [], after["load_growth_base_year"], rates,
-        after["load_scalers_by_carrier"] or {}, after["load_scalers_derived"] or {},
-        after["load_scalers"] or {})
-    submitted["load_scalers_by_carrier"] = scalers
-    submitted["load_scalers_derived"] = derived
+    try:
+        network = PyPSAService.get_active_context().network
+    except Exception:
+        network = None
+    periods = LG.effective_periods(SimpleNamespace(**after), network)
+    try:
+        submitted.update(LG.apply(after, stored_cfg, periods))
+    except LG.LoadGrowthError as exc:
+        raise HTTPException(422, exc.detail) from None
 
 
 def _is_fca(stored) -> bool:

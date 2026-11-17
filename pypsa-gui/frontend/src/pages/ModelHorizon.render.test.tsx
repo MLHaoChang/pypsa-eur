@@ -414,16 +414,27 @@ it('shows the load growth rate beside the multipliers it derives, and sends a ty
   await screen.findByText('Period weightings')
   await userEvent.click(screen.getByText('Advanced'))
 
-  const rate = await screen.findByLabelText('Load growth, % per year, Electrical')
+  const rate = await screen.findByLabelText('Load growth (% per year), Electrical')
   expect((rate as HTMLInputElement).value).toBe('2')
   const cell = screen.getByLabelText('Load multiplier, Electrical, 2035') as HTMLInputElement
   expect(cell.value).toBe('1.104')
   expect(cell.title).toMatch(/From the load growth rate: 2 % per year from 2030/)
 
-  const heat = screen.getByLabelText('Load growth, % per year, Heat')
+  const heat = screen.getByLabelText('Load growth (% per year), Heat')
   await userEvent.type(heat, '3')
   await userEvent.tab()
   expect(put).toHaveBeenCalledWith({ load_growth_pct_per_year: { electrical: 2, heat: 3 } })
+  expect(screen.getByText(/muted = calculated from the growth rate/)).not.toBeNull()
+  expect(screen.getAllByText('from rate').length).toBe(2)  // 2030 (1.000) and 2035
+
+  // A refusal only the server can make shows beside the field, in its words.
+  put.mockRejectedValueOnce({ response: { data: { detail: {
+    error_kind: 'load_growth_factor_invalid',
+    message: 'Load growth (heat): 900 % per year gives a load multiplier of inf in 2035' } } } })
+  const hydrogen = screen.getByLabelText('Load growth (% per year), Hydrogen')
+  await userEvent.type(hydrogen, '900')
+  await userEvent.tab()
+  expect((await screen.findByRole('alert')).textContent).toMatch(/^Load growth \(heat\): 900 %/)
 })
 
 // ── 4. Guided-step shell: routing between summary and steps (Task 3) ──────

@@ -452,16 +452,15 @@ describe('load growth, % per year (homer-parity 04a)', () => {
     expect(isDerivedScaler({}, 'electrical', 2035)).toBe(false)
   })
 
-  it('typing over a derived cell makes it typed, even at 1.00 while a rate is set', () => {
+  it('typing over a derived cell sends the value, even 1.00 while a rate is set, and no flag', () => {
     expect(loadScalerEdit(grown, 'electrical', 2035, 1)).toEqual({
       load_scalers_by_carrier: { electrical: { '2035': 1, '2040': 1.3 } },
-      load_scalers_derived: { electrical: [] },
     })
   })
 
   it('without a rate a 1.00 cell is dropped, as before', () => {
     expect(loadScalerEdit({ load_scalers_by_carrier: { heat: { '2035': 1.2 } } }, 'heat', 2035, 1))
-      .toEqual({ load_scalers_by_carrier: {}, load_scalers_derived: {} })
+      .toEqual({ load_scalers_by_carrier: {} })
   })
 
   it('a reset returns the cell to the rate', () => {
@@ -479,9 +478,10 @@ describe('load growth, % per year (homer-parity 04a)', () => {
   })
 
   it('says in plain words why a rate or a growth year is refused', () => {
-    expect(loadGrowthProblem(-100, 2030, [2030])).toMatch(/above -100 %/)
-    expect(loadGrowthProblem(Number.NaN, 2030, [2030])).toMatch(/number/)
-    expect(loadGrowthProblem(2, 2031, [2030, 2035])).toMatch(/not after 2030/)
+    expect(loadGrowthProblem(-100, 2030, [2030])).toBe('Load growth: must be above -100 %')
+    expect(loadGrowthProblem(Number.NaN, 2030, [2030])).toMatch(/^Load growth: must be a number/)
+    expect(loadGrowthProblem(2, 2031, [2030, 2035]))
+      .toBe('Growth from year: must not be after the first period (2030)')
     expect(loadGrowthProblem(2, 2030, [2030, 2035])).toBeNull()
   })
 })
