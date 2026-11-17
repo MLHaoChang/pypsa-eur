@@ -10,7 +10,7 @@ import { useUIStore } from '../../store/uiStore'
 
 const api = vi.hoisted(() => ({
   revision: 1, reads: 0, busy: false,
-  hold: null as Promise<unknown> | null, release: () => {},
+  hold: null as Promise<unknown> | null, release: (() => {}) as (v?: unknown) => void,
 }))
 vi.mock('../../api/network', () => ({
   networkApi: { undoInfo: async () => ({ depth: 0, unsaved: false, network_revision: api.revision }) },
