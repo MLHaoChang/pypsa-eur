@@ -396,8 +396,18 @@ def test_model_set_id_only_when_passed(tmp_path):
 
 def test_manifest_cites_the_contract(tmp_path):
     m = json.loads((pack(tmp_path).path / "manifest.json").read_text())
-    assert m["channels"] == list(CHANNELS)
-    assert m["contract_version"] == emt_pack.CONTRACT_VERSION
+    # contract version 1: the schedule records no `connected` yet (GC-12, T1)
+    assert m["channels"] == [
+        "v_poc_pu",
+        "theta_poc_deg",
+        "f_hz",
+        "p_poc_mw",
+        "q_poc_mvar",
+        "id_pu",
+        "iq_pu",
+        "i_poc_pu",
+    ]
+    assert m["contract_version"] == emt_pack.EMT_CONTRACT_VERSION
     assert m["files"] and math.isfinite(m["vn_kv"])
 
 
