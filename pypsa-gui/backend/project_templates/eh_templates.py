@@ -720,11 +720,12 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
     week = " of the modelled week" if isinstance(n.snapshots, pd.MultiIndex) else ""
     words = (f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
              f"{row['binding_snapshot']}{week}), above {describe(row)}.")
-    most = None
-    if spec.backup.mode == "bess" and len(spec.phases) == 1 and not week:
-        most = _largest_fitting_it(template_id, spec, planning, over)
-    raise DcLoadError(words + _peak_ways_out(spec, most, single=len(spec.phases) == 1 and not week),
-                      "dc_load.phases")
+    # One modelled year: its IT load is the form's one field (the staged plan's
+    # phases are read-only there, so no number is searched).
+    single = not week
+    most = (_largest_fitting_it(template_id, spec, planning, over)
+            if single and spec.backup.mode == "bess" else None)
+    raise DcLoadError(words + _peak_ways_out(spec, most, single=single), "dc_load.phases")
 
 
 def _peak_over(template_id: str, spec, planning: Planning | None = None):

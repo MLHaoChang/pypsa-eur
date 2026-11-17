@@ -48,6 +48,8 @@ neither the 422 nor the scorecard reads the placeholder as a number.
 """
 from __future__ import annotations
 
+import datetime
+
 import numpy as np
 import pandas as pd
 
@@ -479,7 +481,7 @@ def snapshot_words(snap) -> str:
     ``(period, timestamp)`` snapshot gives its timestamp (DC walkthrough 02:
     never the tuple's Python text)."""
     ts = snap[-1] if isinstance(snap, tuple) else snap
-    if not isinstance(ts, (pd.Timestamp, np.datetime64)) and not hasattr(ts, "strftime"):
+    if not isinstance(ts, (pd.Timestamp, np.datetime64, datetime.datetime)):
         return str(ts)   # an integer or text snapshot index (GK A D3)
     return pd.Timestamp(ts).strftime("%Y-%m-%d %H:%M")
 

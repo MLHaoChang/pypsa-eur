@@ -3,7 +3,10 @@ the energized import is plain words. It names no program internals (no
 ``Timestamp('…')`` tuple), leaves out a firm source that adds nothing, and for
 Battery backup says why and names each way out with its number."""
 
+import datetime
 import re
+
+import numpy as np
 
 import pytest
 
@@ -24,7 +27,9 @@ def test_staged_refusal_has_no_code_text():
     msg = _refusal("eh_datacenter_staged", BESS)
     assert "Timestamp" not in msg and "(2027," not in msg
     # The staged plan reuses one modelled week for every phase: say so.
-    assert re.search(r"at \d{4}-\d{2}-\d{2} \d{2}:\d{2} of the modelled week\)", msg), msg
+    assert re.search(r"at \d{4}-\d{2}-\d{2} \d{2}:\d{2} of the modelled week\)", msg), (
+        msg
+    )
     # Battery backup has no gensets: no genset clause.
     assert "firm gensets" not in msg and "genset fleet" not in msg, msg
     assert "Battery strings carry outages only" in msg
@@ -41,12 +46,21 @@ def test_single_year_refusal_names_the_largest_it_load_that_builds():
     assert m, msg
     most = float(m.group(1))
     # The number is the largest 0.1 MW step that builds (the form takes decimals).
-    T.dc_load_spec("eh_datacenter", {**body, "phases": [{"cod": "2030-01-01", "it_mw": most}]})
-    _refusal("eh_datacenter", {**body, "phases": [{"cod": "2030-01-01", "it_mw": round(most + 0.1, 1)}]})
+    T.dc_load_spec(
+        "eh_datacenter", {**body, "phases": [{"cod": "2030-01-01", "it_mw": most}]}
+    )
+    _refusal(
+        "eh_datacenter",
+        {**body, "phases": [{"cod": "2030-01-01", "it_mw": round(most + 0.1, 1)}]},
+    )
 
 
 def test_hybrid_is_a_way_out_at_the_default_it_load():
-    body = {**BESS, "backup": {"mode": "hybrid"}, "phases": [{"cod": "2030-01-01", "it_mw": 36.0}]}
+    body = {
+        **BESS,
+        "backup": {"mode": "hybrid"},
+        "phases": [{"cod": "2030-01-01", "it_mw": 36.0}],
+    }
     assert T.dc_load_spec("eh_datacenter", body).backup.mode == "hybrid"
     staged = {k: v for k, v in body.items() if k != "phases"}
     assert T.dc_load_spec("eh_datacenter_staged", staged).backup.mode == "hybrid"
@@ -55,7 +69,9 @@ def test_hybrid_is_a_way_out_at_the_default_it_load():
 def test_binding_snapshot_is_iso_minutes():
     from services.adequacy.site_peak import peak_check
 
-    spec = T.dc_load_spec("eh_datacenter_staged", {**BESS, "backup": {"mode": "genset"}})
+    spec = T.dc_load_spec(
+        "eh_datacenter_staged", {**BESS, "backup": {"mode": "genset"}}
+    )
     n = T.BUILDERS["eh_datacenter_staged"](load_spec=spec)
     rows = peak_check(n, T.island_config("eh_datacenter_staged", None, load_spec=spec))
     assert rows
@@ -84,13 +100,17 @@ def test_no_it_number_where_the_cap_may_move_with_it(mode):
 def test_no_it_load_fits_is_said_not_zero():
     words = T._peak_ways_out(_spec("bess"), 0.0, single=True)
     assert "at most 0" not in words and "No IT load fits the energized import." in words
-    assert words.endswith("Pick Hybrid backup, or raise the connection after you create the project.")
+    assert words.endswith(
+        "Pick Hybrid backup, or raise the connection after you create the project."
+    )
 
 
 def test_the_search_stays_below_the_current_it_load(monkeypatch):
     # A check that always passes: the answer is the step below the current IT load, never it.
     monkeypatch.setattr(T, "_peak_over", lambda *a, **k: (None, []))
-    spec = T.dc_load_spec("eh_datacenter", {**BESS, "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]})
+    spec = T.dc_load_spec(
+        "eh_datacenter", {**BESS, "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]}
+    )
     over = [{"cap_mw": 47.2, "load_mw": 47.2}]
     assert T._largest_fitting_it("eh_datacenter", spec, None, over) == 19.9
     # None fits: 0.
@@ -105,16 +125,61 @@ def test_snapshot_words():
     assert snapshot_words(ts) == "2030-07-07 13:00"
     assert snapshot_words((2027, ts)) == "2030-07-07 13:00"
     assert snapshot_words(7) == "7" and snapshot_words("now") == "now"
+    assert snapshot_words(np.datetime64("2030-07-07T13:00")) == "2030-07-07 13:00"
+    assert snapshot_words(datetime.datetime(2030, 7, 7, 13)) == "2030-07-07 13:00"
 
 
 def _row(*firm):
-    return {"efficiency": 1.0, "energized_mw": 15.0, "cap_mw": 15.0,
-            "firm": [{"source": s, "mw": mw, "rule": "r"} for s, mw in firm]}
+    return {
+        "efficiency": 1.0,
+        "energized_mw": 15.0,
+        "cap_mw": 15.0,
+        "firm": [{"source": s, "mw": mw, "rule": "r"} for s, mw in firm],
+    }
 
 
 def test_describe_drops_zero_sources_and_says_unknown():
-    assert describe(_row(("gensets", 0.0), ("ride-through batteries", 0.0))) == \
-        "the 15 MW energized import = 15 MW"
-    assert describe(_row(("gensets", 0.0), ("ride-through batteries", 2.0))) == \
-        "the 15 MW energized import plus 2 MW of firm ride-through batteries (r) = 15 MW"
-    assert "plus an unknown amount of firm gensets (r)" in describe(_row(("gensets", float("nan"))))
+    assert (
+        describe(_row(("gensets", 0.0), ("ride-through batteries", 0.0)))
+        == "the 15 MW energized import = 15 MW"
+    )
+    assert (
+        describe(_row(("gensets", 0.0), ("ride-through batteries", 2.0)))
+        == "the 15 MW energized import plus 2 MW of firm ride-through batteries (r) = 15 MW"
+    )
+    assert "plus an unknown amount of firm gensets (r)" in describe(
+        _row(("gensets", float("nan")))
+    )
+
+
+@pytest.mark.parametrize("mode", ["genset", "hybrid"])
+def test_a_refusal_with_gensets_searches_no_it_load(mode, monkeypatch):
+    # GK A D1: the search runs for Battery backup only.
+    row = {
+        "period": "2030",
+        "load_mw": 50.0,
+        "binding_snapshot": "2030-07-07 14:00",
+        "efficiency": 1.0,
+        "energized_mw": 40.0,
+        "cap_mw": 40.0,
+        "firm": [{"source": "gensets", "mw": 0.0, "rule": ""}],
+    }
+    import pandas as pd
+
+    spec = T.dc_load_spec(
+        "eh_datacenter",
+        {
+            **BESS,
+            "backup": {"mode": mode},
+            "phases": [{"cod": "2030-01-01", "it_mw": 20.0}],
+        },
+    )
+    monkeypatch.setattr(
+        T, "_peak_over", lambda *a, **k: (NS(snapshots=pd.DatetimeIndex([])), [row])
+    )
+    monkeypatch.setattr(
+        T, "_largest_fitting_it", lambda *a, **k: pytest.fail("searched")
+    )
+    with pytest.raises(DcLoadError) as exc:
+        T._check_dc_peak("eh_datacenter", spec)
+    assert str(exc.value).endswith("Raise the connection after you create the project.")
