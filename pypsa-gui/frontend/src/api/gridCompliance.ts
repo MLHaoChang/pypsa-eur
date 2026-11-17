@@ -48,8 +48,8 @@ export interface Deliverable {
   stale: boolean
   /** The model set each submission went out on, oldest first; never rewritten. */
   submissions: Freeze[]
-  /** Submitted rows only: the inputs moved after submission (the record stands). */
-  inputs_changed_since_submission: boolean
+  /** Submitted rows only: the current inputs against the kept record. */
+  since_submission: { inputs: 'unchanged' | 'changed' | 'not_compared'; reason: string | null } | null
   feeds: { package: string; label: string; available: boolean; state: 'present' | 'pending' | 'unavailable' }[]
   comments: TsoComment[]
   packs: { version: number; digest: string }[]

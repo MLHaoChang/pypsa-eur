@@ -253,9 +253,14 @@ function Detail({ name, d, statuses, hasCampusInput }: {
           <p>Data frozen on {d.freeze.frozen_at.slice(0, 10)}{' '}
             <Tag tone={FREEZE_TONE[d.freeze_state]}>{FREEZE_LABEL[d.freeze_state]}</Tag></p>
         ) : <p className="text-muted">The data is not frozen for this deliverable.</p>}
-        {submittedOn && d.inputs_changed_since_submission && (
+        {submittedOn && d.since_submission?.inputs === 'changed' && (
           <p className="text-muted">
             The inputs changed after submission. What was submitted stays as frozen; later steps follow that record.
+          </p>
+        )}
+        {submittedOn && d.since_submission?.inputs === 'not_compared' && (
+          <p className="text-muted">
+            The current inputs were not compared with what was submitted. {d.since_submission.reason}
           </p>
         )}
         {hasCampusInput && !submittedOn && (d.freeze_state === 'stale' || d.freeze_state === 'unreadable') && (
