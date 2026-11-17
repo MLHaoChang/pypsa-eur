@@ -67,9 +67,9 @@ describe('WeatherBar', () => {
     expect((await screen.findByTestId('weather-error')).textContent).toContain('completed year')
   })
 
-  describe('in a browser east of UTC', () => {
+  describe.each(['Europe/Berlin', 'America/New_York'])('in a browser on %s time', zone => {
     const tz = process.env.TZ
-    beforeEach(() => { process.env.TZ = 'Europe/Berlin' })
+    beforeEach(() => { process.env.TZ = zone })
     afterEach(() => { process.env.TZ = tz })
 
     it('says which dates a sampled window takes from the weather year', async () => {
@@ -77,12 +77,15 @@ describe('WeatherBar', () => {
       renderIt()
       const line = (await screen.findByTestId('weather-window')).textContent!
       expect(line).toBe('Your model covers 1–7 Jul (168 h): a generated profile takes these dates from 2025.')
+      expect(line).not.toContain('2030')
     })
 
     it('names both months of a window across the year end', async () => {
       prof.weather.mockResolvedValue(answer({ year: 2025, window: { first: '2030-12-29 00:00:00', last: '2031-01-04 23:00:00', hours: 168, runs: 1 } }))
       renderIt()
-      expect((await screen.findByTestId('weather-window')).textContent).toContain('covers 29 Dec–4 Jan (168 h)')
+      const line = (await screen.findByTestId('weather-window')).textContent!
+      expect(line).toContain('covers 29 Dec–4 Jan (168 h)')
+      expect(line).not.toMatch(/2030|2031/)
     })
   })
 

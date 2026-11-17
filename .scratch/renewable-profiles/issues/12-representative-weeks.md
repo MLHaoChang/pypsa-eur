@@ -36,3 +36,12 @@ Acceptance:
   and showed the model year ("2030-06-30 to 2030-07-07").
 
 ## Comments
+
+- 2026-11-17, GK B2 plan GO (WeatherBar window line slice), conditions:
+  - W1: the one-run case also runs under America/New_York. Both time zones are shown red on master in the PR body.
+  - W2: TZ is restored in `afterEach`.
+  - W3: the multi-run copy and the other weather and series surfaces are checked for local-time parsing of route
+    stamps. Result: the multi-run line parses no date. `SeriesKit.weekDates` appends `Z` and `windowDates` builds a
+    UTC date. DefaultsReview, RenewableTuner, RenewableReadiness, ProfileStudioSection and modelHorizon/StepWindow
+    parse no route stamp. All clean.
+  - W4: no "2030" or "2031" (the model year) on the line.
