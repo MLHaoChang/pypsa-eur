@@ -60,9 +60,7 @@ CHOICES = {
     "run/dtc_config": ("dtc_config", "DtC config", (dict,)),
     "run/dtc_attribution": ("dtc_attribution", "DtC attribution", (str,)),
 }
-FINANCE_UNCOMPARED = (
-    "the study did not record the finance and currency settings, and PUT /finance does not move the revision"
-)
+FINANCE_UNCOMPARED = "the study did not record the finance and currency settings, and PUT /finance does not move the revision"
 PACK_UNCOMPARED = "the study did not record the pack's prices"
 RESULTS = runs.results_id("study")
 RUN = runs.run_id("study")
@@ -117,7 +115,9 @@ def _text(d: dict, key: str) -> Any:
     return v if isinstance(v, str) else Unrecorded(f"{key}: not text")
 
 
-def _choice(d: dict, key: str, words: str, types: tuple, *, nullable: bool = True) -> Any:
+def _choice(
+    d: dict, key: str, words: str, types: tuple, *, nullable: bool = True
+) -> Any:
     """A run choice as recorded: the value, `DEFAULT_CHOICE` for a recorded null, or `Unrecorded`."""
     if key not in d:
         return Unrecorded(f"the study did not record its {words}")
@@ -142,7 +142,9 @@ def beyond_goal(overrides: Any) -> Any:
 
 
 def _scalar(v: Any) -> bool:
-    return isinstance(v, (str, bool)) or (isinstance(v, (int, float)) and math.isfinite(v))
+    return isinstance(v, (str, bool)) or (
+        isinstance(v, (int, float)) and math.isfinite(v)
+    )
 
 
 @dataclass(frozen=True)
@@ -171,10 +173,15 @@ def normalise(raw: Any) -> Record:
     if status == "running":
         raise StudyNotRun("the Energy Hub study is still running", status=409)
     if status not in FINISHED:
-        return Record(unreadable=f"the study record's status {status!r} is not a finished study")
+        return Record(
+            unreadable=f"the study record's status {status!r} is not a finished study"
+        )
     version = raw.get("version", RECORD_VERSION)
     if version != RECORD_VERSION or isinstance(version, bool):
-        return Record(status=status, unreadable=f"the study record's version {version!r} is not one this reads")
+        return Record(
+            status=status,
+            unreadable=f"the study record's version {version!r} is not one this reads",
+        )
     report = raw.get("report")
     report = report if isinstance(report, dict) else {}
     sections = report.get("sections")
@@ -193,17 +200,25 @@ def normalise(raw: Any) -> Record:
     for node, (key, words, types) in CHOICES.items():
         fields[node] = _choice(raw, key, words, types, nullable=key != "budget_solves")
     fields["run/pack_overrides"] = beyond_goal(fields["run/pack_overrides"])
-    fields["mc/cov_target"] = _choice(payload, "cov_target", "MC convergence target", (int, float), nullable=False)
+    fields["mc/cov_target"] = _choice(
+        payload, "cov_target", "MC convergence target", (int, float), nullable=False
+    )
     has_seed = payload.get("seed") is not None
     if has_seed:
         fields["mc/seed"] = _int(payload, "seed")
     ci = payload.get("lole_ci")
     lole_ci = (
         list(ci)
-        if isinstance(ci, list) and len(ci) == 2 and all(not isinstance(_number({"v": x}, "v"), Unrecorded) for x in ci)
+        if isinstance(ci, list)
+        and len(ci) == 2
+        and all(not isinstance(_number({"v": x}, "v"), Unrecorded) for x in ci)
         else Unrecorded("lole_ci: not a pair of numbers")
     )
-    verdict = _text(payload, "verdict") if payload.get("verdict") is not None else Unrecorded("verdict: not recorded")
+    verdict = (
+        _text(payload, "verdict")
+        if payload.get("verdict") is not None
+        else Unrecorded("verdict: not recorded")
+    )
     assumptions = raw.get("assumptions", ())
     return Record(
         status=status,
@@ -289,32 +304,56 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
     def choices() -> dict[str, Any]:
         from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES
         from services.adequacy.eh_study import DEFAULT_MC_COV_TARGET, validate_stages
-        from services.adequacy.eh_study_runner import normalised_overrides, resolve_dtc_attribution
+        from services.adequacy.eh_study_runner import (
+            normalised_overrides,
+            resolve_dtc_attribution,
+        )
 
         def tok(v):
             return DEFAULT_CHOICE if v is None else v
 
-        raw_dtc, attribution = resolve_dtc_attribution(req.dtc_config, req.dtc_attribution)
+        raw_dtc, attribution = resolve_dtc_attribution(
+            req.dtc_config, req.dtc_attribution
+        )
         stages = validate_stages(req.stages)
         cov = (req.mc or {}).get("cov_target")
         return {
-            "run/pack_overrides": beyond_goal(tok(normalised_overrides(req.pack_overrides))),
+            "run/pack_overrides": beyond_goal(
+                tok(normalised_overrides(req.pack_overrides))
+            ),
             "run/stages": tok(list(stages) if stages is not None else None),
-            "run/budget_solves": int(req.budget_solves if req.budget_solves is not None else DEFAULT_EH_BUDGET_SOLVES),
-            "run/dsr_buses": tok(list(dict.fromkeys(str(b) for b in req.dsr_buses)) if req.dsr_buses else None),
+            "run/budget_solves": int(
+                req.budget_solves
+                if req.budget_solves is not None
+                else DEFAULT_EH_BUDGET_SOLVES
+            ),
+            "run/dsr_buses": tok(
+                list(dict.fromkeys(str(b) for b in req.dsr_buses))
+                if req.dsr_buses
+                else None
+            ),
             "run/dtc_config": tok(dict(raw_dtc) if raw_dtc else None),
             "run/dtc_attribution": tok(attribution),
-            "mc/cov_target": cov if cov is not None else getattr(pack, "mc_cov_target", DEFAULT_MC_COV_TARGET),
+            "mc/cov_target": cov
+            if cov is not None
+            else getattr(pack, "mc_cov_target", DEFAULT_MC_COV_TARGET),
         }
 
     chosen = _try(choices)
     current = {
-        **{k: (chosen if isinstance(chosen, Exception) else chosen[k]) for k in (*CHOICES, "mc/cov_target")},
+        **{
+            k: (chosen if isinstance(chosen, Exception) else chosen[k])
+            for k in (*CHOICES, "mc/cov_target")
+        },
         "goal/value": _try(target),
         "goal/basis": GOAL_BASIS,
         "goal/unit": GOAL_UNIT,
         "site_archetype": _try(lambda: goal["site_archetype"]["value"]),
-        "mc/draws": _try(lambda: goal_or_pack("mc_draws", lambda p: getattr(p, "mc_draws", rg.DEFAULT_MC_DRAWS))),
+        "mc/draws": _try(
+            lambda: goal_or_pack(
+                "mc_draws", lambda p: getattr(p, "mc_draws", rg.DEFAULT_MC_DRAWS)
+            )
+        ),
         "mc/horizon_years": _try(lambda: float(horizon_years(ctx.network))),
         "mc/seed": _try(lambda: getattr(pack, "mc_seed", DEFAULT_MC_SEED)),
         "network_revision": runs._revision(ctx),
@@ -390,7 +429,14 @@ def study_graph(r: StudyRead) -> StudyGraph:
     b = Builder(None)
     info: dict[str, dict] = {}
 
-    def link(src: str, key: str, label: str, recorded: Any, current: Any, unit: str | None = None) -> None:
+    def link(
+        src: str,
+        key: str,
+        label: str,
+        recorded: Any,
+        current: Any,
+        unit: str | None = None,
+    ) -> None:
         dst = input_id(key)
         b.node(Node("input", dst))
         if blocked is not None:
@@ -400,21 +446,42 @@ def study_graph(r: StudyRead) -> StudyGraph:
         else:
             via = pins.Pin(label, recorded, _reader(current))
         b.edge(Edge("derived_from", src, dst, via))
-        info[dst] = {"label": label, "value": _shown(recorded), "unit": unit, "stamp": None}
+        info[dst] = {
+            "label": label,
+            "value": _shown(recorded),
+            "unit": unit,
+            "stamp": None,
+        }
 
     for figure in FIGURES:
         fid = figure_id(figure)
         b.node(Node("derived", fid))
-        value = rec.figures.get(figure)  # none at all when the whole record is unreadable
+        value = rec.figures.get(
+            figure
+        )  # none at all when the whole record is unreadable
         stamp = None
         if isinstance(value, Unrecorded):
             stamp = {"unreadable": value.reason}
         elif figure == "design_cost":
-            stamp = {"period_basis": rec.period_basis if isinstance(rec.period_basis, str) else None}
-        info[fid] = {"label": figure, "value": _shown(value), "unit": _UNITS[figure], "stamp": stamp}
+            stamp = {
+                "period_basis": rec.period_basis
+                if isinstance(rec.period_basis, str)
+                else None
+            }
+        info[fid] = {
+            "label": figure,
+            "value": _shown(value),
+            "unit": _UNITS[figure],
+            "stamp": stamp,
+        }
         b.edge(Edge("derived_from", fid, RESULTS))
     b.node(Node("derived", LOLE_CI))
-    info[LOLE_CI] = {"label": "lole_ci", "value": _shown(rec.lole_ci), "unit": "h per horizon", "stamp": None}
+    info[LOLE_CI] = {
+        "label": "lole_ci",
+        "value": _shown(rec.lole_ci),
+        "unit": "h per horizon",
+        "stamp": None,
+    }
     for figure in ("expected_shortfall", "verdict"):
         b.edge(Edge("derived_from", figure_id(figure), LOLE_CI))
     b.edge(Edge("derived_from", LOLE_CI, RESULTS))
@@ -430,19 +497,33 @@ def study_graph(r: StudyRead) -> StudyGraph:
         edited,
         Unrecorded(blocked or "the study recorded no network revision"),
     )
-    info[RESULTS] = {"label": "study results", "value": None, "unit": None, "stamp": None}
+    info[RESULTS] = {
+        "label": "study results",
+        "value": None,
+        "unit": None,
+        "stamp": None,
+    }
     info[RUN] = {"label": "study run", "value": rec.status, "unit": None, "stamp": None}
 
     for key, label in _LABELS.items():
         if key == "mc/seed" and not rec.has_seed:
             continue  # a seed is pinned only when the record holds one
         unit = {"goal/value": GOAL_UNIT, "mc/horizon_years": "years"}.get(key)
-        link(RUN, key, label, rec.fields.get(key, Unrecorded(f"{label}: not recorded")), r.current.get(key), unit)
+        link(
+            RUN,
+            key,
+            label,
+            rec.fields.get(key, Unrecorded(f"{label}: not recorded")),
+            r.current.get(key),
+            unit,
+        )
 
     if isinstance(rec.assumptions, Unrecorded):
         link(RUN, "assumptions", "assumptions", rec.assumptions, None)
     seen: set[str] = set()
-    for i, row in enumerate(rec.assumptions if isinstance(rec.assumptions, tuple) else ()):
+    for i, row in enumerate(
+        rec.assumptions if isinstance(rec.assumptions, tuple) else ()
+    ):
         ok = isinstance(row, dict)
         name = str(row.get("key")) if ok and row.get("key") is not None else f"#{i}"
         key = f"assumption/{name}" if name not in seen else f"assumption/{name}#{i}"
@@ -450,7 +531,9 @@ def study_graph(r: StudyRead) -> StudyGraph:
         label = str(row.get("label") or name) if ok else name
         if not ok:
             recorded: Any = Unrecorded("assumption row: not an object")
-        elif not all(isinstance(row.get(k), str) for k in ("component", "entity", "field")):
+        elif not all(
+            isinstance(row.get(k), str) for k in ("component", "entity", "field")
+        ):
             recorded = Unrecorded("assumption row: names no network field")
         elif not _scalar(row.get("value")):
             recorded = Unrecorded("assumption row: no comparable value")
@@ -459,7 +542,13 @@ def study_graph(r: StudyRead) -> StudyGraph:
         link(RUN, key, label, recorded, r.rows[i] if i < len(r.rows) else None)
 
     cost = figure_id("design_cost")
-    link(cost, "finance", "finance and currency settings", Unrecorded(FINANCE_UNCOMPARED), None)
+    link(
+        cost,
+        "finance",
+        "finance and currency settings",
+        Unrecorded(FINANCE_UNCOMPARED),
+        None,
+    )
     link(cost, "pack_prices", "pack prices", Unrecorded(PACK_UNCOMPARED), None)
     return StudyGraph(b.build(), info)
 
@@ -471,5 +560,11 @@ def verdict(g: Graph, start: str) -> tuple[State, list[str]]:
     walks = [staleness(g, start), staleness(g, RUN)]
     uncompared = list(dict.fromkeys(u for v in walks for u in v.uncompared))
     states = {v.state for v in walks}
-    state: State = "stale" if "stale" in states else "uncompared" if "uncompared" in states else "fresh"
+    state: State = (
+        "stale"
+        if "stale" in states
+        else "uncompared"
+        if "uncompared" in states
+        else "fresh"
+    )
     return state, uncompared

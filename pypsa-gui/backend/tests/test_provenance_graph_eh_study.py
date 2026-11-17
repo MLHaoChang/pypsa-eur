@@ -19,7 +19,11 @@ import pytest
 
 from services.adequacy.metrics import horizon_years
 from services.provenance_graph import eh_study as S
-from services.provenance_graph.explain import MAX_STEPS, TargetUnknown, explain_study_figure
+from services.provenance_graph.explain import (
+    MAX_STEPS,
+    TargetUnknown,
+    explain_study_figure,
+)
 from services.pypsa_service import PyPSAService
 
 
@@ -88,7 +92,12 @@ def _record(ctx, **payload_over):
 
 def _goal(ctx, **over):
     cfg = ctx.solver_state["solver_config"]
-    fields = {"target_lole_h": 1.0, "mc_draws": 500, "site_archetype": "strong_grid", **over}
+    fields = {
+        "target_lole_h": 1.0,
+        "mc_draws": 500,
+        "site_archetype": "strong_grid",
+        **over,
+    }
     ctx.solver_state["solver_config"] = dataclasses.replace(cfg, **fields)
 
 
@@ -102,7 +111,9 @@ def study(install_network):
 
 
 def _payload(ctx):
-    return ctx.solver_state["eh_study"]["report"]["sections"]["certification"]["payload"]
+    return ctx.solver_state["eh_study"]["report"]["sections"]["certification"][
+        "payload"
+    ]
 
 
 def _step(out, node):
@@ -110,7 +121,11 @@ def _step(out, node):
 
 
 def _broken_labels(out):
-    return {s["broken"]["compared"].get("field") for s in out["steps"] if s["state"] == "stale" and s["broken"]}
+    return {
+        s["broken"]["compared"].get("field")
+        for s in out["steps"]
+        if s["state"] == "stale" and s["broken"]
+    }
 
 
 # ── the wire ────────────────────────────────────────────────────────────────
@@ -135,8 +150,16 @@ def test_a_current_study_reads_fresh_outcome_first(study):
     assert ci["value"] == [0.0001, 0.0002]
     run = _step(out, S.RUN)
     assert run["via"]["edge"] == "computed_in" and run["state"] == "fresh"
-    for key in ("goal/value", "goal/basis", "goal/unit", "site_archetype", "mc/draws", "mc/horizon_years",
-                "mc/seed", "network_revision"):
+    for key in (
+        "goal/value",
+        "goal/basis",
+        "goal/unit",
+        "site_archetype",
+        "mc/draws",
+        "mc/horizon_years",
+        "mc/seed",
+        "network_revision",
+    ):
         assert _step(out, S.input_id(key))["state"] == "fresh", key
 
 
@@ -151,7 +174,10 @@ def test_design_cost_never_reads_fresh_on_the_revision_alone(study):
     """W1: finance/currency and the pack's prices sit outside the revision counter; neither is recorded."""
     out = explain_study_figure("design_cost")
     assert out["outcome"]["state"] == "uncompared"
-    assert set(out["outcome"]["uncompared"]) == {S.input_id("finance"), S.input_id("pack_prices")}
+    assert set(out["outcome"]["uncompared"]) == {
+        S.input_id("finance"),
+        S.input_id("pack_prices"),
+    }
     assert out["steps"][0]["value"] == 1234.5 and out["steps"][0]["unit"] == "EUR"
     assert out["steps"][0]["stamp"] == {"period_basis": "single_period"}
     for key in ("finance", "pack_prices"):
@@ -163,7 +189,9 @@ def test_a_finance_edit_does_not_make_design_cost_fresh_or_move_the_revision(stu
     """W1: PUT /finance does not move the revision, so design_cost keeps naming finance uncompared."""
     revision = study.network_revision
     cfg = study.solver_state["solver_config"]
-    study.solver_state["solver_config"] = dataclasses.replace(cfg, finance={"discount_rate": 0.09})
+    study.solver_state["solver_config"] = dataclasses.replace(
+        cfg, finance={"discount_rate": 0.09}
+    )
     out = explain_study_figure("design_cost")
     assert study.network_revision == revision
     assert out["outcome"]["state"] == "uncompared"
@@ -211,7 +239,9 @@ def test_a_null_missing_or_mistyped_captured_revision_reads_uncompared(study, ca
     assert out["outcome"]["state"] == "uncompared"
     assert S.RUN in out["outcome"]["uncompared"]
     assert S.input_id("network_revision") in out["outcome"]["uncompared"]
-    assert _step(out, S.RUN)["via"]["recorded"] == {"unrecorded": "the study recorded no network revision"}
+    assert _step(out, S.RUN)["via"]["recorded"] == {
+        "unrecorded": "the study recorded no network revision"
+    }
     assert "unrecorded" in _step(out, S.input_id("network_revision"))["via"]["recorded"]
 
 
@@ -284,7 +314,9 @@ def test_changed_draws_read_stale(study):
 
 def test_a_changed_horizon_reads_stale_exactly(study):
     _payload(study)["horizon_years"] = horizon_years(study.network) * (1 + 1e-12)
-    assert _broken_labels(explain_study_figure("expected_shortfall")) == {"horizon years"}
+    assert _broken_labels(explain_study_figure("expected_shortfall")) == {
+        "horizon years"
+    }
 
 
 def test_a_changed_seed_reads_stale_and_an_unrecorded_seed_has_no_node(study):
@@ -312,8 +344,15 @@ def test_an_mc_setting_the_study_did_not_record_reads_uncompared(study, key):
 # ── the run choices: none moves the revision, so each is pinned ─────────────
 
 _CHOICES = {
-    "pack_overrides": ("record", {"target_lole_h": 1.0, "certification_metric": "mc_lole", "levers": {"sizing": False}},
-                       "pack overrides beyond the goal"),
+    "pack_overrides": (
+        "record",
+        {
+            "target_lole_h": 1.0,
+            "certification_metric": "mc_lole",
+            "levers": {"sizing": False},
+        },
+        "pack overrides beyond the goal",
+    ),
     "stages": ("record", ["apply_pack", "ens_solve", "assemble"], "stages"),
     "budget_solves": ("record", 12, "solve budget"),
     "dsr_buses": ("record", ["b"], "demand-response buses"),
@@ -324,27 +363,42 @@ _CHOICES = {
 
 
 @pytest.mark.parametrize("key", list(_CHOICES))
-def test_a_run_choice_other_than_today_s_request_reads_stale_without_a_revision_bump(study, key):
+def test_a_run_choice_other_than_today_s_request_reads_stale_without_a_revision_bump(
+    study, key
+):
     where, value, label = _CHOICES[key]
     target = _payload(study) if where == "payload" else study.solver_state["eh_study"]
     revision = study.network_revision
     target[key] = value
     out = explain_study_figure("expected_shortfall")
-    assert study.network_revision == revision  # a run choice is no edit: the revision cannot catch it
+    assert (
+        study.network_revision == revision
+    )  # a run choice is no edit: the revision cannot catch it
     assert out["outcome"]["state"] == "stale"
     assert _broken_labels(out) == {label}
 
 
 @pytest.mark.parametrize(
     "request_now, label",
-    [({"pack_overrides": {"levers": {"sizing": False}}}, "pack overrides beyond the goal"),
-     ({"stages": ["apply_pack", "ens_solve", "assemble"]}, "stages"),
-     ({"dtc_attribution": "aggregate"}, "DtC attribution")],
+    [
+        (
+            {"pack_overrides": {"levers": {"sizing": False}}},
+            "pack overrides beyond the goal",
+        ),
+        ({"stages": ["apply_pack", "ens_solve", "assemble"]}, "stages"),
+        ({"dtc_attribution": "aggregate"}, "DtC attribution"),
+    ],
 )
-def test_a_changed_request_guided_would_send_now_reads_stale(study, monkeypatch, request_now, label):
+def test_a_changed_request_guided_would_send_now_reads_stale(
+    study, monkeypatch, request_now, label
+):
     from services import flow_service
 
-    monkeypatch.setattr(flow_service, "_request_for", lambda t, c=None: {"archetype": "strong_grid", **request_now})
+    monkeypatch.setattr(
+        flow_service,
+        "_request_for",
+        lambda t, c=None: {"archetype": "strong_grid", **request_now},
+    )
     out = explain_study_figure("expected_shortfall")
     assert out["outcome"]["state"] == "stale"
     assert label in _broken_labels(out)
@@ -361,11 +415,22 @@ def test_a_run_choice_the_study_did_not_record_reads_uncompared(study, key):
     assert step["via"]["recorded"]["unrecorded"].startswith("the study did not record")
 
 
-@pytest.mark.parametrize("key, value", [("stages", "all"), ("budget_solves", 30.0), ("dsr_buses", "b"),
-                                        ("dtc_config", ["x"]), ("pack_overrides", "x"), ("dtc_attribution", 1)])
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("stages", "all"),
+        ("budget_solves", 30.0),
+        ("dsr_buses", "b"),
+        ("dtc_config", ["x"]),
+        ("pack_overrides", "x"),
+        ("dtc_attribution", 1),
+    ],
+)
 def test_a_run_choice_of_the_wrong_type_reads_uncompared(study, key, value):
     study.solver_state["eh_study"][key] = value
-    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "uncompared"
+    assert (
+        explain_study_figure("expected_shortfall")["outcome"]["state"] == "uncompared"
+    )
 
 
 # ── W2: one bounded locked read ─────────────────────────────────────────────
@@ -392,7 +457,9 @@ def _held(lock):
 
 def test_a_busy_lock_reads_network_busy_uncompared_never_stale_and_never_waits(study):
     study.solver_state["eh_study"]["assumptions"] = [_row()]
-    study.network_revision = int(study.network_revision or 0) + 1  # an edit that would read stale
+    study.network_revision = (
+        int(study.network_revision or 0) + 1
+    )  # an edit that would read stale
     _goal(study, target_lole_h=9.0)
     with _held(study.mutation_lock):
         t0 = time.monotonic()
@@ -434,21 +501,35 @@ def test_the_read_never_blocks_on_the_mutation_lock(study, monkeypatch):
         pytest.param(lambda r: {**r, "version": 2}, "version", id="wrong-version"),
         pytest.param(lambda r: {**r, "version": True}, "version", id="bool-version"),
         pytest.param(lambda r: ["not", "a", "dict"], "not an object", id="non-dict"),
-        pytest.param(lambda r: {**r, "status": "exploded"}, "status", id="unknown-status"),
+        pytest.param(
+            lambda r: {**r, "status": "exploded"}, "status", id="unknown-status"
+        ),
         pytest.param(lambda r: {**r, "status": None}, "status", id="no-status"),
     ],
 )
-def test_a_record_of_the_wrong_version_or_shape_reads_uncompared_never_500(study, mutate, why):
+def test_a_record_of_the_wrong_version_or_shape_reads_uncompared_never_500(
+    study, mutate, why
+):
     study.solver_state["eh_study"] = mutate(study.solver_state["eh_study"])
     for figure in S.FIGURES:
         out = explain_study_figure(figure)
         assert out["outcome"]["state"] == "uncompared", figure
         # Every comparison names why the record cannot be read, not a field-by-field "not recorded".
         assert why in _step(out, S.RUN)["via"]["recorded"]["unrecorded"]
-        assert why in _step(out, S.input_id("goal/value"))["via"]["recorded"]["unrecorded"]
-        assert all(s["state"] == "uncompared" or s["via"] is None or s["via"]["edge"] == "derived_from"
-                   for s in out["steps"])
-        assert all(s["state"] != "fresh" for s in out["steps"][1:] if s["via"]["recorded"] is not None)
+        assert (
+            why in _step(out, S.input_id("goal/value"))["via"]["recorded"]["unrecorded"]
+        )
+        assert all(
+            s["state"] == "uncompared"
+            or s["via"] is None
+            or s["via"]["edge"] == "derived_from"
+            for s in out["steps"]
+        )
+        assert all(
+            s["state"] != "fresh"
+            for s in out["steps"][1:]
+            if s["via"]["recorded"] is not None
+        )
 
 
 @pytest.mark.parametrize(
@@ -468,7 +549,9 @@ def test_a_record_of_the_wrong_version_or_shape_reads_uncompared_never_500(study
         ("record", "network_revision", 3.0),
     ],
 )
-def test_a_field_of_the_wrong_type_reads_uncompared_never_a_default(study, where, key, value):
+def test_a_field_of_the_wrong_type_reads_uncompared_never_a_default(
+    study, where, key, value
+):
     target = _payload(study) if where == "payload" else study.solver_state["eh_study"]
     target[key] = value
     out = explain_study_figure("expected_shortfall")
@@ -480,9 +563,17 @@ def test_a_field_of_the_wrong_type_reads_uncompared_never_a_default(study, where
     "mutate",
     [
         pytest.param(lambda r: r.update(report="a string"), id="report-not-dict"),
-        pytest.param(lambda r: r["report"].update(sections=[1]), id="sections-not-dict"),
-        pytest.param(lambda r: r["report"]["sections"].update(certification="ok"), id="section-not-dict"),
-        pytest.param(lambda r: r["report"]["sections"]["certification"].update(payload=None), id="no-payload"),
+        pytest.param(
+            lambda r: r["report"].update(sections=[1]), id="sections-not-dict"
+        ),
+        pytest.param(
+            lambda r: r["report"]["sections"].update(certification="ok"),
+            id="section-not-dict",
+        ),
+        pytest.param(
+            lambda r: r["report"]["sections"]["certification"].update(payload=None),
+            id="no-payload",
+        ),
     ],
 )
 def test_a_report_of_the_wrong_shape_reads_uncompared(study, mutate):
@@ -508,7 +599,9 @@ def test_a_lole_ci_of_the_wrong_shape_is_shown_as_nothing(study, ci):
 def test_a_null_figure_is_named_not_coerced(study):
     study.solver_state["eh_study"]["report"]["mc_lole_h"] = None
     out = explain_study_figure("expected_shortfall")
-    assert out["steps"][0]["value"] is None and out["steps"][0]["stamp"] == {"unreadable": "mc_lole_h: null"}
+    assert out["steps"][0]["value"] is None and out["steps"][0]["stamp"] == {
+        "unreadable": "mc_lole_h: null"
+    }
 
 
 def test_a_current_input_that_cannot_be_read_reads_stale(study, monkeypatch):
@@ -544,17 +637,29 @@ def test_the_record_is_read_under_the_solver_state_lock(study, monkeypatch):
 def test_a_context_with_no_locks_is_read_with_nothing_to_wait_for(study):
     import types
 
-    bare = types.SimpleNamespace(network=study.network, solver_state=study.solver_state,
-                                 network_revision=study.network_revision)
-    assert explain_study_figure("expected_shortfall", ctx=bare)["outcome"]["state"] == "fresh"
-    with pytest.raises(TargetUnknown) as exc:  # no solver state at all: no study, never a 500
-        explain_study_figure("expected_shortfall", ctx=types.SimpleNamespace(network=study.network))
+    bare = types.SimpleNamespace(
+        network=study.network,
+        solver_state=study.solver_state,
+        network_revision=study.network_revision,
+    )
+    assert (
+        explain_study_figure("expected_shortfall", ctx=bare)["outcome"]["state"]
+        == "fresh"
+    )
+    with pytest.raises(
+        TargetUnknown
+    ) as exc:  # no solver state at all: no study, never a 500
+        explain_study_figure(
+            "expected_shortfall", ctx=types.SimpleNamespace(network=study.network)
+        )
     assert exc.value.error_kind == "study_not_run"
 
 
 def test_a_text_assumption_row_compares_exactly(study):
     study.network.generators.loc["g", "carrier"] = "solar"
-    study.solver_state["eh_study"]["assumptions"] = [_row(key="g_carrier", value="solar", field="carrier")]
+    study.solver_state["eh_study"]["assumptions"] = [
+        _row(key="g_carrier", value="solar", field="carrier")
+    ]
     assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
     study.network.generators.loc["g", "carrier"] = "wind"
     assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "stale"
@@ -568,7 +673,9 @@ def test_a_walk_that_compared_nothing_never_reads_fresh(study):
     for figure in S.FIGURES:
         out = explain_study_figure(figure)
         assert out["outcome"]["state"] == "uncompared", figure
-        assert out["outcome"]["complete"] is True and out["outcome"]["truncated"] is False
+        assert (
+            out["outcome"]["complete"] is True and out["outcome"]["truncated"] is False
+        )
 
 
 # ── the assumptions list ────────────────────────────────────────────────────
@@ -612,7 +719,9 @@ def test_assumptions_that_are_not_a_list_read_uncompared(study):
 
 def test_a_row_with_no_key_or_label_is_named_by_its_place(study):
     study.solver_state["eh_study"]["assumptions"] = [_row(key=None, label=None)]
-    step = _step(explain_study_figure("expected_shortfall"), S.input_id("assumption/#0"))
+    step = _step(
+        explain_study_figure("expected_shortfall"), S.input_id("assumption/#0")
+    )
     assert step["label"] == "#0" and step["state"] == "fresh"
 
 
@@ -620,12 +729,21 @@ def test_two_rows_with_one_key_are_two_inputs(study):
     study.solver_state["eh_study"]["assumptions"] = [_row(), _row(value=11.0)]
     out = explain_study_figure("expected_shortfall")
     assert out["outcome"]["state"] == "stale"
-    assert len([s for s in out["steps"] if s["node"].startswith(S.input_id("assumption/"))]) == 2
+    assert (
+        len(
+            [s for s in out["steps"] if s["node"].startswith(S.input_id("assumption/"))]
+        )
+        == 2
+    )
 
 
 def test_a_long_walk_is_cut_at_max_steps_and_marked_truncated(study):
-    study.solver_state["eh_study"]["assumptions"] = [_row(key=f"r{i}") for i in range(MAX_STEPS)]
-    study.network.generators.loc["g", "p_nom"] = 12.0  # every row is stale, most past the cut
+    study.solver_state["eh_study"]["assumptions"] = [
+        _row(key=f"r{i}") for i in range(MAX_STEPS)
+    ]
+    study.network.generators.loc["g", "p_nom"] = (
+        12.0  # every row is stale, most past the cut
+    )
     out = explain_study_figure("expected_shortfall")
     assert out["outcome"]["truncated"] is True and out["outcome"]["complete"] is False
     assert out["outcome"]["steps_total"] > MAX_STEPS == len(out["steps"])
@@ -657,19 +775,33 @@ def _state_bytes(ctx) -> str:
 
 
 def _net_bytes(n) -> str:
-    return json.dumps({"meta": n.meta, "generators": n.generators.to_dict()}, sort_keys=True, default=str)
+    return json.dumps(
+        {"meta": n.meta, "generators": n.generators.to_dict()},
+        sort_keys=True,
+        default=str,
+    )
 
 
 @pytest.mark.parametrize("figure", S.FIGURES)
-def test_the_route_is_explain_study_figure_and_writes_nothing(client, project, bound_ctx, figure):
-    before = (_net_bytes(project.network), copy.deepcopy(project.solver_state["eh_study"]),
-              _state_bytes(project), project.network_revision)
+def test_the_route_is_explain_study_figure_and_writes_nothing(
+    client, project, bound_ctx, figure
+):
+    before = (
+        _net_bytes(project.network),
+        copy.deepcopy(project.solver_state["eh_study"]),
+        _state_bytes(project),
+        project.network_revision,
+    )
     res = client.get(URL.format(figure), params={"project_id": project.project_uuid})
     assert res.status_code == 200, res.text
     with bound_ctx(client):
         assert res.json() == explain_study_figure(figure)
-    after = (_net_bytes(project.network), project.solver_state["eh_study"],
-             _state_bytes(project), project.network_revision)
+    after = (
+        _net_bytes(project.network),
+        project.solver_state["eh_study"],
+        _state_bytes(project),
+        project.network_revision,
+    )
     assert after == before
 
 
@@ -698,5 +830,7 @@ def test_the_route_needs_a_signed_in_reader(client, project):
     import main
 
     with TestClient(main.app) as anon:
-        res = anon.get(URL.format("verdict"), params={"project_id": project.project_uuid})
+        res = anon.get(
+            URL.format("verdict"), params={"project_id": project.project_uuid}
+        )
     assert res.status_code == 401
