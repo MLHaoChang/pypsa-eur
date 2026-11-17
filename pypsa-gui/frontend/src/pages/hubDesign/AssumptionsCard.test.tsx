@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { FlowItem } from '../../api/flow'
 import { useUIStore } from '../../store/uiStore'
 import { countOpen } from '../../utils/flowItems'
-import { ASSUMPTIONS_OPEN_KEY, AssumptionsCard, assumedItems, isAssumedItem } from './AssumptionsCard'
+import { ASSUMPTIONS_OPEN_KEY, AssumptionsCard, DESIGN_GROUP, assumedItems, assumptionGroups, isAssumedItem } from './AssumptionsCard'
 
 const ackMany = vi.hoisted(() => vi.fn())
 const openInPlace = vi.hoisted(() => vi.fn())
@@ -141,5 +141,33 @@ describe('AssumptionsCard', () => {
     expect(screen.getByTestId('assumptions-toggle').textContent).toContain(`· ${assumed.length} not yet confirmed`)
     // Every assumed row is one of the open "to check" the Readiness list and the Expert badge count.
     expect(countOpen(section).check).toBe(assumed.length)
+  })
+
+  it('groups the open rows under plain headings by work card, in first-seen order', () => {
+    const mixed = [item(0, { card: 'grid' }), item(1), item(2, { card: 'reliability' }), item(3, { card: 'grid' })]
+    expect(assumptionGroups(mixed).map(g => [g.title, g.rows.map(r => r.code)])).toEqual([
+      ['Grid connection', ['assumed_row0', 'assumed_row3']],
+      [DESIGN_GROUP, ['assumed_row1']],
+      ['Reliability goal', ['assumed_row2']],
+    ])
+    renderCard(mixed)
+    openCard()
+    const groups = screen.getAllByTestId('assumption-group')
+    expect(groups.map(g => g.querySelector('p')?.textContent)).toEqual(['Grid connection', DESIGN_GROUP, 'Reliability goal'])
+    expect(screen.getAllByTestId('assumption-row')).toHaveLength(4)
+  })
+
+  it('one group shows no heading, and grouping leaves the acknowledge payload as given', async () => {
+    renderCard(rows(3))
+    openCard()
+    expect(screen.getAllByTestId('assumption-group')).toHaveLength(1)
+    expect(screen.queryByText(DESIGN_GROUP)).toBeNull()
+    cleanup()
+    const mixed = [item(0, { card: 'grid' }), item(1), item(2, { card: 'grid' })]
+    renderCard(mixed)
+    openCard()
+    fireEvent.click(screen.getByTestId('assumptions-accept-all'))
+    await waitFor(() => expect(ackMany).toHaveBeenCalledTimes(1))
+    expect(ackMany).toHaveBeenCalledWith('p', mixed.map(r => ({ code: r.code, entity: r.target.entity })))
   })
 })

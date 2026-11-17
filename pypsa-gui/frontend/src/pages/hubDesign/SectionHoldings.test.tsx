@@ -37,6 +37,16 @@ describe('SectionHoldings', () => {
       .toEqual(['Generators (1)', 'Stores (1)'])
   })
 
+  it('a helper row reads in plain words, a plain generator keeps its name (guided-results 03)', () => {
+    render(<SectionHoldings id="assets" pending={false} failed={false}
+      holds={[held({}), held({ entity: '__lost_steel', helper: true }), held({ entity: 'grid_x', helper: true })]} />)
+    const rows = screen.getAllByTestId('section-held')
+    expect(rows.map(r => r.querySelector('span')?.textContent)).toEqual(
+      ['pv', 'lost production (steel)', 'added by the model (grid_x)'])
+    expect(screen.queryByText('__lost_steel')).toBeNull()
+    expect(screen.getAllByTestId('section-held-edit')[1].getAttribute('aria-label')).toBe('Edit lost production (steel)')
+  })
+
   it('a group longer than 8 folds, and "Show all" lists every row', () => {
     render(<SectionHoldings id="assets" pending={false} failed={false} holds={gens(11)} />)
     expect(screen.getAllByTestId('section-held')).toHaveLength(8)

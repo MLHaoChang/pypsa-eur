@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2 } from 'lucide-react'
-import { ackFlowItems, type FlowItem } from '../../api/flow'
+import { ackFlowItems, type FlowItem, type ScopeCardId } from '../../api/flow'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { openFlowTargetInPlace } from '../../layout/flowNavigation'
@@ -26,6 +26,30 @@ export const isAssumedItem = (it: FlowItem): boolean =>
 /** The card's rows: the open items (the one filter the Readiness count and the
  *  Expert badge use) that are assumed defaults. */
 export const assumedItems = (items: FlowItem[]): FlowItem[] => items.filter(i => isOpenItem(i) && isAssumedItem(i))
+
+/** The open card's plain headings, by the work card a default belongs to
+ *  (spec §2: grid connection, units and sizing, reliability goal, costs). */
+export const ASSUMPTION_GROUPS: Record<ScopeCardId, string> = {
+  capacity: 'Units and sizing',
+  grid: 'Grid connection',
+  control: 'Control',
+  reliability: 'Reliability goal',
+  commercial: 'Costs and finance',
+  handoff: 'Hand-off',
+}
+/** A default no work card claims: the design itself. */
+export const DESIGN_GROUP = 'The design'
+
+/** Rows under their heading, in first-seen order. Display only: the ack sends
+ *  `items` as given, whatever the grouping. */
+export function assumptionGroups(items: FlowItem[]): { title: string; rows: FlowItem[] }[] {
+  const groups = new Map<string, FlowItem[]>()
+  for (const it of items) {
+    const title = (it.card && ASSUMPTION_GROUPS[it.card]) || DESIGN_GROUP
+    groups.set(title, [...(groups.get(title) ?? []), it])
+  }
+  return [...groups].map(([title, rows]) => ({ title, rows }))
+}
 
 /** Open or closed is a per-user convenience in this browser, never project state. */
 export const ASSUMPTIONS_OPEN_KEY = 'pypsa-gui:assumptions-open'
@@ -101,9 +125,17 @@ export function AssumptionsCard({ items, waiting = false }: { items: FlowItem[];
         </p>
       )}
       {open && (
-        <ul id="assumptions-rows" className="flex flex-col gap-1.5">
-          {items.map((it, i) => <AssumedRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
-        </ul>
+        <div id="assumptions-rows" className="flex flex-col gap-2">
+          {assumptionGroups(items).map((g, gi, all) => (
+            <div key={g.title} data-testid="assumption-group">
+              {/* One group needs no heading: the card's own line names it. */}
+              {all.length > 1 && <p className="pb-0.5 text-[11px] font-medium text-muted">{g.title}</p>}
+              <ul className="flex flex-col gap-1.5">
+                {g.rows.map((it, i) => <AssumedRow key={`${it.code}-${it.target.entity ?? ''}-${gi}-${i}`} item={it} />)}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
       {accept.isError && (
         <p role="status" data-testid="assumptions-error" className="text-[11px] text-danger">
