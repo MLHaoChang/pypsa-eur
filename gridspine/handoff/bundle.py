@@ -1,4 +1,5 @@
-"""The handoff bundle: one directory per selected hour that stands alone.
+"""
+The handoff bundle: one directory per selected hour that stands alone.
 
 Contents: the .raw and .dyr for the hour, ``contingencies.csv``, the ledger as
 prose (``ledger.md``), the load-flow result, the hour's own dispatch and loads
@@ -33,11 +34,11 @@ from gridspine.handoff.dyr_writer import _machines, write_dyr
 from gridspine.handoff.raw_writer import write_raw
 from gridspine.ingest.pandapower_source import RES_LEDGER
 from gridspine.ingest.synthetic_profiles import PROFILE_LEDGER
+from gridspine.schema.capacity import validate_capacity
 from gridspine.schema.contingency import (
     validate_contingency_results,
     validate_fault_levels,
 )
-from gridspine.schema.capacity import validate_capacity
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch, validate_loads
 from gridspine.static.contingency_set import EXT_GRID_EXCLUSION_LEDGER
@@ -106,6 +107,9 @@ def write_ledger_readme(entries, templates: UnitTemplates, measurements: dict, p
     lines += [
         "Every number in this bundle is tagged `measured`, `datasheet` or "
         "`assumed`. This file is the appendix that lets a reader tell them apart.",
+        "",
+        "The `.dyr` is the PSS/E v33 REGCA1/REECA1 set. The full v35 WECC set (REECC1, "
+        "REPCA1, type 3 wind) is in the PSS/E pack (`gridspine.handoff.psse_pack`).",
         "",
     ]
 
@@ -197,8 +201,10 @@ def write_ledger_readme(entries, templates: UnitTemplates, measurements: dict, p
 
 
 def write_ledger_json(entries, templates: UnitTemplates, measurements: dict, hour, path) -> dict:
-    """`ledger.md`'s content as data. Written from the same inputs, never parsed
-    back out of the prose."""
+    """
+    `ledger.md`'s content as data. Written from the same inputs, never parsed
+    back out of the prose.
+    """
     counts = provenance_counts(templates)
     assumed = templates.params[templates.params["source"] == "assumed"]
     data = {

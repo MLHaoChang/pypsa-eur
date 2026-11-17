@@ -95,9 +95,11 @@ def _records(text):
 
 
 def _net():
-    """The toy (ext grid BUS_01, gen + inverter on BUS_02) with a second
+    """
+    The toy (ext grid BUS_01, gen + inverter on BUS_02) with a second
     BUS_01 -> BUS_02 line. Both lines run FROM the grid bus, so the RAW's I is
-    the grid side and the PoC line (the second) is CKT '2'."""
+    the grid side and the PoC line (the second) is CKT '2'.
+    """
     net = _toy_net_with_inverter()
     pp.create_line_from_parameters(
         net, from_bus=0, to_bus=1, length_km=1.0,
@@ -196,8 +198,10 @@ def test_reecc1_is_refused_for_v33(tmp_path):
 
 
 def test_case39_dyr_is_byte_identical_to_master(tmp_path):
-    """Golden: master 58d4eb5ae738d697236575580fd2b0d7e83615e3's writer, case39
-    with its five REGCA1 + REECA1 wind units."""
+    """
+    Golden: master 58d4eb5ae738d697236575580fd2b0d7e83615e3's writer, case39
+    with its five REGCA1 + REECA1 wind units.
+    """
     net = load_case39_res()
     t = load_unit_templates()
     for ibr in (ibr_params(t), wecc_params(t)):
@@ -393,8 +397,10 @@ def test_a_con_filling_ten_columns_keeps_a_separator():
 
 
 def test_reecc1_con_order_hand_listed():
-    """Hand-listed from the public v35 parser table (VeraGrid v35 dyr.py),
-    not derived from REECA1_CONS."""
+    """
+    Hand-listed from the public v35 parser table (VeraGrid v35 dyr.py),
+    not derived from REECA1_CONS.
+    """
     assert up.REECC1_CONS == tuple("reec_" + n for n in (
         "vdip", "vup", "trv", "dbd1", "dbd2", "kqv", "iqh1", "iql1", "vref0", "tp",
         "qmax", "qmin", "vmax", "vmin", "kqp", "kqi", "kvp", "kvi", "tiq", "dpmax",
@@ -460,3 +466,15 @@ def test_range_boundaries_that_are_legal_load(tmp_path, ibr):
 def test_htfrac_zero_is_refused(tmp_path):
     with pytest.raises(ContractError, match="wtdt_htfrac .* must lie in \\(0, 1\\)"):
         _load(tmp_path, WIND3 | {"wtdt_htfrac": 0.0})
+
+
+def test_synchronous_records_keep_a_separator_before_a_ten_column_con():
+    # GK A2 (PR3 note): the synchronous and DYR_CONTROLS records use the same
+    # _con as the converters, so -998.00000 cannot run into the previous value.
+    from gridspine.handoff.dyr_writer import DYR_CONTROLS, format_record
+
+    model = next(iter(DYR_CONTROLS))
+    icons, cons = DYR_CONTROLS[model]
+    values = {n: 1 for n in icons} | {n: -998.0 for n in cons}
+    line = format_record(1, "1", model, values)
+    assert line.count(" -998.00000") == len(cons)

@@ -2,10 +2,11 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# DRAFT (GC-04 PR4, owner decision GC04-DEFAULTS-1 "Generic, tagged"): one public generic
-# WECC parameter set for converters with no supplied parameters. Every value is assumed;
-# not for submission until replaced with OEM data. Transcribed from public WECC/EPRI
-# documents (cited per block); not yet loaded or validated by gridspine.
+# Owner decision GC04-DEFAULTS-1 ("Generic, tagged"): one public generic WECC parameter
+# set for grid-following converters with no supplied parameters. Every value is assumed;
+# a pack that uses it is not for submission until replaced with OEM data. Transcribed
+# from public WECC/EPRI documents (cited per block); loaded and checked by
+# gridspine/templates/wecc_generic.py.
 source_note: "Generic WECC 2nd-gen IBR parameters transcribed from public WECC/EPRI example records (illustrative, not any real plant); PSLF-named example values mapped to PSS/E REGCA1/REECA1/REECC1/REPCA1 keys."
 blocks:
   regc:
@@ -80,7 +81,7 @@ blocks:
       vp4: {value: 1.3, from: "adjusted: source vp4=0.0 is an unused trailing pair; strictly increasing breakpoints required, so set just above vp3"}
       ip4: {value: 1.0, from: "adjusted: source ip4=0.0 (unused pair); held at ip3 so the curve equals the source 3-point table"}
   reecc:
-    source: "WECC REMTF, 'WECC Battery Storage Dynamic Modeling Guideline', November 2016 (file rev. 4-7-17), pp.6, 11-12, 20 (Table 5) and Appendix A p.38, https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC%20Battery%20Storage%20Guideline%20updates%204-7-17%20.pdf ; Appendix A states REEC_C = REEC_A plus T/SOC parameters, so shared parameters are taken from the WECC 2019 PV guideline example reec_a record pp.27-28 (URL as reec block); pmin from EPRI, 'Model User Guide for Generic Renewable Energy System Models', 3002006525, Technical Update June 2015, Section 3 p.3-8, https://transmission.bpa.gov/business/operations/GridModeling/Model%20User%20Guide%20for%20Generic%20Renewable%20Energy%20System%20Models.pdf"
+    source: "WECC REMTF, 'WECC Battery Storage Dynamic Modeling Guideline', November 2016 (file rev. 4-7-17), pp.6, 11-12, 20 (Table 5) and Appendix A p.38, https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC%20Battery%20Storage%20Guideline%20updates%204-7-17%20.pdf ; Appendix A states REEC_C = REEC_A plus T/SOC parameters, so shared parameters are taken from the WECC 2019 PV guideline example reec_a record pp.27-28 (URL as reec block); pmin from EPRI, 'Model User Guide for Generic Renewable Energy System Models', 3002006525, Technical Update June 2015, Section 3 p.3-8"
     values:
       pfflag: {value: 0, from: "WECC BESS 2016 Table 5 p.20 ('Pflag' = PF control flag set 0)"}
       vflag: {value: 1, from: "WECC BESS 2016 Table 5 p.20 Vflag=1"}

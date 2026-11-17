@@ -1,0 +1,285 @@
+"""
+The PSS/E v35 study pack (GC-04 PR5), written next to the campus bundle.
+
+Oracles:
+* the generic WECC set (owner decision GC04-DEFAULTS-1): every grid-following
+  converter's records carry the YAML's values, each unit's assumed groups
+  are listed in the manifest and README, and the pack says it is not for
+  submission;
+* the bundle stays as it was: its own files, and the pack's .dyr starts with
+  the bundle's records byte for byte;
+* the .seq's own return (write_seq) is the manifest's, split into not written
+  (an omitted earthing transformer, GK Q4) and assumed;
+* GC-01: the model set is cited only when one is given (GK S3);
+* every script is checked against the manifest's file list (GK S1).
+"""
+
+import copy
+import datetime
+import json
+
+import pytest
+
+from gridspine.handoff import psse_pack as PP
+from gridspine.handoff.dyr_writer import PIN_NOTE, PocBranch
+from gridspine.handoff.psspy_scripts import check_script
+from gridspine.handoff.seq_writer import NOT_WRITTEN, write_seq
+from gridspine.schema.contracts import ContractError
+from gridspine.schema.model_set import manifest as model_set_manifest
+from gridspine.schema.model_set import new_model_set
+from gridspine.templates.wecc_generic import NOT_FOR_SUBMISSION, load_generic
+from tests.gridspine.test_campus import t
+from tests.gridspine.test_campus_bundle import bundle
+from tests.gridspine.test_dyr_wecc import _records
+from tests.gridspine.test_island_flow import rows, spec
+
+PLANT = PP.Plant("PV1", PocBranch("trafo", 0, 0))  # TR1, grid end at the PCC
+GENERIC = load_generic()
+
+
+def _pack_of(b):
+    return b.path / PP.SUBDIR
+
+
+def _manifest(b):
+    return json.loads((_pack_of(b) / "manifest.json").read_text())
+
+
+def _hour_campus(tmp_path, s=None):
+    """The campus and the bundle's own inputs to the pack, as the bundle passes them."""
+    camp, b = bundle(tmp_path / "b", s=s)
+    from gridspine.handoff import campus_bundle as CB
+
+    hc = CB.dataclasses.replace(camp, net=copy.deepcopy(camp.net))
+    CB.apply_hour(hc, rows())
+    lines = (b.path / f"{b.path.name}.dyr").read_text().splitlines()
+    grid = next(
+        r
+        for r in _records((b.path / f"{b.path.name}.dyr").read_text())
+        if r[1] == "GENCLS"
+    )
+    return hc, b.path.name, lines, (grid[0], grid[2])
+
+
+def _write(tmp_path, s=None, **kw):
+    hc, case, lines, grid = _hour_campus(tmp_path, s)
+    m = PP.write_psse_pack(tmp_path / "pack", hc, case, lines, grid, **kw)
+    return hc, m, tmp_path / "pack"
+
+
+def _gfl_bess(s=None):
+    """The fixture's BESS made grid-following: its island block removed."""
+    s = copy.deepcopy(s or spec())
+    s["campus"]["units"]["BESS1"].pop("island")
+    return s
+
+
+# --------------------------------------------------------------------------
+# the hook in the campus bundle
+
+
+def test_the_bundle_writes_the_pack_and_keeps_its_own_files(tmp_path):
+    camp, b = bundle(tmp_path)
+    man = json.loads((b.path / "manifest.json").read_text())
+    assert man["files"] == [f"{b.path.name}.{e}" for e in ("raw", "dyr")] + [
+        "gfm_models.csv",
+        "README.md",
+        "manifest.json",
+    ]
+    assert sorted(p.name for p in b.path.iterdir()) == sorted(
+        man["files"] + [PP.SUBDIR]
+    )
+    assert man["psse_pack"] == _manifest(b)
+    for f in man["psse_pack"]["files"]:
+        assert (_pack_of(b) / f).is_file(), f
+
+
+def test_the_pack_dyr_starts_with_the_bundle_records_byte_for_byte(tmp_path):
+    _camp, b = bundle(tmp_path)
+    own = (b.path / f"{b.path.name}.dyr").read_text()
+    pack = (_pack_of(b) / f"{b.path.name}.dyr").read_text()
+    assert pack.startswith(own) and len(pack) > len(own)
+
+
+# --------------------------------------------------------------------------
+# generic, tagged (GC04-DEFAULTS-1)
+
+
+def test_a_grid_following_converter_gets_the_generic_set_tagged_assumed(tmp_path):
+    hc, m, out = _write(tmp_path)
+    assert m["not_for_submission"] == NOT_FOR_SUBMISSION
+    assert m["assumed"] == [
+        {
+            "unit": "PV1",
+            "models": ["REGCA1", "REECA1"],
+            "source": "assumed",
+            "from": "wecc_generic.yaml",
+        }
+    ]
+    recs = _records((out / f"{m['case']}.dyr").read_text())
+    regc = [r for r in recs if r[1] == "REGCA1"]
+    assert len(regc) == 1
+    # ICON lvplsw, then CON tg: the YAML's own values
+    assert [float(v) for v in regc[0][3][:2]] == [
+        GENERIC["regc"]["regc_lvplsw"],
+        GENERIC["regc"]["regc_tg"],
+    ]
+    assert [r[1] for r in recs if r[1] in ("REECA1", "REECC1", "REPCA1")] == ["REECA1"]
+
+
+def test_a_grid_following_battery_gets_reecc1(tmp_path):
+    _hc, m, out = _write(tmp_path, _gfl_bess())
+    assert {a["unit"]: a["models"] for a in m["assumed"]} == {
+        "BESS1": ["REGCA1", "REECC1"],
+        "PV1": ["REGCA1", "REECA1"],
+    }
+    models = [r[1] for r in _records((out / f"{m['case']}.dyr").read_text())]
+    assert models.count("REECC1") == 1 and models.count("REECA1") == 1
+
+
+def test_readme_marks_not_for_submission_and_lists_every_assumed_group(tmp_path):
+    _hc, m, out = _write(tmp_path, _gfl_bess(), plant=PLANT)
+    readme = (out / "README.md").read_text()
+    assert f"**{NOT_FOR_SUBMISSION.capitalize()}.**" in readme
+    assert "- BESS1: REGCA1, REECC1, every value assumed" in readme
+    assert "- PV1: REGCA1, REECA1, REPCA1, every value assumed" in readme
+
+
+def test_with_no_grid_following_converter_nothing_is_assumed(tmp_path):
+    s = spec()
+    u = s["campus"]["units"]
+    u["PV1"]["island"] = copy.deepcopy(u["BESS1"]["island"])
+    _hc, m, out = _write(tmp_path, s)
+    assert m["assumed"] == [] and m["not_for_submission"] is None
+    assert "not for submission" not in (out / "README.md").read_text().lower()
+
+
+# --------------------------------------------------------------------------
+# the aggregated plant: REPCA1 and the scripts
+
+
+def test_the_plant_takes_repca1_on_its_poc_branch(tmp_path):
+    _hc, m, out = _write(tmp_path, plant=PLANT)
+    recs = _records((out / f"{m['case']}.dyr").read_text())
+    pcc = next(
+        b for b, model, _i, _t in recs if model == "GENCLS"
+    )  # the grid sits on the PCC
+    pv = next(
+        b for b, model, _i, _t in recs if model == "REGCA1"
+    )  # PV1 on MV1, TR1's plant end
+    repc = [t for _b, model, _i, t in recs if model == "REPCA1"]
+    assert len(repc) == 1
+    busr, bus1, bus2, ckt = repc[0][:4]
+    assert ckt.strip("'").strip() == "1"
+    assert (int(busr), int(bus1), int(bus2)) == (pcc, pv, pcc)
+    assert m["assumed"][0]["models"] == ["REGCA1", "REECA1", "REPCA1"]
+    assert m["scripts_not_written"] is None
+
+
+def test_without_a_plant_no_scripts_and_the_reason_is_listed(tmp_path):
+    _hc, m, out = _write(tmp_path)
+    assert m["outputs"] == {} and not list(out.glob("run_*.py"))
+    assert m["scripts_not_written"].startswith("psspy scripts not written")
+    assert m["scripts_not_written"] in (out / "README.md").read_text()
+
+
+def test_every_script_passes_check_script_against_the_manifest(tmp_path):
+    _hc, m, out = _write(tmp_path, plant=PLANT)
+    scripts = [f for f in m["files"] if f.startswith("run_")]
+    assert scripts and sorted(p.name for p in out.glob("run_*.py")) == scripts
+    allowed = set(m["files"]) | {f for pair in m["outputs"].values() for f in pair}
+    for name in scripts:
+        check_script((out / name).read_text(), allowed)
+    # a manifest that drops the .dyr fails the check (S1 missing reference)
+    with pytest.raises(ContractError):
+        check_script((out / scripts[0]).read_text(), allowed - {f"{m['case']}.dyr"})
+
+
+def test_the_battery_built_from_the_grid_lists_its_assumptions(tmp_path):
+    _hc, m, _out = _write(tmp_path, plant=PLANT)
+    assert m["battery_assumed"] == list(PP.BATTERY_ASSUMED)
+
+
+@pytest.mark.parametrize("unit", ["GEN1", "BESS1", "NOPE"])
+def test_a_plant_that_is_not_a_grid_following_converter_is_refused(tmp_path, unit):
+    with pytest.raises(
+        ContractError, match=f"plant unit '{unit}' is not a grid-following converter"
+    ):
+        _write(tmp_path, plant=PP.Plant(unit, PLANT.branch))
+
+
+# --------------------------------------------------------------------------
+# .seq (GK Q4), contingencies, notes
+
+
+def test_seq_notes_are_write_seqs_own_return_split_by_kind(tmp_path):
+    s = spec()
+    s["campus"]["earthing_transformers"] = {
+        "ET1": {"bus": "MV2", "x0_ohm": t(15.0, "datasheet"), "r_n_ohm": t(25.0)}
+    }
+    hc, m, _out = _write(tmp_path, s)
+    own = write_seq(
+        hc, tmp_path / "own.seq", version=35, case="max", f_hz=float(hc.net.f_hz)
+    )
+    assert m["seq"]["not_written"] == [n for n in own if NOT_WRITTEN in n]
+    assert m["seq"]["not_written"] == [f"seq: earthing transformer ET1: {NOT_WRITTEN}"]
+    assert (
+        m["seq"]["assumed"] == [n for n in own if NOT_WRITTEN not in n]
+        and m["seq"]["assumed"]
+    )
+    readme = (_out / "README.md").read_text()
+    assert f"- .seq: seq: earthing transformer ET1: {NOT_WRITTEN}" in readme
+    assert (
+        "- .seq: seq: grid GRID: no x0x_max; X0 = X1, R0/X0 = R/X (assumed)" in readme
+    )
+
+
+def test_the_generated_contingency_set_is_written(tmp_path):
+    _hc, m, out = _write(tmp_path)
+    con = (out / f"{m['case']}.con").read_text()
+    assert m["contingencies"]["written"] == con.count("CONTINGENCY ") > 0
+    assert m["contingencies"]["not_written"] == []
+
+
+def test_pending_notes_in_manifest_and_readme(tmp_path):
+    _hc, m, out = _write(tmp_path)
+    readme = (out / "README.md").read_text()
+    assert (
+        PIN_NOTE in m["pending_verification"]
+        and PP.BUSR_NOTE in m["pending_verification"]
+    )
+    assert (
+        PP.BUSR_NOTE
+        == "BUSR = BUS2, BUS1→BUS2 export: pending verification on first PSS/E load"
+    )
+    for note in m["pending_verification"]:
+        assert f"- {note}" in readme
+
+
+# --------------------------------------------------------------------------
+# GC-01 model set (GK S3)
+
+_NOW = datetime.datetime(2026, 11, 17, tzinfo=datetime.UTC)
+
+
+def test_the_model_set_is_cited_when_given(tmp_path):
+    ms = new_model_set(spec(), {"hour": "h18"}, now=_NOW)
+    _hc, m, out = _write(tmp_path, model_set=ms, variant="detailed")
+    assert m["model_set"] == model_set_manifest(ms, "detailed")
+    readme = (out / "README.md").read_text()
+    assert f"- model_set_id: `{ms.model_set_id}`" in readme
+    assert (
+        f"- data_hash: `{ms.data_hash}`" in readme and "- variant: `detailed`" in readme
+    )
+
+
+def test_no_model_set_no_citation(tmp_path):
+    _hc, m, out = _write(tmp_path)
+    assert "model_set" not in m
+    assert "model_set_id" not in (out / "README.md").read_text()
+
+
+def test_a_model_set_without_its_variant_is_refused(tmp_path):
+    ms = new_model_set(spec(), {}, now=_NOW)
+    with pytest.raises(ContractError, match="model_set and its variant together"):
+        _write(tmp_path, model_set=ms)

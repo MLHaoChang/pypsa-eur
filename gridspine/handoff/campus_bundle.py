@@ -1,4 +1,5 @@
-"""The campus PSS/E handoff: one bundle per island hour (island plan I8, PSS/E path).
+"""
+The campus PSS/E handoff: one bundle per island hour (island plan I8, PSS/E path).
 
 Plan: ``docs/superpowers/plans/2026-10-07-campus-island-operation.md``.
 
@@ -165,9 +166,11 @@ def _gfm_rows(campus, uid, block, num, mid):
 
 
 def export_campus_bundle(outdir, campus, rows, hour, ledger=()) -> CampusBundle:
-    """Write the bundle for one island ``hour`` (a label) from that hour's
+    """
+    Write the bundle for one island ``hour`` (a label) from that hour's
     rows of the campus hourly table. ``ledger`` adds the caller's entries
-    to the README's."""
+    to the README's.
+    """
     case = f"{campus.name}_{hour}"
     out = Path(outdir) / case
     out.mkdir(parents=True, exist_ok=True)
@@ -219,6 +222,8 @@ def export_campus_bundle(outdir, campus, rows, hour, ledger=()) -> CampusBundle:
                 "records": records, "gfm_units": sorted(gfm_df["unit_id"].unique().tolist()),
                 "omitted": [u for u, _ in omitted], "pending_verification": PENDING,
                 "event": {"kind": "islanding", "trip_machine": list(grid_id) if grid_id else None, "t_s": 0.0}}
+    from gridspine.handoff.psse_pack import SUBDIR, write_psse_pack  # noqa: PLC0415 (GC-04 pack, one call)
+    manifest["psse_pack"] = write_psse_pack(out / SUBDIR, hour_campus, case, lines, grid_id)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return CampusBundle(out, records, drafted_df, omitted)
 

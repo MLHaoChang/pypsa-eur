@@ -3,7 +3,7 @@
 
 # GC-04 PSS/E pack: RAW v35/36, .seq, WECC second-generation .dyr, .con, psspy test scripts
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (uses the detailed model until GC-01 lands; one call site switches to the model set)
@@ -113,3 +113,12 @@ Every PR: release-note fragment, GC-TEXT-1 grep of the diff, targeted mutants an
 PR3 research (secondary public sources only; no vendor primary is public). ICON/CON counts, earliest library version: REGCA1 1/14 (33); REECA1 6/45 (33); REECC1 5/45 (35; REECCU1 is a user model in 33/34); REPCA1 7/27 (33); WTDTA1 0/5, WTARA1 0/2, WTPTA1 0/10, WTTQA1 1/15 (all 33); REGCBU1 2/7 and REECDU1 6/77 user models only. Sources: andes `andes/io/psse-dyr.yaml`; GridPACK `src/parser/parser_classes`; PowerSystemsTestData `psse_dyr/240busWECC_2018_PSS.dyr` l.800-807 (REPCA1 sample); WECC "Summary of 2nd Generation Generic RES Models Rev5" p.4 (model sets).
 
 **PR3 builder notes (2026-11-17).** P2: one REPCA1 per PoC branch, on the aggregated machine (GC-01); two machines on one PoC branch are refused, because N controllers each measuring the whole plant's flow on their own MBASE multiply the loop gain by N. BUSR is the grid end of the PoC branch (BUS2). Carried to PR4: the generic "assumed" WECC default sets (P5's last sentence; not in `campus_assets.yaml`, whose sha256 the shipped defaults packs pin), `PIN_NOTE` in the pack README/manifest (P1), and switching `bundle.py` from `ibr_params` to `wecc_params` with a PoC branch per controlled plant (until then a REECC1 battery is ledgered "no converter record", and REPCA1/type 3 groups are not written by the bundle). Not checked: that the PoC branch actually leads to the plant's machine (the writer has no notion of plant topology).
+
+**PR4/PR5 split (builder 4, 2026-11-17; GK A2 agreed).** PR4 (`claude/gc04-con-scripts`): `.con`/`.sub`/`.mon` and the psspy scripts with `check_script` (S1, S2). PR5 (`claude/gc04-psse-pack`):
+- `templates/wecc_generic.py` loads the public generic WECC set (owner GC04-DEFAULTS-1);
+- `handoff/psse_pack.py` writes the v35 pack: RAW, .seq, .dyr, .con/.sub/.mon, scripts, README and manifest;
+- the one-call hook in `campus_bundle.py`;
+- the bundle ledger note, and a test pinning the bundle `.dyr` bytes to master;
+- the shared `_con` separator in the synchronous records.
+
+REPCA1 and the scripts are written only for a `Plant` (the GC-01 aggregated machine with its PoC branch). Without one, the manifest names the reason. The EPRI guide is cited by title and number only (GC-TEXT-1).
