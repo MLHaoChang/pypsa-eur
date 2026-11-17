@@ -375,7 +375,8 @@ def _poc_ids(net, poc):
         if key in seen:
             raise ContractError(
                 f"units {seen[key]} and {unit_id} share PoC branch {key}: one REPCA1 per "
-                "plant attaches to the aggregated machine (GC-01); several would multiply its gain"
+                "plant attaches to the aggregated machine: export the GC-01 aggregated model "
+                "(several would multiply the loop gain)"
             )
         seen[key] = unit_id
         out[unit_id] = (bus2, bus1, bus2, ckt)
