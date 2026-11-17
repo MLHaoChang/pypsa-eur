@@ -41,9 +41,13 @@ class Port:
     plain_name: str
     carrier: str = "any"
     side: str = ""  # left | right | top | bottom; empty: the canvas decides
+    component: str | None = (
+        None  # the one class this port belongs to; None: every class of the type
+    )
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "component": self.component,
             "id": self.id,
             "plain_name": self.plain_name,
             "model_name": self.id,
@@ -288,7 +292,11 @@ ASSET_TYPES: tuple[AssetTypeSpec, ...] = (
             Match("Link", carrier=r"data.?cent", port="bus0"),
             Match("Load", generic_unless=ELECTRICAL),
         ),
-        _ONE,
+        # A data hall drawn from a Link draws at its input side; one drawn from a Load at its bus.
+        (
+            Port("bus0", "Power in", "AC", component="Link"),
+            Port("bus", "Connected to", component="Load"),
+        ),
     ),
     # Infrastructure
     AssetTypeSpec(

@@ -22,6 +22,12 @@ router = APIRouter()
 _NOT_FOUND = "Not Found"
 
 
+def _matches(if_none_match: str, tag: str) -> bool:
+    """RFC 9110 weak comparison: `*` or any listed tag, `W/` prefix ignored."""
+    tags = {t.strip().removeprefix("W/") for t in if_none_match.split(",")}
+    return "*" in tags or tag in tags
+
+
 def _etag(body: bytes) -> str:
     return '"' + hashlib.sha256(body).hexdigest() + '"'
 
@@ -38,8 +44,7 @@ def get_catalogue(
     body = C.payload_bytes(function=function, depth=depth)
     tag = _etag(body)
     headers = {"ETag": tag, "Cache-Control": "no-cache"}
-    match = request.headers.get("if-none-match", "")
-    if tag in {t.strip() for t in match.split(",")}:
+    if _matches(request.headers.get("if-none-match", ""), tag):
         return Response(status_code=304, headers=headers)
     return Response(content=body, media_type="application/json", headers=headers)
 

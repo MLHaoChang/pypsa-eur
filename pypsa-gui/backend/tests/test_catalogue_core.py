@@ -48,6 +48,10 @@ def test_entry_is_complete(e):
     assert e.group in E.GROUP_IDS
     assert e.depth in E.DEPTHS
     assert e.spec.kind
+    if e.spec.kind in ("number", "int"):
+        assert e.spec.unit_display or (e.scope, e.model_name) in E.UNITLESS, (
+            f"{e.id}: no unit"
+        )
     assert 0 < len(e.short_help) <= 140, e.short_help
     assert isinstance(e.functions, dict)
     assert set(e.functions) <= set(FUNCTION_IDS)
@@ -249,3 +253,33 @@ def test_model_names_map_covers_every_entry():
     names = C.model_names()
     assert sum(len(v) for v in names.values()) == len(ENTRIES)
     assert names["Generator"]["p_nom"] == "Capacity"
+
+
+def test_unitless_list_has_no_stale_rows():
+    by = {(e.scope, e.model_name): e for e in ENTRIES}
+    for key in E.UNITLESS:
+        assert key in by and not by[key].spec.unit_display, key
+
+
+def test_every_enum_option_has_a_plain_name():
+    """GK B T3 / RAW-NAMES-1: no raw option token is served as a plain name."""
+    for e in ENTRIES:
+        if not e.spec.options:
+            continue
+        plain = E.options_plain_of(e.spec)
+        assert len(plain) == len(e.spec.options), e.id
+        for raw, name in zip(e.spec.options, plain):
+            assert "_" not in name, f"{e.id}: {raw} -> {name}"
+            assert name == raw or name not in e.spec.options, e.id
+
+
+def test_an_option_without_a_plain_name_reads_as_itself():
+    spec = FieldSpec(
+        "process_role",
+        "identity",
+        "Role",
+        "x",
+        kind="enum",
+        options=("buy_in", "brand_new"),
+    )
+    assert E.options_plain_of(spec) == ("Bought in", "brand_new")

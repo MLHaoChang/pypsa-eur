@@ -53,6 +53,13 @@ def test_if_none_match_gives_304_and_a_stale_tag_gives_200(client):
     again = client.get(ROUTE, headers={"If-None-Match": _tag(first)})
     assert again.status_code == 304 and again.content == b""
     assert _tag(again) == _tag(first)
+    assert (
+        client.get(
+            ROUTE, headers={"If-None-Match": f'"x", W/{_tag(first)}'}
+        ).status_code
+        == 304
+    )
+    assert client.get(ROUTE, headers={"If-None-Match": "*"}).status_code == 304
     stale = client.get(ROUTE, headers={"If-None-Match": '"0000"'})
     assert stale.status_code == 200 and stale.content == first.content
 
@@ -151,8 +158,9 @@ def test_catalogue_is_project_free_while_units_stay_per_asset(client, install_ne
         ),
         None,
     )
-    if name is None:
-        pytest.skip("template has no generator on a tonne bus")
+    assert name is not None, (
+        "the concentrator template must keep a generator on a tonne bus"
+    )
     units = client.get(f"/api/network/asset_schema/Generator/units/{name}").json()
     assert json.dumps(units).count("t/h") >= 1
 
@@ -176,3 +184,11 @@ def test_a_missing_guide_file_is_a_404_not_a_blank_page(monkeypatch):
     finally:
         monkeypatch.undo()
         C.clear_caches()
+
+
+def test_data_hall_ports_follow_the_class_it_is_drawn_from(client):
+    hall = next(t for t in client.get(ROUTE).json()["asset_types"] if t["id"] == "load")
+    assert {(p["component"], p["model_name"]) for p in hall["ports"]} == {
+        ("Link", "bus0"),
+        ("Load", "bus"),
+    }

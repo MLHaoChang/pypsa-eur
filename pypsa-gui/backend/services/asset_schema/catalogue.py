@@ -201,7 +201,7 @@ def _entry_dict(e: Entry) -> dict[str, Any]:
         "scale": s.scale,
         "kind": s.kind,
         "options": list(s.options),
-        "options_plain": list(s.options_plain or s.options),
+        "options_plain": list(E.options_plain_of(s)),
         "range": None,
         "default": e.default,
         "functions": e.functions,

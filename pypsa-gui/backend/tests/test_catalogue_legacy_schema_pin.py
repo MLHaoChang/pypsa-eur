@@ -31,11 +31,16 @@ def test_payload_byte_equal_to_the_recording(component):
 
 
 @pytest.mark.parametrize("component", sorted(RECORDED))
-def test_route_body_equal_to_the_recording(client, component):
+def test_route_bytes_equal_to_the_recording(client, component):
+    """The exact bytes FastAPI's JSONResponse renders for the recorded master payload (key order,
+    number formatting and all)."""
     r = client.get(f"/api/network/asset_schema/{component}")
     assert r.status_code == 200
-    assert r.json() == RECORDED[component]
-    # Key order on the wire is part of "byte-identical".
-    assert [list(f) for g in r.json()["groups"] for f in g["fields"]] == [
-        list(f) for g in RECORDED[component]["groups"] for f in g["fields"]
-    ]
+    want = json.dumps(
+        RECORDED[component],
+        ensure_ascii=False,
+        allow_nan=False,
+        indent=None,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert r.content == want

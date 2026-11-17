@@ -8,7 +8,10 @@ rules and overlay tables here, so one decision lives in one place:
 * plain names (RAW-NAMES-1: the rename table in the slice-01 PR body);
 * depth, functions, aliases and one-line help.
 
-A value set on the `FieldSpec` row itself always wins over a rule here.
+Where the `FieldSpec` row carries the attribute (id, plain_name, short_help, depth,
+aliases, options_plain), a value set on the row wins over a rule here. Scope,
+default and functions are per class, and rows are shared between classes, so
+those live here and in `catalogue.py` only.
 Entry ids derive from scope + plain name and are pinned by
 `catalogue.ids.txt`; a rename that would move an id must set `id=` on the row
 to the old id (the pin test says so).
@@ -185,6 +188,74 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "outage_rate_value": ("failure rate", "FOR", "forced outage rate"),
     "co2_emissions": ("emission factor", "CO2"),
 }
+
+#: Plain names for enum options, parallel to `FieldSpec.options`. Display only: the stored
+#: value stays the raw option (GK B T3).
+OPTIONS_PLAIN: dict[str, dict[str, str]] = {
+    "control": {
+        "PQ": "Fixed power (PQ)",
+        "PV": "Fixed voltage (PV)",
+        "Slack": "Reference bus (slack)",
+    },
+    "process_role": {"buy_in": "Bought in", "shortfall": "Shortfall"},
+    "outage_rate_basis": {
+        "FOR": "Forced outage rate (FOR)",
+        "EFORd": "Demand-weighted forced outage rate (EFORd)",
+    },
+    "type": {
+        "primary_energy": "Primary energy cap (CO₂)",
+        "tech_capacity_expansion_limit": "New capacity limit",
+        "operational_limit": "Dispatch limit",
+        "transmission_volume_expansion_limit": "New transmission volume limit",
+        "transmission_expansion_cost_limit": "New transmission cost limit",
+    },
+    "sense": {"<=": "At most", "==": "Exactly", ">=": "At least"},
+    "criticality_tier": {
+        "safety": "Safety",
+        "process_critical": "Process critical",
+        "process_flexible": "Process flexible",
+        "deferrable": "Deferrable",
+    },
+    "harmonic_source": {
+        "linear": "Linear",
+        "6-pulse": "6-pulse rectifier",
+        "12-pulse": "12-pulse rectifier",
+        "18-pulse": "18-pulse rectifier",
+        "active-front-end": "Active front end",
+        "phase-angle": "Phase-angle control",
+        "burst": "Burst-fire control",
+        "thyristor-stack": "Thyristor stack",
+    },
+    "start_method": {
+        "dol": "Direct on line",
+        "soft": "Soft starter",
+        "vfd": "Variable-speed drive",
+    },
+}
+
+
+def options_plain_of(spec: FieldSpec) -> tuple[str, ...]:
+    """One plain name per option; an option with none reads as itself (never blank)."""
+    if spec.options_plain:
+        return spec.options_plain
+    names = OPTIONS_PLAIN.get(spec.key, {})
+    return tuple(names.get(o, o) for o in spec.options)
+
+
+#: Numeric entries with no unit: ratios, counts, a sign and a period label.
+UNITLESS = frozenset(
+    {
+        ("Generator", "dc_ac_ratio"),
+        ("GlobalConstraint", "constant"),
+        ("GlobalConstraint", "investment_period"),
+        ("Link", "efficiency2"),
+        ("Link", "efficiency3"),
+        ("Link", "efficiency4"),
+        ("Load", "sign"),
+        ("Transformer", "tap_ratio"),
+    }
+)
+
 
 #: Depth by plain group when the row does not say (essentials is always set on the row).
 _DEPTH_BY_GROUP = {
