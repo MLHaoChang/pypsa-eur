@@ -29,3 +29,15 @@ Acceptance:
 - [ ] The hand-off reads the case's KPIs; the report no longer lists the investment chapter as a gap when the case ran, and still does when it did not.
 - [ ] A refused or failed case leaves the gap with its reason, never a missing chapter.
 - [ ] Earlier versions are byte-equal (L8); the investment case's own results are unchanged (a pin).
+
+### 2026-11-17: plan GO (GK B (60))
+
+Built as `eh_site@4` (issue 33 had already shipped `eh_site@3`). The rulings:
+
+- Q4: one PR and one version per issue, in the order 36 → `@4`, 34 → `@5`, 35 → `@6`.
+- Q1: the case spends 0 solves (GK B (52) I2).
+- B1: the case's wait ends at the run's wall time (the envelope's `expires_at`) when that comes first. A case still running then ends the step `failed` with the typed kind `ic_wall_time`, never completed.
+- 36-K1: the hand-off reads only figures the stored case holds, through `ic_counterfactual.read_returns` (project post-tax NPV at WACC and IRR) and `read_pre_tax_irr`. Nothing is computed anew.
+- 36-K2: a case that is stale for the network reads `not_current`, never its old number.
+- Follow-up (a): the profile action carries `on_end: chapter_gap` (load accepts it on the solve stage's `run_investment_case` only). A case that ends refused, failed or aborted, or that runs past the wall time, keeps the step `failed` with its error. The step is `judged_by: report`, so the run goes on. The report's investment chapter is then the gap `Chapter not established: Investment case (<error>)`, even over a case the project stored before. An `uncertain` step still stops the run. `eh_ipp_hybrid@1` is unchanged.
+- The hand-off states a case figure the case did not establish as `not_established` with the reader's reasons. `ho.kpis_read` accepts it when it equals the stored row.

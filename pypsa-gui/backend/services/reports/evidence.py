@@ -798,7 +798,14 @@ def _harness_section(harness_run: dict | None,
 
     if not isinstance(harness_run, dict):
         return {}
+    from harness import run_ic
+
     missing = []
+    # Study harness 36 (GK B (60) follow-up (a)): the run's own case that did
+    # not end done is the chapter's gap with its typed error, whatever case
+    # the project stored before (that one is not this run's).
+    for sid, error in run_ic.chapter_gaps(harness_run.get("task") or {}).items():
+        sections[sid] = _missing(sid, "investment", error, source="the run's investment-case step")
     for sid in harness_run.get("chapters") or []:
         sec = sections.get(sid)
         if sec is None or sec.status != "ok":

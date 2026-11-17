@@ -100,6 +100,9 @@ def _rule(id, fact, op, value=None, severity="block", basis=""):
     return rule
 
 
+ON_END, CHAPTER_GAP = "on_end", "chapter_gap"  # `harness/run_ic.py` (study harness 36)
+
+
 def _call(tool, **args):
     return {"tool": tool, "args": args}
 
@@ -259,8 +262,13 @@ def load(profile: dict) -> dict:
         if len(actions) > STAGE_STEPS or len(json.dumps(actions)) > STAGE_CHARS:
             raise ProfileError(f"Stage {name}: at most {STAGE_STEPS} steps and {STAGE_CHARS} characters.")
         for action in actions:
-            if set(action) - {"native"} != {"tool", "args"} or not isinstance(action["args"], dict):
+            if set(action) - {"native", ON_END} != {"tool", "args"} or not isinstance(action["args"], dict):
                 raise ProfileError(f"Stage {name}: each action has tool and args.")
+            if ON_END in action and (name != "solve" or action["tool"] != "run_investment_case"
+                                     or action[ON_END] != CHAPTER_GAP):
+                # Study harness 36 (GK B (60) follow-up (a)): only the solve stage's case.
+                raise ProfileError(f"Stage {name}: on_end is chapter_gap, on the solve stage's "
+                                   "run_investment_case only.")
             if action.get("native") == run_actions.KIND or action["tool"] in run_actions.REGISTRY:
                 # Study harness 10a (GK B (36) D7): the runner's closed native-action registry.
                 try:
@@ -568,6 +576,38 @@ def _eh_site_v3() -> dict:
 
 
 EH_SITE_V3 = _eh_site_v3()
+
+# Study harness 36 (GK B (60) plan GO, Q1, B1, 36-K1, K2): eh_site@4. The solve
+# stage runs the investment case after the queued solve (`harness/run_ic.py`,
+# as eh_ipp_hybrid@1): it values the solved dispatch and solves no LP, so it
+# spends no solve; its sends and wall time are the run's. The hand-off reads
+# the stored case's figures (`run_handoff.IC_KPIS`), so the investment chapter
+# is established when the case ran and stays a listed gap when it did not.
+# eh_site@1-@3 stay byte-equal (L8).
+EH_SITE_IC_KPIS = [
+    {"id": "ic_npv_at_wacc", "label": "Project NPV at WACC (post-tax)", "source": "investment_case",
+     "key": "npv_at_wacc", "unit": "EUR"},
+    {"id": "ic_post_tax_irr", "label": "Project IRR (post-tax)", "source": "investment_case",
+     "key": "post_tax_irr", "unit": "fraction"},
+    {"id": "ic_pre_tax_irr", "label": "Project IRR (pre-tax)", "source": "investment_case",
+     "key": "pre_tax_irr", "unit": "fraction"},
+]
+
+
+def _eh_site_v4() -> dict:
+    profile = copy.deepcopy(EH_SITE_V3)
+    profile["version"] = 4
+    solve = profile["stages"].get("solve", GENERIC["solve"])
+    profile["stages"]["solve"] = {"actions": [*copy.deepcopy(solve["actions"]),
+                                              {**_call("run_investment_case"), ON_END: CHAPTER_GAP}],
+                                  "rules": copy.deepcopy(solve["rules"])}
+    runs = profile["envelope"]["runs"]
+    runs.insert(runs.index({"tool": "generate_report"}), {"tool": "run_investment_case"})
+    profile["kpis"] = [*profile["kpis"], *copy.deepcopy(EH_SITE_IC_KPIS)]
+    return profile
+
+
+EH_SITE_V4 = _eh_site_v4()
 
 # Study harness 10a (GK B (36) D1-D8, Q1-Q5): eh_datacenter@1. The solve stage
 # runs the solve, the EH study (LOLE as eh_site@2, Q5), the campus run held to
@@ -1103,6 +1143,7 @@ EH_MICROGRID = _eh_microgrid(staged=False)
 EH_MICROGRID_STAGED = _eh_microgrid(staged=True)
 
 PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_site@3": EH_SITE_V3,
+                              "eh_site@4": EH_SITE_V4,
                               "eh_datacenter@1": EH_DATACENTER,
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
@@ -1137,5 +1178,6 @@ def materialise(profile: dict, stage: str, project_id: str, start: int = 1) -> l
             return [fill(v) for v in value]
         return value
     return [{"id": f"{stage}.{n}", "tool": a["tool"], "args": fill(a["args"]), "status": "pending",
-             **({"native": a["native"]} if "native" in a else {})}
+             **({"native": a["native"]} if "native" in a else {}),
+             **({ON_END: a[ON_END]} if ON_END in a else {})}
             for n, a in enumerate(profile["stages"][stage].get("actions", []), start=start)]
