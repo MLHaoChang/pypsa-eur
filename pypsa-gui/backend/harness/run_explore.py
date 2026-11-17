@@ -49,13 +49,16 @@ from typing import Any
 PROJECT_NAME_CHARS = 64
 NAME_CHARS = PROJECT_NAME_CHARS - len("Explore 12345678 ")
 NETWORK, STUDY = "network", "study"
+# Study harness 14: the shipped cases' engine (`run_shipped_engine`).
+SHIPPED = "shipped"
 # Domains whose experiment adapters are live-voice 10's (not built here).
 NOT_RUNNABLE = {
     "commercial": "Commercial cases cannot run yet: the app has no commercial experiment.",
     "reliability": "Reliability cases cannot run yet: the app has no reliability experiment.",
     "gridspine": "Grid-study cases cannot run yet: the app has no grid-study experiment.",
 }
-SETTLED = ("passed", "failed", "not_runnable")
+# `not_run` / `not_evaluated`: a shipped case that never forks or has no witness.
+SETTLED = ("passed", "failed", "not_runnable", "not_run", "not_evaluated")
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]*$")
 _LEVER_KEYS = {"component", "name", "attr", "unit", "bounds", "basis"}
 
@@ -1229,9 +1232,25 @@ def advance(path, *, boot, clock) -> bool:
                     None,
                 )
 
+    from harness import run_shipped_engine
+
+    shipped = run_shipped_engine.judged(task, profile)
+
     def change(t):
         r, wrote = t["run"], False
         cases = {c["name"]: c for c in r.get("cases") or []}
+        for case in r.get("cases") or []:
+            hit = shipped.get(case["name"])
+            if case.get("engine") != SHIPPED or case["status"] != "running" or not hit:
+                continue
+            status, reason, gate, solves = hit
+            if gate is not None:
+                _judge(case, gate, solves)
+            else:
+                case.update(status=status, reason=reason)
+                case["solves"]["used"] = solves
+            settle.append((case, solves))
+            wrote = True
         n = _next_id(t)
         for step in t["steps"]:
             if not step["id"].startswith(STAGE + ".") or step.get("judged_by"):

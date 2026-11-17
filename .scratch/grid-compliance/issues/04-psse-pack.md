@@ -58,6 +58,38 @@ cases.
 
 Release note: one new file under `doc/release-notes.d/` (see its README).
 
+## Comments
+
+**GK A2 plan verdict (2026-11-17): GO with conditions.** Four slices, one PR each (PR-SIZE-1).
+
+PR1 `test_battery.py`
+- B1 Finite means `math.isfinite`; test inf and NaN separately for Sk, X/R, every param and every time.
+- B2 One refusal test per guard, asserting its own reason, each killed by a mutant of that guard alone: Sk ≤ 0 (at 0 exactly), X/R ≤ 0, duration ≤ 0 (0 refused), t_event ≥ t_end (equal case), fault clearing at or after t_end, unknown channel, missing kind-required param, duplicate id; also empty channels, sk_min > sk_max, xr_min > xr_max.
+- B3 Fault severity is `v_retained_pu` in [0, 1); |phase jump| < 180°; ramps and steps nonzero.
+- B4 Each channel states unit, base, sign convention and measurement point (iq/id in pu of plant rated current, Q positive = injection).
+- B5 `battery_json` carries `contract_version`, deterministic (sorted keys, fixed float repr, byte-equal test); `cases_from_json` refuses a mismatched version.
+- B6 cases → frame/JSON → cases identical field by field, for the built battery and an overridden one.
+- B7 Pin case count and ids for one input set with a hand-listed expected set.
+- B8 Generic defaults carry `source='assumed'`; TRGC cited by number only (GC-TEXT-1).
+
+PR2 RAW v35/36 and `.seq`
+- R1 Parse written files back with a test-side reader and compare with the network (counts, identities, R/X/B pu on SBASE) for v33, v35, v36.
+- R2 Golden v35 header (SBASE, BASFRQ), system-wide block and every terminator in order; each v35/v36 field difference tested, citing the PSS/E POM by section.
+- R3 `.seq` winding code for YNd and Dyn (winding swap mutant dies); zero-sequence Z on a transformer rated ≠ SBASE; machine/branch values checked against `island_sc_seq` sources.
+- R4 v33 default output byte-identical (master's raw tests pass).
+
+PR3 `.dyr`
+- D1 Pin ICON/CON counts per model from the PSS/E model library with citation; state earliest PSS/E version per model; refuse a model the target version does not ship.
+- D2 REPCA1 remote bus/branch must exist in the RAW; a missing branch is refused, not written as 0.
+- D3 Round trip: model, bus, ID match the RAW; value counts match the pin; existing GENROU/GENSAL/REGCA1/REECA1 output byte-identical.
+
+PR4 `.con`/`.sub`/`.mon`, psspy scripts, pack call
+- S1 Scripts checked with `ast`: compile; every referenced file in the manifest (missing-reference test fails); every case channel written by contract name; no absolute paths, no network/OS calls beyond psspy, dyntools and os.path within the pack dir.
+- S2 `.con` format stable for GC-03's import test; writer refuses an element not in the network.
+- S3 `campus_bundle.py`: one pack call only, GC-06's untouched; manifest cites model_set_id/data_hash/variant only when GC-01 is present, tested both ways.
+
+Every PR: release-note fragment, GC-TEXT-1 grep of the diff, targeted mutants and killing tests listed in the PR body.
+
 **GK A2 on the PR2 approach (2026-11-17): GO with five changes.**
 - Point 1 citations accepted: cite the PSS/E-written files (their `@!` field names, version, repo path); omitted trailing optional fields stated in the docstring; one golden test of each v35/v36 section order including empty sections. (GC-TEXT-1 check: the builder kept the utility-guide name out of code; confirm with GK whether it may appear in PR text.)
 - Q1 No catch-all CC: map each vector group the campus schema allows (YNyn, YNy, Yyn, Yy, YNd, Dyn, Yd, Dy, Dd, Z if allowed) to its own code; refuse an unknown one with a named ContractError; one test per group plus the refusal.

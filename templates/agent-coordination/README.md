@@ -44,6 +44,8 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `scripts/coord/tasks.py` | Applies `frontier.py --stages` output, merge marks and notes to the feature dashboard's `tasks.json` |
 | `scripts/coord/events.py` | Time, assistant text and last tool call per event from a saved `list_events` result |
 | `scripts/coord/frontier.py` | The frontier from the issue headers: ready, unblocked, unclaimed issues no open PR or live session covers; `--stages` gives the dashboard stage per issue |
+| `scripts/coord/waivers.conf` | The one list of waived overlap regexes (`docs_only_re`, ...) that `premerge.sh`, `frontier.py` and `brief.py` all read; frontier and brief print waived overlap as `soft` |
+| `scripts/coord/spawn.py` | Prints the exact `create_session` arguments for a brief `brief.py` wrote, so the coordinator calls `create_session` itself (~1.5k tokens, not 50-60k through a subagent) |
 | `scripts/coord/brief.py` | Fills `docs/agents/session-brief.md` from flags, adds Context budget, Process, any stream paragraph and a "Stay out of" built from open PRs and live sessions |
 | `scripts/coord/board.py` | Edits the dashboard's `board.json` from flags, logs the change and prints the upload path; `--list` prints the open-PR and session rows for a brief |
 | `scripts/coord/board.example.json` | The dashboard's row shape |
