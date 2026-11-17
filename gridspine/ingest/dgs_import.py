@@ -611,7 +611,7 @@ class _Mapper:
                 * sc,
                 active=self.active(oid, row),
             )
-            self._spectrum("Load", name, self._harmonics("ElmLod", oid, row))
+            self._spectrum("Load", name, self._harmonics("ElmLod", oid, row), None)
             self.record("ElmLod", oid, row, "Load", name)
 
     def _p_nom(self, item, name, row) -> float:
@@ -647,7 +647,12 @@ class _Mapper:
                 * sc,
                 active=self.active(oid, row),
             )
-            self._spectrum("Generator", name, self._harmonics("ElmGenstat", oid, row))
+            self._spectrum(
+                "Generator",
+                name,
+                self._harmonics("ElmGenstat", oid, row),
+                float(self.get(row, "sgn")),
+            )
             self.record("ElmGenstat", oid, row, "Generator", name)
 
     def _machines(self):
@@ -727,16 +732,30 @@ class _Mapper:
             )
             self.record("ElmShnt", oid, row, "ShuntImpedance", name)
 
-    def _spectrum(self, component, name, spectrum):
-        """Where an imported harmonic spectrum goes (one place, see METADATA_KEY)."""
+    def _spectrum(self, component, name, spectrum, rated_mva):
+        """
+        Where an imported spectrum goes (owner decision DGS-EXTRAS-1): the
+        fields the harmonic screen reads. ``harmonic_source`` stays empty,
+        since the screen accepts only its topologies there; with a spectrum
+        it reads it as the unit's own ("vendor"). The screen scales the % by
+        ``rated_mva``; a load's DGS row carries no rating, so it is warned.
+        """
         if spectrum is None:
             return
         df = self.n.components[component].static
         for col in ("harmonic_source", "harmonic_spectrum"):
             if col not in df.columns:
                 df[col] = ""
-        df.at[name, "harmonic_source"] = "PowerFactory export"
         df.at[name, "harmonic_spectrum"] = spectrum
+        if "rated_mva" not in df.columns:
+            df["rated_mva"] = math.nan
+        if rated_mva is None:
+            self.warnings.append(
+                f"{component} {name!r} has a harmonic spectrum but the file gives no "
+                "rated apparent power: enter it for the harmonic screen"
+            )
+        else:
+            df.at[name, "rated_mva"] = rated_mva
 
     def _grid_strength(self, item, name, row):
         """The grid's short-circuit level and R/X, max and min, on the slack."""
