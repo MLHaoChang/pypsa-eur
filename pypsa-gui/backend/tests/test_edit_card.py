@@ -346,3 +346,25 @@ def test_solver_card_allows_turning_rolling_off_with_a_stale_window(grid):
     cfg.solve_strategy, cfg.rolling_horizon, cfg.rolling_overlap = "rolling", 24, 24  # legacy pair
     card = edit_card.preview("update_solver_config", {"partial": {"solve_strategy": "full"}})
     assert [r["field"] for r in card["rows"]] == ["solve_strategy"]
+
+
+def test_solver_card_shows_a_load_growth_rate_and_the_multipliers_it_derives(grid):
+    # homer-parity 04a: the rate in Model Horizon's words, the multiplier it
+    # derives beside it, and no row for the derived-entry bookkeeping.
+    cfg = PyPSAService.get_active_context().solver_state["solver_config"]
+    cfg.multi_investment_periods, cfg.investment_periods = True, [2030, 2035]
+    card = edit_card.preview("update_solver_config", {"partial": {
+        "load_growth_pct_per_year": {"electrical": 2.0}, "load_growth_base_year": 2030}})
+    rows = {r["field"]: r for r in card["rows"]}
+    assert set(rows) == {"load_growth_pct_per_year.electrical", "load_growth_base_year",
+                         "load_scalers_by_carrier.electrical"}
+    assert rows["load_growth_pct_per_year.electrical"]["label"] == "Load growth electrical"
+    assert rows["load_growth_pct_per_year.electrical"]["unit"] == "% per year"
+    assert rows["load_scalers_by_carrier.electrical"]["new"] == '{"2035":1.104081}'
+
+
+def test_solver_card_refuses_an_invalid_load_growth_rate(grid):
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview("update_solver_config", {"partial": {
+            "load_growth_pct_per_year": {"electrical": 2.0}}})
+    assert exc.value.detail["error_kind"] == "load_growth_invalid"

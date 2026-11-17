@@ -1,0 +1,3 @@
+{"kinds": {
+  "load_growth_invalid": {"surface": "inline", "why": "update_solver_config (PUT /api/simulation/solver_config) refused a load growth rate: not a finite number, at or below -100 % per year, given without the year growth starts from, or that year after the first investment period. The message names the carrier and the setting to change; nothing was stored. There is no conversation-wide recovery action."}
+}}

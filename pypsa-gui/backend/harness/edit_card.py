@@ -1013,7 +1013,17 @@ _SOLVER_WORDS: dict[str, tuple[str, str, dict | None]] = {
     "reserve_share_load": ("Reserve for load", "", None),
     "reserve_share_pv": ("Reserve for solar output", "", None),
     "reserve_share_wind": ("Reserve for wind output", "", None),
+    # homer-parity 04a, as Model Horizon's period-economics step says them.
+    "load_growth_pct_per_year": ("Load growth", "% per year", None),
+    "load_growth_base_year": ("Load growth starts from year", "", None),
+    "load_scalers_by_carrier": ("Load multiplier", "\u00d7", None),
 }
+# The load-growth inputs derive `load_scalers_by_carrier` (homer-parity 04a): the
+# card shows the multipliers they change; the derived-entry bookkeeping is no
+# setting and gets no row.
+_LOAD_GROWTH_INPUTS = frozenset({"investment_periods", "load_growth_pct_per_year",
+                                 "load_growth_base_year"})
+_NO_ROW = frozenset({"load_scalers_derived"})
 _SHARES = frozenset({
     "discount_rate", "inflation_rate", "min_renewable_fraction",
     "reserve_share_load", "reserve_share_pv", "reserve_share_wind",
@@ -1115,7 +1125,10 @@ def _solver_preview(args: dict) -> list[dict]:
     after = asdict(after) if not isinstance(after, dict) else dict(after)
     rolling_before = current.get("solve_strategy") == "rolling"
     rows = []
-    for key in partial:
+    keys = [k for k in partial if k not in _NO_ROW]
+    if _LOAD_GROWTH_INPUTS & partial.keys() and "load_scalers_by_carrier" not in keys:
+        keys.append("load_scalers_by_carrier")
+    for key in keys:
         old, new = current.get(key), after.get(key)
         if isinstance(old, dict) or isinstance(new, dict):
             old, new = old or {}, new or {}

@@ -52,6 +52,7 @@ vi.mock('../api/simulation', async (importOriginal) => {
     simulationApi: {
       ...actual.simulationApi,
       getSolverConfig: vi.fn(),
+      updateSolverConfig: vi.fn(),
     },
   }
 })
@@ -386,6 +387,43 @@ it('shows the PV column but hides the CAPEX budget column until Advanced is open
   // The PV column is still there too — opening Advanced adds columns, it
   // doesn't replace the default ones.
   expect(screen.getAllByTitle(/Auto-discount/).length).toBeGreaterThan(0)
+})
+
+it('shows the load growth rate beside the multipliers it derives, and sends a typed rate', async () => {
+  // homer-parity 04a: 2 % per year from 2030 → 2035 × 1.104 (the server's
+  // derivation, marked as derived); a typed rate goes to the solver config.
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2035],
+    weightings: [
+      { period: 2030, years: 5, objective: 1 },
+      { period: 2035, years: 5, objective: 1 },
+    ],
+  })
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(baseSolverConfig({
+    multi_investment_periods: true,
+    load_growth_pct_per_year: { electrical: 2 },
+    load_growth_base_year: 2030,
+    load_scalers_by_carrier: { electrical: { '2035': 1.104081 } },
+    load_scalers_derived: { electrical: ['2035'] },
+  }))
+  const put = vi.mocked(simulationApi.updateSolverConfig).mockResolvedValue({} as never)
+
+  renderPage()
+  await openStep(/Economics/)
+  await screen.findByText('Period weightings')
+  await userEvent.click(screen.getByText('Advanced'))
+
+  const rate = await screen.findByLabelText('Load growth, % per year, Electrical')
+  expect((rate as HTMLInputElement).value).toBe('2')
+  const cell = screen.getByLabelText('Load multiplier, Electrical, 2035') as HTMLInputElement
+  expect(cell.value).toBe('1.104')
+  expect(cell.title).toMatch(/From the load growth rate: 2 % per year from 2030/)
+
+  const heat = screen.getByLabelText('Load growth, % per year, Heat')
+  await userEvent.type(heat, '3')
+  await userEvent.tab()
+  expect(put).toHaveBeenCalledWith({ load_growth_pct_per_year: { electrical: 2, heat: 3 } })
 })
 
 // ── 4. Guided-step shell: routing between summary and steps (Task 3) ──────

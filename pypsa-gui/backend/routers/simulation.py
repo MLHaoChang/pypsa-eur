@@ -403,6 +403,38 @@ def _rebind_fca_for_scalers(stored_commercial, user, solver_view) -> dict | None
 _LOAD_SCALER_KEYS = ("multi_investment_periods", "load_scalers", "load_scalers_by_carrier")
 
 
+# The keys load growth reads (homer-parity 04a): a PUT touching one of them
+# re-derives the multipliers while a rate is stored or submitted.
+_LOAD_GROWTH_KEYS = ("investment_periods", "load_scalers", "load_scalers_by_carrier",
+                     "load_growth_pct_per_year", "load_growth_base_year", "load_scalers_derived")
+
+
+def _derive_load_growth(submitted: dict, stored_cfg) -> None:
+    """Validate the load-growth inputs as they stand after this PUT and write
+    the derived multipliers into ``submitted`` (``services.solver.load_growth``),
+    before the FCA rebind reads the scalers. No rate stored or submitted, or no
+    growth key touched: nothing is read or written, so the config is unchanged."""
+    if not any(k in submitted for k in _LOAD_GROWTH_KEYS):
+        return
+    after = {k: submitted[k] if k in submitted else getattr(stored_cfg, k, None)
+             for k in _LOAD_GROWTH_KEYS}
+    rates = after["load_growth_pct_per_year"] or {}
+    if not rates and not getattr(stored_cfg, "load_growth_pct_per_year", None):
+        return
+    from services.solver.load_growth import derive_load_scalers, load_growth_problems
+    problems = load_growth_problems(rates, after["load_growth_base_year"],
+                                    after["investment_periods"] or [])
+    if problems:
+        raise HTTPException(422, {"code": "load_growth_invalid", "error_kind": "load_growth_invalid",
+                                  "message": "; ".join(problems)})
+    scalers, derived = derive_load_scalers(
+        after["investment_periods"] or [], after["load_growth_base_year"], rates,
+        after["load_scalers_by_carrier"] or {}, after["load_scalers_derived"] or {},
+        after["load_scalers"] or {})
+    submitted["load_scalers_by_carrier"] = scalers
+    submitted["load_scalers_derived"] = derived
+
+
 def _is_fca(stored) -> bool:
     """A stored commercial config whose connection is an FCA with curtailment hours."""
     conn = stored.get("connection") if isinstance(stored, dict) else None
@@ -623,6 +655,7 @@ def update_solver_config(
                            "/api/results/business_case/inputs (it validates them and checks "
                            "If-Match); omit the key here"})
         submitted.pop("business_case")
+    _derive_load_growth(submitted, _state["solver_config"])
     stored_commercial = getattr(_state["solver_config"], "commercial", None)
     rebound = False
     # The FCA stress hours are ranked on the load the LP will solve (E2E 1b):

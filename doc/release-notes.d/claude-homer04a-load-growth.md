@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Model Horizon takes a load growth in % per year per carrier, compounded from a start year, and fills the period load multipliers from it; a multiplier you type still wins, and the derived ones are marked beside the rate. The chat assistant's settings card shows the rate and the multipliers it derives.

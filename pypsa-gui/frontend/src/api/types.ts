@@ -275,6 +275,12 @@ export interface SolverConfig {
   // period year (str), value = multiplier. Overrides `load_scalers` (which
   // remains as a legacy all-carriers fallback) for the same period.
   load_scalers_by_carrier?: Record<string, Record<string, number>>
+  // Load growth, % per year per carrier (homer-parity 04a), compounded from
+  // `load_growth_base_year`. The server derives the `load_scalers_by_carrier`
+  // entries the user did not type and names them in `load_scalers_derived`.
+  load_growth_pct_per_year?: Record<string, number>
+  load_growth_base_year?: number | null
+  load_scalers_derived?: Record<string, string[]>
   // When true, the LP overwrites ipw.objective per period with
   // (1 + discount_rate)^-(P - ref_year) × years[P] at solve time. Stops
   // the LP from front-loading every CAPEX dollar into the first period.

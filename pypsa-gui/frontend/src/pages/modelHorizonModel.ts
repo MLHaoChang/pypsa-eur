@@ -357,3 +357,71 @@ export function stepSummary(step: HorizonStepId, ctx: HorizonSummaryContext): st
         : 'Custom weights applied'
   }
 }
+
+// ── Load growth, % per year (homer-parity 04a) ───────────────────────────────
+// The server derives the per-period multipliers from the rate and names the
+// derived ones in `load_scalers_derived` (backend services/solver/load_growth.py);
+// the UI only edits the typed inputs and shows what the server stored.
+
+interface LoadGrowthCfg {
+  load_scalers_by_carrier?: Record<string, Record<string, number>>
+  load_scalers_derived?: Record<string, string[]>
+  load_growth_pct_per_year?: Record<string, number>
+  load_growth_base_year?: number | null
+}
+
+/** True when the period's multiplier came from the carrier's growth rate. */
+export function isDerivedScaler(cfg: LoadGrowthCfg, carrier: string, period: number): boolean {
+  return (cfg.load_scalers_derived?.[carrier] ?? []).includes(String(period))
+}
+
+/** The PUT body for typing a multiplier (or `null` to reset it to the rate).
+ * A typed cell leaves the derived list; 1.00 is dropped only while the carrier
+ * has no rate (an absent key means 1.00 then, but the rate's value otherwise). */
+export function loadScalerEdit(
+  cfg: LoadGrowthCfg, carrier: string, period: number, value: number | null,
+): { load_scalers_by_carrier: Record<string, Record<string, number>>; load_scalers_derived: Record<string, string[]> } {
+  const key = String(period)
+  const next: Record<string, Record<string, number>> = {}
+  for (const [c, m] of Object.entries(cfg.load_scalers_by_carrier ?? {})) next[c] = { ...m }
+  const derived: Record<string, string[]> = {}
+  for (const [c, ps] of Object.entries(cfg.load_scalers_derived ?? {})) derived[c] = [...ps]
+  const slot = next[carrier] ?? {}
+  const hasRate = cfg.load_growth_pct_per_year?.[carrier] != null
+  if (value === null || (value === 1 && !hasRate)) delete slot[key]
+  else slot[key] = value
+  if (Object.keys(slot).length === 0) delete next[carrier]
+  else next[carrier] = slot
+  if (derived[carrier]) derived[carrier] = derived[carrier].filter(p => p !== key)
+  return { load_scalers_by_carrier: next, load_scalers_derived: derived }
+}
+
+/** The PUT body for setting (or clearing, `null`) a carrier's growth rate.
+ * The growth year defaults to the first investment period. */
+export function loadGrowthEdit(
+  cfg: LoadGrowthCfg, carrier: string, ratePct: number | null, periods: number[],
+): { load_growth_pct_per_year: Record<string, number>; load_growth_base_year?: number } {
+  const rates = { ...(cfg.load_growth_pct_per_year ?? {}) }
+  if (ratePct === null) delete rates[carrier]
+  else rates[carrier] = ratePct
+  const body: { load_growth_pct_per_year: Record<string, number>; load_growth_base_year?: number } =
+    { load_growth_pct_per_year: rates }
+  if (ratePct !== null && cfg.load_growth_base_year == null && periods.length > 0) {
+    body.load_growth_base_year = Math.min(...periods)
+  }
+  return body
+}
+
+/** Why a rate or growth year is refused, in plain words (the server's own
+ * check, GK B R5); `null` when both are fine. */
+export function loadGrowthProblem(
+  ratePct: number, baseYear: number | null | undefined, periods: number[],
+): string | null {
+  if (!Number.isFinite(ratePct)) return 'Enter a number, in % per year'
+  if (ratePct <= -100) return 'Enter a rate above -100 % per year'
+  const first = periods.length > 0 ? Math.min(...periods) : null
+  if (baseYear != null && first != null && baseYear > first) {
+    return `Growth must start in a year not after ${first}, the first period`
+  }
+  return null
+}

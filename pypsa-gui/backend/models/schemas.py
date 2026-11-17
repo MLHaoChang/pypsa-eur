@@ -746,6 +746,14 @@ class SolverConfigSchema(BaseModel):
     # `load_scalers` for the same period; carriers without an entry fall
     # back to `load_scalers[period]` or 1.0. See solver_service step 5.
     load_scalers_by_carrier: dict[str, dict[str, float]] = {}
+    # Load growth as a rate per year (homer-parity 04a): canonical carrier →
+    # % per year, compounded from `load_growth_base_year`. It derives the
+    # entries of `load_scalers_by_carrier` it does not hold typed
+    # (`services/solver/load_growth.py`); `load_scalers_derived` names the
+    # derived ones. `gt=-100`: a fall of 100 % or more leaves no load.
+    load_growth_pct_per_year: dict[str, Annotated[float, Field(gt=-100, allow_inf_nan=False)]] = {}
+    load_growth_base_year: int | None = None
+    load_scalers_derived: dict[str, list[str]] = {}
     # Per-period auto-discount via ipw.objective. When True, the LP applies a
     # uniform PV factor (1+discount_rate)^-(P-ref_year) to every period's
     # cost (capex AND opex) — encourages deferring investment until needed

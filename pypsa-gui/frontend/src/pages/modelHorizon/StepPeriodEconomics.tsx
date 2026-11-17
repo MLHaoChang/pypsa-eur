@@ -57,7 +57,7 @@
 // ModelHorizon.tsx today.
 import { useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
-import { pvFactor } from '../modelHorizonModel'
+import { isDerivedScaler, loadGrowthProblem, pvFactor } from '../modelHorizonModel'
 
 export interface StepPeriodEconomicsProps {
   periods: number[]
@@ -97,8 +97,18 @@ export interface StepPeriodEconomicsProps {
   /** Legacy per-period scaler applied to every carrier when there's no
    * per-carrier entry (`cfg.load_scalers`). */
   legacyLoadScalers: Record<string, number>
-  onLoadScalerChange: (carrier: string, period: number, value: number) => void
+  /** `value === null` returns the cell to the carrier's growth rate. */
+  onLoadScalerChange: (carrier: string, period: number, value: number | null) => void
   loadScalerPending: boolean
+  /** Load growth, % per year per carrier (homer-parity 04a), the year it
+   * compounds from, and which multipliers the server derived from it. */
+  loadGrowthPctPerYear: Record<string, number>
+  loadGrowthBaseYear: number | null
+  loadScalersDerived: Record<string, string[]>
+  /** `null` clears the carrier's rate. */
+  onLoadGrowthChange: (carrier: string, ratePct: number | null) => void
+  onLoadGrowthBaseYearChange: (year: number) => void
+  loadGrowthPending: boolean
 
   /** `cfg.capex_budget_per_period`, in EUR. */
   capexBudgetPerPeriod: Record<string, number>
@@ -114,6 +124,8 @@ export function StepPeriodEconomics({
   autoDiscountChecked, onAutoDiscountChange,
   onPeriodColChange, updatePeriodColPending,
   loadCarriers, loadScalersByCarrier, legacyLoadScalers, onLoadScalerChange, loadScalerPending,
+  loadGrowthPctPerYear, loadGrowthBaseYear, loadScalersDerived,
+  onLoadGrowthChange, onLoadGrowthBaseYearChange, loadGrowthPending,
   capexBudgetPerPeriod, onCapexBudgetChange, capexBudgetPending,
 }: StepPeriodEconomicsProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -239,6 +251,17 @@ export function StepPeriodEconomics({
                 </tr>
               </thead>
               <tbody>
+                {advancedOpen && (
+                  <LoadGrowthRow
+                    loadCarriers={loadCarriers}
+                    periods={periods}
+                    rates={loadGrowthPctPerYear}
+                    baseYear={loadGrowthBaseYear}
+                    onRateChange={onLoadGrowthChange}
+                    onBaseYearChange={onLoadGrowthBaseYearChange}
+                    pending={loadGrowthPending}
+                  />
+                )}
                 {periodWeightings.map((row, i) => {
                   const period = Number(row.period ?? row.name ?? periods[i] ?? 0)
                   const years = Number(row.years ?? 1)
@@ -311,28 +334,49 @@ export function StepPeriodEconomics({
                             : 'Auto-discount is off — the objective value on the left is what the LP uses.'}>
                         {pvFactor({ period, refPeriod, years, discountRate, inflationRate }).toFixed(4)}
                       </td>
-                      {advancedOpen && loadCarriers.map(({ key: carrier }) => {
+                      {advancedOpen && loadCarriers.map(({ key: carrier, label }) => {
                         const v = resolvedScaler(carrier)
+                        const rate = loadGrowthPctPerYear[carrier]
+                        const derived = isDerivedScaler({ load_scalers_derived: loadScalersDerived }, carrier, period)
+                        // With a rate, an absent entry is the base year's 1.000 (the
+                        // server writes no 1.0), so it too follows the rate.
+                        const fromRate = rate != null && (derived
+                          || loadScalersByCarrier[carrier]?.[String(period)] == null)
+                        const typedOverRate = rate != null && !fromRate
+                        const shown = v.toFixed(3)
                         return (
-                          <td key={`ls-${period}-${carrier}`} className="px-2 py-1 text-right">
+                          <td key={`ls-${period}-${carrier}`} className="px-2 py-1 text-right whitespace-nowrap">
+                            {typedOverRate && (
+                              <button
+                                type="button"
+                                disabled={loadScalerPending}
+                                onClick={() => onLoadScalerChange(carrier, period, null)}
+                                aria-label={`Return ${label} ${period} to the load growth rate`}
+                                title="Return to the load growth rate"
+                                className="mr-1 text-[10px] text-muted hover:text-accent disabled:opacity-40"
+                              >↺</button>
+                            )}
                             <input
-                              key={`ls-${period}-${carrier}-${v}`}
+                              key={`ls-${period}-${carrier}-${v}-${fromRate}`}
                               type="number"
                               step="0.01"
                               min={0.01}
-                              defaultValue={v.toFixed(2)}
-                              title={`Load multiplier for "${carrier}" in period ${period} (1.00 = unchanged, 1.10 = +10% growth)`}
+                              defaultValue={shown}
+                              aria-label={`Load multiplier, ${label}, ${period}`}
+                              title={fromRate
+                                ? `From the load growth rate: ${rate} % per year from ${loadGrowthBaseYear ?? periods[0]}. Type a value to override it.`
+                                : `Load multiplier for ${label} in ${period} (1.000 = unchanged, 1.100 = +10 %)`}
                               disabled={loadScalerPending}
                               onBlur={e => {
                                 const nv = parseFloat(e.target.value)
                                 if (!Number.isFinite(nv) || nv <= 0) {
-                                  e.target.value = v.toFixed(2)
+                                  e.target.value = shown
                                   return
                                 }
-                                if (nv === v) return
+                                if (e.target.value === shown || nv === v) return
                                 onLoadScalerChange(carrier, period, nv)
                               }}
-                              className="w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait"
+                              className={`w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait ${fromRate ? 'italic text-muted' : ''}`}
                             />
                           </td>
                         )
@@ -414,5 +458,85 @@ export function StepPeriodEconomics({
         </div>
       </div>
     </section>
+  )
+}
+
+/** The "Load growth, % per year" row (homer-parity 04a): one rate per carrier
+ * above that carrier's multiplier column, and the year growth compounds from.
+ * The server derives the multipliers below; this row only edits the inputs. */
+function LoadGrowthRow({ loadCarriers, periods, rates, baseYear, onRateChange, onBaseYearChange, pending }: {
+  loadCarriers: Array<{ key: string; label: string }>
+  periods: number[]
+  rates: Record<string, number>
+  baseYear: number | null
+  onRateChange: (carrier: string, ratePct: number | null) => void
+  onBaseYearChange: (year: number) => void
+  pending: boolean
+}) {
+  const [problem, setProblem] = useState<string | null>(null)
+  const first = periods.length > 0 ? Math.min(...periods) : null
+  const shownYear = baseYear ?? first
+  return (
+    <tr className="border-b border-border bg-bg-2">
+      <td colSpan={4} className="px-2 py-1 text-[10px] text-muted">
+        <div className="flex items-center gap-1.5">
+          <span title="A steady load growth per carrier. It fills the period multipliers below, compounded each year from the year you set; a multiplier you type wins over it.">
+            Load growth, % per year, from
+          </span>
+          <input
+            key={`lg-year-${shownYear}`}
+            type="number"
+            step="1"
+            defaultValue={shownYear ?? ''}
+            aria-label="Load growth starts from year"
+            disabled={pending || Object.keys(rates).length === 0}
+            onBlur={e => {
+              const y = parseInt(e.target.value, 10)
+              const msg = Number.isFinite(y) ? loadGrowthProblem(0, y, periods) : 'Enter a year'
+              setProblem(msg)
+              if (msg) { e.target.value = String(shownYear ?? ''); return }
+              if (y !== shownYear) onBaseYearChange(y)
+            }}
+            className="w-14 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50"
+          />
+          {problem && <span role="alert" className="text-danger">{problem}</span>}
+        </div>
+      </td>
+      {loadCarriers.map(({ key, label }) => {
+        const rate = rates[key]
+        return (
+          <td key={`lg-${key}`} className="px-2 py-1 text-right">
+            <span className="inline-flex items-center gap-0.5">
+              <input
+                key={`lg-${key}-${rate ?? ''}`}
+                type="number"
+                step="0.1"
+                defaultValue={rate ?? ''}
+                placeholder="—"
+                aria-label={`Load growth, % per year, ${label}`}
+                title={`Load growth for ${label}, % per year. Empty = none.`}
+                disabled={pending}
+                onBlur={e => {
+                  const raw = e.target.value.trim()
+                  if (!raw) {
+                    setProblem(null)
+                    if (rate != null) onRateChange(key, null)
+                    return
+                  }
+                  const v = parseFloat(raw)
+                  const msg = loadGrowthProblem(v, baseYear, periods)
+                  setProblem(msg)
+                  if (msg) { e.target.value = rate != null ? String(rate) : ''; return }
+                  if (v !== rate) onRateChange(key, v)
+                }}
+                className="w-14 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50"
+              />
+              <span className="text-[10px] text-muted">%</span>
+            </span>
+          </td>
+        )
+      })}
+      <td />
+    </tr>
   )
 }

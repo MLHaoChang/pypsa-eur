@@ -28,7 +28,10 @@ GOAL_FIELDS = frozenset({"target_lole_h", "mc_draws", "site_archetype"})
 # Config fields no solve and no investment case reads (business case 08, GK B
 # C1): always left out, so they leave every fingerprint and digest, and every
 # one computed before they existed, unchanged.
-NOT_LP_FIELDS = frozenset({"business_case"})
+# The load-growth inputs (homer-parity 04a) reach the LP only through the
+# multipliers they derive into `load_scalers_by_carrier`, which is hashed.
+NOT_LP_FIELDS = frozenset({"business_case", "load_growth_pct_per_year",
+                           "load_growth_base_year", "load_scalers_derived"})
 
 ARCHETYPES = ("strong_grid", "weak_flexible", "off_grid")
 DEFAULT_ARCHETYPE = "strong_grid"

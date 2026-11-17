@@ -115,6 +115,25 @@ def test_the_route_ranks_on_the_submitted_scalers_and_rebinds_when_they_change(
     assert r.json()["commercial"]["connection"]["kind"] == "fca"
 
 
+def test_a_rate_derived_scaler_reranks_the_hours_like_a_typed_one(
+        client, install_network, session_ctx, project_storage_dir):
+    # homer-parity 04a: the load growth rate derives `load_scalers_by_carrier`
+    # before the rebind reads the scalers, so the FCA hours follow it too.
+    _saved_two_period(client, install_network, "fca_lg")
+    n = session_ctx(client).network
+    r = client.put("/api/simulation/solver_config", json={
+        "multi_investment_periods": True, "investment_periods": list(PERIODS),
+        "load_scalers": {"2030": 3.0}, "commercial": _fca_body()})
+    assert r.status_code == 200, r.text
+    assert _zeroed_periods(n, _entry(project_storage_dir, "fca_lg")) == {2030}
+    # 100 %/yr from 2030: 2035 × 32, far above the legacy 2030 × 3.0
+    r = client.put("/api/simulation/solver_config", json={
+        "load_growth_pct_per_year": {"electrical": 100.0}, "load_growth_base_year": 2030})
+    assert r.status_code == 200, r.text
+    assert r.json()["load_scalers_by_carrier"] == {"electrical": {"2035": 32.0}}
+    assert _zeroed_periods(n, _entry(project_storage_dir, "fca_lg")) == {2035}
+
+
 def test_an_unrelated_change_does_not_rebind(client, install_network, project_storage_dir,
                                              monkeypatch):
     _saved_two_period(client, install_network, "fca_ls2")
