@@ -13,7 +13,9 @@ import pytest
 from gridspine.handoff.psspy_scripts import (
     CONVERSIONS,
     EVENT_CALLS,
+    FNSL_OPTIONS,
     PENDING,
+    UNVERIFIED,
     check_script,
     write_scripts,
 )
@@ -26,7 +28,7 @@ KW = dict(
     poc_bus=101,
     poc_kv=132.0,
     grid_machine=(900, "1"),
-    grid_mbase_mva=100.0,
+    grid_mbase_mva=250.0,  # not the 100 MVA system base: Z1 must be on MBASE
     plant_branch=(101, 900, "1"),
     plant_machine=(201, "1"),
     f0_hz=50.0,
@@ -222,18 +224,19 @@ def test_checker_refuses_a_tampered_script(pack, mutate, reason):
 
 def test_thevenin_pu_matches_hand_calculation(pack):
     _, texts = pack
-    # Sk 1000 MVA, X/R 10, MBASE 100 MVA: |Z| = 100/1000 = 0.1 pu,
-    # R = 0.1/sqrt(101), X = 10 R.
+    # Sk 1000 MVA, X/R 10, MBASE 250 MVA: |Z| = 250/1000 = 0.25 pu on MBASE
+    # (0.1 pu if it were wrongly put on the 100 MVA system base),
+    # R = 0.25/sqrt(101), X = 10 R.
     text = texts["flat_skmax_xrmax"]
     line = next(ln for ln in text.splitlines() if ln.startswith("Z1_PU = "))
     r, x = ast.literal_eval(line.split("=", 1)[1].split("#")[0].strip())
-    assert r == pytest.approx(0.1 / math.sqrt(101.0), rel=1e-12)
-    assert x == pytest.approx(1.0 / math.sqrt(101.0), rel=1e-12)
+    assert r == pytest.approx(0.25 / math.sqrt(101.0), rel=1e-12)
+    assert x == pytest.approx(2.5 / math.sqrt(101.0), rel=1e-12)
     # Z0 = 1.5 |Z1| at X0/R0 = 4: on the 1-ph fault cases only matters, but written always
     line0 = next(ln for ln in text.splitlines() if ln.startswith("Z0_PU = "))
     r0, x0 = ast.literal_eval(line0.split("=", 1)[1].split("#")[0].strip())
-    assert r0 == pytest.approx(0.15 / math.sqrt(17.0), rel=1e-12)
-    assert x0 == pytest.approx(0.6 / math.sqrt(17.0), rel=1e-12)
+    assert r0 == pytest.approx(0.375 / math.sqrt(17.0), rel=1e-12)
+    assert x0 == pytest.approx(1.5 / math.sqrt(17.0), rel=1e-12)
 
 
 def _refuse(tmp_path, reason, cases=None, **kw):
@@ -317,10 +320,16 @@ def test_convert_gives_contract_units_on_hand_values(pack):
         "raw_id_pu": [0.6, 0.0],
         "raw_iq_pu": [0.8, 1.0],
     }
+    # V = 0 (bolted fault at the PoC): |I| from P, Q and V is undefined; refused
+    with pytest.raises(
+        ValueError, match="not evaluated, no CSV written: i_poc_pu: V = 0"
+    ):
+        ns["_convert"](rec, 50.0, 80.0)
+    rec["raw_v_poc_pu"] = [0.5, 1.0]
     out = ns["_convert"](rec, 50.0, 80.0)
     assert out["f_hz"] == [pytest.approx(50.5), 50.0]  # 50 * (1 + 0.01)
-    assert out["i_poc_pu"][0] == pytest.approx(50.0 / (0.5 * 80.0))  # |S| / (V S_rated)
-    assert math.isnan(out["i_poc_pu"][1])  # V = 0: undefined, not inf
+    assert out["i_poc_pu"] == [pytest.approx(50.0 / (0.5 * 80.0)), 5.0 / 80.0]
+    assert all(math.isfinite(v) for v in out["i_poc_pu"])
     assert out["theta_poc_deg"] == [20.0, 0.0]
     assert out["q_poc_mvar"] == [-40.0, 4.0] and out["p_poc_mw"] == [30.0, 3.0]
     assert out["iq_pu"] == [0.8, 1.0] and out["t_s"] == [0.0, 1.0]
@@ -369,7 +378,7 @@ def test_checker_refuses_an_empty_script():
 def test_f_step_advances_the_angle_by_two_pi_cycles(pack):
     _, texts = pack
     text = next(t for cid, t in texts.items() if cid.startswith("f_step_"))
-    assert f"psspy.change_state(K, ANGLE0 + {2.0 * math.pi!r} * cycles)" in text
+    assert f"psspy.change_state(K_ANGLE, ANGLE0 + {2.0 * math.pi!r} * cycles)" in text
 
 
 def test_flat_case_docstring_says_parameters_none(pack):
@@ -383,7 +392,7 @@ def test_plant_branch_and_machine_are_written(pack):
     assert "BR_FROM, BR_TO, BR_CKT = 101, 900, '1'" in lines
     assert "PLANT_BUS, PLANT_ID = 201, '1'" in lines
     assert "POC_BUS, POC_KV = 101, 132.0" in lines
-    assert "GRID_BUS, GRID_ID, GRID_MBASE = 900, '1', 100.0" in lines
+    assert "GRID_BUS, GRID_ID, GRID_MBASE = 900, '1', 250.0" in lines
 
 
 #: recorded channel -> the psspy line that records it
@@ -543,7 +552,7 @@ def test_accepts_two_char_machine_id(tmp_path):
         [_flat(("v_poc_pu",))], str(tmp_path), **{**KW, "grid_machine": (900, "G1")}
     )
     assert (
-        "GRID_BUS, GRID_ID, GRID_MBASE = 900, 'G1', 100.0"
+        "GRID_BUS, GRID_ID, GRID_MBASE = 900, 'G1', 250.0"
         in (tmp_path / out[CID]).read_text()
     )
 
@@ -575,3 +584,236 @@ def test_refuses_a_conversion_with_more_than_three_inputs(tmp_path, monkeypatch)
         ContractError, match="conversion of 'v_poc_pu': 4 inputs, at most 3"
     ):
         write_scripts([_flat(("v_poc_pu",))], str(tmp_path), **KW)
+
+
+def test_refuses_a_plant_branch_not_from_the_poc(tmp_path):
+    _refuse(
+        tmp_path,
+        "plant_branch from bus 102 is not poc_bus 101",
+        plant_branch=(102, 900, "1"),
+    )
+
+
+def _top_index(lines, start):
+    return next(i for i, ln in enumerate(lines) if ln.startswith(start))
+
+
+def test_the_case_is_solved_before_dynamics(pack):
+    _, texts = pack
+    for text in texts.values():
+        lines = text.splitlines()
+        fnsl = lines.index(f"psspy.fnsl({list(FNSL_OPTIONS)!r})")
+        assert lines[fnsl + 1] == "if psspy.solved() != 0:"
+        assert lines[fnsl + 2].startswith("    raise SystemExit('power flow did not")
+        assert lines[fnsl + 3] == "psspy.cong(0)"
+        assert _top_index(lines, "psspy.machine_chng_2(") < fnsl
+
+
+def _drop(text, start):
+    lines = text.splitlines()
+    del lines[_top_index(lines, start)]
+    return "\n".join(lines) + "\n"
+
+
+def _move_cong_first(text):
+    lines = _drop(text, "psspy.cong(").splitlines()
+    lines.insert(_top_index(lines, "psspy.fnsl("), "psspy.cong(0)")
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda t: _drop(t, "psspy.fnsl("),
+        lambda t: _drop(
+            _drop(t, "    raise SystemExit('power flow"), "if psspy.solved"
+        ),
+        lambda t: t.replace("if psspy.solved() != 0:", "if False:"),
+        lambda t: t.replace(
+            "    raise SystemExit('power flow did not converge; dynamics not started')",
+            "    pass",
+        ),
+        _move_cong_first,
+        lambda t: _drop(t, "psspy.cong("),
+    ],
+)
+def test_checker_refuses_a_script_not_solved_before_dynamics(pack, mutate):
+    cases, texts = pack
+    with pytest.raises(ContractError, match="must be solved before dynamics"):
+        check_script(mutate(texts[CID]), _allowed(CID), cases[CID].channels)
+
+
+class _Sym:
+    """
+    A named placeholder: the realar lists are evaluated on these, so each
+    slot is known by name, not by value.
+    """
+
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return self.name
+
+
+def _realar(line, call):
+    """Evaluate the realar argument of ``call`` in ``line`` on placeholders."""
+    node = ast.parse(line.strip()).body[0].value
+    assert ast.unparse(node.func) == call
+    names = {
+        "_f": _Sym("f"),
+        "_i": _Sym("i"),
+        "Z1_PU": (_Sym("R1"), _Sym("X1")),
+        "Z0_PU": (_Sym("R0"), _Sym("X0")),
+    }
+    return [repr(v) for v in eval(ast.unparse(node.args[-1]), {"list": list}, names)]
+
+
+def test_thevenin_source_slots_on_the_grid_machine(pack):
+    _, texts = pack
+    lines = texts["fault_1ph_skmin_xrmin_v000"].splitlines()
+    chng = lines[_top_index(lines, "psspy.machine_chng_2(GRID_BUS, GRID_ID,")]
+    # machine realar: PG QG QT QB PT PB MBASE ZR ZX ... 17 values; ZSORCE = ZR, ZX
+    assert _realar(chng, "psspy.machine_chng_2") == ["f"] * 7 + ["R1", "X1"] + ["f"] * 8
+    seq = lines[_top_index(lines, "psspy.seq_machine_data_3(GRID_BUS, GRID_ID, 0,")]
+    # Z+ = Z- = Z1 (test_battery), then Z0
+    assert _realar(seq, "psspy.seq_machine_data_3") == [
+        "R1",
+        "X1",
+        "R1",
+        "X1",
+        "R0",
+        "X0",
+        "f",
+        "f",
+    ]
+
+
+def test_sequence_data_and_mbase_check_precede_the_impedance_change(pack):
+    _, texts = pack
+    lines = texts["fault_1ph_skmin_xrmin_v000"].splitlines()
+    order = [
+        "psspy.read(0, RAW)",
+        "psspy.resq(SEQ)",
+        "ierr, mbase = psspy.macdat(GRID_BUS, GRID_ID, 'MBASE')",
+        "if ierr or abs(mbase - GRID_MBASE) > 1e-6:",
+        "    raise SystemExit('grid machine MBASE differs from the generated base')",
+        "psspy.machine_chng_2(",
+        "Z0_PU = (",
+        "psspy.seq_machine_data_3(",
+        "psspy.fnsl(",
+    ]
+    at = [_top_index(lines, s) for s in order]
+    assert at == sorted(at) and at[4] == at[3] + 1
+
+
+def test_phase_jump_is_in_radians_on_the_angle_state(pack):
+    cases, texts = pack
+    for cid, text in texts.items():
+        if cases[cid].kind != "phase_jump":
+            continue
+        line = next(
+            ln for ln in text.splitlines() if ln.startswith("psspy.change_state(")
+        )
+        node = ast.parse(line).body[0].value
+        assert ast.unparse(node.args[0]) == "K_ANGLE"
+        step = ast.literal_eval(node.args[1].right)
+        assert step == pytest.approx(math.radians(cases[cid].params["angle_deg"]))
+        assert "K_ANGLE = K + 1  # GENCLS angle state: unverified" in text
+
+
+def test_the_gencls_angle_state_is_listed_as_unverified():
+    assert "K+1" in UNVERIFIED["GENCLS angle state"]
+    assert {"fnsl", "solved"} <= set(UNVERIFIED)
+
+
+#: Hand-written from the module's format for a flat case recording v_poc_pu
+#: only: Sk 500 MVA, X/R 0.75 on MBASE 250 gives |Z1| = 0.5 pu, R = 0.4,
+#: X = 0.3; Z0 = 1.5 |Z1| at X0/R0 0.75 gives R0 = 0.6, X0 = 0.45. Two of these
+#: four come out of the float arithmetic one ulp off (0.39999999999999997,
+#: 0.44999999999999996); the bytes pin the writer's repr.
+GOLDEN_SCRIPT = r'''"""
+PSS/E run for battery case flat_skmin_xrmin.
+
+Case flat_skmin_xrmin; kind flat; TRGC 04/05; grid corner skmin_xrmin (Sk 500.0 MVA, X/R 0.75); parameters: none; source assumed.
+
+psspy calls generated without a PSS/E licence; pending verification on first PSS/E load.
+"""
+import os
+
+import dyntools
+import psspy
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+RAW = os.path.join(HERE, 'pack.raw')
+SEQ = os.path.join(HERE, 'pack.seq')
+DYR = os.path.join(HERE, 'pack.dyr')
+OUT = os.path.join(HERE, 'flat_skmin_xrmin.out')
+POC_BUS, POC_KV = 101, 132.0
+GRID_BUS, GRID_ID, GRID_MBASE = 900, 'G2', 250.0
+Z1_PU = (0.39999999999999997, 0.3)  # Thevenin Z1 on GRID_MBASE
+T_EVENT, T_END = 1.0, 10.0
+F0_HZ, PLANT_MBASE = 50.0, None
+HEADER = ['t_s', 'v_poc_pu']
+
+
+def _convert(rec, f0_hz, s_rated):
+    def _refuse(why):
+        raise ValueError('not evaluated, no CSV written: ' + why)
+
+    out = {'t_s': list(rec['t_s'])}
+    # v_poc_pu = V
+    out['v_poc_pu'] = [a for (a,) in zip(rec['raw_v_poc_pu'])]
+    return out
+
+
+psspy.psseinit()
+psspy.read(0, RAW)
+psspy.resq(SEQ)
+ierr, mbase = psspy.macdat(GRID_BUS, GRID_ID, 'MBASE')
+if ierr or abs(mbase - GRID_MBASE) > 1e-6:
+    raise SystemExit('grid machine MBASE differs from the generated base')
+_i, _f = psspy.getdefaultint(), psspy.getdefaultreal()
+psspy.machine_chng_2(GRID_BUS, GRID_ID, [_i] * 6, [_f] * 7 + list(Z1_PU) + [_f] * 8)
+Z0_PU = (0.6, 0.44999999999999996)  # Thevenin Z0 on GRID_MBASE
+psspy.seq_machine_data_3(GRID_BUS, GRID_ID, 0, list(Z1_PU) + list(Z1_PU) + list(Z0_PU) + [_f, _f])
+psspy.fnsl([0, 0, 0, 0, 0, 0, 0, 1])
+if psspy.solved() != 0:
+    raise SystemExit('power flow did not converge; dynamics not started')
+psspy.cong(0)
+for k in (1, 2, 3):
+    psspy.conl(0, 1, k, [0, 0], [100.0, 0.0, 0.0, 100.0])
+psspy.ordr(0)
+psspy.fact()
+psspy.tysl(0)
+psspy.dyre_new([1, 1, 1, 1], DYR, '', '', '')
+psspy.voltage_channel([-1, -1, -1, POC_BUS], 'raw_v_poc_pu')
+psspy.strt(0, OUT)
+psspy.run(0, T_EVENT, 1000, 1, 0)
+# flat run: no event
+psspy.run(0, T_END, 1000, 1, 0)
+_title, idents, values = dyntools.CHNF(OUT).get_data()
+rec = {idents[k]: values[k] for k in idents if k != 'time'}
+rec['t_s'] = values['time']
+data = _convert(rec, F0_HZ, PLANT_MBASE)
+with open(os.path.join(HERE, 'flat_skmin_xrmin.csv'), 'w') as fh:
+    fh.write(','.join(HEADER) + '\n')
+    for row in zip(*[data[h] for h in HEADER]):
+        fh.write(','.join(repr(float(x)) for x in row) + '\n')
+'''
+
+
+def test_golden_script_bytes(tmp_path):
+    cases = build_battery(500.0, 500.0, 0.75, 0.75, z0_over_z1=1.5, x0_over_r0=0.75)
+    flat = next(c for c in cases if c.case_id == CID)
+    kw = {
+        **KW,
+        "grid_machine": (900, "G2"),
+        "plant_branch": None,
+        "plant_machine": None,
+        "plant_mbase_mva": None,
+    }
+    out = write_scripts(
+        [dataclasses.replace(flat, channels=("v_poc_pu",))], str(tmp_path), **kw
+    )
+    assert (tmp_path / out[CID]).read_bytes() == GOLDEN_SCRIPT.encode("utf-8")
