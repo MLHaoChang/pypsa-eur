@@ -3,14 +3,13 @@
 // submission, and per deliverable the data list, the data freeze, the TSO
 // comment log and the report pack. Statuses are what the engineer declares;
 // the backend guards submission (prerequisites judged, a fresh freeze).
-import { useState } from 'react'
+import { createContext, useContext, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  GRID_COMPLIANCE_KEY, gridComplianceApi,
+  GRID_COMPLIANCE_KEY, gcErrorText, gridComplianceApi,
   type ComplianceState, type DataItem, type Deliverable, type FreezeState, type GcStatus,
   type TsoComment,
 } from '../api/gridCompliance'
-import { errorText } from '../api/campusElectrical'
 import { withReturnFrom } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
 import { Btn, PageSection, Tag } from './PageKit'
@@ -58,6 +57,10 @@ const COMMENT_LABEL: Record<TsoComment['status'], string> = {
 
 const SUBMITTED_RANK = 5 // index of 'submitted' in the backend's status ladder
 
+/** Why every write is off (the tracker could not be read), or null. Writes
+ *  wait for a successful read: no control acts on rows it cannot confirm. */
+const WritesOff = createContext<string | null>(null)
+
 const today = () => new Date().toISOString().slice(0, 10)
 
 function saveBlob(blob: Blob, filename: string) {
@@ -83,6 +86,9 @@ export default function GridComplianceSection({ name }: { name: string }) {
   const [open, setOpen] = useState<string | null>(null)
 
   const data = q.data
+  const writesOff = q.isError
+    ? 'Changes are off until the compliance tracker can be read again; nothing was changed.'
+    : null
   const accepted = data?.deliverables.filter(d => d.status === 'accepted').length ?? 0
   const started = data?.deliverables.filter(d => d.status !== 'not_started').length ?? 0
   return (
@@ -94,7 +100,12 @@ export default function GridComplianceSection({ name }: { name: string }) {
     >
       {q.isPending && <p className="text-[11px] text-muted px-4 py-3">Loading the deliverables…</p>}
       {q.isError && (
-        <p role="alert" className="text-[12px] text-danger px-4 py-3">{errorText(q.error)}</p>
+        <div className="px-4 py-3 space-y-1" data-testid="gc-unreadable">
+          <p role="alert" className="text-[12px] text-danger">{gcErrorText(q.error)}</p>
+          <p className="text-[11px] text-muted">
+            {writesOff}{data && ' The rows below are as last read.'}
+          </p>
+        </div>
       )}
       {data && (
         <div className="px-3 py-2 border-b border-border text-[10.5px] text-muted space-y-1">
@@ -107,7 +118,11 @@ export default function GridComplianceSection({ name }: { name: string }) {
           <ChipKey />
         </div>
       )}
-      {data && <Phases name={name} state={data} open={open} setOpen={setOpen} />}
+      {data && (
+        <WritesOff.Provider value={writesOff}>
+          <Phases name={name} state={data} open={open} setOpen={setOpen} />
+        </WritesOff.Provider>
+      )}
     </PageSection>
   )
 }
@@ -191,6 +206,8 @@ function DeliverableRow({ name, d, statuses, hasCampusInput, open, onToggle }: {
   )
 }
 
+/** Every write, refused or not, rereads the tracker: the screen shows what
+ *  the server holds, never what was asked for. */
 function useRefresh(name: string) {
   const qc = useQueryClient()
   return () => qc.invalidateQueries({ queryKey: GRID_COMPLIANCE_KEY(name) })
@@ -200,15 +217,17 @@ function Detail({ name, d, statuses, hasCampusInput }: {
   name: string; d: Deliverable; statuses: GcStatus[]; hasCampusInput: boolean
 }) {
   const refresh = useRefresh(name)
+  const off = useContext(WritesOff)
   const [error, setError] = useState<string | null>(null)
-  const on = { onMutate: () => setError(null), onSuccess: refresh, onError: (e: unknown) => setError(errorText(e)) }
+  const on = { onMutate: () => setError(null), onSettled: refresh, onError: (e: unknown) => setError(gcErrorText(e)) }
   const status = useMutation({ mutationFn: (s: GcStatus) => gridComplianceApi.setStatus(name, d.code, s), ...on })
   const freeze = useMutation({ mutationFn: () => gridComplianceApi.freeze(name, d.code), ...on })
   const pack = useMutation({
     mutationFn: () => gridComplianceApi.pack(name, d.code),
     onMutate: () => setError(null),
-    onSuccess: ({ blob, filename }) => { saveBlob(blob, filename); refresh() },
-    onError: (e: unknown) => setError(errorText(e)),
+    onSuccess: ({ blob, filename }) => saveBlob(blob, filename),
+    onSettled: refresh,
+    onError: (e: unknown) => setError(gcErrorText(e)),
   })
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const requestPanelSection = useUIStore(s => s.requestPanelSection)
@@ -224,17 +243,21 @@ function Detail({ name, d, statuses, hasCampusInput }: {
       <div className="flex flex-wrap items-center gap-2">
         <label className="text-[11px] text-muted" htmlFor={`gc-status-${d.code}`}>Status</label>
         <select id={`gc-status-${d.code}`} className={inputCls} value={d.status}
-          disabled={status.isPending} onChange={e => status.mutate(e.target.value as GcStatus)}>
+          disabled={status.isPending || off !== null} onChange={e => status.mutate(e.target.value as GcStatus)}>
           {statuses.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
         </select>
-        <Btn onClick={() => freeze.mutate()} disabled={freeze.isPending || !hasCampusInput || submittedOn !== null}>
+        <Btn onClick={() => freeze.mutate()} disabled={freeze.isPending || off !== null || !hasCampusInput || submittedOn !== null}>
           {freeze.isPending ? 'Freezing…' : d.freeze ? 'Freeze again' : 'Freeze data'}
         </Btn>
-        <Btn onClick={() => pack.mutate()} disabled={pack.isPending}>
+        <Btn onClick={() => pack.mutate()} disabled={pack.isPending || off !== null}>
           {pack.isPending ? 'Building…' : 'Build report pack'}
         </Btn>
         <span className="text-[10px] text-muted">Status is declared by you; the tool does not judge it.</span>
       </div>
+      {off && <p className="text-[11px] text-muted">{off}</p>}
+      {pack.isPending && (
+        <p className="text-[11px] text-muted">Building the report pack; the button is back once it is saved.</p>
+      )}
       {!hasCampusInput && (
         <p className="text-[11px] text-muted">
           Freeze is off: there is no campus file yet, and the freeze records it.{' '}
@@ -287,9 +310,14 @@ function Detail({ name, d, statuses, hasCampusInput }: {
 
 function DataList({ name, d, onError }: { name: string; d: Deliverable; onError: (e: string | null) => void }) {
   const refresh = useRefresh(name)
+  const off = useContext(WritesOff) !== null
+  // a refused edit remounts the row, so its fields show the server's values again
+  const [refused, setRefused] = useState(0)
   const save = useMutation({
     mutationFn: (items: DataItem[]) => gridComplianceApi.setData(name, d.code, items),
-    onMutate: () => onError(null), onSuccess: refresh, onError: (e: unknown) => onError(errorText(e)),
+    onMutate: () => onError(null),
+    onSettled: refresh,
+    onError: (e: unknown) => { setRefused(n => n + 1); onError(gcErrorText(e)) },
   })
   const update = (i: number, patch: Partial<DataItem>) =>
     save.mutate(d.data.map((it, j) => (j === i ? { ...it, ...patch } : it)))
@@ -304,15 +332,15 @@ function DataList({ name, d, onError }: { name: string; d: Deliverable; onError:
           </tr></thead>
           <tbody>
             {d.data.map((it, i) => (
-              <tr key={it.item_id} className="border-t border-border">
+              <tr key={`${it.item_id}-${refused}`} className="border-t border-border">
                 <td className="py-0.5 pr-2 text-text">{it.label}</td>
-                <td><input aria-label={`Supplier of ${it.label}`} className={inputCls} maxLength={80}
+                <td><input aria-label={`Supplier of ${it.label}`} className={inputCls} maxLength={80} disabled={off}
                   defaultValue={it.supplier} placeholder="role, e.g. TSO"
                   onBlur={e => e.target.value !== it.supplier && update(i, { supplier: e.target.value })} /></td>
-                <td><input type="date" aria-label={`Due date of ${it.label}`} className={inputCls}
+                <td><input type="date" aria-label={`Due date of ${it.label}`} className={inputCls} disabled={off}
                   defaultValue={it.due ?? ''}
                   onBlur={e => (e.target.value || null) !== it.due && update(i, { due: e.target.value || null })} /></td>
-                <td><select aria-label={`Status of ${it.label}`} className={inputCls} value={it.status}
+                <td><select aria-label={`Status of ${it.label}`} className={inputCls} value={it.status} disabled={off}
                   onChange={e => update(i, { status: e.target.value as DataItem['status'] })}>
                   <option value="requested">Requested</option>
                   <option value="received">Received</option>
@@ -329,12 +357,14 @@ function DataList({ name, d, onError }: { name: string; d: Deliverable; onError:
 
 function CommentLog({ name, d, onError }: { name: string; d: Deliverable; onError: (e: string | null) => void }) {
   const refresh = useRefresh(name)
+  const off = useContext(WritesOff) !== null
   const [draft, setDraft] = useState({ date: today(), clause: '', comment: '' })
   const add = useMutation({
     mutationFn: () => gridComplianceApi.addComment(name, d.code, draft),
     onMutate: () => onError(null),
-    onSuccess: () => { setDraft({ date: today(), clause: '', comment: '' }); refresh() },
-    onError: (e: unknown) => onError(errorText(e)),
+    onSuccess: () => setDraft({ date: today(), clause: '', comment: '' }),
+    onSettled: refresh,
+    onError: (e: unknown) => onError(gcErrorText(e)),
   })
   return (
     <div>
@@ -346,13 +376,13 @@ function CommentLog({ name, d, onError }: { name: string; d: Deliverable; onErro
       </ul>
       <form className="mt-2 flex flex-wrap items-end gap-1.5"
         onSubmit={e => { e.preventDefault(); if (draft.comment.trim()) add.mutate() }}>
-        <input type="date" aria-label="Comment date" className={inputCls} value={draft.date} required
+        <input type="date" aria-label="Comment date" className={inputCls} value={draft.date} required disabled={off}
           onChange={e => setDraft({ ...draft, date: e.target.value })} />
-        <input aria-label="Clause" placeholder="Clause" className={`${inputCls} w-24`} maxLength={64}
+        <input aria-label="Clause" placeholder="Clause" className={`${inputCls} w-24`} maxLength={64} disabled={off}
           value={draft.clause} onChange={e => setDraft({ ...draft, clause: e.target.value })} />
         <input aria-label="TSO comment" placeholder="TSO comment" className={`${inputCls} flex-1 min-w-40`}
-          maxLength={4000} value={draft.comment} onChange={e => setDraft({ ...draft, comment: e.target.value })} />
-        <Btn type="submit" disabled={add.isPending || !draft.comment.trim()}>Log comment</Btn>
+          maxLength={4000} disabled={off} value={draft.comment} onChange={e => setDraft({ ...draft, comment: e.target.value })} />
+        <Btn type="submit" disabled={add.isPending || off || !draft.comment.trim()}>Log comment</Btn>
       </form>
       {!draft.comment.trim() && (
         <p className="text-[10px] text-muted mt-0.5">Log comment is off until the TSO comment is typed.</p>
@@ -365,6 +395,7 @@ function CommentItem({ name, code, c, packs, onError }: {
   name: string; code: string; c: TsoComment; packs: number[]; onError: (e: string | null) => void
 }) {
   const refresh = useRefresh(name)
+  const off = useContext(WritesOff) !== null
   const [response, setResponse] = useState(c.response)
   const [revision, setRevision] = useState(c.revision)
   const [pack, setPack] = useState<string>(c.pack ? String(c.pack.version) : '')
@@ -372,11 +403,11 @@ function CommentItem({ name, code, c, packs, onError }: {
     mutationFn: () => gridComplianceApi.updateComment(name, code, c.comment_id, {
       response, revision, status: 'responded', ...(pack ? { pack_version: Number(pack) } : {}),
     }),
-    onMutate: () => onError(null), onSuccess: refresh, onError: (e: unknown) => onError(errorText(e)),
+    onMutate: () => onError(null), onSettled: refresh, onError: (e: unknown) => onError(gcErrorText(e)),
   })
   const close = useMutation({
     mutationFn: () => gridComplianceApi.updateComment(name, code, c.comment_id, { status: 'closed' }),
-    onMutate: () => onError(null), onSuccess: refresh, onError: (e: unknown) => onError(errorText(e)),
+    onMutate: () => onError(null), onSettled: refresh, onError: (e: unknown) => onError(gcErrorText(e)),
   })
   const tone: Tone = c.status === 'open' ? 'warn' : c.status === 'responded' ? 'accent' : 'ok'
   return (
@@ -389,21 +420,21 @@ function CommentItem({ name, code, c, packs, onError }: {
       <p className="text-text mt-0.5 whitespace-pre-wrap">{c.comment}</p>
       <div className="mt-1 flex flex-wrap items-center gap-1.5">
         <input aria-label={`Response to ${c.comment_id}`} placeholder="Response" maxLength={4000}
-          className={`${inputCls} flex-1 min-w-40`} value={response} onChange={e => setResponse(e.target.value)} />
+          disabled={off} className={`${inputCls} flex-1 min-w-40`} value={response} onChange={e => setResponse(e.target.value)} />
         <input aria-label={`Revision for ${c.comment_id}`} placeholder="Rev" maxLength={16}
-          className={`${inputCls} w-14`} value={revision} onChange={e => setRevision(e.target.value)} />
+          disabled={off} className={`${inputCls} w-14`} value={revision} onChange={e => setRevision(e.target.value)} />
         {packs.length > 0 && (
-          <select aria-label={`Pack for ${c.comment_id}`} className={inputCls} value={pack}
+          <select aria-label={`Pack for ${c.comment_id}`} className={inputCls} value={pack} disabled={off}
             onChange={e => setPack(e.target.value)}>
             <option value="">No pack</option>
             {packs.map(v => <option key={v} value={v}>Pack v{v}</option>)}
           </select>
         )}
-        <Btn onClick={() => answer.mutate()} disabled={answer.isPending || !response.trim()}>
+        <Btn onClick={() => answer.mutate()} disabled={answer.isPending || off || !response.trim()}>
           Save response
         </Btn>
         {c.status === 'responded' && (
-          <Btn onClick={() => close.mutate()} disabled={close.isPending}>Close</Btn>
+          <Btn onClick={() => close.mutate()} disabled={close.isPending || off}>Close</Btn>
         )}
       </div>
       {!response.trim() && (
