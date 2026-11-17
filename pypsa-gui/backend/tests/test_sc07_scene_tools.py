@@ -166,6 +166,7 @@ def test_every_scene_kind_a_chat_tool_can_raise_is_declared():
         "scene_managed_site",
         "source_unavailable",
         "worker_unavailable",
+        "job_active",
     }
 
 
