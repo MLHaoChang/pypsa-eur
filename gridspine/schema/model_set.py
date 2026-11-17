@@ -105,7 +105,8 @@ class ModelSet:
     frozen, the parameters, and the campus description of each variant
     (``specs["aggregated"]`` is None when only the detailed model was
     frozen). ``unit_map`` maps each aggregated unit to the detailed units
-    it stands for (empty without an aggregated variant).
+    it stands for (empty without an aggregated variant). ``assumptions``
+    lists what the aggregation left out, one line each.
     """
 
     model_set_id: str
@@ -114,6 +115,7 @@ class ModelSet:
     params: dict
     specs: dict
     unit_map: dict
+    assumptions: tuple = ()
 
     def spec(self, variant: str) -> dict:
         """
@@ -136,7 +138,7 @@ def _check_variant(ms, variant):
 
 
 def new_model_set(
-    campus_spec, params, *, aggregated=None, unit_map=None, now=None
+    campus_spec, params, *, aggregated=None, unit_map=None, assumptions=None, now=None
 ) -> ModelSet:
     """
     A ``ModelSet`` from the detailed campus description and the study
@@ -160,6 +162,7 @@ def new_model_set(
         params=copy.deepcopy(params),
         specs=specs,
         unit_map=copy.deepcopy(unit_map or {}),
+        assumptions=tuple(assumptions or ()),
     )
 
 
