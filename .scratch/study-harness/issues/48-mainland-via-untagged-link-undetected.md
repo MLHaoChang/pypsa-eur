@@ -3,7 +3,7 @@
 
 # 48 — A mainland bus fed through an untagged Link is not detected
 
-Status: needs-triage
+Status: done (#1567)
 Gated: GK A
 Type: bug
 Parent: SH 46 (#1461) hand-off follow-up

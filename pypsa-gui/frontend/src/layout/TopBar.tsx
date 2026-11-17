@@ -77,12 +77,12 @@ export default function TopBar() {
   }
 
   const btnClass = {
-    idle: 'bg-success hover:bg-success/80 text-bg',
-    completed: 'bg-success hover:bg-success/80 text-bg',
-    aborted: 'bg-success hover:bg-success/80 text-bg',
-    running: 'bg-warn hover:bg-warn/80 text-bg animate-pulse',
-    failed: 'bg-danger hover:bg-danger/80 text-bg',
-  }[status] ?? 'bg-success hover:bg-success/80 text-bg'
+    idle: 'bg-success hover:bg-success/90 text-bg',
+    completed: 'bg-success hover:bg-success/90 text-bg',
+    aborted: 'bg-success hover:bg-success/90 text-bg',
+    running: 'bg-warn hover:bg-warn/90 text-bg animate-pulse',
+    failed: 'bg-danger hover:bg-danger/90 text-bg',
+  }[status] ?? 'bg-success hover:bg-success/90 text-bg'
 
   const btnIcon = status === 'running' ? <Loader size={14} className="animate-spin" /> : <Play size={14} />
   const btnLabel = status === 'running' ? 'Running…' : status === 'failed' ? 'Failed' : 'Run'

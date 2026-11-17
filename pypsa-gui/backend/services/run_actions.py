@@ -59,6 +59,11 @@ STAGE = "solve"
 DC_KIND = "dc_grid_code"
 MG_KIND = "mg_island"
 SITE_KIND = "site_context"
+# Study harness 14 S-B2b (GK B (59)): the shipped cases' engine
+# (`harness/run_shipped_engine.py`), explore stage; it forks and solves, so
+# it runs only on its card's digest.
+SHIPPED = "shipped_cases"
+SHIPPED_KIND = "shipped_cases"
 # The registry: each action's stage, whether it only reads, and its record
 # kind. Closed: a profile naming anything else is refused at load (D7).
 REGISTRY = {
@@ -67,6 +72,7 @@ REGISTRY = {
     MG_SURVIVAL: {"stage": STAGE, "reads_only": True, "kind": MG_KIND},
     # Reads only: it writes the run's own record, never the project (GK B (49) Q2).
     SITE_FETCH: {"stage": "inputs", "reads_only": True, "kind": SITE_KIND},
+    SHIPPED: {"stage": "explore", "reads_only": False, "kind": SHIPPED_KIND},
 }
 FROZEN = {
     "frozen": DC_KIND
@@ -76,6 +82,7 @@ MARKERS = {
     DC_KIND: FROZEN,
     MG_KIND: {"frozen": MG_KIND},
     SITE_KIND: {"frozen": SITE_KIND},
+    SHIPPED_KIND: {"frozen": SHIPPED_KIND},
 }
 JOB_KIND = "dc_campus"
 EVENT = "dc_campus"  # the envelope ledger row of the campus run's reservation
@@ -369,6 +376,13 @@ KINDS = {
         "prefix": "site_",
         "valid": lambda frozen: _site("valid")(frozen),
     },
+    SHIPPED_KIND: {
+        "core": lambda frozen: _shipped("core")(frozen),
+        "card": lambda frozen: _shipped("card")(frozen),
+        "event": "explore",  # each case reserves its own row (the engine's)
+        "prefix": "shipped_",
+        "valid": lambda frozen: _shipped("valid")(frozen),
+    },
 }
 
 
@@ -377,6 +391,13 @@ def _site(name):
     from harness import run_site
 
     return getattr(run_site, name)
+
+
+def _shipped(name):
+    """`harness.run_shipped_engine`'s `name` (imported late, as `_site`)."""
+    from harness import run_shipped_engine
+
+    return getattr(run_shipped_engine, name)
 
 
 def stage_of(step) -> str:
@@ -525,6 +546,8 @@ def stage_frozen(task, kind=DC_KIND) -> dict:
     if kind == SITE_KIND:
         # Issue 33 (GK B (49) S1): the site from the run's granted intake rows, never a model's.
         return _site("freeze")(task)
+    if kind == SHIPPED_KIND:
+        return _shipped("freeze")(task)
     if kind not in MARKERS:
         return {
             "unfrozen": {
@@ -729,8 +752,10 @@ def _dispatch(path, ctx, step_id, attempt, approved=None, instance=None):
         return _stop(
             path,
             step["id"],
-            "dc_card",
-            "the campus study runs only on the card the user approved for this record",
+            prefix + "card",
+            "the shipped cases run only on the card the user approved for this record"
+            if kind == SHIPPED_KIND
+            else "the campus study runs only on the card the user approved for this record",
         )
     if str(getattr(ctx, "project_uuid", "")) != task["project_id"]:
         return _stop(
@@ -747,6 +772,18 @@ def _dispatch(path, ctx, step_id, attempt, approved=None, instance=None):
                 path,
                 step["id"],
                 "site_start_failed",
+                type(exc).__name__,
+                held=(attempt, instance),
+            )
+    if kind == SHIPPED_KIND:
+        try:
+            return _shipped("dispatch")(path, step, frozen, attempt, instance)
+        except Exception as exc:  # noqa: BLE001 — a programming error stops for the user
+            logger.exception("the shipped cases failed for run %s", path.stem)
+            return _stop(
+                path,
+                step["id"],
+                "shipped_start_failed",
                 type(exc).__name__,
                 held=(attempt, instance),
             )
