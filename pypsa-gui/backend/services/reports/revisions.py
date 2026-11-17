@@ -896,7 +896,7 @@ def note_draft_refused(
     with `reason` (`draft_budget` or `draft_unavailable`). A comment that is
     gone or closed is left alone. Returns whether it was written."""
     if reason not in (DRAFT_BUDGET, DRAFT_UNAVAILABLE):
-        raise ValueError(f"not a draft reason: {reason!r}")
+        raise ValueError(f"not a draft reason: {reason}")
     with store.report_lock(project_dir, report_id):
         comments = load_comments(project_dir, report_id)
         try:
