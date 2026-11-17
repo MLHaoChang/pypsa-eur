@@ -1,0 +1,176 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+#
+# SPDX-License-Identifier: MIT
+"""The sub-synchronous impedance scan (grid-compliance GC-08, TRGC 20)."""
+
+import math
+
+import numpy as np
+import pandapower as pp
+import pytest
+
+from gridspine.schema.contracts import ContractError
+from gridspine.static import harmonic_scan as hs
+from gridspine.static import subsync_scan as ss
+
+# 110 kV, S_sc 1210 MVA with R/X 0 and c = 1 (normal case): X_grid = 110^2 / 1210 = 10 ohm.
+# The line adds 0.5 + j40 ohm, so the loop reactance at f0 is 50 ohm.
+X_LOOP = 50.0
+CASE = {"normal": (1210.0, 0.0)}
+
+
+def _radial(f_hz=50):
+    net = pp.create_empty_network(sn_mva=100, f_hz=f_hz)
+    b0, b1, b2 = (pp.create_bus(net, vn_kv=110.0) for _ in range(3))
+    pp.create_ext_grid(net, b0, s_sc_max_mva=1210.0, s_sc_min_mva=1210.0, rx_max=0.0, rx_min=0.0)
+    pp.create_line_from_parameters(net, b0, b1, length_km=1.0, r_ohm_per_km=0.5, x_ohm_per_km=40.0,
+                                   c_nf_per_km=0.0, max_i_ka=1.0)
+    return net, b1, b2
+
+
+def _series(kinds):
+    return kinds[kinds["kind"] == ss.SERIES]
+
+
+@pytest.mark.parametrize(("k", "f_er"), [(0.3, 27.386127875), (0.5, 35.355339059), (0.7, 41.833001327)])
+@pytest.mark.parametrize("df", [0.1, 1.0])
+def test_series_capacitor_resonance_at_f0_sqrt_k(k, f_er, df):
+    net, b1, b2 = _radial()
+    study = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, k * X_LOOP)], df=df)
+    res = _series(study.resonance)
+    assert len(res) == 1
+    assert abs(res["f_er_hz"].iloc[0] - f_er) <= df
+    assert res["f_comp_hz"].iloc[0] == pytest.approx(50.0 - res["f_er_hz"].iloc[0])
+    assert res["r_ohm"].iloc[0] == pytest.approx(0.5, abs=1e-9)
+    assert res["verdict"].iloc[0] == "check"
+    assert ss.NO_MODES in res["note"].iloc[0]
+
+
+def test_scan_range_and_constant_r():
+    net, b1, b2 = _radial()
+    study = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)], df=1.0)
+    assert study.scan["f_hz"].iloc[0] == 5.0
+    assert study.scan["f_hz"].iloc[-1] == 45.0
+    assert len(study.scan) == 41
+    # no skin term below f0: R stays the line's 0.5 ohm; X = 50 h - 25 / h
+    assert np.allclose(study.scan["r_ohm"], 0.5)
+    h = study.scan["f_hz"].to_numpy() / 50.0
+    assert np.allclose(study.scan["x_ohm"], X_LOOP * h - 25.0 / h)
+    assert set(study.scan["label"]) == {"screening; binding answer is the EMT study"}
+
+
+def test_no_series_capacitor_not_evaluated_never_clear():
+    net, _, b2 = _radial()
+    pp.create_line_from_parameters(net, 1, b2, length_km=1.0, r_ohm_per_km=0.1, x_ohm_per_km=1.0,
+                                   c_nf_per_km=0.0, max_i_ka=1.0)
+    study = ss.subsync_scan(net, b2, CASE, torsional_modes={"G": [20.0]})
+    res = _series(study.resonance)
+    assert res["f_er_hz"].isna().all()
+    assert list(res["verdict"]) == ["not evaluated"]
+    assert ss.NO_SERIES_CAP in res["note"].iloc[0]
+    assert "clear" not in set(study.resonance["verdict"])
+
+
+def test_ssci_row_per_case_not_evaluated():
+    net, b1, b2 = _radial()
+    study = ss.subsync_scan(net, b2, {"max": (1210.0, 0.0), "min": (800.0, 0.1)}, series_caps=[(b1, b2, 25.0)])
+    ssci = study.resonance[study.resonance["kind"] == ss.SSCI]
+    assert list(ssci["case"]) == ["max", "min"]
+    assert set(ssci["verdict"]) == {"not evaluated"}
+    assert set(ssci["note"]) == {"not evaluated: converter damping not modelled; binding answer is the EMT study"}
+
+
+def test_two_series_capacitors_on_parallel_paths_give_two_crossings():
+    """Two series-LC paths in parallel: X has a zero for each path's resonance, with a pole between."""
+    net = pp.create_empty_network(sn_mva=100, f_hz=50)
+    g, a, b, poc = (pp.create_bus(net, vn_kv=110.0) for _ in range(4))
+    pp.create_ext_grid(net, g, s_sc_max_mva=1e7, s_sc_min_mva=1e7, rx_max=0.0, rx_min=0.0)
+    for bus, x in ((a, 40.0), (b, 60.0)):
+        pp.create_line_from_parameters(net, g, bus, length_km=1.0, r_ohm_per_km=0.2, x_ohm_per_km=x,
+                                       c_nf_per_km=0.0, max_i_ka=1.0)
+    study = ss.subsync_scan(net, poc, CASE, series_caps=[(a, poc, 0.2 * 40.0), (b, poc, 0.6 * 60.0)])
+    f = sorted(_series(study.resonance)["f_er_hz"])
+    assert len(f) == 2
+    assert 5.0 < f[0] < f[1] < 45.0
+
+
+def test_torsional_margin_uses_complement():
+    """f_er = 50 sqrt(0.5) = 35.355 Hz, complement 14.645 Hz. Modes 14.0 (G1) and 35.0 (G2): the
+    complement is 0.645 Hz from G1's mode (clear at 0.5 Hz); f_er itself would be 0.355 Hz from G2's."""
+    net, b1, b2 = _radial()
+    study = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)],
+                            torsional_modes={"G1": [14.0], "G2": [35.0]}, clearance_hz=0.5)
+    row = _series(study.resonance).iloc[0]
+    assert row["machine"] == "G1"
+    assert row["mode_hz"] == 14.0
+    assert row["margin_hz"] == pytest.approx(50.0 - 50.0 * math.sqrt(0.5) - 14.0, abs=0.01)
+    assert row["verdict"] == "clear"
+    assert not bool(row["assumed"])
+    assert ss.NO_MODES not in row["note"]
+    tight = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)],
+                            torsional_modes={"G1": [14.0], "G2": [35.0]}, clearance_hz=0.7)
+    assert _series(tight.resonance)["verdict"].iloc[0] == "flag"
+
+
+def test_judge_states_and_edge():
+    assert ss.judge(None, 1.0) == "check"
+    assert ss.judge(1.0, 1.0) == "clear"
+    assert ss.judge(0.999999, 1.0) == "flag"
+    assert ss.judge(2.0, 1.0) == "clear"
+
+
+def test_no_clearance_takes_default_assumed():
+    net, b1, b2 = _radial()
+    study = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)], torsional_modes={"G": [14.0]})
+    row = _series(study.resonance).iloc[0]
+    assert row["clearance_hz"] == 1.0
+    assert bool(row["assumed"])
+    assert "the grid code sets no torsional clearance; demo default" in row["note"]
+    assert row["verdict"] == "flag"                        # 0.645 Hz < 1.0 Hz
+    marked = ss.subsync_scan(net, b2, CASE, series_caps=[(b1, b2, 25.0)], clearance_hz=0.5,
+                             clearance_assumed=True)
+    assert _series(marked.resonance)["assumed"].all()
+
+
+def test_clearance_from_profile():
+    assert ss.clearance_from_profile(None) == (None, [])
+    v, cited = ss.clearance_from_profile({"subsync_torsional_clearance_hz": {"value": 2.0, "clause": "TRGC 20",
+                                                                           "source": "code"}})
+    assert (v, cited) == (2.0, [{"key": "subsync_torsional_clearance_hz", "clause": "TRGC 20", "source": "code"}])
+
+
+@pytest.mark.parametrize(("kw", "reason"), [
+    ({"series_caps": [(1, 2, 0.0)]}, "needs Xc > 0"),
+    ({"series_caps": [(1, 2, math.inf)]}, "Xc must be finite"),
+    ({"series_caps": [(1, 99, 10.0)]}, "not between in-service buses"),
+    ({"torsional_modes": {"G": [50.0]}}, r"must lie in \(0, 50.0\)"),
+    ({"torsional_modes": {"G": [math.inf]}}, "torsional mode of G must be finite"),
+    ({"clearance_hz": 0.0}, "clearance must be > 0"),
+    ({"clearance_hz": math.inf}, "clearance must be finite"),
+    ({"df": 0.0}, "need df > 0"),
+])
+def test_refuses(kw, reason):
+    net, _, b2 = _radial()
+    with pytest.raises(ContractError, match=reason):
+        ss.subsync_scan(net, b2, CASE, **kw)
+
+
+@pytest.mark.parametrize(("case", "reason"), [
+    ((0.0, 0.1), "needs S_sc > 0"),
+    ((1000.0, -0.1), "R/X >= 0"),
+    ((math.inf, 0.1), "S_sc of case x must be finite"),
+    ((1000.0, None), "R/X of case x must be a number"),
+])
+def test_refuses_bad_case(case, reason):
+    net, _, b2 = _radial()
+    with pytest.raises(ContractError, match=reason):
+        ss.subsync_scan(net, b2, {"x": case})
+
+
+def test_refuses_low_f0():
+    with pytest.raises(ContractError, match="f0 >= 10"):
+        ss.frequencies(9.0)
+
+
+def test_harmonic_scan_branches_promoted_without_change():
+    assert hs._branches is hs.branches
