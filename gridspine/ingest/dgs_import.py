@@ -1,8 +1,9 @@
 """
 PowerFactory DGS import, step 2: the parsed tables as a pypsa network.
 
-``read_dgs(paths, options)`` reads one ASCII ``.dgs`` (``dgs_parse``) and
-returns the shared ``ImportResult``. What becomes what:
+``read_dgs(paths, options)`` reads one ASCII ``.dgs`` (``dgs_parse``, DGS 5.x
+or 7.x) or its Excel form (``dgs_xlsx``) and returns the shared
+``ImportResult``. What becomes what:
 
 - ``ElmTerm`` → Bus (``uknom`` kV). Terminals joined by a closed coupler
   (``ElmCoup`` ``on_off`` 1) of the same voltage become one bus, named after
@@ -103,17 +104,28 @@ METADATA_KEY = "import"
 
 
 def read_dgs(paths: Sequence[Path], options: Mapping[str, Any] | None = None):
-    """Read one ASCII ``.dgs`` export into an ``ImportResult``."""
+    """
+    Read one PowerFactory export into an ``ImportResult``: an ASCII ``.dgs``
+    file (DGS 5.x or 7.x) or its Excel form (``.xlsx``, see ``dgs_xlsx``).
+    """
     paths = [Path(p) for p in paths]
     if len(paths) != 1:
         raise ImportFormatError(
-            f"A PowerFactory DGS import reads one .dgs file, got {len(paths)}"
+            f"A PowerFactory DGS import reads one .dgs or .xlsx file, got {len(paths)}"
         )
     path = paths[0]
-    if path.suffix.lower() != ".dgs":
-        raise ImportFormatError(f"{path.name} is not a .dgs file")
+    suffix = path.suffix.lower()
+    if suffix not in (".dgs", ".xlsx"):
+        raise ImportFormatError(f"{path.name} is not a .dgs or .xlsx file")
     try:
-        tables = parse_dgs(path)
+        if suffix == ".xlsx":
+            from gridspine.ingest.dgs_xlsx import parse_dgs_xlsx
+
+            tables = parse_dgs_xlsx(path)
+        else:
+            tables = parse_dgs(path)
+    except ImportFormatError as exc:  # a workbook limit or an unreadable file
+        raise ImportFormatError(f"{path.name}: {exc}") from exc
     except ContractError as exc:
         raise ImportFormatError(str(exc)) from exc
     try:
@@ -140,6 +152,7 @@ class _Mapper:
     def __init__(self, tables: DgsTables, source: str):
         self.t = tables.tables
         self.dropped = tables.dropped
+        self.where = tables.where
         self.source = source
         self.n = pypsa.Network()
         self.unmapped: list[Unmapped] = []
@@ -166,7 +179,7 @@ class _Mapper:
     def label(self, cls, oid, row) -> str:
         name = row.get("loc_name") if hasattr(row, "get") else None
         name = name if isinstance(name, str) and name else f"ID {oid}"
-        return f"{cls} {name!r} (line {int(row[LINE_COLUMN])})"
+        return f"{cls} {name!r} ({self.where(row[LINE_COLUMN])})"
 
     def skip(self, cls, oid, row, reason):
         self.unmapped.append(Unmapped(self.label(cls, oid, row), reason))

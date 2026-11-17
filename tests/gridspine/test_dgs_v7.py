@@ -191,8 +191,16 @@ G7 = "$$General;FID(a:40);Descr(a:40);Val(a:40)\n1;Version;7.0\n"
         (G7.replace("7.0", "8.0"), 2, "version '8.0' found"),
         (G7 + "$$ElmTerm;ID(a:40);uknom(r)\n2;33\n", 3, "no FID column"),
         (G7 + "$$ElmTerm;FID(a:40);ID(a:40);uknom(r)\n2;3;33\n", 3, "an ID column"),
-        (G5 + "$$ElmTerm;ID(a:40);FID(a:40);uknom(r)\n2;3;33\n", 3, "'FID' belongs to DGS 7.x"),
-        (G5 + "$$ElmTerm;ID(a:40);OP(a:1);uknom(r)\n2;C;33\n", 3, "'OP' belongs to DGS 7.x"),
+        (
+            G5 + "$$ElmTerm;ID(a:40);FID(a:40);uknom(r)\n2;3;33\n",
+            3,
+            "'FID' belongs to DGS 7.x",
+        ),
+        (
+            G5 + "$$ElmTerm;ID(a:40);OP(a:1);uknom(r)\n2;C;33\n",
+            3,
+            "'OP' belongs to DGS 7.x",
+        ),
         (
             G5 + "$$ElmTerm;ID(a:40);uknom(r);GPScoords:MATRIX(a)\n2;33;\n",
             3,

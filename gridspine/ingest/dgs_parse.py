@@ -106,6 +106,14 @@ class DgsTables:
     source: str
     #: per class, the header columns read but not kept (7.x matrices)
     dropped: dict = dataclasses.field(default_factory=dict)
+    #: text line -> where it came from, when not a line of a file
+    #: (``dgs_xlsx``: "sheet ElmTerm, row 3")
+    locations: dict = dataclasses.field(default_factory=dict)
+
+    def where(self, line) -> str:
+        """Where text line ``line`` came from: "line 7", or a sheet and row."""
+        line = int(line)
+        return self.locations.get(line, f"line {line}")
 
     def counts(self) -> dict:
         """Rows per class."""
@@ -130,11 +138,19 @@ def parse_dgs(path) -> DgsTables:
     raise ContractError(f"DGS {path}: neither UTF-8 nor Windows-1252 text")
 
 
-def parse_dgs_text(text: str, source: str = "<text>") -> DgsTables:
-    """Parse DGS ASCII ``text``; ``source`` names it in refusals."""
+def parse_dgs_text(
+    text: str, source: str = "<text>", locations: dict | None = None
+) -> DgsTables:
+    """
+    Parse DGS ASCII ``text``; ``source`` names it in refusals. ``locations``
+    maps a text line to the place it came from, for refusals and
+    ``DgsTables.where``; a line it does not hold is "line <n>".
+    """
+    locations = dict(locations or {})
 
     def fail(lineno, msg):
-        raise ContractError(f"DGS {source}, line {lineno}: {msg}")
+        at = locations.get(lineno, f"line {lineno}")
+        raise ContractError(f"DGS {source}, {at}: {msg}")
 
     rows: dict = {}  # class -> list of dicts
     types: dict = {}  # class -> {attr: type letter}
@@ -279,7 +295,12 @@ def parse_dgs_text(text: str, source: str = "<text>") -> DgsTables:
         ).set_index("ID")
         tables[cls] = df
     return DgsTables(
-        version=version, tables=tables, types=types, source=source, dropped=dropped
+        version=version,
+        tables=tables,
+        types=types,
+        source=source,
+        dropped=dropped,
+        locations=locations,
     )
 
 

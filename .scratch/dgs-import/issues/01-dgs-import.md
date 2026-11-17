@@ -99,3 +99,17 @@ Slices:
   - X9, mutants: mutants.py on both modules; hand-mutate the OP≠"C" refusal, the 5.x FID refusal,
     the formula refusal, the integral-float formatting (5.0 → "5.0") and the dispatch sniff, each
     with its killing test. Release-note fragment. About 600 lines is within PR-SIZE-1.
+- 2026-11-17, S3 build (session_01G7qCukUXA9jRyQCkZWGwRz), choices within X1-X9:
+  - The one public PF 2025 7.0 export writes reals with a decimal comma ("158,7713"). A real
+    with exactly one comma between digits and no point now reads as a point; "1.234,5", two
+    commas, or a comma in an integer field stay refused. Put to GK A2 as a plan question.
+  - 7.x: a header with an ID column, or without FID, is refused; General has no OP. A MATRIX
+    column drops every `name:...` column of its name; each is listed unmapped once per class
+    for mapped classes (other classes are already listed whole).
+  - X4: a non-empty sheet that is not a class table is refused (row 1 is not typed headers); a
+    wholly empty sheet is ignored; hidden sheets are read like any other.
+  - X5: the Excel input workbook's zip, declared-size and row checks moved to
+    `gridspine/ingest/xlsx_safe.py` (no pypsa), shared by both readers; `open_workbook` opens
+    read-only, formulas kept, `keep_links=False`.
+  - X6: `ImporterSpec.sniff` ("module:function") and `import_result.for_file(path)`: one
+    importer for the extension wins outright; for `.xlsx` exactly one sniff must claim the file.

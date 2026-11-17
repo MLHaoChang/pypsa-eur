@@ -358,11 +358,11 @@ def test_each_guard_refuses_naming_the_item(tmp_path, cls, row, words):
 def test_file_level_refusals(tmp_path):
     good = tmp_path / "a.dgs"
     good.write_text(dgs_text())
-    with pytest.raises(ImportFormatError, match="one .dgs file, got 2"):
+    with pytest.raises(ImportFormatError, match="one .dgs or .xlsx file, got 2"):
         read_dgs([good, good], {})
     other = tmp_path / "a.txt"
     other.write_text(dgs_text())
-    with pytest.raises(ImportFormatError, match="a.txt is not a .dgs file"):
+    with pytest.raises(ImportFormatError, match="a.txt is not a .dgs or .xlsx file"):
         read_dgs([other], {})
     with pytest.raises(ImportFormatError, match="version '6.0' found"):
         read_text(tmp_path, dgs_text().replace("1;Version;5.0", "1;Version;6.0"))
