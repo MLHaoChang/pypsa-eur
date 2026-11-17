@@ -7,6 +7,7 @@ from models.schemas import (
     BUS_LAZY_COLUMNS,
     GENERATOR_LAZY_COLUMNS,
     LINK_LAZY_COLUMNS,
+    LOAD_LAZY_COLUMNS,
     BusCreate,
     CarrierCreate,
     GeneratorCreate,
@@ -482,7 +483,8 @@ def get_loads():
 
 @router.post("/loads", status_code=201)
 def create_load(load: LoadCreate):
-    return _create_component("Load", "loads", load.name, load.model_dump(exclude={"name"}))
+    unset_lazy = LOAD_LAZY_COLUMNS - load.model_fields_set
+    return _create_component("Load", "loads", load.name, load.model_dump(exclude={"name"} | unset_lazy))
 
 
 @router.put("/loads/{name}")
