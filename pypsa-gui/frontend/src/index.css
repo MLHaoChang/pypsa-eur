@@ -5,11 +5,14 @@
    Red accent shared with the sign-in landing page, engineering-clean
    (Linear / Vercel / Figma lineage), mono numerics.
 
-   Dark is the shipped default and carries the product identity: a near-black
-   surface ramp warmed toward red, with a #ff5252 accent, mirroring index.html.
-   Light is the @theme default block (so it stays the Tailwind fallback) and
-   keeps its near-white identity, with the accent pulled down to a deeper
-   crimson that stays legible as text on white.
+   Light is the default (THEME-LIGHT-1) and the @theme block, so it is also
+   the Tailwind fallback: white surfaces, a neutral grey ink ramp, one red
+   accent, and pale-red / light-grey tinted bands. Dark is the user's toggle:
+   a near-black surface ramp warmed toward red, with a #ff5252 accent.
+   The theme opens on the stored choice, else the OS preference, else light
+   (uiStore.storedTheme and the boot scripts in spa.html / index.html).
+   Every text token clears WCAG AA on every surface in both themes:
+   src/theme.contrast.test.ts.
 
    `public/brand.css` is the source of truth for the identity colours — it is
    what the static (non-Tailwind) sign-in document consumes. Tailwind's @theme
@@ -22,50 +25,51 @@
    ══════════════════════════════════════════════════════════════════════════ */
 @theme {
   /* Surfaces */
-  --color-bg: #fdfdfe;
-  --color-bg-2: #f9fafb;
-  --color-panel: #f5f6f8;
-  --color-panel-2: #eef0f3;
-  --color-canvas: #f8f9fb;
-  --color-canvas-dot: #dde0e5;
+  --color-bg: #ffffff;
+  --color-bg-2: #fafafa;
+  --color-panel: #f7f7f7;
+  --color-panel-2: #f4f4f4;
+  --color-canvas: #fbfbfb;
+  --color-canvas-dot: #d9d9d9;
   /* Tinted backgrounds (THEME-LIGHT-1): `band` washes header strips and hero
      areas, `tint` fills soft cards inside panels. Text on them meets AA
      (theme.contrast.test.ts). The matching gradient is --band-gradient. */
-  --color-band: #fbf3f4;
-  --color-tint: #fbf4f5;
+  --color-band: #ffefef;
+  --color-tint: #f4f4f4;
 
   /* Borders / hairlines — fine to strong */
-  --color-border: #e6e8ec;
-  --color-border-2: #d4d8de;
-  --color-border-3: #b9bec7;
-  --color-grid: #e6e8ec;
+  --color-border: #e6e6e6;
+  --color-border-2: #d9d9d9;
+  --color-border-3: #b3b3b3;
+  --color-grid: #ececec;
 
   /* Ink scale (text) */
-  --color-ink-900: #0a0e14;
-  --color-ink-800: #1a202b;
-  --color-ink-700: #303843;
-  --color-ink-600: #475061;
-  --color-ink-500: #5f6876;
-  --color-ink-400: #97a0ae;
-  --color-ink-300: #c2c8d2;
-  --color-ink-200: #dde1e7;
+  --color-ink-900: #222222;
+  --color-ink-800: #333333;
+  --color-ink-700: #404040;
+  --color-ink-600: #4d4d4d;
+  --color-ink-500: #5c5c5c;
+  --color-ink-400: #8c8c8c;
+  --color-ink-300: #b3b3b3;
+  --color-ink-200: #d9d9d9;
   /* Aliases — keep existing `text-text` / `text-muted` working, now on the
      design ink scale. */
-  --color-text: #0a0e14;
-  --color-muted: #5f6876; /* ≥ 4.9 : 1 on every light surface and band (theme.contrast.test.ts) */
-  --color-axis: #5f6876; /* ≥ 4.9 : 1 on every light surface (UX S4, A1); was #97a0ae, 2.6 : 1 */
-  --color-legend: #475061;
+  --color-text: #222222;
+  --color-muted: #5c5c5c; /* ≥ 5.7 : 1 on every light surface and band (theme.contrast.test.ts) */
+  --color-axis: #5c5c5c; /* ≥ 5.7 : 1 on every light surface (UX S4, A1) */
+  --color-legend: #4d4d4d;
 
-  /* Crimson accent — same family as the dark theme's red, darkened so
-     `text-accent` on a white surface still clears WCAG AA (≈6.5:1). Bright red
-     (#ff5252) is reserved for the dark theme, where it has the contrast. */
-  --color-accent: #b3261e;
-  --color-accent-700: #8c1d18;
-  --color-accent-100: #f7cdcb;
-  --color-accent-50: #fdf0ef;
+  /* Red accent, used sparingly: title rules, key numbers, the active item,
+     primary actions. Dark enough that `text-accent` clears AA on every light
+     surface and band (≥ 4.8 : 1). Bright red (#ff5252) is the dark theme's. */
+  --color-accent: #d0021b;
+  --color-accent-700: #a8000f;
+  --color-accent-100: #fbd5d8;
+  --color-accent-50: #ffefef;
   /* Foreground for anything FILLED with the accent. White works on the light
-     theme's deep crimson; the dark theme's bright red needs ink instead. */
+     theme's red (5.7 : 1); the dark theme's bright red needs ink instead. */
   --color-on-accent: #ffffff;
+  --color-focus: #d0021b;
 
   /* State colours. `danger` stays the saturated destructive red even though
      the brand accent is now also red — red IS the destructive signal, and
@@ -73,12 +77,12 @@
      They separate in practice: accent fills carry near-black text (see
      --color-on-accent), destructive fills carry white, and every destructive
      action is labelled and confirmed. */
-  --color-success: #16a34a;
-  --color-warn: #d97706;
-  --color-danger: #c81e1e; /* ≥ 5.0 : 1 on every light surface; #dc2626 was 4.2 : 1 on panel-2 */
+  --color-success: #166534;
+  --color-warn: #a14c00;
+  --color-danger: #b91c1c; /* ≥ 5.5 : 1 on every light surface and band */
   --color-purple: #7c3aed;
   /* Result states (components/ResultState.tsx): not run / running. */
-  --color-info: #2563eb;
+  --color-info: #1d4ed8;
 
   /* Voltage bands (>300 / 200–300 / 100–200 / <100 kV) */
   --color-v-red: #ef4444;
@@ -133,9 +137,9 @@
 
   /* Left sidebar — a light near-white surface (was a dark navy rail).
      nav-hover is the row-hover tint; nav-active tracks the accent. */
-  --color-nav: #f9fafb;
-  --color-nav-hover: #f5f6f8;
-  --color-nav-active: #b3261e;
+  --color-nav: #fafafa;
+  --color-nav-hover: #f4f4f4;
+  --color-nav-active: #d0021b;
 
   /* Typography */
   --font-family-sans: 'Inter', system-ui, sans-serif;
@@ -158,11 +162,19 @@
   --shadow: 0 2px 4px rgba(10, 14, 20, 0.04), 0 1px 2px rgba(10, 14, 20, 0.03);
   --shadow-md: 0 6px 16px rgba(10, 14, 20, 0.07), 0 2px 5px rgba(10, 14, 20, 0.04);
   --shadow-lg: 0 18px 40px rgba(10, 14, 20, 0.12), 0 4px 12px rgba(10, 14, 20, 0.06);
-  --ring-accent: 0 0 0 3px rgba(179, 38, 30, 0.18);
-  /* Canvas signature — soft ambient crimson radial gradients. */
+  /* Focus and selection ring: solid, so it reaches 3 : 1 on every surface and
+     band (WCAG 1.4.11, theme.contrast.test.ts). */
+  --ring-accent: 0 0 0 2px var(--color-focus);
+  /* Canvas signature — soft ambient red radial gradients. */
   --ambient:
-    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(179, 38, 30, 0.05), transparent 60%),
-    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(220, 38, 38, 0.035), transparent 55%);
+    radial-gradient(ellipse 800px 600px at 18% -10%, rgba(208, 2, 27, 0.04), transparent 60%),
+    radial-gradient(ellipse 600px 500px at 90% 110%, rgba(208, 2, 27, 0.03), transparent 55%);
+  /* Header strips and hero areas: white into the pale-red band, with a soft
+     red glow at the top right. Decoration only; text on it is tested against
+     its darkest stop composited over --color-band. */
+  --band-gradient:
+    radial-gradient(ellipse 700px 160px at 85% 0%, rgba(208, 2, 27, 0.05), transparent 70%),
+    linear-gradient(180deg, #ffffff 0%, var(--color-band) 100%);
 }
 
 /* ── Dark theme overrides ──────────────────────────────────────────────────
@@ -240,9 +252,12 @@
   --color-accent: #ff5252;
   --color-accent-700: #e63b3b; /* on-accent ink on it ≥ 4.7 : 1; #e03131 was 4.3 : 1 */
   --color-danger: #ff8b8b; /* ≥ 7 : 1 on every dark surface; #dc2626 was 3.3 : 1 */
+  --color-success: #22c55e; /* ≥ 6.9 : 1 on every dark surface; the light #166534 is 2.6 : 1 here */
+  --color-warn: #f59e0b; /* ≥ 7.3 : 1 on every dark surface */
   --color-accent-100: #3a1214;
   --color-accent-50: #260c0e;
   --color-on-accent: #14090a;
+  --color-focus: #ff5252;
 
   --color-nav: #131011;
   --color-nav-hover: #211b1c;
@@ -254,11 +269,15 @@
   --shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --ring-accent: 0 0 0 3px rgba(255, 82, 82, 0.22);
 
   --ambient:
     radial-gradient(ellipse 800px 600px at 18% -10%, rgba(255, 82, 82, 0.10), transparent 60%),
     radial-gradient(ellipse 600px 500px at 90% 110%, rgba(255, 138, 138, 0.055), transparent 55%);
+  /* Redeclared so the brand-dark subtree resolves var() against its own focus. */
+  --ring-accent: 0 0 0 2px var(--color-focus);
+  --band-gradient:
+    radial-gradient(ellipse 700px 160px at 85% 0%, rgba(255, 82, 82, 0.10), transparent 70%),
+    linear-gradient(180deg, var(--color-bg-2) 0%, var(--color-band) 100%);
 
   /* Tell the browser to render native form controls (date pickers, scrollbar
      thumbs, autofill rendering) in dark variants. */

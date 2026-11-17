@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-store" />
-    <meta name="theme-color" content="#151112" />
+    <meta name="theme-color" content="#ffffff" />
     <title>PyPSA Studio</title>
     <!-- Identity palette, shared with the static sign-in page. -->
     <link rel="stylesheet" href="/brand.css" />
@@ -21,7 +21,7 @@
       // src/store/uiStore.ts by uiStore.theme.test.ts; both migrations are
       // idempotent, so whichever runs first wins.
       ;(function pypsaBootTheme() {
-        var theme = 'light'
+        var theme = null
         try {
           if (localStorage.getItem('network-diagram:theme-schema') !== '2') {
             localStorage.removeItem('network-diagram:theme')
@@ -29,11 +29,19 @@
           }
           var stored = localStorage.getItem('network-diagram:theme')
           if (stored === 'light' || stored === 'dark') theme = stored
-          else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) theme = 'dark'
         } catch (err) {
-          /* storage blocked: fall back to light */
+          /* storage blocked: no stored choice */
+        }
+        if (theme === null) {
+          try {
+            theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          } catch (err) {
+            theme = 'light'
+          }
         }
         document.documentElement.dataset.theme = theme
+        var meta = document.querySelector('meta[name="theme-color"]')
+        if (meta) meta.setAttribute('content', theme === 'dark' ? '#151112' : '#ffffff')
       })()
     </script>
     <script>

@@ -1135,7 +1135,8 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
   const toggleDensity = useUIStore(s => s.toggleDensity)
   const themeTitle = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'
   const densityTitle = density === 'comfortable' ? 'Switch to compact density' : 'Switch to comfortable density'
-  const ThemeIcon = theme === 'light' ? Sun : Moon
+  // Icon and copy both name the ACTION, as in the command palette.
+  const ThemeIcon = theme === 'light' ? Moon : Sun
   const DensityIcon = density === 'comfortable' ? Rows2 : Rows3
 
   if (small) {
@@ -1175,7 +1176,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
     <div className="shrink-0 border-t border-border p-2">
       <p className="px-2 pb-1 text-[9px] font-bold uppercase tracking-widest text-ink-400">PREFERENCES</p>
       <div className="flex gap-1">
-        <button
+        <button aria-label={themeTitle}
           onClick={toggleTheme} title={themeTitle}
           className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] rounded transition-colors"
           style={{ color: 'var(--color-muted)', border: '1px solid var(--color-border)' }}
@@ -1183,7 +1184,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '' }}
         >
           <ThemeIcon size={12} />
-          <span className="capitalize">{theme}</span>
+          <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
         </button>
         <button
           onClick={toggleDensity} title={densityTitle}

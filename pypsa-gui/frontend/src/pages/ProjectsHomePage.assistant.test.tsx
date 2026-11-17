@@ -96,17 +96,17 @@ describe('the assistant on the projects home', () => {
     expect(screen.getByTestId('companion-compose')).toBeTruthy()
   })
 
-  // The page is `data-pypsa-surface="brand-dark"` on purpose (see its own
-  // comment: the projects home is always the dark front door, and token-driven
-  // children must follow it rather than the user's workbench theme). The dock
-  // is a token-driven child, so it has to sit INSIDE that subtree — mounting
-  // it as a sibling would render a light-themed panel against the dark page
-  // for anyone whose workbench preference is light.
-  it('renders inside the brand-dark token surface', async () => {
+  // The page is a `data-pypsa-surface` token subtree on purpose (see its own
+  // comment: `brand-dark` or `brand-light`, following the workspace theme, and
+  // token-driven children must follow it). The dock is a token-driven child,
+  // so it has to sit INSIDE that subtree — mounting it as a sibling would
+  // render a panel in the wrong theme against the page.
+  it.each(['light', 'dark'] as const)('renders inside the %s token surface', async theme => {
+    useUIStore.setState({ theme })
     renderPage()
     await screen.findByRole('navigation', { name: 'Account' })
 
-    const surface = document.querySelector('[data-pypsa-surface="brand-dark"]')
+    const surface = document.querySelector(`[data-pypsa-surface="brand-${theme}"]`)
     expect(surface).toBeTruthy()
     expect(surface!.contains(screen.getByTestId('assistant-dock'))).toBe(true)
   })

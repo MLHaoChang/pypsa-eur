@@ -142,7 +142,7 @@ export default function LoginPage() {
           authored for a light card and kept `text-slate-900` + a #e5ece7 rule
           after the card became dark glass — near-black text on a near-black
           panel, effectively invisible. */}
-      <form className="space-y-4 border-t border-white/14 pt-5" onSubmit={handleForgotPassword}>
+      <form className="space-y-4 border-t border-[var(--brand-line)] pt-5" onSubmit={handleForgotPassword}>
         <div className="space-y-1">
           <h3 className="text-sm font-medium text-[var(--brand-ink)]">Forgot your password?</h3>
           <p className="text-sm leading-6 text-[var(--brand-ink-dim)]">

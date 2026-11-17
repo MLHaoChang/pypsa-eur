@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   PyPSA Studio — brand palette (red on black).
+   PyPSA Studio — identity palette, light (default) and dark.
 
    SINGLE SOURCE OF TRUTH for the identity colours. Served from /brand.css and
    linked by BOTH HTML entry points:
@@ -11,49 +11,147 @@
    `src/index.css` needs literal values at build time, so the same numbers
    necessarily appear in `src/index.css` too. `frontend/brand.theme.test.ts` parses
    both files and fails if they drift — treat that test as the contract, not
-   the comment.
+   the comment. `src/theme.contrast.test.ts` pins WCAG AA for both themes.
 
-   Contrast (all against --brand-black #151112):
-     --brand-red        #ff5252  5.9:1  ✓ AA for body text
-     --brand-red-soft   #ff8a8a  8.3:1  ✓
-     --brand-ink        #f4eaea 15.9:1  ✓
-     --brand-ink-dim    #b9a7a9  8.2:1  ✓
-   and --brand-on-red (#14090a) on --brand-red is 6.3:1, which is why filled
-   red surfaces carry near-black text rather than white (white would be 3.2:1).
+   Light is the default (THEME-LIGHT-1): white surfaces, grey ink, one red
+   accent, pale-red tints. Dark is the user's toggle, set on <html> as
+   data-theme="dark" by the boot script in each entry point before first paint.
+
+   Token names are neutral (`accent`, not a hue). The older hue names
+   (--brand-black, --brand-red, …) at the bottom are aliases kept for the
+   pages that still read them; the colour sweep moves those pages over.
    ══════════════════════════════════════════════════════════════════════════ */
 :root {
-  /* Surfaces — near-black warmed a few degrees toward red so it reads as a
-     deliberate choice rather than an unstyled grey.
-     --brand-black sits at relative luminance 0.0060, which is Material's
-     dark-theme baseline (#121212 = 0.0061) to three decimals. The first cut of
-     this palette used #0a0708 (0.0023, ~2.6x darker); that is below every
-     mainstream dark UI and it flattened the surface ramp, because a surface
-     that dark leaves nowhere for panels and shadows to sit ABOVE it. */
-  --brand-black: #151112;
+  /* Surfaces */
+  --brand-bg: #ffffff;
+  --brand-surface: #fafafa;
+  --brand-surface-2: #f4f4f4;
+  --brand-panel: rgba(255, 255, 255, 0.88);
+  --brand-band: #ffefef;
+
+  /* Accent ramp. #d0021b on white is 5.7:1, white on it is 5.7:1. */
+  --brand-accent: #d0021b;
+  --brand-accent-soft: #e3243b;
+  --brand-accent-deep: #a8000f;
+  --brand-accent-deeper: #8a000c;
+  --brand-on-accent: #ffffff;
+
+  /* Ink */
+  --brand-ink: #222222;
+  --brand-ink-dim: #5c5c5c;
+
+  /* Hairlines */
+  --brand-line: rgba(34, 34, 34, 0.14);
+  --brand-line-strong: rgba(208, 2, 27, 0.45);
+
+  /* Semantic */
+  --brand-danger: #b91c1c;
+  --brand-warn: #a14c00;
+
+  /* Composites reused by both entry points */
+  --brand-accent-gradient: linear-gradient(135deg, #e3243b, #d0021b 55%, #a8000f);
+  --brand-accent-glow: 0 12px 28px rgba(208, 2, 27, 0.22);
+  --brand-band-gradient:
+    radial-gradient(ellipse 700px 160px at 85% 0%, rgba(208, 2, 27, 0.05), transparent 70%),
+    linear-gradient(180deg, #ffffff 0%, #ffefef 100%);
+
+  /* Sign-in page (index.html): the scrim over the backdrop photo, the glass
+     card and its form controls. */
+  --brand-scrim:
+    radial-gradient(1100px 720px at 8% 45%, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.84) 34%, rgba(255, 255, 255, 0.4) 62%, transparent 100%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.45) 42%, rgba(255, 255, 255, 0.3) 62%, rgba(255, 255, 255, 0.7) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, transparent 26%, transparent 62%, rgba(255, 239, 239, 0.75) 100%);
+  --brand-grid-line: rgba(208, 2, 27, 0.06);
+  --brand-chip-bg: rgba(255, 255, 255, 0.78);
+  --brand-pulse: rgba(208, 2, 27, 0.55);
+  --brand-pulse-out: rgba(208, 2, 27, 0);
+  --brand-mark-glow: 0 8px 24px rgba(208, 2, 27, 0.25);
+  --brand-card-shadow: 0 24px 64px rgba(34, 34, 34, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --brand-input-bg: #ffffff;
+  --brand-input-bg-focus: #ffffff;
+  --brand-input-line-focus: #d0021b;
+  --brand-focus-ring: 0 0 0 3px rgba(208, 2, 27, 0.18);
+  --brand-placeholder: #737373;
+  --brand-error-bg: #ffefef;
+  --brand-error-line: rgba(185, 28, 28, 0.35);
+  --brand-ok-bg: #f4f4f4;
+  --brand-foot: #5c5c5c;
+  --brand-code: #a8000f;
+  --brand-backdrop-filter: saturate(0.9) contrast(1.02) brightness(1.08);
+  --brand-scheme: light;
+}
+
+/* Dark: the red-on-black identity the app shipped with until THEME-LIGHT-1.
+   Contrast (against --brand-bg #151112): --brand-accent 5.9:1,
+   --brand-accent-soft 8.3:1, --brand-ink 15.9:1, --brand-ink-dim 8.2:1, and
+   --brand-on-accent #14090a on --brand-accent 6.3:1 (white would be 3.2:1).
+   The second selector pins this ramp on a subtree marked
+   data-pypsa-surface="brand-dark" (the admin console, still always dark until
+   the colour sweep), matching the --color-* pin in src/index.css. */
+:root[data-theme="dark"],
+[data-pypsa-surface="brand-dark"] {
+  --brand-bg: #151112;
   --brand-surface: #211b1c;
   --brand-surface-2: #282122;
   --brand-panel: rgba(33, 27, 28, 0.80);
+  --brand-band: #1b1617;
 
-  /* Red ramp */
-  --brand-red: #ff5252;
-  --brand-red-soft: #ff8a8a;
-  --brand-red-deep: #e63b3b; /* --brand-on-red on it 4.7:1 (was #e03131, 4.3:1) */
-  --brand-red-deeper: #b02226;
-  --brand-on-red: #14090a;
+  --brand-accent: #ff5252;
+  --brand-accent-soft: #ff8a8a;
+  --brand-accent-deep: #e63b3b; /* --brand-on-accent on it 4.7:1 (was #e03131, 4.3:1) */
+  --brand-accent-deeper: #b02226;
+  --brand-on-accent: #14090a;
 
-  /* Ink */
   --brand-ink: #f4eaea;
   --brand-ink-dim: #b9a7a9;
 
-  /* Hairlines */
   --brand-line: rgba(255, 255, 255, 0.14);
   --brand-line-strong: rgba(255, 82, 82, 0.45);
 
-  /* Semantic */
   --brand-danger: #ff8b8b;
   --brand-warn: #f6c68a;
 
-  /* Composites reused by both entry points */
-  --brand-red-gradient: linear-gradient(135deg, #ff8a8a, #ff5252 55%, #e63b3b);
-  --brand-red-glow: 0 14px 34px rgba(255, 82, 82, 0.28);
+  --brand-accent-gradient: linear-gradient(135deg, #ff8a8a, #ff5252 55%, #e63b3b);
+  --brand-accent-glow: 0 14px 34px rgba(255, 82, 82, 0.28);
+  --brand-band-gradient:
+    radial-gradient(ellipse 700px 160px at 85% 0%, rgba(255, 82, 82, 0.10), transparent 70%),
+    linear-gradient(180deg, #1b1617 0%, #151112 100%);
+
+  --brand-scrim:
+    radial-gradient(1100px 720px at 8% 45%, rgba(21, 17, 18, 0.78) 0%, rgba(21, 17, 18, 0.62) 34%, rgba(21, 17, 18, 0.18) 62%, transparent 100%),
+    linear-gradient(90deg, rgba(21, 17, 18, 0.78) 0%, rgba(21, 17, 18, 0.28) 42%, rgba(21, 17, 18, 0.12) 62%, rgba(21, 17, 18, 0.55) 100%),
+    linear-gradient(180deg, rgba(21, 17, 18, 0.42) 0%, transparent 26%, transparent 62%, rgba(21, 17, 18, 0.6) 100%);
+  --brand-grid-line: rgba(255, 82, 82, 0.06);
+  --brand-chip-bg: rgba(33, 27, 28, 0.62);
+  --brand-pulse: rgba(255, 82, 82, 0.7);
+  --brand-pulse-out: rgba(255, 82, 82, 0);
+  --brand-mark-glow: 0 8px 28px rgba(255, 82, 82, 0.35);
+  --brand-card-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --brand-input-bg: rgba(16, 13, 14, 0.66);
+  --brand-input-bg-focus: rgba(24, 19, 20, 0.88);
+  --brand-input-line-focus: rgba(255, 82, 82, 0.65);
+  --brand-focus-ring: 0 0 0 4px rgba(255, 82, 82, 0.16);
+  --brand-placeholder: #9e8a8d; /* was rgba(185, 167, 169, 0.6), 3.7:1 on the input */
+  --brand-error-bg: rgba(90, 20, 22, 0.3);
+  --brand-error-line: rgba(255, 139, 139, 0.4);
+  --brand-ok-bg: rgba(255, 255, 255, 0.06);
+  --brand-foot: rgba(185, 167, 169, 0.75);
+  --brand-code: #ff8a8a;
+  --brand-backdrop-filter: saturate(1.15) contrast(1.08) brightness(1.18);
+  --brand-scheme: dark;
+}
+
+/* Legacy hue names, aliased onto the neutral tokens. Declared on every
+   element that redeclares the neutral ones, so var() resolves per theme. */
+:root,
+:root[data-theme="dark"],
+[data-pypsa-surface="brand-dark"] {
+  --brand-black: var(--brand-bg);
+  --brand-red: var(--brand-accent);
+  --brand-red-soft: var(--brand-accent-soft);
+  --brand-red-deep: var(--brand-accent-deep);
+  --brand-red-deeper: var(--brand-accent-deeper);
+  --brand-on-red: var(--brand-on-accent);
+  --brand-red-gradient: var(--brand-accent-gradient);
+  --brand-red-glow: var(--brand-accent-glow);
 }
