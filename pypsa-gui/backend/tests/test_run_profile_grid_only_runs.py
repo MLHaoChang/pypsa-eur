@@ -109,8 +109,12 @@ def test_a_run_with_load_flow_on_reaches_the_hand_off_with_the_network_chapters(
     assert run["handoff"]["kpis"] == []
     # GK B (61) condition 7: the receipt names the skipped report with its reason, never a gap.
     rows = run["handoff"]["coverage"]
-    assert {"part": "Report", "kind": "deliverable", "status": "skipped",
-            "basis": report["reason"]} in rows, rows
+    assert {
+        "part": "Report",
+        "kind": "deliverable",
+        "status": "skipped",
+        "basis": report["reason"],
+    } in rows, rows
     assert all(r["status"] != "gap" for r in rows), rows
 
 
@@ -121,10 +125,16 @@ def test_a_skipped_report_names_its_reason_for_the_report_and_its_chapters(tmp_p
     from harness import run_handoff
 
     why = "No report yet (issue 50)."
-    task = {"run": {"stages": {"report": {"status": "skipped", "reason": why, "by": "profile"}}}}
+    task = {
+        "run": {
+            "stages": {"report": {"status": "skipped", "reason": why, "by": "profile"}}
+        }
+    }
     rows = run_handoff.coverage(task, {"chapters": ["network"]}, tmp_path)
     assert [(r["part"], r["status"], r["basis"]) for r in rows[:2]] == [
-        ("Report", "skipped", why), (rows[1]["part"], "skipped", why)]
+        ("Report", "skipped", why),
+        (rows[1]["part"], "skipped", why),
+    ]
     # Only the fake task's ungated targets count as a gap, never the skipped deliverables.
     assert run_handoff.gaps({"run": {"handoff": {"coverage": rows}}}) == 1
     assert [r["part"] for r in rows if r["status"] == "gap"] == ["Stated targets"]

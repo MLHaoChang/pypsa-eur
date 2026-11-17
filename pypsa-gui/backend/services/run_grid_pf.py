@@ -144,7 +144,11 @@ def loading(ctx, ev) -> Any:
         # The per-snapshot limit (GK A F2): a time-varying s_max_pu below the
         # static one would otherwise understate the loading.
         try:
-            smax_t = n.get_switchable_as_dense(cls, "s_max_pu").reindex(index=index).astype(float)
+            smax_t = (
+                n.get_switchable_as_dense(cls, "s_max_pu")
+                .reindex(index=index)
+                .astype(float)
+            )
         except Exception:  # noqa: BLE001 — an unreadable limit rates no branch
             smax_t = pd.DataFrame(index=index)
         p0, q0 = _frame(ev, f"{t}.p0", index), _frame(ev, f"{t}.q0", index)
@@ -231,7 +235,9 @@ def voltage(ctx, ev) -> Any:
     # A non-finite voltage on a banded bus compares False both ways: no evidence (GK A F1).
     for b in banded:
         if not np.isfinite(v[b].to_numpy()).all():
-            return Missing("voltage_not_finite", f"bus {b}'s AC power-flow voltage is not finite")
+            return Missing(
+                "voltage_not_finite", f"bus {b}'s AC power-flow voltage is not finite"
+            )
     out, names = 0, []
     for b in banded:
         bad = int(((v[b] < lo[b] - 1e-9) | (v[b] > hi[b] + 1e-9)).sum())
