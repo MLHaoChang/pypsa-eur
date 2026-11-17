@@ -12,8 +12,8 @@ const HOLD = [
   [g('Diesel genset 1', 40), g('Diesel genset 2', 30), g('Gas engine', 20), g('Hydro', 10), g('Backup 1', 8), g('Backup 2', 6), g('Backup 3', 4)],
   [],
 ]
-const per = (n, bindAt) => Array.from({ length: n }, (_, i) => ({ snapshot: `2026-01-${String(1 + Math.floor(i / 24)).padStart(2, '0')} ${String(i % 24).padStart(2, '0')}:00`, required_mw: 120 + (i % 7) * 4, held_mw: bindAt(i) ? 120 + (i % 7) * 4 : 400, binding: bindAt(i), ...(bindAt(i) ? { holders: HOLD[i % 3] } : {}) }))
-const reserve = STATE === 'empty' ? { shares: { load: 0.1, pv: 0.2, wind: 0.15 }, not_counted: [], per_snapshot: per(12, () => true).map(r => ({ ...r, holders: [] })), binding: [], reason: null }
+const per = (n, bindAt) => Array.from({ length: n }, (_, i) => ({ snapshot: `2026-01-${String(1 + Math.floor(i / 24)).padStart(2, '0')} ${String(i % 24).padStart(2, '0')}:00`, required_mw: 120 + (i % 7) * 4, held_mw: bindAt(i) && i % 3 !== 2 ? 120 + (i % 7) * 4 : bindAt(i) ? 0 : 400, binding: bindAt(i), ...(bindAt(i) ? { holders: HOLD[i % 3] } : {}) }))
+const reserve = STATE === 'empty' ? { shares: { load: 0.1, pv: 0.2, wind: 0.15 }, not_counted: [], per_snapshot: per(12, () => true).map(r => ({ ...r, held_mw: 0, holders: [] })), binding: [], reason: null }
   : { shares: { load: 0.1, pv: 0.2, wind: 0.15 }, not_counted: ['battery store'], per_snapshot: per(12, () => true), binding: [], reason: null }
 const cost = {
   capex: 4.2e6, capex_lifetime: 4.2e7, capex_expansion: 1e6, capex_expansion_lifetime: 1e7, opex: 2.6e6, total: 6.8e6,

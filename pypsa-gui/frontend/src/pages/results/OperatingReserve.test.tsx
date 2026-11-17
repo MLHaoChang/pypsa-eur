@@ -73,10 +73,12 @@ it('folds past five units behind Show all and explains a binding hour with no ho
   show({ ...base, per_snapshot: [
     { snapshot: 'a', required_mw: 28, held_mw: 28, binding: true, holders },
     { snapshot: 'b', required_mw: 1, held_mw: 0, binding: true, holders: [] },
+    { snapshot: 'c', required_mw: 2, held_mw: 2, binding: true },
   ] })
   const cells = await screen.findAllByTestId('operating-reserve-holders')
   expect(cells[0].textContent).toBe('u0 7 MW · u1 6 MW · u2 5 MW · u3 4 MW · u4 3 MW · (2 more) Show all')
   expect(cells[1].textContent).toBe('No unit had spare capacity to hold reserve')
+  expect(cells[2].textContent).toBe('Holders not recorded for this hour')
   fireEvent.click(screen.getByTestId('operating-reserve-show-all'))
   expect(screen.getAllByTestId('operating-reserve-holders')[0].textContent).toBe('u0 7 MW · u1 6 MW · u2 5 MW · u3 4 MW · u4 3 MW · u5 2 MW · u6 1 MW')
 })

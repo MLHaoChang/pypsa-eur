@@ -18,9 +18,10 @@ export const RESERVE_HOLDER_CAP = 5
 const holderText = (h: ReserveHolder) => `${h.name}${h.kind === 'storage_unit' ? ' (storage)' : ''} ${mw(h.held_mw)} MW`
 
 /** Who holds the reserve in one binding hour: "Diesel 120 MW · Battery (storage) 30 MW", folded past five units. */
-function HeldBy({ holders }: { holders: ReserveHolder[] }) {
+function HeldBy({ holders, heldMw }: { holders: ReserveHolder[]; heldMw: number }) {
   const [all, setAll] = useState(false)
-  if (holders.length === 0) return <>No unit had spare capacity to hold reserve</>
+  if (holders.length === 0)
+    return <>{heldMw > 0 ? 'Holders not recorded for this hour' : 'No unit had spare capacity to hold reserve'}</>
   const shown = all ? holders : holders.slice(0, RESERVE_HOLDER_CAP)
   const rest = holders.length - shown.length
   return (
@@ -92,7 +93,7 @@ export default function OperatingReserve() {
                     <td className={td}>{mw(r.required_mw)}</td>
                     <td className={td}>{mw(r.held_mw)}</td>
                     <td className={td}>{mw(Math.max(0, r.required_mw - r.held_mw))}</td>
-                    <td data-testid="operating-reserve-holders" className="px-2 py-1 text-[11px]"><HeldBy holders={r.holders ?? []} /></td>
+                    <td data-testid="operating-reserve-holders" className="px-2 py-1 text-[11px]"><HeldBy holders={r.holders ?? []} heldMw={r.held_mw} /></td>
                   </tr>
                 ))}
               </tbody>
