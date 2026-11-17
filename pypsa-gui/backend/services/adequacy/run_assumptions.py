@@ -17,6 +17,7 @@ arithmetic, and these rows describe exactly those fallbacks:
   efficiency with 1.0 on import, and lossless conversion is never measured.
   Slack and study-internal Links are left out.
 """
+
 from __future__ import annotations
 
 import math
@@ -26,17 +27,39 @@ GOAL_SECTION = "scenarios"
 ASSET_SECTION = "assets"
 CARD = "reliability"
 
-_COMPONENTS = (("generators", "Generator", "units"),
-               ("storage_units", "StorageUnit", "storage units"),
-               ("links", "Link", "links"))
+_COMPONENTS = (
+    ("generators", "Generator", "units"),
+    ("storage_units", "StorageUnit", "storage units"),
+    ("links", "Link", "links"),
+)
 
 
-def _row(key: str, label: str, value: Any, shown: str, source: str, reason: str,
-         section: str, *, component: str = "", entity: str = "",
-         field: str = "") -> dict:
-    return {"key": key, "label": label, "value": value, "shown": shown,
-            "source": source, "reason": reason, "section": section, "card": CARD,
-            "component": component, "entity": entity, "field": field}
+def _row(
+    key: str,
+    label: str,
+    value: Any,
+    shown: str,
+    source: str,
+    reason: str,
+    section: str,
+    *,
+    component: str = "",
+    entity: str = "",
+    field: str = "",
+) -> dict:
+    return {
+        "key": key,
+        "label": label,
+        "value": value,
+        "shown": shown,
+        "source": source,
+        "reason": reason,
+        "section": section,
+        "card": CARD,
+        "component": component,
+        "entity": entity,
+        "field": field,
+    }
 
 
 def _plain(raw: str) -> str:
@@ -53,17 +76,23 @@ def _goal_rows(cfg: Any, template: dict | None) -> list[dict]:
 
     goal = effective_goal(cfg if cfg is not None else {}, template)
     out: list[dict] = []
-    for key, label in (("mc_draws", "Simulation runs per reliability check"),
-                       ("site_archetype", "Site type")):
+    for key, label in (
+        ("mc_draws", "Simulation runs per reliability check"),
+        ("site_archetype", "Site type"),
+    ):
         g = goal[key]
         if g["source"] == STORED:
             continue
         value = g["value"]
-        reason = ("the template's recommendation" if g["source"] == TEMPLATE
-                  else "the engine default")
+        reason = (
+            "the template's recommendation"
+            if g["source"] == TEMPLATE
+            else "the engine default"
+        )
         shown = f"{value} runs" if key == "mc_draws" else _plain(value)
-        out.append(_row(key, label, value, shown, g["source"], reason,
-                        GOAL_SECTION, field=key))
+        out.append(
+            _row(key, label, value, shown, g["source"], reason, GOAL_SECTION, field=key)
+        )
     return out
 
 
@@ -77,7 +106,11 @@ def _carrier_label(n, carrier: str) -> str:
 
 
 def _outage_rows(n) -> list[dict]:
-    from services.adequacy.occurrence import CARRIER_DEFAULTS, _is_set, resolve_outage_params
+    from services.adequacy.occurrence import (
+        CARRIER_DEFAULTS,
+        _is_set,
+        resolve_outage_params,
+    )
 
     out: list[dict] = []
     for attr, component, noun in _COMPONENTS:
@@ -91,9 +124,13 @@ def _outage_rows(n) -> list[dict]:
             src = params.at[name, "source"]
             if src == "carrier_default":
                 groups.setdefault(("rate", carriers[name]), []).append(str(name))
-            elif src == "asset" and not _is_set(df.at[name, "mttr_hours"]
-                                                if "mttr_hours" in df.columns else None) \
-                    and carriers[name] in CARRIER_DEFAULTS:
+            elif (
+                src == "asset"
+                and not _is_set(
+                    df.at[name, "mttr_hours"] if "mttr_hours" in df.columns else None
+                )
+                and carriers[name] in CARRIER_DEFAULTS
+            ):
                 groups.setdefault(("mttr", carriers[name]), []).append(str(name))
         for (kind, carrier), names in groups.items():
             d = CARRIER_DEFAULTS[carrier]
@@ -101,20 +138,35 @@ def _outage_rows(n) -> list[dict]:
             reason = f"the {what.lower()} class default: {d.source}"
             entity = ", ".join(names)
             if kind == "rate":
-                out.append(_row(
-                    f"outage_rate:{component}:{carrier}",
-                    f"Outage rate of {what.lower()} {noun} ({", ".join(names)})",
-                    d.rate,
-                    f"{_number(d.rate * 100)} % {d.basis}, repair {_number(d.mttr_hours)} h",
-                    "carrier_default", reason, ASSET_SECTION,
-                    component=component, entity=entity, field="outage_rate_value"))
+                out.append(
+                    _row(
+                        f"outage_rate:{component}:{carrier}",
+                        f"Outage rate of {what.lower()} {noun} ({', '.join(names)})",
+                        d.rate,
+                        f"{_number(d.rate * 100)} % {d.basis}, repair {_number(d.mttr_hours)} h",
+                        "carrier_default",
+                        reason,
+                        ASSET_SECTION,
+                        component=component,
+                        entity=entity,
+                        field="outage_rate_value",
+                    )
+                )
             else:
-                out.append(_row(
-                    f"mttr:{component}:{carrier}",
-                    f"Repair time of {what.lower()} {noun} ({", ".join(names)})",
-                    d.mttr_hours, f"{_number(d.mttr_hours)} h",
-                    "carrier_default", reason, ASSET_SECTION,
-                    component=component, entity=entity, field="mttr_hours"))
+                out.append(
+                    _row(
+                        f"mttr:{component}:{carrier}",
+                        f"Repair time of {what.lower()} {noun} ({', '.join(names)})",
+                        d.mttr_hours,
+                        f"{_number(d.mttr_hours)} h",
+                        "carrier_default",
+                        reason,
+                        ASSET_SECTION,
+                        component=component,
+                        entity=entity,
+                        field="mttr_hours",
+                    )
+                )
     return out
 
 
@@ -126,7 +178,9 @@ def _efficiency_rows(n) -> list[dict]:
     links = getattr(n, "links", None)
     if links is None or links.empty:
         return []
-    bus_carrier = n.buses["carrier"].astype(str) if "carrier" in n.buses.columns else None
+    bus_carrier = (
+        n.buses["carrier"].astype(str) if "carrier" in n.buses.columns else None
+    )
     out: list[dict] = []
     for name in links.index:
         role = str(links.at[name, "eh_role"]) if "eh_role" in links.columns else ""
@@ -135,16 +189,32 @@ def _efficiency_rows(n) -> list[dict]:
         _, fell_back = link_attr_series(n, name, "efficiency", LINK_EFFICIENCY_DEFAULT)
         if fell_back:
             reason = "no efficiency is set, so the study reads it as lossless"
-        elif (bus_carrier is not None and name not in n.links_t.efficiency.columns
-              and bus_carrier.get(links.at[name, "bus0"]) != bus_carrier.get(links.at[name, "bus1"])
-              and float(links.at[name, "efficiency"]) == LINK_EFFICIENCY_DEFAULT):
-            reason = "a conversion at exactly 100 % is the value a blank efficiency gets"
+        elif (
+            bus_carrier is not None
+            and name not in n.links_t.efficiency.columns
+            and bus_carrier.get(links.at[name, "bus0"])
+            != bus_carrier.get(links.at[name, "bus1"])
+            and float(links.at[name, "efficiency"]) == LINK_EFFICIENCY_DEFAULT
+        ):
+            reason = (
+                "a conversion at exactly 100 % is the value a blank efficiency gets"
+            )
         else:
             continue
-        out.append(_row(f"efficiency:{name}", f"Conversion efficiency of {name}",
-                        LINK_EFFICIENCY_DEFAULT, "100 % (lossless)", "default", reason,
-                        ASSET_SECTION, component="Link", entity=str(name),
-                        field="efficiency"))
+        out.append(
+            _row(
+                f"efficiency:{name}",
+                f"Conversion efficiency of {name}",
+                LINK_EFFICIENCY_DEFAULT,
+                "100 % (lossless)",
+                "default",
+                reason,
+                ASSET_SECTION,
+                component="Link",
+                entity=str(name),
+                field="efficiency",
+            )
+        )
     return out
 
 
@@ -161,9 +231,16 @@ def voll_is_set(cfg: Any) -> bool:
 
 def voll_missing_row() -> dict:
     """The row a surface that serves unpriced figures carries (GK B Q1)."""
-    return _row("voll", "Value of lost load", None, "not set", "missing",
-                "unserved energy is not priced, so every cost of it is left blank",
-                GOAL_SECTION, field="voll")
+    return _row(
+        "voll",
+        "Value of lost load",
+        None,
+        "not set",
+        "missing",
+        "unserved energy is not priced, so every cost of it is left blank",
+        GOAL_SECTION,
+        field="voll",
+    )
 
 
 def run_assumptions(n, cfg: Any, template: dict | None) -> list[dict]:
@@ -175,8 +252,9 @@ def run_assumptions(n, cfg: Any, template: dict | None) -> list[dict]:
     return rows
 
 
-def study_assumptions(rows: list[dict], goal_sources: dict[str, str],
-                      requested: dict[str, Any]) -> list[dict]:
+def study_assumptions(
+    rows: list[dict], goal_sources: dict[str, str], requested: dict[str, Any]
+) -> list[dict]:
     """The rows a study run records. A goal field the request set to a value
     of its own (``override``, ``eh_request_with_goal``) was chosen for that
     run, so its row goes; one the request merely repeated is still the
@@ -184,7 +262,11 @@ def study_assumptions(rows: list[dict], goal_sources: dict[str, str],
     out = []
     for r in rows:
         key = r["field"] if r["section"] == GOAL_SECTION else None
-        if key and goal_sources.get(key) == "override" and requested.get(key) != r["value"]:
+        if (
+            key
+            and goal_sources.get(key) == "override"
+            and requested.get(key) != r["value"]
+        ):
             continue
         out.append(r)
     return out
