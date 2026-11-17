@@ -1,6 +1,6 @@
 # 01c — Show the hours where the operating reserve binds
 
-Status: needs-triage
+Status: done
 
 Follow-up from homer-parity 01b (#1521, engine and route; 01b-2, inputs). UX 21 asked for it as its own issue, reviewed when it exists.
 

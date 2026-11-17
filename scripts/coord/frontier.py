@@ -13,7 +13,8 @@ The issue files' headers (``Status:``, ``Blocked by:``, ``Model tier:``,
 An issue is on the frontier when its Status starts with ``ready-for-agent``,
 every issue it is blocked by (same effort folder) is done, no live session works
 on it and no open PR touches its file. One line per package: path, model tier,
-gated, title, and the open PRs that change a file the issue names.
+gated, title, and the open PRs that change a file the issue names: ``overlap``
+for code, ``soft`` for docs and catalogue files (``waivers.conf``; premerge waives them).
 
 Inputs, both optional and plain text:
 
@@ -31,7 +32,8 @@ from the board.
 Modes: ``--stages`` prints ``<effort>/<file>`` and a dashboard stage for every
 issue (Done, In review, In progress, Ready, Blocked by NN, Needs triage, Needs
 owner, Won't do); ``--held`` also lists the ready issues that are not on the
-frontier, with the reason; ``--json`` prints the same data as JSON.
+frontier, with the reason (a live session naming the issue's id, an open PR, an
+open blocker, or a ``HOLD-...`` row of ``docs/agents/owner-decisions.md`` naming its tag); ``--json`` prints the same data as JSON.
 """
 
 import argparse
@@ -42,6 +44,29 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TIERS = ("opus", "sonnet", "haiku")
+WAIVERS = Path(__file__).resolve().parent / "waivers.conf"
+
+
+def load_waivers(path=WAIVERS):
+    """{name: compiled regex} from ``waivers.conf`` (the file premerge.sh reads);
+    a missing file or an empty value matches nothing."""
+    out = {}
+    if path.exists():
+        for text in path.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"([a-z_]+)=(.+)$", text)
+            if m:
+                out[m.group(1)] = re.compile(m.group(2))
+    return out
+
+
+def is_soft(path, waivers=None):
+    """True for an overlap premerge waives: docs-only, or the catalogue file."""
+    w = load_waivers() if waivers is None else waivers
+    return any(
+        r.search(path)
+        for k, r in w.items()
+        if k in ("docs_only_re", "inventory_overlap_re")
+    )
 
 
 def clean(text):
@@ -103,7 +128,10 @@ def blockers_of(lines, status):
                     nums += [f"tag:{t.upper()}" for t in tags]
                 else:
                     free.append(item)
-    nums += [num_key(m) for m in re.findall(r"still blocked by (\d{1,3}[a-z]?)\b", status, re.I)]
+    nums += [
+        num_key(m)
+        for m in re.findall(r"still blocked by (\d{1,3}[a-z]?)\b", status, re.I)
+    ]
     return sorted(set(nums)), free
 
 
@@ -129,7 +157,9 @@ def load_issues(root):
         kind, pending = status_kind(status)
         nums, free = blockers_of(lines, status)
         title = next((l[2:].strip() for l in lines if l.startswith("# ")), path.stem)
-        gated = (header(lines, "Gated") or "").lower().startswith("yes") or "gated" in status.lower()
+        gated = (header(lines, "Gated") or "").lower().startswith(
+            "yes"
+        ) or "gated" in status.lower()
         tier = header(lines, "Model tier") or ""
         tier = next((t for t in TIERS if t in (tier + " " + status).lower()), "?")
         issues[path.relative_to(root).as_posix()] = {
@@ -139,7 +169,9 @@ def load_issues(root):
             "title": title,
             "kind": kind,
             "pending": pending,
-            "tag": (re.match(r"([A-Za-z]{1,4}-\d+)\b", title) or [None, ""])[1].upper(),
+            "tag": (re.match(r"([A-Za-z]{1,4}-\d+[a-z]?)\b", title) or [None, ""])[
+                1
+            ].upper(),
             "blockers": nums,
             "free_blockers": free,
             "tier": tier,
@@ -168,11 +200,52 @@ def read_prs(path):
 
 
 def in_session(issue, text):
+    """A live session's text names the issue: its path or stem, its tag
+    (``LC-48f``), or ``<effort> <NN>`` (also ``<effort> 35/36`` and ``35, 36``)."""
     stem = Path(issue["path"]).stem
     if stem in text or issue["path"] in text:
         return True
-    pair = rf"{re.escape(issue['effort'])}[\s/#:._-]+0*{issue['num'].lstrip('0') or '0'}\b"
-    return bool(re.search(pair, text, re.I))
+    if issue["tag"] and re.search(
+        rf"(?<![\w-]){re.escape(issue['tag'])}(?![\w-])", text, re.I
+    ):
+        return True
+    pair = rf"(?<![\w-]){re.escape(issue['effort'])}[\s/#:._-]+(\d+[a-z]?(?:\s*(?:[/,&+]|and)\s*\d+[a-z]?)*)"
+    for m in re.finditer(pair, text, re.I):
+        if issue["num"] in (
+            num_key(n) for n in re.findall(r"\d+[a-z]?", m.group(1), re.I)
+        ):
+            return True
+    return False
+
+
+def hold_rows(path):
+    """(id, [normalised tags]) of each ``HOLD-...`` row of owner-decisions.md.
+
+    The row's question and decision name the held issues by tag: ``RP-12``,
+    ``SC-04/05/06``. Delete the row (or reword it) to lift the hold."""
+    if not path or not Path(path).exists():
+        return []
+    rows = []
+    for text in Path(path).read_text(encoding="utf-8").splitlines():
+        cells = [c.strip() for c in text.strip().strip("|").split("|")]
+        if len(cells) < 4 or not re.match(r"HOLD\b", cells[1]):
+            continue
+        tags = []
+        for pre, nums in re.findall(
+            r"\b([A-Za-z]{1,4})-(\d{1,3}[a-z]?(?:\s*[/,]\s*\d{1,3}[a-z]?)*)",
+            " ".join(cells[2:4]),
+        ):
+            tags += [
+                f"{pre.upper()}-{num_key(n)}"
+                for n in re.findall(r"\d+[a-z]?", nums, re.I)
+            ]
+        rows.append((cells[1], tags))
+    return rows
+
+
+def norm_tag(tag):
+    m = re.match(r"([A-Za-z]+)-(\d+[a-z]?)$", tag)
+    return f"{m.group(1).upper()}-{num_key(m.group(2))}" if m else tag
 
 
 def overlap(issue, prs):
@@ -189,7 +262,7 @@ def overlap(issue, prs):
     return hits
 
 
-def evaluate(issues, prs, sessions_text):
+def evaluate(issues, prs, sessions_text, holds=()):
     """Add ``stage``, ``held`` (reason or None) and ``overlap`` to each issue."""
     for it in issues.values():
         it["covered_by"] = sorted(p for p, f in prs.items() if it["path"] in f)
@@ -230,15 +303,30 @@ def evaluate(issues, prs, sessions_text):
         it["held"] = None
         if kind == "ready" and it["stage"] != "Ready":
             it["held"] = it["stage"]
+        elif kind == "ready":
+            row = next(
+                (i for i, tags in holds if it["tag"] and norm_tag(it["tag"]) in tags),
+                None,
+            )
+            if row:
+                it["held"] = f"Held by owner decision {row}"
 
 
 def line(it):
     out = f"{it['path']}  {it['tier']}  {'gated' if it['gated'] else 'ungated'}  {it['title']}"
-    if it["overlap"]:
-        out += "  overlap " + "; ".join(
-            f"#{pr}: {', '.join(f[:3])}{'…' if len(f) > 3 else ''}"
-            for pr, f in sorted(it["overlap"].items())
-        )
+    waivers = load_waivers()
+    for word, soft in (("overlap", False), ("soft", True)):
+        # docs and catalogue overlap is soft (premerge waives it); code overlap blocks
+        hits = {
+            pr: [x for x in f if is_soft(x, waivers) == soft]
+            for pr, f in it["overlap"].items()
+        }
+        hits = {pr: f for pr, f in hits.items() if f}
+        if hits:
+            out += f"  {word} " + "; ".join(
+                f"#{pr}: {', '.join(f[:3])}{'…' if len(f) > 3 else ''}"
+                for pr, f in sorted(hits.items())
+            )
     if it["free_blockers"]:
         out += "  CHECK blocker text: " + "; ".join(it["free_blockers"])[:80]
     return out
@@ -250,6 +338,11 @@ def main(argv=None):
     ap.add_argument("--open-prs", help="file: '<pr> <changed path>' per line, or JSON")
     ap.add_argument("--sessions", help="file naming the issues in progress")
     ap.add_argument("--stages", action="store_true", help="print a stage per issue")
+    ap.add_argument(
+        "--decisions",
+        type=Path,
+        help="owner-decisions.md (default: <root>/docs/agents/owner-decisions.md)",
+    )
     ap.add_argument("--held", action="store_true", help="also list held ready issues")
     ap.add_argument("--json", action="store_true", help="print JSON")
     args = ap.parse_args(argv)
@@ -257,7 +350,8 @@ def main(argv=None):
     issues = load_issues(args.root)
     prs = read_prs(args.open_prs) if args.open_prs else {}
     sessions = Path(args.sessions).read_text(encoding="utf-8") if args.sessions else ""
-    evaluate(issues, prs, sessions)
+    decisions = args.decisions or args.root / "docs" / "agents" / "owner-decisions.md"
+    evaluate(issues, prs, sessions, hold_rows(decisions))
     rows = list(issues.values())
 
     if args.stages:
@@ -268,11 +362,30 @@ def main(argv=None):
                 print(f"{r['path']}\t{r['stage']}")
         return 0
 
-    frontier = [r for r in rows if r["kind"] == "ready" and r["stage"] == "Ready"]
+    frontier = [
+        r
+        for r in rows
+        if r["kind"] == "ready" and r["stage"] == "Ready" and not r["held"]
+    ]
     held = [r for r in rows if r["held"]]
     if args.json:
         keep = ("path", "title", "tier", "gated", "overlap", "free_blockers", "files")
-        data = {"frontier": [{k: r[k] for k in keep} for r in frontier]}
+        waivers = load_waivers()
+
+        def entry(r):
+            d = {k: r[k] for k in keep}
+            split = {
+                pr: (
+                    [x for x in f if not is_soft(x, waivers)],
+                    [x for x in f if is_soft(x, waivers)],
+                )
+                for pr, f in r["overlap"].items()
+            }
+            d["overlap"] = {pr: h for pr, (h, _) in split.items() if h}
+            d["soft"] = {pr: sft for pr, (_, sft) in split.items() if sft}
+            return d
+
+        data = {"frontier": [entry(r) for r in frontier]}
         data["held"] = [{"path": r["path"], "reason": r["held"]} for r in held]
         print(json.dumps(data, indent=1))
         return 0
