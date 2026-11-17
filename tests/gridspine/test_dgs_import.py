@@ -151,6 +151,13 @@ def test_hand_counts_unmapped_and_report_are_complete(hand):
         "Synchronous machines": 1,
         "External grids": 1,
         "Shunts": 2,
+        "Loads given a harmonic spectrum": 1,
+        "Slack generators given short-circuit data": 1,
+    }
+    # the preview names what the DGS extras filled (DGS-EXTRAS-1, UX 25)
+    assert hand.sidecars["metadata.json"]["import"]["filled"] == {
+        "harmonic_spectrum": {"Load": ["Load"], "Generator": []},
+        "short_circuit": ["Grid"],
     }
     assert sorted((u.source_item, u.reason) for u in rep.unmapped) == [
         ("ElmRelay 'Relay' (line 46)", "PowerFactory class ElmRelay is not imported"),
@@ -441,6 +448,13 @@ def test_round_trip_counts_and_spectra(tmp_path):
         "Synchronous machines": 1,
         "External grids": 1,
         "Shunts": 2,
+        "Loads given a harmonic spectrum": 1,
+        "Generators given a harmonic spectrum": 1,
+        "Slack generators given short-circuit data": 1,
+    }
+    assert res.sidecars["metadata.json"]["import"]["filled"] == {
+        "harmonic_spectrum": {"Load": ["drive"], "Generator": ["pv"]},
+        "short_circuit": ["grid"],
     }
     assert res.report.unmapped == []
     n = res.network

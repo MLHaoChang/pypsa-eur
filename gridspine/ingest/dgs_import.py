@@ -148,6 +148,11 @@ class _Mapper:
         self.names: list[dict] = []  # DGS → network, every object
         self.switches: list[dict] = []
         self.dgs_names: dict[str, list[str]] = {}  # bus → its terminals' names
+        # which DGS extras (DGS-EXTRAS-1) the import filled, named for the preview
+        self.filled = {
+            "harmonic_spectrum": {"Load": [], "Generator": []},
+            "short_circuit": [],
+        }
         self.used_types: set = set()
         self.cub = self._cubicles()
         self.bus_of = {}  # ElmTerm ID → bus name
@@ -255,6 +260,19 @@ class _Mapper:
                     df[col] = df[col].fillna("")
         self._leftovers()
         self._islands()
+        for label, names in (
+            (
+                "Loads given a harmonic spectrum",
+                self.filled["harmonic_spectrum"]["Load"],
+            ),
+            (
+                "Generators given a harmonic spectrum",
+                self.filled["harmonic_spectrum"]["Generator"],
+            ),
+            ("Slack generators given short-circuit data", self.filled["short_circuit"]),
+        ):
+            if names:
+                self.counts[label] = len(names)
         report = ImportReport(
             source_format=FORMAT_ID,
             source_files=[self.source],
@@ -271,6 +289,7 @@ class _Mapper:
                     "names": self.names,
                     "switches": self.switches,
                     "dgs_names": self.dgs_names,
+                    "filled": self.filled,
                 }
             }
         }
@@ -766,6 +785,7 @@ class _Mapper:
             if col not in df.columns:
                 df[col] = ""
         df.at[name, "harmonic_spectrum"] = spectrum
+        self.filled["harmonic_spectrum"][component].append(name)
         if "rated_mva" not in df.columns:
             df["rated_mva"] = math.nan
         if rated_mva is None:
@@ -795,6 +815,8 @@ class _Mapper:
             if col not in df.columns:
                 df[col] = math.nan
             df.at[name, col] = v
+            if name not in self.filled["short_circuit"]:
+                self.filled["short_circuit"].append(name)
 
     def _leftovers(self):
         for cls, df in self.t.items():
