@@ -637,6 +637,26 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
 }
 
 // ── Load card ──────────────────────────────────────────────────────────────────
+/** A loaded profile overrides the static p_set, so the readout shows the
+ *  profile's own peak and mean (matching the Guided card) instead of the stale
+ *  constant; `sign` is PyPSA's own word, so Guided hides it and Expert says it
+ *  in words. */
+export function loadReadoutItems(items: ExpandedItem[], profile: { peak: number; mean: number } | null,
+  mode: string): ExpandedItem[] {
+  const fmt1 = (v: number) => Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 1 })
+  return items.flatMap((i): ExpandedItem[] => {
+    if (i.field === 'p_set' && profile) {
+      return [{ ...i, value: `${fmt1(profile.peak)} MW peak · ${fmt1(profile.mean)} MW mean (from the profile)`, unit: undefined }]
+    }
+    if (i.field === 'sign') {
+      if (mode !== 'expert') return []
+      const v = Number(i.value)
+      return [{ ...i, value: v === 1 ? 'supplies power' : 'consumes power', unit: undefined }]
+    }
+    return [i]
+  })
+}
+
 export function LoadCard({ load, onRename, mode = 'card', title }: {
   load: Load
   onRename?: (newName: string) => void
@@ -648,6 +668,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   const [showChart, setShowChart] = useState(false)
   const [form, setForm] = useState<FS>({})
 
+  const uiMode = useUIStore(s => s.uiMode)
   const currentProject = useUIStore(s => s.currentProject)
   const { data: profiles = {} } = useQuery({
     queryKey: nk(currentProject, 'load_profiles'),
@@ -714,7 +735,9 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, load.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance, series)
+  const items: ExpandedItem[] = loadReadoutItems(
+    assetReadoutItems(schema, asset, undefined, provenance, series),
+    hasProfile && profileMeta?.has_profile ? profileMeta : null, uiMode)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {

@@ -189,14 +189,15 @@ def _load_guard(ctx, component_type: str, component: str,
         return
     if meta.get("archetype") == "data_centre":
         raise DcLoadOwnedError(
-            "this project's data-centre load comes from its dc_load spec (the "
-            "template's it_load/cooling split); change it there, not with a "
-            "data-centre profile"
+            "this project's data-centre load follows its data-centre set-up "
+            "(the IT load and PUE chosen when the project was created), so a "
+            "data-centre profile cannot replace it"
         )
     if component in DC_SPLIT_LOADS:
         raise DcLoadOwnedError(
-            f"{component!r} carries this project's dc_load facility load "
-            "(split by its critical share); change the dc_load spec instead"
+            f"{component!r} carries this project's data-centre load, which follows "
+            "its data-centre set-up (the IT load and PUE chosen when the "
+            "project was created), so a profile cannot replace it"
         )
 
 

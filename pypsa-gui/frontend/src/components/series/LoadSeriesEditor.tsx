@@ -12,6 +12,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { Play, Upload } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
 import { seriesApi, type PendingSeries } from '../../api/profiles'
+import { resultsApi } from '../../api/simulation'
 import {
   CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, GenerateError, ReplayToggle, useReplay,
   type EditorMode,
@@ -45,6 +46,9 @@ function coerce(raw: string, like: unknown): unknown {
   }
   return raw
 }
+
+// The loads a data-centre project's set-up owns (backend DC_SPLIT_LOADS).
+const DC_OWNED_LOADS = ['it_load', 'cooling']
 
 export default function LoadSeriesEditor({ project, component, mode, initialTab = 'archetype' }: LoadSeriesEditorProps) {
   const [tab, setTab] = useState<'archetype' | 'upload'>(initialTab)
@@ -86,6 +90,29 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
     }),
     onSuccess: setPending,
   })
+
+  // A load the data-centre set-up owns takes no profile of its own: say so
+  // before any work, with the set-up's numbers, instead of building a preview
+  // the server then refuses.
+  const { data: eh } = useQuery({
+    queryKey: ['eh-template', project], queryFn: () => resultsApi.getEhTemplate(project, { quiet: true }),
+    staleTime: 60_000,
+  })
+  const dcSpec = (eh as { dc_load?: { spec?: { pue_at_design?: number; phases?: { it_mw?: number }[] } } } | null)
+    ?.dc_load?.spec
+  if (dcSpec && DC_OWNED_LOADS.includes(component)) {
+    const it = dcSpec.phases?.map(p => p.it_mw).filter((v): v is number => typeof v === 'number').pop()
+    const detail = [it != null ? `IT ${it} MW` : null, dcSpec.pue_at_design != null ? `PUE ${dcSpec.pue_at_design}` : null]
+      .filter(Boolean).join(', ')
+    return (
+      <div className="text-xs" data-testid="load-series-editor">
+        <p className="text-muted" data-testid="dc-owned-note">
+          This load follows the data-centre set-up{detail ? ` (${detail})` : ''}, chosen when the project was created.
+          A profile cannot replace it.
+        </p>
+      </div>
+    )
+  }
 
   const busy = generate.isPending || upload.isPending
   const error = generate.error ?? upload.error

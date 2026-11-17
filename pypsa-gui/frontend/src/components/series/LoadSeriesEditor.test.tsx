@@ -23,6 +23,12 @@ vi.mock('../../api/profiles', async () => {
   return { ...real, seriesApi: api }
 })
 
+const eh = vi.hoisted(() => ({ getEhTemplate: vi.fn() }))
+vi.mock('../../api/simulation', async () => {
+  const real = await vi.importActual<typeof import('../../api/simulation')>('../../api/simulation')
+  return { ...real, resultsApi: { ...real.resultsApi, getEhTemplate: eh.getEhTemplate } }
+})
+
 const CATALOGUE = {
   archetypes: [
     { name: 'industrial', params: { peak_mw: null, annual_mwh: null, shifts: 2, base_share: 0.25, holidays: [] } },
@@ -36,23 +42,41 @@ const PENDING = {
   warnings: ['time_basis_assumed_utc: applied unshifted'],
 }
 
-function renderEditor(mode: 'guided' | 'expert' = 'guided', initialTab?: 'archetype' | 'upload') {
+function renderEditor(mode: 'guided' | 'expert' = 'guided', initialTab?: 'archetype' | 'upload', component = 'plant') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <LoadSeriesEditor project="Site A" component="plant" mode={mode} initialTab={initialTab} />
+      <LoadSeriesEditor project="Site A" component={component} mode={mode} initialTab={initialTab} />
     </QueryClientProvider>,
   )
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  eh.getEhTemplate.mockResolvedValue(null)
   api.current.mockResolvedValue({ exists: false })
   api.loadArchetypes.mockResolvedValue(CATALOGUE)
 })
 afterEach(() => cleanup())
 
 describe('LoadSeriesEditor', () => {
+  it('says a data-centre set-up owns its load, with its numbers, and offers no picker', async () => {
+    eh.getEhTemplate.mockResolvedValue({ dc_load: { spec: { pue_at_design: 1.3, phases: [{ it_mw: 36 }] } } })
+    renderEditor('guided', undefined, 'it_load')
+    const note = await screen.findByTestId('dc-owned-note')
+    expect(note.textContent).toContain('data-centre set-up (IT 36 MW, PUE 1.3)')
+    expect(screen.queryByRole('combobox', { name: 'Archetype' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Preview/ })).toBeNull()
+  })
+
+  it('keeps the picker for another load of a data-centre project', async () => {
+    eh.getEhTemplate.mockResolvedValue({ dc_load: { spec: { pue_at_design: 1.3, phases: [{ it_mw: 36 }] } } })
+    renderEditor('guided', undefined, 'office')
+    await screen.findByRole('option', { name: 'industrial' })
+    expect(screen.queryByTestId('dc-owned-note')).toBeNull()
+  })
+
+
   it('shows only the key parameters in Guided', async () => {
     renderEditor('guided')
     await screen.findByRole('option', { name: 'industrial' })
@@ -277,5 +301,15 @@ describe('LoadSeriesEditor replay of stored refinements', () => {
       archetype: 'industrial', loads: ['plant'], params: { peak_mw: 80 }, replay_refinements: false,
     }))
     expect(await screen.findByTestId('stat-peak')).toBeTruthy()
+  })
+})
+
+describe('a refusal that disables Apply', () => {
+  it('is visible text, not behind a disclosure', async () => {
+    const { WarningList } = await import('./SeriesKit')
+    render(<WarningList warnings={['not_applicable: this load follows the set-up']} testId="w" />)
+    const li = screen.getByTestId('w').querySelector('li') as HTMLElement
+    expect(li.querySelector('details')).toBeNull()
+    expect(li.textContent).toContain('this load follows the set-up')
   })
 })
