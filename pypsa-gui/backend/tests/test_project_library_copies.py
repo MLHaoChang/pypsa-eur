@@ -346,3 +346,119 @@ def test_the_migration_fills_once_and_then_writes_nothing(
     stamp = path.stat().st_mtime_ns
     _open(client, name)
     assert path.stat().st_mtime_ns == stamp
+
+
+# ── mutant survivors (project_copies unit level) ───────────────────────────
+
+
+def _series_pin(data: bytes) -> dict:
+    return {
+        "kind": "series",
+        "id": "x",
+        "version": 1,
+        "hash": hashlib.sha256(data).hexdigest(),
+    }
+
+
+_CSV = b"# tz=naive\ntimestamp_utc,value\n2030-01-01T00:00:00,1\n"
+
+
+def test_write_refuses_a_mismatch_and_skips_a_good_copy(tmp_path):
+    pin = _series_pin(_CSV)
+    assert PC.write(tmp_path, pin, _CSV + b"x") is False
+    assert PC.path_for(tmp_path, pin).exists() is False
+    assert PC.write(tmp_path, {**pin, "hash": "nope"}, _CSV) is False
+    assert PC.write(tmp_path, pin, _CSV) is True
+    assert PC.write(tmp_path, pin, _CSV) is False
+
+
+def test_a_truncated_or_oversized_copy_reads_as_modified(tmp_path, monkeypatch):
+    pin = _series_pin(_CSV)
+    path = PC.path_for(tmp_path, pin)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(gzip.compress(_CSV, mtime=0)[:-12])
+    assert PC.read(tmp_path, pin) == (None, True)
+    path.write_bytes(gzip.compress(_CSV, mtime=0))
+    monkeypatch.setattr(PC, "MAX_PAYLOAD", path.stat().st_size - 1)
+    assert PC.read(tmp_path, pin) == (None, True)
+
+
+def test_an_item_copy_is_read_as_is_not_unzipped(tmp_path):
+    raw = gzip.compress(b'{"a": 1}', mtime=0)
+    pin = {
+        "kind": "tariff",
+        "id": "t",
+        "version": 1,
+        "hash": hashlib.sha256(raw).hexdigest(),
+    }
+    assert PC.write(tmp_path, pin, raw)
+    assert PC.read(tmp_path, pin) == (raw, False)
+
+
+@pytest.mark.parametrize(
+    "ident, ok",
+    [
+        ("x" * 128, True),
+        ("a b", True),
+        (7, False),
+        ("a\x7fb", False),
+        ("a\x1fb", False),
+    ],
+    ids=["at-cap", "space", "not-a-string", "del", "unit-sep"],
+)
+def test_the_id_rule_boundaries(tmp_path, ident, ok):
+    pin = {**_series_pin(_CSV), "id": ident}
+    assert (PC.staged_problems(tmp_path, [], [pin]) == []) is ok
+
+
+def test_a_directory_entry_and_a_duplicate_pin_are_not_problems_twice(tmp_path):
+    pin = _series_pin(_CSV)
+    path = PC.path_for(tmp_path, pin)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"junk")
+    members = ["library/", "library/series/", PC.member_name(pin)]
+    assert PC.staged_problems(tmp_path, members, [pin, dict(pin)]) == [
+        f"{PC.member_name(pin)} does not match its pin in library_refs.json."
+    ]
+
+
+def test_fill_skips_a_good_copy_and_a_shipped_common_item(tmp_path, monkeypatch):
+    from services.library import common
+    from services.library import series_store
+
+    pin = _series_pin(_CSV)
+    assert PC.write(tmp_path, pin, _CSV)
+    calls = []
+    monkeypatch.setattr(series_store, "payload_bytes", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(common, "is_common", lambda kind, name: True)
+    item = {"kind": "tariff", "id": "c", "version": 1, "hash": "b" * 64}
+    assert PC.fill(None, None, tmp_path, [pin, item]) == []
+    assert calls == []
+
+
+def test_an_item_pin_resolves_from_its_copy_and_a_modified_one_is_named(
+    tmp_path, monkeypatch
+):
+    from models.commercial import LibraryItemRef
+    from services.library import items as I
+
+    raw = b'{"a": 1}'
+    pin = {
+        "kind": "tariff",
+        "id": "t",
+        "version": 1,
+        "hash": hashlib.sha256(raw).hexdigest(),
+    }
+    assert PC.write(tmp_path, pin, raw)
+    ref = LibraryItemRef(**pin)
+
+    def gone(*a, **k):
+        raise S.LibraryRefNotFound("no such row")
+
+    monkeypatch.setattr(I, "payload_bytes", gone)
+    assert I.resolve(None, None, ref, project_dir=tmp_path) == {"a": 1}
+    PC.path_for(tmp_path, pin).write_bytes(b'{"a": 2}')
+    with pytest.raises(S.LibraryRefStale, match="copy of tariff 't' v1 was modified"):
+        I.resolve(None, None, ref, project_dir=tmp_path)
+    with pytest.raises(S.LibraryRefNotFound):
+        I.resolve(None, None, ref)
