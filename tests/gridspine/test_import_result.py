@@ -410,7 +410,7 @@ def test_get_does_not_import_the_reader(fake_package):
 def test_a_missing_reader_dependency_is_an_import_format_error(fake_package):
     _write_importer(fake_package, "psse", "import not_a_real_dependency_xyz\n")
     with pytest.raises(
-        ImportFormatError, match="PSS/E case importer cannot load"
+        ImportFormatError, match="PSS/E case importer cannot run"
     ) as err:
         ir.read("psse", ["case.raw"], declared=(_spec("psse", name="PSS/E case"),))
     assert isinstance(err.value.__cause__, ModuleNotFoundError)
@@ -431,6 +431,24 @@ def test_a_bug_while_loading_a_reader_is_not_hidden(fake_package):
         ".",
         "/abs.json",
         "C:x.json",
+        "Network.nc",
+        "NETWORK.NC",
+        "network.nc.",
+        "network.nc ",
+        "Results_State.pkl..",
+        "\x00a.json",
+        "a\x1fb.json",
+        "a\x7f.json",
+        "a\nb.json",
+        "con",
+        "CON.json",
+        "nul.txt",
+        "Aux",
+        "prn.",
+        "com1.json",
+        "COM9",
+        "lpt1",
+        "LPT9.csv",
         " x.json",
         "network.nc",
         "results_state.pkl",
@@ -502,3 +520,21 @@ def test_read_revalidates_what_the_reader_changed_late(
     )
     with pytest.raises(error, match=match):
         ir.read("psse", ["case.raw"], declared=(_spec("psse"),))
+
+
+@pytest.mark.parametrize(
+    "name", ["console.json", "com10.json", "lpt.json", "nulls.json", "a.con"]
+)
+def test_names_near_windows_devices_are_allowed(name):
+    assert (
+        name
+        in ImportResult(network=None, report=_report(), sidecars={name: {}}).sidecars
+    )
+
+
+def test_missing_dependency_message_names_the_format_and_module(fake_package):
+    _write_importer(fake_package, "psse", "import not_a_real_dependency_xyz\n")
+    with pytest.raises(ImportFormatError) as err:
+        ir.read("psse", ["case.raw"], declared=(_spec("psse", name="PSS/E case"),))
+    assert "PSS/E case" in str(err.value)
+    assert "'not_a_real_dependency_xyz'" in str(err.value)

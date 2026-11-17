@@ -59,6 +59,11 @@ CONFIDENCE = ("high", "medium", "low")
 SUGGESTED_BY = ("importer", "assistant")
 # Files the project writes itself; an importer's sidecar never replaces them.
 RESERVED_SIDECARS = frozenset({"network.nc", "results_state.pkl"})
+_WINDOWS_DEVICES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{i}" for i in range(1, 10)}
+    | {f"lpt{i}" for i in range(1, 10)}
+)
 _FORMAT_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -242,19 +247,30 @@ class ImportResult:
 
 
 def _require_sidecar_name(name: Any) -> None:
-    """A plain file name in the project folder: no folders, no reserved files."""
+    """
+    A plain file name in the project folder: no folders, no reserved files.
+
+    Compared the way Windows and macOS do (case-insensitive, trailing dots and
+    spaces dropped), so "Network.nc" cannot stand in for network.nc there.
+    """
     _require_text(name, "sidecar file name")
     if (
-        "/" in name
+        any(ord(c) < 32 or ord(c) == 127 for c in name)
+        or "/" in name
         or "\\" in name
         or name.strip() != name
         or name in (".", "..")
         or ":" in name  # a Windows drive ("C:x.json") or alternate stream
     ):
         raise ValueError(f"sidecar file name must be a plain file name, got {name!r}")
-    if name in RESERVED_SIDECARS:
+    folded = name.casefold().rstrip(". ")
+    if folded in {r.casefold() for r in RESERVED_SIDECARS}:
         raise ValueError(
             f"sidecar file name {name!r} is reserved for the project itself"
+        )
+    if folded.split(".")[0] in _WINDOWS_DEVICES:
+        raise ValueError(
+            f"sidecar file name {name!r} is a reserved device name on Windows"
         )
 
 
@@ -308,8 +324,10 @@ class ImporterSpec:
         try:
             module = importlib.import_module(self.module)
         except ImportError as exc:
+            missing = exc.name or self.module
             raise ImportFormatError(
-                f"The {self.display_name} importer cannot load in this build: {exc}"
+                f"The {self.display_name} importer cannot run: it needs the module "
+                f"{missing!r}, which this installation does not have"
             ) from exc
         reader = getattr(module, f"read_{self.format_id}", None)
         if not callable(reader):
