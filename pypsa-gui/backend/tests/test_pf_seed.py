@@ -139,7 +139,7 @@ def test_call_sites_use_run_pf():
 
     from services import ac_pf_service, solver_service
 
-    assert "run_pf(" in inspect.getsource(ac_pf_service.run_ac_pf_stage)
+    acpf = inspect.getsource(ac_pf_service)
+    assert "pf_result = run_pf(" in acpf and "network.pf(" not in acpf
     assert "_run_pf(network, phase)" in inspect.getsource(solver_service.run_simulation)
-    assert "network.pf(" not in inspect.getsource(ac_pf_service.run_ac_pf_stage)
     assert pf_seed.run_pf is run_pf
