@@ -141,7 +141,7 @@ describe('GoalStudyRun run', () => {
 })
 
 describe('GoalStudyRun where Reliability is not offered', () => {
-  it('the disabled Run title gives the registry reason, not "add…"', async () => {
+  it('says why in words, with the registry reason, not "add…"', async () => {
     getFlowScope.mockResolvedValue({
       scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_ipp_hybrid',
         options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
@@ -153,9 +153,31 @@ describe('GoalStudyRun where Reliability is not offered', () => {
       preset_id: 'eh_ipp_hybrid', preset_label: 'IPP', preset: { version: 1, groups: [], options: {} },
     })
     mount()
-    const run = await screen.findByTestId('hub-run-start') as HTMLButtonElement
-    await waitFor(() => expect(run.title).toBe(
-      'Not offered for this site: Nothing to make adequate: this site only generates and has no load.'))
+    const why = await screen.findByTestId('hub-run-solve-why')
+    expect(why.textContent).toBe(
+      'Nothing to make adequate: this site only generates and has no load. The run for this site is the dispatch solve.')
+  })
+
+  it('offers "Run the solve" through the gated header Run instead of a disabled study (GENONLY-RUN-1)', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_ipp_hybrid',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
+          reliability: [], commercial: [], handoff: ['reports'] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: [],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'not_yet_available',
+          reason: 'Nothing to make adequate: this site only generates and has no load.' }] }],
+      preset_id: 'eh_ipp_hybrid', preset_label: 'IPP', preset: { version: 1, groups: [], options: {} },
+    })
+    const requestRunSolve = vi.fn()
+    useUIStore.setState({ requestRunSolve } as never)
+    const user = mount()
+    const btn = await screen.findByTestId('hub-run-solve') as HTMLButtonElement
+    expect(btn.textContent).toMatch(/Run the solve/)
+    expect(screen.queryByTestId('hub-run-start')).toBeNull()
+    await user.click(btn)
+    expect(requestRunSolve).toHaveBeenCalledTimes(1)
+    expect(resultsApi.startEhStudy).not.toHaveBeenCalled()
   })
 })
 

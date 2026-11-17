@@ -14,6 +14,7 @@ import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 import { useFlowScope, useInScope } from '../../../components/flowScope/useFlowScope'
 import { useGoalStudy } from '../useGoalStudy'
+import { useUIStore } from '../../../store/uiStore'
 
 export const RELIABILITY_OUT_OF_SCOPE =
   'Outside scope: add Reliability goal & study (below) to run the study.'
@@ -33,6 +34,11 @@ export function GoalStudyRun() {
   const outOfScopeTitle = goalOpt && goalOpt.status !== 'available'
     ? (goalOpt.reason ? `Not offered for this site: ${goalOpt.reason}` : 'Not offered for this site.')
     : RELIABILITY_OUT_OF_SCOPE
+  // A site with no reliability study to run (generation-only: "nothing to make
+  // adequate") has one Run, the dispatch solve: the header's gated Run, so the
+  // gate and the save are the same (owner decision GENONLY-RUN-1).
+  const requestRunSolve = useUIStore(s => s.requestRunSolve)
+  const solveOnly = goalOpt != null && goalOpt.status !== 'available'
   const status = study?.status
   const again = status === 'failed' || status === 'aborted' || status === 'done'
   const pipeline = study?.report?.pipeline
@@ -43,6 +49,21 @@ export function GoalStudyRun() {
     ? `Studying… ${pipeline.solves_consumed} of ${pipeline.budget_solves} calculation steps`
     : budget ? `Studying… (up to ${budget} calculation steps)` : 'Studying…')
     + ` · ${elapsed} elapsed`
+
+  if (solveOnly) {
+    return (
+      <div data-testid="hub-run" className="flex flex-col gap-2">
+        <button type="button" data-testid="hub-run-solve" onClick={() => requestRunSolve()}
+          disabled={!project || gate.blocked}
+          className="inline-flex items-center gap-1.5 self-start rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
+          <Play size={12} /> Run the solve
+        </button>
+        <p data-testid="hub-run-solve-why" className="text-[12px] text-muted">
+          {goalOpt.reason ? `${goalOpt.reason} ` : ''}The run for this site is the dispatch solve.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div data-testid="hub-run" className="flex flex-col gap-2">
