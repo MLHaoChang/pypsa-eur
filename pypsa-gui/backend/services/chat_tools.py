@@ -47,6 +47,7 @@ lists which Phase 2 turns into Messages-API content blocks.
 """
 from __future__ import annotations
 
+import copy
 import contextlib
 import inspect
 import json
@@ -3684,30 +3685,39 @@ def _bc_inputs() -> dict:
     return out
 
 
-# Cut first when the options outgrow the cap; each cut is named in `truncated`.
-_BC_OPTIONS_CUT_ORDER = ("offered_rows", "outputs", "units_by_source", "refusals")
+# Cut first when the options outgrow the cap, whole entries from the end (never part of a
+# unit list); the refusals go last. Each cut is named in `truncated`.
+_BC_OPTIONS_CUT_ORDER = ("offered_rows", "outputs", "refusals")
+
+
+def _bc_options_cut(out: dict) -> dict:
+    cut: dict = {}
+    for section in _BC_OPTIONS_CUT_ORDER:
+        while _json_len(out) > _BC_INPUTS_CHARS and out.get(section):
+            gone = out[section].pop()
+            if section == "outputs":
+                out["units_by_source"]["linked"].pop(gone["id"], None)
+            cut.setdefault(section, []).append(
+                str(gone.get("id") or gone.get("name") or gone.get("field") or gone.get("code"))[:80])
+    return cut
 
 
 def _bc_options() -> dict:
     """The line table's options and the refusals of the stored lines (bc 16), as the
-    table reads them. A busy model is `business_case_busy`."""
+    route reads them: one source, no re-derivation. A busy model is `business_case_busy`;
+    None stays None with its reason (never [])."""
     from routers.results import get_business_case_options as _h
 
     with _bc_errors():
-        out = dict(_h())
-    cut = []
-    for section in _BC_OPTIONS_CUT_ORDER:
-        if _json_len(out) <= _BC_INPUTS_CHARS:
-            break
-        if out.get(section) is not None:
-            out[section] = None
-            cut.append(section)
+        out = copy.deepcopy(_h())
+    cut = _bc_options_cut(out)
     if cut:
         out["truncated"] = cut
-        out["truncated_note"] = ("cut to fit the chat: " + ", ".join(cut)
-                                 + "; say they were not read, never that there are none")
+        out["truncated_note"] = ("cut to fit the chat, whole entries only: "
+                                 + ", ".join(cut) + "; a cut output is NOT offered here, "
+                                 "not 'has no units'; say the rest was not read")
     out["hint"] = ("offer a unit only from units_by_source; name each refusal in plain words "
-                   "(its field and why), and say a part that reads None was not read")
+                   "(its field and why); a part that reads None was not read, say so")
     return out
 
 
