@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { hintCurrencyNote, ledgerKeyWords, outputLabelWords, CATEGORY_WORDS, categoryWords, ESCALATION_WORDS, escalationWords, STREAM_WORDS, streamWords } from './businessCaseWords'
+import { hintCurrencyNote, ledgerKeysWords, ledgerKeyWords, outputLabelWords, CATEGORY_WORDS, categoryWords, ESCALATION_WORDS, escalationWords, STREAM_WORDS, streamWords } from './businessCaseWords'
 
 const BACKEND = resolve(__dirname, '../../../../../backend')
 const read = (p: string) => readFileSync(resolve(BACKEND, p), 'utf8')
@@ -63,11 +63,16 @@ describe('locked rows and model outputs in display names (walk 06, UX 2)', () =>
     expect(ledgerKeyWords('bill_degradation:pv_plant')).toBe('Degradation, PV plant')
     // A name a person typed is kept.
     expect(ledgerKeyWords('contract:ppa:Wind PPA 2030')).toBe('Wind PPA 2030')
+    // Two rows that would read alike read in full, never as twins.
+    expect(ledgerKeysWords(['asset:export:Generator:pv_plant', 'bill:export:pv_plant', 'bill:network_charges']))
+      .toEqual(['Asset · Export · PV plant', 'Bill · Export · PV plant', 'Network charges'])
   })
   it('words the asset at the end of an output label, and keeps other labels', () => {
     expect(outputLabelWords('Capacity in service: wind_farm')).toBe('Capacity in service: Wind farm')
     expect(outputLabelWords('Capacity in service: bess')).toBe('Capacity in service: BESS')
     expect(outputLabelWords('Served IT energy')).toBe('Served IT energy')
+    expect(outputLabelWords('Energy delivered at the grid side of grid_export, after link losses'))
+      .toBe('Energy delivered at the grid side of Grid export, after link losses')
     expect(outputLabelWords('Capacity in service: Rooftop PV')).toBe('Capacity in service: Rooftop PV')
   })
 })

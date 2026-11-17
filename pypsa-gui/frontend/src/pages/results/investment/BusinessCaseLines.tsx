@@ -17,7 +17,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { openPanel } from '../openPanel'
 import {
-  categoryWords, escalationWords, hintCurrencyNote, ledgerKeyWords, outputLabelWords, streamWords,
+  categoryWords, escalationWords, hintCurrencyNote, ledgerKeysWords, outputLabelWords, streamWords,
 } from './businessCaseWords'
 import { financeApi } from '../../../api/finance'
 import { ACTION } from './actionStyle'
@@ -231,6 +231,12 @@ function PriceCell({ line, set, bad, currency }: {
 }
 
 function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean }) {
+  // Rows of one stream that would read alike read their key in full (walk 06, UX 2).
+  const rows = locked ?? []
+  const keyWords = rows.map(r => {
+    const same = rows.filter(x => x.stream === r.stream)
+    return ledgerKeysWords(same.map(x => x.key ?? ''))[same.indexOf(r)]
+  })
   return (
     <section aria-labelledby="bc-locked-h" className="border border-border rounded p-2 space-y-1"
              data-testid="bc-locked">
@@ -242,10 +248,10 @@ function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean 
         <p className="text-muted">The investment case carries no energy streams.</p>
       ) : (
         <ul className="space-y-0.5">
-          {(locked ?? []).map(r => (
+          {(locked ?? []).map((r, i) => (
             <li key={`${r.stream}/${r.key}`} data-testid="bc-locked-row">
               <span>{streamWords(r.stream)}</span>
-              {r.key && r.key !== r.stream && <span className="text-muted" title={r.key}> · {ledgerKeyWords(r.key)}</span>}
+              {r.key && r.key !== r.stream && <span className="text-muted" title={r.key}> · {keyWords[i]}</span>}
               {r.superseded_by.length > 0 && (
                 <span className="text-muted"> · replaced in {r.dropped.length} year{r.dropped.length === 1 ? '' : 's'} by {r.superseded_by.join(', ')}</span>
               )}

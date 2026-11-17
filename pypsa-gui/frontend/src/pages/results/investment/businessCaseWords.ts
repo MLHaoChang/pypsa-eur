@@ -112,18 +112,29 @@ const idWords = (id: string) => displayName(id).replace(/\bPpa\b|\bppa\b/g, 'PPA
  *  is the server's words, kept (walk 06, UX 2). */
 export function outputLabelWords(label: string): string {
   const i = label.lastIndexOf(': ')
-  if (i < 0) return label
-  const tail = label.slice(i + 2)
-  return ID.test(tail) ? `${label.slice(0, i + 2)}${idWords(tail)}` : label
+  const tail = i < 0 ? '' : label.slice(i + 2)
+  const head = ID.test(tail) ? `${label.slice(0, i + 2)}${idWords(tail)}` : label
+  // An id inside the sentence ("the grid side of grid_export") reads its name too.
+  return head.replace(/\b[a-z0-9]+(?:_[a-z0-9]+)+\b/g, idWords)
 }
 
 /** The ledger key of a locked energy-model row in words (walk 06, UX 2):
  *  `bill:network_charges` → "Network charges", `asset:fom:Generator:pv_plant` →
  *  "PV plant", `contract:ppa:ppa_energy` → "PPA energy", `bill_degradation:pv_plant`
  *  → "Degradation, PV plant". The last segment names the item; never an id. */
-export function ledgerKeyWords(key: string): string {
+export function ledgerKeyWords(key: string, full = false): string {
   const parts = key.split(':').filter(Boolean)
   const last = parts[parts.length - 1] ?? ''
   const name = ID.test(last) ? idWords(last) : last
+  if (full) {
+    // Every segment but a component class ("Generator"), to tell two rows apart.
+    return parts.filter(p => ID.test(p) || p === last).map(p => (ID.test(p) ? idWords(p) : p)).join(' · ')
+  }
   return parts[0] === 'bill_degradation' ? `Degradation, ${name}` : name
+}
+
+/** Each locked row's key in words; two rows that would read the same read in full. */
+export function ledgerKeysWords(keys: string[]): string[] {
+  const short = keys.map(k => ledgerKeyWords(k))
+  return keys.map((k, i) => (short.filter(x => x === short[i]).length > 1 ? ledgerKeyWords(k, true) : short[i]))
 }
