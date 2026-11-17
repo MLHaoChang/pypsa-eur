@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { FlowHeld, FlowSectionId } from '../../api/flow'
 import { ChartFrame, carrierColour } from '../../components/charts/chartTheme'
 import { fixedCharts, helperName, holdSummary, isHelper, type FixedChart } from './holdSummary'
@@ -8,10 +9,31 @@ import { fixedCharts, helperName, holdSummary, isHelper, type FixedChart } from 
 // state, count, verdict, acknowledgement or fingerprint.
 
 const number = (v: number): string => v.toLocaleString('en-GB', { maximumFractionDigits: 2 })
-const NAMES_SHOWN = 6
-const names = (rows: FlowHeld[], word: (name: string) => string = n => n): string =>
-  rows.slice(0, NAMES_SHOWN).map(h => word(h.entity)).join(', ')
-  + (rows.length > NAMES_SHOWN ? `, and ${number(rows.length - NAMES_SHOWN)} more` : '')
+/** More names than this fold behind "(N more) Show all" (the banner-list rule, UX 2). */
+export const NAMES_SHOWN = 5
+
+/** A line of names: the first five, then a button that shows the rest. */
+function Names({ testId, lead, rows, word = n => n }: {
+  testId: string; lead: string; rows: FlowHeld[]; word?: (name: string) => string
+}) {
+  const [all, setAll] = useState(false)
+  const shown = all || rows.length <= NAMES_SHOWN ? rows : rows.slice(0, NAMES_SHOWN)
+  const more = rows.length - shown.length
+  return (
+    <p data-testid={testId} className="text-[11px] text-muted">
+      {lead}: {shown.map(h => word(h.entity)).join(', ')}
+      {more > 0 && (
+        <>
+          {' '}
+          <button type="button" data-testid={`${testId}-show-all`} onClick={() => setAll(true)}
+            className="text-muted underline hover:text-accent">
+            ({number(more)} more) Show all
+          </button>
+        </>
+      )}
+    </p>
+  )
+}
 
 function Bars({ chart, capNote }: { chart: FixedChart; capNote: string | null }) {
   const max = Math.max(...chart.bars.map(b => Math.abs(b.value)), 0) || 1
@@ -55,12 +77,11 @@ function AssetsChart({ holds, total }: { holds: FlowHeld[]; total?: number }) {
         </p>
       )}
       {sized.length > 0 && (
-        <p data-testid="assets-sized" className="text-[11px] text-muted">Sized by the study, not drawn: {names(sized)}</p>
+        <Names testId="assets-sized" lead="Sized by the study, not drawn" rows={sized} />
       )}
       {helpers.length > 0 && (
-        <p data-testid="assets-helpers" className="text-[11px] text-muted">
-          Added by the model, left out of the sums and the chart: {names(helpers, helperName)}
-        </p>
+        <Names testId="assets-helpers" lead="Added by the model, left out of the sums and the chart"
+          rows={helpers} word={helperName} />
       )}
     </div>
   )

@@ -1,6 +1,6 @@
 // guided-results 03: the summary line and section 5's bars above a Guided list.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { FlowHeld, FlowSection } from '../../api/flow'
 import { SectionHoldings } from './SectionHoldings'
@@ -50,6 +50,20 @@ describe('section 5: line and bars', () => {
     expect(screen.getByTestId('assets-helpers').textContent)
       .toBe('Added by the model, left out of the sums and the chart: lost production (steel)')
     for (const c of screen.getAllByTestId('assets-chart')) expect(c.textContent).not.toContain('steel')
+  })
+
+  it('more than five names fold behind "(N more) Show all", which shows them all (UX 2)', () => {
+    const sized = Array.from({ length: 9 }, (_, i) => held({ entity: `pv_${i + 1}`, extendable: true }))
+    assets(sized)
+    const line = screen.getByTestId('assets-sized')
+    expect(line.textContent).toBe('Sized by the study, not drawn: pv_1, pv_2, pv_3, pv_4, pv_5 (4 more) Show all')
+    fireEvent.click(screen.getByTestId('assets-sized-show-all'))
+    expect(screen.getByTestId('assets-sized').textContent)
+      .toBe('Sized by the study, not drawn: pv_1, pv_2, pv_3, pv_4, pv_5, pv_6, pv_7, pv_8, pv_9')
+    expect(screen.queryByTestId('assets-sized-show-all')).toBeNull()
+    cleanup()
+    assets(sized.slice(0, 5))
+    expect(screen.queryByTestId('assets-sized-show-all')).toBeNull()
   })
 
   it('no chart for one carrier or no fixed capacity, and the line says so', () => {
