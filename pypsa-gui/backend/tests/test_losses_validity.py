@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-from services.results.losses import compute_losses_summary
+from services.results.losses import _validity_rows, compute_losses_summary
 
 
 def _net():
@@ -135,6 +135,16 @@ def test_ac_pf_nan_from_a_nonconverged_line_is_missing_not_zero():
 def test_a_network_without_branches_is_not_complete():
     n = _net()
     n.remove("Line", ["L1", "L2", "L3", "L4"])
+    n.remove("Load", ["D1", "D3"])
     n.lines_t["loss"] = pd.DataFrame(index=n.snapshots)
+    n.loads_t["p"] = n.loads_t["p"][["D2"]]
     v = compute_losses_summary(n, "lopf", False, result_df=_result_df)["validity"]
-    assert v["branches"] == [] and v["complete"] is False
+    # Every load is complete, yet with no branch there is nothing to certify.
+    assert v["branches"] == [] and [r["state"] for r in v["loads"]] == ["complete"]
+    assert v["complete"] is False
+
+
+def test_a_frame_that_is_not_there_marks_every_entity_absent():
+    assert _validity_rows(None, ["L1"], "Line") == [
+        {"component": "Line", "name": "L1", "state": "absent", **_counts()},
+    ]
