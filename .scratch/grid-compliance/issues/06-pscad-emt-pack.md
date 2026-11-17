@@ -44,3 +44,41 @@ data. The app holds that data but exports none of it in a form an EMT engineer c
   zero instead").
 
 Release note: one new file under `doc/release-notes.d/` (see its README).
+
+## Comments
+
+**GK A2 plan verdict (2026-11-17): GO, two PRs.**
+
+Answers: (a) the EMT source is always the PCC grid data; per-stage fault levels are reference
+columns labelled "reference, not the EMT source". (b) Z0 per corner in GC-06's own files from
+`x0x_<case>` / `r0x0_<case>`; a case without it goes to to_be_supplied with a named reason; a
+fallback borrowed from the max case is an explicit "assumed: from max" row; where a schedule row's
+source Z0 differs from the battery's single z0, the manifest lists it. The GC-04 battery file is
+left alone (per-corner z0 in the battery is a GC-04 follow-up if needed).
+
+PR1 `emt_pack.py`: Thevenin set, case schedule, automation stub, manifest
+- E1 Every Thevenin row states "IEC 60909 c not applied (as the test battery); with c_max = 1.1 the
+  max-case |Z| is 10 % higher"; the manifest lists it under assumptions to confirm with the TSO;
+  a test pins the note on the max row.
+- E2 rx = 0 refused ("X/R not given / infinite: an EMT source needs a finite X/R"); sk_min > sk_max
+  and rx = 0 each raise their own message, two tests, each guard mutated.
+- E3 Hand calc of one corner's R and X to 1e-6 with literals; a second test with X/R from rx_max
+  kills the 1/rx mapping and the min/max swap.
+- E4 Every battery case exactly once; channel names equal the contract in order; round trip gives
+  the same Case ids; fault R/X from `fault_impedance_ohm`.
+- E5 run_schedule.py compiles; AST checks (pack-only file literals, no absolute paths, allowed
+  imports); no eval/exec/subprocess/os.system; header "generated, never executed in CI; written for
+  the mhi.pscad API version N, untested against a PSCAD install".
+- E6 Manifest bytes deterministic; data_hash covers every listed file and moves when one changes;
+  model_set_id only when passed, tested both ways.
+- E7 EmtPackError subclasses ContractError; a catching-site test kills the base-class mutant.
+
+PR2 parameter workbook, RSCAD note, bundle call
+- W1 Never 0: each missing required parameter goes to to_be_supplied.csv; one unit missing one
+  parameter, "write 0" mutant killed.
+- W2 Units in every column header; values keep their source tag; a unit-precedence case where
+  catalogue and explicit units differ (#1057).
+- W3 campus_bundle.py: one call and one manifest entry; GC-04's lines byte-unchanged; line order
+  agreed with GC-04.
+
+Both PRs: GC-TEXT-1 grep, release-note fragment, mutants on emt_pack.py with survivors argued.
