@@ -247,6 +247,11 @@ class _Mapper:
         self._machines()
         self._xnets()
         self._shunts()
+        for component in ("Load", "Generator"):
+            df = self.n.components[component].static
+            for col in ("harmonic_source", "harmonic_spectrum"):
+                if col in df.columns:  # units added after the first spectrum
+                    df[col] = df[col].fillna("")
         self._leftovers()
         self._islands()
         report = ImportReport(

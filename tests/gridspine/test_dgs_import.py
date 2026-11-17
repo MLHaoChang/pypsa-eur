@@ -472,3 +472,124 @@ def test_a_bus_cut_off_from_every_source_is_warned(tmp_path):
     rows["ElmSym"] = ["43;Gen;2;42;4.0;1.02;0;1"]  # and its machine
     res = read_text(tmp_path, dgs_text(rows))
     assert any("cannot solve them: Spare" in w for w in res.report.warnings)
+
+
+# --- details the mutant run left untested --------------------------------------
+
+
+def _with(**changes):
+    rows = {k: list(v) for k, v in ROWS.items()}
+    for cls, new in changes.items():
+        rows[cls] = new
+    return rows
+
+
+def test_imported_spectra_fill_only_the_fields_the_screen_reads(tmp_path):
+    from gridspine.static import harmonics as hm
+
+    n = _round_trip(tmp_path, fixture_net()).network
+    # harmonic_source stays empty everywhere: the screen accepts only its
+    # topologies there (DGS-EXTRAS-1)
+    assert set(n.loads.harmonic_source) == {""}
+    assert set(n.generators.harmonic_source) == {""}
+    # a unit without a spectrum gets an empty string, not a placeholder
+    assert n.loads.at["heater", "harmonic_spectrum"] == ""
+    assert n.generators.at["bess", "harmonic_spectrum"] == ""
+    # the sgen's rating comes from sgn; a load's file row has none
+    assert n.generators.at["pv", "rated_mva"] == 5.0
+    assert math.isnan(n.loads.at["drive", "rated_mva"])
+    # the screen takes the imported spectrum as the unit's own
+    g = n.generators.loc["pv"]
+    spec, source = hm.unit_spectrum(g.harmonic_source, g.harmonic_spectrum)
+    assert source == "vendor"
+    assert spec == pytest.approx(hm.parse_spectrum(HARMONICS["pv"]["spectrum"]))
+
+
+def test_a_load_with_a_spectrum_is_warned_for_its_missing_rating(hand):
+    n = hand.network
+    assert n.loads.at["Load", "harmonic_source"] == ""
+    assert math.isnan(n.loads.at["Load", "rated_mva"])
+    assert (
+        "Load 'Load' has a harmonic spectrum but the file gives no rated apparent "
+        "power: enter it for the harmonic screen"
+    ) in hand.report.warnings
+    # the PV row names no spectrum, so it gets no rating warning
+    assert not any("'PV'" in w for w in hand.report.warnings)
+
+
+def test_an_unnamed_item_is_reported_by_its_id(tmp_path):
+    res = read_text(tmp_path, dgs_text(_with(ElmRelay=["60;"])))
+    assert (
+        "ElmRelay 'ID 60' (line 46)",
+        "PowerFactory class ElmRelay is not imported",
+    ) in {(u.source_item, u.reason) for u in res.report.unmapped}
+
+
+def test_an_empty_scaling_means_one(tmp_path):
+    res = read_text(tmp_path, dgs_text(_with(ElmLod=["40;Load;2;3.0;1.0;;50;0"])))
+    ld = res.network.loads.loc["Load"]
+    assert (ld.p_set, ld.q_set) == (3.0, 1.0)
+
+
+def test_a_repeated_name_gets_a_suffix_and_a_warning(tmp_path):
+    rows = _with(
+        ElmLod=[*ROWS["ElmLod"], "48;Load;2;1.0;0.0;1.0;;0"],
+        StaCubic=[*ROWS["StaCubic"], "118;c;12;48;0"],
+    )
+    res = read_text(tmp_path, dgs_text(rows))
+    assert list(res.network.loads.index) == ["Load", "Load (2)"]
+    assert res.network.loads.at["Load (2)", "p_set"] == 1.0
+    assert (
+        "Two Load items are named 'Load'; the second is 'Load (2)'"
+        in res.report.warnings
+    )
+
+
+def test_a_path_given_as_text_is_read(tmp_path):
+    path = tmp_path / "hand.dgs"
+    path.write_text(dgs_text(), encoding="utf-8")
+    assert read_dgs([str(path)], {}).report.counts["Buses"] == 4
+
+
+def test_a_zero_power_factor_is_refused(tmp_path):
+    with pytest.raises(ImportFormatError, match="rated power factor 0 must be above zero"):
+        read_text(tmp_path, dgs_text(_with(ElmGenstat=["41;PV;2;5.0;0;3.0;1.0;0"])))
+
+
+PHASE_WARNING = (
+    "Some transformers shift the phase angle (vector group). The AC load "
+    "flow converges from a linear-flow start, not from a flat start."
+)
+
+
+def test_a_phase_shifting_transformer_is_warned(hand, tmp_path):
+    assert hand.network.transformers.at["T2W", "phase_shift"] == 330.0  # nt2ag 11
+    assert PHASE_WARNING in hand.report.warnings
+    yy0 = "32;T type;10.0;33.0;11.0;10.0;50.0;10.0;0.5;0;2.5;0;0"
+    res = read_text(tmp_path, dgs_text(_with(TypTr2=[yy0])))
+    assert res.network.transformers.at["T2W", "phase_shift"] == 0.0
+    assert PHASE_WARNING not in res.report.warnings
+
+
+def test_three_winding_copper_losses_split_into_the_legs(tmp_path):
+    head = dict(HEAD, TypTr3=HEAD["TypTr3"] + ";pcut3_h(r);pcut3_m(r);pcut3_l(r)")
+    rows = _with(
+        TypTr3=["34;T3 type;100.0;50.0;25.0;132.0;33.0;11.0;10.0;8.0;12.0;300;50;100"]
+    )
+    tr = read_text(tmp_path, dgs_text(rows, head)).network.transformers
+    # Pair r on its own (smaller) rating: hm 300 kW / 50 MVA = 0.006, ml 50 kW /
+    # 25 MVA = 0.002, lh 100 kW / 25 MVA = 0.004. On 100 MVA: 0.012, 0.008,
+    # 0.016. Legs: h = (0.012 + 0.016 - 0.008) / 2 = 0.010, m = (0.012 + 0.008 -
+    # 0.016) / 2 = 0.002, l = (0.008 + 0.016 - 0.012) / 2 = 0.006; on each leg's
+    # own rating: 0.010, 0.001, 0.0015.
+    # x per pair on 100 MVA: sqrt(z^2 - r^2) on its own rating, times 2 or 4.
+    xhm = 2 * math.sqrt(0.10**2 - 0.006**2)
+    xml = 4 * math.sqrt(0.08**2 - 0.002**2)
+    xlh = 4 * math.sqrt(0.12**2 - 0.004**2)
+    for leg, r, x in (
+        ("T3W HV", 0.010, (xhm + xlh - xml) / 2),
+        ("T3W MV", 0.001, (xhm + xml - xlh) / 2 * 0.5),
+        ("T3W LV", 0.0015, (xml + xlh - xhm) / 2 * 0.25),
+    ):
+        assert tr.at[leg, "r"] == pytest.approx(r)
+        assert tr.at[leg, "x"] == pytest.approx(x)
