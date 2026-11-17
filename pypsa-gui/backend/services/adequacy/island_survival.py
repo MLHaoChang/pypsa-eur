@@ -304,7 +304,8 @@ def _mainland_links(n, own: set[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
     #48: an untagged Link with no end on an ``eh_poc`` bus is not a mainland feed. Topology alone
     cannot tell it from the island's own feeder (``hospital_feeder``, ``site_transformer``), and a
     Link from an unlisted supply is caught anyway: on a unit's bus by that supply, off the
-    island as a tie. A feed is read by its size alone: a normally-open feed with capacity is
+    island as a tie. Only ``bus0`` and ``bus1`` are read: a multi-port Link's further ports are
+    out of scope here (the tie check still sees them). A feed is read by its size alone: a normally-open feed with capacity is
     still the mainland's, and whether it carries power is the tie's open or closed answer."""
     from services.adequacy.archetypes import _poc_buses
 

@@ -389,3 +389,59 @@ def test_only_a_size_of_exactly_zero_leaves_a_supply_out():
     n = T.BUILDERS["eh_microgrid"]()
     n.add("Generator", "odd_supply", bus="hospital", p_nom=-1.0)
     assert S.tie_state(n, island)["state"] == "unit_on_mainland"
+
+
+def test_a_grid_import_link_with_no_eh_poc_marker_is_still_refused_by_its_role():
+    """eh_role alone marks the feed: the R4 fixture without the eh_poc tag on the mainland bus."""
+    n, island = _untagged_r4(poc=False)
+    n.links.at["subsea_tie", "eh_role"] = "grid_import"
+    out = S.tie_state(n, island)
+    assert (out["state"], out["links"]) == ("unit_on_mainland", ["subsea_tie"])
+    assert "grid side (bus0) of the grid-import link subsea_tie" in out["reason"]
+    assert "eh_poc" not in out["reason"]
+
+
+@pytest.mark.parametrize("role", [float("nan"), None])
+def test_an_eh_role_that_reads_empty_marks_nothing(role):
+    n, island = _untagged_r4(poc=False)
+    n.links["eh_role"] = n.links["eh_role"].astype(object)
+    n.links.at["subsea_tie", "eh_role"] = role
+    assert S.tie_state(n, island)["state"] == "no_tie"
+
+
+def test_a_network_without_an_eh_role_column_reads_the_eh_poc_feed():
+    n, island = _untagged_r4(poc=True)
+    n.links = n.links.drop(columns="eh_role")
+    assert S.tie_state(n, island)["links"] == ["subsea_tie"]
+
+
+def test_a_zero_capacity_tie_that_may_flow_reads_open():
+    """_carries shares the size helper: a 0-MW, non-extendable tie carries nothing although its
+    p_max_pu allows flow."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    n.links.at["subsea_tie", "p_max_pu"] = 1.0
+    assert S.tie_state(n, island)["state"] == "closed"
+    n.links.at["subsea_tie", "p_nom"] = 0.0
+    n.links.at["subsea_tie", "p_nom_extendable"] = False
+    assert S.tie_state(n, island) == _MASTER_TIE_STATES["eh_microgrid"]
+
+
+def test_a_tie_with_no_size_column_fails_closed_to_its_hourly_limits():
+    """Review note: a missing size column reads as able to carry; the hourly limits decide."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    n.links.at["subsea_tie", "p_max_pu"] = 1.0
+    n.links = n.links.drop(columns="p_nom_extendable")
+    assert S.tie_state(n, island)["carrying"] == ["subsea_tie"]
+
+
+@pytest.mark.parametrize("flag", [float("nan"), "False"])
+def test_an_unreadable_extendable_flag_keeps_a_zero_supply_detected(flag):
+    """A non-boolean flag reads as extendable, so the size is p_nom_max (inf): fails closed."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    n.add("Generator", "flag_supply", bus="hospital", p_nom=0.0)
+    n.generators["p_nom_extendable"] = n.generators["p_nom_extendable"].astype(object)
+    n.generators.at["flag_supply", "p_nom_extendable"] = flag
+    assert S.tie_state(n, island)["state"] == "unit_on_mainland"
