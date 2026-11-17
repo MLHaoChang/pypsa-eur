@@ -107,3 +107,18 @@ Open owner questions (sent to the coordinator): per-project vs. workspace scope;
 viewer run a study; comment on reports; export/build deliveries.
 
 ## Comments
+
+### 2026-11-17: GK B plan GO for PR 1, with conditions
+
+GK B (session_01G7qCunbvxN6JVyrzVTsisA) reviews this package (the brief names it; GK B2 inactive).
+
+- R1. Each project_write row declares its target resolver (path param, active project, handler check); id-keyed writes (snapshot, report, job, upload, study, site) resolve the id's owning project. Tests per resolver kind: viewer on X / editor on active Y and the reverse.
+- R2. A non-member or other-org caller never sees `project_view_only`; the handler's 404 stands (status and body equal a nonexistent project's).
+- R3. Role re-read at use: chat per tool call; queued/requeued jobs, run-profile and approval executors, Guided flows, scheduled triggers, sweep/experiment child writes at execution. A test downgrades editor → viewer between enqueue/approval and execution.
+- R4. List every WebSocket route and every GET that writes project files; gate each or show it read-only, with a test. Name the tier source for undo, restore and every writing tool; a writing tool tiered `read` fails a test.
+- R5. Members PUT: an absent role keeps the stored role (editor default for new members only); nobody changes their own role; admins and lineage creators read editor whatever the row says; mutant of `can_manage_membership` at the role write.
+- R6. A malformed stored role reads `view` (fail closed); migration up/down on SQLite; existing rows read editor.
+- R7. Totality test fails on an unclassified route and on a stale row; viewer_allowed rows carry a reason; a test pins the exact viewer_allowed set.
+- R8. A mutant per guard: gate view check, each resolver, `require_allowed` role branch (with a loosening saved rule), members role authority, save-on-switch skip.
+- R9. At the trial merge: test_route_chat_disposition, test_project_route_acl_policy, test_write_surface_lock_policy, test_golden_coverage, tool_error_kind_manifest, ChatPanel.manifest, assistant_inventory / route_parity / control_matrix --check.
+- R10. Choice made: **role-setting stays out of PR 1.** Members PUT is unchanged in PR 1 (roles are set only by tests), so no viewer can exist before PR 2 ships the UI, the generic `project_view_only` message and the role picker. R5 lands in PR 2.
