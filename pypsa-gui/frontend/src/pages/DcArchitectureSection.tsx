@@ -19,6 +19,7 @@ import { VerdictChip } from '../components/gridReadiness/GridReadinessScorecard'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { money, SYMBOL } from './DcBackupSection'
+import { ServiceSources } from '../components/gridReadiness/ServiceSources'
 
 const NBSP = ' '
 /** The section's own title; the create form shares it (DC 22). */
@@ -170,7 +171,7 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
               {data.variants.map(v => (
                 <Fragment key={v.architecture}>
                   <tr data-testid={`dc-architecture-row-${v.architecture}`} className={v.own ? 'font-medium' : ''}>
-                    <td>
+                    <td className="whitespace-nowrap">
                       {!guided && (
                         <button type="button" className="mr-1 text-muted" aria-expanded={open === v.architecture}
                                 aria-label={`Loss chain of ${v.label}`}
@@ -210,7 +211,11 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
                       <td key={k}>
                         <VerdictChip verdict={sv.verdict} />
                         {sv.project_value && (
-                          <div className="text-[10px] text-muted" data-testid={`dc-architecture-${k}-${v.architecture}`}>{sv.project_value}</div>
+                          <div className="text-[10px] text-muted" data-testid={`dc-architecture-${k}-${v.architecture}`}>
+                            {sv.sources?.length
+                              ? <ServiceSources sources={sv.sources} rest={sv.value_rest} testId={`dc-architecture-${k}-${v.architecture}-sources`} />
+                              : sv.project_value}
+                          </div>
                         )}
                       </td>
                     ))}

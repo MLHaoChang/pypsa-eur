@@ -164,6 +164,8 @@ def test_the_compare_service_columns_read_the_scorecards_value(
         "project_value": row["project_value"],
         "assumed_from_architecture": [],
         "conditional": [],
+        "sources": row["sources"],
+        "value_rest": row["value_rest"],
     }
     vc = ac["verdicts"]["voltage_control"]
     # Voltage control here is the rooftop PV's own, named as such, not the architecture's.
@@ -173,6 +175,40 @@ def test_the_compare_service_columns_read_the_scorecards_value(
     )
     for v in out["variants"]:  # never Pass on frequency from the UPS side
         assert v["verdicts"]["frequency_support"]["verdict"] != "pass"
+
+
+def test_each_architectures_voltage_cell_names_only_voltage_control(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    # DC walk 05 shots: the voltage cell repeated the frequency services and
+    # missed the architecture's own assumed voltage control.
+    d, _ = _dc_project(
+        tmp_path, monkeypatch, client, project_row, "dc_vc_cells", {"architecture": "ac"}
+    )
+    out = A.compare_project(d, T, energy_price_per_mwh=80.0)
+    for v in out["variants"]:
+        vc = v["verdicts"]["voltage_control"]
+        for word in ("frequency", "grid forming", "inertia"):
+            assert word not in vc["project_value"], (v["architecture"], vc)
+        assert [r["service"] for r in vc["sources"]] == ["voltage_control"]
+
+
+def test_an_unset_architecture_compares_with_the_scorecards_values(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    # GK A 30 ask 3: with nothing stored, the compare's "ac" default does not
+    # move units behind an architecture, so its cells read the scorecard's rows.
+    dc_load = {k: v for k, v in _bess().items() if k != "architecture"}
+    d, n = _dc_project(tmp_path, monkeypatch, client, project_row, "dc_unset_cmp", dc_load)
+    from services.adequacy import dc_backup
+
+    assert not A.is_set((dc_backup._meta(d).get("dc_load") or {}).get("spec"))
+    out = A.compare_project(d, T, energy_price_per_mwh=80.0)
+    ac = next(v for v in out["variants"] if v["architecture"] == "ac")
+    row = _rows(d, n)["frequency_support"]
+    cell = ac["verdicts"]["frequency_support"]
+    assert (cell["verdict"], cell["project_value"]) == (row["verdict"], row["project_value"])
+    assert "sources" not in row and cell["sources"] == []  # no units named, as before
 
 
 def test_03_and_05_leave_out_the_same_units(
@@ -484,3 +520,23 @@ def test_a_real_scr_below_three_warns_even_when_a_cap_also_holds(tmp_path):
     )
     row = _rows(d, n)["scr"]
     assert row["verdict"] == "warn" and "predates them" in row["note"]
+
+
+def test_a_cap_on_any_poc_withholds_the_pass_not_only_on_the_lowest_scr_one(tmp_path):
+    # GK A 30 ask 2: PoC grid is stated 25 MVA (SCR 10). PoC poc2 is stated
+    # 10 MVA against 100 MVA of converters on its own bus: it shows 40, really 4.
+    d = tmp_path / "p"
+    n = T.BUILDERS["eh_datacenter"]()
+    T.write_sidecars(d, "eh_datacenter")
+    n.buses.at["grid", "eh_ibr_mva"] = 25.0
+    n.add("Bus", "poc2")
+    n.buses.at["poc2", "eh_poc"] = True
+    n.buses.at["poc2", "eh_sk_mva"] = 400.0
+    n.buses.at["poc2", "eh_ibr_mva"] = 10.0
+    n.add("Generator", "wind2", bus="poc2", carrier="wind", p_nom=100.0)
+    row = _rows(d, n)["scr"]
+    assert row["project_value"] == pytest.approx(10.0, rel=1e-3)  # the lowest, at grid
+    assert row["verdict"] == "unknown"
+    assert "poc2" in row["note"] and "predates them" in row["note"]
+    n.buses.at["poc2", "eh_ibr_mva"] = 100.0  # stated at the converters: the Pass holds
+    assert _rows(d, n)["scr"]["verdict"] == "pass"

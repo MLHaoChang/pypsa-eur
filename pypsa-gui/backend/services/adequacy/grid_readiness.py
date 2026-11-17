@@ -304,14 +304,20 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
     # holds, or a derived one with a converter not sized yet, never certifies a
     # Pass. It reads unknown, not warn, so the verdict stays the declared rule's
     # wherever it is given (checked results S9: a checker withholds unknown).
-    if verdict == "pass" and (_stated_below(low) or _unsized(low)):
+    # GK A 30: a cap on any PoC, not only the lowest-SCR one, since a capped
+    # PoC's real SCR may be below the lowest shown.
+    label = LABEL[arch[0]] if arch else None
+    capped = [r for r in payload["buses"] if _stated_below(r) or _unsized(r)]
+    if verdict == "pass" and capped:
         verdict = "unknown"
+    others = "".join(f". At {r['bus']} (SCR {r['scr']:.4g}): {_capacity_words(r, label)}"
+                     for r in capped if r is not low)
     return [_row("scr", "Short-circuit ratio at the PoC", project_value=round(payload["min_scr"], 3),
                  verdict=verdict, assumed=True,
                  note=(f"Lowest SCR, at {payload['min_bus']}: fault level over inverter-based capacity "
                        f"(MVA){extra}; " + ("fault level assumed" if fault_assumed
                                             else "fault level as entered")
-                       + f". {_capacity_words(low, LABEL[arch[0]] if arch else None)}"),
+                       + f". {_capacity_words(low, label)}{others}"),
                  **base)]
 
 
@@ -1426,14 +1432,6 @@ def grid_facing_offer(n, island: dict, architecture: str | None) -> dict:
     return {**got, "units": units, "services": services, "behind": behind, "sources": sources}
 
 
-def named_services(offer: dict | None) -> str | None:
-    """``voltage control (rooftop_pv), ...``: each credited service and the units offering it."""
-    if not offer or not offer.get("services"):
-        return None
-    return " · ".join(f"{SERVICE_WORDS.get(x, x)} ({', '.join(map(_display, offer['sources'][x]))})"
-                      for x in offer["services"])
-
-
 def _no_island_note(inp: _Inputs) -> str:
     return (f"The island requirements are not valid: {inp.island_error}" if inp.island_error
             else "The project has no island requirements yet")
@@ -1514,29 +1512,46 @@ def _reactive_row(inp: _Inputs) -> dict:
 
 
 def service_verdict(offered, arch_counted=(), *, wanted=None, conditional=(),
-                    architecture: str | None = None, offered_text: str | None = None) -> dict:
+                    architecture: str | None = None,
+                    offered_sources: dict[str, list[str]] | None = None) -> dict:
     """The support rule (DC 05, shared with the architecture compare): a
     service the island's units offer passes; one only the power architecture
     can offer is assumed and reads warn, never pass on that alone (GK A C6);
     a service waiting for DC-bus storage is listed as conditional and never
-    counts. ``wanted`` defaults to the frequency services. ``offered`` None
-    (no island) with nothing from the architecture is unknown. ``offered_text``
-    (``named_services``) words the units' services with the units named."""
+    counts. ``wanted`` defaults to the frequency services; an explicit
+    ``wanted`` also limits the value to those services, so the voltage-control
+    cell does not repeat the frequency ones (DC walk 05 shots). ``offered`` None
+    (no island) with nothing from the architecture is unknown.
+    ``offered_sources`` (``grid_facing_offer``'s ``sources``) names the units
+    offering each service, in the value and in ``sources``
+    ([{service, label, units}], each service's credited units in full)."""
+    shown = (lambda xs: [x for x in xs if x in wanted]) if wanted else list
     wanted = tuple(wanted or _FREQUENCY_SERVICES)
     arch = [x for x in (arch_counted or ()) if x not in (offered or [])]
     have = [x for x in (offered or []) if x in wanted]
     arch_have = [x for x in arch if x in wanted]
     cond = [x for x in (conditional or ()) if x in wanted]
     if offered is None and not arch and not cond:
-        return {"verdict": "unknown", "project_value": None, "assumed_from_architecture": []}
-    parts = [offered_text or _services_text(offered)] if offered else []
+        return {"verdict": "unknown", "project_value": None, "assumed_from_architecture": [],
+                "sources": []}
+    own, arch, cond_shown = shown(offered or []), shown(arch), shown(conditional or ())
+    sources = ([{"service": x, "label": SERVICE_WORDS.get(x, x),
+                 "units": [_display(u) for u in offered_sources.get(x, [])]}
+                for x in own] if offered_sources is not None else [])
+    parts = []
+    if own:
+        parts.append(" · ".join(f"{r['label']} ({', '.join(r['units'])})" for r in sources)
+                     if sources else _services_text(own))
     if arch:
         parts.append(f"{_services_text(arch)} (assumed, {architecture or 'architecture'})")
-    if cond:
-        parts.append(f"{_services_text(cond)} (conditional on DC-bus storage)")
+    if cond_shown:
+        parts.append(f"{_services_text(cond_shown)} (conditional on DC-bus storage)")
     value = "; ".join(parts) if parts else "none"
+    # ``value_rest``: the value after the unit-named services, for a UI that
+    # renders ``sources`` itself (folded) and this text after it.
     return {"verdict": "pass" if have else "warn", "project_value": value,
-            "assumed_from_architecture": arch_have, "conditional": cond}
+            "assumed_from_architecture": arch_have, "conditional": cond, "sources": sources,
+            "value_rest": "; ".join(parts[1:] if sources else parts) or None}
 
 
 def _arch_offer(inp: _Inputs):
@@ -1570,7 +1585,8 @@ def _support_rows(inp: _Inputs) -> list[dict]:
     else:
         from services import dc_architecture as A
         got = service_verdict(offered, arch[1]["counted"], conditional=arch[1]["conditional"],
-                              architecture=A.LABEL[arch[0]], offered_text=named_services(services))
+                              architecture=A.LABEL[arch[0]],
+                              offered_sources=services["sources"] if services else None)
         verdict, value = got["verdict"], got["project_value"]
         note += f". Power architecture {A.LABEL[arch[0]]}: {A.SERVICE_WHY[arch[0]]}"
         if services and services["behind"]:
@@ -1582,6 +1598,8 @@ def _support_rows(inp: _Inputs) -> list[dict]:
                  source="Assumed: the scorecard's own expectation for a large connection; the grid "
                         "code sets no limit", project_value=value,
                  verdict=verdict, assumed=True, note=note, section="assets", target=target)]
+    if arch is not None:  # each credited service's units, for the UI to fold (unset: as before)
+        rows[0]["sources"], rows[0]["value_rest"] = got["sources"], got["value_rest"]
     for r in (inp.profile or {}).get("dynamic_requirements") or []:
         rows.append(_row(f"dynamic:{r['id']}", r["requirement"], limit=r["value"], unit=None,
                          source=f"{_profile_title(inp)}: {r['clause']}",

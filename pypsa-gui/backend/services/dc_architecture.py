@@ -237,8 +237,9 @@ def services(architecture: str, storage: bool) -> dict[str, list[str]]:
 
 def behind_architecture(n, island: dict | None, architecture: str | None) -> list[str]:
     """The units behind a set power ``architecture`` (DC grid-readiness
-    walkthrough 03, 05): the island's ``ups`` units and every unit or
-    Generator/StorageUnit on an ``eh_critical`` bus. They reach the grid only
+    walkthrough 03, 05): the island's ``ups`` units and every
+    Generator or StorageUnit on an ``eh_critical`` bus (Link-modelled units
+    are never behind). They reach the grid only
     through the architecture's own converters, so neither their island-study
     services nor their converters count at the PoC (the architecture's own
     services stand in; its grid-facing front end is not in the IBR figure).
@@ -565,7 +566,7 @@ def compare(
     rate_kwargs: dict | None = None,
     island_offered: list[str] | None = None,
     finance_currency: str | None = None,
-    island_offered_text: str | None = None,
+    island_offered_sources: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Every architecture against the project's own on the saved network ``n``
     (read, never changed). See the module docstring for the algebra."""
@@ -765,7 +766,7 @@ def compare(
                 wanted=wanted,
                 conditional=svc["conditional"],
                 architecture=LABEL[a],
-                offered_text=island_offered_text,
+                offered_sources=island_offered_sources,
             )
         variants.append(variant)
     own_v = next(v for v in variants if v["own"])
@@ -913,17 +914,21 @@ def compare_project(
         FinanceInputs.model_validate(finance).currency if finance else None
     )
     plan = planning or tpl.NATIVE_PLANNING[tid]
-    offered = offered_text = None
+    offered = offered_sources = None
     if isinstance(island, dict):
-        from services.adequacy.grid_readiness import grid_facing_offer, named_services
+        from services.adequacy.grid_readiness import grid_facing_offer
         from services.adequacy.island_config import ContractError, validate
 
-        # Every variant is an architecture, so the units behind it (the UPS, the
-        # critical bus) are never credited at the PoC: its own services stand in
-        # (DC grid-readiness walkthrough 03).
+        # A set architecture's units behind it (the UPS, the critical bus) are
+        # never credited at the PoC: its own services stand in (DC grid-readiness
+        # walkthrough 03). Unset, nothing is behind, as on the scorecard: the
+        # spec's "ac" is only a default then (GK A 30).
         try:
-            got = grid_facing_offer(n, validate(island), spec.architecture)
-            offered, offered_text = got["services"], named_services(got)
+            got = grid_facing_offer(n, validate(island),
+                                    spec.architecture if is_set(raw) else None)
+            offered = got["services"]
+            # Units are named only under a set architecture, as on the scorecard.
+            offered_sources = got["sources"] if is_set(raw) else None
         except (ContractError, ValueError):
             offered = None
     commercial = getattr(cfg, "commercial", None)
@@ -943,7 +948,7 @@ def compare_project(
         energy_price_per_mwh=energy_price_per_mwh,
         rate_kwargs=rate_kwargs,
         island_offered=offered,
-        island_offered_text=offered_text,
+        island_offered_sources=offered_sources,
         finance_currency=finance_currency,
     )
     return {**out, "basis": dc_backup._basis(nc)}

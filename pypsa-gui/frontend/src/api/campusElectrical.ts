@@ -845,6 +845,9 @@ export interface GridReadinessRow {
   unit: string | null
   source: string
   project_value: number | string | Record<string, unknown> | null
+  /** frequency_support under a set architecture (DC 03): each service's units, rendered folded, then `value_rest`. */
+  sources?: GridReadinessServiceSource[]
+  value_rest?: string | null
   verdict: GridReadinessVerdict
   assumed: boolean
   /** The rapid-voltage-change and flicker rows only (AS-18): the point-of-connection X/R is the assumed default. */
@@ -993,9 +996,12 @@ export type DcArchitecture = 'ac' | 'mv_ups' | 'dc_800v' | 'sst'
 export interface DcArchitectureStage {
   stage: string; label: string; efficiency: number; range: [number, number] | null; source: string
 }
+/** A credited grid service and the units it comes from (DC 03), under a set architecture. */
+export interface GridReadinessServiceSource { service: string; label: string; units: string[] }
 export interface DcArchitectureServiceVerdict {
   verdict: GridReadinessVerdict; project_value: string | null
   assumed_from_architecture: string[]; conditional?: string[]
+  sources?: GridReadinessServiceSource[]; value_rest?: string | null
 }
 export interface DcArchitectureNpv { capex: number; fom: number; energy: number; total: number }
 export interface DcArchitectureVariant {
