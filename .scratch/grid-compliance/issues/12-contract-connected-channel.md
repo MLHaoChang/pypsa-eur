@@ -56,3 +56,10 @@ Merge order: PR-A any time; PR-B after #1608 and #1609; PR-C after PR-A. Item 4 
 - D-4: KNOWN_CONTRACT_VERSIONS = test_battery.CONTRACT_VERSIONS; an unknown version is still refused for the whole pack.
 - D-5: hand-written result CSVs with literal statuses and times, plus an f_step trip → fail, blank-then-0 → fail, 0-then-1 → fail at the first 0. Hand mutants: version gate, unit gate, v1 reason, 0/1 guard, "last sample decides", "blank → 1".
 - D-6: the body says the trip verdict reaches the user through the judgment.json rows GC-22 serves; a release-note fragment.
+- GK A2 (4), 2026-11-17, PR-B CSV dialect (option A: one reader dialect; the writer conforms). Master's PSS/E results are unreadable by channels.read_csv today (`t_s` header, bare names, a text `status` column, blank i_poc_pu at V = 0).
+- T8 PR-B: psspy_scripts writes `time [s]` and `<name> [<unit>]` with names and units from test_battery.CHANNELS (never hard-coded); `connected [status]` only on v2.
+- T9 PR-B: text diagnostics go to a sidecar `<case_id>.status.txt`, not a skipped column; read_csv stays strict on non-numeric columns. The pack lists the sidecar as allowed so the extra-file check accepts it; tested that it is read as a reason, never as data.
+- T10 PR-B: a blank i_poc_pu cell (V = 0) becomes a per-sample unknown in channels.py (the blank_status mechanism), never 0 or a substitute (ruling 2); a check needing I at that sample reads unknown "no current at V = 0 (t=…)". channels.py is GC-07's area: tell session_01G7qCun9zjyvyqzyBHA7hda before pushing and say so in the body.
+- T11 PR-B: contract test: CSV text from psspy_scripts' converter on a hand-literal table (a V = 0 row, a failed poll, a trip) is read by channels.read_csv and checked against literal values; the old header is refused, the new one read.
+- T12 PR-B: the body states master's PSS/E results are unreadable today (#1607), with a one-line release fragment. Hand mutants: bare-name header, status column restored, blank I read as 0; name the killing test for each.
+- PR-D: a literal -1 (the not-read marker) in a `connected` status column is refused per case, tested in both the CSV and PSCAD readers.
