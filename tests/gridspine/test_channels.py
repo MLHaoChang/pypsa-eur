@@ -87,6 +87,30 @@ def test_comtrade_binary_matches_ascii(tmp_path, ft, fmt):
     np.testing.assert_array_equal(f.channel("TRIP"), [0, 1, 0])
 
 
+def test_comtrade_primary_file_read_as_secondary_divides_by_the_ratio(tmp_path):
+    cfg = CFG_1999.replace(",1,1,P", ",400,5,P")
+    np.testing.assert_allclose(
+        read_comtrade(_write(tmp_path, cfg=cfg)).channel("IA"), IA
+    )
+    np.testing.assert_allclose(
+        read_comtrade(_write(tmp_path, cfg=cfg), primary=False).channel("IA"),
+        [x * 5 / 400 for x in IA],
+    )
+
+
+def test_comtrade_2013_nanosecond_stamps_and_99999_is_a_value(tmp_path):
+    cfg = (
+        CFG_1999.replace(",1999\n", ",2013\n")
+        .replace("1\n1000,3\n", "0\n0,3\n")
+        .replace("00:00:00.000000", "00:00:00.000000000")
+    )
+    f = read_comtrade(
+        _write(tmp_path, cfg=cfg, dat="1,0,10,0,0\n2,250,99999,-2,1\n3,750,-4,4,0\n")
+    )
+    np.testing.assert_allclose(f.time, [0.0, 250e-9, 750e-9])
+    assert f.channel("VA")[1] == pytest.approx((0.5 * 99999 - 1) * 100)
+
+
 def test_comtrade_time_from_stamps_when_no_rate(tmp_path):
     cfg = CFG_1999.replace("1\n1000,3\n", "0\n0,3\n").replace("{ft}\n1\n", "{ft}\n2\n")
     f = read_comtrade(
@@ -144,7 +168,8 @@ def test_comtrade_binary_missing_value_refused(tmp_path):
         ("3,2A,1D", "3,2A", "TT,##A,##D"),
         ("{ft}\n", "BINARY64\n", "data file type 'BINARY64'"),
         ("2,IA,A,", "2,VA,A,", r"\['VA'\] appear more than once"),
-        (",10000,100,S", ",10000,0,S", "secondary ratio 0"),
+        (",10000,100,S", ",10000,0,S", "needs both above zero"),
+        (",10000,100,S", ",10000,100,X", "PS 'X'; it must be P or S"),
         ("{ft}\n1\n", "{ft}\n0\n", "timemult must be above zero"),
         ("1,VA,A,,V,0.5,", "1,VA,A,,V,a,", "multiplier a is not a number"),
     ],
@@ -183,7 +208,8 @@ def test_csv_reader(tmp_path):
         ("seconds,V [pu]\n0,1\n1,1\n", "first column must be the time"),
         ("time [ms],V [pu]\n0,1\n1,1\n", "first column must be the time"),
         ("time,V\n0,1\n1,1\n", "'V' has no unit"),
-        ("time,V [pu],V [kV]\n0,1,1\n1,1,1\n", "'V' appears twice"),
+        ("time,V [pu],V [kV]\n0,1,1\n1,1,1\n", r"\['V'\] appear more than once"),
+        ("time,V [pu],V [pu]\n0,1,1\n1,1,1\n", r"\['V'\] appear more than once"),
         ("time,V [pu]\n0,1\n1,\n", "'V' has a missing or non-numeric value at row 1"),
         ("time,V [pu]\n0,1\n,1\n", "time has a missing or non-numeric value at row 1"),
         ("time,V [pu]\n0,1\n0,1\n", "strictly increasing; row 1"),
@@ -281,6 +307,5 @@ def test_frame_refusals_and_helpers():
         f.resample([0.0, 0.3])
     with pytest.raises(ContractError, match="outside the recorded"):
         f.resample([-0.1, 0.1])
-    np.testing.assert_allclose(f.window(0.1, 0.2).time, [0.1, 0.2])
     with pytest.raises(ValueError):
         f.channel("v")[0] = 5.0

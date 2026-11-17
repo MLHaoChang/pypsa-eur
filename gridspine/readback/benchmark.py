@@ -3,7 +3,7 @@ Windowed error benchmark between two channel frames (GC-07 part 4).
 
 One engine serves two TRGC studies: RMS model against EMT model (TRGC 08) and
 model against field measurement (TRGC 24/25). It follows the validation method
-of IEC 61400-27-1 (as applied by IEC 61400-27-2): both frames are resampled to
+of IEC 61400-27-2 in part: both frames are resampled to
 one uniform time grid, the record is split into windows at the event times
 (two events give the pre-fault, fault and post-fault windows), and in each
 window three errors of the test channel against the reference channel are
@@ -27,7 +27,13 @@ channel: ``{metric: limit}`` for every window, and ``{"<window>.<metric>":
 limit}`` for one window, which wins over the plain form.
 
 Not done here (follow-up): the standard's low-pass pre-filter and its split of
-each window into transient and quasi-steady-state parts.
+each window into transient and quasi-steady-state parts. Every row says so in
+its ``method`` field (``METHOD``), so no row reads as a full IEC 61400-27-2
+validation.
+
+There is no aggregate verdict: each row stands on its own. A caller that
+wants one passes only when every row passes; any unknown row, or no row at
+all, makes it unknown.
 
 numpy only.
 """
@@ -45,6 +51,8 @@ METRICS = ("me", "mae", "mxe")
 #: Window names when exactly two events are given.
 FAULT_WINDOWS = ("pre_fault", "fault", "post_fault")
 PASS, FAIL, UNKNOWN = "pass", "fail", "unknown"
+#: What every row was computed with, stated so it is never read as more.
+METHOD = "whole-window metrics; no IEC pre-filter or sub-window split"
 
 
 def window_names(n_events: int) -> tuple:
@@ -168,12 +176,13 @@ def benchmark(
     """
     One row per channel, window and metric:
     ``{channel, test_channel, window, t_start, t_end, samples, metric, value,
-    at_s, unit, limit, margin, status, detail}``. ``channels`` is a list of
+    at_s, unit, limit, margin, status, method, detail}``. ``channels`` is a list of
     names found in both frames or a ``{reference name: test name}`` mapping;
     ``events`` the times (s) the windows split at, strictly increasing and
     inside the shared span.
     """
     grid = common_grid(reference, test, dt)
+    ref_on_grid, test_on_grid = reference.resample(grid), test.resample(grid)
     events = [float(e) for e in events]
     for e in events:
         if not math.isfinite(e) or not grid[0] < e < grid[-1]:
@@ -204,9 +213,7 @@ def benchmark(
         ]
         err = None
         if not missing:
-            err = np.interp(grid, test.time, test.channels[test_name]) - np.interp(
-                grid, reference.time, reference.channels[ref_name]
-            )
+            err = test_on_grid.channels[test_name] - ref_on_grid.channels[ref_name]
         unit = reference.units.get(ref_name, test.units.get(test_name, ""))
         for w, name in enumerate(names):
             sel = which == w
@@ -244,6 +251,7 @@ def benchmark(
                         "limit": lim,
                         "margin": margin,
                         "status": status,
+                        "method": METHOD,
                         "detail": detail,
                     }
                 )

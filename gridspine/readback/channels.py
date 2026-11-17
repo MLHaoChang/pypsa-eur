@@ -17,12 +17,16 @@ Readers:
 ``read_comtrade``
     IEEE C37.111 (1999 and 2013) ``.cfg`` + ``.dat``, data file type ``ASCII``,
     ``BINARY`` (int16), ``BINARY32`` (int32) or ``FLOAT32``. An analog value is
-    ``a * x + b`` in the channel's unit, then scaled to primary
-    (``primary / secondary``) when the channel is recorded as secondary
-    (``PS = S``), unless ``primary=False``. Digital channels become 0/1
-    channels with unit ``status``. The time comes from the sampling rates when
-    the file gives one (``nrates >= 1`` and every rate above zero), otherwise
-    from each sample's time stamp times ``timemult``, in microseconds.
+    ``a * x + b`` in the channel's unit, on the side the channel was recorded
+    (``PS``), then converted with ``primary / secondary`` to primary values
+    (``primary=True``, the default) or to secondary values (``primary=False``)
+    when it was recorded on the other side. Digital channels become 0/1
+    channels with unit ``status``. The time, in seconds from the recording's start time, comes from
+    the sampling rates when the file gives them (``nrates >= 1`` and every rate
+    above zero), each segment at its own rate; otherwise from each sample's
+    time stamp times ``timemult``, in microseconds, or nanoseconds when the
+    start time carries nine fraction digits (2013 revision). ``99999`` marks a
+    missing ASCII sample before the 2013 revision; a blank one does in any.
 ``read_pscad``
     A PSCAD ``.inf`` (one ``PGB(n) ... Desc="..." Units="..."`` line per
     channel) and its ``.out`` files (whitespace-separated, the time first and
@@ -37,6 +41,7 @@ numpy/pandas only.
 
 from __future__ import annotations
 
+import csv
 import dataclasses
 import io
 import math
@@ -156,15 +161,11 @@ class ChannelFrame:
             self.source,
         )
 
-    def window(self, t0: float, t1: float) -> ChannelFrame:
-        """The samples with ``t0 <= t <= t1``."""
-        keep = (self.time >= t0) & (self.time <= t1)
-        return ChannelFrame(
-            self.time[keep],
-            {n: v[keep] for n, v in self.channels.items()},
-            self.units,
-            self.source,
-        )
+
+def _refuse_duplicates(names, where):
+    dup = sorted({n for n in names if names.count(n) > 1})
+    if dup:
+        raise ContractError(f"{where}: channel name(s) {dup} appear more than once")
 
 
 def _split_header(col, where):
@@ -185,8 +186,19 @@ def read_csv(path) -> ChannelFrame:
     path = Path(path)
     where = str(path.name)
     try:
+        header = next(
+            csv.reader(
+                io.StringIO(path.read_text(encoding="utf-8").partition("\n")[0])
+            ),
+            [],
+        )
         df = pd.read_csv(path)
-    except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as exc:
+    except (
+        pd.errors.ParserError,
+        pd.errors.EmptyDataError,
+        UnicodeDecodeError,
+        OSError,
+    ) as exc:
         raise ContractError(f"{where}: not a readable CSV ({exc})") from exc
     if df.shape[1] < 2:
         raise ContractError(f"{where}: needs a time column and at least one channel")
@@ -198,11 +210,11 @@ def read_csv(path) -> ChannelFrame:
             f"{where}: the first column must be the time in seconds ('time' or 'time [s]'), "
             f"got {first!r}"
         )
+    names = [_split_header(col, where)[0] for col in header[1:]]
+    _refuse_duplicates(names, where)
     channels, units = {}, {}
     for col in df.columns[1:]:
         name, unit = _split_header(col, where)
-        if name in channels:
-            raise ContractError(f"{where}: channel {name!r} appears twice")
         values = pd.to_numeric(df[col], errors="coerce")
         if values.isna().any():
             row = int(values.isna().to_numpy().argmax())
@@ -242,7 +254,7 @@ class _Analog:
     unit: str
     a: float
     b: float
-    ratio: float  # primary / secondary when recorded as secondary, else 1
+    ratio: float  # the factor from the recorded side to the side asked for
 
 
 def _parse_cfg(text, where, primary):
@@ -256,7 +268,8 @@ def _parse_cfg(text, where, primary):
         pos += 1
         return _cfg_fields(lines[pos - 1])
 
-    take("station")
+    station = take("station")
+    rev = station[2] if len(station) > 2 else "1991"
     counts = take("channel count")
     if len(counts) < 3:
         raise ContractError(
@@ -289,16 +302,24 @@ def _parse_cfg(text, where, primary):
             _num(f[6], f"analog {name!r} offset b", where),
         )
         ratio = 1.0
-        if primary and len(f) >= 13 and f[12].upper() == "S":
+        recorded = f[12].upper() if len(f) >= 13 else "P"
+        if recorded not in ("P", "S"):
+            raise ContractError(
+                f"{where}: analog {name!r} has PS {f[12]!r}; it must be P or S"
+            )
+        if (
+            recorded == "S"
+        ) == primary:  # the asked-for side differs from the recorded one
             p, s = (
                 _num(f[10], f"analog {name!r} primary", where),
                 _num(f[11], f"analog {name!r} secondary", where),
             )
-            if s == 0:
+            if p == 0 or s == 0:
                 raise ContractError(
-                    f"{where}: analog {name!r} is recorded as secondary with secondary ratio 0"
+                    f"{where}: analog {name!r} has primary {p!r} and secondary {s!r}; "
+                    "converting between them needs both above zero"
                 )
-            ratio = p / s
+            ratio = p / s if primary else s / p
         analogs.append(_Analog(name, unit, a, b, ratio))
     for i in range(n_d):
         f = take(f"digital channel {i + 1}")
@@ -316,7 +337,10 @@ def _parse_cfg(text, where, primary):
     if nrates == 0:  # the standard writes one '0,endsamp' line after nrates = 0
         f = take("sample rate")
         rates.append((0.0, int(_num(f[1], "endsamp", where)) if len(f) > 1 else 0))
-    take("start time")
+    start = take("start time")
+    fraction = start[1].rpartition(".")[2] if len(start) > 1 else ""
+    # C37.111-2013: the start time's fraction digits set the time-stamp unit (6 = us, 9 = ns).
+    stamp_s = 1e-9 if len(fraction) == 9 else 1e-6
     take("trigger time")
     ft = take("data file type")[0].upper()
     if ft not in COMTRADE_TYPES:
@@ -331,10 +355,8 @@ def _parse_cfg(text, where, primary):
                 f"{where}: timemult must be above zero, got {timemult!r}"
             )
     names = [a.name for a in analogs] + digitals
-    dup = sorted({n for n in names if names.count(n) > 1})
-    if dup:
-        raise ContractError(f"{where}: channel name(s) {dup} appear more than once")
-    return analogs, digitals, rates, ft, timemult
+    _refuse_duplicates(names, where)
+    return analogs, digitals, rates, ft, timemult * stamp_s, rev
 
 
 def _comtrade_time(stamps, rates, timemult, where):
@@ -354,7 +376,7 @@ def _comtrade_time(stamps, rates, timemult, where):
                 f"{where}: the sample rates cover {start} samples but the data has {n}"
             )
         return time
-    return stamps * timemult * 1e-6
+    return stamps * timemult
 
 
 def read_comtrade(cfg, dat=None, primary: bool = True) -> ChannelFrame:
@@ -369,7 +391,9 @@ def read_comtrade(cfg, dat=None, primary: bool = True) -> ChannelFrame:
         text = cfg.read_text(encoding="latin-1")
     except OSError as exc:
         raise ContractError(f"{where}: cannot read ({exc})") from exc
-    analogs, digitals, rates, ft, timemult = _parse_cfg(text, where, primary)
+    analogs, digitals, rates, ft, timemult, rev = _parse_cfg(text, where, primary)
+    # 99999 marks a missing ASCII sample before the 2013 revision, which leaves it blank.
+    ascii_missing = ("",) if rev == "2013" else ("", "99999")
     n_a, n_d = len(analogs), len(digitals)
     dwhere = dat.name
     if not dat.is_file():
@@ -392,7 +416,7 @@ def read_comtrade(cfg, dat=None, primary: bool = True) -> ChannelFrame:
                 _num(f[1], f"row {i + 1} time stamp", dwhere) if f[1] else math.nan
             )
             for j in range(n_a):
-                if f[2 + j] == "" or f[2 + j] == "99999":
+                if f[2 + j] in ascii_missing:
                     raise ContractError(
                         f"{dwhere}: analog {analogs[j].name!r} is missing at row {i + 1}"
                     )
@@ -480,9 +504,7 @@ def _parse_inf(path):
             f"got {sorted(found)}"
         )
     names = [found[n][0] for n in sorted(found)]
-    dup = sorted({n for n in names if names.count(n) > 1})
-    if dup:
-        raise ContractError(f"{where}: channel name(s) {dup} appear more than once")
+    _refuse_duplicates(names, where)
     return [found[n] for n in sorted(found)]
 
 

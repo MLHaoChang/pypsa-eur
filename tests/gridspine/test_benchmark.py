@@ -131,6 +131,30 @@ def test_tolerances_pass_fail_and_margin():
     assert all(r["status"] == "fail" for r in _rows(rows, "me").values())
 
 
+def test_one_ulp_above_the_tolerance_fails():
+    ones = np.ones_like(T)
+    above = float(np.nextafter(0.5, 0.0))
+    rows = benchmark(
+        _frame(ones),
+        _frame(ones * 1.5, source="test"),
+        ["V"],
+        EVENTS,
+        tolerances={"V": {"me": above}},
+    )
+    assert all(r["status"] == "fail" for r in _rows(rows, "me").values())
+
+
+def test_max_error_keeps_its_sign_and_first_time_on_ties():
+    low = V.copy()
+    low[(T > 0.4)] -= 0.01
+    low[T == 0.5] -= 0.3
+    low[T == 0.7] -= 0.3
+    r = _rows(benchmark(_frame(V), _frame(low, source="test"), ["V"], EVENTS), "mxe")[
+        "post_fault"
+    ]
+    assert r["value"] == pytest.approx(-0.31) and r["at_s"] == pytest.approx(0.5)
+
+
 def test_error_exactly_at_the_tolerance_passes():
     ones = np.ones_like(T)
     rows = benchmark(
@@ -170,6 +194,18 @@ def test_channel_mapping_and_units():
     )
     with pytest.raises(ContractError, match="in 'pu' but 'V' in 'kV'"):
         benchmark(_frame(V), _frame(V, unit="kV"), ["V"], EVENTS)
+    # the same voltage in kV and in V: equal physically, refused rather than compared as numbers
+    with pytest.raises(ContractError, match="in 'kV' but 'V' in 'V'"):
+        benchmark(
+            _frame(V * 132, unit="kV"), _frame(V * 132e3, unit="V"), ["V"], EVENTS
+        )
+
+
+def test_every_row_states_its_method():
+    rows = benchmark(_frame(V), _frame(V, source="test"), ["V"], EVENTS)
+    assert {r["method"] for r in rows} == {
+        "whole-window metrics; no IEC pre-filter or sub-window split"
+    }
 
 
 @pytest.mark.parametrize(
@@ -189,6 +225,11 @@ def test_channel_mapping_and_units():
         ({"tolerances": {"V": {"rmse": 1}}}, "has 'rmse'"),
         ({"tolerances": {"V": {"me": -1}}}, "number from 0"),
         ({"tolerances": {"V": {"me": True}}}, "number from 0"),
+        ({"tolerances": {"V": {"me": float("nan")}}}, "number from 0"),
+        ({"tolerances": {"V": {"me": float("inf")}}}, "number from 0"),
+        ({"events": (0.0, 0.5)}, "not inside the shared span"),
+        ({"events": (0.5, 1.0)}, "not inside the shared span"),
+        ({"events": (0.5, float("nan"))}, "not inside the shared span"),
         ({"tolerances": {"V": 0.1}}, "must be a mapping"),
         ({"tolerances": [0.1]}, "tolerances must be a mapping"),
     ],
