@@ -302,8 +302,16 @@ def test_grid_following_reads_the_kind_and_the_island_control(tmp_path):
     # PV1 carries an island block with a grid-following control (gfl_qu)
     hc, _case, _lines, _grid = _hour_campus(tmp_path, spec(pv_island=pv_qu()))
     assert {
-        u: PP.grid_following(hc, u) for u in ("PV1", "BESS1", "GEN1", "GRID", "NOPE")
-    } == {"PV1": True, "BESS1": False, "GEN1": False, "GRID": False, "NOPE": False}
+        u: PP.grid_following(hc, u)
+        for u in ("PV1", "BESS1", "GEN1", "GRID", "NOPE", "DC_LOAD")
+    } == {
+        "PV1": True,
+        "BESS1": False,
+        "GEN1": False,
+        "GRID": False,
+        "NOPE": False,
+        "DC_LOAD": False,
+    }
 
 
 def test_a_gfl_island_block_still_takes_the_generic_set(tmp_path):

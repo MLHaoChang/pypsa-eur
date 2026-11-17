@@ -85,6 +85,8 @@ _SCRIPTS_NEED_PLANT = (
     "psspy scripts not written: the SMIB cases need the aggregated plant's PoC branch and "
     "machine (GC-01)"
 )
+#: Campus unit kinds behind a converter (a load, a genset and a UPS are not).
+CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell")
 _COLUMNS = ["mbase_mva", *IBR_PARAMS, *REECC1_ONLY, *WECC_GROUP_PARAMS]
 
 
@@ -106,7 +108,7 @@ def grid_following(campus, unit_id) -> bool:
     """
     if unit_id not in campus.units.index:
         return False
-    if campus.units.at[unit_id, "kind"] in ("genset", "ups"):
+    if campus.units.at[unit_id, "kind"] not in CONVERTER_KINDS:
         return False
     block = campus.island["units"].get(unit_id)
     return block is None or block.get("control") not in ("gfm_droop", "gfm_vsm")
