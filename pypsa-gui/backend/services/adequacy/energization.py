@@ -209,12 +209,13 @@ def all_by_period(n) -> dict[str, dict]:
 
 def _period_mask(store: pd.DataFrame, period) -> tuple[np.ndarray, str]:
     """The rows of ``period`` in the frame's own index, and its key. A
-    multi-period axis takes a level-0 value (an int, or its digits); a single
+    multi-period axis takes a level-0 value (an int, numpy's included, or its digits); a single
     axis takes only ``"all"`` or None."""
     index = store.index
     if isinstance(index, pd.MultiIndex):
         masks = dict(_period_masks(index))
-        if isinstance(period, bool) or not isinstance(period, (int, str)) or str(period) not in masks:
+        # An int period may come from the index itself (np.int64); a float, bool or Decimal never.
+        if isinstance(period, bool) or not isinstance(period, (int, np.integer, str)) or str(period) not in masks:
             raise EnergizationEditError(
                 "energization_unknown_period",
                 f"Choose one of the schedule's periods: {', '.join(masks)}.")

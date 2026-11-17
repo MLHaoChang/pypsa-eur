@@ -417,8 +417,8 @@ def put_flow_energization(body: dict,
             "energization_invalid_request",
             "Send {link, period, mw}: the link's name, the period and the MW.")
     link, period, mw = body["link"], body.get("period"), body["mw"]
-    n = PyPSAService.get_network()
     with PyPSAService.get_lock():
+        n = PyPSAService.get_network()  # read under the lock the edit holds (GK A G2)
         try:
             E.plan_period_mw(n, link, period, mw)       # refused before the undo step
         except E.EnergizationEditError as exc:

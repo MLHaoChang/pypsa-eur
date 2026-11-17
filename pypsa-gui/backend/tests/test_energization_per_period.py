@@ -13,6 +13,8 @@ import pathlib
 import threading
 import types
 
+from decimal import Decimal
+
 import numpy as np
 import pandas as pd
 import pypsa
@@ -156,7 +158,7 @@ def test_a_period_not_in_level_zero_is_refused(period):
     assert "2027, 2030, 2035" in message
 
 
-@pytest.mark.parametrize("period", [2030.0, True])
+@pytest.mark.parametrize("period", [2030.0, True, Decimal("2030")])
 def test_g1_a_float_or_bool_period_never_writes_2030(period):
     """GK G1: the period-type check on a real staged network, whose level 0
     is int64 (so its keys are digit strings: "2030", never "2030.0" or
@@ -170,6 +172,16 @@ def test_g1_a_float_or_bool_period_never_writes_2030(period):
     assert exc.value.error_kind == "energization_unknown_period"
     assert_frame_equal(E.energization_frame(n), before)
     assert (E.energization_frame(n).loc[2030, LINK] == 55.0).all()
+
+
+def test_g1_a_numpy_int_period_from_the_index_is_taken():
+    """A period read from the frame's own level 0 is np.int64: it sets that period."""
+    n = _staged()
+    period = E.energization_frame(n).index.get_level_values(0)[-1]
+    assert isinstance(period, np.integer) and not isinstance(period, int)
+    out = E.set_period_mw(n, LINK, period, 33.0)
+    assert out["period"] == str(period)
+    assert (E.energization_frame(n).loc[int(period), LINK] == 33.0).all()
 
 
 @pytest.mark.parametrize("period", [2030, "2030", 0])
