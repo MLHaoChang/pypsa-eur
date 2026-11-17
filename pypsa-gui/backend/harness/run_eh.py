@@ -125,20 +125,45 @@ def freeze(ctx, profile, solves_left) -> dict:
         raise FreezeError("No solve is left for the Energy Hub study.")
     try:
         # template-e2e 02 (GK B C2-C4): a weak-grid import cap is the
-        # network's connection limit, over the template's and the profile's;
-        # one the network doesn't fix refuses, never a constant.
+        # network's connection limit, over the template's; one the network
+        # doesn't fix refuses, never a constant.
         card = flow_service.with_network_import(
             {
                 **card,
                 "pack_overrides": {
                     **(card.get("pack_overrides") or {}),
-                    **dict(block.get("pack_overrides") or {}),
+                    **{
+                        k: v
+                        for k, v in dict(block.get("pack_overrides") or {}).items()
+                        if k != "import_p_nom_mw"  # compared with the network's below
+                    },
                 },
             },
             getattr(ctx, "network", None),
         )
     except flow_service.ImportCapacityError as exc:
         raise FreezeError(str(exc)) from exc
+    # GK B (64): a profile's own import cap never overrides the network's in
+    # silence; one that differs refuses with both values.
+    asked = (block.get("pack_overrides") or {}).get("import_p_nom_mw")
+    cap = (card.get("pack_overrides") or {}).get("import_p_nom_mw")
+    if (
+        card["archetype"] == "weak_flexible"
+        and asked is not None
+        and not (
+            isinstance(asked, (int, float))
+            and not isinstance(asked, bool)
+            and math.isclose(float(asked), float(cap), rel_tol=1e-9, abs_tol=1e-9)
+        )
+    ):
+        raise FreezeError(
+            f"The run profile sets an import cap of {asked:g} MW but the network's "
+            f"connection limit is {cap:g} MW: set the limit on the grid import link, "
+            "or remove the profile's import cap."
+            if isinstance(asked, (int, float)) and not isinstance(asked, bool)
+            else f"The run profile's import cap ({asked!r}) is not a number; the "
+            f"network's connection limit is {cap:g} MW."
+        )
     body = EhStudyRequest(
         archetype=card["archetype"],
         stages=list(block.get("stages") or card.get("stages") or []) or None,

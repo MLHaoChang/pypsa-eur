@@ -1791,12 +1791,12 @@ def test_the_freeze_takes_the_profiles_block_over_the_goal_card_and_falls_back_t
     """F1: the profile's `eh_study` block wins for pack overrides and MC
     settings (draws stay the goal's); its stages, when it names none, are
     the goal card's, and with neither the study's own default applies. The
-    weak-grid import cap is the network's connection limit over both
-    (template-e2e 02, GK B C3)."""
+    weak-grid import cap is the network's connection limit; a profile cap
+    equal to it passes (template-e2e 02, GK B (64))."""
     block = {
         "budget_solves": 2,
         "pack_overrides": {
-            "import_p_nom_mw": 55.0,
+            "import_p_nom_mw": 40.0,
             "import_energy_mwh_per_year": 1000.0,
         },
         "mc": {"seed": 7},
@@ -1815,6 +1815,20 @@ def test_the_freeze_takes_the_profiles_block_over_the_goal_card_and_falls_back_t
         ctx_for(tmp_path), {**PROFILE, "eh_study": {"budget_solves": 2}}, 6
     )
     assert "stages" not in bare["args"]
+
+
+@pytest.mark.parametrize(
+    "asked, words",
+    [(55.0, ["55 MW", "40 MW"]), (0.0, ["0 MW", "40 MW"]), ("40", ["'40'", "40 MW"])],
+)
+def test_a_profile_import_cap_that_is_not_the_networks_refuses(tmp_path, asked, words):
+    """template-e2e 02, GK B (64): the network's connection limit wins, but a
+    profile's own cap that differs from it is refused with both values, never
+    overridden in silence."""
+    block = {"budget_solves": 2, "pack_overrides": {"import_p_nom_mw": asked}}
+    with pytest.raises(run_eh.FreezeError) as exc:
+        run_eh.freeze(ctx_for(tmp_path), {**PROFILE, "eh_study": block}, 6)
+    assert all(w in str(exc.value) for w in words), str(exc.value)
 
 
 def test_releasing_an_unknown_charge_keeps_the_calls_own_eh_reservation(
