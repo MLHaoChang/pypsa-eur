@@ -768,6 +768,7 @@ def test_min_stable_larger_wins_as_suggestion(msf, msl, expected, disagree):
     (s,) = conv.report.suggestions
     assert s.proposed == pytest.approx(expected) and s.target == "G"
     assert conv.network.generators.loc["G", "p_min_pu"] == 0
+    assert f"({expected * 100:g} MW)" in s.why  # Max Capacity is 100 MW
     assert (
         any(a.parameter == "minimum stable level" for a in conv.report.assumed)
         is disagree
@@ -956,3 +957,27 @@ def test_battery_efficiency_default_comes_from_the_file():
     assert (s.efficiency_store, s.efficiency_dispatch) == (pytest.approx(0.7), 1.0)
     params = {a.parameter for a in conv.report.assumed if a.asset == "B"}
     assert params == {"charge efficiency", "discharge efficiency"}
+
+
+def test_battery_efficiency_in_another_unit_is_assumed():
+    model = _battery(("Battery", "B", "Charge Efficiency", 0.9, "-"))
+    conv = convert(model, {})
+    assert conv.network.storage_units.loc["B", "efficiency_store"] == 1.0
+    a = next(a for a in conv.report.assumed if a.parameter == "charge efficiency")
+    assert a.value == 1.0 and "not %" in a.why
+    check_ledger(model, conv)
+
+
+@pytest.mark.parametrize("unit", ["MW", "GW"])
+def test_unlimited_max_flow_is_listed_once(unit):
+    model = build(
+        [("Node", "A"), ("Node", "B"), ("Line", "L")],
+        [("Line", "L", "Max Flow", 1e30, unit)],
+        [
+            (("Line", "L"), ("Node", "A"), "Node From"),
+            (("Line", "L"), ("Node", "B"), "Node To"),
+        ],
+    )
+    conv = convert(model, {})  # a row listed twice would raise in Ledger.put
+    assert conv.network.links.empty
+    check_ledger(model, conv)

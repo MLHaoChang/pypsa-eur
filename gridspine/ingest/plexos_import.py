@@ -761,7 +761,8 @@ class _Converter:
             r = self.take(obj, "Resistance")
             wheel = self.take(obj, "Wheeling Charge")
             if mx is None or not self.unit_ok(mx, "MW") or mx.value >= _UNLIMITED:
-                if mx is not None and mx.value >= _UNLIMITED:
+                # unit_ok has already listed a wrong-unit row; list it once only
+                if mx is not None and (_ROW_TABLE, mx.data_id) not in self.ledger.dest:
                     self.skip(mx, "unlimited Max Flow is not converted")
                 for row in (mn, x, r, wheel):
                     if row is not None:
@@ -1227,6 +1228,12 @@ class _Converter:
                     self.assume(bat.name, plain, f, why)
                     continue
                 if not self.unit_ok(row, "%"):
+                    self.assume(
+                        bat.name,
+                        plain,
+                        1.0,
+                        f"{prop} in {row.unit!r}, not %; 100 % used",
+                    )
                     continue
                 f = _percent(row.value)
                 if f is None:
