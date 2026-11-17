@@ -37,7 +37,7 @@ def periods_env(
     from harness import calculations, durable
 
     n = pypsa.Network()
-    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.set_snapshots(pd.date_range("2030-01-01", periods=len(weights[0]), freq="h"))
     n.investment_periods = list(PERIODS)
     n.snapshot_weightings.loc[:, "generators"] = [w for p in weights for w in p]
     n.snapshot_weightings.loc[:, "objective"] = [w for p in weights for w in p]
@@ -186,18 +186,63 @@ def test_a_snapshot_index_that_is_not_period_by_time_is_unsupported(
     assert isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
 
 
-@pytest.mark.parametrize("cap, refused", [(3, True), (4, False)])
-def test_more_snapshots_than_the_cap_are_unsupported(
-    tmp_path, monkeypatch, cap, refused
+@pytest.mark.parametrize("per_period, refused", [(1, True), (2, False)])
+def test_more_snapshots_than_the_per_period_bound_are_unsupported(
+    tmp_path, monkeypatch, per_period, refused
 ):
-    from harness import calculations
-
+    """GK A (28) Q9: the bound is per investment period (2 periods × 2 h)."""
     env = periods_env(tmp_path, monkeypatch)
-    monkeypatch.setattr(calculations, "MAX_SNAPSHOTS", cap)
+    monkeypatch.setattr(run_gates, "UNSERVED_MAX_HOURS_PER_PERIOD", per_period)
     value = _by_period(env)
     assert (
         isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
     ) is refused
+
+
+HOURS = 8760
+
+
+def _year_capture(tmp_path, monkeypatch, hours=HOURS):
+    """Two periods of `hours` snapshots each, uneven non-unit weightings, and
+    shedding only after hour 512 of the second period."""
+    import numpy as np
+
+    w1 = tuple(float(1 + (i % 3)) for i in range(hours))
+    w2 = tuple(float(0.5 + (i % 7)) for i in range(hours))
+    s1 = (0.0,) * hours
+    s2 = tuple(0.0 if i < 600 else float(1 + (i % 5)) / 10 for i in range(hours))
+    env = periods_env(
+        tmp_path, monkeypatch, shed=(s1, s2), weights=(w1, w2), years=(5.0, 5.0)
+    )
+    return env, float(np.dot(w2, s2)), sum(s2), float(np.dot(w2[:512], s2[:512]))
+
+
+def test_a_year_per_period_capture_reads_every_snapshot_with_its_weighting(
+    tmp_path, monkeypatch
+):
+    """GK A (28) Q9 (2): 2 × 8760 snapshots, past MAX_SNAPSHOTS (512); the
+    second period's MWh is Σ w·p over the whole capture, so a capture cut at
+    512, or unit weightings, reads another number."""
+    from harness.calculations import MAX_SNAPSHOTS
+
+    env, direct, unit, cut = _year_capture(tmp_path, monkeypatch)
+    assert cut == 0.0 and direct != pytest.approx(unit)
+    assert len(env.ctx.network.snapshots) == 2 * HOURS > MAX_SNAPSHOTS
+    value = _by_period(env)
+    assert isinstance(value, Scored), value
+    assert [(r["period"], r["worst"]) for r in value.rows] == [
+        (2030, False),
+        (2040, True),
+    ]
+    assert value.rows[0]["unserved_mwh"] == 0.0
+    assert value.value == pytest.approx(direct, rel=1e-12)
+
+
+def test_a_capture_over_the_per_period_bound_is_unsupported(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_gates, "UNSERVED_MAX_HOURS_PER_PERIOD", HOURS - 1)
+    env, *_ = _year_capture(tmp_path, monkeypatch)
+    value = _by_period(env)
+    assert isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
 
 
 def test_an_empty_capture_is_no_evidence(tmp_path, monkeypatch):
