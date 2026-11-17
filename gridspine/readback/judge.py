@@ -58,7 +58,8 @@ end_window_s?, channels: {role: channel name}}``. Kinds and their checks:
     dP * 100``, from pre-step and end-of-record means, within
     ``tolerance_pct`` percentage points of ``droop_pct``. A frequency change
     inside the deadband is unknown; no power change, or one in the wrong
-    direction, fails; neither yields an infinite or NaN droop.
+    direction, fails; neither yields an infinite or NaN droop. ``dP`` is in pu
+    of the rated active power.
 
 Channel roles: the voltage is ``v1`` (positive-sequence voltage at the PoC)
 or ``v_ll_min`` (minimum phase-to-phase voltage at the PoC), one of them, in
@@ -292,6 +293,43 @@ def _row(
     }
 
 
+def _judged(
+    case, check, env, measured, limit, margin, at_s, unit, detail="", quantity=""
+):
+    """An obligation row that passes when ``margin`` (positive inside the limit) is from 0."""
+    status = PASS if margin >= 0 else FAIL
+    return _row(
+        case,
+        check,
+        OBLIGATION,
+        env,
+        status,
+        measured,
+        limit,
+        margin,
+        at_s,
+        unit,
+        quantity,
+        detail,
+    )
+
+
+def _at_most(case, check, env, measured, limit, at_s, unit, detail="", quantity=""):
+    """An obligation row that passes when ``measured`` is at most ``limit``."""
+    return _judged(
+        case,
+        check,
+        env,
+        measured,
+        limit,
+        limit - measured,
+        at_s,
+        unit,
+        detail,
+        quantity,
+    )
+
+
 def _unknown(case, check, role, envelope, detail, key=None, **kw):
     if envelope is None:
         detail = f"{key} not in profile"
@@ -379,6 +417,19 @@ def _ride_through(case, profile):
         raise ContractError(
             f"{case.where}: the connected channel {case.channels['connected']!r} must be 0 or 1"
         )
+    if not held.any():
+        return [
+            vrow,
+            _row(
+                case,
+                "stays_connected",
+                OBLIGATION,
+                env,
+                UNKNOWN,
+                quantity=quantity,
+                detail="the voltage is outside the curve from fault inception; no sample to judge",
+            ),
+        ]
     tripped = np.flatnonzero(status[held] == 0)
     if tripped.size:
         at = float(t[held][tripped[0]])
@@ -418,10 +469,20 @@ def _reactive_current(case, profile):
     key = "reactive_current_injection"
     env = profile.get(key)
     vrole = case.voltage_role or "v1"
+    quantity = VOLTAGE_ROLES[vrole]
     why = case.missing(vrole, "iq")
     if env is None or why:
         return [
-            _unknown(case, "reactive_current_rise", OBLIGATION, env, why, key, unit="s")
+            _unknown(
+                case,
+                "reactive_current_rise",
+                OBLIGATION,
+                env,
+                why,
+                key,
+                unit="s",
+                quantity=quantity,
+            )
         ]
     t = case.frame.time
     v, iq = case.values(vrole), case.values("iq")
@@ -438,6 +499,7 @@ def _reactive_current(case, profile):
                 env,
                 UNKNOWN,
                 unit="s",
+                quantity=quantity,
                 detail=f"voltage deviation {abs(dv):g} pu is inside the {env['deadband_pu']:g} pu deadband; "
                 "no reactive current is required",
             )
@@ -451,7 +513,8 @@ def _reactive_current(case, profile):
     side = "capacitive" if sign > 0 else "inductive"
     detail = (
         f"{side} change of {need:g} pu needed ({env['target_pct']:g} % of {env['k_gain']:g} x "
-        f"{beyond:g} pu beyond the deadband; voltage deviation {dv:g} pu)"
+        f"{beyond:g} pu beyond the deadband; voltage deviation {dv:g} pu, the pre-fault mean over "
+        f"{case.pre_window:g} s less the mean over the fault)"
     )
     if not reached.size:
         return [
@@ -466,24 +529,23 @@ def _reactive_current(case, profile):
                 None,
                 None,
                 "s",
+                quantity,
                 detail=detail + "; not reached before clearing",
             )
         ]
     at = float(t[reached[0]])
     rise = at - case.t_event
     return [
-        _row(
+        _at_most(
             case,
             "reactive_current_rise",
-            OBLIGATION,
             env,
-            PASS if rise <= limit else FAIL,
             rise,
             limit,
-            limit - rise,
             at,
             "s",
             detail=detail,
+            quantity=quantity,
         )
     ]
 
@@ -499,11 +561,26 @@ def _p_recovery(case, profile):
     t = case.frame.time
     p = case.values("p")
     p_pre = case.pre_mean("p")
+    if p_pre <= 0:
+        return [
+            _row(
+                case,
+                "active_power_recovery",
+                OBLIGATION,
+                env,
+                UNKNOWN,
+                unit="s",
+                detail=f"pre-fault active power {p_pre:g} pu is not above 0; nothing to recover to",
+            )
+        ]
     level = env["recovery_pct"] / 100 * p_pre
     after = np.flatnonzero(t >= case.t_clear)
     below = after[p[after] < level]
     limit = env["time_s"]
-    detail = f"{env['recovery_pct']:g} % of the pre-fault {p_pre:g} pu is {level:g} pu"
+    detail = (
+        f"{env['recovery_pct']:g} % of the pre-fault {p_pre:g} pu (mean over {case.pre_window:g} s) "
+        f"is {level:g} pu"
+    )
     if below.size and below[-1] == len(t) - 1:
         rows = [
             _row(
@@ -526,15 +603,12 @@ def _p_recovery(case, profile):
         t_rec = float(t[k])
         took = t_rec - case.t_clear
         rows = [
-            _row(
+            _at_most(
                 case,
                 "active_power_recovery",
-                OBLIGATION,
                 env,
-                PASS if took <= limit else FAIL,
                 took,
                 limit,
-                limit - took,
                 t_rec,
                 "s",
                 detail=detail + "; held to the end of the record",
@@ -576,12 +650,10 @@ def _p_recovery(case, profile):
             p_clear = float(np.interp(case.t_clear, t, p))
             ramp = (level - p_clear) / (t_rec - case.t_clear)
             rows.append(
-                _row(
+                _judged(
                     case,
                     "active_power_ramp",
-                    OBLIGATION,
                     env,
-                    PASS if ramp >= ramp_min else FAIL,
                     ramp,
                     ramp_min,
                     ramp - ramp_min,
@@ -635,15 +707,12 @@ def _step(case, profile):
         at = float(t[after[hit[0]]])
         rise = at - case.t_event
         rows.append(
-            _row(
+            _at_most(
                 case,
                 "rise_time",
-                OBLIGATION,
                 env,
-                PASS if rise <= limit else FAIL,
                 rise,
                 limit,
-                limit - rise,
                 at,
                 "s",
                 detail=f"0 to {env['rise_level_pct']:g} % of the change; {basis}",
@@ -685,15 +754,12 @@ def _step(case, profile):
         at = float(t[k])
         settle = at - case.t_event
         rows.append(
-            _row(
+            _at_most(
                 case,
                 "settling_time",
-                OBLIGATION,
                 env,
-                PASS if settle <= limit else FAIL,
                 settle,
                 limit,
-                limit - settle,
                 at,
                 "s",
                 detail=f"within ±{env['settling_band_pct']:g} % of the change "
@@ -704,15 +770,12 @@ def _step(case, profile):
     k = int(np.argmax(frac))
     over = max(0.0, (float(frac[k]) - 1.0) * 100)
     rows.append(
-        _row(
+        _at_most(
             case,
             "overshoot",
-            OBLIGATION,
             env,
-            PASS if over <= limit else FAIL,
             over,
             limit,
-            limit - over,
             float(t[after[k]]),
             "%",
             detail=f"peak past the final value; {basis}",
@@ -759,14 +822,26 @@ def _droop(case, profile):
             )
         ]
     droop = -(df_eff / env["nominal_hz"]) / dp * 100
+    if not math.isfinite(droop):
+        return [
+            _row(
+                case,
+                "droop",
+                OBLIGATION,
+                env,
+                FAIL,
+                None,
+                limit,
+                unit="%",
+                detail=f"active power change {dp:g} pu is too small to give a finite droop",
+            )
+        ]
     margin = env["tolerance_pct"] - abs(droop - limit)
     return [
-        _row(
+        _judged(
             case,
             "droop",
-            OBLIGATION,
             env,
-            PASS if margin >= 0 else FAIL,
             droop,
             limit,
             margin,

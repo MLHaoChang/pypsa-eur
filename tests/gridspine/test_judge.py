@@ -943,3 +943,58 @@ def test_curve_point_must_be_a_list_not_a_two_key_mapping():
         validate_profile(
             "x", {**_base(), "lvrt_curve": {**LVRT, "points": [{0: 0.0, 1: 0.2}]}}
         )
+
+
+def test_voltage_outside_from_inception_leaves_connection_unknown():
+    v = np.where(
+        T < 0.2, 1.0, 0.05
+    )  # below the 0.2 pu curve from the first fault sample
+    rows = _rows(judge(_full_frame(v=v), _lvrt_case(**FULL), PROFILE))
+    assert rows["stays_connected"]["status"] == "unknown"
+    assert "outside the curve from fault inception" in rows["stays_connected"]["detail"]
+
+
+def test_reactive_rows_name_the_voltage_quantity():
+    v = np.where((T >= 0.2) & (T < 0.35), 0.5, 1.0)
+    for iq in (0 * T, np.where((T >= 0.21) & (T < 0.35), 0.8, 0.0)):
+        r = _rows(_iq_case(T, v, iq))["reactive_current_rise"]
+        assert r["quantity"] == "positive-sequence voltage at the PoC"
+    r = _rows(judge(_full_frame(v=0.95 + 0 * T), _lvrt_case(**FULL), PROFILE))[
+        "reactive_current_rise"
+    ]
+    assert (
+        r["quantity"] == "positive-sequence voltage at the PoC"
+        and r["status"] == "unknown"
+    )
+    r = _rows(judge(_full_frame(), _lvrt_case(v1="V"), PROFILE))[
+        "reactive_current_rise"
+    ]
+    assert (
+        r["quantity"] == "positive-sequence voltage at the PoC"
+        and "role 'iq'" in r["detail"]
+    )
+
+
+def test_pre_fault_power_not_above_zero_is_unknown():
+    r = _p_case(np.where(T < 0.2, 0.0, P_REC))["active_power_recovery"]
+    assert r["status"] == "unknown" and "not above 0" in r["detail"]
+    assert "mean over 0.1 s" in _p_case(P_REC)["active_power_recovery"]["detail"]
+
+
+def test_subnormal_power_change_gives_no_infinite_droop():
+    f = np.where(TS < 0.2, 50.0, 50.5)
+    p = np.where(TS < 0.2, 0.0, -1e-310)  # a subnormal change: df / dp overflows
+    case = {"id": "d", "kind": "frequency_step", "t_event": 0.2, "channels": {"f": "F", "p": "P"}}
+    r = _rows(judge(_frame(TS, F=f, P=p), case, {"frequency_droop": DROOP}))["droop"]
+    assert (
+        r["status"] == "fail"
+        and r["measured"] is None
+        and "finite droop" in r["detail"]
+    )
+
+
+def test_curve_must_start_at_inception():
+    with pytest.raises(ContractError, match="must start at t = 0 s"):
+        validate_profile(
+            "x", {**_base(), "lvrt_curve": {**LVRT, "points": [[0.1, 0.2], [0.2, 0.5]]}}
+        )

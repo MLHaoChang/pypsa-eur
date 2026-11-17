@@ -234,16 +234,15 @@ _BAND_PATH = re.compile(r"voltage_bands\[(0|[1-9][0-9]*)\]")
 #: The dynamic envelopes (GC-07): the field each must carry, with its range.
 #: A range is (low, high, low_inclusive); high is inclusive, None is unbounded.
 _PCT = (0.0, 100.0, False)
-_TIME = (0.0, None, True)
-_POSITIVE = (0.0, None, False)
 _FROM_ZERO = (0.0, None, True)
+_POSITIVE = (0.0, None, False)
 DYNAMIC_ENVELOPES = {
     "lvrt_curve": {},
     "hvrt_curve": {},
     "reactive_current_injection": {"k_gain": _POSITIVE, "deadband_pu": _FROM_ZERO, "target_pct": _PCT,
-                                   "rise_time_s": _TIME},
-    "active_power_recovery": {"recovery_pct": _PCT, "time_s": _TIME},
-    "setpoint_step_response": {"rise_level_pct": _PCT, "rise_time_s": _TIME, "settling_time_s": _TIME,
+                                   "rise_time_s": _FROM_ZERO},
+    "active_power_recovery": {"recovery_pct": _PCT, "time_s": _FROM_ZERO},
+    "setpoint_step_response": {"rise_level_pct": _PCT, "rise_time_s": _FROM_ZERO, "settling_time_s": _FROM_ZERO,
                                "settling_band_pct": _PCT, "overshoot_max_pct": (0.0, 100.0, True)},
     "frequency_droop": {"droop_pct": _PCT, "deadband_hz": _FROM_ZERO, "nominal_hz": _POSITIVE,
                         "tolerance_pct": _PCT},
@@ -519,6 +518,8 @@ def _check_curve(key, lim, where):
                 or pt[0] < 0 or pt[1] < 0):
             raise ContractError(f"{where}: {key}.points[{i}] must be [t_s, v_pu], both finite numbers from 0, "
                                 f"got {pt!r}")
+        if i == 0 and pt[0] != 0:
+            raise ContractError(f"{where}: {key}.points must start at t = 0 s (fault inception), got {pt[0]!r}")
         if i and pt[0] < points[i - 1][0]:
             raise ContractError(f"{where}: {key}.points[{i}] is at {pt[0]!r} s, before the point ahead of it "
                                 f"({points[i - 1][0]!r} s); times never decrease")
