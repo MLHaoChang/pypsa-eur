@@ -224,6 +224,39 @@ def scaled(
 def test_static_variable_actions(action, want):
     conv = scaled(var(action=action), profile=(2, "-"))
     assert load(conv) == {"A": want}
+    # one variable on a row needs no assumed row about the order
+    assert not [a for a in conv.report.assumed if a.parameter == "Load"]
+
+
+def test_multiplying_by_zero_is_not_a_division_by_zero():
+    assert load(scaled(var(), profile=(0, "-"))) == {"A": 0.0}
+
+
+def test_overflow_after_the_variable_unmaps_the_row():
+    conv = scaled(
+        var(),
+        profile=(1e300, "-"),
+        load_row=("Node", "A", "Load", 1e300, "MW", {"tags": [var()]}),
+    )
+    assert conv.network.loads.empty
+    assert unmapped_reason(conv, "Node 'A'") == [
+        "a value is not finite after its variables"
+    ]
+
+
+def test_static_only_property_times_a_static_variable_is_scaled():
+    conv = run(
+        model(
+            [("Generator", "G"), ("Variable", "V")],
+            [
+                ("Generator", "G", "Units", 1, "-"),
+                ("Generator", "G", "Max Capacity", 50, "MW", {"tags": [var()]}),
+                ("Variable", "V", "Profile", 2, "-"),
+            ],
+            [(("Generator", "G"), ("Node", "A"), "Nodes")],
+        )
+    )
+    assert conv.network.generators.loc["G", "p_nom"] == 100.0
 
 
 def test_file_variable_scales_a_file_series_at_each_timestamp():
