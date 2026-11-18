@@ -678,8 +678,10 @@ class Turn:
         from harness import answer_sections
         from services import assurance_metrics
 
-        ids = [b.id for s in draft.sections or () for b in s.blocks]
-        if draft.blocks or draft.derived or draft.predicates or not ids or len(set(ids)) != len(ids):
+        if draft.sections is None or draft.blocks or draft.derived or draft.predicates:
+            raise ValueError("invalid sectioned draft")
+        ids = [b.id for s in draft.sections for b in s.blocks]
+        if len(set(ids)) != len(ids):
             raise ValueError("invalid sectioned draft")
         scope = self.request_scope
         sections = answer_sections.record_sections(record, assurance_metrics.requested_metrics(scope))

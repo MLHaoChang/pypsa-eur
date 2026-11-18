@@ -391,8 +391,77 @@ def test_sections_outside_a_population_scope_are_withheld(grid, checked):
         "retain": False,
     }
 
-    def add(ledger):
-        ledger["sections"] = [{"heading": None, "blocks": ledger["blocks"]}]
-        ledger["blocks"] = []
+    def add(ledger):  # the one-entity ledger stays whole; sections ride along
+        ledger["sections"] = [
+            {"heading": None, "blocks": [dict(ledger["blocks"][0], id="extra")]}
+        ]
 
     assert withheld(ask(checked, scope, add)[1])
+
+
+def _derived(ledger):
+    ledger["derived"] = [
+        {
+            "id": "d1",
+            "kind": "derived",
+            "formula_id": "difference/1",
+            "operands": ["0-dispatch_energy", "1-dispatch_energy"],
+            "value": 0,
+            "unit": "MWh",
+        }
+    ]
+
+
+def _predicate(ledger):
+    evidence = ledger["sections"][0]["blocks"][0]["source"]["evidence_id"]
+    ledger["predicates"] = [
+        {
+            "id": "p1",
+            "kind": "predicate",
+            "quantifier": "all",
+            "source": {"evidence_id": evidence},
+            "metric": "dispatch_energy",
+            "unit": "MWh",
+            "comparator": ">",
+            "threshold": -1,
+            "holds": True,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda ledger: ledger["blocks"].append(
+            dict(ledger["sections"][0]["blocks"][0], id="extra")
+        ),
+        _derived,
+        _predicate,
+        lambda ledger: ledger["sections"][1]["blocks"][0].update(
+            id=ledger["sections"][0]["blocks"][0]["id"]
+        ),
+        lambda ledger: ledger.pop("sections"),
+    ],
+    ids=["top-level-block", "derived", "predicate", "duplicate-id", "no-sections"],
+)
+def test_a_population_draft_carries_its_sections_only(grid, checked, change):
+    ctx = fleet(grid, 7)
+    assert withheld(ask(checked, every(ctx), change)[1])
+
+
+def test_a_population_with_no_answered_slot_still_publishes_its_sections(grid, checked):
+    ctx = fleet(grid, 7)
+    ctx.solver_state["condition"] = "infeasible"
+    frames, record = ask(checked, every(ctx))
+    receipt = record["receipt"]
+    assert (
+        receipt["policy_version"] == "4"
+        and receipt["evidence_ids"]
+        and not receipt["checked_block_ids"]
+    )
+    assert not receipt["request_complete"] and record["verdict"] == "limited"
+    assert (
+        "G1, Generator energy: unavailable (invalid_or_missing_raw_data)."
+        in public_text(frames)
+    )
+    assert "G1 dispatch_energy: invalid_or_missing_raw_data" in receipt["limitations"]
