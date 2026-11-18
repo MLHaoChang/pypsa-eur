@@ -11,6 +11,7 @@ import { useUIStore } from '../../store/uiStore'
 import { AssumptionsCard, isAssumedItem } from './AssumptionsCard'
 import { CommercialCard } from './cards/CommercialCard'
 import { SectionHoldings } from './SectionHoldings'
+import { ExpertOnlyLines } from './ExpertOnlyLines'
 import { GoalStudyRun } from './shared/GoalStudyRun'
 import { NextSectionButton } from '../../components/NextSectionButton'
 import { sectionMeta } from '../../layout/flowSections'
@@ -90,6 +91,7 @@ export function SectionView({ id, onNext, children }: {
         </ul>
       )}
       {children}
+      <ExpertOnlyLines section={id} />
       {onNext && (
         <div>
           <NextSectionButton from={id} onNext={onNext} testId={`section-next-${id}`}

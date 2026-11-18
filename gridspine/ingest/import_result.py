@@ -385,8 +385,8 @@ DECLARED: tuple[ImporterSpec, ...] = (
     ImporterSpec(
         format_id="plexos",
         display_name="PLEXOS model",
-        extensions=(".xml", ".xlsx"),
-        help="A PLEXOS model exported as XML, or its input workbook.",
+        extensions=(".xml", ".zip"),
+        help="A PLEXOS model exported as XML, or a .zip of the XML and its CSV data files.",
     ),
 )
 
