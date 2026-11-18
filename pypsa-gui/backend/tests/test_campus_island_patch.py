@@ -61,7 +61,28 @@ def test_a_client_cannot_send_a_source(island):
     with pytest.raises(HTTPException) as exc:
         ce.patch_island(island, {"requirements": {"sustained_h": {"value": 3.0, "source": "measured"}}})
     assert exc.value.status_code == 422 and "requirements.sustained_h" in exc.value.detail
+    assert "source is set by the server" in exc.value.detail
     assert _stored(island) == json.loads(json.dumps(_config()))
+
+
+@pytest.mark.parametrize("patch, says", [
+    ({"preset": {"name": "grid_following"}}, "preset: cannot be changed here"),
+    ({"requirements": "seamless"}, "requirements: send the fields to change, by name"),
+])
+def test_each_refusal_is_the_merge_s_own_sentence(island, patch, says):
+    text = _sidecar_path(island).read_text()
+    with pytest.raises(HTTPException) as exc:
+        ce.patch_island(island, patch)
+    assert exc.value.status_code == 422 and exc.value.detail == says, exc.value.detail
+    assert _sidecar_path(island).read_text() == text
+
+
+def test_an_untagged_mapping_and_a_new_field_are_set_whole(island):
+    limits = _stored(island)["requirements"]["frequency_limits"]
+    ce.patch_island(island, {"requirements": {"frequency_limits": limits, "linearised_uc": True}})
+    req = _stored(island)["requirements"]
+    assert req["frequency_limits"] == limits
+    assert req["linearised_uc"] is True
 
 
 def test_lists_are_replaced_whole(island):
