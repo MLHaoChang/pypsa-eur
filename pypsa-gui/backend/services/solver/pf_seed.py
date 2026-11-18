@@ -55,6 +55,12 @@ def run_pf(network, phase: Callable[[str], None] | None = None, **pf_kwargs):
     that triggered the seed, empty for a flat start
     (no shift, or the seed skipped).
     """
+    # Both callers repair already; repeating it here keeps this solve site
+    # self-contained (link-port guard, study harness #42). Idempotent: a
+    # healthy network gets nothing added.
+    from services.solver.link_ports import ensure_link_port_frames
+
+    ensure_link_port_frames(network)
     shifted = phase_shift_transformers(network, pf_kwargs.get("snapshots"))
     if not shifted:
         return network.pf(**pf_kwargs), []
