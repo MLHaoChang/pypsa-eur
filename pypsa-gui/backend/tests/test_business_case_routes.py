@@ -246,8 +246,15 @@ def test_c1_the_inputs_move_no_fingerprint_digest_or_ic_key(
 def test_c1_goal_free_config_drops_only_the_named_field():
     from services.reliability_goal import NOT_LP_FIELDS, goal_free_config
 
-    assert NOT_LP_FIELDS == frozenset({"business_case"})
-    d = {"voll": 1.0, "business_case": {"x": 1}, "finance": {"y": 2}}
+    # The load-growth inputs reach the LP only through the multipliers they
+    # derive into the hashed `load_scalers_by_carrier` (homer-parity 04a).
+    assert NOT_LP_FIELDS == frozenset({"business_case", "load_growth_pct_per_year",
+                                       "load_growth_base_year",
+                                       "load_scalers_derived"})
+    d = {"voll": 1.0, "business_case": {"x": 1}, "finance": {"y": 2},
+         "load_growth_pct_per_year": {"electrical": 2.0},
+         "load_growth_base_year": 2030,
+         "load_scalers_derived": {"electrical": ["2035"]}}
     assert goal_free_config(d) == {"voll": 1.0, "finance": {"y": 2}}
 
 

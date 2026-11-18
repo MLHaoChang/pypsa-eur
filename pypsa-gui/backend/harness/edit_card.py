@@ -1120,7 +1120,8 @@ def _scaler_rows(old: dict, new: dict) -> list[dict]:
             if _same(was, now):
                 continue
             row = _solver_row(f"{_SCALERS}.{carrier}.{period}", was, now)
-            row["label"] = row["says_name"] = f"{_SOLVER_WORDS[_SCALERS][0]} {carrier} {period}:"
+            row["label"] = f"{_SOLVER_WORDS[_SCALERS][0]} {carrier} {period}"
+            row["says_name"] = f"{row['label']}:"
             row["display"] = {"old": round(was, 3) if _numeric(was) else None,
                               "new": round(now, 3) if _numeric(now) else None, "unit": row["unit"]}
             rows.append(row)

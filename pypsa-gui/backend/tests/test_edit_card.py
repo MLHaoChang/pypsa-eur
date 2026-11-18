@@ -418,7 +418,7 @@ def test_solver_card_says_each_load_multiplier_period_in_words(grid):
     card = edit_card.preview("update_solver_config", {"partial": {
         "load_growth_pct_per_year": {"electrical": 3.0}}})
     row = next(r for r in card["rows"] if r["field"] == "load_scalers_by_carrier.electrical.2035")
-    assert row["label"] == "Load multiplier electrical 2035:"
+    assert row["label"] == "Load multiplier electrical 2035"
     assert (row["old"], row["new"], row["unit"]) == (1.104081, 1.159274, "\u00d7")
     assert row["display"] == {"old": 1.104, "new": 1.159, "unit": "\u00d7"}
     assert "2035: 1.104 \u2192 1.159" in card["says"]
@@ -475,7 +475,7 @@ def test_a_time_axis_card_shows_the_load_multipliers_its_period_change_rederives
     assert {f: (r["old"], r["new"]) for f, r in scalers.items()} == {
         f"load_scalers_by_carrier.electrical.{p}": v for p, v in new.items()}
     assert {r["role"] for r in scalers.values()} == {"derived"}
-    assert rows["load_scalers_by_carrier.electrical.2035"]["label"] == "Load multiplier electrical 2035:"
+    assert rows["load_scalers_by_carrier.electrical.2035"]["label"] == "Load multiplier electrical 2035"
     assert rows["load_scalers_by_carrier.electrical.2035"]["display"]["old"] == 1.104
     assert set(args) <= set(rows)          # the arguments stay on the card
     assert card["complete"] is False       # the network change itself is not read back
