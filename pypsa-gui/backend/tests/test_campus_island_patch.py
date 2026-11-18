@@ -1,5 +1,6 @@
 """PATCH /campus-electrical/{p}/island: a partial island edit merged into the
 stored sidecar (control-strategy 02/03; GK B3 K1, K2, K4)."""
+
 from __future__ import annotations
 
 import json
@@ -9,7 +10,13 @@ import pytest
 from fastapi import HTTPException
 
 from services import campus_electrical_service as ce
-from tests.test_campus_island_service import _a, _config, _sidecar_path, project, user_and_db  # noqa: F401
+from tests.test_campus_island_service import (
+    _a,
+    _config,
+    _sidecar_path,
+    project,  # noqa: F401
+    user_and_db,  # noqa: F401
+)
 
 
 def _stored(project):  # noqa: F811
@@ -59,16 +66,27 @@ def test_a_tagged_number_takes_the_value_and_the_server_sets_its_source(island):
 
 def test_a_client_cannot_send_a_source(island):
     with pytest.raises(HTTPException) as exc:
-        ce.patch_island(island, {"requirements": {"sustained_h": {"value": 3.0, "source": "measured"}}})
-    assert exc.value.status_code == 422 and "requirements.sustained_h" in exc.value.detail
+        ce.patch_island(
+            island,
+            {"requirements": {"sustained_h": {"value": 3.0, "source": "measured"}}},
+        )
+    assert (
+        exc.value.status_code == 422 and "requirements.sustained_h" in exc.value.detail
+    )
     assert "source is set by the server" in exc.value.detail
     assert _stored(island) == json.loads(json.dumps(_config()))
 
 
-@pytest.mark.parametrize("patch, says", [
-    ({"preset": {"name": "grid_following"}}, "preset: cannot be changed here"),
-    ({"requirements": "seamless"}, "requirements: send the fields to change, by name"),
-])
+@pytest.mark.parametrize(
+    "patch, says",
+    [
+        ({"preset": {"name": "grid_following"}}, "preset: cannot be changed here"),
+        (
+            {"requirements": "seamless"},
+            "requirements: send the fields to change, by name",
+        ),
+    ],
+)
 def test_each_refusal_is_the_merge_s_own_sentence(island, patch, says):
     text = _sidecar_path(island).read_text()
     with pytest.raises(HTTPException) as exc:
@@ -79,7 +97,9 @@ def test_each_refusal_is_the_merge_s_own_sentence(island, patch, says):
 
 def test_an_untagged_mapping_and_a_new_field_are_set_whole(island):
     limits = _stored(island)["requirements"]["frequency_limits"]
-    ce.patch_island(island, {"requirements": {"frequency_limits": limits, "linearised_uc": True}})
+    ce.patch_island(
+        island, {"requirements": {"frequency_limits": limits, "linearised_uc": True}}
+    )
     req = _stored(island)["requirements"]
     assert req["frequency_limits"] == limits
     assert req["linearised_uc"] is True
@@ -90,18 +110,23 @@ def test_lists_are_replaced_whole(island):
     assert _stored(island)["requirements"]["scenarios"] == ["seamless"]
 
 
-@pytest.mark.parametrize("patch, where", [
-    ({"units": {"ghost": {"control": "gfl_pq"}}}, "units.ghost"),
-    ({"requirements": {"sustained_h": None}}, "requirements.sustained_h"),
-    ({"units": {"bess": {"droop_pct": None}}}, "units.bess.droop_pct"),
-    ({"preset": "grid_following"}, "preset"),
-    ({"units": {"bess": "gfm_vsm"}}, "units.bess"),
-])
+@pytest.mark.parametrize(
+    "patch, where",
+    [
+        ({"units": {"ghost": {"control": "gfl_pq"}}}, "units.ghost"),
+        ({"requirements": {"sustained_h": None}}, "requirements.sustained_h"),
+        ({"units": {"bess": {"droop_pct": None}}}, "units.bess.droop_pct"),
+        ({"preset": "grid_following"}, "preset"),
+        ({"units": {"bess": "gfm_vsm"}}, "units.bess"),
+    ],
+)
 def test_refusals_name_the_field_and_leave_the_file(island, patch, where):
     text = _sidecar_path(island).read_text()
     with pytest.raises(HTTPException) as exc:
         ce.patch_island(island, patch)
-    assert exc.value.status_code == 422 and exc.value.detail.startswith(where), exc.value.detail
+    assert exc.value.status_code == 422 and exc.value.detail.startswith(where), (
+        exc.value.detail
+    )
     assert _sidecar_path(island).read_text() == text
 
 
@@ -139,10 +164,14 @@ def test_two_patches_on_different_keys_both_survive(island):
             ce.patch_island(island, p)
         except Exception as e:  # pragma: no cover - surfaced below
             errors.append(e)
-    ts = [threading.Thread(target=run, args=(p,)) for p in (
-        {"units": {"bess": {"droop_pct": 5.0}}},
-        {"requirements": {"sustained_h": 9.0}},
-    )]
+
+    ts = [
+        threading.Thread(target=run, args=(p,))
+        for p in (
+            {"units": {"bess": {"droop_pct": 5.0}}},
+            {"requirements": {"sustained_h": 9.0}},
+        )
+    ]
     for t in ts:
         t.start()
     for t in ts:
