@@ -521,7 +521,7 @@ def test_storages_not_converted_drop_the_whole_unit(change, reason):
         (
             [("Generator", "G2")],
             [(("Generator", "G2"), ("Storage", "S"), "Head Storage")],
-            "storage 'S' feeds 2 generators: cascades are not converted yet",
+            "storage 'S' is linked to 2 generators: cascades are not converted yet",
         ),
         (
             [("Waterway", "W")],
@@ -551,6 +551,22 @@ def test_a_shared_storage_is_listed_once_under_its_first_reason():
     assert unmapped_reason(conv, "Storage 'S'") == [
         "tail storage (pumped or cascaded hydro) is not converted yet"
     ]
+
+
+@pytest.mark.parametrize("other", ["F", "H"])  # before and after 'G' by name
+def test_head_of_one_generator_and_tail_of_another_is_a_cascade(other):
+    """GK A (31) #1713 ask 1: head and tail links both count."""
+    conv = run(
+        hydro_model(
+            objects=[("Generator", other)],
+            members=[(("Generator", other), ("Storage", "S"), "Tail Storage")],
+        )
+    )
+    assert conv.network.storage_units.empty
+    assert unmapped_reason(conv, "Generator 'G'") == [
+        "storage 'S' is linked to 2 generators: cascades are not converted yet"
+    ]
+    assert len(unmapped_reason(conv, "Storage 'S'")) == 1
 
 
 def test_storage_without_a_generator():
@@ -772,6 +788,15 @@ def test_period_layout_refusals(row, reason):
 def test_period_refusal_names_the_bad_period_not_a_valid_edge(rows, reason):
     body = "Year,Month,Day,Period,A\n" + "\n".join(rows) + "\n"
     assert series(body, snaps=HOURS[:1])["A"] == reason
+
+
+def test_names_may_be_a_one_shot_iterator_with_repeats():
+    """GK A (31) #1713 ask 2: names are read once, deduplicated."""
+    got = series(
+        "Datetime,A,B\n01/01/2015 00:00,1,2\n", names=iter("ABA"), snaps=HOURS[:1]
+    )
+    assert sorted(got) == ["A", "B"]
+    assert (got["A"].iloc[0], got["B"].iloc[0]) == (1.0, 2.0)
 
 
 def test_irregular_snapshots_are_refused_even_when_the_first_step_fits():

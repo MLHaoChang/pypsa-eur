@@ -1512,7 +1512,8 @@ class _Converter:
             kids = self.children.get(gen.key, {})
             if _STORAGE_LINKS & set(kids):
                 gens.append(gen)
-                for st in kids.get("Head Storage", []):
+                # head and tail links: a storage on two generators is a cascade
+                for st in kids.get("Head Storage", []) + kids.get("Tail Storage", []):
                     feeds[st].append(gen.key)
         on_waterway = {
             end
@@ -1533,7 +1534,7 @@ class _Converter:
                 why = f"{len(heads)} head storages: cascades are not converted yet"
             elif len(feeds[heads[0]]) > 1:
                 why = (
-                    f"storage {heads[0][1]!r} feeds {len(feeds[heads[0]])} "
+                    f"storage {heads[0][1]!r} is linked to {len(feeds[heads[0]])} "
                     "generators: cascades are not converted yet"
                 )
             elif heads[0] in on_waterway:
