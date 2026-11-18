@@ -44,6 +44,7 @@ import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
 import { FieldDrawer } from './components/FieldDrawer'
 import { FlowReturnButton } from './layout/FlowReturnButton'
 import { ConnectionLimits } from './components/gridReadiness/ConnectionLimits'
+import { DispatchLimitsEditor, isDispatchLimitTarget } from './pages/hubDesign/cards/IslandRequirementsCard'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
@@ -832,6 +833,10 @@ export default function App() {
                 // The grid-readiness limits' one editor (DC 03 slice 6): a to-check ramp or oscillation
                 // limit opens its line; the fault level's value and source are one line too.
                 ? <div className="px-3"><ConnectionLimits only={LIMIT_FIELDS[t.field ?? '']} /></div>
+                : isDispatchLimitTarget(t)
+                // Control-strategy 03: an off-grid site's reserve or renewable-fraction row opens the
+                // Island requirements card's dispatch-limits editor.
+                ? <div className="px-3 py-2"><DispatchLimitsEditor onDone={() => useUIStore.getState().setFieldDrawer(null)} /></div>
                 : t.component && t.entity
                 ? <PropertiesPanel />
                 : <FullPageTab panel={t.panel as SlidePanel} onClose={() => useUIStore.getState().setFieldDrawer(null)} />}

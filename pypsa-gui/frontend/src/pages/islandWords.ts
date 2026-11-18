@@ -19,3 +19,11 @@ export const ISLAND_SCENARIO_LABELS: Record<IslandScenario, string> = {
   seamless: 'Seamless',
   planned: 'Planned',
 }
+
+/** The other island requirements the Guided card lists read-only (Expert edits them). */
+export const ISLAND_OTHER_REQUIREMENT_LABELS: Record<string, string> = {
+  rocof_window_ms: 'Rate-of-change window (ms)',
+  gfm_margin: 'Grid-forming margin',
+  ride_through_storage: 'Ride-through storage',
+  pickup_blocks: 'Pickup blocks',
+}
