@@ -260,7 +260,9 @@ def test_record_sections_join_slots_to_the_recorded_entities():
         sections.record_sections({**record, "slots": record["slots"][:1]}, ["m"])
     with pytest.raises(ValueError, match="population_slots_differ"):
         sections.record_sections(record, ["n"])
-    with pytest.raises(ValueError, match="population_slots_differ"):  # two metrics need four slots
+    with pytest.raises(
+        ValueError, match="population_slots_differ"
+    ):  # two metrics need four slots
         sections.record_sections(record, ["m", "n"])
 
 
