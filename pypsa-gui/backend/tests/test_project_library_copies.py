@@ -654,3 +654,34 @@ def test_a_series_served_by_its_copy_alone_is_a_notice_not_a_fault(
     monkeypatch.setattr(S, "ref_for", lambda *a, **k: object())
     assert P._copy_only(None, None, pin) == []
     assert P._copy_only(None, None, {**pin, "kind": "tariff"}) == []
+
+
+def _config_naming(pin) -> str:
+    ref = {k: pin[k] for k in ("id", "version", "hash")}
+    return json.dumps(
+        {"commercial": {"export_price_ref": {**ref, "source": "library"}}}
+    )
+
+
+def test_a_copy_only_the_config_names_is_kept_without_a_sidecar(tmp_path):
+    # An import without a sidecar is accepted when the config names the copy;
+    # its first load-migration must not prune it (GK B3 @5f0c351b).
+    pin = _series_pin(_CSV)
+    assert PC.write(tmp_path, pin, _CSV)
+    (tmp_path / "solver_config.json").write_text(_config_naming(pin))
+    assert P.collect_pins(json.loads(_config_naming(pin)))[0]["hash"] == pin["hash"]
+    P.write_copies(None, None, tmp_path)
+    assert PC.path_for(tmp_path, pin).is_file()
+    (tmp_path / "solver_config.json").write_text("{not json")
+    stray = PC.path_for(tmp_path, pin).parent / f"{'b' * 64}.csv.gz"
+    stray.write_bytes(b"x")
+    P.write_copies(None, None, tmp_path)  # unreadable config: prune nothing
+    assert stray.is_file()
+    (tmp_path / "solver_config.json").unlink()
+    P.write_copies(None, None, tmp_path)  # no sidecar, no config: no pins
+    assert not stray.exists() and not PC.path_for(tmp_path, pin).exists()
+
+
+def test_a_temp_file_in_a_bundle_is_not_a_stray(tmp_path):
+    members = ["library/series/x.tmp", "library/series/" + "c" * 64 + ".csv.gz"]
+    assert PC.stray_members(members, []) == [members[1]]

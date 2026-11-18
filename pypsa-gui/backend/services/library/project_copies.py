@@ -208,12 +208,17 @@ def prune(project_dir: Path, pins: Iterable[dict]) -> list[str]:
 
 
 def stray_members(members: Iterable[str], pins: Iterable[dict]) -> list[str]:
-    """The `library/` members of a bundle that are no pin's copy."""
+    """The `library/` members of a bundle that are no pin's copy. A temp file
+    is a copy being written when the bundle was made: it is never read, and the
+    next save's prune removes it once it is an hour old."""
     wanted = {member_name(p) for p in pins} - {None}
     return sorted(
         m
         for m in members
-        if m.startswith(f"{DIR}/") and not m.endswith("/") and m not in wanted
+        if m.startswith(f"{DIR}/")
+        and not m.endswith("/")
+        and not m.endswith(".tmp")  # a write in flight at export; never read
+        and m not in wanted
     )
 
 

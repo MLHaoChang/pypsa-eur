@@ -167,9 +167,24 @@ def write_copies(
     written."""
     pins, issues = read_pins(project_dir)
     written = PC.fill(db, org_id, Path(project_dir), pins, root=root)
-    if not issues:  # an unreadable sidecar names no pins: prune nothing
-        PC.prune(Path(project_dir), pins)
+    # Prune by the same pins an import counts: the sidecar's and the config's
+    # refs (GK B3). An unreadable sidecar or config names no pins: prune nothing.
+    config_pins = _config_pins(Path(project_dir))
+    if not issues and config_pins is not None:
+        PC.prune(Path(project_dir), pins + config_pins)
     return written
+
+
+def _config_pins(project_dir: Path) -> list[dict] | None:
+    """The refs `solver_config.json` names, [] without one, None when it is
+    unreadable."""
+    path = project_dir / "solver_config.json"
+    if not path.is_file():
+        return []
+    try:
+        return collect_pins(json.loads(path.read_text()))
+    except (OSError, ValueError):
+        return None
 
 
 def _unreadable(label: str, exc: Exception) -> str:
