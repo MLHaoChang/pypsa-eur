@@ -606,3 +606,71 @@ def test_an_undo_with_no_project_restores_no_record(monkeypatch):
     monkeypatch.setattr(network_lengths, "active_project_dir", lambda: None)
     assert network_undo._snapshot_cutouts() is None
     network_undo._restore_cutouts({"value": None})  # no project, no write, no raise
+
+
+# ── a save keeps it, a copy takes the source's (GK B3 #1) ──────────────────
+
+
+def _info(client, name) -> dict:
+    return next(p for p in client.get("/api/projects/").json() if p["name"] == name)
+
+
+def test_a_save_keeps_the_record_and_the_weather_choice(
+    client, project, project_storage_dir
+):
+    pdir = project_storage_dir(project)
+    assert _apply(client, project, _job(client, project, pdir)).status_code == 200
+    W.save_choice(pdir, "atlite", 2023)
+    assert client.post(f"/api/projects/{project}").status_code == 200
+    assert _targets(pdir) == {"g_a": SHA}
+    assert W.saved_choice(pdir) == {"source": "atlite", "year": 2023}
+
+
+@pytest.mark.parametrize("rebind", [False, True], ids=["save-a-copy", "save-as"])
+def test_a_copy_to_another_directory_takes_the_sources_record(
+    client, project, project_storage_dir, rebind
+):
+    pdir = project_storage_dir(project)
+    assert _apply(client, project, _job(client, project, pdir)).status_code == 200
+    W.save_choice(pdir, "atlite", 2023)
+    dst = f"cutout-copy-{int(rebind)}"
+    r = client.post(f"/api/projects/{dst}", params={"force": True, "rebind": rebind})
+    assert r.status_code == 200, r.text
+    ddir = project_storage_dir(dst)
+    assert ddir != pdir
+    assert _targets(ddir) == {"g_a": SHA}
+    assert W.saved_choice(ddir) == {"source": "atlite", "year": 2023}
+    assert _targets(pdir) == {"g_a": SHA}
+
+
+def test_save_export_import_and_its_own_save_keep_the_record(
+    client, project, project_storage_dir
+):
+    pdir = project_storage_dir(project)
+    assert _apply(client, project, _job(client, project, pdir)).status_code == 200
+    assert client.post(f"/api/projects/{project}").status_code == 200
+    blob = client.get(f"/api/projects/{project}/bundle").content
+    r = client.post(
+        "/api/projects/import_bundle?name=cutout_saved",
+        files={"file": ("a.pypsaproj.zip", blob, "application/zip")},
+    )
+    assert r.status_code in (200, 201), r.text
+    dst = r.json().get("imported") or r.json().get("name") or "cutout_saved"
+    r = client.post(f"/api/projects/{_info(client, dst)['id']}/activate")
+    assert r.status_code == 200, r.text
+    assert client.post(f"/api/projects/{dst}").status_code == 200
+    assert _targets(project_storage_dir(dst)) == {"g_a": SHA}
+
+
+# ── a caller with no write access writes no record (GK B3 #3) ──────────────
+
+
+def test_a_caller_outside_the_project_is_refused_and_writes_no_record(
+    client, other_org_client, project, project_storage_dir
+):
+    pdir = project_storage_dir(project)
+    job_id = _job(client, project, pdir)
+    before = (pdir / "metadata.json").read_bytes()
+    assert _apply(other_org_client, project, job_id).status_code == 404
+    assert _batch(other_org_client, project, job_id).status_code == 404
+    assert (pdir / "metadata.json").read_bytes() == before

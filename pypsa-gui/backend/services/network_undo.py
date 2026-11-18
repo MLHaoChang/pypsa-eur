@@ -176,7 +176,8 @@ def apply_undo():
     # An undone series edit leaves its growth placeholder as it was (C3).
     with PyPSAService.get_lock():
         not_restored = growth_placeholders.restore_meta(result["template_meta"])
-    _restore_cutouts(result.get("profile_cutouts"))
+        # Under the lock a save's metadata.json rewrite holds (GK B3 #2).
+        _restore_cutouts(result.get("profile_cutouts"))
     change_log_service.log("undo", "Network", "", "Undone last action")
     out = {"undone": True, "remaining": undo_service.depth()}
     if not_restored:
