@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Any, Literal
@@ -112,6 +113,7 @@ from services.profile_gen.load_archetypes import (
     resolve_defaults as load_archetype_defaults,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()          # global: /api/profiles/…
 project_router = APIRouter()  # scoped: /api/projects/{name}/profiles/…
 
@@ -1672,7 +1674,9 @@ def _weather_answer(proj: AuthorizedProject) -> dict[str, Any]:
     except ProfileGenError as exc:
         window = {"unsupported": public_message(exc, route="weather")}
     return {**weather_prefs.resolved(proj.directory, snapshots), "window": window,
-            "time_basis": {"value": recorded, "assumed": "assumed" in recorded}}
+            "time_basis": {"value": recorded, "assumed": "assumed" in recorded},
+            # Where the current profiles came from (project-io 03), read-only.
+            "cutouts": weather_prefs.recorded_cutouts(proj.directory)}
 
 
 @project_router.get("/{name}/profiles/weather")
@@ -1806,12 +1810,29 @@ def apply_profile(
                     "message": public_message(exc, route="apply", job_id=body.job_id)},
         ) from exc
 
+    _record_cutouts(proj, meta, [(component_type, body.component, attribute)])
+
     from routers.simulation import _state_update
 
     _state_update(status="idle")
     if warning:
         summary["warning"] = warning
     return summary
+
+
+def _record_cutouts(proj, meta: dict, targets: list[tuple[str, str, str]]) -> None:
+    """Record, in the project's metadata, the cutout the applied series came
+    from, or forget it when there was none (project-io 03). One write per
+    apply. The network write has happened, so a metadata failure is logged,
+    never raised."""
+    cutout = meta.get("cutout") if isinstance(meta.get("cutout"), dict) else None
+    try:
+        weather_prefs.record_cutouts(
+            proj.directory, targets, cutout,
+            _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"))
+    except OSError:
+        logger.warning("profile apply: cutout record for %s not written",
+                       proj.name, exc_info=True)
 
 
 @project_router.post("/{name}/profiles/apply-batch")
@@ -1888,6 +1909,7 @@ def apply_profile_batch(
 
     push_undo_snapshot()
     applied: list[dict[str, Any]] = []
+    written: list[tuple[str, str, str]] = []
     for i, (component, series, component_type, attribute, member_meta) in enumerate(prepared):
         try:
             summary = assign_profile(ctx, component, series, member_meta,
@@ -1897,6 +1919,7 @@ def apply_profile_batch(
             kind = (_apply_refusal_kind(exc)["error_kind"]
                     if isinstance(exc, ProfileApplyError) else "write_failed")
             message = public_message(exc, route="apply", job_id=body.job_id)
+            _record_cutouts(proj, meta, written)
             raise HTTPException(status_code=409, detail={
                 "error_kind": "batch_partially_applied",
                 "message": f"{len(applied)} of {len(prepared)} written before "
@@ -1912,6 +1935,9 @@ def apply_profile_batch(
         if warning:
             summary["warning"] = warning
         applied.append(summary)
+        written.append((component_type, component, attribute))
+
+    _record_cutouts(proj, meta, written)
 
     from routers.simulation import _state_update
 

@@ -9,6 +9,8 @@ snapshots' year), so the bar shows "from your snapshots" or "default".
 from __future__ import annotations
 
 import json
+import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -77,3 +79,79 @@ def resolved(project_dir: Path | str, snapshots) -> dict[str, Any]:
         return {"source": saved["source"], "year": saved["year"], "year_source": "saved"}
     return {"source": saved["source"] if saved else "synthetic",
             "year": default_year, "year_source": default_kind}
+
+
+# ── Where the project's generated profiles came from (project-io 03) ─────────
+# One entry per applied target (component type, component, attribute): the
+# cutout its current series was generated from. Re-applying a target replaces
+# its entry; applying a series with no cutout (synthetic, or a cutout that could
+# not be recorded) removes it, so an entry never names a replaced source.
+CUTOUTS_KEY = "profile_cutouts"
+_TARGET = ("component_type", "component", "attribute")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _valid_cutout(entry: Any) -> bool:
+    """Imported metadata is untrusted: keep only well-formed entries (W4)."""
+    if not isinstance(entry, dict):
+        return False
+    if not all(isinstance(entry.get(k), str) for k in (*_TARGET, "module")):
+        return False
+    sha, year, bbox = entry.get("sha256"), entry.get("year"), entry.get("bbox")
+    if not (isinstance(sha, str) and _SHA256.fullmatch(sha)):
+        return False
+    if not isinstance(year, int) or isinstance(year, bool):
+        return False
+    if not (isinstance(bbox, list) and len(bbox) == 4):
+        return False
+    if not all(
+        isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        for v in bbox
+    ):
+        return False
+    w, s, e, n = bbox
+    return w < e and s < n
+
+
+def recorded_cutouts(project_dir: Path | str) -> list[dict[str, Any]]:
+    """The valid entries of `profile_cutouts`; read-only (W6)."""
+    got = _read(project_dir).get(CUTOUTS_KEY)
+    if not isinstance(got, list):
+        return []
+    return [e for e in got if _valid_cutout(e)]
+
+
+def record_cutouts(
+    project_dir: Path | str,
+    targets: list[tuple[str, str, str]],
+    cutout: dict[str, Any] | None,
+    applied_at: str,
+) -> None:
+    """Set each target's entry to `cutout`, or remove it when `cutout` is None.
+    One write for all the targets (W5)."""
+    meta = _read(project_dir)
+    keys = {tuple(t) for t in targets}
+    kept = [
+        e
+        for e in recorded_cutouts(project_dir)
+        if tuple(e[k] for k in _TARGET) not in keys
+    ]
+    if cutout is not None:
+        for t in targets:
+            entry = {
+                **dict(zip(_TARGET, t)),
+                "module": cutout.get("module"),
+                "bbox": cutout.get("bbox"),
+                "year": cutout.get("year"),
+                "sha256": cutout.get("sha256"),
+                "applied_at": applied_at,
+            }
+            if _valid_cutout(entry):
+                kept.append(entry)
+    if kept == meta.get(CUTOUTS_KEY) or (not kept and CUTOUTS_KEY not in meta):
+        return
+    if kept:
+        meta[CUTOUTS_KEY] = kept
+    else:
+        meta.pop(CUTOUTS_KEY, None)
+    atomic_write_text(_meta_file(project_dir), json.dumps(meta, indent=2))
