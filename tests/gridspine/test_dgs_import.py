@@ -1209,3 +1209,13 @@ def test_text_in_an_out_of_service_flag_is_refused_by_name(tmp_path):
         ImportFormatError, match=r"ElmLod 'Load' \(line \d+\): outserv 'no'"
     ):
         read_text(tmp_path, dgs_text(rows, head))
+
+
+def test_a_true_false_tap_position_is_refused(tmp_path):
+    """A bool is an int in Python; the mapper still refuses it as a tap position."""
+    from gridspine.ingest.dgs_import import _int
+    from gridspine.schema.contracts import ContractError
+
+    with pytest.raises(ContractError, match="nntap True is not an integer"):
+        _int("T2W", "nntap", True)
+    assert _int("T2W", "nntap", 3.0) == 3

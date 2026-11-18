@@ -425,14 +425,14 @@ def test_the_declared_size_is_checked_per_limit(monkeypatch):
     X.declared_within_limits(_ws(10, 5))  # at each limit: accepted
     X.declared_within_limits(_ws(5, 10))
     X.declared_within_limits(_ws(None, None))  # an empty sheet declares nothing
-    for ws, limit in (
-        (_ws(11, 1), "rows"),
-        (_ws(1, 11), "columns"),
-        (_ws(6, 9), "cells"),
+    for ws, limit, value in (
+        (_ws(11, 1), "rows", 11),
+        (_ws(1, 11), "columns", 11),
+        (_ws(6, 9), "cells", 54),
     ):
         with pytest.raises(L.ImportLimitError) as e:
             X.declared_within_limits(ws)
-        assert e.value.limit == limit
+        assert (e.value.limit, e.value.value) == (limit, value)
     X.declared_within_limits(_ws(10, 5))  # rows * cols == 50: accepted
 
 

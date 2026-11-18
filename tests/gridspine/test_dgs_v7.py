@@ -331,3 +331,11 @@ def test_matrix_columns_of_types_are_listed_and_of_unmapped_classes_are_not(tmp_
     assert "TypLne column 'M:MATRIX'" in cols
     assert not any("IntGrf column" in c for c in cols)
     assert any(u.source_item.startswith("IntGrf 'g'") for u in r.report.unmapped)
+
+
+def test_a_matrix_in_a_repeated_class_header_is_listed_once():
+    text = G7 + (
+        "$$ElmTerm;FID(a:40);OP(a:1);uknom(r);G:MATRIX(a)\n2;C;33;\n"
+        "$$ElmTerm;FID(a:40);OP(a:1);uknom(r);G:MATRIX(a)\n3;C;11;\n"
+    )
+    assert parse_dgs_text(text).dropped == {"ElmTerm": ["G:MATRIX"]}

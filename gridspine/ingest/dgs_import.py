@@ -137,11 +137,11 @@ def read_dgs(paths: Sequence[Path], options: Mapping[str, Any] | None = None):
 
 def _int(item: str, what: str, v) -> int:
     """``v`` as an integer; text or a fraction is refused naming ``what``."""
-    if isinstance(v, bool) or not isinstance(v, numbers.Real):
-        raise ContractError(f"{item}: {what} {v!r} is not an integer")
-    if isinstance(v, numbers.Integral):
-        return int(v)
-    if not math.isfinite(v) or not float(v).is_integer():
+    if (
+        isinstance(v, bool)
+        or not isinstance(v, numbers.Real)
+        or not float(v).is_integer()  # a fraction, inf or nan
+    ):
         raise ContractError(f"{item}: {what} {v!r} is not an integer")
     return int(v)
 

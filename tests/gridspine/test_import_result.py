@@ -622,3 +622,26 @@ def test_for_file_names_the_candidates_when_none_claims(tmp_path, fake_package):
     with pytest.raises(ImportFormatError) as e:
         ir.for_file(tmp_path / "w.xlsx", specs)
     assert "importers recognise: AA file, BB file" in str(e.value)
+
+
+def test_an_ambiguous_file_names_only_the_importers_that_claim_it(
+    tmp_path, fake_package
+):
+    for fid, claims in (("aa", True), ("bb", True), ("cc", False)):
+        (fake_package / f"{fid}_import.py").write_text(
+            f"def read_{fid}(p, o): pass\ndef sniff(p): return {claims}\n"
+        )
+    specs = [
+        ir.ImporterSpec(
+            format_id=fid,
+            display_name=f"{fid.upper()} file",
+            extensions=(".xlsx",),
+            help="h",
+            package="fake_ingest",
+            sniff=f"fake_ingest.{fid}_import:sniff",
+        )
+        for fid in ("aa", "bb", "cc")
+    ]
+    with pytest.raises(ImportFormatError) as e:
+        ir.for_file(tmp_path / "w.xlsx", specs)
+    assert "more than one format (AA file, BB file)" in str(e.value)
