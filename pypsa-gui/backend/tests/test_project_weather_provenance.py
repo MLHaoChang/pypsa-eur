@@ -550,7 +550,9 @@ def test_undo_of_an_apply_puts_the_earlier_record_back(
     pdir = project_storage_dir(project)
     assert _apply(client, project, _job(client, project, pdir)).status_code == 200
     other = {**CUT, "sha256": "b" * 64}
-    assert _apply(client, project, _job(client, project, pdir, other)).status_code == 200
+    assert (
+        _apply(client, project, _job(client, project, pdir, other)).status_code == 200
+    )
     assert _targets(pdir) == {"g_a": "b" * 64}
     _undo(client)
     assert _targets(pdir) == {"g_a": SHA}
@@ -574,8 +576,9 @@ def test_undo_of_an_unrelated_edit_leaves_the_record_and_the_choice(
     pdir = project_storage_dir(project)
     assert _apply(client, project, _job(client, project, pdir)).status_code == 200
     W.save_choice(pdir, "atlite", 2023)
-    r = client.put("/api/network/buses/B1",
-                   json={"name": "B1", "v_nom": 110.0, "carrier": "AC"})
+    r = client.put(
+        "/api/network/buses/B1", json={"name": "B1", "v_nom": 110.0, "carrier": "AC"}
+    )
     assert r.status_code == 200, r.text
     _undo(client)
     assert _targets(pdir) == {"g_a": SHA}
