@@ -346,3 +346,79 @@ def test_an_unknown_requested_metric_still_captures(solved, checked):
     assert answer_id is not None
     shown = _get(checked, answer_id)
     assert "definition_hash" not in shown and "definition_changed" not in shown
+
+
+# --- The retained conversation snapshot (GK B 67 F2). ---
+
+
+def _remember(source, metrics):
+    """remember() on a complete published turn whose request evidence is
+    `source`; returns the scoped_result snapshot it saved."""
+    from types import SimpleNamespace
+
+    from harness import assurance_conversation
+
+    owner = assurance_records.actor_id()
+    session = SimpleNamespace(assurance_context=None)
+    turn = SimpleNamespace(
+        approved={
+            "receipt": {"request_complete": True},
+            "blocks": [{}],
+            "expires_at": source["expires_at"],
+            "answer_id": "answer",
+        },
+        clarification=None,
+        request_evidence={"evidence_id": source["evidence_id"]},
+        request_scope={
+            "version": 1,
+            "profile": PROFILE,
+            "project_id": source["project_id"],
+            "entity_id": "G1",
+            "retain": False,
+            "metrics": metrics,
+        },
+        owner=owner,
+        project_id=source["project_id"],
+        session=session,
+        conversation_state=None,
+    )
+    assurance_conversation.remember(turn)
+    snapshot_id = session.assurance_context["entries"][-1]["evidence_id"]
+    return assurance_records.load(owner, snapshot_id, "evidence")
+
+
+def test_a_retained_snapshot_hashes_its_own_requested_metrics(solved, checked):
+    # A subset of the profile's defaults, not a comparison metric: remember()
+    # drops COMPARISON_METRICS from the scope before recalculating, so one of
+    # those would never reach the snapshot's scope or its hash.
+    metrics = list(calculations.PROFILES[PROFILE][:2])
+    source = assurance_records.capture_dispatch(assurance_records.actor_id(), "G1")
+    assert source["definition_hash"] == GOLDEN
+    snapshot = _remember(source, metrics)
+    assert snapshot["source_kind"] == "scoped_result"
+    assert snapshot["request_scope"]["metrics"] == metrics
+    expected = calculations.scope_definition_hash(snapshot["request_scope"])
+    assert snapshot["definition_hash"] == expected
+    assert expected == calculations.definition_hash(PROFILE, metrics) != GOLDEN
+
+
+def test_a_snapshot_whose_metric_lost_its_definition_drops_the_source_hash(
+    solved, checked, monkeypatch
+):
+    # An undefined *requested* metric never reaches the save: every slot must be
+    # answered, and only profile or comparison metrics are. So the definition is
+    # removed after the recalculation, before the hash, as a release would.
+    metric = calculations.PROFILES[PROFILE][0]
+    source = assurance_records.capture_dispatch(assurance_records.actor_id(), "G1")
+    assert source["definition_hash"] == GOLDEN
+    real = calculations.scoped_calculate
+
+    def then_undefine(raw, scope):
+        result = real(raw, scope)
+        monkeypatch.delitem(calculations.DEFINITIONS, metric)
+        return result
+
+    monkeypatch.setattr(calculations, "scoped_calculate", then_undefine)
+    snapshot = _remember(source, [metric])
+    assert calculations.scope_definition_hash(snapshot["request_scope"]) is None
+    assert "definition_hash" not in snapshot
