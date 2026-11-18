@@ -51,6 +51,7 @@ import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
 import RunStrip from './components/runStatus/RunStrip'
+import RunNotices from './components/runStatus/RunNotices'
 import ProjectMismatchBanner from './components/ProjectMismatchBanner'
 import { ProjectMismatchWatcher } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -708,6 +709,8 @@ export default function App() {
         {/* While this project's run is queued or going on: what runs, how
             far, the estimate, and the read-only line while it is solved. */}
         <RunStrip />
+        {/* Finish/fail notices for my runs (slice 3); they render in the toaster. */}
+        <RunNotices />
 
         {/* ── Tab / backend project mismatch (A2) ───────────────────── */}
         {/* Renders only while this tab's project and the backend's binding

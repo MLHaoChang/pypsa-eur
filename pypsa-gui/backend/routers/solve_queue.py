@@ -628,6 +628,17 @@ def _can_dismiss(job: dict, owner, user: User) -> bool:
     """
     if job.get("status") not in _TERMINAL:
         return False
+    return _started_by(owner, user)
+
+
+def _started_by(owner, user: User) -> bool:
+    """
+    Whether this caller queued the job: the one ownership test behind both
+    `can_dismiss` and `started_by_me` (run progress slice 3, GK B3 N1).
+
+    `owner` comes from the `owners` map `list_queue` pops, never from the job
+    dict. A NULL owner (a legacy row) is false for everybody.
+    """
     return owner is not None and str(owner) == str(user.id)
 
 
@@ -830,6 +841,11 @@ def list_queue(
                 # never have been queued by this caller, so it is already
                 # false for every redacted row.
                 "can_dismiss": _can_dismiss(job, owners.get(job["id"]), user),
+                # The finish/fail notification fires only for runs this caller
+                # started (run progress slice 3). A capability, like
+                # `can_dismiss`: true in every status, and false for every
+                # redacted row for the same reason.
+                "started_by_me": _started_by(owners.get(job["id"]), user),
             }
             for job, ok in zip(jobs, seen)
         ],
