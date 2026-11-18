@@ -268,3 +268,11 @@ def test_per_corner_nonfinite_refused_by_level(bad):
 
 def test_emt_pack_is_at_contract_version_two():
     assert emt_pack.EMT_CONTRACT_VERSION == "2"
+
+
+def test_a_written_v2_pack_s_stub_says_what_connected_means(tmp_path):
+    # GC 06c/06d (#1640) gates the sentence on the contract; at v2 the shipped pack carries it
+    p = write_emt_pack(tmp_path / "emt", build_campus(spec()))
+    stub = (p.path / emt_pack.STUB).read_text()
+    assert stub.count(emt_pack.CONNECTED_NOTE) == 1
+    assert "momentary cessation or current blocking is not a trip" in stub
