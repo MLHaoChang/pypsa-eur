@@ -687,6 +687,9 @@ def finance_inputs(p: dict) -> dict:
         "replacement_rule": "part_lifetimes",
         "terminal_value": {"method": "remaining_life_annuity"},
         "wacc_nominal": DISCOUNT_RATE, "cost_of_equity": DISCOUNT_RATE, "inflation": 0.02,
+        # The templates' tax default (eh_templates.TAX_DEFAULT): German
+        # corporate tax at the average Hebesatz, the assets bought on day one.
+        **_T.TAX_DEFAULT, "acquisition_date": f"{first}-01-01",
     }
 
 
@@ -699,10 +702,16 @@ def commercial_and_finance(p: dict, n: pypsa.Network | None = None) -> dict:
 
     base = CommercialConfig.model_validate(
         {"poc_link": "grid_import", "import_tariff": SITE_TARIFF, "timezone": "UTC"})
-    vf = VFT.build("single_owner", n if n is not None else build_eh_site(p), base).config
+    net = n if n is not None else build_eh_site(p)
+    vf = VFT.build("single_owner", net, base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
+    fin = finance_inputs(p)
+    # Each owned asset's AfA class, as the templates ship them; without one
+    # a battery leaves the tax section not established.
+    fin["depreciation_class_by_asset"] = {
+        o.asset_id: _T._afa_class(net, o.component, o.asset_id) for o in vf.asset_owners}
     return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(finance_inputs(p)).model_dump(mode="json")}
+            "finance": FinanceInputs.model_validate(fin).model_dump(mode="json")}
 
 
 def solver_config(p: dict, n: pypsa.Network | None = None) -> dict:
