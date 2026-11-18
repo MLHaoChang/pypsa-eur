@@ -264,6 +264,17 @@ def test_record_sections_join_slots_to_the_recorded_entities():
         ValueError, match="population_slots_differ"
     ):  # two metrics need four slots
         sections.record_sections(record, ["m", "n"])
+    two = {
+        **record,
+        "slots": [{"metric": m, "disposition": "answered"} for _ in "ab" for m in "mn"],
+    }
+    (both,) = sections.record_sections(two, ["m", "n"])  # two metrics, four slots
+    assert [(s["entity_id"], s["metric"]) for s in both["slots"]] == [
+        ("a", "m"),
+        ("a", "n"),
+        ("b", "m"),
+        ("b", "n"),
+    ]
 
 
 # --- K5: the receipt contract, in code and in the schema JSON ---

@@ -465,3 +465,41 @@ def test_a_population_with_no_answered_slot_still_publishes_its_sections(grid, c
         in public_text(frames)
     )
     assert "G1 dispatch_energy: invalid_or_missing_raw_data" in receipt["limitations"]
+
+
+REFUSAL_101 = (
+    "I can check up to 100 values in one answer and this needs 101: "
+    "ask for one carrier or one bus at a time."
+)
+
+
+def test_sections_drafted_for_a_refused_population_are_withheld(grid, checked):
+    ctx = fleet(grid, 101)
+    scope = every(ctx, metrics=["dispatch_energy"])
+    frames, record = ask(
+        checked,
+        scope,
+        lambda ledger: ledger.update(sections=[{"heading": None, "blocks": []}]),
+    )
+    assert public_text(frames) != REFUSAL_101 and withheld(record)
+    assert public_text(ask(checked, scope)[0]) == REFUSAL_101
+
+
+@pytest.mark.parametrize("error", [KeyError(), TypeError()])
+def test_a_source_failure_without_a_code_is_not_read_as_a_refusal(
+    grid, checked, monkeypatch, error
+):
+    from services import assurance_records
+
+    ctx = fleet(grid, 7)
+
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(assurance_records, "capture_scoped", fail)
+    frames, record = ask(checked, every(ctx))
+    assert (
+        record["receipt"]["request_scope"]["reason"]
+        == "unsupported_or_unavailable_source"
+    )
+    assert public_text(frames) != REFUSAL_101
