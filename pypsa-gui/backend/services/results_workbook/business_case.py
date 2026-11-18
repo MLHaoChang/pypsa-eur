@@ -51,8 +51,16 @@ _REASON_WORDS = {
 }
 
 #: Abbreviations a spelled-out code keeps in capitals.
-_CAPS = {"wacc": "WACC", "irr": "IRR", "npv": "NPV", "dscr": "DSCR", "ppa": "PPA",
-         "ebitda": "EBITDA", "capex": "capex", "opex": "opex"}
+_CAPS = {
+    "wacc": "WACC",
+    "irr": "IRR",
+    "npv": "NPV",
+    "dscr": "DSCR",
+    "ppa": "PPA",
+    "ebitda": "EBITDA",
+    "capex": "capex",
+    "opex": "opex",
+}
 
 
 def _code_words(code: str) -> str:

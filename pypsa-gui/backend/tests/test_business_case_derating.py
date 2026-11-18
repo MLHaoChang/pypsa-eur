@@ -87,9 +87,7 @@ def test_b1_the_ipp_oracle_pays_capacity_times_derating_once():
     assert paid and all(v == pytest.approx(644_811.0, abs=0.5) for v in paid)
     # Applied once: a sold share multiplies alongside it, never instead of it.
     half = _line(**_cap(derating=0.5, linked_share=0.5, quantity=None))
-    bc2 = build_business_case(
-        _ic(), _inputs(half), {half.name: series[ln.name]}
-    )
+    bc2 = build_business_case(_ic(), _inputs(half), {half.name: series[ln.name]})
     r2 = run_case(bc2.case, PACK)
     paid2 = [v for v in r2.op.lines[half.name] if v]
     assert len(paid2) == len(paid)
@@ -196,5 +194,7 @@ def test_b3_the_sheet_writes_a_non_finite_figure_and_known_reasons_in_words():
     }
     wb = openpyxl.Workbook()
     write_business_case_sheet(wb, report, {"stale": False})
-    rows = {r[0].value: [c.value for c in r[1:]] for r in wb["Business case"].iter_rows()}
+    rows = {
+        r[0].value: [c.value for c in r[1:]] for r in wb["Business case"].iter_rows()
+    }
     assert rows["Project NPV"][0] == "not established"
