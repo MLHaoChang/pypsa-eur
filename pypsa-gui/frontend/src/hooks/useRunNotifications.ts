@@ -7,7 +7,7 @@ import {
   awayJobs, claim, isMyNotice, lastSeen, markSeen, notifyPermission, pruneClaims,
   shouldNotifyBrowser,
 } from '../utils/runNotify'
-import { awayNotice, noticeFromJob, useRunNotices, type RunNotice } from '../components/runStatus/runNotices'
+import { awayNotice, noticeFromJob, resetRunNotices, useRunNotices, type RunNotice } from '../components/runStatus/runNotices'
 import { openNoticeResults, openNoticeWhy } from '../components/runStatus/noticeActions'
 
 function safeStorage(): Storage | null {
@@ -35,6 +35,16 @@ export function useRunNotifications(userKey: string): void {
   const prevRef = useRef<Map<string, string> | null>(null)
   const userRef = useRef(userKey)
   userRef.current = userKey
+
+  // Another account signed in: forget the last one's notices and baseline, so
+  // its runs neither show nor get diffed against (GK B3 (3) #1716). The next
+  // listing is this account's first: it feeds only its own away summary.
+  const firstUser = useRef(true)
+  useEffect(() => {
+    prevRef.current = null
+    if (firstUser.current) { firstUser.current = false; return }
+    resetRunNotices()
+  }, [userKey])
 
   useEffect(() => {
     if (jobs === undefined) return
@@ -75,12 +85,14 @@ export function useRunNotifications(userKey: string): void {
  * An interrupted run has none (spec §3: the restart is the app's, not news).
  */
 function notifyBrowser(notice: RunNotice): void {
-  if (notice.kind !== 'completed' && notice.kind !== 'failed') return
+  if (!notice.osTitle) return
   const hidden = typeof document !== 'undefined' && document.hidden
   if (!shouldNotifyBrowser(hidden, notifyPermission(), useUIStore.getState().browserNotify)) return
   try {
     // A failed run's notification stays until dismissed (spec §3).
-    const n = new Notification(notice.text, { tag: `run-${notice.id}`, requireInteraction: notice.kind === 'failed' })
+    // The tag names the project, not the run (no run ids, UX 2 GO 6): a newer
+    // notice for the same project replaces the older one.
+    const n = new Notification(notice.osTitle, { tag: `run:${notice.project}`, requireInteraction: notice.kind === 'failed' })
     n.onclick = () => {
       window.focus()
       if (notice.kind === 'completed') openNoticeResults(notice)

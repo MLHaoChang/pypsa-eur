@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SolveJob } from '../../api/solveQueue'
-import { awayText, noticeEnd, noticeText, runName, type NoticeEnd } from '../../utils/runNotify'
+import { awayText, noticeEnd, noticeText, osTitle, runName, type NoticeEnd } from '../../utils/runNotify'
 import { outcomeFromJob, outcomeReason } from '../../utils/runStatus'
 
 /**
@@ -23,6 +23,8 @@ export interface RunNotice {
   reason: string | null
   /** The summary's lines, one per run. */
   lines: string[]
+  /** The hidden-tab notification's title; null when the outcome has none. */
+  osTitle: string | null
 }
 
 /** How long a finished run's notice stays (UX 7: it goes by itself). */
@@ -85,6 +87,7 @@ export function noticeFromJob(job: SolveJob): RunNotice | null {
     runName: runName(job),
     reason: kind === 'failed' && outcome ? outcomeReason(outcome) : null,
     lines: [],
+    osTitle: osTitle(job),
   }
 }
 
@@ -98,5 +101,6 @@ export function awayNotice(jobs: SolveJob[]): RunNotice {
     runName: '',
     reason: null,
     lines: jobs.map(j => noticeText(j)).filter((t): t is string => t != null),
+    osTitle: null,
   }
 }

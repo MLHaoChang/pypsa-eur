@@ -42,6 +42,17 @@ export function noticeText(job: SolveJob): string | null {
   return `${runName(job)} finished: ${project}${s != null ? ` · ${aboutMinutes(s)}` : ''}`
 }
 
+/**
+ * The hidden-tab notification's title: the run, how it ended and the project,
+ * nothing else (GK B3 N6; the toast keeps the duration). Only finished and
+ * failed runs have one.
+ */
+export function osTitle(job: SolveJob): string | null {
+  const end = noticeEnd(job)
+  if (!job.project_id || (end !== 'completed' && end !== 'failed')) return null
+  return `${runName(job)} ${end === 'completed' ? 'finished' : 'failed'}: ${job.project_id}`
+}
+
 /** Whether a finished job of the caller's own is one the user should hear about. */
 export function isMyNotice(job: SolveJob): boolean {
   return job.started_by_me === true && noticeEnd(job) !== null && job.project_id != null
@@ -147,6 +158,9 @@ export function runAgainError(err: unknown, project: string): string {
   }
   if (res?.status === 409) return "Can't run it again: the run is still going on."
   if (res?.status === 404) return `Can't run it again: ${project} has no saved copy to run. Save it, then run it again.`
+  if (res?.status === 403 && (res.data as { detail?: { error_kind?: string } })?.detail?.error_kind === 'project_view_only') {
+    return `Can't run it again: you can view ${project} but not run it.`
+  }
   if (res?.status === 403) return `Can't run it again: you can't run ${project}.`
   return "Can't run it again: the app did not answer. Try again from the Solve queue."
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { SolveJob } from '../api/solveQueue'
 import {
-  AWAY_WINDOW_S, awayJobs, awayText, claim, isMyNotice, lastSeen, markSeen, noticeText,
+  AWAY_WINDOW_S, awayJobs, awayText, claim, isMyNotice, lastSeen, markSeen, noticeText, osTitle,
   pruneClaims, runAgainError, shouldNotifyBrowser,
 } from './runNotify'
 
@@ -27,6 +27,16 @@ describe('noticeText', () => {
     expect(noticeText(job({ status: 'aborted' }))).toBeNull()
     expect(noticeText(job({ status: 'running' }))).toBeNull()
     expect(noticeText(job({ project_id: null }))).toBeNull()
+  })
+})
+
+describe('osTitle', () => {
+  it('names the run, how it ended and the project; no duration, no error', () => {
+    expect(osTitle(job())).toBe('Campus study finished: Campus A')
+    expect(osTitle(job({ status: 'failed' }))).toBe('Campus study failed: Campus A')
+    expect(osTitle(job({ status: 'interrupted' }))).toBeNull()
+    expect(osTitle(job({ status: 'aborted' }))).toBeNull()
+    expect(osTitle(job({ project_id: null }))).toBeNull()
   })
 })
 
@@ -113,6 +123,9 @@ describe('runAgainError', () => {
     expect(runAgainError(err(409, 'Job 1 is running, not finished.'), 'P')).toBe("Can't run it again: the run is still going on.")
     expect(runAgainError(err(404, 'No solve job with id 1.'), 'P')).toMatch(/^Can't run it again: P has no saved copy/)
     expect(runAgainError(err(403, 'nope'), 'P')).toBe("Can't run it again: you can't run P.")
+    // A viewer (#1622): the route's write gate refuses with project_view_only.
+    expect(runAgainError(err(403, { error_kind: 'project_view_only', message: 'x' }), 'P'))
+      .toBe("Can't run it again: you can view P but not run it.")
     expect(runAgainError(new Error('Network Error'), 'P')).toMatch(/^Can't run it again: the app did not answer/)
   })
 })

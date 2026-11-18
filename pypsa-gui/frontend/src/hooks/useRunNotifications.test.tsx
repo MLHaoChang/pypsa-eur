@@ -29,13 +29,13 @@ function serve(jobs: SolveJob[]) {
 
 const texts = () => useRunNotices.getState().notices.map(n => n.text)
 
-let notified: { title: string }[]
+let notified: { title: string; options: NotificationOptions | undefined }[]
 let permission: NotificationPermission
 
 class FakeNotification {
   static get permission() { return permission }
   onclick: (() => void) | null = null
-  constructor(title: string) { notified.push({ title }) }
+  constructor(title: string, options?: NotificationOptions) { notified.push({ title, options }) }
   close() {}
 }
 
@@ -134,7 +134,8 @@ describe('browser notification', () => {
   it('only when the tab is hidden, permission is granted and the setting is on', () => {
     setHidden(true)
     endRun('completed')
-    expect(notified).toEqual([{ title: 'Campus study finished: Campus A · 6 min' }])
+    // The whole options object: no body, no run id in the tag (N6, UX 2 GO 6).
+    expect(notified).toEqual([{ title: 'Campus study finished: Campus A', options: { tag: 'run:Campus A', requireInteraction: false } }])
   })
 
   it.each([
@@ -151,7 +152,7 @@ describe('browser notification', () => {
   it('carries the toast words only, never the error text (N6)', () => {
     setHidden(true)
     endRun('failed')
-    expect(notified).toEqual([{ title: 'Campus study failed: Campus A' }])
+    expect(notified).toEqual([{ title: 'Campus study failed: Campus A', options: { tag: 'run:Campus A', requireInteraction: true } }])
   })
 
   it('none for an interrupted run', () => {
@@ -166,6 +167,21 @@ describe('browser notification', () => {
     permission = 'default'
     endRun('completed')
     expect(ask).not.toHaveBeenCalled()
+  })
+})
+
+describe('another account signs in', () => {
+  it("drops the last account's notices and does not diff against its baseline", () => {
+    serve([job('a', 'running')])
+    const { rerender } = renderHook(({ user }) => useRunNotifications(user), { initialProps: { user: 'u1' } })
+    serve([job('a', 'failed')])
+    rerender({ user: 'u1' })
+    expect(texts()).toEqual(['Campus study failed: Campus A'])
+
+    // u2's first listing: a is not theirs, c ended long before they signed in.
+    serve([job('a', 'failed', { started_by_me: false }), job('c', 'completed', { finished_at: NOW - 100 })])
+    rerender({ user: 'u2' })
+    expect(texts()).toEqual([])
   })
 })
 

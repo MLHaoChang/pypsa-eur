@@ -14,7 +14,7 @@ import * as results from './openResults'
 
 const notice = (id: string, kind: RunNotice['kind'], over: Partial<RunNotice> = {}): RunNotice => ({
   id, kind, text: `${id} ${kind}: Campus A`, project: 'Campus A', jobId: id, runName: 'Campus study',
-  reason: kind === 'failed' ? 'The solver found no feasible plan.' : null, lines: [], ...over,
+  reason: kind === 'failed' ? 'The solver found no feasible plan.' : null, lines: [], osTitle: null, ...over,
 })
 
 function renderStack(ui: ReactNode = <RunNoticeStack />) {
