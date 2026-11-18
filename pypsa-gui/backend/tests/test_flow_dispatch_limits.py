@@ -97,3 +97,29 @@ def test_off_grid_site_shows_both_in_section_8_without_blocking_the_run(client, 
 def test_grid_connected_site_has_neither(client, tmp_projects_dir):
     name = _create(client, "eh_h2_hub", "dl_grid")
     assert not CODES & _codes(_items(_flow(client, name)))
+
+
+# ── K6: the card's save moves the solver-input fingerprint ──────────────────
+
+def test_a_share_saved_through_the_solver_config_route_makes_results_stale(client, tmp_projects_dir, bound_ctx):
+    from services.provenance_graph.runs import active_input_fingerprint
+
+    _create(client, "eh_microgrid", "dl_fp")
+
+    def fp():
+        with bound_ctx(client):
+            return active_input_fingerprint()
+
+    before = fp()
+    assert before is not None
+    # Off sent as off (the drawer opened and saved nothing new): unchanged.
+    r = client.put("/api/simulation/solver_config", json={"reserve_share_load": None})
+    assert r.status_code == 200, r.text
+    assert fp() == before
+    r = client.put("/api/simulation/solver_config", json={"reserve_share_load": 0.1})
+    assert r.status_code == 200, r.text
+    after = fp()
+    assert after != before
+    r = client.put("/api/simulation/solver_config", json={"min_renewable_fraction": 0.6})
+    assert r.status_code == 200, r.text
+    assert fp() not in (before, after)
