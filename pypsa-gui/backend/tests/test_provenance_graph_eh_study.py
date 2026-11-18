@@ -446,11 +446,11 @@ _MC_INPUTS = [S.input_id(f"mc/{k}") for k in ("draws", "seed", "cov_target")]
         ("lots", "not an object"),
         ([500], "not an object"),
         ({"draws": 2001}, "at most 2000"),
-        ({"draws": 0}, "one the study refuses"),
-        ({"seed": -1}, "one the study refuses"),
-        ({"cov_target": 2}, "one the study refuses"),
-        ({"draws": "many"}, "one the study refuses"),
-        ({"bogus": 1}, "one the study refuses"),
+        ({"draws": 0}, "one the study refuses: draws: "),
+        ({"seed": -1}, "one the study refuses: seed: "),
+        ({"cov_target": 2}, "one the study refuses: cov_target: "),
+        ({"draws": "many"}, "one the study refuses: draws: "),
+        ({"bogus": 1}, "one the study refuses: bogus: "),
     ],
     ids=[
         "text",
@@ -480,6 +480,21 @@ def test_an_mc_the_runner_refuses_reads_the_mc_settings_uncompared(
         for s in out["steps"]
         if s["node"].startswith(S.input_id("run/"))
     )
+
+
+def test_a_request_that_cannot_be_built_reads_the_mc_settings_stale_naming_why(
+    study, monkeypatch
+):
+    from services import flow_service
+
+    def boom(*_a, **_k):
+        raise RuntimeError("no template")
+
+    monkeypatch.setattr(flow_service, "_request_for", boom)
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "stale"
+    for node in _MC_INPUTS:
+        assert _step(out, node)["broken"]["reason"] == "cannot be read now: no template"
 
 
 def test_the_mc_draw_cap_is_the_runner_s_own(study, monkeypatch):

@@ -323,7 +323,8 @@ class StudyRead:
 
 def _first_error(exc) -> str:
     err = exc.errors()[0]
-    where = ".".join(str(x) for x in err.get("loc", ())) or "mc"
+    # A dict's errors always name a field: the non-object mc is refused before validation.
+    where = ".".join(str(x) for x in err.get("loc", ()))
     return f"{where}: {err.get('msg')}"
 
 
@@ -399,6 +400,8 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
         from services.adequacy import mc as _mc
         from services.adequacy.eh_study_runner import McOptions
 
+        if isinstance(req, Exception):
+            raise req  # the request cannot be built: stale, naming why
         if refused:
             return Unrecorded(refused[0])
         try:
