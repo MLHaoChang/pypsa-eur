@@ -172,14 +172,16 @@ jobs:
       run: npm ci --no-audit --no-fund
 
     # The full output goes to a log file and the artifact below, so a failure
-    # can be read whole instead of from under the job log's tail.
+    # can be read whole instead of from under the job log's tail. `-vv` (on top
+    # of pytest.ini's -q) prints every test's name, so a shard that stalls
+    # shows which test it stalled on.
     - name: Run backend tests
       run: |
         set -o pipefail
         mkdir -p pypsa-gui/backend/test-results
         pixi run gui-tests \
           --num-shards=4 --shard-id=$(( ${{ matrix.shard }} - 1 )) \
-          --junitxml=test-results/junit.xml --durations=30 \
+          --junitxml=test-results/junit.xml --durations=30 -vv \
           2>&1 | tee pypsa-gui/backend/test-results/pytest.log
 
     - name: Upload test results

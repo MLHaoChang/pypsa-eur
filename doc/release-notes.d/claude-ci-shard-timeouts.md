@@ -1,1 +1,1 @@
-* CI: each GUI backend shard job has a `timeout-minutes` cap, and the backend pytest config sets `faulthandler_timeout = 60`, so a hung test dumps every thread's stack into the log instead of holding a runner for six hours.
+* CI: each GUI backend shard job has a `timeout-minutes` cap and lists every test by name, and the backend pytest config sets `faulthandler_timeout = 60`, so a hung test dumps every thread's stack into the log instead of holding a runner for six hours.
