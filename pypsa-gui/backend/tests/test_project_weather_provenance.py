@@ -520,6 +520,15 @@ def test_a_snapshot_holds_only_the_record_and_a_restore_puts_it_back(tmp_path):
     assert W.CUTOUTS_KEY not in json.loads((tmp_path / "metadata.json").read_text())
 
 
+def test_a_project_with_no_metadata_snapshots_no_record_and_restores_one(tmp_path):
+    assert W.snapshot_cutouts(tmp_path) == {"value": None}
+    W.restore_cutouts(tmp_path, {"value": None})
+    assert not (tmp_path / "metadata.json").exists()
+    entry = _entry()
+    W.restore_cutouts(tmp_path, {"value": [entry]})
+    assert W.recorded_cutouts(tmp_path) == [entry]
+
+
 def test_a_restore_never_overwrites_metadata_it_cannot_read(tmp_path):
     (tmp_path / "metadata.json").write_text("{not json")
     assert W.snapshot_cutouts(tmp_path) is None

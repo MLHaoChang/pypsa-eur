@@ -158,7 +158,7 @@ def record_cutouts(
 def _write_cutouts(project_dir: Path | str, meta: dict[str, Any], value: Any) -> None:
     """Set `profile_cutouts` to `value` (None removes it); no write when it
     already holds that."""
-    if value == meta.get(CUTOUTS_KEY) or (value is None and CUTOUTS_KEY not in meta):
+    if value == meta.get(CUTOUTS_KEY):
         return
     if value is None:
         meta.pop(CUTOUTS_KEY, None)
