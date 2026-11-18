@@ -627,7 +627,9 @@ def test_world_fixture_with_its_csvs_in_a_zip(tmp_path):
 def _no_scenarios(m):
     """The Europe Model with its scenarios off: the 2b base rows and files."""
     m.memberships = [
-        x for x in m.memberships if not (x.parent[0] == "Model" and x.child[0] == "Scenario")
+        x
+        for x in m.memberships
+        if not (x.parent[0] == "Model" and x.child[0] == "Scenario")
     ]
     return m
 
