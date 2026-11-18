@@ -187,9 +187,7 @@ def write(tables, path):
 
 
 def trim_csv(fixture, source, out, hours=48):
-    names = {
-        dict(r).get("name") for r in load(fixture).get("t_object", [])
-    }
+    names = {dict(r).get("name") for r in load(fixture).get("t_object", [])}
     with open(source, encoding="utf-8-sig", newline="") as f:
         lines = [f.readline() for _ in range(hours + 1)]
     rows = [line.rstrip("\r\n").split(",") for line in lines]

@@ -151,7 +151,12 @@ def test_irl_accounting_and_counts(irl):
     # no CSVs given: every data-file row and Data File row is unmapped
     assert conv.ledger.totals() == {
         "t_data": {"network": 289, "sidecar": 10, "unmapped": 255, "assumed": 0},
-        "t_attribute_data": {"network": 10, "sidecar": 0, "unmapped": 174, "assumed": 0},
+        "t_attribute_data": {
+            "network": 10,
+            "sidecar": 0,
+            "unmapped": 174,
+            "assumed": 0,
+        },
     }
     assert conv.report.counts["grid nodes"] == 4
     assert conv.report.counts["hydro reservoirs"] == 1
