@@ -537,6 +537,22 @@ def test_cascades_are_not_converted(objects, members, reason):
     assert reason in unmapped_reason(conv, "Storage 'S'")
 
 
+def test_a_shared_storage_is_listed_once_under_its_first_reason():
+    """Mutant survivor (2b): a storage already listed is not listed again."""
+    conv = run(
+        hydro_model(
+            objects=[("Storage", "T"), ("Generator", "G2")],
+            members=[
+                (("Generator", "G"), ("Storage", "T"), "Tail Storage"),
+                (("Generator", "G2"), ("Storage", "S"), "Head Storage"),
+            ],
+        )
+    )
+    assert unmapped_reason(conv, "Storage 'S'") == [
+        "tail storage (pumped or cascaded hydro) is not converted yet"
+    ]
+
+
 def test_storage_without_a_generator():
     conv = run(model([("Storage", "S")], [("Storage", "S", "Max Volume", 1, "GWh")]))
     assert unmapped_reason(conv, "Storage 'S'") == ["storage without a generator"]
@@ -741,6 +757,27 @@ def test_monthly_header_needs_name_and_all_months(header):
 def test_period_layout_refusals(row, reason):
     got = series("Year,Month,Day,Period,A\n" + row + "\n", snaps=HOURS[:1])["A"]
     assert got == reason
+
+
+@pytest.mark.parametrize(
+    "rows, reason",
+    [
+        (["2015,1,1,1,1", "2015,1,1,0,1"], "period 0 outside 1..24 for this horizon"),
+        (
+            ["2015,1,1,24,1", "2015,1,1,25,1"],
+            "period 25 outside 1..24 for this horizon",
+        ),
+    ],
+)
+def test_period_refusal_names_the_bad_period_not_a_valid_edge(rows, reason):
+    body = "Year,Month,Day,Period,A\n" + "\n".join(rows) + "\n"
+    assert series(body, snaps=HOURS[:1])["A"] == reason
+
+
+def test_irregular_snapshots_are_refused_even_when_the_first_step_fits():
+    snaps = HOURS[[0, 1, 3]]
+    got = series("Datetime,A\n01/01/2015 00:00,1\n", snaps=snaps)["A"]
+    assert got == "the snapshots have no single step; none inferred"
 
 
 def test_last_period_of_the_day():
