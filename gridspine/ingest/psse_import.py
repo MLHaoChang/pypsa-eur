@@ -168,8 +168,8 @@ def _split(paths):
                 f"a PSS/E import takes at most one {ext} file, got "
                 f"{len(by_ext[ext])}: {', '.join(p.name for p in by_ext[ext])}"
             )
-    first = lambda ext: by_ext[ext][0] if by_ext[ext] else None  # noqa: E731
-    return raws[0], first(".dyr"), first(".con"), others
+    dyr, con = (by_ext[ext][0] if by_ext[ext] else None for ext in (".dyr", ".con"))
+    return raws[0], dyr, con, others
 
 
 def _text(path: Path) -> str:
