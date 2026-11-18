@@ -78,7 +78,7 @@
       "item": "fuel cell",
       "note": "the pack's fuel cell lives 10 years: a staged one would retire before 2045",
       "source": "assumed",
-      "value": "the existing 10 MW unit, no staged candidate"
+      "value": "the existing 10 MW unit, overnight cost 0 (sunk), no staged candidate"
     },
     {
       "item": "investment case",
