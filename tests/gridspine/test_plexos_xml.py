@@ -198,7 +198,8 @@ def garbage_dtd(tmp_path):
 
 
 def test_an_external_dtd_file_is_never_loaded(tmp_path, garbage_dtd):
-    # pins load_dtd=False and no_network=True
+    # the refusal comes from the docinfo check; the parser flags themselves
+    # are pinned by test_the_parser_flags_are_hardened below
     head = f'<!DOCTYPE MasterDataSet SYSTEM "file://{garbage_dtd}">'
     assert _refused_kind(tmp_path, xml(MINIMAL, header=head)) == "dtd"
 
@@ -532,3 +533,37 @@ def test_the_reader_imports_without_pypsa():
         cwd=Path(__file__).parents[2],
     )
     assert out.returncode == 0 and out.stdout.strip() == "ok", out.stderr
+
+
+def test_the_parser_flags_are_hardened(monkeypatch):
+    """GK A (30): each hardening flag passed to iterparse is pinned."""
+    import gridspine.ingest.plexos_xml as mod
+
+    seen = {}
+    real = etree.iterparse
+
+    def spy(source, **kwargs):
+        seen.update(kwargs)
+        return real(source, **kwargs)
+
+    monkeypatch.setattr(mod.etree, "iterparse", spy)
+    read_plexos_xml(EDGE)
+    assert seen["resolve_entities"] is False
+    assert seen["load_dtd"] is False
+    assert seen["no_network"] is True
+    assert seen["huge_tree"] is False
+    assert seen["dtd_validation"] is False
+
+
+def test_huge_tree_off_refuses_a_deeply_nested_file(tmp_path):
+    """Behaviour of huge_tree=False: lxml's depth limit (256) refuses the file."""
+    deep = "<a>" * 300 + "</a>" * 300
+    path = tmp_path / "deep.xml"
+    path.write_text(
+        '<MasterDataSet xmlns="http://tempuri.org/MasterDataSet.xsd">'
+        + deep
+        + "</MasterDataSet>"
+    )
+    with pytest.raises(PlexosRefused) as exc:
+        read_plexos_xml(path)
+    assert exc.value.kind == "not_xml"

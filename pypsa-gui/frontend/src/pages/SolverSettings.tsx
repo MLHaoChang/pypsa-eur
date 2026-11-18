@@ -275,6 +275,8 @@ export default function SolverSettings() {
       ? ['network', 'solver-offgrid-constraints'] as const
       : blockRequest === 'goal'
         ? ['network', 'solver-reliability-goal'] as const
+      : blockRequest === 'voll'
+        ? ['network', 'solver-voll'] as const
         : blockRequest === 'strategy'
           ? ['general', 'solver-solve-strategy'] as const
           : ['dispatch', 'solver-economic-assumptions'] as const
@@ -1564,7 +1566,7 @@ export function ReliabilityAssumptions({
     if (!error) patch(p)
   })
   return (
-    <section className="border border-border rounded">
+    <section id="solver-voll" className="border border-border rounded">
       <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
         Reliability — Value of Lost Load
       </div>
