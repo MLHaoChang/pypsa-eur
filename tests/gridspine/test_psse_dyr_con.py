@@ -98,6 +98,7 @@ def test_hand_written_dyr_one_model_per_family(raw, tmp_path):
     assert got["REGCA1"]["parameters"] == _REGCA1
     repc = got["REPCA1"]["parameters"]
     assert [repc[k] for k in ("busr", "bus1", "bus2", "ckt")] == [0, 1, 2, "1"]
+    assert type(repc["bus2"]) is int and type(got["DEGOV1"]["parameters"]["m"]) is int
     assert (repc["repc_tfltr"], repc["repc_kp"], repc["repc_dup"]) == (0.02, 18.0, 0.0)
     assert [r["line"] for r in _records(res)] == [2, 4, 5, 6, 7]
     assert [r["generator"] for r in _records(res)] == [
@@ -131,6 +132,7 @@ def test_each_record_carries_machine_base_and_bus_kv(raw, tmp_path):
 def test_machine_id_quotes_and_blanks_match_one_generator(raw, tmp_path, mid):
     got = _records(_import(raw, tmp_path, dyr=f"2 'GENCLS' {mid} 3.0 0.0 /\n"))
     assert got[0]["generator"] == "Gen B 1" and got[0]["machine"] == "1"
+    assert got[0]["parameters"] == {"h": 3.0, "d": 0.0}
 
 
 def test_machine_id_case_is_kept(raw, tmp_path):
@@ -144,13 +146,11 @@ def test_machine_id_case_is_kept(raw, tmp_path):
 
 
 def test_machine_id_normalisation():
-    assert [machine_id(x) for x in ("'1'", "1", " ' 1' ", "'A '", "a")] == [
-        "1",
-        "1",
-        "1",
-        "A",
-        "a",
+    got = [
+        machine_id(x)
+        for x in ("'1'", "1", " ' 1' ", "'A '", "a", "''", "'", "'1\"", "A1A")
     ]
+    assert got == ["1", "1", "1", "A", "a", "", "'", "'1\"", "A1A"]
 
 
 # ---------------------------------------------------------------- parameter count (D1)
@@ -202,6 +202,18 @@ def test_records_on_a_bus_without_generator_are_kept_with_one_warning(raw, tmp_p
     ]
 
 
+def test_warning_lists_five_without_a_tail(raw, tmp_path):
+    dyr = "".join(f"3 'CLODBL' {k} 0.1 /\n" for k in range(1, 6))
+    (warning,) = _import(raw, tmp_path, dyr=dyr).report.warnings
+    assert warning.endswith("5 (bus 3)")
+
+
+def test_three_winding_star_is_not_a_dyr_bus(tmp_path):
+    (tmp_path / "t.dyr").write_text("0 'GENCLS' 1 3.0 0.0 /\n")
+    res = read_psse([FIX / "three_winding_test.raw", tmp_path / "t.dyr"], {})
+    assert _records(res)[0]["bus_name"] is None
+
+
 def test_record_on_a_bus_not_in_the_raw_is_unmapped(raw, tmp_path):
     res = _import(raw, tmp_path, dyr="99 'GENCLS' 1 3.0 0.0 /\n")
     rec = _records(res)[0]
@@ -229,6 +241,9 @@ def test_record_on_a_bus_not_in_the_raw_is_unmapped(raw, tmp_path):
         ("1 'GENCLS' /\n", "line 1: a record needs 'IBUS MODEL ID'"),
         ("1 'GENCLS' 1 3.0 0.0 /\n/\n", "line 2: '/' with no record before it"),
         ("1 'GENCLS' 1 '3.0' 0.0 /\n", "line 1: GENCLS h '3.0' is not a number"),
+        ("1 'GENCLS' '' 3.0 0.0 /\n", "line 1: empty machine ID in GENCLS record"),
+        ("1 'GENCLS' ' ' 3.0 0.0 /\n", "line 1: empty machine ID in GENCLS record"),
+        ("1 '' 1 3.0 0.0 /\n", "line 1: empty model name"),
     ],
     ids=[
         "non-numeric",
@@ -239,6 +254,9 @@ def test_record_on_a_bus_not_in_the_raw_is_unmapped(raw, tmp_path):
         "short",
         "empty",
         "text-con",
+        "empty-id",
+        "blank-id",
+        "empty-model",
     ],
 )
 def test_malformed_dyr_is_refused_naming_the_line(raw, tmp_path, text, match):
@@ -247,11 +265,15 @@ def test_malformed_dyr_is_refused_naming_the_line(raw, tmp_path, text, match):
 
 
 def test_reader_is_pure():
-    recs = read_dyr_text("1 'genrou' 1 1 2 /  trailing\n@! c\n2 'X' 2\n 3 /\n")
+    recs = read_dyr_text(
+        "1 'genrou' 1 1 2.5 /  trailing\n@! c\n2 'X' 2\n 3 /\n4 'Y' 1 /\n"
+    )
     assert [(r.line, r.bus, r.model, r.machine, r.values) for r in recs] == [
-        (1, 1, "GENROU", "1", (1, 2)),
+        (1, 1, "GENROU", "1", (1, 2.5)),
         (3, 2, "X", "2", (3,)),
+        (5, 4, "Y", "1", ()),
     ]
+    assert [type(v) for v in recs[0].values] == [int, float]
     with pytest.raises(ContractError):
         read_dyr_text("1 'X' 1 /\n1 'X' 1 /\n")
 
@@ -271,7 +293,9 @@ def test_no_files_are_refused(tmp_path):
 
 
 def test_two_raw_files_are_refused(tmp_path):
-    with pytest.raises(ImportFormatError, match="exactly one .raw file, got 2"):
+    with pytest.raises(
+        ImportFormatError, match="exactly one .raw file, got 2: a.raw, b.raw, c.dyr$"
+    ):
         read_psse([tmp_path / "a.raw", tmp_path / "b.raw", tmp_path / "c.dyr"], {})
 
 
@@ -417,6 +441,12 @@ def test_index_refuses_a_branch_twice(raw, tmp_path):
         ContractError, match="branch 1-2 circuit '1' is in the .raw twice"
     ):
         PsseNetIndex(n, {})
+
+
+def test_con_swing_bus_is_not_a_bus_section(raw, tmp_path):
+    res = _import(raw, tmp_path, con="CONTINGENCY S\n   DISCONNECT BUS 1\nEND\nEND\n")
+    unmatched = res.sidecars["psse_contingencies.json"]["unmatched"]
+    assert [u["reason"] for u in unmatched] == ["unsupported"]
 
 
 def test_malformed_con_is_refused_naming_the_file(raw, tmp_path):
