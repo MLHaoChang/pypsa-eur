@@ -1460,6 +1460,9 @@ def get_island(project) -> dict:
         if valid is not None:
             services, warnings = offered_services(valid), island_warnings(valid)
     return {"config": config,
+            # The sidecar's content hash: a PATCH passes it back as ``base`` and
+            # is refused (409) when the file changed since (GK B3 K1).
+            "revision": island_revision(sidecar),
             "study": json.loads(study.read_text()) if study.is_file() else None,
             # When the study was written (UTC, ISO 8601): the Results tab says "run <date>".
             "study_at": (datetime.fromtimestamp(study.stat().st_mtime, tz=timezone.utc).isoformat(timespec="seconds")
@@ -1521,13 +1524,98 @@ def save_island(project, config: dict) -> dict:
     """Validate the island sidecar with gridspine's schema and write it; a
     bad one is a 422 naming the field and leaves the previous file. The
     last study was made with the old sidecar, so it goes. Returns
-    ``get_island``."""
+    ``get_island``. Writes under the sidecar's lock, like ``patch_island``."""
+    sidecar, _ = _island_paths(project)
+    with _lock(sidecar):
+        _write_island(project, config)
+    return get_island(project)
+
+
+def _write_island(project, config: dict) -> None:
+    """The one island writer (PUT, PATCH, preset): every check
+    ``checked_island_text`` makes, the atomic write, and the stale study gone.
+    The caller holds ``_lock(sidecar)``."""
     from services.atomic_io import atomic_write_text
 
     text = checked_island_text(project, config)
     sidecar, study = _island_paths(project)
     atomic_write_text(sidecar, text)
     study.unlink(missing_ok=True)
+
+
+def island_revision(sidecar: Path) -> str | None:
+    """The sidecar's content hash (sha256 hex), None when it has none."""
+    return hashlib.sha256(sidecar.read_bytes()).hexdigest() if sidecar.is_file() else None
+
+
+#: The keys a PATCH may change: the per-unit settings (section 5's Controls
+#: block) and the island requirements (section 8's card).
+ISLAND_PATCH_KEYS = ("units", "requirements")
+#: The source a user's own edit of a tagged number takes ({value, source}); the
+#: client never sends a source (GK B3 K2). gridspine's sources are measured,
+#: datasheet and assumed: an entered value is no longer assumed.
+EDITED_SOURCE = "datasheet"
+
+
+def _bad_patch(where: str, why: str) -> HTTPException:
+    return HTTPException(status_code=422, detail=f"{where}: {why}")
+
+
+def _merge_value(where: str, old, new):
+    """One field: a tagged number keeps its tag (the source turns
+    ``EDITED_SOURCE`` when the value changes); anything else is replaced whole
+    (lists included). None is refused: a PATCH never deletes."""
+    if new is None:
+        raise _bad_patch(where, "a value is required (a PATCH cannot remove a setting)")
+    if isinstance(old, dict) and set(old) == {"value", "source"}:
+        if isinstance(new, dict):
+            raise _bad_patch(where, "send the number only; its source is set by the server")
+        return old if new == old["value"] else {"value": new, "source": EDITED_SOURCE}
+    return new
+
+
+def patch_island(project, patch: dict, base: str | None = None) -> dict:
+    """Merge a partial change into the stored island sidecar and save it
+    through ``_write_island`` (same checks, 422 naming the field, atomic write,
+    stale study gone). Read, merge, check and write run under the sidecar's
+    lock, which PUT takes too, so two edits to different keys both survive. A
+    ``base`` that is not the current ``revision`` is a 409
+    ``island_config_changed`` and leaves the file as it was.
+
+    Merge rules: only ``units`` and ``requirements``; ``units[name]`` merges
+    one level deep and an unknown unit is refused, not created;
+    ``requirements`` merges one level deep; lists are replaced whole; None is
+    refused."""
+    require_capacity_expansion(project)
+    sidecar, _ = _island_paths(project)
+    with _lock(sidecar):
+        if not sidecar.is_file():
+            raise _bad_patch("island config", "the project has none yet; choose a preset first")
+        if base is not None and base != island_revision(sidecar):
+            raise HTTPException(status_code=409, detail={
+                "error_kind": "island_config_changed",
+                "message": "The island settings changed since you opened them. Reload and try again.",
+            })
+        config = json.loads(sidecar.read_text())
+        for key, change in patch.items():
+            if key not in ISLAND_PATCH_KEYS:
+                raise _bad_patch(key, "cannot be changed here")
+            if not isinstance(change, dict):
+                raise _bad_patch(key, "send the fields to change, by name")
+            current = config.setdefault(key, {})
+            for name, value in change.items():
+                where = f"{key}.{name}"
+                if key == "units":
+                    if name not in current:
+                        raise _bad_patch(where, "no such unit in the island settings")
+                    if not isinstance(value, dict):
+                        raise _bad_patch(where, "send the unit's fields to change, by name")
+                    unit = current[name]
+                    for f, v in value.items():
+                        unit[f] = _merge_value(f"{where}.{f}", unit.get(f), v)
+                else:
+                    current[name] = _merge_value(where, current.get(name), value)
+        _write_island(project, config)
     return get_island(project)
 
 

@@ -901,6 +901,34 @@ def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
     return out
 
 
+#: The off-grid dispatch limits Guided shows as assumed while they are off
+#: (owner RESERVE-SHOW-1; control-strategy walkthrough 03, asset-investment
+#: walkthrough improvement 2): code, label (the Solver settings word, no unit),
+#: the solver config fields, the value shown while off.
+_DISPATCH_LIMITS = (
+    ("assumed_operating_reserve", "Operating reserve",
+     ("reserve_share_load", "reserve_share_pv", "reserve_share_wind"), "off"),
+    ("assumed_min_renewable_fraction", "Minimum renewable fraction",
+     ("min_renewable_fraction",), "none"),
+)
+
+
+def _dispatch_limit_items(cfg: dict | None) -> list[dict]:
+    """An off-grid site's operating reserve and minimum renewable fraction, each
+    an assumed warning while every one of its fields is off (0 or unset) in the
+    solver config the solve reads. Never a blocker: off is a valid choice, and
+    no default changes (RESERVE-SHOW-1). Gone once any field is set."""
+    cfg = cfg or {}
+    out: list[dict] = []
+    for code, label, fields, off in _DISPATCH_LIMITS:
+        if any(cfg.get(f) for f in fields):
+            continue
+        out.append(_item(code, "warning", f"{label}: {off} (assumed): confirm it or set your own.",
+                         "flow", "scenarios", panel="simparams", fld=fields[0],
+                         value=off))
+    return out
+
+
 def _is_assumed(it: dict) -> bool:
     """An unconfirmed template default (the Assumptions card's rows)."""
     return it["severity"] == "warning" and it["code"].startswith("assumed_")
@@ -1290,6 +1318,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             items += _readiness_items(r, voll_noted=any(
                 i["code"] == "presence_voll" for i in presence))
         items += _assumed_items(template, facts.cfg_dict)
+        if islanded:
+            items += _dispatch_limit_items(facts.cfg_dict)
     items += _bind_items(facts, db, org_id, project_dir, n)
     # Load flow and N-1 security are on exactly when their solver settings are.
     scope = S.apply_settings(scope, facts.cfg_dict)
