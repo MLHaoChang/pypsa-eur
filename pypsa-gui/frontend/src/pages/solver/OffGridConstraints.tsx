@@ -45,7 +45,7 @@ function toText(v: number | null | undefined): string {
 const nameOf = (label: string) => label.replace(/ \(%\)$/, '')
 
 /** One percent field: its own text and refusal; the block collects the refusals. */
-function ShareField({ field, label, value, patch, onError, errorTestId }: {
+export function ShareField({ field, label, value, patch, onError, errorTestId }: {
   field: ShareKey
   label: string
   value: number | null | undefined

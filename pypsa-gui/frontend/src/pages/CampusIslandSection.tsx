@@ -23,6 +23,7 @@ import {
 import { Btn, PageSection, Tag } from '../components/PageKit'
 import CampusIslandCutsSection, { scenarioWords } from './CampusIslandCutsSection'
 import { showResultsTab } from '../layout/flowNavigation'
+import { ISLAND_REQUIREMENT_LABELS, ISLAND_SCENARIO_LABELS } from './islandWords'
 
 export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name] as const
 export const ISLAND_REPORT_KEY = (name: string) => ['campusElectrical', 'islandReport', name] as const
@@ -31,12 +32,7 @@ const INPUT = 'px-2 py-1 text-sm border border-border rounded focus:outline-none
 const SOURCES: IslandSource[] = ['measured', 'datasheet', 'assumed']
 const CONTROLS = ['gfl_pq', 'gfl_qu', 'gfl_pf', 'gfl_fw', 'gfm_droop', 'gfm_vsm']
 /** The requirements the form edits, each a tagged number. */
-const NUMBERS: [string, string][] = [
-  ['sustained_h', 'Sustained ride-through (h)'],
-  ['bridge_s', 'UPS bridge (s)'],
-  ['fuel_autonomy_h', 'Fuel autonomy (h)'],
-  ['genset_redundancy_n', 'Genset redundancy (N+k)'],
-]
+export const NUMBERS: [string, string][] = Object.entries(ISLAND_REQUIREMENT_LABELS)
 
 type Tagged = { value: number; source: IslandSource }
 
@@ -223,7 +219,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
               {ISLAND_SCENARIOS.map(sc => (
                 <label key={sc} className="flex gap-1 items-center">
                   <input type="checkbox" checked={req.scenarios.includes(sc)} onChange={() => toggleScenario(sc)} />
-                  {sc}
+                  {ISLAND_SCENARIO_LABELS[sc]}
                 </label>
               ))}
             </fieldset>
