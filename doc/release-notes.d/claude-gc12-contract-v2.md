@@ -1,0 +1,1 @@
+* Feat(gridspine): The test battery's channel contract version 2 adds `connected`, the PoC breaker status (1 closed and not tripped, 0 open or tripped; breaker status only). Readers accept versions 1 and 2; writers stay at version 1 until a pack records the channel (GC-12).

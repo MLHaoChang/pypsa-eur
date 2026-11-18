@@ -165,14 +165,14 @@ def test_non_http_sentinels_are_documented():
 # ── get_results dispatcher specifics ───────────────────────────────────────
 
 
-def test_get_results_enum_has_32_values():
+def test_get_results_enum_has_33_values():
     """v6 plan: 28 distinct result_kind values matching results.py grep, plus
     `billing` and `cfe_score` (Edge Investment Case P2 WP2.5),
-    `value_flows` (P3 WP3.4) and `renewable_fraction` (homer-parity 01a)."""
-    assert len(set(RESULTS_ENUM)) == 32, (
-        f"RESULTS_ENUM has {len(RESULTS_ENUM)} unique values; expected 32"
+    `value_flows` (P3 WP3.4) and `renewable_fraction` (homer-parity 01a) and `operating_reserve` (01d)."""
+    assert len(set(RESULTS_ENUM)) == 33, (
+        f"RESULTS_ENUM has {len(RESULTS_ENUM)} unique values; expected 33"
     )
-    assert {"billing", "cfe_score", "value_flows", "renewable_fraction"} <= set(RESULTS_ENUM)
+    assert {"billing", "cfe_score", "value_flows", "renewable_fraction", "operating_reserve"} <= set(RESULTS_ENUM)
 
 
 def test_get_results_lookup_dict_handles_ac_pf_status():
