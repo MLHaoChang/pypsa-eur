@@ -19,20 +19,31 @@ from tests.conftest import build_network
 
 def _row(client, jid):
     return next(
-        j for j in client.get("/api/simulation/queue").json()["jobs"]
+        j
+        for j in client.get("/api/simulation/queue").json()["jobs"]
         if j["id"] == str(jid)
     )
 
 
 def test_my_job_is_started_by_me_in_every_status(
-    client, install_network, tmp_projects_dir, registry_key_for,
+    client,
+    install_network,
+    tmp_projects_dir,
+    registry_key_for,
 ):
     install_network(build_network(), name="Mine")
     dismiss._save_project(client, "Mine")
     solve_queue.reset_for_tests()
     try:
         me = dismiss._acting_user_id(client)
-        for status in ("queued", "running", "completed", "failed", "interrupted", "aborted"):
+        for status in (
+            "queued",
+            "running",
+            "completed",
+            "failed",
+            "interrupted",
+            "aborted",
+        ):
             jid = dismiss._seed(status, "Mine", registry_key_for("Mine"), me)
             assert _row(client, jid)["started_by_me"] is True, status
     finally:
@@ -40,7 +51,10 @@ def test_my_job_is_started_by_me_in_every_status(
 
 
 def test_a_colleagues_visible_job_is_not_started_by_me(
-    client, install_network, tmp_projects_dir, registry_key_for,
+    client,
+    install_network,
+    tmp_projects_dir,
+    registry_key_for,
 ):
     """Fully visible (not redacted) and still not mine: ownership is consulted."""
     install_network(build_network(), name="Theirs")
@@ -48,7 +62,9 @@ def test_a_colleagues_visible_job_is_not_started_by_me(
     solve_queue.reset_for_tests()
     try:
         for status in ("running", "completed"):
-            jid = dismiss._seed(status, "Theirs", registry_key_for("Theirs"), uuid.uuid4())
+            jid = dismiss._seed(
+                status, "Theirs", registry_key_for("Theirs"), uuid.uuid4()
+            )
             row = _row(client, jid)
             assert row["project_id"] == "Theirs", row
             assert row["started_by_me"] is False, (status, row)
@@ -57,7 +73,10 @@ def test_a_colleagues_visible_job_is_not_started_by_me(
 
 
 def test_a_legacy_row_with_no_owner_is_not_started_by_me(
-    client, install_network, tmp_projects_dir, registry_key_for,
+    client,
+    install_network,
+    tmp_projects_dir,
+    registry_key_for,
 ):
     install_network(build_network(), name="Mine")
     dismiss._save_project(client, "Mine")
@@ -70,11 +89,16 @@ def test_a_legacy_row_with_no_owner_is_not_started_by_me(
 
 
 def test_a_foreign_orgs_redacted_row_is_not_started_by_me(
-    client, install_network, tmp_projects_dir, registry_key_for,
+    client,
+    install_network,
+    tmp_projects_dir,
+    registry_key_for,
 ):
     solve_queue.reset_for_tests()
     try:
-        jid = dismiss._seed("completed", "Theirs", "some-other-org:deadbeef", uuid.uuid4())
+        jid = dismiss._seed(
+            "completed", "Theirs", "some-other-org:deadbeef", uuid.uuid4()
+        )
         row = _row(client, jid)
         assert row["project_id"] is None, row
         assert row["started_by_me"] is False, row
@@ -83,7 +107,10 @@ def test_a_foreign_orgs_redacted_row_is_not_started_by_me(
 
 
 def test_a_persisted_only_job_still_answers_started_by_me(
-    client, install_network, tmp_projects_dir, registry_key_for,
+    client,
+    install_network,
+    tmp_projects_dir,
+    registry_key_for,
 ):
     """After a restart the row comes from `solve_jobs`, not `_jobs`."""
     from services import solve_job_store
@@ -96,7 +123,9 @@ def test_a_persisted_only_job_still_answers_started_by_me(
         jid = dismiss._seed("interrupted", "Mine", registry_key_for("Mine"), me)
         with solve_queue._lock:
             job = solve_queue._jobs[jid]
-        solve_job_store.record_enqueued(job, enqueued_by_user_id=me, solver_config_json=None)
+        solve_job_store.record_enqueued(
+            job, enqueued_by_user_id=me, solver_config_json=None
+        )
         solve_job_store.record_status(job)
         solve_queue.reset_for_tests()
 
@@ -106,7 +135,10 @@ def test_a_persisted_only_job_still_answers_started_by_me(
 
 
 def test_no_owner_or_user_id_reaches_the_listing(
-    client, install_network, tmp_projects_dir, registry_key_for,
+    client,
+    install_network,
+    tmp_projects_dir,
+    registry_key_for,
 ):
     install_network(build_network(), name="Mine")
     dismiss._save_project(client, "Mine")
