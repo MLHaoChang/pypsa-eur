@@ -5,6 +5,20 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
+# The one multi-entity scope form (issue 10, S6a): entity_id EVERY with the named
+# component_class means every entity of that class, resolved server-side from the
+# network. Only these profiles and classes admit it; elsewhere "*" is a plain name.
+EVERY = "*"
+EVERY_ENTITY = {"generator-dispatch/1": "Generator", "branch-loading/1": "Line"}
+
+
+def every_entity(scope):
+    return (
+        scope.get("entity_id") == EVERY
+        and EVERY_ENTITY.get(scope.get("profile")) is not None
+        and scope.get("component_class") == EVERY_ENTITY[scope["profile"]]
+    )
+
 
 class CostBasis(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -85,6 +99,11 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_lost_load_cost_scope")
+    if every_entity(scope):
+        if any(scope.get(k) for k in ("cost_basis", "comparison_evidence_id", "retain",
+                                      "evidence_id", "chart")):
+            raise ValueError("unsupported_population_scope")
+        return scope
     classed = {"branch-loading/1": ("Line", "Transformer"),
                "capacity/1": ("Generator", "Link", "StorageUnit", "Store", "Line", "Transformer"),
                "storage-cycles/1": ("StorageUnit", "Store")}
@@ -167,6 +186,22 @@ def _from_message(message, project_id, ui_context):
         r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
         message.strip(), re.I,
     )
+    every = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(key results|(?:branch\s+)?loading)\s+for\s+"
+        r"(?:every|all)\s+(generators?|lines?)"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if every:
+        profile = {("key", "g"): "generator-dispatch/1", ("loading", "l"): "branch-loading/1"}.get(
+            ("key" if every[1].lower() == "key results" else "loading", every[2][0].lower()))
+        if profile is None:
+            return None  # e.g. "loading for every generator": no such profile
+        value = {"version": 1, "profile": profile, "project_id": project_id, "entity_id": EVERY,
+                 "component_class": EVERY_ENTITY[profile], "retain": False}
+        if every[3]:
+            value.update(start=every[3], end=every[4])
+        return validate(value)
     if loading:
         network = loading[3] is None
         value = {
