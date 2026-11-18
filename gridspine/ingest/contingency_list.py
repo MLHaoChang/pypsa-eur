@@ -173,8 +173,10 @@ class _NetIndex:
 
 
 def _index(net) -> _NetIndex:
-    """``net`` itself when a caller passes a prebuilt index (the PSS/E importer's,
-    over a PyPSA network), else the pandapower net's index."""
+    """
+    ``net`` itself when a caller passes a prebuilt index (the PSS/E importer's,
+    over a PyPSA network), else the pandapower net's index.
+    """
     return net if isinstance(net, _NetIndex) else _NetIndex(net)
 
 

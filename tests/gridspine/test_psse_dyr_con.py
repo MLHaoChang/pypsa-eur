@@ -17,9 +17,9 @@ from gridspine.handoff.raw_writer import _bus_numbers, write_raw
 from gridspine.ingest import import_result
 from gridspine.ingest.import_result import ImportFormatError
 from gridspine.ingest.psse_dyr_parse import machine_id, read_dyr_text
-from gridspine.ingest.psse_import import read_psse
+from gridspine.ingest.psse_import import PsseNetIndex, read_psse
 from gridspine.schema.contracts import ContractError
-from tests.gridspine.test_psse_import import _case, _gen
+from tests.gridspine.test_psse_import import FIX, _case, _gen
 
 logging.getLogger("pypsa").setLevel(logging.ERROR)
 
@@ -265,6 +265,11 @@ def test_lone_dyr_or_con_is_refused_naming_the_raw(tmp_path, lone):
         read_psse([tmp_path / lone], {})
 
 
+def test_no_files_are_refused(tmp_path):
+    with pytest.raises(ImportFormatError, match="exactly one .raw file, got 0: none$"):
+        read_psse([], {})
+
+
 def test_two_raw_files_are_refused(tmp_path):
     with pytest.raises(ImportFormatError, match="exactly one .raw file, got 2"):
         read_psse([tmp_path / "a.raw", tmp_path / "b.raw", tmp_path / "c.dyr"], {})
@@ -377,6 +382,41 @@ def test_every_con_statement_is_mapped_or_unmapped(raw, tmp_path):
         "unsupported", "ambiguous_bus", "unknown_circuit", "unknown_machine",
         "partial", "unsupported",
     ]  # fmt: skip
+
+
+def test_three_winding_legs_are_not_two_bus_branches(tmp_path):
+    """A star leg has no RAW bus at the star end; the transformer is unsupported."""
+    con = (
+        "CONTINGENCY T2\n   OPEN BRANCH FROM BUS 1001 TO BUS 1002 CKT A\nEND\n"
+        "CONTINGENCY T3\n   OPEN BRANCH FROM BUS 1001 TO BUS 1002 TO BUS 1003 CKT A\nEND\n"
+        "END\n"
+    )
+    (tmp_path / "t.con").write_text(con)
+    res = read_psse([FIX / "three_winding_test.raw", tmp_path / "t.con"], {})
+    side = res.sidecars["psse_contingencies.json"]
+    assert side["contingencies"] == []
+    assert [u["reason"] for u in side["unmatched"]] == ["unknown_branch", "unsupported"]
+
+
+def test_con_refuses_branches_that_read_as_one_element(tmp_path):
+    branches = ["1,2,'&1',0.01,0.1,0.0,100.0", "1,2,'_1',0.01,0.1,0.0,100.0"]
+    _case(tmp_path, BUS=_BUSES, GENERATOR=_GENS, BRANCH=branches)
+    (tmp_path / "c.con").write_text("CONTINGENCY X\n   DISCONNECT BUS 2\nEND\nEND\n")
+    with pytest.raises(
+        ImportFormatError, match="read as one contingency element '1-2-_1'"
+    ):
+        read_psse([tmp_path / "c.raw", tmp_path / "c.con"], {})
+
+
+def test_index_refuses_a_branch_twice(raw, tmp_path):
+    """The import names two equal (I, J, CKT) branches alike, so this is built by hand."""
+    n = read_psse([raw], {}).network
+    n.add("Line", "copy", bus0="A #1", bus1="B", x=0.1, r=0.01)
+    n.lines.at["copy", "psse_circuit"] = "1"
+    with pytest.raises(
+        ContractError, match="branch 1-2 circuit '1' is in the .raw twice"
+    ):
+        PsseNetIndex(n, {})
 
 
 def test_malformed_con_is_refused_naming_the_file(raw, tmp_path):
