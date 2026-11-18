@@ -163,6 +163,7 @@ describe('the state (GK B W6, UX 2, 3)', () => {
     await openWith(body('current', 'design_cost'), 'design_cost')
     expect((await screen.findByTestId(`${T('design_cost')}-unchecked`)).textContent).toContain(
       "Not compared: Finance and currency settings, The site type's prices could not be checked.")
+    // UX 2 (3): the disclosure's money is the tile's notation (kpiMoney); kpiMoney vs money() is issue 06.
     expect(screen.getByTestId(`${T('design_cost')}-source`).textContent).toContain(`The design cost (${kpiMoney(1234.5)})`)
   })
 
