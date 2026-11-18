@@ -545,10 +545,13 @@ def test_a_hundred_unavailable_long_names_keep_the_receipt_valid(grid, checked):
     assert "N" * 124 + "000, Generator energy: unavailable" in public_text(frames)
 
 
+@pytest.mark.parametrize(
+    "name", ["Z" * 129, "\U0001f50b" * 65], ids=["129-chars", "130-utf16-units"]
+)
 def test_a_name_over_128_characters_is_refused_before_any_calculation(
-    grid, checked, monkeypatch
+    grid, checked, monkeypatch, name
 ):
-    grid.network.add("Generator", "Z" * 129, bus="B1", p_nom=1, marginal_cost=50)
+    grid.network.add("Generator", name, bus="B1", p_nom=1, marginal_cost=50)
     ctx = solved(grid)
     calls = []
     real = calculations.source

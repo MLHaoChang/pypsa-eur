@@ -353,9 +353,9 @@ def _every_source(ctx, scope):
     names = sorted(str(name) for name in ctx.network.components[scope["component_class"]].static.index)
     if not names:
         raise ValueError("empty_population")
-    # A receipt slot names its entity in at most 128 characters; refuse before any
-    # calculation rather than publish an answer that fails read-back.
-    if any(len(name) > 128 for name in names):
+    # A receipt slot names its entity in at most 128 characters (UTF-16 units in the
+    # browser); refuse before any calculation rather than publish an answer that fails read-back.
+    if any(len(name.encode("utf-16-le")) // 2 > 128 for name in names):
         raise ValueError("population_name_too_long")
     answer_sections.admit(len(names), len(requested_metrics(scope)))
     if scope["profile"] == PROFILE:
