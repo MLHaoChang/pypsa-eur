@@ -12,6 +12,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { goalPatchFromEdits, useReliabilityGoal, type GoalEdits } from '../../../hooks/useReliabilityGoal'
 import { ReliabilityGoalEditor } from '../../../components/reliabilityGoal/ReliabilityGoalEditor'
 import { VOLL_TEXT } from '../delegate'
+import { GOAL_VOLL_LABEL } from './goalCardWords'
 import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term } from '../shared/Term'
@@ -114,7 +115,7 @@ export function GoalCard() {
           (UX review L3). */}
       {(advanced || voll == null || vollMissing) && (
       <div data-testid="hub-goal-voll" className="flex flex-wrap items-center gap-2 text-[12px]">
-        <span><Term k="voll_plain">Price of undelivered energy</Term>:</span>
+        <span><Term k="voll_plain">{GOAL_VOLL_LABEL}</Term>:</span>
         {voll == null ? <span className="text-muted">…</span>
           : vollMissing ? (
             <>
