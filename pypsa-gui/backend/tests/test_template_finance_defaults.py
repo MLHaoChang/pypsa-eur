@@ -602,6 +602,13 @@ def test_a_new_sites_shipped_finance_reads_as_assumed_with_its_source(reset_back
     import eh_site as S
 
     cfg = S.solver_config(S.site_params({"site_type": "campus"}))
+    from models.finance import FinanceInputs
+
+    # Stored as validated and dumped, every field present, as the routes store it.
+    assert cfg["finance"] == FinanceInputs.model_validate(cfg["finance"]).model_dump(
+        mode="json"
+    )
+    assert set(cfg["finance"]) == set(FinanceInputs.model_fields)
     assert set(cfg["finance_assumed"]) == {
         k for k in T.FINANCE_SOURCES if cfg["finance"].get(k) not in (None, {}, [])
     }
