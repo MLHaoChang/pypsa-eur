@@ -636,3 +636,22 @@ def test_the_acquisition_date_is_the_first_cod(tid):
     fin = T.solver_config(tid)["finance"]
     if fin.get("cod_by_asset"):
         assert fin["acquisition_date"] == min(fin["cod_by_asset"].values())
+
+
+def test_a_settings_put_keeps_the_record_and_cannot_forge_it(client):
+    """`finance_assumed` is off the settings schema: a PUT of other settings
+    keeps the stored record, and a record in the body is ignored."""
+    import routers.simulation as sim_router
+    from routers.projects import _solver_config_from_dict
+
+    client.get("/api/simulation/solver_config")  # the request's own state first
+    cfg = T.solver_config("eh_h2_hub")
+    sim_router._state["solver_config"] = _solver_config_from_dict(cfg)
+    forged = {"wacc_nominal": {"value": 0.01, "source": "forged"}}
+    r = client.put(
+        "/api/simulation/solver_config",
+        json={"solver_name": "highs", "finance_assumed": forged},
+    )
+    assert r.status_code == 200, r.text
+    st = sim_router._state["solver_config"]
+    assert st.finance_assumed == cfg["finance_assumed"]
