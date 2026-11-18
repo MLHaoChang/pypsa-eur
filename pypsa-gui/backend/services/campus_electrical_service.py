@@ -1574,6 +1574,30 @@ def _merge_value(where: str, old, new):
     return new
 
 
+def merge_island_patch(config: dict, patch: dict) -> None:
+    """Apply a partial island change to ``config`` in place, with
+    ``patch_island``'s merge rules and refusals (the edit card previews the
+    tool's patch with it, without writing)."""
+    for key, change in patch.items():
+        if key not in ISLAND_PATCH_KEYS:
+            raise _bad_patch(key, "cannot be changed here")
+        if not isinstance(change, dict):
+            raise _bad_patch(key, "send the fields to change, by name")
+        current = config.setdefault(key, {})
+        for name, value in change.items():
+            where = f"{key}.{name}"
+            if key == "units":
+                if name not in current:
+                    raise _bad_patch(where, "no such unit in the island settings")
+                if not isinstance(value, dict):
+                    raise _bad_patch(where, "send the unit's fields to change, by name")
+                unit = current[name]
+                for f, v in value.items():
+                    unit[f] = _merge_value(f"{where}.{f}", unit.get(f), v)
+            else:
+                current[name] = _merge_value(where, current.get(name), value)
+
+
 def patch_island(project, patch: dict, base: str | None = None) -> dict:
     """Merge a partial change into the stored island sidecar and save it
     through ``_write_island`` (same checks, 422 naming the field, atomic write,
@@ -1597,24 +1621,7 @@ def patch_island(project, patch: dict, base: str | None = None) -> dict:
                 "message": "The island settings changed since you opened them. Reload and try again.",
             })
         config = json.loads(sidecar.read_text())
-        for key, change in patch.items():
-            if key not in ISLAND_PATCH_KEYS:
-                raise _bad_patch(key, "cannot be changed here")
-            if not isinstance(change, dict):
-                raise _bad_patch(key, "send the fields to change, by name")
-            current = config.setdefault(key, {})
-            for name, value in change.items():
-                where = f"{key}.{name}"
-                if key == "units":
-                    if name not in current:
-                        raise _bad_patch(where, "no such unit in the island settings")
-                    if not isinstance(value, dict):
-                        raise _bad_patch(where, "send the unit's fields to change, by name")
-                    unit = current[name]
-                    for f, v in value.items():
-                        unit[f] = _merge_value(f"{where}.{f}", unit.get(f), v)
-                else:
-                    current[name] = _merge_value(where, current.get(name), value)
+        merge_island_patch(config, patch)
         _write_island(project, config)
     return get_island(project)
 

@@ -51,6 +51,10 @@ def test_zero_or_none_counts_as_off():
     assert _codes(S._dispatch_limit_items(cfg)) == CODES
 
 
+def test_no_solver_config_counts_as_both_off():
+    assert _codes(S._dispatch_limit_items(None)) == CODES
+
+
 def test_both_set_gives_nothing():
     assert S._dispatch_limit_items({"reserve_share_wind": 0.2, "min_renewable_fraction": 0.5}) == []
 
