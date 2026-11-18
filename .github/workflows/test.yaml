@@ -134,9 +134,10 @@ jobs:
     needs: gui-backend-changes
     if: needs.gui-backend-changes.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # A healthy shard takes 25 to 110 min (SCALE-1 profile). Without a cap a
-    # hung shard held its runner for GitHub's 6 h limit.
-    timeout-minutes: 150
+    # A healthy shard on the 4-shard layout takes up to ~150 min. Without a cap
+    # a hung shard held its runner for GitHub's 6 h limit. Once the shards run
+    # under xdist (~25 min each) this can drop to ~60.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
