@@ -1979,8 +1979,7 @@ def definition_changed(record):
         current = calculations.scope_definition_hash(scope)
     except (KeyError, ValueError, TypeError):
         return True
-    if current is None:
-        return True
+    # A requested metric with no definition hashes to None: None != recorded.
     return current != recorded
 
 
