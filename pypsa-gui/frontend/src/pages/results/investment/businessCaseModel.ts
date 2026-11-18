@@ -143,6 +143,7 @@ export const REFUSAL_WORDS: Record<string, string> = {
   outside_horizon: 'Years: outside the investment case years',
   year_out_of_range: 'By year: a year outside the line’s start to end',
   indexation_missing: 'Indexation: needed with contract escalation',
+  derating_missing: 'De-rating: set the share of the capacity the market pays for (0 to 1)',
   life_missing: 'Life (years): needed for capex',
   rate_missing: 'Rate: needed for declining balance',
   price_not_established: 'Price: not established, the run waits for it',

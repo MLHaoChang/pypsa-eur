@@ -2452,12 +2452,14 @@ def get_business_case_preset(variant: str | None = Query(default=None)):
                                   "message": "set the finance inputs first: a preset's cost "
                                              "defaults are filled in the case's currency"})
     try:
-        currency = FinanceInputs.model_validate(raw_fin).currency
+        fin = FinanceInputs.model_validate(raw_fin)
     except ValidationError as exc:
         raise HTTPException(422, {"code": "finance_inputs_invalid",
                                   "message": str(exc.errors()[0]["msg"])}) from exc
     try:
-        inputs = P.preset(template_id, variant, currency=currency)
+        inputs = P.with_finance_indexation(
+            P.preset(template_id, variant, currency=fin.currency), fin.escalation
+        )
     except DefaultUnitMismatch as exc:
         raise HTTPException(422, refusal_detail(exc)) from exc
     except LookupError as exc:

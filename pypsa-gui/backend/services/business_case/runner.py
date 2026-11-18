@@ -253,7 +253,11 @@ def report_body(
     """The stored report: P&L by year by stream, the KPIs (gross and net of
     pass-through), break-even, the locked rows, each linked output's state and every
     assumed default the run used."""
-    from services.finance.business_case import row_reasons, volume_factor_display
+    from services.finance.business_case import (
+        KPI_ROW,
+        row_reasons,
+        volume_factor_display,
+    )
 
     return {
         "business_case_hash": bc.hash,
@@ -279,6 +283,8 @@ def report_body(
             "row_reason": row_reasons(
                 result, p, outputs, receivable_days=inputs.receivable_days
             ),
+            # A display key too (walk 03): the P&L row each KPI is computed from.
+            "kpi_row": dict(KPI_ROW),
             # Display keys (BC 15): the lease-up applied, its basis and the stated
             # years it ignored. Absent for a full-volume case, so its report is as it was.
             **volume_factor_display(inputs, result.tl.operating_years),

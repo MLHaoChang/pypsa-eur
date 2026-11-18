@@ -1030,7 +1030,7 @@ def test_a_report_from_before_the_list_reads_not_established(bc, monkeypatch):
     ]
     cells = [[c.value for c in row] for row in ws.iter_rows()]
     at = next(i for i, r in enumerate(cells) if r[0] == "Assumed default")
-    assert cells[at + 1][0] == "not_established" and "again" in cells[at + 1][3]
+    assert cells[at + 1][0] == "not established" and "again" in cells[at + 1][3]
 
 
 def test_the_workbook_row_without_a_unit_is_blank_never_none():
@@ -1312,3 +1312,67 @@ def test_bc15_a_whole_object_write_shows_a_lease_up_change_on_the_card():
     )
     assert _label(None, ("inputs", "receivable_days")) == "Receivable days"
     assert _label("x", ("price_by_year", "2031")) == "x · Price 2031"
+
+
+# ── walk 05: indexation from the finance inputs (GK B2 B2) ─────────────────
+
+
+def test_b2_a_preset_contract_line_reads_the_finance_ppa_rate(bc, template):
+    """The IPP's two contract revenue lines read the s2 finance inputs' `ppa` rate (the
+    rate the investment case indexes contract lines by); a non-contract line takes none."""
+    template["id"] = "eh_ipp_hybrid"
+    new = preset_apply.plan(_args(variant="ipp_hybrid"))["new"]
+    lines = new["inputs"]["lines"]
+    contract = [ln for ln in lines if ln["escalation"] == "contract"]
+    assert len(contract) == 2
+    assert all(ln["indexation"] == 0.01 for ln in contract)
+    assert all(ln.get("indexation") is None for ln in lines if ln not in contract)
+    asks = preset_apply.to_ask(new)
+    assert not [r for r in asks if r.get("column") == "indexation"]
+    # The de-rating is the user's to type (Q2): asked for, by line, never filled.
+    assert [r["line"] for r in asks if r.get("column") == "derating"] == [
+        "Capacity payment (BESS, firm capacity)"
+    ]
+
+
+def test_b2_the_card_marks_the_rate_from_the_finance_inputs(bc, template):
+    """Guided: the card says where the indexation came from, and shows the empty
+    de-rating, so the user sees both before applying (walk 04, 05)."""
+    template["id"] = "eh_ipp_hybrid"
+    rows = _rows(preset_apply.plan(_args(variant="ipp_hybrid")))
+    cap = "Capacity payment (BESS, firm capacity)"
+    assert rows[f"{cap} · indexation"]["new"] == 0.01
+    assert rows[f"{cap} · indexation"]["unit"] == preset_apply.FROM_FINANCE
+    assert rows[f"{cap} · de-rating"]["new"] == preset_apply.EMPTY
+
+
+def test_b2_a_stated_indexation_stays_and_no_rate_leaves_it_empty():
+    from models.business_case import BusinessCaseInputs, LineItem
+    from services.business_case import presets as P
+
+    def line(name, **kw):
+        return LineItem(
+            name=name,
+            kind="revenue",
+            category="capacity_payment",
+            unit="kW_year",
+            quantity=1.0,
+            escalation="contract",
+            **kw,
+        )
+
+    case = BusinessCaseInputs(lines=[line("stated", indexation=0.03), line("empty")])
+    filled = P.with_finance_indexation(case, {"ppa": 0.02, "opex": 0.05})
+    assert [ln.indexation for ln in filled.lines] == [0.03, 0.02]
+    assert case.lines[1].indexation is None  # the input is not changed in place
+    none = P.with_finance_indexation(case, {"opex": 0.05})
+    assert [ln.indexation for ln in none.lines] == [0.03, None]
+
+
+def test_b2_a_preset_keeps_the_stored_receivable_days(bc, template):
+    from tests.test_business_case_chat_tools import _line as _bc_line
+    from tests.test_business_case_chat_tools import _store
+
+    _store(bc, {"inputs": {"lines": [_bc_line(price=None)], "receivable_days": 30.0}})
+    new = preset_apply.plan(_args(variant="gpu_cloud"))["new"]
+    assert new["inputs"]["receivable_days"] == 30.0

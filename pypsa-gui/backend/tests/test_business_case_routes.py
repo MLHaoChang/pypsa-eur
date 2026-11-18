@@ -631,7 +631,10 @@ def test_c6_a_break_even_without_a_root_is_not_established_in_api_and_workbook()
 
     import openpyxl
 
-    from services.results_workbook.business_case import write_business_case_sheet
+    from services.results_workbook.business_case import (
+        reason_words,
+        write_business_case_sheet,
+    )
 
     for status in (
         "break_even_not_bracketed",
@@ -666,11 +669,13 @@ def test_c6_a_break_even_without_a_root_is_not_established_in_api_and_workbook()
             for r in wb["Business case"].iter_rows()
             if r[0].value
         }
-        assert cells["Price at NPV 0"][:2] == ["not_established", status]
-        assert cells["Price scale at NPV 0"][0] == "not_established"
-        assert cells["project_npv"][:2] == ["not_established", "wacc_nominal_missing"]
-        assert cells["min_dscr"][:2] == ["n/a", "no_debt"]
-        assert cells["revenue"][0] == "not_established"
+        # In words, never a code (walk 06, GK B2 B3).
+        assert cells["Price at NPV 0"][:2] == ["not established", reason_words(status)]
+        assert "_" not in reason_words(status)
+        assert cells["Price scale at NPV 0"][0] == "not established"
+        assert cells["Project NPV"][:2] == ["not established", "WACC nominal missing"]
+        assert cells["Minimum DSCR"][:2] == ["n/a", "no debt"]
+        assert cells["revenue"][0] == "not established"
 
 
 def _save(wb) -> bytes:
@@ -713,11 +718,11 @@ def test_c7_the_sheet_reads_the_stored_report_only(
     # Nothing stored: not established, and the export never runs it.
     got = _sheet(client)
     assert (
-        got["about"].startswith("not_established")
+        got["about"].startswith("not established")
         and "run the business case" in got["about"]
     )
     assert got["rows"]["Business case"][0] == got["about"]
-    assert "ebitda_margin_gross" not in got["rows"]
+    assert "EBITDA margin (gross)" not in got["rows"]
     assert session_state(client).get("business_case") is None
     assert session_state(client).get("business_case_report") is None
     # A current report: its figures.
@@ -726,18 +731,21 @@ def test_c7_the_sheet_reads_the_stored_report_only(
     got = _sheet(client)
     assert got["about"].startswith("current")
     rep = session_state(client)["business_case_report"]
+    from services.finance.business_case import KPI_ROW
+
+    assert rep["pnl"]["kpi_row"] == KPI_ROW  # served, never mirrored (walk 03)
     k = rep["kpis"]["ebitda_margin_gross"]
-    assert got["rows"]["ebitda_margin_gross"][0] == (
+    assert got["rows"]["EBITDA margin (gross)"][0] == (
         k["value"]
         if k["status"] == "ok"
-        else ("n/a" if k["status"] == "n/a" else "not_established")
+        else ("n/a" if k["status"] == "n/a" else "not established")
     )
     assert got["rows"]["Revenue line"][0] == "product"
     # Stale: labelled with what changed, its figures not shown.
     assert _put(client, _bc(_line(price=70.0))).status_code == 200
     got = _sheet(client)
     assert got["about"].startswith("stale") and "business_case_inputs" in got["about"]
-    assert "ebitda_margin_gross" not in got["rows"]
+    assert "EBITDA margin (gross)" not in got["rows"]
 
 
 # ── the preset route: DefaultUnitMismatch's catching site (C6) ───────────────
@@ -930,7 +938,7 @@ def test_c6_a_break_even_without_a_root_is_not_established_end_to_end(
     assert be["status"] == "break_even_not_bracketed" and be["price"] is None
     assert be["line"] == "product"
     rows = _sheet(client)["rows"]
-    assert rows["Price at NPV 0"][:2] == ["not_established", "break_even_not_bracketed"]
+    assert rows["Price at NPV 0"][:2] == ["not established", "break even not bracketed"]
 
 
 def test_c6_kw_per_gpu_missing_reads_not_established_in_the_workbook(
@@ -951,8 +959,8 @@ def test_c6_kw_per_gpu_missing_reads_not_established_in_the_workbook(
     assert client.post(BC_URL).status_code == 200
     assert _bc_poll(client)["status"] == "done"
     rows = _sheet(client)["rows"]
-    assert rows["ebitda_margin_gross"][0] == "not_established"
-    assert rows["revenue"][0] == "not_established"
+    assert rows["EBITDA margin (gross)"][0] == "not established"
+    assert rows["revenue"][0] == "not established"
 
 
 def test_a_report_without_a_current_ic_report_reads_stale(
@@ -1068,10 +1076,11 @@ def test_the_sheet_cells_name_each_reason_and_unit():
         for r in wb["Business case"].iter_rows()
         if r[0].value
     }
-    assert rows["a"][:3] == [1.5, "ok", "EUR/MW"]
-    assert rows["b"][:2] == ["not_established", "not_established"]
-    assert rows["b"][2] in (None, "")
-    assert rows["Price at NPV 0"][:2] == ["not_established", "not_established"]
+    # A key with no words of its own reads as its spelled-out name, never the id.
+    assert rows["A"][:3] == [1.5, "ok", "EUR/MW"]
+    assert rows["B"][:2] == ["not established", "not established"]
+    assert rows["B"][2] in (None, "")
+    assert rows["Price at NPV 0"][:2] == ["not established", "not established"]
 
 
 # ── GK B (54) D1, D2, M8: the under-lock re-checks, each pinned at lock entry ──

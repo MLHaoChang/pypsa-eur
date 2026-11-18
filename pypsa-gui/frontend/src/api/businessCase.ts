@@ -166,6 +166,9 @@ export interface BusinessCasePnl {
   /** Display key (BC 17): every input each row that reads None lacks, in the engine's
    *  reason codes; absent on a report stored before it. */
   row_reason?: Record<string, BusinessCaseRowReasonItem[]>
+  /** Display key (walk 03): the P&L row each KPI is computed from, so a KPI not
+   *  established reads that row's `row_reason`; absent on a report stored before it. */
+  kpi_row?: Record<string, string>
 }
 
 export interface BusinessCaseRowReasonItem {
