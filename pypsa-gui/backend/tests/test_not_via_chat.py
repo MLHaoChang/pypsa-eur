@@ -63,9 +63,11 @@ def test_the_issue_rows_are_declared():
         'assistant_keys_and_profiles': ('out of chat', 'settings'), 'assistant_access_rule': ('out of chat', 'chat'),
         'solve_queue_instance_controls': ('out of chat', 'solveQueue'), 'map_layout_and_sites': ('manual', 'map'),
         'site_scene': ('unbuilt', 'map'),
+        'site_scene_export': ('manual', 'map'),
+        'site_scene_blender_worker': ('unbuilt', 'map'),
         'accept_assumed_defaults': ('unbuilt', None),
         'intent_comparison': ('unbuilt', None),
-        'business_case': ('out of chat', None),  # 08b: only the preset (GK B (54) Q3, D8)
+        'business_case_table_options': ('unbuilt', None),  # 09: the line table's options (issue 16)
         'dc_backup': ('unbuilt', None),
         'dc_architecture': ('unbuilt', None),
         'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),
@@ -73,6 +75,7 @@ def test_the_issue_rows_are_declared():
         'power_trace_spectrum': ('unbuilt', None),
         'report_comment_revisions': ('unbuilt', None),
         'report_chart_snapshots': ('manual', 'results'),
+        'eh_study_why': ('unbuilt', None),  # guided-results 02a; a later slice adds the chat tool
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected
@@ -115,8 +118,6 @@ def test_the_issue_rows_are_declared():
     ('Why is the LCOE KPI not shown in the strip?', 'results_headline_strip'), ('Add a KPI to the strip', 'results_headline_strip'),
     ('Hide the headline strip', 'results_headline_strip'), ('What does the headline strip show?', 'results_headline_strip'),
     # BC 08b (GK B (54) D8): only the preset is out of chat.
-    ('Apply the business case preset', 'business_case'),
-    ('Fill the business case from the template preset', 'business_case'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -127,6 +128,8 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
 
 @pytest.mark.parametrize('goal', [
     'get_component_schema', 'run the simulation', 'show the load flow results', 'parameter changes chart delivery',
+    # Business case 14 (GK B (56) B7): the preset is a chat tool now (apply_business_case_preset).
+    'Apply the business case preset', 'Fill the business case from the template preset',
     'Change the storage cost to 150', 'Read the capex from this PDF datasheet', 'Set the coordinates of bus 3',
     'What are the key cost drivers', 'Add a user-defined carrier', 'Attach the TOU tariff to the grid connection',
     'Import a URDB tariff', 'List the tariffs in the library', 'Upload this CSV as the load profile',
@@ -244,3 +247,15 @@ def test_saved_report_charts_are_human_only_and_found_by_their_goal(discovery):
 def test_a_real_chart_pin_phrase_is_still_refused(discovery):
     out = chat_tools.find_capabilities('Which charts are pinned to the report?')
     assert out['not_via_chat'][0]['title'] == 'Saving a chart for the report'
+
+
+def test_the_line_table_options_hit_only_on_the_business_case():
+    """09: "units" alone is any unit question; the entry hits only with "business case"."""
+    from services.not_via_chat import matches
+
+    def titles(words):
+        return [m['title'] for m in matches(set(words), limit=5)]
+
+    assert 'Business case line options' not in titles({'what', 'units', 'is', 'p_nom', 'in'})
+    assert 'Business case line options' in titles({'business', 'case', 'units', 'for', 'line'})
+    assert 'Business case line options' not in titles({'business', 'as', 'usual', 'units'})

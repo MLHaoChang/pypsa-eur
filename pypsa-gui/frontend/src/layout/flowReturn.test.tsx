@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useUIStore } from '../store/uiStore'
 import { FlowReturnButton } from './FlowReturnButton'
-import { openFlowTarget, openFlowTargetInPlace, returnToOrigin, showGridReadiness,
+import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert, returnToOrigin, showGridReadiness, withReturnFrom,
   openEconomicAssumptions, openProfileStudio } from './flowNavigation'
 
 const prop = { section: 'connection', panel: null, component: 'Link', entity: 'grid_import', field: 'p_nom' } as const
@@ -43,6 +43,26 @@ describe('fix link return to origin', () => {
     await new Promise(r => setTimeout(r, 50))
     expect(top).toBe(240)
     box.remove()
+  })
+
+  it('Guided: Back from an Expert Add form drops the form, so a later drawer shows its own editor', () => {
+    reset({ uiMode: 'guided', activeSlidePanel: 'hubDesign', activeSection: 'carriers', creationItem: null })
+    act(() => withReturnFrom(() => {
+      openSectionInExpert('carriers')
+      useUIStore.getState().setCreationItem({ id: 'process_unit', label: 'Process unit' })
+    }))
+    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(useUIStore.getState().creationItem).not.toBeNull()
+    act(() => returnToOrigin())
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().creationItem).toBeNull()
+  })
+
+  it('Back within one mode keeps an Add form the jump opened beside the view', () => {
+    reset({ uiMode: 'expert', activeSlidePanel: 'issues', activeSection: 'readiness', creationItem: null })
+    act(() => withReturnFrom(() => useUIStore.getState().setCreationItem({ id: 'bus', label: 'Bus (Node)' })))
+    act(() => returnToOrigin())
+    expect(useUIStore.getState().creationItem).toEqual({ id: 'bus', label: 'Bus (Node)' })
   })
 
   it('Guided: the jump replaces the drawer; Back reinstates the previous one', () => {

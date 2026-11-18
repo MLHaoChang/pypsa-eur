@@ -313,6 +313,9 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/headline_kpis",
         # homer-parity 01a: one share per period, not a series.
         "/renewable_fraction",
+        # homer-parity 01b: per-snapshot records and the binding list, not a
+        # windowed index/columns/data frame.
+        "/operating_reserve",
         # Grid-to-process process view (ticket 04): per-product and per-unit
         # records; each inventory carries its own level list, not index/columns/data.
         "/process_view",
@@ -389,6 +392,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # Energy Hub reference-design surfaces — structured reports /
         # comparison tables / study lifecycle status, no snapshot series.
         "/eh_study",
+        # guided-results 02a: the provenance walk of one study figure, steps not a series.
+        "/eh_study/why/{figure}",
         "/eh_reference_design",
         "/eh_readiness",
         "/eh_review",
@@ -412,7 +417,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
     aggregates.update({"/loadflow-view", "/run-view", "/run-evidence.json"})
     # Business case (business-case 08a): the inputs state, the preset variants
     # and the stored case are structured documents, not index/columns/data.
-    aggregates.update({"/business_case", "/business_case/inputs", "/business_case/preset"})
+    aggregates.update({"/business_case", "/business_case/inputs", "/business_case/preset",
+                       "/business_case/options"})
     unclassified = declared - ranged - aggregates
     assert not unclassified, (
         f"unclassified /results endpoints: {sorted(unclassified)} — add each to "

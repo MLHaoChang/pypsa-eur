@@ -138,6 +138,7 @@ RESULTS_ENUM = [
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
     "asset_economics", "billing", "cfe_score", "value_flows", "renewable_fraction",
+    "operating_reserve",
 ]
 RESULTS_SOURCE_ENUM = ["lopf", "ac_pf"]
 # Task 14 — per-asset results chat tools (get_asset_results /
@@ -491,6 +492,11 @@ TOOLS: list[dict[str, Any]] = [
         "nothing served), renewable_mwh, nonrenewable_mwh, served_mwh, conversion_mwh, "
         "note, per_period: [{period, fraction, ...}], target (the minimum the solve "
         "enforced, null when off), reason}; "
+        "(operating_reserve): only the hours where the reserve binds, paged with offset/limit "
+        "(at most 24 per read): {shares: {load, pv, wind} (fractions, null when the reserve was "
+        "off), hours_total, binding_hours_total, binding_hours: [{snapshot, required_mw, "
+        "held_mw, binding, holders: [{name, kind: generator|storage_unit, held_mw}] (the 5 "
+        "largest), holders_total}], not_counted: [storage not on the electricity bus], reason}; "
         "(value_flows): {status: 'ok'|'not_established'|'value_flows_invalid', "
         "participants, externals, template, periods: {'_'|period: {lines: [{payer, payee, "
         "value_stream, source, amount, ...}], by_participant: {id: {paid, received, net, "
@@ -2540,6 +2546,21 @@ TOOLS: list[dict[str, Any]] = [
         "A cancelled wait leaves the job running; solve_queue_abort, abort_simulation, "
         "abort_adequacy_study, or abort_report_generation stops it. Safety: read.",
         {"job_id": {"type": "string"}, "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 25}}, ["job_id"],
+    ),
+    _t(
+        "cancel_job",
+        "Cancel one job by the handle you were given: fg:… (run_simulation / "
+        "run_ac_pf_stage), ad:… (study jobs), rpt:… (report jobs) or a "
+        "solve-queue/GridSpine UUID. Runs that family's own abort as you and "
+        "reports only what it verified: `cancel` is cancelled (stopped and the "
+        "worker exited), cancel_requested (sent; it stops at its next boundary), "
+        "already_finished (nothing sent) or finished_first (it ended another way; "
+        "job.outcome says how). It errors, and nothing is cancelled, when the "
+        "abort was refused (job_cancel_refused), the handle no longer owns its run "
+        "(job_origin_lost) or the job has no recorded owner (job_owner_unknown). "
+        "This does not stop monitoring; it stops the job. Safety: destructive.",
+        {"job_id": {"type": "string", "maxLength": 80}},
+        ["job_id"],
     ),
     _t(
         "get_study_evidence",
@@ -4691,10 +4712,33 @@ TOOLS: list[dict[str, Any]] = [
         "approves a card showing every line added, changed (old → new) or removed and "
         "each price's source; an edit too large for one card is refused "
         "(business_case_card_too_large): split it. clear=true (no business_case) removes "
-        "every line. The preset is the panel's (Results, Investment tab). Safety: write.",
+        "every line. `set` (instead of business_case) changes named cells of the STORED "
+        "lines without sending them back: {\"<line name>\": {price | price_by_year | "
+        "quantity | quantity_by_year | money_year | life_years: value}, kw_per_gpu?, "
+        "break_even_line?}; a cell that replaces a pack default (assumed) makes the user its "
+        "source, so it cites the user too (citation `column` names a non-price cell), even "
+        "when equal to the default. Unknown names or columns: business_case_set_invalid. "
+        "Safety: write.",
         {"business_case": {"type": "object"}, "if_match": {"type": "string"},
-         "clear": {"type": "boolean"},
+         "clear": {"type": "boolean"}, "set": {"type": "object"},
          "citations": {"type": "array", "maxItems": 60, "items": {"type": "object"}}},
+        ["if_match"],
+    ),
+    _t(
+        "apply_business_case_preset",
+        "Store the open project's template preset as the business-case lines (Guided "
+        "'is this plant worth building?'). The SERVER fills every cost default from the "
+        "preset's pinned pack, marked assumed with its source and year; revenue prices stay "
+        "empty. `variant` picks one of the template's presets; a template with none (the "
+        "generic site, or a template with no preset yet) takes `rows`, the labels of the "
+        "offered rows the user picked. Refusals list the choices: preset_variant_required "
+        "(variants), preset_rows_required (offered). `if_match` is REQUIRED (the digest of "
+        "get_business_case(detail='inputs')); it REPLACES the stored lines, so the card "
+        "shows each removed line. Returns `to_ask` (every empty price, quantity or share: "
+        "ask the user, NEVER invent) and `assumed` (each default with source and year). "
+        "Needs the finance inputs (their currency). Safety: write.",
+        {"if_match": {"type": "string"}, "variant": {"type": "string"},
+         "rows": {"type": "array", "maxItems": 20, "items": {"type": "string"}}},
         ["if_match"],
     ),
     _t(
@@ -4962,8 +5006,11 @@ TOOLS: list[dict[str, Any]] = [
         "why_this_number",
         "Explain why one number has its value, step by step, from the provenance graph. "
         "Target either an asset field (component, name, field; field='capital_cost' is the "
-        "Economics row's annualised cost) or a Guided ledger row (project, study_id, ledger_key, "
-        "option_id: the row on that option's network). The result starts with `outcome` "
+        "Economics row's annualised cost), a Guided ledger row (project, study_id, ledger_key, "
+        "option_id: the row on that option's network) or a calculation metric a checked evidence "
+        "record answered (evidence_id, metric: its steps pin the record's raw inputs, window and value "
+        "against the open network now; the run it was computed in reads uncompared, so it is never "
+        "fresh). The result starts with `outcome` "
         "(state fresh|stale|uncompared|from_memory, complete, truncated), then each step: what the value "
         "was derived from or priced through (a pack price scaled by dc_ac_ratio or a Link's "
         "efficiency), its value and unit as stored now, its provenance stamp (status, source, "
@@ -4982,7 +5029,9 @@ TOOLS: list[dict[str, Any]] = [
          "project": {"type": "string", "minLength": 1},
          "study_id": {"type": "string", "minLength": 1},
          "ledger_key": {"type": "string", "minLength": 1},
-         "option_id": {"type": "string", "minLength": 1}},
+         "option_id": {"type": "string", "minLength": 1},
+         "evidence_id": {"type": "string", "minLength": 1},
+         "metric": {"type": "string", "minLength": 1}},
         [],
     ),
     _t(
@@ -5719,6 +5768,7 @@ TOOL_ROUTES: dict[str, list] = {
     "ask_user": _UI_EVENT,
     "project_readiness": _SERVICE_CALL,
     "wait_for_job": _SERVICE_CALL,
+    "cancel_job": _SERVICE_CALL,
     "get_study_evidence": _SERVICE_CALL,
     "run_sensitivity_sweep": _SERVICE_CALL,
     "use_toolset": _SERVICE_CALL,
@@ -5872,7 +5922,8 @@ TOOL_ROUTES: dict[str, list] = {
     # end LV08 B2a
     # Provenance graph (1), issue 03: "why this number", an asset field or a Guided ledger row.
     "why_this_number": [("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}"),
-                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why")],
+                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why"),
+                        ("GET", "/api/chat/evidence/{evidence_id}/why/{metric}")],
     # Library references (3): two reads (the asset's pack from its provenance) and the apply.
     "list_library_references": [("GET", "/api/library/references")],
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
@@ -5901,6 +5952,8 @@ TOOL_ROUTES: dict[str, list] = {
     "get_business_case": [("GET", "/api/results/business_case"),
                           ("GET", "/api/results/business_case/inputs")],
     "set_business_case_lines": [("PUT", "/api/results/business_case/inputs")],
+    "apply_business_case_preset": [("GET", "/api/results/business_case/preset"),
+                                   ("PUT", "/api/results/business_case/inputs")],
     "abort_business_case": [("POST", "/api/results/business_case/abort")],
     # decision study (6) — U3: `routers/studies.py`, in process through `_route`.
     "start_decision_study": [("POST", "/api/projects/{name}/studies/")],
@@ -6035,6 +6088,8 @@ _SERVICE_CALL_NETWORK_WRITES = frozenset({
 # rest are chat / upload / profile state).
 _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     "propose_memory",
+    # live-voice 11b: stops a job through its family's own abort; edits nothing.
+    "cancel_job",
     "gridspine_create_study", "gridspine_set_dispatch_source",
     "gridspine_update_config", "gridspine_edit_template_param",
     "gridspine_export_handoff_bundle", "gridspine_compute_capacity",

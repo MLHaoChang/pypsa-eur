@@ -1,7 +1,7 @@
 # Hosted streaming speech transport and account proof
 
-Status: ready-for-agent
-Progress: Mocked STT/TTS contracts in harness/providers/live_media.py with test; no LiveKit, routes, session or live probe gate on master
+Status: in-progress (live probe pending owner keys, LV01-PROBE-LATER-1)
+Progress: Mocked contracts for LiveKit/Deepgram/OpenAI adapters, startup wiring and the closed live-probe gate plus probe script on the claude/live-voice-01a-adapters and claude/live-voice-01b-probe-gate PRs; the live probe has not run (no keys, no approved budget)
 Type: task
 Blocked by: 02, 09 (integrated live acceptance; adapter development can start earlier)
 
@@ -38,3 +38,46 @@ audio) refused before or after the call, pinned explicit language (auto/invalid
 refused; response-language mismatch refused), cancel before and during an
 in-flight request. Still open: real vendor adapters, WebRTC/LiveKit, token
 routes, and the budgeted live probe with sanitized usage evidence.
+
+2026-11-13: live-voice 01 build, probe later (LV01-PROBE-LATER-1). Session,
+actor/CSRF routes, bridge tokens and settlement were already on master from
+LC-07 (`services/live_speech.py`, `routers/durable_conversation.py`); this
+slice adds the vendor adapters behind the `live_media` protocols:
+`harness/providers/livekit_media.py` (CreateRoom with 60 s empty / 20 s
+departure timeouts and 3 participants max, optional worker dispatch carrying the
+bridge token in job metadata, browser grant = join + microphone + subscribe,
+no data or admin, at most 900 s; a failed start deletes the room; DeleteRoom
+"not found" counts as closed), `deepgram_stt.py` (streaming, pinned model and
+language, `numerals=true`, interim captions plus final events, usage from
+bytes sent and the service's own Metadata duration), `openai_tts.py` (pinned
+model and voice, `/v1/audio/speech` contract, no automatic migration), and
+`hosted_speech.py` (env config, `probe_gate`, price estimate, evidence
+`sanitize`). `main` installs the transport only when `PYPSA_GUI_LIVE_SPEECH=1`.
+The probe script is `pypsa-gui/backend/smoke/live_voice_probe.py`: without
+`--run` it prints the gate; with it, it refuses until the gate is open.
+
+Supported, as built and mocked (not yet measured live):
+- Languages: pinned per deployment in `PYPSA_GUI_LIVE_LANGUAGES` (primary
+  tags; auto-detect and `multi` refused). The probe has exact-number sentences
+  for `en` and `de` only.
+- STT: Deepgram streaming, model pinned in `PYPSA_GUI_LIVE_STT_MODEL` (no
+  default; `nova-3` intended per the cost assessment), 48 kHz mono linear16
+  from the worker, containerized WAV in the probe.
+- TTS: OpenAI `/v1/audio/speech`, model and voice pinned in
+  `PYPSA_GUI_LIVE_TTS_MODEL` / `PYPSA_GUI_LIVE_TTS_VOICE` (no default).
+  `tts-1` and `tts-1-hd` are refused from 2027-01-06 (the assessment's
+  retirement date). Check `gpt-4o-mini-tts` against OpenAI's deprecation page
+  before the probe; a model change is an owner decision.
+- Device: not measured. The browser WebRTC join is a manual step the probe
+  records as `not_run`.
+
+To run the probe the owner sets `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
+`LIVEKIT_API_SECRET`, `DEEPGRAM_API_KEY`, `OPENAI_API_KEY` (or
+`PYPSA_GUI_OPENAI_API_KEY`), the three pinned model variables, the languages,
+`PYPSA_GUI_LIVE_PROBE_BUDGET_USD` (at most 0.10; the estimate is about $0.025
+per 60 s) and `PYPSA_GUI_LIVE_PROBE_APPROVAL` (the decision id). Prices are
+taken from the 2026-10-10 assessment, and the gate refuses (`prices_stale`)
+once they are 90 days old. Still open: the live probe and its evidence, the
+hosted audio worker (it needs the thread id as well as the room in its dispatch
+metadata, which `MediaTransport.open_session` does not pass yet), cold-start
+and Build-quota measurement, and the browser join.

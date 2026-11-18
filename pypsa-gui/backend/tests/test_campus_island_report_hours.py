@@ -270,3 +270,42 @@ def test_no_title_model_or_missing_item_carries_an_internal_plan_tag(saved):
     report = island_report(saved)
     shown = [t["title"] for t in report["tables"]] + [t["model"] for t in report["tables"]] + report["missing"]
     assert not [s for s in shown if re.search(r"\((I\d|Q\d)", s)]
+
+
+# SH 40: a row at an hour whose solved tie is open was not run; its ok is
+# shown as what it means, it is neither a failing nor a passing row.
+
+def test_a_tie_open_row_reads_not_applicable_in_the_e1_and_event_tables(saved):
+    cols, ecols = F.E1_HOURLY_COLUMNS, F.EVENT_COLUMNS
+    _freq(_run_dir(saved), e1_rows=[
+        _row(cols, period=0, hour=1, scenario="seamless", event="E1", direction="import", ok=None,
+             binding=F.TIE_OPEN_NA),
+        _row(cols, period=0, hour=3, scenario="seamless", event="E1", direction="import", ok=False, nadir_hz=47.1),
+        _row(cols, period=0, hour=5, scenario="seamless", event="E1", direction="import", ok=True, nadir_hz=49.9)],
+        event_rows=[
+        _row(ecols, period=0, hour=1, scenario="seamless", event="E1", ok=None, binding=F.TIE_OPEN_NA),
+        _row(ecols, period=0, hour=1, scenario="seamless", event="E2", ok=True, nadir_hz=49.5)],
+        summary={"tie_open_hours": [[0, 1]], "e1_bridge_note": None})
+    tables = _tables(island_report(saved))
+    t = tables["freq_e1_hourly"]
+    at = {c: i for i, c in enumerate(t["columns"])}
+    assert [(r[at["hour"]], r[at["ok"]]) for r in t["rows"]] == [(3, False), (1, "not applicable: tie open")]
+    assert "1 of 3 rows; 1 not applicable: tie open, not judged" in t["title"]
+    ev = tables["freq_events"]
+    at = {c: i for i, c in enumerate(ev["columns"])}
+    assert [(r[at["event"]], r[at["ok"]]) for r in ev["rows"]] == [("E1", "not applicable: tie open"), ("E2", True)]
+    rows = {r[0]: r[1] for r in tables["freq_summary"]["rows"] if r[0] != "ledger"}
+    assert rows["tie_open_hours"] == "p0 h1"
+
+
+def test_every_island_hour_tie_open_is_said_in_the_frequency_summary(saved):
+    note = "not evaluated (tie open on every island hour)"
+    _freq(_run_dir(saved), summary={"tie_open_hours": [[0, 3]], "e1_bridge_note": note})
+    rows = {r[0]: r[1] for r in _tables(island_report(saved))["freq_summary"]["rows"] if r[0] != "ledger"}
+    assert rows["e1_bridge_note"] == note
+
+
+def test_a_frequency_summary_from_before_the_tie_state_shows_no_tie_rows(saved):
+    _freq(_run_dir(saved))
+    rows = {r[0] for r in _tables(island_report(saved))["freq_summary"]["rows"]}
+    assert "tie_open_hours" not in rows and "e1_bridge_note" not in rows

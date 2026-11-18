@@ -707,6 +707,8 @@ export const KIND_COPY: Record<
   project_exists: { title: 'Project name already exists' },
   descendants_exist: { title: 'Project has descendants' },
   confirmation_expired: { title: 'Confirmation expired' },
+  // Live copilot 48d (LC48D-APPROVAL-1): the server restarted, so the approval card was lost and nothing ran.
+  confirmation_lost_on_restart: { title: 'The server restarted: ask again' },
   // Study harness 37: a grant whose intake digest is not the card's (the inputs changed since it was shown).
   intake_stale: { title: 'The inputs changed: review them again' },
   // Chat harness issue 18: approvals fail closed when they cannot be recorded.
@@ -854,7 +856,7 @@ const DENIED_LINE_ONLY_KINDS: ReadonlySet<string> = new Set(['confirmation_expir
 
 export const TOOL_ERROR_BANNER_KINDS = new Set([
   'project_exists', 'descendants_exist',
-  'confirmation_expired', 'approval_unavailable', 'rate_limited',
+  'confirmation_expired', 'confirmation_lost_on_restart', 'approval_unavailable', 'rate_limited',
   'user_restriction', 'restriction_unavailable',
   'unauthorized', 'missing_api_key',
   'inactive_acting_user',

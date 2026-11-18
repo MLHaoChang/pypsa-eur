@@ -46,3 +46,38 @@ register(
     "set_business_case_lines",
     Adapter("settings_edit", _preview, _readback, section_id=_SECTION, says=_says),
 )
+
+
+# Business case 14: the preset, filled by the server (one row per line, each default with
+# its source and year; `services.business_case.preset_apply`).
+def _preset_preview(args: dict) -> list[dict]:
+    from harness.edit_card_site import _acting
+    from services.business_case import preset_apply
+
+    _acting()
+    return preset_apply.plan(args)["rows"]
+
+
+def _preset_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.business_case import preset_apply
+
+    stored = _stored()
+    return [preset_apply.read_cell(row, stored) for row in rows]
+
+
+def _preset_says(args: dict, rows: list[dict]) -> str:
+    from services.business_case import preset_apply
+
+    return preset_apply.says(rows)
+
+
+register(
+    "apply_business_case_preset",
+    Adapter(
+        "settings_edit",
+        _preset_preview,
+        _preset_readback,
+        section_id=_SECTION,
+        says=_preset_says,
+    ),
+)

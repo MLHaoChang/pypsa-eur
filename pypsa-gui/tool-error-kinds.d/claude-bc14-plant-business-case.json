@@ -1,0 +1,28 @@
+{
+ "kinds": {
+  "preset_variant_required": {
+   "surface": "inline",
+   "why": "apply_business_case_preset refuses a template with business-case presets when no variant, an unknown one or rows are given, and lists the variants. The assistant asks the user which preset and passes its id."
+  },
+  "preset_rows_required": {
+   "surface": "inline",
+   "why": "apply_business_case_preset refuses a template with no preset (the generic site, or one not covered yet) unless rows names offered rows, each once, and lists them. The assistant asks the user which rows the plant has."
+  },
+  "preset_invalid": {
+   "surface": "inline",
+   "why": "apply_business_case_preset refuses when the preset file or its pinned defaults pack cannot be read (the pack moved since the file was written). Nothing is stored; the preset needs fixing in the app, not in chat."
+  },
+  "business_case_set_invalid": {
+   "surface": "inline",
+   "why": "set_business_case_lines refuses a `set` patch with an unknown line, a column outside the patchable ones, a non-finite value, a malformed shape, or a `set` sent with business_case or clear. Nothing is written; the assistant reads the line names and sends a valid patch."
+  },
+  "default_unit_mismatch": {
+   "surface": "inline",
+   "why": "apply_business_case_preset refuses a preset whose pinned pack row is in another unit than the preset line names, with the field; nothing is filled or stored. The preset file needs fixing in the app, not in chat."
+  },
+  "template_not_known": {
+   "surface": "inline",
+   "why": "apply_business_case_preset refuses a project not made from a template: there is no preset to apply. The assistant sets the lines from the user's own figures with set_business_case_lines."
+  }
+ }
+}

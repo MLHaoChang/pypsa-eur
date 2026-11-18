@@ -64,6 +64,7 @@ import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/drop
 import SiteOverlay from '../components/SiteOverlay'
 import NativeBuildings from '../site3d/NativeBuildings'
 import SiteScenePanel from '../site3d/SiteScenePanel'
+import { useSceneExport } from '../site3d/sceneExport'
 import { useModelProposal, useSceneProposal, useSiteScene } from '../site3d/useSiteScene'
 import { emptyLayoutFor, sceneOsmIds } from '../site3d/nativeSite'
 import AssetFootprintEditor from '../components/AssetFootprintEditor'
@@ -708,6 +709,8 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
 
   const selectedBus = selectedComponent?.type === 'Bus' ? selectedComponent.name : null
   const site = useMemo(() => chooseSite(sitesDoc, activeSiteId, selectedBus), [sitesDoc, activeSiteId, selectedBus])
+  // Export for Blender (SC-04): reads the same scene query the Site 3D panel reads.
+  const sceneExport = useSceneExport(site?.id ?? null)
 
   // The packed layout for one bus alone, in that bus's frame — what the
   // empty state needs to size a default boundary.
@@ -1227,6 +1230,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
           dispatchFresh={solved}
           libraryGaps={gapLine}
           onSnapshot={currentProject ? () => setCaptureNonce(n => n + 1) : undefined}
+          sceneExport={currentProject ? sceneExport : undefined}
           walking={walking}
           onToggleWalk={() => setWalking(w => !w)}
           selectedPlacedKey={selectedPlacedKey}
@@ -1248,7 +1252,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
           onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
         />
 
-        <SiteScenePanel site={site} contextBuildings={context?.buildings ?? null} />
+        <SiteScenePanel site={site} contextBuildings={context?.buildings ?? null} current={solved} freshSince={freshSince} />
         {selectedComponent && showFootprintEditor && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
         <p className="max-w-72 rounded bg-bg/95 px-2 py-1 text-[10px] text-muted">Library dimensions are estimates unless a user-entered envelope is provided. Fit checks do not certify clearances or compliance.</p>
         {/* Legend — under the picker; the result bands only while results show. */}

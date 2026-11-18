@@ -157,6 +157,8 @@ FRAME_PROJECTIONS = {
     "tool_result": "projected",
     "tool_error": "projected",
     "tool_progress": "projected",
+    "job_snapshot": "projected",
+    "job_terminal": "projected",
     "ui_event": "projected",
     "session_init": "projected",
     "answer_progress": "software_progress",
@@ -187,6 +189,7 @@ ROUTE_SURFACES = {
     "GET /answers/{answer_id}": "answer_fetch",
     "GET /answers/{answer_id}/export": "answer_export",
     "GET /evidence/{evidence_id}": "tool_result_frames",
+    "GET /evidence/{evidence_id}/why/{metric}": "tool_result_frames",
     "GET /{session_id}/progress": "tool_result_frames",
     "GET /runs/{task_id}/view": "run_monitor",
     "POST /runs/{task_id}/present": "run_monitor",
@@ -232,6 +235,8 @@ ROUTE_SURFACES = {
     "POST /{session_id}/rewind": NO_ASSISTANT_TEXT,
     "POST /{session_id}/goal": NO_ASSISTANT_TEXT,
     "POST /{session_id}/abort": NO_ASSISTANT_TEXT,
+    # live-voice 11b: Stop monitoring answers {ok, stopped}; no assistant text.
+    "POST /{session_id}/progress/stop": NO_ASSISTANT_TEXT,
     "GET /{session_id}/continuations": NO_ASSISTANT_TEXT,
     "POST /{session_id}/continuations/{job_id}/dismiss": NO_ASSISTANT_TEXT,
 }

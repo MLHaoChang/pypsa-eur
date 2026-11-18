@@ -280,8 +280,12 @@ def _freq_tables(run_dir, missing) -> list:
             # Every hour is too long to show; its failing rows are the verdict. On the year base a period has
             # 8,760 hours, so thousands may fail: the table shows the E1_ROWS_SHOWN worst (``worst``, the
             # binding limit's relative exceedance) and names the file that holds them all.
+            # SH 40: a row at an hour whose tie is open was not run (ok empty, never failing, never
+            # passing); it is shown, named, and counted apart from the failing rows.
             total = len(df)
-            df = df[df["ok"].map(lambda v: str(v).lower() in ("false", "0"))]
+            na = df[_tie_open_rows(df, F)].head(E1_ROWS_SHOWN)
+            n_na = int(_tie_open_rows(df, F).sum())
+            df = df[df["ok"].map(F.failed)]
             failing = len(df)
             title = f"{title} ({failing} of {total} rows"
             if failing > E1_ROWS_SHOWN:
@@ -290,9 +294,23 @@ def _freq_tables(run_dir, missing) -> list:
                       if exceed is not None else df.head(E1_ROWS_SHOWN))
                 title += (f"; the {E1_ROWS_SHOWN} worst by exceedance shown, all of them in the run's "
                           f"{fname}")
+            if n_na:
+                title += f"; {n_na} {F.TIE_OPEN_NA}, not judged"
             title += ")"
+            df = pd.concat([df, na])
+        if "ok" in df.columns and "binding" in df.columns:
+            df = df.astype({"ok": object})
+            df.loc[_tie_open_rows(df, F), "ok"] = F.TIE_OPEN_NA        # ok None shown as what it means
         tables.append(_table(f"freq_{key}", title, model, columns, df.values.tolist(), group="frequency"))
     return tables
+
+
+def _tie_open_rows(df, F):
+    """The rows not run because the hour's solved tie is open (``ok`` empty,
+    ``binding`` ``frequency.TIE_OPEN_NA``)."""
+    if "binding" not in df.columns:
+        return pd.Series(False, index=df.index)
+    return (df["binding"] == F.TIE_OPEN_NA) & ~df["ok"].map(F.failed) & ~df["ok"].map(F.passed)
 
 
 def _finite(value):

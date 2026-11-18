@@ -199,6 +199,10 @@ GENERATOR: tuple[FieldSpec, ...] = (
                   "at once without financing. Annualised over the lifetime at the discount rate.", key_param=True),
     FieldSpec("lifetime", "investment", "Lifetime", "Technical and economic lifetime. The asset retires after its "
               "build year plus lifetime.", "years", "years", key_param=True),
+    FieldSpec("lifetime_run_hours", "investment", "Lifetime in running hours", "Engine-driven generators only. "
+              "Running hours before the unit is replaced (HOMER's generator lifetime). The investment case replaces "
+              "it at this many hours at the solved hours per year, or at Lifetime if sooner. The capital cost keeps "
+              "Lifetime.", "h", "h"),
     *_investment_common(),
     _money_per_mw_yr("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
                      "discount rate, lifetime); fixed O&M is charged on top. The optimiser pays it on every MW it adds, "
@@ -210,11 +214,15 @@ GENERATOR: tuple[FieldSpec, ...] = (
     FieldSpec("fuel_price", "variable", "Fuel price", "Fuel-burning generators only. Price per MWh of fuel "
               "burnt; sets marginal cost = slope × price and stand-by cost = no-load fuel × capacity × price.",
               "EUR/MWh fuel", "EUR/MWh"),
+    FieldSpec("om_cost_per_run_hour", "variable", "O&M per running hour", "Engine-driven generators only. "
+              "Operation and maintenance per hour the unit is on, at any output (HOMER's O&M per operating hour). "
+              "Adds to the stand-by cost. Needs Unit commitment.", "EUR/h", "EUR/h"),
     FieldSpec("curtailment_cost", "variable", "Curtailment cost", "Penalty per MWh of available but unused energy. "
               "Set above zero to discourage spilling wind or solar.", "EUR/MWh", "EUR/MWh"),
     *_uc_cost_rows(shut_down=True, stand_by=False),
     FieldSpec("stand_by_cost", "variable", "Stand-by cost", "Derived: cost per hour while the unit is on, at any "
-              "output, from the fuel curve (no-load fuel × capacity × fuel price).", "EUR/h", "EUR/h",
+              "output: the fuel curve's no-load fuel × capacity × fuel price, plus the O&M per running hour.", "EUR/h",
+              "EUR/h",
               reveal_when=_UC, derived=True),
     _share("efficiency", "performance", "Efficiency", "Conversion efficiency from primary energy to electricity. "
            "Used for CO₂ accounting (carrier emissions ÷ efficiency)."),
@@ -642,7 +650,8 @@ _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
                             "start_method", "ride_through_curve"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
-                   "Generator": {"dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load", "fuel_price"},
+                   "Generator": {"dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load", "fuel_price",
+                                 "om_cost_per_run_hour", "lifetime_run_hours"},
                    "Bus": {"mwh_per_t", "product_value", "lost_production_value", "temperature_c", "pressure_bar"},
                    "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
                             "single_phase_share", "motor_kw", "i_start_pu", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"}}
@@ -697,21 +706,79 @@ def schema_payload(component: str) -> dict[str, Any]:
 _SIZE_BUS = {"Generator": "bus", "StorageUnit": "bus", "Store": "bus", "Load": "bus", "Link": "bus0"}
 
 
-def size_units(n, component: str, name: str) -> dict[str, str]:
+def _size_bus_of(n, component: str, name: str | None, bus: str | None):
+    """The bus a size is measured on: ``bus`` for an asset not yet created, else the asset's own (`_SIZE_BUS`).
+    None for a class with no bus size or an unknown asset."""
+    col = _SIZE_BUS.get(component)
+    if col is None:
+        return None
+    if bus is not None:
+        return bus
+    table = getattr(n, CLASS_ATTR.get(component, ""), None)
+    if table is None or name not in table.index:
+        return None
+    return table.at[name, col]
+
+
+def size_units(n, component: str, name: str | None, bus: str | None = None) -> dict[str, str]:
     """Per-asset display units for the quantity fields (size, initial energy, bounds) that differ from the class-level MW / MWh: t/h (t for a
     stock) on a tonne bus, as `flow_service._size_unit` reads the bus. Empty on an energy bus, an unreadable
     bus or a class with no bus size."""
     from services.flow_service import _size_unit
 
-    col = _SIZE_BUS.get(component)
-    table = getattr(n, CLASS_ATTR.get(component, ""), None)
-    if col is None or table is None or name not in table.index:
+    size_bus = _size_bus_of(n, component, name, bus)
+    if size_bus is None:
         return {}
     out: dict[str, str] = {}
     for f in fields_for(component):
         if f.unit_display not in ("MW", "MWh"):
             continue
-        unit = _size_unit(n, table.at[name, col], stock=f.unit_display == "MWh")
+        unit = _size_unit(n, size_bus, stock=f.unit_display == "MWh")
         if unit in ("t", "t/h"):
             out[f.key] = unit
     return out
+
+
+# Tonne-bus cost units (05d). Stored values are per t/h of capacity or per t of stock, so no kW or kWh
+# scale applies: display = stored × 1. Only the per-energy cost rows change; EUR/MWh fuel, EUR/h and EUR stay.
+_TONNE_COST_UNIT = {
+    "EUR/kW": "EUR/(t/h)", "EUR/kW/yr": "EUR/(t/h)/yr",
+    "EUR/kWh": "EUR/t", "EUR/kWh/yr": "EUR/t/yr", "EUR/MWh": "EUR/t",
+}
+
+
+def cost_units(n, component: str, name: str | None, bus: str | None = None) -> dict[str, dict]:
+    """Per-asset display unit and scale for the cost fields (overnight cost, fixed O&M, capital cost, marginal
+    and curtailment cost) of an asset on a tonne bus: EUR/(t/h), EUR/(t/h)/yr, EUR/t, EUR/t/yr, scale 1.0.
+    Empty on an energy bus, an unreadable bus or a class with no bus size, so the class-level EUR/kW etc. stay.
+    ``bus`` stands for the size bus of an asset that does not exist yet (the creation form)."""
+    from services.flow_service import _size_unit
+
+    size_bus = _size_bus_of(n, component, name, bus)
+    if size_bus is None or _size_unit(n, size_bus, stock=False) not in ("t", "t/h"):
+        return {}
+    return {f.key: {"unit": _TONNE_COST_UNIT[f.unit_display], "scale": 1.0}
+            for f in fields_for(component) if f.unit_display in _TONNE_COST_UNIT}
+
+
+def on_tonne_bus(n, component: str, name: str) -> bool:
+    """True when the asset's size is measured in t/h or t (the Economics rows show it per tonne)."""
+    from services.flow_service import _size_unit
+
+    size_bus = _size_bus_of(n, component, name, None)
+    return size_bus is not None and _size_unit(n, size_bus, stock=False) in ("t", "t/h")
+
+
+def cost_basis_of_row(n, component: str, row) -> str | None:
+    """What the costs of a row (as it will be stored) are measured per: ``tonne`` or ``energy``, from the bus its
+    size is measured on; None where the class has no bus size or the bus is unreadable. The server's check of the
+    basis a client assumed when it scaled a typed cost (05d)."""
+    from services.flow_service import _size_unit
+
+    col = _SIZE_BUS.get(component)
+    if col is None:
+        return None
+    unit = _size_unit(n, row.get(col), stock=False)
+    if unit is None:
+        return None
+    return "tonne" if unit in ("t", "t/h") else "energy"

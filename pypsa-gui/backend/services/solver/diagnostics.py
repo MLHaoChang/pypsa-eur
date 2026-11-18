@@ -191,6 +191,20 @@ def _diagnose_infeasibility(network, config, log_queue,
     except Exception:
         pass
 
+    # 2a') The operating reserve (homer-parity 01b, GK B O7): snapshots are
+    #      named only when the load share alone exceeds the most headroom.
+    try:
+        from services.solver.operating_reserve import LABEL as _OR_LABEL
+        from services.solver.operating_reserve import infeasibility_lines as _or_lines
+        for line in _or_lines(n, config):
+            emit(f"[INFEASIBLE]   • {line}")
+            body = line[len(_OR_LABEL) + 2:] if line.startswith(f"{_OR_LABEL}: ") else line
+            body = _regex.sub(r" \(row [^)]*\)", "", body.split(". ", 1)[0].rstrip(".") + ".")
+            add_constraint_hint(_OR_LABEL, body, "offgrid")
+            hints += 1
+    except Exception:
+        pass
+
     # 2b) The minimum renewable fraction (homer-parity 01a): its row per
     #     period, what it needs and the most the renewables can produce.
     try:
@@ -1038,6 +1052,10 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
     except Exception:
         pass
 
+    from services import fuel_curve as _fuel_curve
+
+    no_load_t = _fuel_curve.no_load_fuel_t(network)
+
     def _per_period_split(series, weights):
         """Group a per-snapshot series by period, returning {period → sum}."""
         weighted = (series.reindex(sns).fillna(0.0) * weights)
@@ -1082,8 +1100,14 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                 period_data[p]["opex_var_mc0"] += e
             # CO2 emitted + per-period surcharge from cfg.co2_price_per_period.
             if intensity > 0:
-                out_intensity = intensity / eff
-                tco2_per_period = _per_period_split(p_series * out_intensity, weights)
+                # Same fuel terms as services/results/emissions.py (homer-parity 02e/02j): a curve genset's
+                # slope replaces 1 / efficiency, and its no-load fuel emits per committed hour.
+                slope = _fuel_curve.curve_slope(gens.loc[g])
+                out_intensity = intensity * slope if slope is not None else intensity / eff
+                co2_series = p_series * out_intensity
+                if g in no_load_t.columns:
+                    co2_series = co2_series + no_load_t[g].reindex(sns).fillna(0.0) * intensity
+                tco2_per_period = _per_period_split(co2_series, weights)
                 for p, t_co2 in tco2_per_period.items():
                     period_data[p]["co2_emitted_t"] += t_co2
                 # CO2 surcharge = tCO2_per_period × co2_price_per_period[p]

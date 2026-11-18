@@ -61,10 +61,12 @@ import inspect
 import re
 import textwrap
 from functools import lru_cache
+from pathlib import Path
 
 import pytest
 
 import main
+from smoke.json_fragments import extend, named_with_file, route_key
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _LOCK_PRIMITIVES = frozenset({"_check_project_lock", "_enforce_project_lock"})
@@ -74,7 +76,7 @@ _LOCK_ATTR_PRIMITIVES = frozenset({
     "project_locks.get_lock",
     "projects._check_project_lock", "projects._enforce_project_lock",
 })
-_OUR_MODULES = ("routers.", "services.")
+_OUR_MODULES = ("routers.", "services.", "harness.")
 # Any canonical uuid: `_foreign_lock_gate_exempt` matches REAL request paths,
 # and its job-scoped patterns are anchored to the dashed-uuid shape.
 _SAMPLE_UUID = "123e4567-e89b-12d3-a456-426614174000"
@@ -188,6 +190,11 @@ _R_STUDY = (
     "`_refuse_while_active`; every one of these refuses a non-study project "
     "(`require_planning`). Whether studies should join the lock is an open "
     "product question, not a gap in a control that exists."
+)
+_R_SCENE_EXPORT = (
+    "SC-04 \"Export for Blender\": a POST only because the body names the format and media policy. "
+    "It READS one scene generation behind `ProjectAccessDep` and returns the zip; it persists nothing "
+    "(test_site_scene_export asserts the project tree is unchanged), so viewers may call it and no lock applies."
 )
 _R_READ_ONLY_PREVIEW = (
     "a POST only to carry a body: it computes and returns, and writes nothing. "
@@ -304,6 +311,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/projects/{name}/intent-comparison"): (NOT_PROJECT_DATA, _R_INTENT_COMPARISON),
     ("POST", "/api/projects/{name}/intent-comparison/abort"): (STOPS_WORK, _R_STOP),
     ("POST", "/api/projects/{name}/studies/preview"): (NOT_PROJECT_DATA, _R_READ_ONLY_PREVIEW),
+    ("POST", "/api/projects/{name}/sites/{site_id}/scene/exports"): (NOT_PROJECT_DATA, _R_SCENE_EXPORT),
     ("POST", "/api/profiles/estimate"): (NOT_PROJECT_DATA,
         "a POST only to carry a body: it generates a SYNTHETIC preview series "
         "in memory and returns it downsampled, writes nothing, resolves no "
@@ -349,6 +357,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("DELETE", "/api/mcp"): (CHAT_SESSION, _R_MCP),
     ("POST", "/api/chat/{session_id}/rewind"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/abort"): (CHAT_SESSION, _R_CHAT_OWNED),
+    ("POST", "/api/chat/{session_id}/progress/stop"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/continuations/{job_id}/dismiss"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/{session_id}/goal"): (CHAT_SESSION, _R_CHAT_OWNED),
     ("POST", "/api/chat/runs/{task_id}/pause"): (STOPS_WORK, _R_RUN_STOP),
@@ -407,6 +416,7 @@ TOOL_POLICY: dict[str, tuple[str, str]] = {
     "advance_experiment": (CHAT_SESSION, "arms one owned case ledger and offers an ordinary call; no case effect or execution approval"),
     "refresh_experiment": (CHAT_SESSION, "checkpoints authorized job/evidence reads in the owner's ledger; no live network writes"),
     "cancel_experiment": (CHAT_SESSION, "stops future owned case advancement; neither edits inputs nor aborts a job"),
+    "cancel_job": (STOPS_WORK, _R_STOP),
     "prepare_experiment": (CHAT_SESSION, (
         "validates an owner-scoped experiment plan on private network copies "
         "and records input/evidence fingerprints in `experiments/`. It "
@@ -429,6 +439,38 @@ KNOWN_GAPS: dict[str, str] = {
 
 
 # ── enumeration ─────────────────────────────────────────────────────────────
+
+# A new route or tool adds its decision as a fragment instead of a row above
+# (RETRO-FRAG-1): `write_surface_lock_policy.d/<branch>.json`, format in that
+# folder's README. A fragment adds rows; one naming a row above fails.
+POLICY_FILE = Path(__file__).with_name("write_surface_lock_policy.json")
+PYTHON_TABLES = (ROUTE_POLICY, TOOL_POLICY, KNOWN_GAPS)
+
+
+def _decision(_key, row) -> tuple[str, str]:
+    if not (isinstance(row, dict) and set(row) == {"category", "reason"}
+            and row["category"] in CATEGORIES and isinstance(row["reason"], str) and row["reason"].strip()):
+        raise ValueError(f'needs {{"category": one of {sorted(CATEGORIES)}, "reason": text}}, not {row!r}')
+    return row["category"], row["reason"]
+
+
+def _gap(key, text):
+    if not (isinstance(text, str) and text.strip()):
+        raise ValueError("a known gap needs its defect as text")
+    return key, text
+
+
+def policy_tables(base: Path = POLICY_FILE) -> tuple[dict, dict, dict]:
+    """ROUTE_POLICY, TOOL_POLICY and KNOWN_GAPS: the rows above plus the fragments'."""
+    return (
+        extend(PYTHON_TABLES[0], base, "routes", lambda k, v: (route_key(k), _decision(k, v))),
+        extend(PYTHON_TABLES[1], base, "tools", lambda k, v: (k, _decision(k, v))),
+        extend(PYTHON_TABLES[2], base, "known_gaps", _gap),
+    )
+
+
+ROUTE_POLICY, TOOL_POLICY, KNOWN_GAPS = policy_tables()
+
 
 def _walk_routes(routes):
     from fastapi.routing import APIRoute
@@ -492,7 +534,7 @@ def _lock_check_path(fn, depth: int = 0, seen: set | None = None) -> list[str] |
     """
     The call chain from `fn` to a lock-check primitive, or None.
 
-    Follows calls by NAME into functions defined in `routers.*`/`services.*`
+    Follows calls by NAME into functions defined in `routers.*`/`services.*`/`harness.*`
     (module globals AND function-local imports), up to six levels deep. It
     does not follow a function passed as an argument; a handler that checks
     the lock that way needs a ROUTE_POLICY entry saying so. That is a false
@@ -583,7 +625,7 @@ def test_no_route_policy_entry_is_stale_or_redundant():
     """
     routes = _write_routes()
     gone = sorted(k for k in ROUTE_POLICY if k not in routes)
-    assert not gone, f"ROUTE_POLICY names routes that no longer exist: {gone}"
+    assert not gone, f"ROUTE_POLICY names routes that no longer exist: {named_with_file(POLICY_FILE, ('routes',), gone)}"
     gated = sorted(k for k in ROUTE_POLICY if _middleware_gated(k[1]))
     assert not gated, f"ROUTE_POLICY names middleware-gated routes: {gated}"
     checked = sorted(k for k in ROUTE_POLICY if _lock_check_path(routes[k]))
@@ -683,7 +725,7 @@ def test_no_tool_policy_entry_is_stale_or_redundant():
     chat_tools, TOOL_ROUTES, nonread, gated = _tool_tables()
     for table, label in ((TOOL_POLICY, "TOOL_POLICY"), (KNOWN_GAPS, "KNOWN_GAPS")):
         gone = sorted(n for n in table if n not in chat_tools.DISPATCHERS)
-        assert not gone, f"{label} names tools that no longer exist: {gone}"
+        assert not gone, f"{label} names tools that no longer exist: {named_with_file(POLICY_FILE, ('tools', 'known_gaps'), gone)}"
     covered = sorted(n for n in TOOL_POLICY
                      if _tool_is_covered(n, chat_tools, TOOL_ROUTES, gated))
     assert not covered, f"these are covered now; delete their TOOL_POLICY entries: {covered}"

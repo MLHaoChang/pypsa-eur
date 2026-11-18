@@ -30,6 +30,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from sqlalchemy.orm import Session as DBSession
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 
 from db.models import Session as SessionRow
@@ -38,6 +39,7 @@ from db.session import get_db
 from deps import current_session, optional_user, require_user
 from harness import loop as chat_service
 from harness import mcp_client
+from harness.session import refuse_if_lost_on_restart
 from services import app_secrets, llm_config
 
 logger = logging.getLogger("pypsa_gui.chat")
@@ -1483,6 +1485,18 @@ def checked_evidence(evidence_id: str, actor: User | None = Depends(optional_use
     return assurance_records.public(assurance_records.evidence(str(actor.id), evidence_id))
 
 
+@router.get("/evidence/{evidence_id}/why/{metric}")
+def checked_evidence_why(evidence_id: str, metric: str, actor: User | None = Depends(optional_user)):
+    """Why a calculation metric an evidence record answered has its value (provenance-graph 09): the walk to the
+    raw source, window and value it was computed from, each compared with the open network now. Reads only
+    (COPILOT-1); a target it cannot answer for is `why_target_unknown` (401 signed out, 404, 422)."""
+    from services.provenance_graph.explain import TargetUnknown, explain_metric
+    try:
+        return explain_metric(None if actor is None else str(actor.id), evidence_id, metric)
+    except TargetUnknown as exc:
+        raise HTTPException(exc.status, {"error_kind": "why_target_unknown", "message": str(exc)}) from exc
+
+
 @router.get("/answers/{answer_id}/export")
 def export_checked_answer(answer_id: str, format: Literal["json", "zip"] = "json",
                           actor: User | None = Depends(optional_user)):
@@ -2300,6 +2314,10 @@ def chat_confirm(session_id: str, body: ConfirmRequest,
         _run_call(actor, lambda: run_monitor.confirm(session_id.removeprefix(runner.SESSION_PREFIX)))
     session = _resolve_owned_session(session_id, actor)
     if session is None:
+        # LC48D-APPROVAL-1: a restart drops the session with its cards. The
+        # answer depends on the token alone, so an unknown and a foreign
+        # session still read alike.
+        refuse_if_lost_on_restart(body.token)
         raise HTTPException(
             status_code=404,
             detail={
@@ -2436,6 +2454,36 @@ def chat_abort(session_id: str,
     return {"ok": True}
 
 
+@router.post("/{session_id}/progress/stop")
+def chat_progress_stop(session_id: str,
+                       actor: User | None = Depends(optional_user)) -> dict[str, Any]:
+    """
+    Stop monitoring (live-voice 11b): this session stops watching its jobs.
+
+    The jobs keep running and still settle and publish; cancelling one is
+    `cancel_job`. Only this session's observation ends: its solver-log
+    bridges stop at their next poll and its GET /progress stream closes.
+    Another session watching the same job keeps receiving. Idempotent:
+    `stopped` says whether a monitor was active. Owner and replica checks
+    are /abort's: a foreign session reads as unknown.
+    """
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException as exc:
+        if exc.status_code == 409 and (
+            (exc.detail or {}).get("error_kind") == "wrong_replica"
+        ):
+            return {
+                "ok": False,
+                "reason": "wrong_replica",
+                "owner_replica_id": (exc.detail or {}).get("owner_replica_id"),
+            }
+        raise
+    if session is None:
+        return {"ok": False, "reason": "unknown_session"}
+    return {"ok": True, "stopped": session.stop_monitoring()}
+
+
 @router.get("/{session_id}/continuations")
 def chat_continuations(session_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
     """
@@ -2488,6 +2536,62 @@ def chat_dismiss_continuation(session_id: str, job_id: str,
         raise
 
 
+def _progress_project_id() -> str | None:
+    from services.pypsa_service import PyPSAService
+
+    project = PyPSAService.get_active_context().project_uuid
+    return str(project) if project else None
+
+
+def _progress_job_view(job_id: str, actor_id: str | None) -> dict | None:
+    """live-voice 11c (C1, E2): a job's view for this reader, read now.
+
+    Through the 11a adapter as the requesting actor, and only for the
+    session's current project; anything it refuses is served as nothing.
+    """
+    from harness import job_adapters
+
+    if actor_id is None:
+        return None  # job_status would show an ownerless job to no one in particular
+    try:
+        view = job_adapters.job_status(job_id, actor_id=actor_id)
+    except HTTPException:
+        return None
+    except Exception:  # noqa: BLE001 — an adapter fault serves nothing, the stream goes on
+        logger.exception("chat progress: job view for %s failed", job_id)
+        return None
+    project_id = _progress_project_id()
+    if project_id is None or view.get("project_id") != project_id:
+        return None
+    return view
+
+
+def _progress_snapshot(session, actor_id, epoch: str, seq: int) -> dict:
+    """live-voice 11c: what a resume that cannot replay starts from."""
+    from harness import job_adapters
+    from services.pypsa_service import PyPSAService
+
+    project_id = _progress_project_id()
+    jobs = []
+    # The rows are candidates only; `_progress_job_view` is the one gate (it
+    # refuses a missing actor or project, another actor and another project).
+    rows = job_adapters.activity_jobs(
+        PyPSAService.get_active_context(),
+        owner_id=str(actor_id),
+        project_id=str(project_id),
+    )
+    for row in rows:
+        view = _progress_job_view(row["source_id"], actor_id)
+        if view is not None:
+            jobs.append(view)
+    return {
+        "epoch": epoch,
+        "seq": seq,
+        "monitor_active": session.detached_monitor_active(),
+        "jobs": jobs,
+    }
+
+
 @router.get("/{session_id}/progress")
 async def chat_progress(
     session_id: str,
@@ -2498,10 +2602,15 @@ async def chat_progress(
     """
     Issue 11 — observe detached solver progress after a foreground handoff.
 
-    Drains the session's detached progress ring and emits existing
-    ``tool_progress`` SSE frames (no new frame names). Each payload carries
-    a monotonic ``cursor`` (D-I2). Pass ``?cursor=N`` to replay frames after
-    N from the session log (gap recovery) without clearing the unread ring.
+    Drains the session's detached progress ring and emits the frames in
+    ``harness.events.PROGRESS_FRAMES``. Each payload carries a monotonic
+    ``cursor`` (D-I2) and each frame an SSE ``id: <epoch>:<seq>`` (live-voice
+    11c). A ``Last-Event-ID`` header resumes after that id: same epoch with
+    the log intact replays the rest; a past epoch of this session (restart)
+    or a gap sends ``job_snapshot`` first and never replays from 0; a
+    malformed id is 400 and another session's id 409, with nothing streamed.
+    The header wins over ``?cursor=N``, the older path, which replays after
+    N from the session log without clearing the unread ring.
     Stays open while a detached monitor is active; exits once the ring is
     empty and the monitor is inactive. Ownership/replica gates match /confirm.
     """
@@ -2525,17 +2634,94 @@ async def chat_progress(
                 "message": "cursor must be a non-negative integer",
             },
         )
+    from harness import progress_ids
+
+    # live-voice 11c: Last-Event-ID (`<epoch>:<seq>`) wins over `?cursor=`,
+    # which stays for the old client path (Q1).
+    last_event_id = request.headers.get("last-event-id")
+    resume = None
+    if last_event_id is not None:
+        try:
+            epoch, seq = progress_ids.parse_event_id(last_event_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error_kind": "invalid_progress_cursor",
+                    "message": "Last-Event-ID must be an id this stream sent",
+                },
+            ) from None
+        point, items, head = session.progress_since(epoch, seq)
+        if point == "foreign":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "progress_cursor_foreign",
+                    "message": "Last-Event-ID belongs to another chat session",
+                },
+            )
+        resume = (point, items, head if point == "snapshot" else seq)
+    # The ownership gate above admitted this actor; its id filters every job view.
+    actor_id = str(actor.id) if actor is not None else None
+    epoch_now = session.progress_epoch()
+
+    def _framed(payload):
+        # Every logged item carries its cursor; one without (a hand-fed payload)
+        # is framed without an id rather than failing the stream.
+        cursor_of = payload.get("cursor")
+        event_id = (
+            None
+            if cursor_of is None
+            else progress_ids.format_event_id(epoch_now, int(cursor_of))
+        )
+        if payload.get("frame") != "job_terminal":
+            return chat_service.sse_frame("tool_progress", payload, event_id=event_id)
+        return chat_service.sse_frame(
+            "job_terminal",
+            {
+                "job_id": payload["job_id"],
+                "tool_use_id": payload.get("tool_use_id"),
+                "job": _progress_job_view(payload["job_id"], actor_id),
+                "cursor": cursor_of,
+            },
+            event_id=event_id,
+        )
+
+    async def _snapshot_frame(seq):
+        snap = await run_in_threadpool(
+            _progress_snapshot, session, actor_id, epoch_now, seq
+        )
+        return chat_service.sse_frame(
+            "job_snapshot", snap, event_id=progress_ids.format_event_id(epoch_now, seq)
+        )
 
     async def _gen():
         # First drain is immediate so a short-lived ring is not held for a
-        # full poll interval before the client sees it. A resume cursor
-        # replays from the log once, then falls through to unread drains.
+        # full poll interval before the client sees it. Without Last-Event-ID
+        # the stream drains the unread ring (a `?cursor=` replays from the
+        # log once first). With it (live-voice 11c) the stream follows the
+        # log by its own cursor and never drains the shared ring, so a
+        # half-open older stream or a second tab cannot take its frames; a
+        # gap at any point is answered with a snapshot.
         idle_rounds = 0
         resume_cursor = cursor
+        follow = None
+        pending = None
+        if resume is not None:
+            point, pending, follow = resume
+            if point == "snapshot":
+                yield await _snapshot_frame(follow)
         while True:
             if await request.is_disconnected():
                 return
-            if resume_cursor is not None:
+            if follow is not None:
+                if pending is None:
+                    point, pending, head = session.progress_since(epoch_now, follow)
+                    if point != "replay":
+                        follow = head
+                        yield await _snapshot_frame(follow)
+                payloads, pending = pending, None
+            elif resume_cursor is not None:
                 payloads = session.drain_detached_progress(
                     after_cursor=resume_cursor,
                 )
@@ -2543,7 +2729,9 @@ async def chat_progress(
             else:
                 payloads = session.drain_detached_progress()
             for payload in payloads:
-                yield chat_service.sse_frame("tool_progress", payload)
+                yield await run_in_threadpool(_framed, payload)
+                if follow is not None:
+                    follow = int(payload["cursor"])
             if session.detached_monitor_active():
                 idle_rounds = 0
                 await asyncio.sleep(PROGRESS_POLL_SECONDS)
@@ -2552,7 +2740,7 @@ async def chat_progress(
                 idle_rounds = 0
                 await asyncio.sleep(PROGRESS_POLL_SECONDS)
                 continue
-            # Monitor gone and ring empty — one extra short wait for a late
+            # Monitor gone and nothing new — one extra short wait for a late
             # append, then close.
             idle_rounds += 1
             if idle_rounds >= 2:

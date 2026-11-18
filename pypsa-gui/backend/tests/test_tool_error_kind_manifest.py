@@ -50,6 +50,7 @@ _SKIP_DIRS = frozenset({"tests", "__pycache__", "smoke", ".pixi", "alembic"})
 
 _REFUSE_HELPER_MODULES: tuple[str, ...] = (
     "harness/edit_card.py",
+    "harness/job_adapters.py",
     "harness/sensitivity_comparison.py",
     "harness/sweep_card.py",
     "services/assistant_tasks.py",

@@ -103,6 +103,54 @@ REECA1_CONS = (
 IBR_PARAMS = REGCA1_ICONS + REGCA1_CONS + REECA1_ICONS + REECA1_CONS
 IBR_FLAGS = frozenset(REGCA1_ICONS + REECA1_ICONS)
 
+#: REECC1, the battery electrical control (PSS/E 35 library; REECCU1 is a
+#: user model before it): REECA1's fields without PFLAG, Iqfrz, Thld, Thld2 and
+#: Vref1 (``reec_vbias``), then the state-of-charge block. Shared fields keep
+#: REECA1's names, so ``_check_ibr``'s ranges apply to both. A unit carries
+#: REGCA1 + REECA1 or REGCA1 + REECC1; any ``REECC1_ONLY`` field selects REECC1.
+REECC1_ICONS = ("reec_pfflag", "reec_vflag", "reec_qflag", "reec_pqflag")
+REECC1_ONLY = ("reec_t", "reec_socini", "reec_socmax", "reec_socmin")
+REECC1_CONS = tuple(
+    c for c in REECA1_CONS if c not in ("reec_iqfrz", "reec_thld", "reec_thld2", "reec_vbias")
+) + REECC1_ONLY
+REECC1_PARAMS = REGCA1_ICONS + REGCA1_CONS + REECC1_ICONS + REECC1_CONS
+
+#: The rest of the WECC second-generation set (GC-04 PR3), as optional groups
+#: on an inverter on top of REGCA1 + REECA1. ICONs then CONs, each in the PSS/E
+#: library order (the counts and their sources are ``dyr_writer.MODEL_PIN``).
+#: REPCA1, the plant controller: its first four ICONs (BUSR, BUS1, BUS2, CKT)
+#: are RAW identities, so the .dyr writer authors them from the PoC branch.
+REPCA1_ICONS = ("repc_vcflag", "repc_refflag", "repc_fflag")
+REPCA1_CONS = (
+    "repc_tfltr", "repc_kp", "repc_ki", "repc_tft", "repc_tfv", "repc_vfrz",
+    "repc_rc", "repc_xc", "repc_kc", "repc_emax", "repc_emin", "repc_dbd1",
+    "repc_dbd2", "repc_qmax", "repc_qmin", "repc_kpg", "repc_kig", "repc_tp",
+    "repc_fdbd1", "repc_fdbd2", "repc_femax", "repc_femin", "repc_pmax",
+    "repc_pmin", "repc_tg", "repc_ddn", "repc_dup",
+)
+#: The type 3 wind set: drive train, aero, pitch, torque control.
+WTDTA1_CONS = ("wtdt_h", "wtdt_damp", "wtdt_htfrac", "wtdt_freq1", "wtdt_dshaft")
+WTARA1_CONS = ("wtar_ka", "wtar_theta0")
+WTPTA1_CONS = (
+    "wtpt_kiw", "wtpt_kpw", "wtpt_kic", "wtpt_kpc", "wtpt_kcc", "wtpt_tp",
+    "wtpt_thetamax", "wtpt_thetamin", "wtpt_rthetamax", "wtpt_rthetamin",
+)
+WTTQA1_ICONS = ("wttq_tflag",)
+WTTQA1_CONS = (
+    "wttq_kpp", "wttq_kip", "wttq_tp", "wttq_twref", "wttq_temax", "wttq_temin",
+    "wttq_p1", "wttq_spd1", "wttq_p2", "wttq_spd2", "wttq_p3", "wttq_spd3",
+    "wttq_p4", "wttq_spd4", "wttq_trate",
+)
+#: Optional groups, each all-or-nothing, each needing the REGCA1/REECA1 group:
+#: name -> fields. ``wt3`` is the whole type 3 set (a torque controller without
+#: its drive train or pitch is no machine).
+WECC_GROUPS = {
+    "repca1": REPCA1_ICONS + REPCA1_CONS,
+    "wt3": WTDTA1_CONS + WTARA1_CONS + WTPTA1_CONS + WTTQA1_ICONS + WTTQA1_CONS,
+}
+WECC_GROUP_PARAMS = tuple(p for fields in WECC_GROUPS.values() for p in fields)
+WECC_FLAGS = frozenset(REPCA1_ICONS + WTTQA1_ICONS)
+
 #: Parameters a model MAY carry beyond its dynamic record: the IEC 60909 data
 #: for synchronous machines (R/X ratio, rated power factor). Optional here so
 #: the .dyr layout and its fixtures are untouched; ``static/shortcircuit`` asserts
@@ -111,7 +159,7 @@ IBR_FLAGS = frozenset(REGCA1_ICONS + REECA1_ICONS)
 MODEL_OPTIONAL_PARAMS = {
     "GENROU": ("rx_sc", "cos_phi"),
     "GENSAL": ("rx_sc", "cos_phi"),
-    "inverter": IBR_PARAMS,
+    "inverter": IBR_PARAMS + REECC1_ONLY + WECC_GROUP_PARAMS,
     "legacy": (),
 }
 _V2_MODELS = frozenset(MODEL_PARAMS) - {"legacy"}
@@ -214,6 +262,7 @@ def _check_physics(uid, model, values, include_in_inertia, mbase):
         if mbase <= 0:
             raise ContractError(f"unit {uid}: mbase_mva must be > 0, got {mbase}")
         _check_ibr(uid, values)
+        _check_wecc(uid, values)
         return
     needs_h = include_in_inertia or model in ("GENROU", "GENSAL")
     if needs_h and (values["h_s"] <= 0 or mbase <= 0):
@@ -265,15 +314,23 @@ def _check_ibr(uid, values):
     import as zero, and a converter with a zero current limit is a plausible,
     wrong machine.
     """
-    present = [p for p in IBR_PARAMS if p in values]
+    group, name = IBR_PARAMS, "REGCA1/REECA1"
+    if any(p in values for p in REECC1_ONLY):
+        group, name = REECC1_PARAMS, "REGCA1/REECC1"
+    present = [p for p in group if p in values]
     if not present:
         return
-    missing = [p for p in IBR_PARAMS if p not in values]
+    missing = [p for p in group if p not in values]
     if missing:
         raise ContractError(
-            f"unit {uid}: the REGCA1/REECA1 group is all-or-nothing; missing {missing}"
+            f"unit {uid}: the {name} group is all-or-nothing; missing {missing}"
         )
-    for flag in sorted(IBR_FLAGS):
+    extra = sorted(p for p in IBR_PARAMS if p in values and p not in group)
+    if extra:
+        raise ContractError(f"unit {uid}: REECC1 has no {extra}; a unit carries REECA1 or REECC1, not both")
+    if group is REECC1_PARAMS:
+        _check_soc(uid, values)
+    for flag in sorted(IBR_FLAGS & set(values)):
         if values[flag] not in (0.0, 1.0):
             raise ContractError(f"unit {uid}: {flag} is a switch and must be 0 or 1, got {values[flag]}")
     for name in ("regc_tg", "reec_imax"):
@@ -301,6 +358,103 @@ def _check_ibr(uid, values):
             raise ContractError(
                 f"unit {uid}: VDL voltages {axis}1..4 must strictly increase, got {points}"
             )
+
+
+def _check_soc(uid, values):
+    """REECC1's state-of-charge block: 0 <= SOCmin < SOCmax <= 1, the initial
+    charge between them, and a positive discharge time T (PSS/E divides by it)."""
+    t, ini, hi, lo = (values[p] for p in REECC1_ONLY)  # T, SOCini, SOCmax, SOCmin
+    if not t > 0:
+        raise ContractError(f"unit {uid}: reec_t must be > 0, got {t}")
+    if not 0 <= lo < hi <= 1:
+        raise ContractError(
+            f"unit {uid}: need 0 <= reec_socmin < reec_socmax <= 1, got {lo}, {hi}"
+        )
+    if not lo <= ini <= hi:
+        raise ContractError(
+            f"unit {uid}: reec_socini {ini} must lie in [reec_socmin, reec_socmax] = [{lo}, {hi}]"
+        )
+
+
+#: (lower, upper, strict) pairs in the optional WECC groups.
+_WECC_ORDERED = (
+    ("repc_emin", "repc_emax", True),
+    ("repc_dbd1", "repc_dbd2", False),
+    ("repc_qmin", "repc_qmax", True),
+    ("repc_fdbd1", "repc_fdbd2", False),
+    ("repc_femin", "repc_femax", True),
+    ("repc_pmin", "repc_pmax", True),
+    ("wtpt_thetamin", "wtpt_thetamax", True),
+    ("wtpt_rthetamin", "wtpt_rthetamax", True),
+    ("wttq_temin", "wttq_temax", True),
+)
+#: Divided by in the model (an integrator rate, an inertia, a rating): > 0.
+_WECC_POSITIVE = ("wtdt_h", "wtdt_freq1", "wttq_twref", "wttq_trate")
+#: Lags PSS/E bypasses at 0, never below; droop and damping gains >= 0.
+_WECC_NON_NEGATIVE = (
+    "repc_tfltr", "repc_tft", "repc_tfv", "repc_tp", "repc_tg", "repc_kc",
+    "repc_ddn", "repc_dup", "wtdt_damp", "wtdt_dshaft", "wtpt_tp", "wttq_tp",
+)
+
+
+def _check_wecc(uid, values):
+    """The optional REPCA1 and type 3 wind groups: each absent, or complete,
+    on top of a REGCA1/REECA1 group, in range, and consistent as a flag set.
+
+    Flag rules (GK P4): REPCA1 drives REECA1's Qext, so a plant-controlled
+    unit has REECA1 PFFLAG = 0 (a power-factor reference would ignore the
+    plant controller); a type 3 torque controller (WTTQA1) feeds REECA1 a
+    speed-dependent power order, which REECA1 uses only with PFLAG = 1.
+    """
+    for group, fields in WECC_GROUPS.items():
+        present = [p for p in fields if p in values]
+        if not present:
+            continue
+        missing = [p for p in fields if p not in values]
+        if missing:
+            raise ContractError(f"unit {uid}: the {group} group is all-or-nothing; missing {missing}")
+        if "regc_tg" not in values:
+            raise ContractError(f"unit {uid}: the {group} group needs the REGCA1/REECA1 group")
+    for flag in sorted(WECC_FLAGS & set(values)):
+        if values[flag] not in (0.0, 1.0):
+            raise ContractError(f"unit {uid}: {flag} is a switch and must be 0 or 1, got {values[flag]}")
+    for name in _WECC_POSITIVE:
+        if name in values and values[name] <= 0:
+            raise ContractError(f"unit {uid}: {name} must be > 0, got {values[name]}")
+    for name in _WECC_NON_NEGATIVE:
+        if name in values and values[name] < 0:
+            raise ContractError(f"unit {uid}: {name} must be >= 0, got {values[name]}")
+    if "wtdt_htfrac" in values and not 0 < values["wtdt_htfrac"] < 1:
+        raise ContractError(
+            f"unit {uid}: wtdt_htfrac splits H between turbine and generator and "
+            f"must lie in (0, 1), got {values['wtdt_htfrac']}"
+        )
+    for lo, hi, strict in _WECC_ORDERED:
+        if lo not in values:
+            continue
+        ok = values[lo] < values[hi] if strict else values[lo] <= values[hi]
+        if not ok:
+            raise ContractError(
+                f"unit {uid}: {lo} must be {'<' if strict else '<='} {hi}: "
+                f"{lo}={values[lo]}, {hi}={values[hi]}"
+            )
+    if "wttq_p1" in values:
+        for axis in ("wttq_p", "wttq_spd"):
+            points = [values[f"{axis}{k}"] for k in range(1, 5)]
+            if any(b <= a for a, b in zip(points, points[1:])):
+                raise ContractError(
+                    f"unit {uid}: WTTQA1 breakpoints {axis}1..4 must strictly increase, got {points}"
+                )
+    if "repc_kp" in values and values["reec_pfflag"] != 0.0:
+        raise ContractError(
+            f"unit {uid}: REPCA1 drives REECA1's Qext, so reec_pfflag must be 0 "
+            "under plant control (a power-factor reference ignores the plant controller)"
+        )
+    if "wttq_kpp" in values and values.get("reec_pflag") != 1.0:
+        raise ContractError(
+            f"unit {uid}: a type 3 set (WTTQA1) needs reec_pflag = 1 (power order "
+            "follows rotor speed)"
+        )
 
 
 def _overlay_for(overlay) -> dict:
@@ -358,6 +512,10 @@ def _apply_overlay(uid, parsed, entries):
             raise ContractError(
                 f"overlay entry {uid}.{name} value must be a number, got {spec['value']!r}"
             ) from exc
+        if not math.isfinite(value):
+            raise ContractError(
+                f"overlay entry {uid}.{name} value must be a finite number, got {spec['value']!r}"
+            )
         parsed[name] = (value, spec["source"])
     return parsed
 
@@ -431,11 +589,33 @@ def ibr_params(templates: UnitTemplates) -> pd.DataFrame:
     already made every group complete, so a unit is here with all of it or
     not at all. This is what the .dyr writer reads for converter records."""
     inv = templates.units.index[templates.units["model"] == "inverter"]
+    reecc1 = templates.params.loc[templates.params["param"].isin(REECC1_ONLY), "unit_id"]
     rows = templates.params[
-        templates.params["unit_id"].isin(inv) & templates.params["param"].isin(IBR_PARAMS)
+        templates.params["unit_id"].isin(inv)
+        & ~templates.params["unit_id"].isin(reecc1)
+        & templates.params["param"].isin(IBR_PARAMS)
     ]
     wide = rows.pivot(index="unit_id", columns="param", values="value")
     wide = wide.reindex(columns=list(IBR_PARAMS))
+    wide.insert(0, "mbase_mva", templates.units.loc[wide.index, "mbase_mva"])
+    wide.index.name = "unit_id"
+    return wide
+
+
+def wecc_params(templates: UnitTemplates) -> pd.DataFrame:
+    """Every inverter with a converter group (REGCA1 + REECA1 or REGCA1 +
+    REECC1), wide: index ``unit_id``, columns ``mbase_mva``, ``IBR_PARAMS``,
+    ``REECC1_ONLY`` and ``WECC_GROUP_PARAMS``, NaN where a unit does not carry
+    a field. ``ibr_params`` is unchanged, so a caller that passes it to the
+    .dyr writer gets the REGCA1 + REECA1 output it always had."""
+    inv = templates.units.index[templates.units["model"] == "inverter"]
+    cols = list(IBR_PARAMS + REECC1_ONLY + WECC_GROUP_PARAMS)
+    rows = templates.params[
+        templates.params["unit_id"].isin(inv) & templates.params["param"].isin(cols)
+    ]
+    units = rows.loc[rows["param"] == "regc_tg", "unit_id"]
+    rows = rows[rows["unit_id"].isin(units)]
+    wide = rows.pivot(index="unit_id", columns="param", values="value").reindex(columns=cols)
     wide.insert(0, "mbase_mva", templates.units.loc[wide.index, "mbase_mva"])
     wide.index.name = "unit_id"
     return wide

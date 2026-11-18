@@ -6,6 +6,9 @@ no row in `n.carriers` emits nothing in the LP and counts as zero, disclosed.
 The network total refuses when CO2 also flows through Links, StorageUnits or
 Stores, which this profile does not count. The cap's shadow price is the
 observed dual of a `co2_emissions` global constraint, reported as −mu.
+A generator with a fuel curve on an emitting carrier (homer-parity 02e) emits from
+its slope and its no-load fuel, which this profile does not rebuild: its
+emissions, and the network total, are not established (`fuel_curve_generator`).
 """
 
 import math
@@ -72,9 +75,12 @@ def _generator(n, name, index, efficiency):
     defined = carrier in n.carriers.index
     co2 = _number(n.carriers.at[carrier, "co2_emissions"]) if defined and "co2_emissions" in n.carriers.columns else 0.0
     p = n.generators_t.p
+    from services import fuel_curve
+
     return {
         "co2": co2,
         "defined": defined,
+        "fuel_curve": fuel_curve.curve_of(n.generators.loc[name]) is not None,
         "p": [_number(v) for v in p[name]] if name in p.columns else [None] * len(index),
         "efficiency": [_number(v) for v in efficiency[name]],
     }
@@ -150,7 +156,13 @@ def calculate(raw, scope):
     network = scope["profile"] == NETWORK_PROFILE
     base = "unverified_solve" if not raw["valid_solve"] else "invalid_or_missing_emissions_data"
     available, reasons = {}, {}
+    curved = [g for g, u in raw["generators"].items() if u.get("fuel_curve") and u["co2"] != 0]
+    if curved:
+        # GK B F2: the curve's CO2 (slope × p + no-load fuel × p_nom × on) is not rebuilt here.
+        reasons["total_emissions" if network else "generator_emissions"] = "fuel_curve_generator"
     values = [_emissions(u, raw["weight"], a, b) for u in raw["generators"].values()] if raw["valid_solve"] else [None]
+    if curved:
+        values = [None]
     if all(v is not None for v in values):
         available["total_emissions" if network else "generator_emissions"] = math.fsum(values)
     if network:
@@ -168,6 +180,12 @@ def calculate(raw, scope):
 
 def notes(raw, label):
     lines = []
+    curved = [g for g, u in raw["generators"].items() if u.get("fuel_curve") and u["co2"] != 0]
+    if curved:
+        lines.append(
+            f"{len(curved)} generators burn fuel by a fuel curve (slope and no-load fuel); this check counts "
+            "dispatch over efficiency only, so their CO2 is not checked here."
+        )
     undefined = [g for g, u in raw["generators"].items() if not u["defined"]]
     if undefined:
         lines.append(f"{len(undefined)} generators have no carrier entry and count as zero emissions, as in the LP.")

@@ -48,6 +48,17 @@ def has_parts(component_class: str, values: Mapping[str, Any]) -> bool:
     return any(number(values.get(p.column("overnight"))) is not None for p in composite_parts(component_class))
 
 
+def owned_columns(component_class: str) -> tuple[str, ...]:
+    """The PyPSA columns `derive_composite` writes on a priced row, so a write of one is re-derived away. The
+    asset's `lifetime` is owned only when every part has a lifetime of its own; a Line's per-km part takes the
+    asset's lifetime, so there it is an input."""
+    specs = composite_parts(component_class)
+    if not specs:
+        return ()
+    cols = ("capital_cost", "fom_cost", "overnight_cost")
+    return cols + ("lifetime",) if all(spec.own_lifetime for spec in specs) else cols
+
+
 def part_scales(component_class: str, row: Mapping[str, Any]) -> dict[str, float]:
     """The column each part of a class is scaled by (`max_hours`, `length`), read from `row`."""
     out: dict[str, float] = {}

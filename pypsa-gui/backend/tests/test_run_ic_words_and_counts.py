@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from harness import run_handoff, run_loops
+from harness.gate_words import rule_words
 from services import assistant_tasks, run_gates, run_profiles
 from services import ic_counterfactual as ic
 from services.reports import harness_chapter
@@ -124,7 +125,7 @@ def test_the_words_reach_the_task_view_the_chat_tool_and_the_monitor_read(monkey
 def test_the_words_reach_the_reports_harness_chapter(monkeypatch):
     """Reader 3: the report's gates table (`harness_chapter.gates_rows`)."""
     rows = harness_chapter.gates_rows(_run_with(_dropped_gate(monkeypatch)))
-    [row] = [r for r in rows if r[2] == KEEPS]
+    [row] = [r for r in rows if r[2] == rule_words(KEEPS)]
     assert row[3] == "not_evaluated" and row[5] == DROPS_WORDS
 
 

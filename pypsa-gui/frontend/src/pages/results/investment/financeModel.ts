@@ -147,6 +147,8 @@ export interface Headline {
   value: number | null
   /** Why it is not established, when the report says. */
   note: string | null
+  /** The question the figure answers, when two figures could be confused. */
+  asks?: string
 }
 
 interface HeadlineSpec {
@@ -156,6 +158,7 @@ interface HeadlineSpec {
   optional?: boolean
   /** Shown only when the report has storage (an LCOS block with assets). */
   storage?: boolean
+  asks?: string
 }
 
 /** The storage LCOS block of the project payload (owner decision 6), or null. */
@@ -190,7 +193,9 @@ export const HEADLINES: HeadlineSpec[] = [
   { id: 'llcr', label: 'LLCR', kind: 'ratio', top: 'llcr', section: 'debt', keys: ['llcr'] },
   { id: 'plcr', label: 'PLCR', kind: 'ratio', top: 'plcr', section: 'debt', keys: ['plcr'] },
   { id: 'lcoe', label: 'LCOE (finance-consistent, nominal)', kind: 'price',
-    top: 'lcoe_finance_consistent_eur_per_mwh', section: 'project', keys: ['lcoe_nominal_per_mwh'] },
+    top: 'lcoe_finance_consistent_eur_per_mwh', section: 'project', keys: ['lcoe_nominal_per_mwh'],
+    // WALK-IMPROVE-1 (a): the two break-even prices answer different questions.
+    asks: 'Break-even for all output: one price for every MWh generated that repays every cost at the case’s finance terms, with no other revenue.' },
   { id: 'lcoe_real', label: 'LCOE (real)', kind: 'price', section: 'project',
     keys: ['lcoe_real_per_mwh'], optional: true },
   { id: 'lcos', label: 'Storage LCOS (charging included, nominal)', kind: 'price', section: 'project',
@@ -198,7 +203,8 @@ export const HEADLINES: HeadlineSpec[] = [
   { id: 'lcos_real', label: 'Storage LCOS (real)', kind: 'price', section: 'project',
     keys: ['lcos_real_per_mwh'], storage: true },
   { id: 'ppa_price', label: 'Solved PPA price for the target IRR', kind: 'price',
-    top: 'ppa_price_for_target_irr_eur_per_mwh', section: 'project', keys: ['solved_ppa_price'] },
+    top: 'ppa_price_for_target_irr_eur_per_mwh', section: 'project', keys: ['solved_ppa_price'],
+    asks: 'Break-even for the PPA alone: the PPA’s price that reaches the target equity IRR, with the market sales and other revenue kept as they are.' },
 ]
 
 export function headlines(report: InvestmentCaseReportPayload): Headline[] {
@@ -223,7 +229,7 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
         ?? (h.storage ? lcosReason(payload, h.id === 'lcos_real') : null)
         ?? (sec && sec.status !== 'ok' ? sec.note ?? `the ${h.section} section is ${sec.status.replace(/_/g, ' ')}` : null)
     }
-    out.push({ id: h.id, label: h.label, kind: h.kind, value, note })
+    out.push({ id: h.id, label: h.label, kind: h.kind, value, note, ...(h.asks ? { asks: h.asks } : {}) })
   }
   // H2e: "of which avoided CO2 cost" beside the NPV, when the case prices CO2
   // (gatekeeper Q1: lenders ask). Undiscounted over the horizon; a priced but
@@ -632,10 +638,14 @@ export function studyProgress(s: InvestmentCaseStudy | null | undefined): unknow
   return null
 }
 
-/** Stale: the record's own flag or the stored report's staleness block. */
+/** Stale: the stored report's verdict on the provenance graph (PG-05), the one source; any state but
+ *  fresh is stale (an uncompared verdict never reads fresh). A stored report whose block carries no
+ *  verdict is not read as fresh: its own flag stands, and a present report with no flag is stale. */
 export function studyStale(s: InvestmentCaseStudy | null | undefined):
     { stale: boolean; changed: string[]; reason: string | null } {
-  const stale = s?.stale === true || s?.report?.stale === true
+  const block = s?.report
+  const verdict = block?.verdict
+  const stale = verdict ? verdict.state !== 'fresh' : block?.stale === true || block?.present === true
   const rep = s?.report as { reason?: unknown } | undefined
   const reason = stale && typeof rep?.reason === 'string' ? rep.reason : null
   return { stale, changed: stale ? (s?.report?.changed ?? []).filter(x => typeof x === 'string') : [],

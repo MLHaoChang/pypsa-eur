@@ -1,7 +1,8 @@
 """The staged microgrid's GFM demo: a recommendation that can be applied
 (owner, GFM demo tuning; gatekeeper's plan review).
 
-The microgrid's island fails I6 at its current settings. With its demo limit
+The microgrid's island fails I6 at the settings it shipped before study-harness 40
+(4 % droop, τ_f 0.1 s; the test starts from them). With its demo limit
 (2 Hz/s over 500 ms, relaxed from the data center's 1 Hz/s and ledgered), the
 hub sized for the island's own events (the seamless event rows, I2b) and the
 search's cap of 1500 simulations, the real recommender finishes with
@@ -28,6 +29,8 @@ from tests.test_campus_island_cuts_e2e import user_and_db  # noqa: F401
 from tests.test_eh_staged_hubs import H, T, _solve
 
 TID = "eh_microgrid_staged"
+#: The battery droop (%) and τ_f (s) the island shipped before study-harness 40.
+PRE_SH40_GFM = (4.0, 0.1)
 
 
 def _frequency_check(row):
@@ -67,6 +70,12 @@ def test_the_microgrid_gets_a_recommendation_it_can_apply(user_and_db, reset_bac
                                                           monkeypatch, tmp_path):
     from services.campus_island_report import island_report
 
+    # The demo starts from the grid-forming settings the template shipped
+    # before study-harness 40 (4 % droop, τ_f 0.1 s): the retuned ones pass
+    # the check, so the recommender would have nothing to recommend.
+    monkeypatch.setattr(H, "MG_GFM_DROOP_PCT", PRE_SH40_GFM[0])
+    monkeypatch.setattr(H, "MG_GFM_TAU_F_S", PRE_SH40_GFM[1])
+    monkeypatch.setitem(T.ISLAND_CONFIG, TID, H._mg_island(T))
     n, _cfg, _state = _solve(TID, monkeypatch, tmp_path)
     db, user = user_and_db
     row = project_registry.create_root(db, user, "Microgrid GFM demo")

@@ -1019,3 +1019,68 @@ def _sanitise_history_message(msg: dict[str, Any]) -> dict[str, Any] | None:
     if len(kept) == len(content):
         return msg
     return {**msg, "content": kept}
+
+
+INTERRUPTED_TOOL_CALL = "interrupted_tool_call"
+
+
+def _tool_use_ids(msg: dict[str, Any]) -> list[str]:
+    content = msg.get("content")
+    if msg.get("role") != "assistant" or not isinstance(content, list):
+        return []
+    return [b["id"] for b in content
+            if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str)]
+
+
+def _tool_result_ids(msg: dict[str, Any]) -> set[str]:
+    content = msg.get("content")
+    if msg.get("role") != "user" or not isinstance(content, list):
+        return set()
+    return {b.get("tool_use_id") for b in content
+            if isinstance(b, dict) and b.get("type") == "tool_result"}
+
+
+def repair_unpaired_tool_use(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    The outgoing history with every unpaired `tool_use` answered
+    (owner decision LC48D-REPAIR-1).
+
+    The API requires one `tool_result` per `tool_use` id at the start of the
+    next user message. A stored history can lack one (a turn killed between
+    persisting the assistant's tool calls and their results); sent as it is,
+    every later turn of the session is a provider 400. Each unpaired call gets
+    a synthetic error result `interrupted_tool_call`, put first in the next
+    user message (or in a new user message when the next one is not a user's,
+    or there is none). Only this list changes: the stored history is not
+    touched, and a history with nothing unpaired comes back as the same list.
+    """
+    out: list[dict[str, Any]] = []
+    changed = False
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        out.append(msg)
+        i += 1
+        ids = _tool_use_ids(msg)
+        nxt = messages[i] if i < len(messages) else None
+        answered = _tool_result_ids(nxt) if nxt is not None else set()
+        missing = [t for t in ids if t not in answered]
+        if not missing:
+            continue
+        changed = True
+        synthetic = [{"type": "tool_result", "tool_use_id": t, "is_error": True,
+                      "content": INTERRUPTED_TOOL_CALL} for t in missing]
+        if nxt is not None and nxt.get("role") == "user":
+            content = nxt.get("content")
+            if isinstance(content, list):
+                blocks = content
+            else:
+                blocks = [{"type": "text", "text": content}] if content else []
+            results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
+            others = [b for b in blocks
+                      if not (isinstance(b, dict) and b.get("type") == "tool_result")]
+            out.append({**nxt, "content": [*results, *synthetic, *others]})
+            i += 1
+        else:
+            out.append({"role": "user", "content": synthetic})
+    return out if changed else messages

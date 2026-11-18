@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A shipped-study test now expects the battery cost case to change the input fingerprint, as it has since the fingerprint started covering battery part costs, so results from before the change read as out of date.

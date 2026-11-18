@@ -1,7 +1,7 @@
 // S1b: the pure form logic behind the schema-rendered asset cards.
 import { describe, expect, it } from 'vitest'
 import type { AssetFieldSpec } from '../api/assetSchema'
-import { annuity, buildPatch, derivedStored, displayValue, isRevealed, seedForm } from './assetForm'
+import { annuity, buildPatch, cardCostClaim, costBasisOf, derivedStored, displayValue, isRevealed, omitDerived, seedForm } from './assetForm'
 
 function spec(key: string, over: Partial<AssetFieldSpec> = {}): AssetFieldSpec {
   return {
@@ -120,5 +120,57 @@ describe('derivedStored: the capital cost PyPSA charges', () => {
     expect(derivedStored('capital_cost', { overnight_cost: null, capital_cost: 95_712, lifetime: 25,
       discount_rate: 0.07 })).toBe(95_712)
     expect(derivedStored('lifetime', { lifetime: 25, overnight_cost: 1, discount_rate: 0.07 })).toBe(25)
+  })
+})
+
+describe('omitDerived: a composite PUT never echoes a derived cost (TCU 09)', () => {
+  it('drops the derived columns from the spread row, so the JSON body leaves them out', () => {
+    const current = { name: 'bess', capital_cost: 41234.56789, inv_power_overnight: 300_000, p_nom: 10 }
+    const patch: Record<string, unknown> = { p_nom: 12 }
+    omitDerived([OVERNIGHT, CAPEX, P_NOM], patch)
+    const body = JSON.parse(JSON.stringify({ ...current, ...patch }))
+    expect(body).toEqual({ name: 'bess', inv_power_overnight: 300_000, p_nom: 12 })
+  })
+})
+
+
+describe('costBasisOf (05d): what the costs on screen are per', () => {
+  const schema = (fields: AssetFieldSpec[]) => ({ component: 'Generator', groups: [{ key: 'g', label: 'g', fields }] }) as never
+
+  it('reads tonne from a tonne cost unit, per hour of flow or per tonne', () => {
+    expect(costBasisOf(schema([P_NOM, spec('overnight_cost', { unit_display: 'EUR/(t/h)' })]))).toBe('tonne')
+    expect(costBasisOf(schema([spec('fom_cost', { unit_display: 'EUR/(t/h)/yr' })]))).toBe('tonne')
+    expect(costBasisOf(schema([spec('marginal_cost', { unit_display: '€/t' })]))).toBe('tonne')
+  })
+
+  it('reads energy from a per-energy cost unit', () => {
+    expect(costBasisOf(schema([spec('overnight_cost', { unit_display: 'EUR/kW' })]))).toBe('energy')
+    expect(costBasisOf(schema([spec('marginal_cost', { unit_display: 'EUR/MWh' })]))).toBe('energy')
+  })
+
+  it('claims nothing without a schema or a cost field', () => {
+    expect(costBasisOf(undefined)).toBeUndefined()
+    expect(costBasisOf(schema([P_NOM, spec('start_up_cost', { unit_display: 'EUR' })]))).toBeUndefined()
+  })
+})
+
+describe('cardCostClaim (05d U1): a bus move alone saves without a claim', () => {
+  const OC = spec('overnight_cost', { unit_display: 'EUR/(t/h)' })
+  const BUS = spec('bus', { kind: 'bus' })
+  const schema = { component: 'Generator', groups: [{ key: 'g', label: 'g', fields: [BUS, OC] }] } as never
+  const asset = { bus: 'ore', overnight_cost: 50 }
+  const seeded = seedForm([BUS, OC], asset)
+
+  it('claims the schema basis when the bus stays', () => {
+    expect(cardCostClaim(schema, [BUS, OC], { ...seeded, overnight_cost: '60' }, asset, 'bus'))
+      .toEqual({ costBasis: 'tonne', dropCosts: [] })
+  })
+  it('drops the untouched costs and the claim when only the bus moves', () => {
+    expect(cardCostClaim(schema, [BUS, OC], { ...seeded, bus: 'grid' }, asset, 'bus'))
+      .toEqual({ costBasis: undefined, dropCosts: ['overnight_cost'] })
+  })
+  it('keeps the claim when the bus moves and a cost changed', () => {
+    expect(cardCostClaim(schema, [BUS, OC], { ...seeded, bus: 'grid', overnight_cost: '60' }, asset, 'bus'))
+      .toEqual({ costBasis: 'tonne', dropCosts: [] })
   })
 })

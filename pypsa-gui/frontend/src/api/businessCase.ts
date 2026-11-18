@@ -1,0 +1,287 @@
+// Business case clients (business-case 09/10): the line table's inputs (their own
+// route, If-Match always sent), the preset, the table's options, and the run.
+// Wire shapes mirror `models/business_case.py` and `services/business_case/runner.py`.
+import client from './client'
+import { SolverInFlightError, StaleEditError } from './commercial'
+
+export { SolverInFlightError, StaleEditError }
+
+export type LineKind = 'revenue' | 'opex' | 'capex'
+export type DefaultColumn = 'price' | 'quantity' | 'life_years' | 'rate'
+
+export interface CostDefault {
+  key: string
+  value: number
+  unit: string
+  source: string
+  source_year: number
+  currency?: string | null
+  money_year?: number | null
+  pack: string
+  status: 'assumed'
+  range_low?: number | null
+  range_high?: number | null
+}
+
+export interface PriceHint {
+  low: number
+  high: number
+  unit: string
+  source: string
+  year: number
+  note?: string
+}
+
+export interface PresetRule {
+  requires: string[]
+  excludes: string[]
+  price_includes_energy: boolean
+}
+
+export interface LineItem {
+  name: string
+  kind: LineKind
+  category: string
+  unit: string
+  quantity_source: string
+  quantity?: number | null
+  quantity_by_year?: Record<string, number>
+  price?: number | null
+  price_by_year?: Record<string, number>
+  money_year?: number | null
+  escalation: string
+  indexation?: number | null
+  start_year?: number | null
+  end_year?: number | null
+  depreciation?: 'straight_line' | 'declining_balance' | null
+  life_years?: number | null
+  rate?: number | null
+  refresh_years?: number | null
+  note?: string
+  assumed?: Partial<Record<DefaultColumn, CostDefault>>
+  default_keys?: Partial<Record<DefaultColumn, string>>
+  default_units?: Partial<Record<DefaultColumn, string>>
+  preset_rule?: PresetRule | null
+  linked_share?: number | null
+  linked_share_by_year?: Record<string, number>
+  hint?: PriceHint | null
+}
+
+export interface BusinessCaseInputs {
+  preset?: string | null
+  receivable_days?: number | null
+  lines: LineItem[]
+}
+
+/** `BusinessCaseConfig`: the lines plus the run's parameters. */
+export interface BusinessCaseConfig {
+  inputs: BusinessCaseInputs
+  kw_per_gpu?: number | null
+  lhv_kwh_per_kg?: number | null
+  capacity?: Record<string, number>
+  capacity_unit?: string
+  break_even_line?: string | null
+}
+
+export interface BusinessCaseInputsState {
+  business_case: BusinessCaseConfig | null
+  digest: string
+  status: 'not_set' | 'ok' | 'business_case_inputs_invalid'
+  message?: string
+}
+
+export interface OfferedRow {
+  label: string
+  units: string[]
+  sources: string[]
+  line: LineItem
+}
+
+export interface LinkedOutput {
+  id: string
+  label: string
+  units: string[]
+  derived: boolean
+}
+
+/** A typed refusal's wire form (G9): `field` is `lines[<i>].<column>`. */
+export interface BusinessCaseRefusal {
+  code: string
+  refusal?: string
+  field?: string
+  message: string
+}
+
+export interface BusinessCaseOptions {
+  template_id: string | null
+  variants: Record<string, string>
+  offered_rows: OfferedRow[]
+  categories: Record<LineKind, string[]>
+  escalations: string[]
+  /** The units a line may take per quantity source (the backend's `allowed_units`):
+   *  typed and share_of per kind; linked per output id, then per kind. */
+  units_by_source: {
+    typed: Record<LineKind, string[]>
+    share_of: Record<LineKind, string[]>
+    linked: Record<string, Record<LineKind, string[]>>
+  }
+  catalogue_version: string
+  outputs: LinkedOutput[] | null
+  outputs_reason: string | null
+  /** The investment case's operating years, first and last; null without one. */
+  horizon: [number, number] | null
+  base_year: number | null
+  refusals: BusinessCaseRefusal[] | null
+  refusals_reason: string | null
+}
+
+export interface PresetResponse {
+  template_id: string
+  variants: Record<string, string>
+  business_case: { inputs: BusinessCaseInputs } | null
+}
+
+/** One IC ledger line the business case carries (G2): "from the energy model". */
+export interface LockedRow {
+  stream: string
+  key: string
+  /** [year, share] per year a revenue line supersedes it (G3); share null = not established. */
+  dropped: [number, number | null][]
+  superseded_by: string[]
+}
+
+/** Per year; null where a year (or the whole series) is not established. */
+export type YearSeries = (number | null)[] | null
+
+/** The report's P&L (`runner.report_body` → `pnl`). Streams are signed as the ledger's
+ *  lines (revenue +, cost −); the totals are `rows`, never a sum of streams (GK B F1). */
+export interface BusinessCasePnl {
+  years: number[]
+  streams: Record<string, YearSeries>
+  /** Display keys (GK B F2); absent on a report stored before them. */
+  stream_class?: Record<string, string | null>
+  stream_source?: Record<string, string>
+  rows: Record<string, YearSeries | boolean>
+  not_finite?: string[]
+  /** Display key (BC 17): every input each row that reads None lacks, in the engine's
+   *  reason codes; absent on a report stored before it. */
+  row_reason?: Record<string, BusinessCaseRowReasonItem[]>
+}
+
+export interface BusinessCaseRowReasonItem {
+  /** The section that needs the input; null for a figure out of range or no cause. */
+  section: string | null
+  code: string
+}
+
+export interface BusinessCaseKpi {
+  value: number | null
+  status: 'ok' | 'n/a' | 'not_established'
+  reason: string | null
+  unit?: string | null
+  basis?: unknown
+}
+
+export interface BusinessCaseBreakEven {
+  status: string | null
+  price_scale?: number | null
+  price?: number | null
+  money_year?: number | null
+  basis?: string
+}
+
+export interface BusinessCaseReport {
+  currency?: string
+  basis?: { id: string; label: string }
+  locked?: LockedRow[]
+  pnl?: BusinessCasePnl
+  kpis?: Record<string, BusinessCaseKpi>
+  break_even?: BusinessCaseBreakEven | null
+  [key: string]: unknown
+}
+
+export interface BusinessCaseStudy {
+  status: string
+  stage?: string | null
+  refusal?: string | null
+  error?: string | null
+  error_code?: string | null
+  stages?: string[]
+  stages_done?: string[]
+  report?: BusinessCaseReport | null
+  staleness?: {
+    stale: boolean | null; reason?: string | null; changed?: string[]; [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+/** A 422 from the inputs PUT or the preset GET, its detail kept for placement. */
+/** A 409 `investment_case_missing` from the run POST: no current investment case (C3). */
+export class InvestmentCaseMissing extends Error {
+  constructor(public reason: string | null) {
+    super('the business case needs a current investment case')
+    this.name = 'InvestmentCaseMissing'
+  }
+}
+
+export class BusinessCaseRejected extends Error {
+  constructor(public detail: {
+    code?: string; refusal?: string; field?: string; message?: string
+    errors?: { loc: string[]; msg: string }[]
+  }) {
+    super(detail.message ?? detail.code ?? 'refused')
+    this.name = 'BusinessCaseRejected'
+  }
+}
+
+const QUIET = { skipErrorToast: true } as const
+
+function detailOf(e: unknown): { status?: number; detail: Record<string, unknown> } {
+  const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+  const d = r?.data?.detail
+  const detail = (d && typeof d === 'object' && !Array.isArray(d)) ? d as Record<string, unknown>
+    : typeof d === 'string' ? { message: d } : {}
+  return { status: r?.status, detail }
+}
+
+function typed(e: unknown): never {
+  const { status, detail } = detailOf(e)
+  const message = detail.message as string | undefined
+  if (status === 412) throw new StaleEditError(message ?? 'the business-case inputs changed since they were read')
+  if (status === 409 && detail.code === 'solver_in_flight') {
+    throw new SolverInFlightError(message ?? 'a solve is running')
+  }
+  if (status === 409 && detail.code === 'investment_case_missing') {
+    throw new InvestmentCaseMissing((detail.reason as string | undefined) ?? null)
+  }
+  if (status === 422) throw new BusinessCaseRejected(detail as BusinessCaseRejected['detail'])
+  throw e
+}
+
+export const businessCaseApi = {
+  getInputs: () =>
+    client.get<BusinessCaseInputsState>('/results/business_case/inputs', QUIET)
+      .then(r => r.data, typed),
+  /** `ifMatch` is the digest of the GET this edit started from: always sent. */
+  putInputs: (business_case: BusinessCaseConfig | null, ifMatch: string) =>
+    client.put<BusinessCaseInputsState>('/results/business_case/inputs', { business_case },
+      { headers: { 'If-Match': ifMatch }, skipErrorToast: true })
+      .then(r => r.data, typed),
+  getOptions: () =>
+    client.get<BusinessCaseOptions>('/results/business_case/options', QUIET).then(r => r.data),
+  /** The run's record and stored report; 204 (never run) → null. */
+  getStudy: () =>
+    client.get<BusinessCaseStudy>('/results/business_case', QUIET)
+      .then(r => (r.status === 204 ? null : r.data)),
+  /** Start a run (spec §7): 409 `investment_case_missing` → `InvestmentCaseMissing`. */
+  startRun: () =>
+    client.post<BusinessCaseStudy>('/results/business_case', {}, QUIET).then(r => r.data, typed),
+  abortRun: () =>
+    client.post<{ status?: string; aborting?: boolean }>('/results/business_case/abort', {}, QUIET)
+      .then(r => r.data),
+  /** No variant: the variants only (`business_case` null when the template has some). */
+  getPreset: (variant?: string) =>
+    client.get<PresetResponse>('/results/business_case/preset',
+      { ...QUIET, params: variant ? { variant } : {} })
+      .then(r => r.data, typed),
+}

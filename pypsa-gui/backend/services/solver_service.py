@@ -104,6 +104,11 @@ from services.solver.renewable_fraction import (
     _wrap_with_min_renewable_fraction,
     target_of as _rf_target_of,
 )
+from services.solver.operating_reserve import (
+    SHARES as _OR_SHARES,
+    _wrap_with_operating_reserve,
+    shares_of as _or_shares_of,
+)
 from services.solver.island import (  # noqa: F401  (re-exported)
     IslandRefusal,
     _wrap_with_island,
@@ -232,6 +237,13 @@ class SolverConfig:
     # `SolverConfigSchema`. Dropped from fingerprints while off
     # (`reliability_goal.goal_free_config`), so old identities hold.
     min_renewable_fraction: float | None = None
+    # ── Operating reserve (homer-parity 01b) ──────────────────────────────
+    # FRACTIONS of load, PV output and wind output held as dispatchable
+    # headroom each snapshot (`operating_reserve._wrap_with_operating_reserve`);
+    # all None/0 = off and dropped from fingerprints while off.
+    reserve_share_load: float | None = None
+    reserve_share_pv: float | None = None
+    reserve_share_wind: float | None = None
     # ── Island ride-through (campus island plan 2026-10-07, I2a) ──────────
     # Opt-in per project (owner Q5): the ride-through, bridge and fuel rows of
     # `services/solver/island.py`, read from the project's island_config.json.
@@ -596,6 +608,10 @@ def build_lp_chain(network, config, log_queue):
     # Minimum renewable fraction (homer-parity 01a): one energy row per
     # period. Adds work only when a target is set.
     extra_fn = _wrap_with_min_renewable_fraction(
+        network, extra_fn, config, log_queue=log_queue)
+    # Operating reserve (homer-parity 01b): one headroom row per snapshot.
+    # Adds work only when a share is set.
+    extra_fn = _wrap_with_operating_reserve(
         network, extra_fn, config, log_queue=log_queue)
     # Island ride-through, bridge and fuel rows (campus island I2a).
     # Opt-in; refused, with the reason, on a path that is not the plain
@@ -1534,6 +1550,8 @@ def run_simulation(
                     # Only when on: an off solve's settings stay byte-identical (01a R1).
                     **({"min_renewable_fraction": _rf_target}
                        if (_rf_target := _rf_target_of(config)) is not None else {}),
+                    **({k: getattr(config, k, None) for k in _OR_SHARES}
+                       if _or_shares_of(config) is not None else {}),
                 } if status in ("ok", "optimal") else None))
                 _margin_payload = None
                 if not _margin_targets:

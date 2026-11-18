@@ -759,6 +759,52 @@ def _part(
     return {"capex": capex, "fom": fom_c, "residual": residual}
 
 
+def fleet_fuel_curve(
+    n, gensets: list[str], heat_rate: float, fuel_price: float
+) -> dict[str, Any] | None:
+    """The backup fleet's fuel rate and cost from its gensets' fuel curves (homer-parity 02c), or None when no
+    genset carries one.
+
+    A curved genset burns ``slope + no_load`` MWh of fuel per MWh_e at rated output (the backup runs its MW for
+    its run hours, and the no-load fuel is per MW per on-hour) at its own ``fuel_price``; one without a curve
+    burns ``heat_rate`` at the backup ``fuel_price``. A mixed fleet is weighted by ``p_nom`` (equal weights when
+    every ``p_nom`` is 0).
+    """
+    curved = [
+        g for g in gensets if fuel_curve.curve_of(n.generators.loc[g]) is not None
+    ]
+    if not curved:
+        return None
+    w = {g: max(float(n.generators.at[g, "p_nom"]), 0.0) for g in gensets}
+    if not sum(w.values()):
+        w = dict.fromkeys(gensets, 1.0)
+    rate, cost = {}, {}
+    for g in gensets:
+        curve = fuel_curve.curve_of(n.generators.loc[g])
+        if curve is None:
+            rate[g], cost[g] = heat_rate, heat_rate * fuel_price
+        else:
+            slope, no_load, price = curve
+            rate[g], cost[g] = slope + no_load, (slope + no_load) * price
+    total = sum(w.values())
+    plain = [g for g in gensets if g not in curved]
+    rule = (
+        "the gensets' fuel curves: (slope + no-load fuel) × fuel price at rated output over the run hours"
+        + (
+            f"; MW-weighted (p_nom) with the backup heat rate and fuel price for {', '.join(plain)}"
+            if plain
+            else ""
+        )
+    )
+    return {
+        "heat_rate": sum(w[g] * rate[g] for g in gensets) / total,
+        "cost_per_mwh_el": sum(w[g] * cost[g] for g in gensets) / total,
+        "curved": curved,
+        "heat_rate_gensets": plain,
+        "rule": rule,
+    }
+
+
 def backup_cost_delta(
     sizing: dict[str, Any],
     backup: BackupSpec,
@@ -777,6 +823,7 @@ def backup_cost_delta(
     rate_note: str | None = None,
     kept_genset_mw: float | None = None,
     genset_mw_source: str | None = None,
+    fuel_curve_fleet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """NPV of the backup in ``sizing``'s mode against an all-genset backup.
 
@@ -787,7 +834,9 @@ def backup_cost_delta(
     ``finance_rate``, as the IC engine does; ``rate_is_real``: as given). Each leg's purchases get the remaining-life credit
     at the horizon end (``_part``). Genset leg: ``genset_mw`` × overnight,
     FOM, repurchase at lifetime, fuel = run hours × MW × heat rate
-    (MWh_th/MWh_e) × fuel price (per MWh_th). Battery leg: power and energy
+    (MWh_th/MWh_e) × fuel price (per MWh_th); with ``fuel_curve_fleet``
+    (`fleet_fuel_curve`, homer-parity 02c) the fleet's MW-weighted fuel rate
+    and fuel cost per MWh_e replace the heat rate and fuel price. Battery leg: power and energy
     overnight, FOM, repurchase, and the augmentation MWh at the energy price.
     ``bess`` avoids the genset leg; ``hybrid`` keeps ``kept_genset_mw`` of
     gensets (the fleet its proof dispatches; None: ``genset_mw``) plus the
@@ -831,6 +880,12 @@ def backup_cost_delta(
     cur = prices.get("currency") or ""
     kept = genset_mw if kept_genset_mw is None else float(kept_genset_mw)
     _finite("kept_genset_mw", kept)
+    fc = fuel_curve_fleet
+    if fc is not None:
+        _finite("fuel curve fleet", fc["heat_rate"], fc["cost_per_mwh_el"])
+        rate_th, cost_el = fc["heat_rate"], fc["cost_per_mwh_el"]
+    else:
+        rate_th, cost_el = heat_rate, None
 
     def genset_leg(mw):
         part = _part(
@@ -840,8 +895,14 @@ def backup_cost_delta(
             years,
             r,
         )
-        burn = mw * run_hours_per_year * heat_rate
-        return part, burn, np.r_[0.0, [burn * backup.fuel_price_per_mwh_fuel] * years]
+        burn = mw * run_hours_per_year * rate_th
+        if fc is None:  # byte-equal to the pre-02c product without a curve
+            return (
+                part,
+                burn,
+                np.r_[0.0, [burn * backup.fuel_price_per_mwh_fuel] * years],
+            )
+        return part, burn, np.r_[0.0, [mw * run_hours_per_year * cost_el] * years]
 
     g, fuel_mwh_th, fuel = genset_leg(genset_mw)
     hg, _hburn, hfuel = genset_leg(kept)
@@ -945,6 +1006,26 @@ def backup_cost_delta(
             "assumed": heat_rate_assumed,
             "source": heat_rate_source or SOURCES["heat_rate_mwh_fuel_per_mwh_el"],
         },
+        *(
+            [
+                {
+                    "key": "fleet_fuel_mwh_th_per_mwh_el",
+                    "value": rate_th,
+                    "unit": "MWh_th/MWh_e",
+                    "assumed": False,
+                    "source": fc["rule"],
+                },
+                {
+                    "key": "fleet_fuel_cost_per_mwh_el",
+                    "value": cost_el,
+                    "unit": f"{cur}/MWh_e",
+                    "assumed": False,
+                    "source": fc["rule"],
+                },
+            ]
+            if fc is not None
+            else []
+        ),
         {
             "key": "fuel_price",
             "value": backup.fuel_price_per_mwh_fuel,
@@ -1317,6 +1398,7 @@ def assess(
             SOURCES["heat_rate_default"],
             True,
         )
+    fleet = fleet_fuel_curve(n, gens, heat, backup.fuel_price_per_mwh_fuel)
     cost = backup_cost_delta(
         sizing,
         backup,
@@ -1334,17 +1416,17 @@ def assess(
         rate_note=rate_note,
         kept_genset_mw=fleets["hybrid"]["mw"],
         genset_mw_source=fleets["all_genset"]["source"],
+        fuel_curve_fleet=fleet,
     )
     cost["genset_unit_mw"] = unit
-    if curved := [
-        g for g in gens if fuel_curve.curve_of(n.generators.loc[g]) is not None
-    ]:
-        # homer-parity 02a, GK B ruling 3: stated precedence. The backup NPV is off the LP and never summed into opex.
-        # The machine key (GK B D3); the note below is the words.
-        cost["fuel_curve_ignored"] = curved
+    if fleet is not None:
+        # homer-parity 02c: the backup NPV prices fuel from the gensets' curves, as the solve does. The machine
+        # keys (GK B D3); the note below is the words. The NPV is still off the LP and never summed into opex.
+        cost["fuel_curve_priced"] = fleet["curved"]
+        cost["fuel_heat_rate_priced"] = fleet["heat_rate_gensets"]
         cost["notes"].append(
-            f"Fuel curve not used here: fuel is priced from the backup heat rate ({heat_src}); the fuel curve on "
-            f"{', '.join(curved)} (slope and no-load fuel) is read only by the solve"
+            f"Fuel curve used here: fuel is priced from {fleet['rule']} "
+            f"(the curve on {', '.join(fleet['curved'])})"
         )
     return {
         "mode": backup.mode,

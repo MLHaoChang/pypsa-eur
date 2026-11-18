@@ -57,15 +57,27 @@ def test_frontend_test_dir_is_found_from_a_different_directory(tree):
     [
         "pypsa-gui/backend/services/untested.py",
         "pypsa-gui/backend/services/__init__.py",
-        "pypsa-gui/backend/tests/test_costs.py",
+        "pypsa-gui/backend/tests/conftest.py",
+        "pypsa-gui/backend/tests/test_missing.py",
         "pypsa-gui/frontend/src/components/Untested.tsx",
-        "pypsa-gui/frontend/src/components/Kpi.test.tsx",
+        "pypsa-gui/frontend/src/components/Missing.test.tsx",
         "scripts/anything.py",
         "Snakefile",
     ],
 )
 def test_no_matching_test_means_no_tests(tree, path):
     assert map_tests(tree, path)[1] == []
+
+
+@pytest.mark.parametrize(
+    "path, test",
+    [
+        ("pypsa-gui/backend/tests/test_costs.py", "tests/test_costs.py"),
+        ("pypsa-gui/frontend/src/components/Kpi.test.tsx", "src/components/Kpi.test.tsx"),
+    ],
+)
+def test_a_changed_test_file_is_its_own_test(tree, path, test):
+    assert map_tests(tree, path)[1] == [test]
 
 
 def test_cli_prints_one_line_per_test_and_none(tree, capsys):

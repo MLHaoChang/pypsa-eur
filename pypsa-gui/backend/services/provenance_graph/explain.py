@@ -11,6 +11,9 @@ or `not_established` when that division cannot be made (GK B (42) X3).
 `explain_ledger_row(n, key)` does the same for each asset field a Guided ledger row compiles to
 (`asset_view.LEDGER_FIELDS`).
 
+`explain_metric(owner, evidence_id, metric)` does it for a calculation metric an evidence record answered (issue 09):
+its pins to the record's raw source, window and value (`metric.metric_graph`).
+
 It reads only (COPILOT-1): nothing here writes to `n`, and the graph writes nothing of its own. A target the graph
 cannot answer for is refused (`TargetUnknown`), never guessed.
 """
@@ -383,4 +386,107 @@ def explain_ledger_row(n, key: str, memory=None) -> dict:
         },
         "target": {"ledger_key": key},
         "fields": fields,
+    }
+
+
+def _metric_step(mg, step: Step) -> dict:
+    """One step of a metric's walk: what the record holds for the node, the pin that reached it and its state;
+    on a broken pin, recorded vs current for what was compared and, by name, what was not (X2)."""
+    info = mg.info.get(step.node.id, {})
+    unit = info.get("unit")
+    stamp = info.get("stamp")
+    return {
+        "node": step.node.id,
+        "kind": step.node.kind,
+        "label": info.get("label"),
+        "value": info.get("value"),
+        "unit": unit,
+        "stamp": stamp,
+        # Named, never filled (X3): a raw input or window the record holds carries no unit of its own.
+        "stamp_missing": (["unit"] if unit is None else [])
+        + ([k for k, v in stamp.items() if v is None] if stamp else []),
+        "via": None
+        if step.via is None
+        else {
+            "edge": step.via.kind,
+            "from": step.via.src,
+            "recorded": _recorded(step.via),
+        },
+        "state": step.state,
+        "broken": None if step.via is None else _broken(step.via, mg.graph),
+    }
+
+
+def explain_metric(owner: str | None, evidence_id: str, metric: str) -> dict:
+    """Why a calculation metric has its value (PG-03b, issue 09): the walk from the metric an evidence record
+    answered to what it was computed from (`metric.metric_graph`), outcome first. The run it was computed in is
+    not compared until slice 04 (`computed_in`), so it is named uncompared and the outcome never reads fresh."""
+    from services.provenance_graph import metric as metric_producer
+
+    mg = metric_producer.metric_graph(owner, evidence_id, metric)
+    steps = why(mg.graph, mg.start).steps
+    verdict = staleness(mg.graph, mg.start)
+    run_step = {
+        "node": mg.run,
+        "kind": "run",
+        "label": "run",
+        "value": None,
+        "unit": None,
+        "stamp": None,
+        "stamp_missing": ["unit"],
+        "via": {
+            "edge": "computed_in",
+            "from": mg.start,
+            "recorded": {"unrecorded": metric_producer.RUN_UNCOMPARED},
+        },
+        "state": "uncompared",
+        "broken": None,
+    }
+    total = len(steps) + 1
+    truncated = total > MAX_STEPS
+    # The run step stays when the walk is cut: it is why the outcome is never fresh (X5).
+    wire = [_metric_step(mg, s) for s in steps[: MAX_STEPS - 1]] + [run_step]
+    return {
+        "outcome": {
+            "state": "stale" if verdict.state == "stale" else "uncompared",
+            "uncompared": [*verdict.uncompared, mg.run],
+            "complete": not truncated,
+            "truncated": truncated,
+            "steps_total": total,
+        },
+        "target": {"evidence_id": evidence_id, "metric": metric},
+        "node": mg.start,
+        "steps": wire,
+    }
+
+
+def explain_study_figure(figure: str, ctx=None) -> dict:
+    """Why a Guided Energy Hub study figure has its value (guided-results 02a): the walk from the figure to the
+    study run and the inputs it was computed from (`eh_study.study_graph`), outcome first. The outcome also reads
+    the run's inputs, which the walk shows but `staleness` does not follow past `computed_in`. Refused for a figure
+    the study does not show (`why_target_unknown`, 404) or no finished study (`study_not_run`)."""
+    from services.provenance_graph import eh_study
+
+    if figure not in eh_study.FIGURES:
+        raise TargetUnknown(
+            f"no study figure '{figure}'; one of {', '.join(eh_study.FIGURES)}"
+        )
+    sg = eh_study.study_graph(eh_study.read(ctx))
+    start = eh_study.figure_id(figure)
+    steps = why(sg.graph, start).steps
+    state, uncompared = eh_study.verdict(sg.graph, start)
+    total = len(steps)
+    truncated = total > MAX_STEPS
+    # The run step is the walk's third or fourth: a cut never drops it, and the outcome reads the whole graph (X5).
+    return {
+        "outcome": {
+            "state": state,
+            "uncompared": uncompared,
+            "complete": not truncated,
+            "truncated": truncated,
+            "steps_total": total,
+        },
+        "target": {"study": "eh_study", "figure": figure},
+        "node": start,
+        "steps": [_metric_step(sg, s) for s in steps[:MAX_STEPS]],
     }

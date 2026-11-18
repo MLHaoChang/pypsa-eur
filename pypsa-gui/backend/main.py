@@ -66,6 +66,7 @@ import security
 import static_gate
 from db import session as db_session_module
 from deps import bind_active_project, resolve_request_session, resolve_request_user
+from services import project_write_gate
 from services import active_project
 from services import fs_permission
 from services import shutdown as shutdown_service
@@ -727,8 +728,9 @@ app = FastAPI(
     lifespan=lifespan,
     # Runs before every endpoint on every router: binds the caller's session to
     # its active project so the ~110 routes that name no project resolve
-    # per-user instead of through a process global (Step 0b).
-    dependencies=[Depends(bind_active_project)],
+    # per-user instead of through a process global (Step 0b). Then refuses a
+    # project viewer's write, after the binding it reads (project-viewer-role 01).
+    dependencies=[Depends(bind_active_project), Depends(project_write_gate.require_project_write)],
 )
 
 # The Tariff model's defaults-pack stamp lookup (gridspine-library-eu 05, GK A G5-1):
@@ -1567,8 +1569,19 @@ app.include_router(memory_dream.router, prefix="/api/memory", tags=["memory"])
 
 @app.on_event("startup")
 def _speech_boot_sweep() -> None:
-    """LC-07: settle speech sessions a previous process left holding budget."""
+    """LC-07: settle speech sessions a previous process left holding budget.
+
+    Live-voice 01: when speech is enabled, install the LiveKit transport from
+    the environment first, so the sweep can also delete the rooms it settles.
+    """
     from services import live_speech
+    if live_speech.enabled():
+        try:
+            from harness.providers import hosted_speech
+
+            live_speech.configure_transport(hosted_speech.transport_from_env())
+        except Exception as exc:  # noqa: BLE001 — speech stays off; the app boots
+            logger.warning("speech transport not configured: %s", type(exc).__name__)
     live_speech.start_boot_sweep()
 
 

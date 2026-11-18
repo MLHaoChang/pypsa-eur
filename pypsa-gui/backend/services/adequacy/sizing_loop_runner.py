@@ -130,7 +130,9 @@ class SizingLoopRefusal(ValueError):
 class SizingInputs:
     """What the loop needs beyond the network. `envelope` is a `dynamic_envelope` result (its `phases` and `max`).
     `xr` is the PoC X/R; with none, `DEFAULT_XR` (assumed). `xr_source` says where it came from: "request" (the
-    caller's own), "project" (the project's `poc_xr`, set only by `project_inputs`) or "assumed"."""
+    caller's own), "project" (the project's `poc_xr`, set only by `project_inputs`) or "assumed".
+    `harmonics(n, sizes)` and each `campus` adapter `(n, result)` read the solved round: n.* results are in EUR
+    (objective scale reversed); n.model duals and n.model.objective.value stay in solver scale."""
 
     link: str
     envelope: dict

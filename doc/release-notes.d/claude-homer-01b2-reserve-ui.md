@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Solver Settings › Off-grid constraints has an "Operating reserve" group with three percent inputs: reserve for load, for solar output and for wind output. 0 or empty means no reserve; a value outside 0–100 or text is refused with an inline sentence and Save stays disabled. The chat edit card shows the same labels.

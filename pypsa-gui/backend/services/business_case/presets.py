@@ -186,3 +186,54 @@ def offered_rows(
     return [
         o.model_copy(deep=True) for o in _for_template(template_id, directory).offered
     ]
+
+
+#: The template whose offered rows are the generic start for a template with no preset
+#: file of its own yet (business case 14: "a template with no preset uses the generic
+#: offered rows").
+GENERIC = "eh_site"
+
+
+def has_preset(template_id: str, *, directory: pathlib.Path = PRESETS_DIR) -> bool:
+    """True when exactly one preset file names the template."""
+    return sum(template_id in f.templates for f in map(load, _files(directory))) == 1
+
+
+def pinned_pack(template_id: str, *, directory: pathlib.Path = PRESETS_DIR) -> str:
+    """The stamp of the pack the template's preset (or the generic rows) fills from,
+    checked against the pack on disk (`PresetInvalid` when it moved)."""
+    owner = template_id if has_preset(template_id, directory=directory) else GENERIC
+    return _pack(_for_template(owner, directory)).stamp
+
+
+def offered_labels(
+    template_id: str, *, directory: pathlib.Path = PRESETS_DIR
+) -> list[str]:
+    """The labels of the offered rows the template (or the generic site) starts from."""
+    owner = template_id if has_preset(template_id, directory=directory) else GENERIC
+    return [o.label for o in _for_template(owner, directory).offered]
+
+
+def offered_case(
+    template_id: str,
+    labels: list[str],
+    *,
+    currency: str,
+    directory: pathlib.Path = PRESETS_DIR,
+) -> BusinessCaseInputs:
+    """The offered rows named by `labels`, in that order, cost defaults filled from the
+    pinned pack as `assumed`. A template with no preset file uses the generic rows
+    (`GENERIC`). An unknown or repeated label raises LookupError naming the offered ones;
+    an empty list is a LookupError too, so nothing is stored blank by mistake."""
+    owner = template_id if has_preset(template_id, directory=directory) else GENERIC
+    f = _for_template(owner, directory)
+    by_label = {o.label: o for o in f.offered}
+    unknown = [x for x in labels if x not in by_label]
+    if not labels or unknown or len(set(labels)) != len(labels):
+        raise LookupError(
+            f"pick offered rows by label (each once): {', '.join(by_label) or 'none'}"
+        )
+    case = BusinessCaseInputs(
+        lines=[by_label[x].line.model_copy(deep=True) for x in labels]
+    )
+    return case.with_cost_defaults(_pack(f), currency=currency)

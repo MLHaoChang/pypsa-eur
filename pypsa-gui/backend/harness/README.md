@@ -10,7 +10,7 @@ harness/
   protocol.py     the provider seam: LLMProvider, LLMRequest, LLMEvent, ERROR_KINDS
   catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES
   toolsets.py     ordered provider-neutral catalogue views and always-available controls
-  events.py       the closed vocabulary of frames the turn loop yields to the UI
+  events.py       the closed vocabulary of frames the turn loop yields to the UI; (live-voice 11c) `PROGRESS_FRAMES`, the separate vocabulary of the /progress stream (`tool_progress`, `job_snapshot`, `job_terminal`)
   assurance.py    opt-in checked input/result drafts and publication gate
   assurance_scope.py  typed requested metrics, windows, cost basis and retained/comparison IDs
   assurance_conversation.py  bounded checked-scope carryover, cost clarification and previous-run selection
@@ -36,8 +36,9 @@ harness/
   providers/      anthropic, openai_compat, openai_responses, usage (one token-usage meaning for both OpenAI wires), fake, and wiring (profile → provider, tools payload, history portability) — the only place a wire is named
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py); `dispatch_tool_call` is the one per-call path (allowlist → guard → validators → card → handler) every caller drives
   run_lifecycle.py  LC-19: a re-solve of current results is asked about before its card (`results_current`), and a failed solve names its triage reads; nothing re-runs by itself
-  solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call
-  job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
+  solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call; (live-voice 11b) each bridge ends when its session's `monitor_generation` moves (Stop monitoring, `POST /api/chat/{id}/progress/stop`, `ChatSession.stop_monitoring`), which ends this session's observation only, never the job (cancelling is the `cancel_job` tool). The generation is per session and is not the 11c event-ring epoch
+  progress_ids.py (live-voice 11c) /progress event ids `<epoch>:<seq>`: an epoch is a nonce signed with the server key and the session id, so a past epoch still verifies for its session after a restart (resumed with a `job_snapshot`) and another session's does not (409 `progress_cursor_foreign`)
+  job_adapters.py the fg:/ad:/rpt: job handles for wait_for_job without holding the turn, and (live-voice 11a) `job_status` / `cancel_job`: one neutral view of every job family, solve queue and GridSpine included, with a cursor, start revision, outcome and a cancel that reports only what it verified. Cancel verdicts: `cancelled` (outcome cancelled and the worker exited), `cancel_requested` (sent, not yet confirmed within the settle bound, capped at `CANCEL_SETTLE_MAX_SECONDS`), `already_finished`, `finished_first`, `origin_lost` (a newer run took the record, the worker exited without a status, or the project was reopened as a new context: nothing is stopped; a switch to another project is 409 `job_project_mismatch`), `refused` (with `refusal.error_kind`: the queue refused the abort, or `not_stoppable`); a native handle with no owner is 409 `job_owner_unknown` on cancel. The stop is set on the handle's own record in the same solver-state-lock hold that checked its origin
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
   continuation.py  LC-12: a plan's finished job continues its conversation once; no approval authority
@@ -62,7 +63,7 @@ harness/
   mcp_client.py   external tools from admin-listed MCP servers (issue 19): the server list, the stdio and HTTP JSON-RPC client, the per-session tool list and tiers, the dispatcher
   goals.py        a goal with a round budget: set/pause/complete, what stops it after a turn, the per-turn goal block (rounds run in loop.run_turn)
   ratelimit.py    the /stream token bucket
-  sse.py          the SSE framing of a yielded (event, payload)
+  sse.py          the SSE framing of a yielded (event, payload); an optional `id:` line, written only on the /progress stream (live-voice 11c)
   fence.py        the untrusted-content delimiters and the neutraliser
   results.py      tool-result shaping: coercion, truncation, the per-turn result budget, error content
   spill.py        oversized results kept whole per owner and session; the model gets a preview and a locator for `read_result`
@@ -821,10 +822,18 @@ merge in either order. The inventory, route parity
 (`smoke/assistant_route_parity.py`) and control matrix
 (`smoke/assistant_control_matrix.py`) are built in memory by their `--check`s and
 are not committed; `--write` saves a copy under `.scratch/live-voice/` (git
-ignores it) for reading. New entries in the shared hand-written JSON go in a new
-fragment file per PR: error kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity
-declarations in `smoke/assistant_route_parity_declarations.d/`
-(`smoke/json_fragments.py` merges them and fails on a duplicate). A declaration or
+ignores it) for reading. New entries in a shared list go in a new fragment file
+per PR, never a new row in the shared file (RETRO-COST-1, RETRO-FRAG-1): error
+kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity declarations in
+`smoke/assistant_route_parity_declarations.d/`, a write route's or tool's lock
+decision in `tests/write_surface_lock_policy.d/`, a route's chat disposition in
+`tests/route_chat_disposition.d/`, a feature chat cannot do (and its refusal
+goals) in `services/not_via_chat.d/`, a tool's LC-06 family, variant or evidence
+in `smoke/family_manifest.d/`, and a results route's golden surfaces in
+`tests/golden_route_surfaces.d/`. Each folder's README has the format.
+`smoke/json_fragments.py` merges them after the Python rows and fails on a key
+defined twice, so a fragment adds rows and never overrides one; every check
+(stale or unknown route, unknown tool, ceilings) runs on the merged table. A declaration or
 `KNOWN_GAPS` row whose route a tool now serves stays in place and passes as stale;
 the coordinator's sweep deletes it (`smoke/prune_stale_declarations.py`). New tool
 blocks go at the end of TOOLS (and of the matching chat_tools section). Existing tools then keep their selection tie-breaks, which `wiring._bounded_tools` resolves toward the earlier index. Two PRs that append at the same anchor conflict as text: resolve it by keeping both blocks, the earlier-merged PR's first, then run `assistant_inventory.py --check` and the tool-selection tests at the merge.
@@ -974,6 +983,19 @@ Only the user's reviewed insertion enters the composer, then the normal chat
 provider receives it. Browser dictation remains an explicit fallback. See
 `docs/superpowers/plans/2026-10-10-multilingual-dictation.md` and the results
 assessment for the automated, real-browser and live-API validation boundaries.
+
+Continuous speech (live-voice 01) keeps every vendor behind the protocols in
+`providers/live_media.py`: `livekit_media` (rooms and HS256 grants over the
+LiveKit Twirp API; the browser gets one room-scoped microphone grant, at most
+15 min; a failed start deletes its room), `deepgram_stt` (one streaming socket
+per stream, pinned model and language, numerals as digits, actual usage) and
+`openai_tts` (pinned model and voice, refused from its retirement date, never
+swapped). `hosted_speech` reads their configuration from the environment at
+call time, and `main` installs the LiveKit transport into `services/live_speech`
+only when `PYPSA_GUI_LIVE_SPEECH=1`. Its `probe_gate` keeps the paid probe
+(`smoke/live_voice_probe.py`) closed with typed refusals until keys, pinned
+models and an owner-approved budget within the plan's $0.10 per 60 s ceiling are
+set; `sanitize` strips keys, tokens and JWTs from the evidence.
 
 `find_capabilities(goal)` searches the shared catalogue and explains required
 arguments, safety, project eligibility and reduced-toolset visibility.
@@ -2305,6 +2327,36 @@ the error is `discussed_run_required`. Download the chip with
 `discuss_project_run` and `export_run_evidence` are write-tier. Expert mode
 leaves write-tier tools uncarded. Guided mode cards every write, and
 `AUTO_APPROVE_TIERS` never includes `write`.
+
+### Current view (live-voice 03a)
+
+Each admitted turn records the view it was asked from in the durable thread's
+`refs.current`, through `durable_conversation.record_current_view`, called once
+in `loop.py` after the turn has passed every refusal and its user message is
+kept. The loop reads the bound thread's generation before `session_init`
+(`current_view_generation`) and passes it on; the write re-checks it under
+`_LOCK`, so a rebind during the turn, an obsolete utterance or an unreadable
+start generation records nothing. `refs.discussed` is never
+touched by it: what the user is looking at and the run under discussion stay
+distinct, and a resumed episode keeps both.
+
+The record is built from the request's `ui_context`, which is client input.
+Every value is checked on its own: `panel` and `results_tab` against
+`SAFETY_PANEL_ENUM` and `RESULTS_TAB_ENUM` (a tab only under Results), run ids
+against the run id pattern, `section` against a bounded id pattern, `source`,
+`scope` and `mode` against closed sets, the window as two whole numbers in
+order, and the asset as a known component class plus a bounded name. A value
+that fails is dropped. `at` is server time.
+
+The write never refuses or delays a turn: no context, no bound thread, another
+episode, a stale `generation`, another replica, or a disk or JSON error writes
+nothing and returns False. It does not bump the generation. The loop holds no
+session or provider lock at the call; the function takes only `_LOCK`.
+
+`get_file_delivery` also returns `expires_at`: for an `agent_export`, the last
+instant the download is served (`uploaded_at` + 7 days, as
+`upload_service.refuse_expired_delivery` measures it); `null` for every other
+kind, which never expires.
 
 ### Current load flow
 

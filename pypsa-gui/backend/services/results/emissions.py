@@ -132,6 +132,17 @@ def compute_emissions(n, source, *, result_df):
     co2_by_carrier: dict[str, float] = co2_intensity_map(n)
 
     gens = n.generators
+    # homer-parity 02e: a curve genset's no-load fuel (MWh of fuel, no efficiency) emits per committed hour.
+    from services import fuel_curve as _fuel_curve
+
+    # From the LP's solved status: a power-flow source has none of its own.
+    no_load_t = _fuel_curve.no_load_fuel_t(n) if src == "lopf" else _pd.DataFrame()
+    no_load_per_period = _energy_by_period(no_load_t) if not no_load_t.empty else {}
+    no_load_horizon = (
+        no_load_t.multiply(w_series.reindex(no_load_t.index).fillna(0.0), axis=0).sum(axis=0)
+        if not no_load_t.empty
+        else _pd.Series(dtype=float)
+    )
 
     # Per-period accumulators. Keyed by period (or None for flat).
     period_totals: dict = {}                          # period → total tCO2
@@ -157,11 +168,18 @@ def compute_emissions(n, source, *, result_df):
         eff = float(gens.at[name, "efficiency"]) if "efficiency" in gens.columns else 1.0
         if not _math.isfinite(eff) or eff <= 0:
             eff = 1.0
-        out_intensity = intensity / eff if intensity != 0 else 0.0
+        # GK B H1: a curve genset's fuel per MWh is its slope, not 1 / efficiency.
+        slope = _fuel_curve.curve_slope(gens.loc[name])
+        if intensity == 0:
+            out_intensity = 0.0
+        else:
+            out_intensity = intensity * slope if slope is not None else intensity / eff
         mwh_horizon = float(gen_energy_horizon.get(name, 0.0))
         if not _math.isfinite(mwh_horizon):
             mwh_horizon = 0.0
         tCO2_horizon = mwh_horizon * out_intensity
+        no_load_tCO2 = float(no_load_horizon.get(name, 0.0)) * intensity
+        tCO2_horizon += no_load_tCO2
         total_t += tCO2_horizon
         if intensity != 0:
             carrier_totals[g_carrier] = carrier_totals.get(g_carrier, 0.0) + tCO2_horizon
@@ -171,6 +189,7 @@ def compute_emissions(n, source, *, result_df):
             "energy_mwh": mwh_horizon,
             "tCO2": tCO2_horizon,
             "intensity_tCO2_per_MWh_out": out_intensity,
+            **({"no_load_tCO2": no_load_tCO2} if name in no_load_t.columns else {}),
         })
         # Per-period split. On flat networks period_key=None; on multi-period
         # each (period, generator) gets one row.
@@ -179,12 +198,16 @@ def compute_emissions(n, source, *, result_df):
             if not _math.isfinite(mwh):
                 mwh = 0.0
             tCO2 = mwh * out_intensity
+            nl_p = no_load_per_period.get(period_key)
+            nl_tCO2 = float(nl_p.get(name, 0.0)) * intensity if nl_p is not None else 0.0
+            tCO2 += nl_tCO2
             _accumulate(period_key, tCO2, g_carrier, {
                 "name": str(name),
                 "carrier": g_carrier,
                 "energy_mwh": mwh,
                 "tCO2": tCO2,
                 "intensity_tCO2_per_MWh_out": out_intensity,
+                **({"no_load_tCO2": nl_tCO2} if name in no_load_t.columns else {}),
             })
 
     # ── Storage emissions ────────────────────────────────────────────────

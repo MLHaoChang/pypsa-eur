@@ -231,3 +231,27 @@ def test_the_flicker_row_is_not_scalar_since_its_verdict_reads_pst_and_plt(tmp_p
     row = _rows(G.grid_readiness(tmp_path, _flicker_site(step=step), PROFILE))["flicker"]
     assert row["project_value"] is not None
     assert R.disposition(row)[0] == "not_scalar"
+
+
+EXCLUDED = [{"id": "ramp_rate", "requirement": "Connection ramp rate", "reason": "off-grid: the tie is open"},
+            {"id": "energization_peak:2030", "requirement": "Energization peak 2030", "reason": "off-grid: the tie is open"}]
+
+
+def test_checked_source_names_excluded_rows_and_why():
+    raw = {**raw_for([]), "excluded": EXCLUDED}
+    line = R.notes(raw, str)[-1]
+    assert "Connection ramp rate (off-grid: the tie is open)" in line
+    assert "Energization peak 2030" in line and "not applicable" in line
+    assert not any("Left out" in x for x in R.notes(raw_for([]), str))
+
+
+def test_report_chapter_names_excluded_rows_and_why():
+    from services.reports import chapters as C
+
+    src = {"profile": {"id": PROFILE}, "rows": [], "summary": {}, "excluded": EXCLUDED}
+    payload = C.grid_readiness_payload(src)
+    text = "\n".join(C.grid_readiness_disclosures(payload))
+    assert "Connection ramp rate (off-grid: the tie is open)" in text and "Energization peak 2030" in text
+    plain = C.grid_readiness_payload({**src, "excluded": []})
+    assert "excluded" not in plain
+    assert "left out" not in "\n".join(C.grid_readiness_disclosures(plain))

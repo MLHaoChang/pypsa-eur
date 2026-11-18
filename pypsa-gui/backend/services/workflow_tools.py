@@ -553,11 +553,23 @@ def _network_input_fingerprint(ctx, *, exact=False):
             parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
     # AS-02, homer-parity 02a: a generator fuel curve's inputs, which the solve staging turns into marginal_cost
     # and stand_by_cost (both already hashed as PyPSA columns). Appended only when present.
-    from services.fuel_curve import COLUMNS as FUEL_CURVE_COLUMNS
+    # homer-parity 02b: the O&M per running hour rides in the same block (a lifetime in running hours is the
+    # investment case's, `finance_case.owner_assets_digest`).
+    from services.fuel_curve import LP_COLUMNS as FUEL_CURVE_COLUMNS
     present = [c for c in FUEL_CURVE_COLUMNS if c in n.generators.columns]
     if present:
         parts.append("fuel-curve/1")
         parts.append(_exact_frame_json(n.generators[present]) if exact else n.generators[present].to_json())
+    # TCU 08: a composite asset's investment parts, which the solve staging turns into capital_cost, fom_cost and
+    # lifetime (hashed as PyPSA columns). A backstop for a writer that sets a part without re-deriving (the
+    # legacy Excel sheet import). Appended only when a part column holds a value.
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, part_columns
+    for comp_class in COMPOSITE:
+        frame = getattr(n, CLASS_ATTR[comp_class])
+        present = [c for c in part_columns(comp_class) if c in frame.columns]
+        if present and frame[present].notna().any().any():
+            parts.append(f"composite-parts/{comp_class}/1")
+            parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
     # AS-05: the PCS/STATCOM tags and their costs change the LP rows and the
     # objective. Appended only when a Store or Link carries one.
     from services.solver.pcs_statcom import pcs_statcom_tags
@@ -610,10 +622,31 @@ def _network_input_fingerprint(ctx, *, exact=False):
 _SWEEP_LOCK = threading.Lock()
 
 
+def _refuse_cost_the_parts_own(n, change) -> None:
+    """TCU 09: a case that sets a cost a target's investment parts own would build a child identical to the
+    baseline, since the bulk write re-derives it; refused before any case exists, in the single edit's words."""
+    from services.asset_schema.derive import split_parts
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+    from services.network_crud import check_parts_own_costs
+
+    if change.component_class not in COMPOSITE:
+        return
+    frame = getattr(n, CLASS_ATTR[change.component_class])
+    for name in change.names:
+        if name not in frame.index:
+            continue  # the bulk write refuses an unknown name
+        before = frame.loc[name].to_dict()
+        _, parts = split_parts(change.component_class, before)
+        try:
+            check_parts_own_costs(change.component_class, parts, before=before,
+                                  submitted={change.attribute: change.value})
+        except HTTPException as exc:
+            _refuse("invalid_sensitivity_cases", f"{change.component_class} {name}: {exc.detail}")
+
+
 def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
     """Preflight all cases, then persist/enqueue isolated children. No activation."""
     from models.schemas import CreateScenarioRequest
-    from routers import projects
     from services import chat_tools, dirty_state, gridspine_service as gs, project_registry
     from services.safe_names import fold
     if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
@@ -669,6 +702,7 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         boolean = change.attribute.endswith("_extendable")
                         if boolean != isinstance(change.value, bool) or (not boolean and not math.isfinite(change.value)):
                             _refuse("invalid_sensitivity_value", "Use finite numbers for numeric inputs and booleans for extendable flags.")
+                        _refuse_cost_the_parts_own(ctx.network, change)
                         chat_tools.bulk_update_components(change.component_class, change.names, {change.attribute: change.value})
                     validation = chat_tools.validate_network()
                     if not validation.get("ok") or validation.get("deferred"):
@@ -698,25 +732,14 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         _refuse("baseline_changed", "The saved baseline changed during preparation; inspect saved cases before retrying.", 409)
                     if existing is None:
                         checkpoint('effect_started')
-                        info = projects.create_scenario(str(base.id), request, db=db, user=user)
+                        # The fork helper (study harness 14, GK B (57)): the steps this block ran inline.
+                        # Called by name so the write-lock verifier follows them.
+                        from harness.shipped_fork import create as create_fork, save as save_fork
+                        info = create_fork(db, user, base, request.name, request.description)
                         result["project_id"] = str(info.id)
                         existing = project_registry.resolve_project(db, user, str(info.id))
                         checkpoint('child_created', case_project_id=str(existing.id))
-                        ctx.loaded_project = existing.name
-                        ctx.org_id, ctx.project_uuid = str(existing.org_id), str(existing.id)
-                        ctx.storage_dir = str(project_registry.project_dir(existing))
-                        # Invalidate copied dispatch/results; only the new queued solve
-                        # establishes results for the altered inputs.
-                        with _isolated(ctx):
-                            from services.dispatch_status import clear_dispatch
-                            clear_dispatch(ctx.network)
-                            ctx.network._objective = None
-                            ctx.network._objective_constant = None
-                        ctx.solver_state.update(status="idle", objective=None, condition=None)
-                        projects._enforce_project_lock(db, existing, user)
-                        projects._save_context(ctx, existing.name, storage_dir=Path(ctx.storage_dir), db=db, user=user, project_row=existing)
-                        from services.atomic_io import atomic_write_bytes
-                        atomic_write_bytes(Path(ctx.storage_dir) / SENSITIVITY_CASE_FILE, json.dumps(spec, sort_keys=True).encode())
+                        save_fork(ctx, existing, spec, db=db, user=user)
                         checkpoint('child_saved')
                     result["project_id"] = str(existing.id)
                     saved_ctx = _load_context(existing)

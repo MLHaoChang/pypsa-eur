@@ -3,7 +3,7 @@
 
 # LC-48b — The LC-D21 report rows (stale report, resume)
 
-Status: ready-for-agent
+Status: done (#1514)
 Model tier: opus
 Size: M
 Blocked by: none

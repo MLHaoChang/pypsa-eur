@@ -20,6 +20,7 @@ import pytest
 from services.adequacy import sizing_loop_runner as slr
 from services.adequacy.sizing_loop_runner import SizingInputs, SizingLoopRefusal, run_sizing
 from services.solver.envelope_floors import set_run_hours_cap, tag_store
+from services.solver.objective import _rescale_results_for_objective
 from services.solver.pcs_statcom import tag_pcs, tag_pq_link
 from services.solver.sizing_cuts import tag_gfm
 from services.solver.split_storage import add_split_storage
@@ -425,3 +426,75 @@ def test_a_converged_run_writes_the_control_settings_sheet(tmp_path):
     assert out["sheet"] is not None
     assert sorted(p.split("/")[-1] for p in out["sheet_paths"]) == ["campus.control_settings.csv",
                                                                    "campus.control_settings.json"]
+
+
+# ── the objective scale (homer-parity 02f): every value read from a solved round is in EUR or €/MWh ──
+
+
+def _same(a, b, path="") -> list[str]:
+    """Where `a` and `b` differ: numbers to rel 1e-6 (the LP's argmin is scale-invariant up to the solver's
+    tolerance), everything else with ==."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a) != set(b):
+            return [f"{path}: keys {sorted(set(a) ^ set(b))}"]
+        return [d for k in a for d in _same(a[k], b[k], f"{path}.{k}")]
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        if len(a) != len(b):
+            return [f"{path}: length {len(a)} != {len(b)}"]
+        return [d for i, (x, y) in enumerate(zip(a, b)) for d in _same(x, y, f"{path}[{i}]")]
+    numbers = (int, float, np.integer, np.floating)
+    if isinstance(a, numbers) and isinstance(b, numbers) and not isinstance(a, bool) and not isinstance(b, bool):
+        if math.isnan(a) and math.isnan(b):
+            return []
+        return [] if a == pytest.approx(b, rel=1e-6, abs=1e-6) else [f"{path}: {a!r} != {b!r}"]
+    return [] if a == b else [f"{path}: {a!r} != {b!r}"]
+
+
+def _scaled_run(monkeypatch, **scale) -> tuple[dict, list, list]:
+    """`run_sizing` on `_tiny()` with a harmonics hook and a campus adapter that record what they read from each
+    solved round; returns the result, those reads, and the objective scale each round's solve applied."""
+    from services.solver import objective
+
+    applied, seen = [], []
+    reverse = _rescale_results_for_objective   # the module's own, never an earlier run's spy
+
+    def spy(n, log_queue=None):
+        applied.append(getattr(n, "_pypsa_gui_objective_scale", 1.0))
+        return reverse(n, log_queue)
+
+    monkeypatch.setattr(objective, "_rescale_results_for_objective", spy)
+
+    def harmonics(n, sizes):
+        seen.append(("harmonics", float(n.objective), float(n.buses_t.marginal_price.abs().max().max())))
+        return 25_000.0
+
+    def campus(n, result):
+        seen.append(("campus", float(n.objective), float(n.buses_t.marginal_price.abs().max().max()),
+                     float(result["cost_eur"])))
+        return {"ok": True, "lever": "cut", "cut": {}}
+
+    out = run_sizing(_tiny(), _config(voll=10_000.0, **scale),
+                     _inputs(harmonics=harmonics, campus={"gfm_tuning": campus}))
+    return out, seen, applied
+
+
+@pytest.mark.parametrize("scale", [{"user_objective_scale": 10.0}, {"auto_objective_scale": True}],
+                         ids=["user", "auto"])
+def test_every_read_of_a_solved_round_is_in_eur_whatever_the_objective_scale(monkeypatch, scale):
+    """homer-parity 02f (GK A A2-1 on #1466): the LP cost, the cost total with the filter cost, the forward checks,
+    the verdict and what a hook reads off the solved network (n.objective, the bus duals) equal the unscaled run's.
+    The sizes and the sheet's values are left out: they are a primal optimum, which a ×0.001 objective may move
+    along a tie (equal cost) without any unit being wrong; the sheet is compared by its shape only."""
+    base, base_seen, base_applied = _scaled_run(monkeypatch)
+    out, seen, applied = _scaled_run(monkeypatch, **scale)
+    assert base["status"] == "converged" and base["sheet"] is not None, base["verdict"]
+    assert max(r[2] for r in base_seen) > 0                                  # the duals are there to read
+    rows = ("cost_eur", "filter_cost_eur", "total_cost_eur", "checks", "failing", "not_run")
+    assert _same([{k: r.get(k) for k in rows} for r in out["rounds"]],
+                 [{k: r.get(k) for k in rows} for r in base["rounds"]]) == []
+    assert _same(seen, base_seen) == []
+    keys = ("status", "verdict", "warnings", "library")
+    assert _same({k: out[k] for k in keys}, {k: base[k] for k in keys}) == []
+    assert out["sheet"] is not None and sorted(out["sheet"]) == sorted(base["sheet"])
+    assert set(base_applied) == {1.0}
+    assert applied and all(abs(s - 1.0) > 1e-9 for s in applied), applied   # the scale really applied

@@ -1,6 +1,6 @@
 # 02d — Warn on a fuel curve slope below 1 MWh fuel per MWh
 
-Status: needs-triage
+Status: done (#1538)
 
 Follow-up from homer-parity 02a (#1466), asked for by GK B.
 
@@ -16,3 +16,13 @@ A pre-run warning, not a refusal, on any curve generator whose slope is above 0 
 
 - A slope of 0.8 warns; 2.5 and 0 do not.
 - No warning on a generator without a curve.
+
+## Comments
+
+### UX (21), 2026-11-14
+
+Pre-run warning only. The wording is fine. It shows in the run checklist with the generator named, as a warning, never a refusal. The asset-form hint is logged as `02i`; if it is added, it needs shots in Expert and Guided and the same wording.
+
+### Plan GO, GK B (58), 2026-11-14
+
+H6: a warning, never a refusal. The boundary is tested at exactly 1 and just under. A slope of 0 or unset gives no warning.

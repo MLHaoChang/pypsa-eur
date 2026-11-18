@@ -41,6 +41,7 @@ LIVE_MEDIA_ERROR_KINDS: frozenset[str] = frozenset(
         "malformed_response",
         "partial_result",
         "language_mismatch",
+        "model_retired",
         "cancelled",
         "provider_auth",
         "provider_limit",

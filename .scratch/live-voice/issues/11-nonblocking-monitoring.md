@@ -79,3 +79,89 @@ flakiness). No real solves. Foreground completion now also publishes a run
 (issue 06). Still open: GridSpine/solve-queue family in the same matrix,
 real-worker (not state-flip) multi-family run, D-I2 recovery across families,
 UI/result matching per workload.
+
+2026-11-14: 11a, the neutral job contract. `harness/job_adapters.job_status` gives one
+view for `fg:`, `ad:`, `rpt:` and solve-queue UUIDs (GridSpine included, through the
+queue's own ACL). The view carries identity, status, phase, progress, a per-job cursor
+that moves only on a change, created/started/updated/finished timestamps, the input
+revision (`network_revision` at handoff), the result revision on success, warnings and
+the outcome (succeeded/failed/cancelled/refused/not_met/interrupted/unknown).
+`cancel_job` calls each family's existing abort only while the handle's own worker
+still owns its record, then reports the verified result. Tests:
+`tests/test_lv11a_job_contract.py`. No tool-list change yet. Still open: 11b (the
+`cancel_job` tool, Stop monitoring, plan-step solve handoff) and 11c (versioned SSE,
+snapshot recovery, results refresh).
+
+2026-11-14: GK B (59) plan GO for the 11a/11b/11c split, with conditions:
+- Q1: 11c adds an explicit `job_snapshot` frame. test_harness_layout and the
+  frontend's frame handling are extended in the same PR, plus a test that a client on
+  the old cursor path misses nothing it needs.
+- Q2: `cancel_job` takes the strictest tier among the aborts it can reach (resolved by
+  family) and is never looser than `abort_simulation`. A queue/GridSpine cancel through
+  chat with no existing chat tier gets the strictest existing abort tier and a
+  control-matrix row.
+- A1: the queue adapter uses `routers.solve_queue._visible_job_or_404`, never a copy.
+  The matrix covers 4 families × {view, cancel} × {own, foreign actor, foreign
+  project}; a foreign caller is refused with a structured kind. Each family's check is
+  mutated on its own.
+- A2: the ack reports what really happened. A job that succeeds before the abort lands
+  reads `succeeded`; past the bound it reads `cancel_requested`; both races are tested.
+  The re-read holds no project lock or lease, and its bound is a named constant.
+- A3: an unrecognised raw status fails closed (never `succeeded`), tested per family.
+- A4: the input revision is captured at start, never computed at view time. A family
+  that records none reports None plus a reason. An edit mid-job leaves it unchanged.
+- A5: the `wait_for_job` outputs for fg:/ad:/rpt: are unchanged (pinned), and queue
+  UUIDs keep their path.
+- A6: no tool-list change; `assistant_inventory.py --check` and
+  `assistant_route_parity.py --check` run at the trial merge.
+- A7: mutants on the ACL guards, the outcome mapping, the cancel ack's terminal check and
+  the start-time revision capture.
+- B1: the new POST route runs test_route_chat_disposition, test_project_route_acl_policy,
+  test_write_surface_lock_policy, test_golden_coverage and the control matrix. Stop
+  monitoring is idempotent and closes only this session's observer; a second session
+  watching the same job keeps receiving.
+- B2: in the task_path hand-off, the plan step still gets its result through the wait,
+  and step accounting is unchanged. Tested for a step solve that finishes, one that
+  fails, and one that is cancelled.
+- B3: new kinds go only in the branch's tool-error-kinds.d fragment; the manifest test
+  and ChatPanel.manifest run.
+- C1: a snapshot is ACL-filtered by the requesting session's actor and project through
+  the 11a adapters. A cursor or Last-Event-ID from another session is refused. An epoch
+  change gives a snapshot, never a silent replay from 0.
+- C2: dedupe by (epoch, seq) is tested across a reconnect.
+- C3: results refresh on a terminal outcome only when the project and run revision
+  match. Tested: navigation after the job started (no navigation, no foreign
+  invalidation), and cancelled or failed outcomes (no refresh).
+- Each PR that touches the frontend goes to UX too.
+
+2026-11-16: GK B (59) plan GO for 11c, split 11c-1 (backend) and 11c-2 (frontend, plus UX).
+- (a) A foreign epoch gets 409 `progress_cursor_foreign`, with nothing streamed. A
+  malformed id gets 400 `invalid_progress_cursor`. Both are tested.
+- (b) The terminal event is a progress item (`job_terminal`), not a second snapshot.
+- E1: a restart is the main C1 case. An epoch from before a rehydrate must give
+  `job_snapshot`, and a truly foreign id gives 409. Built as signed epochs
+  (`harness/progress_ids.py`): there is no stored set, so nothing is evicted.
+- E2: replay is ACL-filtered too. A replayed `job_terminal` re-reads the job through
+  `job_status` for the requesting actor at send time.
+- E3: Last-Event-ID wins over `?cursor=` (pinned).
+- E4: mutants on each snapshot filter (actor, project), the past-epoch check, the gap
+  check and the id parser.
+- E5: test_harness_layout, the manifest test, ChatPanel.manifest and the three smoke
+  `--check`s run at the trial merge.
+- R1: C3 compares job.input_revision with the same quantity it was captured from. A
+  job with input_revision None gets no auto-refresh.
+- R2: the high-water mark is per (session, epoch), and a snapshot resets it. Backoff is
+  bounded and stops when the monitor is inactive or after Stop monitoring.
+- R3: pressing Stop monitoring POSTs /progress/stop, closes the stream, and makes no
+  cancel call.
+
+2026-11-16: UX (21) conditions for 11c-2:
+1. Visible text: "Stop monitoring" with "the job keeps running" beside it; Cancel stays
+   the separate card. No engine or tool ids in either label.
+2. After a Stop the line reads "Not monitoring. The job is still running."; the
+   control goes away or becomes a way to watch again.
+3. A snapshot after a gap is announced in one muted line, never as a duplicate line.
+4. The in-place results refresh shows no toast and leaves no stale "refreshed" mark
+   in the mismatch cases.
+- Shots: the line with Stop monitoring, the state after Stop, and the card next to
+  Cancel, in Guided and Expert.

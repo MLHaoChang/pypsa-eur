@@ -80,7 +80,13 @@ import numpy as np
 import pandas as pd
 
 from gridspine.ingest.campus import campus_f_hz
-from gridspine.schema.campus import STANDARD_MVA, validate_hourly, validate_pcc
+from gridspine.schema.campus import (
+    PCC_TIE_OPEN,
+    STANDARD_MVA,
+    TIE_OPEN_TOL_MW,
+    validate_hourly,
+    validate_pcc,
+)
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.island import ffr_sizing, preset_block
 from gridspine.schema.network import MAX_NAME_LEN
@@ -306,18 +312,73 @@ def _translate(names, pypsa_ids, what, skipped, known):
     return out
 
 
-def _never_conducts(n, lname):
+def _never_conducts(n, lname, per_snapshot=False):
     """True when the Link's per-unit limits hold it at 0 MW in every hour: a
-    normally open tie."""
+    normally open tie (the draft's rule).
+
+    ``per_snapshot``: instead, a bool Series over the snapshots, True in each
+    hour the *solved* Link cannot carry power: its solved rating (p_nom_opt
+    when extendable, else p_nom) times max(p_max_pu(t), −p_min_pu(t)) is at
+    most ``TIE_OPEN_TOL_MW``, or it is committable and its solved status is
+    0. What cannot be read (an extendable Link with no p_nom_opt, a
+    committable one with no status, a NaN limit) conducts (fail closed)."""
     links, links_t = n.links, getattr(n, "links_t", None)
 
-    def limit(attr, default, pick):
+    def limit(attr, default):
         frame = getattr(links_t, attr, pd.DataFrame())
         if lname in frame.columns:
-            return pick(frame[lname].astype(float))
-        return float(links.at[lname, attr]) if attr in links.columns else default
+            return frame[lname].astype(float).reindex(n.snapshots)
+        return pd.Series(float(links.at[lname, attr]) if attr in links.columns else default, index=n.snapshots)
 
-    return limit("p_max_pu", 1.0, max) <= 0.0 and limit("p_min_pu", 0.0, min) >= 0.0
+    p_max, p_min = limit("p_max_pu", 1.0), limit("p_min_pu", 0.0)
+    if not per_snapshot:
+        return p_max.max() <= 0.0 and p_min.min() >= 0.0
+    rating = float(links.at[lname, "p_nom"]) if "p_nom" in links.columns else math.inf
+    if "p_nom_extendable" in links.columns and _marked(links.at[lname, "p_nom_extendable"]):
+        opt = links.at[lname, "p_nom_opt"] if "p_nom_opt" in links.columns else math.nan
+        rating = float(opt) if pd.notna(opt) else math.inf
+    reach = rating * np.maximum(p_max, -p_min)                # NaN compares False: conducts
+    out = (reach <= TIE_OPEN_TOL_MW).fillna(False).astype(bool)
+    if "committable" in links.columns and _marked(links.at[lname, "committable"]):
+        status = getattr(links_t, "status", pd.DataFrame())
+        if lname in status.columns:
+            out = out | (status[lname].astype(float).reindex(n.snapshots) < 0.5).fillna(False)
+    return out.astype(bool)
+
+
+def pcc_tie_open(n, pcc) -> pd.Series:
+    """The solved tie state at the PCC bus ``pcc``, per snapshot (a bool
+    Series over ``n.snapshots``): True in an hour when nothing at the PCC
+    can carry power then. "At the PCC" is ``campus_hourly``'s own reading of
+    the import: the Links with an end at the PCC bus (a grid generator there
+    is the supply only when no Link touches it, and then the PCC conducts).
+    Open needs no Line or Transformer at the PCC, at least one Link there,
+    and every one of them open in that hour (``_never_conducts``).
+
+    Fail closed (every hour False, so every hour is judged): no PCC bus, a
+    bus the network does not have, or a network that marks a different or a
+    second PCC (``eh_poc``). Never read from a template name or from the
+    campus file's ``tie_normally_open``."""
+    closed = pd.Series(False, index=n.snapshots, dtype=bool)
+    buses = n.buses
+    if not pcc or pcc not in buses.index:
+        return closed
+    if "eh_poc" in buses.columns:
+        marked = {b for b in buses.index if _marked(buses.at[b, "eh_poc"])}
+        if marked and marked != {pcc}:
+            return closed
+    for tbl in ("lines", "transformers"):
+        df = getattr(n, tbl, pd.DataFrame())
+        if len(df) and ((df["bus0"] == pcc) | (df["bus1"] == pcc)).any():
+            return closed
+    links = n.links
+    at_pcc = [x for x in links.index if pcc in (links.at[x, "bus0"], links.at[x, "bus1"])]
+    if not at_pcc:
+        return closed
+    out = ~closed
+    for x in at_pcc:
+        out = out & _never_conducts(n, x, per_snapshot=True)
+    return out.astype(bool)
 
 
 def _open_tie_rating(n, pcc):
@@ -678,9 +739,11 @@ def campus_hourly(n, campus):
             raise ContractError(f"nothing in the project connects the PCC bus {pcc_bus!r} to the campus")
         flow = sum((_flow(n.generators_t.p, g) for g in grid), pd.Series(0.0, index=n.snapshots))
     weight = n.snapshot_weightings["objective"]
+    tie_open = pcc_tie_open(n, pcc_bus)
     pcc = pd.concat([
         pd.DataFrame({"period": period, "hour": np.arange(len(sns)),
-                      "weight": weight.loc[sns].to_numpy(), "import_mw": flow.loc[sns].to_numpy()})
+                      "weight": weight.loc[sns].to_numpy(), "import_mw": flow.loc[sns].to_numpy(),
+                      PCC_TIE_OPEN: tie_open.loc[sns].to_numpy(dtype=bool)})
         for period, sns in periods
     ], ignore_index=True)
     return hourly, validate_pcc(pcc)

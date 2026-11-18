@@ -31,6 +31,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from smoke.json_fragments import extend, extend_items, fragment_files, load_merged
+except ImportError:  # run as a script: smoke/ itself is on sys.path
+    from json_fragments import extend, extend_items, fragment_files, load_merged
+
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / '.scratch/live-copilot/family-manifest.json'
 B = 'pypsa-gui/backend/tests/'
@@ -113,7 +118,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         upload_load_profiles_file upload_series_file upload_snapshot_weightings_csv upload_timeseries
         list_vintage_bounds set_vintage_bounds delete_vintage_bounds cleanup_orphan_vintages""",
     'solver-simulation': """
-        abort_simulation check_solver_availability dispatch_status force_reset_simulation
+        abort_simulation cancel_job check_solver_availability dispatch_status force_reset_simulation
         get_simulation_lock_status get_simulation_log_history get_simulation_status get_solver_capabilities
         get_solver_config run_ac_pf_stage run_simulation solve_queue_abort solve_queue_cancel_queued
         solve_queue_clear_finished solve_queue_dismiss solve_queue_enqueue solve_queue_job_log
@@ -142,7 +147,8 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         get_study_findings get_poc_state get_value_flow_designer
         get_supply_architectures compare_supply_architectures
         get_grid_extension_break_even
-        run_business_case get_business_case set_business_case_lines abort_business_case""",
+        run_business_case get_business_case set_business_case_lines abort_business_case
+        apply_business_case_preset""",
     'experiments': """
         advance_experiment cancel_experiment compare_experiments compare_sensitivities get_experiment
         list_experiments prepare_experiment reconcile_experiment refresh_experiment run_sensitivity_sweep
@@ -705,7 +711,14 @@ VARIANTS: list[dict] = [
              'with the open project (project_uuid), its unsaved G1 edit (20 to 33 MW) and the lc43_gates state kept: each file is parsed into a candidate network before it replaces the open one (LC-43c)',
              'import_uploaded_network',
              B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_import_is_refused_and_keeps_the_open_network'),
-    _pending('LC-D20.delivery_ttl', 'a delivery and its download never expire: no expiry gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _covered('LC-D20.delivery_ttl', 'a delivery lives 7 days (owner decision LC48A-TTL-1): made 604,800 - 60 s ago it is delivered, zipped and downloaded with the same sha256; made 604,800 + 60 s ago '
+             'get_file_delivery, build_delivery and the download are each 410 delivery_expired, with tests/lc43_gates.py state and the file\'s meta.json bytes unchanged; '
+             'the person\'s own upload made 30 days ago still downloads; exporting the same network again keeps the file id and serves it',
+             'export_network_nc get_file_delivery build_delivery',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_a_delivery_inside_seven_days_is_served',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_a_delivery_older_than_seven_days_is_refused_and_nothing_changes',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_the_persons_own_upload_never_expires',
+             B + 'test_lc48a_d20_delivery_ttl.py::test_exporting_the_same_content_again_makes_a_fresh_delivery'),
     _covered('LC-D21.reports', 'exported DOCX read with python-docx: headline table MC LOLE 3.21 h/yr, ENS cap 10.00, unrun sections say not established; scripted 3.2 h/yr audited verified; '
              'regenerated 9.9 h/yr is version 2, unverified and listed in Numbers to check, tables and other sections unchanged, version 1 intact (one stored study report, scripted model)',
              'generate_report get_report_status list_reports get_report get_report_table regenerate_report_section diff_report_versions export_report_docx',
@@ -750,8 +763,19 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d21_report_gates.py::test_a_deleted_headline_table_is_recorded',
              B + 'test_lc43_d21_report_gates.py::test_a_table_turned_into_its_siblings_copy_keeps_no_wrong_caption',
              B + 'test_lc43_d21_report_gates.py::test_two_swapped_tables_keep_their_own_captions_and_the_second_is_withheld'),
-    _pending('LC-D21.stale_report', 'a report generated or exported after its study changed is neither refused nor flagged (only the IC case note): no stale gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
-    _pending('LC-D21.report_resume', 'a report job interrupted by a restart is not resumed (its record is in-process state): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _covered('LC-D21.stale_report', 'owner decision LC48B-STALE-1: a generated report exports; a network edit alone leaves its evidence and the export open; after the study is re-run with MC LOLE 4.50 h/yr '
+             'exporting it (by id and by default) is 409 report_stale with tests/lc43_gates.py state unchanged; a report generated after the change exports with MC LOLE 4.50 h/yr while the old one stays report_stale',
+             'generate_report export_report_docx get_report_table update_component',
+             B + 'test_lc48b_d21_report_stale.py::test_a_report_exports_until_its_study_changes',
+             B + 'test_lc48b_d21_report_stale.py::test_a_report_generated_after_the_change_exports_the_new_figure',
+             B + 'test_lc48b_d21_report_stale.py::test_a_report_of_a_project_that_is_not_open_is_not_compared',
+             B + 'test_lc48b_d21_report_stale.py::test_an_unreadable_evidence_read_refuses_with_its_reason',
+             B + 'test_lc48b_d21_report_stale.py::test_a_version_without_an_evidence_hash_is_refused'),
+    _covered('LC-D21.report_resume', 'owner decision LC48B-RESUME-1: a running job keeps reports/.job.json with its report id and leaves none once done, aborted or failed; after a restart (no record in memory, the marker left) '
+             'get_report_status is 409 report_interrupted, status interrupted, that report id, hint "generate the report again", with no model call and tests/lc43_gates.py state unchanged; generating again ends done with no marker',
+             'generate_report get_report_status abort_report_generation',
+             B + 'test_lc48b_d21_report_resume.py::test_an_interrupted_job_reads_interrupted_and_nothing_reruns',
+             B + 'test_lc48b_d21_report_resume.py::test_an_aborted_or_failed_job_leaves_no_marker'),
     _covered('LC-D22.undo_checkpoints', 'input-table fingerprint before/after: undo restores the exact fingerprint and the matching results (objective 100, current again), '
              'a second undo is refused; a pre-solve checkpoint (read from its network.nc) restores the inputs but no results (not current); an unknown checkpoint id changes nothing',
              'update_component undo_last run_simulation create_project_snapshot restore_project_snapshot list_project_snapshots',
@@ -767,8 +791,16 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d22_concurrency_gates.py::test_another_users_lock_refuses_checkpoint_restore_and_edit',
              B + 'test_lc43_d22_concurrency_gates.py::test_undo_reverts_the_newest_step_even_when_it_is_the_persons',
              B + 'test_lc43_d22_concurrency_gates.py::test_a_missing_checkpoint_restores_nothing_and_the_run_evidence_stays'),
-    _pending('LC-D22.rebind', 'an edit racing a switch of the active project (build_delivery project_changed, a write rebinding mid-turn) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
-    _pending('LC-D22.viewer_role', 'project ACL knows only admin and member: no read-only role refuses an edit, undo or restore (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _covered('LC-D22.rebind', 'the person\'s other tab saves the open network as Elsewhere with rebind while the turn runs (the real projects route): '
+             'the copilot\'s G1 marginal cost 10 -> 50 is refused project_switched_mid_turn (tool error and turn error), G1 stays 10 in the open network and in the baseline '
+             'project\'s saved file; build_delivery with the switch landing while the zip is built is 409 project_changed; tests/lc43_gates.py state of the new active project is '
+             'unchanged and neither project gains a zip',
+             'update_component build_delivery export_network_nc',
+             B + 'test_lc48c_d22_rebind_gates.py::test_a_write_after_the_active_project_switched_mid_turn_writes_nothing',
+             B + 'test_lc48c_d22_rebind_gates.py::test_a_delivery_built_while_the_active_project_switched_is_refused'),
+    _unavailable('LC-D22.viewer_role', 'DROPPED by owner decision LC48C-ROLE-1: project ACL has only admin and member, no read-only role exists to refuse an edit, '
+                 'undo or restore; a read-only project viewer role is filed as a product idea (.scratch/project-viewer-role/issues/01-read-only-project-viewer-role.md)',
+                 'docs/agents/owner-decisions.md LC48C-ROLE-1'),
     _covered('LC-D23.provider_parity', 'one journey on the Claude wire only (LC32-OPEN-1), read from the request bodies: toolset results offers a strict subset without update_component; '
              'the unoffered call is refused tool_not_offered with G1 still 20 MW; toolset all restores the first offer; approved write gives G1 35 MW and a 20 -> 35 receipt, denied leaves 20 MW',
              'use_toolset update_component',
@@ -792,10 +824,23 @@ VARIANTS: list[dict] = [
              'update_component list_components',
              B + 'test_lc43_d23_wire_gates.py::test_a_write_that_outlives_its_budget_is_never_reported_done',
              B + 'test_lc43_d23_wire_gates.py::test_a_read_that_outlives_its_budget_keeps_the_plain_kind'),
-    _pending('LC-D23.history_repair', 'a stored history with an unpaired tool_use is sent as it is: no repair step is built (the harness only avoids writing one) (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
-    _pending('LC-D23.approval_resume', 'a pending approval is not resumed after a restart (it expires or reads unknown_confirmation_token): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
-    _pending('LC-D23.profile_recovery', 'after a refused provider switch or a deleted profile, recovery (a new chat, or picking a profile and resending) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
-    _pending('LC-D23.goal_switch', 'no gate refuses or recovers a workflow, goal or task switch mid-turn: none is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _covered('LC-D23.history_repair', 'owner decision LC48D-REPAIR-1: a stored assistant tool_use lost_1 with no result is sent with a synthetic error tool_result interrupted_tool_call first in the next user message (this turn\'s words after it); '
+             'the stored history still has no result for lost_1; G1 stays 20 MW and tests/lc43_gates.py state is unchanged',
+             'update_component',
+             B + 'test_lc48d_d23_wire_recovery.py::test_an_unpaired_tool_use_is_answered_before_send_and_history_is_kept'),
+    _covered('LC-D23.approval_resume', 'owner decision LC48D-APPROVAL-1: a card minted before a restart, approved after it on a fresh session or through /confirm on the gone session, is 410 confirmation_lost_on_restart with hint "ask again"; '
+             'G1 stays 20 MW and state is unchanged; a token this process minted and does not hold still reads 404 unknown_confirmation_token / unknown_session',
+             'update_component',
+             B + 'test_lc48d_d23_wire_recovery.py::test_an_approval_lost_on_restart_is_410_ask_again'),
+    _covered('LC-D23.profile_recovery', 'after profile_switch_requires_new_chat a new chat sends the turn and G1 reads 35 MW; after unknown_profile_id resending on the same session with its own profile sends the turn and G1 reads 35 MW',
+             'update_component',
+             B + 'test_lc48d_d23_wire_recovery.py::test_after_a_refused_switch_a_new_chat_recovers',
+             B + 'test_lc48d_d23_wire_recovery.py::test_after_a_deleted_profile_picking_one_and_resending_recovers'),
+    _covered('LC-D23.goal_switch', 'owner decision LC48D-GOAL-1: start_workflow run-study while build-network is active is 409 switch_in_progress naming it (step orient) and the session keeps it; build-network again restarts it; after end_workflow run-study starts; '
+             'start_task for another plan while one runs is 409 switch_in_progress naming it (status running), the same plan again is not refused, and after cancel_task the other starts',
+             'start_workflow end_workflow start_task',
+             B + 'test_lc48d_d23_wire_recovery.py::test_a_workflow_switch_is_refused_naming_the_active_one',
+             B + 'test_lc48d_d23_wire_recovery.py::test_a_task_switch_is_refused_while_one_runs'),
     _covered('LC-D24.ui', 'the four ui_* tools only: ui_event frames carry the hand snapshot index (01:00 = 1), asset and panel as asked; an off-axis time, an unknown component opened in the editor, or an unknown panel '
              'moves nothing; frontend uiNavigate.lc06.test.ts drives the store from those frames and drops a frame older than a manual navigation',
              'ui_set_snapshot ui_select_component ui_open_asset_detail ui_open_panel',
@@ -817,6 +862,106 @@ def inventory_tools() -> tuple[str, ...]:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from assistant_inventory import build_inventory
     return tuple(sorted(t['name'] for t in build_inventory()['tools']))
+
+
+# A new tool's family, a new variant, a settled pending variant and a covered
+# variant's extra tools or tests arrive as a fragment instead of an edit above
+# (RETRO-FRAG-1): `family_manifest.d/<branch>.json`, format in that folder's
+# README. A fragment adds rows; one redefining a row above fails.
+MANIFEST_FILE = Path(__file__).with_name('family_manifest.json')
+PYTHON_TOOLS_BY_FAMILY = TOOLS_BY_FAMILY
+PYTHON_VARIANTS = VARIANTS
+_VARIANT_KEYS = {'covered': {'id', 'status', 'oracle', 'tools', 'tests'},
+                 'pending': {'id', 'status', 'reason'},
+                 'unavailable': {'id', 'status', 'reason', 'pointer'}}
+
+
+def _words(raw, key: str) -> list[str]:
+    value = raw.get(key, [])
+    if not (isinstance(value, list) and all(isinstance(x, str) and x and ' ' not in x for x in value)):
+        raise ValueError(f'{key} is a list of names')
+    return value
+
+
+def _variant(raw) -> dict:
+    """A fragment's variant, built by the same helpers as the rows above."""
+    keys = _VARIANT_KEYS.get(raw.get('status')) if isinstance(raw, dict) else None
+    if keys is None or set(raw) != keys or not isinstance(raw['id'], str):
+        raise ValueError(f'a variant has exactly the keys of its status: {_VARIANT_KEYS}')
+    if raw['status'] == 'covered':
+        return _covered(raw['id'], raw['oracle'], ' '.join(_words(raw, 'tools')), *_words(raw, 'tests'))
+    if raw['status'] == 'pending':
+        return _pending(raw['id'], raw['reason'])
+    return _unavailable(raw['id'], raw['reason'], raw['pointer'])
+
+
+def merged_tables(base: Path = MANIFEST_FILE) -> tuple[dict, list, dict]:
+    """TOOLS_BY_FAMILY, VARIANTS and {settled variant id: fragment}: the rows above plus the fragments'.
+
+    Sections apply in order: `tool_families`, `variants` (new ids), `settles` (a
+    pending variant, once, kept in place) and `variant_additions` (a covered
+    variant's extra tools and tests). `manifest_problems` then checks the result.
+    """
+    owner = {t: f for f, tools in PYTHON_TOOLS_BY_FAMILY.items() for t in tools}
+
+    def tool_family(tool, family):
+        if family not in FAMILIES:
+            raise ValueError(f'no family {family!r}; one of {sorted(FAMILIES)}')  # repr-ok: names a JSON key in a CI/import error
+        if tool in owner:
+            raise ValueError(f'{tool} is already in {owner[tool]}')
+        return tool, family
+    tools = {f: set(names) for f, names in PYTHON_TOOLS_BY_FAMILY.items()}
+    for tool, family in extend({}, base, 'tool_families', tool_family).items():
+        tools[family].add(tool)
+    variants = extend_items(PYTHON_VARIANTS, base, 'variants', convert=_variant)
+    for section in ('settles', 'variant_additions'):
+        if not isinstance(load_merged(base).get(section), list):
+            raise ValueError(f'{base}: needs a list {section!r}')  # repr-ok: names a JSON key in a CI/import error
+    files = [(path, json.loads(path.read_text(encoding='utf-8'))) for path in [base, *fragment_files(base)]]
+    index = {v['id']: i for i, v in enumerate(variants)}
+    settled: dict[str, Path] = {}
+    for path, data in files:
+        for raw in data.get('settles', []):
+            try:
+                variant = _variant(raw)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f'{path}: settles item {raw!r}: {exc}') from exc  # repr-ok: names a JSON key in a CI/import error
+            vid = variant['id']
+            if vid in settled:
+                raise ValueError(f'{path}: {vid} is already settled by {settled[vid].name}')
+            base_status = variants[index[vid]]['status'] if vid in index else None
+            if base_status != 'pending' or variant['status'] == 'pending':
+                raise ValueError(f'{path}: settles {vid!r}: only a pending variant can be settled, '  # repr-ok: names a JSON key in a CI/import error
+                                 'and only to covered or unavailable')
+            variants[index[vid]], settled[vid] = variant, path
+    for path, data in files:
+        for raw in data.get('variant_additions', []):
+            vid = raw.get('id') if isinstance(raw, dict) else None
+            try:
+                if vid not in index or set(raw) - {'id', 'tools', 'tests'}:
+                    raise ValueError(f'names no variant {vid!r}, or has keys beyond id, tools, tests')  # repr-ok: names a JSON key in a CI/import error
+                old = variants[index[vid]]
+                if old['status'] != 'covered':
+                    raise ValueError(f'{vid} is not covered')
+                more_tools, more_tests = _words(raw, 'tools'), _words(raw, 'tests')
+                again = sorted((set(old['tools']) & set(more_tools)) | (set(old['tests']) & set(more_tests)))
+                if again or len(set(more_tools)) < len(more_tools) or len(set(more_tests)) < len(more_tests):
+                    raise ValueError(f'{vid} already lists {again or "a name twice"}')
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f'{path}: variant_additions item {raw!r}: {exc}') from exc  # repr-ok: names a JSON key in a CI/import error
+            grown = old['tools'] + more_tools
+            variants[index[vid]] = {**old, 'tools': grown, 'tests': old['tests'] + more_tests,
+                                    'seam': 'chat tools' if grown else CHECKED_STREAM}
+    return {f: frozenset(names) for f, names in tools.items()}, variants, settled
+
+
+def stale_rows(settled: dict[str, Path]) -> list[str]:
+    """A pending row a fragment settled stays above until someone deletes it; say so."""
+    return [f'stale: {vid} is still pending where it is declared, and {path.name} settles it; '
+            'delete that pending row' for vid, path in sorted(settled.items())]
+
+
+TOOLS_BY_FAMILY, VARIANTS, SETTLED = merged_tables()
 
 
 def _families(tools_by_family: dict, inventory: tuple[str, ...]) -> dict[str, set[str]]:
@@ -930,6 +1075,7 @@ def report(built: dict) -> str:
         f'unavailable={c["unavailable_variants"]}', 'full_coverage=not_established'])]
     if built['unmapped_tools']:
         lines.append('unmapped: ' + ' '.join(built['unmapped_tools']))
+    lines += stale_rows(SETTLED)
     return '\n'.join(lines)
 
 

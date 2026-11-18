@@ -43,6 +43,10 @@ two faces" §3 rule 4). The pack holds:
   SG&A shares. Every value is assumed with a source, a year and a range; no revenue price
   (DCBC-SCOPE-1). Read by `models/business_case.py`. The build script is
   `.scratch/dc-business-case/make_pack_2026-11-10.py`;
+- from version 2026-11-13, the campus library pinned again after its 220/110 kV transformers took
+  losses from OPTCL's 220/132 kV tender caps, scaled x1.25 as assumed autotransformers and tagged
+  `assumed` (campus-library-gaps 03, CLG03-SOURCE-2): the pack carries no loss, so every 2026-11-10
+  row is unchanged and only the manifest's campus sha256 moves;
 - finance defaults;
 - regional cost overlays (see [Regional versions](#regional-versions));
 - two illustrative tariffs;

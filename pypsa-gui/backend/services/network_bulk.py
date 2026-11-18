@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
@@ -400,7 +401,13 @@ def apply_bulk_update(body: dict) -> dict:
             if c in _eh_cols:
                 ensure_eh_column(n, component_class, c)
         df = getattr(n, attr)
-        unknown_cols = [c for c in sorted(touched_cols) if c not in df.columns]
+        # TCU 09: a composite class's own part columns may be the FIRST write of their column, as on PUT
+        # (`derive.apply_parts` creates them). Created as float after every check, so a refusal adds none.
+        from services.asset_schema.schema import part_columns
+
+        new_part_cols = [c for c in sorted(touched_cols)
+                         if c not in df.columns and c in part_columns(component_class)]
+        unknown_cols = [c for c in sorted(touched_cols) if c not in df.columns and c not in new_part_cols]
         if unknown_cols:
             raise HTTPException(400,
                 f"{component_class} has no column(s): {', '.join(unknown_cols)}.")
@@ -423,7 +430,7 @@ def apply_bulk_update(body: dict) -> dict:
                     except ValueError as exc:
                         raise HTTPException(422, str(exc)) from exc
                     continue
-                col_dtype = df[col].dtype
+                col_dtype = df[col].dtype if col in df.columns else np.dtype(float)
                 if pd.api.types.is_bool_dtype(col_dtype):
                     if isinstance(value, str):
                         if value.strip().lower() in ("true", "1", "yes"):
@@ -565,11 +572,34 @@ def apply_bulk_update(body: dict) -> dict:
                         notices.append(f"{t}: {fuel_curve.clear_notice(after, before=before)}")
                         resets[t] = reset
 
+        # TCU 08: a composite asset's investment parts, refused as the single edit refuses them (#738), per
+        # target and before the first write, so a 422 leaves every row as it was.
+        from services.asset_schema.schema import COMPOSITE
+
+        if component_class in COMPOSITE:
+            from services.asset_schema.derive import split_parts
+            from services.network_crud import _check_investment_parts, check_parts_own_costs
+
+            for (_targets, coerced), (_, submitted) in zip(pending, batches):
+                for t in _targets:
+                    before = df.loc[t].to_dict()
+                    row, parts = split_parts(component_class, {**before, **coerced})
+                    _check_investment_parts(component_class, parts, row=row)
+                    # TCU 09: a cost the parts own is refused, not written and re-derived away. The raw value
+                    # decides, so a blank (coerced to the column default) is not an edit.
+                    try:
+                        check_parts_own_costs(component_class, parts, before=before, submitted=submitted)
+                    except HTTPException as exc:
+                        raise HTTPException(exc.status_code, f"{t}: {exc.detail}") from exc
+
         for _targets, coerced in pending:
             carrier = coerced.get("carrier")
             if (component_class != "Carrier" and isinstance(carrier, str) and carrier
                     and carrier not in n.carriers.index):
                 require_valid_name(carrier, component_class="Carrier")
+
+        for col in new_part_cols:
+            df[col] = float("nan")
 
         for _targets, coerced in pending:
             # If the batch sets `carrier`, ensure the carrier row exists with
@@ -600,6 +630,14 @@ def apply_bulk_update(body: dict) -> dict:
                         asset_provenance.mark_customised(n, component_class, t, list(reset))
             if component_class == "Generator":
                 fuel_curve.apply(n, _targets, stamp=True)
+            if component_class in COMPOSITE:
+                # TCU 08: re-derive capital_cost, fom_cost and lifetime from the row's parts as the single edit
+                # does, per target (#1466 D1), so the hashed columns, and the input fingerprint, follow a part,
+                # scale or rate edit. A no-op on a row with no priced part.
+                from services.network_crud import rederive_scaled_parts
+
+                for t in _targets:
+                    rederive_scaled_parts(n, component_class, t)
 
     # One audit entry per bulk op (not per component). The row form cannot
     # print every value, so it prints the shape instead.

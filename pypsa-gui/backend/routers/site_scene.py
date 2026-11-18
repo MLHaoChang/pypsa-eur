@@ -7,6 +7,7 @@ The Site 3D native scene routes (SC-01a; D01/D02 in
   * ``GET  /{name}/sites/{site_id}/scene/results``: SC-03 native results on buildings and groups (D07).
   * ``POST /{name}/sites/{site_id}/scene/adopt``: explicit, digest-checked adoption.
   * ``POST /{name}/sites/{site_id}/scene/proposals``: an in-request native preview.
+  * ``POST /{name}/sites/{site_id}/scene/exports``: SC-04 GLB + manifest zip download (a read).
   * ``GET  …/proposals/{proposal_id}``, ``POST …/apply``, ``POST …/cancel``.
 
 Every route authorizes ``{name}`` with ``ProjectAccessDep`` (404 for a project
@@ -25,7 +26,7 @@ import uuid
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session as DBSession
 
@@ -250,3 +251,82 @@ def cancel_proposal(site_id: str, proposal_id: str, project: AuthorizedProject =
                     user: User | None = Depends(optional_user)) -> dict:
     _check_lock(project, db, user)
     return proposals.cancel(project.registry_key, _owner(user), site_id, proposal_id)
+
+
+@router.post("/{name}/sites/{site_id}/scene/exports")
+async def export_scene(site_id: str, request: Request, project: AuthorizedProject = ProjectAccessDep) -> Response:
+    """
+    SC-04: "Export for Blender", the neutral GLB + manifest bundle of the current
+    generation as a zip download. A read: viewers may call it, it takes no edit
+    lock, persists nothing and never starts Blender (V31). The body names the
+    format and media policy explicitly (`glb_manifest`, `none`).
+    """
+    from datetime import UTC, datetime
+
+    from services.http_filenames import content_disposition
+    from services.site_scene import export
+
+    body = await _json_body(request, MAX_SMALL_BODY)
+    export.parse_request(body)
+    await run_in_threadpool(_site_known, project, site_id)
+    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    data, meta = await _call(export.export_site, project.directory, project.name, site_id, stamp)
+    name = f"{meta['site_name'] or site_id}-scene-r{meta['revision']}.zip"
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": content_disposition(name),
+                             "X-Scene-Revision": str(meta["revision"])})
+
+
+@router.post("/{name}/sites/{site_id}/scene/blender-jobs")
+async def start_blender_job(site_id: str, project: AuthorizedProject = ProjectAccessDep,
+                            db: DBSession = Depends(get_db),
+                            user: User | None = Depends(optional_user)) -> dict:
+    """
+    Issue 06 slice (a): queue one pinned-Blender run on the site's native export.
+    It writes a download-only artifact under the project directory, so it takes the
+    edit lock. With no configured container worker it is 503 `worker_unavailable`
+    and names why; the Blender-free export is unaffected. No body.
+    """
+    from services import solve_queue as sq
+    from services.site_scene import blender_job, blender_worker, export
+
+    _check_lock(project, db, user)
+    await run_in_threadpool(_site_known, project, site_id)
+    ready = await run_in_threadpool(blender_worker.readiness)
+    if not ready.available:
+        raise SceneError("worker_unavailable", f"Blender is not available: {ready.reason}",
+                         blender_worker.describe(ready))
+    await _call(export.read_snapshot, project.directory, site_id)     # not_found before queueing
+    job, created = sq.solve_queue.enqueue_unique(
+        project.name,
+        project_key=project.registry_key,
+        storage_dir=str(project.directory),
+        solver_config_json=blender_job.spec(site_id, project.name),
+        enqueued_by_user_id=getattr(user, "id", None),
+        kind=sq.KIND_BLENDER_SCENE,
+    )
+    if not created:
+        raise SceneError("job_active",
+                         f"This project already has a {job.kind} job {job.status}; wait for it or abort it",
+                         {"job_id": str(job.id)})
+    return sq.solve_queue.get_job(job.id) or job.to_public(None)
+
+
+@router.get("/{name}/sites/{site_id}/scene/artifacts/{artifact_id}")
+async def get_scene_artifact(site_id: str, artifact_id: str,
+                             project: AuthorizedProject = ProjectAccessDep) -> Response:
+    """
+    Issue 06 slice (a): download one stored Blender artifact (`.blend`, GLB and
+    meta.json, zipped). A read: viewers may call it. The id must be a canonical
+    UUID and the artifact this site's, or it is 404; nothing is ever read back
+    into the scene or the model here.
+    """
+    from services.http_filenames import content_disposition
+    from services.site_scene import blender_job
+
+    await run_in_threadpool(_site_known, project, site_id)
+    data, meta = await _call(blender_job.read_artifact, project.directory, site_id, artifact_id)
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": content_disposition(
+                                 f"{site_id}-blender-r{meta.get('revision')}.zip"),
+                             "X-Content-Type-Options": "nosniff"})

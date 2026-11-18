@@ -1,0 +1,1 @@
+Guided has no asset edit form: it shows the Hub design stepper with 'Assets & sizing' ('Its editor is still in Expert', with an 'Open assets & sizing in Expert' link), so no Generator fuel-slope field or hint is shown.

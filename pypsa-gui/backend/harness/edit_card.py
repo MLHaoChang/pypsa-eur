@@ -64,6 +64,8 @@ SETTINGS_EDITS = frozenset({
     "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
     # Business case 08b: the business-case lines (a diff card with each price's source).
     "set_business_case_lines",
+    # Business case 14: the template's preset, every default filled by the server.
+    "apply_business_case_preset",
     # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
     "import_map_geometry",
     # LV08 B-campus: the campus file, the readiness limits, the study's dispatch, grid-code drafts
@@ -1007,8 +1009,15 @@ _SOLVER_WORDS: dict[str, tuple[str, str, dict | None]] = {
     # homer-parity 01a. Shown in % (a share, below), as the Solver Settings field
     # `MIN_RENEWABLE_FRACTION_LABEL` (pages/solver/OffGridConstraints.tsx) says it.
     "min_renewable_fraction": ("Minimum renewable fraction", "", None),
+    # homer-parity 01b, shown in %, as `RESERVE_LABELS` in the same file says them.
+    "reserve_share_load": ("Reserve for load", "", None),
+    "reserve_share_pv": ("Reserve for solar output", "", None),
+    "reserve_share_wind": ("Reserve for wind output", "", None),
 }
-_SHARES = frozenset({"discount_rate", "inflation_rate", "min_renewable_fraction"})
+_SHARES = frozenset({
+    "discount_rate", "inflation_rate", "min_renewable_fraction",
+    "reserve_share_load", "reserve_share_pv", "reserve_share_wind",
+})
 _ROLLING = frozenset({"rolling_horizon", "rolling_overlap"})
 # Settings with their own route (validation and If-Match): never through this card. The
 # commercial config stays: chat_tools steers the model here for its poc_link and contracts.

@@ -64,6 +64,7 @@ from services.reports.report_job import (
     ReportJobInFlight,
     SummarySectionUnknown,
     assistant_strict_active,
+    interrupted_job,
     pending_instruction_of,
     public_record,
     start_mapping_job,
@@ -312,12 +313,26 @@ def propose_template_plan(report_id: str, body: ProposeMappingBody,
 
 @router.get("/{name}/reports/generate/status")
 def get_generate_status(project: AuthorizedProject = ProjectAccessDep):
-    """The job record without its thread handle and stop event; 204 when never run."""
+    """The job record without its thread handle and stop event; 204 when never run.
+
+    LC48B-RESUME-1: with no record in this process but a job marker on disk
+    that still reads running, a restart interrupted that job: 409
+    `report_interrupted` (status `interrupted`, its report id). Nothing
+    re-runs it; generating again replaces the marker."""
     from starlette.responses import Response
 
     with PyPSAService.get_solver_state_lock():
         record = public_record(_state().get(JOB_KEY))
     if record is None:
+        lost = interrupted_job(project.directory)
+        if lost is not None:
+            raise HTTPException(409, {
+                "error_kind": "report_interrupted",
+                **lost,
+                "message": "The report job was interrupted by a server restart "
+                           "before it finished.",
+                "hint": "generate the report again",
+            })
         return Response(status_code=204)
     return record
 

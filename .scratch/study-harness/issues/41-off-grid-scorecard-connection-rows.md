@@ -3,14 +3,14 @@
 
 # 41 — Off-grid scorecard still judges ramp, oscillation and peak rows against the connection
 
-Status: ready-for-agent
+Status: done
 Size: S
 Blocked by: none
 Gated: GK A
 Likely files: pypsa-gui/backend/services/adequacy/grid_readiness.py; pypsa-gui/backend/services/run_profiles.py; pypsa-gui/backend/tests/test_run_action_island_survival.py (nearby)
 Type: task
 Found by: GK A's review of issue 12, slice 12a (#1361)
-Owner decisions: none yet
+Owner decisions: SH41-OFFGRID-1
 
 ## What was seen
 
@@ -31,3 +31,16 @@ the island's own limits instead.
 ### 2026-11-13: owner decision
 
 Owner answered (SH41-OFFGRID-1, `docs/agents/owner-decisions.md`). Status: ready-for-agent.
+
+### 2026-11-14: GK A plan verdict, GO with O1–O4 (build session_01G7qCukKkK9qyiku8SD5Cme)
+
+- O1, not on the label alone: the three rows leave only when the archetype is off_grid **and** the saved network has no conducting connection. That check reuses SH 40's `_never_conducts` (gridspine/producers/campus.py) over every import Link. No saved network, or a tie that can conduct, keeps the rows judged; the conducting case adds the note "labelled off-grid, but the connection can import".
+- O2, exact ids: the ids are whatever `_peak_rows`, `_ramp_row` and `_oscillation_row` emitted on this project (`CONN_BUILDERS`), every `energization_peak:<period>` included; tested on three periods.
+- O3, downstream readers: `readiness_fact` gives NoEvidence("excluded") for single rows. The `energization_peak:` gate family in run_gates read `rows` only, so it now returns NoEvidence("excluded") when any member was excluded. `rows_digest` hashes `excluded`; the scorecard UI lists excluded rows. Not changed here: `ConnectionLimits.tsx` still says "No grid connection is tagged" when these rows are excluded (UI area), and the report chapter and checked-results source do not mention exclusions.
+- O4: the cards of the four grid-connected templates (eh_datacenter, eh_datacenter_staged, eh_h2_hub, eh_h2_hub_staged) were compared once, byte for byte, with master's: identical. A test on the same four pins that the card with the rule switched off is the same card.
+
+Status: done.
+
+### 2026-11-14: GK A NOT OK @79d7ac2c, fixed
+
+`_tie_open` was `all(_never_conducts(...) for x in inp.links)`: `all([])` excluded an off-grid project with no import Link, and Lines, Transformers and grid generators at the PCC were ignored. The rows now leave only when at least one bus is marked as the PoC, every PoC passes SH 40's structural rule `_open_tie_rating` (joined by Links alone, at least one, every one held at 0 MW, no Line or Transformer), and every tagged import Link is held at 0 MW. Template-free tests, red on 79d7ac2c: no import Link; a Line to the grid; a grid Generator at the PoC with no Link; no PoC marked. Also: a conducting import Link away from the PoC keeps the rows (kills a mutant), and the open tie stays excluded. The "can import" note goes only on a project with an import Link.

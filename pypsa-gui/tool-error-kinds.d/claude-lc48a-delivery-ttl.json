@@ -1,0 +1,3 @@
+{"kinds": {
+  "delivery_expired": {"surface": "inline", "why": "A copilot delivery (an agent_export file) is more than 7 days old (LC48A-TTL-1): get_file_delivery, build_delivery and the download refuse it with 410. Nothing is written or deleted; the assistant exports the content again, which makes a fresh delivery."}
+}}

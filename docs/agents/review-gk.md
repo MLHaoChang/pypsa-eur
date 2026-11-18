@@ -195,11 +195,15 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A date answered at model-period resolution discloses its true window: [earliest, reported]. earliest is the start of the earliest earlier period that was partly energised (max > 0) while load was in service, clamped by the first COD and the project start. Otherwise the date is exact. Never "up to a period earlier" (#1474 R1/R2, GK A (26)).
 - A thread-local handoff is cleared by its consumer on every outcome, success, refusal and raise alike (#1477 F1, GK B (54)).
 - A bulk write applies its side effects per target, never through one shared coerced dict (#1466 D1, GK B (54)).
+- A bulk write that touches derived-input columns (composite cost parts) re-derives per target through the same derive as the single edit, so the network-input fingerprint and the LP agree (TCU 08; extends #1466 D1 and #738, GK B (58)).
 - A plain-text refusal keeps a structured kind; the mutant that widens the check to the base class in `isinstance` is killed (#1466 D2, GK B (54)).
 - When a bounded-try lock is busy, a read says "network busy" without comparing, never stale (PG-09 Y1, GK B (54)).
 - An evidence or probe record that a later gate will trust binds a digest of the exact configuration that gate checks, plus the code version (#1483 F3, GK B (55)).
 - A lock test that wraps lock entry pins only "the read comes after entry". When the property is "held across the whole read-modify-write", a second writer hooked inside the read must be shown to wait (#1479, GK B (55)).
 - A parity or "unchanged vs master" fixture compares exactly (==); a relative tolerance on values that should be bit-equal hides drift (#1466 F1, GK B (55)).
+- A `not_via_chat` word that is also a component name (`store`) counts only in its verb position; the component asks are tested as non-hits (#1480, GK B (56)).
+- A persisted timestamp or number that a gate compares is checked with `isfinite`: `NaN > limit` is False, so the gate fails open (#1505, GK B (56)).
+- A template's committed sidecar hash is written only by its generator, and native byte-identity holds (#1492, GK B (56)).
 - A cache keyed on a revision is safe only if every writer of a hashed input moves the key after its write. A bump before the handler lets a poll cache the pre-edit state (#1464 F1, GK B (53)).
 - A polled freshness read never blocks on the mutation lock, and never reports stale only because the lock was held (#1464 F2, GK B (53)).
 - A typed refusal's status code is pinned by test wherever a manifest row claims it (#1452 I1, GK B (53)).
@@ -209,6 +213,9 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A preset note never prices a cost that a linked row also prices (#1462 F1, GK B (53)).
 - A key-scoped restore makes the outcome check compare only the restored keys (UM10 K3, GK B (53)).
 - A solver-config write that touches only fields in `reliability_goal.NOT_LP_FIELDS` need not bump the network revision, provided the fields are dropped from `goal_free_config` with a pin test that the fingerprint, adequacy hash and IC digest are unchanged, and every reader of those fields keys its staleness on its own inputs hash, with a test. Any other solver-config write still bumps (refines LC40-COUNTER-1; owner LC40-COUNTER-2; #1467 C1, GK B (54)).
+- A gate that compares session-scoped evidence for a project refuses with a typed reason when that project is not the session's open one; it never compares across projects (#1514 F1, GK B (57)).
+- A new guard on one entry point covers every entry point that sets the same state (`start_task`'s run path and `resume_task` as well as the switch path; #1515 F2, GK B (57)).
+- A tool-error-kind fragment with surface "banner" adds its frontend `TOOL_ERROR_BANNER_KINDS` and `KIND_COPY` entries in the same PR (#1515 F1, GK B (57)).
 
 ## Engineering rules
 
@@ -287,3 +294,31 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - Test fixtures for a follower or reader use the record shape the real writer saves, never a hand-made shape (#1427 F1/F3).
 - A share s that scales a linked revenue line scales that bus's lost-production drop by the same s (f × s, capped at 1, summed per bus): a shortfall counts once, and s = 0 means no link (#1430 P4, GK B (51)).
 - `linked_share` is a commercial sold share only. A year-varying share used as physical lease-up is a volume factor under ruling 6: it is refused, or never offered, until the dispatched-volume cost lines scale with it (#1430 F2, GK B (51)).
+- A spy test that pins "the draws actually used" runs at least 2 batches with an early stop, n ≠ requested draws, and the heaviest draw in an earlier batch. A single-batch run cannot tell the used count from the requested count (#1463 F1, GK A (26)).
+- A new terminal loop status is tested at the runner level (restore flag, final/nearest, verdict copy), not only in the controller (#1463 F3, GK A (26)).
+- A date answered at model-period resolution discloses its true window: [earliest, reported]. earliest is the start of the earliest earlier period that was partly energised (max > 0) while load was in service, clamped by the first COD and the project start. Otherwise the date is exact. Never "up to a period earlier" (#1474 R1/R2, GK A (26)).
+- A "tie open" or "off-grid" decision reads the network's own connection, as SH 40's structural PCC rule does (`_open_tie_rating` / `pcc_tie_open`): only Links at the PCC, all held at 0, no Line or Transformer, and a grid generator decides only when no Link touches the PCC. It never reads a label, and never an `all()` over a set that may be empty (#1516 N1/N2, GK A (27)).
+- A sizing or loop runner that reports a cost derived from the objective reverses the objective scale the way `run_simulation` does (`_rescale_results_for_objective`), with a test under auto scale and a user scale ≠ 1 (#1466 A2-1, GK A (27)).
+- A per-unit LP share whose exact form is a ratio of variables uses the share over the fixed units only (conservative) and gives extendable units the aggregate row only. The screen still judges them per unit, and the facts name the gap (#1486 R1, GK A (27)).
+- Loss data from an autotransformer source, applied to a unit whose winding type is unknown, is scaled by the co-ratio, states "autotransformer assumed" and discloses the two-winding multiple (#1500 C1, GK A (27)).
+
+## Standing rulings (GK B 59, recorded 2026-11-17)
+
+- A raw edit of composite investment parts moves the network-input fingerprint. A test pinning the opposite is a defect pin (#1547; extends #1533 T3).
+- After a discount-rate change, any write to a priced composite row re-derives it from its parts. That is intended: the stored cost becomes true, and the staged LP is bit-identical either way (TCU 09 N3).
+- A bit-identity claim is tested with an inexact operand pair (e.g. 0.187/0.4), exact `==`, at every site. Replacing `x / y` with `x * (1/y)` is not bit-identical (#1538 F1).
+- A race fix is pinned at the call site that reads the shared value, not only in the callee. Mutate each call site (#1548 F1, #1543 F1-t).
+- A guard with two parts ("differs from base" AND "equals new") needs a case where only the first fails. A test that trips the second part first leaves the first unkilled (#1544 F1/F2).
+
+## Standing rulings (GK B 60, GK B 61 and GK B2 1, recorded 2026-11-17)
+
+- A dependency or derivation table is pinned by exact equality per knockout (#1559).
+- Dedupe is tested with a real duplicate, backend and frontend (#1559).
+- A read-back applies the write path's normalisation before comparing (#1555).
+- A validator checks at the writer's parameter, e.g. the effective discount rate (#1555).
+- A vitest/jsdom "no unhandled rejection" claim is tested via window `unhandledrejection` or by asserting the rejection is consumed (#1556 F6).
+- A retry counter resets only on progress that survives dedupe (#1556).
+- One targeted mutant per added guard replaces a multi-hour full mutant sweep (#1544, #1561).
+- A display scale the client applies before a write, where the scale depends on server state (e.g. a bus unit), is enforced on the server: the write carries the basis the client assumed and the server refuses a mismatch against the post-patch state with a typed 409. Cache invalidation alone never closes it: races, revision rewinds on restore and in-form edits each defeated it (#1565, GK B2).
+- A FastAPI `Header`, `Query` or `Body` parameter on a route function that tests or code call directly is declared `Annotated[T, Header(...)] = default`, never `= Header(default)`; a direct call otherwise receives the FieldInfo object (#1565 B1, GK B2).
+- A card may name a bound item by a label in place of its engine id only when labels are unique (case-insensitive, non-blank, refused otherwise) and the digest binds id and label together. Content hashes may stay off the card when the card names each item the hash covers; the hash binds the identity of named content. A bound scalar the card does not show (e.g. a cap) is shown, or not bound (#1575, GK B 61).

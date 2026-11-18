@@ -43,12 +43,42 @@ describe('the run step', () => {
 
 describe('the report step', () => {
   it('shows the stale banner with its reasons in words', () => {
-    render(<ReportStep report={{ ...report, stale: true, stale_reasons: ['intake_changed_since_findings'] }} error={null}
+    render(<ReportStep report={{ ...report, stale: true, stale_reasons: ['intake_changed_since_findings'],
+      verdict: { state: 'stale', broken: [{ edge: 'input:study:s1/intake', field: null, recorded: 'a', current_field: null, current: 'b', reason: 'changed', needs_run: true }] } }} error={null}
       assembleError={null} run={run} tornado={tornado} onAssemble={vi.fn()} busy={false} urls={urls} />)
     const b = screen.getByTestId('report-stale')
     expect(b.textContent).toContain('out of date')
     expect(b.textContent).toContain(HELP.intake_changed_since_findings)
     expect(screen.getByTestId('report-rerun').textContent).toContain('Run the study again')
+    expect(screen.queryByTestId('report-reassemble-hint')).toBeNull()
+  })
+
+  // PG-05: the verdict says which edge broke; the reason text is never parsed.
+  it('offers assembling again when only the report’s own edge broke, whatever the reason text says', () => {
+    render(<ReportStep report={{ ...report, stale: true, stale_reasons: ['report_has_no_findings_hashes'],
+      verdict: { state: 'stale', broken: [{ edge: 'input:report:s1/findings_hashes', field: null, recorded: 'a', current_field: null, current: 'b', reason: 'changed', needs_run: false }] } }} error={null}
+      assembleError={null} run={run} tornado={tornado} onAssemble={vi.fn()} busy={false} urls={urls} />)
+    const b = screen.getByTestId('report-stale')
+    expect(screen.queryByTestId('report-rerun')).toBeNull()
+    expect(screen.getByTestId('report-reassemble-hint').textContent).toBe('Assemble the report again to bring it up to date.')
+    // the verdict's edge names never reach the words (the reason code's own muted line is CodeList's, as before)
+    expect(b.textContent).not.toMatch(/needs_run|input:/)
+  })
+
+  it('asks for the re-run when the report carries no verdict', () => {
+    render(<ReportStep report={{ ...report, stale: true, stale_reasons: ['report_has_no_findings_hashes'], verdict: undefined }}
+      error={null} assembleError={null} run={run} tornado={tornado} onAssemble={vi.fn()} busy={false} urls={urls} />)
+    expect(screen.getByTestId('report-rerun')).toBeTruthy()
+    expect(screen.queryByTestId('report-reassemble-hint')).toBeNull()
+  })
+
+  it('asks for a re-run from the verdict, not from the reason text', () => {
+    // neither code reads "changed", "copied" or "earlier": only the network edge says a run is needed
+    render(<ReportStep report={{ ...report, stale: true, stale_reasons: ['report_has_no_findings_hashes', 'network_edited'],
+      verdict: { state: 'stale', broken: [{ edge: 'input:report:s1/findings_hashes', field: null, recorded: 'a', current_field: null, current: 'b', reason: 'changed', needs_run: false }, { edge: 'input:run:fork:f1/network', field: null, recorded: 'a', current_field: null, current: 'b', reason: 'changed', needs_run: true }] } }} error={null}
+      assembleError={null} run={run} tornado={tornado} onAssemble={vi.fn()} busy={false} urls={urls} />)
+    expect(screen.getByTestId('report-rerun')).toBeTruthy()
+    expect(screen.queryByTestId('report-reassemble-hint')).toBeNull()
   })
 
   it('shows whether the report has an established verdict', () => {

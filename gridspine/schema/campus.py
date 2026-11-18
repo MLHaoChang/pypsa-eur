@@ -14,6 +14,11 @@
 * ``import_mw`` is the capacity-expansion model's own net import at the
   PCC. It is negative when the campus exports. The AC load flow computes
   the real figure, losses included; this one ranks the hours (plan C3).
+* ``tie_open`` (optional) is True in an hour when the solve left nothing at
+  the PCC able to carry power then (``producers.campus.pcc_tie_open``):
+  there is no islanding event to judge in that hour. A table without the
+  column, or a cell that is not a clear true or false, reads as closed, so
+  the hour is judged as it always was (fail closed).
 
 pandas only, like every other contract in ``schema/``.
 """
@@ -24,6 +29,8 @@ from gridspine.schema.contracts import ContractError
 
 HOURLY_COLUMNS = ("unit_id", "period", "hour", "p_mw", "status")
 PCC_COLUMNS = ("period", "hour", "weight", "import_mw")
+#: Optional ``campus_pcc.csv`` column: the solved tie state per hour.
+PCC_TIE_OPEN = "tie_open"
 HOURLY_CSV = "campus_hourly.csv"
 PCC_CSV = "campus_pcc.csv"
 
@@ -34,6 +41,22 @@ STANDARD_MVA = (0.1, 0.16, 0.25, 0.4, 0.63, 1.0, 1.6, 2.5, 4.0, 6.3, 10.0, 16.0,
 
 #: MW tolerance for "carries no power".
 P_TOL_MW = 1e-6
+
+#: The PCC exchange (MW) a normally open tie may show in any hour: the
+#: solver's noise, not power through the tie. Also the most a PCC Link may
+#: be able to carry in an hour (solved rating × per-unit limit) and still
+#: count as open then (``tie_open``).
+TIE_OPEN_TOL_MW = 0.01
+
+_TRUE = frozenset({"true", "1", "1.0"})
+
+
+def _tie_flag(v) -> bool:
+    """One ``tie_open`` cell: True only for a clear true; anything else
+    (false, empty, NaN, junk) is closed (fail closed)."""
+    if isinstance(v, (bool, np.bool_)):
+        return bool(v)
+    return str(v).strip().lower() in _TRUE
 
 
 def _integral(out, col, where):
@@ -86,9 +109,59 @@ def validate_pcc(df: pd.DataFrame) -> pd.DataFrame:
         _integral(out, col, where)
     for col in ("weight", "import_mw"):
         _finite(out, col, where)
+    out[PCC_TIE_OPEN] = (df[PCC_TIE_OPEN].map(_tie_flag).astype(bool) if PCC_TIE_OPEN in df.columns
+                         else pd.Series(False, index=out.index, dtype=bool))
     if (out["weight"] <= 0).any():
         raise ContractError(f"{where}: weight must be positive")
     dup = out.duplicated(subset=["period", "hour"])
     if dup.any():
         raise ContractError(f"{where}: duplicate (period, hour) rows")
+    return out
+
+
+#: The fields of a vendor (black-box) model reference (GC-01, TRGC 01/02):
+#: the file's name, the simulation tool it runs in, the model's name in that
+#: tool, its version and the file's SHA-256. GridSpine stores the reference
+#: and never opens or parses the file.
+VENDOR_MODEL_FIELDS = ("file", "tool", "model", "version", "sha256")
+_HEX = frozenset("0123456789abcdef")
+
+
+def check_vendor_models(block, kinds) -> dict:
+    """The campus's optional ``vendor_models`` block, ``{unit_kind:
+    {file, tool, model, version, sha256}}``, checked and copied. ``kinds``
+    are the unit kinds a reference may name. Every field is required and a
+    non-empty string; ``sha256`` is 64 hex digits (lower-cased). Refused,
+    naming the kind and field: an unknown kind, an unknown, missing or empty
+    field, a bad hash."""
+    if block is None:
+        return {}
+    if not isinstance(block, dict):
+        raise ContractError("vendor_models: must be a mapping {unit_kind: reference}")
+    out = {}
+    for kind, ref in block.items():
+        where = f"vendor_models.{kind}"
+        if kind not in kinds:
+            raise ContractError(f"{where}: unknown unit kind {kind!r}; allowed {sorted(kinds)}")
+        if not isinstance(ref, dict):
+            raise ContractError(f"{where}: must be a mapping of {list(VENDOR_MODEL_FIELDS)}")
+        unknown = sorted(set(ref) - set(VENDOR_MODEL_FIELDS))
+        if unknown:
+            raise ContractError(f"{where}: unknown field(s) {unknown}; allowed {list(VENDOR_MODEL_FIELDS)}")
+        missing = [f for f in VENDOR_MODEL_FIELDS if f not in ref]
+        if missing:
+            raise ContractError(f"{where}: missing field(s) {missing}")
+        clean = {}
+        for f in VENDOR_MODEL_FIELDS:
+            v = ref[f]
+            if not isinstance(v, str) or not v.strip():
+                raise ContractError(f"{where}.{f}: must be a non-empty string")
+            clean[f] = v.strip()
+        sha = clean["sha256"].lower()
+        if len(sha) != 64:
+            raise ContractError(f"{where}.sha256: must be 64 hex digits, got {len(sha)} characters")
+        if not set(sha) <= _HEX:
+            raise ContractError(f"{where}.sha256: must be 64 hex digits, got non-hex {sorted(set(sha) - _HEX)}")
+        clean["sha256"] = sha
+        out[kind] = clean
     return out

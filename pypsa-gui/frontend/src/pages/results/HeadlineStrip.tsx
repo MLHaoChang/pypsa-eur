@@ -30,13 +30,13 @@ const ROW = 'grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr)
 // A row with a trend line is taller (149px measured); its placeholder is too.
 const TILE_MIN = 'min-h-[128px]'
 const TILE_MIN_TREND = 'min-h-[149px]'
-// The placeholder has as many tiles as the last row shown; before any, the shortest card set (`headline_kpis.py` ORDER).
+// The placeholder has as many tiles as the last row shown; before any, the shortest card set (`headline_kpis.py` ORDER; six with a data-centre load).
 const TILES_KEY = 'pypsa-gui.headline-strip.tiles'
 const TREND_KEY = 'pypsa-gui.headline-strip.trend'
 function remembered(): { tiles: number; trend: boolean } {
   try {
     const n = Number(localStorage.getItem(TILES_KEY))
-    return { tiles: n >= 1 && n <= 5 ? n : 4, trend: localStorage.getItem(TREND_KEY) === '1' }
+    return { tiles: n >= 1 && n <= 6 ? n : 4, trend: localStorage.getItem(TREND_KEY) === '1' }
   } catch { return { tiles: 4, trend: false } }
 }
 let loading = remembered()

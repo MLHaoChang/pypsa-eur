@@ -86,6 +86,7 @@ from db.session import get_db
 from deps import optional_user
 from models.report import ReportDocument
 from routers.deps import AuthorizedProject, ProjectAccessDep
+from services import project_write_gate
 from services.http_filenames import content_disposition
 from services.reports import pdf, roundtrip_service, store, templates
 from services.reports.docx_reader import TemplateOutline
@@ -280,6 +281,25 @@ def _check_lock(project: AuthorizedProject, db: DBSession, user: User | None) ->
     _lock = _lock_target(project)
     if _lock is not None:
         _check_project_lock(db, _lock, user)
+
+
+def _check_lock_unless_viewer(project: AuthorizedProject, db: DBSession,
+                              user: User | None) -> bool:
+    """`_check_lock`, skipped for a viewer (VIEWER-ROLE-1 Q3/Q4, GK B F1 on #1622).
+    Returns whether the caller is a viewer, so a handler reuses this one read.
+
+    A viewer can never take the edit lock, so without the skip an editor's
+    open project would refuse every viewer comment and export. The skip is
+    safe: a comment writes only the report's comments file under
+    `store.report_lock` (cross-process, honours a directory close), and an
+    export renders the saved version from disk into a new upload, never the
+    editor's in-memory state or the report's files. The role is read once per
+    request, here, before the report lock is taken (R3: per request, never
+    cached); an editor keeps the foreign-lock refusal."""
+    viewer = project_write_gate.is_viewer(db, user, project.uuid)
+    if not viewer:
+        _check_lock(project, db, user)
+    return viewer
 
 
 def _current_eh_report() -> dict | None:
@@ -534,6 +554,61 @@ def create_report(body: CreateReportBody,
     return {**meta.model_dump(), "document": stored.model_dump()}
 
 
+def _stale(doc, reason: str, message: str) -> HTTPException:
+    return HTTPException(409, {
+        "error_kind": "report_stale",
+        "reason": reason,
+        "version": doc.version,
+        "message": message,
+        "hint": "generate the report again, then export",
+    })
+
+
+def _refuse_stale(project: AuthorizedProject, doc) -> None:
+    """409 `report_stale` when this version cannot be shown to match the study
+    now (owner decision LC48B-STALE-1); nothing is rendered or saved. The
+    `reason` says which:
+
+    - `no_evidence_hash`: the version stored no hash, so it cannot be compared;
+    - `project_not_open`: the evidence is read from the session, which holds
+      another project (or none), so the comparison would be with the wrong
+      project's study (GK B F1 on #1514);
+    - `evidence_unreadable`: reading the evidence now failed;
+    - `study_changed`: its stored `evidence_hash` is not the hash of the
+      project's evidence now, the comparison the viewer shows as "evidence
+      changed since vN".
+
+    The process holds one open project per session, so the session's evidence
+    is the open project's (single-process reading, GK B N2)."""
+    from services.pypsa_service import PyPSAService
+    from services.reports.evidence import evidence_hash
+
+    if not doc.evidence_hash:
+        raise _stale(doc, "no_evidence_hash",
+                     f"Version {doc.version} of this report stored no evidence hash, so it "
+                     "cannot be checked against the study.")
+    try:
+        open_uuid = str(PyPSAService.get_active_context().project_uuid or "")
+    except Exception:                                       # noqa: BLE001 - no session context
+        open_uuid = ""
+    if open_uuid != str(project.uuid):
+        raise _stale(doc, "project_not_open",
+                     f"Version {doc.version} is checked against the open project's study, "
+                     f"and {project.name} is not the open project; open it, then export.")
+    try:
+        evidence, _eh_report = _current_evidence(project)
+        now = evidence_hash(evidence)
+    except Exception as exc:                                # noqa: BLE001 - stated, never a 500
+        logger.warning("reports: evidence not read for the stale check: %s", exc, exc_info=True)
+        raise _stale(doc, "evidence_unreadable",
+                     f"The study's evidence could not be read, so version {doc.version} "
+                     "cannot be checked against it.") from exc
+    if doc.evidence_hash != now:
+        raise _stale(doc, "study_changed",
+                     f"Version {doc.version} of this report was written before the "
+                     "study changed, so its figures no longer match the project.")
+
+
 @router.post("/{name}/reports/{report_id}/export")
 def export_report(report_id: str, body: ExportReportBody,
                   project: AuthorizedProject = ProjectAccessDep,
@@ -569,11 +644,12 @@ def export_report(report_id: str, body: ExportReportBody,
             "message": "PDF export needs LibreOffice (soffice) on this host's PATH, "
                        "and it is not installed here. Export the .docx instead.",
         })
-    _check_lock(project, db, user)
+    _check_lock_unless_viewer(project, db, user)
     try:
         doc = store.load_report(project.directory, report_id, body.version)
     except store.ReportStoreError as exc:
         raise _http(exc) from exc
+    _refuse_stale(project, doc)
     figure_bytes: dict[str, bytes] = {}
     for figure_id in doc.figures:
         try:
@@ -1070,7 +1146,7 @@ def add_report_comment(report_id: str, body: CommentBody,
     from services.reports import revisions
 
     _latest_or_404(project, report_id)
-    _check_lock(project, db, user)
+    _check_lock_unless_viewer(project, db, user)
     text = body.text.strip()
     if not text or len(text) > revisions.MAX_COMMENT_CHARS:
         raise HTTPException(422, {
@@ -1095,7 +1171,13 @@ def withdraw_report_comment(report_id: str, comment_id: str,
     from services.reports import revisions
 
     _latest_or_404(project, report_id)
-    _check_lock(project, db, user)
+    viewer = _check_lock_unless_viewer(project, db, user)
+    # A viewer may withdraw only their own comment (owner decision VIEWER-ROLE-1, Q3).
+    if viewer:
+        mine = [c for c in revisions.load_comments(project.directory, report_id)
+                if c.comment_id == comment_id and c.created_by == getattr(user, "email", None)]
+        if not mine:
+            raise project_write_gate.refusal()
     try:
         comment = revisions.withdraw(project.directory, report_id, comment_id)
     except (revisions.RevisionError, store.ReportStoreError) as exc:

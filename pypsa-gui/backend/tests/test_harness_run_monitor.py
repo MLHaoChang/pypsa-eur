@@ -13,7 +13,7 @@ import pytest
 from fastapi import HTTPException
 
 from harness import confirm, runner as harness_runner
-from services import chat_tools
+from services import chat_service, chat_tools
 from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, wait_until,
@@ -590,7 +590,13 @@ def test_present_refuses_a_paused_or_a_stopped_run(client, session, site):
 def test_solves_used_counts_only_this_runs_own_audit_rows(client, session, site):
     from services import run_envelope
     project_id, root = site
-    mine, other = start("run-1"), start("run-2")
+    mine = start("run-1")
+    # LC48D-GOAL-1: a chat runs one plan at a time, so the other run is another chat's.
+    chat_tools.set_chat_session(chat_service.ChatSession())
+    try:
+        other = start("run-2")
+    finally:
+        chat_tools.set_chat_session(session)
     for task in (mine, other):
         run_envelope.decide(session, task["task_id"], "unattended")
     theirs = run_envelope.path_for(task_path(root, other))

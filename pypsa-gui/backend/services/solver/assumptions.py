@@ -30,6 +30,7 @@ import math
 
 import pandas as pd
 
+from services import fuel_curve as _fuel_curve
 from services import period_utils as _period_utils
 from services.adequacy.slack import (
     DSR_SLACK_CARRIER,
@@ -685,32 +686,40 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             co2 = co2[co2 > 0]
             if not co2.empty:
                 gens = n.generators
+                if has_per_period_price:
+                    # Build per-snapshot price series keyed by period.
+                    raw_dict = cfg.co2_price_per_period or {}
+                    period_price: dict[int, float] = {}
+                    for k, v in raw_dict.items():
+                        try:
+                            period_price[int(k)] = float(v)
+                        except (TypeError, ValueError):
+                            continue
+                    period_lvl = n.snapshots.get_level_values(0)
+                    price_series = pd.Series(
+                        [period_price.get(int(p), cfg.co2_price) for p in period_lvl],
+                        index=n.snapshots, dtype=float,
+                    )
                 mask = gens["carrier"].isin(co2.index) & (gens["efficiency"] > 0)
                 if mask.any():
                     idx = gens.index[mask]
+                    # homer-parity 02e (GK B H1): a curve genset's CO2 per MWh follows its slope, the fuel its
+                    # marginal cost prices; every other emitter keeps `/ efficiency`, bit for bit (GK B F1).
+                    slopes = {
+                        g: s for g in idx if (s := _fuel_curve.curve_slope(gens.loc[g])) is not None
+                    }
                     if has_per_period_price:
-                        # Build per-snapshot price series keyed by period.
-                        raw_dict = cfg.co2_price_per_period or {}
-                        period_price: dict[int, float] = {}
-                        for k, v in raw_dict.items():
-                            try:
-                                period_price[int(k)] = float(v)
-                            except (TypeError, ValueError):
-                                continue
-                        period_lvl = n.snapshots.get_level_values(0)
-                        price_series = pd.Series(
-                            [period_price.get(int(p), cfg.co2_price) for p in period_lvl],
-                            index=n.snapshots, dtype=float,
-                        )
                         # Build the time-varying surcharge per emitting generator:
                         # surcharge[g, t] = price_series[t] × co2[carrier(g)] / efficiency[g]
+                        # (× slope[g] for a curve genset)
                         intensity_per_gen = gens.loc[idx, "carrier"].map(co2)
                         eff_per_gen = gens.loc[idx, "efficiency"]
                         base_mc = n.get_switchable_as_dense(
                             "Generator", "marginal_cost", inds=idx)
                         # outer = snapshot × generator; broadcast price (T,) × intensity (G,)
                         surcharge = pd.DataFrame(
-                            {g: price_series * float(intensity_per_gen.loc[g]) / float(eff_per_gen.loc[g])
+                            {g: price_series * float(intensity_per_gen.loc[g]) * slopes[g] if g in slopes
+                             else price_series * float(intensity_per_gen.loc[g]) / float(eff_per_gen.loc[g])
                              for g in idx},
                             index=n.snapshots,
                         )
@@ -736,6 +745,8 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     else:
                         # Single-period network OR no per-period dict: uniform price path.
                         add_per_mwh = gens.loc[idx, "carrier"].map(co2) * cfg.co2_price / gens.loc[idx, "efficiency"]
+                        for g, slope in slopes.items():
+                            add_per_mwh.loc[g] = float(co2[gens.at[g, "carrier"]]) * cfg.co2_price * slope
                         original_mc = gens.loc[idx, "marginal_cost"].copy()
                         gens.loc[idx, "marginal_cost"] = original_mc + add_per_mwh
                         undo_actions.append(("col", "generators", "marginal_cost", idx, original_mc))
@@ -750,6 +761,49 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             f"Applied CO2 price {cfg.co2_price:.1f} EUR/tCO2 to {len(idx)} "
                             f"fossil generator(s) (sum surcharge {add_per_mwh.sum():.2f} EUR/MWh)."
                         )
+                # homer-parity 02e: a curve genset's no-load fuel emits too, per committed hour, so its CO2 is
+                # priced on the stand-by term: no_load × p_nom × co2_emissions × price (EUR/h while on). No
+                # efficiency: the no-load term is already MWh of fuel (`services.fuel_curve`); the per-MWh adder
+                # above covers the output-proportional fuel (the slope) only. Transient like that adder.
+                no_load_t_co2_per_h = pd.Series(
+                    {
+                        g: _fuel_curve.no_load_fuel(gens.loc[g]) * float(co2[gens.at[g, "carrier"]])
+                        for g in gens.index[gens["carrier"].isin(co2.index)]
+                    },
+                    dtype=float,
+                )
+                no_load_t_co2_per_h = no_load_t_co2_per_h[no_load_t_co2_per_h > 0]
+                if not no_load_t_co2_per_h.empty:
+                    nl_idx = list(no_load_t_co2_per_h.index)
+                    # A curve genset never carries a stand-by cost series (`fuel_curve.guard` refuses one before
+                    # the LP is built), so its static stand-by cost is the whole of it.
+                    if has_per_period_price:
+                        sb_t = n.generators_t.stand_by_cost
+                        saved_sb = sb_t[[g for g in nl_idx if g in sb_t.columns]].copy()
+                        added_sb = [g for g in nl_idx if g not in sb_t.columns]
+                        base_sb = n.get_switchable_as_dense("Generator", "stand_by_cost", inds=nl_idx)
+                        for g in nl_idx:
+                            n.generators_t.stand_by_cost[g] = (
+                                base_sb[g] + price_series * float(no_load_t_co2_per_h[g])
+                            )
+
+                        def _restore_stand_by_series(saved=saved_sb, added=added_sb):
+                            frame = n.generators_t.stand_by_cost
+                            n.generators_t.stand_by_cost = frame.drop(
+                                columns=[g for g in added if g in frame.columns]
+                            )
+                            for g in saved.columns:
+                                n.generators_t.stand_by_cost[g] = saved[g]
+
+                        undo_actions.append(("call", _restore_stand_by_series))
+                    else:
+                        original_sb = gens.loc[nl_idx, "stand_by_cost"].copy()
+                        gens.loc[nl_idx, "stand_by_cost"] = original_sb + no_load_t_co2_per_h * cfg.co2_price
+                        undo_actions.append(("col", "generators", "stand_by_cost", nl_idx, original_sb))
+                    phase(
+                        f"Applied the CO2 price to the no-load fuel of {len(nl_idx)} curve generator(s) via "
+                        "stand_by_cost."
+                    )
         elif getattr(cfg, "co2_price_per_period", None) and not isinstance(n.snapshots, pd.MultiIndex):
             # User set per-period prices but the network is flat — log so the
             # silent no-op doesn't go unnoticed.

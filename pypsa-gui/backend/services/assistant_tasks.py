@@ -176,6 +176,33 @@ def _save(path, task):
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
+    if task.get("status") in _ENDED_TASK:
+        _release_sessions(task.get("task_id"))
+
+
+# LC-48f (GK B E): the task statuses after which nothing of it runs again.
+_ENDED_TASK = frozenset({"completed", "cancelled"})
+
+
+def _release_sessions(task_id):
+    """A task that has ended lets go of the chats it is bound to, in the same
+    write as its status, so the start guard (`_refuse_switch`) never has to
+    read a finished task, which after a project switch it could not. Only a
+    session whose `task_id` or `detached_task_id` is this task changes."""
+    from harness import session as harness_session
+    from services import chat_tools, run_envelope
+    if not task_id:
+        return
+    with harness_session._SESSIONS_LOCK:
+        sessions = list(harness_session._SESSIONS.values())
+    current = chat_tools.chat_session()
+    for session in ([current] if current is not None else []) + sessions:
+        if str(getattr(session, "session_id", "") or "").startswith(run_envelope.SESSION_PREFIX):
+            continue  # a runner session is its run's by identity (`_is_run_session`)
+        if getattr(session, "task_id", None) == task_id:
+            session.task_id = None
+        if getattr(session, "detached_task_id", None) == task_id:
+            session.detached_task_id = None
 
 
 def _resolve(value, steps):
@@ -512,6 +539,70 @@ def _check_scene_apply(args, earlier):
         _refuse("invalid_task_reference", "A site_scene_apply step takes all its args from one site_scene_prepare step.", 422)
 
 
+# LC48D-GOAL-1: the task statuses during which its steps execute.
+_RUNNING_TASK = frozenset({"running", "waiting_job"})
+
+
+def _refuse_switch(session, task_id):
+    """409 `switch_in_progress` naming the session's task while it runs and
+    a start or resume names another plan; a repeated start of the same plan is
+    not a switch. A harness run's task stays `ready` while its run executes, so
+    the run's own status counts too (GK B F2 on #1515). Callers hold `_LOCK`,
+    the lock that sets `session.task_id`: `start_task`, `_start_run` and
+    `resume_task`.
+
+    A task this project cannot read (the chat switched projects, or its file
+    needs repair) may still run where it lives, so it refuses too: fail closed
+    (owner decision LC48F-REFUSE-1). `begin_step` detaches a task it cannot
+    find after a switch; it keeps the id as `session.detached_task_id`, which
+    this guard reads the same way until it reads as not running (GK B D)."""
+    for active, detached in ((getattr(session, "task_id", None), False),
+                             (getattr(session, "detached_task_id", None), True)):
+        if not active or active == task_id:
+            continue
+        try:
+            _, task = _read(active)
+        except (HTTPException, OSError, ValueError):
+            raise HTTPException(409, {
+                "error_kind": "switch_in_progress",
+                "active": {"kind": "task", "id": active, "title": None, "status": "unreadable"},
+                "message": "this chat's task cannot be read in this project and may still run in its own; "
+                           "cancel it there, or open a new chat, before starting another",
+            }) from None
+        status = task.get("status")
+        run_status = (task.get("run") or {}).get("status")
+        if status not in _RUNNING_TASK and run_status not in _RUNNING_TASK:
+            if detached:
+                session.detached_task_id = None  # it reads as ended: nothing runs that a switch would cut
+            continue
+        shown = status if status in _RUNNING_TASK else run_status
+        raise HTTPException(409, {
+            "error_kind": "switch_in_progress",
+            "active": {"kind": "task", "id": active, "title": task.get("title"),
+                       "status": shown},
+            "message": f"the task \u201c{task.get('title') or active}\u201d is {shown}; wait for it, "
+                       "or cancel it, before starting another",
+        })
+
+
+def note_held(task_id, refusal):
+    """LC-48e (owner decision LC48E-SURFACE-1): the answered run's resume was
+    refused with `switch_in_progress`; the run card shows what it waits for,
+    named as the 409's `active` names it. Nothing resumes it on its own; the
+    next `resume_task` that the guard lets through drops the note."""
+    with _LOCK:
+        path, task = _read(task_id)
+        run = task.get("run")
+        # A resume can land between the guard's refusal and this note (the
+        # active task ended, the user resumed): only a run still at the answer
+        # is held (GK B 59, call-site race).
+        if not isinstance(run, dict) or run.get("status") != "needs_user" or run.get("waiting"):
+            return  # a cancelled or completed run has left `needs_user` too
+        run["held"] = {"kind": refusal["error_kind"], "active": refusal["active"],
+                       "since": _now()}
+        _save(path, task)
+
+
 def start_task(title: str, steps: list[dict], request_id: str, brief: dict | None = None,
                run: dict | None = None) -> dict:
     from harness.catalogue import TOOLS
@@ -571,6 +662,7 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
     task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
     path = root / "assistant_tasks" / (task_id + ".json")
     with _LOCK:
+        _refuse_switch(session, task_id)
         if path.exists():
             _, task = _read(task_id)
             original = [{k: s[k] for k in ("id", "tool", "args")} for s in task["steps"]]
@@ -632,6 +724,7 @@ def _start_run(session, title, request_id, run, profile, brief, *, origin=None, 
     from services import run_envelope
     held = run_envelope.counted_live(project, profile)  # study harness 12c (G1): K, before the lock (#1345)
     with _LOCK:
+        _refuse_switch(session, task_id)
         if path.exists():
             _, task = _read(task_id)
             if {k: (task.get("run") or {}).get(k) for k in ("profile", "mode")} != run \
@@ -827,7 +920,7 @@ def _advance_run(path, ctx=None):
                     # Study harness 10a (GK B (36) D1): the grid-code profile, frozen now, shown on the stage card.
                     # Study harness 12b (M2): one record per kind, never crossed.
                     for kind in run_actions.kinds(steps):
-                        run_actions.fill(steps, run_actions.stage_frozen(task, kind), kind)
+                        run_actions.fill(steps, run_actions.stage_frozen(task, kind, path=path), kind)
                 short = run_eh.pass_short(path, steps)
                 if short is not None:
                     # Study harness 12c (Q1-i): a pass the solves left cannot finish never
@@ -919,6 +1012,23 @@ def _intake_view(run):
             **({"request": intake["request"]} if intake.get("request") else {})}
 
 
+def _held_view(held):
+    """LC-48e: what the held run waits for, read now, so the card never names
+    a task that has ended as running. The title shows only when the reader
+    can read that task (`_read` checks project and owner, GK B E-c)."""
+    active = held.get("active") or {}
+    out = {"kind": held.get("kind"), "since": held.get("since"),
+           "active": {"kind": "task", "id": active.get("id"), "title": None, "status": "unreadable"}}
+    try:
+        _, task = _read(active.get("id"))
+    except Exception:  # noqa: BLE001 — not readable here: the card says so, and nothing else
+        return out
+    status, run_status = task.get("status"), (task.get("run") or {}).get("status")
+    shown = status if status in _RUNNING_TASK else run_status if run_status in _RUNNING_TASK else "ended"
+    out["active"].update(title=task.get("title"), status=shown)
+    return out
+
+
 def _run_view(task):
     run = task["run"]
     stages = []
@@ -942,6 +1052,8 @@ def _run_view(task):
             **({"intake": _intake_view(run)} if isinstance(run.get("intake"), dict) else {}),
             **({"handed_over": run["handed_over"]} if run.get("handed_over") else {}),
             **({"reason": run["reason"]} if run.get("reason") else {}),
+            # Only while the run waits on the user: never on a cancelled or completed run.
+            **({"held": _held_view(run["held"])} if run.get("held") and run["status"] == "needs_user" else {}),
             "next_stage": _next_stage(run, run["stage"]), "scope": (run.get("scope") or {}).get("preset"),
             "stages": stages,
             **({"loop": {**{k: run["loop"][k] for k in ("kind", "stage", "rounds", "limit", "refusals", "ended")
@@ -970,7 +1082,10 @@ def resume_task(task_id: str) -> dict:
     if session is None:
         _refuse("no_chat_session", "Resume requires a chat session.")
     with _LOCK:
+        _refuse_switch(session, task_id)
         path, task = _read(task_id)
+        if (task.get("run") or {}).pop("held", None) is not None:
+            _save(path, task)  # LC-48e: the guard lets it through now
         if task["status"] == "cancelled":
             _refuse("task_cancelled", "Create a new plan to restart a cancelled task.")
         if task["status"] == "paused_at_card":
@@ -1631,7 +1746,10 @@ def begin_step(session, tool, args):
             path, task = _read(task_id)
         except HTTPException as exc:
             if exc.status_code == 404:
-                session.task_id = None  # A legitimate project switch detaches the task.
+                # A legitimate project switch detaches the task; the start and
+                # resume guard keeps reading it (LC-48f, `_refuse_switch`). Like
+                # `task_id`, it lives on the in-memory session only: a restart forgets it.
+                session.detached_task_id, session.task_id = task_id, None
                 return None
             raise
         if task["status"] in ("cancelled", "completed"):

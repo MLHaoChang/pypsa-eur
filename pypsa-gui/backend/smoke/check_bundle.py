@@ -133,6 +133,9 @@ EXPECTED = (
     "default.docx",
     # Class-C profile packs (P15): read by `stress.py` at scenario save/run.
     "synth_dunkelflaute.json",
+    # Not-via-chat entries and their fragment folder (RETRO-FRAG-1): read beside
+    # `services/not_via_chat.py` at import; without the folder every fragment entry is lost.
+    "not_via_chat.json", "not_via_chat.d",
 )
 
 # Info.plist usage-description keys macOS TCC requires before the app may
@@ -220,6 +223,8 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-11-07/manifest.json",
     # DC business case 02: the non-energy cost defaults.
     "services/library/defaults_pack/versions/2026-11-10/manifest.json",
+    # Campus-library-gaps 03: the 220/110 kV losses (campus sha256 only).
+    "services/library/defaults_pack/versions/2026-11-13/manifest.json",
     # The shipped common Library items (GS-EU P2d): `common.COMMON_DIR` = the module's
     # sibling `common_items/`; one probe per shipped kind.
     "services/library/common_items/tariff/nl-tennet-2026-hs.json",

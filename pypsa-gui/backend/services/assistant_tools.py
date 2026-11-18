@@ -90,9 +90,12 @@ def _file(file_id):
 
 
 def get_file_delivery(file_id: str) -> dict:
+    from services import upload_service
     project, _, _, meta, _ = _file(file_id)
+    upload_service.refuse_expired_delivery(meta)
     return {"file_id": meta.file_id, "filename": meta.filename, "mime": meta.mime,
             "size": meta.size, "kind": meta.kind, "sha256": meta.sha256,
+            "expires_at": upload_service.delivery_expires_at(meta),
             "project_id": str(project.id), "download_url":
             f"/api/projects/{quote(str(project.id), safe='')}/uploads/{meta.file_id}/blob"}
 
@@ -678,9 +681,9 @@ def _preview_candidate(ctx, parsed):
     for change in parsed:
         for name in change.names:
             targets.setdefault(change.component_class, {}).setdefault(name, {})[change.attribute] = change.value
-    # The bulk handler skips the priced-part check a single edit runs
-    # (`network_crud._update_component`): a part priced without a lifetime is
-    # refused here, before any sandbox work, with the single edit's words.
+    # The bulk handler runs the single edit's priced-part check too (TCU 08);
+    # this one runs first, so a part priced without a lifetime is refused with a
+    # typed kind (invalid_edit_value) before any sandbox work.
     for klass, rows in targets.items():
         attr = edit_card._component_attr(klass)
         for name, attrs in rows.items():
@@ -999,6 +1002,7 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
     files, total = [], 0
     for file_id in file_ids:
         _, _, _, meta, path = _file(file_id)
+        upload_service.refuse_expired_delivery(meta)
         total += path.stat().st_size
         if total > upload_service.MAX_FILE_BYTES - 100000:
             workflow._refuse("delivery_too_large", "Delivery contents exceed the 25 MB limit.", 413)

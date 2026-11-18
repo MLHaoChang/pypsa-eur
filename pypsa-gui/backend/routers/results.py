@@ -488,6 +488,16 @@ def grid_risk_production_payload(project_id: str | None = None) -> dict:
     `project_id` must be the open project (it is the one whose network and campus run are read), resolved through
     the project ACL before any file is read. `available` false before a solve; `omitted` when the network has no
     process unit. See `services.results.grid_risk_production`."""
+    project_id, project = _open_project_read(
+        project_id, "Grid risk to production reads the open project's network and campus run; open that "
+                    "project first.")
+    return grid_risk_production_of(project, project_id)
+
+
+def _open_project_read(project_id: str | None, not_open: str) -> tuple[str, Any]:
+    """`(project_id, project)` for a read of the open project, for the acting user: `project_id` (default: the open
+    one) must be the open project (409 `no_active_project` / `project_not_open`, `not_open` its message), resolved
+    through the project ACL before anything is read (404 `not_authorized`)."""
     from services import chat_tools, project_registry
 
     active = PyPSAService.get_active_context().project_uuid
@@ -496,16 +506,14 @@ def grid_risk_production_payload(project_id: str | None = None) -> dict:
         raise HTTPException(409, {"error_kind": "no_active_project",
                                   "message": "No project is open; open the project and ask again."})
     if project_id != str(active or ""):
-        raise HTTPException(409, {"error_kind": "project_not_open",
-                                  "message": "Grid risk to production reads the open project's network and "
-                                             "campus run; open that project first."})
+        raise HTTPException(409, {"error_kind": "project_not_open", "message": not_open})
     with chat_tools._acting() as (db, user):
         try:
             project = project_registry.resolve_project(db, user, project_id)
         except HTTPException:
             raise HTTPException(404, {"error_kind": "not_authorized",
                                       "message": "The open project is not one you may read."}) from None
-    return grid_risk_production_of(project, project_id)
+    return project_id, project
 
 
 def grid_risk_production_of(project, project_id: str) -> dict:
@@ -802,6 +810,23 @@ def get_renewable_fraction():
     settings = _solved_settings() or {}
     return renewable_fraction_result(n, _state.get("last_lost_load"),
                                      settings.get("min_renewable_fraction"))
+
+
+@results_router.get("/operating_reserve")
+def get_operating_reserve():
+    """
+    The operating reserve of the last solve (homer-parity 01b): per snapshot
+    the headroom required (shares of load, PV and wind output) and held by
+    dispatchable generators and storage units, from the solved values only,
+    and the snapshots where it binds. `shares` is None when it was off.
+    Definition in `services/solver/operating_reserve.py`.
+    """
+    from services.solver.operating_reserve import operating_reserve_result, shares_of
+
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        return _not_solved()
+    return operating_reserve_result(n, shares_of(_solved_settings() or {}))
 
 
 @results_router.get("/emissions")
@@ -1673,6 +1698,32 @@ def get_eh_study():
     return out
 
 
+@results_router.get("/eh_study/why/{figure}")
+def get_eh_study_why(figure: str, project_id: str | None = Query(default=None),
+                     actor: User = Depends(require_user)):
+    """
+    Why a Guided Energy Hub study figure (`expected_shortfall`, `design_cost`,
+    `verdict`) has its value (guided-results 02a): the provenance graph's walk
+    to the study run and its inputs, each recorded vs current, outcome first
+    (`explain_study_figure`). Reads only (COPILOT-1). `project_id` must be the
+    open project (409 / 404 as the other open-project reads); an unknown figure
+    is `why_target_unknown` (404), no finished study `study_not_run` (404, 409
+    while it runs).
+    """
+    from services.provenance_graph.eh_study import StudyNotRun
+    from services.provenance_graph.explain import TargetUnknown, explain_study_figure
+
+    with _result_actor(actor):
+        _open_project_read(project_id, "The study's figures are read from the open project; open that "
+                                       "project first.")
+        try:
+            return explain_study_figure(figure)
+        except StudyNotRun as exc:
+            raise HTTPException(exc.status, {"error_kind": "study_not_run", "message": str(exc)}) from exc
+        except TargetUnknown as exc:
+            raise HTTPException(exc.status, {"error_kind": "why_target_unknown", "message": str(exc)}) from exc
+
+
 @results_router.post("/eh_study/abort")
 def post_eh_study_abort():
     """
@@ -2447,6 +2498,177 @@ def get_business_case_preset(variant: str | None = Query(default=None)):
         raise HTTPException(422, {"code": "preset_not_found", "message": str(exc)}) from exc
     return {"template_id": template_id, "variants": offered,
             "business_case": {"inputs": inputs.model_dump(mode="json")}}
+
+
+def _bc_ic_horizon() -> tuple[tuple[int, int], int] | None:
+    """(operating horizon, base year) of the stored investment-case report, as the
+    business case compiles against it (`build_timeline`); None without a project payload."""
+    stored = _state.get("investment_case_report")
+    if stored is not None and hasattr(stored, "model_dump"):
+        stored = stored.model_dump(mode="json")
+    payload = (((stored or {}).get("sections") or {}).get("project") or {}).get("payload") or {}
+    cod, n, base = (payload.get(k) for k in ("cod_year", "analysis_years", "base_year"))
+    # A bool is an int to isinstance; a year or a count never is one (GK B F3).
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (cod, n, base)):
+        return None
+    if n < 1:
+        return None
+    return (cod, cod + n - 1), base
+
+
+@results_router.get("/business_case/options")
+def get_business_case_options():
+    """What the line table offers (spec §4, §6.1), read-only: the template's preset
+    variants and "add line" rows, this project's linked outputs with the units each
+    offers (the catalogue the run reads), the units a typed line may take per kind, and
+    every refusal of the stored lines (G9) against the stored investment case's
+    horizon. `outputs` is None with `outputs_reason` without a network, without a current
+    solve or when the catalogue cannot be read, never [] (GK B O2); 409 while a solve runs
+    or when the network lock is not had within the bounded wait. `refusals` is None with
+    `refusals_reason` without an investment case."""
+    from typing import get_args
+
+    from models.business_case import (
+        CATEGORIES,
+        Escalation,
+        LinkedOutputMissing,
+        UnitNotAllowed,
+        allowed_units,
+    )
+    from services.business_case import linked_outputs as L
+    from services.business_case import presets as P
+    from services.business_case.runner import BusinessCaseConfig, refusal_detail
+
+    template_id = (_active_template_meta() or {}).get("id")
+    variants: dict[str, str] = {}
+    offered: list[dict] = []
+    if template_id:
+        try:
+            variants = P.variants(template_id)
+            offered = [o.model_dump(mode="json") for o in P.offered_rows(template_id)]
+        except LookupError:
+            pass        # a template with no preset file: a blank table
+    out: dict = {
+        "template_id": template_id,
+        "variants": variants,
+        "offered_rows": offered,
+        "categories": {k: list(v) for k, v in CATEGORIES.items()},
+        "escalations": list(get_args(Escalation)),
+        # The units a line may take per quantity source (spec §4), from `allowed_units`,
+        # the function the validator's `unit_not_allowed` reads (GK B O1).
+        "units_by_source": {
+            "typed": {k: list(allowed_units(k, "typed")) for k in ("revenue", "opex", "capex")},
+            "share_of": {k: list(allowed_units(k, "share_of"))
+                         for k in ("revenue", "opex", "capex")},
+            "linked": {},
+        },
+        # A linked line stores `linked:<output id>@<catalogue_version>`.
+        "catalogue_version": L.CATALOGUE_VERSION,
+        "outputs": None,
+        "outputs_reason": None,
+        "refusals": None,
+        "refusals_reason": None,
+    }
+    kinds = ("revenue", "opex", "capex")
+    if _solver_in_flight():
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; the model "
+                                             "outputs are offered after it finishes"})
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(timeout=_IC_LOCK_WAIT_S):       # bounded, never a blocking read (O2)
+        raise HTTPException(409, {"code": "network_busy",
+                                  "message": "the model is busy; read the options again"})
+    try:
+        ctx = PyPSAService.get_active_context()
+        if ctx.network is None:
+            out["outputs_reason"] = "no_network"
+        else:
+            solve = L.bind(ctx)
+            if not solve.fresh:
+                out["outputs_reason"] = "no_current_solve"
+            else:
+                specs = L.catalogue(ctx.network, solve)
+                out["outputs"] = [{"id": s.id, "label": s.label, "units": list(s.units),
+                                   "derived": s.derived} for s in specs]
+                out["units_by_source"]["linked"] = {
+                    s.id: {k: list(allowed_units(k, "linked", s.units)) for k in kinds}
+                    for s in specs
+                }
+    except Exception as exc:  # noqa: BLE001 — a read must not 500 on a bad network
+        logger.warning("business_case options: outputs not readable: %s", exc)
+        out["outputs"] = None
+        out["units_by_source"]["linked"] = {}
+        out["outputs_reason"] = "outputs_not_readable"
+    finally:
+        lock.release()
+    span = _bc_ic_horizon()
+    out["horizon"] = None if span is None else list(span[0])
+    out["base_year"] = None if span is None else span[1]
+    raw = _bc_raw()
+    if raw is None:
+        out["refusals"] = []
+        return out
+    try:
+        inputs = BusinessCaseConfig.model_validate(raw).inputs
+    except ValidationError:
+        out["refusals_reason"] = "business_case_inputs_invalid"
+        return out
+    if span is None:
+        out["refusals_reason"] = "investment_case_missing"
+        return out
+    not_current = _bc_ic_current()
+    if not_current is not None:
+        # The run needs a current investment case (C3); years from an old one could
+        # place a wrong `outside_horizon`, so nothing is checked against them. A key
+        # that cannot be read now (the network busy) says so, never "out of date"
+        # (ruling PG-09 Y1).
+        out["refusals_reason"] = not_current
+        return out
+    found = list(inputs.refusals(horizon=span[0], base_year=span[1]))
+    # A linked line against the catalogue in hand (GK B O1): its output and its unit.
+    if out["outputs"] is not None:
+        offered = {o["id"]: o["units"] for o in out["outputs"]}
+        for i, ln in enumerate(inputs.lines):
+            if ln.source != "linked":
+                continue
+            oid = ln.quantity_source.split(":", 1)[1].rpartition("@")[0]
+            if oid not in offered:
+                found.append(LinkedOutputMissing(f"lines[{i}].quantity_source"))
+            elif ln.unit not in allowed_units(ln.kind, "linked", offered[oid]):
+                found.append(UnitNotAllowed(f"lines[{i}].unit"))
+    # The validator and the catalogue check can both refuse one cell (a linked unit):
+    # one refusal per kind and cell (GK B F1).
+    details, seen = [], set()
+    for r in found:
+        d = refusal_detail(r)
+        key = (d.get("code"), d.get("refusal"), d.get("field"))
+        if key not in seen:
+            seen.add(key)
+            details.append(d)
+    out["refusals"] = details
+    return out
+
+
+def _bc_ic_current() -> str | None:
+    """None when the stored investment-case report is current, read as `_bc_ic_check`
+    reads it, without refusing; else why not: `investment_case_out_of_date`, or the
+    reason the current key cannot be read now (`network_busy`, `solve_in_flight`,
+    `current_assumptions_not_established`), which is never compared (PG-09 Y1)."""
+    from services.business_case.runner import ic_report_key
+    from services.finance.investment_case_runner import staleness
+
+    stored = _state.get("investment_case_report")
+    if stored is not None and hasattr(stored, "model_dump"):
+        stored = stored.model_dump(mode="json")
+    a_hash, c_hash = ic_report_key(stored)
+    if a_hash is None or c_hash is None:
+        return "investment_case_out_of_date"
+    current, why = _ic_current_assumptions()
+    if current is None:
+        return why or "current_assumptions_not_established"
+    if staleness(stored, current, reason=why)["stale"] is False:
+        return None
+    return "investment_case_out_of_date"
 
 
 def _bc_ic_check() -> tuple[str, str | None]:

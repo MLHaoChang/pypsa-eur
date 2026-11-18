@@ -1,0 +1,1 @@
+* Test(pypsa-gui): The copilot's gate row for a project switch mid-turn is covered: a write after another tab switched the active project, and a delivery built across a switch, are refused and change nothing. The read-only viewer row is dropped by owner decision (no such role exists); the role is filed as a product idea.

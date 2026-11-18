@@ -3,7 +3,7 @@
 
 # 46 — Island tie reads no_tie when a sidecar unit sits on a mainland bus
 
-Status: ready-for-agent
+Status: done (#1461; GK A plan option (2), the typed refusal)
 Model tier: opus
 Size: S
 Blocked by: none

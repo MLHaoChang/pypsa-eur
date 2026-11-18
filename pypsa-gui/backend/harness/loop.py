@@ -435,6 +435,7 @@ from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-expor
     _THINKING_REQUIRED_FIELDS,
     _thinking_block_is_wellformed,
     _sanitise_history_message,
+    repair_unpaired_tool_use,
 )
 
 
@@ -2120,7 +2121,10 @@ def _run_turn_body(
         else _tools_payload_for_profile(profile, message, history=selection_history)
     )
     from harness import assurance
+    from services import durable_conversation as _durable
 
+    # Live-voice 03a: the thread generation this turn starts at (see below).
+    _view_generation = _durable.current_view_generation(session.session_id)
     yield (
         "session_init",
         {
@@ -2252,6 +2256,15 @@ def _run_turn_body(
     history_cache_anchor: int | None = len(messages) - 1 if messages else None
 
     messages.append({"role": "user", "content": user_content})
+    # LC48D-REPAIR-1: an unpaired tool_use in the stored history (a turn killed
+    # between its tool calls and their results) is answered with a synthetic
+    # `interrupted_tool_call` error, first in the user message after it, in
+    # this outgoing list only: the history persists `user_content` as it is.
+    repaired = repair_unpaired_tool_use(messages)
+    if repaired is not messages:
+        messages[:] = repaired
+        # The anchor is still the last message before this turn's own.
+        history_cache_anchor = len(messages) - 2 if len(messages) > 1 else None
 
     # Task 8 — vision capability enforcement, on the OUTBOUND MESSAGE ARRAY,
     # not on `attachment_file_ids`. Checked HERE, before this turn's message
@@ -2348,6 +2361,17 @@ def _run_turn_body(
 
     with session._lock:
         session.append_history_message({"role": "user", "content": user_content})
+
+    # Live-voice 03a: the durable current view, distinct from refs.discussed,
+    # written once the turn is past every refusal and its message is kept.
+    # Held locks here: none (no session or provider lock); the call takes only
+    # durable_conversation._LOCK and never refuses or delays the turn. The
+    # thread generation read before session_init is re-checked under _LOCK, so
+    # a rebind during the turn (or an obsolete utterance) records nothing.
+    if _view_generation is not None and not obsolete():
+        _durable.record_current_view(
+            session.session_id, ui_context, generation=_view_generation
+        )
 
     tool_call_count = 0
     # Task 8 — `[]` when the profile's `tools` capability is off; see
@@ -4247,11 +4271,17 @@ def _dispatch_real_tool_call(
                 except Exception:  # noqa: BLE001 — the step then stays a start receipt: uncertain
                     logger.exception("chat: plan step could not wait on job %s", job_id)
                     task_path = None
+                # live-voice 11b (B2): Stop monitoring ends this watch and the
+                # plan step's in-turn hold below together; the step still
+                # settles from the native record through `follow_job`.
+                monitor_generation = session.monitor_generation()
                 start_detached_solver_monitor(
                     session,
                     active_ctx,
                     tool_use_id=tool_use_id,
                     tool_name=tool_name,
+                    monitor_generation=monitor_generation,
+                    job_id=job_id,
                     **({} if task_path else _publish_hooks(active_ctx, run_token)),
                 )
                 if task_path:
@@ -4286,6 +4316,7 @@ def _dispatch_real_tool_call(
                         is_solver_done=lambda: (
                             settled.is_set() or time.monotonic() >= deadline
                         ),
+                        monitor_generation=monitor_generation,
                     ):
                         yield (
                             "tool_progress",

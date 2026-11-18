@@ -1,0 +1,4 @@
+{"kinds": {
+  "report_stale": {"surface": "inline", "why": "export_report_docx/export_report_pdf (and the export route) on a report version that cannot be shown to match the study now; detail.reason says which: study_changed (stored evidence_hash is not the project's evidence hash now), no_evidence_hash, project_not_open (the evidence is the session's, which holds another project), evidence_unreadable (reading it failed). Nothing is rendered or saved; the model says to generate the report again (LC48B-STALE-1)."},
+  "report_interrupted": {"surface": "inline", "why": "GET /reports/generate/status after a server restart when the project's on-disk job marker (reports/.job.json) still reads running and this process has no job record: the job was interrupted; status interrupted, its report_id, hint 'generate the report again'; nothing re-runs it (LC48B-RESUME-1)"}
+}}

@@ -39,7 +39,12 @@ import numpy as np
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from models.business_case import BusinessCaseInputs, BusinessCaseRefused
+from models.business_case import (
+    CATEGORY_STREAM,
+    BusinessCaseInputs,
+    BusinessCaseRefused,
+)
+from services.finance.cashflow import STREAM_CLASS
 from services.finance.investment_case_runner import json_digest
 
 logger = logging.getLogger(__name__)
@@ -197,6 +202,41 @@ def _output_state(v: Any) -> dict:
     return {"status": "ok", "unit": getattr(v, "unit", None)}
 
 
+#: A business-case line stream → "line:<kind>"; any other stream is the IC ledger's
+#: ("energy_model", G2).
+_STREAM_SOURCE: dict[str, str] = {
+    stream: f"line:{kind}"
+    for (kind, _cat), (stream, _cls) in CATEGORY_STREAM.items()
+    if stream is not None
+}
+
+
+def assumed_defaults(inputs: BusinessCaseInputs) -> list[dict]:
+    """Every value the case takes from a pack rather than the user (spec §7, business
+    case 14): one row per line and column, with its source, year and range, in line
+    order. The report and its workbook sheet list them all; none is an empty list."""
+    out = []
+    for ln in inputs.lines:
+        for col, d in ln.assumed.items():
+            out.append(
+                {
+                    "line": ln.name,
+                    "kind": ln.kind,
+                    "column": col,
+                    "value": d.value,
+                    "unit": d.unit,
+                    "source": d.source,
+                    "source_year": d.source_year,
+                    "currency": d.currency,
+                    "money_year": d.money_year,
+                    "pack": d.pack,
+                    "range_low": d.range_low,
+                    "range_high": d.range_high,
+                }
+            )
+    return out
+
+
 def report_body(
     *,
     bc,
@@ -208,9 +248,13 @@ def report_body(
     raw: dict,
     ic_hash: str,
     ic_case_hash: str | None,
+    inputs: BusinessCaseInputs,
 ) -> dict:
     """The stored report: P&L by year by stream, the KPIs (gross and net of
-    pass-through), break-even, the locked rows and each linked output's state."""
+    pass-through), break-even, the locked rows, each linked output's state and every
+    assumed default the run used."""
+    from services.finance.business_case import row_reasons, volume_factor_display
+
     return {
         "business_case_hash": bc.hash,
         "inputs_digest": config_digest(raw),
@@ -221,14 +265,30 @@ def report_body(
         "pnl": {
             "years": [int(y) for y in p.years],
             "streams": _jsonable(p.streams),
+            # Display keys only (GK B BC 10 F2): each stream's escalation class and where
+            # it comes from, so the view groups without a copy of the maps. Every other
+            # field stays as it was.
+            "stream_class": {s: STREAM_CLASS.get(s) for s in p.streams},
+            "stream_source": {
+                s: _STREAM_SOURCE.get(s, "energy_model") for s in p.streams
+            },
             "rows": _jsonable(p.rows),
             "not_finite": list(p.not_finite),
+            # A display key like the two above (BC 17): every input each row that reads
+            # None lacks. It moves no digest or staleness key.
+            "row_reason": row_reasons(
+                result, p, outputs, receivable_days=inputs.receivable_days
+            ),
+            # Display keys (BC 15): the lease-up applied, its basis and the stated
+            # years it ignored. Absent for a full-volume case, so its report is as it was.
+            **volume_factor_display(inputs, result.tl.operating_years),
         },
         "kpis": {name: _jsonable(dataclasses.asdict(v)) for name, v in k.items()},
         "break_even": _jsonable(be),
         "locked": [_jsonable(dataclasses.asdict(r)) for r in bc.locked],
         "outputs": {name: _output_state(v) for name, v in sorted(outputs.items())},
         "flags": list(result.flags),
+        "assumed": assumed_defaults(inputs),
         "created_at": time.time(),
     }
 
@@ -413,6 +473,7 @@ def start_business_case(
                 raw=raw,
                 ic_hash=ic_hash,
                 ic_case_hash=got,
+                inputs=cfg.inputs,
             )
             # The stop check, the store and the finish are one step under the state lock,
             # which the abort route reads the record under: an abort seen here stores

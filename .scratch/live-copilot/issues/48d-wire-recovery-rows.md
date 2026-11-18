@@ -3,7 +3,7 @@
 
 # LC-48d — The LC-D23 wire rows (history, approval, profile, goal)
 
-Status: ready-for-agent
+Status: done (#1515; follow-ups 48e, 48f)
 Model tier: opus
 Size: L
 Blocked by: none
