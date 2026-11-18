@@ -286,3 +286,35 @@ def test_a_stale_editor_row_grants_nothing_after_leaving_the_org(
         assert (
             project_acl.project_role(db, db.get(User, world["editor"]), project) is None
         )
+
+
+def test_a_new_row_is_written_with_its_role_not_left_to_the_column_default(
+    world, client
+):
+    # NULL reads view-only, so the role must be in the INSERT itself (GK B3 V1).
+    from sqlalchemy import event
+
+    inserted = []
+
+    def capture(mapper, connection, target):
+        inserted.append((target.user_id, target.role))
+
+    newcomer = _member(world["session_local"], _org_of(world))
+    event.listen(ProjectMembership, "before_insert", capture)
+    try:
+        response = _put(client, world, [world["viewer"], world["editor"], newcomer])
+    finally:
+        event.remove(ProjectMembership, "before_insert", capture)
+    assert response.status_code == 200, response.text
+    assert inserted == [(newcomer, "editor")]
+
+
+def test_the_same_user_twice_in_roles_is_400(world, client):
+    viewer = str(world["viewer"])
+    body = {
+        "user_ids": [viewer, str(world["editor"])],
+        "roles": {viewer: "editor", viewer.upper(): "viewer"},
+    }
+    response = client.put(f"/api/projects/{world['project']}/members", json=body)
+    assert response.status_code == 400, response.text
+    assert _stored(world, world["viewer"]) == "viewer"

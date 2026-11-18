@@ -5347,6 +5347,8 @@ def put_project_members(
         roles = {_uuid.UUID(str(uid)): role for uid, role in body.roles.items()}
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, "roles keys must be valid UUID strings") from exc
+    if len(roles) != len(body.roles):
+        raise HTTPException(400, "roles names the same user more than once")
 
     return project_registry.set_root_members(db, user, project, user_ids, roles)
 

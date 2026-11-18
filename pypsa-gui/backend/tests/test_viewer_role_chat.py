@@ -12,6 +12,7 @@ OpenAI-compatible wire, and the system prompt carries the view-only fragment
 from __future__ import annotations
 
 import json
+import re
 from importlib import import_module
 
 import httpx
@@ -75,8 +76,22 @@ def test_the_view_only_fragment_names_no_tool():
     )
 
 
-def _turn(world, as_user, who, wire):
-    """One text-only turn as `who`; returns the request body the provider got."""
+def _system_text(body, anthropic) -> str:
+    if anthropic:
+        system = body.get("system", "")
+        if isinstance(system, list):
+            return "".join(block.get("text", "") for block in system)
+        return system
+    first = body["messages"][0]
+    return first["content"] if first.get("role") == "system" else ""
+
+
+def _turn(world, as_user, who, wire, first_call=None):
+    """One turn as `who`; returns every request body the provider got.
+
+    With `first_call` (name, args) the model's first answer calls that tool,
+    so the second body shows the offer rebuilt mid-turn.
+    """
     anthropic = wire == "anthropic"
     base_url = "https://api.anthropic.com" if anthropic else "https://api.openai.com/v1"
     model = "claude-sonnet-5" if anthropic else "gpt-6-luna"
@@ -112,10 +127,11 @@ def _turn(world, as_user, who, wire):
 
     def respond(request):
         sent.append(json.loads(request.content))
+        name, args = first_call if (first_call and len(sent) == 1) else (None, {})
         stream = (
-            _anthropic_stream(model, "c0", None, {})
+            _anthropic_stream(model, f"c{len(sent)}", name, args)
             if anthropic
-            else _compatible_stream("c0", None, {})
+            else _compatible_stream(f"c{len(sent)}", name, args)
         )
         return http_module.Response(
             200, headers={"content-type": "text/event-stream"}, content=stream
@@ -151,30 +167,64 @@ def _turn(world, as_user, who, wire):
     finally:
         PyPSAService.reset_request_context(binding)
     assert frames[-1][0] == "turn_done", frames[-3:]
-    body = sent[0]
-    offered = {
-        t["name"] if anthropic else t["function"]["name"] for t in body.get("tools", [])
-    }
-    system = json.dumps(body.get("system", "")) + json.dumps(
-        body.get("messages", [])[:1]
-    )
-    return offered, system
+    return [
+        (
+            {
+                t["name"] if anthropic else t["function"]["name"]
+                for t in body.get("tools", [])
+            },
+            _system_text(body, anthropic),
+        )
+        for body in sent
+    ]
+
+
+def _writes(offered) -> set:
+    return {n for n in offered if catalogue.safety_tier_for(n) != "read"}
 
 
 @pytest.mark.parametrize("wire", ["anthropic", "openai"])
 def test_a_viewer_is_offered_only_read_tools_and_told_why(world, as_user, wire):
-    offered, system = _turn(world, as_user, "viewer", wire)
+    [(offered, system)] = _turn(world, as_user, "viewer", wire)
     assert offered, "a viewer still gets the read tools"
-    assert {n for n in offered if catalogue.safety_tier_for(n) != "read"} == set()
+    assert _writes(offered) == set()
     assert "cancel_job" not in offered
-    assert "This project is view only for this user." in system
+    assert system.endswith("\n" + _VIEW_ONLY)
 
 
 @pytest.mark.parametrize("wire", ["anthropic", "openai"])
 def test_an_editor_keeps_the_write_tools_and_no_view_only_line(world, as_user, wire):
-    offered, system = _turn(world, as_user, "editor", wire)
-    assert {n for n in offered if catalogue.safety_tier_for(n) != "read"}
-    assert "This project is view only for this user." not in system
+    [(offered, system)] = _turn(world, as_user, "editor", wire)
+    assert _writes(offered)
+    assert _VIEW_ONLY not in system
+
+
+@pytest.mark.parametrize("wire", ["anthropic", "openai"])
+def test_the_view_only_line_is_appended_after_the_editors_prompt(world, as_user, wire):
+    [(_, editor)] = _turn(world, as_user, "editor", wire)
+    [(_, viewer)] = _turn(world, as_user, "viewer", wire)
+    # Each session gets its own short confirmation-token salt; nothing else differs.
+    salt = re.compile(r"<verb>:[0-9a-f]{6}")
+    assert (
+        salt.sub("<verb>:", viewer) == salt.sub("<verb>:", editor) + "\n" + _VIEW_ONLY
+    )
+
+
+@pytest.mark.parametrize("wire", ["anthropic", "openai"])
+@pytest.mark.parametrize(
+    "call",
+    [
+        ("find_capabilities", {"goal": "edit a generator"}),
+        ("use_toolset", {"domain": "all"}),
+    ],
+)
+def test_the_offer_rebuilt_mid_turn_stays_read_only_for_a_viewer(
+    world, as_user, wire, call
+):
+    bodies = _turn(world, as_user, "viewer", wire, first_call=call)
+    assert len(bodies) == 2, "the tool result went back to the model"
+    for offered, _ in bodies:
+        assert offered and _writes(offered) == set()
 
 
 # ── LC-D22.viewer_role: the copilot's edit, undo and restore for a viewer ────
@@ -228,3 +278,16 @@ def test_a_viewers_copilot_edit_undo_and_restore_are_refused_and_change_nothing(
     finally:
         PyPSAService.reset_request_context(binding)
     assert lc43_gates.state(world["path"]) == before
+
+
+@pytest.mark.parametrize("wire", ["anthropic", "openai"])
+def test_the_view_only_line_comes_after_the_assurance_block(
+    world, as_user, wire, monkeypatch
+):
+    from harness import assurance
+
+    monkeypatch.setattr(assurance, "strict_configured", lambda: True)
+    [(_, viewer)] = _turn(world, as_user, "viewer", wire)
+    head, _, tail = viewer.rpartition("\n")
+    assert tail == _VIEW_ONLY
+    assert _VIEW_ONLY not in head
