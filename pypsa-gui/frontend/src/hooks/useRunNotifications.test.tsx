@@ -89,6 +89,9 @@ describe('per-run notices', () => {
   })
 
   it('two tabs on one browser notify once', () => {
+    // The notice store is shared in this test, so count the hidden-tab
+    // notifications: each tab that claimed the job would send one.
+    setHidden(true)
     serve([job('a', 'running')])
     const tab1 = renderHook(() => useRunNotifications('u1'))
     const tab2 = renderHook(() => useRunNotifications('u1'))
@@ -96,6 +99,7 @@ describe('per-run notices', () => {
     tab1.rerender()
     tab2.rerender()
     expect(texts()).toHaveLength(1)
+    expect(notified).toHaveLength(1)
   })
 
   it('still notifies when storage throws', () => {
@@ -186,6 +190,22 @@ describe('missed while away (N4)', () => {
     // A second mount (a reload) finds them claimed and last-seen moved on.
     renderHook(() => useRunNotifications('u1'))
     expect(texts()).toEqual([])
+  })
+
+  it('a run the away summary counted is not toasted again by a tab already open (N4)', () => {
+    setHidden(true)
+    // Tab 1 has been open on an idle queue: its baseline lacks job a.
+    serve([])
+    const tab1 = renderHook(() => useRunNotifications('u1'))
+    localStorage.setItem('run-last-seen:u1', String(NOW - 3600))
+    // Tab 2 loads and counts a in its summary.
+    serve([job('a', 'completed', { finished_at: NOW - 100 })])
+    renderHook(() => useRunNotifications('u1'))
+    expect(texts()).toEqual(['1 run finished while you were away'])
+    // Tab 1's next listing shows a for the first time, already ended.
+    tab1.rerender()
+    expect(texts()).toEqual(['1 run finished while you were away'])
+    expect(notified).toEqual([])
   })
 
   it('last seen is per account', () => {
