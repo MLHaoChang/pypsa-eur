@@ -115,7 +115,11 @@ def _valid_cutout(entry: Any) -> bool:
 
 def recorded_cutouts(project_dir: Path | str) -> list[dict[str, Any]]:
     """The valid entries of `profile_cutouts`; read-only (W6)."""
-    got = _read(project_dir).get(CUTOUTS_KEY)
+    return _valid_entries(_read(project_dir))
+
+
+def _valid_entries(meta: dict[str, Any]) -> list[dict[str, Any]]:
+    got = meta.get(CUTOUTS_KEY)
     if not isinstance(got, list):
         return []
     return [e for e in got if _valid_cutout(e)]
@@ -133,7 +137,7 @@ def record_cutouts(
     keys = {tuple(t) for t in targets}
     kept = [
         e
-        for e in recorded_cutouts(project_dir)
+        for e in _valid_entries(meta)
         if tuple(e[k] for k in _TARGET) not in keys
     ]
     if cutout is not None:

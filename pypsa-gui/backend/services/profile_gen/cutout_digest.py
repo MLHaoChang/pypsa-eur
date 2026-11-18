@@ -10,7 +10,11 @@ W1).
 The hash is computed per job, with no cache beside the cutout (GK B3). The
 bytes hashed are those of the file the profile is generated from: the hash
 reads one open file, and the record is refused when the path no longer names
-that file once the extent has been read (W2).
+that file once the extent has been read (W2). Generation opens the path again
+afterwards. The cache (`cutout_cache.py`) returns an existing file untouched
+and places a new one only when the path is free, with `os.replace`, never by
+writing in place; only two cold fetches of the same key racing could swap the
+file in that window, and the second holds the same request's data.
 """
 
 from __future__ import annotations
