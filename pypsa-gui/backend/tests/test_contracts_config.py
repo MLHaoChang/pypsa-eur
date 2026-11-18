@@ -322,13 +322,14 @@ def test_contracts_round_trip_through_the_route_save_load_and_a_bundle(
     assert [c.id for c in back.contracts] == ["ppa1", "c"]
     assert SI.reference_price(reloaded.network, back.contracts[0])[1] == []
     # bundle: the reference series is pinned and its copy travels with it, so
-    # another org's import needs nothing from its own Library (project-io 03)
+    # another org's import resolves it; only the notice that its Library row
+    # (the currency) is not in that org remains (project-io 03)
     b = client.get("/api/projects/contracted/bundle")
     side = json.loads(zipfile.ZipFile(io.BytesIO(b.content)).read("library_refs.json"))
     assert [(p["id"], p["version"]) for p in side["refs"]] == [("px", 1)]
     other = other_org_client.post("/api/projects/import_bundle?name=contracted_there",
                                   files={"file": ("b.zip", b.content, "application/zip")})
-    assert other.json()["library_issues"] == []
+    assert [i["reason"] for i in other.json()["library_issues"]] == ["copy_only"]
 
 
 # ── IPP ticket 01 (G2): the financial PPA the site sells ───────────────────

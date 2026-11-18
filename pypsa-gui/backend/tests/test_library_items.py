@@ -242,6 +242,23 @@ def test_a_bundle_into_another_org_reports_its_tariff_pin(client, other_org_clie
     assert other.status_code == 200, other.text
     assert other.json()["library_issues"] == []
 
+    # Without the copy, the other org's Library is the only source, and it has
+    # no such tariff: the pin is missing there (the org scope still holds).
+    from tests.bundle_util import refresh_manifest
+
+    src = zipfile.ZipFile(io.BytesIO(r.content))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for m in src.namelist():
+            if not m.startswith("library/"):
+                zf.writestr(m, src.read(m))
+    bare = other_org_client.post(
+        "/api/projects/import_bundle?name=tariffed_bare",
+        files={"file": ("b.zip", refresh_manifest(buf.getvalue()), "application/zip")})
+    assert bare.status_code == 200, bare.text
+    assert [(i["kind"], i["reason"]) for i in bare.json()["library_issues"]] == [
+        ("tariff", "missing")]
+
 
 # ── WP2.4a review round 1 ──────────────────────────────────────────────────
 

@@ -95,7 +95,8 @@ def test_the_copy_serves_the_pin_when_the_library_row_is_gone(
     with session_local() as db:
         db.query(LibraryItem).delete()
         db.commit()
-    assert _open(client, name)["library_issues"] == []
+    # Served by the copy; the notice says the Library row (its currency) is gone.
+    assert [i["reason"] for i in _open(client, name)["library_issues"]] == ["copy_only"]
     from models.commercial import PriceSeriesRef
 
     pref = PriceSeriesRef(**{k: ref[k] for k in ("id", "version", "hash", "source")})
@@ -150,7 +151,9 @@ def test_a_modified_copy_is_reported_and_never_read(
 
 
 def test_a_copy_too_large_once_unpacked_is_not_read(tmp_path, monkeypatch):
-    data = b"# tz=naive\ntimestamp_utc,value\n" + b"2030-01-01T00:00:00,1\n" * 100
+    data = b"# tz=naive\ntimestamp_utc,value\n" + b"".join(
+        f"2030-01-01T{h:02d}:00:00,1\n".encode() for h in range(24)
+    )
     pin = {
         "kind": "series",
         "id": "x",
@@ -369,6 +372,22 @@ def _series_pin(data: bytes) -> dict:
     }
 
 
+_TARIFF = json.dumps(
+    {
+        "id": "nl-tou",
+        "name": "NL TOU",
+        "jurisdiction": "NL",
+        "valid_from": "2030-01-01",
+        "items": [
+            {
+                "id": "energy",
+                "kind": "energy",
+                "unit": "per_kwh",
+                "periods": [{"name": "day", "rate": 0.20}],
+            }
+        ],
+    }
+).encode()
 _CSV = b"# tz=naive\ntimestamp_utc,value\n2030-01-01T00:00:00,1\n"
 
 
@@ -393,7 +412,7 @@ def test_a_truncated_or_oversized_copy_reads_as_modified(tmp_path, monkeypatch):
 
 
 def test_an_item_copy_is_read_as_is_not_unzipped(tmp_path):
-    raw = gzip.compress(b'{"a": 1}', mtime=0)
+    raw = gzip.compress(_TARIFF, mtime=0)
     pin = {
         "kind": "tariff",
         "id": "t",
@@ -401,7 +420,11 @@ def test_an_item_copy_is_read_as_is_not_unzipped(tmp_path):
         "hash": hashlib.sha256(raw).hexdigest(),
     }
     assert PC.write(tmp_path, pin, raw)
-    assert PC.read(tmp_path, pin) == (raw, False)
+    # Never unzipped: gzip bytes are not a tariff, so the copy is not used.
+    assert PC.read(tmp_path, pin) == (None, True)
+    plain = {**pin, "hash": hashlib.sha256(_TARIFF).hexdigest()}
+    assert PC.write(tmp_path, plain, _TARIFF)
+    assert PC.read(tmp_path, plain) == (_TARIFF, False)
 
 
 @pytest.mark.parametrize(
@@ -428,7 +451,8 @@ def test_a_directory_entry_and_a_duplicate_pin_are_not_problems_twice(tmp_path):
     path.write_bytes(b"junk")
     members = ["library/", "library/series/", PC.member_name(pin)]
     assert PC.staged_problems(tmp_path, members, [pin, dict(pin)]) == [
-        f"{PC.member_name(pin)} does not match its pin in library_refs.json."
+        f"{PC.member_name(pin)} does not match its pin in library_refs.json, "
+        "or is not a valid payload."
     ]
 
 
@@ -465,7 +489,7 @@ def test_fill_copies_an_item_and_a_series_named_like_a_common_item(
 ):
     from services.library import common, items, series_store
 
-    body = b'{"id": "c"}'
+    body = _TARIFF
     item = {
         "kind": "tariff",
         "id": "mine",
@@ -487,7 +511,7 @@ def test_an_item_pin_resolves_from_its_copy_and_a_modified_one_is_named(
     from models.commercial import LibraryItemRef
     from services.library import items as I
 
-    raw = b'{"a": 1}'
+    raw = _TARIFF
     pin = {
         "kind": "tariff",
         "id": "t",
@@ -501,9 +525,163 @@ def test_an_item_pin_resolves_from_its_copy_and_a_modified_one_is_named(
         raise S.LibraryRefNotFound("no such row")
 
     monkeypatch.setattr(I, "payload_bytes", gone)
-    assert I.resolve(None, None, ref, project_dir=tmp_path) == {"a": 1}
-    PC.path_for(tmp_path, pin).write_bytes(b'{"a": 2}')
+    assert I.resolve(None, None, ref, project_dir=tmp_path) == json.loads(_TARIFF)
+    PC.path_for(tmp_path, pin).write_bytes(_TARIFF + b" ")
     with pytest.raises(S.LibraryRefStale, match="copy of tariff 't' v1 was modified"):
         I.resolve(None, None, ref, project_dir=tmp_path)
     with pytest.raises(S.LibraryRefNotFound):
         I.resolve(None, None, ref)
+
+
+# ── GK B3 NOT OK @a366899a ─────────────────────────────────────────────────
+
+
+def test_a_re_pinned_project_exports_a_bundle_its_import_accepts(
+    client, api_project, session_ctx, project_storage_dir
+):
+    name = api_project("lc-repin")
+    v1 = _put(client)
+    _save_with_refs(client, session_ctx, name, [v1])
+    v2 = _put(client, offset=1.0)
+    assert v2["version"] == v1["version"] + 1
+    _save_with_refs(client, session_ctx, name, [v2])
+    assert not _copy(project_storage_dir, name, v1).exists()
+    assert _copy(project_storage_dir, name, v2).is_file()
+    r = _import(client, _bundle(client, name), "lc_repin_again")
+    assert r.status_code == 200, r.text
+
+
+def test_prune_keeps_the_pins_copies_and_a_temp_file_in_flight(tmp_path):
+    import os
+    import time
+
+    pin = _series_pin(_CSV)
+    assert PC.write(tmp_path, pin, _CSV)
+    folder = PC.path_for(tmp_path, pin).parent
+    stray = folder / f"{'b' * 64}.csv.gz"
+    stray.write_bytes(b"old")
+    fresh, stale = folder / "x.tmp", folder / "y.tmp"
+    fresh.write_bytes(b"")
+    stale.write_bytes(b"")
+    old = time.time() - PC._TMP_GRACE_S - 5
+    os.utime(stale, (old, old))
+    assert PC.prune(tmp_path, [pin]) == sorted(
+        f"library/series/{p.name}" for p in (stray, stale)
+    )
+    assert sorted(p.name for p in folder.iterdir()) == sorted(
+        [PC.path_for(tmp_path, pin).name, "x.tmp"]
+    )
+    assert PC.prune(tmp_path / "none", [pin]) == []
+
+
+def test_an_unreadable_sidecar_prunes_nothing(tmp_path):
+    pin = _series_pin(_CSV)
+    assert PC.write(tmp_path, pin, _CSV)
+    (tmp_path / P.SIDECAR_NAME).write_text("{not json")
+    assert P.write_copies(None, None, tmp_path) == []
+    assert PC.path_for(tmp_path, pin).is_file()
+
+
+def _pinned(kind: str, data: bytes) -> dict:
+    return {
+        "kind": kind,
+        "id": "x",
+        "version": 1,
+        "hash": hashlib.sha256(data).hexdigest(),
+    }
+
+
+@pytest.mark.parametrize(
+    "kind, data",
+    [
+        ("series", b"# tz=naive\ntimestamp_utc,value\n2030-01-01T00:00:00,nan\n"),
+        ("series", b"# tz=naive\ntimestamp_utc,value\n2030-01-01T00:00:00,inf\n"),
+        ("series", b"# tz=Not/AZone\ntimestamp_utc,value\n2030-01-01T00:00:00,1\n"),
+        ("series", b"# tz=naive\ntimestamp_utc,value\nnot a time,1\n"),
+        ("tariff", b"{not json"),
+        ("tariff", b'{"id": "c"}'),
+    ],
+    ids=["nan", "inf", "bad-tz", "bad-index", "not-json", "not-a-tariff"],
+)
+def test_a_copy_whose_contents_are_not_a_valid_payload_is_never_used(
+    tmp_path, kind, data
+):
+    # The hash alone vouches for nothing: the bundle brings both pin and copy.
+    pin = _pinned(kind, data)
+    assert PC.write(tmp_path, pin, data)
+    assert PC.read(tmp_path, pin) == (None, True)
+    members = [PC.member_name(pin)]
+    [problem] = PC.staged_problems(tmp_path, members, [pin])
+    assert "is not a valid payload" in problem
+
+
+def test_a_bundle_whose_copy_is_not_finite_is_refused(
+    client,
+    pinned_bundle,
+    project_row,
+    projects_root,  # noqa: F811
+):
+    data, ref = pinned_bundle
+    bad = b"# tz=UTC\ntimestamp_utc,value\n2030-01-01T00:00:00Z,nan\n"
+    sha = hashlib.sha256(bad).hexdigest()
+    pin = {**_pin(ref), "hash": sha}
+    sidecar = {
+        "schema": 1,
+        "refs": [{"id": ref["id"], "version": ref["version"], "hash": sha}],
+    }
+    edited = _edited(
+        data,
+        {
+            PC.member_name(_pin(ref)): None,
+            PC.member_name(pin): gzip.compress(bad),
+            P.SIDECAR_NAME: json.dumps(sidecar).encode(),
+        },
+    )
+    r = _import(client, edited, "lc_nan")
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"]["error_kind"] == "bundle_corrupt"
+    assert _left_behind(project_row, projects_root, "lc_nan") == []
+
+
+def test_a_series_served_by_its_copy_alone_is_a_notice_not_a_fault(
+    tmp_path, monkeypatch
+):
+    pin = _series_pin(_CSV)
+    monkeypatch.setattr(S, "ref_for", lambda *a, **k: None)
+    [issue] = P._copy_only(None, None, pin)
+    assert (issue["code"], issue["reason"]) == (P.COPY_ONLY_CODE, "copy_only")
+    assert P.COPY_ONLY_CODE in P.NOTICE_CODES
+    monkeypatch.setattr(S, "ref_for", lambda *a, **k: object())
+    assert P._copy_only(None, None, pin) == []
+    assert P._copy_only(None, None, {**pin, "kind": "tariff"}) == []
+
+
+def _config_naming(pin) -> str:
+    ref = {k: pin[k] for k in ("id", "version", "hash")}
+    return json.dumps(
+        {"commercial": {"export_price_ref": {**ref, "source": "library"}}}
+    )
+
+
+def test_a_copy_only_the_config_names_is_kept_without_a_sidecar(tmp_path):
+    # An import without a sidecar is accepted when the config names the copy;
+    # its first load-migration must not prune it (GK B3 @5f0c351b).
+    pin = _series_pin(_CSV)
+    assert PC.write(tmp_path, pin, _CSV)
+    (tmp_path / "solver_config.json").write_text(_config_naming(pin))
+    assert P.collect_pins(json.loads(_config_naming(pin)))[0]["hash"] == pin["hash"]
+    P.write_copies(None, None, tmp_path)
+    assert PC.path_for(tmp_path, pin).is_file()
+    (tmp_path / "solver_config.json").write_text("{not json")
+    stray = PC.path_for(tmp_path, pin).parent / f"{'b' * 64}.csv.gz"
+    stray.write_bytes(b"x")
+    P.write_copies(None, None, tmp_path)  # unreadable config: prune nothing
+    assert stray.is_file()
+    (tmp_path / "solver_config.json").unlink()
+    P.write_copies(None, None, tmp_path)  # no sidecar, no config: no pins
+    assert not stray.exists() and not PC.path_for(tmp_path, pin).exists()
+
+
+def test_a_temp_file_in_a_bundle_is_not_a_stray(tmp_path):
+    members = ["library/series/x.tmp", "library/series/" + "c" * 64 + ".csv.gz"]
+    assert PC.stray_members(members, []) == [members[1]]

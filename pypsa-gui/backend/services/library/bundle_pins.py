@@ -32,7 +32,9 @@ Issue reasons:
 A pin whose project copy hashes to it is good whatever the org's Library holds
 (project-io 03: a project carries its pinned bytes in `library/`). A separate
 notice, code `library_newer_version`, says the org's Library has a later
-version than the pin; it changes nothing (the user re-pins).
+version than the pin; it changes nothing (the user re-pins). Another,
+`library_copy_only`, says a series is served by its copy alone, so the
+metadata its Library row holds (the currency) cannot be read.
 
 Pure service: imports neither routers nor `solver_service` (plan gate rubric).
 """
@@ -59,6 +61,9 @@ SERIES = "series"
 ITEM_KINDS = ("tariff", "contract", "connection_agreement")
 ISSUE_CODE = "library_ref_stale"
 NEWER_CODE = "library_newer_version"
+COPY_ONLY_CODE = "library_copy_only"
+# Notices, not faults: they never block a run (the flow panel shows warnings).
+NOTICE_CODES = (NEWER_CODE, COPY_ONLY_CODE)
 
 _REF_KEYS = frozenset({"id", "version", "hash", "source"})
 
@@ -156,10 +161,30 @@ def write_copies(
     db: DBSession, org_id: UUID, project_dir: Path, *, root: Path | None = None
 ) -> list[str]:
     """Copy each pinned payload the project lacks into its `library/` folder
-    from `org_id`'s Library (project-io 03; `project_copies.fill`). An
-    unreadable sidecar copies nothing. Returns the member names written."""
-    pins, _issues = read_pins(project_dir)
-    return PC.fill(db, org_id, Path(project_dir), pins, root=root)
+    from `org_id`'s Library (project-io 03; `project_copies.fill`), then
+    remove the copies no current pin names (`project_copies.prune`). An
+    unreadable sidecar copies and removes nothing. Returns the member names
+    written."""
+    pins, issues = read_pins(project_dir)
+    written = PC.fill(db, org_id, Path(project_dir), pins, root=root)
+    # Prune by the same pins an import counts: the sidecar's and the config's
+    # refs (GK B3). An unreadable sidecar or config names no pins: prune nothing.
+    config_pins = _config_pins(Path(project_dir))
+    if not issues and config_pins is not None:
+        PC.prune(Path(project_dir), pins + config_pins)
+    return written
+
+
+def _config_pins(project_dir: Path) -> list[dict] | None:
+    """The refs `solver_config.json` names, [] without one, None when it is
+    unreadable."""
+    path = project_dir / "solver_config.json"
+    if not path.is_file():
+        return []
+    try:
+        return collect_pins(json.loads(path.read_text()))
+    except (OSError, ValueError):
+        return None
 
 
 def _unreadable(label: str, exc: Exception) -> str:
@@ -252,6 +277,7 @@ def check_pins(
         if copies is not None:
             data, modified = PC.read(copies, pin)
             if data is not None:
+                issues += _copy_only(db, org_id, pin)
                 continue
             if modified:
                 issues.append(
@@ -287,6 +313,28 @@ def check_pins(
                                  f"Library series {label} could not be read "
                                  f"({type(exc).__name__})"))
     return issues
+
+
+def _copy_only(db: DBSession, org_id: UUID, pin: dict) -> list[dict]:
+    """The `library_copy_only` notice for a series served by the project's copy
+    alone. The copy holds the values, but a series' metadata (its currency)
+    lives in the org's Library row, and binding a reserve product priced from
+    the series reads it there (GK B3). Read-only."""
+    if pin["kind"] != SERIES or S.ref_for(db, org_id, pin["id"], pin["version"]):
+        return []
+    return [
+        {
+            **_issue(
+                "copy_only",
+                pin,
+                f"this project carries Library series '{pin['id']}' v{pin['version']}, "
+                "but this organization's Library has no entry for it, so its "
+                "currency cannot be read: a reserve product priced from it cannot "
+                "be bound until the series is added to the Library",
+            ),
+            "code": COPY_ONLY_CODE,
+        }
+    ]
 
 
 def _newer(db: DBSession, org_id: UUID, pin: dict) -> list[dict]:

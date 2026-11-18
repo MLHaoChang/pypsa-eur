@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import json
 import os
 import re
 import tempfile
+import time
 import zlib
 from collections.abc import Iterable
 from pathlib import Path
@@ -90,7 +92,27 @@ def read(project_dir: Path, pin: dict) -> tuple[bytes | None, bool]:
         return None, True
     if hashlib.sha256(data).hexdigest() != pin["hash"]:
         return None, True
+    if not _well_formed(data, pin["kind"]):
+        return None, True
     return data, False
+
+
+def _well_formed(data: bytes, kind: str) -> bool:
+    """A copy's hash only says it is the payload its pin names; a bundle brings
+    both. So its contents pass the same checks the Library puts on a payload
+    (GK B3): a series of finite values on a valid index and zone, an item that
+    is its kind's model."""
+    from services.library import items as I
+    from services.library import series_store as S
+
+    try:
+        if kind == SERIES:
+            S._validate("copy", S._series_from(data, "copy"))
+        else:
+            I.validate_payload(kind, json.loads(data))
+    except (ValueError, KeyError, TypeError):  # UnknownTimeZoneError is a KeyError
+        return False
+    return True
 
 
 def write(project_dir: Path, pin: dict, data: bytes) -> bool:
@@ -154,13 +176,49 @@ def fill(
     return written
 
 
+_TMP_GRACE_S = 3600
+
+
+def prune(project_dir: Path, pins: Iterable[dict]) -> list[str]:
+    """Remove the `library/` files no current pin names, so a re-pinned project
+    still exports a bundle its import accepts (GK B3). A temp file younger than
+    an hour may be a write in flight and stays; an older one is a crash's
+    leftover. Returns the member names removed."""
+    project_dir = Path(project_dir)
+    root = project_dir / DIR
+    if not root.is_dir():
+        return []
+    wanted = {member_name(p) for p in pins} - {None}
+    now = time.time()
+    removed = []
+    for f in sorted(root.rglob("*")):
+        if not f.is_file():
+            continue
+        rel = f.relative_to(project_dir).as_posix()
+        if rel in wanted:
+            continue
+        try:
+            if f.name.endswith(".tmp") and now - f.stat().st_mtime < _TMP_GRACE_S:
+                continue
+            f.unlink()
+        except FileNotFoundError:
+            continue
+        removed.append(rel)
+    return removed
+
+
 def stray_members(members: Iterable[str], pins: Iterable[dict]) -> list[str]:
-    """The `library/` members of a bundle that are no pin's copy."""
+    """The `library/` members of a bundle that are no pin's copy. A temp file
+    is a copy being written when the bundle was made: it is never read, and the
+    next save's prune removes it once it is an hour old."""
     wanted = {member_name(p) for p in pins} - {None}
     return sorted(
         m
         for m in members
-        if m.startswith(f"{DIR}/") and not m.endswith("/") and m not in wanted
+        if m.startswith(f"{DIR}/")
+        and not m.endswith("/")
+        and not m.endswith(".tmp")  # a write in flight at export; never read
+        and m not in wanted
     )
 
 
@@ -194,7 +252,8 @@ def staged_problems(
             continue
         if read(staging, pin)[1]:
             problems.append(
-                f"{member_name(pin)} does not match its pin in library_refs.json."
+                f"{member_name(pin)} does not match its pin in library_refs.json, "
+                "or is not a valid payload."
             )
     problems += [
         f"{m} is not the copy of any pin in library_refs.json."
