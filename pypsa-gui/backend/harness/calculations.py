@@ -335,8 +335,9 @@ def _no_floats(value):
             _no_floats(item)
 
 
-def definition_hash(profile):
-    """``"sha256:<hex>"`` over the profile's metrics in order, each metric's
+def definition_hash(profile, metrics=None):
+    """``"sha256:<hex>"`` over the profile's metrics in order (or `metrics`,
+    the ones a scope requested, in their requested order), each metric's
     label, unit and formula_id (as `definition` gives them for this profile) and
     `RENDERER_VERSION`; canonical JSON (sorted keys, no spaces, UTF-8).
 
@@ -344,14 +345,14 @@ def definition_hash(profile):
     its formula_id. A metric without a definition (the "unsupported" fallback)
     and an unknown profile are refused, never hashed; so is a float input.
     """
-    metrics = []
-    for metric in PROFILES[profile]:
+    rows = []
+    for metric in PROFILES[profile] if metrics is None else metrics:
         d = definition(metric, profile)
         if d["formula_id"] == "unsupported":
             raise ValueError("unsupported_metric_definition")
-        metrics.append({"metric": metric, "label": d["label"], "unit": d["unit"],
-                        "formula_id": d["formula_id"]})
-    payload = {"metrics": metrics, "renderer_version": RENDERER_VERSION}
+        rows.append({"metric": metric, "label": d["label"], "unit": d["unit"],
+                     "formula_id": d["formula_id"]})
+    payload = {"metrics": rows, "renderer_version": RENDERER_VERSION}
     _no_floats(payload)
     text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -373,6 +374,16 @@ def slot_warnings(slots):
 
 def requested_metrics(scope):
     return scope.get("metrics", PROFILES[scope["profile"]])
+
+
+def scope_definition_hash(scope):
+    """`definition_hash` over the metrics `scope` requests (comparison and
+    optional metrics included), or None when one has no definition: such a
+    record is captured with its hash not recorded, never refused here."""
+    try:
+        return definition_hash(scope["profile"], requested_metrics(scope))
+    except ValueError:
+        return None
 
 
 def _window(raw, scope):

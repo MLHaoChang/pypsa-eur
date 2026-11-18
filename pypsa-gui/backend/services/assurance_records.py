@@ -1915,7 +1915,12 @@ def capture_scoped(owner, scope):
             "solve_stamp": solve_stamp(ctx.network),
             # AA-10 S7: the profile's definition hash as checked (hidden like
             # the keys above, so the public evidence shape is unchanged).
-            "definition_hash": calculations.definition_hash(scope["profile"]),
+            **(
+                {"definition_hash": definition}
+                if (definition := calculations.scope_definition_hash(scope))
+                is not None
+                else {}
+            ),
             "validity": {
                 "coverage": "requested_population",
                 "as_of": time.time(),
@@ -1971,8 +1976,10 @@ def definition_changed(record):
 
     try:
         scope = record.get("request_scope") or record["receipt"]["request_scope"]
-        current = calculations.definition_hash(scope["profile"])
+        current = calculations.scope_definition_hash(scope)
     except (KeyError, ValueError, TypeError):
+        return True
+    if current is None:
         return True
     return current != recorded
 

@@ -1454,7 +1454,7 @@ class Turn:
         # reasons when twenty unavailable slots also have a review limitation.
         if len(limitations) > 20:
             limitations[19:] = ["; ".join(limitations[19:])]
-        from harness.calculations import definition_hash
+        from harness.calculations import scope_definition_hash
 
         answer_id = str(uuid.uuid4())
         record = {
@@ -1474,10 +1474,12 @@ class Turn:
             # AA-10 S7: the definitions this answer's checked values were worded
             # under; the answer route compares it with the current hash.
             **(
-                {"definition_hash": definition_hash(self.request_scope["profile"])}
+                {"definition_hash": recorded_hash}
                 if self.request_scope is not None
                 and self.request_evidence is not None
                 and not draft_failed
+                and (recorded_hash := scope_definition_hash(self.request_scope))
+                is not None
                 else {}
             ),
             "expires_at": time.time() + records.RETENTION_SECONDS,

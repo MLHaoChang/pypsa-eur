@@ -391,9 +391,11 @@ def remember(turn):
             "slots": slots,
             "raw": raw,
             "source_sha256": records.digest(raw),
-            # Recalculated now, so the current definitions, not the source's.
-            "definition_hash": calculations.definition_hash(scope["profile"]),
         }
+        # Recalculated now, so the current definitions, not the source's.
+        frozen.pop("definition_hash", None)
+        if (definition := calculations.scope_definition_hash(scope)) is not None:
+            frozen["definition_hash"] = definition
         records.save(frozen, frozen["evidence_id"])
         entry = {
             "scope": deepcopy(scope),

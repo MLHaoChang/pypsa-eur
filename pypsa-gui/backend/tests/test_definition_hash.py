@@ -267,3 +267,82 @@ def test_calculated_evidence_records_the_hash_too(solved, checked):
     stored = assurance_records.capture_dispatch(assurance_records.actor_id(), "G1")
     assert stored["definition_hash"] == calculations.definition_hash(PROFILE) == GOLDEN
     assert "definition_hash" not in assurance_records.public(stored)
+
+
+def test_the_hash_covers_the_metrics_a_scope_requests(monkeypatch):
+    """GK B 67 F1: a requested comparison metric is in the hash, in order."""
+    scope = {"profile": "generator-cost/1", "metrics": ["total_cost", "cost_delta"]}
+    before = calculations.scope_definition_hash(scope)
+    assert before != calculations.definition_hash("generator-cost/1")
+    assert before != calculations.scope_definition_hash(
+        {**scope, "metrics": ["cost_delta", "total_cost"]}
+    )
+    monkeypatch.setitem(
+        calculations.DEFINITIONS,
+        "cost_delta",
+        {**calculations.DEFINITIONS["cost_delta"], "label": "Renamed"},
+    )
+    assert calculations.scope_definition_hash(scope) != before
+    record = {"definition_hash": before, "receipt": {"request_scope": scope}}
+    assert assurance_records.definition_changed(record) is True
+    monkeypatch.undo()
+    assert assurance_records.definition_changed(record) is False
+
+
+def test_a_scope_without_metrics_hashes_the_profile_defaults():
+    scope = {"profile": PROFILE}
+    assert calculations.scope_definition_hash(scope) == GOLDEN
+
+
+def test_an_unknown_requested_metric_is_not_hashed_and_reads_changed():
+    scope = {"profile": PROFILE, "metrics": ["no_such_metric"]}
+    assert calculations.scope_definition_hash(scope) is None
+    record = {"definition_hash": GOLDEN, "request_scope": scope}
+    assert assurance_records.definition_changed(record) is True
+
+
+def test_a_requested_comparison_metric_change_reads_through_the_route(
+    solved, checked, monkeypatch
+):
+    metrics = [*calculations.PROFILES[PROFILE][:1], "cost_delta"]
+    frames = checked.run(
+        NumericalProvider(GENERATOR),
+        message="Check results.",
+        checked_scope={
+            "version": 1,
+            "profile": PROFILE,
+            "project_id": solved.project_uuid,
+            "entity_id": "G1",
+            "retain": False,
+            "metrics": metrics,
+        },
+    )
+    answer_id = approval(frames)["answer_id"]
+    shown = _get(checked, answer_id)
+    assert shown["definition_hash"] == calculations.definition_hash(PROFILE, metrics)
+    assert shown["definition_changed"] is False
+    monkeypatch.setitem(
+        calculations.DEFINITIONS,
+        "cost_delta",
+        {**calculations.DEFINITIONS["cost_delta"], "label": "Renamed"},
+    )
+    assert _get(checked, answer_id)["definition_changed"] is True
+
+
+def test_an_unknown_requested_metric_still_captures(solved, checked):
+    frames = checked.run(
+        NumericalProvider(GENERATOR),
+        message="Check results.",
+        checked_scope={
+            "version": 1,
+            "profile": PROFILE,
+            "project_id": solved.project_uuid,
+            "entity_id": "G1",
+            "retain": False,
+            "metrics": [*calculations.PROFILES[PROFILE][:1], "no_such_metric"],
+        },
+    )
+    answer_id = approval(frames).get("answer_id")
+    assert answer_id is not None
+    shown = _get(checked, answer_id)
+    assert "definition_hash" not in shown and "definition_changed" not in shown
