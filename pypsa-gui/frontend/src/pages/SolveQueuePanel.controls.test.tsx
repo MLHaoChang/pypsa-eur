@@ -35,6 +35,7 @@ function job(over: Partial<SolveJob> = {}): SolveJob {
     started_at: 0,
     finished_at: 1,
     can_dismiss: true,
+    started_by_me: false,
     ...over,
   }
 }

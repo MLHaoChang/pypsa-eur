@@ -24,8 +24,10 @@ export async function askToNotify(): Promise<void> {
   useUIStore.getState().setBrowserNotify(p === 'granted')
 }
 
-export const PRIVACY_OFF = 'Shows the project name in the notification'
-export const PRIVACY_ON = 'Shows the project name and whether the run finished or failed'
+// True in every state (review-ux #1401): the notification carries the toast's
+// words, which name the run, the project and how it ended.
+export const PRIVACY_OFF = 'Shows the project name and how the run ended'
+export const PRIVACY_ON = 'While this tab is hidden: the run, the project name and how it ended'
 export const BLOCKED = "Blocked in this browser: allow notifications in the browser's site settings"
 
 /**

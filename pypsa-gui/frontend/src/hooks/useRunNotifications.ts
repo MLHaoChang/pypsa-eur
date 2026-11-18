@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { isActive, type SolveJob } from '../api/solveQueue'
+import { isActive } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
 import { useSolveQueue } from './useSolveQueue'
 import { statusMap, terminalJobs } from './useJobTerminalInvalidation'
 import {
-  awayJobs, claim, isMyNotice, lastSeen, markSeen, noticeText, notifyPermission, pruneClaims,
+  awayJobs, claim, isMyNotice, lastSeen, markSeen, notifyPermission, pruneClaims,
   shouldNotifyBrowser,
 } from '../utils/runNotify'
 import { awayNotice, noticeFromJob, useRunNotices, type RunNotice } from '../components/runStatus/runNotices'
@@ -60,7 +60,7 @@ export function useRunNotifications(userKey: string): void {
       const notice = noticeFromJob(job)
       if (!notice) continue
       push(notice)
-      notifyBrowser(job, notice)
+      notifyBrowser(notice)
     }
 
     // A failed or interrupted notice is over once its project runs again (UX 3).
@@ -74,14 +74,13 @@ export function useRunNotifications(userKey: string): void {
  * The hidden-tab notification: the toast's own words, nothing more (GK N6).
  * An interrupted run has none (spec §3: the restart is the app's, not news).
  */
-function notifyBrowser(job: SolveJob, notice: RunNotice): void {
+function notifyBrowser(notice: RunNotice): void {
   if (notice.kind !== 'completed' && notice.kind !== 'failed') return
   const hidden = typeof document !== 'undefined' && document.hidden
   if (!shouldNotifyBrowser(hidden, notifyPermission(), useUIStore.getState().browserNotify)) return
-  const title = noticeText(job)
-  if (!title) return
   try {
-    const n = new Notification(title, { tag: `run-${job.id}` })
+    // A failed run's notification stays until dismissed (spec §3).
+    const n = new Notification(notice.text, { tag: `run-${notice.id}`, requireInteraction: notice.kind === 'failed' })
     n.onclick = () => {
       window.focus()
       if (notice.kind === 'completed') openNoticeResults(notice)

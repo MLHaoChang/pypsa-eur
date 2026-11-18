@@ -37,6 +37,7 @@ const finishedJob: SolveJob = {
   // Not the subject of this file; false keeps the Dismiss control out of
   // the DOM so it cannot interfere with the queries below.
   can_dismiss: false,
+  started_by_me: false,
 }
 
 let authState: { user: { is_super_admin: boolean; role: string | null } | null }

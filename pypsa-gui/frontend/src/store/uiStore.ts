@@ -110,7 +110,7 @@ const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
 const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
 // Browser notifications when a run of mine ends (run progress slice 3).
-const BROWSER_NOTIFY_KEY = 'run-browser-notify'
+const BROWSER_NOTIFY_KEY = 'network-diagram:run-browser-notify'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
 const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'

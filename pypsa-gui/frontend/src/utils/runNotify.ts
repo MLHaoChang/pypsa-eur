@@ -5,6 +5,7 @@
  */
 import type { SolveJob, SolveJobKind } from '../api/solveQueue'
 import { RUN_NAME, aboutMinutes } from './runStatus'
+import { PROJECT_LOCKED, lockFromErrorData, lockRefusalCode } from './lockState'
 
 /** The outcomes that notify. An aborted run notifies nobody: they did it. */
 export type NoticeEnd = 'completed' | 'failed' | 'interrupted'
@@ -139,10 +140,9 @@ export function notifyPermission(): NotificationPermission | null {
  * success, never the route's raw text.
  */
 export function runAgainError(err: unknown, project: string): string {
-  const res = (err as { response?: { status?: number; data?: { detail?: unknown } } })?.response
-  const detail = res?.data?.detail as { error_kind?: string; lock?: { holder_email?: string } } | string | undefined
-  if (res?.status === 409 && typeof detail === 'object' && detail?.error_kind === 'project_locked') {
-    const who = detail.lock?.holder_email ?? 'another user'
+  const res = (err as { response?: { status?: number; data?: unknown } })?.response
+  if (res?.status === 409 && lockRefusalCode(res.data) === PROJECT_LOCKED) {
+    const who = lockFromErrorData(res.data)?.holder_email ?? 'another user'
     return `Can't run it again: ${who} is editing ${project}.`
   }
   if (res?.status === 409) return "Can't run it again: the run is still going on."

@@ -53,8 +53,7 @@ export interface SolveJob {
   // Whether THIS caller queued the job, in any status (run progress slice 3):
   // the finish/fail notification fires only for your own runs. The same
   // capability-not-identity shape as `can_dismiss`; false for redacted rows.
-  // Optional only for rows from a backend older than the field (absent = no).
-  started_by_me?: boolean
+  started_by_me: boolean
 }
 
 export interface QueueList {

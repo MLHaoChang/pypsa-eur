@@ -23,11 +23,11 @@ const TOAST_ID = 'run-notices'
  */
 export default function RunNotices() {
   useRunNotifications(useAuthUserId() ?? 'local')
-  const any = useRunNotices(s => s.notices.length > 0)
+  const hasNotices = useRunNotices(s => s.notices.length > 0)
   useEffect(() => {
-    if (any) toast.custom(<RunNoticeStack />, { id: TOAST_ID, duration: Infinity })
+    if (hasNotices) toast.custom(<RunNoticeStack />, { id: TOAST_ID, duration: Infinity })
     else toast.remove(TOAST_ID)
-  }, [any])
+  }, [hasNotices])
   useEffect(() => () => toast.remove(TOAST_ID), [])
   return null
 }
