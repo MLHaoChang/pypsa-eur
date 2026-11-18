@@ -261,3 +261,9 @@ def test_definition_changed_compares_and_never_raises():
         "definition_hash": GOLDEN,
     }
     assert assurance_records.definition_changed(answer) is False
+
+
+def test_calculated_evidence_records_the_hash_too(solved, checked):
+    stored = assurance_records.capture_dispatch(assurance_records.actor_id(), "G1")
+    assert stored["definition_hash"] == calculations.definition_hash(PROFILE) == GOLDEN
+    assert "definition_hash" not in assurance_records.public(stored)
