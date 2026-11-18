@@ -1674,13 +1674,21 @@ def _with_finance_defaults(template_id: str, built: dict,
             if a not in classes:
                 classes[a] = _afa_class(n, comp, a)
     fin["depreciation_class_by_asset"] = classes
-    from models.finance import FinanceInputs, parse_finance_assumed
+    from models.finance import FinanceInputs
 
     fin = FinanceInputs.model_validate(fin).model_dump(mode="json")
+    return {**built, "finance": fin, "finance_assumed": finance_assumed(fin)}
+
+
+def finance_assumed(fin: dict) -> dict:
+    """The `finance_assumed` record of the shipped finance inputs ``fin``
+    (validated, as dumped): each `FINANCE_SOURCES` key ``fin`` sets."""
+    from models.finance import parse_finance_assumed
+
     assumed = {k: {"value": fin[k], **src} for k, src in FINANCE_SOURCES.items()
                if fin.get(k) not in (None, {}, [])}
     parse_finance_assumed(assumed)
-    return {**built, "finance": fin, "finance_assumed": assumed}
+    return assumed
 
 
 #: Template blocks that need the backend's models (built on first use).

@@ -586,3 +586,46 @@ def test_a_new_site_ships_the_tax_default_with_every_owned_asset_classed():
     assert owners and set(fin["depreciation_class_by_asset"]) == set(owners)
     assert fin["depreciation_class_by_asset"]["site_battery"] == "afa_10"
     assert fin["depreciation_class_by_asset"]["genset_1"] == "afa_19"
+
+
+def test_a_new_sites_shipped_finance_reads_as_assumed_with_its_source(reset_backend):
+    """GK B2 F1: the site records what it ships, so GET /finance names each
+    value assumed (current) with its source, not as entered."""
+    import pathlib
+    import sys
+
+    import routers.simulation as sim_router
+    from routers.projects import _solver_config_from_dict
+    from routers.simulation import get_finance
+
+    sys.path.insert(0, str(pathlib.Path(T.__file__).parent))
+    import eh_site as S
+
+    cfg = S.solver_config(S.site_params({"site_type": "campus"}))
+    assert set(cfg["finance_assumed"]) == {
+        k for k in T.FINANCE_SOURCES if cfg["finance"].get(k) not in (None, {}, [])
+    }
+    sim_router._state["solver_config"] = _solver_config_from_dict(cfg)
+    out = get_finance()["assumed"]
+    for k in (
+        "tax_pack_id",
+        "hebesatz_pct",
+        "depreciation_class_by_asset",
+        "acquisition_date",
+        "wacc_nominal",
+        "escalation",
+    ):
+        assert (
+            out[k]["current"] is True
+            and out[k]["source"] == T.FINANCE_SOURCES[k]["source"]
+        )
+        assert out[k]["value"] == cfg["finance"][k]
+
+
+@pytest.mark.parametrize("tid", FINANCE_TEMPLATES)
+def test_the_acquisition_date_is_the_first_cod(tid):
+    """GK B2 F2: bought at the first commercial operation date, on every
+    template (the concentrator's own CODs, not the generic site's year)."""
+    fin = T.solver_config(tid)["finance"]
+    if fin.get("cod_by_asset"):
+        assert fin["acquisition_date"] == min(fin["cod_by_asset"].values())
