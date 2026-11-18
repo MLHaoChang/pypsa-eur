@@ -1361,12 +1361,20 @@ def test_b2_a_stated_indexation_stays_and_no_rate_leaves_it_empty():
             **kw,
         )
 
-    case = BusinessCaseInputs(lines=[line("stated", indexation=0.03), line("empty")])
+    case = BusinessCaseInputs(
+        lines=[
+            line("stated", indexation=0.03),
+            line("zero", indexation=0.0),  # a stated 0 is stated, never "unset"
+            line("empty"),
+        ]
+    )
     filled = P.with_finance_indexation(case, {"ppa": 0.02, "opex": 0.05})
-    assert [ln.indexation for ln in filled.lines] == [0.03, 0.02]
-    assert case.lines[1].indexation is None  # the input is not changed in place
+    assert [ln.indexation for ln in filled.lines] == [0.03, 0.0, 0.02]
+    assert case.lines[2].indexation is None  # the input is not changed in place
+    # No PPA rate: the line stays empty (the run names it), never filled with 0.
     none = P.with_finance_indexation(case, {"opex": 0.05})
-    assert [ln.indexation for ln in none.lines] == [0.03, None]
+    assert [ln.indexation for ln in none.lines] == [0.03, 0.0, None]
+    assert P.with_finance_indexation(case, {}) == case
 
 
 def test_b2_a_preset_keeps_the_stored_receivable_days(bc, template):

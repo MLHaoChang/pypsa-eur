@@ -783,6 +783,55 @@ def test_preset_lists_the_variants_and_returns_a_variant_read_only(
     assert r.status_code == 422 and r.json()["detail"]["code"] == "preset_not_found"
 
 
+def test_b2_the_preset_get_fills_indexation_and_stores_nothing(
+    client, install_network, monkeypatch, session_state
+):
+    """GK B2 B2: the GET fills each contract line's empty indexation from the finance
+    inputs' PPA rate, and writes nothing: the stored inputs and their digest move only
+    on the client's PUT."""
+    import routers.results as R
+
+    install_network(build_network())
+    monkeypatch.setattr(R, "_active_template_meta", lambda: {"id": "eh_ipp_hybrid"})
+    assert _put_fin(client, _s2_inputs()).status_code == 200
+    assert _put(client, _bc()).status_code == 200
+    before = client.get(INPUTS_URL).json()
+    r = client.get(PRESET_URL, params={"variant": "ipp_hybrid"})
+    assert r.status_code == 200, r.text
+    lines = r.json()["business_case"]["inputs"]["lines"]
+    contract = [ln for ln in lines if ln["escalation"] == "contract"]
+    assert contract and all(ln["indexation"] == 0.01 for ln in contract)  # s2's ppa
+    after = client.get(INPUTS_URL).json()
+    assert after["digest"] == before["digest"]
+    assert after["business_case"] == before["business_case"]
+
+
+def test_q2_a_saved_case_without_its_derating_refuses_by_field(
+    client, install_network, monkeypatch, session_state
+):
+    """GK B2 Q2, fail-closed at the catching site: a saved case whose capacity payment
+    has no de-rating (every IPP case saved before the field) is a typed refusal naming
+    the line and column, never a run read at the whole capacity."""
+    _with_ic(client, install_network, monkeypatch)
+    cap = _line(
+        name="Capacity payment (BESS, firm capacity)",
+        category="capacity_payment",
+        unit="kW_year",
+        quantity=None,
+        quantity_source="linked:capacity.Generator.solar@1",
+        price=40.0,
+        escalation="contract",
+        indexation=0.0,
+    )
+    assert _put(client, _bc(_line(), cap)).status_code == 200  # saves, as before
+    assert client.post(BC_URL).status_code == 200
+    body = _bc_poll(client)
+    assert body["status"] == "refused" and body["error_code"] == "business_case_refused"
+    assert body["refusal"]["refusal"] == "derating_missing"
+    assert body["refusal"]["field"] == "lines[1].derating"
+    assert session_state(client).get("business_case_report") is None
+
+
 def test_preset_refusals(client, install_network, monkeypatch):
     import routers.results as R
 
