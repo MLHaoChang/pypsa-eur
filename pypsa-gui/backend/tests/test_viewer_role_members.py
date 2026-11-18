@@ -17,17 +17,14 @@ import pytest
 
 from db.models import ProjectMembership
 from services.project_write_gate import KIND
-from tests.test_viewer_role_gate import (  # noqa: F401  (fixtures)
-    _grant,
-    _kind,
-    _member,
-    _org_of,
-    _set_role,
-    as_user,
-    baseline,
-    helpers_state,
-    world,
-)
+from tests import test_viewer_role_gate as gate
+from tests.test_viewer_role_gate import _grant, _kind, _member, _org_of, _set_role
+
+# The viewer-role gate suite's fixtures, shared as module attributes.
+as_user = gate.as_user
+baseline = gate.baseline
+helpers_state = gate.helpers_state
+world = gate.world
 
 
 def _stored(world, user_id):
@@ -83,11 +80,22 @@ def test_promote_and_demote_in_one_put(world, client):
     assert _stored(world, world["editor"]) == "viewer"
 
 
-def test_get_members_reports_each_role_and_the_fixed_ones(world, client, seeded_identity):
+def test_get_members_reports_each_role_and_the_fixed_ones(
+    world, client, seeded_identity
+):
     admin = seeded_identity["user_id"]
-    _grant(world["session_local"], world["project"], uuid.UUID(str(admin)), "viewer", by=admin)
+    _grant(
+        world["session_local"],
+        world["project"],
+        uuid.UUID(str(admin)),
+        "viewer",
+        by=admin,
+    )
     _set_role(world["session_local"], world["project"], world["editor"], None)
-    rows = {r["user_id"]: r for r in client.get(f"/api/projects/{world['project']}/members").json()}
+    rows = {
+        r["user_id"]: r
+        for r in client.get(f"/api/projects/{world['project']}/members").json()
+    }
     assert rows[str(world["viewer"])]["role"] == "viewer"
     # A NULL row reads view-only, as `project_role` does.
     assert rows[str(world["editor"])]["role"] == "viewer"
@@ -106,7 +114,9 @@ def test_an_unknown_role_value_is_422(world, client):
 
 
 def test_a_roles_key_outside_user_ids_is_400(world, client):
-    response = _put(client, world, [world["viewer"], world["editor"]], {uuid.uuid4(): "viewer"})
+    response = _put(
+        client, world, [world["viewer"], world["editor"]], {uuid.uuid4(): "viewer"}
+    )
     assert response.status_code == 400, response.text
 
 
@@ -149,7 +159,9 @@ def test_a_demoted_editor_is_refused_on_the_next_write(world, client, as_user):
     assert editor.post(f"/api/projects/{world['project']}/activate").status_code == 200
     before = editor.patch(f"/api/projects/{world['project']}/settings", json={})
     assert _kind(before) != KIND, before.text
-    demoted = _put(client, world, [world["viewer"], world["editor"]], {world["editor"]: "viewer"})
+    demoted = _put(
+        client, world, [world["viewer"], world["editor"]], {world["editor"]: "viewer"}
+    )
     assert demoted.status_code == 200, demoted.text
     after = editor.patch(f"/api/projects/{world['project']}/settings", json={})
     assert after.status_code == 403 and _kind(after) == KIND, after.text
@@ -185,9 +197,17 @@ def test_my_access_follows_the_stored_role(world, as_user, who, stored, expected
     assert _access(as_user(world[who]), world) == (expected,) * 3
 
 
-def test_my_access_is_edit_for_an_admin_with_a_viewer_row(world, client, seeded_identity):
+def test_my_access_is_edit_for_an_admin_with_a_viewer_row(
+    world, client, seeded_identity
+):
     admin = seeded_identity["user_id"]
-    _grant(world["session_local"], world["project"], uuid.UUID(str(admin)), "viewer", by=admin)
+    _grant(
+        world["session_local"],
+        world["project"],
+        uuid.UUID(str(admin)),
+        "viewer",
+        by=admin,
+    )
     assert _access(client, world) == ("edit",) * 3
 
 
@@ -212,9 +232,12 @@ def test_set_root_members_without_roles_keeps_every_stored_role(world, seeded_id
         actor = db.get(User, uuid.UUID(str(seeded_identity["user_id"])))
         project = db.get(Project, uuid.UUID(world["project"]))
         rows = project_registry.set_root_members(
-            db, actor, project, [world["viewer"], world["editor"]])
+            db, actor, project, [world["viewer"], world["editor"]]
+        )
     assert {r["user_id"]: r["role"] for r in rows} == {
-        str(world["viewer"]): "viewer", str(world["editor"]): "editor"}
+        str(world["viewer"]): "viewer",
+        str(world["editor"]): "editor",
+    }
 
 
 def test_role_is_fixed_for_an_org_admin_and_a_creator_only(world):
@@ -224,8 +247,16 @@ def test_role_is_fixed_for_an_org_admin_and_a_creator_only(world):
     other_admin = _member(world["session_local"], _org_of(world), org_role="admin")
     outsider = uuid.uuid4()
     with world["session_local"]() as db:
-        db.add(User(id=outsider, email=f"lone-{outsider.hex}@example.com", password_hash="unused",
-                    status="active", is_super_admin=False, created_at=datetime.now(UTC)))
+        db.add(
+            User(
+                id=outsider,
+                email=f"lone-{outsider.hex}@example.com",
+                password_hash="unused",
+                status="active",
+                is_super_admin=False,
+                created_at=datetime.now(UTC),
+            )
+        )
         db.commit()
     with world["session_local"]() as db:
         project = db.get(Project, uuid.UUID(world["project"]))
@@ -241,7 +272,9 @@ def test_role_is_fixed_for_an_org_admin_and_a_creator_only(world):
         assert fixed(world["viewer"]) is True
 
 
-def test_a_stale_editor_row_grants_nothing_after_leaving_the_org(world, seeded_identity):
+def test_a_stale_editor_row_grants_nothing_after_leaving_the_org(
+    world, seeded_identity
+):
     # A user who left the org keeps no access through an old membership row.
     from db.models import OrgMembership, Project, User
     from services import project_acl
@@ -250,4 +283,6 @@ def test_a_stale_editor_row_grants_nothing_after_leaving_the_org(world, seeded_i
         db.query(OrgMembership).filter_by(user_id=world["editor"]).delete()
         db.commit()
         project = db.get(Project, uuid.UUID(world["project"]))
-        assert project_acl.project_role(db, db.get(User, world["editor"]), project) is None
+        assert (
+            project_acl.project_role(db, db.get(User, world["editor"]), project) is None
+        )
