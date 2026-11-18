@@ -3,7 +3,11 @@
 
 # Raw tool and engine names on screens (RAW-NAMES-1)
 
-Status: needs-triage
+Status: ready-for-agent
+Model tier: sonnet
+Size: M
+Blocked by: #1634 (expert catalogue core) merged
+Likely files: `AssistantResultCard.tsx`, Expert header and Results labels; the catalogue raw-name guard
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J4 Run, J2 Set up, chat dock
 Severity: medium
@@ -22,3 +26,7 @@ Expert labels use the same words as the Guided sections for the same feature; en
 ## Journey fit
 
 J4 (the run button name) and J2 (panel names).
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Owned by RAW-NAMES-1 and the expert-catalogue track (#1597, #1634); template-e2e 05 covers part of the screens. Build after the catalogue core so labels come from it. The chat-card rows (`run_lopf (waiting)`, job ids, `diff.attribute`) are to confirm live first; no new package until the catalogue session says they are outside its scope.
