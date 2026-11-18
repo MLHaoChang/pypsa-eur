@@ -211,7 +211,8 @@ export interface BusinessCaseReport {
 export interface BusinessCaseStudy {
   status: string
   stage?: string | null
-  refusal?: string | null
+  /** The runner's refusal detail (`runner.py` refusal dict), set on a refused run. */
+  refusal?: BusinessCaseRefusal | null
   error?: string | null
   error_code?: string | null
   stages?: string[]

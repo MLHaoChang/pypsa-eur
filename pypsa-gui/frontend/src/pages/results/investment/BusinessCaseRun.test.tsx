@@ -298,7 +298,8 @@ describe('the volume factor in the report', () => {
   it('a run refused on the volume factor reads plain words, never the kind', () => {
     mount({ status: 'refused', error: 'business_case_refused:volume_factor_unclassified: energy_export',
             error_code: 'business_case_refused',
-            refusal: { code: 'business_case_refused', refusal: 'volume_factor_unclassified', field: 'energy_export' } as unknown as string })
+            refusal: { code: 'business_case_refused', refusal: 'volume_factor_unclassified', field: 'energy_export',
+                       message: 'volume_factor_unclassified: energy_export' } })
     const text = screen.getByTestId('bc-failure').textContent ?? ''
     expect(text).toMatch(/^Refused: Volume factor \(lease-up\), %: The energy-model row “energy export”/)
     expect(text).not.toMatch(/volume_factor/)

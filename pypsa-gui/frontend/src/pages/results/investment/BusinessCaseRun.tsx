@@ -71,7 +71,7 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
   const report = running ? null : (s?.report ?? null)
   const stale = running ? null : staleText(s)
   // A run refused on the volume factor reads its words, never the kind (BC 15).
-  const refusal = (s?.refusal ?? null) as unknown as { refusal?: string; field?: string } | null
+  const refusal = s?.refusal ?? null
   const vfRefused = s?.status === 'refused' && refusal?.refusal?.startsWith('volume_factor_')
   const failure = vfRefused ? `Refused: ${refusalWords(refusal!.refusal!, refusal!.field)}`
     : s?.status === 'failed' || s?.status === 'refused'
