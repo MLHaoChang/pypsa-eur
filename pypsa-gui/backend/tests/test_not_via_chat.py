@@ -75,7 +75,6 @@ def test_the_issue_rows_are_declared():
         'power_trace_spectrum': ('unbuilt', None),
         'parameter_catalogue': ('unbuilt', None),  # expert-catalogue 01a; chat tools in 01b
         'report_comment_revisions': ('unbuilt', None),
-        'operating_reserve_result': ('unbuilt', None),
         'report_chart_snapshots': ('manual', 'results'),
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card

@@ -1,0 +1,1 @@
+* Doc(pypsa-gui): Asset-investment end-to-end walkthrough (sizing, adequacy, HOMER parity, campus assets): journey map, eight bug issues and recommended improvements under `.scratch/walkthroughs/asset-investment-2026-11-17/`.
