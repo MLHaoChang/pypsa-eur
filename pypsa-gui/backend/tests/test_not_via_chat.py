@@ -64,6 +64,7 @@ def test_the_issue_rows_are_declared():
         'solve_queue_instance_controls': ('out of chat', 'solveQueue'), 'map_layout_and_sites': ('manual', 'map'),
         'site_scene': ('unbuilt', 'map'),
         'site_scene_export': ('manual', 'map'),
+        'site_scene_blender_worker': ('unbuilt', 'map'),
         'accept_assumed_defaults': ('unbuilt', None),
         'intent_comparison': ('unbuilt', None),
         'business_case_table_options': ('unbuilt', None),  # 09: the line table's options (issue 16)
@@ -73,7 +74,6 @@ def test_the_issue_rows_are_declared():
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
         'report_comment_revisions': ('unbuilt', None),
-        'operating_reserve_result': ('unbuilt', None),
         'report_chart_snapshots': ('manual', 'results'),
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card

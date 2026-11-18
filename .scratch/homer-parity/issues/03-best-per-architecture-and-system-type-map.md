@@ -3,7 +3,7 @@
 
 # 03 — Results: best system per architecture, winning-system-type map, grid-extension break-even
 
-Status: ready-for-agent
+Status: 03c done (#1435), 03d done (#1468); 03a and 03b tracked in their own PRs
 Model: Sonnet for 03b and 03c; Opus for 03a
 Reviewer: GK B; UX for 03b (and 03c if it adds a UI input)
 Blocked by: 03b blocked by 03a; 03c independent

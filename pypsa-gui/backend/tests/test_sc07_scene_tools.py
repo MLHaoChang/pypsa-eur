@@ -166,6 +166,7 @@ def test_every_scene_kind_a_chat_tool_can_raise_is_declared():
         "scene_managed_site",
         "source_unavailable",
         "worker_unavailable",
+        "job_active",
     }
 
 
@@ -323,7 +324,10 @@ def test_prepare_admits_the_route_actions_and_refuses_any_other(geo):
     # S4 admits the model actions (tests/test_sc07_bindings.py); adopt stays not_via_chat.
     # SC-06-layout: import_layout is route-only (a user-chosen file, traced in the browser);
     # it is not a chat action until a harness unit admits it.
-    assert set(chat.CHAT_ACTIONS) == set(proposals.ACTIONS) - {"import_layout"}
+    assert set(chat.CHAT_ACTIONS) == set(proposals.ACTIONS) - set(
+        proposals.ROUTE_ONLY_ACTIONS
+    )
+    assert set(proposals.ROUTE_ONLY_ACTIONS) == {"import_layout", "blender_return"}
     with pytest.raises(HTTPException) as exc:
         chat_tools.site_scene_prepare("campus", "adopt", 1, {})
     assert _kind(exc) == "invalid_input" and exc.value.detail["field"] == "action"

@@ -1339,10 +1339,13 @@ export interface HeadlineKpis {
   comparison: HeadlineComparison | null
 }
 
+export interface ReserveHolder { name: string; kind: 'generator' | 'storage_unit'; held_mw: number }
+
 export interface OperatingReserveResult {
   shares: { load: number; pv: number; wind: number } | null
   not_counted: string[]
-  per_snapshot: { snapshot: string; required_mw: number; held_mw: number; binding: boolean }[]
+  // `holders` (01d) is on binding hours only: the units holding the reserve, largest first.
+  per_snapshot: { snapshot: string; required_mw: number; held_mw: number; binding: boolean; holders?: ReserveHolder[] }[]
   binding: string[]
   reason: string | null
 }

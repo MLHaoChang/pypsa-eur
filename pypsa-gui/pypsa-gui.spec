@@ -86,6 +86,11 @@ datas = [
     # below puts `services/llm_config.py` at _MEIPASS-root/`services/`, so its
     # `parent.parent` is _MEIPASS root itself).
     (str(BACKEND / "presets.json"), "."),
+    # Features chat cannot do: `services/not_via_chat.py` reads its JSON base and
+    # fragment folder beside itself at import (RETRO-FRAG-1), so both keep the
+    # `services/` layout under _MEIPASS. Without them the app does not start.
+    (str(BACKEND / "services" / "not_via_chat.json"), "services"),
+    (str(BACKEND / "services" / "not_via_chat.d"), "services/not_via_chat.d"),
     # Class-C synthetic profile packs (P15): `services/adequacy/stress.py`
     # resolves `parents[2] / "data" / "eh_class_c"`, i.e. _MEIPASS root.
     (str(BACKEND / "data" / "eh_class_c"), "data/eh_class_c"),
@@ -247,6 +252,14 @@ hiddenimports = [
     # `drivers.year_study` (check_external, increment 7) reached the guard on
     # master and missed this list; the guard test caught it at the merge.
     "gridspine.drivers.year_study",
+    # The model importers (IMPORTS-1). `ingest.import_result` finds each one
+    # with find_spec and imports it only when it runs, so analysis never sees
+    # them; `test_declared_importer_modules_are_frozen_into_the_app` keeps this
+    # list equal to `import_result.DECLARED`. Until an importer lands, its
+    # entry only logs "hidden import not found" and the app lists it as absent.
+    "gridspine.ingest.import_result",
+    "gridspine.ingest.excel_import", "gridspine.ingest.psse_import",
+    "gridspine.ingest.dgs_import", "gridspine.ingest.plexos_import",
     "gridspine.schema.contracts", "gridspine.templates.unit_params",
 ]
 
