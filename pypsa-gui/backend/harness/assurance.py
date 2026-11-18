@@ -21,7 +21,7 @@ from pydantic import (
     ValidationError,
 )
 
-from harness import derived, interpretation_markers, predicates
+from harness import answer_sections, derived, interpretation_markers, predicates
 from harness.assurance_coverage import FRAME_PROJECTIONS
 from services import assurance_records as records
 
@@ -147,14 +147,16 @@ class DraftSection(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
     heading: str | None = Field(min_length=1, max_length=64)
-    blocks: list[Computed] = Field(max_length=20)
+    blocks: list[Computed] = Field(max_length=answer_sections.SECTION_SLOTS)
 
 
 class ProfileDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: StrictInt
     blocks: list[Computed] = Field(max_length=20)
-    sections: list[DraftSection] | None = Field(default=None, min_length=1, max_length=5)
+    sections: list[DraftSection] | None = Field(
+        default=None, min_length=1, max_length=answer_sections.MAX_SECTIONS
+    )
     interpretations: list[Interpretation] = Field(default_factory=list, max_length=2)
     derived: list[Derived] = Field(default_factory=list, max_length=8)
     predicates: list[Predicate] = Field(
@@ -461,7 +463,6 @@ class Turn:
         from harness.assurance_scope import every_entity
 
         if evidence and every_entity(self.request_scope):
-            from harness import answer_sections
             from harness.calculations import requested_metrics
 
             def block(f):
@@ -675,8 +676,7 @@ class Turn:
 
     def _validate_sections(self, draft, record):
         """A population answer: each drafted section against its own facts (issue 10 K3)."""
-        from harness import answer_sections
-        from services import assurance_metrics
+        from harness import calculations
 
         if draft.sections is None or draft.blocks or draft.derived or draft.predicates:
             raise ValueError("invalid sectioned draft")
@@ -684,7 +684,7 @@ class Turn:
         if len(set(ids)) != len(ids):
             raise ValueError("invalid sectioned draft")
         scope = self.request_scope
-        sections = answer_sections.record_sections(record, assurance_metrics.requested_metrics(scope))
+        sections = answer_sections.record_sections(record, calculations.requested_metrics(scope))
         published = answer_sections.gate(
             [(s.heading, [b.model_dump() for b in s.blocks]) for s in draft.sections],
             sections, record["evidence_id"])
@@ -697,14 +697,14 @@ class Turn:
         plural = answer_sections.PLURALS[raw["component_class"]].lower()
         lines = [f"All {len(raw['entities'])} {plural}; requested snapshots "
                  f"({record['scope']['start']} to {record['scope']['end']})."]
-        if scope["profile"] in assurance_metrics.branch.PROFILES:
+        if scope["profile"] in calculations.branch.PROFILES:
             first = raw["members"][raw["entities"][0]]
             lines.append(f"{first['links_excluded']} Links excluded.")
         for section in sections:
             if section["heading"] is not None:
                 lines.append(section["heading"])
             for slot in section["slots"]:
-                definition = assurance_metrics.definition(slot["metric"], scope["profile"])
+                definition = calculations.definition(slot["metric"], scope["profile"])
                 if "fact" in slot:
                     fact = slot["fact"]
                     lines.append(f"{_label(slot['entity_id'])}, {definition['label']}: "
@@ -712,7 +712,7 @@ class Turn:
                 else:
                     lines.append(f"{_label(slot['entity_id'])}, {_label(definition['label'])}: "
                                  f"unavailable ({slot['reason']}).")
-        lines.append(assurance_metrics.disclosure(scope))
+        lines.append(calculations.disclosure(scope))
         self.sections = sections
         return "\n".join(lines), public_blocks, [record["evidence_id"]]
 
