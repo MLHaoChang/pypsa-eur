@@ -353,6 +353,10 @@ def _every_source(ctx, scope):
     names = sorted(str(name) for name in ctx.network.components[scope["component_class"]].static.index)
     if not names:
         raise ValueError("empty_population")
+    # A receipt slot names its entity in at most 128 characters; refuse before any
+    # calculation rather than publish an answer that fails read-back.
+    if any(len(name) > 128 for name in names):
+        raise ValueError("population_name_too_long")
     answer_sections.admit(len(names), len(requested_metrics(scope)))
     if scope["profile"] == PROFILE:
         members = {name: {"generators": {name: source(ctx, name)}, "passive_costs": [],
@@ -361,8 +365,12 @@ def _every_source(ctx, scope):
     else:
         members = {name: branch.source(ctx, name, False, scope["component_class"]) for name in names}
         index = members[names[0]]["index"]
-    return {"version": 1, "component_class": scope["component_class"], "entities": names,
-            "index": index, "members": members}
+    population = {"version": 1, "component_class": scope["component_class"], "entities": names,
+                  "index": index, "members": members}
+    if scope["profile"] != PROFILE:
+        # branch-loading/1 "*" covers Lines; Transformers are named as excluded.
+        population["transformers_excluded"] = len(ctx.network.components["Transformer"].static)
+    return population
 
 
 def _every_calculate(raw, scope):

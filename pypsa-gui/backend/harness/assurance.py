@@ -182,6 +182,40 @@ def _label(value):
     )
 
 
+def _utf16_units(text):
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _fold_limitations(limitations, keep=20, units=4096):
+    """At most `keep` limitations, as the browser's receipt contract admits; the
+    overflow folds into the last entry, kept within `units` UTF-16 code units.
+    Whole items are kept while they fit, then "; and N more" counts the rest."""
+    if len(limitations) <= keep:
+        return limitations
+    rest = limitations[keep - 1 :]
+
+    def more(n):
+        return f"; and {n} more" if n else ""
+
+    folded, kept = "", 0
+    for item in rest:
+        joined = f"{folded}; {item}" if kept else item
+        if _utf16_units(joined + more(len(rest) - kept - 1)) > units:
+            break
+        folded, kept = joined, kept + 1
+    if not kept:
+        # Not even one whole item fits: cut it short, without splitting a pair.
+        budget = units - _utf16_units("…" + more(len(rest) - 1))
+        cut = []
+        for ch in rest[0]:
+            budget -= _utf16_units(ch)
+            if budget < 0:
+                break
+            cut.append(ch)
+        folded, kept = "".join(cut) + "…", 1
+    return limitations[: keep - 1] + [folded + more(len(rest) - kept)]
+
+
 # The only tools a checked turn may run. Every results read, chart and export
 # is refused before its handler runs; checked results come from the bounded
 # profiles, computed by software from the request scope.
@@ -702,6 +736,7 @@ class Turn:
         if scope["profile"] in calculations.branch.PROFILES:
             first = raw["members"][raw["entities"][0]]
             lines.append(f"{first['links_excluded']} Links excluded.")
+            lines.append(f"{raw['transformers_excluded']} Transformers excluded.")
         for section in sections:
             if section["heading"] is not None:
                 lines.append(section["heading"])
@@ -1554,9 +1589,9 @@ class Turn:
                 or [x for section in receipt.get("sections", ()) for x in section["result_slots"]]
             )
         # The browser's receipt contract admits twenty limitations. Keep all
-        # reasons when twenty unavailable slots also have a review limitation.
-        if len(limitations) > 20:
-            limitations[19:] = ["; ".join(limitations[19:])]
+        # reasons when twenty unavailable slots also have a review limitation;
+        # a population's overflow is bounded, then counted (issue 10, S6a).
+        limitations[:] = _fold_limitations(limitations)
         answer_id = str(uuid.uuid4())
         record = {
             "version": 1,

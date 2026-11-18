@@ -346,6 +346,11 @@ def remember(turn):
             (turn.conversation_state or {}).get("expires_at", record["expires_at"]),
             record["expires_at"],
         )
+    elif assurance_scope.every_entity(turn.request_scope or {}):
+        # A population answer is not a follow-up scope: it is cleared, like any
+        # answer that cannot be retained (the final `else` does the same).
+        turn.session.assurance_context = None
+        return
     elif (
         record["receipt"].get("request_complete")
         and turn.request_evidence

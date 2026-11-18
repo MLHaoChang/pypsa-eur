@@ -154,6 +154,17 @@ describe('receipt policy "4" (issue 10 S6a sectioned answers)', () => {
     expect(parseApproval(frame({ verdict: 'limited', receipt: sectioned({ sections: lone, checked_block_ids: [] }) }))).not.toBeNull()
   })
 
+  it('bounds a folded limitation at 4096 UTF-16 units and twenty entries', () => {
+    const folded = (last: string) => frame({ verdict: 'limited', receipt: sectioned({
+      limitations: [...Array.from({ length: 19 }, (_, i) => `G${i} dispatch_energy: x`), last] }) })
+    expect(parseApproval(folded('L'.repeat(4084) + '; and 9 more'))).not.toBeNull()
+    expect(parseApproval(folded('\u{1F600}'.repeat(2048)))).not.toBeNull()
+    expect(parseApproval(folded('L'.repeat(4085) + '; and 9 more'))).toBeNull()
+    expect(parseApproval(folded('\u{1F600}'.repeat(2048) + 'L'))).toBeNull()
+    expect(parseApproval(frame({ verdict: 'limited', receipt: sectioned({
+      limitations: Array.from({ length: 21 }, (_, i) => `l${i}`) }) }))).toBeNull()
+  })
+
   it.each([
     ['policy "4" without sections', sectioned({ sections: undefined })],
     ['sections that are not a list', sectioned({ sections: { heading: null, result_slots: full } })],

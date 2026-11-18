@@ -7,6 +7,7 @@ with their class; every other profile treats "*" as a plain name, as before.
 # ruff: noqa: F811 -- imported shared fixtures.
 import json
 import re
+import uuid
 
 import pandas as pd
 import pytest
@@ -503,3 +504,114 @@ def test_a_source_failure_without_a_code_is_not_read_as_a_refusal(
         == "unsupported_or_unavailable_source"
     )
     assert public_text(frames) != REFUSAL_101
+
+
+# --- GK B 67: bounded limitations, long names, transformers, retained context. ---
+
+
+def test_folded_limitations_stay_inside_the_browser_bound():
+    from harness.assurance import _fold_limitations
+
+    def units(text):
+        return len(text.encode("utf-16-le")) // 2
+
+    short = [f"r{i}" for i in range(25)]
+    assert _fold_limitations(short) == [*short[:19], "; ".join(short[19:])]
+    assert _fold_limitations(short[:20]) == short[:20]
+    long = [f"{i:03d}" + "x" * 997 for i in range(30)]
+    folded = _fold_limitations(long)
+    assert len(folded) == 20 and folded[:19] == long[:19]
+    assert folded[19] == "; ".join(long[19:23]) + "; and 7 more"
+    assert units(folded[19]) <= 4096
+    huge = _fold_limitations(["y" * 9000] * 21)
+    assert huge[19].endswith("…; and 1 more") and units(huge[19]) == 4096
+    # A character outside the BMP counts two units and is never split.
+    astral = _fold_limitations(["\U0001f600" * 3000] * 21)
+    assert units(astral[19]) <= 4096 and "\ud83d" not in astral[19]
+
+
+def test_a_hundred_unavailable_long_names_keep_the_receipt_valid(grid, checked):
+    n = grid.network
+    for i in range(98):
+        n.add("Generator", f"{'N' * 124}{i:03d}", bus="B1", p_nom=1, marginal_cost=50)
+    ctx = solved(grid)
+    ctx.solver_state["condition"] = "infeasible"
+    frames, record = ask(checked, every(ctx, metrics=["dispatch_energy"]))
+    receipt = record["receipt"]
+    RECEIPTS["4"].model_validate(receipt)
+    assert len(receipt["limitations"]) <= 20
+    assert all(len(x.encode("utf-16-le")) // 2 <= 4096 for x in receipt["limitations"])
+    assert re.search(r"; and \d+ more$", receipt["limitations"][-1])
+    assert "N" * 124 + "000, Generator energy: unavailable" in public_text(frames)
+
+
+def test_a_name_over_128_characters_is_refused_before_any_calculation(
+    grid, checked, monkeypatch
+):
+    grid.network.add("Generator", "Z" * 129, bus="B1", p_nom=1, marginal_cost=50)
+    ctx = solved(grid)
+    calls = []
+    real = calculations.source
+    monkeypatch.setattr(calculations, "source", lambda *a: calls.append(a) or real(*a))
+    frames, record = ask(checked, every(ctx, metrics=["dispatch_energy"]))
+    assert calls == [] and record["receipt"]["evidence_ids"] == []
+    assert (
+        record["receipt"]["request_scope"]["reason"]
+        == "unsupported_or_unavailable_source"
+    )
+
+
+def test_a_name_of_128_characters_still_publishes(grid, checked):
+    grid.network.add("Generator", "Z" * 128, bus="B1", p_nom=1, marginal_cost=50)
+    ctx = solved(grid)
+    frames, record = ask(checked, every(ctx, metrics=["dispatch_energy"]))
+    RECEIPTS["4"].model_validate(record["receipt"])
+    assert record["receipt"]["request_complete"]
+    assert "Z" * 128 + ", Generator energy:" in public_text(frames)
+
+
+def test_every_line_names_the_transformers_it_excludes(grid, checked):
+    grid.network.add("Transformer", "T12", bus0="B1", bus1="B2", s_nom=8, x=0.1)
+    ctx = fleet(grid, 2, lines=2)
+    frames, _ = ask(checked, every(ctx, BRANCH))
+    assert "\n0 Links excluded.\n1 Transformers excluded.\n" in public_text(frames)
+
+
+def test_a_population_answer_clears_the_retained_context(grid, checked, monkeypatch):
+    from harness import assurance_conversation
+    from services import chat_service
+
+    ctx = solved(grid)
+    sid = "population-" + uuid.uuid4().hex
+    checked.session_ids.append(sid)
+    returned = []
+    real = assurance_conversation.remember
+
+    def remember(turn):
+        real(turn)
+        returned.append(turn.request_scope["entity_id"])
+
+    monkeypatch.setattr(assurance_conversation, "remember", remember)
+    one = {
+        "version": 1,
+        "profile": GEN,
+        "project_id": ctx.project_uuid,
+        "entity_id": "G1",
+        "retain": True,
+    }
+
+    def send(scope):
+        checked.run(
+            Echo(),
+            message="Check them all.",
+            checked_scope=scope,
+            session_id=sid,
+            binding_generation=3,
+        )
+        return chat_service.get_or_create_session(sid).assurance_context
+
+    assert send(one) is not None
+    assert send(every(ctx)) is None and returned == ["G1", "*"]
+    # Parity: a refused one-entity scope clears it the same way.
+    assert send(one) is not None
+    assert send({**one, "entity_id": "nobody"}) is None
