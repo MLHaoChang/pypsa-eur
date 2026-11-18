@@ -4,7 +4,7 @@ Current coordinator session: `session_01G7qCuiZJ6NvwPU1wqejA49`
 
 Engine gatekeeper A (31; gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCunWgCoUguGVtSasU5r`
 
-Engine gatekeeper B (66; harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCujsT2Qwb6DXqTzvsM5`
+Engine gatekeeper B (67; harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCujPWkcAPU1DHS2NPDu`
 
 Engine gatekeeper B2 (finance and business case, ui-modern, other app fixes, GC-09 and app-backend packages opened from 2026-11-17 04:00Z; owner decision GKB2-1): `session_01G7qCumm3cWL4NVm6H72AV2`
 
