@@ -19,13 +19,18 @@ PLURALS = {
     "Line": "Lines",
 }
 TYPE_ORDER = tuple(PLURALS)
+# The plain singular a refusal names (UX 25): a Line is "one branch" in branch loading.
+SINGULARS = {
+    "Generator": "generator",
+    "Line": "branch",
+}
 
 
-def refusal(count):
+def refusal(count, component_class):
     """The plain answer sentence for a request above MAX_SLOTS values."""
     return (
         f"I can check up to {MAX_SLOTS} values in one answer and this needs {count}: "
-        "ask for one carrier or one bus at a time."
+        f"ask for fewer metrics or one {SINGULARS[component_class]} at a time."
     )
 
 

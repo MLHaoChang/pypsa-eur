@@ -140,10 +140,15 @@ def test_admit_bounds(entities, metrics, ok):
 
 
 def test_the_refusal_sentence_is_pinned():
-    assert sections.refusal(140) == (
+    assert sections.refusal(140, "Generator") == (
         "I can check up to 100 values in one answer and this needs 140: "
-        "ask for one carrier or one bus at a time."
+        "ask for fewer metrics or one generator at a time."
     )
+    assert sections.refusal(101, "Line") == (
+        "I can check up to 100 values in one answer and this needs 101: "
+        "ask for fewer metrics or one branch at a time."
+    )
+    assert set(sections.SINGULARS) == set(sections.PLURALS)
 
 
 # --- K3: the gate ---

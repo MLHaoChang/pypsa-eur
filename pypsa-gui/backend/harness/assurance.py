@@ -394,7 +394,9 @@ class Turn:
                 if named and len(exc.args) > 1 and isinstance(exc.args[1], str):
                     self.scope_hint = exc.args[1]
                 if named and exc.args[0] in answer_sections.REFUSALS:
-                    self.scope_refusal = answer_sections.refusal(exc.args[1])
+                    self.scope_refusal = answer_sections.refusal(
+                        exc.args[1], self.request_scope["component_class"]
+                    )
             return
         # Deliberately narrow whole-message grammar. Additional instructions,
         # periods or another requested quantity never silently become this profile.

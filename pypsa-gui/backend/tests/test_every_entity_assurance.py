@@ -334,7 +334,7 @@ def test_a_hundred_and_one_slots_is_refused_before_any_calculation(
     frames, record = ask(checked, every(ctx, metrics=["dispatch_energy"]))
     assert public_text(frames) == (
         "I can check up to 100 values in one answer and this needs 101: "
-        "ask for one carrier or one bus at a time."
+        "ask for fewer metrics or one generator at a time."
     )
     assert calls == [] and record["receipt"]["evidence_ids"] == []
     assert record["receipt"]["request_scope"]["reason"] == "too_many_values"
@@ -345,7 +345,7 @@ def test_the_refusal_names_the_real_count(grid, checked):
     frames, _ = ask(checked, every(ctx))
     assert public_text(frames) == (
         "I can check up to 100 values in one answer and this needs 141: "
-        "ask for one carrier or one bus at a time."
+        "ask for fewer metrics or one generator at a time."
     )
 
 
@@ -469,7 +469,7 @@ def test_a_population_with_no_answered_slot_still_publishes_its_sections(grid, c
 
 REFUSAL_101 = (
     "I can check up to 100 values in one answer and this needs 101: "
-    "ask for one carrier or one bus at a time."
+    "ask for fewer metrics or one generator at a time."
 )
 
 
