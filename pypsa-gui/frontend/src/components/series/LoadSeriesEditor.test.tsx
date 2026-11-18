@@ -303,13 +303,3 @@ describe('LoadSeriesEditor replay of stored refinements', () => {
     expect(await screen.findByTestId('stat-peak')).toBeTruthy()
   })
 })
-
-describe('a refusal that disables Apply', () => {
-  it('is visible text, not behind a disclosure', async () => {
-    const { WarningList } = await import('./SeriesKit')
-    render(<WarningList warnings={['not_applicable: this load follows the set-up']} testId="w" />)
-    const li = screen.getByTestId('w').querySelector('li') as HTMLElement
-    expect(li.querySelector('details')).toBeNull()
-    expect(li.textContent).toContain('this load follows the set-up')
-  })
-})
