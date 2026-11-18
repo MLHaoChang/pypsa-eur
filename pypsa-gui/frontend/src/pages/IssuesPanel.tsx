@@ -17,7 +17,7 @@ import { FlowStateDot } from '../components/FlowStateDot'
 import { FLOW_SECTIONS, type FlowSectionId } from '../api/flow'
 import { useProjectFlow } from '../hooks/useProjectFlow'
 import { sectionForComponent, sectionMeta } from '../layout/flowSections'
-import { openOffGridConstraints } from '../layout/flowNavigation'
+import { openOffGridConstraints, openOperatingReserve } from '../layout/flowNavigation'
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
 import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
@@ -179,6 +179,12 @@ export default function IssuesPanel() {
                       <button type="button" onClick={openOffGridConstraints}
                         className="ml-1.5 inline-flex items-center gap-0.5 text-accent hover:underline">
                         Open Off-grid constraints <ArrowRight size={11} />
+                      </button>
+                    )}
+                    {h.setting === 'reserve' && (
+                      <button type="button" onClick={openOperatingReserve}
+                        className="ml-1.5 inline-flex items-center gap-0.5 text-accent hover:underline">
+                        Open Operating reserve <ArrowRight size={11} />
                       </button>
                     )}
                   </div>

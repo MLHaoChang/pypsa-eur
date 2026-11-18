@@ -23,6 +23,7 @@ import CarrierSelect from '../components/CarrierSelect'
 import { ROLLING_WORDS } from './solver/rollingWords'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
 import { OffGridConstraints } from './solver/OffGridConstraints'
+import { OperatingReserveBlock } from './solver/OperatingReserveBlock'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
 import { useLoadFlowOn, useN1On } from '../components/flowScope/useFlowScope'
 import { ScopeGate } from '../components/flowScope/ScopeGate'
@@ -162,7 +163,8 @@ export default function SolverSettings() {
   const [goalEdits, setGoalEdits] = useState<GoalEdits>({})
   const goalError = goalPatchFromEdits(goalEdits).error
   const [offGridError, setOffGridError] = useState<string | null>(null)
-  const saveBlock = goalError ?? offGridError
+  const [reserveError, setReserveError] = useState<string | null>(null)
+  const saveBlock = goalError ?? offGridError ?? reserveError
   // Snapshot of `cfg` at the moment `draft` was hydrated. Used at Save
   // time to compute a DIFF — we send only the fields the user actually
   // changed in this form, never the unchanged ones. Without this, Save
@@ -273,6 +275,8 @@ export default function SolverSettings() {
       ? ['network', 'solver-sclopf-panel'] as const
       : blockRequest === 'offgrid'
       ? ['network', 'solver-offgrid-constraints'] as const
+      : blockRequest === 'reserve'
+      ? ['dispatch', 'solver-operating-reserve'] as const
       : blockRequest === 'goal'
         ? ['network', 'solver-reliability-goal'] as const
         : blockRequest === 'strategy'
@@ -904,6 +908,9 @@ export default function SolverSettings() {
           solve time and reverted after the solve — the network on disk
           stays unchanged. */}
       <EconomicAssumptions draft={draft} patch={patch} />
+
+      {/* ── Operating reserve (homer-parity 01b; control-strategy 03) ── */}
+      <OperatingReserveBlock draft={draft} patch={patch} onError={setReserveError} />
       </>}
 
       {tab === 'network' && <>

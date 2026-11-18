@@ -245,6 +245,19 @@ export function openOffGridConstraints(): void {
   withReturn(null, () => openSectionInExpert('scenarios'))
 }
 
+/** Show Solver settings › Dispatch › Operating reserve (control-strategy 03): the
+ *  section's panel in Expert, in place in Guided (never flips the mode). */
+export function openOperatingReserve(): void {
+  const ui = useUIStore.getState()
+  ui.requestSolverBlock('reserve')
+  if (ui.uiMode === 'guided') {
+    openFlowTargetInPlace({ section: 'scenarios', panel: 'simparams', component: null,
+      entity: null, field: null })
+    return
+  }
+  withReturn(null, () => openSectionInExpert('scenarios'))
+}
+
 /** Show the N-1 security branch selector (Solver settings › Network): the
  *  section's panel in Expert, in place in Guided (never flips the mode). */
 export function openN1BranchSelector(): void {
