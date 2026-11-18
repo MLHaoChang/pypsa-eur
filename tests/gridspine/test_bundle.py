@@ -422,3 +422,22 @@ def test_bundle_modules_import_no_engine():
         src = open(mod.__file__, encoding="utf-8").read()
         for banned in ("import pypsa", "gridspine.producers", "gridspine.drivers"):
             assert banned not in src, (mod.__name__, banned)
+
+
+# GC-04 PR5 (GK A2): the bundle keeps the v33 REGCA1/REECA1 .dyr; the full
+# v35 WECC set lives in the PSS/E pack.
+#: sha256 of case39_h0.dyr as master 164dfb73's export_bundle wrote it.
+_MASTER_DYR_SHA256 = "eec6f205c97a4c6d248e26e63b9621d0e5259f77d603a508bd63f83776aeb108"
+
+
+def test_bundle_dyr_bytes_are_masters(bundle):
+    import hashlib
+
+    data = (bundle / "case39_h0.dyr").read_bytes()
+    assert hashlib.sha256(data).hexdigest() == _MASTER_DYR_SHA256
+
+
+def test_ledger_says_the_dyr_is_the_v33_set_and_points_to_the_pack(bundle):
+    ledger = (bundle / "ledger.md").read_text()
+    assert "The `.dyr` is the PSS/E v33 REGCA1/REECA1 set." in ledger
+    assert "`gridspine.handoff.psse_pack`" in ledger
