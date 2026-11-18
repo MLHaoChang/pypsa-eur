@@ -60,7 +60,9 @@ def push_undo_snapshot() -> None:
                 tmp.unlink(missing_ok=True)
             user_ts_payload = _serialize_user_ts()
             template_meta = growth_placeholders.snapshot_meta()
-        undo_service.push(netcdf_bytes, user_ts_payload, template_meta)
+            profile_cutouts = _snapshot_cutouts()
+        undo_service.push(netcdf_bytes, user_ts_payload, template_meta,
+                          profile_cutouts)
     except Exception as exc:
         # Log instead of swallowing silently so future regressions are visible.
         _logging.getLogger(__name__).warning("undo snapshot skipped: %s", exc)
@@ -174,6 +176,7 @@ def apply_undo():
     # An undone series edit leaves its growth placeholder as it was (C3).
     with PyPSAService.get_lock():
         not_restored = growth_placeholders.restore_meta(result["template_meta"])
+    _restore_cutouts(result.get("profile_cutouts"))
     change_log_service.log("undo", "Network", "", "Undone last action")
     out = {"undone": True, "remaining": undo_service.depth()}
     if not_restored:
@@ -181,6 +184,33 @@ def apply_undo():
         # (GK B K4, UM10-UNDO-1).
         out["template_meta"] = {"restored": False, "reason": not_restored}
     return out
+
+
+def _snapshot_cutouts() -> dict | None:
+    """The active project's cutout record for the undo entry (project-io 03)."""
+    from services.network_lengths import active_project_dir
+    from services.profile_gen import weather_prefs
+
+    project_dir = active_project_dir()
+    return None if project_dir is None else weather_prefs.snapshot_cutouts(project_dir)
+
+
+def _restore_cutouts(snapshot: dict | None) -> None:
+    """Put back the cutout record with the profile it describes (GK B3 A1).
+    The network is already back, so a failure is logged, never raised."""
+    import logging as _logging
+
+    from services.network_lengths import active_project_dir
+    from services.profile_gen import weather_prefs
+
+    project_dir = active_project_dir()
+    if snapshot is None or project_dir is None:
+        return
+    try:
+        weather_prefs.restore_cutouts(project_dir, snapshot)
+    except OSError:
+        _logging.getLogger(__name__).warning(
+            "undo: cutout record of %s not restored", project_dir, exc_info=True)
 
 
 # Alias for the middleware / facade identity pin.

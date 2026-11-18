@@ -152,10 +152,49 @@ def record_cutouts(
             }
             if _valid_cutout(entry):
                 kept.append(entry)
-    if kept == meta.get(CUTOUTS_KEY) or (not kept and CUTOUTS_KEY not in meta):
+    _write_cutouts(project_dir, meta, kept or None)
+
+
+def _write_cutouts(project_dir: Path | str, meta: dict[str, Any], value: Any) -> None:
+    """Set `profile_cutouts` to `value` (None removes it); no write when it
+    already holds that."""
+    if value == meta.get(CUTOUTS_KEY) or (value is None and CUTOUTS_KEY not in meta):
         return
-    if kept:
-        meta[CUTOUTS_KEY] = kept
-    else:
+    if value is None:
         meta.pop(CUTOUTS_KEY, None)
+    else:
+        meta[CUTOUTS_KEY] = value
     atomic_write_text(_meta_file(project_dir), json.dumps(meta, indent=2))
+
+
+def snapshot_cutouts(project_dir: Path | str) -> dict[str, Any] | None:
+    """The record for the undo stack: only `profile_cutouts`, so an undo never
+    rolls back the weather choice or other keys (GK B3 A2). None when the
+    metadata cannot be read: that undo then leaves the record alone."""
+    meta = _read_strict(project_dir)
+    return None if meta is None else {"value": meta.get(CUTOUTS_KEY)}
+
+
+def restore_cutouts(project_dir: Path | str, snapshot: dict[str, Any] | None) -> None:
+    """Undo: put back the record the undone step started from (GK B3 A1).
+    Raises OSError when it cannot be written; a metadata file that cannot be
+    read is left as it is, never overwritten."""
+    if not isinstance(snapshot, dict):
+        return
+    meta = _read_strict(project_dir)
+    if meta is None:
+        raise OSError(f"{_meta_file(project_dir)} cannot be read")
+    _write_cutouts(project_dir, meta, snapshot.get("value"))
+
+
+def _read_strict(project_dir: Path | str) -> dict[str, Any] | None:
+    """`_read`, but None (not {}) for a file that exists and does not parse
+    as an object, so a restore never replaces it with the record alone."""
+    path = _meta_file(project_dir)
+    if not path.is_file():
+        return {}
+    try:
+        meta = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else None

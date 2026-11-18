@@ -502,3 +502,87 @@ def test_a_bundle_carries_the_record_and_an_import_keeps_only_valid_entries(
     )
     assert r.status_code == 200, r.text
     assert _targets(project_storage_dir("cutout_there")) == {"g_a": SHA}
+
+
+# ── Undo puts the record back with the profile (GK B3 A1–A3) ───────────────
+
+
+def test_a_snapshot_holds_only_the_record_and_a_restore_puts_it_back(tmp_path):
+    W.record_cutouts(tmp_path, [A], CUT, "t1")
+    snap = W.snapshot_cutouts(tmp_path)
+    assert snap == {"value": W.recorded_cutouts(tmp_path)}
+    W.record_cutouts(tmp_path, [A, B], {**CUT, "sha256": "b" * 64}, "t2")
+    W.save_choice(tmp_path, "atlite", 2023)
+    W.restore_cutouts(tmp_path, snap)
+    assert W.recorded_cutouts(tmp_path) == snap["value"]
+    assert W.saved_choice(tmp_path) == {"source": "atlite", "year": 2023}
+    W.restore_cutouts(tmp_path, {"value": None})
+    assert W.CUTOUTS_KEY not in json.loads((tmp_path / "metadata.json").read_text())
+
+
+def test_a_restore_never_overwrites_metadata_it_cannot_read(tmp_path):
+    (tmp_path / "metadata.json").write_text("{not json")
+    assert W.snapshot_cutouts(tmp_path) is None
+    W.restore_cutouts(tmp_path, None)
+    with pytest.raises(OSError):
+        W.restore_cutouts(tmp_path, {"value": None})
+    assert (tmp_path / "metadata.json").read_text() == "{not json"
+
+
+def _undo(client):
+    r = client.post("/api/network/undo")
+    assert r.status_code == 200, r.text
+    return r
+
+
+def test_undo_of_an_apply_puts_the_earlier_record_back(
+    client, project, project_storage_dir
+):
+    pdir = project_storage_dir(project)
+    assert _apply(client, project, _job(client, project, pdir)).status_code == 200
+    other = {**CUT, "sha256": "b" * 64}
+    assert _apply(client, project, _job(client, project, pdir, other)).status_code == 200
+    assert _targets(pdir) == {"g_a": "b" * 64}
+    _undo(client)
+    assert _targets(pdir) == {"g_a": SHA}
+    _undo(client)
+    assert _targets(pdir) == {}
+
+
+def test_undo_of_a_batch_removes_every_member_in_one_step(
+    client, project, project_storage_dir
+):
+    pdir = project_storage_dir(project)
+    assert _batch(client, project, _job(client, project, pdir)).status_code == 200
+    assert _targets(pdir) == {"g_a": SHA, "g_b": SHA}
+    _undo(client)
+    assert _targets(pdir) == {}
+
+
+def test_undo_of_an_unrelated_edit_leaves_the_record_and_the_choice(
+    client, project, project_storage_dir
+):
+    pdir = project_storage_dir(project)
+    assert _apply(client, project, _job(client, project, pdir)).status_code == 200
+    W.save_choice(pdir, "atlite", 2023)
+    r = client.put("/api/network/buses/B1",
+                   json={"name": "B1", "v_nom": 110.0, "carrier": "AC"})
+    assert r.status_code == 200, r.text
+    _undo(client)
+    assert _targets(pdir) == {"g_a": SHA}
+    assert W.saved_choice(pdir) == {"source": "atlite", "year": 2023}
+
+
+def test_a_record_that_cannot_be_restored_never_fails_the_undo(
+    client, project, project_storage_dir, monkeypatch, caplog
+):
+    pdir = project_storage_dir(project)
+    assert _apply(client, project, _job(client, project, pdir)).status_code == 200
+
+    def fail(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(W, "atomic_write_text", fail)
+    _undo(client)
+    assert _targets(pdir) == {"g_a": SHA}
+    assert "cutout record" in caplog.text
