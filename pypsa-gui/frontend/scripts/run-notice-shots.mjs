@@ -35,6 +35,8 @@ for (const mode of ['guided', 'expert']) {
   SHOTS.push(['optin', 'optin', mode, 'light', 1024])
   SHOTS.push(['optin', 'optin', mode, 'dark', 1280])
 }
+SHOTS.push(['pref-off', 'pref', 'guided', 'light', 1280])
+SHOTS.push(['pref-blocked', 'blocked', 'guided', 'light', 1280])
 SHOTS.push(['pref-off', 'pref', 'expert', 'light', 1280])
 SHOTS.push(['pref-off', 'pref', 'expert', 'dark', 1280])
 SHOTS.push(['pref-blocked', 'blocked', 'expert', 'light', 1280])
@@ -75,7 +77,10 @@ try {
     }
   }
 
-  for (const [shot, scen, mode, theme, width, click] of SHOTS) {
+  // SHOTS_ONLY=<substring> takes only the shots whose file name contains it.
+const ONLY = process.env.SHOTS_ONLY
+for (const [shot, scen, mode, theme, width, click] of SHOTS) {
+    if (ONLY && !`${shot}-${mode}-${width}${theme === 'dark' ? '-dark' : ''}`.includes(ONLY)) continue
     const context = await browser.newContext({ viewport: { width, height: 800 }, deviceScaleFactor: 2 })
     permission = scen === 'blocked' ? 'denied' : 'default'
     await context.addInitScript(p => {
