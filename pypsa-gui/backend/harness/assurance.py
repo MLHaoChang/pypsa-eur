@@ -194,6 +194,25 @@ CHECKED_TOOLS = frozenset(
 )
 
 
+# A checked turn shows only the structural, enumerated fields of a job view:
+# `phase`, `detail`, `warnings` and `input_revision_note` carry free text that
+# tools and the solver write, so they never pass. An allow-list: a field the
+# view gains later is dropped until it is named here.
+_JOB_VIEW_KEYS = (
+    "id", "family", "kind", "tool_use_id", "status", "terminal", "outcome",
+    "cursor", "progress", "created_at", "started_at", "updated_at", "finished_at",
+)
+_JOB_SNAPSHOT_KEYS = ("epoch", "seq", "monitor_active")
+_JOB_TERMINAL_KEYS = ("job_id", "tool_use_id", "cursor")
+
+
+def _job_projection(job):
+    """The allow-listed fields of one job view; None when there is no view."""
+    if not isinstance(job, dict):
+        return None
+    return {k: job.get(k) for k in _JOB_VIEW_KEYS if k in job}
+
+
 class Turn:
     def __init__(self, session, ctx):
         self.turn_id = str(uuid.uuid4())
@@ -1555,6 +1574,16 @@ class Turn:
                 "tool_use_id": payload.get("tool_use_id"),
                 "line": "Application task is running.",
                 "kind": "INFO",
+            }
+        if event == "job_snapshot":
+            return {
+                **{k: payload.get(k) for k in _JOB_SNAPSHOT_KEYS},
+                "jobs": [_job_projection(j) for j in payload.get("jobs") or []],
+            }
+        if event == "job_terminal":
+            return {
+                **{k: payload.get(k) for k in _JOB_TERMINAL_KEYS},
+                "job": _job_projection(payload.get("job")),
             }
         if event == "tool_error":
             if payload.get("error_kind") in GUARD_REFUSAL_KINDS:
