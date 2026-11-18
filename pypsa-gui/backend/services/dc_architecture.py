@@ -625,8 +625,8 @@ def compare(
             )
         rate_t = tr["rate"]
         price = {
-            "source": tr["source"] + (" (the template's default tariff, assumed)"
-                                      if tariff_shipped else ""),
+            "source": tr["source"]
+            + (" (the template's default tariff, assumed)" if tariff_shipped else ""),
             "assumed": tariff_shipped,
             "currency": tr["currency"],
             "currency_note": tr["currency_note"],
@@ -840,11 +840,13 @@ def _tariff_is_shipped(tpl, tid: str, plan, commercial: dict | None) -> bool:
     from models.commercial import CommercialConfig
 
     tariff = (commercial or {}).get("import_tariff")
-    shipped = (tpl.solver_config(tid, plan).get("commercial") or {})
+    shipped = tpl.solver_config(tid, plan).get("commercial") or {}
     if not tariff or not shipped.get("import_tariff"):
         return False
     try:
-        want = CommercialConfig.model_validate(shipped).model_dump(mode="json")["import_tariff"]
+        want = CommercialConfig.model_validate(shipped).model_dump(mode="json")[
+            "import_tariff"
+        ]
     except ValueError:
         return False
     return tariff == want
@@ -894,7 +896,9 @@ def compare_project(
         ) from None
     finance = getattr(cfg, "finance", None)
     try:
-        rate_kwargs = dc_backup.finance_rate(finance, getattr(cfg, "finance_assumed", None))
+        rate_kwargs = dc_backup.finance_rate(
+            finance, getattr(cfg, "finance_assumed", None)
+        )
     except dc_backup.DcBackupError as exc:
         raise _err(str(exc), "invalid", exc.field) from None
     from models.finance import FinanceInputs

@@ -365,7 +365,7 @@ def _require_one_way(n, name: str, what: str) -> None:
     if static < 0 or (dyn is not None and (dyn < 0).any()):
         # Plain words with the fix (GK B2, WALK-IMPROVE-1 b): templates ship a commercial block.
         raise CommercialBindingError(
-            f"The {_ONE_WAY_WHAT.get(what, what)} {name!r} allows reverse flow (power both "
+            f"The {_ONE_WAY_WHAT.get(what, what)} {name} allows reverse flow (power both "
             "ways), so the tariff and prices cannot be applied to it. Make it one-way (set "
             "its minimum power, p_min_pu, to 0) and model any export on a separate export link.")
 

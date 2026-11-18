@@ -248,8 +248,12 @@ def test_c1_goal_free_config_drops_only_the_named_field():
 
     # ...and the template's assumed-value record (WALK-IMPROVE-1 b, GK B2 D2).
     assert NOT_LP_FIELDS == frozenset({"business_case", "finance_assumed"})
-    d = {"voll": 1.0, "business_case": {"x": 1}, "finance": {"y": 2},
-         "finance_assumed": {"wacc_nominal": {"value": 0.07, "source": "s"}}}
+    d = {
+        "voll": 1.0,
+        "business_case": {"x": 1},
+        "finance": {"y": 2},
+        "finance_assumed": {"wacc_nominal": {"value": 0.07, "source": "s"}},
+    }
     assert goal_free_config(d) == {"voll": 1.0, "finance": {"y": 2}}
 
 

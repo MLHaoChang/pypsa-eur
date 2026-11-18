@@ -536,10 +536,15 @@ def test_the_rate_source_names_the_shipped_wacc_on_a_finance_rate_only():
     n, spec, tag = _net()[0], _spec(), " (the template's shipped wacc, assumed)"
     nominal = {"rate": 0.07, "inflation": 0.02, "rate_assumed": True}
     assert _compare(n, spec, rate_kwargs=nominal)["discount_rate_source"] == (
-        "finance case nominal wacc 0.07 made real with its inflation 0.02" + tag)
-    real = _compare(n, spec, rate_kwargs={"rate": 0.05, "rate_is_real": True,
-                                          "rate_assumed": True})
-    assert real["discount_rate_source"] == "finance case wacc 0.05 (real price basis)" + tag
+        "finance case nominal wacc 0.07 made real with its inflation 0.02" + tag
+    )
+    real = _compare(
+        n, spec, rate_kwargs={"rate": 0.05, "rate_is_real": True, "rate_assumed": True}
+    )
+    assert (
+        real["discount_rate_source"]
+        == "finance case wacc 0.05 (real price basis)" + tag
+    )
     typed = _compare(n, spec, rate_kwargs={"rate": 0.07, "inflation": 0.02})
     assert "assumed" not in typed["discount_rate_source"]
     pack = _compare(n, spec, rate_kwargs={"rate": None, "rate_assumed": True})
@@ -854,7 +859,10 @@ def test_compare_route_writes_nothing_and_answers_every_architecture(
     r = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={})
     assert r.status_code == 200, r.text
     price = r.json()["price"]
-    assert price["assumed"] is True and "the template's default tariff, assumed" in price["source"]
+    assert (
+        price["assumed"] is True
+        and "the template's default tariff, assumed" in price["source"]
+    )
     assert "request" not in price["source"]
     assert _snapshot(d) == before
     # Once the user's own tariff stands, the price read from it is not assumed.
@@ -866,12 +874,17 @@ def test_compare_route_writes_nothing_and_answers_every_architecture(
     own = copy.deepcopy(raw)
     own["commercial"]["import_tariff"]["items"][0]["periods"][0]["rate"] += 0.001
     cfg.write_text(json.dumps(own))
-    price = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={}).json()["price"]
+    price = client.post(
+        f"/api/campus-electrical/{name}/dc-architecture/compare", json={}
+    ).json()["price"]
     assert price["assumed"] is False and "assumed" not in price["source"]
     cfg.write_text(json.dumps(raw))
     # With no tariff and no price entered, it refuses and writes nothing.
-    cfg.write_text(json.dumps({k: v for k, v in json.loads(cfg.read_text()).items()
-                               if k != "commercial"}))
+    cfg.write_text(
+        json.dumps(
+            {k: v for k, v in json.loads(cfg.read_text()).items() if k != "commercial"}
+        )
+    )
     before = _snapshot(d)
     r = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={})
     assert r.status_code == 422

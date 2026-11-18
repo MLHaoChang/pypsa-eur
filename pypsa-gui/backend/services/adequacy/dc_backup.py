@@ -666,7 +666,12 @@ def finance_rate(finance: dict | None, assumed: dict | None = None) -> dict[str,
     shipped = (assumed.get("wacc_nominal") or {}) if isinstance(assumed, dict) else {}
     flag = {"rate_assumed": True} if shipped.get("value") == fin.wacc_nominal else {}
     if fin.price_basis == "real":
-        return {"rate": fin.wacc_nominal, "inflation": None, "rate_is_real": True, **flag}
+        return {
+            "rate": fin.wacc_nominal,
+            "inflation": None,
+            "rate_is_real": True,
+            **flag,
+        }
     if fin.inflation is None:
         # GK B F3: never a nominal rate read as real, never an assumed 0.
         raise DcBackupError(
@@ -1627,7 +1632,9 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
             prices=prices,
             cfg=cfg,
             lock=PyPSAService.get_lock(),
-            **finance_rate(getattr(cfg, "finance", None), getattr(cfg, "finance_assumed", None)),
+            **finance_rate(
+                getattr(cfg, "finance", None), getattr(cfg, "finance_assumed", None)
+            ),
         )
     return {**out, "basis": _basis(nc)}
 
