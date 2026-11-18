@@ -639,6 +639,13 @@ unit, or the reason when not answered) and its `warnings`, the receipt's limitat
 (`calculations.slot_warnings`), both read from the sealed record only. A chart stored without both keys
 verifies as before. Evidence from another project is refused (`other_project`) before anything is drawn
 or written. Table exports, reports and download headers carry no checked fact (AA05-A46-SCOPE-1).
+A profile's definition hash (`calculations.definition_hash`, AA-10 S7) covers each metric's label,
+unit and formula_id in order and `RENDERER_VERSION`, not formula code: a formula change bumps its
+formula_id. New scoped evidence stores it as a hidden identity key (`records.IDENTITY_KEYS`, so the
+public evidence shape is unchanged), the answer record and a checked chart's manifest store it, and
+a chart reports the hash it was drawn under (`not recorded` before S7). `GET /answers/{id}` and its
+export add `definition_changed` (`records.definition_changed`), compared and never recomputed into
+the record; absent when the answer recorded no hash.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,

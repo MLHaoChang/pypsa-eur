@@ -1454,6 +1454,8 @@ class Turn:
         # reasons when twenty unavailable slots also have a review limitation.
         if len(limitations) > 20:
             limitations[19:] = ["; ".join(limitations[19:])]
+        from harness.calculations import definition_hash
+
         answer_id = str(uuid.uuid4())
         record = {
             "version": 1,
@@ -1469,6 +1471,15 @@ class Turn:
             **({"predicates": checked} if checked else {}),
             "verdict": "limited" if limitations else "passed",
             "receipt": receipt,
+            # AA-10 S7: the definitions this answer's checked values were worded
+            # under; the answer route compares it with the current hash.
+            **(
+                {"definition_hash": definition_hash(self.request_scope["profile"])}
+                if self.request_scope is not None
+                and self.request_evidence is not None
+                and not draft_failed
+                else {}
+            ),
             "expires_at": time.time() + records.RETENTION_SECONDS,
         }
         # One worker/locked network is the supported pilot. Check evidence once

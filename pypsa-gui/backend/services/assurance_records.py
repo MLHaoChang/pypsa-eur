@@ -1829,6 +1829,7 @@ def capture_dispatch(owner, entity):
             "slots": slots,
             "raw": raw,
             "source_sha256": digest(raw),
+            "definition_hash": assurance_metrics.definition_hash(assurance_metrics.PROFILE),
             "validity": {
                 "outcome": "completed"
                 if all(s["disposition"] == "answered" for s in slots)
@@ -1912,6 +1913,9 @@ def capture_scoped(owner, scope):
             # `public` strips both, so existing readers see byte-equal output.
             "window": fact_identity.window(first["index"], scope),
             "solve_stamp": solve_stamp(ctx.network),
+            # AA-10 S7: the profile's definition hash as checked (hidden like
+            # the keys above, so the public evidence shape is unchanged).
+            "definition_hash": calculations.definition_hash(scope["profile"]),
             "validity": {
                 "coverage": "requested_population",
                 "as_of": time.time(),
@@ -1949,7 +1953,27 @@ scoped_read = _scoped_read
 
 # AA-05 S5a (A4.6): identity keys an evidence record stores for the
 # cross-surface checks. No existing reader's output carries them (GK B (34) Q2).
-IDENTITY_KEYS = frozenset({"window", "solve_stamp"})
+# AA-10 S7 adds the definition hash on the same terms.
+IDENTITY_KEYS = frozenset({"window", "solve_stamp", "definition_hash"})
+
+
+def definition_changed(record):
+    """Whether the definition hash of the profile a checked answer (or scoped
+    evidence) record names now differs from the hash it recorded: True or
+    False, or None when it recorded none. A read only: the record is never
+    recomputed or rewritten. A profile this server no longer defines counts as
+    changed."""
+    recorded = record.get("definition_hash")
+    if recorded is None:
+        return None
+    from harness import calculations
+
+    try:
+        scope = record.get("request_scope") or record["receipt"]["request_scope"]
+        current = calculations.definition_hash(scope["profile"])
+    except (KeyError, ValueError, TypeError):
+        return True
+    return current != recorded
 
 
 def public(record):

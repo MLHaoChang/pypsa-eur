@@ -97,6 +97,8 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
     <p className="font-medium" role="status">{label}</p>
     {answer ? <p className="mt-1 break-words text-[10px] text-muted">
       Project: {answer.project_id} · {answer.receipt.request_scope?.retain ? 'Retained evidence' : 'Recorded answer'}
+      {answer.definition_changed && <span data-testid="companion-definition-changed">
+        {' · '}The definition changed since this was checked.</span>}
     </p> : !checked && <p className="mt-1 break-words text-[10px] text-muted">
       {message?.origin_project !== undefined ? `Conversation: ${message.origin_project ?? 'Unsaved network'}` : 'Conversation source not recorded'}
     </p>}

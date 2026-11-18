@@ -391,6 +391,8 @@ def remember(turn):
             "slots": slots,
             "raw": raw,
             "source_sha256": records.digest(raw),
+            # Recalculated now, so the current definitions, not the source's.
+            "definition_hash": calculations.definition_hash(scope["profile"]),
         }
         records.save(frozen, frozen["evidence_id"])
         entry = {
