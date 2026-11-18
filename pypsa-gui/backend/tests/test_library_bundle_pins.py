@@ -261,7 +261,9 @@ def test_a_bundle_carries_the_pins_and_import_checks_them(client, other_org_clie
         files={"file": ("b.zip", r.content, "application/zip")},
     )
     assert other.status_code in (200, 201), other.text
-    assert other.json()["library_issues"] == []
+    # Only the notice that the series' Library row (its currency) is not here.
+    assert [(i["code"], i["reason"]) for i in other.json()["library_issues"]] == [
+        ("library_copy_only", "copy_only")]
     listed = other_org_client.get("/api/library/series")
     assert listed.status_code == 200, listed.text
     assert listed.json() == []

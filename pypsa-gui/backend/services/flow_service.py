@@ -780,14 +780,15 @@ def _bind_items(facts: _Facts, db, org_id, project_dir: pathlib.Path, n) -> list
             for issue in bundle_pins.check_pins(
                 db, _uuid.UUID(str(org_id)), project_dir, config=facts.cfg_dict
             ):
-                # A newer Library version is a notice, not a fault (project-io 03).
+                # A newer Library version, or a series served by its copy alone, is a
+                # notice, not a fault (project-io 03).
                 add(
                     issue.get("code", "library_pin_invalid"),
                     issue.get("message", ""),
                     issue.get("field") or "library",
                     source="library",
                     severity="warning"
-                    if issue.get("code") == bundle_pins.NEWER_CODE
+                    if issue.get("code") in bundle_pins.NOTICE_CODES
                     else "error",
                 )
         except Exception:  # noqa: BLE001
