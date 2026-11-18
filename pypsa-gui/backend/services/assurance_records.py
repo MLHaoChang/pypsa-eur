@@ -1958,11 +1958,12 @@ IDENTITY_KEYS = frozenset({"window", "solve_stamp", "definition_hash"})
 
 
 def definition_changed(record):
-    """Whether the definition hash of the profile a checked answer (or scoped
-    evidence) record names now differs from the hash it recorded: True or
-    False, or None when it recorded none. A read only: the record is never
-    recomputed or rewritten. A profile this server no longer defines counts as
-    changed."""
+    """Whether the definition hash of the profile a checked answer record
+    names now differs from the hash it recorded: True or False, or None when
+    it recorded none. A read only: the record is never recomputed or
+    rewritten. A profile this server no longer defines counts as changed.
+    Answer records only: evidence records carry no request scope here, so
+    they would read as changed."""
     recorded = record.get("definition_hash")
     if recorded is None:
         return None

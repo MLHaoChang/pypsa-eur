@@ -20,7 +20,8 @@ reuse keeps the raw source and recalculates under the current code:
   record is re-run through `calculations.scoped_calculate` on its stored raw and
   refused unless facts and slots are equal, and each fact carries its current
   unit and formula_id (`calculations.scoped_calculate`, the `definition(metric)`
-  fact).
+  fact). The same function recalculates calculated, run and run-section
+  records from their stored raw before returning them.
 - `services/assurance_records.py` `capture_scoped()`: a follow-up naming an
   `evidence_id` returns that record only after `evidence()` above.
 - `harness/assurance_conversation.py` `remember()`: the retained snapshot is
