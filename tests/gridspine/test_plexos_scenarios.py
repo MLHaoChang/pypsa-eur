@@ -128,6 +128,37 @@ def test_one_row_tagged_with_two_on_scenarios_is_not_a_tie():
     assert not conv.report.warnings
 
 
+def test_overlapping_tag_sets_tie_and_name_each_scenario_once():
+    conv = run(
+        scenarios(
+            "X",
+            "Y",
+            rows=[
+                ("Node", "A", "Load", 4, "MW", on("X", "Y")),
+                ("Node", "A", "Load", 6, "MW", on("X")),
+            ],
+        )
+    )
+    assert unmapped_reason(conv, "Node 'A'") == [
+        "scenarios 'X' and 'Y' both set 'Load'; none used"
+    ]
+
+
+def test_two_rows_of_one_scenario_are_not_called_base_values():
+    conv = run(
+        scenarios(
+            "On",
+            rows=[
+                ("Node", "A", "Load", 4, "MW", on("On")),
+                ("Node", "A", "Load", 6, "MW", on("On")),
+            ],
+        )
+    )
+    assert unmapped_reason(conv, "Node 'A'") == [
+        "2 values of scenario 'On' for 'Load'; none used"
+    ]
+
+
 # ------------------------------------------------- S3: file chosen by scenario
 
 
@@ -283,6 +314,24 @@ def _hole(body: bytes) -> bytes:
     return ("\n".join(lines) + "\n").encode()
 
 
+def test_variable_of_a_row_whose_file_is_missing_is_not_counted_as_used():
+    conv = scaled(
+        var(),
+        profile=(2, "-"),
+        load_row=(
+            "Node",
+            "A",
+            "Load",
+            0,
+            "MW",
+            {"tags": [Tag("Data File", "F", None), var()]},
+        ),
+    )
+    assert conv.network.loads_t.p_set.empty
+    assert any(r.endswith("not supplied") for r in unmapped_reason(conv, "Node 'A'"))
+    assert unmapped_reason(conv, "Variable 'V'") == ["no imported row uses it"]
+
+
 def test_static_divide_by_zero_and_unknown_action():
     conv = scaled(var(action="÷"), profile=(0, "-"))
     assert unmapped_reason(conv, "Node 'A'") == ["divided by variable 'V', which is 0"]
@@ -391,6 +440,8 @@ def test_multiplied_rating_factor_above_100_is_unmapped_not_clipped():
     assert unmapped_reason(conv, "Generator 'G'") == [
         "Rating Factor 120 % at 2015-01-01 01:00:00 outside [0, 100] %"
     ]
+    # the variable's rows are not counted as used by a row that was not imported
+    assert unmapped_reason(conv, "Variable 'V'") == ["no imported row uses it"]
 
 
 # ----------------------------------------------- the World fixture, S3 + S6
