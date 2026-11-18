@@ -149,3 +149,52 @@ def test_kpi_row_names_every_kpi_and_only_rows_the_pnl_has():
     p = pnl(r)
     assert set(KPI_ROW) == set(kpis(r, p, capacity={"a": 1.0}))
     assert set(KPI_ROW.values()) <= set(p.rows)
+
+
+def test_b1_quantity_never_reads_a_missing_derating_or_series_as_a_figure():
+    """GK B2 mutants on `_quantity`: an unset de-rating is None (never 1.0), and a
+    series the solve does not have is None with or without a de-rating."""
+    from services.finance.business_case import _quantity
+
+    series = L.Series("capacity.StorageUnit.bess", "kW_year", {None: 100.0}, {})
+    unset = B.LineItem(**_cap())
+    assert _quantity(unset, 2030, {unset.name: series}) is None
+    assert _quantity(unset, 2030, {}) is None
+    set_ = B.LineItem(**_cap(derating=0.5))
+    assert _quantity(set_, 2030, {set_.name: series}) == 50.0
+    assert _quantity(set_, 2030, {}) is None
+    # A linked line that takes no de-rating reads its series whole.
+    other = B.LineItem(**_cap(category="service_fee"))
+    assert _quantity(other, 2030, {other.name: series}) == 100.0
+
+
+def test_b2_only_a_line_the_finance_inputs_filled_reads_from_finance():
+    from services.business_case.preset_apply import _indexation_filled
+    from services.business_case.presets import with_finance_indexation
+
+    before = B.BusinessCaseInputs(
+        lines=[B.LineItem(**_cap(name="stated")), B.LineItem(**_cap(name="empty"))]
+    )
+    before.lines[1].indexation = None
+    after = with_finance_indexation(before, {"ppa": 0.02})
+    assert _indexation_filled(before, after) == {"empty"}
+
+
+def test_b3_the_sheet_writes_a_non_finite_figure_and_known_reasons_in_words():
+    import openpyxl
+
+    from services.results_workbook.business_case import (
+        reason_words,
+        write_business_case_sheet,
+    )
+
+    assert reason_words("capacity_not_stated") == "the capacity is not stated"
+    assert reason_words("not_requested") == "not run"
+    report = {
+        "basis": {"label": "x"},
+        "kpis": {"project_npv": {"status": "ok", "value": float("inf"), "unit": "EUR"}},
+    }
+    wb = openpyxl.Workbook()
+    write_business_case_sheet(wb, report, {"stale": False})
+    rows = {r[0].value: [c.value for c in r[1:]] for r in wb["Business case"].iter_rows()}
+    assert rows["Project NPV"][0] == "not established"

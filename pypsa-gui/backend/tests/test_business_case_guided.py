@@ -1344,6 +1344,14 @@ def test_b2_the_card_marks_the_rate_from_the_finance_inputs(bc, template):
     assert rows[f"{cap} · indexation"]["new"] == 0.01
     assert rows[f"{cap} · indexation"]["unit"] == preset_apply.FROM_FINANCE
     assert rows[f"{cap} · de-rating"]["new"] == preset_apply.EMPTY
+    # Only the filled indexation reads "from the finance inputs".
+    marked = {k for k, r in rows.items() if r["unit"] == preset_apply.FROM_FINANCE}
+    assert marked == {
+        f"{r['line']} · indexation"
+        for r in rows.values()
+        if r["path"][-1:] == ["indexation"]
+    }
+    assert f"{cap} · price" not in marked
 
 
 def test_b2_a_stated_indexation_stays_and_no_rate_leaves_it_empty():
