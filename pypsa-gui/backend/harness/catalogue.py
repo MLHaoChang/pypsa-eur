@@ -138,6 +138,7 @@ RESULTS_ENUM = [
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
     "asset_economics", "billing", "cfe_score", "value_flows", "renewable_fraction",
+    "operating_reserve",
 ]
 RESULTS_SOURCE_ENUM = ["lopf", "ac_pf"]
 # Task 14 — per-asset results chat tools (get_asset_results /
@@ -491,6 +492,11 @@ TOOLS: list[dict[str, Any]] = [
         "nothing served), renewable_mwh, nonrenewable_mwh, served_mwh, conversion_mwh, "
         "note, per_period: [{period, fraction, ...}], target (the minimum the solve "
         "enforced, null when off), reason}; "
+        "(operating_reserve): only the hours where the reserve binds, paged with offset/limit "
+        "(at most 24 per read): {shares: {load, pv, wind} (fractions, null when the reserve was "
+        "off), hours_total, binding_hours_total, binding_hours: [{snapshot, required_mw, "
+        "held_mw, binding, holders: [{name, kind: generator|storage_unit, held_mw}] (the 5 "
+        "largest), holders_total}], not_counted: [storage not on the electricity bus], reason}; "
         "(value_flows): {status: 'ok'|'not_established'|'value_flows_invalid', "
         "participants, externals, template, periods: {'_'|period: {lines: [{payer, payee, "
         "value_stream, source, amount, ...}], by_participant: {id: {paid, received, net, "

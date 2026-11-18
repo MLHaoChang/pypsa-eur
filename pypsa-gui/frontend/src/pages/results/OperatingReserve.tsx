@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { resultsApi } from '../../api/simulation'
+import { resultsApi, type ReserveHolder } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { openOffGridConstraints } from '../../layout/flowNavigation'
@@ -9,6 +10,33 @@ export const RESERVE_ROW_CAP = 50
 
 const pct = (f: number) => `${+(f * 100).toFixed(1)} %`
 const mw = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+
+/** Units named per hour before the rest fold behind "Show all". */
+export const RESERVE_HOLDER_CAP = 5
+
+/** One unit as people read it: "Diesel 120 MW", with "(storage)" after a storage unit's name. */
+const holderText = (h: ReserveHolder) =>
+  h.held_mw < 0
+    ? `${h.name} ${mw(Math.abs(h.held_mw))} MW over its limit`
+    : `${h.name}${h.kind === 'storage_unit' ? ' (storage)' : ''} ${mw(h.held_mw)} MW`
+
+/** Who holds the reserve in one binding hour: "Diesel 120 MW · Battery (storage) 30 MW", folded past five units. */
+function HeldBy({ holders, heldMw }: { holders: ReserveHolder[]; heldMw: number }) {
+  const [all, setAll] = useState(false)
+  if (holders.length === 0)
+    return <>{heldMw > 0 ? 'Holders not recorded for this hour' : 'No unit had spare capacity to hold reserve'}</>
+  const shown = all ? holders : holders.slice(0, RESERVE_HOLDER_CAP)
+  const rest = holders.length - shown.length
+  return (
+    <>
+      {shown.map(holderText).join(' · ')}
+      {rest > 0 && (
+        <> · <button type="button" data-testid="operating-reserve-show-all" onClick={() => setAll(true)}
+          className="text-accent hover:underline">({rest} more) Show all</button></>
+      )}
+    </>
+  )
+}
 
 /** The server's reason, in plain words (it carries engine wording). */
 function plainReason(reason: string): string {
@@ -30,6 +58,7 @@ export default function OperatingReserve() {
   const { load, pv, wind } = data.shares
   const rows = data.per_snapshot.filter(r => r.binding)
   const shown = rows.slice(0, RESERVE_ROW_CAP)
+  const thLeft = 'px-2 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wide whitespace-nowrap text-left'
   const td = 'px-2 py-1 text-[11px] text-right font-mono'
   const th = 'px-2 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wide whitespace-nowrap text-right'
   return (
@@ -50,13 +79,14 @@ export default function OperatingReserve() {
       ) : (
         <>
           <div className="overflow-auto border border-border rounded">
-            <table className="w-full text-xs border-collapse" style={{ minWidth: 480 }}>
+            <table className="w-full text-xs border-collapse" style={{ minWidth: 640 }}>
               <thead>
                 <tr>
-                  <th className={`${th} text-left`}>Hour</th>
+                  <th className={thLeft}>Hour</th>
                   <th className={th}>Reserve required (MW)</th>
                   <th className={th}>Reserve held (MW)</th>
                   <th className={th}>Shortfall (MW)</th>
+                  <th className={thLeft}>Held by</th>
                 </tr>
               </thead>
               <tbody>
@@ -66,6 +96,7 @@ export default function OperatingReserve() {
                     <td className={td}>{mw(r.required_mw)}</td>
                     <td className={td}>{mw(r.held_mw)}</td>
                     <td className={td}>{mw(Math.max(0, r.required_mw - r.held_mw))}</td>
+                    <td data-testid="operating-reserve-holders" className="px-2 py-1 text-[11px]"><HeldBy holders={r.holders ?? []} heldMw={r.held_mw} /></td>
                   </tr>
                 ))}
               </tbody>
