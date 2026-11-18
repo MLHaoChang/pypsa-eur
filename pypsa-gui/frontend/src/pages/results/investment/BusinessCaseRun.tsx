@@ -10,9 +10,11 @@ import {
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { useUIStore } from '../../../store/uiStore'
 import { ACTION } from './actionStyle'
+import { openPanel } from '../openPanel'
+import { streamWords } from './businessCaseWords'
 import {
-  breakEvenReason, fmtYear, hidden, KPI_ORDER, kpiText, NET_INCOME_NOTE, PNL_SECTIONS,
-  rowReason, series, staleText, stageText, streamGroups, yearReason,
+  breakEvenReason, firstFix, fmtYear, hidden, KPI_ORDER, kpiText, NET_INCOME_NOTE, PNL_SECTIONS,
+  refusedRunText, rowReason, series, staleText, stageText, streamGroups, yearReason,
 } from './businessCaseReport'
 import { fmtAmount } from './valueFlows'
 
@@ -25,6 +27,8 @@ export interface BusinessCaseRunProps {
   /** Why Run is off now (unsaved lines, no lines, refused lines…), or null. */
   disabledReason: string | null
   revenueLines: string[]
+  /** Every saved line's name, in order: a refused run names its line (walk 05). */
+  lineNames?: string[]
   breakEvenLine: string | null
   onBreakEvenLine: (name: string | null) => void
 }
@@ -66,7 +70,8 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
   const report = running ? null : (s?.report ?? null)
   const stale = running ? null : staleText(s)
   const failure = s?.status === 'failed' || s?.status === 'refused'
-    ? `${s.status === 'refused' ? 'Refused' : 'Failed'}: ${s.error || words(s.error_code ?? 'unknown')}`
+    ? `${s.status === 'refused' ? 'Refused.' : 'Failed.'} ${
+      s.error ? refusedRunText(s.error, p.lineNames ?? []) : words(s.error_code ?? 'unknown')}`
     : null
 
   return (
@@ -133,7 +138,9 @@ function ReportView({ report, breakEvenLine }: { report: BusinessCaseReport; bre
 
 function KpiRow({ report }: { report: BusinessCaseReport }) {
   const k = report.kpis ?? {}
+  const fix = firstFix(k, report.pnl)
   return (
+    <>
     <dl className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-2" data-testid="bc-kpis">
       {KPI_ORDER.map(spec => {
         const kpi = k[spec.key]
@@ -141,11 +148,19 @@ function KpiRow({ report }: { report: BusinessCaseReport }) {
           <div key={spec.key} className="border border-border rounded px-2 py-1"
                data-testid={`bc-kpi-${spec.key}`} data-status={kpi?.status ?? 'missing'}>
             <dt className="text-muted">{spec.label}</dt>
-            <dd className={kpi?.status === 'ok' ? 'font-semibold tabular-nums' : 'text-muted'}>{kpiText(kpi, spec.fmt)}</dd>
+            <dd className={kpi?.status === 'ok' ? 'font-semibold tabular-nums' : 'text-muted'}>{kpiText(kpi, spec.fmt, report.pnl, spec.key)}</dd>
           </div>
         )
       })}
     </dl>
+    {fix && (
+      <p className="text-warn" data-testid="bc-first-fix">First:{' '}
+        {fix.place === 'finance'
+          ? <button type="button" className="underline" data-testid="bc-first-fix-open"
+              onClick={() => openPanel('commercial', 'economics')}>{fix.action} ›</button>
+          : <>{fix.action} in the lines above.</>}</p>
+    )}
+    </>
   )
 }
 
@@ -214,7 +229,7 @@ function PnlTable({ pnl }: { pnl: BusinessCasePnl }) {
                 const v = pnl.streams[n]
                 return (
                   <tr key={n} data-testid={`bc-stream-${n}`}>
-                    <th scope="row" className={head + ' pl-3'}>{words(n.replace(/^bc_/, ''))}
+                    <th scope="row" className={head + ' pl-3'}>{streamWords(n)}
                       {!v && <Reason text={rowReason(`stream:${n}`, pnl)} />}</th>
                     {v ? cells(n, v) : <Gap span={years.length} />}
                   </tr>
