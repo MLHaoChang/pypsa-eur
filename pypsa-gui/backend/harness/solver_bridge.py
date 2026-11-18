@@ -68,6 +68,7 @@ def start_detached_solver_monitor(
     on_superseded: Callable[[], None] | None = None,
     is_pending: Callable[[], bool] | None = None,
     monitor_generation: int | None = None,
+    job_id: str | None = None,
 ) -> None:
     """Run ``solver_log_bridge`` on a daemon thread after turn handoff (issue 11).
 
@@ -99,14 +100,33 @@ def start_detached_solver_monitor(
         status, same = _state()
         return status in _TERMINAL or not same
 
+    def _note_end() -> None:
+        """live-voice 11c: a `job_terminal` item once this solve has ended.
+
+        Called once: `_settle` notes the end exactly when it settles; the
+        no-`on_terminal` path notes it in its `finally` when the solve has
+        ended, or else once its wait after a turn abort sees the end. The
+        item names the job only; the progress route re-reads the job's view
+        for whoever is reading the stream, so a replay is ACL-checked too.
+        """
+        if job_id is None:
+            return
+        session.append_detached_progress({
+            "frame": "job_terminal",
+            "job_id": job_id,
+            "tool_use_id": tool_use_id,
+        })
+
     def _settle() -> bool:
         """Publish once this solve's outcome is known; True when settled."""
         status, same = _state()
         if not same:
             _call(on_superseded, "on_superseded")
+            _note_end()
             return True
         if status in _TERMINAL:
             _call(on_terminal, "on_terminal")
+            _note_end()
             return True
         return False
 
@@ -136,6 +156,8 @@ def start_detached_solver_monitor(
         finally:
             if not settled:
                 settled = _settle()
+            elif _done():
+                _note_end()
             session.mark_detached_monitor(tool_use_id, tool_name, active=False)
         # A session abort ends the bridge, not the solve: wait it out so the
         # run is still published once (a process exit is read as interrupted).
@@ -145,6 +167,20 @@ def start_detached_solver_monitor(
                 return
             time.sleep(_TERMINAL_POLL_S)
             settled = _settle()
+        # live-voice 11c: the plan step's monitor (no on_terminal) also waits
+        # out a turn abort so its solve's end is still logged once, as the
+        # path above does (after which the solve is done, so this is skipped);
+        # Stop monitoring ends the watch for good.
+        if job_id is not None and not _done():
+            while not _stopped():
+                if _done():
+                    _note_end()
+                    return
+                time.sleep(_TERMINAL_POLL_S)
+
+    def _stopped() -> bool:
+        # `generation` is None only for a session without the method (11b).
+        return generation is not None and session.monitor_generation() != generation
 
     threading.Thread(
         target=_run,

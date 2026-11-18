@@ -169,6 +169,7 @@ vi.mock('./src/hooks/useAssetSchema', async () => {
       data: componentClass ? fixture[componentClass] : undefined,
       isLoading: false,
       isError: false,
+      unitsReady: true,
     }),
   }
 })

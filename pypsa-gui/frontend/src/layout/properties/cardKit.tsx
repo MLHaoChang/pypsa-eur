@@ -882,8 +882,10 @@ export function CardShell({ title, badge, meta, onEdit, onDelete, delPending, ch
 }
 
 // ── Edit form shell ────────────────────────────────────────────────────────────
-export function EditShell({ title, onSave, onCancel, saving, children }: {
+export function EditShell({ title, onSave, onCancel, saving, saveDisabled, children }: {
   title: string; onSave: () => void; onCancel: () => void; saving: boolean;
+  /** True while the card's fields are not loaded: a save would silently drop what was typed (05d). */
+  saveDisabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -896,7 +898,8 @@ export function EditShell({ title, onSave, onCancel, saving, children }: {
         {children}
       </div>
       <div className="flex gap-2 mt-3">
-        <button onClick={onSave} disabled={saving}
+        <button onClick={onSave} disabled={saving || saveDisabled}
+        title={saveDisabled ? 'The fields are loading' : undefined}
           className="flex-1 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50">
           {saving ? 'Saving…' : 'Save'}
         </button>

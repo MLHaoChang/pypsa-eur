@@ -217,6 +217,19 @@ export function openReliabilityGoal(): void {
   })
 }
 
+/** Show the Value of Lost Load field: Guided's Goal card (section 8, where the
+ *  field shows while VOLL is missing), or Expert's Solver settings › Network,
+ *  scrolled to the VOLL block. Never flips the mode; Back returns to the view
+ *  it left, named `from`. */
+export function openVollField(from?: string): void {
+  withReturn(null, () => {
+    const ui = useUIStore.getState()
+    ui.requestSolverBlock('voll')
+    if (ui.uiMode === 'guided') openSectionInGuided('scenarios')
+    else openSectionInExpert('scenarios')
+  }, false, from)
+}
+
 /** Show the site type select (W3b-R): Guided's Site card (section 3), or the
  *  top of Expert's Connection & grid panel. Never flips the mode; Back
  *  returns to the view it left. */
