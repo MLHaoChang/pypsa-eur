@@ -595,3 +595,11 @@ def test_a_record_that_cannot_be_restored_never_fails_the_undo(
     _undo(client)
     assert _targets(pdir) == {"g_a": SHA}
     assert "cutout record" in caplog.text
+
+
+def test_an_undo_with_no_project_restores_no_record(monkeypatch):
+    from services import network_lengths, network_undo
+
+    monkeypatch.setattr(network_lengths, "active_project_dir", lambda: None)
+    assert network_undo._snapshot_cutouts() is None
+    network_undo._restore_cutouts({"value": None})  # no project, no write, no raise

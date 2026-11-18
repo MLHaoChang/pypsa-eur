@@ -204,7 +204,7 @@ def _restore_cutouts(snapshot: dict | None) -> None:
     from services.profile_gen import weather_prefs
 
     project_dir = active_project_dir()
-    if snapshot is None or project_dir is None:
+    if project_dir is None:
         return
     try:
         weather_prefs.restore_cutouts(project_dir, snapshot)
