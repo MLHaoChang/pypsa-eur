@@ -260,13 +260,13 @@ function PnlTable({ pnl }: { pnl: BusinessCasePnl }) {
                   {sec.note && <span className="font-normal text-muted"> · {sec.note}</span>}</span></th></tr>
               {si === 0 && pnl.volume_factor && (
                 <tr data-testid="bc-row-volume_factor">
-                  <th scope="row" className={head + ' pl-3'}>{VOLUME_LABEL}
+                  <th scope="row" className={head + ' pl-3 align-top'}>{VOLUME_LABEL}
                     {pnl.volume_factor_note && (
                       <span className="block font-normal text-muted whitespace-normal max-w-[18rem]"
                             data-testid="bc-volume-factor-note">{sentence(pnl.volume_factor_note)}</span>
                     )}</th>
                   {years.map(y => (
-                    <td key={y} className="text-right tabular-nums px-1 whitespace-nowrap">
+                    <td key={y} className="text-right tabular-nums px-1 whitespace-nowrap align-top">
                       {pctText(pnl.volume_factor![String(y)] ?? 1)}</td>
                   ))}
                 </tr>

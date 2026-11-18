@@ -72,7 +72,7 @@ export default function VolumeFactorStrip({ years, value, bad, server, onChange 
           <div className="overflow-x-auto">
             <table className="text-[11px]">
               <thead><tr><th className="text-left pr-2 font-normal text-muted">Year</th>
-                {years.map(y => <th key={y} className="font-normal text-muted px-0.5">{y}</th>)}</tr></thead>
+                {years.map(y => <th key={y} className="font-normal text-muted px-0.5 text-center">{y}</th>)}</tr></thead>
               <tbody>
                 <tr>
                   <th scope="row" className="text-left pr-2 font-normal whitespace-nowrap">%</th>
