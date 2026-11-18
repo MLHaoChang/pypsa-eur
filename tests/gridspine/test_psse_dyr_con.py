@@ -10,6 +10,7 @@ files are the oracle (D4); the round trips through our own writers come after.
 
 import json
 import logging
+import re
 
 import pytest
 
@@ -262,6 +263,96 @@ def test_record_on_a_bus_not_in_the_raw_is_unmapped(raw, tmp_path):
 def test_malformed_dyr_is_refused_naming_the_line(raw, tmp_path, text, match):
     with pytest.raises(ImportFormatError, match="c.dyr: " + match):
         _import(raw, tmp_path, dyr=text)
+
+
+@pytest.mark.parametrize("tok", ["nan", "inf", "1e400"])
+def test_non_finite_value_is_refused_naming_the_line(raw, tmp_path, tok):
+    with pytest.raises(
+        ImportFormatError, match=f"c.dyr: line 2: GENCLS value '{tok}' is not a finite"
+    ):
+        _import(
+            raw, tmp_path, dyr=f"1 'GENCLS' 1 3.0 0.0 /\n2 'GENCLS' 1 {tok} 0.0 /\n"
+        )
+
+
+def test_unknown_model_without_values(raw, tmp_path):
+    res = _import(raw, tmp_path, dyr="1 'FOOBAR' 1 /\n")
+    (rec,) = _records(res)
+    assert (rec["model"], rec["values"], rec["generator"]) == (
+        "FOOBAR",
+        [],
+        "Gen A #1 1",
+    )
+    assert _reasons(res) == {
+        "c.dyr: model FOOBAR": "no parameter names for this model; 1 record(s) kept as "
+        "ordered values (line 1)"
+    }
+
+
+# Counting rule (GK A ask 2). .dyr: every record is in the sidecar exactly once.
+# In the report a record is mapped (generator + parameters) or named by line in
+# at least one place: its own unmapped row(s) (wrong count, unknown bus, missing
+# machine; a record can have two), its model's row (unknown model, lines capped
+# at 5) or the no-generator warning (lines capped at 5).
+_LEDGER_DYR = """\
+1 'GENCLS' 1 3.0 0.0 /
+2 'GENCLS' 1 3.0 /
+2 'FOOBAR' 1 1.0 /
+3 'CLODBL' 1 0.1 /
+99 'GENCLS' 1 3.0 0.0 0.0 /
+99 'BARBAZ' 1 /
+2 'GENCLS' 'z' 3.0 0.0 /
+"""
+
+
+def _lines_named(text):
+    """Every record line a report string names: 'line N:' or a '(line a, b)' list."""
+    out = {int(m) for m in re.findall(r"line (\d+):", text)}
+    for group in re.findall(r"\(lines? ([\d, ]+)\)", text) + re.findall(
+        r"lines ([\d ()bus,]+)", text
+    ):
+        out |= {int(m) for m in re.findall(r"(?<!bus )\b(\d+)\b", group)}
+    return out
+
+
+def test_every_dyr_record_is_accounted_for(raw, tmp_path):
+    res = _import(raw, tmp_path, dyr=_LEDGER_DYR)
+    recs = _records(res)
+    lines_in = {r.line for r in read_dyr_text(_LEDGER_DYR)}
+    assert len(recs) == 7 and {r["line"] for r in recs} == lines_in
+    mapped = {r["line"] for r in recs if r["generator"] and "parameters" in r}
+    named = set()
+    for u in res.report.unmapped:
+        named |= _lines_named(u.source_item) | _lines_named(u.reason)
+    for w in res.report.warnings:
+        named |= _lines_named(w)
+    assert named <= lines_in
+    assert mapped == {1} and mapped | named == lines_in
+    # by hand: line 2 count; line 5 count + bus; line 6 bus; line 7 machine;
+    # models FOOBAR, CLODBL, BARBAZ = 8 rows
+    assert len(res.report.unmapped) == 8
+
+
+def test_con_mixed_kind_contingency_is_one_row_at_its_label(raw, tmp_path):
+    """
+    .con rule: a statement is a mapped element or its own unmatched row, except a
+    contingency whose elements all match but are not one outage: one row at its
+    CONTINGENCY line stands for all its statements.
+    """
+    con = (
+        "CONTINGENCY MIXK\n   OPEN BRANCH FROM BUS 1 TO BUS 2 CKT 1\n"
+        "   TRIP MACHINE 1 FROM BUS 2\nEND\nEND\n"
+    )
+    side = _import(raw, tmp_path, con=con).sidecars["psse_contingencies.json"]
+    assert side["contingencies"] == []
+    assert side["unmatched"] == [
+        {
+            "contingency_id": "MIXK",
+            "line": 1,
+            "element": "MIXK",
+            "reason": "not_representable",
+        }
+    ]
 
 
 def test_reader_is_pure():

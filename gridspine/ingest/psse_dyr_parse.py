@@ -8,7 +8,7 @@ PSS/E dynamic data (``.dyr``) reader, without pypsa (owner decision IMPORTS-1).
 quoted model name, the machine ID (quoted or bare), then the ICONs and CONs in
 the model's order. A record may run over several lines and ends at ``/``; the
 rest of that line is a comment. A line starting with ``@!`` is a comment. A
-value is a number, or a quoted text ICON (REPCA1's circuit). Anything else
+value is a finite number, or a quoted text ICON (REPCA1's circuit). Anything else
 raises ``ContractError`` naming the line: a value that is neither, a quote that
 is not closed, a record with no ``/`` before the end of the file, and a second
 record for the same bus, machine ID and model.
@@ -27,6 +27,7 @@ Values are never truncated or padded to fit a layout.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
@@ -107,11 +108,16 @@ def _value(tok: str, lineno: int, model: str):
     if _INT.fullmatch(tok):
         return int(tok)
     try:
-        return float(tok)
+        v = float(tok)
     except ValueError:
         raise ContractError(
             f"line {lineno}: {model} value {tok!r} is not a number"
         ) from None
+    if not math.isfinite(v):
+        raise ContractError(
+            f"line {lineno}: {model} value {tok!r} is not a finite number"
+        )
+    return v
 
 
 def _record(toks: list[tuple[int, str]]) -> DyrRecord:
