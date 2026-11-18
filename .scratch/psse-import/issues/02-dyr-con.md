@@ -56,3 +56,5 @@ GK A (29) plan GO, 2026-11-17, with these conditions:
 - D7 Mutants: one per refusal, the count check (D1) and the ID normalisation (D3), each with
   `-x` against its own test; survivors in the PR body.
 - The PR body carries a `Session:` line.
+
+GK A (31) confirmed, 2026-11-18, that the D1–D7 plan GO above stands for the PR2 build.

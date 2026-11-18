@@ -37,6 +37,15 @@ the PSS/E conventions and their source).
 - Areas, zones and owners: bus columns, and their tables in ``psse_case.json``.
 - Everything else in the file is listed in ``unmapped`` by the reader.
 
+**Alongside the .raw** (one each, never alone; GK A plan GO D1-D7):
+
+- ``.dyr``: read by ``psse_dyr_parse`` into the ``psse_dynamics.json`` sidecar,
+  one entry per record, matched to its generator by bus number and machine ID
+  and carrying the machine base and bus kV (see ``dynamics``).
+- ``.con``: read by ``contingency_list.read_contingency_list`` onto the network
+  under the RAW's identity (``PsseNetIndex``) into ``psse_contingencies.json``;
+  every element it does not map is an unmapped row with its line.
+
 ``s_nom`` is the PSS/E rating RATEA (v33) or RATE1 (v35/v36). A line without a
 rating keeps ``s_nom`` = 0 and a transformer without one takes its impedance
 base SBASE1-2 as ``s_nom``; both are listed in ``assumed``.
@@ -44,7 +53,11 @@ base SBASE1-2 as ``s_nom``; both are listed in ``assumed``.
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import math
+import re
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -52,12 +65,19 @@ from typing import Any
 import pandas as pd
 import pypsa
 
+from gridspine.ingest.contingency_list import _NetIndex, read_contingency_list
 from gridspine.ingest.import_result import (
     Assumed,
     ImportFormatError,
     ImportReport,
     ImportResult,
     Unmapped,
+)
+from gridspine.ingest.psse_dyr_parse import (
+    LAYOUTS,
+    machine_id,
+    parameters,
+    read_dyr_text,
 )
 from gridspine.ingest.psse_raw_parse import (
     RawCase,
@@ -77,35 +97,41 @@ _BUS_TYPE = {1: "load bus", 2: "generator bus", 3: "swing bus", 4: "isolated"}
 
 def read_psse(paths: Sequence[Path], options: Mapping[str, Any]) -> ImportResult:
     paths = [Path(p) for p in paths]
-    raws = [p for p in paths if p.suffix.lower() == ".raw"]
-    if len(raws) != 1:
-        raise ImportFormatError(
-            f"a PSS/E import needs exactly one .raw file, got {len(raws)}: "
-            f"{', '.join(p.name for p in paths) or 'none'}"
-        )
-    raw = raws[0]
+    raw, dyr, con, others = _split(paths)
     try:
-        case = read_raw_text(
-            raw.read_text(encoding="latin-1"), version=options.get("version")
-        )
+        case = read_raw_text(_text(raw), version=options.get("version"))
     except ContractError as exc:
         raise ImportFormatError(f"{raw.name}: {exc}") from exc
-    except OSError as exc:
-        raise ImportFormatError(f"{raw.name}: cannot be read ({exc.strerror})") from exc
     try:
         net, counts, assumed, warnings = build_network(case)
     except ContractError as exc:
         raise ImportFormatError(f"{raw.name}: {exc}") from exc
     unmapped = [Unmapped(item, reason) for item, reason in case.unmapped]
-    for p in paths:
-        if p is not raw:
-            unmapped.append(
-                Unmapped(
-                    p.name,
-                    "only the .raw case is read so far; "
-                    "dynamic data (.dyr) import is not available yet",
-                )
-            )
+    unmapped += [
+        Unmapped(p.name, "not a PSS/E file this import reads (.raw, .dyr, .con)")
+        for p in others
+    ]
+    warnings = case.warnings + warnings
+    sidecars = {"psse_case.json": case_summary(case)}
+    if dyr is not None:
+        side, um, warn, n_rec = dynamics(dyr.name, _text(dyr), net, raw.name)
+        sidecars["psse_dynamics.json"] = side
+        unmapped += um
+        warnings += warn
+        counts["Dynamic records"] = n_rec
+    if con is not None:
+        raw_names = (
+            {
+                int(i): str(nm).strip()
+                for i, nm in zip(case.tables["bus"]["I"], case.tables["bus"]["NAME"])
+            }
+            if "NAME" in case.tables["bus"]
+            else {}
+        )
+        side, um, n_con = contingencies(con.name, _text(con), net, raw_names)
+        sidecars["psse_contingencies.json"] = side
+        unmapped += um
+        counts["Contingencies"] = n_con
     assumed = [Assumed(*a) for a in case.assumed] + assumed
     report = ImportReport(
         source_format=FORMAT_ID,
@@ -113,11 +139,46 @@ def read_psse(paths: Sequence[Path], options: Mapping[str, Any]) -> ImportResult
         counts=counts,
         unmapped=unmapped,
         assumed=assumed,
-        warnings=case.warnings + warnings,
+        warnings=warnings,
     )
-    return ImportResult(
-        network=net, report=report, sidecars={"psse_case.json": case_summary(case)}
-    )
+    return ImportResult(network=net, report=report, sidecars=sidecars)
+
+
+def _split(paths):
+    """``(raw, dyr | None, con | None, others)``; refuses what cannot be read as one case."""
+    by_ext: dict[str, list[Path]] = {".raw": [], ".dyr": [], ".con": []}
+    others = []
+    for p in paths:
+        by_ext.get(p.suffix.lower(), others).append(p)
+    raws = by_ext[".raw"]
+    if len(raws) != 1:
+        extra = [p.name for p in by_ext[".dyr"] + by_ext[".con"]]
+        why = (
+            f"; {', '.join(extra)} is read onto the .raw case it belongs to, so add that .raw file"
+            if extra and not raws
+            else ""
+        )
+        raise ImportFormatError(
+            f"a PSS/E import needs exactly one .raw file, got {len(raws)}: "
+            f"{', '.join(p.name for p in paths) or 'none'}{why}"
+        )
+    for ext in (".dyr", ".con"):
+        if len(by_ext[ext]) > 1:
+            raise ImportFormatError(
+                f"a PSS/E import takes at most one {ext} file, got "
+                f"{len(by_ext[ext])}: {', '.join(p.name for p in by_ext[ext])}"
+            )
+    first = lambda ext: by_ext[ext][0] if by_ext[ext] else None  # noqa: E731
+    return raws[0], first(".dyr"), first(".con"), others
+
+
+def _text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="latin-1")
+    except OSError as exc:
+        raise ImportFormatError(
+            f"{path.name}: cannot be read ({exc.strerror})"
+        ) from exc
 
 
 def case_summary(case: RawCase) -> dict:
@@ -389,6 +450,7 @@ def build_network(case: RawCase):
                     tap_ratio=1.0,
                     active=on,
                 )
+                n.transformers.at[nm, "psse_circuit"] = r["CKT"]
                 if rate <= 0:
                     assumed.append(
                         Assumed(
@@ -637,3 +699,245 @@ def _branch_names(br, bname, version):
         f"{nm} ({r['I']}-{r['J']} {r['CKT']})" if d else nm
         for nm, d, r in zip(out, dup, br.to_dict("records"))
     ]
+
+
+# ---------------------------------------------------------------- dynamics (.dyr)
+_LIST_CAP = 5
+
+
+def _capped(items, cap=_LIST_CAP):
+    items = list(items)
+    more = len(items) - cap
+    return ", ".join(items[:cap]) + (f" and {more} more" if more > 0 else "")
+
+
+def _finite(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def dynamics(name: str, text: str, n, raw_name: str):
+    """
+    ``(psse_dynamics.json, unmapped, warnings, record count)`` for a ``.dyr``
+    read onto the imported network ``n``.
+
+    A record is matched to the generator with its bus number and machine ID
+    (``psse_dyr_parse.machine_id``, GK A D3). Its parameters are per unit on the
+    machine base, so each record carries ``mbase`` and the bus ``bus_kv`` from the
+    RAW (D2). A record on a bus with no generator (a load or FACTS model) is kept
+    with ``generator`` null and counted in one warning (#1353). A record on an
+    unknown bus, or naming a machine ID its bus does not have, is unmapped.
+    """
+    try:
+        records = read_dyr_text(text)
+    except ContractError as exc:
+        raise ImportFormatError(f"{name}: {exc}") from exc
+    num = n.buses["psse_number"].astype(int)
+    bus_at = {int(v): b for b, v in num.items() if v > 0}
+    gens = n.generators
+    machine, ids_at = {}, defaultdict(list)
+    if len(gens):
+        for g, b, mid in zip(gens.index, gens["bus"], gens["psse_id"]):
+            key = (int(num[b]), machine_id(mid))
+            machine[key] = g
+            ids_at[key[0]].append(key[1])
+    rows, unmapped, no_gen = [], [], []
+    unknown = defaultdict(list)
+    for r in records:
+        bus = bus_at.get(r.bus)
+        gen = machine.get((r.bus, r.machine))
+        item = f"{name} line {r.line}: {r.model} at bus {r.bus} machine {r.machine!r}"
+        row = {
+            "line": r.line,
+            "bus": r.bus,
+            "bus_name": bus,
+            "machine": r.machine,
+            "generator": gen,
+            "mbase": _finite(gens.at[gen, "machine_base_mva"]) if gen else None,
+            "bus_kv": _finite(n.buses.at[bus, "v_nom"]) if bus else None,
+            "model": r.model,
+        }
+        try:
+            named, why = parameters(r)
+        except ContractError as exc:
+            raise ImportFormatError(f"{name}: {exc}") from exc
+        if named is None:
+            row["values"] = list(r.values)
+            if r.model in LAYOUTS:
+                unmapped.append(Unmapped(item, f"{why}; kept as ordered values"))
+            else:
+                unknown[r.model].append(r.line)
+        else:
+            row["parameters"] = named
+        if bus is None:
+            unmapped.append(Unmapped(item, f"bus {r.bus} is not in {raw_name}"))
+        elif gen is None and ids_at[r.bus]:
+            have = ", ".join(repr(i) for i in ids_at[r.bus])
+            unmapped.append(
+                Unmapped(
+                    item, f"bus {r.bus} has no machine {r.machine!r} (it has {have})"
+                )
+            )
+        elif gen is None:
+            no_gen.append(r)
+        rows.append(row)
+    for model, lines in sorted(unknown.items()):
+        unmapped.append(
+            Unmapped(
+                f"{name}: model {model}",
+                f"no parameter names for this model; {len(lines)} record(s) kept as "
+                f"ordered values (line {_capped(str(x) for x in lines)})",
+            )
+        )
+    warnings = []
+    if no_gen:
+        per_model = pd.Series([r.model for r in no_gen]).value_counts().sort_index()
+        warnings.append(
+            f"{len(no_gen)} dynamic record(s) in {name} sit on a bus with no generator "
+            f"and are kept unlinked ({', '.join(f'{m}: {c}' for m, c in per_model.items())}); "
+            f"lines {_capped(f'{r.line} (bus {r.bus})' for r in no_gen)}"
+        )
+    side = {"format": 1, "source": name, "records": rows}
+    return side, unmapped, warnings, len(records)
+
+
+# ---------------------------------------------------------------- contingencies (.con)
+#: The .con reader's reason codes in words for the import report.
+_CON_REASON = {
+    "unknown_bus": "the bus is not in the .raw case",
+    "ambiguous_bus": "more than one bus has this name in the .raw case; use its number",
+    "unknown_branch": "no branch joins these buses in the .raw case",
+    "unknown_circuit": "no branch with this circuit joins these buses",
+    "unknown_machine": "the bus has no machine with this ID",
+    "unsupported": "a PSS/E command this import does not map",
+    "not_representable": "its elements are not one outage the app screens",
+    "partial": "matched, but its contingency is left out because another element is unmapped",
+}
+_SAFE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+@dataclasses.dataclass(frozen=True)
+class _Branch:
+    from_bus: str
+    to_bus: str
+    ckt: str
+    element_type: str
+    element_index: int
+
+
+class PsseNetIndex(_NetIndex):
+    """
+    The imported network under the RAW's identity, for ``read_contingency_list``.
+
+    Buses are their RAW numbers as text; a quoted bus name in the ``.con`` is
+    matched against the RAW NAME, so a renamed bus (RAW-NAMES-1) is found by its
+    number and a name shared by several buses is ambiguous. A branch is a line or
+    two-winding transformer ``(I, J, CKT)``; a machine is ``(I, ID)``. ``element``
+    maps each id the reader returns to its PyPSA component and name.
+    """
+
+    def __init__(self, n, raw_names: Mapping[int, str]):
+        num = n.buses["psse_number"].astype(int)
+        name = {b: str(int(v)) for b, v in num.items() if v > 0}
+        self.num_of = {name[b]: int(num[b]) for b in name}
+        self.name_at_num = {v: k for k, v in self.num_of.items()}
+        self.element: dict[str, tuple[str, str]] = {}
+        self.by_raw_name = defaultdict(list)
+        for b, k in name.items():
+            self.by_raw_name[raw_names.get(int(k), b)].append(k)
+            self._add(k, "Bus", b)
+        gens = n.generators
+        self.slack = {
+            name[b] for b in gens.loc[gens["control"] == "Slack", "bus"] if b in name
+        }
+        self.branch, self.pair = {}, set()
+        for comp, df in (("Line", n.lines), ("Transformer", n.transformers)):
+            ckts = df["psse_circuit"] if "psse_circuit" in df else [None] * len(df)
+            for pos, (el, b0, b1, ckt) in enumerate(
+                zip(df.index, df["bus0"], df["bus1"], ckts)
+            ):
+                if b0 not in name or b1 not in name or not isinstance(ckt, str):
+                    continue  # a three-winding star leg, or no RAW circuit
+                ckt = ckt.strip()
+                row = _Branch(name[b0], name[b1], _SAFE.sub("_", ckt), comp, pos)
+                for f, t in ((row.from_bus, row.to_bus), (row.to_bus, row.from_bus)):
+                    if (f, t, ckt) in self.branch:
+                        raise ContractError(
+                            f"branch {row.from_bus}-{row.to_bus} circuit {ckt!r} is in the .raw twice"
+                        )
+                    self.branch[(f, t, ckt)] = row
+                    self.pair.add((f, t))
+                self._add(f"{row.from_bus}-{row.to_bus}-{row.ckt}", comp, el)
+        self.machine = {}
+        for g, b, mid in zip(gens.index, gens["bus"], gens.get("psse_id", [])):
+            if b in name:
+                mid = machine_id(mid)
+                uid = f"{name[b]}-{_SAFE.sub('_', mid)}"
+                self.machine[(int(name[b]), mid)] = (uid, "gen")
+                self._add(uid, "Generator", g)
+
+    def _add(self, eid, component, name):
+        if self.element.setdefault(eid, (component, name)) != (component, name):
+            raise ContractError(
+                f"{component} {name!r} and {self.element[eid][0]} {self.element[eid][1]!r} "
+                f"read as one contingency element {eid!r}"
+            )
+
+    def bus(self, token):
+        if isinstance(token, int):
+            name = self.name_at_num.get(token)
+            return (name, None) if name else (None, "unknown_bus")
+        hits = self.by_raw_name.get(token, [])
+        if len(hits) > 1:
+            return None, "ambiguous_bus"
+        return (hits[0], None) if hits else (None, "unknown_bus")
+
+
+def contingencies(name: str, text: str, n, raw_names: Mapping[int, str]):
+    """
+    ``(psse_contingencies.json, unmapped, contingency count)`` for a ``.con``
+    read with ``contingency_list.read_contingency_list`` onto ``n``. Every
+    element the reader leaves out is an unmapped row with its line (GK A D6).
+    """
+    try:
+        idx = PsseNetIndex(n, raw_names)
+        got = read_contingency_list(text, idx, fmt="con")
+    except ContractError as exc:
+        raise ImportFormatError(f"{name}: {exc}") from exc
+    rows = []
+    for rec in got.contingencies.to_dict("records"):
+        ids = [str(e) for e in rec["element_ids"]]
+        rows.append(
+            {
+                "contingency_id": rec["contingency_id"],
+                "kind": rec["kind"],
+                "order": int(rec["order"]),
+                "element_ids": ids,
+                "elements": [
+                    {"component": idx.element[e][0], "name": idx.element[e][1]}
+                    for e in ids
+                ],
+            }
+        )
+    unmatched = [
+        {
+            "contingency_id": r["contingency_id"],
+            "line": int(r["line"]),
+            "element": r["element"],
+            "reason": r["reason"],
+        }
+        for r in got.unmatched.to_dict("records")
+    ]
+    unmapped = [
+        Unmapped(
+            f"{name} line {u['line']}: {u['element']}",
+            _CON_REASON[u["reason"]]
+            + (f" (contingency {u['contingency_id']})" if u["contingency_id"] else ""),
+        )
+        for u in unmatched
+    ]
+    side = {"format": 1, "source": name, "contingencies": rows, "unmatched": unmatched}
+    return side, unmapped, len(rows)
