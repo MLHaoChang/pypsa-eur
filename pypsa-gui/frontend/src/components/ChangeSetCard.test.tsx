@@ -203,3 +203,39 @@ it('reads no receipt from a malformed frame', () => {
     ticked: 1, landed: 1, failed: 0 })).toBeNull()
   expect(changeSetReceiptOf({ version: 2, decision: 'approve', rows: [], ticked: 0, landed: 0, failed: 0 })).toBeNull()
 })
+
+// Study harness 14 S-B2c: the shipped cases' pick card. Nothing starts ticked,
+// at most `pick_max` may be ticked, and the ticked ids go to the server.
+const PICK = {
+  ...SET,
+  pick_max: 2,
+  requirements: {
+    checked: 0,
+    says: 'The other cases: Merchant-heavy runs with no solve: its read is not evaluated. '
+      + 'Tight connection is not run: it changes something that is not one of the settings a shipped case may change.',
+  },
+}
+
+it('a pick card starts unticked and holds the ticks to its limit', async () => {
+  setPending(PICK)
+  render(<ConfirmationCard />)
+  expect(document.getElementById('chat-confirmation-title')!.textContent).toBe('Pick up to 2 of 3 cases to solve')
+  expect(ticks().map(t => t.checked)).toEqual([false, false, false])
+  expect(approve().disabled).toBe(true)
+  expect(screen.getByTestId('chat-change-set-none').textContent).toBe('Tick at least one case to solve.')
+  ticks().forEach(t => fireEvent.click(t))
+  const title = document.getElementById('chat-confirmation-title')!.textContent!
+  const overPick = screen.getByTestId('chat-change-set-over-pick').textContent!
+  expect(overPick).toBe('Tick at most 2 cases: the run has 2 solves for them.')
+  // UX (S-B2c): no line repeats the title, and none names an engine id.
+  expect(overPick).not.toContain(title)
+  expect(screen.getByTestId('chat-change-set-requirements').textContent).not.toContain('Pick up to')
+  expect(document.body.textContent).not.toMatch(/pick_max|ipp_|[0-9a-f]{12}/)
+  expect(approve().disabled).toBe(true)
+  fireEvent.click(ticks()[1])
+  expect(screen.queryByTestId('chat-change-set-over-pick')).toBeNull()
+  expect(approve().textContent).toBe('Run 2 cases')
+  fireEvent.click(approve())
+  await waitFor(() => expect(postChatConfirm).toHaveBeenCalledWith('session-1',
+    { token: 'token-1', decision: 'approve', ticked: ['tu-0', 'tu-2'] }))
+})

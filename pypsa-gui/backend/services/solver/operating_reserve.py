@@ -413,7 +413,8 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
             unknown.append(name)
         return s
 
-    held = pd.Series(0.0, index=sns)
+    # (name, kind, headroom) per unit: the terms `held` sums
+    parts: list[tuple[str, str, pd.Series]] = []
     avail = _avail(n, "Generator", sns, sel["dispatchable"])
     status = getattr(n.generators_t, "status", None)
     for g in sel["dispatchable"]:
@@ -428,7 +429,10 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
             if st is None:
                 continue
             cap = cap * st
-        held += cap - p
+        # Solver noise (a dispatch within _ABS of its cap) holds 0; a real overdraw stays negative, as in the
+        # LP row, so held and the units are one sum.
+        room = cap - p
+        parts.append((str(g), "generator", room.mask(room.abs() <= _ABS, 0.0)))
     su = n.storage_units
     su_t = n.storage_units_t
     w = n.snapshot_weightings["stores"].reindex(sns).astype(float)
@@ -450,9 +454,19 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
         cancel = soc / ws.where(
             ws > 0, np.nan
         )  # w·η_s = 0: no bound (as the LP's 0 ≤ soc)
-        held += np.minimum(np.minimum(power, energy), cancel.fillna(np.inf)).clip(
+        hold = np.minimum(np.minimum(power, energy), cancel.fillna(np.inf)).clip(
             lower=0.0
         )
+        parts.append((str(s), "storage_unit", hold))
+    # held is the exactly rounded sum of the units' headroom (order-free), so a binding hour's units add up
+    # to held_mw with `==`.
+    cols = np.array([v.to_numpy(dtype=float) for _, _, v in parts]).reshape(
+        len(parts), len(sns)
+    )
+    held = pd.Series(
+        [math.fsum(c) if np.isfinite(c).all() else float(c.sum()) for c in cols.T],
+        index=sns,
+    )
     req = a * _load_mw(n, sel["loads"], sns)
     for share, names in ((b, sel["pv"]), (c, sel["wind"])):
         if not share:
@@ -472,9 +486,18 @@ def operating_reserve_result(n, shares) -> dict[str, Any]:
     for t in sns:
         r, h = float(req[t]), float(held[t])
         binds = r > 0 and h - r <= _REL * r + _ABS
-        out["per_snapshot"].append(
-            {"snapshot": _label(t), "required_mw": r, "held_mw": h, "binding": binds}
-        )
+        row = {"snapshot": _label(t), "required_mw": r, "held_mw": h, "binding": binds}
+        if binds:
+            # Binding hours only (01d); a unit's headroom is what the sum above added, so the units add up to held_mw.
+            row["holders"] = sorted(
+                (
+                    {"name": name, "kind": kind, "held_mw": float(v[t])}
+                    for name, kind, v in parts
+                    if float(v[t]) != 0
+                ),
+                key=lambda x: (-x["held_mw"], x["name"]),
+            )
+        out["per_snapshot"].append(row)
         if binds:
             out["binding"].append(_label(t))
     return out
