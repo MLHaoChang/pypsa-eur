@@ -98,16 +98,25 @@ def test_a_file_that_is_not_a_cutout_is_a_value_error(tmp_path):
         CD.cutout_record(path)
 
 
-def test_an_empty_grid_is_a_value_error(tmp_path):
+@pytest.mark.parametrize(
+    "dims",
+    [
+        {"time": 1, "y": 0, "x": 2},
+        {"time": 1, "y": 2, "x": 0},
+        {"time": 0, "y": 2, "x": 2},
+    ],
+    ids=["no-y", "no-x", "no-time"],
+)
+def test_an_empty_grid_is_a_value_error(tmp_path, dims):
     import xarray as xr
 
     path = tmp_path / "era5_x_2023.nc"
     xr.Dataset(
-        {"v": (("time", "y", "x"), np.zeros((1, 0, 2)))},
+        {"v": (("time", "y", "x"), np.zeros((dims["time"], dims["y"], dims["x"])))},
         coords={
-            "time": pd.date_range("2023-01-01", periods=1),
-            "y": [],
-            "x": [1.0, 2.0],
+            "time": pd.date_range("2023-01-01", periods=dims["time"]),
+            "y": np.arange(dims["y"], dtype=float),
+            "x": np.arange(dims["x"], dtype=float),
         },
     ).to_netcdf(path)
     with pytest.raises(ValueError, match="empty"):
@@ -213,6 +222,8 @@ def _write_meta(d: Path, meta: dict) -> None:
         {"bbox": [5.0, 48.0, float("nan"), 55.0]},
         {"bbox": [5.0, 48.0, float("inf"), 55.0]},
         {"bbox": [True, 48.0, 12.0, 55.0]},
+        {"bbox": ["5", 48.0, 12.0, 55.0]},
+        {"bbox": [None, 48.0, 12.0, 55.0]},
         {"bbox": "5,48,12,55"},
         {"year": "2023"},
         {"year": True},
