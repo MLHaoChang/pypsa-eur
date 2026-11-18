@@ -1,0 +1,18 @@
+import { createRequire } from 'module'; const require = createRequire('/opt/node22/lib/node_modules/');
+const { chromium } = require('playwright');
+const fs = require('fs');
+const pw = fs.readFileSync('../appdata/dev-admin-password', 'utf8').trim();
+const b = await chromium.launch();
+const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+const p = await ctx.newPage();
+await p.goto('http://127.0.0.1:5173/');
+await p.fill('input[name=email]', 'admin@example.com');
+await p.fill('input[name=password]', pw);
+await p.click('button:has-text("Sign in")');
+await p.waitForTimeout(25000);
+console.log(p.url());
+await p.screenshot({ path: '../e2.png' });
+const btns = await p.locator('button:visible').evaluateAll(els => els.map(e => (e.innerText||'').trim().slice(0,40) + '|' + (e.getAttribute('aria-label')||'') + '|' + (e.title||'')));
+console.log(JSON.stringify(btns));
+await ctx.storageState({ path: '../state.json' });
+await b.close();

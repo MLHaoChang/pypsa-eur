@@ -9,7 +9,7 @@ Part of `.scratch/assistant-assurance/issues/10-metric-calculation-and-validity.
   - **Bug fix:** `_bridge` derived the period-weighting term from `cost_breakdown["total"]`, so on a single-period network any error in the total went into that term and the residual stayed 0. With a 10 EUR over-report, the residual read 0 and the adjustment read −10.
   - The wrapper now builds the term from the cost parts, using a new additive `_bridge` key, `reported_basis_eur`. The error now lands in the residual.
   - `/results/objective_decomposition` output is unchanged.
-  - `RESIDUAL_TOLERANCE = 1e-6`, relative, with a 1 EUR floor (`residual_tolerance()`).
+  - `RESIDUAL_TOLERANCE = 1e-6`, relative to max(1, |objective|), so never below 1e-6 EUR (`residual_tolerance()`).
 - **Penalty row.** The reported total includes the cost of slack generators (VOLL, DSR and the other slack carriers). Their share is read from `by_carrier`. A slack generator under an ordinary carrier makes the row unavailable (`not_separable`), never 0.
 - **`harness/objective_bridge_calculations.py`, `objective-bridge/1`**: network only, opt-in, whole run; a partial window is refused.
   - Rows, in bridge order: Solver objective, Total system cost, its penalty share, non-extendable fixed cost, period-weighting adjustment, reserve revenue, and the residual last.
