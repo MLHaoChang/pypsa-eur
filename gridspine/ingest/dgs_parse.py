@@ -19,9 +19,9 @@ tool exports it):
   ``name:0(t)``, ``name:1(t)``...; it comes back as one list column
   ``name``. Any other ``name:x`` column (a matrix's ``SIZECOL``, say) is
   kept as its own column under its full header name;
-- the same class may open more than once (our writer emits one
-  ``$$TypHmccur`` header per spectrum, since each vector has its own
-  length); its rows are merged into one table;
+- the same class may open more than once (another tool's file may repeat
+  a header; our writer emits one block per class); its rows are merged
+  into one table;
 - the ``General`` table carries ``Descr``/``Val`` pairs; its ``Version``
   must be 5.x.
 
