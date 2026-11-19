@@ -2,10 +2,17 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { FlowHeld } from '../../api/flow'
-import { PEAK_LOAD, SERIES_WORDS, groupTitle, heldFigure, heldGroups, heldHome, heldKind, heldRest } from './holdWords'
+import type { FlowHeld, FlowRecipe } from '../../api/flow'
+import { fieldWords } from '../../utils/flowItems'
+import { PEAK_LOAD, SERIES_WORDS, groupTitle, heldFigure, heldGroups, heldHome, heldKind, heldRest, RECIPE_FIELD } from './holdWords'
 
 const src = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf8')
+const HB: FlowRecipe = {
+  label: 'Haber-Bosch', product: { carrier: 'NH3', label: 'NH₃' }, per: 't', product_per: 5.166,
+  electricity: { value: 1277.5518, unit: 'kWh' },
+  inputs: [{ port: 2, carrier: 'H2', label: 'Hydrogen', value: 5.93, unit: 'MWh' }],
+}
+
 const held = (over: Partial<FlowHeld>): FlowHeld => ({
   component: 'Generator', entity: 'pv', carrier: null, field: 'p_nom', value: 5, unit: 'MW',
   extendable: false, series: false, ...over,
@@ -81,8 +88,38 @@ describe('where "Edit" goes, by kind', () => {
   it('a storage time series has no slot in the panel: its own editor', () => {
     expect(heldHome('profiles', held({ component: 'StorageUnit', entity: 'hydro', field: 'inflow' })).kind).toBe('drawer')
   })
-  it('a carrier has no Guided editor: Expert', () => {
-    expect(heldHome('carriers', held({ component: 'Carrier' }))).toEqual({ kind: 'expert' })
+  it('a carrier opens its own card in the drawer (gap 03)', () => {
+    expect(heldHome('carriers', held({ component: 'Carrier', entity: 'H2' }))).toEqual({ kind: 'drawer',
+      target: { section: 'carriers', panel: null, component: 'Carrier', entity: 'H2', field: null } })
+  })
+
+  it('a recipe row opens the recipe card in the drawer (gap 03)', () => {
+    expect(heldHome('carriers', held({ entity: 'haber_bosch', recipe: HB }))).toEqual({ kind: 'drawer',
+      target: { section: 'carriers', panel: null, component: 'Link', entity: 'haber_bosch', field: RECIPE_FIELD,
+        entityLabel: `${HB.label} recipe` } })
+  })
+
+  it("the recipe drawer's title names the recipe as the list does, never its Link id", () => {
+    const home = heldHome('carriers', held({ entity: 'haber_bosch', recipe: HB }))
+    const title = home.kind === 'drawer' ? fieldWords(home.target) : null
+    expect(title).toBe(`Carriers & processes › ${HB.label} recipe`)
+    expect(title).not.toContain('haber_bosch')
+  })
+})
+
+describe('section 2 recipe rows (gap 03)', () => {
+  it('group under "Recipes", after the carriers, in server order', () => {
+    const rows = [held({ component: 'Carrier', entity: 'H2' }), held({ entity: 'haber_bosch', recipe: HB }),
+      held({ entity: 'electrolyser', recipe: { ...HB, label: 'Electrolyser' } })]
+    const groups = heldGroups(rows)
+    expect(groups.map(g => [groupTitle(g.component), g.rows.map(r => r.entity)])).toEqual([
+      ['Carriers', ['H2']], ['Recipes', ['haber_bosch', 'electrolyser']]])
+  })
+
+  it('show the recipe in words and no class or id', () => {
+    const h = held({ entity: 'haber_bosch', recipe: HB })
+    expect(heldFigure('carriers', h)).toBe('5.93 MWh Hydrogen + 1,277.55 kWh electricity per t NH₃')
+    expect(heldKind(h)).toBe('')
   })
 })
 
