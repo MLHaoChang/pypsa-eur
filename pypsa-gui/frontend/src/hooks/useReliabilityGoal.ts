@@ -62,6 +62,16 @@ export function goalText(goal: ReliabilityGoal | null, k: GoalNumberField): stri
   return String(f.value)
 }
 
+/** The site type's goal (h/yr) the screens show while none is set: the
+ *  server's `assumed`, never recomputed here. A missing or non-number
+ *  `assumed`, or a goal that is set, reads as none (GK B 65). */
+export function assumedLole(goal: ReliabilityGoal | null): number | null {
+  const t = goal?.target_lole_h
+  if (!t || t.source !== 'default' || t.value != null) return null
+  const a: unknown = t.assumed
+  return typeof a === 'number' && Number.isFinite(a) ? a : null
+}
+
 /** The goal's name where a run or a readiness row asks for it: the run
  *  profile's intake field and the template ledgers' `lole_goal` row use the
  *  same words (parity test in EnvelopeSection.test.tsx). */

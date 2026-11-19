@@ -306,7 +306,10 @@ export interface GoalValue<T> { value: T; source: GoalSource }
 /** The project's one reliability goal (W3b-R) as every study resolves it.
  *  A `default` target or ENS of null is "the site type's own value". */
 export interface ReliabilityGoal {
-  target_lole_h: GoalValue<number | null>
+  /** `assumed`: the site type's own target (h/yr), sent with a `default`
+   *  source when nothing sets one (`reliability_goal.effective_goal`). The
+   *  screens name it; `assumedLole` reads it. */
+  target_lole_h: GoalValue<number | null> & { assumed?: number | null }
   ens_cap_permyriad: GoalValue<number | null>
   mc_draws: GoalValue<number>
   site_archetype: GoalValue<'strong_grid' | 'weak_flexible' | 'off_grid'>

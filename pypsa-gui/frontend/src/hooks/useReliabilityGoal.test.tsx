@@ -7,7 +7,8 @@ import type { ReactNode } from 'react'
 import { simulationApi } from '../api/simulation'
 import { useUIStore } from '../store/uiStore'
 import { goal } from '../test/fixtures/reliabilityGoal'
-import { goalPatchFromEdits, goalText, useReliabilityGoal } from './useReliabilityGoal'
+import { assumedLole, goalPatchFromEdits, goalText, useReliabilityGoal } from './useReliabilityGoal'
+import type { ReliabilityGoal } from '../api/flow'
 
 const getReliabilityGoal = vi.fn()
 vi.mock('../api/flow', async (importOriginal) => {
@@ -99,5 +100,25 @@ describe('useReliabilityGoal', () => {
     const sent = vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]
     expect(Object.keys(sent)).toEqual(['mc_draws'])
     await waitFor(() => expect(getReliabilityGoal).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('assumedLole (template-e2e 06, GK B 65)', () => {
+  const withAssumed = (assumed: unknown, over: Parameters<typeof goal>[0] = {}) => {
+    const g = goal(over)
+    return { ...g, target_lole_h: { ...g.target_lole_h, assumed } } as ReliabilityGoal
+  }
+  it('is the server\'s number, never recomputed', () => {
+    expect(assumedLole(withAssumed(3))).toBe(3)
+    expect(assumedLole(withAssumed(0))).toBe(0)
+  })
+  it.each([['missing', undefined], ['null', null], ['a string', '3'], ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY]])('reads %s as none', (_, a) => {
+    expect(assumedLole(withAssumed(a))).toBeNull()
+  })
+  it('is none once a goal is set (stored or template)', () => {
+    expect(assumedLole(withAssumed(3, { target_lole_h: [4, 'stored'] }))).toBeNull()
+    expect(assumedLole(withAssumed(3, { target_lole_h: [1.5, 'template'] }))).toBeNull()
+    expect(assumedLole(null)).toBeNull()
   })
 })

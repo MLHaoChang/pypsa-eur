@@ -7,8 +7,14 @@
 import type { ReactNode } from 'react'
 import type { ReliabilityGoal } from '../../api/flow'
 import {
-  goalPatchFromEdits, goalText, goalWords, GOAL_UNSET, MAX_GOAL_DRAWS, type GoalEdits, type GoalNumberField,
+  assumedLole, goalPatchFromEdits, goalText, goalWords, GOAL_UNSET, MAX_GOAL_DRAWS, type GoalEdits, type GoalNumberField,
 } from '../../hooks/useReliabilityGoal'
+import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { isAssumedItem } from '../../pages/hubDesign/AssumptionsCard'
+import {
+  GOAL_KEY_SITE_TYPE, GOAL_KEY_TEMPLATE, GOAL_KEY_TYPED,
+} from '../../pages/hubDesign/cards/goalCardWords'
+import { AssumedChip } from '../AssumedChip'
 import { Term } from '../../pages/hubDesign/shared/Term'
 import { useGuide } from '../GuidedTour'
 import { InfoTip } from '../../layout/properties/cardKit'
@@ -38,6 +44,7 @@ export function ReliabilityGoalEditor({
   // Guided's labels are glossary terms with their own hover; draws has none.
   const { data: guide } = useGuide()
   const fieldTip = (key: string): string | undefined => guide?.fields?.[key]
+  const lole = useLoleStanding(goal, edits)
 
   const label: Record<GoalNumberField, ReactNode> = guided ? {
     target_lole_h: <Term k="shortfall_hours">Allowed shortfall (hours per year)</Term>,
@@ -50,12 +57,19 @@ export function ReliabilityGoalEditor({
   }
   // An empty field reads what the goal says, the same in both modes and in
   // the Results summary: `not set`, `off`, or the default draws.
+  // The site type's assumed goal fills an empty allowed shortfall: the value
+  // the study certifies against until the user types one (template-e2e 06).
+  const assumed = assumedLole(goal)
   const placeholder = (k: GoalNumberField): string =>
     (k === 'mc_draws' ? goalWords(goal, k) || 'default' : GOAL_UNSET[k])
+  const shown = (k: GoalNumberField): string =>
+    goalText(goal, k) || (k === 'target_lole_h' && assumed !== null ? String(assumed) : '')
   const common = (k: GoalNumberField) => ({
     k, mode, label: label[k], placeholder: placeholder(k), disabled,
-    value: edits[k] ?? goalText(goal, k),
-    fromTemplate: !(k in edits) && goal?.[k].source === 'template',
+    value: edits[k] ?? shown(k),
+    // The allowed shortfall says where its value comes from with the chip.
+    fromTemplate: k !== 'target_lole_h' && !(k in edits) && goal?.[k].source === 'template',
+    standing: k === 'target_lole_h' ? lole : null,
     onChange: (v: string) => onChange({ ...edits, [k]: v }),
   })
   const show = (k: GoalNumberField) => fields.includes(k)
@@ -83,7 +97,43 @@ const HINT: Partial<Record<GoalNumberField, string>> = {
   mc_draws: `Samples of the sequential Monte Carlo every reliability study runs (1–${MAX_GOAL_DRAWS}).`,
 }
 
-function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromTemplate, onChange }: {
+/** Where the allowed shortfall's value comes from, for its chip: typed (or
+ *  saved) by the user, the template's, or the site type's assumed goal; null
+ *  with no value at all. Kept: the user confirmed the template's value with
+ *  "Keep all defaults" (its `assumed_*` flow item is acknowledged). */
+type LoleStanding = { typed: true } | { typed: false; from: 'template' | 'site_type'; value: number; kept: boolean }
+
+function useLoleStanding(goal: ReliabilityGoal | null, edits: GoalEdits): LoleStanding | null {
+  const { flow } = useProjectFlow()
+  const t = goal?.target_lole_h
+  if (!t) return null
+  if ('target_lole_h' in edits) {
+    if ((edits.target_lole_h ?? '').trim() !== '') return { typed: true }
+  } else if (t.source === 'stored' && t.value != null) return { typed: true }
+  const kept = (flow?.sections ?? []).some(s => s.items.some(it =>
+    isAssumedItem(it) && it.target.field === 'target_lole_h' && it.acknowledged))
+  if (t.source === 'template' && t.value != null) return { typed: false, from: 'template', value: t.value, kept }
+  const assumed = assumedLole(goal)
+  return assumed === null ? null : { typed: false, from: 'site_type', value: assumed, kept }
+}
+
+function LoleChip({ testId, standing }: { testId: string; standing: LoleStanding }) {
+  const typed = standing.typed
+  return (
+    <span className="flex flex-col gap-0.5 text-[10px]">
+      <AssumedChip testId={`${testId}-assumed`} typed={typed}
+        confirmed={!standing.typed && standing.kept}
+        source={standing.typed ? null : standing.from === 'template' ? 'Project template' : 'Site type'}
+        note={standing.typed ? null : `${standing.value} h/yr`} />
+      <span data-testid={`${testId}-key`} className="text-muted">
+        {standing.typed ? GOAL_KEY_TYPED
+          : standing.from === 'template' ? GOAL_KEY_TEMPLATE : GOAL_KEY_SITE_TYPE}
+      </span>
+    </span>
+  )
+}
+
+function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromTemplate, standing, onChange }: {
   k: GoalNumberField
   mode: 'guided' | 'expert'
   testId: string
@@ -92,6 +142,7 @@ function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromT
   value: string
   disabled: boolean
   fromTemplate: boolean
+  standing: LoleStanding | null
   onChange: (v: string) => void
 }) {
   const guided = mode === 'guided'
@@ -115,6 +166,7 @@ function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromT
           From the project template
         </span>
       )}
+      {standing && <LoleChip testId={testId} standing={standing} />}
     </label>
   )
 }
