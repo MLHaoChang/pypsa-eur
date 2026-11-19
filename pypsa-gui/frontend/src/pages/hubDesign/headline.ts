@@ -69,7 +69,7 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
       // is the first thing that would settle it.
       const unread = [...new Set(pk.flatMap((p) => p.no_data ?? []))]
       if (unread.length) {
-        return `${cut} (the outage rate of ${names(unread)} is not known, so it is taken as always out), over the ${g(target)} h/yr goal: outage data for ${names(unread)}, a second feeder or a more reliable one would settle it.`
+        return `${cut}, against the ${g(target)} h/yr goal. ${names(unread)}'s outage rate${unread.length > 1 ? 's are' : ' is'} not known, so ${unread.length > 1 ? 'they are' : 'it is'} taken as always out. Outage data for ${names(unread)}, a second feeder or a more reliable one would settle it.`
       }
       return `${cut} (${pk.length > 1 ? 'their' : 'its'} own backup not counted), over the ${g(target)} h/yr goal: a second feeder or a more reliable one would settle it.`
     }

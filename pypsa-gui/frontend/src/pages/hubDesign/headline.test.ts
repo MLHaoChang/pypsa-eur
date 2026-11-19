@@ -81,10 +81,10 @@ describe('headline (§5.5)', () => {
       feeder_bound: { pockets: [{ buses: ['crit'], feeders: ['crit_feeder'], no_data: ['crit_feeder'],
         bound_h_per_year: 8760 }], chained: [] } })
     const text = headline(rv, report())
-    expect(text).toMatch(/^Not decided: Crit could be cut off up to 8760\.0 h\/yr while Crit feeder is out/)
-    expect(text).toMatch(/outage rate of Crit feeder is not known/)
-    expect(text).toMatch(/outage data for Crit feeder/)
-    expect(text).not.toMatch(/own backup/)
+    // UX 2 (4): cause first, no bracket, three sentences.
+    expect(text).toBe('Not decided: Crit could be cut off up to 8760.0 h/yr while Crit feeder is out, '
+      + 'against the 3 h/yr goal. Crit feeder\'s outage rate is not known, so it is taken as always out. '
+      + 'Outage data for Crit feeder, a second feeder or a more reliable one would settle it.')
   })
 
   it('inconclusive held by a chained feeder says it cannot be bounded', () => {
