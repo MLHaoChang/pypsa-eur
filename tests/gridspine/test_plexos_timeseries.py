@@ -152,6 +152,7 @@ def test_monthly_layout_gives_each_snapshot_its_months_value():
         ("A,1,nan,3,4,5,6,7,8,9,10,11,12\n", "value 'nan' at M2 is not a number"),
         ("A,1,2,inf,4,5,6,7,8,9,10,11,12\n", "value 'inf' at M3 is not a number"),
         ("A,1,2,3,4,5,6,7,8,9,10,11,\n", "value '' at M12 is not a number"),
+        ("A,1,2\n", "value '' at M3 is not a number"),
     ],
 )
 def test_monthly_layout_refusals(rows, reason):
@@ -221,6 +222,26 @@ def test_month_day_period_leap_day():
 def test_month_day_period_refusals(body, snaps, step, reason):
     """GK A C1: file step from periods per day, a finer and a coarser one refused."""
     assert series(body, snaps=snaps, step=step)["A"] == reason
+
+
+def test_monthly_layout_partly_covered_snapshot_and_row_cap(monkeypatch):
+    days = pd.date_range("2015-01-31 12:00", periods=2, freq="D")
+    got = series(MONTHLY + "A,1,2,3,4,5,6,7,8,9,10,11,12\n", snaps=days, step=1440)
+    assert got["A"] == (
+        "pattern 'M1' covers snapshot 2015-01-31 12:00:00 only partly; not rounded"
+    )
+    body = MONTHLY + "A,1,2,3,4,5,6,7,8,9,10,11,12\nB,1,2,3,4,5,6,7,8,9,10,11,12\n"
+    monkeypatch.setattr("gridspine.ingest.plexos_csv.MAX_CSV_ROWS", 2)
+    assert series(body, snaps=JAN_FEB)["A"].tolist() == [1, 1, 2, 2]
+    monkeypatch.setattr("gridspine.ingest.plexos_csv.MAX_CSV_ROWS", 1)
+    assert series(body, snaps=JAN_FEB)["A"] == "more than 1 rows; not read"
+
+
+def test_month_day_period_empty_and_period_zero():
+    assert series("Month,Day,Period,A\n")["A"] == (
+        "file has no value for 3 of 3 snapshots, first 2015-01-01 00:00:00"
+    )
+    assert series("Month,Day,Period,A\n1,1,0,5\n")["A"] == "period 0 is below 1"
 
 
 def test_month_day_period_with_matching_half_hours():

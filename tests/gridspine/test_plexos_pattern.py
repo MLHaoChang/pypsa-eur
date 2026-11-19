@@ -91,3 +91,11 @@ def test_pattern_reader_loads_without_pypsa():
         "import gridspine.ingest.plexos_pattern"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_mask_passes_on_why_and_takes_no_snapshots():
+    assert mask("Y1", pd.DatetimeIndex(["2017-01-01"]), 60) == (
+        "pattern symbol 'Y' not read (read are M, W, D, H)"
+    )
+    assert mask("H1", pd.DatetimeIndex([]), 60).tolist() == []
+    assert parse("   ") == "empty pattern"

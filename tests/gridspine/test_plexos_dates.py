@@ -88,6 +88,7 @@ def test_midnight_date_to_covers_that_whole_day():
     )
     p = p_set(conv)
     assert p["2015-01-01 23:00"] == 20 and p["2015-01-02 00:00"] == 10
+    assert ("dated rows", "Date To", MIDNIGHT) in assumed(conv)
 
 
 def test_date_to_with_a_time_includes_the_snapshot_starting_at_it():
@@ -119,6 +120,7 @@ def test_date_to_with_a_time_includes_the_snapshot_starting_at_it():
             "not rounded",
         ),
         (dated("soon"), "Date From 'soon' not read"),
+        (dated(date_to="soon"), "Date To 'soon' not read"),
     ],
 )
 def test_date_inside_a_snapshot_is_refused(when, reason):
@@ -346,6 +348,21 @@ def test_timeslice_name_is_the_pattern_only_without_a_pattern_row():
         ),
         (
             [("Timeslice", "T")],
+            [include("T", "H1", date_to="2015-01-01")],
+            "timeslice 'T': its pattern row is dated, tagged or banded; not read",
+        ),
+        (
+            [("Timeslice", "T")],
+            [include("T", "H1", band=2)],
+            "timeslice 'T': its pattern row is dated, tagged or banded; not read",
+        ),
+        (
+            [("Timeslice", "T")],
+            [include("T", "  ")],
+            "timeslice 'T': its pattern row gives no single pattern",
+        ),
+        (
+            [("Timeslice", "T")],
             [include("T", "H8-9")],
             "timeslice 'T': pattern 'H8-9': pattern 'H8-9' covers snapshot "
             "2015-01-01 06:00:00 only partly; not rounded",
@@ -367,6 +384,8 @@ def test_unusable_timeslice_leaves_the_group_unmapped(objects, rows, reason):
     )
     assert conv.network.loads.empty
     assert set(unmapped_reason(conv, "Node 'A'")) == {reason}
+    if not rows:  # a Timeslice without rows is still listed, with why
+        assert (f"Timeslice '{name}'", reason.split(": ", 1)[1]) in reasons(conv)
 
 
 # ------------------------------------------------------------- Q3, scenarios
@@ -431,3 +450,85 @@ def test_world_fixture_has_no_dated_or_timesliced_rows():
 def test_unused_timeslice_rows_are_unmapped():
     conv = run(model(objects=[("Timeslice", "T")], rows=[include("T", "H1")], files=()))
     assert ("Timeslice 'T' (Include)", "no imported row uses it") in reasons(conv)
+
+
+def test_two_timeslices_on_one_row_fail_closed():
+    conv = run(
+        model(
+            objects=[("Timeslice", "H1"), ("Timeslice", "H2")],
+            rows=[
+                ("Node", "A", "Load", 10, "MW"),
+                (
+                    "Node",
+                    "A",
+                    "Load",
+                    20,
+                    "MW",
+                    {
+                        "tags": [
+                            Tag("Timeslice", "H1", None),
+                            Tag("Timeslice", "H2", None),
+                        ]
+                    },
+                ),
+            ],
+            files=(),
+        )
+    )
+    assert set(unmapped_reason(conv, "Node 'A'")) == {
+        "2 timeslices on one row; none used"
+    }
+
+
+def test_other_timeslice_properties_are_unmapped_when_the_pattern_is_used():
+    conv = run(
+        model(
+            objects=[("Timeslice", "Day")],
+            rows=[
+                include("Day", "H9-20"),
+                ("Timeslice", "Day", "Weight", 1, "-"),
+                ("Node", "A", "Load", 10, "MW"),
+                ("Node", "A", "Load", 20, "MW", sliced("Day")),
+            ],
+            files=(),
+        )
+    )
+    assert conv.ledger.dest[("t_data", "2")] == "network"
+    assert ("Timeslice 'Day' (Weight)", "Timeslice property 'Weight' not read") in (
+        reasons(conv)
+    )
+
+
+def test_midnight_date_to_ending_inside_a_snapshot_is_refused():
+    """GK A D1/D2: a 3 h horizon from 01:00, so midnight falls inside a snapshot."""
+    m = three_hourly(
+        rows=[
+            ("Node", "A", "Load", 10, "MW"),
+            ("Node", "A", "Load", 20, "MW", dated(date_to="2015-01-01T00:00:00")),
+        ]
+    )
+    for a in m.attributes:
+        if a.name == "Chrono Date From":
+            object.__setattr__(a, "value", 42005 + 1 / 24)
+    conv = run(m)
+    assert set(unmapped_reason(conv, "Node 'A'")) == {
+        "end of Date To 2015-01-02 00:00:00 falls inside snapshot "
+        "2015-01-01 22:00:00; not rounded"
+    }
+
+
+def test_no_horizon_leaves_dated_rows_and_timeslices_unmapped():
+    from tests.gridspine.test_plexos_import import build
+    from tests.gridspine.test_plexos_timeseries import run as run_any
+
+    m = build(
+        [("Node", "A"), ("Timeslice", "H1")],
+        [
+            ("Node", "A", "Load", 10, "MW"),
+            ("Node", "A", "Load", 20, "MW", dated("2015-01-02T00:00:00")),
+            ("Node", "A", "Load", 30, "MW", sliced("H1")),
+        ],
+    )
+    conv = run_any(m)
+    assert set(unmapped_reason(conv, "Node 'A'")) == {"the network has no time horizon"}
+    assert ("Timeslice 'H1'", "the network has no time horizon") in reasons(conv)
