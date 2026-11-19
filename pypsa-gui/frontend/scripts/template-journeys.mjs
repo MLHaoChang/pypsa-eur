@@ -118,7 +118,9 @@ async function journey(t) {
       await L.goSection(ctx, 'Readiness and run')
       await page.getByTestId('hub-design-panel').getByText(/\d+ to do, \d+ to check|0 to do/).first().waitFor({ timeout: 90000 })
       texts[9] = await panelText(ctx)
-      await page.getByTestId('hub-run-start').waitFor()  // present (maybe disabled) whatever the gaps do
+      // present (maybe disabled) whatever the gaps do; a site with no study renders the optimisation Run instead
+      await page.getByTestId(t.run === false ? 'hub-run-solve' : 'hub-run-start').waitFor()
+      if (t.run === false) await page.getByTestId('hub-run-solve-why').waitFor()
     })
 
     // Expected failures (step 1 gaps). Each predicate is the issue's acceptance, as a conjunction, so a
@@ -209,10 +211,10 @@ async function journey(t) {
     if (t.run === false) {
       // A generation-only site has no study to run: Guided says so and keeps Run off (not a gap in the template, see the PR note).
       await L.step(ctx, 'run is not offered and the reason is named', async () => {
-        assert.match(texts[9], /Not offered for this site/)
         await L.goSection(ctx, 'Readiness and run')
-        await page.getByTestId('hub-run-out-of-scope-why').waitFor()
-        assert.ok(await page.getByTestId('hub-run-start').isDisabled(), 'Run is enabled')
+        await page.getByTestId('hub-run-solve-why').waitFor()
+        assert.match(await page.getByTestId('hub-run-solve-why').innerText(), /no reliability study/i)
+        assert.equal(await page.getByTestId('hub-run-start').count(), 0, 'the study Run is offered')
       })
       assert.equal(ctx.problems.length, 0, `page errors: ${ctx.problems.slice(0, 2).join(' | ')}`)
       return ctx

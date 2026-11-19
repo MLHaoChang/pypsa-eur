@@ -3,7 +3,7 @@
 
 # SC-05 — optional integrated Blender generation and reviewed return
 
-Status: ready-for-agent (slice (a) #1561; slice (b), the backend reviewed return, on `claude/site-scene-06b`; slice (c), the review UI, still to build; see the 2026-11-17 comments)
+Status: ready-for-agent (slice (a) #1561; slice (b), the backend reviewed return, on `claude/site-scene-06b`; slice (c), the review UI, still to build; see the 2026-11-17 comments); audit 2026-11-19: slices a and b merged (#1557, #1561, #1619); left: slice c, the review UI
 Type: task
 Dependencies: SC-04; SC-00 worker/protocol/resource evidence
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
