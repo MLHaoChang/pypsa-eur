@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from smoke.json_fragments import extend, named_with_file
 from tests.golden import coverage as cov
 
 
@@ -177,6 +178,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_eh_study"):                    frozenset(),
     ("routers/results.py", "post_eh_study"):                   frozenset(),
     ("routers/results.py", "post_eh_study_abort"):             frozenset(),
+    ("routers/results.py", "get_eh_study_why"):                frozenset(),  # guided-results 02a: quotes the record's figures, derives no €
     # EH reference-design fragments (report / tables). No economics SURFACES —
     # same adequacy-style € derivation as get_adequacy / get_frontier above.
     ("routers/results.py", "get_eh_reference_design"):         frozenset(),
@@ -354,13 +356,38 @@ def _scan_route_handlers() -> set[tuple[str, str]]:
     return found
 
 
+# A new route handler declares its surfaces as a fragment instead of a row in
+# ROUTE_SURFACES above (RETRO-FRAG-1): `golden_route_surfaces.d/<branch>.json`,
+# format in that folder's README. A fragment adds rows; one naming a row above fails.
+ROUTE_SURFACES_FILE = pathlib.Path(__file__).with_name("golden_route_surfaces.json")
+PYTHON_ROUTE_SURFACES = ROUTE_SURFACES
+
+
+def _surface_row(key, surfaces):
+    file, sep, fn = key.partition("::")
+    if not (sep and file.startswith("routers/") and file.endswith(".py") and fn.isidentifier()):
+        raise ValueError(f'a key is "routers/<file>.py::<handler>", not {key!r}')
+    if not (isinstance(surfaces, list) and all(isinstance(x, str) for x in surfaces)):
+        raise ValueError("surfaces is a list of coverage.SURFACES ids ([] for none)")
+    return (file, fn), frozenset(surfaces)
+
+
+def route_surfaces(base: pathlib.Path = ROUTE_SURFACES_FILE) -> dict[tuple[str, str], frozenset[str]]:
+    """ROUTE_SURFACES: the rows above plus the fragments'."""
+    return extend(PYTHON_ROUTE_SURFACES, base, "routes", _surface_row)
+
+
+ROUTE_SURFACES = route_surfaces()
+
+
 def test_every_route_handler_is_declared_in_the_surfaces_allowlist():
     scanned = _scan_route_handlers()
     declared = set(ROUTE_SURFACES)
     assert scanned == declared, (
         "routers/{results,simulation,compare,asset_results}.py route "
         "handlers drifted from ROUTE_SURFACES in this file -- new routes: "
-        f"{scanned - declared}, routes removed/renamed: {declared - scanned}. "
+        f"{scanned - declared}, routes removed/renamed: "
+        f"{named_with_file(ROUTE_SURFACES_FILE, ('routes',), [f'{f}::{n}' for f, n in sorted(declared - scanned)])}. "
         "Add (or remove) the entry, and if it's a new economics endpoint "
         "give it a coverage.SURFACES id (or an empty frozenset with a "
         "reason if it deliberately reports none)."

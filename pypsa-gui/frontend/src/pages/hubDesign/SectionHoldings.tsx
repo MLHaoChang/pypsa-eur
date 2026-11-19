@@ -21,11 +21,11 @@ function Row({ section, h }: { section: FlowSectionId; h: FlowHeld }) {
   const figure = heldFigure(section, h)
   return (
     <li data-testid="section-held" className="flex items-baseline gap-2 py-0.5 text-[12px] text-text">
-      <span className="min-w-0 flex-1 truncate" title={h.entity}>{h.entity}</span>
-      <span className="shrink-0 text-muted">{heldKind(h)}</span>
+      <span className="min-w-0 flex-1 truncate" title={h.recipe ? undefined : h.entity}>{h.recipe?.label ?? h.entity}</span>
+      {!h.recipe && <span className="shrink-0 text-muted">{heldKind(h)}</span>}
       {figure && <span className="shrink-0 text-muted">{figure}</span>}
       <button type="button" data-testid="section-held-edit"
-        aria-label={`Edit ${h.entity}${section === 'profiles' && figure ? `, ${figure}` : ''}`}
+        aria-label={`Edit ${h.recipe ? `${h.recipe.label} recipe` : h.entity}${section === 'profiles' && figure ? `, ${figure}` : ''}`}
         onClick={() => edit(section, h)}
         className="shrink-0 text-[11px] text-muted hover:text-accent">
         Edit ›

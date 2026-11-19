@@ -100,6 +100,8 @@ def asset_cost_rows(n, *, discount_rate: float | None = None, keep=None) -> list
     EUR per unit of the sizing variable (`basis`); `capital_cost` and `fom_cost` are the asset's annual columns
     as stored (derived where the asset is priced by parts). `keep(component_class, names)` filters the names
     (the routes drop solver scaffolding)."""
+    from services.asset_schema.fields import on_tonne_bus
+
     out = []
     for cls, (size_col, basis) in SIZING.items():
         df = getattr(n, CLASS_ATTR[cls])
@@ -114,6 +116,7 @@ def asset_cost_rows(n, *, discount_rate: float | None = None, keep=None) -> list
             out.append({
                 "component": cls, "name": str(name), "carrier": str(row.get("carrier", "") or ""),
                 "basis": f"EUR/{basis}", "size_column": size_col, "size": _finite(size),
+                "tonne_bus": on_tonne_bus(n, cls, str(name)),
                 "extendable": bool(row.get(f"{size_col}_extendable", False)),
                 "parts": [{"name": p.name, "upfront_per_unit": _finite(p.upfront_per_unit),
                            "lifetime": _finite(p.lifetime), "fom_share": _finite(p.fom_share),

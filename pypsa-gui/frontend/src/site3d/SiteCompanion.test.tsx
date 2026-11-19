@@ -35,6 +35,22 @@ describe.each(['guided', 'expert'] as const)('Site 3D companion row (%s)', mode 
     expect(seed()).toBe('Explain OSM building 7, selected in the Generate part of the site “Campus” in Site 3D.')
   })
 
+  it('in the Results part, Explain these results names the Site, the building and the snapshot, no ids (S6c)', () => {
+    const { rerender } = render(<SiteCompanion siteName="Campus" part="results" selected={osm} snapshot="2030-03-03 14:00" />)
+    expect(screen.getByTestId('site-companion-explain').textContent).toBe('Explain these results')
+    fireEvent.click(screen.getByTestId('site-companion-explain'))
+    expect(seed()).toBe('Explain these results: the Results part of the site “Campus” in Site 3D, '
+      + 'OSM building 7 selected, at 2030-03-03 14:00.')
+    expect(seed()).not.toContain('osm:7')
+    // The results panel's own name for the building wins, so the prefill and the panel agree.
+    rerender(<SiteCompanion siteName="Campus" part="results" selected={osm} resultsName="Building 1" snapshot={null} />)
+    fireEvent.click(screen.getByTestId('site-companion-explain'))
+    expect(seed()).toBe('Explain these results: the Results part of the site “Campus” in Site 3D, Building 1 selected.')
+    rerender(<SiteCompanion siteName="Campus" part="results" selected={null} />)
+    fireEvent.click(screen.getByTestId('site-companion-explain'))
+    expect(seed()).toBe('Explain these results: the Results part of the site “Campus” in Site 3D.')
+  })
+
   it('labels name their target: the selection, else the part tab', () => {
     const { rerender } = render(<SiteCompanion siteName="Campus" part="model" selected={null} />)
     expect(screen.getByTestId('site-companion-explain').textContent).toBe('Explain Model')

@@ -1,0 +1,1 @@
+{"kinds": {"study_not_run": {"surface": "inline", "why": "GET /api/results/eh_study/why/{figure} has no finished Energy Hub study to explain: none was run in this session (404) or one is still running (409). The model says the study has not run (or is running) and offers to start it or to wait, then asks again."}}}
