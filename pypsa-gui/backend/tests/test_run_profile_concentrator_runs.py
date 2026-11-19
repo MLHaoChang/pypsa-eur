@@ -91,9 +91,11 @@ def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site, monke
     from harness import run_handoff
 
     # The per-tool deadline guards a hung handler; this test reads whether the
-    # run reaches the hand-off. solve_queue_enqueue fingerprints the one-year
-    # network twice (`run_envelope.identity`, ~9 s locally), which a loaded CI
-    # runner pushed past the 30 s default twice (tool_timeout at solve.1).
+    # run reaches the hand-off. solve_queue_enqueue's solve_capture ->
+    # run_envelope.identity hashes the 8760 h network through
+    # `_exact_frame_json` twice (~9 s locally), which a shared CI runner pushed
+    # past the 30 s default twice (tool_timeout at solve.1). GK A (32), option A;
+    # the cost itself is .scratch/harness/issues/225 (GK B).
     monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 120.0)
     from services import run_envelope
 
