@@ -137,7 +137,10 @@ export function elccSize(r: { kind: string; nameplate_mw: number }, installed?: 
   const peak = `${trim(r.nameplate_mw)} MW peak`
   // GK A 30 A6: the MC's own capacity; a sizable unit no solve built is 0 MW.
   if (installed?.basis === 'not_built') return `not built by the solve · ${peak}`
-  return installed?.mw != null ? `${trim(installed.mw)} MW installed · ${peak}` : peak
+  if (installed?.mw == null) return peak
+  // A solve's size is what the solve chose, not something installed (GK B3 (3)).
+  const how = installed.basis === 'p_nom_opt' ? 'sized by the last solve' : 'installed'
+  return `${trim(installed.mw)} MW ${how} · ${peak}`
 }
 
 /** What an ELCC share is a share of: a vre credit is priced against its peak. */
@@ -490,7 +493,7 @@ export function McPanel() {
             are hours and megawatt-hours, not euros.
           </p>
 
-          <ReliabilityGoalSummary testId="mc-goal" items={['target', 'mc_budget']} />
+          <ReliabilityGoalSummary testId="mc-goal" items={['target', 'mc_budget']} mcBudget={result?.draws ?? null} />
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => run.mutate()} disabled={running}

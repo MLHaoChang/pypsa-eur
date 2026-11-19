@@ -27,10 +27,9 @@ const MC = { status: 'done', error: null, started_at: 1, finished_at: 2, result:
   elcc_installed: { 'Wind-North': { mw: 6, basis: 'p_nom' }, 'Solar-East': { mw: 4, basis: 'p_nom_opt' }, 'Solar-New': { mw: 0, basis: 'not_built' } },
 } }
 const SIZING = { status: 'ok', payload: { by_carrier: {}, total_p_nom_mw: 6.7, assets: [
-  { component: 'Generator', name: 'diesel_new', carrier: 'diesel', built_mw: 4.2, min_mw: 0, max_mw: 12 },
+  // The project's own extendable assets, so each row reads its unit from section 5.
+  { component: 'Generator', name: 'genset_new', carrier: 'gas', built_mw: 4.2, min_mw: 0, max_mw: 12 },
   { component: 'StorageUnit', name: 'bess_new', carrier: 'battery', built_mw: 2.5, min_mw: 0, max_mw: 15, max_hours: 4, built_mwh: 10 },
-  { component: 'Generator', name: 'genset_new', carrier: 'gas', built_mw: 0, min_mw: 0, max_mw: 8 },
-  { component: 'Store', name: 'h2_store', carrier: 'H2', built_mwh: -0, min_mwh: 0, max_mwh: 40 },
 ] } }
 const REPORT = { archetype: 'strong_grid', pack_hash: 'x', assumptions_hash: 'y', ens_cap_permyriad: 0.5, achieved_ens_permyriad: 0.3,
   mc_lole_h: 2.1, certified: true, cost_at_target_eur: 1.2e6, period_basis: 'year', completeness: { sizing: 'ok' },

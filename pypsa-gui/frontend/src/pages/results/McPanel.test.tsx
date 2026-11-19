@@ -515,8 +515,9 @@ describe('mcGoalText', () => {
 
 describe('elccSize', () => {
   it('says a vre figure is its peak and puts the installed MW beside it', () => {
+    // A solve's size is what the solve chose, not something installed (GK B3 (3) 2).
     expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 }, { mw: 6, basis: 'p_nom_opt' }))
-      .toBe('6 MW installed · 4.85 MW peak')
+      .toBe('6 MW sized by the last solve · 4.85 MW peak')
     expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 }, { mw: 6, basis: 'p_nom' }))
       .toBe('6 MW installed · 4.85 MW peak')
     expect(elccSize({ kind: 'vre', nameplate_mw: 4.85 })).toBe('4.85 MW peak')
@@ -552,6 +553,16 @@ describe('McPanel goal verdict', () => {
       'Samples the network as it stands: an asset a solve sizes counts at the last solve\'s size, '
       + 'and as 0 MW until a solve builds it; the Guided verdict uses the sized design.')
     expect(screen.getByTestId('elcc-size-Wind-North').textContent).toMatch(/6 MW installed · .* MW peak/)
+  })
+
+  it('a finished run states its own draws, not the defaults (GK B3 (3) 3)', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue({
+      ...DONE,
+      result: { ...DONE.result!, draws: { first_batch: 400, max: 1600, cov_target: 0.025 } },
+    })
+    await openPanel()
+    await waitFor(() => expect(screen.getByTestId('mc-goal-values').textContent).toBe(
+      'allowed shortfall not set · MC draws 400 first, then more until the estimate\'s spread is under 2.5 %, up to 1,600'))
   })
 
   it('shows no verdict when no goal applies', async () => {
