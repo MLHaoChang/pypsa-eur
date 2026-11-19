@@ -179,7 +179,7 @@ def format_record(num, mid, model, values):
     if missing:
         raise ContractError(f"{model} at bus {num}: {missing} missing; a zero here is a plausible wrong control")
     head = f"{num:>6d} '{model}' '{mid:<2s}'" + "".join(f"{int(values[n]):6d}" for n in icon_names)
-    return head + " " + "".join(f"{float(values[n]):10.5f}" for n in con_names) + " /"
+    return head + " " + "".join(_con(float(values[n])) for n in con_names) + " /"
 
 
 #: Every model this writer emits, pinned: model -> (ICON count, CON count,
@@ -410,11 +410,7 @@ def write_dyr(
         if not synchronous:
             if ibr is None or unit_id not in ibr.index:
                 continue
-            row = ibr.loc[unit_id]
-            _check_base(unit_id, row["mbase_mva"], mbase)
-            lines += _ibr_lines(unit_id, num, mid, row, version, repc.get(unit_id))
-            if _has(row, WECC_GROUPS["repca1"][:1]):
-                controlled.add(unit_id)
+            lines += _converter(unit_id, num, mid, mbase, ibr.loc[unit_id], version, repc, controlled)
             written[unit_id] = num
             continue
         if unit_id not in unit_params.index:
@@ -442,14 +438,51 @@ def write_dyr(
             cons.append(float(v))
         lines.append(
             f"{num:>6d} '{model}' '{mid:<2s}' "
-            + "".join(f"{c:10.5f}" for c in cons)
+            + "".join(_con(c) for c in cons)
             + " /"
         )
         written[unit_id] = num
 
-    stray = sorted(set(repc) - controlled)
-    if stray:
-        raise ContractError(f"PoC branch given for {stray}, which write no REPCA1 record")
+    _check_stray(repc, controlled)
     with open(path, "w", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     return written
+
+
+def _converter(unit_id, num, mid, mbase, row, version, repc, controlled):
+    """One converter's records; a unit with a REPCA1 group joins ``controlled``."""
+    _check_base(unit_id, row["mbase_mva"], mbase)
+    lines = _ibr_lines(unit_id, num, mid, row, version, repc.get(unit_id))
+    if _has(row, WECC_GROUPS["repca1"][:1]):
+        controlled.add(unit_id)
+    return lines
+
+
+def _check_stray(repc, controlled):
+    stray = sorted(set(repc) - controlled)
+    if stray:
+        raise ContractError(f"PoC branch given for {stray}, which write no REPCA1 record")
+
+
+def converter_records(net, ibr: pd.DataFrame, version=35, poc=None) -> tuple:
+    """
+    The converter records ``write_dyr`` would write, and nothing else, for a
+    caller that writes its own synchronous records (the PSS/E pack appends
+    these to the campus bundle's GENSAL/SEXS/DEGOV1/GENCLS records).
+
+    Returns ``(lines, written, repc)``: the record lines in RAW machine order,
+    unit_id -> bus number, and unit_id -> ``(BUSR, BUS1, BUS2, CKT)`` for each
+    REPCA1. Same checks as ``write_dyr``: version, PoC branches, MBASE, every
+    field present.
+    """
+    if version not in DYR_VERSIONS:
+        raise ContractError(f".dyr version {version!r} not supported; supported {DYR_VERSIONS}")
+    repc = _poc_ids(net, poc)
+    lines, written, controlled = [], {}, set()
+    for unit_id, num, mid, mbase, synchronous in _machines(net):
+        if synchronous or unit_id not in ibr.index:
+            continue
+        lines += _converter(unit_id, num, mid, mbase, ibr.loc[unit_id], version, repc, controlled)
+        written[unit_id] = num
+    _check_stray(repc, controlled)
+    return lines, written, repc

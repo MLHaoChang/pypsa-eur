@@ -392,6 +392,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # Energy Hub reference-design surfaces — structured reports /
         # comparison tables / study lifecycle status, no snapshot series.
         "/eh_study",
+        # guided-results 02a: the provenance walk of one study figure, steps not a series.
+        "/eh_study/why/{figure}",
         "/eh_reference_design",
         "/eh_readiness",
         "/eh_review",
