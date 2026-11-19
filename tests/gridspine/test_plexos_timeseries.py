@@ -127,6 +127,11 @@ def test_year_month_day_period_layout():
     assert series(body, snaps=half, step=30)["A"].tolist() == [10, 20, 30]
     bad = "Year,Month,Day,Period,A\n2015,1,1,25,1\n"
     assert "period 25 outside 1..24" in series(bad)["A"]
+    # GK A N2: an infinite key is refused, never cast to int
+    inf = "Year,Month,Day,Period,A\ninf,1,1,1,1\n"
+    assert series(inf)["A"] == "Year 'inf' is not a whole number"
+    inf = "Year,Month,Day,Period,A\n2015,1,1,-inf,1\n"
+    assert series(inf)["A"] == "Period '-inf' is not a whole number"
 
 
 MONTHLY = "NAME,M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11,M12\n"
@@ -211,6 +216,18 @@ def test_month_day_period_leap_day():
             "month 1 day 2 has 1 periods, other days 24; periods per day differ",
         ),
         (_mdp([(2, 30)]), HOURS[:3], 60, "month 2 day 30 is not a date"),
+        (
+            "Month,Day,Period,A\n1,1,inf,5\n",
+            HOURS[:3],
+            60,
+            "Period 'inf' is not a whole number",
+        ),
+        (
+            "Month,Day,Period,A\n1,-inf,1,5\n",
+            HOURS[:3],
+            60,
+            "Day '-inf' is not a whole number",
+        ),
         (
             "Month,Day,Period,A\n1,1,x,5\n",
             HOURS[:3],

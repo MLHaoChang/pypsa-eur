@@ -121,6 +121,15 @@ def test_date_to_with_a_time_includes_the_snapshot_starting_at_it():
         ),
         (dated("soon"), "Date From 'soon' not read"),
         (dated("01/02/2015"), "Date From '01/02/2015' not read"),
+        (
+            dated("2015-01-02T00:00:00+01:00"),
+            "Date From '2015-01-02T00:00:00+01:00' has a UTC offset; the snapshots "
+            "have none",
+        ),
+        (
+            dated(date_to="2015-01-02T00:00:00Z"),
+            "Date To '2015-01-02T00:00:00Z' has a UTC offset; the snapshots have none",
+        ),
         (dated(date_to="soon"), "Date To 'soon' not read"),
     ],
 )
@@ -266,7 +275,13 @@ def test_static_property_changing_within_the_horizon_is_unmapped():
 def test_constant_check_is_exact():
     """GK A D5: no tolerance."""
     conv = voltage((220.000001, "kV", dated("2015-01-02T00:00:00")))
-    assert "Node 'A'" not in conv.network.buses.index
+    # neither 220 nor 220.000001 is used: the node keeps no voltage (2a rule)
+    assert ("A", "voltage", None) in assumed(conv)
+    assert not [a for a in assumed(conv) if a[:2] == ("Node 'A'", "Voltage")]
+    assert set(unmapped_reason(conv, "Node 'A'")) == {
+        "'Voltage' changes within the horizon (at 2015-01-02 00:00:00); it is static "
+        "in PyPSA"
+    }
 
 
 def test_static_all_outside_without_an_undated_row_is_a_gap():
@@ -533,3 +548,23 @@ def test_no_horizon_leaves_dated_rows_and_timeslices_unmapped():
     conv = run_any(m)
     assert set(unmapped_reason(conv, "Node 'A'")) == {"the network has no time horizon"}
     assert ("Timeslice 'H1'", "the network has no time horizon") in reasons(conv)
+
+
+def test_undated_variable_scaled_row_in_a_dated_group_is_unmapped():
+    """GK A Q3 / N4: no overlay onto a variable-scaled undated row."""
+    conv = run(
+        model(
+            objects=[("Variable", "V")],
+            rows=[
+                ("Variable", "V", "Profile", 2, "-"),
+                ("Node", "A", "Load", 10, "MW", {"tags": [Tag("Variable", "V", "×")]}),
+                ("Node", "A", "Load", 20, "MW", dated("2015-01-02T00:00:00")),
+            ],
+            files=(),
+        )
+    )
+    assert conv.network.loads.empty
+    assert set(unmapped_reason(conv, "Node 'A'")) == {
+        "dated or timesliced rows with a data-file or variable row for 'Load': not read"
+    }
+    assert unmapped_reason(conv, "Variable 'V'") == ["no imported row uses it"]

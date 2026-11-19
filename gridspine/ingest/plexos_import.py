@@ -264,13 +264,21 @@ def _windowed(row: PropertyRow) -> bool:
     )
 
 
-def _when(raw: str) -> pd.Timestamp | None:
-    # ISO only, as t_date_from / t_date_to store it; "01/02/2015" is never guessed
+def _when(raw: str, what: str) -> pd.Timestamp | str:
+    """
+    A row's Date From/To, or why not: ISO only, as t_date_from / t_date_to
+    store it ("01/02/2015" is never guessed), and without a UTC offset, since
+    the snapshots have none (GK A N1).
+    """
     try:
         t = pd.to_datetime(raw, format="ISO8601")
-    except (ValueError, TypeError):
-        return None
-    return None if pd.isna(t) else t
+    except (ValueError, TypeError, OverflowError):
+        return f"{what} {raw!r} not read"
+    if pd.isna(t):
+        return f"{what} {raw!r} not read"
+    if t.tzinfo is not None:
+        return f"{what} {raw!r} has a UTC offset; the snapshots have none"
+    return t
 
 
 def _label(obj: tuple[str, str]) -> str:
@@ -1133,16 +1141,16 @@ class _Converter:
         for r in win:
             m = np.ones(len(snaps), dtype=bool)
             if r.date_from:
-                t = _when(r.date_from)
-                if t is None:
-                    return f"Date From {r.date_from!r} not read"
+                t = _when(r.date_from, "Date From")
+                if isinstance(t, str):
+                    return t
                 if why := inside(t, "Date From"):
                     return why
                 m &= snaps >= t
             if r.date_to:
-                t = _when(r.date_to)
-                if t is None:
-                    return f"Date To {r.date_to!r} not read"
+                t = _when(r.date_to, "Date To")
+                if isinstance(t, str):
+                    return t
                 if t == t.normalize():  # GK A D2: a midnight Date To is the whole day
                     end = t + pd.Timedelta(days=1)
                     if why := inside(end, "end of Date To"):

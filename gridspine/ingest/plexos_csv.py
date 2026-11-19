@@ -221,8 +221,9 @@ def _periods(
     parts = {}
     for col in header[:4]:
         v = pd.to_numeric(body[col].str.strip(), errors="coerce")
-        if v.isna().any() or (v != v.round()).any():
-            return f"{col} {body[col][v.isna() | (v != v.round())].iloc[0]!r} is not a whole number"
+        bad = ~np.isfinite(v) | (v != v.round())  # NaN, text and ±inf (GK A N2)
+        if bad.any():
+            return f"{col} {body[col][bad].iloc[0]!r} is not a whole number"
         parts[col.casefold()] = v.astype(int)
     per_day = 1440 / step
     p = parts["period"]
@@ -248,7 +249,7 @@ def _year_free(
     parts = {}
     for col in keys:
         v = pd.to_numeric(body[col].str.strip(), errors="coerce")
-        bad = v.isna() | (v != v.round())
+        bad = ~np.isfinite(v) | (v != v.round())  # NaN, text and ±inf (GK A N2)
         if bad.any():
             return body, f"{col} {body[col][bad].iloc[0]!r} is not a whole number"
         parts[col.casefold()] = v.astype(int)
