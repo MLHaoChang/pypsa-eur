@@ -3,7 +3,7 @@
 
 # 14 — Harness profile: eh_ipp_hybrid
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: profile and explore cases merged (#1454, #1492, #1508, #1532, #1544, #1575); S-C PPA price KPI open in #1590
 Type: task
 Blocked by: 07
 Gated: yes (GK B, investment/finance)
