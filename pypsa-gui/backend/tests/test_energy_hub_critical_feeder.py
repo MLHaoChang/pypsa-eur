@@ -27,7 +27,7 @@ HOURS = 168
 VOLL = 150.0
 
 
-def _pack(target_lole_h: float = 3.0):
+def _pack(target_lole_h: float | None = 3.0):
     base = default_off_grid_pack()
     return base.model_copy(
         update={
@@ -167,20 +167,67 @@ def test_a_second_feeder_in_parallel_needs_both_out():
     assert names == ["crit_feeder", "crit_feeder_2"]
 
 
-def test_a_feeder_without_outage_data_adds_nothing():
+def test_a_feeder_without_outage_data_bounds_every_loaded_hour():
+    # GK R2: an unread rate is a risk not evaluated, taken as 1: as the only
+    # path the bound is every loaded hour (8,760 h/yr), so the pass is
+    # withheld; nothing is added (never a fail on the unread link alone).
     n = _hub_with_one_critical_feeder()
     n.links.at["crit_feeder", "outage_rate_value"] = float("nan")
     n.links.at["crit_feeder", "mttr_hours"] = float("nan")
     report = _run(n, _pack())
     assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)
+    sec = report.sections["certification"]
+    pay = sec.payload
+    assert pay["verdict"] == "inconclusive", sec.note
+    assert pay["confident"] is False
+    [row] = pay["critical_feeders"]
+    assert (row["name"], row["model"], row["upper_bound"]) == (
+        "crit_feeder",
+        "no_outage_data",
+        True,
+    )
+    [pk] = pay["feeder_bound"]["pockets"]
+    assert pk["bound_h_per_year"] == pytest.approx(8760.0, rel=1e-9)
+    assert pk["no_data"] == ["crit_feeder"]
+    assert pay["critical_pocket_bound_h_per_year"] == pytest.approx(8760.0)
+    assert "Outage data for crit_feeder" in sec.note
+    note = pay["critical_feeder_note"]
+    assert "crit_feeder" in note and "not known" in note
+    assert "never failing" not in note and "only path" not in note
+
+
+def test_a_no_data_feeder_beside_a_usable_one_bounds_by_the_usable_rate():
+    # GK R2 probe: crit_feeder q = 0.5 beside a no-data crit_feeder_2 used to
+    # pass on the copper plate. Now: 0.5 × 1 × 8,760 = 4,380 h/yr bound.
+    n = _hub_with_one_critical_feeder(feeder_rate=0.5)
+    n.add(
+        "Link",
+        "crit_feeder_2",
+        bus0="island",
+        bus1="crit",
+        p_nom=20.0,
+        efficiency=1.0,
+        carrier="AC",
+    )
+    n.links.at["crit_feeder_2", "eh_role"] = ""
+    report = _run(n, _pack())
     pay = report.sections["certification"].payload
-    assert pay["verdict"] == "pass"
-    # F5: not silent — the Link is named as taken never to fail.
+    assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)
+    assert pay["verdict"] == "inconclusive", report.sections["certification"].note
     assert [(f["name"], f["model"]) for f in pay["critical_feeders"]] == [
-        ("crit_feeder", "no_outage_data")
+        ("crit_feeder", "unsampled"),
+        ("crit_feeder_2", "no_outage_data"),
     ]
-    assert "crit_feeder" in pay["critical_feeder_note"]
-    assert "never failing" in pay["critical_feeder_note"]
+    [pk] = pay["feeder_bound"]["pockets"]
+    assert pk["feeders"] == ["crit_feeder", "crit_feeder_2"]
+    assert pk["bound_h_per_year"] == pytest.approx(4380.0, rel=1e-9)
+
+
+def test_without_a_goal_confidence_is_not_stated():
+    # GK R5: no target, no verdict: ``confident`` stays None, not False.
+    report = _run(_hub_with_one_critical_feeder(), _pack(target_lole_h=None))
+    pay = report.sections["certification"].payload
+    assert pay["verdict"] is None and pay["confident"] is None
 
 
 def test_a_parallel_line_is_redundancy_and_adds_nothing():
@@ -231,7 +278,8 @@ def test_a_critical_bus_with_its_own_units_is_bounded_not_composed():
     assert pk["buses"] == ["crit"] and pk["bound_h_per_year"] == pytest.approx(
         87.6, rel=0.01
     )
-    assert "issue" not in note
+    # GK R6: the two-area treatment is named as a way to clear it.
+    assert "issue 09" in note and "crit as its own area" in note
 
 
 def test_a_bound_under_the_goal_does_not_block_a_pass():

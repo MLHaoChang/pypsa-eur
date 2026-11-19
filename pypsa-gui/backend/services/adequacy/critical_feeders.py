@@ -13,25 +13,29 @@ This module finds those buses and states what the certification does with
 them:
 
 * ``critical_feeder_rows(n, scope)`` — topology only. Drop every internal Link
-  that carries usable outage data; a component that then holds an
-  ``eh_critical`` bus and no supply is a *pocket*. One row per Link feeding a
-  pocket, with ``model``:
+  that carries usable outage data, and every one without it that decides
+  whether a critical bus keeps a path to supply; a component that then holds
+  an ``eh_critical`` bus is a *pocket*. One row per Link feeding a pocket,
+  with ``model``:
 
-  - ``composed``: the pocket has no supply of its own and every feeder comes
-    straight from a supplied component. Its loss of supply while all its
-    feeders are out is added to the certified LOLE (``compose``).
-  - ``unsampled``: the pocket has units of its own, or is fed through another
-    pocket. Its outages cannot be added in closed form. With units of its own
-    (not chained) the composed figure, the units ignored, is an upper bound
-    (``bounded_verdict``, GK A F6'): at or under the goal it does not block a
-    ``pass``; over it the verdict is ``inconclusive``. A chained pocket has no
-    such bound and keeps a ``pass`` from being given.
-  - ``no_outage_data``: an internal Link without usable outage data that is
-    the only path to a critical bus. Nothing is added — the Link is taken as
-    never failing — and the certification says so.
+  - ``composed``: the pocket has no supply of its own, every feeder has
+    usable data and comes straight from a supplied component. Its loss of
+    supply while all its feeders are out is added to the certified LOLE
+    (``compose``).
+  - ``unsampled``: the pocket has units of its own, is fed through another
+    pocket, or has a feeder without usable data. Its outages cannot be added
+    in closed form. Not chained, the composed figure (units ignored, an
+    unread rate taken as 1) is an upper bound (``bounded_verdict``, GK A
+    F6'): at or under the goal it does not block a ``pass``; over it the
+    verdict is ``inconclusive``. A chained pocket has no such bound and
+    keeps a ``pass`` from being given.
+  - ``no_outage_data``: a feeder without usable outage data (GK R2). Its
+    rate is not known, so it is taken as 1: its pocket is bounded as above
+    (``q`` None, ``upper_bound`` set unless chained). Never a ``fail`` and
+    never a ``pass`` on the unread Link alone.
 
-  A parallel Line or a feeder without data beside one with data is real (or
-  assumed) redundancy: no row.
+  A parallel Line, or a Link without data whose outage cuts no critical bus
+  off, is not a feeder: no row.
 
 * ``pocket_series(n, rows, weights, cfg)`` — per snapshot, the probability the
   pocket is cut off (``Π q_k`` over its feeders, independent, the stationary
@@ -71,14 +75,18 @@ LOOP_CAVEAT = (
 @dataclass
 class Pocket:
     """One pocket: per-snapshot cut-off probability and load. ``bound``: the
-    pocket has units of its own, so its figure is an upper bound only and is
-    not composed into the certified LOLE."""
+    pocket has units of its own or a feeder without outage data, so its
+    figure is an upper bound only and is not composed into the certified
+    LOLE. ``no_data``: its feeders whose rate is not known (taken as 1);
+    ``own_units``: it has supply of its own (left out of the bound)."""
 
     buses: list[str]
     feeders: list[str]
-    u: float  # Π q over the feeders
+    u: float  # Π q over the feeders, q = 1 for a feeder without data
     load: np.ndarray = field(default_factory=lambda: np.zeros(0))
     bound: bool = False
+    no_data: list[str] = field(default_factory=list)
+    own_units: bool = False
 
 
 def _cap(df, name: str, col: str) -> float:
@@ -175,15 +183,34 @@ def critical_feeder_rows(
             groups.setdefault(i, set()).add(b)
         return c, groups
 
+    def fed_crit(cut: set[str]) -> set[str]:
+        c, g = comps(cut)
+        fed_ids = {i for i, grp in g.items() if grp & supplied}
+        return {b for b in crit if c[b] in fed_ids}
+
+    # GK R2: a Link without usable data is taken as failing (q = 1), so it is
+    # cut like a usable one wherever its outage can cut a critical bus off:
+    # alone, beside the usable feeders' outages, or beside the other no-data
+    # Links' (parallel unread Links). One that never does (a dead end) is not.
+    no_data = [lk for lk in internal if lk not in usable]
+    relevant: set[str] = set()
+    for lk in no_data:
+        others = set(no_data) - {lk}
+        for base in (set(), set(usable), others, set(usable) | others):
+            if fed_crit(base) - fed_crit(base | {lk}):
+                relevant.add(lk)
+                break
+    cut = set(usable) | relevant
+
     rows: list[dict] = []
-    comp, groups = comps(set(usable))
+    comp, groups = comps(cut)
     fed = {i for i, g in groups.items() if g & supplied}
     for i, g in sorted(groups.items(), key=lambda kv: sorted(kv[1])):
         if not (g & crit):
             continue
         feeders = [
             lk
-            for lk in sorted(usable)
+            for lk in sorted(cut)
             if (str(ldf.at[lk, "bus0"]) in g) != (str(ldf.at[lk, "bus1"]) in g)
             and _delivers_into(
                 n,
@@ -208,15 +235,9 @@ def critical_feeder_rows(
             for lk in feeders
         }
         chained = not far <= fed
-        if i in fed and not chained:
-            model, reason = (
-                UNSAMPLED,
-                (
-                    "the must-stay-on bus has units of its own: what it can carry "
-                    "while its feeders are out is not simulated"
-                ),
-            )
-        elif chained:
+        own_units = i in fed
+        unread = [lk for lk in feeders if lk not in usable]
+        if chained:
             model, reason = (
                 UNSAMPLED,
                 (
@@ -224,46 +245,49 @@ def critical_feeder_rows(
                     "chained feeders are not composed"
                 ),
             )
+        elif own_units:
+            model, reason = (
+                UNSAMPLED,
+                (
+                    "the must-stay-on bus has units of its own: what it can carry "
+                    "while its feeders are out is not simulated"
+                ),
+            )
+        elif unread:
+            model, reason = (
+                UNSAMPLED,
+                (
+                    f"{', '.join(unread)} beside it has no usable outage data: "
+                    "its outage rate is not known and is taken as certain, so "
+                    "the pocket's figure is an upper bound"
+                ),
+            )
         else:
             model, reason = COMPOSED, None
-        u = float(np.prod([usable[lk][0] for lk in feeders]))
+        u = float(np.prod([usable[lk][0] if lk in usable else 1.0 for lk in feeders]))
         for lk in feeders:
+            read = lk in usable
             rows.append(
                 {
                     "name": lk,
-                    "model": model,
+                    "model": model if read else NO_OUTAGE_DATA,
                     "buses": sorted(g & crit),
                     "pocket_buses": sorted(g),
                     "feeders": list(feeders),
-                    "q": usable[lk][0],
-                    "mttr_hours": usable[lk][1],
+                    "no_data_feeders": list(unread),
+                    "own_units": own_units,
+                    "q": usable[lk][0] if read else None,
+                    "mttr_hours": usable[lk][1] if read else None,
                     "pocket_unavailability": u,
-                    "reason": reason,
+                    "reason": reason
+                    if read
+                    else (
+                        "no usable outage data: its outage rate is not known "
+                        "and is taken as certain for the upper bound"
+                        + ("; " + reason if chained else "")
+                    ),
                     "chained": chained,
                     "upper_bound": model == UNSAMPLED and not chained,
-                    "lole_h": None,
-                    "eue_mwh": None,
-                }
-            )
-
-    # F5: a Link without usable data that is the only path to a critical bus.
-    named = {r["name"] for r in rows}
-    for lk in internal:
-        if lk in usable or lk in named:
-            continue
-        c2, g2 = comps(set(usable) | {lk})
-        fed2 = {i for i, g in g2.items() if g & supplied}
-        cut_off = sorted(b for b in crit if comp[b] in fed and c2[b] not in fed2)
-        if cut_off:
-            rows.append(
-                {
-                    "name": lk,
-                    "model": NO_OUTAGE_DATA,
-                    "buses": cut_off,
-                    "reason": (
-                        "no usable outage data: taken as never "
-                        "failing, so its outages add nothing"
-                    ),
                     "lole_h": None,
                     "eue_mwh": None,
                 }
@@ -290,6 +314,8 @@ def pocket_series(
                 feeders=list(r["feeders"]),
                 u=float(r["pocket_unavailability"]),
                 bound=r["model"] != COMPOSED,
+                no_data=list(r.get("no_data_feeders") or []),
+                own_units=bool(r.get("own_units")),
             )
     if not pockets:
         return []
@@ -375,6 +401,9 @@ def compose(res: dict, pockets: list[Pocket], *, weights: np.ndarray, periods) -
                 "lole_ci": [lo, hi],
                 "eue_mwh": eue,
             }
+            # The interval moves with the value, as the total's does (GK R4).
+            if cur.get("eue_ci"):
+                new_by[lab]["eue_ci"] = [float(x) + e for x in cur["eue_ci"]]
     out["lole_hours"] = tot_l
     out["lole_ci"] = [tot_lo, tot_hi]
     out["eue_mwh"] = tot_e
@@ -390,6 +419,29 @@ def compose(res: dict, pockets: list[Pocket], *, weights: np.ndarray, periods) -
     return out
 
 
+def bound_hours(pockets: list[Pocket], weights: np.ndarray) -> float | None:
+    """Expected weighted hours with any bounded pocket cut off over the
+    horizon (their union), the upper bound a certified LOLE must carry in
+    every reader (GK R1); None with no bounded pocket."""
+    bounded = [p for p in pockets if p.bound]
+    if not bounded:
+        return None
+    return pocket_terms(bounded, np.asarray(weights, dtype=float))[0]
+
+
+def _why_bound(p: Pocket) -> str:
+    """Why a bounded pocket's figure is an upper bound, in words."""
+    bus = ", ".join(p.buses)
+    why = []
+    if p.no_data:
+        why.append(
+            f"{', '.join(p.no_data)}'s outage rate is not known and is taken as certain"
+        )
+    if p.own_units or not p.no_data:
+        why.append(f"{bus}'s own units not counted")
+    return "upper bound: " + "; ".join(why)
+
+
 def bounded_verdict(
     verdict: str | None,
     note: str | None,
@@ -403,43 +455,51 @@ def bounded_verdict(
 ) -> tuple[str | None, str | None, dict | None]:
     """GK A F6': a ``pass`` stands only if the pockets this certification
     cannot simulate cannot break it. A bounded pocket's figure (its units
-    ignored) added to the CI upper bound must stay at or under the target;
-    a chained pocket has no bound. Otherwise ``inconclusive`` — never
-    ``fail`` — naming the pocket, its bound and what clears it. The third
-    item, set only when it withholds the pass, says why in fields the review
-    and the Guided headline read (``feeder_bound``)."""
+    ignored, an unread rate taken as 1) added to the CI upper bound must
+    stay at or under the target; a chained pocket has no bound. Otherwise
+    ``inconclusive`` — never ``fail`` — naming the pocket, its bound and what
+    clears it. The third item, set only when it withholds the pass, says why
+    in fields the review and the Guided headline read (``feeder_bound``)."""
     if verdict != "pass" or target_h is None:
         return verdict, note, None
-    chained = sorted(
-        {str(r["name"]) for r in rows if r["model"] == UNSAMPLED and r.get("chained")}
-    )
+    chained = sorted({str(r["name"]) for r in rows if r.get("chained")})
     bounded = [p for p in pockets if p.bound]
     per_year = years if years > 0 else 1.0
     parts = []
     held: dict = {"pockets": [], "chained": chained}
-    if bounded:
-        p_h, _ = pocket_terms(bounded, np.asarray(weights, dtype=float))
-        if hi + p_h > target_h:
-            for p in bounded:
-                b_h, _ = pocket_terms([p], np.asarray(weights, dtype=float))
-                bus = ", ".join(p.buses)
-                held["pockets"].append(
-                    {
-                        "buses": list(p.buses),
-                        "feeders": list(p.feeders),
-                        "bound_h_per_year": b_h / per_year,
-                    }
-                )
-                parts.append(
-                    f"{bus} behind {', '.join(p.feeders)} could be short up to "
-                    f"{b_h / per_year:.3g} h/yr (upper bound: {bus}'s own units "
-                    "not counted)"
-                )
-            parts[-1] += (
-                f", which with the rest of the hub exceeds the goal of "
-                f"{target_h / per_year:g} h/yr. A second feeder or a lower "
-                "outage rate on the feeder would settle it"
+    p_h = bound_hours(bounded, weights)
+    if p_h is not None and hi + p_h > target_h:
+        for p in bounded:
+            b_h, _ = pocket_terms([p], np.asarray(weights, dtype=float))
+            bus = ", ".join(p.buses)
+            held["pockets"].append(
+                {
+                    "buses": list(p.buses),
+                    "feeders": list(p.feeders),
+                    "bound_h_per_year": b_h / per_year,
+                    "no_data": list(p.no_data),
+                    "own_units": bool(p.own_units),
+                }
             )
+            parts.append(
+                f"{bus} behind {', '.join(p.feeders)} could be short up to "
+                f"{b_h / per_year:.3g} h/yr ({_why_bound(p)})"
+            )
+        unread = sorted({f for p in bounded for f in p.no_data})
+        buses = ", ".join(b for p in bounded for b in p.buses)
+        clears = ([f"outage data for {', '.join(unread)}"] if unread else []) + [
+            "a second feeder",
+            "a lower outage rate on the feeder",
+            f"simulating {buses} as its own area (the two-area treatment, issue 09)",
+        ]
+        settle = ", ".join(clears[:-1]) + f" or {clears[-1]}"
+        parts[-1] += (
+            f", which with the rest of the hub exceeds the goal of "
+            f"{target_h / per_year:g} h/yr. "
+            + settle[0].upper()
+            + settle[1:]
+            + " would settle it"
+        )
     if chained:
         parts.append(
             f"{', '.join(chained)} feeds a must-stay-on bus through another "
@@ -457,32 +517,39 @@ def certification_note(rows: list[dict]) -> str | None:
     if not rows:
         return None
     by: dict[str, list[str]] = {}
-    bounds = []
+    bounds: dict[str, list[str]] = {}
     for r in rows:
         by.setdefault(r["model"], []).append(str(r["name"]))
         if r.get("upper_bound") and r.get("lole_h") is not None:
             bus = ", ".join(r["buses"])
-            bounds.append(
-                f"{r['name']} at most {float(r['lole_h']):.3g} h/yr "
-                f"(upper bound: {bus}'s own units not counted)"
+            why = (
+                "upper bound: its outage rate taken as certain"
+                if r["model"] == NO_OUTAGE_DATA
+                else f"upper bound: {bus}'s own units not counted"
+            )
+            bounds.setdefault(r["model"], []).append(
+                f"{r['name']} at most {float(r['lole_h']):.3g} h/yr ({why})"
             )
     parts = []
     if by.get(COMPOSED):
         parts.append(f"added in closed form for {', '.join(by[COMPOSED])}: " + CAVEAT)
     if by.get(UNSAMPLED):
+        b = bounds.get(UNSAMPLED)
         parts.append(
             "not simulated for "
             + ", ".join(by[UNSAMPLED])
-            + ": the must-stay-on bus it feeds has units of its own "
-            "or is fed through another bus, so what it can carry "
-            "while the feeder is out is not modelled"
-            + (", bounded: " + ", ".join(bounds) if bounds else "")
+            + ": the must-stay-on bus it feeds has units of its own, "
+            "is fed through another bus or beside a feeder without outage "
+            "data, so what it can carry while the feeder is out is not "
+            "modelled" + (", bounded: " + ", ".join(b) if b else "")
         )
     if by.get(NO_OUTAGE_DATA):
+        b = bounds.get(NO_OUTAGE_DATA)
         parts.append(
-            ", ".join(by[NO_OUTAGE_DATA]) + " is the only path to a "
-            "must-stay-on bus but has no usable outage data: it is "
-            "taken as never failing"
+            ", ".join(by[NO_OUTAGE_DATA]) + " feeds a must-stay-on bus but "
+            "has no usable outage data: its outage rate is not known, so it "
+            "is taken as certain for the upper bound"
+            + (", bounded: " + ", ".join(b) if b else "")
         )
     return "Must-stay-on feeders: " + "; ".join(parts) + "."
 
@@ -490,5 +557,11 @@ def certification_note(rows: list[dict]) -> str | None:
 def loop_note(rows: list[dict]) -> str | None:
     """The caveat for the views that keep the copper plate (the coupling and
     margin loops, Expert's Monte Carlo), naming the Links; None with none."""
-    names = [str(r["name"]) for r in rows if r["model"] in (COMPOSED, UNSAMPLED)]
+    names = [
+        str(r["name"])
+        for r in rows
+        if r["model"] in (COMPOSED, UNSAMPLED)
+        or r.get("upper_bound")
+        or r.get("chained")
+    ]
     return LOOP_CAVEAT.format(names=", ".join(names)) if names else None

@@ -481,7 +481,24 @@ def test_an_inconclusive_held_by_a_feeder_bound_names_the_feeder_not_draws():
     assert "it_bus" in f["title"] and "site_transformer" in f["title"]
     assert "43.8" in f["title"] and "straddles" not in f["title"]
     assert "second feeder" in f["recommendation"]
+    assert "issue 09" in f["recommendation"]  # GK R6: the two-area treatment
+    assert "Outage data" not in f["recommendation"]
     assert out["summary"]["feeder_bound"] == _BOUND
+
+
+def test_a_bound_held_by_a_feeder_without_data_asks_for_its_data():
+    # GK R2: the unread rate is taken as certain; its data settles it.
+    fb = {"pockets": [{"buses": ["crit"], "feeders": ["crit_feeder"],
+                       "bound_h_per_year": 8760.0, "no_data": ["crit_feeder"]}],
+          "chained": [], "target_h_per_year": 3.0}
+    cert = {"verdict": "inconclusive", "target_lole_h": 3.0, "draws": 200,
+            "feeder_bound": fb}
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": cert}}), RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert "Outage data for crit_feeder" in f["recommendation"]
+    assert "not known" in f["recommendation"]
+    assert "own units" not in f["recommendation"]
 
 
 def test_a_bounded_dominant_feeder_gets_the_feeder_remedy():

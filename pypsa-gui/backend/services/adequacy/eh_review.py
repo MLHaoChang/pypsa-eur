@@ -198,12 +198,21 @@ def review_report(report: dict, record: dict | None = None,
                  + (f"{', '.join(names)} could be cut off up to "
                     f"{_fmt(bound, 'h/yr')} while {', '.join(feeders)} is out"
                     if pk else f"{', '.join(feeders)} cannot be bounded"))
+        # GK R2: a feeder without outage data is taken as always out; its
+        # data is then the first thing that settles the verdict.
+        unread = sorted({str(f) for p in pk for f in (p.get("no_data") or [])})
+        why = ("Not a failure: this upper bound takes the outage rate of "
+               f"{', '.join(unread)}, which is not known, as certain. Outage "
+               f"data for {', '.join(unread)}, a"
+               if unread else
+               "Not a failure: this upper bound leaves out the bus's own "
+               "units, which the certification does not simulate behind its "
+               "feeder. A")
         add("certification_inconclusive", "medium", title,
             {**ev, "feeder_bound": fb},
-            "Not a failure: this upper bound leaves out the bus's own units, "
-            "which the certification does not simulate behind its feeder. A "
-            "second feeder or a lower outage rate on the feeder settles it; "
-            "more simulation draws do not.")
+            why + " second feeder, a lower outage rate on the feeder or "
+            "simulating the bus as its own area (the two-area treatment, "
+            "issue 09) settles it; more simulation draws do not.")
     elif verdict == "inconclusive":
         draws = int(cert.get("draws") or 500)
         more = min(_MC_MAX_DRAWS, max(draws * 2, draws + 1))

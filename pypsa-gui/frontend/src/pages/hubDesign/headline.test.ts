@@ -76,6 +76,17 @@ describe('headline (§5.5)', () => {
     expect(text).not.toMatch(/straddles|simulation runs|it_bus/)
   })
 
+  it('a bound held by a feeder without outage data asks for its data (GK R2)', () => {
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 3,
+      feeder_bound: { pockets: [{ buses: ['crit'], feeders: ['crit_feeder'], no_data: ['crit_feeder'],
+        bound_h_per_year: 8760 }], chained: [] } })
+    const text = headline(rv, report())
+    expect(text).toMatch(/^Not decided: Crit could be cut off up to 8760\.0 h\/yr while Crit feeder is out/)
+    expect(text).toMatch(/outage rate of Crit feeder is not known/)
+    expect(text).toMatch(/outage data for Crit feeder/)
+    expect(text).not.toMatch(/own backup/)
+  })
+
   it('inconclusive held by a chained feeder says it cannot be bounded', () => {
     const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 1, target_lole_h: 3,
       feeder_bound: { pockets: [], chained: ['crit_feeder'] } })

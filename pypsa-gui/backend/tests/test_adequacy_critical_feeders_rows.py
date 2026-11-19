@@ -114,6 +114,12 @@ def test_unusable_outage_data_is_named_not_composed(rate, mttr):
         NO_OUTAGE_DATA,
         ["crit"],
     )
+    # GK R2: an unread rate is taken as 1, so the pocket is a bound of every
+    # loaded hour, not a link that never fails.
+    assert (r["q"], r["mttr_hours"], r["pocket_unavailability"]) == (None, None, 1.0)
+    assert (r["upper_bound"], r["chained"]) == (True, False)
+    assert r["feeders"] == ["crit_feeder"] and r["no_data_feeders"] == ["crit_feeder"]
+    assert "not known" in r["reason"] and "never" not in r["reason"]
 
 
 def test_the_import_link_is_never_a_feeder():
@@ -141,10 +147,10 @@ def _second_path(n, *, rate):
     return n
 
 
-def test_a_no_data_link_beside_a_usable_feeder_is_named_and_nothing_else():
-    # Taken as never failing, the no-data Link hides the usable feeder's
-    # outages: it is named (F5); the usable feeder adds nothing. An unrelated
-    # no-data Link elsewhere in the hub is not on the pocket's path.
+def test_a_no_data_link_beside_a_usable_feeder_bounds_the_pocket_naming_both():
+    # GK R2: the no-data Link's rate is taken as 1, so the pocket is cut off
+    # whenever the usable feeder is out: a bound of u = 0.01 × 1, both named.
+    # An unrelated no-data Link elsewhere in the hub is not on the pocket's path.
     n = _second_path(_hub_with_one_critical_feeder(), rate=float("nan"))
     n.add("Bus", "aux", carrier="AC")
     n.add("Link", "aux_link", bus0="island", bus1="aux", p_nom=5.0)
@@ -154,8 +160,65 @@ def test_a_no_data_link_beside_a_usable_feeder_is_named_and_nothing_else():
         n, hub_buses=["island", "crit", "aux"], import_links=["import_poc"]
     )
     assert [(r["name"], r["model"]) for r in rows] == [
-        ("crit_feeder_2", NO_OUTAGE_DATA)
+        ("crit_feeder", UNSAMPLED),
+        ("crit_feeder_2", NO_OUTAGE_DATA),
     ]
+    a, b = rows
+    assert (a["q"], b["q"]) == (0.01, None)
+    for r in rows:
+        assert r["feeders"] == ["crit_feeder", "crit_feeder_2"]
+        assert r["no_data_feeders"] == ["crit_feeder_2"]
+        assert r["pocket_unavailability"] == pytest.approx(0.01)
+        assert (r["upper_bound"], r["chained"], r["buses"]) == (True, False, ["crit"])
+
+
+def test_two_no_data_links_in_parallel_bound_every_loaded_hour():
+    n = _second_path(_hub_with_one_critical_feeder(), rate=float("nan"))
+    n.links.at["crit_feeder", "outage_rate_value"] = float("nan")
+    rows = _rows(n)
+    assert [(r["name"], r["model"]) for r in rows] == [
+        ("crit_feeder", NO_OUTAGE_DATA),
+        ("crit_feeder_2", NO_OUTAGE_DATA),
+    ]
+    assert all(r["pocket_unavailability"] == 1.0 and r["upper_bound"] for r in rows)
+
+
+def test_a_dead_end_no_data_link_at_the_pocket_does_not_chain_it():
+    # A two-way no-data Link from the critical bus to a bus with no supply
+    # cuts nothing off: the pocket stays composed on its one usable feeder.
+    n = _hub_with_one_critical_feeder()
+    n.add("Bus", "aux", carrier="AC")
+    n.add("Load", "aux_load", bus="aux", p_set=1.0)
+    n.add("Link", "aux_link", bus0="crit", bus1="aux", p_nom=5.0, p_min_pu=-1.0)
+    n.links.at["aux_link", "outage_rate_value"] = float("nan")
+    n.links.at["aux_link", "mttr_hours"] = float("nan")
+    rows = critical_feeder_rows(
+        n, hub_buses=["island", "crit", "aux"], import_links=["import_poc"]
+    )
+    assert [(r["name"], r["model"], r["chained"]) for r in rows] == [
+        ("crit_feeder", COMPOSED, False)
+    ]
+
+
+def test_a_no_data_link_inside_a_pocket_is_cut_too():
+    # island -> crit (usable) -> crit_b (no data): crit_b is lost whenever the
+    # no-data Link is out, so it is not merged into crit's composed pocket.
+    n = _hub_with_one_critical_feeder()
+    n.add("Bus", "crit_b", carrier="AC")
+    n.buses.at["crit_b", "eh_critical"] = True
+    n.add("Load", "crit_b_load", bus="crit_b", p_set=1.0)
+    n.add("Link", "crit_b_link", bus0="crit", bus1="crit_b", p_nom=5.0)
+    n.links.at["crit_b_link", "outage_rate_value"] = float("nan")
+    n.links.at["crit_b_link", "mttr_hours"] = float("nan")
+    rows = _by_name(
+        critical_feeder_rows(
+            n, hub_buses=["island", "crit", "crit_b"], import_links=["import_poc"]
+        )
+    )
+    assert rows["crit_feeder"]["model"] == COMPOSED
+    assert rows["crit_feeder"]["pocket_buses"] == ["crit"]
+    assert rows["crit_b_link"]["model"] == NO_OUTAGE_DATA
+    assert rows["crit_b_link"]["buses"] == ["crit_b"]
 
 
 def test_a_no_data_link_elsewhere_is_not_named():
@@ -198,9 +261,32 @@ def test_the_certification_note_states_a_bound_only_once_it_is_computed():
     assert "not simulated for g" in note and "at most" not in note
 
 
+def test_the_note_says_a_no_data_rate_is_unknown_not_never_failing():
+    row = {
+        "name": "nd",
+        "model": NO_OUTAGE_DATA,
+        "buses": ["h"],
+        "upper_bound": True,
+        "lole_h": 8760.0,
+    }
+    note = certification_note([row])
+    assert "nd" in note and "outage rate is not known" in note
+    assert "8.76e+03 h/yr" in note or "8760 h/yr" in note
+    assert "never failing" not in note and "only path" not in note
+
+
+def test_the_loop_note_names_a_no_data_feeder_of_a_bounded_pocket():
+    from services.adequacy.critical_feeders import loop_note
+
+    n = _second_path(_hub_with_one_critical_feeder(), rate=float("nan"))
+    note = loop_note(_rows(n))
+    assert "crit_feeder, crit_feeder_2" in note
+
+
 def _stage_rows(monkeypatch, nyears):
-    """``eh_stages._critical_pockets`` on two pockets of its own, and a
-    no-data row: each row gets its own pocket's figures per year."""
+    """``eh_stages._critical_pockets`` on two pockets of its own, a no-data
+    feeder of the bounded one, and a no-data row in no pocket: each row gets
+    its own pocket's figures per year."""
     from types import SimpleNamespace
 
     import numpy as np
@@ -210,13 +296,14 @@ def _stage_rows(monkeypatch, nyears):
 
     pockets = [
         cf.Pocket(["a"], ["fa"], 0.1, np.ones(10)),
-        cf.Pocket(["b"], ["fb"], 0.2, np.full(10, 2.0), bound=True),
+        cf.Pocket(["b"], ["fb", "fc"], 0.2, np.full(10, 2.0), bound=True),
     ]
     monkeypatch.setattr(cf, "pocket_series", lambda *a, **k: pockets)
     rows = [
         {"name": "fa", "model": COMPOSED, "lole_h": None, "eue_mwh": None},
         {"name": "fb", "model": UNSAMPLED, "lole_h": None, "eue_mwh": None},
         {"name": "fc", "model": NO_OUTAGE_DATA, "lole_h": None, "eue_mwh": None},
+        {"name": "fd", "model": NO_OUTAGE_DATA, "lole_h": None, "eue_mwh": None},
     ]
     scope = SimpleNamespace(critical_feeders=rows)
     inputs = SimpleNamespace(nyears=nyears, weights=np.ones(10))
@@ -228,7 +315,8 @@ def test_each_feeder_row_gets_its_own_pockets_figures_per_year(monkeypatch):
     r = _stage_rows(monkeypatch, 2.0)
     assert (r["fa"]["lole_h"], r["fa"]["eue_mwh"]) == pytest.approx((0.5, 0.5))
     assert (r["fb"]["lole_h"], r["fb"]["eue_mwh"]) == pytest.approx((1.0, 2.0))
-    assert (r["fc"]["lole_h"], r["fc"]["eue_mwh"]) == (None, None)
+    assert (r["fc"]["lole_h"], r["fc"]["eue_mwh"]) == pytest.approx((1.0, 2.0))
+    assert (r["fd"]["lole_h"], r["fd"]["eue_mwh"]) == (None, None)
 
 
 @pytest.mark.parametrize("nyears", [0.0, None])

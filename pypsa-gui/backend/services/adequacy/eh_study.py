@@ -525,6 +525,8 @@ def _stage_mc_certify(st: _Study) -> None:
         years=horizon_years)
     if verdict != "pass" and confident:
         confident = False
+    pocket_bound_h = cf.bound_hours(list(frozen.critical_pockets or []),
+                                    inputs.weights)
     dsr_on = bool(getattr(st.cfg, "dsr_buses", None)) and float(
         getattr(st.cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0) > 0
     payload = {
@@ -571,6 +573,11 @@ def _stage_mc_certify(st: _Study) -> None:
             if "critical_pocket_lole_hours" in res else None),
         "critical_pocket_eue_overlap_bound_mwh": res.get(
             "critical_pocket_eue_overlap_bound_mwh"),
+        # GK R1: the bounded pockets' upper bound (h/yr), which every other
+        # reader of ``lole_ci`` adds before it reads "within the goal"
+        # (the readiness row); None with no bounded pocket.
+        "critical_pocket_bound_h_per_year": (
+            None if pocket_bound_h is None else pocket_bound_h / horizon_years),
         "dsr_note": (
             "the LP plan uses demand response but the MC does not model it — "
             "this LOLE is pessimistic relative to the plan" if dsr_on else None),

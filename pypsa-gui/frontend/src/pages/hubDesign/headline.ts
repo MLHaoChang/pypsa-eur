@@ -64,7 +64,14 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
       const buses = names(pk.flatMap((p) => p.buses))
       const feeders = pk.flatMap((p) => p.feeders)
       const bound = pk.reduce((a, p) => a + (num(p.bound_h_per_year) ?? 0), 0)
-      return `${verdictWord('inconclusive')}: ${buses} could be cut off up to ${bound.toFixed(1)} h/yr while ${names(feeders)} ${feeders.length > 1 ? 'are' : 'is'} out (${pk.length > 1 ? 'their' : 'its'} own backup not counted), over the ${g(target)} h/yr goal: a second feeder or a more reliable one would settle it.`
+      const cut = `${verdictWord('inconclusive')}: ${buses} could be cut off up to ${bound.toFixed(1)} h/yr while ${names(feeders)} ${feeders.length > 1 ? 'are' : 'is'} out`
+      // GK R2: a feeder without outage data is taken as always out; its data
+      // is the first thing that would settle it.
+      const unread = [...new Set(pk.flatMap((p) => p.no_data ?? []))]
+      if (unread.length) {
+        return `${cut} (the outage rate of ${names(unread)} is not known, so it is taken as always out), over the ${g(target)} h/yr goal: outage data for ${names(unread)}, a second feeder or a more reliable one would settle it.`
+      }
+      return `${cut} (${pk.length > 1 ? 'their' : 'its'} own backup not counted), over the ${g(target)} h/yr goal: a second feeder or a more reliable one would settle it.`
     }
     return `${verdictWord('inconclusive')}: ${names(fb.chained ?? [])} reaches a must-stay-on bus only through a bus with no supply of its own, which this check cannot bound: a feeder straight from a supplied bus would settle it.`
   }

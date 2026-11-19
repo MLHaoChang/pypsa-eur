@@ -285,7 +285,16 @@ export const CERTIFICATION_NEXT = {
   // GK A F6': a must-stay-on bus behind one feeder holds the pass back; the
   // interval may sit under the goal, so more draws would not settle it.
   feederBound: 'Next: add a second feeder to the must-stay-on bus or make its feeder more reliable; more simulation draws would not settle this verdict.',
+  // GK R2: a feeder without outage data is taken as always out; its data
+  // comes first.
+  feederNoData: "Next: add outage data for the must-stay-on bus's feeder, or add a second feeder; more simulation draws would not settle this verdict.",
 } as const
+
+function feederNext(fb: unknown): string {
+  const pockets = (fb as { pockets?: { no_data?: string[] }[] } | null)?.pockets ?? []
+  return pockets.some((p) => (p.no_data ?? []).length > 0)
+    ? CERTIFICATION_NEXT.feederNoData : CERTIFICATION_NEXT.feederBound
+}
 
 /** MC certification headline from the `certification` section, if it ran. */
 export function certificationHeadline(report: EhReferenceDesignReport): {
@@ -315,7 +324,7 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
   // metric both leave the verdict empty: the next step is to set a target.
   const next = verdict === 'fail' ? CERTIFICATION_NEXT.fail
     : verdict === 'inconclusive'
-      ? (payload.feeder_bound ? CERTIFICATION_NEXT.feederBound : CERTIFICATION_NEXT.inconclusive)
+      ? (payload.feeder_bound ? feederNext(payload.feeder_bound) : CERTIFICATION_NEXT.inconclusive)
       : verdict === 'pass' ? null
         : (verdict == null || verdict === 'none' || payload.metric === 'none')
           ? CERTIFICATION_NEXT.noTarget : null

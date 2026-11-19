@@ -136,13 +136,32 @@ def test_the_bound_plus_the_ci_upper_bound_decides_a_pass(hi, u, want):
     assert (held is None) == (want == "pass")
     if held:
         assert held["pockets"] == [
-            {"buses": ["h"], "feeders": ["f"], "bound_h_per_year": pytest.approx(2.0)}
+            {
+                "buses": ["h"],
+                "feeders": ["f"],
+                "bound_h_per_year": pytest.approx(2.0),
+                "no_data": [],
+                "own_units": False,
+            }
         ]
-        assert "issue" not in note
+        # R6: the two-area treatment (issue 09) is one way to clear it.
+        assert "issue 09" in note and "its own area" in note
 
 
 def test_a_bound_never_turns_a_verdict_into_a_pass_or_a_fail():
     p = [Pocket(["h"], ["f"], 0.9, np.ones(10), bound=True)]
+    # A pass the bound breaks (0 + 0.9 × 10 = 9 > 2) is exactly inconclusive.
+    v, _, held = bounded_verdict(
+        "pass",
+        None,
+        hi=0.0,
+        pockets=p,
+        rows=[],
+        weights=np.ones(10),
+        target_h=2.0,
+        years=1.0,
+    )
+    assert v == "inconclusive" and held is not None
     for v in ("fail", "inconclusive", None):
         assert bounded_verdict(
             v,
@@ -300,3 +319,84 @@ def test_a_chained_pocket_alone_withholds_the_pass_and_names_the_feeder():
     assert v == "inconclusive"
     assert held == {"pockets": [], "chained": ["g"], "target_h_per_year": 2.0}
     assert note.startswith("g feeds a must-stay-on bus") and "straight from" in note
+
+
+def test_uneven_weights_count_each_loaded_hour_at_its_own_weight():
+    # GK R3: P is Σ u·w over the loaded hours, not count × mean weight
+    # (2 × 3 × 0.5 = 3), and E is Σ u·w·load, not the mean weight's (9).
+    w = np.array([1.0, 3.0, 2.0, 6.0])
+    load = np.array([2.0, 0.0, 4.0, 0.0])
+    out = compose(
+        _res(0.0, (0.0, 0.0), 0.0),
+        [Pocket(["h"], ["f"], 0.5, load)],
+        weights=w,
+        periods=(),
+    )
+    assert out["critical_pocket_lole_hours"] == pytest.approx(1.5)
+    assert out["lole_hours"] == pytest.approx(1.5)
+    assert out["critical_pocket_eue_mwh"] == pytest.approx(0.5 * (1 * 2 + 2 * 4))
+    assert out["eue_mwh"] == pytest.approx(5.0)
+
+
+def test_a_periods_eue_interval_moves_with_its_eue():
+    # GK R4: 0.01 × 10 MW × 8,760 h = 876 MWh, in the value and its interval.
+    by = {
+        "2030": {
+            "lole_hours": 0.0,
+            "lole_ci": [0.0, 0.0],
+            "eue_mwh": 0.0,
+            "eue_ci": [0.0, 0.0],
+        }
+    }
+    out = compose(
+        _res(0.0, (0.0, 0.0), 0.0, by),
+        [Pocket(["h"], ["f"], 0.01, np.full(8760, 10.0))],
+        weights=np.ones(8760),
+        periods=(("2030", 0, 8760),),
+    )
+    period = out["by_period"]["2030"]
+    assert period["eue_mwh"] == pytest.approx(876.0)
+    assert period["eue_ci"] == pytest.approx([876.0, 876.0])
+
+
+def test_a_period_without_an_eue_interval_does_not_get_one():
+    by = {"2030": {"lole_hours": 0.0, "lole_ci": [0.0, 0.0], "eue_mwh": 0.0}}
+    out = compose(
+        _res(0.0, (0.0, 0.0), 0.0, by),
+        [Pocket(["h"], ["f"], 0.5, np.ones(4))],
+        weights=np.ones(4),
+        periods=(("2030", 0, 4),),
+    )
+    assert "eue_ci" not in out["by_period"]["2030"]
+
+
+def test_a_no_data_pockets_bound_names_the_data_that_would_clear_it():
+    # GK R2: an unread rate is taken as 1; the note says so and names the
+    # outage data as a way to settle it, never "never failing".
+    v, note, held = bounded_verdict(
+        "pass",
+        None,
+        hi=0.0,
+        pockets=[Pocket(["h"], ["f", "g"], 0.5, np.ones(4), bound=True, no_data=["g"])],
+        rows=[],
+        weights=np.ones(4),
+        target_h=1.0,
+        years=1.0,
+    )
+    assert v == "inconclusive"
+    assert held["pockets"][0]["no_data"] == ["g"]
+    assert held["pockets"][0]["bound_h_per_year"] == pytest.approx(2.0)
+    assert "outage rate is not known" in note and "Outage data for g" in note
+    assert "never failing" not in note and "own units" not in note
+
+
+def test_the_bound_of_the_bounded_pockets_is_their_union():
+    from services.adequacy.critical_feeders import bound_hours
+
+    p = [
+        Pocket(["a"], ["fa"], 0.5, np.ones(4), bound=True),
+        Pocket(["b"], ["fb"], 0.5, np.ones(4), bound=True),
+        Pocket(["c"], ["fc"], 0.9, np.ones(4)),  # composed: not a bound
+    ]
+    assert bound_hours(p, np.ones(4)) == pytest.approx(4 * (1 - 0.25))
+    assert bound_hours(p[2:], np.ones(4)) is None

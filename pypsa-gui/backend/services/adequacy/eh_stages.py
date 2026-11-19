@@ -1245,7 +1245,7 @@ def _critical_pockets(network, scope: FleetScope, inputs, *, cfg) -> list:
     for p in pockets:
         hours, energy = cf.pocket_terms([p], w)
         for r in scope.critical_feeders:
-            if r["model"] != cf.NO_OUTAGE_DATA and r["name"] in p.feeders:
+            if r["name"] in p.feeders:
                 r["lole_h"] = hours / years if years > 0 else None
                 r["eue_mwh"] = energy / years if years > 0 else None
     return pockets

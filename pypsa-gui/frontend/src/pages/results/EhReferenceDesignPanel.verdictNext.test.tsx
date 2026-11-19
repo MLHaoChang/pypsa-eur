@@ -61,6 +61,14 @@ describe('certificationHeadline.next', () => {
     expect(next).not.toMatch(/raise the MC draws/)
   })
 
+  it('a feeder without outage data → ask for its data first (GK R2)', () => {
+    const next = certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 3,
+      feeder_bound: { pockets: [{ buses: ['crit'], feeders: ['crit_feeder'],
+        bound_h_per_year: 8760, no_data: ['crit_feeder'] }], chained: [] } }))!.next
+    expect(next).toMatch(/^Next: add outage data for the must-stay-on bus's feeder/)
+    expect(next).not.toMatch(/raise the MC draws/)
+  })
+
   it('no target (verdict null) → set a target', () => {
     expect(certificationHeadline(report({ verdict: null, target_lole_h: null }))!.next)
       .toBe(NO_TARGET_NEXT)

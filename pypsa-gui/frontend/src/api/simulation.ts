@@ -782,14 +782,20 @@ export interface EhCommonModeEvent {
  *  (`critical_feeders.critical_feeder_rows`, walkthrough 2026-11-17 issue 02). */
 export interface EhCriticalFeeder {
   name: string
-  /** composed: added to the LOLE; unsampled: own units or chained, an upper
-   *  bound when `upper_bound`; no_outage_data: taken as never failing. */
+  /** composed: added to the LOLE; unsampled: own units, chained or beside a
+   *  feeder without data, an upper bound when `upper_bound`; no_outage_data:
+   *  its rate is not known and is taken as 1 (GK R2), so its pocket is
+   *  bounded (`upper_bound`) unless chained. */
   model: 'composed' | 'unsampled' | 'no_outage_data'
   buses: string[]
   pocket_buses?: string[]
   feeders?: string[]
-  q?: number
-  mttr_hours?: number
+  /** The pocket's feeders without usable outage data. */
+  no_data_feeders?: string[]
+  own_units?: boolean
+  /** null for a feeder without usable outage data. */
+  q?: number | null
+  mttr_hours?: number | null
   pocket_unavailability?: number
   reason?: string | null
   chained?: boolean
@@ -802,7 +808,9 @@ export interface EhCriticalFeeder {
 /** Why a pass was withheld by pockets the certification cannot simulate
  *  (GK A F6'); null when it was not. */
 export interface EhFeederBound {
-  pockets: { buses: string[]; feeders: string[]; bound_h_per_year: number }[]
+  pockets: { buses: string[]; feeders: string[]; bound_h_per_year: number
+    /** Feeders whose outage rate is not known, taken as always out (GK R2). */
+    no_data?: string[]; own_units?: boolean }[]
   chained: string[]
   target_h_per_year?: number
 }
@@ -840,6 +848,8 @@ export interface EhCertificationPayload {
   critical_feeder_note?: string | null
   critical_feeders?: EhCriticalFeeder[]
   critical_pocket_lole_h_per_year?: number | null
+  /** The bounded pockets' upper bound, h/yr (GK R1); null with none. */
+  critical_pocket_bound_h_per_year?: number | null
   critical_pocket_eue_overlap_bound_mwh?: number | null
   feeder_bound?: EhFeederBound | null
   metric?: string

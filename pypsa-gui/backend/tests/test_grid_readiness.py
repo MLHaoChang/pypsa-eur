@@ -744,6 +744,50 @@ def test_the_lole_goal_is_the_one_the_study_certified_against(tmp_path):
     assert "Scenarios" in row["source"]
 
 
+def _held(study, **payload):
+    study["report"]["sections"]["certification"]["payload"].update(payload)
+    return study
+
+
+_FB = {"pockets": [{"buses": ["it_bus"], "feeders": ["site_transformer"], "bound_h_per_year": 43.8}],
+       "chained": [], "target_h_per_year": 3.0}
+
+
+def test_a_certification_held_by_a_feeder_bound_never_reads_pass(tmp_path):
+    # GK R1: the interval alone sits under the goal, but the certification
+    # withheld the pass on the feeder's bound: the scorecard follows it.
+    d, n = _project(tmp_path, "eh_datacenter")
+    # The GK probe: the verdict and its feeder_bound alone, as a record without the bound figure.
+    study = _held(_study(1.0, [0.0, 2.0], target=3.0), verdict="inconclusive", feeder_bound=_FB)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "warn" and row["limit"] == 3.0
+    assert "43.8" in row["note"]
+
+
+@pytest.mark.parametrize("bound, verdict", [(1.0, "pass"), (2.0, "warn")])
+def test_the_feeder_bound_counts_toward_the_goal(tmp_path, bound, verdict):
+    # No study goal (the template's 3 h/yr): CI upper 2 + bound ≤ 3 passes.
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), critical_pocket_bound_h_per_year=bound)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == verdict
+
+
+def test_a_chained_feeder_withholds_the_scorecards_pass(tmp_path):
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), critical_feeders=[
+        {"name": "g", "model": "unsampled", "chained": True, "upper_bound": False}])
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "warn" and "g" in row["note"]
+
+
+def test_a_bound_never_turns_the_row_into_a_fail(tmp_path):
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), critical_pocket_bound_h_per_year=8760.0)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "warn"
+
+
 def test_the_h2_hub_sets_no_lole_goal(tmp_path):
     d, n = _project(tmp_path, "eh_h2_hub")
     row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=_study(1.0, [0.0, 2.0]),
