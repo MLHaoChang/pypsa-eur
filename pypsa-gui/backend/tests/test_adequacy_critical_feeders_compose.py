@@ -154,3 +154,149 @@ def test_a_bound_never_turns_a_verdict_into_a_pass_or_a_fail():
             target_h=2.0,
             years=1.0,
         ) == (v, "n", None)
+
+
+def test_a_single_period_reports_the_same_figure_as_the_total():
+    by = {"2030": {"lole_hours": 1.0, "lole_ci": [1.0, 1.0], "eue_mwh": 2.0}}
+    out = compose(
+        _res(1.0, (1.0, 1.0), 2.0, by),
+        [Pocket(["h"], ["f"], 0.5, np.ones(4))],
+        weights=np.ones(4),
+        periods=(("2030", 0, 4),),
+    )
+    # 1 + 2 − 1·2/4 = 2.5, in the period and in the total.
+    assert out["lole_hours"] == pytest.approx(2.5)
+    assert out["by_period"]["2030"]["lole_hours"] == pytest.approx(2.5)
+    assert out["by_period"]["2030"]["eue_mwh"] == pytest.approx(4.0)
+
+
+def test_periods_the_mc_did_not_report_compose_on_the_whole_horizon():
+    by = {"2030": {"lole_hours": 0.0, "lole_ci": [0.0, 0.0], "eue_mwh": 0.0}}
+    out = compose(
+        _res(0.0, (0.0, 0.0), 0.0, by),
+        [Pocket(["h"], ["f"], 0.5, np.ones(8))],
+        weights=np.ones(8),
+        periods=(("2030", 0, 4), ("2040", 4, 8)),
+    )
+    assert out["lole_hours"] == pytest.approx(4.0)
+    assert out["by_period"] == by  # left as reported, not half-composed
+
+
+def test_no_periods_given_is_the_whole_horizon():
+    out = compose(
+        _res(0.0, (0.0, 0.0), 0.0),
+        [Pocket(["h"], ["f"], 0.5, np.ones(4))],
+        weights=np.ones(4),
+        periods=None,
+    )
+    assert out["lole_hours"] == pytest.approx(2.0)
+
+
+def test_the_hub_eue_is_kept_and_a_missing_one_reads_as_zero():
+    pocket = [Pocket(["h"], ["f"], 0.2, np.full(10, 3.0))]
+    kept = compose(_res(1.0, (1.0, 1.0), 5.0), pocket, weights=np.ones(10), periods=())
+    assert kept["eue_mwh"] == pytest.approx(5.0 + 0.2 * 10 * 3.0)
+    missing = _res(1.0, (1.0, 1.0), 0.0)
+    missing["eue_mwh"] = None
+    missing.pop("eue_ci")
+    out = compose(missing, pocket, weights=np.ones(10), periods=())
+    assert out["eue_mwh"] == pytest.approx(6.0)
+    assert out["critical_pocket_eue_overlap_bound_mwh"] == 0.0
+    assert "eue_ci" not in out
+
+
+def test_zero_weights_lose_no_hours_and_do_not_divide_by_zero():
+    out = compose(
+        _res(0.0, (0.0, 0.0), 1.0),
+        [Pocket(["h"], ["f"], 0.5, np.ones(4))],
+        weights=np.zeros(4),
+        periods=(),
+    )
+    assert out["lole_hours"] == 0.0
+    assert out["critical_pocket_eue_overlap_bound_mwh"] == 0.0
+
+
+def _bounded(u=0.5, hours=4):
+    return [Pocket(["h"], ["f"], u, np.ones(hours), bound=True)]
+
+
+_BOUND_ROW = [
+    {
+        "name": "f",
+        "model": "unsampled",
+        "chained": False,
+        "upper_bound": True,
+        "buses": ["h"],
+    }
+]
+
+
+def test_a_bound_exactly_at_the_goal_lets_the_pass_stand():
+    # 0 + 0.5 × 4 = 2.0 exactly: at the goal is within it.
+    v, _, held = bounded_verdict(
+        "pass",
+        None,
+        hi=0.0,
+        pockets=_bounded(),
+        rows=_BOUND_ROW,
+        weights=np.ones(4),
+        target_h=2.0,
+        years=1.0,
+    )
+    assert (v, held) == ("pass", None)
+
+
+def test_without_a_goal_a_bound_decides_nothing():
+    assert bounded_verdict(
+        "pass",
+        "n",
+        hi=0.0,
+        pockets=_bounded(u=0.9),
+        rows=_BOUND_ROW,
+        weights=np.ones(4),
+        target_h=None,
+        years=1.0,
+    ) == ("pass", "n", None)
+
+
+@pytest.mark.parametrize("years, per_year", [(2.0, 1.0), (0.0, 2.0)])
+def test_the_bound_and_the_goal_are_stated_per_year(years, per_year):
+    # 0.5 × 4 h = 2 h over the horizon; a goal of 1 h over it.
+    v, note, held = bounded_verdict(
+        "pass",
+        None,
+        hi=0.0,
+        pockets=_bounded(),
+        rows=_BOUND_ROW,
+        weights=np.ones(4),
+        target_h=1.0,
+        years=years,
+    )
+    assert v == "inconclusive"
+    assert held["pockets"][0]["bound_h_per_year"] == pytest.approx(per_year)
+    assert held["target_h_per_year"] == pytest.approx(per_year / 2.0)
+
+
+def test_a_chained_pocket_alone_withholds_the_pass_and_names_the_feeder():
+    rows = [
+        {
+            "name": "g",
+            "model": "unsampled",
+            "chained": True,
+            "upper_bound": False,
+            "buses": ["h"],
+        }
+    ]
+    v, note, held = bounded_verdict(
+        "pass",
+        None,
+        hi=0.0,
+        pockets=[],
+        rows=rows,
+        weights=np.ones(4),
+        target_h=2.0,
+        years=1.0,
+    )
+    assert v == "inconclusive"
+    assert held == {"pockets": [], "chained": ["g"], "target_h_per_year": 2.0}
+    assert note.startswith("g feeds a must-stay-on bus") and "straight from" in note

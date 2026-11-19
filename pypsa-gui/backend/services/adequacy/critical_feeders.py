@@ -339,9 +339,8 @@ def compose(res: dict, pockets: list[Pocket], *, weights: np.ndarray, periods) -
     w = np.asarray(weights, dtype=float)
     by_period = res.get("by_period") or {}
     blocks = [(str(lab), slice(int(a), int(b))) for lab, a, b in (periods or ())]
-    use_periods = (
-        len(blocks) > 1 and by_period and all(lab in by_period for lab, _ in blocks)
-    )
+    # Every period the MC reports, a single one too, so it matches the total.
+    use_periods = bool(blocks) and all(lab in by_period for lab, _ in blocks)
     if not use_periods:
         blocks = [("_all", slice(None))]
         by_period_in = {
