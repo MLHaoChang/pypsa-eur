@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The data-centre create refusal for a peak above the energized import is plain words: an ISO hour (no program text), no genset clause without gensets, and for Battery backup why it is refused and each way out (the largest IT load that fits, Hybrid, or a later connection change).

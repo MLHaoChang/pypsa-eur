@@ -229,7 +229,7 @@ ATTRIBUTE_SOURCES = {
     "StaCubic": f"{_DGS_DOC}: cubicle (connection of an element to a terminal)",
     "TypHmccur": f"{_DGS_DOC}: harmonic current source type (vector attributes)",
 }
-#: ``TypHmccur`` is written separately: its vectors' length varies per row.
+#: ``TypHmccur`` is written separately: one block over the union of every source's orders (GC-15).
 HARMONIC_CLASS = "TypHmccur"
 #: ``ElmShnt.shtype``: 2 = C (capacitive), 1 = R-L (inductive).
 SHTYPE_C, SHTYPE_L = 2, 1

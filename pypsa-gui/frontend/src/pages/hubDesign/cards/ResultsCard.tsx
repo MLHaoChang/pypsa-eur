@@ -25,6 +25,7 @@ import { networkApi } from '../../../api/network'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
+import GridExtensionCard from '../../results/GridExtensionCard'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
 
 
@@ -113,6 +114,7 @@ export function ResultsCard() {
           <ResultState state="not_run" reason="The study writes its verdict, cost and risks here."
             action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} />
         )}
+        <GridExtensionCard />
         {/* No headline yet, so every tile keeps its figure. */}
         <ChaptersSection reliability={reliability} />
       </CardShell>
@@ -234,6 +236,7 @@ export function ResultsCard() {
           <FileText size={13} /> Show the engineering detail
         </button>
       </div>
+      <GridExtensionCard />
       <ChaptersSection reliability={reliability} headlined={[...HEADLINED]} />
     </CardShell>
   )
