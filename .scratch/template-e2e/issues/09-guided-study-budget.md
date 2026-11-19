@@ -48,4 +48,4 @@ Both can ship; (a) alone leaves the concentrator slow by default.
 
 ## Triage (2026-11-19, master 9f850d36)
 
-Checked by code reading only; the app was not re-run. Still true: `GoalStudyRun.tsx` shows the size only in the progress line, and `run_profiles.py` `eh_study` still has `budget_solves: 2` with no Guided field. Scope: fix (a) only (UX gate). Fix (b) changes template results and is not triaged here; file it separately if the owner wants it. Blocked by: none.
+Checked by code reading only; the app was not re-run. Still true: `GoalStudyRun.tsx` shows the size only in the progress line, and `run_profiles.py` `eh_study` still has `budget_solves: 2` with no Guided field. Scope: fixes (a) (UX gate) and (b) (GK A); one PR each. Fix (b) is also in scope. Decision (owner, 2026-11-19, TE2E-09-SMALLER-1): lower the staged concentrator's default horizon/budget in its run profile; GK A reviews the changed results; fix (a) still lets users go bigger. Acceptance for (b): the concentrator's short journey waits for the verdict within 300 s and the abort branch (`slow: true`) is removed. Blocked by: none.
