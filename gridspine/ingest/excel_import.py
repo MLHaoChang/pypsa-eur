@@ -1185,18 +1185,38 @@ def _index_columns(header: Sequence, levels: Sequence[str]) -> list[int]:
     return cols or [0]
 
 
+def _last_row(ws) -> int:
+    """The last row holding a value: pandas drops the empty rows after it, not before."""
+    last = 1
+    for r, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if any(v is not None for v in row):
+            last = r
+    return last
+
+
+def _first_column(ws) -> list:
+    """Column A under the header, down to `_last_row`."""
+    return [
+        row[0] if row else None
+        for row in ws.iter_rows(min_row=2, max_row=_last_row(ws), values_only=True)
+    ]
+
+
 def _check_weightings(
     ws, header: Sequence, keys: Sequence[str], report: ImportReport
 ) -> None:
-    """Each weighting cell a finite number ≥ 0; a bad one is reported and set to 1."""
+    """
+    Each weighting cell a finite number ≥ 0; a bad or empty one (pandas would
+    store NaN) is reported and set to 1.
+    """
     for c, h in enumerate(header, 1):
         if h not in keys:
             continue
-        for r in range(2, ws.max_row + 1):
+        for r in range(2, _last_row(ws) + 1):
             cell = ws.cell(row=r, column=c)
-            if cell.value is None:
-                continue
             try:
+                if cell.value is None:
+                    raise _Bad("the cell is empty")
                 _weighting(cell.value)
             except _Bad as exc:
                 report.unmapped.append(
@@ -1208,11 +1228,14 @@ def _check_weightings(
 
 
 def _check_index(ws, cols: Sequence[int], *, whole: Sequence[int] = ()) -> None:
-    """Every row of the index columns named, the names unique; else the file is refused."""
+    """
+    Every row of the index columns named, the names unique; else the file is
+    refused. An empty row before the last one counts: pandas reads it as a NaT/NaN
+    time step.
+    """
     seen: set[tuple] = set()
-    for r, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        if all(v is None for v in row):
-            continue
+    rows = ws.iter_rows(min_row=2, max_row=_last_row(ws), values_only=True)
+    for r, row in enumerate(rows, start=2):
         key = tuple(row[c] if c < len(row) else None for c in cols)
         problem = None
         if any(v is None or _na_text(v) for v in key):
@@ -1266,9 +1289,7 @@ def _check_native_copy(wb, report: ImportReport) -> set[str]:
         whole = [c for c in cols if header[c] == "period"]
         _check_index(ws, cols, whole=whole)
         _check_weightings(ws, header, _SNAPSHOT_WEIGHTINGS, report)
-        steps = [
-            row[0] if row else None for row in ws.iter_rows(min_row=2, values_only=True)
-        ]
+        steps = _first_column(ws)
     if "investment_periods" in wb.sheetnames:
         ws = wb["investment_periods"]
         header = next(ws.iter_rows(max_row=1, values_only=True), ())
@@ -1288,9 +1309,7 @@ def _check_native_copy(wb, report: ImportReport) -> set[str]:
     for ws in list(wb.worksheets):
         if not _native_series_sheet(ws.title):
             continue
-        index = [
-            row[0] if row else None for row in ws.iter_rows(min_row=2, values_only=True)
-        ]
+        index = _first_column(ws)
         if index != steps:
             report.unmapped.append(
                 Unmapped(
@@ -1305,6 +1324,40 @@ def _check_native_copy(wb, report: ImportReport) -> set[str]:
 
 
 _BUS_COLUMN = re.compile(r"bus\d*")
+#: The standard-type tables a line or transformer `type` names. A file's own types
+#: sheet is never read (`_check_native_copy`), so only PyPSA's standard types count.
+_TYPE_TABLES = {"Line": "line_types", "Transformer": "transformer_types"}
+
+
+def _drop_unknown_types(n: pypsa.Network, report: ImportReport) -> dict[str, int]:
+    """
+    A line or transformer whose `type` is not a standard type is reported and not
+    read: PyPSA would keep it and then fail its consistency check. Returns how
+    many of each class went.
+    """
+    dropped: dict[str, int] = {}
+    for cls, types in _TYPE_TABLES.items():
+        table = getattr(n, L.LIST_NAME[cls])
+        if table.empty or "type" not in table.columns:
+            continue
+        known = set(getattr(n, types).index)
+        bad = {
+            name: v
+            for name, v in table["type"].items()
+            if isinstance(v, str) and v != "" and v not in known
+        }
+        for name, v in bad.items():
+            report.unmapped.append(
+                Unmapped(
+                    f"{L.LIST_NAME[cls]} › {name}",
+                    f"type: '{v[:40]}' is not a standard {cls.lower()} type; "
+                    "the asset was not read",
+                )
+            )
+        if bad:
+            n.remove(cls, list(bad))
+            dropped[cls] = len(bad)
+    return dropped
 
 
 def _drop_dangling(
@@ -1495,6 +1548,7 @@ def _check_native_cells(
                         )
                         series[attr] = series[attr].drop(columns=asset, errors="ignore")
                         break
+    _drop_unknown_types(n, report)
     _drop_dangling(n, removed, report)
 
 
@@ -1621,6 +1675,8 @@ def _read_legacy_sheets(
                 )
                 removed.setdefault(cls, set()).add(name)
         report.counts[L.SHEET_OF[cls]] = report.counts.get(L.SHEET_OF[cls], 0) + added
+    for cls, count in _drop_unknown_types(n, report).items():
+        report.counts[L.SHEET_OF[cls]] -= count
     for cls, count in _drop_dangling(n, removed, report).items():
         report.counts[L.SHEET_OF[cls]] -= count
     _report_formulas(sheets, report)

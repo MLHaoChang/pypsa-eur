@@ -2410,3 +2410,112 @@ def test_the_raw_sheets_layout_drops_what_refers_to_a_skipped_row(tmp_path):
     ) in um
     assert list(res.network.generators.index) == ["G2"] and res.network.lines.empty
     assert res.report.counts["Generators"] == 1 and res.report.counts["Lines"] == 0
+
+
+# ── GK B 68 on #1732 @69dccb3e ─────────────────────────────────────────────────
+
+
+def test_an_empty_snapshot_weighting_is_reported_and_set_to_one(tmp_path):
+    def edit(wb):
+        ws = wb["snapshots"]
+        col = [c.value for c in ws[1]].index("objective") + 1
+        ws.cell(row=3, column=col).value = None
+
+    res = _native_wb(tmp_path, edit)
+    assert (
+        "snapshots row 3",
+        "objective: the cell is empty; the weighting 1 is used",
+    ) in _um(res)
+    assert res.network.snapshot_weightings["objective"].tolist() == [1.0, 1.0]
+
+
+def test_an_empty_period_weighting_is_reported_and_set_to_one(tmp_path):
+    def edit(ws):
+        ws["C3"] = None
+
+    res = _period_edit(tmp_path, edit)
+    assert (
+        "investment_periods row 3",
+        "years: the cell is empty; the weighting 1 is used",
+    ) in _um(res)
+    assert res.network.investment_period_weightings["years"].tolist() == [1.0, 1.0]
+
+
+def test_an_empty_row_inside_the_snapshots_refuses_the_file(tmp_path):
+    def edit(wb):
+        wb["snapshots"].insert_rows(3)
+
+    with pytest.raises(L.ImportFormatError, match="row 3 has no name"):
+        _native_wb(tmp_path, edit)
+
+
+def test_empty_rows_after_the_last_snapshot_are_not_a_time_step(tmp_path):
+    def edit(wb):
+        for sheet in ("snapshots", "generators-p_max_pu"):
+            ws = wb[sheet]
+            ws.cell(row=ws.max_row + 2, column=1).value = None  # styled, empty
+            ws.cell(row=ws.max_row, column=1).number_format = "0.00"
+
+    res = _native_wb(tmp_path, edit)
+    assert _um(res) == []
+    assert len(res.network.snapshots) == 2
+
+
+def test_an_empty_row_inside_a_series_sheet_drops_the_sheet(tmp_path):
+    def edit(wb):
+        wb["generators-p_max_pu"].insert_rows(3)
+
+    res = _native_wb(tmp_path, edit)
+    assert (
+        "generators-p_max_pu",
+        "its first column is not the time steps of the snapshots sheet; "
+        "the sheet was not read",
+    ) in _um(res)
+    assert res.network.generators_t.p_max_pu.empty
+    assert not res.network.generators_t.p_max_pu.isna().any().any()
+
+
+def test_a_line_or_transformer_of_an_unknown_type_is_reported_and_not_read(tmp_path):
+    n = _two_gens()
+    n.add("Line", "l1", bus0="B1", bus1="B2", type="no such type", s_nom=1.0)
+    n.add("Line", "l2", bus0="B1", bus1="B2", type="149-AL1/24-ST1A 110.0")
+    n.add("Transformer", "t1", bus0="B1", bus1="B2", type="mine")
+    path = _native(n, tmp_path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb.create_sheet("transformer_types")  # the file's own type: never read
+    ws.append(["name", "s_nom", "v_nom_0", "v_nom_1"])
+    ws.append(["mine", 40.0, 220.0, 110.0])
+    wb.save(path)
+    res = read_excel(path)
+    um = _um(res)
+    assert (
+        "lines › l1",
+        "type: 'no such type' is not a standard line type; the asset was not read",
+    ) in um
+    assert (
+        "transformers › t1",
+        "type: 'mine' is not a standard transformer type; the asset was not read",
+    ) in um
+    assert ("transformer_types", _NOT_READ_SHEET) in um
+    assert list(res.network.lines.index) == ["l2"] and res.network.transformers.empty
+    res.network.consistency_check()
+
+
+def test_the_raw_sheets_layout_reports_an_unknown_line_type(tmp_path):
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for sheet, rows in {
+        "buses": [["name", "v_nom"], ["B1", 110.0], ["B2", 110.0]],
+        "lines": [["name", "bus0", "bus1", "type"], ["l1", "B1", "B2", "nope"]],
+    }.items():
+        ws = wb.create_sheet(sheet)
+        for row in rows:
+            ws.append(row)
+    path = tmp_path / "raw.xlsx"
+    wb.save(path)
+    res = read_excel(path)
+    assert (
+        "lines › l1",
+        "type: 'nope' is not a standard line type; the asset was not read",
+    ) in _um(res)
+    assert res.network.lines.empty and res.report.counts["Lines"] == 0
