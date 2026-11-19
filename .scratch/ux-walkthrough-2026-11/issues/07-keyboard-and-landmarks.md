@@ -3,7 +3,12 @@
 
 # Keyboard and landmarks: no main, no h1, focus order, chat-card focus
 
-Status: needs-triage
+Status: ready-for-agent
+Model tier: sonnet
+Size: M
+Gated: UX
+Blocked by: #1556 merged for the chat-card part (it edits `ChatPanel.tsx`); the landmark and first-Tab part is free now
+Likely files: `pypsa-gui/frontend/src/` app shell (main landmark, h1, first Tab stop), `ChatPanel.tsx` (choice-card focus, live region)
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: all steps
 Severity: medium (the chat-card focus items are high once confirmed live; chat-dock rows are to confirm)
@@ -23,3 +28,7 @@ One main landmark and an h1 per screen, a predictable first Tab stop, and chat c
 ## Journey fit
 
 Applies to every step; no hand-off change.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Unowned; ui-cohesion 01 does not touch these files (it avoids `ChatPanel.tsx`). Two slices: (a) landmarks, h1 and first Tab stop; (b) chat-card focus and live region after #1556.
