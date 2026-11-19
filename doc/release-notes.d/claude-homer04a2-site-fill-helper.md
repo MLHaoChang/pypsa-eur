@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The generic site form can grow the later stages' peak load from the first stage at a rate in % per year ("Grow from the first stage"). Filled peaks are marked "from rate", a peak you type wins for its stage and "↺" gives it back to the rate. The rate is only a fill helper: the site is created from the stage peaks alone.
