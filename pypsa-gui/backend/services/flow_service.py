@@ -831,10 +831,20 @@ _LEDGER_PLAIN: dict[str, tuple[str | None, tuple[tuple[str, str], ...]]] = {
 }
 
 
+#: The island-capability break-even's ledger item, as stored before and after
+#: its rename (walkthrough asset-investment, improvement 3).
+_ISLAND_BREAKEVEN_ITEMS = frozenset({"island break-even", "island-capability break-even"})
+
+
 def _plain_words(item: str, shown: str) -> tuple[str | None, str]:
     """``(label, value)`` of a ledger row for the flow message: the row's plain
     label when it has one, and its value with the engineering keys in words."""
     label, swaps = _LEDGER_PLAIN.get(item, (None, ()))
+    if item in _ISLAND_BREAKEVEN_ITEMS:
+        # One name for one figure (UX 2 on #1692): a project created before
+        # the rename stores the old item text; both read the current label.
+        from services.finance.breakeven import LABEL
+        label = LABEL
     for key, words in swaps:
         shown = shown.replace(key, words)
     return label, shown
