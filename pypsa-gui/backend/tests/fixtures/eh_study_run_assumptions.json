@@ -1,0 +1,93 @@
+[
+ {
+  "key": "mc_draws",
+  "label": "Simulation runs per reliability check",
+  "value": 500,
+  "shown": "500 runs",
+  "source": "default",
+  "reason": "the engine default",
+  "section": "scenarios",
+  "card": "reliability",
+  "component": "",
+  "entity": "",
+  "field": "mc_draws"
+ },
+ {
+  "key": "site_archetype",
+  "label": "Site type",
+  "value": "strong_grid",
+  "shown": "Strong grid",
+  "source": "default",
+  "reason": "the engine default",
+  "section": "scenarios",
+  "card": "reliability",
+  "component": "",
+  "entity": "",
+  "field": "site_archetype"
+ },
+ {
+  "key": "outage_rate:Generator:gas",
+  "label": "Outage rate of gas generating units (d1, d2)",
+  "value": 0.05,
+  "shown": "5 % forced outage rate on demand, repair 50 h",
+  "source": "carrier_default",
+  "reason": "the typical value for gas units, about NERC GADS 2019\u20132023 gas CT/CC fleet class average (forced outage rate on demand)",
+  "section": "assets",
+  "card": "reliability",
+  "component": "Generator",
+  "entity": "d1, d2",
+  "field": "outage_rate_value"
+ },
+ {
+  "key": "mttr:Generator:oil",
+  "label": "Repair time of oil generating units (o1)",
+  "value": 50.0,
+  "shown": "50 h",
+  "source": "carrier_default",
+  "reason": "the typical value for oil units, about NERC GADS 2019\u20132023 oil/petroleum fleet class average (forced outage rate on demand)",
+  "section": "assets",
+  "card": "reliability",
+  "component": "Generator",
+  "entity": "o1",
+  "field": "mttr_hours"
+ },
+ {
+  "key": "outage_basis:Generator",
+  "label": "Outage rate basis of generating units (o1)",
+  "value": "FOR",
+  "shown": "forced outage rate",
+  "source": "default",
+  "reason": "an outage rate without a basis is read as a forced outage rate",
+  "section": "assets",
+  "card": "reliability",
+  "component": "Generator",
+  "entity": "o1",
+  "field": "outage_rate_basis"
+ },
+ {
+  "key": "outage_rate:StorageUnit:battery",
+  "label": "Outage rate of battery storage units (bat)",
+  "value": 0.02,
+  "shown": "2 % forced outage rate, repair 24 h",
+  "source": "carrier_default",
+  "reason": "the typical value for battery units, about utility-scale BESS availability surveys (forced outage rate; sparse public data)",
+  "section": "assets",
+  "card": "reliability",
+  "component": "StorageUnit",
+  "entity": "bat",
+  "field": "outage_rate_value"
+ },
+ {
+  "key": "efficiency:boiler",
+  "label": "Conversion efficiency of boiler",
+  "value": 1.0,
+  "shown": "100 % (lossless)",
+  "source": "default",
+  "reason": "a conversion at exactly 100 % is the value a blank efficiency gets",
+  "section": "assets",
+  "card": "reliability",
+  "component": "Link",
+  "entity": "boiler",
+  "field": "efficiency"
+ }
+]

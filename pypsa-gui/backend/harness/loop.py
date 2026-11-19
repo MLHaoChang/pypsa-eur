@@ -2121,7 +2121,10 @@ def _run_turn_body(
         else _tools_payload_for_profile(profile, message, history=selection_history)
     )
     from harness import assurance
+    from services import durable_conversation as _durable
 
+    # Live-voice 03a: the thread generation this turn starts at (see below).
+    _view_generation = _durable.current_view_generation(session.session_id)
     yield (
         "session_init",
         {
@@ -2358,6 +2361,17 @@ def _run_turn_body(
 
     with session._lock:
         session.append_history_message({"role": "user", "content": user_content})
+
+    # Live-voice 03a: the durable current view, distinct from refs.discussed,
+    # written once the turn is past every refusal and its message is kept.
+    # Held locks here: none (no session or provider lock); the call takes only
+    # durable_conversation._LOCK and never refuses or delays the turn. The
+    # thread generation read before session_init is re-checked under _LOCK, so
+    # a rebind during the turn (or an obsolete utterance) records nothing.
+    if _view_generation is not None and not obsolete():
+        _durable.record_current_view(
+            session.session_id, ui_context, generation=_view_generation
+        )
 
     tool_call_count = 0
     # Task 8 — `[]` when the profile's `tools` capability is off; see
