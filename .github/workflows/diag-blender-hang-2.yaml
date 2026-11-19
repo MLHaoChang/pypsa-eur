@@ -1,0 +1,58 @@
+# TEMPORARY diagnostic for the GUI backend shard hang. Not for merge.
+# Same steps as test.yaml's shard job (Node + npm ci included), plus a stack
+# dump on the first queue reset that takes over 20 s.
+name: Diag blender hang 2
+on:
+  push:
+    branches: [claude/diag-blender-hang-2]
+jobs:
+  diag:
+    name: diag ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: pr1643-merge-shard4
+          ref: ""
+          shard: 3
+        - name: master-shard3
+          ref: 9f850d366d58d10a3671afbb0a1ae99af47a5f90
+          shard: 2
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        path: diagsrc
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ matrix.ref || github.sha }}
+    - uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        cache: true
+        cache-write: false
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: pypsa-gui/frontend/package-lock.json
+    - working-directory: pypsa-gui/frontend
+      run: npm ci --no-audit --no-fund
+    - name: Add the stack-dump hook
+      run: cat diagsrc/.github/diag/conftest_patch.py >> pypsa-gui/backend/conftest.py && rm -rf diagsrc
+    - name: Run the shard
+      timeout-minutes: 170
+      env:
+        DIAG_STACKS: /tmp/diag-stacks.txt
+      run: |
+        mkdir -p pypsa-gui/backend/test-results
+        pixi run gui-tests --num-shards=4 --shard-id=${{ matrix.shard }} -p no:cacheprovider \
+          > pypsa-gui/backend/test-results/pytest.log 2>&1 || echo "exit $?"
+        grep -E "%\]|passed|failed" pypsa-gui/backend/test-results/pytest.log | tail -15
+    - name: Stacks
+      if: always()
+      run: cat /tmp/diag-stacks.txt || echo "no stacks"
