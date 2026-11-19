@@ -2478,6 +2478,16 @@ def test_a_removed_carrier_takes_its_buses_and_their_assets(tmp_path):
     assert list(res.network.buses.index) == ["B2"] and res.network.generators.empty
 
 
+def test_a_removed_carrier_is_matched_on_the_carrier_column_only(tmp_path):
+    n = _two_gens()  # both generators have control "PQ" and no carrier
+    n.add("Carrier", "PQ", co2_emissions=0.0)
+    res = read_excel(
+        _native_edit(tmp_path, n, "carriers", "co2_emissions", "PQ", "nan")
+    )
+    assert _um(res) == [("carriers › PQ", "co2_emissions: not a number (NaN)")]
+    assert list(res.network.generators.index) == ["G1", "G2"]
+
+
 def test_the_raw_sheets_layout_drops_what_refers_to_a_skipped_row(tmp_path):
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
