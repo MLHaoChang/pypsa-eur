@@ -12,7 +12,11 @@ import pandas as pd
 import pytest
 
 from gridspine.handoff.contingencies import (
+    _con_label,
+    _label_width,
     conmap_path,
+    read_conmap,
+    write_conmap,
     write_con,
     write_mon,
     write_sub,
@@ -72,7 +76,7 @@ def test_an_n2_pair_is_one_block_with_two_openings(net, tmp_path):
         }
     )
     write_con(pair, net, tmp_path / "p.con")
-    imp = read_contingency_list((tmp_path / "p.con").read_text(), net, fmt="con")
+    imp = read_contingency_list(tmp_path / "p.con", net)
     assert _sets(imp.contingencies) == [("branch", (a, b))]
 
 
@@ -100,8 +104,8 @@ def test_bus_name_ids_round_trip_through_the_label_map(net, cset, tmp_path):
     cs = cset.head(3).assign(contingency_id=ids)
     assert write_con(cs, net, tmp_path / "s.con") == []
     text = (tmp_path / "s.con").read_text()
+    assert text.startswith("COM gridspine conmap s.conmap.csv\n")
     assert "CONTINGENCY C0001\n" in text and long_id not in text
-    assert conmap_path(tmp_path / "s.con").name == "s.conmap.csv"
     imp = read_contingency_list(tmp_path / "s.con", net)
     assert imp.unmatched.empty and imp.excluded == []
     assert list(imp.contingencies["contingency_id"]) == ids
@@ -109,27 +113,38 @@ def test_bus_name_ids_round_trip_through_the_label_map(net, cset, tmp_path):
 
 def test_labels_skip_compound_kinds(net, tmp_path):
     cs = n_1_1_contingencies(branch_contingencies(net))
-    if cs.empty:
-        pytest.skip("no compound set on this net")
     mixed = pd.concat([cs.head(1), _set(net, kinds=("branch",)).head(2)], ignore_index=True)
-    skipped = write_con(mixed, net, tmp_path / "s.con")
-    assert len(skipped) == 1
-    labels = pd.read_csv(conmap_path(tmp_path / "s.con"))["label"].tolist()
-    assert labels == ["C0001", "C0002"]
+    assert len(write_con(mixed, net, tmp_path / "s.con")) == 1
+    assert list(read_conmap(conmap_path(tmp_path / "s.con"))) == ["C0001", "C0002"]
 
 
-def test_a_con_without_its_map_is_refused_on_pack_read_back(net, cset, tmp_path):
+def test_marked_con_without_its_map_is_refused(net, cset, tmp_path):
     write_con(cset, net, tmp_path / "s.con")
     conmap_path(tmp_path / "s.con").unlink()
-    with pytest.raises(ContractError, match="no label map"):
-        read_contingency_list(tmp_path / "s.con", net, require_map=True)
+    with pytest.raises(ContractError, match="s.conmap.csv is needed"):
+        read_contingency_list(tmp_path / "s.con", net)
+
+
+def test_marked_con_as_text_without_conmap_is_refused(net, cset, tmp_path):
+    write_con(cset, net, tmp_path / "s.con")
+    text = (tmp_path / "s.con").read_text()
+    with pytest.raises(ContractError, match="s.conmap.csv is needed"):
+        read_contingency_list(text, net, fmt="con")
+    imp = read_contingency_list(text, net, fmt="con", conmap=conmap_path(tmp_path / "s.con"))
+    assert sorted(imp.contingencies["contingency_id"]) == sorted(cset["contingency_id"])
+
+
+def test_unmarked_hand_written_con_reads_by_its_own_labels(net, tmp_path):
+    (tmp_path / "h.con").write_text("CONTINGENCY L1\n   DISCONNECT BUS 4\nEND\nEND\n")
+    imp = read_contingency_list(tmp_path / "h.con", net)
+    assert list(imp.contingencies["contingency_id"]) == ["L1"]
 
 
 def test_a_label_missing_from_the_map_is_refused_by_name(net, cset, tmp_path):
     write_con(cset, net, tmp_path / "s.con")
     mp = conmap_path(tmp_path / "s.con")
-    df = pd.read_csv(mp)
-    df[df["label"] != "C0002"].to_csv(mp, index=False)
+    lines = [ln for ln in mp.read_text().splitlines() if not ln.startswith("C0002,")]
+    mp.write_text("\n".join(lines) + "\n")
     with pytest.raises(ContractError, match="'C0002' is not in the label map"):
         read_contingency_list(tmp_path / "s.con", net)
 
@@ -140,6 +155,58 @@ def test_a_map_entry_with_no_block_is_refused_by_name(net, cset, tmp_path):
     mp.write_text(mp.read_text() + "C9999,ghost\n")
     with pytest.raises(ContractError, match="'C9999' has no block"):
         read_contingency_list(tmp_path / "s.con", net)
+
+
+ODD_IDS = ["a,b", 'q"uote', " lead", "trail ", "caf\u00e9 \u00fc", "x" * 80]
+
+
+def test_the_map_file_round_trips_awkward_ids(tmp_path):
+    pairs = [(f"C{i:04d}", cid) for i, cid in enumerate(ODD_IDS, 1)]
+    write_conmap(tmp_path / "m.csv", pairs)
+    assert read_conmap(tmp_path / "m.csv") == dict(pairs)
+    assert read_conmap((tmp_path / "m.csv").read_text(encoding="utf-8")) == dict(pairs)
+
+
+@pytest.mark.parametrize(
+    "pairs, match",
+    [
+        ([("C1", "a"), ("C1", "b")], "duplicate label 'C1'"),
+        ([("C1", "a"), ("C2", "a")], "duplicate id 'a'"),
+        ([("C1", "")], "empty id"),
+    ],
+)
+def test_the_map_refuses_by_name(tmp_path, pairs, match):
+    with pytest.raises(ContractError, match=match):
+        write_conmap(tmp_path / "m.csv", pairs)
+    text = "label,contingency_id\n" + "".join(f"{a},{b}\n" for a, b in pairs)
+    with pytest.raises(ContractError, match=match):
+        read_conmap(text)
+
+
+def test_the_map_refuses_a_wrong_header():
+    with pytest.raises(ContractError, match="needs the header label,contingency_id"):
+        read_conmap("id,label\nC1,a\n")
+
+
+def test_labels_are_unique_past_9999():
+    assert _label_width(9999) == 4 and _label_width(10000) == 5
+    labels = {_con_label(n, _label_width(10001)) for n in range(1, 10002)}
+    assert len(labels) == 10001 and _con_label(1, 5) == "C00001"
+
+
+def test_the_same_set_writes_byte_identical_files(net, cset, tmp_path):
+    for d in ("a", "b"):
+        (tmp_path / d).mkdir()
+        write_con(cset, net, tmp_path / d / "s.con")
+    for f in ("s.con", "s.conmap.csv"):
+        assert (tmp_path / "a" / f).read_bytes() == (tmp_path / "b" / f).read_bytes()
+
+
+def test_an_all_compound_set_writes_no_map_and_no_mark(net, tmp_path):
+    cs = n_1_1_contingencies(branch_contingencies(net))
+    assert len(write_con(cs, net, tmp_path / "s.con")) == len(cs)
+    assert not conmap_path(tmp_path / "s.con").exists()
+    assert (tmp_path / "s.con").read_text() == "END\n"
 
 
 @pytest.mark.parametrize("build", [n_m_1_contingencies, n_1_1_contingencies])
@@ -210,6 +277,7 @@ def test_golden_con(golden_net, tmp_path):
     )
     assert write_con(cset, golden_net, tmp_path / "g.con") == []
     assert (tmp_path / "g.con").read_bytes() == (
+        b"COM gridspine conmap g.conmap.csv\n"
         b"CONTINGENCY C0001\n"
         b"   OPEN BRANCH FROM BUS 1 TO BUS 2 CIRCUIT '1 '\n"
         b"END\n"

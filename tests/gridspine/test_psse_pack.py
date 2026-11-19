@@ -479,3 +479,25 @@ def test_without_a_plant_the_readme_says_no_plant_controller(tmp_path):
     assert (
         "plant controller (REPCA1) not written" not in (out / "README.md").read_text()
     )
+
+
+def test_the_readme_says_the_map_turns_a_label_back_into_its_id(tmp_path):
+    _hc, m, out = _write(tmp_path)
+    readme = (out / "README.md").read_text()
+    assert f"`{m['case']}.conmap.csv` turns each label back into its contingency id" in readme
+
+
+def test_an_all_compound_set_declares_no_map(tmp_path):
+    from gridspine.static.contingency_set import (
+        branch_contingencies,
+        n_1_1_contingencies,
+    )
+
+    hc, case, lines, grid = _hour_campus(tmp_path)
+    cs = n_1_1_contingencies(branch_contingencies(hc.net))
+    m = PP.write_psse_pack(
+        tmp_path / "pack", hc, case, lines, grid, contingency_set=cs
+    )
+    assert m["contingencies"]["label_map"] is None
+    assert f"{case}.conmap.csv" not in m["files"]
+    assert sorted(p.name for p in (tmp_path / "pack").iterdir()) == sorted(m["files"])

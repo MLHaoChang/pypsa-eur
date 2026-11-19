@@ -275,8 +275,8 @@ def write_psse_pack(
     write_sub(net, out / names["sub"])
     write_mon(out / names["mon"], *MON_BAND_PU)
 
-    conmap_name = conmap_path(names["con"]).name
-    files = [*names.values(), conmap_name, "README.md", "manifest.json"]
+    conmap_name = conmap_path(names["con"]).name if len(cs) > len(con_skipped) else None
+    files = [*names.values(), *([conmap_name] if conmap_name else []), "README.md", "manifest.json"]
     scripts, outputs, battery_notes = {}, {}, []
     if plant is not None:
         if cases is None:
@@ -356,6 +356,12 @@ def _readme(m) -> str:
         mark = m["not_for_submission"]
         lines += [f"**{mark[:1].upper()}{mark[1:]}.**", ""]
     lines += ["## Files", "", *(f"- `{f}`" for f in m["files"]), ""]
+    if m["contingencies"]["label_map"]:
+        lines += [
+            f"The contingencies in the .con are labelled C0001, C0002 and so on. "
+            f"`{m['contingencies']['label_map']}` turns each label back into its contingency id.",
+            "",
+        ]
     if "model_set" in m:
         ms = m["model_set"]
         lines += [
