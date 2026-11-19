@@ -1,4 +1,5 @@
 """The shard fail-fast hook in conftest fires when the solve queue cannot drain."""
+
 import pathlib
 import queue
 import sys
@@ -12,7 +13,8 @@ def _tests_conftest():
     # Two conftest.py files exist (backend/ and tests/); `import conftest` is ambiguous.
     here = pathlib.Path(__file__).with_name("conftest.py").resolve()
     return next(
-        m for m in sys.modules.values()
+        m
+        for m in sys.modules.values()
         if getattr(m, "__file__", None) and pathlib.Path(m.__file__).resolve() == here
     )
 
