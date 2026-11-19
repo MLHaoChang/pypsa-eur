@@ -88,7 +88,8 @@ def _state(turn, ui):
         turn.project_id,
         None,
     )
-    if (_scope_key(state["binding"]) != _scope_key(_binding(turn)) and not resumed) or conflict:
+    moved = _scope_key(state["binding"]) != _scope_key(_binding(turn))
+    if (moved and not resumed) or conflict:
         with turn.session._lock:
             turn.session.assurance_context = None
         return None, "conversation_scope_changed"

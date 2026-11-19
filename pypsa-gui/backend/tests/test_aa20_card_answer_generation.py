@@ -83,9 +83,7 @@ def test_capacity_card_answered_on_a_new_generation_reaches_the_checked_answer(
     assert client_chat.generations == [1, 2]
     assert len(provider.requests) == 1
     assert approval(frames)["receipt"]["request_complete"] is True
-    assert blocks(checked, frames) == {
-        "configured_capacity": (pytest.approx(20), "MW")
-    }
+    assert blocks(checked, frames) == {"configured_capacity": (pytest.approx(20), "MW")}
 
 
 def test_repeat_followup_on_a_new_generation_keeps_the_checked_scope(
