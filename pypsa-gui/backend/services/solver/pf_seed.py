@@ -51,10 +51,10 @@ def run_pf(network, phase: Callable[[str], None] | None = None, **pf_kwargs):
     through ``phase``. When ``lpf()`` raises or leaves a non-finite angle,
     it logs that and makes the caller's unseeded call instead.
 
-    Known edge: a loop made of a shifted and an unshifted parallel path was
-    reported to converge flat but fail seeded. It is not a real import
-    topology and small reproductions here converge both ways, so no guard or
-    test pins it; if it shows up, fall back to the flat call.
+    Known edge (``.scratch/dgs-seed/01-*``): a loop of a shifted and an
+    unshifted parallel path was reported to converge flat but not seeded. A
+    seeded ``pf`` that leaves snapshots unconverged is returned as is; there
+    is no flat retry today.
 
     Returns ``(pf_result, seeded_by)``: ``seeded_by`` lists the transformers
     that triggered the seed, empty for a flat start
