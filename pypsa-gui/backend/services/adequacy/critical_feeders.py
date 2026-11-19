@@ -238,11 +238,6 @@ def critical_feeder_rows(
     on_path = _on_supply_paths(n, buses, skip, no_data, supplied & set(buses), crit)
     relevant = {lk for lk, hit in on_path.items() if hit}
     cut = set(usable) | relevant
-    # The hub with every relevant no-data Link out: a bus cut off from all
-    # supply there is never supplied, so a feeder from it carries nothing.
-    live, live_groups = comps(relevant)
-    live_fed = {i for i, g in live_groups.items() if g & supplied}
-
     rows: list[dict] = []
     comp, groups = comps(cut)
     fed = {i for i, g in groups.items() if g & supplied}
@@ -266,7 +261,14 @@ def critical_feeder_rows(
         if not feeders:
             continue
         # A feeder whose far side is never supplied (q = 1 upstream) is out
-        # for good: it adds a factor 1, not a chain (GK R2').
+        # for good: it adds a factor 1, not a chain (GK R2'). "Supplied" is
+        # judged with every relevant no-data Link out and without the pocket
+        # itself: supply that reaches the far side only back through the
+        # pocket cannot feed it (GK R2'').
+        live = _components(
+            [b for b in buses if b not in g], _branch_edges(n, skip | relevant)
+        )
+        live_fed = {live[b] for b in live if b in supplied}
         dead = {
             lk
             for lk in feeders

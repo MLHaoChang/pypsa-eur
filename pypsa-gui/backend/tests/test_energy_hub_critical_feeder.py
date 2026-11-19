@@ -261,6 +261,29 @@ def test_a_no_data_link_on_any_supply_path_is_taken_as_out():
     assert "lk" in sec.note and "o2" in sec.note
 
 
+def test_a_usable_feeder_behind_an_unread_link_adds_no_redundancy():
+    # GK R2'': island -lk-> X -u3-> crit beside crit_feeder; lk without data
+    # (taken as out), u3 at q = 0.01. With lk out X has no supply, so u3 can
+    # carry nothing: it is a factor 1, not 0.01. Bound 0.01 × 8,760 = 87.6
+    # h/yr > 3 h/yr, inconclusive (counting u3 would give 0.876, a pass).
+    n = _hub_with_one_critical_feeder()
+    n.add("Bus", "X", carrier="AC")
+    for name, a, b in (("lk", "island", "X"), ("u3", "X", "crit")):
+        n.add("Link", name, bus0=a, bus1=b, p_nom=20.0, p_min_pu=-1.0, carrier="AC")
+        n.links.at[name, "eh_role"] = ""
+        n.links.at[name, "outage_rate_value"] = float("nan")
+        n.links.at[name, "mttr_hours"] = float("nan")
+    n.links.at["u3", "outage_rate_value"] = 0.01
+    n.links.at["u3", "mttr_hours"] = 8.0
+    report = _run(n, _pack())
+    sec = report.sections["certification"]
+    pay = sec.payload
+    assert pay["verdict"] == "inconclusive", sec.note
+    [pk] = pay["feeder_bound"]["pockets"]
+    assert pk["bound_h_per_year"] == pytest.approx(87.6, rel=1e-9)
+    assert pk["no_data"] == ["lk"]
+
+
 def test_without_a_goal_confidence_is_not_stated():
     # GK R5: no target, no verdict: ``confident`` stays None, not False.
     report = _run(_hub_with_one_critical_feeder(), _pack(target_lole_h=None))
