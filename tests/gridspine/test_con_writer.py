@@ -16,8 +16,8 @@ from gridspine.handoff.contingencies import (
     _label_width,
     conmap_path,
     read_conmap,
-    write_conmap,
     write_con,
+    write_conmap,
     write_mon,
     write_sub,
 )
@@ -113,7 +113,9 @@ def test_bus_name_ids_round_trip_through_the_label_map(net, cset, tmp_path):
 
 def test_labels_skip_compound_kinds(net, tmp_path):
     cs = n_1_1_contingencies(branch_contingencies(net))
-    mixed = pd.concat([cs.head(1), _set(net, kinds=("branch",)).head(2)], ignore_index=True)
+    mixed = pd.concat(
+        [cs.head(1), _set(net, kinds=("branch",)).head(2)], ignore_index=True
+    )
     assert len(write_con(mixed, net, tmp_path / "s.con")) == 1
     assert list(read_conmap(conmap_path(tmp_path / "s.con"))) == ["C0001", "C0002"]
 
@@ -130,7 +132,9 @@ def test_marked_con_as_text_without_conmap_is_refused(net, cset, tmp_path):
     text = (tmp_path / "s.con").read_text()
     with pytest.raises(ContractError, match="s.conmap.csv is needed"):
         read_contingency_list(text, net, fmt="con")
-    imp = read_contingency_list(text, net, fmt="con", conmap=conmap_path(tmp_path / "s.con"))
+    imp = read_contingency_list(
+        text, net, fmt="con", conmap=conmap_path(tmp_path / "s.con")
+    )
     assert sorted(imp.contingencies["contingency_id"]) == sorted(cset["contingency_id"])
 
 

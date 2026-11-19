@@ -276,7 +276,12 @@ def write_psse_pack(
     write_mon(out / names["mon"], *MON_BAND_PU)
 
     conmap_name = conmap_path(names["con"]).name if len(cs) > len(con_skipped) else None
-    files = [*names.values(), *([conmap_name] if conmap_name else []), "README.md", "manifest.json"]
+    files = [
+        *names.values(),
+        *([conmap_name] if conmap_name else []),
+        "README.md",
+        "manifest.json",
+    ]
     scripts, outputs, battery_notes = {}, {}, []
     if plant is not None:
         if cases is None:

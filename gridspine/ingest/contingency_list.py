@@ -56,9 +56,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from gridspine.handoff.contingencies import CON_MARK, conmap_path, read_conmap
 from gridspine.handoff.dyr_writer import _machines
 from gridspine.handoff.raw_writer import _bus_numbers
-from gridspine.handoff.contingencies import CON_MARK, conmap_path, read_conmap
 from gridspine.schema.contingency import COMPOUND_SEPARATORS, validate_contingency_set
 from gridspine.schema.contracts import ContractError
 from gridspine.static.contingency_set import branch_contingencies
@@ -492,12 +492,16 @@ def _finish(rows, unmatched) -> ImportedContingencies:
 
 
 def _apply_conmap(blocks, conmap: dict):
-    """Rename each block's label to its id; refuse by name a label with no map
-    entry and a map entry with no block."""
+    """
+    Rename each block's label to its id; refuse by name a label with no map
+    entry and a map entry with no block.
+    """
     labels = {b[0] for b in blocks}
     for label, line, _ in blocks:
         if label not in conmap:
-            raise ContractError(f"line {line}: contingency label {label!r} is not in the label map")
+            raise ContractError(
+                f"line {line}: contingency label {label!r} is not in the label map"
+            )
     for label in conmap:
         if label not in labels:
             raise ContractError(f"label map entry {label!r} has no block in the .con")
@@ -692,15 +696,19 @@ def _from_csv(text: str, net) -> ImportedContingencies:
 
 
 def _marked(text: str) -> str | None:
-    """The map file name a ``write_con`` .con names in its first line, or None
-    for an unmarked (hand-written) list."""
+    """
+    The map file name a ``write_con`` .con names in its first line, or None
+    for an unmarked (hand-written) list.
+    """
     first = text.lstrip().split("\n", 1)[0].strip()
     if not first.startswith(CON_MARK):
         return None
-    return first[len(CON_MARK):].strip() or "<stem>.conmap.csv"
+    return first[len(CON_MARK) :].strip() or "<stem>.conmap.csv"
 
 
-def read_contingency_list(source, net, *, fmt: str | None = None, conmap=None) -> ImportedContingencies:
+def read_contingency_list(
+    source, net, *, fmt: str | None = None, conmap=None
+) -> ImportedContingencies:
     """
     Read a TSO contingency list (``.con`` or CSV) onto ``net``.
 
@@ -728,7 +736,9 @@ def read_contingency_list(source, net, *, fmt: str | None = None, conmap=None) -
         if conmap is None and path is not None and conmap_path(path).exists():
             conmap = conmap_path(path)
         if conmap is None:
-            raise ContractError(f"the .con is marked as written with a label map; {name} is needed to read it")
+            raise ContractError(
+                f"the .con is marked as written with a label map; {name} is needed to read it"
+            )
         return _from_con(text, net, read_conmap(conmap))
     if fmt == "csv":
         return _from_csv(text, net)
