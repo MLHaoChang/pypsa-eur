@@ -82,12 +82,19 @@ def site(baseline):
 
 
 @pytest.mark.live_solve
-def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site):
+def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site, monkeypatch):
     """Acceptance 2: the solve, the result gate (the mass balance holds; the
     DOL mills' motor start and restart FAIL as warnings with their numbers;
     N-1 not evaluated: no site transformer; the case rules not evaluated: no
     case the user ran on this network), report and hand-off."""
+    from harness import budget as harness_budget
     from harness import run_handoff
+
+    # The per-tool deadline guards a hung handler; this test reads whether the
+    # run reaches the hand-off. solve_queue_enqueue fingerprints the one-year
+    # network twice (`run_envelope.identity`, ~9 s locally), which a loaded CI
+    # runner pushed past the 30 s default twice (tool_timeout at solve.1).
+    monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 120.0)
     from services import run_envelope
 
     task, path, _ = granted(run={**RUN, "profile": REF})
