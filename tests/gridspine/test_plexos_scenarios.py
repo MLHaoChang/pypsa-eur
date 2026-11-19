@@ -91,6 +91,34 @@ def test_dated_or_banded_scenario_row_never_replaces_the_base_row():
     ]
 
 
+def test_timesliced_scenario_row_never_replaces_the_base_row():
+    """GK A C1 (#1728 ask 1): a Timeslice tag is slice 3b."""
+    conv = run(
+        scenarios(
+            "On",
+            objects=[("Timeslice", "Peak")],
+            rows=[
+                ("Node", "A", "Load", 5, "MW"),
+                (
+                    "Node",
+                    "A",
+                    "Load",
+                    9,
+                    "MW",
+                    {
+                        "tags": [
+                            Tag("Scenario", "On", None),
+                            Tag("Timeslice", "Peak", None),
+                        ]
+                    },
+                ),
+            ],
+        )
+    )
+    assert load(conv) == {"A": 5.0}
+    assert unmapped_reason(conv, "Node 'A'") == ["scaled by Timeslice 'Peak': slice 3b"]
+
+
 # ------------------------------------------------------------- S2: ties
 
 
@@ -467,11 +495,12 @@ def test_multiplied_rating_factor_above_100_is_unmapped_not_clipped():
         0,
         Tag("Data File", "F", None),
         var(),
-        files={"load.csv": hourly({"G": [40, 80]})},
+        files={"load.csv": hourly({"G": [40, 80, 70, 90, 60]})},
     )
     assert "G" not in conv.network.generators_t.p_max_pu
+    # 80, 70 and 90 % × 1.5 are all above 100 %: the furthest one is named
     assert unmapped_reason(conv, "Generator 'G'") == [
-        "Rating Factor 120 % at 2015-01-01 01:00:00 outside [0, 100] %"
+        "Rating Factor 135 % at 2015-01-01 03:00:00 outside [0, 100] %"
     ]
     # the variable's rows are not counted as used by a row that was not imported
     assert unmapped_reason(conv, "Variable 'V'") == ["no imported row uses it"]

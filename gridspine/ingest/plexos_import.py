@@ -891,8 +891,7 @@ class _Converter:
                 got = f"data file: {ts}" if isinstance(ts, str) else ts
             else:
                 got = row.value
-            if not isinstance(got, str) and not np.isfinite(got).all():
-                got = "profile has a non-finite value"
+            # a non-finite profile cell is caught on the scaled value (_scaled)
             prof[v.name] = got
         self._var_rows = rows_of
         self._var_why = {k: v for k, v in prof.items() if isinstance(v, str)}
@@ -1382,9 +1381,11 @@ class _Converter:
                 return
             if ((s < 0) | (s > 100)).any():
                 bad = s[(s < 0) | (s > 100)]
+                # GK A Q-a: name the cell furthest outside, not the first
+                at = (bad - 100).where(bad > 100, -bad).idxmax()
                 self.skip(
                     rf,
-                    f"Rating Factor {bad.iloc[0]:g} % at {bad.index[0]} outside [0, 100] %",
+                    f"Rating Factor {bad[at]:g} % at {at} outside [0, 100] %",
                 )
                 return
             kw["p_max_pu"] = s / 100.0
