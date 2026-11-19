@@ -27,6 +27,7 @@ from tests.test_assurance_metrics import NumericalProvider, solved  # noqa: F401
 from tests.test_capacity_cycles_assurance import PROFILES, solve
 from tests.test_conversation_scope import clarified
 from tests.test_harness_reliability import VALUES, scope
+from services import workflow_tools
 from tests.test_workflow_tools import baseline  # noqa: F401
 
 
@@ -85,7 +86,8 @@ def test_capacity_card_answered_on_a_new_generation_reaches_the_checked_answer(
     capacity_profiles, grid, client_chat, checked
 ):
     solve(grid)
-    client_chat("What is the capacity of generator G1?")
+    frames, provider = client_chat("What is the capacity of generator G1?")
+    clarified(frames, provider, "capacity_meaning_required")
     frames, provider = client_chat("Configured capacity", {"configured_capacity": 20})
     assert client_chat.generations == [1, 2]
     assert len(provider.requests) == 1
@@ -129,3 +131,32 @@ def test_card_answer_after_an_interleaved_turn_is_refused(
     assert reasons == ["conversation_scope_required"]
     assert not [d for e, d in frames if e == "choice_request"]
     assert "price year" not in public_text(frames).lower()
+
+
+def test_compare_after_a_repeat_on_new_generations_keeps_the_baseline(
+    solved, client_chat
+):
+    # The checked-run history carries over from one send to the next (the entries
+    # carry-over compares owner and project, not the generation).
+    first, _ = client_chat("Check this run.", VALUES, checked_scope=scope(solved))
+    assert approval(first)["receipt"]["request_complete"]
+    solved.network.generators.at["G1", "p_nom"] = 30
+    assert solved.network.optimize(solver_name="highs") == ("ok", "optimal")
+    workflow_tools._record_solve_inputs(
+        solved.network, solved.solver_state["solver_config"]
+    )
+    changed = {
+        **VALUES,
+        "annual_fixed_cost": 90,
+        "allocated_fixed_cost": 90,
+        "total_cost": 260,
+    }
+    frames, _ = client_chat("Show those results again.", changed)
+    assert approval(frames)["receipt"]["request_complete"]
+    frames, _ = client_chat(
+        "Compare that with the previous run.",
+        {**changed, "cost_delta": 30, "cost_change_percent": 30 / 230 * 100},
+    )
+    assert client_chat.generations == [1, 2, 3]
+    assert approval(frames)["receipt"]["request_complete"]
+    assert "30 EUR" in public_text(frames)

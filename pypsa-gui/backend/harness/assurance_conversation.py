@@ -50,14 +50,14 @@ def _binding(turn):
     return (turn.owner, turn.project_id, getattr(turn, "binding_generation", 0))
 
 
-def _scope_key(binding):
-    """What a follow-up must share with the turn that set the context: owner and project.
+def _same_scope(binding, turn):
+    """Whether a follow-up shares the owner and project of the turn that set the context.
 
     The browser raises ``binding_generation`` on every send, so a follow-up (a card
     answer, a repeat or a compare) always carries a newer one (AA-20). A project
     switch changes the project id, and a new chat starts a new session.
     """
-    return tuple(binding)[:2]
+    return tuple(binding)[:2] == _binding(turn)[:2]
 
 
 def _state(turn, ui):
@@ -88,8 +88,7 @@ def _state(turn, ui):
         turn.project_id,
         None,
     )
-    moved = _scope_key(state["binding"]) != _scope_key(_binding(turn))
-    if (moved and not resumed) or conflict:
+    if (not _same_scope(state["binding"], turn) and not resumed) or conflict:
         with turn.session._lock:
             turn.session.assurance_context = None
         return None, "conversation_scope_changed"
@@ -412,7 +411,7 @@ def remember(turn):
         old = turn.conversation_state
         entries = (
             deepcopy(old["entries"])
-            if old and _scope_key(old["binding"]) == _scope_key(_binding(turn))
+            if old and _same_scope(old["binding"], turn)
             else []
         )
         if entries and _compatible(entries[-1]["scope"]) != _compatible(scope):

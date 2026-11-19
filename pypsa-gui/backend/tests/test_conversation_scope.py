@@ -242,9 +242,9 @@ def test_changed_binding_requires_clarification(solved, conversation, part):
     conversation("Check this run.", VALUES, checked_scope=scope(solved))
     session = moved_binding(conversation.sid, part)
     frames, provider = conversation("Show those results again.")
-    assert "The project or selected component changed." in clarified(
-        frames, provider, "conversation_scope_changed"
-    )
+    text = clarified(frames, provider, "conversation_scope_changed")
+    assert "The project or selected component changed." in text
+    assert "browser binding" not in text
     assert session.assurance_context is None
 
 
