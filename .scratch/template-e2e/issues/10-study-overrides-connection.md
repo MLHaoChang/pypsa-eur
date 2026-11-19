@@ -3,7 +3,7 @@
 
 # 10 — The reliability study silently changes the user's grid connection
 
-Status: needs-info
+Status: ready-for-agent
 Impact: high
 Templates: Concentrator, ammonia, every weak-grid template
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -22,4 +22,4 @@ Show every change the study pack makes to a user value as a decision before Run 
 
 ## Triage (2026-11-19, master 9f850d36)
 
-Checked by code reading only; the app was not re-run. Still true: `services/adequacy/archetypes.py:335` still words the change as raised/lowered. Question for the coordinator: how far should the fix go? (1) Recommended: show each change to a user value as a plain-words line before Run, and refuse to change the connection limit without keep/accept, as the issue suggests. (2) Plain words after the run only, no ask. (3) Do not change the user's connection limit at all; the study uses it as set and reports the shortfall.
+Checked by code reading only; the app was not re-run. `services/adequacy/archetypes.py:335` still words the change as raised/lowered. Decision (owner, 2026-11-19, TE2E-10-ASK-1): before Run, list each change the study makes to a user value in plain words, and require keep/accept before the grid connection limit changes. Acceptance: no change to a user value without it being listed before Run; the connection limit never changes without an accept; wording has no raw ids; a test per weak-grid template family. Gated: GK A and UX. Blocked by: none.

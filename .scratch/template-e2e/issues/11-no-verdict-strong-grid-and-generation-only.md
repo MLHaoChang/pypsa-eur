@@ -3,7 +3,7 @@
 
 # 11 — No reliability verdict for strong-grid and generation-only templates
 
-Status: needs-info
+Status: ready-for-agent
 Impact: high
 Templates: H2 hub (both), ammonia, IPP
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -22,4 +22,4 @@ Give each such template its own verdict (supply, delivery, revenue) or say plain
 
 ## Triage (2026-11-19, master 9f850d36)
 
-Checked by code reading only; the app was not re-run. Question for the coordinator: what do strong-grid and generation-only templates (H2 hub, ammonia, IPP) get? (1) Recommended first step: a plain statement 'no reliability verdict for this site type' with what to check instead, for all four. (2) A per-template verdict (supply, delivery, revenue), one slice per template, GK A. (3) Plain statement now, per-template verdicts as a later issue.
+Checked by code reading only; the app was not re-run. Decision (owner, 2026-11-19, TE2E-11-PLAIN-1): show 'no reliability verdict for this site type' plus what to check instead, for all four templates (H2 hub both, ammonia, IPP). Acceptance: no 'certification: skipped' or unopenable accordion on these templates; the plain statement and the check-instead pointer show in Guided and Expert; a test per template. Per-template verdicts are not part of this issue. Gated: UX. Blocked by: none.
