@@ -237,6 +237,10 @@ def build_network(case: RawCase):
     warnings: list[str] = []
     t = case.tables
 
+    _refuse_repeats(t["load"], "load")
+    _refuse_repeats(t["generator"], "generator")
+    _refuse_repeats(t["branch"], "branch")
+
     # ---------------------------------------------------------- buses
     bus = t["bus"]
     names = _names(bus, "I", "NAME", "Bus")
@@ -671,6 +675,29 @@ def _lone_buses(n):
         for b, sub in n.buses["sub_network"].items()
         if sizes[sub] == 1 and b not in gen_buses
     ]
+
+
+def _refuse_repeats(t, what):
+    """
+    Refuse a record whose PSS/E identity repeats an earlier one: ``(I, ID)`` for a
+    load or generator, ``(I, J, CKT)`` in either direction for a branch. PSS/E
+    rejects such a case; importing it would give both records one name, so one
+    would be lost (issue 03).
+    """
+    seen = {}
+    for r in t.to_dict("records") if len(t) else []:
+        if what == "branch":
+            key = (min(r["I"], r["J"]), max(r["I"], r["J"]), r["CKT"])
+            desc = f"branch {r['I']}-{r['J']} circuit {r['CKT']!r}"
+        else:
+            key = (r["I"], r["ID"])
+            desc = f"{what} {r['ID']!r} at bus {r['I']}"
+        if key in seen:
+            raise ContractError(
+                f"RAW line {r['_line']}: {desc} repeats the one at RAW line {seen[key]}; "
+                "PSS/E identifies each by it, so give the record its own ID"
+            )
+        seen[key] = r["_line"]
 
 
 def _unique(names):
