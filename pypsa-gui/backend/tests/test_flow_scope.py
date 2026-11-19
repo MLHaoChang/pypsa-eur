@@ -246,7 +246,8 @@ def test_put_refuses_an_unavailable_sub_option(client, tmp_projects_dir):
     assert r.json()["detail"]["error_kind"] == "flow_scope_unavailable"
 
 
-def test_reliability_off_takes_the_study_out_of_the_run(client, tmp_projects_dir, edit):
+def test_reliability_off_takes_the_study_out_of_the_run(
+        client, tmp_projects_dir, edit):  # noqa: F811
     """The off-card test (modular-cards §6): its items don't count, aren't to
     check and don't block; its kind leaves run_request; its values survive."""
     name = _create(client, "eh_microgrid", "off_card")
