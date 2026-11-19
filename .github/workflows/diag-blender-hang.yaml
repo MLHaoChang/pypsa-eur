@@ -6,7 +6,7 @@ on:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 200
     defaults:
       run:
         shell: bash -l {0}
@@ -35,3 +35,13 @@ jobs:
         pixi run -e test timeout -s ABRT 600 python -m pytest -p no:cacheprovider -v \
           -o log_cli=true --log-cli-level=WARNING --durations=10 \
           tests/test_site_scene_blender_job.py || echo "exit $?"
+    - name: Master's shard 3/4 (holds the 409 test at ~8247), dumping stacks on the first stuck reset
+      working-directory: pypsa-gui/backend
+      timeout-minutes: 150
+      env:
+        DIAG_STACKS: /tmp/diag-stacks.txt
+      run: |
+        pixi run gui-tests --num-shards=4 --shard-id=2 -p no:cacheprovider 2>&1 | tail -60 || true
+    - name: Stacks
+      if: always()
+      run: cat /tmp/diag-stacks.txt || echo "no stacks"
