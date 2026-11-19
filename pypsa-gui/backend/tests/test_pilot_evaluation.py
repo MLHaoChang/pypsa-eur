@@ -25,7 +25,12 @@ def evaluation_project(baseline, request):
         sys.path.insert(0, str(BACKEND / "project_templates"))
         import eh_templates as T
 
-        T.BUILDERS["eh_datacenter"]().export_to_netcdf(str(baseline[2] / "network.nc"))
+        site = T.BUILDERS["eh_datacenter"]()
+        # The size a solve chose for the extendable BESS: the SCR gate derives the
+        # inverter capacity from the converters and withholds a Pass while one is
+        # unsized (DC walk 05), so the scorecard's one checked row needs a size.
+        site.storage_units.at["bess_new", "p_nom_opt"] = 10.0
+        site.export_to_netcdf(str(baseline[2] / "network.nc"))
         T.write_sidecars(baseline[2], "eh_datacenter")
     if case.profile == "copt-screening/1":
         n.remove("Generator", "G1")
