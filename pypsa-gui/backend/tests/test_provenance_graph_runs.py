@@ -945,7 +945,7 @@ def _a_write_that_mutates_then(monkeypatch, fail):
 
     seen = {}
 
-    def handler(component, list_name, name, attrs):
+    def handler(component, list_name, name, attrs, cost_basis=None):
         started = PyPSAService.get_active_context()
         ended = ProjectContext(network=_net())
         PyPSAService._note_request_ctx(ended)

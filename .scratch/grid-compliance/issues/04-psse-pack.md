@@ -3,7 +3,7 @@
 
 # GC-04 PSS/E pack: RAW v35/36, .seq, WECC second-generation .dyr, .con, psspy test scripts
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (uses the detailed model until GC-01 lands; one call site switches to the model set)
@@ -113,3 +113,26 @@ Every PR: release-note fragment, GC-TEXT-1 grep of the diff, targeted mutants an
 PR3 research (secondary public sources only; no vendor primary is public). ICON/CON counts, earliest library version: REGCA1 1/14 (33); REECA1 6/45 (33); REECC1 5/45 (35; REECCU1 is a user model in 33/34); REPCA1 7/27 (33); WTDTA1 0/5, WTARA1 0/2, WTPTA1 0/10, WTTQA1 1/15 (all 33); REGCBU1 2/7 and REECDU1 6/77 user models only. Sources: andes `andes/io/psse-dyr.yaml`; GridPACK `src/parser/parser_classes`; PowerSystemsTestData `psse_dyr/240busWECC_2018_PSS.dyr` l.800-807 (REPCA1 sample); WECC "Summary of 2nd Generation Generic RES Models Rev5" p.4 (model sets).
 
 **PR3 builder notes (2026-11-17).** P2: one REPCA1 per PoC branch, on the aggregated machine (GC-01); two machines on one PoC branch are refused, because N controllers each measuring the whole plant's flow on their own MBASE multiply the loop gain by N. BUSR is the grid end of the PoC branch (BUS2). Carried to PR4: the generic "assumed" WECC default sets (P5's last sentence; not in `campus_assets.yaml`, whose sha256 the shipped defaults packs pin), `PIN_NOTE` in the pack README/manifest (P1), and switching `bundle.py` from `ibr_params` to `wecc_params` with a PoC branch per controlled plant (until then a REECC1 battery is ledgered "no converter record", and REPCA1/type 3 groups are not written by the bundle). Not checked: that the PoC branch actually leads to the plant's machine (the writer has no notion of plant topology).
+
+**PR4/PR5 split (builder 4, 2026-11-17; GK A2 agreed).** PR4 (`claude/gc04-con-scripts`): `.con`/`.sub`/`.mon` and the psspy scripts with `check_script` (S1, S2). PR5 (`claude/gc04-psse-pack`):
+- `templates/wecc_generic.py` loads the public generic WECC set (owner GC04-DEFAULTS-1);
+- `handoff/psse_pack.py` writes the v35 pack: RAW, .seq, .dyr, .con/.sub/.mon, scripts, README and manifest;
+- the one-call hook in `campus_bundle.py`;
+- the bundle ledger note, and a test pinning the bundle `.dyr` bytes to master;
+- the shared `_con` separator in the synchronous records.
+
+REPCA1 and the scripts are written only for a `Plant` (the GC-01 aggregated machine with its PoC branch). Without one, the manifest names the reason. The EPRI guide is cited by title and number only (GC-TEXT-1).
+
+**PR5 builder (5) notes (2026-11-17).**
+- Open gap: `campus_bundle.py`'s one pack call passes no `plant`, `model_set` or `variant`, so a pack written by the bundle today has no REPCA1, no psspy scripts and no GC-01 citation; its manifest says why. Wiring the bundle to the GC-01 plant and model set is tracked in `04c-bundle-pack-wiring.md`.
+- A battery plant's REPCA1 takes `pmin = -1` and `dup = ddn` (`repc_bess`, generic engineering): the PV example's `pmin = 0`, `dup = 0` would block charging and low-frequency response.
+- Wind gets the type 4 set (REGCA1 + REECA1), as PV; the type 3 set (WTDTA1/WTARA1/WTPTA1/WTTQA1) needs OEM data and is not defaulted.
+- Inherited from the test battery: no IEC 60909 factor c in the Thevenin source, filed as `14-thevenin-voltage-factor-c.md`.
+
+**GK A2 on the PR6 plan (2026-11-17): GO with conditions** (transformer WINDV2² applied twice; owner chose a separate PR6).
+- V1 Model source: the series Z sits between the ideal windings, so from bus J it is Z·WINDV2² (CW=1, CZ=1). Cite only public sources: PowerModels.jl `src/io/psse.jl` `_psse2pm_transformer!` and generic engineering, with no vendor manual text (GC-TEXT-1). The test-side Z·WINDV2² step lives in one function.
+- V2 Oracle: compare with `net._ppc['branch']` to 1e-6 (r, x, b, ratio) for an HV tap, an LV tap, and vn_lv ≠ bus kV with no tap. Add a hand literal (x 0.1653, not 0.1822) and an explicit test that an HV tap does not scale Z.
+- V3 Callers: list every caller of `trafo_impedance` and of the bus-base scaling, each fixed or excluded with a reason. A three-winding path, if one exists, gets the same ppc test.
+- V4 Zero sequence: R01/X01 take the same 1/WINDV2², while RG/XG stay on the bus base. Test both on an off-nominal LV transformer, with a killed mutant that scales RG.
+- V5 Goldens: case39 v33 and every WINDV2 = 1 case stay byte-identical. List any other changed golden with its old and new value and a reason.
+- V6 HOLISTIC: the old-pack line goes in the pack README, and in a manifest version field if one exists (if none, say so and don't add one). Tell the PSS/E importer session when the PR opens.

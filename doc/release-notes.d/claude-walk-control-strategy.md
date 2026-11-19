@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): End-to-end walkthrough of the Control strategy group (reserve, island control, load generators, process production) with a journey map, hand checks, improvements and twelve issue files under .scratch/walkthroughs/control-strategy-2026-11-17/.
