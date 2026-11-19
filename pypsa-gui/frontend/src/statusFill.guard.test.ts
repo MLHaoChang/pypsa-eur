@@ -16,6 +16,8 @@ const FOREGROUND = /(?:^|[\s'"`])text-(on-status|bg)(?=[\s'"`]|$)/
 const NO_TEXT = new Set([
   'components/FlowStateDot.tsx:"block h-2 w-2 rounded-full bg-warn"', // status dot
   "components/PageKit.tsx:on ? 'bg-success' : 'bg-border-2'}`", // toggle track; its knob is a white disc, not text
+  // the reliability bar's fill; its words ("Within goal", the title) sit outside it, in theme text
+  "pages/hubDesign/cards/ResultsHeadline.tsx:target == null ? 'bg-accent' : pass ? 'bg-success' : 'bg-danger'}`",
 ])
 
 function sources(dir: string): string[] {

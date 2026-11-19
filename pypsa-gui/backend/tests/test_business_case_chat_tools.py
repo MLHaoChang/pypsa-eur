@@ -1186,3 +1186,31 @@ def test_the_options_route_is_bound_to_the_read_tool():
     assert ("GET", "/api/results/business_case/options") in TOOL_ROUTES[
         "get_business_case"
     ]
+
+
+def test_bc15_the_summary_carries_the_lease_up_only_when_one_applied(bc, monkeypatch):
+    """HOLISTIC-1: an answer about the result knows the volumes were ramped."""
+    import routers.results as R
+    from services.finance.business_case import VOLUME_FACTOR_NOTE
+
+    monkeypatch.setattr(
+        R,
+        "_bc_staleness_now",
+        lambda stored, ic_key=None: {"present": True, "stale": False, "changed": []},
+    )
+    R._state["business_case_report"] = _report()
+    out = chat_tools.get_business_case()
+    assert not {"volume_factor", "volume_factor_note", "volume_factor_ignored"} & set(
+        out
+    )
+    rep = _report()
+    rep["pnl"].update(
+        volume_factor={"2027": 0.5},
+        volume_factor_note=VOLUME_FACTOR_NOTE,
+        volume_factor_ignored=[2040],
+    )
+    R._state["business_case_report"] = rep
+    out = chat_tools.get_business_case()
+    assert out["volume_factor"] == {"2027": 0.5}
+    assert out["volume_factor_note"] == VOLUME_FACTOR_NOTE
+    assert out["volume_factor_ignored"] == [2040]

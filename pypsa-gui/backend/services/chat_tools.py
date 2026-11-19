@@ -611,6 +611,7 @@ _RESULTS_ENUM = (
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
     "asset_economics", "billing", "cfe_score", "value_flows", "renewable_fraction",
+    "operating_reserve",
 )
 
 
@@ -648,6 +649,8 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     "billing": "get_billing",
     "cfe_score": "get_cfe_score",
     "renewable_fraction": "get_renewable_fraction",
+    # homer-parity 01d.
+    "operating_reserve": "get_operating_reserve",
     # Edge Investment Case P3 WP3.4.
     "value_flows": "get_value_flows",
 }
@@ -733,7 +736,30 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
     if result_kind == "value_flows" and isinstance(result, dict) and result.get("status") == "ok":
         result = (_value_flow_lines_page(result, offset, limit) if detail == "lines"
                   else _value_flows_summary(result))
+    if result_kind == "operating_reserve" and isinstance(result, dict) and "per_snapshot" in result:
+        result = _operating_reserve_page(result, offset, limit)
     return _with_freshness(result)
+
+
+_RESERVE_ROWS = 24     # binding hours per read (homer-parity 01d)
+_RESERVE_HOLDERS = 5   # units named per binding hour
+
+
+def _operating_reserve_page(result: dict, offset: int = 0, limit: int | None = None) -> dict:
+    """The reserve for the model: only the binding hours, one page of them, each with its largest
+    holders. Every count is the true total, so the model never reads a cut list as the whole."""
+    rows = [r for r in result["per_snapshot"] if r.get("binding")]
+    start = max(0, int(offset or 0))
+    size = _RESERVE_ROWS if limit is None else max(1, min(int(limit), _RESERVE_ROWS))
+    page = []
+    for r in rows[start:start + size]:
+        holders = r.get("holders") or []
+        page.append({**{k: v for k, v in r.items() if k != "holders"},
+                     "holders": holders[:_RESERVE_HOLDERS], "holders_total": len(holders)})
+    out = {k: v for k, v in result.items() if k not in ("per_snapshot", "binding")}
+    return {**out, "hours_total": len(result["per_snapshot"]), "binding_hours_total": len(rows),
+            "binding_hours": page, "offset": start,
+            "note": "Only binding hours are listed; page with offset/limit."}
 
 
 def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -> dict:
@@ -3761,6 +3787,10 @@ def get_business_case(detail: str = "summary") -> dict:
                    assumed_total=(len(report["assumed"])
                                   if isinstance(report.get("assumed"), list) else _NE),
                    verdict=_bc_verdict(report, bc_verdict))
+        # BC 15: the lease-up the run applied and its basis, so an answer about the
+        # result never reads it as full volume. Absent at 100 %.
+        out.update({k: v for k, v in (report.get("pnl") or {}).items()
+                    if k in ("volume_factor", "volume_factor_note", "volume_factor_ignored")})
         cut = []
         for section in _BC_CUT_ORDER:
             if _json_len(out) <= _BC_SUMMARY_CHARS:
