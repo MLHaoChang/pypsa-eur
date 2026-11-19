@@ -3,7 +3,7 @@
 
 # 03 — Carriers & processes: every Edit in Guided jumps to Expert
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: recipe drawer merged (#1684); left (unverified): Expert label parity for recipes, browser test
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk
 Decided: GAP03-ADD-1 (Q5 a), Guided edits recipe values in a drawer; adding carriers and process units stays an Expert action behind a return link
 Size: M

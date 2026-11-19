@@ -271,6 +271,8 @@ POST   /api/projects/{name}/studies/{study_id}/run  write path:name
 POST   /api/projects/{name}/studies/{study_id}/run/abort  write path:name
 POST   /api/projects/{name}/studies/{study_id}/supply-architectures  write path:name
 POST   /api/projects/{name}/studies/{study_id}/supply-architectures/abort  write path:name
+POST   /api/projects/{name}/studies/{study_id}/system-type-map  write path:name
+POST   /api/projects/{name}/studies/{study_id}/system-type-map/abort  write path:name
 POST   /api/projects/{name}/uploads  write path:name
 DELETE /api/projects/{name}/uploads/{file_id}  write path:name
 PUT    /api/projects/{name}/worksheet  write path:name

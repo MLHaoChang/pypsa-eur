@@ -3,7 +3,7 @@
 
 # P3: verified action outcomes and real progress
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: S1 merged (#1150); left: S1b, S2-S5, A3.5-A3.6 reconciliation
 Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) merged ee141c66; S1b (chat tool-line marks) in review; S2–S5 planned; update_component static inputs done (effects.py)
 Type: task
 Blocked by: 01, 02; live-voice issue 11 for nonblocking jobs
