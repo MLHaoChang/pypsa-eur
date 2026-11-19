@@ -224,18 +224,36 @@ def test_marginal_choice_is_not_relabelled_total_cost(solved, conversation):
     assert "Total cost on the declared basis" not in public_text(frames)
 
 
-@pytest.mark.parametrize(
-    "change",
-    [
-        {"binding_generation": 4},
-        {"ui_context": {"selected_component": {"class": "Generator", "name": "G2"}}},
-    ],
-)
-def test_changed_binding_or_selection_requires_clarification(
-    solved, conversation, change
-):
+def moved_binding(sid, part):
+    """Forge the server's stored binding: another owner or project, same generation (AA-20)."""
+    session = chat_service.get_or_create_session(sid)
+    owner, project, generation = session.assurance_context["binding"]
+    other = "someone-else" if part == "owner" else str(uuid.uuid4())
+    session.assurance_context["binding"] = (
+        (other, project, generation) if part == "owner" else (owner, other, generation)
+    )
+    return session
+
+
+@pytest.mark.parametrize("part", ["owner", "project"])
+def test_changed_binding_requires_clarification(solved, conversation, part):
+    # AA-20: a new binding_generation alone is a new send, not a changed scope;
+    # the owner or the project changing still refuses.
     conversation("Check this run.", VALUES, checked_scope=scope(solved))
-    frames, provider = conversation("Show those results again.", **change)
+    session = moved_binding(conversation.sid, part)
+    frames, provider = conversation("Show those results again.")
+    assert "The project or selected component changed." in clarified(
+        frames, provider, "conversation_scope_changed"
+    )
+    assert session.assurance_context is None
+
+
+def test_changed_selection_requires_clarification(solved, conversation):
+    conversation("Check this run.", VALUES, checked_scope=scope(solved))
+    frames, provider = conversation(
+        "Show those results again.",
+        ui_context={"selected_component": {"class": "Generator", "name": "G2"}},
+    )
     clarified(frames, provider, "conversation_scope_changed")
 
 

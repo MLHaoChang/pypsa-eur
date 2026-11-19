@@ -13,7 +13,14 @@ import uuid
 
 import pytest
 
-from tests.assurance_acceptance.support import approval, parse_sse, public_text
+from harness import assurance_conversation
+from harness.providers.fake import FakeProvider
+from tests.assurance_acceptance.support import (
+    approval,
+    parse_sse,
+    public_text,
+    text_turn,
+)
 from tests.assurance_acceptance.test_p2_request_slots import blocks, grid  # noqa: F401
 from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_assurance_metrics import NumericalProvider, solved  # noqa: F401
@@ -30,9 +37,9 @@ def client_chat(checked):
     checked.session_ids.append(sid)
     sent = []
 
-    def send(message, values=None, **options):
+    def send(message, values=None, provider=None, **options):
         provider = checked.install(
-            NumericalProvider(values if values is not None else {})
+            provider or NumericalProvider(values if values is not None else {})
         )
         sent.append(len(sent) + 1)
         response = checked.client.post(
@@ -95,3 +102,30 @@ def test_repeat_followup_on_a_new_generation_keeps_the_checked_scope(
     assert client_chat.generations == [1, 2]
     assert len(provider.requests) == 1
     assert approval(frames)["receipt"]["request_complete"]
+
+
+def test_card_answer_after_an_interleaved_turn_is_refused(
+    solved, client_chat, checked, monkeypatch
+):
+    # G4: only owner and project are compared now, so the anchor check is what stops
+    # a stale card answer: a turn in between leaves the card no longer the last answer.
+    reasons = []
+    state = assurance_conversation._state
+
+    def spy(turn, ui):
+        found = state(turn, ui)
+        reasons.append(found[1])
+        return found
+
+    monkeypatch.setattr(assurance_conversation, "_state", spy)
+    frames, provider = client_chat("Show me cost for generator G1.")
+    clarified(frames, provider, "cost_quantity_required")
+    client_chat("Hello.", provider=FakeProvider([text_turn("Hello.")]))
+    reasons.clear()
+    frames, _ = client_chat(
+        "Total declared-basis cost", provider=FakeProvider([text_turn("Which one?")])
+    )
+    assert client_chat.generations == [1, 2, 3]
+    assert reasons == ["conversation_scope_required"]
+    assert not [d for e, d in frames if e == "choice_request"]
+    assert "price year" not in public_text(frames).lower()

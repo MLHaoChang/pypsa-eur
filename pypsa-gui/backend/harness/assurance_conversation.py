@@ -31,7 +31,7 @@ QUESTIONS = {
     "cost_quantity_required": "Which quantity do you mean: Marginal dispatch expenditure or Total declared-basis cost?",
     "explicit_cost_basis_required": "Please provide the EUR price year and annual fixed cost fraction. Reply: Price year YYYY; annual fixed cost fraction F (between 0 and 1).",
     "conversation_scope_required": "Please specify the generator, StorageUnit or network and the results to check; there is no available checked scope in this chat.",
-    "conversation_scope_changed": "The project, browser binding or selected component changed. Please specify the generator, StorageUnit or network and results again.",
+    "conversation_scope_changed": "The project or selected component changed. Please specify the generator, StorageUnit or network and results again.",
     "previous_compatible_run_required": "No previous distinct checked run has the same entity, time window and cost basis. Check a compatible baseline first or provide an explicit retained comparison scope.",
     "baseline_unavailable": "The selected previous run is unavailable or could not be verified. Please check a compatible baseline again.",
     "unsupported_followup": "That follow-up contains constraints outside the supported scope grammar. Please specify an exact result scope; no constraint has been ignored.",
