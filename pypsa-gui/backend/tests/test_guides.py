@@ -179,26 +179,32 @@ def test_verdict_text_covers_the_no_target_case():
 # the rail step that shows its card. Its ids are literal test ids in the step
 # cards, which `test_every_tour_target_is_a_rendered_test_id` pins.
 _HUB_TOUR = [
-    ("hub-rail", None, False),
     ("hub-start-templates", "hub-rail-step-start", False),
+    ("hub-rail-section-carriers", "hub-rail-section-carriers", False),
     ("hub-site-readiness", "hub-rail-step-site", False),
-    ("hub-site-type", "hub-rail-step-site", False),
+    ("hub-rail-section-loads", "hub-rail-section-loads", False),
+    ("hub-rail-section-assets", "hub-rail-section-assets", False),
+    ("hub-rail-section-profiles", "hub-rail-section-profiles", False),
+    ("hub-rail-section-commercial", "hub-rail-section-commercial", False),
     ("hub-goal-lole", "hub-rail-step-goal", False),
     ("hub-run-start", "hub-rail-section-readiness", False),
     ("hub-results-verdict", "hub-rail-step-results", True),
     ("hub-improve-list", "hub-rail-step-improve", True),
-    # optional + after_run (P24-FE gate B2): Improve is blocked until a
-    # study has finished, so before one the step would dead-end.
     ("hub-improve-fmea", "hub-rail-step-improve", True),
 ]
 
 
 def test_hub_design_tour_matches_the_spec():
     tour = G.load_guide("eh_fmea")["tours"]["hub_design"]
-    assert tour["title"] == "Design a hub in five steps"
+    assert tour["title"] == "Design a hub, section by section"
     got = [(s["target"], s.get("reveal"), bool(s.get("optional")))
            for s in tour["steps"]]
     assert got == _HUB_TOUR
+    # Numbering follows the stepper's ten sections; each step opens its own.
+    nums = [int(s["title"].split(" ")[0]) for s in tour["steps"]]
+    assert nums == sorted(nums) and nums[0] == 1 and nums[-1] == 10
+    assert all(s["jump"] == s["reveal"] for s in tour["steps"])
+    assert "assistant" not in tour["intro"].lower()
     for s in tour["steps"]:
         text = f"{s['title']} {s['body']} {s.get('enter', '')}"
         bad = [w for w in _JARGON + _HUB_JARGON if w.lower() in text.lower()]
