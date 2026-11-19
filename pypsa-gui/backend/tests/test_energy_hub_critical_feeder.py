@@ -9,6 +9,7 @@ feeder to an ``eh_critical`` bus were never drawn. On the Island Microgrid
 template the study certified 0.0 h/yr while its own FMEA ranked the
 hospital's only feeder first; the hand check is 0.01 × 8,760 h = 87.6 h/yr.
 """
+
 from __future__ import annotations
 
 import queue
@@ -28,13 +29,17 @@ VOLL = 150.0
 
 def _pack(target_lole_h: float = 3.0):
     base = default_off_grid_pack()
-    return base.model_copy(update={
-        "availability": AvailabilityTarget(
-            ens_cap_permyriad=2000.0, target_lole_h=target_lole_h,
-            certification_metric="mc_lole"),
-        "levers": base.levers.model_copy(update={"storage_duration": False}),
-        "mc_draws": 200,
-    })
+    return base.model_copy(
+        update={
+            "availability": AvailabilityTarget(
+                ens_cap_permyriad=2000.0,
+                target_lole_h=target_lole_h,
+                certification_metric="mc_lole",
+            ),
+            "levers": base.levers.model_copy(update={"storage_duration": False}),
+            "mc_draws": 200,
+        }
+    )
 
 
 def _hub_with_one_critical_feeder(*, feeder_rate: float = 0.01) -> pypsa.Network:
@@ -55,13 +60,35 @@ def _hub_with_one_critical_feeder(*, feeder_rate: float = 0.01) -> pypsa.Network
     n.add("Load", "town", bus="island", p_set=50.0)
     n.add("Load", "hospital", bus="crit", p_set=10.0)
     for g in ("gen_a", "gen_b"):
-        n.add("Generator", g, bus="island", carrier="gas", p_nom=500.0,
-              marginal_cost=10.0, outage_rate_value=1e-9,
-              outage_rate_basis="EFORd", mttr_hours=1.0)
-    n.add("Link", "import_poc", bus0="grid", bus1="island", p_nom=50.0,
-          efficiency=1.0, carrier="AC")
-    n.add("Link", "crit_feeder", bus0="island", bus1="crit", p_nom=20.0,
-          efficiency=1.0, carrier="AC")
+        n.add(
+            "Generator",
+            g,
+            bus="island",
+            carrier="gas",
+            p_nom=500.0,
+            marginal_cost=10.0,
+            outage_rate_value=1e-9,
+            outage_rate_basis="EFORd",
+            mttr_hours=1.0,
+        )
+    n.add(
+        "Link",
+        "import_poc",
+        bus0="grid",
+        bus1="island",
+        p_nom=50.0,
+        efficiency=1.0,
+        carrier="AC",
+    )
+    n.add(
+        "Link",
+        "crit_feeder",
+        bus0="island",
+        bus1="crit",
+        p_nom=20.0,
+        efficiency=1.0,
+        carrier="AC",
+    )
     n.links["eh_role"] = ""
     n.links.at["import_poc", "eh_role"] = "grid_import"
     n.links["outage_rate_value"] = float("nan")
@@ -78,7 +105,9 @@ def _run(n, pack):
 
     PyPSAService.set_network(n)
     return S.run_eh_study(
-        n, pack, SolverConfig(voll=VOLL),
+        n,
+        pack,
+        SolverConfig(voll=VOLL),
         lock=PyPSAService.get_lock(),
         stop_event=threading.Event(),
         log_queue=queue.SimpleQueue(),
@@ -114,17 +143,27 @@ def test_a_reliable_feeder_still_certifies():
 
 def test_a_second_feeder_in_parallel_needs_both_out():
     n = _hub_with_one_critical_feeder()
-    n.add("Link", "crit_feeder_2", bus0="island", bus1="crit", p_nom=20.0,
-          efficiency=1.0, carrier="AC")
+    n.add(
+        "Link",
+        "crit_feeder_2",
+        bus0="island",
+        bus1="crit",
+        p_nom=20.0,
+        efficiency=1.0,
+        carrier="AC",
+    )
     n.links.at["crit_feeder_2", "eh_role"] = ""
     n.links.at["crit_feeder_2", "outage_rate_value"] = 0.01
     n.links.at["crit_feeder_2", "mttr_hours"] = 8.0
     report = _run(n, _pack())
     # Independent: 0.01 × 0.01 × 8,760 h = 0.876 h/yr.
     assert report.mc_lole_h == pytest.approx(0.876, rel=0.01)
-    names = sorted(f["name"] for f in
-                   report.sections["certification"].payload["fleet_scope"]
-                   ["critical_feeders"])
+    names = sorted(
+        f["name"]
+        for f in report.sections["certification"].payload["fleet_scope"][
+            "critical_feeders"
+        ]
+    )
     assert names == ["crit_feeder", "crit_feeder_2"]
 
 
@@ -138,15 +177,15 @@ def test_a_feeder_without_outage_data_adds_nothing():
     assert pay["verdict"] == "pass"
     # F5: not silent — the Link is named as taken never to fail.
     assert [(f["name"], f["model"]) for f in pay["critical_feeders"]] == [
-        ("crit_feeder", "no_outage_data")]
+        ("crit_feeder", "no_outage_data")
+    ]
     assert "crit_feeder" in pay["critical_feeder_note"]
     assert "never failing" in pay["critical_feeder_note"]
 
 
 def test_a_parallel_line_is_redundancy_and_adds_nothing():
     n = _hub_with_one_critical_feeder()
-    n.add("Line", "crit_cable", bus0="island", bus1="crit", x=0.1, r=0.01,
-          s_nom=50.0)
+    n.add("Line", "crit_cable", bus0="island", bus1="crit", x=0.1, r=0.01, s_nom=50.0)
     report = _run(n, _pack())
     pay = report.sections["certification"].payload
     assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)
@@ -154,9 +193,17 @@ def test_a_parallel_line_is_redundancy_and_adds_nothing():
 
 
 def _with_backup(n):
-    n.add("Generator", "crit_backup", bus="crit", carrier="gas", p_nom=5.0,
-          marginal_cost=50.0, outage_rate_value=1e-9,
-          outage_rate_basis="EFORd", mttr_hours=1.0)
+    n.add(
+        "Generator",
+        "crit_backup",
+        bus="crit",
+        carrier="gas",
+        p_nom=5.0,
+        marginal_cost=50.0,
+        outage_rate_value=1e-9,
+        outage_rate_basis="EFORd",
+        mttr_hours=1.0,
+    )
     return n
 
 
@@ -169,9 +216,12 @@ def test_a_critical_bus_with_its_own_units_is_bounded_not_composed():
     note = report.sections["certification"].note
     [row] = pay["critical_feeders"]
     assert (row["name"], row["model"], row["upper_bound"]) == (
-        "crit_feeder", "unsampled", True)
+        "crit_feeder",
+        "unsampled",
+        True,
+    )
     assert row["lole_h"] == pytest.approx(87.6, rel=0.01)
-    assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)   # nothing added
+    assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)  # nothing added
     assert pay["verdict"] == "inconclusive", note
     assert pay["confident"] is False
     assert "crit" in note and "87.6 h/yr" in note
@@ -181,8 +231,9 @@ def test_a_critical_bus_with_its_own_units_is_bounded_not_composed():
 
 def test_a_bound_under_the_goal_does_not_block_a_pass():
     # 1e-5 × 8,760 ≈ 0.09 h/yr even with the backup ignored: under 3 h/yr.
-    report = _run(_with_backup(_hub_with_one_critical_feeder(feeder_rate=1e-5)),
-                  _pack())
+    report = _run(
+        _with_backup(_hub_with_one_critical_feeder(feeder_rate=1e-5)), _pack()
+    )
     pay = report.sections["certification"].payload
     assert pay["verdict"] == "pass", report.sections["certification"].note
     assert pay["critical_feeders"][0]["lole_h"] == pytest.approx(0.0876, rel=0.02)
@@ -204,15 +255,23 @@ def test_a_chained_feeder_has_no_bound_and_withholds_a_pass():
     n = _hub_with_one_critical_feeder(feeder_rate=1e-5)
     n.add("Bus", "mid", carrier="AC")
     n.links.at["crit_feeder", "bus0"] = "mid"
-    n.add("Link", "mid_feeder", bus0="island", bus1="mid", p_nom=20.0,
-          efficiency=1.0, carrier="AC")
+    n.add(
+        "Link",
+        "mid_feeder",
+        bus0="island",
+        bus1="mid",
+        p_nom=20.0,
+        efficiency=1.0,
+        carrier="AC",
+    )
     n.links.at["mid_feeder", "eh_role"] = ""
     n.links.at["mid_feeder", "outage_rate_value"] = 1e-5
     n.links.at["mid_feeder", "mttr_hours"] = 8.0
     report = _run(n, _pack())
     pay = report.sections["certification"].payload
     assert [(f["name"], f["chained"]) for f in pay["critical_feeders"]] == [
-        ("crit_feeder", True)]
+        ("crit_feeder", True)
+    ]
     assert pay["verdict"] == "inconclusive"
     assert "crit_feeder" in report.sections["certification"].note
 
@@ -223,13 +282,17 @@ def _dc_pack(target_lole_h: float = 25.0):
     from models.energy_hub import default_weak_flexible_pack
 
     base = default_weak_flexible_pack()
-    return base.model_copy(update={
-        "availability": AvailabilityTarget(
-            ens_cap_permyriad=10.0, target_lole_h=target_lole_h,
-            certification_metric="mc_lole"),
-        "levers": base.levers.model_copy(update={"storage_duration": False}),
-        "mc_draws": 200,
-    })
+    return base.model_copy(
+        update={
+            "availability": AvailabilityTarget(
+                ens_cap_permyriad=10.0,
+                target_lole_h=target_lole_h,
+                certification_metric="mc_lole",
+            ),
+            "levers": base.levers.model_copy(update={"storage_duration": False}),
+            "mc_draws": 200,
+        }
+    )
 
 
 def _dc(rate=None):
@@ -249,7 +312,10 @@ def test_data_centre_transformer_bound_as_shipped_is_inconclusive():
     sec = report.sections["certification"]
     [row] = sec.payload["critical_feeders"]
     assert (row["name"], row["model"], row["upper_bound"]) == (
-        "site_transformer", "unsampled", True)
+        "site_transformer",
+        "unsampled",
+        True,
+    )
     assert row["lole_h"] == pytest.approx(43.8, rel=0.01)
     assert sec.payload["verdict"] == "inconclusive", sec.note
     assert "it_bus" in sec.note
@@ -261,7 +327,8 @@ def test_data_centre_transformer_bound_under_the_goal_passes():
     report = _run(_dc(rate=1e-5), _dc_pack())
     sec = report.sections["certification"]
     assert sec.payload["critical_feeders"][0]["lole_h"] == pytest.approx(
-        0.0876, rel=0.02)
+        0.0876, rel=0.02
+    )
     assert sec.payload["verdict"] == "pass", sec.note
 
 
@@ -277,7 +344,10 @@ def test_island_microgrid_certifies_the_hospital_feeder():
     assert sec.payload["verdict"] == "fail"
     [row] = sec.payload["critical_feeders"]
     assert (row["name"], row["model"], row["buses"]) == (
-        "hospital_feeder", "composed", ["hospital"])
+        "hospital_feeder",
+        "composed",
+        ["hospital"],
+    )
     assert row["lole_h"] == pytest.approx(87.6, rel=0.01)
 
 
@@ -290,5 +360,6 @@ def test_the_copper_plate_views_say_they_leave_the_feeder_out():
     assert any("crit_feeder" in x and "certification does" in x for x in notes)
     m = _hub_with_one_critical_feeder()
     m.add("Line", "crit_cable", bus0="island", bus1="crit", x=0.1, s_nom=50.0)
-    assert not any("certification does" in x
-                   for x in assemble_fleet(m, loop_scope(m)).fleet_notes)
+    assert not any(
+        "certification does" in x for x in assemble_fleet(m, loop_scope(m)).fleet_notes
+    )
