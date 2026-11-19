@@ -8,6 +8,7 @@ import { solveProgressLabel } from '../utils/solveProgress'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { formatRelativeTime } from '../utils/projectActions'
+import { money } from '../utils/money'
 
 const STATUS_COLORS: Record<string, string> = {
   idle: 'text-muted', running: 'text-warn', completed: 'text-success',
@@ -66,7 +67,9 @@ export default function StatusBar() {
   const { data: liveStatus, dataUpdatedAt: liveAt } = useQuery({
     queryKey: nk(currentProject, 'simulationStatus'),
     queryFn: simulationApi.getStatus,
-    enabled: !!currentProject && watchDispatch,
+    // Fetched once on mount even when idle, so the objective survives a reload
+    // (control-strategy 07); polling stays limited to the watched states.
+    enabled: !!currentProject,
     refetchInterval: watchDispatch ? 3000 : false,
   })
   const prevDispatchRef = useRef<string | null>(null)
@@ -117,7 +120,18 @@ export default function StatusBar() {
     : null
 
   const color = STATUS_COLORS[status] ?? 'text-muted'
-  const objStr = objective != null ? `${(objective / 1e9).toFixed(3)} B€` : '—'
+  // The last solve's objective, read from /simulation/status (set after every
+  // solve and after a reload); the store's value covers a reconnect. In the one
+  // money notation (utils/money.ts). Only a fresh dispatch has a figure: an
+  // edit clears the solve (the backend drops the objective and the app toasts
+  // "Results cleared"), so the bar reads "—" as Results reads "Not run yet"
+  // (control-strategy 07).
+  const solvedObjective = liveStatus
+    ? (liveStatus.dispatch === 'fresh' ? liveStatus.objective ?? null : null)
+    : objective
+  const objStr = solvedObjective != null && Number.isFinite(solvedObjective)
+    ? `${solvedObjective < 0 ? '−' : ''}${money(solvedObjective, 'EUR')}`
+    : '—'
 
   // Prefer the UI store's project name (set on import/load/save) over PyPSA's
   // internal n.name, which defaults to "Unnamed Network" when not explicitly

@@ -25,11 +25,12 @@ def _key(project_uuid: str) -> str:
     return project_uuid
 
 
-def start(project: str, specs, work) -> dict:
-    """Start `work(stop_event, on_progress)` (returns `{"rows": [...]}`) in a thread; JobBusy if one is running."""
+def start(project: str, specs, work, inputs: dict | None = None) -> dict:
+    """Start `work(stop_event, on_progress)` (returns `{"rows": [...]}`) in a thread; JobBusy if one is running.
+    `inputs` (the values the run uses, each with its source) is kept on the record as given."""
     stop = threading.Event()
     record = {"status": "running", "progress": {s.intent: "queued" for s in specs}, "rows": [], "error": None,
-              "started_at": time.time(), "finished_at": None, "stop_event": stop}
+              "started_at": time.time(), "finished_at": None, "stop_event": stop, "inputs": inputs}
 
     def on_progress(intent, state, row):
         with _LOCK:

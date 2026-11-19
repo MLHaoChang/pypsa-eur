@@ -1,0 +1,47 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# 07 — Decisions found in neither mode, and Expert-only decisions Guided never names
+
+Status: ready-for-agent
+Owner: unassigned: triaged by the coordinator
+Size: M
+Gated: UX
+Likely files: pypsa-gui/frontend/src/layout/PropertiesPanel.tsx (Load and Generator blocks); pypsa-gui/frontend/src/pages/hubDesign/SectionView.tsx; pypsa-gui/backend/services/flow_service.py (section items); pypsa-gui/frontend/src/pages/SolverSettings.tsx
+Journey fit: set up site and assets (sections 1, 3, 4, 5, 7, 8) in Guided. Hands on to readiness, which must name what is left.
+
+## What
+
+Design §3.5 lets Expert hold fields that Guided does not show. Guided must then name each field ("switch to Expert to edit") and never hide a blocker. With the assistant off, as in these journeys, naming the field is the only route Guided offers. The probe found:
+
+**Found in neither mode** (on a load or asset form, in the panels, or in the drawers):
+- load flexibility (curtailable / deferrable share), §2.1 section 4;
+- per-asset unit commitment (min load, min up/down, restart): Expert Grid study has only a global "Linearised unit commitment for the fixed-size gensets". Code check pending for the Haber-Bosch loop (`eh_ammonia.py`);
+- parties / value split (§2.1 section 7): not checked; confirm or list.
+
+**Expert only, and Guided does not name them:**
+- model horizon of a template (periods, representative weeks vs chronological year): section 1's drawer shows them read-only;
+- grid code profile and grid-code document, point of connection, export link, site time zone (section 3);
+- scenario variants to compare (section 8);
+- overnight cost and lifetime show a "Default" tag but no "assumed" mark, so finding 7 of decisions.md applies.
+
+Re-triaged after TEMPLATE-GAPS-1: critical share, PUE, backup mode and architecture moved to 04 (Q3 a). What is left here: load flexibility, per-asset unit commitment, parties (confirm), and the Expert-only fields Guided must name.
+
+## Acceptance
+
+- Each "neither mode" item is found (and the inventory corrected) or added to its section's form in Expert.
+- Each "Expert only" item that matters for the run appears in Guided either as a decision (≤3 per card) or as a named line with "Open in Expert", per §3.5.
+- (UX) Section 10 business-case inputs (the investment case's own settings) are Expert-only with no Guided equivalent. List them, then name each in Guided or give it a Guided field.
+
+## Inventory corrections (filed after #1613; first recorded on #1631)
+
+- **Load flexibility:** the project-wide demand-response tier (`dsr_*`). There is no per-load curtailable/deferrable share.
+- **Unit commitment:** set per asset in Expert Properties. Haber-Bosch (`eh_ammonia.py:160-170`) is committable at 40 % minimum output, 24 h min up and 8 h min down, and gets one binary check per period (`solver/process_uc.py`).
+- **Parties:** participants, owners, contracts and value flows exist. There is no share field; the value split follows ownership and contracts.
+
+## Corrections from the app walk (2026-11-17)
+
+- The IPP `bess` drawer is read-only by design (Q5 (a)), not empty.
+- The staged H2 fuel cell's "Default 0" was a stale pack stamp on a sunk unit; fixed in #1625.
+- The `pv_new` 883.81 €/kW is the rooftop pack row, not a bug (#1625 names it in the ledger).
+- GK B's D1–D4 conditions on the template data are listed in #1625's body.

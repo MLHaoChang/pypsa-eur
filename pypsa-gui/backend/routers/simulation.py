@@ -1734,6 +1734,7 @@ def run_ac_pf():
             ac_pf_convergence_list=None,
             ac_pf_slack_bus_used=None,
             ac_pf_stripped_voll_slacks=None,
+            ac_pf_seeded_by=None,
             ac_pf_converged_count=None,
             ac_pf_total_snapshots=None,
             ac_pf_unknown_count=None,
