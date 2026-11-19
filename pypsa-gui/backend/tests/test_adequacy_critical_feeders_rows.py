@@ -314,7 +314,13 @@ def test_the_note_says_a_no_data_rate_is_unknown_not_never_failing():
 def test_each_bounded_row_states_its_own_reason():
     # The note's reason follows the row's model: an unread rate is taken as
     # certain, a bus with its own units has them left out.
-    nd = {"name": "nd", "model": NO_OUTAGE_DATA, "buses": ["h"], "upper_bound": True, "lole_h": 1.0}
+    nd = {
+        "name": "nd",
+        "model": NO_OUTAGE_DATA,
+        "buses": ["h"],
+        "upper_bound": True,
+        "lole_h": 1.0,
+    }
     un = {**nd, "name": "un", "model": UNSAMPLED}
     assert "nd at most 1 h/yr (upper bound: its outage rate taken as certain)" in (
         certification_note([nd])
@@ -327,7 +333,9 @@ def test_each_bounded_row_states_its_own_reason():
 def test_a_pocket_with_own_units_and_an_unread_feeder_names_both_reasons():
     from services.adequacy.critical_feeders import Pocket, _why_bound
 
-    both = Pocket(buses=["h"], feeders=["f"], u=1.0, bound=True, no_data=["f"], own_units=True)
+    both = Pocket(
+        buses=["h"], feeders=["f"], u=1.0, bound=True, no_data=["f"], own_units=True
+    )
     assert _why_bound(both) == (
         "upper bound: f's outage rate is not known and is taken as certain; "
         "h's own units not counted"
