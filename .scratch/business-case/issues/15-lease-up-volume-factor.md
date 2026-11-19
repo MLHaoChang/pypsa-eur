@@ -3,7 +3,7 @@
 
 # 15 — Lease-up volume factor
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: 15a backend merged (#1601); 15b UI open in #1721
 Gated: GK B
 Type: enhancement
 Parent: business-case 08 (#1467), GK B question Q1

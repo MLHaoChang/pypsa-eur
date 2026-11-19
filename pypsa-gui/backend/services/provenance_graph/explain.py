@@ -458,3 +458,35 @@ def explain_metric(owner: str | None, evidence_id: str, metric: str) -> dict:
         "node": mg.start,
         "steps": wire,
     }
+
+
+def explain_study_figure(figure: str, ctx=None) -> dict:
+    """Why a Guided Energy Hub study figure has its value (guided-results 02a): the walk from the figure to the
+    study run and the inputs it was computed from (`eh_study.study_graph`), outcome first. The outcome also reads
+    the run's inputs, which the walk shows but `staleness` does not follow past `computed_in`. Refused for a figure
+    the study does not show (`why_target_unknown`, 404) or no finished study (`study_not_run`)."""
+    from services.provenance_graph import eh_study
+
+    if figure not in eh_study.FIGURES:
+        raise TargetUnknown(
+            f"no study figure '{figure}'; one of {', '.join(eh_study.FIGURES)}"
+        )
+    sg = eh_study.study_graph(eh_study.read(ctx))
+    start = eh_study.figure_id(figure)
+    steps = why(sg.graph, start).steps
+    state, uncompared = eh_study.verdict(sg.graph, start)
+    total = len(steps)
+    truncated = total > MAX_STEPS
+    # The run step is the walk's third or fourth: a cut never drops it, and the outcome reads the whole graph (X5).
+    return {
+        "outcome": {
+            "state": state,
+            "uncompared": uncompared,
+            "complete": not truncated,
+            "truncated": truncated,
+            "steps_total": total,
+        },
+        "target": {"study": "eh_study", "figure": figure},
+        "node": start,
+        "steps": [_metric_step(sg, s) for s in steps[:MAX_STEPS]],
+    }
