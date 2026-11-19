@@ -294,9 +294,13 @@ class ImporterSpec:
     #: "module:function" taking a path and returning whether the file's
     #: content is this format; how ``for_file`` tells apart importers that
     #: share an extension (``.xlsx``). The module must not import the engine.
-    #: Empty: the importer is never chosen by content, and is the fallback
-    #: for its extension when no sniff claims the file.
+    #: Empty: the importer is never chosen by content.
     sniff: str = ""
+    #: The importer ``for_file`` picks for a shared extension when no sniff
+    #: claims the file, so the extension's own format refuses it in its own
+    #: words (``.xlsx``: the Excel input workbook, whose older layouts its
+    #: sniff does not list).
+    fallback: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.format_id, str) or not _FORMAT_ID.match(self.format_id):
@@ -367,6 +371,8 @@ DECLARED: tuple[ImporterSpec, ...] = (
         display_name="Excel input workbook",
         extensions=(".xlsx",),
         help="A workbook with one sheet per asset type, as the app's own template exports it.",
+        sniff="gridspine.ingest.xlsx_safe:is_excel_input_workbook",
+        fallback=True,
     ),
     ImporterSpec(
         format_id="psse",
@@ -432,11 +438,11 @@ def for_file(path: Path, declared: Sequence[ImporterSpec] = DECLARED) -> Importe
     """
     The one importer for the file at ``path``. Its extension decides when one
     importer takes it. When several do (``.xlsx``), the sniffs read the
-    content: the one importer that claims it, or, when none does, the one
-    candidate without a sniff (the extension's own format, which then
-    refuses the file in its own words). A file two importers claim, or one
-    with no claim and no single fallback, is refused naming the candidates:
-    the app never picks between formats silently.
+    content and the one importer that claims it wins; when none does, the
+    extension's one ``fallback`` importer takes it and refuses it in its own
+    words. A file two importers claim, or one with no claim and no single
+    fallback, is refused naming the candidates: the app never picks between
+    formats silently.
     """
     path = Path(path)
     candidates = for_extension(path.suffix or ".", declared)
@@ -457,7 +463,7 @@ def for_file(path: Path, declared: Sequence[ImporterSpec] = DECLARED) -> Importe
             f"{path.name} reads as more than one format ({names}); "
             "it cannot be imported until it is only one"
         )
-    fallback = [s for s in candidates if not s.sniff]
+    fallback = [s for s in candidates if s.fallback]
     if len(fallback) == 1:
         return fallback[0]
     names = ", ".join(s.display_name for s in candidates)

@@ -9,6 +9,7 @@ fixtures of ``test_dgs_import`` and ``test_dgs_v7``; no third-party file.
 
 import datetime as dt
 import re
+import zipfile
 
 import openpyxl
 import pandas as pd
@@ -20,6 +21,7 @@ from gridspine.ingest.dgs_import import read_dgs
 from gridspine.ingest.dgs_parse import parse_dgs_text
 from gridspine.ingest.dgs_xlsx import is_dgs_workbook, parse_dgs_xlsx
 from gridspine.ingest.import_result import ImportFormatError
+from gridspine.ingest.xlsx_safe import is_excel_input_workbook
 from gridspine.schema.contracts import ContractError
 from tests.gridspine.test_dgs_import import dgs_text
 from tests.gridspine.test_dgs_v7 import V7
@@ -342,23 +344,70 @@ def test_the_apps_workbook_goes_to_excel(tmp_path):
     assert ir.for_file(path).format_id == "excel"
 
 
-def test_a_dgs_general_sheet_takes_the_workbook_to_dgs(tmp_path):
-    """Only DGS sniffs; the Excel input workbook is the .xlsx fallback."""
+def test_a_workbook_both_claim_is_refused_naming_both(tmp_path):
     path = _write(_network(False), tmp_path)
     wb = openpyxl.load_workbook(path)
     g = wb.create_sheet("General")
     g.append(["FID(a:40)", "Descr(a:40)", "Val(a:40)"])
     wb.save(path)
-    assert ir.for_file(path).format_id == "dgs"
+    with pytest.raises(ImportFormatError) as e:
+        ir.for_file(path)
+    msg = str(e.value)
+    assert "more than one format" in msg
+    assert "PowerFactory export (DGS)" in msg and "Excel input workbook" in msg
 
 
-def test_a_workbook_dgs_does_not_claim_falls_back_to_excel(tmp_path):
+@pytest.mark.parametrize("sheet", ["network", "About", "Nodes"])
+def test_a_sheet_only_the_apps_workbooks_use_claims_it_for_excel(tmp_path, sheet):
+    wb = openpyxl.Workbook()
+    wb.active.title = sheet
+    path = tmp_path / "w.xlsx"
+    wb.save(path)
+    assert is_excel_input_workbook(path)
+    assert ir.for_file(path).format_id == "excel"
+
+
+def test_a_workbook_no_sniff_claims_falls_back_to_excel(tmp_path):
     """Excel then refuses it in its own words (S1b's older layouts land here)."""
     path = one_sheet(tmp_path, [HEAD], name="Data")
     wb = openpyxl.load_workbook(path)
     del wb["General"]
     wb.save(path)
+    assert not is_excel_input_workbook(path)
     assert ir.for_file(path).format_id == "excel"
+
+
+def _rewrite(path, member, change):
+    """Rewrite one zip member of the workbook at ``path`` with ``change``."""
+    with zipfile.ZipFile(path) as z:
+        items = [(i, z.read(i.filename)) for i in z.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for info, data in items:
+            z.writestr(info, change(data) if info.filename == member else data)
+
+
+@pytest.mark.parametrize("sheet", [1, 2])  # General, then the class sheet
+def test_a_sheet_with_broken_xml_is_a_format_error(tmp_path, sheet):
+    path = one_sheet(tmp_path, [HEAD, ["2", "C", "T", 33.0, 1]])
+    _rewrite(path, f"xl/worksheets/sheet{sheet}.xml", lambda b: b[: len(b) // 2])
+    with pytest.raises(
+        ImportFormatError, match="one.xlsx: The file is not a readable Excel workbook"
+    ):
+        read_dgs([path], {})
+    assert is_dgs_workbook(path) == (sheet == 2)
+    ir.for_file(path)  # routes, never a raw parser error
+
+
+def test_an_understated_dimension_still_reads_every_row(tmp_path):
+    rows = [["2", "C", "T", 33.0, 1], ["3", "C", "U", 11.0, 1], ["4", "C", "V", 1.0, 1]]
+    path = one_sheet(tmp_path, [HEAD, *rows])
+    _rewrite(
+        path,
+        "xl/worksheets/sheet2.xml",
+        lambda b: re.sub(rb'<dimension ref="[^"]*"', b'<dimension ref="A1:A1"', b),
+    )
+    assert b'ref="A1:A1"' in zipfile.ZipFile(path).read("xl/worksheets/sheet2.xml")
+    assert list(parse_dgs_xlsx(path).tables["ElmTerm"].index) == ["2", "3", "4"]
 
 
 @pytest.mark.parametrize(
@@ -512,3 +561,10 @@ def test_a_general_sheet_past_the_limits_is_not_dgs(tmp_path, monkeypatch):
     path = one_sheet(tmp_path, [HEAD])
     monkeypatch.setitem(L.LIMITS, "rows", 1)
     assert not is_dgs_workbook(path)
+
+
+@pytest.mark.parametrize("name", ["Elm;Term", "Elm\nTerm", "Elm\rTerm"])
+def test_a_sheet_name_that_would_split_the_header_is_refused(tmp_path, name):
+    path = one_sheet(tmp_path, [HEAD, ["2", "C", "T", 33.0, 1]], name=name)
+    with pytest.raises(ContractError, match="a ';' or a line break in the sheet name"):
+        parse_dgs_xlsx(path)

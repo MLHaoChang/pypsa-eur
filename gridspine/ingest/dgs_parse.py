@@ -207,6 +207,8 @@ def parse_dgs_text(
         sizes: dict = {}
         vectors: dict = {}
         for (col, attr, t, k), field in zip(cols, fields):
+            if k == "MATRIX":
+                continue  # dropped (listed in the report), so never read
             v = _value(field, t, lineno, f"{cls}.{col}", fail)
             if t in ("r", "d"):
                 mark = "," if "," in field else "." if "." in field else None
@@ -214,8 +216,6 @@ def parse_dgs_text(
                     marks.setdefault(mark, (lineno, f"{cls}.{col}", field.strip()))
             if isinstance(k, int) and field.strip() == "":
                 v = None  # an unused vector slot, not a missing real
-            if k == "MATRIX":
-                continue
             if attr == "OP":
                 ops.append((lineno, cls, v))
                 continue

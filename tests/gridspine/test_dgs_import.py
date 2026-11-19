@@ -1219,3 +1219,21 @@ def test_a_true_false_tap_position_is_refused(tmp_path):
     with pytest.raises(ContractError, match="nntap True is not an integer"):
         _int("T2W", "nntap", True)
     assert _int("T2W", "nntap", 3.0) == 3
+
+
+@pytest.mark.parametrize(
+    "cls, attr, row",
+    [
+        ("StaCubic", "obj_bus", "100;c;11;20;x"),
+        ("ElmCoup", "on_off", "20;C1;2;x"),
+        ("StaSwitch", "on_off", "90;S-PV;112;x"),
+        ("ElmSym", "ip_ctrl", "43;Gen;2;42;4.0;1.02;x;0"),
+        ("ElmShnt", "shtype", "45;Cap;2;x;11.0;6.0;3;2;0"),
+    ],
+)
+def test_text_in_each_integer_flag_is_refused_by_name(tmp_path, cls, attr, row):
+    """GK A2 X11: each integer guard, one field at a time."""
+    head = dict(HEAD, **{cls: HEAD[cls].replace(f"{attr}(i)", f"{attr}(a:8)")})
+    rows = dict(ROWS, **{cls: [row, *ROWS[cls][1:]]})
+    with pytest.raises(ImportFormatError, match=rf"{attr} 'x' is not an integer"):
+        read_text(tmp_path, dgs_text(rows, head))

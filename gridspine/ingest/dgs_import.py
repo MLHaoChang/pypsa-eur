@@ -1006,14 +1006,13 @@ class _Mapper:
 
     def _leftovers(self):
         for cls, cols in self.dropped.items():
-            if cls in ELEMENTS or cls in TYPES:  # other classes are listed whole
-                for col in cols:
-                    self.unmapped.append(
-                        Unmapped(
-                            f"{cls} column {col!r}",
-                            "a DGS 7.x matrix attribute is not imported",
-                        )
+            for col in cols:  # every class, its rows imported or not
+                self.unmapped.append(
+                    Unmapped(
+                        f"{cls} column {col!r}",
+                        "a DGS 7.x matrix attribute is not imported",
                     )
+                )
         for cls, df in self.t.items():
             if cls in STRUCTURE or cls in ELEMENTS:
                 continue

@@ -20,8 +20,10 @@ ASCII reader's. Refusals name "sheet <class>, row <n>" instead of a line.
 Cells, each handled explicitly (GK A2 X4):
 
 - a number becomes its text as Python writes it: an integer ``5``, a real
-  ``5.0`` or ``1e-05``, so an integer column holding ``5.0`` is refused as the
-  ASCII ``5.0`` would be;
+  ``5.5`` or ``1e-05``. Excel stores numbers without a type, and openpyxl
+  reads a whole number such as ``5.0`` back as ``5``, so an integer column
+  holding 5.0 is read as 5; a fraction there (``5.5``) is refused as the
+  ASCII ``5.5`` would be;
 - text is taken as it stands; a ``;`` or a line break in it is refused
   (it would split the row), and so is a row whose first cell starts with
   ``*`` or ``$$`` (it would read as a comment or a header);
@@ -35,7 +37,9 @@ Cells, each handled explicitly (GK A2 X4):
 - a wholly empty sheet is ignored. Every other sheet must be a DGS class
   table: one whose row 1 is not typed headers is refused, naming the sheet
   (the reader has no way to tell notes from a damaged class);
-- hidden sheets are read like any other.
+- hidden sheets are read like any other;
+- a sheet whose XML or compression is damaged is refused as an unreadable
+  workbook, never as a raw parser error.
 
 Opening goes through ``xlsx_safe`` (zip and size limits, read-only, no
 external links), the same path as the Excel input workbook.
@@ -44,6 +48,7 @@ external links), the same path as the Excel input workbook.
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 import math
 from pathlib import Path
 
@@ -54,6 +59,8 @@ from gridspine.ingest import xlsx_safe as X
 from gridspine.ingest.dgs_parse import DgsTables, parse_dgs_text
 from gridspine.schema.contracts import ContractError
 
+logger = logging.getLogger(__name__)
+
 GENERAL = "General"
 
 
@@ -63,6 +70,11 @@ def parse_dgs_xlsx(path) -> DgsTables:
     wb = X.open_workbook(path)
     try:
         text, locations = _as_text(wb, path.name)
+    except (L.ImportFormatError, ContractError):
+        raise
+    except Exception as exc:  # noqa: BLE001 - a damaged sheet, as excel_import
+        logger.warning("DGS workbook refused as unreadable", exc_info=True)
+        raise L.ImportFormatError("The file is not a readable Excel workbook.") from exc
     finally:
         wb.close()
     return parse_dgs_text(text, source=path.name, locations=locations)
@@ -91,7 +103,7 @@ def is_dgs_workbook(path) -> bool:
             if isinstance(v, str) and v.strip().endswith(")")
         }
         return {"Descr", "Val"} <= names and bool(names & {"ID", "FID"})
-    except L.ImportFormatError:
+    except Exception:  # noqa: BLE001 - a damaged or over-limit sheet is not DGS
         return False
     finally:
         wb.close()
@@ -127,8 +139,8 @@ def _as_text(wb, source: str) -> tuple[str, dict]:
             rows.pop()
         if not rows:
             continue  # a wholly empty sheet
-        if ";" in name:
-            fail(1, 0, "a ';' in the sheet name; the sheet name is the class")
+        if any(ch in name for ch in ";\n\r"):
+            fail(1, 0, "a ';' or a line break in the sheet name; the name is the class")
         head = list(rows[0])
         while head and head[-1] == "":
             head.pop()

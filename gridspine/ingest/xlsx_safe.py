@@ -92,3 +92,27 @@ def open_workbook(path: pathlib.Path):
         wb.close()
         raise L.ImportLimitError("sheets", len(wb.sheetnames))
     return wb
+
+
+#: Sheet names only the app's Excel workbooks use: the input workbook's own
+#: sheets (``excel_layout``) and the older export's ``network`` sheet.
+EXCEL_SHEETS = frozenset(
+    {L.ABOUT, L.HORIZON, L.TIME_SERIES, "network"} | {sheet for _, sheet, _ in L.SHEETS}
+)
+
+
+def is_excel_input_workbook(path) -> bool:
+    """
+    Whether the workbook at ``path`` has a sheet only the app's Excel
+    workbooks use (``EXCEL_SHEETS``), for the import registry to route a
+    ``.xlsx``. Sheet names only, no cell is read; a file that cannot be
+    opened safely is not one.
+    """
+    try:
+        wb = open_workbook(pathlib.Path(path))
+    except L.ImportFormatError:
+        return False
+    try:
+        return bool(EXCEL_SHEETS & set(wb.sheetnames))
+    finally:
+        wb.close()

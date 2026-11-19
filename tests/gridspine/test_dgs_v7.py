@@ -320,7 +320,7 @@ def test_a_matrix_in_a_later_5_x_header_of_a_class_is_refused_there():
         parse_dgs_text(text, "x.dgs")
 
 
-def test_matrix_columns_of_types_are_listed_and_of_unmapped_classes_are_not(tmp_path):
+def test_matrix_columns_of_types_and_of_unmapped_classes_are_listed(tmp_path):
     text = V7.replace(
         "$$TypLne;FID(a:40);OP(a:1);loc_name(a:80);",
         "$$TypLne;FID(a:40);OP(a:1);M:MATRIX(a);loc_name(a:80);",
@@ -329,7 +329,7 @@ def test_matrix_columns_of_types_are_listed_and_of_unmapped_classes_are_not(tmp_
     r = _read(tmp_path, text, "v7.dgs")
     cols = sorted(u.source_item for u in r.report.unmapped if "column" in u.source_item)
     assert "TypLne column 'M:MATRIX'" in cols
-    assert not any("IntGrf column" in c for c in cols)
+    assert "IntGrf column 'P:MATRIX'" in cols  # its rows are listed whole too
     assert any(u.source_item.startswith("IntGrf 'g'") for u in r.report.unmapped)
 
 
@@ -339,3 +339,32 @@ def test_a_matrix_in_a_repeated_class_header_is_listed_once():
         "$$ElmTerm;FID(a:40);OP(a:1);uknom(r);G:MATRIX(a)\n3;C;11;\n"
     )
     assert parse_dgs_text(text).dropped == {"ElmTerm": ["G:MATRIX"]}
+
+
+def _with_matrix(text, cls, value=""):
+    """``text`` with a ``G:MATRIX(r)`` column on ``cls``, every row ``value``."""
+    out, here = [], False
+    for line in text.splitlines():
+        if line.startswith("$$"):
+            here = line.startswith(f"$${cls};")
+            out.append(line + (";G:MATRIX(r)" if here else ""))
+        elif here and line.strip():
+            out.append(f"{line};{value}")
+        else:
+            out.append(line)
+    return "\n".join(out) + "\n"
+
+
+@pytest.mark.parametrize("cls", ["ElmNet", "StaCubic"])
+def test_a_matrix_column_on_a_structure_class_is_listed(tmp_path, cls):
+    """A dropped matrix column is reported whatever its class."""
+    res = _read(tmp_path, _with_matrix(V7, cls), "v7.dgs")
+    assert f"{cls} column 'G:MATRIX'" in {u.source_item for u in res.report.unmapped}
+
+
+@pytest.mark.parametrize("value", ["abc", "2.5"])
+def test_a_dropped_matrix_column_is_never_read(value):
+    """Neither a non-number nor a point in this comma file can refuse it there."""
+    tables = parse_dgs_text(_with_matrix(V7, "ElmXnet", value), "v7.dgs")
+    assert tables.dropped["ElmXnet"] == ["G:MATRIX"]
+    assert tables.decimal_comma
