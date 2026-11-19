@@ -10,6 +10,7 @@ import collections
 import copy
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -1208,6 +1209,134 @@ def set_discussed_run(
         thread['updated_at'] = datetime.now(timezone.utc).isoformat()
         _save(path, thread)
         return _view(thread)
+
+
+# Live-voice 03a: the durable current view, distinct from refs.discussed.
+# ui_context is client input, so every stored value passes a per-value check
+# (GK B 64, L1); a value that fails is dropped, never stored as given.
+_VIEW_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')  # run ids (run_evidence._RUN_ID)
+_VIEW_SECTION = re.compile(r'^[a-z][a-z0-9_]{0,47}$')
+_VIEW_ASSET_NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9 _.:/-]{0,63}$')
+_VIEW_ASSET_CLASSES = frozenset({
+    'Bus', 'Line', 'Transformer', 'Generator', 'StorageUnit', 'Store', 'Load',
+    'Link', 'Carrier', 'ShuntImpedance',
+})
+_VIEW_WINDOW_MAX = 10**6
+
+
+def _view_enum(value: Any, allowed) -> str | None:
+    return value if isinstance(value, str) and value in allowed else None
+
+
+def _view_pattern(value: Any, pattern: re.Pattern) -> str | None:
+    return value if isinstance(value, str) and pattern.fullmatch(value) else None
+
+
+def _view_index(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 <= value <= _VIEW_WINDOW_MAX else None
+
+
+def current_view_from_ui_context(ui_context: Any) -> dict[str, Any] | None:
+    """The allow-listed view a turn's ``ui_context`` names, or None for no context."""
+    from harness.catalogue import RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM
+
+    if not isinstance(ui_context, dict):
+        return None
+    view: dict[str, Any] = {
+        'mode': 'guided' if ui_context.get('ui_mode') == 'guided' else 'expert',
+    }
+    panel = _view_enum(ui_context.get('panel'), SAFETY_PANEL_ENUM)
+    if panel:
+        view['panel'] = panel
+    tab = _view_enum(ui_context.get('results_tab'), RESULTS_TAB_ENUM) if panel in ('results', 'Results') else None
+    if tab:
+        view['results_tab'] = tab
+    source = ui_context.get('results_source')
+    if tab and isinstance(source, dict):
+        for key in ('run_id', 'baseline_run_id'):
+            value = _view_pattern(source.get(key), _VIEW_ID)
+            if value:
+                view[key] = value
+        section = _view_pattern(source.get('section'), _VIEW_SECTION)
+        if section:
+            view['section'] = section
+        kind = _view_enum(source.get('source'), ('lopf', 'ac_pf'))
+        if kind:
+            view['source'] = kind
+        scope = _view_enum(source.get('scope'), ('current', 'historical'))
+        if scope:
+            view['scope'] = scope
+        start, end = _view_index(source.get('window_from')), _view_index(source.get('window_to'))
+        if start is not None and end is not None and start <= end:
+            view['window'] = {'from': start, 'to': end}
+    selected = ui_context.get('selected_component')
+    if isinstance(selected, dict):
+        cls = _view_enum(selected.get('class'), _VIEW_ASSET_CLASSES)
+        name = _view_pattern(selected.get('name'), _VIEW_ASSET_NAME)
+        if cls and name:
+            view['asset'] = {'class': cls, 'name': name}
+    return view
+
+
+def current_view_generation(episode_id: str) -> int | None:
+    """The generation of the thread bound to ``episode_id`` at turn start, or None.
+
+    The loop reads it before ``session_init`` and passes it to
+    ``record_current_view``, so a rebind during the turn makes its view
+    obsolete. Never raises (L2).
+    """
+    if not isinstance(episode_id, str) or not episode_id:
+        return None
+    try:
+        thread_id = find_thread_for_episode(episode_id)
+        if not thread_id:
+            return None
+        with _LOCK:
+            _, thread = _read(thread_id)
+            if thread.get('episode_id') != episode_id:
+                return None
+            return int(thread.get('generation', 1))
+    except (HTTPException, OSError, ValueError, TypeError):
+        return None
+
+
+def record_current_view(episode_id: str, ui_context: Any, *, generation: int | None = None) -> bool:
+    """Store the turn's view in ``refs.current`` of the thread bound to ``episode_id``.
+
+    Called once per admitted turn. It never refuses or delays the turn (L2):
+    no context, no bound thread, another episode or a stale ``generation``
+    writes nothing and returns False. ``refs.discussed`` is never touched and
+    the generation is not bumped. Takes ``_LOCK`` only; the caller must hold
+    no session or provider lock (L3).
+    """
+    view = current_view_from_ui_context(ui_context)
+    if view is None or not isinstance(episode_id, str) or not episode_id:
+        return False
+    try:
+        thread_id = find_thread_for_episode(episode_id)
+        if not thread_id:
+            return False
+        with _LOCK:
+            path, thread = _read(thread_id)
+            _require_authoritative_replica(thread)
+            if thread.get('episode_id') != episode_id:
+                return False
+            if generation is not None and (
+                isinstance(generation, bool) or not isinstance(generation, int)
+                or generation != int(thread.get('generation', 1))
+            ):
+                return False
+            view['at'] = datetime.now(timezone.utc).isoformat()
+            refs = thread.setdefault('refs', {'current': {}, 'discussed': {}})
+            refs['current'] = view
+            thread['checkpoint_rev'] = int(thread.get('checkpoint_rev', 0)) + 1
+            thread['updated_at'] = view['at']
+            _save(path, thread)
+            return True
+    except (HTTPException, OSError, ValueError):
+        return False
 
 
 def settle_budget(

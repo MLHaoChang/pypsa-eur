@@ -3,7 +3,7 @@
 
 # GC-16 DGS: line conductance written; shunt active power listed, never guessed
 
-Status: ready-for-agent
+Status: done (#1602)
 Type: bug
 Parent: `05-powerfactory-dgs.md` (#1580 review follow-up)
 Gated: **yes** (GK A2, gridspine)

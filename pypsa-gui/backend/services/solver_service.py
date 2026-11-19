@@ -1630,7 +1630,8 @@ def run_simulation(
                         pass
             elif config.mode == "pf":
                 phase("Solving non-linear AC power flow (Newton–Raphson)...")
-                network.pf()
+                from services.solver.pf_seed import run_pf as _run_pf
+                _run_pf(network, phase)
                 status, condition = "ok", "ok"
             solve_secs = time.time() - t_solve
             phase(

@@ -1062,3 +1062,31 @@ def test_citations_that_are_not_a_list_are_invalid_citations(bc):
     assert d["error_kind"] == "price_not_from_user" and d["status"] == 422
     assert d["reason"] == "invalid_citations"
     assert chat_tools.get_business_case(detail="inputs")["business_case"] is None
+
+
+def test_bc15_the_summary_carries_the_lease_up_only_when_one_applied(bc, monkeypatch):
+    """HOLISTIC-1: an answer about the result knows the volumes were ramped."""
+    import routers.results as R
+    from services.finance.business_case import VOLUME_FACTOR_NOTE
+
+    monkeypatch.setattr(
+        R,
+        "_bc_staleness_now",
+        lambda stored, ic_key=None: {"present": True, "stale": False, "changed": []},
+    )
+    R._state["business_case_report"] = _report()
+    out = chat_tools.get_business_case()
+    assert not {"volume_factor", "volume_factor_note", "volume_factor_ignored"} & set(
+        out
+    )
+    rep = _report()
+    rep["pnl"].update(
+        volume_factor={"2027": 0.5},
+        volume_factor_note=VOLUME_FACTOR_NOTE,
+        volume_factor_ignored=[2040],
+    )
+    R._state["business_case_report"] = rep
+    out = chat_tools.get_business_case()
+    assert out["volume_factor"] == {"2027": 0.5}
+    assert out["volume_factor_note"] == VOLUME_FACTOR_NOTE
+    assert out["volume_factor_ignored"] == [2040]

@@ -2,6 +2,7 @@ import type { FlowTarget, FlowSectionId, SitePart } from '../api/flow'
 import { useUIStore, type CanvasView, type SitePartSelection, type SlidePanel } from '../store/uiStore'
 import { onManualNavigation } from '../utils/navigationEpoch'
 import { fieldWords } from '../utils/flowItems'
+import { RECIPE_FIELD } from '../pages/hubDesign/holdWords'
 import { PANEL_SECTION, SECTION_OPEN, sectionMeta } from './flowSections'
 import { useScorecardOpen } from '../components/gridReadiness/GridReadinessScorecard'
 
@@ -111,6 +112,9 @@ export function returnToOrigin(): void {
   const o = useUIStore.getState().flowReturn
   if (!o) return
   const ui = useUIStore.getState()
+  // Back from Expert to Guided abandons an Add form the jump opened (Guided's "Add a process unit
+  // in Expert"); left set, it would take over the next Guided drawer.
+  if (ui.uiMode === 'expert' && o.mode === 'guided') ui.setCreationItem(null)
   ui.setUiMode(o.mode)
   ui.setActiveSection(o.section)
   if (o.mode === 'guided') {
@@ -370,7 +374,8 @@ export function openSiteBoundaryDraw(at: { lat: number; lng: number } | null): v
  *  (focused, highlighted), not the read-only card at its top. The card takes the
  *  request once it is the selected Link's detail view. */
 function requestLinkFieldEdit(target: FlowTarget): void {
-  if (target.component !== 'Link' || !target.entity || !target.field) return
+  // The recipe card (gap 03) sits above the Link's fields; it names no field to edit.
+  if (target.component !== 'Link' || !target.entity || !target.field || target.field === RECIPE_FIELD) return
   useUIStore.getState().requestPropertiesEdit({ type: 'Link', name: target.entity, field: target.field })
 }
 

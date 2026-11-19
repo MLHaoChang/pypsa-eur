@@ -447,7 +447,11 @@ def run_ac_pf_stage(
           f"(x_tol={config.ac_pf_x_tol:g})...")
     try:
         try:
-            pf_result = network.pf(
+            from services.solver.pf_seed import run_pf
+
+            pf_result, seeded_by = run_pf(
+                network,
+                phase,
                 snapshots=network.snapshots,
                 x_tol=config.ac_pf_x_tol,
                 use_seed=False,
@@ -532,6 +536,9 @@ def run_ac_pf_stage(
         "ac_pf_convergence_list": converged_list,
         "ac_pf_slack_bus_used": slack_bus,
         "ac_pf_stripped_voll_slacks": stripped,
+        # DGS-SEED-1: transformers whose phase shift made the flow start from
+        # lpf() (`pf(use_seed=True)`); empty when it started flat.
+        "ac_pf_seeded_by": seeded_by,
         "ac_pf_converged_count": n_ok,
         "ac_pf_unknown_count": n_unknown,
         "ac_pf_total_snapshots": n_total,
