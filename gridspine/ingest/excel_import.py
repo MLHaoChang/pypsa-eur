@@ -1238,7 +1238,10 @@ def _check_index(ws, cols: Sequence[int], *, whole: Sequence[int] = ()) -> None:
     for r, row in enumerate(rows, start=2):
         key = tuple(row[c] if c < len(row) else None for c in cols)
         problem = None
-        if any(v is None or _na_text(v) for v in key):
+        if any(
+            v is None or _na_text(v) or (isinstance(v, str) and not v.strip())
+            for v in key
+        ):
             problem = "has no name"
         elif key in seen:
             problem = "repeats an earlier row"

@@ -2519,3 +2519,27 @@ def test_the_raw_sheets_layout_reports_an_unknown_line_type(tmp_path):
         "type: 'nope' is not a standard line type; the asset was not read",
     ) in _um(res)
     assert res.network.lines.empty and res.report.counts["Lines"] == 0
+
+
+@pytest.mark.parametrize("value", [" ", "\t"])
+def test_a_blank_text_snapshot_name_refuses_the_file(tmp_path, value):
+    def edit(wb):
+        ws = wb["snapshots"]
+        col = [c.value for c in ws[1]].index("snapshot") + 1
+        ws.cell(row=3, column=col).value = value
+
+    with pytest.raises(L.ImportFormatError, match="row 3 has no name"):
+        _native_wb(tmp_path, edit)
+
+
+def test_a_blank_text_series_index_drops_the_sheet(tmp_path):
+    def edit(wb):
+        wb["generators-p_max_pu"]["A3"] = " "
+
+    res = _native_wb(tmp_path, edit)
+    assert (
+        "generators-p_max_pu",
+        "its first column is not the time steps of the snapshots sheet; "
+        "the sheet was not read",
+    ) in _um(res)
+    assert res.network.generators_t.p_max_pu.empty
