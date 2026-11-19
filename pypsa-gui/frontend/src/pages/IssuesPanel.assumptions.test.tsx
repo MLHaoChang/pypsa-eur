@@ -2,7 +2,7 @@
 // through the same AssumptionsCard and words, by flow section, and counts them
 // as the sidebar badge does (open, unacknowledged, in-scope sections only).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { simulationApi } from '../api/simulation'
 import { networkApi } from '../api/network'
@@ -10,6 +10,11 @@ import * as flowApi from '../api/flow'
 import { useUIStore } from '../store/uiStore'
 import type { PreflightResult } from '../api/types'
 import IssuesPanel from './IssuesPanel'
+
+/** The card opens collapsed (guided-results 03): open each one to read its rows. */
+const openCards = (box: HTMLElement) => {
+  for (const t of within(box).getAllByTestId('assumptions-toggle')) fireEvent.click(t)
+}
 
 vi.mock('../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulation')>()
@@ -50,7 +55,10 @@ beforeEach(() => {
     currentProject: 'Demo', activeSlidePanel: 'issues', selectedComponent: null, rightPanelOpen: false,
   })
 })
-afterEach(() => { useUIStore.setState({ currentProject: null, activeSlidePanel: null }) })
+afterEach(() => {
+  useUIStore.setState({ currentProject: null, activeSlidePanel: null })
+  localStorage.clear()
+})
 
 type Row = { code: string; message: string; acknowledged?: boolean; severity?: 'warning' | 'error'; source?: string }
 function assumedFlow(rows: Partial<Record<flowApi.FlowSectionId, Row[]>>, outOfScope: flowApi.FlowSectionId[] = []): flowApi.ProjectFlow {
@@ -88,6 +96,7 @@ describe('IssuesPanel — Assumptions (Expert shows what Guided shows)', () => {
     // In flow order; the out-of-scope section and the acknowledged and non-assumed rows are left out.
     expect(Array.from(box.querySelectorAll('[data-testid^="issues-assumptions-"]')).map(n => n.getAttribute('data-testid')))
       .toEqual(['issues-assumptions-assets', 'issues-assumptions-scenarios'])
+    openCards(box)
     const rows = within(box).getAllByTestId('assumption-row').map(r => r.textContent)
     expect(rows.some(t => t?.includes('Outage rate: 2 %/yr'))).toBe(true)
     expect(rows.some(t => t?.includes('Reliability goal (LOLE): 3 h/yr'))).toBe(true)
@@ -110,8 +119,11 @@ describe('IssuesPanel — Assumptions (Expert shows what Guided shows)', () => {
     expect(within(screen.getByTestId('issues-section-project')).getByTestId('issues-flow-item')).toBe(row)
     expect(screen.queryByText('All checks passed')).toBeNull()
     // 1 flow-only row + 1 assumed row = the badge's 2 (open, in scope).
+    const assumed = screen.getByTestId('issues-assumptions')
+    expect(within(assumed).getByTestId('assumptions-toggle').textContent).toContain('1 not yet confirmed')
+    openCards(assumed)
     expect(screen.getAllByTestId('issues-flow-item').length
-      + within(screen.getByTestId('issues-assumptions')).getAllByTestId('assumption-row').length).toBe(2)
+      + within(assumed).getAllByTestId('assumption-row').length).toBe(2)
   })
 
   it('shows no Assumptions section when nothing is assumed', async () => {
