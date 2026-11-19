@@ -941,11 +941,13 @@ export default function LoadFlow() {
       {acPfStatus?.available && (
         <section>
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2">AC Power Flow status</h3>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <KPI label="Snapshots converged" value={acPfText.kpi} />
             <KPI label="Slack bus" value={acPfStatus.slack_bus_used ?? '—'} />
             <KPI label="VOLL slacks stripped"
               value={`${(acPfStatus.stripped_voll_slacks ?? []).length}`} />
+            <KPI label="Seeded by"
+              value={(acPfStatus.seeded_by ?? []).length ? `${acPfStatus.seeded_by!.length} phase-shifting transformer(s)` : 'Flat start'} />
           </div>
           {acPfText.note && (
             <p className="text-[11px] text-muted mt-2">{acPfText.note}</p>
