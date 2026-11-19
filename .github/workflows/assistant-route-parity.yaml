@@ -29,6 +29,12 @@ on:
       - '.github/workflows/assistant-route-parity.yaml'
   workflow_dispatch:
 
+# A new push to a PR cancels that PR's stale run (SCALE-1); master and
+# scheduled runs always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
