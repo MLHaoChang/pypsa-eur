@@ -3,7 +3,7 @@
 
 # 07 — Decisions found in neither mode, and Expert-only decisions Guided never names
 
-Status: ready-for-agent
+Status: done (#1613, #1625, #1631)
 Owner: unassigned: triaged by the coordinator
 Size: M
 Gated: UX

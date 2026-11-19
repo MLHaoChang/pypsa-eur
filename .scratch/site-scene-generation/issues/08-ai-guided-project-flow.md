@@ -3,7 +3,7 @@
 
 # SC-07 — integrated AI guidance and project-flow continuity
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: S6c merged (#1702); S6a open in #1674, S6b in #1701
 Model: Opus
 Type: task
 Dependencies: accepted SC-00 N contracts; develop native adapters with SC-01–SC-03, optional adapters only when their respective engine gates pass
