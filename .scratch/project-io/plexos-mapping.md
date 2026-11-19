@@ -32,7 +32,7 @@ Plain names in the report follow RAW-NAMES-1: "grid nodes", "lines", "generators
 | PLEXOS | Our network / sidecar | Notes |
 |---|---|---|
 | Node | `Bus` | `Voltage` → `v_nom`. There is no default voltage. A node without `Voltage` is listed in `report.assumed`, one entry per bus, as "voltage unknown". A line with reactance that touches such a bus is not converted: it goes to `report.unmapped` ("needs a node voltage to convert reactance"). Links do not need a voltage. Latitude/Longitude attributes → `x`/`y`. `Units` = 0 → the bus is kept but reported as out of service. |
-| Node `Load` | `Load` on that bus | Static → `p_set`. Data-file-backed → `loads_t.p_set` over the snapshots. A file that is missing → warning, with the load's static value as fallback in `assumed`. |
+| Node `Load` | `Load` on that bus | Static → `p_set`. Data-file-backed → `loads_t.p_set` over the snapshots. A file that is missing → its rows unmapped plus one warning per file, never a static fallback (GK A ruling A, slice 2b). |
 | Region, Zone | sidecar `areas` (name, kind, member buses) | Region `VoLL` → `areas[].voll` and the project's load-shedding cost, if the project has one; otherwise sidecar only. |
 | Line with `Reactance` | `Line` | `Max Flow` → `s_nom`, `Resistance`/`Reactance` (pu on 100 MVA) → ohms on `v_nom`. |
 | Line without reactance (transport model) | `Link` | `Max Flow` → `p_nom`. `Min Flow` → `p_min_pu = Min Flow / Max Flow`, which is usually −1. `Wheeling Charge` → `marginal_cost`. |
@@ -67,7 +67,7 @@ Every source row lands in exactly one place: the network, a sidecar, `report.unm
 - **Scenarios.** A data row tagged with a Scenario applies only when that scenario is on. The user picks a **PLEXOS Model** in the import options (default: the only one, or the first by name, recorded in `assumed`). The scenarios that Model includes (Model→Scenarios memberships) are switched on. Untagged rows are the base. When an on scenario and the base both set a property, the scenario wins. When two on scenarios conflict, PLEXOS uses the `Scenario` priority; we use it too, and warn on a tie. Rows of scenarios that are off go to unmapped ("scenario X not selected"), grouped per scenario so the preview stays short. Open question S1 (below) is whether to also keep them as alternative variants.
 - **Bands.** Band 1 only; see above.
 - **Dates.** Rows with `Date From`/`Date To` become step series over the snapshots. A static property whose dated rows all fall outside the horizon → the undated row, plus a warning.
-- **Data files and Variables.** Input is a `.zip` (XML plus the CSV folder) or the XML plus loose CSVs. PLEXOS stores Windows-relative paths (`csv_files\…`); we match them case-insensitively against the given files. A referenced file that is missing → warning; the property falls back to its static `t_data` value, recorded in `assumed`.
+- **Data files and Variables.** Input is a `.zip` (XML plus the CSV folder) or the XML plus loose CSVs. PLEXOS stores Windows-relative paths (`csv_files\…`); we match them case-insensitively against the given files. A referenced file that is missing → its rows unmapped plus one warning per file; the static `t_data` value is a placeholder and is never used (GK A ruling A, slice 2b).
 
 ## Example models and fixtures
 
@@ -91,7 +91,7 @@ Generator: capacity, unit count, minimum stable level, rating profile, heat rate
 ## Owner scope (PLEXOS-SCOPE-1, 2026-11-17)
 
 - Scenarios: the user picks one PLEXOS Model in the preview. Rows of other scenarios are listed as "not selected".
-- Inputs: an XML file, or a .zip of the XML plus its CSV data files. A missing CSV gives a warning and the static value as fallback. There is no xlsx reader in this package.
+- Inputs: an XML file, or a .zip of the XML plus its CSV data files. A missing CSV gives a warning and the static value as fallback (superseded in slice 2b by GK A ruling A: unmapped, no fallback, because the static value is a placeholder). There is no xlsx reader in this package.
 - Generic constraints, reserves, energy limits and market objects are reported as unmapped with a reason, plus follow-up issues. Slice 4 is dropped.
 
 ## Comments
@@ -131,3 +131,14 @@ Generator: capacity, unit count, minimum stable level, rating profile, heat rate
   - Scenario rows are listed per object and scenario (full lists, per the contract), not as counts per scenario. A row tagged with an on and an off scenario counts as on.
   - Horizon: `Chrono Date From` (else `Date From`) × `Chrono Step Count` days × `Periods per Day` (default 24); weightings equal the step in hours. A horizon without a length gives one year, in `assumed`. Other horizon settings are unmapped.
   - Scenario-tagged rows are all unmapped in 2a: "not selected", or "is on in the chosen Model; applied in a later slice". Data-file, dated, variable and band > 1 rows likewise.
+- 2026-11-17, GK A (30), plan GO for slice 2b with T1–T7 (the T8/T9 wording was not recorded; the GO is held as T1–T7 + A/B/C, GK A (31) #1713); answers A (1), B (1), C (2). Where each is met:
+  - Deviation (ruling A): a referenced data file that is not supplied gives each of its rows unmapped "data file '<path>' not supplied" and one warning per file. There is never a static fallback, because the `t_data` value on a data-file row is a placeholder in real files (PLEXOS-World: Load 0, Rating Factor 100). This replaces "A file that is missing → warning, with the load's static value as fallback in `assumed`" in the mapping table and under "Data files and Variables".
+  - B: a file step finer than the snapshots → unmapped, never resampled. C: `NAME,M1..M12` → unmapped "monthly layout not read in this slice".
+  - T1: day/month order is decided per file (`plexos_csv._order`): a known Data File `Locale`, else a first field above 12 means day first and a second field above 12 month first; neither or both → the file is not read. A bare date is midnight. Snapshots without a single step are refused.
+  - T2: `marginal_cost` series = heat rate (GJ/MWh, after 2a's BTU/kWh conversion) × fuel price series ($/GJ) + VO&M ($/MWh), with an assumed row naming the currency convention. Tested at two timestamps.
+  - T3: Rating Factor series cells in [0, 100] are ÷100; one cell outside → the row is unmapped naming it; never clipped.
+  - T4: storage Units from the file default (2a rule); Initial Volume through the same GWh/MWh factor and refused above Max Volume; `cyclic_state_of_charge` = False with an assumed row; an inflow series uses the same alignment rules.
+  - T5: per-CSV caps `MAX_CSV_BYTES` (256 MiB, loose files and zip members; over it → unmapped + warning) and `MAX_CSV_ROWS`; only the needed columns are parsed (`usecols`); a header naming no needed object is not read further.
+  - T6/T7: ledger tests on both fixtures with CSVs given; `plexos_csv` loads with `pypsa` blocked.
+  - Data-file rows of properties not read as series (`Max Capacity`, `Max Capacity Factor Month`, …) are unmapped and their placeholder value is never used (`_Converter.take`).
+- Slice 2b review (mp-code-review), kept on purpose: the `Month,Day,Period` and `Pattern` layouts in the mapping table are not read in 2b (listed as "layout not read") and move to slice 3 with the monthly layout. Two loose CSVs with one name, or a CSV both in the zip and given loose, still refuse the import: they are input mistakes the user fixes by re-uploading, unlike a missing file. The storage's `Hydro Model` is checked through `t_config` as the table says (≠ Energy → unit unmapped), on top of the volume unit.
