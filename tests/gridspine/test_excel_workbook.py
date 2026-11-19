@@ -2164,7 +2164,12 @@ def test_the_network_sheet_sets_only_the_settings_an_export_writes(tmp_path):
 
 @pytest.mark.parametrize(
     ("header", "value"),
-    [("pypsa_version", "not.a.version!"), ("_multi_invest", 7), ("name", "NA")],
+    [
+        ("pypsa_version", "not.a.version!"),
+        ("_multi_invest", 7),
+        ("name", "NA"),
+        ("srid", 0),
+    ],
 )
 def test_a_network_setting_the_model_cannot_take_is_reported_and_not_read(
     tmp_path, header, value
@@ -2185,10 +2190,11 @@ def test_sheets_pypsa_would_load_unchecked_are_removed_and_reported(tmp_path):
         ws.append(["name", "geometry"])
         ws.append(["s1", "POINT (0 0)"])
         wb.create_sheet("sub_networks").append(["name"])  # empty: removed silently
+        wb.copy_worksheet(wb["crs"]).title = "crs_copy"  # a crs, but not named so
 
     res = _native_wb(tmp_path, edit)
     n, um = res.network, _um(res)
-    for sheet in ("line_types", "meta", "shapes"):
+    for sheet in ("line_types", "meta", "shapes", "crs_copy"):
         assert (sheet, _NOT_READ_SHEET) in um
     assert "sub_networks" not in {src for src, _ in um}
     assert "zzz" not in n.line_types.columns and "evil" not in n.line_types.index
@@ -2209,6 +2215,37 @@ def test_a_tampered_crs_sheet_is_removed_and_reported(tmp_path):
 def test_pypsa_s_own_crs_sheet_is_read_without_a_report(tmp_path):
     res = read_excel(_native(_two_gens(), tmp_path))
     assert _um(res) == []
+
+
+def _pad_crs(ws, length):
+    ws["B2"] = ws["B2"].value.ljust(length)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [lambda ws: ws.delete_rows(2, 10), lambda ws: _pad_crs(ws, 20_000)],
+    ids=["empty", "longest"],
+)
+def test_a_crs_sheet_pypsa_reads_is_read_without_a_report(tmp_path, edit):
+    res = _native_wb(tmp_path, lambda wb: edit(wb["crs"]))
+    assert _um(res) == []
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda ws: ws.cell(row=2, column=1, value="evil"),
+        lambda ws: ws.append(["_crs", ws["B2"].value]),
+        lambda ws: ws.delete_cols(2),
+        lambda ws: ws.cell(row=2, column=2, value=4326),
+        lambda ws: _pad_crs(ws, 20_001),
+    ],
+    ids=["key", "two-rows", "no-value", "number", "too-long"],
+)
+def test_a_crs_sheet_pypsa_does_not_write_is_removed_and_reported(tmp_path, edit):
+    res = _native_wb(tmp_path, lambda wb: edit(wb["crs"]))
+    assert ("crs", _NOT_READ_SHEET) in _um(res)
+    assert res.network.crs.to_epsg() == 4326
 
 
 @pytest.mark.parametrize(
@@ -2254,6 +2291,19 @@ def test_a_repeated_snapshot_refuses_the_file(tmp_path):
         _native_wb(tmp_path, edit)
 
 
+def test_a_snapshots_sheet_with_no_level_header_is_keyed_by_its_first_column(
+    tmp_path,
+):
+    def edit(wb):
+        ws = wb["snapshots"]
+        col = [c.value for c in ws[1]].index("snapshot") + 1
+        ws.cell(row=1, column=col, value="x")
+
+    res = _native_wb(tmp_path, edit)
+    assert _um(res) == []
+    assert len(res.network.snapshots) == 2
+
+
 def _multi_period() -> pypsa.Network:
     n = pypsa.Network()
     n.set_snapshots(
@@ -2290,6 +2340,12 @@ def test_an_investment_period_weighting_is_checked_as_written(tmp_path):
     assert w.loc[2040].tolist() == [1.0, 1.0] and "evil" not in w.columns
 
 
+def test_pypsa_s_own_investment_periods_are_read_without_a_report(tmp_path):
+    res = read_excel(_native(_multi_period(), tmp_path))
+    assert _um(res) == []
+    assert res.network.investment_period_weightings.shape == (2, 2)
+
+
 @pytest.mark.parametrize(
     ("value", "match"), [("2040x", "row 3 is not a year"), (2030, "row 3 repeats")]
 )
@@ -2304,6 +2360,7 @@ def test_a_bad_investment_period_refuses_the_file(tmp_path, value, match):
 def test_a_series_sheet_off_the_snapshots_is_not_read(tmp_path):
     def edit(wb):
         wb["generators-p_max_pu"]["A3"] = 99
+        wb["generators-p_max_pu"]["B2"] = "x"  # not checked: the sheet is not read
 
     res = _native_wb(tmp_path, edit)
     assert (
@@ -2313,6 +2370,28 @@ def test_a_series_sheet_off_the_snapshots_is_not_read(tmp_path):
     ) in _um(res)
     assert res.network.generators_t.p_max_pu.empty
     assert not any(src.startswith("generators-p_max_pu ›") for src, _ in _um(res))
+
+
+def test_an_empty_column_without_a_header_is_dropped_without_a_report(tmp_path):
+    def edit(wb):
+        ws = wb["network"]
+        col = ws.max_column + 2  # the column before it stays empty
+        ws.cell(row=1, column=col, value="evil")
+        ws.cell(row=2, column=col, value=1)
+
+    res = _native_wb(tmp_path, edit)
+    assert _um(res) == [("network › column evil", _NOT_SETTING)]
+
+
+def test_a_column_that_is_not_read_is_not_checked(tmp_path):
+    def edit(wb):
+        ws = wb["generators"]
+        ws.cell(row=1, column=ws.max_column + 1, value="evil")
+        ws.cell(row=2, column=ws.max_column, value="NA")
+
+    res = _native_wb(tmp_path, edit)
+    assert _um(res) == [("generators › column evil", _NOT_INPUT)]
+    assert list(res.network.generators.index) == ["G1", "G2"]
 
 
 def test_text_pandas_reads_as_empty_is_reported_not_turned_into_the_default(tmp_path):
@@ -2364,6 +2443,20 @@ def test_assets_on_a_removed_bus_are_reported_and_removed(tmp_path):
     assert list(net.loads.index) == ["D2"] and list(net.buses.index) == ["B2"]
     assert net.generators_t.p_max_pu.empty
     assert res.report.counts.get("Generators", 0) == 0
+
+
+def test_an_asset_on_two_removed_buses_is_reported_for_the_first(tmp_path):
+    n = _two_gens()
+    n.add("Line", "l1", bus0="B1", bus1="B2", x=0.1, s_nom=50.0)
+    path = _native(n, tmp_path)
+    wb = openpyxl.load_workbook(path)
+    for r in (2, 3):
+        wb["buses"].cell(row=r, column=2, value="nan")  # B1's and B2's v_nom
+    wb.save(path)
+    um = [item for item in _um(read_excel(path)) if item[0] == "lines › l1"]
+    assert um == [
+        ("lines › l1", "bus0: 'B1' was not read, so this asset was not read either")
+    ]
 
 
 def test_a_removed_carrier_takes_its_buses_and_their_assets(tmp_path):
