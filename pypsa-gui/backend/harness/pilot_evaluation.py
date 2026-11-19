@@ -102,9 +102,9 @@ LCOE = {"lcoe_nominal": (10, "USD/MWh"), "lcoe_real": (8, "USD/MWh")}
 # per unit weight, 122.5 MWh.
 COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screening_lolp_max": (0.625, "probability")}
 # The data-centre template's saved scorecard as the route reads it (22 rows), with the BESS at the
-# size a solve chose (10 MW, set by the pilot fixture). Two rows a declared rule checks: SCR 250 MVA
-# over 54 MVA derived (PV 4 + UPS battery 40 + BESS 10) = 4.63 >= 3.0 (pass) and the reactive range
-# 4.60 < 19.2 Mvar (warn). The other 20 are unknown (ramp, voltage change, infrequent voltage change,
+# size a solve leaves (p_nom_opt 10 MW, set by the pilot fixture). Two rows a declared rule checks:
+# "scr" 250 / (4 + 40 + 10) MVA (PV, UPS battery, BESS; derived) = 4.63 >= 3.0 → pass, and
+# "reactive_range" 4.60 < 19.2 Mvar → warn. The other 20 are unknown (ramp, voltage change, infrequent voltage change,
 # motor start with no process unit, voltage unbalance, the P–V and Q–V voltage stability margins
 # before any campus run), not scalar (the peak, oscillation, LOLE, harmonic distortion, flicker,
 # current distortion) or categorical (frequency support, four dynamic rows, grid former, ride-through).

@@ -26,9 +26,11 @@ def evaluation_project(baseline, request):
         import eh_templates as T
 
         site = T.BUILDERS["eh_datacenter"]()
-        # The size a solve chose for the extendable BESS: the SCR gate derives the
-        # inverter capacity from the converters and withholds a Pass while one is
-        # unsized (DC walk 05), so the scorecard's one checked row needs a size.
+        # Stands for a solved network: the size a solve leaves on the extendable
+        # BESS (p_nom_opt only; no stated eh_ibr_mva, no architecture). The SCR gate
+        # derives the inverter capacity from the converters and withholds a Pass
+        # while one is unsized (DC walk 05; the fresh, unsized template is pinned in
+        # test_grid_readiness_converters).
         site.storage_units.at["bess_new", "p_nom_opt"] = 10.0
         site.export_to_netcdf(str(baseline[2] / "network.nc"))
         T.write_sidecars(baseline[2], "eh_datacenter")
