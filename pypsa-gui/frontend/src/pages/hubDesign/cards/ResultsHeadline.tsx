@@ -127,9 +127,14 @@ function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null 
   )
 }
 
+/** The pill when the shortfall is under the goal but a feeder bound holds the verdict back. */
+export const FEEDER_HELD_PILL = 'Under goal · verdict not decided'
+
 /** Shortfall against the goal: one bar, the goal as a marker, the study's interval when it gave one. */
-export function ReliabilityBullet({ lole, target, ci: range, stale, freshnessUnknown = false }: {
+export function ReliabilityBullet({ lole, target, ci: range, stale, freshnessUnknown = false, feederBound = false }: {
   lole: number; target: number | null; ci: [number, number] | null; stale: boolean; freshnessUnknown?: boolean
+  /** The verdict is held back by a feeder bound (GK A F6'): under the goal is not a pass. */
+  feederBound?: boolean
 }) {
   const top = Math.max(lole, target ?? 0, range?.[1] ?? 0) * 1.2 || 1
   const x = (v: number) => `${Math.min(100, (v / top) * 100)}%`
@@ -144,13 +149,15 @@ export function ReliabilityBullet({ lole, target, ci: range, stale, freshnessUnk
     ? `Expected shortfall ${words(lole)}, goal ${goalWords(target)}`
     : `Expected shortfall ${words(lole)}, no goal set`
   // The band is not the only cue: the result is also said in words (UX 23, 7).
-  const against = target == null ? null : pass ? 'Within goal' : 'Above goal'
+  // Under the goal but held back by a feeder bound: neutral, never the pass green (UX 2, #1729).
+  const held = pass && feederBound
+  const against = target == null ? null : held ? FEEDER_HELD_PILL : pass ? 'Within goal' : 'Above goal'
   return (
     <ChartSourceProvider value={{ line: `Reliability study · Monte Carlo${freshnessUnknown ? " · can't tell if current" : ''}`, stale }}>
       <ChartFrame testId="hub-results-reliability-chart" title={title} bodyClassName="px-4 py-3"
         right={against && (
           <span data-testid="hub-results-reliability-against"
-            className={`text-[11.5px] font-semibold ${pass ? 'text-success' : 'text-danger'}`}>{against}</span>
+            className={`text-[11.5px] font-semibold ${held ? 'text-muted' : pass ? 'text-success' : 'text-danger'}`}>{against}</span>
         )}>
         <div role="img"
           aria-label={[title, against, ci && `likely between ${words(ci[0])} and ${words(ci[1])}`, 'lower is better']
@@ -231,7 +238,8 @@ export function ResultsHeadline({ reliability, cost, ci, freshnessUnknown = fals
       {note && <p role="note" data-testid="hub-results-mixed" className="text-[11.5px] text-muted">{note}</p>}
       {reliability.lole != null && (
         <ReliabilityBullet lole={reliability.lole} target={reliability.target} ci={ci}
-          stale={reliability.stale === true} freshnessUnknown={freshnessUnknown} />
+          stale={reliability.stale === true} freshnessUnknown={freshnessUnknown}
+          feederBound={reliability.feederBound === true} />
       )}
     </section>
   )

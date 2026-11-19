@@ -100,6 +100,7 @@ export function ResultsCard() {
     horizonYears: horizonYearsOf(report),
     stale,
     verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
+    feederBound: summary.feeder_bound != null,
   } as const
 
   if (!studyHasResults(study)) {
