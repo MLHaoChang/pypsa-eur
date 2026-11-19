@@ -223,6 +223,44 @@ def test_a_no_data_feeder_beside_a_usable_one_bounds_by_the_usable_rate():
     assert pk["bound_h_per_year"] == pytest.approx(4380.0, rel=1e-9)
 
 
+def _mixed_paths(n):
+    """GK R2': island -o1-> crit beside crit_feeder, and island -lk-> X -u2->
+    Y -o2-> crit; o1, lk, o2 without data, u2 at q = 0.01, all two-way. lk
+    matters only when crit_feeder, o1 and u2 are out together."""
+    n.add("Bus", "X", carrier="AC")
+    n.add("Bus", "Y", carrier="AC")
+    for name, a, b in (
+        ("o1", "island", "crit"),
+        ("lk", "island", "X"),
+        ("u2", "X", "Y"),
+        ("o2", "Y", "crit"),
+    ):
+        n.add("Link", name, bus0=a, bus1=b, p_nom=20.0, p_min_pu=-1.0, carrier="AC")
+        n.links.at[name, "eh_role"] = ""
+        n.links.at[name, "outage_rate_value"] = float("nan")
+        n.links.at[name, "mttr_hours"] = float("nan")
+    n.links.at["u2", "outage_rate_value"] = 0.01
+    n.links.at["u2", "mttr_hours"] = 8.0
+    return n
+
+
+def test_a_no_data_link_on_any_supply_path_is_taken_as_out():
+    # GK R2': with q = 1 for o1, lk and o2, crit is cut off whenever
+    # crit_feeder is out: 0.01 × 8,760 = 87.6 h/yr > 3 h/yr. The four fixed
+    # cut sets left lk and o2 uncut (bound 0.876 h/yr, a pass).
+    report = _run(_mixed_paths(_hub_with_one_critical_feeder()), _pack())
+    sec = report.sections["certification"]
+    pay = sec.payload
+    assert pay["verdict"] == "inconclusive", sec.note
+    assert pay["confident"] is False
+    [pk] = pay["feeder_bound"]["pockets"]
+    assert pk["bound_h_per_year"] == pytest.approx(87.6, rel=1e-9)
+    assert pk["no_data"] == ["lk", "o1", "o2"]
+    assert pay["critical_pocket_bound_h_per_year"] == pytest.approx(87.6)
+    assert {"lk", "o2"} <= {f["name"] for f in pay["critical_feeders"]}
+    assert "lk" in sec.note and "o2" in sec.note
+
+
 def test_without_a_goal_confidence_is_not_stated():
     # GK R5: no target, no verdict: ``confident`` stays None, not False.
     report = _run(_hub_with_one_critical_feeder(), _pack(target_lole_h=None))

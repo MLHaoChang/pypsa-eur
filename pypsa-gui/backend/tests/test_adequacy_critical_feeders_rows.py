@@ -200,6 +200,42 @@ def test_a_dead_end_no_data_link_at_the_pocket_does_not_chain_it():
     ]
 
 
+def test_a_no_data_link_behind_a_usable_one_on_a_supply_path_is_named():
+    # GK R2': lk (island -> X) is on the path island-X-Y-crit; X and Y have
+    # no supply once lk is taken as out, so o2 feeds nothing: u = 0.01 × 1 × 1.
+    from tests.test_energy_hub_critical_feeder import _mixed_paths
+
+    n = _mixed_paths(_hub_with_one_critical_feeder())
+    rows = critical_feeder_rows(
+        n, hub_buses=["island", "crit", "X", "Y"], import_links=["import_poc"]
+    )
+    assert [(r["name"], r["model"]) for r in rows] == [
+        ("crit_feeder", UNSAMPLED),
+        ("lk", NO_OUTAGE_DATA),
+        ("o1", NO_OUTAGE_DATA),
+        ("o2", NO_OUTAGE_DATA),
+    ]
+    for r in rows:
+        assert r["pocket_buses"] == ["crit"] and r["chained"] is False
+        assert r["upper_bound"] is True
+        assert r["no_data_feeders"] == ["lk", "o1", "o2"]
+        assert r["pocket_unavailability"] == pytest.approx(0.01)
+
+
+def test_a_dead_end_no_data_link_off_a_supplied_bus_is_not_cut():
+    # A two-way no-data spur from the island to a bus with no supply and no
+    # critical bus beyond it lies on no supply-to-critical path.
+    n = _hub_with_one_critical_feeder()
+    n.add("Bus", "aux", carrier="AC")
+    n.add("Link", "spur", bus0="island", bus1="aux", p_nom=5.0, p_min_pu=-1.0)
+    n.links.at["spur", "outage_rate_value"] = float("nan")
+    n.links.at["spur", "mttr_hours"] = float("nan")
+    rows = critical_feeder_rows(
+        n, hub_buses=["island", "crit", "aux"], import_links=["import_poc"]
+    )
+    assert [(r["name"], r["model"]) for r in rows] == [("crit_feeder", COMPOSED)]
+
+
 def test_a_no_data_link_inside_a_pocket_is_cut_too():
     # island -> crit (usable) -> crit_b (no data): crit_b is lost whenever the
     # no-data Link is out, so it is not merged into crit's composed pocket.

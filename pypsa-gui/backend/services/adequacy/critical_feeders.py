@@ -130,6 +130,53 @@ def _delivers_into(n, lk: str, side_bus: str) -> bool:
     return p_min < 0 and _cap(ldf, lk, "p_nom") > 0
 
 
+def _on_supply_paths(
+    n,
+    buses: list[str],
+    skip: set[str],
+    no_data: list[str],
+    supplied: set[str],
+    crit: set[str],
+) -> dict[str, set[str]]:
+    """For each no-data Link, the critical buses it lies on a simple path to
+    from a supplied bus (GK R2'). Exact: subdivide the Link with a node z,
+    join a source s* to every supplied bus, the critical bus c to a sink c*,
+    and both to t. The Link is on a simple supplied-to-c path iff z has two
+    node-disjoint paths to t (Menger): t's only neighbours are s* and c*, so
+    one path ends through each, and the paths share no bus."""
+    import networkx as nx
+
+    from services.adequacy.eh_stages import _branch_edges
+
+    inside = set(buses)
+    nd = set(no_data)
+    g = nx.Graph()
+    g.add_nodes_from(inside)
+    for a, b in _branch_edges(n, skip | nd):
+        if a in inside and b in inside and a != b:
+            g.add_edge(a, b)
+    ldf = n.links
+    for lk in no_data:
+        a, b = str(ldf.at[lk, "bus0"]), str(ldf.at[lk, "bus1"])
+        g.add_edge(("z", lk), a)
+        g.add_edge(("z", lk), b)
+    src, sink, t = ("s*",), ("c*",), ("t",)
+    g.add_edges_from((src, s) for s in supplied)
+    g.add_edges_from([(src, t), (sink, t)])
+    out: dict[str, set[str]] = {lk: set() for lk in no_data}
+    for c in sorted(crit):
+        g.add_edge(sink, c)
+        for lk in no_data:
+            z = ("z", lk)
+            if (
+                nx.algorithms.connectivity.local_node_connectivity(g, z, t, cutoff=2)
+                >= 2
+            ):
+                out[lk].add(c)
+        g.remove_edge(sink, c)
+    return out
+
+
 def critical_feeder_rows(
     n, *, hub_buses: list[str], import_links: list[str]
 ) -> list[dict]:
@@ -183,24 +230,18 @@ def critical_feeder_rows(
             groups.setdefault(i, set()).add(b)
         return c, groups
 
-    def fed_crit(cut: set[str]) -> set[str]:
-        c, g = comps(cut)
-        fed_ids = {i for i, grp in g.items() if grp & supplied}
-        return {b for b in crit if c[b] in fed_ids}
-
-    # GK R2: a Link without usable data is taken as failing (q = 1), so it is
-    # cut like a usable one wherever its outage can cut a critical bus off:
-    # alone, beside the usable feeders' outages, or beside the other no-data
-    # Links' (parallel unread Links). One that never does (a dead end) is not.
+    # GK R2/R2': a Link without usable data is taken as out (q = 1), so it is
+    # cut wherever it lies on a simple path from a supplied bus to a critical
+    # one, whatever else is out (``_on_supply_paths``). One on no such path
+    # (a dead end) is not cut.
     no_data = [lk for lk in internal if lk not in usable]
-    relevant: set[str] = set()
-    for lk in no_data:
-        others = set(no_data) - {lk}
-        for base in (set(), set(usable), others, set(usable) | others):
-            if fed_crit(base) - fed_crit(base | {lk}):
-                relevant.add(lk)
-                break
+    on_path = _on_supply_paths(n, buses, skip, no_data, supplied & set(buses), crit)
+    relevant = {lk for lk, hit in on_path.items() if hit}
     cut = set(usable) | relevant
+    # The hub with every relevant no-data Link out: a bus cut off from all
+    # supply there is never supplied, so a feeder from it carries nothing.
+    live, live_groups = comps(relevant)
+    live_fed = {i for i, g in live_groups.items() if g & supplied}
 
     rows: list[dict] = []
     comp, groups = comps(cut)
@@ -224,6 +265,20 @@ def critical_feeder_rows(
         ]
         if not feeders:
             continue
+        # A feeder whose far side is never supplied (q = 1 upstream) is out
+        # for good: it adds a factor 1, not a chain (GK R2').
+        dead = {
+            lk
+            for lk in feeders
+            if live[
+                next(
+                    b
+                    for b in (str(ldf.at[lk, "bus0"]), str(ldf.at[lk, "bus1"]))
+                    if b not in g
+                )
+            ]
+            not in live_fed
+        }
         far = {
             comp[
                 next(
@@ -233,10 +288,13 @@ def critical_feeder_rows(
                 )
             ]
             for lk in feeders
+            if lk not in dead
         }
         chained = not far <= fed
         own_units = i in fed
-        unread = [lk for lk in feeders if lk not in usable]
+        # Every unread Link on a supply path to this pocket's critical buses,
+        # its own feeders or further up (GK R2').
+        unread = sorted(lk for lk in relevant if on_path[lk] & g)
         if chained:
             model, reason = (
                 UNSAMPLED,
@@ -264,8 +322,15 @@ def critical_feeder_rows(
             )
         else:
             model, reason = COMPOSED, None
-        u = float(np.prod([usable[lk][0] if lk in usable else 1.0 for lk in feeders]))
-        for lk in feeders:
+        u = float(
+            np.prod(
+                [
+                    usable[lk][0] if lk in usable and lk not in dead else 1.0
+                    for lk in feeders
+                ]
+            )
+        )
+        for lk in sorted(set(feeders) | set(unread)):
             read = lk in usable
             rows.append(
                 {
