@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { GRID_EXTENSION_QUESTION_ID, GRID_EXTENSION_STUDY_NAME } from '../../api/decisionStudies'
 import type { DecisionStudy, Findings, TornadoRow } from '../../api/decisionStudies'
 import { findings, ledger, library, previewUpload, run, study } from './__fixtures__/payloads'
 import { HELP, REOPEN_LABELS, TESTED_RANGE_LABELS } from '../../utils/decisionVocabulary'
@@ -136,6 +137,28 @@ describe('F2: the projects home lists the last study’s project’s studies', (
     expect(useDecisionStore.getState().active).toEqual({ project: 'site-base', studyId: other.study_id })
     expect(useUIStore.getState().activeSlidePanel).toBe('decision')
     expect(navigate).toHaveBeenCalledWith('/app')
+  })
+
+  it('leaves out the grid-extension card’s own record, which is no study the user started', async () => {
+    localStorage.setItem(STUDY_REF_KEY, JSON.stringify(REF))
+    useDecisionStore.setState({ active: REF })
+    const gridExt: DecisionStudy = { ...study, study_id: 'c'.repeat(32), name: GRID_EXTENSION_STUDY_NAME,
+      question_id: GRID_EXTENSION_QUESTION_ID }
+    api.list.mockResolvedValue([study, gridExt])
+    renderEntry()
+    const entry = await screen.findByTestId('decision-studies-entry')
+    expect(within(entry).getAllByRole('listitem')).toHaveLength(1)
+    expect(entry.textContent).not.toContain(GRID_EXTENSION_STUDY_NAME)
+  })
+
+  it('shows nothing when the only record is the grid-extension card’s', async () => {
+    localStorage.setItem(STUDY_REF_KEY, JSON.stringify(REF))
+    useDecisionStore.setState({ active: REF })
+    api.list.mockResolvedValue([{ ...study, question_id: GRID_EXTENSION_QUESTION_ID }])
+    renderEntry()
+    await waitFor(() => expect(api.list).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 20))
+    expect(screen.queryByTestId('decision-studies-entry')).toBeNull()
   })
 
   it('shows nothing without a remembered study, and asks nothing', async () => {

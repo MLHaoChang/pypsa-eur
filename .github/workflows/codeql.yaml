@@ -19,6 +19,12 @@ on:
   schedule:
   - cron: '23 18 * * 5'
 
+# A new push to a PR cancels that PR's stale run (SCALE-1); master and
+# scheduled runs always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})

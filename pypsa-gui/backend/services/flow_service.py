@@ -608,9 +608,19 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
             # The attribute's name only, never the series' values.
             profiles += [_held(klass, str(name), field_name=fld)
                          for name in frame.columns[:max(0, HOLDS_CAP - len(profiles))]]
-    rows = {"carriers": [_held("Carrier", c) for c in carriers[:HOLDS_CAP]], "loads": loads,
+    from services.recipes import link_recipe
+
+    # Section 2 holds the carriers, then each process's recipe (gap 03): the
+    # recipe row owns the recipe, section 5's row of the same Link its size.
+    recipes = []
+    for klass, name in site_assets:
+        r = link_recipe(n, name) if klass == "Link" else None
+        if r is not None:
+            recipes.append({**_held("Link", name, carrier=n.links.at[name, "carrier"]), "recipe": r})
+    held_carriers = [_held("Carrier", c) for c in carriers[:HOLDS_CAP]]
+    rows = {"carriers": held_carriers + recipes[:max(0, HOLDS_CAP - len(held_carriers))], "loads": loads,
             "assets": assets, "profiles": profiles}
-    totals = {"carriers": len(carriers), "loads": len(n.loads.index),
+    totals = {"carriers": len(carriers) + len(recipes), "loads": len(n.loads.index),
               "assets": len(site_assets), "profiles": profile_total}
     return rows, totals
 

@@ -62,8 +62,10 @@ function ownArchitecture(meta: unknown): { arch: DcArchitecture; set: boolean } 
 /** What the compare reads from the stored spec; a change makes a result out of date (UX 5). */
 const specKey = (meta: unknown) => JSON.stringify((meta as DcMeta | null)?.dc_load?.spec ?? null)
 
+/** The source chip's one style (shared with the intent comparison's source words). */
+export const SOURCE_CHIP = 'rounded border border-border px-1 text-[10px] text-muted'
 function Assumed() {
-  return <span className="rounded border border-border px-1 text-[10px] text-muted">assumed</span>
+  return <span className={SOURCE_CHIP}>assumed</span>
 }
 
 export default function DcArchitectureSection({ name }: { name: string }) {
