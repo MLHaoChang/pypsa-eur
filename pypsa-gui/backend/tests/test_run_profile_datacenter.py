@@ -173,10 +173,15 @@ def _result_gate(monkeypatch, card, steps=None, live=CODE["digest"]):
     }
 
 
-def _shipped_card(tmp_path):
+def _shipped_card(tmp_path, bess_sized=False):
     d = tmp_path / "shipped"
     d.mkdir()
     n = T.BUILDERS["eh_datacenter"]()
+    if bess_sized:
+        # Stands for a solved network: the size a solve leaves on the extendable
+        # BESS. Unsized, the SCR gate derives the inverter capacity without it and
+        # withholds the Pass (DC walk 05), so the row would read unknown.
+        n.storage_units.at["bess_new", "p_nom_opt"] = 10.0
     T.write_sidecars(d, "eh_datacenter")
     return G.grid_readiness(d, n, "generic_assumed")
 
@@ -184,7 +189,7 @@ def _shipped_card(tmp_path):
 def test_on_the_shipped_template_warn_rows_do_not_end_the_run_and_never_count_as_passes(
     tmp_path, monkeypatch
 ):
-    card = _shipped_card(tmp_path)
+    card = _shipped_card(tmp_path, bess_sized=True)
     results = _result_gate(monkeypatch, card)
     warn = [r for r in results.values() if r["severity"] == "warn"]
     unknown = {r["id"] for r in card["rows"] if r["verdict"] == "unknown"}
