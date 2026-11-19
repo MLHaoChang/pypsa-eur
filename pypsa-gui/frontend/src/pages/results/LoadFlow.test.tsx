@@ -290,7 +290,7 @@ it.each([
     total_snapshots: 4, known_converged_count: 4, unknown_count: 0,
   } as never)
   renderPage()
-  expect(await screen.findByText(shown, { exact: false })).toBeTruthy()
+  expect(await screen.findByText(shown)).toBeTruthy()
 })
 
 // ── "Add to report" on the bus-voltage chart ────────────────────────────────
