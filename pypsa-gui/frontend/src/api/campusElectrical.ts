@@ -1095,6 +1095,8 @@ export const campusApi = {
     client.delete(`${base(project)}/grid-readiness/limits/${item}`, quiet).then(r => r.data),
 
   /** Store the backup setting (DC 03). 422 `{error_kind: dc_backup_invalid, message, field}`;
+   *  409 `{error_kind: dc_backup_busy, message}` when another marker write or an undo holds the
+   *  lock (retryable, nothing stored);
    *  the network and the investment case are untouched. */
   setDcBackup: (project: string, backup: DcBackupSetting) =>
     client.put<DcBackupSetting>(`${base(project)}/dc-backup`, backup, quiet).then(r => r.data),

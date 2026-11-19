@@ -43,6 +43,16 @@ describe('TariffSection', () => {
     expect((await screen.findByTestId('ic-tariff-error')).textContent).toMatch(/could not be read/)
   })
 
+  it('names the tariff by its name, not its raw id (RAW-NAMES-1)', async () => {
+    vi.mocked(commercialApi.getCommercial).mockResolvedValue({ poc_link: 'import', import_tariff: {
+      id: 'h2_hub_network_tariff_synthetic', name: 'Synthetic network tariff (illustrative)',
+      jurisdiction: 'DE', valid_from: '2030-01-01', items: [] } } as never)
+    renderSection()
+    expect(await screen.findByText(
+      "Editing the project's import tariff Synthetic network tariff (illustrative).")).toBeTruthy()
+    expect(screen.queryByText(/import tariff h2_hub_network_tariff_synthetic/)).toBeNull()
+  })
+
   it('says when the tariff is a Library item that saving detaches', async () => {
     vi.mocked(commercialApi.getCommercial).mockResolvedValue({
       poc_link: 'import', import_tariff_ref: { id: 'lib-tariff', version: 3 } } as never)

@@ -25,15 +25,23 @@ import { networkApi } from '../../../api/network'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
+import GridExtensionCard from '../../results/GridExtensionCard'
+import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
 
 
+// It names the figures it covers: the investment case's NPV and LCOE above carry their own state (UX 23).
 export const STALE_TEXT =
-  'These results are from an earlier study; the network was solved since. Run again to refresh.'
+  'The verdict, expected shortfall, design cost and risks are from an earlier study; the network was solved since. Run again to refresh.'
 
 /** P33b (D-2): an edit seam was crossed since the study started. Says
  *  "edited", never "changed" — that is all the counter carries. */
 export const EDITED_TEXT =
-  'The network has been edited since this study, so these results describe the design as it was. Run again to refresh.'
+  'The network has been edited since this study, so its verdict, expected shortfall, design cost and risks describe the design as it was. Run again to refresh.'
+
+/** GK B F1 (rulings #1170, #1390 F2): the server says `edited_since_study` is null when it could not
+ *  compare, such as a study saved before revisions were captured. Unknown never reads as current. */
+export const FRESHNESS_UNKNOWN_TEXT =
+  "Can't tell whether the network changed since this study, so its verdict, expected shortfall, design cost and risks may not describe the current design. Run again to check."
 
 export function openFullReport(): void {
   const ui = useUIStore.getState()
@@ -47,6 +55,13 @@ export function openFullReport(): void {
 function horizonYearsOf(report: ReturnType<typeof useHubReport>): number | null {
   const h = report?.sections?.certification?.payload?.horizon_years
   return typeof h === 'number' ? h : null
+}
+
+/** The study's likely range for the shortfall (`certification.lole_ci`), when it gave one. */
+export function loleCi(report: ReturnType<typeof useHubReport>): [number, number] | null {
+  const ci = (report?.sections?.certification?.payload as { lole_ci?: unknown } | undefined)?.lole_ci
+  return Array.isArray(ci) && ci.length === 2 && ci.every(v => typeof v === 'number' && Number.isFinite(v))
+    ? [ci[0] as number, ci[1] as number] : null
 }
 
 export function ResultsCard() {
@@ -77,16 +92,16 @@ export function ResultsCard() {
   const verdict = summary.verdict
   // Out-of-date figures are marked on the tiles too, not only above them (UX review N4, L5).
   const stale = review?.stale === true && study?.edited_since_study !== true
-  const chapters = (
-    <ChaptersSection reliability={{
-      hasResults: studyHasResults(study), running,
-      lole: summary.mc_lole_h_per_year ?? report?.mc_lole_h ?? null,
-      target: summary.target_lole_h ?? null,
-      horizonYears: horizonYearsOf(report),
-      stale,
-      verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
-    }} />
-  )
+  // Null or missing means the server could not compare (GK B F1): only a strict `false` reads as current.
+  const freshnessUnknown = study?.edited_since_study !== true && study?.edited_since_study !== false && !stale
+  const reliability = {
+    hasResults: studyHasResults(study), running,
+    lole: summary.mc_lole_h_per_year ?? report?.mc_lole_h ?? null,
+    target: summary.target_lole_h ?? null,
+    horizonYears: horizonYearsOf(report),
+    stale,
+    verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
+  } as const
 
   if (!studyHasResults(study)) {
     // Never an empty or greyed card (UX S6, G2): say why, and how to get there.
@@ -98,7 +113,9 @@ export function ResultsCard() {
           <ResultState state="not_run" reason="The study writes its verdict, cost and risks here."
             action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} />
         )}
-        {chapters}
+        <GridExtensionCard />
+        {/* No headline yet, so every tile keeps its figure. */}
+        <ChaptersSection reliability={reliability} />
       </CardShell>
     )
   }
@@ -110,6 +127,12 @@ export function ResultsCard() {
         <p data-testid="hub-results-edited"
           className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
           {EDITED_TEXT}
+        </p>
+      )}
+      {freshnessUnknown && (
+        <p data-testid="hub-results-freshness-unknown"
+          className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+          {FRESHNESS_UNKNOWN_TEXT}
         </p>
       )}
       {uncheckedKinds.length > 0 && (
@@ -148,19 +171,20 @@ export function ResultsCard() {
         </p>
       )}
 
-      {cost != null && (
+      {/* An edit since the study makes the study's figures out of date too: the edited banner is their
+          mark, and the headline's mixed-source line and chart then say so (review P1, GK B G1). */}
+      <ResultsHeadline reliability={{ ...reliability, stale: stale || study?.edited_since_study === true }}
+        freshnessUnknown={freshnessUnknown} ci={loleCi(report)} cost={cost != null && (
         // The cost of the planned design at the pack's energy target, without
         // shortfall costs — never "the cost of your goal" (P24-FE gate B1).
         // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.
-        <div className="max-w-[260px]">
-          <Kpi testId="hub-results-cost" headline
-            label={costTileLabel(report?.period_basis, periods.data?.periods)}
-            value={fmtCurrency(cost)} fromStudy={solved === false && !stale}
-            hint={solved === false && !stale ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
-            // The banner above says "Out of date" once for the card; the tile only dims.
-            state="ready" dimmed={stale} />
-        </div>
-      )}
+        <Kpi testId="hub-results-cost" headline
+          label={costTileLabel(report?.period_basis, periods.data?.periods)}
+          value={fmtCurrency(cost)} fromStudy={solved === false && !stale && !freshnessUnknown}
+          hint={solved === false && !stale && !freshnessUnknown ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
+          // The banner above says "Out of date" once for the card; the tile only dims.
+          state="ready" dimmed={stale || freshnessUnknown} />
+      )} />
 
       {(risks.length > 0 || coped.length > 0) && (
         <div className="flex flex-col gap-1 text-[12px]">
@@ -211,7 +235,8 @@ export function ResultsCard() {
           <FileText size={13} /> Show the engineering detail
         </button>
       </div>
-      {chapters}
+      <GridExtensionCard />
+      <ChaptersSection reliability={reliability} headlined={[...HEADLINED]} />
     </CardShell>
   )
 }

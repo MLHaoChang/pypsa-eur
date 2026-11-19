@@ -25,6 +25,7 @@ hourly dispatch move 52 hours of stored energy.
 """
 from __future__ import annotations
 
+import logging
 import math
 from datetime import date
 from typing import NamedTuple
@@ -32,6 +33,8 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 import pypsa
+
+_log = logging.getLogger(__name__)
 
 HOURS = 168
 SNAPSHOTS = pd.date_range("2030-07-01", periods=HOURS, freq="h")
@@ -709,20 +712,134 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
     the plan could only shed (gatekeeper review of DC grid readiness 01).
     The one check the grid-readiness scorecard also reports
     (``services.adequacy.site_peak.peak_check``)."""
-    from services.adequacy.site_peak import describe, peak_check, unset_periods
+    from services.adequacy.site_peak import describe
     from services.dc_load_profile import DcLoadError
+
+    n, over = _peak_over(template_id, spec, planning)
+    if not over:
+        return
+    row = over[0]
+    # The staged plan reuses one modelled week for every phase (walkthrough 02).
+    week = " of the modelled week" if isinstance(n.snapshots, pd.MultiIndex) else ""
+    words = (f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
+             f"{row['binding_snapshot']}{week}), above {describe(row)}.")
+    # One modelled year: its IT load is the form's one field (the staged plan's
+    # phases are read-only there, so no number is searched).
+    single = not week
+    bess = spec.backup.mode == "bess"
+    most = _search_fitting_it(template_id, spec, planning) if single and bess else None
+    # Name another backup mode only where it builds (GK A review).
+    alts = tuple(
+        m for m in (("hybrid",) if single else ("hybrid", "genset"))
+        if bess and _mode_builds(template_id, spec, m, planning)
+    )
+    raise DcLoadError(words + _peak_ways_out(spec, most, single=single, alts=alts),
+                      "dc_load.phases")
+
+
+def _search_fitting_it(template_id: str, spec, planning: Planning | None) -> float | None:
+    """``_largest_fitting_it``, or None when the search raises: the refusal
+    stands without its "at most N MW" way out, and the error is logged, never
+    shown as the user's (GK A review)."""
+    try:
+        return _largest_fitting_it(template_id, spec, planning)
+    except Exception:
+        _log.warning("DC peak IT load search failed; not naming a number", exc_info=True)
+        return None
+
+
+def _mode_builds(template_id: str, spec, mode: str, planning: Planning | None) -> bool:
+    """Whether ``spec`` with backup ``mode`` passes the same peak check. A probe
+    that raises counts as "doesn't build": the mode is not named, and the
+    error is logged, never shown as the user's (GK A review)."""
+    try:
+        return not _peak_over(template_id, _with_backup(spec, mode), planning)[1]
+    except Exception:
+        _log.warning("DC peak probe with %s backup failed; not naming it", mode,
+                     exc_info=True)
+        return False
+
+
+def _with_backup(spec, mode: str):
+    """``spec`` with another backup mode, the rest as entered."""
+    return spec.model_copy(update={"backup": spec.backup.model_copy(update={"mode": mode})})
+
+
+def _peak_over(template_id: str, spec, planning: Planning | None = None):
+    """The built network and the periods whose peak is above the cap
+    (``site_peak.peak_check``; an unset energization is unknown, never over)."""
+    from services.adequacy.site_peak import peak_check, unset_periods
 
     if planning is None:
         n = BUILDERS[template_id](load_spec=spec)
     else:
         n = BUILDERS[template_id](load_spec=spec, planning=planning)
-    # A period whose energization is a placeholder is unknown, never refused.
     unset = unset_periods(template_meta(template_id, planning, load_spec=spec))
-    for row in peak_check(n, island_config(template_id, planning, load_spec=spec), unset=unset):
-        if row["headroom_mw"] is not None and row["headroom_mw"] < -1e-9:
-            raise DcLoadError(
-                f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
-                f"{row['binding_snapshot']}), above {describe(row)}", "dc_load.phases")
+    rows = peak_check(n, island_config(template_id, planning, load_spec=spec), unset=unset)
+    return n, [r for r in rows if r["headroom_mw"] is not None and r["headroom_mw"] < -1e-9]
+
+
+#: The New project form's backup mode words (frontend ``MODE_LABEL``).
+_MODE_WORD = {"hybrid": "Hybrid", "genset": "Gensets"}
+
+#: The New project form takes the IT load in decimals; the way out names it to this step (MW).
+IT_STEP_MW = 0.1
+
+#: The bisection's step cap: far above log2 of any IT load the form takes.
+_BISECT_CAP = 64
+
+
+def _largest_fitting_it(template_id: str, spec, planning) -> float:
+    """The largest IT load, on the form's 0.1 MW step, whose peak fits: a bisection
+    on the same check (GK A D1: the load is not exactly proportional to the IT
+    load, so the linear IT × cap / load is no bound). 0 when none fits. The
+    bracket is proven: 0 MW fits, and the current IT load is refused (GK A
+    review), so ~9 builds of the network."""
+    import math
+
+    def fits(it_mw: float) -> bool:
+        phase = spec.phases[0].model_copy(update={"it_mw": it_mw})
+        return not _peak_over(template_id, spec.model_copy(update={"phases": [phase]}), planning)[1]
+
+    it = float(spec.phases[0].it_mw)
+    lo, hi = 0, int(math.ceil(it / IT_STEP_MW - 1e-9))  # lo fits (0 MW), hi refused
+    # A bisection ends in ceil(log2(hi)) steps; the cap makes a regression
+    # that stops shrinking the bracket fail fast instead of hanging (GK A review).
+    for _ in range(_BISECT_CAP):
+        if hi - lo <= 1:
+            return round(lo * IT_STEP_MW, 1)
+        mid = (lo + hi) // 2
+        if fits(mid * IT_STEP_MW):
+            lo = mid
+        else:
+            hi = mid
+    raise RuntimeError(f"IT load search did not converge in {_BISECT_CAP} steps")
+
+
+def _peak_ways_out(spec, most: float | None, *, single: bool,
+                   alts: tuple[str, ...] = ()) -> str:
+    """Why the peak is refused and each way out (DC grid-readiness walkthrough 01).
+    ``most`` is the largest IT load that fits (``_largest_fitting_it``), searched for
+    Battery backup only: with gensets the firm cap may move with the IT load, so no
+    number is given (GK A D1). 0 says no IT load fits. ``alts`` are the other
+    backup modes that build with the same spec: only those are named (GK A
+    review: Hybrid is refused too at a high IT load)."""
+    bess = spec.backup.mode == "bess"
+    out = (" Battery strings carry outages only, so the normal peak must fit the import."
+           if bess else "")
+    ways = []
+    if most is not None:
+        if most > 0:
+            ways.append(f"set IT load to at most {most:g} MW")
+        else:
+            out += " No IT load fits the energized import."
+    named = [_MODE_WORD[m] for m in ("hybrid", "genset") if m in alts]
+    if bess and named:
+        ways.append(f"pick {' or '.join(named)} backup")
+    ways.append("raise the connection after you create the project" if single
+                else "change the build plan after you create the project")
+    said = ways[0] if len(ways) == 1 else ", ".join(ways[:-1]) + ", or " + ways[-1]
+    return f"{out} {said[0].upper()}{said[1:]}."
 
 
 def dc_load_meta(template_id: str, spec) -> dict:
