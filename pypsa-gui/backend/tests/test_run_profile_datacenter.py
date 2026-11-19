@@ -178,9 +178,9 @@ def _shipped_card(tmp_path, bess_sized=False):
     d.mkdir()
     n = T.BUILDERS["eh_datacenter"]()
     if bess_sized:
-        # Stands for a solved network: the size a solve leaves on the extendable
-        # BESS. Unsized, the SCR gate derives the inverter capacity without it and
-        # withholds the Pass (DC walk 05), so the row would read unknown.
+        # 10 MW stands for the size a solve leaves on the extendable BESS. The
+        # scr_gate._rating reader counts a positive p_nom_opt as sized (solve
+        # coverage decides only a 0). Unsized, the SCR Pass is withheld (DC walk 05).
         n.storage_units.at["bess_new", "p_nom_opt"] = 10.0
     T.write_sidecars(d, "eh_datacenter")
     return G.grid_readiness(d, n, "generic_assumed")
@@ -213,6 +213,8 @@ def test_on_the_shipped_template_warn_rows_do_not_end_the_run_and_never_count_as
     assert (
         card_row(card, "scr")["verdict"] == "pass" and card_row(card, "scr")["assumed"]
     )
+    # 250 MVA over PV 4 + UPS battery 40 + BESS 10 = 54 MVA, as the row rounds it.
+    assert card_row(card, "scr")["project_value"] == round(250.0 / 54.0, 3) == 4.63
     assert (
         block["dc.scr"]["verdict"] == "not_evaluated"
         and "assumed" in block["dc.scr"]["reason"]
