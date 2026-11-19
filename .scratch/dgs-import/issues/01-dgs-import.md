@@ -112,7 +112,9 @@ Slices:
     `gridspine/ingest/xlsx_safe.py` (no pypsa), shared by both readers; `open_workbook` opens
     read-only, formulas kept, `keep_links=False`.
   - X6: `ImporterSpec.sniff` ("module:function") and `import_result.for_file(path)`: one
-    importer for the extension wins outright; for `.xlsx` exactly one sniff must claim the file.
+    importer for the extension wins outright; for `.xlsx` the one sniff that claims the file wins,
+    else the one candidate without a sniff (excel, so S1b's older layouts still route); two
+    claims, or no claim and no single fallback, are refused.
 - 2026-11-17, GK A2 (4): #1678 OK @9a9b4d7b. Added to S3:
   - X10: ElmLod, ElmGenstat and ElmSym P/Q set-points the file omits are listed as assumed with
     their default (0), never silently 0; one test per field.
