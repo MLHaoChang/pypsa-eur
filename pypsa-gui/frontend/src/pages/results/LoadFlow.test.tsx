@@ -279,6 +279,20 @@ it.each([
   else expect(await findByText('1 non-converged snapshot')).toBeTruthy()
 })
 
+it.each([
+  [[], 'Flat start'],
+  [['T1'], '1 phase-shifting transformer'],
+  [['T1', 'T2', 'T3', 'T4', 'T5', 'T6'], '6 phase-shifting transformers'],
+])('AC PF status shows the seed (%j) as %s', async (seededBy, shown) => {
+  vi.mocked(resultsApi.getAcPfStatus).mockResolvedValue({
+    available: true, slack_bus_used: 'B1', stripped_voll_slacks: [], seeded_by: seededBy,
+    converged_list: [], converged_per_snapshot: {}, converged_count: 4,
+    total_snapshots: 4, known_converged_count: 4, unknown_count: 0,
+  } as never)
+  renderPage()
+  expect(await screen.findByText(shown, { exact: false })).toBeTruthy()
+})
+
 // ── "Add to report" on the bus-voltage chart ────────────────────────────────
 describe('bus voltage chart · report', () => {
   // 28 days (one 12:00 stamp each) in every season: weekly and monthly are both available.

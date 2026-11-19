@@ -946,8 +946,7 @@ export default function LoadFlow() {
             <KPI label="Slack bus" value={acPfStatus.slack_bus_used ?? '—'} />
             <KPI label="VOLL slacks stripped"
               value={`${(acPfStatus.stripped_voll_slacks ?? []).length}`} />
-            <KPI label="Seeded by"
-              value={(acPfStatus.seeded_by ?? []).length ? `${acPfStatus.seeded_by!.length} phase-shifting transformer(s)` : 'Flat start'} />
+            <SeededByKPI seededBy={acPfStatus.seeded_by ?? []} />
           </div>
           {acPfText.note && (
             <p className="text-[11px] text-muted mt-2">{acPfText.note}</p>
@@ -1381,5 +1380,15 @@ export default function LoadFlow() {
         </section>
       )}
     </div>
+  )
+}
+
+/** Seed tile: a count (names in the tooltip) so the value never outgrows its quarter-width tile. */
+function SeededByKPI({ seededBy }: { seededBy: string[] }) {
+  const n = seededBy.length
+  if (n === 0) return <KPI label="Seeded by" value="Flat start" hint="No active phase-shifting transformer: the flow started flat." />
+  return (
+    <KPI label="Seeded by" value="lpf()" sub={`${n} phase-shifting ${n === 1 ? 'transformer' : 'transformers'}`}
+      hint={`lpf() seeded the flow because these transformers shift phase: ${seededBy.join(', ')}`} />
   )
 }
