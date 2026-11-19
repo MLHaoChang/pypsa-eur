@@ -3,7 +3,7 @@
 
 # Certified 0.0 h/yr leaves out the outages of the hospital's only feeder
 
-Status: ready-for-agent
+Status: done (#1729)
 Type: bug (asset-investment walkthrough, WALK-E2E-1)
 Journey steps: J2 Reliability goal → verdict
 Severity: high
