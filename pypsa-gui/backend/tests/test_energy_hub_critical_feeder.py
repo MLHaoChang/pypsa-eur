@@ -259,6 +259,11 @@ def test_a_no_data_link_on_any_supply_path_is_taken_as_out():
     assert pay["critical_pocket_bound_h_per_year"] == pytest.approx(87.6)
     assert {"lk", "o2"} <= {f["name"] for f in pay["critical_feeders"]}
     assert "lk" in sec.note and "o2" in sec.note
+    # lk is unread but not one of the pocket's feeders: its row still gets
+    # the pocket's figure.
+    assert "lk" not in pk["feeders"]
+    lk = next(f for f in pay["critical_feeders"] if f["name"] == "lk")
+    assert lk["lole_h"] == pytest.approx(87.6, rel=1e-9)
 
 
 def test_a_usable_feeder_behind_an_unread_link_adds_no_redundancy():
