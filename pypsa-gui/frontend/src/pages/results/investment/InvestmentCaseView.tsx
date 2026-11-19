@@ -166,6 +166,7 @@ function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
               className={h.value === null ? 'text-muted' : ''} title={h.note ?? undefined}>
             {fmtHeadline(h.kind, h.value)}{h.value === null && h.note ? ` (${h.note})` : ''}
           </dd>
+          {h.asks && <dd className="col-span-2 text-muted pl-3 pb-0.5" data-testid={`ic-headline-asks-${h.id}`}>{h.asks}</dd>}
         </div>
       ))}
     </dl>
