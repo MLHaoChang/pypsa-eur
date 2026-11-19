@@ -25,6 +25,7 @@ Split from: [07d](07d-report-revision-drafts.md), PR B scope (coordinator, 2026-
 - [ ] An open comment can be withdrawn; an addressed or withdrawn one cannot.
 - [ ] Refusals (`report_comment_closed`, `revision_stale_base`, the viewer role's 403) are shown in words.
 - [ ] UX placement agreed before building (the reports page is a workflow surface).
+- [ ] The chat disposition of `GET /api/projects/{name}/reports/{report_id}/comments` is settled: a typed read tool, or a limitation. 07d PR B holds it on this issue (`held-by-spec`).
 
 ## Likely files
 

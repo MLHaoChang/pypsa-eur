@@ -3,7 +3,7 @@
 // drafts, each with Confirm and Discard once it is drafted. Nothing changes
 // the report until Confirm. Every model or user text (comment, edit, heading)
 // renders as plain text: no markdown, no HTML, no link (GK B (68) R3).
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   confirmRevisionDraft, discardRevisionDraft, getReport, isReportError, listReportComments,
   requestRevisionDraft,
@@ -12,7 +12,7 @@ import {
 import type { RunMonitorView } from '../../api/runMonitor'
 import { useUIStore } from '../../store/uiStore'
 import {
-  DRAFT_NOT_APPLIED, DRAFT_REASON_WORDS, DRAFT_STATUS_WORDS, draftErrorWords, draftRefusalWords,
+  DRAFT_DRAFTED_VIEW_ONLY, DRAFT_NOT_APPLIED, DRAFT_REASON_WORDS, DRAFT_STATUS_UNKNOWN, DRAFT_STATUS_WORDS, draftErrorWords, draftRefusalWords,
 } from './runWords'
 
 export const DRAFT_POLL_MS = 4000
@@ -51,6 +51,7 @@ function EditText({ edit }: { edit: RevisionEdit }) {
       <p>Columns: {edit.columns.join(', ')}</p>
     </div>
   }
+  if (edit.kind !== 'table_cells') return null
   return <table className="text-left" data-testid="draft-edit"><tbody>
     {edit.rows.map((row, r) => <tr key={r}>{row.map((cell, c) => <td key={c} className="pr-2">{cell}</td>)}</tr>)}
   </tbody></table>
@@ -62,8 +63,9 @@ export default function RevisionDrafts({ taskId, view, onRefresh }: {
   const current = useUIStore(s => s.currentProject)
   // The run belongs to the project the card opened in: under another project
   // the block reads, polls and sends nothing (R5).
-  const [home] = useState(current)
-  const project = current !== null && current === home ? current : null
+  const home = useRef<string | null>(null)
+  if (home.current === null && current !== null) home.current = current
+  const project = current !== null && current === home.current ? current : null
   const offer = view.monitor.revision_report ?? null
   const rows = view.monitor.revision_drafts ?? []
   const reportId = offer?.report_id ?? rows[0]?.report_id ?? null
@@ -71,24 +73,25 @@ export default function RevisionDrafts({ taskId, view, onRefresh }: {
   const [doc, setDoc] = useState<ReportDocument | null>(null)
   const [readFailed, setReadFailed] = useState(false)
   const [busy, setBusy] = useState(false)
+  // A poll never lands while a click is in flight: its late reply could bring
+  // back the row the click just decided.
+  const acting = useRef(false)
   const [refusal, setRefusal] = useState<string | null>(null)
 
   const inFlightStates = offer?.in_flight ?? ['requested', 'drafting']
   const inFlight = rows.some(r => inFlightStates.includes(r.status))
   const settledKey = rows.map(r => `${r.id}:${r.status}`).join(',')
 
-  const load = useCallback(async () => {
+  // The comments again whenever a row changes (a refused draft notes its
+  // comment); a reply for an older report or after unmount is dropped.
+  useEffect(() => {
     if (!project || !reportId) return
-    try {
-      setComments((await listReportComments(project, reportId)).comments)
-      setReadFailed(false)
-    } catch {
-      setReadFailed(true)
-    }
-  }, [project, reportId])
-
-  // The comments again whenever a row changes: a refused draft notes its comment.
-  useEffect(() => { void load() }, [load, settledKey])
+    let live = true
+    listReportComments(project, reportId)
+      .then(c => { if (live) { setComments(c.comments); setReadFailed(false) } })
+      .catch(() => { if (live) setReadFailed(true) })
+    return () => { live = false }
+  }, [project, reportId, settledKey])
   useEffect(() => {
     if (!project || !reportId) return
     let live = true
@@ -101,7 +104,7 @@ export default function RevisionDrafts({ taskId, view, onRefresh }: {
   useEffect(() => {
     if (!inFlight || !project) return
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void onRefresh()
+      if (document.visibilityState === 'visible' && !acting.current) void onRefresh()
     }, DRAFT_POLL_MS)
     return () => window.clearInterval(timer)
   }, [inFlight, project, onRefresh])
@@ -117,6 +120,7 @@ export default function RevisionDrafts({ taskId, view, onRefresh }: {
 
   const act = async (call: () => Promise<unknown>) => {
     setBusy(true)
+    acting.current = true
     setRefusal(null)
     try {
       await call()
@@ -125,7 +129,7 @@ export default function RevisionDrafts({ taskId, view, onRefresh }: {
         isReportError(err) ? err.detail.message : null))
     } finally {
       await onRefresh()
-      await load()
+      acting.current = false
       setBusy(false)
     }
   }
@@ -159,7 +163,8 @@ export default function RevisionDrafts({ taskId, view, onRefresh }: {
         {rows.map(r => {
           const comment = byId.get(r.comment_id)
           const status = r.status === 'refused' && r.error && NOT_APPLIED.has(r.error)
-            ? DRAFT_NOT_APPLIED : DRAFT_STATUS_WORDS[r.status] ?? 'Not made'
+            ? DRAFT_NOT_APPLIED : r.status === 'drafted' && !mayAct ? DRAFT_DRAFTED_VIEW_ONLY
+            : DRAFT_STATUS_WORDS[r.status] ?? DRAFT_STATUS_UNKNOWN
           const reasons = (r.reasons ?? []).map(k => DRAFT_REASON_WORDS[k]).filter(Boolean)
           return <li key={r.id} data-testid="revision-draft" data-status={r.status}>
             <div role="status" data-testid="revision-draft-status">{status}</div>

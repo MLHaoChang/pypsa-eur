@@ -233,6 +233,11 @@ export const DRAFT_STATUS_WORDS: Record<string, string> = {
   discarded: 'Discarded',
 }
 
+/** A drafted row for a user who may not confirm it: no "for you". */
+export const DRAFT_DRAFTED_VIEW_ONLY = 'Drafted, not yet confirmed'
+/** A status this card does not know yet: never read as a refusal. */
+export const DRAFT_STATUS_UNKNOWN = 'Status not known'
+
 /** A refused row whose confirm 07c refused: the draft was made, not applied. */
 export const DRAFT_NOT_APPLIED = 'Not applied'
 
@@ -273,6 +278,7 @@ export const draftErrorWords = (error: string | undefined): string =>
 export const DRAFT_REFUSAL_WORDS: Record<string, string> = {
   revision_draft_run_state: 'Only a finished run can draft a fix.',
   revision_draft_not_run_report: 'This run did not make this report, so it cannot draft for it.',
+  revision_draft_limit: 'This run is already drafting, or has made all its drafts.',
   revision_draft_not_found: 'This draft is no longer there.',
   revision_draft_not_drafted: 'This draft was already decided.',
   revision_stale_base: 'The report changed after this draft was made, so it cannot be applied.',

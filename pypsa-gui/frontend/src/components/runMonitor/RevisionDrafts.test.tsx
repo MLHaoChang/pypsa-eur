@@ -103,7 +103,7 @@ describe('RevisionDrafts', () => {
     show({ revision_report: OFFER })
     fireEvent.click(await screen.findByTestId('revision-draft-request'))
     const refusal = await screen.findByTestId('revision-refusal')
-    expect(refusal.textContent).toBe('This run is already drafting; wait for that draft first.')
+    expect(refusal.textContent).toBe(DRAFT_REFUSAL_WORDS.revision_draft_limit)
     expect(refusal.getAttribute('role')).toBe('status')
     await waitFor(() => expect((screen.getByTestId('revision-draft-request') as HTMLButtonElement).disabled).toBe(false))
   })
@@ -141,6 +141,10 @@ describe('RevisionDrafts', () => {
     await screen.findAllByTestId('revision-draft')
     expect(screen.getAllByTestId('revision-draft-confirm')).toHaveLength(1)
     expect(screen.getAllByTestId('revision-draft-discard')).toHaveLength(1)
+    // An unknown status reads neutral, never as a refusal.
+    cleanup()
+    show({ revision_report: OFFER, revision_drafts: [row({ status: 'something_new', edit: undefined })] })
+    expect((await screen.findByTestId('revision-draft-status')).textContent).toBe('Status not known')
   })
 
   it('shows every status in plain words, never the engine word or a raw code (UX 3)', async () => {
@@ -184,6 +188,42 @@ describe('RevisionDrafts', () => {
     expect(screen.queryByTestId('revision-draft-confirm')).toBeNull()
     expect(screen.queryByTestId('revision-draft-discard')).toBeNull()
     expect(screen.queryByTestId('revision-blocked')).toBeNull()
+    expect(screen.getByTestId('revision-draft-status').textContent).toBe('Drafted, not yet confirmed')
+  })
+
+  it('shows once the project is known when the card mounted before it was', async () => {
+    useUIStore.setState({ currentProject: null })
+    const view = viewWith({ revision_report: OFFER })
+    const { rerender } = render(<RevisionDrafts taskId={TASK_ID} view={view} onRefresh={vi.fn(async () => undefined)} />)
+    expect(screen.queryByTestId('revision-drafts')).toBeNull()
+    await act(async () => { useUIStore.setState({ currentProject: 'Project A' }) })
+    rerender(<RevisionDrafts taskId={TASK_ID} view={view} onRefresh={vi.fn(async () => undefined)} />)
+    expect(await screen.findByTestId('revision-draft-request')).toBeTruthy()
+    expect(reports.listReportComments).toHaveBeenCalledWith('Project A', RID)
+  })
+
+  it('names the limit refusal in words that promise no other control', async () => {
+    vi.mocked(reports.requestRevisionDraft).mockRejectedValue(
+      new ReportsError({ error_kind: 'revision_draft_limit', message: 'write the edit yourself.' }, 409))
+    show({ revision_report: OFFER })
+    fireEvent.click(await screen.findByTestId('revision-draft-request'))
+    expect((await screen.findByTestId('revision-refusal')).textContent).toBe(DRAFT_REFUSAL_WORDS.revision_draft_limit)
+  })
+
+  it('skips a poll tick while a click is in flight', async () => {
+    vi.useFakeTimers()
+    let release: () => void = () => undefined
+    vi.mocked(reports.discardRevisionDraft).mockReturnValue(new Promise(r => { release = () => r({ draft: row() }) }))
+    const onRefresh = vi.fn(async () => undefined)
+    const flying = viewWith({ revision_report: OFFER, revision_drafts: [row({ id: 'd0', status: 'drafting', edit: undefined }), row()] })
+    render(<RevisionDrafts taskId={TASK_ID} view={flying} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByTestId('revision-draft-discard'))
+    await act(async () => { vi.advanceTimersByTime(DRAFT_POLL_MS * 2) })
+    expect(onRefresh).not.toHaveBeenCalled()
+    await act(async () => { release() })
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+    await act(async () => { vi.advanceTimersByTime(DRAFT_POLL_MS) })
+    expect(onRefresh).toHaveBeenCalledTimes(2)
   })
 
   it('polls only while a draft is in flight, one interval, stopped on unmount and a project switch (R5)', async () => {
