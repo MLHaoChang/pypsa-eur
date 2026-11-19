@@ -399,4 +399,12 @@ describe('ImproveCard cheaper battery duration', () => {
     await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
     expect(screen.queryByTestId('hub-improve-cheaper-duration')).toBeNull()
   })
+
+  it('nothing when the levers table leaves meets_target unknown (null)', async () => {
+    withLevers(null)
+    mount()
+    await screen.findByTestId('hub-improve-certification_fail')
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    expect(screen.queryByTestId('hub-improve-cheaper-duration')).toBeNull()
+  })
 })
