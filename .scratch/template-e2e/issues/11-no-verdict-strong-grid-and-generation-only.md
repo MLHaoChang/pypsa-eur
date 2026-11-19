@@ -3,7 +3,7 @@
 
 # 11 — No reliability verdict for strong-grid and generation-only templates
 
-Status: needs-triage
+Status: needs-info
 Impact: high
 Templates: H2 hub (both), ammonia, IPP
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -19,3 +19,7 @@ Journey ends at results without a decision for 4 of 10 templates.
 ## Suggested fix
 
 Give each such template its own verdict (supply, delivery, revenue) or say plainly "no reliability verdict for this site type" and point to what to check instead.
+
+## Triage (2026-11-19, master 9f850d36)
+
+Checked by code reading only; the app was not re-run. Question for the coordinator: what do strong-grid and generation-only templates (H2 hub, ammonia, IPP) get? (1) Recommended first step: a plain statement 'no reliability verdict for this site type' with what to check instead, for all four. (2) A per-template verdict (supply, delivery, revenue), one slice per template, GK A. (3) Plain statement now, per-template verdicts as a later issue.

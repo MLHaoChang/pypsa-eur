@@ -3,7 +3,7 @@
 
 # 09 — Guided cannot choose the study size; the staged concentrator study runs 15+ minutes
 
-Status: needs-triage
+Status: ready-for-agent
 Owner: unassigned
 Size: S (a) or S (b)
 Gated: UX (a); GK A (b)
@@ -45,3 +45,7 @@ Both can ship; (a) alone leaves the concentrator slow by default.
 
 - A Guided user can see and change the study size before a run, or the concentrator's default finishes within the short-journey budget.
 - The `budget` marker in `template-journeys.mjs` flips to a normal assertion and, for (b), the `slow` branch goes.
+
+## Triage (2026-11-19, master 9f850d36)
+
+Checked by code reading only; the app was not re-run. Still true: `GoalStudyRun.tsx` shows the size only in the progress line, and `run_profiles.py` `eh_study` still has `budget_solves: 2` with no Guided field. Scope: fix (a) only (UX gate). Fix (b) changes template results and is not triaged here; file it separately if the owner wants it. Blocked by: none.

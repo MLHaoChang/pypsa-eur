@@ -3,7 +3,7 @@
 
 # 10 — The reliability study silently changes the user's grid connection
 
-Status: needs-triage
+Status: needs-info
 Impact: high
 Templates: Concentrator, ammonia, every weak-grid template
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -19,3 +19,7 @@ The connection limit is the user's most important decision and the study rewrite
 ## Suggested fix
 
 Show every change the study pack makes to a user value as a decision before Run (keep / accept), in plain words; never override the connection limit silently.
+
+## Triage (2026-11-19, master 9f850d36)
+
+Checked by code reading only; the app was not re-run. Still true: `services/adequacy/archetypes.py:335` still words the change as raised/lowered. Question for the coordinator: how far should the fix go? (1) Recommended: show each change to a user value as a plain-words line before Run, and refuse to change the connection limit without keep/accept, as the issue suggests. (2) Plain words after the run only, no ask. (3) Do not change the user's connection limit at all; the study uses it as set and reports the shortfall.
