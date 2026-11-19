@@ -3,7 +3,7 @@
 
 # P6: bounded reviewer, approved history and recovery
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: reviewer and assurance recovery merged; left: general task and effect recovery, A6.6
 Progress: harness/reviewer.py and assurance_recovery.py shipped; general task and effect recovery pending
 Type: task
 Blocked by: 03, 06; live-voice issue 09 for durable restarts
