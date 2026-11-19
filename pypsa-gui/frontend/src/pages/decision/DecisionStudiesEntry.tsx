@@ -11,7 +11,7 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { decisionStudiesApi as api, studyError } from '../../api/decisionStudies'
+import { decisionStudiesApi as api, GRID_EXTENSION_QUESTION_ID, studyError } from '../../api/decisionStudies'
 import { useAuthMode } from '../../auth/AuthModeProvider'
 import { useUIStore } from '../../store/uiStore'
 import { REOPEN_LABELS } from '../../utils/decisionVocabulary'
@@ -36,7 +36,8 @@ export default function DecisionStudiesEntry({ className = '' }: { className?: s
   const gone = err?.status === 404 && !err.code?.startsWith('decision_studies_')
   useEffect(() => { if (gone && remembered) forget(remembered) }, [gone, remembered, forget])
 
-  const studies = q.data ?? []
+  // The grid-extension card's own record is not a study the user started here.
+  const studies = (q.data ?? []).filter(s => s.question_id !== GRID_EXTENSION_QUESTION_ID)
   if (authEnabled || !project || !remembered || studies.length === 0) return null
 
   const open = (studyId: string) => {
