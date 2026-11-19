@@ -3,7 +3,7 @@
 
 # Metric semantics, deterministic calculations and raw validity
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: losses validity (#1644) and solve validity (#1680) merged; S4/S5/S6a/S7 open in #1704, #1705, #1712, #1707; left besides: NPV and other-domain metrics, plausibility adapter
 Model: Opus
 Progress: harness/calculations.py with generator, network and storage profiles shipped; other domains, NPV and validity checks pending
 Type: task

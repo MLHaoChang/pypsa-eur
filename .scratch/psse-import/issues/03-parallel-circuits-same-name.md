@@ -3,7 +3,7 @@
 
 # PSS/E import 03: parallel circuits with the same CKT are lost
 
-Status: ready-for-agent
+Status: done (#1720)
 Type: bug
 Reporter: GK A (31)
 Owner decision: IMPORTS-1
