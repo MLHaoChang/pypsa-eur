@@ -45,8 +45,13 @@ export interface SiteForm {
   }
 }
 
+/** "Grow from the first stage at X % per year" (homer-parity 04a2, owner
+ *  decision LOADGROWTH-FORM-1): a form helper only, never sent. `typed` are
+ *  the later stages whose peak the user typed; those win over the rate. */
+export interface SiteGrowth { pct: number | null; typed: number[] }
+
 /** The form's state: the current values and the paths the user has set. */
-export interface SiteDraft { values: SiteParams; touched: string[] }
+export interface SiteDraft { values: SiteParams; touched: string[]; growth?: SiteGrowth }
 
 // structuredClone, not a JSON round trip: a cleared field is NaN, and JSON
 // would turn it into null, which the derived defaults then refill.
@@ -80,13 +85,42 @@ export function isDefault(draft: SiteDraft, field: string): boolean {
 }
 
 const round3 = (x: number) => Math.round(x * 1000) / 1000
+const round2 = (x: number) => Math.round(x * 100) / 100
+
+const growthUsable = (pct: number | null | undefined): pct is number =>
+  pct != null && Number.isFinite(pct) && pct > -100
+
+/** Whether stage `i`'s peak comes from the growth rate (not typed, not the base). */
+export function isFilledFromRate(draft: SiteDraft, i: number): boolean {
+  const g = draft.growth
+  return i > 0 && i < draft.values.stages.length && g != null && growthUsable(g.pct)
+    && !g.typed.includes(i)
+}
+
+/** Fill the later stages' peaks from the first stage at the growth rate:
+ *  first peak × (1 + g/100)^(year − first year), to 0.01 MW. */
+function fillFromRate(v: SiteParams, draft: SiteDraft): boolean {
+  const first = v.stages[0]
+  const pct = draft.growth?.pct
+  if (!first || !growthUsable(pct)) return false
+  let filled = false
+  v.stages = v.stages.map((s, i) => {
+    if (!isFilledFromRate(draft, i)) return s
+    filled = true
+    return { ...s, peak_mw: round2(first.peak_mw * (1 + pct / 100) ** (s.year - first.year)) }
+  })
+  return filled
+}
 
 /** Fill the values that follow others while the user has not set them, as
  *  the backend does: the UPS carries the critical load with 10 % margin, the
  *  energization is the connection in every stage, the fault level 20 × it. */
 export function derive(draft: SiteDraft): SiteDraft {
   const v = clone(draft.values)
-  const t = new Set(draft.touched)
+  // Filled peaks are the user's choice through the helper, so they are sent.
+  const touched = fillFromRate(v, draft) && !draft.touched.includes('stages')
+    ? [...draft.touched, 'stages'] : draft.touched
+  const t = new Set(touched)
   const last = v.stages[v.stages.length - 1]?.peak_mw ?? 0
   // A blank field the derived value reads keeps the last good value, so the
   // problem shows on the field the user is editing, not on one they never set.
@@ -107,7 +141,7 @@ export function derive(draft: SiteDraft): SiteDraft {
       mw: byYear.get(s.year) ?? byIndex[i] ?? v.connection_mw,
     }))
   }
-  return { values: v, touched: draft.touched }
+  return { ...draft, values: v, touched }
 }
 
 export function initialDraft(form: SiteForm, type: SiteTypeId = 'industrial'): SiteDraft {
@@ -126,7 +160,7 @@ export function withSiteType(form: SiteForm, draft: SiteDraft, type: SiteTypeId)
   const values = clone(form.presets[type]) as unknown as Record<string, unknown>
   for (const p of draft.touched) setPath(values, p, clone(getPath(draft.values, p)))
   ;(values as unknown as SiteParams).site_type = type
-  return derive({ values: values as unknown as SiteParams, touched: draft.touched })
+  return derive({ ...draft, values: values as unknown as SiteParams })
 }
 
 /** Set one field (a parameter path, or a list path with the whole list). */
@@ -135,12 +169,29 @@ export function setField(draft: SiteDraft, path: string, value: unknown): SiteDr
   setPath(values, path, value)
   const p = touchPath(path)
   const touched = draft.touched.includes(p) ? draft.touched : [...draft.touched, p]
-  return derive({ values: values as unknown as SiteParams, touched })
+  return derive({ ...draft, values: values as unknown as SiteParams, touched })
 }
 
 export function setStage(draft: SiteDraft, i: number, key: keyof SiteStage, value: number): SiteDraft {
   const stages = draft.values.stages.map((s, j) => (j === i ? { ...s, [key]: value } : s))
-  return setField(draft, 'stages', stages)
+  // A later stage's typed peak wins over the growth rate for that stage.
+  const typed = draft.growth?.typed ?? []
+  const growth = key === 'peak_mw' && i > 0 && !typed.includes(i)
+    ? { pct: draft.growth?.pct ?? null, typed: [...typed, i] } : draft.growth
+  return setField({ ...draft, growth }, 'stages', stages)
+}
+
+/** Set or clear (null) the "grow from the first stage" rate. Clearing it
+ *  leaves the filled peaks as ordinary values, so nothing on screen moves. */
+export function setGrowth(draft: SiteDraft, pct: number | null): SiteDraft {
+  const growth = { pct, typed: draft.growth?.typed ?? [] }
+  return derive({ ...draft, growth })
+}
+
+/** Give a typed later stage back to the growth rate ("Back to the rate"). */
+export function resetStageToRate(draft: SiteDraft, i: number): SiteDraft {
+  if (!draft.growth) return draft
+  return derive({ ...draft, growth: { ...draft.growth, typed: draft.growth.typed.filter(j => j !== i) } })
 }
 
 export function addStage(draft: SiteDraft, bounds: SiteForm['bounds']): SiteDraft {
@@ -153,7 +204,11 @@ export function addStage(draft: SiteDraft, bounds: SiteForm['bounds']): SiteDraf
 
 export function removeStage(draft: SiteDraft, i: number): SiteDraft {
   if (draft.values.stages.length <= 1) return draft
-  return setField(draft, 'stages', draft.values.stages.filter((_, j) => j !== i))
+  const growth = draft.growth && {
+    ...draft.growth,
+    typed: draft.growth.typed.filter(j => j !== i).map(j => (j > i ? j - 1 : j)),
+  }
+  return setField({ ...draft, growth }, 'stages', draft.values.stages.filter((_, j) => j !== i))
 }
 
 export function setEnergization(draft: SiteDraft, i: number, mw: number): SiteDraft {
@@ -167,6 +222,10 @@ const fmt = (x: number) => `${Number(x.toPrecision(6))}`
 export function validate(draft: SiteDraft, bounds: SiteForm['bounds']): Record<string, string> {
   const v = draft.values
   const err: Record<string, string> = {}
+  const rate = draft.growth?.pct
+  if (rate != null && !growthUsable(rate)) {
+    err.growth_pct = 'Grow from the first stage: enter a number above -100 % per year.'
+  }
   const num = (key: string, x: number, lo: number, hi: number, open = false) => {
     if (!Number.isFinite(x)) err[key] = 'Enter a number.'
     else if (open ? x <= lo : x < lo) err[key] = open ? `Must be above ${fmt(lo)}.` : `Must be at least ${fmt(lo)}.`
@@ -256,7 +315,7 @@ export function presetSummary(p: SiteParams, figure: (x: number) => string): str
 
 /** The first field with a problem, in the order the form shows them. */
 export const FIELD_ORDER = [
-  'stages', 'load_profile', 'critical_share', 'connection_mw', 'energization', 'fault_level_mva',
+  'stages', 'growth_pct', 'load_profile', 'critical_share', 'connection_mw', 'energization', 'fault_level_mva',
   'existing.gensets', 'existing.pv_mw', 'existing.battery', 'existing.ups', 'candidates',
   'ride_through',
 ]
