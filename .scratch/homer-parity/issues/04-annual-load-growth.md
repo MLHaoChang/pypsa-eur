@@ -3,7 +3,7 @@
 
 # 04 — Load growth as a rate per year across the multi-year optimisation and the finance years
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: 04a open in #1604; 04b not started
 Model: Sonnet for 04a; Opus for 04b
 Reviewer: GK B (GK A only if adequacy/demand.py changes); UX for 04a
 Blocked by: 04b blocked by 04a

@@ -1,6 +1,6 @@
 # S1 pure reader and writer: gridspine/ingest/excel_layout.py, excel_export.py, excel_import.py
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: S1a merged (#1646); S1b open in #1732, ticket 04 in #1733
 Blocked by: GK A ruling on pypsa inside gridspine/ingest (core session PR1)
 
 See `../spec.md`.

@@ -3,7 +3,7 @@
 
 # 08 — Run inputs that fall back to a default without saying so
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: open in #1645
 Owner: builder session_01G7qCuo15kNsNqjAaBLjvmL
 Size: M
 Gated: GK B; UX
