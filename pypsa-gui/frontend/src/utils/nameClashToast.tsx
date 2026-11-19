@@ -20,7 +20,7 @@ export function showNameClashToast(name: string, openExisting: () => void,
     <div role="alert" data-testid="name-clash-toast"
       className="flex max-w-sm flex-col gap-2 rounded border border-border bg-surface px-3 py-2 text-[12px] text-text shadow-lg">
       <span>A project named <strong>{name}</strong> already exists, so nothing was created.</span>
-      <span className="flex gap-2">
+      <span className="flex flex-wrap gap-2">
         <button type="button" data-testid="name-clash-open"
           onClick={() => { toast.dismiss(t.id); openExisting() }}
           className="rounded bg-accent px-2 py-1 font-semibold text-white">
