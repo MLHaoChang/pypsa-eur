@@ -94,6 +94,9 @@ class FixedPlanSnapshot:
     # the screening's fidelity note (profiled units beyond K_EXACT netted).
     screening_units: list = field(default_factory=list)
     copt_fidelity_note: str | None = None
+    # Composed critical pockets (``critical_feeders.Pocket``), per snapshot;
+    # the certification adds their loss of supply to the MC LOLE.
+    critical_pockets: list = field(default_factory=list)
 
 
 # ── the hub's fleet, not the copper plate ─────────────────────────────────
@@ -173,6 +176,11 @@ class FleetScope:
     # WP4: common-mode events from opt-in Link data — one entry per import
     # Link that carries ``common_mode_rate`` (applied or not, with the reason).
     common_mode: list = field(default_factory=list)
+    # Walkthrough 2026-11-17 issue 02: Links inside the hub that are the only
+    # path to an eh_critical bus (``critical_feeders.critical_feeder_rows``).
+    critical_feeders: list = field(default_factory=list)
+    # Set by ``link_supply.loop_scope`` only: the copper-plate views' caveat.
+    loop_note: str | None = None
 
     @property
     def zonal(self) -> bool:
@@ -284,6 +292,7 @@ class FleetScope:
             "grid_areas": list(self.grid_areas),
             "copt_import_model": self.copt_import_model(),
             "copt_import_note": self.copt_import_note(),
+            "critical_feeders": [dict(r) for r in self.critical_feeders],
             "note": self.note,
         }
 
@@ -340,6 +349,25 @@ def _series(n, name: str, attr: str, default: float) -> np.ndarray:
 def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
                     boundary: dict | None = None,
                     keep_zero_capacity: bool = False) -> FleetScope:
+    """``_hub_fleet_scope`` plus the Links inside the hub that are the only
+    path to an ``eh_critical`` bus (``critical_feeders``, walkthrough
+    2026-11-17 issue 02): the copper plate merges every bus on the hub side,
+    so an outage of such a Link is never drawn by the MC itself."""
+    from services.adequacy.critical_feeders import critical_feeder_rows
+
+    scope = _hub_fleet_scope(n, overlay, sample_links=sample_links,
+                             boundary=boundary,
+                             keep_zero_capacity=keep_zero_capacity)
+    ex = set(scope.excluded_buses)
+    scope.critical_feeders = critical_feeder_rows(
+        n, hub_buses=[str(b) for b in n.buses.index if str(b) not in ex],
+        import_links=list(scope.import_links))
+    return scope
+
+
+def _hub_fleet_scope(n, overlay, *, sample_links: bool = True,
+                     boundary: dict | None = None,
+                     keep_zero_capacity: bool = False) -> FleetScope:
     """
     Split the network at the identified import Link(s) → ``FleetScope``.
 
@@ -1152,6 +1180,8 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                 # AFTER the loop: the note states import_firmness, which
                 # reads the `applied` flags the loop may just have cleared.
                 scope.note = _scope_note(scope, why)
+            snap.critical_pockets = _critical_pockets(network, scope, inputs,
+                                                      cfg=cfg)
         except Exception as exc:  # noqa: BLE001 — the reason is the payload
             snap.mc_error = f"MC snapshot refused: {exc}"
             snap.copt_error = snap.mc_error
@@ -1202,6 +1232,23 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
 
 
 # ── WP3: fmea_top ─────────────────────────────────────────────────────────
+
+def _critical_pockets(network, scope: FleetScope, inputs, *, cfg) -> list:
+    """The composed pockets' series, on the MC's own weights and horizon;
+    each composed row also gets its pocket's own h/yr and MWh/yr."""
+    from services.adequacy import critical_feeders as cf
+
+    pockets = cf.pocket_series(network, scope.critical_feeders, cfg=cfg)
+    years = float(getattr(inputs, "nyears", 0.0) or 0.0)
+    w = np.asarray(getattr(inputs, "weights", ()), dtype=float)
+    for p in pockets:
+        hours, energy = cf.pocket_terms([p], w)
+        for r in scope.critical_feeders:
+            if r["model"] == cf.COMPOSED and r["name"] in p.feeders:
+                r["lole_h"] = hours / years if years > 0 else None
+                r["eue_mwh"] = energy / years if years > 0 else None
+    return pockets
+
 
 def _flatten_mode(row: dict, *, rank: int) -> dict:
     fm = dict(row.get("failure_mode") or {})

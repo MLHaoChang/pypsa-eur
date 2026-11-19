@@ -134,4 +134,62 @@ def test_a_feeder_without_outage_data_adds_nothing():
     n.links.at["crit_feeder", "mttr_hours"] = float("nan")
     report = _run(n, _pack())
     assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)
-    assert report.sections["certification"].payload["verdict"] == "pass"
+    pay = report.sections["certification"].payload
+    assert pay["verdict"] == "pass"
+    # F5: not silent — the Link is named as taken never to fail.
+    assert [(f["name"], f["model"]) for f in pay["critical_feeders"]] == [
+        ("crit_feeder", "no_outage_data")]
+    assert "crit_feeder" in pay["critical_feeder_note"]
+    assert "never failing" in pay["critical_feeder_note"]
+
+
+def test_a_parallel_line_is_redundancy_and_adds_nothing():
+    n = _hub_with_one_critical_feeder()
+    n.add("Line", "crit_cable", bus0="island", bus1="crit", x=0.1, r=0.01,
+          s_nom=50.0)
+    report = _run(n, _pack())
+    pay = report.sections["certification"].payload
+    assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)
+    assert pay["critical_feeders"] == [] and pay["critical_feeder_note"] is None
+
+
+def test_a_critical_bus_with_its_own_units_is_named_not_composed():
+    n = _hub_with_one_critical_feeder()
+    n.add("Generator", "crit_backup", bus="crit", carrier="gas", p_nom=5.0,
+          marginal_cost=50.0, outage_rate_value=1e-9,
+          outage_rate_basis="EFORd", mttr_hours=1.0)
+    report = _run(n, _pack())
+    pay = report.sections["certification"].payload
+    assert [(f["name"], f["model"]) for f in pay["critical_feeders"]] == [
+        ("crit_feeder", "unsampled")]
+    assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)   # nothing added
+    assert "crit_feeder" in pay["critical_feeder_note"]
+
+
+@pytest.mark.live_solve
+def test_island_microgrid_certifies_the_hospital_feeder():
+    # The walkthrough's own case: Island Microgrid, its shipped 3 h/yr goal.
+    from project_templates.eh_templates import build_eh_microgrid
+
+    report = _run(build_eh_microgrid(), _pack())
+    sec = report.sections["certification"]
+    # Hand check: 0.01 × 8,760 h = 87.6 h/yr; the island fleet adds little.
+    assert report.mc_lole_h == pytest.approx(87.6, rel=0.05), sec.note
+    assert sec.payload["verdict"] == "fail"
+    [row] = sec.payload["critical_feeders"]
+    assert (row["name"], row["model"], row["buses"]) == (
+        "hospital_feeder", "composed", ["hospital"])
+    assert row["lole_h"] == pytest.approx(87.6, rel=0.01)
+
+
+def test_the_copper_plate_views_say_they_leave_the_feeder_out():
+    # GK A F8: the loops and Expert's Monte Carlo read `loop_scope`.
+    from services.adequacy.link_supply import assemble_fleet, loop_scope
+
+    n = _hub_with_one_critical_feeder()
+    notes = assemble_fleet(n, loop_scope(n)).fleet_notes
+    assert any("crit_feeder" in x and "certification does" in x for x in notes)
+    m = _hub_with_one_critical_feeder()
+    m.add("Line", "crit_cable", bus0="island", bus1="crit", x=0.1, s_nom=50.0)
+    assert not any("certification does" in x
+                   for x in assemble_fleet(m, loop_scope(m)).fleet_notes)

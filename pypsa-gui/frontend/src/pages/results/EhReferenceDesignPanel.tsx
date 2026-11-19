@@ -39,6 +39,8 @@ import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 import type { ZeroReason } from './fmea'
 import { CRITICALITY_PER_YEAR_LABEL } from './fmea'
+import { verdictWord } from '../hubDesign/verdictWords'
+import { plainIds } from '../hubDesign/plainWords'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
   {
@@ -1509,7 +1511,7 @@ export function EhReferenceDesignPanel() {
                     className={verdictTone(cert.verdict)}
                     title="MC LOLE certification (decision 2): certified only when the 95% CI upper bound is within the target"
                   >
-                    {cert.verdict === 'pass' ? 'Certified' : 'Not certified'}
+                    {verdictWord(cert.verdict)}
                     {' '}({cert.verdict}
                     {cert.target != null ? ` vs ${cert.target} h/yr` : ''})
                   </span>
@@ -1666,6 +1668,11 @@ export function EhReferenceDesignPanel() {
                         <span data-testid="eh-certification-ens">
                           <span className="text-muted">ENS target </span>
                           <span className="text-text">{certification.ens_met ? 'met' : 'missed'}</span>
+                        </span>
+                      )}
+                      {certification.critical_feeder_note && (
+                        <span data-testid="eh-certification-feeders" className="text-muted">
+                          {plainIds(certification.critical_feeder_note)}
                         </span>
                       )}
                       {importModelLabel(certification) && (

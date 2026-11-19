@@ -102,3 +102,27 @@ describe('statusTone', () => {
     expect(statusTone('skipped')).toBe('text-muted')
   })
 })
+
+describe('Expert says the verdict in the words Guided uses (asset-walk 2026-11-17)', () => {
+  async function renderWith(payload: Record<string, unknown>) {
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(report(payload))
+    const user = userEvent.setup()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><EhReferenceDesignPanel /></QueryClientProvider>)
+    await user.click(screen.getByTestId('eh-reference-design-toggle'))
+    await screen.findByTestId('eh-report')
+  }
+
+  it.each([['pass', 'Certified'], ['fail', 'Not certified'], ['inconclusive', 'Not decided']])(
+    '%s → "%s", as Guided headline says it', async (verdict, words) => {
+      await renderWith({ verdict, target_lole_h: 3 })
+      expect(screen.getByTestId('eh-certification-verdict').textContent!.startsWith(`${words} (`)).toBe(true)
+    })
+
+  it('names the must-stay-on feeder note in plain names', async () => {
+    await renderWith({ verdict: 'fail', target_lole_h: 3, mc_lole_h: 87.6,
+      critical_feeder_note: 'Must-stay-on feeders: added in closed form for hospital_feeder: …' })
+    expect(screen.getByTestId('eh-certification-feeders').textContent)
+      .toBe('Must-stay-on feeders: added in closed form for Hospital feeder: …')
+  })
+})

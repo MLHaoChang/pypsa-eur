@@ -1,0 +1,3 @@
+* Fix(pypsa-gui): The reliability study's certified expected shortfall now counts the hours a must-stay-on bus is cut off while its only feeder inside the site is out; the Island Microgrid's hospital feeder moves its result from 0.0 h/yr to about 88 h/yr. A must-stay-on bus with units of its own, or a feeder without outage data, is named in the result instead of being left out silently.
+
+* Fix(pypsa-gui): Improve states a dominant link's share of all ranked outage risk beside its share of the risk from links, and suggests a second feeder or backup supply when that link is the only path to a must-stay-on bus.

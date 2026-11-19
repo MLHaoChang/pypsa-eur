@@ -806,6 +806,8 @@ export interface EhFleetScope {
 
 /** `sections.certification.payload` from the mc_certify stage. */
 export interface EhCertificationPayload {
+  /** Must-stay-on feeders inside the hub, one sentence (walkthrough 2026-11-17 issue 02). */
+  critical_feeder_note?: string | null
   metric?: string
   target_lole_h?: number | null
   /** LOLE per YEAR (the report headline). */

@@ -498,6 +498,14 @@ def _stage_mc_certify(st: _Study) -> None:
             "not_established", None, "MC aborted — no verdict")
         return
 
+    # Walkthrough 2026-11-17 issue 02: a must-stay-on bus whose only feeder
+    # is out loses supply whatever the hub's fleet does; the copper-plate MC
+    # never draws that, so its hours are added here (`critical_feeders`).
+    from services.adequacy import critical_feeders as cf
+
+    feeders = list(scope.get("critical_feeders") or [])
+    res = cf.compose(res, list(frozen.critical_pockets or []),
+                     weights=inputs.weights, periods=inputs.periods)
     lole = float(res["lole_hours"])
     lo, hi = (float(x) for x in res["lole_ci"])
     floor = res.get("resolution_floor_h")
@@ -545,6 +553,13 @@ def _stage_mc_certify(st: _Study) -> None:
         "met_on_mean": met,
         "confident": confident,
         "ens_met": st.ens_met,
+        "critical_feeders": feeders,
+        "critical_feeder_note": cf.certification_note(feeders),
+        "critical_pocket_lole_h_per_year": (
+            res["critical_pocket_lole_hours"] / horizon_years
+            if "critical_pocket_lole_hours" in res else None),
+        "critical_pocket_eue_overlap_bound_mwh": res.get(
+            "critical_pocket_eue_overlap_bound_mwh"),
         "dsr_note": (
             "the LP plan uses demand response but the MC does not model it — "
             "this LOLE is pessimistic relative to the plan" if dsr_on else None),

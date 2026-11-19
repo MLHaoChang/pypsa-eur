@@ -5,6 +5,7 @@
 import type { EhReferenceDesignReport, EhReview } from '../../api/simulation'
 import { certificationHeadline, fmeaTopRows } from '../results/EhReferenceDesignPanel'
 import { displayName } from '../../utils/displayName'
+import { verdictWord } from './verdictWords'
 import { sectionMeta } from '../../layout/flowSections'
 
 type OkReview = Extract<EhReview, { status: 'ok' }>
@@ -51,18 +52,18 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
   const target = num(s.target_lole_h)
 
   if (verdict === 'fail' && lole != null && target != null) {
-    return `Not certified: about ${lole.toFixed(1)} h/yr of shortfall vs a ${g(target)} h/yr goal, driven by ${topRisk(report)}`
+    return `${verdictWord('fail')}: about ${lole.toFixed(1)} h/yr of shortfall vs a ${g(target)} h/yr goal, driven by ${topRisk(report)}`
   }
   if (verdict === 'inconclusive' && target != null) {
     const ci = interval(review, report)
     if (ci) {
-      return `Not decided: the shortfall estimate (${ci[0].toFixed(1)}–${ci[1].toFixed(1)} h/yr) straddles the ${g(target)} h/yr goal: more simulation runs would settle it.`
+      return `${verdictWord('inconclusive')}: the shortfall estimate (${ci[0].toFixed(1)}–${ci[1].toFixed(1)} h/yr) straddles the ${g(target)} h/yr goal: more simulation runs would settle it.`
     }
   }
   if (verdict === 'pass' && lole != null && target != null) {
     // A computed zero (below the one-decimal rounding) says so (UX audit M7).
-    return lole < 0.05 ? `Certified: no shortfall expected, under the ${g(target)} h/yr goal.`
-      : `Certified: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
+    return lole < 0.05 ? `${verdictWord('pass')}: no shortfall expected, under the ${g(target)} h/yr goal.`
+      : `${verdictWord('pass')}: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
   }
   if (lole != null && target == null) {
     return lole < 0.05 ? 'No reliability goal was set: the study expects no shortfall. Set a goal to certify.'

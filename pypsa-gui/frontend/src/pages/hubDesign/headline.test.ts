@@ -120,3 +120,13 @@ describe('riskName (UX S6, G1)', () => {
     expect(riskName('Main feeder')).toBe('Main feeder')
   })
 })
+
+describe('headline and Expert share one set of verdict words (EXPERT-GUIDED-1)', () => {
+  it.each([['pass', 'Certified:'], ['fail', 'Not certified:'], ['inconclusive', 'Not decided:']])(
+    '%s opens with "%s"', (verdict, words) => {
+      const r = report({ ...cert({ verdict, target_lole_h: 3, lole_h_per_year: 4, lole_ci: [2, 6] }),
+        mc_lole_h: 4 })
+      expect(headline(review({ verdict, mc_lole_h_per_year: 4, target_lole_h: 3 }), r)
+        .startsWith(words)).toBe(true)
+    })
+})
