@@ -180,6 +180,7 @@ def _confirm_destructive_tool(
     restriction_snapshot: dict | None = None,
     edit_card: dict | None = None,
     sweep_card: dict | None = None,
+    map_card: dict | None = None,
     repeat_card: dict | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, bool]:
     """
@@ -303,6 +304,8 @@ def _confirm_destructive_tool(
         card["edit_card"] = copy.deepcopy(edit_card)
     if sweep_card is not None:
         card["sweep_card"] = copy.deepcopy(sweep_card)  # LC-17, harness/sweep_card.py
+    if map_card is not None:
+        card["map_card"] = copy.deepcopy(map_card)  # homer-parity 03b, harness/system_map_card.py
     if repeat_card is not None:
         card["repeat_card"] = copy.deepcopy(repeat_card)  # issue 04 S5, harness/job_holds.py
     yield "tool_pending_confirmation", card
