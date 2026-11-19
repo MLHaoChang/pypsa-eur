@@ -238,6 +238,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('GET', '/api/projects/{name}/intent-comparison'),
             ('POST', '/api/projects/{name}/intent-comparison'),
             ('POST', '/api/projects/{name}/intent-comparison/abort'),
+            ('GET', '/api/projects/{name}/intent-comparison/defaults'),
         }),
     },
     {
