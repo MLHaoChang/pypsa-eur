@@ -294,7 +294,8 @@ class ImporterSpec:
     #: "module:function" taking a path and returning whether the file's
     #: content is this format; how ``for_file`` tells apart importers that
     #: share an extension (``.xlsx``). The module must not import the engine.
-    #: Empty: the importer is never chosen by content.
+    #: Empty: the importer is never chosen by content, and is the fallback
+    #: for its extension when no sniff claims the file.
     sniff: str = ""
 
     def __post_init__(self) -> None:
@@ -366,7 +367,6 @@ DECLARED: tuple[ImporterSpec, ...] = (
         display_name="Excel input workbook",
         extensions=(".xlsx",),
         help="A workbook with one sheet per asset type, as the app's own template exports it.",
-        sniff="gridspine.ingest.excel_layout:is_input_workbook",
     ),
     ImporterSpec(
         format_id="psse",
@@ -431,9 +431,12 @@ def for_extension(
 def for_file(path: Path, declared: Sequence[ImporterSpec] = DECLARED) -> ImporterSpec:
     """
     The one importer for the file at ``path``. Its extension decides when one
-    importer takes it; when several do (``.xlsx``), each one's sniff reads the
-    content and exactly one must claim it. None, or more than one, is
-    refused naming the candidates: the app never picks silently.
+    importer takes it. When several do (``.xlsx``), the sniffs read the
+    content: the one importer that claims it, or, when none does, the one
+    candidate without a sniff (the extension's own format, which then
+    refuses the file in its own words). A file two importers claim, or one
+    with no claim and no single fallback, is refused naming the candidates:
+    the app never picks between formats silently.
     """
     path = Path(path)
     candidates = for_extension(path.suffix or ".", declared)
@@ -448,12 +451,16 @@ def for_file(path: Path, declared: Sequence[ImporterSpec] = DECLARED) -> Importe
     claimed = [s for s in candidates if s.claims(path)]
     if len(claimed) == 1:
         return claimed[0]
-    names = ", ".join(s.display_name for s in (claimed or candidates))
     if claimed:
+        names = ", ".join(s.display_name for s in claimed)
         raise ImportFormatError(
             f"{path.name} reads as more than one format ({names}); "
             "it cannot be imported until it is only one"
         )
+    fallback = [s for s in candidates if not s.sniff]
+    if len(fallback) == 1:
+        return fallback[0]
+    names = ", ".join(s.display_name for s in candidates)
     raise ImportFormatError(
         f"{path.name} is not a file any of these importers recognise: {names}"
     )

@@ -334,7 +334,6 @@ def test_a_file_that_is_not_a_workbook_is_refused(tmp_path):
 def test_a_dgs_workbook_goes_to_dgs(tmp_path):
     path = workbook(V7, tmp_path / "v7.xlsx")
     assert ir.for_file(path).format_id == "dgs"
-    assert not L.is_input_workbook(path)
 
 
 def test_the_apps_workbook_goes_to_excel(tmp_path):
@@ -343,28 +342,23 @@ def test_the_apps_workbook_goes_to_excel(tmp_path):
     assert ir.for_file(path).format_id == "excel"
 
 
-def test_a_workbook_both_claim_is_refused_naming_both(tmp_path):
+def test_a_dgs_general_sheet_takes_the_workbook_to_dgs(tmp_path):
+    """Only DGS sniffs; the Excel input workbook is the .xlsx fallback."""
     path = _write(_network(False), tmp_path)
     wb = openpyxl.load_workbook(path)
     g = wb.create_sheet("General")
     g.append(["FID(a:40)", "Descr(a:40)", "Val(a:40)"])
     wb.save(path)
-    with pytest.raises(ImportFormatError) as e:
-        ir.for_file(path)
-    msg = str(e.value)
-    assert "more than one format" in msg
-    assert "PowerFactory export (DGS)" in msg and "Excel input workbook" in msg
+    assert ir.for_file(path).format_id == "dgs"
 
 
-def test_a_workbook_neither_claims_is_refused_naming_the_candidates(tmp_path):
+def test_a_workbook_dgs_does_not_claim_falls_back_to_excel(tmp_path):
+    """Excel then refuses it in its own words (S1b's older layouts land here)."""
     path = one_sheet(tmp_path, [HEAD], name="Data")
     wb = openpyxl.load_workbook(path)
     del wb["General"]
     wb.save(path)
-    with pytest.raises(
-        ImportFormatError, match="not a file any of these importers recognise"
-    ):
-        ir.for_file(path)
+    assert ir.for_file(path).format_id == "excel"
 
 
 @pytest.mark.parametrize(
@@ -478,7 +472,7 @@ def test_a_zip_that_is_not_a_workbook_is_refused(tmp_path):
         ImportFormatError, match="z.xlsx: The file is not a readable Excel workbook"
     ):
         read_dgs([path], {})
-    assert not is_dgs_workbook(path) and not L.is_input_workbook(path)
+    assert not is_dgs_workbook(path)
 
 
 def test_a_path_may_be_text(tmp_path):
@@ -518,19 +512,3 @@ def test_a_general_sheet_past_the_limits_is_not_dgs(tmp_path, monkeypatch):
     path = one_sheet(tmp_path, [HEAD])
     monkeypatch.setitem(L.LIMITS, "rows", 1)
     assert not is_dgs_workbook(path)
-
-
-@pytest.mark.parametrize(
-    "sheets", [["About"], ["Horizon and finance"], ["About", "Nodes"]]
-)
-def test_the_input_workbook_needs_both_marker_sheets(tmp_path, sheets):
-    wb = openpyxl.Workbook()
-    wb.active.title = sheets[0]
-    for s in sheets[1:]:
-        wb.create_sheet(s)
-    path = tmp_path / "w.xlsx"
-    wb.save(path)
-    assert not L.is_input_workbook(path)
-    wb.create_sheet("Horizon and finance" if "About" in sheets else "About")
-    wb.save(path)
-    assert L.is_input_workbook(path)

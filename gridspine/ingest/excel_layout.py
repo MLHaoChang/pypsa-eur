@@ -58,33 +58,6 @@ ABOUT, TIME_SERIES, HORIZON, LISTS = (
     "Horizon and finance",
     "Lists",
 )
-
-
-def is_input_sheetnames(names) -> bool:
-    """Whether a workbook with these sheet names is the app's input workbook."""
-    return ABOUT in names and HORIZON in names
-
-
-def is_input_workbook(path) -> bool:
-    """
-    Whether the workbook at ``path`` is the app's input workbook (its About
-    and Horizon sheets), for the import registry to route a ``.xlsx``; a file
-    that cannot be opened safely is not one.
-    """
-    from pathlib import Path
-
-    from gridspine.ingest import xlsx_safe
-
-    try:
-        wb = xlsx_safe.open_workbook(Path(path))
-    except ImportFormatError:
-        return False
-    try:
-        return is_input_sheetnames(wb.sheetnames)
-    finally:
-        wb.close()
-
-
 #: Hidden: uploaded profiles whose time steps differ from the project's (kept for the round trip).
 UPLOADED = "Uploaded profiles"
 UP_ROW_LIST, UP_ROW_ATTR, UP_ROW_ASSET, UP_ROW_META, UP_FIRST_DATA_ROW = 1, 2, 3, 4, 5

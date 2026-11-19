@@ -998,7 +998,7 @@ def read_excel(
     path = paths[0]
     report = ImportReport(source_format=FORMAT_ID, source_files=[path.name])
     sheets = _Sheets(path)
-    if not L.is_input_sheetnames(sheets.names):
+    if not (L.ABOUT in sheets.names and L.HORIZON in sheets.names):
         raise L.ImportFormatError(
             f"{path.name} is not the app's input workbook (it has no About and "
             f"'{L.HORIZON}' sheets). Download the template from the Import dialog and fill it in."
