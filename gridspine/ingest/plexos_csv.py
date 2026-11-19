@@ -37,6 +37,8 @@ from typing import IO
 import numpy as np
 import pandas as pd
 
+from gridspine.ingest.plexos_pattern import mask
+
 #: Windows locale ids (the Data File ``Locale`` attribute) whose short dates put
 #: the day first, and those that put the month first.
 DAY_FIRST_LOCALES = {2057: "en-GB", 3081: "en-AU", 5129: "en-NZ", 6153: "en-IE"}
@@ -304,8 +306,6 @@ def _by_pattern(
     covers. Two rows giving one snapshot different values, or a snapshot no
     row covers, leave the name unread.
     """
-    from gridspine.ingest.plexos_pattern import mask
-
     masks = []
     for i, pat in enumerate(body[key]):
         got = mask(pat.strip(), snapshots, step)
@@ -350,8 +350,6 @@ def _monthly(
     step: float,
 ) -> Result:
     """``NAME,M1..M12``: one row per object; a snapshot takes its month's value."""
-    from gridspine.ingest.plexos_pattern import mask
-
     months = []
     for i in range(1, 13):
         got = mask(f"M{i}", snapshots, step)

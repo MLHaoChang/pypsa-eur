@@ -265,8 +265,9 @@ def _windowed(row: PropertyRow) -> bool:
 
 
 def _when(raw: str) -> pd.Timestamp | None:
+    # ISO only, as t_date_from / t_date_to store it; "01/02/2015" is never guessed
     try:
-        t = pd.Timestamp(raw)
+        t = pd.to_datetime(raw, format="ISO8601")
     except (ValueError, TypeError):
         return None
     return None if pd.isna(t) else t
@@ -479,6 +480,7 @@ class _Converter:
         # timesliced group by the data_id of the row that stands for it
         self._slice_rows: dict[str, list[PropertyRow]] = defaultdict(list)
         self._groups: dict[str, tuple[PropertyRow | None, list[PropertyRow]]] = {}
+        self._slices: dict[str, np.ndarray | str] = {}  # filled by dated()
         self.names: dict[str, set[str]] = defaultdict(set)
         self.base: dict[tuple[str, str], dict[str, PropertyRow]] = defaultdict(dict)
         self.children: dict[tuple[str, str], dict[str, list[tuple[str, str]]]] = (

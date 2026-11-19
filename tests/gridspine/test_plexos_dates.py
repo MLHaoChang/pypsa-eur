@@ -120,6 +120,7 @@ def test_date_to_with_a_time_includes_the_snapshot_starting_at_it():
             "not rounded",
         ),
         (dated("soon"), "Date From 'soon' not read"),
+        (dated("01/02/2015"), "Date From '01/02/2015' not read"),
         (dated(date_to="soon"), "Date To 'soon' not read"),
     ],
 )
