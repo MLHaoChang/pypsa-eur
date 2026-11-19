@@ -417,3 +417,47 @@ def test_a_feeder_without_outage_data_keeps_the_generic_advice():
     dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
     assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
     assert "second feeder" not in dom["recommendation"]
+
+
+def test_a_composed_feeder_that_is_not_the_dominant_link_keeps_the_generic_advice():
+    rep = _island_fmea_report()
+    rep["sections"]["certification"]["payload"]["fleet_scope"][
+        "critical_feeders"][0]["name"] = "other_feeder"
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
+    assert "second feeder" not in dom["recommendation"]
+
+
+@pytest.mark.parametrize("cert", [None, {"status": "ok", "payload": None}])
+def test_no_certification_payload_keeps_the_generic_advice(cert):
+    # A report stored before the certification ran, or one that has none.
+    rep = _island_fmea_report()
+    rep["sections"]["certification"] = cert
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
+
+
+def test_a_feeder_row_without_buses_still_reads():
+    rep = _island_fmea_report()
+    rep["sections"]["certification"]["payload"]["fleet_scope"][
+        "critical_feeders"][0]["buses"] = None
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert "second feeder" in dom["recommendation"]
+    assert dom["evidence"]["feeds_critical_buses"] == []
+
+
+def test_zero_total_risk_has_no_share_of_all_ranked():
+    # Not reachable through review_report (no risk, no dominant mode), so
+    # the helper is pinned directly: 0 / 0 is no share, not a crash.
+    from services.adequacy.eh_review import _share_of_all_ranked
+
+    rows = [{"criticality_eur_per_year": 0.0}]
+    assert _share_of_all_ranked(0.0, rows, {"status": "ok", "rows": rows}) is None
+
+
+def test_class_a_without_rows_counts_the_links_alone():
+    rep = _island_fmea_report()
+    rep["sections"]["fmea_top"]["payload"]["class_a"] = {"status": "ok",
+                                                         "rows": None}
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert dom["evidence"]["share_of_all_ranked"] == pytest.approx(1.0)
