@@ -19,6 +19,9 @@ describe('the summary line', () => {
     expect(holdSummary('carriers', ['electricity', 'heat', 'hydrogen'].map(carrier)))
       .toBe('3 carriers: electricity, heat, hydrogen')
     expect(holdSummary('carriers', [carrier('electricity')])).toBe('1 carrier: electricity')
+    const recipe = { ...carrier('steel_making'), recipe: { label: 'Steel making' } } as unknown as FlowHeld
+    expect(holdSummary('carriers', [carrier('electricity'), carrier('steel'), recipe], 5))
+      .toBe('2 carriers: electricity, steel')
   })
 
   it('loads: the largest peak, never a sum of peaks', () => {

@@ -1,0 +1,22 @@
+{
+ "entries": [
+  {
+   "id": "eh_study_why",
+   "title": "Why a study figure has its value",
+   "disposition": "unbuilt",
+   "reason": "Why a study figure has its value is not in chat yet; a later guided-results slice adds the chat tool. Until then, the Adequacy tab in Expert Results shows the study's figures.",
+   "page": "Guided Results",
+   "panel": null,
+   "keywords": [
+    "shortfall",
+    "verdict"
+   ],
+   "routes": [
+    [
+     "GET",
+     "/api/results/eh_study/why/{figure}"
+    ]
+   ]
+  }
+ ]
+}

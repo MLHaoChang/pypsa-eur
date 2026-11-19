@@ -14,6 +14,7 @@ import pytest
 from gridspine.handoff import emt_pack
 from gridspine.handoff.emt_pack import (
     C_NOTE,
+    SCHEDULE_COLUMNS,
     EmtPackError,
     battery_from_campus,
     study_sources,
@@ -57,6 +58,12 @@ def pack(tmp_path, s=None, **kw):
 
 def rows(path, name):
     return json.loads((path / name).read_text())
+
+
+def grid_gaps(p):
+    """The to-be-supplied rows of the grid source (not the workbook's)."""
+    g = p.to_be_supplied
+    return g[g["sheet"].isin(["thevenin", "case_schedule"])]
 
 
 def by_label(p):
@@ -156,7 +163,7 @@ def test_a_case_without_zero_sequence_is_to_be_supplied_not_borrowed(tmp_path):
     p = pack(tmp_path, spec(x0x_min=None, r0x0_min=None))
     s = by_label(p)
     assert s["min"]["x0_ohm"] is None and s["min"]["z0_over_z1"] is None
-    gaps = p.to_be_supplied
+    gaps = grid_gaps(p)
     assert set(gaps.loc[gaps["sheet"] == "thevenin", "param"]) == {
         "x0x_min",
         "r0x0_min",
@@ -170,14 +177,14 @@ def test_a_case_without_zero_sequence_is_to_be_supplied_not_borrowed(tmp_path):
 def test_r0x0_zero_is_a_gap_not_an_infinite_ratio(tmp_path):
     p = pack(tmp_path, spec(r0x0_min=0.0))
     assert by_label(p)["min"]["x0_over_r0"] is None
-    assert list(p.to_be_supplied["param"]) == ["r0x0_min"]
+    assert list(grid_gaps(p)["param"]) == ["r0x0_min"]
 
 
 def test_without_a_max_zero_sequence_no_schedule_is_written(tmp_path):
     p = pack(tmp_path, spec(x0x_max=None, r0x0_max=None))
     assert not (p.path / "case_schedule.json").exists()
     assert not (p.path / "run_schedule.py").exists()
-    assert "x0x_max, r0x0_max" in set(p.to_be_supplied["param"])
+    assert "x0x_max, r0x0_max" in set(grid_gaps(p)["param"])
     assert p.manifest["case_ids"] == []
     with pytest.raises(EmtPackError, match="max case has no zero sequence"):
         battery_from_campus(build_campus(spec(x0x_max=None, r0x0_max=None)))
@@ -389,8 +396,18 @@ def test_model_set_id_only_when_passed(tmp_path):
 
 def test_manifest_cites_the_contract(tmp_path):
     m = json.loads((pack(tmp_path).path / "manifest.json").read_text())
-    assert m["channels"] == list(CHANNELS)
-    assert m["contract_version"] == emt_pack.CONTRACT_VERSION
+    # contract version 1: the schedule records no `connected` yet (GC-12, T1)
+    assert m["channels"] == [
+        "v_poc_pu",
+        "theta_poc_deg",
+        "f_hz",
+        "p_poc_mw",
+        "q_poc_mvar",
+        "id_pu",
+        "iq_pu",
+        "i_poc_pu",
+    ]
+    assert m["contract_version"] == emt_pack.EMT_CONTRACT_VERSION
     assert m["files"] and math.isfinite(m["vn_kv"])
 
 
@@ -399,12 +416,12 @@ def test_manifest_cites_the_contract(tmp_path):
 
 def test_normal_case_without_schema_zero_sequence_is_not_a_gap(tmp_path):
     p = pack(tmp_path, spec(sk_normal_mva=2500.0, rx_normal=0.11))
-    assert p.to_be_supplied.empty
+    assert grid_gaps(p).empty
 
 
 def test_x0x_without_r0x0_lists_only_the_missing_one(tmp_path):
     p = pack(tmp_path, spec(r0x0_min=None))
-    assert list(p.to_be_supplied["param"]) == ["r0x0_min"]
+    assert list(grid_gaps(p)["param"]) == ["r0x0_min"]
     assert by_label(p)["min"]["x0_ohm"] is None
 
 
@@ -536,4 +553,130 @@ def test_each_battery_corner_is_one_row(tmp_path):
 
 def test_r0x0_without_x0x_lists_only_the_missing_one(tmp_path):
     p = pack(tmp_path, spec(x0x_min=None))
-    assert list(p.to_be_supplied["param"]) == ["x0x_min"]
+    assert list(grid_gaps(p)["param"]) == ["x0x_min"]
+
+
+def test_json_files_have_sorted_keys(tmp_path):
+    p = pack(tmp_path)
+    for name in ("manifest.json", "thevenin_set.json", "case_schedule.json"):
+        text = (p.path / name).read_text()
+        assert text == json.dumps(json.loads(text), sort_keys=True, indent=1) + "\n", (
+            name
+        )
+
+
+# --- the generated mhi.pscad stub, run against a fake module (GC-06d) -----------
+
+
+class _FakeComponent:
+    def __init__(self, name, log):
+        self.name, self.log = name, log
+
+    def parameters(self, **kw):
+        self.log.append(("component", self.name, kw))
+
+
+class _FakeProject(_FakeComponent):
+    def find(self, name):
+        return _FakeComponent(name, self.log)
+
+    def run(self):
+        self.log.append(("run", self.name, {}))
+
+
+class _FakePscad:
+    def __init__(self, log):
+        self.log = log
+
+    def load(self, workspace):
+        self.log.append(("load", workspace, {}))
+
+    def project(self, name):
+        return _FakeProject(name, self.log)
+
+    def quit(self):
+        self.log.append(("quit", "", {}))
+
+
+def _run_stub(tmp_path, monkeypatch, argv=("ws.pswx", "plant")):
+    """Run the pack's stub in-process with ``mhi.pscad`` replaced by a fake."""
+    import importlib.util
+    import sys
+    import types
+
+    p = pack(tmp_path)
+    log = []
+    fake = types.ModuleType("mhi.pscad")
+    fake.launch = lambda: _FakePscad(log)
+    pkg = types.ModuleType("mhi")
+    pkg.pscad = fake
+    monkeypatch.setitem(sys.modules, "mhi", pkg)
+    monkeypatch.setitem(sys.modules, "mhi.pscad", fake)
+    spec_ = importlib.util.spec_from_file_location(
+        "run_schedule_under_test", p.path / "run_schedule.py"
+    )
+    mod = importlib.util.module_from_spec(spec_)
+    spec_.loader.exec_module(mod)
+    mod.main(list(argv))
+    return p, mod, log
+
+
+def test_stub_runs_one_project_run_per_case_with_the_case_id_as_output(
+    tmp_path, monkeypatch
+):
+    p, mod, log = _run_stub(tmp_path, monkeypatch)
+    cases = json.loads((p.path / "case_schedule.json").read_text())
+    assert len(cases) > 1
+    runs = [e for e in log if e[0] == "run"]
+    assert len(runs) == len(cases)
+    outputs = [
+        e[2]["output_filename"]
+        for e in log
+        if e[0] == "component" and e[1] == "plant" and "output_filename" in e[2]
+    ]
+    assert all(c["output_name"] == c["case_id"] for c in cases)
+    assert outputs == [c["case_id"] + ".out" for c in cases]
+    assert log[0][:2] == ("load", "ws.pswx")
+    assert log[-1][0] == "quit"
+    assert (p.path / "results").is_dir()
+
+
+def test_stub_sets_each_case_s_source_values_on_the_named_component(
+    tmp_path, monkeypatch
+):
+    p, mod, log = _run_stub(tmp_path, monkeypatch, ("ws.pswx", "plant"))
+    cases = json.loads((p.path / "case_schedule.json").read_text())
+    src = [e for e in log if e[0] == "component" and e[1] == "GRID_SOURCE"]
+    with_r = [c for c in cases if c.get("r_ohm") is not None]
+    assert with_r and len(src) == len(with_r)
+    for e, c in zip(src, with_r):
+        assert e[2]["R"] == c["r_ohm"] and e[2]["X"] == c["x_ohm"]
+        if c.get("r0_ohm") is None:
+            assert "R0" not in e[2]  # a case without zero sequence sets none
+
+
+def test_stub_only_reads_schedule_columns_the_pack_writes(tmp_path, monkeypatch):
+    p, mod, log = _run_stub(tmp_path, monkeypatch)
+    stub_columns = (
+        set(mod.SOURCE_KEYS) | set(mod.EVENT_KEYS) | {"t_end_s", "output_name"}
+    )
+    assert stub_columns <= set(SCHEDULE_COLUMNS), stub_columns - set(SCHEDULE_COLUMNS)
+    cases = json.loads((p.path / "case_schedule.json").read_text())
+    assert all(set(c) <= set(SCHEDULE_COLUMNS) for c in cases)
+    # the CSV the pack writes beside the JSON carries the same columns
+    header = (p.path / "case_schedule.csv").read_text().splitlines()[0]
+    assert header.split(",") == SCHEDULE_COLUMNS
+
+
+def test_stub_says_what_connected_means_only_when_the_contract_has_it(monkeypatch):
+    from gridspine.handoff.emt_pack import CONNECTED_NOTE, stub_text
+
+    monkeypatch.setattr(emt_pack, "EMT_CONTRACT_VERSION", "1")
+    assert "connected" not in stub_text(3)
+    monkeypatch.setattr(emt_pack, "EMT_CONTRACT_VERSION", "2")
+    text = stub_text(3)
+    assert text.count(CONNECTED_NOTE) == 1
+    head = ast.get_docstring(ast.parse(text))
+    assert CONNECTED_NOTE in head
+    assert "momentary cessation or current blocking is not a trip" in head
+    compile(text, "run_schedule.py", "exec")

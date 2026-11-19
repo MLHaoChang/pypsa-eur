@@ -67,3 +67,28 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
   - S2: the RMS/EMT note appears exactly once per strength row, and the existing `_scr_rows` stay byte-identical.
   - S3: only this package's wrappers, sections and two `RUN_STAGES` entries go into the service. A merge with GC-08 keeps both sets of entries.
 - Every PR: a release-note fragment, a GC-TEXT-1 grep of the diff, and the targeted mutants with their killing tests listed in the PR body.
+
+**2026-11-17, GK A2 PR2 delta GO.** The strength step uses a private campus→templates adapter, with S_k from the campus spec. Conditions:
+
+- T1: SCR uses the entered S_k'' without c. A test pins that at a PoC fed straight from the PCC, intact SCR = sk_min_mva / P_rated. An LV case (c_min = 0.95) shows whether c enters. If it does, divide it back out or state it in the row note; it never shifts the ratio silently.
+- T2: every IBR sgen is off for the strength fault levels, not only those on PoC buses. Gensets and synchronous machines stay in. A test checks that a second PoC's IBR k_sc does not move the first PoC's S_k.
+- T3: the adapter's intact S_k at the PCC equals campus_sc's min-case figure within 0.5 % on the hand fixture.
+- T4: the source is tagged "campus spec", and template defaults the spec does not give keep their assumed tags.
+- H1: unit and load Q come from the hourly slice, else from the spec pf. Failing both, q = 0 is stated as an assumption in the note. A test checks that load Q reaches the net.
+- H2: the import hour is `_vs_period`'s pick, or a test pins that it equals voltage_stability's.
+- H3: a capacitor bank on no PoC is subtracted at every PoC (worst case) and named in a note, or ESCR reads "unknown". One option is picked and tested.
+- H4: on the shared fixture, an islanding contingency reads fail (SCR 0 or not evaluated), never skipped. Tested.
+- H5: "Judged on normal ratings: no emergency rating given" appears in the row note, exactly once.
+
+**2026-11-17, GK A2 ruling (A) on the PR2 engine fix in `static/planning_criteria._lost`.** Conditions:
+
+- L1: each unit is clipped at 0 before the sum; a test with +5 and −3 gives 5.
+- L2: a removed charging draw is not load lost; the note "charging storage lost: X MW of draw removed" is pinned by a test.
+- L3: any other sgen sum in the module is clipped or its netting justified.
+- L4: the PR body and release note name it as an engine change, and `tests/gridspine/test_planning_criteria.py` runs in full.
+
+**2026-11-17, GK A2 minor CSV notes folded into PR2:** an N-2 row naming the same branch twice is listed `not_representable`; an `order` other than 1 or 2 (0 included) is refused by name with its line.
+
+**2026-11-17, GK A2 ruling on P4: (A).** P4's intent is that no shared `campus_study.py` code changes. Private `_gc03_*` helpers and GC-03 constants beside the two steps meet it. Conditions: every addition is `_gc03_`-prefixed or a GC-03 constant; no existing line in `campus_study.py` changes; the PR body states "campus_study.py: additive only (+N/−0)".
+
+**2026-11-17, GK A2 ruling on T2: (A).** pandapower's IEC 60909 minimum case adds no sgen current, and the campus carries a genset as an sgen, so S_k''min is grid-only (the conservative minimum-generation case). Conditions: `GENSET_SK_NOTE` appears only when a genset exists (tested both ways); the "gensets in" wording is gone everywhere; S_k is pinned unchanged with a genset on a PoC bus and off one. Option B (genset as a synchronous `gen` with K_G) is filed as `13-genset-in-strength-fault-level.md` (renumbered from 10 by the coordinator) (needs-triage).

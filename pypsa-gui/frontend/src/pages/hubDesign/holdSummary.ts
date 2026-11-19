@@ -68,6 +68,12 @@ function counted<T extends string>(items: T[]): string[] {
 
 /** The section's summary line; null when it holds nothing (its own empty state shows). */
 export function holdSummary(section: FlowSectionId, holds: FlowHeld[], total?: number): string | null {
+  if (section === 'carriers' && holds.some(h => h.recipe)) {
+    // Section 2 also holds process recipes, listed after every carrier: they are
+    // not carriers, and a shown recipe means every carrier was shown too.
+    holds = holds.filter(h => !h.recipe)
+    total = holds.length
+  }
   if (holds.length === 0) return null
   const all = Math.max(total ?? 0, holds.length)
   const fields: string[] = []

@@ -38,6 +38,7 @@ import dataclasses
 import hashlib
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -51,6 +52,7 @@ from models.business_case import (
     LineItem,
     LinkedOutputMissing,
     NameDuplicate,
+    VolumeFactorUnclassified,
 )
 from services.business_case.linked_outputs import (
     LostProductionMap,
@@ -141,6 +143,139 @@ def _linked_q(out: Series | NotEvaluated | None, year: int) -> float | None:
     if not isinstance(out, Series):
         return None
     return out.for_year(year)
+
+
+# ── the volume factor (BC 15, ruling 6) ──────────────────────────────────────
+
+#: The linked-output kinds that are served volume: a volume factor scales them. A test
+#: pins each catalogue kind to exactly one of the two sets, so a new kind fails closed.
+VOLUME_KINDS = frozenset(
+    {
+        "served_product",
+        "served_h2",
+        "shipped",
+        "derived_o2",
+        "served_load",
+        "it_energy",
+        # The billed share of contracted IT kW is the spec's "contracted kW × lease-up".
+        "contracted_it_kw",
+    }
+)
+#: Installed capacity is not volume: lease-up never scales it.
+FIXED_KINDS = frozenset({"capacity"})
+#: Exported energy is generation-side: lower served load need not lower it (as the
+#: `energy_export` row), so a lease-up refuses a line on it.
+UNDETERMINED_KINDS = frozenset({"export"})
+
+#: The volume class of each IC ledger stream (ruling 6, review-gk.md
+#: "homer-parity 04"). `scale` moves with the served volume, `fixed` does not;
+#: `undetermined` (generation-side, not load-proportional) refuses under a factor below full volume. A test pins the keys to
+#: the ledger's `STREAM_CLASS` (exact set), so a new stream fails closed.
+#: Each `scale` row's basis (GK B2 V2):
+#: - energy_import, network_energy: the per-kWh import tariff item
+#:   (`commercial/participants.py` `_item_stream`), per MWh of metered import;
+#: - certificates, tax: the `certificate` and `tax_levy` tariff kinds, unit per kWh of
+#:   metered import (`commercial/tariff_engine.py`); income tax is the engine's, never a row;
+#: - demand_charge: per peak kW-month (`tariff_engine.py` accepts only `per_kw_month`),
+#:   scaled as if the peak scales with the factor;
+#: - vom, fuel, lost_production: solved dispatch × the LP's cost (`results/value_flows.py`);
+#: - energy_wholesale: imported MWh × the market price (`value_flows.py` `_import_cost`).
+#: Pro rata only: the dispatch is not re-solved at reduced load (`VOLUME_FACTOR_NOTE`).
+STREAM_VOLUME_CLASS: dict[str, str] = {
+    "energy_import": "scale",
+    "network_energy": "scale",
+    "certificates": "scale",
+    "tax": "scale",
+    "demand_charge": "scale",
+    "vom": "scale",
+    "fuel": "scale",
+    "lost_production": "scale",
+    "energy_wholesale": "scale",
+    "network_capacity": "fixed",
+    "retail_fixed": "fixed",
+    "fom": "fixed",
+    "other": "fixed",
+    "capex": "fixed",
+    "lease": "fixed",
+    "eaas_fee": "fixed",
+    "dr_availability": "fixed",
+    "energy_export": "undetermined",
+    "ppa_settlement": "undetermined",
+    "cfd_settlement": "undetermined",
+    "ancillary": "undetermined",
+    "dr_activation": "undetermined",
+}
+
+
+def _volume_line(ln: LineItem) -> bool:
+    """A linked operating line on served volume. An undetermined kind, or one in no
+    set, refuses."""
+    if ln.source != "linked":
+        return False
+    kind = _output_id(ln).partition(".")[0]
+    if kind in VOLUME_KINDS:
+        return True
+    if kind in FIXED_KINDS:
+        return False
+    raise VolumeFactorUnclassified(f"linked:{kind}")
+
+
+def _ic_scaled(ln: TemplateLine, f: float) -> TemplateLine:
+    """An IC row in a year whose volume factor is `f` < 1 (ruling 6)."""
+    cls = STREAM_VOLUME_CLASS.get(ln.stream, "undetermined")
+    if cls == "fixed" or ln.amount is None:
+        return ln
+    q = ln.price_qty_mwh
+    if cls == "scale":
+        # A difference line's quantity is scaled with it, so both legs move together.
+        return dataclasses.replace(
+            ln,
+            amount=_finite(ln.amount * f),
+            price_qty_mwh=None if q is None else _finite(q * f),
+        )
+    # A zero row passes; a difference line nets to zero only in its money year, so its
+    # quantity must be zero too.
+    if ln.amount == 0.0 and not q:
+        return ln
+    raise VolumeFactorUnclassified(ln.stream)
+
+
+#: The basis every lease-up report and workbook states (GK B2 BC 15 V1).
+VOLUME_FACTOR_NOTE = (
+    "volume-tied costs and revenue scaled pro rata by the factor; "
+    "the dispatch was not re-solved at reduced load"
+)
+
+
+def volume_factor_display(
+    inputs: BusinessCaseInputs, operating_years: Iterable[int]
+) -> dict[str, object]:
+    """The report's lease-up display keys (BC 15): each operating year below full volume,
+    the basis note, and each stated year outside the operating years, which changes
+    nothing and is named as ignored (GK B2 C3). Empty for a full-volume case with no
+    such year, so its report is as it was."""
+    ops = {int(y) for y in operating_years}
+    out: dict[str, object] = {}
+    scaled = volume_factors_below_full(inputs, sorted(ops))
+    if scaled:
+        out["volume_factor"] = {str(y): f for y, f in scaled.items()}
+        out["volume_factor_note"] = VOLUME_FACTOR_NOTE
+    ignored = sorted(y for y in inputs.volume_factor_by_year if y not in ops)
+    if ignored:
+        out["volume_factor_ignored"] = ignored
+    return out
+
+
+def volume_factors_below_full(
+    inputs: BusinessCaseInputs, years: Iterable[int]
+) -> dict[int, float]:
+    """The operating years whose volume factor is below full volume (BC 15)."""
+    out = {}
+    for y in years:
+        f = inputs.volume_factor_at(int(y))
+        if f != 1.0:
+            out[int(y)] = f
+    return out
 
 
 def _quantity(ln: LineItem, year: int, outputs: dict) -> float | None:
@@ -393,10 +528,12 @@ def _templates(
     *,
     with_ic: bool = True,
     drops: dict | None = None,
+    lease_up: dict[int, float] | None = None,
 ) -> tuple:
     """One template per timeline year: the IC template in force that year, so its
     energy, storage and money year stay, less the `lost_production` a line supersedes
-    that year (G3), plus that year's business-case lines."""
+    that year (G3), each dispatched-volume row scaled by that year's volume factor
+    (BC 15), plus that year's business-case lines."""
     out = []
     for t, y in zip(_templates_by_year(ic, tl), tl.years):
         own: tuple = ()
@@ -410,6 +547,9 @@ def _templates(
                 )
                 if x is not None
             )
+            f = (lease_up or {}).get(int(y))
+            if f is not None:
+                own = tuple(_ic_scaled(ln, f) for ln in own)
         out.append(
             dataclasses.replace(
                 t, first_year=int(y), lines=tuple(own) + tuple(by_year.get(int(y), ()))
@@ -438,6 +578,7 @@ def build_business_case(
     inputs.require_runnable(horizon=horizon, base_year=base)
     _refuse_clashes(ic_case, inputs, outputs)
     drops = _drops(ic_case, tl, inputs.lines, horizon, lost_production)
+    lease_up = volume_factors_below_full(inputs, ops)
     fin = ic_case.inputs
     r_capex = fin.escalation.get("capex")
     lines = inputs.lines
@@ -452,6 +593,8 @@ def build_business_case(
             if not first <= y <= last:
                 continue
             q, pc = _quantity(ln, y, outputs), ln.cell("price", y)
+            if q is not None and y in lease_up and _volume_line(ln):
+                q *= lease_up[y]
             amount = _finite(
                 None if q is None or pc.value is None else _SIGN[ln.kind] * q * pc.value
             )
@@ -560,7 +703,7 @@ def build_business_case(
         inputs=fin.model_copy(
             update={"depreciation_class_by_asset": dep, "replacement_capex": rep}
         ),
-        templates=_templates(ic_case, tl, by_year, drops=drops),
+        templates=_templates(ic_case, tl, by_year, drops=drops, lease_up=lease_up),
         assets=tuple(assets),
         asset_cod=cod,
         counterfactual=(),
@@ -624,7 +767,8 @@ def business_case_hash(
     lost_production: LostProductionMap | None = None,
 ) -> str:
     """The business case's own digest (G-C6). It covers `preset_id@version`, the lines,
-    `receivable_days`, each linked line's bound solve, the lost-production map the G3
+    `receivable_days`, the volume factor of each operating year below full volume, each
+    linked line's bound solve, the lost-production map the G3
     drop reads, and the IC case it runs on. No IC digest reads it.
 
     The IC case enters as its inputs and owner, never its counterfactual: a reference
@@ -644,6 +788,11 @@ def business_case_hash(
             if ln.source == "linked"
         },
     }
+    lease_up = volume_factors_below_full(inputs, ops)
+    if lease_up:
+        # Only the operating years it scales, so a full-volume case keeps its digest
+        # (BC 15; a digest gate enters only when it changes an outcome, GK B (49)).
+        blob["volume_factor"] = sorted([y, float(f)] for y, f in lease_up.items())
     lp = lost_production
     if (
         lp is not None
