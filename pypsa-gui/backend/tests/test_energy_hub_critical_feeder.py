@@ -153,17 +153,116 @@ def test_a_parallel_line_is_redundancy_and_adds_nothing():
     assert pay["critical_feeders"] == [] and pay["critical_feeder_note"] is None
 
 
-def test_a_critical_bus_with_its_own_units_is_named_not_composed():
-    n = _hub_with_one_critical_feeder()
+def _with_backup(n):
     n.add("Generator", "crit_backup", bus="crit", carrier="gas", p_nom=5.0,
           marginal_cost=50.0, outage_rate_value=1e-9,
           outage_rate_basis="EFORd", mttr_hours=1.0)
+    return n
+
+
+def test_a_critical_bus_with_its_own_units_is_bounded_not_composed():
+    # GK A F6': the pocket's own units are not simulated, so its composed
+    # figure (units ignored) is an upper bound: 87.6 h/yr > 3 h/yr, so the
+    # verdict is "inconclusive", never "fail", and nothing is added.
+    report = _run(_with_backup(_hub_with_one_critical_feeder()), _pack())
+    pay = report.sections["certification"].payload
+    note = report.sections["certification"].note
+    [row] = pay["critical_feeders"]
+    assert (row["name"], row["model"], row["upper_bound"]) == (
+        "crit_feeder", "unsampled", True)
+    assert row["lole_h"] == pytest.approx(87.6, rel=0.01)
+    assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)   # nothing added
+    assert pay["verdict"] == "inconclusive", note
+    assert pay["confident"] is False
+    assert "crit" in note and "87.6 h/yr" in note
+    assert "own units not counted" in note and "second feeder" in note
+    assert "upper bound" in pay["critical_feeder_note"]
+
+
+def test_a_bound_under_the_goal_does_not_block_a_pass():
+    # 1e-5 × 8,760 ≈ 0.09 h/yr even with the backup ignored: under 3 h/yr.
+    report = _run(_with_backup(_hub_with_one_critical_feeder(feeder_rate=1e-5)),
+                  _pack())
+    pay = report.sections["certification"].payload
+    assert pay["verdict"] == "pass", report.sections["certification"].note
+    assert pay["critical_feeders"][0]["lole_h"] == pytest.approx(0.0876, rel=0.02)
+
+
+def test_the_bound_is_the_composed_figure_for_the_same_feeder():
+    composed = _run(_hub_with_one_critical_feeder(), _pack())
+    bounded = _run(_with_backup(_hub_with_one_critical_feeder()), _pack())
+    [c] = composed.sections["certification"].payload["critical_feeders"]
+    [b] = bounded.sections["certification"].payload["critical_feeders"]
+    assert (c["model"], b["model"]) == ("composed", "unsampled")
+    assert b["lole_h"] == pytest.approx(c["lole_h"], rel=1e-9)
+    assert b["eue_mwh"] == pytest.approx(c["eue_mwh"], rel=1e-9)
+
+
+def test_a_chained_feeder_has_no_bound_and_withholds_a_pass():
+    # island → mid (no supply) → crit: no closed-form bound, so a reliable
+    # pair of feeders still cannot certify.
+    n = _hub_with_one_critical_feeder(feeder_rate=1e-5)
+    n.add("Bus", "mid", carrier="AC")
+    n.links.at["crit_feeder", "bus0"] = "mid"
+    n.add("Link", "mid_feeder", bus0="island", bus1="mid", p_nom=20.0,
+          efficiency=1.0, carrier="AC")
+    n.links.at["mid_feeder", "eh_role"] = ""
+    n.links.at["mid_feeder", "outage_rate_value"] = 1e-5
+    n.links.at["mid_feeder", "mttr_hours"] = 8.0
     report = _run(n, _pack())
     pay = report.sections["certification"].payload
-    assert [(f["name"], f["model"]) for f in pay["critical_feeders"]] == [
-        ("crit_feeder", "unsampled")]
-    assert report.mc_lole_h == pytest.approx(0.0, abs=1e-6)   # nothing added
-    assert "crit_feeder" in pay["critical_feeder_note"]
+    assert [(f["name"], f["chained"]) for f in pay["critical_feeders"]] == [
+        ("crit_feeder", True)]
+    assert pay["verdict"] == "inconclusive"
+    assert "crit_feeder" in report.sections["certification"].note
+
+
+def _dc_pack(target_lole_h: float = 25.0):
+    # The template's recommended pack. The hub alone is about 15 h/yr (CI
+    # upper ≈ 21 h/yr) at these draws, so a 25 h/yr goal isolates the bound.
+    from models.energy_hub import default_weak_flexible_pack
+
+    base = default_weak_flexible_pack()
+    return base.model_copy(update={
+        "availability": AvailabilityTarget(
+            ens_cap_permyriad=10.0, target_lole_h=target_lole_h,
+            certification_metric="mc_lole"),
+        "levers": base.levers.model_copy(update={"storage_duration": False}),
+        "mc_draws": 200,
+    })
+
+
+def _dc(rate=None):
+    from project_templates.eh_templates import build_eh_datacenter
+
+    n = build_eh_datacenter()
+    if rate is not None:
+        n.links.at["site_transformer", "outage_rate_value"] = rate
+    return n
+
+
+@pytest.mark.live_solve
+def test_data_centre_transformer_bound_as_shipped_is_inconclusive():
+    # site_transformer q = 0.005: 0.005 × 8,760 = 43.8 h/yr bound; with the
+    # hub's ≈ 21 h/yr that is over the 25 h/yr goal.
+    report = _run(_dc(), _dc_pack())
+    sec = report.sections["certification"]
+    [row] = sec.payload["critical_feeders"]
+    assert (row["name"], row["model"], row["upper_bound"]) == (
+        "site_transformer", "unsampled", True)
+    assert row["lole_h"] == pytest.approx(43.8, rel=0.01)
+    assert sec.payload["verdict"] == "inconclusive", sec.note
+    assert "it_bus" in sec.note
+
+
+@pytest.mark.live_solve
+def test_data_centre_transformer_bound_under_the_goal_passes():
+    # 1e-5 × 8,760 ≈ 0.09 h/yr: the hub's ≈ 21 h/yr stays under 25 h/yr.
+    report = _run(_dc(rate=1e-5), _dc_pack())
+    sec = report.sections["certification"]
+    assert sec.payload["critical_feeders"][0]["lole_h"] == pytest.approx(
+        0.0876, rel=0.02)
+    assert sec.payload["verdict"] == "pass", sec.note
 
 
 @pytest.mark.live_solve

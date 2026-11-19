@@ -94,7 +94,7 @@ class FixedPlanSnapshot:
     # the screening's fidelity note (profiled units beyond K_EXACT netted).
     screening_units: list = field(default_factory=list)
     copt_fidelity_note: str | None = None
-    # Composed critical pockets (``critical_feeders.Pocket``), per snapshot;
+    # Composed and bounded critical pockets (``critical_feeders.Pocket``), per snapshot;
     # the certification adds their loss of supply to the MC LOLE.
     critical_pockets: list = field(default_factory=list)
 
@@ -1234,8 +1234,9 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
 # ── WP3: fmea_top ─────────────────────────────────────────────────────────
 
 def _critical_pockets(network, scope: FleetScope, inputs, *, cfg) -> list:
-    """The composed pockets' series, on the MC's own weights and horizon;
-    each composed row also gets its pocket's own h/yr and MWh/yr."""
+    """The composed and bounded pockets' series, on the MC's own weights and
+    horizon; each of their rows also gets its pocket's own h/yr and MWh/yr
+    (for a bounded row an upper bound, its ``upper_bound`` flag set)."""
     from services.adequacy import critical_feeders as cf
 
     pockets = cf.pocket_series(network, scope.critical_feeders, cfg=cfg)
@@ -1244,7 +1245,7 @@ def _critical_pockets(network, scope: FleetScope, inputs, *, cfg) -> list:
     for p in pockets:
         hours, energy = cf.pocket_terms([p], w)
         for r in scope.critical_feeders:
-            if r["model"] == cf.COMPOSED and r["name"] in p.feeders:
+            if r["model"] != cf.NO_OUTAGE_DATA and r["name"] in p.feeders:
                 r["lole_h"] = hours / years if years > 0 else None
                 r["eue_mwh"] = energy / years if years > 0 else None
     return pockets

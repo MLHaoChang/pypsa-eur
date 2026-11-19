@@ -517,6 +517,14 @@ def _stage_mc_certify(st: _Study) -> None:
     verdict, note = certification_verdict(
         lole_ci=(lo, hi), target_h=target_h, resolution_floor_h=floor,
         n_samples=res.get("n_samples"), ens_met=st.ens_met)
+    # GK A F6': pockets with units of their own (or chained) can still break
+    # a pass this run cannot see; their upper bound decides.
+    verdict, note = cf.bounded_verdict(
+        verdict, note, hi=hi, pockets=list(frozen.critical_pockets or []),
+        rows=feeders, weights=inputs.weights, target_h=target_h,
+        years=horizon_years)
+    if verdict != "pass" and confident:
+        confident = False
     dsr_on = bool(getattr(st.cfg, "dsr_buses", None)) and float(
         getattr(st.cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0) > 0
     payload = {

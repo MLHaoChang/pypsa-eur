@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from services.adequacy.critical_feeders import Pocket, compose
+from services.adequacy.critical_feeders import Pocket, bounded_verdict, compose
 
 
 def _res(lole, ci, eue, by_period=None):
@@ -67,3 +67,33 @@ def test_each_period_composes_on_its_own_weights():
 def test_no_pocket_leaves_the_result_as_it_was():
     res = _res(1.0, (0.5, 1.5), 2.0)
     assert compose(res, [], weights=np.ones(3), periods=()) is res
+
+
+def test_a_bounded_pocket_is_not_composed():
+    out = compose(_res(1.0, (0.5, 1.5), 2.0),
+                  [Pocket(["h"], ["f"], 0.5, np.ones(10), bound=True)],
+                  weights=np.ones(10), periods=())
+    assert out["lole_hours"] == 1.0 and out["lole_ci"] == [0.5, 1.5]
+
+
+@pytest.mark.parametrize("hi, u, want", [
+    (1.0, 0.1, "pass"),           # 1 + 0.1 × 10 = 2 ≤ 2
+    (1.0, 0.2, "inconclusive"),   # 1 + 2 = 3 > 2
+])
+def test_the_bound_plus_the_ci_upper_bound_decides_a_pass(hi, u, want):
+    rows = [{"name": "f", "model": "unsampled", "chained": False,
+             "upper_bound": True, "buses": ["h"]}]
+    v, note = bounded_verdict(
+        "pass", None, hi=hi,
+        pockets=[Pocket(["h"], ["f"], u, np.ones(10), bound=True)],
+        rows=rows, weights=np.ones(10), target_h=2.0, years=1.0)
+    assert v == want
+    assert (note is None) == (want == "pass")
+
+
+def test_a_bound_never_turns_a_verdict_into_a_pass_or_a_fail():
+    p = [Pocket(["h"], ["f"], 0.9, np.ones(10), bound=True)]
+    for v in ("fail", "inconclusive", None):
+        assert bounded_verdict(v, "n", hi=0.0, pockets=p, rows=[],
+                               weights=np.ones(10), target_h=2.0,
+                               years=1.0) == (v, "n")
