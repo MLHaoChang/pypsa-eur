@@ -1388,7 +1388,7 @@ function SeededByKPI({ seededBy }: { seededBy: string[] }) {
   const n = seededBy.length
   if (n === 0) return <KPI label="Seeded by" value="Flat start" hint="No active phase-shifting transformer: the flow started flat." />
   return (
-    <KPI label="Seeded by" value="lpf()" sub={`${n} phase-shifting ${n === 1 ? 'transformer' : 'transformers'}`}
+    <KPI label="Seeded by" value="Linear estimate" sub={`${n} phase-shifting ${n === 1 ? 'transformer' : 'transformers'}`}
       hint={`lpf() seeded the flow because these transformers shift phase: ${seededBy.join(', ')}`} />
   )
 }
