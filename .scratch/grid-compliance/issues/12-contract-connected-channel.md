@@ -3,7 +3,7 @@
 
 # GC-12 Channel contract: a breaker / trip status channel
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: PR-A merged (#1647); PR-C open in #1650, PR-D in #1708; left: PR-B PSS/E CSV `connected` export
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07, GK A2 condition K3)
 Gated: yes (GK A, gridspine)

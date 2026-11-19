@@ -496,10 +496,7 @@ def test_reader_and_registry_import_without_pypsa():
 #: Cases whose exact equality waits on a writer fix: id -> ticket. They are not skipped:
 #: the test pins today's error at exactly WINDV2**2, so the fix turns it red and the
 #: case moves to the equality branch.
-_PENDING = {
-    "hv": "#1609: GC-04 raw_writer.trafo_impedance WINDV2² fix",
-    "lv": "#1609: GC-04 raw_writer.trafo_impedance WINDV2² fix",
-}
+_PENDING: dict[str, str] = {}
 
 
 @pytest.mark.parametrize("tap_side", ["hv", "lv"])
@@ -926,3 +923,48 @@ def test_v35_branch_name_used_when_set(tmp_path, rev):
         ],
     ).network
     assert list(n.lines.index) == ["FEEDER", "Line A - B 2"]
+
+
+# ---------------------------------------------------------------- repeated PSS/E identities (issue 03)
+_LOAD = "2,'1',1,1,1,10.0,2.0"
+
+
+@pytest.mark.parametrize(
+    "sections, match",
+    [
+        (
+            {"BRANCH": [_LINE, "1,2,'1',0.02,0.2,0.0,100.0"]},
+            "RAW line 12: branch 1-2 circuit '1' repeats the one at RAW line 11",
+        ),
+        (
+            {"BRANCH": [_LINE, "2,1,'1',0.02,0.2,0.0,100.0"]},
+            "RAW line 12: branch 2-1 circuit '1' repeats the one at RAW line 11",
+        ),
+        (
+            {"GENERATOR": [_SWING, _SWING]},
+            "RAW line 10: generator '1' at bus 1 repeats the one at RAW line 9",
+        ),
+        (
+            {"LOAD": [_LOAD, _LOAD]},
+            "RAW line 8: load '1' at bus 2 repeats the one at RAW line 7",
+        ),
+    ],
+    ids=["branch", "branch-reversed", "generator", "load"],
+)
+def test_repeated_identity_is_refused_naming_both_lines(tmp_path, sections, match):
+    """A parallel circuit with the same CKT would share a name and be lost (issue 03)."""
+    base = {"BUS": _BUSES, "GENERATOR": [_SWING], "BRANCH": [_LINE]}
+    with pytest.raises(ImportFormatError, match=match):
+        _case(tmp_path, **(base | sections))
+
+
+def test_parallel_circuits_with_distinct_ckt_are_both_kept(tmp_path):
+    res = _case(
+        tmp_path,
+        BUS=_BUSES,
+        GENERATOR=[_SWING],
+        BRANCH=[_LINE, "1,2,'2',0.02,0.2,0.0,100.0", "2,1,'3',0.03,0.3,0.0,100.0"],
+    )
+    n = res.network
+    assert len(n.lines) == res.report.counts["Lines"] == 3
+    assert n.lines["r"].nunique() == 3
