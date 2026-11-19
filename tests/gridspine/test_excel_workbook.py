@@ -2113,3 +2113,300 @@ def test_the_formula_pass_stops_at_the_cell_limit(tmp_path, monkeypatch):
     with pytest.raises(L.ImportLimitError) as e:
         _read(path)
     assert e.value.limit == "cells"
+
+
+# ── GK B 67 on #1732: what PyPSA's own layout reads outside the component sheets ──
+
+_NOT_INPUT = "not an input of this kind of asset; the column was not read"
+_NOT_SETTING = "not a network setting this import reads; the column was not read"
+_NOT_READ_SHEET = "not a sheet this import reads; its rows were not read"
+
+
+def _set_header(ws, header, value):
+    """Set `header`'s cell in row 2, adding the column when it is not there."""
+    heads = [c.value for c in ws[1]]
+    if header not in heads:
+        ws.cell(row=1, column=len(heads) + 1, value=header)
+        heads.append(header)
+    ws.cell(row=2, column=heads.index(header) + 1, value=value)
+
+
+def test_the_network_sheet_sets_only_the_settings_an_export_writes(tmp_path):
+    def edit(wb):
+        ws = wb["network"]
+        for header, value in [
+            ("evil_attr", "x"),
+            ("objective", 123.0),
+            ("objective_constant", 4.0),
+            ("model", "m"),
+            ("optimize", 1),
+            ("srid", "not a number"),
+        ]:
+            _set_header(ws, header, value)
+        ws.cell(row=1, column=ws.max_column + 1, value="name")  # a second `name`
+        ws.cell(row=2, column=ws.max_column, value="second")
+        ws.cell(row=2, column=ws.max_column + 1, value="no header")
+
+    res = _native_wb(tmp_path, edit)
+    n, um = res.network, _um(res)
+    for header in ("evil_attr", "objective", "objective_constant", "model", "optimize"):
+        assert (f"network › column {header}", _NOT_SETTING) in um
+    assert ("network › column name", _NOT_SETTING) in um
+    assert any(src == "network › srid" for src, _ in um)
+    assert any(src.startswith("network › column ") and r == _NO_HEADER for src, r in um)
+    assert not hasattr(n, "evil_attr")
+    assert n._objective is None and n._objective_constant is None and n._model is None
+    assert not isinstance(n.optimize, int)
+    assert n.srid == 4326
+    assert n.name != "second"
+    assert not any(k.startswith(("Unnamed", "name.")) for k in vars(n))
+
+
+@pytest.mark.parametrize(
+    ("header", "value"),
+    [("pypsa_version", "not.a.version!"), ("_multi_invest", 7), ("name", "NA")],
+)
+def test_a_network_setting_the_model_cannot_take_is_reported_and_not_read(
+    tmp_path, header, value
+):
+    res = _native_wb(tmp_path, lambda wb: _set_header(wb["network"], header, value))
+    assert any(src == f"network › {header}" for src, _ in _um(res))
+    assert getattr(res.network, header, None) != value
+
+
+def test_sheets_pypsa_would_load_unchecked_are_removed_and_reported(tmp_path):
+    def edit(wb):
+        ws = wb.create_sheet("line_types")
+        ws.append(["name", "zzz", "r_per_length"])
+        ws.append(["evil", 1, 0.1])
+        ws = wb["meta"] if "meta" in wb.sheetnames else wb.create_sheet("meta")
+        ws.append(["evil", '{"injected": true}'])
+        ws = wb.create_sheet("shapes")
+        ws.append(["name", "geometry"])
+        ws.append(["s1", "POINT (0 0)"])
+        wb.create_sheet("sub_networks").append(["name"])  # empty: removed silently
+
+    res = _native_wb(tmp_path, edit)
+    n, um = res.network, _um(res)
+    for sheet in ("line_types", "meta", "shapes"):
+        assert (sheet, _NOT_READ_SHEET) in um
+    assert "sub_networks" not in {src for src, _ in um}
+    assert "zzz" not in n.line_types.columns and "evil" not in n.line_types.index
+    assert n.meta == {}
+    assert n.shapes.empty
+
+
+def test_a_tampered_crs_sheet_is_removed_and_reported(tmp_path):
+    def edit(wb):
+        ws = wb["crs"]
+        ws.cell(row=2, column=2, value="not a coordinate system")
+
+    res = _native_wb(tmp_path, edit)
+    assert ("crs", _NOT_READ_SHEET) in _um(res)
+    assert res.network.crs.to_epsg() == 4326
+
+
+def test_pypsa_s_own_crs_sheet_is_read_without_a_report(tmp_path):
+    res = read_excel(_native(_two_gens(), tmp_path))
+    assert _um(res) == []
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "reason"),
+    [
+        ("objective", "inf", "infinity is not allowed here"),
+        ("generators", "nan", "not a number (NaN)"),
+        ("stores", "NA", "'NA' is not a number"),
+        ("objective", -1, "a weighting cannot be negative"),
+    ],
+)
+def test_a_snapshot_weighting_is_checked_as_written(tmp_path, column, value, reason):
+    def edit(wb):
+        ws = wb["snapshots"]
+        col = [c.value for c in ws[1]].index(column) + 1
+        ws.cell(row=3, column=col, value=value)
+
+    res = _native_wb(tmp_path, edit)
+    hits = [r for src, r in _um(res) if src == "snapshots row 3"]
+    assert len(hits) == 1 and hits[0].startswith(f"{column}: {reason}")
+    assert hits[0].endswith("the weighting 1 is used")
+    assert res.network.snapshot_weightings[column].tolist() == [1.0, 1.0]
+
+
+@pytest.mark.parametrize("value", [None, "NA"])
+def test_a_snapshot_with_no_name_refuses_the_file(tmp_path, value):
+    def edit(wb):
+        ws = wb["snapshots"]
+        col = [c.value for c in ws[1]].index("snapshot") + 1
+        ws.cell(row=3, column=col).value = value
+
+    with pytest.raises(L.ImportFormatError, match="row 3 has no name"):
+        _native_wb(tmp_path, edit)
+
+
+def test_a_repeated_snapshot_refuses_the_file(tmp_path):
+    def edit(wb):
+        ws = wb["snapshots"]
+        col = [c.value for c in ws[1]].index("snapshot") + 1
+        ws.cell(row=3, column=col, value=ws.cell(row=2, column=col).value)
+
+    with pytest.raises(L.ImportFormatError, match="row 3 repeats an earlier row"):
+        _native_wb(tmp_path, edit)
+
+
+def _multi_period() -> pypsa.Network:
+    n = pypsa.Network()
+    n.set_snapshots(
+        pd.MultiIndex.from_product(
+            [[2030, 2040], pd.date_range("2030-01-01", periods=2, freq="h")]
+        )
+    )
+    n.investment_periods = [2030, 2040]
+    n.add("Bus", "B1", v_nom=110.0)
+    n.add("Generator", "G1", bus="B1", p_nom=5.0, p_max_pu=[0.1, 0.2, 0.3, 0.4])
+    return n
+
+
+def _period_edit(tmp_path, edit):
+    path = _native(_multi_period(), tmp_path)
+    wb = openpyxl.load_workbook(path)
+    edit(wb["investment_periods"])
+    wb.save(path)
+    return read_excel(path)
+
+
+def test_an_investment_period_weighting_is_checked_as_written(tmp_path):
+    def edit(ws):
+        ws["B3"] = "inf"
+        ws["C3"] = "N/A"
+        ws["D1"], ws["D2"] = "evil", 9
+
+    res = _period_edit(tmp_path, edit)
+    um = _um(res)
+    rows = [r for src, r in um if src == "investment_periods row 3"]
+    assert len(rows) == 2 and all(r.endswith("the weighting 1 is used") for r in rows)
+    assert ("investment_periods › column evil", _NOT_INPUT) in um
+    w = res.network.investment_period_weightings
+    assert w.loc[2040].tolist() == [1.0, 1.0] and "evil" not in w.columns
+
+
+@pytest.mark.parametrize(
+    ("value", "match"), [("2040x", "row 3 is not a year"), (2030, "row 3 repeats")]
+)
+def test_a_bad_investment_period_refuses_the_file(tmp_path, value, match):
+    def edit(ws):
+        ws["A3"] = value
+
+    with pytest.raises(L.ImportFormatError, match=match):
+        _period_edit(tmp_path, edit)
+
+
+def test_a_series_sheet_off_the_snapshots_is_not_read(tmp_path):
+    def edit(wb):
+        wb["generators-p_max_pu"]["A3"] = 99
+
+    res = _native_wb(tmp_path, edit)
+    assert (
+        "generators-p_max_pu",
+        "its first column is not the time steps of the snapshots sheet; "
+        "the sheet was not read",
+    ) in _um(res)
+    assert res.network.generators_t.p_max_pu.empty
+    assert not any(src.startswith("generators-p_max_pu ›") for src, _ in _um(res))
+
+
+def test_text_pandas_reads_as_empty_is_reported_not_turned_into_the_default(tmp_path):
+    def edit(wb):
+        ws = wb["buses"]
+        heads = [c.value for c in ws[1]]
+        if "carrier" not in heads:
+            ws.cell(row=1, column=len(heads) + 1, value="carrier")
+            heads.append("carrier")
+        ws.cell(row=2, column=heads.index("carrier") + 1, value="N/A")
+
+    res = _native_wb(tmp_path, edit)
+    assert (
+        "buses › B1",
+        "carrier: the text 'N/A' reads as empty; leave the cell empty instead",
+    ) in _um(res)
+    assert "B1" not in res.network.buses.index
+
+
+def test_an_asset_named_with_text_pandas_reads_as_empty_is_reported(tmp_path):
+    def edit(wb):
+        wb["generators"]["A3"] = "NA"
+
+    res = _native_wb(tmp_path, edit)
+    assert ("generators row 3", "the row has values but no name") in _um(res)
+    assert "nan" not in res.network.generators.index
+    assert list(res.network.generators.index) == ["G1"]
+
+
+# ── GK B 67 ask 4: nothing points at an asset that was not read ────────────────
+
+
+def test_assets_on_a_removed_bus_are_reported_and_removed(tmp_path):
+    n = _two_gens()
+    n.add("Line", "l1", bus0="B2", bus1="B1", x=0.1, s_nom=50.0)
+    n.add("Load", "D2", bus="B2", p_set=1.0)
+    res = read_excel(_native_edit(tmp_path, n, "buses", "v_nom", "B1", "nan"))
+    um, net = _um(res), res.network
+    for item, col in [
+        ("generators › G1", "bus"),
+        ("generators › G2", "bus"),
+        ("lines › l1", "bus1"),
+    ]:
+        assert (
+            item,
+            f"{col}: 'B1' was not read, so this asset was not read either",
+        ) in um
+    assert net.generators.empty and net.lines.empty
+    assert list(net.loads.index) == ["D2"] and list(net.buses.index) == ["B2"]
+    assert net.generators_t.p_max_pu.empty
+    assert res.report.counts.get("Generators", 0) == 0
+
+
+def test_a_removed_carrier_takes_its_buses_and_their_assets(tmp_path):
+    n = _two_gens()
+    n.add("Carrier", "DC", co2_emissions=0.0)
+    n.buses.loc["B1", "carrier"] = "DC"
+    res = read_excel(
+        _native_edit(tmp_path, n, "carriers", "co2_emissions", "DC", "nan")
+    )
+    um = _um(res)
+    assert (
+        "buses › B1",
+        "carrier: 'DC' was not read, so this asset was not read either",
+    ) in um
+    assert (
+        "generators › G1",
+        "bus: 'B1' was not read, so this asset was not read either",
+    ) in um
+    assert list(res.network.buses.index) == ["B2"] and res.network.generators.empty
+
+
+def test_the_raw_sheets_layout_drops_what_refers_to_a_skipped_row(tmp_path):
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for sheet, rows in {
+        "buses": [["name", "v_nom"], ["B1", "x"], ["B2", 110.0]],
+        "generators": [["name", "bus", "p_nom"], ["G1", "B1", 5.0], ["G2", "B2", 1.0]],
+        "lines": [["name", "bus0", "bus1", "x"], ["l1", "B2", "B1", 0.1]],
+    }.items():
+        ws = wb.create_sheet(sheet)
+        for row in rows:
+            ws.append(row)
+    path = tmp_path / "raw.xlsx"
+    wb.save(path)
+    res = read_excel(path)
+    um = _um(res)
+    assert (
+        "generators › G1",
+        "bus: 'B1' was not read, so this asset was not read either",
+    ) in um
+    assert (
+        "lines › l1",
+        "bus1: 'B1' was not read, so this asset was not read either",
+    ) in um
+    assert list(res.network.generators.index) == ["G2"] and res.network.lines.empty
+    assert res.report.counts["Generators"] == 1 and res.report.counts["Lines"] == 0

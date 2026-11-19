@@ -31,6 +31,7 @@ from typing import Any
 import pandas as pd
 import pypsa
 from openpyxl.utils import get_column_letter
+from pandas._libs.parsers import STR_NA_VALUES
 
 from gridspine.ingest import excel_layout as L
 from gridspine.ingest.import_result import Assumed, ImportReport, ImportResult, Unmapped
@@ -1069,8 +1070,296 @@ _NOT_INPUT = "not an input of this kind of asset; the column was not read"
 _NO_HEADER = "a column with no header; the column was not read"
 
 
+# ── PyPSA's own layout: the copy PyPSA reads (GK B E1/E3, asks 1-3) ──────────
+
+#: The network settings a valid export writes, with the type each cell must hold.
+#: PyPSA setattr's every column of the `network` sheet, so nothing else reaches it
+#: (never `objective`, `objective_constant` or `model`).
+_NETWORK_SETTINGS: dict[str, type] = {
+    "name": str,
+    "pypsa_version": str,
+    "srid": int,
+    "_multi_invest": int,
+}
+#: The snapshot and investment-period weightings PyPSA reads.
+_SNAPSHOT_WEIGHTINGS = ("objective", "stores", "generators", "weightings")
+_SNAPSHOT_LEVELS = ("period", "timestep", "snapshot")
+_PERIOD_WEIGHTINGS = ("objective", "years")
+#: Text pandas reads as empty ("NA", "N/A", "null", ...): such a cell would silently
+#: become the model default.
+_NA_TEXT = frozenset(STR_NA_VALUES) - {""}
+_NOT_READ_SHEET = "not a sheet this import reads; its rows were not read"
+_NOT_SETTING = "not a network setting this import reads; the column was not read"
+_MAX_CRS = 20_000
+
+
+def _na_text(v: Any) -> bool:
+    return isinstance(v, str) and v in _NA_TEXT
+
+
+def _na_bad(v: Any) -> None:
+    if _na_text(v):
+        raise _Bad(f"the text '{v}' reads as empty; leave the cell empty instead")
+
+
+def _native_series_sheet(name: str) -> bool:
+    return any(name.startswith(f"{ln}-") for _, _, ln in L.SHEETS)
+
+
+def _data_rows(ws) -> list[tuple]:
+    return [
+        row
+        for row in ws.iter_rows(min_row=2, values_only=True)
+        if any(v is not None for v in row)
+    ]
+
+
+def _crs_ok(ws) -> bool:
+    """The `crs` sheet as PyPSA writes it: one `_crs` row holding a WKT text."""
+    rows = _data_rows(ws)
+    if not rows:
+        return True
+    if len(rows) != 1 or len(rows[0]) < 2 or rows[0][0] != "_crs":
+        return False
+    wkt = rows[0][1]
+    if not isinstance(wkt, str) or len(wkt) > _MAX_CRS:
+        return False
+    try:
+        from pyproj import CRS
+
+        CRS.from_wkt(wkt)
+    except Exception:  # noqa: BLE001 - any parse failure means not a CRS
+        return False
+    return True
+
+
+def _check_network_sheet(ws, report: ImportReport) -> None:
+    """Keep only `_NETWORK_SETTINGS`, each cell checked as written (E1, E3)."""
+    from packaging.version import InvalidVersion, Version
+
+    seen: set[str] = set()
+    drop: list[int] = []
+    for c, h in enumerate(next(ws.iter_rows(max_row=1, values_only=True), ()), 1):
+        if h is None:
+            if any(
+                v is not None
+                for (v,) in ws.iter_rows(min_col=c, max_col=c, values_only=True)
+            ):
+                report.unmapped.append(Unmapped(f"network › column {c}", _NO_HEADER))
+            drop.append(c)
+            continue
+        if not isinstance(h, str) or h not in _NETWORK_SETTINGS or h in seen:
+            report.unmapped.append(
+                Unmapped(f"network › column {str(h)[:40]}", _NOT_SETTING)
+            )
+            drop.append(c)
+            continue
+        seen.add(h)
+        v = ws.cell(row=2, column=c).value
+        if v is None:
+            continue
+        try:
+            _na_bad(v)
+            typ = _NETWORK_SETTINGS[h]
+            got = _convert(v, typ)
+            if h == "pypsa_version":
+                try:
+                    Version(got)
+                except InvalidVersion:
+                    raise _Bad(f"'{got[:40]}' is not a version number") from None
+            elif h == "srid" and got <= 0:
+                raise _Bad(f"{got} is not a spatial reference id")
+            elif h == "_multi_invest" and got not in (0, 1):
+                raise _Bad(f"{got} is not 0 or 1")
+        except _Bad as exc:
+            report.unmapped.append(
+                Unmapped(f"network › {h}", f"{exc}; the setting was not read")
+            )
+            drop.append(c)
+    for c in reversed(drop):
+        ws.delete_cols(c)
+
+
+def _index_columns(header: Sequence, levels: Sequence[str]) -> list[int]:
+    cols = [i for i, h in enumerate(header) if h in levels]
+    return cols or [0]
+
+
+def _check_weightings(
+    ws, header: Sequence, keys: Sequence[str], report: ImportReport
+) -> None:
+    """Each weighting cell a finite number ≥ 0; a bad one is reported and set to 1."""
+    for c, h in enumerate(header, 1):
+        if h not in keys:
+            continue
+        for r in range(2, ws.max_row + 1):
+            cell = ws.cell(row=r, column=c)
+            if cell.value is None:
+                continue
+            try:
+                _weighting(cell.value)
+            except _Bad as exc:
+                report.unmapped.append(
+                    Unmapped(
+                        f"{ws.title} row {r}", f"{h}: {exc}; the weighting 1 is used"
+                    )
+                )
+                cell.value = 1.0
+
+
+def _check_index(ws, cols: Sequence[int], *, whole: Sequence[int] = ()) -> None:
+    """Every row of the index columns named, the names unique; else the file is refused."""
+    seen: set[tuple] = set()
+    for r, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if all(v is None for v in row):
+            continue
+        key = tuple(row[c] if c < len(row) else None for c in cols)
+        problem = None
+        if any(v is None or _na_text(v) for v in key):
+            problem = "has no name"
+        elif key in seen:
+            problem = "repeats an earlier row"
+        else:
+            for c in whole:
+                try:
+                    _convert(row[c], int)
+                except _Bad as exc:
+                    problem = f"is not a year: {exc}"
+        if problem:
+            raise L.ImportFormatError(
+                f"The '{ws.title}' sheet's row {r} {problem}; PyPSA's layout needs one "
+                "named row per time step or period."
+            )
+        seen.add(key)
+
+
+def _check_native_copy(wb, report: ImportReport) -> set[str]:
+    """
+    E1 and E3 on the parts of PyPSA's layout outside the component sheets, on the
+    copy PyPSA reads, before it reads it: sheets PyPSA would load into the network
+    with no check (`meta`, `line_types`, `shapes`, ...) are removed and reported;
+    the `network` sheet keeps only `_NETWORK_SETTINGS`; snapshot and period
+    weightings and their index cells are checked as written; a time-series sheet
+    whose first column is not the snapshots' is removed. Returns the removed sheets.
+    """
+    removed: set[str] = set()
+    known = {"network", "snapshots", "investment_periods"} | {
+        ln for _, _, ln in L.SHEETS
+    }
+    for ws in list(wb.worksheets):
+        name = ws.title
+        if name in known or _native_series_sheet(name):
+            continue
+        if name == "crs" and _crs_ok(ws):
+            continue
+        if name == "crs" or _data_rows(ws):
+            report.unmapped.append(Unmapped(name, _NOT_READ_SHEET))
+        wb.remove(ws)
+        removed.add(name)
+    if "network" in wb.sheetnames:
+        _check_network_sheet(wb["network"], report)
+    steps = ["now"]
+    if "snapshots" in wb.sheetnames:
+        ws = wb["snapshots"]
+        header = next(ws.iter_rows(max_row=1, values_only=True), ())
+        cols = _index_columns(header, _SNAPSHOT_LEVELS)
+        whole = [c for c in cols if header[c] == "period"]
+        _check_index(ws, cols, whole=whole)
+        _check_weightings(ws, header, _SNAPSHOT_WEIGHTINGS, report)
+        steps = [
+            row[0] if row else None for row in ws.iter_rows(min_row=2, values_only=True)
+        ]
+    if "investment_periods" in wb.sheetnames:
+        ws = wb["investment_periods"]
+        header = next(ws.iter_rows(max_row=1, values_only=True), ())
+        _check_index(ws, [0], whole=[0])
+        _check_weightings(ws, header, _PERIOD_WEIGHTINGS, report)
+        for c in range(len(header), 1, -1):
+            h = header[c - 1]
+            if h in _PERIOD_WEIGHTINGS:
+                continue
+            report.unmapped.append(
+                Unmapped(
+                    f"investment_periods › column {c if h is None else str(h)[:40]}",
+                    _NOT_INPUT,
+                )
+            )
+            ws.delete_cols(c)
+    for ws in list(wb.worksheets):
+        if not _native_series_sheet(ws.title):
+            continue
+        index = [
+            row[0] if row else None for row in ws.iter_rows(min_row=2, values_only=True)
+        ]
+        if index != steps:
+            report.unmapped.append(
+                Unmapped(
+                    ws.title,
+                    "its first column is not the time steps of the snapshots sheet; "
+                    "the sheet was not read",
+                )
+            )
+            wb.remove(ws)
+            removed.add(ws.title)
+    return removed
+
+
+_BUS_COLUMN = re.compile(r"bus\d*")
+
+
+def _drop_dangling(
+    n: pypsa.Network, removed: Mapping[str, set], report: ImportReport
+) -> dict[str, int]:
+    """
+    E1: an asset whose bus or carrier was not read is reported and not read
+    either, and so on down (a carrier's buses, then their lines). Returns how many
+    of each class went.
+    """
+    dropped: dict[str, int] = {}
+    pending = {cls: set(names) for cls, names in removed.items() if names}
+    while pending.get("Bus") or pending.get("Carrier"):
+        gone = {
+            "bus": pending.get("Bus", set()),
+            "carrier": pending.get("Carrier", set()),
+        }
+        pending = {}
+        for cls, _sheet, ln in L.SHEETS:
+            table = getattr(n, ln)
+            hits: dict[str, tuple[str, Any]] = {}
+            for col in table.columns:
+                kind = (
+                    "bus"
+                    if isinstance(col, str) and _BUS_COLUMN.fullmatch(col)
+                    else "carrier"
+                    if col == "carrier" and cls != "Carrier"
+                    else None
+                )
+                if kind is None or not gone[kind]:
+                    continue
+                for name, v in table[col].items():
+                    if name not in hits and isinstance(v, str) and v in gone[kind]:
+                        hits[name] = (col, v)
+            if not hits:
+                continue
+            for name, (col, v) in hits.items():
+                report.unmapped.append(
+                    Unmapped(
+                        f"{ln} › {name}",
+                        f"{col}: '{str(v)[:40]}' was not read, so this asset was not read either",
+                    )
+                )
+            n.remove(cls, list(hits))
+            pending[cls] = set(hits)
+            dropped[cls] = dropped.get(cls, 0) + len(hits)
+    return dropped
+
+
 def _check_native_cells(
-    n: pypsa.Network, sheets: _Sheets, report: ImportReport, custom: Mapping[str, set]
+    n: pypsa.Network,
+    sheets: _Sheets,
+    report: ImportReport,
+    custom: Mapping[str, set],
+    not_read: set[str] = frozenset(),
 ) -> None:
     """
     E1 and E3 on PyPSA's own layout, checked on the cells as written: PyPSA's
@@ -1081,7 +1370,10 @@ def _check_native_cells(
     An asset with a cell the model cannot take is reported and removed, never
     half-read. A time-series sheet for an attribute that is not a varying input is
     reported and not read; an asset's series with a bad cell is reported and dropped.
+    An asset whose bus or carrier was removed goes as well (`_drop_dangling`).
+    Sheets in `not_read` were removed from the copy PyPSA read.
     """
+    removed: dict[str, set] = {}
     for cls, _sheet, ln in L.SHEETS:
         table = getattr(n, ln)
         rows = sheets.rows.get(ln)
@@ -1110,12 +1402,14 @@ def _check_native_cells(
             checked = [
                 (c, h)
                 for c, h in enumerate(headers)
-                if c > 0 and isinstance(h, str) and h in allowed and h in defaults.index
+                if c > 0 and isinstance(h, str) and h in allowed
             ]
             refused: list[str] = []
             for r, row in enumerate(rows[1:], start=2):
                 raw = row[0] if row else None
-                if raw is None or (isinstance(raw, str) and not raw.strip()):
+                if raw is None or (
+                    isinstance(raw, str) and (not raw.strip() or _na_text(raw))
+                ):
                     # PyPSA's reader names such a row "nan"; it is not an asset.
                     if any(v is not None for v in row) and "nan" in table.index:
                         report.unmapped.append(
@@ -1137,11 +1431,14 @@ def _check_native_cells(
                     if c >= len(row) or row[c] is None:
                         continue
                     try:
-                        _convert(
-                            unescape_formula(row[c]),
-                            _attr_type(defaults, h),
-                            inf=_allowed_inf(defaults, h),
-                        )
+                        if h in defaults.index:
+                            _convert(
+                                unescape_formula(row[c]),
+                                _attr_type(defaults, h),
+                                inf=_allowed_inf(defaults, h),
+                            )
+                        # A text cell pandas reads as empty would become the default.
+                        _na_bad(row[c])
                     except _Bad as exc:
                         report.unmapped.append(
                             Unmapped(f"{ln} › {name}", f"{h}: {exc}")
@@ -1150,9 +1447,10 @@ def _check_native_cells(
                         break
             if refused:
                 n.remove(cls, list(dict.fromkeys(refused)))
+                removed[cls] = set(refused)
         series = getattr(n, f"{ln}_t")
         for sheet in sheets.names:
-            if not sheet.startswith(f"{ln}-"):
+            if not sheet.startswith(f"{ln}-") or sheet in not_read:
                 continue
             attr = sheet[len(ln) + 1 :]
             varying_input = (
@@ -1197,6 +1495,7 @@ def _check_native_cells(
                         )
                         series[attr] = series[attr].drop(columns=asset, errors="ignore")
                         break
+    _drop_dangling(n, removed, report)
 
 
 def _read_native(
@@ -1221,6 +1520,7 @@ def _read_native(
                         if new != cell.value:
                             cell.value = new
                             cell.data_type = "s"
+        not_read = _check_native_copy(wb, report)
         wb.save(copy)
         wb.close()
         try:
@@ -1230,7 +1530,7 @@ def _read_native(
             raise L.ImportFormatError(
                 "The workbook has a 'network' sheet but PyPSA could not read it."
             ) from exc
-    _check_native_cells(n, sheets, report, custom)
+    _check_native_cells(n, sheets, report, custom, not_read)
     for _cls, sheet, ln in L.SHEETS:
         table = getattr(n, ln)
         if table.empty:
@@ -1245,6 +1545,7 @@ def _read_legacy_sheets(
 ) -> pypsa.Network:
     """Raw-named component sheets: header row, then one row per asset."""
     n = pypsa.Network()
+    removed: dict[str, set] = {}
     for sheet in sheets.names:
         cls = _LEGACY_SHEETS.get(sheet)
         if cls is None:
@@ -1309,6 +1610,7 @@ def _read_legacy_sheets(
                     break
             if bad is not None:
                 report.unmapped.append(Unmapped(f"{sheet} › {name}", bad))
+                removed.setdefault(cls, set()).add(name)
                 continue
             try:
                 n.add(cls, name, **values)
@@ -1317,7 +1619,10 @@ def _read_legacy_sheets(
                 report.unmapped.append(
                     Unmapped(f"{sheet} › {name}", f"the model refused the row: {exc}")
                 )
+                removed.setdefault(cls, set()).add(name)
         report.counts[L.SHEET_OF[cls]] = report.counts.get(L.SHEET_OF[cls], 0) + added
+    for cls, count in _drop_dangling(n, removed, report).items():
+        report.counts[L.SHEET_OF[cls]] -= count
     _report_formulas(sheets, report)
     return n
 
