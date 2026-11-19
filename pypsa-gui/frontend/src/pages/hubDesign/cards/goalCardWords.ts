@@ -5,6 +5,7 @@ export const GOAL_VOLL_LABEL = 'Price of undelivered energy'
 
 /** The key line under the allowed-shortfall chip (template-e2e 06): which
  *  goal applies while the user has typed none, in Guided and Expert alike. */
-export const GOAL_KEY_TEMPLATE = 'From the template; type a value to set your own.'
-export const GOAL_KEY_SITE_TYPE = 'Assumed for this site type; type a value to set your own.'
+export const GOAL_KEY_TEMPLATE = 'From the template. Type a value to set your own.'
+export const GOAL_KEY_SITE_TYPE = 'Assumed for this site type. Type a value to set your own.'
+export const GOAL_KEY_KEPT = 'You kept this default. Type a value to set your own.'
 export const GOAL_KEY_TYPED = 'Typed by you.'

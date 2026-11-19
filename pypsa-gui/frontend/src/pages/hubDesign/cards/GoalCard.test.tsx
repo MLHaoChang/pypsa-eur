@@ -14,7 +14,7 @@ import { VOLL_TEXT } from '../delegate'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
 import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { GoalCard } from './GoalCard'
-import { GOAL_KEY_SITE_TYPE, GOAL_KEY_TEMPLATE, GOAL_KEY_TYPED } from './goalCardWords'
+import { GOAL_KEY_KEPT, GOAL_KEY_SITE_TYPE, GOAL_KEY_TEMPLATE, GOAL_KEY_TYPED } from './goalCardWords'
 import { nk } from '../../../utils/queryKeys'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
@@ -129,6 +129,7 @@ describe('GoalCard goal (W3b-R: the one stored goal)', () => {
     mount()
     await waitFor(() => expect(screen.getByTestId('hub-goal-lole-assumed').dataset.state).toBe('confirmed'))
     expect(screen.getByTestId('hub-goal-lole-assumed-source').textContent).toBe('Site type: 3 h/yr')
+    expect(screen.getByTestId('hub-goal-lole-key').textContent).toBe(GOAL_KEY_KEPT)
   })
 
   it('a stored value wins and carries no template note', async () => {

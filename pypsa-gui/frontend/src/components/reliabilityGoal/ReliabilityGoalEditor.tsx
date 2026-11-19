@@ -12,7 +12,7 @@ import {
 import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { isAssumedItem } from '../../pages/hubDesign/AssumptionsCard'
 import {
-  GOAL_KEY_SITE_TYPE, GOAL_KEY_TEMPLATE, GOAL_KEY_TYPED,
+  GOAL_KEY_KEPT, GOAL_KEY_SITE_TYPE, GOAL_KEY_TEMPLATE, GOAL_KEY_TYPED,
 } from '../../pages/hubDesign/cards/goalCardWords'
 import { AssumedChip } from '../AssumedChip'
 import { Term } from '../../pages/hubDesign/shared/Term'
@@ -126,7 +126,7 @@ function LoleChip({ testId, standing }: { testId: string; standing: LoleStanding
         source={standing.typed ? null : standing.from === 'template' ? 'Project template' : 'Site type'}
         note={standing.typed ? null : `${standing.value} h/yr`} />
       <span data-testid={`${testId}-key`} className="text-muted">
-        {standing.typed ? GOAL_KEY_TYPED
+        {standing.typed ? GOAL_KEY_TYPED : standing.kept ? GOAL_KEY_KEPT
           : standing.from === 'template' ? GOAL_KEY_TEMPLATE : GOAL_KEY_SITE_TYPE}
       </span>
     </span>
