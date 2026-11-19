@@ -1066,6 +1066,7 @@ def _report_formulas(sheets: _Sheets, report: ImportReport) -> None:
 
 
 _NOT_INPUT = "not an input of this kind of asset; the column was not read"
+_NO_HEADER = "a column with no header; the column was not read"
 
 
 def _check_native_cells(
@@ -1088,8 +1089,16 @@ def _check_native_cells(
         if rows and not table.empty:
             allowed = _static_inputs(n, cls, custom)
             headers = list(rows[0])
-            for h in headers[1:]:
-                if h is None or h in allowed:
+            for c, h in enumerate(headers):
+                if c == 0 or h in allowed:
+                    continue
+                if h is None:
+                    # PyPSA keeps a header-less column as "Unnamed: <c>".
+                    if f"Unnamed: {c}" in table.columns:
+                        report.unmapped.append(
+                            Unmapped(f"{ln} › column {c + 1}", _NO_HEADER)
+                        )
+                        table.drop(columns=f"Unnamed: {c}", inplace=True)
                     continue
                 report.unmapped.append(
                     Unmapped(f"{ln} › column {str(h)[:40]}", _NOT_INPUT)
@@ -1104,12 +1113,25 @@ def _check_native_cells(
                 if c > 0 and isinstance(h, str) and h in allowed and h in defaults.index
             ]
             refused: list[str] = []
-            for row in rows[1:]:
+            for r, row in enumerate(rows[1:], start=2):
+                raw = row[0] if row else None
+                if raw is None or (isinstance(raw, str) and not raw.strip()):
+                    # PyPSA's reader names such a row "nan"; it is not an asset.
+                    if any(v is not None for v in row) and "nan" in table.index:
+                        report.unmapped.append(
+                            Unmapped(f"{ln} row {r}", "the row has values but no name")
+                        )
+                        refused.append("nan")
+                    continue
+                # The name as PyPSA's reader made it: our text form, or str() for
+                # what pandas turned to text itself (a date, a TRUE/FALSE).
+                names = [str(raw)]
                 try:
-                    name = unescape_formula(_convert(row[0] if row else None, str))
+                    names.insert(0, unescape_formula(_convert(raw, str)))
                 except _Bad:
-                    continue  # PyPSA did not read it as an asset either
-                if name not in table.index:
+                    pass
+                name = next((x for x in names if x in table.index), None)
+                if name is None:
                     continue
                 for c, h in checked:
                     if c >= len(row) or row[c] is None:
@@ -1127,7 +1149,7 @@ def _check_native_cells(
                         refused.append(name)
                         break
             if refused:
-                n.remove(cls, refused)
+                n.remove(cls, list(dict.fromkeys(refused)))
         series = getattr(n, f"{ln}_t")
         for sheet in sheets.names:
             if not sheet.startswith(f"{ln}-"):
@@ -1154,7 +1176,14 @@ def _check_native_cells(
             rows = sheets.rows.get(sheet) or []
             inf = _allowed_inf(defaults, attr)
             for c, asset in enumerate(rows[0] if rows else []):
-                if c == 0 or asset is None:
+                if c == 0:
+                    continue
+                if asset is None:
+                    if f"Unnamed: {c}" in series[attr].columns:
+                        report.unmapped.append(
+                            Unmapped(f"{sheet} › column {c + 1}", _NO_HEADER)
+                        )
+                        series[attr] = series[attr].drop(columns=f"Unnamed: {c}")
                     continue
                 asset = str(asset)
                 for row in rows[1:]:

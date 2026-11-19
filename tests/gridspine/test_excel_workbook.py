@@ -6,6 +6,7 @@ GK B plan conditions E1–E8 (.scratch/excel-input-workbook/issues/01-reader-wri
 
 from __future__ import annotations
 
+import datetime
 import json
 import math
 import random
@@ -1039,6 +1040,138 @@ def test_a_bad_cell_in_a_pypsa_export_time_series_drops_that_series(tmp_path):
     res = read_excel(path)
     assert _um(res) == [("generators-p_max_pu › G2", "p_max_pu: not a number (NaN)")]
     assert list(res.network.generators_t.p_max_pu.columns) == ["G1"]
+
+
+def _native_wb(tmp_path, edit):
+    """`_native(_two_gens())` with `edit(workbook)` applied, then read."""
+    path = _native(_two_gens(), tmp_path)
+    wb = openpyxl.load_workbook(path)
+    edit(wb)
+    wb.save(path)
+    return read_excel(path)
+
+
+_NO_HEADER = "a column with no header; the column was not read"
+_NOT_TS = "not an input time series of this kind of asset; the sheet was not read"
+
+
+def test_a_header_less_column_in_pypsa_s_export_is_reported_and_dropped(tmp_path):
+    def edit(wb):
+        ws = wb["buses"]
+        ws.insert_cols(2)
+        ws["B3"] = 7
+
+    res = _native_wb(tmp_path, edit)
+    assert ("buses › column 2", _NO_HEADER) in _um(res)
+    assert not any(c.startswith("Unnamed") for c in res.network.buses.columns)
+    assert not any("None" in src for src, _ in _um(res))
+
+
+def test_a_header_less_series_column_in_pypsa_s_export_is_not_read(tmp_path):
+    def edit(wb):
+        ws = wb["generators-p_max_pu"]
+        ws.insert_cols(2)
+        ws["B2"] = "x"
+
+    res = _native_wb(tmp_path, edit)
+    assert not any("None" in src for src, _ in _um(res))
+    assert sorted(res.network.generators_t.p_max_pu.columns) == ["G1", "G2"]
+
+
+@pytest.mark.parametrize("name", [True, datetime.datetime(2030, 1, 1)])
+def test_a_name_pypsa_turns_to_text_still_gets_its_cells_checked(tmp_path, name):
+    """Bug found by mutants: a date or TRUE name skipped E3 on the row."""
+
+    def edit(wb):
+        wb["buses"].append([name, True])
+
+    res = _native_wb(tmp_path, edit)
+    assert [why for _, why in _um(res)] == [
+        "v_nom: a TRUE/FALSE value in a number column"
+    ]
+    assert len(res.network.buses) == 2
+
+
+def test_a_short_row_in_pypsa_s_export_reads(tmp_path):
+    path = _native_edit(tmp_path, _two_gens(), "generators", "marginal_cost", "G1", 3.0)
+    res = read_excel(path)
+    assert _um(res) == []
+    assert res.network.generators.at["G1", "marginal_cost"] == 3.0
+
+
+def test_a_row_with_two_bad_cells_in_pypsa_s_export_is_reported_once(tmp_path):
+    def edit(wb):
+        ws = wb["generators"]
+        heads = [c.value for c in ws[1]]
+        for h in ("bus", "p_nom"):
+            ws.cell(row=3, column=heads.index(h) + 1, value=True)
+
+    res = _native_wb(tmp_path, edit)
+    assert [src for src, _ in _um(res)] == ["generators › G2"]
+
+
+@pytest.mark.parametrize("attr", ["foo", "p_nom"])
+def test_a_series_sheet_that_is_not_a_varying_input_is_not_read(tmp_path, attr):
+    def edit(wb):
+        out = wb.create_sheet(f"generators-{attr}")
+        for row in wb["generators-p_max_pu"].iter_rows(values_only=True):
+            out.append(row)
+
+    res = _native_wb(tmp_path, edit)
+    assert (f"generators-{attr}", _NOT_TS) in _um(res)
+
+
+def test_a_short_or_blank_series_cell_in_pypsa_s_export_is_not_a_bad_cell(tmp_path):
+    def edit(wb):
+        ws = wb["generators-p_max_pu"]
+        ws["B2"] = None
+        ws["D2"] = None  # widens the sheet past row 3
+
+    res = _native_wb(tmp_path, edit)
+    assert _um(res) == []
+    assert sorted(res.network.generators_t.p_max_pu.columns) == ["G1", "G2"]
+
+
+def test_a_series_with_two_bad_cells_is_reported_once(tmp_path):
+    def edit(wb):
+        ws = wb["generators-p_max_pu"]
+        col = [c.value for c in ws[1]].index("G1") + 1
+        ws.cell(row=2, column=col, value="x")
+        ws.cell(row=3, column=col, value="x")
+
+    res = _native_wb(tmp_path, edit)
+    assert [src for src, _ in _um(res)] == ["generators-p_max_pu › G1"]
+
+
+def test_a_nameless_row_in_pypsa_s_export_is_reported_not_read_as_nan(tmp_path):
+    def edit(wb):
+        wb["buses"].append([None, True])
+
+    res = _native_wb(tmp_path, edit)
+    assert sorted(res.network.buses.index) == ["B1", "B2"]
+    assert _um(res) == [("buses row 4", "the row has values but no name")]
+
+
+def test_a_blank_cell_mid_row_in_pypsa_s_export_keeps_the_default(tmp_path):
+    def edit(wb):
+        ws = wb["generators"]
+        heads = [c.value for c in ws[1]]
+        ws.cell(row=1, column=len(heads) + 1, value="marginal_cost")
+        ws.cell(row=2, column=len(heads) + 1, value=3.0)
+        ws.cell(row=2, column=heads.index("p_nom") + 1).value = None
+
+    res = _native_wb(tmp_path, edit)
+    assert _um(res) == []
+    assert res.network.generators.at["G1", "p_nom"] == 0.0
+
+
+def test_a_series_row_shorter_than_its_header_reads(tmp_path):
+    def edit(wb):
+        ws = wb["generators-p_max_pu"]
+        ws["D1"], ws["D2"] = "G3", 0.5
+
+    res = _native_wb(tmp_path, edit)
+    assert {"G1", "G2"} <= set(res.network.generators_t.p_max_pu.columns)
 
 
 def test_a_legacy_true_false_name_is_reported(tmp_path):
