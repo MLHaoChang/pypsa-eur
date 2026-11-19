@@ -3,7 +3,7 @@
 
 # Verdict text points to 'step 3 (Goal)'; every template opens with a warning
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: stale step numbers fixed (#1611, #1695); left: em dashes (SiteTypeSelect.tsx), amber first screen (needs template-e2e 01)
 Model tier: sonnet
 Size: S
 Blocked by: #1611 merged (it rewrites the Guided verdict text)
