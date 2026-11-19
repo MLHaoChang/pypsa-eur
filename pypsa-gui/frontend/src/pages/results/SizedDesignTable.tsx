@@ -4,6 +4,7 @@
 // two modes show the same numbers (EXPERT-GUIDED-1, HOLISTIC-1).
 import type { EhReferenceDesignReport, EhSizedAsset } from '../../api/simulation'
 import { componentLabel } from '../../utils/componentLabels'
+import { useProjectFlow } from '../../hooks/useProjectFlow'
 
 // A solver's -0 or 1e-9 reads 0, never "-0".
 const num = (v: number): string =>
@@ -28,29 +29,49 @@ export function sizedByName(report: EhReferenceDesignReport | null | undefined):
   return new Map(sizedAssets(report).map(a => [`${a.component}:${a.name}`, a]))
 }
 
+/** The stock unit of a power unit: MW → MWh on an energy bus, t/h → t on a
+ *  tonne bus (`flow_service._size_unit`). Null when the unit is not known. */
+const STOCK_OF: Record<string, string> = { MW: 'MWh', 't/h': 't' }
+
+/** An asset's size unit: its power unit, or for a Store its stock unit. The
+ *  engine's unit follows the bus (MW on an energy bus, t/h on a tonne bus),
+ *  so a unit is shown only where the caller knows it (GK B3 (3)). */
+export type SizeUnit = string | null | undefined
+
+const withUnit = (v: number, unit: string | null | undefined): string =>
+  unit ? `${num(v)} ${unit}` : num(v)
+
 /** "4.2 MW", "2.5 MW · 10 MWh (4 h)", "30 MWh"; "not reported" when the
- *  solve left no size. */
-export function sizedBuilt(a: EhSizedAsset): string {
+ *  solve left no size. `unit` is the asset's own size unit (a Store's is its
+ *  stock unit); without one, the figures carry no unit. */
+export function sizedBuilt(a: EhSizedAsset, unit?: SizeUnit): string {
   if (a.component === 'Store') {
-    return a.built_mwh == null ? 'not reported' : notBuilt(a) ? 'none built' : `${num(a.built_mwh)} MWh`
+    return a.built_mwh == null ? 'not reported' : notBuilt(a) ? 'none built' : withUnit(a.built_mwh, unit)
   }
   if (a.built_mw == null) return 'not reported'
   if (notBuilt(a)) return 'none built'
-  const mw = `${num(a.built_mw)} MW`
-  if (a.component !== 'StorageUnit' || a.built_mwh == null) return mw
+  const power = withUnit(a.built_mw, unit)
+  if (a.component !== 'StorageUnit' || a.built_mwh == null) return power
   const hours = a.max_hours != null ? ` (${num(a.max_hours)} h)` : ''
-  return `${mw} · ${num(a.built_mwh)} MWh${hours}`
+  return `${power} · ${withUnit(a.built_mwh, unit ? STOCK_OF[unit] ?? null : null)}${hours}`
 }
 
-/** The range the study could choose from: "0–12 MW", "at least 2 MW", "no limit". */
-export function sizedRange(a: EhSizedAsset): string {
+/** The range the study could choose from: "0–12 MW", "up to 12 MW",
+ *  "at least 2 MW", "no limit". */
+export function sizedRange(a: EhSizedAsset, unit?: SizeUnit): string {
   const store = a.component === 'Store'
   const lo = store ? a.min_mwh : a.min_mw
   const hi = store ? a.max_mwh : a.max_mw
-  const unit = store ? 'MWh' : 'MW'
-  if (hi != null) return `${num(lo ?? 0)}–${num(hi)} ${unit}`
-  if (lo != null && lo > 0) return `at least ${num(lo)} ${unit}`
+  if (hi != null) return lo == null ? `up to ${withUnit(hi, unit)}` : `${num(lo)}–${withUnit(hi, unit)}`
+  if (lo != null && lo > 0) return `at least ${withUnit(lo, unit)}`
   return 'no limit'
+}
+
+/** Each held asset's size unit from the project flow's rows, keyed like
+ *  `sizedByName` ("Component:name"). A row the flow does not list, or whose
+ *  bus unit is not known, has none. */
+export function heldUnits(holds: { component: string; entity: string; unit: string | null }[] | null | undefined): Map<string, string | null> {
+  return new Map((holds ?? []).map(h => [`${h.component}:${h.entity}`, h.unit]))
 }
 
 export function SizedDesignTable({ report, mode, testId }: {
@@ -59,6 +80,9 @@ export function SizedDesignTable({ report, mode, testId }: {
   testId: string
 }) {
   const rows = sizedAssets(report)
+  // Section 5's rows carry each asset's unit from its bus (MW or t/h).
+  const { flow } = useProjectFlow()
+  const units = heldUnits(flow?.sections?.find(x => x.section === 'assets')?.holds)
   if (rows.length === 0) return null
   const guided = mode === 'guided'
   const cell = guided ? 'py-1 pr-3' : 'py-0.5 pr-3'
@@ -84,8 +108,8 @@ export function SizedDesignTable({ report, mode, testId }: {
                 className="border-t border-border/50">
                 <td className={`${cell} font-mono`}>{a.name}</td>
                 <td className={cell}>{componentLabel(a.component)}{a.carrier ? `, ${a.carrier}` : ''}</td>
-                <td className={`${cell} text-right font-mono`}>{sizedBuilt(a)}</td>
-                <td className={`${cell} text-right font-mono text-muted`}>{sizedRange(a)}</td>
+                <td className={`${cell} text-right font-mono`}>{sizedBuilt(a, units.get(`${a.component}:${a.name}`))}</td>
+                <td className={`${cell} text-right font-mono text-muted`}>{sizedRange(a, units.get(`${a.component}:${a.name}`))}</td>
               </tr>
             ))}
           </tbody>

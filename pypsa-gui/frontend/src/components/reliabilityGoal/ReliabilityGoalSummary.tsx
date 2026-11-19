@@ -18,6 +18,9 @@ export type GoalItem = 'target' | 'ens' | 'draws' | 'mc_budget' | 'site'
 /** The sequential MC's stopping rule (`mc_adequacy`'s default `cov_target`). */
 export const MC_COV_TARGET = 0.05
 
+// 0.05 → "5", never "5.000000000000001".
+const pct = (v: number): string => (v * 100).toLocaleString('en-GB', { maximumFractionDigits: 2 })
+
 const sourceNote = (f: GoalValue<unknown>): string =>
   f.source === 'template' ? ' (template)' : f.source === 'default' ? ' (default)' : ''
 
@@ -26,9 +29,12 @@ export function hasTarget(target: number | null): target is number {
   return target != null && Number.isFinite(target) && target > 0
 }
 
-export function ReliabilityGoalSummary({ items, testId, requireTarget = false }: {
+export function ReliabilityGoalSummary({ items, testId, requireTarget = false, mcBudget = null }: {
   items: GoalItem[]
   testId: string
+  /** `mc_budget` only: the last run's own batching (`result.draws`), read
+   *  instead of the defaults when a run carries it. */
+  mcBudget?: { first_batch: number; max: number; cov_target: number } | null
   /** A study that cannot run without a shortfall target (the loops): with
    *  none (or 0), say so and link to where it is set instead of the values.
    *  A goal that could not be read falls through to "could not be read". */
@@ -58,9 +64,12 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false }:
       else if (it === 'draws') parts.push(`MC draws ${goalWords(goal, 'mc_draws')}`)
       // The Expert MC batches adaptively (walkthrough asset-investment 08):
       // the goal's draws are its first batch, not its whole run.
-      else if (it === 'mc_budget') parts.push(`MC draws ${goalWords(goal, 'mc_draws')} first, then more `
-        + `until the estimate's spread is under ${MC_COV_TARGET * 100} %, up to `
-        + MAX_GOAL_DRAWS.toLocaleString('en-GB'))
+      else if (it === 'mc_budget') parts.push(mcBudget
+        ? `MC draws ${mcBudget.first_batch.toLocaleString('en-GB')} first, then more until the estimate's `
+          + `spread is under ${pct(mcBudget.cov_target)} %, up to ${mcBudget.max.toLocaleString('en-GB')}`
+        : `MC draws ${goalWords(goal, 'mc_draws')} first, then more `
+          + `until the estimate's spread is under ${pct(MC_COV_TARGET)} %, up to `
+          + MAX_GOAL_DRAWS.toLocaleString('en-GB'))
       else {
         // The select's own label and wording ("Grid connection: None — …").
         const l = siteTypeLabel(goal.site_archetype.value)
