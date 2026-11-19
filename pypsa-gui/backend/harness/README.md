@@ -2373,6 +2373,36 @@ the error is `discussed_run_required`. Download the chip with
 leaves write-tier tools uncarded. Guided mode cards every write, and
 `AUTO_APPROVE_TIERS` never includes `write`.
 
+### Current view (live-voice 03a)
+
+Each admitted turn records the view it was asked from in the durable thread's
+`refs.current`, through `durable_conversation.record_current_view`, called once
+in `loop.py` after the turn has passed every refusal and its user message is
+kept. The loop reads the bound thread's generation before `session_init`
+(`current_view_generation`) and passes it on; the write re-checks it under
+`_LOCK`, so a rebind during the turn, an obsolete utterance or an unreadable
+start generation records nothing. `refs.discussed` is never
+touched by it: what the user is looking at and the run under discussion stay
+distinct, and a resumed episode keeps both.
+
+The record is built from the request's `ui_context`, which is client input.
+Every value is checked on its own: `panel` and `results_tab` against
+`SAFETY_PANEL_ENUM` and `RESULTS_TAB_ENUM` (a tab only under Results), run ids
+against the run id pattern, `section` against a bounded id pattern, `source`,
+`scope` and `mode` against closed sets, the window as two whole numbers in
+order, and the asset as a known component class plus a bounded name. A value
+that fails is dropped. `at` is server time.
+
+The write never refuses or delays a turn: no context, no bound thread, another
+episode, a stale `generation`, another replica, or a disk or JSON error writes
+nothing and returns False. It does not bump the generation. The loop holds no
+session or provider lock at the call; the function takes only `_LOCK`.
+
+`get_file_delivery` also returns `expires_at`: for an `agent_export`, the last
+instant the download is served (`uploaded_at` + 7 days, as
+`upload_service.refuse_expired_delivery` measures it); `null` for every other
+kind, which never expires.
+
 ### Current load flow
 
 `get_loadflow_summary` ranks lines and transformers on the current solve. It

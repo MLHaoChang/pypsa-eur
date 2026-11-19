@@ -19,6 +19,12 @@ vi.mock('../../../api/businessCase', async (importOriginal) => {
   } }
 })
 const api = vi.mocked(businessCaseApi)
+// The project currency for the price hints (walk 04): the finance inputs' EUR.
+vi.mock('../../../api/finance', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/finance')>()
+  return { ...actual, financeApi: { ...actual.financeApi,
+    getFinance: vi.fn().mockResolvedValue({ finance: { currency: 'EUR' }, digest: 'f1', status: 'ok' }) } }
+})
 
 const OPTS: BusinessCaseOptions = {
   template_id: 'eh_h2_hub',
@@ -138,6 +144,16 @@ describe('revenue prices', () => {
     expect(await screen.findByTestId('bc-not-established')).toBeTruthy()
     expect(screen.getByTestId('bc-hint').textContent).toBe('Public range 3–6 EUR per kg · Hydrogen bank auction, 2024')
     expect((screen.getByLabelText('Price, H2 sales') as HTMLInputElement).value).toBe('')
+  })
+  it('a range in another currency says so and is never converted (walk 04)', async () => {
+    mount(config({ ...H2, hint: { ...H2.hint!, unit: 'GBP/kW_year' } }))
+    expect((await screen.findByTestId('bc-hint-currency')).textContent)
+      .toBe('In GBP, not converted: type the price in EUR, the project currency.')
+  })
+  it('a range in the project currency adds no note', async () => {
+    mount(config(H2))
+    await screen.findByTestId('bc-hint')
+    expect(screen.queryByTestId('bc-hint-currency')).toBeNull()
   })
 })
 
