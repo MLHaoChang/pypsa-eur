@@ -16,4 +16,7 @@ describe('numberedCopyName', () => {
     expect(numberedCopyName('Industrial Hydrogen Hub')).toBe('Industrial Hydrogen Hub 2')
     expect(numberedCopyName('Industrial Hydrogen Hub 2')).toBe('Industrial Hydrogen Hub 3')
   })
+  it('does not count a year as a copy number', () => {
+    expect(numberedCopyName('Hub 2030')).toBe('Hub 2030 2')
+  })
 })
