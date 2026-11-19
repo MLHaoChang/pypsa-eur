@@ -27,6 +27,8 @@ jobs:
     - uses: actions/checkout@v7
       with:
         path: diagsrc
+    - name: Keep the hook outside the workspace
+      run: cp diagsrc/.github/diag/conftest_patch.py "$RUNNER_TEMP/conftest_patch.py"
     - uses: actions/checkout@v7
       with:
         ref: ${{ matrix.ref || github.sha }}
@@ -43,7 +45,7 @@ jobs:
     - working-directory: pypsa-gui/frontend
       run: npm ci --no-audit --no-fund
     - name: Add the stack-dump hook
-      run: cat diagsrc/.github/diag/conftest_patch.py >> pypsa-gui/backend/conftest.py && rm -rf diagsrc
+      run: cat "$RUNNER_TEMP/conftest_patch.py" >> pypsa-gui/backend/conftest.py && tail -3 pypsa-gui/backend/conftest.py
     - name: Run the shard
       timeout-minutes: 170
       env:
