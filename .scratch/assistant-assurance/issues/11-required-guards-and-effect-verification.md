@@ -3,7 +3,7 @@
 
 # Required effect guards and independent completion verification
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: read-back for update_component merged (#119); left: general mandatory guards, untasked idempotency, task-resolution evidence, A3.5/A3.6/A7.7
 Model: Opus
 Progress: Effect read-back for exact update_component only; general guards, untasked idempotency and task-resolution evidence pending
 Type: task

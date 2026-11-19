@@ -3,7 +3,7 @@
 
 # 05 — Raw parameter, option and internal names shown to the user (RAW-NAMES-1)
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: Set-in-Expert lines in plain words merged (#1631); left: raw ids in eh_concentrator.py, campusElectrical.ts, CampusIslandCutsSection.tsx, ipp_da
 Owner: expert-catalogue slices 01/02 (lead session_01G7qCuo4TtQpLUWDE5GKpny)
 Size: M
 Gated: UX
