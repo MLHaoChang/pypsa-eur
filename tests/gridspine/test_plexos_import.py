@@ -148,11 +148,18 @@ def irl():
 def test_irl_accounting_and_counts(irl):
     model, conv = irl
     check_ledger(model, conv)
+    # no CSVs given: every data-file row and Data File row is unmapped
     assert conv.ledger.totals() == {
-        "t_data": {"network": 282, "sidecar": 9, "unmapped": 243, "assumed": 0},
-        "t_attribute_data": {"network": 8, "sidecar": 0, "unmapped": 171, "assumed": 0},
+        "t_data": {"network": 289, "sidecar": 10, "unmapped": 255, "assumed": 0},
+        "t_attribute_data": {
+            "network": 10,
+            "sidecar": 0,
+            "unmapped": 174,
+            "assumed": 0,
+        },
     }
-    assert conv.report.counts["grid nodes"] == 3
+    assert conv.report.counts["grid nodes"] == 4
+    assert conv.report.counts["hydro reservoirs"] == 1
     assert conv.report.counts["generators"] == 59
     assert conv.report.counts["links"] == 1
 
@@ -210,6 +217,7 @@ def test_read_plexos_result_is_json_ready(tmp_path):
     areas = res.sidecars[AREAS_SIDECAR]["areas"]
     region = next(a for a in areas if a["kind"] == "region")
     assert region["voll"] > 0 and sorted(region["buses"]) == [
+        "EU-ESP",
         "EU-FRA",
         "EU-GBR",
         "EU-IRL",
@@ -238,7 +246,7 @@ def test_zip_reads_like_the_xml(tmp_path):
     assert res.report.source_files == ["m.zip"]
     assert (
         "data file model/csv_files/a.csv",
-        "data-file time series are read in a later slice",
+        "no imported property reads this file",
     ) in [(u.source_item, u.reason) for u in res.report.unmapped]
 
 

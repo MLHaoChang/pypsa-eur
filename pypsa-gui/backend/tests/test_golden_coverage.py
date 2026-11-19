@@ -278,6 +278,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/compare.py", "post_intent_comparison"):         frozenset(),
     ("routers/compare.py", "get_intent_comparison"):          frozenset(),
     ("routers/compare.py", "post_intent_comparison_abort"):   frozenset(),
+    ("routers/compare.py", "get_intent_comparison_defaults"): frozenset(),
     # ── routers/asset_results.py ────────────────────────────────────────
     ("routers/asset_results.py", "list_assets"):                frozenset(),
     ("routers/asset_results.py", "export_asset_results_xlsx"):   frozenset({"asset_results_xlsx"}),
@@ -311,6 +312,9 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/studies.py", "start_supply_architectures"): frozenset(),
     ("routers/studies.py", "get_supply_architectures"):   frozenset(),
     ("routers/studies.py", "abort_supply_architectures"): frozenset(),
+    ("routers/studies.py", "start_system_type_map"): frozenset(),
+    ("routers/studies.py", "get_system_type_map"):   frozenset(),
+    ("routers/studies.py", "abort_system_type_map"): frozenset(),
     # S7: the decision report — assembled once, then rendered; every
     # rendering shows the same verdict facts and case KPIs.
     ("routers/studies.py", "assemble_report"):        frozenset({"decision_report"}),

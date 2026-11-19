@@ -578,11 +578,17 @@ def _from_csv(text: str, net) -> ImportedContingencies:
             )
         seen[label] = lineno
         try:
-            order = _num(rec.get("order")) or 1
+            order = _num(rec.get("order"))
         except (TypeError, ValueError):
             raise ContractError(
                 f"line {lineno}: order {rec.get('order')!r} is not an integer"
             ) from None
+        if order is None:
+            order = 1
+        elif order not in (1, 2):
+            raise ContractError(
+                f"line {lineno}: order {rec.get('order')!r} is not 1 or 2"
+            )
         cid = _contingency_id(label) if kind not in COMPOUND_SEPARATORS else label
         if cid in seen_id:
             raise ContractError(
@@ -621,6 +627,17 @@ def _from_csv(text: str, net) -> ImportedContingencies:
                 raise ContractError(
                     f"line {lineno}: a {kind} row of order 2 needs two element_ids, got {ids}"
                 )
+            if ids[0] == ids[1]:
+                # one branch named twice is not an N-2: listed, never screened as N-1
+                unmatched.append(
+                    {
+                        "contingency_id": cid,
+                        "line": lineno,
+                        "element": ids[0],
+                        "reason": "not_representable",
+                    }
+                )
+                continue
             bad = [e for e in ids if e not in known_branch]
             if bad:
                 for e in bad:

@@ -3,7 +3,7 @@
 
 # 15 — Harness profiles: grid-only templates (3bus, ieee14, belgium, ieee39)
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: open in #1586
 Type: task
 Blocked by: 07
 Gated: yes (GK A for the PF and N-1 rules; GK B for the harness parts)
