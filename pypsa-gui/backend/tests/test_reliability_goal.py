@@ -142,7 +142,7 @@ def test_effective_goal_order():
     template = {"recommended_archetype": "weak_flexible",
                 "pack_overrides": {"target_lole_h": 1.0, "ens_cap_permyriad": 3.0}}
     assert G.effective_goal({}, None) == {
-        "target_lole_h": {"value": None, "source": "default"},
+        "target_lole_h": {"value": None, "source": "default", "assumed": None},
         "ens_cap_permyriad": {"value": None, "source": "default"},
         "mc_draws": {"value": G.DEFAULT_MC_DRAWS, "source": "default"},
         "site_archetype": {"value": "strong_grid", "source": "default"},
@@ -227,11 +227,11 @@ def test_the_mc_study_fills_its_draws_from_the_goal(client, install_network):
     _put(client, mc_draws=16)
     r = client.post("/api/results/mc", json={"seed": SEED, "cov_target": COV})
     assert r.status_code == 200, r.text
-    assert (r.json()["draws"], r.json()["goal_sources"]) == (16, {"mc_draws": "stored"})
+    assert (r.json()["draws"], r.json()["goal_sources"]) == (16, {"mc_draws": "stored", "target_lole_h": "default"})
     assert mc_poll(client)["status"] == "done"
 
     r = client.post("/api/results/mc", json={"draws": 8, "seed": SEED, "cov_target": COV})
-    assert (r.json()["draws"], r.json()["goal_sources"]) == (8, {"mc_draws": "override"})
+    assert (r.json()["draws"], r.json()["goal_sources"]) == (8, {"mc_draws": "override", "target_lole_h": "default"})
     mc_poll(client)
 
 
@@ -417,3 +417,166 @@ def test_the_assistant_tools_default_to_the_goal(install_network, monkeypatch):
         time.sleep(0.02)
     out = T.run_eh_study(archetype="strong_grid", stages=stages)
     assert (out["archetype"], out["goal_sources"]["site_archetype"]) == ("strong_grid", "override")
+
+
+# ── Walkthrough asset-investment 01: the goal the study certifies against ──
+
+def test_an_unset_lole_carries_the_site_types_assumed_goal():
+    """With no stored or template LOLE the value stays None (no reader keyed
+    on it changes) and `assumed` names the site type's own pack target, the
+    one the EH study certifies against. Strong grid has none."""
+    def lole(cfg, template):
+        return G.effective_goal(cfg, template)["target_lole_h"]
+    assert lole({}, {"recommended_archetype": "off_grid"}) == {
+        "value": None, "source": "default", "assumed": 3.0}
+    assert lole({"site_archetype": "weak_flexible"}, None)["assumed"] == 3.0
+    # The site type the goal returns decides, not the template's raw field.
+    assert lole({"site_archetype": "strong_grid"},
+                {"recommended_archetype": "off_grid"})["assumed"] is None
+    assert lole({}, None)["assumed"] is None
+    # A set value is the goal: nothing is assumed.
+    assert lole({"target_lole_h": 1.5}, {"recommended_archetype": "off_grid"}) == {
+        "value": 1.5, "source": "stored"}
+    assert lole({}, {"recommended_archetype": "off_grid",
+                     "pack_overrides": {"target_lole_h": 2.0}}) == {
+        "value": 2.0, "source": "template"}
+    assert G.pack_target_lole_h("not_a_site_type") is None
+
+
+@pytest.mark.parametrize("archetype", ["off_grid", "weak_flexible", "strong_grid"])
+def test_the_assumed_goal_is_the_one_the_study_certifies_against(archetype):
+    """One source (GK B3 A1): the pack the EH study builds, whose
+    `availability.target_lole_h` is the report's `target_lole_h` the Guided
+    verdict reads."""
+    from services.adequacy.eh_study_runner import _PACK_FACTORY
+
+    pack = _PACK_FACTORY[archetype]()
+    goal = G.effective_goal({"site_archetype": archetype}, None)
+    assert goal["target_lole_h"]["assumed"] == pack.availability.target_lole_h
+
+
+def test_an_assumed_goal_drives_no_loop_and_no_eh_override():
+    """GK A 30 A1: the loops still see no target and refuse; the EH study
+    request is unchanged (AI-A owns its numbers); the run digest's goal
+    snapshot is what it was."""
+    from harness import run_eh
+
+    class Body:
+        target_lole_h = None
+        draws = None
+    goal = G.effective_goal({}, {"recommended_archetype": "off_grid"})
+    assert G.loop_goal(Body(), goal, 2.0)[0] is None
+    body, sources = G.eh_request_with_goal(EhStudyRequest(), goal)
+    assert body.pack_overrides in (None, {})
+    assert sources["target_lole_h"] == "default"
+    assert run_eh._goal_snapshot(goal)["target_lole_h"] == {"value": None, "source": "default"}
+    # A set goal still drives the loop, on the horizon basis.
+    stored = G.effective_goal({"target_lole_h": 3.0}, {"recommended_archetype": "off_grid"})
+    assert G.loop_goal(Body(), stored, 2.0)[0] == 6.0
+
+
+def test_the_loop_refusal_names_the_assumed_goal(monkeypatch):
+    goal = G.effective_goal({}, {"recommended_archetype": "off_grid"})
+    monkeypatch.setattr(G, "active_goal", lambda state: goal)
+    assert G.no_target_hint({}) == (
+        " (the site type assumes 3 h/yr; type it there to search against it)")
+    monkeypatch.setattr(G, "active_goal", lambda state: G.effective_goal({}, None))
+    assert G.no_target_hint({}) == ""
+
+
+def test_every_template_assumes_the_target_its_study_runs_with():
+    """The template-e2e builder's check: for each shipped template, a goal
+    nobody set assumes exactly the target the EH study applies
+    (`apply_pack_overrides(_PACK_FACTORY[a](), overrides)`), and a stored
+    site type different from the template's is followed."""
+    from project_templates.eh_templates import TEMPLATE_META
+    from services.adequacy.eh_study_runner import _PACK_FACTORY, apply_pack_overrides
+
+    for tid, meta in TEMPLATE_META.items():
+        goal = G.effective_goal({}, meta)
+        arch = goal["site_archetype"]["value"]
+        po = meta.get("pack_overrides") or {}
+        study = apply_pack_overrides(_PACK_FACTORY[arch](), po).availability.target_lole_h
+        lole = goal["target_lole_h"]
+        if lole["source"] == "default":
+            assert lole["assumed"] == study, tid
+        else:
+            assert lole["value"] == study, tid
+    off_grid = next(m for m in TEMPLATE_META.values() if m.get("recommended_archetype") == "off_grid"
+                    and not (m.get("pack_overrides") or {}).get("target_lole_h"))
+    assert G.effective_goal({"site_archetype": "strong_grid"}, off_grid)["target_lole_h"]["assumed"] is None
+
+
+def test_a_pack_that_cannot_be_built_assumes_nothing(monkeypatch):
+    from services.adequacy import eh_study_runner
+
+    def broken():
+        raise ValueError("bad pack")
+    monkeypatch.setitem(eh_study_runner._PACK_FACTORY, "off_grid", broken)
+    assert G.effective_goal({"site_archetype": "off_grid"}, None)["target_lole_h"] == {
+        "value": None, "source": "default", "assumed": None}
+
+
+def test_the_assumed_goal_never_reaches_the_fingerprint_or_the_digest(
+        client, install_network, session_ctx, monkeypatch):
+    """GK B 65 C5: `assumed` is read, never stored, so the solve fingerprints
+    and the investment-case digest are byte-identical whatever the site type's
+    pack assumes; the goal fields stay out of `goal_free_config`."""
+    from services.finance.investment_case_runner import assumptions_digest
+
+    install_network(_network())
+    _put(client, solver_name="highs", voll=150.0, site_archetype="off_grid")
+    ctx = session_ctx(client)
+    assert G.active_goal(ctx.solver_state)["target_lole_h"]["assumed"] == 3.0
+
+    def snapshot():
+        solver = G.goal_free_config(ctx.solver_state["solver_config"])
+        return _fingerprint(ctx), assumptions_digest(
+            finance=None, commercial=None, dispatch=None, packs={}, solver=solver)
+    before = snapshot()
+    assert not {"assumed", "target_lole_h", "site_archetype", "mc_draws"} & set(
+        G.goal_free_config(ctx.solver_state["solver_config"]))
+    for other in (7.5, None):
+        monkeypatch.setattr(G, "pack_target_lole_h", lambda _a, v=other: v)
+        assert G.active_goal(ctx.solver_state)["target_lole_h"]["assumed"] == other
+        assert snapshot() == before
+
+
+def test_a_pack_failing_with_any_exception_assumes_nothing(monkeypatch):
+    """GK B 65 C8: not only the module's own ValueError; any failure building
+    the pack leaves the goal readable with `assumed: None`."""
+    from services.adequacy import eh_study_runner
+
+    class ForeignError(Exception):
+        pass
+
+    def broken():
+        raise ForeignError("pack library missing")
+    monkeypatch.setitem(eh_study_runner._PACK_FACTORY, "off_grid", broken)
+    assert G.effective_goal({"site_archetype": "off_grid"}, None)["target_lole_h"] == {
+        "value": None, "source": "default", "assumed": None}
+
+
+def test_a_runner_that_cannot_be_imported_assumes_nothing(monkeypatch):
+    """GK B 65 C8: the pack import is lazy; its failure is no goal either."""
+    import builtins
+
+    real = builtins.__import__
+
+    def refuse(name, *a, **k):
+        if name == "services.adequacy.eh_study_runner":
+            raise ImportError("runner unavailable")
+        return real(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", refuse)
+    assert G.pack_target_lole_h("off_grid") is None
+
+
+@pytest.mark.parametrize("bad", ["3", True, float("nan"), float("inf"), {}, None])
+def test_a_non_number_assumed_goal_reads_as_none(bad, monkeypatch):
+    """GK B 65 C9: every reader treats a missing or non-number `assumed` as
+    not set: no assumed goal, no hint in the loops' refusal."""
+    goal = {"target_lole_h": {"value": None, "source": "default", "assumed": bad}}
+    assert G.assumed_lole(goal) is None
+    monkeypatch.setattr(G, "active_goal", lambda state: goal)
+    assert G.no_target_hint({}) == ""
+    assert G.assumed_lole({"target_lole_h": {"value": None, "source": "default"}}) is None
