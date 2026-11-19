@@ -496,10 +496,7 @@ def test_reader_and_registry_import_without_pypsa():
 #: Cases whose exact equality waits on a writer fix: id -> ticket. They are not skipped:
 #: the test pins today's error at exactly WINDV2**2, so the fix turns it red and the
 #: case moves to the equality branch.
-_PENDING = {
-    "hv": "#1609: GC-04 raw_writer.trafo_impedance WINDV2² fix",
-    "lv": "#1609: GC-04 raw_writer.trafo_impedance WINDV2² fix",
-}
+_PENDING: dict[str, str] = {}
 
 
 @pytest.mark.parametrize("tap_side", ["hv", "lv"])
