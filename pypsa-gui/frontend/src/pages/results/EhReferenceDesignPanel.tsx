@@ -282,6 +282,9 @@ export const CERTIFICATION_NEXT = {
   // links there ("Change in Scenarios & optimisation ›").
   inconclusive: 'Next: raise the MC draws in the reliability goal or tighten the plan; an inconclusive verdict is not a failure.',
   noTarget: 'Next: set an allowed shortfall in the reliability goal to certify.',
+  // GK A F6': a must-stay-on bus behind one feeder holds the pass back; the
+  // interval may sit under the goal, so more draws would not settle it.
+  feederBound: 'Next: add a second feeder to the must-stay-on bus or make its feeder more reliable; more simulation draws would not settle this verdict.',
 } as const
 
 /** MC certification headline from the `certification` section, if it ran. */
@@ -311,7 +314,8 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
   // No target (the study reports LOLE but certifies nothing) and the 'none'
   // metric both leave the verdict empty: the next step is to set a target.
   const next = verdict === 'fail' ? CERTIFICATION_NEXT.fail
-    : verdict === 'inconclusive' ? CERTIFICATION_NEXT.inconclusive
+    : verdict === 'inconclusive'
+      ? (payload.feeder_bound ? CERTIFICATION_NEXT.feederBound : CERTIFICATION_NEXT.inconclusive)
       : verdict === 'pass' ? null
         : (verdict == null || verdict === 'none' || payload.metric === 'none')
           ? CERTIFICATION_NEXT.noTarget : null

@@ -5,6 +5,11 @@ import { costTileLabel, evidenceValue, feederAdvice, kpiMoney, plainIds, plainWo
 import { GROUP_TITLES } from './holdWords'
 
 describe('plainWords', () => {
+  it('a feeder-bound title names the bus and feeder as the project does (GK A F6\')', () => {
+    expect(plainWords('Certification not decided: it_bus could be cut off up to 43.8 h/yr while site_transformer is out'))
+      .toBe('Certification not decided: IT bus could be cut off up to 43.8 h/yr while Site transformer is out')
+  })
+
   it('a bare dtc_planning (dtc_critical_unserved effect)', () => {
     expect(plainWords('size what islanded operation needs (dtc_planning)'))
       .toBe('size what islanded operation needs (a plan for running without the grid)')

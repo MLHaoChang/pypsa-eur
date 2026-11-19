@@ -53,6 +53,14 @@ describe('certificationHeadline.next', () => {
     expect(certificationHeadline(report({ verdict, target_lole_h: target }))!.next).toBe(next)
   })
 
+  it('inconclusive held by a feeder bound → the feeder, not more draws (GK A F6\')', () => {
+    const next = certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 3,
+      feeder_bound: { pockets: [{ buses: ['it_bus'], feeders: ['site_transformer'],
+        bound_h_per_year: 43.8 }], chained: [] } }))!.next
+    expect(next).toMatch(/second feeder/)
+    expect(next).not.toMatch(/raise the MC draws/)
+  })
+
   it('no target (verdict null) → set a target', () => {
     expect(certificationHeadline(report({ verdict: null, target_lole_h: null }))!.next)
       .toBe(NO_TARGET_NEXT)

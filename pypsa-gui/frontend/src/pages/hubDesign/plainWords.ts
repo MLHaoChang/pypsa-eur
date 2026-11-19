@@ -58,6 +58,9 @@ export function plainWords(text: string): string {
     (_m, link: string, all: string) =>
       `: ${all} of the outage risk, and ${link === '100%' ? 'all' : link} of the risk from ${LINKS}`)
   for (const [re, plain] of RULES) out = out.replace(re, plain)
+  // A pass held back by a feeder bound names the bus and the feeder by id
+  // (GK A F6'): shown as the project names them.
+  if (out.startsWith('Certification not decided: ')) out = plainIds(out)
   return out
 }
 
