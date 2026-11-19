@@ -242,6 +242,7 @@ def test_a_bound_under_the_goal_does_not_block_a_pass():
     pay = report.sections["certification"].payload
     assert pay["verdict"] == "pass", report.sections["certification"].note
     assert pay["critical_feeders"][0]["lole_h"] == pytest.approx(0.0876, rel=0.02)
+    assert pay["confident"] is True and pay["feeder_bound"] is None
 
 
 def test_the_bound_is_the_composed_figure_for_the_same_feeder():

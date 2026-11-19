@@ -386,7 +386,8 @@ def test_a_critical_feeder_gets_a_feeder_remedy_not_generic_spare_capacity():
     dom = _by_id(review_report(_island_fmea_report(), RECORD),
                  "fmea_dominant_mode")
     rec = dom["recommendation"]
-    assert "second feeder" in rec and "hospital" in rec
+    assert "second feeder" in rec and "backup supply at hospital," in rec
+    assert dom["evidence"]["feeds_critical_buses"] == ["hospital"]
     assert "N+1" not in rec
     assert dom["actions"] == []
 
@@ -489,3 +490,28 @@ def test_a_bounded_dominant_feeder_gets_the_feeder_remedy():
         "critical_feeders"][0]["upper_bound"] = True
     dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
     assert "second feeder" in dom["recommendation"] and dom["actions"] == []
+
+
+def _bound_review(verdict, fb):
+    cert = {"verdict": verdict, "target_lole_h": 25.0, "draws": 200,
+            "feeder_bound": fb}
+    return review_report(_report(sections={"certification": {
+        "status": "ok", "payload": cert}}), RECORD)
+
+
+def test_a_chained_feeder_alone_cannot_be_bounded():
+    f = _by_id(_bound_review("inconclusive", {"chained": ["mid_feeder"]}),
+               "certification_inconclusive")
+    assert f["title"] == "Certification not decided: mid_feeder cannot be bounded"
+    assert f["actions"] == []
+
+
+def test_a_bound_with_missing_fields_still_reads():
+    f = _by_id(_bound_review("inconclusive", {"pockets": [{}]}),
+               "certification_inconclusive")
+    assert f["title"].startswith("Certification not decided:  could be cut off up to 0")
+
+
+def test_a_feeder_bound_on_a_pass_adds_no_inconclusive_finding():
+    out = _bound_review("pass", _BOUND)
+    assert all(f["id"] != "certification_inconclusive" for f in out["findings"])
