@@ -461,3 +461,31 @@ def test_class_a_without_rows_counts_the_links_alone():
                                                          "rows": None}
     dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
     assert dom["evidence"]["share_of_all_ranked"] == pytest.approx(1.0)
+
+
+# GK A F6': a pass withheld by a pocket's upper bound is not a sampling
+# question — the interval can sit under the goal — so no "more draws".
+_BOUND = {"pockets": [{"buses": ["it_bus"], "feeders": ["site_transformer"],
+                       "bound_h_per_year": 43.8}],
+          "chained": [], "target_h_per_year": 25.0}
+
+
+def test_an_inconclusive_held_by_a_feeder_bound_names_the_feeder_not_draws():
+    cert = {"verdict": "inconclusive", "target_lole_h": 25.0, "draws": 200,
+            "feeder_bound": _BOUND}
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": cert}}), RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert f["actions"] == []
+    assert "it_bus" in f["title"] and "site_transformer" in f["title"]
+    assert "43.8" in f["title"] and "straddles" not in f["title"]
+    assert "second feeder" in f["recommendation"]
+    assert out["summary"]["feeder_bound"] == _BOUND
+
+
+def test_a_bounded_dominant_feeder_gets_the_feeder_remedy():
+    rep = _island_fmea_report(feeder_model="unsampled")
+    rep["sections"]["certification"]["payload"]["fleet_scope"][
+        "critical_feeders"][0]["upper_bound"] = True
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert "second feeder" in dom["recommendation"] and dom["actions"] == []

@@ -52,11 +52,13 @@ def _share_of_all_ranked(c: float, class_b: list, class_a) -> float | None:
 
 def _critical_feeder(sections: dict, name) -> dict | None:
     """The certification's critical-feeder row for Link ``name`` when its
-    outages were composed into the LOLE (``model == "composed"``)."""
+    outages were composed into the LOLE (``model == "composed"``) or bound it
+    from above (``upper_bound``, GK A F6')."""
     scope = (((sections.get("certification") or {}).get("payload") or {})
              .get("fleet_scope") or {})
     for f in scope.get("critical_feeders") or []:
-        if f.get("name") == name and f.get("model") == "composed":
+        if f.get("name") == name and (f.get("model") == "composed"
+                                      or f.get("upper_bound")):
             return f
     return None
 
@@ -182,6 +184,26 @@ def review_report(report: dict, record: dict | None = None,
                          rerun.with_(add_stages=["dtc_stress", "dtc_planning"]),
                          "size the local capacity that islanded operation "
                          "needs (dtc_stress + dtc_planning)")])
+    elif verdict == "inconclusive" and isinstance(cert.get("feeder_bound"), dict):
+        # GK A F6': the interval may sit under the goal; what withholds the
+        # pass is a must-stay-on bus behind one feeder whose own units the
+        # certification does not simulate. More draws cannot clear it.
+        fb = cert["feeder_bound"]
+        pk = list(fb.get("pockets") or [])
+        names = [b for p in pk for b in (p.get("buses") or [])]
+        feeders = [f for p in pk for f in (p.get("feeders") or [])]
+        feeders += list(fb.get("chained") or [])
+        bound = sum(_num(p.get("bound_h_per_year")) or 0.0 for p in pk)
+        title = ("Certification not decided: "
+                 + (f"{', '.join(names)} could be cut off up to "
+                    f"{_fmt(bound, 'h/yr')} while {', '.join(feeders)} is out"
+                    if pk else f"{', '.join(feeders)} cannot be bounded"))
+        add("certification_inconclusive", "medium", title,
+            {**ev, "feeder_bound": fb},
+            "Not a failure: this upper bound leaves out the bus's own units, "
+            "which the certification does not simulate behind its feeder. A "
+            "second feeder or a lower outage rate on the feeder settles it; "
+            "more simulation draws do not.")
     elif verdict == "inconclusive":
         draws = int(cert.get("draws") or 500)
         more = min(_MC_MAX_DRAWS, max(draws * 2, draws + 1))
@@ -460,6 +482,9 @@ def review_report(report: dict, record: dict | None = None,
         "archetype": report.get("archetype"),
         "certified": report.get("certified"),
         "verdict": verdict,
+        # Why an inconclusive verdict is held (GK A F6'), or None.
+        "feeder_bound": (cert.get("feeder_bound")
+                         if isinstance(cert.get("feeder_bound"), dict) else None),
         "mc_lole_h_per_year": lole,
         "target_lole_h": target,
         "ens_cap_permyriad": pack_ens,

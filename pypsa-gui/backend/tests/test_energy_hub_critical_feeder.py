@@ -227,6 +227,11 @@ def test_a_critical_bus_with_its_own_units_is_bounded_not_composed():
     assert "crit" in note and "87.6 h/yr" in note
     assert "own units not counted" in note and "second feeder" in note
     assert "upper bound" in pay["critical_feeder_note"]
+    [pk] = pay["feeder_bound"]["pockets"]
+    assert pk["buses"] == ["crit"] and pk["bound_h_per_year"] == pytest.approx(
+        87.6, rel=0.01
+    )
+    assert "issue" not in note
 
 
 def test_a_bound_under_the_goal_does_not_block_a_pass():

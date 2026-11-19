@@ -1706,7 +1706,7 @@ export function EhReferenceDesignPanel() {
                   )}
                   {report.sections?.certification?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-certification-note">
-                      {report.sections.certification.note}
+                      {plainIds(report.sections.certification.note)}
                     </p>
                   )}
                   {certification?.warning && (

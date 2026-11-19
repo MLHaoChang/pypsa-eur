@@ -63,6 +63,25 @@ describe('headline (§5.5)', () => {
       'Not decided: the shortfall estimate (1.6–4.2 h/yr) straddles the 3 h/yr goal: more simulation runs would settle it.')
   })
 
+  it('inconclusive held by a feeder bound names the feeder, not more runs (GK A F6\')', () => {
+    // The interval (≈ 10–21 h/yr) sits under the 25 h/yr goal: it does not straddle.
+    const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 15,
+      lole_ci: [10, 21], horizon_years: 1, target_lole_h: 25 }) })
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 15, target_lole_h: 25,
+      feeder_bound: { pockets: [{ buses: ['it_bus'], feeders: ['site_transformer'],
+        bound_h_per_year: 43.8 }], chained: [] } })
+    const text = headline(rv, r)
+    expect(text).toMatch(/^Not decided: IT bus could be cut off up to 43\.8 h\/yr while Site transformer is out/)
+    expect(text).toMatch(/second feeder/)
+    expect(text).not.toMatch(/straddles|simulation runs|it_bus/)
+  })
+
+  it('inconclusive held by a chained feeder says it cannot be bounded', () => {
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 1, target_lole_h: 3,
+      feeder_bound: { pockets: [], chained: ['crit_feeder'] } })
+    expect(headline(rv, report())).toMatch(/^Not decided: Crit feeder reaches .* cannot bound/)
+  })
+
   it('pass: one decimal, under the goal', () => {
     expect(headline(review({ verdict: 'pass', mc_lole_h_per_year: 0.44, target_lole_h: 3 }), report()))
       .toBe('Certified: about 0.4 h/yr of shortfall, under the 3 h/yr goal.')

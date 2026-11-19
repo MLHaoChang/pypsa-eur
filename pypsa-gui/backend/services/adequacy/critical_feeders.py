@@ -401,26 +401,36 @@ def bounded_verdict(
     weights: np.ndarray,
     target_h: float | None,
     years: float,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, dict | None]:
     """GK A F6': a ``pass`` stands only if the pockets this certification
     cannot simulate cannot break it. A bounded pocket's figure (its units
     ignored) added to the CI upper bound must stay at or under the target;
     a chained pocket has no bound. Otherwise ``inconclusive`` — never
-    ``fail`` — naming the pocket, its bound and what clears it."""
+    ``fail`` — naming the pocket, its bound and what clears it. The third
+    item, set only when it withholds the pass, says why in fields the review
+    and the Guided headline read (``feeder_bound``)."""
     if verdict != "pass" or target_h is None:
-        return verdict, note
+        return verdict, note, None
     chained = sorted(
         {str(r["name"]) for r in rows if r["model"] == UNSAMPLED and r.get("chained")}
     )
     bounded = [p for p in pockets if p.bound]
     per_year = years if years > 0 else 1.0
     parts = []
+    held: dict = {"pockets": [], "chained": chained}
     if bounded:
         p_h, _ = pocket_terms(bounded, np.asarray(weights, dtype=float))
         if hi + p_h > target_h:
             for p in bounded:
                 b_h, _ = pocket_terms([p], np.asarray(weights, dtype=float))
                 bus = ", ".join(p.buses)
+                held["pockets"].append(
+                    {
+                        "buses": list(p.buses),
+                        "feeders": list(p.feeders),
+                        "bound_h_per_year": b_h / per_year,
+                    }
+                )
                 parts.append(
                     f"{bus} behind {', '.join(p.feeders)} could be short up to "
                     f"{b_h / per_year:.3g} h/yr (upper bound: {bus}'s own units "
@@ -428,20 +438,19 @@ def bounded_verdict(
                 )
             parts[-1] += (
                 f", which with the rest of the hub exceeds the goal of "
-                f"{target_h / per_year:g} h/yr. A second feeder, a lower "
-                "outage rate on the feeder, or simulating the bus as its own "
-                "area (issue 09) would settle it"
+                f"{target_h / per_year:g} h/yr. A second feeder or a lower "
+                "outage rate on the feeder would settle it"
             )
     if chained:
         parts.append(
             f"{', '.join(chained)} feeds a must-stay-on bus through another "
             "bus with no supply of its own, which this certification cannot "
-            "bound. Simulating the bus as its own area (issue 09) would "
-            "settle it"
+            "bound. A feeder straight from a bus with supply would settle it"
         )
     if not parts:
-        return verdict, note
-    return "inconclusive", "; ".join(parts) + "."
+        return verdict, note, None
+    held["target_h_per_year"] = target_h / per_year
+    return "inconclusive", "; ".join(parts) + ".", held
 
 
 def certification_note(rows: list[dict]) -> str | None:

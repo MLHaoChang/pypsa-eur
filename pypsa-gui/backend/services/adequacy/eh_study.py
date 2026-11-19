@@ -519,7 +519,7 @@ def _stage_mc_certify(st: _Study) -> None:
         n_samples=res.get("n_samples"), ens_met=st.ens_met)
     # GK A F6': pockets with units of their own (or chained) can still break
     # a pass this run cannot see; their upper bound decides.
-    verdict, note = cf.bounded_verdict(
+    verdict, note, feeder_bound = cf.bounded_verdict(
         verdict, note, hi=hi, pockets=list(frozen.critical_pockets or []),
         rows=feeders, weights=inputs.weights, target_h=target_h,
         years=horizon_years)
@@ -563,6 +563,9 @@ def _stage_mc_certify(st: _Study) -> None:
         "ens_met": st.ens_met,
         "critical_feeders": feeders,
         "critical_feeder_note": cf.certification_note(feeders),
+        # Why a pass was withheld (F6'), or None: read by the review and the
+        # Guided headline so they name the feeder, not "more draws".
+        "feeder_bound": feeder_bound,
         "critical_pocket_lole_h_per_year": (
             res["critical_pocket_lole_hours"] / horizon_years
             if "critical_pocket_lole_hours" in res else None),

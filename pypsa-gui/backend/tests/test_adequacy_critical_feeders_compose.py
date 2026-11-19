@@ -121,7 +121,7 @@ def test_the_bound_plus_the_ci_upper_bound_decides_a_pass(hi, u, want):
             "buses": ["h"],
         }
     ]
-    v, note = bounded_verdict(
+    v, note, held = bounded_verdict(
         "pass",
         None,
         hi=hi,
@@ -133,6 +133,12 @@ def test_the_bound_plus_the_ci_upper_bound_decides_a_pass(hi, u, want):
     )
     assert v == want
     assert (note is None) == (want == "pass")
+    assert (held is None) == (want == "pass")
+    if held:
+        assert held["pockets"] == [
+            {"buses": ["h"], "feeders": ["f"], "bound_h_per_year": pytest.approx(2.0)}
+        ]
+        assert "issue" not in note
 
 
 def test_a_bound_never_turns_a_verdict_into_a_pass_or_a_fail():
@@ -147,4 +153,4 @@ def test_a_bound_never_turns_a_verdict_into_a_pass_or_a_fail():
             weights=np.ones(10),
             target_h=2.0,
             years=1.0,
-        ) == (v, "n")
+        ) == (v, "n", None)
