@@ -223,7 +223,7 @@ export function validate(draft: SiteDraft, bounds: SiteForm['bounds']): Record<s
   const v = draft.values
   const err: Record<string, string> = {}
   const rate = draft.growth?.pct
-  if (rate != null && !growthUsable(rate)) {
+  if (v.stages.length > 1 && rate != null && !growthUsable(rate)) {
     err.growth_pct = 'Grow from the first stage: enter a number above -100 % per year.'
   }
   const num = (key: string, x: number, lo: number, hi: number, open = false) => {

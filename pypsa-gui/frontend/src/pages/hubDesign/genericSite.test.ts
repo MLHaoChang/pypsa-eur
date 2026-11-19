@@ -175,6 +175,9 @@ describe('grow from the first stage', () => {
       expect(peaks(d)).toEqual([8, 12, 15])
     }
     expect(validate(setGrowth(initialDraft(FORM, 'industrial'), -5), B).growth_pct).toBeUndefined()
+    // One stage hides the row, so its rate cannot block the form unseen.
+    const one = removeStage(removeStage(setGrowth(initialDraft(FORM, 'industrial'), NaN), 2), 1)
+    expect(validate(one, B).growth_pct).toBeUndefined()
   })
 
   it('a filled peak over the grid that year shows on that stage\'s peak field', () => {
