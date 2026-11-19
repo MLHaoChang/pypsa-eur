@@ -1,6 +1,6 @@
 # Hosted streaming speech transport and account proof
 
-Status: in-progress (live probe pending owner keys, LV01-PROBE-LATER-1)
+Status: in-progress (live probe pending owner keys, LV01-PROBE-LATER-1); audit 2026-11-19: 01a and 01b merged (#1482, #1483); left: budgeted live probe, WebRTC/LiveKit, token routes
 Progress: Mocked contracts for LiveKit/Deepgram/OpenAI adapters, startup wiring and the closed live-probe gate plus probe script on the claude/live-voice-01a-adapters and claude/live-voice-01b-probe-gate PRs; the live probe has not run (no keys, no approved budget)
 Type: task
 Blocked by: 02, 09 (integrated live acceptance; adapter development can start earlier)

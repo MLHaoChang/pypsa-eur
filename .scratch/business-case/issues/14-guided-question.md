@@ -3,7 +3,7 @@
 
 # 14 — Guided question: is this plant worth building?
 
-Status: ready-for-agent (blocked by 08, 11, 12, 13; ../../study-harness/issues/10-profile-datacenter.md for the DC profile; Opus; GK B)
+Status: done (#1510)
 Type: task
 Blocked by: 08, 11, 12, 13; ../../study-harness/issues/10-profile-datacenter.md for the DC profile
 Gated: yes (GK B)

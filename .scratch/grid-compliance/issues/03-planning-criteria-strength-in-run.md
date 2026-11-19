@@ -3,7 +3,7 @@
 
 # GC-03 Planning criteria and SCR/ESCR/WSCR in the campus run; TSO contingency-list import
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: campus steps merged (#1574, #1589); left: scorecard rows in grid_readiness.py and the campus service section
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none
