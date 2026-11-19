@@ -85,6 +85,13 @@ describe('invalidateAssetQueries', () => {
     }
   })
 
+  it('marks a cached asset-units read stale, so a cost edit after a bus change reads the new unit (05d)', () => {
+    const qc = new QueryClient()
+    qc.setQueryData(['assetUnits', 'proj-a', 'Generator', 'g', ''], { units: {}, costs: {} })
+    invalidateAssetQueries(qc, 'proj-a')
+    expect(qc.getQueryState(['assetUnits', 'proj-a', 'Generator', 'g', ''])?.isInvalidated).toBe(true)
+  })
+
   it('works for a null project (desktop single-project mode keys)', () => {
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
@@ -165,6 +172,24 @@ describe('updateAsset — the chokepoint (Task 3)', () => {
       updateAsset(qc, 'p1', 'loads', 'l1', { p_set: 20 }),
     ).rejects.toThrow('422')
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe('updateAsset carries the cost basis claim (05d)', () => {
+  const api = () => (globalThis as never as { __awMock: Record<string, ReturnType<typeof vi.fn>> }).__awMock
+  beforeEach(() => vi.clearAllMocks())
+
+  it('passes the basis as the third PUT argument, and leaves it off when none is claimed', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [{ name: 'g1', p_nom: 100 }])
+    api().updateGenerator.mockResolvedValue({})
+
+    await updateAsset(qc, 'p1', 'generators', 'g1', { marginal_cost: 7 }, { costBasis: 'tonne' })
+    expect(api().updateGenerator).toHaveBeenLastCalledWith('g1', { name: 'g1', p_nom: 100, marginal_cost: 7 }, 'tonne')
+
+    await updateAsset(qc, 'p1', 'generators', 'g1', { marginal_cost: 8 })
+    expect(api().updateGenerator.mock.lastCall).toHaveLength(2)
   })
 })
 

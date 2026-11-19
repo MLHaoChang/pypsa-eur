@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Guided Results with no reliability goal now points to section 8, Scenarios & optimisation, where the goal is set, instead of a stale "step 3 (Goal)". The section number and name come from the flow itself.

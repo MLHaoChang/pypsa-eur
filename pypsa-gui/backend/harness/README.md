@@ -822,10 +822,18 @@ merge in either order. The inventory, route parity
 (`smoke/assistant_route_parity.py`) and control matrix
 (`smoke/assistant_control_matrix.py`) are built in memory by their `--check`s and
 are not committed; `--write` saves a copy under `.scratch/live-voice/` (git
-ignores it) for reading. New entries in the shared hand-written JSON go in a new
-fragment file per PR: error kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity
-declarations in `smoke/assistant_route_parity_declarations.d/`
-(`smoke/json_fragments.py` merges them and fails on a duplicate). A declaration or
+ignores it) for reading. New entries in a shared list go in a new fragment file
+per PR, never a new row in the shared file (RETRO-COST-1, RETRO-FRAG-1): error
+kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity declarations in
+`smoke/assistant_route_parity_declarations.d/`, a write route's or tool's lock
+decision in `tests/write_surface_lock_policy.d/`, a route's chat disposition in
+`tests/route_chat_disposition.d/`, a feature chat cannot do (and its refusal
+goals) in `services/not_via_chat.d/`, a tool's LC-06 family, variant or evidence
+in `smoke/family_manifest.d/`, and a results route's golden surfaces in
+`tests/golden_route_surfaces.d/`. Each folder's README has the format.
+`smoke/json_fragments.py` merges them after the Python rows and fails on a key
+defined twice, so a fragment adds rows and never overrides one; every check
+(stale or unknown route, unknown tool, ceilings) runs on the merged table. A declaration or
 `KNOWN_GAPS` row whose route a tool now serves stays in place and passes as stale;
 the coordinator's sweep deletes it (`smoke/prune_stale_declarations.py`). New tool
 blocks go at the end of TOOLS (and of the matching chat_tools section). Existing tools then keep their selection tie-breaks, which `wiring._bounded_tools` resolves toward the earlier index. Two PRs that append at the same anchor conflict as text: resolve it by keeping both blocks, the earlier-merged PR's first, then run `assistant_inventory.py --check` and the tool-selection tests at the merge.
@@ -2346,6 +2354,36 @@ the error is `discussed_run_required`. Download the chip with
 `discuss_project_run` and `export_run_evidence` are write-tier. Expert mode
 leaves write-tier tools uncarded. Guided mode cards every write, and
 `AUTO_APPROVE_TIERS` never includes `write`.
+
+### Current view (live-voice 03a)
+
+Each admitted turn records the view it was asked from in the durable thread's
+`refs.current`, through `durable_conversation.record_current_view`, called once
+in `loop.py` after the turn has passed every refusal and its user message is
+kept. The loop reads the bound thread's generation before `session_init`
+(`current_view_generation`) and passes it on; the write re-checks it under
+`_LOCK`, so a rebind during the turn, an obsolete utterance or an unreadable
+start generation records nothing. `refs.discussed` is never
+touched by it: what the user is looking at and the run under discussion stay
+distinct, and a resumed episode keeps both.
+
+The record is built from the request's `ui_context`, which is client input.
+Every value is checked on its own: `panel` and `results_tab` against
+`SAFETY_PANEL_ENUM` and `RESULTS_TAB_ENUM` (a tab only under Results), run ids
+against the run id pattern, `section` against a bounded id pattern, `source`,
+`scope` and `mode` against closed sets, the window as two whole numbers in
+order, and the asset as a known component class plus a bounded name. A value
+that fails is dropped. `at` is server time.
+
+The write never refuses or delays a turn: no context, no bound thread, another
+episode, a stale `generation`, another replica, or a disk or JSON error writes
+nothing and returns False. It does not bump the generation. The loop holds no
+session or provider lock at the call; the function takes only `_LOCK`.
+
+`get_file_delivery` also returns `expires_at`: for an `agent_export`, the last
+instant the download is served (`uploaded_at` + 7 days, as
+`upload_service.refuse_expired_delivery` measures it); `null` for every other
+kind, which never expires.
 
 ### Current load flow
 
