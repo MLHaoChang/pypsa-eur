@@ -48,12 +48,13 @@ try {
   await owner.close()
 
   for (const scheme of ['light', 'dark']) {
-    for (const mode of ['guided', 'expert']) {
+    // 'plain': Guided with no levers finding, so the Improve card keeps its original top line.
+    for (const mode of ['guided', 'expert', 'plain']) {
       const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1440, height: 1100 }, deviceScaleFactor: 2, reducedMotion: 'reduce', colorScheme: scheme })
       await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
       await ctx.addInitScript(({ mode, project, scheme }) => {
         localStorage.setItem('network-diagram:current-project', project)
-        localStorage.setItem('network-diagram:ui-mode', mode)
+        localStorage.setItem('network-diagram:ui-mode', mode === 'plain' ? 'guided' : mode)
         localStorage.setItem('network-diagram:ui-mode-explicit', '1')
         localStorage.setItem('network-diagram:theme', scheme)
       }, { mode, project: PROJECT, scheme })
@@ -61,7 +62,7 @@ try {
       page.setDefaultTimeout(15000)
       page.on('pageerror', e => problems.push(`${scheme}/${mode}: page error: ${e.message}`))
       await page.route(u => u.pathname === '/api/results/eh_study', r => r.request().method() === 'GET' ? r.fulfill({ json: { status: 'done', report: REPORT, error: null } }) : r.continue())
-      await page.route(u => u.pathname === '/api/results/eh_review', r => r.fulfill({ json: REVIEW }))
+      await page.route(u => u.pathname === '/api/results/eh_review', r => r.fulfill({ json: mode === 'plain' ? { ...REVIEW, findings: [] } : REVIEW }))
       await page.route(u => u.pathname === '/api/results/eh_reference_design', r => r.fulfill({ json: REPORT }))
       await page.route(u => u.pathname === '/api/results/eh_levers', r => r.fulfill({ json: LEVERS }))
       await page.goto(`${BASE}/`); await page.waitForLoadState('networkidle')
@@ -77,7 +78,17 @@ try {
           await box.screenshot({ path: f }); written.push(f)
         } catch (e) { problems.push(`${scheme}/${mode}/${name}: ${e.message.split('\n')[0]}`); await page.screenshot({ path: path.join(OUT, `failed-${name}-${scheme}.png`) }).catch(() => {}) }
       }
-      if (mode === 'guided') {
+      const openHub = () => page.getByTestId('hub-design-panel').waitFor({ timeout: 8000 }).catch(async () => {
+        await page.evaluate(async () => { const { useUIStore } = await import('/src/store/uiStore.ts'); useUIStore.getState().setSlidePanel('hubDesign') })
+        await page.getByTestId('hub-design-panel').waitFor()
+      })
+      if (mode === 'plain') {
+        try {
+          await openHub()
+          await page.getByTestId('hub-rail-step-improve').click(); await page.waitForTimeout(2000)
+          await shot(page.getByTestId('hub-improve-none').locator('xpath=..'), '5-improve-no-cheaper-guided')
+        } catch (e) { problems.push(`${scheme}/plain: ${e.message.split('\n')[0]}`) }
+      } else if (mode === 'guided') {
         try {
           await page.getByTestId('hub-design-panel').waitFor({ timeout: 8000 }).catch(async () => {
             await page.evaluate(async () => { const { useUIStore } = await import('/src/store/uiStore.ts'); useUIStore.getState().setSlidePanel('hubDesign') })
