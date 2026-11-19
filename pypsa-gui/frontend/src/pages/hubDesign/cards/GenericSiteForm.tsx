@@ -149,6 +149,11 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
                         aria-label={`${BACK_TO_RATE}, stage ${i + 1}`} title={BACK_TO_RATE}
                         className="pt-1 text-[11px] text-muted hover:text-accent">↺</button>
                     )}
+                    {/* Beside the field, not under it, so rows keep their height. */}
+                    {isFilledFromRate(draft, i) && (
+                      <span data-testid={`stages[${i}].peak_mw-from-rate`}
+                        className="pt-1.5 text-[10.5px] text-muted whitespace-nowrap">{FROM_RATE}</span>
+                    )}
                   </span>
                 </td>
                 <td className="pr-2">
@@ -352,7 +357,6 @@ function NumInput({ field, label, value, onChange, error, step, fromRate }: {
         aria-invalid={error ? true : undefined} aria-describedby={error ? errId(field) : undefined}
         onChange={e => onChange(e.target.value === '' ? NaN : Number(e.target.value))}
         className={`w-28 rounded border bg-bg px-2 py-1 text-[12px] ${fromRate ? 'italic text-muted' : 'text-text'} ${error ? 'border-danger' : 'border-border'}`} />
-      {fromRate && <span data-testid={`${field}-from-rate`} className="text-[10.5px] text-muted">{FROM_RATE}</span>}
       <FieldError id={errId(field)} error={error} />
     </span>
   )
