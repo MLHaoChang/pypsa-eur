@@ -3,7 +3,7 @@
 
 # 22 — Improve and the investment case have no manual path
 
-Status: needs-triage
+Status: needs-info
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: blocks decision
 Journey fit: results → decide (compare options, investment case).
@@ -21,3 +21,7 @@ Improve cards offer only 'Let the assistant do this' (disabled without a key, KE
 ## Comments
 
 Extended by the investment/business-case walk (PR #1668, its issue 02): a manual investment path meets value_flows_not_configured, then cod_missing, then tax and degradation blockers on the data-centre template, and Guided section 7 reads "complete" while finance inputs are empty. Keep this issue's acceptance in step with that issue.
+
+## Triage (2026-11-19, master 9f850d36)
+
+Still true on master (Improve cards: `CardShell` has only 'Ask about this' and 'Let the assistant do this'). Open question sent to the coordinator: what should the manual Improve action do? Options: (1) Recommended: each card opens the matching Expert panel with the lever pre-filled, no assistant; (2) a Guided 'Run the investment case' button only, Improve stays assistant-only until a key is set; (3) split into three issues (Improve manual action, Guided investment-case run, lever-cost reconciliation) and triage each. Overlaps walk issue 02 (#1668); keep acceptance in step.
