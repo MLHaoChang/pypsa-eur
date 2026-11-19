@@ -42,6 +42,8 @@ export interface EhStudyWhy {
   steps: WhyStep[]
 }
 
-export const getEhStudyWhy = (project: string, figure: EhStudyWhyFigure): Promise<EhStudyWhy> =>
-  client.get(`/results/eh_study/why/${figure}`, { params: { project_id: project }, skipErrorToast: true })
+/** Read for the open project: no `project_id`, which the route compares with the open project's UUID (the
+ *  frontend knows the project by name only; a name there is refused 409 `project_not_open`). */
+export const getEhStudyWhy = (figure: EhStudyWhyFigure): Promise<EhStudyWhy> =>
+  client.get(`/results/eh_study/why/${figure}`, { skipErrorToast: true })
     .then(r => r.data as EhStudyWhy)

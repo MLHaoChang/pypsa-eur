@@ -222,9 +222,9 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
   return (
     <section aria-label="Headline figures" data-testid="hub-results-headline" className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2">
-        {rel && <div className="flex flex-col gap-1"><TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true}
+        {rel && <div className="flex flex-col gap-1 self-start"><TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true}
           dimmed={freshnessUnknown} /><WhyThisNumber figure="expected_shortfall" /></div>}
-        {cost && <div className="flex flex-col gap-1">{cost}<WhyThisNumber figure="design_cost" value={costEur} /></div>}
+        {cost && <div className="flex flex-col gap-1 self-start">{cost}<WhyThisNumber figure="design_cost" value={costEur} /></div>}
         {npv && <TileFigure tile={npv} testId="hub-results-npv" />}
         {/* The tile's place is kept while the figures load, so the grid does not move (as Expert's strip). */}
         {headline.isLoading ? <Skeleton className="min-h-[96px]" /> : (

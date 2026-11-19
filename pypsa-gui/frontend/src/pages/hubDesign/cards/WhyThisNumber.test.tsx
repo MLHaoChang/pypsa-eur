@@ -11,7 +11,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { kpiMoney } from '../plainWords'
 import FIXTURE from './__fixtures__/ehStudyWhy.json'
-import { editFor, failureWords, isoTime, recordedAndNow, shownState, WhyThisNumber } from './WhyThisNumber'
+import { editFor, failureWords, isoTime, recordedAndNow, shownState, valueWords, WhyThisNumber } from './WhyThisNumber'
 
 vi.mock('../../../api/results', () => ({ getEhStudyWhy: vi.fn() }))
 vi.mock('../../../layout/flowNavigation', async (importOriginal) => {
@@ -84,7 +84,7 @@ describe('the disclosure (UX 2, 6)', () => {
     expect(getEhStudyWhy).not.toHaveBeenCalled()
     await user.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    expect(getEhStudyWhy).toHaveBeenCalledWith('Demo', 'expected_shortfall')
+    expect(getEhStudyWhy).toHaveBeenCalledWith('expected_shortfall')
     const busy = screen.getByTestId(`${T()}-loading`)
     expect(busy.getAttribute('role')).toBe('status')
     expect(busy.getAttribute('aria-busy')).toBe('true')
@@ -109,6 +109,11 @@ describe('the state (GK B W6, UX 2, 3)', () => {
     expect(shownState('uncompared')).toBe('not_compared')
     expect(shownState('busy')).toBe('not_compared')
     expect(shownState(null)).toBe('not_compared')
+  })
+
+  it('writes one year in the singular', () => {
+    expect(valueWords('mc/horizon_years', 1)).toBe('1 year')
+    expect(valueWords('mc/horizon_years', 0.000342)).toBe('0.000342 years')
   })
 
   it('reads current with every run setting recorded and now', async () => {
@@ -143,6 +148,8 @@ describe('the state (GK B W6, UX 2, 3)', () => {
     expect(screen.getByTestId(`${T()}-unchecked`).textContent).toContain('Not compared: Assumed inputs could not be checked.')
     expect(outcome.textContent).not.toContain('Current')
     expect(screen.getAllByTestId(`${T()}-unchecked`)).toHaveLength(1)
+    // One visible "Not compared", not a pill and a sentence that both say it (PR #1724 shots).
+    expect((screen.getByTestId(`${T()}-outcome`).textContent ?? '').match(/Not compared/g)).toHaveLength(1)
   })
 
   it('shows a seed the study did not record as not recorded, not compared, never current (02b-1 W3)', async () => {
@@ -162,7 +169,7 @@ describe('the state (GK B W6, UX 2, 3)', () => {
   it('names the design cost\'s finance and prices as not compared, the cost in the tiles\' money', async () => {
     await openWith(body('current', 'design_cost'), 'design_cost')
     expect((await screen.findByTestId(`${T('design_cost')}-unchecked`)).textContent).toContain(
-      "Not compared: Finance and currency settings, The site type's prices could not be checked.")
+      'Not compared: Finance and currency settings, Site-type prices could not be checked.')
     // UX 2 (3): the disclosure's money is the tile's notation (kpiMoney); kpiMoney vs money() is issue 06.
     expect(screen.getByTestId(`${T('design_cost')}-source`).textContent).toContain(`The design cost (${kpiMoney(1234.5)})`)
   })

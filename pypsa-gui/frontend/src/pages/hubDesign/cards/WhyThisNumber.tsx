@@ -43,7 +43,7 @@ export const INPUT_WORDS: Record<string, string> = {
   'run/dtc_config': 'Critical-load settings',
   'run/dtc_attribution': 'Critical-load attribution',
   finance: 'Finance and currency settings',
-  pack_prices: "The site type's prices",
+  pack_prices: 'Site-type prices',
   assumptions: 'Assumed inputs',
 }
 
@@ -80,7 +80,10 @@ export function valueWords(k: string, v: unknown): string {
   if (k === 'goal/basis') return v === 'h_per_year' ? 'per year' : String(v)
   if (k === 'goal/unit') return v === 'h' ? 'hours' : String(v)
   if (k === 'network_revision') return `version ${v}`
-  if (k === 'mc/horizon_years' && typeof v === 'number') return `${Number(v.toPrecision(3))} years`
+  if (k === 'mc/horizon_years' && typeof v === 'number') {
+    const n = Number(v.toPrecision(3))
+    return `${n} year${n === 1 ? '' : 's'}`
+  }
   if (typeof v === 'string') return v === "none (the study's default)" ? "the study's default" : v
   if (Array.isArray(v)) return v.length ? v.map(String).join(', ') : 'none'
   if (typeof v === 'object') return 'custom settings'
@@ -160,9 +163,8 @@ function Outcome({ why, testId }: { why: EhStudyWhy; testId: string }) {
         </p>
       )}
       {unchecked.length > 0 && (
-        <p data-testid={`${testId}-unchecked`} className="flex flex-wrap items-center gap-1.5 text-text">
-          <span className="whitespace-nowrap rounded-full bg-muted/12 px-2 py-0.5 text-[11px] font-semibold text-muted">Not compared</span>
-          Not compared: {names(unchecked)} could not be checked.
+        <p data-testid={`${testId}-unchecked`} className="text-text">
+          <span className="font-semibold">Not compared:</span> {names(unchecked)} could not be checked.
         </p>
       )}
       {why.outcome.truncated && <p className="text-muted">Only the first {why.steps.length} steps are listed.</p>}
@@ -178,7 +180,7 @@ function Settings({ why, testId }: { why: EhStudyWhy; testId: string }) {
   })
   if (rows.length === 0) return null
   return (
-    <table data-testid={`${testId}-settings`} className="w-full text-left">
+    <table data-testid={`${testId}-settings`} className="w-auto max-w-full text-left">
       <caption className="text-left font-semibold text-text">Run settings</caption>
       <thead>
         <tr className="text-muted"><th scope="col" className="font-normal">Setting</th>
@@ -246,7 +248,7 @@ export function WhyThisNumber({ figure, value, testId = `hub-why-${figure}` }: {
   const region = useId()
   const q = useQuery({
     queryKey: nk(project, 'results', 'eh_study_why', figure),
-    queryFn: () => getEhStudyWhy(project as string, figure),
+    queryFn: () => getEhStudyWhy(figure),
     enabled: open && !!project,
     retry: false,
     // Read on every open: the answer depends on edits made since.
