@@ -24,7 +24,7 @@ jobs:
       env:
         PYTHONFAULTHANDLER: "1"
       run: |
-        timeout -s ABRT 240 pixi run -e test python -m pytest -p no:cacheprovider -v \
+        pixi run -e test timeout -s ABRT 240 python -m pytest -p no:cacheprovider -v \
           -o log_cli=true --log-cli-level=WARNING \
           "tests/test_site_scene_blender_job.py" -k "run_stores or second_job or not_a_canonical" || echo "exit $?"
     - name: Whole file, with a thread dump on hang
@@ -32,6 +32,6 @@ jobs:
       env:
         PYTHONFAULTHANDLER: "1"
       run: |
-        timeout -s ABRT 600 pixi run -e test python -m pytest -p no:cacheprovider -v \
+        pixi run -e test timeout -s ABRT 600 python -m pytest -p no:cacheprovider -v \
           -o log_cli=true --log-cli-level=WARNING --durations=10 \
           tests/test_site_scene_blender_job.py || echo "exit $?"
