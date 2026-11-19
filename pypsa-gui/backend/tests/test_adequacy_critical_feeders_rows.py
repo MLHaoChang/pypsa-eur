@@ -94,7 +94,15 @@ def test_a_0_mw_feeder_feeds_only_if_it_can_be_built(extendable, n_rows):
 
 
 @pytest.mark.parametrize(
-    "rate, mttr", [(float("nan"), 8.0), (0.01, 0.0), (0.01, float("nan"))]
+    "rate, mttr",
+    [
+        (float("nan"), 8.0),
+        (1.5, 8.0),
+        (-0.1, 8.0),
+        (0.01, 0.0),
+        (0.01, float("nan")),
+        (0.01, float("inf")),
+    ],
 )
 def test_unusable_outage_data_is_named_not_composed(rate, mttr):
     n = _hub_with_one_critical_feeder()
@@ -184,8 +192,10 @@ def test_the_certification_note_states_a_bound_only_once_it_is_computed():
     row = {"name": "f", "model": UNSAMPLED, "buses": ["h"], "upper_bound": True}
     assert "at most" not in certification_note([{**row, "lole_h": None}])
     assert "f at most 43.8 h/yr" in certification_note([{**row, "lole_h": 43.8}])
-    composed = {**row, "model": COMPOSED, "upper_bound": False, "lole_h": 87.6}
-    assert "at most" not in certification_note([composed])
+    composed = {**row, "name": "c", "model": COMPOSED, "upper_bound": False}
+    chained = {**row, "name": "g", "upper_bound": False, "lole_h": None}
+    note = certification_note([{**composed, "lole_h": 87.6}, chained])
+    assert "not simulated for g" in note and "at most" not in note
 
 
 def _stage_rows(monkeypatch, nyears):
@@ -225,3 +235,16 @@ def test_each_feeder_row_gets_its_own_pockets_figures_per_year(monkeypatch):
 def test_no_horizon_leaves_the_figures_unstated(monkeypatch, nyears):
     r = _stage_rows(monkeypatch, nyears)
     assert all(v["lole_h"] is None and v["eue_mwh"] is None for v in r.values())
+
+
+def test_a_pocket_reads_its_load_per_snapshot_not_its_flat_set_point():
+    # Load only in the first half of the hours: the pocket can be short only
+    # then. The flat p_set (10 MW) would claim every hour.
+    from services.adequacy.critical_feeders import pocket_series
+
+    n = _hub_with_one_critical_feeder()
+    half = len(n.snapshots) // 2
+    series = [10.0] * half + [0.0] * (len(n.snapshots) - half)
+    n.loads_t.p_set["hospital"] = series
+    (p,) = pocket_series(n, _rows(n), demand_scaled_in_place=True)
+    assert list(p.load) == series
