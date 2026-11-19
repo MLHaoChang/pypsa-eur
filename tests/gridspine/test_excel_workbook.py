@@ -943,6 +943,110 @@ def test_a_legacy_row_names_its_first_bad_cell(tmp_path):
     assert _um(res) == [("generators › G1", "p_nom: 'lots' is not a number")]
 
 
+def _native_edit(tmp_path, n, sheet, header, row_name, value):
+    """`_native(n)` with one cell set: the `header` column of the row named `row_name`."""
+    path = _native(n, tmp_path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[sheet]
+    heads = [c.value for c in ws[1]]
+    if header not in heads:
+        ws.cell(row=1, column=len(heads) + 1, value=header)
+        heads.append(header)
+    col = heads.index(header) + 1
+    for r in range(2, ws.max_row + 1):
+        if str(ws.cell(row=r, column=1).value) == row_name:
+            ws.cell(row=r, column=col, value=value)
+    wb.save(path)
+    return path
+
+
+def _two_gens() -> pypsa.Network:
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Bus", "B1", v_nom=110.0)
+    n.add("Bus", "B2", v_nom=220.0)
+    n.add("Generator", "G1", bus="B1", p_nom=5.0, p_max_pu=[0.5, 0.6])
+    n.add("Generator", "G2", bus="B1", p_nom=6.0, p_max_pu=[0.7, 0.8])
+    return n
+
+
+@pytest.mark.parametrize(
+    ("sheet", "header", "row", "value", "reason"),
+    [
+        ("buses", "v_nom", "B2", True, "v_nom: a TRUE/FALSE value in a number column"),
+        ("buses", "v_nom", "B2", "-inf", "v_nom: infinity is not allowed here"),
+        ("buses", "v_nom", "B2", "nan", "v_nom: not a number (NaN)"),
+        ("generators", "p_nom", "G2", "inf", "p_nom: infinity is not allowed here"),
+        (
+            "generators",
+            "p_nom_max",
+            "G2",
+            "-inf",
+            "p_nom_max: only inf is allowed here",
+        ),
+    ],
+)
+def test_a_cell_pypsa_s_export_cannot_take_is_reported_and_its_asset_not_read(
+    tmp_path, sheet, header, row, value, reason
+):
+    """E3 on PyPSA's own layout: checked on the cell as written, before PyPSA coerces it."""
+    res = read_excel(_native_edit(tmp_path, _two_gens(), sheet, header, row, value))
+    assert _um(res) == [(f"{sheet} › {row}", reason)]
+    assert row not in getattr(res.network, sheet).index
+    assert len(getattr(res.network, sheet)) == 1
+
+
+def test_an_allowed_infinity_in_pypsa_s_export_is_read(tmp_path):
+    path = _native_edit(tmp_path, _two_gens(), "generators", "p_nom_max", "G2", "inf")
+    res = read_excel(path)
+    assert _um(res) == []
+    assert math.isinf(res.network.generators.at["G2", "p_nom_max"])
+
+
+def test_a_model_output_column_in_pypsa_s_export_is_reported_and_reset(tmp_path):
+    """E1: an attribute PyPSA knows but that is not an input is not read."""
+    path = _native_edit(tmp_path, _two_gens(), "generators", "p_nom_opt", "G1", 99.0)
+    res = read_excel(path)
+    assert _um(res) == [("generators › column p_nom_opt", _OFF_LIST)]
+    assert res.network.generators.at["G1", "p_nom_opt"] == 0.0
+
+
+def test_an_output_time_series_sheet_in_pypsa_s_export_is_not_read(tmp_path):
+    n = _two_gens()
+    path = _native(n, tmp_path)
+    wb = openpyxl.load_workbook(path)
+    src = wb["generators-p_max_pu"]
+    out = wb.create_sheet("generators-p")
+    for row in src.iter_rows(values_only=True):
+        out.append(row)
+    wb.save(path)
+    res = read_excel(path)
+    assert (
+        "generators-p",
+        "not an input time series of this kind of asset; the sheet was not read",
+    ) in _um(res)
+    assert res.network.generators_t.p.empty
+
+
+def test_a_bad_cell_in_a_pypsa_export_time_series_drops_that_series(tmp_path):
+    n = _two_gens()
+    path = _native(n, tmp_path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb["generators-p_max_pu"]
+    col = [c.value for c in ws[1]].index("G2") + 1
+    ws.cell(row=3, column=col, value="nan")
+    wb.save(path)
+    res = read_excel(path)
+    assert _um(res) == [("generators-p_max_pu › G2", "p_max_pu: not a number (NaN)")]
+    assert list(res.network.generators_t.p_max_pu.columns) == ["G1"]
+
+
+def test_a_legacy_true_false_name_is_reported(tmp_path):
+    res = read_excel(_book(tmp_path, {"buses": [["name", "v_nom"], [True, 110.0]]}))
+    assert _um(res) == [("buses row 2", "name: a TRUE/FALSE value in a text column")]
+    assert res.network.buses.empty
+
+
 def test_unescape_undoes_only_the_export_s_quote():
     from gridspine.ingest.excel_import import unescape_formula
 

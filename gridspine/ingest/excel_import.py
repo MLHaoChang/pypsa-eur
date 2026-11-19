@@ -1065,6 +1065,111 @@ def _report_formulas(sheets: _Sheets, report: ImportReport) -> None:
         )
 
 
+_NOT_INPUT = "not an input of this kind of asset; the column was not read"
+
+
+def _check_native_cells(
+    n: pypsa.Network, sheets: _Sheets, report: ImportReport, custom: Mapping[str, set]
+) -> None:
+    """
+    E1 and E3 on PyPSA's own layout, checked on the cells as written: PyPSA's
+    reader coerces them (TRUE to 1.0, "inf" to inf, "nan" to the default).
+
+    A column that is not a static input of its class or on the allow-list is
+    reported; a model output goes back to its default, anything else is dropped.
+    An asset with a cell the model cannot take is reported and removed, never
+    half-read. A time-series sheet for an attribute that is not a varying input is
+    reported and not read; an asset's series with a bad cell is reported and dropped.
+    """
+    for cls, _sheet, ln in L.SHEETS:
+        table = getattr(n, ln)
+        rows = sheets.rows.get(ln)
+        defaults = n.components[ln].defaults
+        if rows and not table.empty:
+            allowed = _static_inputs(n, cls, custom)
+            headers = list(rows[0])
+            for h in headers[1:]:
+                if h is None or h in allowed:
+                    continue
+                report.unmapped.append(
+                    Unmapped(f"{ln} › column {str(h)[:40]}", _NOT_INPUT)
+                )
+                if isinstance(h, str) and h in defaults.index:
+                    table[h] = defaults.at[h, "default"]
+                elif h in table.columns:
+                    table.drop(columns=h, inplace=True)
+            checked = [
+                (c, h)
+                for c, h in enumerate(headers)
+                if c > 0 and isinstance(h, str) and h in allowed and h in defaults.index
+            ]
+            refused: list[str] = []
+            for row in rows[1:]:
+                try:
+                    name = unescape_formula(_convert(row[0] if row else None, str))
+                except _Bad:
+                    continue  # PyPSA did not read it as an asset either
+                if name not in table.index:
+                    continue
+                for c, h in checked:
+                    if c >= len(row) or row[c] is None:
+                        continue
+                    try:
+                        _convert(
+                            unescape_formula(row[c]),
+                            _attr_type(defaults, h),
+                            inf=_allowed_inf(defaults, h),
+                        )
+                    except _Bad as exc:
+                        report.unmapped.append(
+                            Unmapped(f"{ln} › {name}", f"{h}: {exc}")
+                        )
+                        refused.append(name)
+                        break
+            if refused:
+                n.remove(cls, refused)
+        series = getattr(n, f"{ln}_t")
+        for sheet in sheets.names:
+            if not sheet.startswith(f"{ln}-"):
+                continue
+            attr = sheet[len(ln) + 1 :]
+            varying_input = (
+                attr in defaults.index
+                and bool(defaults.at[attr, "varying"])
+                and str(defaults.at[attr, "status"]).startswith("Input")
+            )
+            if not varying_input:
+                report.unmapped.append(
+                    Unmapped(
+                        sheet,
+                        "not an input time series of this kind of asset; "
+                        "the sheet was not read",
+                    )
+                )
+                if attr in series:
+                    series[attr] = series[attr].iloc[:, :0]
+                continue
+            if _attr_type(defaults, attr) is not float or attr not in series:
+                continue
+            rows = sheets.rows.get(sheet) or []
+            inf = _allowed_inf(defaults, attr)
+            for c, asset in enumerate(rows[0] if rows else []):
+                if c == 0 or asset is None:
+                    continue
+                asset = str(asset)
+                for row in rows[1:]:
+                    if c >= len(row) or row[c] is None:
+                        continue
+                    try:
+                        _number(row[c], inf=inf)
+                    except _Bad as exc:
+                        report.unmapped.append(
+                            Unmapped(f"{sheet} › {asset}", f"{attr}: {exc}")
+                        )
+                        series[attr] = series[attr].drop(columns=asset, errors="ignore")
+                        break
+
+
 def _read_native(
     path: pathlib.Path, sheets: _Sheets, report: ImportReport, custom: Mapping[str, set]
 ) -> pypsa.Network:
@@ -1096,22 +1201,11 @@ def _read_native(
             raise L.ImportFormatError(
                 "The workbook has a 'network' sheet but PyPSA could not read it."
             ) from exc
-    for cls, sheet, ln in L.SHEETS:
+    _check_native_cells(n, sheets, report, custom)
+    for _cls, sheet, ln in L.SHEETS:
         table = getattr(n, ln)
         if table.empty:
             continue
-        allowed = _static_inputs(n, cls, custom)
-        attrs = n.components[ln].defaults
-        extra = [c for c in table.columns if c not in attrs.index and c not in allowed]
-        for col in extra:
-            report.unmapped.append(
-                Unmapped(
-                    f"{ln} › column {col}",
-                    "not an input of this kind of asset; the column was not read",
-                )
-            )
-        if extra:
-            table.drop(columns=extra, inplace=True)
         report.counts[sheet] = len(table)
     _report_formulas(sheets, report)
     return n
@@ -1142,10 +1236,7 @@ def _read_legacy_sheets(
                 continue
             if not isinstance(h, str) or h not in allowed:
                 report.unmapped.append(
-                    Unmapped(
-                        f"{sheet} › column {str(h)[:40]}",
-                        "not an input of this kind of asset; the column was not read",
-                    )
+                    Unmapped(f"{sheet} › column {str(h)[:40]}", _NOT_INPUT)
                 )
                 continue
             columns[c] = h
@@ -1159,7 +1250,11 @@ def _read_legacy_sheets(
                     Unmapped(f"{sheet} row {r}", "the row has values but no name")
                 )
                 continue
-            name = unescape_formula(_convert(raw, str))
+            try:
+                name = unescape_formula(_convert(raw, str))
+            except _Bad as exc:
+                report.unmapped.append(Unmapped(f"{sheet} row {r}", f"name: {exc}"))
+                continue
             if name in getattr(n, L.LIST_NAME[cls]).index:
                 # PyPSA skips a second add with a warning only: report it instead.
                 report.unmapped.append(
