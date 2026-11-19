@@ -2646,3 +2646,29 @@ def test_a_blank_text_series_index_drops_the_sheet(tmp_path):
         "the sheet was not read",
     ) in _um(res)
     assert res.network.generators_t.p_max_pu.empty
+
+
+# ── Pass 4 found: a blank network setting, and an asset named only with spaces ──
+
+
+@pytest.mark.parametrize("header", ["srid", "pypsa_version", "_multi_invest"])
+def test_a_blank_network_setting_keeps_its_default(tmp_path, header):
+    def edit(wb):
+        ws = wb["network"]
+        col = [c.value for c in ws[1]].index(header) + 1
+        ws.cell(row=2, column=col).value = None
+
+    res = _native_wb(tmp_path, edit)
+    assert _um(res) == []
+    assert res.network.srid == 4326
+    assert res.network._multi_invest == 0
+
+
+@pytest.mark.parametrize("name", [" ", "\t"])
+def test_an_asset_named_only_with_spaces_is_reported_not_read(tmp_path, name):
+    def edit(wb):
+        wb["generators"]["A3"] = name
+
+    res = _native_wb(tmp_path, edit)
+    assert ("generators row 3", "the row has values but no name") in _um(res)
+    assert list(res.network.generators.index) == ["G1"]

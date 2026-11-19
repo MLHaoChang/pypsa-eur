@@ -1157,6 +1157,10 @@ def _check_network_sheet(ws, report: ImportReport) -> None:
         seen.add(h)
         v = ws.cell(row=2, column=c).value
         if v is None:
+            # A blank setting keeps its default. PyPSA would refuse a blank srid
+            # or version, and read a blank _multi_invest as NaN (true).
+            if h != "name":
+                drop.append(c)
             continue
         try:
             _na_bad(v)
@@ -1466,12 +1470,18 @@ def _check_native_cells(
                 if raw is None or (
                     isinstance(raw, str) and (not raw.strip() or _na_text(raw))
                 ):
-                    # PyPSA's reader names such a row "nan"; it is not an asset.
-                    if any(v is not None for v in row) and "nan" in table.index:
+                    # PyPSA's reader names such a row "nan", or keeps a name of
+                    # spaces as it is; neither is an asset.
+                    made = [
+                        x
+                        for x in ("nan", raw)
+                        if isinstance(x, str) and x in table.index
+                    ]
+                    if made and any(v is not None for v in row):
                         report.unmapped.append(
                             Unmapped(f"{ln} row {r}", "the row has values but no name")
                         )
-                        refused.append("nan")
+                        refused.extend(made)
                     continue
                 # The name as PyPSA's reader made it: our text form, or str() for
                 # what pandas turned to text itself (a date, a TRUE/FALSE).
