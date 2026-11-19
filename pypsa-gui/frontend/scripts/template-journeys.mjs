@@ -211,9 +211,9 @@ async function journey(t) {
     if (t.run === false) {
       // A generation-only site has no study to run: Guided says so and keeps Run off (not a gap in the template, see the PR note).
       await L.step(ctx, 'run is not offered and the reason is named', async () => {
-        assert.match(texts[9], /Not offered for this site/)
         await L.goSection(ctx, 'Readiness and run')
         await page.getByTestId('hub-run-solve-why').waitFor()
+        assert.match(await page.getByTestId('hub-run-solve-why').innerText(), /no reliability study/i)
         assert.equal(await page.getByTestId('hub-run-start').count(), 0, 'the study Run is offered')
       })
       assert.equal(ctx.problems.length, 0, `page errors: ${ctx.problems.slice(0, 2).join(' | ')}`)
