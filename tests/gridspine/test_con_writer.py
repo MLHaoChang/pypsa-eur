@@ -350,3 +350,27 @@ def test_an_unknown_kind_is_refused_not_written_as_a_bus(net, tmp_path, monkeypa
     with pytest.raises(ContractError, match="kind 'breaker' has no .con form"):
         write_con(cset, net, tmp_path / "c.con")
     assert not (tmp_path / "c.con").exists()
+
+
+def test_an_empty_or_ragged_map_is_refused():
+    with pytest.raises(ContractError, match="needs the header"):
+        read_conmap("")
+    with pytest.raises(ContractError, match="needs 2 fields"):
+        read_conmap("label,contingency_id\nC0001\n")
+
+
+def test_an_explicit_conmap_wins_over_the_sibling_file(net, cset, tmp_path):
+    write_con(cset, net, tmp_path / "s.con")
+    mine = tmp_path / "other.csv"
+    sib = conmap_path(tmp_path / "s.con")
+    mine.write_text(sib.read_text())
+    sib.write_text("label,contingency_id\nC0001,only\n")
+    imp = read_contingency_list(tmp_path / "s.con", net, conmap=mine)
+    assert sorted(imp.contingencies["contingency_id"]) == sorted(cset["contingency_id"])
+
+
+def test_a_mapped_id_is_never_rewritten(net, cset, tmp_path):
+    write_con(cset.head(1), net, tmp_path / "s.con")
+    conmap_path(tmp_path / "s.con").write_text("label,contingency_id\nC0001,bad id\n")
+    with pytest.raises(ContractError, match="bad id"):
+        read_contingency_list(tmp_path / "s.con", net)
