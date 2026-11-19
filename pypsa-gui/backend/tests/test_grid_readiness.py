@@ -788,6 +788,33 @@ def test_a_bound_never_turns_the_row_into_a_fail(tmp_path):
     assert row["verdict"] == "warn"
 
 
+@pytest.mark.parametrize("payload", [
+    {"critical_feeders": [{"name": "g", "model": "unsampled", "chained": True, "upper_bound": False}]},
+    {"verdict": "fail"},
+    {"verdict": "inconclusive", "feeder_bound": _FB},
+])
+def test_a_fail_stays_a_fail_whatever_held_the_pass(tmp_path, payload):
+    # CI lower 4 > the 3 h/yr goal: the chained and withheld-verdict guards
+    # only stop a pass, they never soften a fail to a warn.
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(5.0, [4.0, 6.0]), **payload)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "fail"
+
+
+@pytest.mark.parametrize("payload", [
+    {"verdict": "inconclusive", "feeder_bound": None},
+    {"verdict": "pass", "feeder_bound": _FB},
+])
+def test_the_feeder_text_comes_only_with_a_bound_held_verdict(tmp_path, payload):
+    # A plain-CI inconclusive has no feeder_bound, and a stale feeder_bound
+    # beside a pass names nothing: the pocket text needs both.
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), **payload)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert "could be cut off" not in row["note"]
+
+
 def test_the_h2_hub_sets_no_lole_goal(tmp_path):
     d, n = _project(tmp_path, "eh_h2_hub")
     row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=_study(1.0, [0.0, 2.0]),

@@ -311,12 +311,46 @@ def test_the_note_says_a_no_data_rate_is_unknown_not_never_failing():
     assert "never failing" not in note and "only path" not in note
 
 
+def test_each_bounded_row_states_its_own_reason():
+    # The note's reason follows the row's model: an unread rate is taken as
+    # certain, a bus with its own units has them left out.
+    nd = {"name": "nd", "model": NO_OUTAGE_DATA, "buses": ["h"], "upper_bound": True, "lole_h": 1.0}
+    un = {**nd, "name": "un", "model": UNSAMPLED}
+    assert "nd at most 1 h/yr (upper bound: its outage rate taken as certain)" in (
+        certification_note([nd])
+    )
+    assert "un at most 1 h/yr (upper bound: h's own units not counted)" in (
+        certification_note([un])
+    )
+
+
+def test_a_pocket_with_own_units_and_an_unread_feeder_names_both_reasons():
+    from services.adequacy.critical_feeders import Pocket, _why_bound
+
+    both = Pocket(buses=["h"], feeders=["f"], u=1.0, bound=True, no_data=["f"], own_units=True)
+    assert _why_bound(both) == (
+        "upper bound: f's outage rate is not known and is taken as certain; "
+        "h's own units not counted"
+    )
+    unread = Pocket(buses=["h"], feeders=["f"], u=1.0, bound=True, no_data=["f"])
+    assert "own units" not in _why_bound(unread)
+
+
 def test_the_loop_note_names_a_no_data_feeder_of_a_bounded_pocket():
     from services.adequacy.critical_feeders import loop_note
 
     n = _second_path(_hub_with_one_critical_feeder(), rate=float("nan"))
     note = loop_note(_rows(n))
     assert "crit_feeder, crit_feeder_2" in note
+
+
+def test_the_loop_note_names_an_unread_feeder_of_a_chained_pocket():
+    # A chained pocket's unread feeder is neither composed, unsampled nor
+    # bounded; only ``chained`` puts it in the copper-plate caveat.
+    from services.adequacy.critical_feeders import loop_note
+
+    row = {"name": "nd", "model": NO_OUTAGE_DATA, "chained": True, "upper_bound": False}
+    assert "nd" in loop_note([row])
 
 
 def _stage_rows(monkeypatch, nyears):
