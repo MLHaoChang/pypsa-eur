@@ -31,7 +31,7 @@ const startsWithLabel = (message: string, label: string) => plain(message).start
  *  field shows the entity alone rather than a made-up name. With `message`,
  *  a label the message already opens with is left out. */
 export function fieldWords(
-  t: Pick<FlowItem['target'], 'section' | 'component' | 'entity'> & { field?: string | null },
+  t: Pick<FlowItem['target'], 'section' | 'component' | 'entity' | 'entityLabel'> & { field?: string | null },
   labels: Record<string, string> = FIELD_LABELS,
   message?: string,
 ): string | null {
@@ -40,7 +40,8 @@ export function fieldWords(
   // does not need it said again.
   const field = label && message && startsWithLabel(message, label) ? null : label
   if (!t.component && !t.entity && !field) return null
-  const thing = [t.component ? componentLabel(t.component) : null, t.entity ? `“${t.entity}”` : null]
-    .filter(Boolean).join(' ')
+  // A row with display words (a recipe) names the thing by them, never by its raw id.
+  const thing = t.entityLabel
+    ?? [t.component ? componentLabel(t.component) : null, t.entity ? `“${t.entity}”` : null].filter(Boolean).join(' ')
   return [sectionMeta(t.section).label, thing || null, field].filter(Boolean).join(' › ')
 }

@@ -178,6 +178,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_eh_study"):                    frozenset(),
     ("routers/results.py", "post_eh_study"):                   frozenset(),
     ("routers/results.py", "post_eh_study_abort"):             frozenset(),
+    ("routers/results.py", "get_eh_study_why"):                frozenset(),  # guided-results 02a: quotes the record's figures, derives no €
     # EH reference-design fragments (report / tables). No economics SURFACES —
     # same adequacy-style € derivation as get_adequacy / get_frontier above.
     ("routers/results.py", "get_eh_reference_design"):         frozenset(),
@@ -310,6 +311,9 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/studies.py", "start_supply_architectures"): frozenset(),
     ("routers/studies.py", "get_supply_architectures"):   frozenset(),
     ("routers/studies.py", "abort_supply_architectures"): frozenset(),
+    ("routers/studies.py", "start_system_type_map"): frozenset(),
+    ("routers/studies.py", "get_system_type_map"):   frozenset(),
+    ("routers/studies.py", "abort_system_type_map"): frozenset(),
     # S7: the decision report — assembled once, then rendered; every
     # rendering shows the same verdict facts and case KPIs.
     ("routers/studies.py", "assemble_report"):        frozenset({"decision_report"}),

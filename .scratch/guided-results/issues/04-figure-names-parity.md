@@ -38,3 +38,7 @@ GK B (63) ruling, 2026-11-17: NPV is one figure. `npv_at_wacc` = `project_post_t
 the WACC. Its name is "Project NPV at the WACC, after tax (unlevered)", with "after tax" as the single tax word on every
 surface. The names are fixed in this issue's naming slice, not in #1611. Also: the LCOE card carries no money year
 (`/results/headline_kpis` sends none); add it here.
+
+### LCOE after an edit (UX 24, #1611, 2026-11-17)
+
+After an edit, `/results/headline_kpis` answers 204 whenever `_dispatch_ready(network)` is false (`routers/results.py:3313`), so Guided and Expert show "Not run yet · To get it, solve…" for a project that was solved but is now out of date. The server's 204 should say which case it is (never solved, or solved but out of date) so that LCOE can read "Out of date" in that case. This belongs to this issue's LCOE work, together with the money year.
