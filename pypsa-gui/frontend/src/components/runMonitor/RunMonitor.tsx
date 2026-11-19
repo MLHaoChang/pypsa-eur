@@ -22,6 +22,7 @@ import {
   GAP_WORDS,
 } from './runWords'
 import { runUnderReview } from './planReview'
+import RevisionDrafts from './RevisionDrafts'
 import { fmtCurrency } from '../../utils/format'
 
 const POLL_MS = 4000
@@ -376,6 +377,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
       A stopped run cannot be restarted: start a new one from the composer.
     </p>}
     {finished && hasReport && <p data-testid="run-finished">The report is in Reports.</p>}
+    <RevisionDrafts taskId={taskId} view={view} onRefresh={refresh} />
 
     {failed && <p className="text-amber-400">{failed}</p>}
     {(can.has('pause') || can.has('stop')) && <div className="mt-1 flex flex-wrap items-baseline gap-2">
