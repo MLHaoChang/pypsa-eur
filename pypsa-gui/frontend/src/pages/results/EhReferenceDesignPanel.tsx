@@ -40,6 +40,7 @@ import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 import type { ZeroReason } from './fmea'
 import { CRITICALITY_PER_YEAR_LABEL } from './fmea'
+import { leverKindWords } from './leverKindWords'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
   {
@@ -2112,7 +2113,7 @@ export function EhReferenceDesignPanel() {
             <div className="flex flex-col gap-1.5" data-testid="eh-levers">
               <div className="flex items-center gap-2 flex-wrap">
                 <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                  Levers{levTable.kind ? ` (${levTable.kind})` : ''}
+                  Levers{levTable.kind ? ` (${leverKindWords(levTable.kind)})` : ''}
                 </h4>
                 <CsvButton
                   testId="eh-levers-csv"
@@ -2148,7 +2149,7 @@ export function EhReferenceDesignPanel() {
                         className="border-t border-border/50"
                         data-testid={`eh-lever-row-${i}`}
                       >
-                        <td className="py-0.5 pr-3 font-sans">{o.kind}</td>
+                        <td className="py-0.5 pr-3 font-sans">{leverKindWords(o.kind)}</td>
                         <td className="py-0.5 pr-3 text-right">
                           {o.value}{o.unit ? ` ${o.unit}` : ''}
                         </td>

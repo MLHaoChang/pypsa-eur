@@ -75,9 +75,12 @@ describe('levers section request', () => {
     ] })
     useUIStore.getState().requestResultsTab('adequacy', LEVERS_SECTION)
     mount()
-    await screen.findByTestId('eh-levers')
+    const levers = await screen.findByTestId('eh-levers')
     await waitFor(() => expect(scrolled).toContain('eh-levers'))
     expect(useUIStore.getState().resultsSectionRequest).toBeNull()
+    // RAW-NAMES-1: the kind column reads plain words, never the engine id.
+    expect(levers.textContent).toContain('Battery duration')
+    expect(levers.textContent).not.toContain('storage_duration')
   })
 })
 

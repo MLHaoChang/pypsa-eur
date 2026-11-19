@@ -222,7 +222,8 @@ describe('ImproveCard', () => {
   it('no high or medium finding: says so', async () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [F[2], F[3]] }))
     mount()
-    expect((await screen.findByTestId('hub-improve-none')).textContent).toMatch(/nothing urgent/i)
+    expect((await screen.findByTestId('hub-improve-none')).textContent)
+      .toBe('Nothing urgent: the study found no important or worthwhile change.')
   })
 })
 
@@ -378,6 +379,17 @@ describe('ImproveCard cheaper battery duration', () => {
     expect(row.querySelector('button, a')).toBeNull()
     // an info finding: still not in the findings list
     expect(screen.queryByTestId('hub-improve-levers_best_option')).toBeNull()
+  })
+
+  it('nothing urgent and a cheaper option: the top line leads into the row', async () => {
+    withLevers()
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [F[2], F[3],
+      { id: 'levers_best_option', severity: 'info', title: 'Cheapest lever option',
+        evidence: { kind: 'storage_duration', value: 24, cost_at_target_eur: 3_100_000, spread_eur: 400_000 },
+        recommendation: '', actions: [] }] }))
+    mount()
+    await screen.findByTestId('hub-improve-cheaper-duration')
+    expect(screen.getByTestId('hub-improve-none').textContent).toBe('Nothing urgent. One cheaper option:')
   })
 
   it('nothing when the levers table does not say the option meets the cap', async () => {

@@ -148,7 +148,9 @@ export function ImproveCard() {
     <CardShell step="improve" testId="hub-card-improve" title="Improve">
       {review && findings.length === 0 ? (
         <p data-testid="hub-improve-none" className="text-[12px] text-muted">
-          Nothing urgent: the study found no important or worthwhile change.
+          {cheaper
+            ? 'Nothing urgent. One cheaper option:'
+            : 'Nothing urgent: the study found no important or worthwhile change.'}
         </p>
       ) : (
         <ul data-testid="hub-improve-list" className="flex flex-col gap-2">

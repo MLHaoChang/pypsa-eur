@@ -408,11 +408,14 @@ describe('ResultsCard cheaper battery duration', () => {
 
   it('Guided: the link opens Results › Adequacy and asks for the levers block, in Guided', async () => {
     withLevers()
-    useUIStore.setState({ uiMode: 'guided', resultsSectionRequest: null })
+    useUIStore.setState({ uiMode: 'guided', resultsSectionRequest: null, flowReturn: null })
     const user = mount()
     await user.click(await screen.findByTestId('hub-results-design-options'))
     const s = useUIStore.getState()
     expect(s.uiMode).toBe('guided')
+    // The Results panel's own "Back to Results" is the one way back; a Back
+    // pill as well would show two.
+    expect(s.flowReturn).toBeNull()
     expect(s.activeSlidePanel).toBe('results')
     expect(s.resultsTabRequest).toBe('adequacy')
     expect(s.resultsSectionRequest).toBe('eh_levers')
