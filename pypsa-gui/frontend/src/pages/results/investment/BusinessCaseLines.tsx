@@ -16,6 +16,10 @@ import {
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { openPanel } from '../openPanel'
+import {
+  categoryWords, escalationWords, hintCurrencyNote, ledgerKeysWords, outputLabelWords, streamWords,
+} from './businessCaseWords'
+import { financeApi } from '../../../api/finance'
 import { ACTION } from './actionStyle'
 import BusinessCaseRun from './BusinessCaseRun'
 import { NumInput } from './NumInput'
@@ -33,13 +37,6 @@ const words = (id: string) => id.replace(/_/g, ' ').replace(/^./, c => c.toUpper
 const CELL = 'border border-border rounded px-1 py-0.5 bg-bg text-[11px]'
 const BAD = ' border-danger'
 
-/** The stream words for the locked rows (the ledger's stream ids, in words). */
-const STREAM_WORD: Record<string, string> = {
-  bill: 'Energy bill', export: 'Export sales', ppa: 'PPA', cfd: 'CfD settlement',
-  eaas_fee: 'Energy-as-a-service fee', ancillary: 'Ancillary services',
-  fom: 'Fixed O&M (energy assets)', vom: 'Variable O&M (energy assets)',
-  lost_production: 'Lost production',
-}
 
 function optionsErrorWords(e: unknown): string {
   const code = (e as { response?: { data?: { detail?: { code?: string } } } })?.response?.data?.detail?.code
@@ -60,20 +57,20 @@ function SourceSelect({ line, opts, onChange, invalid, label }: {
   const known = current === 'typed' || current.startsWith('share_of:')
     || outputs.some(o => linkedSource(o.id, opts?.catalogue_version ?? '1') === current)
   return (
-    <select aria-label={label} className={CELL + ' max-w-[11rem]' + (invalid ? BAD : '')} value={current}
+    <select aria-label={label} className={CELL + ' max-w-[16rem]' + (invalid ? BAD : '')} value={current}
             aria-invalid={invalid || undefined} onChange={e => onChange(e.target.value)}>
       <option value="typed">Typed</option>
       {outputs.length > 0 && (
         <optgroup label="From the model">
           {outputs.map(o => (
-            <option key={o.id} value={linkedSource(o.id, opts?.catalogue_version ?? '1')}>{o.label}</option>
+            <option key={o.id} value={linkedSource(o.id, opts?.catalogue_version ?? '1')}>{outputLabelWords(o.label)}</option>
           ))}
         </optgroup>
       )}
       <optgroup label="Share of">
         {KINDS.map(k => <option key={k} value={`share_of:${k}`}>Share of all {KIND_WORD[k].toLowerCase()}</option>)}
         {KINDS.flatMap(k => (opts?.categories[k] ?? []).map(c => (
-          <option key={`${k}/${c}`} value={`share_of:${k}/${c}`}>Share of {KIND_WORD[k].toLowerCase()} · {words(c)}</option>
+          <option key={`${k}/${c}`} value={`share_of:${k}/${c}`}>Share of {KIND_WORD[k].toLowerCase()} · {categoryWords(c)}</option>
         )))}
       </optgroup>
       {!known && <option value={current}>
@@ -227,11 +224,20 @@ function PriceCell({ line, set, bad, currency }: {
           Public range {line.hint.low}–{line.hint.high} {hintUnitWords(line.hint.unit)} · {line.hint.source}, {line.hint.year}
         </p>
       )}
+      {line.kind === 'revenue' && line.hint && hintCurrencyNote(line.hint.unit, currency) && (
+        <p className="text-warn max-w-[12rem]" data-testid="bc-hint-currency">{hintCurrencyNote(line.hint.unit, currency)}</p>
+      )}
     </div>
   )
 }
 
 function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean }) {
+  // Rows of one stream that would read alike read their key in full (walk 06, UX 2).
+  const rows = locked ?? []
+  const keyWords = rows.map(r => {
+    const same = rows.filter(x => x.stream === r.stream)
+    return ledgerKeysWords(same.map(x => x.key ?? ''))[same.indexOf(r)]
+  })
   return (
     <section aria-labelledby="bc-locked-h" className="border border-border rounded p-2 space-y-1"
              data-testid="bc-locked">
@@ -243,10 +249,10 @@ function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean 
         <p className="text-muted">The investment case carries no energy streams.</p>
       ) : (
         <ul className="space-y-0.5">
-          {(locked ?? []).map(r => (
+          {(locked ?? []).map((r, i) => (
             <li key={`${r.stream}/${r.key}`} data-testid="bc-locked-row">
-              <span>{STREAM_WORD[r.stream] ?? words(r.stream)}</span>
-              {r.key && r.key !== r.stream && <span className="text-muted"> · {r.key}</span>}
+              <span>{streamWords(r.stream)}</span>
+              {r.key && r.key !== r.stream && <span className="text-muted" title={r.key}> · {keyWords[i]}</span>}
               {r.superseded_by.length > 0 && (
                 <span className="text-muted"> · replaced in {r.dropped.length} year{r.dropped.length === 1 ? '' : 's'} by {r.superseded_by.join(', ')}</span>
               )}
@@ -266,6 +272,9 @@ export default function BusinessCaseLines() {
   const optionsKey = nk(project, 'results', 'business_case', 'options')
   const inputs = useQuery({ queryKey: inputsKey, queryFn: () => businessCaseApi.getInputs() })
   const options = useQuery({ queryKey: optionsKey, queryFn: () => businessCaseApi.getOptions() })
+  // Shares the finance editor's query: the project currency for the price hints (walk 04).
+  const finance = useQuery({ queryKey: nk(project, 'simulation', 'finance'), queryFn: () => financeApi.getFinance(),
+                             retry: false })
   const studyKey = nk(project, 'results', 'business_case')
   const study = useQuery({ queryKey: studyKey, queryFn: () => businessCaseApi.getStudy(),
                            refetchInterval: q => (q.state.data?.status === 'running' ? 2000 : false) })
@@ -306,7 +315,9 @@ export default function BusinessCaseLines() {
 
   const lines = draft?.inputs.lines ?? []
   const names = lines.map(l => l.name)
-  const currency = (study.data?.report?.currency as string | undefined) ?? null
+  // The report's currency, else the finance inputs' (blank reads EUR, as their form says).
+  const currency = (study.data?.report?.currency as string | undefined)
+    ?? (finance.data?.finance ? (finance.data.finance.currency || 'EUR') : null)
   const setLines = (next: LineItem[]) => {
     // A break-even line must name a revenue line (the validator's rule): one renamed,
     // retyped or removed leaves the choice empty rather than a refused save.
@@ -498,7 +509,9 @@ export default function BusinessCaseLines() {
                           <button type="button" className={ACTION + ' mr-1'} aria-expanded={open.has(i)}
                                   aria-label={`${open.has(i) ? 'Hide' : 'Show'} details of ${ln.name}`}
                                   onClick={() => toggle(i)}>{open.has(i) ? '▾' : '▸'}</button>
-                          <input aria-label={`Name, line ${i + 1}`} className={CELL + ' w-32' + (bad('name') ? BAD : '')}
+                          <input aria-label={`Name, line ${i + 1}`} title={ln.name} className={CELL + (bad('name') ? BAD : '')}
+                                 // Wide enough for the whole name (walk 06: "Capacity payment (BES"), 12–40 characters.
+                                 style={{ width: `${Math.min(40, Math.max(12, ln.name.length + 2))}ch` }}
                                  maxLength={80} value={ln.name} aria-invalid={bad('name') ? true : undefined}
                                  onChange={e => setLine(i, { name: e.target.value })} />
                         </td>
@@ -512,7 +525,7 @@ export default function BusinessCaseLines() {
                           <select aria-label={`Category, ${ln.name}`} className={CELL + ' max-w-[8rem]' + (bad('category') ? BAD : '')}
                                   aria-invalid={bad('category') ? true : undefined}
                                   value={ln.category} onChange={e => setLine(i, { category: e.target.value })}>
-                            {(opts?.categories[ln.kind] ?? [ln.category]).map(c => <option key={c} value={c}>{words(c)}</option>)}
+                            {(opts?.categories[ln.kind] ?? [ln.category]).map(c => <option key={c} value={c}>{categoryWords(c)}</option>)}
                           </select>
                         </td>
                         <td className="px-1">
@@ -548,7 +561,7 @@ export default function BusinessCaseLines() {
                         <td className="px-1">
                           <select aria-label={`Escalation, ${ln.name}`} className={CELL} value={ln.escalation}
                                   onChange={e => setLine(i, { escalation: e.target.value })}>
-                            {(opts?.escalations ?? [ln.escalation]).map(x => <option key={x} value={x}>{words(x)}</option>)}
+                            {(opts?.escalations ?? [ln.escalation]).map(x => <option key={x} value={x}>{escalationWords(x)}</option>)}
                           </select>
                         </td>
                         <td className="px-1 whitespace-nowrap">
@@ -650,6 +663,7 @@ export default function BusinessCaseLines() {
         study={study.data ?? null} studyKey={studyKey}
         disabledReason={runOffReason(dirty, lines.length, (opts?.refusals ?? []).length)}
         revenueLines={lines.filter(l => l.kind === 'revenue').map(l => l.name)}
+        lineNames={lines.map(l => l.name)}
         breakEvenLine={draft?.break_even_line ?? null}
         onBreakEvenLine={name => {
           setDraft(d => ({ ...(d ?? { inputs: { lines: [] } }), break_even_line: name }) as BusinessCaseConfig)
