@@ -15,7 +15,7 @@ convention ``selected.csv`` uses for ``reasons``.
 
 Nothing here imports an engine; the net is read for its tables only.
 """
-import re
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -98,13 +98,18 @@ SUBSYSTEM = "STUDY"
 CON_NOT_WRITTEN = tuple(sorted(COMPOUND_SEPARATORS))
 
 
-def _con_label(cid: str) -> str:
-    """The block label: the contingency id itself, which must be one token of
-    [A-Za-z0-9_-], at most 32 characters, so GC-03's reader maps it back to
-    the same id."""
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", cid):
-        raise ContractError(f"contingency {cid!r}: not a .con label ([A-Za-z0-9_-], 1-32 characters)")
-    return cid
+#: Header of the label -> id map written beside a .con.
+CONMAP_COLUMNS = ["label", "contingency_id"]
+
+
+def conmap_path(con_path) -> Path:
+    """The label -> id map that belongs to ``con_path``: ``<stem>.conmap.csv``."""
+    return Path(con_path).with_suffix(".conmap.csv")
+
+
+def _con_label(n: int) -> str:
+    """The n-th (1-based) block label: ``C0001``, ``C0002``, ..."""
+    return f"C{n:04d}"
 
 
 def write_con(contingency_set: pd.DataFrame, net, path) -> list:
@@ -116,13 +121,12 @@ def write_con(contingency_set: pd.DataFrame, net, path) -> list:
     the table GC-03's reader matches against); a unit is ``REMOVE MACHINE
     'id' FROM BUS n`` with the RAW's per-bus machine ID; a bus section is
     ``DISCONNECT BUS n``. An element not on the network is refused and
-    nothing is written (S2). Labels are the contingency ids themselves.
+    nothing is written (S2).
 
-    Label scope: a contingency id outside ``[A-Za-z0-9_-]{1,32}`` (a space,
-    a dot, an accent, more than 32 characters) is refused by name, never
-    rewritten, so a label always reads back as the id it came from. Ids
-    such as PyPSA-Eur bus names need sequential labels and a label -> id map;
-    that is a follow-up (GC-19), not this writer.
+    Labels are sequential (``C0001``, ``C0002``, ... over the written
+    blocks) so any id, such as a PyPSA-Eur bus name with spaces or more than
+    32 characters, can be written. The label -> id map is written beside the
+    .con (``conmap_path``); GC-03's reader needs it to go back to the ids.
     """
     cset = validate_contingency_set(contingency_set)
     nums = _bus_numbers(net)
@@ -130,7 +134,7 @@ def write_con(contingency_set: pd.DataFrame, net, path) -> list:
     for r in branch_contingencies(net).itertuples(index=False):
         branch[r.element_ids[0]] = (nums[r.from_bus], nums[r.to_bus], str(r.ckt))
     machine = {uid: (num, mid) for uid, num, mid, _mb, _sync in _machines(net)}
-    lines, skipped = [], []
+    lines, skipped, labels = [], [], []
     for r in cset.itertuples(index=False):
         if r.kind in CON_NOT_WRITTEN:
             skipped.append(r.contingency_id)
@@ -153,10 +157,13 @@ def write_con(contingency_set: pd.DataFrame, net, path) -> list:
                 body.append(f"   DISCONNECT BUS {nums[el]}")
             else:
                 raise ContractError(f"contingency {r.contingency_id}: kind {r.kind!r} has no .con form")
-        lines += [f"CONTINGENCY {_con_label(r.contingency_id)}", *body, "END"]
+        label = _con_label(len(labels) + 1)
+        labels.append((label, r.contingency_id))
+        lines += [f"CONTINGENCY {label}", *body, "END"]
     lines.append("END")
     with open(path, "w", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
+    pd.DataFrame(labels, columns=CONMAP_COLUMNS).to_csv(conmap_path(path), index=False)
     return skipped
 
 

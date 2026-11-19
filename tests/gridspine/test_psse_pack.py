@@ -339,7 +339,8 @@ def test_the_manifest_lists_exactly_the_files_written(tmp_path):
     case = m["case"]
     assert m["files"] == [
         f"{case}.{e}" for e in ("raw", "seq", "dyr", "con", "sub", "mon")
-    ] + ["README.md", "manifest.json"]
+    ] + [f"{case}.conmap.csv", "README.md", "manifest.json"]
+    assert m["contingencies"]["label_map"] == f"{case}.conmap.csv"
     assert sorted(p.name for p in out.iterdir()) == sorted(m["files"])
 
 

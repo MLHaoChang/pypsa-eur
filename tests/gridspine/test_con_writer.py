@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from gridspine.handoff.contingencies import (
+    conmap_path,
     write_con,
     write_mon,
     write_sub,
@@ -42,7 +43,7 @@ def cset(net):
 
 def test_round_trip_through_gc03_reader(net, cset, tmp_path):
     assert write_con(cset, net, tmp_path / "s.con") == []
-    imp = read_contingency_list((tmp_path / "s.con").read_text(), net, fmt="con")
+    imp = read_contingency_list(tmp_path / "s.con", net)
     assert imp.unmatched.empty and imp.excluded == []
     assert _sets(imp.contingencies) == _sets(cset)
     assert sorted(imp.contingencies["contingency_id"]) == sorted(cset["contingency_id"])
@@ -92,19 +93,53 @@ def test_an_element_not_on_the_network_is_refused(net, tmp_path, kind, el, reaso
     assert not (tmp_path / "x.con").exists()
 
 
-def test_a_label_outside_the_token_charset_is_refused(net, cset, tmp_path):
-    bad = cset.head(1).assign(contingency_id="x" * 33)
-    with pytest.raises(ContractError, match="not a .con label"):
-        write_con(bad, net, tmp_path / "x.con")
+def test_bus_name_ids_round_trip_through_the_label_map(net, cset, tmp_path):
+    # the schema's id charset has no length cap; only the old 32-char label limit bit
+    long_id = "LINE_BUS_A_to_BUS_B_ckt_2_" + "x" * 40
+    ids = [long_id, "N-1_unit_G1", "bus-C"]
+    cs = cset.head(3).assign(contingency_id=ids)
+    assert write_con(cs, net, tmp_path / "s.con") == []
+    text = (tmp_path / "s.con").read_text()
+    assert "CONTINGENCY C0001\n" in text and long_id not in text
+    assert conmap_path(tmp_path / "s.con").name == "s.conmap.csv"
+    imp = read_contingency_list(tmp_path / "s.con", net)
+    assert imp.unmatched.empty and imp.excluded == []
+    assert list(imp.contingencies["contingency_id"]) == ids
 
 
-def test_a_label_with_a_space_is_refused_by_name(net, cset, tmp_path):
-    bad = cset.head(1).assign(contingency_id="LINE A")
-    with pytest.raises(
-        ContractError, match=r"characters outside \[A-Za-z0-9_-\]: 'LINE A'"
-    ):
-        write_con(bad, net, tmp_path / "x.con")
-    assert not (tmp_path / "x.con").exists()
+def test_labels_skip_compound_kinds(net, tmp_path):
+    cs = n_1_1_contingencies(branch_contingencies(net))
+    if cs.empty:
+        pytest.skip("no compound set on this net")
+    mixed = pd.concat([cs.head(1), _set(net, kinds=("branch",)).head(2)], ignore_index=True)
+    skipped = write_con(mixed, net, tmp_path / "s.con")
+    assert len(skipped) == 1
+    labels = pd.read_csv(conmap_path(tmp_path / "s.con"))["label"].tolist()
+    assert labels == ["C0001", "C0002"]
+
+
+def test_a_con_without_its_map_is_refused_on_pack_read_back(net, cset, tmp_path):
+    write_con(cset, net, tmp_path / "s.con")
+    conmap_path(tmp_path / "s.con").unlink()
+    with pytest.raises(ContractError, match="no label map"):
+        read_contingency_list(tmp_path / "s.con", net, require_map=True)
+
+
+def test_a_label_missing_from_the_map_is_refused_by_name(net, cset, tmp_path):
+    write_con(cset, net, tmp_path / "s.con")
+    mp = conmap_path(tmp_path / "s.con")
+    df = pd.read_csv(mp)
+    df[df["label"] != "C0002"].to_csv(mp, index=False)
+    with pytest.raises(ContractError, match="'C0002' is not in the label map"):
+        read_contingency_list(tmp_path / "s.con", net)
+
+
+def test_a_map_entry_with_no_block_is_refused_by_name(net, cset, tmp_path):
+    write_con(cset, net, tmp_path / "s.con")
+    mp = conmap_path(tmp_path / "s.con")
+    mp.write_text(mp.read_text() + "C9999,ghost\n")
+    with pytest.raises(ContractError, match="'C9999' has no block"):
+        read_contingency_list(tmp_path / "s.con", net)
 
 
 @pytest.mark.parametrize("build", [n_m_1_contingencies, n_1_1_contingencies])
@@ -175,13 +210,13 @@ def test_golden_con(golden_net, tmp_path):
     )
     assert write_con(cset, golden_net, tmp_path / "g.con") == []
     assert (tmp_path / "g.con").read_bytes() == (
-        b"CONTINGENCY L1\n"
+        b"CONTINGENCY C0001\n"
         b"   OPEN BRANCH FROM BUS 1 TO BUS 2 CIRCUIT '1 '\n"
         b"END\n"
-        b"CONTINGENCY U_G2\n"
+        b"CONTINGENCY C0002\n"
         b"   REMOVE MACHINE '2 ' FROM BUS 2\n"
         b"END\n"
-        b"CONTINGENCY B_C\n"
+        b"CONTINGENCY C0003\n"
         b"   DISCONNECT BUS 3\n"
         b"END\n"
         b"END\n"
