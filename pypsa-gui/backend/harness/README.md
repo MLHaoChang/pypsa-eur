@@ -2248,8 +2248,16 @@ runner launches itself (SH07C-DRAFT-1; GK B (64) D1–D10).
   boot's lease lapsed or this instance holds it (the boot sweep, and `_revise`
   after a takeover); its comment gets `draft_unavailable`, and its hold
   settles `uncertain` through issue 24's reconcile. Nothing is re-sent.
+- **The run card (PR B).** The run view carries `monitor.revision_drafts`
+  (`run_revise.view`) and, where a request can be made, `monitor.revision_report`
+  (`run_revise.offer`: the report id, `max_requests`, `in_flight`, and `may_act`,
+  false for a viewer). The offer and `request()` read one predicate,
+  `requestable_report`, so the card never offers what the route refuses.
+  `RunMonitor`'s `RevisionDrafts` lists the report's open comments with Draft a
+  fix, and the drafts with Confirm and Discard, as plain text.
 
-Tests: `tests/test_harness_revision_drafts.py`.
+Tests: `tests/test_harness_revision_drafts.py`; the card in
+`frontend/src/components/runMonitor/RevisionDrafts.test.tsx`.
 
 
 ## Recorded runs, load flow, and experiment plans

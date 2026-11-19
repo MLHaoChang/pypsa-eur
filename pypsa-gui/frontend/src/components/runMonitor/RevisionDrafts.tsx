@@ -164,7 +164,10 @@ export default function RevisionDrafts({ taskId, view, onRefresh }: {
           return <li key={r.id} data-testid="revision-draft" data-status={r.status}>
             <div role="status" data-testid="revision-draft-status">{status}</div>
             {comment && <div className="text-muted">For: {comment.text}</div>}
-            {r.edit && ['drafted', 'applying', 'applied'].includes(r.status) && <EditText edit={r.edit} />}
+            {r.edit && ['drafted', 'applying', 'applied'].includes(r.status) && <>
+              <div className="text-muted">{r.status === 'applied' ? 'Applied edit:' : 'Proposed edit:'}</div>
+              <EditText edit={r.edit} />
+            </>}
             {r.status === 'refused' && <div className="text-muted" data-testid="revision-draft-why">
               {draftErrorWords(r.error)}</div>}
             {reasons.length > 0 && <ul className="list-disc pl-5 text-muted" data-testid="revision-draft-reasons">

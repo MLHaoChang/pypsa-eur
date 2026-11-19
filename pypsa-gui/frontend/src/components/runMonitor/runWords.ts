@@ -252,8 +252,8 @@ export const DRAFT_REASON_WORDS: Record<string, string> = {
   changes_evidence_hash: 'The edit changes the evidence the report was made from.',
   changes_table_shape: "The edit changes a table's shape.",
   edit_outside_anchor: 'The edit changes something outside the commented block.',
-  draft_budget: "The run's model budget cannot cover a draft for this comment. Write the edit yourself, or raise the run's budget.",
-  draft_unavailable: 'No draft could be made for this comment. Write the edit yourself, or ask the run for a draft again.',
+  draft_budget: "The run's model budget cannot cover a draft for this comment.",
+  draft_unavailable: 'No draft could be made for this comment last time.',
   draft_unreadable: "The model's reply could not be read as an edit.",
   draft_truncated: "The model's reply was cut off before the edit ended.",
 }
