@@ -1,0 +1,37 @@
+# TEMPORARY diagnostic for the GUI backend shard hang. Not for merge.
+name: Diag blender hang
+on:
+  push:
+    branches: [claude/diag-blender-hang]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+    - uses: actions/checkout@v7
+    - uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        cache: true
+        cache-write: false
+    - name: Environment
+      run: id; nproc; ulimit -a | head -20; which docker podman || true
+    - name: The 409 test alone, with a thread dump on hang
+      working-directory: pypsa-gui/backend
+      env:
+        PYTHONFAULTHANDLER: "1"
+      run: |
+        timeout -s ABRT 240 pixi run -e test python -m pytest -p no:cacheprovider -v \
+          -o log_cli=true --log-cli-level=WARNING \
+          "tests/test_site_scene_blender_job.py" -k "run_stores or second_job or not_a_canonical" || echo "exit $?"
+    - name: Whole file, with a thread dump on hang
+      working-directory: pypsa-gui/backend
+      env:
+        PYTHONFAULTHANDLER: "1"
+      run: |
+        timeout -s ABRT 600 pixi run -e test python -m pytest -p no:cacheprovider -v \
+          -o log_cli=true --log-cli-level=WARNING --durations=10 \
+          tests/test_site_scene_blender_job.py || echo "exit $?"
