@@ -761,7 +761,7 @@ def test_a_certification_held_by_a_feeder_bound_never_reads_pass(tmp_path):
     study = _held(_study(1.0, [0.0, 2.0], target=3.0), verdict="inconclusive", feeder_bound=_FB)
     row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
     assert row["verdict"] == "warn" and row["limit"] == 3.0
-    assert "43.8" in row["note"]
+    assert "it_bus could be cut off up to 43.8 h/yr while site_transformer is out" in row["note"]
 
 
 @pytest.mark.parametrize("bound, verdict", [(1.0, "pass"), (2.0, "warn")])
@@ -800,6 +800,24 @@ def test_a_fail_stays_a_fail_whatever_held_the_pass(tmp_path, payload):
     study = _held(_study(5.0, [4.0, 6.0]), **payload)
     row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
     assert row["verdict"] == "fail"
+
+
+def test_a_composed_feeder_row_does_not_withhold_the_pass(tmp_path):
+    # Only a row flagged ``chained`` withholds the pass; a composed feeder's
+    # hours are already in the certified interval.
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), critical_feeders=[
+        {"name": "c", "model": "composed", "chained": False, "upper_bound": False}])
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "pass"
+
+
+def test_a_lower_bound_exactly_at_the_goal_is_not_a_fail(tmp_path):
+    # fail needs the CI lower bound above the 3 h/yr goal, not at it.
+    d, n = _project(tmp_path, "eh_datacenter")
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=_study(3.5, [3.0, 4.0]),
+                                 study_edited=False))["lole"]
+    assert row["verdict"] == "warn"
 
 
 @pytest.mark.parametrize("payload", [
