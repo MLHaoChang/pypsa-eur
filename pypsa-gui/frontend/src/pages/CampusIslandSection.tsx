@@ -15,6 +15,7 @@
 //   results of I4–I6) as the report orders them.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { controlModeLabel, islandScenarioLabel } from '../plainNames'
 import { Play, Save } from 'lucide-react'
 import {
   campusApi, errorText, ISLAND_SCENARIOS,
@@ -223,7 +224,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
               {ISLAND_SCENARIOS.map(sc => (
                 <label key={sc} className="flex gap-1 items-center">
                   <input type="checkbox" checked={req.scenarios.includes(sc)} onChange={() => toggleScenario(sc)} />
-                  {sc}
+                  {islandScenarioLabel(sc)}
                 </label>
               ))}
             </fieldset>
@@ -259,7 +260,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
                 <label htmlFor={`island-control-${unit}`} className="w-56">Control mode of {unit}</label>
                 <select id={`island-control-${unit}`} className={INPUT} value={u.control}
                         onChange={e => setUnitControl(unit, e.target.value)}>
-                  {CONTROLS.map(c => <option key={c} value={c}>{c}</option>)}
+                  {CONTROLS.map(c => <option key={c} value={c}>{controlModeLabel(c)}</option>)}
                 </select>
               </div>
             ))}
