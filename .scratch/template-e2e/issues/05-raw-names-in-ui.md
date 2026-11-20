@@ -42,3 +42,7 @@ Waiting on other PRs / later slices:
 - Campus file raw YAML stub: needs a form editor, a separate slice.
 - Template-wide snake_case scan test of every Guided section and Expert panel: needs the Q2 names first.
 
+
+## Comments
+
+- Seen again 2026-11-20 (template walk, master 1f6905e3): DC Guided step 3 prints 'grid_import, 40 MW', 'BESS new is not sized yet'; H2 step 1 says 'Fmea top ranks them'.
