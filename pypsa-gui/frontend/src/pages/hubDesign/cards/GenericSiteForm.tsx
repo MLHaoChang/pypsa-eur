@@ -10,10 +10,12 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { useQuery } from '@tanstack/react-query'
 import { projectsApi } from '../../../api/projects'
 import { kpiFigure } from '../../../utils/format'
+import { BACK_TO_RATE, FROM_RATE } from '../../../utils/loadGrowthWords'
 import { siteParamsRefusal, type TemplateCreate } from '../../../hooks/useCreateFromTemplate'
 import {
-  addStage, draftFromSite, firstErrorField, initialDraft, isDefault, presetSummary, removeStage, requestBody,
-  setEnergization, setField, setStage, validate, withSiteType,
+  addStage, draftFromSite, firstErrorField, initialDraft, isDefault, isFilledFromRate, presetSummary,
+  removeStage, requestBody, resetStageToRate, setEnergization, setField, setGrowth, setStage, validate,
+  withSiteType,
   type SiteDraft, type SiteForm, type SiteParams, type SiteTypeId,
 } from '../genericSite'
 
@@ -67,6 +69,8 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
   const update = (d: SiteDraft) => { setDraft(d); setServer(null) }
   const v = draft.values
   const bounds = form.bounds
+  const growthOn = v.stages.length > 1 && validate(draft, bounds).growth_pct == null
+    && draft.growth?.pct != null
 
   const field = (key: string) => ({
     field: key, error: errors[key], isDefault: isDefault(draft, key),
@@ -133,8 +137,24 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
                     value={s.year} step={1} onChange={x => update(setStage(draft, i, 'year', x))} />
                 </td>
                 <td className="pr-2">
-                  <NumInput {...field(`stages[${i}].peak_mw`)} label={`Peak load in stage ${i + 1} (MW)`}
-                    value={s.peak_mw} onChange={x => update(setStage(draft, i, 'peak_mw', x))} />
+                  {/* A peak filled by "Grow from the first stage" reads "from
+                      rate"; a typed one over a rate gets "↺" back to it (04a2). */}
+                  <span className="flex items-start gap-1">
+                    <NumInput {...field(`stages[${i}].peak_mw`)} label={`Peak load in stage ${i + 1} (MW)`}
+                      value={s.peak_mw} onChange={x => update(setStage(draft, i, 'peak_mw', x))}
+                      fromRate={isFilledFromRate(draft, i)} />
+                    {i > 0 && growthOn && !isFilledFromRate(draft, i) && (
+                      <button type="button" data-testid={`site-stage-reset-${i}`}
+                        onClick={() => update(resetStageToRate(draft, i))}
+                        aria-label={`${BACK_TO_RATE}, stage ${i + 1}`} title={BACK_TO_RATE}
+                        className="pt-1 text-[11px] text-muted hover:text-accent">↺</button>
+                    )}
+                    {/* Beside the field, not under it, so rows keep their height. */}
+                    {isFilledFromRate(draft, i) && (
+                      <span data-testid={`stages[${i}].peak_mw-from-rate`}
+                        className="pt-1.5 text-[10.5px] text-muted whitespace-nowrap">{FROM_RATE}</span>
+                    )}
+                  </span>
                 </td>
                 <td className="pr-2">
                   <NumInput {...field(`energization[${i}].mw`)}
@@ -152,6 +172,10 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
             ))}
           </tbody>
         </table>
+        {v.stages.length > 1 && (
+          <GrowthField value={draft.growth?.pct ?? null} error={errors.growth_pct}
+            onChange={x => update(setGrowth(draft, x))} />
+        )}
         {v.stages.length < bounds.max_stages && (
           <button type="button" data-testid="site-stage-add" onClick={() => update(addStage(draft, bounds))}
             className="self-start text-[11.5px] text-accent hover:underline">Add a growth stage</button>
@@ -297,10 +321,33 @@ function FieldError({ id, error }: { id: string; error?: string }) {
 
 const errId = (field: string) => `site-err-${field.replace(/[^a-z0-9]/gi, '-')}`
 
+/** "Grow from the first stage at X % per year" (homer-parity 04a2, owner
+ *  decision LOADGROWTH-FORM-1): a helper that fills the later stages' peaks;
+ *  never sent. Empty clears it. Its check says itself in role="status". */
+function GrowthField({ value, error, onChange }: {
+  value: number | null; error?: string; onChange: (x: number | null) => void
+}) {
+  return (
+    <span className="flex flex-col gap-0.5 text-[12px]">
+      <label className="flex items-baseline gap-1.5 text-text">
+        Grow from the first stage at
+        <input type="number" inputMode="decimal" data-field="growth_pct" data-testid="site-field-growth_pct"
+          step="any" value={value != null && Number.isFinite(value) ? value : ''}
+          aria-invalid={error ? true : undefined} aria-describedby={error ? errId('growth_pct') : undefined}
+          onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))}
+          className={`w-20 rounded border bg-bg px-2 py-1 text-[12px] text-text ${error ? 'border-danger' : 'border-border'}`} />
+        % per year
+      </label>
+      <Hint>Fills the later stages' peak load from the first stage. A peak you type wins for its stage.</Hint>
+      {error && <span id={errId('growth_pct')} role="status" className="text-[11px] text-danger">{error}</span>}
+    </span>
+  )
+}
+
 /** A bare number input (table cells): its label is for screen readers. */
-function NumInput({ field, label, value, onChange, error, step }: {
+function NumInput({ field, label, value, onChange, error, step, fromRate }: {
   field: string; label: string; value: number; onChange: (x: number) => void
-  error?: string; isDefault?: boolean; step?: number
+  error?: string; isDefault?: boolean; step?: number; fromRate?: boolean
 }) {
   return (
     <span className="flex flex-col gap-0.5">
@@ -309,7 +356,7 @@ function NumInput({ field, label, value, onChange, error, step }: {
         value={Number.isFinite(value) ? value : ''}
         aria-invalid={error ? true : undefined} aria-describedby={error ? errId(field) : undefined}
         onChange={e => onChange(e.target.value === '' ? NaN : Number(e.target.value))}
-        className={`w-28 rounded border bg-bg px-2 py-1 text-[12px] text-text ${error ? 'border-danger' : 'border-border'}`} />
+        className={`w-28 rounded border bg-bg px-2 py-1 text-[12px] ${fromRate ? 'italic text-muted' : 'text-text'} ${error ? 'border-danger' : 'border-border'}`} />
       <FieldError id={errId(field)} error={error} />
     </span>
   )
