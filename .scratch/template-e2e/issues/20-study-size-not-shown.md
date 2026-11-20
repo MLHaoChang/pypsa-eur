@@ -17,3 +17,18 @@ Guided and Expert results say 'sized by the study' and never list the chosen cap
 - Guided results and the report list every built asset with MW (and MWh, t/h where non-electric), per stage for staged templates.
 - Placeholder grid capacity and shortfall are not counted as installed capacity; the total is checked against the connection limit.
 - Guided, Expert and report show the same figures (test per template).
+
+## Comments
+
+GK A (33) plan GO (2026-11-20), with S1–S8:
+
+- S1 Connection: one reading, `flow_service.import_capacity` (#1772). No own filter and no p_nom fallback. Refused: `grid_connection_mw`/`connection_check` None plus the refusal sentence, never a number or "within".
+- S2 Grid supply leaves the total only structurally: a generator on an import Link's grid-side bus that holds nothing else of the site's; otherwise counted, with the reason. A grid generator at the PoC with no Link is grid supply, labelled "unbounded connection". Both tested.
+- S3 Buy-in and shortfall (by `process_role`) leave the total but get their own key, with energy. A delivered shortfall is its own report row; ammonia staged pinned.
+- S4 Every sizing consumer is listed with what it reads, old and new. An old stored report renders and hashes byte-equal (pin test).
+- S5 Peak = max over snapshots of summed import `p0`, positive direction, checked per period (EXCEEDS when any period does); unsolved gives None; the tolerance is stated and pinned on both sides.
+- S6 `unit` from `_size_unit` (bus, or bus0 for a Link); `stage` = int(build_year) on multi-period only; old rows keep the unit fallback.
+- S7 Real HiGHS tests for DC and ammonia staged. One targeted mutant per guard, each killed by a named test.
+- S8 Two PRs: backend + fixture (GK A), then the frontend (UX) stacked on it.
+
+Builder note: an export-only Link into the grid bus (IPP `grid_export`: bus1 = grid, `p_min_pu` ≥ 0) is not site equipment, so it does not stop the S2 split. A two-way Link does.
