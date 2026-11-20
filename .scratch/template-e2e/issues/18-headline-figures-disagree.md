@@ -4,13 +4,15 @@
 # 18 — Cost and capacity headline figures disagree or are missing
 
 Status: ready-for-agent
-Impact: medium
+Impact: high (raised 2026-11-20, UX 3 review of #1777)
 Templates: DC staged, H2 staged, microgrid (both), ammonia, DC
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
 
 ## What
 
 LOPF toast "Solved · €120.29 M" vs Summary "€195 M" (H2 staged); €382.67M vs €576M (DC staged), no basis stated. Summary "No cost breakdown / No capacities for this solve" and "Loading the headline figures…" stuck (microgrid staged, ammonia). Off-grid microgrid lists "grid 100 MW" in Key capacities; DC lists "grid 500 MW" against a 40/55 MW connection. Ammonia: delivered 785 kt exceeds made 672 kt, unexplained. Study card: "Achieved 0.00‱" beside "LOLE 4.58 h/yr Not certified".
+
+Mode-by-mode figures, same H2 project, same state (template walk 2026-11-20, `walkthroughs/templates-2026-11-20/`): Guided Results 'Yearly cost of this design (before any shortfall costs)' EUR 7.61 M; Expert Run LOPF > Results > Summary 'Total system cost' EUR 9.02 M (new-build capital EUR 6.32 M per year), status bar 'Obj: € 9 m'; the report's cost at target 7,608,649 EUR. DC and microgrid agree across modes (34.7 M and 3.47 M).
 
 ## Why it matters
 

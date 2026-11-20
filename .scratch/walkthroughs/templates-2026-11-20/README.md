@@ -5,7 +5,7 @@
 
 Owner decision WALK-CADENCE-1 (daily template rotation). Templates: `eh_datacenter` (Data Center Energy Hub), `eh_h2_hub` (Industrial Hydrogen Hub), `eh_microgrid` (Island Microgrid). Judged against `.scratch/project-workflow/design.md`, `.scratch/template-e2e/` and the earlier walkthroughs.
 
-How: master `8a039460`-era checkout, API and Vite started from the pixi env (the boot script had not run), dev admin, Playwright at 1440×900, light theme. Each template was created through Projects › New project › From template, then walked in Guided (sections 1–10, Run, Results, investment case) and in Expert (panels, Run LOPF, Results tabs, Reports, export). Shots are downscaled to 800 px in `shots/`.
+How: master `1f6905e3`, API and Vite started from the pixi env (the boot script had not run), dev admin, Playwright at 1440×900, light theme. Each template was created through Projects › New project › From template, then walked in Guided (sections 1–10, Run, Results, investment case) and in Expert (panels, Run LOPF, Results tabs, Reports, export). Shots are downscaled to 800 px in `shots/`.
 
 **Timing caveat.** My scripts polled every 5–10 s and waited a fixed 8 s after opening a project, so each time below is an upper bound within that granularity, not a measurement.
 
@@ -27,7 +27,7 @@ How: master `8a039460`-era checkout, API and Vite started from the pixi env (the
 - All three templates create, open, run and certify (or say why they did not) in under half a minute in Guided.
 - Cost agrees between Guided, Expert Summary and the report for DC (34.7 M, report 34,700,616 €) and microgrid (3.47 M, 3,473,806 €).
 - The verdict wording on H2 now names the right place: "section 8, Scenarios & optimisation". The earlier "step 3" mistake is fixed.
-- A "Sized design" table now shows on all three results pages, with the built size and the allowed range (microgrid battery 7.52 MW · 30.08 MWh (4 h), which checks: 7.52 × 4 = 30.08). That closes the heart of `asset-investment-2026-11-17` issue 03; the triage of that issue should be updated.
+- A "Sized design" table now shows on all three results pages, with the built size and the allowed range (microgrid battery 7.52 MW · 30.08 MWh (4 h), which checks: 7.52 × 4 = 30.08). That confirms `asset-investment-2026-11-17` issue 03, which is already `done (#1677, #1734)`.
 - The microgrid verdict adds a design option ("A 24 h battery also meets the cap at EUR 3.1 m a year (design: 4 h, EUR 3.5 m)").
 - The report builds in about 3 s and states what a study did not establish.
 
@@ -39,6 +39,7 @@ New (files in `issues/`):
 |---|---|---|
 | 02 | Report disclosures use engine words (`tea`, `COPT`, `single_period`, `VoLL`, "LP proxy") and a hydrogen note in non-hydrogen projects | medium |
 | 03 | Grid-readiness counts differ between the Guided step and the report (13 vs 12 unknown on DC, 7 vs 6 on the microgrid) | medium |
+| 07 | Guided Results LCOE card says "solve the project in Readiness and run" right after a run | medium |
 | 06 | H2 investment case: raw `48,665,787.09` without unit; NPV and post-tax returns "not established" after a normal run | medium |
 | 01 | "Next: Goal" names a step the stepper does not have and skips sections 4–7 | low |
 | 04 | Results chart: axis end "3.6 h/yr" sits beside "Goal" (goal is 3) | low |
