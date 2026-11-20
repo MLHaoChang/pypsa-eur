@@ -136,7 +136,7 @@ describe('the served row reason (BC 17)', () => {
     } }
     expect(rowReason('tax', served)).toBe('Not established: the tax section needs a tax pack.')
     expect(rowReason('net_income', served)).toBe('Not established: the operating section needs '
-      + 'the line “nh3” and its linked output, which is stale; '
+      + 'the line “nh3” and its linked output, which is out of date; '
       + 'the business case needs receivable days; the tax section needs a tax pack.')
     // Served wins; absent falls back; an empty map from a new report never falls back.
     expect(rowReason('tax', PNL)).toBe('Not established. It needs the tax section.')
@@ -256,5 +256,74 @@ describe('the run', () => {
     const { onBreakEvenLine } = mount(DONE)
     fireEvent.change(screen.getByLabelText('Break-even on'), { target: { value: 'H2 sales' } })
     expect(onBreakEvenLine).toHaveBeenCalledWith('H2 sales')
+  })
+})
+
+// BC 15: the volume factor (lease-up) in the report.
+describe('the volume factor in the report', () => {
+  const LEASED: BusinessCaseStudy = { ...DONE, report: { ...REPORT, pnl: {
+    ...PNL, volume_factor: { 2030: 0.6 },
+    volume_factor_note: 'volume-tied costs and revenue scaled pro rata by the factor; the dispatch was not re-solved at reduced load',
+  } } }
+
+  it('at default adds no row, note, mark or ignored line', () => {
+    mount(DONE)
+    for (const id of ['bc-row-volume_factor', 'bc-volume-factor-note', 'bc-kpi-volume-factor', 'bc-volume-factor-ignored']) {
+      expect(screen.queryByTestId(id)).toBeNull()
+    }
+  })
+  it('a first P&L row reads every year as a percent, with the note under it', () => {
+    mount(LEASED)
+    const row = screen.getByTestId('bc-row-volume_factor')
+    expect(row.querySelector('th')!.textContent).toMatch(/^Volume factor \(lease-up\), %/)
+    expect(within(row).getAllByRole('cell').map(c => c.textContent)).toEqual(['60 %', '100 %'])
+    expect(screen.getByTestId('bc-volume-factor-note').textContent).toMatch(/^Volume-tied costs .* reduced load\.$/)
+    // First in "Profit and loss": before the revenue row.
+    expect(row.compareDocumentPosition(screen.getByTestId('bc-row-revenue')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+  it('marks the KPI row', () => {
+    mount(LEASED)
+    expect(screen.getByTestId('bc-kpi-volume-factor').textContent).toBe(
+      'With volume factor (lease-up) These figures differ from the Investment case because of the volume factor.')
+  })
+  it('names the ignored years, and Remove hands back the ones the draft still states', () => {
+    const onRemove = vi.fn()
+    const study = { ...LEASED, report: { ...LEASED.report!, pnl: { ...LEASED.report!.pnl!, volume_factor_ignored: [2028, 2029] } } }
+    mount(study, { volumeFactorYears: ['2029', '2030'], onRemoveVolumeFactorYears: onRemove })
+    const line = screen.getByTestId('bc-volume-factor-ignored')
+    expect(line.textContent).toMatch(/^Ignored, outside the operating years: 2028, 2029/)
+    fireEvent.click(within(line).getByRole('button'))
+    expect(onRemove).toHaveBeenCalledWith([2029])
+  })
+  it('a run refused on the volume factor reads plain words, never the kind', () => {
+    mount({ status: 'refused', error: 'business_case_refused:volume_factor_unclassified: energy_export',
+            error_code: 'business_case_refused',
+            refusal: { code: 'business_case_refused', refusal: 'volume_factor_unclassified', field: 'energy_export',
+                       message: 'volume_factor_unclassified: energy_export' } })
+    const text = screen.getByTestId('bc-failure').textContent ?? ''
+    expect(text).toMatch(/^Refused\. Volume factor \(lease-up\), %: The energy-model row “energy export”/)
+    expect(text).not.toMatch(/volume_factor/)
+  })
+})
+
+describe('walk 03 and 05 on the panel', () => {
+  it('a KPI names the served cause and the first fix opens the finance inputs', () => {
+    const row_reason = { project_post_tax: [
+      { section: 'operating', code: 'degradation_missing:genset_1' },
+      { section: 'operating', code: 'degradation_missing:rooftop_pv' }] }
+    const ne = { value: null, status: 'not_established', reason: 'operating_not_established' } as const
+    mount({ ...DONE, report: { ...REPORT, pnl: { ...REPORT.pnl!, row_reason },
+      kpis: { ...REPORT.kpis, project_npv: ne } } as BusinessCaseReport })
+    expect(screen.getByTestId('bc-kpi-project_npv').textContent).toContain(
+      'Not established: needs a degradation rate for Genset 1 and Rooftop PV')
+    expect(screen.getByTestId('bc-first-fix-open').textContent).toBe(
+      'Set a degradation rate for Genset 1 and Rooftop PV ›')
+  })
+
+  it('a refused run names the line and the column', () => {
+    mount({ status: 'refused', error: 'business_case_refused:indexation_missing: lines[1].indexation' } as BusinessCaseStudy,
+      { lineNames: ['Capacity payment', 'Guarantees of origin'] })
+    expect(screen.getByTestId('bc-failure').textContent).toBe(
+      'Refused. Guarantees of origin: set an indexation rate')
   })
 })
