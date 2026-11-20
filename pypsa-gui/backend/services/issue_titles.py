@@ -137,7 +137,7 @@ ISSUE_TITLES: dict[str, str] = {
     # The rest of the engine preflight's commercial codes (GK B2 (3) on template-e2e 14).
     "commercial.binding_invalid": "Commercial setup does not fit this network",
     "commercial.capacity_double_count": "Grid capacity may be charged twice",
-    "commercial.contract_asset_missing": "Contract names an asset that is not in the network",
+    "commercial.contract_asset_missing": "Contract names an asset it cannot use",
     "commercial.contract_tariff_mismatch": "Contract names a different tariff",
     "commercial.currency_mismatch": "Commercial prices use different currencies",
     "commercial.demand_partial_months": "Demand charge counts a part month as a full month",
