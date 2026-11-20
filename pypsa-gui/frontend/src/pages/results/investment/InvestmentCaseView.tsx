@@ -7,8 +7,8 @@
 // establish is shown as "not established", never as 0 or a blank (ADR-0001).
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { financeApi, SolverInFlightError } from '../../../api/finance'
-import type { InvestmentCaseReportPayload, InvestmentCaseStudy } from '../../../api/types'
+import { financeApi } from '../../../api/finance'
+import type { InvestmentCaseReportPayload } from '../../../api/types'
 import { CompletenessChips } from '../../../components/CompletenessChips'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
@@ -17,7 +17,7 @@ import { downloadCSV } from '../shared'
 import {
   AVOIDED_PREFIX, basisStatement, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
   baselineCaveats, counterfactualBasis, HEADLINE_KEYS, islandBreakeven, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
-  projectFlagWords, reportFlags, reportYears, sectionOf, stalePartLabel, studyFailure, studyProgress, studyStale, toTable,
+  projectFlagWords, reportFlags, reportYears, sectionOf, stalePartLabel, studyProgress, studyStale, toTable,
   uncheckableReason, waccGate, campusEquipment, campusRefusal, unmetNeedsLink,
   type CampusLink,
   type GateState, type Table,
@@ -28,6 +28,8 @@ import CaptureTable from './CaptureTable'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 import { Tag } from '../../../components/PageKit'
 import { openPanel } from '../openPanel'
+import InvestmentCaseRunPanel from './InvestmentCaseRunPanel'
+import { useInvestmentCaseRun } from './useInvestmentCaseRun'
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -403,18 +405,14 @@ function Report({ report }: { report: InvestmentCaseReportPayload }) {
 
 // ── the tab ──────────────────────────────────────────────────────────────
 
-const refetchWhileRunning = (q: { state: { data: unknown } }): number | false =>
-  (q.state.data as InvestmentCaseStudy | null)?.status === 'running' ? 2000 : false
-
 export default function InvestmentCaseView() {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const studyKey = nk(project, 'results', 'investment_case')
   const reportKey = nk(project, 'results', 'investment_case', 'report')
-  const study = useQuery({ queryKey: studyKey, queryFn: () => financeApi.getInvestmentCase(),
-                           refetchInterval: refetchWhileRunning })
-  const s = study.data ?? null
-  const running = s?.status === 'running'
+  const run = useInvestmentCaseRun()
+  const s = run.study
+  const running = run.running
   const report = useQuery({ queryKey: reportKey, queryFn: () => financeApi.getReport(), enabled: !running })
   const [blocked, setBlocked] = useState<string | null>(null)
 
@@ -426,15 +424,9 @@ export default function InvestmentCaseView() {
     if (before === 'running' && s?.status !== 'running') void qc.invalidateQueries({ queryKey: reportKey })
   }, [s?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const run = useMutation({
-    mutationFn: () => financeApi.startInvestmentCase(),
-    onMutate: () => setBlocked(null),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: studyKey }),
-    onError: (e: unknown) => setBlocked(e instanceof SolverInFlightError
-      ? 'a solve is running; run the investment case after it.' : blockerMessage(e)),
-  })
   const abort = useMutation({
     mutationFn: () => financeApi.abortInvestmentCase(),
+    onMutate: () => setBlocked(null),
     onSuccess: () => void qc.invalidateQueries({ queryKey: studyKey }),
     onError: (e: unknown) => setBlocked(blockerMessage(e)),
   })
@@ -445,16 +437,13 @@ export default function InvestmentCaseView() {
   const stale = !running && staleness.stale
   const fraction = progressFraction(studyProgress(s))
   const progress = progressText(studyProgress(s))
-  const failure = studyFailure(s)
   const campusLine = running ? null : campusRefusal(s, r)
 
   return (
     <div className="space-y-3 text-[11px]" data-testid="investment-case">
+      <InvestmentCaseRunPanel run={run} mode="expert"
+                              report={running ? null : report.isSuccess ? (report.data ?? null) : undefined} />
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" data-testid="ic-run" disabled={running || run.isPending}
-                className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
-                onClick={() => run.mutate()}>
-          {running ? 'Running the investment case…' : 'Run the investment case'}</button>
         {running && (
           <button type="button" data-testid="ic-abort" disabled={abort.isPending}
                   className="px-2 py-1 rounded border border-border hover:border-danger hover:text-danger"
@@ -470,12 +459,11 @@ export default function InvestmentCaseView() {
           <span className="text-warn" data-testid="ic-aborted">
             Stopped: the run was aborted; the report below, if any, is from an earlier run.</span>
         )}
-        {failure && <span className="text-danger" data-testid="ic-error">{failure}</span>}
         {campusLine && (
           <span className="text-warn" data-testid="ic-campus-refusal">{campusLine.text}
             {campusLine.links.map(l => <span key={l.label}>{' '}{l.lead && `${l.lead} `}<CampusLinkButton link={l} /></span>)}</span>
         )}
-        {blocked && <span className="text-warn" data-testid="ic-blocked">Blocked: {blocked}</span>}
+        {blocked && <span className="text-warn" data-testid="ic-abort-blocked">Blocked: {blocked}</span>}
       </div>
       {stale && (
         <p role="alert" className="text-warn" data-testid="ic-stale">
@@ -489,10 +477,6 @@ export default function InvestmentCaseView() {
       )}
       {report.isError && !running && (
         <p className="text-warn" data-testid="ic-report-error">The report could not be loaded.</p>
-      )}
-      {!running && !report.isError && report.isSuccess && !r && (
-        <p className="text-muted" data-testid="ic-not-run">
-          No investment case has been run yet. State the finance inputs, then run it.</p>
       )}
       {r && <Report report={r} />}
     </div>

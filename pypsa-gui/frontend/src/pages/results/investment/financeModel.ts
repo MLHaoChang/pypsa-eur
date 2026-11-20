@@ -665,16 +665,6 @@ export function uncheckableReason(reason: string | null): string | null {
   }
 }
 
-/** The failure a finished run ended in (error / failed / refused), or null. */
-export function studyFailure(s: InvestmentCaseStudy | null | undefined): string | null {
-  if (!s || !['error', 'failed', 'refused'].includes(s.status)) return null
-  const why = s.message ?? s.error ?? null
-  const code = s.code ?? s.error_code ?? null
-  const text = why ?? code ?? 'no reason given'
-  return `${s.status === 'refused' ? 'The case was refused' : 'The run failed'}: ${text}`
-    + (why && code && !why.includes(code) ? ` (${code})` : '')
-}
-
 // ── the campus equipment the case took (campus-IC issues 02 and 05) ─────
 
 export interface CampusEquipmentRow {
