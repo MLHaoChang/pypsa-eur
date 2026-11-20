@@ -37,13 +37,21 @@ export const ENERGIZED_SENTENCE = 'Each period\'s value is the energized limit t
 const periodOrder = (a: string, b: string) => Number(a) - Number(b) || a.localeCompare(b)
 const periodWords = (p: string) => (p === 'all' ? 'All periods' : p)
 
+/** A period the route cannot set: "varies 30–40", or, where every hour with a value has the
+ *  same one (min = max, the rest unset), "15, some hours without a value" (GK B 68). */
+export function rangeWords(v: { min: number; max: number }, unit = ''): string {
+  const n = (x: number) => Number(x.toPrecision(6))
+  const u = unit ? ` ${unit}` : ''
+  return v.min === v.max ? `${n(v.min)}${u}, some hours without a value` : `varies ${n(v.min)}–${n(v.max)}${u}`
+}
+
 /** The schedule in words, for a one-line summary under the "Connection limit (MW)" label:
  *  "2027 15 · 2035 varies 30–40". */
 export function energizationSummary(entry: FlowEnergization): string {
   const n = (v: number) => Number(v.toPrecision(6))
   return Object.keys(entry.by_period).sort(periodOrder).map(p => {
     const v = entry.by_period[p]
-    const what = v == null ? 'not set' : typeof v === 'number' ? `${n(v)}` : `varies ${n(v.min)}–${n(v.max)}`
+    const what = v == null ? 'not set' : typeof v === 'number' ? `${n(v)}` : rangeWords(v)
     return `${periodWords(p)} ${what}`
   }).join(' · ')
 }
@@ -107,7 +115,7 @@ function PeriodRow({ link, period, value, unit, check, readOnly, target }: {
     <li data-testid={`energization-period-${period}`} data-period={period} className="flex flex-col gap-1 text-[11px]">
       <div className="flex flex-wrap items-center gap-2">
         {varies ? (<>
-          <span className="tabular-nums">{`${label} · varies ${Number(value.min.toPrecision(6))}–${Number(value.max.toPrecision(6))} ${unit}`}</span>
+          <span className="tabular-nums">{`${label} · ${rangeWords(value, unit)}`}</span>
           {!readOnly && <button type="button" className="underline" onClick={open}>Edit the link ›</button>}
         </>) : readOnly ? (
           <span className="tabular-nums">{`${label}: ${typeof value === 'number' ? `${Number(value.toPrecision(6))} ${unit}` : 'not set'}`}</span>

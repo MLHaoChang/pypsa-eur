@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { putFlowEnergization } from '../../api/flow'
 import { useUIStore } from '../../store/uiStore'
 import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
-import { ENERGIZATION_REFUSALS, EnergizationRows, energizationRefusal } from './EnergizationRows'
+import { ENERGIZATION_REFUSALS, EnergizationRows, energizationRefusal, rangeWords } from './EnergizationRows'
 
 vi.mock('../../api/flow', async (orig) => ({
   ...await orig<typeof import('../../api/flow')>(), putFlowEnergization: vi.fn() }))
@@ -82,6 +82,16 @@ describe('EnergizationRows', () => {
     expect(a.textContent).not.toMatch(/against/)
     expect(a.getAttribute('title')).toBe('the 15 MW energized import')
     expect(screen.getByTestId('energization-check-2035').textContent).toMatch(/peak 3 MW against 35 MW/)
+  })
+
+  it('a period flat apart from hours without a value never reads "varies 15–15" (GK B 68)', () => {
+    mount({ '2027': { min: 15, max: 15 }, '2035': 35 })
+    const row = screen.getByTestId('energization-period-2027')
+    expect(row.textContent).toMatch(/2027 · 15 MW, some hours without a value/)
+    expect(row.textContent).not.toMatch(/varies/)
+    expect(within(row).queryByRole('spinbutton')).toBeNull()
+    expect(rangeWords({ min: 30, max: 40 }, 'MW')).toBe('varies 30–40 MW')
+    expect(rangeWords({ min: 15, max: 15 })).toBe('15, some hours without a value')
   })
 
   it('a period that varies is read-only, with Edit the link through the mode-aware opener', () => {
