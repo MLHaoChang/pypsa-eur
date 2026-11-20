@@ -81,8 +81,10 @@ def solved(staged):
 
 
 def test_the_single_year_template_is_unchanged():
-    # the digest of master's build_eh_datacenter() before staging was added
-    assert _digest(T.build_eh_datacenter()) == "84c80723f0e72176"
+    # the digest of master's build_eh_datacenter() before staging was added;
+    # re-pinned for DC walk 05, which drops the template's stated 30/25 MVA IBR
+    # capacity so the SCR derives it from the converters
+    assert _digest(T.build_eh_datacenter()) == "32b282c3eb61543e"
 
 
 def test_three_periods_each_a_year_of_hours_with_their_own_length(staged):
