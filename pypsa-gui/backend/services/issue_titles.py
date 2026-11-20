@@ -122,6 +122,7 @@ ISSUE_TITLES: dict[str, str] = {
     "import_energy_cap_unsupported_strategy": "Import energy cap not supported by this solve strategy",
     "import_energy_link_bidirectional": "Metered import link can also export",
     "min_renewable_fraction_unsupported_strategy": "Minimum renewable fraction not supported by this solve strategy",
+    "load_growth_stale": "Load growth multipliers out of date for the investment periods",
     "reserve_margin_unsupported_strategy": "Reserve margin not supported by this solve strategy",
     "reserve_margin_myopic_report_is_partial": "Reserve margin report covers only part of a myopic run",
     "reserve_margin_unpriceable_assets": "Reserve margin cannot price some assets",
