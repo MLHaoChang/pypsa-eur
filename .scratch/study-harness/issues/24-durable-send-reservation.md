@@ -3,7 +3,7 @@
 
 # 24 — A durable reservation before each model send, settled across restarts
 
-Status: done (#1088)
+Status: done (#1088, #1103)
 Type: task
 Blocked by: 04; PR #1059 (LC-07 PR2, in review; it changes files under `pypsa-gui/backend/harness/`, so build after it merges)
 Gated: yes (GK B: persistence and failure semantics)

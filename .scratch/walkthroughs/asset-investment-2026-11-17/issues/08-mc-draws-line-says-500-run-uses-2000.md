@@ -3,7 +3,7 @@
 
 # The Monte Carlo panel says 500 draws and the run uses 2,000
 
-Status: ready-for-agent
+Status: done (#1677, #1734)
 Type: bug (asset-investment walkthrough, WALK-E2E-1)
 Journey steps: J2 Monte Carlo (Expert)
 Severity: low
