@@ -492,6 +492,42 @@ def test_the_synchronous_refusal_set_is_complete(
         assert frag in detail, f"{case_id}: {frag!r} missing from {detail!r}"
     assert client.get(LOOP_URL).status_code == 204
 
+# ── the refusal names the site type's assumed goal (walkthrough 01) ───────
+
+@pytest.mark.parametrize("archetype", ["off_grid", "weak_flexible"])
+def test_no_goal_refusal_names_the_site_types_assumed_goal(
+        client, install_network, archetype):
+    """GK A 30 1 / GK B3 2: with no goal set, the refusal still refuses (the
+    loop never searches against an assumed goal) and names the site type's
+    3 h/yr and where to type it."""
+    _setup(client, install_network, site_archetype=archetype)
+    r = client.post(LOOP_URL, json={})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "assumes 3 h/yr" in detail and "Scenarios & optimisation" in detail
+    assert client.get(LOOP_URL).status_code == 204
+
+
+def test_no_goal_refusal_on_a_strong_grid_has_no_assumed_goal(
+        client, install_network):
+    """strong_grid's pack has no target, so the refusal names none."""
+    _setup(client, install_network, site_archetype="strong_grid")
+    r = client.post(LOOP_URL, json={})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "target_lole_h" in detail and "assumes" not in detail
+
+
+def test_a_stored_goal_passes_the_target_gate(client, install_network):
+    """A stored goal is the loop's target: the request gets past the target
+    gate (here to the draws refusal), with no hint anywhere."""
+    _setup(client, install_network, site_archetype="off_grid", target_lole_h=1.0)
+    r = client.post(LOOP_URL, json={"draws": 0})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "draws" in detail
+    assert "target_lole_h" not in detail and "assumes" not in detail
+
 
 def test_a_voll_free_network_is_accepted(client, install_network, monkeypatch):
     """★ Bite: copy the cap loop's ``voll > 0`` refusal.

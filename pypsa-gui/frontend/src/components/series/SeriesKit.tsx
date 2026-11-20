@@ -299,7 +299,7 @@ export function WarningList({ warnings, testId }: { warnings: string[]; testId?:
 }
 
 const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: 'UTC' })
-const DAY_MONTH = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+export const DAY_MONTH = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
 const FULL = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 // Snapshots are naive; read them as written (UTC), never shifted by the browser.
 const stamp = (s: string) => new Date(s.endsWith('Z') ? s : `${s}Z`)

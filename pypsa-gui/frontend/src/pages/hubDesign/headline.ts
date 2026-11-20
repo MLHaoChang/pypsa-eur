@@ -5,6 +5,7 @@
 import type { EhReferenceDesignReport, EhReview } from '../../api/simulation'
 import { certificationHeadline, fmeaTopRows } from '../results/EhReferenceDesignPanel'
 import { displayName } from '../../utils/displayName'
+import { sectionMeta } from '../../layout/flowSections'
 
 type OkReview = Extract<EhReview, { status: 'ok' }>
 
@@ -70,7 +71,10 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
   // No goal and no shortfall number (decided at P24-FE, spec §5.5): the
   // engine's note ("no LOLE target …") would be jargon; ask for a goal.
   if (lole == null && target == null) {
-    return 'No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in step 3 (Goal) to get a verdict.'
+    // The goal lives in the Scenarios section; name it from the flow's own
+    // numbering so the sentence never points at a stale step (walkthrough 05a).
+    const goal = sectionMeta('scenarios')
+    return `No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in section ${goal.number}, ${goal.label}, to get a verdict.`
   }
   const note = report?.sections?.certification?.note
   return `The study could not certify reliability: ${

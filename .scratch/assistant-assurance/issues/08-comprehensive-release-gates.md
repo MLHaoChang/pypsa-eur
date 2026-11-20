@@ -3,7 +3,7 @@
 
 # P7: adversarial, full-family and performance release
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: tests/assurance_acceptance/ suite merged; left: a CI job that runs it, domain review, calibration, load budgets, release enablement
 Progress: CI evaluation gate shipped; domain review, calibration, load budgets and release enablement pending
 Type: task
 Blocked by: 01–07 plus required retained-run/durable/job dependencies

@@ -9,11 +9,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import services.business_case.runner as RN
 import services.finance.business_case as BCM
 from models.business_case import CATEGORY_STREAM
 from services.finance.cashflow import BC_STREAM_CLASS, STREAM_CLASS
-from tests.test_business_case_routes import BC_URL, _bc, _bc_poll, _put, _with_ic
+from tests.test_business_case_routes import (
+    BC_URL,
+    INPUTS_URL,
+    _bc,
+    _bc_poll,
+    _put,
+    _with_ic,
+)
 
 
 def test_every_stream_pnl_can_emit_has_a_class_and_a_source():
@@ -152,3 +161,119 @@ def test_bc17_row_reason_is_a_display_key_that_moves_no_digest_or_staleness(
         body["pnl"].pop("row_reason")
         body.pop("created_at")
     assert a == b
+
+
+def test_bc15_a_lease_up_reaches_the_report_and_the_workbook(
+    client, install_network, monkeypatch
+):
+    """The run applies the stored volume factor; the report serves it per operating
+    year, its basis and the years it ignored as display keys, and the workbook writes
+    them (GK B2 V1, C3)."""
+    from openpyxl import Workbook
+
+    import services.business_case.linked_outputs as L
+    from services.results_workbook.business_case import (
+        LEASE_UP_ROW,
+        write_business_case_sheet,
+    )
+    from tests.test_business_case_routes import _line
+
+    _with_ic(client, install_network, monkeypatch)
+    monkeypatch.setattr(
+        L,
+        "resolve",
+        lambda line, n, solve, **kw: L.Series("it_energy", "GPU_h", {None: 1e4}, {}),
+    )
+    gpu = _line(
+        name="gpu", unit="GPU_h", quantity=None, quantity_source="linked:it_energy@1"
+    )
+    assert _put(client, _bc(gpu)).status_code == 200
+    assert client.post(BC_URL).status_code == 200
+    full = _bc_poll(client)
+    assert full["status"] == "done", json.dumps(full)[:600]
+    years = full["report"]["pnl"]["years"]
+    first = years[-2]
+    factor = {str(first): 0.25, "1990": 0.5}
+
+    def run(*lines):
+        bc = _bc(*lines)
+        bc["inputs"]["volume_factor_by_year"] = factor
+        assert _put(client, bc).status_code == 200
+        assert client.post(BC_URL).status_code == 200
+        return _bc_poll(client)
+
+    # A typed line under a lease-up refuses, naming it (Q1).
+    body = run(_line())
+    assert body["status"] == "refused"
+    assert body["refusal"]["refusal"] == "volume_factor_typed_line"
+    assert body["refusal"]["field"] == "lines[0].quantity_source"
+    # This IC sells under a PPA: a generation-side row refuses, naming it (ruling 6).
+    body = run(gpu)
+    assert body["status"] == "refused"
+    assert body["refusal"]["refusal"] == "volume_factor_unclassified"
+    assert body["refusal"]["field"] == "ppa_settlement"
+    assert (
+        client.get(INPUTS_URL).json()["business_case"]["inputs"][
+            "volume_factor_by_year"
+        ]
+        == factor
+    )
+    # Read as fixed, the run completes: the rest of the path is what is pinned here.
+    for s, cls in BCM.STREAM_VOLUME_CLASS.items():
+        if cls == "undetermined":
+            monkeypatch.setitem(BCM.STREAM_VOLUME_CLASS, s, "fixed")
+    body = run(gpu)
+    assert body.get("status") == "done", json.dumps(body)[:600]
+    rep = body["report"]
+    assert rep["pnl"]["volume_factor"] == {str(first): 0.25}
+    assert rep["pnl"]["volume_factor_note"] == BCM.VOLUME_FACTOR_NOTE
+    assert rep["pnl"]["volume_factor_ignored"] == [1990]
+    assert rep["business_case_hash"] != full["report"]["business_case_hash"]
+    i = years.index(first)
+    got, ref = rep["pnl"]["streams"], full["report"]["pnl"]["streams"]
+    assert got["product_revenue"][i] == pytest.approx(
+        0.25 * ref["product_revenue"][i], rel=1e-12
+    )
+    assert got["product_revenue"][i - 1] == ref["product_revenue"][i - 1]
+    wb = Workbook()
+    sheet = write_business_case_sheet(
+        wb, {**rep, "basis": {"label": "x"}}, {"stale": False}
+    )
+    cells = [[c.value for c in row] for row in wb[sheet].iter_rows()]
+    by_item = {r[0]: r[1] for r in cells}
+    assert by_item["Volume factor (lease-up)"] == BCM.VOLUME_FACTOR_NOTE
+    assert by_item["Volume factor years ignored"] == "outside the operating years: 1990"
+    at = next(i for i, r in enumerate(cells) if r[0] == "P&L by year")
+    assert cells[at + 1][0] == LEASE_UP_ROW
+    assert [r[0] for r in cells].count(LEASE_UP_ROW) == 1  # not in the ledger table
+    want = [25.0 if y == first else 100.0 for y in years]
+    assert cells[at + 1][1 : 1 + len(years)] == want
+    # A full-volume report writes none of it.
+    sheet = write_business_case_sheet(
+        wb, {**full["report"], "basis": {"label": "x"}}, {"stale": False}
+    )
+    text = {str(c.value) for row in wb[sheet].iter_rows() for c in row}
+    assert not {LEASE_UP_ROW, "Volume factor (lease-up)"} & text
+    assert not any("not re-solved" in t for t in text)
+
+
+def test_bc15_a_lease_up_outside_zero_to_one_is_a_422(
+    client, install_network, monkeypatch
+):
+    _with_ic(client, install_network, monkeypatch)
+    for bad in (1.5, -0.1):
+        bc = _bc()
+        bc["inputs"]["volume_factor_by_year"] = {"2031": bad}
+        assert _put(client, bc).status_code == 422
+
+
+def test_bc15_a_report_without_a_pnl_writes_its_header_only():
+    from openpyxl import Workbook
+
+    from services.results_workbook.business_case import write_business_case_sheet
+
+    wb = Workbook()
+    rep = {"basis": {"label": "x"}, "currency": "EUR", "kpis": {}}
+    ws = wb[write_business_case_sheet(wb, rep, {"stale": False})]
+    items = [r[0].value for r in ws.iter_rows()]
+    assert "Basis" in items and "Volume factor (lease-up)" not in items
