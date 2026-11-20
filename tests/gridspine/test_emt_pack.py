@@ -452,9 +452,33 @@ def test_stub_runs_once_per_case_with_that_cases_values(tmp_path, monkeypatch):
             "output_filename": case["output_name"] + ".out",
         }
         assert block[0][0] == "GRID_SOURCE" and block[1][0] == "EVENT"
-        assert block[0][1]["R"] == case["r_ohm"]
-        assert block[0][1]["X"] == case["x_ohm"]
-        assert block[1][1]["KIND"] == case["kind"]
+        # Expected parameter names are written by hand, not read from the stub;
+        # a blank (None) column must not be passed at all.
+        source = {
+            "R": case["r_ohm"],
+            "X": case["x_ohm"],
+            "R0": case["r0_ohm"],
+            "X0": case["x0_ohm"],
+        }
+        event = {
+            "KIND": case["kind"],
+            "T_EVENT": case["t_event_s"],
+            "T_DUR": case["duration_s"],
+            "RF": case["fault_r_ohm"],
+            "XF": case["fault_x_ohm"],
+            "VRET": case["v_retained_pu"],
+            "STEP_PU": case["step_pu"],
+            "STEP_HZ": case["step_hz"],
+            "RAMP_HZ_S": case["ramp_hz_per_s"],
+            "ANGLE_DEG": case["angle_deg"],
+        }
+        assert block[0][1] == {k: v for k, v in source.items() if v is not None}
+        assert block[1][1] == {k: v for k, v in event.items() if v is not None}
+    # The schedule has blank event columns and distinct values, so a dropped
+    # None filter or swapped names (R0/X0, T_EVENT/T_DUR) cannot pass.
+    assert any(c["duration_s"] is None for c in cases)
+    assert any(c["t_event_s"] != c["duration_s"] and c["duration_s"] for c in cases)
+    assert all(c["r0_ohm"] != c["x0_ohm"] for c in cases)
 
 
 # --- manifest ---------------------------------------------------------------
