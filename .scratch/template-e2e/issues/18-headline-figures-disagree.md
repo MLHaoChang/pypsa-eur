@@ -3,7 +3,7 @@
 
 # 18 — Cost and capacity headline figures disagree or are missing
 
-Status: needs-triage
+Status: ready-for-agent
 Impact: medium
 Templates: DC staged, H2 staged, microgrid (both), ammonia, DC
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -19,3 +19,7 @@ Compare and decide depend on numbers that contradict each other.
 ## Suggested fix
 
 One cost number with a stated basis (NPV or LP objective); fix empty summary; hide irrelevant assets.
+
+## Triage (2026-11-20, master 8a039460)
+
+Checked by code reading only; the app was not re-run. Still true: `HeadlineStrip.tsx` still has the 'Loading the headline figures' state. Acceptance: every cost figure states its basis (LP objective or NPV) wherever it shows; the toast and the Summary agree or say why they differ; the empty-summary and stuck-loading states are fixed; assets that do not apply to the template (grid on an off-grid microgrid) are not listed in Key capacities. Gated: GK A and UX. Blocked by: none.

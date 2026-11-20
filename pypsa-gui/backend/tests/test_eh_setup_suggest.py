@@ -286,7 +286,12 @@ def test_outage_data_ignores_slack_and_renewables_and_rated_units():
     assert "voll_slack" not in od
     assert "pv_plant" not in od and "wind_turbines" not in od
     assert not any(d.startswith("diesel_") for d in od)          # rated
-    # the proposed import link has no outage data on the microgrid
+    # the microgrid's tie is normally open (p_max_pu 0): it carries nothing, so it is
+    # no unit missing outage data (walkthrough 12) ...
+    assert "subsea_tie" not in od
+    # ... but closed, the proposed import link has no outage data
+    n.links.loc["subsea_tie", "p_max_pu"] = 1.0
+    od = {s["name"] for s in suggest_eh_setup(n)["suggestions"] if s["kind"] == "outage_data"}
     assert "subsea_tie" in od
 
 

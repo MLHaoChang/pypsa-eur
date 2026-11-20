@@ -3,7 +3,7 @@
 
 # 21 — Opening a saved project and project housekeeping are rough
 
-Status: needs-triage
+Status: ready-for-agent
 Impact: low
 Templates: concentrator (60+ s), others
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -19,3 +19,7 @@ Confusing but recoverable.
 ## Suggested fix
 
 Loading state with progress; resolve name and id deep links; hide deleted projects from the queue.
+
+## Triage (2026-11-20, master 8a039460)
+
+Checked by code reading only; the app was not re-run. Still true: `SolveQueuePanel.tsx` still has the 'Hidden — another organisation' label. Low impact. Acceptance: a loading state with progress while a project opens; `/app?project=<name>` resolves the name as well as the id; deleted projects do not show in the Solve Queue. Gated: UX. Blocked by: none.

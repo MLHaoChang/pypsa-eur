@@ -32,11 +32,19 @@ event timings and parameters, the fault impedance every tool applies
 the contract channel names in contract order.
 
 **Battery from the campus.** :func:`battery_from_campus` builds the default
-battery from the PCC corners. The battery holds one zero-sequence pair for
-all corners; it is taken from the max case and recorded in the manifest as
-``assumed: from max`` (in the manifest and on each battery-corner row). The
-manifest's ``z0_differs_from_battery`` maps each study case whose own zero
-sequence differs to the battery case ids at that case's Sk.
+battery from the PCC corners at contract version 2, so every case records
+``connected`` (the PoC breaker status, GC-12). Each corner takes the zero
+sequence of the study case at its Sk (GC-06b): the two Sk-max corners the max
+case's, the two Sk-min corners the min case's. When the min case holds no
+zero sequence, the Sk-min corners use the max case's and say so: their
+Thevenin rows read ``assumed: from max``, the manifest's ``z0_assumed`` maps
+each such case id to that note (keyed for the read-back, which never passes
+an unbalanced-fault verdict on an assumed Z0 alone), and ``README.md`` states
+it. The max case's zero sequence is required.
+
+**README.** ``README.md`` gives the contract version, every channel with its
+unit and meaning (``connected`` is breaker status only), the zero sequence
+per corner and the IEC 60909 c note.
 
 **Automation stub.** ``run_schedule.py`` is generated text for the mhi.pscad
 API: it loops the schedule, sets the source and event parameters and runs
@@ -60,17 +68,20 @@ import json
 import math
 import shutil
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
 from gridspine.handoff.emt_workbook import RSCAD_NOTES, rscad_notes, workbook
 from gridspine.handoff.test_battery import (
     CHANNEL_SEP,
+    CHANNELS,
     PARAM_NAMES,
     Thevenin,
     battery_json,
     build_battery,
     contract_channels,
+    corner_level,
     fault_impedance_ohm,
     thevenin_impedances_ohm,
     validate_battery,
@@ -78,10 +89,10 @@ from gridspine.handoff.test_battery import (
 from gridspine.schema.contracts import ContractError
 
 PACK_VERSION = "1"
-#: The battery contract this pack's schedule records: version 1 until the
-#: schedule writes `connected` (GC-12, GK A2 T1). Pinned here, not taken from
-#: the writers' default, so the pack never declares a channel it does not write.
-EMT_CONTRACT_VERSION = "1"
+#: The battery contract this pack's schedule records: version 2, with
+#: `connected` (GC-12, GK A2 T1). Pinned here, not taken from the writers'
+#: default, so the pack never declares a channel it does not write.
+EMT_CONTRACT_VERSION = "2"
 #: The mhi.pscad API the stub is written for (PSCAD 5 automation library).
 MHI_PSCAD_API = "2"
 C_NOTE = "IEC 60909 c not applied (as the test battery); with c_max = 1.1 the max-case |Z| is 10 % higher"
@@ -103,6 +114,7 @@ THEVENIN_CSV = "thevenin_set.csv"
 STAGES_CSV = "thevenin_stages.csv"
 SUPPLY_CSV = "to_be_supplied.csv"
 STUB = "run_schedule.py"
+README = "README.md"
 MANIFEST = "manifest.json"
 RESULTS_DIR = "results"
 
@@ -245,30 +257,113 @@ def study_sources(pcc: dict) -> tuple:
     return tuple(out), gaps
 
 
+class CornerZeroSequence(NamedTuple):
+    """The battery's zero sequence per corner level, and whether Sk-min borrowed the max case's."""
+
+    z0_over_z1: dict
+    x0_over_r0: dict
+    min_assumed: bool
+
+
+def _corner_zero_sequence(sources) -> CornerZeroSequence:
+    """
+    The zero sequence per corner level for the battery.
+
+    The Sk-max corners take the max case's zero sequence and the Sk-min
+    corners the min case's; when the min case holds none they take the max
+    case's and ``min_assumed`` is True. The max case's is required.
+    """
+    by = {g.label: g for g, _ in sources}
+    if not by["max"].has_zero_sequence:
+        raise EmtPackError(
+            "battery: the max case has no zero sequence (x0x_max, r0x0_max); the single-phase faults need it"
+        )
+    min_assumed = not by["min"].has_zero_sequence
+    at_min = by["max"] if min_assumed else by["min"]
+    return CornerZeroSequence(
+        {"skmax": by["max"].z0_over_z1, "skmin": at_min.z0_over_z1},
+        {"skmax": by["max"].x0_over_r0, "skmin": at_min.x0_over_r0},
+        min_assumed,
+    )
+
+
 def battery_from_campus(campus, overrides=None) -> tuple:
     """
-    The default test battery for the campus PCC (``build_battery``).
+    The default test battery for the campus PCC (``build_battery``), at
+    :data:`EMT_CONTRACT_VERSION`.
 
-    The battery's single zero-sequence pair comes from the max case
-    (``assumed: from max``); without it the battery is refused.
+    Each corner takes the zero sequence of the study case at its Sk; the
+    Sk-min corners take the max case's when the min case holds none
+    (``assumed: from max``, module docstring). Without the max case's zero
+    sequence the battery is refused.
     """
     _, _, pcc = pcc_data(campus)
     sources, _ = study_sources(pcc)
     by = {g.label: g for g, _ in sources}
     xrs = (by["max"].x_over_r, by["min"].x_over_r)
-    if not by["max"].has_zero_sequence:
-        raise EmtPackError(
-            "battery: the max case has no zero sequence (x0x_max, r0x0_max); the single-phase faults need it"
-        )
+    z0 = _corner_zero_sequence(sources)
     return build_battery(
         by["min"].sk_mva,
         by["max"].sk_mva,
         min(xrs),
         max(xrs),
-        z0_over_z1=by["max"].z0_over_z1,
-        x0_over_r0=by["max"].x0_over_r0,
+        z0_over_z1=z0.z0_over_z1,
+        x0_over_r0=z0.x0_over_r0,
         overrides=overrides,
+        contract_version=EMT_CONTRACT_VERSION,
     )
+
+
+def _z0_note(min_assumed) -> str:
+    if min_assumed:
+        return f"Sk-max corners from the max case; Sk-min corners {BATTERY_Z0_NOTE}"
+    return (
+        "per corner: Sk-max corners from the max case, Sk-min corners from the min case"
+    )
+
+
+def readme_text(zero_sequence: str) -> str:
+    """``README.md``: the contract's channels, the c note and ``zero_sequence`` (one line)."""
+    lines = [
+        "# PSCAD / EMT pack",
+        "",
+        f"Battery contract version {EMT_CONTRACT_VERSION}. Record, for each case, the channels "
+        f"listed in {SCHEDULE_CSV}'s `channels` column, named by contract name:",
+        "",
+    ]
+    for name in contract_channels(EMT_CONTRACT_VERSION):
+        ch = CHANNELS[name]
+        lines.append(f"- `{name}` [{ch.unit}]: {ch.meaning}; {ch.sign}.")
+    lines += [
+        "",
+        "`connected` is the PoC breaker status: 1 while the breaker is closed and the plant "
+        "has not tripped, else 0. It is breaker status only: momentary cessation or current "
+        "blocking is not a trip. Without it a stays-connected verdict reads unknown.",
+        "",
+        f"Source impedance: {C_NOTE}.",
+        "",
+        zero_sequence,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _readme_zero_sequence(battery_given, battery, z0_assumed, min_assumed) -> str:
+    if battery is None:
+        return (
+            f"No battery: the max case's zero sequence is not held (see {SUPPLY_CSV})."
+        )
+    if battery_given:
+        return (
+            "Zero sequence: as in the caller's battery (battery.json); not checked against "
+            "the PCC study cases."
+        )
+    if min_assumed:
+        return (
+            f"Zero sequence: {_z0_note(True)} (x0x_min, r0x0_min not held). An unbalanced-fault "
+            "verdict at an Sk-min corner never passes on this assumed Z0 alone; the manifest's "
+            f"`z0_assumed` lists the {len(z0_assumed)} cases."
+        )
+    return f"Zero sequence: {_z0_note(False)}."
 
 
 def _impedance_row(g: Thevenin, vn_kv) -> dict:
@@ -286,7 +381,9 @@ def _impedance_row(g: Thevenin, vn_kv) -> dict:
     }
 
 
-def thevenin_set(sources, battery, vn_kv, battery_source="caller's battery") -> list:
+def thevenin_set(
+    sources, battery, vn_kv, battery_source="caller's battery", min_assumed=False
+) -> list:
     """
     Rows of the Thevenin set: the study cases (group ``study``, tagged
     with their PCC data source) then each distinct battery corner (group
@@ -312,7 +409,11 @@ def thevenin_set(sources, battery, vn_kv, battery_source="caller's battery") -> 
                 "label": c.grid.label,
                 "group": "battery",
                 **_impedance_row(c.grid, vn_kv),
-                "source": battery_source,
+                "source": (
+                    f"{battery_source}; this corner's Z0 {BATTERY_Z0_NOTE}"
+                    if min_assumed and corner_level(c.grid.label) == "skmin"
+                    else battery_source
+                ),
                 "note": C_NOTE,
             }
         )
@@ -352,7 +453,7 @@ def stage_reference(campus, stages) -> list:
 def case_schedule(battery, vn_kv) -> list:
     """One schedule row per battery case, in battery order."""
     rows = []
-    for c in validate_battery(battery):
+    for c in validate_battery(battery, EMT_CONTRACT_VERSION):
         z1, z0 = thevenin_impedances_ohm(c.grid, vn_kv)
         zf = (
             fault_impedance_ohm(c, vn_kv)
@@ -499,14 +600,18 @@ def write_emt_pack(
     assumptions = [
         f"thevenin: {C_NOTE}; confirm the source impedance convention with the TSO"
     ]
-    z0_differs, battery_source = {}, "caller's battery"
+    z0_assumed, min_assumed, battery_source = {}, False, "caller's battery"
+    battery_given = battery is not None
     if battery is None:
         if {g.label: g for g, _ in sources}["max"].has_zero_sequence:
             battery = battery_from_campus(campus)
-            battery_source = f"campus PCC corners; Z0 {BATTERY_Z0_NOTE}"
-            assumptions.append(
-                f"battery zero sequence: {BATTERY_Z0_NOTE} (x0x_max, r0x0_max)"
-            )
+            min_assumed = _corner_zero_sequence(sources).min_assumed
+            battery_source = f"campus PCC corners; Z0 {_z0_note(min_assumed)}"
+            if min_assumed:
+                assumptions.append(
+                    f"battery zero sequence at the Sk-min corners: {BATTERY_Z0_NOTE} "
+                    "(x0x_max, r0x0_max); x0x_min, r0x0_min not held"
+                )
         else:
             supply.append(
                 {
@@ -516,16 +621,17 @@ def write_emt_pack(
                     "why": "the test battery needs the max case's zero sequence; no schedule is written",
                 }
             )
-    battery = validate_battery(battery) if battery is not None else None
-    if battery is not None:
-        pair = {(c.grid.z0_over_z1, c.grid.x0_over_r0) for c in battery}
-        z0_differs = {
-            g.label: [c.case_id for c in battery if c.grid.sk_mva == g.sk_mva]
-            for g, _ in sources
-            if g.has_zero_sequence and (g.z0_over_z1, g.x0_over_r0) not in pair
+    battery = (
+        validate_battery(battery, EMT_CONTRACT_VERSION) if battery is not None else None
+    )
+    if min_assumed:
+        z0_assumed = {
+            c.case_id: BATTERY_Z0_NOTE
+            for c in battery
+            if corner_level(c.grid.label) == "skmin"
         }
 
-    set_rows = thevenin_set(sources, battery, vn_kv, battery_source)
+    set_rows = thevenin_set(sources, battery, vn_kv, battery_source, min_assumed)
     stage_rows = stage_reference(campus, stages)
     texts = {
         THEVENIN_CSV: _csv(set_rows, THEVENIN_COLUMNS),
@@ -551,6 +657,9 @@ def write_emt_pack(
     for name, frame in sheets.items():
         texts[f"{name}.csv"] = frame.to_csv(index=False, lineterminator="\n")
     texts[RSCAD_NOTES] = rscad_notes()
+    texts[README] = readme_text(
+        _readme_zero_sequence(battery_given, battery, z0_assumed, min_assumed)
+    )
     supply += sheet_gaps.to_dict("records")
     texts[SUPPLY_CSV] = _csv(supply, SUPPLY_COLUMNS)
 
@@ -571,7 +680,7 @@ def write_emt_pack(
         "channels": list(contract_channels(EMT_CONTRACT_VERSION)),
         "outputs": {f"{RESULTS_DIR}/": "PSCAD .inf/.out per case, named by case id"},
         "assumptions": assumptions,
-        "z0_differs_from_battery": z0_differs,
+        "z0_assumed": z0_assumed,
         "to_be_supplied": SUPPLY_CSV,
         "trgc": ["02", "03", "05", "07", "17", "19", "20", "21", "22", "23"],
     }

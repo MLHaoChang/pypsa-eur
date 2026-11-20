@@ -3,7 +3,7 @@
 
 # Waiting on a run: header says Idle, no ETA, long runs unbounded
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: pill, ETA and wait open in #1614, #1627, #1630, #1716; left: 409 Conflict cause, Guided-vs-Expert run wording
 Model tier: sonnet
 Size: S
 Blocked by: #1627, #1630 merged

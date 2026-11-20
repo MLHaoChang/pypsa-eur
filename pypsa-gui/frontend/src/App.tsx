@@ -6,6 +6,8 @@ import AppHeader from './layout/AppHeader'
 import ProjectTabs from './layout/ProjectTabs'
 import Sidebar from './layout/Sidebar'
 import PropertiesPanel from './layout/PropertiesPanel'
+import RecipeCard from './layout/properties/RecipeCard'
+import { RECIPE_FIELD } from './pages/hubDesign/holdWords'
 import BottomPanel from './layout/BottomPanel'
 import StatusBar from './components/StatusBar'
 import MapModeSwitcher from './components/MapModeSwitcher'
@@ -832,6 +834,9 @@ export default function App() {
                 // The grid-readiness limits' one editor (DC 03 slice 6): a to-check ramp or oscillation
                 // limit opens its line; the fault level's value and source are one line too.
                 ? <div className="px-3"><ConnectionLimits only={LIMIT_FIELDS[t.field ?? '']} /></div>
+                : t.field === RECIPE_FIELD && t.entity
+                // Gap 03: a section 2 recipe row's Guided home, the recipe card alone over the card.
+                ? <div className="px-3 py-2"><RecipeCard name={t.entity} /></div>
                 : t.component && t.entity
                 ? <PropertiesPanel />
                 : <FullPageTab panel={t.panel as SlidePanel} onClose={() => useUIStore.getState().setFieldDrawer(null)} />}
