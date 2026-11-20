@@ -1252,7 +1252,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
           onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
         />
 
-        <SiteScenePanel site={site} contextBuildings={context?.buildings ?? null} />
+        <SiteScenePanel site={site} contextBuildings={context?.buildings ?? null} current={solved} freshSince={freshSince} />
         {selectedComponent && showFootprintEditor && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
         <p className="max-w-72 rounded bg-bg/95 px-2 py-1 text-[10px] text-muted">Library dimensions are estimates unless a user-entered envelope is provided. Fit checks do not certify clearances or compliance.</p>
         {/* Legend — under the picker; the result bands only while results show. */}

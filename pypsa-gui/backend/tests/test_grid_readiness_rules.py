@@ -54,7 +54,8 @@ def test_the_scr_rule_agrees_with_the_scr_gate(scr):
 
 def test_a_rounded_boundary_is_a_disagreement_a_checker_must_withhold(tmp_path):
     d, n = _project(tmp_path, "eh_datacenter")
-    n.buses.at["grid", "eh_sk_mva"] = 89.988                     # IBR 30 MVA: SCR 2.9996
+    n.buses.at["grid", "eh_ibr_mva"] = 50.0                      # stated (DC walk 05)
+    n.buses.at["grid", "eh_sk_mva"] = 149.98                     # SCR 2.9996
     row = _rows(G.grid_readiness(d, n, PROFILE))["scr"]
     assert row["verdict"] == "warn" and row["project_value"] == 3.0
     # Recomputed on the stored, rounded value the rule says pass: not a re-verdict, a withholding.

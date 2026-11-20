@@ -8,10 +8,12 @@
 // intermittent endless re-render (useHubData.test).
 import { useQuery } from '@tanstack/react-query'
 import {
-  resultsApi, simulationApi, type EhReferenceDesignReport, type EhReview,
+  resultsApi, simulationApi, type EhLeverTable, type EhReferenceDesignReport, type EhReview,
   type EhStudyPayload, type EhTemplateMeta,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import type { EhSizedAsset } from '../../api/simulation'
+import { sizedByName } from '../results/SizedDesignTable'
 import { nk } from '../../utils/queryKeys'
 import {
   buildEhStudyBody, EMPTY_PACK_FORM, ehStudyRefetchInterval, formFromTemplate,
@@ -76,6 +78,30 @@ export function useHubReport(study: EhStudyPayload | null, running: boolean) {
   const report: EhReferenceDesignReport | null = running ? null
     : study?.report ?? ((q.data ?? null) as EhReferenceDesignReport | null)
   return report
+}
+
+/** The levers table the Expert panel shows (its `levKey` query); read only
+ *  where `enabled`. */
+export function useHubLevers(enabled: boolean): EhLeverTable | null {
+  const project = useUIStore(s => s.currentProject)
+  const q = useQuery({
+    queryKey: nk(project, 'results', 'eh_levers'),
+    queryFn: () => resultsApi.getEhLevers(),
+    enabled: !!project && enabled,
+  })
+  return enabled ? (q.data ?? null) as EhLeverTable | null : null
+}
+
+/** The last study's sized assets by `Component:name`, for section 5's rows
+ *  (walkthrough asset-investment 03); read only where `enabled`. */
+export function useSizedAssets(enabled: boolean): Map<string, EhSizedAsset> {
+  const project = useUIStore(s => s.currentProject)
+  const q = useQuery({
+    queryKey: nk(project, 'results', 'eh_reference_design'),
+    queryFn: () => resultsApi.getEhReferenceDesign(),
+    enabled: !!project && enabled,
+  })
+  return sizedByName(enabled ? (q.data ?? null) as EhReferenceDesignReport | null : null)
 }
 
 /** The pack form a project starts from: its template's, else the pack's own. */
