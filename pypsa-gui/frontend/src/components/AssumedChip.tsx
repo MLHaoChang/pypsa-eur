@@ -29,7 +29,8 @@ export const ASSUMED_CHIP_LABELS: Record<AssumedState, string> = {
 }
 
 const TONE: Record<AssumedState, string> = {
-  assumed: 'bg-warn/15 text-warn',
+  // /10, not /15: warn text on a /15 tint over a light-grey card is 4.45:1 (template-e2e 06 shots); /10 is 4.79:1.
+  assumed: 'bg-warn/10 text-warn',
   confirmed: 'bg-success/10 text-success',
   typed: 'bg-muted/15 text-text',
 }

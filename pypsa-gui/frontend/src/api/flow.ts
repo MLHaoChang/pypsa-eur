@@ -74,6 +74,9 @@ export interface FlowItem {
 export interface FlowHeld {
   component: string
   entity: string
+  /** Section 5 asset rows: the size an extendable asset's two equal, finite bounds pin
+   *  (`flow_service._pin_sizes`); null or absent when the study sizes it. */
+  fixed_size?: number | null
   carrier: string | null
   field: string | null
   value: number | null
