@@ -3,7 +3,7 @@
 
 # 15 — Lease-up volume factor
 
-Status: ready-for-agent
+Status: done
 Gated: GK B
 Type: enhancement
 Parent: business-case 08 (#1467), GK B question Q1

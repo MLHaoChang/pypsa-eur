@@ -3,7 +3,7 @@
 
 # GC-02 Voltage-control strategy in the load flow and PoC P–Q across voltage
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: open in #1584
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none
