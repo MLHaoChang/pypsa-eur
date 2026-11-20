@@ -33,3 +33,25 @@ back to a template constant.
 
 The pack default is engine code (`models/energy_hub.py`, `eh_study_runner`), so the plan
 goes to GK A as well as GK B.
+
+## Comments
+
+- 2026-11-17 GK A 30 plan GO with P1–P7 (as relayed in the builder's brief):
+  - P1: fill under the lock before the pack is built; the test asserts the worker's overlay = 45 (network 45 MW).
+    Met: `check_eh_study_start` fills it under the lock and rebuilds the pack; route and chat tests.
+  - P2: red without the fill. Met: with the fill replaced by `pass`, 16/25 tests fail (the worker got 50.0).
+  - P3: exact compare; the sentence names both values and "change it on the network".
+    Met: 45.000001 against 45 is refused.
+  - P4: NaN / inf / 0 / no-link refusal tests. Met: route and chat, each with #1626's sentence.
+  - P5: `import_capacity` takes no PyPSAService lock, stated or pinned.
+    Met: `test_import_capacity_takes_no_network_lock`, plus a comment at the call site.
+  - P6: the study cache/digest keyed on `pack_overrides` sees the filled value.
+    Met: the record's `pack_overrides` and `pack_hash` carry it; the readiness cache is keyed on the network revision.
+  - P7: mutants (drop fill, drop refusal, `!=`→`<`, all archetypes, fill even when explicit).
+    Met: 18/18 generated, plus the hand mutants, killed; one equivalent survivor (explicit wins over the network).
+- 2026-11-20 GK A 32 NOT OK @e4a46332 (#1772), D1: the cap was read under the start lock but the
+  worker copied the network after that lock was released, so an edit in between ran a stale cap
+  that was not marked edited.
+  Fixed: the worker reads the cap again under the lock it captures the revision under, and fails
+  the study naming both values. Two lock-entry tests cover it (route and chat).
+- Follow-up filed: `02d-readiness-preview-import-cap.md` (`GET /eh_readiness` without a cap still previews 50 MW).
