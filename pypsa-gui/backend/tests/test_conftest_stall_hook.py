@@ -63,14 +63,44 @@ def test_exit_watchdog_is_a_daemon_timer_that_hard_exits(monkeypatch):
     assert made[1] == ("daemon", True)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="uses Linux `ps --ppid`")
-def test_child_processes_are_killed():
+def test_child_kill_skips_the_ps_process_itself(monkeypatch):
+    """`ps --ppid` lists itself; its (reaped) pid must never be signalled."""
     import subprocess
 
-    child = subprocess.Popen(["sleep", "60"])
-    try:
-        _tests_conftest()._kill_child_processes()
-        assert child.wait(timeout=10) == -9
-    finally:
-        if child.poll() is None:
-            child.kill()
+    class FakePs:
+        pid = 4242
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def communicate(self, timeout=None):
+            return "4242\n4343\n", None
+
+    sent = []
+    monkeypatch.setattr(subprocess, "Popen", FakePs)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append(pid))
+    _tests_conftest()._kill_child_processes()
+    assert sent == [4343]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="uses Linux `ps --ppid`")
+def test_child_processes_are_killed():
+    """Run the real `ps --ppid` path in an isolated interpreter.
+
+    Killing every child of the shard's own pytest process would break whichever
+    helper (mcp client, blender or pdf worker) a neighbouring test keeps alive.
+    """
+    import inspect
+    import subprocess
+
+    code = (
+        "import os, subprocess\n"
+        + inspect.getsource(_tests_conftest()._kill_child_processes)
+        + "\nchild = subprocess.Popen(['sleep', '60'])\n"
+        "_kill_child_processes()\n"
+        "print(child.wait(timeout=10))\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=60
+    )
+    assert out.stdout.strip() == "-9", out.stderr

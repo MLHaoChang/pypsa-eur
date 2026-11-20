@@ -135,16 +135,25 @@ def _kill_child_processes() -> None:
     import subprocess
 
     try:
-        out = subprocess.run(
+        ps = subprocess.Popen(
             ["ps", "-o", "pid=", "--ppid", str(os.getpid())],
-            capture_output=True, text=True, timeout=10,
-        ).stdout
+            stdout=subprocess.PIPE, text=True,
+        )
+        out, _ = ps.communicate(timeout=10)
     except Exception:  # noqa: BLE001 — best effort, the watchdog still follows
         return
     for tok in out.split():
         try:
-            os.kill(int(tok), signal.SIGKILL)
-        except (ValueError, OSError):
+            pid = int(tok)
+        except ValueError:
+            continue
+        # `ps` lists itself as our child; it is already reaped, so its pid may
+        # have been reused by an unrelated process.
+        if pid == ps.pid:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
             pass
 
 
