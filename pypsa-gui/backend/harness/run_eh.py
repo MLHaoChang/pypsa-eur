@@ -210,9 +210,10 @@ def freeze(ctx, profile, solves_left) -> dict:
 
 def _energization_entry(network) -> dict:
     """``{"energization": ...}`` for `freeze`; empty where the schedule reads
-    as absent (no digest, no links), so a non-staged card is unchanged."""
+    as absent (no digest: the test `_energization_change` admits a pre-02b
+    record by), so a non-staged card is unchanged."""
     entry = _energization(network)
-    if entry is not None and entry["digest"] is None and not entry["by_period"]:
+    if entry is not None and entry["digest"] is None:
         return {}
     return {"energization": entry}
 
