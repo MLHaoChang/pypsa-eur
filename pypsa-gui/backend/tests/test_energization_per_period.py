@@ -672,3 +672,65 @@ def test_e4_a_schedule_unreadable_at_freeze_and_admit_cannot_be_compared(
         "The connection's energization schedule can't be compared now. "
         "Review the run again."
     )
+
+
+def test_e4_a_schedule_unreadable_only_at_admit_cannot_be_compared(
+    tmp_path, monkeypatch
+):
+    """D5 survivor (`now is None`): frozen readable, unreadable at admission.
+    It refuses with a sentence; it never raises out of admission."""
+    from harness import run_eh
+
+    def unreadable(_n):
+        raise RuntimeError("unreadable")
+
+    n = _staged()
+    ctx = _run_ctx(tmp_path, n)
+    frozen = json.loads(
+        json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
+    )
+    monkeypatch.setattr(E, "all_by_period", unreadable)
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message == (
+        "The connection's energization schedule can't be compared now. "
+        "Review the run again."
+    )
+
+
+def test_d4_a_pre_02b_record_refuses_where_the_schedule_is_unreadable(
+    tmp_path, monkeypatch
+):
+    """D5 survivor (`now is not None and …`): a record frozen before 02b, and
+    a schedule that can't be read now, is never read as "no schedule"."""
+    from harness import run_eh
+
+    def unreadable(_n):
+        raise RuntimeError("unreadable")
+
+    ctx = _run_ctx(tmp_path, build_eh_datacenter(), "eh_datacenter")
+    frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
+    frozen.pop("energization")
+    monkeypatch.setattr(E, "all_by_period", unreadable)
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND and message == run_eh.ENERGIZATION_UNRECORDED
+
+
+def test_e4_a_record_without_by_period_still_refuses_a_changed_digest(tmp_path):
+    """D5 survivor (`then.get("by_period") or {}`): a record whose digest no
+    longer matches refuses even when it carries no by_period; the links named
+    are then those the network schedules now."""
+    from harness import run_eh
+
+    n = _staged()
+    ctx = _run_ctx(tmp_path, n)
+    frozen = json.loads(
+        json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
+    )
+    frozen["energization"] = {"digest": "not-this-schedule"}
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message == (
+        "The connection's energization schedule changed since the study's card "
+        "was drawn (grid_import). Review the run again."
+    )
