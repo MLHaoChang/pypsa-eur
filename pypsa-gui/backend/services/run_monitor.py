@@ -143,7 +143,7 @@ def _actions(task):
 
 
 def view(task_id, provider_ready):
-    from harness import runner
+    from harness import run_revise, runner
     from services import email_service, run_envelope
     with assistant_tasks._LOCK:
         path, task = _task(task_id)
@@ -161,6 +161,7 @@ def view(task_id, provider_ready):
         **({"card": card} if card else {}),
         **({"waiting": {k: waiting[k] for k in ("kind", "ref")}} if waiting else {}),
         **({"research": _research(task["run"]["research"])} if task["run"].get("research") else {}),
+        **({"revision_drafts": run_revise.view(task)} if run_revise.rows(task) else {}),
     }
     return out
 

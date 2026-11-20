@@ -1,12 +1,16 @@
 """
-PLEXOS importer, slices 2a and 2b: a PLEXOS model (XML, or a .zip of the XML and its
+PLEXOS importer, slices 2a, 2b and 3a: a PLEXOS model (XML, or a .zip of the XML and its
 CSV data files) to a PyPSA network plus an import report.
 
 Plan and conditions: ``.scratch/project-io/plexos-mapping.md``. The XML is read
 by :mod:`gridspine.ingest.plexos_xml` (no engine); this module converts it and
 is the only PLEXOS module that imports ``pypsa`` (engine cage, IMPORT-CAGE-1).
 
-What is mapped from base rows (no scenario, band 1, undated, no variable):
+Rows are those of no scenario or of a scenario the chosen Model switches on
+(an on scenario's row replaces the base row; two on scenarios setting one
+property leave both unused), band 1 and undated. A row tagged with a Variable
+is combined with that Variable's profile (× ÷ + -) before it is converted.
+What is mapped from them:
 grid nodes, lines and links, generators, batteries, generators with a head
 storage (as storage units), fuels and their CO2 rate, node loads and the
 chosen Model's chronological horizon. A row whose value comes from a data file
@@ -24,16 +28,18 @@ from __future__ import annotations
 
 import io
 import math
+import operator
 import re
 import stat
 import zipfile
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pypsa
 
@@ -56,6 +62,7 @@ from gridspine.ingest.plexos_xml import (
     PlexosModel,
     PlexosRefused,
     PropertyRow,
+    Tag,
     read_plexos_xml,
 )
 
@@ -91,9 +98,18 @@ SERIES_PROPERTIES = {
     ("Generator", "Rating Factor"),
     ("Fuel", "Price"),
     ("Storage", "Natural Inflow"),
+    ("Variable", "Profile"),
 }
 
 DESTINATIONS = ("network", "sidecar", "unmapped", "assumed")
+
+#: Variable actions read (S4); a row with any other action is unmapped.
+_ACTIONS = {
+    "×": operator.mul,
+    "÷": operator.truediv,
+    "+": operator.add,
+    "-": operator.sub,
+}
 
 #: Plain names for the PyPSA components, for text a user reads (RAW-NAMES-1).
 _PLAIN = {
@@ -113,9 +129,8 @@ _UNSUPPORTED = {
     "Reserve": "reserves are not imported yet",
     "Transformer": "transformers are not imported yet",
     "Interface": "interfaces (flow-gate limits) are not imported yet",
-    "Variable": "variables are applied in a later slice",
-    "Timeslice": "timeslices are applied in a later slice",
-    "Scenario": "scenario settings are applied in a later slice",
+    "Timeslice": "timeslices are applied in slice 3b",
+    "Scenario": "scenario settings (such as a priority) are not read",
     "Waterway": "waterways (hydro cascades) are not imported yet",
 }
 #: Generator collections that make it a storage-backed unit (see hydro()).
@@ -440,6 +455,11 @@ class _Converter:
         self.co2: dict[str, float] = {}
         # grouped unmapped entries: (source item, reason) -> property names
         self._skip: dict[tuple[str, str], list[str]] = defaultdict(list)
+        # filled by variables(): rows of each Variable, why it is unusable,
+        # and the data_ids of the rows it scaled
+        self._var_rows: dict[str, list[PropertyRow]] = {}
+        self._var_why: dict[str, str] = {}
+        self._var_users: dict[str, list[str]] = defaultdict(list)
         self.names: dict[str, set[str]] = defaultdict(set)
         self.base: dict[tuple[str, str], dict[str, PropertyRow]] = defaultdict(dict)
         self.children: dict[tuple[str, str], dict[str, list[tuple[str, str]]]] = (
@@ -507,36 +527,45 @@ class _Converter:
         return chosen, on
 
     def sort_rows(self, on: set[str]) -> None:
-        """Base rows go to ``self.base``; every other row to unmapped, with why."""
+        """
+        Base rows, and rows of the scenarios the chosen Model switches on, go to
+        ``self.base``; every other row to unmapped, with why. A row of an on
+        scenario replaces the base row for its property (S1); two on scenarios
+        setting one property leave neither in use (S2, fails closed).
+        """
         seen: dict[tuple[tuple[str, str], tuple[str, str], str], list[PropertyRow]] = (
             defaultdict(list)
         )
+        #: data_id -> the on scenarios that tag it
+        scen_of: dict[str, tuple[str, ...]] = {}
         for row in self.m.rows:
             scen = row.scenarios
+            on_here = [x for x in scen if x in on]
             if row.value is None:
                 self.skip(row, f"value unreadable ({row.unreadable or 'empty'})")
-            elif scen:
-                on_here = [x for x in scen if x in on]
-                if on_here:
-                    why = (
-                        f"scenario {on_here[0]!r} is on in the chosen Model; "
-                        "scenario rows are applied in a later slice"
-                    )
-                else:
-                    why = (
-                        "scenario " + ", ".join(repr(x) for x in scen) + " not selected"
-                    )
+            elif scen and not on_here:
+                why = "scenario " + ", ".join(repr(x) for x in scen) + " not selected"
                 self.skip(row, why)
             elif row.band != 1:
                 self.skip(row, f"band {row.band}: only band 1 is used")
             elif row.date_from or row.date_to:
-                self.skip(row, "dated row: dates are applied in a later slice")
-            elif other := [t for t in row.tags if t.cls != "Data File"]:
+                self.skip(row, "dated row: dates are applied in slice 3b")
+            elif other := [
+                t
+                for t in row.tags
+                if t.cls not in ("Data File", "Scenario", "Variable")
+            ]:
+                self.skip(row, f"scaled by {other[0].cls} {other[0].name!r}: slice 3b")
+            elif bad := [
+                t for t in row.tags if t.cls == "Variable" and t.action not in _ACTIONS
+            ]:
                 self.skip(
-                    row, f"scaled by {other[0].cls} {other[0].name!r}: later slice"
+                    row,
+                    f"scaled by Variable {bad[0].name!r} with action "
+                    f"{bad[0].action!r}: only × ÷ + - are read",
                 )
             else:
-                files = [("object", t.name) for t in row.tags]
+                files = [("object", t.name) for t in row.tags if t.cls == "Data File"]
                 if row.child[0] != "Data File":
                     files += [("path", x) for c, x in row.texts if c == "Data File"]
                 if len(files) > 1:
@@ -544,8 +573,34 @@ class _Converter:
                     continue
                 if files:
                     self.source[row.data_id] = files[0]
+                if on_here:
+                    scen_of[row.data_id] = tuple(on_here)
                 seen[(row.parent, row.child, row.property)].append(row)
+        tied: set[str] = set()
         for (parent, child, prop), rows in seen.items():
+            labels = {scen_of[r.data_id] for r in rows if r.data_id in scen_of}
+            names = sorted({x for label in labels for x in label})
+            if len(labels) > 1:
+                both = " and ".join(repr(x) for x in names)
+                for row in rows:
+                    self.source.pop(row.data_id, None)
+                    self.skip(row, f"scenarios {both} both set {prop!r}; none used")
+                if both not in tied:
+                    tied.add(both)
+                    self.r.warnings.append(
+                        f"scenarios {both} set the same properties; those rows are "
+                        "not used (no scenario priority is read)"
+                    )
+                continue
+            what = "base values"
+            if labels:
+                scen = ", ".join(repr(x) for x in names)
+                for row in rows:
+                    if row.data_id not in scen_of:
+                        self.source.pop(row.data_id, None)
+                        self.skip(row, f"replaced by scenario {scen}")
+                rows = [r for r in rows if r.data_id in scen_of]
+                what = f"values of scenario {scen}"
             filed = [r for r in rows if r.data_id in self.source]
             if len(rows) > 1 and len(filed) == 1:
                 for row in rows:
@@ -555,7 +610,7 @@ class _Converter:
             if len(rows) > 1:
                 for row in rows:
                     self.source.pop(row.data_id, None)
-                    self.skip(row, f"{len(rows)} base values for {prop!r}; none used")
+                    self.skip(row, f"{len(rows)} {what} for {prop!r}; none used")
                 continue
             key = child if parent[0] == "System" else (parent, child)
             self.base[key][prop] = rows[0]  # type: ignore[index]
@@ -805,6 +860,114 @@ class _Converter:
                     if a.name == "Locale"
                     else "attribute not imported yet",
                 )
+
+    def variables(self) -> None:
+        """
+        Apply each row's Variable tags (S4/S5), before any handler converts it:
+        a static profile scales a static or file value, a file profile turns a
+        series property into a series. Any unusable step leaves the whole row
+        unmapped (C3), never a partial series.
+        """
+        prof: dict[str, float | pd.Series | str] = {}
+        rows_of: dict[str, list[PropertyRow]] = {}
+        for v in sorted(self.m.objects_of("Variable"), key=lambda o: o.name):
+            props = self.base.pop(v.key, {})
+            rows_of[v.name] = list(props.values())
+            sampling = props.get("Sampling Method")
+            default = self.m.defaults.get(
+                (("System", "Variable", "Variables"), "Sampling Method")
+            )
+            other = sorted(set(props) - {"Profile", "Sampling Method"})
+            row = props.get("Profile")
+            got: float | pd.Series | str
+            if other:
+                got = f"variable property {other[0]!r} is not read"
+            elif sampling is not None and sampling.value != default:
+                got = f"sampled variable (Sampling Method {sampling.value:g})"
+            elif row is None:
+                got = "no profile in this Model"
+            elif self.filed(row):
+                ts = self.ts.get(row.data_id, "time series not read")
+                got = f"data file: {ts}" if isinstance(ts, str) else ts
+            else:
+                got = row.value
+            # a non-finite profile cell is caught on the scaled value (_scaled)
+            prof[v.name] = got
+        self._var_rows = rows_of
+        self._var_why = {k: v for k, v in prof.items() if isinstance(v, str)}
+        for key, props in self.base.items():
+            obj = key[1] if isinstance(key[0], tuple) else key
+            for prop, row in list(props.items()):
+                tags = [t for t in row.tags if t.cls == "Variable"]
+                if not tags:
+                    continue
+                if self.filed(row) and not isinstance(
+                    self.ts.get(row.data_id), pd.Series
+                ):
+                    continue  # its handler lists why the file gave no series
+                why, value = self._scaled(row, (obj[0], prop), tags, prof)
+                if why is not None:
+                    props.pop(prop)
+                    self.source.pop(row.data_id, None)
+                    self.skip(row, why)
+                    continue
+                for t in tags:
+                    self._var_users[t.name].append(row.data_id)
+                if len(tags) > 1:
+                    self.assume(
+                        _label(obj),
+                        prop,
+                        " then ".join(f"{t.action} {t.name}" for t in tags),
+                        "several variables on one row, applied in the file's tag order",
+                    )
+                if isinstance(value, pd.Series):
+                    self.ts[row.data_id] = value
+                    self.source.setdefault(row.data_id, ("variable", tags[0].name))
+                else:
+                    props[prop] = replace(row, value=value)
+
+    def variable_rows(self) -> None:
+        """
+        After the handlers: a Variable's rows count as network when a row it
+        scales was imported, else unmapped.
+        """
+        for name, rows in self._var_rows.items():
+            used = any(
+                self.ledger.dest.get((_ROW_TABLE, d)) in ("network", "sidecar")
+                for d in self._var_users.get(name, [])
+            )
+            for row in rows:
+                if used:
+                    self.used(row)
+                else:
+                    self.skip(
+                        row,
+                        self._var_why.get(name, "no imported row uses it"),
+                        item=_label(("Variable", name)),
+                    )
+
+    def _scaled(
+        self,
+        row: PropertyRow,
+        cls_prop: tuple[str, str],
+        tags: list[Tag],
+        prof: Mapping[str, float | pd.Series | str],
+    ) -> tuple[str | None, float | pd.Series | None]:
+        """(why not, None) or (None, the row's value after its variables)."""
+        ts = self.ts.get(row.data_id)
+        value: float | pd.Series = ts if isinstance(ts, pd.Series) else row.value
+        for t in tags:
+            p = prof.get(t.name, "does not exist")
+            if isinstance(p, str):
+                return f"scaled by variable {t.name!r}: {p}", None
+            if t.action == "÷" and (np.asarray(p) == 0).any():
+                return f"divided by variable {t.name!r}, which is 0", None
+            value = _ACTIONS[t.action](value, p)
+        if isinstance(value, pd.Series) and cls_prop not in SERIES_PROPERTIES:
+            return "static property scaled by a time-varying variable", None
+        if not np.isfinite(value).all():
+            return "a value is not finite after its variables", None
+        return None, value
 
     def nodes(self) -> None:
         coords = {
@@ -1218,9 +1381,11 @@ class _Converter:
                 return
             if ((s < 0) | (s > 100)).any():
                 bad = s[(s < 0) | (s > 100)]
+                # GK A Q-a: name the cell furthest outside, not the first
+                at = (bad - 100).where(bad > 100, -bad).idxmax()
                 self.skip(
                     rf,
-                    f"Rating Factor {bad.iloc[0]:g} % at {bad.index[0]} outside [0, 100] %",
+                    f"Rating Factor {bad[at]:g} % at {at} outside [0, 100] %",
                 )
                 return
             kw["p_max_pu"] = s / 100.0
@@ -1695,6 +1860,7 @@ class _Converter:
         self.sort_rows(on)
         self.horizon(model)
         self.data_files()
+        self.variables()
         self.nodes()
         self.areas()
         self.lines()
@@ -1703,6 +1869,7 @@ class _Converter:
         self.batteries()
         self.hydro()
         self.rest()
+        self.variable_rows()
         for name in sorted(self.carriers):
             kw = {"co2_emissions": self.co2[name]} if name in self.co2 else {}
             self.n.add("Carrier", name, **kw)

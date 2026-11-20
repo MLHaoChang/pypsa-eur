@@ -488,3 +488,77 @@ def test_without_gridspine_the_extendable_flag_still_follows_the_rule(monkeypatc
     assert S._held("Generator", "g", extendable="1.0")["extendable"] is True
     assert S._held("Generator", "g", extendable=np.float64(1.0))["extendable"] is True
     assert S._held("Generator", "g", extendable=float("nan"))["extendable"] is False
+
+
+def test_an_extendable_asset_between_equal_bounds_reads_as_fixed():
+    """Template-e2e 14, GK B2 (3) f: an extendable asset whose two size bounds are finite and
+    equal carries that size as `fixed_size` (the IPP's owned plants); an open upper bound, unequal
+    bounds and a fixed-size asset carry None."""
+    n = _hand_built()
+    n.add(
+        "Generator",
+        "pinned",
+        bus="site",
+        p_nom=60.0,
+        p_nom_extendable=True,
+        p_nom_min=60.0,
+        p_nom_max=60.0,
+    )
+    n.add(
+        "Generator",
+        "ranged",
+        bus="site",
+        p_nom=60.0,
+        p_nom_extendable=True,
+        p_nom_min=10.0,
+        p_nom_max=60.0,
+    )
+    n.add(
+        "Store",
+        "tank_pinned",
+        bus="h2",
+        e_nom_extendable=True,
+        e_nom_min=40.0,
+        e_nom_max=40.0,
+    )
+    assets = S._site_assets(n, ["grid_import"], {"grid_import", "export_tie"})
+    holds, _ = S._holds(n, ["solar"], assets)
+    S._pin_sizes(n, holds["assets"])
+    fixed = {h["entity"]: h["fixed_size"] for h in holds["assets"]}
+    assert fixed["pinned"] == 60.0 and fixed["tank_pinned"] == 40.0
+    assert fixed["candidate"] is None  # p_nom_max = inf: sized by the study
+    assert fixed["ranged"] is None  # 10 to 60: sized by the study
+    assert fixed["pv"] is None  # not extendable: its own size
+
+
+def test_only_an_extendable_asset_row_with_two_usable_bounds_is_fixed():
+    """The guard and the bounds of `_pin_sizes` (mutants on template-e2e 14 PR 2): a fixed-size
+    asset with equal bounds, a blank lower bound, a row of no asset class, and a large size
+    within the relative tolerance."""
+    n = _hand_built()
+    n.add("Generator", "plain", bus="site", p_nom=5.0, p_nom_min=5.0, p_nom_max=5.0)
+    n.add(
+        "Generator",
+        "no_min",
+        bus="site",
+        p_nom=5.0,
+        p_nom_extendable=True,
+        p_nom_max=5.0,
+    )
+    n.generators.at["no_min", "p_nom_min"] = np.nan
+    n.add(
+        "Generator",
+        "big",
+        bus="site",
+        p_nom=2e6,
+        p_nom_extendable=True,
+        p_nom_min=2e6,
+        p_nom_max=2e6 + 1.0,
+    )
+    rows = [
+        S._held("Generator", g, extendable=bool(n.generators.at[g, "p_nom_extendable"]))
+        for g in ("plain", "no_min", "big")
+    ]
+    rows.append(S._held("Carrier", "solar", extendable=True))
+    S._pin_sizes(n, rows)
+    assert [r["fixed_size"] for r in rows] == [None, None, 2e6, None]

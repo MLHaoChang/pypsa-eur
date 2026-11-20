@@ -371,10 +371,8 @@ def test_model_default_is_first_by_name_and_listed():
 def test_model_option_switches_scenarios_on():
     conv = convert(_models(), {"model": "B"})
     assert not [a for a in conv.report.assumed if a.parameter == "Model"]
-    assert sorted(unmapped_reason(conv, "Node 'N'")) == [
-        "scenario 'Off' not selected",
-        "scenario 'On' is on in the chosen Model; scenario rows are applied in a later slice",
-    ]
+    assert unmapped_reason(conv, "Node 'N'") == ["scenario 'Off' not selected"]
+    assert conv.network.loads.p_set.tolist() == [5.0]
     with pytest.raises(ImportFormatError, match="has: A, B"):
         convert(_models(), {"model": "C"})
 
@@ -916,11 +914,11 @@ def test_name_clash_gets_a_fixed_suffix():
 
 def test_row_with_an_on_and_an_off_scenario_is_on():
     model = _models()
+    model.rows[0].tags = []
     model.rows[1].tags = [Tag("Scenario", "Off", None), Tag("Scenario", "On", None)]
     conv = convert(model, {"model": "B"})
-    assert all(
-        "is on in the chosen Model" in r for r in unmapped_reason(conv, "Node 'N'")
-    )
+    assert conv.network.loads.p_set.tolist() == [7.0]
+    assert unmapped_reason(conv, "Node 'N'") == ["replaced by scenario 'On'"]
 
 
 def test_load_tally_counts_every_readable_load_row():

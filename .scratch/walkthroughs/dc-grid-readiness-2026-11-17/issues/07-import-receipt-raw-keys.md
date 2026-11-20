@@ -3,7 +3,7 @@
 
 # 07: The asset import's receipt and left-out rows use field keys and Python quotes
 
-Status: ready-for-agent
+Status: done
 Type: task
 Impact: low (wording; the preview itself is in words)
 Templates: any (walked on eh_datacenter, Expert)
