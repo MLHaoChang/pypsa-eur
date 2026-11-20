@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Creating a template whose name is taken now offers "Create 'Name 2'" next to "Open the existing project". A template whose example network is not built says so in plain words instead of naming a developer script.

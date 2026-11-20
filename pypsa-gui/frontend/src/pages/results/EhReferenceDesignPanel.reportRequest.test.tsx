@@ -10,7 +10,7 @@ import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import {
-  EhReferenceDesignPanel, ehStudyQueryKeys, ehStudyRefetchInterval,
+  EhReferenceDesignPanel, ehStudyQueryKeys, ehStudyRefetchInterval, LEVERS_SECTION,
 } from './EhReferenceDesignPanel'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
@@ -35,7 +35,7 @@ const DONE = { status: 'done', study: 'eh_study', archetype: 'strong_grid', repo
 
 let scrolled: string[] = []
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo', ehReportRequest: false })
+  useUIStore.setState({ currentProject: 'Demo', ehReportRequest: false, resultsSectionRequest: null })
   scrolled = []
   Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
     scrolled.push((this as HTMLElement).dataset.testid ?? '?')
@@ -63,6 +63,24 @@ describe('ehReportRequest', () => {
     await waitFor(() => expect(resultsApi.getEhStudy).toHaveBeenCalled())
     expect(screen.queryByTestId('eh-report')).toBeNull()
     expect(scrolled).toEqual([])
+  })
+})
+
+// WALK-IMPROVE-1: the Results card's "Design options ›" asks for the levers
+// block; the collapsed panel opens, scrolls it into view and clears the request.
+describe('levers section request', () => {
+  it('opens the panel, scrolls the levers block into view and clears the request', async () => {
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({ kind: 'storage_duration', options: [
+      { kind: 'storage_duration', value: 4, unit: 'h', status: 'ok', cost_at_target_eur: 1, meets_target: true },
+    ] })
+    useUIStore.getState().requestResultsTab('adequacy', LEVERS_SECTION)
+    mount()
+    const levers = await screen.findByTestId('eh-levers')
+    await waitFor(() => expect(scrolled).toContain('eh-levers'))
+    expect(useUIStore.getState().resultsSectionRequest).toBeNull()
+    // RAW-NAMES-1: the kind column reads plain words, never the engine id.
+    expect(levers.textContent).toContain('Battery duration')
+    expect(levers.textContent).not.toContain('storage_duration')
   })
 })
 
