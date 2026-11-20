@@ -125,8 +125,10 @@ export function planFromRerun(args: Rec, archetype: EhArchetype): ImprovePlan {
   if (typeof po.ens_cap_permyriad === 'number') goal.ens_cap_permyriad = str(po.ens_cap_permyriad)
   if (typeof po.target_lole_h === 'number') goal.target_lole_h = str(po.target_lole_h)
   if (typeof mc.draws === 'number') goal.mc_draws = str(mc.draws)
-  const changesGoal = Object.keys(goal).length > 0
-  return { dest: changesGoal ? 'goal' : 'study', pack, ...(changesGoal ? { goal } : {}), unshown }
+  // A goal change hands over the goal only: the user saves it, then runs the
+  // study from its own form (GK B3 on #1757, no form left behind).
+  if (Object.keys(goal).length > 0) return { dest: 'goal', goal, unshown }
+  return { dest: 'study', pack, unshown }
 }
 
 /** What "Open in Expert" does for one finding. A finding with no action

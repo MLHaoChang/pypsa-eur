@@ -93,13 +93,13 @@ describe('improvePlan on the real actions', () => {
     expect(plan.unshown).toEqual([])
   })
 
-  it('more MC draws go to the goal’s draws; the seed stays on the study form', () => {
+  it('more MC draws go to the goal’s draws; a goal change hands over no study form', () => {
     const f = finding('certification_inconclusive')
     const plan = improvePlan(f, ARCH)
     const mc = f.actions[0].args.mc as Record<string, number>
     expect(plan.dest).toBe('goal')
     expect(plan.goal).toEqual({ mc_draws: String(mc.draws) })
-    expect(plan.pack?.seed).toBe(String(mc.seed))
+    expect(plan.pack).toBeUndefined()
   })
 
   it('a LOLE target implies its certification method; nothing is left unnamed', () => {
@@ -158,6 +158,9 @@ describe('the hand-over (GK B3 E1, E3)', () => {
     for (const c of ['not_established_voll', 'fmea_dominant_mode', 'certification_inconclusive']) {
       openImproveInExpert('Set VOLL', improvePlan(finding(c), ARCH))
     }
+    // Let any deferred write (a microtask or timer) land before asserting.
+    await new Promise(r => setTimeout(r, 0))
+    await Promise.resolve()
     for (const s of spies) expect(s).not.toHaveBeenCalled()
     useImprovePrefillStore.setState({ prefill: null })
     openImproveInExpert('Set VOLL', improvePlan(finding('not_established_voll'), ARCH))
@@ -177,7 +180,8 @@ describe('the hand-over (GK B3 E1, E3)', () => {
   })
 
   it('each part is taken once', () => {
-    openImproveInExpert('T', improvePlan(finding('certification_inconclusive'), ARCH))
+    useImprovePrefillStore.getState().set({ project: 'Demo', title: 'T', goal: { mc_draws: '1000' },
+      pack: { ...EMPTY_PACK_FORM, seed: '7' } })
     expect(takeImprovePrefill('Demo', 'solver')).toEqual({ title: 'T', goal: { mc_draws: '1000' } })
     expect(takeImprovePrefill('Demo', 'solver')).toBeNull()
     expect(takeImprovePrefill('Demo', 'pack')?.pack.seed).toBe('7')
@@ -251,7 +255,8 @@ describe('mapper edges', () => {
   })
 
   it('taking the form leaves the goal for Solver settings; a goal-only prefill gives no form', () => {
-    openImproveInExpert('T', improvePlan(finding('certification_inconclusive'), ARCH))
+    useImprovePrefillStore.getState().set({ project: 'Demo', title: 'T', goal: { mc_draws: '1000' },
+      pack: { ...EMPTY_PACK_FORM, seed: '7' } })
     expect(takeImprovePrefill('Demo', 'pack')).not.toBeNull()
     expect(takeImprovePrefill('Demo', 'solver')).toEqual({ title: 'T', goal: { mc_draws: '1000' } })
     useImprovePrefillStore.getState().set({ project: 'Demo', title: 'G', goal: { mc_draws: '9' } })

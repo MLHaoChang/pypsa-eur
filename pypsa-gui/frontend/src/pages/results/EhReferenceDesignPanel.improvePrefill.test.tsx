@@ -107,3 +107,15 @@ it('a project switch takes the note away, and switching back does not bring it',
   await new Promise(r => setTimeout(r, 30))
   expect(screen.queryByTestId('eh-filled-from-improve')).toBeNull()
 })
+
+// Hand mutant #45 (GK B3 on #1757): a hand-over made in a second project, then
+// a switch back, must not keep that project's note.
+it('a note made in another project goes when switching back', async () => {
+  mount()
+  await waitFor(() => expect(resultsApi.getEhStudy).toHaveBeenCalled())
+  act(() => useUIStore.setState({ currentProject: 'Other' }))
+  act(() => useImprovePrefillStore.getState().set({ project: 'Other', title: 'Price a spare', pack: PACK }))
+  await screen.findByTestId('eh-filled-from-improve')
+  act(() => useUIStore.setState({ currentProject: 'Demo' }))
+  await waitFor(() => expect(screen.queryByTestId('eh-filled-from-improve')).toBeNull())
+})

@@ -8,7 +8,7 @@ import { ensTargetWarning, RESERVE_MARGIN_CAVEAT } from './results/adequacy'
 import { networkApi } from '../api/network'
 import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
-import { openSectionInExpert } from '../layout/flowNavigation'
+import { openSectionInExpert, showResultsTab } from '../layout/flowNavigation'
 import { nk } from '../utils/queryKeys'
 import { errorText } from '../utils/errorText'
 import type { ReliabilityGoal } from '../api/flow'
@@ -151,6 +151,18 @@ export function StressConditionsSection({ project }: { project: string | null })
   )
 }
 
+/** The line above Save while an Improve card's change is unsaved. A goal
+ *  change says it is the project's goal for every study, not one run (GK B3
+ *  on #1757). */
+export function improveFillText(f: { title: string; voll: boolean; goal: boolean }): string {
+  const what = f.voll && f.goal ? 'the value of lost load and the reliability goal'
+    : f.voll ? 'the value of lost load' : 'the reliability goal'
+  const head = `Not saved yet: ${what} filled in from the Improve card (${f.title}).`
+  return f.goal
+    ? `${head} Saving changes the project's goal for every study, not only the next run; then run the study again in Results › Adequacy. Or Revert.`
+    : `${head} Save settings to keep it, or Revert.`
+}
+
 /** The tag on a block whose value an Improve card filled in, unsaved. */
 function NotSavedYet({ testId }: { testId: string }) {
   return <span data-testid={testId} className="ml-2 normal-case tracking-normal font-normal text-warn">Not saved yet</span>
@@ -226,7 +238,7 @@ export default function SolverSettings() {
       // Guided's Goal card and every Results study read the goal (W3b-R).
       invalidateReliabilityGoal(qc, useUIStore.getState().currentProject)
       setGoalEdits({})
-      setImproveFill(null)
+      setImproveFill(f => (f?.goal && !noOp ? { ...f, saved: true } : null))
       if (noOp) {
         toast('No changes to save', { icon: 'ℹ️' })
       } else {
@@ -307,7 +319,9 @@ export default function SolverSettings() {
   // draft, unsaved; the fields say so until Save or Revert, and leaving
   // without saving says it was not saved (UX 2 S1 condition 2).
   const prefillPending = useImprovePrefillStore(s => !!s.prefill && (!!s.prefill.goal || s.prefill.voll !== undefined))
-  const [improveFill, setImproveFill] = useState<{ title: string; voll: boolean; goal: boolean } | null>(null)
+  // `saved`: a goal change was saved; the line then points to running the
+  // study again (GK B3 on #1757), and nothing is left unsaved.
+  const [improveFill, setImproveFill] = useState<{ title: string; voll: boolean; goal: boolean; saved?: boolean } | null>(null)
   useEffect(() => {
     if (!prefillPending || !draft) return
     const got = takeImprovePrefill(currentProject, 'solver')
@@ -326,7 +340,7 @@ export default function SolverSettings() {
   const unsavedFill = useRef(improveFill)
   unsavedFill.current = improveFill
   useEffect(() => () => {
-    if (unsavedFill.current) toast(`Not saved: the change from the Improve card (${unsavedFill.current.title}).`, { icon: 'ℹ️' })
+    if (unsavedFill.current && !unsavedFill.current.saved) toast(`Not saved: the change from the Improve card (${unsavedFill.current.title}).`, { icon: 'ℹ️' })
   }, [])
 
   if (!draft) return <div className="p-6 text-muted text-xs">Loading…</div>
@@ -969,7 +983,7 @@ export default function SolverSettings() {
 
       {/* ── Value of Lost Load (VOLL) ────────────────────────── */}
       <ReliabilityAssumptions draft={draft} patch={patch} goal={goal} goalEdits={goalEdits}
-        unsaved={improveFill ? { voll: improveFill.voll, goal: improveFill.goal } : undefined}
+        unsaved={improveFill && !improveFill.saved ? { voll: improveFill.voll, goal: improveFill.goal } : undefined}
         onGoalEdits={e => {
           setGoalEdits(e)
           const { patch: p, error } = goalPatchFromEdits(e)
@@ -995,9 +1009,16 @@ export default function SolverSettings() {
       {/* ── Save ─────────────────────────────────────────────── */}
       {/* Outside the tab body so it's always reachable. Pinned to the
           bottom edge of the panel with a top border for separation. */}
-      {improveFill && (
+      {improveFill && !improveFill.saved && (
         <p role="status" data-testid="solver-improve-unsaved" className="px-3 pt-2 text-[11px] text-warn">
-          Not saved yet: {improveFill.voll ? 'the value of lost load' : 'the reliability goal'} is filled in from the Improve card ({improveFill.title}). Save settings to keep it, or Revert.
+          {improveFillText(improveFill)}
+        </p>
+      )}
+      {improveFill?.saved && (
+        <p role="status" data-testid="solver-improve-saved" className="px-3 pt-2 text-[11px] text-muted">
+          Goal saved for every study. Run the study again to see its effect:{' '}
+          <button type="button" data-testid="solver-improve-run-study" onClick={() => showResultsTab('adequacy')}
+            className="text-accent hover:underline">Results › Adequacy</button>
         </p>
       )}
       <div className="flex gap-2 p-3 border-t border-border bg-bg">

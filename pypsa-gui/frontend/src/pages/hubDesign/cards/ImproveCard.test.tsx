@@ -368,8 +368,12 @@ describe('ImproveCard — Open in Expert', () => {
   })
 
   it('opens Expert with a way back and hands the change over, writing nothing', async () => {
+    const { default: client } = await import('../../../api/client')
+    const writes = (['post', 'put', 'patch', 'delete'] as const).map(m => vi.spyOn(client, m))
     const user = mount()
     await user.click(await screen.findByTestId('hub-improve-open-certification_fail'))
+    await new Promise(r => setTimeout(r, 0))
+    for (const w of writes) expect(w).not.toHaveBeenCalled()
     const ui = useUIStore.getState()
     expect(ui.uiMode).toBe('expert')
     expect(ui.activeSlidePanel).toBe('results')

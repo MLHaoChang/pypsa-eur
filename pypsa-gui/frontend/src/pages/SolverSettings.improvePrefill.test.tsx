@@ -68,14 +68,30 @@ it('Revert drops the filled-in value and the tag', async () => {
   expect(toast).not.toHaveBeenCalled()
 })
 
-it('a goal change fills the goal editor and tags the goal block', async () => {
+it('the VOLL line says save or revert, and nothing about the goal', async () => {
+  useImprovePrefillStore.getState().set({ project: 'Demo', title: 'Set VOLL', voll: 5000 })
+  mount()
+  expect((await screen.findByTestId('solver-improve-unsaved')).textContent).toBe(
+    'Not saved yet: the value of lost load filled in from the Improve card (Set VOLL). Save settings to keep it, or Revert.')
+})
+
+it('a goal change says before Save it is the goal for every study, then points to the study', async () => {
   useUIStore.setState({ solverBlockRequest: 'goal' })
   useImprovePrefillStore.getState().set({ project: 'Demo', title: 'More draws', goal: { mc_draws: '1000' } })
-  mount()
+  const { unmount } = mount()
   await screen.findByTestId('solver-goal-unsaved')
+  expect(screen.getByTestId('solver-improve-unsaved').textContent).toBe(
+    "Not saved yet: the reliability goal filled in from the Improve card (More draws). Saving changes the project's goal for every study, not only the next run; then run the study again in Results › Adequacy. Or Revert.")
   expect((screen.getByTestId('solver-goal-draws') as HTMLInputElement).value).toBe('1000')
   fireEvent.click(screen.getByText('Save settings'))
   await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledWith(expect.objectContaining({ mc_draws: 1000 })))
+  const saved = await screen.findByTestId('solver-improve-saved')
+  expect(saved.textContent).toMatch(/^Goal saved for every study\. Run the study again/)
+  expect(screen.queryByTestId('solver-goal-unsaved')).toBeNull()
+  fireEvent.click(screen.getByTestId('solver-improve-run-study'))
+  expect(useUIStore.getState().resultsTabRequest).toBe('adequacy')
+  unmount()
+  expect(toast).not.toHaveBeenCalledWith(expect.stringMatching(/^Not saved/), expect.anything())
 })
 
 it('another project’s prefill never applies', async () => {
