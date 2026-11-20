@@ -32,7 +32,7 @@ export function energizationRefusal(err: unknown): string {
 
 /** The study limit vs the rating, said once on a surface that shows the rows. */
 export const ENERGIZED_SENTENCE = 'Each period\'s value is the energized limit the study holds the site to in that period. '
-  + 'The link\'s rating is the most it can ever carry; a value above it does not raise it.'
+  + 'The link\'s rating (its capacity) is the most it can ever carry; a value above the rating does not raise it.'
 
 const periodOrder = (a: string, b: string) => Number(a) - Number(b) || a.localeCompare(b)
 const periodWords = (p: string) => (p === 'all' ? 'All periods' : p)
