@@ -21,7 +21,7 @@ from pydantic import (
     ValidationError,
 )
 
-from harness import answer_sections, derived, interpretation_markers, predicates
+from harness import answer_sections, derived, interpretation_markers, predicates, solve_validity
 from harness.assurance_coverage import FRAME_PROJECTIONS
 from services import assurance_records as records
 
@@ -703,6 +703,8 @@ class Turn:
                         f"{len(slot['excluded_indices'])} snapshots excluded."
                     )
         lines.append(assurance_metrics.disclosure(self.request_scope))
+        # Every answer on a MIP names its optimality gap (assistant-assurance 10, S2).
+        lines.extend(solve_validity.notes(record["raw"]))
         shared = derived.scope_key(record)
         published = {b["id"]: (b["value"], b["unit"], shared) for b in public_blocks}
         lines.extend(self._derive(draft, published))
