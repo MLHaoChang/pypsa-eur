@@ -270,3 +270,14 @@ def test_a_weak_pack_without_a_cap_is_refused():
         update={"import_p_nom_mw": None})})
     with pytest.raises(A.ArchetypePackError, match="requires import_overlay"):
         A.planned_changes(n, pack)
+
+
+def test_a_floor_above_each_links_share_is_named_per_connection():
+    n = _two_link_network()
+    pack = RUN.apply_pack_overrides(default_weak_flexible_pack(), {"import_p_nom_mw": 60.0})
+    assert not any("minimum size" in w
+                   for w in A.apply_archetype_pack_detailed(n.copy(), pack).warnings)
+    n.links.at["feeder_a", "p_nom_min"] = 40.0
+    res = A.apply_archetype_pack_detailed(n, pack)
+    assert ("Your grid connection has a minimum size of 40 MW, above the study's cap "
+            "of 30 MW per connection; the study may find no solution.") in res.warnings
