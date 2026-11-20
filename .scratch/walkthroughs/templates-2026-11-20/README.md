@@ -56,6 +56,8 @@ Seen again, added to the existing issue (no duplicate):
 
 ## Not walked, and what to trust
 
+**Scope for the next rotation: Expert field edits were not walked on any of the three templates.** Edit a value in each Expert panel (Loads, Assets, Capacity Bounds, Economics, Grid connection), save, re-run and check Results and the report.
+
 - Guided steps were read as text and screenshots; I did not edit inputs by hand in Expert (panels were opened and the Run, Results, Reports and investment-case paths were exercised, not field edits). Business-case "where offered" was walked on DC (dead end), H2 (run) only.
 - Run times are bounds (see the caveat). The H2 investment case took up to my 5-minute poll; its real time is unknown.
 - Dark theme, the assistant and the Grid study panel were not walked.
