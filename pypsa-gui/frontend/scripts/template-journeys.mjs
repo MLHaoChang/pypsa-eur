@@ -52,7 +52,7 @@ const TEMPLATES = [
   { id: 'eh_h2_hub', card: 'Industrial Hydrogen Hub', goal: true, processes: true },
   { id: 'eh_h2_hub_staged', card: 'Industrial Hydrogen Hub (staged growth)', goal: true, processes: true },
   { id: 'eh_ammonia_staged', card: 'Green Ammonia Hub (staged growth)', goal: true, processes: true },
-  { id: 'eh_concentrator_staged', card: 'Mining Concentrator (staged growth)', goal: true, processes: true, slow: true, rawNamesClean: true },
+  { id: 'eh_concentrator_staged', card: 'Mining Concentrator (staged growth)', goal: true, processes: true, slow: true },
   { id: 'eh_ipp_hybrid', card: 'Renewables IPP with battery', goal: false, run: false },
 ]
 const only = opt('template') ? opt('template').split(',') : null
@@ -173,7 +173,7 @@ async function journey(t) {
       await page.getByLabel(t.dc ? /PUE/i : /Must stay on|critical share/i).first().waitFor({ timeout: 1500 })
     })
     await L.resetOverlays(ctx)
-    const scanRawNames = async () => {
+    await L.gap(ctx, '05', 'no raw snake_case names in Guided sections 1-9, their drawers, the Expert summaries and the Grid study panel', async () => {
       const found = []
       for (const [section, opener] of [['Carriers & processes', /^Edit/], ['Connection & grid', /^Edit/], ['Loads & demand', /^(Edit|Open here)/], ['Assets & sizing', /^(Edit|Open here)/], ['Commercial & parties', /^Edit/]]) {
         try { found.push(await drawerText(section, opener)) } catch { /* a section without a drawer has nothing to scan */ }
@@ -190,11 +190,7 @@ async function journey(t) {
       const own = new RegExp(`${L.esc(name)}|${L.esc(name.replace(/ /g, '_'))}`, 'g')  // a project name is the user's, not ours
       const raw = [...Object.values(texts), ...found].flatMap(text => text.replace(own, '').match(RAW_NAME) || [])
       assert.equal(raw.length, 0, `raw names: ${[...new Set(raw)].slice(0, 5).join(', ')}`)
-    }
-    const rawNamesWhat = 'no raw snake_case names in Guided sections 1-9, their drawers, the Expert summaries and the Grid study panel'
-    // A template whose scan is clean runs it as a normal assertion; the others stay expected failures.
-    if (t.rawNamesClean) await L.step(ctx, `gap 05: ${rawNamesWhat}`, scanRawNames)
-    else await L.gap(ctx, '05', rawNamesWhat, scanRawNames)
+    })
     await L.resetOverlays(ctx)
     if (t.goal) await L.gap(ctx, '06', 'the goal editor shows the assumed value the run will use ("No goal yet" gone), and Expert shows the goal', async () => {
       const assumed = (texts[8] || '').match(/Reliability goal \(LOLE\): ([\d.]+) h\/yr/)?.[1]
