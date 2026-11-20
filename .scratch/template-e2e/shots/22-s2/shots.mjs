@@ -66,10 +66,10 @@ try {
       const caseTab = page.getByRole('tab', { name: 'Investment case' })
       if (await caseTab.count()) await caseTab.first().click()
       await page.getByTestId('ic-run-panel').waitFor()
-      await page.getByTestId('ic-not-run').waitFor()
+      await page.getByTestId('ic-run').waitFor(); await page.waitForTimeout(1000)
       await view('1-before-run')
       await page.getByTestId('ic-run').click()
-      await page.getByTestId('ic-needs').waitFor()
+      await page.getByTestId('ic-need-solve').waitFor()
       await page.waitForTimeout(1500)
       await view('2-refused-needs')
       // A busy 409 is a plain sentence (routers/results.py _refuse_if_mesh_busy);

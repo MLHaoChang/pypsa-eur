@@ -7,7 +7,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { openSiteConnection } from '../../economics/SiteConnectionLink'
 import { openPanel } from '../openPanel'
 import {
-  BEFORE_RUN, comparedLine, couldNotFinish, NEED_TEXT, NEEDS_LEAD, RUNNING, type Need,
+  BEFORE_RUN, comparedLine, couldNotFinish, NEED_ORDER, NEED_TEXT, NEEDS_LEAD, RUNNING, type Need,
 } from './investmentCaseNeeds'
 import type { InvestmentCaseRun } from './useInvestmentCaseRun'
 
@@ -19,25 +19,36 @@ const OPEN: Record<Need, () => void> = {
 }
 
 /** Where a need's link goes: the solve is an action; the others open a panel (›). */
+/** The server's busy sentence as a sentence ("a frontier study is running — wait for it to finish"). */
+const sentence = (t: string) => {
+  const s = t.trim()
+  return `${s.charAt(0).toUpperCase()}${s.slice(1)}${/[.!?]$/.test(s) ? '' : '.'}`
+}
+
 const linkLabel = (need: Need) => (need === 'solve' ? NEED_TEXT[need].link : `${NEED_TEXT[need].link} ›`)
 
-export default function InvestmentCaseRunPanel({ run, report, mode }: {
+export default function InvestmentCaseRunPanel({ run, report, mode, known = [] }: {
   run: InvestmentCaseRun
   /** The stored report; null before a run, undefined while it is not read yet. */
   report: InvestmentCaseReportPayload | null | undefined
   mode: 'guided' | 'expert'
+  /** Needs another server read already states (the commercial config's
+   *  "no site connection"), listed with the refusal's in one checklist. */
+  known?: Need[]
 }) {
   const { running, starting, start, blocker } = run
   const busy = running || starting
+  const needs = blocker?.kind === 'wait' || blocker?.kind === 'unknown' ? []
+    : NEED_ORDER.filter(n => known.includes(n) || (blocker?.kind === 'needs' && blocker.needs.includes(n)))
   return (
     <div className="space-y-1 text-[11px]" data-testid="ic-run-panel">
-      {blocker?.kind === 'needs' ? (
+      {needs.length > 0 ? (
         <div data-testid="ic-needs">
           <p>{NEEDS_LEAD}</p>
           <ol className="list-decimal pl-5">
-            {blocker.needs.map(need => (
+            {needs.map(need => (
               <li key={need} data-testid={`ic-need-${need}`}>
-                {NEED_TEXT[need].item}{' '}
+                {NEED_TEXT[need].item} —{' '}
                 <button type="button" className="underline text-accent" onClick={OPEN[need]}>
                   {linkLabel(need)}</button>
               </li>
@@ -45,7 +56,7 @@ export default function InvestmentCaseRunPanel({ run, report, mode }: {
           </ol>
         </div>
       ) : blocker?.kind === 'wait' ? (
-        <p className="text-warn" data-testid="ic-blocked">Wait: {blocker.text}</p>
+        <p className="text-warn" data-testid="ic-blocked">{sentence(blocker.text)}</p>
       ) : blocker?.kind === 'unknown' ? (
         <p className="text-danger" data-testid="ic-error">{couldNotFinish(mode, blocker.detail)}</p>
       ) : running ? null : report ? (
@@ -56,7 +67,7 @@ export default function InvestmentCaseRunPanel({ run, report, mode }: {
       <button type="button" data-testid="ic-run" disabled={busy}
               className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
               onClick={start}>
-        {running ? RUNNING : 'Run the investment case'}</button>
+        {running ? RUNNING : blocker?.kind === 'wait' ? 'Try again' : 'Run the investment case'}</button>
     </div>
   )
 }

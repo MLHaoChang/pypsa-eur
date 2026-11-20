@@ -86,10 +86,10 @@ function reasonOf(study: InvestmentCaseStudy, code: string | null): string | nul
 
 /** The blocker a start refusal (`err`) or a refused / failed run (`study`)
  *  shows; null when neither blocks. A busy 409 (another study or a solve) is
- *  "Wait: <the server's sentence>"; a code with no plain fix is "unknown". */
+ *  "wait" with the server's sentence; a code with no plain fix is "unknown". */
 export function blockerOf(err: unknown, study: InvestmentCaseStudy | null | undefined): Blocker | null {
   if (err) {
-    if (err instanceof SolverInFlightError) return { kind: 'wait', text: 'a solve is running; run the investment case after it.' }
+    if (err instanceof SolverInFlightError) return { kind: 'wait', text: 'a solve is running; wait for it to finish.' }
     const need = needOf(errorCode(err))
     if (need) return { kind: 'needs', needs: [need] }
     if (err instanceof StudyBusyError) return { kind: 'wait', text: err.message }

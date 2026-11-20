@@ -162,7 +162,7 @@ describe('InvestmentCaseRunPanel', () => {
                                               error: "cod_by_asset names no date for ['bess']" })
     renderPanel()
     expect((await screen.findByTestId('ic-need-cod')).textContent)
-      .toBe('A start date for each piece of new equipment Set the start dates ›')
+      .toBe('A start date for each piece of new equipment — Set the start dates ›')
     expect(screen.getByTestId('ic-needs').textContent).not.toMatch(/bess|cod_/)
   })
 
@@ -178,11 +178,30 @@ describe('InvestmentCaseRunPanel', () => {
       .toBe('The investment case could not finish: the template is not one year.')
   })
 
-  it('a busy 409 reads "Wait:" with the server sentence', async () => {
-    api.startInvestmentCase.mockRejectedValue(new StudyBusyError('a frontier study is running'))
+  it('a busy 409 shows the server sentence once, and the button says it can be tried again', async () => {
+    api.startInvestmentCase.mockRejectedValue(new StudyBusyError('a frontier study is running — wait for it to finish'))
     renderPanel()
     fireEvent.click(await screen.findByRole('button', { name: 'Run the investment case' }))
-    expect((await screen.findByTestId('ic-blocked')).textContent).toBe('Wait: a frontier study is running')
+    expect((await screen.findByTestId('ic-blocked')).textContent)
+      .toBe('A frontier study is running — wait for it to finish.')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+
+  it('a need another read states joins the refusal in one ordered checklist', async () => {
+    api.startInvestmentCase.mockRejectedValue(new StudyBusyError('solve the network first', 'not_solved'))
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    function Known() {
+      const run = useInvestmentCaseRun()
+      return <InvestmentCaseRunPanel run={run} mode="expert" report={null} known={['connection']} />
+    }
+    render(<QueryClientProvider client={qc}><Known /></QueryClientProvider>)
+    // Before a run, the stated need is the panel's only line.
+    await screen.findByTestId('ic-need-connection')
+    expect(screen.queryByTestId('ic-not-run')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Run the investment case' }))
+    await screen.findByTestId('ic-need-solve')
+    expect(screen.getAllByRole('listitem').map(li => li.getAttribute('data-testid')))
+      .toEqual(['ic-need-solve', 'ic-need-connection'])
   })
 
   it('after a run, the compared line replaces "Not run yet"', async () => {

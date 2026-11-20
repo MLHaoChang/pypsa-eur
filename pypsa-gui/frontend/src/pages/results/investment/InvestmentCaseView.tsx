@@ -405,7 +405,9 @@ function Report({ report }: { report: InvestmentCaseReportPayload }) {
 
 // ── the tab ──────────────────────────────────────────────────────────────
 
-export default function InvestmentCaseView() {
+/** `connectionMissing`: the commercial config's own refusal (no site
+ *  connection) — the run panel lists it, the only "needs" on the tab (UX 2). */
+export default function InvestmentCaseView({ connectionMissing = false }: { connectionMissing?: boolean } = {}) {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const studyKey = nk(project, 'results', 'investment_case')
@@ -441,7 +443,7 @@ export default function InvestmentCaseView() {
 
   return (
     <div className="space-y-3 text-[11px]" data-testid="investment-case">
-      <InvestmentCaseRunPanel run={run} mode="expert"
+      <InvestmentCaseRunPanel run={run} mode="expert" known={connectionMissing ? ['connection'] : []}
                               report={running ? null : report.isSuccess ? (report.data ?? null) : undefined} />
       <div className="flex flex-wrap items-center gap-2">
         {running && (
