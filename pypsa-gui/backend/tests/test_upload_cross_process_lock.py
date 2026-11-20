@@ -3,6 +3,7 @@
 Two API processes uploading the same bytes to one project must store one copy,
 and a lock another process holds past the timeout is a stated 409, not a hang.
 """
+
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -35,7 +36,9 @@ def test_two_processes_store_one_copy(tmp_path):
     ctx = mp.get_context("spawn")
     go, out = ctx.Event(), ctx.Queue()
     readies = [ctx.Event() for _ in range(2)]
-    procs = [ctx.Process(target=_worker, args=(str(tmp_path), r, go, out)) for r in readies]
+    procs = [
+        ctx.Process(target=_worker, args=(str(tmp_path), r, go, out)) for r in readies
+    ]
     for p in procs:
         p.start()
     for r in readies:
@@ -60,7 +63,11 @@ def test_busy_lock_is_a_stated_409(tmp_path, monkeypatch):
         # flock is per open file description, so a second open in this process
         # contends exactly as another process would.
         with pytest.raises(HTTPException) as err:
-            upload_service.add_upload("p", DATA, "a.txt", "text/plain", project_dir=tmp_path)
+            upload_service.add_upload(
+                "p", DATA, "a.txt", "text/plain", project_dir=tmp_path
+            )
     assert err.value.status_code == 409
     assert err.value.detail["error_kind"] == "upload_busy"
-    assert not (tmp_path / "uploads").exists() or not list((tmp_path / "uploads").iterdir())
+    assert not (tmp_path / "uploads").exists() or not list(
+        (tmp_path / "uploads").iterdir()
+    )
