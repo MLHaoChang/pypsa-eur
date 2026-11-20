@@ -426,6 +426,9 @@ it('says a negative total system cost is revenue over cost, never a profit', asy
   // The sign before the €, never "€-4.55 M" (the shared tile writes its own minus).
   expect(card.textContent).toMatch(/[-\u2212]€4\.55\s?M/)
   expect(card.textContent).not.toMatch(/profit/i)
+  // One sign position and one minus for the total in the view (UX 2 (5)): the build-up chart's
+  // header reads as the tile does, never "€-4.55 M".
+  expect(screen.getByText('-€4.55 M per year')).toBeTruthy()
 })
 
 // ── Result states (UX overhaul S2) ──────────────────────────────────────────

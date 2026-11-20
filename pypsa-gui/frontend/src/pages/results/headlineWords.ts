@@ -22,12 +22,13 @@ export const UNSERVED_ENERGY = 'Unserved energy'
  *  objective is not the business case. */
 export const REVENUE_EXCEEDS_COST = '(revenue exceeds cost)'
 
-/** A total system cost in words: the figure with a real minus sign before the €, and the
- *  note a negative total carries (none otherwise). One helper for the strip, Summary and
- *  Capacity expansion. */
+/** A total system cost in words: the figure with its sign before the €, and the note a
+ *  negative total carries (none otherwise). One helper for the strip, Summary and Capacity
+ *  expansion. The minus is the one the KPI tiles write (`kpiFigure`), so a view never mixes
+ *  two (UX 2 (5) on #1783). */
 export function totalCostWords(total: number | null | undefined): { value: string; note?: string } {
   if (total == null || !Number.isFinite(total) || total >= 0) return { value: fmtCurrency(total) }
-  return { value: `\u2212${fmtCurrency(-total)}`, note: REVENUE_EXCEEDS_COST }
+  return { value: `-${fmtCurrency(-total)}`, note: REVENUE_EXCEEDS_COST }
 }
 
 interface Words {

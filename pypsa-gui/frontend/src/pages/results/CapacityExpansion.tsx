@@ -1060,7 +1060,7 @@ export default function CapacityExpansion() {
       {costWaterfall.length > 1 && (
         <ChartFrame
           title="System cost build-up"
-          figure={`${fmtCurrency(costWaterfall[costWaterfall.length - 1]?.abs ?? 0)} per year`}
+          figure={`${totalCostWords(costWaterfall[costWaterfall.length - 1]?.abs ?? 0).value} per year`}
           hint="horizon (all periods): how the total system cost builds up; ignores the period selector"
           right={
             <ChartActions
