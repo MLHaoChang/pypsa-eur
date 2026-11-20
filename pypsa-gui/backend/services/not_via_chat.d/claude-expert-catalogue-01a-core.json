@@ -1,0 +1,12 @@
+{
+ "entries": [{
+  "id": "parameter_catalogue",
+  "title": "Parameter catalogue and guide",
+  "disposition": "unbuilt",
+  "reason": "Chat cannot search the parameter catalogue or quote its guide yet; that arrives with the chat parameter tools. Each field's help shows in the Properties panel.",
+  "page": "Properties panel",
+  "panel": null,
+  "keywords": ["catalogue", "glossary", "wiki"],
+  "routes": [["GET", "/api/catalogue"], ["GET", "/api/catalogue/guide/{guide_id}"], ["GET", "/api/catalogue/guide/{rest:path}"]]
+ }]
+}
