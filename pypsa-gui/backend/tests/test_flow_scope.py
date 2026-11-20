@@ -74,8 +74,12 @@ def test_a_preset_names_real_sub_options_and_never_preselects_an_unavailable_one
     # Capacity and Hand-off are always on; capacity with sizing and dispatch.
     assert {"capacity", "handoff"} <= set(eff["groups"])
     assert eff["options"]["capacity"][:2] == ["sizing", "dispatch"]
-    # An EH example keeps today's reliability study, except the IPP hybrid.
-    if pid not in ("blank", "eh_ipp_hybrid"):
+    # An EH example keeps today's reliability study, except the IPP hybrid;
+    # a grid template has no EH reliability study and runs its load flow (issue 51).
+    if pid in S.GRID_TEMPLATES:
+        assert not S.selected(eff, "reliability", "goal_study"), pid
+        assert S.selected(eff, "grid", "load_flow"), pid
+    elif pid not in ("blank", "eh_ipp_hybrid"):
         assert S.selected(eff, "reliability", "goal_study"), pid
     # The stored form passes the strict check the PUT route applies.
     S.validate(eff, has_template=pid != "blank")
