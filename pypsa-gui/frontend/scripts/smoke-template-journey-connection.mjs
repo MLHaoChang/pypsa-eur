@@ -80,6 +80,8 @@ try {
     localStorage.setItem('network-diagram:current-project', project)
     localStorage.setItem('network-diagram:ui-mode', 'guided')
     localStorage.setItem('network-diagram:ui-mode-explicit', '1')
+    // The hub-design tour offers itself once per project (TOUR-AUTO-1); this journey is not about it.
+    localStorage.setItem(`pypsa-guide-offered:hub_design:${project}`, '1')
   }, PROJECT)
   await page.goto(base + '/app')
   await page.getByTestId('hub-rail').waitFor()
