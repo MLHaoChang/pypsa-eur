@@ -411,7 +411,7 @@ def put_flow_energization(body: dict,
     _check_lock(project, db, user)
     _require_open(project)
     refuse_edit_during_live_study()
-    if not isinstance(body, dict) or set(body) - _ENERGIZATION_KEYS or "mw" not in body \
+    if set(body) - _ENERGIZATION_KEYS or "mw" not in body \
             or not isinstance(body.get("link"), str) or not body["link"]:
         raise _energization_refused(
             "energization_invalid_request",

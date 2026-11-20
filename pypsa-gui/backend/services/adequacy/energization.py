@@ -253,10 +253,11 @@ def plan_period_mw(n, link: str, period, mw) -> dict:
     finite = current[np.isfinite(current)]
     if finite.size and (finite.size != current.size or finite.min() != finite.max()):
         # Never scaled: the range is named and the network is where it is set.
-        raise EnergizationEditError(
-            "energization_period_not_flat",
-            f"{'The period' if key == ALL else key} varies {finite.min():g}–{finite.max():g} MW: "
-            "set it on the network.")
+        # A period flat apart from hours without a value says so, not "varies 15–15".
+        label = "The period" if key == ALL else key
+        shape = (f"varies {finite.min():g}–{finite.max():g} MW" if finite.min() != finite.max()
+                 else f"has hours without a value ({finite.min():g} MW in the others)")
+        raise EnergizationEditError("energization_period_not_flat", f"{label} {shape}: set it on the network.")
     p_nom = float(n.links.at[link, "p_nom"])
     note = None
     if value > p_nom:

@@ -159,3 +159,78 @@ def test_a_template_without_a_schedule_keeps_the_single_limit(client, tmp_projec
         r.status_code == 422
         and r.json()["detail"]["error_kind"] == "energization_no_schedule"
     )
+
+
+# ── GK A 32 G2: the network is read under the lock, seen at lock entry ──────
+
+
+class _SwapOnRouteEntry:
+    """The project lock, with the network replaced (as a reload or an undo
+    does) just as the route enters it: a route that read the network before
+    taking the lock writes the edit to a network that is no longer the
+    project's (GK A 32, mutant M23)."""
+
+    def __init__(self, lock, state):
+        self._lock, self._state = lock, state
+
+    def acquire(self, *a, **kw):
+        return self._lock.acquire(*a, **kw)
+
+    def release(self):
+        self._lock.release()
+
+    def __enter__(self):
+        import sys
+
+        from services.pypsa_service import PyPSAService
+
+        caller = sys._getframe(1).f_code.co_name
+        if caller == "put_flow_energization" and not self._state["swapped"]:
+            ctx = PyPSAService.get_active_context()
+            old = ctx.network
+            new = old.copy()
+            new.links_t[E.ATTR] = E.energization_frame(old).copy()
+            ctx.network = new
+            self._state["swapped"] = new
+        entered = self._lock.__enter__()
+        self._state["depth"] += 1
+        return entered
+
+    def __exit__(self, *exc):
+        self._state["depth"] -= 1
+        return self._lock.__exit__(*exc)
+
+
+def test_g2_the_route_reads_the_network_under_its_lock(
+    client, tmp_projects_dir, monkeypatch
+):
+    import sys
+
+    from services.pypsa_service import PyPSAService
+
+    name = _create(client, "eh_datacenter_staged", "staged02b_lock")
+    state = {"swapped": None, "depth": 0}
+    real_lock, real_network = PyPSAService.get_lock, PyPSAService.get_network
+    reads = []
+
+    def get_network():
+        if sys._getframe(1).f_code.co_name == "put_flow_energization":
+            reads.append(state["depth"])
+        return real_network()
+
+    monkeypatch.setattr(
+        PyPSAService,
+        "get_lock",
+        staticmethod(lambda: _SwapOnRouteEntry(real_lock(), state)),
+    )
+    monkeypatch.setattr(PyPSAService, "get_network", staticmethod(get_network))
+    r = _put(client, name, link=LINK, period=2030, mw=30)
+    assert r.status_code == 200, r.text
+    assert state["swapped"] is not None, "the route never entered the lock"
+    assert reads and all(d > 0 for d in reads), (
+        "the route read the network outside the lock"
+    )
+    # The edit is on the network that is the project's after the lock was taken.
+    assert E.by_period(state["swapped"], LINK)["by_period"]["2030"] == 30.0
+    monkeypatch.undo()
+    assert _row(client, name)["energization"][0]["by_period"]["2030"] == 30.0

@@ -199,20 +199,23 @@ def freeze(ctx, profile, solves_left) -> dict:
         "args": args,
         "goal": _goal_snapshot(goal),
         "digest": digest(args),
-        # template-e2e 02b (GK B E4): the energization schedule per period the
-        # card was drawn on, which `admit` compares exactly.
+        # template-e2e 02b (GK B E4, GK A 32): the energization schedule the card
+        # was drawn on, bound by its digest, which `admit` compares exactly.
         "energization": _energization(getattr(ctx, "network", None)),
         **({"contingencies": held} if held is not None else {}),
     }
 
 
 def _energization(network):
-    """``{link: {by_period, not_flat}}`` of the network's energization schedule
-    (`energization.all_by_period`); None when it can't be read."""
-    from services.adequacy.energization import all_by_period
+    """``{digest, by_period}`` of the network's energization schedule: the
+    digest of the exact schedule (`energization.schedule_digest`, None without
+    one), which `admit` binds, and ``{link: by_period}``
+    (`energization.all_by_period`), which only names the links that moved.
+    None when it can't be read."""
+    from services.adequacy.energization import all_by_period, schedule_digest
 
     try:
-        return all_by_period(network)
+        return {"digest": schedule_digest(network), "by_period": all_by_period(network)}
     except Exception:  # noqa: BLE001 — unreadable is never the frozen schedule
         logger.exception("run_eh: energization schedule read failed")
         return None
@@ -226,22 +229,29 @@ ENERGIZATION_UNRECORDED = (
 
 
 def _energization_change(ctx, frozen) -> str | None:
-    """template-e2e 02b (GK B E4): why the network's energization schedule is
-    no longer the one the study's card was drawn on (compared exactly, period
-    by period), or None when it still is. A record frozen before 02b holds
-    none: it refuses where the network carries a schedule."""
+    """template-e2e 02b (GK B E4, GK A 32): why the network's energization
+    schedule is no longer the one the study's card was drawn on, or None when
+    it still is. The digest of the exact schedule is compared, so a ramp
+    reversed inside a period (the same min and max) is seen. A record frozen
+    before 02b holds none: it refuses where the network carries a schedule."""
     now = _energization(getattr(ctx, "network", None))
     if "energization" not in frozen:
-        return None if now == {} else ENERGIZATION_UNRECORDED
+        return (
+            None
+            if now is not None and now["digest"] is None
+            else ENERGIZATION_UNRECORDED
+        )
     then = frozen["energization"]
-    if now is not None and now == then:
-        return None
-    if now is None or not isinstance(then, dict):
+    if not isinstance(then, dict) or "digest" not in then or now is None:
         return "The connection's energization schedule can't be compared now. Review the run again."
-    moved = sorted(link for link in {*then, *now} if then.get(link) != now.get(link))
+    if now["digest"] == then.get("digest"):
+        return None
+    was, is_ = then.get("by_period") or {}, now["by_period"]
+    moved = sorted(link for link in {*was, *is_} if was.get(link) != is_.get(link))
+    where = f" ({', '.join(moved)})" if moved else " (inside a period)"
     return (
         f"The connection's energization schedule changed since the study's card was "
-        f"drawn ({', '.join(moved)}). Review the run again."
+        f"drawn{where}. Review the run again."
     )
 
 
