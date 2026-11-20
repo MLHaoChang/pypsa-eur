@@ -24,7 +24,6 @@ import math
 import pathlib
 import re
 import tempfile
-import zipfile
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -34,6 +33,7 @@ from openpyxl.utils import get_column_letter
 from pandas._libs.parsers import STR_NA_VALUES
 
 from gridspine.ingest import excel_layout as L
+from gridspine.ingest import xlsx_safe as X
 from gridspine.ingest.import_result import Assumed, ImportReport, ImportResult, Unmapped
 
 logger = logging.getLogger(__name__)
@@ -49,49 +49,10 @@ _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?\Z"
 # ── reading the file safely (E2) ─────────────────────────────────────────────
 
 
-def _check_zip(path: pathlib.Path) -> None:
-    try:
-        with zipfile.ZipFile(path) as zf:
-            infos = zf.infolist()
-    except (
-        zipfile.BadZipFile,
-        zipfile.LargeZipFile,
-        OSError,
-        NotImplementedError,
-        ValueError,
-        EOFError,
-    ) as exc:
-        # A damaged header can claim a zip version or feature Python does not support.
-        raise L.ImportFormatError("The file is not an Excel workbook (.xlsx).") from exc
-    if len(infos) > L.LIMITS["zip_members"]:
-        raise L.ImportLimitError("zip_members", len(infos))
-    total = sum(i.file_size for i in infos)
-    if total > L.LIMITS["uncompressed_bytes"]:
-        raise L.ImportLimitError("uncompressed_bytes", total)
-
-
-def _declared_within_limits(ws) -> None:
-    """
-    Refuse a sheet whose declared size passes the limits before any cell is read
-    (E2): a small file can declare A1:XFD1048576.
-    """
-    rows, cols = ws.max_row or 0, ws.max_column or 0
-    if rows > L.LIMITS["rows"]:
-        raise L.ImportLimitError("rows", rows)
-    if cols > L.LIMITS["columns"]:
-        raise L.ImportLimitError("columns", cols)
-    if rows * cols > L.LIMITS["cells"]:
-        raise L.ImportLimitError("cells", rows * cols)
-
-
-def _capped(rows):
-    """Each (row number, row), refusing past the row and column limits."""
-    for r, row in enumerate(rows, start=1):
-        if r > L.LIMITS["rows"]:
-            raise L.ImportLimitError("rows", r)
-        if len(row) > L.LIMITS["columns"]:
-            raise L.ImportLimitError("columns", len(row))
-        yield r, row
+# The checks live in xlsx_safe, shared with the DGS workbook reader (GK A2 X5).
+_check_zip = X.check_zip
+_declared_within_limits = X.declared_within_limits
+_capped = X.capped
 
 
 class _Sheets:
