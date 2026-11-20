@@ -353,3 +353,16 @@ describe('project finance flags in plain words', () => {
     expect(baselineCaveats({ sections: { project: { payload: { flags: caveats } } } } as never)).toHaveLength(5)
   })
 })
+
+describe('the two break-even prices say which question they answer (WALK-IMPROVE-1 a)', () => {
+  it('labels LCOE and the solved PPA price apart', () => {
+    const rows = headlines({ lcoe_finance_consistent_eur_per_mwh: 84.48,
+      ppa_price_for_target_irr_eur_per_mwh: 36.35, sections: {} } as never)
+    const lcoe = rows.find(h => h.id === 'lcoe')!
+    const ppa = rows.find(h => h.id === 'ppa_price')!
+    expect([lcoe.value, ppa.value]).toEqual([84.48, 36.35])
+    expect(lcoe.asks).toMatch(/^Break-even for all output: .*every MWh generated.*no other revenue\.$/)
+    expect(ppa.asks).toMatch(/^Break-even for the PPA alone: .*target equity IRR.*other revenue kept as they are\.$/)
+    expect(rows.filter(h => h.asks).map(h => h.id)).toEqual(['lcoe', 'ppa_price'])
+  })
+})

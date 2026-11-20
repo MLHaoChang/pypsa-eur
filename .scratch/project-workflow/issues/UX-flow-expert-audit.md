@@ -1,6 +1,6 @@
 # UX-flow audit: one entry point, owning section, visible next step
 
-Status: ready-for-agent (the UX-NEXT-1 findings are verified fixed, see the 2026-11-17 comment; W3b and R1 findings remain)
+Status: ready-for-agent (the UX-NEXT-1 findings are verified fixed, see the 2026-11-17 comment; W3b and R1 findings remain); audit 2026-11-19: most findings fixed (closeout #1606); left: W3b and R1 findings
 Progress: Audit document (26 findings) merged; the fix tickets it routes are not shown done.
 Type: audit, which routes into fix tickets
 Owner of the audit: UX reviewer. The coordinator routes each fix to its package.

@@ -3,7 +3,7 @@
 
 # 01 — Parameter catalogue core (01a): entries, asset types, guide files, `GET /api/catalogue`, range validation
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: 01a-1 open in #1634
 Type: task
 Gated: yes (GK B; UX (23) OKs the rename diff table and guide drafts)
 Spec: [spec.md](../spec.md) §3, §6.2, §7.2, §10.1
