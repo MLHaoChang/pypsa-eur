@@ -1,19 +1,35 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
-import ProjectOpeningBanner from './ProjectOpeningBanner'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { render, screen, cleanup, act } from '@testing-library/react'
+import ProjectOpeningBanner, { OPENING_STRIP_DELAY_MS } from './ProjectOpeningBanner'
 import { useUIStore } from '../store/uiStore'
 
-afterEach(() => { cleanup(); useUIStore.getState().setOpeningProject(null) })
+beforeEach(() => { vi.useFakeTimers() })
+afterEach(() => { cleanup(); useUIStore.getState().setOpeningProject(null); vi.useRealTimers() })
+
+function open(target: string) {
+  render(<ProjectOpeningBanner />)
+  act(() => { useUIStore.getState().setOpeningProject(target) })
+}
 
 describe('ProjectOpeningBanner', () => {
   it('renders nothing when no project is opening', () => {
     render(<ProjectOpeningBanner />)
     expect(screen.queryByTestId('project-opening')).toBeNull()
   })
-  it('shows a progress bar naming the project while it opens', () => {
-    useUIStore.getState().setOpeningProject('concentrator')
-    render(<ProjectOpeningBanner />)
+  it('stays hidden for a quick open', () => {
+    open('concentrator')
+    act(() => { vi.advanceTimersByTime(OPENING_STRIP_DELAY_MS - 100) })
+    expect(screen.queryByTestId('project-opening')).toBeNull()
+  })
+  it('shows a progress bar naming the project once the open is slow', () => {
+    open('concentrator')
+    act(() => { vi.advanceTimersByTime(OPENING_STRIP_DELAY_MS + 10) })
     expect(screen.getByRole('progressbar', { name: 'Opening concentrator' })).toBeTruthy()
-    expect(screen.getByText(/Opening concentrator/)).toBeTruthy()
+  })
+  it('never shows a raw UUID', () => {
+    open('3f2b8c1e-9d4a-4e7b-8a61-0c5d2e9f7a13')
+    act(() => { vi.advanceTimersByTime(OPENING_STRIP_DELAY_MS + 10) })
+    expect(screen.getByRole('progressbar', { name: 'Opening project' })).toBeTruthy()
+    expect(screen.queryByText(/3f2b8c1e/)).toBeNull()
   })
 })
