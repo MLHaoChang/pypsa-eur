@@ -14,6 +14,7 @@ import { HelpCircle } from 'lucide-react'
 import { create } from 'zustand'
 import client from '../api/client'
 import { useUIStore } from '../store/uiStore'
+import { useChatReadiness } from '../hooks/useChatProfiles'
 
 export interface GuideStep {
   target: string
@@ -21,6 +22,11 @@ export interface GuideStep {
   body: string
   enter?: string
   reveal?: string
+  /** Control clicked every time the step is entered (a stepper section), so the
+   *  tour opens the section it describes even when its target is on screen. */
+  jump?: string
+  /** Extra sentence shown only while the assistant is set up. */
+  assistant?: string
   optional?: boolean
   /** The control only exists once a study has run (report, pipeline, …). */
   after_run?: boolean
@@ -29,6 +35,8 @@ export interface GuideStep {
 export interface GuideTour {
   title: string
   intro?: string
+  /** Replaces `intro` while the assistant is set up. */
+  intro_assistant?: string
   steps: GuideStep[]
 }
 
@@ -70,6 +78,24 @@ export function tourSeen(tourId: string): boolean {
     return window.localStorage.getItem(SEEN_PREFIX + tourId) === '1'
   } catch {
     return false
+  }
+}
+
+const OFFER_PREFIX = 'pypsa-guide-offered:'
+
+function offeredFor(tourId: string, project: string): boolean {
+  try {
+    return window.localStorage.getItem(`${OFFER_PREFIX}${tourId}:${project}`) === '1'
+  } catch {
+    return true // storage blocked: never nag on every render
+  }
+}
+
+function markOffered(tourId: string, project: string): void {
+  try {
+    window.localStorage.setItem(`${OFFER_PREFIX}${tourId}:${project}`, '1')
+  } catch {
+    /* blocked storage: offered is remembered for this page load only */
   }
 }
 
@@ -161,6 +187,7 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
   onClose: () => void
 }) {
   const { data, isError } = useGuide(topic)
+  const assistantOn = useChatReadiness().ready === true
   const tour = data?.tours?.[tourId]
   // While a tour is on screen Guided must not auto-open hubDesign over its
   // targets (guided-mode spec §10 addendum, gate P23 B2).
@@ -226,6 +253,7 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
   // Locate (and if needed reveal) the step's target.
   useLayoutEffect(() => {
     if (!step) return
+    if (step.jump) findTarget(step.jump)?.click()
     let el = findTarget(step.target)
     let retry: ReturnType<typeof setTimeout> | undefined
     if (!el && step.reveal) {
@@ -366,10 +394,10 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
           {tour.title} · {position}/{total}
         </div>
         {isFirst && tour.intro && (
-          <p className="mb-2 text-muted" data-testid="guide-intro">{tour.intro}</p>
+          <p className="mb-2 text-muted" data-testid="guide-intro">{assistantOn && tour.intro_assistant ? tour.intro_assistant : tour.intro}</p>
         )}
         <h4 className="font-semibold" data-testid="guide-step-title">{step.title}</h4>
-        <p className="mt-1" data-testid="guide-step-body" aria-live="polite">{step.body}</p>
+        <p className="mt-1" data-testid="guide-step-body" aria-live="polite">{step.body}{assistantOn && step.assistant ? ` ${step.assistant}` : ''}</p>
         {step.enter && (
           <p className="mt-1 text-accent" data-testid="guide-step-enter">
             <span className="font-semibold">What to enter: </span>{step.enter}
@@ -433,14 +461,22 @@ export function GuidedTourHost() {
 /** "Guide" button that starts a tour; dotted until the tour was finished.
  *  `prepare` (optional) runs and is awaited before the tour mounts; a failed
  *  prepare still opens the tour, which then notes the missing target. */
-export function GuideButton({ tourId, testId, label = 'Guide', prepare }: {
+export function GuideButton({ tourId, testId, label = 'Guide', prepare, autoOfferFor }: {
   tourId: string
   testId: string
   label?: string
   prepare?: () => void | Promise<void>
+  /** A project name: the tour opens by itself once for that project, the first
+   *  time this is non-null (TOUR-AUTO-1). Null: opt-in only. */
+  autoOfferFor?: string | null
 }) {
   const [open, setOpen] = useState(false)
   const [seen, setSeen] = useState(() => tourSeen(tourId))
+  useEffect(() => {
+    if (!autoOfferFor || offeredFor(tourId, autoOfferFor)) return
+    markOffered(tourId, autoOfferFor)
+    setOpen(true)
+  }, [autoOfferFor, tourId])
   const start = async () => {
     // The host already shows this tour (e.g. launched from Results, then the
     // Bus card's own button): don't stack a second identical overlay.

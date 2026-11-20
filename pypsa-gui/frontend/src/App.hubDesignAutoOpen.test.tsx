@@ -97,6 +97,7 @@ function renderApp() {
 }
 
 beforeEach(() => {
+  for (const p of ['Demo', 'Fresh', 'Other', 'P1', 'P2']) window.localStorage.setItem(`pypsa-guide-offered:hub_design:${p}`, '1')
   chatPanelMounts.current = 0
   useUIStore.setState({
     activeSlidePanel: null,
