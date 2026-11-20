@@ -55,3 +55,7 @@ goes to GK A as well as GK B.
   Fixed: the worker reads the cap again under the lock it captures the revision under, and fails
   the study naming both values. Two lock-entry tests cover it (route and chat).
 - Follow-up filed: `02d-readiness-preview-import-cap.md` (`GET /eh_readiness` without a cap still previews 50 MW).
+- 2026-11-20 GK B 68 NOT OK @e4a46332 (#1772): (1) the exact float compare refused a matching cap
+  (links 10.7 + 12.6 MW sum to 23.299999999999997). Fixed: `_same_mw` (`math.isclose`, rel 1e-9) at
+  the start check and at worker entry; two-link tests by route and chat. (2) The P6 cache finding and
+  (3) the mutant counts are now stated in the PR body.
