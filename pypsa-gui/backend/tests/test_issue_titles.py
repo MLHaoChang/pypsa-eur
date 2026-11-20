@@ -45,3 +45,13 @@ def test_a_validation_issue_serialises_with_its_title():
     d = Issue("error", "bus_v_nom_invalid", "Bus", "b", "v_nom must be > 0 (got 0).").to_dict()
     assert d["title"] == "Bus voltage must be positive"
     assert d["message"].startswith("v_nom")
+
+
+def test_every_cycling_code_has_a_title():
+    """The engine preflight's own codes reach the readiness list too (template-e2e 14:
+    the IPP template showed "Commercial.arbitrage loop via storage")."""
+    from services.commercial.preflight import CYCLING_CODES
+
+    assert [c for c in CYCLING_CODES if c not in ISSUE_TITLES] == []
+    assert issue_title("commercial.arbitrage_loop_via_storage") == issue_title(
+        "tariff_export_exceeds_import_via_storage")

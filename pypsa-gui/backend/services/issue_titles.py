@@ -131,6 +131,9 @@ ISSUE_TITLES: dict[str, str] = {
     # Tariff sanity (decision study)
     "tariff_export_exceeds_import": "Export pays more than import in some hours",
     "tariff_export_exceeds_import_via_storage": "Export pays more than import after storage losses",
+    # The engine preflight's own codes for the same two findings (template-e2e 14).
+    "commercial.arbitrage_loop": "Export pays more than import in some hours",
+    "commercial.arbitrage_loop_via_storage": "Export pays more than import after storage losses",
 
     # Commercial preflight
     "commercial.grid_connection_double_count": "Grid connection may be paid twice",
