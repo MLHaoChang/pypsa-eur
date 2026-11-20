@@ -432,8 +432,50 @@ def test_an_old_stored_report_hashes_and_renders_as_on_master():
 # ── the UI's figures (fixture) ──────────────────────────────────────────────
 
 
+#: Rows no template has (a zero, a missing size, a bare minimum, a tonne
+#: store...): the fixture's ``_edge`` case, which the frontend test renders too.
+EDGE_ASSETS = [
+    {"component": "Generator", "name": "off", "carrier": "solar", "built_mw": 0.004,
+     "min_mw": 0.0, "max_mw": None, "unit": "MW"},
+    {"component": "Generator", "name": "unsolved", "carrier": None, "built_mw": None,
+     "min_mw": 2.0, "max_mw": None, "unit": "MW"},
+    {"component": "Link", "name": "fixed_floor", "carrier": "AC", "built_mw": 0.005,
+     "min_mw": 1.5, "max_mw": 9.999, "unit": "MW"},
+    {"component": "StorageUnit", "name": "bess_bare", "carrier": "battery",
+     "built_mw": 1234.567, "min_mw": None, "max_mw": 2000.0, "unit": "MW"},
+    {"component": "StorageUnit", "name": "tank_th", "carrier": "nh3",
+     "built_mw": 3.0, "min_mw": 0.0, "max_mw": 5.0, "unit": "t/h",
+     "max_hours": None, "built_mwh": 72.0},
+    {"component": "Store", "name": "silo", "carrier": "ore", "built_mwh": 0.0,
+     "min_mwh": 0.0, "max_mwh": 400.0, "min_mw": 999.0, "max_mw": 1.0, "unit": "t"},
+    {"component": "Store", "name": "silo_unsolved", "carrier": "ore",
+     "built_mwh": None, "built_mw": 5.0, "min_mwh": 10.0, "max_mwh": None, "unit": "t"},
+    {"component": "Store", "name": "h2_cav", "carrier": "H2", "built_mwh": -0.0001,
+     "built_mw": 3.0, "unit": "MWh"},
+]
+
+
+def _cells(assets: list[dict]) -> tuple[dict, dict]:
+    rows = E._t_sized_assets({"assets": assets}).rows
+    return {r[-4]: r[-2] for r in rows}, {r[-4]: r[-1] for r in rows}
+
+
 def test_fixture_covers_every_template():
-    assert set(json.loads(FIXTURE.read_text())) == set(TEMPLATES)
+    assert set(json.loads(FIXTURE.read_text())) == set(TEMPLATES) | {"_edge"}
+
+
+def test_edge_rows_render_as_the_ui_fixture_pins_them():
+    case = json.loads(FIXTURE.read_text())["_edge"]
+    assert case["assets"] == EDGE_ASSETS
+    assert _cells(EDGE_ASSETS) == (case["built"], case["range"])
+    assert case["built"] == {
+        "off": "none built", "unsolved": "not reported", "fixed_floor": "0.01 MW",
+        "bess_bare": "1,234.57 MW", "tank_th": "3 t/h · 72 t", "silo": "none built",
+        "silo_unsolved": "not reported", "h2_cav": "none built"}
+    assert case["range"] == {
+        "off": "no limit", "unsolved": "at least 2 MW", "fixed_floor": "1.5–10 MW",
+        "bess_bare": "up to 2,000 MW", "tank_th": "0–5 t/h", "silo": "0–400 t",
+        "silo_unsolved": "at least 10 t", "h2_cav": "no limit"}
 
 
 @pytest.mark.parametrize("tid", TEMPLATES)
@@ -441,8 +483,7 @@ def test_report_built_cell_matches_the_ui_fixture(tid):
     """The report's Built cell is the string the frontend test pins for
     Guided and Expert (``SizedDesignTable.parity.test.tsx``)."""
     case = json.loads(FIXTURE.read_text())[tid]
-    built = {r[-4]: r[-2] for r in E._t_sized_assets({"assets": case["assets"]}).rows}
-    assert built == case["built"]
+    assert _cells(case["assets"]) == (case["built"], case["range"])
     # The fixture is this template's own rows (rebuild it if a template changes).
     _n, payload = _payload(tid)
     assert payload["assets"] == case["assets"]
@@ -454,10 +495,10 @@ def _write_fixture() -> None:
     out = {}
     for tid in TEMPLATES:
         _n, payload = _payload(tid)
-        out[tid] = {
-            "assets": payload["assets"],
-            "built": {r[-4]: r[-2] for r in E._t_sized_assets(payload).rows},
-        }
+        built, rng = _cells(payload["assets"])
+        out[tid] = {"assets": payload["assets"], "built": built, "range": rng}
+    built, rng = _cells(EDGE_ASSETS)
+    out["_edge"] = {"assets": EDGE_ASSETS, "built": built, "range": rng}
     FIXTURE.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE.write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n")
 
@@ -494,3 +535,55 @@ def test_a_link_with_the_grid_bus_on_bus1_and_another_port_is_site_side():
     n.links["bus2"] = ""
     n.links.loc["grid_export", "bus2"] = "grid"
     assert R.sizing_summary_from_network(n)["by_carrier"] == {"grid": 500.0, "solar": 4.0}
+
+
+# ── guards the second mutant run named ──────────────────────────────────────
+
+
+def test_a_single_period_peak_has_no_per_period_split():
+    n = _site()
+    n._objective = 1.0
+    p = _with_import(n, pd.Series([10.0, 30.0, 5.0], index=n.snapshots))
+    assert p["grid_import_peak_mw"] == 30.0 and p["grid_import_peak_by_period"] is None
+
+
+def test_slacks_on_the_grid_bus_are_neither_supply_nor_installed():
+    n = _site()
+    n.add("Generator", "__voll_grid", bus="grid", carrier="voll", p_nom=900.0)
+    n.add("Generator", "__buy_power", bus="grid", carrier="grid", p_nom=700.0)
+    n.add("Generator", "shed", bus="site", carrier="load_shedding", p_nom=60.0)
+    n.generators["process_role"] = ""
+    n.generators.loc["__buy_power", "process_role"] = "buy_in"
+    p = R.sizing_summary_from_network(n)
+    assert p["grid_supply_mw"] == 500.0 and p["by_carrier"] == {"solar": 4.0}
+
+
+def test_a_line_named_like_the_import_link_is_site_side():
+    n = _site()
+    n.add("Line", "grid_import", bus0="grid", bus1="site", x=0.1, s_nom=10.0)
+    assert R.sizing_summary_from_network(n)["by_carrier"] == {"grid": 500.0, "solar": 4.0}
+
+
+def test_no_import_link_keeps_import_capacitys_own_refusal():
+    p = R.sizing_summary_from_network(_site(with_link=False, poc=False))
+    assert p["grid_connection_refusal"] not in (None, R.NO_REQUEST_REFUSAL)
+
+
+def test_a_poc_with_no_generator_and_no_link_is_not_unbounded():
+    n = _site(with_link=False)
+    n.remove("Generator", "grid_supply")
+    assert R.sizing_summary_from_network(n)["connection_check"] != "unbounded"
+
+
+def test_a_link_elsewhere_leaves_an_unlinked_poc_unbounded():
+    n = _site(with_link=False)
+    n.add("Bus", "heat")
+    n.add("Link", "boiler", bus0="site", bus1="heat", p_nom=5.0)
+    assert R.sizing_summary_from_network(n)["connection_check"] == "unbounded"
+
+
+def test_a_zero_minimum_is_no_limit_and_an_asset_without_carrier_is_its_kind():
+    a = {"name": "g", "component": "Generator", "carrier": None, "min_mw": 0.0,
+         "max_mw": None, "p_nom_opt": 1.0}
+    assert E._sized_range(a) == "no limit"
+    assert E._t_sized_assets({"assets": [a]}).rows[0][1] == "Generator"
