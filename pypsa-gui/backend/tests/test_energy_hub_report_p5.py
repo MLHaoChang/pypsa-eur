@@ -112,6 +112,7 @@ def test_sizing_lists_each_asset_the_study_sized():
             "built_mw": pytest.approx(4.2),
             "min_mw": 0.0,
             "max_mw": 12.0,
+            "unit": "MW",
         },
         {
             "component": "StorageUnit",
@@ -122,6 +123,7 @@ def test_sizing_lists_each_asset_the_study_sized():
             "max_mw": 15.0,
             "max_hours": 4.0,
             "built_mwh": pytest.approx(10.0),
+            "unit": "MW",
         },
         {
             "component": "Link",
@@ -131,6 +133,7 @@ def test_sizing_lists_each_asset_the_study_sized():
             "min_mw": 0.0,
             "max_mw": None,
             "basis": "bus0",
+            "unit": "MW",
         },
         {
             "component": "Store",
@@ -139,6 +142,7 @@ def test_sizing_lists_each_asset_the_study_sized():
             "built_mwh": 30.0,
             "min_mwh": 0.0,
             "max_mwh": 500.0,
+            "unit": "MWh",
         },
     ]
     assert sizing["assets_solved"] is True

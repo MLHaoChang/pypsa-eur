@@ -55,34 +55,226 @@ def _is_slack(name: Any, carrier: str) -> bool:
     return str(name).startswith("__voll") or carrier in _SLACK_CARRIERS
 
 
-def sizing_summary_from_network(n) -> dict[str, Any]:
-    """Installed p_nom by generator carrier (MVP-A sizing section)."""
+#: ``process_role`` of a product bus's slack generators: bought in or lost,
+#: never installed (``services.asset_schema.entries``). Read by role, never by
+#: carrier name (GK A 33 S3).
+_PRODUCT_SLACK_ROLES = frozenset({"buy_in", "shortfall"})
+
+#: How far the peak import may sit above the connection limit and still read
+#: "within": float summing of the import Links' flows, never a real overload.
+CONNECTION_TOL_MW = 1e-6
+
+#: The request ``import_capacity`` reads when the caller gives none. Its pack
+#: only matters to the carrier rule (3) of the import-Link selection; the
+#: ``eh_role`` and ``eh_poc`` rules every template uses read the network alone.
+_DEFAULT_REQUEST = {"archetype": "strong_grid"}
+
+NO_REQUEST_REFUSAL = ("The grid import links are not marked (eh_role grid_import or a bus "
+                      "tagged eh_poc), and without the study's site type the connection "
+                      "limit can't be read.")
+
+
+def _picked_by_carrier(n) -> bool:
+    """True when the import Links are picked by the carrier rule (3) alone:
+    neither ``eh_role`` nor ``eh_poc`` marks them."""
+    from services.adequacy import archetypes as arch
+    from services.flow_service import _pack_for
+
+    _links, rule = arch.select_import_links_with_rule(n, _pack_for(_DEFAULT_REQUEST).import_overlay)
+    return rule not in ("eh_role", "eh_poc")
+
+
+def _p_nom(row) -> float:
+    """A generator's installed size: its ``p_nom_opt`` when that is finite and
+    above zero (a solve's), else ``p_nom``."""
+    opt = _finite(row.get("p_nom_opt"))
+    if opt is not None and opt > 0:
+        return opt
+    return _finite(row.get("p_nom")) or 0.0
+
+
+def _weighted_energy(n, name: str) -> float | None:
+    """A solved generator's output over the horizon, snapshot-weighted."""
+    p = getattr(n.generators_t, "p", None)
+    if not getattr(n, "is_solved", False) or p is None or name not in p.columns:
+        return None
+    return float((p[name] * n.snapshot_weightings.generators).sum())
+
+
+def _site_side(n, bus: str, links: set[str]) -> list[str]:
+    """What else sits on a grid-side bus besides the import Links: loads,
+    stores, storage, another Link, a Line or a Transformer. Empty: the bus is
+    the grid's alone (GK A 33 S2)."""
+    found: list[str] = []
+    for word, table in (("load", n.loads), ("store", n.stores),
+                        ("storage unit", n.storage_units)):
+        if not table.empty and "bus" in table.columns:
+            found += [f"{word} {x}" for x in table.index[table["bus"].astype(str) == bus]]
+    for word, table in (("link", n.links), ("line", n.lines), ("transformer", n.transformers)):
+        if table.empty:
+            continue
+        # Every port: a multi-port Link can draw from the bus on bus2, bus3...
+        ports = [c for c in table.columns if c.startswith("bus") and c[3:].isdigit()]
+        ends = table[ports].astype(str).eq(bus).any(axis=1)
+        found += [f"{word} {x}" for x in table.index[ends]
+                  if not (word == "link" and (str(x) in links or _export_only(n, str(x), bus)))]
+    return found
+
+
+def _export_only(n, link: str, bus: str) -> bool:
+    """A Link that only delivers INTO ``bus``: an export to the grid, which
+    carries no grid power into the site. ``bus`` is its ``bus1`` and on no
+    other port, and it never reverses or draws: ``p_min_pu`` not below 0 and
+    ``efficiency`` above 0, static and in their series (GK A 33)."""
+    row = n.links.loc[link]
+    ports = [c for c in n.links.columns if c.startswith("bus") and c[3:].isdigit()]
+    if str(row["bus1"]) != bus or any(
+            str(row[c]) == bus for c in ports if c != "bus1"):
+        return False
+    for attr, ok in (("p_min_pu", lambda v: v >= 0), ("efficiency", lambda v: v > 0)):
+        values = [float(row.get(attr, 0.0 if attr == "p_min_pu" else 1.0))]
+        series = getattr(n.links_t, attr, None)
+        if series is not None and link in series.columns:
+            values += [float(series[link].min())]
+        if not all(ok(v) for v in values):
+            return False
+    return True
+
+
+def _import_peaks(n, links: tuple[str, ...]) -> dict[Any, float] | None:
+    """The peak import through ``links`` per period (one key, None, on a
+    single-period network): the max over snapshots of their summed ``p0``,
+    import positive, in the bus unit; a horizon (or period) with no import
+    peaks at 0, never a negative "import" (GK A 33). None when unsolved."""
+    flows = getattr(n.links_t, "p0", None)
+    if not getattr(n, "is_solved", False) or flows is None or not links:
+        return None
+    cols = [c for c in links if c in flows.columns]
+    if not cols:
+        return None
+    total = flows[cols].sum(axis=1).clip(lower=0.0)
+    if len(getattr(n, "investment_periods", ())) > 0:
+        return {int(k): float(v) for k, v in total.groupby(level=0).max().items()}
+    return {None: float(total.max())}
+
+
+def _connection(n, request: dict | None) -> tuple[dict[str, Any], set[str]]:
+    """The grid connection as the study reads it, and the generators that are
+    grid supply beyond it (never installed capacity).
+
+    The limit is `flow_service.import_capacity`, the one reading readiness and
+    the run take (GK A 33 S1): refused, it is None with the refusal's words,
+    never a number or "within". A generator is grid supply when it sits on the
+    grid side of an import Link and that bus holds nothing of the site's; one
+    beside site equipment is counted, with the reason. A generator at the PoC
+    with no Link to it is the grid itself, with no limit between: "unbounded"
+    (SH 40's PCC rule, GK A 33 S2)."""
+    from services.adequacy.archetypes import _poc_buses
+    from services.flow_service import ImportCapacity, import_capacity
+
+    cap = import_capacity(n, request or _DEFAULT_REQUEST)
+    if request is None and cap.links and _picked_by_carrier(n):
+        # Without the study's request the pack is a placeholder: a pick by the
+        # carrier rule (3) is the placeholder's, never the network's (GK A 33).
+        cap = ImportCapacity((), None, NO_REQUEST_REFUSAL)
+    links = set(cap.links)
+    grid_side = ({str(n.links.at[x, "bus0"]) for x in cap.links} if cap.links else set())
+    supply: set[str] = set()
+    counted: list[str] = []
+    unbounded = False
+    gens = n.generators
+    for bus in sorted(grid_side | _poc_buses(n)):
+        here = [str(g) for g in gens.index[gens["bus"].astype(str) == bus]] if not gens.empty else []
+        here = [g for g in here if not _is_slack(g, str(gens.at[g, "carrier"] or ""))
+                and str(gens.at[g, "process_role"] if "process_role" in gens.columns else "")
+                not in _PRODUCT_SLACK_ROLES]
+        if not here:
+            continue
+        ports = [c for c in n.links.columns if c.startswith("bus") and c[3:].isdigit()]
+        touching = not n.links.empty and bool(n.links[ports].astype(str).eq(bus).any(axis=None))
+        if not touching:
+            supply.update(here)
+            unbounded = True
+            continue
+        if bus not in grid_side:
+            counted += [f"{g} is counted: bus {bus} is marked as the point of connection, "
+                        "but no grid import link leaves it" for g in here]
+            continue
+        others = _site_side(n, bus, links)
+        if others:
+            counted += [f"{g} is counted: bus {bus} also holds {', '.join(others)}" for g in here]
+        else:
+            supply.update(here)
+    peaks = None if unbounded else _import_peaks(n, cap.links)
+    peak = max(peaks.values()) if peaks else None
+    if unbounded:
+        check = "unbounded"
+    elif cap.mw is None or peaks is None:
+        check = None
+    else:
+        over = any(v > cap.mw + CONNECTION_TOL_MW for v in peaks.values())
+        check = "exceeds" if over else "within"
+    return {
+        "grid_connection_mw": None if unbounded else cap.mw,
+        "grid_connection_refusal": None if unbounded else cap.refusal,
+        "grid_supply_mw": float(sum(_p_nom(gens.loc[g]) for g in sorted(supply))),
+        "grid_supply_counted": counted,
+        "grid_import_peak_mw": peak,
+        "grid_import_peak_by_period": ({str(k): v for k, v in peaks.items()}
+                                       if peaks and None not in peaks else None),
+        "connection_check": check,
+    }, supply
+
+
+def _product_slacks(n) -> list[dict[str, Any]]:
+    """A product's buy-in and shortfall generators (by ``process_role``):
+    never installed, never hidden either (GK A 33 S3). Each with its size, its
+    energy over the horizon when solved, and its bus's units."""
+    from services.flow_service import _size_unit
+
+    gens = n.generators
+    if gens.empty or "process_role" not in gens.columns:
+        return []
+    out = []
+    for name in gens.index[gens["process_role"].isin(_PRODUCT_SLACK_ROLES)]:
+        row = gens.loc[name]
+        out.append({"name": str(name), "process_role": str(row["process_role"]),
+                    "carrier": str(row.get("carrier", "") or ""),
+                    "p_nom": _p_nom(row), "energy": _weighted_energy(n, str(name)),
+                    "unit": _size_unit(n, row.get("bus"), stock=False),
+                    "energy_unit": _size_unit(n, row.get("bus"), stock=True)})
+    return out
+
+
+def sizing_summary_from_network(n, request: dict | None = None) -> dict[str, Any]:
+    """Installed p_nom by generator carrier (MVP-A sizing section), the grid
+    connection and the product slacks beside it, and every asset the study
+    sized.
+
+    Installed capacity is the site's own generation: the grid supply behind
+    the connection (``_connection``), a product's buy-in or shortfall and the
+    VOLL / DSR slacks are not counted. ``request`` is the study's request
+    (its pack picks the import Links); without one, the network's own
+    ``eh_role`` / ``eh_poc`` marks pick them (issue template-e2e 20)."""
+    connection, supply = _connection(n, request)
+    slacks = _product_slacks(n)
+    left_out = supply | {s["name"] for s in slacks}
     by_carrier: dict[str, float] = {}
     total = 0.0
     if n.generators is not None and not n.generators.empty:
         for name, row in n.generators.iterrows():
-            # Skip VOLL / DSR slack generators if tagged.
             carrier = str(row.get("carrier", "") or "")
-            if _is_slack(name, carrier):
+            if _is_slack(name, carrier) or str(name) in left_out:
                 continue
-            try:
-                p_nom = float(row.get("p_nom", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                p_nom = 0.0
-            # Prefer optimised capacity when present and finite.
-            if "p_nom_opt" in n.generators.columns:
-                try:
-                    opt = float(row.get("p_nom_opt"))
-                    if opt == opt and opt > 0:  # not NaN
-                        p_nom = opt
-                except (TypeError, ValueError):
-                    pass
+            p_nom = _p_nom(row)
             key = carrier or "unknown"
             by_carrier[key] = by_carrier.get(key, 0.0) + p_nom
             total += p_nom
     return {
         "by_carrier": {k: float(v) for k, v in sorted(by_carrier.items())},
         "total_p_nom_mw": float(total),
+        **connection,
+        "product_slacks": slacks,
         "assets": sized_assets(n),
         # False: the network was not solved, so `assets` carry no built size.
         "assets_solved": bool(getattr(n, "is_solved", False)),
@@ -113,7 +305,10 @@ def sized_assets(n) -> list[dict[str, Any]]:
     row is that asset's one build. On a network
     that was not solved the built figures are None, never ``p_nom`` shown as
     built (``solved``) (walkthrough asset-investment 03, GK A 30 A5)."""
+    from services.flow_service import _size_unit
+
     solved = bool(getattr(n, "is_solved", False))
+    staged = len(getattr(n, "investment_periods", ())) > 0
     rows: list[dict[str, Any]] = []
     for component, table, stem in _SIZED:
         df = getattr(n, table, None)
@@ -135,6 +330,14 @@ def sized_assets(n) -> list[dict[str, Any]]:
             }
             if component == "Link":
                 out["basis"] = "bus0"
+            # The size's own unit (MW or t/h, MWh or t), from its bus as
+            # section 5 reads it, so the report and the UI print one unit.
+            out["unit"] = _size_unit(n, row.get("bus0" if component == "Link" else "bus"),
+                                     stock=component == "Store")
+            if staged:
+                # The period a staged build lands in (one candidate per period).
+                year = _finite(row.get("build_year"))
+                out["stage"] = int(year) if year is not None else None
             if component == "StorageUnit":
                 hours = _finite(row.get("max_hours"))
                 out["max_hours"] = hours
