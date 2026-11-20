@@ -1,5 +1,7 @@
 import type { FlowHeld, FlowSectionId, FlowTarget } from '../../api/flow'
 import { componentLabel } from '../../utils/componentLabels'
+import type { EhSizedAsset } from '../../api/simulation'
+import { sizedBuilt } from '../results/SizedDesignTable'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
 import { recipeFigure } from '../../utils/recipe'
 
@@ -30,13 +32,18 @@ export function heldKind(h: FlowHeld): string {
 
 /** The row's one figure in words, with its unit; null for a carrier. A missing
  *  figure says why instead of showing a dash. */
-export function heldFigure(section: FlowSectionId, h: FlowHeld): string | null {
+export function heldFigure(section: FlowSectionId, h: FlowHeld, sized?: EhSizedAsset): string | null {
   if (section === 'carriers') return h.recipe ? recipeFigure(h.recipe) : null
   if (section === 'profiles') {
     const word = h.field && (SERIES_WORDS[h.field] ?? FIELD_LABELS[h.field])
     return word ? `${word} time series` : 'Time series'
   }
   const label = section === 'loads' ? PEAK_LOAD : (h.field && FIELD_LABELS[h.field]) || 'Size'
+  // After a study, the size it chose (walkthrough asset-investment 03).
+  // The row's own unit (MW, or t/h on a tonne bus), never an assumed MW.
+  if (h.extendable && sized && sizedBuilt(sized, h.unit) !== 'not reported') {
+    return `${label}: ${sizedBuilt(sized, h.unit)} (by the last study)`
+  }
   if (h.extendable) return `${label}: sized by the study`
   if (h.value === null) return `${label}: ${h.series ? 'its profile has no values yet' : 'not set'}`
   return `${label}: ${number(h.value)}${h.unit ? ` ${h.unit}` : ''}`

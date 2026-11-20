@@ -140,7 +140,7 @@ describe('display only', () => {
     expect(bars).not.toHaveBeenCalled()
     expect(helper).not.toHaveBeenCalled()
     // The card does, and only for its own line.
-    render(<GenericSectionCard id="assets" />)
+    render(<QueryClientProvider client={new QueryClient()}><GenericSectionCard id="assets" /></QueryClientProvider>)
     expect(line).toHaveBeenCalled()
   })
 })

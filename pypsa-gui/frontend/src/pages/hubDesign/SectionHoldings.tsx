@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FlowHeld, FlowSectionId } from '../../api/flow'
+import type { EhSizedAsset } from '../../api/simulation'
 import { openFlowTargetInPlace, openSectionInExpert, openTimeSeriesFor, withReturnFrom } from '../../layout/flowNavigation'
 import { SectionSummary } from './SectionSummary'
 import { helperName, isHelper } from './holdSummary'
@@ -19,8 +20,8 @@ function edit(section: FlowSectionId, h: FlowHeld): void {
   else withReturnFrom(() => openSectionInExpert(section))
 }
 
-function Row({ section, h }: { section: FlowSectionId; h: FlowHeld }) {
-  const figure = heldFigure(section, h)
+function Row({ section, h, sized }: { section: FlowSectionId; h: FlowHeld; sized?: EhSizedAsset }) {
+  const figure = heldFigure(section, h, sized)
   // A helper the model adds reads in plain words, never its engine id (spec §3).
   const name = isHelper(h) ? helperName(h.entity) : h.entity
   return (
@@ -40,8 +41,9 @@ function Row({ section, h }: { section: FlowSectionId; h: FlowHeld }) {
 
 /** `counted` is false when the server cut the list short: a group's rows are
  *  then not all of its class, so the title carries no number. */
-function Group({ section, title, rows, counted }: {
+function Group({ section, title, rows, counted, sized }: {
   section: FlowSectionId; title: string | null; rows: FlowHeld[]; counted: boolean
+  sized?: Map<string, EhSizedAsset>
 }) {
   const [all, setAll] = useState(false)
   const shown = all || rows.length <= FOLD_AFTER ? rows : rows.slice(0, FOLD_AFTER)
@@ -50,7 +52,8 @@ function Group({ section, title, rows, counted }: {
     <div data-testid="section-held-group">
       {title && <p className="pb-0.5 text-[11px] font-medium text-muted">{counted ? `${title} (${rows.length})` : title}</p>}
       <ul className="flex flex-col divide-y divide-border">
-        {shown.map(h => <Row key={`${h.component}:${h.entity}:${h.field ?? ''}`} section={section} h={h} />)}
+        {shown.map(h => <Row key={`${h.component}:${h.entity}:${h.field ?? ''}`} section={section} h={h}
+          sized={sized?.get(`${h.component}:${h.entity}`)} />)}
       </ul>
       {more > 0 && (
         <button type="button" data-testid="section-held-show-all" onClick={() => setAll(true)}
@@ -77,9 +80,11 @@ function Loading() {
   )
 }
 
-export function SectionHoldings({ id, holds, total, pending, failed, deferred = false }: {
+export function SectionHoldings({ id, holds, total, pending, failed, deferred = false, sized }: {
   id: FlowSectionId; holds: FlowHeld[] | undefined; total?: number; pending: boolean; failed: boolean
   deferred?: boolean
+  /** The last study's sizes by `Component:name` (walkthrough 03). */
+  sized?: Map<string, EhSizedAsset>
 }) {
   // A failed refetch keeps the last good list on screen.
   if (failed && !holds) {
@@ -103,7 +108,7 @@ export function SectionHoldings({ id, holds, total, pending, failed, deferred = 
     <div data-testid="section-held-list" className="flex flex-col gap-3">
       <SectionSummary id={id} holds={holds} total={total} />
       {groups.map(g => (
-        <Group key={g.component} section={id} rows={g.rows} counted={rest === null}
+        <Group key={g.component} section={id} rows={g.rows} counted={rest === null} sized={sized}
           title={groups.length > 1 ? groupTitle(g.component) : null} />
       ))}
       {rest && <p data-testid="section-held-rest" className="text-[11px] text-muted">{rest}</p>}

@@ -11,6 +11,7 @@ import { useUIStore } from '../../store/uiStore'
 import { AssumptionsCard, isAssumedItem } from './AssumptionsCard'
 import { CommercialCard } from './cards/CommercialCard'
 import { SectionHoldings } from './SectionHoldings'
+import { useSizedAssets } from './useHubData'
 import { ExpertOnlyLines } from './ExpertOnlyLines'
 import { GoalStudyRun } from './shared/GoalStudyRun'
 import { NextSectionButton } from '../../components/NextSectionButton'
@@ -111,6 +112,8 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   const { flow, section, isError, isPending } = useProjectFlow()
   const setActiveSection = useUIStore(s => s.setActiveSection)
   const gate = useRunGate('all')
+  // Section 5's sized assets read the last study's sizes (walkthrough asset-investment 03).
+  const sized = useSizedAssets(id === 'assets')
   if (id === 'readiness') {
     return (
       <div data-testid="hub-card-readiness" className="flex flex-col gap-2 rounded border border-border bg-panel p-4">
@@ -170,7 +173,7 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   return (
     <div data-testid={`hub-card-${id}`} className="flex flex-col gap-3 rounded border border-border bg-panel p-4">
       <SectionHoldings id={id} holds={s?.holds} total={s?.holds_total} pending={isPending} failed={isError}
-        deferred={flow?.deferred === true} />
+        deferred={flow?.deferred === true} sized={sized} />
       <div>
         <button type="button" data-testid={`section-open-expert-${id}`} onClick={() => openSectionInExpert(id)}
           className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
