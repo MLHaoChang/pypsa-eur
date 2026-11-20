@@ -17,6 +17,7 @@ import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { SiteCard } from './SiteCard'
 import { nk } from '../../../utils/queryKeys'
 import { campusApi, type GridReadiness } from '../../../api/campusElectrical'
+import { networkApi } from '../../../api/network'
 import { useScorecardOpen } from '../../../components/gridReadiness/GridReadinessScorecard'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
@@ -34,12 +35,19 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
 
 // The site type is the stored reliability goal's (W3b-R).
 const getReliabilityGoal = vi.fn()
+// A staged site's schedule (template-e2e 02b), as the flow's connection row reads it; none by default.
+const flowRow = vi.hoisted(() => ({ energization: undefined as unknown }))
+vi.mock('../../../api/network', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/network')>()
+  return { ...actual, networkApi: { ...actual.networkApi, getLinks: vi.fn().mockResolvedValue([]) } }
+})
 vi.mock('../../../api/flow', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/flow')>()
   // The connection limit the server reads from the network (template-e2e 02): the template's 40 MW.
   return { ...actual, getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a),
     getProjectFlow: async () => ({ run_ready: true, notes: [],
-      sections: [{ section: 'connection', connection_limit: { mw: 40, refusal: null, links: ['grid_import'] } }] }) }
+      sections: [{ section: 'connection', connection_limit: { mw: 40, refusal: null, links: ['grid_import'] },
+        energization: flowRow.energization }] }) }
 })
 
 vi.mock('../../../api/campusElectrical', async (importOriginal) => {
@@ -184,6 +192,30 @@ describe('SiteCard rows', () => {
 // P26 walkthrough: after reading the Site card a first-time user had no
 // forward button — only the numbered rail. "Next: Goal" moves the rail there,
 // as a manual move (like a rail click).
+describe('SiteCard connection limit on a staged site (template-e2e 02b)', () => {
+  beforeEach(() => {
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'grid_import', eh_role: 'grid_import', p_nom: 35 }] as never)
+    flowRow.energization = [{ link: 'grid_import', by_period: { '2035': { min: 30, max: 40 }, '2027': 15 } }]
+  })
+  afterEach(() => {
+    flowRow.energization = undefined; vi.mocked(networkApi.getLinks).mockResolvedValue([])
+    useUIStore.setState({ readOnly: false, readOnlyReason: 'writable' })
+  })
+
+  it('reads the limit per period in order, with an Edit into the drawer', async () => {
+    mount()
+    await waitFor(() => expect(text('hub-site-connection-limit')).toMatch(/Connection limit \(MW\): 2027 15 · 2035 varies 30–40/))
+    expect(screen.getByTestId('hub-site-connection-limit-edit')).toBeTruthy()
+  })
+
+  it('has no Edit while the project is read-only', async () => {
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' })
+    mount()
+    await waitFor(() => expect(text('hub-site-connection-limit')).toMatch(/2027 15/))
+    expect(screen.queryByTestId('hub-site-connection-limit-edit')).toBeNull()
+  })
+})
+
 describe('SiteCard next step', () => {
   it('"Next: Goal" moves the rail to Goal as a user move', async () => {
     const user = mount()

@@ -20,11 +20,13 @@ import { siteFixText, type SiteFix } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term, type TermKey } from '../shared/Term'
-import { useConnectionLimit, useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
+import { useConnectionLimit, useEnergization, useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
 import { displayName } from '../../../utils/displayName'
 import { openConnectionLimitEditor } from '../../../layout/flowNavigation'
 import { useCapacityUnit, useImportLinks, useStagedConnection } from '../../../components/gridReadiness/ConnectionLimits'
 import type { Link } from '../../../api/types'
+import type { FlowEnergization } from '../../../api/flow'
+import { energizationSummary } from '../../../components/gridReadiness/EnergizationRows'
 import { GridReadinessScorecard, summaryText, useGridReadiness, useScorecardOpen }
   from '../../../components/gridReadiness/GridReadinessScorecard'
 
@@ -104,20 +106,48 @@ function SiteRow({ k, term, label, row, liveStudy }: {
 
 /** The connection limit (template-e2e 02): read here, edited on the Connection limits line in the field
  *  drawer, the same editor Expert's Connection & grid shows. One row per import link. A staged site's
- *  energization schedule caps each period, so there the limit is shown with that reason and no Edit. */
+ *  link with an energization schedule reads its limit per period, edited as rows in that drawer
+ *  (template-e2e 02b); a staged one without a schedule is shown with that reason and no Edit. */
 function ConnectionLimitRows({ liveStudy }: { liveStudy: boolean }) {
   // The import links themselves, the record the editor writes, so a save shows here at once.
   const links = useImportLinks()
   const staged = useStagedConnection()
+  const schedules = useEnergization()
   return <>{links.map(l => (
-    <ConnectionLimitRow key={l.name} link={l} named={links.length > 1} staged={staged} liveStudy={liveStudy} />
+    <ConnectionLimitRow key={l.name} link={l} named={links.length > 1} staged={staged} liveStudy={liveStudy}
+      schedule={schedules.find(e => e.link === l.name)} />
   ))}</>
 }
 
-function ConnectionLimitRow({ link, named, staged, liveStudy }: {
-  link: Link; named: boolean; staged: boolean; liveStudy: boolean
+function ConnectionLimitRow({ link, named, staged, liveStudy, schedule }: {
+  link: Link; named: boolean; staged: boolean; liveStudy: boolean; schedule?: FlowEnergization
 }) {
   const unit = useCapacityUnit(link.name)
+  // No Edit while the project is read-only (another user's edit lock, or a solve).
+  const readOnly = useUIStore(s => s.readOnly)
+  if (schedule) {
+    return (
+      <li className="flex flex-wrap items-center gap-2 text-[12px]">
+        <span data-testid="hub-site-connection-limit" className="flex-1 min-w-[16rem]">
+          <span className="mr-1 text-success">✓</span>
+          {`Connection limit (${unit})${named ? ` · ${displayName(link.name)}` : ''}`}:{' '}
+          <span className="text-text tabular-nums">{energizationSummary(schedule)}</span>
+        </span>
+        {!readOnly && (
+          <button type="button" data-testid="hub-site-connection-limit-edit" disabled={liveStudy}
+            onClick={openConnectionLimitEditor}
+            className="shrink-0 text-[11px] text-text underline disabled:opacity-50">
+            Edit ›
+          </button>
+        )}
+        {!readOnly && liveStudy && (
+          <span data-testid="hub-site-connection-limit-paused" className="basis-full text-[11px] text-muted">
+            {LIVE_STUDY_EDIT}
+          </span>
+        )}
+      </li>
+    )
+  }
   return (
     <li className="flex flex-wrap items-center gap-2 text-[12px]">
       <span data-testid="hub-site-connection-limit" className="flex-1 min-w-[16rem]">

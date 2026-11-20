@@ -104,6 +104,14 @@ export interface FlowConnectionLimit {
   links: string[]
 }
 
+/** One scheduled link's energized limit per period (template-e2e 02b): a number is flat in that period
+ *  (editable), `{min, max}` varies inside it (read-only), null has no value. Keys are the periods in
+ *  the schedule's order, or `"all"` on a single-period network. */
+export interface FlowEnergization {
+  link: string
+  by_period: Record<string, number | { min: number; max: number } | null>
+}
+
 export interface FlowSection {
   section: FlowSectionId
   label: string
@@ -117,6 +125,8 @@ export interface FlowSection {
    *  (`flow_service.import_capacity`), the import links' summed capacity in MW,
    *  or why the network fixes none (`refusal`, `mw` null). */
   connection_limit?: FlowConnectionLimit
+  /** `connection` only, on a staged site: each scheduled link's energized limit per period. */
+  energization?: FlowEnergization[]
   /** Sections 2, 4, 5 and 6: what the section holds, for display only. */
   holds?: FlowHeld[]
   /** How many the section holds in all; `holds` stops at the server's cap. */
@@ -233,6 +243,14 @@ export function ackFlowItem(project: string, code: string, entity: string | null
 export function ackFlowItems(project: string, items: { code: string, entity: string | null }[]): Promise<FlowAck[]> {
   return client.post<{ acks: FlowAck[] }>(`${flowPath(project)}/ack-many`, { items })
     .then(r => r.data.acks)
+}
+
+/** Set one period of a link's energized limit, flat across the period (template-e2e 02b). 422 with
+ *  `energization_invalid_request` / `energization_invalid_mw` / `energization_no_schedule` /
+ *  `energization_unknown_period` / `energization_period_not_flat`; the row shows it, so no toast. */
+export function putFlowEnergization(project: string, body: { link: string; period: string; mw: number }):
+  Promise<{ link: string; period: string; mw: number; note: string | null; message: string }> {
+  return client.put(`${flowPath(project)}/energization`, body, { skipErrorToast: true }).then(r => r.data)
 }
 
 // ── The scope (W4a): six work cards, each with at most three sub-options ──────
