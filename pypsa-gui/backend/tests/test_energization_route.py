@@ -102,6 +102,7 @@ def test_the_route_names_the_rating_it_does_not_raise(client, tmp_projects_dir):
             "energization_invalid_request",
         ),
         ({"link": 3, "period": 2030, "mw": 30}, "energization_invalid_request"),
+        ({"link": "", "period": 2030, "mw": 30}, "energization_invalid_request"),
     ],
 )
 def test_each_refusal_is_a_typed_422_and_writes_nothing(
@@ -114,6 +115,21 @@ def test_each_refusal_is_a_typed_422_and_writes_nothing(
     assert r.json()["detail"]["error_kind"] == kind
     assert client.get("/api/network/undo/info").json()["depth"] == info["depth"]
     assert _row(client, name)["energization"][0]["by_period"] == AS_BUILT
+
+
+def test_an_edit_that_clears_no_dispatch_leaves_the_solver_state(
+    client, tmp_projects_dir, monkeypatch
+):
+    """D5 survivor (`if cleared:`): the solver state is reset only when the
+    edit cleared a solved dispatch; on an unsolved network it stays."""
+    from routers import simulation
+
+    name = _create(client, "eh_datacenter_staged", "staged02b_unsolved")
+    monkeypatch.setitem(simulation._state, "objective", 123.0)
+    r = _put(client, name, link=LINK, period=2030, mw=30.0)
+    assert r.status_code == 200, r.text
+    assert r.json()["dispatch_cleared"] is False
+    assert simulation._state["objective"] == 123.0
 
 
 @pytest.mark.parametrize("mw", [True, False])
