@@ -15,7 +15,9 @@ import re
 from pathlib import Path
 
 _BACKEND = Path(__file__).resolve().parents[1]
-NEEDS = _BACKEND.parent / "frontend/src/pages/results/investment/investmentCaseNeeds.json"
+NEEDS = (
+    _BACKEND.parent / "frontend/src/pages/results/investment/investmentCaseNeeds.json"
+)
 
 #: Where a run of the investment case refuses, and the call each refusal is.
 _SOURCES = {
@@ -44,7 +46,7 @@ def _start_route() -> str:
     refusal is a plain sentence, so only coded ones count)."""
     src = (_BACKEND / "routers/results.py").read_text()
     start = src.index("\ndef post_investment_case(")
-    return src[start:src.index("\n@", start)]
+    return src[start : src.index("\n@", start)]
 
 
 def _table() -> dict[str, list[str]]:
