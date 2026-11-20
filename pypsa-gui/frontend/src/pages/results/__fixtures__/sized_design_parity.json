@@ -25,6 +25,10 @@
   "built": {
    "genset_new": "20 MW",
    "bess_new": "15 MW · 60 MWh (4 h)"
+  },
+  "range": {
+   "genset_new": "0–40 MW",
+   "bess_new": "0–30 MW"
   }
  },
  "eh_datacenter_staged": {
@@ -103,6 +107,14 @@
    "bess_new_2030": "15 MW · 60 MWh (4 h)",
    "genset_new_2035": "20 MW",
    "bess_new_2035": "15 MW · 60 MWh (4 h)"
+  },
+  "range": {
+   "genset_new_2027": "0–40 MW",
+   "bess_new_2027": "0–30 MW",
+   "genset_new_2030": "0–40 MW",
+   "bess_new_2030": "0–30 MW",
+   "genset_new_2035": "0–40 MW",
+   "bess_new_2035": "0–30 MW"
   }
  },
  "eh_h2_hub": {
@@ -152,6 +164,12 @@
    "solar_new": "75 MW",
    "bess_new": "100 MW · 600 MWh (6 h)",
    "fuel_cell": "40 MW"
+  },
+  "range": {
+   "wind_new": "0–300 MW",
+   "solar_new": "0–150 MW",
+   "bess_new": "0–200 MW",
+   "fuel_cell": "10–80 MW"
   }
  },
  "eh_microgrid": {
@@ -180,6 +198,10 @@
   "built": {
    "diesel_new": "6 MW",
    "bess_new": "7.5 MW · 30 MWh (4 h)"
+  },
+  "range": {
+   "diesel_new": "0–12 MW",
+   "bess_new": "0–15 MW"
   }
  },
  "eh_h2_hub_staged": {
@@ -327,6 +349,20 @@
    "solar_new_2035": "40 MW",
    "bess_new_2035": "40 MW · 160 MWh (4 h)",
    "electrolyser_new_2035": "20 MW"
+  },
+  "range": {
+   "wind_new_2027": "0–150 MW",
+   "solar_new_2027": "0–80 MW",
+   "bess_new_2027": "0–80 MW",
+   "electrolyser_new_2027": "0–40 MW",
+   "wind_new_2030": "0–150 MW",
+   "solar_new_2030": "0–80 MW",
+   "bess_new_2030": "0–80 MW",
+   "electrolyser_new_2030": "0–40 MW",
+   "wind_new_2035": "0–150 MW",
+   "solar_new_2035": "0–80 MW",
+   "bess_new_2035": "0–80 MW",
+   "electrolyser_new_2035": "0–40 MW"
   }
  },
  "eh_microgrid_staged": {
@@ -471,6 +507,20 @@
    "pv_new_2035": "5 MW",
    "wind_new_2035": "3 MW",
    "bess_new_2035": "5 MW · 20 MWh (4 h)"
+  },
+  "range": {
+   "diesel_new_2027": "0–8 MW",
+   "pv_new_2027": "0–10 MW",
+   "wind_new_2027": "0–6 MW",
+   "bess_new_2027": "0–10 MW",
+   "diesel_new_2030": "0–8 MW",
+   "pv_new_2030": "0–10 MW",
+   "wind_new_2030": "0–6 MW",
+   "bess_new_2030": "0–10 MW",
+   "diesel_new_2035": "0–8 MW",
+   "pv_new_2035": "0–10 MW",
+   "wind_new_2035": "0–6 MW",
+   "bess_new_2035": "0–10 MW"
   }
  },
  "eh_ammonia_staged": {
@@ -640,6 +690,22 @@
    "solar_new_2035": "40 MW",
    "bess_new_2035": "40 MW · 160 MWh (4 h)",
    "electrolyser_new_2035": "20 MW"
+  },
+  "range": {
+   "wind_new_2027": "0–150 MW",
+   "solar_new_2027": "0–80 MW",
+   "bess_new_2027": "0–80 MW",
+   "electrolyser_new_2027": "0–40 MW",
+   "h2_storage": "0–10,000 MWh",
+   "nh3_tank": "0–6,000 MWh",
+   "wind_new_2030": "0–150 MW",
+   "solar_new_2030": "0–80 MW",
+   "bess_new_2030": "0–80 MW",
+   "electrolyser_new_2030": "0–40 MW",
+   "wind_new_2035": "0–150 MW",
+   "solar_new_2035": "0–80 MW",
+   "bess_new_2035": "0–80 MW",
+   "electrolyser_new_2035": "0–40 MW"
   }
  },
  "eh_concentrator_staged": {
@@ -751,6 +817,17 @@
    "pv_new_2035": "20 MW",
    "bess_new_2035": "10 MW · 40 MWh (4 h)",
    "coarse_ore_stockpile_new_2035": "30,000 t"
+  },
+  "range": {
+   "pv_new_2027": "0–40 MW",
+   "bess_new_2027": "0–20 MW",
+   "coarse_ore_stockpile_new_2027": "0–60,000 t",
+   "pv_new_2030": "0–40 MW",
+   "bess_new_2030": "0–20 MW",
+   "coarse_ore_stockpile_new_2030": "0–60,000 t",
+   "pv_new_2035": "0–40 MW",
+   "bess_new_2035": "0–20 MW",
+   "coarse_ore_stockpile_new_2035": "0–60,000 t"
   }
  },
  "eh_ipp_hybrid": {
@@ -789,6 +866,11 @@
    "wind_farm": "30 MW",
    "pv_plant": "20.83 MW",
    "bess": "25 MW · 50 MWh (2 h)"
+  },
+  "range": {
+   "wind_farm": "60–60 MW",
+   "pv_plant": "41.67–41.67 MW",
+   "bess": "0–50 MW"
   }
  },
  "eh_site": {
@@ -900,6 +982,117 @@
    "genset_new_2035": "6 MW",
    "pv_new_2035": "2.5 MW",
    "bess_new_2035": "4 MW · 16 MWh (4 h)"
+  },
+  "range": {
+   "genset_new_2027": "0–12 MW",
+   "pv_new_2027": "0–5 MW",
+   "bess_new_2027": "0–8 MW",
+   "genset_new_2030": "0–12 MW",
+   "pv_new_2030": "0–5 MW",
+   "bess_new_2030": "0–8 MW",
+   "genset_new_2035": "0–12 MW",
+   "pv_new_2035": "0–5 MW",
+   "bess_new_2035": "0–8 MW"
+  }
+ },
+ "_edge": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "off",
+    "carrier": "solar",
+    "built_mw": 0.004,
+    "min_mw": 0.0,
+    "max_mw": null,
+    "unit": "MW"
+   },
+   {
+    "component": "Generator",
+    "name": "unsolved",
+    "carrier": null,
+    "built_mw": null,
+    "min_mw": 2.0,
+    "max_mw": null,
+    "unit": "MW"
+   },
+   {
+    "component": "Link",
+    "name": "fixed_floor",
+    "carrier": "AC",
+    "built_mw": 0.005,
+    "min_mw": 1.5,
+    "max_mw": 9.999,
+    "unit": "MW"
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_bare",
+    "carrier": "battery",
+    "built_mw": 1234.567,
+    "min_mw": null,
+    "max_mw": 2000.0,
+    "unit": "MW"
+   },
+   {
+    "component": "StorageUnit",
+    "name": "tank_th",
+    "carrier": "nh3",
+    "built_mw": 3.0,
+    "min_mw": 0.0,
+    "max_mw": 5.0,
+    "unit": "t/h",
+    "max_hours": null,
+    "built_mwh": 72.0
+   },
+   {
+    "component": "Store",
+    "name": "silo",
+    "carrier": "ore",
+    "built_mwh": 0.0,
+    "min_mwh": 0.0,
+    "max_mwh": 400.0,
+    "min_mw": 999.0,
+    "max_mw": 1.0,
+    "unit": "t"
+   },
+   {
+    "component": "Store",
+    "name": "silo_unsolved",
+    "carrier": "ore",
+    "built_mwh": null,
+    "built_mw": 5.0,
+    "min_mwh": 10.0,
+    "max_mwh": null,
+    "unit": "t"
+   },
+   {
+    "component": "Store",
+    "name": "h2_cav",
+    "carrier": "H2",
+    "built_mwh": -0.0001,
+    "built_mw": 3.0,
+    "unit": "MWh"
+   }
+  ],
+  "built": {
+   "off": "none built",
+   "unsolved": "not reported",
+   "fixed_floor": "0.01 MW",
+   "bess_bare": "1,234.57 MW",
+   "tank_th": "3 t/h · 72 t",
+   "silo": "none built",
+   "silo_unsolved": "not reported",
+   "h2_cav": "none built"
+  },
+  "range": {
+   "off": "no limit",
+   "unsolved": "at least 2 MW",
+   "fixed_floor": "1.5–10 MW",
+   "bess_bare": "up to 2,000 MW",
+   "tank_th": "0–5 t/h",
+   "silo": "0–400 t",
+   "silo_unsolved": "at least 10 t",
+   "h2_cav": "no limit"
   }
  }
 }
