@@ -423,7 +423,7 @@ def planned_changes(n, pack: ArchetypePack, *, keep_connection: bool = False,
     counts as the accept for closing the connection (GK A); otherwise that
     row needs an accept too."""
     selected = select_import_links(n, pack.import_overlay)
-    if not selected or pack.archetype == "strong_grid":
+    if not selected:
         return []
     writes = _connection_writes(n, pack, selected, keep_connection=keep_connection)
     return _rows(n, selected, writes, off_grid_chosen=off_grid_chosen)
@@ -456,11 +456,8 @@ def apply_archetype_pack_detailed(n, pack: ArchetypePack, *,
     saved: dict[str, dict[str, object]] = {
         name: _save_link_power(n, name) for name in selected
     }
-    if pack.archetype == "strong_grid":
-        writes: list[dict[str, Any]] = []
-    else:
-        writes = _connection_writes(n, pack, selected,
-                                    keep_connection=keep_connection)
+    writes = _connection_writes(n, pack, selected,
+                                keep_connection=keep_connection)
     rows = _rows(n, selected, writes, off_grid_chosen=True)
     for w in writes:
         name, attr = w["link"], w["attr"]
