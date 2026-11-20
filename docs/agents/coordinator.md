@@ -10,7 +10,7 @@ Engine gatekeeper B2 (finance and business case, ui-modern, other app fixes, GC-
 
 Engine gatekeeper A2 (5; grid-compliance packages GC-01..GC-08 and the PowerFactory DGS import; owner decisions GC-PACE-1, IMPORTS-1): `session_01G7qCuo8cvbZvwh4azcCQ55`
 
-Engine gatekeeper B3 (3; new template-e2e, ux-next, project-io app side, project-viewer-role and site-scene reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCun7KGEKGF1AZih4iTW`
+Engine gatekeeper B3 (4; new template-e2e, ux-next, project-io app side, project-viewer-role and site-scene reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCujtSJoVDwDKoTaQNuR`
 
 UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01G7qCunwh6nMR3u21Ni2HL5`
 
