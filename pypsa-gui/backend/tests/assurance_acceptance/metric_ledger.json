@@ -1,0 +1,4 @@
+{
+ "$comment": "AA-10 S5 per-metric mapping ledger (A7.7). Every row lives in metric_ledger.d/, one file per checked-answer profile; see that folder's README. test_metric_ledger.py checks it against harness.calculations.PROFILES.",
+ "profiles": {}
+}

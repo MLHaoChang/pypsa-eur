@@ -1,0 +1,62 @@
+{
+ "profiles": {
+  "lost-load/1": [
+   {
+    "metric": "lost_load_energy",
+    "formula": "sum over t of w_generators[t] x sum over loads of max(shed[t], 0)",
+    "validity": "verified solve (else unverified_solve); every shed value and weight in the window finite and weights >= 0, else invalid_or_missing_shed_data. Refusals: legacy_lost_load_capture, misaligned_source, no_electrical_loads, no_lost_load_capture, unknown_load, unsupported_load_population, unsupported_snapshot_scope, reversed_window",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve"
+     }
+    }
+   },
+   {
+    "metric": "peak_shed",
+    "formula": "max over t of sum over loads of max(shed[t], 0)",
+    "validity": "verified solve (else unverified_solve); every shed value and weight in the window finite and weights >= 0, else invalid_or_missing_shed_data. Refusals: legacy_lost_load_capture, misaligned_source, no_electrical_loads, no_lost_load_capture, unknown_load, unsupported_load_population, unsupported_snapshot_scope, reversed_window",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve"
+     }
+    }
+   },
+   {
+    "metric": "shed_hours",
+    "formula": "sum over t of w_generators[t] where electrical-load shed[t] > SHED_THRESHOLD_MW",
+    "validity": "verified solve (else unverified_solve); every shed value and weight in the window finite and weights >= 0, else invalid_or_missing_shed_data. Refusals: legacy_lost_load_capture, misaligned_source, no_electrical_loads, no_lost_load_capture, unknown_load, unsupported_load_population, unsupported_snapshot_scope, reversed_window",
+    "tolerance": "harness.lost_load_calculations:SHED_THRESHOLD_MW",
+    "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve"
+     }
+    }
+   },
+   {
+    "metric": "lost_load_cost",
+    "formula": "VoLL x sum over t of w_objective[t] x sum over loads of max(shed[t], 0)",
+    "validity": "verified solve (else unverified_solve); every shed value and weight in the window finite and weights >= 0, else invalid_or_missing_shed_data. Refusals: legacy_lost_load_capture, misaligned_source, no_electrical_loads, no_lost_load_capture, unknown_load, unsupported_load_population, unsupported_snapshot_scope, reversed_window; VoLL of the solve > 0, else voll_missing_or_zero",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve"
+     }
+    }
+   }
+  ]
+ }
+}
