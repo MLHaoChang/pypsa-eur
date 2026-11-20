@@ -355,3 +355,27 @@ def test_a_float_sum_at_worker_entry_is_not_a_change(make, seen, via, monkeypatc
     monkeypatch.setattr(PyPSAService, "get_lock", staticmethod(lambda: proxy))
     assert s.start() is None
     assert len(seen) == 1, s.record().get("error")
+
+
+@VIAS
+def test_a_cap_just_inside_the_tolerance_passes(make, seen, via):
+    # rel 1e-9 (`_same_mw`): 45 * (1 + 5e-10) is the same limit; the
+    # just-outside side is 45.000001 (2.2e-8 rel) in the refusal test above.
+    s = make(via, _network(45.0))
+    assert s.start(pack_overrides={"import_p_nom_mw": 45.0 * (1 + 5e-10)}) is None
+    assert seen[0].import_overlay.import_p_nom_mw == 45.0
+
+
+@pytest.mark.parametrize(
+    "a, b, same",
+    [
+        (45.0, 45.0 * (1 + 5e-10), True),
+        (45.0, 45.0 * (1 + 2e-9), False),
+        (45.0, 45.000001, False),
+        (23.3, 10.7 + 12.6, True),
+    ],
+)
+def test_same_mw_boundary(a, b, same):
+    from services.adequacy.eh_study_runner import _same_mw
+
+    assert _same_mw(a, b) is same and _same_mw(b, a) is same
