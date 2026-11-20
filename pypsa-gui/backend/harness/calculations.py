@@ -148,17 +148,38 @@ def _series(component, attribute, entity, index):
     return [_number(component.static.at[entity, attribute])] * len(index)
 
 
-def solve_matches_inputs(ctx):
+def solve_matches_inputs(ctx, after_pf=False):
     """Both recorded solve fingerprints match the current inputs: the lossy one
     and the exact one the Load flow tab requires. After an AC power flow the
-    live outputs are PF values (ac_pf_service overwrites them and keeps the LP
-    aside), so the live network no longer holds the LP solve."""
+    live network keeps the LP's tables (owner decision PF-SAVE-1: the flow's
+    live only in `ac_pf_results`), so the LP solve stays current through a
+    flow chained to it (`lopf+ac_pf_ok`) and through a failed one; a flow
+    record needs the LP's record beside it. A standalone flow (condition
+    `ac_pf_ok`) reads not current to an LP-only reader: it fails closed.
+    `after_pf` (study harness 15) also asks that a flow there ran on the
+    current edit counter and succeeded (a PF result, never an LP one)."""
     n, state = ctx.network, ctx.solver_state
+    flowed = state.get("ac_pf_results") is not None
+    condition = state.get("condition")
+    if after_pf and flowed and (
+        state.get("ac_pf_network_revision") != int(getattr(ctx, "network_revision", 0) or 0)
+        or condition != "lopf+ac_pf_ok"
+    ):
+        return False
+    from services.run_grid_pf import AC_PF_FAILED
+
+    # A flow that failed restores the LP's tables too (`ac_pf_service.run_ac_pf_stage`): the
+    # failure is judged by the PF rules alone (GK B SH-15 (1)); no other suffix is accepted.
+    lp_kept = (
+        condition == "optimal"
+        or (flowed and condition == "lopf+ac_pf_ok")
+        or (isinstance(condition, str) and condition.startswith(AC_PF_FAILED))
+    )
     return (
-        state.get("ac_pf_results") is None
-        and state.get("lopf_results") is None
+        # A flow keeps the LP's record beside its own; an LP record alone is no solve's.
+        flowed == (state.get("lopf_results") is not None)
         and state.get("status") == "completed"
-        and state.get("condition") == "optimal"
+        and lp_kept
         and n.meta.get("assistant_solve_input_fingerprint")
         == workflow_tools._network_input_fingerprint(ctx)
         and n.meta.get("assistant_solve_exact_input_fingerprint")
