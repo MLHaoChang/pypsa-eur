@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { SizedDesignTable } from './SizedDesignTable'
 import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Hexagon, Square } from 'lucide-react'
@@ -1552,6 +1553,9 @@ export function EhReferenceDesignPanel() {
                   </span>
                 )}
               </div>
+
+              {/* Walkthrough asset-investment 03: the sizes, not only "sizing: ok". */}
+              <SizedDesignTable report={report} mode="expert" testId="eh-report-sized" />
 
               {cert?.next && (
                 <p className="text-[10px] text-muted" data-testid="eh-certification-next">

@@ -1,0 +1,1 @@
+* Feat(gridspine): The PSCAD/EMT pack writes battery contract version 2: every case records `connected` (PoC breaker status), and a new pack `README.md` defines it. Each battery corner takes the zero sequence of the study case at its Sk; when the min case holds none, the Sk-min cases are listed in the manifest's `z0_assumed` (GC-06a, GC-06b).

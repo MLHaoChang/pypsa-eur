@@ -3,7 +3,7 @@
 
 # 01 — the intent comparison's island-limits refusal links to the setting
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Gated: no (UI)
 
@@ -28,3 +28,7 @@ request for the island-limits setting yet.
   setting; a Back pill returns to the comparison.
 - A component test covers the link; a shot in light and dark.
 - Moot once the sizing loop includes island rows (GK A follow-up from walkthrough issue 05); then the refusal goes away.
+
+## Triage (2026-11-19, master 9f850d36)
+
+Still true: `backend/routers/compare.py` returns the refusal text; `IntentComparisonSection.tsx` has only the 'Set grid code ›' link. UX reviewer needed. Blocked by: none.

@@ -29,6 +29,7 @@ redundant ones out). ``backup_cost_delta`` prices the mode against gensets.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import pathlib
@@ -1550,13 +1551,155 @@ def _write_meta(project_dir, meta: dict) -> None:
     )
 
 
-#: The refusal for a project whose saved network already has the backup
-#: strings (created in that mode, GK A Q1); the card shows it in place of
-#: Assess.
+#: The Backup mode words the create form and the Backup section show
+#: (frontend ``MODE_LABEL``), for the refusals a user reads.
+MODE_WORD = {"genset": "Gensets", "bess": "Batteries", "hybrid": "Hybrid"}
+
+
+def mode_word(mode: str) -> str:
+    """The mode as the form names it; an unknown stored mode as it is stored."""
+    return MODE_WORD.get(mode, mode)
+
+
+#: The sidecar requirements ``apply_backup`` rewrites, by the mode it applied:
+#: a Batteries campus loses the gensets' N+k, fuel and join scenarios too.
+_BACKUP_REQUIREMENTS = {
+    "bess": ("genset_redundancy_n", "fuel_autonomy_h", "scenarios", "sustained_h"),
+    "hybrid": ("sustained_h",),
+}
+
+
+def built_strings(n, island: dict | None) -> list[str]:
+    """The backup strings ``apply_backup`` put in a built campus, by provenance:
+    StorageUnits the sidecar lists as ride-through storage with a ``bess`` unit,
+    named with the string prefix as a cross-check (GK A G2). A user StorageUnit
+    that only shares the prefix is not one."""
+    req = (island or {}).get("requirements") or {}
+    units = (island or {}).get("units") or {}
+    return [
+        u
+        for u in req.get("ride_through_storage") or []
+        if u in n.storage_units.index
+        and str(u).startswith(STRING_PREFIX)
+        and (units.get(u) or {}).get("kind") == "bess"
+    ]
+
+
+def genset_form(n, island: dict, built: str, genset_n, genset_island: dict):
+    """The campus a project built with ``built`` backup ("bess" or "hybrid")
+    would be in genset form, for the assessment only (DC grid-readiness
+    walkthrough 01; GK A G1-G8). Works on copies: ``n`` and ``island`` are
+    left as they are.
+
+    The built strings are removed (network and sidecar). For ``bess`` the
+    gensets ``apply_backup`` removed come back from ``genset_n`` /
+    ``genset_island``, the example's genset-form campus built today for the
+    project's stored spec, with their sidecar units and requirements; for
+    ``hybrid`` the gensets stayed and only ``sustained_h`` comes back. Every
+    other component and sidecar entry is the project's own. Returns
+    ``(n', island', notes, built_strings)``; a restored genset whose name the
+    project already uses is refused, never merged (G5). A project whose
+    sidecar lists no built string (one created before the create wrote its
+    own sidecar) is refused: its strings cannot be told from a user's.
+
+    The edited-load note is for ``bess`` only: there the gensets are the
+    example's, sized for the spec; a ``hybrid`` project keeps its own gensets,
+    so none is restored from the spec."""
+    strings = built_strings(n, island)
+    if not strings:
+        raise DcBackupError(
+            f"backup: this project was created with {mode_word(built)} backup, but its saved "
+            "sidecar does not list the battery strings, so the assessment cannot "
+            "tell them from your own storage. Create the project again to assess it",
+            "backup.mode",
+        )
+    built_mw = sum(float(n.storage_units.at[s, "p_nom"]) for s in strings)
+    built_mwh = sum(
+        float(n.storage_units.at[s, "p_nom"])
+        * float(n.storage_units.at[s, "max_hours"])
+        for s in strings
+    )
+    m = n.copy()
+    for s in strings:
+        m.remove("StorageUnit", s)
+    out = copy.deepcopy(island)
+    units, req = out.setdefault("units", {}), out.setdefault("requirements", {})
+    for s in strings:
+        units.pop(s, None)
+    req["ride_through_storage"] = [
+        u for u in req.get("ride_through_storage") or [] if u not in strings
+    ]
+    notes = []
+    g_units = (genset_island or {}).get("units") or {}
+    g_req = (genset_island or {}).get("requirements") or {}
+    if built == "bess":
+        names = [u for u, d in g_units.items() if d.get("kind") == "genset"]
+        taken = [u for u in names if u in units or u in m.generators.index]
+        if taken:
+            raise DcBackupError(
+                "backup: the example's gensets cannot be restored for the assessment: "
+                f"the project already has {', '.join(sorted(taken))}",
+                "backup.mode",
+            )
+        if not m.snapshots.equals(genset_n.snapshots):
+            raise DcBackupError(
+                "backup: the project's time steps differ from the example's, so its "
+                "gensets cannot be restored for the assessment",
+                "backup.mode",
+            )
+        gens = [u for u in names if u in genset_n.generators.index]
+        if gens:
+            m.add(
+                "Generator",
+                gens,
+                **{
+                    c: genset_n.generators.loc[gens, c]
+                    for c in genset_n.generators.columns
+                    if c in m.generators.columns or c in ("bus", "carrier")
+                },
+            )
+            for attr, frame in genset_n.generators_t.items():
+                cols = [g for g in gens if g in frame.columns]
+                if cols:
+                    m.generators_t[attr] = m.generators_t[attr].join(frame[cols])
+        for u in names:
+            units[u] = copy.deepcopy(g_units[u])
+        notes.append(
+            "The gensets are the example's genset fleet for this project's spec, as the "
+            "example builds it today, restored for the assessment only; the saved project "
+            "is not changed."
+        )
+        from services.adequacy.site_peak import named_load
+
+        crit = [c for c in critical_loads(out) if c in genset_n.loads.index]
+        mine, theirs = named_load(m, crit), named_load(genset_n, crit)
+        if crit and abs(float(mine.max()) - float(theirs.max())) > 0.005 * float(
+            theirs.max()
+        ):
+            notes.append(
+                f"The project's critical peak ({float(mine.max()):.4g} MW) differs from the "
+                f"spec's ({float(theirs.max()):.4g} MW): the restored gensets are sized for "
+                "the spec, not the edited load."
+            )
+    for key in _BACKUP_REQUIREMENTS.get(built, ()):
+        if key in g_req:
+            req[key] = copy.deepcopy(g_req[key])
+        else:
+            req.pop(key, None)
+    if strings:
+        notes.append(
+            f"The project's {len(strings)} built strings ({built_mw:.4g} MW, "
+            f"{built_mwh:.4g} MWh) are not assessed as built: the assessment sizes the "
+            "strings again from the spec."
+        )
+    return m, out, notes, strings
+
+
+#: The refusal for a project built with a backup mode the assessment cannot
+#: put back in genset form (Batteries and Hybrid can: walkthrough 01).
 NOT_GENSET_FORM = (
-    "backup: this project was created with {mode} backup, so its saved network already "
-    "has the battery strings. The assessment needs a project created with gensets: "
-    "create one with gensets and switch its mode with PUT /dc-backup"
+    "backup: this project was created with {mode} backup, which the assessment "
+    "cannot put back in genset form"
 )
 
 
@@ -1577,8 +1720,10 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
     d = pathlib.Path(project_dir)
     tid, spec, planning = project_spec(d, tpl)
     built = (_meta(d).get("dc_load") or {}).get("network_backup_mode")
-    if built and built != "genset":
-        raise DcBackupError(NOT_GENSET_FORM.format(mode=built), "backup.mode")
+    if built and built not in _BACKUP_REQUIREMENTS:
+        raise DcBackupError(
+            NOT_GENSET_FORM.format(mode=mode_word(built)), "backup.mode"
+        )
     if mode is not None:
         try:
             spec = spec.model_copy(
@@ -1610,6 +1755,20 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
     n = pypsa.Network()
     with PyPSAService.get_netcdf_io_lock():
         n.import_from_netcdf(str(nc))
+    notes: list[str] = []
+    if built in _BACKUP_REQUIREMENTS:
+        # Created with the strings: assessed in genset form, on copies (walkthrough 01).
+        gspec = spec.model_copy(
+            update={"backup": spec.backup.model_copy(update={"mode": "genset"})}
+        )
+        n_g = (
+            tpl.BUILDERS[tid](load_spec=gspec)
+            if planning is None
+            else tpl.BUILDERS[tid](load_spec=gspec, planning=planning)
+        )
+        n, island, notes, _strings = genset_form(
+            n, island, built, n_g, tpl.island_config(tid, planning, load_spec=gspec)
+        )
     cfg_path = d / "solver_config.json"
     try:
         cfg = _solver_config_from_dict(
@@ -1636,7 +1795,11 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
                 getattr(cfg, "finance", None), getattr(cfg, "finance_assumed", None)
             ),
         )
-    return {**out, "basis": _basis(nc)}
+    return {
+        **out,
+        "basis": _basis(nc),
+        "built": {"mode": built or "genset", "notes": notes},
+    }
 
 
 #: What the assessment's re-dispatch does not reproduce from a normal solve

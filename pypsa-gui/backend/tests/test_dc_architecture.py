@@ -281,7 +281,9 @@ def test_an_architecture_service_alone_never_passes():
     assert service_verdict([])["verdict"] == "warn"
     assert service_verdict(["grid_forming"])["verdict"] == "pass"
     got = service_verdict([], ["fast_frequency_response"], architecture="MV UPS")
-    assert got["verdict"] == "warn" and "assumed, MV UPS" in got["project_value"]
+    assert got["verdict"] == "warn" and got["project_value"] == (
+        "fast frequency response (assumed, MV UPS: not counted)"
+    )
     got = service_verdict(None, [], conditional=["grid_forming"])
     assert got["verdict"] == "warn" and got["conditional"] == ["grid_forming"]
     assert (
@@ -927,3 +929,21 @@ def test_every_refusal_kind_is_declared():
         and isinstance(c.args[1], ast.Constant)
     }
     assert len(used) == 6 and used == set(frag)
+
+
+def test_service_verdict_words_an_unnamed_architecture_and_an_empty_rest():
+    # Mutants on the GK A 30 / UX 2 lines: the fallback architecture word, an
+    # absent island with an explicit `wanted`, and value_rest's None.
+    from services.adequacy.grid_readiness import service_verdict
+
+    got = service_verdict(None, ["voltage_control"], wanted=("voltage_control",))
+    assert (
+        got["project_value"] == "voltage control (assumed, architecture: not counted)"
+    )
+    assert got["value_rest"] == got["project_value"] and got["sources"] == []
+    got = service_verdict([])
+    assert got["project_value"] == "none" and got["value_rest"] is None
+    got = service_verdict(
+        ["grid_forming"], offered_sources={"grid_forming": ["bess_new"]}
+    )
+    assert got["value_rest"] is None and got["sources"][0]["units"] == ["BESS new"]
