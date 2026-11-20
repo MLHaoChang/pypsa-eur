@@ -752,6 +752,8 @@ class Turn:
                     lines.append(f"{_label(slot['entity_id'])}, {_label(definition['label'])}: "
                                  f"unavailable ({slot['reason']}).")
         lines.append(calculations.disclosure(scope))
+        # Every answer on a MIP names its optimality gap, sectioned ones too.
+        lines.extend(solve_validity.notes(record["raw"]))
         self.sections = sections
         return "\n".join(lines), public_blocks, [record["evidence_id"]]
 

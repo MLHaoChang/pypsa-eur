@@ -266,6 +266,45 @@ def test_the_entity_list_is_resolved_sorted_and_recorded(grid, checked):
     assert facts == evidence["facts"] and slots == evidence["slots"]
 
 
+@pytest.mark.parametrize(
+    "gap, line",
+    [
+        (0.02, "Integer (MIP) solve to a relative optimality gap of 0.02"),
+        (None, "Integer (MIP) solve; the relative optimality gap was not recorded."),
+    ],
+)
+def test_an_every_entity_answer_carries_the_solve_and_its_gap_line(
+    grid, checked, monkeypatch, gap, line
+):
+    """The "*" source goes through the solve-validity capture like any other raw."""
+    from harness import solve_validity
+    from services import assurance_records as records
+
+    disclosure = (
+        line
+        if gap is None
+        else f"{line}; costs may exceed the optimum by up to that share."
+    )
+    monkeypatch.setattr(
+        solve_validity,
+        "classify",
+        lambda n, config: {
+            "kind": "mip",
+            "gap": gap,
+            "optimal": False,
+            "disclosure": disclosure,
+        },
+    )
+    ctx = fleet(grid, 3)
+    frames, record = ask(checked, every(ctx))
+    evidence = records.evidence(
+        records.actor_id(), record["receipt"]["evidence_ids"][0]
+    )
+    assert evidence["raw"]["solve"]["gap"] == gap
+    assert evidence["raw"]["solve"]["disclosure"] == disclosure
+    assert disclosure in public_text(frames)
+
+
 # --- Sections in the real turn. ---
 
 
