@@ -412,6 +412,31 @@ export const ERROR_COPY: Record<string, ErrorCopy> = {
     title: 'The investment case for this option could not be calculated from these assumptions.',
     action: 'The message below names what is missing or inconsistent. Correct that assumption; if none applies, report it as a defect.',
   },
+  // Homer-parity 03a (supply-architecture comparison) and 03d (grid-extension
+  // break-even), shown by the "Grid extension vs island" card.
+  baseline_not_saved: { title: 'The project has unsaved edits.', action: 'Save the project first.' },
+  no_architectures: {
+    title: 'The network has no PV, wind, genset or grid supply that reaches its load.',
+    action: 'Add a supply to the site first.',
+  },
+  unknown_architecture: { title: 'That supply architecture is not in this network.', action: 'Compare all architectures instead.' },
+  too_many_architectures: { title: 'The network has too many supply architectures to compare at once.', action: 'Remove a supply type, then compare again.' },
+  supply_architectures_never_run: { title: 'The supply architectures have not been compared yet.', action: 'Compare them first.' },
+  supply_architectures_running: { title: 'The comparison is still running.', action: 'Wait for it to finish.' },
+  supply_architectures_stale: {
+    title: 'The comparison is out of date: the network changed since it ran.',
+    action: 'Compare the supply architectures again.',
+  },
+  supply_architectures_not_evaluated: { title: 'The last comparison could not be read.', action: 'Compare the supply architectures again.' },
+  architecture_not_solved: { title: 'That architecture has no solved cost.', action: 'Choose a solved architecture from the table.' },
+  architecture_unknown: { title: 'That architecture is not in the comparison.', action: 'Choose one from the table.' },
+  assumptions_not_set: {
+    title: 'The comparison has no discount rate, horizon or currency year.',
+    action: 'Compare the supply architectures again: that sets them.',
+  },
+  discount_rate_invalid: { title: 'The discount rate in the basis cannot be used.', action: 'Compare the supply architectures again: that resets it.' },
+  basis_mismatch: { title: 'The basis does not match the comparison’s basis.', action: 'Reload the page and try again.' },
+  npc_not_finite: { title: 'The island’s net present cost is not a finite number.', action: 'Check the values and the basis, then try again.' },
 }
 
 export const ERROR_FALLBACK: ErrorCopy = { title: 'The request was refused.', action: 'The message below says why.' }

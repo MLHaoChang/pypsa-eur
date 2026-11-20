@@ -3,7 +3,7 @@
 
 # 07 — Decisions found in neither mode, and Expert-only decisions Guided never names
 
-Status: ready-for-agent
+Status: done (#1613, #1625, #1631)
 Owner: unassigned: triaged by the coordinator
 Size: M
 Gated: UX
@@ -32,3 +32,16 @@ Re-triaged after TEMPLATE-GAPS-1: critical share, PUE, backup mode and architect
 - Each "neither mode" item is found (and the inventory corrected) or added to its section's form in Expert.
 - Each "Expert only" item that matters for the run appears in Guided either as a decision (≤3 per card) or as a named line with "Open in Expert", per §3.5.
 - (UX) Section 10 business-case inputs (the investment case's own settings) are Expert-only with no Guided equivalent. List them, then name each in Guided or give it a Guided field.
+
+## Inventory corrections (filed after #1613; first recorded on #1631)
+
+- **Load flexibility:** the project-wide demand-response tier (`dsr_*`). There is no per-load curtailable/deferrable share.
+- **Unit commitment:** set per asset in Expert Properties. Haber-Bosch (`eh_ammonia.py:160-170`) is committable at 40 % minimum output, 24 h min up and 8 h min down, and gets one binary check per period (`solver/process_uc.py`).
+- **Parties:** participants, owners, contracts and value flows exist. There is no share field; the value split follows ownership and contracts.
+
+## Corrections from the app walk (2026-11-17)
+
+- The IPP `bess` drawer is read-only by design (Q5 (a)), not empty.
+- The staged H2 fuel cell's "Default 0" was a stale pack stamp on a sunk unit; fixed in #1625.
+- The `pv_new` 883.81 €/kW is the rooftop pack row, not a bug (#1625 names it in the ledger).
+- GK B's D1–D4 conditions on the template data are listed in #1625's body.

@@ -3,7 +3,7 @@
 
 # 14 — IPP run retires both existing plants and reports a negative cost
 
-Status: needs-triage
+Status: ready-for-agent
 Impact: high
 Templates: eh_ipp_hybrid
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -19,3 +19,7 @@ The user's owned plants vanish from the result; a profit is labelled a cost.
 ## Suggested fix
 
 Do not retire fixed plants; label a profit as profit; plain-language arbitrage warning.
+
+## Triage (2026-11-19, master 9f850d36)
+
+Checked by code reading only; the app was not re-run. `commercial/preflight.py` still emits the raw `commercial.arbitrage_loop_via_storage` id. Acceptance: an existing fixed plant is never retired by the run; a negative total cost reads as a profit; the arbitrage readiness warning is plain words with the import and export prices; a test on the IPP template. Gated: GK A. Blocked by: none.

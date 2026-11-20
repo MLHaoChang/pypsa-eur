@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 import { simulationApi } from '../api/simulation'
 import { useUIStore } from '../store/uiStore'
 import { goal } from '../test/fixtures/reliabilityGoal'
-import { goalPatchFromEdits, goalText, useReliabilityGoal } from './useReliabilityGoal'
+import { assumedLole, goalPatchFromEdits, goalText, goalWords, useReliabilityGoal } from './useReliabilityGoal'
 
 const getReliabilityGoal = vi.fn()
 vi.mock('../api/flow', async (importOriginal) => {
@@ -68,6 +68,32 @@ describe('goalPatchFromEdits', () => {
     expect(goalText(g, 'ens_cap_permyriad')).toBe('2')
     expect(goalText(g, 'mc_draws')).toBe('')
     expect(goalText(null, 'target_lole_h')).toBe('')
+  })
+})
+
+describe('assumedLole', () => {
+  const withAssumed = (a: unknown) => {
+    const g = goal()
+    return { ...g, target_lole_h: { ...g.target_lole_h, assumed: a as number } }
+  }
+
+  it('names the site type\'s assumed goal when none is set', () => {
+    expect(assumedLole(withAssumed(3))).toBe(3)
+    expect(goalWords(withAssumed(3), 'target_lole_h')).toBe('3 h/yr (assumed for the site type)')
+  })
+
+  it('reads a missing or non-number assumed value as not set (GK B 65 C9)', () => {
+    for (const bad of [undefined, null, '3', true, NaN, Infinity, {}]) {
+      expect(assumedLole(withAssumed(bad))).toBeNull()
+      expect(goalWords(withAssumed(bad), 'target_lole_h')).toBe('not set')
+    }
+    expect(assumedLole(null)).toBeNull()
+  })
+
+  it('a set goal is never called assumed', () => {
+    const g = goal({ target_lole_h: [1.5, 'stored'] })
+    expect(goalWords({ ...g, target_lole_h: { ...g.target_lole_h, assumed: 3 } }, 'target_lole_h'))
+      .toBe('1.5 h/yr')
   })
 })
 

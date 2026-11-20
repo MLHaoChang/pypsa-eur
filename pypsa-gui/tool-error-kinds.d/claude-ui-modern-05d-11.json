@@ -1,0 +1,3 @@
+{"kinds": {
+  "cost_basis_mismatch": {"surface": "inline", "why": "An asset write claimed (X-Cost-Basis) its cost fields were entered per tonne or per energy unit, but the asset's bus after the write uses the other unit (services/network_crud.py). Nothing is stored; the reply names the claimed and actual basis. The user reopens the card, which shows the costs in the bus unit, and enters them again."}
+}}

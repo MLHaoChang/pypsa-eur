@@ -166,6 +166,12 @@ class PlexosModel:
     #: tables this reader does not interpret (reports, messages, ...), whose
     #: rows are counted and named in ``warnings``.
     accounting: dict[str, dict[str, int]]
+    #: (collection, property) -> the file's ``t_property.default_value``, the
+    #: value PLEXOS uses when a row is absent; None when the file gives none or
+    #: it is unreadable.
+    defaults: dict[tuple[tuple[str, str, str], str], float | None] = field(
+        default_factory=dict
+    )
 
     def objects_of(self, cls: str) -> list[PlexosObject]:
         return [o for o in self.objects.values() if o.cls == cls]
@@ -355,6 +361,7 @@ def read_plexos_xml(source) -> PlexosModel:
 
     properties = _index(tables, ledger, "t_property", "property_id")
     prop = {}
+    defaults: dict[tuple[tuple[str, str, str], str], float | None] = {}
     for pid, row in properties.items():
         if row.get("collection_id") not in collection_key or not row.get("name"):
             ledger.bad(
@@ -369,6 +376,9 @@ def read_plexos_xml(source) -> PlexosModel:
                 f"Property {row['name']!r} names unit id {uid}, which the file does not define; its unit is unknown."
             )
         prop[pid] = (row["name"], row["collection_id"], unit_name.get(uid))
+        defaults[(collection_key[row["collection_id"]], row["name"])] = _number(
+            row.get("default_value")
+        )[0]
         ledger.ok("t_property")
 
     # objects
@@ -645,4 +655,5 @@ def read_plexos_xml(source) -> PlexosModel:
         broken=ledger.broken,
         warnings=warnings,
         accounting=ledger.accounting,
+        defaults=defaults,
     )
