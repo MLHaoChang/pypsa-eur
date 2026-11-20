@@ -309,3 +309,49 @@ def test_a_limit_removed_before_the_worker_starts_fails_with_its_sentence(
     assert seen == []
     assert rec["status"] == "failed"
     assert "45 MW" in rec["error"] and F.CAP_ZERO in rec["error"], rec["error"]
+
+
+def _two_links(a, b):
+    """Two import Links whose float sum is not the decimal sum: 10.7 + 12.6
+    is 23.299999999999997 (GK B 68)."""
+    n = _network(a)
+    imp = n.links.index[_imports(n)][0]
+    row = n.links.loc[imp]
+    n.add(
+        "Link",
+        "import_b",
+        bus0=row.bus0,
+        bus1=row.bus1,
+        p_nom=b,
+        p_nom_extendable=False,
+        efficiency=1.0,
+        carrier=row.carrier,
+    )
+    n.links.at["import_b", "eh_role"] = "grid_import"
+    return n
+
+
+@VIAS
+def test_a_cap_equal_to_a_float_sum_passes(make, seen, via):
+    n = _two_links(10.7, 12.6)
+    assert F.import_capacity(n, {"archetype": "weak_flexible"}).mw != 23.3
+    s = make(via, n)
+    assert s.start(pack_overrides={"import_p_nom_mw": 23.3}) is None
+    assert len(seen) == 1
+
+
+@VIAS
+def test_a_float_sum_at_worker_entry_is_not_a_change(make, seen, via, monkeypatch):
+    from services.pypsa_service import PyPSAService
+
+    n = _two_links(23.3, 0.0)
+    s = make(via, n)
+
+    def edit():
+        n.links.loc[n.links.index[_imports(n)][0], "p_nom"] = 10.7
+        n.links.at["import_b", "p_nom"] = 12.6
+
+    proxy = _EditOnEntry(PyPSAService.get_lock(), edit)
+    monkeypatch.setattr(PyPSAService, "get_lock", staticmethod(lambda: proxy))
+    assert s.start() is None
+    assert len(seen) == 1, s.record().get("error")

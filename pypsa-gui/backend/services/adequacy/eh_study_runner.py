@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextvars as _contextvars
 import logging
+import math
 import queue as _queue
 import threading as _threading
 import time
@@ -227,7 +228,7 @@ def _stale_import_cap(cap_mw: float, archetype: str, n) -> str | None:
         return (f"The study was asked for on a {cap_mw:.12g} MW connection "
                 f"limit, but the network changed before it started: "
                 f"{cap.refusal} Start the study again.")
-    if cap.mw != cap_mw:
+    if not _same_mw(cap.mw, cap_mw):
         return (f"The study was asked for on a {cap_mw:.12g} MW connection "
                 f"limit, but the network's limit changed to {cap.mw:.12g} MW "
                 "before it started. Start the study again.")
@@ -252,6 +253,13 @@ def _validate_dtc_config(raw: dict, n) -> DtcConfig:
     return dtc
 
 
+def _same_mw(a: float, b: float) -> bool:
+    """Equal connection limits up to float summing: 10.7 + 12.6 MW of links
+    is 23.299999999999997 and still 23.3 (GK B 68). 1e-9 relative keeps
+    45.000001 against 45 a different value."""
+    return math.isclose(a, b, rel_tol=1e-9, abs_tol=0.0)
+
+
 def _with_network_import_cap(body: EhStudyRequest, archetype: str, n
                              ) -> tuple[EhStudyRequest, ArchetypePack]:
     """``body`` and its pack with ``pack_overrides.import_p_nom_mw`` taken
@@ -267,7 +275,7 @@ def _with_network_import_cap(body: EhStudyRequest, archetype: str, n
     overrides = dict(body.pack_overrides or {})
     asked = overrides.get("import_p_nom_mw")
     # `apply_pack_overrides` validated it first: a finite number > 0, or None.
-    if asked is not None and float(asked) != cap.mw:
+    if asked is not None and not _same_mw(float(asked), cap.mw):
         raise HTTPException(
             422,
             f"pack_overrides.import_p_nom_mw is {float(asked):.12g} MW but the "
