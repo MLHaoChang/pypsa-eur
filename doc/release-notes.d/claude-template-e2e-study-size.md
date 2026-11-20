@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The report lists every asset the study sized, by stage on a staged plan, with the figures Guided and Expert show. Installed capacity no longer counts the grid supply behind the connection or a product's buy-in or shortfall slack. The grid connection's limit is reported apart from the total, and the peak import is checked against it.
