@@ -14,6 +14,9 @@ import type { SolverConfig } from '../../api/types'
 /** The field label, shared with the chat edit card's word map. */
 export const MIN_RENEWABLE_FRACTION_LABEL = 'Minimum renewable fraction (%)'
 
+/** The island-limits checkbox label. */
+export const ISLAND_LIMITS_LABEL = 'Island limits in the optimisation'
+
 /** The operating reserve fields (homer-parity 01b), each label shared with the chat edit card's word map. */
 export const RESERVE_LABELS = {
   reserve_share_load: 'Reserve for load (%)',
@@ -116,6 +119,15 @@ export function OffGridConstraints({ draft, patch, onError }: {
       <div className="p-3">
         <p className="text-[10px] text-muted mb-2">
           For an off-grid or island design: limits on how the system is run, applied to every solve.
+        </p>
+        <label className="flex items-center gap-2 text-[11px] mb-3" data-testid="island-constraints">
+          <input id="solver-island-constraints" type="checkbox" checked={!!draft.island_constraints}
+            onChange={e => patch({ island_constraints: e.target.checked })} />
+          {ISLAND_LIMITS_LABEL}
+        </label>
+        <p className="text-[10px] text-muted -mt-2 mb-3">
+          Adds the island study's limits to the hub solve, from the project's island data. The intent comparison
+          cannot include them yet.
         </p>
         <ShareField
           field="min_renewable_fraction"

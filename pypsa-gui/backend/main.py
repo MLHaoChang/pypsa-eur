@@ -75,6 +75,7 @@ from routers import (
     asset_results,
     assistant_activity,
     auth,
+    catalogue,
     changelog,
     chat,
     dictation,
@@ -1388,6 +1389,8 @@ app.include_router(
 app.include_router(library.router, prefix="/api/library", tags=["library"])
 # The shipped (common) cost references: read-only, the same for every org.
 app.include_router(library_references.router, prefix="/api/library/references", tags=["library"])
+# The Parameter catalogue (expert-catalogue 01a): project-free, the same for every org and caller.
+app.include_router(catalogue.router, prefix="/api/catalogue", tags=["catalogue"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.

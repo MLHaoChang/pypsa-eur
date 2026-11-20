@@ -3,7 +3,7 @@
 
 # Guide tour: opt-in only, numbering and copy out of step with the stepper
 
-Status: in-progress (PR open)
+Status: done (#1744 merged 2544219b); follow-ups: Expert workbench tour, step-1 popover placement, assistant-on wording shot
 Model tier: sonnet
 Size: M
 Gated: UX

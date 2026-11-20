@@ -51,6 +51,11 @@ def run_pf(network, phase: Callable[[str], None] | None = None, **pf_kwargs):
     through ``phase``. When ``lpf()`` raises or leaves a non-finite angle,
     it logs that and makes the caller's unseeded call instead.
 
+    Known edge (``.scratch/dgs-seed/01-*``): a loop of a shifted and an
+    unshifted parallel path was reported to converge flat but not seeded. A
+    seeded ``pf`` that leaves snapshots unconverged is returned as is; there
+    is no flat retry today.
+
     Returns ``(pf_result, seeded_by)``: ``seeded_by`` lists the transformers
     that triggered the seed, empty for a flat start
     (no shift, or the seed skipped).
@@ -75,12 +80,12 @@ def run_pf(network, phase: Callable[[str], None] | None = None, **pf_kwargs):
         if "snapshots" in pf_kwargs:
             v_ang = v_ang.reindex(pf_kwargs["snapshots"])
         finite = np.isfinite(v_ang.to_numpy(dtype=float)).all()
-        problem = None if finite else "non-finite voltage angles"
+        problem = None if finite else "lpf() left non-finite voltage angles"
     except Exception as exc:
-        problem = f"{type(exc).__name__}: {exc}"
+        problem = f"lpf() raised {type(exc).__name__}: {exc}"
     if problem is not None:
         if phase is not None:
-            phase(f"AC PF seed skipped: lpf() failed ({problem}); flat start.")
+            phase(f"AC PF seed skipped ({problem}); flat start.")
         return network.pf(**pf_kwargs), []
     if phase is not None:
         names = ", ".join(map(str, shifted[:5])) + ("..." if len(shifted) > 5 else "")
