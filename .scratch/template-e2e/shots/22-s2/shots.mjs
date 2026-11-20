@@ -1,7 +1,7 @@
 // Template-e2e 22 S2 shots: the investment case's run panel in Expert, before
 // a run and refused with two needs. Real API (the data-centre template, not
 // solved: the start is refused with not_solved and its finance inputs are
-// unset). Run: node .scratch/template-e2e/shots/22-s2/shots.mjs (app on :8000/:5173).
+// unset; the busy 409 is mocked). Run: node .scratch/template-e2e/shots/22-s2/shots.mjs (app on :8000/:5173).
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -72,6 +72,13 @@ try {
       await page.getByTestId('ic-needs').waitFor()
       await page.waitForTimeout(1500)
       await view('2-refused-needs')
+      // A busy 409 is a plain sentence (routers/results.py _refuse_if_mesh_busy);
+      // a solve or another study must be running to get it, so it is mocked here.
+      await page.route(u => u.pathname === '/api/results/investment_case', r => r.request().method() === 'POST'
+        ? r.fulfill({ status: 409, json: { detail: 'a frontier study is running — wait for it to finish' } }) : r.fallback())
+      await page.getByTestId('ic-run').click()
+      await page.getByTestId('ic-blocked').waitFor()
+      await view('3-wait')
     } catch (e) { problems.push(`${scheme}: ${e.message.split('\n')[0]}`); await page.screenshot({ path: path.join(OUT, `failed-${scheme}.png`) }) }
     await ctx.close()
   }
