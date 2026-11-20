@@ -785,7 +785,10 @@ def test_an_assumed_neutral_earthing_is_tagged_assumed_with_the_campus_reason():
     camp = build_campus(s)
     frames, _ = workbook(camp)
     e = _earthing(frames, "TR1")
-    assert (e["earthing_hv source"], e["earthing_lv source"]) == ("campus (untagged)", "assumed")
+    assert (e["earthing_hv source"], e["earthing_lv source"]) == (
+        "campus (untagged)",
+        "assumed",
+    )
     r = frames["transformers"].set_index("element")
     assert (
         r.at["TR1", "assumed"]
