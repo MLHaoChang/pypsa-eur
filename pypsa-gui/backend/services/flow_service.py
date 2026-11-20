@@ -448,6 +448,24 @@ def _held(component: str, entity: str, *, carrier=None, field_name: str | None =
             "series": bool(series)}
 
 
+def _pin_sizes(n, rows: list[dict]) -> None:
+    """Set ``fixed_size`` on each section 5 asset row: the size an extendable asset's two
+    bounds pin when both are finite and equal (an IPP's owned plant, template-e2e 14), else
+    None. Display only, like the rest of the row: Guided reads "fixed at", not "sized by
+    the study"."""
+    tables = {klass: (table, fld) for klass, table, fld, _stock in _ASSET_TABLES}
+    for row in rows:
+        row["fixed_size"] = None
+        if not row["extendable"] or row["component"] not in tables:
+            continue
+        table, fld = tables[row["component"]]
+        df = getattr(n, table)
+        lo, hi = (_number(df.at[row["entity"], f"{fld}_{b}"]) if f"{fld}_{b}" in df else None
+                  for b in ("min", "max"))
+        if lo is not None and hi is not None and abs(hi - lo) <= 1e-6 * max(1.0, abs(hi)):
+            row["fixed_size"] = lo
+
+
 def _peak(column) -> float | None:
     """The value of a series furthest from zero, sign kept: the peak of
     [-5, -1, -2] is -5. Where +5 and -5 tie, the positive one. None for a
@@ -494,9 +512,19 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
             # The attribute's name only, never the series' values.
             profiles += [_held(klass, str(name), field_name=fld)
                          for name in frame.columns[:max(0, HOLDS_CAP - len(profiles))]]
-    rows = {"carriers": [_held("Carrier", c) for c in carriers[:HOLDS_CAP]], "loads": loads,
+    from services.recipes import link_recipe
+
+    # Section 2 holds the carriers, then each process's recipe (gap 03): the
+    # recipe row owns the recipe, section 5's row of the same Link its size.
+    recipes = []
+    for klass, name in site_assets:
+        r = link_recipe(n, name) if klass == "Link" else None
+        if r is not None:
+            recipes.append({**_held("Link", name, carrier=n.links.at[name, "carrier"]), "recipe": r})
+    held_carriers = [_held("Carrier", c) for c in carriers[:HOLDS_CAP]]
+    rows = {"carriers": held_carriers + recipes[:max(0, HOLDS_CAP - len(held_carriers))], "loads": loads,
             "assets": assets, "profiles": profiles}
-    totals = {"carriers": len(carriers), "loads": len(n.loads.index),
+    totals = {"carriers": len(carriers) + len(recipes), "loads": len(n.loads.index),
               "assets": len(site_assets), "profiles": profile_total}
     return rows, totals
 
@@ -543,6 +571,7 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     carriers = [str(c) for c in n.carriers.index] if len(n.carriers) else \
         sorted({str(b) for b in n.buses.get("carrier", []) if str(b)})
     holds, holds_total = _holds(n, carriers, site_assets)
+    _pin_sizes(n, holds.get("assets", []))
     return _Facts(
         revision=revision, snapshots=len(n.snapshots), loads=len(n.loads),
         carriers=carriers,
@@ -786,6 +815,20 @@ def _bind_items(facts: _Facts, db, org_id, project_dir: pathlib.Path, n) -> list
     return out
 
 
+# Island rows have no editor of their own in section 5 yet (the Controls block
+# is a later package); until then they open the island panel, Grid study ›
+# Island, in place. Never the Expert Capacity bounds the section fallback gives.
+_ISLAND_WORDS = ("island", "rocof", "ride-through")
+_ISLAND_PANEL = "campusStudy"
+
+
+def _ledger_panel(item: str, section: str | None) -> str | None:
+    low = item.lower()
+    if section == "assets" and any(w in low for w in _ISLAND_WORDS):
+        return _ISLAND_PANEL
+    return None
+
+
 def ledger_section(item: str) -> str | None:
     """The section a template ledger row's `item` files to, or None."""
     low = item.lower()
@@ -883,8 +926,9 @@ def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
                              panel=row.get("panel"), value=str(value or "")))
             out[-1]["card"] = card
             continue
+        filed = ledger_section(item) or "project"
         out.append(_item("assumed_default", "warning", message, "template",
-                         ledger_section(item) or "project", entity=item,
+                         filed, entity=item, panel=_ledger_panel(item, filed),
                          value=str(value or "")))
         out[-1]["card"] = card
     energ = [e for e in template.get("energization") or []

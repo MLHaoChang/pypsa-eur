@@ -3,7 +3,7 @@
 
 # 05 — Raw parameter, option and internal names shown to the user (RAW-NAMES-1)
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: Set-in-Expert lines in plain words merged (#1631); left: raw ids in eh_concentrator.py, campusElectrical.ts, CampusIslandCutsSection.tsx, ipp_da
 Owner: expert-catalogue slices 01/02 (lead session_01G7qCuo4TtQpLUWDE5GKpny)
 Size: M
 Gated: UX
@@ -27,3 +27,22 @@ Journey fit: every set-up step (sections 1–8) in Expert, plus the Guided drawe
 - Each raw label above has a plain-language label in both modes (glossary: pypsa-gui/CONTEXT.md). Internal units such as `__lost_concentrate` are hidden or labelled as what they mean ("Concentrate shortfall").
 - A test scans the rendered Guided sections and Expert panels of each template for `/\b[a-z]+(_[a-z0-9]+)+\b/` outside allowed component names (per Q2).
 - (UX, Q2 (a)) Templates ship plain display names. Existing projects keep their ids (no renames). The names follow the expert-catalogue plain-name table (session expert-catalogue).
+
+## Progress (session for PR on branch claude/template-e2e-05-raw-names)
+
+Done in this slice (screens neither #1686 nor #1634 touch), via `frontend/src/plainNames.ts`:
+- Load profile advanced fields and archetype/preset names (Guided and Expert share `LoadSeriesEditor`).
+- Grid study island scenarios and control-mode options.
+- Commercial price-series picker and its provenance line (`Ipp da base (version 1)`).
+
+Waiting on other PRs / later slices:
+- Scorecard raw names: DC walk DW-C (#1686).
+- Model names and the plain-name table for template component ids (Q2): expert-catalogue 01a-1 (#1634). The ids in `Control mode of <unit>` and `it_load`, `genset_new`, ... stay until that table lands.
+- `__lost_concentrate` in the Assets list: the list is built by `services/equipment_table.py`, which #1686 edits; hide or relabel after it merges.
+- Campus file raw YAML stub: needs a form editor, a separate slice.
+- Template-wide snake_case scan test of every Guided section and Expert panel: needs the Q2 names first.
+
+
+## Comments
+
+- Seen again 2026-11-20 (template walk, master 1f6905e3): DC Guided step 3 prints 'grid_import, 40 MW', 'BESS new is not sized yet'; H2 step 1 says 'Fmea top ranks them'.

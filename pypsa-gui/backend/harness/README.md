@@ -593,8 +593,9 @@ the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
 (opt-in, `price_calculations.py`, `emissions_calculations.py`,
 `curtailment_calculations.py`, sharing `profile_common.py`) check one bus's
 time-weighted price, generator CO2 over the time-varying efficiency with the cap's
-dual as −mu, and curtailment of generators with a time-varying availability. Every
-profile refuses once an AC power flow has overwritten the LP outputs.
+dual as −mu, and curtailment of generators with a time-varying availability. An AC
+power flow leaves the LP outputs in place (owner decision PF-SAVE-1: the flow's
+values live only in `ac_pf_results`), so every profile still reads the LP after one.
 `capacity/1` (opt-in) reports one named-class component's `*_nom_opt` and its
 change, and says when it was built to its bound; `storage-cycles/1` divides window
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
@@ -1804,6 +1805,37 @@ the preset turns off (grid, control, reliability), with its reason, read from
 - **Explore.** Skipped, with its reason, until the shipped `cases.json` run as
   explore cases (the next slice).
 
+### The grid-only profile (study harness 15)
+
+`grid_only@1` serves the `3bus`, `ieee14`, `belgium` and `ieee39` templates,
+with no params, sidecars or levers (owner decisions SH-PILOT-1, SH15-PF-1).
+
+- **Setup.** One action: `update_solver_config` with exactly
+  `{"partial": {"run_ac_pf_after_lopf": true}}`, switching Load flow on. It is
+  a `BOUND_CONTEXT_TOOLS` member, carded in stepwise mode; a grant admits it
+  only through `run_envelope.SETTING_TOOLS`, as the runner's own step
+  (`session.run_step_call`, else `own_step_only`) with those args alone (else
+  `outside_entry`). Setup also refuses a template whose source is missing.
+- **Result gate.** The core rules and the PF rules, read only from the stored
+  AC PF result (`services/run_grid_pf.py`), never from LOPF flows; a stale,
+  unknown or absent PF is no evidence. `grid.pf.converged` and
+  `grid.pf.loading` (at most 100 %, apparent power) block and go to the user
+  when not evaluated; `grid.pf.voltage` (each bus's own band, none set: not
+  evaluated) and `grid.n1.secured` (the solver's N-1 option over every line,
+  and every transformer when there is one) warn. A solve with Load flow on is
+  fresh for a profile that sets `pf_results` only while `ac_pf_network_revision`
+  is the network's and the condition is exactly `lopf+ac_pf_ok`
+  (`run_gates.lp_condition`, `calculations.solve_matches_inputs(after_pf=True)`).
+  An LP-only reader stays current through the flow (issue 50).
+- **Report and hand-off (issue 50, PF-SAVE-1).** The flow restores the LP's
+  tables into the live network, so the report and the hand-off's total-cost and
+  CO2 KPIs read the LP dispatch. The chapters are `headline_results`,
+  `dispatch` and `load_flow`; the load-flow chapter reads the flow's own result.
+  The grant lists the report.
+- **Scope (issue 51).** The four grid templates have their own preset in
+  `flow_scope.TEMPLATE_PRESETS`: the grid card with Load flow, and no EH
+  reliability study or investment case.
+
 ### The approval envelope (study harness issue 03)
 
 `services/run_envelope.py` (design §7; SH-ENVELOPE-1). "Approve once, run
@@ -2373,6 +2405,36 @@ the error is `discussed_run_required`. Download the chip with
 `discuss_project_run` and `export_run_evidence` are write-tier. Expert mode
 leaves write-tier tools uncarded. Guided mode cards every write, and
 `AUTO_APPROVE_TIERS` never includes `write`.
+
+### Current view (live-voice 03a)
+
+Each admitted turn records the view it was asked from in the durable thread's
+`refs.current`, through `durable_conversation.record_current_view`, called once
+in `loop.py` after the turn has passed every refusal and its user message is
+kept. The loop reads the bound thread's generation before `session_init`
+(`current_view_generation`) and passes it on; the write re-checks it under
+`_LOCK`, so a rebind during the turn, an obsolete utterance or an unreadable
+start generation records nothing. `refs.discussed` is never
+touched by it: what the user is looking at and the run under discussion stay
+distinct, and a resumed episode keeps both.
+
+The record is built from the request's `ui_context`, which is client input.
+Every value is checked on its own: `panel` and `results_tab` against
+`SAFETY_PANEL_ENUM` and `RESULTS_TAB_ENUM` (a tab only under Results), run ids
+against the run id pattern, `section` against a bounded id pattern, `source`,
+`scope` and `mode` against closed sets, the window as two whole numbers in
+order, and the asset as a known component class plus a bounded name. A value
+that fails is dropped. `at` is server time.
+
+The write never refuses or delays a turn: no context, no bound thread, another
+episode, a stale `generation`, another replica, or a disk or JSON error writes
+nothing and returns False. It does not bump the generation. The loop holds no
+session or provider lock at the call; the function takes only `_LOCK`.
+
+`get_file_delivery` also returns `expires_at`: for an `agent_export`, the last
+instant the download is served (`uploaded_at` + 7 days, as
+`upload_service.refuse_expired_delivery` measures it); `null` for every other
+kind, which never expires.
 
 ### Current load flow
 

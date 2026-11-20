@@ -148,11 +148,18 @@ def irl():
 def test_irl_accounting_and_counts(irl):
     model, conv = irl
     check_ledger(model, conv)
+    # no CSVs given: every data-file row and Data File row is unmapped
     assert conv.ledger.totals() == {
-        "t_data": {"network": 282, "sidecar": 9, "unmapped": 243, "assumed": 0},
-        "t_attribute_data": {"network": 8, "sidecar": 0, "unmapped": 171, "assumed": 0},
+        "t_data": {"network": 289, "sidecar": 10, "unmapped": 255, "assumed": 0},
+        "t_attribute_data": {
+            "network": 10,
+            "sidecar": 0,
+            "unmapped": 174,
+            "assumed": 0,
+        },
     }
-    assert conv.report.counts["grid nodes"] == 3
+    assert conv.report.counts["grid nodes"] == 4
+    assert conv.report.counts["hydro reservoirs"] == 1
     assert conv.report.counts["generators"] == 59
     assert conv.report.counts["links"] == 1
 
@@ -210,6 +217,7 @@ def test_read_plexos_result_is_json_ready(tmp_path):
     areas = res.sidecars[AREAS_SIDECAR]["areas"]
     region = next(a for a in areas if a["kind"] == "region")
     assert region["voll"] > 0 and sorted(region["buses"]) == [
+        "EU-ESP",
         "EU-FRA",
         "EU-GBR",
         "EU-IRL",
@@ -238,7 +246,7 @@ def test_zip_reads_like_the_xml(tmp_path):
     assert res.report.source_files == ["m.zip"]
     assert (
         "data file model/csv_files/a.csv",
-        "data-file time series are read in a later slice",
+        "no imported property reads this file",
     ) in [(u.source_item, u.reason) for u in res.report.unmapped]
 
 
@@ -363,10 +371,8 @@ def test_model_default_is_first_by_name_and_listed():
 def test_model_option_switches_scenarios_on():
     conv = convert(_models(), {"model": "B"})
     assert not [a for a in conv.report.assumed if a.parameter == "Model"]
-    assert sorted(unmapped_reason(conv, "Node 'N'")) == [
-        "scenario 'Off' not selected",
-        "scenario 'On' is on in the chosen Model; scenario rows are applied in a later slice",
-    ]
+    assert unmapped_reason(conv, "Node 'N'") == ["scenario 'Off' not selected"]
+    assert conv.network.loads.p_set.tolist() == [5.0]
     with pytest.raises(ImportFormatError, match="has: A, B"):
         convert(_models(), {"model": "C"})
 
@@ -908,11 +914,11 @@ def test_name_clash_gets_a_fixed_suffix():
 
 def test_row_with_an_on_and_an_off_scenario_is_on():
     model = _models()
+    model.rows[0].tags = []
     model.rows[1].tags = [Tag("Scenario", "Off", None), Tag("Scenario", "On", None)]
     conv = convert(model, {"model": "B"})
-    assert all(
-        "is on in the chosen Model" in r for r in unmapped_reason(conv, "Node 'N'")
-    )
+    assert conv.network.loads.p_set.tolist() == [7.0]
+    assert unmapped_reason(conv, "Node 'N'") == ["replaced by scenario 'On'"]
 
 
 def test_load_tally_counts_every_readable_load_row():

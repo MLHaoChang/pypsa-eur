@@ -108,3 +108,25 @@ describe('DcLoadForm staged reason and selection mark', () => {
     expect(screen.getAllByTestId('dc-form-arch-selected')).toHaveLength(1)
   })
 })
+
+describe('DcLoadForm Batteries words (DC walkthrough 01)', () => {
+  it('says the strings are sized at creation and carry outages only', async () => {
+    mount()
+    await userEvent.selectOptions(screen.getByLabelText(BACKUP_MODE_FIELD), 'bess')
+    expect(screen.getByTestId('dc-form-backup-hint').textContent).toContain(
+      'Battery strings replace the gensets. They are sized at creation from the IT load and carry outages only, '
+      + 'so the normal peak must fit the import.')
+    expect(BACKUP_HINT.bess).not.toContain('sized later')
+    expect(screen.queryByTestId('dc-form-backup-staged')).toBeNull()
+  })
+
+  it('staged: says Create refuses Batteries and names the way out, in the mode words', async () => {
+    mount('eh_datacenter_staged')
+    expect(screen.queryByTestId('dc-form-backup-staged')).toBeNull()
+    await userEvent.selectOptions(screen.getByLabelText(BACKUP_MODE_FIELD), 'bess')
+    expect(screen.getByTestId('dc-form-backup-staged').textContent?.trim())
+      .toBe(`Create refuses ${MODE_LABEL.bess} on this example at the default PUE: pick ${MODE_LABEL.hybrid}.`)
+    await userEvent.selectOptions(screen.getByLabelText(BACKUP_MODE_FIELD), 'hybrid')
+    expect(screen.queryByTestId('dc-form-backup-staged')).toBeNull()
+  })
+})
