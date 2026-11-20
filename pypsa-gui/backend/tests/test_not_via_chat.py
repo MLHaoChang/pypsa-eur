@@ -72,6 +72,7 @@ def test_the_issue_rows_are_declared():
         'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
+        'parameter_catalogue': ('unbuilt', None),  # expert-catalogue 01a; chat tools in 01b
         'report_comment_revisions': ('unbuilt', None),
         'report_chart_snapshots': ('manual', 'results'),
         'eh_study_why': ('unbuilt', None),  # guided-results 02a; a later slice adds the chat tool

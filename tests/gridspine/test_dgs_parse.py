@@ -204,9 +204,9 @@ GENERAL = "$$General;ID(a:40);Descr(a:40);Val(a:40)\n1;Version;5.0\n"
             "SIZEROW 1 but no vector columns",
         ),
         (
-            GENERAL + "$$ElmTerm;ID(a:40);uknom(r)\n3;33,0\n",
+            GENERAL + "$$ElmTerm;ID(a:40);uknom(r)\n3;1.234,5\n",
             4,
-            "'33,0' is not a number",
+            "'1.234,5' is not a number",
         ),
         (
             GENERAL + "$$ElmTerm;ID(a:40);outserv(i)\n3;1.0\n",

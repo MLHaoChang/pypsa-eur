@@ -3,7 +3,7 @@
 
 # Template creation: dev 404 text, duplicate name, one unverified project
 
-Status: ready-for-agent
+Status: done (#1748 merged 583927b8)
 Model tier: sonnet
 Size: S
 Gated: UX
