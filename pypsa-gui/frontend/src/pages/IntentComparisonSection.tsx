@@ -422,7 +422,7 @@ function InputsUsed({ inputs }: { inputs: NonNullable<IntentJob['inputs']> }) {
 }
 
 /** A refusal, with a link on its own line that focuses the field on this form it names (review-ux.md). */
-function RefusalLine({ text }: { text: string }) {
+export function RefusalLine({ text }: { text: string }) {
   const field = refusalField(text)
   const focus = () => {
     const el = field && document.querySelector<HTMLElement>(`[data-testid="${field.testId}"]`)
