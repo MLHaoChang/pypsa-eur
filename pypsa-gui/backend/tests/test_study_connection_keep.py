@@ -69,7 +69,8 @@ def test_planned_changes_list_the_connection_change_in_plain_words(tid, built, c
     if built != cap:
         row = kinds["connection_limit"]
         assert (row["before_mw"], row["after_mw"]) == (built, cap)
-        assert f"{cap:g} MW" in row["text"] and f"{built:g} MW" in row["text"]
+        assert row["text"] == (f"The study would set your grid connection limit to "
+                               f"{cap:g} MW (your project: {built:g} MW).")
     else:
         assert "connection_limit" not in kinds
         assert kinds["expansion_limit"]["after_mw"] == cap
@@ -213,7 +214,10 @@ def test_an_equal_sum_with_a_different_split_is_still_listed():
     pack = RUN.apply_pack_overrides(default_weak_flexible_pack(), {"import_p_nom_mw": 50.0})
     row = next(r for r in A.planned_changes(n, pack) if r["kind"] == "connection_limit")
     assert (row["before_mw"], row["after_mw"]) == (50.0, 50.0)
-    assert "evenly" in row["text"] and "25 MW each" in row["text"]
+    assert row["text"] == ("The study would share your 50 MW grid connection limit "
+                           "evenly over its 2 connections (25 MW each).")
+    res = A.apply_archetype_pack_detailed(n, pack)
+    assert res.warnings[0] == row["text"].replace("would share", "shared")
 
 
 def test_a_cap_equal_only_after_rounding_is_a_change():

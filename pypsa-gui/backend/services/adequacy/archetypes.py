@@ -373,13 +373,15 @@ def _rows(n, selected: list[str], writes: list[dict[str, Any]], *,
             float(n.links.at[s, "p_nom"]) for s in selected
             if s not in {w["link"] for w in by_kind["connection_limit"]})
         if before != after:
-            text = (f"The study {{v}} your grid connection limit to "
-                    f"{_mw(after)}{many} (your project: {_mw(before)}).")
+            def say(v: str) -> str:
+                return (f"The study {v} your grid connection limit to "
+                        f"{_mw(after)}{many} (your project: {_mw(before)}).")
+            text = (say("would set"), say("set"))
         else:
-            text = (f"The study {{v}} your {_mw(after)} grid connection "
-                    f"limit evenly{many} ({_mw(after / k)} each).")
-        verb = ("would set", "set") if before != after else ("would share", "shared")
-        text = (text.replace("{v}", verb[0]), text.replace("{v}", verb[1]))
+            def say(v: str) -> str:
+                return (f"The study {v} your {_mw(after)} grid connection "
+                        f"limit evenly{many} ({_mw(after / k)} each).")
+            text = (say("would share"), say("shared"))
         rows.append({"kind": "connection_limit", "before_mw": before,
                      "after_mw": after, "needs_accept": True, "text": text[0],
                      "done": text[1], "writes": by_kind["connection_limit"]})
