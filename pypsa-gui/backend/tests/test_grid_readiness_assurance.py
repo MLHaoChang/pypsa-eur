@@ -30,6 +30,16 @@ def card(tmp_path, tid="eh_datacenter", dc_load=None):
     return G.grid_readiness(d, n, PROFILE)["rows"]
 
 
+def scr_card(tmp_path, tid="eh_datacenter", dc_load=None, sk=None):
+    """The card with the PoC's IBR capacity stated (50 MVA, above the template's
+    44 MVA of converters), so the SCR row carries a checkable verdict (DC walk 05)."""
+    d, n = _project(tmp_path, tid, dc_load=dc_load)
+    n.buses.at["grid", "eh_ibr_mva"] = 50.0
+    if sk is not None:
+        n.buses.at["grid", "eh_sk_mva"] = sk
+    return G.grid_readiness(d, n, PROFILE)["rows"]
+
+
 def counts(rows):
     scope = {"version": 1, "profile": R.PROFILE, "entity_id": "network"}
     facts, _ = R.calculate(raw_for(rows), scope)
@@ -47,7 +57,7 @@ def test_every_row_has_one_disposition_and_the_counts_add_up(tmp_path, tid, dc_l
 
 
 def test_each_declared_rule_checks_its_row(tmp_path):
-    rows = {r["id"]: r for r in card(tmp_path, "eh_datacenter", {})}
+    rows = {r["id"]: r for r in scr_card(tmp_path, "eh_datacenter", {})}
     for rid in ("scr", "ramp_rate", "rapid_voltage_change"):
         kind, verdict = R.disposition(rows[rid])
         assert kind == "checked" and verdict == rows[rid]["verdict"], rid
@@ -70,9 +80,8 @@ def test_the_voltage_change_row_re_judges_in_every_regime(tmp_path, swing, verdi
 
 
 def test_a_rounded_boundary_is_withheld_not_re_verdicted(tmp_path):
-    d, n = _project(tmp_path, "eh_datacenter")
-    n.buses.at["grid", "eh_sk_mva"] = 89.988  # SCR 2.9996: stored 3.0, the engine says warn
-    row = _rows(G.grid_readiness(d, n, PROFILE))["scr"]
+    # SCR 2.9996 at a stated 50 MVA: stored 3.0, the engine says warn
+    row = _rows({"rows": scr_card(tmp_path, sk=149.98)})["scr"]
     assert R.disposition(row) == ("boundary_disagreement", "pass")
     assert counts([row]) == {"checked_pass": 0, "checked_warn": 0, "checked_fail": 0, "not_checked": 1}
 
@@ -97,7 +106,7 @@ def test_the_harmonic_row_is_not_scalar_since_its_verdict_reads_each_order(tmp_p
 
 
 def test_a_rule_that_is_not_the_codes_rule_is_withheld(tmp_path):
-    row = _rows({"rows": card(tmp_path, "eh_datacenter", {})})["scr"]
+    row = _rows({"rows": scr_card(tmp_path, "eh_datacenter", {})})["scr"]
     loose = dict(row, rule={**row["rule"], "comparator": "<="})
     assert R.disposition(loose)[0] == "rule_mismatch"
     stray = dict(row, id="made_up_row")

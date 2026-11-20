@@ -788,6 +788,22 @@
     <complement_description>set of generators that use the fuel</complement_description>
   </t_collection>
   <t_collection>
+    <collection_id>8</collection_id>
+    <parent_class_id>2</parent_class_id>
+    <child_class_id>7</child_class_id>
+    <name>Head Storage</name>
+    <min_count>0</min_count>
+    <max_count>1</max_count>
+    <complement_name>Exporting Generators</complement_name>
+    <complement_min_count>0</complement_min_count>
+    <complement_max_count>-1</complement_max_count>
+    <is_enabled>true</is_enabled>
+    <is_one_to_many>false</is_one_to_many>
+    <lang_id>38</lang_id>
+    <description>head storage for the generator</description>
+    <complement_description>set of generators that draw water from the storage</complement_description>
+  </t_collection>
+  <t_collection>
     <collection_id>15</collection_id>
     <parent_class_id>2</parent_class_id>
     <child_class_id>41</child_class_id>
@@ -842,6 +858,18 @@
     <lang_id>31</lang_id>
     <description>set of fuels that produce the emission</description>
     <complement_description>set of emissions produced by the fuel</complement_description>
+  </t_collection>
+  <t_collection>
+    <collection_id>45</collection_id>
+    <parent_class_id>1</parent_class_id>
+    <child_class_id>7</child_class_id>
+    <name>Storages</name>
+    <min_count>0</min_count>
+    <max_count>-1</max_count>
+    <is_enabled>true</is_enabled>
+    <is_one_to_many>true</is_one_to_many>
+    <lang_id>96</lang_id>
+    <description>Storage objects</description>
   </t_collection>
   <t_collection>
     <collection_id>82</collection_id>
@@ -1867,10 +1895,22 @@
     <name>Wind</name>
   </t_category>
   <t_category>
+    <category_id>96</category_id>
+    <class_id>3</class_id>
+    <rank>8</rank>
+    <name>Solar</name>
+  </t_category>
+  <t_category>
     <category_id>98</category_id>
     <class_id>3</class_id>
     <rank>10</rank>
     <name>Oil country level</name>
+  </t_category>
+  <t_category>
+    <category_id>101</category_id>
+    <class_id>7</class_id>
+    <rank>3</rank>
+    <name>Europe</name>
   </t_category>
   <t_category>
     <category_id>106</category_id>
@@ -1901,6 +1941,12 @@
     <class_id>63</class_id>
     <rank>1</rank>
     <name>Wind</name>
+  </t_category>
+  <t_category>
+    <category_id>129</category_id>
+    <class_id>63</class_id>
+    <rank>2</rank>
+    <name>Solar</name>
   </t_category>
   <t_category>
     <category_id>130</category_id>
@@ -2208,6 +2254,97 @@
     <lang_id>627</lang_id>
     <description>Emissions produced per unit of energy</description>
     <tag>2001</tag>
+    <is_visible>true</is_visible>
+  </t_property>
+  <t_property>
+    <property_id>439</property_id>
+    <collection_id>45</collection_id>
+    <property_group_id>3</property_group_id>
+    <enum_id>16</enum_id>
+    <name>Units</name>
+    <unit_id>0</unit_id>
+    <default_value>1</default_value>
+    <validation_rule>In (0,1)</validation_rule>
+    <upscaling_method>1</upscaling_method>
+    <downscaling_method>0</downscaling_method>
+    <property_type>0</property_type>
+    <period_type_id>0</period_type_id>
+    <is_key>true</is_key>
+    <is_enabled>true</is_enabled>
+    <is_dynamic>true</is_dynamic>
+    <is_multi_band>false</is_multi_band>
+    <max_band_id>1</max_band_id>
+    <lang_id>812</lang_id>
+    <description>Flag if Storage is in service</description>
+    <tag>840000</tag>
+    <is_visible>true</is_visible>
+  </t_property>
+  <t_property>
+    <property_id>440</property_id>
+    <collection_id>45</collection_id>
+    <property_group_id>3</property_group_id>
+    <enum_id>17</enum_id>
+    <name>Max Volume</name>
+    <unit_id>24</unit_id>
+    <default_value>1E+30</default_value>
+    <validation_rule>&gt;=0</validation_rule>
+    <upscaling_method>1</upscaling_method>
+    <downscaling_method>0</downscaling_method>
+    <property_type>0</property_type>
+    <period_type_id>0</period_type_id>
+    <is_key>false</is_key>
+    <is_enabled>true</is_enabled>
+    <is_dynamic>false</is_dynamic>
+    <is_multi_band>false</is_multi_band>
+    <max_band_id>1</max_band_id>
+    <lang_id>466</lang_id>
+    <description>Maximum volume</description>
+    <tag>40001</tag>
+    <is_visible>true</is_visible>
+  </t_property>
+  <t_property>
+    <property_id>441</property_id>
+    <collection_id>45</collection_id>
+    <property_group_id>3</property_group_id>
+    <enum_id>18</enum_id>
+    <name>Initial Volume</name>
+    <unit_id>24</unit_id>
+    <default_value>0</default_value>
+    <validation_rule>&gt;=0</validation_rule>
+    <upscaling_method>1</upscaling_method>
+    <downscaling_method>0</downscaling_method>
+    <property_type>0</property_type>
+    <period_type_id>0</period_type_id>
+    <is_key>false</is_key>
+    <is_enabled>true</is_enabled>
+    <is_dynamic>false</is_dynamic>
+    <is_multi_band>false</is_multi_band>
+    <max_band_id>1</max_band_id>
+    <lang_id>318</lang_id>
+    <description>Storage volume at the start of the period</description>
+    <tag>C0001</tag>
+    <is_visible>true</is_visible>
+  </t_property>
+  <t_property>
+    <property_id>450</property_id>
+    <collection_id>45</collection_id>
+    <property_group_id>3</property_group_id>
+    <enum_id>27</enum_id>
+    <name>Natural Inflow</name>
+    <unit_id>25</unit_id>
+    <default_value>0</default_value>
+    <upscaling_method>1</upscaling_method>
+    <downscaling_method>0</downscaling_method>
+    <property_type>0</property_type>
+    <period_type_id>0</period_type_id>
+    <is_key>false</is_key>
+    <is_enabled>true</is_enabled>
+    <is_dynamic>true</is_dynamic>
+    <is_multi_band>false</is_multi_band>
+    <max_band_id>1</max_band_id>
+    <lang_id>530</lang_id>
+    <description>Rate of natural inflow</description>
+    <tag>40001</tag>
     <is_visible>true</is_visible>
   </t_property>
   <t_property>
@@ -2580,6 +2717,14 @@
     <category_id>70</category_id>
     <description>The 10-year study period 2020-29</description>
     <GUID>e5206572-4ed1-4898-bce1-2b7c308e8596</GUID>
+  </t_object>
+  <t_object>
+    <object_id>9386</object_id>
+    <class_id>2</class_id>
+    <name>ESP_Csp_ANDASOL316855</name>
+    <category_id>85</category_id>
+    <description>Identified as CSP by means of Solarpaces database entry 'Andasol-1'.</description>
+    <GUID>f4e7b8bb-739e-4813-b166-fdf97063b2f9</GUID>
   </t_object>
   <t_object>
     <object_id>14916</object_id>
@@ -3130,6 +3275,13 @@
     <GUID>24b46967-9999-473f-9649-1db6b3e3f067</GUID>
   </t_object>
   <t_object>
+    <object_id>30742</object_id>
+    <class_id>3</class_id>
+    <name>Europe_Csp</name>
+    <category_id>96</category_id>
+    <GUID>eb0518f0-4263-4cee-99ea-45bb4d3b6465</GUID>
+  </t_object>
+  <t_object>
     <object_id>30853</object_id>
     <class_id>3</class_id>
     <name>EU-IRL Oil</name>
@@ -3142,6 +3294,14 @@
     <name>CO2</name>
     <category_id>5</category_id>
     <GUID>57baefb4-fe27-478c-a21c-10771f173df8</GUID>
+  </t_object>
+  <t_object>
+    <object_id>30914</object_id>
+    <class_id>7</class_id>
+    <name>ESP_Csp_ANDASOL316855_Storage</name>
+    <category_id>101</category_id>
+    <description>Storage object for ESP_Csp_ANDASOL316855 Generator object. Storage data from Solarpaces database entry 'Andasol-1'.</description>
+    <GUID>db345421-659a-4033-99b4-03bcd35bb1ac</GUID>
   </t_object>
   <t_object>
     <object_id>31505</object_id>
@@ -3191,6 +3351,14 @@
     <GUID>7fe7e36b-018a-4cb0-ab77-9a988b0cea3c</GUID>
   </t_object>
   <t_object>
+    <object_id>32180</object_id>
+    <class_id>40</class_id>
+    <name>EU-ESP</name>
+    <category_id>112</category_id>
+    <description>Solely used to be able to report emissions on a country level.</description>
+    <GUID>67743bb2-21c5-43db-8feb-d7cff0bfab4c</GUID>
+  </t_object>
+  <t_object>
     <object_id>32183</object_id>
     <class_id>40</class_id>
     <name>EU-FRA</name>
@@ -3213,6 +3381,13 @@
     <category_id>112</category_id>
     <description>Solely used to be able to report emissions on a country level.</description>
     <GUID>e1f76847-aa54-4c12-a50a-b5b54b114071</GUID>
+  </t_object>
+  <t_object>
+    <object_id>32392</object_id>
+    <class_id>41</class_id>
+    <name>EU-ESP</name>
+    <category_id>118</category_id>
+    <GUID>c70ca67a-f59f-45ec-9653-2691ddfca9ce</GUID>
   </t_object>
   <t_object>
     <object_id>32395</object_id>
@@ -3250,6 +3425,14 @@
     <GUID>f9c6017e-736b-437a-8dff-82f6004698f6</GUID>
   </t_object>
   <t_object>
+    <object_id>33045</object_id>
+    <class_id>62</class_id>
+    <name>Global CSP Data</name>
+    <category_id>62</category_id>
+    <description>CSP inflow profiles. Equals solar-PV hourly CF value of the specific location as extracted from renewables.ninja for 2015 * assumed solar multiple of 2.5 * generator capacity of CSP generator.</description>
+    <GUID>23c44abc-cce7-4d07-8f92-39d155368243</GUID>
+  </t_object>
+  <t_object>
     <object_id>33046</object_id>
     <class_id>62</class_id>
     <name>Global Hourly Demand Data</name>
@@ -3280,6 +3463,14 @@
     <category_id>128</category_id>
     <description>Multipliers to adjust the generation output from wind/solar on a country-level to overcome data gaps in the different databases.</description>
     <GUID>0245b7c4-c803-4373-b365-2db381b54007</GUID>
+  </t_object>
+  <t_object>
+    <object_id>33319</object_id>
+    <class_id>63</class_id>
+    <name>EU-ESP Solar Multiplier</name>
+    <category_id>129</category_id>
+    <description>Multipliers to adjust the generation output from wind/solar on a country-level to overcome data gaps in the different databases.</description>
+    <GUID>22fe5ce0-0467-42f1-a284-49645438d023</GUID>
   </t_object>
   <t_object>
     <object_id>33378</object_id>
@@ -3579,6 +3770,14 @@
     <collection_id>544</collection_id>
     <child_class_id>70</child_class_id>
     <child_object_id>6</child_object_id>
+  </t_membership>
+  <t_membership>
+    <membership_id>10107</membership_id>
+    <parent_class_id>1</parent_class_id>
+    <parent_object_id>1</parent_object_id>
+    <collection_id>1</collection_id>
+    <child_class_id>2</child_class_id>
+    <child_object_id>9386</child_object_id>
   </t_membership>
   <t_membership>
     <membership_id>16886</membership_id>
@@ -4109,6 +4308,14 @@
     <child_object_id>30692</child_object_id>
   </t_membership>
   <t_membership>
+    <membership_id>30820</membership_id>
+    <parent_class_id>1</parent_class_id>
+    <parent_object_id>1</parent_object_id>
+    <collection_id>19</collection_id>
+    <child_class_id>3</child_class_id>
+    <child_object_id>30742</child_object_id>
+  </t_membership>
+  <t_membership>
     <membership_id>30821</membership_id>
     <parent_class_id>1</parent_class_id>
     <parent_object_id>1</parent_object_id>
@@ -4147,6 +4354,14 @@
     <collection_id>31</collection_id>
     <child_class_id>5</child_class_id>
     <child_object_id>30887</child_object_id>
+  </t_membership>
+  <t_membership>
+    <membership_id>30921</membership_id>
+    <parent_class_id>1</parent_class_id>
+    <parent_object_id>1</parent_object_id>
+    <collection_id>45</collection_id>
+    <child_class_id>7</child_class_id>
+    <child_object_id>30914</child_object_id>
   </t_membership>
   <t_membership>
     <membership_id>31416</membership_id>
@@ -4197,6 +4412,14 @@
     <child_object_id>32071</child_object_id>
   </t_membership>
   <t_membership>
+    <membership_id>32203</membership_id>
+    <parent_class_id>1</parent_class_id>
+    <parent_object_id>1</parent_object_id>
+    <collection_id>263</collection_id>
+    <child_class_id>40</child_class_id>
+    <child_object_id>32180</child_object_id>
+  </t_membership>
+  <t_membership>
     <membership_id>32206</membership_id>
     <parent_class_id>1</parent_class_id>
     <parent_object_id>1</parent_object_id>
@@ -4219,6 +4442,14 @@
     <collection_id>263</collection_id>
     <child_class_id>40</child_class_id>
     <child_object_id>32189</child_object_id>
+  </t_membership>
+  <t_membership>
+    <membership_id>32415</membership_id>
+    <parent_class_id>1</parent_class_id>
+    <parent_object_id>1</parent_object_id>
+    <collection_id>294</collection_id>
+    <child_class_id>41</child_class_id>
+    <child_object_id>32392</child_object_id>
   </t_membership>
   <t_membership>
     <membership_id>32418</membership_id>
@@ -4261,6 +4492,14 @@
     <child_object_id>32993</child_object_id>
   </t_membership>
   <t_membership>
+    <membership_id>33068</membership_id>
+    <parent_class_id>1</parent_class_id>
+    <parent_object_id>1</parent_object_id>
+    <collection_id>511</collection_id>
+    <child_class_id>62</child_class_id>
+    <child_object_id>33045</child_object_id>
+  </t_membership>
+  <t_membership>
     <membership_id>33069</membership_id>
     <parent_class_id>1</parent_class_id>
     <parent_object_id>1</parent_object_id>
@@ -4283,6 +4522,14 @@
     <collection_id>511</collection_id>
     <child_class_id>62</child_class_id>
     <child_object_id>33049</child_object_id>
+  </t_membership>
+  <t_membership>
+    <membership_id>33283</membership_id>
+    <parent_class_id>1</parent_class_id>
+    <parent_object_id>1</parent_object_id>
+    <collection_id>513</collection_id>
+    <child_class_id>63</child_class_id>
+    <child_object_id>33319</child_object_id>
   </t_membership>
   <t_membership>
     <membership_id>33302</membership_id>
@@ -4523,6 +4770,14 @@
     <collection_id>561</collection_id>
     <child_class_id>70</child_class_id>
     <child_object_id>33406</child_object_id>
+  </t_membership>
+  <t_membership>
+    <membership_id>43672</membership_id>
+    <parent_class_id>2</parent_class_id>
+    <parent_object_id>9386</parent_object_id>
+    <collection_id>6</collection_id>
+    <child_class_id>3</child_class_id>
+    <child_object_id>30742</child_object_id>
   </t_membership>
   <t_membership>
     <membership_id>50451</membership_id>
@@ -5027,6 +5282,22 @@
     <collection_id>6</collection_id>
     <child_class_id>3</child_class_id>
     <child_object_id>30731</child_object_id>
+  </t_membership>
+  <t_membership>
+    <membership_id>64276</membership_id>
+    <parent_class_id>2</parent_class_id>
+    <parent_object_id>9386</parent_object_id>
+    <collection_id>8</collection_id>
+    <child_class_id>7</child_class_id>
+    <child_object_id>30914</child_object_id>
+  </t_membership>
+  <t_membership>
+    <membership_id>74403</membership_id>
+    <parent_class_id>2</parent_class_id>
+    <parent_object_id>9386</parent_object_id>
+    <collection_id>15</collection_id>
+    <child_class_id>41</child_class_id>
+    <child_object_id>32392</child_object_id>
   </t_membership>
   <t_membership>
     <membership_id>81182</membership_id>
@@ -5597,6 +5868,14 @@
     <child_object_id>32401</child_object_id>
   </t_membership>
   <t_membership>
+    <membership_id>96395</membership_id>
+    <parent_class_id>41</parent_class_id>
+    <parent_object_id>32392</parent_object_id>
+    <collection_id>297</collection_id>
+    <child_class_id>38</child_class_id>
+    <child_object_id>32071</child_object_id>
+  </t_membership>
+  <t_membership>
     <membership_id>96398</membership_id>
     <parent_class_id>41</parent_class_id>
     <parent_object_id>32395</parent_object_id>
@@ -5619,6 +5898,14 @@
     <collection_id>297</collection_id>
     <child_class_id>38</child_class_id>
     <child_object_id>32071</child_object_id>
+  </t_membership>
+  <t_membership>
+    <membership_id>96653</membership_id>
+    <parent_class_id>41</parent_class_id>
+    <parent_object_id>32392</parent_object_id>
+    <collection_id>298</collection_id>
+    <child_class_id>40</child_class_id>
+    <child_object_id>32180</child_object_id>
   </t_membership>
   <t_membership>
     <membership_id>96656</membership_id>
@@ -6588,6 +6875,48 @@
     <child_class_id>70</child_class_id>
     <child_object_id>33406</child_object_id>
   </t_membership>
+  <t_data>
+    <data_id>73520</data_id>
+    <membership_id>10107</membership_id>
+    <property_id>35</property_id>
+    <value>1</value>
+    <uid>3211718771</uid>
+  </t_data>
+  <t_data>
+    <data_id>73521</data_id>
+    <membership_id>10107</membership_id>
+    <property_id>36</property_id>
+    <value>150</value>
+    <uid>3211718772</uid>
+  </t_data>
+  <t_data>
+    <data_id>73522</data_id>
+    <membership_id>10107</membership_id>
+    <property_id>38</property_id>
+    <value>40</value>
+    <uid>3211718773</uid>
+  </t_data>
+  <t_data>
+    <data_id>73523</data_id>
+    <membership_id>10107</membership_id>
+    <property_id>41</property_id>
+    <value>1.67</value>
+    <uid>3211718774</uid>
+  </t_data>
+  <t_data>
+    <data_id>73524</data_id>
+    <membership_id>10107</membership_id>
+    <property_id>49</property_id>
+    <value>0</value>
+    <uid>3211718775</uid>
+  </t_data>
+  <t_data>
+    <data_id>73525</data_id>
+    <membership_id>10107</membership_id>
+    <property_id>242</property_id>
+    <value>40544</value>
+    <uid>3211718776</uid>
+  </t_data>
   <t_data>
     <data_id>125587</data_id>
     <membership_id>16886</membership_id>
@@ -9893,6 +10222,13 @@
     <uid>3211871605</uid>
   </t_data>
   <t_data>
+    <data_id>226356</data_id>
+    <membership_id>30820</membership_id>
+    <property_id>312</property_id>
+    <value>0</value>
+    <uid>3211871607</uid>
+  </t_data>
+  <t_data>
     <data_id>226357</data_id>
     <membership_id>30821</membership_id>
     <property_id>312</property_id>
@@ -9919,6 +10255,41 @@
     <property_id>312</property_id>
     <value>0</value>
     <uid>3211871619</uid>
+  </t_data>
+  <t_data>
+    <data_id>226496</data_id>
+    <membership_id>30921</membership_id>
+    <property_id>439</property_id>
+    <value>0</value>
+    <uid>3211871747</uid>
+  </t_data>
+  <t_data>
+    <data_id>226497</data_id>
+    <membership_id>30921</membership_id>
+    <property_id>440</property_id>
+    <value>1.125</value>
+    <uid>3211871748</uid>
+  </t_data>
+  <t_data>
+    <data_id>226498</data_id>
+    <membership_id>30921</membership_id>
+    <property_id>441</property_id>
+    <value>0</value>
+    <uid>3211871749</uid>
+  </t_data>
+  <t_data>
+    <data_id>226499</data_id>
+    <membership_id>30921</membership_id>
+    <property_id>450</property_id>
+    <value>0</value>
+    <uid>3211871750</uid>
+  </t_data>
+  <t_data>
+    <data_id>226500</data_id>
+    <membership_id>30921</membership_id>
+    <property_id>450</property_id>
+    <value>0</value>
+    <uid>3211871751</uid>
   </t_data>
   <t_data>
     <data_id>229741</data_id>
@@ -10166,6 +10537,20 @@
     <uid>3211879364</uid>
   </t_data>
   <t_data>
+    <data_id>234429</data_id>
+    <membership_id>32415</membership_id>
+    <property_id>1561</property_id>
+    <value>1</value>
+    <uid>3211879680</uid>
+  </t_data>
+  <t_data>
+    <data_id>234430</data_id>
+    <membership_id>32415</membership_id>
+    <property_id>1563</property_id>
+    <value>0</value>
+    <uid>3211879681</uid>
+  </t_data>
+  <t_data>
     <data_id>234435</data_id>
     <membership_id>32418</membership_id>
     <property_id>1561</property_id>
@@ -10236,6 +10621,20 @@
     <uid>3211880581</uid>
   </t_data>
   <t_data>
+    <data_id>235729</data_id>
+    <membership_id>33068</membership_id>
+    <property_id>2654</property_id>
+    <value>0</value>
+    <uid>3211880980</uid>
+  </t_data>
+  <t_data>
+    <data_id>235730</data_id>
+    <membership_id>33068</membership_id>
+    <property_id>2654</property_id>
+    <value>0</value>
+    <uid>3211880981</uid>
+  </t_data>
+  <t_data>
     <data_id>235731</data_id>
     <membership_id>33069</membership_id>
     <property_id>2654</property_id>
@@ -10269,6 +10668,20 @@
     <property_id>2654</property_id>
     <value>0</value>
     <uid>3211880988</uid>
+  </t_data>
+  <t_data>
+    <data_id>236158</data_id>
+    <membership_id>33283</membership_id>
+    <property_id>2663</property_id>
+    <value>1</value>
+    <uid>3211881409</uid>
+  </t_data>
+  <t_data>
+    <data_id>236159</data_id>
+    <membership_id>33283</membership_id>
+    <property_id>2673</property_id>
+    <value>0.69</value>
+    <uid>3211881410</uid>
   </t_data>
   <t_data>
     <data_id>236196</data_id>
@@ -10306,6 +10719,20 @@
     <uid>3211881739</uid>
   </t_data>
   <t_data>
+    <data_id>236557</data_id>
+    <membership_id>10107</membership_id>
+    <property_id>35</property_id>
+    <value>0</value>
+    <uid>3211881808</uid>
+  </t_data>
+  <t_data>
+    <data_id>236630</data_id>
+    <membership_id>30921</membership_id>
+    <property_id>439</property_id>
+    <value>1</value>
+    <uid>3211881881</uid>
+  </t_data>
+  <t_data>
     <data_id>239997</data_id>
     <membership_id>16900</membership_id>
     <property_id>152</property_id>
@@ -10326,6 +10753,10 @@
     <value>100</value>
     <uid>3211885250</uid>
   </t_data>
+  <t_tag>
+    <data_id>73525</data_id>
+    <object_id>33382</object_id>
+  </t_tag>
   <t_tag>
     <data_id>125592</data_id>
     <object_id>33384</object_id>
@@ -11319,6 +11750,27 @@
     <object_id>33382</object_id>
   </t_tag>
   <t_tag>
+    <data_id>226496</data_id>
+    <object_id>33380</object_id>
+  </t_tag>
+  <t_tag>
+    <data_id>226499</data_id>
+    <object_id>33319</object_id>
+    <action_id>1</action_id>
+  </t_tag>
+  <t_tag>
+    <data_id>226499</data_id>
+    <object_id>33045</object_id>
+  </t_tag>
+  <t_tag>
+    <data_id>226499</data_id>
+    <object_id>33390</object_id>
+  </t_tag>
+  <t_tag>
+    <data_id>226500</data_id>
+    <object_id>33045</object_id>
+  </t_tag>
+  <t_tag>
     <data_id>229742</data_id>
     <object_id>33378</object_id>
   </t_tag>
@@ -11355,6 +11807,10 @@
     <object_id>33394</object_id>
   </t_tag>
   <t_tag>
+    <data_id>234430</data_id>
+    <object_id>33046</object_id>
+  </t_tag>
+  <t_tag>
     <data_id>234436</data_id>
     <object_id>33046</object_id>
   </t_tag>
@@ -11367,6 +11823,10 @@
     <object_id>33046</object_id>
   </t_tag>
   <t_tag>
+    <data_id>235729</data_id>
+    <object_id>33390</object_id>
+  </t_tag>
+  <t_tag>
     <data_id>235733</data_id>
     <object_id>33387</object_id>
   </t_tag>
@@ -11375,8 +11835,16 @@
     <object_id>33391</object_id>
   </t_tag>
   <t_tag>
+    <data_id>236159</data_id>
+    <object_id>33390</object_id>
+  </t_tag>
+  <t_tag>
     <data_id>236197</data_id>
     <object_id>33391</object_id>
+  </t_tag>
+  <t_tag>
+    <data_id>236557</data_id>
+    <object_id>33380</object_id>
   </t_tag>
   <t_tag>
     <data_id>239997</data_id>
@@ -11390,6 +11858,16 @@
     <data_id>239999</data_id>
     <object_id>33381</object_id>
   </t_tag>
+  <t_text>
+    <data_id>235729</data_id>
+    <class_id>62</class_id>
+    <value>csv_files\renewables.ninja.CSP.output.full.adjusted.csv</value>
+  </t_text>
+  <t_text>
+    <data_id>235730</data_id>
+    <class_id>62</class_id>
+    <value>csv_files\renewables.ninja.CSP.output.full.csv</value>
+  </t_text>
   <t_text>
     <data_id>235731</data_id>
     <class_id>62</class_id>
@@ -11430,6 +11908,10 @@
     <class_id>62</class_id>
     <value>Model PLEXOS World 2015 Global Solution\RHS Day LessThanOrEqualTo.csv</value>
   </t_text>
+  <t_memo_data>
+    <data_id>73525</data_id>
+    <value>Commissioning year according to WRI Power Plant Database.</value>
+  </t_memo_data>
   <t_memo_data>
     <data_id>125592</data_id>
     <value>Generation restricted at country level for 2015 by integrating a maintenance rate to match reported data, value determined based on iterative simulations. Generation data retrieved from IEA electricity information.</value>
@@ -11715,6 +12197,18 @@
     <value>BP Stat Review </value>
   </t_memo_data>
   <t_memo_data>
+    <data_id>226497</data_id>
+    <value>Determined by multiplying generator capacity with amount of storage hours from project specific entry in Solarpaces database (7.5 storage hours).</value>
+  </t_memo_data>
+  <t_memo_data>
+    <data_id>226499</data_id>
+    <value>CSP inflow profiles. Equals solar-PV hourly CF value of the specific location as extracted from renewables.ninja for 2015 * assumed solar multiple of 2.5 * generator capacity of CSP generator * country-level solar multiplier.</value>
+  </t_memo_data>
+  <t_memo_data>
+    <data_id>226500</data_id>
+    <value>CSP inflow profiles. Equals solar-PV hourly CF value of the specific location as extracted from renewables.ninja for 2015 * assumed solar multiple of 2.5 * generator capacity of CSP generator.</value>
+  </t_memo_data>
+  <t_memo_data>
     <data_id>229743</data_id>
     <value>Assumed 4 hours of storage at full rated power following technology specific mean values in reported range in https://www.sciencedirect.com/science/article/pii/S0306261914010290.</value>
   </t_memo_data>
@@ -11799,6 +12293,14 @@
     <value>If USE then price = highest cost marginal generator</value>
   </t_memo_data>
   <t_memo_data>
+    <data_id>234429</data_id>
+    <value>Set to Zero if  not required</value>
+  </t_memo_data>
+  <t_memo_data>
+    <data_id>234430</data_id>
+    <value>UTC; Historical load profile; source https://www.entsoe.eu/db-query/consumption/mhlv-all-countries-for-a-specific-month</value>
+  </t_memo_data>
+  <t_memo_data>
     <data_id>234435</data_id>
     <value>Set to Zero if  not required</value>
   </t_memo_data>
@@ -11837,6 +12339,14 @@
   <t_memo_data>
     <data_id>235330</data_id>
     <value>Source ENTSO-E TYNDP 2016</value>
+  </t_memo_data>
+  <t_memo_data>
+    <data_id>235729</data_id>
+    <value>Scaled profiles based on calculated difference in country-level capacity factors for Solar (PV &amp; CSP combined) from renewables.ninja versus country-level capacity factors according to IRENA data.</value>
+  </t_memo_data>
+  <t_memo_data>
+    <data_id>235730</data_id>
+    <value>CSP inflow profiles. Equals solar-PV hourly CF value of the specific location as extracted from renewables.ninja for 2015 * assumed solar multiple of 2.5 * generator capacity of CSP generator.</value>
   </t_memo_data>
   <t_memo_data>
     <data_id>235731</data_id>
@@ -11914,6 +12424,16 @@
     <object_id>7</object_id>
     <attribute_id>67</attribute_id>
     <value>43831</value>
+  </t_attribute_data>
+  <t_attribute_data>
+    <object_id>9386</object_id>
+    <attribute_id>1</attribute_id>
+    <value>37.2281</value>
+  </t_attribute_data>
+  <t_attribute_data>
+    <object_id>9386</object_id>
+    <attribute_id>2</attribute_id>
+    <value>-3.0511</value>
   </t_attribute_data>
   <t_attribute_data>
     <object_id>14916</object_id>
@@ -12556,6 +13076,16 @@
     <value>-6.4</value>
   </t_attribute_data>
   <t_attribute_data>
+    <object_id>32392</object_id>
+    <attribute_id>15</attribute_id>
+    <value>40.463667</value>
+  </t_attribute_data>
+  <t_attribute_data>
+    <object_id>32392</object_id>
+    <attribute_id>16</attribute_id>
+    <value>-3.74922</value>
+  </t_attribute_data>
+  <t_attribute_data>
     <object_id>32395</object_id>
     <attribute_id>15</attribute_id>
     <value>46.227638</value>
@@ -12584,6 +13114,11 @@
     <object_id>32401</object_id>
     <attribute_id>16</attribute_id>
     <value>-8.24389</value>
+  </t_attribute_data>
+  <t_attribute_data>
+    <object_id>33045</object_id>
+    <attribute_id>32</attribute_id>
+    <value>2057</value>
   </t_attribute_data>
   <t_attribute_data>
     <object_id>33046</object_id>

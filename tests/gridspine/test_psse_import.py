@@ -90,12 +90,14 @@ def test_unmapped_dc_link_listed():
     assert len(rep.unmapped) == 1 and "no DC link mapping" in rep.unmapped[0].reason
 
 
-def test_dyr_alongside_is_listed_not_ignored(tmp_path):
+def test_dyr_alongside_is_read(tmp_path):
     dyr = tmp_path / "case14.dyr"
     dyr.write_text("1 'GENCLS' 1 6.0 0.0 /\n")
-    rep = read_psse([FIX / "case14.raw", dyr], {}).report
-    assert [u.source_item for u in rep.unmapped] == ["case14.dyr"]
-    assert rep.source_files == ["case14.raw", "case14.dyr"]
+    res = read_psse([FIX / "case14.raw", dyr], {})
+    assert res.report.unmapped == []
+    assert res.report.source_files == ["case14.raw", "case14.dyr"]
+    (rec,) = res.sidecars["psse_dynamics.json"]["records"]
+    assert rec["parameters"] == {"h": 6.0, "d": 0.0} and rec["generator"]
 
 
 @pytest.mark.parametrize("files", [[], ["a.raw", "b.raw"], ["a.dyr"]])
@@ -478,6 +480,7 @@ def test_reader_and_registry_import_without_pypsa():
     code = (
         "import sys; sys.modules['pypsa'] = None\n"
         "import gridspine.ingest.psse_raw_parse, gridspine.ingest.import_result\n"
+        "import gridspine.ingest.psse_dyr_parse\n"
         "from gridspine.ingest.psse_raw_parse import read_raw\n"
         f"read_raw({str(FIX / 'case14.raw')!r})\n"
         "print('ok')\n"
@@ -496,10 +499,7 @@ def test_reader_and_registry_import_without_pypsa():
 #: Cases whose exact equality waits on a writer fix: id -> ticket. They are not skipped:
 #: the test pins today's error at exactly WINDV2**2, so the fix turns it red and the
 #: case moves to the equality branch.
-_PENDING = {
-    "hv": "#1609: GC-04 raw_writer.trafo_impedance WINDV2² fix",
-    "lv": "#1609: GC-04 raw_writer.trafo_impedance WINDV2² fix",
-}
+_PENDING: dict[str, str] = {}
 
 
 @pytest.mark.parametrize("tap_side", ["hv", "lv"])
@@ -926,3 +926,48 @@ def test_v35_branch_name_used_when_set(tmp_path, rev):
         ],
     ).network
     assert list(n.lines.index) == ["FEEDER", "Line A - B 2"]
+
+
+# ---------------------------------------------------------------- repeated PSS/E identities (issue 03)
+_LOAD = "2,'1',1,1,1,10.0,2.0"
+
+
+@pytest.mark.parametrize(
+    "sections, match",
+    [
+        (
+            {"BRANCH": [_LINE, "1,2,'1',0.02,0.2,0.0,100.0"]},
+            "RAW line 12: branch 1-2 circuit '1' repeats the one at RAW line 11",
+        ),
+        (
+            {"BRANCH": [_LINE, "2,1,'1',0.02,0.2,0.0,100.0"]},
+            "RAW line 12: branch 2-1 circuit '1' repeats the one at RAW line 11",
+        ),
+        (
+            {"GENERATOR": [_SWING, _SWING]},
+            "RAW line 10: generator '1' at bus 1 repeats the one at RAW line 9",
+        ),
+        (
+            {"LOAD": [_LOAD, _LOAD]},
+            "RAW line 8: load '1' at bus 2 repeats the one at RAW line 7",
+        ),
+    ],
+    ids=["branch", "branch-reversed", "generator", "load"],
+)
+def test_repeated_identity_is_refused_naming_both_lines(tmp_path, sections, match):
+    """A parallel circuit with the same CKT would share a name and be lost (issue 03)."""
+    base = {"BUS": _BUSES, "GENERATOR": [_SWING], "BRANCH": [_LINE]}
+    with pytest.raises(ImportFormatError, match=match):
+        _case(tmp_path, **(base | sections))
+
+
+def test_parallel_circuits_with_distinct_ckt_are_both_kept(tmp_path):
+    res = _case(
+        tmp_path,
+        BUS=_BUSES,
+        GENERATOR=[_SWING],
+        BRANCH=[_LINE, "1,2,'2',0.02,0.2,0.0,100.0", "2,1,'3',0.03,0.3,0.0,100.0"],
+    )
+    n = res.network
+    assert len(n.lines) == res.report.counts["Lines"] == 3
+    assert n.lines["r"].nunique() == 3

@@ -3,9 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Dices, Square } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import type {
-  ElccCandidate, ElccRow, McMetrics, McRequestBody, McStatus, ElccPortfolioBlock, ElccPortfolioPeriod,
+  ElccCandidate, ElccInstalled, ElccRow, McGoalVerdict, McMetrics, McRequestBody, McStatus, ElccPortfolioBlock, ElccPortfolioPeriod,
 } from '../../api/simulation'
 import { blockerMessage } from '../../utils/blockerMessage'
+import { NATIVE_OUTCOME_WORDS } from '../../components/activityWords'
+import { ASSUMED_GOAL_SOURCE } from '../../hooks/useReliabilityGoal'
+import { AssumedChip } from '../../components/AssumedChip'
 import { useUIStore } from '../../store/uiStore'
 import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
@@ -107,6 +110,41 @@ export function loleStatement(m: McMetrics): string {
   }
   return `${trim(m.lole_hours)} ${unit}`
 }
+
+/** The run against the project's goal in words (walkthrough asset-investment
+ *  01): the loops' words for met and not confident (`NATIVE_OUTCOME_WORDS`).
+ *  A goal nobody set is marked beside it with the shared AssumedChip. */
+export function mcGoalText(g: McGoalVerdict): string {
+  const goal = `${trim(g.target_lole_h)} h/yr goal`
+  if (g.verdict === 'pass') return `${NATIVE_OUTCOME_WORDS.met}: at or under the ${goal}`
+  if (g.verdict === 'miss') return `Goal missed: above the ${goal}`
+  const settle = g.settle_draws != null
+    ? `; about ${g.settle_draws.toLocaleString('en-GB')} draws would settle it` : ''
+  return `${NATIVE_OUTCOME_WORDS.not_confident}: at or under the ${goal}, but not by enough to call it a pass${settle}`
+}
+
+/** Why the Expert verdict can differ from the Guided one (HOLISTIC-1, fleet
+ *  note): MC samples the open network, where a sizable asset counts at its
+ *  last solve's size (`copt.solved_capacity`), 0 MW before one; the Guided
+ *  verdict uses the study's sized design. */
+export const MC_FLEET_NOTE = 'Samples the network as it stands: an asset a solve sizes counts at the '
+  + 'last solve\'s size, and as 0 MW until a solve builds it; the Guided verdict uses the sized design.'
+
+/** An ELCC row's capacity (walkthrough 07): a vre row's `nameplate_mw` is its
+ *  PEAK output, so it says so, with the installed capacity beside it. */
+export function elccSize(r: { kind: string; nameplate_mw: number }, installed?: ElccInstalled | null): string {
+  if (r.kind !== 'vre') return `${trim(r.nameplate_mw)} MW`
+  const peak = `${trim(r.nameplate_mw)} MW peak`
+  // GK A 30 A6: the MC's own capacity; a sizable unit no solve built is 0 MW.
+  if (installed?.basis === 'not_built') return `not built by the solve · ${peak}`
+  if (installed?.mw == null) return peak
+  // A solve's size is what the solve chose, not something installed (GK B3 (3)).
+  const how = installed.basis === 'p_nom_opt' ? 'sized by the last solve' : 'installed'
+  return `${trim(installed.mw)} MW ${how} · ${peak}`
+}
+
+/** What an ELCC share is a share of: a vre credit is priced against its peak. */
+export const elccShareBase = (kind: string): string => (kind === 'vre' ? 'of peak' : 'of nameplate')
 
 /** The credit as a share of nameplate, or nothing when there is no credit. */
 export function elccShare(share: number | null | undefined): string | null {
@@ -455,7 +493,7 @@ export function McPanel() {
             are hours and megawatt-hours, not euros.
           </p>
 
-          <ReliabilityGoalSummary testId="mc-goal" items={['draws']} />
+          <ReliabilityGoalSummary testId="mc-goal" items={['target', 'mc_budget']} mcBudget={result?.draws ?? null} />
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => run.mutate()} disabled={running}
@@ -543,7 +581,7 @@ export function McPanel() {
                             />
                             <span className="font-mono">{c.name}</span>
                             <span className="text-muted">
-                              · {c.kind} · {trim(c.nameplate_mw)} MW
+                              · {c.kind} · {elccSize(c)}
                             </span>
                           </label>
                         </li>
@@ -642,6 +680,20 @@ export function McPanel() {
                   </span>
                 )}
               </div>
+              {result?.goal && (
+                <span data-testid="mc-goal-verdict"
+                  className={`text-[11px] self-end ${result.goal.verdict === 'pass' ? 'text-success' : 'text-warn'}`}>
+                  {mcGoalText(result.goal)}
+                  {result.goal.target_source === 'default' && (
+                    <>{' '}<AssumedChip source={ASSUMED_GOAL_SOURCE} testId="mc-goal-assumed" /></>
+                  )}
+                </span>
+              )}
+              {result?.goal && (
+                <span data-testid="mc-fleet-note" className="text-[10px] text-muted self-end">
+                  {MC_FLEET_NOTE}
+                </span>
+              )}
               {m.converged === false && (
                 <span className="text-[10px] text-warn self-end">
                   draw cap reached before the target coefficient of variation
@@ -672,7 +724,7 @@ export function McPanel() {
                     <tr>
                       <th className="text-left font-medium py-1 pr-3">Asset</th>
                       <th className="text-left font-medium py-1 pr-3">Kind</th>
-                      <th className="text-right font-medium py-1 pr-3">Nameplate</th>
+                      <th className="text-right font-medium py-1 pr-3">Capacity</th>
                       <th className="text-left font-medium py-1 pr-3">Credit</th>
                       <th className="text-right font-medium py-1 pr-3">Baseline LOLE</th>
                     </tr>
@@ -683,7 +735,9 @@ export function McPanel() {
                           data-testid={`elcc-row-${r.name}`}>
                         <td className="py-1 pr-3">{r.name}</td>
                         <td className="py-1 pr-3 font-sans">{r.kind}</td>
-                        <td className="py-1 pr-3 text-right">{trim(r.nameplate_mw)} MW</td>
+                        <td className="py-1 pr-3 text-right" data-testid={`elcc-size-${r.name}`}>
+                          {elccSize(r, result?.elcc_installed?.[r.name])}
+                        </td>
                         {/* A refusal is DATA. The bisection either resolved a
                             credit or it did not, and when it did not the engine
                             says why — rendering that as an empty cell or a bare
@@ -694,7 +748,7 @@ export function McPanel() {
                             <>
                               {trim(r.elcc_mw)} MW
                               {elccShare(r.elcc_share) && (
-                                <span className="text-muted"> ({elccShare(r.elcc_share)})</span>
+                                <span className="text-muted"> ({elccShare(r.elcc_share)} {elccShareBase(r.kind)})</span>
                               )}
                             </>
                           ) : (
