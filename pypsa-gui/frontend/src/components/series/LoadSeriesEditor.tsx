@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Play, Upload } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
+import { archetypeLabel, paramLabel } from '../../plainNames'
 import { seriesApi, type PendingSeries } from '../../api/profiles'
 import { resultsApi } from '../../api/simulation'
 import {
@@ -130,10 +131,10 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
             <span className="w-20 text-muted">Shape</span>
             <select aria-label="Archetype" className={INPUT} value={choice} onChange={e => { setChoice(e.target.value); setOverrides({}) }}>
               <optgroup label="Archetypes">
-                {(catalogue?.archetypes ?? []).map(a => <option key={a.name} value={a.name}>{a.name.replace(/_/g, ' ')}</option>)}
+                {(catalogue?.archetypes ?? []).map(a => <option key={a.name} value={a.name}>{archetypeLabel(a.name)}</option>)}
               </optgroup>
               <optgroup label="Presets">
-                {(catalogue?.presets ?? []).map(p => <option key={p.name} value={p.name}>{p.name.replace(/_/g, ' ')}</option>)}
+                {(catalogue?.presets ?? []).map(p => <option key={p.name} value={p.name}>{archetypeLabel(p.name)}</option>)}
               </optgroup>
             </select>
           </label>
@@ -151,13 +152,13 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1" data-testid="archetype-params">
               {Object.entries(defaults).filter(([k]) => !SCALE_KEYS.has(k)).map(([k, v]) => (
                 <label key={k} className="flex items-center gap-1">
-                  <span className="text-muted flex-1 min-w-0 break-words">{k.replace(/_/g, ' ')}</span>
+                  <span className="text-muted flex-1 min-w-0 break-words">{paramLabel(k)}</span>
                   {typeof v === 'boolean' ? (
-                    <input aria-label={k} type="checkbox"
+                    <input aria-label={paramLabel(k)} type="checkbox"
                       checked={overrides[k] !== undefined ? overrides[k] === 'true' : v}
                       onChange={e => setOverrides({ ...overrides, [k]: String(e.target.checked) })} />
                   ) : (
-                    <input aria-label={k} className={`${INPUT} w-24`}
+                    <input aria-label={paramLabel(k)} className={`${INPUT} w-24`}
                       placeholder={Array.isArray(v) ? (v.length ? v.join(', ') : 'none, comma-separated')
                         : v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)}
                       value={overrides[k] ?? ''} onChange={e => setOverrides({ ...overrides, [k]: e.target.value })} />
