@@ -7,6 +7,7 @@ through the same write path and checks as a process unit's.
 from __future__ import annotations
 
 import math
+import re
 
 import pypsa
 import pytest
@@ -179,15 +180,30 @@ def _plain_net() -> pypsa.Network:
 
 
 def test_x1_the_new_inputs_move_no_fingerprint(session_ctx, client, install_network):
+    from services.dispatch_status import dispatch_digest
+    from services.results.finance_case import owner_assets_digest
     from services.workflow_tools import _network_input_fingerprint
 
     n = _plain_net()
     install_network(n)
     ctx = session_ctx(client)
 
+    # The investment case's digest reads the network through two parts: the
+    # solve's result tables and the owner assets' investment columns.
+    commercial = {
+        "value_flows": {
+            "asset_owners": [
+                {"asset_id": "g", "component": "Generator", "owner": "site"}
+            ]
+        }
+    }
+
     def fp():
-        return _network_input_fingerprint(ctx), _network_input_fingerprint(
-            ctx, exact=True
+        return (
+            _network_input_fingerprint(ctx),
+            _network_input_fingerprint(ctx, exact=True),
+            dispatch_digest(n),
+            owner_assets_digest(n, commercial),
         )
 
     before = fp()
@@ -204,49 +220,75 @@ def _wire(updates: dict) -> dict:
     }
 
 
+def _refusal(call) -> str:
+    """The message a chat tool refuses with; fails the test if it accepts."""
+    from fastapi import HTTPException
+    from pydantic import ValidationError
+
+    try:
+        out = call()
+    except HTTPException as exc:
+        assert exc.status_code == 422, exc.detail
+        return str(exc.detail)
+    except ValidationError as exc:
+        return str(exc)
+    pytest.fail(f"accepted: {out!r}")
+
+
 @pytest.mark.parametrize(
-    "cls, name, updates",
+    "cls, name, col, goods, bad, label, rule",
     [
-        ("Generator", "g", {"sk_max_mva": -1.0}),
-        ("Generator", "g", {"harmonic_source": "24-pulse"}),
-        ("Generator", "g", {"rx_min": float("nan")}),
-        ("Generator", "g", {"sk_min_mva": float("inf")}),
-        ("Generator", "g", {"rated_mva": True}),
-        ("Load", "l", {"harmonic_spectrum": "5:20, 5:10"}),
-        ("Load", "l", {"rated_mva": -1.0}),
+        ("Generator", "g", "sk_max_mva", (3000.0, 2500.0, 2000.0), -1.0, "sk_max_mva", r"finite number >= 0"),
+        ("Generator", "g", "harmonic_source", ("6-pulse", "12-pulse", "linear"), "24-pulse", "Harmonic source", r"is not one of"),
+        ("Generator", "g", "rx_min", (0.15, 0.2, 0.25), float("nan"), "rx_min", r"finite number"),
+        ("Generator", "g", "sk_min_mva", (1200.0, 1100.0, 1000.0), float("inf"), "sk_min_mva", r"finite number"),
+        ("Generator", "g", "rated_mva", (12.0, 11.0, 10.0), True, "rated_mva", r"(expected a|valid) number"),
+        ("Load", "l", "harmonic_spectrum", ("5:20", "7:14", "5:20, 7:14"), "5:20, 5:10", "Harmonic spectrum", r"order 5 appears twice"),
+        ("Load", "l", "rated_mva", (4.5, 4.0, 3.5), -1.0, "rated_mva", r"finite number >= 0"),
     ],
-)
+)  # fmt: skip
 def test_x2_bulk_and_chat_refuse_like_the_single_edit(
-    session_ctx, client, install_network, cls, name, updates
+    bound_ctx, client, install_network, cls, name, col, goods, bad, label, rule
 ):
+    """Each path first ACCEPTS a valid value (so a refusal below is not a missing
+    row or a missing field), then refuses the bad one by its column and rule and
+    leaves the stored value as it was."""
     from services import chat_tools
 
     n = _plain_net()
     install_network(n)
-    attr = {"Generator": "generators", "Load": "loads"}[cls]
+    df = lambda: getattr(n, {"Generator": "generators", "Load": "loads"}[cls])  # noqa: E731
+
+    r = client.patch(
+        "/api/network/_bulk",
+        json={"component_class": cls, "names": [name], "updates": {col: goods[0]}},
+    )
+    assert r.status_code == 200, r.text
+    assert df().at[name, col] == goods[0]
+    with bound_ctx(client) as ctx:
+        assert ctx.network is n
+        chat_tools.bulk_update_components(cls, [name], {col: goods[1]})
+        assert df().at[name, col] == goods[1]
+        chat_tools.update_component(cls, name, attrs={col: goods[2]})
+        assert df().at[name, col] == goods[2]
+
     r = client.patch(
         "/api/network/_bulk",
         # JSON has no NaN or inf: the wire carries them as text, which the float check reads.
-        json={"component_class": cls, "names": [name], "updates": _wire(updates)},
+        json={"component_class": cls, "names": [name], "updates": _wire({col: bad})},
     )
     assert r.status_code == 422, r.text
-    try:
-        out = chat_tools.bulk_update_components(cls, [name], updates)
-    except Exception:  # noqa: BLE001 - a raised refusal is a refusal
-        out = None
-    assert out is None or out.get("error") or out.get("ok") is False, out
-    try:
-        out = chat_tools.update_component(cls, name, attrs=updates)
-    except Exception:  # noqa: BLE001
-        out = None
-    assert out is None or out.get("error") or out.get("ok") is False, out
-    df = getattr(session_ctx(client).network, attr)
-    for k in updates:
-        assert (
-            k not in df.columns
-            or df.at[name, k] in ("", None)
-            or math.isnan(float(df.at[name, k]))
+    messages = [r.json()["detail"]]
+    with bound_ctx(client):
+        messages.append(
+            _refusal(lambda: chat_tools.bulk_update_components(cls, [name], {col: bad}))
         )
+        messages.append(
+            _refusal(lambda: chat_tools.update_component(cls, name, attrs={col: bad}))
+        )
+    for msg in messages:
+        assert label in msg and re.search(rule, msg), msg
+    assert df().at[name, col] == goods[2]
 
 
 def test_x2_a_float_input_refuses_a_tick(client, install_network):
@@ -261,11 +303,14 @@ def test_x3_the_new_inputs_make_no_process_unit():
     from gridspine.drivers.campus_study import harmonic_units
 
     n = _plain_net()
+    n.add("Bus", "b2", carrier="AC")
+    n.add("Link", "k", bus0="b", bus1="b2", p_nom=5.0)
     for k, v in NEW["Generator"].items():
         n.generators.loc["g", k] = v
     for k, v in NEW["Load"].items():
         n.loads.loc["l", k] = v
-    assert not process_mask(n.links).any()
+    mask = process_mask(n.links)
+    assert list(mask.index) == ["k"] and not mask.any()
     assert harmonic_units(n, "b").empty
 
 
@@ -282,6 +327,24 @@ def test_x4_untouched_loads_and_generators_gain_no_column(tmp_path):
     normalise_eh_columns(m)
     for a in ("generators", "loads"):
         assert not set(getattr(m, a).columns) & {k for c in NEW.values() for k in c}
+
+
+@pytest.mark.parametrize(
+    "cls, attr, other, name",
+    [("Load", "loads", "generators", "l"), ("Generator", "generators", "loads", "g")],
+)
+def test_x4_a_bulk_write_lands_on_its_own_frame(
+    client, install_network, cls, attr, other, name
+):
+    n = _plain_net()
+    install_network(n)
+    r = client.patch(
+        "/api/network/_bulk",
+        json={"component_class": cls, "names": [name], "updates": {"rated_mva": 4.5}},
+    )
+    assert r.status_code == 200, r.text
+    assert getattr(n, attr).at[name, "rated_mva"] == 4.5
+    assert "rated_mva" not in getattr(n, other).columns
 
 
 @pytest.mark.parametrize("fmt", ["netcdf", "csv"])
@@ -305,6 +368,56 @@ def test_x5_blank_reads_as_not_set_after_a_round_trip(tmp_path, fmt):
     assert math.isnan(float(m.loads.at["l2", "rated_mva"]))
     assert m.loads.at["l", "harmonic_source"] == "6-pulse"
     assert m.loads.at["l", "rated_mva"] == 4.5
+
+
+def _check_set_and_blank(m: pypsa.Network) -> None:
+    for cls, attr, set_name, blank_name in (
+        ("Generator", "generators", "g", "g2"),
+        ("Load", "loads", "l", "l2"),
+    ):
+        df = getattr(m, attr)
+        for k, v in NEW[cls].items():
+            assert df.at[set_name, k] == v, (cls, k, df.at[set_name, k])
+            blank = df.at[blank_name, k]
+            if isinstance(v, str):
+                assert blank == "", (cls, k, blank)
+            else:
+                assert math.isnan(float(blank)), (cls, k, blank)
+
+
+def test_x5_the_new_inputs_survive_save_reload_and_a_bundle(
+    client, install_network, session_ctx
+):
+    n = _plain_net()
+    n.add("Generator", "g2", bus="b", carrier="AC", p_nom=1.0)
+    n.add("Load", "l2", bus="b", p_set=1.0)
+    install_network(n, name="dgs_rt")
+    for cls, name in (("Generator", "g"), ("Load", "l")):
+        r = client.patch(
+            "/api/network/_bulk",
+            json={"component_class": cls, "names": [name], "updates": NEW[cls]},
+        )
+        assert r.status_code == 200, r.text
+    _check_set_and_blank(n)
+
+    r = client.post("/api/projects/dgs_rt", params={"force": True, "rebind": True})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/projects/dgs_rt").status_code == 200
+    reloaded = session_ctx(client).network
+    assert reloaded is not n
+    _check_set_and_blank(reloaded)
+
+    bundle = client.get("/api/projects/dgs_rt/bundle")
+    assert bundle.status_code == 200, bundle.text
+    r = client.post(
+        "/api/projects/import_bundle?name=dgs_rt_copy",
+        files={"file": ("x.pypsaproj.zip", bundle.content, "application/zip")},
+    )
+    assert r.status_code in (200, 201), r.text
+    assert client.get("/api/projects/dgs_rt_copy").status_code == 200
+    imported = session_ctx(client).network
+    assert imported is not reloaded and imported.name == "dgs_rt_copy"
+    _check_set_and_blank(imported)
 
 
 def test_x6_an_overlong_spectrum_is_a_typed_422(client, install_network):
