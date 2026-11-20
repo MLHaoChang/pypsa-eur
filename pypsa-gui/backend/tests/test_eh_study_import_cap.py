@@ -228,3 +228,63 @@ def test_import_capacity_takes_no_network_lock(install_network):
     finally:
         done.set()
         t.join(timeout=5)
+
+
+class _EditOnEntry:
+    """The network lock, with an edit of the connection limit landing just
+    before the study worker enters it: after the start check released the
+    lock, before the worker captures the revision and copies the network
+    (GK A 32 D1)."""
+
+    def __init__(self, lock, edit):
+        self._lock, self._edit, self.entries = lock, edit, 0
+
+    def acquire(self, *a, **kw):
+        return self._lock.acquire(*a, **kw)
+
+    def release(self):
+        self._lock.release()
+
+    def __enter__(self):
+        self.entries += 1
+        if self.entries == 1:
+            self._edit()
+        return self._lock.__enter__()
+
+    def __exit__(self, *exc):
+        return self._lock.__exit__(*exc)
+
+
+@VIAS
+def test_a_limit_changed_before_the_worker_starts_fails_the_study(
+    make, seen, via, monkeypatch
+):
+    from services.pypsa_service import PyPSAService
+
+    n = _network(45.0)
+    s = make(via, n)
+
+    def edit():
+        n.links.loc[_imports(n), "p_nom"] = 60.0
+
+    proxy = _EditOnEntry(PyPSAService.get_lock(), edit)
+    monkeypatch.setattr(PyPSAService, "get_lock", staticmethod(lambda: proxy))
+    assert s.start() is None
+    rec = s.record()
+    assert proxy.entries >= 1, "the worker never entered the network lock"
+    assert seen == [], "the study ran on the cap read before the edit"
+    assert rec["status"] == "failed"
+    assert "45 MW" in rec["error"] and "60 MW" in rec["error"], rec["error"]
+
+
+@VIAS
+def test_an_unchanged_limit_at_worker_entry_runs(make, seen, via, monkeypatch):
+    from services.pypsa_service import PyPSAService
+
+    s = make(via, _network(45.0))
+    proxy = _EditOnEntry(PyPSAService.get_lock(), lambda: None)
+    monkeypatch.setattr(PyPSAService, "get_lock", staticmethod(lambda: proxy))
+    assert s.start() is None
+    assert proxy.entries >= 1
+    assert len(seen) == 1
+    assert seen[0].import_overlay.import_p_nom_mw == 45.0

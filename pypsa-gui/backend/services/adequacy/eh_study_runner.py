@@ -216,6 +216,24 @@ def normalised_overrides(overrides: dict | None) -> dict | None:
         exclude_none=True) or None
 
 
+def _stale_import_cap(cap_mw: float, archetype: str, n) -> str | None:
+    """The sentence when the network's connection limit is no longer
+    ``cap_mw``, the cap the study was started with; None when it still is.
+    The caller holds the network lock (template-e2e 02c, GK A 32 D1)."""
+    from services import flow_service
+
+    cap = flow_service.import_capacity(n, {"archetype": archetype})
+    if cap.refusal is not None:
+        return (f"The study was asked for on a {cap_mw:.12g} MW connection "
+                f"limit, but the network changed before it started: "
+                f"{cap.refusal} Start the study again.")
+    if cap.mw != cap_mw:
+        return (f"The study was asked for on a {cap_mw:.12g} MW connection "
+                f"limit, but the network's limit changed to {cap.mw:.12g} MW "
+                "before it started. Start the study again.")
+    return None
+
+
 def _validate_dtc_config(raw: dict, n) -> DtcConfig:
     try:
         dtc = DtcConfig.model_validate(
@@ -438,7 +456,22 @@ def start_eh_study(
     def worker():
         try:
             # ★ Here, not on the request thread nor in `run_eh_study`: see `dirty_state.capture`.
-            dirty_state.capture(record, study_ctx, lock=lock)
+            cap_mw = pack.import_overlay.import_p_nom_mw
+            if cap_mw is None:
+                dirty_state.capture(record, study_ctx, lock=lock)
+            else:
+                # template-e2e 02c (GK A 32 D1): an edit between the start
+                # check and here would run a stale cap that `edited_since`
+                # cannot see, so the limit is read again under the lock the
+                # revision is captured under; any later edit is counted.
+                with lock:
+                    dirty_state.capture(record, study_ctx)
+                    stale = _stale_import_cap(cap_mw, archetype, n)
+                if stale is not None:
+                    with PyPSAService.get_solver_state_lock():
+                        record.update(status="failed", report=None,
+                                      error=stale, finished_at=time.time())
+                    return
             report = run_eh_study(
                 n,
                 pack,
