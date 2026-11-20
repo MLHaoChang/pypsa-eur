@@ -29,12 +29,15 @@ def test_undrainable_reset_dumps_stacks_and_exits(tmp_path, monkeypatch):
     monkeypatch.setattr(sq, "_RESET_JOIN_TIMEOUT_S", 0.05)
     monkeypatch.setattr(conftest, "_RESULTS_DIR", tmp_path)
     armed = []
+    killed = []
+    monkeypatch.setattr(conftest, "_kill_child_processes", lambda: killed.append(True))
     monkeypatch.setattr(conftest, "_arm_exit_watchdog", lambda: armed.append(True))
 
     with pytest.raises(pytest.exit.Exception) as exc:
         conftest._reset_solve_queue_or_exit()
 
     assert exc.value.returncode == 3
+    assert killed == [True]  # children holding CI's tee pipe are killed first
     assert armed == [True]  # a stuck non-daemon thread must not hang the exit
     assert "could not drain" in exc.value.msg
     dump = (tmp_path / "solve-queue-stall.txt").read_text()
@@ -58,3 +61,16 @@ def test_exit_watchdog_is_a_daemon_timer_that_hard_exits(monkeypatch):
 
     assert made[0] == (conftest._EXIT_GRACE_S, os._exit, (3,))
     assert made[1] == ("daemon", True)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="uses Linux `ps --ppid`")
+def test_child_processes_are_killed():
+    import subprocess
+
+    child = subprocess.Popen(["sleep", "60"])
+    try:
+        _tests_conftest()._kill_child_processes()
+        assert child.wait(timeout=10) == -9
+    finally:
+        if child.poll() is None:
+            child.kill()

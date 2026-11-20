@@ -124,6 +124,30 @@ def _dump_stall_diagnostics(unfinished: int) -> pathlib.Path:
     return out
 
 
+def _kill_child_processes() -> None:
+    """SIGKILL every direct child of this process (Linux `ps`; a no-op elsewhere).
+
+    A job stuck in `subprocess.Popen` leaves a forked child that never reaches
+    `exec`. It inherited the pipe CI tees pytest's output through, so after
+    pytest exits `tee` waits on that pipe until the step is cancelled.
+    """
+    import signal
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "pid=", "--ppid", str(os.getpid())],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception:  # noqa: BLE001 — best effort, the watchdog still follows
+        return
+    for tok in out.split():
+        try:
+            os.kill(int(tok), signal.SIGKILL)
+        except (ValueError, OSError):
+            pass
+
+
 _EXIT_GRACE_S = 60.0
 
 
@@ -155,6 +179,7 @@ def _reset_solve_queue_or_exit() -> None:
     unfinished = getattr(q, "unfinished_tasks", 0) if hasattr(q, "all_tasks_done") else 0
     if isinstance(unfinished, int) and unfinished > 0:
         out = _dump_stall_diagnostics(unfinished)
+        _kill_child_processes()
         _arm_exit_watchdog()
         pytest.exit(
             f"solve_queue.reset_for_tests could not drain ({unfinished} job(s) "
