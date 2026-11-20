@@ -125,11 +125,12 @@ def test_an_edit_that_clears_no_dispatch_leaves_the_solver_state(
     from routers import simulation
 
     name = _create(client, "eh_datacenter_staged", "staged02b_unsolved")
-    monkeypatch.setitem(simulation._state, "objective", 123.0)
+    resets = []
+    monkeypatch.setattr(simulation, "_state_update", lambda **kw: resets.append(kw))
     r = _put(client, name, link=LINK, period=2030, mw=30.0)
     assert r.status_code == 200, r.text
     assert r.json()["dispatch_cleared"] is False
-    assert simulation._state["objective"] == 123.0
+    assert resets == []  # nothing cleared, the solver state is left as it was
 
 
 @pytest.mark.parametrize("mw", [True, False])
