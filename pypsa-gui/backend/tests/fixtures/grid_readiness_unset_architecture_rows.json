@@ -22,7 +22,7 @@
   "assumed": true,
   "id": "reactive_range",
   "limit": 19.2,
-  "note": "Not sized yet: bess_new — run the plan to see the reactive range it adds.",
+  "note": "Not sized yet: \u201cBESS new\u201d: run the plan to see the reactive range it adds.",
   "project_value": 1.3147,
   "requirement": "Reactive power range at the PoC",
   "rule": {
