@@ -72,7 +72,7 @@ describe('LoadSeriesEditor', () => {
   it('keeps the picker for another load of a data-centre project', async () => {
     eh.getEhTemplate.mockResolvedValue({ dc_load: { spec: { pue_at_design: 1.3, phases: [{ it_mw: 36 }] } } })
     renderEditor('guided', undefined, 'office')
-    await screen.findByRole('option', { name: 'industrial' })
+    await screen.findByRole('option', { name: 'Industrial' })
     expect(screen.queryByTestId('dc-owned-note')).toBeNull()
   })
 
