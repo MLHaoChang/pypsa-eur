@@ -3,11 +3,11 @@
 
 # Metric semantics, deterministic calculations and raw validity
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: losses validity (#1644) and solve validity (#1680) merged; S4/S5/S6a/S7 open in #1704, #1705, #1712, #1707; left besides: NPV and other-domain metrics, plausibility adapter
 Model: Opus
 Progress: harness/calculations.py with generator, network and storage profiles shipped; other domains, NPV and validity checks pending
 Type: task
-Blocked by: reliability contract review; 01 for computed schema; 02 for raw evidence
+Blocked by: none (reliability contract review done, GK B OK @d36109ae, AA-A04-REVIEW-1; 01 and 02 done)
 
 ## Scope
 
@@ -96,3 +96,34 @@ other domain adapters, arbitrary-language completeness and calibration/release.
 ### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
 
 Was: `needs-triage`. Files: `pypsa-gui/backend/harness/calculations.py` (extend beyond generator/network/storage profiles), result-service validity masks, hand-worked fixtures under `tests/`. Blockers: 01 and 02 are done. Reviewer: GK B (finance metrics such as NPV also GK B). Shares metric definitions with 09. Plan OK from GK B first.
+
+### 2026-11-17: GK B plan GO, slices S1–S7 (builder session_01G7qCujEGst2EoC67pAmmXd)
+
+GK B (64) gave GO on the 09+10 plan at master 0ab07339. Slices, one PR each: S1 losses raw validity (10, A1.7); S2 solve-status/MIP-gap guard; S3 objective-to-cost bridge profile and an objective-vs-cost clarification; S4 cross-surface parity and metamorphic fixtures; S5 per-metric mapping ledger, with S5b oracle batches; S6 bounded sections above 20 slots; S7 definition hash in evidence and the validation-cache key. #1113's GK B OK @d36109ae is the section-1 contract review (AA-A04-REVIEW-1); independent_domain_approval stays false. Checked plausibility findings wait for Codex K (#851).
+
+Conditions:
+- G1: existing Losses fields byte-identical; `validity` is additive. Loads and branches are both classified; real 0, NaN, ±inf and absent are kept apart, pinned by exact equality.
+- G2: name the persisted status/gap source. A missing status is limited, never optimal. A pure LP has no gap; MIP-ness comes from the network. One tolerance constant, with a boundary test. Report the flip count before building.
+- G3: a public bridge wrapper; objective-scale reversal tested under auto and user scale ≠ 1; a residual tolerance constant with a boundary test; a penalty that can't be identified is `unavailable`, never 0; clarification choices pinned by exact list equality.
+- G4: the wrong service aggregate is injected by monkeypatch, and the refusal kind is asserted exactly.
+- G5: exact set equality between profile metrics and ledger rows, so both missing and orphan rows fail; a pending row has `oracle: null` and is never counted as verified.
+- G6: deterministic server-owned sections, each slot in exactly one; a contract change is re-reviewed under AA-A04-REVIEW-1.
+- G7: new kinds go in `tool-error-kinds.d/`; inventory, route-parity and control-matrix checks run at the trial merge; calculations.py registration only after asking the coordinator.
+- G8: one targeted mutant per guard, with its killing test listed in the PR body.
+- G9: Journey fit line per PR; UX leads S3/S6.
+- S7 ruling: the sealed chart keeps verifying as drawn. The definition hash goes in the evidence record and the cache key; one test shows a fresh answer misses the cache after a definition change, another that the sealed chart reports the old hash.
+
+### 2026-11-17: GK B S2 ruling (gap-aware limits)
+
+Option (a); no owner question, since only deltas and prices on MIP runs flip. G2a: the effective gap is the one solver_service passed for that solve and solver (committable → configured mip_gap under that solver's option name). Any other path (modular-only, an unmapped solver, a missing field) reads `solve_gap_not_recorded`, never a solver default. G2b: MIP-ness comes from the network (committable Generator/Link; extendable with *_nom_mod > 0), tested per component; a non-extendable unit with a mod value is not integer. G2c: the band is |Δ| ≤ gap_a·|obj_a| + gap_b·|obj_b| (an LP counts 0) on the user-unit objective, and it limits only total-cost/objective deltas and least-cost wording. Boundary tests sit at the band and one ULP above; SOLVE_GAP_TOLERANCE = 1e-6. G2d: fixed-commitment duals are answered as limited ("marginal given the fixed commitment"); absent duals stay unavailable; a small committable test shows which applies. G2e: the gap disclosure is additive and facts stay byte-identical. G2f: `unsupported_stochastic_run` is detected from the network's scenarios.
+
+### 2026-11-17: S1b, the harness reader for losses validity (named slice, GK B #1644 ask 3)
+
+S1 (#1644) adds `services/results/losses.py:_validity_rows` (per entity, aligned to `n.snapshots`: finite, zero, missing, ±inf, absent, misaligned). The `/results/losses` response carries only a bounded per-component summary, so per-entity rows stay off the chat `get_results` path until a reader exists. Nothing in the harness reads it yet.
+
+S1b adds that reader: a checked losses profile (`branch-losses/1`) built on `_validity_rows`. A1.7 acceptance for S1b:
+- a branch or load whose state is `incomplete`, `absent` or `misaligned` never yields a loss or demand fact; its slot is unavailable with the state as the reason;
+- a real zero is answered as 0 MWh, a missing value never is;
+- a short or zero-row frame never certifies;
+- `loss_pct_of_demand` needs every load complete; the denominator guard is the existing near-zero rule;
+- an independent hand-worked LP-with-losses oracle and the S5 ledger rows.

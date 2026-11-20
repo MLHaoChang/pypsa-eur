@@ -138,6 +138,7 @@ RESULTS_ENUM = [
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
     "asset_economics", "billing", "cfe_score", "value_flows", "renewable_fraction",
+    "operating_reserve",
 ]
 RESULTS_SOURCE_ENUM = ["lopf", "ac_pf"]
 # Task 14 — per-asset results chat tools (get_asset_results /
@@ -491,6 +492,11 @@ TOOLS: list[dict[str, Any]] = [
         "nothing served), renewable_mwh, nonrenewable_mwh, served_mwh, conversion_mwh, "
         "note, per_period: [{period, fraction, ...}], target (the minimum the solve "
         "enforced, null when off), reason}; "
+        "(operating_reserve): only the hours where the reserve binds, paged with offset/limit "
+        "(at most 24 per read): {shares: {load, pv, wind} (fractions, null when the reserve was "
+        "off), hours_total, binding_hours_total, binding_hours: [{snapshot, required_mw, "
+        "held_mw, binding, holders: [{name, kind: generator|storage_unit, held_mw}] (the 5 "
+        "largest), holders_total}], not_counted: [storage not on the electricity bus], reason}; "
         "(value_flows): {status: 'ok'|'not_established'|'value_flows_invalid', "
         "participants, externals, template, periods: {'_'|period: {lines: [{payer, payee, "
         "value_stream, source, amount, ...}], by_participant: {id: {paid, received, net, "
@@ -1291,10 +1297,11 @@ TOOLS: list[dict[str, Any]] = [
         "strong grid. It runs by default for weak_flexible / off_grid and "
         "costs no LP solve. "
         "weak_flexible sets each selected import Link's rating (`p_nom`, "
-        "and a finite `p_nom_max`) to `import_p_nom_mw` (default 50 MW) "
-        "divided by the number of import Links, replacing the Link's own "
-        "rating; when the two differ the `apply_pack` note and the report "
-        "name the Link, its rating and the cap used. "
+        "and a set `p_nom_max`, unlimited included) to `import_p_nom_mw` "
+        "(default 50 MW) divided by the number of import Links, replacing "
+        "the Link's own rating; when the two differ the `apply_pack` note "
+        "and the report state, in plain words, the user's grid connection "
+        "limit and the cap the study used. "
         "`budget_solves` (1–120, default 30) is a hard ceiling on LP solves "
         "inside the study — stages that would exceed it are skipped and "
         "reported not_established. Returns {status:'running'} — poll "
@@ -4686,8 +4693,11 @@ TOOLS: list[dict[str, Any]] = [
         "stale. `truncated` lists any section cut to fit. detail='inputs': the stored "
         "lines {business_case, digest, status, citable_turns} — pass `digest` as "
         "set_business_case_lines' if_match; `citable_turns` are the user's own messages a "
-        "price may cite. Safety: read.",
-        {"detail": {"type": "string", "enum": ["summary", "inputs"]}},
+        "price may cite. detail='options': what the line table offers {variants, "
+        "offered_rows, units_by_source (typed / share_of / linked per output), outputs "
+        "(or outputs_reason), refusals (or refusals_reason), horizon}: offer a line only "
+        "a unit its source allows and name each refusal in plain words. Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "inputs", "options"]}},
         [],
     ),
     _t(
@@ -4695,7 +4705,8 @@ TOOLS: list[dict[str, Any]] = [
         "Replace the business-case inputs (revenue, opex and capex lines, kw_per_gpu, "
         "capacity, break_even_line) with `business_case`, a whole BusinessCaseConfig: read "
         "it with get_business_case(detail='inputs'), change what the user asked, send the "
-        "whole object back. `if_match` is REQUIRED (that read's `digest`; '*' is refused; "
+        "whole object back. Before choosing a unit, read get_business_case(detail='options') "
+        "and use only a unit its source allows. `if_match` is REQUIRED (that read's `digest`; '*' is refused; "
         "stale: business_case_changed). NEVER invent a price: each NEW or CHANGED price "
         "(`price`, or a year of `price_by_year`) needs one entry in `citations` — {line, "
         "year? (for price_by_year), then where the user gave it: turn_id + quote + unit "
@@ -5386,6 +5397,45 @@ TOOLS.extend([
        ["project", "study_id"]),
 ])
 TOOLS.extend([
+    # homer-parity 03b: HOMER's optimal system type map, the winning supply
+    # architecture over two sensitivity variables.
+    _t("compare_system_types",
+       "Map which supply architecture wins over two sensitivity variables (HOMER's optimal system type map), in "
+       "the background. Each cell applies both multipliers to a copy of the base project's SAVED network and "
+       "compares the supply architectures (PV, wind, battery, genset, grid; the others OMITTED, each sized by the "
+       "optimiser), so a 3x3 map with 4 architectures is 36 solves, charged to the campaign (at most 120: use "
+       "fewer values or `architectures` to name fewer). x_variable and y_variable (different) are one of "
+       "genset_fuel_price, grid_energy_price, solar_resource, wind_resource, load, pv_capital_cost, "
+       "battery_capital_cost, genset_capital_cost; x_values and y_values are 2-5 multipliers above 0 and at most 10 on the "
+       "project's own value (default 0.5, 1, 1.5). action='abort' stops it before its next solve. `project` is "
+       "the study's base project. Returns {status, solves_estimated, architectures, axes} at once; poll "
+       "get_system_type_map. Refusals: study_running, solver_in_flight, baseline_not_saved, unknown_variable, "
+       "axes_not_different, axis_values_invalid, variable_not_in_network (the project has no such asset or its "
+       "value is zero), campaign_budget_invalid (names the solve count), no_architectures, "
+       "unknown_architecture, system_type_map_never_run (abort). Safety: execution_long_running.",
+       {"project": {"type": "string"},
+        "study_id": {"type": "string"},
+        "action": {"type": "string", "enum": ["start", "abort"]},
+        "x_variable": {"type": "string", "maxLength": 64},
+        "y_variable": {"type": "string", "maxLength": 64},
+        "x_values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+                     "minItems": 2, "maxItems": 5},
+        "y_values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+                     "minItems": 2, "maxItems": 5},
+        "architectures": {"type": "array", "items": {"type": "string", "maxLength": 64},
+                          "minItems": 1, "maxItems": 16},
+        "budget_solves": {"type": "integer", "minimum": 1, "maximum": 120}},
+       ["project", "study_id"]),
+    _t("get_system_type_map",
+       "Read a decision study's system type map. While it runs: {running: {status, current, solves_charged}}. "
+       "Afterwards: {status, stale (the base project changed since: map again), axes: [{label, values}], cells: "
+       "[{i, j, winner_label, runner_up_gap_eur_per_year, all_solved, clipped: [{label, share}], rows: [{label, status, total_cost_eur_per_year}]}]}. "
+       "i runs along the first axis, j along the second. A cell with no winner had no architecture solved; a "
+       "null gap or cost was not computed: NEVER report it as 0. 404 system_type_map_never_run. Safety: read.",
+       {"project": {"type": "string"}, "study_id": {"type": "string"}},
+       ["project", "study_id"]),
+])
+TOOLS.extend([
     # homer-parity 03d: the grid-extension break-even distance for one 03a row.
     _t("get_grid_extension_break_even",
        "How far could the grid be extended before an off-grid supply architecture is cheaper (HOMER's "
@@ -5941,10 +5991,11 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_ppa_price": [("GET", "/api/simulation/finance")],
     "explain_cashflow": [("GET", "/api/results/investment_case"),
                          ("GET", "/api/results/investment_case/report")],
-    # business case (4) — business case 08b; the preset route stays panel-only (Q3)
+    # business case (4) — business case 08b; the preset and options reads are chat reads (bc 14, bc 16)
     "run_business_case": [("POST", "/api/results/business_case")],
     "get_business_case": [("GET", "/api/results/business_case"),
-                          ("GET", "/api/results/business_case/inputs")],
+                          ("GET", "/api/results/business_case/inputs"),
+                          ("GET", "/api/results/business_case/options")],
     "set_business_case_lines": [("PUT", "/api/results/business_case/inputs")],
     "apply_business_case_preset": [("GET", "/api/results/business_case/preset"),
                                    ("PUT", "/api/results/business_case/inputs")],
@@ -5980,6 +6031,11 @@ TOOL_ROUTES: dict[str, list] = {
         ("POST", "/api/projects/{name}/studies/{study_id}/supply-architectures/abort")],
     "get_supply_architectures": [
         ("GET", "/api/projects/{name}/studies/{study_id}/supply-architectures")],
+    "compare_system_types": [
+        ("POST", "/api/projects/{name}/studies/{study_id}/system-type-map"),
+        ("POST", "/api/projects/{name}/studies/{study_id}/system-type-map/abort")],
+    "get_system_type_map": [
+        ("GET", "/api/projects/{name}/studies/{study_id}/system-type-map")],
     "get_grid_extension_break_even": [
         ("POST", "/api/projects/{name}/studies/{study_id}/grid-extension-break-even")],
     # project settings and scope (5) — LV08 B1

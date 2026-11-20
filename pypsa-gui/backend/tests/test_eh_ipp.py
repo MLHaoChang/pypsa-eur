@@ -621,3 +621,45 @@ def test_the_pv_profile_is_scaled_to_the_ac_rating():
     assert pu == pytest.approx((sun.to_numpy() * 1.2).clip(max=1.0))
     assert pu.max() <= 1.0
     assert (pu > sun.to_numpy() + 1e-9).any()
+
+
+def test_the_arbitrage_warning_reads_in_plain_words(client, tmp_projects_dir):
+    """Template-e2e 14: the readiness warning names the grid trade in plain words, with the
+    import and export prices, and no raw code as its title."""
+    _create(client)
+    issues = client.post("/api/simulation/preflight").json()["issues"]
+    hit = [i for i in issues if i["code"] == "commercial.arbitrage_loop_via_storage"]
+    assert len(hit) == 1
+    title, msg = hit[0]["title"], hit[0]["message"]
+    assert "." not in title and "_" not in title, title
+    assert msg.startswith("With the storage bess, the site can buy electricity from the grid at -31.44 per MWh"), msg
+    assert "sell it back at 184.46 per MWh" in msg and "193.74 per MWh" in msg
+    assert "snapshot" not in msg and "Link" not in msg and "LP" not in msg, msg
+
+
+@pytest.mark.live_solve
+def test_the_app_run_never_retires_the_fixed_plants(client, tmp_projects_dir):
+    """Template-e2e 14: through the app's own routes (create, run, read the generators as the
+    results page does), the wind and PV plants the IPP owns keep their nameplate."""
+    import time
+
+    _create(client)
+    assert client.post("/api/simulation/run").status_code == 200
+    t0 = time.time()
+    while client.get("/api/simulation/status").json().get("status") == "running":
+        assert time.time() - t0 < 500, "the run did not finish"
+        time.sleep(0.5)
+    assert client.get("/api/simulation/status").json()["condition"] == "optimal"
+    name = "ipp"
+
+    def kept(when):
+        rows = {r["name"]: r for r in client.get("/api/network/generators").json()}
+        for g, mw in (("wind_farm", M.WIND_MW), ("pv_plant", M.PV_MW_AC)):
+            assert rows[g]["p_nom"] == pytest.approx(mw), (when, g)
+            assert rows[g]["p_nom_opt"] == pytest.approx(rows[g]["p_nom"]), (when, g)
+
+    kept("after the solve")
+    # The walk's path (GK B2 (3) c): saved, then reopened from disk.
+    assert client.post(f"/api/projects/{name}").status_code == 200
+    assert client.get(f"/api/projects/{name}").status_code == 200
+    kept("after save and reopen")

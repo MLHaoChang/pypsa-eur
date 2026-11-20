@@ -24,6 +24,7 @@ from services.asset_schema.derive import (
     derive_composite,
     effective_discount_rate,
     has_parts,
+    number,
     owned_columns,
     part_scales,
     split_parts,
@@ -36,6 +37,7 @@ from services.carrier_catalog import ensure_carrier
 from services.component_names import require_valid_name
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
+from services.solver.periodized_costs import discount_rate_problem
 from services.study_state import refuse_edit_during_live_study
 from services.user_timeseries import (
     _user_ts_delete_asset,
@@ -429,11 +431,22 @@ def _imported_parts_problem(component_class: str, row, global_rate: float) -> st
             if v is not None and math.isinf(v):
                 return f"the {spec.name} part's {field.replace('_', ' ')} must be a finite number"
     rate = effective_discount_rate(row.get("discount_rate"), global_rate)
+    # The row's own rate, else the rate in force, held to the rate rule first (GK B 65): at -1 or below
+    # (1 + r)^L is zero, negative or complex, which the annuity below would not catch.
+    if why := discount_rate_problem(rate):
+        return f"its discount rate {rate:g} cannot be used ({why})"
     try:
         derived = derive_composite(component_class, dict(row), scales=part_scales(component_class, row),
                                    discount_rate=rate, asset_lifetime=row.get("lifetime"))
     except ValueError as exc:
         return str(exc)
+    except ArithmeticError:  # (1 + r)^L overflows, or 1 + r = ±1 divides by zero (GK B 64)
+        lives = sorted({life for spec in composite_parts(component_class)
+                        if number(row.get(spec.column("overnight"))) is not None
+                        and (life := number(row.get(spec.column("lifetime")) if spec.own_lifetime
+                                            else row.get("lifetime"))) is not None})
+        over = " and ".join(f"{life:g}" for life in lives)
+        return f"its investment parts cannot be annuitised at rate {rate:g} over {over} years"
     if not all(math.isfinite(derived[c]) for c in ("capital_cost", "fom_cost")):
         scale = ", ".join(sorted({s.scale_by for s in composite_parts(component_class) if s.scale_by}))
         return f"its derived cost is not finite (check {scale or 'the parts'})"
@@ -478,7 +491,33 @@ def _refuse_edit_during_live_study() -> None:
     refuse_edit_during_live_study()
 
 
-def _create_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
+def _refuse_cost_basis_mismatch(n, component_class: str, row: dict, claimed: str | None,
+                                stored_row: dict | None = None) -> None:
+    """05d: a client that scaled a typed cost sends the basis it assumed (``X-Cost-Basis``: tonne or energy). When the
+    asset's bus, as it will be stored, says otherwise (the bus or its unit changed under the form, a restore
+    rewound the network, or the same save moved the bus) nothing is written: 409 ``cost_basis_mismatch``."""
+    if claimed is None:
+        return
+    if claimed not in ("tonne", "energy"):
+        raise HTTPException(400, "X-Cost-Basis must be 'tonne' or 'energy'.")
+    actual = asset_fields.cost_basis_of_row(n, component_class, row)
+    if actual is not None and actual != claimed:
+        words = {"tonne": "t/h or t", "energy": "kW or kWh"}
+        col = asset_fields._SIZE_BUS.get(component_class)
+        if stored_row is not None and col is not None and stored_row.get(col) != row.get(col):
+            # U1: the card prices in the stored bus's unit; a bus move saves alone, then the costs follow the new bus.
+            message = (f"This save moves the asset to a bus priced per {words[actual]}, but the costs on the form "
+                       f"are per {words[claimed]}. Nothing was saved. Save the bus change on its own first, then "
+                       "enter the costs in the new unit.")
+        else:
+            message = (f"This asset's costs are per {words[actual]}, but the form assumed per {words[claimed]}. "
+                       "Nothing was saved; reopen the card and enter the costs again.")
+        raise HTTPException(409, detail={
+            "error_kind": "cost_basis_mismatch", "claimed": claimed, "actual": actual, "message": message})
+
+
+def _create_component(component_class: str, attr: str, name: str, kwargs: dict,
+                      cost_basis: str | None = None) -> dict:
     _refuse_edit_during_live_study()
     # Dispatch invalidation lives in the undo middleware (main.py) — it runs
     # after every successful /api/network/* mutation, so cascade-delete,
@@ -498,6 +537,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     _check_investment_parts(component_class, parts, row=kwargs)
     notice = check_fuel_curve(component_class, kwargs)
     with PyPSAService.get_lock():
+        _refuse_cost_basis_mismatch(n, component_class, kwargs, cost_basis)
         df = getattr(n, attr)
         if name in df.index:
             raise HTTPException(409, f"{component_class} '{name}' already exists")
@@ -698,7 +738,8 @@ def _same_value(a, b) -> bool:
     return math.isclose(fa, fb, rel_tol=1e-12, abs_tol=1e-12)
 
 
-def _update_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
+def _update_component(component_class: str, attr: str, name: str, kwargs: dict,
+                      cost_basis: str | None = None) -> dict:
     """
     Update by remove+add. `kwargs` should be the user's *partial* dict
     (produced via `model_dump(exclude_unset=True)`). Reads the current row from
@@ -721,6 +762,8 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # Read current row + overlay the user's partial dict (shared helper).
         merged = _merge_partial_update(n, attr, name, kwargs)
         merged, current_parts = split_parts(component_class, merged)
+        _refuse_cost_basis_mismatch(n, component_class, merged, cost_basis,
+                                    stored_row=df.loc[name].to_dict() if cost_basis else None)
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, row=merged)
         stored = df.loc[name].to_dict()

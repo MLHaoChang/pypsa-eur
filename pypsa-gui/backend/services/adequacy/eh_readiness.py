@@ -106,6 +106,18 @@ def _outage_units(net, import_links) -> dict[str, Any]:
             "missing": missing[:_OUTAGE_MISSING_CAP]}
 
 
+def _is_open_tie(net, name) -> bool:
+    """True when a Link carries nothing: its static ``p_max_pu`` is 0 and no
+    ``links_t.p_max_pu`` series overrides it with a non-zero value."""
+    df = net.links
+    if "p_max_pu" not in df.columns or float(df.at[name, "p_max_pu"]) != 0.0:
+        return False
+    series = net.links_t.p_max_pu
+    if name in series.columns:
+        return bool((series[name].fillna(0.0) == 0.0).all())
+    return True
+
+
 def outage_scan(net, import_links) -> tuple[dict[str, int], list[dict[str, str]]]:
     """Units with usable outage data per class, and EVERY thermal-like unit
     without it (uncapped; ``suggest_eh_setup`` shares this rule, P25).
@@ -145,6 +157,10 @@ def outage_scan(net, import_links) -> tuple[dict[str, int], list[dict[str, str]]
                                        for k in _NOT_EQUIPMENT_KW))
             else:
                 thermal = cls == "Link" and name in imports
+                # A normally-open tie (p_max_pu 0) carries nothing: the study runs
+                # the site as an island, so its outage rate never enters it.
+                if thermal and _is_open_tie(net, name):
+                    thermal = False
             if thermal:
                 missing.append({"class": cls, "name": str(name)})
         by_class[cls] = count

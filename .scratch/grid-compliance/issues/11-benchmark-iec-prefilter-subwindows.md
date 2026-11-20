@@ -3,7 +3,7 @@
 
 # GC-11 Benchmark: IEC 61400-27-2 pre-filter and transient / quasi-steady sub-windows
 
-Status: needs-triage
+Status: needs-info
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07, GK A2 condition B1)
 Gated: yes (GK A, gridspine)
@@ -25,3 +25,7 @@ benchmark row carries `method = "whole-window metrics; no IEC pre-filter or sub-
 
 - A step filtered by the pre-filter matches a hand-computed response within one sample.
 - Sub-window boundaries match the stated durations; a row says which sub-window it is.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1; GK A2 4 priority view).** Parked: useful but it blocks nothing (GK A2 4). Set ready-for-agent when a verdict needs it.
