@@ -599,7 +599,8 @@ def test_d4_a_record_frozen_before_02b_admits_on_an_unscheduled_network(tmp_path
 
     ctx = _run_ctx(tmp_path, build_eh_datacenter(), "eh_datacenter")
     frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
-    assert frozen.pop("energization") == {"digest": None, "by_period": {}}
+    # GK B E4: a non-staged card is byte-equal to a pre-02b one (no entry).
+    assert "energization" not in frozen
     assert _admit(tmp_path, ctx, frozen) is None  # admitted, as before 02b
 
 
@@ -642,7 +643,9 @@ def test_e4_a_ramp_reversed_inside_a_period_refuses(tmp_path):
     summary = E.all_by_period(n)
     ramp = frame.iloc[rows, 0].to_numpy()
     frame.iloc[rows, 0] = ramp[::-1]  # the same values, exactly, in reverse
-    assert sorted(frame.iloc[rows, 0]) == sorted(ramp)  # an order-blind digest can't see it
+    assert sorted(frame.iloc[rows, 0]) == sorted(
+        ramp
+    )  # an order-blind digest can't see it
     assert E.all_by_period(n) == summary  # the summary cannot see it
     kind, message = _admit(tmp_path, ctx, frozen)
     assert kind == run_eh.ARGS_KIND
@@ -712,7 +715,7 @@ def test_d4_a_pre_02b_record_refuses_where_the_schedule_is_unreadable(
 
     ctx = _run_ctx(tmp_path, build_eh_datacenter(), "eh_datacenter")
     frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
-    frozen.pop("energization")
+    assert "energization" not in frozen  # pre-02b shape, as a non-staged card
     monkeypatch.setattr(E, "all_by_period", unreadable)
     kind, message = _admit(tmp_path, ctx, frozen)
     assert kind == run_eh.ARGS_KIND and message == run_eh.ENERGIZATION_UNRECORDED
