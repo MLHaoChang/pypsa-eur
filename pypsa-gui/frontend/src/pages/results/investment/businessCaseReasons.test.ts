@@ -91,6 +91,11 @@ describe('a refused run names the line and what to do (walk 05)', () => {
     expect(refusedRunText('business_case_refused:a_new_kind: lines[0].price', names))
       .toBe('Capacity payment (BESS, firm capacity): Price: refused')
     expect(refusedRunText('the run could not start', names)).toBe('the run could not start')
+    // BC 15: a typed line under a lease-up names the line and the fix; the stream refusal names the row.
+    expect(refusedRunText('business_case_refused:volume_factor_typed_line: lines[2].quantity_source', names))
+      .toBe('Insurance: take the quantity from the model, or set the volume factor (lease-up) to 100 % in this line’s years')
+    expect(refusedRunText('business_case_refused:volume_factor_unclassified: energy_export', names))
+      .toMatch(/^Volume factor \(lease-up\), %: The energy-model row “energy export” does not follow served volume/)
   })
   it('has an action only for kinds the cells know, each one sentence with no code', () => {
     for (const [k, a] of Object.entries(REFUSAL_ACTION)) {
