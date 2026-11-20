@@ -338,12 +338,15 @@ def _connection_writes(n, pack: ArchetypePack, selected: list[str],
                 if ts is not None and name in getattr(ts, "columns", []) \
                         and not (ts[name] == 0.0).all():
                     put(name, f"t_{attr}", None, 0.0)
-    elif pack.archetype == "weak_flexible" and not keep_connection:
+    elif pack.archetype == "weak_flexible":
+        # Keep or accept, a weak-grid study reads the connection in MW.
+        _require_mw(n, selected)
+        if keep_connection:
+            return writes
         total = pack.import_overlay.import_p_nom_mw
         if total is None:
             raise ArchetypePackError(
                 "the weak-grid study needs a grid connection cap in MW")
-        _require_mw(n, selected)
         each = float(total) / float(len(selected))
         for name in selected:
             put(name, "p_nom", float(n.links.at[name, "p_nom"]), each)
@@ -359,6 +362,17 @@ _KIND_OF = {"p_nom": "connection_limit", "p_nom_max": "expansion_limit",
             "t_p_max_pu": "connection_closed", "t_p_min_pu": "connection_closed"}
 
 
+def _expansion_text(cap: str, limit: str, before: float, after: float,
+                    k: int) -> str:
+    if after == float("inf"):
+        # Some Links keep no bound, so the connection as a whole stays
+        # unlimited; say what the study does bound.
+        return (f"The study {limit} how far some of your {k} grid connections "
+                "can be expanded; the connection as a whole stays unlimited.")
+    return (f"The study {cap} how far your grid connection can be expanded "
+            f"at {_mw(after)} (your project: {_mw(before)}).")
+
+
 def _rows(n, pack: ArchetypePack, selected: list[str],
           writes: list[dict[str, Any]], *,
           off_grid_chosen: bool) -> list[dict[str, Any]]:
@@ -369,13 +383,20 @@ def _rows(n, pack: ArchetypePack, selected: list[str],
     k = len(selected)
     many = f" over its {k} connections" if k > 1 else ""
 
+    def limit(v: float | None) -> float:
+        # A missing or NaN bound is no bound: unlimited, never "nan MW".
+        return float("inf") if v is None or v != v else v
+
     def total_after(attr: str, ws: list[dict[str, Any]]) -> float:
-        # Every Link ends at the pack's share, so the summed limit after is
-        # the pack's cap itself (no float drift from summing cap/k k times).
         new = {w["link"]: w["after"] for w in ws}
-        return sum(new.get(s, _link_float(n, s, attr)) for s in selected) \
-            if pack.archetype != "weak_flexible" else \
-            float(pack.import_overlay.import_p_nom_mw)
+        ends = [limit(new.get(s, _link_float(n, s, attr))) for s in selected]
+        cap = pack.import_overlay.import_p_nom_mw
+        if pack.archetype == "weak_flexible" and cap is not None and all(
+                e == float(cap) / k for e in ends):
+            # Every Link ends at the pack's share: the summed limit is the
+            # pack's cap itself (no float drift from summing cap/k k times).
+            return float(cap)
+        return sum(ends)
 
     if "connection_limit" in by_kind:
         before = sum(float(n.links.at[s, "p_nom"]) for s in selected)
@@ -396,15 +417,13 @@ def _rows(n, pack: ArchetypePack, selected: list[str],
     if "expansion_limit" in by_kind:
         ws = by_kind["expansion_limit"]
         # Summed over every import Link, as the limit is; unlimited when one is.
-        before = sum(_link_float(n, s, "p_nom_max") for s in selected)
+        before = sum(limit(_link_float(n, s, "p_nom_max")) for s in selected)
         after = total_after("p_nom_max", ws)
         rows.append({
             "kind": "expansion_limit", "before_mw": before, "after_mw": after,
             "needs_accept": True,
-            "text": (f"The study would cap how far your grid connection can be "
-                     f"expanded at {_mw(after)} (your project: {_mw(before)})."),
-            "done": (f"The study capped how far your grid connection can be "
-                     f"expanded at {_mw(after)} (your project: {_mw(before)})."),
+            "text": _expansion_text("would cap", "would limit", before, after, k),
+            "done": _expansion_text("capped", "limited", before, after, k),
             "writes": ws})
     if "connection_closed" in by_kind:
         before = sum(float(n.links.at[s, "p_nom"]) for s in selected)

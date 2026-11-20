@@ -184,12 +184,18 @@ _PACKS = {
 
 @pytest.mark.parametrize("keep", [False, True])
 @pytest.mark.parametrize("arch", list(_PACKS))
-@pytest.mark.parametrize("tid", list(T.BUILDERS))
+@pytest.mark.parametrize("tid", [*T.BUILDERS, "two_links", "three_links"])
 def test_planned_changes_equal_what_the_apply_writes(tid, arch, keep):
-    n = _build(tid)
-    pack = _PACKS[arch]()
-    if arch == "weak_flexible":
-        pack = _weak_pack(tid)
+    if tid in _SMALL:
+        n = _SMALL[tid]()
+        pack = _PACKS[arch]()
+        if arch == "weak_flexible":
+            pack = RUN.apply_pack_overrides(pack, {"import_p_nom_mw": 50.0})
+    else:
+        n = _build(tid)
+        pack = _PACKS[arch]()
+        if arch == "weak_flexible":
+            pack = _weak_pack(tid)
     rows = A.planned_changes(n, pack, keep_connection=keep)
     before = n.copy()
     A.apply_archetype_pack_detailed(n, pack, keep_connection=keep)
@@ -365,3 +371,49 @@ def test_three_links_sharing_an_equal_cap_read_as_shared_not_set():
     row = next(r for r in A.planned_changes(n, pack) if r["kind"] == "connection_limit")
     assert (row["before_mw"], row["after_mw"]) == (50.0, 50.0)
     assert "evenly over its 3 connections" in row["text"]
+
+
+def _three_link_network():
+    n = _two_link_network()
+    n.add(
+        "Link",
+        "feeder_c",
+        bus0="grid",
+        bus1="hub",
+        p_nom=10.0,
+        p_nom_max=40.0,
+        eh_role="grid_import",
+    )
+    n.links.at["feeder_a", "p_min_pu"] = -0.5
+    return n
+
+
+#: Multi-Link connections for the preview = apply parity test (GK A N1).
+_SMALL = {"two_links": _two_link_network, "three_links": _three_link_network}
+
+
+def test_keep_on_a_non_mw_import_bus_is_refused():
+    n = _two_link_network()
+    n.buses.at["grid", "unit"] = "t"
+    pack = RUN.apply_pack_overrides(
+        default_weak_flexible_pack(), {"import_p_nom_mw": 60.0}
+    )
+    with pytest.raises(A.ArchetypePackError, match="not MW"):
+        A.planned_changes(n, pack, keep_connection=True)
+    with pytest.raises(A.ArchetypePackError, match="not MW"):
+        A.apply_archetype_pack_detailed(n, pack, keep_connection=True)
+
+
+def test_a_nan_expansion_bound_reads_as_unlimited():
+    n = _two_link_network()
+    n.links.loc[["feeder_a", "feeder_b"], "p_nom_max"] = [40.0, float("nan")]
+    pack = RUN.apply_pack_overrides(
+        default_weak_flexible_pack(), {"import_p_nom_mw": 60.0}
+    )
+    row = next(r for r in A.planned_changes(n, pack) if r["kind"] == "expansion_limit")
+    # The NaN Link is left unbounded, so the connection stays unlimited after.
+    assert (row["before_mw"], row["after_mw"]) == (float("inf"), float("inf"))
+    assert row["text"] == (
+        "The study would limit how far some of your 2 grid connections "
+        "can be expanded; the connection as a whole stays unlimited."
+    )
