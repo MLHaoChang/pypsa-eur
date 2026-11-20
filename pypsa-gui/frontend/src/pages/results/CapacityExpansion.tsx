@@ -900,6 +900,9 @@ export default function CapacityExpansion() {
   // of confident nonsense, so the null is carried through explicitly.
   const displayTotalCost: number | null =
     displayCapex == null ? null : displayCapex + displayOpex
+  // The charts' € ticks put the sign before the €, as the tiles and the total do: one sign
+  // position in the view (UX 2 (5) on #1783), never "€-5.0 M".
+  const fmtAxisCurrency = (v: number) => (v < 0 ? `-${fmtCurrency(-v, 1)}` : fmtCurrency(v, 1))
   const fmtCostOrUnavailable = (v: number | null) =>
     v == null ? COST_UNAVAILABLE : fmtCurrency(v)
   const scopeLabel = periodEntry ? `period ${filter.selectedPeriod}` : 'horizon (all periods)'
@@ -1099,7 +1102,7 @@ export default function CapacityExpansion() {
               <BarChart data={costWaterfall} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                <YAxis {...CHART_AXIS} width={72} tickFormatter={fmtAxisCurrency}
                   label={yAxisLabel('€ per year')} />
                 <RTooltip
                   cursor={{ fill: 'rgba(0,0,0,0.04)' }}
@@ -1170,7 +1173,7 @@ export default function CapacityExpansion() {
               <BarChart data={capexByClass} margin={{ top: 18, right: 16, left: 8, bottom: 0 }} maxBarSize={72}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                <YAxis {...CHART_AXIS} width={72} tickFormatter={fmtAxisCurrency}
                   label={yAxisLabel(costMode === 'lifetime' ? '€ (present value)' : '€ per year')} />
                 <RTooltip {...CHART_TOOLTIP} formatter={(v: number) => fmtCurrency(v)} />
                 <Bar dataKey="capex" radius={[4, 4, 0, 0]}>
@@ -1228,7 +1231,7 @@ export default function CapacityExpansion() {
                     tickFormatter={(v: number) => fmtPower(v, 0)}
                     label={yAxisLabel('Capacity added')} />
                   <YAxis yAxisId="capex" orientation="right" {...CHART_AXIS}
-                    tickFormatter={(v: number) => fmtCurrency(v, 1)} />
+                    tickFormatter={fmtAxisCurrency} />
                   <RTooltip {...CHART_TOOLTIP}
                     formatter={(v: number, name: string) =>
                       name === 'Total CAPEX' ? fmtCurrency(v) : fmtPower(v)} />
@@ -1278,7 +1281,7 @@ export default function CapacityExpansion() {
                 <BarChart data={perPeriod} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="period" {...CHART_AXIS} />
-                  <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                  <YAxis {...CHART_AXIS} width={72} tickFormatter={fmtAxisCurrency}
                     label={yAxisLabel(costMode === 'lifetime' ? '€ (present value)' : '€ per year')} />
                   <RTooltip {...CHART_TOOLTIP} formatter={(v: number) => fmtCurrency(v)} />
                   <Legend {...CHART_LEGEND} />
