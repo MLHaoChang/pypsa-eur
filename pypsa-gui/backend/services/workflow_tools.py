@@ -551,6 +551,14 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if present:
             parts.append("envelope-floors/1")
             parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
+    # AS-02, template-e2e 02b: the energization schedule in MW, which a solve turns into p_max_pu
+    # (`energization.apply_energization`). Not a PyPSA input, so the loop above skips it: a schedule edited or
+    # uploaded left the fingerprint as it was. Appended only when the column holds a value.
+    from services.adequacy.energization import energization_frame
+    schedule = energization_frame(n)
+    if schedule is not None and schedule.notna().any().any():
+        parts.append("energization/1")
+        parts.append(encode(schedule))
     # AS-02, homer-parity 02a: a generator fuel curve's inputs, which the solve staging turns into marginal_cost
     # and stand_by_cost (both already hashed as PyPSA columns). Appended only when present.
     # homer-parity 02b: the O&M per running hour rides in the same block (a lifetime in running hours is the

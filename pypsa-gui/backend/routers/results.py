@@ -2261,12 +2261,16 @@ def _ic_assumptions(cfg, n, *, lock, extra_assets: str | None = None,
         fin = None
     solver = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else None
     commercial = getattr(cfg, "commercial", None)
+    from services.adequacy.energization import schedule_digest
+
     with lock:
         owner_assets = owner_assets_digest(n, commercial)
+        # template-e2e 02b (W2): the case reads the energization schedule at build time.
+        energization = schedule_digest(n)
     return assumptions_digest(finance=raw, commercial=commercial,
                               dispatch=dispatch_digest(n, result_df or _result_df), packs=pack_versions(fin),
                               solver=solver, owner_assets=owner_assets,
-                              extra_assets=extra_assets)
+                              extra_assets=extra_assets, energization=energization)
 
 
 def _ic_current_assumptions() -> tuple[tuple[str, dict] | None, str | None]:

@@ -210,6 +210,9 @@ class _Facts:
     # how many cost fields a person typed (no money year recorded) (B9).
     money_years: dict = field(default_factory=dict)
     hand_typed_costs: int = 0
+    # The energization schedule per period (`energization.all_by_period`):
+    # the connection row's `energization`, which Guided section 3 edits.
+    energization: dict = field(default_factory=dict)
 
 
 # eh_readiness copies and walks the network; cached per readiness key.
@@ -672,7 +675,20 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         ens_cap=getattr(config, "ens_cap_permyriad", None),
         commercial=commercial, finance=getattr(config, "finance", None),
         cfg_dict=cfg_dict, cfg_hash=cfg_hash, copy=copy,
+        energization=_energization(n),
         **_money_years(n))
+
+
+def _energization(n) -> dict:
+    """``{link: {by_period, not_flat}}`` of each scheduled Link
+    (`energization.all_by_period`); {} where none is, or it can't be read."""
+    from services.adequacy.energization import all_by_period
+
+    try:
+        return all_by_period(n)
+    except Exception:                                    # noqa: BLE001 — display only
+        logger.exception("flow: energization schedule read failed")
+        return {}
 
 
 def _money_years(n) -> dict:
@@ -1466,6 +1482,13 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             row["connection_limit"] = {"mw": facts.import_cap.mw,
                                        "refusal": facts.import_cap.refusal,
                                        "links": list(facts.import_cap.links)}
+            if facts.energization:
+                # template-e2e 02b: a staged template's energization schedule,
+                # one MW per period ({min, max} for a period that varies), as
+                # `PUT /flow/energization` writes it. A network without one
+                # keeps #1626's single limit: no key.
+                row["energization"] = [{"link": link, **v}
+                                       for link, v in sorted(facts.energization.items())]
         if s in facts.holds:
             row["holds"] = facts.holds[s]
             row["holds_total"] = facts.holds_total[s]
