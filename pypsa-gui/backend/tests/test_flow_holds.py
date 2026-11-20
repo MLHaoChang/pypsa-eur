@@ -495,16 +495,37 @@ def test_an_extendable_asset_between_equal_bounds_reads_as_fixed():
     equal carries that size as `fixed_size` (the IPP's owned plants); an open upper bound, unequal
     bounds and a fixed-size asset carry None."""
     n = _hand_built()
-    n.add("Generator", "pinned", bus="site", p_nom=60.0, p_nom_extendable=True,
-          p_nom_min=60.0, p_nom_max=60.0)
-    n.add("Generator", "ranged", bus="site", p_nom=60.0, p_nom_extendable=True,
-          p_nom_min=10.0, p_nom_max=60.0)
-    n.add("Store", "tank_pinned", bus="h2", e_nom_extendable=True, e_nom_min=40.0, e_nom_max=40.0)
+    n.add(
+        "Generator",
+        "pinned",
+        bus="site",
+        p_nom=60.0,
+        p_nom_extendable=True,
+        p_nom_min=60.0,
+        p_nom_max=60.0,
+    )
+    n.add(
+        "Generator",
+        "ranged",
+        bus="site",
+        p_nom=60.0,
+        p_nom_extendable=True,
+        p_nom_min=10.0,
+        p_nom_max=60.0,
+    )
+    n.add(
+        "Store",
+        "tank_pinned",
+        bus="h2",
+        e_nom_extendable=True,
+        e_nom_min=40.0,
+        e_nom_max=40.0,
+    )
     assets = S._site_assets(n, ["grid_import"], {"grid_import", "export_tie"})
     holds, _ = S._holds(n, ["solar"], assets)
     S._pin_sizes(n, holds["assets"])
     fixed = {h["entity"]: h["fixed_size"] for h in holds["assets"]}
     assert fixed["pinned"] == 60.0 and fixed["tank_pinned"] == 40.0
-    assert fixed["candidate"] is None          # p_nom_max = inf: sized by the study
-    assert fixed["ranged"] is None             # 10 to 60: sized by the study
-    assert fixed["pv"] is None                 # not extendable: its own size
+    assert fixed["candidate"] is None  # p_nom_max = inf: sized by the study
+    assert fixed["ranged"] is None  # 10 to 60: sized by the study
+    assert fixed["pv"] is None  # not extendable: its own size
