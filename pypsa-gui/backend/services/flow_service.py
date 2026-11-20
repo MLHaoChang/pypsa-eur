@@ -481,6 +481,8 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
     total never does. Raw values only, the words are the frontend's. Display only: no state,
     count, blocker, verdict, acknowledgement or fingerprint reads it. An
     extendable asset carries the size as entered, never a solved one."""
+    from services.process_products import is_helper_generator
+
     tables = {klass: (table, fld, stock) for klass, table, fld, stock in _ASSET_TABLES}
     assets = []
     for klass, name in site_assets[:HOLDS_CAP]:
@@ -491,6 +493,9 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
                             field_name=fld, value=df.at[name, fld],
                             unit=_size_unit(n, bus, stock=stock),
                             extendable=df.at[name, f"{fld}_extendable"]))
+        # Asset rows only: a Generator the model adds (slack, lost production, buy-in), not an asset of
+        # the site (`process_products.is_helper_generator`). Display only, like the rest of the row.
+        assets[-1]["helper"] = klass == "Generator" and is_helper_generator(n, name)
     series = n.loads_t.p_set
     loads = []
     for name in n.loads.index[:HOLDS_CAP]:

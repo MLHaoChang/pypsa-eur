@@ -83,6 +83,9 @@ export interface FlowHeld {
   unit: string | null
   extendable: boolean
   series: boolean
+  /** Asset rows only: a Generator the model adds (slack, buy-in, shortfall).
+   *  Display only; a missing or non-boolean value reads as not a helper. */
+  helper?: boolean
   /** Section 2's recipe rows only (gap 03): the inputs per unit of product. */
   recipe?: FlowRecipe
 }
