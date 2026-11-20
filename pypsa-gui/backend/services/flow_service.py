@@ -448,6 +448,24 @@ def _held(component: str, entity: str, *, carrier=None, field_name: str | None =
             "series": bool(series)}
 
 
+def _pin_sizes(n, rows: list[dict]) -> None:
+    """Set ``fixed_size`` on each section 5 asset row: the size an extendable asset's two
+    bounds pin when both are finite and equal (an IPP's owned plant, template-e2e 14), else
+    None. Display only, like the rest of the row: Guided reads "fixed at", not "sized by
+    the study"."""
+    tables = {klass: (table, fld) for klass, table, fld, _stock in _ASSET_TABLES}
+    for row in rows:
+        row["fixed_size"] = None
+        if not row["extendable"] or row["component"] not in tables:
+            continue
+        table, fld = tables[row["component"]]
+        df = getattr(n, table)
+        lo, hi = (_number(df.at[row["entity"], f"{fld}_{b}"]) if f"{fld}_{b}" in df else None
+                  for b in ("min", "max"))
+        if lo is not None and hi is not None and abs(hi - lo) <= 1e-6 * max(1.0, abs(hi)):
+            row["fixed_size"] = lo
+
+
 def _peak(column) -> float | None:
     """The value of a series furthest from zero, sign kept: the peak of
     [-5, -1, -2] is -5. Where +5 and -5 tie, the positive one. None for a
@@ -553,6 +571,7 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     carriers = [str(c) for c in n.carriers.index] if len(n.carriers) else \
         sorted({str(b) for b in n.buses.get("carrier", []) if str(b)})
     holds, holds_total = _holds(n, carriers, site_assets)
+    _pin_sizes(n, holds.get("assets", []))
     return _Facts(
         revision=revision, snapshots=len(n.snapshots), loads=len(n.loads),
         carriers=carriers,
