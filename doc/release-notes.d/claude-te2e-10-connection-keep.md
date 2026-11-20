@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The reliability study now lists, before Run and in plain words, every change it would make to the grid connection (its limit, its expansion bound, or closing it for an off-grid study), from the same writes the study applies, and it can run on the connection exactly as the user built it.
