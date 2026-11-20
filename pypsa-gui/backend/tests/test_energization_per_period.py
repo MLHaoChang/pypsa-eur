@@ -640,7 +640,9 @@ def test_e4_a_ramp_reversed_inside_a_period_refuses(tmp_path):
         json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
     )
     summary = E.all_by_period(n)
-    frame.iloc[rows, 0] = np.linspace(20.0, 10.0, rows.size)
+    ramp = frame.iloc[rows, 0].to_numpy()
+    frame.iloc[rows, 0] = ramp[::-1]  # the same values, exactly, in reverse
+    assert sorted(frame.iloc[rows, 0]) == sorted(ramp)  # an order-blind digest can't see it
     assert E.all_by_period(n) == summary  # the summary cannot see it
     kind, message = _admit(tmp_path, ctx, frozen)
     assert kind == run_eh.ARGS_KIND
@@ -734,3 +736,25 @@ def test_e4_a_record_without_by_period_still_refuses_a_changed_digest(tmp_path):
         "The connection's energization schedule changed since the study's card "
         "was drawn (grid_import). Review the run again."
     )
+
+
+def test_e4_a_renamed_link_column_with_the_same_values_refuses(tmp_path):
+    """GK A 33 E4: the schedule moved to another link, every value the same.
+    A digest without the column names would read it unchanged."""
+    from harness import run_eh
+
+    n = _staged()
+    ctx = _run_ctx(tmp_path, n)
+    frozen = json.loads(
+        json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
+    )
+    frame = E.energization_frame(n)
+    other = next(link for link in n.links.index if link != LINK)
+    n.links_t[E.ATTR] = frame.rename(columns={LINK: other})
+    assert E.energization_frame(n)[other].equals(frame[LINK])  # same values
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message.startswith(
+        "The connection's energization schedule changed since the study's card was drawn ("
+    )
+    assert LINK in message
