@@ -80,7 +80,15 @@ def capture(session):
     with chat_tools._acting() as (db, user):
         if session.owner_user_id is not None and session.owner_user_id != str(user.id):
             raise HTTPException(403, 'Chat ownership changed.')
-        project = current_project(db, user, project_id)
+        try:
+            project = current_project(db, user, project_id)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            # No access is not an unreadable store (issue 17); still 404, so a
+            # project's existence never leaks across the access boundary.
+            raise HTTPException(404, {'error_kind': 'project_access_denied',
+                                      'message': 'You do not have access to this project. No tool was admitted.'}) from exc
         # The caller's project role, read fresh at every admission and again at
         # execution (require_current), so an editor demoted to viewer mid-turn
         # is refused at the next write (project-viewer-role 01, GK B R3).

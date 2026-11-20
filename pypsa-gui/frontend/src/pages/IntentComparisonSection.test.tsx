@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { IntentJob, IntentRow } from '../api/intentComparison'
-import IntentComparisonSection, { assetLabel, checkLabel } from './IntentComparisonSection'
+import type { IntentInputDefaults, IntentJob, IntentRow } from '../api/intentComparison'
+import IntentComparisonSection, { assetLabel, checkLabel, refusalField } from './IntentComparisonSection'
 
-const api = vi.hoisted(() => ({ start: vi.fn(), get: vi.fn(), abort: vi.fn() }))
+const api = vi.hoisted(() => ({ start: vi.fn(), get: vi.fn(), abort: vi.fn(), defaults: vi.fn() }))
 vi.mock('../api/intentComparison', async () => {
   const real = await vi.importActual<typeof import('../api/intentComparison')>('../api/intentComparison')
   return { ...real, intentComparisonApi: api }
@@ -17,11 +17,6 @@ const proj = vi.hoisted(() => ({ list: vi.fn(), updateSettings: vi.fn() }))
 vi.mock('../api/projects', () => ({ projectsApi: proj }))
 const net = vi.hoisted(() => ({ getBuses: vi.fn(), getLoads: vi.fn(), getLinks: vi.fn() }))
 vi.mock('../api/network', () => ({ networkApi: net }))
-const codes = vi.hoisted(() => ({ getPublishedGridCode: vi.fn() }))
-vi.mock('../api/campusElectrical', async () => {
-  const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
-  return { ...real, campusApi: codes }
-})
 const ui = vi.hoisted(() => ({ setSlidePanel: vi.fn(), requestGridCodeScroll: vi.fn() }))
 vi.mock('../store/uiStore', () => ({ useUIStore: (sel: (s: typeof ui) => unknown) => sel(ui) }))
 vi.mock('../layout/flowNavigation', () => ({ withReturnFrom: (jump: () => void) => jump() }))
@@ -34,6 +29,32 @@ const row = (intent: IntentRow['intent'], over: Partial<IntentRow> = {}): Intent
 const job = (rows: IntentRow[], over: Partial<IntentJob> = {}): IntentJob => ({
   status: 'done', progress: Object.fromEntries(rows.map(r => [r.intent, 'done'])), rows, error: null, ...over,
 })
+
+const PQ = {
+  x_pu: { value: 0.12, source: 'assumed: a typical transformer short-circuit reactance', kind: 'assumed' as const },
+  pf: { value: 0.95, source: 'assumed: a typical load power factor', kind: 'assumed' as const },
+  pf_req: { value: 0.95, source: 'assumed: no grid code value', kind: 'assumed' as const },
+  s_n_mva: { value: 40, source: "assumed: the connection's rating", kind: 'assumed' as const },
+  p_cap_mw: { value: 40, source: "assumed: the connection's rating", kind: 'assumed' as const },
+  statcom_capital_cost: { value: 11195.36331689301, source: 'assumed (defaults pack …)', kind: 'assumed' as const },
+}
+/** A project that holds none of the inputs but the assumed point-of-connection values. */
+const HELD_NONE: IntentInputDefaults = {
+  link: { value: null, source: null, reason: 'No link is marked as the grid import.' },
+  ramp_mw_per_min: { value: null, source: null, reason: 'The project has no ramp limit.' },
+  envelope: { value: null, source: null, reason: 'The project has no DC load envelope.' },
+  pq: PQ, grid_code: { value: 'eu_rfg_dcc_ce', title: 'EU RfG and DCC', source: 'default' },
+  pst_limit: { value: null, source: null, reason: 'The grid code sets no Pst limit.' },
+}
+/** The Data Center Energy Hub template as shipped (walkthrough bug 06). */
+const HELD_DC: IntentInputDefaults = {
+  link: { value: 'poc', source: 'project', kind: 'project' },
+  ramp_mw_per_min: { value: 4, source: 'Template assumption: 10% of the connection per minute', kind: 'assumed' },
+  envelope: { value: { phases: [{}], max: { swing_mw: 23.4, oscillation_amplitude_mw: 7.2, oscillation_period_s: 2 } },
+    source: "the DC load's dynamic envelope", kind: 'load_envelope' },
+  pq: PQ, grid_code: { value: 'eu_rfg_dcc_ce', title: 'EU RfG and DCC', source: 'default' },
+  pst_limit: { value: 0.8, source: 'IEC TR 61000-3-7 indicative planning level', kind: 'assumed' },
+}
 
 async function fill(user: ReturnType<typeof userEvent.setup>) {
   const v: Record<string, string> = { critical: '80', ramp: '10', sk: '1000', pst: '1', library: '50,100', swing: '20', amp: '5', period: '2' }
@@ -53,11 +74,11 @@ async function runWith(user: ReturnType<typeof userEvent.setup>, rows: IntentRow
   await waitFor(() => expect(screen.getByTestId(`intent-row-${rows[0].intent}`)).toBeTruthy())
 }
 afterEach(() => { cleanup(); Object.values(api).forEach(m => m.mockReset()); Object.values(proj).forEach(m => m.mockReset())
-  Object.values(net).forEach(m => m.mockReset()); codes.getPublishedGridCode.mockReset() })
+  Object.values(net).forEach(m => m.mockReset()); })
 beforeEach(() => {
   net.getBuses.mockResolvedValue([]); net.getLoads.mockResolvedValue([])
   net.getLinks.mockResolvedValue([{ name: 'poc', bus0: 'grid', bus1: 'hub', p_min_pu: 0 }])
-  codes.getPublishedGridCode.mockResolvedValue({ profile: {} })
+  api.defaults.mockResolvedValue(HELD_NONE)
 })
 const stored = (h?: number) => proj.list.mockResolvedValue([{ name: 'Hub A', settings: h == null ? {} : { backup_autonomy_h: h } }])
 
@@ -122,6 +143,8 @@ describe('IntentComparisonSection', () => {
   it('D with no grid code says so and links to the grid-code section; D rows show the backend warning', async () => {
     const user = userEvent.setup()
     api.get.mockResolvedValue(job([row('D', { warnings: ['This grid code may not count transfer to BESS.'] }), row('B')]))
+    api.defaults.mockResolvedValue({ ...HELD_NONE, grid_code: { value: null, title: null, source: 'default' },
+      pst_limit: { value: null, source: null, reason: 'No grid code is set.' } })
     renderIt(null)
     await user.click(await screen.findByLabelText(/^D\. /))
     expect(screen.getByTestId('intent-d-nocode').textContent).toContain('No grid code set')
@@ -149,6 +172,29 @@ describe('IntentComparisonSection', () => {
     await vi.advanceTimersByTimeAsync(7000)
     expect(api.get.mock.calls.length).toBe(n)
     vi.useRealTimers()
+  })
+
+  it('a refusal naming a field on this form links to it on its own line and focuses it', async () => {
+    const user = userEvent.setup()
+    api.get.mockResolvedValue(null)
+    api.start.mockRejectedValue({ response: { status: 422, data: { detail: 'Grid ramp limit: the project has no ramp limit; enter one' } } })
+    renderIt(); await fill(user)
+    await user.click(screen.getByLabelText(/^B\. /)); await user.click(screen.getByLabelText(/^C\. /))
+    await user.click(screen.getByTestId('intent-run'))
+    const link = await screen.findByTestId('intent-error-field')
+    expect(link.textContent).toBe('Grid ramp limit ›')
+    expect(screen.getByTestId('intent-error').contains(link)).toBe(true)
+    await user.click(link)
+    expect(document.activeElement).toBe(screen.getByTestId('intent-in-ramp'))
+  })
+
+  it('maps each refusal label to its field, and a refusal from another panel to none', () => {
+    expect(refusalField('Campus link: nowhere is not in the network')?.testId).toBe('intent-in-link')
+    expect(refusalField('Load swing, oscillation amplitude and period: the project has none')?.testId).toBe('intent-in-swing')
+    expect(refusalField('Point of connection: transformer rating (MVA): enter it')).toEqual(
+      { label: 'Transformer rating (MVA)', testId: 'intent-pq-s_n_mva' })
+    expect(refusalField('Point of connection: every value must be a number')?.testId).toBe('intent-pq-x_pu')
+    expect(refusalField('Island limits in the optimisation: on for this project')).toBeNull()
   })
 
   it('a 409 on start shows the running job and does not start a second one', async () => {
@@ -258,7 +304,7 @@ describe('IntentComparisonSection', () => {
       net.getBuses.mockResolvedValue([{ name: 'a', eh_critical: true }, { name: 'p', eh_poc: true, eh_sk_mva: 1200 }])
       net.getLoads.mockResolvedValue([{ name: 'l', bus: 'a', p_set: 42 }])
       net.getLinks.mockResolvedValue([{ name: 'z', bus0: 'g', bus1: 'h', p_min_pu: 0 }, { name: 'imp', eh_role: 'grid_import', bus0: 'g', bus1: 'h', p_min_pu: 0 }])
-      codes.getPublishedGridCode.mockResolvedValue({ profile: { pst_limit: { value: 0.8 } } })
+      api.defaults.mockResolvedValue({ ...HELD_NONE, pst_limit: { value: 0.8, source: 'the grid code', kind: 'grid_code' } })
       api.get.mockResolvedValue(null)
       renderIt()
       await waitFor(() => expect((screen.getByTestId('intent-in-critical') as HTMLInputElement).value).toBe('42'))
@@ -273,6 +319,8 @@ describe('IntentComparisonSection', () => {
 
     it('leaves a field blank with its reason when the source is missing', async () => {
       api.get.mockResolvedValue(null)
+      api.defaults.mockResolvedValue({ ...HELD_NONE, grid_code: { value: null, title: null, source: 'default' },
+      pst_limit: { value: null, source: null, reason: 'No grid code is set.' } })
       renderIt(null)
       await waitFor(() => expect(screen.getByTestId('intent-why-critical')).toBeTruthy())
       for (const k of ['critical', 'sk', 'pst']) {
@@ -295,3 +343,115 @@ describe('IntentComparisonSection', () => {
     })
   })
 })
+
+describe('IntentComparisonSection prefill from the project (walkthrough bug 06)', () => {
+  const dcNet = () => {
+    net.getBuses.mockResolvedValue([{ name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_critical: true }])
+    net.getLoads.mockResolvedValue([{ name: 'it', bus: 'it', p_set: 34.4937816188 }])
+    net.getLinks.mockResolvedValue([{ name: 'poc', bus0: 'grid', bus1: 'hub', eh_role: 'grid_import' },
+      { name: 'site_transformer', bus0: 'hub', bus1: 'it' }])
+    api.defaults.mockResolvedValue(HELD_DC)
+  }
+
+  it('prefills ramp, envelope, PoC values and the PoC link, each with its source, and rounds the critical load', async () => {
+    dcNet(); api.get.mockResolvedValue(null)
+    renderIt(null)
+    await waitFor(() => expect((screen.getByTestId('intent-in-ramp') as HTMLInputElement).value).toBe('4'))
+    const val = (id: string) => (screen.getByTestId(id) as HTMLInputElement).value
+    expect(val('intent-in-critical')).toBe('34.49')
+    expect(val('intent-in-swing')).toBe('23.4'); expect(val('intent-in-amp')).toBe('7.2'); expect(val('intent-in-period')).toBe('2')
+    expect(val('intent-in-link')).toBe('poc')
+    const select = screen.getByTestId('intent-in-link') as HTMLSelectElement
+    expect(select.selectedOptions[0].textContent).toBe('Grid import (point of connection)')
+    expect(screen.getByTestId('intent-src-ramp').textContent).toBe('assumed')
+    expect(screen.getByTestId('intent-src-swing').textContent).toBe('load envelope')
+    expect(screen.getByTestId('intent-src-link').textContent).toBe('project')
+    expect(val('intent-in-pst')).toBe('0.8'); expect(screen.getByTestId('intent-src-pst').textContent).toBe('assumed')
+    expect(val('intent-pq-x_pu')).toBe('0.12'); expect(val('intent-pq-statcom_capital_cost')).toBe('11195')
+    expect(screen.getByTestId('intent-pq-src-pf').textContent).toBe('assumed')
+    expect(screen.getByTestId('intent-poc-scope').textContent).toContain('apply to this comparison only')
+    expect(screen.getByTestId('intent-poc-scope').textContent).not.toContain('›')
+    expect(screen.getByTestId('intent-source-key').textContent).toContain('assumed a typical value')
+    expect(screen.getByTestId('intent-pq-cost-money').textContent).toBe('€\u00a011.2\u00a0k per Mvar per year')
+  })
+
+  it('leaves a PoC value the link cannot give empty, with its reason and no source chip', async () => {
+    dcNet(); api.get.mockResolvedValue(null)
+    api.defaults.mockResolvedValue({ ...HELD_DC, pq: { ...PQ,
+      s_n_mva: { value: null, source: null, kind: 'assumed', reason: 'The connection has no finite rating; enter it.' } } })
+    renderIt(null)
+    await waitFor(() => expect((screen.getByTestId('intent-pq-x_pu') as HTMLInputElement).value).toBe('0.12'))
+    expect((screen.getByTestId('intent-pq-s_n_mva') as HTMLInputElement).value).toBe('')
+    expect(screen.getByTestId('intent-why-pq-s_n_mva').textContent).toContain('no finite rating')
+    expect(screen.queryByTestId('intent-pq-src-s_n_mva')).toBeNull()
+  })
+
+  it('shows the reason under the ramp limit and each envelope field when the project has none (GK B4)', async () => {
+    dcNet(); api.get.mockResolvedValue(null); api.defaults.mockResolvedValue(HELD_NONE)
+    renderIt(null)
+    expect((await screen.findByTestId('intent-why-ramp')).textContent).toBe('The project has no ramp limit.')
+    for (const k of ['swing', 'amp', 'period'])
+      expect(screen.getByTestId(`intent-why-${k}`).textContent).toBe('The project has no DC load envelope.')
+  })
+
+  it('shows the PoC values of the link the user picks, the ones the run takes on it (GK B3)', async () => {
+    const user = userEvent.setup()
+    dcNet(); api.get.mockResolvedValue(null)
+    const site = { ...HELD_DC, pq: { ...PQ, s_n_mva: { value: 25, source: "assumed: the connection's rating", kind: 'assumed' as const } } }
+    api.defaults.mockImplementation(async (_p: string, link?: string) => (link === 'site_transformer' ? site : HELD_DC))
+    renderIt(null)
+    await waitFor(() => expect((screen.getByTestId('intent-pq-s_n_mva') as HTMLInputElement).value).toBe('40'))
+    await user.selectOptions(screen.getByTestId('intent-in-link'), 'site_transformer')
+    await waitFor(() => expect((screen.getByTestId('intent-pq-s_n_mva') as HTMLInputElement).value).toBe('25'))
+    expect(api.defaults).toHaveBeenCalledWith('Hub A', 'site_transformer')
+    await user.selectOptions(screen.getByTestId('intent-in-link'), 'poc')
+    await waitFor(() => expect((screen.getByTestId('intent-pq-s_n_mva') as HTMLInputElement).value).toBe('40'))
+  })
+
+  it('leaves untouched project values out of the request and sends only the typed PoC values', async () => {
+    const user = userEvent.setup()
+    dcNet(); api.get.mockResolvedValue(null); api.start.mockResolvedValue(job([row('B'), row('C')]))
+    renderIt(null)
+    await waitFor(() => expect((screen.getByTestId('intent-in-ramp') as HTMLInputElement).value).toBe('4'))
+    await user.type(screen.getByTestId('intent-in-library'), '40,63')
+    await user.clear(screen.getByTestId('intent-pq-x_pu')); await user.type(screen.getByTestId('intent-pq-x_pu'), '0.08')
+    expect(screen.getByTestId('intent-pq-src-x_pu').textContent).toBe('entered here')
+    await user.click(screen.getByLabelText(/^B\. /)); await user.click(screen.getByLabelText(/^C\. /))
+    await user.click(screen.getByTestId('intent-run'))
+    await waitFor(() => expect(api.start).toHaveBeenCalled())
+    const body = api.start.mock.calls[0][1]
+    expect(body.inputs).not.toHaveProperty('link'); expect(body.inputs).not.toHaveProperty('ramp_mw_per_min')
+    expect(body.inputs).not.toHaveProperty('envelope')
+    expect(body.inputs.pq).toEqual({ x_pu: 0.08 })
+    expect(body.critical_mw).toBe(34.49)
+    expect(body.grid_code).toBe('eu_rfg_dcc_ce')                      // the code the backend applies
+  })
+
+  it('says "No grid code set" only when the backend applies none', async () => {
+    const user = userEvent.setup()
+    api.get.mockResolvedValue(null)
+    renderIt(null)
+    await waitFor(() => expect(api.defaults).toHaveBeenCalled())
+    await user.click(screen.getByLabelText(/^D\. /))
+    expect(screen.queryByTestId('intent-d-nocode')).toBeNull()
+    cleanup()
+    api.defaults.mockResolvedValue({ ...HELD_NONE, grid_code: { value: null, title: null, source: 'default' },
+      pst_limit: { value: null, source: null, reason: 'No grid code is set.' } })
+    renderIt(null)
+    await user.click(screen.getByLabelText(/^D\. /))
+    await waitFor(() => expect(screen.getByTestId('intent-d-nocode')).toBeTruthy())
+  })
+
+  it('says which inputs a finished run took from where', async () => {
+    api.get.mockResolvedValue(job([row('B'), row('C')], { inputs: { values: {}, sources: {
+      link: 'project', ramp_mw_per_min: 'Template assumption: 10%', envelope: "the DC load's dynamic envelope",
+      pq: { x_pu: 'request', pf: 'assumed: a typical load power factor' }, xr: 'assumed' } } }))
+    renderIt()
+    await waitFor(() => expect(screen.getByTestId('intent-inputs-used')).toBeTruthy())
+    const text = screen.getByTestId('intent-inputs-used').textContent
+    expect(text).toContain('Grid ramp limit assumed')
+    expect(text).toContain('transformer reactance entered here')
+    expect(text).toContain('load power factor assumed')
+  })
+})
+

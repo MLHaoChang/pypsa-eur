@@ -95,6 +95,7 @@ def get_file_delivery(file_id: str) -> dict:
     upload_service.refuse_expired_delivery(meta)
     return {"file_id": meta.file_id, "filename": meta.filename, "mime": meta.mime,
             "size": meta.size, "kind": meta.kind, "sha256": meta.sha256,
+            "expires_at": upload_service.delivery_expires_at(meta),
             "project_id": str(project.id), "download_url":
             f"/api/projects/{quote(str(project.id), safe='')}/uploads/{meta.file_id}/blob"}
 

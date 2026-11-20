@@ -3,7 +3,7 @@
 
 # A read-only project viewer role
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: PR 1 backend merged (#1622); PR 2 open in #1718
 Type: task
 Source: owner decisions LC48C-ROLE-1 (2026-11-14), VIEWER-ROLE-1 (2026-11-17, build it now), from LC-48c (`.scratch/live-copilot/issues/48c-undo-rebind-viewer-rows.md`)
 
