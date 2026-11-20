@@ -44,6 +44,20 @@ describe('a row in words', () => {
   })
   it('an extendable asset is sized by the study, whatever was entered', () => {
     expect(heldFigure('assets', held({ extendable: true, value: 2 }))).toBe('Capacity: sized by the study')
+    // After a study: the size it chose (walkthrough asset-investment 03).
+    expect(heldFigure('assets', held({ extendable: true, value: 2 }),
+      { component: 'StorageUnit', name: 'bess_new', carrier: 'battery', built_mw: 2.5, built_mwh: 10, max_hours: 4 }))
+      .toBe('Capacity: 2.5 MW · 10 MWh (4 h) (by the last study)')
+    // On a tonne bus the size is in t (t/h), the row's own unit, never MWh (GK B3 (3) 1).
+    expect(heldFigure('assets', held({ component: 'Store', field: 'e_nom', extendable: true, unit: 't' }),
+      { component: 'Store', name: 'nh3_tank', carrier: 'NH3', built_mwh: 500 }))
+      .toBe('Energy capacity: 500 t (by the last study)')
+    expect(heldFigure('assets', held({ extendable: true, unit: 't/h' }),
+      { component: 'StorageUnit', name: 'nh3_buffer', carrier: 'NH3', built_mw: 2, built_mwh: 48, max_hours: 24 }))
+      .toBe('Capacity: 2 t/h · 48 t (24 h) (by the last study)')
+    // A study that left no size keeps the plain words.
+    expect(heldFigure('assets', held({ extendable: true }),
+      { component: 'Generator', name: 'g', carrier: '', built_mw: null })).toBe('Capacity: sized by the study')
   })
   it('a missing figure says why', () => {
     expect(heldFigure('assets', held({ value: null }))).toBe('Capacity: not set')
@@ -81,7 +95,11 @@ describe('where "Edit" goes, by kind', () => {
     expect(heldHome(section, held({ component, entity: 'x' }))).toEqual({
       kind: 'drawer', target: { section, panel: null, component, entity: 'x', field: null } })
   })
-  it.each(['Load', 'Generator', 'Link'] as const)('a %s time series: the Time Series drawer on that row', component => {
+  it('a load time series: the load\'s own drawer with its series editor, not the library', () => {
+    expect(heldHome('profiles', held({ component: 'Load', entity: 'it_load', field: 'p_set' })))
+      .toEqual({ kind: 'drawer', target: { section: 'profiles', panel: null, component: 'Load', entity: 'it_load', field: null } })
+  })
+  it.each(['Generator', 'Link'] as const)('a %s time series: the Time Series drawer on that row', component => {
     expect(heldHome('profiles', held({ component, entity: 'x', field: 'p_max_pu' })))
       .toEqual({ kind: 'series', type: component, name: 'x', field: 'p_max_pu' })
   })

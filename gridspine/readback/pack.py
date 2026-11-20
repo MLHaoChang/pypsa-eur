@@ -33,9 +33,16 @@ Battery kind to judge kind:
 
 MW and Mvar channels become pu of the plant's rated active and apparent power
 (``Ratings``); a case that needs a rating the caller has not given is
-``unknown``. The contract has no breaker / trip status channel (issue GC-12),
-so stays-connected is ``unknown`` and no fault case passes; a ``connected``
-column outside the contract is not read.
+``unknown``.
+
+Stays connected (GC-12). Every judged case gets a ``stays_connected``
+obligation row. Under contract version 2 it reads the result's ``connected``
+channel (unit ``status``; the PoC breaker status); an empty cell of a CSV
+``connected`` column is a sample not read. Under version 1 the contract has
+no such channel, so the row is ``unknown`` ("no connected channel (contract
+v1)") and no case passes; a ``connected`` column in a version-1 result is not
+read. A missing column, a unit other than ``status`` or a value other than
+0/1 makes the row or the case ``unknown`` with the reason, never ``pass``.
 """
 
 from __future__ import annotations
@@ -48,8 +55,18 @@ from pathlib import Path
 
 import numpy as np
 
-from gridspine.handoff.test_battery import CONTRACT_VERSION, cases_from_json
-from gridspine.readback.channels import ChannelFrame, read_csv, read_pscad
+from gridspine.handoff.test_battery import (
+    CONNECTED,
+    CONTRACT_VERSIONS,
+    cases_from_json,
+    contract_channels,
+)
+from gridspine.readback.channels import (
+    ChannelFrame,
+    read_csv,
+    read_pscad,
+    refuse_status_marker,
+)
 from gridspine.readback.judge import PRE_WINDOW_S, UNKNOWN, case_status, judge
 from gridspine.schema.contracts import ContractError
 
@@ -59,12 +76,12 @@ RESULTS_DIR = "results"
 #: Pack kinds and versions this reader knows.
 KNOWN_PACKS = {"pscad_emt": ("1",)}
 #: Channel-contract versions this reader knows.
-KNOWN_CONTRACT_VERSIONS = (CONTRACT_VERSION,)
+KNOWN_CONTRACT_VERSIONS = CONTRACT_VERSIONS
 NOT_JUDGED = ("flat", "f_ramp", "phase_jump")
-NO_CONNECTED = (
-    "the channel contract has no breaker / trip status channel (GC-12): "
-    "stays-connected is unknown, so no fault case passes until the contract "
-    "carries one"
+NO_CONNECTED = "no connected channel (contract v1)"
+CONNECTED_READ = (
+    "stays_connected is judged from the contract's 'connected' channel "
+    "(PoC breaker status; breaker status only)"
 )
 ONE_PHASE = "positive-sequence voltage; per-phase ride-through not judged"
 
@@ -149,6 +166,14 @@ def read_manifest(pack_dir) -> dict:
     return manifest
 
 
+def _pscad_result(inf, outs) -> ChannelFrame:
+    """A PSCAD result; it has no blank cells, so no status sample may read as one."""
+    frame = read_pscad(inf, outs)
+    if CONNECTED in frame and frame.units[CONNECTED] == "status":
+        refuse_status_marker(frame.channel(CONNECTED), CONNECTED, inf.name)
+    return frame
+
+
 def _result_files(results: Path, case_id: str):
     """``(reader, label)`` for the case's result, or ``None`` when there is none."""
     inf = results / f"{case_id}.inf"
@@ -163,9 +188,9 @@ def _result_files(results: Path, case_id: str):
                 "which run is the result is ambiguous"
             )
         outs = [single] if single.is_file() else None
-        found.append((lambda: read_pscad(inf, outs), inf.name))
+        found.append((lambda: _pscad_result(inf, outs), inf.name))
     if csv.is_file():
-        found.append((lambda: read_csv(csv), csv.name))
+        found.append((lambda: read_csv(csv, blank_status=(CONNECTED,)), csv.name))
     if len(found) > 1:
         raise ContractError(
             f"{case_id}: both a PSCAD and a CSV result are present; which is the result "
@@ -208,11 +233,25 @@ def _unknown_case(case_id, kind, why) -> dict:
     }
 
 
-def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> dict:
+def _connected_why(frame: ChannelFrame, contract_version: str):
+    """Why the result's ``connected`` channel cannot be read, or None."""
+    if CONNECTED not in contract_channels(contract_version):
+        return NO_CONNECTED
+    if CONNECTED not in frame:
+        return f"the result has no {CONNECTED!r} channel"
+    if frame.units[CONNECTED] != "status":
+        return f"{CONNECTED!r} is in {frame.units[CONNECTED]!r}, expected 'status'"
+    return None
+
+
+def _judge_one(
+    case, frame: ChannelFrame, profile: dict, ratings: Ratings, contract_version: str
+) -> dict:
     """The judgment of one battery case on its result frame."""
     channels, units = {}, {}
     p = case.params
-    jc = {"id": case.case_id, "t_event": case.t_event_s}  # judge default pre-window
+    # judge default pre-window; stays_connected is an obligation on every kind (GK A2 D-2)
+    jc = {"id": case.case_id, "t_event": case.t_event_s, "connected_required": True}
     note = ""
     p_rows = ()  # the checks that read P in pu of the rated P
 
@@ -300,6 +339,9 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
                 case.kind,
                 f"{name!r} is in {frame.units[name]!r}, expected {unit!r}",
             )
+    why = _connected_why(frame, contract_version)
+    if why is None:
+        take("connected", frame.channel(CONNECTED), "status")
     view = ChannelFrame(frame.time, channels, units, frame.source)
     result = judge(view, jc, profile)
     for row in result["rows"]:
@@ -308,10 +350,8 @@ def _judge_one(case, frame: ChannelFrame, profile: dict, ratings: Ratings) -> di
         if row["check"] in p_rows:
             base = _p_base(ratings)
             row["detail"] = f"{row['detail']}; {base}" if row["detail"] else base
-        if row["check"] == "stays_connected":
-            row["detail"] = (
-                f"{row['detail']}; {NO_CONNECTED}" if row["detail"] else NO_CONNECTED
-            )
+        if row["check"] == "stays_connected" and why is not None:
+            row["detail"] = f"{row['detail']}; {why}" if row["detail"] else why
     result["kind"] = case.kind
     result["judge_kind"] = jc["kind"]
     result["detail"] = ""
@@ -354,7 +394,9 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
             )
             continue
         try:
-            cases.append(_judge_one(case, frame, profile, ratings))
+            cases.append(
+                _judge_one(case, frame, profile, ratings, manifest["contract_version"])
+            )
         except ContractError as exc:
             cases.append(_unknown_case(case.case_id, case.kind, f"not judged: {exc}"))
     stamp = {
@@ -383,7 +425,11 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
             if ratings.rated_mva is not None
             else "no rated MVA"
         ),
-        "connected": NO_CONNECTED,
+        "connected": (
+            CONNECTED_READ
+            if CONNECTED in contract_channels(manifest["contract_version"])
+            else NO_CONNECTED
+        ),
         "extra_files": extra,
     }
     return {"header": header, "cases": cases}

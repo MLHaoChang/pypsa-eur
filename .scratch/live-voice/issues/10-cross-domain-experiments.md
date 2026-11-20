@@ -3,7 +3,7 @@
 
 # Typed cross-domain experimentation and resumable task advancement
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: first slice (services/experiments.py) merged; left: commercial, reliability and GridSpine adapters, advancing cases, compare, cancel/resume, export
 Model: Opus
 Previous status: ready-for-agent
 Progress: Network experiment persistence, prepare, compare, two-case admission shipped; commercial, reliability, GridSpine execution adapters and resume absent
