@@ -190,7 +190,7 @@ describe('ImproveCard', () => {
       .toContain('Site transformer accounts for 93% of the outage risk')
     expect(screen.getByTestId('hub-improve-fmea_dominant_mode').textContent)
       // P26 gate friction 4: the button runs the study; the effect is its aim.
-      .toContain('The assistant would run the reliability study again. Aim: compare the cost with and without a spare unit or extra storage (rough estimate).')
+      .toContain('This change: run the reliability study again. Aim: compare the cost with and without a spare unit or extra storage (rough estimate).')
     // the engine prose moved into Why, verbatim
     const ev = screen.getByTestId('hub-improve-evidence-certification_fail').textContent ?? ''
     expect(ev).toContain(ENGINE[0].recommendation)
@@ -261,15 +261,15 @@ describe('ImproveCard follows the sweep it started (P26)', () => {
 // P26 gate friction 4: the description said "the assistant would size the
 // local capacity…" while the button opens a "Run the reliability study" card.
 // For a study re-run the text now says so; the effect becomes its aim. Other
-// tools keep "The assistant would <effect>".
+// tools read "This change: <effect>".
 describe('Improve description matches the action (P26 gate)', () => {
   it('run_eh_study → "run the reliability study again. Aim: …"', async () => {
     mount()
     const li = await screen.findByTestId('hub-improve-certification_fail')
-    expect(li.textContent).toContain('The assistant would run the reliability study again. Aim: size the local capacity.')
+    expect(li.textContent).toContain('This change: run the reliability study again. Aim: size the local capacity.')
   })
 
-  it('another tool keeps "The assistant would <effect>"', async () => {
+  it('another tool reads "This change: <effect>"', async () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [
       { id: 'voll_missing', severity: 'high', title: 'frontier: not established', evidence: {},
         recommendation: 'Set VOLL.', actions: [{ tool: 'update_solver_config',
@@ -277,7 +277,7 @@ describe('Improve description matches the action (P26 gate)', () => {
     ] }))
     mount()
     const li = await screen.findByTestId('hub-improve-voll_missing')
-    expect(li.textContent).toContain('The assistant would set the price of undelivered energy to 5000 €/MWh.')
+    expect(li.textContent).toContain('This change: set the price of undelivered energy to 5000 €/MWh.')
   })
 })
 
@@ -345,5 +345,39 @@ describe('ImproveCard while a risk check runs (A1-FE)', () => {
     })
     await waitFor(() => expect(doBtn.disabled).toBe(false))
     expect(screen.queryByTestId('hub-live-study-note')).toBeNull()
+  })
+})
+
+// Template-e2e 22 (IMPROVE-MANUAL-1, KEY-LATER-1): every finding has a manual
+// way in that needs no assistant.
+describe('ImproveCard — Open in Expert', () => {
+  it('every finding has it, before the assistant button, naming its destination', async () => {
+    mount()
+    await screen.findByTestId('hub-improve-certification_fail')
+    for (const id of ['certification_fail', 'not_established_frontier']) {
+      const li = screen.getByTestId(`hub-improve-${id}`)
+      const open = screen.getByTestId(`hub-improve-open-${id}`) as HTMLButtonElement
+      expect(open.disabled).toBe(false)
+      expect(open.getAttribute('aria-label')).toMatch(/^Open in Expert: /)
+      const buttons = [...li.querySelectorAll('button')].map(b => b.dataset.testid)
+      const doBtn = buttons.indexOf(`hub-improve-do-${id}`)
+      if (doBtn >= 0) expect(buttons.indexOf(`hub-improve-open-${id}`)).toBeLessThan(doBtn)
+    }
+    expect(screen.getByTestId('hub-improve-open-certification_fail').getAttribute('aria-label'))
+      .toBe('Open in Expert: Results › Adequacy')
+  })
+
+  it('opens Expert with a way back and hands the change over, writing nothing', async () => {
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-improve-open-certification_fail'))
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe('expert')
+    expect(ui.activeSlidePanel).toBe('results')
+    expect(ui.resultsTabRequest).toBe('adequacy')
+    expect(ui.flowReturn).not.toBeNull()
+    const { useImprovePrefillStore } = await import('../improvePrefill')
+    expect(useImprovePrefillStore.getState().prefill?.pack?.stages)
+      .toEqual(['dtc_stress', 'dtc_planning'])
+    expect(useChatStore.getState().requestQueue).toEqual([])
   })
 })
