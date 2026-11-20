@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Guided Results verdict and the Improve card name a cheaper battery duration that the study's levers already found to meet the energy-not-served cap, with a "Design options ›" link from the verdict to that block of the Energy Hub reference design in Results.

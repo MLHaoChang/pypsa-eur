@@ -70,6 +70,12 @@ export function heldHome(section: FlowSectionId, h: FlowHeld): HeldHome {
     return { kind: 'drawer', target: { section, panel: null, component: 'Link', entity: h.entity, field: RECIPE_FIELD,
       entityLabel: `${h.recipe.label} recipe` } }
   }
+  // A load's series editor (archetype, upload, preview, Apply) is in its own drawer, the one
+  // section 4 opens; the series library is too wide for the drawer and has no generator.
+  if (section === 'profiles' && h.component === 'Load') {
+    return { kind: 'drawer',
+      target: { section, panel: null, component: h.component, entity: h.entity, field: null } }
+  }
   if (section === 'profiles' && h.field && SERIES_TYPES.has(h.component)) {
     return { kind: 'series', type: h.component as 'Load' | 'Generator' | 'Link', name: h.entity, field: h.field }
   }
