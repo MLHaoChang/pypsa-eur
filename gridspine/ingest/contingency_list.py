@@ -173,6 +173,14 @@ class _NetIndex:
         return name, None
 
 
+def _index(net) -> _NetIndex:
+    """
+    ``net`` itself when a caller passes a prebuilt index (the PSS/E importer's,
+    over a PyPSA network), else the pandapower net's index.
+    """
+    return net if isinstance(net, _NetIndex) else _NetIndex(net)
+
+
 def _contingency_id(label: str) -> str:
     """The label in the contingency-set charset: other characters become ``_``."""
     return _ID_UNSAFE.sub("_", label.strip())
@@ -512,7 +520,7 @@ def _from_con(text: str, net, conmap: dict | None = None) -> ImportedContingenci
     blocks, top = _parse_con(text)
     if conmap is not None:
         blocks = _apply_conmap(blocks, conmap)
-    idx = _NetIndex(net)
+    idx = _index(net)
     seen, rows, unmatched = {}, [], []
     for lineno, line in top:
         unmatched.append(
@@ -583,7 +591,7 @@ def _from_csv(text: str, net) -> ImportedContingencies:
         raise ContractError(
             f"line 1: contingency CSV is missing column(s) {sorted(missing)}"
         )
-    idx = _NetIndex(net)
+    idx = _index(net)
     seen, seen_id, rows, unmatched = {}, {}, [], []
     known_branch = {f"{r.from_bus}-{r.to_bus}-{r.ckt}" for r in idx.branch.values()}
     for i, rec in enumerate(df.to_dict("records")):
@@ -713,7 +721,9 @@ def read_contingency_list(
     Read a TSO contingency list (``.con`` or CSV) onto ``net``.
 
     ``source`` is a path, or the file's text with ``fmt`` given (``"con"`` or
-    ``"csv"``). For a path, ``fmt`` defaults to its suffix.
+    ``"csv"``). For a path, ``fmt`` defaults to its suffix. ``net`` is a
+    pandapower net, or a ``_NetIndex`` subclass that maps another network onto
+    the RAW's identity (``psse_import`` does this for an imported PyPSA network).
 
     A ``.con`` written by ``write_con`` is marked in its first line and has
     sequential labels: it needs its label -> id map, the sibling
