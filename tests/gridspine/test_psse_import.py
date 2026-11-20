@@ -90,12 +90,14 @@ def test_unmapped_dc_link_listed():
     assert len(rep.unmapped) == 1 and "no DC link mapping" in rep.unmapped[0].reason
 
 
-def test_dyr_alongside_is_listed_not_ignored(tmp_path):
+def test_dyr_alongside_is_read(tmp_path):
     dyr = tmp_path / "case14.dyr"
     dyr.write_text("1 'GENCLS' 1 6.0 0.0 /\n")
-    rep = read_psse([FIX / "case14.raw", dyr], {}).report
-    assert [u.source_item for u in rep.unmapped] == ["case14.dyr"]
-    assert rep.source_files == ["case14.raw", "case14.dyr"]
+    res = read_psse([FIX / "case14.raw", dyr], {})
+    assert res.report.unmapped == []
+    assert res.report.source_files == ["case14.raw", "case14.dyr"]
+    (rec,) = res.sidecars["psse_dynamics.json"]["records"]
+    assert rec["parameters"] == {"h": 6.0, "d": 0.0} and rec["generator"]
 
 
 @pytest.mark.parametrize("files", [[], ["a.raw", "b.raw"], ["a.dyr"]])
@@ -478,6 +480,7 @@ def test_reader_and_registry_import_without_pypsa():
     code = (
         "import sys; sys.modules['pypsa'] = None\n"
         "import gridspine.ingest.psse_raw_parse, gridspine.ingest.import_result\n"
+        "import gridspine.ingest.psse_dyr_parse\n"
         "from gridspine.ingest.psse_raw_parse import read_raw\n"
         f"read_raw({str(FIX / 'case14.raw')!r})\n"
         "print('ok')\n"

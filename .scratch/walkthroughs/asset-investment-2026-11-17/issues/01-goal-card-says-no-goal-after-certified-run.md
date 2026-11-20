@@ -3,7 +3,7 @@
 
 # The Goal card says "No goal yet" while the verdict is certified against 3 h/yr
 
-Status: ready-for-agent
+Status: done (#1677, #1734)
 Type: bug (asset-investment walkthrough, WALK-E2E-1)
 Journey steps: J2 Reliability goal → verdict (Guided and Expert)
 Severity: high
