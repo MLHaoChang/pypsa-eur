@@ -32,3 +32,7 @@ GK A (33) plan GO (2026-11-20), with S1–S8:
 - S8 Two PRs: backend + fixture (GK A), then the frontend (UX) stacked on it.
 
 Builder note: an export-only Link into the grid bus (IPP `grid_export`: bus1 = grid, `p_min_pu` ≥ 0) is not site equipment, so it does not stop the S2 split. A two-way Link does.
+
+GK A (33), on the builder's two points: accepted. An export-only Link counts as part of the connection only when the grid bus is its bus1 and on no other port, with `p_min_pu` ≥ 0 and `efficiency` > 0, static and in series. With no request, a pick by the carrier rule alone is refused.
+
+Follow-up (open): `eh_study.py` should pass the study's own request to `sizing_summary_from_network(n, request)`, so the import Links are picked with the study's pack (rule 3 included). Left out of #(this PR) because open PRs #1645 and #1729 change `eh_study.py`.

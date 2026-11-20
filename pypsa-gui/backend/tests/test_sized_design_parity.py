@@ -14,6 +14,7 @@ Guided, Expert and the report, for every template (GK A 33 S1-S7).
   test reads (``sized_design_parity.json``).
 * A report stored before this change renders, and hashes, as it did.
 """
+
 from __future__ import annotations
 
 import json
@@ -34,8 +35,15 @@ import eh_templates as T  # noqa: E402
 from services.adequacy import eh_report as R  # noqa: E402
 from services.reports import evidence as E  # noqa: E402
 
-FIXTURE = (_BACKEND.parent / "frontend" / "src" / "pages" / "results" / "__fixtures__"
-           / "sized_design_parity.json")
+FIXTURE = (
+    _BACKEND.parent
+    / "frontend"
+    / "src"
+    / "pages"
+    / "results"
+    / "__fixtures__"
+    / "sized_design_parity.json"
+)
 TEMPLATES = [*T.BUILDERS, "eh_site"]
 _TABLES = (("generators", "p"), ("storage_units", "p"), ("links", "p"), ("stores", "e"))
 GRID_ROW = "Grid connection (import limit, not counted)"
@@ -82,10 +90,17 @@ def _with_import(n, flow: pd.Series):
 @pytest.mark.parametrize("tid", TEMPLATES)
 def test_report_lists_every_sized_asset_per_period(tid):
     n, payload = _payload(tid)
-    extendable = {f"{c}:{name}" for c, table, stem in R._SIZED
-                  for name in getattr(n, table).index[
-                      getattr(n, table)[f"{stem}_nom_extendable"].fillna(False).astype(bool)]
-                  if not (c == "Generator" and R._is_slack(name, str(n.generators.at[name, "carrier"])))}
+    extendable = {
+        f"{c}:{name}"
+        for c, table, stem in R._SIZED
+        for name in getattr(n, table).index[
+            getattr(n, table)[f"{stem}_nom_extendable"].fillna(False).astype(bool)
+        ]
+        if not (
+            c == "Generator"
+            and R._is_slack(name, str(n.generators.at[name, "carrier"]))
+        )
+    }
     assert {f"{a['component']}:{a['name']}" for a in payload["assets"]} == extendable
     table = E._t_sized_assets(payload)
     staged = len(n.investment_periods) > 0
@@ -93,7 +108,9 @@ def test_report_lists_every_sized_asset_per_period(tid):
     assert len(table.rows) == len(payload["assets"])
     if staged:
         for a in payload["assets"]:
-            assert a["stage"] == int(n.components[a["component"]].static.at[a["name"], "build_year"])
+            assert a["stage"] == int(
+                n.components[a["component"]].static.at[a["name"], "build_year"]
+            )
         assert [int(r[0]) for r in table.rows] == sorted(int(r[0]) for r in table.rows)
     else:
         assert all("stage" not in a for a in payload["assets"])
@@ -106,15 +123,27 @@ def test_grid_supply_and_product_slacks_are_not_installed_capacity(tid):
     assert not gi.empty, "every template has a grid connection"
     supply = set(n.generators.index[n.generators.bus.isin(gi.bus0)])
     roles = n.generators.get("process_role")
-    slacks = set(roles.index[roles.isin(("buy_in", "shortfall"))]) if roles is not None else set()
-    counted = {name for name in n.generators.index if name not in supply | slacks
-               and not R._is_slack(name, str(n.generators.at[name, "carrier"]))}
+    slacks = (
+        set(roles.index[roles.isin(("buy_in", "shortfall"))])
+        if roles is not None
+        else set()
+    )
+    counted = {
+        name
+        for name in n.generators.index
+        if name not in supply | slacks
+        and not R._is_slack(name, str(n.generators.at[name, "carrier"]))
+    }
     assert payload["total_p_nom_mw"] == pytest.approx(
-        float(n.generators.loc[sorted(counted), "p_nom_opt"].sum()))
-    assert payload["total_p_nom_mw"] == pytest.approx(sum(payload["by_carrier"].values()))
+        float(n.generators.loc[sorted(counted), "p_nom_opt"].sum())
+    )
+    assert payload["total_p_nom_mw"] == pytest.approx(
+        sum(payload["by_carrier"].values())
+    )
     assert payload["grid_connection_mw"] == pytest.approx(float(gi.p_nom.sum()))
     assert payload["grid_supply_mw"] == pytest.approx(
-        float(n.generators.loc[sorted(supply), "p_nom_opt"].sum()))
+        float(n.generators.loc[sorted(supply), "p_nom_opt"].sum())
+    )
     assert payload["grid_supply_counted"] == []
     assert {s["name"] for s in payload["product_slacks"]} == slacks
     rows = dict(E._t_sizing(payload).rows)
@@ -139,11 +168,19 @@ def _site(*, extendable=False, with_link=True, grid_load=False, poc=True, export
     n.add("Generator", "pv", bus="site", carrier="solar", p_nom=4.0)
     n.add("Load", "it", bus="site", p_set=30.0)
     if with_link:
-        n.add("Link", "grid_import", bus0="grid", bus1="site", p_nom=40.0,
-              p_nom_extendable=extendable)
+        n.add(
+            "Link",
+            "grid_import",
+            bus0="grid",
+            bus1="site",
+            p_nom=40.0,
+            p_nom_extendable=extendable,
+        )
         n.links["eh_role"] = ["grid_import"]
     if export is not None:
-        n.add("Link", "grid_export", bus0="site", bus1="grid", p_nom=70.0, p_min_pu=export)
+        n.add(
+            "Link", "grid_export", bus0="site", bus1="grid", p_nom=70.0, p_min_pu=export
+        )
     if grid_load:
         n.add("Load", "aux", bus="grid", p_set=1.0)
     return n
@@ -163,26 +200,94 @@ def test_an_extendable_import_link_is_no_limit_never_a_number_or_within():
     p = R.sizing_summary_from_network(n)
     assert p["grid_connection_mw"] is None and p["connection_check"] is None
     assert "sized by the optimisation" in p["grid_connection_refusal"]
-    assert dict(E._t_sizing(p).rows)[GRID_ROW].startswith("not established: The grid import link")
+    assert dict(E._t_sizing(p).rows)[GRID_ROW].startswith(
+        "not established: The grid import link"
+    )
 
 
 def test_a_grid_generator_beside_site_equipment_is_counted_with_the_reason():
     p = R.sizing_summary_from_network(_site(grid_load=True))
     assert p["by_carrier"] == {"grid": 500.0, "solar": 4.0}
-    assert p["grid_supply_counted"] == ["grid_supply is counted: bus grid also holds load aux"]
+    assert p["grid_supply_counted"] == [
+        "grid_supply is counted: bus grid also holds load aux"
+    ]
     assert ["Grid supply counted", p["grid_supply_counted"][0]] in E._t_sizing(p).rows
 
 
 def test_an_export_only_link_leaves_the_grid_bus_the_grids():
     """The IPP's export Link delivers into the grid bus and never draws from
     it: the supply there is still the grid's."""
-    assert R.sizing_summary_from_network(_site(export=0.0))["by_carrier"] == {"solar": 4.0}
+    assert R.sizing_summary_from_network(_site(export=0.0))["by_carrier"] == {
+        "solar": 4.0
+    }
 
 
 def test_a_two_way_link_on_the_grid_bus_is_site_side():
     p = R.sizing_summary_from_network(_site(export=-1.0))
     assert p["by_carrier"] == {"grid": 500.0, "solar": 4.0}
-    assert p["grid_supply_counted"] == ["grid_supply is counted: bus grid also holds link grid_export"]
+    assert p["grid_supply_counted"] == [
+        "grid_supply is counted: bus grid also holds link grid_export"
+    ]
+
+
+def test_a_link_with_the_grid_bus_on_another_port_is_site_side():
+    """A multi-port Link with the grid bus on bus2 can draw from it."""
+    n = _site(export=0.0)
+    n.add("Bus", "heat")
+    n.links["bus2"] = ""
+    n.links.loc["grid_export", ["bus1", "bus2"]] = ["heat", "grid"]
+    n.links["efficiency2"] = 0.0
+    n.links.loc["grid_export", "efficiency2"] = -0.1
+    p = R.sizing_summary_from_network(n)
+    assert p["grid_supply_counted"] == [
+        "grid_supply is counted: bus grid also holds link grid_export"
+    ]
+
+
+def test_an_export_link_with_one_negative_p_min_pu_step_is_site_side():
+    n = _site(export=0.0)
+    n.links_t.p_min_pu = pd.DataFrame(
+        {"grid_export": [0.0, -0.2, 0.0]}, index=n.snapshots
+    )
+    assert R.sizing_summary_from_network(n)["by_carrier"] == {
+        "grid": 500.0,
+        "solar": 4.0,
+    }
+
+
+def test_an_export_link_with_no_efficiency_is_site_side():
+    n = _site(export=0.0)
+    n.links.loc["grid_export", "efficiency"] = 0.0
+    assert R.sizing_summary_from_network(n)["by_carrier"] == {
+        "grid": 500.0,
+        "solar": 4.0,
+    }
+
+
+def test_without_a_request_a_carrier_pick_is_refused():
+    """Neither eh_role nor eh_poc marks the Link: only the carrier rule (3)
+    would pick it, and with no request its pack is a placeholder (GK A 33)."""
+    n = _site(poc=False)
+    n.links["eh_role"] = [""]
+    n.links.loc["grid_import", "carrier"] = "AC"
+    p = R.sizing_summary_from_network(n)
+    assert p["grid_connection_mw"] is None and p["connection_check"] is None
+    assert p["grid_connection_refusal"] == R.NO_REQUEST_REFUSAL
+    # The study's own request picks it as the study does.
+    assert (
+        R.sizing_summary_from_network(n, {"archetype": "weak_flexible"})[
+            "grid_connection_mw"
+        ]
+        == 40.0
+    )
+
+
+def test_capacity_mix_figure_loses_the_grid_bar():
+    """An intended change: the figure plots the site's own generation only."""
+    from services.reports.figures import _capacity_rows
+
+    _n, p = _payload("eh_datacenter")
+    assert [name for name, _mw in _capacity_rows(p["by_carrier"])] == ["gas", "solar"]
 
 
 def test_a_grid_generator_at_the_poc_with_no_link_is_unbounded():
@@ -192,14 +297,30 @@ def test_a_grid_generator_at_the_poc_with_no_link_is_unbounded():
     assert dict(E._t_sizing(p).rows)[GRID_ROW].startswith("unbounded connection")
 
 
+def test_a_link_on_the_poc_by_another_port_is_no_unbounded_poc():
+    """A Link touching the PoC on bus2 is a Link there: not "unbounded"."""
+    n = _site(with_link=False)
+    n.add("Bus", "heat")
+    n.add("Link", "chp", bus0="site", bus1="heat", p_nom=5.0)
+    n.links["bus2"] = ["grid"]
+    p = R.sizing_summary_from_network(n)
+    assert p["connection_check"] != "unbounded"
+    assert p["grid_supply_counted"] == [
+        "grid_supply is counted: bus grid is marked as the point of connection, "
+        "but no grid import link leaves it"
+    ]
+
+
 def test_a_generator_on_an_unmarked_bus_with_no_link_is_installed():
     p = R.sizing_summary_from_network(_site(with_link=False, poc=False))
     assert p["by_carrier"] == {"grid": 500.0, "solar": 4.0}
     assert p["connection_check"] is None
 
 
-@pytest.mark.parametrize("over,verdict", [(0.0, "within"), (TOL, "within"),
-                                          (2 * TOL, "exceeds"), (1.0, "exceeds")])
+@pytest.mark.parametrize(
+    "over,verdict",
+    [(0.0, "within"), (TOL, "within"), (2 * TOL, "exceeds"), (1.0, "exceeds")],
+)
 def test_peak_import_against_the_limit_at_the_tolerance(over, verdict):
     n = _site()
     n._objective = 1.0
@@ -220,7 +341,7 @@ def test_export_is_not_import():
 def test_multi_period_peak_is_checked_per_period():
     n = _fake_solve(_build("eh_datacenter_staged"))
     flow = pd.Series(10.0, index=n.snapshots)
-    flow.loc[2030] = 55.0 + 1.0           # over the 55 MW limit in 2030 only
+    flow.loc[2030] = 55.0 + 1.0  # over the 55 MW limit in 2030 only
     p = _with_import(n, flow)
     assert p["grid_import_peak_by_period"] == {"2027": 10.0, "2030": 56.0, "2035": 10.0}
     assert p["connection_check"] == "exceeds"
@@ -241,12 +362,16 @@ def test_a_shortfall_that_delivered_is_its_own_row_never_in_the_total():
     p_set.iloc[0, 0] = 5.0
     n.generators_t.p = p_set
     p = R.sizing_summary_from_network(n)
-    assert "NH3 shortfall" not in p["by_carrier"] and "NH3 import" not in p["by_carrier"]
+    assert (
+        "NH3 shortfall" not in p["by_carrier"] and "NH3 import" not in p["by_carrier"]
+    )
     lost = next(s for s in p["product_slacks"] if s["name"] == "__lost_nh3")
-    assert lost["energy"] == pytest.approx(5.0 * float(n.snapshot_weightings.generators.iloc[0]))
+    assert lost["energy"] == pytest.approx(
+        5.0 * float(n.snapshot_weightings.generators.iloc[0])
+    )
     rows = dict(E._t_sizing(p).rows)
     assert rows["Shortfall, NH3 shortfall (not counted)"].startswith("32.3 MW; ")
-    assert not any(k.startswith("Bought in") for k in rows)   # bought nothing: no row
+    assert not any(k.startswith("Bought in") for k in rows)  # bought nothing: no row
 
 
 # ── unit and stage (S6) ─────────────────────────────────────────────────────
@@ -264,20 +389,44 @@ def test_unit_follows_the_bus_and_stage_only_on_a_staged_network():
 # ── stored format (S4) ──────────────────────────────────────────────────────
 
 #: A sizing payload as stored before this change (it counted the grid).
-OLD = {"sections": {"sizing": {"status": "ok", "note": None, "payload": {
-    "by_carrier": {"gas": 40.0, "grid": 500.0, "solar": 4.0}, "total_p_nom_mw": 544.0,
-    "assets": [{"component": "Generator", "name": "genset_new", "carrier": "gas",
-                "built_mw": 36.67, "min_mw": 0.0, "max_mw": 40.0}],
-    "assets_solved": True}}}}
+OLD = {
+    "sections": {
+        "sizing": {
+            "status": "ok",
+            "note": None,
+            "payload": {
+                "by_carrier": {"gas": 40.0, "grid": 500.0, "solar": 4.0},
+                "total_p_nom_mw": 544.0,
+                "assets": [
+                    {
+                        "component": "Generator",
+                        "name": "genset_new",
+                        "carrier": "gas",
+                        "built_mw": 36.67,
+                        "min_mw": 0.0,
+                        "max_mw": 40.0,
+                    }
+                ],
+                "assets_solved": True,
+            },
+        }
+    }
+}
 
 
 def test_an_old_stored_report_hashes_and_renders_as_on_master():
     """sha256 of the evidence master ae6ea750a collects for OLD: no sized-assets
     table, no connection row, the old caption, so a stored report stays fresh."""
     ev = E.collect_evidence(study_report=None, eh_report=OLD, worksheet=None)
-    assert E.evidence_hash(ev) == "cb5607f9d1c0bc438a55a3ff66a4d67a4f599e5ea6ab8d85d98ff3e2c5a949bf"
+    assert (
+        E.evidence_hash(ev)
+        == "cb5607f9d1c0bc438a55a3ff66a4d67a4f599e5ea6ab8d85d98ff3e2c5a949bf"
+    )
     assert "sized_assets" not in ev.tables
-    assert ev.tables["sizing"].caption == "Installed capacity of the least-cost plan by carrier"
+    assert (
+        ev.tables["sizing"].caption
+        == "Installed capacity of the least-cost plan by carrier"
+    )
 
 
 # ── the UI's figures (fixture) ──────────────────────────────────────────────
@@ -305,8 +454,10 @@ def _write_fixture() -> None:
     out = {}
     for tid in TEMPLATES:
         _n, payload = _payload(tid)
-        out[tid] = {"assets": payload["assets"],
-                    "built": {r[-4]: r[-2] for r in E._t_sized_assets(payload).rows}}
+        out[tid] = {
+            "assets": payload["assets"],
+            "built": {r[-4]: r[-2] for r in E._t_sized_assets(payload).rows},
+        }
     FIXTURE.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE.write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n")
 

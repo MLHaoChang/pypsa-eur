@@ -69,6 +69,20 @@ CONNECTION_TOL_MW = 1e-6
 #: ``eh_role`` and ``eh_poc`` rules every template uses read the network alone.
 _DEFAULT_REQUEST = {"archetype": "strong_grid"}
 
+NO_REQUEST_REFUSAL = ("The grid import links are not marked (eh_role grid_import or a bus "
+                      "tagged eh_poc), and without the study's site type the connection "
+                      "limit can't be read.")
+
+
+def _picked_by_carrier(n) -> bool:
+    """True when the import Links are picked by the carrier rule (3) alone:
+    neither ``eh_role`` nor ``eh_poc`` marks them."""
+    from services.adequacy import archetypes as arch
+    from services.flow_service import _pack_for
+
+    _links, rule = arch.select_import_links_with_rule(n, _pack_for(_DEFAULT_REQUEST).import_overlay)
+    return rule not in ("eh_role", "eh_poc")
+
 
 def _p_nom(row) -> float:
     """A generator's installed size: its ``p_nom_opt`` when that is finite and
@@ -99,24 +113,32 @@ def _site_side(n, bus: str, links: set[str]) -> list[str]:
     for word, table in (("link", n.links), ("line", n.lines), ("transformer", n.transformers)):
         if table.empty:
             continue
-        ends = table["bus0"].astype(str).eq(bus) | table["bus1"].astype(str).eq(bus)
+        # Every port: a multi-port Link can draw from the bus on bus2, bus3...
+        ports = [c for c in table.columns if c.startswith("bus") and c[3:].isdigit()]
+        ends = table[ports].astype(str).eq(bus).any(axis=1)
         found += [f"{word} {x}" for x in table.index[ends]
                   if not (word == "link" and (str(x) in links or _export_only(n, str(x), bus)))]
     return found
 
 
 def _export_only(n, link: str, bus: str) -> bool:
-    """A Link that only delivers INTO ``bus`` (its ``bus1``, never reversed:
-    ``p_min_pu`` not below 0, static or in its series): an export to the
-    grid, which carries no grid power into the site."""
+    """A Link that only delivers INTO ``bus``: an export to the grid, which
+    carries no grid power into the site. ``bus`` is its ``bus1`` and on no
+    other port, and it never reverses or draws: ``p_min_pu`` not below 0 and
+    ``efficiency`` above 0, static and in their series (GK A 33)."""
     row = n.links.loc[link]
-    if str(row["bus1"]) != bus or str(row["bus0"]) == bus:
+    ports = [c for c in n.links.columns if c.startswith("bus") and c[3:].isdigit()]
+    if str(row["bus1"]) != bus or any(
+            str(row[c]) == bus for c in ports if c != "bus1"):
         return False
-    series = getattr(n.links_t, "p_min_pu", None)
-    lows = [float(row.get("p_min_pu", 0.0) or 0.0)]
-    if series is not None and link in series.columns:
-        lows.append(float(series[link].min()))
-    return min(lows) >= 0
+    for attr, ok in (("p_min_pu", lambda v: v >= 0), ("efficiency", lambda v: v > 0)):
+        values = [float(row.get(attr, 0.0 if attr == "p_min_pu" else 1.0))]
+        series = getattr(n.links_t, attr, None)
+        if series is not None and link in series.columns:
+            values += [float(series[link].min())]
+        if not all(ok(v) for v in values):
+            return False
+    return True
 
 
 def _import_peaks(n, links: tuple[str, ...]) -> dict[Any, float] | None:
@@ -147,9 +169,13 @@ def _connection(n, request: dict | None) -> tuple[dict[str, Any], set[str]]:
     with no Link to it is the grid itself, with no limit between: "unbounded"
     (SH 40's PCC rule, GK A 33 S2)."""
     from services.adequacy.archetypes import _poc_buses
-    from services.flow_service import import_capacity
+    from services.flow_service import ImportCapacity, import_capacity
 
     cap = import_capacity(n, request or _DEFAULT_REQUEST)
+    if request is None and cap.links and _picked_by_carrier(n):
+        # Without the study's request the pack is a placeholder: a pick by the
+        # carrier rule (3) is the placeholder's, never the network's (GK A 33).
+        cap = ImportCapacity((), None, NO_REQUEST_REFUSAL)
     links = set(cap.links)
     grid_side = ({str(n.links.at[x, "bus0"]) for x in cap.links} if cap.links else set())
     supply: set[str] = set()
@@ -163,13 +189,17 @@ def _connection(n, request: dict | None) -> tuple[dict[str, Any], set[str]]:
                 not in _PRODUCT_SLACK_ROLES]
         if not here:
             continue
-        touching = not n.links.empty and bool(
-            (n.links["bus0"].astype(str).eq(bus) | n.links["bus1"].astype(str).eq(bus)).any())
+        ports = [c for c in n.links.columns if c.startswith("bus") and c[3:].isdigit()]
+        touching = not n.links.empty and bool(n.links[ports].astype(str).eq(bus).any(axis=None))
         if not touching:
             supply.update(here)
             unbounded = True
             continue
-        others = _site_side(n, bus, links) if bus in grid_side else ["no import link"]
+        if bus not in grid_side:
+            counted += [f"{g} is counted: bus {bus} is marked as the point of connection, "
+                        "but no grid import link leaves it" for g in here]
+            continue
+        others = _site_side(n, bus, links)
         if others:
             counted += [f"{g} is counted: bus {bus} also holds {', '.join(others)}" for g in here]
         else:
