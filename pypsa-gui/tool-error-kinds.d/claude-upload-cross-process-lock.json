@@ -1,0 +1,1 @@
+{"kinds": {"upload_busy": {"surface": "banner", "why": "Another API process held the project's upload lock for the whole wait, so add_upload stored nothing (HTTP 409). The user or assistant retries in a few seconds."}}}
