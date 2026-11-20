@@ -3,7 +3,7 @@
 
 # 24 — A durable reservation before each model send, settled across restarts
 
-Status: ready-for-agent (04 and #1059 landed; built on `claude/sh-24-durable-send-reservation`)
+Status: done (#1088, #1103)
 Type: task
 Blocked by: none (04 done; PR #1059 merged)
 Gated: yes (GK B: persistence and failure semantics)
