@@ -1,0 +1,1 @@
+* Test(pypsa-gui): After a backend test shard aborts on a stalled solve queue, a daemon watchdog now hard-exits the process 60 s later, so a thread stuck in `subprocess.Popen` can no longer hold the shard until the CI timeout.

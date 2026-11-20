@@ -124,6 +124,24 @@ def _dump_stall_diagnostics(unfinished: int) -> pathlib.Path:
     return out
 
 
+_EXIT_GRACE_S = 60.0
+
+
+def _arm_exit_watchdog() -> None:
+    """Hard-exit the process if it is still alive `_EXIT_GRACE_S` after `pytest.exit`.
+
+    `pytest.exit` ends the session, but the interpreter then joins every
+    non-daemon thread, and the very thread that stalled the drain (a job stuck
+    in `subprocess.Popen`) can block that join forever. The watchdog is a daemon
+    timer: a clean exit (junit.xml written) never reaches it.
+    """
+    import threading
+
+    timer = threading.Timer(_EXIT_GRACE_S, os._exit, args=(3,))
+    timer.daemon = True
+    timer.start()
+
+
 def _reset_solve_queue_or_exit() -> None:
     """Reset the solve queue; if jobs outlive its bounded join, dump and abort the shard.
 
@@ -137,6 +155,7 @@ def _reset_solve_queue_or_exit() -> None:
     unfinished = getattr(q, "unfinished_tasks", 0) if hasattr(q, "all_tasks_done") else 0
     if isinstance(unfinished, int) and unfinished > 0:
         out = _dump_stall_diagnostics(unfinished)
+        _arm_exit_watchdog()
         pytest.exit(
             f"solve_queue.reset_for_tests could not drain ({unfinished} job(s) "
             f"still unwinding after its join); thread stacks and ps in {out}",
