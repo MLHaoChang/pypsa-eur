@@ -17,7 +17,7 @@ import {
   type IntentInputDefaults, type PqField,
 } from '../api/intentComparison'
 import { Btn, Field, PageSection, Tag } from '../components/PageKit'
-import { withReturnFrom } from '../layout/flowNavigation'
+import { withReturnFrom, openIslandLimits } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
 
 type Tone = 'ok' | 'warn' | 'err' | 'neutral'
@@ -59,6 +59,8 @@ export const checkLabel = (name: string) => CHECK_LABELS[name] ?? humanise(name)
 const byIntent = <T,>(items: T[], id: (t: T) => string) => [...items].sort((a, b) => id(a).localeCompare(id(b)))
 const intentLabel = (id: string) => DESIGN_INTENTS.find(i => i.id === id)?.label ?? ''
 const NEED_TWO = 'Pick at least two intents.'
+/** The backend's plain-words island refusal (routers/compare.py), whose setting lives in Solver settings. */
+const ISLAND_REFUSAL = /^Island limits in the optimisation/
 const NO_CODE_LINK = 'Set grid code ›'
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
 const POLL_MS = 2000
@@ -432,6 +434,7 @@ function RefusalLine({ text }: { text: string }) {
     <p className="text-[12px] text-err" role="alert" data-testid="intent-error">
       {text}
       {field && <>{' '}<button type="button" className="underline" data-testid="intent-error-field" onClick={focus}>{field.label} ›</button></>}
+      {!field && ISLAND_REFUSAL.test(text) && <>{' '}<button type="button" className="underline" data-testid="intent-error-island" onClick={openIslandLimits}>Island limits ›</button></>}
     </p>
   )
 }
