@@ -95,7 +95,11 @@ describe('where "Edit" goes, by kind', () => {
     expect(heldHome(section, held({ component, entity: 'x' }))).toEqual({
       kind: 'drawer', target: { section, panel: null, component, entity: 'x', field: null } })
   })
-  it.each(['Load', 'Generator', 'Link'] as const)('a %s time series: the Time Series drawer on that row', component => {
+  it('a load time series: the load\'s own drawer with its series editor, not the library', () => {
+    expect(heldHome('profiles', held({ component: 'Load', entity: 'it_load', field: 'p_set' })))
+      .toEqual({ kind: 'drawer', target: { section: 'profiles', panel: null, component: 'Load', entity: 'it_load', field: null } })
+  })
+  it.each(['Generator', 'Link'] as const)('a %s time series: the Time Series drawer on that row', component => {
     expect(heldHome('profiles', held({ component, entity: 'x', field: 'p_max_pu' })))
       .toEqual({ kind: 'series', type: component, name: 'x', field: 'p_max_pu' })
   })
