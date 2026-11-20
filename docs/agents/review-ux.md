@@ -92,6 +92,13 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A lens or filter never hides Essentials or Guided blockers, and shows a "Showing for … Clear" chip.
 - Folds use ▸/▾, never ">".
 - "·" separates data fields; a comma separates names inside one field.
+- Hand-resolved master merge: read the resolved files. A clean merge carries after comparing the PR's own non-test frontend diff against master at both heads (`git diff origin/master...<head> -- pypsa-gui/frontend/src ':!*.test.*'`); stat diffs against a sha are polluted by master drift.
+- Strings with nested brackets or a semicolon chain are split into short sentences, cause first (#1729 headline, #1757 goal line).
+- A banner describing a state the user can change (e.g. "Filled in from…") is muted, never red.
+- A mock or harness toast or error in a shot is retaken or explained before OK (#1757).
+- A button whose line says "wait" is disabled or reads "Try again" (#1761).
+- Two "needs" lines on one screen agree: one checklist only (#1761).
+- A cross-mode link (Guided to Expert) sets the Back pill labelled with the origin card's own title; a same-mode link does not (#1757, #1752).
 
 ## Master merges
 
