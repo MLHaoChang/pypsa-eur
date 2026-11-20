@@ -342,7 +342,7 @@ def _connection_writes(n, pack: ArchetypePack, selected: list[str],
         total = pack.import_overlay.import_p_nom_mw
         if total is None:
             raise ArchetypePackError(
-                "weak_flexible pack requires import_overlay.import_p_nom_mw")
+                "the weak-grid study needs a grid connection cap in MW")
         _require_mw(n, selected)
         each = float(total) / float(len(selected))
         for name in selected:
@@ -359,7 +359,8 @@ _KIND_OF = {"p_nom": "connection_limit", "p_nom_max": "expansion_limit",
             "t_p_max_pu": "connection_closed", "t_p_min_pu": "connection_closed"}
 
 
-def _rows(n, selected: list[str], writes: list[dict[str, Any]], *,
+def _rows(n, pack: ArchetypePack, selected: list[str],
+          writes: list[dict[str, Any]], *,
           off_grid_chosen: bool) -> list[dict[str, Any]]:
     by_kind: dict[str, list[dict[str, Any]]] = {}
     for w in writes:
@@ -367,11 +368,18 @@ def _rows(n, selected: list[str], writes: list[dict[str, Any]], *,
     rows: list[dict[str, Any]] = []
     k = len(selected)
     many = f" over its {k} connections" if k > 1 else ""
+
+    def total_after(attr: str, ws: list[dict[str, Any]]) -> float:
+        # Every Link ends at the pack's share, so the summed limit after is
+        # the pack's cap itself (no float drift from summing cap/k k times).
+        new = {w["link"]: w["after"] for w in ws}
+        return sum(new.get(s, _link_float(n, s, attr)) for s in selected) \
+            if pack.archetype != "weak_flexible" else \
+            float(pack.import_overlay.import_p_nom_mw)
+
     if "connection_limit" in by_kind:
         before = sum(float(n.links.at[s, "p_nom"]) for s in selected)
-        after = sum(w["after"] for w in by_kind["connection_limit"]) + sum(
-            float(n.links.at[s, "p_nom"]) for s in selected
-            if s not in {w["link"] for w in by_kind["connection_limit"]})
+        after = total_after("p_nom", by_kind["connection_limit"])
         if before != after:
             def say(v: str) -> str:
                 return (f"The study {v} your grid connection limit to "
@@ -387,8 +395,9 @@ def _rows(n, selected: list[str], writes: list[dict[str, Any]], *,
                      "done": text[1], "writes": by_kind["connection_limit"]})
     if "expansion_limit" in by_kind:
         ws = by_kind["expansion_limit"]
-        before = max(w["before"] for w in ws)
-        after = sum(w["after"] for w in ws)
+        # Summed over every import Link, as the limit is; unlimited when one is.
+        before = sum(_link_float(n, s, "p_nom_max") for s in selected)
+        after = total_after("p_nom_max", ws)
         rows.append({
             "kind": "expansion_limit", "before_mw": before, "after_mw": after,
             "needs_accept": True,
@@ -426,7 +435,7 @@ def planned_changes(n, pack: ArchetypePack, *, keep_connection: bool = False,
     if not selected:
         return []
     writes = _connection_writes(n, pack, selected, keep_connection=keep_connection)
-    return _rows(n, selected, writes, off_grid_chosen=off_grid_chosen)
+    return _rows(n, pack, selected, writes, off_grid_chosen=off_grid_chosen)
 
 
 def apply_archetype_pack(n, pack: ArchetypePack) -> Callable[[], None]:
@@ -458,7 +467,7 @@ def apply_archetype_pack_detailed(n, pack: ArchetypePack, *,
     }
     writes = _connection_writes(n, pack, selected,
                                 keep_connection=keep_connection)
-    rows = _rows(n, selected, writes, off_grid_chosen=True)
+    rows = _rows(n, pack, selected, writes, off_grid_chosen=True)
     for w in writes:
         name, attr = w["link"], w["attr"]
         if attr.startswith("t_"):

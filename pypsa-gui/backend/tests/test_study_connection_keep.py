@@ -194,6 +194,16 @@ def test_planned_changes_equal_what_the_apply_writes(tid, arch, keep):
     before = n.copy()
     A.apply_archetype_pack_detailed(n, pack, keep_connection=keep)
     assert _diff(before, n) == _planned(rows)
+    # Each row's totals are the summed values before and after the apply.
+    links = A.select_import_links(n, pack.import_overlay)
+    attr = {"connection_limit": "p_nom", "expansion_limit": "p_nom_max"}
+    for r in rows:
+        if r["kind"] in attr:
+            col = attr[r["kind"]]
+            assert r["before_mw"] == sum(before.links.loc[links, col])
+            assert r["after_mw"] == pytest.approx(
+                sum(n.links.loc[links, col]), abs=1e-9
+            )
     if keep and arch == "weak_flexible":
         assert rows == []
 
@@ -312,7 +322,7 @@ def test_a_weak_pack_without_a_cap_is_refused():
             )
         }
     )
-    with pytest.raises(A.ArchetypePackError, match="requires import_overlay"):
+    with pytest.raises(A.ArchetypePackError, match="needs a grid connection cap in MW"):
         A.planned_changes(n, pack)
 
 
@@ -331,3 +341,27 @@ def test_a_floor_above_each_links_share_is_named_per_connection():
         "Your grid connection has a minimum size of 40 MW, above the study's cap "
         "of 30 MW per connection; the study may find no solution."
     ) in res.warnings
+
+
+def test_the_expansion_row_sums_every_link():
+    n = _two_link_network()
+    n.links.loc[["feeder_a", "feeder_b"], "p_nom_max"] = 40.0
+    pack = RUN.apply_pack_overrides(
+        default_weak_flexible_pack(), {"import_p_nom_mw": 60.0}
+    )
+    row = next(r for r in A.planned_changes(n, pack) if r["kind"] == "expansion_limit")
+    assert (row["before_mw"], row["after_mw"]) == (80.0, 60.0)
+
+
+def test_three_links_sharing_an_equal_cap_read_as_shared_not_set():
+    n = _two_link_network()
+    n.add(
+        "Link", "feeder_c", bus0="grid", bus1="hub", p_nom=10.0, eh_role="grid_import"
+    )
+    n.links.at["feeder_b", "p_nom"] = 10.0
+    pack = RUN.apply_pack_overrides(
+        default_weak_flexible_pack(), {"import_p_nom_mw": 50.0}
+    )
+    row = next(r for r in A.planned_changes(n, pack) if r["kind"] == "connection_limit")
+    assert (row["before_mw"], row["after_mw"]) == (50.0, 50.0)
+    assert "evenly over its 3 connections" in row["text"]
