@@ -321,7 +321,7 @@ def _connection_writes(n, pack: ArchetypePack, selected: list[str],
     writes: list[dict[str, Any]] = []
 
     def put(link, attr, before, after):
-        if before is None or before != after:
+        if before != after:                 # a series' None always differs
             writes.append({"link": link, "attr": attr,
                            "before": before, "after": after})
 

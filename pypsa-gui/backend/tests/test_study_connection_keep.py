@@ -246,3 +246,23 @@ def test_an_unknown_archetype_is_refused_before_any_write():
     with pytest.raises(A.ArchetypePackError, match="unknown archetype"):
         A.apply_archetype_pack_detailed(n, pack)
     assert (n.links.at["feeder_a", "p_nom"], n.links.at["feeder_b", "p_nom"]) == (30.0, 20.0)
+
+
+def test_off_grid_writes_zero_flow_on_each_link_and_keeps_its_rating():
+    n = _two_link_network()
+    n.links.at["feeder_a", "p_min_pu"] = -0.5
+    rows = A.planned_changes(n, default_off_grid_pack())
+    assert _planned(rows) == sorted([
+        ("feeder_a", "p_max_pu", 1.0, 0.0), ("feeder_a", "p_min_pu", -0.5, 0.0),
+        ("feeder_b", "p_max_pu", 1.0, 0.0)], key=str)
+    A.apply_archetype_pack_detailed(n, default_off_grid_pack())
+    assert list(n.links.p_max_pu) == [0.0, 0.0] and list(n.links.p_nom) == [30.0, 20.0]
+
+
+def test_a_weak_pack_without_a_cap_is_refused():
+    n = _two_link_network()
+    pack = default_weak_flexible_pack()
+    pack = pack.model_copy(update={"import_overlay": pack.import_overlay.model_copy(
+        update={"import_p_nom_mw": None})})
+    with pytest.raises(A.ArchetypePackError, match="requires import_overlay"):
+        A.planned_changes(n, pack)
