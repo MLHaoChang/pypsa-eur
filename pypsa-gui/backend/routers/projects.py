@@ -2014,8 +2014,9 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
     if not src_nc.exists() and eh_builder is None:
         raise HTTPException(
             404,
-            f"Template '{template_id}' is registered but its network.nc is "
-            f"missing — run project_templates/_build.py to regenerate it.",
+            "This template's example network has not been built on this "
+            "installation, so it cannot be created here. Choose another "
+            "template, or reinstall the app.",
         )
 
     # `name` is optional — default to the template's friendly name, then
