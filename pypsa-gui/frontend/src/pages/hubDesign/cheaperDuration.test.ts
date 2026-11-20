@@ -31,7 +31,7 @@ function report(assets: EhSizedAsset[] = [battery()], cost: unknown = 3_600_000)
     sections: { sizing: { status: 'ok', payload: { assets } } } } as EhReferenceDesignReport
 }
 
-const SENTENCE = 'A 24 h battery also meets the energy-not-served cap for € 3.1 m (design: 4 h, € 3.5 m)'
+const SENTENCE = 'A 24 h battery also meets the energy-not-served cap at a system cost of € 3.1 m a year (design: 4 h, € 3.5 m)'
 
 describe('cheaperDuration', () => {
   it('names the cheaper duration, the cap and the design (its own lever cost first)', () => {
@@ -44,7 +44,7 @@ describe('cheaperDuration', () => {
 
   it('falls back to the report cost when the design duration is not a lever option', () => {
     const s = cheaperDuration(finding(), levers(opt(24, 3_100_000), opt(72, 3_120_000)), report())
-    expect(plain(s)).toBe('A 24 h battery also meets the energy-not-served cap for € 3.1 m (design: 4 h, € 3.6 m)')
+    expect(plain(s)).toBe('A 24 h battery also meets the energy-not-served cap at a system cost of € 3.1 m a year (design: 4 h, € 3.6 m)')
   })
 
   it('"An" before 8, 11 and 18 h', () => {
@@ -93,6 +93,31 @@ describe('cheaperDuration', () => {
     expect(cheaperDuration(finding(), levers(opt(4, null), opt(24, 3_100_000)), report(undefined, null)))
       .toBeNull()
     expect(cheaperDuration(finding(), levers(opt(24, 3_100_000)), report(undefined, Number.NaN))).toBeNull()
+  })
+
+  it('a multi-period study states the discounted system cost over the plan, not a year', () => {
+    const r = { ...report(), period_basis: 'npv_multi_period' } as EhReferenceDesignReport
+    expect(plain(cheaperDuration(finding(), levers(), r))).toBe(
+      'A 24 h battery also meets the energy-not-served cap at a system cost of € 3.1 m over the plan, discounted (design: 4 h, € 3.5 m)')
+    const y = { ...report(), period_basis: 'single_period' } as EhReferenceDesignReport
+    expect(plain(cheaperDuration(finding(), levers(), y))).toBe(SENTENCE)
+  })
+
+  it('hidden when the best option is the design duration, even when it reads cheaper than the report cost', () => {
+    // The design's own row has no cost, so the design cost falls back to the report's € 3.6 m:
+    // only the best-equals-design check keeps "A 4 h battery … (design: 4 h …)" off.
+    expect(cheaperDuration(finding({ value: 4, cost_at_target_eur: 3_100_000 }),
+      levers(opt(4, null), opt(24, 3_300_000)), report())).toBeNull()
+  })
+
+  it('reads only storage_duration rows: an import_cap row with the same value does not count', () => {
+    const cap = opt(24, 3_100_000, { kind: 'import_cap', meets_target: true })
+    expect(cheaperDuration(finding(), levers(cap, opt(4, 3_500_000), opt(24, 3_100_000, { meets_target: false })),
+      report())).toBeNull()
+    // and the design cost is not read from an import_cap row sharing the design's value
+    const cheapCap = opt(4, 3_000_000, { kind: 'import_cap' })
+    expect(plain(cheaperDuration(finding(), levers(cheapCap, opt(4, 3_500_000), opt(24, 3_100_000)), report())))
+      .toBe(SENTENCE)
   })
 
   it('hidden when the design duration is unknown', () => {

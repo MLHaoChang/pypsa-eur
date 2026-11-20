@@ -34,8 +34,11 @@ export function designDurationHours(report: EhReferenceDesignReport | null | und
   return values.every(v => same(v, values[0])) ? values[0] : null
 }
 
-/** "A 24 h battery also meets the energy-not-served cap for € 3.1 m (design:
- *  4 h, € 3.5 m)", or null. Shown only when the best option is a storage
+/** "A 24 h battery also meets the energy-not-served cap at a system cost of
+ *  € 3.1 m a year (design: 4 h, € 3.5 m)", or null. The cost is the whole
+ *  system's at the cap (`cost_at_target_eur`, before shortfall), never the
+ *  battery's price: a year's on a single-period study, the discounted total
+ *  over the plan on a multi-period one (`period_basis`, as the cost tile). Shown only when the best option is a storage
  *  duration other than the design's, the levers table says it meets the
  *  energy-not-served cap, and it costs less than the design. The design's
  *  cost is its own lever option's, else the report's cost at target. */
@@ -63,6 +66,7 @@ export function cheaperDuration(
   // Two figures that round the same would read as no saving.
   if (bestText === designText) return null
   const h = hours(best)
-  return `${article(h)} ${h} h battery also meets the energy-not-served cap for ${bestText}`
-    + ` (design: ${hours(design)} h, ${designText})`
+  const basis = report?.period_basis === 'npv_multi_period' ? 'over the plan, discounted' : 'a year'
+  return `${article(h)} ${h} h battery also meets the energy-not-served cap at a system cost of`
+    + ` ${bestText} ${basis} (design: ${hours(design)} h, ${designText})`
 }

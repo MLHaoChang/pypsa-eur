@@ -12,6 +12,10 @@ describe('leverKindWords', () => {
     expect(leverKindWords('dsr_share')).toBe('dsr share')
   })
 
+  it('a "+"-joined kind reads each part, joined with ", "', () => {
+    expect(leverKindWords('storage_duration+import_cap')).toBe('Battery duration, Import capacity')
+  })
+
   it('parity: every kind the backend levers module builds has words', () => {
     const src = readFileSync(resolve(__dirname, '../../../../backend/services/adequacy/levers.py'), 'utf8')
     const kinds = new Set([...src.matchAll(/kind == "([a-z_]+)"/g)].map(m => m[1]))

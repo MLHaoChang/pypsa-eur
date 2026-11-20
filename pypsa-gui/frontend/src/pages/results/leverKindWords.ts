@@ -10,7 +10,10 @@ export const LEVER_KIND_WORDS: Record<LeverKey, string> = {
   redundancy: 'Redundancy',
 }
 
-/** The words for one option's kind; an unknown kind reads with spaces, never underscores. */
+/** The words for one option's kind; an unknown kind reads with spaces, never underscores.
+ *  A combined kind ("storage_duration+import_cap") reads each part, joined with ", ". */
 export function leverKindWords(kind: string): string {
-  return (LEVER_KIND_WORDS as Record<string, string>)[kind] ?? kind.replace(/_/g, ' ')
+  return kind.split('+')
+    .map(k => (LEVER_KIND_WORDS as Record<string, string>)[k.trim()] ?? k.trim().replace(/_/g, ' '))
+    .join(', ')
 }

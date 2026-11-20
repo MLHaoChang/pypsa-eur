@@ -378,7 +378,7 @@ describe('ResultsCard before the study (UX S6, G2)', () => {
 // WALK-IMPROVE-1: the cheaper battery duration the study's levers found, under
 // the verdict, with one link to the design options.
 describe('ResultsCard cheaper battery duration', () => {
-  const SENTENCE = 'A 24 h battery also meets the energy-not-served cap for € 3.1 m (design: 4 h, € 3.5 m)'
+  const SENTENCE = 'A 24 h battery also meets the energy-not-served cap at a system cost of € 3.1 m a year (design: 4 h, € 3.5 m)'
   function withLevers(best = 24) {
     const rep = { ...REPORT, sections: { ...REPORT.sections, sizing: { status: 'ok', payload: { assets: [
       { component: 'StorageUnit', name: 'battery', carrier: 'battery', built_mw: 2, built_mwh: 8, max_hours: 4 },

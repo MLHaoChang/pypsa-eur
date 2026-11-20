@@ -354,7 +354,7 @@ describe('ImproveCard while a risk check runs (A1-FE)', () => {
 // WALK-IMPROVE-1: the Results card's cheaper battery duration, repeated as one
 // row without a link.
 describe('ImproveCard cheaper battery duration', () => {
-  const SENTENCE = 'A 24 h battery also meets the energy-not-served cap for € 3.1 m (design: 4 h, € 3.5 m)'
+  const SENTENCE = 'A 24 h battery also meets the energy-not-served cap at a system cost of € 3.1 m a year (design: 4 h, € 3.5 m)'
   function withLevers(meets: boolean | null = true) {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', report: { ...REPORT,
       sections: { ...REPORT.sections, sizing: { status: 'ok', payload: { assets: [
