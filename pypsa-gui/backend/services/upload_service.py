@@ -52,6 +52,7 @@ import shutil
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 
@@ -311,6 +312,18 @@ def _upload_not_found(name: str, file_id: str) -> HTTPException:
 # that the delivery tools and the download refuse it 410 delivery_expired; the
 # file stays on disk, and exporting the same content again makes a fresh one.
 DELIVERY_TTL_SECONDS = 7 * 24 * 3600
+
+
+def delivery_expires_at(meta: UploadMeta) -> str | None:
+    """The last instant an `agent_export` download is served (ISO, UTC), else None.
+
+    Matches `refuse_expired_delivery`: served while age <= TTL. Other kinds
+    never expire, so they carry no date.
+    """
+    if meta.kind != "agent_export" or not math.isfinite(meta.uploaded_at):
+        return None
+    instant = meta.uploaded_at + DELIVERY_TTL_SECONDS
+    return datetime.fromtimestamp(instant, UTC).isoformat()
 
 
 def refuse_expired_delivery(meta: UploadMeta, *, now: float | None = None) -> None:

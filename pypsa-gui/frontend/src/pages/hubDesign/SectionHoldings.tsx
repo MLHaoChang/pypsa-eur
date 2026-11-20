@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FlowHeld, FlowSectionId } from '../../api/flow'
+import type { EhSizedAsset } from '../../api/simulation'
 import { openFlowTargetInPlace, openSectionInExpert, openTimeSeriesFor, withReturnFrom } from '../../layout/flowNavigation'
 import { FOLD_AFTER, groupTitle, heldFigure, heldGroups, heldHome, heldKind, heldRest } from './holdWords'
 
@@ -17,15 +18,15 @@ function edit(section: FlowSectionId, h: FlowHeld): void {
   else withReturnFrom(() => openSectionInExpert(section))
 }
 
-function Row({ section, h }: { section: FlowSectionId; h: FlowHeld }) {
-  const figure = heldFigure(section, h)
+function Row({ section, h, sized }: { section: FlowSectionId; h: FlowHeld; sized?: EhSizedAsset }) {
+  const figure = heldFigure(section, h, sized)
   return (
     <li data-testid="section-held" className="flex items-baseline gap-2 py-0.5 text-[12px] text-text">
-      <span className="min-w-0 flex-1 truncate" title={h.entity}>{h.entity}</span>
-      <span className="shrink-0 text-muted">{heldKind(h)}</span>
+      <span className="min-w-0 flex-1 truncate" title={h.recipe ? undefined : h.entity}>{h.recipe?.label ?? h.entity}</span>
+      {!h.recipe && <span className="shrink-0 text-muted">{heldKind(h)}</span>}
       {figure && <span className="shrink-0 text-muted">{figure}</span>}
       <button type="button" data-testid="section-held-edit"
-        aria-label={`Edit ${h.entity}${section === 'profiles' && figure ? `, ${figure}` : ''}`}
+        aria-label={`Edit ${h.recipe ? `${h.recipe.label} recipe` : h.entity}${section === 'profiles' && figure ? `, ${figure}` : ''}`}
         onClick={() => edit(section, h)}
         className="shrink-0 text-[11px] text-muted hover:text-accent">
         Edit ›
@@ -36,8 +37,9 @@ function Row({ section, h }: { section: FlowSectionId; h: FlowHeld }) {
 
 /** `counted` is false when the server cut the list short: a group's rows are
  *  then not all of its class, so the title carries no number. */
-function Group({ section, title, rows, counted }: {
+function Group({ section, title, rows, counted, sized }: {
   section: FlowSectionId; title: string | null; rows: FlowHeld[]; counted: boolean
+  sized?: Map<string, EhSizedAsset>
 }) {
   const [all, setAll] = useState(false)
   const shown = all || rows.length <= FOLD_AFTER ? rows : rows.slice(0, FOLD_AFTER)
@@ -46,7 +48,8 @@ function Group({ section, title, rows, counted }: {
     <div data-testid="section-held-group">
       {title && <p className="pb-0.5 text-[11px] font-medium text-muted">{counted ? `${title} (${rows.length})` : title}</p>}
       <ul className="flex flex-col divide-y divide-border">
-        {shown.map(h => <Row key={`${h.component}:${h.entity}:${h.field ?? ''}`} section={section} h={h} />)}
+        {shown.map(h => <Row key={`${h.component}:${h.entity}:${h.field ?? ''}`} section={section} h={h}
+          sized={sized?.get(`${h.component}:${h.entity}`)} />)}
       </ul>
       {more > 0 && (
         <button type="button" data-testid="section-held-show-all" onClick={() => setAll(true)}
@@ -73,9 +76,11 @@ function Loading() {
   )
 }
 
-export function SectionHoldings({ id, holds, total, pending, failed, deferred = false }: {
+export function SectionHoldings({ id, holds, total, pending, failed, deferred = false, sized }: {
   id: FlowSectionId; holds: FlowHeld[] | undefined; total?: number; pending: boolean; failed: boolean
   deferred?: boolean
+  /** The last study's sizes by `Component:name` (walkthrough 03). */
+  sized?: Map<string, EhSizedAsset>
 }) {
   // A failed refetch keeps the last good list on screen.
   if (failed && !holds) {
@@ -98,7 +103,7 @@ export function SectionHoldings({ id, holds, total, pending, failed, deferred = 
   return (
     <div data-testid="section-held-list" className="flex flex-col gap-3">
       {groups.map(g => (
-        <Group key={g.component} section={id} rows={g.rows} counted={rest === null}
+        <Group key={g.component} section={id} rows={g.rows} counted={rest === null} sized={sized}
           title={groups.length > 1 ? groupTitle(g.component) : null} />
       ))}
       {rest && <p data-testid="section-held-rest" className="text-[11px] text-muted">{rest}</p>}

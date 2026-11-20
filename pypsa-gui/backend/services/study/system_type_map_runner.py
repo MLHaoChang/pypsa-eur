@@ -1,0 +1,403 @@
+"""
+The optimal system type map of a decision study (homer-parity 03b): over two
+sensitivity variables, the winning supply architecture in each cell
+(`system_type_map.build_map`), on the 03a comparison.
+
+Built like the supply-architecture runner (`supply_architecture_runner`) and
+sharing its pieces: the saved-base source and its fingerprint (gate G1), the
+unsaved-edits refusal, the typed fork-solve failure (gate G6) and the record
+reader. Per cell it copies the saved base, applies both multipliers and runs
+the 03a comparison, one throw-away fork solve per architecture
+(`tornado_runner.ForkSolver`, deleted on every path, gate G7).
+
+* **Budget.** Cells x architectures solves are charged on the campaign up
+  front; more than `campaign.MAX_BUDGET_SOLVES` is refused with the count.
+* **One at a time (gate G8).** The record takes the study slot
+  (`runner.STUDY_KEY`) like the run, the tornado and the 03a comparison.
+* **Versioned record (gate G9).** :data:`SCHEMA_VERSION`; another version
+  reads ``not_evaluated``.
+"""
+
+from __future__ import annotations
+
+import contextvars
+import logging
+import threading
+import time
+from typing import Any
+
+from services import dirty_state
+from services.pypsa_service import PyPSAService
+from services.study import runner as R
+from services.study import store
+from services.study import supply_architecture_runner as SAR
+from services.study import supply_architectures as SA
+from services.study import system_type_map as M
+from services.study.tornado_runner import ForkSolver
+
+logger = logging.getLogger(__name__)
+
+KIND = "system_type_map"
+AUX = "system_type_map"
+SCHEMA_VERSION = 1
+
+
+def start(
+    study_id: str,
+    *,
+    base_row,
+    db,
+    user_id,
+    x: dict,
+    y: dict,
+    architecture_ids: list[str] | None = None,
+    budget_solves: int | None = None,
+) -> dict:
+    """
+    Validate, check the budget, claim the study slot on the base context and
+    start the worker. Raises ``runner.RunRefused`` before anything starts.
+    """
+    from services import project_registry
+    from services.adequacy import campaign
+
+    base_dir = project_registry.project_dir(base_row)
+    try:
+        study = store.load_study(base_dir, study_id)
+    except store.StudyNotFound:
+        raise R.RunRefused(404, "study_not_found", "Study not found") from None
+    try:
+        xa, ya = M.check_axes(x, y)
+    except M.MapRefused as exc:
+        raise R.RunRefused(422, exc.code, exc.detail) from None
+    key = project_registry.registry_key(base_row)
+    resident = PyPSAService.get_context(key)
+    if resident is not None:
+        R._refuse_busy(resident)
+    SAR._refuse_unsaved(resident)
+    network, cfg, fingerprint = SAR._saved_base(base_row)
+    try:
+        archs = SA.select(network, architecture_ids)
+    except SA.ArchitectureUnsolved as exc:
+        raise R.RunRefused(
+            422 if exc.code == "unknown_architecture" else 409, exc.code, exc.detail
+        ) from None
+    groups = SA.classify(network)
+    for var, values in (xa, ya):
+        if not M.apply_variable(network.copy(), var, values[0], groups).scaled:
+            raise R.RunRefused(
+                422,
+                "variable_not_in_network",
+                f"{var.label} changes nothing in this project: it has no such "
+                "asset (or none the optimiser sizes) or its value is zero",
+            )
+    cells = len(xa[1]) * len(ya[1])
+    solves = cells * len(archs)
+    budget = solves if budget_solves is None else int(budget_solves)
+    too_many = M.solves_refusal(cells, len(archs), campaign.MAX_BUDGET_SOLVES)
+    if too_many:
+        raise R.RunRefused(422, "campaign_budget_invalid", too_many)
+    if not 1 <= budget <= campaign.MAX_BUDGET_SOLVES:
+        raise R.RunRefused(
+            422,
+            "campaign_budget_invalid",
+            f"budget_solves must be 1..{campaign.MAX_BUDGET_SOLVES}",
+        )
+
+    registered = resident is None
+    if registered:
+        PyPSAService.mark_study_owned(key)
+    try:
+        ctx = R.base_context(base_row)
+    except BaseException:
+        if registered:
+            PyPSAService.unmark_study_owned(key)
+        raise
+    stop_event = threading.Event()
+    record: dict[str, Any] = {
+        "status": "running",
+        "kind": KIND,
+        "study": R.STUDY_KEY,
+        "study_id": study_id,
+        "current": None,
+        "architectures": [a.architecture_id for a in archs],
+        "axes": [
+            {"variable": v.variable_id, "label": v.label, "values": vals}
+            for v, vals in (xa, ya)
+        ],
+        "solves_estimated": solves,
+        "solves_charged": 0,
+        "variants": [],
+        "campaign": None,
+        "own_campaign": False,
+        "registered_base": registered,
+        "error": None,
+        "started_at": time.time(),
+        "finished_at": None,
+        "thread": None,
+        "stop_event": stop_event,
+        "network_revision": None,
+        "base_project_id": str(base_row.id),
+        "base_fingerprint": fingerprint,
+    }
+    dirty_state.capture(record, ctx)
+    run_ctx = contextvars.copy_context()
+    thread = threading.Thread(
+        target=lambda: run_ctx.run(
+            _worker,
+            study_id=study_id,
+            base_dir=base_dir,
+            base_row_id=str(base_row.id),
+            user_id=user_id,
+            network=network,
+            cfg=cfg,
+            archs=archs,
+            axes=(xa, ya),
+            record=record,
+            stop_event=stop_event,
+            ctx=ctx,
+        ),
+        daemon=True,
+        name=f"system-type-map-{study_id[:8]}",
+    )
+    record["thread"] = thread
+
+    lock = ctx.mutation_lock
+    if not lock.acquire(timeout=5.0):
+        R._release_base(key, registered)
+        raise R.RunRefused(
+            409,
+            "solver_in_flight",
+            "a solve holds the study's base project; wait for it to finish",
+        )
+    try:
+        with ctx.solver_state_lock:
+            try:
+                R._refuse_busy(ctx)
+                # Gate G1: the saved base pinned above is still the one solved.
+                SAR._refuse_unsaved(ctx)
+            except R.RunRefused:
+                R._release_base(key, registered)
+                raise
+            own = not R._on_ctx(ctx, campaign.status)["active"]
+            if own:
+                try:
+                    R._on_ctx(
+                        ctx,
+                        campaign.start,
+                        f'decision study "{study.name}": system type map',
+                        budget,
+                    )
+                except campaign.CampaignError as exc:
+                    R._release_base(key, registered)
+                    # A fixed message: an exception's text never reaches the
+                    # client (CodeQL, information exposure).
+                    logger.info("system type map budget refused: %s", exc)
+                    raise R.RunRefused(
+                        422,
+                        "campaign_budget_invalid",
+                        "budget_solves is not a valid campaign budget",
+                    ) from None
+            try:
+                R._on_ctx(ctx, campaign.check, R.STUDY_KEY, solves)
+            except campaign.CampaignBudgetError as exc:
+                if own:
+                    R._on_ctx(ctx, campaign.end, "refused before the first solve")
+                R._release_base(key, registered)
+                raise R.RunRefused(
+                    409, "campaign_budget_exhausted", exc.detail["message"]
+                ) from None
+            record["own_campaign"] = own
+            ctx.solver_state[R.STUDY_KEY] = record
+            try:
+                thread.start()
+            except BaseException:
+                ctx.solver_state[R.STUDY_KEY] = None
+                if own:
+                    R._on_ctx(ctx, campaign.end, "the worker did not start")
+                R._release_base(key, registered)
+                raise
+    finally:
+        lock.release()
+    return {
+        "status": "running",
+        "kind": KIND,
+        "study_id": study_id,
+        "solves_estimated": solves,
+        "architectures": record["architectures"],
+        "axes": record["axes"],
+    }
+
+
+def _worker(
+    *,
+    study_id,
+    base_dir,
+    base_row_id,
+    user_id,
+    network,
+    cfg,
+    archs,
+    axes,
+    record,
+    stop_event,
+    ctx,
+) -> None:
+    from db.models import Project
+    from db.session import SessionLocal
+    from services.adequacy import campaign
+
+    PyPSAService.bind_request_context(ctx)
+    db = SessionLocal()
+    solver = None
+    table = None
+    status, error = "failed", None
+    try:
+        base_row = db.get(Project, R._uuid(base_row_id))
+        solver = ForkSolver(db, user_id, base_row, study_id, stop_event, record, ctx)
+        # Gate V6: the cells' transforms and solves read the base project's
+        # transient marks (slacks, vintage clones) from its own context.
+        with PyPSAService.solving_context(ctx):
+            table = M.build_map(
+                network,
+                *axes,
+                SAR._solve_fn(solver, cfg),
+                archs=archs,
+                progress=lambda **kw: R._set(ctx, record, **kw),
+            )
+        status = (
+            "aborted"
+            if stop_event.is_set()
+            or record.get("budget_exhausted")
+            or record.get("deadline_exceeded")
+            else "done"
+        )
+        if record.get("deadline_exceeded"):
+            error = record["deadline_exceeded"]
+    except Exception as exc:  # noqa: BLE001 — recorded
+        logger.exception("decision study %s system type map failed", study_id)
+        error = type(exc).__name__  # the text is in the log above, not the record
+        status = "failed"
+    finally:
+        left = [r.name for r in solver.left] if solver is not None else []
+        if record.get("own_campaign"):
+            try:
+                R._set(
+                    ctx,
+                    record,
+                    campaign=campaign.end(f"decision study system type map {status}"),
+                )
+            except campaign.CampaignError:
+                pass
+        try:
+            _save(base_dir, study_id, record, table, status, error, left)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "decision study %s: saving the system type map failed", study_id
+            )
+            error = error or "saving the system type map failed"
+            status = "failed"
+        db.close()
+        if record.get("registered_base"):
+            R._release_base(ctx.registry_key, True)
+        R._set(
+            ctx,
+            record,
+            status=status,
+            error=error,
+            finished_at=time.time(),
+            current=None,
+            forks_left=left,
+        )
+
+
+def _save(base_dir, study_id, record, table, status, error, left) -> None:
+    data: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "status": status,
+        "kind": KIND,
+        "error": error,
+        "started_at": record.get("started_at"),
+        "finished_at": time.time(),
+        "base_project_id": record.get("base_project_id"),
+        "base_fingerprint": record.get("base_fingerprint"),
+        "architectures": record.get("architectures"),
+        "solves_estimated": record.get("solves_estimated"),
+        "solves_charged": record.get("solves_charged"),
+        "campaign": record.get("campaign"),
+        "variants": record.get("variants"),
+        "forks_left": left,
+        "budget_exhausted": bool(record.get("budget_exhausted")),
+        "axes": record.get("axes"),
+        "cells": None,
+    }
+    if table is not None:
+        data.update(table)
+    with store.WRITE_LOCK:
+        store.save_aux(base_dir, study_id, AUX, data)
+
+
+def _load_saved(base_dir, study_id: str):
+    """The saved record as stored (None when never run); an unreadable file
+    reads as ``[]``, which callers treat as not evaluated (gate G9)."""
+    try:
+        return store.load_aux(base_dir, study_id, AUX)
+    except store.StudyUnreadable:
+        logger.warning("study %s: the system type map record is unreadable", study_id)
+        return []
+
+
+def get(study_id: str, *, base_row, base_dir) -> dict | None:
+    """The live map on the base context, else the last one on disk
+    (with ``stale``), else None."""
+    from services import project_registry
+
+    ctx = PyPSAService.get_context(project_registry.registry_key(base_row))
+    if ctx is not None:
+        with ctx.solver_state_lock:
+            rec = ctx.solver_state.get(R.STUDY_KEY)
+            if (
+                rec
+                and rec.get("kind") == KIND
+                and rec.get("study_id") == study_id
+                and rec.get("status") == "running"
+            ):
+                return R._public(rec)
+    saved = _load_saved(base_dir, study_id)
+    if saved is None:
+        return None
+    if not isinstance(saved, dict):
+        # Gate G9: a record that can't be read is not evaluated, never a crash.
+        return {"status": "not_evaluated", "kind": KIND, "reason": "unreadable_record"}
+    if saved.get("schema_version") != SCHEMA_VERSION:
+        return {
+            "status": "not_evaluated",
+            "kind": KIND,
+            "reason": "unknown_schema_version",
+            "schema_version": saved.get("schema_version"),
+        }
+    return {**saved, "stale": SAR._stale(saved, base_row)}
+
+
+def abort(study_id: str, *, base_row, base_dir) -> dict:
+    """Set the map's stop event. Idempotent; 404 when it never ran."""
+    from services import project_registry
+
+    ctx = PyPSAService.get_context(project_registry.registry_key(base_row))
+    if ctx is not None:
+        with ctx.solver_state_lock:
+            rec = ctx.solver_state.get(R.STUDY_KEY)
+            if rec and rec.get("kind") == KIND and rec.get("study_id") == study_id:
+                ev, status = rec.get("stop_event"), rec.get("status")
+                if ev is not None:
+                    ev.set()
+                return {"status": status, "aborting": status == "running"}
+    last = _load_saved(base_dir, study_id)
+    if last is not None and not isinstance(last, dict):
+        return {"status": "not_evaluated", "aborting": False}
+    if last is None:
+        raise R.RunRefused(
+            404,
+            "system_type_map_never_run",
+            "the system type map has not been run",
+        )
+    return {"status": last.get("status"), "aborting": False}

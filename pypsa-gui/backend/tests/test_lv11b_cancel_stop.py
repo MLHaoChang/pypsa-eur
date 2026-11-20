@@ -682,8 +682,9 @@ def test_each_unverified_cancel_reaches_the_model_as_a_tool_error(baseline, case
     [
         ("own", "sq", None),
         # Through dispatch a user without access to the project is refused before
-        # any handler runs; the queue ACL's own 404 is pinned at the tool below.
-        ("foreign_actor", "sq", "restriction_unavailable"),
+        # any handler runs, as no access (issue 17), never as an unreadable rule
+        # store; the queue ACL's own 404 is pinned at the tool below.
+        ("foreign_actor", "sq", "project_access_denied"),
         # the queue's own ACL hides another project's job (11a FOREIGN_PROJECT_KIND)
         ("foreign_project", "sq", "job_not_found"),
         ("foreign_project", "fg", "job_project_mismatch"),

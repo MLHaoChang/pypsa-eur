@@ -3,7 +3,7 @@
 
 # GC-15 DGS attribute names and the harmonic-source block, checked against public sources
 
-Status: ready-for-agent
+Status: done (#1602)
 Type: task
 Parent: `05-powerfactory-dgs.md` (#1580 review follow-up)
 Gated: **yes** (GK A2, gridspine)
