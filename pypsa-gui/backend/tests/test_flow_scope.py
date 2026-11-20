@@ -250,10 +250,18 @@ def test_put_refuses_an_unavailable_sub_option(client, tmp_projects_dir):
     assert r.json()["detail"]["error_kind"] == "flow_scope_unavailable"
 
 
-def test_reliability_off_takes_the_study_out_of_the_run(client, tmp_projects_dir):
+def test_reliability_off_takes_the_study_out_of_the_run(
+        client, tmp_projects_dir, edit):  # noqa: F811
     """The off-card test (modular-cards §6): its items don't count, aren't to
     check and don't block; its kind leaves run_request; its values survive."""
     name = _create(client, "eh_microgrid", "off_card")
+    # The microgrid's tie is normally open, so it is no unit missing outage data
+    # (walkthrough 12) and its readiness is clean. Untagging the critical bus gives the
+    # reliability card an item of its own (eh_no_critical_load).
+    with edit() as n:
+        n.buses["eh_critical"] = False
+        from services import dirty_state
+        dirty_state.bump_revision()    # the readiness cache is keyed on it
     before = _flow(client, name)
     rel_before = [i for s in before["sections"] for i in s["items"]
                   if i["card"] == "reliability"]

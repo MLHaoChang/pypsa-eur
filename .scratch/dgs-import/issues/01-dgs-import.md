@@ -67,3 +67,71 @@ Slices:
   a source does not name is written as amplitude 0 and alpha 0, so S2 keeps only non-zero
   amplitudes. Line g is TypLne `gline(r)` in uS/km. Shunt P is not written, so S2 records it as an
   assumed 0.
+- 2026-11-17, owner decision Q6 (via the coordinator): S3 accepts both DGS 7.0 ASCII and Excel.
+  GK A2 (4) plan verdict: GO, on these conditions.
+  - X1, 7.x references: pointer attributes (p:…; bus, typ_id, cubicle) hold FID values. Resolve
+    them through the FID column and refuse a dangling FID by name. Test: a 7.0 file whose FIDs
+    differ from its 5.0 twin's IDs gives the same network.
+  - X2, 7.0 oracle: "same tables as the 5.0 twin" compares the parser with itself, so also assert
+    literal values from the 7.0 file (a bus kV, a line length, a pointer target). The 7.0 fixture
+    is hand-written, never produced by our writer (ruling 4).
+  - X3, version gate: refuse 6.x and the rest by name. Pin with tests: 4.x, 6.x, 7.x without FID,
+    and 5.x with FID, OP or MATRIX.
+  - X4, Excel cell types, each handled explicitly: a formula cell is refused naming sheet, row and
+    column (open with data_only=False, or refuse a missing cached value; never read it as empty);
+    dates, booleans and error cells (#N/A) are refused by cell; exponent floats (1e-05) tested
+    through parse_dgs_text; wholly empty trailing rows and columns ignored, a partly empty row
+    keeps its empty cells; an extra non-DGS-class sheet is refused or unmapped (say which);
+    hidden sheets are treated like any other (say so).
+  - X5, safety: reuse the repo's safe xlsx opening (defusedxml, keep_links=False, read_only) and
+    the other xlsx importers' size and row caps; no second, looser path. Run
+    tests/test_packaging_requirements.py and test_openpyxl_parses_uploads_with_defusedxml* if
+    imports change (the latter is a known container-only failure: report it, don't fix it).
+  - X6, .xlsx dispatch: dgs, excel and plexos all take .xlsx, so the registry decides by content.
+    A workbook with a DGS General sheet and typed headers is DGS. The app's own network workbook
+    is never claimed by DGS, and a DGS workbook never by excel. Test both directions, plus an
+    ambiguous workbook refused naming both candidates. The body says how an upload reaches the
+    right importer (HOLISTIC).
+  - X7, Excel oracle: the S2 hand fixture as .xlsx maps to the same network and report as the .dgs
+    apart from locations; assert the "sheet <class>, row <n>" text in a refusal.
+  - X8, disclosure: the PR body and release note say the xlsx layout is third-party-documented and
+    untested against a real PowerFactory export.
+  - X9, mutants: mutants.py on both modules; hand-mutate the OP≠"C" refusal, the 5.x FID refusal,
+    the formula refusal, the integral-float formatting (5.0 → "5.0") and the dispatch sniff, each
+    with its killing test. Release-note fragment. About 600 lines is within PR-SIZE-1.
+- 2026-11-17, S3 build (session_01G7qCukUXA9jRyQCkZWGwRz), choices within X1-X9:
+  - The one public PF 2025 7.0 export writes reals with a decimal comma ("158,7713"). A real
+    with exactly one comma between digits and no point now reads as a point; "1.234,5", two
+    commas, or a comma in an integer field stay refused. Put to GK A2 as a plan question.
+  - 7.x: a header with an ID column, or without FID, is refused; General has no OP. A MATRIX
+    column drops every `name:...` column of its name; each is listed unmapped once per class
+    for mapped classes (other classes are already listed whole).
+  - X4: a non-empty sheet that is not a class table is refused (row 1 is not typed headers); a
+    wholly empty sheet is ignored; hidden sheets are read like any other.
+  - X5: the Excel input workbook's zip, declared-size and row checks moved to
+    `gridspine/ingest/xlsx_safe.py` (no pypsa), shared by both readers; `open_workbook` opens
+    read-only, formulas kept, `keep_links=False`.
+  - X6: `ImporterSpec.sniff` ("module:function") and `import_result.for_file(path)`: one
+    importer for the extension wins outright; for `.xlsx` the one sniff that claims the file wins
+    (dgs: a typed General sheet; excel: `xlsx_safe.is_excel_input_workbook`, a sheet only the
+    app's workbooks use), else the one spec marked `fallback` (excel, so S1b's older layouts
+    still route); two claims, or no claim and no single fallback, are refused.
+- 2026-11-17, GK A2 (4): #1678 OK @9a9b4d7b. Added to S3:
+  - X10: ElmLod, ElmGenstat and ElmSym P/Q set-points the file omits are listed as assumed with
+    their default (0), never silently 0; one test per field.
+  - X11: a text value in an int field (tap_side, nntap, nntap0) is an ImportFormatError naming
+    the field, not a bare ValueError; tested. (Built for every int read in the mapper:
+    obj_bus, outserv, on_off, ip_ctrl, shtype too; a fraction is refused the same way.)
+  - D1a, amending D1: in r/d fields only, one comma between digits with no point reads as the
+    decimal mark ("158,7713" → 158.7713). Still refused, naming line, class and attribute: a comma
+    in an i field, mixed marks in one value ("1.234,5"), more than one comma, a leading or trailing
+    comma (a text field keeps its comma as text). One file, one mark: a file with a comma real and
+    a point real is refused naming the first of each; integers carry no mark. The report says
+    "Decimal comma read as decimal mark" once per file. Fixtures are hand-written; the third-party
+    file is neither committed nor named in the repo.
+- 2026-11-19, GK A2 (5): NOT OK @f22e7b52, seven asks, all taken: (1) excel sniffs its known
+  sheets and is the explicit `.xlsx` fallback, a workbook both claim is refused; (2) a damaged
+  sheet is a format error in the sniff and the reader; (3) MATRIX columns listed for every class;
+  (4) a dropped MATRIX column is never parsed or counted for the decimal mark; (5) a refusal test
+  per X11 flag; (6) an understated `<dimension>` test; (7) the docstring says a saved 5.0 reads as 5.
+  Also: a line break in a sheet name is refused like `;`.

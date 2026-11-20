@@ -3,7 +3,11 @@
 
 # GC-19: sequential .con labels with a label-to-id map
 
-Status: needs-triage
+Status: ready-for-agent
+Model tier: sonnet
+Size: S
+Blocked by: #1607 (writes `contingencies.py`), #1608, #1609, #1589 (changes `contingency_list.py`)
+Likely files: `gridspine/handoff/contingencies.py`, `gridspine/ingest/contingency_list.py`, `gridspine/handoff/psse_pack.py`, `tests/gridspine/`
 Type: task
 Parent: `.scratch/grid-compliance/issues/04-psse-pack.md`
 Gated: yes (GK A2, gridspine)
@@ -32,3 +36,7 @@ Issue number 15 was taken on other branches (15 to 18 are in use), so this is 19
 - A label missing from the map, or a map entry with no block, is refused by name.
 - The current refusal test for ids outside the token set is replaced by the round-trip
   test only once the map exists.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Still needed: `write_con` still refuses ids outside the token set, so a bus-name contingency set cannot be written. It shares files with the GC-04 PR4–6 stack and GC-03 PR2, so it waits for them; bundle with GC-18 only if both start at the same time (they share no files).

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { FileText } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { openReliabilityGoal } from '../../layout/flowNavigation'
@@ -110,6 +111,8 @@ export default function AdequacyTab() {
           network.
         </p>
       )}
+      {/* The LOLE goal the studies below judge against (walkthrough asset-investment 01). */}
+      <ReliabilityGoalSummary testId="adequacy-goal" items={['target']} />
 
       <CoptChips
         copt={(copt ?? null) as CoptPayload | null}

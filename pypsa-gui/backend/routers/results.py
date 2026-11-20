@@ -493,6 +493,16 @@ def grid_risk_production_payload(project_id: str | None = None) -> dict:
     `project_id` must be the open project (it is the one whose network and campus run are read), resolved through
     the project ACL before any file is read. `available` false before a solve; `omitted` when the network has no
     process unit. See `services.results.grid_risk_production`."""
+    project_id, project = _open_project_read(
+        project_id, "Grid risk to production reads the open project's network and campus run; open that "
+                    "project first.")
+    return grid_risk_production_of(project, project_id)
+
+
+def _open_project_read(project_id: str | None, not_open: str) -> tuple[str, Any]:
+    """`(project_id, project)` for a read of the open project, for the acting user: `project_id` (default: the open
+    one) must be the open project (409 `no_active_project` / `project_not_open`, `not_open` its message), resolved
+    through the project ACL before anything is read (404 `not_authorized`)."""
     from services import chat_tools, project_registry
 
     active = PyPSAService.get_active_context().project_uuid
@@ -501,16 +511,14 @@ def grid_risk_production_payload(project_id: str | None = None) -> dict:
         raise HTTPException(409, {"error_kind": "no_active_project",
                                   "message": "No project is open; open the project and ask again."})
     if project_id != str(active or ""):
-        raise HTTPException(409, {"error_kind": "project_not_open",
-                                  "message": "Grid risk to production reads the open project's network and "
-                                             "campus run; open that project first."})
+        raise HTTPException(409, {"error_kind": "project_not_open", "message": not_open})
     with chat_tools._acting() as (db, user):
         try:
             project = project_registry.resolve_project(db, user, project_id)
         except HTTPException:
             raise HTTPException(404, {"error_kind": "not_authorized",
                                       "message": "The open project is not one you may read."}) from None
-    return grid_risk_production_of(project, project_id)
+    return project_id, project
 
 
 def grid_risk_production_of(project, project_id: str) -> dict:
@@ -706,6 +714,9 @@ def get_ac_pf_status():
         "available": True,
         "slack_bus_used": s.get("ac_pf_slack_bus_used"),
         "stripped_voll_slacks": s.get("ac_pf_stripped_voll_slacks") or [],
+        # DGS-SEED-1: non-empty when the flow was seeded by lpf() because
+        # these transformers shift phase.
+        "seeded_by": s.get("ac_pf_seeded_by") or [],
         # `converged_per_snapshot` is the legacy `{iso: bool}` dict; on
         # multi-period the same ISO can map to multiple periods so the map
         # is ambiguous. New consumers should use `converged_list` —
@@ -1693,6 +1704,32 @@ def get_eh_study():
     # (Unavailable) while running or for a record without a captured revision.
     out["edited_since_study"] = edited_since(st)
     return out
+
+
+@results_router.get("/eh_study/why/{figure}")
+def get_eh_study_why(figure: str, project_id: str | None = Query(default=None),
+                     actor: User = Depends(require_user)):
+    """
+    Why a Guided Energy Hub study figure (`expected_shortfall`, `design_cost`,
+    `verdict`) has its value (guided-results 02a): the provenance graph's walk
+    to the study run and its inputs, each recorded vs current, outcome first
+    (`explain_study_figure`). Reads only (COPILOT-1). `project_id` must be the
+    open project (409 / 404 as the other open-project reads); an unknown figure
+    is `why_target_unknown` (404), no finished study `study_not_run` (404, 409
+    while it runs).
+    """
+    from services.provenance_graph.eh_study import StudyNotRun
+    from services.provenance_graph.explain import TargetUnknown, explain_study_figure
+
+    with _result_actor(actor):
+        _open_project_read(project_id, "The study's figures are read from the open project; open that "
+                                       "project first.")
+        try:
+            return explain_study_figure(figure)
+        except StudyNotRun as exc:
+            raise HTTPException(exc.status, {"error_kind": "study_not_run", "message": str(exc)}) from exc
+        except TargetUnknown as exc:
+            raise HTTPException(exc.status, {"error_kind": "why_target_unknown", "message": str(exc)}) from exc
 
 
 @results_router.post("/eh_study/abort")

@@ -23,6 +23,7 @@ from harness import site_import_calculations as site_import
 from harness import storage_cycles_calculations as cycles
 from harness import storage_calculations as storage
 from harness import storage_costs
+from harness import solve_validity
 from harness import time_to_power_calculations as time_to_power
 
 PROFILE = "generator-dispatch/1"
@@ -367,7 +368,15 @@ def _window(raw, scope):
 
 
 def scoped_source(ctx, scope, owner=None, investment_state=None):
-    """Capture complete raw populations under the existing project lock."""
+    """Capture complete raw populations under the existing project lock, with
+    the solve's LP/MIP classification and gap (assistant-assurance 10, S2)."""
+    raw = _scoped_source(ctx, scope, owner, investment_state)
+    if isinstance(raw, dict):
+        raw["solve"] = solve_validity.capture(ctx)
+    return raw
+
+
+def _scoped_source(ctx, scope, owner=None, investment_state=None):
     if scope["profile"] == carrier.PROFILE:
         return carrier.source(ctx, scope["entity_id"])
     if scope["profile"] == lost_load.PROFILE:
@@ -734,6 +743,14 @@ def _comparison_values(raw, available, reasons):
             available["cost_change_percent"] = available["cost_delta"] / abs(base) * 100
     reasons["cost_delta"] = "baseline_total_unavailable"
     reasons["cost_change_percent"] = "baseline_denominator_zero_or_unavailable"
+    if "cost_delta" in available:
+        # A delta inside the two solves' combined MIP gap has no established sign.
+        limit = solve_validity.raw_delta_limit(
+            available["cost_delta"], raw.get("solve"), comparison["raw"].get("solve"))
+        if limit:
+            for metric in ("cost_delta", "cost_change_percent"):
+                available.pop(metric, None)
+                reasons[metric] = limit
 
 
 def _comparison_disclosure(scope):

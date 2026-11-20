@@ -86,6 +86,7 @@ from db.session import get_db
 from deps import optional_user
 from models.report import ReportDocument
 from routers.deps import AuthorizedProject, ProjectAccessDep
+from services import project_write_gate
 from services.http_filenames import content_disposition
 from services.reports import pdf, roundtrip_service, store, templates
 from services.reports.docx_reader import TemplateOutline
@@ -280,6 +281,25 @@ def _check_lock(project: AuthorizedProject, db: DBSession, user: User | None) ->
     _lock = _lock_target(project)
     if _lock is not None:
         _check_project_lock(db, _lock, user)
+
+
+def _check_lock_unless_viewer(project: AuthorizedProject, db: DBSession,
+                              user: User | None) -> bool:
+    """`_check_lock`, skipped for a viewer (VIEWER-ROLE-1 Q3/Q4, GK B F1 on #1622).
+    Returns whether the caller is a viewer, so a handler reuses this one read.
+
+    A viewer can never take the edit lock, so without the skip an editor's
+    open project would refuse every viewer comment and export. The skip is
+    safe: a comment writes only the report's comments file under
+    `store.report_lock` (cross-process, honours a directory close), and an
+    export renders the saved version from disk into a new upload, never the
+    editor's in-memory state or the report's files. The role is read once per
+    request, here, before the report lock is taken (R3: per request, never
+    cached); an editor keeps the foreign-lock refusal."""
+    viewer = project_write_gate.is_viewer(db, user, project.uuid)
+    if not viewer:
+        _check_lock(project, db, user)
+    return viewer
 
 
 def _current_eh_report() -> dict | None:
@@ -624,7 +644,7 @@ def export_report(report_id: str, body: ExportReportBody,
             "message": "PDF export needs LibreOffice (soffice) on this host's PATH, "
                        "and it is not installed here. Export the .docx instead.",
         })
-    _check_lock(project, db, user)
+    _check_lock_unless_viewer(project, db, user)
     try:
         doc = store.load_report(project.directory, report_id, body.version)
     except store.ReportStoreError as exc:
@@ -1126,7 +1146,7 @@ def add_report_comment(report_id: str, body: CommentBody,
     from services.reports import revisions
 
     _latest_or_404(project, report_id)
-    _check_lock(project, db, user)
+    _check_lock_unless_viewer(project, db, user)
     text = body.text.strip()
     if not text or len(text) > revisions.MAX_COMMENT_CHARS:
         raise HTTPException(422, {
@@ -1151,7 +1171,13 @@ def withdraw_report_comment(report_id: str, comment_id: str,
     from services.reports import revisions
 
     _latest_or_404(project, report_id)
-    _check_lock(project, db, user)
+    viewer = _check_lock_unless_viewer(project, db, user)
+    # A viewer may withdraw only their own comment (owner decision VIEWER-ROLE-1, Q3).
+    if viewer:
+        mine = [c for c in revisions.load_comments(project.directory, report_id)
+                if c.comment_id == comment_id and c.created_by == getattr(user, "email", None)]
+        if not mine:
+            raise project_write_gate.refusal()
     try:
         comment = revisions.withdraw(project.directory, report_id, comment_id)
     except (revisions.RevisionError, store.ReportStoreError) as exc:
