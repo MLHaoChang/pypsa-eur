@@ -3,7 +3,7 @@
 
 # Guide tour: opt-in only, numbering and copy out of step with the stepper
 
-Status: ready-for-agent
+Status: in-progress (PR open)
 Model tier: sonnet
 Size: M
 Gated: UX

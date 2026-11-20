@@ -7,7 +7,7 @@ import { FileText } from 'lucide-react'
 import Kpi from '../../../components/Kpi'
 import ResultState from '../../../components/ResultState'
 import { useUIStore } from '../../../store/uiStore'
-import { fmeaTopRows, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
+import { fmeaTopRows, LEVERS_SECTION, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
 import { zeroReasonText } from '../../results/fmea'
 import { fmtCurrency } from '../../results/shared'
 import { studyHasResults } from '../flow'
@@ -15,10 +15,13 @@ import { headline, riskName } from '../headline'
 import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
-import { useDispatchSolved, useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { useDispatchSolved, useHubLevers, useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { cheaperDuration, leversFinding } from '../cheaperDuration'
+import { showResultsTab } from '../../../layout/flowNavigation'
 import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
 import { costTileLabel, kpiMoney } from '../plainWords'
+import { SizedDesignTable } from '../../results/SizedDesignTable'
 import { useQuery } from '@tanstack/react-query'
 import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
 import { networkApi } from '../../../api/network'
@@ -51,6 +54,20 @@ export function openFullReport(): void {
   ui.requestEhReport()
 }
 
+/** "Design options ›": Results › Adequacy, the Energy Hub panel opened and
+ *  scrolled to its levers block (request-then-scroll). Guided stays in Guided,
+ *  as "Show the engineering detail" does, with the Results panel's own "Back
+ *  to Results"; Expert goes through showResultsTab, whose Back pill returns. */
+export function openDesignOptions(): void {
+  const ui = useUIStore.getState()
+  if (ui.uiMode === 'guided') {
+    ui.setSlidePanel('results')
+    ui.requestResultsTab('adequacy', LEVERS_SECTION)
+    return
+  }
+  showResultsTab('adequacy', { section: LEVERS_SECTION })
+}
+
 /** Years the Monte Carlo modelled, from the certification section (UX review N10). */
 function horizonYearsOf(report: ReturnType<typeof useHubReport>): number | null {
   const h = report?.sections?.certification?.payload?.horizon_years
@@ -77,6 +94,9 @@ export function ResultsCard() {
   const risks = rows.filter(r => !isNoShortfall(r)).slice(0, 3)
   const coped = rows.filter(isNoShortfall).map(r => riskName(r.name || r.mode_id))
   const gaps = report ? notEstablishedNotes(report) : []
+  // A cheaper battery duration the study's levers already found (WALK-IMPROVE-1).
+  const levers = useHubLevers(!running && leversFinding(review?.findings) != null)
+  const cheaper = cheaperDuration(review?.findings, levers, report)
   const cost = report?.cost_at_target_eur
   const project = useUIStore(s => s.currentProject)
   const multiPeriod = report?.period_basis === 'npv_multi_period'
@@ -157,6 +177,15 @@ export function ResultsCard() {
           <p data-testid="hub-results-verdict" className="text-[14px] font-semibold text-text">
             {headline(review, report)}
           </p>
+          {cheaper && (
+            <p data-testid="hub-results-cheaper-duration" className="text-[12px] text-text">
+              {cheaper}{' '}
+              <button type="button" data-testid="hub-results-design-options" onClick={openDesignOptions}
+                className="text-accent hover:underline">
+                {SECTION_LABEL.levers} ›
+              </button>
+            </p>
+          )}
           {/* P26 gate: with no goal the headline asks for one — take the user there. */}
           {review.status === 'ok' && review.summary?.target_lole_h == null && (
             <button type="button" data-testid="hub-results-set-goal"
@@ -186,6 +215,9 @@ export function ResultsCard() {
           // The banner above says "Out of date" once for the card; the tile only dims.
           state="ready" dimmed={stale || freshnessUnknown} />
       )} />
+
+      {/* What the study chose to build (walkthrough asset-investment 03). */}
+      <SizedDesignTable report={report} mode="guided" testId="hub-results-sized" />
 
       {(risks.length > 0 || coped.length > 0) && (
         <div className="flex flex-col gap-1 text-[12px]">

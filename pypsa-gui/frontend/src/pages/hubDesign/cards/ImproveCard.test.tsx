@@ -24,7 +24,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
     resultsApi: {
       ...actual.resultsApi,
       getEhStudy: vi.fn(), getEhReview: vi.fn(), getEhTemplate: vi.fn(),
-      getFmeaModes: vi.fn(),
+      getFmeaModes: vi.fn(), getEhLevers: vi.fn(), getEhReferenceDesign: vi.fn(),
     },
   }
 })
@@ -49,6 +49,8 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', report: REPORT })
   vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
+  vi.mocked(resultsApi.getEhLevers).mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
   sweep.mutate.mockReset()
   sweep.reset.mockReset()
   sweep.isSuccess = false
@@ -220,7 +222,8 @@ describe('ImproveCard', () => {
   it('no high or medium finding: says so', async () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [F[2], F[3]] }))
     mount()
-    expect((await screen.findByTestId('hub-improve-none')).textContent).toMatch(/nothing urgent/i)
+    expect((await screen.findByTestId('hub-improve-none')).textContent)
+      .toBe('Nothing urgent: the study found no important or worthwhile change.')
   })
 })
 
@@ -365,5 +368,63 @@ describe('Improve on the only feeder to a must-stay-on bus (asset-walk 2026-11-1
       .toBe('Add a second feeder or backup supply at Hospital. A spare unit or storage elsewhere cannot supply Hospital while Hospital feeder is out.')
     expect(li.textContent).not.toContain('spare unit or extra storage (rough estimate)')
     expect(screen.queryByTestId('hub-improve-do-fmea_dominant_mode')).toBeNull()
+  })
+})
+
+// WALK-IMPROVE-1: the Results card's cheaper battery duration, repeated as one
+// row without a link.
+describe('ImproveCard cheaper battery duration', () => {
+  const SENTENCE = 'A 24 h battery also meets the energy-not-served cap at a system cost of € 3.1 m a year (design: 4 h, € 3.5 m)'
+  function withLevers(meets: boolean | null = true) {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', report: { ...REPORT,
+      sections: { ...REPORT.sections, sizing: { status: 'ok', payload: { assets: [
+        { component: 'StorageUnit', name: 'battery', carrier: 'battery', built_mw: 2, built_mwh: 8, max_hours: 4 },
+      ] } } } } })
+    const rv = review()
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue({ ...rv, findings: [...rv.findings,
+      { id: 'levers_best_option', severity: 'info', title: 'Cheapest lever option',
+        evidence: { kind: 'storage_duration', value: 24, cost_at_target_eur: 3_100_000, spread_eur: 400_000 },
+        recommendation: '', actions: [] }] })
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({ kind: 'storage_duration', options: [
+      { kind: 'storage_duration', value: 4, unit: 'h', status: 'ok', cost_at_target_eur: 3_500_000, meets_target: true },
+      { kind: 'storage_duration', value: 24, unit: 'h', status: 'ok', cost_at_target_eur: 3_100_000, meets_target: meets },
+    ] })
+  }
+
+  it('shows the sentence as one row, without a link', async () => {
+    withLevers()
+    mount()
+    const row = await screen.findByTestId('hub-improve-cheaper-duration')
+    expect(row.textContent?.replace(/\u00a0/g, ' ')).toBe(SENTENCE)
+    expect(row.querySelector('button, a')).toBeNull()
+    // an info finding: still not in the findings list
+    expect(screen.queryByTestId('hub-improve-levers_best_option')).toBeNull()
+  })
+
+  it('nothing urgent and a cheaper option: the top line leads into the row', async () => {
+    withLevers()
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [F[2], F[3],
+      { id: 'levers_best_option', severity: 'info', title: 'Cheapest lever option',
+        evidence: { kind: 'storage_duration', value: 24, cost_at_target_eur: 3_100_000, spread_eur: 400_000 },
+        recommendation: '', actions: [] }] }))
+    mount()
+    await screen.findByTestId('hub-improve-cheaper-duration')
+    expect(screen.getByTestId('hub-improve-none').textContent).toBe('Nothing urgent. One cheaper option:')
+  })
+
+  it('nothing when the levers table does not say the option meets the cap', async () => {
+    withLevers(false)
+    mount()
+    await screen.findByTestId('hub-improve-certification_fail')
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    expect(screen.queryByTestId('hub-improve-cheaper-duration')).toBeNull()
+  })
+
+  it('nothing when the levers table leaves meets_target unknown (null)', async () => {
+    withLevers(null)
+    mount()
+    await screen.findByTestId('hub-improve-certification_fail')
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    expect(screen.queryByTestId('hub-improve-cheaper-duration')).toBeNull()
   })
 })
