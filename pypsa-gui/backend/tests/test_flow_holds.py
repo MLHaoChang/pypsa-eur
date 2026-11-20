@@ -529,3 +529,36 @@ def test_an_extendable_asset_between_equal_bounds_reads_as_fixed():
     assert fixed["candidate"] is None  # p_nom_max = inf: sized by the study
     assert fixed["ranged"] is None  # 10 to 60: sized by the study
     assert fixed["pv"] is None  # not extendable: its own size
+
+
+def test_only_an_extendable_asset_row_with_two_usable_bounds_is_fixed():
+    """The guard and the bounds of `_pin_sizes` (mutants on template-e2e 14 PR 2): a fixed-size
+    asset with equal bounds, a blank lower bound, a row of no asset class, and a large size
+    within the relative tolerance."""
+    n = _hand_built()
+    n.add("Generator", "plain", bus="site", p_nom=5.0, p_nom_min=5.0, p_nom_max=5.0)
+    n.add(
+        "Generator",
+        "no_min",
+        bus="site",
+        p_nom=5.0,
+        p_nom_extendable=True,
+        p_nom_max=5.0,
+    )
+    n.generators.at["no_min", "p_nom_min"] = np.nan
+    n.add(
+        "Generator",
+        "big",
+        bus="site",
+        p_nom=2e6,
+        p_nom_extendable=True,
+        p_nom_min=2e6,
+        p_nom_max=2e6 + 1.0,
+    )
+    rows = [
+        S._held("Generator", g, extendable=bool(n.generators.at[g, "p_nom_extendable"]))
+        for g in ("plain", "no_min", "big")
+    ]
+    rows.append(S._held("Carrier", "solar", extendable=True))
+    S._pin_sizes(n, rows)
+    assert [r["fixed_size"] for r in rows] == [None, None, 2e6, None]
