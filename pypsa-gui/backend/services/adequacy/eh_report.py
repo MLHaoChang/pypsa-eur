@@ -144,14 +144,15 @@ def _export_only(n, link: str, bus: str) -> bool:
 def _import_peaks(n, links: tuple[str, ...]) -> dict[Any, float] | None:
     """The peak import through ``links`` per period (one key, None, on a
     single-period network): the max over snapshots of their summed ``p0``,
-    import positive, in the bus unit. None when unsolved."""
+    import positive, in the bus unit; a horizon (or period) with no import
+    peaks at 0, never a negative "import" (GK A 33). None when unsolved."""
     flows = getattr(n.links_t, "p0", None)
     if not getattr(n, "is_solved", False) or flows is None or not links:
         return None
     cols = [c for c in links if c in flows.columns]
     if not cols:
         return None
-    total = flows[cols].sum(axis=1)
+    total = flows[cols].sum(axis=1).clip(lower=0.0)
     if len(getattr(n, "investment_periods", ())) > 0:
         return {int(k): float(v) for k, v in total.groupby(level=0).max().items()}
     return {None: float(total.max())}
