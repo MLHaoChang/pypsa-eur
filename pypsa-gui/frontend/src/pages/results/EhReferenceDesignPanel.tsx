@@ -1433,7 +1433,7 @@ export function EhReferenceDesignPanel() {
           </div>
 
           {filledNote && (
-            <p role="status" data-testid="eh-filled-from-improve" className="text-[11px] text-accent">
+            <p role="status" data-testid="eh-filled-from-improve" className="text-[11px] text-muted">
               Filled in from the Improve card: {filledNote}. Review and run.
             </p>
           )}

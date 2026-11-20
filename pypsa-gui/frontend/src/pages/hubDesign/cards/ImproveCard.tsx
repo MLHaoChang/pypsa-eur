@@ -23,7 +23,7 @@ import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
-import { DEST_WHERE, improvePlan, openImproveInExpert, type ImprovePlan } from '../improvePrefill'
+import { DEST_WHERE, improvePlan, openImproveInExpert, openStressScenarios, type ImprovePlan } from '../improvePrefill'
 
 export function openFmeaTab(): void {
   const ui = useUIStore.getState()
@@ -196,6 +196,11 @@ export function ImproveCard() {
         )}
         <div data-testid="hub-improve-stress-row" className="flex flex-wrap items-center gap-2">
           <span className="text-text"><Term k="stress_scenario">Hard conditions to test</Term>:</span>
+          <button type="button" data-testid="hub-improve-open-stress" onClick={openStressScenarios}
+            title="Open: Goal › More settings › Hard conditions" aria-label="Open the hard conditions: Goal › More settings"
+            className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] text-text hover:border-accent hover:text-accent">
+            <ExternalLink size={12} /> Open the hard conditions
+          </button>
           <DelegateButton testId="hub-improve-add-stress" text={stressScenarioText(context)}
             label="Add a stress scenario" />
         </div>

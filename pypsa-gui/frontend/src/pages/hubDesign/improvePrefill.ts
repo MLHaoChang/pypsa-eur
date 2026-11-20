@@ -16,7 +16,8 @@ import {
   EMPTY_PACK_FORM, OPTIONAL_STAGES, leverKeysFor, type LeverKey, type PackForm,
 } from '../results/EhReferenceDesignPanel'
 import { useUIStore } from '../../store/uiStore'
-import { withReturnFrom } from '../../layout/flowNavigation'
+import { openSectionInGuided, withReturnFrom } from '../../layout/flowNavigation'
+import { useHubDesignStore } from './hubDesignStore'
 
 /** Where "Open in Expert" goes. */
 export type ImproveDest = 'study' | 'goal' | 'voll' | 'bounds'
@@ -219,7 +220,16 @@ export function openImproveInExpert(title: string, plan: ImprovePlan): void {
       s.setSlidePanel('simparams')
       s.requestSolverBlock(plan.dest === 'goal' ? 'goal' : 'voll')
     }
-  })
+  }, 'Improve')
+}
+
+/** "Open the stress scenarios": the Goal card's editor, "More settings"
+ *  open, in Guided (where the Improve card is), with Back to Improve. */
+export function openStressScenarios(): void {
+  withReturnFrom(() => {
+    useHubDesignStore.getState().setGoalAdvancedRequested(true)
+    openSectionInGuided('scenarios')
+  }, 'Improve')
 }
 
 /** Dropped when the user changes (AuthProvider's user-scoped reset). */

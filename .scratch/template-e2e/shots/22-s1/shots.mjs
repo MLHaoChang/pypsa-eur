@@ -84,14 +84,21 @@ try {
     const resume = page.getByRole('link', { name: /Resume project/ })
     if (await resume.count()) { await resume.first().click(); await page.waitForURL(u => !u.pathname.startsWith('/projects')); await page.waitForLoadState('networkidle') }
     await page.waitForTimeout(2500)
+    // The harness opens the project from localStorage, so the first autosave
+    // can race the load and toast a refusal; that toast is the harness's, not
+    // this PR's, so it is hidden before each shot (UX 2 on #1757).
+    const hideToasts = () => page.evaluate(() => {
+      for (const n of document.querySelectorAll('div[style*="z-index: 9999"]')) n.style.visibility = 'hidden'
+    })
     const shot = async (box, name) => {
+      await hideToasts()
       try {
         await box.scrollIntoViewIfNeeded()
         const f = path.join(OUT, `${name}-${scheme}.png`)
         await box.screenshot({ path: f }); written.push(f)
       } catch (e) { problems.push(`${scheme}/${name}: ${e.message.split('\n')[0]}`) }
     }
-    const view = async name => { const f = path.join(OUT, `${name}-${scheme}.png`); await page.screenshot({ path: f }); written.push(f) }
+    const view = async name => { await hideToasts(); const f = path.join(OUT, `${name}-${scheme}.png`); await page.screenshot({ path: f }); written.push(f) }
     const toImprove = async () => {
       await page.getByTestId('hub-design-panel').waitFor({ timeout: 8000 }).catch(async () => {
         await page.evaluate(async () => { const { useUIStore } = await import('/src/store/uiStore.ts'); useUIStore.getState().setSlidePanel('hubDesign') })
@@ -107,6 +114,7 @@ try {
     try {
       await toImprove()
       await shot(page.getByTestId('hub-improve-list'), '1-improve-card')
+      await shot(page.getByTestId('hub-improve-stress-row').locator('xpath=..'), '1b-improve-hard-conditions')
       // Study re-run: Results › Adequacy, form filled in.
       await page.getByTestId('hub-improve-open-fmea_dominant_mode').click(); await page.waitForTimeout(2500)
       await page.getByTestId('eh-filled-from-improve').scrollIntoViewIfNeeded()

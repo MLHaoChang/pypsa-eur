@@ -381,3 +381,22 @@ describe('ImproveCard — Open in Expert', () => {
     expect(useChatStore.getState().requestQueue).toEqual([])
   })
 })
+
+describe('ImproveCard — way back and the stress scenarios (UX 2 on #1757)', () => {
+  it('the Back pill names the Improve card', async () => {
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-improve-open-certification_fail'))
+    expect(useUIStore.getState().flowReturn?.label).toBe('Improve')
+  })
+
+  it('"Open the hard conditions" opens the Goal card’s editor in Guided, with Back to Improve', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    const user = mount()
+    const btn = await screen.findByTestId('hub-improve-open-stress')
+    expect(btn.textContent).toContain('Open the hard conditions')
+    await user.click(btn)
+    expect(useHubDesignStore.getState().goalAdvancedRequested).toBe(true)
+    expect(useUIStore.getState().uiMode).not.toBe('expert')
+    expect(useUIStore.getState().flowReturn?.label).toBe('Improve')
+  })
+})

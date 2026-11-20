@@ -101,8 +101,10 @@ function withReturn(target: FlowTarget | null, jump: () => void, fromSite3D = fa
   if (origin) useUIStore.setState({ flowReturn: origin })
 }
 
-/** Run a programmatic jump (the assistant's) and remember the view it left. */
-export function withReturnFrom(jump: () => void): void { withReturn(null, jump) }
+/** Run a programmatic jump (the assistant's) and remember the view it left;
+ *  `label` names it on the Back pill when the section's name would not
+ *  (an Improve card: "Back to Improve"). */
+export function withReturnFrom(jump: () => void, label?: string): void { withReturn(null, jump, false, label) }
 
 /** A jump that leaves Site 3D: "Back to Site 3D" lands on the same Site, part and selection. */
 export function withReturnFromSite3D(jump: () => void): void { withReturn(null, jump, true) }
