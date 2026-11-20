@@ -283,12 +283,161 @@ def _restore_link_power(n, name: str, saved: dict[str, float]) -> None:
             n.links.at[name, col] = val
 
 
+def _mw(v: float) -> str:
+    """Display only: the compare that decides a change is always exact."""
+    return "unlimited" if v == float("inf") else f"{v:,.6g} MW"
+
+
+def _link_float(n, name: str, col: str) -> float | None:
+    if col not in n.links.columns:
+        return None
+    try:
+        return float(n.links.at[name, col])
+    except (TypeError, ValueError):
+        return None
+
+
+def _require_mw(n, selected: list[str]) -> None:
+    """The weak-grid cap is in MW: refuse an import Link whose grid side
+    counts in another unit (review-gk unit rule), never a silent mix."""
+    from services.process_products import bus_unit
+
+    for name in selected:
+        bus = str(n.links.at[name, "bus0"])
+        unit = bus_unit(n, bus)
+        if unit not in ("", "MWh"):
+            raise ArchetypePackError(
+                f"the grid connection is measured in {unit}, not MW; the "
+                "weak-grid study's import cap cannot be applied to it")
+
+
+def _connection_writes(n, pack: ArchetypePack, selected: list[str],
+                       *, keep_connection: bool) -> list[dict[str, Any]]:
+    """Every write the pack overlay makes to a user value, before it is made:
+    ``{link, attr, before, after}`` (a ``t_`` attr is a time series written
+    whole; its ``before`` is None). The one source for both
+    `apply_archetype_pack_detailed` and `planned_changes`, so the preview never
+    drifts from the apply. Compares are exact; text rounds for display only."""
+    writes: list[dict[str, Any]] = []
+
+    def put(link, attr, before, after):
+        if before is None or before != after:
+            writes.append({"link": link, "attr": attr,
+                           "before": before, "after": after})
+
+    if pack.archetype == "off_grid":
+        # Class-B discipline: zero flow via p_max_pu/p_min_pu, keep p_nom > 0
+        # so validation's link_p_nom_invalid does not fire.
+        for name in selected:
+            for attr in ("p_max_pu", "p_min_pu"):
+                cur = _link_float(n, name, attr)
+                if cur is not None:
+                    put(name, attr, cur, 0.0)
+            for attr in ("p_max_pu", "p_min_pu"):
+                ts = getattr(getattr(n, "links_t", None), attr, None)
+                if ts is not None and name in getattr(ts, "columns", []) \
+                        and not (ts[name] == 0.0).all():
+                    put(name, f"t_{attr}", None, 0.0)
+    elif pack.archetype == "weak_flexible" and not keep_connection:
+        total = pack.import_overlay.import_p_nom_mw
+        if total is None:
+            raise ArchetypePackError(
+                "weak_flexible pack requires import_overlay.import_p_nom_mw")
+        _require_mw(n, selected)
+        each = float(total) / float(len(selected))
+        for name in selected:
+            put(name, "p_nom", float(n.links.at[name, "p_nom"]), each)
+            cur = _link_float(n, name, "p_nom_max")
+            # Only an existing max is tightened (inf included); NaN is left.
+            if cur is not None and cur == cur:
+                put(name, "p_nom_max", cur, each)
+    return writes
+
+
+_KIND_OF = {"p_nom": "connection_limit", "p_nom_max": "expansion_limit",
+            "p_max_pu": "connection_closed", "p_min_pu": "connection_closed",
+            "t_p_max_pu": "connection_closed", "t_p_min_pu": "connection_closed"}
+
+
+def _rows(n, selected: list[str], writes: list[dict[str, Any]], *,
+          off_grid_chosen: bool) -> list[dict[str, Any]]:
+    by_kind: dict[str, list[dict[str, Any]]] = {}
+    for w in writes:
+        by_kind.setdefault(_KIND_OF[w["attr"]], []).append(w)
+    rows: list[dict[str, Any]] = []
+    k = len(selected)
+    many = f" over its {k} connections" if k > 1 else ""
+    if "connection_limit" in by_kind:
+        before = sum(float(n.links.at[s, "p_nom"]) for s in selected)
+        after = sum(w["after"] for w in by_kind["connection_limit"]) + sum(
+            float(n.links.at[s, "p_nom"]) for s in selected
+            if s not in {w["link"] for w in by_kind["connection_limit"]})
+        if before != after:
+            text = (f"The study {{v}} your grid connection limit to "
+                    f"{_mw(after)}{many} (your project: {_mw(before)}).")
+        else:
+            text = (f"The study {{v}} your {_mw(after)} grid connection "
+                    f"limit evenly{many} ({_mw(after / k)} each).")
+        verb = ("would set", "set") if before != after else ("would share", "shared")
+        text = (text.replace("{v}", verb[0]), text.replace("{v}", verb[1]))
+        rows.append({"kind": "connection_limit", "before_mw": before,
+                     "after_mw": after, "needs_accept": True, "text": text[0],
+                     "done": text[1], "writes": by_kind["connection_limit"]})
+    if "expansion_limit" in by_kind:
+        ws = by_kind["expansion_limit"]
+        before = max(w["before"] for w in ws)
+        after = sum(w["after"] for w in ws)
+        rows.append({
+            "kind": "expansion_limit", "before_mw": before, "after_mw": after,
+            "needs_accept": True,
+            "text": (f"The study would cap how far your grid connection can be "
+                     f"expanded at {_mw(after)} (your project: {_mw(before)})."),
+            "done": (f"The study capped how far your grid connection can be "
+                     f"expanded at {_mw(after)} (your project: {_mw(before)})."),
+            "writes": ws})
+    if "connection_closed" in by_kind:
+        before = sum(float(n.links.at[s, "p_nom"]) for s in selected)
+        rows.append({
+            "kind": "connection_closed", "before_mw": before, "after_mw": 0.0,
+            "needs_accept": not off_grid_chosen,
+            "text": (f"The off-grid study would close your {_mw(before)} grid "
+                     "connection: no power is imported."),
+            "done": (f"The off-grid study closed your {_mw(before)} grid "
+                     "connection: no power is imported."),
+            "writes": by_kind["connection_closed"]})
+    return rows
+
+
+def planned_changes(n, pack: ArchetypePack, *, keep_connection: bool = False,
+                    off_grid_chosen: bool = False) -> list[dict[str, Any]]:
+    """What the study pack would change in the user's network, listed before
+    Run (template-e2e 10, owner decision TE2E-10-ASK-1). Reads only.
+
+    One row per kind (``connection_limit``, ``expansion_limit``,
+    ``connection_closed``): ``before_mw``, ``after_mw``, ``needs_accept``,
+    plain ``text`` with no raw ids, and the exact per-Link ``writes`` that
+    `apply_archetype_pack_detailed` makes with the same ``keep_connection``.
+    ``off_grid_chosen``: off_grid is the user's own saved site type, which
+    counts as the accept for closing the connection (GK A); otherwise that
+    row needs an accept too."""
+    selected = select_import_links(n, pack.import_overlay)
+    if not selected or pack.archetype == "strong_grid":
+        return []
+    writes = _connection_writes(n, pack, selected, keep_connection=keep_connection)
+    return _rows(n, selected, writes, off_grid_chosen=off_grid_chosen)
+
+
 def apply_archetype_pack(n, pack: ArchetypePack) -> Callable[[], None]:
     return apply_archetype_pack_detailed(n, pack).undo
 
 
-def apply_archetype_pack_detailed(n, pack: ArchetypePack) -> ApplyResult:
-    """Apply import overlay (spec §6). Returns undo + metadata."""
+def apply_archetype_pack_detailed(n, pack: ArchetypePack, *,
+                                  keep_connection: bool = False) -> ApplyResult:
+    """Apply import overlay (spec §6). Returns undo + metadata.
+
+    ``keep_connection`` (template-e2e 10): a weak_flexible pack leaves the
+    user's connection limit and expansion bound as built; the study's cap is
+    then the user's own limit. The writes are `planned_changes`' writes."""
     overlay = pack.import_overlay
     selected = select_import_links(n, overlay)
     warnings: list[str] = []
@@ -299,69 +448,42 @@ def apply_archetype_pack_detailed(n, pack: ArchetypePack) -> ApplyResult:
             "Links (eh_role=grid_import, eh_poc bus, or import_carriers); "
             "none matched"
         )
+    if pack.archetype not in ("strong_grid", "weak_flexible", "off_grid"):
+        raise ArchetypePackError(f"unknown archetype {pack.archetype!r}")
 
     saved: dict[str, dict[str, object]] = {
         name: _save_link_power(n, name) for name in selected
     }
-
     if pack.archetype == "strong_grid":
-        # No-op mutation.
-        pass
-    elif pack.archetype == "off_grid":
-        # Class-B discipline: zero flow via p_max_pu/p_min_pu, keep p_nom > 0
-        # so validation's link_p_nom_invalid does not fire.
-        for name in selected:
-            if "p_max_pu" in n.links.columns:
-                n.links.at[name, "p_max_pu"] = 0.0
-            if "p_min_pu" in n.links.columns:
-                n.links.at[name, "p_min_pu"] = 0.0
-            # Time-series overlays if present.
-            for attr in ("p_max_pu", "p_min_pu"):
-                ts = getattr(getattr(n, "links_t", None), attr, None)
-                if ts is not None and name in getattr(ts, "columns", []):
-                    saved[name][f"t_{attr}"] = ts[name].copy()
-                    ts[name] = 0.0
-    elif pack.archetype == "weak_flexible":
-        total = overlay.import_p_nom_mw
-        if total is None:
-            raise ArchetypePackError(
-                "weak_flexible pack requires import_overlay.import_p_nom_mw")
-        each = float(total) / float(len(selected))
-        split = (f"import_p_nom_mw {float(total):g} MW split over "
-                 f"{len(selected)} Link{'s' if len(selected) != 1 else ''}")
-        for name in selected:
-            rating = float(n.links.at[name, "p_nom"])
-            if abs(rating - each) > 1e-9:
-                verb = "lowered" if each < rating else "raised"
-                warnings.append(
-                    f"weak_flexible {verb} import Link {name!r} p_nom from "
-                    f"{rating:g} MW to {each:g} MW ({split})")
-            n.links.at[name, "p_nom"] = each
-            if "p_nom_max" in n.links.columns:
-                try:
-                    cur = float(n.links.at[name, "p_nom_max"])
-                    # Only tighten an existing finite max; leave NaN alone.
-                    if cur == cur:  # not NaN
-                        n.links.at[name, "p_nom_max"] = each
-                        if abs(cur - each) > 1e-9:
-                            warnings.append(
-                                f"weak_flexible set import Link {name!r} "
-                                f"p_nom_max from {cur:g} MW to {each:g} MW "
-                                f"({split})")
-                except (TypeError, ValueError):
-                    pass
-            if "p_nom_min" in n.links.columns:
-                try:
-                    floor = float(n.links.at[name, "p_nom_min"])
-                except (TypeError, ValueError):
-                    floor = 0.0
-                if floor == floor and floor > each + 1e-9:
-                    warnings.append(
-                        f"import Link {name!r} p_nom_min {floor:g} MW is "
-                        f"above the weak_flexible cap {each:g} MW; the "
-                        "solve may be infeasible")
+        writes: list[dict[str, Any]] = []
     else:
-        raise ArchetypePackError(f"unknown archetype {pack.archetype!r}")
+        writes = _connection_writes(n, pack, selected,
+                                    keep_connection=keep_connection)
+    rows = _rows(n, selected, writes, off_grid_chosen=True)
+    for w in writes:
+        name, attr = w["link"], w["attr"]
+        if attr.startswith("t_"):
+            ts = getattr(n.links_t, attr[2:])
+            saved[name][attr] = ts[name].copy()
+            ts[name] = w["after"]
+        else:
+            n.links.at[name, attr] = w["after"]
+    warnings.extend(r["done"] for r in rows)
+    if pack.archetype == "weak_flexible":
+        if keep_connection:
+            limit = sum(float(n.links.at[s, "p_nom"]) for s in selected)
+            warnings.append(
+                f"The study kept your grid connection limit of {_mw(limit)}.")
+        else:
+            each = float(overlay.import_p_nom_mw) / float(len(selected))
+            floors = [f for f in (_link_float(n, s, "p_nom_min") for s in selected)
+                      if f is not None and f == f]
+            if floors and max(floors) > each + 1e-9:
+                warnings.append(
+                    f"Your grid connection has a minimum size of "
+                    f"{_mw(max(floors))}, above the study's cap of {_mw(each)}"
+                    f"{' per connection' if len(selected) > 1 else ''}; the "
+                    "study may find no solution.")
 
     def undo() -> None:
         for name, vals in saved.items():
