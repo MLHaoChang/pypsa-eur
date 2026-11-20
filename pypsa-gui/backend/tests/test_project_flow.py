@@ -1145,3 +1145,19 @@ def test_a_weak_grid_site_without_a_readable_limit_blocks_the_study(client, tmp_
     assert item["message"] == row["connection_limit"]["refusal"]
     assert body["run_ready"] is False
     assert all("connection_limit" not in s for s in body["sections"] if s["section"] != "connection")
+
+
+def test_island_assumption_rows_open_the_island_panel_not_expert_capacity_bounds():
+    from services.flow_service import _assumed_items
+
+    items = ["existing island", "island sidecar", "island unit data",
+             "transition RoCoF limit", "island rows", "island break-even",
+             "ride-through settings"]
+    template = {"ledger": [{"item": i, "value": "x", "source": "assumed"} for i in items]}
+    out = _assumed_items(template, {})
+    assert len(out) == len(items)
+    for it in out:
+        assert it["target"]["section"] == "assets", it["target"]
+        assert it["target"]["panel"] == "campusStudy", it["target"]
+    other = _assumed_items({"ledger": [{"item": "battery", "value": 1, "source": "assumed"}]}, {})
+    assert other[0]["target"]["panel"] is None

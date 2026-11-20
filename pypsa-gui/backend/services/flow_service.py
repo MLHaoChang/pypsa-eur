@@ -914,6 +914,20 @@ def _bind_items(facts: _Facts, db, org_id, project_dir: pathlib.Path, n) -> list
     return out
 
 
+# Island rows have no editor of their own in section 5 yet (the Controls block
+# is a later package); until then they open the island panel, Grid study ›
+# Island, in place. Never the Expert Capacity bounds the section fallback gives.
+_ISLAND_WORDS = ("island", "rocof", "ride-through")
+_ISLAND_PANEL = "campusStudy"
+
+
+def _ledger_panel(item: str, section: str | None) -> str | None:
+    low = item.lower()
+    if section == "assets" and any(w in low for w in _ISLAND_WORDS):
+        return _ISLAND_PANEL
+    return None
+
+
 def ledger_section(item: str) -> str | None:
     """The section a template ledger row's `item` files to, or None."""
     low = item.lower()
@@ -1011,8 +1025,9 @@ def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
                              panel=row.get("panel"), value=str(value or "")))
             out[-1]["card"] = card
             continue
+        filed = ledger_section(item) or "project"
         out.append(_item("assumed_default", "warning", message, "template",
-                         ledger_section(item) or "project", entity=item,
+                         filed, entity=item, panel=_ledger_panel(item, filed),
                          value=str(value or "")))
         out[-1]["card"] = card
     energ = [e for e in template.get("energization") or []

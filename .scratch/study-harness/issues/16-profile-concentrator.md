@@ -3,7 +3,7 @@
 
 # 16 — Harness profile: eh_concentrator_staged (planned template)
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: open in #1594
 Model: Opus
 Type: task
 Blocked by: 07; g2p 10 (template), g2p 11 (counterfactual), g2p 12 and 18 (motor start)
