@@ -1,6 +1,9 @@
 import type { FlowHeld, FlowSectionId, FlowTarget } from '../../api/flow'
 import { componentLabel } from '../../utils/componentLabels'
+import type { EhSizedAsset } from '../../api/simulation'
+import { sizedBuilt } from '../results/SizedDesignTable'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
+import { recipeFigure } from '../../utils/recipe'
 
 // The words of a Guided section's list ("what this section holds"). Each word
 // is the owning panel's: the class from `componentLabel`, a size from
@@ -22,19 +25,25 @@ const number = (v: number): string => v.toLocaleString('en-GB', { maximumFractio
 
 /** The row's kind: "Generator", or "Generator, solar" when it has a carrier. */
 export function heldKind(h: FlowHeld): string {
+  if (h.recipe) return ''
   const kind = componentLabel(h.component)
   return h.carrier ? `${kind}, ${h.carrier}` : kind
 }
 
 /** The row's one figure in words, with its unit; null for a carrier. A missing
  *  figure says why instead of showing a dash. */
-export function heldFigure(section: FlowSectionId, h: FlowHeld): string | null {
-  if (section === 'carriers') return null
+export function heldFigure(section: FlowSectionId, h: FlowHeld, sized?: EhSizedAsset): string | null {
+  if (section === 'carriers') return h.recipe ? recipeFigure(h.recipe) : null
   if (section === 'profiles') {
     const word = h.field && (SERIES_WORDS[h.field] ?? FIELD_LABELS[h.field])
     return word ? `${word} time series` : 'Time series'
   }
   const label = section === 'loads' ? PEAK_LOAD : (h.field && FIELD_LABELS[h.field]) || 'Size'
+  // After a study, the size it chose (walkthrough asset-investment 03).
+  // The row's own unit (MW, or t/h on a tonne bus), never an assumed MW.
+  if (h.extendable && sized && sizedBuilt(sized, h.unit) !== 'not reported') {
+    return `${label}: ${sizedBuilt(sized, h.unit)} (by the last study)`
+  }
   if (h.extendable) return `${label}: sized by the study`
   if (h.value === null) return `${label}: ${h.series ? 'its profile has no values yet' : 'not set'}`
   return `${label}: ${number(h.value)}${h.unit ? ` ${h.unit}` : ''}`
@@ -51,8 +60,16 @@ export type HeldHome =
 
 const SERIES_TYPES = new Set(['Load', 'Generator', 'Link'])
 
+/** The field a recipe row's drawer target names: the recipe card, not a Link field (gap 03). */
+export const RECIPE_FIELD = 'recipe'
+
 export function heldHome(section: FlowSectionId, h: FlowHeld): HeldHome {
-  if (h.component === 'Carrier') return { kind: 'expert' }
+  // Section 2 (gap 03): a carrier opens its own Properties card, a recipe row the recipe card,
+  // both in the drawer over the card.
+  if (h.recipe) {
+    return { kind: 'drawer', target: { section, panel: null, component: 'Link', entity: h.entity, field: RECIPE_FIELD,
+      entityLabel: `${h.recipe.label} recipe` } }
+  }
   if (section === 'profiles' && h.field && SERIES_TYPES.has(h.component)) {
     return { kind: 'series', type: h.component as 'Load' | 'Generator' | 'Link', name: h.entity, field: h.field }
   }
@@ -60,10 +77,13 @@ export function heldHome(section: FlowSectionId, h: FlowHeld): HeldHome {
     target: { section, panel: null, component: h.component, entity: h.entity, field: null } }
 }
 
+/** Section 2's recipe rows group under one title, whatever their Link (gap 03). */
+export const RECIPES_GROUP = 'recipes'
+
 /** A group's title: the class as the Expert tables name their tabs. */
 export const GROUP_TITLES: Record<string, string> = {
   Generator: 'Generators', StorageUnit: 'Storage', Store: 'Stores', Load: 'Loads', Link: 'Links',
-  Carrier: 'Carriers',
+  Carrier: 'Carriers', [RECIPES_GROUP]: 'Recipes',
 }
 export const groupTitle = (component: string): string => GROUP_TITLES[component] ?? componentLabel(component)
 
@@ -77,9 +97,10 @@ export function heldRest(shown: number, total: number | undefined): string | nul
 export function heldGroups(holds: FlowHeld[]): { component: string; rows: FlowHeld[] }[] {
   const groups: { component: string; rows: FlowHeld[] }[] = []
   for (const h of holds) {
-    const g = groups.find(x => x.component === h.component)
+    const component = h.recipe ? RECIPES_GROUP : h.component
+    const g = groups.find(x => x.component === component)
     if (g) g.rows.push(h)
-    else groups.push({ component: h.component, rows: [h] })
+    else groups.push({ component, rows: [h] })
   }
   return groups
 }

@@ -79,7 +79,7 @@ describe('ResultsCard headline (§5.5)', () => {
       'No reliability goal was set: the study reports 1.3 h/yr of shortfall. Set a goal to certify.'],
     ['no goal, no shortfall number', review({ summary: { verdict: null, mc_lole_h_per_year: null, target_lole_h: null } }),
       { ...REPORT, mc_lole_h: null, sections: { certification: { status: 'skipped', note: 'no LOLE target — certification not requested' } } },
-      'No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in step 3 (Goal) to get a verdict.'],
+      'No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in section 8, Scenarios & optimisation, to get a verdict.'],
     ['not established', review({ summary: { verdict: null, mc_lole_h_per_year: null, target_lole_h: 3 } }),
       { ...REPORT, sections: { certification: { status: 'not_established', note: 'no hub-side buses' } } },
       'The study could not certify reliability: no hub-side buses'],

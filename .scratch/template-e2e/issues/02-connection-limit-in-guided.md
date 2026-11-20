@@ -3,7 +3,7 @@
 
 # 02 — The connection limit cannot be changed in Guided; "Import efficiency" opens an empty Link form
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: open in #1626
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk
 Size: S
 Gated: UX
