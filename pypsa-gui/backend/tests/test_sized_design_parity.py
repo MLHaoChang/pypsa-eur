@@ -587,3 +587,11 @@ def test_a_zero_minimum_is_no_limit_and_an_asset_without_carrier_is_its_kind():
          "max_mw": None, "p_nom_opt": 1.0}
     assert E._sized_range(a) == "no limit"
     assert E._t_sized_assets({"assets": [a]}).rows[0][1] == "Generator"
+
+
+def test_a_slack_that_delivered_nothing_has_no_row():
+    _n, p = _payload("eh_datacenter")
+    p["product_slacks"] = [{"name": "__lost_nh3", "process_role": "shortfall",
+                            "carrier": "NH3", "p_nom": 30.0, "energy": 1e-10,
+                            "unit": "t/h", "energy_unit": "t"}]
+    assert not any(r[0].startswith("Shortfall") for r in E._t_sizing(p).rows)
