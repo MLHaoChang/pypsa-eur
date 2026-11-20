@@ -24,6 +24,7 @@ vi.mock('../hubDesign/useHubData', () => ({
   useHubStudy: () => ({ study: null, running: false }),
   useHubReview: () => ({ review: null }),
   useHubReport: () => null,
+  useHubLevers: () => null,
   useDispatchSolved: () => undefined,
 }))
 vi.mock('../hubDesign/ChaptersSection', () => ({ ChaptersSection: () => null }))
