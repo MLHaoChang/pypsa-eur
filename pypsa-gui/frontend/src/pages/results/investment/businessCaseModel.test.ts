@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { BusinessCaseOptions, LineItem } from '../../../api/businessCase'
 import {
-  edited, hintUnitWords, parsePaste, priceUnitWords, placeRefusals, placeValidation, provenanceOf, sourceKind,
-  unitNotAllowed, unitsFor, withKind, yearsOf,
+  edited, hintUnitWords, parsePaste, priceUnitWords, placeRefusals, placeValidation, provenanceOf, refusalWords,
+  sourceKind, unitNotAllowed, unitsFor, VOLUME_SCOPE, withKind, yearsOf,
 } from './businessCaseModel'
 
 export const OPTS: BusinessCaseOptions = {
@@ -116,5 +116,24 @@ describe('line edits', () => {
     expect(yearsOf(line({ start_year: 2030, end_year: 2032 }), null)).toEqual([2030, 2031, 2032])
     expect(yearsOf(line(), [2030, 2031])).toEqual([2030, 2031])
     expect(yearsOf(line(), null)).toEqual([])
+  })
+})
+
+describe('the volume factor in words (BC 15)', () => {
+  it('a typed line refused under a lease-up names its column and the fix, never the kind', () => {
+    const t = refusalWords('volume_factor_typed_line', 'lines[0].quantity_source')
+    expect(t).toMatch(/^Quantity from: /)
+    expect(t).toMatch(/100 %/)
+    expect(t).not.toMatch(/volume_factor|lease-up:/i)
+  })
+  it('an unclassified row names the row and the fix', () => {
+    expect(refusalWords('volume_factor_unclassified', 'energy_export')).toBe(
+      'Volume factor (lease-up), %: The energy-model row “energy export” does not follow served volume, so it cannot be scaled. '
+      + 'Set the volume factor to 100 % in the years it runs')
+    expect(refusalWords('volume_factor_unclassified', 'linked:export')).toMatch(/: A line on export does not follow/)
+    expect(refusalWords('volume_factor_unclassified')).toMatch(/^Volume factor \(lease-up\), %: .*100 %/)
+  })
+  it('the scope sentence names what scales, what is kept and what refuses', () => {
+    expect(VOLUME_SCOPE).toMatch(/^Scales: lines priced on the model's served output, energy, network and fuel costs, .* and per-kWh taxes and certificates\. Kept: capacity lines, capital cost lines and fixed charges\. Refused while a year is below 100 %: a typed revenue or cost line, /)
   })
 })

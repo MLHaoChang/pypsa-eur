@@ -69,7 +69,7 @@ export interface CreateFromTemplateOptions {
 /** A template created with parameters: the generic site (G2). */
 export interface TemplateCreate {
   templateId: string
-  params: Record<string, unknown>
+  params?: Record<string, unknown>
   name?: string
 }
 
@@ -103,7 +103,7 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
   // Available templates import via the backend's /projects/from_template/<id>
   // endpoint, which copies the bundled network.nc into a fresh project dir and
   // loads it — same success path as FromFileTab's bundle import.
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: (arg: string | TemplateCreate) => typeof arg === 'string'
       ? projectsApi.createFromTemplate(arg)
       : projectsApi.createFromTemplate(arg.templateId, arg.name, arg.params),
@@ -141,7 +141,7 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
         .catch(() => { /* no template meta: Results opens as it would */ })
     },
     // A refused site parameter is shown beside its field by the form.
-    onError: (e: unknown) => {
+    onError: (e: unknown, arg: string | TemplateCreate) => {
       if (siteParamsRefusal(e) || dcLoadRefusal(e)) return
       // N17: a taken name stays on screen with a way to open that project.
       const taken = nameClashFrom(blockerMessage(e))
@@ -151,10 +151,13 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
           setProjectName(taken)
           onCreated?.(taken)
           openInWorkbench(taken)
-        })
+        }, copyName => mutation.mutate(typeof arg === 'string'
+          ? { templateId: arg, name: copyName }
+          : { ...arg, name: copyName }))
         return
       }
       toast.error(createErrorMessage(e))
     },
   })
+  return mutation
 }

@@ -6,6 +6,7 @@
 import type {
   BusinessCaseOptions, BusinessCaseRefusal, LineItem, LineKind, LinkedOutput,
 } from '../../../api/businessCase'
+import VOLUME_GROUPS from './businessCaseVolumeGroups.json'
 
 export type SourceKind = 'typed' | 'linked' | 'share_of'
 
@@ -95,6 +96,13 @@ export function placeRefusals(refusals: BusinessCaseRefusal[] | null | undefined
  *  and column it names, under `business_case.inputs.lines.<i>.<column>`. */
 export function placeValidation(errors: { loc: string[]; msg: string }[] | undefined): Placed[] {
   return (errors ?? []).map(e => {
+    const v = e.loc.indexOf(VOLUME_FIELD)
+    if (v >= 0) {
+      // The strip's own (BC 15): its year, when the error names one.
+      const year = e.loc[v + 1]
+      return { line: -1, column: VOLUME_FIELD, kind: 'invalid',
+               message: `${VOLUME_LABEL}${year ? ` ${year}` : ''}: ${e.msg.replace(/^Value error, /, '')}` }
+    }
     const i = e.loc.indexOf('lines')
     const line = i >= 0 ? Number(e.loc[i + 1]) : -1
     const column = i >= 0 ? (e.loc[i + 2] ?? '') : ''
@@ -155,19 +163,56 @@ export const REFUSAL_WORDS: Record<string, string> = {
   linked_output_missing: 'Quantity from: this model has no such output',
   double_count: 'Quantity from: the energy model rows already price this output',
   default_unit_mismatch: 'Price: the cost default is in another unit, not filled',
-  volume_factor_typed_line: 'Lease-up: a typed quantity does not say whether it moves with served volume, so a lease-up below 100 % cannot scale it',
-  volume_factor_unclassified: 'Lease-up: this energy model row does not move with served volume, so a lease-up below 100 % cannot scale it',
+  volume_factor_typed_line: 'Quantity from: a typed quantity cannot follow the volume factor (lease-up). Take the quantity from the model, or set the volume factor to 100 % in this line’s years',
+  volume_factor_unclassified: 'Volume factor (lease-up), %: a row that does not follow served volume (export, PPA, CfD) cannot be scaled. Set the volume factor to 100 % in the years it runs',
 }
 
 const COLUMN_OF_FIELD = (field: string | undefined) => parseField(field)?.column ?? ''
 
 export function refusalWords(kind: string, field?: string): string {
   const base = kind.split(':', 1)[0]
+  if (base === 'volume_factor_unclassified' && field && !parseField(field)) {
+    // `field` is the ledger stream, or `linked:<kind>` for a line on that output kind.
+    const row = field.startsWith('linked:') ? `A line on ${field.slice(7).replace(/_/g, ' ')}`
+      : `The energy-model row “${field.replace(/_/g, ' ')}”`
+    return `${VOLUME_LABEL}: ${row} does not follow served volume, so it cannot be scaled. `
+      + 'Set the volume factor to 100 % in the years it runs'
+  }
   const words = REFUSAL_WORDS[base]
   if (words) return words
   const label = COLUMN_LABEL[COLUMN_OF_FIELD(field)]
   return label ? `${label}: refused` : 'Refused'
 }
+
+// ── the volume factor (lease-up, BC 15) ─────────────────────────────────────
+
+export const VOLUME_LABEL = 'Volume factor (lease-up), %'
+export const VOLUME_FIELD = 'volume_factor_by_year'
+
+/** A stored fraction as the percent the strip shows: 0.6 → 60, never 60.00000001. */
+export const pctOf = (f: number): number => Number((f * 100).toPrecision(12))
+
+/** "60 %", "62.5 %": the strip's and the P&L's notation. */
+export const pctText = (f: number): string => `${Number((f * 100).toFixed(1))} %`
+
+/** An entered percent outside 0..100 (or not finite), in words; null when it is fine. */
+export function volumeRefusal(label: string, pct: number): string | null {
+  return Number.isFinite(pct) && pct >= 0 && pct <= 100 ? null : `${label}: must be between 0 and 100 %`
+}
+
+/** Every year of the investment case's operating span, first to last. */
+export const operatingYears = (horizon: [number, number] | null): number[] =>
+  yearsOf({} as LineItem, horizon)
+
+const listWords = (xs: string[]) =>
+  xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`
+const groupWords = (gs: { words: string }[]) => listWords(gs.map(g => g.words))
+
+/** What the factor scales, keeps and refuses, in words, from the groups a backend test
+ *  pins to the engine's volume classes. */
+export const VOLUME_SCOPE = `Scales: ${groupWords(VOLUME_GROUPS.scales)}. `
+  + `Kept: ${groupWords(VOLUME_GROUPS.kept)}. `
+  + `Refused while a year is below 100 %: ${groupWords(VOLUME_GROUPS.refuses)}.`
 
 // ── per-year grid and paste (BCA-SCOPE-1 Q2) ────────────────────────────────
 
