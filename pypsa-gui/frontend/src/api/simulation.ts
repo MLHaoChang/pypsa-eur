@@ -1877,6 +1877,8 @@ export const resultsApi = {
     available: boolean
     slack_bus_used?: string | null
     stripped_voll_slacks?: string[]
+    // Shifting transformers that made lpf() seed the flow (DGS-SEED-1); empty = flat start.
+    seeded_by?: string[]
     // Legacy `{iso: bool}` dict — ambiguous on multi-period (same iso under
     // different periods collapses). Kept for backward compatibility.
     // `null` = PyPSA did not report convergence for that snapshot (AA-12).
