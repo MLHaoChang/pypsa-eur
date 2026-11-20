@@ -28,7 +28,8 @@ export function intentDefaults(src: {
   const critBuses = new Set(src.buses.filter(b => b.eh_critical).map(b => b.name))
   const crit = src.loads.filter(l => critBuses.has(l.bus)).reduce((s, l) => s + Math.abs(pos(l.p_set_peak) ?? pos(l.p_set) ?? 0), 0)
   const critStates = [st.buses, st.loads]
-  const critical: Prefill = critStates.every(s => s === 'ok') && crit > 0 ? { value: text(crit) }
+  // Rounded to the field's precision (0.01 MW), not the sum's float digits.
+  const critical: Prefill = critStates.every(s => s === 'ok') && crit > 0 ? { value: String(Number(crit.toFixed(2))) }
     : missing(critStates, 'The critical load', critBuses.size === 0
       ? 'No bus is marked critical, so the critical load is not known.'
       : 'The critical buses carry no load, so the critical load is not known.')

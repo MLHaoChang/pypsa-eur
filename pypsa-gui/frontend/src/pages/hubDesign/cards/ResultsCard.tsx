@@ -19,12 +19,14 @@ import { useDispatchSolved, useHubReport, useHubReview, useHubStudy } from '../u
 import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
 import { costTileLabel, kpiMoney } from '../plainWords'
+import { SizedDesignTable } from '../../results/SizedDesignTable'
 import { useQuery } from '@tanstack/react-query'
 import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
 import { networkApi } from '../../../api/network'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
+import GridExtensionCard from '../../results/GridExtensionCard'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
 
 
@@ -112,6 +114,7 @@ export function ResultsCard() {
           <ResultState state="not_run" reason="The study writes its verdict, cost and risks here."
             action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} />
         )}
+        <GridExtensionCard />
         {/* No headline yet, so every tile keeps its figure. */}
         <ChaptersSection reliability={reliability} />
       </CardShell>
@@ -184,6 +187,9 @@ export function ResultsCard() {
           state="ready" dimmed={stale || freshnessUnknown} />
       )} />
 
+      {/* What the study chose to build (walkthrough asset-investment 03). */}
+      <SizedDesignTable report={report} mode="guided" testId="hub-results-sized" />
+
       {(risks.length > 0 || coped.length > 0) && (
         <div className="flex flex-col gap-1 text-[12px]">
           <span className="font-semibold text-text"><Term k="top_risks">Biggest risks</Term></span>
@@ -233,6 +239,7 @@ export function ResultsCard() {
           <FileText size={13} /> Show the engineering detail
         </button>
       </div>
+      <GridExtensionCard />
       <ChaptersSection reliability={reliability} headlined={[...HEADLINED]} />
     </CardShell>
   )

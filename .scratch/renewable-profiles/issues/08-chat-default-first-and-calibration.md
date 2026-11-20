@@ -3,7 +3,7 @@
 
 # RP-08 — chat: default-first workflow, shaping and compare tools
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: readiness, shaping and compare tools and the default-first workflow text are on master; left (unverified): OJ-47 to OJ-54 Tier A journeys, inventory check
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
 Blocked by: RP-02, RP-06, RP-07; sequencing with live-copilot LC-03/04/05
