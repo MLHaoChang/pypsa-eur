@@ -66,7 +66,11 @@ import pandas as pd
 import pypsa
 
 from gridspine.handoff.contingencies import conmap_path
-from gridspine.ingest.contingency_list import _NetIndex, read_contingency_list
+from gridspine.ingest.contingency_list import (
+    _marked,
+    _NetIndex,
+    read_contingency_list,
+)
 from gridspine.ingest.import_result import (
     Assumed,
     ImportFormatError,
@@ -98,7 +102,7 @@ _BUS_TYPE = {1: "load bus", 2: "generator bus", 3: "swing bus", 4: "isolated"}
 
 def read_psse(paths: Sequence[Path], options: Mapping[str, Any]) -> ImportResult:
     paths = [Path(p) for p in paths]
-    raw, dyr, con, others = _split(paths)
+    raw, dyr, con, conmap, others = _split(paths)
     try:
         case = read_raw_text(_text(raw), version=options.get("version"))
     except ContractError as exc:
@@ -129,9 +133,7 @@ def read_psse(paths: Sequence[Path], options: Mapping[str, Any]) -> ImportResult
             if "NAME" in case.tables["bus"]
             else {}
         )
-        side, um, n_con = contingencies(
-            con.name, _text(con), net, raw_names, _label_map(con)
-        )
+        side, um, n_con = contingencies(con.name, _text(con), net, raw_names, conmap)
         sidecars["psse_contingencies.json"] = side
         unmapped += um
         counts["Contingencies"] = n_con
@@ -148,7 +150,11 @@ def read_psse(paths: Sequence[Path], options: Mapping[str, Any]) -> ImportResult
 
 
 def _split(paths):
-    """``(raw, dyr | None, con | None, others)``; refuses what cannot be read as one case."""
+    """
+    ``(raw, dyr | None, con | None, conmap | None, others)``; refuses what
+    cannot be read as one case. ``conmap`` is ``<con stem>.conmap.csv`` when
+    it is among ``paths``, else the one beside the ``.con``, else None.
+    """
     by_ext: dict[str, list[Path]] = {".raw": [], ".dyr": [], ".con": []}
     others = []
     for p in paths:
@@ -172,7 +178,12 @@ def _split(paths):
                 f"{len(by_ext[ext])}: {', '.join(p.name for p in by_ext[ext])}"
             )
     dyr, con = (by_ext[ext][0] if by_ext[ext] else None for ext in (".dyr", ".con"))
-    return raws[0], dyr, con, others
+    conmap = None
+    if con is not None:
+        given = [p for p in others if p.name == conmap_path(con).name]
+        others = [p for p in others if p not in given]
+        conmap = given[0] if given else _label_map(con)
+    return raws[0], dyr, con, conmap, others
 
 
 def _text(path: Path) -> str:
@@ -938,6 +949,12 @@ def contingencies(name: str, text: str, n, raw_names: Mapping[int, str], conmap=
     read with ``contingency_list.read_contingency_list`` onto ``n``. Every
     element the reader leaves out is an unmapped row with its line (GK A D6).
     """
+    mark = _marked(text)
+    if mark is not None and conmap is None:
+        raise ImportFormatError(
+            f"{name}: written with a label map; import {conmap_path(name).name} "
+            "together with the .con"
+        )
     try:
         idx = PsseNetIndex(n, raw_names)
         got = read_contingency_list(text, idx, fmt="con", conmap=conmap)
