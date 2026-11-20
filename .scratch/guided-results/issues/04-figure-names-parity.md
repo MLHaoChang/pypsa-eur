@@ -1,6 +1,6 @@
 # One name and unit for LOLE, NPV and LCOE across Guided, Expert, reports and chat
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Spec: `.scratch/guided-results/spec.md`; GK B (62) condition G5, UX (23) condition 9.
 
@@ -42,3 +42,7 @@ surface. The names are fixed in this issue's naming slice, not in #1611. Also: t
 ### LCOE after an edit (UX 24, #1611, 2026-11-17)
 
 After an edit, `/results/headline_kpis` answers 204 whenever `_dispatch_ready(network)` is false (`routers/results.py:3313`), so Guided and Expert show "Not run yet · To get it, solve…" for a project that was solved but is now out of date. The server's 204 should say which case it is (never solved, or solved but out of date) so that LCOE can read "Out of date" in that case. This belongs to this issue's LCOE work, together with the money year.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Scope now: (1) one source of figure names, units and basis lines read by the strip, Investment, Guided, reports, Compare and the harness, with a mode-parity test; (2) NPV named 'Project NPV at the WACC, after tax (unlevered)' everywhere (GK B (63) ruling above); (3) the LCOE card carries its money year. The LOLE word ('LOLE' vs 'Expected shortfall') is not decided: question sent to the coordinator; do the LOLE rename only after the answer. Gated: GK B and UX. Blocked by: none for (1) to (3).
