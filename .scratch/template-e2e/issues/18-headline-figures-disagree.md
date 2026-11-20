@@ -23,3 +23,7 @@ One cost number with a stated basis (NPV or LP objective); fix empty summary; hi
 ## Triage (2026-11-20, master 8a039460)
 
 Checked by code reading only; the app was not re-run. Still true: `HeadlineStrip.tsx` still has the 'Loading the headline figures' state. Acceptance: every cost figure states its basis (LP objective or NPV) wherever it shows; the toast and the Summary agree or say why they differ; the empty-summary and stuck-loading states are fixed; assets that do not apply to the template (grid on an off-grid microgrid) are not listed in Key capacities. Gated: GK A and UX. Blocked by: none.
+
+## Comments
+
+- Seen again 2026-11-20 (template walk, master 1f6905e3): H2: Guided 'Yearly cost' EUR 7.61 M vs Expert Run LOPF Summary 'Total system cost' EUR 9.02 M (status bar 'Obj: € 9 m'), no basis stated on either. DC (34.7 M) and microgrid (3.47 M) agree.

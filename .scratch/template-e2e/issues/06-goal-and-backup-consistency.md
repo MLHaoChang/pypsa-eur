@@ -25,3 +25,7 @@ Journey fit: set up the question (section 8) → run → results header ("the re
 - Backup and control-mode inputs live in section 5 in both modes. Section 8 may show them read-only with a link.
 - (UX) The goal editor shows the effective value with an "Assumed" chip until the user sets it.
 - (UX) Backup and control inputs have one editing home, section 5. Section 8 shows a read-only copy with a `withReturn` link that requests the section, then scrolls to the field.
+
+## Comments
+
+- Seen again 2026-11-20 (template walk, master 1f6905e3): H2 Guided Goal card still reads 'No goal yet' (no default goal); DC and microgrid show 'No goal yet' in the field while the Assumptions row says '3 h/yr (assumed)'. The verdict text now correctly names 'section 8, Scenarios & optimisation'.
