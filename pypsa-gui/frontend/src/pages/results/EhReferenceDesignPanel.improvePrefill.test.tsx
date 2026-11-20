@@ -3,7 +3,7 @@
 // "Filled in from the Improve card" stands only while the form is the one
 // handed over (UX 2 S1 condition 3). Another project's never applies (E3).
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
@@ -82,4 +82,28 @@ it('a viewer’s run is refused in the gate’s plain words, never the code', as
   fireEvent.click(run)
   expect((await screen.findByTestId('eh-blocked')).textContent).toContain(MESSAGE)
   expect(document.body.textContent).not.toContain('project_view_only')
+})
+
+it('a template that loads after the hand-over does not overwrite the form', async () => {
+  vi.mocked(resultsApi.getEhTemplate).mockImplementation(
+    () => new Promise(r => setTimeout(() => r({ pack_overrides: {}, stages: ['frontier'] } as never), 30)))
+  // A goal-only finding hands over the empty form: the template must not
+  // take it for an untouched one.
+  useImprovePrefillStore.getState().set({ project: 'Demo', title: 'Tighter target', pack: EMPTY_PACK_FORM })
+  mount()
+  await screen.findByTestId('eh-filled-from-improve')
+  await waitFor(() => expect(resultsApi.getEhTemplate).toHaveBeenCalled())
+  await new Promise(r => setTimeout(r, 80))
+  expect(screen.getByTestId('eh-filled-from-improve')).toBeTruthy()
+})
+
+it('a project switch takes the note away, and switching back does not bring it', async () => {
+  useImprovePrefillStore.getState().set({ project: 'Demo', title: 'Price a spare', pack: PACK })
+  mount()
+  await screen.findByTestId('eh-filled-from-improve')
+  act(() => useUIStore.setState({ currentProject: 'Other' }))
+  await waitFor(() => expect(screen.queryByTestId('eh-filled-from-improve')).toBeNull())
+  act(() => useUIStore.setState({ currentProject: 'Demo' }))
+  await new Promise(r => setTimeout(r, 30))
+  expect(screen.queryByTestId('eh-filled-from-improve')).toBeNull()
 })

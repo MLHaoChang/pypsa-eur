@@ -26,6 +26,7 @@ import { OffGridConstraints } from './solver/OffGridConstraints'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
 import { useLoadFlowOn, useN1On } from '../components/flowScope/useFlowScope'
 import { ScopeGate } from '../components/flowScope/ScopeGate'
+import { takeImprovePrefill, useImprovePrefillStore } from './hubDesign/improvePrefill'
 
 // Two-tier UI: a "common" form per-solver covering ~6 parameters most users
 // touch, and an "advanced" key:value table that flows straight into
@@ -150,6 +151,11 @@ export function StressConditionsSection({ project }: { project: string | null })
   )
 }
 
+/** The tag on a block whose value an Improve card filled in, unsaved. */
+function NotSavedYet({ testId }: { testId: string }) {
+  return <span data-testid={testId} className="ml-2 normal-case tracking-normal font-normal text-warn">Not saved yet</span>
+}
+
 export default function SolverSettings() {
   const qc = useQueryClient()
   const currentProject = useUIStore(s => s.currentProject)
@@ -220,6 +226,7 @@ export default function SolverSettings() {
       // Guided's Goal card and every Results study read the goal (W3b-R).
       invalidateReliabilityGoal(qc, useUIStore.getState().currentProject)
       setGoalEdits({})
+      setImproveFill(null)
       if (noOp) {
         toast('No changes to save', { icon: 'ℹ️' })
       } else {
@@ -294,6 +301,33 @@ export default function SolverSettings() {
       ?.scrollIntoView({ block: 'center' })
     setShowScopeRow(null)
   }, [showScopeRow, tab])
+
+  // Template-e2e 22 (IMPROVE-MANUAL-1): an Improve card's "Open in Expert"
+  // hands over a VOLL or goal value, once, for this project. It goes into the
+  // draft, unsaved; the fields say so until Save or Revert, and leaving
+  // without saving says it was not saved (UX 2 S1 condition 2).
+  const prefillPending = useImprovePrefillStore(s => !!s.prefill && (!!s.prefill.goal || s.prefill.voll !== undefined))
+  const [improveFill, setImproveFill] = useState<{ title: string; voll: boolean; goal: boolean } | null>(null)
+  useEffect(() => {
+    if (!prefillPending || !draft) return
+    const got = takeImprovePrefill(currentProject, 'solver')
+    if (!got) return
+    const voll = got.voll
+    if (voll !== undefined) setDraft(d => (d ? { ...d, voll } : d))
+    if (got.goal) {
+      const next = { ...goalEdits, ...got.goal }
+      setGoalEdits(next)
+      const { patch: p, error } = goalPatchFromEdits(next)
+      if (!error) setDraft(d => (d ? { ...d, ...p } : d))
+    }
+    setImproveFill({ title: got.title, voll: got.voll !== undefined, goal: !!got.goal })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillPending, draft === null, currentProject])
+  const unsavedFill = useRef(improveFill)
+  unsavedFill.current = improveFill
+  useEffect(() => () => {
+    if (unsavedFill.current) toast(`Not saved: the change from the Improve card (${unsavedFill.current.title}).`, { icon: 'ℹ️' })
+  }, [])
 
   if (!draft) return <div className="p-6 text-muted text-xs">Loading…</div>
 
@@ -935,6 +969,7 @@ export default function SolverSettings() {
 
       {/* ── Value of Lost Load (VOLL) ────────────────────────── */}
       <ReliabilityAssumptions draft={draft} patch={patch} goal={goal} goalEdits={goalEdits}
+        unsaved={improveFill ? { voll: improveFill.voll, goal: improveFill.goal } : undefined}
         onGoalEdits={e => {
           setGoalEdits(e)
           const { patch: p, error } = goalPatchFromEdits(e)
@@ -960,6 +995,11 @@ export default function SolverSettings() {
       {/* ── Save ─────────────────────────────────────────────── */}
       {/* Outside the tab body so it's always reachable. Pinned to the
           bottom edge of the panel with a top border for separation. */}
+      {improveFill && (
+        <p role="status" data-testid="solver-improve-unsaved" className="px-3 pt-2 text-[11px] text-warn">
+          Not saved yet: {improveFill.voll ? 'the value of lost load' : 'the reliability goal'} is filled in from the Improve card ({improveFill.title}). Save settings to keep it, or Revert.
+        </p>
+      )}
       <div className="flex gap-2 p-3 border-t border-border bg-bg">
         <button
           onClick={() => draft && save.mutate(draft)}
@@ -980,6 +1020,7 @@ export default function SolverSettings() {
             setDraft(cfg)
             baselineRef.current = JSON.parse(JSON.stringify(cfg))
             setGoalEdits({})
+            setImproveFill(null)
           }}
           className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-text"
         >Revert</button>
@@ -1545,9 +1586,11 @@ function goalFromDraft(d: SolverConfig): ReliabilityGoal {
 // tested) without mounting the whole settings page: this component is pure
 // `(draft, patch)` with no hooks of its own.
 export function ReliabilityAssumptions({
-  draft, patch, goal = null, goalEdits = {}, onGoalEdits,
+  draft, patch, goal = null, goalEdits = {}, onGoalEdits, unsaved,
 }: {
   draft: SolverConfig
+  /** Filled in from an Improve card and not saved yet (template-e2e 22). */
+  unsaved?: { voll: boolean; goal: boolean }
   patch: (p: Partial<SolverConfig>) => void
   /** The stored goal with its fallbacks; without it, the draft's values. */
   goal?: ReliabilityGoal | null
@@ -1569,6 +1612,7 @@ export function ReliabilityAssumptions({
     <section id="solver-voll" className="border border-border rounded">
       <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
         Reliability — Value of Lost Load
+        {unsaved?.voll && <NotSavedYet testId="solver-voll-unsaved" />}
       </div>
       <div className="p-3">
         <NumberField
@@ -1593,6 +1637,7 @@ export function ReliabilityAssumptions({
             className="flex flex-col gap-2 mb-2">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
               Reliability goal
+              {unsaved?.goal && <NotSavedYet testId="solver-goal-unsaved" />}
             </span>
             <ReliabilityGoalEditor mode="expert"
               goal={goal ?? goalFromDraft(draft)} edits={edits} onChange={onEdits} />

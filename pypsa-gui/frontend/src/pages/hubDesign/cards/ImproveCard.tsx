@@ -1,11 +1,12 @@
 // Step 5 — Improve (guided-mode spec §5.3, §5.7): the review's high and
-// medium findings, each with Why (the evidence), "Let the assistant do this"
-// (its first action) and Ask; Check risks runs the FMEA sweep exactly as the
+// medium findings, each with Why (the evidence), "Open in Expert" (the same
+// change by hand, filled in; template-e2e 22, IMPROVE-MANUAL-1), "Let the
+// assistant do this" (its first action) and Ask; Check risks runs the FMEA sweep exactly as the
 // FMEA tab does (the lifted hook), and a stress scenario is added through
 // the assistant.
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ShieldAlert } from 'lucide-react'
+import { ExternalLink, ShieldAlert } from 'lucide-react'
 import { resultsApi, type EhReviewFinding } from '../../../api/simulation'
 import { fmeaModesRefetchInterval, useStartFmeaSweep } from '../../../hooks/useStartFmeaSweep'
 import { useStudyFinishedInvalidation } from '../../../hooks/useStudyFinishedInvalidation'
@@ -22,11 +23,34 @@ import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
+import { DEST_WHERE, improvePlan, openImproveInExpert } from '../improvePrefill'
 
 export function openFmeaTab(): void {
   const ui = useUIStore.getState()
   ui.setSlidePanel('results')
   ui.requestResultsTab('fmea')
+}
+
+/** The secondary "Open in Expert" button: the same change by hand, with no
+ *  assistant (KEY-LATER-1), so it is never disabled. */
+function OpenInExpert({ f }: { f: EhReviewFinding }) {
+  const { archetype } = useReliabilityGoal()
+  const plan = improvePlan(f, archetype)
+  const where = `Open in Expert: ${DEST_WHERE[plan.dest]}`
+  return (
+    <>
+      <button type="button" data-testid={`hub-improve-open-${f.id}`} title={where} aria-label={where}
+        onClick={() => openImproveInExpert(plainWords(f.title), plan)}
+        className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] text-text hover:border-accent hover:text-accent">
+        <ExternalLink size={12} /> Open in Expert
+      </button>
+      {plan.unshown.length > 0 && (
+        <span data-testid={`hub-improve-unshown-${f.id}`} className="basis-full text-[11px] text-muted">
+          Expert does not fill in {plan.unshown.join(', ')}: set {plan.unshown.length === 1 ? 'it' : 'them'} there by hand, or let the assistant do this.
+        </span>
+      )}
+    </>
+  )
 }
 
 function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
@@ -58,8 +82,8 @@ function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
           {/* P26 gate: the button opens a "Run the reliability study" card,
               so a study re-run says so; the review's effect is its aim. */}
           {f.actions?.[0]?.tool === 'run_eh_study'
-            ? <>The assistant would run the reliability study again. Aim: {plainWords(effect)}</>
-            : <>The assistant would {plainWords(effect)}</>}
+            ? <>This change: run the reliability study again. Aim: {plainWords(effect)}</>
+            : <>This change: {plainWords(effect)}</>}
           {more > 0 ? `, then ${more} more step${more === 1 ? '' : 's'}, one at a time` : ''}.
         </p>
       )}
@@ -69,6 +93,7 @@ function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
           className="px-2 py-1 text-[11px] text-muted hover:text-accent">
           {why ? '▾' : '▸'} Why
         </button>
+        <OpenInExpert f={f} />
         {doTexts.length > 0 && (
           <DelegateButton testId={`hub-improve-do-${f.id}`} text={doTexts} display={doLabels}
             disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />

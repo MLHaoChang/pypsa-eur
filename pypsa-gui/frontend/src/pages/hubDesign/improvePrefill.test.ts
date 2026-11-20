@@ -214,3 +214,48 @@ describe('the hand-over (GK B3 E1, E3)', () => {
     expect(EMPTY_PACK_FORM.levers).toEqual({})
   })
 })
+
+// Hand-mutant survivors (GK B3 E6), each pinned by one assertion.
+describe('mapper edges', () => {
+  const rerun = (args: Record<string, unknown>): EhReviewFinding => ({ id: 'x', severity: 'medium', title: 't',
+    evidence: {}, recommendation: '', actions: [{ tool: 'run_eh_study', args, effect: '' }] })
+  const solver = (partial: Record<string, unknown>): EhReviewFinding => ({ id: 'x', severity: 'medium', title: 't',
+    evidence: {}, recommendation: '', actions: [{ tool: 'update_solver_config', args: { partial }, effect: '' }] })
+
+  it('a certification method without its LOLE target, or "none" with one, is named', () => {
+    expect(improvePlan(rerun({ pack_overrides: { certification_metric: 'mc_lole' } }), ARCH).unshown)
+      .toContain('the certification method')
+    expect(improvePlan(rerun({ pack_overrides: { certification_metric: 'none', target_lole_h: 3 } }), ARCH).unshown)
+      .toContain('the certification method')
+  })
+
+  it('off weak_flexible, an import energy budget is named; empty DSR buses are not', () => {
+    expect(improvePlan(rerun({ pack_overrides: { import_energy_mwh_per_year: 100 } }), 'strong_grid').unshown)
+      .toEqual(['an import energy budget'])
+    expect(improvePlan(rerun({ dsr_buses: [] }), 'strong_grid').unshown).toEqual([])
+    expect(improvePlan(rerun({ dsr_buses: ['b1'] }), 'strong_grid').pack?.dsrBuses).toBe('')
+  })
+
+  it('a non-boolean lever value is ignored', () => {
+    expect(improvePlan(rerun({ pack_overrides: { levers: { redundancy: 'yes' } } }), ARCH).pack?.levers).toEqual({})
+  })
+
+  it('each unshown phrase appears once', () => {
+    const plan = improvePlan(rerun({ foo: 1, bar: 2 }), ARCH)
+    expect(plan.unshown).toEqual(['a setting this screen does not show'])
+  })
+
+  it('VOLL with another solver setting names it; a non-finite VOLL is not filled in', () => {
+    expect(improvePlan(solver({ voll: 1, solver_name: 'x' }), ARCH).unshown).toEqual(['another solver setting'])
+    expect(improvePlan(solver({ voll: Infinity }), ARCH)).toEqual({ dest: 'voll', unshown: ['the value to set'] })
+  })
+
+  it('taking the form leaves the goal for Solver settings; a goal-only prefill gives no form', () => {
+    openImproveInExpert('T', improvePlan(finding('certification_inconclusive'), ARCH))
+    expect(takeImprovePrefill('Demo', 'pack')).not.toBeNull()
+    expect(takeImprovePrefill('Demo', 'solver')).toEqual({ title: 'T', goal: { mc_draws: '1000' } })
+    useImprovePrefillStore.getState().set({ project: 'Demo', title: 'G', goal: { mc_draws: '9' } })
+    expect(takeImprovePrefill('Demo', 'pack')).toBeNull()
+    expect(useImprovePrefillStore.getState().prefill?.goal).toEqual({ mc_draws: '9' })
+  })
+})
