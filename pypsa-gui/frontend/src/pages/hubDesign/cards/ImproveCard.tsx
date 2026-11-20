@@ -23,7 +23,7 @@ import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
-import { DEST_WHERE, improvePlan, openImproveInExpert } from '../improvePrefill'
+import { DEST_WHERE, improvePlan, openImproveInExpert, type ImprovePlan } from '../improvePrefill'
 
 export function openFmeaTab(): void {
   const ui = useUIStore.getState()
@@ -33,28 +33,21 @@ export function openFmeaTab(): void {
 
 /** The secondary "Open in Expert" button: the same change by hand, with no
  *  assistant (KEY-LATER-1), so it is never disabled. */
-function OpenInExpert({ f }: { f: EhReviewFinding }) {
-  const { archetype } = useReliabilityGoal()
-  const plan = improvePlan(f, archetype)
+function OpenInExpert({ f, plan }: { f: EhReviewFinding; plan: ImprovePlan }) {
   const where = `Open in Expert: ${DEST_WHERE[plan.dest]}`
   return (
-    <>
-      <button type="button" data-testid={`hub-improve-open-${f.id}`} title={where} aria-label={where}
-        onClick={() => openImproveInExpert(plainWords(f.title), plan)}
-        className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] text-text hover:border-accent hover:text-accent">
-        <ExternalLink size={12} /> Open in Expert
-      </button>
-      {plan.unshown.length > 0 && (
-        <span data-testid={`hub-improve-unshown-${f.id}`} className="basis-full text-[11px] text-muted">
-          Expert does not fill in {plan.unshown.join(', ')}: set {plan.unshown.length === 1 ? 'it' : 'them'} there by hand, or let the assistant do this.
-        </span>
-      )}
-    </>
+    <button type="button" data-testid={`hub-improve-open-${f.id}`} title={where} aria-label={where}
+      onClick={() => openImproveInExpert(plainWords(f.title), plan)}
+      className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] text-text hover:border-accent hover:text-accent">
+      <ExternalLink size={12} /> Open in Expert
+    </button>
   )
 }
 
 function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
   const [why, setWhy] = useState(false)
+  const { archetype } = useReliabilityGoal()
+  const plan = improvePlan(f, archetype)
   // One message per action (§5.7); the queue sends them one after another.
   const doTexts = actionTexts(f)
   const more = doTexts.length - 1
@@ -93,13 +86,18 @@ function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
           className="px-2 py-1 text-[11px] text-muted hover:text-accent">
           {why ? '▾' : '▸'} Why
         </button>
-        <OpenInExpert f={f} />
+        <OpenInExpert f={f} plan={plan} />
         {doTexts.length > 0 && (
           <DelegateButton testId={`hub-improve-do-${f.id}`} text={doTexts} display={doLabels}
             disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />
         )}
         <AskButton testId={`hub-improve-ask-${f.id}`} text={askText(f)} label="Ask" />
       </div>
+      {plan.unshown.length > 0 && (
+        <p data-testid={`hub-improve-unshown-${f.id}`} className="text-[11px] text-muted">
+          Expert does not fill in {plan.unshown.join(', ')}: set {plan.unshown.length === 1 ? 'it' : 'them'} there by hand, or let the assistant do this.
+        </p>
+      )}
       {why && (
         <div data-testid={`hub-improve-evidence-${f.id}`} className="rounded bg-bg p-2">
           <span className="text-[10px] uppercase tracking-wide text-muted">Technical evidence</span>

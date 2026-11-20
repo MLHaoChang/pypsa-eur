@@ -116,13 +116,13 @@ try {
       await page.getByTestId('hub-improve-open-not_established_fmea_top').click(); await page.waitForTimeout(2500)
       await page.getByTestId('solver-voll-unsaved').waitFor()
       await view('3-expert-voll-unsaved')
-      await page.getByText('Revert').click(); await page.waitForTimeout(500)
+      await page.getByRole('button', { name: 'Revert', exact: true }).last().click(); await page.waitForTimeout(500)
       await back(); await page.getByTestId('hub-improve-list').waitFor().catch(toImprove)
       // Goal: Solver settings › Reliability goal, unsaved.
       await page.getByTestId('hub-improve-open-certification_fail').click(); await page.waitForTimeout(2500)
       await page.getByTestId('solver-goal-unsaved').waitFor()
       await view('4-expert-goal-unsaved')
-      await page.getByText('Revert').click(); await page.waitForTimeout(500)
+      await page.getByRole('button', { name: 'Revert', exact: true }).last().click(); await page.waitForTimeout(500)
       await back(); await page.getByTestId('hub-improve-list').waitFor().catch(toImprove)
       // No action: Capacity bounds.
       await page.getByTestId('hub-improve-open-ens_target_missed').click(); await page.waitForTimeout(2500)

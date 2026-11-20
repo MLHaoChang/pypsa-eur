@@ -8,6 +8,7 @@ engine and checks the committed fixture the frontend tests read.
 Regenerate after an intended change:
     UPDATE_EH_REVIEW_FIXTURE=1 pytest tests/test_eh_review_actions_fixture.py
 """
+
 from __future__ import annotations
 
 import json
@@ -16,10 +17,21 @@ from pathlib import Path
 
 from services.adequacy.eh_review import review_report
 from services.adequacy.eh_study_runner import (
-    EhStudyRequest, LeverOverrides, McOptions, PackOverrides)
+    EhStudyRequest,
+    LeverOverrides,
+    McOptions,
+    PackOverrides,
+)
 
-FIXTURE = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages"
-           / "hubDesign" / "__fixtures__" / "ehReviewActions.json")
+FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "frontend"
+    / "src"
+    / "pages"
+    / "hubDesign"
+    / "__fixtures__"
+    / "ehReviewActions.json"
+)
 
 # The previous request every rerun copies (`_Rerun`): each field the form
 # can carry, so the base the args start from is exercised too.
@@ -35,47 +47,78 @@ RECORD = {
 
 
 def _cert(verdict, **kw):
-    return {"certification": {"payload": {"verdict": verdict, "draws": 500,
-                                          "target_lole_h": 3.0, **kw}}}
+    return {
+        "certification": {
+            "payload": {"verdict": verdict, "draws": 500, "target_lole_h": 3.0, **kw}
+        }
+    }
 
 
 # One report per finding that carries an action (eh_review.py).
 CASES: dict[str, dict] = {
     "certification_fail_energy_limited": {
-        "ens_cap_permyriad": 10.0, "achieved_ens_permyriad": 9.0,
-        "mc_lole_h": 8.0, "sections": _cert("fail")},
+        "ens_cap_permyriad": 10.0,
+        "achieved_ens_permyriad": 9.0,
+        "mc_lole_h": 8.0,
+        "sections": _cert("fail"),
+    },
     "certification_fail_outage_driven": {
-        "ens_cap_permyriad": 10.0, "achieved_ens_permyriad": 0.5,
-        "mc_lole_h": 8.0, "sections": _cert("fail")},
+        "ens_cap_permyriad": 10.0,
+        "achieved_ens_permyriad": 0.5,
+        "mc_lole_h": 8.0,
+        "sections": _cert("fail"),
+    },
     "certification_inconclusive": {
-        "ens_cap_permyriad": 10.0, "mc_lole_h": 3.1,
-        "sections": _cert("inconclusive")},
+        "ens_cap_permyriad": 10.0,
+        "mc_lole_h": 3.1,
+        "sections": _cert("inconclusive"),
+    },
     "certification_no_target": {
-        "ens_cap_permyriad": 10.0, "mc_lole_h": 2.0,
-        "sections": {"certification": {"payload": {"verdict": None}}}},
+        "ens_cap_permyriad": 10.0,
+        "mc_lole_h": 2.0,
+        "sections": {"certification": {"payload": {"verdict": None}}},
+    },
     "not_established_budget": {
         "ens_cap_permyriad": 10.0,
         "pipeline": {"budget_solves": 20, "solves_consumed": 12},
         "completeness": {"frontier": "not_established"},
-        "sections": {"frontier": {"note": "solve budget exhausted"}}},
+        "sections": {"frontier": {"note": "solve budget exhausted"}},
+    },
     "not_established_voll": {
         "ens_cap_permyriad": 10.0,
         "completeness": {"fmea_top": "not_established"},
-        "sections": {"fmea_top": {"note": "needs VOLL > 0"}}},
+        "sections": {"fmea_top": {"note": "needs VOLL > 0"}},
+    },
     "fmea_dominant_mode": {
         "ens_cap_permyriad": 10.0,
-        "sections": {"fmea_top": {"payload": {"rows": [
-            {"name": "grid_import", "criticality_eur_per_year": 900.0},
-            {"name": "genset_1", "criticality_eur_per_year": 100.0}]}}}},
+        "sections": {
+            "fmea_top": {
+                "payload": {
+                    "rows": [
+                        {"name": "grid_import", "criticality_eur_per_year": 900.0},
+                        {"name": "genset_1", "criticality_eur_per_year": 100.0},
+                    ]
+                }
+            }
+        },
+    },
     "dtc_critical_unserved": {
         "ens_cap_permyriad": 10.0,
-        "sections": {"dtc": {"payload": {"mode": "stress_fixed_plan",
-                                         "contingencies": [
-                                             {"contingency": "grid_import",
-                                              "critical_unserved_mwh": 4.0}]}}}},
+        "sections": {
+            "dtc": {
+                "payload": {
+                    "mode": "stress_fixed_plan",
+                    "contingencies": [
+                        {"contingency": "grid_import", "critical_unserved_mwh": 4.0}
+                    ],
+                }
+            }
+        },
+    },
     "budget_tight": {
         "ens_cap_permyriad": 10.0,
-        "pipeline": {"budget_solves": 20, "solves_consumed": 19}},
+        "pipeline": {"budget_solves": 20, "solves_consumed": 19},
+    },
 }
 
 
@@ -89,9 +132,15 @@ def build_fixture() -> dict:
         out = review_report({"archetype": RECORD["archetype"], **report}, RECORD)
         for f in out["findings"]:
             if f["actions"]:
-                findings.append({"case": case, "id": f["id"],
-                                 "severity": f["severity"], "title": f["title"],
-                                 "actions": f["actions"]})
+                findings.append(
+                    {
+                        "case": case,
+                        "id": f["id"],
+                        "severity": f["severity"],
+                        "title": f["title"],
+                        "actions": f["actions"],
+                    }
+                )
     return {
         "_comment": "Generated by backend/tests/test_eh_review_actions_fixture.py; do not edit.",
         "record": RECORD,
@@ -125,4 +174,5 @@ def test_the_committed_fixture_is_current():
         FIXTURE.parent.mkdir(parents=True, exist_ok=True)
         FIXTURE.write_text(text, encoding="utf-8")
     assert FIXTURE.read_text(encoding="utf-8") == text, (
-        "ehReviewActions.json is stale: rerun with UPDATE_EH_REVIEW_FIXTURE=1")
+        "ehReviewActions.json is stale: rerun with UPDATE_EH_REVIEW_FIXTURE=1"
+    )
