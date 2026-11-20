@@ -470,7 +470,11 @@ class Runner:
     def scan(self):
         """Every run the runner may drive: reads task files only, never a
         network, at most SCAN_LIMIT of them."""
-        return [path for path, task in self._runs() if task["run"].get("status") in _DRIVEN]
+        from harness import run_revise
+        # 07d (GK B (64) D1): a completed run with a draft to make is scanned too,
+        # so a lost wake or a lease held elsewhere never strands the request.
+        return [path for path, task in self._runs()
+                if task["run"].get("status") in _DRIVEN or run_revise.due(task)]
 
     def _runs(self):
         """Every run file with its record, at most SCAN_LIMIT task files read."""
@@ -519,6 +523,9 @@ class Runner:
             swept += run_eh.recover(path, None, instance=self.instance, now=self.clock(), lapsed_ok=True)
             from harness import run_ic
             swept += run_ic.recover(path, None, instance=self.instance, now=self.clock(), lapsed_ok=True)
+            from harness import run_revise
+            if any(r.get("status") == "drafting" for r in run_revise.rows(task)):
+                swept += run_revise.recover(path, boot=self.instance, now=self.clock())  # 07d: a draft lost with a boot
         return swept
 
     # one tick
@@ -540,6 +547,9 @@ class Runner:
             self._sync_hold(task)
             _notify(path)
             return "needs_user"  # a failed gate or a stop: only the user's resume goes on
+        from harness import run_revise
+        if run_revise.due(task):
+            return self._revise(path, task)  # 07d: before the idle return, never through _act (D2)
         if run["status"] not in _DRIVEN:
             self._let_go(task)
             _notify(path)
@@ -1047,6 +1057,63 @@ class Runner:
         self._inflight[task_id] = (path, thread)
         thread.start()
         return "explore"
+
+    def _revise(self, path, task):
+        """07d: draft one requested report revision of a completed run, on a
+        helper thread under the run's lease. It never changes `run.status`,
+        never goes through `_act`'s recovery (which may pause a run) and takes
+        no project hold (GK B (64) D2, D3); every fault ends the row, not the
+        run."""
+        from harness import run_revise
+        task_id = task["task_id"]
+        if self._lease(path) is None:
+            return "leased_elsewhere"
+        try:
+            run_revise.recover(path, boot=self.instance, now=self.clock())
+            from harness import send_reservation
+            send_reservation.reconcile(path, boot=self.instance, now=self.clock())
+            row = run_revise.claim(path, boot=self.instance, clock=self.clock)
+        except Exception:  # noqa: BLE001 — a ledger fault leaves the request for the next tick
+            logger.exception("harness runner: claiming a revision draft of %s failed", task_id)
+            return "error"
+        if row is None:
+            return "idle"
+        project_dir = Path(path).parent.parent
+
+        def turn():
+            from harness import send_reservation
+            try:
+                ctx, slot = self._context(task)
+                with self._bound(task, ctx, slot) as session:
+                    run_revise.run_turn(path, project_dir, row, provider=self._revision_provider(path, session),
+                                        model=getattr(session, "model", None), boot=self.instance)
+            except BaseException:  # noqa: BLE001 — a lost owner or any fault refuses the draft, never the run
+                logger.exception("harness runner: the revision draft of %s errored", task_id)
+                run_revise.failed(path, project_dir, row, self.instance)
+            finally:
+                try:
+                    send_reservation.close_open(path, boot=self.instance)
+                except Exception:  # noqa: BLE001 — a ledger fault never keeps the runner from waking
+                    logger.exception("harness runner: closing the draft send of %s failed", task_id)
+                self.wake(path)
+        context = contextvars.copy_context()
+        thread = threading.Thread(target=context.run, args=(turn,), name=f"harness-rv-{task_id[:8]}", daemon=True)
+        self._inflight[task_id] = (path, thread)
+        thread.start()
+        return "revise"
+
+    def _revision_provider(self, path, session):
+        """The run's own provider behind a `revision` reservation (07d): held
+        in EUR whatever the durable budget mode."""
+        from harness import run_revise, send_reservation
+        inner = self._agent_provider
+        if inner is None:
+            from harness.providers import wiring
+            inner, _ = wiring._provider_for_profile(wiring._resolve_turn_profile(session))
+            if inner is None:
+                return None
+        return send_reservation.ReservingProvider(inner, path, boot=self.instance, scope=run_revise.SCOPE,
+                                                  clock=self.clock)
 
     def _hold_if_effectful(self, task, step):
         from services import harness_locks

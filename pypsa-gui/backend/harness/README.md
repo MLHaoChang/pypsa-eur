@@ -2240,6 +2240,44 @@ step never nests a second `ReservingProvider`.
 
 Tests: `tests/test_harness_budget_reservation.py`.
 
+### Report revision drafts (study harness issue 07d)
+
+`harness/run_revise.py` (the module docstring holds the rules). A completed
+run drafts the edit for an open comment on its own report (07c), as a turn the
+runner launches itself (SH07C-DRAFT-1; GK B (64) D1–D10).
+
+- **Request.** `POST /api/projects/{name}/reports/{report_id}/comments/{comment_id}/drafts
+  {task_id}` names the run: the caller's own, in this project, `completed`
+  (`run_revise.REQUESTABLE`), and the report must be its stage-7 job's. It
+  writes one `requested` row on `run.revisions.requests` and charges nothing.
+  One request in flight (`requested` or `drafting`) per run, at most
+  `MAX_REQUESTS` = 10 rows in all (`revision_draft_limit`).
+- **Turn.** `Runner.tick` drafts before its idle return (`_revise`), never
+  through `_act` or `_recover`, so a draft never changes `run.status`, and it
+  takes no project hold. `scan()` also returns a completed run with a request
+  due. The row is claimed under the live lease. The send has no tools,
+  `max_tokens` 4096 and the run's own model; the comment and the anchored
+  block are fenced as untrusted data. It goes through `ReservingProvider` with
+  scope `revision`: held in EUR whatever the mode, against `budget.cost_eur`
+  with the metered spend and the research and revision rows
+  (`send_reservation.cost_eur`), and never metered by `runner.charge`. A
+  refusal makes no call: the row is `refused` and the comment keeps
+  `draft_budget` or `draft_unavailable`. A reply that does not parse, is
+  truncated or fails 07c's invariants (`revisions.preview`) is `rejected` and
+  cannot be confirmed.
+- **Confirm.** `POST …/drafts/{draft_id}/confirm {task_id}` (and `/discard`),
+  with 07c's address checks (project lock, report job slot). The row moves to
+  `applying` under the lock before `revisions.address` runs against the
+  draft's base digest, so one of two clicks wins; it ends `applied` or
+  `refused` with 07c's kind, or goes back to `drafted` on any other fault.
+  Chat never reaches these routes (`not_via_chat.d`, "out of chat").
+- **Restart.** A `drafting` row of another boot is `lost`, only where that
+  boot's lease lapsed or this instance holds it (the boot sweep, and `_revise`
+  after a takeover); its comment gets `draft_unavailable`, and its hold
+  settles `uncertain` through issue 24's reconcile. Nothing is re-sent.
+
+Tests: `tests/test_harness_revision_drafts.py`.
+
 
 ## Recorded runs, load flow, and experiment plans
 
