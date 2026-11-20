@@ -290,10 +290,10 @@ GENERATOR: tuple[FieldSpec, ...] = (
     FieldSpec("sk_min_mva", "performance", "Minimum short-circuit power", "Short-circuit power of the external "
               "grid at its weakest, for fault and harmonic studies. Leave empty when unknown.", "MVA", "MVA",
               reveal_when=_SLACK),
-    FieldSpec("rx_max", "performance", "Resistance-to-reactance ratio at maximum short circuit", "Ratio of the "
-              "external grid's resistance to its reactance at its strongest, e.g. 0.1. Leave empty when unknown.", "", "", reveal_when=_SLACK),
-    FieldSpec("rx_min", "performance", "Resistance-to-reactance ratio at minimum short circuit", "Ratio of the "
-              "external grid's resistance to its reactance at its weakest, e.g. 0.15. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    FieldSpec("rx_max", "performance", "R/X ratio at maximum short circuit", "Resistance-to-reactance ratio (R/X) "
+              "of the external grid at its strongest, e.g. 0.1. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    FieldSpec("rx_min", "performance", "R/X ratio at minimum short circuit", "Resistance-to-reactance ratio (R/X) "
+              "of the external grid at its weakest, e.g. 0.15. Leave empty when unknown.", "", "", reveal_when=_SLACK),
     *_harmonic_rows("generator"),
     *_outages(with_cf_flag=True),
 )

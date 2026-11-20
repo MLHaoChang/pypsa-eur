@@ -1144,8 +1144,8 @@
      {
       "key": "rx_max",
       "group": "performance",
-      "label": "Resistance-to-reactance ratio at maximum short circuit",
-      "help": "Ratio of the external grid's resistance to its reactance at its strongest, e.g. 0.1. Leave empty when unknown.",
+      "label": "R/X ratio at maximum short circuit",
+      "help": "Resistance-to-reactance ratio (R/X) of the external grid at its strongest, e.g. 0.1. Leave empty when unknown.",
       "unit_display": "",
       "unit_storage": "",
       "scale": 1.0,
@@ -1164,8 +1164,8 @@
      {
       "key": "rx_min",
       "group": "performance",
-      "label": "Resistance-to-reactance ratio at minimum short circuit",
-      "help": "Ratio of the external grid's resistance to its reactance at its weakest, e.g. 0.15. Leave empty when unknown.",
+      "label": "R/X ratio at minimum short circuit",
+      "help": "Resistance-to-reactance ratio (R/X) of the external grid at its weakest, e.g. 0.15. Leave empty when unknown.",
       "unit_display": "",
       "unit_storage": "",
       "scale": 1.0,
