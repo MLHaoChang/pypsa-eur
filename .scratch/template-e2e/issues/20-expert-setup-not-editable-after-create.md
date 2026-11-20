@@ -3,7 +3,7 @@
 
 # 20 — DC form and site decisions are not editable in Expert after creation
 
-Status: needs-triage
+Status: needs-info
 Impact: medium
 Templates: eh_datacenter(+staged), eh_site
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -19,3 +19,7 @@ To change a form answer the user must make a new project; the same decision has 
 ## Suggested fix
 
 Make the form answers editable in both modes with one label; mark every template default as assumed.
+
+## Triage (2026-11-20, master 8a039460)
+
+Checked by code reading only; the app was not re-run. Question for the coordinator: how should the creation-form answers (IT load, PUE, backup mode, power architecture) change? (1) Recommended: editable after creation in both modes under one label, with template defaults marked assumed. Largest change, GK A. (2) Read-only in both modes, with a plain 'start a new project to change this' line; mark defaults assumed. Small. (3) Editable in Expert only. Also one fix is not in question: let eh_site be created from Expert (it works over Expert today).

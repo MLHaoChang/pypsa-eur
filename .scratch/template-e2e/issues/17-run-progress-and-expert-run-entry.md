@@ -3,7 +3,7 @@
 
 # 17 — Expert has two Run buttons, no readiness block, and no progress while waiting
 
-Status: needs-triage
+Status: needs-info
 Impact: medium
 Templates: all templates
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -19,3 +19,7 @@ A user cannot tell which run answers their question, whether it may start, or ho
 ## Suggested fix
 
 One Run entry that runs the verdict study; Expert readiness shows the same to-check items as Guided; show stage x of N and elapsed time; header reflects the running study.
+
+## Triage (2026-11-20, master 8a039460)
+
+Checked by code reading only; the app was not re-run. Overlaps issue 09 (study size) and issue 12 slice (c) (stage and elapsed time). Question for the coordinator: what is the Run entry? (1) Recommended: the header 'Run' runs the verdict study, Expert readiness lists the same to-check items as Guided, and stage x of N with elapsed time shows (reuse 12 (c)). (2) Keep two entries but label each by the question it answers, and add stage and elapsed time. (3) Only add stage and elapsed time (12 (c)) and drop the rest.
