@@ -1,6 +1,6 @@
 # Continuous voice UX and interruption
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: 03a merged (#1657); left: continuous voice UI, captions, live-mode lifecycle, mute/end, media acceptance (need 01)
 Progress: Presence-led Live grid node shipped; no continuous media, real-device gates or speech transport; blocked on issue 01
 Type: task
 Blocked by: 02, 08, 09 (typed UI); 01, 11 (media/monitoring acceptance)
