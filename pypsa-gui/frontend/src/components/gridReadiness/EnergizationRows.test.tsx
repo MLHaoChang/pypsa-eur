@@ -74,6 +74,16 @@ describe('EnergizationRows', () => {
     expect(b.textContent).toMatch(/Fail.*peak 41 MW against 30 MW/)
   })
 
+  it('says "against" only when the check figure is the row value (UX 26)', () => {
+    mount({ '2027': 25, '2035': 35 }, [check('2027', { limit: 15, project_value: 3, note: 'the 15 MW energized import' }),
+      check('2035', { limit: 35, project_value: 3 })])
+    const a = screen.getByTestId('energization-check-2027')
+    expect(a.textContent).toMatch(/Pass.*peak 3 MW$/)
+    expect(a.textContent).not.toMatch(/against/)
+    expect(a.getAttribute('title')).toBe('the 15 MW energized import')
+    expect(screen.getByTestId('energization-check-2035').textContent).toMatch(/peak 3 MW against 35 MW/)
+  })
+
   it('a period that varies is read-only, with Edit the link through the mode-aware opener', () => {
     useUIStore.setState({ uiMode: 'guided' })
     mount({ '2027': 15, '2035': { min: 30, max: 40 } })

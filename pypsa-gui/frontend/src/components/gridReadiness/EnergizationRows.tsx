@@ -55,14 +55,18 @@ function checkFor(readiness: GridReadinessRow[], period: string): GridReadinessR
   return rows.find(r => r.id === `energization_peak:${period}`) ?? (period === 'all' && rows.length === 1 ? rows[0] : undefined)
 }
 
-function Check({ row, period }: { row?: GridReadinessRow; period: string }) {
+/** The check beside a row: its verdict and the period's peak. "against X MW" only when X is the row's
+ *  own value; the check's cap can differ (efficiency, firm gensets), and a different figure beside the
+ *  row would read as a contradiction (UX 26). The readiness note stays as the tooltip. */
+function Check({ row, period, value }: { row?: GridReadinessRow; period: string; value: number | null }) {
   if (!row) return null
+  const same = typeof row.limit === 'number' && value != null && Math.abs(row.limit - value) < 1e-6
   return (
     <span data-testid={`energization-check-${period}`} title={row.note ?? undefined}
       className="inline-flex items-center gap-1 text-[11px] text-muted">
       <VerdictChip verdict={row.verdict} />
-      {row.project_value != null && row.limit != null
-        && <span className="tabular-nums">peak {fmt(row.project_value, row.unit)} against {fmt(row.limit, row.unit)}</span>}
+      {row.project_value != null && <span className="tabular-nums">
+        peak {fmt(row.project_value, row.unit)}{same ? ` against ${fmt(row.limit, row.unit)}` : ''}</span>}
     </span>
   )
 }
@@ -119,7 +123,7 @@ function PeriodRow({ link, period, value, unit, check, readOnly, target }: {
             disabled={!ok || n === value || save.isPending} onClick={() => save.mutate()}
             className="rounded border border-border px-2 py-0.5 disabled:opacity-50">Save</button>
         </>)}
-        <Check row={check} period={period} />
+        <Check row={check} period={period} value={typeof value === 'number' ? value : null} />
       </div>
       {!varies && !readOnly && !ok && <p className="text-warn">Connection limit: must be above 0 {unit}.</p>}
       {error && <p role="alert" className="text-warn" data-testid={`energization-error-${period}`}>{error}</p>}
