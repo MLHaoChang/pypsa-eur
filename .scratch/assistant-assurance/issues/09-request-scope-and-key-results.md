@@ -3,11 +3,11 @@
 
 # Request scope and complete key-results answers
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: bounded generator scope merged (#119); left: arbitrary-language scope, retained runs, conversational constraints, other domain profiles
 Model: Opus
 Progress: harness.assurance_scope with answered or unavailable slots shipped for bounded grammar; arbitrary-language scope pending
 Type: task
-Blocked by: reliability contract review; 01 for schema freeze; 02 for evidence
+Blocked by: none (reliability contract review done, GK B OK @d36109ae, AA-A04-REVIEW-1; 01 and 02 done)
 
 ## Scope
 

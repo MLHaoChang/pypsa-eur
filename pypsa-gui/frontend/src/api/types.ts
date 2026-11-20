@@ -243,6 +243,8 @@ export interface SolverConfig {
   // cover; null = off. Schema bounds are ge=0, le=5.
   reserve_margin?: number | null
   /** homer-parity 01a: share of the electricity used on site (load plus converter draw) from renewables, 0–1; null = off. */
+  /** Island limits in the optimisation (the hub solve reads island_config.json); off when absent. */
+  island_constraints?: boolean
   min_renewable_fraction?: number | null
   /** homer-parity 01b operating reserve shares (0–1), null or 0 off. */
   reserve_share_load?: number | null

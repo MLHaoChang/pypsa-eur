@@ -1,0 +1,90 @@
+{
+ "profiles": {
+  "storage-unit-dispatch/1": [
+   {
+    "metric": "charged_energy",
+    "formula": "sum over t of w_stores[t] x p_store[t]",
+    "validity": "the whole state-of-charge chain from the initial state must replay: per snapshot soc = (1 - standing_loss)^dt x soc_prev + dt x (eta_store x p_store - p_dispatch / eta_dispatch) and p = p_dispatch - p_store within tolerance, bounds held, verified solve; else invalid_or_missing_storage_trajectory. Refusals: storage_source_identity, invalid_storage_index, invalid_storage_population, reversed_storage_window",
+    "tolerance": "harness.storage_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations"
+     }
+    }
+   },
+   {
+    "metric": "discharged_energy",
+    "formula": "sum over t of w_stores[t] x p_dispatch[t]",
+    "validity": "the whole state-of-charge chain from the initial state must replay: per snapshot soc = (1 - standing_loss)^dt x soc_prev + dt x (eta_store x p_store - p_dispatch / eta_dispatch) and p = p_dispatch - p_store within tolerance, bounds held, verified solve; else invalid_or_missing_storage_trajectory. Refusals: storage_source_identity, invalid_storage_index, invalid_storage_population, reversed_storage_window",
+    "tolerance": "harness.storage_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations"
+     }
+    }
+   },
+   {
+    "metric": "net_storage_energy",
+    "formula": "discharged_energy - charged_energy",
+    "validity": "the whole state-of-charge chain from the initial state must replay: per snapshot soc = (1 - standing_loss)^dt x soc_prev + dt x (eta_store x p_store - p_dispatch / eta_dispatch) and p = p_dispatch - p_store within tolerance, bounds held, verified solve; else invalid_or_missing_storage_trajectory. Refusals: storage_source_identity, invalid_storage_index, invalid_storage_population, reversed_storage_window",
+    "tolerance": "harness.storage_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations"
+     }
+    }
+   },
+   {
+    "metric": "peak_charging_power",
+    "formula": "max over t of p_store[t]",
+    "validity": "the whole state-of-charge chain from the initial state must replay: per snapshot soc = (1 - standing_loss)^dt x soc_prev + dt x (eta_store x p_store - p_dispatch / eta_dispatch) and p = p_dispatch - p_store within tolerance, bounds held, verified solve; else invalid_or_missing_storage_trajectory. Refusals: storage_source_identity, invalid_storage_index, invalid_storage_population, reversed_storage_window",
+    "tolerance": "harness.storage_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations"
+     }
+    }
+   },
+   {
+    "metric": "peak_discharging_power",
+    "formula": "max over t of p_dispatch[t]",
+    "validity": "the whole state-of-charge chain from the initial state must replay: per snapshot soc = (1 - standing_loss)^dt x soc_prev + dt x (eta_store x p_store - p_dispatch / eta_dispatch) and p = p_dispatch - p_store within tolerance, bounds held, verified solve; else invalid_or_missing_storage_trajectory. Refusals: storage_source_identity, invalid_storage_index, invalid_storage_population, reversed_storage_window",
+    "tolerance": "harness.storage_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations"
+     }
+    }
+   },
+   {
+    "metric": "final_state_of_charge",
+    "formula": "state_of_charge at the window's last snapshot",
+    "validity": "the whole state-of-charge chain from the initial state must replay: per snapshot soc = (1 - standing_loss)^dt x soc_prev + dt x (eta_store x p_store - p_dispatch / eta_dispatch) and p = p_dispatch - p_store within tolerance, bounds held, verified solve; else invalid_or_missing_storage_trajectory. Refusals: storage_source_identity, invalid_storage_index, invalid_storage_population, reversed_storage_window",
+    "tolerance": "harness.storage_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations"
+     }
+    }
+   }
+  ]
+ }
+}

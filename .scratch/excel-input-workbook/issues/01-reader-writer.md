@@ -1,6 +1,6 @@
 # S1 pure reader and writer: gridspine/ingest/excel_layout.py, excel_export.py, excel_import.py
 
-Status: ready-for-agent
+Status: done (#1646, #1732)
 Blocked by: GK A ruling on pypsa inside gridspine/ingest (core session PR1)
 
 See `../spec.md`.
