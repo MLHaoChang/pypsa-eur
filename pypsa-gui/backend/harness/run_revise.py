@@ -122,6 +122,29 @@ def run_report_id(task: dict) -> str | None:
     return job.get("report_id")
 
 
+def requestable_report(task: dict) -> str | None:
+    """The report a draft may be requested for now: the run's own report
+    while the run is in a requestable state, else None. The route's check
+    and the run view's offer both read it, so the view never offers what
+    `request()` refuses (GK B (68) R1)."""
+    if (task.get("run") or {}).get("status") not in REQUESTABLE:
+        return None
+    return run_report_id(task)
+
+
+def offer(task: dict) -> dict | None:
+    """The run view's `revision_report`: the report to draft for and the
+    server's limits, or None when no request can be made."""
+    report_id = requestable_report(task)
+    if report_id is None:
+        return None
+    return {
+        "report_id": report_id,
+        "max_requests": MAX_REQUESTS,
+        "in_flight": list(IN_FLIGHT),
+    }
+
+
 def due(task: dict) -> bool:
     """A completed run with a request the runner has not claimed."""
     run = task.get("run") or {}
@@ -147,7 +170,7 @@ def _requestable(task: dict, report_id: str) -> None:
             409,
             "Only a completed run drafts a revision of its report.",
         )
-    if run_report_id(task) != report_id:
+    if requestable_report(task) != report_id:
         raise DraftError(
             "revision_draft_not_run_report",
             409,
