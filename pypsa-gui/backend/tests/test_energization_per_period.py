@@ -603,6 +603,28 @@ def test_d4_a_record_frozen_before_02b_admits_on_an_unscheduled_network(tmp_path
     assert _admit(tmp_path, ctx, frozen) is None  # admitted, as before 02b
 
 
+@pytest.mark.parametrize(
+    "record",
+    [{"by_period": {}}, {}],  # no digest; {} is the unmerged pre-digest shape
+)
+def test_d4_a_digest_less_record_refuses_on_an_unscheduled_network(tmp_path, record):
+    """GK B 68 (D5 survivor, `"digest" not in then`): a record that carries an
+    energization entry but no digest is not a pre-02b record (that has no
+    entry at all, and admits above). It can't be read, so it refuses even
+    where the network has no schedule: its missing digest is never "None"."""
+    from harness import run_eh
+
+    ctx = _run_ctx(tmp_path, build_eh_datacenter(), "eh_datacenter")
+    frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
+    frozen["energization"] = record
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message == (
+        "The connection's energization schedule can't be compared now. "
+        "Review the run again."
+    )
+
+
 def test_e4_a_ramp_reversed_inside_a_period_refuses(tmp_path):
     """GK A 32 E4: 2027 as a ramp, frozen, then reversed. Its min and max (the
     flow row's reading) are the same; the schedule, the LP input and the
