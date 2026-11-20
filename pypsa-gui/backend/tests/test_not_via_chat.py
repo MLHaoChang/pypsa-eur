@@ -74,9 +74,9 @@ def test_the_issue_rows_are_declared():
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
         'report_comment_revisions': ('unbuilt', None),
-        'operating_reserve_result': ('unbuilt', None),
         'report_chart_snapshots': ('manual', 'results'),
         'energization_per_period': ('unbuilt', None),  # template-e2e 02b (not_via_chat.d/)
+        'eh_study_why': ('unbuilt', None),  # guided-results 02a; a later slice adds the chat tool
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected

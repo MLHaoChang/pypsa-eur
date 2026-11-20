@@ -298,6 +298,15 @@ def test_injections_shunts_and_both_short_circuit_cases(written):
     )
 
 
+def _own(row):
+    """A merged TypHmccur row's own (order, amplitude, alpha) entries: those with a non-zero amplitude."""
+    return [
+        (h, a, al)
+        for h, a, al in zip(row["norder"], row["ampl"], row["alpha"])
+        if a != 0
+    ]
+
+
 def test_each_source_carries_its_units_spectrum_and_a_missing_one_is_listed(written):
     _, dgs, exp = written
     hm = {r["ID"]: r for r in dgs["TypHmccur"]}
@@ -306,18 +315,15 @@ def test_each_source_carries_its_units_spectrum_and_a_missing_one_is_listed(writ
     pv = next(r for r in dgs["ElmGenstat"] if r["loc_name"] == "pv")
     bess = next(r for r in dgs["ElmGenstat"] if r["loc_name"] == "bess")
     six = DEFAULT_SPECTRA["6-pulse"]
-    assert hm[drive["phmc"]]["norder"] == sorted(six)
-    assert hm[drive["phmc"]]["ampl"] == [six[h] for h in sorted(six)]
-    assert hm[drive["phmc"]]["alpha"] == [1.4, 1.4, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
-    assert (hm[pv["phmc"]]["norder"], hm[pv["phmc"]]["ampl"]) == (
-        [4, 5, 10, 11],
-        [1.0, 2.0, 0.5, 1.5],
-    )
-    assert hm[pv["phmc"]]["alpha"] == [
-        1.0,
-        1.4,
-        1.4,
-        2.0,
+    drive_hm, pv_hm = _own(hm[drive["phmc"]]), _own(hm[pv["phmc"]])
+    assert [h for h, _, _ in drive_hm] == sorted(six)
+    assert [a for _, a, _ in drive_hm] == [six[h] for h in sorted(six)]
+    assert [al for _, _, al in drive_hm] == [1.4, 1.4, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+    assert pv_hm == [
+        (4, 1.0, 1.0),
+        (5, 2.0, 1.4),
+        (10, 0.5, 1.4),
+        (11, 1.5, 2.0),
     ]  # the band edges of IEC 61000-3-6
     assert heater["phmc"] is None and bess["phmc"] is None
     hs = exp.harmonic_sources.set_index("pp_name")
@@ -358,7 +364,7 @@ GOLDEN_HEADERS = [
     "$$General;ID(a:40);Descr(a:40);Val(a:40)",
     "$$ElmNet;ID(a:40);loc_name(a:40);frnom(r)",
     "$$ElmTerm;ID(a:40);loc_name(a:40);fold_id(p);uknom(r);outserv(i)",
-    "$$TypLne;ID(a:40);loc_name(a:40);uline(r);sline(r);rline(r);xline(r);bline(r);inAir(i);frnom(r)",
+    "$$TypLne;ID(a:40);loc_name(a:40);uline(r);sline(r);rline(r);xline(r);bline(r);gline(r);inAir(i);frnom(r)",
     "$$ElmLne;ID(a:40);loc_name(a:40);fold_id(p);typ_id(p);dline(r);nlnum(i);outserv(i)",
     "$$TypTr2;ID(a:40);loc_name(a:40);strn(r);utrn_h(r);utrn_l(r);uktr(r);pcutr(r);pfe(r);curmg(r);nt2ag(r);"
     "dutap(r);nntap0(i);ntpmn(i);ntpmx(i);tap_side(i);frnom(r)",
@@ -467,3 +473,134 @@ def test_the_tap_side_is_written(tmp_path):
     net.trafo.loc[1, "tap_side"] = "lv"
     write_dgs(net, tmp_path / "h.dgs")
     assert [r["tap_side"] for r in read_dgs(tmp_path / "h.dgs")["TypTr2"]] == [0, 1]
+
+
+# ── GC-15: one TypHmccur block over the union of orders (GK A2) ──
+
+
+def test_every_harmonic_source_shares_one_block_over_the_union_of_orders(tmp_path):
+    """
+    Neither a repeated header nor padded fields: one header, every row the same SIZEROW; an order a source
+    does not name is 0 amplitude with that order's normal alpha (never 0, which risks 0^0 and a 1/0
+    exponent in a reader), as gridspine.static.harmonics sums it.
+    """
+    from gridspine.static.harmonics import alpha
+
+    net = fixture_net()
+    path = tmp_path / "u.dgs"
+    write_dgs(net, path, title="fixture", harmonics=HARMONICS, converters=["bess"])
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert sum(ln.startswith("$$TypHmccur;") for ln in lines) == 1
+    dgs = read_dgs(path)
+    union = sorted(set(DEFAULT_SPECTRA["6-pulse"]) | {4, 5, 10, 11})
+    rows = dgs["TypHmccur"]
+    assert len(rows) == 2
+    for row in rows:
+        assert row["norder"] == union
+        assert len(row["ampl"]) == len(row["alpha"]) == len(union)
+        assert row["alpha"] == [alpha(h) for h in union]
+        assert all(al > 0 for al in row["alpha"])
+        assert any(a == 0 for a in row["ampl"])
+
+
+def test_the_merge_leaves_each_sources_own_entries_unchanged(written):
+    """Each source's non-zero (order, amplitude, alpha) set is exactly its spectrum's."""
+    from gridspine.static.harmonics import alpha, parse_spectrum
+
+    _, dgs, _ = written
+    hm = {r["ID"]: r for r in dgs["TypHmccur"]}
+    for cls, name in (("ElmLod", "drive"), ("ElmGenstat", "pv")):
+        elm = next(r for r in dgs[cls] if r["loc_name"] == name)
+        spectrum = parse_spectrum(HARMONICS[name]["spectrum"])
+        want = [(h, float(spectrum[h]), alpha(h)) for h in sorted(spectrum)]
+        assert _own(hm[elm["phmc"]]) == want, name
+
+
+def test_one_block_per_class_in_the_whole_file(tmp_path):
+    path = tmp_path / "b.dgs"
+    write_dgs(
+        fixture_net(), path, title="fixture", harmonics=HARMONICS, converters=["bess"]
+    )
+    heads = [
+        ln.split(";")[0]
+        for ln in path.read_text(encoding="utf-8").splitlines()
+        if ln.startswith("$$")
+    ]
+    assert len(heads) == len(set(heads))
+
+
+# ── GC-16: line conductance written; shunt active power listed, never guessed (GK A2) ──
+
+
+def test_line_conductance_matches_pandapower(tmp_path):
+    net = fixture_net()
+    net.line["g_us_per_km"] = 0.0
+    # the parallel=2 cable carries a non-zero g, so g x parallel is checked (GK A2)
+    net.line.loc[net.line["name"] == "cable", "g_us_per_km"] = 4.0
+    net.line.loc[net.line.index[-1], "g_us_per_km"] = 2.5
+    assert (net.line["g_us_per_km"] == 0).any()
+    want = [float(g) for g in net.line["g_us_per_km"]]
+    path = tmp_path / "g.dgs"
+    write_dgs(net, path, title="fixture")
+    dgs = read_dgs(path)
+    pp.runpp(net)
+    from pandapower.pypower.idx_brch import BR_G
+
+    ppc_br = net._ppc["branch"]
+    terms = _terms(dgs)
+    types = {r["ID"]: r for r in dgs["TypLne"]}
+    for k, elm in enumerate(dgs["ElmLne"]):
+        typ = types[elm["typ_id"]]
+        kv = terms[_ends(dgs, elm["ID"])[0]]["uknom"]
+        zb = kv**2 / SBASE
+        g = typ["gline"] * 1e-6 * elm["dline"] * elm["nlnum"] * zb
+        assert abs(g - ppc_br[k, BR_G].real) < 1e-6
+    assert [r["gline"] for r in dgs["TypLne"]] == want
+
+
+def test_a_line_without_conductance_writes_zero(written):
+    _, dgs, _ = written
+    assert [r["gline"] for r in dgs["TypLne"]] == [0.0, 0.0, 0.0]
+
+
+@pytest.mark.parametrize("g", [float("nan"), float("inf")])
+def test_a_line_with_non_finite_conductance_is_refused_by_name(tmp_path, g):
+    net = fixture_net()
+    net.line["g_us_per_km"] = 0.0
+    net.line.loc[net.line.index[1], "g_us_per_km"] = g
+    name = str(net.line.at[net.line.index[1], "name"])
+    with pytest.raises(ContractError, match="conductance") as err:
+        write_dgs(net, tmp_path / "g.dgs")
+    assert name in str(err.value)
+
+
+@pytest.mark.parametrize("p", [0.0, -0.0])
+def test_a_shunt_with_no_active_power_is_not_listed(tmp_path, p):
+    net = fixture_net()
+    net.shunt.loc[:, "p_mw"] = p
+    exp = write_dgs(net, tmp_path / "s.dgs")
+    assert exp.not_written.empty
+
+
+def test_a_shunt_with_active_power_is_listed_with_its_value_and_reason(tmp_path):
+    net = fixture_net()
+    net.shunt.loc[0, "p_mw"] = 0.02
+    exp = write_dgs(net, tmp_path / "s.dgs")
+    assert exp.not_written.to_dict("records") == [
+        {
+            "pp_table": "shunt",
+            "pp_name": "cap",
+            "dgs_name": "cap",
+            "attribute": "p_mw",
+            "value": 0.02,
+            "reason": "active power not written: no verified attribute",
+        }
+    ]
+
+
+@pytest.mark.parametrize("p", [float("nan"), float("inf")])
+def test_a_shunt_with_non_finite_active_power_is_refused_by_name(tmp_path, p):
+    net = fixture_net()
+    net.shunt.loc[1, "p_mw"] = p
+    with pytest.raises(ContractError, match="reactor"):
+        write_dgs(net, tmp_path / "s.dgs")

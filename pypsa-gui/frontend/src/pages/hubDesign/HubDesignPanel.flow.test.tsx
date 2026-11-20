@@ -60,6 +60,7 @@ const RUNNING = { status: 'running', archetype: 'weak_flexible' as const }
 const DONE = { status: 'done', archetype: 'weak_flexible' as const, report: REPORT }
 
 beforeEach(() => {
+  for (const p of ['Demo', 'Fresh', 'Other', 'P1', 'P2']) window.localStorage.setItem(`pypsa-guide-offered:hub_design:${p}`, '1')
   useUIStore.setState({ currentProject: 'Demo', activeSection: null, fieldDrawer: null, uiMode: 'guided' })
   vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flowPayload())
   vi.mocked(flowApi.getReliabilityGoal).mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'template'] }))
@@ -262,8 +263,10 @@ describe('hub_design tour before any study (gate B2)', () => {
       await waitFor(() => expect(screen.getByTestId('guide-tour')
         .getAttribute('data-step-target')).not.toBe(target))
     }
-    expect(seen).toEqual(['hub-rail', 'hub-start-templates', 'hub-site-readiness',
-      'hub-site-type', 'hub-goal-lole', 'hub-run-start'])
+    expect(seen).toEqual(['hub-start-templates', 'hub-rail-section-carriers',
+      'hub-site-readiness', 'hub-rail-section-loads', 'hub-rail-section-assets',
+      'hub-rail-section-profiles', 'hub-rail-section-commercial', 'hub-goal-lole',
+      'hub-run-start'])
     expect(screen.queryByTestId('guide-tour')).toBeNull()
     // the tour's reveal clicks did not count as the user moving the rail
     expect(useHubDesignStore.getState().userMovedRail).toBe(false)
