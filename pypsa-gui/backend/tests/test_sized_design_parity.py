@@ -47,7 +47,8 @@ FIXTURE = (
 TEMPLATES = [*T.BUILDERS, "eh_site"]
 _TABLES = (("generators", "p"), ("storage_units", "p"), ("links", "p"), ("stores", "e"))
 GRID_ROW = "Grid connection (import limit, not counted)"
-TOL = R.CONNECTION_TOL_MW
+# The literal, so a widened constant fails the boundary tests (GK A 33).
+TOL = 1e-6
 
 
 def _build(tid: str):
@@ -686,3 +687,20 @@ def test_a_slack_that_delivered_nothing_has_no_row():
         }
     ]
     assert not any(r[0].startswith("Shortfall") for r in E._t_sizing(p).rows)
+
+
+def test_a_horizon_with_no_import_peaks_at_zero():
+    """Export only: the peak import is 0, never a negative "import" (GK A 33)."""
+    n = _site()
+    n._objective = 1.0
+    p = _with_import(n, pd.Series([-90.0, -12.0, -60.0], index=n.snapshots))
+    assert p["grid_import_peak_mw"] == 0.0 and p["connection_check"] == "within"
+    assert "peak import 0.0 MW" in dict(E._t_sizing(p).rows)[GRID_ROW]
+
+
+def test_a_period_with_no_import_peaks_at_zero():
+    n = _fake_solve(_build("eh_datacenter_staged"))
+    flow = pd.Series(10.0, index=n.snapshots)
+    flow.loc[2030] = -20.0
+    p = _with_import(n, flow)
+    assert p["grid_import_peak_by_period"] == {"2027": 10.0, "2030": 0.0, "2035": 10.0}
