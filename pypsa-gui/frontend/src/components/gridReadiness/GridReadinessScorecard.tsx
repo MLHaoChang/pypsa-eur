@@ -24,6 +24,7 @@ import { useChatReadiness } from '../../hooks/useChatProfiles'
 import { ask, ASK_TITLE } from '../../pages/hubDesign/delegate'
 import { NO_ASSISTANT } from '../../pages/hubDesign/shared/CardShell'
 import { displayName } from '../../utils/displayName'
+import { ServiceSources } from './ServiceSources'
 
 export type ScorecardMode = 'expert' | 'guided'
 
@@ -217,7 +218,9 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
             )}
             <span className="mx-1.5">·</span>
             Project:{'\u00A0'}<span className="text-text">
-              {row.project_value_is_lower_bound ? '≥\u00A0' : ''}{fmt(row.project_value, row.unit)}</span>
+              {row.sources?.length
+                ? <ServiceSources sources={row.sources} rest={row.value_rest} testId={`gr-sources-${row.id}`} />
+                : <>{row.project_value_is_lower_bound ? '≥\u00A0' : ''}{fmt(row.project_value, row.unit)}</>}</span>
           </div>
           <AfterLine row={row} />
         </div>

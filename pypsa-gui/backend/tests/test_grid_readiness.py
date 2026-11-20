@@ -331,10 +331,11 @@ def test_the_oscillation_row(tmp_path, amp, period, verdict):
     assert _rows(G.grid_readiness(d, n, PROFILE))["oscillation"]["verdict"] == verdict
 
 
-@pytest.mark.parametrize("sk, verdict", [(90.0, "pass"), (87.0, "warn")])
+@pytest.mark.parametrize("sk, verdict", [(150.0, "pass"), (145.0, "warn")])
 def test_the_scr_row_at_three(tmp_path, sk, verdict):
     d, n = _project(tmp_path, "eh_datacenter")
-    n.buses.at["grid", "eh_sk_mva"] = sk                         # IBR 30 MVA: SCR 3.0 / 2.9
+    n.buses.at["grid", "eh_ibr_mva"] = 50.0                      # stated, above the 44 MVA of converters
+    n.buses.at["grid", "eh_sk_mva"] = sk                         # SCR 3.0 / 2.9
     row = _rows(G.grid_readiness(d, n, PROFILE))["scr"]
     assert row["verdict"] == verdict and row["assumed"]
 

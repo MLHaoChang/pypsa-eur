@@ -24,3 +24,17 @@ pins today's behaviour and changes with this fix.
 - The manifest fragment for any new kind, and the frontend copy if it is a banner.
 
 ## Comments
+
+- GK B (64) plan GO 2026-11-17 at master 0ab07339, conditions:
+  V1 catch only `current_project`'s 404, `raise … from exc`; the 403 ownership and 409
+  binding refusals pass through unchanged.
+  V2 no existence leak: a missing, an inaccessible and a deleted project give byte-equal
+  frames and tool_result; the message names no project id.
+  V3 every `capture`/`require_current` caller (loop admission, runner._policy,
+  change_set._admitted, confirm.py, change_set.py and loop.py `require_current`) is pinned
+  by a foreign-actor test: fails closed, no `tool_running`.
+  V4 the kind in a fragment; the manifest test, ChatPanel.manifest vitest and
+  `smoke/assistant_inventory.py --check` at the trial merge; the store-fault tests stay
+  503 `restriction_unavailable`.
+  V5 targeted mutants (widen the catch, drop the status check, re-raise a string detail)
+  listed in the PR body with their killing tests; follow-up issue 21 for the 403/409.
