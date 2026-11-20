@@ -40,6 +40,16 @@ FAMILIES = [
 ]
 
 
+_BUILT: dict = {}
+
+
+def _build(tid: str):
+    """A fresh copy of the template network (each template built once)."""
+    if tid not in _BUILT:
+        _BUILT[tid] = T.BUILDERS[tid]()
+    return _BUILT[tid].copy()
+
+
 def _weak_pack(tid: str):
     po = (T.TEMPLATE_META.get(tid) or {}).get("pack_overrides") or {}
     keep = {k: v for k, v in po.items() if k == "import_p_nom_mw"}
@@ -53,7 +63,7 @@ def _limits(n, links):
 
 @pytest.mark.parametrize("tid,built,cap", FAMILIES)
 def test_planned_changes_list_the_connection_change_in_plain_words(tid, built, cap):
-    n = T.BUILDERS[tid]()
+    n = _build(tid)
     rows = A.planned_changes(n, _weak_pack(tid))
     kinds = {r["kind"]: r for r in rows}
     if built != cap:
@@ -70,7 +80,7 @@ def test_planned_changes_list_the_connection_change_in_plain_words(tid, built, c
 
 @pytest.mark.parametrize("tid,built,cap", FAMILIES)
 def test_planned_changes_do_not_touch_the_network(tid, built, cap):
-    n = T.BUILDERS[tid]()
+    n = _build(tid)
     links = A.select_import_links(n, _weak_pack(tid).import_overlay)
     before = _limits(n, links)
     A.planned_changes(n, _weak_pack(tid))
@@ -79,7 +89,7 @@ def test_planned_changes_do_not_touch_the_network(tid, built, cap):
 
 @pytest.mark.parametrize("tid,built,cap", FAMILIES)
 def test_keep_leaves_the_connection_as_built(tid, built, cap):
-    n = T.BUILDERS[tid]()
+    n = _build(tid)
     pack = _weak_pack(tid)
     links = A.select_import_links(n, pack.import_overlay)
     before = _limits(n, links)
@@ -91,7 +101,7 @@ def test_keep_leaves_the_connection_as_built(tid, built, cap):
 
 @pytest.mark.parametrize("tid,built,cap", FAMILIES)
 def test_accept_applies_the_study_cap_with_plain_warnings(tid, built, cap):
-    n = T.BUILDERS[tid]()
+    n = _build(tid)
     pack = _weak_pack(tid)
     links = A.select_import_links(n, pack.import_overlay)
     res = A.apply_archetype_pack_detailed(n, pack)
@@ -102,7 +112,7 @@ def test_accept_applies_the_study_cap_with_plain_warnings(tid, built, cap):
 
 
 def test_strong_grid_plans_no_change():
-    n = T.BUILDERS["eh_ammonia_staged"]()
+    n = _build("eh_ammonia_staged")
     assert A.planned_changes(n, default_strong_grid_pack()) == []
 
 
@@ -110,7 +120,7 @@ def test_strong_grid_plans_no_change():
 def test_off_grid_lists_the_closed_connection_in_plain_words(chosen):
     """The off-grid site type counts as the accept only when it is the user's
     own saved choice (GK A); a template default or a model's pick needs one."""
-    n = T.BUILDERS["eh_concentrator_staged"]()
+    n = _build("eh_concentrator_staged")
     rows = A.planned_changes(n, default_off_grid_pack(), off_grid_chosen=chosen)
     assert [r["kind"] for r in rows] == ["connection_closed"]
     assert (rows[0]["before_mw"], rows[0]["after_mw"]) == (35.0, 0.0)
@@ -119,7 +129,7 @@ def test_off_grid_lists_the_closed_connection_in_plain_words(chosen):
 
 
 def test_an_already_closed_connection_plans_no_change():
-    n = T.BUILDERS["eh_microgrid_staged"]()
+    n = _build("eh_microgrid_staged")
     assert A.planned_changes(n, default_off_grid_pack()) == []
 
 
@@ -158,7 +168,7 @@ _PACKS = {"strong_grid": default_strong_grid_pack,
 @pytest.mark.parametrize("arch", list(_PACKS))
 @pytest.mark.parametrize("tid", list(T.BUILDERS))
 def test_planned_changes_equal_what_the_apply_writes(tid, arch, keep):
-    n = T.BUILDERS[tid]()
+    n = _build(tid)
     pack = _PACKS[arch]()
     if arch == "weak_flexible":
         pack = _weak_pack(tid)
@@ -207,7 +217,7 @@ def test_an_equal_sum_with_a_different_split_is_still_listed():
 
 
 def test_a_cap_equal_only_after_rounding_is_a_change():
-    n = T.BUILDERS["eh_concentrator_staged"]()
+    n = _build("eh_concentrator_staged")
     pack = RUN.apply_pack_overrides(default_weak_flexible_pack(),
                                     {"import_p_nom_mw": 35.0000001})
     kinds = [r["kind"] for r in A.planned_changes(n, pack)]
@@ -222,3 +232,17 @@ def test_a_non_mw_import_bus_is_refused():
         A.planned_changes(n, pack)
     with pytest.raises(A.ArchetypePackError, match="not MW"):
         A.apply_archetype_pack_detailed(n, pack)
+
+
+def test_a_network_without_an_import_link_plans_no_change():
+    n = _two_link_network()
+    n.remove("Link", ["feeder_a", "feeder_b"])
+    assert A.planned_changes(n, default_weak_flexible_pack()) == []
+
+
+def test_an_unknown_archetype_is_refused_before_any_write():
+    n = _two_link_network()
+    pack = default_weak_flexible_pack().model_copy(update={"archetype": "mystery"})
+    with pytest.raises(A.ArchetypePackError, match="unknown archetype"):
+        A.apply_archetype_pack_detailed(n, pack)
+    assert (n.links.at["feeder_a", "p_nom"], n.links.at["feeder_b", "p_nom"]) == (30.0, 20.0)
