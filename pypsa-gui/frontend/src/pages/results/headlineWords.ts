@@ -17,6 +17,19 @@ export const COST_WORDS = {
 } as const
 export const UNSERVED_ENERGY = 'Unserved energy'
 
+/** Template-e2e 14 (GK B2 (3) e, UX 2 (4)): a negative total system cost is revenue over cost.
+ *  It keeps its cost label, says so beside the figure, and is never called a profit: the LP
+ *  objective is not the business case. */
+export const REVENUE_EXCEEDS_COST = '(revenue exceeds cost)'
+
+/** A total system cost in words: the figure with a real minus sign before the €, and the
+ *  note a negative total carries (none otherwise). One helper for the strip, Summary and
+ *  Capacity expansion. */
+export function totalCostWords(total: number | null | undefined): { value: string; note?: string } {
+  if (total == null || !Number.isFinite(total) || total >= 0) return { value: fmtCurrency(total) }
+  return { value: `\u2212${fmtCurrency(-total)}`, note: REVENUE_EXCEEDS_COST }
+}
+
 interface Words {
   label: string
   /** The Results tab that owns the figure, and its name for the "›" link. */
@@ -46,7 +59,11 @@ export function headlineFigure(card: HeadlineCard): { value: string; basis?: str
     case 'currency/yr': return { value: fmtCurrency(v), basis: 'per year' }
     // Annualised fixed cost plus the opex of the solved snapshots, or a sum over
     // the periods: what the solve covered, which is a year only by coincidence.
-    case 'currency': return { value: fmtCurrency(v), basis: 'in this solve' }
+    case 'currency': {
+      if (card.id !== 'system_cost') return { value: fmtCurrency(v), basis: 'in this solve' }
+      const words = totalCostWords(v)
+      return { value: words.value, basis: words.note ? `in this solve ${words.note}` : 'in this solve' }
+    }
     case 'MWh': return { value: fmtEnergy(v), basis: 'in this solve' }
     case 'months': return { value: `${v} ${v === 1 ? 'month' : 'months'}`, basis: card.detail ?? 'from project start' }
     case '%': return { value: `${v.toFixed(1)} %`, basis: card.detail ?? undefined }
