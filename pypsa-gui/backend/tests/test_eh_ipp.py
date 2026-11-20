@@ -650,7 +650,16 @@ def test_the_app_run_never_retires_the_fixed_plants(client, tmp_projects_dir):
         assert time.time() - t0 < 500, "the run did not finish"
         time.sleep(0.5)
     assert client.get("/api/simulation/status").json()["condition"] == "optimal"
-    rows = {r["name"]: r for r in client.get("/api/network/generators").json()}
-    for g, mw in (("wind_farm", M.WIND_MW), ("pv_plant", M.PV_MW_AC)):
-        assert rows[g]["p_nom"] == pytest.approx(mw)
-        assert rows[g]["p_nom_opt"] == pytest.approx(rows[g]["p_nom"]), g
+    name = "ipp"
+
+    def kept(when):
+        rows = {r["name"]: r for r in client.get("/api/network/generators").json()}
+        for g, mw in (("wind_farm", M.WIND_MW), ("pv_plant", M.PV_MW_AC)):
+            assert rows[g]["p_nom"] == pytest.approx(mw), (when, g)
+            assert rows[g]["p_nom_opt"] == pytest.approx(rows[g]["p_nom"]), (when, g)
+
+    kept("after the solve")
+    # The walk's path (GK B2 (3) c): saved, then reopened from disk.
+    assert client.post(f"/api/projects/{name}").status_code == 200
+    assert client.get(f"/api/projects/{name}").status_code == 200
+    kept("after save and reopen")

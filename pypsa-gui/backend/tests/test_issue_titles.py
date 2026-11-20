@@ -55,3 +55,15 @@ def test_every_cycling_code_has_a_title():
     assert [c for c in CYCLING_CODES if c not in ISSUE_TITLES] == []
     assert issue_title("commercial.arbitrage_loop_via_storage") == issue_title(
         "tariff_export_exceeds_import_via_storage")
+
+
+def test_the_titled_commercial_codes_are_exactly_the_engines():
+    """GK B2 (3): every `commercial.*` id the engine's commercial checks can raise has a
+    title, and no title names an id they no longer raise; a new id fails here instead
+    of reaching the readiness list as a raw identifier."""
+    src = pathlib.Path(__file__).parent.parent / "services" / "commercial"
+    raised = set()
+    for f in src.glob("*.py"):
+        raised |= set(re.findall(r"\"(commercial\.[a-z][a-z0-9_]+)\"", f.read_text(encoding="utf8")))
+    assert len(raised) > 15
+    assert {c for c in ISSUE_TITLES if c.startswith("commercial.")} == raised
