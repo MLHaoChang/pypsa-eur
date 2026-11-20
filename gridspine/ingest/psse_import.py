@@ -65,6 +65,7 @@ from typing import Any
 import pandas as pd
 import pypsa
 
+from gridspine.handoff.contingencies import conmap_path
 from gridspine.ingest.contingency_list import _NetIndex, read_contingency_list
 from gridspine.ingest.import_result import (
     Assumed,
@@ -128,7 +129,9 @@ def read_psse(paths: Sequence[Path], options: Mapping[str, Any]) -> ImportResult
             if "NAME" in case.tables["bus"]
             else {}
         )
-        side, um, n_con = contingencies(con.name, _text(con), net, raw_names)
+        side, um, n_con = contingencies(
+            con.name, _text(con), net, raw_names, _label_map(con)
+        )
         sidecars["psse_contingencies.json"] = side
         unmapped += um
         counts["Contingencies"] = n_con
@@ -923,7 +926,13 @@ class PsseNetIndex(_NetIndex):
         return (hits[0], None) if hits else (None, "unknown_bus")
 
 
-def contingencies(name: str, text: str, n, raw_names: Mapping[int, str]):
+def _label_map(con: Path):
+    """The label map beside a ``.con`` written by ``write_con``, or None."""
+    path = conmap_path(con)
+    return path if path.exists() else None
+
+
+def contingencies(name: str, text: str, n, raw_names: Mapping[int, str], conmap=None):
     """
     ``(psse_contingencies.json, unmapped, contingency count)`` for a ``.con``
     read with ``contingency_list.read_contingency_list`` onto ``n``. Every
@@ -931,7 +940,7 @@ def contingencies(name: str, text: str, n, raw_names: Mapping[int, str]):
     """
     try:
         idx = PsseNetIndex(n, raw_names)
-        got = read_contingency_list(text, idx, fmt="con")
+        got = read_contingency_list(text, idx, fmt="con", conmap=conmap)
     except ContractError as exc:
         raise ImportFormatError(f"{name}: {exc}") from exc
     rows = []

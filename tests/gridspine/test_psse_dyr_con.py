@@ -591,6 +591,18 @@ def test_con_writer_round_trip(tmp_path):
     assert got == want
 
 
+def test_a_written_con_without_its_label_map_is_refused(tmp_path):
+    from gridspine.handoff.contingencies import conmap_path, write_con
+    from tests.gridspine.test_planning_criteria import _net, _set
+
+    net = _net()
+    write_con(_set(net, kinds=("branch",)), net, tmp_path / "s.con")
+    write_raw(net, tmp_path / "s.raw", f_hz=50.0)
+    conmap_path(tmp_path / "s.con").unlink()
+    with pytest.raises(ImportFormatError, match=r"s\.conmap\.csv is needed"):
+        read_psse([tmp_path / "s.raw", tmp_path / "s.con"], {})
+
+
 def test_dyr_writer_round_trip(tmp_path):
     from tests.gridspine.test_dyr_wecc import PLANT, POC, WT3, _write
 
