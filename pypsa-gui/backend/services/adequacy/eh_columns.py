@@ -65,7 +65,7 @@ def coerce_eh_value(component_class: str, col: str, value):
         if value is None or value == "":
             return float("nan")
         if isinstance(value, bool):  # float(True) is 1.0: a tick is never a size (GK B X2)
-            raise ValueError(f"{col}: expected a number, got {value!r}")
+            raise ValueError(f"{col}: expected a number, got {value}")
         try:
             v = float(value)
         except (TypeError, ValueError):
