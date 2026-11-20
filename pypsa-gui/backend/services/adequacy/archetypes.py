@@ -451,7 +451,7 @@ def apply_archetype_pack_detailed(n, pack: ArchetypePack, *,
             "none matched"
         )
     if pack.archetype not in ("strong_grid", "weak_flexible", "off_grid"):
-        raise ArchetypePackError(f"unknown archetype {pack.archetype!r}")
+        raise ArchetypePackError(f"unknown archetype {pack.archetype}")
 
     saved: dict[str, dict[str, object]] = {
         name: _save_link_power(n, name) for name in selected
