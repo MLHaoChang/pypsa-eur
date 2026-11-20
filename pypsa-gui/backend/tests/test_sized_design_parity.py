@@ -464,3 +464,33 @@ def _write_fixture() -> None:
 
 if __name__ == "__main__":
     _write_fixture()
+
+
+# ── guards the mutants named ────────────────────────────────────────────────
+
+
+def test_an_unsolved_network_with_stale_results_has_no_peak_or_energy():
+    """Results left from an earlier solve never read as this one's."""
+    n = _fake_solve(_build("eh_ammonia_staged"))
+    n.links_t.p0 = pd.DataFrame({"grid_import": 500.0}, index=n.snapshots)
+    n.generators_t.p = pd.DataFrame({"__lost_nh3": 5.0}, index=n.snapshots)
+    n._objective = None
+    p = R.sizing_summary_from_network(n)
+    assert p["grid_import_peak_mw"] is None and p["connection_check"] is None
+    assert all(s["energy"] is None for s in p["product_slacks"])
+
+
+def test_a_size_that_is_not_a_number_reads_its_fixed_size_or_zero():
+    n = _site()
+    n.generators.loc["pv", "p_nom_opt"] = float("nan")
+    n.add("Generator", "wind", bus="site", carrier="wind")
+    n.generators.loc["wind", ["p_nom", "p_nom_opt"]] = [float("nan"), float("nan")]
+    p = R.sizing_summary_from_network(n)
+    assert p["by_carrier"] == {"solar": 4.0, "wind": 0.0}
+
+
+def test_a_link_with_the_grid_bus_on_bus1_and_another_port_is_site_side():
+    n = _site(export=0.0)
+    n.links["bus2"] = ""
+    n.links.loc["grid_export", "bus2"] = "grid"
+    assert R.sizing_summary_from_network(n)["by_carrier"] == {"grid": 500.0, "solar": 4.0}
