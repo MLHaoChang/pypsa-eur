@@ -310,8 +310,12 @@ def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_project
     assert [i["in_scope"] for i in defaults] == [False] * 4
     assert not any(i["blocking"] for i in defaults)
     by_id = {s["section"]: s for s in flow["sections"]}
-    # 14 before the templates ship a tax rule as an assumption (WALK-IMPROVE-1 b).
-    assert by_id["readiness"]["summary"] == "0 to do, 15 to check"
+    # The normally-open subsea tie is no unit missing outage data (walkthrough 12):
+    # that one row is gone (it made this 14); 13 before the templates ship a tax
+    # rule as an assumption (WALK-IMPROVE-1 b).
+    assert not [i for s in flow["sections"] for i in s["items"]
+                if i["code"] == "eh_outage_data_missing"]
+    assert by_id["readiness"]["summary"] == "0 to do, 14 to check"
     assert [i["target"]["entity"] for i in by_id["commercial"]["items"]
             if i["code"] == "assumed_default" and i["target"].get("entity") == "tax"] == ["tax"]
     # The assumed rows of the sections the project does need are still asked for.
@@ -332,8 +336,10 @@ def test_the_staged_microgrid_keeps_its_feeder_losses_counted(client, tmp_projec
                      "subsea_tie": False}
     assert len(defaults) == 5
     readiness = next(s for s in flow["sections"] if s["section"] == "readiness")
-    # 11 before the templates shipped a tax rule as an assumption (WALK-IMPROVE-1 b).
-    assert readiness["summary"] == "0 to do, 12 to check"
+    assert not [i for s in flow["sections"] for i in s["items"]
+                if i["code"] == "eh_outage_data_missing"]
+    # 10 before the templates shipped a tax rule as an assumption (WALK-IMPROVE-1 b).
+    assert readiness["summary"] == "0 to do, 11 to check"
 
 
 def test_a_section_the_scope_leaves_out_says_so(client, tmp_projects_dir, monkeypatch):
