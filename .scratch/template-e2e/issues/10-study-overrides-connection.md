@@ -35,3 +35,5 @@ GK A plan verdict (2026-11-20): GO with conditions for PR 1 (engine).
 - C6 Old warning strings grepped and every consumer updated; frontend types follow the `planned_changes` shape.
 - C7 mutants.py on archetypes.py and the runner branch, plus targeted mutants per guard.
 - Off-grid: the site-type choice counts as the accept only when off_grid is the user's own saved choice; a template default, inference or model-supplied off_grid lists `connection_closed` with needs_accept true.
+
+Owner decision (2026-11-20, TE2E-10-OFFGRID-1): an off-grid study's closing of the grid connection is listed before Run in plain words; the off-grid site type the user chose counts as the accept (no extra click). Per GK A, only when off_grid is the user's own saved choice (`planned_changes(..., off_grid_chosen=True)`); otherwise the row needs an accept.
