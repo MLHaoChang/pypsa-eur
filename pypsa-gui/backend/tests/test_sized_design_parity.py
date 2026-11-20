@@ -435,23 +435,82 @@ def test_an_old_stored_report_hashes_and_renders_as_on_master():
 #: Rows no template has (a zero, a missing size, a bare minimum, a tonne
 #: store...): the fixture's ``_edge`` case, which the frontend test renders too.
 EDGE_ASSETS = [
-    {"component": "Generator", "name": "off", "carrier": "solar", "built_mw": 0.004,
-     "min_mw": 0.0, "max_mw": None, "unit": "MW"},
-    {"component": "Generator", "name": "unsolved", "carrier": None, "built_mw": None,
-     "min_mw": 2.0, "max_mw": None, "unit": "MW"},
-    {"component": "Link", "name": "fixed_floor", "carrier": "AC", "built_mw": 0.005,
-     "min_mw": 1.5, "max_mw": 9.999, "unit": "MW"},
-    {"component": "StorageUnit", "name": "bess_bare", "carrier": "battery",
-     "built_mw": 1234.567, "min_mw": None, "max_mw": 2000.0, "unit": "MW"},
-    {"component": "StorageUnit", "name": "tank_th", "carrier": "nh3",
-     "built_mw": 3.0, "min_mw": 0.0, "max_mw": 5.0, "unit": "t/h",
-     "max_hours": None, "built_mwh": 72.0},
-    {"component": "Store", "name": "silo", "carrier": "ore", "built_mwh": 0.0,
-     "min_mwh": 0.0, "max_mwh": 400.0, "min_mw": 999.0, "max_mw": 1.0, "unit": "t"},
-    {"component": "Store", "name": "silo_unsolved", "carrier": "ore",
-     "built_mwh": None, "built_mw": 5.0, "min_mwh": 10.0, "max_mwh": None, "unit": "t"},
-    {"component": "Store", "name": "h2_cav", "carrier": "H2", "built_mwh": -0.0001,
-     "built_mw": 3.0, "unit": "MWh"},
+    {
+        "component": "Generator",
+        "name": "off",
+        "carrier": "solar",
+        "built_mw": 0.004,
+        "min_mw": 0.0,
+        "max_mw": None,
+        "unit": "MW",
+    },
+    {
+        "component": "Generator",
+        "name": "unsolved",
+        "carrier": None,
+        "built_mw": None,
+        "min_mw": 2.0,
+        "max_mw": None,
+        "unit": "MW",
+    },
+    {
+        "component": "Link",
+        "name": "fixed_floor",
+        "carrier": "AC",
+        "built_mw": 0.005,
+        "min_mw": 1.5,
+        "max_mw": 9.999,
+        "unit": "MW",
+    },
+    {
+        "component": "StorageUnit",
+        "name": "bess_bare",
+        "carrier": "battery",
+        "built_mw": 1234.567,
+        "min_mw": None,
+        "max_mw": 2000.0,
+        "unit": "MW",
+    },
+    {
+        "component": "StorageUnit",
+        "name": "tank_th",
+        "carrier": "nh3",
+        "built_mw": 3.0,
+        "min_mw": 0.0,
+        "max_mw": 5.0,
+        "unit": "t/h",
+        "max_hours": None,
+        "built_mwh": 72.0,
+    },
+    {
+        "component": "Store",
+        "name": "silo",
+        "carrier": "ore",
+        "built_mwh": 0.0,
+        "min_mwh": 0.0,
+        "max_mwh": 400.0,
+        "min_mw": 999.0,
+        "max_mw": 1.0,
+        "unit": "t",
+    },
+    {
+        "component": "Store",
+        "name": "silo_unsolved",
+        "carrier": "ore",
+        "built_mwh": None,
+        "built_mw": 5.0,
+        "min_mwh": 10.0,
+        "max_mwh": None,
+        "unit": "t",
+    },
+    {
+        "component": "Store",
+        "name": "h2_cav",
+        "carrier": "H2",
+        "built_mwh": -0.0001,
+        "built_mw": 3.0,
+        "unit": "MWh",
+    },
 ]
 
 
@@ -469,13 +528,25 @@ def test_edge_rows_render_as_the_ui_fixture_pins_them():
     assert case["assets"] == EDGE_ASSETS
     assert _cells(EDGE_ASSETS) == (case["built"], case["range"])
     assert case["built"] == {
-        "off": "none built", "unsolved": "not reported", "fixed_floor": "0.01 MW",
-        "bess_bare": "1,234.57 MW", "tank_th": "3 t/h · 72 t", "silo": "none built",
-        "silo_unsolved": "not reported", "h2_cav": "none built"}
+        "off": "none built",
+        "unsolved": "not reported",
+        "fixed_floor": "0.01 MW",
+        "bess_bare": "1,234.57 MW",
+        "tank_th": "3 t/h · 72 t",
+        "silo": "none built",
+        "silo_unsolved": "not reported",
+        "h2_cav": "none built",
+    }
     assert case["range"] == {
-        "off": "no limit", "unsolved": "at least 2 MW", "fixed_floor": "1.5–10 MW",
-        "bess_bare": "up to 2,000 MW", "tank_th": "0–5 t/h", "silo": "0–400 t",
-        "silo_unsolved": "at least 10 t", "h2_cav": "no limit"}
+        "off": "no limit",
+        "unsolved": "at least 2 MW",
+        "fixed_floor": "1.5–10 MW",
+        "bess_bare": "up to 2,000 MW",
+        "tank_th": "0–5 t/h",
+        "silo": "0–400 t",
+        "silo_unsolved": "at least 10 t",
+        "h2_cav": "no limit",
+    }
 
 
 @pytest.mark.parametrize("tid", TEMPLATES)
@@ -534,7 +605,10 @@ def test_a_link_with_the_grid_bus_on_bus1_and_another_port_is_site_side():
     n = _site(export=0.0)
     n.links["bus2"] = ""
     n.links.loc["grid_export", "bus2"] = "grid"
-    assert R.sizing_summary_from_network(n)["by_carrier"] == {"grid": 500.0, "solar": 4.0}
+    assert R.sizing_summary_from_network(n)["by_carrier"] == {
+        "grid": 500.0,
+        "solar": 4.0,
+    }
 
 
 # ── guards the second mutant run named ──────────────────────────────────────
@@ -561,7 +635,10 @@ def test_slacks_on_the_grid_bus_are_neither_supply_nor_installed():
 def test_a_line_named_like_the_import_link_is_site_side():
     n = _site()
     n.add("Line", "grid_import", bus0="grid", bus1="site", x=0.1, s_nom=10.0)
-    assert R.sizing_summary_from_network(n)["by_carrier"] == {"grid": 500.0, "solar": 4.0}
+    assert R.sizing_summary_from_network(n)["by_carrier"] == {
+        "grid": 500.0,
+        "solar": 4.0,
+    }
 
 
 def test_no_import_link_keeps_import_capacitys_own_refusal():
@@ -583,7 +660,29 @@ def test_a_link_elsewhere_leaves_an_unlinked_poc_unbounded():
 
 
 def test_a_zero_minimum_is_no_limit_and_an_asset_without_carrier_is_its_kind():
-    a = {"name": "g", "component": "Generator", "carrier": None, "min_mw": 0.0,
-         "max_mw": None, "p_nom_opt": 1.0}
+    a = {
+        "name": "g",
+        "component": "Generator",
+        "carrier": None,
+        "min_mw": 0.0,
+        "max_mw": None,
+        "p_nom_opt": 1.0,
+    }
     assert E._sized_range(a) == "no limit"
     assert E._t_sized_assets({"assets": [a]}).rows[0][1] == "Generator"
+
+
+def test_a_slack_that_delivered_nothing_has_no_row():
+    _n, p = _payload("eh_datacenter")
+    p["product_slacks"] = [
+        {
+            "name": "__lost_nh3",
+            "process_role": "shortfall",
+            "carrier": "NH3",
+            "p_nom": 30.0,
+            "energy": 1e-10,
+            "unit": "t/h",
+            "energy_unit": "t",
+        }
+    ]
+    assert not any(r[0].startswith("Shortfall") for r in E._t_sizing(p).rows)
