@@ -1,0 +1,1 @@
+* Feat(gridspine): EMT workbook carries transformer tap-changer data, winding neutral resistors and an earthing-transformer sheet (missing values listed in to_be_supplied.csv); the mhi.pscad stub is now tested against a fake module (GC-06c, 06d).

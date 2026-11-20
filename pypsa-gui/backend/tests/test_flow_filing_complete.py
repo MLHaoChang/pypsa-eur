@@ -310,9 +310,13 @@ def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_project
     assert [i["in_scope"] for i in defaults] == [False] * 4
     assert not any(i["blocking"] for i in defaults)
     by_id = {s["section"]: s for s in flow["sections"]}
-    # 16: the 14 template rows plus the off-grid dispatch limits (operating
-    # reserve, minimum renewable fraction; RESERVE-SHOW-1).
-    assert by_id["readiness"]["summary"] == "0 to do, 16 to check"
+    # The normally-open subsea tie is no unit missing outage data (walkthrough 12):
+    # that one row is gone (it made this 14).
+    assert not [i for s in flow["sections"] for i in s["items"]
+                if i["code"] == "eh_outage_data_missing"]
+    # 15: 13 rows plus the off-grid dispatch limits (operating reserve,
+    # minimum renewable fraction; RESERVE-SHOW-1).
+    assert by_id["readiness"]["summary"] == "0 to do, 15 to check"
     # The assumed rows of the sections the project does need are still asked for.
     assert all(i["in_scope"] for s in ("assets", "commercial", "scenarios")
                for i in by_id[s]["items"] if i["code"].startswith("assumed_"))
@@ -331,7 +335,9 @@ def test_the_staged_microgrid_keeps_its_feeder_losses_counted(client, tmp_projec
                      "subsea_tie": False}
     assert len(defaults) == 5
     readiness = next(s for s in flow["sections"] if s["section"] == "readiness")
-    assert readiness["summary"] == "0 to do, 13 to check"   # 11 + the two dispatch limits
+    assert not [i for s in flow["sections"] for i in s["items"]
+                if i["code"] == "eh_outage_data_missing"]
+    assert readiness["summary"] == "0 to do, 12 to check"  # 10 + the two dispatch limits
 
 
 def test_a_section_the_scope_leaves_out_says_so(client, tmp_projects_dir, monkeypatch):

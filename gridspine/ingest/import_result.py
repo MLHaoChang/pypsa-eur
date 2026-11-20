@@ -354,8 +354,11 @@ DECLARED: tuple[ImporterSpec, ...] = (
     ImporterSpec(
         format_id="psse",
         display_name="PSS/E case",
-        extensions=(".raw", ".dyr"),
-        help="A PSS/E .raw network file, optionally with a .dyr dynamic data file.",
+        extensions=(".raw", ".dyr", ".con"),
+        help=(
+            "A PSS/E .raw network file, optionally with a .dyr dynamic data file "
+            "and a .con contingency file."
+        ),
     ),
     ImporterSpec(
         format_id="dgs",
@@ -366,8 +369,8 @@ DECLARED: tuple[ImporterSpec, ...] = (
     ImporterSpec(
         format_id="plexos",
         display_name="PLEXOS model",
-        extensions=(".xml", ".xlsx"),
-        help="A PLEXOS model exported as XML, or its input workbook.",
+        extensions=(".xml", ".zip"),
+        help="A PLEXOS model exported as XML, or a .zip of the XML and its CSV data files.",
     ),
 )
 

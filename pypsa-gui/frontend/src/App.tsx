@@ -6,6 +6,8 @@ import AppHeader from './layout/AppHeader'
 import ProjectTabs from './layout/ProjectTabs'
 import Sidebar from './layout/Sidebar'
 import PropertiesPanel from './layout/PropertiesPanel'
+import RecipeCard from './layout/properties/RecipeCard'
+import { RECIPE_FIELD } from './pages/hubDesign/holdWords'
 import BottomPanel from './layout/BottomPanel'
 import StatusBar from './components/StatusBar'
 import MapModeSwitcher from './components/MapModeSwitcher'
@@ -837,6 +839,9 @@ export default function App() {
                 // Control-strategy 03: an off-grid site's reserve or renewable-fraction row opens the
                 // Island requirements card's dispatch-limits editor.
                 ? <div className="px-3 py-2"><DispatchLimitsEditor onDone={() => useUIStore.getState().setFieldDrawer(null)} /></div>
+                : t.field === RECIPE_FIELD && t.entity
+                // Gap 03: a section 2 recipe row's Guided home, the recipe card alone over the card.
+                ? <div className="px-3 py-2"><RecipeCard name={t.entity} /></div>
                 : t.component && t.entity
                 ? <PropertiesPanel />
                 : <FullPageTab panel={t.panel as SlidePanel} onClose={() => useUIStore.getState().setFieldDrawer(null)} />}

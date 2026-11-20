@@ -22,7 +22,9 @@ import {
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
 import CampusIslandCutsSection, { scenarioWords } from './CampusIslandCutsSection'
-import { showResultsTab } from '../layout/flowNavigation'
+import { openFlowTargetInPlace, showResultsTab, withReturnFrom } from '../layout/flowNavigation'
+import { useUIStore } from '../store/uiStore'
+import { money } from '../utils/money'
 import { ISLAND_REQUIREMENT_LABELS, ISLAND_SCENARIO_LABELS } from './islandWords'
 
 export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name] as const
@@ -47,9 +49,9 @@ const GROUP_TITLES: Record<IslandGroup, string> = {
 /** Column headers in the user's words. The report's columns are the engine's contract
  *  (kept as they are in the data); a column not listed reads as its name with spaces. */
 const COLUMN_WORDS: Record<string, string> = {
-  field: 'Setting', value: 'Value', source: 'Source', unit: 'Unit', kind: 'Kind', scenario: 'Scenario', row: 'Limit', 'cost of island capability': 'Cost of island capability',
-  'hours binding': 'Hours reached', 'sum of duals': 'Cost of the limit',
-  status: 'Status', objective: 'Objective', period: 'Period', hour: 'Hour', event: 'Event', case: 'Case',
+  field: 'Setting', value: 'Value', source: 'Source', unit: 'Unit', kind: 'Kind', scenario: 'Scenario', row: 'Limit', 'cost of island capability': 'Cost of island capability (per year)',
+  'hours binding': 'Hours reached', 'sum of duals': 'Cost of the limit (per year)',
+  status: 'Status', objective: 'Objective (per year)', period: 'Period', hour: 'Hour', event: 'Event', case: 'Case',
   viable: 'Viable', reason: 'Reason', assumed: 'Assumed inputs', ok: 'Passes', verdict: 'Verdict', detail: 'Detail',
   df_hz: 'Frequency shift (Hz)', delta_p_ac_mw: 'Power step (MW)', sync_df_hz: 'Sync frequency gap (Hz)',
   sync_dv_pu: 'Sync voltage gap (pu)', gate_ok: 'Gate passes', gate_problems: 'Gate problems',
@@ -103,8 +105,30 @@ const fieldWords = (f: string) => {
   return `${head.replace(/_/g, ' ')}: ${(FIELD_WORDS[field] ?? field.replace(/_/g, ' ')).replace(/^./, c => c.toLowerCase())}`.replace(/^./, c => c.toUpperCase())
 }
 
+/** The campus file's home, Grid connection. In Guided it replaces the drawer's content (the user
+ *  stays over the card, with one way back); in Expert it opens the panel. */
+export function openCampusFile(): void {
+  const ui = useUIStore.getState()
+  if (ui.uiMode === 'guided') {
+    openFlowTargetInPlace({ section: 'connection', panel: 'campusElectrical', component: null, entity: null, field: null })
+  } else {
+    withReturnFrom(() => useUIStore.getState().setSlidePanel('campusElectrical'))
+  }
+}
+
 const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
-const intFmt = (v: number) => Math.round(v).toLocaleString('en-US')
+
+/** An island limit's engine name in words: `Island-n1-down-bess_new` is "Island N-1: loss of
+ *  bess new, downward reserve". A name that matches none stays as the old sentence form. */
+const LIMIT_PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
+  [/^island-n1-(up|down)-(.+)$/i, m => `Island N-1: loss of ${m[2].replace(/_/g, ' ')}, ${m[1].toLowerCase() === 'up' ? 'upward' : 'downward'} reserve`],
+  [/^island-e2-up(?:-(.+))?$/i, m => `Island: largest load step, upward reserve${m[1] ? ` (${m[1].replace(/_/g, ' ')})` : ''}`],
+  [/^island-e5-up$/i, () => 'Island: loss of the PV output, upward reserve'],
+]
+export function limitWords(raw: string): string {
+  for (const [re, f] of LIMIT_PATTERNS) { const m = raw.match(re); if (m) return f(m) }
+  return sentence(raw.replace(/_/g, ' '))
+}
 
 /** A cell longer than this stays on one line, its full text on hover. */
 const LONG = 48
@@ -124,6 +148,11 @@ function ReportTable({ table }: { table: IslandTable }) {
       <h4 className="text-[12.5px] font-semibold">{table.title}</h4>
       <p className="text-[11px] text-muted" data-testid="island-model">Model: {table.model}</p>
       <p className="text-[11px] text-muted italic mb-1" data-testid="island-caveat">{table.caveat}</p>
+      {table.id === 'binding' && (
+        <p className="text-[11px] text-muted mb-1" data-testid="island-binding-note">
+          Each limit's cost is its marginal value, so the costs do not add up to the cost of island capability.
+        </p>
+      )}
       {/* A table scrolls in its own box, and a long cell (a list of assumed
           inputs, a ledger reason) stays on one line with the full text on
           hover, so an island-hours table of many rows keeps its height. */}
@@ -140,8 +169,8 @@ function ReportTable({ table }: { table: IslandTable }) {
                   const text = table.id === 'requirements' && j === 0 && typeof v === 'string' ? fieldWords(v)
                     : col === 'scenario' && typeof v === 'string' ? scenarioWords(v)
                     : col === 'status' && v === 'ok' ? 'OK'
-                    : col === 'row' && typeof v === 'string' ? sentence(v.replace(/_/g, ' '))
-                    : (table.id === 'costs' || (table.id === 'binding' && col === 'sum of duals')) && typeof v === 'number' ? intFmt(v)
+                    : col === 'row' && typeof v === 'string' ? limitWords(v)
+                    : (table.id === 'costs' || (table.id === 'binding' && col === 'sum of duals')) && typeof v === 'number' ? money(v, 'EUR')
                     : cell(v)
                   return text.length > LONG
                     ? <td key={j} className="px-2 max-w-[320px] truncate" title={text}>{text}</td>
@@ -305,7 +334,13 @@ export function IslandReportView({ report }: { report: IslandReport | undefined 
     <div className="mt-4" data-testid="island-report">
       {report.missing.length > 0 && (
         <p className="text-[12px] text-muted mb-2" data-testid="island-missing">
-          Not yet available: {report.missing.join(', ')}.
+          {tables.length > 0 && <>Ran: {tables.map(t => inSentence(t.title)).join('; ')}. </>}
+          Not run yet: {report.missing.join(', ')}.{' '}
+          They need the campus file (drafted in Grid connection) and a grid study run.{' '}
+          <button type="button" className="text-accent underline" data-testid="island-missing-link"
+            onClick={openCampusFile}>
+            Open Grid connection ›
+          </button>
         </p>
       )}
       {empty.length > 0 && (
