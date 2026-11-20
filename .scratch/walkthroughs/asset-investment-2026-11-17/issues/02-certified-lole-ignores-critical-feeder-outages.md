@@ -48,3 +48,4 @@ The Island Microgrid run either reports the hospital's LOLE with the feeder samp
   - If the bound, together with the rest of the hub, stays within the target, the bus does not block "pass". Its row shows the bound, labelled as an upper bound with the bus's own units not counted.
   - Otherwise the certification reads "inconclusive", never "fail". It names the bus and the bound, and says what clears it: a second feeder, a lower outage rate on the feeder, or the two-area treatment in issue 09.
   - A cap never certifies a pass on a risk that was not evaluated.
+- Seen again 2026-11-20 (template walk, master 1f6905e3): DC: verdict 'Certified: about 0.5 h/yr' next to 'Site transformer about EUR 7.04 M per year'; microgrid: 'Certified: no shortfall expected' next to 'Hospital feeder about EUR 657 k per year'. The EUR figure is not explained next to the verdict. Issue 03 (sized design never shown) looks fixed: all three now show a 'Sized design' table.

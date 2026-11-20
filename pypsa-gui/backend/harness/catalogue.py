@@ -1297,10 +1297,11 @@ TOOLS: list[dict[str, Any]] = [
         "strong grid. It runs by default for weak_flexible / off_grid and "
         "costs no LP solve. "
         "weak_flexible sets each selected import Link's rating (`p_nom`, "
-        "and a finite `p_nom_max`) to `import_p_nom_mw` (default 50 MW) "
-        "divided by the number of import Links, replacing the Link's own "
-        "rating; when the two differ the `apply_pack` note and the report "
-        "name the Link, its rating and the cap used. "
+        "and a set `p_nom_max`, unlimited included) to `import_p_nom_mw` "
+        "(default 50 MW) divided by the number of import Links, replacing "
+        "the Link's own rating; when the two differ the `apply_pack` note "
+        "and the report state, in plain words, the user's grid connection "
+        "limit and the cap the study used. "
         "`budget_solves` (1–120, default 30) is a hard ceiling on LP solves "
         "inside the study — stages that would exceed it are skipped and "
         "reported not_established. Returns {status:'running'} — poll "
@@ -4692,8 +4693,11 @@ TOOLS: list[dict[str, Any]] = [
         "stale. `truncated` lists any section cut to fit. detail='inputs': the stored "
         "lines {business_case, digest, status, citable_turns} — pass `digest` as "
         "set_business_case_lines' if_match; `citable_turns` are the user's own messages a "
-        "price may cite. Safety: read.",
-        {"detail": {"type": "string", "enum": ["summary", "inputs"]}},
+        "price may cite. detail='options': what the line table offers {variants, "
+        "offered_rows, units_by_source (typed / share_of / linked per output), outputs "
+        "(or outputs_reason), refusals (or refusals_reason), horizon}: offer a line only "
+        "a unit its source allows and name each refusal in plain words. Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "inputs", "options"]}},
         [],
     ),
     _t(
@@ -4701,7 +4705,8 @@ TOOLS: list[dict[str, Any]] = [
         "Replace the business-case inputs (revenue, opex and capex lines, kw_per_gpu, "
         "capacity, break_even_line) with `business_case`, a whole BusinessCaseConfig: read "
         "it with get_business_case(detail='inputs'), change what the user asked, send the "
-        "whole object back. `if_match` is REQUIRED (that read's `digest`; '*' is refused; "
+        "whole object back. Before choosing a unit, read get_business_case(detail='options') "
+        "and use only a unit its source allows. `if_match` is REQUIRED (that read's `digest`; '*' is refused; "
         "stale: business_case_changed). NEVER invent a price: each NEW or CHANGED price "
         "(`price`, or a year of `price_by_year`) needs one entry in `citations` — {line, "
         "year? (for price_by_year), then where the user gave it: turn_id + quote + unit "
@@ -5986,10 +5991,11 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_ppa_price": [("GET", "/api/simulation/finance")],
     "explain_cashflow": [("GET", "/api/results/investment_case"),
                          ("GET", "/api/results/investment_case/report")],
-    # business case (4) — business case 08b; the preset route stays panel-only (Q3)
+    # business case (4) — business case 08b; the preset and options reads are chat reads (bc 14, bc 16)
     "run_business_case": [("POST", "/api/results/business_case")],
     "get_business_case": [("GET", "/api/results/business_case"),
-                          ("GET", "/api/results/business_case/inputs")],
+                          ("GET", "/api/results/business_case/inputs"),
+                          ("GET", "/api/results/business_case/options")],
     "set_business_case_lines": [("PUT", "/api/results/business_case/inputs")],
     "apply_business_case_preset": [("GET", "/api/results/business_case/preset"),
                                    ("PUT", "/api/results/business_case/inputs")],

@@ -3,7 +3,12 @@
 
 # A user without project access reads as restriction_unavailable
 
-Status: needs-triage
+Status: ready-for-agent
+Blocked by: none (live-voice 11b merged, #1548)
+Model tier: sonnet
+Size: S
+Gated: GK B
+Likely files: `pypsa-gui/backend/harness/restrictions.py` (`capture`, `require_allowed`), `pypsa-gui/tool-error-kinds.d/<branch>.json`, `pypsa-gui/backend/tests/test_lv11b_cancel_stop.py`
 Type: task
 Found by: live-voice 11b (#1548), GK B (59) N2.
 
@@ -25,6 +30,7 @@ pins today's behaviour and changes with this fix.
 
 ## Comments
 
+**2026-11-17 triage (SCALE-1).** Still needed on master. A new error kind goes in a `tool-error-kinds.d` fragment; the frontend copy changes only if the kind is a banner.
 - GK B (64) plan GO 2026-11-17 at master 0ab07339, conditions:
   V1 catch only `current_project`'s 404, `raise … from exc`; the 403 ownership and 409
   binding refusals pass through unchanged.
