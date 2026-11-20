@@ -288,3 +288,24 @@ def test_an_unchanged_limit_at_worker_entry_runs(make, seen, via, monkeypatch):
     assert proxy.entries >= 1
     assert len(seen) == 1
     assert seen[0].import_overlay.import_p_nom_mw == 45.0
+
+
+@VIAS
+def test_a_limit_removed_before_the_worker_starts_fails_with_its_sentence(
+    make, seen, via, monkeypatch
+):
+    from services.pypsa_service import PyPSAService
+
+    n = _network(45.0)
+    s = make(via, n)
+
+    def edit():
+        n.links.loc[_imports(n), "p_nom"] = 0.0
+
+    proxy = _EditOnEntry(PyPSAService.get_lock(), edit)
+    monkeypatch.setattr(PyPSAService, "get_lock", staticmethod(lambda: proxy))
+    assert s.start() is None
+    rec = s.record()
+    assert seen == []
+    assert rec["status"] == "failed"
+    assert "45 MW" in rec["error"] and F.CAP_ZERO in rec["error"], rec["error"]
