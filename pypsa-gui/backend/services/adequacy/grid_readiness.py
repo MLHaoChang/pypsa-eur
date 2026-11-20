@@ -65,6 +65,13 @@ SERVICE_WORDS = {"grid_forming": "grid forming", "synthetic_inertia": "synthetic
                  "fast_frequency_response": "fast frequency response", "voltage_control": "voltage control"}
 
 
+def _asset_names(names) -> str:
+    """Asset ids as the app reads them (utils/displayName.ts), each in curly quotes."""
+    from services.run_actions import _display_name
+
+    return ", ".join(f"\u201c{_display_name(n)}\u201d" for n in names)
+
+
 def _services_text(services) -> str:
     return ", ".join(SERVICE_WORDS.get(x, x) for x in services)
 
@@ -1497,10 +1504,10 @@ def _reactive_row(inp: _Inputs) -> dict:
         derivation += f"; {', '.join(unrated)} counted zero: no rated power factor or no rating"
     source = f"{source}. {derivation}"
     if unsized and verdict == "unknown":
-        note = (f"Not sized yet: {', '.join(unsized)} — run the plan to see the reactive range "
+        note = (f"Not sized yet: {_asset_names(unsized)}: run the plan to see the reactive range "
                 f"{'it adds' if len(unsized) == 1 else 'they add'}.")
     elif unsized:
-        note = f"Enough without {', '.join(unsized)}, which are not sized yet"
+        note = f"Enough without {_asset_names(unsized)}, which are not sized yet"
     elif verdict == "warn":
         note = f"Short by {need - have:.4g} Mvar"
     else:
@@ -1653,7 +1660,7 @@ def _island_rows(inp: _Inputs) -> list[dict]:
         if inp.island_study is not None:
             note += "; the study is the stored one, re-run it after a network edit"
         rows.append(_row(f"ride_through:{sc}", f"Island ride-through ({SCENARIO_WORDS.get(sc, sc)})",
-                         limit=(f"bridge {bridge:g} s on {', '.join(storage) or 'the site storage'}"
+                         limit=(f"bridge {bridge:g} s on {_asset_names(storage) or 'the site storage'}"
                                 if bridge is not None else "the island requirements"),
                          unit=None, source="The island requirements (each value tagged with its source)",
                          project_value=value, verdict=verdict,

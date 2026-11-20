@@ -931,6 +931,7 @@ def _mapped_rows(p: dict, counter: str) -> list[dict]:
         cell = lineage.get((row["name"], row["field"])) if row["role"] == "typed" else None
         if cell is not None:
             row["source"] = cell["source"]
+            row["says_name"] = f"{klass} \u201c{row['name']}\u201d: {cell['label']}"
             if cell["money_year"] is not None:
                 row["money"] = {"currency": cell["currency"], "money_year": cell["money_year"]}
             notes += [_note(klass, row["name"], row["field"], text) for text in cell.get("notes", ())]

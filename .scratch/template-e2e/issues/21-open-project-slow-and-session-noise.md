@@ -3,7 +3,7 @@
 
 # 21 — Opening a saved project and project housekeeping are rough
 
-Status: ready-for-agent
+Status: done
 Impact: low
 Templates: concentrator (60+ s), others
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
