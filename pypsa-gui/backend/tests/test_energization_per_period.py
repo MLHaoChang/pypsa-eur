@@ -217,7 +217,7 @@ def test_a_period_with_hours_without_a_value_is_not_flat():
     n = _single((20.0, np.nan, 20.0, 20.0))
     assert (
         _refused(n, "energization_period_not_flat", LINK, "all", 10.0)
-        == "The period varies 20–20 MW: set it on the network."
+        == "The period has hours without a value (20 MW in the others): set it on the network."
     )
     assert E.by_period(n, LINK) == {"by_period": {"all": {"min": 20.0, "max": 20.0}}}
 
@@ -280,20 +280,29 @@ def test_the_fingerprint_moves_on_an_upload_equivalent_write():
     assert after[0] != before[0] and after[1] != before[1]
 
 
-def test_the_fingerprint_is_unchanged_without_the_column(monkeypatch):
-    """Byte-identical: a network without a schedule (or an all-NaN one) hashes
-    as it did before the block existed."""
+# GK A 32 (W1/AS-02): master's fingerprints, computed by `_network_input_fingerprint`
+# on origin/master (no energization block), (plain, exact). A literal, so a block
+# appended on every network (its marker moved above the `if`) is seen.
+MASTER_FP_SINGLE = (
+    "5d957d5904040a2461e135cab361dcc37c94837dfdb4281f1a49a835d206702c",
+    "c5d6c416f41b319c4043f2db0c30def9f22e9273ded7664a958c355bcda81433",
+)
+MASTER_FP_EH_DATACENTER = (
+    "6bed6cc31d9261488445d9f53fe338c01a411a0e3c2eff9e9a32d09cea6d5450",
+    "f55e9bea34b15b82088ffb796b2804428e061a8d0a4a6ad2367c0544d79b7dbd",
+)
+
+
+def test_the_fingerprint_is_unchanged_without_the_column():
+    """Byte-identical to master: a network without a schedule (or an all-NaN
+    one) hashes as it did before the block existed."""
     n = _single()
     with_schedule = _fps(n)
     n.links_t[E.ATTR] = pd.DataFrame({LINK: [np.nan] * 4}, index=n.snapshots)
     nan_only = _fps(n)
     del n.links_t[E.ATTR]
     without = _fps(n)
-    assert nan_only == without != with_schedule
-    monkeypatch.setattr(E, "energization_frame", lambda _n: None)  # the block dropped
-    n2 = _single()
-    del n2.links_t[E.ATTR]
-    assert _fps(n2) == without
+    assert nan_only == without == MASTER_FP_SINGLE != with_schedule
 
 
 def test_g3_a_partly_nan_column_is_hashed_and_moves_when_its_nan_period_is_set():
@@ -311,6 +320,40 @@ def test_g3_a_partly_nan_column_is_hashed_and_moves_when_its_nan_period_is_set()
     assert E.set_period_mw(n, LINK, 2035, 40.0)["previous_mw"] is None
     after = _fps(n)
     assert after[0] != partly_nan[0] and after[1] != partly_nan[1]
+
+
+def _two_links():
+    """The staged network with a second scheduled Link: ``grid_import`` has no
+    value in 2035, ``import_b`` has one in every period."""
+    n = _staged()
+    n.add(
+        "Link",
+        "import_b",
+        bus0=n.links.at[LINK, "bus0"],
+        bus1=n.links.at[LINK, "bus1"],
+        p_nom=30.0,
+    )
+    frame = E.energization_frame(n).copy()
+    frame["import_b"] = 25.0
+    frame.loc[2035, LINK] = np.nan
+    n.links_t[E.ATTR] = frame
+    return n
+
+
+@pytest.mark.parametrize(
+    "link, period", [("import_b", 2035), (LINK, 2035), ("import_b", 2030)]
+)
+def test_g3_two_links_one_partly_nan_each_edit_moves_the_fingerprint(link, period):
+    """GK A 32 G3: a NaN in one column drops no row of the other. Setting
+    ``import_b`` in 2035, where ``grid_import`` has no value, moves the
+    fingerprint and the investment case's digest (a block hashed after
+    ``dropna()`` would not see it)."""
+    n = _two_links()
+    before, digest = _fps(n), E.schedule_digest(n)
+    E.set_period_mw(n, link, period, 12.0)
+    after = _fps(n)
+    assert after[0] != before[0] and after[1] != before[1]
+    assert E.schedule_digest(n) != digest
 
 
 # ── W2: the investment case's key ───────────────────────────────────────────
@@ -348,6 +391,51 @@ def test_the_investment_case_key_is_unchanged_without_a_schedule():
     assert (
         assumptions_digest(**base)[0] != assumptions_digest(**base, energization="x")[0]
     )
+
+
+class _EditOnEntry:
+    """A lock with an edit of the schedule landing just as the reader enters
+    it (GK A 32 G2, mutant M17); ``held`` is the reader's depth inside it."""
+
+    def __init__(self, lock, edit):
+        self._lock, self._edit, self.entries, self.held = lock, edit, 0, 0
+
+    def acquire(self, *a, **kw):
+        return self._lock.acquire(*a, **kw)
+
+    def release(self):
+        self._lock.release()
+
+    def __enter__(self):
+        self.entries += 1
+        if self.entries == 1:
+            self._edit()
+        entered = self._lock.__enter__()
+        self.held += 1
+        return entered
+
+    def __exit__(self, *exc):
+        self.held -= 1
+        return self._lock.__exit__(*exc)
+
+
+def test_g2_the_investment_case_reads_the_schedule_under_its_lock(monkeypatch):
+    from routers import results
+
+    n = _staged()
+    lock = _EditOnEntry(threading.RLock(), lambda: E.set_period_mw(n, LINK, 2030, 30.0))
+    real, held = E.schedule_digest, []
+
+    def digest(network):
+        held.append(lock.held)
+        return real(network)
+
+    monkeypatch.setattr(E, "schedule_digest", digest)
+    cfg = types.SimpleNamespace(finance=None, commercial=None)
+    _, parts = results._ic_assumptions(cfg, n, lock=lock)
+    assert lock.entries >= 1, "the case never entered the lock"
+    assert held == [1], "the schedule was read outside the lock"
+    assert parts["energization"] == real(n)  # the edit that landed at entry
 
 
 # GK B D2a / D2b: the investment case's status across the update. A record
@@ -397,11 +485,10 @@ def test_d2a_an_unscheduled_network_keeps_its_pre_02b_key_and_reads_fresh():
     assert E.schedule_digest(n) is None
 
 
-def test_d2a_the_fingerprint_of_an_unscheduled_template_is_pre_02b(monkeypatch):
+def test_d2a_the_fingerprint_of_an_unscheduled_template_is_pre_02b():
     n = build_eh_datacenter()
-    now = _fps(n)
-    monkeypatch.setattr(E, "energization_frame", lambda _n: None)  # the block dropped
-    assert _fps(n) == now
+    assert E.energization_frame(n) is None
+    assert _fps(n) == MASTER_FP_EH_DATACENTER  # master's, byte for byte
 
 
 def test_d2b_a_scheduled_network_reads_inputs_changed_once_then_fresh(monkeypatch):
@@ -480,7 +567,8 @@ def test_freeze_records_the_schedule_and_admit_compares_it_exactly(tmp_path):
         json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
     )
     assert frozen["energization"] == {
-        LINK: {"by_period": {"2027": 15.0, "2030": 55.0, "2035": 55.0}}
+        "digest": E.schedule_digest(n),
+        "by_period": {LINK: {"by_period": {"2027": 15.0, "2030": 55.0, "2035": 55.0}}},
     }
     assert run_eh._energization_change(ctx, frozen) is None
     E.set_period_mw(n, LINK, 2030, 54.999999)  # exact, never a tolerance
@@ -511,5 +599,54 @@ def test_d4_a_record_frozen_before_02b_admits_on_an_unscheduled_network(tmp_path
 
     ctx = _run_ctx(tmp_path, build_eh_datacenter(), "eh_datacenter")
     frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
-    assert frozen.pop("energization") == {}
+    assert frozen.pop("energization") == {"digest": None, "by_period": {}}
     assert _admit(tmp_path, ctx, frozen) is None  # admitted, as before 02b
+
+
+def test_e4_a_ramp_reversed_inside_a_period_refuses(tmp_path):
+    """GK A 32 E4: 2027 as a ramp, frozen, then reversed. Its min and max (the
+    flow row's reading) are the same; the schedule, the LP input and the
+    fingerprint are not, so admission refuses."""
+    from harness import run_eh
+
+    n = _staged()
+    frame = E.energization_frame(n)
+    rows = np.flatnonzero(frame.index.get_level_values(0) == 2027)
+    frame.iloc[rows, 0] = np.linspace(10.0, 20.0, rows.size)
+    ctx = _run_ctx(tmp_path, n)
+    frozen = json.loads(
+        json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
+    )
+    summary = E.all_by_period(n)
+    frame.iloc[rows, 0] = np.linspace(20.0, 10.0, rows.size)
+    assert E.all_by_period(n) == summary  # the summary cannot see it
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message == (
+        "The connection's energization schedule changed since the study's card "
+        "was drawn (inside a period). Review the run again."
+    )
+
+
+def test_e4_a_schedule_unreadable_at_freeze_and_admit_cannot_be_compared(
+    tmp_path, monkeypatch
+):
+    """GK A 32 (mutant M21): unreadable at both ends is never "unchanged"."""
+    from harness import run_eh
+
+    def unreadable(_n):
+        raise RuntimeError("unreadable")
+
+    n = _staged()
+    ctx = _run_ctx(tmp_path, n)
+    monkeypatch.setattr(E, "all_by_period", unreadable)
+    frozen = json.loads(
+        json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
+    )
+    assert frozen["energization"] is None
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message == (
+        "The connection's energization schedule can't be compared now. "
+        "Review the run again."
+    )
