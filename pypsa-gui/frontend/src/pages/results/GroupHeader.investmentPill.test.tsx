@@ -12,7 +12,7 @@ import { CARD_GROUPS } from './groups'
 
 vi.mock('../../api/finance', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/finance')>()
-  return { ...actual, financeApi: { ...actual.financeApi, getReport: vi.fn() } }
+  return { ...actual, financeApi: { ...actual.financeApi, getReport: vi.fn(), getInvestmentCase: vi.fn() } }
 })
 const api = vi.mocked(financeApi)
 const group = (id: string) => CARD_GROUPS.find(g => g.id === id)!
@@ -25,7 +25,10 @@ function renderHeader(id: string, status: SimulationStatus) {
     <GroupHeader group={group(id)} status={status} outsideScope={false} /></QueryClientProvider>)
 }
 
-beforeEach(() => useUIStore.setState({ currentProject: 'Demo' }))
+beforeEach(() => {
+  useUIStore.setState({ currentProject: 'Demo' })
+  api.getInvestmentCase.mockResolvedValue(null)
+})
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('the Commercial & finance pill', () => {
@@ -33,6 +36,15 @@ describe('the Commercial & finance pill', () => {
     api.getReport.mockResolvedValue(null)
     renderHeader('commercial', SOLVED)
     expect((await screen.findByTestId('results-ghead-freshness')).textContent).toBe('Investment case not run yet')
+  })
+
+  it('a first run under way shows no "not run" pill', async () => {
+    api.getReport.mockResolvedValue(null)
+    api.getInvestmentCase.mockResolvedValue({ status: 'running' })
+    renderHeader('commercial', SOLVED)
+    await waitFor(() => expect(api.getInvestmentCase).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 0))
+    expect(screen.queryByTestId('results-ghead-freshness')).toBeNull()
   })
 
   it('a populated view shows no pill, even on an unsolved project', async () => {
@@ -48,5 +60,6 @@ describe('the Commercial & finance pill', () => {
     renderHeader('capacity', SOLVED)
     expect(screen.getByTestId('results-ghead-freshness').textContent).toBe('From the latest run')
     expect(api.getReport).not.toHaveBeenCalled()
+    expect(api.getInvestmentCase).not.toHaveBeenCalled()
   })
 })

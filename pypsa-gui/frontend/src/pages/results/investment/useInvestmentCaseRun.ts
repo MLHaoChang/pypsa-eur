@@ -5,11 +5,9 @@
 import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { financeApi } from '../../../api/finance'
-import { simulationApi } from '../../../api/simulation'
 import type { InvestmentCaseStudy } from '../../../api/types'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
-import { dispatchSolved } from '../../hubDesign/chapters'
 import { blockerOf, type Blocker } from './investmentCaseNeeds'
 
 const refetchWhileRunning = (q: { state: { data: unknown } }): number | false =>
@@ -52,19 +50,8 @@ export function useInvestmentCaseRun(): InvestmentCaseRun {
   }, [running, run])
 
   // A start refusal outlives the stored record until the next start; a stored
-  // refused run shows until it is replaced.
-  const raw = blockerOf(refusal, refusal ? null : s)
-  const needsGaps = raw?.kind === 'needs'
-  const status = useQuery({ queryKey: nk(project, 'simulationStatus'), queryFn: simulationApi.getStatus,
-                            enabled: !!project && needsGaps })
-  const finance = useQuery({ queryKey: nk(project, 'simulation', 'finance'), queryFn: () => financeApi.getFinance(),
-                             enabled: !!project && needsGaps, retry: false })
-  const blocker = needsGaps
-    ? blockerOf(refusal, refusal ? null : s, {
-      solved: status.isSuccess ? dispatchSolved(status.data) : null,
-      financeSet: finance.isSuccess ? finance.data?.finance != null : null,
-    })
-    : raw
+  // refused run shows until it is replaced. The needs are the server's only.
+  const blocker = blockerOf(refusal, refusal ? null : s)
 
   return { study: s, loaded: study.isSuccess, running, starting: run.isPending, start, blocker }
 }

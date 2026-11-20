@@ -115,7 +115,7 @@ export function errorsFor(errors: Record<string, string[]>, path: string,
 // ── the report ───────────────────────────────────────────────────────────
 
 type Obj = Record<string, unknown>
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
+export const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** A value as a number, or null when it is not established (null, absent,
  *  the string "not_established", a `{value: null}` record). */

@@ -46,8 +46,13 @@ export default function GroupHeader({ group, status, outsideScope, pastRun, chil
   // is the Investment case view's, so both read one cache.
   const project = useUIStore(st => st.currentProject)
   const icGroup = group.id === 'commercial'
+  const icStudy = useQuery({ queryKey: nk(project, 'results', 'investment_case'),
+                             queryFn: () => financeApi.getInvestmentCase(), enabled: icGroup && !!project })
   const icReport = useQuery({ queryKey: nk(project, 'results', 'investment_case', 'report'),
                               queryFn: () => financeApi.getReport(), enabled: icGroup && !!project })
+  // A first run under way is not "not run": the panel says it is running.
+  const icNotRun = icReport.isSuccess && icReport.data == null && icStudy.isSuccess
+    && icStudy.data?.status !== 'running'
   // The latest solve's failure says nothing about a past run on screen.
   const failed = !pastRun && !!status && !status.running && !!status.failure
   const pastWhen = pastRun ? runWhen(pastRun.startedAt) : null
@@ -60,7 +65,7 @@ export default function GroupHeader({ group, status, outsideScope, pastRun, chil
           title={`Run ${pastRun.runId}`} className="text-[11px] text-muted">
           {pastWhen ? `From the run of ${pastWhen}` : `From past ${runShort(pastRun.runId)}`}
         </span>
-      ) : icGroup ? (!outsideScope && icReport.isSuccess && icReport.data == null && (
+      ) : icGroup ? (!outsideScope && icNotRun && (
         <span data-testid="results-ghead-freshness" data-freshness="ic_not_run" className="flex items-center gap-2">
           <StatePill state="not_run" label="Investment case not run yet" />
         </span>

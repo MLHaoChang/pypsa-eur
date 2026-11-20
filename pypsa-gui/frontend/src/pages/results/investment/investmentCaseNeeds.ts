@@ -4,6 +4,7 @@
 // codes, asset ids and the server's 422 messages are never shown here.
 import type { InvestmentCaseReportPayload, InvestmentCaseStudy } from '../../../api/types'
 import { SolverInFlightError, StudyBusyError } from '../../../api/finance'
+import { isObj } from './financeModel'
 import table from './investmentCaseNeeds.json'
 
 export type Need = 'solve' | 'connection' | 'cod' | 'finance'
@@ -46,7 +47,6 @@ const COMPARED = "Compared with: the same site's energy bill and connection cost
 const NOT_RE_PLANNED = 'Existing equipment runs as it did; it is not re-planned.'
 const NOT_COMPARED = "Not compared with anything. This is the design's own cash flow, not a saving against today."
 
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** What a finished run compared, in our own words, keyed on the report's
  *  counterfactual basis (backend: services/finance/case.py, the
@@ -75,34 +75,30 @@ const errorCode = (e: unknown): string | null => {
   return isObj(d) && typeof d.code === 'string' ? d.code : null
 }
 
-/** What the inputs already show is missing (null: not known yet). Added to the
- *  refusal's own need, so the checklist names every input the user can see is
- *  missing, not only the first the server stopped at. */
-export interface KnownGaps { solved?: boolean | null; financeSet?: boolean | null }
-
-function withGaps(needs: Need[], gaps: KnownGaps): Need[] {
-  const all = new Set(needs)
-  if (gaps.solved === false) all.add('solve')
-  if (gaps.financeSet === false) all.add('finance')
-  return NEED_ORDER.filter(n => all.has(n))
+/** A stored run's reason without its code: a refusal is stored as
+ *  "<code>: <detail>" (services/finance/case.py, FinanceRefused). */
+function reasonOf(study: InvestmentCaseStudy, code: string | null): string | null {
+  const text = (study.message || study.error || '').trim()
+  if (!code) return text || null
+  if (text === code) return null
+  return (text.startsWith(`${code}: `) ? text.slice(code.length + 2) : text) || null
 }
 
 /** The blocker a start refusal (`err`) or a refused / failed run (`study`)
  *  shows; null when neither blocks. A busy 409 (another study or a solve) is
  *  "Wait: <the server's sentence>"; a code with no plain fix is "unknown". */
-export function blockerOf(err: unknown, study: InvestmentCaseStudy | null | undefined,
-                          gaps: KnownGaps = {}): Blocker | null {
+export function blockerOf(err: unknown, study: InvestmentCaseStudy | null | undefined): Blocker | null {
   if (err) {
     if (err instanceof SolverInFlightError) return { kind: 'wait', text: 'a solve is running; run the investment case after it.' }
     const need = needOf(errorCode(err))
-    if (need) return { kind: 'needs', needs: withGaps([need], gaps) }
+    if (need) return { kind: 'needs', needs: [need] }
     if (err instanceof StudyBusyError) return { kind: 'wait', text: err.message }
     return { kind: 'unknown', detail: null }
   }
   if (study && ['refused', 'error', 'failed'].includes(String(study.status))) {
-    const need = needOf(study.error_code ?? study.code)
-    return need ? { kind: 'needs', needs: withGaps([need], gaps) }
-      : { kind: 'unknown', detail: study.message || study.error || null }
+    const code = study.error_code ?? study.code ?? null
+    const need = needOf(code)
+    return need ? { kind: 'needs', needs: [need] } : { kind: 'unknown', detail: reasonOf(study, code) }
   }
   return null
 }

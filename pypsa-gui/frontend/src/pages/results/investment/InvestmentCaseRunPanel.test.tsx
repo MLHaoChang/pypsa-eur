@@ -6,7 +6,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../../store/uiStore'
 import { financeApi, SolverInFlightError, StudyBusyError } from '../../../api/finance'
-import { simulationApi } from '../../../api/simulation'
 import type { InvestmentCaseReportPayload } from '../../../api/types'
 import InvestmentCaseRunPanel from './InvestmentCaseRunPanel'
 import { useInvestmentCaseRun } from './useInvestmentCaseRun'
@@ -16,11 +15,7 @@ import table from './investmentCaseNeeds.json'
 vi.mock('../../../api/finance', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/finance')>()
   return { ...actual, financeApi: { ...actual.financeApi, getInvestmentCase: vi.fn(),
-    startInvestmentCase: vi.fn(), getFinance: vi.fn() } }
-})
-vi.mock('../../../api/simulation', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../api/simulation')>()
-  return { ...actual, simulationApi: { ...actual.simulationApi, getStatus: vi.fn() } }
+    startInvestmentCase: vi.fn() } }
 })
 const openPanel = vi.fn()
 vi.mock('../openPanel', () => ({ openPanel: (...a: unknown[]) => openPanel(...a) }))
@@ -28,7 +23,6 @@ const openSiteConnection = vi.fn()
 vi.mock('../../economics/SiteConnectionLink', () => ({ openSiteConnection: () => openSiteConnection() }))
 
 const api = vi.mocked(financeApi)
-const sim = vi.mocked(simulationApi)
 
 const reportWith = (payload: Record<string, unknown>) =>
   ({ sections: { project: { payload } } }) as unknown as InvestmentCaseReportPayload
@@ -46,8 +40,6 @@ function renderPanel(mode: 'guided' | 'expert' = 'guided', report?: InvestmentCa
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
   api.getInvestmentCase.mockResolvedValue(null)
-  api.getFinance.mockResolvedValue({ finance: null, digest: 'd', status: 'ok' })
-  sim.getStatus.mockResolvedValue({ dispatch: 'fresh', objective: 1 } as never)
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -89,11 +81,10 @@ describe('the needs (F1)', () => {
       .toEqual({ kind: 'wait', text: 'a frontier study is running' })
     expect(blockerOf(new SolverInFlightError('x'), null)?.kind).toBe('wait')
   })
-  it('a coded 409 or 422 is a need; the known gaps join it in order', () => {
-    expect(blockerOf(new StudyBusyError('solve first', 'not_solved'), null, { financeSet: false }))
-      .toEqual({ kind: 'needs', needs: ['solve', 'finance'] })
-    expect(blockerOf(http(422, { code: 'finance_inputs_missing', message: 'PUT /api/simulation/finance' }), null,
-                     { solved: true, financeSet: false }))
+  it('a coded 409 or 422 is a need, and only the server names it', () => {
+    expect(blockerOf(new StudyBusyError('solve first', 'not_solved'), null))
+      .toEqual({ kind: 'needs', needs: ['solve'] })
+    expect(blockerOf(http(422, { code: 'finance_inputs_missing', message: 'PUT /api/simulation/finance' }), null))
       .toEqual({ kind: 'needs', needs: ['finance'] })
   })
   it('a missing or unknown code falls to "could not finish"', () => {
@@ -101,6 +92,12 @@ describe('the needs (F1)', () => {
     expect(blockerOf(null, { status: 'refused' })).toEqual({ kind: 'unknown', detail: null })
     expect(blockerOf(null, { status: 'failed', error_code: 'internal_error', error: 'kaput' }))
       .toEqual({ kind: 'unknown', detail: 'kaput' })
+    // A refusal is stored as "<code>: <detail>"; the code never reaches the words.
+    expect(blockerOf(null, { status: 'refused', error_code: 'replacement_unknown_asset',
+                             error: 'replacement_unknown_asset: bess' }))
+      .toEqual({ kind: 'unknown', detail: 'bess' })
+    expect(blockerOf(null, { status: 'refused', error_code: 'template_missing', error: 'template_missing' }))
+      .toEqual({ kind: 'unknown', detail: null })
     expect(blockerOf(null, { status: 'done' })).toBeNull()
   })
 })
@@ -128,30 +125,33 @@ describe('InvestmentCaseRunPanel', () => {
     expect(await screen.findByRole('button', { name: 'Running the investment case…' })).toBeTruthy()
   })
 
-  it('a refusal lists only the applicable needs, in order, each with its link; never the code or the 422 message',
-    async () => {
-      sim.getStatus.mockResolvedValue({ dispatch: 'none', objective: null } as never)
-      api.startInvestmentCase.mockRejectedValue(http(422, { code: 'finance_inputs_missing',
-                                                           message: 'set the finance inputs first (PUT /api/simulation/finance)' }))
-      const { container } = renderPanel('expert')
-      fireEvent.click(await screen.findByRole('button', { name: 'Run the investment case' }))
-      await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(2))
-      const needs = screen.getByTestId('ic-needs')
-      expect(needs.textContent).toMatch(/^The investment case needs:/)
-      expect(screen.getAllByRole('listitem').map(li => li.getAttribute('data-testid')))
-        .toEqual(['ic-need-solve', 'ic-need-finance'])
-      expect(container.textContent).not.toMatch(/finance_inputs_missing|PUT \/api/)
-      const before = useUIStore.getState().runSolveRequest
-      fireEvent.click(within(needs).getByRole('button', { name: 'Run the solve' }))
-      expect(useUIStore.getState().runSolveRequest).toBe(before + 1)
-      fireEvent.click(within(needs).getByRole('button', { name: 'Set the finance inputs ›' }))
-      expect(openPanel).toHaveBeenCalledWith('commercial', 'economics')
-    })
+  it('a refusal lists the need it names with its link; never the code or the 422 message', async () => {
+    api.startInvestmentCase.mockRejectedValue(http(422, { code: 'finance_inputs_missing',
+                                                         message: 'set the finance inputs first (PUT /api/simulation/finance)' }))
+    const { container } = renderPanel('expert')
+    fireEvent.click(await screen.findByRole('button', { name: 'Run the investment case' }))
+    const needs = await screen.findByTestId('ic-needs')
+    expect(needs.textContent).toMatch(/^The investment case needs:/)
+    expect(screen.getAllByRole('listitem').map(li => li.getAttribute('data-testid'))).toEqual(['ic-need-finance'])
+    expect(container.textContent).not.toMatch(/finance_inputs_missing|PUT \/api/)
+    fireEvent.click(within(needs).getByRole('button', { name: 'Set the finance inputs ›' }))
+    expect(openPanel).toHaveBeenCalledWith('commercial', 'economics')
+  })
+
+  it('an unsolved project: the solve link asks the header to run it', async () => {
+    api.startInvestmentCase.mockRejectedValue(new StudyBusyError('solve the network first', 'not_solved'))
+    renderPanel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run the investment case' }))
+    const item = await screen.findByTestId('ic-need-solve')
+    const before = useUIStore.getState().runSolveRequest
+    fireEvent.click(within(item).getByRole('button', { name: 'Run the solve' }))
+    expect(useUIStore.getState().runSolveRequest).toBe(before + 1)
+    expect(screen.queryByTestId('ic-blocked')).toBeNull()
+  })
 
   it('a stored refusal names the connection and the start dates by their links', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'refused', error_code: 'value_flows_not_configured',
                                               error: 'value_flows is not set' })
-    api.getFinance.mockResolvedValue({ finance: {} as never, digest: 'd', status: 'ok' })
     renderPanel()
     const item = await screen.findByTestId('ic-need-connection')
     fireEvent.click(within(item).getByRole('button', { name: 'Check the site connection ›' }))
@@ -168,7 +168,7 @@ describe('InvestmentCaseRunPanel', () => {
 
   it('an unknown code: Guided points to Expert; Expert adds the reason, never the code', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'refused', error_code: 'template_not_annual:8784',
-                                              error: 'the template is not one year' })
+                                              error: 'template_not_annual:8784: the template is not one year' })
     renderPanel('guided')
     expect((await screen.findByTestId('ic-error')).textContent)
       .toBe('The investment case could not finish. Open it in Expert for the details.')
