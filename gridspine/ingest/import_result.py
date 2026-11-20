@@ -354,8 +354,11 @@ DECLARED: tuple[ImporterSpec, ...] = (
     ImporterSpec(
         format_id="psse",
         display_name="PSS/E case",
-        extensions=(".raw", ".dyr"),
-        help="A PSS/E .raw network file, optionally with a .dyr dynamic data file.",
+        extensions=(".raw", ".dyr", ".con"),
+        help=(
+            "A PSS/E .raw network file, optionally with a .dyr dynamic data file "
+            "and a .con contingency file."
+        ),
     ),
     ImporterSpec(
         format_id="dgs",
