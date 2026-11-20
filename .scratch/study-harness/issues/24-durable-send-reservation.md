@@ -3,9 +3,9 @@
 
 # 24 — A durable reservation before each model send, settled across restarts
 
-Status: ready-for-agent (04 and #1059 landed; built on `claude/sh-24-durable-send-reservation`)
+Status: done (#1088, #1103)
 Type: task
-Blocked by: 04; PR #1059 (LC-07 PR2, in review; it changes files under `pypsa-gui/backend/harness/`, so build after it merges)
+Blocked by: none (04 done; PR #1059 merged)
 Gated: yes (GK B: persistence and failure semantics)
 Model tier: opus
 Owner decisions: HARNESS-970-1, SH-FOLD-1, SH-RESEARCH-CAP-1, AI-558

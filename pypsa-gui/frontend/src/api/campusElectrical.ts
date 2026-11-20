@@ -845,6 +845,9 @@ export interface GridReadinessRow {
   unit: string | null
   source: string
   project_value: number | string | Record<string, unknown> | null
+  /** frequency_support under a set architecture (DC 03): each service's units, rendered folded, then `value_rest`. */
+  sources?: GridReadinessServiceSource[]
+  value_rest?: string | null
   verdict: GridReadinessVerdict
   assumed: boolean
   /** The rapid-voltage-change and flicker rows only (AS-18): the point-of-connection X/R is the assumed default. */
@@ -984,6 +987,9 @@ export interface DcBackupAssessment {
     inputs: { key: string; value: unknown; unit?: string; assumed?: boolean }[]
   }
   notes: string[]
+  /** The mode the saved network was built in. A Batteries or Hybrid build is
+   *  assessed in genset form; the notes say what that means (DC walkthrough 01). */
+  built: { mode: DcBackupMode; notes: string[] }
   /** The saved network the assessment read, and what its re-dispatch does not reproduce. */
   basis?: { network_saved_at: string; network_sha256: string; not_reproduced: string[] }
 }
@@ -996,9 +1002,12 @@ export type DcArchitecture = 'ac' | 'mv_ups' | 'dc_800v' | 'sst'
 export interface DcArchitectureStage {
   stage: string; label: string; efficiency: number; range: [number, number] | null; source: string
 }
+/** A credited grid service and the units it comes from (DC 03), under a set architecture. */
+export interface GridReadinessServiceSource { service: string; label: string; units: string[] }
 export interface DcArchitectureServiceVerdict {
   verdict: GridReadinessVerdict; project_value: string | null
   assumed_from_architecture: string[]; conditional?: string[]
+  sources?: GridReadinessServiceSource[]; value_rest?: string | null
 }
 export interface DcArchitectureNpv { capex: number; fom: number; energy: number; total: number }
 export interface DcArchitectureVariant {
@@ -1098,6 +1107,8 @@ export const campusApi = {
     client.delete(`${base(project)}/grid-readiness/limits/${item}`, quiet).then(r => r.data),
 
   /** Store the backup setting (DC 03). 422 `{error_kind: dc_backup_invalid, message, field}`;
+   *  409 `{error_kind: dc_backup_busy, message}` when another marker write or an undo holds the
+   *  lock (retryable, nothing stored);
    *  the network and the investment case are untouched. */
   setDcBackup: (project: string, backup: DcBackupSetting) =>
     client.put<DcBackupSetting>(`${base(project)}/dc-backup`, backup, quiet).then(r => r.data),

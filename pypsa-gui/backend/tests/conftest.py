@@ -97,6 +97,53 @@ from services.solve_queue import solve_queue
 from services.solver_service import SolverConfig
 
 
+_RESULTS_DIR = _BACKEND / "test-results"  # uploaded as the shard artifact in CI
+
+
+def _dump_stall_diagnostics(unfinished: int) -> pathlib.Path:
+    """Write every thread's stack plus `ps` output; return the file written."""
+    import subprocess
+    import threading
+    import traceback
+
+    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    out = _RESULTS_DIR / "solve-queue-stall.txt"
+    names = {t.ident: t.name for t in threading.enumerate()}
+    with out.open("w") as f:
+        f.write(f"unfinished_tasks={unfinished}\n")
+        for ident, frame in sys._current_frames().items():
+            f.write(f"\n--- thread {names.get(ident)} ({ident})\n")
+            f.write("".join(traceback.format_stack(frame)))
+        try:
+            ps = subprocess.run(
+                ["ps", "-ef", "--forest"], capture_output=True, text=True, timeout=10
+            ).stdout
+        except Exception as exc:  # noqa: BLE001 — diagnostics must not mask the stall
+            ps = f"ps failed: {exc!r}"
+        f.write("\n--- ps\n" + ps)
+    return out
+
+
+def _reset_solve_queue_or_exit() -> None:
+    """Reset the solve queue; if jobs outlive its bounded join, dump and abort the shard.
+
+    A stalled drain otherwise costs ~60 s per remaining test and runs the shard
+    to the CI timeout with no clue which call blocks.
+    """
+    solve_queue.reset_for_tests()
+    q = getattr(solve_queue, "_q", None)
+    # Mirror reset_for_tests: a stand-in `_q` without `all_tasks_done` is never
+    # waited on, so it is never "stalled" (and a Mock's attributes aren't ints).
+    unfinished = getattr(q, "unfinished_tasks", 0) if hasattr(q, "all_tasks_done") else 0
+    if isinstance(unfinished, int) and unfinished > 0:
+        out = _dump_stall_diagnostics(unfinished)
+        pytest.exit(
+            f"solve_queue.reset_for_tests could not drain ({unfinished} job(s) "
+            f"still unwinding after its join); thread stacks and ps in {out}",
+            returncode=3,
+        )
+
+
 def _reset_backend_state() -> None:
     """Fresh singleton network (unbound) + cleared lifecycle/result state."""
     # `allow_during_study=True` is exactly the internal caller the opt-out
@@ -141,7 +188,7 @@ def _reset_backend_state() -> None:
     # Drain the multi-project solve queue so jobs (and the dispatcher's view of
     # "current") can't bleed across tests. The daemon dispatcher thread stays
     # parked on the now-empty queue — it's reused by the next test that enqueues.
-    solve_queue.reset_for_tests()
+    _reset_solve_queue_or_exit()
     # The authenticated suite reuses its seeded user and app-data root. Owned
     # checked-answer/evidence files otherwise accumulate across unrelated tests
     # until the real 512-record quota refuses publication. Reset only this

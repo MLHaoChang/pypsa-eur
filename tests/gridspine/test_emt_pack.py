@@ -14,6 +14,7 @@ import pytest
 from gridspine.handoff import emt_pack
 from gridspine.handoff.emt_pack import (
     C_NOTE,
+    SCHEDULE_COLUMNS,
     EmtPackError,
     battery_from_campus,
     study_sources,
@@ -189,16 +190,20 @@ def test_without_a_max_zero_sequence_no_schedule_is_written(tmp_path):
         battery_from_campus(build_campus(spec(x0x_max=None, r0x0_max=None)))
 
 
-def test_battery_z0_is_from_max_and_the_differing_case_is_listed(tmp_path):
+def test_battery_z0_follows_the_corner_sk_and_nothing_is_assumed(tmp_path):
+    # hand ratios from spec(): max X0/X1 = 3, R0/X0 = 0.1 at R/X 0.1; min 2.5, 0.2 at 0.12
     p = pack(tmp_path)
     b = cases_from_json((p.path / "battery.json").read_text())
-    assert {(round(c.grid.z0_over_z1, 9), round(c.grid.x0_over_r0, 9)) for c in b} == {
-        (3.0, 10.0)
+    want = {
+        "skmax": (3.0 * math.sqrt(1.01) / math.sqrt(1.01), 10.0),
+        "skmin": (2.5 * math.sqrt(1.04) / math.sqrt(1.0144), 5.0),
     }
-    camp = build_campus(spec())
-    on_min = [c.case_id for c in battery_from_campus(camp) if c.grid.sk_mva == 2000.0]
-    assert on_min and p.manifest["z0_differs_from_battery"] == {"min": on_min}
-    assert any("assumed: from max" in a for a in p.manifest["assumptions"])
+    for c in b:
+        z0z1, x0r0 = want[c.grid.label.split("_")[0]]
+        assert c.grid.z0_over_z1 == pytest.approx(z0z1, rel=1e-12), c.case_id
+        assert c.grid.x0_over_r0 == pytest.approx(x0r0, rel=1e-12), c.case_id
+    assert p.manifest["z0_assumed"] == {}
+    assert not any("assumed: from max" in a for a in p.manifest["assumptions"])
 
 
 def test_stage_reference_is_labelled_and_is_the_grid_alone_with_nothing_installed(
@@ -266,6 +271,7 @@ def test_schedule_round_trips_to_the_same_cases(tmp_path):
         z0_over_z1=3.0,
         x0_over_r0=10.0,
         overrides={"flat_skmin_xrmin": {"t_end_s": 5.0}},
+        contract_version="2",
     )
     p = write_emt_pack(tmp_path, camp, battery=battery)
     back = cases_from_json((p.path / "battery.json").read_text())
@@ -395,8 +401,19 @@ def test_model_set_id_only_when_passed(tmp_path):
 
 def test_manifest_cites_the_contract(tmp_path):
     m = json.loads((pack(tmp_path).path / "manifest.json").read_text())
-    assert m["channels"] == list(CHANNELS)
-    assert m["contract_version"] == emt_pack.CONTRACT_VERSION
+    # contract version 2: the schedule records `connected` (GC-12, T1)
+    assert m["channels"] == [
+        "v_poc_pu",
+        "theta_poc_deg",
+        "f_hz",
+        "p_poc_mw",
+        "q_poc_mvar",
+        "id_pu",
+        "iq_pu",
+        "i_poc_pu",
+        "connected",
+    ]
+    assert m["contract_version"] == emt_pack.EMT_CONTRACT_VERSION
     assert m["files"] and math.isfinite(m["vn_kv"])
 
 
@@ -414,9 +431,17 @@ def test_x0x_without_r0x0_lists_only_the_missing_one(tmp_path):
     assert by_label(p)["min"]["x0_ohm"] is None
 
 
-def test_a_source_without_zero_sequence_is_not_listed_as_differing(tmp_path):
+def test_without_a_min_zero_sequence_the_skmin_cases_are_assumed_from_max(tmp_path):
     p = pack(tmp_path, spec(x0x_min=None, r0x0_min=None))
-    assert p.manifest["z0_differs_from_battery"] == {}
+    b = cases_from_json((p.path / "battery.json").read_text())
+    skmin = [c.case_id for c in b if c.grid.label.startswith("skmin_")]
+    assert len(skmin) == 28
+    assert p.manifest["z0_assumed"] == {cid: "assumed: from max" for cid in skmin}
+    assert {(c.grid.z0_over_z1, c.grid.x0_over_r0) for c in b} == {(3.0, 10.0)}
+    assert any(
+        a.startswith("battery zero sequence at the Sk-min corners: assumed: from max")
+        for a in p.manifest["assumptions"]
+    )
 
 
 def test_missing_pcc_field_is_refused_by_name():
@@ -435,7 +460,19 @@ def test_battery_rows_say_their_zero_sequence_is_borrowed(tmp_path):
         "skmin_xrmax",
         "skmin_xrmin",
     ]
-    assert s["skmin_xrmin"]["source"] == "campus PCC corners; Z0 assumed: from max"
+    assert s["skmin_xrmin"]["source"] == (
+        "campus PCC corners; Z0 per corner: Sk-max corners from the max case, "
+        "Sk-min corners from the min case"
+    )
+    s = by_label(pack(tmp_path / "nomin", spec(x0x_min=None, r0x0_min=None)))
+    assert s["skmin_xrmin"]["source"] == (
+        "campus PCC corners; Z0 Sk-max corners from the max case; Sk-min corners "
+        "assumed: from max; this corner's Z0 assumed: from max"
+    )
+    assert s["skmax_xrmin"]["source"] == (
+        "campus PCC corners; Z0 Sk-max corners from the max case; Sk-min corners "
+        "assumed: from max"
+    )
     camp = build_campus(spec())
     own = write_emt_pack(tmp_path / "own", camp, battery=battery_from_campus(camp))
     assert by_label(own)["skmin_xrmin"]["source"] == "caller's battery"
@@ -469,7 +506,7 @@ def test_schedule_zero_sequence_present_and_absent(tmp_path):
         Thevenin("g", 2000.0, 8.0),
         1.0,
         10.0,
-        ("v_poc_pu",),
+        ("v_poc_pu", "connected"),
     )
     r = rows(
         write_emt_pack(tmp_path / "b", camp, battery=(flat,)).path, "case_schedule.json"
@@ -509,7 +546,7 @@ def test_manifest_and_thevenin_keys_are_pinned(tmp_path):
         "channels",
         "outputs",
         "assumptions",
-        "z0_differs_from_battery",
+        "z0_assumed",
         "to_be_supplied",
         "trgc",
     }
@@ -522,7 +559,7 @@ def test_manifest_and_thevenin_keys_are_pinned(tmp_path):
     )
     assert m["trgc"] == ["02", "03", "05", "07", "17", "19", "20", "21", "22", "23"]
     assert m["to_be_supplied"] == "to_be_supplied.csv"
-    assert len(m["assumptions"]) == 2
+    assert len(m["assumptions"]) == 1  # c note; no Z0 assumed when both cases hold it
     th = rows(p.path, "thevenin_set.json")
     assert set(th) == {"note", "stage_note", "pcc_bus", "vn_kv", "sources", "stages"}
     assert (th["note"], th["pcc_bus"], th["vn_kv"]) == (C_NOTE, "PCC", 110.0)
@@ -552,3 +589,120 @@ def test_json_files_have_sorted_keys(tmp_path):
         assert text == json.dumps(json.loads(text), sort_keys=True, indent=1) + "\n", (
             name
         )
+
+
+# --- the generated mhi.pscad stub, run against a fake module (GC-06d) -----------
+
+
+class _FakeComponent:
+    def __init__(self, name, log):
+        self.name, self.log = name, log
+
+    def parameters(self, **kw):
+        self.log.append(("component", self.name, kw))
+
+
+class _FakeProject(_FakeComponent):
+    def find(self, name):
+        return _FakeComponent(name, self.log)
+
+    def run(self):
+        self.log.append(("run", self.name, {}))
+
+
+class _FakePscad:
+    def __init__(self, log):
+        self.log = log
+
+    def load(self, workspace):
+        self.log.append(("load", workspace, {}))
+
+    def project(self, name):
+        return _FakeProject(name, self.log)
+
+    def quit(self):
+        self.log.append(("quit", "", {}))
+
+
+def _run_stub(tmp_path, monkeypatch, argv=("ws.pswx", "plant")):
+    """Run the pack's stub in-process with ``mhi.pscad`` replaced by a fake."""
+    import importlib.util
+    import sys
+    import types
+
+    p = pack(tmp_path)
+    log = []
+    fake = types.ModuleType("mhi.pscad")
+    fake.launch = lambda: _FakePscad(log)
+    pkg = types.ModuleType("mhi")
+    pkg.pscad = fake
+    monkeypatch.setitem(sys.modules, "mhi", pkg)
+    monkeypatch.setitem(sys.modules, "mhi.pscad", fake)
+    spec_ = importlib.util.spec_from_file_location(
+        "run_schedule_under_test", p.path / "run_schedule.py"
+    )
+    mod = importlib.util.module_from_spec(spec_)
+    spec_.loader.exec_module(mod)
+    mod.main(list(argv))
+    return p, mod, log
+
+
+def test_stub_runs_one_project_run_per_case_with_the_case_id_as_output(
+    tmp_path, monkeypatch
+):
+    p, mod, log = _run_stub(tmp_path, monkeypatch)
+    cases = json.loads((p.path / "case_schedule.json").read_text())
+    assert len(cases) > 1
+    runs = [e for e in log if e[0] == "run"]
+    assert len(runs) == len(cases)
+    outputs = [
+        e[2]["output_filename"]
+        for e in log
+        if e[0] == "component" and e[1] == "plant" and "output_filename" in e[2]
+    ]
+    assert all(c["output_name"] == c["case_id"] for c in cases)
+    assert outputs == [c["case_id"] + ".out" for c in cases]
+    assert log[0][:2] == ("load", "ws.pswx")
+    assert log[-1][0] == "quit"
+    assert (p.path / "results").is_dir()
+
+
+def test_stub_sets_each_case_s_source_values_on_the_named_component(
+    tmp_path, monkeypatch
+):
+    p, mod, log = _run_stub(tmp_path, monkeypatch, ("ws.pswx", "plant"))
+    cases = json.loads((p.path / "case_schedule.json").read_text())
+    src = [e for e in log if e[0] == "component" and e[1] == "GRID_SOURCE"]
+    with_r = [c for c in cases if c.get("r_ohm") is not None]
+    assert with_r and len(src) == len(with_r)
+    for e, c in zip(src, with_r):
+        assert e[2]["R"] == c["r_ohm"] and e[2]["X"] == c["x_ohm"]
+        if c.get("r0_ohm") is None:
+            assert "R0" not in e[2]  # a case without zero sequence sets none
+
+
+def test_stub_only_reads_schedule_columns_the_pack_writes(tmp_path, monkeypatch):
+    p, mod, log = _run_stub(tmp_path, monkeypatch)
+    stub_columns = (
+        set(mod.SOURCE_KEYS) | set(mod.EVENT_KEYS) | {"t_end_s", "output_name"}
+    )
+    assert stub_columns <= set(SCHEDULE_COLUMNS), stub_columns - set(SCHEDULE_COLUMNS)
+    cases = json.loads((p.path / "case_schedule.json").read_text())
+    assert all(set(c) <= set(SCHEDULE_COLUMNS) for c in cases)
+    # the CSV the pack writes beside the JSON carries the same columns
+    header = (p.path / "case_schedule.csv").read_text().splitlines()[0]
+    assert header.split(",") == SCHEDULE_COLUMNS
+
+
+def test_stub_says_what_connected_means_only_when_the_contract_has_it(monkeypatch):
+    from gridspine.handoff.emt_pack import CONNECTED_NOTE, stub_text
+
+    monkeypatch.setattr(emt_pack, "EMT_CONTRACT_VERSION", "1")
+    assert "connected" not in stub_text(3)
+    monkeypatch.setattr(emt_pack, "EMT_CONTRACT_VERSION", "2")
+    text = stub_text(3)
+    assert text.count(CONNECTED_NOTE) == 1
+    head = ast.get_docstring(ast.parse(text))
+    assert CONNECTED_NOTE in head
+    assert "momentary cessation or current blocking is not a trip" in head
+    compile(text, "run_schedule.py", "exec")

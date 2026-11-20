@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { SizedDesignTable } from './SizedDesignTable'
 import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Hexagon, Square } from 'lucide-react'
@@ -39,6 +40,7 @@ import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 import type { ZeroReason } from './fmea'
 import { CRITICALITY_PER_YEAR_LABEL } from './fmea'
+import { leverKindWords } from './leverKindWords'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
   {
@@ -934,6 +936,10 @@ export function ehStudyQueryKeys(project: string | null) {
   ]
 }
 
+/** The `resultsSectionRequest` that opens this panel and scrolls its levers
+ *  block (the design options) into view (request-then-scroll). */
+export const LEVERS_SECTION = 'eh_levers'
+
 export function EhReferenceDesignPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
@@ -1101,6 +1107,19 @@ export function EhReferenceDesignPanel() {
   }, [open, hasReport])
   const redTable = running ? null : (redundancy ?? null) as EhRedundancyTable | null
   const levTable = running ? null : (levers ?? null) as EhLeverTable | null
+  // Request-then-scroll: the hub-design Results card's "Design options ›"
+  // opens the collapsed panel and scrolls the levers block once it renders.
+  const sectionRequest = useUIStore(s => s.resultsSectionRequest)
+  const hasLevers = (levTable?.options?.length ?? 0) > 0
+  useEffect(() => {
+    if (sectionRequest === LEVERS_SECTION) setOpen(true)
+  }, [sectionRequest])
+  useEffect(() => {
+    if (sectionRequest !== LEVERS_SECTION || !open || !hasLevers) return
+    useUIStore.getState().clearResultsSectionRequest()
+    requestAnimationFrame(() => document.querySelector('[data-testid="eh-levers"]')
+      ?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
+  }, [sectionRequest, open, hasLevers])
   const dtcTable = running ? null : (dtcStress ?? null) as EhDtcStressTable | null
   const dtcPlanTable = running ? null
     : (dtcPlanning ?? null) as EhDtcPlanningTable | null
@@ -1552,6 +1571,9 @@ export function EhReferenceDesignPanel() {
                   </span>
                 )}
               </div>
+
+              {/* Walkthrough asset-investment 03: the sizes, not only "sizing: ok". */}
+              <SizedDesignTable report={report} mode="expert" testId="eh-report-sized" />
 
               {cert?.next && (
                 <p className="text-[10px] text-muted" data-testid="eh-certification-next">
@@ -2091,7 +2113,7 @@ export function EhReferenceDesignPanel() {
             <div className="flex flex-col gap-1.5" data-testid="eh-levers">
               <div className="flex items-center gap-2 flex-wrap">
                 <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                  Levers{levTable.kind ? ` (${levTable.kind})` : ''}
+                  Levers{levTable.kind ? ` (${leverKindWords(levTable.kind)})` : ''}
                 </h4>
                 <CsvButton
                   testId="eh-levers-csv"
@@ -2127,7 +2149,7 @@ export function EhReferenceDesignPanel() {
                         className="border-t border-border/50"
                         data-testid={`eh-lever-row-${i}`}
                       >
-                        <td className="py-0.5 pr-3 font-sans">{o.kind}</td>
+                        <td className="py-0.5 pr-3 font-sans">{leverKindWords(o.kind)}</td>
                         <td className="py-0.5 pr-3 text-right">
                           {o.value}{o.unit ? ` ${o.unit}` : ''}
                         </td>
