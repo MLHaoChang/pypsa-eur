@@ -89,6 +89,14 @@ export const openGuide = (id?: string | null, opener?: HTMLElement | null): void
   useGuideStore.getState().openGuide(id, opener)
 
 // A mode switch closes the guide: the drawer or panel it sat beside is replaced.
-useUIStore.subscribe((s, prev) => {
-  if (s.uiMode !== prev.uiMode) useGuideStore.getState().closeGuide({ restoreFocus: false })
-})
+// Subscribed on the first open, not at import: importing this module (ChatMarkdown
+// does, everywhere chat renders) must not touch uiStore, which some tests mock.
+let watchingMode = false
+function watchModeSwitch(): void {
+  if (watchingMode) return
+  watchingMode = true
+  useUIStore.subscribe((s, prev) => {
+    if (s.uiMode !== prev.uiMode) useGuideStore.getState().closeGuide({ restoreFocus: false })
+  })
+}
+useGuideStore.subscribe((s, prev) => { if (s.view && !prev.view) watchModeSwitch() })
