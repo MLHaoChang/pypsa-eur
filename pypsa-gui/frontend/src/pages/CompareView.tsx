@@ -16,6 +16,7 @@ import type {
 import { canonicaliseCarrier, carrierDisplayName, type ComponentClass } from './results/carrierAliases'
 import { useCarrierFilter, CarrierFilter, bindCarrierFilter } from './results/CarrierFilter'
 import { COST_UNAVAILABLE, UnavailableBlock, UnavailableCell } from './results/shared'
+import { signFirstEuro } from '../utils/format'
 
 // ── Compare view ─────────────────────────────────────────────────────────────
 // Tabbed A/B comparison across two saved projects. Each tab loads its own
@@ -3417,10 +3418,10 @@ function DispatchBadge({ status }: { status: 'none' | 'fresh' | 'stale' }) {
 function fmtCurrency(v: number | null): string {
   if (v == null || !Number.isFinite(v)) return '—'
   const abs = Math.abs(v)
-  if (abs >= 1e9) return `€${(v / 1e9).toFixed(2)}B`
-  if (abs >= 1e6) return `€${(v / 1e6).toFixed(2)}M`
-  if (abs >= 1e3) return `€${(v / 1e3).toFixed(2)}k`
-  return `€${v.toFixed(0)}`
+  if (abs >= 1e9) return signFirstEuro(v, `${(abs / 1e9).toFixed(2)}B`)
+  if (abs >= 1e6) return signFirstEuro(v, `${(abs / 1e6).toFixed(2)}M`)
+  if (abs >= 1e3) return signFirstEuro(v, `${(abs / 1e3).toFixed(2)}k`)
+  return signFirstEuro(v, abs.toFixed(0))
 }
 function fmtMW(v: number): string {
   if (!Number.isFinite(v)) return '—'

@@ -30,6 +30,7 @@ import { useRunGate } from '../hooks/useRunGate'
 import { staleKindsSentence, uncheckedKindsSentence, useStaleRunKinds, useUncheckedRunKinds } from '../hooks/useStaleRunKinds'
 import { openFlowTarget, openSectionInExpert } from './flowNavigation'
 import { componentLabel } from '../utils/componentLabels'
+import { signFirstEuro } from '../utils/format'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
@@ -44,10 +45,10 @@ const STATUS_LABEL: Record<string, string> = {
 export function formatObjective(v: number | null | undefined): string | null {
   if (v == null || !Number.isFinite(v)) return null
   const a = Math.abs(v)
-  if (a >= 1e9) return `€${(v / 1e9).toFixed(2)} bn`
-  if (a >= 1e6) return `€${(v / 1e6).toFixed(2)} M`
-  if (a >= 1e3) return `€${(v / 1e3).toFixed(0)} k`
-  return `€${v.toFixed(0)}`
+  if (a >= 1e9) return signFirstEuro(v, `${(a / 1e9).toFixed(2)} bn`)
+  if (a >= 1e6) return signFirstEuro(v, `${(a / 1e6).toFixed(2)} M`)
+  if (a >= 1e3) return signFirstEuro(v, `${(a / 1e3).toFixed(0)} k`)
+  return signFirstEuro(v, a.toFixed(0))
 }
 
 /** Open Results after a solve, on its Summary (the answer first; the Summary
