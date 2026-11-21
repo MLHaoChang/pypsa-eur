@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { MoreHorizontal } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { projectsApi } from '../../api/projects'
+import client from '../../api/client'
 import { networkApi } from '../../api/network'
 import { formatApiDetail } from '../../api/client'
 import type { ProjectInfo } from '../../api/types'
@@ -113,7 +114,10 @@ export function InlineRename({ project, onDone }: { project: ProjectInfo; onDone
   useEffect(() => { ref.current?.focus(); ref.current?.select() }, [])
 
   const save = useMutation({
-    mutationFn: (to: string) => projectsApi.rename(project.id || project.name, to),
+    // Same route as projectsApi.rename; the refusal shows inline, so no global toast.
+    mutationFn: (to: string) => client.post<ProjectInfo>(
+      `/projects/${encodeURIComponent(project.id || project.name)}/rename`,
+      { new_name: to }, { skipErrorToast: true }).then(r => r.data),
     onSuccess: (_r, to) => {
       const s = useUIStore.getState()
       if (s.currentProject === project.name) s.renameProject(project.name, to)

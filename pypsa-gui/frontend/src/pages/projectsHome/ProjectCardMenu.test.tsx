@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ProjectInfo } from '../../api/types'
 
 const api = vi.hoisted(() => ({ rename: vi.fn(), del: vi.fn(), reset: vi.fn() }))
-vi.mock('../../api/projects', () => ({ projectsApi: { rename: api.rename, delete: api.del } }))
+vi.mock('../../api/projects', () => ({ projectsApi: { delete: api.del } }))
+vi.mock('../../api/client', () => ({ default: { post: api.rename }, formatApiDetail: (d: unknown, f: string) => (typeof d === 'string' ? d : f) }))
 vi.mock('../../api/network', () => ({ networkApi: { resetNetwork: api.reset } }))
 vi.mock('../ScenariosPanel', () => ({ describeDescendants: (_d: unknown, n: string) => `'${n}' has children. Delete it and all of them?` }))
 
@@ -66,14 +67,14 @@ describe('ProjectCardMenu', () => {
 describe('InlineRename', () => {
   it('renames and keeps the open project in step', async () => {
     useUIStore.setState({ currentProject: 'Alpha' })
-    api.rename.mockResolvedValue({})
+    api.rename.mockResolvedValue({ data: {} })
     const done = vi.fn()
     wrap(<InlineRename project={P} onDone={done} />)
     const input = screen.getByTestId('project-rename-input')
     fireEvent.change(input, { target: { value: 'Beta' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => expect(done).toHaveBeenCalled())
-    expect(api.rename).toHaveBeenCalledWith('p1', 'Beta')
+    expect(api.rename).toHaveBeenCalledWith('/projects/p1/rename', { new_name: 'Beta' }, { skipErrorToast: true })
   })
   it('a name clash reads in words with curly quotes', async () => {
     api.rename.mockRejectedValue({ response: { data: { detail: "Project 'Beta' already exists" } }, message: 'x' })
