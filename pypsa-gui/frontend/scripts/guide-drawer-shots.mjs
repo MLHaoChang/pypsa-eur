@@ -7,7 +7,8 @@
 // a full entry, an entry with rows left out, browse by function, search results, the
 // palette footer on a row with no field, an unknown guide id, the guide beside the
 // open assistant dock (never over it), then Guided "Back to <field>" or Expert
-// "Back to <asset>" with "Open on <asset> ›". Checks Esc order (guide first, then the
+// "Back to <asset>" (no "Open on" over the field it came from), then "Open on <asset> ›"
+// for another field of that asset. Checks Esc order (guide first, then the
 // dock stays) and focus return. Shots at 1x (downscaled for the evidence branch).
 // Exit 1 when a check fails.
 //
@@ -194,22 +195,35 @@ try {
           ? await p.getByTestId('field-drawer').locator('[data-field]').first().isVisible().catch(() => false)
           : true
       }
-      // "Open on" lands on the field. The value it shows is recorded, not pinned: the
-      // edit form can open blank today (.scratch/properties-blank-form/issues/01-edit-form-opens-blank.md).
-      if (r.openOn) {
-        await openPalette(QUERY)
-        await input.press('Shift+Enter')
-        await guide.getByTestId('guide-open-on').click()
-        await p.waitForFunction(() => document.activeElement?.closest('[data-field]'), null, { timeout: 5000 }).catch(() => {})
-        r.landed = await p.evaluate(() => {
-          const a = document.activeElement
-          return {
-            field: a?.closest('[data-field]')?.getAttribute('data-field') ?? null,
-            value: (a instanceof HTMLInputElement) ? a.value : null,
-            mode: localStorage.getItem('network-diagram:ui-mode'),
-          }
-        })
-        await shot('9-open-on-landed')
+      // Another field of that asset keeps "Open on" (hidden only over the field the guide
+      // was opened from), and it lands on that field. The value it shows is recorded, not
+      // pinned: the edit form can open blank today (.scratch/properties-blank-form/issues/01-edit-form-opens-blank.md).
+      await openPalette(QUERY)
+      await input.press('Shift+Enter')
+      await guide.getByTestId('guide-entry').waitFor()
+      r.heading = await guide.locator('[data-guide-title]').innerText()
+      r.modelName = await guide.getByTestId('guide-model-name').innerText()
+      const shown = catalogue.entries.find(e => e.model_name === r.modelName && e.plain_name === r.heading)
+      const other = ['marginal_cost', 'capital_cost', 'p_nom_max'].map(m => catalogue.entries.find(e => e.scope === shown?.scope && e.model_name === m)).find(Boolean)
+      r.otherField = other?.model_name ?? null
+      if (other) {
+        await openGuideById(other.id)
+        await guide.getByRole('heading', { name: other.plain_name }).waitFor()
+        r.openOnOther = await guide.getByTestId('guide-open-on').innerText().catch(() => null)
+        await shot('9-open-on-other-field')
+        if (r.openOnOther) {
+          await guide.getByTestId('guide-open-on').click()
+          await p.waitForFunction(f => document.activeElement?.closest('[data-field]')?.getAttribute('data-field') === f, other.model_name, { timeout: 5000 }).catch(() => {})
+          r.landed = await p.evaluate(() => {
+            const a = document.activeElement
+            return {
+              field: a?.closest('[data-field]')?.getAttribute('data-field') ?? null,
+              value: (a instanceof HTMLInputElement) ? a.value : null,
+              mode: localStorage.getItem('network-diagram:ui-mode'),
+            }
+          })
+          await shot('9-open-on-landed')
+        }
       }
 
       r.ok = r.fullRows.includes('In model files') && r.escFocusTrigger
@@ -218,7 +232,9 @@ try {
         && (!noField || /⏎ open guide/.test(r.noFieldFooter)) && /⏎ select/.test(r.footer) && /⏎ guide/.test(r.footer)
         && r.unknownSearchFocused && r.dockUncovered && r.dockOpenAfterEsc
         && !!r.back && r.backFirst && r.formShownAfterBack && (mode === 'expert' || r.oneDrawer)
-        && (!r.landed || (r.landed.field === 'p_nom' && r.landed.mode === mode))
+        // Hosted over the field it was opened from: no "Open on"; over another field: there, and it lands.
+        && r.openOn === null && !!r.otherField && /^Open on .+ ›$/.test(r.openOnOther ?? '')
+        && r.landed?.field === r.otherField && r.landed.mode === mode
       if (!r.ok) failures.push(`${key}: ${JSON.stringify(r)}`)
       results.push(r)
     } catch (e) {
@@ -231,6 +247,6 @@ try {
   await browser.close()
 }
 await fs.writeFile(path.join(OUT, 'result.json'), JSON.stringify({ results, failures }, null, 1))
-for (const r of results) console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.key}: "${r.back}", open on "${r.openOn}" → ${JSON.stringify(r.landed ?? null)}, dock uncovered ${r.dockUncovered}`)
+for (const r of results) console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.key}: "${r.back}", open on same field "${r.openOn}", other "${r.openOnOther}" → ${JSON.stringify(r.landed ?? null)}, dock uncovered ${r.dockUncovered}`)
 for (const f of failures) console.log(`FAIL ${f}`)
 process.exit(failures.length ? 1 : 0)

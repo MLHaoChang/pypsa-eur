@@ -31,9 +31,10 @@ const OUT = process.env.OUT || path.resolve('copy-guard-shots')
 const TEMPLATE = process.env.TEMPLATE ?? 'eh_microgrid'
 const BLANK = process.env.BLANK_PROJECT || 'copy guard blank'
 const TEMPLATED = process.env.TEMPLATE_PROJECT || 'copy guard template'
-// Results tabs whose copy 02c changed, with a text the tab shows after the change.
+// Results tabs whose copy 02c changed, with a text the tab shows after the change and
+// the view button that shows it (the per-asset table sits under Dispatch's "Full load hours").
 const RESULT_TABS = [
-  ['dispatch', 'Capacity (MW)'],
+  ['dispatch', 'Capacity (MW)', 'Full load hours'],
   ['storage', 'Power (MW)'],
   ['economics', null],
   ['prices', null],
@@ -140,11 +141,18 @@ try {
           if (!ok) failures.push(`${key}: capacity-bounds empty state ${JSON.stringify(text)}`)
           results.push({ key, surface: 'capacity-bounds empty state', text, mode: await p.evaluate(() => localStorage.getItem('network-diagram:ui-mode')), ok })
         } else {
-          for (const [tab, expect] of RESULT_TABS) {
+          for (const [tab, expect, view] of RESULT_TABS) {
             const hidden = mode === 'guided' && expertOnlyFlag.expertOnly.includes(tab)
             await store(p, "s.requestResultsTab(a); s.setSlidePanel('results')", tab)
             await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {})
             await p.waitForTimeout(1200)
+            if (!hidden && view) {
+              await p.getByRole('button', { name: view, exact: true }).first().click().catch(() => {})
+              await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {})
+              await p.waitForTimeout(800)
+            }
+            // The changed copy in the shot, not only in the page text.
+            if (!hidden && expect) await p.getByText(expect, { exact: true }).first().scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {})
             await shoot(p, `${key}-results-${tab}`)
             const body = await p.locator('body').innerText()
             const raw = BAD.exec(body)?.[0] ?? null
