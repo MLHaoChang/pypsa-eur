@@ -82,9 +82,13 @@ def test_goal_free_config_drops_only_the_inert_fields():
     # ...and an opt-in LP field while it is off (homer-parity 01a R1), nothing else.
     assert G.OFF_WHEN_FALSY == {"min_renewable_fraction", "reserve_share_load",
                                 "reserve_share_pv", "reserve_share_wind"}
-    # ...and the config fields no solve reads (business case 08a, GK B C1; the
-    # template's assumed-value record, WALK-IMPROVE-1 b, GK B2 D2).
-    assert G.NOT_LP_FIELDS == {"business_case", "finance_assumed"}
+    # ...and a config field no solve reads (business case 08a, GK B C1), the
+    # load-growth inputs, which reach the LP only through the multipliers they
+    # derive into the hashed `load_scalers_by_carrier` (homer-parity 04a), and
+    # the template's assumed-value record (WALK-IMPROVE-1 b, GK B2 D2).
+    assert G.NOT_LP_FIELDS == {"business_case", "finance_assumed",
+                               "load_growth_pct_per_year", "load_growth_base_year",
+                               "load_scalers_derived"}
     assert free == {k: v for k, v in asdict(cfg).items()
                     if k not in G.GOAL_FIELDS and k not in G.OFF_WHEN_FALSY
                     and k not in G.NOT_LP_FIELDS}

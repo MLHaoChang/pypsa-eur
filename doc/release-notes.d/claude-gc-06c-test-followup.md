@@ -1,0 +1,1 @@
+* Test(gridspine): Pin the EMT workbook's earthing and tap-changer tests to hand-written literals, a non-zero tap neutral and a no-assumption transformer, and refuse a neutral resistor without resistance earthing (GC-06c follow-up).

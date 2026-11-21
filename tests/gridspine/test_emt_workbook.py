@@ -595,7 +595,7 @@ def _tap(**over):
     block = {
         "changer": "on_load",
         "side": "hv",
-        "neutral": 0,
+        "neutral": 1,
         "min": -9,
         "max": 9,
         "step_percent": t(1.5, "datasheet"),
@@ -615,11 +615,11 @@ def test_a_held_tap_changer_fills_its_columns_with_its_own_tag():
     tr = frames["transformers"].set_index("element")
     assert tr.at["TR1", "tap_changer [-]"] == "on_load"
     assert tr.at["TR1", "tap_side [-]"] == "lv"
-    assert tr.at["TR1", "tap_neutral [-]"] == 0
+    assert tr.at["TR1", "tap_neutral [-]"] == 1
     assert (tr.at["TR1", "tap_min [-]"], tr.at["TR1", "tap_max [-]"]) == (-7, 11)
     assert tr.at["TR1", "tap_step_percent [%]"] == 1.5
     assert tr.at["TR1", "tap_step_percent source"] == "datasheet"
-    assert tr.at["TR1", "tap_changer source"] == UNTAGGED
+    assert tr.at["TR1", "tap_changer source"] == "campus (untagged)"
     assert ("TR1", "tap_changer") not in gaps_of(g, "transformers")
 
 
@@ -695,8 +695,10 @@ def test_a_resistance_earthed_winding_needs_its_neutral_resistor():
 
 
 def test_the_new_sheet_is_written_and_listed_for_rscad(tmp_path):
-    assert "earthing_transformers" in SHEETS
-    assert "`earthing_transformers.csv`" in rscad_notes()
+    p = write_emt_pack(tmp_path, build_campus(campus_spec()))
+    assert "earthing_transformers.csv" in p.manifest["files"]
+    notes = (p.path / "RSCAD_NOTES.md").read_text()
+    assert "`earthing_transformers.csv`" in notes
 
 
 def test_a_held_tap_position_is_written_and_the_default_says_it_is_neutral():
@@ -708,7 +710,7 @@ def test_a_held_tap_position_is_written_and_the_default_says_it_is_neutral():
     frames, _ = workbook(build_campus(s))
     tr = frames["transformers"].set_index("element")
     assert tr.at["TR1", "tap_pos [-]"] == -3
-    assert tr.at["TR2", "tap_pos [-]"] == 0
+    assert tr.at["TR2", "tap_pos [-]"] == 1  # the fixture neutral, not 0
     for n in ("TR1", "TR2"):
         assert "neutral when none was entered" in tr.at[n, "tap_note"]
         assert "campus_invest_taps.csv" in tr.at[n, "tap_note"]
@@ -748,15 +750,15 @@ def test_each_winding_earthing_mode_is_written_with_its_own_source():
     frames, _ = workbook(build_campus(s))
     assert _earthing(frames, "TR1") == {
         "earthing_hv": "resistance",
-        "earthing_hv source": UNTAGGED,
+        "earthing_hv source": "campus (untagged)",
         "earthing_lv": "solid",
-        "earthing_lv source": UNTAGGED,
+        "earthing_lv source": "campus (untagged)",
     }
     assert _earthing(frames, "TR2") == {
         "earthing_hv": "delta",
-        "earthing_hv source": UNTAGGED,
+        "earthing_hv source": "campus (untagged)",
         "earthing_lv": "resistance",
-        "earthing_lv source": UNTAGGED,
+        "earthing_lv source": "campus (untagged)",
     }
     r = frames["transformers"].set_index("element")
     assert r.at["TR2", "r_n_lv_ohm [ohm]"] == 8.0
@@ -783,7 +785,10 @@ def test_an_assumed_neutral_earthing_is_tagged_assumed_with_the_campus_reason():
     camp = build_campus(s)
     frames, _ = workbook(camp)
     e = _earthing(frames, "TR1")
-    assert (e["earthing_hv source"], e["earthing_lv source"]) == (UNTAGGED, "assumed")
+    assert (e["earthing_hv source"], e["earthing_lv source"]) == (
+        "campus (untagged)",
+        "assumed",
+    )
     r = frames["transformers"].set_index("element")
     assert (
         r.at["TR1", "assumed"]
@@ -803,7 +808,7 @@ def test_a_defaulted_vector_group_is_assumed_with_its_reason_and_a_given_one_is_
         "TR1: no vector_group; taken as Dyn11 (assumed); "
         "TR1: LV neutral earthing not given; taken as solid (assumed)"
     )
-    assert r.at["TR2", "vector_group source"] == UNTAGGED
+    assert r.at["TR2", "vector_group source"] == "campus (untagged)"
     # a given vector group is not assumed; the unearthed LV star neutral still is
     assert (
         r.at["TR2", "assumed"]
@@ -832,7 +837,17 @@ def test_the_workbook_csvs_hold_no_nan_text(tmp_path):
         "ET1": {"bus": "MV1", "x0_ohm": t(4.0, "datasheet")}
     }
     s["campus"]["transformers"]["TR1"]["tap"] = _tap()
-    p = write_emt_pack(tmp_path, build_campus(s))
+    # TR2 states everything the campus would otherwise assume, so it has no
+    # assumption: its `assumed` cell must be empty, not "None" or "nan".
+    s["campus"]["transformers"]["TR2"].update(vector_group="Dyn11", earthing_lv="solid")
+    camp = build_campus(s)
+    assert not [a for a in camp.assumptions if a.startswith("TR2:")]
+    p = write_emt_pack(tmp_path, camp)
+    tr = pd.read_csv(
+        p.path / "transformers.csv", keep_default_na=False, dtype=str
+    ).set_index("element")
+    assert tr.at["TR2", "assumed"] == ""
+    assert tr.at["TR1", "assumed"] != ""
     for sheet in ("transformers", "earthing_transformers"):
         frame = pd.read_csv(p.path / f"{sheet}.csv", keep_default_na=False, dtype=str)
         cells = {c.strip().lower() for c in frame.to_numpy().ravel()}
@@ -842,3 +857,24 @@ def test_the_workbook_csvs_hold_no_nan_text(tmp_path):
 
 def test_the_rscad_note_says_when_no_earthing_transformer_is_entered():
     assert "header only when none entered" in rscad_notes()
+
+
+def test_resistance_earthing_without_its_resistor_is_refused_not_read_as_solid():
+    s = campus_spec()
+    tr = s["campus"]["transformers"]["TR1"]
+    tr.update(vector_group="YNyn0", earthing_hv="resistance", earthing_lv="solid")
+    with pytest.raises(ContractError, match="r_n_hv_ohm is needed with resistance"):
+        build_campus(s)
+
+
+def test_a_neutral_resistor_on_a_solid_winding_is_refused():
+    s = campus_spec()
+    tr = s["campus"]["transformers"]["TR1"]
+    tr.update(
+        vector_group="YNyn0",
+        earthing_hv="solid",
+        r_n_hv_ohm=t(20.0, "datasheet"),
+        earthing_lv="solid",
+    )
+    with pytest.raises(ContractError, match="r_n_hv_ohm is needed with resistance"):
+        build_campus(s)

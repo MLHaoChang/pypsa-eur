@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The storage arbitrage readiness warning on the IPP template now has a plain title instead of the raw id `commercial.arbitrage_loop_via_storage`. Its text names the grid import and export prices in plain words. A test pins that an app run on the IPP template keeps the owned wind and PV plants at their nameplate.

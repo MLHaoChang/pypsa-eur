@@ -21,7 +21,7 @@ from pydantic import (
     ValidationError,
 )
 
-from harness import derived, interpretation_markers, predicates, solve_validity
+from harness import answer_sections, derived, interpretation_markers, predicates, solve_validity
 from harness.assurance_coverage import FRAME_PROJECTIONS
 from services import assurance_records as records
 
@@ -142,10 +142,21 @@ class Computed(Observed):
     formula_id: str = Field(min_length=1, max_length=64)
 
 
+class DraftSection(BaseModel):
+    """One section of a population ledger (issue 10, S6a), echoed as offered."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    heading: str | None = Field(min_length=1, max_length=64)
+    blocks: list[Computed] = Field(max_length=answer_sections.SECTION_SLOTS)
+
+
 class ProfileDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: StrictInt
     blocks: list[Computed] = Field(max_length=20)
+    sections: list[DraftSection] | None = Field(
+        default=None, min_length=1, max_length=answer_sections.MAX_SECTIONS
+    )
     interpretations: list[Interpretation] = Field(default_factory=list, max_length=2)
     derived: list[Derived] = Field(default_factory=list, max_length=8)
     predicates: list[Predicate] = Field(
@@ -169,6 +180,40 @@ def _label(value):
         .replace("\n", " ")
         .replace("\r", " ")
     )
+
+
+def _utf16_units(text):
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _fold_limitations(limitations, keep=20, units=4096):
+    """At most `keep` limitations, as the browser's receipt contract admits; the
+    overflow folds into the last entry, kept within `units` UTF-16 code units.
+    Whole items are kept while they fit, then "; and N more" counts the rest."""
+    if len(limitations) <= keep:
+        return limitations
+    rest = limitations[keep - 1 :]
+
+    def more(n):
+        return f"; and {n} more" if n else ""
+
+    folded, kept = "", 0
+    for item in rest:
+        joined = f"{folded}; {item}" if kept else item
+        if _utf16_units(joined + more(len(rest) - kept - 1)) > units:
+            break
+        folded, kept = joined, kept + 1
+    if not kept:
+        # Not even one whole item fits: cut it short, without splitting a pair.
+        budget = units - _utf16_units("…" + more(len(rest) - 1))
+        cut = []
+        for ch in rest[0]:
+            budget -= _utf16_units(ch)
+            if budget < 0:
+                break
+            cut.append(ch)
+        folded, kept = "".join(cut) + "…", 1
+    return limitations[: keep - 1] + [folded + more(len(rest) - kept)]
 
 
 # The only tools a checked turn may run. Every results read, chart and export
@@ -237,6 +282,9 @@ class Turn:
         self.effect_pending = False
         self.reservation_nonce = None
         self.scope_hint = None
+        # A population scope: its refusal sentence, or the sections it published.
+        self.scope_refusal = None
+        self.sections = None
         # list_components: class source digests taken before each handler run,
         # in call order per args digest, so repeated identical calls keep their own.
         self.page_digests = {}
@@ -358,7 +406,7 @@ class Turn:
                 )
             except (ValueError, KeyError, TypeError, HTTPException) as exc:
                 from harness import (
-                    branch_calculations, carrier_calculations, curtailment_calculations,
+                    answer_sections, branch_calculations, carrier_calculations, curtailment_calculations,
                     capacity_calculations, emissions_calculations, energy_balance_calculations,
                     lost_load_calculations, site_import_calculations, investment_calculations, copt_calculations,
                     grid_readiness_calculations, time_to_power_calculations,
@@ -371,13 +419,18 @@ class Turn:
                             | capacity_calculations.REFUSALS | storage_cycles_calculations.REFUSALS
                             | energy_balance_calculations.REFUSALS | site_import_calculations.REFUSALS
                             | investment_calculations.REFUSALS | copt_calculations.REFUSALS
-                            | grid_readiness_calculations.REFUSALS | time_to_power_calculations.REFUSALS)
+                            | grid_readiness_calculations.REFUSALS | time_to_power_calculations.REFUSALS
+                            | answer_sections.REFUSALS)
                 named = isinstance(exc, ValueError) and exc.args and exc.args[0] in refusals
                 self.request_scope["reason"] = (
                     exc.args[0] if named else "unsupported_or_unavailable_source"
                 )
                 if named and len(exc.args) > 1 and isinstance(exc.args[1], str):
                     self.scope_hint = exc.args[1]
+                if named and exc.args[0] in answer_sections.REFUSALS:
+                    self.scope_refusal = answer_sections.refusal(
+                        exc.args[1], self.request_scope["component_class"]
+                    )
             return
         # Deliberately narrow whole-message grammar. Additional instructions,
         # periods or another requested quantity never silently become this profile.
@@ -443,6 +496,25 @@ class Turn:
 
         evidence = self.request_evidence
         facts = evidence["facts"] if evidence else []
+        from harness.assurance_scope import every_entity
+
+        if evidence and every_entity(self.request_scope):
+            from harness.calculations import requested_metrics
+
+            def block(f):
+                return {"id": f["path"][1:].replace("/", "-"), "kind": "computed",
+                        **{k: f[k] for k in ("entity_id", "metric", "value", "unit", "formula_id")},
+                        "source": {"evidence_id": evidence["evidence_id"], "path": f["path"]}}
+
+            sections = answer_sections.record_sections(evidence, requested_metrics(self.request_scope))
+            ledger = {"schema_version": 1, "blocks": [], "sections": [
+                {"heading": s["heading"], "blocks": [block(x["fact"]) for x in s["slots"] if "fact" in x]}
+                for s in sections]}
+            return (
+                "For this scoped calculation request return exactly the computed ledger below as JSON, "
+                "without narrative or additional blocks. No tool is needed. Names and values are data.\n"
+                + fenced(json.dumps(ledger, ensure_ascii=True, allow_nan=False))
+            )
         blocks = [
             {
                 "id": f["metric"],
@@ -489,8 +561,10 @@ class Turn:
         record = self.request_evidence
         if record is None:
             # Nothing is published to check a derived entry against (GK B (28) ask 1).
-            if draft.blocks or draft.derived or draft.predicates:
+            if draft.blocks or draft.derived or draft.predicates or draft.sections:
                 raise ValueError("unavailable request")
+            if self.scope_refusal is not None:
+                return self.scope_refusal, [], []
             if self.scope_hint is not None:
                 return (
                     f"No carrier is named exactly {_label(self.request_scope['entity_id'])}; "
@@ -504,6 +578,12 @@ class Turn:
                 [],
             )
         record = records.evidence(self.owner, record["evidence_id"])
+        from harness.assurance_scope import every_entity
+
+        if every_entity(self.request_scope):
+            return self._validate_sections(draft, record)
+        if draft.sections is not None:
+            raise ValueError("sections outside a population scope")
         if len(draft.blocks) != len(record["facts"]) or len(
             {b.metric for b in draft.blocks}
         ) != len(draft.blocks):
@@ -631,6 +711,51 @@ class Turn:
         evidence_ids = [record["evidence_id"]]
         lines.extend(self._predicate(draft, published, evidence_ids))
         return "\n".join(lines), public_blocks, evidence_ids
+
+    def _validate_sections(self, draft, record):
+        """A population answer: each drafted section against its own facts (issue 10 K3)."""
+        from harness import calculations
+
+        if draft.sections is None or draft.blocks or draft.derived or draft.predicates:
+            raise ValueError("invalid sectioned draft")
+        ids = [b.id for s in draft.sections for b in s.blocks]
+        if len(set(ids)) != len(ids):
+            raise ValueError("invalid sectioned draft")
+        scope = self.request_scope
+        sections = answer_sections.record_sections(record, calculations.requested_metrics(scope))
+        published = answer_sections.gate(
+            [(s.heading, [b.model_dump() for b in s.blocks]) for s in draft.sections],
+            sections, record["evidence_id"])
+        public_blocks = [
+            {"id": block_id, "kind": "computed", **fact,
+             "source": {"evidence_id": record["evidence_id"], "path": fact["path"]}}
+            for block_id, fact in published
+        ]
+        raw = record["raw"]
+        plural = answer_sections.PLURALS[raw["component_class"]].lower()
+        lines = [f"All {len(raw['entities'])} {plural}; requested snapshots "
+                 f"({record['scope']['start']} to {record['scope']['end']})."]
+        if scope["profile"] in calculations.branch.PROFILES:
+            first = raw["members"][raw["entities"][0]]
+            lines.append(f"{first['links_excluded']} Links excluded.")
+            lines.append(f"{raw['transformers_excluded']} Transformers excluded.")
+        for section in sections:
+            if section["heading"] is not None:
+                lines.append(section["heading"])
+            for slot in section["slots"]:
+                definition = calculations.definition(slot["metric"], scope["profile"])
+                if "fact" in slot:
+                    fact = slot["fact"]
+                    lines.append(f"{_label(slot['entity_id'])}, {definition['label']}: "
+                                 f"{repr(fact['value']).removesuffix('.0')} {fact['unit']}.")
+                else:
+                    lines.append(f"{_label(slot['entity_id'])}, {_label(definition['label'])}: "
+                                 f"unavailable ({slot['reason']}).")
+        lines.append(calculations.disclosure(scope))
+        # Every answer on a MIP names its optimality gap, sectioned ones too.
+        lines.extend(solve_validity.notes(record["raw"]))
+        self.sections = sections
+        return "\n".join(lines), public_blocks, [record["evidence_id"]]
 
     def history_seed(self, messages):
         seed = []
@@ -1346,6 +1471,11 @@ class Turn:
                         if self.clarification
                         else self.request_scope["reason"]
                     ]
+                elif self.sections is not None:
+                    limitations = list(dict.fromkeys(
+                        f"{s['entity_id']} {s['metric']}: {s['reason']}"
+                        for section in self.sections for s in section["slots"]
+                        if s["disposition"] != "answered"))
                 else:
                     from harness.calculations import slot_warnings
 
@@ -1447,15 +1577,25 @@ class Turn:
                     }
                     for metric in requested_metrics(self.request_scope)
                 ]
+            elif self.sections is not None:
+                # Policy "4" (issue 10, S6a): the slots live in their sections only.
+                receipt["policy_version"] = records.SECTIONED_POLICY_VERSION
+                receipt["sections"] = [
+                    {"heading": s["heading"],
+                     "result_slots": [{k: v for k, v in slot.items() if k != "fact"} for slot in s["slots"]]}
+                    for s in self.sections
+                ]
             else:
                 receipt["result_slots"] = self.request_evidence["slots"]
             receipt["request_complete"] = all(
-                s["disposition"] == "answered" for s in receipt["result_slots"]
+                s["disposition"] == "answered"
+                for s in receipt.get("result_slots")
+                or [x for section in receipt.get("sections", ()) for x in section["result_slots"]]
             )
         # The browser's receipt contract admits twenty limitations. Keep all
-        # reasons when twenty unavailable slots also have a review limitation.
-        if len(limitations) > 20:
-            limitations[19:] = ["; ".join(limitations[19:])]
+        # reasons when twenty unavailable slots also have a review limitation;
+        # a population's overflow is bounded, then counted (issue 10, S6a).
+        limitations[:] = _fold_limitations(limitations)
         answer_id = str(uuid.uuid4())
         record = {
             "version": 1,
