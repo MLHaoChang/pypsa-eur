@@ -12,8 +12,8 @@ Token rules (GK B4, SCU06-S1 plan):
 * the token travels only as the `securityToken` query parameter to the one fixed
   HTTPS host below, with redirects off, so it can never be carried to another host;
 * it never enters the cache file, the series meta or notes, an error message or a
-  log line: errors are built from our own words and the status code only, and the
-  request URL is never logged.
+  log line: errors are our own plain words (no status code, no ENTSO-E text), and
+  the request line httpx logs has the token blotted out (`_NoSecurityToken`).
 
 Parsing rules: the response is capped at `MAX_RESPONSE_BYTES`; a document with a
 DOCTYPE or ENTITY declaration is refused before parsing; every TimeSeries must be
@@ -22,14 +22,15 @@ the last price over skipped positions (its definition). Sub-hourly points (PT15M
 PT30M: the 15-minute day-ahead market since October 2025) are averaged to hourly,
 and the series notes say so. A year with any hour missing is refused, never filled.
 
-Live probe (documented, not run in CI; needs a real token):
+Live probe (documented, not run in CI; needs a real token), from the backend:
 
-    ENTSOE_API_TOKEN=... python -c "from services import market_prices as m; \\
-        s, n = m.fetch_day_ahead('DE-LU', 2024, token=__import__('os').environ['ENTSOE_API_TOKEN']); \\
-        print(len(s), s.mean(), n)"
+    ENTSOE_API_TOKEN=... python -c "import os; from services import market_prices as m;
+    s, n = m.fetch_day_ahead('DE-LU', 2024, token=os.environ['ENTSOE_API_TOKEN']);
+    print(len(s), s.mean(), n)"
 
 expects 8784 hourly values for the leap year 2024.
 """
+
 from __future__ import annotations
 
 import json
@@ -39,7 +40,7 @@ import os
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 import httpx
@@ -154,6 +155,7 @@ class MarketPriceError(Exception):
 
 # ── zone and year ──────────────────────────────────────────────────────────
 
+
 def zone_for_pin(lat: float, lng: float) -> str | None:
     """The bidding zone a site pin lies in, or None when the bundled cores
     cannot tell (near a border or coast, or in a multi-zone country): the
@@ -162,8 +164,11 @@ def zone_for_pin(lat: float, lng: float) -> str | None:
         return None
     if not (math.isfinite(lat) and math.isfinite(lng)):
         return None
-    hits = [zone for zone, rects in CORES.items()
-            if any(w <= lng < e and s <= lat < n for w, s, e, n in rects)]
+    hits = [
+        zone
+        for zone, rects in CORES.items()
+        if any(w <= lng < e and s <= lat < n for w, s, e, n in rects)
+    ]
     return hits[0] if len(hits) == 1 else None
 
 
@@ -179,22 +184,31 @@ def pin_of(sites_doc: dict) -> tuple[float, float] | None:
 
 
 def last_complete_year(now: datetime | None = None) -> int:
-    return (now or datetime.now(timezone.utc)).year - 1
+    return (now or datetime.now(UTC)).year - 1
 
 
 def check_request(zone: str, year: int, now: datetime | None = None) -> Zone:
     """Validate the zone and year before either touches a path or a request."""
     z = BIDDING_ZONES.get(zone) if isinstance(zone, str) else None
     if z is None:
-        raise MarketPriceError("invalid_zone", "Bidding zone: choose a zone from the list.")
-    last = last_complete_year(now)
-    if isinstance(year, bool) or not isinstance(year, int) or not (z.first_year <= year <= last):
         raise MarketPriceError(
-            "invalid_year", f"Year: choose a complete year from {z.first_year} to {last}.")
+            "invalid_zone", "Bidding zone: choose a zone from the list."
+        )
+    last = last_complete_year(now)
+    if (
+        isinstance(year, bool)
+        or not isinstance(year, int)
+        or not (z.first_year <= year <= last)
+    ):
+        raise MarketPriceError(
+            "invalid_year",
+            f"Year: choose a complete year from {z.first_year} to {last}.",
+        )
     return z
 
 
 # ── project zone choice ────────────────────────────────────────────────────
+
 
 def chosen_zone(project_dir: Path) -> str | None:
     """The zone the user picked for this project, or None (missing, unreadable
@@ -209,11 +223,14 @@ def chosen_zone(project_dir: Path) -> str | None:
 
 def store_zone(project_dir: Path, zone: str) -> None:
     if zone not in BIDDING_ZONES:
-        raise MarketPriceError("invalid_zone", "Bidding zone: choose a zone from the list.")
+        raise MarketPriceError(
+            "invalid_zone", "Bidding zone: choose a zone from the list."
+        )
     atomic_write_text(project_dir / ZONE_FILE, json.dumps({"zone": zone}))
 
 
 # ── fetch and parse ────────────────────────────────────────────────────────
+
 
 def token() -> str | None:
     value = os.environ.get(TOKEN_NAME, "").strip()
@@ -267,7 +284,9 @@ def parse_a44(xml: bytes, zone: str, year: int) -> tuple[pd.Series, list[str]]:
         raise _bad("ENTSO-E sent a document that could not be read.") from exc
     name = _local(root.tag)
     if name == "Acknowledgement_MarketDocument":
-        raise MarketPriceError("no_data", f"ENTSO-E has no day-ahead prices for {zone} in {year}.")
+        raise MarketPriceError(
+            "no_data", f"ENTSO-E has no day-ahead prices for {zone} in {year}."
+        )
     if name != "Publication_MarketDocument":
         raise _bad("ENTSO-E sent a document that is not a price list.")
 
@@ -286,7 +305,9 @@ def parse_a44(xml: bytes, zone: str, year: int) -> tuple[pd.Series, list[str]]:
             start, end = _ts(_text(interval, "start")), _ts(_text(interval, "end"))
             minutes = _RESOLUTION.get(_text(period, "resolution") or "")
             if minutes is None:
-                raise _bad("ENTSO-E sent prices at a resolution this app does not read.")
+                raise _bad(
+                    "ENTSO-E sent prices at a resolution this app does not read."
+                )
             count = int((end - start) / pd.Timedelta(minutes=minutes))
             if count <= 0:
                 raise _bad("ENTSO-E sent an empty price period.")
@@ -307,14 +328,19 @@ def parse_a44(xml: bytes, zone: str, year: int) -> tuple[pd.Series, list[str]]:
             bucket = points.setdefault(minutes, {})
             last = given[1]
             for pos in range(1, count + 1):
-                last = given.get(pos, last)  # A03: a skipped position repeats the last price
+                last = given.get(
+                    pos, last
+                )  # A03: a skipped position repeats the last price
                 bucket[start + pd.Timedelta(minutes=minutes * (pos - 1))] = last
 
     if not points:
-        raise MarketPriceError("no_data", f"ENTSO-E has no day-ahead prices for {zone} in {year}.")
+        raise MarketPriceError(
+            "no_data", f"ENTSO-E has no day-ahead prices for {zone} in {year}."
+        )
     lo = pd.Timestamp(f"{year}-01-01", tz="UTC")
-    hours = pd.date_range(lo, pd.Timestamp(f"{year + 1}-01-01", tz="UTC"), freq="h",
-                          inclusive="left")
+    hours = pd.date_range(
+        lo, pd.Timestamp(f"{year + 1}-01-01", tz="UTC"), freq="h", inclusive="left"
+    )
     notes: list[str] = []
     hourly = pd.Series(float("nan"), index=hours)
     # Coarse first, finer on top: where the 15-minute market published, its
@@ -330,7 +356,9 @@ def parse_a44(xml: bytes, zone: str, year: int) -> tuple[pd.Series, list[str]]:
     missing = int(hourly.isna().sum())
     if missing:
         raise MarketPriceError(
-            "incomplete", f"ENTSO-E is missing {missing} hours of {zone} prices in {year}.")
+            "incomplete",
+            f"ENTSO-E is missing {missing} hours of {zone} prices in {year}.",
+        )
     return hourly.rename(None), notes
 
 
@@ -338,41 +366,65 @@ def _period(year: int) -> dict[str, str]:
     return {"periodStart": f"{year}01010000", "periodEnd": f"{year + 1}01010000"}
 
 
-def fetch_day_ahead(zone: str, year: int, *, token: str,
-                    transport: httpx.BaseTransport | None = None) -> tuple[pd.Series, list[str]]:
+def fetch_day_ahead(
+    zone: str, year: int, *, token: str, transport: httpx.BaseTransport | None = None
+) -> tuple[pd.Series, list[str]]:
     """One request to ENTSO-E for `zone`'s day-ahead prices in `year` (UTC)."""
     z = check_request(zone, year)
-    params = {"securityToken": token, "documentType": "A44",
-              "in_Domain": z.eic, "out_Domain": z.eic, **_period(year)}
+    params = {
+        "securityToken": token,
+        "documentType": "A44",
+        "in_Domain": z.eic,
+        "out_Domain": z.eic,
+        **_period(year),
+    }
     try:
-        with httpx.Client(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT},
-                          transport=transport, follow_redirects=False) as client:
+        with httpx.Client(
+            timeout=TIMEOUT,
+            headers={"User-Agent": USER_AGENT},
+            transport=transport,
+            follow_redirects=False,
+        ) as client:
             with client.stream("GET", BASE_URL, params=params) as r:
                 status = r.status_code
                 body = bytearray()
                 for chunk in r.iter_bytes():
                     body += chunk
                     if len(body) > MAX_RESPONSE_BYTES:
-                        raise _bad("ENTSO-E sent more data than one year of prices can be.")
+                        raise _bad(
+                            "ENTSO-E sent more data than one year of prices can be."
+                        )
     except httpx.TimeoutException as exc:
-        raise MarketPriceError("unavailable", "ENTSO-E did not answer in time. Try again later.") from exc
+        raise MarketPriceError(
+            "unavailable", "ENTSO-E did not answer in time. Try again later."
+        ) from exc
     except httpx.HTTPError as exc:
-        raise MarketPriceError("unavailable", "ENTSO-E could not be reached. Check the connection "
-                                              "and try again.") from exc
+        raise MarketPriceError(
+            "unavailable",
+            "ENTSO-E could not be reached. Check the connection and try again.",
+        ) from exc
     if status == 401 or status == 403:
-        raise MarketPriceError("bad_token", "ENTSO-E did not accept the access token. Check it "
-                                            "on the Transparency Platform and save it again.")
+        raise MarketPriceError(
+            "bad_token",
+            "ENTSO-E did not accept the access token. Check it "
+            "on the Transparency Platform and save it again.",
+        )
     if status == 429:
-        raise MarketPriceError("unavailable", "ENTSO-E is limiting requests. Try again in a minute.")
+        raise MarketPriceError(
+            "unavailable", "ENTSO-E is limiting requests. Try again in a minute."
+        )
     if status == 400:
         # An Acknowledgement (no data for the query) answers 400 as well as 200.
         return parse_a44(bytes(body), zone, year)
     if status != 200:
-        raise MarketPriceError("unavailable", "ENTSO-E could not answer just now. Try again later.")
+        raise MarketPriceError(
+            "unavailable", "ENTSO-E could not answer just now. Try again later."
+        )
     return parse_a44(bytes(body), zone, year)
 
 
 # ── cache ──────────────────────────────────────────────────────────────────
+
 
 def cache_dir() -> Path:
     return app_paths.app_data_dir() / "market_prices" / "entsoe"
@@ -388,11 +440,16 @@ def _read_cache(zone: str, year: int) -> tuple[pd.Series, list[str], str] | None
     """A complete cached year, or None (absent, partial or corrupt: refetch)."""
     try:
         data = json.loads(_cache_file(zone, year).read_text(encoding="utf-8"))
-        if data.get("version") != CACHE_VERSION or data.get("zone") != zone or data.get("year") != year:
+        if (
+            data.get("version") != CACHE_VERSION
+            or data.get("zone") != zone
+            or data.get("year") != year
+        ):
             return None
         values = [float(v) for v in data["values"]]
-        hours = pd.date_range(f"{year}-01-01", f"{year + 1}-01-01", freq="h", tz="UTC",
-                              inclusive="left")
+        hours = pd.date_range(
+            f"{year}-01-01", f"{year + 1}-01-01", freq="h", tz="UTC", inclusive="left"
+        )
         if len(values) != len(hours) or not all(math.isfinite(v) for v in values):
             return None
         notes = [str(n) for n in data.get("notes", [])]
@@ -403,16 +460,33 @@ def _read_cache(zone: str, year: int) -> tuple[pd.Series, list[str], str] | None
         return None
 
 
-def _write_cache(zone: str, year: int, series: pd.Series, notes: list[str], fetched: str) -> None:
+def _write_cache(
+    zone: str, year: int, series: pd.Series, notes: list[str], fetched: str
+) -> None:
     path = _cache_file(zone, year)
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, json.dumps({
-        "version": CACHE_VERSION, "zone": zone, "year": year, "fetched": fetched,
-        "notes": notes, "values": [float(v) for v in series.values]}))
+    atomic_write_text(
+        path,
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "zone": zone,
+                "year": year,
+                "fetched": fetched,
+                "notes": notes,
+                "values": [float(v) for v in series.values],
+            }
+        ),
+    )
 
 
-def day_ahead(zone: str, year: int, *, transport: httpx.BaseTransport | None = None,
-              now: datetime | None = None) -> tuple[pd.Series, list[str], str]:
+def day_ahead(
+    zone: str,
+    year: int,
+    *,
+    transport: httpx.BaseTransport | None = None,
+    now: datetime | None = None,
+) -> tuple[pd.Series, list[str], str]:
     """`(series, notes, fetched ISO date)` for a complete year: from the cache
     when it holds the year (a complete year never changes), else one fetch
     with the stored token, then cached."""
@@ -422,14 +496,17 @@ def day_ahead(zone: str, year: int, *, transport: httpx.BaseTransport | None = N
         return cached
     tok = token()
     if tok is None:
-        raise MarketPriceError("no_token", "Day-ahead prices need an ENTSO-E access token.")
+        raise MarketPriceError(
+            "no_token", "Day-ahead prices need an ENTSO-E access token."
+        )
     series, notes = fetch_day_ahead(zone, year, token=tok, transport=transport)
-    fetched = (now or datetime.now(timezone.utc)).date().isoformat()
+    fetched = (now or datetime.now(UTC)).date().isoformat()
     _write_cache(zone, year, series, notes, fetched)
     return series, notes, fetched
 
 
 # ── landing ────────────────────────────────────────────────────────────────
+
 
 def series_name(zone: str, year: int) -> str:
     return f"entsoe_da_{zone}_{year}"
@@ -439,25 +516,49 @@ def series_meta(zone: str, year: int, notes: list[str], fetched: str) -> dict:
     """Library meta: source, fetch date, zone and year; money notes in the
     template-series convention (`services/library/template_series.py`)."""
     return {
-        "source": SOURCE, "provider": PROVIDER, "vintage_year": year, "unit": "EUR/MWh",
+        "source": SOURCE,
+        "provider": PROVIDER,
+        "vintage_year": year,
+        "unit": "EUR/MWh",
         "label": f"{zone} day-ahead {year}",
         "description": f"{SOURCE} prices for {BIDDING_ZONES[zone].label}, {year}, "
-                       f"fetched {fetched}.",
-        "notes": ["currency:EUR", "price_basis:nominal", f"currency_year:{year}",
-                  f"region:{zone}", "source_time_basis:UTC", f"fetched:{fetched}",
-                  "document:A44", *notes],
+        f"fetched {fetched}.",
+        "notes": [
+            "currency:EUR",
+            "price_basis:nominal",
+            f"currency_year:{year}",
+            f"region:{zone}",
+            "source_time_basis:UTC",
+            f"fetched:{fetched}",
+            "document:A44",
+            *notes,
+        ],
     }
 
 
-def land(db, org_id, zone: str, year: int, *, created_by=None,
-         transport: httpx.BaseTransport | None = None, now: datetime | None = None,
-         root: Path | None = None):
+def land(
+    db,
+    org_id,
+    zone: str,
+    year: int,
+    *,
+    created_by=None,
+    transport: httpx.BaseTransport | None = None,
+    now: datetime | None = None,
+    root: Path | None = None,
+):
     """Fetch (or read the cache) and store the year in the org's Library;
     returns `(PriceSeriesRef, fetched ISO date)`."""
     from services.library import series_store
 
     series, notes, fetched = day_ahead(zone, year, transport=transport, now=now)
-    ref = series_store.put_series(db, org_id, series_name(zone, year), series,
-                                  series_meta(zone, year, notes, fetched),
-                                  created_by=created_by, root=root)
+    ref = series_store.put_series(
+        db,
+        org_id,
+        series_name(zone, year),
+        series,
+        series_meta(zone, year, notes, fetched),
+        created_by=created_by,
+        root=root,
+    )
     return ref, fetched
