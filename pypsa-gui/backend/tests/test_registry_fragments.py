@@ -534,7 +534,7 @@ def test_a_fragment_settles_a_pending_variant_once(copy):
     _, variants, settled = fm.merged_tables(base)
     assert [v["status"] for v in variants if v["id"] == pending["id"]] == ["covered"]
     assert settled == {pending["id"]: path}
-    assert [i["id"] for i in variants] == [v["id"] for v in fm.VARIANTS] + [
+    assert [i["id"] for i in variants] == [v["id"] for v in fm.PYTHON_VARIANTS] + [
         pending["id"]
     ]  # in place
     assert any(
