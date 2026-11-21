@@ -288,8 +288,8 @@ MASTER_FP_SINGLE = (
     "c5d6c416f41b319c4043f2db0c30def9f22e9273ded7664a958c355bcda81433",
 )
 MASTER_FP_EH_DATACENTER = (
-    "6bed6cc31d9261488445d9f53fe338c01a411a0e3c2eff9e9a32d09cea6d5450",
-    "f55e9bea34b15b82088ffb796b2804428e061a8d0a4a6ad2367c0544d79b7dbd",
+    "92e01e3cda191c9dd1845288d676bb2dd64bafce69a1b821c802297e947f274f",
+    "dcd48fe494a0683fa8716bb12c8ba1e2899d1466052d8c0e6714b9784857e0f4",
 )
 
 
@@ -599,8 +599,31 @@ def test_d4_a_record_frozen_before_02b_admits_on_an_unscheduled_network(tmp_path
 
     ctx = _run_ctx(tmp_path, build_eh_datacenter(), "eh_datacenter")
     frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
-    assert frozen.pop("energization") == {"digest": None, "by_period": {}}
+    # GK B E4: a non-staged card is byte-equal to a pre-02b one (no entry).
+    assert "energization" not in frozen
     assert _admit(tmp_path, ctx, frozen) is None  # admitted, as before 02b
+
+
+@pytest.mark.parametrize(
+    "record",
+    [{"by_period": {}}, {}],  # no digest; {} is the unmerged pre-digest shape
+)
+def test_d4_a_digest_less_record_refuses_on_an_unscheduled_network(tmp_path, record):
+    """GK B 68 (D5 survivor, `"digest" not in then`): a record that carries an
+    energization entry but no digest is not a pre-02b record (that has no
+    entry at all, and admits above). It can't be read, so it refuses even
+    where the network has no schedule: its missing digest is never "None"."""
+    from harness import run_eh
+
+    ctx = _run_ctx(tmp_path, build_eh_datacenter(), "eh_datacenter")
+    frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
+    frozen["energization"] = record
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message == (
+        "The connection's energization schedule can't be compared now. "
+        "Review the run again."
+    )
 
 
 def test_e4_a_ramp_reversed_inside_a_period_refuses(tmp_path):
@@ -618,7 +641,11 @@ def test_e4_a_ramp_reversed_inside_a_period_refuses(tmp_path):
         json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
     )
     summary = E.all_by_period(n)
-    frame.iloc[rows, 0] = np.linspace(20.0, 10.0, rows.size)
+    ramp = frame.iloc[rows, 0].to_numpy()
+    frame.iloc[rows, 0] = ramp[::-1]  # the same values, exactly, in reverse
+    assert sorted(frame.iloc[rows, 0]) == sorted(
+        ramp
+    )  # an order-blind digest can't see it
     assert E.all_by_period(n) == summary  # the summary cannot see it
     kind, message = _admit(tmp_path, ctx, frozen)
     assert kind == run_eh.ARGS_KIND
@@ -650,3 +677,87 @@ def test_e4_a_schedule_unreadable_at_freeze_and_admit_cannot_be_compared(
         "The connection's energization schedule can't be compared now. "
         "Review the run again."
     )
+
+
+def test_e4_a_schedule_unreadable_only_at_admit_cannot_be_compared(
+    tmp_path, monkeypatch
+):
+    """D5 survivor (`now is None`): frozen readable, unreadable at admission.
+    It refuses with a sentence; it never raises out of admission."""
+    from harness import run_eh
+
+    def unreadable(_n):
+        raise RuntimeError("unreadable")
+
+    n = _staged()
+    ctx = _run_ctx(tmp_path, n)
+    frozen = json.loads(
+        json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
+    )
+    monkeypatch.setattr(E, "all_by_period", unreadable)
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message == (
+        "The connection's energization schedule can't be compared now. "
+        "Review the run again."
+    )
+
+
+def test_d4_a_pre_02b_record_refuses_where_the_schedule_is_unreadable(
+    tmp_path, monkeypatch
+):
+    """D5 survivor (`now is not None and …`): a record frozen before 02b, and
+    a schedule that can't be read now, is never read as "no schedule"."""
+    from harness import run_eh
+
+    def unreadable(_n):
+        raise RuntimeError("unreadable")
+
+    ctx = _run_ctx(tmp_path, build_eh_datacenter(), "eh_datacenter")
+    frozen = run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6)
+    assert "energization" not in frozen  # pre-02b shape, as a non-staged card
+    monkeypatch.setattr(E, "all_by_period", unreadable)
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND and message == run_eh.ENERGIZATION_UNRECORDED
+
+
+def test_e4_a_record_without_by_period_still_refuses_a_changed_digest(tmp_path):
+    """D5 survivor (`then.get("by_period") or {}`): a record whose digest no
+    longer matches refuses even when it carries no by_period; the links named
+    are then those the network schedules now."""
+    from harness import run_eh
+
+    n = _staged()
+    ctx = _run_ctx(tmp_path, n)
+    frozen = json.loads(
+        json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
+    )
+    frozen["energization"] = {"digest": "not-this-schedule"}
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message == (
+        "The connection's energization schedule changed since the study's card "
+        "was drawn (grid_import). Review the run again."
+    )
+
+
+def test_e4_a_renamed_link_column_with_the_same_values_refuses(tmp_path):
+    """GK A 33 E4: the schedule moved to another link, every value the same.
+    A digest without the column names would read it unchanged."""
+    from harness import run_eh
+
+    n = _staged()
+    ctx = _run_ctx(tmp_path, n)
+    frozen = json.loads(
+        json.dumps(run_eh.freeze(ctx, {"eh_study": {"budget_solves": 2}}, 6))
+    )
+    frame = E.energization_frame(n)
+    other = next(link for link in n.links.index if link != LINK)
+    n.links_t[E.ATTR] = frame.rename(columns={LINK: other})
+    assert E.energization_frame(n)[other].equals(frame[LINK])  # same values
+    kind, message = _admit(tmp_path, ctx, frozen)
+    assert kind == run_eh.ARGS_KIND
+    assert message.startswith(
+        "The connection's energization schedule changed since the study's card was drawn ("
+    )
+    assert LINK in message

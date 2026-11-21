@@ -19,7 +19,7 @@ const GOAL_SOURCE: Record<string, string> = { stored: "from the project's solver
 function GoalRow({ goal }: { goal: EnvelopeGoal }) {
   if (goal.value === null) return <div data-testid="envelope-goal">No reliability goal is set. Missing:{' '}
     <button type="button" data-testid="envelope-goal-fix" onClick={openReliabilityGoal}
-      className="text-accent hover:underline whitespace-nowrap">{RELIABILITY_GOAL_LABEL} ›</button></div>
+      className="text-link hover:underline whitespace-nowrap">{RELIABILITY_GOAL_LABEL} ›</button></div>
   return <div data-testid="envelope-goal">
     {`${RELIABILITY_GOAL_LABEL}: ${goal.value} h/yr, ${GOAL_SOURCE[goal.source] ?? goal.source}`}</div>
 }

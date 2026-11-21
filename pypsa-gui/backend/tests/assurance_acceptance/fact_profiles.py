@@ -34,6 +34,7 @@ from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_assurance_metrics import solved  # noqa: F401
 from tests.test_branch_loading_assurance import grid  # noqa: F401
 from tests.test_branch_loading_assurance import solve as solve_grid
+from tests.assurance_acceptance.test_p2_request_slots import install_ac
 from tests.test_capacity_cycles_assurance import built, tank  # noqa: F401
 from tests.test_carrier_assurance import _solve as solve_carrier
 from tests.test_carrier_assurance import wind  # noqa: F401
@@ -103,6 +104,12 @@ def _same(ctx):
     return ctx
 
 
+def _ac_grid(ctx):
+    """`grid` solved, then an AC flow on L12 whose last snapshot did not converge,
+    so every surface sees a warned (policy "5") answer."""
+    return install_ac(solve_grid(ctx), (True, True, False), [3, 6, 4], [4, 8, 3])
+
+
 def _storage_cost(ctx):
     """test_storage_cost_assurance's `priced`, on its `storage`."""
     n = ctx.network
@@ -151,6 +158,9 @@ DRIVERS = {
     "branch-loading/1": Driver("grid", solve_grid, _scope("branch-loading/1", "L12")),
     "network-loading/1": Driver(
         "grid", solve_grid, _scope("network-loading/1", "network")
+    ),
+    "ac-branch-loading/1": Driver(
+        "grid", _ac_grid, _scope("ac-branch-loading/1", "L12", component_class="Line")
     ),
     "lost-load/1": Driver("shed", _same, _scope("lost-load/1", "L1")),
     "bus-price/1": Driver(

@@ -7,6 +7,11 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import type { Generator, Line, Link, StorageUnit, Store, Transformer } from '../api/types'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
+import { FIELD_MAP } from '../layout/CreationForm'
+
+/** The Properties panel's word for "let the optimiser size it": its create
+ *  form's word map, which the edit form's schema label matches (tested). */
+export const EXTENDABLE_LABEL = FIELD_MAP.thermal.find(f => f.key === 'p_nom_extendable')!.label
 
 // ── Capacity bounds editor ────────────────────────────────────────────────────
 // Single page where every extendable asset across the network can have its
@@ -166,9 +171,9 @@ export default function CapacityBoundsEditor() {
 
   if (totalCount === 0) {
     return (
-      <div className="p-6 text-center text-xs text-muted">
-        No extendable assets in this network. Mark assets <code>p_nom_extendable=True</code>{' '}
-        (or <code>s_nom</code>/<code>e_nom</code>) in the Properties panel first.
+      <div className="p-6 text-center text-xs text-muted" data-testid="capacity-bounds-empty">
+        No asset in this network is sized by the optimiser. Tick “{EXTENDABLE_LABEL}” on an asset to list it
+        here.
       </div>
     )
   }
@@ -247,7 +252,7 @@ function ClassSection({
 }) {
   return (
     <section>
-      <h3 className="text-[12.5px] font-semibold text-text mb-2.5 flex items-center gap-2 tracking-[-0.005em]">
+      <h3 className="text-h3 font-semibold text-text mb-2.5 flex items-center gap-2">
         <Settings2 size={13} className="text-muted" />
         {section.label}
         <span className="text-[10px] font-normal text-muted">({rows.length} extendable)</span>
@@ -402,7 +407,7 @@ function AssetRowEditor({
           <>
             <button
               onClick={onOpenModal}
-              className="text-[10.5px] text-accent hover:underline mr-2"
+              className="text-[10.5px] text-link hover:underline mr-2"
             >Edit</button>
             <button
               onClick={() => clearVintageMut.mutate()}
@@ -415,7 +420,7 @@ function AssetRowEditor({
           <button
             onClick={onOpenModal}
             disabled={!hasPeriods}
-            className="text-[10.5px] text-accent hover:underline disabled:opacity-40 disabled:no-underline"
+            className="text-[10.5px] text-link hover:underline disabled:opacity-40 disabled:no-underline"
             title={hasPeriods
               ? 'Configure per-period bounds for this asset'
               : 'Enable multi-period planning first (Model Horizon → Mode → Multi-period)'}

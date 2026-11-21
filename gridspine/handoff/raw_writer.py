@@ -75,6 +75,7 @@ off two-winding records) are omitted, so the importer's defaults apply.
 import numpy as np
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 
 SBASE_MVA = 100.0
 VERSIONS = (33, 35, 36)
@@ -218,6 +219,7 @@ def _rates(rate):
 def write_raw(net, path, title="gridspine export", f_hz=50.0, version=33):
     if version not in VERSIONS:
         raise ContractError(f"RAW version {version!r} not in {VERSIONS}")
+    SC.refuse(net, "PSS/E RAW writer")  # GC-01b: not written yet (follow-up)
     nums = _bus_numbers(net)
     name_of = net.bus["name"]
     slack_buses = set(net.ext_grid["bus"])

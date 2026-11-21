@@ -127,14 +127,16 @@ describe('Grid code & connection', () => {
   it('says a planning → dynamics study has not run, not an empty capacity table', async () => {
     api.gsStatus.mockResolvedValue({ status: 'pending' })
     mount(<GridCodeTab />)
-    expect(await screen.findByText(/Not run yet: the planning → dynamics study/)).toBeTruthy()
+    expect(await screen.findByText('Not run yet')).toBeTruthy()
+    expect(screen.getByText('The planning → dynamics study has not finished.')).toBeTruthy()
     expect(screen.queryByTestId('capacity-section')).toBeNull()
   })
 
   it('says a running planning → dynamics study is running, without an action', async () => {
     api.gsStatus.mockResolvedValue({ status: 'running' })
     mount(<GridCodeTab />)
-    expect(await screen.findByText(/Running: the planning → dynamics study/)).toBeTruthy()
+    expect(await screen.findByText('Running')).toBeTruthy()
+    expect(screen.getByText('The planning → dynamics study is still going.')).toBeTruthy()
     expect(screen.queryByText('Open Planning → dynamics ›')).toBeNull()
   })
 

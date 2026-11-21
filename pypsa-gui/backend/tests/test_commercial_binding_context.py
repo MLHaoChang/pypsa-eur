@@ -64,7 +64,7 @@ def test_the_resolver_uses_the_contexts_org_not_the_users(monkeypatch):
 
     seen = []
 
-    def fake_resolve(db, org, ref):
+    def fake_resolve(db, org, ref, *, project_dir=None):  # project-io 03 copies
         seen.append(org)
         raise series_store.LibraryRefNotFound("not here")
 

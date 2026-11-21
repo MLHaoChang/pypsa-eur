@@ -15,6 +15,8 @@
 //   results of I4–I6) as the report orders them.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { controlModeLabel, islandScenarioLabel } from '../plainNames'
+import { displayName } from '../utils/displayName'
 import { Play, Save } from 'lucide-react'
 import {
   campusApi, errorText, ISLAND_SCENARIOS,
@@ -123,10 +125,10 @@ export function openCampusFile(): void {
 const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
 
 /** An island limit's engine name in words: `Island-n1-down-bess_new` is "Island N-1: loss of
- *  bess new, downward reserve". A name that matches none stays as the old sentence form. */
+ *  BESS, downward reserve". A name that matches none stays as the old sentence form. */
 const LIMIT_PATTERNS: [RegExp, (m: RegExpMatchArray) => string][] = [
-  [/^island-n1-(up|down)-(.+)$/i, m => `Island N-1: loss of ${m[2].replace(/_/g, ' ')}, ${m[1].toLowerCase() === 'up' ? 'upward' : 'downward'} reserve`],
-  [/^island-e2-up(?:-(.+))?$/i, m => `Island: largest load step, upward reserve${m[1] ? ` (${m[1].replace(/_/g, ' ')})` : ''}`],
+  [/^island-n1-(up|down)-(.+)$/i, m => `Island N-1: loss of ${displayName(m[2])}, ${m[1].toLowerCase() === 'up' ? 'upward' : 'downward'} reserve`],
+  [/^island-e2-up(?:-(.+))?$/i, m => `Island: largest load step, upward reserve${m[1] ? ` (${displayName(m[1])})` : ''}`],
   [/^island-e5-up$/i, () => 'Island: loss of the PV output, upward reserve'],
 ]
 export function limitWords(raw: string): string {
@@ -252,7 +254,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
               {ISLAND_SCENARIOS.map(sc => (
                 <label key={sc} className="flex gap-1 items-center">
                   <input type="checkbox" checked={req.scenarios.includes(sc)} onChange={() => toggleScenario(sc)} />
-                  {sc}
+                  {islandScenarioLabel(sc)}
                 </label>
               ))}
             </fieldset>
@@ -285,10 +287,10 @@ export default function CampusIslandSection({ name }: { name: string }) {
             </label>
             {Object.entries(config!.units).filter(([, u]) => u.control !== undefined).map(([unit, u]) => (
               <div key={unit} className="flex gap-2 items-center text-[12px]">
-                <label htmlFor={`island-control-${unit}`} className="w-56">Control mode of {unit}</label>
+                <label htmlFor={`island-control-${unit}`} className="w-56">Control mode of {displayName(unit)}</label>
                 <select id={`island-control-${unit}`} className={INPUT} value={u.control}
                         onChange={e => setUnitControl(unit, e.target.value)}>
-                  {CONTROLS.map(c => <option key={c} value={c}>{c}</option>)}
+                  {CONTROLS.map(c => <option key={c} value={c}>{controlModeLabel(c)}</option>)}
                 </select>
               </div>
             ))}
@@ -320,7 +322,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
             live in Results › Control (W10 R3). The cuts' loop is started here. */}
         <p className="text-[12px] text-muted mt-3" data-testid="island-results-link">
           The island report, the frequency cuts and the grid-forming settings are in Results › Control.{' '}
-          <button type="button" className="text-accent hover:underline" data-testid="island-results-open"
+          <button type="button" className="text-link hover:underline" data-testid="island-results-open"
             onClick={() => showResultsTab('island')}>Open Island & ride-through ›</button>
         </p>
         {saved && <CampusIslandCutsSection name={name} mode="actions" />}

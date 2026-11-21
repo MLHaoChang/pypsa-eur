@@ -21,6 +21,7 @@ export const NOT_ESTABLISHED_REASON: Record<string, string> = {
   export_price_missing: 'No export price is set, so curtailment is not split by cause.',
   no_commercial_solve_record: 'The last run did not price the export, so curtailment is not split by cause.',
   export_price_changed_since_solve: 'The export price changed since the last run; run again to split curtailment by cause.',
+  export_flow_missing: 'The saved results hold no export flow; run again to split curtailment by cause.',
 }
 
 /** For a reason this view has no sentence for: the code is logged, never shown (UX). */
@@ -51,7 +52,7 @@ export function CurtailmentByCauseTable({ payload }: { payload: CurtailmentByCau
     }
   }, [reason])
   return (
-    <section className="rounded-[10px] border border-border bg-bg overflow-hidden"
+    <section className="rounded-card border border-border bg-bg overflow-hidden"
              data-testid="curtailment-by-cause" data-status={payload.status}>
       <header className="px-4 py-2.5 border-b border-border bg-bg-2 flex justify-between items-center">
         <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Curtailment by cause</span>

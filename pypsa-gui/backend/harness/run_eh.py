@@ -200,10 +200,22 @@ def freeze(ctx, profile, solves_left) -> dict:
         "goal": _goal_snapshot(goal),
         "digest": digest(args),
         # template-e2e 02b (GK B E4, GK A 32): the energization schedule the card
-        # was drawn on, bound by its digest, which `admit` compares exactly.
-        "energization": _energization(getattr(ctx, "network", None)),
+        # was drawn on, bound by its digest, which `admit` compares exactly. A
+        # network read without a schedule records nothing, so its card stays
+        # byte-equal to a pre-02b one (GK B E4) and admits as one.
+        **_energization_entry(getattr(ctx, "network", None)),
         **({"contingencies": held} if held is not None else {}),
     }
+
+
+def _energization_entry(network) -> dict:
+    """``{"energization": ...}`` for `freeze`; empty where the schedule reads
+    as absent (no digest: the test `_energization_change` admits a pre-02b
+    record by), so a non-staged card is unchanged."""
+    entry = _energization(network)
+    if entry is not None and entry["digest"] is None:
+        return {}
+    return {"energization": entry}
 
 
 def _energization(network):

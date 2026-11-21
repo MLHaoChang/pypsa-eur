@@ -98,7 +98,7 @@ function StudyList({ project }: { project: string | null }) {
           <ul className="flex flex-col gap-1">
             {studies.map(s => (
               <li key={s.study_id}>
-                <button type="button" className="text-accent hover:underline" onClick={() => openStudy({ project, studyId: s.study_id })}>{s.name}</button>
+                <button type="button" className="text-link hover:underline" onClick={() => openStudy({ project, studyId: s.study_id })}>{s.name}</button>
               </li>
             ))}
           </ul>

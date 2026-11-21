@@ -88,6 +88,8 @@ describe('SiteCard rows', () => {
     expect(text('hub-site-critical')).toContain('IT bus')
     expect(text('hub-site-grid')).not.toContain('grid_import')
     expect(text('hub-site-critical')).not.toContain('it_bus')
+    // A colon, not an em dash, between the bus and what it means (UX 2 on #1688).
+    expect(text('hub-site-critical')).toContain('IT bus: everything on this bus keeps power')
     expect(text('hub-site-strength')).toContain('data present')
     expect(text('hub-site-outage')).toContain('9 units')
     for (const k of ['grid', 'critical', 'strength', 'outage']) {

@@ -31,7 +31,7 @@ export type FlowFreshness = 'not_run' | 'running' | 'fresh' | 'stale' | 'uncompa
 
 export type FlowItemSource =
   | 'validation' | 'eh_study' | 'eh_readiness' | 'commercial' | 'library' | 'template' | 'flow'
-  | 'loadflow'
+  | 'loadflow' | 'run_defaults'
 
 /** Where an item's fix lives. `panel` is a `SlidePanel` id, or null for the
  *  component's own Properties (`component` + `entity`); unknowns are null. */
@@ -74,12 +74,18 @@ export interface FlowItem {
 export interface FlowHeld {
   component: string
   entity: string
+  /** Section 5 asset rows: the size an extendable asset's two equal, finite bounds pin
+   *  (`flow_service._pin_sizes`); null or absent when the study sizes it. */
+  fixed_size?: number | null
   carrier: string | null
   field: string | null
   value: number | null
   unit: string | null
   extendable: boolean
   series: boolean
+  /** Asset rows only: a Generator the model adds (slack, buy-in, shortfall).
+   *  Display only; a missing or non-boolean value reads as not a helper. */
+  helper?: boolean
   /** Section 2's recipe rows only (gap 03): the inputs per unit of product. */
   recipe?: FlowRecipe
 }
@@ -119,7 +125,7 @@ export interface FlowSection {
   state: FlowSectionState | null
   required: boolean
   items: FlowItem[]
-  /** One line for the rail ("1 grid connection, 40 MW"); `readiness`: "n to do, m to check". */
+  /** One line for the rail ("Grid import, 40 MW"); `readiness`: "n to do, m to check". */
   summary: string | null
   /** `connection` only: the connection limit as the study takes it
    *  (`flow_service.import_capacity`), the import links' summed capacity in MW,

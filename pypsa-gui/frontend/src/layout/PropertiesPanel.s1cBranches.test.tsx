@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { seedRows } from '../test/seedRows'
 
 vi.mock('../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/network')>()
@@ -16,7 +17,9 @@ vi.mock('../api/network', async (importOriginal) => {
     ...actual,
     networkApi: {
       ...actual.networkApi,
-      getBuses: empty, getCarriers: empty, getLines: empty, getTransformers: empty,
+      getBuses: empty, getCarriers: empty,
+      getLines: vi.fn(async () => (await import('../test/seedRows')).servedRows('lines')),
+      getTransformers: vi.fn(async () => (await import('../test/seedRows')).servedRows('transformers')),
       updateLine: vi.fn(async () => ({ name: 'L1' })),
       updateTransformer: vi.fn(async () => ({ name: 'T1' })),
       getCatalog: vi.fn(async (component: string) => ({ component, attributes: [] })),
@@ -55,7 +58,7 @@ async function openEdit(node: React.ReactNode, seed: Array<[string, unknown]>) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
   })
-  for (const [key, value] of seed) qc.setQueryData(nk('Demo', key), value)
+  for (const [key, value] of seed) seedRows(qc, 'Demo', key, value as unknown[])
   render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>)
   await userEvent.click(await screen.findByRole('button', { name: 'Edit Parameters' }))
 }

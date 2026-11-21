@@ -49,6 +49,8 @@ export interface NewProjectWizardProps {
   // separate action cards, so it needs to open the wizard already on the one
   // the user clicked; the workbench omits it and gets 'blank'.
   initialTab?: NewProjectTab
+  // The Duplicate tab starts with this project picked (the card menu's Duplicate).
+  initialCloneSource?: string
   // Called after a decision study's intake was opened (the `decision` tab).
   // The projects home passes a navigation into the workbench, where the
   // decision panel lives; the workbench omits it.
@@ -90,7 +92,7 @@ export const TEMPLATES = [
 ] as const
 
 export default function NewProjectWizard({
-  existingProjects, onConfirm, onClose, isPending, initialTab = 'blank', onDecisionStart,
+  existingProjects, onConfirm, onClose, isPending, initialTab = 'blank', initialCloneSource, onDecisionStart,
 }: NewProjectWizardProps) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const { authEnabled } = useAuthMode()
@@ -140,7 +142,7 @@ export default function NewProjectWizard({
         {tab === 'blank'    && <BlankTab    existingProjects={existingProjects} onConfirm={onConfirm} onClose={onClose} isPending={isPending} />}
         {tab === 'template' && <TemplateTab onClose={onClose} />}
         {tab === 'file'     && <FromFileTab onClose={onClose} />}
-        {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} />}
+        {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} initialSource={initialCloneSource} />}
         {tab === 'study'    && <StudyTab    existingProjects={existingProjects} onClose={onClose} />}
         {tab === 'decision' && <DecisionTab existingProjects={existingProjects} onClose={onClose} onStarted={onDecisionStart} onBlank={() => setTab('blank')} />}
         {tab === 'folder' && !authEnabled && <FromFolderTab onClose={onClose} />}
@@ -433,7 +435,7 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
         return { imported: name, summary }
       }
       throw new Error(
-        'Unsupported file. Use a .pypsaproj.zip project bundle (network + results), or a .nc network file.',
+        'Unsupported file. Use a .pypsaproj.zip project bundle (network + results), a .nc network file or an .xlsx input workbook.',
       )
     },
     onSuccess: (res) => {
@@ -455,6 +457,13 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
 
   const onFile = (file: File) => {
     if (!file) return
+    // An Excel input workbook is previewed before anything is created (IMPORT-FLOW-1):
+    // the workbook dialog takes the file from here.
+    if (file.name.toLowerCase().endsWith('.xlsx')) {
+      onClose()
+      useUIStore.getState().requestWorkbookImport(file)
+      return
+    }
     importMut.mutate(file)
   }
 
@@ -474,10 +483,10 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
       >
         <Upload size={28} className="text-muted" />
         <span className="text-sm font-medium text-text">Drop a .pypsaproj.zip project file here</span>
-        <span className="text-[11px] text-muted">or click to browse · .nc also accepted (network only)</span>
+        <span className="text-[11px] text-muted">or click to browse · .nc (network only) and .xlsx (input workbook) also accepted</span>
         <input
           type="file"
-          accept=".pypsaproj.zip,.zip,.nc"
+          accept=".pypsaproj.zip,.zip,.nc,.xlsx"
           className="hidden"
           onChange={e => {
             const f = e.target.files?.[0]
@@ -495,6 +504,8 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
         Restores Results tabs when the file was saved after a solve.
         <br />
         <strong>.nc</strong> — PyPSA network only; wrapped as a new project (no GUI side-results).
+        <br />
+        <strong>.xlsx</strong>: an Excel input workbook you filled in. It shows what it reads before the project is created.
       </p>
     </div>
   )
@@ -502,16 +513,17 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
 
 // ── Tab 4: Clone — fork an existing project ───────────────────────────────
 
-function CloneTab({ existingProjects, onClose }: {
+function CloneTab({ existingProjects, onClose, initialSource }: {
   existingProjects: ProjectInfo[]
   onClose: () => void
+  initialSource?: string
 }) {
   const qc = useQueryClient()
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
   const currentProject    = useUIStore(s => s.currentProject)
   const openInWorkbench = useOpenInWorkbench()
-  const [sourceId, setSourceId] = useState<string | null>(null)
+  const [sourceId, setSourceId] = useState<string | null>(initialSource ?? null)
   const [newName, setNewName]   = useState('')
 
   // Auto-suggest "<source>_copy" the first time a source is picked.

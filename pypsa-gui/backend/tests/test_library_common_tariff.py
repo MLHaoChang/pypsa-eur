@@ -148,6 +148,12 @@ def test_a_pinned_ref_to_a_common_item_stays_resolvable_and_a_wrong_hash_is_stal
         I.resolve(db, org_id, ref.model_copy(update={"hash": "0" * 64}))
 
 
+def test_a_pinned_ref_to_another_version_of_a_common_item_is_not_found(db, org_id):
+    ref = common.ref("tariff", HS)
+    with pytest.raises(I.LibraryRefNotFound, match="shipped common item"):
+        I.resolve(db, org_id, ref.model_copy(update={"version": ref.version + 1}))
+
+
 def test_routes_list_get_and_refuse_a_put(client):
     names = [r["id"] for r in client.get("/api/library/items/tariff").json()]
     assert HS in names and EHS in names

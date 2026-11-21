@@ -56,7 +56,7 @@ function TemplateDialog({ built, onClose, onUse }: {
   const cfg = built.result.config
   return (
     <Dialog open onClose={onClose} title={`Template: ${built.name.replace(/_/g, ' ')}`}
-            panelClassName="bg-bg rounded-xl shadow-2xl w-[520px] max-w-[95vw] p-4 space-y-3">
+            panelClassName="bg-bg rounded-card shadow-2xl w-[520px] max-w-[95vw] p-4 space-y-3">
       <div className="text-[11px] space-y-1">
         <p>Participants: {(cfg.participants ?? []).map(p => `${p.name} (${p.role})`).join(', ')}</p>
         <p>Asset owners: {(cfg.asset_owners ?? []).length}; externals:{' '}

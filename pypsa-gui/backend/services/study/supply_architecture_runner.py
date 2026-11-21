@@ -34,7 +34,7 @@ import threading
 import time
 from typing import Any
 
-from services import dirty_state
+from services import dirty_state, project_write_gate
 from services.pypsa_service import PyPSAService
 from services.study import findings as F
 from services.study import runner as R
@@ -273,6 +273,7 @@ def _worker(
     solver = None
     table = None
     status, error = "failed", None
+    view_only = False  # the run met a `RequesterViewOnly` (project-viewer-role 02)
     try:
         base_row = db.get(Project, R._uuid(base_row_id))
         solver = ForkSolver(db, user_id, base_row, study_id, stop_event, record, ctx)
@@ -291,6 +292,8 @@ def _worker(
         )
         if record.get("deadline_exceeded"):
             error = record["deadline_exceeded"]
+    except project_write_gate.RequesterViewOnly as exc:
+        error, status, view_only = str(exc), "failed", True
     except Exception as exc:  # noqa: BLE001 — recorded
         logger.exception("decision study %s supply architectures failed", study_id)
         error = type(exc).__name__  # the text is in the log above, not the record
@@ -308,14 +311,23 @@ def _worker(
                 )
             except campaign.CampaignError:
                 pass
-        try:
-            _save(base_dir, study_id, record, table, status, error, left)
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "decision study %s: saving the supply architectures failed", study_id
-            )
-            error = error or "saving the supply architectures failed"
-            status = "failed"
+        # A requester made a viewer, or removed, mid-run gets nothing saved
+        # (project-viewer-role 02); `get` serves the refusal.
+        refused = view_only or project_write_gate.requester_may_not_write(
+            user_id, base_row_id
+        )
+        if refused:
+            status, error = "failed", project_write_gate.REFUSAL
+        else:
+            try:
+                _save(base_dir, study_id, record, table, status, error, left)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "decision study %s: saving the supply architectures failed",
+                    study_id,
+                )
+                error = error or "saving the supply architectures failed"
+                status = "failed"
         db.close()
         if record.get("registered_base"):
             R._release_base(ctx.registry_key, True)
@@ -327,7 +339,10 @@ def _worker(
             finished_at=time.time(),
             current=None,
             forks_left=left,
+            **({"error_code": project_write_gate.KIND} if refused else {}),
         )
+        if refused:
+            R.remember_refusal(base_row_id, study_id, KIND, R._public(record))
 
 
 def _save(base_dir, study_id, record, table, status, error, left) -> None:
@@ -397,6 +412,9 @@ def get(study_id: str, *, base_row, base_dir) -> dict | None:
             ):
                 return R._public(rec)
     saved = _load_saved(base_dir, study_id)
+    refused = R.refused_or_saved(base_row.id, study_id, KIND, saved)
+    if refused is not saved:  # a run refused since (project-viewer-role 02)
+        return refused
     if saved is None:
         return None
     if not isinstance(saved, dict):

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { solveQueueApi, isActive, type QueueList, type SolveJob } from '../api/solveQueue'
+import { SOLVE_QUEUE_ROOT } from '../utils/queryKeys'
 
-export const QUEUE_KEY = ['solveQueue'] as const
+export const QUEUE_KEY = [SOLVE_QUEUE_ROOT] as const
 
 /**
  * Live view of the solve queue. Polls every 1.5s WHILE there is a queued or

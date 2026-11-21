@@ -93,6 +93,36 @@ def test_every_frozen_receipt_version_is_accepted_by_both_readers(served):
                     "members": ["L1"],
                 }
             ]
+        if version == assurance_records.SECTIONED_POLICY_VERSION:
+            # Policy "4" carries its slots in sections only (issue 10, S6a).
+            receipt.pop("result_slots", None)
+            receipt["sections"] = [
+                {
+                    "heading": None,
+                    "result_slots": [
+                        {
+                            "metric": "dispatch_energy",
+                            "disposition": "answered",
+                            "entity_id": "G1",
+                            "component_class": "Generator",
+                        }
+                    ],
+                }
+            ]
+        if version == assurance_records.WARNED_POLICY_VERSION:
+            # Policy "5" starts with a required warning slot and is incomplete (AA-13).
+            receipt["request_complete"] = False
+            receipt["result_slots"] = [
+                {
+                    "metric": "ac_pf_convergence",
+                    "disposition": "warning",
+                    "reason": "ac_pf_not_converged (1 of 2 snapshots in the window converged)",
+                    "valid_snapshots": 1,
+                    "requested_snapshots": 2,
+                    "excluded_indices": ["2026-01-01T01:00:00"],
+                },
+                *(receipt.get("result_slots") or []),
+            ]
         rewritten = {**stored, "receipt": receipt}
         # Answer records are immutable, so each version is stored under its own id.
         answer_id = str(uuid.uuid4())

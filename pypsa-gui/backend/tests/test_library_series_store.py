@@ -123,6 +123,20 @@ def test_a_tampered_file_is_refused_as_stale(db, org, tmp_path):
         S.resolve(db, org, ref, root=tmp_path)
 
 
+@pytest.mark.parametrize("says", ["is missing", "is unreadable"])
+def test_a_lost_or_unreadable_file_is_refused_as_stale(db, org, tmp_path, says):
+    from services.library import series_store as S
+
+    ref = S.put_series(db, org, "lost", _berlin_prices(), {"source": "u"}, root=tmp_path)
+    f = next((tmp_path / ".library" / str(org) / "series").glob("*.csv.gz"))
+    if says == "is missing":
+        f.unlink()
+    else:
+        f.write_bytes(b"not gzip")
+    with pytest.raises(S.LibraryRefStale, match=says):
+        S.resolve(db, org, ref, root=tmp_path)
+
+
 def test_a_ref_with_a_wrong_hash_is_stale(db, org, tmp_path):
     from models.commercial import PriceSeriesRef
     from services.library import series_store as S
