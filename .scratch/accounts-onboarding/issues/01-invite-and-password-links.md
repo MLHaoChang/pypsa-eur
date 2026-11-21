@@ -3,7 +3,7 @@
 
 # 01 Invite and password links reach their pages, and the invite result is honest
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W4 (shots `invite`, `setpw`).
 Design: `.scratch/project-workflow/workspace-reconciliation.md:364` (`/login`, `/set-password`, `/reset-password` are public).
