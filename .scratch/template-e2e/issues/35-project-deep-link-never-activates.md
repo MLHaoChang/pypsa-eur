@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# 30 Opening a project sometimes never activates it and leaves "Unnamed Network"
+# 35 Opening a project sometimes never activates it and leaves "Unnamed Network"
 
 Status: ready-for-agent
 Blocked by: none (21, now done, sped the open up; this race remains)

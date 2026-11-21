@@ -17,7 +17,7 @@ Commissioned by the owner through the coordinator: walk the current implementati
 
 | Journey / feature | % built (issues) | In flight (PRs) | Planned (open issues) | Journey on master | Missing (new here) |
 |---|---|---|---|---|---|
-| Projects & templates (`template-e2e`, `project-workflow`) | te 7 % (2/29), pw B1/B9/E1 done | #1626, #1645, #1757, #1773/#1778, #1786/#1787 | te 01–28 (21 ready) | works: 14 templates in 3 families, create 2–3 s, rename, duplicate | blank project inherits the last project's config (te/32); deep link sometimes never activates (te/30); delete only via Expert › Scenarios (te/34) |
+| Projects & templates (`template-e2e`, `project-workflow`) | te 7 % (2/29), pw B1/B9/E1 done | #1626, #1645, #1757, #1773/#1778, #1786/#1787 | te 01–28 (21 ready) | works: 14 templates in 3 families, create 2–3 s, rename, duplicate | blank project inherits the last project's config (te/32); deep link sometimes never activates (te/35); delete only via Expert › Scenarios (te/34) |
 | Guided sections 1–10 | B1 done; te/ux open | #1627/#1630/#1716 (run progress) | te 01, 03, 06, 08, 09; ux 01–07 | works: every section opens with state; run gate per §3.3 | the location fix never clears (te/01 extended); rep-week called chronological (te/33) |
 | Expert panels (`expert-catalogue`) | 0 % (0/5) | #1634 (catalogue core) | ec 01–05 | works: all panels open, edits persist both ways | none new |
 | Run & results (`guided-results`, `provenance-graph`) | gr 0 % (0/6); pg done | #1700, #1729 | gr 01–06 | partly: run fine, but an edit drops the run to not_run | edit discards run (pg/13); Hand-off group empty (gr/07); no Commercial tabs (gr/08); no Products tab (gr/09); Load flow dead end (sh/61) |
@@ -41,13 +41,14 @@ Status R = `ready-for-agent`, T = `needs-triage` (the owner question is written 
 | 1 | `.scratch/project-io/issues/04-model-import-pipeline.md` | R | opus | Three built importers (PSS/E, DGS, PLEXOS) are invisible to users. |
 | 2 | `.scratch/template-e2e/issues/32-blank-project-inherits-solver-config.md` | R | sonnet | Silent wrong inputs, and one project's commercial data leaking into another. |
 | 3 | `.scratch/provenance-graph/issues/13-component-edit-discards-run.md` | R | sonnet | Every edit hides the last results; Results and Investment disagree. |
+| 3b | `.scratch/template-e2e/issues/30-guided-run-results-workbook-empty.md` | T | sonnet | A Guided user cannot export the workbook of their run; Expert says "Not run yet". Found by the TE2E-29 builder; may share pg/13's cause. |
 | 4 | `.scratch/accounts-onboarding/issues/01-invite-and-password-links.md` | R | sonnet | No second user can onboard without SMTP. **Opened** (session_01G7qCumn3dwi5dmAg5fwr6u). |
 | 5 | `.scratch/project-io/issues/09-excel-export-times-out.md` | R | sonnet | Excel export fails on every hourly template. |
 | 6 | `.scratch/business-case/issues/21-ipp-preset-cannot-run.md` + `23-indexation-fraction-vs-percent.md` | R | sonnet | The business case cannot reach an NPV, and a typo gives 200 %/yr. |
 | 7 | `.scratch/guided-results/issues/07-hand-off-results-group.md` | R | sonnet | The results journey ends at an empty card; reports and exports sit in 2–3 places. |
 | 8 | `.scratch/study-harness/issues/61-load-flow-tab-dead-end.md` | R | sonnet | A dead end on every Energy Hub project. **Opened** (session_01G7qCukZDvwRFMjvgH4Gurc). |
 | 9 | `.scratch/grid-compliance/issues/23-campus-pss-e-bundle-download.md` + `24-switchgear-pass-without-rating.md` | R | sonnet | The TSO hand-off cannot leave the app, and a PASS shows with no limit. |
-| 10 | `.scratch/template-e2e/issues/30-project-deep-link-never-activates.md` | R | sonnet | An empty app with no message, about 1 open in 3 under load. |
+| 10 | `.scratch/template-e2e/issues/35-project-deep-link-never-activates.md` | R | sonnet | An empty app with no message, about 1 open in 3 under load. |
 | 11 | `.scratch/template-e2e/issues/29-journey-suite-export-and-expert-parity.md` | R | sonnet | CI guard for exports and Guided/Expert agreement. **Opened** (session_01G7qCuk2dRcskiyXzKdfgdo). |
 | 12 | `.scratch/live-copilot/issues/49-non-admin-chat-off-state.md` | R | sonnet | Spinners that never end for every non-admin with no key. |
 | 13 | `.scratch/business-case/issues/22-network-busy-reads-as-out-of-date.md` | R | sonnet | A wrong refusal reason sends users into a loop. |
@@ -86,7 +87,7 @@ Each lane runs in order. Lanes can open in parallel; no two lanes touch the same
 | Lane | Packages, in order | Files the lane owns |
 |---|---|---|
 | A Imports and Hand-off | pio/09 → pio/04 (A backend, then B UI) → gr/07 → gr/09 | `routers/io.py` (after #1798), new `routers/model_import.py` + service, `main.py` (after #1798), `api/client.ts`, `api/io.ts`, `layout/NewProjectWizard.tsx` (after te/01's builder), `pages/ImportExport.tsx`, `layout/Sidebar.tsx`, `pages/results/groups.ts`, `pages/Results.tsx`, `pages/ReportsPanel.tsx` |
-| B Project lifecycle | te/32 → te/30 → te/34 | `routers/network.py` (`reset_network`), `routers/projects.py`, `pages/ProjectsHomePage.tsx`, `utils/projectActions.ts`, `App.tsx`, `pages/ScenariosPanel.tsx` (read) |
+| B Project lifecycle | te/32 → te/35 → te/34 | `routers/network.py` (`reset_network`), `routers/projects.py`, `pages/ProjectsHomePage.tsx`, `utils/projectActions.ts`, `App.tsx`, `pages/ScenariosPanel.tsx` (read) |
 | C Freshness | pg/13 | the component PUT routes in `routers/network.py` (other functions than lane B; trial merge expected clean), `services/provenance_graph/`, `flow_service.py` freshness, `useStaleRunKinds` |
 | D Business case | bc/21 + bc/23 (one package) → bc/22 | `business_case_presets/*.json`, `services/business_case/`, `investment/BusinessCaseLines.tsx`, `BusinessCaseRun.tsx`, `routers/results.py` (`_bc_read_solve` only) |
 | E Grid hand-off | gc/23 + gc/24 (one package) → pio/08 | `campus_electrical_service.py`, `routers/campus_electrical.py`, `CampusElectricalPanel.tsx`, `campus_study.py` (switchgear check); then `GridspinePanel.tsx`, `sidebar/SectionRows.tsx`, `gridspine/drivers/progress.py`, `routers/gridspine.py`. gr/07 (lane A) reads GridspinePanel's bundle list, so it opens after pio/08 or reuses it read-only. |
@@ -110,7 +111,8 @@ The needs-triage issues open after the owner answers. scu/03 (K1) is the gate fo
 9. **scu/04**: party board: (a) K4 then K5 after K1 [rec.]; (b) K4–K7 stack; (c) not now.
 10. **S5**: sensitivity banner: (a) with te/23's fix [rec.]; (b) after 23; (c) assistant only.
 11. **bc/19**: report variants: (a) NPV/IRR now [rec.]; (b) after the party board; (c) no.
-12. **acct/03**: account page: (a) small Account page [rec.]; (b) change-password dialog only; (c) not now.
+12. **te/30**: workbook after a Guided study run: (a) the study's own solve, everywhere [rec.]; (b) network run only, with a link; (c) both as two choices.
+13. **acct/03**: account page: (a) small Account page [rec.]; (b) change-password dialog only; (c) not now.
 
 ## 5. What this review skipped
 
