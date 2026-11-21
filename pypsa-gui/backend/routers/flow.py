@@ -310,7 +310,8 @@ def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
                                            no_load=no_load),
             # The size source Asset sizing off dispatches on (read-only here).
             "fixed_sizes": (settings or {}).get("fixed_sizes", "off"),
-            **flow_scope.registry(template, settings, no_load=no_load)}
+            **flow_scope.registry(template, settings, no_load=no_load,
+                                  project_dir=project.directory)}
 
 
 @router.get("/{name}/flow/reliability_goal")

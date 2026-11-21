@@ -26,7 +26,10 @@ that name an object of the cut, keeping each cell's text as written:
 
 The sources are the dataset's own CSVs (``All Demand UTC 2015.csv`` file id
 3985039, ``Renewables.ninja.wind.output.Full.csv`` 3985042,
-``renewables.ninja.Csp.output.full`` 4300174, CC0 as above). The CSP file keeps
+``renewables.ninja.Csp.output.full`` 4300174,
+``Renewables.ninja.wind.output.Full.adjusted.csv`` 3985047 (its first 2 MB)
+and ``renewables.ninja.Csp.output.full.adjusted`` 4300175 as original format,
+CC0 as above). The CSP file keeps
 the dataset's spelling ``Csp``, while the XML names it ``CSP``: the import
 matches file names case-insensitively.
 

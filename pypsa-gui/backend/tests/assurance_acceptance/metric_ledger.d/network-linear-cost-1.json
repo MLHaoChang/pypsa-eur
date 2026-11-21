@@ -1,0 +1,90 @@
+{
+ "profiles": {
+  "network-linear-cost/1": [
+   {
+    "metric": "dispatch_energy",
+    "formula": "sum over t of p[t] x w_generators[t], summed over the network's generators",
+    "validity": "each snapshot needs a verified LP solve (else unverified_solve), capacity >= 0, p within capacity x [p_min_pu, p_max_pu] +/- 1e-8 and its inputs present with weight > 0; one excluded snapshot makes it unavailable (invalid_or_missing_raw_data, partial value labelled). Refusals: unsupported_snapshot_scope, unknown_generator, misaligned_source, missing_dispatch, unsupported_generator_sign",
+    "tolerance": "exact",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "marginal_expenditure",
+    "formula": "sum over t of p[t] x marginal_cost[t] x w_objective[t], summed over the network's generators",
+    "validity": "each snapshot needs a verified LP solve (else unverified_solve), capacity >= 0, p within capacity x [p_min_pu, p_max_pu] +/- 1e-8 and its inputs present with weight > 0; one excluded snapshot makes it unavailable (invalid_or_missing_raw_data, partial value labelled). Refusals: unsupported_snapshot_scope, unknown_generator, misaligned_source, missing_dispatch, unsupported_generator_sign; in a cost profile also withheld with the cost reason when the cost population is not linear",
+    "tolerance": "exact",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "peak_dispatch",
+    "formula": "max over t of sum over generators of p[t]",
+    "validity": "each snapshot needs a verified LP solve (else unverified_solve), capacity >= 0, p within capacity x [p_min_pu, p_max_pu] +/- 1e-8 and its inputs present with weight > 0; one excluded snapshot makes it unavailable (invalid_or_missing_raw_data, partial value labelled). Refusals: unsupported_snapshot_scope, unknown_generator, misaligned_source, missing_dispatch, unsupported_generator_sign",
+    "tolerance": "exact",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "annual_fixed_cost",
+    "formula": "sum of capacity x capital_cost over the generators and passive branches (capacity = p_nom_opt if extendable else p_nom)",
+    "validity": "needs an explicit cost basis (else explicit_cost_basis_required), a linear non-committable cost model with no unsupported cost components, a verified solve, and every capacity and capital_cost finite and >= 0 (else unsupported_or_invalid_cost_population)",
+    "tolerance": "exact",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "allocated_fixed_cost",
+    "formula": "annual_fixed_cost x cost_basis.annual_fixed_cost_fraction",
+    "validity": "needs an explicit cost basis (else explicit_cost_basis_required), a linear non-committable cost model with no unsupported cost components, a verified solve, and every capacity and capital_cost finite and >= 0 (else unsupported_or_invalid_cost_population)",
+    "tolerance": "exact",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "total_cost",
+    "formula": "allocated_fixed_cost + marginal_expenditure",
+    "validity": "needs an explicit cost basis (else explicit_cost_basis_required), a linear non-committable cost model with no unsupported cost components, a verified solve, and every capacity and capital_cost finite and >= 0 (else unsupported_or_invalid_cost_population); needs marginal_expenditure",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_harness_reliability.py::test_passive_branch_cost_and_physical_limits_have_independent_oracle[None]",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_harness_reliability.py::test_passive_branch_cost_and_physical_limits_have_independent_oracle[None]"
+     }
+    }
+   }
+  ]
+ }
+}

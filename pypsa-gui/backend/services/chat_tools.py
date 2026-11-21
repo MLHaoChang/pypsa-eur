@@ -48,6 +48,7 @@ lists which Phase 2 turns into Messages-API content blocks.
 from __future__ import annotations
 
 import contextlib
+import copy
 import inspect
 import json
 import logging
@@ -3574,6 +3575,7 @@ _BC_CODES = {
     "business_case_inputs_invalid": "business_case_inputs_invalid",
     "solver_config_invalid": "business_case_inputs_invalid",
     "business_case_changed": "business_case_changed",
+    "network_busy": "business_case_busy",
     "investment_case_missing": "investment_case_missing",
     "solver_in_flight": "solver_in_flight",
     "finance_inputs_missing": "finance_inputs_missing",
@@ -3709,16 +3711,56 @@ def _bc_inputs() -> dict:
     return out
 
 
+# Cut first when the options outgrow the cap, whole entries from the end (never part of a
+# unit list); the refusals go last. Each cut is named in `truncated`.
+_BC_OPTIONS_CUT_ORDER = ("offered_rows", "outputs", "refusals")
+
+
+def _bc_options_cut(out: dict) -> dict:
+    cut: dict = {}
+    for section in _BC_OPTIONS_CUT_ORDER:
+        while _json_len(out) > _BC_INPUTS_CHARS and out.get(section):
+            gone = out[section].pop()
+            if section == "outputs":
+                out["units_by_source"]["linked"].pop(gone["id"], None)
+            cut.setdefault(section, []).append(
+                str(gone.get("id") or gone.get("name") or gone.get("field") or gone.get("code"))[:80])
+    return cut
+
+
+def _bc_options() -> dict:
+    """The line table's options and the refusals of the stored lines (bc 16), as the
+    route reads them: one source, no re-derivation. A busy model is `business_case_busy`;
+    None stays None with its reason (never [])."""
+    from routers.results import get_business_case_options as _h
+
+    with _bc_errors():
+        out = copy.deepcopy(_h())
+    cut = _bc_options_cut(out)
+    if cut:
+        out["truncated"] = cut
+        out["truncated_note"] = ("cut to fit the chat, whole entries only: "
+                                 + ", ".join(cut) + "; a cut output is NOT offered here, "
+                                 "not 'has no units'; say the rest was not read")
+    out["hint"] = ("offer a unit only from units_by_source; name each refusal in plain words "
+                   "(its field and why); a part that reads None was not read, say so")
+    return out
+
+
 def get_business_case(detail: str = "summary") -> dict:
-    """The business-case run and its stored report (detail='summary'), or the
-    stored inputs with their digest and the citable turns (detail='inputs')."""
+    """The business-case run and its stored report (detail='summary'), the
+    stored inputs with their digest and the citable turns (detail='inputs'), or what
+    the line table offers and refuses (detail='options')."""
     from routers.results import get_business_case as _h
     from services.business_case.verdict import verdict as bc_verdict
 
-    if detail not in ("summary", "inputs"):
-        _ic_raise(422, "business_case_request_invalid", "detail is 'summary' or 'inputs'")
+    if detail not in ("summary", "inputs", "options"):
+        _ic_raise(422, "business_case_request_invalid",
+                  "detail is 'summary', 'inputs' or 'options'")
     if detail == "inputs":
         return _bc_inputs()
+    if detail == "options":
+        return _bc_options()
     body = _h()
     if getattr(body, "status_code", None) == 204:
         out = _no_data("business_case", _BC_NO_DATA)
@@ -5930,8 +5972,13 @@ def update_project_layout(name: str, layout: dict) -> dict:
 def download_project_bundle(name: str) -> dict:
     from routers.projects import _project_bundle_bytes
     proj = _authorized_project(name)
+    with _acting() as (db, user):
+        from services import project_registry
+
+        row = project_registry.find_project(db, user, proj.uuid) if user is not None else None
     return _save_agent_export(
-        _project_bundle_bytes(proj.name, proj.directory),
+        _project_bundle_bytes(proj.name, proj.directory,
+                              project_kind=getattr(row, "project_kind", None)),
         f"{proj.name}.pypsaproj.zip",
         "application/zip",
     )

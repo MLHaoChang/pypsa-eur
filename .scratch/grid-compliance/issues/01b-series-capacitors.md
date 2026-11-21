@@ -3,7 +3,7 @@
 
 # GC-01b Series capacitors in the campus description
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (follows GC-01)
@@ -50,3 +50,5 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 
 **2026-11-17.** Filed from GC-08's request via the coordinator; GC-08's plan (GO by GK A2) consumes
 it. Not folded into GC-01: GC-01 is already two PRs, and this is a separate schema change.
+
+**2026-11-17 triage (SCALE-1; GK A2 4 priority view).** Do not dispatch a new builder. GK A2 already gave a plan GO (S1–S7, S7 amended to A, S7a–S7e; the conditions live on the builder branch). The builder is session_01G7qCum4y6yiCpqfgf8xV9Y, which opens after #1578 merges.

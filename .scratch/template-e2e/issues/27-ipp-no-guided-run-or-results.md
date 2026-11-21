@@ -16,3 +16,7 @@ Guided sections 8 and 9 say 'Not offered for this site: Nothing to make adequate
 
 - Guided offers an IPP run (or a clear Expert hand-off) and its results show the LOPF outcome, NPV and IRR.
 - No load-only goal inputs on a generation-only site; net revenue is labelled; the report omits the reliability text.
+
+## Comments
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): IPP (`eh_ipp_hybrid`): Guided section 9 now has a "Run the optimisation" button and says "The optimisation finished. Open the results ›" (about 10 s, upper bound), so the run part is fixed. Section 10 still says "Not run yet — The study writes its verdict, cost and risks here. Go to Goal and run the study", and Investment and Reliability say "Not run yet. Set a goal and run it". The result (EUR -4.55 M, "revenue exceeds cost") shows only in the status bar and Expert Results.

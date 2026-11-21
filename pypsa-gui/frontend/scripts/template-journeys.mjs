@@ -90,6 +90,15 @@ async function journey(t) {
   const context = page.context()
   const ctx = L.newContext({ page, context, base, out, template: t.id, mode })
   page.on('pageerror', error => ctx.problems.push(String(error)))
+  // The hub_design Guide tour opens by itself once per project when the panel settles, and its first step
+  // jumps to section 1. On a large template that lands after a step has opened another section and pulls the
+  // panel away. The project name is only known after creation, so mark the tour as offered for every project.
+  await page.addInitScript(() => {
+    const getItem = Storage.prototype.getItem
+    Storage.prototype.getItem = function (key) {
+      return typeof key === 'string' && key.startsWith('pypsa-guide-offered:hub_design:') ? '1' : getItem.call(this, key)
+    }
+  })
   try {
     await page.goto(base + '/projects')
     let name

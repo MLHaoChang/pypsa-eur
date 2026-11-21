@@ -12,7 +12,8 @@ model. The read is `read_sources` (impure, the route's); the chapters are
   established for every results chapter, never as the current results.
 * Each payload carries at most `MAX_FACTS` numbers (AI-558: at most 12 facts
   per explanation), so the prose of one chapter can quote no more.
-* The load flow chapter on an LOPF solve is an active-power proxy: its
+* The load flow chapter reads the AC power flow when one ran on the current
+  inputs; otherwise it is the LOPF solve's active-power proxy, and its
   disclosure says so (`LOADFLOW_PROXY`).
 """
 
@@ -116,9 +117,13 @@ def read_sources(project_root: Any = None) -> dict | None:
         failed[MODEL_SUMMARY] = _why(exc)
     reads: dict[str, dict | None] = {}
     if current:
+        flow = _flow_token(ctx)
         for a in retained_results.ADAPTERS:
             try:
-                out = a.capture({})
+                out = a.capture(flow) if a.section == "loadflow" and flow else None
+                # No flow for the current inputs, or its read did not answer:
+                # the LP's proxy, disclosed as such (`LOADFLOW_PROXY`).
+                out = out if out is not None else a.capture({})
             except Exception as exc:  # noqa: BLE001 - stated as not established
                 logger.info("reports: %s not read: %s", a.section, exc)
                 failed[a.section] = _why(exc)
@@ -129,6 +134,17 @@ def read_sources(project_root: Any = None) -> dict | None:
                 else None
             )
     return {"current": current, "summary": summary, "reads": reads, "failed": failed}
+
+
+def _flow_token(ctx) -> dict:
+    """The load flow chapter reads the AC power flow when one ran on the
+    current edit counter (GK B B1), else the LP."""
+    state = ctx.solver_state or {}
+    if state.get("ac_pf_results") is not None and state.get(
+        "ac_pf_network_revision"
+    ) == int(getattr(ctx, "network_revision", 0) or 0):
+        return {"solver_kind": "ac_pf"}
+    return {}
 
 
 def _why(exc: Exception) -> str:

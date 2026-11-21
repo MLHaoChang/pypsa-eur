@@ -31,6 +31,7 @@ describe('CurtailmentByCauseTable', () => {
     export_price_missing: 'No export price is set, so curtailment is not split by cause.',
     no_commercial_solve_record: 'The last run did not price the export, so curtailment is not split by cause.',
     export_price_changed_since_solve: 'The export price changed since the last run; run again to split curtailment by cause.',
+    export_flow_missing: 'The saved results hold no export flow; run again to split curtailment by cause.',
   }))('not established (%s): the totals and one sentence', (reason, sentence) => {
     expect(NOT_ESTABLISHED_REASON[reason]).toBe(sentence)
     render(<CurtailmentByCauseTable payload={{ status: 'not_established', reason,

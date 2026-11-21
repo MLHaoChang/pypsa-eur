@@ -26,3 +26,10 @@ J6, `origin/claude/ux-walkthrough-2026-11:.scratch/ux-walkthrough-2026-11/issues
   a test pins each against the same fixture.
 - Expert's figures carry "Why this number", the same component as Guided's, with its tests.
 - UX shots: Expert Summary for a DC and a microgrid project, dark and light, with the disclosure open.
+
+### Chat parity for "Why this number" (02b-2)
+
+Guided reads `GET /api/results/eh_study/why/{figure}` from 02b-2 on. Chat cannot yet: the route's not-via-chat row
+(`services/not_via_chat.d/claude-guided-results-02a.json`) is "unbuilt", and route parity holds it on this issue
+(`smoke/assistant_route_parity_declarations.d/claude-guided-results-02b-frontend.json`). This slice, or one named
+here before it closes, adds the chat tool and removes both declarations.
