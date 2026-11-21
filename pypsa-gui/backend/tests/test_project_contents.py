@@ -858,5 +858,7 @@ def test_the_grid_compliance_tracker_travels_but_its_lock_stays_behind(
         dst = src.parent / f"pc-tracker-{op}"
         dst.mkdir()
         projects._copy_bundle_dirs(src, dst, op=op)
-        assert json.loads((dst / "grid_compliance" / "tracker.json").read_text()) == {"t": 1}
+        assert json.loads((dst / "grid_compliance" / "tracker.json").read_text()) == {
+            "t": 1
+        }
         assert not (dst / "grid_compliance" / "tracker.lock").exists()
