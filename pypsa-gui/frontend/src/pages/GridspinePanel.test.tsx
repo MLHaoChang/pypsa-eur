@@ -233,10 +233,25 @@ describe('GridspinePanel', () => {
     })
     renderPanel()
     await waitFor(() => expect(screen.getByTestId('stage-dispatch').textContent).toContain('window 2 of 3, 1 solved'))
-    expect(screen.getByTestId('stage-dispatch-elapsed').textContent).toBe('3:12')
+    expect(screen.queryByTestId('stage-dispatch-elapsed')).toBeNull()   // no job: no clock
     const bar = screen.getByRole('progressbar', { name: /unit commitment progress/i })
     expect(bar.getAttribute('aria-valuenow')).toBe('1')
     expect(bar.getAttribute('aria-valuemax')).toBe('3')
+  })
+
+  it('shows the elapsed time only while the queue holds a job for the study', async () => {
+    queue.activeJob = { id: 'j1' }
+    api.status.mockResolvedValue({
+      ...completed, status: 'running', selected_hours: [], bundles: {},
+      stages: { ...completed.stages,
+                dispatch: { state: 'running', done: 1, total: 3, elapsed_s: 192.4 },
+                ranking: done('pending', 0), loadflow: done('pending', 0),
+                screening: done('pending', 0), handoff: done('pending', 0) },
+    })
+    try {
+      renderPanel()
+      expect((await screen.findByTestId('stage-dispatch-elapsed')).textContent).toBe('3:12')
+    } finally { queue.activeJob = undefined }
   })
 
   it('shows no window count or clock on a finished dispatch', async () => {

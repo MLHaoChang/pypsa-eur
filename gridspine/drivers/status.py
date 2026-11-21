@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from gridspine.drivers.progress import PROGRESS_RECORD
+from gridspine.drivers.progress import PROGRESS_RECORD, PROGRESS_RUN
 from gridspine.drivers.year_study import REASON_SEP, STAGES
 from gridspine.schema.contracts import ContractError
 
@@ -70,12 +70,18 @@ def _n_selected(outdir: Path):
 
 
 def _live_record(outdir: Path) -> dict:
-    """The run's live `progress.json`, or `{}` when there is none or it is unreadable."""
+    """The running run's live `progress.json`, or `{}`.
+
+    `{}` when there is none, it is unreadable, or it belongs to another run: its
+    nonce must match `progress.run`, which the current run wrote when it began
+    (a timestamp compare would trust two clocks).
+    """
     try:
         body = json.loads((outdir / PROGRESS_RECORD).read_text())
+        run = (outdir / PROGRESS_RUN).read_text().strip()
     except (OSError, ValueError):
         return {}
-    if not isinstance(body, dict):
+    if not isinstance(body, dict) or not run or body.get("run") != run:
         return {}
     try:
         return {
@@ -148,8 +154,10 @@ def stage_status(outdir) -> dict:
         # record (`progress.json`, written by the run) says how far it is.
         # Disk still wins: a stage done on disk, or failed, ignores it.
         record = live if state == "running" and live.get("stage") == stage else {}
-        if total is None and record.get("total"):
-            done, total = record["done"], record["total"]
+        if total is None and record.get("total", 0) > 0:
+            # Clamped: a record counts work, it never completes a stage.
+            total = record["total"]
+            done = min(max(record["done"], 0), total)
         if total is None:
             done, total = (1, 1) if state == "done" else (0, 1)
         stages[stage] = {"state": state, "done": int(done or 0), "total": int(total or 0)}

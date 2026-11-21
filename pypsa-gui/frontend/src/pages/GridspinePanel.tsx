@@ -184,10 +184,13 @@ function StudyView({ name }: { name: string }) {
         {status.isError && !notAStudy && (
           <p className="text-[12px] text-danger">{errorText(status.error)}</p>
         )}
+        <p className="mb-2 text-[11px] text-muted" data-testid="study-panel-note">
+          A Study project has no network to build: set the study up below, then run it here with Run study.
+        </p>
         {status.isPending && (
           <p role="status" className="text-[12px] text-muted" data-testid="study-loading">Loading the study…</p>
         )}
-        {status.data && <Stages status={status.data} />}
+        {status.data && <Stages status={status.data} live={activeJob != null} />}
         {status.data?.error && (
           <p className="mt-2 text-[11px] text-danger" data-testid="study-error">
             {status.data.error.stage}: {status.data.error.cause}
@@ -723,7 +726,10 @@ function ReadbackRow({ name, hour, short }: { name: string; hour: number; short:
   )
 }
 
-function Stages({ status }: { status: StageStatus }) {
+// `live`: the queue holds a job for this project. The clock shows only then:
+// a record copied with the project, or left by a run that died, would
+// otherwise count up for ever.
+function Stages({ status, live }: { status: StageStatus; live: boolean }) {
   return (
     <ol className="flex flex-col gap-1" aria-label="Study stages">
       {STAGES.map(stage => {
@@ -753,7 +759,7 @@ function Stages({ status }: { status: StageStatus }) {
                 <span className="block h-full bg-accent" style={{ width: `${(100 * s.done) / s.total}%` }} />
               </span>
             )}
-            {running && s.elapsed_s != null && (
+            {running && live && s.elapsed_s != null && (
               <span className="text-[10.5px] font-mono text-muted" data-testid={`stage-${stage}-elapsed`}>
                 {formatElapsed(Math.floor(s.elapsed_s))}
               </span>

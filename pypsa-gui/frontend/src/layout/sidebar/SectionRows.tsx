@@ -196,7 +196,17 @@ function ResultRows({ onCloseModal }: Props) {
       title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
       active={activeSlidePanel === 'gridspine'} onClick={() => toggle('gridspine')} />
   )
-  if (knownStudy) return studyRow
+  if (knownStudy) {
+    // The hidden sections are not missing: a study is set up and run here.
+    return (
+      <>
+        <p className="px-4 pt-1 pb-1 text-[10.5px] leading-snug text-muted" data-testid="study-sidebar-note">
+          A Study project has no network to build: its settings and its run are in this panel.
+        </p>
+        {studyRow}
+      </>
+    )
+  }
   return (
     <>
       <SItem icon={<TrendingUp size={15} />} label="Results"

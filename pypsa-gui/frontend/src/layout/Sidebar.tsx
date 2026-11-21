@@ -35,7 +35,7 @@ import {
   ResultsWorkbookPicker, WORKBOOK_DEFAULT, useWorkbookViews, workbookBlock, type WorkbookChoice,
 } from './sidebar/ResultsWorkbookPicker'
 import { STEPS, stepsForKind, type Step, type StepId } from './sidebar/steps'
-import { useOpenProjectKind } from '../hooks/useOpenProjectKind'
+import { useOpenProjectKind, useOpenProjectKindPending } from '../hooks/useOpenProjectKind'
 import { STUDY_KIND } from '../utils/projectActions'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 
@@ -1321,7 +1321,8 @@ export default function Sidebar() {
   // hub-design entry: it has no network (pio/08).
   const kind = useOpenProjectKind()
   const isStudy = kind === STUDY_KIND
-  const steps = stepsForKind(kind)
+  // Held while the kind is loading, so a study never flashes the hub bands.
+  const steps = useOpenProjectKindPending() ? [] : stepsForKind(kind)
   const [sections, setSections] = useState<Record<FlyoutSection, boolean>>({
     project: true, setup: true, model: true, run: true, results: true, reports: true,
   })

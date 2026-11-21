@@ -177,6 +177,15 @@ def run_study(config: StudyConfig, progress=None, stop_event=None):
         raise ContractError(f"run_study takes a StudyConfig, got {type(config).__name__}")
     _clear_stale_errors(config.outdir)
     bus = Progress(progress, stop_event, record=Path(config.outdir) / PROGRESS_RECORD)
+    try:
+        return _run(config, bus)
+    finally:
+        # The record is a live view of THIS run; once it ends, done or failed,
+        # the run directory keeps only its artifacts (GK P6).
+        bus.close()
+
+
+def _run(config: StudyConfig, bus: Progress):
     common = dict(
         k=config.k, screen=config.screen,
         n2_prune_threshold_pct=config.n2_prune_threshold_pct,

@@ -163,8 +163,7 @@ describe('AppHeader — the Run button per mode', () => {
     useUIStore.setState({ uiMode: 'expert', currentProject: 'p1' })
     try {
       renderHeader()
-      await waitFor(() => expect(vi.mocked(projectsApi.list)).toHaveBeenCalled())
-      expect(screen.getByTitle(/queues the solve/)).toBeTruthy()
+      expect(await screen.findByTitle(/queues the solve/)).toBeTruthy()
     } finally { vi.mocked(projectsApi.list).mockResolvedValue([]) }
   })
 
@@ -203,10 +202,11 @@ describe('AppHeader — the Run button per mode', () => {
     }
   })
 
-  it('Expert: the Run button is there', () => {
+  it('Expert: the Run button is there', async () => {
     useUIStore.setState({ uiMode: 'expert' })
     renderHeader()
-    expect(screen.getByTitle(/queues the solve/)).toBeTruthy()
+    // Held until the open project's kind is known (pio/08), then shown.
+    expect(await screen.findByTitle(/queues the solve/)).toBeTruthy()
   })
 })
 

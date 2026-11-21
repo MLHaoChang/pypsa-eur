@@ -17,7 +17,8 @@ import threading
 
 import pytest
 
-from gridspine.drivers.progress import PROGRESS_RECORD, Progress, StudyAborted
+from gridspine.drivers import progress as progress_mod
+from gridspine.drivers.progress import PROGRESS_RECORD, PROGRESS_RUN, Progress, StudyAborted
 from gridspine.drivers.status import stage_status
 from gridspine.drivers.study import StudyConfig, run_study
 
@@ -95,6 +96,47 @@ def test_a_record_that_cannot_be_written_never_fails_the_run(tmp_path):
     assert events == [("dispatch", 1, 3)]
 
 
+def test_the_record_names_its_run(tmp_path):
+    rec = tmp_path / PROGRESS_RECORD
+    p = Progress(record=rec)
+    p.tick("dispatch", 1, 3)
+    run = (tmp_path / PROGRESS_RUN).read_text()
+    assert len(run) == 32 and _read(rec)["run"] == run
+    assert Progress(record=rec)._run_id != run          # a new run, a new nonce
+    assert (tmp_path / PROGRESS_RUN).read_text() != run
+
+
+def test_a_throttled_stage_still_ends_at_its_total(tmp_path):
+    rec = tmp_path / PROGRESS_RECORD
+    p = Progress(record=rec)
+    for done in range(1, 8761):
+        p.tick("ranking", done, 8760)
+        if done == 8759:
+            assert _read(rec)["done"] < 8759                # throttled meanwhile
+    assert (_read(rec)["done"], _read(rec)["total"]) == (8760, 8760)
+
+
+def test_a_failed_write_is_logged_once(tmp_path, monkeypatch, caplog):
+    def refuse(*_a, **_k):
+        raise OSError("disk full")
+    monkeypatch.setattr(progress_mod.os, "replace", refuse)
+    p = Progress(record=tmp_path / PROGRESS_RECORD)
+    for done in range(1, 4):
+        p.tick("dispatch", done, 3)
+    assert [r for r in caplog.records if "not written" in r.getMessage()].__len__() == 1
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_the_callback_hears_the_same_events_with_or_without_a_record(tmp_path):
+    def events(**kw):
+        heard = []
+        p = Progress(lambda *e: heard.append(e), **kw)
+        for done in range(1, 1001):
+            p.tick("ranking", done, 1000)
+        return heard
+    assert events() == events(record=tmp_path / PROGRESS_RECORD)
+
+
 def test_without_a_record_nothing_is_written(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     Progress().tick("dispatch", 1, 3)
@@ -105,31 +147,119 @@ def test_without_a_record_nothing_is_written(tmp_path, monkeypatch):
 # a real run keeps the record current
 # --------------------------------------------------------------------------
 
+def _config(outdir):
+    return StudyConfig(outdir=outdir, hours=HOURS, k=K, window=WINDOW, overlap=OVERLAP)
+
+
 def test_a_run_records_the_dispatch_total_before_the_first_window_is_solved(tmp_path):
-    seen = {}
+    seen, windows = {}, []
 
     def callback(stage, done, total):
+        if stage == "dispatch":
+            windows.append(done)
         # The callback runs before the tick's own write, so at the first
-        # window's event the record still holds what came before it.
+        # window's event the record still holds what `begin` wrote.
         if (stage, done) == ("dispatch", 1):
             seen.update(_read(tmp_path / PROGRESS_RECORD))
 
-    run_study(StudyConfig(outdir=tmp_path, hours=HOURS, k=K, window=WINDOW, overlap=OVERLAP),
-              progress=callback)
-    assert (seen["stage"], seen["done"], seen["total"]) == ("dispatch", 0, WINDOWS)
-    last = _read(tmp_path / PROGRESS_RECORD)
-    assert last["stage"] == "handoff" and last["done"] == last["total"]
+    run_study(_config(tmp_path), progress=callback)
+    assert (seen["stage"], seen["done"]) == ("dispatch", 0)
+    # GK P1: the total announced before window 1 is the number of windows solved.
+    assert seen["total"] == len(windows) == WINDOWS
+
+
+def test_a_finished_run_leaves_no_record(tmp_path):
+    run_study(_config(tmp_path))
+    assert not (tmp_path / PROGRESS_RECORD).exists()
+    assert not (tmp_path / PROGRESS_RUN).exists()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_a_failed_run_leaves_no_record(tmp_path):
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(StudyAborted):
+        run_study(_config(tmp_path), stop_event=stop)
+    assert not (tmp_path / PROGRESS_RECORD).exists()
+    assert not (tmp_path / PROGRESS_RUN).exists()
+
+
+def _outputs(outdir):
+    # A file may name its own run directory; that is not a difference.
+    return {p.relative_to(outdir).as_posix(): p.read_bytes().replace(str(outdir).encode(), b"<out>")
+            for p in sorted(outdir.rglob("*")) if p.is_file()}
+
+
+def test_the_record_changes_no_output_and_a_failing_write_fails_nothing(tmp_path, monkeypatch):
+    """GK P2/P6: with the record, with it failing on every write, and without
+    it, the run directory ends byte-identical (manifest timestamps aside)."""
+    with_record = tmp_path / "with"
+    run_study(_config(with_record))
+
+    def refuse(*_a, **_k):
+        raise OSError("disk full")
+    monkeypatch.setattr(progress_mod.os, "replace", refuse)
+    failing = tmp_path / "failing"
+    run_study(_config(failing))
+    monkeypatch.undo()
+
+    class NoRecord(Progress):
+        def __init__(self, callback=None, stop_event=None, record=None):
+            super().__init__(callback, stop_event)
+    import gridspine.drivers.study as study_mod
+    monkeypatch.setattr(study_mod, "Progress", NoRecord)
+    without = tmp_path / "without"
+    run_study(_config(without))
+
+    a, b, c = _outputs(with_record), _outputs(failing), _outputs(without)
+    assert sorted(a) == sorted(b) == sorted(c)
+    for name in a:
+        if name.rsplit("/", 1)[-1] in ("manifest.json", "ledger.json", "ledger.md"):
+            continue   # differ between ANY two runs (their own time and paths), record or not
+        assert a[name] == b[name] == c[name], name
 
 
 # --------------------------------------------------------------------------
 # stage_status reads it for the running stage only
 # --------------------------------------------------------------------------
 
-def _dispatch_running(tmp_path, record):
+RUN = "a" * 32
+
+
+def _write_record(outdir, record, run=RUN):
+    (outdir / PROGRESS_RUN).write_text(run)
+    (outdir / PROGRESS_RECORD).write_text(json.dumps({"run": RUN, **record}))
+
+
+def _dispatch_running(tmp_path, record, run=RUN):
     """A run directory past ingest, inside the unit commitment."""
     (tmp_path / "loads.csv").write_text("snapshot\n")
-    (tmp_path / PROGRESS_RECORD).write_text(json.dumps(record))
+    _write_record(tmp_path, record, run)
     return stage_status(tmp_path)
+
+
+def test_a_record_left_by_another_run_is_ignored_however_new(tmp_path):
+    import time
+    st = _dispatch_running(tmp_path, {
+        "stage": "dispatch", "done": 2, "total": 3,
+        "stage_started_at": time.time() + 3600, "updated_at": time.time() + 3600,
+    }, run="b" * 32)
+    assert st["stages"]["dispatch"] == {"state": "running", "done": 0, "total": 1}
+
+
+def test_a_record_without_its_run_file_is_ignored(tmp_path):
+    (tmp_path / "loads.csv").write_text("snapshot\n")
+    (tmp_path / PROGRESS_RECORD).write_text(json.dumps(
+        {"run": RUN, "stage": "dispatch", "done": 1, "total": 3}))
+    assert stage_status(tmp_path)["stages"]["dispatch"]["total"] == 1
+
+
+@pytest.mark.parametrize("done, shown", [(7, 3), (-2, 0)])
+def test_the_count_is_clamped_to_the_total(tmp_path, done, shown):
+    st = _dispatch_running(tmp_path, {"stage": "dispatch", "done": done, "total": 3})
+    d = st["stages"]["dispatch"]
+    # Clamped, and still running: a record never completes a stage.
+    assert (d["state"], d["done"], d["total"]) == ("running", shown, 3)
 
 
 def test_the_running_dispatch_reports_its_windows_and_elapsed_time(tmp_path):
@@ -156,11 +286,14 @@ def test_a_record_for_another_stage_is_ignored(tmp_path):
 @pytest.mark.parametrize("body", [
     "not json",
     json.dumps(["dispatch", 1, 3]),
+    json.dumps({"run": RUN, "stage": "dispatch", "done": 1, "total": "three"}),
+    json.dumps({"run": RUN, "stage": "dispatch", "done": 1, "total": 3})[:-5],
     json.dumps({"stage": "dispatch", "done": "one", "total": 3}),
     json.dumps({"stage": "dispatch"}),
 ])
 def test_an_unreadable_record_is_ignored(tmp_path, body):
     (tmp_path / "loads.csv").write_text("snapshot\n")
+    (tmp_path / PROGRESS_RUN).write_text(RUN)
     (tmp_path / PROGRESS_RECORD).write_text(body)
     assert stage_status(tmp_path)["stages"]["dispatch"] == {"state": "running", "done": 0, "total": 1}
 
@@ -184,9 +317,9 @@ def test_a_per_hour_stage_keeps_its_disk_count_and_gains_the_clock(tmp_path):
         (tmp_path / name).write_text("x\n")
     (tmp_path / "selected.csv").write_text("hour\n7\n19\n")
     (tmp_path / "lf_7_bus.csv").write_text("x\n")
-    (tmp_path / PROGRESS_RECORD).write_text(json.dumps({
+    _write_record(tmp_path, {
         "stage": "loadflow", "done": 2, "total": 9, "stage_started_at": time.time() - 5,
-    }))
+    })
     lf = stage_status(tmp_path)["stages"]["loadflow"]
     assert (lf["state"], lf["done"], lf["total"]) == ("running", 1, 2)
     assert lf["elapsed_s"] >= 4
