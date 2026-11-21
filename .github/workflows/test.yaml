@@ -134,6 +134,10 @@ jobs:
     needs: gui-backend-changes
     if: needs.gui-backend-changes.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # A healthy shard on the 4-shard layout takes up to ~150 min. Without a cap
+    # a hung shard held its runner for GitHub's 6 h limit. Once the shards run
+    # under xdist (~25 min each) this can drop to ~60.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -168,14 +172,16 @@ jobs:
       run: npm ci --no-audit --no-fund
 
     # The full output goes to a log file and the artifact below, so a failure
-    # can be read whole instead of from under the job log's tail.
+    # can be read whole instead of from under the job log's tail. `-vv` (on top
+    # of pytest.ini's -q) prints every test's name, so a shard that stalls
+    # shows which test it stalled on.
     - name: Run backend tests
       run: |
         set -o pipefail
         mkdir -p pypsa-gui/backend/test-results
         pixi run gui-tests \
           --num-shards=4 --shard-id=$(( ${{ matrix.shard }} - 1 )) \
-          --junitxml=test-results/junit.xml --durations=30 \
+          --junitxml=test-results/junit.xml --durations=30 -vv \
           2>&1 | tee pypsa-gui/backend/test-results/pytest.log
 
     - name: Upload test results
