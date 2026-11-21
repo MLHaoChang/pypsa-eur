@@ -11,48 +11,7 @@
     "group_contract": null,
     "group_members": [],
     "import_price_ref": null,
-    "import_tariff": {
-      "dso_or_retailer": null,
-      "id": "dc_network_tariff_synthetic",
-      "items": [
-        {
-          "direction": "cost",
-          "id": "network_energy",
-          "kind": "energy",
-          "measured_on": "import",
-          "periods": [
-            {
-              "end_hour": 20,
-              "months": [],
-              "name": "day",
-              "rate": 0.035,
-              "start_hour": 8,
-              "tier_rates": null,
-              "weekdays": []
-            },
-            {
-              "end_hour": null,
-              "months": [],
-              "name": "night",
-              "rate": 0.02,
-              "start_hour": null,
-              "tier_rates": null,
-              "weekdays": []
-            }
-          ],
-          "ratchet": null,
-          "settlement": "15min",
-          "tiers": null,
-          "unit": "per_kwh"
-        }
-      ],
-      "jurisdiction": "DE",
-      "name": "Synthetic network tariff (illustrative)",
-      "pack_hash": null,
-      "unsupported_fields": [],
-      "valid_from": "2027-01-01",
-      "valid_to": null
-    },
+    "import_tariff": null,
     "import_tariff_id": null,
     "import_tariff_ref": null,
     "initial_peak_lower_bound": {},

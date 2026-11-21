@@ -556,23 +556,31 @@ def test_the_rate_source_names_the_shipped_wacc_on_a_finance_rate_only():
 def test_the_tariff_is_shipped_only_while_it_equals_the_templates():
     from project_templates import eh_templates as T
 
-    cfg = T.solver_config("eh_datacenter")
+    # The staged campus ships a tariff; the single-year one ships none (#1711), so
+    # nothing of its own is ever "shipped".
+    tid = "eh_datacenter_staged"
+    cfg = T.solver_config(tid)
     tpl = SimpleNamespace(solver_config=lambda tid, plan: cfg)
     own = json.loads(json.dumps(cfg["commercial"]))
-    assert A._tariff_is_shipped(tpl, "eh_datacenter", None, own) is True
+    assert A._tariff_is_shipped(tpl, tid, None, own) is True
     own["import_tariff"]["items"][0]["periods"][0]["rate"] += 0.001
-    assert A._tariff_is_shipped(tpl, "eh_datacenter", None, own) is False
+    assert A._tariff_is_shipped(tpl, tid, None, own) is False
     for commercial in (None, {}, {"import_tariff": None}):
-        assert A._tariff_is_shipped(tpl, "eh_datacenter", None, commercial) is False
+        assert A._tariff_is_shipped(tpl, tid, None, commercial) is False
+    single = T.solver_config("eh_datacenter")
+    assert single["commercial"]["import_tariff"] is None
+    assert A._tariff_is_shipped(
+        SimpleNamespace(solver_config=lambda t, plan: single), "eh_datacenter", None, own
+    ) is False
     # A template that ships no tariff, or one its model refuses, marks nothing shipped.
     bare = SimpleNamespace(solver_config=lambda tid, plan: {})
-    assert A._tariff_is_shipped(bare, "eh_datacenter", None, cfg["commercial"]) is False
+    assert A._tariff_is_shipped(bare, tid, None, cfg["commercial"]) is False
     none = {**cfg["commercial"], "import_tariff": None}
     untariffed = SimpleNamespace(solver_config=lambda tid, plan: {"commercial": none})
-    assert A._tariff_is_shipped(untariffed, "eh_datacenter", None, none) is False
+    assert A._tariff_is_shipped(untariffed, tid, None, none) is False
     bad = {**cfg["commercial"], "poc_link": 7}
     broken = SimpleNamespace(solver_config=lambda tid, plan: {"commercial": bad})
-    assert A._tariff_is_shipped(broken, "eh_datacenter", None, bad) is False
+    assert A._tariff_is_shipped(broken, tid, None, bad) is False
 
 
 def test_an_unset_architecture_leaves_the_scorecard_as_before(tmp_path, monkeypatch):
@@ -857,15 +865,12 @@ def test_compare_route_writes_nothing_and_answers_every_architecture(
         for v in body["variants"]
     )
     assert _snapshot(d) == before and _network_input_fingerprint(ctx) == fp
-    # The template ships a tariff (WALK-IMPROVE-1 b): no price entered, its energy rate prices.
+    # The single-year template ships no tariff (the sizing loop and intent comparison
+    # would size on a cheaper import than the solve, #1711): no price entered, no
+    # assumed default, the route asks for one and writes nothing.
     r = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={})
-    assert r.status_code == 200, r.text
-    price = r.json()["price"]
-    assert (
-        price["assumed"] is True
-        and "the template's default tariff, assumed" in price["source"]
-    )
-    assert "request" not in price["source"]
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "dc_architecture_no_energy_price"
     assert _snapshot(d) == before
     # Once the user's own tariff stands, the price read from it is not assumed.
     import copy
@@ -873,8 +878,12 @@ def test_compare_route_writes_nothing_and_answers_every_architecture(
 
     cfg = d / "solver_config.json"
     raw = json.loads(cfg.read_text())
+    from project_templates import eh_templates as T
+
     own = copy.deepcopy(raw)
-    own["commercial"]["import_tariff"]["items"][0]["periods"][0]["rate"] += 0.001
+    own["commercial"]["import_tariff"] = copy.deepcopy(
+        T.solver_config("eh_datacenter_staged")["commercial"]["import_tariff"]
+    )
     cfg.write_text(json.dumps(own))
     price = client.post(
         f"/api/campus-electrical/{name}/dc-architecture/compare", json={}

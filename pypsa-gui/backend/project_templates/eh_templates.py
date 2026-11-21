@@ -1644,16 +1644,18 @@ def _staged_commercial_and_finance(planning: Planning | None = None) -> dict:
     return _dc_blocks(build_eh_datacenter_staged(planning=planning), _dc_finance(plan), plan)
 
 
-def _dc_blocks(n, finance: dict, plan: _DcPlan) -> dict:
+def _dc_blocks(n, finance: dict, plan: _DcPlan, *, tariff: bool = True) -> dict:
     """A campus's `commercial` and `finance` blocks on its network ``n``: the
-    grid import as the PoC, the campus tariff and the `single_owner` value
-    flows, stored as the routes store them (validated, dumped)."""
+    grid import as the PoC, the campus tariff (unless ``tariff`` is off) and the
+    `single_owner` value flows, stored as the routes store them (validated,
+    dumped)."""
     from models.commercial import CommercialConfig
     from models.finance import FinanceInputs
     from services.commercial import value_flow_templates as VFT
 
     base = CommercialConfig.model_validate(
-        {"poc_link": "grid_import", "import_tariff": _dc_tariff(plan), "timezone": "UTC"})
+        {"poc_link": "grid_import", "timezone": "UTC",
+         **({"import_tariff": _dc_tariff(plan)} if tariff else {})})
     vf = VFT.build("single_owner", n, base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
     return {"commercial": commercial.model_dump(mode="json"),
@@ -1679,10 +1681,13 @@ def _microgrid_commercial_and_finance(planning: Planning | None = None) -> dict:
 
 def _dc_single_commercial_and_finance(planning: Planning | None = None) -> dict:
     """The single-year campus's `commercial` and `finance` blocks
-    (WALK-IMPROVE-1 b): the staged campus's basis (`_dc_finance`, its tariff,
-    the `single_owner` value flows) on one period. Every asset's COD is the
-    start year, close a year before it, the case to the end year, as the
-    single-year H2 hub."""
+    (WALK-IMPROVE-1 b): the staged campus's basis (`_dc_finance`, the
+    `single_owner` value flows) on one period, without its tariff: a project
+    solve applies a tariff at solve time and the sizing loop and intent
+    comparison do not, so a tariff here would make them size on a cheaper
+    import than the solve (GK A, #1711; the single-year island ships none
+    either). Every asset's COD is the start year, close a year before it, the
+    case to the end year, as the single-year H2 hub."""
     p = planning or NATIVE_PLANNING["eh_datacenter"]
     n = build_eh_datacenter(planning=planning)
     first = f"{p.start_year}-01-01"
@@ -1694,7 +1699,7 @@ def _dc_single_commercial_and_finance(planning: Planning | None = None) -> dict:
                                     for a in (*n.generators.index.drop("grid_supply"),
                                               *n.storage_units.index)},
            "analysis_years": p.analysis_years}
-    return _dc_blocks(n, fin, _dc_plan())
+    return _dc_blocks(n, fin, _dc_plan(), tariff=False)
 
 
 # ── Finance defaults every template ships (WALK-IMPROVE-1 b) ────────────────
