@@ -19,6 +19,7 @@ import { VerdictChip } from '../components/gridReadiness/GridReadinessScorecard'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { money, SYMBOL } from './DcBackupSection'
+import { ServiceSources } from '../components/gridReadiness/ServiceSources'
 
 const NBSP = ' '
 /** The section's own title; the create form shares it (DC 22). */
@@ -62,8 +63,10 @@ function ownArchitecture(meta: unknown): { arch: DcArchitecture; set: boolean } 
 /** What the compare reads from the stored spec; a change makes a result out of date (UX 5). */
 const specKey = (meta: unknown) => JSON.stringify((meta as DcMeta | null)?.dc_load?.spec ?? null)
 
+/** The source chip's one style (shared with the intent comparison's source words). */
+export const SOURCE_CHIP = 'rounded border border-border px-1 text-[10px] text-muted'
 function Assumed() {
-  return <span className="rounded border border-border px-1 text-[10px] text-muted">assumed</span>
+  return <span className={SOURCE_CHIP}>assumed</span>
 }
 
 export default function DcArchitectureSection({ name }: { name: string }) {
@@ -153,7 +156,7 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
           <table className="w-full text-[11px] [&_td]:px-2 [&_td]:py-0.5 [&_th]:px-2 [&_th]:align-bottom" data-testid="dc-architecture-table">
             <thead className="text-muted">
               <tr>
-                <th className="text-left font-normal">Architecture</th>
+                <th className="sticky left-0 z-[1] bg-bg text-left font-normal">Architecture</th>
                 {!guided && <th className="text-right font-normal">Efficiency to rack</th>}
                 <th className="text-right font-normal">Effective PUE</th>
                 <th className="text-right font-normal">Facility energy (GWh/yr)</th>
@@ -170,7 +173,8 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
               {data.variants.map(v => (
                 <Fragment key={v.architecture}>
                   <tr data-testid={`dc-architecture-row-${v.architecture}`} className={v.own ? 'font-medium' : ''}>
-                    <td>
+                    {/* sticky, so a sideways scroll never hides which row is which (UX 2) */}
+                    <td className="sticky left-0 z-[1] whitespace-nowrap bg-bg">
                       {!guided && (
                         <button type="button" className="mr-1 text-muted" aria-expanded={open === v.architecture}
                                 aria-label={`Loss chain of ${v.label}`}
@@ -205,8 +209,19 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
                         {v.services.counted.length + v.services.conditional.length === 0 && <span className="text-muted">none</span>}
                       </td>
                     )}
-                    <td><VerdictChip verdict={v.verdicts.frequency_support.verdict} /></td>
-                    <td><VerdictChip verdict={v.verdicts.voltage_control.verdict} /></td>
+                    {/* The units each credited service comes from (DC grid-readiness walkthrough 03). */}
+                    {([['frequency_support', v.verdicts.frequency_support], ['voltage_control', v.verdicts.voltage_control]] as const).map(([k, sv]) => (
+                      <td key={k} className={k === 'frequency_support' ? 'min-w-[18rem]' : 'min-w-[12rem]'}>
+                        <VerdictChip verdict={sv.verdict} />
+                        {sv.project_value && (
+                          <div className="text-[10px] text-muted" data-testid={`dc-architecture-${k}-${v.architecture}`}>
+                            {sv.sources?.length
+                              ? <ServiceSources sources={sv.sources} rest={sv.value_rest} testId={`dc-architecture-${k}-${v.architecture}-sources`} />
+                              : sv.project_value}
+                          </div>
+                        )}
+                      </td>
+                    ))}
                   </tr>
                   {!guided && open === v.architecture && (
                     <tr data-testid={`dc-architecture-chain-${v.architecture}`}>

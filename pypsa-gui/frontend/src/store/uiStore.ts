@@ -538,7 +538,7 @@ interface UIStore {
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
-  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'strategy' | 'offgrid' | null
+  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island' | null
   /** Request-then-scroll to the Grid codes section of the Grid connection part (AS-10). */
   gridCodeScrollRequest: boolean
   requestGridCodeScroll: () => void
@@ -606,6 +606,10 @@ interface UIStore {
   // solving project editable, and vice versa.
   lockReadOnly: boolean
   solvingReadOnly: boolean
+  // Name/id of the project a switch is in flight for (null = none). Drives the
+  // "Opening …" progress bar; a cold open can take a minute on a big template.
+  openingProject: string | null
+  setOpeningProject: (target: string | null) => void
   currentProject: string | null
   // Resume target for auth / projects-home flows. Prefer a stable UUID when a
   // caller knows it, but keep the project name as a compatible fallback so
@@ -727,7 +731,7 @@ interface UIStore {
   clearResultsWindowRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
-  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'strategy' | 'offgrid') => void
+  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island') => void
   clearSolverBlockRequest: () => void
   requestGridReadiness: () => void
   clearGridReadinessRequest: () => void
@@ -845,6 +849,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   readOnlyReason: 'writable',
   lockReadOnly: false,
   solvingReadOnly: false,
+  openingProject: null,
+  setOpeningProject: (target) => set({ openingProject: target }),
   currentProject: storedCurrentProject(),
   lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(INITIAL_UI_MODE.mode),

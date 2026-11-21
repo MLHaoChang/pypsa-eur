@@ -72,6 +72,15 @@ def generator_role(n, gen: str) -> tuple[str, str | None]:
     return "", None
 
 
+def is_helper_generator(n, gen: str) -> bool:
+    """True for a Generator the model adds rather than an asset of the site: an LP slack (`is_slack_name`) or a
+    product's buy-in or shortfall Generator (`generator_role`, its column or its name prefix). Display only
+    (guided-results 03): the Guided sums and chart leave helpers out; no state, count or verdict reads it."""
+    from services.adequacy.slack import is_slack_name
+
+    return is_slack_name(gen) or generator_role(n, gen)[0] != ""
+
+
 def lost_production_value(n, gen: str) -> float | None:
     """A shortfall Generator's lost-production value, EUR per bus unit: its marginal_cost, the ledgered input the LP
     priced. Never VoLL. None (Unavailable) when it is not a finite positive number."""

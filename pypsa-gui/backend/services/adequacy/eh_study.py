@@ -516,6 +516,8 @@ def _stage_mc_certify(st: _Study) -> None:
         "certification_metric": pack.availability.certification_metric,
         "target_lole_h": target,
         "target_basis": "h_per_year",
+        # The goal's unit, so "why this number" compares it (guided-results 02a).
+        "target_unit": "h",
         "target_lole_h_per_horizon": target_h,
         "horizon_years": horizon_years,
         "lole_h_per_horizon": lole,

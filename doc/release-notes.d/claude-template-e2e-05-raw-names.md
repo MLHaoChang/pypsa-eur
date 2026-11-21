@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Load-profile advanced fields, island control modes and scenarios, and the market-price series picker show plain-language names instead of parameter, option and Library ids (RAW-NAMES-1).

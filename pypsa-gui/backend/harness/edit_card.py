@@ -165,6 +165,8 @@ class Adapter:
     # The card's one-line `says` from the args and rows, for an action whose effect an
     # old → new phrase does not state (a delete, a publish, a started job).
     says: Callable[[dict, list[dict]], str] | None = None
+    # False: the rows do not read back everything the call writes (an arguments card).
+    complete: bool = True
 
 
 ADAPTERS: dict[str, Adapter] = {}
@@ -237,6 +239,7 @@ def _says(rows: list[dict], sets: list[dict] = ()) -> str:
         return f"{what} {old} → {new}{unit}{stored}"
     grouped = {(g["component_class"], name, g["attribute"]) for g in sets for name in g["names"]}
     return "; ".join([phrase(g) for g in sets] + [one(row) for row in rows if row["role"] == "typed"
+                                                   and not row.get("unchanged")
                                                    and (row.get("component_class"), row["name"], row["field"]) not in grouped])
 
 
@@ -268,7 +271,7 @@ def preview(tool_name: str, args: dict, *, with_state: bool = True) -> dict:
     rows = adapter.preview(args or {})
     sections = _attach_targets(rows)
     card = {"version": VERSION, "kind": adapter.kind, "tool": tool_name, "rows": rows,
-            "says": _says(rows), "complete": adapter is not _ARGUMENTS}
+            "says": _says(rows), "complete": adapter is not _ARGUMENTS and adapter.complete}
     sets = adapter.sets(args or {}) if adapter.sets is not None else []
     if sets:
         card["sets"] = sets
@@ -440,7 +443,7 @@ def reread(tool_name: str, args: dict, earlier: dict) -> dict | None:
     value; None when a row differs or the tool has no native adapter."""
     adapter = ADAPTERS.get(tool_name)
     rows = [{k: v for k, v in row.items() if k != "readback"} for row in earlier.get("rows") or []]
-    if adapter is None or not rows:
+    if adapter is None or not adapter.complete or not rows:
         return None
     values = adapter.readback(args or {}, rows)
     rows = [{**row, "readback": _scalar(value)} for row, value in zip(rows, values)]
@@ -931,6 +934,7 @@ def _mapped_rows(p: dict, counter: str) -> list[dict]:
         cell = lineage.get((row["name"], row["field"])) if row["role"] == "typed" else None
         if cell is not None:
             row["source"] = cell["source"]
+            row["says_name"] = f"{klass} \u201c{row['name']}\u201d: {cell['label']}"
             if cell["money_year"] is not None:
                 row["money"] = {"currency": cell["currency"], "money_year": cell["money_year"]}
             notes += [_note(klass, row["name"], row["field"], text) for text in cell.get("notes", ())]
@@ -1013,7 +1017,20 @@ _SOLVER_WORDS: dict[str, tuple[str, str, dict | None]] = {
     "reserve_share_load": ("Reserve for load", "", None),
     "reserve_share_pv": ("Reserve for solar output", "", None),
     "reserve_share_wind": ("Reserve for wind output", "", None),
+    # homer-parity 04a, as Model Horizon's period-economics step says them.
+    "load_growth_pct_per_year": ("Load growth", "% per year", None),
+    "load_growth_base_year": ("Growth from year", "", None),
+    "load_scalers_by_carrier": ("Load multiplier", "\u00d7", None),
 }
+# The load-growth inputs derive `load_scalers_by_carrier` (homer-parity 04a): the
+# card shows the multipliers they change; the derived-entry bookkeeping is no
+# setting and gets no row.
+_LOAD_GROWTH_INPUTS = frozenset({"multi_investment_periods", "investment_periods", "load_growth_pct_per_year",
+                                 "load_growth_base_year"})
+# A change of the rate or its start year shows both, the one it leaves as it is too
+# (unchanged), so the card states the whole input the multipliers are derived from.
+_LOAD_GROWTH_PAIR = ("load_growth_pct_per_year", "load_growth_base_year")
+_NO_ROW = frozenset({"load_scalers_derived"})
 _SHARES = frozenset({
     "discount_rate", "inflation_rate", "min_renewable_fraction",
     "reserve_share_load", "reserve_share_pv", "reserve_share_wind",
@@ -1072,7 +1089,7 @@ def _settle(row: dict, value):
     return _setting(value)
 
 
-def _solver_row(key: str, old, new, *, applies: bool = True) -> dict:
+def _solver_row(key: str, old, new, *, applies: bool = True, unchanged: bool = False) -> dict:
     base = key.split(".")[0]
     label, unit, words = _SOLVER_WORDS.get(base, (key, "", None))
     if base != key:
@@ -1081,11 +1098,41 @@ def _solver_row(key: str, old, new, *, applies: bool = True) -> dict:
            "old": _setting(old), "new": _setting(new), "unit": unit, "role": "typed"}
     if not applies:
         row["old_applies"] = False
+    if unchanged:  # shown beside a changed growth input; no arrow, not in the headline
+        row["unchanged"] = True
     if words:
         row["words"] = {"old": words.get(old, old), "new": words.get(new, new)}
     if base in _SHARES and _numeric(new):
         row["display"] = {"old": old * 100 if _numeric(old) else None, "new": new * 100, "unit": "%"}
     return row
+
+
+_SCALERS = "load_scalers_by_carrier"
+
+
+def _scaler_rows(old: dict, new: dict) -> list[dict]:
+    """The load multipliers a change moves, one row per carrier and period it changes
+    ("Load multiplier electrical 2035: 1.104 → 1.159"), never the stored map as JSON (UX #1604)."""
+    rows = []
+    for carrier in dict.fromkeys([*old, *new]):
+        before, after = old.get(carrier) or {}, new.get(carrier) or {}
+        for period in dict.fromkeys([*before, *after]):
+            was, now = before.get(period), after.get(period)
+            if _same(was, now):
+                continue
+            row = _solver_row(f"{_SCALERS}.{carrier}.{period}", was, now)
+            row["label"] = f"{_SOLVER_WORDS[_SCALERS][0]} {carrier} {period}"
+            row["says_name"] = f"{row['label']}:"
+            row["display"] = {"old": round(was, 3) if _numeric(was) else None,
+                              "new": round(now, 3) if _numeric(now) else None, "unit": row["unit"]}
+            rows.append(row)
+    return rows
+
+
+def _scaler_at(scalers: dict, field: str):
+    """The stored multiplier a `load_scalers_by_carrier.<carrier>.<period>` row names."""
+    carrier, _, period = field.partition(".")[2].rpartition(".")
+    return ((scalers or {}).get(carrier) or {}).get(period)
 
 
 def _solver_preview(args: dict) -> list[dict]:
@@ -1115,14 +1162,28 @@ def _solver_preview(args: dict) -> list[dict]:
     after = asdict(after) if not isinstance(after, dict) else dict(after)
     rolling_before = current.get("solve_strategy") == "rolling"
     rows = []
-    for key in partial:
+    keys = [k for k in partial if k not in _NO_ROW]
+    shown = set()  # a growth input the change leaves: every entry, unchanged
+    if set(_LOAD_GROWTH_PAIR) & partial.keys():
+        shown = {k for k in _LOAD_GROWTH_PAIR if k not in keys}
+        keys += [k for k in _LOAD_GROWTH_PAIR if k in shown]
+    if _LOAD_GROWTH_INPUTS & partial.keys() and "load_scalers_by_carrier" not in keys:
+        keys.append("load_scalers_by_carrier")
+    for key in keys:
         old, new = current.get(key), after.get(key)
+        if key == _SCALERS:
+            rows += _scaler_rows(old or {}, new or {})
+            continue
         if isinstance(old, dict) or isinstance(new, dict):
             old, new = old or {}, new or {}
-            subs = [k for k in dict.fromkeys([*old, *new]) if not _same(old.get(k), new.get(k))]
-            rows += [_solver_row(f"{key}.{k}", old.get(k), new.get(k)) for k in subs]
+            subs = [k for k in dict.fromkeys([*old, *new])
+                    if key in shown or not _same(old.get(k), new.get(k))]
+            rows += [_solver_row(f"{key}.{k}", old.get(k), new.get(k),
+                                 unchanged=key in shown and _same(old.get(k), new.get(k)))
+                     for k in subs]
             continue
-        rows.append(_solver_row(key, old, new, applies=key not in _ROLLING or rolling_before))
+        rows.append(_solver_row(key, old, new, applies=key not in _ROLLING or rolling_before,
+                                unchanged=key in shown and _same(old, new)))
     if after.get("solve_strategy") == "rolling" and not rolling_before:
         rows.append(_note("", "", "solve_strategy", ROLLING_NOTE))
     if not rows:
@@ -1139,6 +1200,9 @@ def _solver_readback(args: dict, rows: list[dict]) -> list[Any]:
             continue
         key, _, sub = row["field"].partition(".")
         value = current.get(key)
+        if key == _SCALERS:
+            out.append(_setting(_scaler_at(value, row["field"])))
+            continue
         out.append(_setting((value or {}).get(sub) if sub else value))
     return out
 
@@ -1215,6 +1279,60 @@ def _weightings_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 
 register("set_investment_period_weightings", Adapter("settings_edit", _weightings_preview, _weightings_readback))
+
+
+# ── The network's periods: set_snapshots / set_multi_period_snapshots / set_investment_periods
+# The card stays the call's arguments (the network rebuild is not read back), plus the load
+# multipliers the new periods re-derive from a stored load growth rate (homer-parity 04a), worked
+# out as the route's own check does (`load_growth.refreshed_config`), so the card refuses what the
+# route refuses.
+
+def _new_periods(tool: str, args: dict) -> list[int] | None:
+    if tool == "set_snapshots":
+        return []
+    periods = args.get("periods")
+    if not isinstance(periods, list) or not all(isinstance(p, int) and not isinstance(p, bool)
+                                                for p in periods):
+        return None  # the route refuses it; the card shows the arguments
+    return sorted(set(periods))
+
+
+def _time_axis_preview(tool: str) -> Callable[[dict], list[dict]]:
+    def preview(args: dict) -> list[dict]:
+        from services.pypsa_service import PyPSAService
+        from services.solver import load_growth as LG
+
+        rows = _arguments_preview(args)
+        periods = _new_periods(tool, args)
+        current = PyPSAService.get_active_context().solver_state.get("solver_config")
+        if periods is None:
+            return rows
+        try:
+            grown = LG.refreshed_config(current, periods)
+        except LG.LoadGrowthError as exc:
+            # The route's own refusal (`_check_load_growth`), its kind kept.
+            raise HTTPException(422, {**exc.detail, "message": f"{exc.detail['message']}; change it first"}) \
+                from None
+        if grown is current:
+            return rows
+        old = getattr(current, "load_scalers_by_carrier", None) or {}
+        new = grown.load_scalers_by_carrier or {}
+        rows += [{**row, "role": "derived"} for row in _scaler_rows(old, new)]
+        return rows
+    return preview
+
+
+def _time_axis_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.pypsa_service import PyPSAService
+
+    scalers = getattr(PyPSAService.get_active_context().solver_state.get("solver_config"),
+                      "load_scalers_by_carrier", None) or {}
+    return [_setting(_scaler_at(scalers, row["field"]))
+            if row["field"].startswith(f"{_SCALERS}.") else None for row in rows]
+
+
+for _tool in ("set_snapshots", "set_multi_period_snapshots", "set_investment_periods"):
+    register(_tool, Adapter("arguments", _time_axis_preview(_tool), _time_axis_readback, complete=False))
 
 
 # ── Undo: the snapshot it restores, against the project now ────────────────

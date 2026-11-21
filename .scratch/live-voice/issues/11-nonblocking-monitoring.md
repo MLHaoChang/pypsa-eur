@@ -3,7 +3,7 @@
 
 # Nonblocking domain jobs, recoverable monitoring and results refresh
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: 11a, 11b, 11c-1, 11c-2 merged (#1543, #1548, #1550, #1556); left besides: adapters for all families, wait_for_job, D-I2, D-C1
 Type: task
 Blocked by: 02, 08, 09
 
@@ -133,3 +133,49 @@ snapshot recovery, results refresh).
   match. Tested: navigation after the job started (no navigation, no foreign
   invalidation), and cancelled or failed outcomes (no refresh).
 - Each PR that touches the frontend goes to UX too.
+
+2026-11-16: GK B (59) plan GO for 11c, split 11c-1 (backend) and 11c-2 (frontend, plus UX).
+- (a) A foreign epoch gets 409 `progress_cursor_foreign`, with nothing streamed. A
+  malformed id gets 400 `invalid_progress_cursor`. Both are tested.
+- (b) The terminal event is a progress item (`job_terminal`), not a second snapshot.
+- E1: a restart is the main C1 case. An epoch from before a rehydrate must give
+  `job_snapshot`, and a truly foreign id gives 409. Built as signed epochs
+  (`harness/progress_ids.py`): there is no stored set, so nothing is evicted.
+- E2: replay is ACL-filtered too. A replayed `job_terminal` re-reads the job through
+  `job_status` for the requesting actor at send time.
+- E3: Last-Event-ID wins over `?cursor=` (pinned).
+- E4: mutants on each snapshot filter (actor, project), the past-epoch check, the gap
+  check and the id parser.
+- E5: test_harness_layout, the manifest test, ChatPanel.manifest and the three smoke
+  `--check`s run at the trial merge.
+- R1: C3 compares job.input_revision with the same quantity it was captured from. A
+  job with input_revision None gets no auto-refresh.
+- R2: the high-water mark is per (session, epoch), and a snapshot resets it. Backoff is
+  bounded and stops when the monitor is inactive or after Stop monitoring.
+- R3: pressing Stop monitoring POSTs /progress/stop, closes the stream, and makes no
+  cancel call.
+
+2026-11-16: UX (21) conditions for 11c-2:
+1. Visible text: "Stop monitoring" with "the job keeps running" beside it; Cancel stays
+   the separate card. No engine or tool ids in either label.
+2. After a Stop the line reads "Not monitoring. The job is still running."; the
+   control goes away or becomes a way to watch again.
+3. A snapshot after a gap is announced in one muted line, never as a duplicate line.
+4. The in-place results refresh shows no toast and leaves no stale "refreshed" mark
+   in the mismatch cases.
+- Shots: the line with Stop monitoring, the state after Stop, and the card next to
+  Cancel, in Guided and Expert.
+
+2026-11-17: GK B (60) plan GO for 11c-2. After Stop the button is removed (option A); "Watch
+again" is a follow-up if UX wants it. Conditions:
+- F1: a stream that stops by itself (tries used up, a 400, a second 409) no longer reads
+  "monitoring"; a muted terminal line shows and no timer is left. Each cause tested.
+- F2: close(), unmount and a session switch clear the backoff timer and abort the fetch.
+- F3: the reconnect after a foreign 409 drops the refused epoch's mark (tested, mutant).
+- F4: a snapshot below the mark resets it; mutants on `<=`, the per-epoch key and the reset.
+- F5: the C3 matrix adds a rename (fails closed) and input_revision 0; each clause has a
+  row where only it fails, and a mutant that row kills.
+- F6: a failing stop POST still closes the stream, cancels nothing, throws nothing.
+- F7: the button has an accessible name, works by keyboard, and its state is words.
+- F8: at the trial merge, tsc, the manifest tests and the inventory, route-parity and
+  control-matrix checks.

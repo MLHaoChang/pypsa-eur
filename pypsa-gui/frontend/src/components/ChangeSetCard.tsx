@@ -21,6 +21,8 @@ export interface ChangeSet {
   items: ChangeSetItem[]
   digest: string
   requirements: { checked: number; says: string }
+  /** Study harness 14: a pick card (the shipped cases); rows start unticked and at most this many may be ticked. */
+  pick_max?: number
 }
 
 export type ChangeSetRowStatus = 'applied' | 'unchanged' | 'uncertain' | 'failed' | 'stale' | 'unticked' | 'not_run'
@@ -84,8 +86,14 @@ export function changeSetItemLabel(item: ChangeSetItem): string {
 
 export const CHANGE_SET_NONE_TICKED = 'Tick at least one change to apply.'
 
-export function changeSetApplyLabel(ticked: number): string {
+export function changeSetApplyLabel(ticked: number, pick = false): string {
+  if (pick) return ticked === 1 ? 'Run 1 case' : `Run ${ticked} cases`
   return ticked === 1 ? 'Apply 1 change' : `Apply ${ticked} changes`
+}
+
+/** A pick card's limit, or null for an ordinary change set. */
+export function pickMaxOf(set: ChangeSet | null): number | null {
+  return set && typeof set.pick_max === 'number' && Number.isInteger(set.pick_max) ? set.pick_max : null
 }
 
 /** The rows of the card: a tick box, the old and new values and the source of each change. */
@@ -109,7 +117,7 @@ export function ChangeSetRows({ set, ticked, onToggle, disabled = false }: {
               </div>
               {/* UX C5: the panel's field labels in both modes. */}
               <EditCardTable card={item.edit_card} guided
-                labels={{ header: '', caption: `Change ${i + 1} of ${total}` }} />
+                labels={{ header: '', caption: `${pickMaxOf(set) === null ? 'Change' : 'Case'} ${i + 1} of ${total}` }} />
               {item.source !== 'rows' && (
                 <div className="text-[11px] text-muted" data-testid="chat-change-set-source">
                   Source: {item.source}

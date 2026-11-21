@@ -771,7 +771,12 @@ ALLOWED = {
 #: Per-function exemptions, so a new direct read elsewhere in the file is
 #: still seen. `sidecars()` names the marker in its tuple; `_source` reads
 #: that entry through the helper (pinned by the capture tests above).
-EXEMPT_FUNCTIONS = {"services/solve_capture.py": {"sidecars"}}
+#: `_marker_entry()` names it in the project contents table, which says which
+#: copy paths carry it and reads nothing (project-io 01).
+EXEMPT_FUNCTIONS = {
+    "services/solve_capture.py": {"sidecars"},
+    "services/project_contents.py": {"_marker_entry"},
+}
 ALLOWED_DIRS = ("project_templates/", "tests/", "smoke/")
 #: The names the marker file goes by.
 NAMES = {"MARKER_FILE", "TEMPLATE_FILE", "META_FILE"}
@@ -1040,6 +1045,36 @@ def test_a_dc_backup_save_while_the_marker_is_busy_is_refused(eh_base, monkeypat
     with real(eh_base.dir), pytest.raises(dc_backup.DcBackupBusy, match="busy"):
         dc_backup.save_backup(eh_base.dir, t, {"mode": "hybrid"})
     assert stamp(eh_base.dir / tm.MARKER_FILE) == before
+
+
+def test_an_undo_while_the_marker_lock_is_held_is_refused_and_leaves_the_file(
+    eh_base, active_case
+):
+    """Issue 11: a restore that cannot take the lock reports ``busy`` and writes
+    nothing; once the lock is free the same restore puts the rows back."""
+    from services import growth_placeholders as gp
+
+    real = tm.write_lock  # the real lock, held below; the restore waits its default 5 s
+    own = write_marker(active_case, {**eh_base.meta, "ledger": [_ph("it_mw", 2030)]})
+    snapshot = gp.snapshot_meta()
+    write_marker(active_case, {**eh_base.meta, "ledger": []})
+    before = own.read_bytes()
+    import signal
+
+    def _hung(*_):
+        raise AssertionError("the restore did not give up on the held lock within 30 s")
+
+    old = signal.signal(signal.SIGALRM, _hung)
+    signal.alarm(30)  # explicit bound; the lock itself times out at 5 s
+    try:
+        with real(active_case):
+            assert gp.restore_meta(snapshot) == "busy"
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+    assert own.read_bytes() == before
+    assert gp.restore_meta(snapshot) is None
+    assert json.loads(own.read_text())["ledger"] == [_ph("it_mw", 2030)]
 
 
 @pytest.mark.parametrize("error", [PermissionError("denied"), ValueError("outside")])
