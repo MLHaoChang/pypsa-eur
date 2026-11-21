@@ -13,7 +13,7 @@ Opening a Generator card's edit form through a `propertiesEditRequest` (the ⌘K
 
 ## Where
 
-`pypsa-gui/frontend/src/layout/PropertiesPanel.tsx`, the cards' `propertiesEditRequest` effects: the form state is seeded before the asset's values are read.
+`pypsa-gui/frontend/src/layout/PropertiesPanel.tsx`, the cards' `propertiesEditRequest` effects (not yet diagnosed past that point).
 
 ## Why it is its own package
 
