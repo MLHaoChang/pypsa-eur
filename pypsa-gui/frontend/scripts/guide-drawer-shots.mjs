@@ -96,7 +96,7 @@ try {
       }
       // The guide's own store, through Vite's module URL (the app's instance).
       const openGuideById = id => p.evaluate(id => import('/src/catalogue/guideStore.ts').then(m => m.openGuide(id)), id)
-      const focusOnTrigger = () => p.evaluate(() => !!document.activeElement?.closest('[data-palette-trigger]'))
+      const focusOnTrigger = () => p.evaluate(() => !!document.activeElement?.closest('header button[title^="Command palette"]'))
 
       // 1. A full entry, from the palette (Shift+Enter on a Capacity row).
       await openPalette(QUERY)

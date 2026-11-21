@@ -204,17 +204,19 @@ describe('stacking, Esc and focus', () => {
   })
 
   it('an opener that is gone hands focus to the palette launcher', async () => {
+    const header = document.createElement('header')
     const trigger = document.createElement('button')
-    trigger.setAttribute('data-palette-trigger', '')
+    trigger.title = 'Command palette — switch projects (Ctrl+K)'
+    header.append(trigger)
     const opener = document.createElement('button')
-    document.body.append(trigger, opener)
+    document.body.append(header, opener)
     renderWith(<GuideDrawer />)
     open('generator.capacity', opener)
     await screen.findByTestId('guide-entry')
     opener.remove()
     fireEvent.click(screen.getByRole('button', { name: 'Close the guide' }))
     await waitFor(() => expect(document.activeElement).toBe(trigger))
-    trigger.remove()
+    header.remove()
   })
 
   it('Expert: over the Properties panel, whose form stays mounted with its unsaved input', async () => {

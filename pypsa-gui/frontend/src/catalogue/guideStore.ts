@@ -40,6 +40,9 @@ interface GuideState {
 const push = (history: GuideView[], v: GuideView | null): GuideView[] =>
   (v ? [...history, v].slice(-HISTORY_LIMIT) : history)
 
+/** The header's palette launcher (layout/AppHeader.tsx), found by its title (the header is snapshot-pinned). */
+export const PALETTE_TRIGGER = 'header button[title^="Command palette"]'
+
 /**
  * Where focus goes when the opener is gone (the palette's search field, a chat
  * message re-rendered away) or hidden: the palette launcher in the header. With
@@ -47,7 +50,7 @@ const push = (history: GuideView[], v: GuideView | null): GuideView[] =>
  */
 export function focusTargetAfterClose(opener: HTMLElement | null): HTMLElement | null {
   if (opener?.isConnected && !opener.closest('[hidden]')) return opener
-  return document.querySelector<HTMLElement>('[data-palette-trigger]')
+  return document.querySelector<HTMLElement>(PALETTE_TRIGGER)
 }
 
 function restoreFocus(opener: HTMLElement | null): void {

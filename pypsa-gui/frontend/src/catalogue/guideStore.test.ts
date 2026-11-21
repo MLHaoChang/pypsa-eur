@@ -46,9 +46,11 @@ describe('guide state', () => {
   })
 
   it('an opener that is gone or hidden falls back to the palette launcher', () => {
+    const header = document.createElement('header')
     const trigger = document.createElement('button')
-    trigger.setAttribute('data-palette-trigger', '')
-    document.body.append(trigger)
+    trigger.title = 'Command palette — switch projects (Ctrl+K)'
+    header.append(trigger)
+    document.body.append(header)
     const gone = document.createElement('button')
     expect(gone.isConnected).toBe(false)
     expect(focusTargetAfterClose(gone)).toBe(trigger)
