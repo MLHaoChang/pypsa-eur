@@ -18,6 +18,16 @@ log = logging.getLogger(__name__)
 UNNAMED = "Unnamed check"
 
 RULE_WORDS: dict[str, str] = {
+    "conc.ic.basis": "Comparison basis",
+    "conc.ic.counterfactual": "Comparison case",
+    "conc.kpi.lost_tonnes": "Lost concentrate",
+    "conc.kpi.npv": "Investment returns",
+    "conc.kpi.shed_level": "Load shed level",
+    "conc.mass_balance": "Ore mass balance",
+    "conc.motor_start": "Motor start",
+    "conc.n_1.site_transformer": "Site transformer failure",
+    "conc.process.units": "Process unit count",
+    "conc.restart": "Restart time",
     "dc.campus.contingency": "Campus survives a failure",
     "dc.campus.study": "Campus grid study",
     "dc.current_distortion": "Current distortion",
