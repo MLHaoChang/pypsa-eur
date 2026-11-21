@@ -1405,6 +1405,7 @@ CLEARANCE_CHANGED = "the torsional clearance changed since the run: rerun the gr
 UIF_ROW_COLUMNS = ("uif", "bus", "case", "machine")
 #: The resonance table's columns the least-margin row's note names.
 SUBSYNC_ROW_COLUMNS = ("f_comp_hz", "mode_hz", "machine", "case")
+SSTI_RECORD_UNREADABLE = "The SSTI screens' record is unreadable: rerun the grid study"
 
 
 def _finite_number(v) -> float | None:
@@ -1418,7 +1419,41 @@ def _ssti_shown(v) -> str:
     """A value the run wrote, as a note shows it: plainly, with an empty cell named."""
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return "an empty value"
+    if not isinstance(v, (str, int, float)):
+        return "an unreadable value"
     return str(v)
+
+
+def _ssti_verdict(screen: dict, verdicts: dict) -> tuple[str | None, str | None]:
+    """(the run's verdict, None) when it is one the map reads, else (None, why the row is unknown). A blank,
+    non-string or unknown verdict is refused, never raised on (GK A2 R2, B1)."""
+    verdict = screen.get("verdict")
+    if not isinstance(verdict, str):
+        return None, ("The screen gave no verdict" if verdict is None else "The screen's verdict is unreadable")
+    if not verdict.strip():
+        return None, "The screen gave no verdict"
+    if verdict not in verdicts:
+        return None, f"The screen returned {verdict}"
+    return verdict, None
+
+
+def _ssti_notes(notes) -> str:
+    """The engine's notes as one reason: a string is one note; a list joins its string entries; anything
+    else reads unreadable (B4)."""
+    if notes is None:
+        return ""
+    if isinstance(notes, str):
+        return notes
+    if not isinstance(notes, list):
+        return "the screen's notes are unreadable"
+    return "; ".join(x if isinstance(x, str) else "an unreadable note" for x in notes)
+
+
+def _ssti_hz(v) -> float | None:
+    """A frequency or margin the run wrote: a finite number, never a bool (B2, B3)."""
+    import pandas as pd
+
+    return None if pd.api.types.is_bool(v) else _num(v)
 
 
 def _ssti_say(text: str) -> str:
@@ -1436,6 +1471,8 @@ def _ssti_limit_source(screen: dict, what: str) -> tuple[str, bool]:
         return str(clause), False
     if clause:
         return f"{clause} ({source or 'assumed'})", True
+    if source == "code":
+        return f"The grid code's {what}, its clause not recorded by the run (assumed)", True
     return f"Assumed screening {what} (the grid code sets none)", True
 
 
@@ -1465,12 +1502,11 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
     limit = _finite_number(screen.get("threshold"))
     source, assumed_limit = _ssti_limit_source(screen, "threshold")
     unknown = dict(common, limit=limit, source=source, unit="UIF", project_value=None, verdict="unknown")
-    verdict = screen.get("verdict")
-    if verdict not in SSTI_VERDICTS[SSTI_UIF]:
-        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(f"The screen returned {_ssti_shown(verdict)}"),
-                    **unknown)
+    verdict, why = _ssti_verdict(screen, SSTI_VERDICTS[SSTI_UIF])
+    if why:
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(why), **unknown)
     if verdict == "not evaluated":
-        why = "; ".join(str(x) for x in screen.get("notes") or []) or "the screen was not evaluated"
+        why = _ssti_notes(screen.get("notes")) or "the screen was not evaluated"
         return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(why),
                     **dict(unknown, verdict=SSTI_VERDICTS[SSTI_UIF][verdict]))
     worst = _finite_number(screen.get("worst_uif"))
@@ -1530,10 +1566,9 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     limit = _finite_number(screen.get("clearance_hz"))
     source, _ = _ssti_limit_source(screen, "torsional clearance")
     unknown = dict(common, limit=limit, source=source, unit="Hz", project_value=None, verdict="unknown")
-    verdict = screen.get("verdict")
-    if verdict not in SSTI_VERDICTS[SUBSYNC_SR]:
-        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(f"The screen returned {_ssti_shown(verdict)}"),
-                    **unknown)
+    verdict, why = _ssti_verdict(screen, SSTI_VERDICTS[SUBSYNC_SR])
+    if why:
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(why), **unknown)
     if verdict in ("check", "not evaluated"):
         why = NO_MODES if verdict == "check" else NO_SERIES_CAP
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(why),
@@ -1550,7 +1585,7 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
                     note=_ssti_say("The run wrote no torsional margin for a series resonance"), **unknown)
     # Fail closed like the UIF row (GK A2 R2): a margin that is not a number, a least margin that
     # contradicts the run's verdict, or a least-margin row that cannot say where it sits reads unknown.
-    margins = [(_num(r["margin_hz"]), r) for _, r in series.iterrows()]
+    margins = [(_ssti_hz(r["margin_hz"]), r) for _, r in series.iterrows()]
     if bad := [r["margin_hz"] for m, r in margins if m is None]:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
             f"The run's resonance table has a torsional margin that is not a finite number ({_ssti_shown(bad[0])})"),
@@ -1563,9 +1598,14 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     if blank := [c for c in SUBSYNC_ROW_COLUMNS if c not in r or pd.isna(r[c]) or not str(r[c]).strip()]:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
             f"The run's resonance table's least-margin row has no {', '.join(blank)}"), **unknown)
+    f_comp, f_mode = _ssti_hz(r["f_comp_hz"]), _ssti_hz(r["mode_hz"])
+    if f_comp is None or f_mode is None:
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
+            "The run's resonance table's least-margin row has a frequency that is not a finite number "
+            f"({_ssti_shown(r['f_comp_hz'] if f_comp is None else r['mode_hz'])})"), **unknown)
     words = "below" if verdict == "flag" else "at or above"
-    note = (f"Least margin {margin:.4g} Hz: the electrical resonance's complement {r.get('f_comp_hz')} Hz "
-            f"against the torsional mode {r.get('mode_hz')} Hz of {r.get('machine')} ({r.get('case')}), {words} "
+    note = (f"Least margin {margin:.4g} Hz: the electrical resonance's complement {f_comp:g} Hz "
+            f"against the torsional mode {f_mode:g} Hz of {r['machine']} ({r['case']}), {words} "
             f"the clearance {limit:g} Hz. {SSTI_SCREENING}")
     return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], limit=limit, source=source, unit="Hz", rule=RULE_SUBSYNC,
                 project_value=margin, verdict=SSTI_VERDICTS[SUBSYNC_SR][verdict], note=note,
@@ -1597,17 +1637,19 @@ def _ssti_rows(inp: _Inputs) -> list[dict]:
 
     run = inp.dir / ce.SUBDIR / "run"
     error = _read_json(run / ce.SSTI_SCREENS_ERROR)
-    if isinstance(error, dict) or (run / ce.SSTI_SCREENS_ERROR).is_file():
-        text = (str(error.get("error") or "") or "no reason given" if isinstance(error, dict)
-                else "its error file is unreadable")
+    if isinstance(error, dict) or (run / ce.SSTI_SCREENS_ERROR).exists():
+        reason = error.get("error") if isinstance(error, dict) else None
+        text = ("its error file is unreadable" if not isinstance(error, dict)
+                else (reason.strip() or "no reason given") if isinstance(reason, str)
+                else "no reason given" if reason is None else "its error is unreadable")
         return all_unknown(f"The SSTI screens could not run: {text}")
     meta = _read_json(run / ce.SSTI_SCREENS_META)
     if not (run / ce.SSTI_SCREENS_META).is_file():
         ran = run.is_dir() and any(run.iterdir())
         return all_unknown("The grid study ran before the SSTI screens were added: rerun the grid study" if ran
                            else "No grid study with the SSTI screens yet: run the grid study")
-    if not (isinstance(meta, dict) and isinstance(meta.get("uif"), dict) and isinstance(meta.get("subsync"), dict)):
-        return all_unknown("The SSTI screens' record is unreadable: rerun the grid study")
+    if not isinstance(meta, dict):
+        return all_unknown(SSTI_RECORD_UNREADABLE)
 
     def table(name):
         try:
@@ -1615,11 +1657,18 @@ def _ssti_rows(inp: _Inputs) -> list[dict]:
         except (OSError, ValueError):
             return None
 
-    uif = _uif_row(inp, meta["uif"], table(SSTI_UIF_CSV), common)
+    # A defect in one screen's record blanks that screen's row only (GK A2 N1).
+    def unreadable(rid):
+        return _row(rid, _SSTI_REQ[rid], project_value=None, verdict="unknown",
+                    note=_ssti_say(SSTI_RECORD_UNREADABLE), **common)
+
+    uif = (_uif_row(inp, meta["uif"], table(SSTI_UIF_CSV), common) if isinstance(meta.get("uif"), dict)
+           else unreadable(SSTI_UIF))
     if (uif["verdict"] in ("pass", "warn") and _archetype(inp) == "off_grid" and _tie_open(inp)):
         uif.update(verdict="unknown", project_value=None,
                    note=_ssti_say(SSTI_ISLAND))
-    sub = _subsync_row(inp, meta["subsync"], table(SUBSYNC_RESONANCE_CSV), common)
+    sub = (_subsync_row(inp, meta["subsync"], table(SUBSYNC_RESONANCE_CSV), common)
+           if isinstance(meta.get("subsync"), dict) else unreadable(SUBSYNC_SR))
     ssci = _row(SSCI, _SSTI_REQ[SSCI], project_value=None, verdict="unknown",
                 note=_ssti_say(SSCI_REASON), **common)
     return [uif, sub, ssci]

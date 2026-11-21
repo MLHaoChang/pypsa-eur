@@ -172,7 +172,7 @@ def test_a_flag_warns_with_the_worst_uif_its_bus_and_the_assumed_threshold(tmp_p
     assert (
         row["assumed"] is True
         and row["section"] == "connection"
-        and row["rule"] == G.RULE_UIF
+        and row["rule"] == {"comparator": "<=", "otherwise": "warn", "tolerance": 0.0}
     )
     # the worst converter bus, not the PCC row (information only, its UIF is larger here)
     assert row["note"] == (
@@ -350,7 +350,10 @@ def test_a_series_resonance_flag_warns_with_the_least_margin(tmp_path):
         1.0,
         "Hz",
     )
-    assert row["rule"] == G.RULE_SUBSYNC and row["assumed"] is True
+    assert (
+        row["rule"] == {"comparator": ">=", "otherwise": "warn", "tolerance": 0.0}
+        and row["assumed"] is True
+    )
     assert (
         row["source"]
         == "Assumed screening torsional clearance (the grid code sets none)"
@@ -468,9 +471,7 @@ def test_a_run_from_before_the_stage_reads_unknown(tmp_path):
         )
 
 
-@pytest.mark.parametrize(
-    "raw", ["{not json", json.dumps({"uif": "x", "subsync": {}}), json.dumps([1])]
-)
+@pytest.mark.parametrize("raw", ["{not json", json.dumps([1])])
 def test_an_unreadable_record_reads_unknown(tmp_path, raw):
     _write(tmp_path, raw_meta=raw)
     for row in _three(_card(tmp_path)[0]):
@@ -538,10 +539,15 @@ def test_the_ids_are_unique_and_listed_where_their_siblings_are(tmp_path):
     assert {i: gated.get(i) for i in IDS} == dict.fromkeys(IDS, "warn")
     assert all(gate_words.RULE_WORDS[f"dc.{i}"] for i in IDS)
     registered = calc._registered()
-    assert (
-        registered["ssti_uif"] == G.RULE_UIF
-        and registered["subsync_series_resonance"] == G.RULE_SUBSYNC
-    )
+    assert registered["ssti_uif"] == {
+        "comparator": "<=",
+        "otherwise": "warn",
+        "tolerance": 0.0,
+    } and registered["subsync_series_resonance"] == {
+        "comparator": ">=",
+        "otherwise": "warn",
+        "tolerance": 0.0,
+    }
 
 
 # ── end to end: the real stage on a two-genset campus (R5) ────────────────────
@@ -720,13 +726,24 @@ def test_an_empty_run_directory_is_no_run(tmp_path):
         )
 
 
-def test_a_record_without_the_subsync_screen_is_unreadable(tmp_path):
-    _write(tmp_path, raw_meta=json.dumps({"uif": _uif_meta()}))
-    for row in _three(_card(tmp_path)[0]):
-        assert (
-            row["note"]
-            == f"The SSTI screens' record is unreadable: rerun the grid study. {SCREENING}"
-        )
+@pytest.mark.parametrize(
+    "meta, broken",
+    [
+        ({"uif": _uif_meta()}, "subsync_series_resonance"),
+        ({"uif": _uif_meta(), "subsync": "x"}, "subsync_series_resonance"),
+        ({"uif": "x", "subsync": _sub_meta()}, "ssti_uif"),
+    ],
+    ids=["no_subsync", "subsync_not_a_dict", "uif_not_a_dict"],
+)
+def test_a_broken_screen_record_blanks_its_own_row_only(tmp_path, meta, broken):
+    # GK A2 N1: one screen's contract error reads unknown for that screen alone
+    _write(tmp_path, raw_meta=json.dumps(meta))
+    rows = _card(tmp_path)[0]
+    assert rows[broken]["note"] == (
+        f"The SSTI screens' record is unreadable: rerun the grid study. {SCREENING}"
+    )
+    other = ({"ssti_uif", "subsync_series_resonance"} - {broken}).pop()
+    assert "record is unreadable" not in rows[other]["note"]
 
 
 @pytest.mark.parametrize(
@@ -736,7 +753,12 @@ def test_a_record_without_the_subsync_screen_is_unreadable(tmp_path):
         ("assumed", "TRGC 19 c", "TRGC 19 c (assumed)", True),
         (None, "TRGC 19 c", "TRGC 19 c (assumed)", True),
         ("extracted", "TRGC 19 c", "TRGC 19 c (extracted)", True),
-        ("code", None, "Assumed screening threshold (the grid code sets none)", True),
+        (
+            "code",
+            None,
+            "The grid code's threshold, its clause not recorded by the run (assumed)",
+            True,
+        ),
     ],
     ids=["code", "assumed_clause", "no_source", "extracted", "code_without_clause"],
 )
@@ -1063,3 +1085,152 @@ def test_a_worst_uif_that_contradicts_the_verdict_reads_unknown(
 )
 def test_a_note_is_one_sentence_whatever_the_engine_wrote(text, want):
     assert G._ssti_say(text) == f"{want}. {SCREENING}"
+
+
+# ── GK A2 (6) review: B1-B5, N2, N4 ──────────────────────────────────────────
+
+
+def test_the_verdict_maps_are_pinned_whole():
+    # B5 (#1767/#1790): the map compared whole against a hand-written one, so an added or changed
+    # entry fails here
+    assert G.SSTI_VERDICTS == {
+        "ssti_uif": {"flag": "warn", "clear": "pass", "not evaluated": "unknown"},
+        "subsync_series_resonance": {
+            "flag": "warn",
+            "clear": "pass",
+            "check": "unknown",
+            "not evaluated": "unknown",
+        },
+    }
+
+
+_VERDICT_CASES = [
+    (["flag"], "The screen's verdict is unreadable"),
+    ({"x": 1}, "The screen's verdict is unreadable"),
+    (1, "The screen's verdict is unreadable"),
+    (None, "The screen gave no verdict"),
+    ("", "The screen gave no verdict"),
+    ("  ", "The screen gave no verdict"),
+]
+_VERDICT_IDS = ["list", "dict", "number", "none", "empty", "blank"]
+
+
+@pytest.mark.parametrize("verdict, why", _VERDICT_CASES, ids=_VERDICT_IDS)
+def test_a_uif_verdict_that_is_not_a_word_reads_unknown(tmp_path, verdict, why):
+    # B1: never a TypeError that takes the whole scorecard down
+    _write(tmp_path, uif=_uif_meta(verdict))
+    rows, out = _card(tmp_path)
+    assert rows["ssti_uif"]["verdict"] == "unknown"
+    assert rows["ssti_uif"]["note"] == f"{why}. {SCREENING}"
+    assert rows["subsync_series_resonance"]["note"].startswith("Not evaluated")
+
+
+@pytest.mark.parametrize("verdict, why", _VERDICT_CASES, ids=_VERDICT_IDS)
+def test_a_subsync_verdict_that_is_not_a_word_reads_unknown(tmp_path, verdict, why):
+    _write(tmp_path, subsync=_sub_meta(verdict))
+    rows = _card(tmp_path)[0]
+    assert rows["subsync_series_resonance"]["verdict"] == "unknown"
+    assert rows["subsync_series_resonance"]["note"] == f"{why}. {SCREENING}"
+    assert rows["ssti_uif"]["verdict"] == "warn"
+
+
+def test_an_all_bool_margin_column_reads_unknown(tmp_path):
+    # B2: True is not 1 Hz
+    rows = [
+        {**r, "margin_hz": True} if r["kind"] == SERIES else r
+        for r in _resonance((0.4, 3.0), "clear")
+    ]
+    rows = [r for r in rows if r["kind"] == SERIES]
+    _write(tmp_path, subsync=_sub_meta("clear"), resonance=rows)
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"] == (
+        "The run's resonance table has a torsional margin that is not a finite number"
+        f" (True). {SCREENING}"
+    )
+
+
+@pytest.mark.parametrize(
+    "changes, shown",
+    [
+        ({"f_comp_hz": "abc"}, "abc"),
+        ({"mode_hz": "xyz"}, "xyz"),
+        ({"mode_hz": "inf"}, "inf"),
+    ],
+    ids=["text_complement", "text_mode", "infinite_mode"],
+)
+def test_a_frequency_that_is_not_a_number_reads_unknown(tmp_path, changes, shown):
+    # B3
+    _write(tmp_path, subsync=_sub_meta("flag"), resonance=_bad_resonance(**changes))
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown"
+    assert row["note"] == (
+        "The run's resonance table's least-margin row has a frequency that is not a finite"
+        f" number ({shown}). {SCREENING}"
+    )
+
+
+def test_a_judged_subsync_note_shows_the_frequencies_as_numbers(tmp_path):
+    _write(
+        tmp_path, subsync=_sub_meta("flag"), resonance=_resonance((0.4, 3.0), "flag")
+    )
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["note"] == (
+        "Least margin 0.4 Hz: the electrical resonance's complement 20.4 Hz against the"
+        " torsional mode 20 Hz of GAS (max), below the clearance 1 Hz. " + SCREENING
+    )
+
+
+@pytest.mark.parametrize(
+    "error, why",
+    [
+        ({"a": [1]}, "its error is unreadable"),
+        (["x"], "its error is unreadable"),
+        (7, "its error is unreadable"),
+        ("  ", "no reason given"),
+        ("KeyError", "KeyError"),
+    ],
+    ids=["dict", "list", "number", "blank", "text"],
+)
+def test_an_error_that_is_not_text_never_shows_its_repr(tmp_path, error, why):
+    # B4
+    _write(tmp_path)
+    (_run_dir(tmp_path) / ce.SSTI_SCREENS_ERROR).write_text(
+        json.dumps({"error": error})
+    )
+    for row in _three(_card(tmp_path)[0]):
+        assert row["note"] == f"The SSTI screens could not run: {why}. {SCREENING}"
+
+
+@pytest.mark.parametrize(
+    "notes, why",
+    [
+        ("one note", "One note"),
+        ([{"k": None}, "no genset"], "An unreadable note; no genset"),
+        ({"k": 1}, "The screen's notes are unreadable"),
+        (7, "The screen's notes are unreadable"),
+    ],
+    ids=["string", "dict_entry", "dict", "number"],
+)
+def test_the_engines_notes_never_show_a_repr(tmp_path, notes, why):
+    # B4: a string is one note, never split into letters
+    uif = dict(_uif_meta("not evaluated", worst=None), notes=notes)
+    _write(tmp_path, uif=uif, uif_rows=[])
+    row = _card(tmp_path)[0]["ssti_uif"]
+    assert row["verdict"] == "unknown" and row["note"] == f"{why}. {SCREENING}"
+
+
+def test_an_error_path_that_is_a_directory_reads_unknown(tmp_path):
+    # N4: the rows never stay judged beside an error entry they cannot read
+    _write(tmp_path)
+    (_run_dir(tmp_path) / ce.SSTI_SCREENS_ERROR).mkdir()
+    for row in _three(_card(tmp_path)[0]):
+        assert row["note"] == (
+            f"The SSTI screens could not run: its error file is unreadable. {SCREENING}"
+        )
+
+
+def test_a_non_scalar_value_in_a_note_is_unreadable():
+    assert G._ssti_shown({"a": 1}) == "an unreadable value"
+    assert G._ssti_shown([1]) == "an unreadable value"
+    assert G._ssti_shown("0.3") == "0.3"
