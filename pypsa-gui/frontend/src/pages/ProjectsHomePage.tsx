@@ -20,6 +20,7 @@ import { formatRelativeTime, invalidateNetworkQueries } from '../utils/projectAc
 import { resolveScenType } from '../utils/scenarioType'
 import { DeleteProjectDialog, InlineRename, ProjectCardMenu } from './projectsHome/ProjectCardMenu'
 import { hasAdminConsoleAccess } from './admin/helpers'
+import { WorkbookImportHost } from '../components/workbook/WorkbookImportDialog'
 import {
   countScenarios,
   findProjectByIdentifier,
@@ -790,6 +791,7 @@ export default function ProjectsHomePage() {
       )}
 
       <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} />
+      <WorkbookImportHost />
 
       {wizardTab && (
         <NewProjectWizard

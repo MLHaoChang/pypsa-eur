@@ -501,7 +501,7 @@ def create_project(db, user, name: str, prep: Prepared):
                 500,
                 {
                     "error_kind": "import_write_failed",
-                    "message": f"The project could not be written ({type(exc).__name__}); nothing was created.",
+                    "message": "The project could not be written; nothing was created.",
                 },
             ) from exc
         raise
