@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The data-centre business case offers "Contracted IT capacity" and "IT energy served" again: the routes bind the solve with the data-centre load the template form stored, so the colocation and GPU-cloud presets run.
