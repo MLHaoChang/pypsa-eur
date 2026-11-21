@@ -39,7 +39,11 @@ def _gs():
         from gridspine.ingest import excel_export, excel_import, excel_layout
     except ImportError as exc:  # pragma: no cover - build-shape branch
         raise HTTPException(
-            503, "The Excel input workbook is not available in this build."
+            503,
+            {
+                "error_kind": "excel_workbook_unavailable",
+                "message": "The Excel input workbook is not available in this build.",
+            },
         ) from exc
     return excel_layout, excel_import, excel_export
 
@@ -116,7 +120,10 @@ def _saved_solver_config(directory: pathlib.Path):
     except (OSError, TypeError, ValueError) as exc:
         raise HTTPException(
             422,
-            "The project's saved solver settings cannot be read: fix or re-save them.",
+            {
+                "error_kind": "saved_solver_config_unreadable",
+                "message": "The project's saved solver settings cannot be read: fix or re-save them.",
+            },
         ) from exc
 
 
@@ -134,7 +141,11 @@ def export_bytes(directory: pathlib.Path, name: str) -> bytes:
             user_ts = json.loads(path.read_text("utf-8"))
         except (OSError, ValueError) as exc:
             raise HTTPException(
-                422, "The project's saved time series (user_ts.json) cannot be read."
+                422,
+                {
+                    "error_kind": "saved_time_series_unreadable",
+                    "message": "The project's saved time series (user_ts.json) cannot be read.",
+                },
             ) from exc
     cfg = _saved_solver_config(directory)
     solver = {k: getattr(cfg, k) for k in SOLVER_KEYS}
@@ -154,6 +165,10 @@ class Prepared:
     sha256: str
     input_workbook: bool
     filename: str
+    #: A new project's solver settings and saved time series, built and checked by `prepare`.
+    solver_config: object = None
+    user_ts_json: str = ""
+    user_ts_count: int = 0
 
     @property
     def suggested_name(self) -> str:
@@ -178,6 +193,33 @@ def workbook_rate(sidecars: dict) -> float:
             f"The workbook's discount rate cannot be used ({problem}); nothing was imported."
         )
     return float(rate)
+
+
+def _new_project_sidecars(sidecars: dict) -> tuple[object, str, int]:
+    """A new project's solver settings, saved time series (as user_ts.json's text) and their count; a malformed sidecar is 422 `import_unreadable`."""
+    from routers.projects import _solver_config_from_dict
+
+    L = _gs()[0]
+    try:
+        cfg = _solver_config_from_dict(sidecars.get(L.SIDECAR_SOLVER) or {})
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise _unreadable(
+            "The workbook's solver settings cannot be read; nothing was imported."
+        ) from exc
+    user_ts = sidecars.get(L.SIDECAR_USER_TS) or {}
+    try:
+        count = sum(
+            len(a)
+            for k, v in user_ts.items()
+            if not k.startswith("$")
+            for a in v.values()
+        )
+        text = json.dumps(user_ts) if user_ts else ""
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise _unreadable(
+            "The workbook's uploaded time series cannot be read; nothing was imported."
+        ) from exc
+    return cfg, text, count
 
 
 def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared:
@@ -236,12 +278,21 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
         )
     _refuse_reserved_buses(n)
     _refuse_invalid_names(n)
+    # A new project's sidecars are checked here, before any row exists (all or nothing).
+    checked = _new_project_sidecars(res.sidecars) if new_project else (None, "", 0)
     rate = workbook_rate(res.sidecars) if new_project else None
-    rederived = rederive_imported_parts(n, global_rate=rate)
+    rederived = rederive_imported_parts(n, global_rate=rate, new_project=new_project)
     # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
     normalise_eh_columns(n)
     return Prepared(
-        n, dict(res.sidecars), res.report, rederived, digest, input_workbook, filename
+        n,
+        dict(res.sidecars),
+        res.report,
+        rederived,
+        digest,
+        input_workbook,
+        filename,
+        *checked,
     )
 
 
@@ -260,22 +311,21 @@ def payload(prep: Prepared) -> dict:
 def _write_files(dest: pathlib.Path, prep: Prepared, name: str) -> None:
     from datetime import UTC, datetime
 
-    from routers.projects import _solver_config_from_dict, _write_meta
+    from routers.projects import _write_meta
     from services.atomic_io import atomic_write_text, atomic_write_with
     from services.pypsa_service import PyPSAService
 
-    L = _gs()[0]
     n = prep.network
     n.name = name
     with PyPSAService.get_netcdf_io_lock():
         atomic_write_with(
             dest / "network.nc", lambda p: PyPSAService.export_network_to_netcdf(n, p)
         )
-    cfg = _solver_config_from_dict(prep.sidecars.get(L.SIDECAR_SOLVER) or {})
-    atomic_write_text(dest / "solver_config.json", json.dumps(asdict(cfg), indent=2))
-    user_ts = prep.sidecars.get(L.SIDECAR_USER_TS) or {}
-    if user_ts:
-        atomic_write_text(dest / "user_ts.json", json.dumps(user_ts))
+    atomic_write_text(
+        dest / "solver_config.json", json.dumps(asdict(prep.solver_config), indent=2)
+    )
+    if prep.user_ts_json:
+        atomic_write_text(dest / "user_ts.json", prep.user_ts_json)
     now = datetime.now(tz=UTC).isoformat()
     _write_meta(
         dest,
@@ -288,12 +338,7 @@ def _write_files(dest: pathlib.Path, prep: Prepared, name: str) -> None:
             "has_results": False,
             "condition": None,
             "solve_time": None,
-            "user_ts_count": sum(
-                len(a)
-                for k, v in user_ts.items()
-                if not k.startswith("$")
-                for a in v.values()
-            ),
+            "user_ts_count": prep.user_ts_count,
             "network_revision": 0,
             "parent_project": None,
             "scenario_description": None,
@@ -305,23 +350,25 @@ def create_project(db, user, name: str, prep: Prepared):
     """
     A new project row and folder holding the prepared network, all or nothing.
 
-    Every check has run (`prepare`) before the row exists. `create_root` refuses a
-    taken name (409) before any folder is made, and a fresh folder is never an
-    existing one, so a collision overwrites nothing. A failure after the row exists
+    Every check has run (`prepare`, the sidecars included) before the row exists.
+    `create_root` refuses a taken name (409) before any folder is made, and a fresh
+    folder is never an existing one, so a collision overwrites nothing. A failure after the row exists
     removes the row and the folder this call made.
     """
     from services import project_registry
 
     project = project_registry.create_root(db, user, name)
-    dest = project_registry.project_dir(project)
     made = False
     try:
+        dest = project_registry.project_dir(project)
         dest.mkdir(parents=True, exist_ok=False)
         made = True
         _write_files(dest, prep, project.name)
     except BaseException as exc:
         if made:
             shutil.rmtree(dest, ignore_errors=True)
+        # A failed flush or statement leaves the session unusable until rolled back.
+        db.rollback()
         project_registry.delete_project_row(db, project)
         if isinstance(exc, Exception) and not isinstance(exc, HTTPException):
             logger.warning(

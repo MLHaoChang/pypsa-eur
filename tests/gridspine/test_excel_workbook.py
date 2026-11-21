@@ -2235,9 +2235,17 @@ def test_the_workbook_cell_cap_counts_every_sheet_s_declared_size(
     monkeypatch.setitem(L.LIMITS, "workbook_cells", total)
     _read(path)
     monkeypatch.setitem(L.LIMITS, "workbook_cells", total - 1)
+    from gridspine.ingest import excel_import
+
+    scanned = []
+    real = excel_import._capped
+    monkeypatch.setattr(
+        excel_import, "_capped", lambda rows: scanned.append(1) or real(rows)
+    )
     with pytest.raises(L.ImportLimitError) as e:
         _read(path)
     assert e.value.limit == "workbook_cells"
+    assert (e.value.value, scanned) == (total, []), "refused by the scanned count"
 
 
 def test_the_workbook_cell_cap_holds_when_the_declared_sizes_lie_low(

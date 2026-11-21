@@ -1025,6 +1025,27 @@ def test_the_annuity_refusal_names_only_the_priced_parts_lifetimes():
     )
 
 
+def test_a_new_project_import_s_refusal_says_nothing_was_imported():
+    """The Excel workbook's new-project path rewords the tail; every other caller keeps it byte for byte."""
+    from fastapi import HTTPException
+
+    from services.network_crud import rederive_imported_parts
+
+    def message(**kw):
+        n = _network()
+        n.storage_units.at["bess2", "inv_power_overnight"] = float("nan")
+        n.storage_units.at["bess2", "inv_power_lifetime"] = 50.0
+        n.storage_units.at["bess2", "inv_energy_lifetime"] = 300.0
+        with pytest.raises(HTTPException) as exc:
+            rederive_imported_parts(n, global_rate=10, **kw)
+        assert exc.value.detail["error_kind"] == "invalid_edit_value"
+        return exc.value.detail["message"]
+
+    head = "Storage 'bess2': its investment parts cannot be annuitised at rate 10 over 300 years. "
+    assert message() == message(new_project=False) == head + "The open network is unchanged."
+    assert message(new_project=True) == head + "Nothing was imported."
+
+
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), 10**400])
 def test_a_rate_that_is_not_a_finite_number_says_so(value):
     from services.solver.periodized_costs import discount_rate_problem

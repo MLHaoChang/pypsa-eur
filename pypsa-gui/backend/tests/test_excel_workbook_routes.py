@@ -313,7 +313,68 @@ def test_a_build_without_gridspine_answers_503(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "gridspine.ingest.excel_export", None)
     monkeypatch.delattr(gridspine.ingest, "excel_export")
     r = client.get("/api/workbook/template")
-    assert r.status_code == 503 and "not available in this build" in r.text
+    assert r.status_code == 503 and _kind(r) == "excel_workbook_unavailable", r.text
+    assert "not available in this build" in r.json()["detail"]["message"]
+
+
+def test_a_new_project_s_part_refusal_says_nothing_was_imported(
+    client, install_network, store
+):
+    """N3: the workbook path never touches the open network, so it does not say it is unchanged."""
+    n = _network(stale=False)
+    n.storage_units.loc["s", "inv_power_overnight"] = float("inf")
+    install_network(_network(stale=False))
+    before = store()
+    for r in (
+        _preview(client, _workbook(n)),
+        _import(client, _workbook(n), name="Inf"),
+    ):
+        assert r.status_code == 422 and _kind(r) == "invalid_edit_value", r.text
+        message = r.json()["detail"]["message"]
+        assert (
+            message.endswith(". Nothing was imported.")
+            and "open network" not in message
+        )
+    assert store() == before
+
+
+# ── G4: who may preview and import ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize("route", ["preview", "import"])
+def test_a_signed_out_caller_is_401_and_creates_nothing(
+    client, anon_client, store, monkeypatch, route
+):
+    """The middleware answers 401 first; the route's own `require_user` holds behind it."""
+    import main
+    from deps import optional_user
+
+    data = _workbook()
+    send = _preview if route == "preview" else _import
+    before = store()
+    assert send(anon_client, data).status_code == 401
+    main.app.dependency_overrides[optional_user] = lambda: None
+    try:
+        r = send(client, data)
+    finally:
+        main.app.dependency_overrides.pop(optional_user, None)
+    assert r.status_code == 401 and r.json()["detail"] == "Authentication required"
+    assert store() == before
+
+
+def test_a_caller_with_no_organization_is_403_and_creates_nothing(_auth_db, store):
+    from tests.test_changelog_scoping import _user
+
+    orgless, raw = _user(_auth_db, org_id=None)
+    try:
+        before = store()
+        assert _preview(orgless, _workbook()).status_code == 200
+        r = _import(orgless, _workbook(), name="No org")
+        assert r.status_code == 403, r.text
+        assert r.json()["detail"] == "User is not a member of any organization"
+        assert store() == before
+    finally:
+        raw.__exit__(None, None, None)
 
 
 # ── G2: the open network's gates do not apply, because it is never touched ──
@@ -438,6 +499,45 @@ def test_a_failed_sidecar_write_removes_the_row_and_the_folder(
     before = store()
     r = _import(client, _workbook(), name="Half written")
     assert r.status_code == 500 and _kind(r) == "import_write_failed", r.text
+    assert store() == before
+
+
+@pytest.mark.parametrize(
+    "sidecar,bad",
+    [
+        ("solver_config.json", ["not", "a mapping"]),
+        ("user_ts.json", {"loads": ["not", "a mapping"]}),
+        ("user_ts.json", {"loads": {"p_set": {"L1": object()}}}),
+    ],
+    ids=["solver-not-a-mapping", "user-ts-not-a-mapping", "user-ts-not-json"],
+)
+def test_a_malformed_sidecar_is_refused_before_the_row_exists(
+    client, store, monkeypatch, sidecar, bad
+):
+    """N2: the sidecars are checked in `prepare`, so a bad one is a typed 422, not a 500 after the row."""
+    from gridspine.ingest import excel_import
+
+    from services import project_registry
+
+    real = excel_import.read_excel
+
+    def malformed(*a, **k):
+        res = real(*a, **k)
+        res.sidecars[sidecar] = bad
+        return res
+
+    def no_row(*a, **k):
+        pytest.fail("a project row was created for a malformed sidecar")
+
+    monkeypatch.setattr(excel_import, "read_excel", malformed)
+    monkeypatch.setattr(project_registry, "create_root", no_row)
+    before = store()
+    for r in (
+        _preview(client, _workbook()),
+        _import(client, _workbook(), name="Bad sidecar"),
+    ):
+        assert r.status_code == 422 and _kind(r) == "import_unreadable", r.text
+        assert r.json()["detail"]["message"].endswith("nothing was imported.")
     assert store() == before
 
 
@@ -646,11 +746,18 @@ def test_a_project_s_saved_sidecars_are_read_or_refused_by_name(
         assert r.status_code == 200, r.text
         assert _preview(client, r.content).status_code == 200
     else:
-        words = {
-            "solver_config.json": "saved solver settings cannot be read",
-            "user_ts.json": "saved time series (user_ts.json) cannot be read",
+        kind, words = {
+            "solver_config.json": (
+                "saved_solver_config_unreadable",
+                "saved solver settings cannot be read",
+            ),
+            "user_ts.json": (
+                "saved_time_series_unreadable",
+                "saved time series (user_ts.json) cannot be read",
+            ),
         }[broken]
-        assert r.status_code == 422 and words in r.json()["detail"], r.text
+        assert r.status_code == 422 and _kind(r) == kind, r.text
+        assert words in r.json()["detail"]["message"]
 
 
 def test_a_cross_org_workbook_is_the_same_404_as_no_project(

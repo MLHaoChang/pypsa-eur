@@ -116,8 +116,7 @@ def allocate_storage_path(
     `exclude` drops names the caller knows are its own (a rename excludes the
     project's current directory, or a no-op rename suffixes itself).
     """
-    root = Path(get_settings().projects_root)
-    resolved_root = root.resolve()
+    resolved_root = os.path.realpath(get_settings().projects_root)
     mine = {fold(entry) for entry in exclude}
     taken = {entry for entry in taken_names(db, org_id, org_segment) if fold(entry) not in mine}
     for _ in range(8):
@@ -125,16 +124,22 @@ def allocate_storage_path(
             org_id, project_id, name, taken, org_segment=org_segment
         )
         # A barrier behind `safe_dir_name`: whatever reaches here (a name, a
-        # symlink already in the root) must resolve inside `projects_root`.
-        if not (resolved_root / relative).resolve().is_relative_to(resolved_root):
+        # symlink already in the root) must resolve strictly inside
+        # `projects_root`, never to the root itself.
+        full = os.path.realpath(os.path.join(resolved_root, relative))
+        if not full.startswith(resolved_root + os.sep):
             raise HTTPException(
-                status_code=400, detail=f"'{name}' does not make a project folder name"
+                status_code=400,
+                detail={
+                    "error_kind": "invalid_project_folder",
+                    "message": f"'{name}' does not make a project folder name.",
+                },
             )
         # `exclude` names are the CALLER'S OWN directory, so of course it
         # exists — a rename to a name that sanitises back to the current
         # directory must land on it, not allocate ` (2)` and move the data for
         # nothing.
-        if fold(relative.name) in mine or not (root / relative).exists():
+        if fold(relative.name) in mine or not os.path.exists(full):
             return relative
         taken.add(relative.name)
     raise HTTPException(
