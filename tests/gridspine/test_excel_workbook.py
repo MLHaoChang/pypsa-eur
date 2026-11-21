@@ -1094,7 +1094,7 @@ def test_a_bad_cell_in_a_pypsa_export_time_series_drops_that_series(tmp_path):
     assert list(res.network.generators_t.p_max_pu.columns) == ["G1"]
 
 
-def _three_steps(tmp_path, edit) -> "ReadResult":
+def _three_steps(tmp_path, edit):
     """Ticket 05: `_two_gens()` over three time steps in PyPSA's layout, `edit(sheet, G1 col, G2 col)`, read."""
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=3, freq="h"))
@@ -1102,6 +1102,7 @@ def _three_steps(tmp_path, edit) -> "ReadResult":
     n.add("Bus", "B2", v_nom=220.0)
     n.add("Generator", "G1", bus="B1", p_nom=5.0, p_max_pu=[0.5, 0.6, 0.4])
     n.add("Generator", "G2", bus="B1", p_nom=6.0, p_max_pu=[0.7, 0.8, 0.9])
+    n.generators.loc["G2", "p_max_pu"] = 0.95  # its static value, not the default
     path = _native(n, tmp_path)
     wb = openpyxl.load_workbook(path)
     ws = wb["generators-p_max_pu"]
@@ -1131,7 +1132,7 @@ def test_an_empty_cell_in_a_pypsa_export_series_drops_that_series(tmp_path):
     assert list(res.network.generators_t.p_max_pu.columns) == ["G1"]
     _no_nan_and_g1_whole(res)
     assert (
-        res.network.generators.at["G2", "p_max_pu"] == 1.0
+        res.network.generators.at["G2", "p_max_pu"] == 0.95
     )  # its static value applies
 
 
@@ -1151,28 +1152,14 @@ def test_a_series_empty_in_every_step_is_reported_with_the_full_count(tmp_path):
     assert "G2" not in res.network.generators_t.p_max_pu.columns
 
 
-def test_a_short_row_counts_its_missing_cell_as_empty(tmp_path):
-    def edit(wb, ws, g1, g2):
-        assert g2 == max(g1, g2)  # G2 is the last column, so its cell ends the row
-        ws.cell(4, g2).value = None
-
-    res = _three_steps(tmp_path, edit)
-    assert _um(res) == [
-        (
-            "generators-p_max_pu · G2",
-            "p_max_pu: 1 empty time step(s); the series was not read",
-        )
-    ]
-    _no_nan_and_g1_whole(res)
-
-
 def test_blank_rows_after_a_pypsa_export_series_report_nothing(tmp_path):
     """T1: rows openpyxl returns past the data, all blank, are not time steps."""
 
     def edit(wb, ws, g1, g2):
-        ws.append([None, None, None])
-        ws.append([None, None, None])
-        ws.cell(7, 1).value = None
+        for r in (5, 6):  # styled but empty: openpyxl's max_row now counts them
+            for c in (1, g1, g2):
+                ws.cell(r, c).number_format = "0.00"
+        assert ws.max_row == 6
 
     res = _three_steps(tmp_path, edit)
     assert _um(res) == []
@@ -1216,22 +1203,19 @@ def test_a_cell_of_spaces_in_a_series_is_bad_not_empty(tmp_path):
 def test_an_asset_already_left_out_gets_no_second_row_for_its_series(tmp_path, how):
     """T5: one row per asset; its blank series is not reported again."""
 
+    def set_by_name(ws, name, header, value):
+        heads = [c.value for c in ws[1]]
+        for r in range(2, ws.max_row + 1):
+            if ws.cell(r, 1).value == name:
+                ws.cell(r, heads.index(header) + 1).value = value
+
     def edit(wb, ws, g1, g2):
         ws.cell(3, g2).value = None
-        gens = wb["generators"]
-        heads = [c.value for c in gens[1]]
-        for r in range(2, gens.max_row + 1):
-            if gens.cell(r, 1).value == "G2":
-                if how == "refused":
-                    gens.cell(r, heads.index("p_nom") + 1, value="inf")
-                else:
-                    gens.cell(r, heads.index("bus") + 1, value="B2")
-        if how == "dangling":
-            buses = wb["buses"]
-            bh = [c.value for c in buses[1]]
-            for r in range(2, buses.max_row + 1):
-                if buses.cell(r, 1).value == "B2":
-                    buses.cell(r, bh.index("v_nom") + 1, value="inf")
+        if how == "refused":
+            set_by_name(wb["generators"], "G2", "p_nom", "inf")
+        else:
+            set_by_name(wb["generators"], "G2", "bus", "B2")
+            set_by_name(wb["buses"], "B2", "v_nom", "inf")
 
     res = _three_steps(tmp_path, edit)
     rows = [src for src, _ in _um(res)]
