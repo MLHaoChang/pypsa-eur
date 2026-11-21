@@ -101,15 +101,15 @@ LCOE = {"lcoe_nominal": (10, "USD/MWh"), "lcoe_real": (8, "USD/MWh")}
 # Residuals 70 and 100 MW at weight 2: LOLP 0.625 both hours, LOLE 2.5 h; EUE 21.25 + 40 = 61.25
 # per unit weight, 122.5 MWh.
 COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screening_lolp_max": (0.625, "probability")}
-# The data-centre template's saved scorecard as the route reads it (22 rows), with the BESS at the
+# The data-centre template's saved scorecard as the route reads it (25 rows), with the BESS at the
 # size a solve leaves (p_nom_opt 10 MW, set by the pilot fixture). Two rows a declared rule checks:
 # "scr" 250 / (4 + 40 + 10) MVA (PV, UPS battery, BESS; derived) = 4.63 >= 3.0 → pass, and
-# "reactive_range" 4.60 < 19.2 Mvar → warn. The other 20 are unknown (ramp, voltage change, infrequent voltage change,
+# "reactive_range" 4.60 < 19.2 Mvar → warn. The other 23 are unknown (ramp, voltage change, infrequent voltage change,
 # motor start with no process unit, voltage unbalance, the P–V and Q–V voltage stability margins
-# before any campus run), not scalar (the peak, oscillation, LOLE, harmonic distortion, flicker,
+# and the SSTI UIF, series-resonance and SSCI screens before any campus run), not scalar (the peak, oscillation, LOLE, harmonic distortion, flicker,
 # current distortion) or categorical (frequency support, four dynamic rows, grid former, ride-through).
 GRID = {"checked_pass": (1, "rows"), "checked_warn": (1, "rows"), "checked_fail": (0, "rows"),
-        "not_checked": (20, "rows")}
+        "not_checked": (23, "rows")}
 # Computed on demand from the current network or saved files: nothing to go stale.
 ON_DEMAND = {"copt-screening/1", "grid-readiness/1"}
 PROFILE_METRICS = {
