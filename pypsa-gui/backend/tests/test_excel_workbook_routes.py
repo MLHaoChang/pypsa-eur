@@ -801,7 +801,9 @@ def test_a_project_s_own_outage_columns_round_trip_with_nothing_left_out(
         40.0,
     ]
     n.storage_units.loc["s", ["outage_rate_value", "mttr_hours"]] = [0.02, 12.0]
-    n.add("Generator", "G2", bus="B1", p_nom=5.0)  # no outage values: blank cells, not a refusal
+    n.add(
+        "Generator", "G2", bus="B1", p_nom=5.0
+    )  # no outage values: blank cells, not a refusal
     install_network(n)
     session_ctx(client)
     assert client.post("/api/projects/WB Outages").status_code == 200
@@ -859,12 +861,24 @@ def test_the_form_columns_a_workbook_carries_are_pinned():
     ("cls", "key", "why"),
     [
         ("Generator", "p_nom", "a PyPSA attribute"),
-        ("StorageUnit", "inv_power_overnight", "an investment part, read as a custom column"),
+        (
+            "StorageUnit",
+            "inv_power_overnight",
+            "an investment part, read as a custom column",
+        ),
         ("Link", "eh_process", "an eh_* tag, read as a custom column"),
-        ("Generator", "p_max_pu_includes_outages", "the outage flag, read as a custom column"),
+        (
+            "Generator",
+            "p_max_pu_includes_outages",
+            "the outage flag, read as a custom column",
+        ),
         ("Link", "bus2", "a bus reference"),
         ("Link", "efficiency2", "a Link port column"),
-        ("Transformer", "v_nom_0", "shown by the form, never written by the single edit"),
+        (
+            "Transformer",
+            "v_nom_0",
+            "shown by the form, never written by the single edit",
+        ),
         ("GlobalConstraint", "carrier", "not declared by a Create model"),
     ],
 )

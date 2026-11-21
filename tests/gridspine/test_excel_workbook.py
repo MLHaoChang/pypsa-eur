@@ -1375,7 +1375,10 @@ def test_a_size_unit_column_on_a_sheet_without_a_size_is_reported(tmp_path):
             ws.cell(r, c).value = v
 
     res = _edit(_write(_network(False), tmp_path), fn)
-    assert ("Lines · Size unit", "its hidden model name “~size_unit” is not one Lines reads; the column was not read") in _um(res)
+    assert (
+        "Lines · Size unit",
+        "its hidden model name “~size_unit” is not one Lines reads; the column was not read",
+    ) in _um(res)
 
 
 def test_a_missing_weighting_column_keeps_the_default(tmp_path):
@@ -1480,7 +1483,10 @@ def test_read_excel_takes_a_plain_string_path_and_no_options(tmp_path):
     res = read_excel(str(path))
     assert res.report.source_files == ["w.xlsx"]
     # Without the allow-list, the custom columns are reported, never set.
-    assert any("is not one Generators reads; the column was not read" in why for _, why in _um(res))
+    assert any(
+        "is not one Generators reads; the column was not read" in why
+        for _, why in _um(res)
+    )
     assert "eh_flag" not in res.network.generators.columns
 
 
@@ -1565,7 +1571,10 @@ def test_a_custom_column_off_the_allow_list_is_exported_and_reported_on_import(
     n = _network(False)
     n.loads["site_note"] = ["north yard"]
     res = _read(_write(n, tmp_path))
-    assert ("Loads · Site note", "its hidden model name “site_note” is not one Loads reads; the column was not read") in _um(res)
+    assert (
+        "Loads · Site note",
+        "its hidden model name “site_note” is not one Loads reads; the column was not read",
+    ) in _um(res)
     assert "site_note" not in res.network.loads.columns
 
 

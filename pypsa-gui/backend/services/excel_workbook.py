@@ -78,7 +78,9 @@ def catalogue() -> dict:
 # a Link's extra ports follow the port rule (`network_crud._link_port_extras`), and a transformer's
 # winding voltages are read from its buses (`update_transformer` excludes them from the write).
 _NOT_WRITTEN = {
-    "Link": frozenset({"bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"}),
+    "Link": frozenset(
+        {"bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"}
+    ),
     "Transformer": frozenset({"v_nom_0", "v_nom_1"}),
 }
 
@@ -145,7 +147,11 @@ def _form_validator(cls: str, key: str):
     from services.network_crud import _CREATE_MODEL_NAMES
 
     field = getattr(schemas, _CREATE_MODEL_NAMES[cls]).model_fields[key]
-    return TypeAdapter(Annotated[field.annotation, *field.metadata] if field.metadata else field.annotation)
+    return TypeAdapter(
+        Annotated[field.annotation, *field.metadata]
+        if field.metadata
+        else field.annotation
+    )
 
 
 def refuse_bad_form_values(n, unchanged: str = "") -> None:
