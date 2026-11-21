@@ -1,0 +1,28 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/reports/{report_id}/comments",
+   "reason": "held-by-spec",
+   "issue": ".scratch/study-harness/issues/07g-report-comment-ui.md"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/reports/{report_id}/comments/{comment_id}/drafts",
+   "reason": "ui-pointer",
+   "decision": "SH07C-DRAFT-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/reports/{report_id}/drafts/{draft_id}/confirm",
+   "reason": "ui-pointer",
+   "decision": "SH07C-DRAFT-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/reports/{report_id}/drafts/{draft_id}/discard",
+   "reason": "ui-pointer",
+   "decision": "SH07C-DRAFT-1"
+  }
+ ]
+}

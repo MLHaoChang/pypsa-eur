@@ -19,7 +19,8 @@ const net = vi.hoisted(() => ({ getBuses: vi.fn(), getLoads: vi.fn(), getLinks: 
 vi.mock('../api/network', () => ({ networkApi: net }))
 const ui = vi.hoisted(() => ({ setSlidePanel: vi.fn(), requestGridCodeScroll: vi.fn() }))
 vi.mock('../store/uiStore', () => ({ useUIStore: (sel: (s: typeof ui) => unknown) => sel(ui) }))
-vi.mock('../layout/flowNavigation', () => ({ withReturnFrom: (jump: () => void) => jump() }))
+const nav = vi.hoisted(() => ({ openIslandLimits: vi.fn() }))
+vi.mock('../layout/flowNavigation', () => ({ withReturnFrom: (jump: () => void) => jump(), openIslandLimits: nav.openIslandLimits }))
 
 const row = (intent: IntentRow['intent'], over: Partial<IntentRow> = {}): IntentRow => ({
   intent, status: 'converged', outcome: 'pass', verdict: '', cost_eur: 1000, assets: { 'store:bess': { value: 320, unit: 'MWh' }, q_ss: { value: 12, unit: 'Mvar' } },
@@ -186,6 +187,20 @@ describe('IntentComparisonSection', () => {
     expect(screen.getByTestId('intent-error').contains(link)).toBe(true)
     await user.click(link)
     expect(document.activeElement).toBe(screen.getByTestId('intent-in-ramp'))
+  })
+
+  it('the island-limits refusal carries an "Island limits ›" link on its own line that opens that setting', async () => {
+    const user = userEvent.setup()
+    api.get.mockResolvedValue(null)
+    api.start.mockRejectedValue({ response: { status: 422, data: { detail: 'Island limits in the optimisation: on for this project, and the intent comparison cannot include them yet.' } } })
+    renderIt(); await fill(user)
+    await user.click(screen.getByLabelText(/^B\. /)); await user.click(screen.getByLabelText(/^C\. /))
+    await user.click(screen.getByTestId('intent-run'))
+    const link = await screen.findByTestId('intent-error-island')
+    expect(link.textContent).toBe('Island limits ›')
+    expect(screen.getByTestId('intent-error').contains(link)).toBe(true)
+    await user.click(link)
+    expect(nav.openIslandLimits).toHaveBeenCalledTimes(1)
   })
 
   it('maps each refusal label to its field, and a refusal from another panel to none', () => {

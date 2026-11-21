@@ -228,6 +228,17 @@ def test_storage_behind_the_meter_carries_night_import_to_evening_export():
     assert "bess" in hit[0][4] and "85.38" in hit[0][4]
 
 
+def test_the_storage_loop_message_names_the_prices_and_what_comes_back():
+    # Template-e2e 14: plain words, the import and export prices, and the share of each
+    # MWh that comes back (import Link 0.8 × round trip 0.9025 = 0.72):
+    # 150 × 0.8 × 0.9025 − 50 = +58.30.
+    out = P.commercial_findings(_edge(_evening, import_eff=0.8), _commercial(TOU))
+    msg = next(f for f in out if f[1] == C_CROSS)[4]
+    assert msg.startswith("With the storage bess, the site can buy electricity from the grid at 50.00 per MWh")
+    assert "sell it back at 150.00 per MWh" in msg and "58.30 per MWh" in msg
+    assert "(0.72 of each MWh comes back)" in msg
+
+
 def test_no_storage_behind_the_meter_no_cross_interval_loop():
     out = P.commercial_findings(_edge(_evening, storage=False), _commercial(TOU))
     assert C_SAME not in _codes(out) and C_CROSS not in _codes(out)

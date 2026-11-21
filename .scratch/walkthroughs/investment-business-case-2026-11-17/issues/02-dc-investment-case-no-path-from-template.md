@@ -32,3 +32,7 @@ On any template in the group, either the investment case runs from the template'
 - No `value_flows_not_configured`, `cod_missing`, asset-id lists or field paths in user-facing prose.
 - Guided section 7 status reflects finance inputs.
 - A Playwright check that the Guided and Expert investment screens say the same thing.
+
+## Comments
+
+- Seen again 2026-11-20 (template walk, master 1f6905e3): DC: Guided Results 'Investment case ›' and Expert Results > Commercial & finance still say 'The investment case needs the site connection. Set it in Connection & grid' although the connection point is set (Guided step 3 shows 'Grid import (40 MW)'). H2 does reach 'Run the investment case'.

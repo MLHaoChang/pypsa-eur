@@ -25,7 +25,7 @@ import ProductionTiles from './ProductionTiles'
 import OperationalGap from './OperationalGap'
 import { solveWords } from './solveWords'
 import HeadlineStrip, { useHeadlineKpis } from './HeadlineStrip'
-import { COST_WORDS } from './headlineWords'
+import { COST_WORDS, totalCostWords } from './headlineWords'
 import { NOT_RECORDED, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 import { StatePill } from '../../components/ResultState'
 import { ScopeGate } from '../../components/flowScope/ScopeGate'
@@ -215,7 +215,8 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
         headline={{
           // The strip above already carries the total cost and the unserved energy.
           capacity: !c ? null
-            : [inStrip('system_cost') ? 'What was built, and the cost by asset' : `${fmtCurrency(c.total)} in this solve`,
+            : [inStrip('system_cost') ? 'What was built, and the cost by asset'
+              : [totalCostWords(c.total).value, 'in this solve', totalCostWords(c.total).note].filter(Boolean).join(' '),
               ll?.total_mwh != null && ll.total_mwh > 0 && !inStrip('unserved_energy') ? `${fmtEnergy(ll.total_mwh)} unserved` : null,
             ].filter(Boolean).join(' · '),
           reliability: target
@@ -235,7 +236,8 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           hint="From /results/cost_breakdown (n.statistics(): annualised capital cost with fixed O&M, plus operating cost). Shed load is not included; see Adequacy.">
           {c ? (
             <>
-              {!inStrip('system_cost') && <Headline value={fmtCurrency(c.total)} sub="total system cost in this solve" />}
+              {!inStrip('system_cost') && <Headline value={totalCostWords(c.total).value}
+                sub={['total system cost in this solve', totalCostWords(c.total).note].filter(Boolean).join(' ')} />}
               <Line label={COST_WORDS.capital} value={fmtCurrency(c.capital)} />
               <Line label="Operating cost" value={fmtCurrency(c.operating)} />
               {/* Horizon only (new build is not split per period). A null on

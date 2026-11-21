@@ -122,6 +122,7 @@ ISSUE_TITLES: dict[str, str] = {
     "import_energy_cap_unsupported_strategy": "Import energy cap not supported by this solve strategy",
     "import_energy_link_bidirectional": "Metered import link can also export",
     "min_renewable_fraction_unsupported_strategy": "Minimum renewable fraction not supported by this solve strategy",
+    "load_growth_stale": "Load growth multipliers out of date for the investment periods",
     "reserve_margin_unsupported_strategy": "Reserve margin not supported by this solve strategy",
     "reserve_margin_myopic_report_is_partial": "Reserve margin report covers only part of a myopic run",
     "reserve_margin_unpriceable_assets": "Reserve margin cannot price some assets",
@@ -131,6 +132,28 @@ ISSUE_TITLES: dict[str, str] = {
     # Tariff sanity (decision study)
     "tariff_export_exceeds_import": "Export pays more than import in some hours",
     "tariff_export_exceeds_import_via_storage": "Export pays more than import after storage losses",
+    # The engine preflight's own codes for the same two findings (template-e2e 14).
+    "commercial.arbitrage_loop": "Export pays more than import in some hours",
+    "commercial.arbitrage_loop_via_storage": "Export pays more than import after storage losses",
+    # The rest of the engine preflight's commercial codes (GK B2 (3) on template-e2e 14).
+    "commercial.binding_invalid": "Commercial setup does not fit this network",
+    "commercial.capacity_double_count": "Grid capacity may be charged twice",
+    "commercial.contract_asset_missing": "Contract names an asset it cannot use",
+    "commercial.contract_tariff_mismatch": "Contract names a different tariff",
+    "commercial.currency_mismatch": "Commercial prices use different currencies",
+    "commercial.demand_partial_months": "Demand charge counts a part month as a full month",
+    "commercial.demand_resolution": "Demand charge interval does not match the time steps",
+    "commercial.dr_without_dsr": "Demand response contract has no flexible load",
+    "commercial.eaas_on_poc": "Energy-as-a-service contract is billed on the grid connection",
+    "commercial.group_fee_bypass": "Some connection capacity avoids the capacity fee",
+    "commercial.link_price_and_tariff": "Connection is priced twice: its own cost and the tariff",
+    "commercial.meter_bypass": "Power can bypass the commercial meter",
+    "commercial.ppa_basis_risk": "PPA settles against a different price than export",
+    "commercial.ppa_dispatch_not_contract_optimal": "PPA keeps paying when the plant curtails",
+    "commercial.ppa_export_double_count": "PPA output may be sold twice",
+    "commercial.preflight_incomplete": "Some commercial checks could not run",
+    "commercial.sleeved_commodity_double_count": "Sleeved PPA energy may be charged twice",
+    "commercial.tariff_out_of_validity": "Run falls outside the tariff's valid dates",
 
     # Commercial preflight
     "commercial.grid_connection_double_count": "Grid connection may be paid twice",
