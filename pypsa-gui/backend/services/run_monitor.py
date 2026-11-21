@@ -126,6 +126,15 @@ def _unattended(task, provider_ready, email):
     return None
 
 
+def _views_only(task):
+    """True when the caller only views the run's project (project-viewer-role
+    01): the card shows the report's drafts but offers no request, Confirm
+    or Discard, which the write gate would refuse (UX (26) condition 6)."""
+    from services import chat_tools, project_write_gate
+    with chat_tools._acting() as (db, user):
+        return project_write_gate.is_viewer(db, user, task["project_id"])
+
+
 def _actions(task):
     """The plan card's run buttons that can work now, in this order."""
     run, status = task["run"], task["status"]
@@ -143,7 +152,7 @@ def _actions(task):
 
 
 def view(task_id, provider_ready):
-    from harness import runner
+    from harness import run_revise, runner
     from services import email_service, run_envelope
     with assistant_tasks._LOCK:
         path, task = _task(task_id)
@@ -161,6 +170,9 @@ def view(task_id, provider_ready):
         **({"card": card} if card else {}),
         **({"waiting": {k: waiting[k] for k in ("kind", "ref")}} if waiting else {}),
         **({"research": _research(task["run"]["research"])} if task["run"].get("research") else {}),
+        **({"revision_drafts": run_revise.view(task)} if run_revise.rows(task) else {}),
+        **({"revision_report": {**offer, "may_act": not _views_only(task)}}
+           if (offer := run_revise.offer(task)) else {}),
     }
     return out
 

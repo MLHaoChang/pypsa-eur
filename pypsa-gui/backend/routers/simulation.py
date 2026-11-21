@@ -403,6 +403,51 @@ def _rebind_fca_for_scalers(stored_commercial, user, solver_view) -> dict | None
 _LOAD_SCALER_KEYS = ("multi_investment_periods", "load_scalers", "load_scalers_by_carrier")
 
 
+# The keys load growth reads (homer-parity 04a): a PUT touching one of them
+# re-derives the multipliers while a rate is stored or submitted.
+_LOAD_GROWTH_KEYS = ("multi_investment_periods", "investment_periods", "load_scalers",
+                     "load_scalers_by_carrier", "load_growth_pct_per_year", "load_growth_base_year")
+
+
+def _derive_load_growth(submitted: dict, stored_cfg) -> None:
+    """Validate the load-growth inputs as they stand after this PUT and write
+    the derived multipliers into ``submitted`` (``services.solver.load_growth``),
+    before the FCA rebind reads the scalers. Which multiplier is derived is the
+    server's call from the stored state, so a submitted ``load_scalers_derived``
+    is dropped (GK B C2). No rate stored or submitted, or no growth key touched:
+    nothing is read or written, so the config is unchanged."""
+    submitted.pop("load_scalers_derived", None)
+    if not any(k in submitted for k in _LOAD_GROWTH_KEYS):
+        return
+    from types import SimpleNamespace
+
+    from services.solver import load_growth as LG
+
+    after = {k: submitted[k] if k in submitted else getattr(stored_cfg, k, None)
+             for k in _LOAD_GROWTH_KEYS}
+    # No project opened is not a read failure: the active context is then an
+    # empty network (no periods, no loads), which derives on the config's own
+    # periods. A read that fails refuses: deriving as if the network had no
+    # periods would skip the carrier check and drop the stored derived
+    # entries (GK #1626 C2/C3).
+    try:
+        network = PyPSAService.get_network()
+    except Exception:
+        logger.exception("load growth: the network could not be read")
+        raise HTTPException(503, {
+            "code": "load_growth_network_unreadable",
+            "error_kind": "load_growth_network_unreadable",
+            "message": "Load growth: the network could not be read, so the load multipliers "
+                       "were not derived and nothing was saved; try again"}) from None
+    periods = LG.effective_periods(SimpleNamespace(**after), network)
+    try:
+        submitted.update(
+            LG.apply(after, stored_cfg, periods, LG.load_carriers_of(network))
+        )
+    except LG.LoadGrowthError as exc:
+        raise HTTPException(422, exc.detail) from None
+
+
 def _is_fca(stored) -> bool:
     """A stored commercial config whose connection is an FCA with curtailment hours."""
     conn = stored.get("connection") if isinstance(stored, dict) else None
@@ -623,6 +668,7 @@ def update_solver_config(
                            "/api/results/business_case/inputs (it validates them and checks "
                            "If-Match); omit the key here"})
         submitted.pop("business_case")
+    _derive_load_growth(submitted, _state["solver_config"])
     stored_commercial = getattr(_state["solver_config"], "commercial", None)
     rebound = False
     # The FCA stress hours are ranked on the load the LP will solve (E2E 1b):
@@ -1688,6 +1734,7 @@ def run_ac_pf():
             ac_pf_convergence_list=None,
             ac_pf_slack_bus_used=None,
             ac_pf_stripped_voll_slacks=None,
+            ac_pf_seeded_by=None,
             ac_pf_converged_count=None,
             ac_pf_total_snapshots=None,
             ac_pf_unknown_count=None,

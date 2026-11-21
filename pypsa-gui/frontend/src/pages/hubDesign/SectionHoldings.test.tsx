@@ -37,6 +37,16 @@ describe('SectionHoldings', () => {
       .toEqual(['Generators (1)', 'Stores (1)'])
   })
 
+  it('a helper row reads in plain words, a plain generator keeps its name (guided-results 03)', () => {
+    render(<SectionHoldings id="assets" pending={false} failed={false}
+      holds={[held({}), held({ entity: '__lost_steel', helper: true }), held({ entity: 'grid_x', helper: true })]} />)
+    const rows = screen.getAllByTestId('section-held')
+    expect(rows.map(r => r.querySelector('span')?.textContent)).toEqual(
+      ['pv', 'lost production (steel)', 'added by the model (grid_x)'])
+    expect(screen.queryByText('__lost_steel')).toBeNull()
+    expect(screen.getAllByTestId('section-held-edit')[1].getAttribute('aria-label')).toBe('Edit lost production (steel)')
+  })
+
   it('a group longer than 8 folds, and "Show all" lists every row', () => {
     render(<SectionHoldings id="assets" pending={false} failed={false} holds={gens(11)} />)
     expect(screen.getAllByTestId('section-held')).toHaveLength(8)
@@ -66,6 +76,16 @@ describe('SectionHoldings', () => {
       holds={[held({ field: 'p_max_pu', value: null, unit: null })]} />)
     fireEvent.click(screen.getByRole('button', { name: 'Edit pv, Availability time series' }))
     expect(openTimeSeriesFor).toHaveBeenCalledWith('Generator', 'pv', { field: 'p_max_pu' })
+  })
+
+  it('"Edit" on a load time series opens the load\'s own editor in Guided, not the library', () => {
+    render(<SectionHoldings id="profiles" pending={false} failed={false}
+      holds={[held({ component: 'Load', entity: 'it_load', field: 'p_set', value: null, unit: null })]} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Edit it_load/ }))
+    expect(openTimeSeriesFor).not.toHaveBeenCalled()
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe('guided')
+    expect(ui.fieldDrawer).toEqual({ section: 'profiles', panel: null, component: 'Load', entity: 'it_load', field: null })
   })
 
   it('"Edit" on a carrier opens its card in the drawer and stays in Guided (gap 03)', () => {

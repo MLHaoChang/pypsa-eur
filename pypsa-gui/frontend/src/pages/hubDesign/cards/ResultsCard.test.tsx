@@ -33,7 +33,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
     resultsApi: {
       ...actual.resultsApi,
       getEhStudy: vi.fn(), getEhReview: vi.fn(), getEhReferenceDesign: vi.fn(),
-      getEhTemplate: vi.fn(),
+      getEhTemplate: vi.fn(), getEhLevers: vi.fn(),
     },
   }
 })
@@ -52,6 +52,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
   vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhLevers).mockResolvedValue(null)
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -371,5 +372,80 @@ describe('ResultsCard before the study (UX S6, G2)', () => {
     const card = await screen.findByTestId('hub-card-results')
     await waitFor(() => expect(card.textContent).toContain('The study is running'))
     expect(screen.queryByText('Go to Goal and run the study')).toBeNull()
+  })
+})
+
+// WALK-IMPROVE-1: the cheaper battery duration the study's levers found, under
+// the verdict, with one link to the design options.
+describe('ResultsCard cheaper battery duration', () => {
+  const SENTENCE = 'A 24 h battery also meets the energy-not-served cap at a system cost of € 3.1 m a year (design: 4 h, € 3.5 m)'
+  function withLevers(best = 24) {
+    const rep = { ...REPORT, sections: { ...REPORT.sections, sizing: { status: 'ok', payload: { assets: [
+      { component: 'StorageUnit', name: 'battery', carrier: 'battery', built_mw: 2, built_mwh: 8, max_hours: 4 },
+    ] } } } } as EhReferenceDesignReport
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study(rep))
+    const rv = review()
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue({ ...rv, findings: [...rv.findings,
+      { id: 'levers_best_option', severity: 'info', title: 'Cheapest lever option',
+        evidence: { kind: 'storage_duration', value: best, cost_at_target_eur: best === 4 ? 3_500_000 : 3_100_000,
+          spread_eur: 400_000 },
+        recommendation: '', actions: [] }] })
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({ kind: 'storage_duration', options: [
+      { kind: 'storage_duration', value: 4, unit: 'h', status: 'ok', cost_at_target_eur: 3_500_000, meets_target: true },
+      { kind: 'storage_duration', value: 24, unit: 'h', status: 'ok', cost_at_target_eur: 3_100_000, meets_target: true },
+      { kind: 'storage_duration', value: 72, unit: 'h', status: 'ok', cost_at_target_eur: 3_120_000, meets_target: true },
+    ] })
+  }
+
+  it('shows the sentence under the verdict with one "Design options ›" link', async () => {
+    withLevers()
+    mount()
+    const line = await screen.findByTestId('hub-results-cheaper-duration')
+    expect(line.textContent?.replace(/\u00a0/g, ' ')).toBe(`${SENTENCE} Design options ›`)
+    expect(line.textContent).not.toMatch(/goal/i)
+    expect(line.querySelectorAll('button').length).toBe(1)
+  })
+
+  it('Guided: the link opens Results › Adequacy and asks for the levers block, in Guided', async () => {
+    withLevers()
+    useUIStore.setState({ uiMode: 'guided', resultsSectionRequest: null, flowReturn: null })
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-results-design-options'))
+    const s = useUIStore.getState()
+    expect(s.uiMode).toBe('guided')
+    // The Results panel's own "Back to Results" is the one way back; a Back
+    // pill as well would show two.
+    expect(s.flowReturn).toBeNull()
+    expect(s.activeSlidePanel).toBe('results')
+    expect(s.resultsTabRequest).toBe('adequacy')
+    expect(s.resultsSectionRequest).toBe('eh_levers')
+  })
+
+  it('Expert: the link goes through showResultsTab, so Back returns', async () => {
+    withLevers()
+    useUIStore.setState({ uiMode: 'expert', resultsSectionRequest: null, flowReturn: null })
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-results-design-options'))
+    const s = useUIStore.getState()
+    expect(s.uiMode).toBe('expert')
+    expect(s.activeSlidePanel).toBe('results')
+    expect(s.resultsTabRequest).toBe('adequacy')
+    expect(s.resultsSectionRequest).toBe('eh_levers')
+    expect(s.flowReturn).not.toBeNull()
+  })
+
+  it('nothing when the best option is the design duration', async () => {
+    withLevers(4)
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    expect(screen.queryByTestId('hub-results-cheaper-duration')).toBeNull()
+  })
+
+  it('nothing, and no levers read, without the finding', async () => {
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-cheaper-duration')).toBeNull()
+    expect(resultsApi.getEhLevers).not.toHaveBeenCalled()
   })
 })

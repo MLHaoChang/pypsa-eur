@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The intent comparison's island-limits refusal carries an "Island limits ›" link that opens Solver settings at a new "Island limits in the optimisation" checkbox (Off-grid constraints), focused, with a Back pill to the comparison.

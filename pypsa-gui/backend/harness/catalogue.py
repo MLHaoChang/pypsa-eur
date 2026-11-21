@@ -1297,10 +1297,11 @@ TOOLS: list[dict[str, Any]] = [
         "strong grid. It runs by default for weak_flexible / off_grid and "
         "costs no LP solve. "
         "weak_flexible sets each selected import Link's rating (`p_nom`, "
-        "and a finite `p_nom_max`) to `import_p_nom_mw` (default 50 MW) "
-        "divided by the number of import Links, replacing the Link's own "
-        "rating; when the two differ the `apply_pack` note and the report "
-        "name the Link, its rating and the cap used. "
+        "and a set `p_nom_max`, unlimited included) to `import_p_nom_mw` "
+        "(default 50 MW) divided by the number of import Links, replacing "
+        "the Link's own rating; when the two differ the `apply_pack` note "
+        "and the report state, in plain words, the user's grid connection "
+        "limit and the cap the study used. "
         "`budget_solves` (1–120, default 30) is a hard ceiling on LP solves "
         "inside the study — stages that would exceed it are skipped and "
         "reported not_established. Returns {status:'running'} — poll "
@@ -4692,8 +4693,11 @@ TOOLS: list[dict[str, Any]] = [
         "stale. `truncated` lists any section cut to fit. detail='inputs': the stored "
         "lines {business_case, digest, status, citable_turns} — pass `digest` as "
         "set_business_case_lines' if_match; `citable_turns` are the user's own messages a "
-        "price may cite. Safety: read.",
-        {"detail": {"type": "string", "enum": ["summary", "inputs"]}},
+        "price may cite. detail='options': what the line table offers {variants, "
+        "offered_rows, units_by_source (typed / share_of / linked per output), outputs "
+        "(or outputs_reason), refusals (or refusals_reason), horizon}: offer a line only "
+        "a unit its source allows and name each refusal in plain words. Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "inputs", "options"]}},
         [],
     ),
     _t(
@@ -4701,7 +4705,8 @@ TOOLS: list[dict[str, Any]] = [
         "Replace the business-case inputs (revenue, opex and capex lines, kw_per_gpu, "
         "capacity, break_even_line) with `business_case`, a whole BusinessCaseConfig: read "
         "it with get_business_case(detail='inputs'), change what the user asked, send the "
-        "whole object back. `if_match` is REQUIRED (that read's `digest`; '*' is refused; "
+        "whole object back. Before choosing a unit, read get_business_case(detail='options') "
+        "and use only a unit its source allows. `if_match` is REQUIRED (that read's `digest`; '*' is refused; "
         "stale: business_case_changed). NEVER invent a price: each NEW or CHANGED price "
         "(`price`, or a year of `price_by_year`) needs one entry in `citations` — {line, "
         "year? (for price_by_year), then where the user gave it: turn_id + quote + unit "
@@ -5308,7 +5313,7 @@ TOOLS.extend([
     _t("preview_library_reference", "Preview applying one shipped cost reference (list_library_references) to ONE asset, exactly as the Library reference dialog previews it: {card, needs, missing, notes, rows, pack, licence, attribution}. While a confirmation is missing there is no card: `needs` says what each confirmation means; ask the user and preview again with confirm=[...] naming only what they confirmed. Plans on a copy and writes nothing; apply_library_reference is the write. Long lists are trimmed and `truncated` names each one's total. Safety: read.", {"component_class": {"type": "string", "enum": ["Generator", "Link"]}, "name": {"type": "string"}, "technology": {"type": "string"}, "projection_year": {"type": "integer"}, "confirm": {"type": "array", "items": {"type": "string", "enum": ["dc_ac", "grid_connection", "money_year"]}}}, ["component_class", "name", "technology", "projection_year"]),
     _t("import_map_geometry", "Match an UPLOADED GeoJSON or KML file (file_id from list_uploads of the open project) against the map: LineStrings become branch routes (by name, else by both ends snapping to placed buses within tolerance_m metres), Polygons become sites. apply=false (default) returns the match report and writes nothing; apply=true writes the routes (source 'import') and appends the sites, and with 'Derive lengths from geometry' on also sets the applied Lines' and Links' lengths (returned under `lengths`). The project must be the open one (409 otherwise); apply under another user's edit lock is 409 project_locked; 413 over the size cap; 422 for malformed GeoJSON/KML or tolerance outside (0, 5000]. Returns counts and per-feature rows without coordinates. Safety: write.", {"name": {"type": "string"}, "file_id": {"type": "string"}, "apply": {"type": "boolean"}, "tolerance_m": {"type": "number", "exclusiveMinimum": 0, "maximum": 5000}}, ["name", "file_id"]),
     _t("list_result_assets", "Every asset the per-asset view's picker lists for the CURRENT network (transient rows removed): rows {class, name, carrier, bus} in the shared page envelope (offset/limit, total_count, has_more); class and name identify the asset for the per-asset read. Safety: read.", {"offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}}, []),
-    _t("get_curtailment_by_cause", "Read the CURRENT solve's curtailment split by cause per plant, as the curtailment view shows it: export_limit (the export Link at its limit), negative_price (a negative export price), both, other. The causes sum to each plant's total_mwh. Returns status (ok, or not_established with a reason: export_link_missing, export_price_missing, no_commercial_solve_record, export_price_changed_since_solve), export_link, export_capacity_mw, negative_price_hours and a page of plant rows {plant, total_mwh, available_mwh, by_cause_mwh, by_period} (offset/limit). Unsolved or stale dispatch returns status no_data; never report it as zero. Safety: read.", {"offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}}, []),
+    _t("get_curtailment_by_cause", "Read the CURRENT solve's curtailment split by cause per plant, as the curtailment view shows it: export_limit (the export Link at its limit), negative_price (a negative export price), both, other. The causes sum to each plant's total_mwh. Returns status (ok, or not_established with a reason: export_link_missing, export_price_missing, no_commercial_solve_record, export_price_changed_since_solve, export_flow_missing), export_link, export_capacity_mw, negative_price_hours and a page of plant rows {plant, total_mwh, available_mwh, by_cause_mwh, by_period} (offset/limit). Unsolved or stale dispatch returns status no_data; never report it as zero. Safety: read.", {"offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}}, []),
     _t("get_eh_readiness", "Energy Hub readiness preflight for an archetype, exactly as the Energy Hub panel's readiness check computes it (on a private copy; nothing is written): which Links the pack treats as imports and by which rule, critical buses, DtC derivability, SCR coverage, Class-B, the MC hub boundary, and a per-stage prediction and solve estimate against budget_solves. stages overrides the pipeline (same rules as run_eh_study); dtc_attribution chooses bus_aggregate_not_per_load or per_load; pack_overrides is the same object run_eh_study takes, validated identically (422 naming the field). 422 for an unknown archetype, a budget out of range or no network. Long lists are trimmed and `truncated` names each one's total. Safety: read.", {"archetype": {"type": "string", "enum": EH_ARCHETYPE_ENUM}, "budget_solves": {"type": "integer", "minimum": 1, "maximum": _MAX_EH_BUDGET_SOLVES}, "stages": {"type": "array", "items": {"type": "string", "enum": EH_STAGE_ENUM}}, "dtc_attribution": {"type": "string", "enum": ["bus_aggregate_not_per_load", "per_load"]}, "pack_overrides": {"type": "object"}}, ["archetype"]),
     _t("get_report_capabilities", "What this host can export a study report as beyond .docx: {pdf: bool} (true when LibreOffice is installed, so export_report_pdf can succeed). Safety: read.", {}, []),
     _t("get_report_evidence_hash", "The hash of the active project's CURRENT report evidence (what create_evidence_report would store as evidence_hash now) and how many evidence sections are established: {evidence_hash, sections_ok, sections_total}. Compare with a report's evidence_hash to say whether the evidence changed since it was written. Safety: read.", {}, []),
@@ -5388,6 +5393,45 @@ TOOLS.extend([
        "as non-renewable), sizes, unavailable}]}, cheapest first. An infeasible architecture is listed, not "
        "dropped. A null figure was not computed: NEVER report it as 0. 404 supply_architectures_never_run. "
        "Safety: read.",
+       {"project": {"type": "string"}, "study_id": {"type": "string"}},
+       ["project", "study_id"]),
+])
+TOOLS.extend([
+    # homer-parity 03b: HOMER's optimal system type map, the winning supply
+    # architecture over two sensitivity variables.
+    _t("compare_system_types",
+       "Map which supply architecture wins over two sensitivity variables (HOMER's optimal system type map), in "
+       "the background. Each cell applies both multipliers to a copy of the base project's SAVED network and "
+       "compares the supply architectures (PV, wind, battery, genset, grid; the others OMITTED, each sized by the "
+       "optimiser), so a 3x3 map with 4 architectures is 36 solves, charged to the campaign (at most 120: use "
+       "fewer values or `architectures` to name fewer). x_variable and y_variable (different) are one of "
+       "genset_fuel_price, grid_energy_price, solar_resource, wind_resource, load, pv_capital_cost, "
+       "battery_capital_cost, genset_capital_cost; x_values and y_values are 2-5 multipliers above 0 and at most 10 on the "
+       "project's own value (default 0.5, 1, 1.5). action='abort' stops it before its next solve. `project` is "
+       "the study's base project. Returns {status, solves_estimated, architectures, axes} at once; poll "
+       "get_system_type_map. Refusals: study_running, solver_in_flight, baseline_not_saved, unknown_variable, "
+       "axes_not_different, axis_values_invalid, variable_not_in_network (the project has no such asset or its "
+       "value is zero), campaign_budget_invalid (names the solve count), no_architectures, "
+       "unknown_architecture, system_type_map_never_run (abort). Safety: execution_long_running.",
+       {"project": {"type": "string"},
+        "study_id": {"type": "string"},
+        "action": {"type": "string", "enum": ["start", "abort"]},
+        "x_variable": {"type": "string", "maxLength": 64},
+        "y_variable": {"type": "string", "maxLength": 64},
+        "x_values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+                     "minItems": 2, "maxItems": 5},
+        "y_values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+                     "minItems": 2, "maxItems": 5},
+        "architectures": {"type": "array", "items": {"type": "string", "maxLength": 64},
+                          "minItems": 1, "maxItems": 16},
+        "budget_solves": {"type": "integer", "minimum": 1, "maximum": 120}},
+       ["project", "study_id"]),
+    _t("get_system_type_map",
+       "Read a decision study's system type map. While it runs: {running: {status, current, solves_charged}}. "
+       "Afterwards: {status, stale (the base project changed since: map again), axes: [{label, values}], cells: "
+       "[{i, j, winner_label, runner_up_gap_eur_per_year, all_solved, clipped: [{label, share}], rows: [{label, status, total_cost_eur_per_year}]}]}. "
+       "i runs along the first axis, j along the second. A cell with no winner had no architecture solved; a "
+       "null gap or cost was not computed: NEVER report it as 0. 404 system_type_map_never_run. Safety: read.",
        {"project": {"type": "string"}, "study_id": {"type": "string"}},
        ["project", "study_id"]),
 ])
@@ -5947,10 +5991,11 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_ppa_price": [("GET", "/api/simulation/finance")],
     "explain_cashflow": [("GET", "/api/results/investment_case"),
                          ("GET", "/api/results/investment_case/report")],
-    # business case (4) — business case 08b; the preset route stays panel-only (Q3)
+    # business case (4) — business case 08b; the preset and options reads are chat reads (bc 14, bc 16)
     "run_business_case": [("POST", "/api/results/business_case")],
     "get_business_case": [("GET", "/api/results/business_case"),
-                          ("GET", "/api/results/business_case/inputs")],
+                          ("GET", "/api/results/business_case/inputs"),
+                          ("GET", "/api/results/business_case/options")],
     "set_business_case_lines": [("PUT", "/api/results/business_case/inputs")],
     "apply_business_case_preset": [("GET", "/api/results/business_case/preset"),
                                    ("PUT", "/api/results/business_case/inputs")],
@@ -5986,6 +6031,11 @@ TOOL_ROUTES: dict[str, list] = {
         ("POST", "/api/projects/{name}/studies/{study_id}/supply-architectures/abort")],
     "get_supply_architectures": [
         ("GET", "/api/projects/{name}/studies/{study_id}/supply-architectures")],
+    "compare_system_types": [
+        ("POST", "/api/projects/{name}/studies/{study_id}/system-type-map"),
+        ("POST", "/api/projects/{name}/studies/{study_id}/system-type-map/abort")],
+    "get_system_type_map": [
+        ("GET", "/api/projects/{name}/studies/{study_id}/system-type-map")],
     "get_grid_extension_break_even": [
         ("POST", "/api/projects/{name}/studies/{study_id}/grid-extension-break-even")],
     # project settings and scope (5) — LV08 B1

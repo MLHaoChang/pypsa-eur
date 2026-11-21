@@ -3,7 +3,7 @@
 
 # GC-09 Compliance workflow: deliverable tracker, data list, TSO revision log, report pack
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: backend open in #1577; UI and item 6 wiring not started
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (tracker, data list and revision log start at once; pack rows light up as 01–08 land)

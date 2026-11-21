@@ -240,6 +240,9 @@ POST   /api/projects/{name}/reports/generate/abort  write path:name
 DELETE /api/projects/{name}/reports/{report_id}  write path:name
 POST   /api/projects/{name}/reports/{report_id}/comments  allow a viewer may comment on a report (owner decision VIEWER-ROLE-1, Q3); the report itself is unchanged
 POST   /api/projects/{name}/reports/{report_id}/comments/{comment_id}/address  write path:name
+POST   /api/projects/{name}/reports/{report_id}/comments/{comment_id}/drafts  write path:name
+POST   /api/projects/{name}/reports/{report_id}/drafts/{draft_id}/confirm  write path:name
+POST   /api/projects/{name}/reports/{report_id}/drafts/{draft_id}/discard  write path:name
 POST   /api/projects/{name}/reports/{report_id}/comments/{comment_id}/withdraw  write handler
 POST   /api/projects/{name}/reports/{report_id}/export  allow a viewer may export a report file (owner decision VIEWER-ROLE-1, Q4); the stored report is unchanged
 POST   /api/projects/{name}/reports/{report_id}/roundtrip  write path:name
@@ -277,6 +280,8 @@ POST   /api/projects/{name}/studies/{study_id}/run  write path:name
 POST   /api/projects/{name}/studies/{study_id}/run/abort  write path:name
 POST   /api/projects/{name}/studies/{study_id}/supply-architectures  write path:name
 POST   /api/projects/{name}/studies/{study_id}/supply-architectures/abort  write path:name
+POST   /api/projects/{name}/studies/{study_id}/system-type-map  write path:name
+POST   /api/projects/{name}/studies/{study_id}/system-type-map/abort  write path:name
 POST   /api/projects/{name}/uploads  write path:name
 DELETE /api/projects/{name}/uploads/{file_id}  write path:name
 PUT    /api/projects/{name}/worksheet  write path:name
