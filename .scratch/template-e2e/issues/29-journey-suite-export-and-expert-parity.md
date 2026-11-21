@@ -3,7 +3,7 @@
 
 # 29 The CI template journeys stop at the report download: add the workbook export and an Expert→Guided parity step
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), coverage map.
 Owner decisions: E2E-TEMPLATES-1, HOLISTIC-1.
