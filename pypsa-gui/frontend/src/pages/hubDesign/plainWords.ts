@@ -93,12 +93,14 @@ const REASON_RULES: [RegExp, string][] = [
   [/\bbudget_solves exhausted \((\d+)\/(\d+)\)/g, 'the study\'s run limit was reached ($1 of $2 runs used)'],
   [/\bbudget_solves exhausted\b/g, 'the study\'s run limit was reached'],
   [/\(import_model=\w+,\s*import_firmness=\w+\)/g, ''],
+  [/\(?Class-B(?: Link)? sweep\)?/g, 'link-by-link risk sweep'],
   [/\bClass-B(?:-eligible)? Links?\b/g, 'links that carry the outage risk'],
-  [/\bClass-B sweep\b/g, 'link-by-link risk sweep'],
-  [/\bdsr_opt_in=True\b/g, 'demand response is switched on'],
+  [/\bdsr_opt_in=True\b/g, 'demand response switched on'],
 ]
 export function plainReason(text: string): string {
   let out = text
   for (const [re, plain] of REASON_RULES) out = out.replace(re, plain)
-  return plainIds(out).replace(/\s{2,}/g, ' ').trim()
+  // An id inside backticks or double quotes is a name the reader may have to type: left as written.
+  out = out.split(/(`[^`]*`|"[^"]*")/).map((seg, i) => (i % 2 ? seg : plainIds(seg))).join('')
+  return out.replace(/\s{2,}/g, ' ').trim()
 }

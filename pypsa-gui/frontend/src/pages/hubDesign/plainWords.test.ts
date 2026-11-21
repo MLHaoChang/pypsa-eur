@@ -114,7 +114,10 @@ describe('plainReason (issue 19, RAW-NAMES-1)', () => {
       .toBe("not run: the study's run limit was reached (1 of 1 runs used) before this stage")
     expect(plainReason('import peak 12 MW (import_model=sampled_unit, import_firmness=firm)')).toBe('import peak 12 MW')
     expect(plainReason('no Class-B-eligible Links')).toBe('no links that carry the outage risk')
-    expect(plainReason('pack has dsr_opt_in=True but no buses')).toBe('pack has demand response is switched on but no buses')
+    expect(plainReason('pack has dsr_opt_in=True but no buses')).toBe('pack has demand response switched on but no buses')
     expect(plainReason('genset_new is capped')).toBe('Genset new is capped')
+    expect(plainReason('Class-B Link sweep skipped')).toBe('link-by-link risk sweep skipped')
+    // a name the reader must type stays as written
+    expect(plainReason('Type `reserve_margin` or "p_nom_max" in the field')).toBe('Type `reserve_margin` or "p_nom_max" in the field')
   })
 })

@@ -64,7 +64,7 @@ describe('SizedDesignTable', () => {
     holds = [{ component: 'Store', entity: 'nh3_tank', unit: 't' }]
     render(<SizedDesignTable testId="t" mode="expert"
       report={report({ status: 'ok', payload: { assets: [nh3] } })} />)
-    expect(screen.getByTestId('t-row-nh3_tank').textContent).toBe('Nh3 tankStore, NH3500 t0–900 t')
+    expect(screen.getByTestId('t-row-nh3_tank').textContent).toBe('NH3 tankStore, NH3500 t0–900 t')
   })
 
   it('an asset whose unit is not known shows the figure without one', () => {
