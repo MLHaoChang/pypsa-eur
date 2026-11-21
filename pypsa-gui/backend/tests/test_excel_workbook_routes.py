@@ -932,6 +932,63 @@ def test_a_form_value_refused_on_the_open_network_import_says_it_is_unchanged():
     }
 
 
+def test_a_fuel_curve_the_single_edit_refuses_refuses_the_import(client, store):
+    """N1: `fuel_curve.guard` runs on import, as on the single edit (homer-parity 02a)."""
+    n = _network(stale=False)
+    n.generators.loc["G1", "fuel_curve_slope"] = 0.3
+    data = _workbook(n)
+    before = store()
+    for r in (_preview(client, data), _import(client, data, name="Bad Curve")):
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"] == {
+            "error_kind": "invalid_edit_value",
+            "message": "Generators · “G1”: Fuel price: enter the price per MWh of fuel, which the fuel "
+            "curve needs. Nothing was imported.",
+        }
+    assert store() == before
+
+
+def test_a_fuel_curve_s_costs_are_derived_on_import(client, _auth_db):
+    """N1: the curve sets the costs, as the single edit's `_apply_fuel_curve` does."""
+    n = _network(stale=False)
+    n.generators.loc["G1", ["fuel_curve_slope", "fuel_curve_no_load", "fuel_price"]] = [2.0, 0.5, 30.0]
+    made = _import(client, _workbook(n), name="Curve")
+    assert made.status_code == 200, made.text
+    got = _saved_network(_saved(_auth_db[1], made.json()["project_id"]))
+    assert got.generators.at["G1", "marginal_cost"] == 60.0  # 2.0 × 30
+    assert got.generators.at["G1", "stand_by_cost"] == 300.0  # 0.5 × 20 MW × 30
+
+
+@pytest.mark.parametrize("spelling", ["nan", "None"])
+def test_a_blank_spelling_of_the_outage_basis_imports_as_unset(client, spelling):
+    """N4: the basis's own BeforeValidator applies on import, as the edit accepts it."""
+    n = _network(stale=False)
+    n.generators.loc["G1", "outage_rate_basis"] = spelling
+    made = _import(client, _workbook(n), name=f"Basis {spelling}")
+    assert made.status_code == 200, made.text
+
+
+def test_a_form_value_refused_on_the_open_network_excel_import_says_it_is_unchanged(
+    client, install_network, session_ctx, tmp_path
+):
+    """N3: /api/io/import/excel end to end (PyPSA's own layout carries the column)."""
+    install_network(_network(stale=False))
+    session_ctx(client)
+    n = _network(stale=False)
+    n.generators.loc["G1", "outage_rate_value"] = 1.5
+    path = tmp_path / "native.xlsx"
+    n.export_to_excel(str(path))
+    r = client.post(
+        "/api/io/import/excel", files={"file": ("native.xlsx", path.read_bytes(), MIME)}
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == {
+        "error_kind": "invalid_edit_value",
+        "message": "Generators · Forced-outage rate: the value for “G1” is not one the asset form "
+        "accepts. The open network is unchanged.",
+    }
+
+
 def test_a_project_without_form_values_imports_none(
     client, install_network, session_ctx, _auth_db
 ):
