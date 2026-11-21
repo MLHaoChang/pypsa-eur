@@ -48,7 +48,7 @@ def check_zip(path: pathlib.Path) -> None:
         raise L.ImportLimitError("uncompressed_bytes", total)
 
 
-def declared_within_limits(ws) -> None:
+def declared_within_limits(ws) -> int:
     """
     Refuse a sheet whose declared size passes the limits before any cell is read
     (E2): a small file can declare A1:XFD1048576.
@@ -60,6 +60,7 @@ def declared_within_limits(ws) -> None:
         raise L.ImportLimitError("columns", cols)
     if rows * cols > L.LIMITS["cells"]:
         raise L.ImportLimitError("cells", rows * cols)
+    return rows * cols
 
 
 def capped(rows):

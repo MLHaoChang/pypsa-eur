@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import pathlib
 import uuid
 from types import SimpleNamespace
@@ -1221,3 +1222,133 @@ def address_report_comment(report_id: str, comment_id: str, body: AddressBody,
         raise _revision_http(exc) from exc
     return {"comment": comment.model_dump(mode="json"), "version": doc.version,
             "digest": comment.revision.digest, "document": doc.model_dump(mode="json")}
+
+
+# ── model-drafted revisions (study harness 07d) ────────────────────────────
+
+
+class RunDraftBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+
+
+def _own_run(project: AuthorizedProject, user: User | None, task_id: str) -> pathlib.Path:
+    """The caller's own harness run in this project, named by the caller:
+    never inferred from the report (SH-07). Anything else is
+    `task_not_found` (404), the same bytes for every miss."""
+    import json
+
+    missing = HTTPException(404, {"error_kind": "task_not_found", "message": "No such run in this project."})
+    try:
+        canonical = str(uuid.UUID(task_id)) == task_id
+    except (ValueError, TypeError):
+        canonical = False
+    if user is None or not canonical:
+        raise missing
+    # Realpath plus a prefix check: the run file must resolve directly inside
+    # `assistant_tasks/` (the form CodeQL reads as a py/path-injection
+    # barrier; the uuid check above is correct but not one it models).
+    root = os.path.realpath(os.path.join(project.directory, "assistant_tasks"))
+    target = os.path.realpath(os.path.join(root, f"{task_id}.json"))
+    if not target.startswith(root + os.sep) or os.path.dirname(target) != root:
+        raise missing
+    path = pathlib.Path(target)
+    try:
+        task = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise missing from None
+    if (not isinstance(task, dict) or task.get("version") != 3 or not task.get("run")
+            or task.get("owner_id") != str(user.id) or task.get("project_id") != project.uuid):
+        raise missing
+    return path
+
+
+def _draft_http(exc: Exception) -> HTTPException:
+    from harness import run_revise
+
+    if isinstance(exc, run_revise.DraftError):
+        return HTTPException(exc.status, {"error_kind": exc.kind, "message": exc.message})
+    return _revision_http(exc)
+
+
+@router.post("/{name}/reports/{report_id}/comments/{comment_id}/drafts")
+def request_revision_draft(report_id: str, comment_id: str, body: RunDraftBody,
+                           project: AuthorizedProject = ProjectAccessDep,
+                           db: DBSession = Depends(get_db),
+                           user: User | None = Depends(optional_user)) -> dict:
+    """
+    Ask the named run (`task_id`, the caller's own, completed) to draft an
+    edit for an open comment on the report that run made. Charges nothing:
+    the harness drafts it on the run's own lease and budget, and nothing is
+    applied until the draft's confirm. Returns the request row.
+
+    404 `task_not_found`; 409 `revision_draft_not_run_report`,
+    `revision_draft_run_state`, `revision_draft_limit`,
+    `report_comment_closed`, `revision_stale_base`; 422
+    `report_revision_unsupported`.
+    """
+    from harness import run_revise
+    from services.reports import revisions
+
+    _latest_or_404(project, report_id)
+    _check_lock(project, db, user)
+    path = _own_run(project, user, body.task_id)
+    try:
+        row = run_revise.request(path, project.directory, report_id, comment_id, by=str(user.id))
+    except (run_revise.DraftError, revisions.RevisionError, store.ReportStoreError) as exc:
+        raise _draft_http(exc) from exc
+    return {"draft": row}
+
+
+@router.post("/{name}/reports/{report_id}/drafts/{draft_id}/confirm")
+def confirm_revision_draft(report_id: str, draft_id: str, body: RunDraftBody,
+                           project: AuthorizedProject = ProjectAccessDep,
+                           db: DBSession = Depends(get_db),
+                           user: User | None = Depends(optional_user)) -> dict:
+    """
+    Apply the run's drafted edit as 07c's address does, against the digest
+    the draft was made from. Returns `{comment, version, digest, document}`.
+
+    404 `task_not_found`, `revision_draft_not_found`; 409
+    `revision_draft_not_drafted`, `revision_stale_base`,
+    `report_comment_closed`, `report_job_in_flight`; 422
+    `report_revision_unsupported` with `reasons` (the comment stays open).
+    """
+    from harness import run_revise
+    from services.reports import revisions
+
+    _latest_or_404(project, report_id)
+    _check_lock(project, db, user)
+    if _job_slot_busy():
+        raise HTTPException(409, {
+            "error_kind": "report_job_in_flight",
+            "message": "A report job is writing this project's reports; wait for it to "
+                       "finish (or abort it) before revising.",
+        })
+    path = _own_run(project, user, body.task_id)
+    try:
+        comment, doc = run_revise.confirm(path, project.directory, draft_id, report_id=report_id,
+                                          by=str(user.id))
+    except (run_revise.DraftError, revisions.RevisionError, store.ReportStoreError) as exc:
+        raise _draft_http(exc) from exc
+    return {"comment": comment.model_dump(mode="json"), "version": doc.version,
+            "digest": comment.revision.digest, "document": doc.model_dump(mode="json")}
+
+
+@router.post("/{name}/reports/{report_id}/drafts/{draft_id}/discard")
+def discard_revision_draft(report_id: str, draft_id: str, body: RunDraftBody,
+                           project: AuthorizedProject = ProjectAccessDep,
+                           db: DBSession = Depends(get_db),
+                           user: User | None = Depends(optional_user)) -> dict:
+    """Set a drafted edit aside; the comment stays open. 404
+    `task_not_found`, `revision_draft_not_found`; 409
+    `revision_draft_not_drafted`."""
+    from harness import run_revise
+
+    _check_lock(project, db, user)
+    path = _own_run(project, user, body.task_id)
+    try:
+        row = run_revise.discard(path, draft_id, report_id=report_id, by=str(user.id))
+    except run_revise.DraftError as exc:
+        raise _draft_http(exc) from exc
+    return {"draft": row}
