@@ -41,6 +41,8 @@ function Note({ children, testId = 'control-tab-state' }: { children: React.Reac
   return <p className="text-[12px] text-muted" data-testid={testId}>{children}</p>
 }
 
+/** The registry's catch-all reason (flow_scope._NOT_HERE): it says nothing a reader can act on. */
+const GENERIC_NOT_HERE = "It can't be run from here yet."
 const NO_PROJECT = 'Open a project to see its island results.'
 const OTHER_KIND = 'The island checks are for capacity-expansion (hub) projects.'
 
@@ -111,7 +113,7 @@ function NoIslandResults({ children }: { children: React.ReactNode }) {
     return (
       <div className="space-y-2" data-testid="island-tab-state">
         <EmptyState testId="island-gate-why" title="Not yet available">
-          {opt.reason ?? 'The island checks cannot be run from here yet.'}
+          {opt.reason && opt.reason !== GENERIC_NOT_HERE ? `${opt.reason} ` : ''}The island study has not been run for this project. Run it in Grid study.
         </EmptyState>
         {children}
       </div>
