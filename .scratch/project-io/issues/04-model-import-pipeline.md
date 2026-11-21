@@ -48,3 +48,17 @@ A user with a PSS/E, PowerFactory or PLEXOS model cannot bring it into PyPSA Stu
 - fragments under `pypsa-gui/backend/tests/write_surface_lock_policy.d/`, `services/not_via_chat.d/`, `tool-error-kinds.d/`, `tests/golden_route_surfaces.d/`
 
 ## Comments
+
+### 2026-11-21, carried from project-io PR1–PR3 (#1648, #1661, #1709)
+
+These are obligations the earlier slices left to this issue. Slice A takes the backend ones and Slice B the UI ones.
+
+- **Sidecars marked `pending_writer` (#1648).** The contents table lists the importer sidecars (`psse_case.json`, `psse_dynamics.json` and the others). No importer on master writes them yet, so they carry the `pending_writer` mark, which the guard accepts only while it is set. Slice A writes the sidecars its importers produce and removes the mark for each one it writes. A test fails if a listed sidecar is written while it still carries the mark, or is marked but never written.
+- **PSS/E items (#1648).** The PSS/E import writes the sidecars its reader produces (the contents table names `psse_case.json` and `psse_dynamics.json`) into the new project, and export, Save-As and fork carry them through the contents table.
+- **DGS metadata merge (project-io (6) hand-off note).** Add a test that a DGS import's metadata (`dgs_names` and the importer's report) merges into the new project's `metadata.json` and keeps every key the project create writes. Nothing may be dropped on either side.
+- **One import route (#1661).** Bundle import stays on `/projects/import_bundle` (the spec's `/projects/import/bundle` was not adopted). The model-import route is the single entry point for model files. Slice A records in the PR body whether the bundle route moves under it or stays separate, and why.
+- **Dry run in chat (#1661).** The bundle import's dry-run parameter is not exposed to chat yet. Slice A exposes it, or records it in `not_via_chat.d` with a reason.
+- **One import-report object (#1661).** The preview route shapes a single report object for the user (counts, unmapped, assumed, suggestions, warnings). The bundle dry run's no-manifest warning and `stripped_note` use the same shape.
+- **The toast (#1661, Slice B, UX review).** The no-manifest warning and `stripped_note` reach the API and the chat, but the app's toast does not show them. Slice B shows them in the import preview.
+- **Raw imports (spec item 4).** The existing raw `.xlsx`, `.nc` and `.m` imports into the Project Data modal go through the same preview. At least the sidebar state and the export name change under Slice B.
+- **Glossary (#1661).** Add a **Bundle manifest** entry, and the preview's words ("Not carried", "Assumed", "Applied (suggested)"), to `pypsa-gui/CONTEXT.md`.

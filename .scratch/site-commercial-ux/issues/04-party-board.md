@@ -3,7 +3,8 @@
 
 # 04 No party board: value flows between parties have no editor (K4–K7)
 
-Status: needs-triage
+Status: ready-for-agent
+Owner: SCU04-K4K5-1.
 Blocked by: 03
 Design: `.scratch/project-workflow/commercial-finance.md` §7 rows K4–K7; design.md:318–322. Owner decisions: D5 (C5 + C6, then C7, C8, C9).
 Source: gap review 2026-11-21, design map.

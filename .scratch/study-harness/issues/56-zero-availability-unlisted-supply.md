@@ -3,7 +3,8 @@
 
 # 56 — An unlisted supply with p_max_pu = 0 in every hour still refuses the island tie
 
-Status: ready-for-agent
+Status: done (#1643)
+Landed in #1643.
 Gated: GK A
 Type: bug
 Parent: SH 49 (#1567) review follow-up

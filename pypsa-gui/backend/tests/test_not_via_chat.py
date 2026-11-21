@@ -76,6 +76,7 @@ def test_the_issue_rows_are_declared():
         'parameter_catalogue': ('unbuilt', None),  # expert-catalogue 01a; chat tools in 01b
         'report_comment_revisions': ('unbuilt', None),
         'report_revision_drafts': ('out of chat', None),
+        'excel_input_workbook': ('unbuilt', None),  # excel-input-workbook 02; chat in issue 06
         'report_chart_snapshots': ('manual', 'results'),
         'eh_study_why': ('unbuilt', None),  # guided-results 02a; a later slice adds the chat tool
     }

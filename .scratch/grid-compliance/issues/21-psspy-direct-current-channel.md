@@ -3,7 +3,7 @@
 
 # GC-21: read the PoC current from a direct branch-current channel
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Parent: `.scratch/grid-compliance/issues/04-psse-pack.md`
 Gated: yes (GK A2, gridspine)
@@ -34,3 +34,7 @@ run.
 - Tests pin the conversion on hand values (including a V = 0 sample) and a mutant on
   the base conversion is killed.
 - The channel call is listed as pending verification, like the other psspy calls.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Acceptance is the 'Done when' section above. Still true: `gridspine/handoff/psspy_scripts.py` still has `STATUS_V0 = 'not evaluated: V = 0 at PoC'`. Gated: GK A2. Blocked by: none.

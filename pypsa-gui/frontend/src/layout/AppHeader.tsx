@@ -9,6 +9,7 @@ import { projectsApi } from '../api/projects'
 import { downloadProjectBundle, saveProjectQuietly, type BundleSaveResult } from '../utils/projectActions'
 import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from '../hooks/useSolveQueue'
 import { useProjectRun } from '../hooks/useProjectRun'
+import { RunsIndicator } from '../components/runStatus/RunsIndicator'
 import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
@@ -1190,6 +1191,8 @@ export default function AppHeader() {
           </button>
         </>)
       })()}
+
+      <RunsIndicator />
 
       <UiModeSwitch />
 

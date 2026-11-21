@@ -235,8 +235,11 @@ def _convert(
         if hasattr(v, "isoformat"):
             return v.isoformat()
         return str(v)
-    # A custom column (no model type): kept as the cell holds it. An .xlsx cell
-    # cannot hold NaN, and a typed "nan" stays text.
+    # A custom column (no model type): kept as the cell holds it, but a number shown
+    # in another unit (a part's EUR/kW) goes back to its stored unit, as the writer
+    # scaled it. An .xlsx cell cannot hold NaN, and a typed "nan" stays text.
+    if scale != 1.0 and isinstance(v, int | float) and not isinstance(v, bool):
+        return L.rescale(float(v), 1.0 / scale)
     return v
 
 

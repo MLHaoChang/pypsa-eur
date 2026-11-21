@@ -116,6 +116,7 @@ from routers import (
     studies,
     uploads,
     vintage,
+    workbook,
 )
 from services.commercial import stamp_currency
 from services.pypsa_service import PyPSAService
@@ -1420,6 +1421,8 @@ app.include_router(asset_results.router, prefix="/api/results/asset", tags=["ass
 # so it's adjacent to the foreground solve lifecycle it shares (_state, log_stream).
 app.include_router(solve_queue.router, prefix="/api/simulation/queue", tags=["solve-queue"])
 app.include_router(io.router, prefix="/api/io", tags=["io"])
+# The Excel input workbook (IMPORTS-1): outside /api/io, since it never touches the open network.
+app.include_router(workbook.router, prefix="/api/workbook", tags=["io"])
 # The manual-mapping form's preview of an equipment table: a read, mounted outside
 # /api/network so it takes no undo snapshot and clears no results.
 from routers.network_equipment_table import preview_router as _equipment_table_preview  # noqa: E402
