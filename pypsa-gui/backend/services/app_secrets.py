@@ -76,6 +76,11 @@ KNOWN_PROVIDER_KEYS: tuple[str, ...] = (
 # to specific names, not the tuple itself.
 MANAGED_KEYS: tuple[str, ...] = KNOWN_PROVIDER_KEYS
 
+# Data-service credentials (not LLM providers): the user's own ENTSO-E
+# Transparency Platform token for day-ahead prices (SCU06 S1,
+# `services/market_prices.py`). Stored and redacted exactly like a provider key.
+DATA_SERVICE_KEYS: tuple[str, ...] = ("ENTSOE_API_TOKEN",)
+
 # Per-profile key slots: PYPSA_GUI_LLM_KEY__<SLOT>, SLOT uppercase-only.
 # Uppercase-only, not case-insensitive, because `os.environ` upper-cases keys
 # on Windows — a mixed-case slot name would pass here but silently fail the
@@ -104,7 +109,7 @@ def is_managed_key(name: str) -> bool:
     an unrelated environment variable such as `SECRET_KEY` or
     `PYPSAGUI_APP_DATA_DIR`.
     """
-    if name in KNOWN_PROVIDER_KEYS:
+    if name in KNOWN_PROVIDER_KEYS or name in DATA_SERVICE_KEYS:
         return True
     for prefix in (_LLM_KEY_PREFIX, _MCP_KEY_PREFIX):
         if name.startswith(prefix):

@@ -30,7 +30,7 @@ function ControlNext() {
   return (
     <p data-testid="control-next" className="text-[11px] text-muted">
       Next: {reliability ? 'Reliability' : 'hand off'}{' '}
-      <button type="button" data-testid="control-next-open" onClick={go} className="text-accent hover:underline">
+      <button type="button" data-testid="control-next-open" onClick={go} className="text-link hover:underline">
         {reliability ? 'Open Adequacy' : 'Open Reports'} ›
       </button>
     </p>
@@ -86,7 +86,7 @@ export function IslandTab() {
           <PageSection title="Load smoothing" hint="Whether the battery holds the load's steps inside the connection's limits">
             <p className="text-[12px] text-muted">
               The smoothing screen is judged with the grid-code verdicts, before and after the battery.{' '}
-              <button type="button" data-testid="island-scorecard-link" className="text-accent hover:underline"
+              <button type="button" data-testid="island-scorecard-link" className="text-link hover:underline"
                 onClick={showGridReadiness}>Readiness › Grid readiness ›</button>
             </p>
           </PageSection>

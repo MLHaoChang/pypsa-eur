@@ -96,6 +96,12 @@ POST   /api/durable-conversations/{thread_id}/speech/segment  allow the caller's
 POST   /api/durable-conversations/{thread_id}/speech/start  allow the caller's own conversation thread and speech records; writes no project
 POST   /api/durable-conversations/{thread_id}/speech/usage  allow the caller's own conversation thread and speech records; writes no project
 POST   /api/equipment_table/preview  allow declared non-mutating (assistant_route_parity non_mutating_routes): computes and returns, writes nothing
+PATCH  /api/grid-compliance/{name}/deliverables/{code}/comments/{comment_id}  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/comments  write path:name
+PUT    /api/grid-compliance/{name}/deliverables/{code}/data  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/freeze  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/pack  write path:name
+PUT    /api/grid-compliance/{name}/deliverables/{code}/status  write path:name
 POST   /api/gridspine/projects  none creates a new project the caller owns
 POST   /api/gridspine/{name}/capacity  write path:name
 PUT    /api/gridspine/{name}/config  write path:name
@@ -117,6 +123,8 @@ POST   /api/library/series/upload  none the org library, not a project
 POST   /api/library_reference/preview  allow declared non-mutating (assistant_route_parity non_mutating_routes): computes and returns, writes nothing
 PUT    /api/local-settings/anthropic-key  none desktop settings
 POST   /api/local-settings/reveal-log  none desktop settings
+DELETE /api/market-prices/token  none instance administration
+PUT    /api/market-prices/token  none instance administration
 DELETE /api/mcp  none personal MCP connections
 POST   /api/mcp  none personal MCP connections
 POST   /api/memory/dismissals  none personal assistant memory
@@ -208,6 +216,7 @@ POST   /api/projects/{name}/intent-comparison/abort  write path:name
 PUT    /api/projects/{name}/layout  write path:name
 PUT    /api/projects/{name}/map_layout  write path:name
 POST   /api/projects/{name}/map_layout/import  write path:name
+POST   /api/projects/{name}/market-prices/day-ahead  write path:name
 PUT    /api/projects/{name}/members  write path:name
 POST   /api/projects/{name}/profiles/apply  write path:name
 POST   /api/projects/{name}/profiles/apply-batch  write path:name

@@ -188,6 +188,33 @@ describe('receipt policy "4" (issue 10 S6a sectioned answers)', () => {
   })
 })
 
+describe('receipt policy "5" (AA-13 required warning slots)', () => {
+  const warning = { metric: 'ac_pf_convergence', disposition: 'warning', reason: 'ac_pf_not_converged (1 of 2)',
+    valid_snapshots: 1, requested_snapshots: 2, excluded_indices: ['2026-01-01T01:00:00'] }
+  const answered = { metric: 'branch_rating', disposition: 'answered', valid_snapshots: 1, requested_snapshots: 2,
+    excluded_indices: ['2026-01-01T01:00:00'] }
+  const warned = (over: Record<string, unknown> = {}) =>
+    receipt({ policy_version: '5', request_complete: false, result_slots: [warning, answered], ...over })
+
+  it('accepts warning slots first with an incomplete request', () => {
+    expect(parseApproval(frame({ verdict: 'limited', receipt: warned() }))).not.toBeNull()
+  })
+
+  it.each([
+    ['no warning slot', warned({ result_slots: [answered] })],
+    ['a warning after a metric', warned({ result_slots: [answered, warning] })],
+    ['a complete request', warned({ request_complete: true })],
+    ['a missing request_complete', warned({ request_complete: undefined })],
+    ['a warning without excluded snapshots', warned({ result_slots: [{ ...warning, excluded_indices: [] }] })],
+    ['a warning without a reason', warned({ result_slots: [{ ...warning, reason: '' }] })],
+    ['derived entries', warned({ derived: [] })],
+    ['a warning slot under policy "1"', receipt({ request_complete: false, result_slots: [warning] })],
+    ['a non-string excluded index', warned({ result_slots: [{ ...warning, excluded_indices: [3] }] })],
+  ])('rejects %s', (_label, value) => {
+    expect(parseApproval(frame({ verdict: 'limited', receipt: value }))).toBeNull()
+  })
+})
+
 describe('verifyApprovedText', () => {
   const previous = globalThis.crypto
   afterEach(() => {

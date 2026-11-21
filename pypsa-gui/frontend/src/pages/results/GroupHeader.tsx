@@ -81,7 +81,7 @@ export default function GroupHeader({ group, status, outsideScope, pastRun, chil
           {' '}
           <button type="button" data-testid="results-ghead-failed-open"
             onClick={() => (uiMode === 'guided' ? openSectionInGuided : openSectionInExpert)('readiness')}
-            className="text-accent hover:underline">Open Issues ›</button>
+            className="text-link hover:underline">Open Issues ›</button>
         </span>
       )}
       <span className="flex-1" />

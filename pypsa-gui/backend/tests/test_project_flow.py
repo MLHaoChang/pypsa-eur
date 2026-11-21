@@ -118,6 +118,9 @@ def test_a_filled_site_is_complete_and_ready(client, site):
     assert rows["readiness"]["state"] is None and rows["readiness"]["summary"] == "0 to do, 0 to check"
     assert rows["results"]["state"] is None and rows["results"]["freshness"] == "not_run"
     assert rows["connection"]["summary"] == "Grid import, 50 MW"
+    # The limit as the study takes it, with the links it is read from (template-e2e 02).
+    assert rows["connection"]["connection_limit"] == {
+        "mw": 50.0, "refusal": None, "links": ["grid_import"]}
     assert rows["project"]["required"] and not rows["commercial"]["required"]
 
 
@@ -518,7 +521,16 @@ def _server_verdict(client, monkeypatch, name, *, study: bool = True) -> bool:
     if study and meta.status_code == 200:
         monkeypatch.setattr("services.adequacy.eh_study.run_eh_study",
                             lambda *a, **k: {})
-        r = client.post("/api/results/eh_study", json=S._request_for(meta.json()))
+        # What the Goal card sends: the template's request with the connection limit
+        # the flow's connection row reads from the network (template-e2e 02).
+        flow = client.get(f"/api/projects/{name}/flow").json()
+        limit = next(s for s in flow["sections"] if s["section"] == "connection")["connection_limit"]
+        try:
+            body = S.with_network_import(S._template_request(meta.json()), cap=S.ImportCapacity(
+                (), limit["mw"], limit["refusal"]))
+        except S.ImportCapacityError:
+            return False                         # the card sends nothing: no study can start
+        r = client.post("/api/results/eh_study", json=body)
         assert r.status_code in (200, 202, 422), r.text
         ok = ok and r.status_code != 422
         for _ in range(100):                     # let the fake worker finish
@@ -628,6 +640,26 @@ def test_r4_study_with_voll_zero(client, tmp_projects_dir, monkeypatch):
     assert {x["section"] for x in body["notes"]} == {"project"}
 
 
+def test_a_two_way_grid_import_is_refused_by_the_commercial_binding_first(
+        client, tmp_projects_dir, monkeypatch):
+    """GK B2 sweep item 9: the data centre ships a commercial block, so a two-way
+    grid import is refused at section 7 before any study refusal, in plain words
+    that say what to change."""
+    name = _create(client, "eh_datacenter", "two_way")
+    link = client.get("/api/network/links").json()
+    grid = next(r for r in link if r["name"] == "grid_import")
+    assert client.put("/api/network/links/grid_import",
+                      json={**grid, "p_min_pu": -1.0}).status_code == 200
+    body = _flow(client, name)
+    assert body["run_ready"] is False
+    blocker = body["run_blocker"]
+    assert blocker["section"] == "commercial" and blocker["code"] == "commercial.binding_invalid"
+    msg = blocker["detail"]  # the plain words; `message` is the issue's title
+    assert "grid connection link grid_import allows reverse flow" in msg
+    assert "Make it one-way (set its minimum power, p_min_pu, to 0)" in msg
+    assert "commercial.poc_link" not in msg
+
+
 def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypatch,
                                              project_storage_dir):
     """The study's own refusal (here: an energy-import cap on a two-way import
@@ -637,6 +669,11 @@ def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypat
     meta = json.loads(path.read_text())
     meta["pack_overrides"] = {**meta["pack_overrides"], "import_energy_mwh_per_year": 1000.0}
     path.write_text(json.dumps(meta))
+    # The template's PoC binding refuses a two-way import (WALK-IMPROVE-1 b ships a
+    # commercial block); without it the study's own refusal is the blocker.
+    _cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config",
+                      json={**_cfg, "commercial": None}).status_code == 200
     link = client.get("/api/network/links").json()
     grid = next(r for r in link if r["name"] == "grid_import")
     assert client.put("/api/network/links/grid_import",
@@ -676,11 +713,13 @@ def test_r4_in_flight(client, site, monkeypatch):
 TEMPLATE_STATES = {
     # R location → warning (site_location_missing). R connection limits and
     # ramp, R LOLE goal: DC 02's assumed ledger rows → connection and
-    # scenarios warning ("to check").
+    # scenarios warning ("to check"). Its shipped finance inputs and tax rule
+    # (WALK-IMPROVE-1 b) are assumed ledger rows → commercial warning; the
+    # existing campus typed sunk (overnight cost 0) is one → assets warning.
     "eh_datacenter": {"project": "warning", "carriers": "complete",
                       "connection": "warning", "loads": "complete",
                       "assets": "warning", "profiles": "complete",
-                      "commercial": "complete", "scenarios": "warning"},
+                      "commercial": "warning", "scenarios": "warning"},
     # Islanded: connection `not_needed`. Assumed island data → assets warning.
     # DC 02's assumed LOLE goal → scenarios warning.
     "eh_microgrid": {"project": "warning", "carriers": "complete",
@@ -1130,6 +1169,23 @@ def test_load_flow_freshness_survives_a_save_and_reload(client, site, set_cfg, b
     assert _kinds(_flow(client, name))["loadflow"] == "fresh"
     _bump(client, bound_ctx)
     assert _kinds(_flow(client, name))["loadflow"] == "stale"
+
+
+def test_a_weak_grid_site_without_a_readable_limit_blocks_the_study(client, tmp_projects_dir):
+    """template-e2e 02 (GK B C2-C4): where the network fixes no connection limit,
+    the connection row says why and the study is blocked; the rail shows no MW."""
+    name = _create(client, "eh_datacenter", "nolimit")
+    assert _flow(client, name)["run_ready"] is True
+    _put(client, "links", "grid_import", p_nom_extendable=True)
+    body = _flow(client, name)
+    row = next(s for s in body["sections"] if s["section"] == "connection")
+    assert row["connection_limit"]["mw"] is None
+    assert "sized by the optimisation" in row["connection_limit"]["refusal"]
+    [item] = [i for i in row["items"] if i["code"] == "eh_connection_limit"]
+    assert item["blocking"] and item["severity"] == "error"
+    assert item["message"] == row["connection_limit"]["refusal"]
+    assert body["run_ready"] is False
+    assert all("connection_limit" not in s for s in body["sections"] if s["section"] != "connection")
 
 
 def test_island_assumption_rows_open_the_island_panel_not_expert_capacity_bounds():

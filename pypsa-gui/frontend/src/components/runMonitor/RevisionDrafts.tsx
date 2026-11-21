@@ -147,7 +147,7 @@ export default function RevisionDrafts({ taskId, view, onRefresh }: {
           {c.reason && <div className="text-muted" data-testid="revision-comment-reason">
             {DRAFT_REASON_WORDS[c.reason] ?? DRAFT_REASON_WORDS.draft_unavailable}</div>}
           {mayAct && <button type="button" disabled={busy || blocked !== null}
-            className="text-accent hover:underline disabled:opacity-40" data-testid="revision-draft-request"
+            className="text-link hover:underline disabled:opacity-40" data-testid="revision-draft-request"
             aria-describedby={blocked ? `revision-blocked-${taskId}` : undefined}
             onClick={() => void act(() => requestRevisionDraft(project, reportId, c.comment_id, taskId))}>
             Draft a fix</button>}
@@ -178,7 +178,7 @@ export default function RevisionDrafts({ taskId, view, onRefresh }: {
             {reasons.length > 0 && <ul className="list-disc pl-5 text-muted" data-testid="revision-draft-reasons">
               {reasons.map((t, i) => <li key={i}>{t}</li>)}</ul>}
             {r.status === 'drafted' && mayAct && <div className="flex flex-wrap items-baseline gap-2">
-              <button type="button" disabled={busy} className="text-accent hover:underline disabled:opacity-40"
+              <button type="button" disabled={busy} className="text-link hover:underline disabled:opacity-40"
                 data-testid="revision-draft-confirm"
                 onClick={() => void act(() => confirmRevisionDraft(project, reportId, r.id, taskId))}>Confirm</button>
               <button type="button" disabled={busy} className="text-muted hover:text-text disabled:opacity-40"

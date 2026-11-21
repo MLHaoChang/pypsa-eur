@@ -66,7 +66,7 @@ function RunAgain({ acPfAvailable, from, to, enabled }: { acPfAvailable: boolean
       </button>
       <span className="text-muted">Runs the whole solve again{acPfAvailable || noBranches ? '' : '; AC power flow follows when switched on'}.</span>
       {noBranches && isHub && (
-        <button type="button" data-testid="loadflow-open-grid-study" className="text-accent hover:underline"
+        <button type="button" data-testid="loadflow-open-grid-study" className="text-link hover:underline"
           onClick={() => openPanel('scenarios', 'campusStudy')}>
           Grid checks are in Grid study ›
         </button>
@@ -75,7 +75,7 @@ function RunAgain({ acPfAvailable, from, to, enabled }: { acPfAvailable: boolean
         <>
           <StatePill state="not_modelled" />
           <span className="text-muted">AC power flow was not part of this run.</span>
-          <button type="button" data-testid="loadflow-switch-on-acpf" className="text-accent hover:underline"
+          <button type="button" data-testid="loadflow-switch-on-acpf" className="text-link hover:underline"
             onClick={() => openPanel('scenarios', 'simparams')}>
             Switch it on under What the Run computes › Load flow ›
           </button>
@@ -454,7 +454,7 @@ export default function LoadFlow() {
       {/* ── KPI strip ─────────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Network</h3>
+          <h3 className="text-h3 font-semibold text-text">Network</h3>
           <RunAgain acPfAvailable={acPfAvailable} from={win.from} to={win.to} enabled={winValid} />
           {/* Result-source toggle. Hidden when Stage 2 hasn't run yet — the
               backend would just return the same LOPF data either way, so
@@ -517,7 +517,7 @@ export default function LoadFlow() {
       {SHOW_RETIRED_SECTIONS && emissions && (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">CO₂ emissions</h3>
+            <h3 className="text-h3 font-semibold text-text">CO₂ emissions</h3>
             {emissions.cap.active && emissions.cap.cap_tCO2 != null && (
               <span className="text-[10px] text-muted">
                 Active cap: <span className="font-mono text-text">{emissions.cap.cap_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 })} tCO₂</span>
@@ -616,7 +616,7 @@ export default function LoadFlow() {
       {carrierKpis && carrierKpis.rows.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Carrier KPIs ({carrierKpis.rows.length})</h3>
+            <h3 className="text-h3 font-semibold text-text">Carrier KPIs ({carrierKpis.rows.length})</h3>
             <button
               onClick={() => {
                 if (!carrierKpis) return
@@ -687,7 +687,7 @@ export default function LoadFlow() {
       {lineDuals && lineDuals.rows.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Line congestion (LP duals)</h3>
+            <h3 className="text-h3 font-semibold text-text">Line congestion (LP duals)</h3>
             {lineDuals.total_congestion_rent_eur > 0 && (
               <span className="text-[10px] text-muted">
                 Total congestion rent:{' '}
@@ -760,7 +760,7 @@ export default function LoadFlow() {
       {ucResults && ucResults.n_committable > 0 && ucResults.generators.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Unit Commitment ({ucResults.n_committable})</h3>
+            <h3 className="text-h3 font-semibold text-text">Unit Commitment ({ucResults.n_committable})</h3>
             <button
               onClick={() => {
                 if (!ucResults) return
@@ -878,7 +878,7 @@ export default function LoadFlow() {
           per-branch table only appears when there's data to show. */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Transmission losses</h3>
+          <h3 className="text-h3 font-semibold text-text">Transmission losses</h3>
         </div>
         {lossesNotModelled ? (
           <ResultState state="not_modelled" reason="Transmission losses were not modelled in this run."
@@ -928,7 +928,7 @@ export default function LoadFlow() {
           PyPSA's Newton-Raphson computed. */}
       {acPfAvailable && lossesLopf && lossesAcPf && (
         <section>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2">Loss comparison — LP model vs AC PF</h3>
+          <h3 className="text-h3 font-semibold text-text mb-2">Loss comparison — LP model vs AC PF</h3>
           <div className="grid grid-cols-2 gap-2">
             <div className="border border-border rounded p-2">
               <p className="text-[10px] text-muted uppercase tracking-wider mb-1">LOPF (LP approximation)</p>
@@ -964,7 +964,7 @@ export default function LoadFlow() {
           endpoint. Hidden when Stage 2 hasn't run since the last solve. */}
       {acPfStatus?.available && (
         <section>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2">AC Power Flow status</h3>
+          <h3 className="text-h3 font-semibold text-text mb-2">AC Power Flow status</h3>
           <div className="grid grid-cols-4 gap-2">
             <KPI label="Snapshots converged" value={acPfText.kpi} />
             <KPI label="Slack bus" value={acPfStatus.slack_bus_used ?? '—'} />
@@ -1045,7 +1045,7 @@ export default function LoadFlow() {
       {acPfAvailable && busVoltageStats && busVoltageStats.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Bus voltage · AC PF ({busVoltageStats.length})</h3>
+            <h3 className="text-h3 font-semibold text-text">Bus voltage · AC PF ({busVoltageStats.length})</h3>
             <button
               onClick={() => {
                 if (!busVoltageStats) return
@@ -1164,7 +1164,7 @@ export default function LoadFlow() {
       {acPfAvailable && lineReactiveStats && lineReactiveStats.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Lines · reactive power · AC PF ({lineReactiveStats.length})</h3>
+            <h3 className="text-h3 font-semibold text-text">Lines · reactive power · AC PF ({lineReactiveStats.length})</h3>
             <button
               onClick={() => {
                 if (!lineReactiveStats) return
@@ -1204,7 +1204,7 @@ export default function LoadFlow() {
       {acPfAvailable && trafoReactiveStats && trafoReactiveStats.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Transformers · reactive power · AC PF ({trafoReactiveStats.length})</h3>
+                <h3 className="text-h3 font-semibold text-text">Transformers · reactive power · AC PF ({trafoReactiveStats.length})</h3>
                 <button
                   onClick={() => {
                     if (!trafoReactiveStats) return
@@ -1253,7 +1253,7 @@ export default function LoadFlow() {
       {SHOW_RETIRED_SECTIONS && priceChart && (
         <section>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+            <h3 className="text-h3 font-semibold text-text">
               Hourly marginal price
               {priceView === 'per_bus' && priceChart.busTotal > priceChart.cols.length && (
                 <span className="ml-2 text-[10px] font-normal text-muted">
@@ -1331,7 +1331,7 @@ export default function LoadFlow() {
       {SHOW_RETIRED_SECTIONS && priceTS && (
         <section>
           <div className="flex items-center gap-2 mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Price drivers</h3>
+            <h3 className="text-h3 font-semibold text-text">Price drivers</h3>
             <label className="text-[10px] text-muted ml-2">|price| ≥</label>
             <input type="number" step="100" min={0}
               value={driverThreshold}

@@ -922,7 +922,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
                 </select>
               ) : (
                 <button type="button" onClick={() => setPicking(true)}
-                        className="text-[10px] text-accent hover:underline">+ Add parameter</button>
+                        className="text-[10px] text-link hover:underline">+ Add parameter</button>
               )}
             </div>
           )}

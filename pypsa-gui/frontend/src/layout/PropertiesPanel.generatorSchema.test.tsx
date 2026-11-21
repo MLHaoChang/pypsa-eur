@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { seedRows } from '../test/seedRows'
 
 vi.mock('../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/network')>()
@@ -52,7 +53,7 @@ function inputOf(label: string): HTMLInputElement {
 
 async function openEdit(gen: unknown) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  client.setQueryData(nk('Demo', 'generators'), [gen])
+  seedRows(client, 'Demo', 'generators', [gen])
   render(<QueryClientProvider client={client}><GeneratorCard gen={gen as never} onRename={() => {}} /></QueryClientProvider>)
   await userEvent.click(await screen.findByRole('button', { name: /edit/i }))
 }
