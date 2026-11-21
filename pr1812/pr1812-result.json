@@ -1,0 +1,306 @@
+{
+ "expertOnlyFlag": {
+  "flag": "TABS[].expertOnly in pages/Results.tsx",
+  "expertOnly": [
+   "overview",
+   "capex",
+   "dispatch",
+   "loadflow",
+   "grid_code",
+   "electrical_design",
+   "island",
+   "grid_forming",
+   "prices",
+   "economics",
+   "emissions",
+   "curtailment",
+   "lostload",
+   "storage",
+   "investment",
+   "asset"
+  ]
+ },
+ "results": [
+  {
+   "key": "guided-light-blank",
+   "surface": "capacity-bounds empty state",
+   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset in the Properties panel to list it here.",
+   "mode": "guided",
+   "ok": true
+  },
+  {
+   "key": "guided-light-template",
+   "surface": "Results dispatch",
+   "hidden": true,
+   "raw": null,
+   "found": false,
+   "ok": true
+  },
+  {
+   "key": "guided-light-template",
+   "surface": "Results storage",
+   "hidden": true,
+   "raw": null,
+   "found": true,
+   "ok": true
+  },
+  {
+   "key": "guided-light-template",
+   "surface": "Results economics",
+   "hidden": true,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "guided-light-template",
+   "surface": "Results prices",
+   "hidden": true,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "guided-light-template",
+   "surface": "Results capex",
+   "hidden": true,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "guided-light-template",
+   "surface": "Results emissions",
+   "hidden": true,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "guided-dark-blank",
+   "surface": "capacity-bounds empty state",
+   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset in the Properties panel to list it here.",
+   "mode": "guided",
+   "ok": true
+  },
+  {
+   "key": "guided-dark-template",
+   "surface": "Results dispatch",
+   "hidden": true,
+   "raw": null,
+   "found": false,
+   "ok": true
+  },
+  {
+   "key": "guided-dark-template",
+   "surface": "Results storage",
+   "hidden": true,
+   "raw": null,
+   "found": true,
+   "ok": true
+  },
+  {
+   "key": "guided-dark-template",
+   "surface": "Results economics",
+   "hidden": true,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "guided-dark-template",
+   "surface": "Results prices",
+   "hidden": true,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "guided-dark-template",
+   "surface": "Results capex",
+   "hidden": true,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "guided-dark-template",
+   "surface": "Results emissions",
+   "hidden": true,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "expert-light-blank",
+   "surface": "capacity-bounds empty state",
+   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset in the Properties panel to list it here.",
+   "mode": "expert",
+   "ok": true
+  },
+  {
+   "key": "expert-light-template",
+   "surface": "Results dispatch",
+   "hidden": false,
+   "raw": null,
+   "found": true,
+   "ok": true
+  },
+  {
+   "key": "expert-light-template",
+   "surface": "Results storage",
+   "hidden": false,
+   "raw": null,
+   "found": true,
+   "ok": true
+  },
+  {
+   "key": "expert-light-template",
+   "surface": "Results economics",
+   "hidden": false,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "expert-light-template",
+   "surface": "Results prices",
+   "hidden": false,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "expert-light-template",
+   "surface": "Results capex",
+   "hidden": false,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "expert-light-template",
+   "surface": "Results emissions",
+   "hidden": false,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "expert-dark-blank",
+   "surface": "capacity-bounds empty state",
+   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset in the Properties panel to list it here.",
+   "mode": "expert",
+   "ok": true
+  },
+  {
+   "key": "expert-dark-template",
+   "surface": "Results dispatch",
+   "hidden": false,
+   "raw": null,
+   "found": true,
+   "ok": true
+  },
+  {
+   "key": "expert-dark-template",
+   "surface": "Results storage",
+   "hidden": false,
+   "raw": null,
+   "found": true,
+   "ok": true
+  },
+  {
+   "key": "expert-dark-template",
+   "surface": "Results economics",
+   "hidden": false,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "expert-dark-template",
+   "surface": "Results prices",
+   "hidden": false,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "expert-dark-template",
+   "surface": "Results capex",
+   "hidden": false,
+   "raw": null,
+   "found": null,
+   "ok": true
+  },
+  {
+   "key": "expert-dark-template",
+   "surface": "Results emissions",
+   "hidden": false,
+   "raw": null,
+   "found": null,
+   "ok": true
+  }
+ ],
+ "unshot": [
+  [
+   "pages/CompareView.tsx",
+   "needs two solved projects in the compare rail"
+  ],
+  [
+   "components/MapConnectDialog.tsx, pages/TopologyCanvas.tsx",
+   "the connect dialog opens on a drag between two buses"
+  ],
+  [
+   "components/VintagePeriodBoundsModal.tsx",
+   "needs a multi-period project with an extendable asset"
+  ],
+  [
+   "pages/modelHorizon/StepYears.tsx",
+   "the Model horizon wizard, step 2"
+  ],
+  [
+   "pages/results/SiteConnectionForm.tsx, pages/results/adequacy.tsx, pages/results/ReserveMarginPanel.tsx",
+   "need a network without a one-way Link, zone data or a reserve-margin study"
+  ],
+  [
+   "pages/IssuesPanel.tsx",
+   "needs a carrier with zero CO2 and a catalogue value"
+  ],
+  [
+   "pages/results/investment/FinanceInputsEditor.tsx",
+   "needs a US finance pack"
+  ]
+ ],
+ "small": [
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-blank-capacity-bounds-empty.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-dispatch.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-storage.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-economics.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-prices.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-capex.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-emissions.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-blank-capacity-bounds-empty.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-dispatch.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-storage.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-economics.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-prices.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-capex.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-emissions.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-blank-capacity-bounds-empty.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-dispatch.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-storage.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-economics.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-prices.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-capex.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-emissions.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-blank-capacity-bounds-empty.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-dispatch.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-storage.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-economics.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-prices.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-capex.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-emissions.small.png"
+ ],
+ "failures": []
+}
