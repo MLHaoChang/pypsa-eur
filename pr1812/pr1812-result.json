@@ -24,7 +24,7 @@
   {
    "key": "guided-light-blank",
    "surface": "capacity-bounds empty state",
-   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset in the Properties panel to list it here.",
+   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset to list it here.",
    "mode": "guided",
    "ok": true
   },
@@ -79,7 +79,7 @@
   {
    "key": "guided-dark-blank",
    "surface": "capacity-bounds empty state",
-   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset in the Properties panel to list it here.",
+   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset to list it here.",
    "mode": "guided",
    "ok": true
   },
@@ -134,7 +134,7 @@
   {
    "key": "expert-light-blank",
    "surface": "capacity-bounds empty state",
-   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset in the Properties panel to list it here.",
+   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset to list it here.",
    "mode": "expert",
    "ok": true
   },
@@ -189,7 +189,7 @@
   {
    "key": "expert-dark-blank",
    "surface": "capacity-bounds empty state",
-   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset in the Properties panel to list it here.",
+   "text": "No asset in this network is sized by the optimiser. Tick “Extendable” on an asset to list it here.",
    "mode": "expert",
    "ok": true
   },
@@ -273,34 +273,34 @@
   ]
  ],
  "small": [
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-blank-capacity-bounds-empty.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-dispatch.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-storage.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-economics.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-prices.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-capex.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-light-template-results-emissions.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-blank-capacity-bounds-empty.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-dispatch.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-storage.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-economics.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-prices.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-capex.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/guided-dark-template-results-emissions.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-blank-capacity-bounds-empty.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-dispatch.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-storage.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-economics.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-prices.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-capex.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-light-template-results-emissions.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-blank-capacity-bounds-empty.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-dispatch.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-storage.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-economics.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-prices.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-capex.small.png",
-  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c/expert-dark-template-results-emissions.small.png"
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-light-blank-capacity-bounds-empty.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-light-template-results-dispatch.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-light-template-results-storage.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-light-template-results-economics.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-light-template-results-prices.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-light-template-results-capex.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-light-template-results-emissions.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-dark-blank-capacity-bounds-empty.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-dark-template-results-dispatch.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-dark-template-results-storage.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-dark-template-results-economics.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-dark-template-results-prices.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-dark-template-results-capex.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/guided-dark-template-results-emissions.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-light-blank-capacity-bounds-empty.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-light-template-results-dispatch.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-light-template-results-storage.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-light-template-results-economics.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-light-template-results-prices.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-light-template-results-capex.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-light-template-results-emissions.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-dark-blank-capacity-bounds-empty.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-dark-template-results-dispatch.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-dark-template-results-storage.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-dark-template-results-economics.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-dark-template-results-prices.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-dark-template-results-capex.small.png",
+  "/tmp/claude-0/-home-user-pypsa-eur/ee883580-39e5-5413-bb44-dbb44578f9f0/scratchpad/shots-02c2/expert-dark-template-results-emissions.small.png"
  ],
  "failures": []
 }
