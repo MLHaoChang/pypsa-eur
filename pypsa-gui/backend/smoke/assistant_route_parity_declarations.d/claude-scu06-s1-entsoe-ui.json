@@ -1,0 +1,6 @@
+{
+  "limitations": [
+    {"method": "PUT", "path": "/api/market-prices/token", "reason": "admin"},
+    {"method": "DELETE", "path": "/api/market-prices/token", "reason": "admin"}
+  ]
+}
