@@ -9,7 +9,8 @@ One native read step, run by the runner on the run's bound context, writes
   no number from model text enters it (GK B C14);
 - `coverage`: each part of the approved request (the report, each profile
   chapter, each brief case, the stated targets) `covered`, `partly` or
-  `gap` (HH-09A). `covered` comes only from a receipt or a passing gate; a
+  `gap` (HH-09A), or `skipped` with the profile's reason when the profile
+  skips the report stage (study harness 15; not a gap). `covered` comes only from a receipt or a passing gate; a
   missing or unreadable one is a `gap`, never `covered` (GK B C13);
 - `revert`: "Revert the run's changes" as one LC-16 preview
   (`assistant_tools.preview_project_changes`) over the ledger's
@@ -39,6 +40,9 @@ PREVIEW_CLASSES = frozenset(
     {"Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"}
 )
 COVERED, PARTLY, GAP = "covered", "partly", "gap"
+# A part the profile itself leaves out (its stage `skipped`, with the profile's
+# reason): named with that reason, and never counted as a gap (study harness 15).
+SKIPPED = "skipped"
 
 
 # ── KPIs (C14) ───────────────────────────────────────────────────────────────
@@ -54,12 +58,38 @@ def _number(value):
     return float(value)
 
 
+def _record_kpi(kpi: dict, task: dict | None) -> dict:
+    """Study harness 14 S-C (C9): a KPI kept in the run's own record (the
+    PPA price, `harness.run_ppa.read`), never from retained results: a
+    missing or malformed record is `not_evaluated`, a broken binding `stale`."""
+    from harness import run_ppa
+    from services.pypsa_service import PyPSAService
+
+    try:
+        ctx = PyPSAService.get_active_context()
+    except Exception:  # noqa: BLE001 -- no context: the read says the project is not open
+        ctx = None
+    got = run_ppa.read(task, ctx)
+    return {
+        "id": kpi["id"],
+        "label": kpi["label"],
+        "unit": got["unit"] or kpi["unit"],
+        "value": got["value"],
+        "source": f"run.{kpi['record']}",
+        "status": got["state"],
+        "reason": got["reason"],
+        "settled": got.get("settled") is True,
+        "text": got["text"],  # UX: the price, or its state with its plain reason
+    }
+
+
 def read_kpis(profile: dict, task: dict | None = None) -> list[dict]:
     """Each profile KPI from its retained results section on the bound
     context: `{id, label, value, unit, source, status}`, `status` "read" or
     why it is not (`not_current`, `unreadable`). When `task`'s own case step
     is the investment chapter's gap, its case KPIs read `not_established` with
-    that gap's kind, never a case the project stored before (follow-up (a))."""
+    that gap's kind, never a case the project stored before (follow-up (a)). A KPI the profile keeps in
+    the run's record (`record`) is read from `task` only."""
     from services import retained_results
     from services.workflow_tools import solve_freshness
 
@@ -74,6 +104,9 @@ def read_kpis(profile: dict, task: dict | None = None) -> list[dict]:
     for kpi in profile.get("kpis") or []:
         if kpi.get("source") == IC_SOURCE:
             rows.append(_ic_kpi(kpi, case, gap))
+            continue
+        if "record" in kpi:
+            rows.append(_record_kpi(kpi, task))
             continue
         row = {
             "id": kpi["id"],
@@ -195,14 +228,25 @@ def kpis_read(task: dict, profile: dict) -> bool | None:
     if not isinstance(stored, list) or not profile.get("kpis"):
         return None
     fresh = read_kpis(profile, task)
-    if any(r["status"] not in ("read", NOT_ESTABLISHED) for r in fresh):
-        return False
     by_id = {r.get("id"): r for r in stored if isinstance(r, dict)}
-    return all(
-        by_id.get(r["id"], {}).get("value") == r["value"]
-        and by_id[r["id"]].get("status") == r["status"]
-        and by_id[r["id"]].get("reasons") == r.get("reasons")
-        for r in fresh
+    return all(_read_back(r, by_id.get(r["id"]) or {}) for r in fresh)
+
+
+def _read_back(fresh: dict, stored: dict) -> bool:
+    """One KPI read back: read now (or not established, with its reasons) and equal to its
+    row; or (study harness 14 S-C) a record KPI the run's own step judged not evaluated,
+    with the same status and reason as its row. Stale or anything else fails."""
+    if fresh["status"] in ("read", NOT_ESTABLISHED):
+        return (
+            stored.get("status") == fresh["status"]
+            and stored.get("value") == fresh["value"]
+            and stored.get("reasons") == fresh.get("reasons")
+        )
+    return (
+        fresh.get("settled") is True
+        and fresh["status"] == NOT_EVALUATED
+        and stored.get("status") == NOT_EVALUATED
+        and stored.get("reason") == fresh.get("reason")
     )
 
 
@@ -216,7 +260,7 @@ def _part(part, kind, read):
     except Exception:  # noqa: BLE001 -- an unreadable receipt is a gap, never covered
         logger.info("coverage of %s could not be read", part, exc_info=True)
         status, basis = GAP, "its receipt could not be read"
-    if status not in (COVERED, PARTLY, GAP):
+    if status not in (COVERED, PARTLY, GAP, SKIPPED):
         status, basis = GAP, "no receipt"
     return {"part": part, "kind": kind, "status": status, "basis": basis}
 
@@ -293,9 +337,22 @@ def coverage(task: dict, profile: dict, project_dir) -> list[dict]:
     parts = []
     if project_dir is not None:
         doc = None
+        stage = (run.get("stages") or {}).get("report") or {}
+        reason = stage.get("reason") if isinstance(stage, dict) else None
+        # Only a profile's own non-blank words count; any other shape reads as a gap (#1390 F2).
+        skipped = (
+            reason.strip()
+            if isinstance(reason, str)
+            and reason.strip()
+            and stage.get("status") == "skipped"
+            and stage.get("by") == "profile"
+            else None
+        )
 
         def report():
             nonlocal doc
+            if skipped:
+                return SKIPPED, skipped
             state = run_report.status(task, project_dir)
             if state != "ready":
                 return GAP, f"the report is {state or 'not read'}"
@@ -310,6 +367,8 @@ def coverage(task: dict, profile: dict, project_dir) -> list[dict]:
         for sid in profile.get("chapters") or []:
 
             def chapter(sid=sid):
+                if skipped:
+                    return SKIPPED, skipped
                 sec = next(
                     (
                         s

@@ -30,6 +30,16 @@ def card(tmp_path, tid="eh_datacenter", dc_load=None):
     return G.grid_readiness(d, n, PROFILE)["rows"]
 
 
+def scr_card(tmp_path, tid="eh_datacenter", dc_load=None, sk=None):
+    """The card with the PoC's IBR capacity stated (50 MVA, above the template's
+    44 MVA of converters), so the SCR row carries a checkable verdict (DC walk 05)."""
+    d, n = _project(tmp_path, tid, dc_load=dc_load)
+    n.buses.at["grid", "eh_ibr_mva"] = 50.0
+    if sk is not None:
+        n.buses.at["grid", "eh_sk_mva"] = sk
+    return G.grid_readiness(d, n, PROFILE)["rows"]
+
+
 def counts(rows):
     scope = {"version": 1, "profile": R.PROFILE, "entity_id": "network"}
     facts, _ = R.calculate(raw_for(rows), scope)
@@ -47,7 +57,7 @@ def test_every_row_has_one_disposition_and_the_counts_add_up(tmp_path, tid, dc_l
 
 
 def test_each_declared_rule_checks_its_row(tmp_path):
-    rows = {r["id"]: r for r in card(tmp_path, "eh_datacenter", {})}
+    rows = {r["id"]: r for r in scr_card(tmp_path, "eh_datacenter", {})}
     for rid in ("scr", "ramp_rate", "rapid_voltage_change"):
         kind, verdict = R.disposition(rows[rid])
         assert kind == "checked" and verdict == rows[rid]["verdict"], rid
@@ -70,9 +80,8 @@ def test_the_voltage_change_row_re_judges_in_every_regime(tmp_path, swing, verdi
 
 
 def test_a_rounded_boundary_is_withheld_not_re_verdicted(tmp_path):
-    d, n = _project(tmp_path, "eh_datacenter")
-    n.buses.at["grid", "eh_sk_mva"] = 89.988  # SCR 2.9996: stored 3.0, the engine says warn
-    row = _rows(G.grid_readiness(d, n, PROFILE))["scr"]
+    # SCR 2.9996 at a stated 50 MVA: stored 3.0, the engine says warn
+    row = _rows({"rows": scr_card(tmp_path, sk=149.98)})["scr"]
     assert R.disposition(row) == ("boundary_disagreement", "pass")
     assert counts([row]) == {"checked_pass": 0, "checked_warn": 0, "checked_fail": 0, "not_checked": 1}
 
@@ -97,7 +106,7 @@ def test_the_harmonic_row_is_not_scalar_since_its_verdict_reads_each_order(tmp_p
 
 
 def test_a_rule_that_is_not_the_codes_rule_is_withheld(tmp_path):
-    row = _rows({"rows": card(tmp_path, "eh_datacenter", {})})["scr"]
+    row = _rows({"rows": scr_card(tmp_path, "eh_datacenter", {})})["scr"]
     loose = dict(row, rule={**row["rule"], "comparator": "<="})
     assert R.disposition(loose)[0] == "rule_mismatch"
     stray = dict(row, id="made_up_row")
@@ -231,3 +240,27 @@ def test_the_flicker_row_is_not_scalar_since_its_verdict_reads_pst_and_plt(tmp_p
     row = _rows(G.grid_readiness(tmp_path, _flicker_site(step=step), PROFILE))["flicker"]
     assert row["project_value"] is not None
     assert R.disposition(row)[0] == "not_scalar"
+
+
+EXCLUDED = [{"id": "ramp_rate", "requirement": "Connection ramp rate", "reason": "off-grid: the tie is open"},
+            {"id": "energization_peak:2030", "requirement": "Energization peak 2030", "reason": "off-grid: the tie is open"}]
+
+
+def test_checked_source_names_excluded_rows_and_why():
+    raw = {**raw_for([]), "excluded": EXCLUDED}
+    line = R.notes(raw, str)[-1]
+    assert "Connection ramp rate (off-grid: the tie is open)" in line
+    assert "Energization peak 2030" in line and "not applicable" in line
+    assert not any("Left out" in x for x in R.notes(raw_for([]), str))
+
+
+def test_report_chapter_names_excluded_rows_and_why():
+    from services.reports import chapters as C
+
+    src = {"profile": {"id": PROFILE}, "rows": [], "summary": {}, "excluded": EXCLUDED}
+    payload = C.grid_readiness_payload(src)
+    text = "\n".join(C.grid_readiness_disclosures(payload))
+    assert "Connection ramp rate (off-grid: the tie is open)" in text and "Energization peak 2030" in text
+    plain = C.grid_readiness_payload({**src, "excluded": []})
+    assert "excluded" not in plain
+    assert "left out" not in "\n".join(C.grid_readiness_disclosures(plain))

@@ -70,6 +70,18 @@ CASE_TOOLS = frozenset({"run_investment_case"})
 # `ic_budget` and no LP runs. Without the key, (53) B2's refusal stands.
 CASE_BASELINE_SOLVES = 2
 IC_BUDGET_KIND = "ic_budget"
+# Study harness 14 S-C (GK B (56) C8): the PPA price is the runner's native read
+# of the run's own case (`harness/run_ppa.py`); no call is ever its step, so a
+# model turn never solves one under the grant (#1123). The tool is read tier, so
+# its calls never reach `admit`: a run turn is refused by the offered-tools
+# allowlist (`session.stage_tools`, `loop.dispatch_tool_call`). This branch is
+# defence in depth: unreachable for a read-tier tool through dispatch, it holds
+# if the tool's tier or a stage's offer ever changes.
+PPA_TOOLS = frozenset({"solve_ppa_price"})
+# Study harness 15 (owner decision SH15-PF-1): grid_only's setup switches Load flow on. The
+# one setting a grant covers, and only as the harness's own step with exactly these args: a
+# model turn never writes the solver config under a grant (`own_step_only`, `outside_entry`).
+SETTING_TOOLS = {"update_solver_config": {"partial": {"run_ac_pf_after_lopf": True}}}
 # Study harness 07 (GK B B1-b): a grant that lists the run's report covers only
 # the stage-7 card (`cross`); the runner starts that job itself, so a chat
 # `generate_report` is never admitted on it, and it never counts as a solve.
@@ -216,14 +228,14 @@ def _check_edit(entry):
 def _check_run(entry):
     if not isinstance(entry, dict) or "tool" not in entry \
             or not set(entry) <= {"tool", "kind", "restore", "baseline_solves"} \
-            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS \
+            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS | set(SETTING_TOOLS) \
             or ("baseline_solves" in entry and (entry["tool"] not in CASE_TOOLS
                                                 or entry["baseline_solves"] != CASE_BASELINE_SOLVES
                                                 or type(entry["baseline_solves"]) is not int)) \
             or not isinstance(entry.get("kind", ""), str) \
             or ("kind" in entry and entry["tool"] in REPORT_TOOLS) \
             or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
-        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS)} and an optional "
+        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS | set(SETTING_TOOLS))} and an optional "
                             "kind (none for the report); a "
                             "loop-driving tool may carry restore \"final\", and the case "
                             f"baseline_solves {CASE_BASELINE_SOLVES}: {json.dumps(entry, default=str)}")
@@ -1515,6 +1527,14 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
             if granted is None:
                 return "baseline_solve"
             note["case_solves"] = granted  # reserved where it is recorded (A2)
+    if tool in PPA_TOOLS:
+        return "own_step_only"
+    if tool in SETTING_TOOLS:
+        # The harness's own setup step, with exactly its frozen args (SH15-PF-1).
+        if not note.get("call_id") or note["call_id"] != getattr(session, "run_step_call", None):
+            return "own_step_only"
+        if args != SETTING_TOOLS[tool]:
+            return "outside_entry"
     if _deletes(tool, edit_card):
         return "delete"
     if tier == "destructive" and tool not in PLANNED_TOOLS:
@@ -2444,7 +2464,17 @@ def answering(session, call_id, edit_card):
                             decision={"id": call_id, "by": "user"}, diff=diff,
                             before=before.get("fingerprint"), after=after)
         if row is not None and row["complete"]:
-            assistant_tasks.resume_task(task_id)
+            try:
+                assistant_tasks.resume_task(task_id)
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                if exc.status_code != 409 or detail.get("error_kind") != "switch_in_progress":
+                    raise
+                # LC-48e: the answer stands; the run waits for the chat's active
+                # task, and its card says so (LC48E-SURFACE-1, no auto-resume).
+                logger.info("run envelope: the answered run waits for the active task %s",
+                            (detail.get("active") or {}).get("id"))
+                assistant_tasks.note_held(task_id, detail)
     except Exception:  # noqa: BLE001 — the write stands; the run reads it as drift
         logger.warning("run envelope: the answer to the data request could not be settled", exc_info=True)
 

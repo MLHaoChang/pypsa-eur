@@ -71,7 +71,7 @@ describe('GenericSiteForm', () => {
     await user.type(fieldOf('connection_mw'), '10')
     await user.click(screen.getByTestId('site-create'))
     expect(create.mutate).toHaveBeenCalledWith(
-      { templateId: 'eh_site', params: { site_type: 'hospital', connection_mw: 10 } },
+      { templateId: 'eh_site', params: { site_type: 'hospital', connection_mw: 10 }, afterCreate: expect.any(Function) },
       expect.anything())
   })
 
@@ -98,7 +98,7 @@ describe('GenericSiteForm', () => {
     expect(fieldOf('connection_mw').value).toBe('10')
     await user.click(screen.getByTestId('site-create'))
     expect(create.mutate).toHaveBeenCalledWith(
-      { templateId: 'eh_site', params: { site_type: 'hospital', connection_mw: 10 } },
+      { templateId: 'eh_site', params: { site_type: 'hospital', connection_mw: 10 }, afterCreate: expect.any(Function) },
       expect.anything())
   })
 
@@ -110,7 +110,7 @@ describe('GenericSiteForm', () => {
     expect(fieldOf('ride_through').checked).toBe(true)
     await user.click(screen.getByTestId('site-create'))
     expect(create.mutate).toHaveBeenCalledWith(
-      { templateId: 'eh_site', params: { site_type: 'industrial', ride_through: true } },
+      { templateId: 'eh_site', params: { site_type: 'industrial', ride_through: true }, afterCreate: expect.any(Function) },
       expect.anything())
   })
 

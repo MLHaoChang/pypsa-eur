@@ -10,8 +10,12 @@ import {
 } from '../../../api/businessCase'
 import { useUIStore } from '../../../store/uiStore'
 import BusinessCaseRun, { type BusinessCaseRunProps } from './BusinessCaseRun'
-import { fmtYear, kpiText, PNL_SECTIONS, reasonWords, ROW_NEEDS, streamGroups } from './businessCaseReport'
+import {
+  fmtYear, kpiText, PNL_SECTIONS, REASON_CODE_WORDS, reasonCodeWords, reasonWords, ROW_NEEDS, rowReason,
+  streamGroups,
+} from './businessCaseReport'
 import PNL_ROWS from './businessCasePnlRows.json'
+import REASON_CODES from './businessCaseRowReasonCodes.json'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/businessCase', async (importOriginal) => {
@@ -121,6 +125,55 @@ describe('the row list (GK B W1)', () => {
   })
 })
 
+describe('the served row reason (BC 17)', () => {
+  const item = (section: string | null, code: string) => ({ section, code })
+  it('words the served items by section, and ROW_NEEDS only for a report stored before', () => {
+    const served = { ...PNL, row_reason: {
+      tax: [item('tax', 'tax_pack_missing')],
+      net_income: [item('operating', 'line_not_established:nh3'),
+        item('operating', 'linked_output_not_evaluated:served_product.nh3:stale'),
+        item('inputs', 'input_missing:receivable_days'), item('tax', 'tax_pack_missing')],
+    } }
+    expect(rowReason('tax', served)).toBe('Not established: the tax section needs a tax pack.')
+    expect(rowReason('net_income', served)).toBe('Not established: the operating section needs '
+      + 'the line “nh3” and its linked output, which is out of date; '
+      + 'the business case needs receivable days; the tax section needs a tax pack.')
+    // Served wins; absent falls back; an empty map from a new report never falls back.
+    expect(rowReason('tax', PNL)).toBe('Not established. It needs the tax section.')
+    expect(rowReason('tax', { ...PNL, row_reason: {} })).toBe('Not established.')
+    expect(rowReason('tax', { ...PNL, not_finite: ['tax'], row_reason: served.row_reason }))
+      .toBe('Not established. The figure is out of range.')
+    expect(rowReason('ebit', { ...PNL, row_reason: { ebit: [item(null, 'not_finite:ebitda')] } }))
+      .toBe('Not established: the EBITDA figure is out of range.')
+    // Two codes with the same words read once (two lines missing one escalation class).
+    expect(rowReason('revenue', { ...PNL, row_reason: { revenue: [
+      item('operating', 'escalation_missing:tariff:bill'), item('operating', 'escalation_missing:tariff:fee')] } }))
+      .toBe('Not established: the operating section needs an escalation rate for tariff.')
+    expect(rowReason('x', { ...PNL, row_reason: { x: [item(null, 'not_established')] } }))
+      .toBe('Not established.')
+    mount({ ...DONE, report: { ...REPORT, pnl: served } })
+    expect(screen.getByTestId('bc-row-tax').textContent ?? '')
+      .toContain('Not established: the tax section needs a tax pack.')
+    // An established row shows no reason.
+    expect(screen.getByTestId('bc-row-revenue').textContent ?? '').not.toContain('Not established')
+    cleanup()
+    mount({ ...DONE, report: { ...REPORT, pnl: { ...PNL, row_reason: {} } } })
+    expect(screen.getByTestId('bc-row-tax').textContent ?? '').not.toContain('It needs')
+    expect(screen.getByTestId('bc-row-revenue').textContent ?? '').not.toContain('Not established')
+  })
+
+  it('has words for every code family the report can serve, never a raw code (GK B C3)', () => {
+    expect(Object.keys(REASON_CODE_WORDS).sort()).toEqual(REASON_CODES)
+    for (const fam of REASON_CODES) {
+      const w = reasonCodeWords(`${fam}:some_asset:2`)
+      // The line's own name is the user's words, shown as typed (UX 1).
+      expect(w.replace(/“[^”]*”/g, ''), fam).not.toMatch(/[_:]/)
+      expect(w.length, fam).toBeGreaterThan(0)
+    }
+    expect(reasonCodeWords('a_future_code:x_y')).toBe('a future code x y')
+  })
+})
+
 describe('the KPI row (UX 6)', () => {
   it('reads ok values, and n/a or not established with the reason in words, never 0', () => {
     mount(DONE)
@@ -203,5 +256,74 @@ describe('the run', () => {
     const { onBreakEvenLine } = mount(DONE)
     fireEvent.change(screen.getByLabelText('Break-even on'), { target: { value: 'H2 sales' } })
     expect(onBreakEvenLine).toHaveBeenCalledWith('H2 sales')
+  })
+})
+
+// BC 15: the volume factor (lease-up) in the report.
+describe('the volume factor in the report', () => {
+  const LEASED: BusinessCaseStudy = { ...DONE, report: { ...REPORT, pnl: {
+    ...PNL, volume_factor: { 2030: 0.6 },
+    volume_factor_note: 'volume-tied costs and revenue scaled pro rata by the factor; the dispatch was not re-solved at reduced load',
+  } } }
+
+  it('at default adds no row, note, mark or ignored line', () => {
+    mount(DONE)
+    for (const id of ['bc-row-volume_factor', 'bc-volume-factor-note', 'bc-kpi-volume-factor', 'bc-volume-factor-ignored']) {
+      expect(screen.queryByTestId(id)).toBeNull()
+    }
+  })
+  it('a first P&L row reads every year as a percent, with the note under it', () => {
+    mount(LEASED)
+    const row = screen.getByTestId('bc-row-volume_factor')
+    expect(row.querySelector('th')!.textContent).toMatch(/^Volume factor \(lease-up\), %/)
+    expect(within(row).getAllByRole('cell').map(c => c.textContent)).toEqual(['60 %', '100 %'])
+    expect(screen.getByTestId('bc-volume-factor-note').textContent).toMatch(/^Volume-tied costs .* reduced load\.$/)
+    // First in "Profit and loss": before the revenue row.
+    expect(row.compareDocumentPosition(screen.getByTestId('bc-row-revenue')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+  it('marks the KPI row', () => {
+    mount(LEASED)
+    expect(screen.getByTestId('bc-kpi-volume-factor').textContent).toBe(
+      'With volume factor (lease-up) These figures differ from the Investment case because of the volume factor.')
+  })
+  it('names the ignored years, and Remove hands back the ones the draft still states', () => {
+    const onRemove = vi.fn()
+    const study = { ...LEASED, report: { ...LEASED.report!, pnl: { ...LEASED.report!.pnl!, volume_factor_ignored: [2028, 2029] } } }
+    mount(study, { volumeFactorYears: ['2029', '2030'], onRemoveVolumeFactorYears: onRemove })
+    const line = screen.getByTestId('bc-volume-factor-ignored')
+    expect(line.textContent).toMatch(/^Ignored, outside the operating years: 2028, 2029/)
+    fireEvent.click(within(line).getByRole('button'))
+    expect(onRemove).toHaveBeenCalledWith([2029])
+  })
+  it('a run refused on the volume factor reads plain words, never the kind', () => {
+    mount({ status: 'refused', error: 'business_case_refused:volume_factor_unclassified: energy_export',
+            error_code: 'business_case_refused',
+            refusal: { code: 'business_case_refused', refusal: 'volume_factor_unclassified', field: 'energy_export',
+                       message: 'volume_factor_unclassified: energy_export' } })
+    const text = screen.getByTestId('bc-failure').textContent ?? ''
+    expect(text).toMatch(/^Refused\. Volume factor \(lease-up\), %: The energy-model row “energy export”/)
+    expect(text).not.toMatch(/volume_factor/)
+  })
+})
+
+describe('walk 03 and 05 on the panel', () => {
+  it('a KPI names the served cause and the first fix opens the finance inputs', () => {
+    const row_reason = { project_post_tax: [
+      { section: 'operating', code: 'degradation_missing:genset_1' },
+      { section: 'operating', code: 'degradation_missing:rooftop_pv' }] }
+    const ne = { value: null, status: 'not_established', reason: 'operating_not_established' } as const
+    mount({ ...DONE, report: { ...REPORT, pnl: { ...REPORT.pnl!, row_reason },
+      kpis: { ...REPORT.kpis, project_npv: ne } } as BusinessCaseReport })
+    expect(screen.getByTestId('bc-kpi-project_npv').textContent).toContain(
+      'Not established: needs a degradation rate for Genset 1 and Rooftop PV')
+    expect(screen.getByTestId('bc-first-fix-open').textContent).toBe(
+      'Set a degradation rate for Genset 1 and Rooftop PV ›')
+  })
+
+  it('a refused run names the line and the column', () => {
+    mount({ status: 'refused', error: 'business_case_refused:indexation_missing: lines[1].indexation' } as BusinessCaseStudy,
+      { lineNames: ['Capacity payment', 'Guarantees of origin'] })
+    expect(screen.getByTestId('bc-failure').textContent).toBe(
+      'Refused. Guarantees of origin: set an indexation rate')
   })
 })

@@ -348,3 +348,22 @@ Eight sessions reached 300k context in 75–120 minutes. The causes were full-si
 - **Session-admin tool results (2–8k tokens each) landed in the coordinator's context.**
   - Fix: session admin always goes through the Haiku subagent.
   - Lives in: coordinator "Tool hygiene".
+
+## 17 Nov 2026: parallel-session retro (RETRO-PAR-1)
+
+- **Every shared file blocked a package, though premerge waives docs overlap.** `frontier.py` and `brief.py` kept their own idea of overlap, so packages queued behind PRs that only touched docs.
+  - Fix: the waiver regexes live in one data file, `waivers.conf`, read by `premerge.sh`, `frontier.py` and `brief.py`; docs overlap prints as `soft`, code overlap as `overlap`/`OVERLAP`, and `brief.py` exits 3 only on a hard one.
+  - Lives in: `scripts/coord/waivers.conf`, `premerge.sh`, `frontier.py`, `brief.py`.
+- **A Sonnet subagent spawned each session at 50-60k tokens against ~1.5k inline**, and "Stay out of" ran ~3k characters per brief.
+  - Fix: `spawn.py <brief-file>` prints the `create_session` arguments and the coordinator calls it itself; "Stay out of" is one line per open PR (top areas) and one line of live session titles.
+  - Lives in: coordinator "Opening a session", `scripts/coord/spawn.py`, `brief.py`.
+- **Small script faults cost sweeps.** `inputs.sh` died on a PR with no merge base; `brief.py --stream X` exited on a missing template block; `whois.py` needed code for each new reviewer; `tasks.py` printed "no row" for new issues; `frontier.py` listed issues a live session or a HOLD decision held.
+  - Fix: `inputs.sh` leaves that PR out and carries on; a missing stream block warns; `whois.py` builds roles from the labelled lines of the role files; `tasks.py` adds a row for a new issue; `frontier.py` matches a session's `doing` text to the issue id (tag, `<effort> NN/MM`) and lists `HOLD-...` decisions' issues under `--held`.
+  - Lives in: `scripts/coord/inputs.sh`, `brief.py`, `whois.py`, `tasks.py`, `frontier.py`.
+
+## 17 Nov 2026: registry fragments (retro package RETRO-FRAG-1)
+
+- **Central registry files serialised feature PRs.** On 17 Nov four open PRs edited the write-surface lock-policy table, and three each the route chat-disposition table, the LC-06 family manifest, `chat_tools.py` and `routers/chat.py`; `not_via_chat.py` blocked a business-case PR. Every new route or tool added a row to the same lists.
+  - Fix: each per-route and per-tool registry takes the error-kind `.d/` fragment pattern. A PR adds its own `<branch>.json`; the loader puts the hand-written rows first, then the JSON base, then the fragments in file-name order, refuses a key defined twice (so a fragment cannot override a reviewed row), and every existing check runs on the merged table. Loaders landed first with no row moved; the existing rows migrate later, in a PR timed when few PRs are open.
+  - Lives in: `pypsa-gui/backend/smoke/json_fragments.py` (`extend`, `extend_items`), the registries' `.d/` folders and READMEs, steward "Release note" (live and template copies), `pypsa-gui/backend/harness/README.md`.
+

@@ -205,7 +205,7 @@ export default function CapacityBoundsEditor() {
           <button
             onClick={() => cleanupMut.mutate()}
             disabled={cleanupMut.isPending}
-            className="self-center px-3 py-1 text-[11.5px] bg-warn text-white rounded font-medium hover:opacity-90 disabled:opacity-40"
+            className="self-center px-3 py-1 text-[11.5px] bg-warn text-on-status rounded font-medium hover:opacity-90 disabled:opacity-40"
           >
             {cleanupMut.isPending ? 'Cleaning…' : 'Clean up'}
           </button>

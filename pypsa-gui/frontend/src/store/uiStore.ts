@@ -103,6 +103,9 @@ const THEME_KEY = 'network-diagram:theme'
 // on the old default pick up the new one instead of being pinned forever.
 // Generation 2 = the dark identity that matches the sign-in page (retuned
 // from mint to red without changing the DEFAULT, so no bump was needed).
+// THEME-LIGHT-1 moved the default to OS-preference-then-light without a bump:
+// since generation 2 only setTheme/toggleTheme write THEME_KEY, so a stored
+// value is an explicit choice and is kept.
 const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
 const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
@@ -265,10 +268,14 @@ function storedTheme(): Theme {
     const v = localStorage.getItem(THEME_KEY)
     if (v === 'light' || v === 'dark') return v
   } catch { /* noop */ }
-  // Dark is the product identity — it is what the sign-in page hands off to,
-  // so the workbench opens in it regardless of the OS preference. The toggle
-  // (and its localStorage write) still lets anyone stay in light.
-  return 'dark'
+  // No explicit choice (THEME_KEY is only written by setTheme/toggleTheme):
+  // follow the OS, else light (THEME-LIGHT-1). The boot scripts in spa.html
+  // and index.html make the same decision before first paint;
+  // uiStore.theme.test.ts runs all three against the same cases.
+  try {
+    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark'
+  } catch { /* noop */ }
+  return 'light'
 }
 
 function storedDensity(): Density {
@@ -531,7 +538,7 @@ interface UIStore {
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
-  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'strategy' | 'offgrid' | null
+  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island' | null
   /** Request-then-scroll to the Grid codes section of the Grid connection part (AS-10). */
   gridCodeScrollRequest: boolean
   requestGridCodeScroll: () => void
@@ -599,6 +606,10 @@ interface UIStore {
   // solving project editable, and vice versa.
   lockReadOnly: boolean
   solvingReadOnly: boolean
+  // Name/id of the project a switch is in flight for (null = none). Drives the
+  // "Opening …" progress bar; a cold open can take a minute on a big template.
+  openingProject: string | null
+  setOpeningProject: (target: string | null) => void
   currentProject: string | null
   // Resume target for auth / projects-home flows. Prefer a stable UUID when a
   // caller knows it, but keep the project name as a compatible fallback so
@@ -720,7 +731,7 @@ interface UIStore {
   clearResultsWindowRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
-  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'strategy' | 'offgrid') => void
+  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island') => void
   clearSolverBlockRequest: () => void
   requestGridReadiness: () => void
   clearGridReadinessRequest: () => void
@@ -838,6 +849,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   readOnlyReason: 'writable',
   lockReadOnly: false,
   solvingReadOnly: false,
+  openingProject: null,
+  setOpeningProject: (target) => set({ openingProject: target }),
   currentProject: storedCurrentProject(),
   lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(INITIAL_UI_MODE.mode),

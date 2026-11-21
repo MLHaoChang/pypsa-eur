@@ -29,11 +29,16 @@ def brief(tmp_path, *args, env=None):
 def test_fields_filled_and_standard_paragraphs_kept(tmp_path):
     text, stdout = brief(
         tmp_path,
-        "--task", "Build X. Done when Y.",
-        "--decisions", "USE-2,OWN-PR",
-        "--read", "docs/a.md: why",
-        "--model", "claude-sonnet-5-5",
-        "--title", "Build · X",
+        "--task",
+        "Build X. Done when Y.",
+        "--decisions",
+        "USE-2,OWN-PR",
+        "--read",
+        "docs/a.md: why",
+        "--model",
+        "claude-sonnet-5-5",
+        "--title",
+        "Build · X",
     )
     assert "**Task.** Build X. Done when Y." in text
     assert "**Owner decisions.** `USE-2`, `OWN-PR`" in text
@@ -65,13 +70,20 @@ def test_stay_out_from_open_prs_and_sessions(tmp_path):
     sessions = tmp_path / "s.txt"
     sessions.write_text("abc running Build · RP-04 — tab\n")
     text, _ = brief(
-        tmp_path, "--task", "t", "--open-prs", str(prs), "--sessions", str(sessions),
-        "--exclude-pr", "7",
+        tmp_path,
+        "--task",
+        "t",
+        "--open-prs",
+        str(prs),
+        "--sessions",
+        str(sessions),
+        "--exclude-pr",
+        "7",
     )
-    assert "open PR #5: `pypsa-gui/backend/harness/` (2)" in text
-    assert "open PR #6: `gridspine/` (1)" in text
+    assert "open PR #5: `pypsa-gui/backend/`" in text
+    assert "open PR #6: `gridspine/`" in text
     assert "#7" not in text
-    assert "live session: abc running Build · RP-04 — tab" in text
+    assert "- live sessions: abc running Build · RP-04 — tab" in text
 
 
 def test_coordinator_id_written_literally(tmp_path):
@@ -92,6 +104,8 @@ def test_coordinator_required_when_own_id_unknown(tmp_path):
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_REMOTE_SESSION_ID"}
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--task", "t", "--out", str(tmp_path / "b.md")],
-        capture_output=True, text=True, env=env,
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert result.returncode == 2 and "--coordinator" in result.stderr

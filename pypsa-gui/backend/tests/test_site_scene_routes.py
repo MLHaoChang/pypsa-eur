@@ -377,6 +377,30 @@ def test_every_write_route_409s_under_a_foreign_lock_before_any_effect(client, g
             project_locks.release_lock(db, project_row("geo").id, second_identity["user_id"])
 
 
+
+def test_the_contract_lock_column_is_what_each_route_enforces(client, geo, _auth_db, seeded_identity,
+                                                              second_identity, project_row):
+    # Issue 06 (b): proposal create and cancel check the lock; the contract said they did not.
+    import uuid as _uuid
+
+    from services import project_locks
+    from services.site_scene import contract
+    _adopted(client, geo)
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        project_locks.release_lock(db, project_row("geo").id, seeded_identity["user_id"])
+        assert project_locks.acquire_lock(db, project_row("geo").id, second_identity["user_id"]) is not None
+    fill = {"name": "geo", "site_id": "campus", "proposal_id": "p-x", "artifact_id": str(_uuid.uuid4())}
+    try:
+        for route in contract.ROUTES:
+            path = route["path"].format(**fill)
+            r = client.request(route["method"], path, json={} if route["method"] != "GET" else None)
+            locked = r.status_code == 409 and _kind(r) == "project_locked"
+            assert locked == route["lock"], (route["method"], route["path"], r.status_code)
+    finally:
+        with session_local() as db:
+            project_locks.release_lock(db, project_row("geo").id, second_identity["user_id"])
+
 # ── (2) no scene or anchor field reaches a network input ────────────────────
 
 def test_anchor_and_scene_writes_leave_the_network_input_fingerprint(client, geo):

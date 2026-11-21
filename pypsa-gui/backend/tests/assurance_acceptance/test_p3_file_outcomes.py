@@ -825,3 +825,39 @@ def test_a_failed_handler_releases_the_upload_watch(
     monkeypatch.setattr(chat_tools, "_save_agent_export", boom)
     _frames(harness, "export_network_nc", {})
     assert upload_service._UPLOAD_WATCH.get() is None
+
+
+def _stale_template_bytes() -> bytes:
+    """The datacenter template with its priced battery's owned costs left stale by a raw writer (TCU 10)."""
+    from project_templates.eh_templates import build_eh_datacenter
+    from services.asset_schema.derive import has_parts
+
+    n = build_eh_datacenter()
+    priced = [
+        b
+        for b in n.storage_units.index
+        if has_parts("StorageUnit", n.storage_units.loc[b])
+    ]
+    assert priced
+    n.storage_units.loc[priced, ["capital_cost", "fom_cost"]] = [1.0, 2.0]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "network.nc"
+        n.export_to_netcdf(path)
+        return path.read_bytes()
+
+
+@pytest.mark.parametrize("tool", ["import_network_nc", "import_csv_bundle"])
+def test_an_import_whose_parts_rederive_a_stale_cost_still_reads_completed(
+    baseline, harness, tool
+):
+    data = _stale_template_bytes()
+    if tool == "import_csv_bundle":
+        from routers.io import _export_csv_zip_bytes
+
+        chat_tools.import_network_nc(_b64(data), "t.nc")
+        data = _export_csv_zip_bytes()
+        chat_tools.import_network_nc(_b64(_template_bytes()), "t.nc")
+    name = "t.nc" if tool == "import_network_nc" else "t.zip"
+    result = _stream(harness, tool, {"bytes_b64": _b64(data), "filename": name})
+    assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
+    assert (_live().storage_units["capital_cost"] != 1.0).all()

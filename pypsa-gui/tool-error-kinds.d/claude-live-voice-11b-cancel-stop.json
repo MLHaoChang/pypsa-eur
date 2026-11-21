@@ -1,0 +1,9 @@
+{"kinds": {
+  "job_cancel_refused": {"surface": "inline", "why": "cancel_job (live-voice 11b): the job family's own abort refused the request, or the run carries no stop event. Nothing was cancelled; `refusal` names the family's reason and the assistant says the job is still running."},
+  "job_origin_lost": {"surface": "inline", "why": "cancel_job (live-voice 11b): the handle no longer owns a live run (a newer run replaced it, or its worker exited without a status). Nothing was cancelled or nothing can be proved; the assistant reads the current run before acting."},
+  "job_owner_unknown": {"surface": "inline", "why": "cancel_job (live-voice 11a/11b): the job was started without a recorded owner, so its handle cannot be cancelled (the owner check would pass anyone). Nothing was cancelled."},
+  "job_not_found": {"surface": "inline", "why": "cancel_job (live-voice 11a/11b): no job with this handle is visible to the acting user (unknown, expired or someone else's). Nothing was cancelled."},
+  "job_project_mismatch": {"surface": "inline", "why": "cancel_job (live-voice 11a/11b): the handle's job belongs to another project than the one open. Nothing was cancelled."},
+  "invalid_wait_timeout": {"surface": "inline", "why": "wait_for_job (harness/job_adapters.py): timeout_seconds is not a finite number from 0 to 25. Nothing waited; the assistant retries with a valid timeout. Classified with 11b, when job_adapters joined the manifest scan."},
+  "invalid_study_key": {"surface": "inline", "why": "A study handoff named a study key outside STUDY_TOOL_KEYS (harness/job_adapters.register_study_job), so no ad: handle was minted. Classified with 11b, when job_adapters joined the manifest scan."}
+}}

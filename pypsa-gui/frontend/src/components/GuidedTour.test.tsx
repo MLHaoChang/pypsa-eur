@@ -418,3 +418,22 @@ describe('GuidedTour optional steps (P30 B7)', () => {
     expect(tourSeen('late')).toBe(true)
   })
 })
+
+describe('GuideButton auto-offer (TOUR-AUTO-1)', () => {
+  it('opens the tour once per project, then stays opt-in', async () => {
+    window.localStorage.clear()
+    const { GuideButton } = await import('./GuidedTour')
+    const view = (p: string | null) => (
+      <QueryClientProvider client={new QueryClient()}>
+        <GuideButton tourId="demo" testId="g" autoOfferFor={p} />
+      </QueryClientProvider>)
+    const r = render(view(null))
+    expect(screen.queryByTestId('guide-tour')).toBeNull()
+    r.unmount()
+    const a = render(view('A'))
+    expect(await screen.findByTestId('guide-tour')).toBeTruthy()
+    a.unmount()
+    render(view('A'))
+    expect(screen.queryByTestId('guide-tour')).toBeNull()
+  })
+})

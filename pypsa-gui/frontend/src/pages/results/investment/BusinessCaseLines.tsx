@@ -16,14 +16,19 @@ import {
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { openPanel } from '../openPanel'
+import {
+  categoryWords, escalationWords, hintCurrencyNote, ledgerKeysWords, outputLabelWords, streamWords,
+} from './businessCaseWords'
+import { financeApi } from '../../../api/finance'
 import { ACTION } from './actionStyle'
 import BusinessCaseRun from './BusinessCaseRun'
 import { NumInput } from './NumInput'
+import VolumeFactorStrip from './BusinessCaseVolumeFactor'
 import {
   blankLine, edited, hintUnitWords, priceUnitWords, unitWords, linkedSource, OUTPUTS_REASON_WORDS,
   parsePaste, placeRefusals, placeValidation, provenanceDetail, provenanceOf,
-  REFUSALS_REASON_WORDS, sourceKind, uniqueName, unitNotAllowed, unitsFor, withKind,
-  yearsOf, type Placed,
+  operatingYears, REFUSALS_REASON_WORDS, sourceKind, uniqueName, unitNotAllowed, unitsFor, VOLUME_FIELD,
+  withKind, yearsOf, type Placed,
 } from './businessCaseModel'
 
 const KINDS: LineKind[] = ['revenue', 'opex', 'capex']
@@ -32,13 +37,6 @@ const words = (id: string) => id.replace(/_/g, ' ').replace(/^./, c => c.toUpper
 const CELL = 'border border-border rounded px-1 py-0.5 bg-bg text-[11px]'
 const BAD = ' border-danger'
 
-/** The stream words for the locked rows (the ledger's stream ids, in words). */
-const STREAM_WORD: Record<string, string> = {
-  bill: 'Energy bill', export: 'Export sales', ppa: 'PPA', cfd: 'CfD settlement',
-  eaas_fee: 'Energy-as-a-service fee', ancillary: 'Ancillary services',
-  fom: 'Fixed O&M (energy assets)', vom: 'Variable O&M (energy assets)',
-  lost_production: 'Lost production',
-}
 
 function optionsErrorWords(e: unknown): string {
   const code = (e as { response?: { data?: { detail?: { code?: string } } } })?.response?.data?.detail?.code
@@ -59,20 +57,20 @@ function SourceSelect({ line, opts, onChange, invalid, label }: {
   const known = current === 'typed' || current.startsWith('share_of:')
     || outputs.some(o => linkedSource(o.id, opts?.catalogue_version ?? '1') === current)
   return (
-    <select aria-label={label} className={CELL + ' max-w-[11rem]' + (invalid ? BAD : '')} value={current}
+    <select aria-label={label} className={CELL + ' max-w-[16rem]' + (invalid ? BAD : '')} value={current}
             aria-invalid={invalid || undefined} onChange={e => onChange(e.target.value)}>
       <option value="typed">Typed</option>
       {outputs.length > 0 && (
         <optgroup label="From the model">
           {outputs.map(o => (
-            <option key={o.id} value={linkedSource(o.id, opts?.catalogue_version ?? '1')}>{o.label}</option>
+            <option key={o.id} value={linkedSource(o.id, opts?.catalogue_version ?? '1')}>{outputLabelWords(o.label)}</option>
           ))}
         </optgroup>
       )}
       <optgroup label="Share of">
         {KINDS.map(k => <option key={k} value={`share_of:${k}`}>Share of all {KIND_WORD[k].toLowerCase()}</option>)}
         {KINDS.flatMap(k => (opts?.categories[k] ?? []).map(c => (
-          <option key={`${k}/${c}`} value={`share_of:${k}/${c}`}>Share of {KIND_WORD[k].toLowerCase()} · {words(c)}</option>
+          <option key={`${k}/${c}`} value={`share_of:${k}/${c}`}>Share of {KIND_WORD[k].toLowerCase()} · {categoryWords(c)}</option>
         )))}
       </optgroup>
       {!known && <option value={current}>
@@ -226,11 +224,20 @@ function PriceCell({ line, set, bad, currency }: {
           Public range {line.hint.low}–{line.hint.high} {hintUnitWords(line.hint.unit)} · {line.hint.source}, {line.hint.year}
         </p>
       )}
+      {line.kind === 'revenue' && line.hint && hintCurrencyNote(line.hint.unit, currency) && (
+        <p className="text-warn max-w-[12rem]" data-testid="bc-hint-currency">{hintCurrencyNote(line.hint.unit, currency)}</p>
+      )}
     </div>
   )
 }
 
 function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean }) {
+  // Rows of one stream that would read alike read their key in full (walk 06, UX 2).
+  const rows = locked ?? []
+  const keyWords = rows.map(r => {
+    const same = rows.filter(x => x.stream === r.stream)
+    return ledgerKeysWords(same.map(x => x.key ?? ''))[same.indexOf(r)]
+  })
   return (
     <section aria-labelledby="bc-locked-h" className="border border-border rounded p-2 space-y-1"
              data-testid="bc-locked">
@@ -242,10 +249,10 @@ function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean 
         <p className="text-muted">The investment case carries no energy streams.</p>
       ) : (
         <ul className="space-y-0.5">
-          {(locked ?? []).map(r => (
+          {(locked ?? []).map((r, i) => (
             <li key={`${r.stream}/${r.key}`} data-testid="bc-locked-row">
-              <span>{STREAM_WORD[r.stream] ?? words(r.stream)}</span>
-              {r.key && r.key !== r.stream && <span className="text-muted"> · {r.key}</span>}
+              <span>{streamWords(r.stream)}</span>
+              {r.key && r.key !== r.stream && <span className="text-muted" title={r.key}> · {keyWords[i]}</span>}
               {r.superseded_by.length > 0 && (
                 <span className="text-muted"> · replaced in {r.dropped.length} year{r.dropped.length === 1 ? '' : 's'} by {r.superseded_by.join(', ')}</span>
               )}
@@ -265,6 +272,9 @@ export default function BusinessCaseLines() {
   const optionsKey = nk(project, 'results', 'business_case', 'options')
   const inputs = useQuery({ queryKey: inputsKey, queryFn: () => businessCaseApi.getInputs() })
   const options = useQuery({ queryKey: optionsKey, queryFn: () => businessCaseApi.getOptions() })
+  // Shares the finance editor's query: the project currency for the price hints (walk 04).
+  const finance = useQuery({ queryKey: nk(project, 'simulation', 'finance'), queryFn: () => financeApi.getFinance(),
+                             retry: false })
   const studyKey = nk(project, 'results', 'business_case')
   const study = useQuery({ queryKey: studyKey, queryFn: () => businessCaseApi.getStudy(),
                            refetchInterval: q => (q.state.data?.status === 'running' ? 2000 : false) })
@@ -279,6 +289,8 @@ export default function BusinessCaseLines() {
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [stale, setStale] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Volume-factor entries outside 0..100, by year: kept in their cell, not in the draft.
+  const [vfBad, setVfBad] = useState<Record<string, number>>({})
 
   useEffect(() => {
     if (inputs.data && draft === undefined && !inputs.isFetching) {
@@ -303,7 +315,9 @@ export default function BusinessCaseLines() {
 
   const lines = draft?.inputs.lines ?? []
   const names = lines.map(l => l.name)
-  const currency = (study.data?.report?.currency as string | undefined) ?? null
+  // The report's currency, else the finance inputs' (blank reads EUR, as their form says).
+  const currency = (study.data?.report?.currency as string | undefined)
+    ?? (finance.data?.finance ? (finance.data.finance.currency || 'EUR') : null)
   const setLines = (next: LineItem[]) => {
     // A break-even line must name a revenue line (the validator's rule): one renamed,
     // retyped or removed leaves the choice empty rather than a refused save.
@@ -315,16 +329,21 @@ export default function BusinessCaseLines() {
     })
     setDirty(true); setRejected([]); setMessage(null)
   }
+  const vf = draft?.inputs.volume_factor_by_year ?? {}
+  const setVolumeFactor = (next: Record<string, number>, bad: Record<string, number> = vfBad) => {
+    setDraft(d => ({ ...(d ?? {}), inputs: { ...(d?.inputs ?? { lines: [] }), volume_factor_by_year: next } }))
+    setVfBad(bad); setDirty(true); setRejected([]); setMessage(null)
+  }
   const setLine = (i: number, patch: Partial<LineItem>) =>
     setLines(lines.map((l, k) => (k === i ? edited(l, patch) : l)))
 
   // Refusals of the stored lines sit on their row only while the table is what was stored.
   const placed: Placed[] = dirty ? rejected : [...rejected, ...placeRefusals(opts?.refusals)]
   const placedOn = (i: number) => placed.filter(p => p.line === i)
-  const caseLevel = placed.filter(p => p.line < 0 || p.line >= lines.length)
+  const caseLevel = placed.filter(p => (p.line < 0 || p.line >= lines.length) && p.column !== VOLUME_FIELD)
 
   const reload = async () => {
-    setStale(false); setRejected([]); setMessage(null)
+    setStale(false); setRejected([]); setMessage(null); setVfBad({})
     try {
       const fresh = await qc.fetchQuery({ queryKey: inputsKey, queryFn: () => businessCaseApi.getInputs(), staleTime: 0 })
       setDraft(fresh.business_case ? structuredClone(fresh.business_case) : null)
@@ -334,7 +353,7 @@ export default function BusinessCaseLines() {
     }
   }
   const save = async () => {
-    if (saving || !draft) return
+    if (saving || !draft || Object.keys(vfBad).length > 0) return
     setSaving(true); setRejected([]); setMessage(null)
     try {
       const out = await businessCaseApi.putInputs(draft, digest ?? '')
@@ -395,6 +414,7 @@ export default function BusinessCaseLines() {
     setOpen(new Set())
   }
   const horizon = opts?.horizon ?? null
+  const vfOff = Object.keys(vfBad).length > 0
   const ran = !!study.data?.report
 
   return (
@@ -403,7 +423,7 @@ export default function BusinessCaseLines() {
         which is versus the site today.</p>
       {stale && (
         <div role="alert" className="text-warn" data-testid="bc-stale">
-          The lines changed elsewhere since you opened them; your edits were not saved.{' '}
+          The lines or the volume factor changed elsewhere since you opened them; your edits were not saved.{' '}
           <button type="button" className={ACTION} onClick={() => { void reload() }}>Reload the lines</button>
         </div>
       )}
@@ -489,7 +509,9 @@ export default function BusinessCaseLines() {
                           <button type="button" className={ACTION + ' mr-1'} aria-expanded={open.has(i)}
                                   aria-label={`${open.has(i) ? 'Hide' : 'Show'} details of ${ln.name}`}
                                   onClick={() => toggle(i)}>{open.has(i) ? '▾' : '▸'}</button>
-                          <input aria-label={`Name, line ${i + 1}`} className={CELL + ' w-32' + (bad('name') ? BAD : '')}
+                          <input aria-label={`Name, line ${i + 1}`} title={ln.name} className={CELL + (bad('name') ? BAD : '')}
+                                 // Wide enough for the whole name (walk 06: "Capacity payment (BES"), 12–40 characters.
+                                 style={{ width: `${Math.min(40, Math.max(12, ln.name.length + 2))}ch` }}
                                  maxLength={80} value={ln.name} aria-invalid={bad('name') ? true : undefined}
                                  onChange={e => setLine(i, { name: e.target.value })} />
                         </td>
@@ -503,7 +525,7 @@ export default function BusinessCaseLines() {
                           <select aria-label={`Category, ${ln.name}`} className={CELL + ' max-w-[8rem]' + (bad('category') ? BAD : '')}
                                   aria-invalid={bad('category') ? true : undefined}
                                   value={ln.category} onChange={e => setLine(i, { category: e.target.value })}>
-                            {(opts?.categories[ln.kind] ?? [ln.category]).map(c => <option key={c} value={c}>{words(c)}</option>)}
+                            {(opts?.categories[ln.kind] ?? [ln.category]).map(c => <option key={c} value={c}>{categoryWords(c)}</option>)}
                           </select>
                         </td>
                         <td className="px-1">
@@ -539,7 +561,7 @@ export default function BusinessCaseLines() {
                         <td className="px-1">
                           <select aria-label={`Escalation, ${ln.name}`} className={CELL} value={ln.escalation}
                                   onChange={e => setLine(i, { escalation: e.target.value })}>
-                            {(opts?.escalations ?? [ln.escalation]).map(x => <option key={x} value={x}>{words(x)}</option>)}
+                            {(opts?.escalations ?? [ln.escalation]).map(x => <option key={x} value={x}>{escalationWords(x)}</option>)}
                           </select>
                         </td>
                         <td className="px-1 whitespace-nowrap">
@@ -607,6 +629,11 @@ export default function BusinessCaseLines() {
               {REFUSALS_REASON_WORDS[opts.refusals_reason] ?? words(opts.refusals_reason)}</p>
           )}
           {dirty && <p className="text-muted" data-testid="bc-unsaved">Unsaved changes: save to check the lines.</p>}
+          <div className="mt-2 max-w-[56rem]">
+            <VolumeFactorStrip years={operatingYears(horizon)} value={vf} bad={vfBad}
+                               server={rejected.filter(p => p.column === VOLUME_FIELD)}
+                               onChange={setVolumeFactor} />
+          </div>
         </div>
         <div className="max-w-xl">
           <LockedRows locked={study.data?.report?.locked ?? null} ran={ran} />
@@ -617,9 +644,13 @@ export default function BusinessCaseLines() {
           onClick={() => openPanel('commercial', 'economics')}>Finance inputs ›</button></>}</p>}
       <div className="flex flex-wrap gap-2 items-center">
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
-                disabled={!dirty || saving || draft === null} onClick={() => { void save() }}>Save the lines</button>
+                disabled={!dirty || saving || draft === null || vfOff}
+                aria-describedby={vfOff ? 'bc-save-off' : undefined}
+                onClick={() => { void save() }}>Save the lines</button>
         <button type="button" className={ACTION} disabled={!dirty} onClick={() => setConfirmDiscard(true)}>Discard changes</button>
         {!dirty && <span className="text-muted">No unsaved changes.</span>}
+        {dirty && vfOff && <span id="bc-save-off" className="text-muted" data-testid="bc-save-off">
+          Fix the volume factor (lease-up) above to save.</span>}
         {dirty && confirmDiscard && (
           <span role="alert" className="text-warn flex flex-wrap gap-2 items-center" data-testid="bc-discard-confirm">
             Discard the unsaved changes to the lines? The stored lines are reloaded.
@@ -632,10 +663,17 @@ export default function BusinessCaseLines() {
         study={study.data ?? null} studyKey={studyKey}
         disabledReason={runOffReason(dirty, lines.length, (opts?.refusals ?? []).length)}
         revenueLines={lines.filter(l => l.kind === 'revenue').map(l => l.name)}
+        lineNames={lines.map(l => l.name)}
         breakEvenLine={draft?.break_even_line ?? null}
         onBreakEvenLine={name => {
           setDraft(d => ({ ...(d ?? { inputs: { lines: [] } }), break_even_line: name }) as BusinessCaseConfig)
           setDirty(true); setMessage(null)
+        }}
+        volumeFactorYears={Object.keys(vf)}
+        onRemoveVolumeFactorYears={years => {
+          const next = { ...vf }
+          for (const y of years) delete next[String(y)]
+          setVolumeFactor(next)
         }} />
     </div>
   )

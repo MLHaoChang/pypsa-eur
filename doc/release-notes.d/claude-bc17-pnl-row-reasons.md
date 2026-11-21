@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The business case's P&L serves a reason for each row that is not established, naming the missing input for this case (a line, its linked output, a section's missing input), and the view shows it in place of the generic "It needs ..." text.

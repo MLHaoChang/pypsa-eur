@@ -261,7 +261,29 @@ def _replace_with(candidate) -> None:
     # The same workspace gets a new network: a COPY of the undo stack keeps the
     # import undoable without touching the outgoing context's own history.
     PyPSAService.reset_network(carry="copy", network=candidate)
+    # The imported network brings its own periods; the kept solver config's
+    # load growth multipliers follow them (homer-parity 04a).
+    from services.solver.load_growth import follow_network
+
+    follow_network(PyPSAService.get_active_context())
     _restore_user_ts({})
+
+
+def _own_costs_from_parts(candidate) -> list[str]:
+    """TCU 10 (N5): an uploaded network's investment parts own their rows' costs, as on create. A priced part
+    without a lifetime, or a non-finite one, refuses the whole import (422) before the candidate is swapped
+    in; the priced rows are re-derived. Upload routes only: opening or restoring a stored project does not
+    come through here."""
+    from services.network_crud import rederive_imported_parts
+
+    return rederive_imported_parts(candidate)
+
+
+def _rederived_note(rows: list[str]) -> str:
+    if not rows:
+        return ""
+    shown = ", ".join(rows[:10]) + (f" and {len(rows) - 10} more" if len(rows) > 10 else "")
+    return f"; costs re-derived from investment parts for {len(rows)} row(s): {shown}"
 
 
 def _unreadable(what: str) -> HTTPException:
@@ -374,6 +396,7 @@ async def import_netcdf(
                 "netCDF network",
                 lambda c: PyPSAService.import_network_from_netcdf(c, tmp),
             )
+        rederived = _own_costs_from_parts(n)
         with PyPSAService.get_lock():
             _replace_with(n)
     finally:
@@ -381,7 +404,8 @@ async def import_netcdf(
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network.nc",
-        f"Imported NetCDF '{file.filename}': {summary.buses} buses, {summary.generators} generators, {summary.snapshots} snapshots",
+        f"Imported NetCDF '{file.filename}': {summary.buses} buses, {summary.generators} generators, {summary.snapshots} snapshots"
+        + _rederived_note(rederived),
     )
     _unbind_session(db, session)
     return summary
@@ -406,12 +430,14 @@ async def import_csv(
 
         n = _parse_candidate("CSV bundle (a .zip of PyPSA CSV tables)", parse)
         normalise_eh_columns(n)
+        rederived = _own_costs_from_parts(n)
         with PyPSAService.get_lock():
             _replace_with(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network_csv.zip",
-        f"Imported CSV zip '{file.filename}': {summary.buses} buses, {summary.generators} generators, {summary.snapshots} snapshots",
+        f"Imported CSV zip '{file.filename}': {summary.buses} buses, {summary.generators} generators, {summary.snapshots} snapshots"
+        + _rederived_note(rederived),
     )
     _unbind_session(db, session)
     return summary
@@ -459,6 +485,7 @@ async def import_excel(
                             pass
 
     n = _parse_candidate("Excel workbook", parse)
+    rederived = _own_costs_from_parts(n)
     # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
     from services.adequacy.eh_columns import normalise_eh_columns
     normalise_eh_columns(n)
@@ -467,7 +494,8 @@ async def import_excel(
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network.xlsx",
-        f"Imported Excel '{file.filename}': {summary.buses} buses, {summary.generators} generators",
+        f"Imported Excel '{file.filename}': {summary.buses} buses, {summary.generators} generators"
+        + _rederived_note(rederived),
     )
     _unbind_session(db, session)
     return summary

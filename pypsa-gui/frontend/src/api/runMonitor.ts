@@ -2,6 +2,7 @@
 // `services/run_monitor.py`, `/api/chat/runs/{task_id}`). Every call is a
 // user's click or the open plan card's own refresh; none is a tool call.
 import { client } from './client'
+import type { RevisionDraft } from './reports'
 
 export interface GateRule {
   rule: string; verdict: 'pass' | 'fail' | string; fact: string
@@ -87,6 +88,8 @@ export interface RunMonitorView {
     profile: string; mode: string; status: string; stage: string; reason?: string
     gate_due?: boolean; next_stage?: string | null; stages: RunStage[]
     waiting?: { kind: string; ref: string }
+    /** LC-48e: the answered run's resume was refused; it waits for the chat's active task, named as the 409 names it. */
+    held?: { kind: string; active: { kind: string; id: string; title: string | null; status: string }; since: string }
     intake?: RunIntake
     /** The agent loop's ending (issue 25); `notice` is the email about it, once claimed. */
     loop?: { ended?: string; notice?: { sent: boolean | null; error?: 'send_failed' | 'no_address' | 'no_mailer' | 'uncertain' | string } }
@@ -111,7 +114,22 @@ export interface RunMonitorView {
     card?: RunCard
     waiting?: { kind: string; ref: string }
     research?: { rows: ResearchRow[]; steps: ResearchStep[] }
+    /** Study harness 14 S-C: the PPA price step's card lines and the price or its state, in words. */
+    ppa?: RunPpaPrice
+    /** SH-07d: the run's draft rows, oldest first. */
+    revision_drafts?: RevisionDraft[]
+    /** SH-07d: the report a draft may be asked for now, with the server's limits;
+     *  `may_act` is false for a viewer of the project. */
+    revision_report?: { report_id: string; max_requests: number; in_flight: string[]; may_act: boolean }
   }
+}
+
+/** `harness.run_ppa.monitor`: every string is the backend's own words. */
+export interface RunPpaPrice {
+  title: string
+  lines: string[]
+  state: 'priced' | 'not_evaluated' | 'out_of_date' | 'pending'
+  text: string
 }
 
 const base = (taskId: string) => `/chat/runs/${encodeURIComponent(taskId)}`

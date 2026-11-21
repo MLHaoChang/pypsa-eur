@@ -266,7 +266,13 @@ class ChatSession:
     _progress_log: collections.deque = field(
         default_factory=lambda: collections.deque(maxlen=500),
     )
+    # live-voice 11c: this in-memory life of the progress log (see
+    # harness/progress_ids.py); minted on first use, never moved by a Stop.
+    _progress_epoch: str | None = None
     _detached_monitor: dict[str, Any] | None = None
+    # live-voice 11b: Stop monitoring. Every solver-log bridge on this
+    # session records the generation it started under and ends when it moves.
+    _monitor_generation: int = 0
     # W-3 — turns started on this session, the fallback bound for an endpoint
     # that never reports usage. See the ceiling in `_run_turn_body`.
     turns_started: int = 0
@@ -611,6 +617,27 @@ class ChatSession:
                     'active': False,
                 }
 
+    def monitor_generation(self) -> int:
+        with self._lock:
+            return self._monitor_generation
+
+    def stop_monitoring(self) -> bool:
+        """Stop this session watching its jobs; the jobs keep running.
+
+        Moves the monitor generation, so every solver-log bridge this session
+        started (the detached monitor, a plan step's in-turn hold) ends at
+        its next poll, and marks the detached monitor inactive, so the
+        /progress stream closes. Other sessions are untouched. Idempotent:
+        returns whether a monitor was active.
+        """
+        with self._lock:
+            self._monitor_generation += 1
+            mon = self._detached_monitor
+            was_active = bool(mon and mon.get('active'))
+            if was_active:
+                self._detached_monitor = {**mon, 'active': False}
+        return was_active
+
     def detached_monitor_active(self, tool_use_id: str | None = None) -> bool:
         with self._lock:
             mon = self._detached_monitor
@@ -630,6 +657,46 @@ class ChatSession:
     def progress_cursor(self) -> int:
         with self._lock:
             return self._progress_seq
+
+    def progress_epoch(self) -> str:
+        from harness import progress_ids
+
+        with self._lock:
+            if self._progress_epoch is None:
+                self._progress_epoch = progress_ids.mint_epoch(self.session_id)
+            return self._progress_epoch
+
+    def progress_since(
+        self, epoch: str, seq: int,
+    ) -> tuple[str, list[dict[str, Any]], int]:
+        """Where a reader holding ``<epoch>:<seq>`` stands (live-voice 11c).
+
+        One lock hold decides and collects, so the log cannot move between
+        the verdict and the replay. Returns ``(point, items, head)``:
+        ``replay`` with every logged item after ``seq``; ``snapshot`` (no
+        items) for a past epoch of this session (a restart or rehydrate),
+        a ``seq`` past the head, or a ``seq`` older than the log keeps (a
+        gap), never a replay from 0; ``foreign`` for an epoch this session
+        never had. ``head`` is the newest cursor. The unread ring is left
+        alone: a resumed reader follows the log, not the shared ring.
+        """
+        from harness import progress_ids
+
+        if not progress_ids.epoch_belongs_to(self.session_id, epoch):
+            return 'foreign', [], self.progress_cursor()
+        current = self.progress_epoch()
+        with self._lock:
+            head = self._progress_seq
+            if epoch != current or seq > head:
+                return 'snapshot', [], head
+            oldest = (
+                int(self._progress_log[0]['cursor'])
+                if self._progress_log else head + 1
+            )
+            if seq < oldest - 1:
+                return 'snapshot', [], head
+            items = [i for i in self._progress_log if int(i['cursor']) > seq]
+            return 'replay', items, head
 
     def drain_detached_progress(
         self, *, after_cursor: int | None = None,

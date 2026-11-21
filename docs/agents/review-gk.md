@@ -301,3 +301,47 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A sizing or loop runner that reports a cost derived from the objective reverses the objective scale the way `run_simulation` does (`_rescale_results_for_objective`), with a test under auto scale and a user scale ≠ 1 (#1466 A2-1, GK A (27)).
 - A per-unit LP share whose exact form is a ratio of variables uses the share over the fixed units only (conservative) and gives extendable units the aggregate row only. The screen still judges them per unit, and the facts name the gap (#1486 R1, GK A (27)).
 - Loss data from an autotransformer source, applied to a unit whose winding type is unknown, is scaled by the co-ratio, states "autotransformer assumed" and discloses the two-winding multiple (#1500 C1, GK A (27)).
+
+## Standing rulings (GK B 59, recorded 2026-11-17)
+
+- A raw edit of composite investment parts moves the network-input fingerprint. A test pinning the opposite is a defect pin (#1547; extends #1533 T3).
+- After a discount-rate change, any write to a priced composite row re-derives it from its parts. That is intended: the stored cost becomes true, and the staged LP is bit-identical either way (TCU 09 N3).
+- A bit-identity claim is tested with an inexact operand pair (e.g. 0.187/0.4), exact `==`, at every site. Replacing `x / y` with `x * (1/y)` is not bit-identical (#1538 F1).
+- A race fix is pinned at the call site that reads the shared value, not only in the callee. Mutate each call site (#1548 F1, #1543 F1-t).
+- A guard with two parts ("differs from base" AND "equals new") needs a case where only the first fails. A test that trips the second part first leaves the first unkilled (#1544 F1/F2).
+
+## Standing rulings (GK B 60, GK B 61 and GK B2 1, recorded 2026-11-17)
+
+- A dependency or derivation table is pinned by exact equality per knockout (#1559).
+- Dedupe is tested with a real duplicate, backend and frontend (#1559).
+- A read-back applies the write path's normalisation before comparing (#1555).
+- A validator checks at the writer's parameter, e.g. the effective discount rate (#1555).
+- A vitest/jsdom "no unhandled rejection" claim is tested via window `unhandledrejection` or by asserting the rejection is consumed (#1556 F6).
+- A retry counter resets only on progress that survives dedupe (#1556).
+- One targeted mutant per added guard replaces a multi-hour full mutant sweep (#1544, #1561).
+- A display scale the client applies before a write, where the scale depends on server state (e.g. a bus unit), is enforced on the server: the write carries the basis the client assumed and the server refuses a mismatch against the post-patch state with a typed 409. Cache invalidation alone never closes it: races, revision rewinds on restore and in-form edits each defeated it (#1565, GK B2).
+- A FastAPI `Header`, `Query` or `Body` parameter on a route function that tests or code call directly is declared `Annotated[T, Header(...)] = default`, never `= Header(default)`; a direct call otherwise receives the FieldInfo object (#1565 B1, GK B2).
+- A card may name a bound item by a label in place of its engine id only when labels are unique (case-insensitive, non-blank, refused otherwise) and the digest binds id and label together. Content hashes may stay off the card when the card names each item the hash covers; the hash binds the identity of named content. A bound scalar the card does not show (e.g. a cap) is shown, or not bound (#1575, GK B 61).
+
+## Standing rulings (GK B3 (2) and GK B3 (3), recorded 2026-11-20)
+
+- A listing that gains a per-caller field (e.g. `started_by_me`) adds its query root to `USER_SCOPED_ROOTS`, with a test that fails without the root, and client stores reset on a user change (#1716).
+- A test asserting "a click writes nothing" waits a tick and a microtask before it asserts: a deferred write passes a synchronous spy (#1757).
+- A cost shown in the UI names whose cost it is (the whole system's, not the component's) and its basis: per year on `single_period`, discounted over the plan on `npv_multi_period` (#1752).
+- A size shown from engine sizing rows uses the asset's bus unit, never hard-coded MW/MWh (#1734; extends #1347/#1353).
+- A merge whose hand resolutions are only in another reviewer's scope: re-OK your own scope, and name the hand-resolved files for the other reviewer (#1673).
+- `_save_context` rebuilds `metadata.json` from an explicit dict, so a key it does not list is dropped on save. A PR that writes a new `metadata.json` key carries it through `_save_context` from `_carry_source_meta`, like `_carried_settings`, under the same `_saves_its_own_directory` rule. Tests fail without the carry: apply → save, Save-As and Save-a-Copy into another directory, and save → export → import → save (#1709, GK B3 (2)).
+- A cleanup keeps everything the import accepts, judged on the same set. Library copies are pruned only against the sidecar pins (`library_refs.json`) ∪ `collect_pins(solver_config.json)`, and nothing is pruned when either file is unreadable. A test keeps a copy that only the config names, with no sidecar (#1689, GK B3 (2)).
+
+## Standing rulings (GK A (32), recorded 2026-11-20)
+
+- A gate that admits on a frozen input binds the exact input's digest, never a summary of it (e.g. min/max per period). A test shows a reversed ramp with the same min/max is refused (#1773 E4).
+- A value read under a start lock and acted on by a worker after that lock is released is re-read under the lock the worker captures its revision under, and the worker fails on a mismatch (#1772 D1).
+- An input of unknown reliability (e.g. a no-data feeder) is taken as failing (q=1) wherever it lies on any supply→critical path. Those paths are found exactly (node-disjoint paths), never by sampling a few cut sets. A far side fed only back through the pocket counts as not supplied (#1729 R2′/R2″).
+- A byte-identity pin compares against a literal value or master's function, never against the same code run with an input monkeypatched to None (#1773 W1).
+
+## Standing rulings (GK B 68, recorded 2026-11-20)
+
+- A builder that cannot see the plan conditions it was given gets them from the GK, verbatim. The GK recovers the text from the setter's transcript (`list_events`) and sends it; a restatement is not accepted, even the builder's own (#1773 dropped clauses and changed W5).
+- A new top-level route prefix (e.g. `/api/workbook/`) skips every `/api/io/` middleware gate (undo, foreign-lock, harness-run, solver, live-study), and no middleware caps uploads (`read_capped` is per route). The plan justifies each skipped gate, with a test, and the route calls `read_capped` itself (S2 excel plan G2/G3).
+- A hand-resolved merge that combines two features (e.g. #1712's sectioned wrapper plus the every-entity branch) gets a test pinning the combined behaviour, and the mutant run covers the resolved hunk. Moving the branch found that the sectioned path missed the gap line (#1712).

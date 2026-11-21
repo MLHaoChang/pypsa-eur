@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import {
   decideResearch, getRun, pauseRun, presentRun, resumeRun, stopRun,
-  type GateRule, type ResearchRow, type RunMonitorView, type RunStage,
+  type GateRule, type ResearchRow, type RunMonitorView, type RunPpaPrice, type RunStage,
 } from '../../api/runMonitor'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore, type SlidePanel } from '../../store/uiStore'
@@ -22,6 +22,7 @@ import {
   GAP_WORDS,
 } from './runWords'
 import { runUnderReview } from './planReview'
+import RevisionDrafts from './RevisionDrafts'
 import { fmtCurrency } from '../../utils/format'
 
 const POLL_MS = 4000
@@ -97,7 +98,29 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
   </div>
 }
 
+/** Study harness 14 S-C: the PPA price, as the backend words it. A price not
+ *  evaluated or out of date is amber with its reason, never a pass. */
+function PpaPrice({ ppa }: { ppa: RunPpaPrice }) {
+  const amber = ppa.state === 'not_evaluated' || ppa.state === 'out_of_date'
+  return <div data-testid="run-ppa" data-state={ppa.state} className="mt-1 rounded border border-border p-2">
+    <div className="font-medium">{ppa.title}</div>
+    <div data-testid="run-ppa-text" className={amber ? 'text-amber-400' : 'text-text'}>{ppa.text}</div>
+    <ul className="text-muted">{ppa.lines.map((line, i) => <li key={i} data-testid="run-ppa-line">{line}</li>)}</ul>
+  </div>
+}
+
 // A run that waits on the user, not one that stopped.
+// LC-48e: what a run whose resume the goal-switch guard refused waits for,
+// read now on the server (`_held_view`); the task named by its title only.
+function heldWords(active: { title: string | null; status: string }): string {
+  const named = active.title ? `\u201c${active.title}\u201d` : 'the chat\u2019s other task'
+  if (active.status === 'ended') return `Your answer is saved. ${active.title ? named : 'The chat\u2019s other task'} has ended; ask to resume the run.`
+  const why = active.status === 'unreadable'
+    ? 'which can\u2019t be read here because it belongs to another project or needs repair'
+    : active.status === 'waiting_job' ? 'which waits on a job' : 'which is still running'
+  return `Your answer is saved. This run waits for ${named}, ${why}; ask to resume the run once it ends.`
+}
+
 const WAITS = new Set(['waiting_card', 'waiting_research_confirm'])
 
 // Study harness issue 09: what a research step that ended early says, and each gap's name.
@@ -287,6 +310,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
   const pausedAt = view.paused_at_card
   const research = view.monitor.waiting?.kind === 'research_confirm'
     ? view.monitor.research?.rows.find(r => r.row === view.monitor.waiting!.ref) ?? null : null
+  const held = run.held?.kind === 'switch_in_progress' ? run.held.active : null
   const state = cancelled ? `Stopped at ${stoppedAt}` : finished ? 'Finished'
     : gateFailed ? `${stoppedAt} failed` : stop ? stop.words
     : pausedAt ? 'Waiting for you' : run.status === 'needs_user' ? 'Waiting for you'
@@ -306,6 +330,8 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
           aria-current={now ? 'step' : undefined} className={now ? 'font-medium' : s.status === 'skipped' ? 'text-muted' : ''}>
           <span data-testid="run-stage-words">{stageWords(s.stage)} · {now && ['pending', 'active'].includes(s.status)
             ? currentWords : STAGE_STATUS_WORDS[s.status] ?? 'to do'}</span>
+          {/* Study harness 15 (GK B): a stage the profile skips says why, e.g. no report until issue 50. */}
+          {s.status === 'skipped' && s.reason && <div data-testid="run-stage-reason" className="text-muted">{s.reason}</div>}
           {now && !cancelled && <CurrentStage stage={s} view={view} />}
         </li>
       })}
@@ -313,6 +339,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
         <Link testId="run-report-link" onClick={() => open('reports')}>Open the report</Link>
       </li>}
     </ol>
+    {view.monitor.ppa && <PpaPrice ppa={view.monitor.ppa} />}
 
     {gateFailed && <div data-testid="run-failure">
       {stoppedAt} failed: {failedRules} {failedRules === 1 ? 'rule' : 'rules'} did not pass.{' '}
@@ -332,7 +359,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
     </div>}
     {noticeWords && <p className={noticeWords.failed ? 'text-warn' : 'text-muted'} data-testid="run-loop-notice">{noticeWords.text}</p>}
 
-    {going && (pausedAt || card || view.monitor.waiting) && <div data-testid="run-waiting">
+    {going && (pausedAt || card || view.monitor.waiting || held) && <div data-testid="run-waiting">
       <div className="font-medium">Waiting for you</div>
       <ul className="list-disc pl-5">
         {pausedAt && <li>
@@ -348,6 +375,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
         </li>}
         {card && <li data-testid="run-waiting-card">A step needs your approval: see the card below</li>}
         {!card && view.monitor.waiting && !research && !pausedAt && <li data-testid="run-waiting-step">A step waits for your decision; its card opens here</li>}
+        {held && <li data-testid="run-held">{heldWords(held)}</li>}
       </ul>
       {research && <ResearchCard row={research} busy={busy}
         others={(view.monitor.research?.rows ?? []).filter(r => r.gap === research.gap && r.row !== research.row && r.status === 'proposed').length}
@@ -363,6 +391,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
       A stopped run cannot be restarted: start a new one from the composer.
     </p>}
     {finished && hasReport && <p data-testid="run-finished">The report is in Reports.</p>}
+    <RevisionDrafts taskId={taskId} view={view} onRefresh={refresh} />
 
     {failed && <p className="text-amber-400">{failed}</p>}
     {(can.has('pause') || can.has('stop')) && <div className="mt-1 flex flex-wrap items-baseline gap-2">

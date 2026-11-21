@@ -97,6 +97,109 @@ from services.solve_queue import solve_queue
 from services.solver_service import SolverConfig
 
 
+_RESULTS_DIR = _BACKEND / "test-results"  # uploaded as the shard artifact in CI
+
+
+def _dump_stall_diagnostics(unfinished: int) -> pathlib.Path:
+    """Write every thread's stack plus `ps` output; return the file written."""
+    import subprocess
+    import threading
+    import traceback
+
+    _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    # Under pytest-xdist several workers can stall at once; one file per worker
+    # keeps a later dump from overwriting (or interleaving with) an earlier one.
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    out = _RESULTS_DIR / (f"solve-queue-stall-{worker}.txt" if worker else "solve-queue-stall.txt")
+    names = {t.ident: t.name for t in threading.enumerate()}
+    with out.open("w") as f:
+        f.write(f"unfinished_tasks={unfinished}\n")
+        for ident, frame in sys._current_frames().items():
+            f.write(f"\n--- thread {names.get(ident)} ({ident})\n")
+            f.write("".join(traceback.format_stack(frame)))
+        try:
+            ps = subprocess.run(
+                ["ps", "-ef", "--forest"], capture_output=True, text=True, timeout=10
+            ).stdout
+        except Exception as exc:  # noqa: BLE001 — diagnostics must not mask the stall
+            ps = f"ps failed: {exc!r}"
+        f.write("\n--- ps\n" + ps)
+    return out
+
+
+def _kill_child_processes() -> None:
+    """SIGKILL every direct child of this process (Linux `ps`; a no-op elsewhere).
+
+    A job stuck in `subprocess.Popen` leaves a forked child that never reaches
+    `exec`. It inherited the pipe CI tees pytest's output through, so after
+    pytest exits `tee` waits on that pipe until the step is cancelled.
+    """
+    import signal
+    import subprocess
+
+    try:
+        ps = subprocess.Popen(
+            ["ps", "-o", "pid=", "--ppid", str(os.getpid())],
+            stdout=subprocess.PIPE, text=True,
+        )
+        out, _ = ps.communicate(timeout=10)
+    except Exception:  # noqa: BLE001 — best effort, the watchdog still follows
+        return
+    for tok in out.split():
+        try:
+            pid = int(tok)
+        except ValueError:
+            continue
+        # `ps` lists itself as our child; it is already reaped, so its pid may
+        # have been reused by an unrelated process.
+        if pid == ps.pid:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+_EXIT_GRACE_S = 60.0
+
+
+def _arm_exit_watchdog() -> None:
+    """Hard-exit the process if it is still alive `_EXIT_GRACE_S` after `pytest.exit`.
+
+    `pytest.exit` ends the session, but the interpreter then joins every
+    non-daemon thread, and the very thread that stalled the drain (a job stuck
+    in `subprocess.Popen`) can block that join forever. The watchdog is a daemon
+    timer: a clean exit (junit.xml written) never reaches it.
+    """
+    import threading
+
+    timer = threading.Timer(_EXIT_GRACE_S, os._exit, args=(3,))
+    timer.daemon = True
+    timer.start()
+
+
+def _reset_solve_queue_or_exit() -> None:
+    """Reset the solve queue; if jobs outlive its bounded join, dump and abort the shard.
+
+    A stalled drain otherwise costs ~60 s per remaining test and runs the shard
+    to the CI timeout with no clue which call blocks.
+    """
+    solve_queue.reset_for_tests()
+    q = getattr(solve_queue, "_q", None)
+    # Mirror reset_for_tests: a stand-in `_q` without `all_tasks_done` is never
+    # waited on, so it is never "stalled" (and a Mock's attributes aren't ints).
+    unfinished = getattr(q, "unfinished_tasks", 0) if hasattr(q, "all_tasks_done") else 0
+    if isinstance(unfinished, int) and unfinished > 0:
+        out = _dump_stall_diagnostics(unfinished)
+        _kill_child_processes()
+        _arm_exit_watchdog()
+        pytest.exit(
+            f"solve_queue.reset_for_tests could not drain ({unfinished} job(s) "
+            f"still unwinding after its join); thread stacks and ps in {out}",
+            returncode=3,
+        )
+
+
 def _reset_backend_state() -> None:
     """Fresh singleton network (unbound) + cleared lifecycle/result state."""
     # `allow_during_study=True` is exactly the internal caller the opt-out
@@ -141,7 +244,7 @@ def _reset_backend_state() -> None:
     # Drain the multi-project solve queue so jobs (and the dispatcher's view of
     # "current") can't bleed across tests. The daemon dispatcher thread stays
     # parked on the now-empty queue — it's reused by the next test that enqueues.
-    solve_queue.reset_for_tests()
+    _reset_solve_queue_or_exit()
     # The authenticated suite reuses its seeded user and app-data root. Owned
     # checked-answer/evidence files otherwise accumulate across unrelated tests
     # until the real 512-record quota refuses publication. Reset only this

@@ -1,0 +1,94 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# GC-03 Planning criteria and SCR/ESCR/WSCR in the campus run; TSO contingency-list import
+
+Status: ready-for-agent; audit 2026-11-19: campus steps merged (#1574, #1589); left: scorecard rows in grid_readiness.py and the campus service section
+Type: task
+Parent: `.scratch/grid-compliance/spec.md`
+Blocked by: none
+Gated: **yes** (GK A, gridspine)
+Model tier: opus
+Size: M
+Owner decision: GC-SCOPE-1, GC-TEXT-1 (2026-11-17); builds on SAGC-1 G4, G6
+TRGC: 15 (and the strength inputs of 04/05, 16, 19–21)
+Likely files: `gridspine/drivers/campus_study.py` (shared; own step function), `gridspine/static/planning_criteria.py` (read-only use of `screen_planning`), `gridspine/static/strength.py`, `gridspine/static/strength_outages.py`, `gridspine/static/contingency_set.py`, new `gridspine/ingest/contingency_list.py`, `pypsa-gui/backend/services/campus_electrical_service.py` (shared; own section), `pypsa-gui/backend/services/adequacy/grid_readiness.py`, new `tests/gridspine/test_contingency_list.py`, `tests/gridspine/test_campus_study.py`
+
+**Confidentiality (GC-TEXT-1).** Cite only the public grid code (SAGC / TRGC by SE / NGSA) and generic engineering. TRGC numbers and titles may be named. Never name a project, customer, consultant, EPC or OEM, here, in code, tests, fixtures, UI text or PR bodies.
+
+## Why
+
+`static/planning_criteria.py` (`screen_planning`) and `static/strength.py`
+(`strength_table`, ESCR/WSCR) exist and are tested, but nothing in the campus run or scorecard
+calls them. TRGC 15 is run against the TSO's own contingency list, which cannot be imported.
+
+## What to build
+
+1. **Campus step** `planning_campus(run_dir, profile)` in `campus_study.py`: runs
+   `screen_planning` over the campus contingency set, writes `campus_planning.csv`.
+2. **Campus step** `strength_campus(run_dir, profile)`: intact and worst-outage SCR, ESCR, WSCR per
+   PoC and stage (`strength_table` + `outage_fault_levels`), writes `campus_strength.csv`.
+3. **TSO contingency-list import** (`ingest/contingency_list.py`): read a PSS/E `.con` subset
+   (`OPEN BRANCH`, `OPEN LINE`, `TRIP`/`DISCONNECT` bus/machine) and a CSV form; map elements
+   to the campus net by bus number/name; unmatched elements are listed, not dropped. The result has
+   the `contingency_set` columns so `screen_planning` takes it unchanged.
+4. **Scorecard rows** in `grid_readiness.py` and a service section, labelled
+   "static screen; binding answer is the RMS/EMT study" for strength.
+
+## Done when
+
+- A run on the existing campus fixture writes both CSVs; worst-outage SCR ≤ intact SCR per PoC.
+- `.con` round-trip: `handoff/contingencies.write_contingencies` output → import → identical
+  element sets. Malformed lines and unknown elements raise/list with line numbers.
+- An imported list with one unmatched branch reports it as unmatched and still screens the rest
+  (test kills "silently drop unmatched").
+- Service and scorecard tests show the new rows; a missing profile band reads "unknown".
+
+Release note: one new file under `doc/release-notes.d/` (see its README).
+
+## Comments
+
+**2026-11-17, GK A2 plan GO** (three PRs: PR1 contingency-list import, PR2 campus steps, PR3 service and scorecard). Conditions:
+
+- (a) "`.con` round-trip" now means the CSV round-trip through `write_contingencies`, plus the `.con` parser tested on fixture text in real PSS/E syntax (POM contingency description data). The true `.con` round-trip is a follow-up once GC-04 lands a `.con` writer to the shared grammar in `ingest/contingency_list.py`. Accept `CKT` and `CIRCUIT`, and `REMOVE MACHINE id FROM BUS n`. A valid PSS/E command outside the subset is listed as `unsupported` with its line number, never as malformed, and its contingency is handled like a partial one.
+- (b) Fail closed. A partly matched contingency is excluded and listed. The planning row never reads pass while any imported contingency went unscreened (partial, unmatched, unsupported); it shows the count. A test pins this.
+- (c) A new optional profile key `scr_min` ({value, clause, source}) is added to `PROFILE_KEYS`. No value ships unless the public code states one, cited by clause. A missing key reads "unknown", never pass.
+- PR1:
+  - C1: a bus name matching more than one bus is listed, never matched to the first. A test checks that the importer and `write_raw` number buses identically.
+  - C2: each refusal and each unmatched reason has its own test with its line number.
+  - C3: the unmatched-element test also checks that the matched rest of that contingency is not screened and that other contingencies are.
+- PR2:
+  - P1: run at the max-import and the max-export hour per period.
+  - P2: a non-converged case is a violation, and an empty set or zero screened cases never reads pass.
+  - P3: strength values are hand-calculated with literal expected values. SCR = S_k,min / P_rated, and ESCR subtracts the PoC's shunt and filter Mvar (tested with a capacitor). WSCR = Σ(S_k,i·P_i)/(ΣP_i)², checked on two PoCs with unequal P. Cite the c factor (IEC 60909 c_min).
+  - P4: only the two new step functions are added to `campus_study.py`.
+- PR3:
+  - S1: a failed step writes ERROR and its rows read error or unknown, never pass.
+  - S2: the RMS/EMT note appears exactly once per strength row, and the existing `_scr_rows` stay byte-identical.
+  - S3: only this package's wrappers, sections and two `RUN_STAGES` entries go into the service. A merge with GC-08 keeps both sets of entries.
+- Every PR: a release-note fragment, a GC-TEXT-1 grep of the diff, and the targeted mutants with their killing tests listed in the PR body.
+
+**2026-11-17, GK A2 PR2 delta GO.** The strength step uses a private campus→templates adapter, with S_k from the campus spec. Conditions:
+
+- T1: SCR uses the entered S_k'' without c. A test pins that at a PoC fed straight from the PCC, intact SCR = sk_min_mva / P_rated. An LV case (c_min = 0.95) shows whether c enters. If it does, divide it back out or state it in the row note; it never shifts the ratio silently.
+- T2: every IBR sgen is off for the strength fault levels, not only those on PoC buses. Gensets and synchronous machines stay in. A test checks that a second PoC's IBR k_sc does not move the first PoC's S_k.
+- T3: the adapter's intact S_k at the PCC equals campus_sc's min-case figure within 0.5 % on the hand fixture.
+- T4: the source is tagged "campus spec", and template defaults the spec does not give keep their assumed tags.
+- H1: unit and load Q come from the hourly slice, else from the spec pf. Failing both, q = 0 is stated as an assumption in the note. A test checks that load Q reaches the net.
+- H2: the import hour is `_vs_period`'s pick, or a test pins that it equals voltage_stability's.
+- H3: a capacitor bank on no PoC is subtracted at every PoC (worst case) and named in a note, or ESCR reads "unknown". One option is picked and tested.
+- H4: on the shared fixture, an islanding contingency reads fail (SCR 0 or not evaluated), never skipped. Tested.
+- H5: "Judged on normal ratings: no emergency rating given" appears in the row note, exactly once.
+
+**2026-11-17, GK A2 ruling (A) on the PR2 engine fix in `static/planning_criteria._lost`.** Conditions:
+
+- L1: each unit is clipped at 0 before the sum; a test with +5 and −3 gives 5.
+- L2: a removed charging draw is not load lost; the note "charging storage lost: X MW of draw removed" is pinned by a test.
+- L3: any other sgen sum in the module is clipped or its netting justified.
+- L4: the PR body and release note name it as an engine change, and `tests/gridspine/test_planning_criteria.py` runs in full.
+
+**2026-11-17, GK A2 minor CSV notes folded into PR2:** an N-2 row naming the same branch twice is listed `not_representable`; an `order` other than 1 or 2 (0 included) is refused by name with its line.
+
+**2026-11-17, GK A2 ruling on P4: (A).** P4's intent is that no shared `campus_study.py` code changes. Private `_gc03_*` helpers and GC-03 constants beside the two steps meet it. Conditions: every addition is `_gc03_`-prefixed or a GC-03 constant; no existing line in `campus_study.py` changes; the PR body states "campus_study.py: additive only (+N/−0)".
+
+**2026-11-17, GK A2 ruling on T2: (A).** pandapower's IEC 60909 minimum case adds no sgen current, and the campus carries a genset as an sgen, so S_k''min is grid-only (the conservative minimum-generation case). Conditions: `GENSET_SK_NOTE` appears only when a genset exists (tested both ways); the "gensets in" wording is gone everywhere; S_k is pinned unchanged with a genset on a PoC bus and off one. Option B (genset as a synchronous `gen` with K_G) is filed as `13-genset-in-strength-fault-level.md` (renumbered from 10 by the coordinator) (needs-triage).

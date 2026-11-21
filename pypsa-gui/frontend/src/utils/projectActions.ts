@@ -444,6 +444,17 @@ async function studyFor(ref: string | null, qc: QueryClient): Promise<ProjectInf
  * the network + store core they all share.
  */
 export async function switchToProject(target: string, qc: QueryClient): Promise<SwitchResult> {
+  if (target === useUIStore.getState().currentProject) return { status: 'noop' }
+  useUIStore.getState().setOpeningProject(target)
+  try {
+    return await switchToProjectInner(target, qc)
+  } finally {
+    // Only clear our own marker: a newer switch may already have replaced it.
+    if (useUIStore.getState().openingProject === target) useUIStore.getState().setOpeningProject(null)
+  }
+}
+
+async function switchToProjectInner(target: string, qc: QueryClient): Promise<SwitchResult> {
   const ui = useUIStore.getState()
   const currentProject = ui.currentProject
   if (target === currentProject) return { status: 'noop' }

@@ -49,6 +49,8 @@ export interface NewProjectWizardProps {
   // separate action cards, so it needs to open the wizard already on the one
   // the user clicked; the workbench omits it and gets 'blank'.
   initialTab?: NewProjectTab
+  // The Duplicate tab starts with this project picked (the card menu's Duplicate).
+  initialCloneSource?: string
   // Called after a decision study's intake was opened (the `decision` tab).
   // The projects home passes a navigation into the workbench, where the
   // decision panel lives; the workbench omits it.
@@ -90,7 +92,7 @@ export const TEMPLATES = [
 ] as const
 
 export default function NewProjectWizard({
-  existingProjects, onConfirm, onClose, isPending, initialTab = 'blank', onDecisionStart,
+  existingProjects, onConfirm, onClose, isPending, initialTab = 'blank', initialCloneSource, onDecisionStart,
 }: NewProjectWizardProps) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const { authEnabled } = useAuthMode()
@@ -140,7 +142,7 @@ export default function NewProjectWizard({
         {tab === 'blank'    && <BlankTab    existingProjects={existingProjects} onConfirm={onConfirm} onClose={onClose} isPending={isPending} />}
         {tab === 'template' && <TemplateTab onClose={onClose} />}
         {tab === 'file'     && <FromFileTab onClose={onClose} />}
-        {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} />}
+        {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} initialSource={initialCloneSource} />}
         {tab === 'study'    && <StudyTab    existingProjects={existingProjects} onClose={onClose} />}
         {tab === 'decision' && <DecisionTab existingProjects={existingProjects} onClose={onClose} onStarted={onDecisionStart} onBlank={() => setTab('blank')} />}
         {tab === 'folder' && !authEnabled && <FromFolderTab onClose={onClose} />}
@@ -268,7 +270,7 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
           disabled={!trimmed || isPending}
           className={`px-4 py-1.5 rounded text-xs font-semibold transition-colors disabled:opacity-40
             ${willOverwrite
-              ? 'bg-warn text-white hover:bg-warn/90'
+              ? 'bg-warn text-on-status hover:bg-warn/90'
               : 'bg-accent text-white hover:bg-accent/90'}`}
         >
           {isPending ? 'Creating…' : willOverwrite ? 'Overwrite & Create' : 'Create blank project'}
@@ -502,16 +504,17 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
 
 // ── Tab 4: Clone — fork an existing project ───────────────────────────────
 
-function CloneTab({ existingProjects, onClose }: {
+function CloneTab({ existingProjects, onClose, initialSource }: {
   existingProjects: ProjectInfo[]
   onClose: () => void
+  initialSource?: string
 }) {
   const qc = useQueryClient()
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
   const currentProject    = useUIStore(s => s.currentProject)
   const openInWorkbench = useOpenInWorkbench()
-  const [sourceId, setSourceId] = useState<string | null>(null)
+  const [sourceId, setSourceId] = useState<string | null>(initialSource ?? null)
   const [newName, setNewName]   = useState('')
 
   // Auto-suggest "<source>_copy" the first time a source is picked.
@@ -690,10 +693,10 @@ function CloneTab({ existingProjects, onClose }: {
         <button
           onClick={() => sourceId && canClone && cloneMut.mutate({ src: sourceId, dest: trimmed })}
           disabled={!canClone || cloneMut.isPending}
-          className={`px-4 py-1.5 rounded text-xs font-semibold transition-colors disabled:opacity-40 text-white ${
+          className={`px-4 py-1.5 rounded text-xs font-semibold transition-colors disabled:opacity-40 ${
             willOverwrite || willDropDirty
-              ? 'bg-warn hover:bg-warn/90'
-              : 'bg-accent hover:bg-accent/90'
+              ? 'bg-warn text-on-status hover:bg-warn/90'
+              : 'bg-accent text-white hover:bg-accent/90'
           }`}
         >
           {cloneMut.isPending

@@ -1,0 +1,87 @@
+name: Site scene Blender round trip (SC-00 B)
+
+# Evidence run for site-scene issue 06 (owner decision SC06-CI-1): fetch the
+# pinned Blender LTS, round-trip the committed export GLB headless, and upload
+# wall time, CPU, peak RSS, stdout and the compare result. Manual only; no
+# secrets, read-only token.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BLENDER_VERSION: 5.2.4
+  BLENDER_URL: https://download.blender.org/release/Blender5.2/blender-5.2.4-linux-x64.tar.xz
+  BLENDER_SHA256: 2fd14c50987426897ba60237ee996edf2b4151f4b1a72a460ca20be58c1d2d86
+  FIXTURE: pypsa-gui/frontend/src/site3d/__fixtures__/scene-export.glb
+  SC00B: .scratch/site-scene-generation/sc00b
+
+jobs:
+  roundtrip:
+    name: Blender GLB round trip
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Fetch and verify Blender
+      run: |
+        mkdir -p "$RUNNER_TEMP/blender" "$RUNNER_TEMP/out"
+        cd "$RUNNER_TEMP/blender"
+        curl -fsSLO "$BLENDER_URL"
+        echo "$BLENDER_SHA256  blender-$BLENDER_VERSION-linux-x64.tar.xz" | sha256sum -c
+        tar xf "blender-$BLENDER_VERSION-linux-x64.tar.xz"
+        echo "BLENDER=$RUNNER_TEMP/blender/blender-$BLENDER_VERSION-linux-x64/blender" >> "$GITHUB_ENV"
+
+    - name: Record runner and missing libraries
+      run: |
+        out="$RUNNER_TEMP/out"
+        { uname -a; nproc; free -m; } > "$out/runner.txt"
+        ldd "$BLENDER" | grep "not found" > "$out/ldd-missing-before.txt" || true
+        cat "$out/ldd-missing-before.txt"
+
+    - name: Install X/GL runtime libraries
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          libxxf86vm1 libxfixes3 libxi6 libxkbcommon0 libsm6 libxrender1 libgl1 libegl1
+        ldd "$BLENDER" | grep "not found" > "$RUNNER_TEMP/out/ldd-missing-after.txt" || true
+
+    - name: Blender version and glTF option names
+      run: |
+        out="$RUNNER_TEMP/out"
+        "$BLENDER" --background --factory-startup --offline-mode --version > "$out/version.txt"
+        cat "$out/version.txt"
+        init="$(dirname "$BLENDER")/5.2/scripts/addons_core/io_scene_gltf2/__init__.py"
+        grep -nE "^\s*(export_extras|import_scene_extras)\s*:" "$init" > "$out/gltf-options.txt"
+        cat "$out/gltf-options.txt"
+
+    - name: Round trip
+      run: |
+        set -o pipefail
+        out="$RUNNER_TEMP/out"
+        start=$(date +%s.%N)
+        "$BLENDER" --background --factory-startup --offline-mode --python-exit-code 3 \
+          --python "$SC00B/roundtrip.py" -- "$FIXTURE" "$out/rt.glb" "$out/rt.blend" \
+          2>&1 | tee "$out/stdout.txt"
+        end=$(date +%s.%N)
+        echo "process_wall_s=$(awk "BEGIN{printf \"%.3f\", $end - $start}")" | tee "$out/wall.txt"
+        ls -l "$out/rt.glb" "$out/rt.blend" | tee "$out/sizes.txt"
+
+    - name: Compare
+      run: |
+        set -o pipefail
+        python3 -I "$SC00B/compare.py" "$FIXTURE" "$RUNNER_TEMP/out/rt.glb" \
+          | tee "$RUNNER_TEMP/out/compare.txt"
+
+    - name: Upload evidence
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: sc00b-blender-roundtrip
+        path: ${{ runner.temp }}/out/
+        retention-days: 30
