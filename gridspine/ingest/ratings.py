@@ -38,16 +38,12 @@ def _class_floor(kv: float) -> float:
 
 def assumed_rating_mva(total_load_mva: float, *kv: float) -> float:
     """The never-binding bound for a total load and the element's voltage(s)."""
-    known = [
-        float(v) for v in kv if v is not None and math.isfinite(float(v)) and v > 0
-    ]
-    floor = _class_floor(max(known)) if known else _class_floor(0.0)
+    # NaN > 0 is False, so a missing voltage drops out like a zero one
+    floor = _class_floor(max([float(v) for v in kv if float(v) > 0], default=0.0))
     return float(math.ceil(max(LOAD_MULTIPLE * float(total_load_mva), floor)))
 
 
 def total_load_mva(loads) -> float:
     """Σ |S| of the in-service loads of a ``n.loads`` frame, in MVA."""
-    if not len(loads):
-        return 0.0
-    on = loads[loads["active"].astype(bool)] if "active" in loads else loads
+    on = loads[loads["active"].astype(bool)]
     return float(((on["p_set"] ** 2 + on["q_set"] ** 2) ** 0.5).sum())

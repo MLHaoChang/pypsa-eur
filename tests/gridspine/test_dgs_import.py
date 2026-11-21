@@ -1293,3 +1293,11 @@ def test_the_issue_example_grid_is_finite_and_assumed(tmp_path):
     ]
     # DGS lines carry √3·U·I ratings and are never defaulted
     assert "s_nom_source" not in res.network.lines.columns
+
+
+def test_a_short_circuit_level_equal_to_the_bound_is_not_named(tmp_path):
+    # snss 250 MVA equals the load bound (the 132 kV floor), so the bound is used
+    res = read_text(tmp_path, dgs_text(_with(ElmXnet=["44;Grid;2;1.0;250.0;;;;SL;0"])))
+    assert res.network.generators.at["Grid", "p_nom"] == 250.0
+    (row,) = _grid_rows(res.report)
+    assert "short-circuit" not in row.why

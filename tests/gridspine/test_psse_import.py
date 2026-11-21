@@ -1076,6 +1076,8 @@ def test_features_rated_line_keeps_its_ratea(features):
         (275.65, 138.0, 2757.0),  # 10 × load wins over the 250 MVA floor
         (10.0, 138.0, 250.0),  # 100 MVA < the ≤150 kV floor
         (10.0, 0.4, 100.0),  # <1 kV floor is 1 MVA
+        (0.01, 0.4, 1.0),
+        (0.01, 1.0, 50.0),  # 1 kV is in the ≤36 kV class
         (1.0, 20.0, 50.0),  # ≤36 kV floor
         (1.0, 36.0, 50.0),
         (1.0, 36.1, 250.0),
@@ -1098,3 +1100,28 @@ def test_assumed_bound_takes_the_higher_end_voltage():
 
     assert assumed_rating_mva(1.0, 20.0, 380.0) == 3000.0
     assert assumed_rating_mva(1.0, 0.0, 220.0) == 1000.0
+
+
+def test_an_out_of_service_load_is_not_in_the_bound(tmp_path):
+    # 2000 MW switched off (STATUS 0): the bound stays 10 × SBASE 100 = 1000 MVA
+    res = _case(
+        tmp_path,
+        BUS=_BUSES,
+        LOAD=["2,'1',0,1,1,2000.0,0.0"],
+        GENERATOR=[_SWING],
+        BRANCH=["1,2,'1',0.01,0.1,0.0,0.0"],
+    )
+    assert bool(res.network.loads["active"].iloc[0]) is False
+    assert res.network.lines.at["Line A - B 1", "s_nom"] == 1000.0
+
+
+def test_an_in_service_load_sets_the_bound(tmp_path):
+    res = _case(
+        tmp_path,
+        BUS=_BUSES,
+        LOAD=["2,'1',1,1,1,300.0,400.0"],
+        GENERATOR=[_SWING],
+        BRANCH=["1,2,'1',0.01,0.1,0.0,0.0"],
+    )
+    # |S| = 500 MVA, 10 × 500 = 5000 MVA
+    assert res.network.lines.at["Line A - B 1", "s_nom"] == 5000.0
