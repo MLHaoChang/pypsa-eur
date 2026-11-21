@@ -178,6 +178,11 @@ def apply_undo():
         not_restored = growth_placeholders.restore_meta(result["template_meta"])
         # Under the lock a save's metadata.json rewrite holds (GK B3 #2).
         _restore_cutouts(result.get("profile_cutouts"))
+        # The undo stack holds the network, not the solver config: the load
+        # growth multipliers follow the restored periods (homer-parity 04a).
+        from services.solver.load_growth import follow_network
+
+        follow_network(PyPSAService.get_active_context())
     change_log_service.log("undo", "Network", "", "Undone last action")
     out = {"undone": True, "remaining": undo_service.depth()}
     if not_restored:

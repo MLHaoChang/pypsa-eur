@@ -16,6 +16,12 @@ const DISPLAY: Record<AssetCostRow['basis'], { unit: string; scale: number }> = 
   'EUR/MWh': { unit: '€/kWh', scale: 1e-3 },
   'EUR/MVA': { unit: '€/MVA', scale: 1 },
 }
+/** An asset on a tonne bus: money per t/h or per t, scale 1 (stored as entered; no kW or kWh factor). */
+const TONNE_DISPLAY: Partial<Record<AssetCostRow['basis'], { unit: string; scale: number }>> = {
+  'EUR/MW': { unit: '€/(t/h)', scale: 1 },
+  'EUR/MWh': { unit: '€/t', scale: 1 },
+}
+
 /** The money fields a scale input can price (backend `provenance_graph.money.SCALED_FIELDS`). */
 const SCALED = ['overnight_cost', 'fom_cost']
 const OVERNIGHT_FIELDS = ['overnight_cost', 'inv_power_overnight', 'inv_energy_overnight', 'inv_per_km_overnight']
@@ -30,7 +36,7 @@ function staleOf(a: AssetCostRow) {
 }
 
 function Row({ a, onOpen, defaultLife }: { a: AssetCostRow; onOpen: () => void; defaultLife?: number }) {
-  const d = DISPLAY[a.basis]
+  const d = a.tonne_bus ? TONNE_DISPLAY[a.basis] ?? DISPLAY[a.basis] : DISPLAY[a.basis]
   const priced = a.parts.length > 0
   // A part with no lifetime of its own inherits the project default.
   const life = [...new Set(a.parts.map(p => p.lifetime != null ? `${p.lifetime} y`

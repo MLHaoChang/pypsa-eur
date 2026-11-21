@@ -1,0 +1,1 @@
+{"non_mutating_routes": [{"method": "POST", "path": "/api/projects/{name}/studies/{study_id}/grid-extension-break-even", "reason": "break-even from the stored 03a table, writes nothing"}]}

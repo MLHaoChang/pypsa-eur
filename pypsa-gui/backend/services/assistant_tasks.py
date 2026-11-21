@@ -887,7 +887,7 @@ def _advance_run(path, ctx=None):
     written only if (stage, attempts, fingerprint) did not move meanwhile; a
     caller that may not edit the project writes nothing (`gate_due`)."""
     from harness import run_eh, run_explore, run_loops
-    from services import flow_service, run_gates, run_profiles
+    from services import flow_scope, run_gates, run_profiles
     ctx = ctx or RUN_CONTEXT.get() or PyPSAService.get_active_context()
     for _ in range(2 * len(run_profiles.STAGES)):
         with _LOCK:
@@ -920,7 +920,7 @@ def _advance_run(path, ctx=None):
                     # Study harness 10a (GK B (36) D1): the grid-code profile, frozen now, shown on the stage card.
                     # Study harness 12b (M2): one record per kind, never crossed.
                     for kind in run_actions.kinds(steps):
-                        run_actions.fill(steps, run_actions.stage_frozen(task, kind), kind)
+                        run_actions.fill(steps, run_actions.stage_frozen(task, kind, path=path), kind)
                 short = run_eh.pass_short(path, steps)
                 if short is not None:
                     # Study harness 12c (Q1-i): a pass the solves left cannot finish never
@@ -990,7 +990,7 @@ def _advance_run(path, ctx=None):
                     run_loops.after_passed_gate(task, name)
                 stage.update(status="passed", exited_at=_now())
                 if name == "setup":
-                    run["scope"] = run_profiles.scope_for(flow_service.read_template(path.parent.parent))
+                    run["scope"] = run_profiles.scope_for(flow_scope.preset_template(path.parent.parent))
                 if following is None:
                     run["status"], task["status"] = "completed", "completed"
                 else:

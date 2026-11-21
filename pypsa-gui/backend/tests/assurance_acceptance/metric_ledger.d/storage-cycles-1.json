@@ -1,0 +1,48 @@
+{
+ "profiles": {
+  "storage-cycles/1": [
+   {
+    "metric": "window_discharged_energy",
+    "formula": "sum over t of w_stores[t] x p_dispatch[t] (Store: x max(p[t], 0))",
+    "validity": "verified solve (else unverified_solve); a non-cyclic StorageUnit passes the storage-unit-dispatch/1 check, a cyclic one its bounds, a Store its energy balance e = (1 - loss)^dt x e_prev - dt x p, else invalid_or_missing_storage_trajectory. Refusals: component_class_required, misaligned_source, misaligned_storage_output, misaligned_storage_weights, unknown_storage, unknown_storage_unit, unsupported_snapshot_scope, unsupported_split_storage_layout",
+    "tolerance": "harness.storage_cycles_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile"
+     }
+    }
+   },
+   {
+    "metric": "energy_capacity",
+    "formula": "p_nom x max_hours (Store: e_nom, opt if extendable)",
+    "validity": "verified solve (else unverified_solve); a non-cyclic StorageUnit passes the storage-unit-dispatch/1 check, a cyclic one its bounds, a Store its energy balance e = (1 - loss)^dt x e_prev - dt x p, else invalid_or_missing_storage_trajectory. Refusals: component_class_required, misaligned_source, misaligned_storage_output, misaligned_storage_weights, unknown_storage, unknown_storage_unit, unsupported_snapshot_scope, unsupported_split_storage_layout",
+    "tolerance": "harness.storage_cycles_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile"
+     }
+    }
+   },
+   {
+    "metric": "equivalent_cycles",
+    "formula": "window_discharged_energy / energy_capacity",
+    "validity": "verified solve (else unverified_solve); a non-cyclic StorageUnit passes the storage-unit-dispatch/1 check, a cyclic one its bounds, a Store its energy balance e = (1 - loss)^dt x e_prev - dt x p, else invalid_or_missing_storage_trajectory. Refusals: component_class_required, misaligned_source, misaligned_storage_output, misaligned_storage_weights, unknown_storage, unknown_storage_unit, unsupported_snapshot_scope, unsupported_split_storage_layout; energy_capacity > 0, else zero_energy_capacity",
+    "tolerance": "harness.storage_cycles_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile"
+     }
+    }
+   }
+  ]
+ }
+}

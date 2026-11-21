@@ -8,12 +8,14 @@ import { useUIStore } from '../../store/uiStore'
 import { ResultsFilterProvider } from './filterContext'
 import type { FlowScopeRegistry } from '../../api/flow'
 
-const flowApi = vi.hoisted(() => ({ getFlowScope: vi.fn() }))
-vi.mock('../../api/flow', async (orig) => ({ ...(await orig<typeof import('../../api/flow')>()), getFlowScope: flowApi.getFlowScope }))
+const flowApi = vi.hoisted(() => ({ getFlowScope: vi.fn(), getProjectFlow: vi.fn() }))
+vi.mock('../../api/flow', async (orig) => ({ ...(await orig<typeof import('../../api/flow')>()),
+  getFlowScope: flowApi.getFlowScope, getProjectFlow: flowApi.getProjectFlow }))
 
 const api = vi.hoisted(() => ({
   getCostBreakdown: vi.fn(), getEmissions: vi.fn(), getLostLoad: vi.fn(), getReserveMargin: vi.fn(),
   getAdequacy: vi.fn(), getStatistics: vi.fn(), getStatus: vi.fn(), getHeadlineKpis: vi.fn(),
+  getEhStudy: vi.fn(), getEhReview: vi.fn(), getEhReferenceDesign: vi.fn(),
 }))
 vi.mock('../../api/simulation', async (orig) => {
   const actual = await orig<typeof import('../../api/simulation')>()
@@ -21,7 +23,8 @@ vi.mock('../../api/simulation', async (orig) => {
     ...actual,
     resultsApi: { ...actual.resultsApi, getCostBreakdown: api.getCostBreakdown, getEmissions: api.getEmissions,
       getLostLoad: api.getLostLoad, getReserveMargin: api.getReserveMargin, getAdequacy: api.getAdequacy,
-      getStatistics: api.getStatistics, getHeadlineKpis: api.getHeadlineKpis },
+      getStatistics: api.getStatistics, getHeadlineKpis: api.getHeadlineKpis,
+      getEhStudy: api.getEhStudy, getEhReview: api.getEhReview, getEhReferenceDesign: api.getEhReferenceDesign },
     simulationApi: { ...actual.simulationApi, getStatus: api.getStatus },
   }
 })
@@ -59,6 +62,10 @@ beforeEach(() => {
   api.getReserveMargin.mockResolvedValue(null)
   api.getAdequacy.mockResolvedValue(null)
   api.getStatistics.mockResolvedValue(STATS)
+  api.getEhStudy.mockResolvedValue(null)
+  api.getEhReview.mockResolvedValue(null)
+  api.getEhReferenceDesign.mockResolvedValue(null)
+  flowApi.getProjectFlow.mockRejectedValue(new Error('no flow'))
 })
 afterEach(() => { cleanup(); vi.clearAllMocks(); useUIStore.setState({ currentProject: null }) })
 
@@ -290,5 +297,53 @@ describe('the Summary tab with unknown lost-load totals and shadow price', () =>
     expect(card.textContent).toMatch(/binding · —\/t/)
     expect(within(card).queryByText(/€0/)).toBeNull()
     expect(screen.getByTestId('not-recorded-note').textContent).toBe('—: not recorded by this solve')
+  })
+})
+
+// Control-strategy walkthrough 06 / improvement 2 / #1618-01: Expert names the source run too.
+describe('SummaryTab source run (control-strategy 06)', () => {
+  const flow = (by: Record<string, string | null>) => flowApi.getProjectFlow.mockResolvedValue(
+    { deferred: false, run_request: { optimisation: true, study: true, loadflow: false },
+      sections: [{ section: 'results', freshness_by_kind: by }] })
+
+  it('after a Guided study with no solve, gives the verdict from the study and offers the solve', async () => {
+    for (const f of [api.getCostBreakdown, api.getEmissions, api.getStatistics, api.getLostLoad]) f.mockResolvedValue(null)
+    api.getStatus.mockResolvedValue({ status: 'idle', objective: null, solve_time: null, dispatch: 'none' })
+    api.getEhStudy.mockResolvedValue({ status: 'done', archetype: 'weak_flexible', report: null,
+      edited_since_study: false, finished_at: Date.parse('2026-11-17T15:42:00Z') / 1000 })
+    api.getEhReview.mockResolvedValue({ status: 'ok', stale: false,
+      summary: { verdict: 'pass', mc_lole_h_per_year: 0, target_lole_h: 3 } })
+    const run = vi.fn()
+    useUIStore.setState({ requestRunSolve: run })
+    renderTab()
+    const verdict = await screen.findByTestId('summary-study-verdict')
+    expect(verdict.textContent).toMatch(/^Certified/)
+    expect(screen.getByTestId('summary-source-from').textContent).toMatch(/^From the reliability study, 2026-11-1[78] \d\d:\d\d$/)
+    expect(screen.getByTestId('summary-source-missing').textContent).toBe('The dispatch solve has not run·Run the solve ›')
+    expect(screen.queryByTestId('summary-empty')).toBeNull()
+    fireEvent.click(screen.getByTestId('summary-source-action'))
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('a solved project names the dispatch solve, and the study when it has not run', async () => {
+    api.getStatus.mockResolvedValue({ status: 'completed', condition: 'optimal', objective: 1.2e7, solve_time: 3.4,
+      dispatch: 'fresh', solved_at: '2026-11-17T15:42:00Z' })
+    flow({ optimisation: 'fresh', study: 'not_run', loadflow: 'not_run' })
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('summary-source-missing').textContent)
+      .toBe('The reliability study has not run·Reliability goal ›'))
+    expect(screen.getByTestId('summary-source-from').textContent).toMatch(/^From the dispatch solve, 2026-11-1[78] \d\d:\d\d$/)
+    expect(screen.queryByTestId('summary-source-stale')).toBeNull()
+  })
+
+  it('a solve older than the inputs is marked out of date (GK B3 C2)', async () => {
+    api.getStatus.mockResolvedValue({ status: 'completed', condition: 'optimal', objective: 1.2e7, solve_time: 3.4,
+      dispatch: 'fresh', solved_at: null })
+    flow({ optimisation: 'stale', study: null, loadflow: 'not_run' })
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('summary-source-stale').textContent).toContain('Out of date'))
+    expect(screen.getByTestId('summary-source-from').textContent).toBe('From the dispatch solve')
+    // A project with no study kind is not offered one.
+    expect(screen.queryByTestId('summary-source-missing')).toBeNull()
   })
 })

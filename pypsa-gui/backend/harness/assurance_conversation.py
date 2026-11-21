@@ -31,7 +31,7 @@ QUESTIONS = {
     "cost_quantity_required": "Which quantity do you mean: Marginal dispatch expenditure or Total declared-basis cost?",
     "explicit_cost_basis_required": "Please provide the EUR price year and annual fixed cost fraction. Reply: Price year YYYY; annual fixed cost fraction F (between 0 and 1).",
     "conversation_scope_required": "Please specify the generator, StorageUnit or network and the results to check; there is no available checked scope in this chat.",
-    "conversation_scope_changed": "The project, browser binding or selected component changed. Please specify the generator, StorageUnit or network and results again.",
+    "conversation_scope_changed": "The project or selected component changed. Please specify the generator, StorageUnit or network and results again.",
     "previous_compatible_run_required": "No previous distinct checked run has the same entity, time window and cost basis. Check a compatible baseline first or provide an explicit retained comparison scope.",
     "baseline_unavailable": "The selected previous run is unavailable or could not be verified. Please check a compatible baseline again.",
     "unsupported_followup": "That follow-up contains constraints outside the supported scope grammar. Please specify an exact result scope; no constraint has been ignored.",
@@ -48,6 +48,16 @@ def _match(pattern, message):
 
 def _binding(turn):
     return (turn.owner, turn.project_id, getattr(turn, "binding_generation", 0))
+
+
+def _same_scope(binding, turn):
+    """Whether a follow-up shares the owner and project of the turn that set the context.
+
+    The browser raises ``binding_generation`` on every send, so a follow-up (a card
+    answer, a repeat or a compare) always carries a newer one (AA-20). A project
+    switch changes the project id, and a new chat starts a new session.
+    """
+    return tuple(binding)[:2] == _binding(turn)[:2]
 
 
 def _state(turn, ui):
@@ -78,7 +88,7 @@ def _state(turn, ui):
         turn.project_id,
         None,
     )
-    if (tuple(state["binding"]) != _binding(turn) and not resumed) or conflict:
+    if (not _same_scope(state["binding"], turn) and not resumed) or conflict:
         with turn.session._lock:
             turn.session.assurance_context = None
         return None, "conversation_scope_changed"
@@ -346,6 +356,11 @@ def remember(turn):
             (turn.conversation_state or {}).get("expires_at", record["expires_at"]),
             record["expires_at"],
         )
+    elif assurance_scope.every_entity(turn.request_scope or {}):
+        # A population answer is not a follow-up scope: it is cleared, like any
+        # answer that cannot be retained (the final `else` does the same).
+        turn.session.assurance_context = None
+        return
     elif (
         record["receipt"].get("request_complete")
         and turn.request_evidence
@@ -392,6 +407,10 @@ def remember(turn):
             "raw": raw,
             "source_sha256": records.digest(raw),
         }
+        # Recalculated now, so the current definitions, not the source's.
+        frozen.pop("definition_hash", None)
+        if (definition := calculations.scope_definition_hash(scope)) is not None:
+            frozen["definition_hash"] = definition
         records.save(frozen, frozen["evidence_id"])
         entry = {
             "scope": deepcopy(scope),
@@ -401,7 +420,7 @@ def remember(turn):
         old = turn.conversation_state
         entries = (
             deepcopy(old["entries"])
-            if old and tuple(old["binding"]) == _binding(turn)
+            if old and _same_scope(old["binding"], turn)
             else []
         )
         if entries and _compatible(entries[-1]["scope"]) != _compatible(scope):

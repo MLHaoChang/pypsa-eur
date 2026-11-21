@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can now read what the business-case line table offers and refuses: the units each line may take per source, the linked model outputs, and every check on the stored lines.

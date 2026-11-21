@@ -408,8 +408,8 @@ export function ReserveMarginPanel() {
           // before a margin-set solve, and the next action is a setting.
           <p className="text-[11px] text-muted" data-testid="reserve-margin-empty">
             No firm-capacity standard was enforced by the last solve, so there
-            is nothing to report against. Set{' '}
-            <code className="font-mono">reserve_margin</code> in solver settings
+            is nothing to report against. Set the{' '}
+            <em>Reserve margin</em> in solver settings
             (0.15 = 15% of peak) and re-solve to get one. The margin is a
             constraint, never a cost — the LP cannot buy its way out of it — so
             a solve that meets it has actually built the capacity.

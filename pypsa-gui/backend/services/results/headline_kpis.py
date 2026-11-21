@@ -72,7 +72,13 @@ CHECKED = {
 _UNAVAILABLE = ("unavailable", "This run cannot give this figure.")
 SWITCHED_OFF = (
     "unavailable",
-    "Checked figures are switched off for this installation.",
+    "Checked figures are off on this installation; an administrator can turn them on.",
+)
+#: The LCOE card off (walk 2026-11-17 issue 06): where the same figure is found.
+SWITCHED_OFF_LCOE = (
+    "unavailable",
+    SWITCHED_OFF[1] + " The Investment case under Commercial & finance gives the"
+    " finance-consistent LCOE.",
 )
 BUSY = ("unavailable", "The project is busy. Try again in a moment.")
 INPUTS_CHANGED = ("stale", "The inputs changed since this solve.")
@@ -279,7 +285,8 @@ def _checked(ctx, card_id):
         # Whether the project is a data-centre one is unknown while switched off.
         if card_id == "time_to_power":
             return None
-        return _card(card_id, state=SWITCHED_OFF[0], reason=SWITCHED_OFF[1])
+        off = SWITCHED_OFF_LCOE if card_id == "lcoe" else SWITCHED_OFF
+        return _card(card_id, state=off[0], reason=off[1])
     scope = {
         "project_id": ctx.project_uuid,
         "profile": profile,

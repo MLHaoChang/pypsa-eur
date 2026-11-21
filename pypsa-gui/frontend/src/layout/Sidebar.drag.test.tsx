@@ -70,7 +70,7 @@ function renderSidebar() {
  */
 async function openPalette() {
   renderSidebar()
-  await userEvent.click(screen.getByText('Assets'))
+  await userEvent.click(await screen.findByText('Assets'))
   return screen.getByText('Bus (Node)').closest('[role="button"]') as HTMLElement
 }
 

@@ -124,7 +124,7 @@ describe('ReserveMarginPanel — ★ it mounts in BOTH states', () => {
     const empty = await screen.findByTestId('reserve-margin-empty')
     // An ANSWER, not a stub: it must say what to do next.
     expect((empty.textContent ?? '').length).toBeGreaterThan(40)
-    expect(empty.textContent).toMatch(/reserve_margin/)
+    expect(empty.textContent).toMatch(/Reserve margin/)
     expect(screen.queryByTestId('reserve-margin-periods')).toBeNull()
   })
 
