@@ -136,10 +136,10 @@ jobs:
     needs: gui-backend-changes
     if: needs.gui-backend-changes.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # A healthy shard on the 4-shard layout takes up to ~150 min. Without a cap
-    # a hung shard held its runner for GitHub's 6 h limit. Once the shards run
-    # under xdist (~25 min each) this can drop to ~60.
-    timeout-minutes: 180
+    # Without a cap a hung shard held its runner for GitHub's 6 h limit. The 8
+    # xdist shards finish in ~10-25 min (pytest itself ~10 min); 120 leaves
+    # wide headroom and frees a wedged runner an hour sooner than 180 did.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
