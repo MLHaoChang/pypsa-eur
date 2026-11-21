@@ -2018,7 +2018,8 @@ TOOLS: list[dict[str, Any]] = [
         "'planning_dynamics' for a gridspine study), study_owned, "
         "owner_study_id, owner_study_name (study_owned = a decision study's own "
         "option or tornado fork; leave it to the study), settings (the per-project "
-        "settings table: derive_lengths_from_geometry) (per "
+        "settings table: derive_lengths_from_geometry), my_access (the "
+        "caller's access: 'edit' or 'view'; null where not reported) (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
         "augmented with `resident: bool` "
@@ -2128,7 +2129,7 @@ TOOLS: list[dict[str, Any]] = [
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
         "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
         "parent_project, scenario_description, scenario_type, project_kind, "
-        "study_owned, owner_study_id, owner_study_name, settings} per "
+        "study_owned, owner_study_id, owner_study_name, settings, my_access} per "
         "schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},

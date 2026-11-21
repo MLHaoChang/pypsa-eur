@@ -16,7 +16,7 @@ import time
 import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
@@ -60,6 +60,9 @@ class MembersRequest(BaseModel):
     """Body for PUT /{id_or_name}/members — the desired member user-id set."""
 
     user_ids: list[str] = []
+    # Optional role per user id (project-viewer-role 01). A member with no
+    # entry keeps the stored role; a new member defaults to editor.
+    roles: dict[str, Literal["editor", "viewer"]] = {}
 
 
 # The FLAT legacy store: <root>/<display-name>/network.nc. Distinct from
@@ -1121,7 +1124,15 @@ def list_projects(
     # (Step 1) is the channel that surfaces such drift.
     project_registry.require_user(user)
     projects = project_acl.list_accessible_projects(db, user)
-    return [_project_info_db(db, p) for p in projects]
+    # One `project_role` per row, the same function the write gate uses (GK B3
+    # V4). Its few indexed lookups are small next to the bundle read
+    # `_project_info_db` already does per row.
+    return [
+        _project_info_db(db, p).model_copy(
+            update={"my_access": project_acl.project_role(db, user, p)}
+        )
+        for p in projects
+    ]
 
 
 # NOTE: `/unclaimed` and `/unclaimed/{legacy_name}/import` MUST stay ahead of
@@ -3723,7 +3734,7 @@ def activate_project(
     ``_solver_in_flight()`` (which keys on the active ctx), so switching away
     while the queue solves a DIFFERENT project is allowed — that is the payoff.
     """
-    from services import project_registry
+    from services import project_acl, project_registry
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, project_id)
@@ -3829,7 +3840,8 @@ def activate_project(
                 f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}")
         library_issues = _tariff_ref_load_issues(cfg, project.name) + library_issues
     return {"activated": project.name, "evicted": evicted, "lock": lock_info,
-            "library_issues": library_issues}
+            "library_issues": library_issues,
+            "my_access": project_acl.project_role(db, user, project)}
 
 
 @router.post("/{project_id}/lock")
@@ -3898,7 +3910,7 @@ def load_project(
     user: User | None = Depends(optional_user),
     session: SessionRow | None = Depends(current_session),
 ) -> ImportSummary | dict[str, object]:
-    from services import project_registry
+    from services import project_acl, project_registry
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, name)
@@ -4166,6 +4178,7 @@ def load_project(
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
     return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues,
+            "my_access": project_acl.project_role(db, user, project),
             **({"dropped_goal": dropped_goal} if dropped_goal else {})}
 
 
@@ -5587,8 +5600,14 @@ def put_project_members(
         user_ids = [_uuid.UUID(str(uid)) for uid in body.user_ids]
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, "user_ids must be valid UUID strings") from exc
+    try:
+        roles = {_uuid.UUID(str(uid)): role for uid, role in body.roles.items()}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "roles keys must be valid UUID strings") from exc
+    if len(roles) != len(body.roles):
+        raise HTTPException(400, "roles names the same user more than once")
 
-    return project_registry.set_root_members(db, user, project, user_ids)
+    return project_registry.set_root_members(db, user, project, user_ids, roles)
 
 
 @router.get("/{name}/statistics")
