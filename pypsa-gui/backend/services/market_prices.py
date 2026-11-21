@@ -463,9 +463,17 @@ def cache_dir() -> Path:
 
 
 def _cache_file(zone: str, year: int) -> Path:
-    # Only ever called after `check_request`: zone is a key of BIDDING_ZONES
-    # and year an int, so the path cannot leave the cache directory.
-    return cache_dir() / zone / f"{year}.json"
+    """The cache path of a year. Callers run `check_request` first; the path is
+    still built from the zone table's own code and an int, and must stay inside
+    the cache directory, so a request string never reaches the file system."""
+    code = BIDDING_ZONES[zone].code
+    root = os.path.realpath(cache_dir())
+    path = os.path.realpath(os.path.join(root, code, f"{int(year)}.json"))
+    if not path.startswith(root + os.sep):
+        raise MarketPriceError(
+            "invalid_zone", "Bidding zone: choose a zone from the list."
+        )
+    return Path(path)
 
 
 def _read_cache(zone: str, year: int) -> tuple[pd.Series, list[str], str] | None:
