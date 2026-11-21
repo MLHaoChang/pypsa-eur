@@ -488,9 +488,14 @@ def start_business_case(
             with lock:
                 if aborted():
                     return
-                if project_write_gate.requester_may_not_write(*(requester or (None, None))):
-                    finish("failed", error=project_write_gate.MESSAGE,
-                           error_code=project_write_gate.KIND)
+                if project_write_gate.requester_may_not_write(
+                    *(requester or (None, None))
+                ):
+                    finish(
+                        "failed",
+                        error=project_write_gate.MESSAGE,
+                        error_code=project_write_gate.KIND,
+                    )
                     return
                 state_update(**{REPORT_KEY: body})
                 finish("done", error=None, business_case_hash=bc.hash)

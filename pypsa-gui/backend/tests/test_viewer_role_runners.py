@@ -24,21 +24,19 @@ from tests.test_homer_supply_architecture_routes import _project as _sa_project
 from tests.test_homer_supply_architecture_routes import _url as _sa_url
 from tests.test_homer_supply_architecture_routes import _var_rows
 from tests.test_homer_supply_architecture_routes import _wait as _sa_wait
-from tests.test_homer_supply_architecture_routes import (  # noqa: F401 (fixture)
-    arch_solver,
-)
 from tests.test_study_runner import FakeSolver
 from tests.test_study_tornado_routes import _run as _study_done
 from tests.test_study_tornado_routes import _variant_rows, wait_tornado
-from tests.test_viewer_role_gate import (  # noqa: F401 (fixtures)
-    _grant,
-    _member,
-    _set_role,
-    as_user,
-    baseline,
-    helpers_state,
-    world,
-)
+from tests import test_homer_supply_architecture_routes as sa_fixtures
+from tests import test_viewer_role_gate as gate_fixtures
+from tests.test_viewer_role_gate import _grant, _member, _set_role
+
+# Fixtures borrowed by assignment, as `test_viewer_role_gate` borrows its own.
+arch_solver = sa_fixtures.arch_solver
+as_user = gate_fixtures.as_user
+baseline = gate_fixtures.baseline
+helpers_state = gate_fixtures.helpers_state
+world = gate_fixtures.world
 
 
 @pytest.fixture
@@ -57,8 +55,11 @@ class Member:
     def __init__(self, session_local, project_name: str | None = None, project_id=None):
         self.sl = session_local
         with session_local() as db:
-            project = (db.get(Project, uuid.UUID(str(project_id))) if project_id
-                       else db.query(Project).filter_by(name=project_name).one())
+            project = (
+                db.get(Project, uuid.UUID(str(project_id)))
+                if project_id
+                else db.query(Project).filter_by(name=project_name).one()
+            )
             root = project_acl.resolve_tree_root(db, project)
             self.project_id, self.root_id = project.id, root.id
             org, by = project.org_id, project.created_by
@@ -71,7 +72,8 @@ class Member:
     def remove(self, *_a) -> None:
         with self.sl() as db:
             db.query(ProjectMembership).filter_by(
-                project_id=self.root_id, user_id=self.id).delete()
+                project_id=self.root_id, user_id=self.id
+            ).delete()
             db.commit()
 
 
@@ -123,7 +125,10 @@ def test_a_role_that_cannot_be_read_refuses(world, monkeypatch):
         raise RuntimeError("database gone")
 
     monkeypatch.setattr(db_session, "SessionLocal", broken)
-    assert project_write_gate.requester_may_not_write(world["editor"], world["project"]) is True
+    assert (
+        project_write_gate.requester_may_not_write(world["editor"], world["project"])
+        is True
+    )
 
 
 # ── decision study run ───────────────────────────────────────────────────────
@@ -148,16 +153,24 @@ def _run_as(client, as_user, member, name, sid):
 
 @pytest.mark.parametrize("change", ["demote", "remove"])
 def test_a_study_run_whose_requester_loses_edit_mid_run_writes_nothing(
-    change, client, api_project, studies_on, monkeypatch, project_row,
-    project_storage_dir, sl, as_user,
+    change,
+    client,
+    api_project,
+    studies_on,
+    monkeypatch,
+    project_row,
+    project_storage_dir,
+    sl,
+    as_user,
 ):
     from services import solver_service
     from services.study import store
 
     name = f"vr-run-{change}"
     sid, member = _study_as_member(client, api_project, sl, name)
-    monkeypatch.setattr(solver_service, "run_simulation",
-                        FakeSolver(getattr(member, change)))
+    monkeypatch.setattr(
+        solver_service, "run_simulation", FakeSolver(getattr(member, change))
+    )
     _c, rec = _run_as(client, as_user, member, name, sid)
     assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
     assert rec["error"].startswith(KIND) and rec["solved"] == []
@@ -175,7 +188,13 @@ def test_a_study_run_whose_requester_loses_edit_mid_run_writes_nothing(
 
 
 def test_a_study_run_of_an_editor_who_stays_one_is_saved(
-    client, api_project, studies_on, monkeypatch, project_storage_dir, sl, as_user,
+    client,
+    api_project,
+    studies_on,
+    monkeypatch,
+    project_storage_dir,
+    sl,
+    as_user,
 ):
     from services import solver_service
     from services.study import store
@@ -188,7 +207,13 @@ def test_a_study_run_of_an_editor_who_stays_one_is_saved(
 
 
 def test_a_study_run_refused_before_its_first_fork_creates_none(
-    client, api_project, studies_on, monkeypatch, project_row, sl, as_user,
+    client,
+    api_project,
+    studies_on,
+    monkeypatch,
+    project_row,
+    sl,
+    as_user,
 ):
     from services import solver_service
     from services.study import runner as R
@@ -214,7 +239,13 @@ def test_a_study_run_refused_before_its_first_fork_creates_none(
 
 
 def test_a_tornado_whose_requester_is_demoted_mid_run_saves_nothing(
-    client, api_project, studies_on, monkeypatch, project_storage_dir, sl, as_user,
+    client,
+    api_project,
+    studies_on,
+    monkeypatch,
+    project_storage_dir,
+    sl,
+    as_user,
 ):
     from services import solver_service
     from services.study import findings as F
@@ -241,7 +272,13 @@ def test_a_tornado_whose_requester_is_demoted_mid_run_saves_nothing(
 
 
 def test_supply_architectures_whose_requester_is_demoted_mid_run_save_nothing(
-    client, studies_on, install_network, arch_solver, sl, as_user, monkeypatch,  # noqa: F811
+    client,
+    studies_on,
+    install_network,
+    arch_solver,
+    sl,
+    as_user,
+    monkeypatch,
 ):
     from services import project_registry, solver_service
     from services.study import supply_architecture_runner as SAR
@@ -260,7 +297,8 @@ def test_supply_architectures_whose_requester_is_demoted_mid_run_save_nothing(
     assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
     with sl() as db:
         base_dir = project_registry.project_dir(
-            db.query(Project).filter_by(name="vr-sa").one())
+            db.query(Project).filter_by(name="vr-sa").one()
+        )
     assert SAR._load_saved(base_dir, sid) is None
     assert _var_rows(sl, "vr-sa") == []
     assert len(arch_solver.calls) == 1  # stopped before the second fork
@@ -275,7 +313,9 @@ def _ic_run(world, change: str | None):
     from tests.test_investment_case_runner import _Cfg
 
     member = Member(world["session_local"], project_id=world["project"])
-    state: dict = {"solver_config": _Cfg(S.to_finance_case("s2").inputs.model_dump(mode="json"))}
+    state: dict = {
+        "solver_config": _Cfg(S.to_finance_case("s2").inputs.model_dump(mode="json"))
+    }
 
     def build():
         if change:
@@ -287,9 +327,14 @@ def _ic_run(world, change: str | None):
         thread.start()
         thread.join(timeout=60)
 
-    start_investment_case(None, build_case=build, solver_state=state,
-                          state_update=state.update, publish_study=publish,
-                          requester=(member.id, member.project_id))
+    start_investment_case(
+        None,
+        build_case=build,
+        solver_state=state,
+        state_update=state.update,
+        publish_study=publish,
+        requester=(member.id, member.project_id),
+    )
     return state
 
 
@@ -308,7 +353,12 @@ def test_an_investment_case_of_an_editor_who_stays_one_is_stored(world):
 
 
 def test_a_business_case_whose_requester_is_demoted_stores_no_report(
-    client, api_project, install_network, monkeypatch, session_state, sl,
+    client,
+    api_project,
+    install_network,
+    monkeypatch,
+    session_state,
+    sl,
 ):
     import routers.results as RR
     from tests.test_business_case_routes import BC_URL, _bc, _bc_poll, _put, _with_ic
@@ -341,7 +391,11 @@ def test_a_business_case_whose_requester_is_demoted_stores_no_report(
 
 @pytest.mark.parametrize("route", ["investment_case", "business_case"])
 def test_the_finance_routes_name_the_caller_and_the_project_at_start(
-    route, client, install_network, monkeypatch, sl,
+    route,
+    client,
+    install_network,
+    monkeypatch,
+    sl,
 ):
     import routers.results as RR
     from db.models import User
@@ -349,7 +403,9 @@ def test_the_finance_routes_name_the_caller_and_the_project_at_start(
 
     seen = []
     real = RR._run_requester
-    monkeypatch.setattr(RR, "_run_requester", lambda u: seen.append(real(u)) or seen[-1])
+    monkeypatch.setattr(
+        RR, "_run_requester", lambda u: seen.append(real(u)) or seen[-1]
+    )
     _with_ic(client, install_network, monkeypatch)
     if route == "business_case":
         assert _put(client, _bc()).status_code == 200
