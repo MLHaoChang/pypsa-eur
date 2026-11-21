@@ -265,6 +265,15 @@ key: an unknown, deleted or foreign one is the route's `not_found`.
   the `scene_apply_outcome_unknown` error kind, never a receipt.
 - **Cancel** reaches only the caller's own preview and carries no card
   (`GUIDED_UNCARDED`).
+- **Results** (`site_scene_results`, `chat_results.py`, S6a) runs the scene
+  results route's own `parse_query`, `gate` and `project` in the route's lock
+  order: the store lock for the scene read, released, then the network lock.
+  The gate alone decides whether a number is shown, so out-of-date results
+  carry only the gate's reason. Buildings and groups are named in
+  `feature_words`, never by scene id or model uid. `building` narrows to one,
+  matched exactly, and an ambiguous or unknown word is `invalid_input`. Whole
+  items are cut to `MAX_ITEMS` and the answer to `MAX_READ_BYTES`, with every
+  cut named in `truncated`.
 - **Per-turn block.** The browser's `ui_context.site_scene` hint only names the
   Site. The `[site 3d]` lines in the per-turn block (`compose._format_ui_context`,
   D11's frozen block) come from a server re-read.
