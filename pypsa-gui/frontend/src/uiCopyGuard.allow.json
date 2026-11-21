@@ -1,0 +1,331 @@
+[
+  {
+    "file": "layout/PropertiesPanel.tsx",
+    "text": "MC",
+    "surface": "Properties panel, Generator card meta line (Expert; Guided field drawer reuses the panel)",
+    "reason": "\"MC\" abbreviates marginal cost (“· MC 40 €/MWh”); held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Plain words come with the properties-blank-form fix.",
+    "fix": ".scratch/properties-blank-form/issues/01-edit-form-opens-blank.md"
+  },
+  {
+    "file": "layout/PropertiesPanel.tsx",
+    "text": "p_set",
+    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
+    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "layout/PropertiesPanel.tsx",
+    "text": "p_nom",
+    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
+    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "layout/PropertiesPanel.tsx",
+    "text": "e_nom",
+    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
+    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "layout/PropertiesPanel.tsx",
+    "text": "s_nom",
+    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
+    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "layout/PropertiesPanel.tsx",
+    "text": "v_nom",
+    "surface": "Properties panel asset cards and their quick-edit labels (Expert; Guided field drawer reuses the panel)",
+    "reason": "Field labels and a profile note use model names; held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Renamed when the cards render CatalogueField.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "layout/properties/cardKit.tsx",
+    "text": "grid_import",
+    "surface": "Properties panel, Link card, Energy Hub role tip (Expert; Guided field drawer reuses it)",
+    "reason": "The role dropdown still lists the raw role ids (EH_LINK_ROLES), and the tip names the one it explains; both get plain role names together.",
+    "fix": ".scratch/template-e2e/issues/05-raw-names-in-ui.md"
+  },
+  {
+    "file": "pages/SolverSettings.tsx",
+    "text": "p_nom",
+    "surface": "Solver settings panel (Expert)",
+    "reason": "Help text and option labels name model columns; held by open PR #1757. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/SolverSettings.tsx",
+    "text": "committable=",
+    "surface": "Solver settings panel (Expert)",
+    "reason": "Help text and option labels name model columns; held by open PR #1757. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/SolverSettings.tsx",
+    "text": "co2_emissions",
+    "surface": "Solver settings panel (Expert)",
+    "reason": "Help text and option labels name model columns; held by open PR #1757. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/SolverSettings.tsx",
+    "text": "carrier",
+    "surface": "Solver settings panel (Expert)",
+    "reason": "Help text and option labels name model columns; held by open PR #1757. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/SolverSettings.tsx",
+    "text": "marginal_cost",
+    "surface": "Solver settings panel (Expert)",
+    "reason": "Help text and option labels name model columns; held by open PR #1757. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/SolverSettings.tsx",
+    "text": "sub_network",
+    "surface": "Solver settings panel (Expert)",
+    "reason": "Help text and option labels name model columns; held by open PR #1757. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/SolverSettings.tsx",
+    "text": "p_set",
+    "surface": "Solver settings panel (Expert)",
+    "reason": "Help text and option labels name model columns; held by open PR #1757. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/SolverSettings.tsx",
+    "text": "p_max_pu",
+    "surface": "Solver settings panel (Expert)",
+    "reason": "Help text and option labels name model columns; held by open PR #1757. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/hubDesign/delegate.ts",
+    "text": "grid_import",
+    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
+  },
+  {
+    "file": "pages/hubDesign/delegate.ts",
+    "text": "outage_rate_value",
+    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
+  },
+  {
+    "file": "pages/hubDesign/delegate.ts",
+    "text": "mttr_hours",
+    "surface": "Site card fix requests sent to the assistant, shown in the chat transcript (Guided)",
+    "reason": "The request tells the assistant which tool and fields to write; it shows in the chat as the user’s message. Plain names in chat requests come with the chat side of the catalogue.",
+    "fix": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
+  },
+  {
+    "file": "pages/modelHorizon/StepPeriodEconomics.tsx",
+    "text": "discount_rate",
+    "surface": "Model horizon wizard, period economics step (Expert)",
+    "reason": "A field label and the CAPEX budget formula name model columns; held by open PR #1795. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/modelHorizon/StepPeriodEconomics.tsx",
+    "text": "overnight_cost",
+    "surface": "Model horizon wizard, period economics step (Expert)",
+    "reason": "A field label and the CAPEX budget formula name model columns; held by open PR #1795. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/modelHorizon/StepPeriodEconomics.tsx",
+    "text": "p_nom",
+    "surface": "Model horizon wizard, period economics step (Expert)",
+    "reason": "A field label and the CAPEX budget formula name model columns; held by open PR #1795. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/modelHorizon/StepPeriodEconomics.tsx",
+    "text": "build_year",
+    "surface": "Model horizon wizard, period economics step (Expert)",
+    "reason": "A field label and the CAPEX budget formula name model columns; held by open PR #1795. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/AggregatedOverview.tsx",
+    "text": "marginal_cost",
+    "surface": "Results, Overview tab (Expert only, multi-period runs)",
+    "reason": "The OPEX definition is a formula over model columns. Results formulas are reworded with the rename diff table so one word names one thing.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/CapacityExpansion.tsx",
+    "text": "overnight_cost",
+    "surface": "Results, Capacity expansion tab (Expert only)",
+    "reason": "The CAPEX column definitions are formulas over model columns. Results formulas are reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/CapacityExpansion.tsx",
+    "text": "build_year",
+    "surface": "Results, Capacity expansion tab (Expert only)",
+    "reason": "The CAPEX column definitions are formulas over model columns. Results formulas are reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/CapacityExpansion.tsx",
+    "text": "capital_cost",
+    "surface": "Results, Capacity expansion tab (Expert only)",
+    "reason": "The CAPEX column definitions are formulas over model columns. Results formulas are reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/Curtailment.tsx",
+    "text": "p_max_pu",
+    "surface": "Results, Curtailment tab (Expert only)",
+    "reason": "The curtailment definition is a formula over model columns. Results formulas are reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/Economics.tsx",
+    "text": "marginal_cost",
+    "surface": "Results, Asset economics tab (Expert only)",
+    "reason": "The cost column definitions are formulas over model columns. Results formulas are reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/Economics.tsx",
+    "text": "capital_cost",
+    "surface": "Results, Asset economics tab (Expert only)",
+    "reason": "The cost column definitions are formulas over model columns. Results formulas are reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/Economics.tsx",
+    "text": "fom_cost",
+    "surface": "Results, Asset economics tab (Expert only)",
+    "reason": "The cost column definitions are formulas over model columns. Results formulas are reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/Economics.tsx",
+    "text": "overnight_cost",
+    "surface": "Results, Asset economics tab (Expert only)",
+    "reason": "The cost column definitions are formulas over model columns. Results formulas are reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/LoadFlow.tsx",
+    "text": "co2_emissions",
+    "surface": "Results, Load Flow tab (Expert only)",
+    "reason": "Column headers, a \"Gen MC\" (generator marginal cost) header and formula tips name model columns; held by open PR #1801. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/LoadFlow.tsx",
+    "text": "s_nom",
+    "surface": "Results, Load Flow tab (Expert only)",
+    "reason": "Column headers, a \"Gen MC\" (generator marginal cost) header and formula tips name model columns; held by open PR #1801. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/LoadFlow.tsx",
+    "text": "p_nom",
+    "surface": "Results, Load Flow tab (Expert only)",
+    "reason": "Column headers, a \"Gen MC\" (generator marginal cost) header and formula tips name model columns; held by open PR #1801. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/LoadFlow.tsx",
+    "text": "start_up_cost",
+    "surface": "Results, Load Flow tab (Expert only)",
+    "reason": "Column headers, a \"Gen MC\" (generator marginal cost) header and formula tips name model columns; held by open PR #1801. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/LoadFlow.tsx",
+    "text": "shut_down_cost",
+    "surface": "Results, Load Flow tab (Expert only)",
+    "reason": "Column headers, a \"Gen MC\" (generator marginal cost) header and formula tips name model columns; held by open PR #1801. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/LoadFlow.tsx",
+    "text": "min_up_time",
+    "surface": "Results, Load Flow tab (Expert only)",
+    "reason": "Column headers, a \"Gen MC\" (generator marginal cost) header and formula tips name model columns; held by open PR #1801. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/LoadFlow.tsx",
+    "text": "v_nom",
+    "surface": "Results, Load Flow tab (Expert only)",
+    "reason": "Column headers, a \"Gen MC\" (generator marginal cost) header and formula tips name model columns; held by open PR #1801. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/LoadFlow.tsx",
+    "text": "curtailment_cost",
+    "surface": "Results, Load Flow tab (Expert only)",
+    "reason": "Column headers, a \"Gen MC\" (generator marginal cost) header and formula tips name model columns; held by open PR #1801. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/LoadFlow.tsx",
+    "text": "MC",
+    "surface": "Results, Load Flow tab (Expert only)",
+    "reason": "Column headers, a \"Gen MC\" (generator marginal cost) header and formula tips name model columns; held by open PR #1801. Reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "pages/results/StorageCycling.tsx",
+    "text": "max_hours",
+    "surface": "Results, Storage cycling tab (Expert only)",
+    "reason": "The cycle definition is a formula over model columns. Results formulas are reworded with the rename diff table.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "utils/decisionVocabulary.ts",
+    "text": "p_nom",
+    "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "utils/decisionVocabulary.ts",
+    "text": "max_hours",
+    "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "utils/decisionVocabulary.ts",
+    "text": "efficiency_store",
+    "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "utils/decisionVocabulary.ts",
+    "text": "efficiency_dispatch",
+    "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "utils/decisionVocabulary.ts",
+    "text": "grid_import",
+    "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  },
+  {
+    "file": "utils/decisionVocabulary.ts",
+    "text": "p_set",
+    "surface": "Decision study Verdict and Intake, the technical subtitle under a plain label (Guided and Expert)",
+    "reason": "The technical line under each plain label is mirrored from the backend vocabulary table (gate S8 BC-S8-3); it moves to the catalogue’s plain names with the word maps.",
+    "fix": ".scratch/expert-catalogue/issues/03-expert-panels-mode-parity.md"
+  }
+]
