@@ -18,6 +18,9 @@ export type GateDecision =
   | { kind: 'serve-login' }
   | { kind: 'redirect'; location: string }
 
+/** Pages an anonymous user must reach to finish onboarding. Exact match only. */
+export const ANON_SPA_PATHS: ReadonlySet<string> = new Set(['/set-password', '/reset-password'])
+
 export function isStaticAsset(urlPath: string): boolean {
   // The results walk pauses on this dev route. Classifying it as a document
   // makes the auth gate answer with login HTML before the pause can run.
@@ -66,6 +69,7 @@ export function decideGateRoute(input: {
   }
 
   if (urlPath === '/spa.html') return { kind: 'redirect', location: '/' }
+  if (ANON_SPA_PATHS.has(urlPath)) return { kind: 'serve-spa' }
   return { kind: 'serve-login' }
 }
 

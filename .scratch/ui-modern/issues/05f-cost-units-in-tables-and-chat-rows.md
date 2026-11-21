@@ -3,7 +3,7 @@
 
 # Cost units on tonne assets in the BottomPanel and the chat rows
 
-Status: needs-triage
+Status: ready-for-agent
 Gated: GK B, UX.
 Type: bug
 Parent: 05d (#1565)
@@ -18,3 +18,7 @@ The edit drawer, the creation form and Economics → Asset costs show per-tonne 
 
 - A cost cell, chip or row for an asset on a tonne bus reads per tonne (scale 1); an energy-bus asset is unchanged.
 - A test pins one of each.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Still true: `ParameterMemory.tsx` still reads the class-level spec. Blocked by 05d: merged (#1565), so unblocked. Gated: GK B and UX.

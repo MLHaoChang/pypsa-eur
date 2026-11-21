@@ -103,7 +103,7 @@ export default function VintagePeriodBoundsModal({ componentClass, name, onClose
           throw new Error(`Period ${r.period}: Max "${r.max}" is not a number`)
         }
         if (minNum != null && maxNum != null && minNum > maxNum) {
-          throw new Error(`Period ${r.period}: Min (${minNum}) > Max (${maxNum})`)
+          throw new Error(`Period ${r.period}: the minimum (${minNum}) is above the maximum (${maxNum}).`)
         }
         const entry: { p_nom_min?: number; p_nom_max?: number } = {}
         if (minNum != null) entry.p_nom_min = minNum
@@ -160,8 +160,8 @@ export default function VintagePeriodBoundsModal({ componentClass, name, onClose
           For each investment period, set a lower / upper bound on the capacity
           the optimiser can build in that period. Leave both empty for periods
           with no constraint. At solve time the asset is expanded into one
-          vintage row per period (build_year = period), each carrying its own
-          bounds — the optimiser then sizes each vintage independently.
+          vintage row per period, built in that period and carrying its own
+          bounds. The optimiser then sizes each vintage independently.
         </p>
 
         {periods.length === 0 ? (

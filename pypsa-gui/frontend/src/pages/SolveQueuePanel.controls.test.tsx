@@ -47,7 +47,7 @@ const cancelQueuedMutate = vi.fn()
 const requeueMutate = vi.fn()
 const dismissMutate = vi.fn()
 
-vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState }))
+vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState, useIsSuperAdmin: () => true }))
 
 vi.mock('../store/uiStore', () => ({
   useUIStore: () => ({ currentProject: null, openTabs: [], markProjectSaved: vi.fn() }),

@@ -210,11 +210,20 @@ def put_series(db: DBSession, org_id: UUID, name: str, series: pd.Series, meta: 
 
 
 def _row_for(db: DBSession, org_id: UUID, ref: PriceSeriesRef) -> LibraryItem:
-    row = db.scalars(select(LibraryItem).where(
-        LibraryItem.org_id == org_id, LibraryItem.kind == KIND,
-        LibraryItem.name == ref.id, LibraryItem.version == ref.version)).first()
+    return _row(db, org_id, ref.id, ref.version)
+
+
+def _row(db: DBSession, org_id: UUID, name: str, version: int) -> LibraryItem:
+    row = db.scalars(
+        select(LibraryItem).where(
+            LibraryItem.org_id == org_id,
+            LibraryItem.kind == KIND,
+            LibraryItem.name == name,
+            LibraryItem.version == version,
+        )
+    ).first()
     if row is None:
-        raise LibraryRefNotFound(f"no series {ref.id!r} v{ref.version} in this org")
+        raise LibraryRefNotFound(f"no series '{name}' v{version} in this org")
     return row
 
 
@@ -240,33 +249,90 @@ def ref_for(db: DBSession, org_id: UUID, name: str, version: int) -> PriceSeries
     return None if row is None else _ref(row)
 
 
-def resolve(db: DBSession, org_id: UUID, ref: PriceSeriesRef, *, root: Path | None = None) -> pd.Series:
-    """Return exactly the series `ref` names; refuse any hash mismatch."""
-    row = _row_for(db, org_id, ref)
-    if ref.hash != row.hash:
-        raise LibraryRefStale(f"ref hash for {ref.id!r} v{ref.version} does not match the Library")
+def payload_bytes(
+    db: DBSession,
+    org_id: UUID,
+    name: str,
+    version: int,
+    digest: str,
+    *,
+    root: Path | None = None,
+) -> bytes:
+    """The canonical bytes of `name` v`version` in `org_id`'s Library, checked
+    against `digest`; refuse any mismatch."""
+    row = _row(db, org_id, name, version)
+    if digest != row.hash:
+        raise LibraryRefStale(
+            f"ref hash for '{name}' v{version} does not match the Library"
+        )
     try:
         path = library_file(root or _default_root(), org_id, row.path)
     except ValueError as exc:
-        raise LibraryRefStale(f"Library path for {ref.id!r} v{ref.version} points outside "
-                              "the org's Library directory") from exc
+        raise LibraryRefStale(
+            f"Library path for '{name}' v{version} points outside "
+            "the org's Library directory"
+        ) from exc
     try:
         data = gzip.decompress(path.read_bytes())
     except FileNotFoundError as exc:
-        raise LibraryRefStale(f"Library file for {ref.id!r} v{ref.version} is missing") from exc
+        raise LibraryRefStale(
+            f"Library file for '{name}' v{version} is missing"
+        ) from exc
     except (OSError, EOFError, zlib.error) as exc:  # BadGzipFile is an OSError
-        raise LibraryRefStale(f"Library file for {ref.id!r} v{ref.version} is unreadable "
-                              f"({type(exc).__name__})") from exc
+        raise LibraryRefStale(
+            f"Library file for '{name}' v{version} is unreadable ({type(exc).__name__})"
+        ) from exc
     if hashlib.sha256(data).hexdigest() != row.hash:
-        raise LibraryRefStale(f"Library file for {ref.id!r} v{ref.version} was modified")
-    meta = json.loads(row.meta_json or "{}")
-    tz = meta.get("tz")
+        raise LibraryRefStale(f"Library file for '{name}' v{version} was modified")
+    return data
+
+
+def _series_from(data: bytes, name: str) -> pd.Series:
+    """The series in canonical bytes; the zone comes from their first line."""
+    first = data.split(b"\n", 1)[0].decode("utf-8")
+    tz = first.removeprefix("# tz=") if first.startswith("# tz=") else "naive"
     frame = pd.read_csv(io.BytesIO(data), dtype={"value": float}, comment="#")
-    if tz:
-        idx = pd.DatetimeIndex(pd.to_datetime(frame["timestamp_utc"], utc=True)).tz_convert(tz)
+    if tz != "naive":
+        idx = pd.DatetimeIndex(
+            pd.to_datetime(frame["timestamp_utc"], utc=True)
+        ).tz_convert(tz)
     else:
         idx = pd.DatetimeIndex(pd.to_datetime(frame["timestamp_utc"]))
-    return pd.Series(frame["value"].to_numpy(dtype=float), index=idx, name=ref.id)
+    return pd.Series(frame["value"].to_numpy(dtype=float), index=idx, name=name)
+
+
+def resolve(
+    db: DBSession,
+    org_id: UUID,
+    ref: PriceSeriesRef,
+    *,
+    root: Path | None = None,
+    project_dir: Path | None = None,
+) -> pd.Series:
+    """Return exactly the series `ref` names; refuse any hash mismatch.
+
+    With `project_dir`, the project's own copy is read first (project-io 03),
+    then the org's Library. A copy that does not hash to the ref is never
+    read; when the Library cannot give the series either, the refusal names
+    the modified copy."""
+    from services.library import project_copies as PC
+
+    modified = False
+    if project_dir is not None:
+        pin = {"kind": KIND, "id": ref.id, "version": ref.version, "hash": ref.hash}
+        data, modified = PC.read(project_dir, pin)
+        if data is not None:
+            return _series_from(data, ref.id)
+    try:
+        data = payload_bytes(db, org_id, ref.id, ref.version, ref.hash, root=root)
+    except (LibraryRefNotFound, LibraryRefStale) as exc:
+        if modified:
+            raise LibraryRefStale(
+                f"the project's copy of '{ref.id}' v{ref.version} was "
+                f"modified, and the Library cannot give it ({exc})"
+            ) from exc
+        raise
+    return _series_from(data, ref.id)
 
 
 def list_series(db: DBSession, org_id: UUID) -> list[PriceSeriesRef]:

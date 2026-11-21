@@ -82,7 +82,9 @@ export interface StageStatus {
   selected_hours: number[]
   converged_hours: number[]
   bundles: Record<string, string>
-  stages: Record<StageName, { state: StageState; done: number; total: number }>
+  // `elapsed_s`: seconds since the running stage began, on the running stage
+  // only, and only when the run recorded its start (pio/08).
+  stages: Record<StageName, { state: StageState; done: number; total: number; elapsed_s?: number }>
   // Spec stage 6 (increment 6): hours whose PowerFactory export has been read
   // back, with the verdict. Absent on a status written before the field.
   readback?: Record<string, ReadbackShort>

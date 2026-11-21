@@ -13,6 +13,8 @@ import json
 import pathlib
 import zipfile
 
+from tests.bundle_util import refresh_manifest
+
 import pytest
 
 from services import site_service as ss
@@ -172,7 +174,7 @@ def test_an_imported_pointer_that_is_not_a_plain_id_is_never_followed(client, en
                 data = json.dumps({**pointer, "generation": generation}).encode()
             zf.writestr(item, data)
     r = client.post("/api/projects/import_bundle?name=hostile",
-                    files={"file": ("x.pypsaproj.zip", out.getvalue(), "application/zip")})
+                    files={"file": ("x.pypsaproj.zip", refresh_manifest(out.getvalue()), "application/zip")})
     assert r.status_code in (200, 201), r.text
     hostile = r.json().get("imported") or r.json().get("name") or "hostile"
     r = client.get(f"/api/projects/{hostile}/sites/campus/scene")
@@ -197,7 +199,7 @@ def test_a_traversal_pointer_is_refused_even_with_a_matching_decoy(client, enabl
             zf.writestr(item, data)
         zf.writestr("sites/campus/scene/x/generation.json", real)
     r = client.post("/api/projects/import_bundle?name=decoy",
-                    files={"file": ("x.pypsaproj.zip", out.getvalue(), "application/zip")})
+                    files={"file": ("x.pypsaproj.zip", refresh_manifest(out.getvalue()), "application/zip")})
     assert r.status_code in (200, 201), r.text
     imported = r.json().get("imported") or r.json().get("name") or "decoy"
     decoy = project_storage_dir(imported) / ss.SITES_DIR / "campus" / "scene" / "x" / "generation.json"

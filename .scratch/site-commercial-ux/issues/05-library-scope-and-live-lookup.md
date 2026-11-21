@@ -3,7 +3,8 @@
 
 # 05 Commercial library: no "Save to library", no shared scope, no "update available", no live tariff lookup (K2, L1–L5)
 
-Status: needs-triage
+Status: ready-for-agent
+Owner: SCU05-L15-1.
 Blocked by: 03 for the inline pickers
 Design: `.scratch/project-workflow/library-and-live-lookup.md` §1–§3 and §5; commercial-finance.md §7 row K2. Related in flight: `project-io/03` (#1689: a project keeps a copy of each pinned payload).
 Source: gap review 2026-11-21, design map.

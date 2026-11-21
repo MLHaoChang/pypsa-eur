@@ -427,6 +427,23 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
     template = read_template(d)
     if template is not None:
         out["template_ledger"] = template
+        # What the last study run assumed (template-e2e 08), from its record;
+        # a record from before the list existed, or a stored study report
+        # whose record is gone, says "not recorded".
+        # The study record is the open project's; another project's is not read.
+        from services.pypsa_service import PyPSAService
+
+        try:
+            is_open = str(PyPSAService.get_active_context().project_uuid or "") \
+                == str(getattr(project, "uuid", ""))
+        except Exception:                                   # noqa: BLE001 - no open project
+            is_open = False
+        record = results_router._state.get("eh_study") or {}
+        if is_open and record.get("report") is not None:
+            out["run_assumptions"] = {"recorded": "assumptions" in record,
+                                      "rows": record.get("assumptions") or []}
+        elif is_open and _current_eh_report() is not None:
+            out["run_assumptions"] = {"recorded": False, "rows": []}
     if (d / "island_config.json").is_file() \
             or (d / "campus_electrical" / "run" / "campus_freq_events.csv").is_file():
         import importlib
@@ -453,7 +470,8 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
         row = SimpleNamespace(name=project.name, storage_path=str(d), project_kind=None,
                               org_id=project.org_id, id=project.uuid)
         try:
-            out["grid_readiness"] = grid_readiness_for(row)
+            # The saved project, as the report's other chapters read it (walkthrough 04).
+            out["grid_readiness"] = grid_readiness_for(row, source="saved")
         except Exception as exc:                            # noqa: BLE001 - stated as not established
             logger.info("reports: grid readiness not read: %s", exc)
             out["grid_readiness"] = {}
@@ -528,8 +546,6 @@ def create_report(body: CreateReportBody,
     Build and store the evidence-only report (v1) from the session's current
     result state. Returns the `ReportMeta` fields plus `document`.
     """
-    from services.reports.assemble import DEFAULT_TITLE, evidence_only_document
-
     if body.mode != "evidence_only":
         raise HTTPException(400, {
             "error_kind": "report_mode_not_supported",
@@ -540,7 +556,17 @@ def create_report(body: CreateReportBody,
 
     evidence, eh_report = _current_evidence(project)
     figure_pngs = _render_figures(eh_report, project.directory, charts=not assistant_strict_active())
-    title = (body.title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
+    return store_evidence_only_report(project, evidence, figure_pngs, body.title)
+
+
+def store_evidence_only_report(project: AuthorizedProject, evidence: Evidence,
+                               figure_pngs: dict, title: str | None) -> dict:
+    """Build the evidence-only document from `evidence`, store it as v1 with
+    its figures and return the `ReportMeta` fields plus `document`. The one
+    builder behind `POST /{name}/reports` and the no-LLM `Generate report`."""
+    from services.reports.assemble import DEFAULT_TITLE, evidence_only_document
+
+    title = (title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
     doc = evidence_only_document(evidence, title=title,
                                  report_id=store.new_report_id(),
                                  figure_pngs=figure_pngs)

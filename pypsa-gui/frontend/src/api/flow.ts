@@ -31,7 +31,7 @@ export type FlowFreshness = 'not_run' | 'running' | 'fresh' | 'stale' | 'uncompa
 
 export type FlowItemSource =
   | 'validation' | 'eh_study' | 'eh_readiness' | 'commercial' | 'library' | 'template' | 'flow'
-  | 'loadflow'
+  | 'loadflow' | 'run_defaults'
 
 /** Where an item's fix lives. `panel` is a `SlidePanel` id, or null for the
  *  component's own Properties (`component` + `entity`); unknowns are null. */

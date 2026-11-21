@@ -15,6 +15,7 @@ import {
   usePauseQueue, useResumeQueue, useCancelQueued, useRequeueJob, useDismissJob,
 } from '../hooks/useSolveQueue'
 import { useAuth } from '../auth/AuthProvider'
+import { signFirstEuro } from '../utils/format'
 
 const STATUS_META: Record<SolveJobStatus, { label: string; cls: string; Icon: typeof Clock }> = {
   queued:      { label: 'Queued',      cls: 'text-muted bg-panel border-border',                Icon: Clock },
@@ -32,13 +33,13 @@ const STATUS_META: Record<SolveJobStatus, { label: string; cls: string; Icon: ty
 // panel only ever needs the visible tail.
 const LIVE_LOG_CAP = 2000
 
-function fmtObjective(v: number | null): string {
+export function fmtObjective(v: number | null): string {
   if (v == null || !isFinite(v)) return '—'
   const abs = Math.abs(v)
-  if (abs >= 1e9) return `€${(v / 1e9).toFixed(2)} B`
-  if (abs >= 1e6) return `€${(v / 1e6).toFixed(2)} M`
-  if (abs >= 1e3) return `€${(v / 1e3).toFixed(1)} k`
-  return `€${v.toFixed(0)}`
+  if (abs >= 1e9) return signFirstEuro(v, `${(abs / 1e9).toFixed(2)} B`)
+  if (abs >= 1e6) return signFirstEuro(v, `${(abs / 1e6).toFixed(2)} M`)
+  if (abs >= 1e3) return signFirstEuro(v, `${(abs / 1e3).toFixed(1)} k`)
+  return signFirstEuro(v, abs.toFixed(0))
 }
 
 function StatusBadge({ status }: { status: SolveJobStatus }) {
@@ -299,9 +300,12 @@ function JobLogPanel({ jobId, live }: { jobId: string; live: boolean }) {
       {lines.length === 0 ? (
         <div className="px-3 py-2 text-[11px] text-muted">No log lines for this job.</div>
       ) : (
-        <pre className="px-3 py-2 max-h-56 overflow-auto text-[10px] leading-snug font-mono text-muted bg-bg-2/40 border-t border-border whitespace-pre-wrap">
-          {lines.join('\n')}
-        </pre>
+        <details className="border-t border-border" data-testid="job-log-details">
+          <summary className="px-3 py-1.5 text-[11px] text-muted cursor-pointer hover:text-text">Details ({lines.length} log lines)</summary>
+          <pre className="px-3 py-2 max-h-56 overflow-auto text-[10px] leading-snug font-mono text-muted bg-bg-2/40 border-t border-border whitespace-pre-wrap">
+            {lines.join('\n')}
+          </pre>
+        </details>
       )}
     </>
   )

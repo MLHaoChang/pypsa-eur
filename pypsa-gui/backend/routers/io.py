@@ -11,7 +11,7 @@ from db.models import Session as SessionRow
 from db.session import get_db
 from deps import current_session
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from models.schemas import ImportSummary
+from models.schemas import ExcelImportSummary, ImportSummary
 from services import active_project, change_log_service
 from sqlalchemy.orm import Session as DBSession
 from services.pypsa_service import PyPSAService
@@ -449,53 +449,26 @@ async def import_excel(
     db: DBSession = Depends(get_db),
     session: SessionRow | None = Depends(current_session),
 ):
-    import openpyxl
+    """An older-layout workbook (PyPSA's own export, raw-named sheets) replaces the open network.
+
+    Read by the input workbook's reader (`services.excel_workbook.prepare`), which
+    reports what it cannot read. The input workbook itself is refused (422
+    ``import_as_new_project``, IMPORT-FLOW-1): it is previewed and imported as a
+    new project (`routers.workbook`).
+    """
+    from services import excel_workbook
+
     data = await read_capped(file)
-    component_map = {
-        "buses": "Bus", "generators": "Generator", "lines": "Line",
-        "links": "Link", "loads": "Load", "storage_units": "StorageUnit",
-        "stores": "Store", "transformers": "Transformer",
-    }
-
-    def parse(n):
-        wb = openpyxl.load_workbook(io.BytesIO(data))
-        if "network" in wb.sheetnames:
-            # Native PyPSA exports include network/snapshot/dynamic sheets.
-            # Keep their horizon and series; legacy custom component sheets
-            # continue through the existing parser below.
-            with tempfile.TemporaryDirectory() as directory:
-                native_file = pathlib.Path(directory) / "network.xlsx"
-                native_file.write_bytes(data)
-                _map_xlsx_strings(native_file, _unescape_formula, data_only=True)
-                n.import_from_excel(str(native_file), engine="openpyxl")
-        else:
-            for sheet_name in wb.sheetnames:
-                comp_class = component_map.get(sheet_name)
-                if comp_class is None:
-                    continue
-                ws = wb[sheet_name]
-                headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-                for row in ws.iter_rows(min_row=2, values_only=True):
-                    row_dict = dict(zip(headers, map(_unescape_formula, row)))
-                    name = row_dict.pop("name", row_dict.pop(headers[0], None))
-                    if name:
-                        try:
-                            n.add(comp_class, str(name), **{k: v for k, v in row_dict.items() if v is not None})
-                        except Exception:
-                            pass
-
-    n = _parse_candidate("Excel workbook", parse)
-    rederived = _own_costs_from_parts(n)
-    # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
-    from services.adequacy.eh_columns import normalise_eh_columns
-    normalise_eh_columns(n)
+    prep = excel_workbook.prepare(data, file.filename, new_project=False)
+    n = prep.network
+    n.name = "Untitled Project"
     with PyPSAService.get_lock():
         _replace_with(n)
-    summary = _build_summary(n)
+    summary = ExcelImportSummary(**_build_summary(n).model_dump(), report=prep.report.to_dict())
     change_log_service.log(
         "import", "Network", file.filename or "network.xlsx",
         f"Imported Excel '{file.filename}': {summary.buses} buses, {summary.generators} generators"
-        + _rederived_note(rederived),
+        + _rederived_note(prep.rederived),
     )
     _unbind_session(db, session)
     return summary

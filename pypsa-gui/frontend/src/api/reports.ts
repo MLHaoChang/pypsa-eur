@@ -180,7 +180,10 @@ export interface RegenerateSectionOptions {
   language?: string
 }
 
-export interface GenerateReportResponse { status: 'running'; report_id: string }
+/** `mode: 'plain'` (TE2E-16-PLAIN-1): no usable LLM profile, so the backend stored the
+ * evidence-only report built from the stored results and `status` is already `done`;
+ * no job runs. A written report answers `running` and carries no `mode`. */
+export interface GenerateReportResponse { status: 'running' | 'done'; report_id: string; mode?: 'plain' }
 export interface AbortGenerateResponse { status: ReportJobStatus; aborting: boolean }
 export interface RegenerateSectionResponse { status: 'running'; report_id: string; version: number }
 
@@ -421,7 +424,7 @@ export function reportJobErrorMessage(e: unknown, fallback = 'Request failed'): 
         return 'Nothing to report on yet: run a study first (the Energy Hub reference design or an adequacy study).'
       case 'missing_api_key':
       case 'sdk_not_installed':
-        return `No usable LLM profile: configure an LLM profile in Settings. (${e.detail.message})`
+        return 'Writing needs an LLM profile with a key, and none is set up yet.'
       case 'project_locked':
         return e.detail.message || 'The Project is being edited by another user.'
       default:

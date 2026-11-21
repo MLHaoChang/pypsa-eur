@@ -1,6 +1,6 @@
 # Exact values sheet and read caps: hardening after #1646
 
-Status: ready-for-agent
+Status: done (#1733)
 Blocked by: 01 (#1646)
 
 See `../spec.md` and the ask-1 ruling (X1–X6) in `01-reader-writer.md` ## Comments.

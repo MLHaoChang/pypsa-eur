@@ -648,6 +648,8 @@ def _with_member(data: bytes, member: str, body: bytes | None) -> bytes:
     """The bundle with `member` replaced (None: removed)."""
     import zipfile
 
+    from tests.bundle_util import refresh_manifest
+
     src = zipfile.ZipFile(io.BytesIO(data))
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as out:
@@ -656,7 +658,9 @@ def _with_member(data: bytes, member: str, body: bytes | None) -> bytes:
                 out.writestr(item, src.read(item))
         if body is not None:
             out.writestr(member, body)
-    return buf.getvalue()
+    return refresh_manifest(
+        buf.getvalue()
+    )  # the edit changes members, so the manifest is rebuilt (project-io 02)
 
 
 def test_a_bundle_without_solver_settings_derives_at_the_default_rate_and_says_so(
@@ -1023,6 +1027,31 @@ def test_the_annuity_refusal_names_only_the_priced_parts_lifetimes():
         "Storage 'bess2': its investment parts cannot be annuitised at rate 10 "
         "over 300 years. The open network is unchanged."
     )
+
+
+def test_a_new_project_import_s_refusal_says_nothing_was_imported():
+    """The Excel workbook's new-project path rewords the tail; every other caller keeps it byte for byte."""
+    from fastapi import HTTPException
+
+    from services.network_crud import rederive_imported_parts
+
+    def message(**kw):
+        n = _network()
+        n.storage_units.at["bess2", "inv_power_overnight"] = float("nan")
+        n.storage_units.at["bess2", "inv_power_lifetime"] = 50.0
+        n.storage_units.at["bess2", "inv_energy_lifetime"] = 300.0
+        with pytest.raises(HTTPException) as exc:
+            rederive_imported_parts(n, global_rate=10, **kw)
+        assert exc.value.detail["error_kind"] == "invalid_edit_value"
+        return exc.value.detail["message"]
+
+    head = "Storage 'bess2': its investment parts cannot be annuitised at rate 10 over 300 years. "
+    assert (
+        message()
+        == message(new_project=False)
+        == head + "The open network is unchanged."
+    )
+    assert message(new_project=True) == head + "Nothing was imported."
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), 10**400])

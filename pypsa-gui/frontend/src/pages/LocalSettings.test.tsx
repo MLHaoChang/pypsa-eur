@@ -199,3 +199,9 @@ describe('A8 — unredactable key disclosure', () => {
     expect(screen.queryByTestId('local-settings-key-unredactable')).toBeNull()
   })
 })
+
+// Issue 49: the assistant section only asks for the model settings as a super-admin.
+vi.mock('../auth/AuthProvider', async (orig) => ({
+  ...(await orig<typeof import('../auth/AuthProvider')>()),
+  useIsSuperAdmin: () => true,
+}))

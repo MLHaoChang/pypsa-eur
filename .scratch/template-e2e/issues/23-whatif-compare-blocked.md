@@ -3,7 +3,7 @@
 
 # 23 — A what-if case cannot be run or compared
 
-Status: needs-triage
+Status: ready-for-agent
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: blocks decision
 Journey fit: decide/compare: scenario → what-if → compare against base.
@@ -17,3 +17,7 @@ Expert Scenarios '+' creates a child project. On DC its Guided section 8 says 'N
 - A child scenario runs the same study and appears in Compare with its numbers matching the base for unchanged inputs.
 - The active scenario is shown; duplicate names give an error.
 - The scenario list is per project.
+
+## Triage (2026-11-20, master b7e5dee3)
+
+Checked by code reading only; the app was not re-run. Three slices (PR-SIZE-1): (a) a child scenario runs the same study and Compare shows its numbers (the 'Needs an Energy Hub site' refusal is still in `flow_scope.py`); (b) the active scenario is marked in the header and duplicate names give an error; (c) the scenario list is per project. Acceptance as above. Gated: GK B and UX. Blocked by: none.

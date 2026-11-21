@@ -1596,6 +1596,8 @@ class Turn:
         # reasons when twenty unavailable slots also have a review limitation;
         # a population's overflow is bounded, then counted (issue 10, S6a).
         limitations[:] = _fold_limitations(limitations)
+        from harness.calculations import scope_definition_hash
+
         answer_id = str(uuid.uuid4())
         record = {
             "version": 1,
@@ -1611,6 +1613,17 @@ class Turn:
             **({"predicates": checked} if checked else {}),
             "verdict": "limited" if limitations else "passed",
             "receipt": receipt,
+            # AA-10 S7: the definitions this answer's checked values were worded
+            # under; the answer route compares it with the current hash.
+            **(
+                {"definition_hash": recorded_hash}
+                if self.request_scope is not None
+                and self.request_evidence is not None
+                and not draft_failed
+                and (recorded_hash := scope_definition_hash(self.request_scope))
+                is not None
+                else {}
+            ),
             "expires_at": time.time() + records.RETENTION_SECONDS,
         }
         # One worker/locked network is the supported pilot. Check evidence once
