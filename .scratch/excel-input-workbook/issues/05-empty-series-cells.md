@@ -1,6 +1,6 @@
 # Empty time-series cells in the older Excel layouts
 
-Status: ready-for-agent
+Status: in-progress
 Blocked by: 01 (#1732)
 
 See `../spec.md`. Filed at GK B 68's request with its OK on #1732 @edb18b9eb8d20299221c8431059925190be5d42e. The gap predates #1732.

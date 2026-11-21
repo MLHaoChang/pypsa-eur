@@ -1094,6 +1094,152 @@ def test_a_bad_cell_in_a_pypsa_export_time_series_drops_that_series(tmp_path):
     assert list(res.network.generators_t.p_max_pu.columns) == ["G1"]
 
 
+def _three_steps(tmp_path, edit) -> "ReadResult":
+    """Ticket 05: `_two_gens()` over three time steps in PyPSA's layout, `edit(sheet, G1 col, G2 col)`, read."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=3, freq="h"))
+    n.add("Bus", "B1", v_nom=110.0)
+    n.add("Bus", "B2", v_nom=220.0)
+    n.add("Generator", "G1", bus="B1", p_nom=5.0, p_max_pu=[0.5, 0.6, 0.4])
+    n.add("Generator", "G2", bus="B1", p_nom=6.0, p_max_pu=[0.7, 0.8, 0.9])
+    path = _native(n, tmp_path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb["generators-p_max_pu"]
+    heads = [c.value for c in ws[1]]
+    edit(wb, ws, heads.index("G1") + 1, heads.index("G2") + 1)
+    wb.save(path)
+    return read_excel(path)
+
+
+def _no_nan_and_g1_whole(res) -> None:
+    """T4: no NaN reaches the model, and the full series is the sheet's, exactly."""
+    series = res.network.generators_t.p_max_pu
+    assert not series.isna().any().any()
+    assert series["G1"].tolist() == [0.5, 0.6, 0.4]
+
+
+def test_an_empty_cell_in_a_pypsa_export_series_drops_that_series(tmp_path):
+    res = _three_steps(
+        tmp_path, lambda wb, ws, g1, g2: setattr(ws.cell(3, g2), "value", None)
+    )
+    assert _um(res) == [
+        (
+            "generators-p_max_pu · G2",
+            "p_max_pu: 1 empty time step(s); the series was not read",
+        )
+    ]
+    assert list(res.network.generators_t.p_max_pu.columns) == ["G1"]
+    _no_nan_and_g1_whole(res)
+    assert (
+        res.network.generators.at["G2", "p_max_pu"] == 1.0
+    )  # its static value applies
+
+
+def test_a_series_empty_in_every_step_is_reported_with_the_full_count(tmp_path):
+    def edit(wb, ws, g1, g2):
+        for r in (2, 3, 4):
+            ws.cell(r, g2).value = None
+
+    res = _three_steps(tmp_path, edit)
+    assert _um(res) == [
+        (
+            "generators-p_max_pu · G2",
+            "p_max_pu: 3 empty time step(s); the series was not read",
+        )
+    ]
+    _no_nan_and_g1_whole(res)
+    assert "G2" not in res.network.generators_t.p_max_pu.columns
+
+
+def test_a_short_row_counts_its_missing_cell_as_empty(tmp_path):
+    def edit(wb, ws, g1, g2):
+        assert g2 == max(g1, g2)  # G2 is the last column, so its cell ends the row
+        ws.cell(4, g2).value = None
+
+    res = _three_steps(tmp_path, edit)
+    assert _um(res) == [
+        (
+            "generators-p_max_pu · G2",
+            "p_max_pu: 1 empty time step(s); the series was not read",
+        )
+    ]
+    _no_nan_and_g1_whole(res)
+
+
+def test_blank_rows_after_a_pypsa_export_series_report_nothing(tmp_path):
+    """T1: rows openpyxl returns past the data, all blank, are not time steps."""
+
+    def edit(wb, ws, g1, g2):
+        ws.append([None, None, None])
+        ws.append([None, None, None])
+        ws.cell(7, 1).value = None
+
+    res = _three_steps(tmp_path, edit)
+    assert _um(res) == []
+    assert sorted(res.network.generators_t.p_max_pu.columns) == ["G1", "G2"]
+    _no_nan_and_g1_whole(res)
+
+
+def test_a_row_with_values_but_no_time_step_refuses_the_sheet(tmp_path):
+    """T1: the sheet's first-column check already refuses it, so no asset is reported for it."""
+    res = _three_steps(tmp_path, lambda wb, ws, g1, g2: ws.append([None, 0.3, 0.3]))
+    assert _um(res) == [
+        (
+            "generators-p_max_pu",
+            "its first column is not the time steps of the snapshots sheet; the sheet was not read",
+        )
+    ]
+
+
+def test_a_series_with_an_empty_and_a_bad_cell_is_reported_once_as_bad(tmp_path):
+    """T3: the bad cell's text wins; the series is dropped once."""
+
+    def edit(wb, ws, g1, g2):
+        ws.cell(2, g2).value = None
+        ws.cell(3, g2, value="lots")
+
+    res = _three_steps(tmp_path, edit)
+    assert _um(res) == [
+        ("generators-p_max_pu · G2", "p_max_pu: “lots” is not a number")
+    ]
+    _no_nan_and_g1_whole(res)
+
+
+def test_a_cell_of_spaces_in_a_series_is_bad_not_empty(tmp_path):
+    """T6: a text of spaces reaches the number check."""
+    res = _three_steps(tmp_path, lambda wb, ws, g1, g2: ws.cell(3, g2, value="   "))
+    assert _um(res) == [("generators-p_max_pu · G2", "p_max_pu: “   ” is not a number")]
+    _no_nan_and_g1_whole(res)
+
+
+@pytest.mark.parametrize("how", ["refused", "dangling"])
+def test_an_asset_already_left_out_gets_no_second_row_for_its_series(tmp_path, how):
+    """T5: one row per asset; its blank series is not reported again."""
+
+    def edit(wb, ws, g1, g2):
+        ws.cell(3, g2).value = None
+        gens = wb["generators"]
+        heads = [c.value for c in gens[1]]
+        for r in range(2, gens.max_row + 1):
+            if gens.cell(r, 1).value == "G2":
+                if how == "refused":
+                    gens.cell(r, heads.index("p_nom") + 1, value="inf")
+                else:
+                    gens.cell(r, heads.index("bus") + 1, value="B2")
+        if how == "dangling":
+            buses = wb["buses"]
+            bh = [c.value for c in buses[1]]
+            for r in range(2, buses.max_row + 1):
+                if buses.cell(r, 1).value == "B2":
+                    buses.cell(r, bh.index("v_nom") + 1, value="inf")
+
+    res = _three_steps(tmp_path, edit)
+    rows = [src for src, _ in _um(res)]
+    assert not any(src.startswith("generators-p_max_pu") for src in rows), rows
+    assert "G2" not in res.network.generators.index
+    _no_nan_and_g1_whole(res)
+
+
 def _native_wb(tmp_path, edit):
     """`_native(_two_gens())` with `edit(workbook)` applied, then read."""
     path = _native(_two_gens(), tmp_path)
@@ -1173,15 +1319,24 @@ def test_a_series_sheet_that_is_not_a_varying_input_is_not_read(tmp_path, attr):
     assert (f"generators-{attr}", _NOT_TS) in _um(res)
 
 
-def test_a_short_or_blank_series_cell_in_pypsa_s_export_is_not_a_bad_cell(tmp_path):
+def test_a_short_or_blank_series_cell_in_pypsa_s_export_is_an_empty_step_not_a_bad_cell(
+    tmp_path,
+):
+    """Ticket 05: the blank is an empty time step (not a bad cell); the widened column is nothing."""
+
     def edit(wb):
         ws = wb["generators-p_max_pu"]
         ws["B2"] = None
         ws["D2"] = None  # widens the sheet past row 3
 
     res = _native_wb(tmp_path, edit)
-    assert _um(res) == []
-    assert sorted(res.network.generators_t.p_max_pu.columns) == ["G1", "G2"]
+    assert _um(res) == [
+        (
+            "generators-p_max_pu · G1",
+            "p_max_pu: 1 empty time step(s); the series was not read",
+        )
+    ]
+    assert list(res.network.generators_t.p_max_pu.columns) == ["G2"]
 
 
 def test_a_series_with_two_bad_cells_is_reported_once(tmp_path):
