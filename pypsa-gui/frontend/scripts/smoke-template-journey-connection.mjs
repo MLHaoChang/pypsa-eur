@@ -121,6 +121,9 @@ try {
   // the limit set above as its capacity, and 99.5 % efficiency.
   await page.getByRole('button', { name: 'Guided', exact: true }).click()
   await page.getByTestId('hub-rail-step-site').click()
+  // The Assumptions card opens collapsed (guided-results 03): open it to reach its rows.
+  const assumptions = page.locator('[data-testid="assumptions-toggle"][aria-expanded="false"]')
+  if (await assumptions.count()) await assumptions.click()
   await page.getByTestId('assumption-row').filter({ hasText: 'Import efficiency' })
     .getByTestId('assumption-edit').click()
   await page.getByTestId('field-drawer').waitFor()
