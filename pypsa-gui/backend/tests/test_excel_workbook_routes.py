@@ -801,6 +801,7 @@ def test_a_project_s_own_outage_columns_round_trip_with_nothing_left_out(
         40.0,
     ]
     n.storage_units.loc["s", ["outage_rate_value", "mttr_hours"]] = [0.02, 12.0]
+    n.add("Generator", "G2", bus="B1", p_nom=5.0)  # no outage values: blank cells, not a refusal
     install_network(n)
     session_ctx(client)
     assert client.post("/api/projects/WB Outages").status_code == 200
@@ -822,6 +823,7 @@ def test_a_project_s_own_outage_columns_round_trip_with_nothing_left_out(
         "EFORd",
         40.0,
     )
+    assert got.generators.loc["G2", ["outage_rate_value", "mttr_hours"]].isna().all()
     s = got.storage_units.loc["s"]
     assert (s["outage_rate_value"], s["mttr_hours"]) == (0.02, 12.0)
 

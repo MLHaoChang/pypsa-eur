@@ -1792,6 +1792,18 @@ def test_an_unknown_setting_row_is_reported(tmp_path):
     assert "discount_rate" not in res.sidecars["solver_config.json"]
 
 
+def test_a_discount_rate_in_another_unit_is_reported_not_read(tmp_path):
+    def fn(wb):
+        ws = wb[L.HORIZON]
+        ws.cell(_horizon_row(ws, "discount_rate"), 3).value = "fraction"
+
+    res = _edit(
+        _write(_network(False), tmp_path, sidecars={"solver_config.json": SOLVER}), fn
+    )
+    assert any(why.startswith("the unit must be “%”") for _, why in _um(res)), _um(res)
+    assert "discount_rate" not in res.sidecars.get("solver_config.json", {})
+
+
 def test_a_second_row_for_a_setting_is_reported_and_the_first_kept(tmp_path):
     def fn(wb):
         ws = wb[L.HORIZON]
