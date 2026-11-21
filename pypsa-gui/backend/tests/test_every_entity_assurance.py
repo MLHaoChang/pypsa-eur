@@ -305,9 +305,7 @@ def test_an_every_entity_answer_carries_the_solve_and_its_gap_line(
     assert disclosure in public_text(frames)
 
 
-def test_an_every_entity_answer_records_its_definition_hash(
-    grid, checked, monkeypatch
-):
+def test_an_every_entity_answer_records_its_definition_hash(grid, checked, monkeypatch):
     """GK B 69: the real turn stores the hash for a "*" scope, and a later
     definition change reads as changed."""
     from services import assurance_records as records
