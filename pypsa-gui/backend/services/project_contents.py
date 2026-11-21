@@ -145,6 +145,17 @@ TABLE: tuple[Entry, ...] = (
     Entry("reports", DIR, FOLDER, _ALL, "study reports"),
     Entry("studies", DIR, FOLDER, _ALL, "decision-study sidecars"),
     Entry("sites", DIR, FOLDER, _ALL, "3D site context"),
+    # The grid-compliance tracker (GC-09): deliverable statuses, TSO comment log,
+    # pack history. Project data, so it travels with the project; the lock file
+    # beside it is a runtime lock and stays behind.
+    Entry(
+        "grid_compliance",
+        DIR,
+        FOLDER,
+        _ALL,
+        "the grid-compliance tracker",
+        skip={op: ("tracker.lock",) for op in sorted(_ALL)},
+    ),
     Entry(
         "library",
         DIR,
@@ -185,6 +196,9 @@ NOT_CARRIED: dict[str, str] = {
     "context.json": "inside sites/",
     "generation.json": "inside sites/",
     "thumb.png": "inside sites/",
+    # Inside grid_compliance/, which the table carries whole (the lock is skipped).
+    "tracker.json": "inside grid_compliance/",
+    "tracker.lock": "inside grid_compliance/; a lock file",
     # Campus electrical files the bundle does not carry (plan C9).
     "campus_cost_basis.json": "campus: derived on every run",
     "campus_milp_basis.json": "campus: derived on every run",
