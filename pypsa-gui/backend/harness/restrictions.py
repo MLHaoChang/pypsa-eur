@@ -97,10 +97,25 @@ def capture(session):
                 'project_role': role}
 
 
+def role_admits(snapshot, tier):
+    """Whether the snapshot's project role admits a tool of `tier`.
+
+    The one rule for a viewer: the chat offers a tool exactly when dispatch
+    would admit it (project-viewer-role 01, GK B3 V5). No snapshot (an
+    unsaved draft) has no role to judge.
+    """
+    return snapshot is None or snapshot.get('project_role') == project_acl.EDIT or tier == 'read'
+
+
+def view_only(snapshot):
+    """True when the snapshot's caller may view the project but not change it."""
+    return not role_admits(snapshot, 'write')
+
+
 def _require_role(snapshot, tier):
     # A viewer's write is refused whatever personal rule is saved: a saved
     # 'standard' rule never loosens the role (project-viewer-role 01).
-    if snapshot is not None and snapshot.get('project_role') != project_acl.EDIT and tier != 'read':
+    if not role_admits(snapshot, tier):
         raise project_write_gate.refusal()
 
 

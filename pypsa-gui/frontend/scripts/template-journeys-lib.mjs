@@ -62,7 +62,7 @@ export async function signIn(context, page, base, credentialsFile) {
 
 /** One journey context: the page, a step log and the expected-fail ledger. */
 export function newContext({ page, context, base, out, template, mode }) {
-  return { page, context, base, out, template, mode, steps: [], xfails: [], unexpected: [], problems: [] }
+  return { page, context, base, out, template, mode, steps: [], skips: [], added: {}, xfails: [], unexpected: [], problems: [] }
 }
 
 export async function step(ctx, name, fn) {
@@ -76,6 +76,9 @@ export async function step(ctx, name, fn) {
     throw error
   }
 }
+
+/** A step the template does not take, with the reason: written to the report, never a silent pass. */
+export function skip(ctx, what, why) { ctx.skips.push({ what, why }) }
 
 export async function gap(ctx, id, what, fn) {
   let passed = false
@@ -143,7 +146,7 @@ export async function chooseMode(ctx, mode) {
 
 export async function report(ctx) {
   const file = path.join(ctx.out, `${ctx.template}-${ctx.mode}.json`)
-  await fs.writeFile(file, JSON.stringify({ template: ctx.template, mode: ctx.mode, runSeconds: ctx.runSeconds, steps: ctx.steps, xfails: ctx.xfails, unexpected: ctx.unexpected }, null, 1))
+  await fs.writeFile(file, JSON.stringify({ template: ctx.template, mode: ctx.mode, runSeconds: ctx.runSeconds, steps: ctx.steps, skips: ctx.skips, added: ctx.added, xfails: ctx.xfails, unexpected: ctx.unexpected }, null, 1))
   return file
 }
 

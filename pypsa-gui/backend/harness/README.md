@@ -649,6 +649,13 @@ unit, or the reason when not answered) and its `warnings`, the receipt's limitat
 (`calculations.slot_warnings`), both read from the sealed record only. A chart stored without both keys
 verifies as before. Evidence from another project is refused (`other_project`) before anything is drawn
 or written. Table exports, reports and download headers carry no checked fact (AA05-A46-SCOPE-1).
+A profile's definition hash (`calculations.definition_hash`, AA-10 S7) covers each metric's label,
+unit and formula_id in order and `RENDERER_VERSION`, not formula code: a formula change bumps its
+formula_id. New scoped evidence stores it as a hidden identity key (`records.IDENTITY_KEYS`, so the
+public evidence shape is unchanged), the answer record and a checked chart's manifest store it, and
+a chart reports the hash it was drawn under (`not recorded` before S7). `GET /answers/{id}` and its
+export add `definition_changed` (`records.definition_changed`), compared and never recomputed into
+the record; absent when the answer recorded no hash.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
@@ -1823,8 +1830,8 @@ the preset turns off (grid, control, reliability), with its reason, read from
 `flow_scope.preset_for`.
 
 - **Solve stage.** The queued solve, then `run_investment_case` (a
-  `BOUND_CONTEXT_TOOLS` member with `solve_ppa_price`, which joins for the next
-  slice). The case runs in a worker thread, so the step waits on its own job and
+  `BOUND_CONTEXT_TOOLS` member with `solve_ppa_price`; no profile lists the
+  latter, see the PPA price below). The case runs in a worker thread, so the step waits on its own job and
   `harness/run_ic.py` settles it from the case's record, the one whose
   `started_at` the start receipt names (the shape of `run_eh`; nothing
   polls, LC-45). A refused, failed or aborted case fails the step; a replaced
@@ -1858,6 +1865,23 @@ the preset turns off (grid, control, reliability), with its reason, read from
   reaches (`missing_tools`).
 - **Explore.** Skipped, with its reason, until the shipped `cases.json` run as
   explore cases (the next slice).
+- **The PPA price (`eh_ipp_hybrid@3`, GK B (61) S-C).** @3 is @2 plus the
+  native `ppa_price` step (`run_actions.REGISTRY`, reads only, 0 solves) after
+  `run_investment_case`, and a record KPI. `harness/run_ppa.py` freezes the
+  target from `finance.solve_ppa` at solve-stage entry (none set: not
+  evaluated, never a default) and shows it on the step's card in words. The
+  step reads the price the case solved from the report the run's own case
+  step stored (its `started_at`, re-read after the report reads). Only status
+  `ok` with no `solve_ppa_*` flag and a positive price counts. It writes
+  `run.ppa_price`, bound to the run, the case, its assumptions hash, the
+  network revision and fingerprint, the target and the price. A model turn
+  never solves it: the stage allowlists do not offer `solve_ppa_price`, and
+  `run_envelope.PPA_TOOLS` refuses it as defence in depth.
+- **Record KPIs.** A profile KPI with `record` (not `section`) is read by
+  `run_handoff.read_kpis` from the run's record only (`run_ppa.read`), never
+  from retained results. A malformed record is not evaluated and a broken
+  binding stale. `kpis_read` takes a not-evaluated record the run's own step
+  judged, with the same reason as its row, as read back.
 
 ### The grid-only profile (study harness 15)
 
