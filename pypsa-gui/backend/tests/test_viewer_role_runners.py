@@ -179,7 +179,11 @@ def test_a_study_run_whose_requester_loses_edit_mid_run_writes_nothing(
     base_dir = project_storage_dir(name)
     assert store.load_aux(base_dir, sid, "findings") is None
     assert store.load_aux(base_dir, sid, "run") is None
-    assert store.load_study(base_dir, sid).findings_ref is None
+    study = store.load_study(base_dir, sid)
+    assert study.findings_ref is None
+    # The option list the run saved while its requester could still write is
+    # put back as it was before the run (a new study: empty).
+    assert study.option_projects == []
     assert all(project_row(f"{name}-opt-{o}") is None for o in OPTIONS)
     assert PyPSAService._study_owned == set()
     # The refusal reads back (the base context is gone by now).
@@ -313,7 +317,12 @@ def test_supply_architectures_whose_requester_loses_edit_mid_run_save_nothing(
 # ── investment case and business case ────────────────────────────────────────
 
 
-def _ic_run(world, change: str | None, before_store=None):
+_NO_REQUESTER = object()
+
+
+def _ic_run(
+    world, change: str | None, before_store=None, *, requester=None, refuse=False
+):
     from services.finance.investment_case_runner import start_investment_case
     from tests.fixtures.investment_case.sam import sam_case as S
     from tests.test_investment_case_runner import _Cfg
@@ -328,6 +337,10 @@ def _ic_run(world, change: str | None, before_store=None):
             getattr(member, change)()
         if before_store is not None:
             before_store()
+        if refuse:
+            from services.finance.case import FinanceRefused
+
+            raise FinanceRefused("vr_refused", "the case cannot be valued")
         return S.to_finance_case("s2")
 
     def publish(key, record, thread):
@@ -341,7 +354,9 @@ def _ic_run(world, change: str | None, before_store=None):
         solver_state=state,
         state_update=state.update,
         publish_study=publish,
-        requester=(member.id, member.project_id),
+        requester=None
+        if requester is _NO_REQUESTER
+        else (requester or (member.id, member.project_id)),
     )
     return state
 
@@ -416,14 +431,26 @@ def test_the_finance_routes_name_the_caller_and_the_project_at_start(
     monkeypatch.setattr(
         RR, "_run_requester", lambda u: seen.append(real(u)) or seen[-1]
     )
+    from tests.test_investment_case_routes import STUDY_URL as IC_URL
+    from tests.test_investment_case_routes import _poll
+
+    name = f"vr-fin-{route}"
     _with_ic(client, install_network, monkeypatch)
+    # Saved as a real project, so the active context carries its id.
+    r = client.post(f"/api/projects/{name}", params={"force": True, "rebind": True})
+    assert r.status_code == 200, r.text
+    seen.clear()
     if route == "business_case":
         assert _put(client, _bc()).status_code == 200
         assert client.post(BC_URL).status_code == 200
+    else:
+        assert client.post(IC_URL, json={}).status_code == 200
+        _poll(client)
     uid, pid = seen[-1]
     with sl() as db:
         assert db.get(User, uuid.UUID(str(uid))) is not None
-    assert pid == PyPSAService.get_active_context().project_uuid
+        project = db.query(Project).filter_by(name=name).one()
+    assert pid is not None and str(pid) == str(project.id)
 
 
 def test_a_chat_run_names_the_acting_user():
@@ -437,6 +464,115 @@ def test_a_chat_run_names_the_acting_user():
     finally:
         chat_tools.set_acting_user(None)
     assert str(uid) == who
+
+
+def test_an_investment_case_refusal_report_is_not_stored_for_a_viewer(world):
+    """The refused-case report is a project write too (the build refused)."""
+    state = _ic_run(world, "demote", refuse=True)
+    rec = state["investment_case"]
+    assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
+    assert "investment_case_report" not in state
+
+
+def test_an_engine_refusal_report_is_not_stored_for_a_viewer(world, monkeypatch):
+    from services.finance import engine
+    from services.finance.case import FinanceRefused
+
+    def refuse(*_a, **_kw):
+        raise FinanceRefused("vr_engine_refused", "no")
+
+    monkeypatch.setattr(engine, "run_case", refuse)
+    state = _ic_run(world, "demote")
+    rec = state["investment_case"]
+    assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
+    assert "investment_case_report" not in state
+
+
+def test_an_investment_case_with_no_requester_is_not_judged(world):
+    """Local mode records no requester: the run stores its report."""
+    state = _ic_run(world, "demote", requester=_NO_REQUESTER)
+    assert state["investment_case"]["status"] == "done"
+    assert state["investment_case_report"] is not None
+
+
+def test_a_business_case_with_no_requester_is_not_judged(
+    client, install_network, monkeypatch, session_state
+):
+    import routers.results as RR
+    from tests.test_business_case_routes import BC_URL, _bc, _bc_poll, _put, _with_ic
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    monkeypatch.setattr(RR, "_run_requester", lambda _u: None)
+    assert client.post(BC_URL).status_code == 200
+    assert _bc_poll(client)["status"] == "done"
+    assert session_state(client).get("business_case_report") is not None
+
+
+# ── late demotion: after the last solve, before the save ─────────────────────
+
+
+def test_a_tornado_demoted_after_its_last_solve_saves_nothing(
+    client, api_project, studies_on, monkeypatch, project_storage_dir, sl, as_user
+):
+    """The final re-read before the save refuses on its own: every variant
+    solved, then the requester is demoted, and nothing is saved."""
+    from services import solver_service
+    from services.study import findings as F
+    from services.study import store
+
+    monkeypatch.setattr(solver_service, "run_simulation", FakeSolver())
+    sid = _study_done(client, api_project, "vr-tor-late")
+    _released(client, sl, "vr-tor-late")
+    member = Member(sl, "vr-tor-late")
+    real = F.run_tornado
+
+    def run_then_demote(*a, **kw):
+        out = real(*a, **kw)
+        member.demote()
+        return out
+
+    monkeypatch.setattr(F, "run_tornado", run_then_demote)
+    c = as_user(member.id)
+    r = c.post(f"/api/projects/vr-tor-late/studies/{sid}/findings/tornado", json={})
+    assert r.status_code == 202, r.text
+    rec = wait_tornado(client, "vr-tor-late", sid)
+    assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
+    assert rec["solves_charged"] == r.json()["solves_estimated"]  # all solved
+    assert (
+        store.load_aux(project_storage_dir("vr-tor-late"), sid, F.TORNADO_AUX) is None
+    )
+
+
+def test_supply_architectures_demoted_after_the_last_solve_save_nothing(
+    client, studies_on, install_network, arch_solver, sl, as_user, monkeypatch
+):
+    from services import project_registry, solver_service
+    from services.study import supply_architecture_runner as SAR
+    from services.study import supply_architectures as SA
+
+    monkeypatch.setattr(solver_service, "run_simulation", arch_solver)
+    sid = _sa_project(client, install_network, "vr-sa-late")
+    _released(client, sl, "vr-sa-late")
+    member = Member(sl, "vr-sa-late")
+    real = SA.compare
+
+    def compare_then_demote(*a, **kw):
+        out = real(*a, **kw)
+        member.demote()
+        return out
+
+    monkeypatch.setattr(SA, "compare", compare_then_demote)
+    r = as_user(member.id).post(_sa_url("vr-sa-late", sid), json={})
+    assert r.status_code == 202, r.text
+    rec = _sa_wait(client, "vr-sa-late", sid)
+    assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
+    assert len(arch_solver.calls) == r.json()["solves_estimated"]  # all solved
+    with sl() as db:
+        base_dir = project_registry.project_dir(
+            db.query(Project).filter_by(name="vr-sa-late").one()
+        )
+    assert SAR._load_saved(base_dir, sid) is None
 
 
 def test_a_run_whose_role_check_fails_refuses_and_logs(world, monkeypatch, caplog):

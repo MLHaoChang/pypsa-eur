@@ -669,9 +669,11 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
     status, error = "failed", None
     view_only = False  # the run met a `RequesterViewOnly` (project-viewer-role 02)
     study = None
+    prior_options: list[str] | None = None  # restored when the run is refused
     try:
         base_row = db.get(Project, _uuid(base_row_id))
         study = store.load_study(base_dir, study_id)
+        prior_options = list(study.option_projects)
         question = Q.get_question(study.question_id)
         library = packs.library_for(ledger)
         # The ledger and intake captured when the run started (BC-S4-2), not
@@ -838,7 +840,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
             final = _finish(db, ctx, record, study_id=study_id, base_row_id=base_row_id,
                             base_dir=base_dir, created=created, outcomes=outcomes,
                             fidelity=fidelity, status=status, error=error, user_id=user_id,
-                            view_only=view_only,
+                            view_only=view_only, prior_options=prior_options,
                             run_ledger=ledger, run_intake=intake,
                             preflight_flags=preflight_flags)
         except Exception as exc:  # noqa: BLE001
@@ -887,15 +889,17 @@ def _flag_codes(preflight_flags: dict[str, list[str]] | None) -> list[str]:
 def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcomes,
             fidelity, status, error, run_ledger, run_intake,
             preflight_flags: dict[str, list[str]] | None = None, user_id,
-            view_only: bool = False) -> dict:
+            view_only: bool = False, prior_options: list[str] | None = None) -> dict:
     """
     Remove unsolved forks, write the findings and the run record; return the
     live record's terminal fields, which the worker publishes after release.
 
     A requester who may no longer write the base project (made a viewer, or
     removed, mid-run: project-viewer-role 02) gets nothing written: every fork
-    goes, and no findings, run record or study change land. The refusal is
-    kept in memory (`remember_refusal`) for `get_study_run`.
+    goes, no findings or run record land, and the study's `option_projects`,
+    which the run saved while its requester could still write, is put back as
+    it was before the run (`prior_options`). The refusal is kept in memory
+    (`remember_refusal`) for `get_study_run`.
     """
     # A refusal the run already met stays final, whatever a second read says.
     refused = view_only or project_write_gate.requester_may_not_write(user_id, base_row_id)
@@ -927,6 +931,12 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
                  "error_code": project_write_gate.KIND, "finished_at": time.time(),
                  "current": None, "pending": [o.option_id for o, _r, _c in created],
                  "solved": [], "fork_removal_refused": removal_errors}
+        if prior_options is not None:
+            with store.WRITE_LOCK:
+                study = store.load_study(base_dir, study_id)
+                if list(study.option_projects) != prior_options:
+                    store.save_study(base_dir, study.model_copy(update={
+                        "option_projects": prior_options}))
         remember_refusal(base_row_id, study_id, "run", {**_public(record), **final})
         return final
 
