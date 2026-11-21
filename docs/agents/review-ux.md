@@ -86,6 +86,19 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A loop or verdict key line does not repeat the verdict sentence (#1463).
 - Tonne-bus assets: every MW/MWh quantity field and header follows the bus unit. Cost units (€/kWh etc.) are logged as follow-up 05d (#1448).
 - A "shots required" claim for Results: the proof that a floating element is gone is a Results shot; a mocked payload is acceptable (#1470).
+- Selected canvas node: a 2 px ink ring plus a soft accent halo on every carrier (#1598, #1597).
+- Panel title is 15 px with the flow-section name as a 9 px eyebrow (UI-COHESION-1).
+- Links and eyebrows are ink and always underlined or marked "›"; red is only for the primary action and the active state (UI-COHESION-1).
+- A lens or filter never hides Essentials or Guided blockers, and shows a "Showing for … Clear" chip.
+- Folds use ▸/▾, never ">".
+- "·" separates data fields; a comma separates names inside one field.
+- Hand-resolved master merge: read the resolved files. A clean merge carries after comparing the PR's own non-test frontend diff against master at both heads (`git diff origin/master...<head> -- pypsa-gui/frontend/src ':!*.test.*'`); stat diffs against a sha are polluted by master drift.
+- Strings with nested brackets or a semicolon chain are split into short sentences, cause first (#1729 headline, #1757 goal line).
+- A banner describing a state the user can change (e.g. "Filled in from…") is muted, never red.
+- A mock or harness toast or error in a shot is retaken or explained before OK (#1757).
+- A button whose line says "wait" is disabled or reads "Try again" (#1761).
+- Two "needs" lines on one screen agree: one checklist only (#1761).
+- A cross-mode link (Guided to Expert) sets the Back pill labelled with the origin card's own title; a same-mode link does not (#1757, #1752).
 
 ## Master merges
 

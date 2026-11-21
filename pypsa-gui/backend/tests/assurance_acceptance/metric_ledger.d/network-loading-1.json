@@ -1,0 +1,34 @@
+{
+ "profiles": {
+  "network-loading/1": [
+   {
+    "metric": "max_branch_utilisation",
+    "formula": "max over the network's Lines and Transformers of peak_branch_utilisation",
+    "validity": "verified solve (else unverified_solve); every snapshot needs p0, p1, s_max_pu and weight >= 0 with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data. Refusals: ac_pf_present, ambiguous_branch, network_scope_required, unknown_branch, unsupported_branch_population, misaligned_source, unsupported_snapshot_scope; every branch must be complete",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_network_counts_branches_above_rating_as_an_integer",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_network_counts_branches_above_rating_as_an_integer"
+     }
+    }
+   },
+   {
+    "metric": "branches_above_rating",
+    "formula": "count of branches with utilisation[t] > 1 + tolerance at any t",
+    "validity": "verified solve (else unverified_solve); every snapshot needs p0, p1, s_max_pu and weight >= 0 with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data. Refusals: ac_pf_present, ambiguous_branch, network_scope_required, unknown_branch, unsupported_branch_population, misaligned_source, unsupported_snapshot_scope; every branch must be complete",
+    "tolerance": "harness.branch_calculations:OVER_LIMIT_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_network_counts_branches_above_rating_as_an_integer",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_network_counts_branches_above_rating_as_an_integer"
+     }
+    }
+   }
+  ]
+ }
+}

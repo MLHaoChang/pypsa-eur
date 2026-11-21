@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Expert's Issues panel now shows every assumed value Guided shows, under its flow section and through the same Assumptions card and words, plus the open items only the project flow reports (e.g. a missing site location). The panel's rows now match the sidebar Issues badge, and its sections no longer squash each other when the list grows.

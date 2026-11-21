@@ -98,7 +98,7 @@ describe('headline (§5.5)', () => {
     const r = report({ completeness: { certification: 'skipped' },
       sections: { certification: { status: 'skipped', note: 'no LOLE target — certification not requested' } } })
     expect(headline(review({ verdict: null, mc_lole_h_per_year: null, target_lole_h: null }), r))
-      .toBe('No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in step 3 (Goal) to get a verdict.')
+      .toBe('No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in section 8, Scenarios & optimisation, to get a verdict.')
   })
 
   it('reads the report when the review summary lacks the shortfall (mc_lole_h)', () => {

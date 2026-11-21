@@ -32,9 +32,18 @@ describe('Guided section heading', () => {
     rows.assets.holds = Array.from({ length: 9 }, (_, i) => ({ component: 'Generator', entity: `g${i}`,
       carrier: null, field: 'p_nom', value: 1, unit: 'MW', extendable: false, series: false }))
     expect(heading('assets')).toBe('complete · 9 assets')
-    render(<GenericSectionCard id="assets" />)
+    render(<QueryClientProvider client={new QueryClient()}><GenericSectionCard id="assets" /></QueryClientProvider>)
     fireEvent.click(screen.getByTestId('section-held-show-all'))
     expect(screen.getAllByTestId('section-held')).toHaveLength(9)
     expect(screen.getByTestId('section-open-expert-assets').textContent).toBe('Open assets & sizing in Expert ›')
+  })
+  it('a section that waits only on its assumed defaults says so on the collapsed card', () => {
+    const assumed = (n: number) => ({ code: `assumed_r${n}`, severity: 'warning' as const, source: 'template' as const,
+      blocking: false, acknowledged: false, card: null, in_scope: true, message: `Row ${n}`,
+      target: { section: 'connection' as const, panel: null, component: null, entity: `e${n}`, field: null } })
+    rows.connection = { state: 'warning', summary: null, items: [assumed(1), assumed(2)] }
+    heading('connection')
+    expect(screen.getByTestId('assumptions-toggle').textContent).toBe('▸ Assumed · 2 not yet confirmed')
+    expect(screen.getByTestId('assumptions-waiting').textContent).toContain('waits on these 2 defaults')
   })
 })

@@ -496,3 +496,87 @@ def test_an_unreadable_reader_leaves_its_chapter_not_established_with_a_hint(
         ].status
         == "ok"
     )
+
+
+@pytest.mark.parametrize(
+    "state, revision, flow_answers, tokens",
+    [
+        ({}, 3, True, [{}]),
+        ({}, 3, None, [{}]),
+        (None, 3, True, [{}]),
+        ({"ac_pf_network_revision": 3}, 3, True, [{}]),  # no flow record
+        (
+            {"ac_pf_results": {}, "ac_pf_network_revision": 3},
+            3,
+            True,
+            [{"solver_kind": "ac_pf"}],
+        ),
+        (
+            {"ac_pf_results": {}, "ac_pf_network_revision": 0},
+            None,
+            True,
+            [{"solver_kind": "ac_pf"}],
+        ),
+        # A flow with no recorded edit counter is not current, even at counter 0 (GK B 65).
+        ({"ac_pf_results": {}, "ac_pf_network_revision": None}, 0, True, [{}]),
+        ({"ac_pf_results": {}, "ac_pf_network_revision": None}, None, True, [{}]),
+        # A flow on another edit counter, or one whose read does not answer: the LP's proxy.
+        ({"ac_pf_results": {}, "ac_pf_network_revision": 2}, 3, True, [{}]),
+        (
+            {"ac_pf_results": {}, "ac_pf_network_revision": 3},
+            3,
+            False,
+            [{"solver_kind": "ac_pf"}, {}],
+        ),
+    ],
+)
+def test_the_load_flow_chapter_reads_the_flow_of_the_current_inputs(
+    monkeypatch, state, revision, flow_answers, tokens
+):
+    """GK B B1: the chapter reads `ac_pf` when a flow ran on the current edit
+    counter; otherwise the LOPF proxy, with its disclosure. Only the load flow
+    read is asked for the flow."""
+    from types import SimpleNamespace
+
+    from services import retained_results, workflow_tools
+    from services.pypsa_service import PyPSAService
+
+    ctx = SimpleNamespace(
+        network=SimpleNamespace(meta={"assistant_solve_input_fingerprint": "f"}),
+        solver_state=state,
+        network_revision=revision,
+        project_uuid="p",
+    )
+    monkeypatch.setattr(PyPSAService, "get_active_context", staticmethod(lambda: ctx))
+    monkeypatch.setattr(
+        workflow_tools, "solve_freshness", lambda: {"results_current": True}
+    )
+    seen, other = [], []
+    lopf = {**_sources()["reads"]["loadflow"], "source": "lopf"}
+
+    def capture(token):
+        seen.append(token)
+        if token.get("solver_kind") == "ac_pf":
+            return {**lopf, "source": "ac_pf"} if flow_answers else None
+        return lopf if flow_answers is not None else None
+
+    monkeypatch.setattr(
+        retained_results,
+        "ADAPTERS",
+        (
+            SimpleNamespace(
+                section="results_summary", capture=lambda t: other.append(t)
+            ),
+            SimpleNamespace(section="loadflow", capture=capture),
+        ),
+    )
+    sources = NC.read_sources()
+    assert seen == tokens and other == [{}]
+    if flow_answers is None:  # no read answered: asked once, no chapter
+        assert NC.payloads(sources)[NC.LOAD_FLOW][0] is None
+        return
+    payload, _ = NC.payloads(sources)[NC.LOAD_FLOW]
+    proxy = NC.LOADFLOW_PROXY in NC.disclosures({NC.LOAD_FLOW: payload})
+    assert (payload["source"], proxy) == (
+        ("ac_pf", False) if tokens == [{"solver_kind": "ac_pf"}] else ("lopf", True)
+    )
