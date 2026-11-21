@@ -384,8 +384,9 @@ def test_an_unknown_or_empty_section_list_is_refused(client, api_project, sessio
         assert r.json()["detail"]["error_kind"] == "report_section_not_found"
 
 
+@pytest.mark.parametrize("no_key", [False, True])
 def test_generate_is_refused_under_a_foreign_lock(client, api_project, session_state,
-                                                  monkeypatch, _auth_db, seeded_identity):
+                                                  monkeypatch, _auth_db, seeded_identity, no_key):
     import uuid as _uuid
     from datetime import datetime, UTC
 
@@ -398,7 +399,12 @@ def test_generate_is_refused_under_a_foreign_lock(client, api_project, session_s
 
     name = api_project("gen-lock")
     _store_eh_report(session_state(client))
-    _install_provider(monkeypatch, FakeProvider([]))
+    if no_key:
+        # No usable profile: the plain fallback must still sit behind the lock.
+        import routers.report_jobs as jobs
+        monkeypatch.setattr(jobs, "_provider_for_profile", lambda profile: (None, "missing_api_key"))
+    else:
+        _install_provider(monkeypatch, FakeProvider([]))
     assert client.post(f"/api/projects/{name}/lock").status_code == 200
 
     _engine, session_local = _auth_db
@@ -417,3 +423,5 @@ def test_generate_is_refused_under_a_foreign_lock(client, api_project, session_s
         r = other.post(f"/api/projects/{name}/reports/generate", json={})
         assert r.status_code == 409, r.text[:300]
         assert r.json()["detail"]["error_kind"] == "project_locked"
+    # Nothing was stored by the refused call.
+    assert client.get(f"/api/projects/{name}/reports").json() == []
