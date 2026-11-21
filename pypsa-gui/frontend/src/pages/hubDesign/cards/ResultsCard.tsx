@@ -20,7 +20,7 @@ import { cheaperDuration, leversFinding } from '../cheaperDuration'
 import { showResultsTab } from '../../../layout/flowNavigation'
 import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
-import { costTileLabel, kpiMoney } from '../plainWords'
+import { costTileLabel, kpiMoney, plainReason } from '../plainWords'
 import { SizedDesignTable } from '../../results/SizedDesignTable'
 import { useQuery } from '@tanstack/react-query'
 import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
@@ -255,7 +255,7 @@ export function ResultsCard() {
             {gaps.map(g => (
               <li key={g.name}>
                 <span className="text-text">{SECTION_LABEL[g.name] ?? 'Another part of the study'}</span>
-                <span className="text-muted">: {g.note}</span>
+                <span className="text-muted">: {plainReason(g.note)}</span>
               </li>
             ))}
           </ul>
