@@ -140,6 +140,8 @@ describe('CommandPalette — Parameters in the guide', () => {
     expect(screen.getByText('Shift+⏎ guide')).toBeTruthy()
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
     expect(useGuideStore.getState().view).toEqual({ kind: 'entry', id: 'generator.p_nom' })
+    // The row's field is where the guide came from: its "Open on" hides over that field.
+    expect(useGuideStore.getState().originField).toBe('p_nom')
     expect(useUIStore.getState().propertiesEditRequest).toBeNull()
     expect(useUIStore.getState().paletteMode).toBeNull()
   })

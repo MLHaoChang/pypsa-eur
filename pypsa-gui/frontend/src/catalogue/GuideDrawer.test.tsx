@@ -20,13 +20,13 @@ const drawer = () => screen.getByRole('dialog', { name: 'Parameter guide' })
 
 beforeEach(() => {
   vi.spyOn(catalogueApi, 'fetchCatalogue').mockResolvedValue(CATALOGUE)
-  useGuideStore.setState({ view: null, history: [], opener: null })
+  useGuideStore.setState({ view: null, history: [], opener: null, originField: null })
   useUIStore.setState({
     uiMode: 'expert', fieldDrawer: null, selectedComponent: null, activeSlidePanel: null, rightPanelOpen: true,
     paletteMode: null, propertiesEditRequest: null, assistantDockOpen: false, assistantDockWidth: 400,
   })
 })
-afterEach(() => { cleanup(); vi.restoreAllMocks(); useGuideStore.setState({ view: null, history: [], opener: null }) })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); useGuideStore.setState({ view: null, history: [], opener: null, originField: null }) })
 
 describe('a guide entry', () => {
   it('shows every row the catalogue has, with "Used by" split, and the model name only on its own line', async () => {
@@ -81,13 +81,46 @@ describe('a guide entry', () => {
     expect(useUIStore.getState().propertiesEditRequest).toEqual({ type: 'Generator', name: 'PV roof', field: 'p_nom' })
   })
 
-  it('no "Open on" over that asset\'s own Properties: "Back to <asset>" already goes there', async () => {
-    useUIStore.setState({ selectedComponent: { type: 'Generator', name: 'PV roof' }, rightPanelOpen: true })
-    renderWith(<GuideDrawer />)
-    open('generator.capacity')
-    await screen.findByTestId('guide-entry')
-    expect(screen.getByRole('button', { name: 'Back to PV roof' })).toBeTruthy()
-    expect(screen.queryByTestId('guide-open-on')).toBeNull()
+  describe('over that asset\'s own Properties (Expert)', () => {
+    beforeEach(() => useUIStore.setState({ selectedComponent: { type: 'Generator', name: 'PV roof' }, rightPanelOpen: true }))
+
+    it('no "Open on" when opened from this same field: "Back to <asset>" already goes there', async () => {
+      renderWith(<GuideDrawer />)
+      act(() => useGuideStore.getState().openGuide('generator.capacity', null, 'p_nom'))
+      await screen.findByTestId('guide-entry')
+      expect(screen.getByRole('button', { name: 'Back to PV roof' })).toBeTruthy()
+      expect(screen.queryByTestId('guide-open-on')).toBeNull()
+    })
+
+    it('the field is the Properties input that had focus when no field is given', async () => {
+      const wrap = document.createElement('div')
+      wrap.dataset.field = 'p_nom'
+      const input = document.createElement('input')
+      wrap.appendChild(input)
+      document.body.appendChild(wrap)
+      input.focus()
+      renderWith(<GuideDrawer />)
+      open('generator.capacity')
+      await screen.findByTestId('guide-entry')
+      expect(useGuideStore.getState().originField).toBe('p_nom')
+      expect(screen.queryByTestId('guide-open-on')).toBeNull()
+      wrap.remove()
+    })
+
+    it('"Open on" for another field of that asset (it scrolls to the field and flashes it)', async () => {
+      renderWith(<GuideDrawer />)
+      act(() => useGuideStore.getState().openGuide('generator.max', null, 'p_nom'))
+      await screen.findByTestId('guide-entry')
+      expect(screen.getByRole('button', { name: 'Open on PV roof ›' })).toBeTruthy()
+    })
+
+    it('"Open on" when the field it was opened from is unknown', async () => {
+      renderWith(<GuideDrawer />)
+      open('generator.capacity')
+      await screen.findByTestId('guide-entry')
+      expect(useGuideStore.getState().originField).toBeNull()
+      expect(screen.getByRole('button', { name: 'Open on PV roof ›' })).toBeTruthy()
+    })
   })
 
   it('"Choose an asset ›" when the asset in hand is of another class; nothing for an entry with no field', async () => {
