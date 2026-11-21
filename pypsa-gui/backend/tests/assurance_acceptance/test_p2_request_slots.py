@@ -536,6 +536,7 @@ def test_a_fully_converged_flow_has_no_warning_and_completes(ac_grid, checked):
 
 @pytest.mark.parametrize(("count", "refused"), [(18, False), (19, False), (20, True)])
 def test_warnings_count_toward_the_slot_cap_and_are_never_dropped(ac_grid, checked, count, refused):
+    # One warning: 18, 19 and 20 metrics need 19, 20 (the cap) and 21 slots.
     ctx = ac_grid((True, False))
     metrics = AC_METRICS + [f"extra_metric_{i}" for i in range(count - len(AC_METRICS))]
     receipt = receipt_of(ac_ask(checked, ctx, FIRST_ONLY, metrics=metrics))

@@ -154,7 +154,13 @@ def test_only_policy_5_admits_a_warning_slot():
             RECEIPTS[version].model_validate(_receipt(version, [WARNING]))
 
 
-def test_a_warned_answer_with_derived_entries_fails_closed(ac_grid, checked, monkeypatch):
+@pytest.mark.parametrize(("attribute", "value"), [
+    ("derived", [{"id": "d1"}]),        # would be policy "2"
+    ("predicates", [{"id": "p1"}]),     # would be policy "3"
+    ("sections", []),                   # would be policy "4"
+])
+def test_a_warned_answer_that_would_carry_another_policy_fails_closed(
+        ac_grid, checked, monkeypatch, attribute, value):
     from harness import assurance
 
     ctx = ac_grid((True, False))
@@ -162,12 +168,13 @@ def test_a_warned_answer_with_derived_entries_fails_closed(ac_grid, checked, mon
 
     def with_derived(self, blocks):
         out = real(self, blocks)
-        self.derived = [{"id": "d1"}]
+        setattr(self, attribute, value)
         return out
 
     monkeypatch.setattr(assurance.Turn, "validate", with_derived)
     receipt = approval(ac_ask(checked, ctx, FIRST_ONLY))["receipt"]
-    assert receipt["policy_version"] == "5" and "derived" not in receipt
+    assert receipt["policy_version"] == "5"
+    assert not receipt.keys() & {"derived", "predicates", "sections"}
     assert receipt["evidence_ids"] == [] and receipt["checked_block_ids"] == []
     assert receipt["result_slots"][0]["disposition"] == "warning"
 

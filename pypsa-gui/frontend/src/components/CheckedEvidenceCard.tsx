@@ -1,4 +1,4 @@
-import { WARNED_LABEL, warningText, type AnswerReceipt } from '../utils/answerAssurance'
+import { hasWarning, WARNED_LABEL, warningText, type AnswerReceipt } from '../utils/answerAssurance'
 import { readableProfile, readableWindow } from '../utils/readableTime'
 import type { NavigationEntry } from '../utils/answerAssurance'
 
@@ -30,7 +30,7 @@ export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answer
   const scope = receipt.request_scope
   const clarifying = receipt.result_slots?.some(s => s.disposition === 'needs_clarification') === true
   // AA-13: a warning slot (policy "5") marks an interval the values leave out.
-  const warned = receipt.result_slots?.some(s => s.disposition === 'warning') === true
+  const warned = hasWarning(receipt)
   return <details className="mt-2 text-[11px] border border-border rounded p-2" data-testid="checked-evidence-card">
     <summary className="cursor-pointer">{clarifying ? 'Clarification needed' : warned ? WARNED_LABEL : receipt.request_complete === true ? 'Requested results checked' : 'Checked evidence and limitations'}</summary>
     <div className="mt-2 space-y-1">

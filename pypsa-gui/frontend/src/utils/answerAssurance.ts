@@ -199,6 +199,11 @@ function validSections(sections: unknown): boolean {
 /** The summary of a receipt with a required warning slot; the evidence card and the outcome card share it. */
 export const WARNED_LABEL = 'Request incomplete: warning'
 
+/** Whether a receipt carries a required warning slot (policy "5", AA-13). */
+export function hasWarning(receipt: Pick<AnswerReceipt, 'result_slots'>): boolean {
+  return receipt.result_slots?.some(s => s.disposition === 'warning') === true
+}
+
 type ResultSlot = NonNullable<AnswerReceipt['result_slots']>[number]
 
 /** Plain text per warning reason code (the code before " (k of n …)", `ac_branch_calculations`). */
