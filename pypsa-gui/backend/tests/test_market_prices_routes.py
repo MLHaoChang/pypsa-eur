@@ -256,7 +256,9 @@ def _fetch_that_runs(monkeypatch, during):
 
     def fetch(zone, year, *, token, transport=None):
         during()
-        return real(zone, year, token=token, transport=Replay(body=_fixture()).transport)
+        return real(
+            zone, year, token=token, transport=Replay(body=_fixture()).transport
+        )
 
     app_secrets.set_secret(M.TOKEN_NAME, TOKEN)
     monkeypatch.setattr(M, "fetch_day_ahead", fetch)
@@ -284,7 +286,9 @@ def test_library_write_access_lost_during_the_fetch_refuses_the_insert(
     monkeypatch.setattr(series_store, "put_series", lambda *a, **k: puts.append(a))
     _fetch_that_runs(
         monkeypatch,
-        lambda: monkeypatch.setattr(library_acl, "can_write", lambda db, user, org: False),
+        lambda: monkeypatch.setattr(
+            library_acl, "can_write", lambda db, user, org: False
+        ),
     )
     with pytest.raises(HTTPException) as e:
         _post(R, db, seeded_identity, tmp_path)
@@ -326,12 +330,22 @@ def test_a_malformed_project_org_refuses_and_never_falls_back(
     called = []
     monkeypatch.setattr(M, "fetch_day_ahead", lambda *a, **k: called.append(a))
     project = AuthorizedProject(
-        name="Demo", directory=tmp_path, uuid="not-a-uuid", org_id=org_id,
+        name="Demo",
+        directory=tmp_path,
+        uuid="not-a-uuid",
+        org_id=org_id,
         registry_key="k",
     )
     user = _user(db, seeded_identity)
-    assert R.get_project_market_prices(project=project, db=db, user=user)["can_fetch"] is False
+    assert (
+        R.get_project_market_prices(project=project, db=db, user=user)["can_fetch"]
+        is False
+    )
     with pytest.raises(HTTPException) as e:
-        R.post_day_ahead(body=R.DayAheadIn(zone="DE-LU", year=2024), project=project,
-                         db=db, user=user)
+        R.post_day_ahead(
+            body=R.DayAheadIn(zone="DE-LU", year=2024),
+            project=project,
+            db=db,
+            user=user,
+        )
     assert e.value.status_code == 403 and called == []
