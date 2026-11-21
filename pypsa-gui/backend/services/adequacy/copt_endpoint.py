@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from services.adequacy.run_assumptions import voll_is_set, voll_missing_row
+
+# The per-mode figures that multiply by VOLL.
+_EUR_FIELDS = ("severity_eur", "criticality_eur_per_year")
+
 
 def build_copt_payload(
     n,
@@ -52,6 +57,7 @@ def build_copt_payload(
     if not units:
         return None
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    priced = voll_is_set(cfg)
     # Phase 12c-pre: split, net the remainder, table, mixture, attribution —
     # one call so this route and the engine tests see the same arithmetic.
     analysis = screening_analysis(units, residual, weights=w, voll=voll,
@@ -86,9 +92,14 @@ def build_copt_payload(
         "per_mode": [
             {**r["failure_mode"],
              "delta_eue_mwh": r["delta_eue_mwh"],
+             # GK B Q1 (template-e2e 08): with no VOLL a € figure is not
+             # priced — None, never €0; ΔEUE still ranks.
+             **({} if priced else {k: None for k in _EUR_FIELDS}),
              **({"note": r["note"]} if "note" in r else {})}
             for r in rows
         ],
+        # What the screening assumed: VOLL not set (template-e2e 08).
+        "assumptions": [] if priced else [voll_missing_row()],
         "fleet": {
             "units": len(units),
             "must_take": n_must_take,
@@ -184,7 +195,7 @@ def build_fmea_modes_payload(
     # the whole ranking ties and the order the worksheet renders depended on
     # which classes happened to have been computed. `reverse=True` cannot be
     # used with a tuple key: it would reverse the mode_id order too.
-    per_mode.sort(key=lambda r: (-float(r.get("criticality_eur_per_year", 0.0)),
+    per_mode.sort(key=lambda r: (-float(r.get("criticality_eur_per_year") or 0.0),
                                  str(r.get("mode_id", ""))))
     # VOLL travels with the rows so the worksheet can say WHY every
     # criticality is zero. Criticality is ΔEUE × VoLL (per year), so with
@@ -198,6 +209,10 @@ def build_fmea_modes_payload(
         _voll = float(getattr(_cfg, "voll", 0.0) or 0.0)
     except (TypeError, ValueError):
         _voll = 0.0
+    if not voll_is_set(_cfg):
+        # GK B Q1: no figure is priced without a VOLL — the sweep's rows from
+        # an earlier VOLL included — so each reads None, never €0.
+        per_mode = [{**r, **{k: None for k in _EUR_FIELDS}} for r in per_mode]
     return {"per_mode": per_mode,
             "voll_eur_per_mwh": _voll,
             "sweep_status": (sweep or {}).get("status"),

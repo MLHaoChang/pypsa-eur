@@ -97,7 +97,7 @@ export default function SiteConnectionForm({ initial, onSaved, onCancel, default
       {meters.length === 0 && (
         <p className="text-[11px] text-warn" data-testid="site-connection-no-links">
           The network has no one-way Link to be the point of connection. Add a Link from the grid
-          bus to the site (with p_min_pu ≥ 0), then set it here.</p>
+          bus to the site (minimum flow 0 or more), then set it here.</p>
       )}
       <div className="flex flex-col gap-0.5">
         <label htmlFor="sc-poc" className="text-[11px]">Point of connection (import Link, grid → site)</label>

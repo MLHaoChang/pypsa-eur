@@ -3,7 +3,7 @@
 
 # GC-22 Campus service: store and serve the pack read-back judgment
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07 part 5, pack read-back)
 Gated: yes (GK B, backend)
@@ -41,3 +41,7 @@ mark a deliverable "judged" from it.
 - GC-09 can mark a deliverable "judged" from the stored judgment.
 
 ## Comments
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Acceptance is the 'Done when' section above. Still true: `gridspine.drivers.readback.judge_pack_results` writes only to the run directory and the backend does not store or serve the judgment. GC-07 is done. Overlaps GC-09 (09-compliance-workflow-ui, backend open in #1577): check that PR first and reuse its route; if it already serves the judgment, set this done. Gated: GK B. Blocked by: none.

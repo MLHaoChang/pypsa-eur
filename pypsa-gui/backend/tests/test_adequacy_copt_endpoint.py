@@ -6,6 +6,8 @@ generators (nothing to convolve).
 """
 from __future__ import annotations
 
+import copy
+
 import pandas as pd
 import pypsa
 import pytest
@@ -54,9 +56,31 @@ def test_endpoint_serves_metrics_and_ranked_modes():
     assert out["fleet"]["netted_beyond_cap"] == []
     assert out["fidelity_note"] is None
     # VoLL comes from the live solver config; default config has voll=0 →
-    # € fields are zero but ΔEUE still ranks.
-    assert all(r["criticality_eur_per_year"] == 0.0 for r in out["per_mode"])
+    # the € fields are not priced (None, never €0: template-e2e 08, GK B Q1),
+    # ΔEUE still ranks, and the payload says VOLL is not set.
+    assert all(r["criticality_eur_per_year"] is None and r["severity_eur"] is None
+               for r in out["per_mode"])
+    assert all(r["delta_eue_mwh"] is not None for r in out["per_mode"])
+    # The configured value, as before: the FMEA tab's "unpriced ranking"
+    # warning reads it.
     assert out["voll_eur_per_mwh"] == 0.0
+    (voll,) = [a for a in out["assumptions"] if a["key"] == "voll"]
+    assert voll["source"] == "missing" and voll["field"] == "voll"
+    modes = R.get_fmea_modes()
+    assert modes["voll_eur_per_mwh"] == 0.0
+    assert all(r.get("criticality_eur_per_year") is None for r in modes["per_mode"])
+
+
+def test_a_set_voll_prices_the_modes():
+    PyPSAService.set_network(_network())
+    PyPSAService.get_solver_state()["solver_config"].voll = 1000.0
+    try:
+        out = R.get_copt()
+        assert out["voll_eur_per_mwh"] == 1000.0
+        assert all(isinstance(r["criticality_eur_per_year"], float) for r in out["per_mode"])
+        assert not [a for a in out["assumptions"] if a["key"] == "voll"]
+    finally:
+        PyPSAService.get_solver_state()["solver_config"].voll = 0.0
 
 
 def test_endpoint_reports_an_annual_basis_when_the_horizon_is_a_year():
@@ -68,3 +92,30 @@ def test_endpoint_reports_an_annual_basis_when_the_horizon_is_a_year():
     m = R.get_copt()["metrics"]
     assert m["time_basis"] == "hours_per_year"
     assert m["horizon_years"] == pytest.approx(1.0)
+
+
+def test_the_worksheet_prices_and_ranks_sweep_rows_only_with_a_voll():
+    """With a VOLL the sweep's rows rank by criticality, highest first; without
+    one no € figure is priced, the sweep's earlier figures included."""
+    from services.adequacy.copt_endpoint import build_fmea_modes_payload
+
+    def sweep_row(mode_id, criticality):
+        return {"failure_mode": {"mode_id": mode_id, "severity_eur": criticality,
+                                 "criticality_eur_per_year": criticality},
+                "delta_eue_mwh": 1.0}
+
+    sweep = {"status": "done",
+             "rows": [sweep_row("A_low", 5.0), sweep_row("Z_high", 5e9)]}
+    cfg = copy.copy(PyPSAService.get_solver_state()["solver_config"])
+
+    def modes(voll):
+        cfg.voll = voll
+        return build_fmea_modes_payload(_network(), cfg, sweep_record=sweep,
+                                        get_lock=PyPSAService.get_lock)["per_mode"]
+
+    priced = modes(1000.0)
+    assert priced[0]["mode_id"] == "Z_high"
+    assert all(isinstance(r["criticality_eur_per_year"], float) for r in priced)
+    unpriced = modes(0.0)
+    assert all(r["criticality_eur_per_year"] is None and r["severity_eur"] is None
+               for r in unpriced)

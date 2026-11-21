@@ -248,9 +248,11 @@ async def get_grid_readiness(profile: str | None = None, proj: AuthorizedProject
     """The project's grid-readiness scorecard against grid-code ``profile``
     (default: the campus study's last-run profile, else ``eu_rfg_dcc_ce``):
     rows ``{id, requirement, limit, unit, source, project_value, verdict,
-    assumed, note, section, target}``. Advisory and read only; it reads the
-    saved network, so it parses a netCDF off the event loop. 422 for an
-    unknown profile."""
+    assumed, note, section, target}``, and ``network`` (``live``, ``saved`` or
+    ``out_of_date``). Advisory and read only: it scores a copy of the loaded
+    network (unsaved edits included), or the saved netCDF when the project is
+    not loaded or a run holds it (DC walkthrough 04), off the event loop. 422
+    for an unknown profile."""
     from services.adequacy.grid_readiness import grid_readiness_for
 
     return await run_in_threadpool(grid_readiness_for, _row(proj, db), profile)

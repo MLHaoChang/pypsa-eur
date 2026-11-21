@@ -296,6 +296,36 @@ def test_a_money_per_kw_value_reads_back_as_the_same_float(tmp_path):
     assert _read(path).network.generators.at["wind 1", "capital_cost"] == 123456.789
 
 
+def test_a_custom_column_shown_per_kw_reads_back_per_mw(tmp_path):
+    """An investment part (a custom column) the catalogue shows in EUR/kW is stored per MW again (S2)."""
+    n = _network(False)
+    n.generators["capex_part_eur_per_kw"] = 250_000.0
+    # A text or TRUE/FALSE cell in a scaled custom column is kept as the cell holds it.
+    n.generators["part_note"] = "n/a"
+    n.generators["part_on"] = True
+    cat = {
+        **CATALOGUE,
+        "Generator": [
+            *CATALOGUE["Generator"],
+            C("capex_part_eur_per_kw", "Capex part", "EUR/kW", 1e-3),
+            C("part_note", "Part note", "EUR/kW", 1e-3),
+            C("part_on", "Part on", "EUR/kW", 1e-3),
+        ],
+    }
+    custom = {**CUSTOM, "Generator": [*CUSTOM["Generator"], "part_note", "part_on"]}
+    data = write_workbook(n, columns=cat, custom_columns=custom)
+    path = tmp_path / "w.xlsx"
+    path.write_bytes(data)
+    ws = openpyxl.load_workbook(path)["Generators"]
+    col = [c.value for c in ws[L.ROW_KEY]].index("capex_part_eur_per_kw") + 1
+    assert ws.cell(L.FIRST_DATA_ROW, col).value == 250.0
+    res = read_excel(path, {"custom_columns": custom, "columns": cat})
+    gens = res.network.generators
+    assert gens["capex_part_eur_per_kw"].tolist() == [250_000.0] * len(n.generators)
+    assert gens["part_note"].tolist() == ["n/a"] * len(n.generators)
+    assert [v is True for v in gens["part_on"]] == [True] * len(n.generators)
+
+
 def test_a_size_on_a_tonne_node_is_shown_and_read_in_tonnes_per_hour(tmp_path):
     """E4: the size unit is the asset's node unit, not the catalogue's MW; the value is unchanged."""
     n = _network(True)
@@ -2205,9 +2235,17 @@ def test_the_workbook_cell_cap_counts_every_sheet_s_declared_size(
     monkeypatch.setitem(L.LIMITS, "workbook_cells", total)
     _read(path)
     monkeypatch.setitem(L.LIMITS, "workbook_cells", total - 1)
+    from gridspine.ingest import excel_import
+
+    scanned = []
+    real = excel_import._capped
+    monkeypatch.setattr(
+        excel_import, "_capped", lambda rows: scanned.append(1) or real(rows)
+    )
     with pytest.raises(L.ImportLimitError) as e:
         _read(path)
     assert e.value.limit == "workbook_cells"
+    assert (e.value.value, scanned) == (total, []), "refused by the scanned count"
 
 
 def test_the_workbook_cell_cap_holds_when_the_declared_sizes_lie_low(

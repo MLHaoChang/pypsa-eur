@@ -106,7 +106,7 @@ POST   /api/gridspine/{name}/readback/{hour}  write path:name
 POST   /api/gridspine/{name}/run  write path:name
 PUT    /api/gridspine/{name}/templates/{unit_id}/{param}  write path:name
 POST   /api/io/import/csv  none replaces the open network with an unsaved scratch copy; writes no project
-POST   /api/io/import/excel  none replaces the open network with an unsaved scratch copy; writes no project
+POST   /api/io/import/excel  write active
 POST   /api/io/import/matpower  none replaces the open network with an unsaved scratch copy; writes no project
 POST   /api/io/import/netcdf  none replaces the open network with an unsaved scratch copy; writes no project
 POST   /api/library/items/tariff/import_urdb  none the org library, not a project
@@ -323,4 +323,6 @@ POST   /api/simulation/run_ac_pf  write active
 PUT    /api/simulation/solver_config  write active
 POST   /api/simulation/value_flows/template  write active
 POST   /api/spectrum/trace  none analyses an uploaded trace in memory; stores nothing
+POST   /api/workbook/import  none creates a new project the caller owns
+POST   /api/workbook/preview  none parses an upload, writes nothing
 """

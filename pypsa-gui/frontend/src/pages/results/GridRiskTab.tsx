@@ -10,6 +10,7 @@ import { resultsApi } from '../../api/simulation'
 import type { FlowTarget } from '../../api/flow'
 import type { GridRiskCell, GridRiskLine, GridRiskLineKey, GridRiskProduction, GridRiskTarget } from '../../api/types'
 import { PageSection, Tag } from '../../components/PageKit'
+import EmptyState from '../../components/EmptyState'
 import { StatePill } from '../../components/ResultState'
 import { openFlowTarget, openFlowTargetInPlace, showResultsTab } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
@@ -324,9 +325,10 @@ export default function GridRiskTab() {
         <div className="px-4 py-3" data-testid="grid-risk-section">
           {isLoading ? <span className="text-[11px] text-muted">Loading…</span>
             : !data || !data.available || !data.lines
-              ? <span data-testid="grid-risk-empty" className="text-[11px] text-muted">
+              ? <EmptyState testId="grid-risk-empty"
+                  title={data?.omitted === 'no_process_unit' ? 'Not applicable' : 'Not run yet'}>
                   {data?.omitted === 'no_process_unit' ? 'The network has no process unit.' : 'Run a solve to see the grid risks.'}
-                </span>
+                </EmptyState>
               : <GridRiskBody data={data} mode={mode === 'guided' ? 'guided' : 'expert'} />}
         </div>
       </PageSection>
