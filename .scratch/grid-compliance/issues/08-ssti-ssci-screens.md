@@ -3,7 +3,7 @@
 
 # GC-08 SSTI unit-interaction-factor screen and sub-synchronous impedance scan
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: UIF and subsync engines merged (#1573); campus stage open in #1578; left besides: service section, scorecard rows
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none

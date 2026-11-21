@@ -301,6 +301,45 @@ mode the island study does not credit, such as a GFM on PV, is listed as
 `not_credited`, not offered. The grid-readiness check reads these.
 _Avoid_: ancillary service (that's a market product), capability
 
+**Parameter catalogue**:
+The one declaration of every asset type and every user-settable parameter,
+served at `GET /api/catalogue` (code: `catalogue` in `backend/services/asset_schema/`).
+Project-free: its body never depends on a project.
+_Avoid_: schema (that is the route shape), field labels, tool catalogue (that is
+`harness/catalogue.py`), Library (that holds values, not declarations).
+
+**Entry**:
+One parameter in the Parameter catalogue. It has a stable **entry id**
+(`generator.capacity`, frozen once shipped, listed in `catalogue.ids.txt`), a
+**plain name** ("Capacity", on every screen, chat reply and report) and a
+**model name** (`p_nom`, the raw engine column, shown only on the guide's
+"In model files" line).
+
+**Asset type**:
+One kind of thing a user places (PV field, transformer, battery). Several asset
+types map onto one Component class.
+
+**Function**:
+What a study does with the model: Dispatch, Capacity expansion, Load flow,
+Short circuit, Grid compliance, Adequacy, Finance. A function **needs** some
+entries (a missing one blocks its run), **uses** others and ignores the rest.
+
+**Depth**:
+How much of an asset's catalogue a view shows: *Essentials* (the Guided set),
+*Basic*, *Advanced*, *Full detail*. Code value `essentials` replaces `key_param`.
+
+**Function lens**:
+A filter that shows only the assets and entries one function reads.
+
+**Parameter guide**:
+The in-app help drawer generated from the catalogue (WIKI-1): one **guide entry**
+per entry, asset type, group and function (`guide/<id>.md`).
+
+**Assumed**:
+A value the user has not supplied, filled from a Generic default. Marked in
+every view and listed in the Assumptions ledger. A catalogue default is shown,
+never written into a network.
+
 ## Project flow language
 
 **Project flow**:

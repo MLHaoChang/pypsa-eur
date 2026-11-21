@@ -117,7 +117,7 @@ def test_a_filled_site_is_complete_and_ready(client, site):
     rows = {s["section"]: s for s in body["sections"]}
     assert rows["readiness"]["state"] is None and rows["readiness"]["summary"] == "0 to do, 0 to check"
     assert rows["results"]["state"] is None and rows["results"]["freshness"] == "not_run"
-    assert rows["connection"]["summary"] == "grid_import, 50 MW"
+    assert rows["connection"]["summary"] == "Grid import, 50 MW"
     assert rows["project"]["required"] and not rows["commercial"]["required"]
 
 
@@ -1116,3 +1116,19 @@ def test_load_flow_freshness_survives_a_save_and_reload(client, site, set_cfg, b
     assert _kinds(_flow(client, name))["loadflow"] == "fresh"
     _bump(client, bound_ctx)
     assert _kinds(_flow(client, name))["loadflow"] == "stale"
+
+
+def test_island_assumption_rows_open_the_island_panel_not_expert_capacity_bounds():
+    from services.flow_service import _assumed_items
+
+    items = ["existing island", "island sidecar", "island unit data",
+             "transition RoCoF limit", "island rows", "island break-even",
+             "ride-through settings"]
+    template = {"ledger": [{"item": i, "value": "x", "source": "assumed"} for i in items]}
+    out = _assumed_items(template, {})
+    assert len(out) == len(items)
+    for it in out:
+        assert it["target"]["section"] == "assets", it["target"]
+        assert it["target"]["panel"] == "campusStudy", it["target"]
+    other = _assumed_items({"ledger": [{"item": "battery", "value": 1, "source": "assumed"}]}, {})
+    assert other[0]["target"]["panel"] is None

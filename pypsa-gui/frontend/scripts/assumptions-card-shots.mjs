@@ -75,6 +75,9 @@ try {
       await step.click()
       await page.waitForSelector(`[data-testid="section-view-${s}"]`)
       await page.waitForTimeout(1200)
+      // The card opens collapsed (guided-results 03): open it to count its rows.
+      const toggle = page.locator('[data-testid="assumptions-toggle"][aria-expanded="false"]')
+      if (await toggle.count()) await toggle.click()
       const rows = await page.locator('[data-testid="assumption-row"]').count()
       total += rows
       console.log(p.key, s, 'assumed rows', rows)
