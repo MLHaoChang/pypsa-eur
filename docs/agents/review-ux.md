@@ -98,6 +98,13 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A persistent notice with a copy field (a credential link) is `role="status"`, not a toast, and never times out (#1803).
 - One word per concept across palette rows, notices and guide, e.g. "parameter" (#1804).
 - A hosted drawer hides a link whose destination its Back control already goes to (#1807).
+- Hand-resolved master merge: read the resolved files. A clean merge carries after comparing the PR's own non-test frontend diff against master at both heads (`git diff origin/master...<head> -- pypsa-gui/frontend/src ':!*.test.*'`); stat diffs against a sha are polluted by master drift.
+- Strings with nested brackets or a semicolon chain are split into short sentences, cause first (#1729 headline, #1757 goal line).
+- A banner describing a state the user can change (e.g. "Filled in from…") is muted, never red.
+- A mock or harness toast or error in a shot is retaken or explained before OK (#1757).
+- A button whose line says "wait" is disabled or reads "Try again" (#1761).
+- Two "needs" lines on one screen agree: one checklist only (#1761).
+- A cross-mode link (Guided to Expert) sets the Back pill labelled with the origin card's own title; a same-mode link does not (#1757, #1752).
 
 ## Master merges
 

@@ -3,7 +3,7 @@
 
 # 06 — Reliability goal shows "3 h/yr (assumed)" and "No goal yet" at once; backup inputs grouped under Scenarios in Expert only
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: backend open in #1645, UI in #1735
 Owner: builder session_01G7qCuo15kNsNqjAaBLjvmL (backend first; reliability_goal.py after #1604)
 Size: S
 Gated: UX; GK B (goal value source)
@@ -25,3 +25,9 @@ Journey fit: set up the question (section 8) → run → results header ("the re
 - Backup and control-mode inputs live in section 5 in both modes. Section 8 may show them read-only with a link.
 - (UX) The goal editor shows the effective value with an "Assumed" chip until the user sets it.
 - (UX) Backup and control inputs have one editing home, section 5. Section 8 shows a read-only copy with a `withReturn` link that requests the section, then scrolls to the field.
+
+## Comments
+
+- Seen again 2026-11-20 (template walk, master 1f6905e3): H2 Guided Goal card still reads 'No goal yet' (no default goal); DC and microgrid show 'No goal yet' in the field while the Assumptions row says '3 h/yr (assumed)'. The verdict text now correctly names 'section 8, Scenarios & optimisation'.
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): Ammonia: verdict "No reliability goal is set for this site, so the study did not certify it", with a Set a goal button; Guided cost shown. Concentrator and IPP: Reliability not offered or not reached.

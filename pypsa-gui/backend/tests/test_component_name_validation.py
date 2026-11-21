@@ -28,6 +28,8 @@ from __future__ import annotations
 import io
 import zipfile
 
+from tests.bundle_util import refresh_manifest
+
 import pandas as pd
 import pypsa
 import pytest
@@ -376,7 +378,7 @@ def _bundle_with(client, name: str, network: pypsa.Network, tmp_path) -> bytes:
     with zipfile.ZipFile(buf, "w") as zf:
         for m in src.namelist():
             zf.writestr(m, nc if m == "network.nc" else src.read(m))
-    return buf.getvalue()
+    return refresh_manifest(buf.getvalue())  # the edit changes members, so the manifest is rebuilt (project-io 02)
 
 
 def test_a_bundle_with_a_bad_name_is_refused_before_the_swap(

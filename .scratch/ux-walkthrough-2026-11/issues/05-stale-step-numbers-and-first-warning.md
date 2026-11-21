@@ -3,7 +3,11 @@
 
 # Verdict text points to 'step 3 (Goal)'; every template opens with a warning
 
-Status: needs-triage
+Status: ready-for-agent; audit 2026-11-19: stale step numbers fixed (#1611, #1695); left: em dashes (SiteTypeSelect.tsx), amber first screen (needs template-e2e 01)
+Model tier: sonnet
+Size: S
+Blocked by: #1611 merged (it rewrites the Guided verdict text)
+Likely files: `pypsa-gui/frontend/src/pages/hubDesign/` verdict text; the Guided step names; `docs/agents/review-ux.md` colon rule
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J3 Readiness, J6 Results
 Severity: medium
@@ -23,3 +27,7 @@ Verdict text names the section by its current name with a link, and a template t
 ## Journey fit
 
 J3 to J6.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Narrowed to the stale "step 3 (Goal)" text (name the section with a link) and the em dashes. The amber first screen from "no site location" is template-e2e 01 (ready), so not repeated here. Check #1611 first: it may already rewrite the sentence.

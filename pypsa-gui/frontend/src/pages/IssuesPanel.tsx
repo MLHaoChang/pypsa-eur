@@ -16,8 +16,12 @@ import { RunFromReadiness } from '../components/RunFromReadiness'
 import { FlowStateDot } from '../components/FlowStateDot'
 import { FLOW_SECTIONS, type FlowSectionId } from '../api/flow'
 import { useProjectFlow } from '../hooks/useProjectFlow'
+import { AssumptionsCard, isAssumedItem } from './hubDesign/AssumptionsCard'
+import { fieldWords, isOpenItem } from '../utils/flowItems'
+import { useFieldLabels } from '../hooks/useFieldLabels'
+import type { FlowItem } from '../api/flow'
 import { sectionForComponent, sectionMeta } from '../layout/flowSections'
-import { openOffGridConstraints } from '../layout/flowNavigation'
+import { openFlowTarget, openOffGridConstraints } from '../layout/flowNavigation'
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
 import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
@@ -95,8 +99,7 @@ export default function IssuesPanel() {
     }
   }, [data?.issues])
 
-  const allOk = data && data.errors === 0 && data.warnings === 0
-  const total = (data?.issues?.length ?? 0)
+  const preflightOk = data && data.errors === 0 && data.warnings === 0
 
   // The open 3D site's layout findings (visual-layers plan 3 S2), published
   // by the site view: advisory, with the same deep link as the preflight
@@ -141,14 +144,44 @@ export default function IssuesPanel() {
       for (const it of sec.items) filed.set(`${it.code}|${it.target.entity ?? ''}`, sec.section)
     }
     const groups = new Map<FlowSectionId | 'other', ValidationIssue[]>()
+    const reported = new Set<string>()
     for (const issue of [...grouped.errors, ...grouped.warnings]) {
+      reported.add(`${issue.code}|${issue.name ?? ''}`)
       const key = filed.get(`${issue.code}|${issue.name ?? ''}`)
         ?? sectionForComponent(issue.component_class) ?? 'other'
       groups.set(key, [...(groups.get(key) ?? []), issue])
     }
+    // template-e2e 09: the open items only the flow lists (no preflight check
+    // reports them; e.g. a missing site location) are filed under their
+    // section too, so the rows here are the ones the sidebar badge counts.
+    // Assumed values have their own group below.
+    const flowOnly = new Map<FlowSectionId, FlowItem[]>()
+    for (const sec of flow?.sections ?? []) {
+      if (sec.state === null) continue
+      // Validation items mirror the preflight above, which stays the live source for them.
+      const extra = sec.items.filter(it => isOpenItem(it) && !isAssumedItem(it)
+        && it.source !== 'validation' && !reported.has(`${it.code}|${it.target.entity ?? ''}`))
+      if (extra.length) flowOnly.set(sec.section, extra)
+    }
     const order: Array<FlowSectionId | 'other'> = [...FLOW_SECTIONS, 'other']
-    return order.filter(k => groups.has(k)).map(k => ({ key: k, issues: groups.get(k) as ValidationIssue[] }))
+    return order.filter(k => groups.has(k) || (k !== 'other' && flowOnly.has(k))).map(k => ({
+      key: k, issues: groups.get(k) ?? [],
+      flowItems: k === 'other' ? [] : (flowOnly.get(k) ?? []),
+    }))
   }, [flow, grouped])
+  const flowOnlyTotal = bySection.reduce((n, g) => n + g.flowItems.length, 0)
+  const allOk = preflightOk && flowOnlyTotal === 0
+  const total = (data?.issues?.length ?? 0) + flowOnlyTotal
+
+  // template-e2e 09: the assumed values Guided lists on each section's
+  // Assumptions card, by flow section, through the same card and words, so
+  // Expert never shows less than Guided (EXPERT-GUIDED-1). In-scope sections
+  // only, as the sidebar badge counts them.
+  const assumedBySection = useMemo(() => (flow?.sections ?? [])
+    .filter(sec => sec.state !== null)
+    .map(sec => ({ key: sec.section, items: sec.items.filter(isOpenItem).filter(isAssumedItem) }))
+    .filter(g => g.items.length > 0), [flow])
+  const assumedTotal = assumedBySection.reduce((n, g) => n + g.items.length, 0)
 
   return (
     <div className="flex flex-col h-full">
@@ -200,6 +233,9 @@ export default function IssuesPanel() {
           </div>
         )}
 
+        {/* Every PageSection here is shrink-0: a flex child with overflow-hidden
+            otherwise shrinks to fit, squashing the lists instead of letting
+            PageBody scroll (seen once Assumptions joined the panel). */}
         {/* StatCard strip — Errors leads as the accent metric. */}
         <RowGrid cols={2}>
           <StatCard
@@ -220,9 +256,10 @@ export default function IssuesPanel() {
         </RowGrid>
 
         <PageSection
+          className="shrink-0"
           title="Findings"
           count={total}
-          hint="Live preflight — the same gate Run LOPF uses"
+          hint="Live preflight (the gate Run LOPF uses) and the project's other open items"
           right={
             <div className="flex items-center gap-2">
               {/* Warnings do not block the run: the Run is here too, not only in the all-clear. */}
@@ -300,10 +337,13 @@ export default function IssuesPanel() {
             <div className="flex flex-col">
               {bySection.map(g => (
                 <div key={g.key} data-testid={`issues-section-${g.key}`}>
-                  <SectionGroupHeader id={g.key} count={g.issues.length} />
+                  <SectionGroupHeader id={g.key} count={g.issues.length + g.flowItems.length} />
                   {g.issues.map((issue, i) => (
                     <IssueRow key={`${issue.severity}-${i}-${issue.code}-${issue.name}`} issue={issue}
                       onJumpTo={jumpTo} carriers={carriers} />
+                  ))}
+                  {g.flowItems.map((it, i) => (
+                    <FlowItemRow key={`flow-${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />
                   ))}
                 </div>
               ))}
@@ -313,8 +353,28 @@ export default function IssuesPanel() {
           <NotInScopeGroup />
         </PageSection>
 
+        {assumedTotal > 0 && (
+          <PageSection
+            className="shrink-0"
+            title="Assumptions"
+            count={assumedTotal}
+            hint="Values the run uses until you confirm or change them"
+            bodyClassName=""
+          >
+            <div className="flex flex-col pb-3" data-testid="issues-assumptions">
+              {assumedBySection.map(g => (
+                <div key={g.key} data-testid={`issues-assumptions-${g.key}`}>
+                  <SectionGroupHeader id={g.key} count={g.items.length} />
+                  <div className="px-4"><AssumptionsCard items={g.items} /></div>
+                </div>
+              ))}
+            </div>
+          </PageSection>
+        )}
+
         {layoutSite && layoutFindings.length > 0 && (
           <PageSection
+            className="shrink-0"
             title="Site layout"
             count={layoutFindings.length}
             hint={`${layoutSite.name} · from the 3D site view; advisory, nothing blocks a save`}
@@ -330,6 +390,7 @@ export default function IssuesPanel() {
 
         {topologyFindings.length > 0 && (
           <PageSection
+            className="shrink-0"
             title="Topology check"
             count={topologyFindings.length}
             hint="The model against the map's routes and site boundaries; advisory, nothing blocks a run"
@@ -344,6 +405,7 @@ export default function IssuesPanel() {
         )}
         {gridReadiness && (
           <PageSection
+            className="shrink-0"
             title="Grid readiness"
             hint="Screening against the connection limits and the grid code"
             bodyClassName=""
@@ -428,6 +490,30 @@ function TopologyFindingRow({ finding, onJumpTo }: { finding: TopologyFinding; o
         className="shrink-0 flex items-center gap-1 self-center rounded-md border border-accent/30 bg-accent/5 px-2 py-1 text-[10.5px] font-medium text-accent hover:bg-accent/10 hover:border-accent/50 transition-colors"
       >
         View <ArrowRight size={11} />
+      </button>
+    </div>
+  )
+}
+
+// An open item only the flow lists, in the words Guided's section shows it,
+// opening its field in Expert.
+function FlowItemRow({ item }: { item: FlowItem }) {
+  const labels = useFieldLabels()
+  const field = fieldWords(item.target, labels, item.message)
+  const tone = item.severity === 'error' ? 'text-danger' : 'text-warn'
+  const Icon = item.severity === 'error' ? XCircle : AlertTriangle
+  return (
+    <div data-testid="issues-flow-item" data-severity={item.severity}
+      className="flex items-start gap-2 px-4 py-1.5 text-[11.5px] text-text">
+      <Icon size={13} className={`mt-0.5 shrink-0 ${tone}`} />
+      <span className="flex-1">
+        {item.message}
+        {field && <span className="text-muted"> ({field})</span>}
+      </span>
+      <button type="button" data-testid="issues-flow-item-open" onClick={() => openFlowTarget(item.target)}
+        title={`Open ${field ?? 'this field'}`}
+        className="shrink-0 text-[11px] text-accent hover:underline">
+        Open ›
       </button>
     </div>
   )
