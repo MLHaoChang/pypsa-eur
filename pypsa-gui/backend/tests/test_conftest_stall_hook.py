@@ -28,6 +28,7 @@ def test_undrainable_reset_dumps_stacks_and_exits(tmp_path, monkeypatch):
     monkeypatch.setattr(sq.solve_queue, "_q", q)
     monkeypatch.setattr(sq, "_RESET_JOIN_TIMEOUT_S", 0.05)
     monkeypatch.setattr(conftest, "_RESULTS_DIR", tmp_path)
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)  # may run in a worker
     armed = []
     killed = []
     monkeypatch.setattr(conftest, "_kill_child_processes", lambda: killed.append(True))
@@ -104,3 +105,19 @@ def test_child_processes_are_killed():
         [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=60
     )
     assert out.stdout.strip() == "-9", out.stderr
+
+
+def test_each_xdist_worker_writes_its_own_stall_dump(tmp_path, monkeypatch):
+    """Workers that stall together must not overwrite each other's dump."""
+    conftest = _tests_conftest()
+    monkeypatch.setattr(conftest, "_RESULTS_DIR", tmp_path)
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw7")
+    first = conftest._dump_stall_diagnostics(1)
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw8")
+    second = conftest._dump_stall_diagnostics(1)
+
+    assert (first.name, second.name) == (
+        "solve-queue-stall-gw7.txt",
+        "solve-queue-stall-gw8.txt",
+    )
+    assert first.exists() and second.exists()

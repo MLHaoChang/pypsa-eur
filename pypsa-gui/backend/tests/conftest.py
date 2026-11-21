@@ -107,7 +107,10 @@ def _dump_stall_diagnostics(unfinished: int) -> pathlib.Path:
     import traceback
 
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out = _RESULTS_DIR / "solve-queue-stall.txt"
+    # Under pytest-xdist several workers can stall at once; one file per worker
+    # keeps a later dump from overwriting (or interleaving with) an earlier one.
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    out = _RESULTS_DIR / (f"solve-queue-stall-{worker}.txt" if worker else "solve-queue-stall.txt")
     names = {t.ident: t.name for t in threading.enumerate()}
     with out.open("w") as f:
         f.write(f"unfinished_tasks={unfinished}\n")
