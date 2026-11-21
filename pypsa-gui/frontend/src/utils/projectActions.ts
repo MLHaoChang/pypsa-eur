@@ -392,7 +392,7 @@ export async function releaseProjectLock(projectId: string): Promise<void> {
 }
 
 /** The project kind of a planning → dynamics (gridspine) study. */
-const STUDY_KIND = 'planning_dynamics'
+export const STUDY_KIND = 'planning_dynamics'
 
 /**
  * `ref` (an id or a name) as a planning → dynamics STUDY, or null when it is an

@@ -201,6 +201,51 @@ describe('GridspinePanel', () => {
     expect(screen.queryByText(/ranked snapshots/i)).toBeNull()
   })
 
+  it('says it is loading, and why Run study is off, until the status arrives (pio/08)', async () => {
+    let resolve!: (v: StageStatus) => void
+    api.status.mockReturnValue(new Promise<StageStatus>(r => { resolve = r }))
+    renderPanel()
+    expect((await screen.findByTestId('study-loading')).textContent).toMatch(/loading the study/i)
+    expect(screen.getByTestId('run-blocked').textContent).toMatch(/loading the study/i)
+    expect((screen.getByRole('button', { name: /run study/i }) as HTMLButtonElement).disabled).toBe(true)
+    resolve(completed)
+    await waitFor(() => expect(screen.queryByTestId('study-loading')).toBeNull())
+    expect(screen.queryByTestId('run-blocked')).toBeNull()
+  })
+
+  it('says a running study is why Run study is off', async () => {
+    api.status.mockResolvedValue({
+      ...completed, status: 'running', selected_hours: [], bundles: {},
+      stages: { ...completed.stages, dispatch: done('running'), ranking: done('pending', 0),
+                loadflow: done('pending', 0), screening: done('pending', 0), handoff: done('pending', 0) },
+    })
+    renderPanel()
+    await waitFor(() => expect(screen.getByTestId('run-blocked').textContent).toMatch(/the study is running/i))
+  })
+
+  it('shows dispatch progress by window, with a bar and the elapsed time (pio/08)', async () => {
+    api.status.mockResolvedValue({
+      ...completed, status: 'running', selected_hours: [], bundles: {},
+      stages: { ...completed.stages,
+                dispatch: { state: 'running', done: 1, total: 3, elapsed_s: 192.4 },
+                ranking: done('pending', 0), loadflow: done('pending', 0),
+                screening: done('pending', 0), handoff: done('pending', 0) },
+    })
+    renderPanel()
+    await waitFor(() => expect(screen.getByTestId('stage-dispatch').textContent).toContain('window 2 of 3, 1 solved'))
+    expect(screen.getByTestId('stage-dispatch-elapsed').textContent).toBe('3:12')
+    const bar = screen.getByRole('progressbar', { name: /unit commitment progress/i })
+    expect(bar.getAttribute('aria-valuenow')).toBe('1')
+    expect(bar.getAttribute('aria-valuemax')).toBe('3')
+  })
+
+  it('shows no window count or clock on a finished dispatch', async () => {
+    renderPanel()
+    const row = await screen.findByTestId('stage-dispatch')
+    expect(row.textContent).not.toMatch(/window/)
+    expect(screen.queryByTestId('stage-dispatch-elapsed')).toBeNull()
+  })
+
   it('renders an aborted run’s error artifact inline', async () => {
     api.status.mockResolvedValue({
       ...completed, status: 'aborted', bundles: {},

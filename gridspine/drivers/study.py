@@ -14,7 +14,7 @@ from its own artifacts.
 import dataclasses
 from pathlib import Path
 
-from gridspine.drivers.progress import Progress
+from gridspine.drivers.progress import PROGRESS_RECORD, Progress
 from gridspine.drivers.year_study import (
     dispatch_from_external,
     dispatch_from_network,
@@ -176,7 +176,7 @@ def run_study(config: StudyConfig, progress=None, stop_event=None):
     if not isinstance(config, StudyConfig):
         raise ContractError(f"run_study takes a StudyConfig, got {type(config).__name__}")
     _clear_stale_errors(config.outdir)
-    bus = Progress(progress, stop_event)
+    bus = Progress(progress, stop_event, record=Path(config.outdir) / PROGRESS_RECORD)
     common = dict(
         k=config.k, screen=config.screen,
         n2_prune_threshold_pct=config.n2_prune_threshold_pct,

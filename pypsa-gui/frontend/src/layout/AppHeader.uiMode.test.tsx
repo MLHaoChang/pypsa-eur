@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import toast from 'react-hot-toast'
 import AppHeader from './AppHeader'
+import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
 import { WRITABLE } from '../utils/lockState'
 import { activeJobForProject } from '../hooks/useSolveQueue'
@@ -144,6 +145,27 @@ describe('AppHeader — the Run button per mode', () => {
     useUIStore.setState({ uiMode: 'guided' })
     renderHeader()
     expect(screen.queryByTitle(/queues the solve/)).toBeNull()
+  })
+
+  // pio/08: a planning → dynamics study has no network to solve; its run is
+  // the study panel's Run study.
+  it('Expert, in a study project: no idle Run button', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([{ id: 'p1', name: 'p1', project_kind: 'planning_dynamics' }] as never)
+    useUIStore.setState({ uiMode: 'expert', currentProject: 'p1' })
+    try {
+      renderHeader()
+      await waitFor(() => expect(screen.queryByTitle(/queues the solve/)).toBeNull())
+    } finally { vi.mocked(projectsApi.list).mockResolvedValue([]) }
+  })
+
+  it('Expert, in an ordinary project: the idle Run button stays', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([{ id: 'p1', name: 'p1', project_kind: null }] as never)
+    useUIStore.setState({ uiMode: 'expert', currentProject: 'p1' })
+    try {
+      renderHeader()
+      await waitFor(() => expect(vi.mocked(projectsApi.list)).toHaveBeenCalled())
+      expect(screen.getByTitle(/queues the solve/)).toBeTruthy()
+    } finally { vi.mocked(projectsApi.list).mockResolvedValue([]) }
   })
 
   // Re-gate R15: the safety half — a solve in flight stays abortable.

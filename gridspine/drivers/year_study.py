@@ -257,7 +257,9 @@ def dispatch_year(outdir, hours: int = 8760, window: int = 168, overlap: int = 2
 
         dispatch = to_dispatch_table(run_uc_rolling(
             n, window=window, overlap=overlap,
-            on_window=lambda done, total: progress.tick("dispatch", done, total),
+            on_window=lambda done, total: (
+                progress.begin("dispatch", total) if done == 0
+                else progress.tick("dispatch", done, total)),
         ))
         dispatch.to_csv(outdir / "dispatch.csv", index=False)
         return net, registry, dispatch, loads

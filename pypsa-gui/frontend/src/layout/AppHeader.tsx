@@ -1,4 +1,5 @@
 import { Play, Zap, Search, Loader, PanelRightClose, PanelRightOpen, Undo2, Save, Check, Command, LayoutGrid } from 'lucide-react'
+import { useOpenProjectIsStudy } from '../hooks/useOpenProjectKind'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useSimulationStore, appLog } from '../store/simulationStore'
@@ -620,6 +621,7 @@ export default function AppHeader() {
   }
   const runLabel = `Run ${MODE_LABEL[mode] ?? mode.toUpperCase()}`
   const runGate = useRunGate('optimisation')
+  const isStudy = useOpenProjectIsStudy()
   const staleKinds = useStaleRunKinds()
   const uncheckedKinds = useUncheckedRunKinds()
   // "Out of date" and "unchecked" are separate words: an unchecked kind is never read as current (PG-04b).
@@ -1100,6 +1102,9 @@ export default function AppHeader() {
         // the idle solve button is hidden; a queued / running solve still
         // shows here so it can be cancelled or aborted.
         if (uiMode === 'guided' && !amber) return null
+        // A planning → dynamics study has no network to solve: its run is the
+        // study panel's Run study (pio/08).
+        if (isStudy && !amber) return null
         // Disabled exactly when the server would refuse (design §3.3), saying
         // why by section; display-only gaps ride beside an enabled Run.
         const gated = runGate.blocked && !amber

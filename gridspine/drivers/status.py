@@ -22,10 +22,12 @@ boundary the backend calls, and it must not import an engine to answer "how
 far did this get".
 """
 import json
+import time
 from pathlib import Path
 
 import pandas as pd
 
+from gridspine.drivers.progress import PROGRESS_RECORD
 from gridspine.drivers.year_study import REASON_SEP, STAGES
 from gridspine.schema.contracts import ContractError
 
@@ -65,6 +67,26 @@ def _n_selected(outdir: Path):
         return int(len(pd.read_csv(path)))
     except (OSError, ValueError):
         return None
+
+
+def _live_record(outdir: Path) -> dict:
+    """The run's live `progress.json`, or `{}` when there is none or it is unreadable."""
+    try:
+        body = json.loads((outdir / PROGRESS_RECORD).read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(body, dict):
+        return {}
+    try:
+        return {
+            "stage": str(body["stage"]),
+            "done": int(body["done"]),
+            "total": int(body["total"]),
+            "stage_started_at": (float(body["stage_started_at"])
+                                 if body.get("stage_started_at") is not None else None),
+        }
+    except (KeyError, TypeError, ValueError):
+        return {}
 
 
 def stage_status(outdir) -> dict:
@@ -107,6 +129,7 @@ def stage_status(outdir) -> dict:
     # only ever created — the difference the UI shows as a queued job.
     started = outdir.is_dir() and any(outdir.iterdir())
 
+    live = _live_record(outdir)
     stages, blocked = {}, False
     for stage in STAGES:
         complete, done, total = signals[stage]
@@ -121,9 +144,17 @@ def stage_status(outdir) -> dict:
         else:
             state = "running" if _previous_done(stages, stage, started) else "pending"
             blocked = True
+        # The running stage's own artifacts appear only when it ends; the live
+        # record (`progress.json`, written by the run) says how far it is.
+        # Disk still wins: a stage done on disk, or failed, ignores it.
+        record = live if state == "running" and live.get("stage") == stage else {}
+        if total is None and record.get("total"):
+            done, total = record["done"], record["total"]
         if total is None:
             done, total = (1, 1) if state == "done" else (0, 1)
         stages[stage] = {"state": state, "done": int(done or 0), "total": int(total or 0)}
+        if record.get("stage_started_at") is not None:
+            stages[stage]["elapsed_s"] = round(max(0.0, time.time() - record["stage_started_at"]), 1)
 
     failed = next((s for s in STAGES if stages[s]["state"] in ("failed", "aborted")), None)
     if failed is not None:

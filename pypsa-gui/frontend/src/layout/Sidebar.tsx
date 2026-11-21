@@ -34,7 +34,9 @@ import { SItem, SectionHdr, SubHdr } from './sidebar/SidebarRows'
 import {
   ResultsWorkbookPicker, WORKBOOK_DEFAULT, useWorkbookViews, workbookBlock, type WorkbookChoice,
 } from './sidebar/ResultsWorkbookPicker'
-import { STEPS, type StepId } from './sidebar/steps'
+import { STEPS, stepsForKind, type Step, type StepId } from './sidebar/steps'
+import { useOpenProjectKind } from '../hooks/useOpenProjectKind'
+import { STUDY_KIND } from '../utils/projectActions'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -1072,6 +1074,16 @@ function ProjectSectionContent({
  * Guided mode's one navigation entry for the hub-design flow (spec §3.5).
  * Rendered only in Guided; Expert never shows it.
  */
+/** One step of the expanded sidebar: its header and, when open, its rows. */
+function StepGroup({ step, open, onToggle }: { step: Step; open: boolean; onToggle: () => void }) {
+  return (
+    <section aria-label={step.label} data-testid={`sidebar-group-${step.id}`}>
+      <SectionHdr title={step.title} open={open} onToggle={onToggle} testId={`sidebar-section-${step.id}`} />
+      {open && <step.Content />}
+    </section>
+  )
+}
+
 function HubDesignNavButton({ compact = false, onCloseModal }: {
   compact?: boolean
   onCloseModal?: () => void
@@ -1305,6 +1317,11 @@ export default function Sidebar() {
   } = useUIStore()
   // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
   const guided = uiMode === 'guided'
+  // A planning → dynamics study shows only the steps that apply to it, and no
+  // hub-design entry: it has no network (pio/08).
+  const kind = useOpenProjectKind()
+  const isStudy = kind === STUDY_KIND
+  const steps = stepsForKind(kind)
   const [sections, setSections] = useState<Record<FlyoutSection, boolean>>({
     project: true, setup: true, model: true, run: true, results: true, reports: true,
   })
@@ -1438,7 +1455,7 @@ export default function Sidebar() {
             </button>
           </div>
 
-          {guided && (
+          {guided && !isStudy && (
             <div className="w-full border-b border-border shrink-0">
               <HubDesignNavButton compact onCloseModal={() => setActiveFlyout(null)} />
             </div>
@@ -1448,7 +1465,7 @@ export default function Sidebar() {
               expanded sidebar keeps it in its footer). Guided shows only the
               project (spec §3.5). */}
           <div className="flex-1 flex flex-col w-full">
-            {!guided && STEPS.map(step => (
+            {(!guided || isStudy) && steps.map(step => (
               <IconStripBtn key={step.id} icon={step.icon} label={step.label} sectionId={step.id}
                 activeFlyout={activeFlyout} onClick={() => toggleFlyout(step.id)} />
             ))}
@@ -1514,7 +1531,7 @@ export default function Sidebar() {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
 
-          {guided && (
+          {guided && !isStudy && (
             <div className="px-2 pt-1 pb-1">
               <HubDesignNavButton />
             </div>
@@ -1533,11 +1550,11 @@ export default function Sidebar() {
                 guided
               />
             )}
-          </>) : STEPS.map(step => (
-            <section key={step.id} aria-label={step.label} data-testid={`sidebar-group-${step.id}`}>
-              <SectionHdr title={step.title} open={sections[step.id]} onToggle={() => toggleSection(step.id)} testId={`sidebar-section-${step.id}`} />
-              {sections[step.id] && <step.Content />}
-            </section>
+            {isStudy && steps.map(step => (
+              <StepGroup key={step.id} step={step} open={sections[step.id]} onToggle={() => toggleSection(step.id)} />
+            ))}
+          </>) : steps.map(step => (
+            <StepGroup key={step.id} step={step} open={sections[step.id]} onToggle={() => toggleSection(step.id)} />
           ))}
         </div>
 

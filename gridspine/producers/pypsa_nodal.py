@@ -323,9 +323,10 @@ def run_uc_rolling(
     place commitment can go wrong; `tests/gridspine/test_producer_year.py`
     asserts run lengths over the ASSEMBLED series for exactly that reason.
 
-    `on_window(done, total)` is called after each window is solved and frozen —
-    the only progress this loop can honestly report, since a window is one
-    MILP. A caller that wants to stop raises from it (the driver's `Progress`
+    `on_window(done, total)` is called once with `done=0` before the first
+    window, so a caller knows the total while the first MILP solves, then
+    after each window is solved and frozen — the only progress this loop can
+    honestly report, since a window is one MILP. A caller that wants to stop raises from it (the driver's `Progress`
     does exactly that): the next window is never started and nothing partial
     is written, because the dispatch table is assembled only at the end.
     """
@@ -348,6 +349,8 @@ def run_uc_rolling(
     frozen_status, dispatch = [], []
     t0 = 0
     solved = 0
+    if on_window is not None:
+        on_window(0, n_windows)
     while True:
         w_sns = sns[t0:t0 + window]
         status, condition = n.optimize(

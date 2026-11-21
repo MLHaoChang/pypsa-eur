@@ -87,3 +87,41 @@ describe('Planning → dynamics row', () => {
     expect(screen.getByText('Planning → dynamics')).toBeTruthy()
   })
 })
+
+// pio/08: a study has no network, so the hub sections and their state dots do
+// not apply to it; only its own panel does.
+describe('A planning → dynamics study project', () => {
+  it('shows only the results band, holding only the study row', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([project('Demo', 'planning_dynamics')])
+    renderSidebar()
+    await screen.findByText('Planning → dynamics')
+    await waitFor(() => expect(screen.queryByTestId('sidebar-group-setup')).toBeNull())
+    for (const band of ['model', 'run', 'reports']) {
+      expect(screen.queryByTestId(`sidebar-group-${band}`)).toBeNull()
+    }
+    expect(screen.getByTestId('sidebar-group-results')).toBeTruthy()
+    for (const row of ['Grid connection', 'Results', 'Grid study results', 'Reports', 'Snapshots']) {
+      expect(screen.queryByText(row, { selector: 'span' })).toBeNull()
+    }
+  })
+
+  it('shows only the results step in the icon strip', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([project('Demo', 'planning_dynamics')])
+    useUIStore.setState({ sidebarMode: 'icon' as never })
+    renderSidebar()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Model' })).toBeNull())
+    expect(screen.getByRole('button', { name: 'Results' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Set-up' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Question & run' })).toBeNull()
+  })
+
+  it('keeps every band while the kind is unknown', async () => {
+    vi.mocked(projectsApi.list).mockResolvedValue([project('Other', 'planning_dynamics')])
+    renderSidebar()
+    await screen.findByText('Grid connection')
+    await waitFor(() => expect(vi.mocked(projectsApi.list)).toHaveBeenCalled())
+    for (const band of ['setup', 'model', 'run', 'results', 'reports']) {
+      expect(screen.getByTestId(`sidebar-group-${band}`)).toBeTruthy()
+    }
+  })
+})
