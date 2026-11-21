@@ -170,6 +170,7 @@ TABLE: tuple[Entry, ...] = (
 NOT_CARRIED: dict[str, str] = {
     ".eh_template.lock": "a lock file",
     ".lock": "a lock file",
+    ".uploads.lock": "a lock file",
     "install.json": "the app install record, not a project file",
     "chat.jsonl": "a per-conversation thread; forks copy it themselves",
     # Inside a folder the table carries whole.
