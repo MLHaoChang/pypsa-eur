@@ -74,12 +74,18 @@ export interface FlowItem {
 export interface FlowHeld {
   component: string
   entity: string
+  /** Section 5 asset rows: the size an extendable asset's two equal, finite bounds pin
+   *  (`flow_service._pin_sizes`); null or absent when the study sizes it. */
+  fixed_size?: number | null
   carrier: string | null
   field: string | null
   value: number | null
   unit: string | null
   extendable: boolean
   series: boolean
+  /** Asset rows only: a Generator the model adds (slack, buy-in, shortfall).
+   *  Display only; a missing or non-boolean value reads as not a helper. */
+  helper?: boolean
   /** Section 2's recipe rows only (gap 03): the inputs per unit of product. */
   recipe?: FlowRecipe
 }
@@ -306,7 +312,10 @@ export interface GoalValue<T> { value: T; source: GoalSource }
 /** The project's one reliability goal (W3b-R) as every study resolves it.
  *  A `default` target or ENS of null is "the site type's own value". */
 export interface ReliabilityGoal {
-  target_lole_h: GoalValue<number | null>
+  /** On a `default` source, `assumed` is the site type's own goal (h/yr),
+   *  the one the reliability study certifies against; null when it has none.
+   *  `value` stays null: nobody set it (walkthrough asset-investment 01). */
+  target_lole_h: GoalValue<number | null> & { assumed?: number | null }
   ens_cap_permyriad: GoalValue<number | null>
   mc_draws: GoalValue<number>
   site_archetype: GoalValue<'strong_grid' | 'weak_flexible' | 'off_grid'>

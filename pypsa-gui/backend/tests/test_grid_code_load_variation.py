@@ -94,3 +94,9 @@ def test_pre_existing_keys_are_unchanged():
     for name, before in frozen.items():
         after = {k: v for k, v in G.load_grid_code(name, raw=True).items() if k not in NEW_KEYS}
         assert after == {k: v for k, v in before.items()}, name
+
+
+def test_raw_names_1_asset_names_helper():
+    from services.adequacy.grid_readiness import _asset_names
+
+    assert _asset_names(["bess_new", "ups_battery"]) == "“BESS new”, “UPS battery”"

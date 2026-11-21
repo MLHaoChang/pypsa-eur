@@ -298,6 +298,11 @@ def _result_df(n, accessor_name: str, attr: str, source: str = "lopf", *, state=
     snap = (_state if state is None else state).get(f"{src}_results")
     if isinstance(snap, dict) and key in snap:
         return snap[key]
+    if src == "ac_pf" and isinstance(snap, dict):
+        # PF-SAVE-1: the live network holds the LP's tables, never the
+        # flow's, so a table the flow's record lacks (links in a project saved
+        # before them) is no data, not the LP's values under a PF label.
+        return None
     try:
         accessor = getattr(n, accessor_name, None)
         if accessor is None:

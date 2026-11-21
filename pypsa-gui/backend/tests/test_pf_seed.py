@@ -235,8 +235,21 @@ def test_failed_seed_falls_back_to_the_callers_call(effect, why):
     result, seeded_by = run_pf(n, log.append, **kw)
     assert seeded_by == [] and spy_calls == [kw]
     assert len(log) == 1 and "seed skipped" in log[0] and why in log[0]
+    assert "lpf() failed" not in log[0]
     assert "use_seed=True" not in log[0]
     assert result is not None
+
+
+def test_interrupt_in_the_seed_is_not_swallowed():
+    """The seed guard catches Exception only: Ctrl-C / SystemExit must propagate."""
+    n = _chain()
+
+    def lpf(**kw):
+        raise KeyboardInterrupt
+
+    n.lpf = lpf
+    with pytest.raises(KeyboardInterrupt):
+        run_pf(n, None, snapshots=n.snapshots)
 
 
 def test_nan_phase_shift_counts_as_no_shift():

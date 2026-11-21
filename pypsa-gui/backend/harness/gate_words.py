@@ -59,6 +59,10 @@ RULE_WORDS: dict[str, str] = {
     "eh.review.blockers": "Review blockers",
     "eh.site.context": "Site map context",
     "eh.study.status": "Study finished",
+    "grid.n1.secured": "Survives losing one line",
+    "grid.pf.converged": "Load flow converged",
+    "grid.pf.loading": "Lines within rating",
+    "grid.pf.voltage": "Bus voltages in band",
     "ex.cases.settled": "What-if cases settled",
     "h2.electrolyser.utilisation": "Electrolyser use",
     "h2.ic.counterfactual": "Comparison case",
@@ -89,6 +93,7 @@ RULE_WORDS: dict[str, str] = {
     "rp.report.unsupported_listed": "Unsupported chapters named",
     "set.project.exists": "Project exists",
     "set.project.template": "Project type",
+    "set.template.source": "Template data available",
     "sv.solve.state": "Solve finished",
 }
 

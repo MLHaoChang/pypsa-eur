@@ -322,13 +322,217 @@ def test_a_changed_horizon_reads_stale_exactly(study):
     }
 
 
-def test_a_changed_seed_reads_stale_and_an_unrecorded_seed_has_no_node(study):
+def test_a_changed_seed_reads_stale(study):
     _payload(study)["seed"] = 7
     assert _broken_labels(explain_study_figure("expected_shortfall")) == {"MC seed"}
-    _payload(study).pop("seed")
+
+
+@pytest.mark.parametrize("seed", ["missing", None], ids=["missing", "null"])
+def test_a_seed_the_study_did_not_record_reads_not_recorded_never_current(study, seed):
+    """02b W3: the seed keeps its node, reads "not recorded" and the figure is not current."""
+    if seed == "missing":
+        _payload(study).pop("seed")
+    else:
+        _payload(study)["seed"] = seed
     out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "uncompared"
+    assert out["outcome"]["uncompared"] == [S.input_id("mc/seed")]
+    step = _step(out, S.input_id("mc/seed"))
+    assert step["state"] == "uncompared" and step["value"] is None
+    assert step["via"]["recorded"]["unrecorded"] == "seed: not recorded"
+
+
+# ── 02b W1: draws and seed as the runner resolves them: the request's mc, else the pack ──
+
+
+def _request_now(monkeypatch, **request):
+    from services import flow_service
+
+    monkeypatch.setattr(
+        flow_service,
+        "_request_for",
+        lambda t, c=None: {"archetype": "strong_grid", **request},
+    )
+
+
+def _pack_now(monkeypatch, **over):
+    from services.adequacy import eh_study_runner
+
+    real = eh_study_runner._PACK_FACTORY["strong_grid"]
+    monkeypatch.setitem(
+        eh_study_runner._PACK_FACTORY,
+        "strong_grid",
+        lambda: real().model_copy(update=over),
+    )
+
+
+@pytest.mark.parametrize(
+    "mc, payload",
+    [
+        ({"draws": 800}, {"draws": 800}),
+        ({"seed": 3}, {"seed": 3}),
+        (
+            {"draws": 800, "seed": 3, "cov_target": 0.02},
+            {"draws": 800, "seed": 3, "cov_target": 0.02},
+        ),
+    ],
+    ids=["draws", "seed", "all"],
+)
+def test_a_request_mc_override_equal_to_the_record_reads_current(
+    study, monkeypatch, mc, payload
+):
+    _request_now(monkeypatch, mc=mc)
+    _payload(study).update(payload)
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+
+
+@pytest.mark.parametrize(
+    "mc, label",
+    [({"draws": 800}, "MC draws"), ({"seed": 3}, "MC seed")],
+    ids=["draws", "seed"],
+)
+def test_a_request_mc_override_other_than_the_record_reads_stale(
+    study, monkeypatch, mc, label
+):
+    _request_now(monkeypatch, mc=mc)
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "stale"
+    assert _broken_labels(out) == {label}
+
+
+def test_the_goal_s_draws_with_no_request_mc_read_as_the_goal(study):
+    _goal(study, mc_draws=1000)
+    _payload(study)["draws"] = 1000
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+
+
+def test_a_request_mc_draws_wins_over_the_goal(study, monkeypatch):
+    _goal(study, mc_draws=1000)
+    _request_now(monkeypatch, mc={"draws": 800})
+    _payload(study)["draws"] = 800
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+
+
+def test_with_neither_request_mc_nor_goal_draws_and_seed_read_as_the_pack(
+    study, monkeypatch
+):
+    _goal(study, mc_draws=None)
+    _pack_now(monkeypatch, mc_draws=700, mc_seed=11)
+    _payload(study).update(draws=700, seed=11)
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+    _payload(study).update(draws=500, seed=0)
+    assert _broken_labels(explain_study_figure("expected_shortfall")) == {
+        "MC draws",
+        "MC seed",
+    }
+
+
+def test_with_no_request_seed_the_seed_reads_as_the_pack_even_beside_goal_draws(
+    study, monkeypatch
+):
+    _pack_now(monkeypatch, mc_seed=11)
+    _payload(study)["seed"] = 11
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+
+
+# ── 02b W2: an mc the runner refuses leaves nothing to compare the MC settings with ──
+
+_MC_INPUTS = [S.input_id(f"mc/{k}") for k in ("draws", "seed", "cov_target")]
+
+
+@pytest.mark.parametrize(
+    "mc, words",
+    [
+        ("lots", "not an object"),
+        ([500], "not an object"),
+        ({"draws": 2001}, "at most 2000"),
+        ({"draws": 0}, "one the study refuses: draws: "),
+        ({"seed": -1}, "one the study refuses: seed: "),
+        ({"cov_target": 2}, "one the study refuses: cov_target: "),
+        ({"draws": "many"}, "one the study refuses: draws: "),
+        ({"bogus": 1}, "one the study refuses: bogus: "),
+    ],
+    ids=[
+        "text",
+        "list",
+        "over-max-draws",
+        "zero-draws",
+        "negative-seed",
+        "cov-over-1",
+        "draws-text",
+        "unknown-key",
+    ],
+)
+def test_an_mc_the_runner_refuses_reads_the_mc_settings_uncompared(
+    study, monkeypatch, mc, words
+):
+    _request_now(monkeypatch, mc=mc)
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "uncompared"
+    assert sorted(out["outcome"]["uncompared"]) == sorted(_MC_INPUTS)
+    for node in _MC_INPUTS:
+        step = _step(out, node)
+        assert step["state"] == "uncompared"
+        assert words in step["via"]["recorded"]["unrecorded"]
+    # Every other input still compares: only the MC settings lost their current value.
+    assert all(
+        s["state"] == "fresh"
+        for s in out["steps"]
+        if s["node"].startswith(S.input_id("run/"))
+    )
+
+
+def test_a_request_that_cannot_be_built_reads_the_mc_settings_stale_naming_why(
+    study, monkeypatch
+):
+    from services import flow_service
+
+    def boom(*_a, **_k):
+        raise RuntimeError("no template")
+
+    monkeypatch.setattr(flow_service, "_request_for", boom)
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "stale"
+    for node in _MC_INPUTS:
+        assert _step(out, node)["broken"]["reason"] == "cannot be read now: no template"
+
+
+def test_the_mc_draw_cap_is_the_runner_s_own(study, monkeypatch):
+    from services.adequacy import mc as _mc
+
+    _request_now(monkeypatch, mc={"draws": _mc.MAX_DRAWS})
+    _payload(study)["draws"] = _mc.MAX_DRAWS
+    assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+
+
+# ── 02b W4: a record the real writer produced ───────────────────────────────
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize(
+    "mc", [None, {"draws": 600, "seed": 7}], ids=["pack", "override"]
+)
+def test_a_record_the_study_writer_produced_reads_its_mc_settings_current(
+    install_network, monkeypatch, mc
+):
+    """The certification payload as `run_eh_study` writes it (int seed, eh_study.py `_mc_certify`), with the mc
+    the runner passes for the same request, reads fresh."""
+    from tests.test_energy_hub_mc_certify import _cert, _cert_network, _pack, _run
+
+    kwargs = {f"mc_{k}": v for k, v in (mc or {"draws": 500}).items()}
+    written = _cert(_run(_cert_network(), _pack(), **kwargs)).payload
+    assert isinstance(written["seed"], int) and not isinstance(written["seed"], bool)
+
+    install_network(_net())
+    ctx = PyPSAService.get_active_context()
+    _goal(ctx)
+    ctx.solver_state["eh_study"] = _record(ctx)
+    _payload(ctx).update({k: written[k] for k in ("draws", "seed", "cov_target")})
+    if mc is not None:
+        _request_now(monkeypatch, mc=mc)
+    out = explain_study_figure("expected_shortfall")
+    assert {_step(out, n)["state"] for n in _MC_INPUTS} == {"fresh"}
     assert out["outcome"]["state"] == "fresh"
-    assert all(s["node"] != S.input_id("mc/seed") for s in out["steps"])
 
 
 def test_a_changed_site_type_reads_stale(study):

@@ -1,0 +1,34 @@
+{
+ "profiles": {
+  "capacity/1": [
+   {
+    "metric": "optimal_capacity",
+    "formula": "*_nom_opt if extendable else *_nom, of the named component",
+    "validity": "verified solve (else unverified_solve); nominal and optimal finite and optimal >= 0, else invalid_or_missing_capacity. Refusals: component_class_required, unknown_component, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound"
+     }
+    }
+   },
+   {
+    "metric": "capacity_change",
+    "formula": "optimal_capacity - *_nom (the input)",
+    "validity": "verified solve (else unverified_solve); nominal and optimal finite and optimal >= 0, else invalid_or_missing_capacity. Refusals: component_class_required, unknown_component, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound"
+     }
+    }
+   }
+  ]
+ }
+}
