@@ -26,6 +26,7 @@
 import { useEffect, useId, useState, type FormEvent } from 'react'
 import { Sparkles, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { AddLlmProfileLink, isNoLlmRefusal, toastReportRefusal } from './llmProfileLink'
 import { reportChartErrorMessage, reportJobErrorMessage, type GenerateReportOptions } from '../../api/reports'
 import { listUploads, type UploadMeta } from '../../api/uploads'
 import { Dialog } from '../../components/Dialog'
@@ -81,6 +82,7 @@ export function GenerateReportDialog({
   const [templates, setTemplates] = useState<UploadMeta[]>([])
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errorSource, setErrorSource] = useState<unknown>(null)
   const saved = useReportCharts(project ?? null, open)
 
   // Reset the form on every open so a second report starts clean.
@@ -91,7 +93,7 @@ export function GenerateReportDialog({
     setPicked([])
     setInstruction('')
     setTemplateId('')
-    setError(null)
+    setError(null); setErrorSource(null)
     setPending(false)
   }, [open, defaultTitle])
 
@@ -133,15 +135,20 @@ export function GenerateReportDialog({
     if (instruction.trim()) opts.instruction = instruction.trim()
     if (templateId) opts.template_file_id = templateId
     setPending(true)
-    setError(null)
+    setError(null); setErrorSource(null)
     try {
-      await onGenerate(opts)
-      toast.success('Report generation started')
+      const out = await onGenerate(opts)
+      if ((out as { mode?: string } | null)?.mode === 'plain') {
+        toast.success('Plain report built from the stored results: no LLM key needed.')
+      } else {
+        toast.success('Report generation started')
+      }
       onClose()
     } catch (err) {
       const msg = reportJobErrorMessage(err, 'Could not start the report')
       setError(msg)
-      toast.error(`Could not start the report: ${msg}`)
+      setErrorSource(err)
+      toastReportRefusal('Could not start the report', msg, err)
     } finally {
       setPending(false)
     }
@@ -292,7 +299,7 @@ export function GenerateReportDialog({
         )}
 
         {error && (
-          <p className="text-[11.5px] text-danger" data-testid="generate-error" role="alert">{error}</p>
+          <p className="text-[11.5px] text-danger" data-testid="generate-error" role="alert">{error}{isNoLlmRefusal(errorSource) && <> <AddLlmProfileLink /></>}</p>
         )}
 
         <div className="flex justify-end gap-2 mt-1">
