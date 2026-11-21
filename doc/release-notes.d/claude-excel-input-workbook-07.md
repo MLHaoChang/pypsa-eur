@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A project's own Excel input workbook now imports its outage rate, outage-rate basis, MTTR and the other asset-form columns it writes, instead of leaving them out. A value the asset form would refuse refuses the import. The import report quotes in “…” and separates sheet and column with "·".

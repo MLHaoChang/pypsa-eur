@@ -126,7 +126,7 @@ def test_an_older_layout_reads_as_before_the_reroute(client, session_ctx, make, 
     # The old parser kept any column; the reader keeps only the app's own (E1) and says so.
     unmapped = [u["source_item"] for u in report["unmapped"]]
     assert unmapped == (
-        ["generators › column eh_flag"] if case == "legacy-sheets" else []
+        ["generators · column eh_flag"] if case == "legacy-sheets" else []
     )
     ctx = session_ctx(client)
     assert _network_input_fingerprint(ctx, exact=True) == BEFORE[case]["fingerprint"]
