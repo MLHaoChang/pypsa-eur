@@ -197,6 +197,42 @@ def test_the_tripwire_is_red_on_a_planted_frame():
     assert not _yielded_frame_names(planted) <= FRAMES
 
 
+def _progress_route_frames() -> set[str]:
+    """live-voice 11c: the frame names the /progress route (`chat_progress`
+    in `routers/chat.py`) writes: every `sse_frame(...)` inside it. A name
+    that is not a string constant is reported as `<not a constant>`."""
+    source = (BACKEND / "routers" / "chat.py").read_text(encoding="utf-8")
+    route = next(
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "chat_progress"
+    )
+    names: set[str] = set()
+    for node in ast.walk(route):
+        if (
+            isinstance(node, ast.Call)
+            and getattr(node.func, "attr", getattr(node.func, "id", None)) == "sse_frame"
+        ):
+            first = node.args[0] if node.args else None
+            names.add(
+                first.value
+                if isinstance(first, ast.Constant) and isinstance(first.value, str)
+                else "<not a constant>"
+            )
+    return names
+
+
+def test_the_progress_stream_writes_exactly_its_own_vocabulary():
+    """Q1: the /progress envelope is closed too, and kept apart from the turn
+    frames (whose tripwires above stay exact)."""
+    from harness.events import FRAME_PAYLOADS, PROGRESS_FRAME_PAYLOADS, PROGRESS_FRAMES
+
+    assert _progress_route_frames() == PROGRESS_FRAMES
+    assert "job_snapshot" not in FRAME_PAYLOADS and "job_terminal" not in FRAME_PAYLOADS
+    # The shared frame keeps one payload shape on both streams.
+    assert PROGRESS_FRAME_PAYLOADS["tool_progress"] == FRAME_PAYLOADS["tool_progress"]
+
+
 # ── 4. workflows ───────────────────────────────────────────────────────────
 
 _BACKTICKED = re.compile(r"`([a-z][a-z0-9_]*)`")

@@ -14,6 +14,7 @@ import { VOLL_TEXT } from '../delegate'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
 import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { GoalCard } from './GoalCard'
+import { GOAL_KEY_KEPT, GOAL_KEY_SITE_TYPE, GOAL_KEY_TEMPLATE, GOAL_KEY_TYPED } from './goalCardWords'
 import { nk } from '../../../utils/queryKeys'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
@@ -33,14 +34,17 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
 // a scope with Reliability off.
 const getFlowScope = vi.fn()
 const getReliabilityGoal = vi.fn()
+const getProjectFlow = vi.fn()
 vi.mock('../../../api/flow', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/flow')>()
   return { ...actual, getFlowScope: (...a: unknown[]) => getFlowScope(...a),
-    getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a) }
+    getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a),
+    getProjectFlow: (...a: unknown[]) => getProjectFlow(...a) }
 })
 
 beforeEach(() => {
   getFlowScope.mockReturnValue(new Promise(() => {}))
+  getProjectFlow.mockReturnValue(new Promise(() => {}))
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
   useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true, step: 'goal' })
@@ -55,6 +59,12 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
+/** No goal set: the server's `assumed` for the site type, as it sent it. */
+function assumedGoal(assumed: unknown) {
+  const g = goal({ site_archetype: ['off_grid', 'template'] })
+  return { ...g, target_lole_h: { ...g.target_lole_h, assumed } }
+}
+
 function mount() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={client}><GoalCard /></QueryClientProvider>)
@@ -68,7 +78,58 @@ describe('GoalCard goal (W3b-R: the one stored goal)', () => {
       site_archetype: ['weak_flexible', 'template'] }))
     mount()
     await waitFor(() => expect(input('hub-goal-lole').value).toBe('1.5'))
-    expect(screen.getByTestId('hub-goal-lole-template').textContent).toBe('From the project template')
+    // template-e2e 06: the shared Assumed chip names the source and value, and one key line says what to do
+    expect(screen.getByTestId('hub-goal-lole-assumed').dataset.state).toBe('assumed')
+    expect(screen.getByTestId('hub-goal-lole-assumed-source').textContent).toBe('Project template: 1.5 h/yr')
+    expect(screen.getByTestId('hub-goal-lole-key').textContent).toBe(GOAL_KEY_TEMPLATE)
+    expect(screen.queryByTestId('hub-goal-lole-template')).toBeNull()
+    expect(screen.queryByTestId('hub-goal-empty-hint')).toBeNull()
+  })
+
+  it('the site type\'s assumed goal fills the field, chip says so, and "No goal yet" is gone', async () => {
+    getReliabilityGoal.mockResolvedValue(assumedGoal(3))
+    mount()
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
+    expect(screen.getByTestId('hub-goal-lole-assumed').dataset.state).toBe('assumed')
+    expect(screen.getByTestId('hub-goal-lole-assumed-source').textContent).toBe('Site type: 3 h/yr')
+    expect(screen.getByTestId('hub-goal-lole-key').textContent).toBe(GOAL_KEY_SITE_TYPE)
+    expect(screen.queryByTestId('hub-goal-empty-hint')).toBeNull()
+  })
+
+  it.each([['a string', '3'], ['NaN', Number.NaN], ['null', null], ['missing', undefined]])(
+    'an assumed goal that is %s reads as not set (GK B 65)', async (_, assumed) => {
+      getReliabilityGoal.mockResolvedValue(assumedGoal(assumed))
+      mount()
+      await waitFor(() => expect(input('hub-goal-lole').disabled).toBe(false))
+      expect(input('hub-goal-lole').value).toBe('')
+      expect(input('hub-goal-lole').placeholder).toBe('not set')
+      expect(screen.queryByTestId('hub-goal-lole-assumed')).toBeNull()
+      expect(screen.getByTestId('hub-goal-empty-hint')).toBeTruthy()
+    })
+
+  it('typing over the assumed goal makes it the user\'s; clearing it brings the assumed one back', async () => {
+    getReliabilityGoal.mockResolvedValue(assumedGoal(3))
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
+    await user.clear(input('hub-goal-lole'))
+    await user.type(input('hub-goal-lole'), '2')
+    expect(screen.getByTestId('hub-goal-lole-assumed').dataset.state).toBe('typed')
+    expect(screen.queryByTestId('hub-goal-lole-assumed-source')).toBeNull()
+    expect(screen.getByTestId('hub-goal-lole-key').textContent).toBe(GOAL_KEY_TYPED)
+    await user.clear(input('hub-goal-lole'))
+    expect(screen.getByTestId('hub-goal-lole-assumed').dataset.state).toBe('assumed')
+  })
+
+  it('"Keep all defaults" on the goal row shows it as kept, with its source', async () => {
+    getReliabilityGoal.mockResolvedValue(assumedGoal(3))
+    getProjectFlow.mockResolvedValue({ sections: [{ section: 'scenarios', items: [{
+      code: 'assumed_lole_goal', severity: 'warning', acknowledged: true,
+      target: { section: 'scenarios', panel: 'simparams', component: '', entity: '', field: 'target_lole_h' },
+    }] }] })
+    mount()
+    await waitFor(() => expect(screen.getByTestId('hub-goal-lole-assumed').dataset.state).toBe('confirmed'))
+    expect(screen.getByTestId('hub-goal-lole-assumed-source').textContent).toBe('Site type: 3 h/yr')
+    expect(screen.getByTestId('hub-goal-lole-key').textContent).toBe(GOAL_KEY_KEPT)
   })
 
   it('a stored value wins and carries no template note', async () => {
@@ -76,14 +137,17 @@ describe('GoalCard goal (W3b-R: the one stored goal)', () => {
     mount()
     await waitFor(() => expect(input('hub-goal-lole').value).toBe('4'))
     expect(screen.queryByTestId('hub-goal-lole-template')).toBeNull()
+    expect(screen.getByTestId('hub-goal-lole-assumed').dataset.state).toBe('typed')
+    expect(screen.getByTestId('hub-goal-lole-key').textContent).toBe(GOAL_KEY_TYPED)
   })
 
   it('without a saved or template goal it reads "not set", as Expert does (no pack default shown)', async () => {
     mount()
     await waitFor(() => expect(input('hub-goal-lole').disabled).toBe(false))
     expect(input('hub-goal-lole').value).toBe('')
-    // readiness's pack default (3 h/yr on the data center) is never shown as the goal
+    // with no assumed goal from the server nothing is shown as the goal
     expect(input('hub-goal-lole').placeholder).toBe('not set')
+    expect(screen.queryByTestId('hub-goal-lole-assumed')).toBeNull()
     // P26 gate friction 5: the empty box says what to type, in plain words.
     expect(screen.getByTestId('hub-goal-empty-hint').textContent).toBe(
       'No goal yet. Type how many hours per year without power you can accept (for example 3) '

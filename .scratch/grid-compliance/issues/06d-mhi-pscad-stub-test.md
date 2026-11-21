@@ -3,13 +3,22 @@
 
 # GC-06d Test the generated mhi.pscad automation stub
 
-Status: needs-triage
+Status: ready-for-agent
+Model tier: sonnet
+Blocked by: none
 Type: task
 Parent: `06-pscad-emt-pack.md` (GC-06 follow-up, GK A2 on #1596)
-Gated: **yes** (GK A, gridspine)
+Gated: **yes** (GK A2, grid-compliance, GC-PACE-1)
 Size: S
 Likely files: `gridspine/handoff/emt_pack.py` (`stub_text`), `tests/gridspine/test_emt_pack.py`
 
 ## What
 
-`stub_text` writes the mhi.pscad automation script, which is never run here or in CI and has no test beyond its presence. Add at least: it compiles (`compile(text, ...)`), it reads the schedule CSV the pack writes, and every column it sets exists in `SCHEDULE_COLUMNS`, with `mhi.pscad` stubbed by a fake module so the loop runs once per case.
+`stub_text` writes the mhi.pscad automation script, which is never run here or in CI and has no test beyond its presence. Add at least: it compiles (`compile(text, ...)`), it reads the schedule the pack writes (`case_schedule.json`; the CSV header is checked against the same columns), and every column it sets exists in `SCHEDULE_COLUMNS`, with `mhi.pscad` stubbed by a fake module so the loop runs once per case.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1; GK A2 4 priority view).** Bundle with 06c (one builder).
+
+GK A2 (4) plan GO, one PR with 06c. E5: test what the stub really reads. It reads `case_schedule.json`, not the CSV (wording above corrected): every key it reads is in `SCHEDULE_COLUMNS`; the CSV header equals `SCHEDULE_COLUMNS` in order; with a fake `mhi.pscad` in `sys.modules` the loop runs once per case with that case's values.
+Follow-up for this PR once contract v2 is on master: add the `connected` sentence to `stub_text`'s instruction paragraph (sibling GC-12/06a/06b asked; it may not edit `stub_text`).

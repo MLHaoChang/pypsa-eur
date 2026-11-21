@@ -1,0 +1,62 @@
+{
+ "profiles": {
+  "grid-readiness/1": [
+   {
+    "metric": "checked_pass",
+    "formula": "count of rows checked with verdict pass",
+    "validity": "counts every scorecard row once; a row is checked only when its stored figure re-judges to the stored verdict under the code's own rule (else boundary_disagreement, rule_mismatch, unknown, not_scalar, categorical: not_checked). Refusals: limits_changed_during_read, network_scope_required, no_saved_project, unknown_grid_code_profile, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "checked_warn",
+    "formula": "count of rows checked with verdict warn",
+    "validity": "counts every scorecard row once; a row is checked only when its stored figure re-judges to the stored verdict under the code's own rule (else boundary_disagreement, rule_mismatch, unknown, not_scalar, categorical: not_checked). Refusals: limits_changed_during_read, network_scope_required, no_saved_project, unknown_grid_code_profile, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "checked_fail",
+    "formula": "count of rows checked with verdict fail",
+    "validity": "counts every scorecard row once; a row is checked only when its stored figure re-judges to the stored verdict under the code's own rule (else boundary_disagreement, rule_mismatch, unknown, not_scalar, categorical: not_checked). Refusals: limits_changed_during_read, network_scope_required, no_saved_project, unknown_grid_code_profile, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "not_checked",
+    "formula": "count of rows not checked",
+    "validity": "counts every scorecard row once; a row is checked only when its stored figure re-judges to the stored verdict under the code's own rule (else boundary_disagreement, rule_mismatch, unknown, not_scalar, categorical: not_checked). Refusals: limits_changed_during_read, network_scope_required, no_saved_project, unknown_grid_code_profile, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_a_rounded_boundary_is_withheld_not_re_verdicted",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   }
+  ]
+ }
+}

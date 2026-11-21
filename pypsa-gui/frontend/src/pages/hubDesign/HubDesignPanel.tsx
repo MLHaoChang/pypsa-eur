@@ -142,7 +142,8 @@ export default function HubDesignPanel() {
           <StepRail flow={flow} section={viewSection} improveShown={cardStep === 'improve'}
             onPick={pickSection}
             onPickImprove={() => setStep('improve', { user: useUIStore.getState().guidedTourHolds === 0 })} />
-          <GuideButton tourId="hub_design" testId="hub-guide-button" label="Guide" />
+          <GuideButton tourId="hub_design" testId="hub-guide-button" label="Guide"
+            autoOfferFor={settled ? project : null} />
         </div>
         <AssistantSetupCard />
         {project !== null && loadError !== null && (

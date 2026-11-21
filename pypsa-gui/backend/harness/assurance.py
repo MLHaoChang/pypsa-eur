@@ -21,7 +21,7 @@ from pydantic import (
     ValidationError,
 )
 
-from harness import derived, interpretation_markers, predicates
+from harness import derived, interpretation_markers, predicates, solve_validity
 from harness.assurance_coverage import FRAME_PROJECTIONS
 from services import assurance_records as records
 
@@ -192,6 +192,25 @@ CHECKED_TOOLS = frozenset(
         "update_component",
     }
 )
+
+
+# A checked turn shows only the structural, enumerated fields of a job view:
+# `phase`, `detail`, `warnings` and `input_revision_note` carry free text that
+# tools and the solver write, so they never pass. An allow-list: a field the
+# view gains later is dropped until it is named here.
+_JOB_VIEW_KEYS = (
+    "id", "family", "kind", "tool_use_id", "status", "terminal", "outcome",
+    "cursor", "progress", "created_at", "started_at", "updated_at", "finished_at",
+)
+_JOB_SNAPSHOT_KEYS = ("epoch", "seq", "monitor_active")
+_JOB_TERMINAL_KEYS = ("job_id", "tool_use_id", "cursor")
+
+
+def _job_projection(job):
+    """The allow-listed fields of one job view; None when there is no view."""
+    if not isinstance(job, dict):
+        return None
+    return {k: job.get(k) for k in _JOB_VIEW_KEYS if k in job}
 
 
 class Turn:
@@ -604,6 +623,8 @@ class Turn:
                         f"{len(slot['excluded_indices'])} snapshots excluded."
                     )
         lines.append(assurance_metrics.disclosure(self.request_scope))
+        # Every answer on a MIP names its optimality gap (assistant-assurance 10, S2).
+        lines.extend(solve_validity.notes(record["raw"]))
         shared = derived.scope_key(record)
         published = {b["id"]: (b["value"], b["unit"], shared) for b in public_blocks}
         lines.extend(self._derive(draft, published))
@@ -1555,6 +1576,16 @@ class Turn:
                 "tool_use_id": payload.get("tool_use_id"),
                 "line": "Application task is running.",
                 "kind": "INFO",
+            }
+        if event == "job_snapshot":
+            return {
+                **{k: payload.get(k) for k in _JOB_SNAPSHOT_KEYS},
+                "jobs": [_job_projection(j) for j in payload.get("jobs") or []],
+            }
+        if event == "job_terminal":
+            return {
+                **{k: payload.get(k) for k in _JOB_TERMINAL_KEYS},
+                "job": _job_projection(payload.get("job")),
             }
         if event == "tool_error":
             if payload.get("error_kind") in GUARD_REFUSAL_KINDS:

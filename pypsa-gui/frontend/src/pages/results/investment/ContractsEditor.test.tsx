@@ -172,7 +172,7 @@ describe('ContractsEditor', () => {
     const conn = await screen.findByTestId('ce-connection')
     const env = within(conn).getByLabelText('Envelope series') as HTMLSelectElement
     expect(env.value).toBe('da@0')
-    expect(env.selectedOptions[0].textContent).toBe('da v0 (not listed)')
+    expect(env.selectedOptions[0].textContent).toBe('Da (version 0) (not listed)')
     fireEvent.change(env, { target: { value: '' } })
     fireEvent.click(within(conn).getByRole('button', { name: 'Save the connection agreement' }))
     await waitFor(() => expect(api.saveCommercial).toHaveBeenCalled())
