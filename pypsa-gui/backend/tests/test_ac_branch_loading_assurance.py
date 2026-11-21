@@ -186,3 +186,16 @@ def test_every_other_profile_has_no_required_warnings(grid):
              "component_class": "Line", "retain": False}
     assert calculations.required_warnings({}, scope) == []
     assert calculations.MAX_RESULT_SLOTS == 20
+
+
+def test_the_browser_words_every_warning_state():
+    """UX 26 (AA-13): each warning reason code has the card's plain wording."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[2] / "frontend/src/utils/answerAssurance.ts").read_text()
+    table = source[source.index("const WARNING_TEXT"):source.index("export const WARNING_REASON_CODES")]
+    states = {"ac_pf_not_converged", "ac_pf_convergence_unknown"}
+    assert states <= ac.REFUSALS
+    import re
+
+    assert set(re.findall(r"^\s+(\w+): \(", table, re.M)) == states

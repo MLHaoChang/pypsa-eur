@@ -196,6 +196,27 @@ function validSections(sections: unknown): boolean {
   })
 }
 
+/** The summary of a receipt with a required warning slot; the evidence card and the outcome card share it. */
+export const WARNED_LABEL = 'Request incomplete: warning'
+
+type ResultSlot = NonNullable<AnswerReceipt['result_slots']>[number]
+
+/** Plain text per warning reason code (the code before " (k of n …)", `ac_branch_calculations`). */
+const WARNING_TEXT: Record<string, (excluded: number, total: number) => string> = {
+  ac_pf_not_converged: (x, n) => `AC power flow did not converge for ${x} of ${n} snapshots in the window.`,
+  ac_pf_convergence_unknown: (x, n) => `AC power flow convergence is unknown for ${x} of ${n} snapshots in the window.`,
+}
+export const WARNING_REASON_CODES = Object.keys(WARNING_TEXT)
+
+/** "Warning: <what is excluded>. The values cover k of n snapshots." for one warning slot. */
+export function warningText(slot: ResultSlot): string {
+  const total = slot.requested_snapshots ?? 0
+  const kept = slot.valid_snapshots ?? 0
+  const text = WARNING_TEXT[(slot.reason ?? '').split(' ')[0]]
+  const what = text ? text(total - kept, total) : `${total - kept} of ${total} snapshots in the window are excluded.`
+  return `Warning: ${what} The values cover ${kept} of ${total} snapshots.`
+}
+
 /** Policy "5" (AA-13): the warning slots come first, each names what it excludes, and the request is incomplete. */
 function validWarned(receipt: Partial<AnswerReceipt>): boolean {
   const slots = receipt.result_slots
