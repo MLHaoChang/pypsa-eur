@@ -1,0 +1,1 @@
+* Test(pypsa-gui): A per-metric ledger now maps each of the 85 checked-answer metrics to its formula, validity guards, tolerance and, where one exists, the test that checks it against a hand-written value, with a status per surface. A test fails when a profile metric has no row, a row has no profile metric, or a row names a test that does not exist.

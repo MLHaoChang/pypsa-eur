@@ -1,0 +1,62 @@
+{
+ "profiles": {
+  "carrier-energy/1": [
+   {
+    "metric": "carrier_generator_energy",
+    "formula": "sum over the carrier's generators and t of w_generators[t] x p[t]",
+    "validity": "every generator of the carrier valid in every snapshot (weights > 0, dispatch within bounds), else invalid_or_missing_generator_data. Refusals: unknown_carrier, ambiguous_carrier, carrier_outside_scope, unsupported_carrier_population",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_wind_carrier_energy_matches_the_hand_sum",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_wind_carrier_energy_matches_the_hand_sum"
+     }
+    }
+   },
+   {
+    "metric": "carrier_peak_generator_output",
+    "formula": "max over t of sum over the carrier's generators of p[t]",
+    "validity": "every generator of the carrier valid in every snapshot (weights > 0, dispatch within bounds), else invalid_or_missing_generator_data. Refusals: unknown_carrier, ambiguous_carrier, carrier_outside_scope, unsupported_carrier_population",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_wind_carrier_energy_matches_the_hand_sum",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_wind_carrier_energy_matches_the_hand_sum"
+     }
+    }
+   },
+   {
+    "metric": "carrier_storage_discharged_energy",
+    "formula": "sum over the carrier's StorageUnits of discharged_energy (w_stores x p_dispatch)",
+    "validity": "every StorageUnit of the carrier passes the storage-unit-dispatch/1 trajectory check, else invalid_or_missing_storage_trajectory. Refusals as for the generator metrics",
+    "tolerance": "harness.storage_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set"
+     }
+    }
+   },
+   {
+    "metric": "carrier_storage_charged_energy",
+    "formula": "sum over the carrier's StorageUnits of charged_energy (w_stores x p_store)",
+    "validity": "every StorageUnit of the carrier passes the storage-unit-dispatch/1 trajectory check, else invalid_or_missing_storage_trajectory. Refusals as for the generator metrics",
+    "tolerance": "harness.storage_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set"
+     }
+    }
+   }
+  ]
+ }
+}

@@ -19,6 +19,7 @@ re-exports them — `routers/results.py`, `routers/compare.py`,
 economics fixtures all import from there, and none of them changed when this
 module appeared. `tests/test_solver_facade_surface.py` is what keeps that true.
 """
+import math
 import threading
 import weakref
 from collections.abc import Callable
@@ -40,6 +41,35 @@ def _annuity(rate: float, lifetime: float) -> float:
         return 1.0 / lifetime
     factor = (1.0 + rate) ** lifetime
     return rate * factor / (factor - 1.0)
+
+
+# The longest lifetime the rate rule below is held to: the reference data's bound on a lifetime
+# (`library/europe_reference`, 1-200 years).
+RATE_RULE_LIFETIME = 200.0
+
+
+def discount_rate_problem(value) -> str | None:
+    """Why `_annuity` cannot take `value` as a discount rate, in words; None when it can. A rate must be a
+    number (not a bool or a string), finite, above -1 (at -1 or below, 1 + r is not positive, so the factor is
+    zero, undefined or divides by zero), and one the annuity computes up to `RATE_RULE_LIFETIME` years: (1 + r)^L
+    stays finite (no overflow) and differs from 1 (a rate too small to move 1 + r divides by zero). A bundle's settings file is held to it (`routers/projects.import_bundle`)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "the discount rate is not a number"
+    try:
+        rate = float(value)
+    except OverflowError:  # an int too large for a float (10**400)
+        return "the discount rate is not a finite number"
+    if not math.isfinite(rate):
+        return "the discount rate is not a finite number"
+    if rate <= -1:
+        return "the discount rate must be above -1"
+    try:
+        finite = math.isfinite(_annuity(rate, RATE_RULE_LIFETIME))
+    except (OverflowError, ZeroDivisionError):
+        finite = False
+    if not finite:
+        return "the annuity cannot be computed at this discount rate"
+    return None
 
 
 HOURS_PER_YEAR = 8760.0

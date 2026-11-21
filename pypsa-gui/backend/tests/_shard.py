@@ -12,9 +12,11 @@ broken by path and shard index — so the result depends only on the set of
 collected nodeids, not on their order. Every shard computes the same table, and
 each file lands in exactly one shard (checked by tests/test_shard_plugin.py).
 
-Matrix jobs rather than pytest-xdist: the suite shares process state (the
-context registry, ports, the app-data directory) that parallel workers in one
-job would trample.
+Each shard job also runs its share under pytest-xdist (`-n auto --dist loadfile`),
+so a file stays in one worker process. Workers are separate processes, and the
+suite's process state is per process: the context registry, the app-data and
+projects directories (tests/conftest.py makes each with mkdtemp), the in-memory
+database, and ports bound to 0.
 
 Loaded by `pypsa-gui/backend/conftest.py`. Without `--num-shards` it does
 nothing.
