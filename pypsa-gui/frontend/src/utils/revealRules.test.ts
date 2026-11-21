@@ -80,10 +80,10 @@ describe('rules 2-4 — required only under lopf', () => {
     expect(isRequired('capital_cost', { ...base, mode: 'pf', extendable: true })).toBe(false)
   })
 
-  it('states the disjunction, so the message cannot read as "capital_cost only"', () => {
+  it('states the disjunction, so the message cannot read as "capital cost only"', () => {
     const msg = requiredPairMessage({ ...base, mode: 'lopf', extendable: true })
-    expect(msg).toContain('capital_cost')
-    expect(msg).toContain('overnight_cost')
+    expect(msg).toContain('capital cost')
+    expect(msg).toContain('overnight cost')
     expect(msg?.toLowerCase()).toContain('or')
   })
 

@@ -7,6 +7,11 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import type { Generator, Line, Link, StorageUnit, Store, Transformer } from '../api/types'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
+import { FIELD_MAP } from '../layout/CreationForm'
+
+/** The Properties panel's word for "let the optimiser size it": its create
+ *  form's word map, which the edit form's schema label matches (tested). */
+export const EXTENDABLE_LABEL = FIELD_MAP.thermal.find(f => f.key === 'p_nom_extendable')!.label
 
 // ── Capacity bounds editor ────────────────────────────────────────────────────
 // Single page where every extendable asset across the network can have its
@@ -166,9 +171,9 @@ export default function CapacityBoundsEditor() {
 
   if (totalCount === 0) {
     return (
-      <div className="p-6 text-center text-xs text-muted">
-        No extendable assets in this network. Mark assets <code>p_nom_extendable=True</code>{' '}
-        (or <code>s_nom</code>/<code>e_nom</code>) in the Properties panel first.
+      <div className="p-6 text-center text-xs text-muted" data-testid="capacity-bounds-empty">
+        No asset in this network is sized by the optimiser. Tick “{EXTENDABLE_LABEL}” on an asset in the
+        Properties panel to list it here.
       </div>
     )
   }

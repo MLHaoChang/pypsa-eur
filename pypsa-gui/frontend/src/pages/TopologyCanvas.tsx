@@ -1761,7 +1761,7 @@ function NewConnectionDialog({
               </select>
             </label>
             <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-muted">s_nom (MVA)</span>
+              <span className="text-[10px] text-muted">Capacity (MVA)</span>
               <input className={inp} type="number" step="any" value={sNom} onChange={e => setSNom(e.target.value)} />
             </label>
             <label className="flex flex-col gap-0.5">
@@ -1786,15 +1786,15 @@ function NewConnectionDialog({
             </label>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted">v_nom₀ (kV)</span>
+                <span className="text-[10px] text-muted">Declared HV voltage (kV)</span>
                 <input className={inp} type="number" step="any" value={trVNom0} onChange={e => { setTrVNom0(e.target.value); setTrType('Custom') }} />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted">v_nom₁ (kV)</span>
+                <span className="text-[10px] text-muted">Declared LV voltage (kV)</span>
                 <input className={inp} type="number" step="any" value={trVNom1} onChange={e => { setTrVNom1(e.target.value); setTrType('Custom') }} />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted">s_nom (MVA)</span>
+                <span className="text-[10px] text-muted">Capacity (MVA)</span>
                 <input className={inp} type="number" step="any" value={trSNom} onChange={e => setTrSNom(e.target.value)} />
               </label>
               <label className="flex flex-col gap-0.5">
@@ -3249,7 +3249,7 @@ export default function TopologyCanvas() {
                     aria-label="Width by flow"
                     aria-pressed={widthByFlow}
                     onClick={() => setWidthByFlow(v => !v)}
-                    title="Width by flow — edge width follows |flow| / rating (off: static s_nom width)"
+                    title="Width by flow. Edge width follows |flow| / rating; off, it follows each line’s capacity."
                     className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
                       ${widthByFlow ? 'bg-accent-50 text-accent' : 'text-ink-600 hover:bg-panel hover:text-accent'}`}
                   >
