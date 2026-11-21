@@ -65,7 +65,10 @@ function renderGreeting() {
   )
 }
 
+const asSuperAdmin = vi.hoisted(() => ({ value: true }))
+
 beforeEach(() => {
+  asSuperAdmin.value = true
   cleanup()
   vi.clearAllMocks()
   useUIStore.setState({ currentProject: 'Baltic 2030' })
@@ -198,6 +201,16 @@ describe('the launch orientation with no API key', () => {
   // is instance-wide and super-admin only. Offering them a field they cannot
   // use is worse than saying nothing, and the query erroring must not be
   // mistaken for "no key configured".
+  it('asks a non-super-admin nothing: no GET to the key route, no offer (issue 49)', async () => {
+    asSuperAdmin.value = false
+    vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
+    renderGreeting()
+    await screen.findByTestId('chat-launch-greeting')
+    await new Promise((r) => setTimeout(r, 50))
+    expect(vi.mocked(getApiKeySettings)).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('chat-launch-key-offer')).toBeNull()
+  })
+
   it('offers nothing when the key route refuses the caller', async () => {
     vi.mocked(getApiKeySettings).mockRejectedValue(
       Object.assign(new Error('forbidden'), { response: { status: 403 } }),
@@ -309,5 +322,5 @@ describe('the key offer follows per-profile readiness (P28 A3)', () => {
 // Issue 49: the key offer is only asked for by a super-admin.
 vi.mock('../auth/AuthProvider', async (orig) => ({
   ...(await orig<typeof import('../auth/AuthProvider')>()),
-  useIsSuperAdmin: () => true,
+  useIsSuperAdmin: () => asSuperAdmin.value,
 }))
