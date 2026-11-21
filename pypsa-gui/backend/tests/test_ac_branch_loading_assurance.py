@@ -617,16 +617,17 @@ def test_a_false_convergence_flag_stays_not_converged(ac_grid):
         ([True, True], "converged"),
     ],
 )
-def test_the_window_state_names_unknown_only_when_a_flag_is_unknown(
-    converged, state
-):
+def test_the_window_state_names_unknown_only_when_a_flag_is_unknown(converged, state):
     raw = {"converged": converged, "index": ["t0", "t1"]}
     assert ac._convergence(raw, 0, 1)[2] == state
 
 
 @pytest.mark.parametrize(
     "converged, state",
-    [((False, False), "ac_pf_not_converged"), ((None, False), "ac_pf_convergence_unknown")],
+    [
+        ((False, False), "ac_pf_not_converged"),
+        ((None, False), "ac_pf_convergence_unknown"),
+    ],
 )
 def test_calculate_refuses_a_window_with_nothing_converged(ac_grid, converged, state):
     ctx = ac_grid((True, True))
