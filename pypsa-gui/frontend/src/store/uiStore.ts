@@ -103,9 +103,14 @@ const THEME_KEY = 'network-diagram:theme'
 // on the old default pick up the new one instead of being pinned forever.
 // Generation 2 = the dark identity that matches the sign-in page (retuned
 // from mint to red without changing the DEFAULT, so no bump was needed).
+// THEME-LIGHT-1 moved the default to OS-preference-then-light without a bump:
+// since generation 2 only setTheme/toggleTheme write THEME_KEY, so a stored
+// value is an explicit choice and is kept.
 const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
 const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
+// Browser notifications when a run of mine ends (run progress slice 3).
+const BROWSER_NOTIFY_KEY = 'network-diagram:run-browser-notify'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
 const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
@@ -265,10 +270,18 @@ function storedTheme(): Theme {
     const v = localStorage.getItem(THEME_KEY)
     if (v === 'light' || v === 'dark') return v
   } catch { /* noop */ }
-  // Dark is the product identity — it is what the sign-in page hands off to,
-  // so the workbench opens in it regardless of the OS preference. The toggle
-  // (and its localStorage write) still lets anyone stay in light.
-  return 'dark'
+  // No explicit choice (THEME_KEY is only written by setTheme/toggleTheme):
+  // follow the OS, else light (THEME-LIGHT-1). The boot scripts in spa.html
+  // and index.html make the same decision before first paint;
+  // uiStore.theme.test.ts runs all three against the same cases.
+  try {
+    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark'
+  } catch { /* noop */ }
+  return 'light'
+}
+
+function storedBrowserNotify(): boolean {
+  try { return localStorage.getItem(BROWSER_NOTIFY_KEY) === 'true' } catch { return false }
 }
 
 function storedDensity(): Density {
@@ -531,7 +544,7 @@ interface UIStore {
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
-  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'strategy' | 'offgrid' | null
+  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island' | null
   /** Request-then-scroll to the Grid codes section of the Grid connection part (AS-10). */
   gridCodeScrollRequest: boolean
   requestGridCodeScroll: () => void
@@ -599,6 +612,10 @@ interface UIStore {
   // solving project editable, and vice versa.
   lockReadOnly: boolean
   solvingReadOnly: boolean
+  // Name/id of the project a switch is in flight for (null = none). Drives the
+  // "Opening …" progress bar; a cold open can take a minute on a big template.
+  openingProject: string | null
+  setOpeningProject: (target: string | null) => void
   currentProject: string | null
   // Resume target for auth / projects-home flows. Prefer a stable UUID when a
   // caller knows it, but keep the project name as a compatible fallback so
@@ -623,6 +640,8 @@ interface UIStore {
   // attributes which the CSS-var overrides in index.css key off.
   theme: Theme
   density: Density
+  /** Browser notifications when a run of mine ends while the tab is hidden; off until chosen. */
+  browserNotify: boolean
   // Guided / Expert (spec §3.1). `uiModeExplicit` is true once the user chose
   // a mode themselves; the new-project rule never overrides that choice.
   uiMode: UiMode
@@ -640,6 +659,7 @@ interface UIStore {
   releaseGuidedTour: () => void
   setTheme: (t: Theme) => void
   setDensity: (d: Density) => void
+  setBrowserNotify: (on: boolean) => void
   toggleTheme: () => void
   toggleDensity: () => void
   toggleSidebar: () => void
@@ -720,7 +740,7 @@ interface UIStore {
   clearResultsWindowRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
-  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'strategy' | 'offgrid') => void
+  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island') => void
   clearSolverBlockRequest: () => void
   requestGridReadiness: () => void
   clearGridReadinessRequest: () => void
@@ -838,6 +858,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   readOnlyReason: 'writable',
   lockReadOnly: false,
   solvingReadOnly: false,
+  openingProject: null,
+  setOpeningProject: (target) => set({ openingProject: target }),
   currentProject: storedCurrentProject(),
   lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(INITIAL_UI_MODE.mode),
@@ -860,6 +882,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   paletteMode: null,
   theme: storedTheme(),
   density: storedDensity(),
+  browserNotify: storedBrowserNotify(),
   uiMode: INITIAL_UI_MODE.mode,
   uiModeExplicit: INITIAL_UI_MODE.explicit,
   setUiMode: (mode, opts) => {
@@ -926,6 +949,10 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setTheme: (t) => {
     try { localStorage.setItem(THEME_KEY, t) } catch { /* noop */ }
     set({ theme: t })
+  },
+  setBrowserNotify: (on) => {
+    try { localStorage.setItem(BROWSER_NOTIFY_KEY, String(on)) } catch { /* noop */ }
+    set({ browserNotify: on })
   },
   setDensity: (d) => {
     try { localStorage.setItem(DENSITY_KEY, d) } catch { /* noop */ }

@@ -324,17 +324,29 @@ def _components(buses: list[str], edges) -> dict[str, int]:
     return {b: roots.setdefault(find(b), len(roots)) for b in buses}
 
 
-def _series(n, name: str, attr: str, default: float) -> np.ndarray:
+# What a Link without a usable efficiency is read as: lossless. Shared with
+# `run_assumptions`, which names every Link this falls back on (template-e2e 08).
+LINK_EFFICIENCY_DEFAULT = 1.0
+
+
+def link_attr_series(n, name: str, attr: str, default: float) -> tuple[np.ndarray, bool]:
+    """``(values per snapshot, whether any snapshot fell back to default)``:
+    the time series where the Link has one (gaps filled), else its static
+    value; missing or non-finite reads ``default``."""
     frame = getattr(getattr(n, "links_t", None), attr, None)
     if frame is not None and name in getattr(frame, "columns", []):
-        return frame[name].reindex(n.snapshots).fillna(default).to_numpy(float)
+        col = frame[name].reindex(n.snapshots)
+        return col.fillna(default).to_numpy(float), bool(col.isna().any())
     try:
         v = float(n.links.at[name, attr])
     except (KeyError, TypeError, ValueError):
-        v = default
-    if not math.isfinite(v):
-        v = default
-    return np.full(len(n.snapshots), v, dtype=float)
+        v = float("nan")
+    fell_back = not math.isfinite(v)
+    return np.full(len(n.snapshots), default if fell_back else v, dtype=float), fell_back
+
+
+def _series(n, name: str, attr: str, default: float) -> np.ndarray:
+    return link_attr_series(n, name, attr, default)[0]
 
 
 def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
@@ -476,7 +488,7 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
         cap_max_mw, cap_series = actx.capacity_series(lk, ldf.loc[lk])
         cap = cap_max_mw if cap_series is None else cap_series
         if h == str(ldf.at[lk, "bus1"]):
-            eff = _series(n, lk, "efficiency", 1.0)
+            eff = _series(n, lk, "efficiency", LINK_EFFICIENCY_DEFAULT)
             # A connection energized in steps caps the sending MW hour by hour
             # (`energization.capped_mw`, the solve's own composition).
             sending = capped_mw(n, str(lk),
@@ -484,7 +496,7 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
             delivered = sending * eff
         else:
             # Reverse flow bus1 → bus0: PyPSA withdraws eff × |p0| at bus1.
-            eff = _series(n, lk, "efficiency", 1.0)
+            eff = _series(n, lk, "efficiency", LINK_EFFICIENCY_DEFAULT)
             delivered = cap * np.clip(-_series(n, lk, "p_min_pu", 0.0), 0.0, None)
             sending = delivered * eff
         cap_max = float(delivered.max()) if H else 0.0

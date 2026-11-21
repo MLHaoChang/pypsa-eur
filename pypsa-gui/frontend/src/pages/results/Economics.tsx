@@ -1273,14 +1273,14 @@ function LcohSection() {
                hint="Cost of electrons fed into the electrolysers, priced at merit-order (curtailment-subsidy-removed) bus duals — same correction the per-asset economics use" />
         </div>
       )}
-      <div className="rounded-[10px] border border-border bg-bg overflow-hidden">
+      <div className="rounded-card border border-border bg-bg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[11.5px] min-w-[900px]">
             <thead className="bg-bg-2 border-b border-border">
               <tr className="text-muted">
                 <th className="text-left  py-1 px-3 font-medium">Link</th>
                 <th className="text-right py-1 px-3 font-medium">Carrier</th>
-                <th className="text-right py-1 px-3 font-medium">p_nom (MW)</th>
+                <th className="text-right py-1 px-3 font-medium">Capacity (MW)</th>
                 <th className="text-right py-1 px-3 font-medium">η</th>
                 <th className="text-right py-1 px-3 font-medium">H₂ produced</th>
                 <th className="text-right py-1 px-3 font-medium" title="Annuitised CAPEX + fixed O&M">Fixed cost</th>

@@ -39,6 +39,7 @@ import copy
 import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -64,6 +65,11 @@ SITE_KIND = "site_context"
 # it runs only on its card's digest.
 SHIPPED = "shipped_cases"
 SHIPPED_KIND = "shipped_cases"
+# Study harness 14 S-C (GK B (61) Q-SC1 = A): the PPA price for the template's
+# target return, read from the report the run's own investment-case step
+# stored (`harness/run_ppa.py`). It solves nothing and writes only the run.
+PPA_PRICE = "ppa_price"
+PPA_KIND = "ppa_price"
 # The registry: each action's stage, whether it only reads, and its record
 # kind. Closed: a profile naming anything else is refused at load (D7).
 REGISTRY = {
@@ -73,6 +79,7 @@ REGISTRY = {
     # Reads only: it writes the run's own record, never the project (GK B (49) Q2).
     SITE_FETCH: {"stage": "inputs", "reads_only": True, "kind": SITE_KIND},
     SHIPPED: {"stage": "explore", "reads_only": False, "kind": SHIPPED_KIND},
+    PPA_PRICE: {"stage": STAGE, "reads_only": True, "kind": PPA_KIND},
 }
 FROZEN = {
     "frozen": DC_KIND
@@ -83,6 +90,7 @@ MARKERS = {
     MG_KIND: {"frozen": MG_KIND},
     SITE_KIND: {"frozen": SITE_KIND},
     SHIPPED_KIND: {"frozen": SHIPPED_KIND},
+    PPA_KIND: {"frozen": PPA_KIND},
 }
 JOB_KIND = "dc_campus"
 EVENT = "dc_campus"  # the envelope ledger row of the campus run's reservation
@@ -383,6 +391,13 @@ KINDS = {
         "prefix": "shipped_",
         "valid": lambda frozen: _shipped("valid")(frozen),
     },
+    PPA_KIND: {
+        "core": lambda frozen: _ppa("core")(frozen),
+        "card": lambda frozen: _ppa("card")(frozen),
+        "event": "ppa_price",  # no reservation: the read solves nothing
+        "prefix": "ppa_",
+        "valid": lambda frozen: _ppa("valid")(frozen),
+    },
 }
 
 
@@ -398,6 +413,13 @@ def _shipped(name):
     from harness import run_shipped_engine
 
     return getattr(run_shipped_engine, name)
+
+
+def _ppa(name):
+    """`harness.run_ppa`'s `name` (imported late, as `_site`)."""
+    from harness import run_ppa
+
+    return getattr(run_ppa, name)
 
 
 def stage_of(step) -> str:
@@ -439,6 +461,335 @@ def _note(field, note) -> dict:
     return {"role": "note", "field": field, "unit": "", "note": note}
 
 
+# S-B2c (GK B (60) P7): the unit of each field a shipped case changes.
+_LP = "lp"  # `harness.run_shipped.LP` (not imported here: harness imports services)
+SHIPPED_UNITS = {
+    "price": "EUR/MWh",
+    "tenor_years": "years",
+    "inv_power_overnight": "EUR/MW",
+    "inv_energy_overnight": "EUR/MWh",
+    "p_nom": "MW",
+}
+# UX (S-B2c): each change in the owning panel's words, pinned to the panels by
+# `test_the_shipped_card_words_are_the_panels_words`. The price refs are the
+# Market prices block's (MarketPricesBlock.tsx); a contract field is the
+# Contracts editor's (contractModel.ts CONTRACT_FIELDS); an asset field is the
+# asset schema's (`fields_for`), what the Properties panel shows.
+SHIPPED_REF_WORDS = {
+    "export_price_ref": "Export price series",
+    "import_price_ref": "Import price series",
+}
+SHIPPED_CONTRACT_FIELD_WORDS = {
+    "reference_price": "reference price series",
+    "price": "price (per MWh)",
+    "share": "share of the plant's output (0–1)",
+    "tenor_years": "tenor (years)",
+}
+# The template's contracts by what they sell (eh_ipp.PPA: wind farm, PV plant).
+SHIPPED_CONTRACT_WORDS = {"ppa_wind": "Wind PPA", "ppa_pv": "Solar PPA"}
+# An asset by runWords.ts NAME_WORDS, else "<COMPONENT_LABEL> “<name>”" as
+# runWords.editSubject reads it.
+SHIPPED_ASSET_WORDS = {"bess": "The battery"}
+SHIPPED_COMPONENT_WORDS = {"StorageUnit": "Storage", "Link": "Link"}
+# A per-asset finance map by its title in FinanceInputsEditor.tsx (AssetMap).
+SHIPPED_FINANCE_WORDS = {"degradation_by_asset": "Degradation"}
+# utils/displayName.ts ACRONYMS: a raw asset id in plain words.
+DISPLAY_ACRONYMS = {
+    "ac": "AC",
+    "dc": "DC",
+    "it": "IT",
+    "pv": "PV",
+    "h2": "H2",
+    "ups": "UPS",
+    "ev": "EV",
+    "hv": "HV",
+    "mv": "MV",
+    "lv": "LV",
+    "bess": "BESS",
+    "chp": "CHP",
+    "ccgt": "CCGT",
+    "ocgt": "OCGT",
+    "poc": "PoC",
+    "co2": "CO₂",
+    "lng": "LNG",
+}
+# Why a case is not run, in plain words, by the reason `run_shipped.load` gave
+# (its text is the server's; each marker below is a phrase of it).
+SHIPPED_WHY_WORDS = (
+    (
+        (
+            "is outside what a case may change",
+            "is not a commercial field a case may change",
+            "is not a battery field a case may change",
+        ),
+        "it changes something that is not one of the settings a shipped case may change",
+    ),
+    (
+        ("which the template does not ship",),
+        "the template does not ship a price series it names",
+    ),
+    (("What this case moves is not known",), "what this case moves is not known"),
+)
+SHIPPED_WHY_OTHER = "it cannot run in this project"
+
+
+def _shipped_why(why) -> str:
+    """A not-runnable case's reason in plain words, never the server's text."""
+    said = [
+        words
+        for markers, words in SHIPPED_WHY_WORDS
+        if any(m in str(why or "") for m in markers)
+    ]
+    return "; ".join(said) or SHIPPED_WHY_OTHER
+
+
+def _series_words(template) -> dict[str, str]:
+    """Each template series' label (its meta.json), by series name."""
+    from services.library import template_series
+
+    try:
+        meta = json.loads(
+            (
+                _shipped("_TEMPLATES")
+                / str(template)
+                / template_series.DIR
+                / template_series.META
+            ).read_text()
+        )
+        return {e["name"]: str(e["label"]) for e in meta["series"] if e.get("label")}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def _display_name(name) -> str:
+    """utils/displayName.ts's `displayName`: an id as a person reads it."""
+    name = str(name)
+    if not name or re.search(r"\s|[A-Z]", name):
+        return name
+    words = [w for w in re.split(r"[_-]+", name) if w]
+    return " ".join(
+        DISPLAY_ACRONYMS.get(w, w[:1].upper() + w[1:] if i == 0 else w)
+        for i, w in enumerate(words)
+    )
+
+
+def _asset_words(component, name) -> str:
+    """runWords.editSubject's subject: NAME_WORDS, else the class and name."""
+    if name in SHIPPED_ASSET_WORDS:
+        return SHIPPED_ASSET_WORDS[name]
+    return f"{SHIPPED_COMPONENT_WORDS.get(component, 'Asset')} “{_display_name(name)}”"
+
+
+def _field_spec(component, attr):
+    """The Properties panel's spec of an asset field (label, display unit,
+    scale), or None when the schema has no such field."""
+    from services.asset_schema.fields import fields_for
+
+    try:
+        specs = fields_for(component)
+    except (KeyError, ValueError):
+        specs = ()
+    return next((s for s in specs if s.key == attr), None)
+
+
+def _field_words(component, attr) -> str:
+    spec = _field_spec(component, attr)
+    return spec.label if spec else "a design value"
+
+
+def _shipped_shown(spec, old, new) -> str | None:
+    """UX (#1575): an asset value in the Properties panel's unit (EUR/kW for a
+    stored EUR/MW), money in the one money notation; None keeps the stored
+    unit (no spec, no display unit, or a value that is not a number)."""
+    from services.reports.chapters import fmt_eur_short
+
+    if (
+        spec is None
+        or not spec.unit_display
+        or not all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in (old, new)
+        )
+    ):
+        return None
+    old, new = old * spec.scale, new * spec.scale
+    currency, _, per = spec.unit_display.partition("/")
+    if currency == "EUR" and per:
+
+        def eur(v):  # the notation is unsigned: callers write the minus
+            return ("−" if v < 0 else "") + fmt_eur_short(v)
+
+        return f"{eur(old)} → {eur(new)} per {per}"
+    if spec.scale == 1.0:
+        return None
+    return f"{old:g} → {new:g} {spec.unit_display}"
+
+
+def _shipped_change(change, frozen, labels) -> str:
+    """One change in the panels' words, old → new with its unit. A price ref
+    names its series by label and says which Library version the project holds
+    (or that the template file adds it); the digest binds the hashes."""
+    path, old, new = change["path"], change.get("old"), change.get("new")
+    parts = path.split(".")
+    if parts[0] == "commercial" and len(parts) >= 4 and parts[1] == "contracts":
+        what = (
+            f"{SHIPPED_CONTRACT_WORDS.get(parts[2], 'A contract')} · "
+            f"{SHIPPED_CONTRACT_FIELD_WORDS.get(parts[3], 'a contract value')}"
+        )
+    elif parts[0] == "commercial" and len(parts) >= 2:
+        what = SHIPPED_REF_WORDS.get(parts[1], "A commercial value")
+    elif parts[0] == "finance" and len(parts) == 3:
+        what = (
+            f"{_asset_words(None, parts[2])} · "
+            f"{SHIPPED_FINANCE_WORDS.get(parts[1], 'a finance value')}"
+        )
+    elif len(parts) == 3:
+        what = (
+            f"{_asset_words(parts[0], parts[1])} · {_field_words(parts[0], parts[2])}"
+        )
+        shown = _shipped_shown(_field_spec(parts[0], parts[2]), old, new)
+        if shown:
+            return f"{what} · {shown}"
+    else:
+        what = "A value"
+    if path.endswith(".id") and isinstance(new, str):
+
+        def series(name):
+            refs = (frozen.get("refs") or {}).get(name) or []
+            versions = [str(v) for v, _ in refs]
+            held = (
+                f"Library version{'s' if len(versions) > 1 else ''} {', '.join(versions)}"
+                if versions
+                else "added from the template file"
+            )
+            return f"{labels.get(name, 'a series the template does not ship')}, {held}"
+
+        return f"{what} · {series(old)} → {series(new)}"
+    unit = SHIPPED_UNITS.get(parts[-1], "")
+    return f"{what} · {old} → {new}{(' ' + unit) if unit else ''}"
+
+
+def _shipped_rows(frozen, ids, cap_now) -> list[dict]:
+    """Every case in file order, by its label, with all its changes and what
+    happens to it."""
+    labels = _series_words(frozen.get("template"))
+    rows = []
+    for case in frozen["cases"]:
+        if case["status"] != "admissible":
+            what = f"not run: {_shipped_why(case.get('why'))}"
+        elif case["kind"] != _LP:
+            what = (
+                "runs with no solve; read not evaluated (it moves only the settlement)"
+            )
+        elif case["id"] in ids:
+            what = "forks the project and solves once"
+        else:
+            what = "not run: " + (
+                "not picked" if cap_now else "the run has no solve left for it"
+            )
+        rows.append(_note(f"case.{case['id']}", f"{case['label']} · {what}"))
+        rows.extend(
+            _note(f"case.{case['id']}.{n}", "  " + _shipped_change(c, frozen, labels))
+            for n, c in enumerate(case["changes"])
+        )
+    return rows
+
+
+def _cap_words(cap_now) -> str:
+    if not cap_now:
+        return "No case can solve in this run: it has no solve left"
+    return f"Up to {cap_now} case{'' if cap_now == 1 else 's'} can solve in this run"
+
+
+def _shipped_card(step, frozen) -> dict:
+    solves = frozen["solves"]
+    rows = [
+        *_shipped_rows(frozen, frozen["run"], frozen.get("cap", 1)),
+        *(
+            [
+                _note(
+                    "save",
+                    "Saves the project before forking the cases, if it has unsaved edits",
+                )
+            ]
+            if solves
+            else []
+        ),
+        _note("solves", f"Reserves {solves} solve{'' if solves == 1 else 's'}"),
+        # GK B (61) 5: the digest binds the cap, so the card shows it.
+        _note("cap", _cap_words(frozen.get("cap", 1))),
+        _note(
+            "source",
+            f"Source: the template's shipped cases, {frozen['total']} cases",
+        ),
+    ]
+    return {
+        "version": 1,
+        "kind": "native",
+        "tool": step["tool"],
+        "rows": rows,
+        "sets": [],
+        "says": f"Run {len(frozen['run'])} of the {frozen['total']} shipped cases",
+        "complete": True,
+        "digest": frozen["digest"],
+    }
+
+
+def pick_card(step) -> dict | None:
+    """S-B2c (Q1 = A): the pick card, shown when more cases need a solve than
+    the run can spend. A change-set shaped payload: one tickable item per LP
+    case that can run, every other case named in its words. None when the
+    step does not wait on a pick."""
+    if kind_of(step) != SHIPPED_KIND:
+        return None
+    pick = (step.get("unfrozen") or {}).get("pick")
+    if not isinstance(pick, dict):
+        return None
+    lp = [c for c in pick["cases"] if c["status"] == "admissible" and c["kind"] == _LP]
+    others = [c for c in pick["cases"] if c not in lp]
+
+    def other(c):
+        if c["status"] != "admissible":
+            return f"{c['label']} is not run: {_shipped_why(c['why'])}."
+        return f"{c['label']} runs with no solve: its read is not evaluated."
+
+    items = [
+        {
+            "tool_use_id": c["id"],
+            "tool": step["tool"],
+            "edit_card": {
+                "version": 1,
+                "kind": "native",
+                "tool": step["tool"],
+                "rows": [_note(f"case.{c['id']}", "Forks the project and solves once")],
+                "sets": [],
+                "says": c["label"],
+                "complete": True,
+                "digest": c["id"],
+            },
+            "source": "Shipped case of the template",
+            "digest": c["id"],
+        }
+        for c in lp
+    ]
+    cap_now = pick["cap"]
+    return {
+        "version": 1,
+        "items": items,
+        "digest": digest(pick),
+        "pick_max": cap_now,
+        "requirements": {
+            "checked": 0,
+            # UX (S-B2c): the title says the pick and the over-pick line the
+            # cap, so this line names only every other case, in plain words.
+            "says": (
+                "The other cases: " + " ".join(other(c) for c in others)
+                if others
+                else ""
+            ),
+        },
+    }
+
+
 def approval_card(step) -> dict | None:
     """GK B (36) F1: the step's Confirmation card, as an edit card of note
     rows (the chat's card shows them as they are, no new UI). It names the
@@ -449,9 +800,10 @@ def approval_card(step) -> dict | None:
     frozen = step.get("frozen") if isinstance(step, dict) else None
     if not isinstance(frozen, dict) or not isinstance(frozen.get("digest"), str):
         return None
-    if (REGISTRY.get(step.get("tool")) or {}).get("kind") != DC_KIND or record_kind(
-        frozen
-    ) != DC_KIND:
+    row_kind = (REGISTRY.get(step.get("tool")) or {}).get("kind")
+    if row_kind == SHIPPED_KIND and record_kind(frozen) == SHIPPED_KIND:
+        return _shipped_card(step, frozen)  # S-B2c (Q1 = A): the approval card
+    if row_kind != DC_KIND or record_kind(frozen) != DC_KIND:
         return None  # M2: only the grid-code record has this card
     from services import campus_electrical_service as ce
 
@@ -520,7 +872,7 @@ def fill(steps, frozen, kind=DC_KIND) -> None:
             step["card"] = _card_for(kind, frozen)
 
 
-def stage_frozen(task, kind=DC_KIND) -> dict:
+def stage_frozen(task, kind=DC_KIND, path=None) -> dict:
     """At solve-stage entry, as the run's owner: the frozen record of `kind`,
     or `{"unfrozen": {state, message}}` when it cannot be fixed (the step then
     stops for the user with that reason). A stage
@@ -547,7 +899,9 @@ def stage_frozen(task, kind=DC_KIND) -> dict:
         # Issue 33 (GK B (49) S1): the site from the run's granted intake rows, never a model's.
         return _site("freeze")(task)
     if kind == SHIPPED_KIND:
-        return _shipped("freeze")(task)
+        return _shipped("freeze")(task, path)
+    if kind == PPA_KIND:
+        return _ppa("freeze")(task)
     if kind not in MARKERS:
         return {
             "unfrozen": {
@@ -763,6 +1117,18 @@ def _dispatch(path, ctx, step_id, attempt, approved=None, instance=None):
         )
     if kind == MG_KIND:
         return _mg_dispatch(path, step, task, frozen, attempt, ctx, instance)
+    if kind == PPA_KIND:
+        try:
+            return _ppa("dispatch")(path, step, frozen, attempt, instance, ctx)
+        except Exception as exc:  # noqa: BLE001 — a programming error stops for the user
+            logger.exception("the PPA price read failed for run %s", path.stem)
+            return _stop(
+                path,
+                step["id"],
+                "ppa_start_failed",
+                type(exc).__name__,
+                held=(attempt, instance),
+            )
     if kind == SITE_KIND:
         try:
             return _site("dispatch")(path, step, frozen, attempt, instance)
@@ -847,7 +1213,8 @@ def _readiness(path, step, project, code):
             "campus_run_stale",
             "the published campus run is not held to the run's grid-code profile",
         )
-    card = grid_readiness.grid_readiness_for(project, code["id"])
+    # The saved project, as the campus run reads it (DC walkthrough 04).
+    card = grid_readiness.grid_readiness_for(project, code["id"], source="saved")
     result = {
         "profile": code["id"],
         "digest": ce.profile_fingerprint(

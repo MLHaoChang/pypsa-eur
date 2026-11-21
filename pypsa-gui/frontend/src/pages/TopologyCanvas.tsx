@@ -62,6 +62,7 @@ import {
 } from '../utils/flowMotion'
 import { useReducedMotion } from '../site3d/motion'
 import LoadingKey, { VoltageKeyTitle } from '../components/LoadingKey'
+import { signFirstEuro } from '../utils/format'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -218,7 +219,7 @@ function CarrierBadge({ carrier, color }: { carrier: string; color: string }) {
       display: 'flex', alignItems: 'center', gap: 3,
       backgroundColor: color, color: '#fff',
       padding: '2px 7px', borderRadius: 10,
-      fontSize: 9, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)',
       border: '2px solid #fff',
       boxShadow: '0 1px 5px rgba(0,0,0,0.25)',
       whiteSpace: 'nowrap', lineHeight: 1.2, userSelect: 'none',
@@ -712,7 +713,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       </div>
 
       {/* Type label */}
-      <div style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15 }}>
+      <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15 }}>
         {(isH2 && H2_CAT_LABELS[d.category]) ?? CAT_DISPLAY_LABELS[d.category] ?? d.category}
       </div>
 
@@ -729,7 +730,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
           : undefined
         const mw = (effective != null && Number.isFinite(effective)) ? effective : d.totalMW
         return (
-          <div style={{ fontSize: 8, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>
+          <div style={{ fontSize: 9, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>
             {d.assetCount} · {mw >= 1000 ? `${(mw / 1000).toFixed(1)} GW` : `${mw.toFixed(0)} MW`}
           </div>
         )
@@ -740,7 +741,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       {dispatchMW != null && Number.isFinite(dispatchMW) && (
         <div
           style={{
-            fontSize: 8.5,
+            fontSize: 9,
             fontWeight: 600,
             color: dispatchColor,
             marginTop: 2,
@@ -765,7 +766,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       {socPct != null && Number.isFinite(socPct) && (
         <div
           style={{
-            fontSize: 8,
+            fontSize: 9,
             fontWeight: 500,
             color: socTint,
             marginTop: 1,
@@ -906,22 +907,22 @@ export function AssetNode({ id, data, selected }: NodeProps) {
       </div>
 
       {/* Name — the thing the user designs; the type is the tooltip and the legend. */}
-      <div style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {d.name}
       </div>
       {figure && (
-        <div data-testid="asset-figure" style={{ fontSize: 8, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>{figure}</div>
+        <div data-testid="asset-figure" style={{ fontSize: 9, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>{figure}</div>
       )}
 
       {dispatchMW != null && Number.isFinite(dispatchMW) && (
-        <div style={{ fontSize: 8.5, fontWeight: 600, color: dispatchColor, marginTop: 2, textAlign: 'center', lineHeight: 1.15 }} title={dispatchTitle}>
+        <div style={{ fontSize: 9, fontWeight: 600, color: dispatchColor, marginTop: 2, textAlign: 'center', lineHeight: 1.15 }} title={dispatchTitle}>
           {arrow} {fmtMW(Math.abs(dispatchMW))}
         </div>
       )}
 
       {socPct != null && Number.isFinite(socPct) && (
         <div
-          style={{ fontSize: 8, fontWeight: 500, color: socTint, marginTop: 1, textAlign: 'center', lineHeight: 1.15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}
+          style={{ fontSize: 9, fontWeight: 500, color: socTint, marginTop: 1, textAlign: 'center', lineHeight: 1.15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}
           title={`State of charge at this snapshot: ${socPct.toFixed(1)} %`}
         >
           <span aria-hidden style={{ display: 'inline-block', width: 22, height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
@@ -1761,7 +1762,7 @@ function NewConnectionDialog({
               </select>
             </label>
             <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-muted">s_nom (MVA)</span>
+              <span className="text-[10px] text-muted">Capacity (MVA)</span>
               <input className={inp} type="number" step="any" value={sNom} onChange={e => setSNom(e.target.value)} />
             </label>
             <label className="flex flex-col gap-0.5">
@@ -1786,15 +1787,15 @@ function NewConnectionDialog({
             </label>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted">v_nom₀ (kV)</span>
+                <span className="text-[10px] text-muted">Declared HV voltage (kV)</span>
                 <input className={inp} type="number" step="any" value={trVNom0} onChange={e => { setTrVNom0(e.target.value); setTrType('Custom') }} />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted">v_nom₁ (kV)</span>
+                <span className="text-[10px] text-muted">Declared LV voltage (kV)</span>
                 <input className={inp} type="number" step="any" value={trVNom1} onChange={e => { setTrVNom1(e.target.value); setTrType('Custom') }} />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted">s_nom (MVA)</span>
+                <span className="text-[10px] text-muted">Capacity (MVA)</span>
                 <input className={inp} type="number" step="any" value={trSNom} onChange={e => setTrSNom(e.target.value)} />
               </label>
               <label className="flex flex-col gap-0.5">
@@ -1847,18 +1848,21 @@ const edgeTypes = { network: EditableEdge }
 // objective value (mono); failed / aborted → muted error line. Reads
 // simulationStore directly so it tracks the header Run button with no
 // prop-drilling through the (large) main canvas component.
+/** The canvas Results pill's objective: "-€96.0 k", sign before the € (UX 2 (6)). */
+export function fmtResultsObjective(v: number): string {
+  const a = Math.abs(v)
+  if (a >= 1e9) return signFirstEuro(v, `${(a / 1e9).toFixed(2)} B`)
+  if (a >= 1e6) return signFirstEuro(v, `${(a / 1e6).toFixed(2)} M`)
+  if (a >= 1e3) return signFirstEuro(v, `${(a / 1e3).toFixed(1)} k`)
+  return signFirstEuro(v, a.toFixed(0))
+}
+
 function ResultsPill() {
   const status = useSimulationStore(s => s.status)
   const objective = useSimulationStore(s => s.objective)
   const solveTime = useSimulationStore(s => s.solveTime)
 
-  const fmtObj = (v: number) => {
-    const a = Math.abs(v)
-    if (a >= 1e9) return `€${(v / 1e9).toFixed(2)} B`
-    if (a >= 1e6) return `€${(v / 1e6).toFixed(2)} M`
-    if (a >= 1e3) return `€${(v / 1e3).toFixed(1)} k`
-    return `€${v.toFixed(0)}`
-  }
+  const fmtObj = fmtResultsObjective
 
   return (
     <div
@@ -3098,7 +3102,7 @@ export default function TopologyCanvas() {
       )}
       {resultsOverlayEnabled && acPfAvailable && resultSource === 'ac_pf' && currentSnapConvergence === false && (
         <div className="absolute bottom-14 left-16 right-[232px] z-[850] flex justify-center pointer-events-none">
-          <div className="pointer-events-auto bg-warn/95 text-white text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
+          <div className="pointer-events-auto bg-warn/95 text-on-status text-[11px] rounded shadow-lg px-3 py-1.5 flex items-center gap-2 max-w-[640px]">
             <span aria-hidden="true" className="text-base leading-none">⚠</span>
             <span>
               AC Power Flow did not converge for this snapshot (<span className="whitespace-nowrap">{currentSnapIso.slice(0, 16).replace('T', ' ')}</span>).
@@ -3249,7 +3253,7 @@ export default function TopologyCanvas() {
                     aria-label="Width by flow"
                     aria-pressed={widthByFlow}
                     onClick={() => setWidthByFlow(v => !v)}
-                    title="Width by flow — edge width follows |flow| / rating (off: static s_nom width)"
+                    title="Width by flow. Edge width follows |flow| / rating; off, it follows each line’s capacity."
                     className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
                       ${widthByFlow ? 'bg-accent-50 text-accent' : 'text-ink-600 hover:bg-panel hover:text-accent'}`}
                   >
@@ -3379,7 +3383,7 @@ export default function TopologyCanvas() {
                           display: 'flex', alignItems: 'center', gap: 2,
                           backgroundColor: color, color: '#fff',
                           padding: '1px 5px', borderRadius: 6,
-                          fontSize: 8, fontWeight: 700, fontFamily: 'var(--font-family-mono)',
+                          fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)',
                           border: '1px solid #fff',
                           flexShrink: 0,
                         }}>

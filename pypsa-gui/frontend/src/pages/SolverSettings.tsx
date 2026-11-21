@@ -273,13 +273,19 @@ export default function SolverSettings() {
       ? ['network', 'solver-sclopf-panel'] as const
       : blockRequest === 'offgrid'
       ? ['network', 'solver-offgrid-constraints'] as const
+      : blockRequest === 'island'
+      ? ['network', 'solver-island-constraints'] as const
       : blockRequest === 'goal'
         ? ['network', 'solver-reliability-goal'] as const
+      : blockRequest === 'voll'
+        ? ['network', 'solver-voll'] as const
         : blockRequest === 'strategy'
           ? ['general', 'solver-solve-strategy'] as const
           : ['dispatch', 'solver-economic-assumptions'] as const
     if (tab !== want) { setTab(want); return }
-    document.getElementById(target)?.scrollIntoView({ block: 'start' })
+    const el = document.getElementById(target)
+    el?.scrollIntoView({ block: 'center' })
+    if (blockRequest === 'island') el?.focus()
     clearBlockRequest()
   }, [blockRequest, draft, tab, clearBlockRequest])
   // "Switch it under What the Run computes › N-1 security" (or › Load flow): the
@@ -1564,7 +1570,7 @@ export function ReliabilityAssumptions({
     if (!error) patch(p)
   })
   return (
-    <section className="border border-border rounded">
+    <section id="solver-voll" className="border border-border rounded">
       <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
         Reliability — Value of Lost Load
       </div>

@@ -23,6 +23,7 @@ import { updateAsset } from '../utils/assetWrite'
 import { blockerMessage } from '../utils/blockerMessage'
 import { isRenewableCarrier } from '../utils/carriers'
 import { hiddenLevelFields } from '../utils/busCarriers'
+import FieldsPending from './properties/FieldsPending'
 import { ingestRescale } from '../utils/rescaleActions'
 import type { RescalePreview } from '../utils/rescale'
 import { networkApi } from '../api/network'
@@ -38,10 +39,11 @@ import { vintageCloneToast, saveFailedToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
 import { useAssetProvenance } from '../hooks/useAssetProvenance'
-import { buildPatch, omitDerived, seedForm } from '../utils/assetForm'
+import { buildPatch, cardCostClaim, omitDerived, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, fieldHelp, fieldUnit, schemaFields } from './properties/AssetFields'
 import { useSaveAction } from '../components/memory/ParameterMemory'
 import { GuideButton } from '../components/GuidedTour'
+import RecipeCard from './properties/RecipeCard'
 import CarrierPanel from './properties/CarrierPanel'
 import ShuntPanel from './properties/ShuntPanel'
 import AssetFootprintEditor from '../components/AssetFootprintEditor'
@@ -147,7 +149,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost; the annualised capital cost is
   // derived (overnight × annuity + fixed O&M) and shown read-only.
-  const { data: schema } = useAssetSchema('Generator', gen.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('Generator', gen.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Generator', gen.name)
   const editors = generatorSeriesEditors(profilesRead ? genMeta?.category ?? 'other' : undefined)
@@ -171,7 +173,9 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     // PUT and invalidation; this builder owns only the form→patch mapping.
     // `current` arrives from the chokepoint — fresh-fetched on a cold cache
     // (ruling 3), so the old `?? gen` stale-prop fallback is gone.
-    mutationFn: () => updateAsset<Generator>(
+    mutationFn: () => {
+      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
+      return updateAsset<Generator>(
       qc, useUIStore.getState().currentProject, 'generators', gen.name,
       (current) => {
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Generator>
@@ -180,8 +184,10 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       payload.carrier = form.carrier || current.carrier
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Generator'))))
+      // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
+      for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }),
+    }, { costBasis: claim.costBasis }) },
     onSuccess: () => {
       // Invalidation is the chokepoint's job now.
       setOpen(false)
@@ -281,7 +287,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={gen.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={gen.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       {schema ? (
         <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset}
@@ -299,7 +305,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
             ),
           }}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Generator" name={gen.name} onClose={() => setVintageOpen(false)} />
       )}
@@ -331,7 +337,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // A battery is typed as its two overnight parts; capital cost, lifetime and
   // fixed O&M are derived from them and shown read-only.
-  const { data: schema } = useAssetSchema('StorageUnit', su.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('StorageUnit', su.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('StorageUnit', su.name)
   // Same query as the panel's Inflow section: a battery has no inflow editor, so no "Constant inflow" row.
@@ -355,7 +361,9 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   const saveMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
     // the schema's descriptors own the form→patch mapping.
-    mutationFn: () => updateAsset<StorageUnit>(
+    mutationFn: () => {
+      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
+      return updateAsset<StorageUnit>(
       qc, useUIStore.getState().currentProject, 'storage_units', su.name,
       (current) => {
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<StorageUnit>
@@ -366,8 +374,10 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       payload.carrier = form.carrier || current.carrier
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('StorageUnit'))))
+      // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
+      for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }),
+    }, { costBasis: claim.costBasis }) },
     onSuccess: () => {
       setOpen(false)
       toast.success('Storage unit saved')
@@ -450,7 +460,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={su.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={su.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       {schema ? (
         <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset}
@@ -474,7 +484,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
             ) : undefined,
           }}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="StorageUnit" name={su.name} onClose={() => setVintageOpen(false)} />
       )}
@@ -506,7 +516,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kWh; the annualised capital
   // cost is derived and shown read-only.
-  const { data: schema } = useAssetSchema('Store', store.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('Store', store.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Store', store.name)
   const specs = schemaFields(schema)
@@ -523,7 +533,9 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   const saveMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
     // the schema's descriptors own the form→patch mapping.
-    mutationFn: () => updateAsset<Store>(
+    mutationFn: () => {
+      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
+      return updateAsset<Store>(
       qc, useUIStore.getState().currentProject, 'stores', store.name,
       (current) => {
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Store>
@@ -532,8 +544,10 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
       payload.carrier = form.carrier || current.carrier
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Store'))))
+      // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
+      for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }),
+    }, { costBasis: claim.costBasis }) },
     onSuccess: () => {
       setOpen(false)
       toast.success('Store saved')
@@ -599,7 +613,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={store.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={store.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       <div className="col-span-2 text-[9px] text-muted bg-border/20 rounded px-2 py-1.5 leading-tight">
         {isH2Store && fieldUnit(schema, 'e_nom', 'MWh') === 'MWh'
           ? <>A <strong>Store</strong> is a pure energy vessel — power throughput is unlimited and bounded only by connected Links (electrolyzers/fuel cells). Set the energy capacity for the tank. 1 MWh ≈ 29.8 kg H₂ (LHV).</>
@@ -622,7 +636,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
             ),
           }}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Store" name={store.name} onClose={() => setVintageOpen(false)} />
       )}
@@ -637,6 +651,33 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
 }
 
 // ── Load card ──────────────────────────────────────────────────────────────────
+/** A loaded profile overrides the static p_set, so the readout shows the
+ *  profile's own peak and mean (matching the Guided card) instead of the stale
+ *  constant; `sign` is PyPSA's own word, so Guided hides it and Expert says it
+ *  in words. */
+/** The words the load readout uses, in one place so the drawer, its tests and
+ *  any card showing the same facts say them alike. */
+export const LOAD_READOUT_WORDS = {
+  profileSuffix: '(from the profile)',
+  sign: { '-1': 'consumes power', '1': 'supplies power' },
+} as const
+
+export function loadReadoutItems(items: ExpandedItem[], profile: { peak: number; mean: number } | null,
+  mode: string): ExpandedItem[] {
+  const fmt1 = (v: number) => Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 1 })
+  return items.flatMap((i): ExpandedItem[] => {
+    if (i.field === 'p_set' && profile) {
+      return [{ ...i, value: `${fmt1(profile.peak)} MW peak · ${fmt1(profile.mean)} MW mean ${LOAD_READOUT_WORDS.profileSuffix}`, unit: undefined }]
+    }
+    if (i.field === 'sign') {
+      if (mode !== 'expert') return []
+      const v = Number(i.value)
+      return [{ ...i, value: LOAD_READOUT_WORDS.sign[v === 1 ? '1' : '-1'], unit: undefined }]
+    }
+    return [i]
+  })
+}
+
 export function LoadCard({ load, onRename, mode = 'card', title }: {
   load: Load
   onRename?: (newName: string) => void
@@ -648,6 +689,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   const [showChart, setShowChart] = useState(false)
   const [form, setForm] = useState<FS>({})
 
+  const uiMode = useUIStore(s => s.uiMode)
   const currentProject = useUIStore(s => s.currentProject)
   const { data: profiles = {} } = useQuery({
     queryKey: nk(currentProject, 'load_profiles'),
@@ -669,7 +711,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   })
 
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
-  const { data: schema } = useAssetSchema('Load', load.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('Load', load.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Load', load.name)
   const series = useSeriesFields(currentProject, 'loads', load.name, { p_set: 'Profile' })
@@ -714,7 +756,9 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, load.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance, series)
+  const items: ExpandedItem[] = loadReadoutItems(
+    assetReadoutItems(schema, asset, undefined, provenance, series),
+    hasProfile && profileMeta?.has_profile ? profileMeta : null, uiMode)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -773,17 +817,17 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       {schema ? (
         <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       <SectionHdr title="Time Series" />
       <div className="flex items-center gap-2 py-1">
-        <div className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${hasProfile ? 'bg-success border-success' : 'bg-bg border-border'}`}>
-          {hasProfile && <span className="text-white text-[8px] leading-none">✓</span>}
+        <div className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${hasProfile ? 'bg-success border-success text-on-status' : 'bg-bg border-border'}`}>
+          {hasProfile && <span className="text-[8px] leading-none">✓</span>}
         </div>
         <span className="text-xs text-muted">
           {hasProfile && profileMeta.has_profile
@@ -869,7 +913,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kW of input; the annualised
   // capital cost is derived and shown read-only.
-  const { data: schema } = useAssetSchema('Link', link.name)
+  const { data: schema, unitsFailed, retryUnits } = useAssetSchema('Link', link.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Link', link.name)
   const series = useSeriesFields(currentProject, 'links', link.name, {
@@ -892,7 +936,9 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     // the spread is what keeps un-surfaced Link fields (`efficiency2`,
     // `bus2..bus4`, `committable`, `terrain_factor`, …) alive through the
     // backend's remove+add cycle. This builder is only the form→patch map.
-    mutationFn: () => updateAsset<Link>(
+    mutationFn: () => {
+      const claim = cardCostClaim(schema, specs, form, asset, 'bus0')
+      return updateAsset<Link>(
       qc, useUIStore.getState().currentProject, 'links', link.name,
       (current) => {
       const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Link>
@@ -903,8 +949,10 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
       Object.assign(payload, ehLinkPayload(form, current))
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Link'))))
+      // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
+      for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }),
+    }, { costBasis: claim.costBasis }) },
     onSuccess: () => {
       setOpen(false)
       toast.success('Link saved')
@@ -952,6 +1000,8 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   if (!open && mode === 'detail') {
     return (
       <>
+        {/* Gap 03: a process's recipe, the same card as Guided section 2's drawer, above the Port N efficiencies. */}
+        <RecipeCard name={link.name} />
         <Section title={title ?? 'Link Properties'}>
           <Row label="Carrier" value={link.carrier} tip={fieldHelp(schema, 'carrier')} />
           {categoryLabel && <Row label="Category" value={categoryLabel} />}
@@ -1027,7 +1077,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   }
 
   return (
-    <EditShell title={link.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
+    <EditShell title={link.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending} saveDisabled={!schema}>
       {(category === 'electrolyzer' || category === 'fuel_cell') && (
         <div className="col-span-2 text-[9px] text-muted bg-border/20 rounded px-2 py-1.5 leading-tight">
           {category === 'electrolyzer'
@@ -1056,7 +1106,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
             ),
           }}
         />
-      ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
+      ) : <FieldsPending failed={unitsFailed} onRetry={retryUnits} />}
       {vintageOpen && (
         <VintagePeriodBoundsModal componentClass="Link" name={link.name} onClose={() => setVintageOpen(false)} />
       )}

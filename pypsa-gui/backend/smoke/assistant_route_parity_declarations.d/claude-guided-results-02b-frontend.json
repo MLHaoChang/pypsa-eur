@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/results/eh_study/why/{figure}",
+   "reason": "held-by-spec",
+   "issue": ".scratch/guided-results/issues/05-expert-results-parity.md"
+  }
+ ]
+}

@@ -33,6 +33,9 @@ REASONS = {
     "render_failed": "The chart could not be saved",
     "current_run_only": "Charts are drawn from the current run's evidence only",
     "other_project": "The checked evidence belongs to another project",
+    # assistant-assurance 10, S2: a MIP's bus prices are not marginal prices.
+    "mip_duals_not_marginal": "An integer (MIP) solve has no marginal prices",
+    "unsupported_stochastic_run": "Stochastic (scenario) runs are not checked",
 }
 # AA-05 S5b: the metric identity the dataset carries. A chart stored before
 # them has neither key and is compared without both (B2).
@@ -184,6 +187,9 @@ def render(ctx, record, requested):
     project, root, _owner = assistant_tools._project()
     if record["project_id"] != str(project.id):  # K1: before any drawing or write
         return refused(requested, "other_project")
+    limit = (record.get("raw") or {}).get("solve_limit")
+    if record["request_scope"]["profile"] == "bus-price/1" and limit:
+        return refused(requested, limit)  # never draw a MIP's 0.0 as a price (GK B 65 B1)
     data, slots, window = dataset(record, requested)
     if not data["columns"]:
         return {"status": "not_drawn", "reason": "nothing_drawable", "title": "No requested series could be drawn",
@@ -205,6 +211,8 @@ def render(ctx, record, requested):
         "render_spec": {"kind": "line", "points": "every snapshot as stored", "caption": lines},
         "artifact_sha256": byte_hash,
     }
+    if "definition_hash" in record:  # AA-10 S7: the definitions it was checked under
+        manifest["definition_hash"] = record["definition_hash"]
     manifest["render_spec_sha256"] = canonical_sha256(manifest["render_spec"])
     provenance = {"manifest": manifest}
     sidecar = root / "assistant_artifacts" / (byte_hash[:16] + ".json")

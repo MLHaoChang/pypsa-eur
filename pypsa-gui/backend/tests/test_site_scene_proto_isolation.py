@@ -39,9 +39,10 @@ def test_frozen_routes_are_mounted_exactly_once():
     for route in contract.ROUTES:
         assert mounted.count((route["method"], _shape(route["path"]))) == 1, route
         assert route["chat"] == "none"
-    # The deferred rows (sources: SC-06; stored artifacts: the optional worker) stay unmounted.
-    # SC-04's exports route is in ROUTES above: mounted exactly once.
-    assert not any("/scene/sources" in p or "/scene/artifacts" in p for p in paths)
+    # The deferred rows (sources: SC-06) stay unmounted. SC-04's exports route and
+    # issue 06's stored-artifact and blender-jobs routes are in ROUTES above: mounted exactly once.
+    assert not any("/scene/sources" in p for p in paths)
+    assert all(p.endswith("/scene/artifacts/{artifact_id}") for p in paths if "/scene/artifacts" in p)
     # The legacy sites routes the guard wraps are the ones that exist today.
     assert ("GET", "/api/projects/{}/sites") in mounted and ("PUT", "/api/projects/{}/sites") in mounted
 

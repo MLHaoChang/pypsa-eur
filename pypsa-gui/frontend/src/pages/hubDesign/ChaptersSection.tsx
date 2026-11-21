@@ -11,11 +11,12 @@ import { nk } from '../../utils/queryKeys'
 import { CAMPUS_KEY, CAMPUS_RUN_POLL_MS } from '../CampusElectricalPanel'
 import { isRunJob, useTick } from '../campusRunProgress'
 import { GFM_KEY } from '../CampusIslandGfmSection'
-import { chapterTiles, dispatchSolved, FROM_STUDY_HINT, type ChapterInputs, type ChapterOpen } from './chapters'
+import { chapterTiles, dispatchSolved, FROM_STUDY_HINT, type ChapterId, type ChapterInputs, type ChapterOpen } from './chapters'
 import { useHubDesignStore } from './hubDesignStore'
 import RunGridChecks from './RunGridChecks'
 import ProductionTiles from '../results/ProductionTiles'
 import { useInScope } from '../../components/flowScope/useFlowScope'
+import { ControlChapter } from './ControlChapter'
 import { AddToScope } from '../../components/flowScope/ScopeCards'
 
 const OPEN_LABEL = (o: ChapterOpen) =>
@@ -25,9 +26,10 @@ function is409(e: unknown): boolean {
   return (e as { response?: { status?: number } } | null)?.response?.status === 409
 }
 
-export function ChaptersSection({ reliability }: { reliability: ChapterInputs['reliability'] }) {
+/** The four tiles and the reads behind them. The Results headline calls it too: the
+ *  query keys are shared, so both read one cache and never disagree (guided-results 01). */
+export function useChapterTiles(reliability: ChapterInputs['reliability']) {
   const project = useUIStore(s => s.currentProject)
-  const setStep = useHubDesignStore(s => s.setStep)
   const icStudy = useQuery({
     queryKey: nk(project, 'results', 'investment_case'),
     queryFn: () => financeApi.getInvestmentCase(), enabled: !!project,
@@ -66,9 +68,22 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
     reliability: { ...reliability, solved: status.isSuccess ? dispatchSolved(status.data) : undefined },
     operation: { status: status.data ?? null, gfm: gfm.data ?? null },
   })
+  return { tiles, processView: processView.data }
+}
+
+/** `headlined`: tiles whose figure, state and Expert link the Results headline shows; here
+ *  they keep their group and say so (one number, one place; one entry point per destination). */
+export function ChaptersSection({ reliability, headlined = [] }: {
+  reliability: ChapterInputs['reliability']; headlined?: ChapterId[]
+}) {
+  const project = useUIStore(s => s.currentProject)
+  const setStep = useHubDesignStore(s => s.setStep)
+  const { tiles, processView } = useChapterTiles(reliability)
 
   // The grid checks are Grid › Grid code & electrical design's (W4a).
   const gridInScope = useInScope('grid', 'grid_code')
+  // The grid-forming line is Control's: none when Control is out of scope (control-strategy 06).
+  const controlInScope = useInScope('control')
 
   const open = (o: ChapterOpen) => {
     if ('step' in o) { setStep(o.step, { user: true }); return }
@@ -82,12 +97,18 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
       <h3 className="text-[12px] font-semibold text-text">The whole picture</h3>
       <div className="grid grid-cols-2 gap-2">
         {tiles.map(t => (
-          <div key={t.id} className="flex flex-col gap-1.5 rounded-[10px] border border-border/70 p-2" data-testid={`hub-chapter-${t.id}`}>
+          <div key={t.id} className="flex flex-col gap-1.5 rounded-card border border-border/70 p-2" data-testid={`hub-chapter-${t.id}`}>
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{t.group}</span>
-            <Kpi label={t.label} value={t.value} unit={t.unit} basis={t.basis}
-              state={t.state} reason={t.reason} fromStudy={t.fromStudy}
-              hint={t.fromStudy ? FROM_STUDY_HINT : undefined} testId={`hub-chapter-${t.id}-kpi`} />
-            {t.control && (
+            {headlined.includes(t.id) ? (
+              <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-headlined`}>
+                {t.label}: in the headline above.
+              </p>
+            ) : (
+              <Kpi label={t.label} value={t.value} unit={t.unit} basis={t.basis}
+                state={t.state} reason={t.reason} fromStudy={t.fromStudy}
+                hint={t.fromStudy ? FROM_STUDY_HINT : undefined} testId={`hub-chapter-${t.id}-kpi`} />
+            )}
+            {t.control && controlInScope && (
               <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-control`}>
                 {t.control.text}{' '}
                 {t.control.resolve && (
@@ -102,14 +123,18 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
                 ? <RunGridChecks project={project} again={t.state !== 'not_run'} disabled={t.state === 'running'} />
                 : <AddToScope card="grid" option="grid_code" testId="hub-run-grid-checks-out-of-scope" />
             )}
-            <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
-              className="self-start text-[11.5px] text-accent hover:underline">
-              {OPEN_LABEL(t.open)}
-            </button>
+            {/* A headlined figure's way in is its link in the headline: one entry point per destination. */}
+            {!headlined.includes(t.id) && (
+              <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
+                className="self-start text-[11.5px] text-accent hover:underline">
+                {OPEN_LABEL(t.open)}
+              </button>
+            )}
           </div>
         ))}
+        <ControlChapter />
       </div>
-      <ProductionTiles view={processView.data} />
+      <ProductionTiles view={processView} />
     </section>
   )
 }

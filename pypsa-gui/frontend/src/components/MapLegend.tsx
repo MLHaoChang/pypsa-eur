@@ -67,7 +67,7 @@ export default function MapLegend({ linkCarriers, assetRows }: Props) {
             const { Icon, label } = getCarrierBadge(carrier)
             return (
               <div key={carrier} className="flex items-center gap-1.5 mb-1.5" data-testid="legend-carrier">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 2, backgroundColor: getLinkColor(carrier, i), color: '#fff', padding: '1px 5px', borderRadius: 6, fontSize: 8, fontWeight: 700, fontFamily: 'var(--font-family-mono)', border: '1px solid #fff', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2, backgroundColor: getLinkColor(carrier, i), color: '#fff', padding: '1px 5px', borderRadius: 6, fontSize: 8, fontWeight: 700, fontFamily: 'var(--font-mono)', border: '1px solid #fff', flexShrink: 0 }}>
                   <Icon size={8} strokeWidth={2.5} />
                   <span style={{ marginLeft: 1 }}>{label}</span>
                 </div>

@@ -175,6 +175,37 @@ describe('RunMonitor', () => {
     expect(row.querySelector('[data-testid="run-stage-words"]')?.textContent).toBe(words)
   })
 
+  it('a stage the profile skips says why under its row, and no other stage carries a reason line', async () => {
+    show('gate_fail')
+    await screen.findByTestId('run-state')
+    const rows = screen.getAllByTestId('run-stage')
+    const reason = (stage: string) =>
+      rows.find(r => r.getAttribute('data-stage') === stage)?.querySelector('[data-testid="run-stage-reason"]')?.textContent
+    expect(reason('report')).toBe('The run report is not part of a run yet.')
+    expect(reason('explore')).toBe('Exploring cases is not part of a run yet.')
+    expect(screen.getAllByTestId('run-stage-reason')).toHaveLength(2)
+  })
+
+  it('a reason on a stage that was not skipped never shows a reason line', async () => {
+    show('finished_with_stage_reasons')
+    await screen.findByTestId('run-state')
+    const rows = screen.getAllByTestId('run-stage')
+    for (const stage of ['solve', 'input_gate']) {
+      const row = rows.find(r => r.getAttribute('data-stage') === stage)!
+      expect(row.querySelector('[data-testid="run-stage-reason"]')).toBeNull()
+    }
+    expect(screen.getByTestId('run-monitor').textContent).not.toMatch(/A solve note|A gate note/)
+  })
+
+  it('a finished grid-only run says why it has no report, in words without a tracker number', async () => {
+    show('finished_grid_only')
+    await screen.findByTestId('run-state')
+    const row = screen.getAllByTestId('run-stage').find(r => r.getAttribute('data-stage') === 'report')!
+    const reason = row.querySelector('[data-testid="run-stage-reason"]')?.textContent ?? ''
+    expect(reason).toMatch(/^No report from grid-only runs yet/)
+    expect(screen.getByTestId('run-monitor').textContent).not.toMatch(/issue \d|#\d/i)
+  })
+
   it.each(['over_budget', 'solves_used_up'] as const)('%s: a held run offers Stop but not Pause', async (state) => {
     show(state)
     await screen.findByTestId('run-failure')
@@ -216,6 +247,37 @@ describe('RunMonitor', () => {
     cleanup()
     show('finished_report')
     expect((await screen.findByTestId('run-report-link')).textContent).toBe('Open the report ›')
+  })
+
+  it('a resume the goal-switch guard refused names the task the run waits for (LC-48e)', async () => {
+    show('held_by_switch')
+    expect((await screen.findByTestId('run-held')).textContent).toBe(
+      'Your answer is saved. This run waits for \u201cWait for result\u201d, which is still running; ask to resume the run once it ends.')
+    expect(screen.getByTestId('run-state').textContent).toBe('Waiting for you')
+    expect(screen.queryByTestId('run-waiting-step')).toBeNull()
+    expect(card()).not.toMatch(INTERNAL)
+    expect(card()).not.toMatch(/switch_in_progress|task-2/)
+  })
+
+  it.each([
+    ['ended', 'Plan <b>"A"</b>', 'Your answer is saved. \u201cPlan <b>"A"</b>\u201d has ended; ask to resume the run.'],
+    ['waiting_job', 'Wait', 'Your answer is saved. This run waits for \u201cWait\u201d, which waits on a job; ask to resume the run once it ends.'],
+    ['unreadable', null, 'Your answer is saved. This run waits for the chat\u2019s other task, which can\u2019t be read here because it belongs to another project or needs repair; ask to resume the run once it ends.'],
+  ])('the held line words a %s task as text, never markup (LC-48e)', async (status, title, words) => {
+    const base = STATES.held_by_switch
+    vi.mocked(api.getRun).mockResolvedValue({ ...base, run: { ...base.run,
+      held: { ...base.run.held!, active: { kind: 'task', id: 'task-2', title, status } } } })
+    render(<AssistantResultCard result={START} disabled={false} onRequest={vi.fn()} />)
+    const line = await screen.findByTestId('run-held')
+    expect(line.textContent).toBe(words)
+    expect(line.querySelector('b')).toBeNull()
+    expect(card()).not.toMatch(/task-2|unreadable|waiting_job/)
+  })
+
+  it('a run without a held note shows no held line', async () => {
+    show('research_confirm')
+    await screen.findByTestId('run-waiting')
+    expect(screen.queryByTestId('run-held')).toBeNull()
   })
 
   it('research: the value waits beside its page and verbatim quote; Use this value settles it (issue 09)', async () => {

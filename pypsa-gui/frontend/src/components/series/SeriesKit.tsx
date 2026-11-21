@@ -268,6 +268,10 @@ export const SERIES_WARNING_TITLES: Record<string, string> = {
   default_peak_above_connection: 'Peak above the grid connection',
 }
 
+// A warning the Apply button's disabled state depends on: its reason is visible
+// text, never behind a disclosure.
+const BLOCKING_CODES: ReadonlySet<string> = new Set(['not_applicable'])
+
 function splitWarning(w: string): { code: string | null; text: string } {
   const m = /^([a-z][a-z0-9_]*):\s*(.*)$/s.exec(w)
   return m ? { code: m[1], text: m[2] } : { code: null, text: w }
@@ -285,7 +289,9 @@ export function WarningList({ warnings, testId }: { warnings: string[]; testId?:
         const title = code ? SERIES_WARNING_TITLES[code] ?? null : null
         return (
           <li key={w} data-code={code ?? undefined}>
-            {title ? (
+            {title && code && BLOCKING_CODES.has(code) ? (
+              <><span className="font-medium">{title}.</span> {text}</>
+            ) : title ? (
               <details>
                 <summary className="cursor-pointer">{title}</summary>
                 <p className="pl-3 text-[10px]">{text}</p>
@@ -299,7 +305,7 @@ export function WarningList({ warnings, testId }: { warnings: string[]; testId?:
 }
 
 const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: 'UTC' })
-const DAY_MONTH = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+export const DAY_MONTH = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
 const FULL = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 // Snapshots are naive; read them as written (UTC), never shifted by the browser.
 const stamp = (s: string) => new Date(s.endsWith('Z') ? s : `${s}Z`)
@@ -447,7 +453,7 @@ export function PendingCard({
         </Btn>
         {blocked && (
           <span className="text-[11px] text-muted" data-testid="apply-blocked">
-            This network cannot take the series yet: see the warning above.
+            This network cannot take the series: the reason is above.
           </span>
         )}
         {apply.isError && <span className="text-[11px] text-red-600" data-testid="apply-error">{errorText(apply.error)}</span>}

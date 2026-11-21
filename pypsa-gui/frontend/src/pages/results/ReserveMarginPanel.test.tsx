@@ -124,7 +124,7 @@ describe('ReserveMarginPanel — ★ it mounts in BOTH states', () => {
     const empty = await screen.findByTestId('reserve-margin-empty')
     // An ANSWER, not a stub: it must say what to do next.
     expect((empty.textContent ?? '').length).toBeGreaterThan(40)
-    expect(empty.textContent).toMatch(/reserve_margin/)
+    expect(empty.textContent).toMatch(/Reserve margin/)
     expect(screen.queryByTestId('reserve-margin-periods')).toBeNull()
   })
 
@@ -217,7 +217,7 @@ describe('ReserveMarginPanel — ★ the horizon-wide label', () => {
     expect(s).toMatch(/not a per-period/i)
     // The mechanism, so the label is checkable rather than a slogan.
     expect(s).toMatch(/single|one/i)
-    expect(s).toMatch(/p_nom/)
+    expect(s).toMatch(/capacity is a single variable/)
     // It must NOT claim the per-period enforcement it does not have.
     expect(s).not.toMatch(/enforced per investment period/i)
   })

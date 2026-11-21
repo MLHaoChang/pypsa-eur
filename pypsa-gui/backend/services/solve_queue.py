@@ -124,7 +124,12 @@ KIND_CAMPUS = "campus"
 # PENDING artifact under the project's storage_dir — it never touches a
 # network. The spec rides as the job's `solver_config_json`, like campus.
 KIND_PROFILE_GEN = "profile_gen"
-KINDS = (KIND_SOLVE, KIND_GRIDSPINE, KIND_CAMPUS, KIND_PROFILE_GEN)
+# A site-scene Blender run (issue 06, Q-SS-2): `site_scene/blender_job.py` runs
+# the pinned Blender in its container wrapper on the native export GLB and
+# stores a download-only artifact under the project directory. It never
+# touches a network or the scene. The site id rides as `solver_config_json`.
+KIND_BLENDER_SCENE = "blender_scene"
+KINDS = (KIND_SOLVE, KIND_GRIDSPINE, KIND_CAMPUS, KIND_PROFILE_GEN, KIND_BLENDER_SCENE)
 
 # Any other kind is refused, never run as a solve (SC-00 N, decision D04): a
 # kind added by a later build, or a corrupt row, must not fall through to
@@ -265,6 +270,23 @@ class SolveConfigConflict(Exception):
     def __init__(self, existing: SolveJob):
         super().__init__("a solve with other settings is already queued or running")
         self.existing = existing
+
+
+def _enqueuer_may_not_write(job: "SolveJob") -> bool:
+    """True when the person who queued `job` may no longer write its project:
+    they now only view it, their membership is gone, or their account is.
+
+    Read fresh from the database at the moment the job runs; a lost membership
+    fails closed like a demotion (GK B F3 on #1622). A job with no recorded
+    requester or project (local mode, unkeyed jobs) is not judged here, nor is
+    a deleted project.
+    """
+    key, requester = job.project_key, job.enqueued_by_user_id
+    if not key or requester is None or ":" not in key:
+        return False
+    from services import project_write_gate
+
+    return project_write_gate.requester_may_not_write(requester, key.split(":", 1)[1])
 
 
 class SolveQueue:
@@ -1032,12 +1054,22 @@ class SolveQueue:
         """Dispatch on the job's kind. Everything else about a job — claiming
         it, the log queue, the stop event, the persisted status — is the same
         whichever runner takes it."""
+        if _enqueuer_may_not_write(job):
+            # The role is read again here, at execution: a person made a
+            # viewer, or removed, after queueing does not get the solve saved
+            # (project-viewer-role 01, GK B R3).
+            from services import project_write_gate
+
+            self._finish(job, "failed", error=f"{project_write_gate.KIND}: {project_write_gate.MESSAGE}")
+            return
         if job.kind == KIND_GRIDSPINE:
             self._run_gridspine_job(job)
         elif job.kind == KIND_CAMPUS:
             self._run_campus_job(job)
         elif job.kind == KIND_PROFILE_GEN:
             self._run_profile_gen_job(job)
+        elif job.kind == KIND_BLENDER_SCENE:
+            self._run_blender_scene_job(job)
         elif job.kind == KIND_SOLVE:
             self._run_solve_job(job)
         else:
@@ -1252,6 +1284,50 @@ class SolveQueue:
                 error = f"{type(exc).__name__}: {detail if detail is not None else exc}"
                 log_queue.put(f"profile generation failed: {error}")
                 logger.exception("solve_queue: profile_gen job %s failed", job.id)
+        finally:
+            log_queue.put(None)
+            self._finish(job, status, error=error)
+
+    def _run_blender_scene_job(self, job: SolveJob) -> None:
+        """Run one site-scene Blender job (`site_scene.blender_job.run_queued`).
+
+        The same claim, log, stop event and persisted status as every other
+        kind. The worker is bounded by a wall timeout, and a cancel kills its
+        process group within the grace period, so a queued solve behind it
+        starts promptly (one dispatcher, by decision)."""
+        from routers import simulation as sim
+        from services.site_scene import blender_job
+        from services.site_scene import blender_worker as bw
+        from services.site_scene.contract import SceneError
+
+        stop_event = threading.Event()
+        log_queue = sim.BufferedLogQueue()
+        claim = self._claim(job, stop_event, log_queue)
+        if claim == "parked":
+            return
+        if claim == "cancelled":
+            self._finish(job, "aborted")
+            return
+
+        status, error = "failed", None
+        try:
+            log_queue.put(f"Blender scene run starting for {job.project_id}")
+            meta = blender_job.run_queued(job, stop_event)
+            status = "completed"
+            log_queue.put(f"Blender scene artifact stored: {meta['artifact_id']}")
+        except BaseException as exc:  # noqa: BLE001 - recorded, never re-raised
+            if isinstance(exc, bw.WorkerError) and exc.kind == bw.CANCELLED:
+                status = "aborted"
+                log_queue.put("Blender scene run aborted")
+            else:
+                # A WorkerError or SceneError message names no host path; anything
+                # else (an OSError's filename) is logged here and served by class only.
+                if isinstance(exc, (bw.WorkerError, SceneError)):
+                    error = str(exc)
+                else:
+                    error = f"{bw.FAILED}: an internal error stopped the run ({type(exc).__name__})"
+                    logger.exception("solve_queue: blender_scene job %s failed", job.id)
+                log_queue.put(f"Blender scene run failed: {error}")
         finally:
             log_queue.put(None)
             self._finish(job, status, error=error)

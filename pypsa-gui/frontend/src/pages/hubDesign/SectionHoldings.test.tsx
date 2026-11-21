@@ -37,6 +37,16 @@ describe('SectionHoldings', () => {
       .toEqual(['Generators (1)', 'Stores (1)'])
   })
 
+  it('a helper row reads in plain words, a plain generator keeps its name (guided-results 03)', () => {
+    render(<SectionHoldings id="assets" pending={false} failed={false}
+      holds={[held({}), held({ entity: '__lost_steel', helper: true }), held({ entity: 'grid_x', helper: true })]} />)
+    const rows = screen.getAllByTestId('section-held')
+    expect(rows.map(r => r.querySelector('span')?.textContent)).toEqual(
+      ['pv', 'lost production (steel)', 'added by the model (grid_x)'])
+    expect(screen.queryByText('__lost_steel')).toBeNull()
+    expect(screen.getAllByTestId('section-held-edit')[1].getAttribute('aria-label')).toBe('Edit lost production (steel)')
+  })
+
   it('a group longer than 8 folds, and "Show all" lists every row', () => {
     render(<SectionHoldings id="assets" pending={false} failed={false} holds={gens(11)} />)
     expect(screen.getAllByTestId('section-held')).toHaveLength(8)
@@ -68,14 +78,40 @@ describe('SectionHoldings', () => {
     expect(openTimeSeriesFor).toHaveBeenCalledWith('Generator', 'pv', { field: 'p_max_pu' })
   })
 
-  it('"Edit" on a carrier goes to Expert and leaves a way back to the section', () => {
+  it('"Edit" on a load time series opens the load\'s own editor in Guided, not the library', () => {
+    render(<SectionHoldings id="profiles" pending={false} failed={false}
+      holds={[held({ component: 'Load', entity: 'it_load', field: 'p_set', value: null, unit: null })]} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Edit it_load/ }))
+    expect(openTimeSeriesFor).not.toHaveBeenCalled()
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe('guided')
+    expect(ui.fieldDrawer).toEqual({ section: 'profiles', panel: null, component: 'Load', entity: 'it_load', field: null })
+  })
+
+  it('"Edit" on a carrier opens its card in the drawer and stays in Guided (gap 03)', () => {
     useUIStore.setState({ activeSection: 'carriers' })
     render(<SectionHoldings id="carriers" pending={false} failed={false}
       holds={[held({ component: 'Carrier', entity: 'solar', field: null, value: null, unit: null })]} />)
     fireEvent.click(screen.getByRole('button', { name: 'Edit solar' }))
     const ui = useUIStore.getState()
-    expect(ui.uiMode).toBe('expert')
-    expect(ui.flowReturn).toMatchObject({ mode: 'guided', section: 'carriers', label: 'Carriers & processes' })
+    expect(ui.uiMode).toBe('guided')
+    expect(ui.fieldDrawer).toMatchObject({ component: 'Carrier', entity: 'solar' })
+    expect(ui.selectedComponent).toEqual({ type: 'Carrier', name: 'solar' })
+  })
+
+  it('a recipe row reads by its plain name and opens the recipe card in the drawer (gap 03)', () => {
+    useUIStore.setState({ activeSection: 'carriers' })
+    const recipe = { label: 'Haber-Bosch', product: { carrier: 'NH3', label: 'NH3' }, per: 't' as const,
+      product_per: 5.166, electricity: { value: 1277.55, unit: 'kWh' as const },
+      inputs: [{ port: 2, carrier: 'H2', label: 'H2', value: 5.93, unit: 'MWh' }] }
+    render(<SectionHoldings id="carriers" pending={false} failed={false}
+      holds={[held({ component: 'Link', entity: 'haber_bosch', field: null, value: null, unit: null, recipe })]} />)
+    expect(screen.queryByText('haber_bosch')).toBeNull()
+    expect(screen.getByText('Haber-Bosch')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Haber-Bosch recipe' }))
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe('guided')
+    expect(ui.fieldDrawer).toMatchObject({ component: 'Link', entity: 'haber_bosch', field: 'recipe' })
   })
 
   it('empty, failed and loading each say so', () => {

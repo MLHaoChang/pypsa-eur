@@ -1,0 +1,75 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import RunStrip from './RunStrip'
+import { useUIStore } from '../../store/uiStore'
+import { WRITABLE } from '../../utils/lockState'
+import * as projectRun from '../../hooks/useProjectRun'
+import { runEstimateApi } from '../../api/runEstimate'
+import type { RunView } from '../../utils/runStatus'
+
+function renderStrip() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={qc}><RunStrip /></QueryClientProvider>)
+}
+
+const run: RunView = {
+  name: 'Optimisation', stage: 'Solving', steps: '', startedAt: Date.now() / 1000 - 30,
+  jobId: 'job-1', queued: false,
+}
+
+beforeEach(() => {
+  useUIStore.getState().setLockState(WRITABLE)
+  useUIStore.getState().setSolvingReadOnly(false)
+  vi.spyOn(runEstimateApi, 'get').mockResolvedValue({ kind: 'solve', seconds: null, samples: 0, run_ids: [] })
+})
+afterEach(() => vi.restoreAllMocks())
+
+describe('RunStrip', () => {
+  it('takes no space when nothing runs and the project is writable', () => {
+    vi.spyOn(projectRun, 'useProjectRun').mockReturnValue(null)
+    renderStrip()
+    expect(screen.queryByTestId('run-strip')).toBeNull()
+  })
+
+  it('shows the run and the read-only line together while the project is solved', () => {
+    vi.spyOn(projectRun, 'useProjectRun').mockReturnValue(run)
+    useUIStore.getState().setSolvingReadOnly(true)
+    renderStrip()
+    expect(screen.getByTestId('run-status').getAttribute('title')).toContain('Optimisation · Solving')
+    expect(screen.getByTestId('run-strip-readonly').textContent)
+      .toBe('Being solved: edits open again when the run ends.')
+    // UX 24: colours come from the app's theme tokens, which follow the app's
+    // theme switch; Tailwind `dark:` follows the OS instead.
+    const cls = screen.getByTestId('run-strip').className + screen.getByTestId('run-strip-readonly').className
+    expect(cls).toContain('text-warn')
+    expect(cls).not.toMatch(/dark:|amber-/)
+  })
+
+  it('a queued run or a Guided study shows without the read-only line', () => {
+    vi.spyOn(projectRun, 'useProjectRun').mockReturnValue({ ...run, queued: true, startedAt: null, stage: 'Waiting in queue #2' })
+    renderStrip()
+    expect(screen.getByTestId('run-strip')).toBeTruthy()
+    expect(screen.queryByTestId('run-strip-readonly')).toBeNull()
+  })
+
+  it('keeps the read-only line when the queue has not caught up with the run', () => {
+    vi.spyOn(projectRun, 'useProjectRun').mockReturnValue(null)
+    useUIStore.getState().setSolvingReadOnly(true)
+    renderStrip()
+    expect(screen.getByTestId('run-strip-readonly')).toBeTruthy()
+    expect(screen.queryByTestId('run-status')).toBeNull()
+  })
+
+  it('keeps an empty live region mounted, so the first stage is announced', () => {
+    const spy = vi.spyOn(projectRun, 'useProjectRun').mockReturnValue(null)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={qc}><RunStrip /></QueryClientProvider>)
+    const region = screen.getByRole('status')
+    expect(region.textContent).toBe('')
+    spy.mockReturnValue(run)
+    view.rerender(<QueryClientProvider client={qc}><RunStrip /></QueryClientProvider>)
+    expect(screen.getByRole('status')).toBe(region)
+    expect(region.textContent).toBe('Optimisation: Solving')
+  })
+})

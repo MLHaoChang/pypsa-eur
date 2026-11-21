@@ -357,10 +357,12 @@ export const projectsApi = {
     client.post<BundleImportResult>(
       `/projects/from_template/${encodeURIComponent(templateId)}`,
       // The generic site (`eh_site`) and the data centers (`dc_load`) take
-      // parameters; any other template refuses a body.
+      // parameters; any other template refuses a body. The caller
+      // (`useCreateFromTemplate`) toasts every refusal once, so the generic
+      // error toast stays off.
       params ?? null,
       // A refused site or dc_load (422) is shown beside its field.
-      { params: name ? { name } : undefined, skipErrorToast: params !== undefined },
+      { params: name ? { name } : undefined, skipErrorToast: true },
     ).then(r => r.data),
   /** The generic site form's presets, load shapes and bounds (G2). */
   getSiteTemplateForm: () =>

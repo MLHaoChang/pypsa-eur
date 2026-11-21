@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): When the acting user has no access to the open project, the assistant's tool admission now refuses with its own `project_access_denied` kind (404) instead of `restriction_unavailable`, which wrongly said the saved chat restrictions could not be read. An unreadable restrictions store still fails closed with 503 `restriction_unavailable`.

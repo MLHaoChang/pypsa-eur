@@ -1,6 +1,8 @@
 import { manualNavigation, navigationEpoch, withAssistantNavigation } from '../utils/navigationEpoch'
 import { useUIStore, type CanvasView, type PropertiesEditRequest } from '../store/uiStore'
 import { withReturnFrom } from '../layout/flowNavigation'
+import toast from 'react-hot-toast'
+import { openParameter, pickAssetFor, resolveEntry } from '../catalogue/openParameter'
 import { HUB_STEPS, useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
 
 /**
@@ -66,8 +68,25 @@ function _normalizePanelId(raw: string): string {
 /** The panels whose sections chat can name (backend `_PANEL_SECTIONS`). */
 const SECTION_PANELS: ReadonlySet<string> = new Set(['campusElectrical', 'campusStudy', 'campusResults', 'gridspine'])
 
+/** Kind `parameter` with an id the catalogue does not hold (or for another class). */
+export const UNKNOWN_PARAMETER_NOTICE = 'That parameter is not in the list. Search for it in the command palette.'
+/** Kind `parameter` for a parameter with no field on an asset's Properties (opens in the guide from slice 02b). */
+export const NOT_OPENABLE_NOTICE = 'No asset in this project has that parameter to open.'
+/** Kind `parameter` while the parameter list could not be loaded. */
+export const CATALOGUE_UNAVAILABLE_NOTICE = 'The parameter list could not be loaded. Try again in a moment.'
+/** The parameter notices are read out politely, never as alerts. */
+export const PARAMETER_NOTICE_OPTIONS = { ariaProps: { role: 'status', 'aria-live': 'polite' } } as const
+
+/** Every `ui_event` kind this file handles; any other kind is read as `navigate`. */
+export const NAVIGATE_KINDS = [
+  'navigate', 'open_panel', 'select_component', 'open_properties', 'open_asset_detail',
+  'open_run_result', 'set_snapshot', 'parameter',
+] as const
+
 type NavigationRequest = {
   kind?: string
+  /** Kind `parameter` (expert-catalogue §7.1): the catalogue entry to open on asset `name`. */
+  entry_id?: string
   panel_id?: string
   results_tab?: string
   bottom_tab?: string
@@ -131,21 +150,39 @@ function apply(d: NavigationRequest, modelTurn: number | null = null) {
   // A highlight lasts until the next navigation.
   ui.setResultsHighlight(null)
   ui.setScenariosHighlight(null)
+  // A kind not on the list reads as `navigate` (the fallthrough below).
+  const kind = NAVIGATE_KINDS.find(k => k === d.kind) ?? 'navigate'
   const closePanelWithReturn = () => withReturnFrom(() => useUIStore.getState().setSlidePanel(null))
-  if (d.kind === 'select_component' && d.component_class && d.name) {
+  if (kind === 'select_component' && d.component_class && d.name) {
     if (ui.activeSlidePanel && ui.activeSlidePanel !== 'issues') closePanelWithReturn()
     ui.setSelectedComponent({ type: d.component_class, name: d.name })
     ui.openRightPanel()
     return
   }
-  if (d.kind === 'open_properties' && d.component_class && d.name) {
+  if (kind === 'open_properties' && d.component_class && d.name) {
     if (ui.activeSlidePanel && ui.activeSlidePanel !== 'issues') closePanelWithReturn()
     ui.setSelectedComponent({ type: d.component_class, name: d.name })
     ui.openRightPanel()
     ui.requestPropertiesEdit({ type: d.component_class as PropertiesEditRequest['type'], name: d.name })
     return
   }
-  if (d.kind === 'open_asset_detail' && d.component_class && d.name) {
+  if (kind === 'parameter') {
+    // The entry may need the catalogue fetched first; a later navigation wins over it.
+    if (!d.entry_id) return
+    const name = d.name
+    const epoch = navigationEpoch()
+    void resolveEntry(d.entry_id).then(entry => {
+      if (navigationEpoch() !== epoch) return
+      if (!entry || (d.component_class && d.component_class !== entry.scope)) {
+        toast(UNKNOWN_PARAMETER_NOTICE, PARAMETER_NOTICE_OPTIONS)
+        return
+      }
+      if (!name) { withAssistantNavigation(() => pickAssetFor(entry)); return }
+      if (!withAssistantNavigation(() => openParameter({ entry, asset: name }))) toast(NOT_OPENABLE_NOTICE, PARAMETER_NOTICE_OPTIONS)
+    }, () => { if (navigationEpoch() === epoch) toast(CATALOGUE_UNAVAILABLE_NOTICE, PARAMETER_NOTICE_OPTIONS) })
+    return
+  }
+  if (kind === 'open_asset_detail' && d.component_class && d.name) {
     ui.requestAssetDetail({
       componentClass: d.component_class,
       name: d.name,
@@ -156,7 +193,7 @@ function apply(d: NavigationRequest, modelTurn: number | null = null) {
     })
     return
   }
-  if (d.kind === 'open_run_result' && d.run_id) {
+  if (kind === 'open_run_result' && d.run_id) {
     pastRunTurn = modelTurn
     ui.requestRunResult({
       runId: d.run_id,
@@ -170,7 +207,7 @@ function apply(d: NavigationRequest, modelTurn: number | null = null) {
     })
     return
   }
-  if (d.kind === 'set_snapshot') {
+  if (kind === 'set_snapshot') {
     if (typeof d.snapshot_index !== 'number') return
     if (ui.activeSlidePanel) closePanelWithReturn()
     ui.setResultsSnapshotIdx(d.snapshot_index)
