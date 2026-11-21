@@ -190,6 +190,11 @@ def match_binding(
 
 
 def _isolated_app():
+    # A process that already imported the app (pytest's conftest, say) chose its
+    # own paths; pointing them at a temp dir now would only leak into whatever
+    # runs next in that process (an app-paths test reading "route-parity-…").
+    if 'main' in sys.modules:
+        return sys.modules['main'].app
     tmp = tempfile.mkdtemp(prefix='route-parity-')
     os.environ.setdefault('PYPSAGUI_APP_DATA_DIR', tmp)
     os.environ.setdefault('PYPSAGUI_PROJECTS_ROOT', str(Path(tmp) / 'projects'))
