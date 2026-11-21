@@ -46,7 +46,7 @@ export const FACT_WORDS: Record<string, string> = {
   'explore.study.status': 'The decision study finished',
   'report.status': 'The report is saved',
   'report.unsupported_listed': 'The report names every chapter it cannot back up',
-  'handoff.kpis_read': 'Every headline result was read back from the model',
+  'handoff.kpis_read': 'Every headline result was read back, or is shown as not evaluated with its reason',
   // Study harness 10a: the data-centre run.
   'dc.gridcode.published': 'A grid-code profile is published for the run',
   'dc.gridcode.frequency_match': 'The campus runs at the grid frequency you gave',

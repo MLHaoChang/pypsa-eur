@@ -637,13 +637,21 @@ def test_directory_entries_and_one_letter_names_are_neither_allowed_nor_refused(
 
 
 def test_the_unpacked_cap_defaults_to_four_gib(monkeypatch):
-    import importlib
+    import importlib.util
+    import sys
 
+    # A fresh copy under its own name, not `importlib.reload(PC)`: a reload
+    # makes new classes, so `BundleRefused` raised by a module that imported
+    # the old one (`bundle_manifest`) no longer matches `PC.BundleRefused` in
+    # every test that runs after this one.
     monkeypatch.delenv("PYPSA_GUI_MAX_BUNDLE_UNPACKED_BYTES", raising=False)
-    try:
-        assert importlib.reload(PC).MAX_UNPACKED_BYTES == 4 * 1024**3
-    finally:
-        importlib.reload(PC)
+    spec = importlib.util.spec_from_file_location(
+        "_project_contents_fresh", PC.__file__
+    )
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, fresh)
+    spec.loader.exec_module(fresh)
+    assert fresh.MAX_UNPACKED_BYTES == 4 * 1024**3
 
 
 def test_restoring_a_snapshot_taken_without_gridspine_keeps_only_the_live_run(
