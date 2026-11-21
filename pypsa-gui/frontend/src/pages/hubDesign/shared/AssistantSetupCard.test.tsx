@@ -16,10 +16,16 @@ vi.mock('../../../hooks/useChatProfiles', async (orig) => ({
   useChatReadiness: () => ({ effectiveProfileId: null, ready: readiness.ready }),
 }))
 
+const authUser = vi.hoisted(() => ({ superAdmin: true }))
+vi.mock('../../../auth/AuthProvider', () => ({
+  useIsSuperAdmin: () => authUser.superAdmin,
+}))
+
 const mount = (ui: ReactElement) => render(
   <QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>)
 
 beforeEach(() => {
+  authUser.superAdmin = true
   useUIStore.setState({ uiMode: 'guided', assistantDockOpen: false })
   useHubDesignStore.setState({ setupCardDismissedFor: [] })
   localStorage.clear()
@@ -27,6 +33,15 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('Guided without an assistant', () => {
+  it('offers a member no setup, only that an administrator can turn it on (issue 49)', () => {
+    readiness.ready = false
+    authUser.superAdmin = false // an org admin is not enough: the key route is super-admin only
+    mount(<AssistantSetupCard />)
+    expect(screen.queryByTestId('assistant-setup-open')).toBeNull()
+    expect(screen.getByTestId('assistant-setup-card').textContent).toContain('An administrator can turn the assistant on')
+    expect(screen.getByTestId('assistant-setup-dismiss')).toBeTruthy()
+  })
+
   it('shows the setup card, which opens the assistant panel', () => {
     readiness.ready = false
     mount(<AssistantSetupCard />)

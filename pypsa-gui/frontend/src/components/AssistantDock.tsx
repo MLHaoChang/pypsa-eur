@@ -4,6 +4,7 @@ import { PanelRightClose, Pin, PinOff } from 'lucide-react'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useChatProfiles, useChatReadiness } from '../hooks/useChatProfiles'
+import { useIsSuperAdmin } from '../auth/AuthProvider'
 import ChatPanel from './ChatPanel'
 import AssistantActivity from './AssistantActivity'
 import { ConfirmationCard } from './ConfirmationCard'
@@ -58,6 +59,7 @@ export default function AssistantDock() {
   useEffect(() => { if (!assistantDockOpen) setSurface('chat') }, [assistantDockOpen])
   const profilesQuery = useChatProfiles()
   const { effectiveProfileId, ready, settled: readinessSettled } = useChatReadiness()
+  const isSuperAdmin = useIsSuperAdmin()
   const streaming = useChatStore((s) => s.streaming)
   const pending = useChatStore((s) => s.pending)
   const choice = useChatStore((s) => s.choice)
@@ -326,6 +328,7 @@ export default function AssistantDock() {
           liveCaption={liveCaption}
           liveEcho={liveEcho}
           modelKeyMissing={ready === false}
+          canSetUp={isSuperAdmin}
           onLiveSubmit={onLiveSubmit}
           speech={speech}
           onCompose={() => {

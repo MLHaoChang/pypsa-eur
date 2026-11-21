@@ -305,3 +305,9 @@ describe('the key offer follows per-profile readiness (P28 A3)', () => {
     expect(await screen.findByTestId('chat-launch-key-offer')).toBeTruthy()
   })
 })
+
+// Issue 49: the key offer is only asked for by a super-admin.
+vi.mock('../auth/AuthProvider', async (orig) => ({
+  ...(await orig<typeof import('../auth/AuthProvider')>()),
+  useIsSuperAdmin: () => true,
+}))
