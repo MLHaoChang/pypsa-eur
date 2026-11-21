@@ -21,6 +21,8 @@ Since #1645, `/fmea_modes` with no VOLL returns `severity_eur` and `criticality_
 3. A vitest covers null severity and null criticality, plus one shot of the table in the unpriced state, dark and light.
 4. It lands with or before slice 2 of template-e2e 08, not after. If it hasn't started when slice 2's plan is ready, tell UX 2.
 
+Shots waived by UX 3 (2) on PR #1844 (no new view; `FmeaTab.unpriced.test.tsx` and its shot script cover "Not set").
+
 ## Remainder (checked on master a68541e6b)
 
 Verified: `mergeWorksheet` keeps null for computed rows, FmeaTab shows "Not set" and sorts unpriced last. Fixed here: manual rows no longer turn a missing € into 0 (`fmea.ts`, vitest added).

@@ -19,4 +19,4 @@ Checked by code reading only. Still true: `cheaperDuration.ts` filters on Storag
 
 ## Done
 
-Status: done (PR pending merge). `designDurationHours` filters `carrier === 'battery'`; test with a battery plus a non-battery StorageUnit of another duration added.
+Status: done (PR #1844; real-app shots waived by UX 3 (2): no new view). `designDurationHours` filters `carrier === 'battery'`; test with a battery plus a non-battery StorageUnit of another duration added.
