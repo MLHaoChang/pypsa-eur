@@ -13,6 +13,7 @@ import gzip
 import json
 import logging
 import os
+import re
 from datetime import datetime, UTC
 from pathlib import Path
 
@@ -228,6 +229,45 @@ def test_a_document_off_the_rules_is_refused_in_words(swap, words):
     assert e.value.kind == "bad_document" and words in e.value.message
 
 
+def _utf16(body: bytes, codec: str) -> bytes:
+    text = re.sub(
+        r'encoding="utf-8"', f'encoding="{codec}"', body.decode("utf-8"), flags=re.I
+    )
+    return text.encode(codec)
+
+
+@pytest.mark.parametrize("codec", ["utf-16-le", "utf-16-be", "utf-16", "utf-32"])
+def test_a_utf16_or_utf32_body_is_refused_even_with_a_hidden_entity(codec):
+    """GK B4 (2) on #1850: a UTF-16 body hid its DOCTYPE from a byte search
+    while expat decoded and expanded it. `utf-16` adds a BOM; -le/-be have none."""
+    raw = _doc(_year_prices(2023))
+    body = raw.replace(
+        b"<Publication_MarketDocument",
+        b'<!DOCTYPE x [<!ENTITY a "9">]><Publication_MarketDocument',
+        1,
+    )
+    with pytest.raises(M.MarketPriceError) as e:
+        M.parse_a44(_utf16(body, codec), "DE-LU", 2023)
+    assert e.value.kind == "bad_document"
+    # A clean year re-encoded is refused as well: only UTF-8 is read.
+    with pytest.raises(M.MarketPriceError):
+        M.parse_a44(_utf16(raw, codec), "DE-LU", 2023)
+
+
+def test_a_utf8_bom_and_a_declared_utf8_still_parse():
+    raw = _doc(_year_prices(2023))
+    assert len(M.parse_a44(b"\xef\xbb\xbf" + raw, "DE-LU", 2023)[0]) == 8760
+
+
+def test_a_declaration_naming_another_encoding_is_refused():
+    raw = _doc(_year_prices(2023))
+    body = re.sub(rb'encoding="utf-8"', b'encoding="ISO-8859-1"', raw, flags=re.I)
+    assert body != raw
+    with pytest.raises(M.MarketPriceError) as e:
+        M.parse_a44(body, "DE-LU", 2023)
+    assert e.value.kind == "bad_document"
+
+
 def test_an_oversized_document_is_refused():
     with pytest.raises(M.MarketPriceError) as e:
         M.parse_a44(b" " * (M.MAX_RESPONSE_BYTES + 1), "DE-LU", 2023)
@@ -325,6 +365,26 @@ def test_a_stream_past_the_cap_is_refused(monkeypatch):
             "DE-LU", 2024, token=TOKEN, transport=Replay(body=b"x" * 5000).transport
         )
     assert e.value.kind == "bad_document"
+
+
+def test_reading_stops_at_the_first_chunk_over_the_cap(monkeypatch):
+    """GK B4 (2): the in-stream cap stops the read; without it parse_a44 would
+    still refuse, but only after the whole body was read into memory."""
+    monkeypatch.setattr(M, "MAX_RESPONSE_BYTES", 1000)
+    pulled = []
+
+    class Endless(httpx.SyncByteStream):
+        def __iter__(self):
+            for i in range(100):
+                pulled.append(i)
+                yield b"x" * 600
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, stream=Endless())
+    )
+    with pytest.raises(M.MarketPriceError) as e:
+        M.fetch_day_ahead("DE-LU", 2024, token=TOKEN, transport=transport)
+    assert e.value.kind == "bad_document" and len(pulled) == 2
 
 
 # ── zone and year ──────────────────────────────────────────────────────────

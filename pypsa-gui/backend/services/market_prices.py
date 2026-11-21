@@ -15,9 +15,9 @@ Token rules (GK B4, SCU06-S1 plan):
   log line: errors are our own plain words (no status code, no ENTSO-E text), and
   the request line httpx logs has the token blotted out (`_NoSecurityToken`).
 
-Parsing rules: the response is capped at `MAX_RESPONSE_BYTES`; a document with a
-DOCTYPE or ENTITY declaration is refused before parsing; every TimeSeries must be
-in EUR per MWH; an A01 curve must list every position, while an A03 curve repeats
+Parsing rules: the response is capped at `MAX_RESPONSE_BYTES`; a body that is not
+UTF-8, or has a DOCTYPE or ENTITY declaration, is refused before parsing; every
+TimeSeries must be in EUR per MWH; an A01 curve must list every position, while an A03 curve repeats
 the last price over skipped positions (its definition). Sub-hourly points (PT15M,
 PT30M: the 15-minute day-ahead market since October 2025) are averaged to hourly,
 and the series notes say so. A year with any hour missing is refused, never filled.
@@ -271,7 +271,10 @@ def _text(el: ET.Element | None, name: str) -> str | None:
 
 
 _RESOLUTION = {"PT15M": 15, "PT30M": 30, "PT60M": 60, "PT1H": 60}
-_FORBIDDEN = re.compile(rb"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
+_FORBIDDEN = re.compile(r"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
+# The encoding an XML declaration names; anything but UTF-8 is refused, so the
+# DOCTYPE/ENTITY check above reads the same characters expat will.
+_DECLARED_ENCODING = re.compile(r"""\A\s*<\?xml[^>]*?encoding\s*=\s*["']([^"']*)["']""")
 
 
 def _bad(message: str) -> MarketPriceError:
@@ -293,10 +296,21 @@ def parse_a44(xml: bytes, zone: str, year: int) -> tuple[pd.Series, list[str]]:
     extra notes). Raises `MarketPriceError` with a plain message."""
     if len(xml) > MAX_RESPONSE_BYTES:
         raise _bad("ENTSO-E sent more data than one year of prices can be.")
-    if _FORBIDDEN.search(xml):
+    # UTF-8 only: a UTF-16 or UTF-32 body (with or without a BOM) would hide a
+    # DOCTYPE from a byte search while expat still decodes and expands it.
+    try:
+        text = xml.decode("utf-8").removeprefix("\ufeff")
+    except UnicodeDecodeError:
+        raise _bad("ENTSO-E sent a document this app does not read.") from None
+    declared = _DECLARED_ENCODING.match(text)
+    if (
+        "\x00" in text
+        or (declared and declared.group(1).strip().lower() not in ("utf-8", "utf8"))
+        or _FORBIDDEN.search(text)
+    ):
         raise _bad("ENTSO-E sent a document this app does not read.")
     try:
-        root = ET.fromstring(xml)
+        root = ET.fromstring(text.encode("utf-8"))
     except ET.ParseError as exc:
         raise _bad("ENTSO-E sent a document that could not be read.") from exc
     name = _local(root.tag)
