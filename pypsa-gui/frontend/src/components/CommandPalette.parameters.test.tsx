@@ -10,6 +10,7 @@ import { networkApi } from '../api/network'
 import * as catalogueApi from '../catalogue/api'
 import { entry } from '../catalogue/testEntries'
 import { pickAssetFor } from '../catalogue/openParameter'
+import { useGuideStore } from '../catalogue/guideStore'
 import { fetchLocalSettings } from '../api/localSettings'
 import { fetchLLMSettingsOrNull } from '../api/llmSettings'
 
@@ -45,7 +46,11 @@ beforeEach(() => {
   vi.spyOn(networkApi, 'getGenerators').mockResolvedValue([{ name: 'PV roof', p_nom: 2.4, bus: 'B1', carrier: 'solar' }] as never)
   useUIStore.setState({ uiMode: 'expert', selectedComponent: null, propertiesEditRequest: null, activeSlidePanel: null })
 })
-afterEach(() => { vi.restoreAllMocks(); useUIStore.setState({ paletteMode: null }) })
+afterEach(() => {
+  vi.restoreAllMocks()
+  useUIStore.setState({ paletteMode: null })
+  useGuideStore.setState({ view: null, history: [], opener: null })
+})
 
 describe('CommandPalette — Parameters', () => {
   it('lists the asset value under Parameters and Enter opens that field', async () => {
@@ -122,5 +127,49 @@ describe('CommandPalette — Parameters', () => {
     renderPalette()
     await screen.findByText('Switch to Guided mode')
     expect(screen.queryByText('Parameters')).toBeNull()
+  })
+})
+
+describe('CommandPalette — Parameters in the guide', () => {
+  it('Shift+Enter opens the row\'s entry in the guide instead, and the footer says both', async () => {
+    renderPalette()
+    const input = screen.getByPlaceholderText(/Type a command/)
+    fireEvent.change(input, { target: { value: 'capacity' } })
+    await screen.findByText('PV roof: Capacity')
+    expect(screen.getByText('⏎ select')).toBeTruthy()
+    expect(screen.getByText('Shift+⏎ guide')).toBeTruthy()
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+    expect(useGuideStore.getState().view).toEqual({ kind: 'entry', id: 'generator.p_nom' })
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+    expect(useUIStore.getState().paletteMode).toBeNull()
+  })
+
+  it('a "None in this project" row still opens in the guide on Shift+Enter', async () => {
+    vi.mocked(networkApi.getGenerators).mockResolvedValue([])
+    renderPalette()
+    const input = screen.getByPlaceholderText(/Type a command/)
+    fireEvent.change(input, { target: { value: 'capacity' } })
+    await screen.findByText(/None in this project/)
+    expect(screen.getByText('Shift+⏎ guide')).toBeTruthy()
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+    expect(useGuideStore.getState().view).toEqual({ kind: 'entry', id: 'generator.p_nom' })
+  })
+
+  it('an entry with no field is listed, says "Opens in the guide", and Enter opens it there', async () => {
+    vi.mocked(catalogueApi.fetchCatalogue).mockResolvedValue({ ...CATALOGUE, entries: [
+      entry({ id: 'globalconstraint.constant', plain_name: 'Emission limit', scope: 'GlobalConstraint' }),
+    ] })
+    renderPalette()
+    const input = screen.getByPlaceholderText(/Type a command/)
+    fireEvent.change(input, { target: { value: 'emission limit' } })
+    const row = (await screen.findByText('Emission limit')).closest('button')!
+    expect(row.textContent).toContain('Opens in the guide')
+    expect(row.getAttribute('aria-disabled')).toBeNull()
+    expect(screen.getByText('⏎ open guide')).toBeTruthy()
+    expect(screen.queryByText('⏎ select')).toBeNull()
+    expect(screen.queryByText('Shift+⏎ guide')).toBeNull()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(useGuideStore.getState().view).toEqual({ kind: 'entry', id: 'globalconstraint.constant' })
+    expect(useUIStore.getState().paletteMode).toBeNull()
   })
 })

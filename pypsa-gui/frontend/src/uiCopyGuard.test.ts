@@ -34,6 +34,8 @@ const SURFACES = [
   'components/EditCard.tsx',
   'components/CheckedEvidenceCard.tsx',
   'components/CheckedChart.tsx',
+  'catalogue/GuideDrawer.tsx',
+  'catalogue/GuideMarkdown.tsx',
 ]
 
 /** JSX attributes whose value is copy the user reads. */

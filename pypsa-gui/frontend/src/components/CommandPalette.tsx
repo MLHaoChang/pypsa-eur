@@ -23,6 +23,8 @@ import { useCatalogue } from '../catalogue/useCatalogue'
 import { buildParameterIndex } from '../catalogue/searchIndex'
 import { parameterRows, type PaletteAsset } from '../catalogue/parameterRows'
 import { openParameter, takePaletteSeed } from '../catalogue/openParameter'
+import { openGuide } from '../catalogue/guideStore'
+import { shiftEnterLabel } from '../utils/platformKeys'
 import type { Bus, Generator, Load, Line, Link, StorageUnit, Store, Transformer } from '../api/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -50,6 +52,10 @@ interface Command {
   // A row that only informs (a parameter with no asset in the project): muted,
   // aria-disabled, and Enter or a click does nothing.
   disabled?: boolean
+  // A Parameters row: Shift+Enter opens its entry in the Parameter guide. A row
+  // marked `guideOnly` has no field to open, so Enter opens the guide too.
+  guide?: () => void
+  guideOnly?: boolean
 }
 
 // Open mode — drives the placeholder + result filter. The 'projects' mode is
@@ -171,9 +177,10 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const cmd = ordered[selectedIdx]
+      if (cmd && e.shiftKey && cmd.guide) { cmd.guide(); onClose(); return }
       if (cmd) runCommand(cmd)
     }
-  }, [ordered, selectedIdx, runCommand])
+  }, [ordered, selectedIdx, runCommand, onClose])
 
   return (
     <Dialog
@@ -262,7 +269,10 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
       {/* Footer hint */}
       <div className="flex items-center gap-3 px-3 py-1.5 border-t border-border text-[10px] text-muted/70 font-mono shrink-0">
         <span>↑↓ navigate</span>
-        {!ordered[selectedIdx]?.disabled && <span>⏎ select</span>}
+        {ordered[selectedIdx]?.guideOnly
+          ? <span>⏎ open guide</span>
+          : !ordered[selectedIdx]?.disabled && <span>⏎ select</span>}
+        {ordered[selectedIdx]?.guide && !ordered[selectedIdx]?.guideOnly && <span>{shiftEnterLabel()} guide</span>}
         <span>esc close</span>
         <span className="ml-auto">{filtered.length} result{filtered.length === 1 ? '' : 's'}</span>
       </div>
@@ -297,7 +307,8 @@ function usePaletteAssets(mode: PaletteMode, currentProject: string | null) {
 
 // The "Parameters" source (expert-catalogue §4.3): catalogue entries ranked by
 // `searchIndex`, not the fuzzy scorer, each shown on the project's assets of its
-// class. Only for a typed query; Enter opens the field in either mode.
+// class. Only for a typed query; Enter opens the field in either mode, Shift+Enter
+// the entry in the Parameter guide.
 function useParameterCommands(mode: PaletteMode, query: string): Command[] {
   const currentProject = useUIStore(s => s.currentProject)
   const { buses, generators, loads, lines, links, storageUnits, stores, transformers } = usePaletteAssets(mode, currentProject)
@@ -318,8 +329,10 @@ function useParameterCommands(mode: PaletteMode, query: string): Command[] {
       subtitle: r.subtitle,
       hint: r.hint,
       icon: <Gauge size={12} />,
-      disabled: !r.target,
-      run: () => { if (r.target) openParameter(r.target) },
+      disabled: !r.target && !r.guideOnly,
+      guideOnly: r.guideOnly,
+      guide: () => openGuide(r.entryId),
+      run: () => { if (r.target) openParameter(r.target); else if (r.guideOnly) openGuide(r.entryId) },
     })), [rows])
 }
 

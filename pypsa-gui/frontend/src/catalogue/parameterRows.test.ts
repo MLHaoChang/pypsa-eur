@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildParameterIndex } from './searchIndex'
 import {
-  ASSETS_PER_ENTRY, MODEL_NAME_NOTE, NONE_NOTE, formatValue, isTonneBus, moreNote, parameterRows, splitAssetWords,
+  ASSETS_PER_ENTRY, GUIDE_NOTE, MODEL_NAME_NOTE, NONE_NOTE, formatValue, isTonneBus, moreNote, parameterRows, splitAssetWords,
 } from './parameterRows'
 import { entry } from './testEntries'
 
@@ -78,8 +78,15 @@ describe('Parameters rows', () => {
     expect(guide[start + inner.length]).toBe(' ')
   })
 
-  it('an entry whose class has no Properties card is left out', () => {
-    expect(rows('limit', {})).toEqual([])
+  it('an entry whose class has no Properties card is one row that opens in the guide', () => {
+    expect(rows('limit', {})).toEqual([{
+      id: 'param-globalconstraint.constant', entryId: 'globalconstraint.constant', title: 'Limit',
+      subtitle: `Global constraint · Size and limits · ${GUIDE_NOTE}`, guideOnly: true,
+    }])
+  })
+
+  it('every row names its entry, for Shift+Enter', () => {
+    expect(rows('capacity', { Generator: [{ name: 'PV roof', p_nom: 1 }] }).map(r => r.entryId)).toEqual(['generator.p_nom'])
   })
 })
 
