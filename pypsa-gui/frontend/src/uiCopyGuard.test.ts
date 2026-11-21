@@ -449,6 +449,7 @@ describe('UI copy guard: the allowlist', () => {
       expect(Object.keys(row).sort(), JSON.stringify(row)).toEqual(['file', 'fix', 'reason', 'surface', 'text'])
       for (const k of ['file', 'text', 'surface', 'reason', 'fix'] as const) expect(row[k].trim(), `${k} of ${row.file}`).not.toBe('')
       expect(fs.existsSync(path.join(SRC, row.file)), row.file).toBe(true)
+      expect(row.fix, `fix of ${row.file}`).toMatch(/^\.scratch\/[^/]+\/issues\/[^/]+\.md$/)
       expect(fs.existsSync(path.join(REPO, row.fix)), `fix of ${row.file}: ${row.fix}`).toBe(true)
       expect(row.surface, row.file).toMatch(/\b(Guided|Expert)\b/)
     }

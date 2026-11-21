@@ -4,8 +4,8 @@
 //
 // expert-catalogue 02c end-to-end (raw-name guard): the copy 02c changed, on the
 // real API and Vite, in Guided and Expert × light and dark.
-//  1. A blank project: the capacity-bounds empty state (it names the Properties
-//     panel's "Extendable" and no model name).
+//  1. A blank project: the capacity-bounds empty state (it names the "Extendable"
+//     tick, no panel and no model name).
 //  2. With TEMPLATE set (default Island Microgrid) and a solve: the Results tabs
 //     whose headers or help 02c reworded (Dispatch, Storage cycling, Asset
 //     economics, Prices, Capacity expansion, Emissions). A tab Guided hides is
