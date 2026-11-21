@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): New routes set or clear the ENTSO-E access token (super-admin only; the status says only whether a token is set) and fetch a project's day-ahead prices into the Library. The fetch remembers the bidding zone the user picked. Chat does not fetch prices, since that spends the stored token.

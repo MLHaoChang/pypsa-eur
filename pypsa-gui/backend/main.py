@@ -94,6 +94,7 @@ from routers import (
     library,
     library_references,
     local_settings,
+    market_prices,
     memory,
     memory_dream,
     network,
@@ -1387,6 +1388,8 @@ app.include_router(
 )
 # Edge Investment Case (P1 WP1.1b): the org-scoped Library.
 app.include_router(library.router, prefix="/api/library", tags=["library"])
+# SCU06 S1: the ENTSO-E token (super-admin) and the project's day-ahead fetch.
+app.include_router(market_prices.router, prefix="/api/market-prices", tags=["market-prices"])
 # The shipped (common) cost references: read-only, the same for every org.
 app.include_router(library_references.router, prefix="/api/library/references", tags=["library"])
 # The Parameter catalogue (expert-catalogue 01a): project-free, the same for every org and caller.
@@ -1461,6 +1464,10 @@ app.include_router(compare.router, prefix="/api/projects", tags=["compare"])
 _projects_router_guard = [Depends(fs_permission.require_file_access)]
 app.include_router(
     adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"],
+    dependencies=_projects_router_guard,
+)
+app.include_router(
+    market_prices.project_router, prefix="/api/projects", tags=["market-prices"],
     dependencies=_projects_router_guard,
 )
 # Study reports (WP1): `/{name}/reports…` — same posture as the worksheet
