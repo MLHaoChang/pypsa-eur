@@ -206,6 +206,10 @@ export function stopWords(reason: string | undefined, stage: string): { words: s
       return stage === 'solve'
         ? { words: 'Solve did not finish', fix: 'solve_log', fixWords: 'Open the solve log' }
         : { words: `A step in ${at} did not finish`, fix: 'review', fixWords: 'Review the step' }
+    case 'step_cancelled':  // live-voice 16: the step's job was stopped on purpose; same fix as step_failed
+      return stage === 'solve'
+        ? { words: 'The solve was stopped: the run waits for you', fix: 'solve_log', fixWords: 'Open the solve log' }
+        : { words: `A step in ${at} was stopped: the run waits for you`, fix: 'review', fixWords: 'Review the step' }
     case 'uncertain':
     case 'step_uncertain':
       return { words: 'A step may or may not have run', fix: 'review', fixWords: 'Review the step' }
