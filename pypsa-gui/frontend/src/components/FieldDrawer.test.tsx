@@ -57,6 +57,18 @@ describe('FieldDrawer — the Parameter guide inside it (expert-catalogue §6.1)
   })
   afterEach(() => { vi.restoreAllMocks(); useGuideStore.setState({ view: null, history: [], opener: null }) })
 
+  it('no "Open on" for the field the drawer is already on; another field of the same asset keeps it', async () => {
+    const gen = { section: 'assets', panel: null, component: 'Generator', entity: 'PV roof', field: 'p_nom' } as const
+    render(<FieldDrawer>{() => <input aria-label="Capacity input" />}</FieldDrawer>)
+    act(() => openFlowTargetInPlace(gen))
+    act(() => useGuideStore.getState().openGuide('generator.capacity'))
+    await screen.findByTestId('guide-entry')
+    expect(screen.queryByTestId('guide-open-on')).toBeNull()
+    expect(screen.queryByTestId('guide-choose-asset')).toBeNull()
+    act(() => useGuideStore.getState().openGuide('generator.max'))
+    expect(await screen.findByRole('button', { name: 'Open on PV roof ›' })).toBeTruthy()
+  })
+
   it('replaces the body with the guide and "Back to <field>", keeping the form and its unsaved input', async () => {
     render(<FieldDrawer>{() => <input aria-label="Capacity input" defaultValue="2.4" />}</FieldDrawer>)
     act(() => openFlowTargetInPlace(target))

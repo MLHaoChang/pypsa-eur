@@ -73,12 +73,21 @@ describe('a guide entry', () => {
   })
 
   it('"Open on <asset> ›" jumps to the selected asset when it has the field', async () => {
-    useUIStore.setState({ selectedComponent: { type: 'Generator', name: 'PV roof' } })
+    useUIStore.setState({ selectedComponent: { type: 'Generator', name: 'PV roof' }, rightPanelOpen: false })
     renderWith(<GuideDrawer />)
     open('generator.capacity')
     fireEvent.click(await screen.findByRole('button', { name: 'Open on PV roof ›' }))
     expect(useGuideStore.getState().view).toBeNull()
     expect(useUIStore.getState().propertiesEditRequest).toEqual({ type: 'Generator', name: 'PV roof', field: 'p_nom' })
+  })
+
+  it('no "Open on" over that asset\'s own Properties: "Back to <asset>" already goes there', async () => {
+    useUIStore.setState({ selectedComponent: { type: 'Generator', name: 'PV roof' }, rightPanelOpen: true })
+    renderWith(<GuideDrawer />)
+    open('generator.capacity')
+    await screen.findByTestId('guide-entry')
+    expect(screen.getByRole('button', { name: 'Back to PV roof' })).toBeTruthy()
+    expect(screen.queryByTestId('guide-open-on')).toBeNull()
   })
 
   it('"Choose an asset ›" when the asset in hand is of another class; nothing for an entry with no field', async () => {

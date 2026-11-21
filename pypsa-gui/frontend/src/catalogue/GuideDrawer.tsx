@@ -130,7 +130,7 @@ function OpenGuide({ view, backTo }: { view: GuideView; backTo?: GuideBack }) {
             <span className="truncate">{backControl.label}</span>
           </button>
         )}
-        <span className="ml-auto shrink-0 font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accent">
+        <span className="ml-auto shrink-0 font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-muted">
           Parameter guide
         </span>
         <button type="button" aria-label="Close the guide" title="Close (Esc)" onClick={() => close()}
@@ -139,7 +139,7 @@ function OpenGuide({ view, backTo }: { view: GuideView; backTo?: GuideBack }) {
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-[11px] text-text">
         {!catalogue && <p className="text-muted">Loading the guide…</p>}
         {catalogue && view.kind === 'home' && <HomeView view={view} catalogue={catalogue} />}
-        {catalogue && resolved?.kind === 'entry' && <EntryView entry={resolved.entry} catalogue={catalogue} />}
+        {catalogue && resolved?.kind === 'entry' && <EntryView entry={resolved.entry} catalogue={catalogue} hosted={backTo !== undefined} />}
       </div>
     </div>
   )
@@ -167,7 +167,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-function EntryView({ entry, catalogue }: { entry: CatalogueEntry; catalogue: Catalogue }) {
+function EntryView({ entry, catalogue, hosted }: { entry: CatalogueEntry; catalogue: Catalogue; hosted: boolean }) {
   const showView = useGuideStore(s => s.showView)
   const { meaning, example } = splitGuide(entry.guide)
   const { needed, also } = usedBy(entry, catalogue)
@@ -202,13 +202,17 @@ function EntryView({ entry, catalogue }: { entry: CatalogueEntry; catalogue: Cat
           <span data-testid="guide-model-name" className="block truncate font-mono text-[10px] text-muted">{entry.model_name}</span>
         </Row>
       </dl>
-      <OpenOn entry={entry} />
+      <OpenOn entry={entry} hosted={hosted} />
     </article>
   )
 }
 
-/** "Open on <asset> ›" for the asset in hand when its class has the field; else "Choose an asset ›". */
-function OpenOn({ entry }: { entry: CatalogueEntry }) {
+/**
+ * "Open on <asset> ›" for the asset in hand when its class has the field; else "Choose an asset ›".
+ * Hidden when the guide is hosted over that same place ("Back to …" already goes there):
+ * Guided's field drawer for this very field, or Expert's Properties of this asset.
+ */
+function OpenOn({ entry, hosted }: { entry: CatalogueEntry; hosted: boolean }) {
   const uiMode = useUIStore(s => s.uiMode)
   const fieldDrawer = useUIStore(s => s.fieldDrawer)
   const selected = useUIStore(s => s.selectedComponent)
@@ -218,6 +222,9 @@ function OpenOn({ entry }: { entry: CatalogueEntry }) {
     ? { type: fieldDrawer.component, name: fieldDrawer.entity }
     : selected
   const asset = inHand && inHand.type === entry.scope ? inHand.name : null
+  const sameAsBack = hosted && asset !== null
+    && (uiMode === 'guided' ? fieldDrawer?.field === entry.model_name : true)
+  if (sameAsBack) return null
   const cls = 'mt-3 rounded border border-border px-2 py-1 text-[11px] text-text underline underline-offset-2 hover:bg-panel'
   return asset
     ? <button type="button" className={cls} data-testid="guide-open-on"
