@@ -5,17 +5,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { kpiFigure, splitValueUnit } from '../../../utils/format'
 import { TERM_FALLBACK } from '../shared/Term'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { resultsApi, type EhReferenceDesignReport } from '../../../api/simulation'
+import { resultsApi, simulationApi, type EhReferenceDesignReport } from '../../../api/simulation'
 import { useUIStore } from '../../../store/uiStore'
 import { fmtCurrency } from '../../results/shared'
 import { headline } from '../headline'
 import { kpiMoney } from '../plainWords'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { REPORT, review } from '../testFixtures'
-import { EDITED_TEXT, ResultsCard } from './ResultsCard'
+import { EDITED_TEXT, FRESHNESS_UNKNOWN_TEXT, ResultsCard } from './ResultsCard'
 import { useProjectFlow } from '../../../hooks/useProjectFlow'
 
 vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
@@ -33,13 +33,15 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
     resultsApi: {
       ...actual.resultsApi,
       getEhStudy: vi.fn(), getEhReview: vi.fn(), getEhReferenceDesign: vi.fn(),
-      getEhTemplate: vi.fn(),
+      getEhTemplate: vi.fn(), getEhLevers: vi.fn(),
     },
+    simulationApi: { ...actual.simulationApi, getStatus: vi.fn() },
   }
 })
 
 function study(report: EhReferenceDesignReport = REPORT) {
-  return { status: 'done', archetype: 'weak_flexible' as const, report }
+  // A study the server compared with the current network and found current (GK B F1: only `false` is).
+  return { status: 'done', archetype: 'weak_flexible' as const, report, edited_since_study: false as boolean | null }
 }
 
 beforeEach(() => {
@@ -51,6 +53,9 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
   vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
+  // Unread by default, as before this mock existed: no claim either way about the solve.
+  vi.mocked(simulationApi.getStatus).mockRejectedValue(new Error('no status'))
+  vi.mocked(resultsApi.getEhLevers).mockResolvedValue(null)
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -75,7 +80,7 @@ describe('ResultsCard headline (§5.5)', () => {
       'No reliability goal was set: the study reports 1.3 h/yr of shortfall. Set a goal to certify.'],
     ['no goal, no shortfall number', review({ summary: { verdict: null, mc_lole_h_per_year: null, target_lole_h: null } }),
       { ...REPORT, mc_lole_h: null, sections: { certification: { status: 'skipped', note: 'no LOLE target — certification not requested' } } },
-      'No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in step 3 (Goal) to get a verdict.'],
+      'No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in section 8, Scenarios & optimisation, to get a verdict.'],
     ['not established', review({ summary: { verdict: null, mc_lole_h_per_year: null, target_lole_h: 3 } }),
       { ...REPORT, sections: { certification: { status: 'not_established', note: 'no hub-side buses' } } },
       'The study could not certify reliability: no hub-side buses'],
@@ -210,7 +215,7 @@ describe('ResultsCard body', () => {
     const stale = await screen.findByTestId('hub-results-stale')
     expect(stale.textContent).toContain('Out of date')
     expect(stale.textContent).toContain(
-      'These results are from an earlier study; the network was solved since. Run again to refresh.')
+      'The verdict, expected shortfall, design cost and risks are from an earlier study; the network was solved since. Run again to refresh.')
     // One mark per card: the tile dims but carries no second "Out of date" pill; the banner offers the way
     // to refresh (UX review N4).
     const tile = screen.getByTestId('hub-results-cost')
@@ -299,9 +304,10 @@ describe('ResultsCard: Set a goal (P26 gate)', () => {
 
 // P33b 10b (D-2, D-3): `edited_since_study` on the study record says an edit
 // seam was crossed since the study started. One amber line: the edited
-// banner subsumes the solved-since one; `false` / `null` / absent say nothing.
+// banner subsumes the solved-since one; `false` / `null` / absent say nothing of an edit, and
+// `null` / absent say the freshness is unknown (GK B F1).
 describe('ResultsCard: edited since the study (P33b)', () => {
-  const EDITED = 'The network has been edited since this study, so these results describe the design as it was. Run again to refresh.'
+  const EDITED = 'The network has been edited since this study, so its verdict, expected shortfall, design cost and risks describe the design as it was. Run again to refresh.'
 
   it('edited_since_study: true → the edited banner', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...study(), edited_since_study: true })
@@ -327,6 +333,27 @@ describe('ResultsCard: edited since the study (P33b)', () => {
     expect(screen.queryByTestId('hub-results-edited')).toBeNull()
     expect(screen.queryByTestId('hub-results-stale')).toBeNull()
   })
+
+  it('edited_since_study: false → current, no freshness line', async () => {
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-freshness-unknown')).toBeNull()
+  })
+
+  // GK B F1: the server returns null when it could not compare (an older results_state.pkl);
+  // an older record leaves the field out. Neither may read as current.
+  it.each([
+    ['null', { edited_since_study: null }],
+    ['missing', {}],
+  ])('edited_since_study %s → freshness unknown, in words', async (_name, over) => {
+    const { edited_since_study: _drop, ...bare } = study()
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ ...bare, ...over } as never)
+    mount()
+    expect((await screen.findByTestId('hub-results-freshness-unknown')).textContent).toBe(FRESHNESS_UNKNOWN_TEXT)
+    expect(FRESHNESS_UNKNOWN_TEXT).toContain("Can't tell whether the network changed since this study")
+    expect(screen.queryByTestId('hub-results-edited')).toBeNull()
+    expect(screen.queryByTestId('hub-results-stale')).toBeNull()
+  })
 })
 
 describe('ResultsCard before the study (UX S6, G2)', () => {
@@ -348,5 +375,143 @@ describe('ResultsCard before the study (UX S6, G2)', () => {
     const card = await screen.findByTestId('hub-card-results')
     await waitFor(() => expect(card.textContent).toContain('The study is running'))
     expect(screen.queryByText('Go to Goal and run the study')).toBeNull()
+  })
+})
+
+// Control-strategy walkthrough 06 / improvement 2: the headline names its source run; an Expert solve is
+// never "Not run yet" in Guided.
+describe('ResultsCard source run (control-strategy 06)', () => {
+  const solved = (o: Record<string, unknown> = {}) => vi.mocked(simulationApi.getStatus).mockResolvedValue(
+    { status: 'completed', objective: 3473806.32, solve_time: 2.8, dispatch: 'fresh',
+      solved_at: '2026-11-17T15:42:00Z', ...o } as never)
+
+  it('after an Expert solve with no study, shows the solve cost from the dispatch solve, not "Not run yet"', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    solved()
+    flowWith({ optimisation: 'fresh', study: 'not_run', loadflow: 'not_run' })
+    mount()
+    const cost = await screen.findByTestId('hub-results-dispatch-cost')
+    expect(cost.textContent).toContain('3.5')
+    expect(cost.getAttribute('data-state')).toBe('ready')
+    expect(screen.getByTestId('hub-results-source-from').textContent).toMatch(/^From the dispatch solve, 2026-11-1[78] \d\d:\d\d$/)
+    expect(screen.getByTestId('hub-results-source-missing').textContent)
+      .toBe('The reliability study has not run·Go to Goal and run the study ›')
+    // The headline's own "Not run yet" is gone; the other chapters keep theirs.
+    expect(screen.getByTestId('hub-card-results').textContent).not.toContain('The study writes its verdict, cost and risks here.')
+  })
+
+  it('a solve older than the inputs shows its figure out of date, never as current (GK B3 C2)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    solved()
+    flowWith({ optimisation: 'stale', study: 'not_run', loadflow: 'not_run' })
+    mount()
+    const cost = await screen.findByTestId('hub-results-dispatch-cost')
+    expect(cost.getAttribute('data-state')).toBe('stale')
+    expect(screen.getByTestId('hub-results-source-stale').textContent).toContain('Out of date')
+  })
+
+  it('a reopened project with no stamp names the solve without a time, never "has not run" (GK B3 C1)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    solved({ solved_at: null })
+    flowWith({ optimisation: 'fresh', study: 'not_run', loadflow: 'not_run' })
+    mount()
+    expect((await screen.findByTestId('hub-results-source-from')).textContent).toBe('From the dispatch solve')
+  })
+
+  it('with the study and no solve, names the study and offers the solve', async () => {
+    vi.mocked(simulationApi.getStatus).mockResolvedValue(
+      { status: 'idle', objective: null, solve_time: null, dispatch: 'none', solved_at: null } as never)
+    const run = vi.fn()
+    useUIStore.setState({ requestRunSolve: run })
+    mount()
+    const line = await screen.findByTestId('hub-results-source')
+    expect(within(line).getByTestId('hub-results-source-from').textContent).toBe('From the reliability study')
+    await waitFor(() => expect(within(line).getByTestId('hub-results-source-missing').textContent)
+      .toBe('The dispatch solve has not run·Run the solve ›'))
+    fireEvent.click(within(line).getByTestId('hub-results-source-action'))
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('with the study and a solve, names the study only', async () => {
+    solved()
+    mount()
+    const line = await screen.findByTestId('hub-results-source')
+    await waitFor(() => expect(simulationApi.getStatus).toHaveBeenCalled())
+    await waitFor(() => expect(within(line).queryByTestId('hub-results-source-missing')).toBeNull())
+  })
+})
+
+// WALK-IMPROVE-1: the cheaper battery duration the study's levers found, under
+// the verdict, with one link to the design options.
+describe('ResultsCard cheaper battery duration', () => {
+  const SENTENCE = 'A 24 h battery also meets the energy-not-served cap at a system cost of € 3.1 m a year (design: 4 h, € 3.5 m)'
+  function withLevers(best = 24) {
+    const rep = { ...REPORT, sections: { ...REPORT.sections, sizing: { status: 'ok', payload: { assets: [
+      { component: 'StorageUnit', name: 'battery', carrier: 'battery', built_mw: 2, built_mwh: 8, max_hours: 4 },
+    ] } } } } as EhReferenceDesignReport
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study(rep))
+    const rv = review()
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue({ ...rv, findings: [...rv.findings,
+      { id: 'levers_best_option', severity: 'info', title: 'Cheapest lever option',
+        evidence: { kind: 'storage_duration', value: best, cost_at_target_eur: best === 4 ? 3_500_000 : 3_100_000,
+          spread_eur: 400_000 },
+        recommendation: '', actions: [] }] })
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({ kind: 'storage_duration', options: [
+      { kind: 'storage_duration', value: 4, unit: 'h', status: 'ok', cost_at_target_eur: 3_500_000, meets_target: true },
+      { kind: 'storage_duration', value: 24, unit: 'h', status: 'ok', cost_at_target_eur: 3_100_000, meets_target: true },
+      { kind: 'storage_duration', value: 72, unit: 'h', status: 'ok', cost_at_target_eur: 3_120_000, meets_target: true },
+    ] })
+  }
+
+  it('shows the sentence under the verdict with one "Design options ›" link', async () => {
+    withLevers()
+    mount()
+    const line = await screen.findByTestId('hub-results-cheaper-duration')
+    expect(line.textContent?.replace(/\u00a0/g, ' ')).toBe(`${SENTENCE} Design options ›`)
+    expect(line.textContent).not.toMatch(/goal/i)
+    expect(line.querySelectorAll('button').length).toBe(1)
+  })
+
+  it('Guided: the link opens Results › Adequacy and asks for the levers block, in Guided', async () => {
+    withLevers()
+    useUIStore.setState({ uiMode: 'guided', resultsSectionRequest: null, flowReturn: null })
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-results-design-options'))
+    const s = useUIStore.getState()
+    expect(s.uiMode).toBe('guided')
+    // The Results panel's own "Back to Results" is the one way back; a Back
+    // pill as well would show two.
+    expect(s.flowReturn).toBeNull()
+    expect(s.activeSlidePanel).toBe('results')
+    expect(s.resultsTabRequest).toBe('adequacy')
+    expect(s.resultsSectionRequest).toBe('eh_levers')
+  })
+
+  it('Expert: the link goes through showResultsTab, so Back returns', async () => {
+    withLevers()
+    useUIStore.setState({ uiMode: 'expert', resultsSectionRequest: null, flowReturn: null })
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-results-design-options'))
+    const s = useUIStore.getState()
+    expect(s.uiMode).toBe('expert')
+    expect(s.activeSlidePanel).toBe('results')
+    expect(s.resultsTabRequest).toBe('adequacy')
+    expect(s.resultsSectionRequest).toBe('eh_levers')
+    expect(s.flowReturn).not.toBeNull()
+  })
+
+  it('nothing when the best option is the design duration', async () => {
+    withLevers(4)
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    expect(screen.queryByTestId('hub-results-cheaper-duration')).toBeNull()
+  })
+
+  it('nothing, and no levers read, without the finding', async () => {
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-cheaper-duration')).toBeNull()
+    expect(resultsApi.getEhLevers).not.toHaveBeenCalled()
   })
 })

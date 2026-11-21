@@ -18,7 +18,13 @@ series capacitor and names it (`static/series_caps.refuse`):
 - `island_sc._branches` (island fault levels);
 - `island_sc_seq.sequence_net` (unbalanced faults, earthing);
 - the PSS/E RAW, sequence and PowerFactory DGS writers;
-- the PyPSA nodal export.
+- the PyPSA nodal export;
+- the EMT pack (`write_emt_pack`; its workbook has no series-capacitor sheet).
+
+Not guarded today, so GK A2 (#1656) added them here:
+
+- the cable-flow reports that read only `net.line`;
+- `dyr_writer`, which is reached only after the RAW writer, so the RAW refusal covers it today.
 
 ## What to build
 

@@ -179,6 +179,8 @@ def test_off_solves_byte_equal_to_a_build_without_the_feature(
     assert da.equals(db)
     ma, mb = json.loads(da.attrs["meta"]), json.loads(db.attrs["meta"])
     for m in (ma, mb):
+        # The solve's own clock (workflow_tools._record_solve_inputs) differs between two solves.
+        m.pop("assistant_solve_at", None)
         m.get("sizing_record", {}).pop("solved_at", None)
         m.get("sizing_record", {}).pop("revision", None)
     assert ma == mb and C.META_KEY not in ma

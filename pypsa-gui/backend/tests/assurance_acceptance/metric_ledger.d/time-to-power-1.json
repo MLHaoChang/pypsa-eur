@@ -1,0 +1,20 @@
+{
+ "profiles": {
+  "time-to-power/1": [
+   {
+    "metric": "time_to_power_months",
+    "formula": "calendar months from the stated project_start to first power (the connection date, else the first energised import stage)",
+    "validity": "withheld with a services.dc_time_to_power REASONS code, never 0. Refusals: network_scope_required, no_saved_project, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_time_to_power_assurance.py::test_the_staged_example_reads_12_months_to_the_2027_stage",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   }
+  ]
+ }
+}

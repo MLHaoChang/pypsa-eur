@@ -87,3 +87,5 @@ one scan per series cap:
   caps, with a note row. With no cap the step still reads "not evaluated". Tests cover f_er below
   5 Hz (clear), in band (flag/check) and no cap (not evaluated).
 - S7e: the PR body says how the per-cap rows appear in the report, chat and app.
+
+**2026-11-17 triage (SCALE-1; GK A2 4 priority view).** Do not dispatch a new builder. GK A2 already gave a plan GO (S1–S7, S7 amended to A, S7a–S7e; the conditions live on the builder branch). The builder is session_01G7qCum4y6yiCpqfgf8xV9Y, which opens after #1578 merges.
