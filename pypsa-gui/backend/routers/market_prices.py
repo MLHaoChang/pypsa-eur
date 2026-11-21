@@ -246,6 +246,11 @@ def post_day_ahead(
     )
     if lock is not None:
         _check_project_lock(db, lock, user)
-    _require_project_writer(db, user, project)
+    # Fresh from the database, failing closed: a viewer, a removed member, a
+    # deleted account or an unreadable role gets no zone written.
+    try:
+        project_write_gate.check_requester(user.id, project.uuid)
+    except project_write_gate.RequesterViewOnly:
+        raise project_write_gate.refusal() from None
     market_prices.store_zone(project.directory, body.zone)
     return DayAheadOut(ref=ref, zone=body.zone, year=body.year, fetched=fetched)

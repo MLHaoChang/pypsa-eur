@@ -296,27 +296,6 @@ def test_library_write_access_lost_during_the_fetch_refuses_the_insert(
     assert M.chosen_zone(tmp_path) is None
 
 
-def test_becoming_a_viewer_during_the_fetch_refuses_the_zone_write(
-    db, seeded_identity, tmp_path, monkeypatch
-):
-    import routers.market_prices as R
-    from fastapi import HTTPException
-
-    from services import project_write_gate
-
-    _fetch_that_runs(
-        monkeypatch,
-        lambda: monkeypatch.setattr(
-            project_write_gate, "is_viewer", lambda db, user, uuid: True
-        ),
-    )
-    with pytest.raises(HTTPException) as e:
-        _post(R, db, seeded_identity, tmp_path)
-    assert e.value.status_code == 403
-    assert e.value.detail["error_kind"] == "project_view_only"
-    assert M.chosen_zone(tmp_path) is None
-
-
 @pytest.mark.parametrize("org_id", ["not-a-uuid", "1234", " "])
 def test_a_malformed_project_org_refuses_and_never_falls_back(
     db, seeded_identity, tmp_path, monkeypatch, org_id
@@ -349,3 +328,78 @@ def test_a_malformed_project_org_refuses_and_never_falls_back(
             user=user,
         )
     assert e.value.status_code == 403 and called == []
+
+
+from tests import test_viewer_role_gate as gate_fixtures  # noqa: E402
+
+baseline = gate_fixtures.baseline
+helpers_state = gate_fixtures.helpers_state
+as_user = gate_fixtures.as_user
+world = gate_fixtures.world
+
+
+def _member_loses_edit_during_the_fetch(
+    world, db, seeded_identity, tmp_path, monkeypatch, change
+):
+    """The world's editor fetches; `change(session_local, project, editor)` runs
+    inside the replayed fetch. The zone must not be written."""
+    import routers.market_prices as R
+    from fastapi import HTTPException
+
+    from db.models import User
+    from routers.deps import AuthorizedProject
+
+    editor, project_id = world["editor"], world["project"]
+    _fetch_that_runs(
+        monkeypatch, lambda: change(world["session_local"], project_id, editor)
+    )
+    project = AuthorizedProject(
+        name="Demo",
+        directory=tmp_path,
+        uuid=str(project_id),
+        org_id=str(seeded_identity["org_id"]),
+        registry_key="k",
+    )
+    with pytest.raises(HTTPException) as e:
+        R.post_day_ahead(
+            body=R.DayAheadIn(zone="DE-LU", year=2024),
+            project=project,
+            db=db,
+            user=db.get(User, editor),
+        )
+    assert e.value.status_code == 403
+    assert e.value.detail["error_kind"] == "project_view_only"
+    assert M.chosen_zone(tmp_path) is None
+
+
+def _remove(session_local, project_id, user_id):
+    from db.models import ProjectMembership
+
+    with session_local() as s:
+        s.query(ProjectMembership).filter_by(
+            project_id=uuid.UUID(str(project_id)), user_id=user_id
+        ).delete()
+        s.commit()
+
+
+def test_becoming_a_viewer_during_the_fetch_refuses_the_zone_write(
+    world, db, seeded_identity, tmp_path, monkeypatch
+):
+    _member_loses_edit_during_the_fetch(
+        world,
+        db,
+        seeded_identity,
+        tmp_path,
+        monkeypatch,
+        lambda sl, project, user: gate_fixtures._set_role(sl, project, user, "viewer"),
+    )
+
+
+def test_a_member_removed_during_the_fetch_gets_no_zone_written(
+    world, db, seeded_identity, tmp_path, monkeypatch
+):
+    """GK B4 (2) on #1851: is_viewer is True only for VIEW, so a removed
+    membership must fail closed through check_requester."""
+    _member_loses_edit_during_the_fetch(
+        world, db, seeded_identity, tmp_path, monkeypatch, _remove
+    )
