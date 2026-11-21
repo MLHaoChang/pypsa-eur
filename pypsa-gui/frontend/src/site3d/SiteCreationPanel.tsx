@@ -105,7 +105,7 @@ export default function SiteCreationPanel() {
         {!confirmed ? (
           <div data-testid="site-create-no-anchor" className="text-muted">
             {REASON_NO_ANCHOR}{' '}
-            <button type="button" onClick={() => openSiteAnchor({ fromSite3D: true })} className="text-accent hover:underline">› Site coordinates</button>
+            <button type="button" onClick={() => openSiteAnchor({ fromSite3D: true })} className="text-link hover:underline">› Site coordinates</button>
           </div>
         ) : (
           <>
@@ -126,7 +126,7 @@ export default function SiteCreationPanel() {
                 </div>
                 <div className="text-[11px] text-muted" data-testid="site-create-draw">
                   Need another shape?{' '}
-                  <button type="button" onClick={() => { close(); openSiteBoundaryDraw(confirmed) }} className="text-accent hover:underline">
+                  <button type="button" onClick={() => { close(); openSiteBoundaryDraw(confirmed) }} className="text-link hover:underline">
                     Draw the boundary on the Satellite map ›
                   </button>
                 </div>

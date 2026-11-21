@@ -18,6 +18,7 @@ import { NextSectionButton } from '../../components/NextSectionButton'
 import { sectionMeta } from '../../layout/flowSections'
 import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert, withReturnFrom } from '../../layout/flowNavigation'
 import { PROCESS_UNIT_ITEM } from '../../layout/paletteData'
+import { SectionTitle } from '../../components/PageKit'
 
 // One flow section in Guided: its name and state, the items that are still to
 // do or to check (a Guided user never has a blocker hidden: the field is named
@@ -39,13 +40,13 @@ function ItemRow({ item }: { item: FlowItem }) {
       <button type="button" data-testid="section-item-open"
         onClick={() => openFlowTargetInPlace(item.target)}
         title={`Open ${field ?? 'this field'} here`}
-        className="shrink-0 inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
+        className="shrink-0 inline-flex items-center gap-1 text-[11px] text-link hover:underline">
         Open here ›
       </button>
       <button type="button" data-testid="section-item-expert"
         onClick={() => openFlowTarget(item.target)}
         title="Open this section in Expert"
-        className="shrink-0 text-[11px] text-muted hover:text-accent hover:underline">
+        className="shrink-0 text-[11px] text-muted hover:text-link hover:underline">
         Open in Expert
       </button>
     </li>
@@ -69,10 +70,10 @@ export function SectionView({ id, onNext, children }: {
   return (
     <div data-testid={`section-view-${id}`} className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
-        <span className="font-mono text-[11px] text-muted">{meta.number}</span>
-        <h2 className="text-[15px] font-semibold text-text">{meta.label}</h2>
+        <span className="font-mono text-body text-muted">{meta.number}</span>
+        <SectionTitle>{meta.label}</SectionTitle>
         {!stateless && <FlowStateDot state={s?.state ?? null} testId={`section-state-${id}`} />}
-        <span className="text-[12px] text-muted" data-testid="section-summary">
+        <span className="text-lead text-muted" data-testid="section-summary">
           {isError ? 'The flow could not be read from the server.'
             : stateless ? (s?.summary ?? '')
               : `${FLOW_STATE_WORDS[s?.state ?? 'unknown']}${s?.summary ? ` · ${s.summary}` : ''}`}
@@ -80,7 +81,7 @@ export function SectionView({ id, onNext, children }: {
       </div>
       {items.length > 0 && (
         <ul data-testid="section-items"
-          className="flex flex-col gap-1.5 rounded border border-border bg-panel px-3 py-2">
+          className="flex flex-col gap-1.5 rounded-card border border-border bg-panel px-3 py-2">
           {items.map((it, i) => <ItemRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
         </ul>
       )}
@@ -130,12 +131,12 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
             {gate.blocker && (<>
               <button type="button" data-testid="readiness-open"
                 onClick={() => openFlowTargetInPlace(gate.blocker!.target)}
-                className="inline-flex items-center gap-1 text-accent hover:underline">
+                className="inline-flex items-center gap-1 text-link hover:underline">
                 Open here ›
               </button>
               <button type="button" data-testid="readiness-open-expert"
                 onClick={() => openFlowTarget(gate.blocker!.target)}
-                className="text-muted hover:text-accent hover:underline">
+                className="text-muted hover:text-link hover:underline">
                 Open in Expert
               </button>
             </>)}

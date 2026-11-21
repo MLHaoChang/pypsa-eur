@@ -68,7 +68,7 @@ export function ControlChapter() {
   if (!found) return null
   return (
     <div data-testid="hub-chapter-control"
-      className={`flex flex-col gap-1.5 rounded-[10px] border border-border/70 p-2 ${inScope ? '' : 'opacity-60'}`}>
+      className={`flex flex-col gap-1.5 rounded-card border border-border/70 p-2 ${inScope ? '' : 'opacity-60'}`}>
       <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Control</span>
       {/* The same inner tile as the other chapters' figures (Kpi). */}
       <div className="flex flex-col gap-1 rounded-[8px] border border-border bg-bg-2 px-3 py-2.5"
@@ -89,7 +89,7 @@ export function ControlChapter() {
       </div>
       {inScope ? (
         <button type="button" data-testid="hub-chapter-control-open" onClick={openIsland}
-          className="self-start text-[11.5px] text-accent hover:underline">Open in Expert ›</button>
+          className="self-start text-[11.5px] text-link hover:underline">Open in Expert ›</button>
       ) : (
         <AddToScope card="control" option="island_checks" testId="hub-chapter-control-out-of-scope" />
       )}

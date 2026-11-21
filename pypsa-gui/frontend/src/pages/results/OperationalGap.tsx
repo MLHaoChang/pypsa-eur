@@ -154,7 +154,7 @@ export function OperationalGapCard({ payload }: { payload: OperationalGapPayload
     : ''
   return (
     <section data-testid="summary-operational-gap" data-flag={payload.flag}
-      className="rounded-[10px] border border-border bg-bg-2 px-4 py-3 flex flex-col gap-2 min-w-0">
+      className="rounded-card border border-border bg-bg-2 px-4 py-3 flex flex-col gap-2 min-w-0">
       <h3 className="text-[12px] font-semibold text-muted">Plan vs operation</h3>
       <p className="text-[11px] text-muted" data-testid="operational-gap-lead">
         Operation{settings} against a full-horizon dispatch on the same sizes
@@ -170,7 +170,7 @@ export function OperationalGapCard({ payload }: { payload: OperationalGapPayload
           {failedWindowWords(w)}, so the run stopped there and there is no gap to show.{' '}
           <button type="button" data-testid="operational-gap-open-strategy"
             onClick={() => openSolveStrategy(BACK_LABEL)}
-            className="inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
+            className="inline-flex items-center gap-1 text-[11px] text-link hover:underline">
             Solver settings ›
           </button>
         </div>

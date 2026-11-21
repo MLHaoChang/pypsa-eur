@@ -289,7 +289,7 @@ export function VintageCloneButton({
         assetName, defaultYear, defaultCost, onSubmit: onClone,
       })}
       className="w-full mt-2 py-1.5 border border-border rounded text-[11px] text-muted hover:border-accent hover:text-accent transition-colors flex items-center justify-center gap-1.5"
-      title="Create a future-vintage copy with its own build_year + overnight_cost"
+      title="Create a future-vintage copy with its own build year and overnight cost"
     >
       <Plus size={11} /> Clone for vintage
     </button>
@@ -511,7 +511,7 @@ export function LifetimeInherit({ fs, set }: { fs: FS; set: SetFS }) {
         <>
           <span>{years ? `${years}, project default` : 'Project default'}</span>
           <button type="button" className="underline" data-testid="asset-lifetime-change" onClick={openEconomicAssumptions}
-            title="Opens Solver Settings in Expert">
+            title="Opens Solver settings in Expert">
             Change in Scenarios &amp; optimisation ›
           </button>
         </>
@@ -997,7 +997,7 @@ export function ExtrasSection({ componentClass, fs, set, curated }: {
         </select>
       ) : (
         <button type="button" onClick={() => setPicking(true)}
-                className="text-[9px] text-accent hover:underline">+ Add parameter</button>
+                className="text-[9px] text-link hover:underline">+ Add parameter</button>
       )}
     </div>
   )
@@ -1092,7 +1092,7 @@ export function EhBusInputs({ fs, set, poc = false }: { fs: FS; set: SetFS; poc?
 }
 
 export function EhLinkInputs({ fs, set }: { fs: FS; set: SetFS }) {
-  const tip = useGuideField('eh_role', 'grid_import marks the Link the archetype packs cap or island (spec §6 rule 1). Conversion roles identify electrolysers / fuel cells for redundancy scenarios.')
+  const tip = useGuideField('eh_role', 'grid_import marks the Link the archetype packs cap or island. Conversion roles identify electrolysers / fuel cells for redundancy scenarios.')
   return (
     <div data-testid="eh-link-role" className="col-span-2">
       <SelInput label="Energy Hub role" k="eh_role" fs={fs} set={set}

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): With no API key, a non-admin no longer makes calls to the admin-only key and model settings, and is no longer offered "Set up the assistant"; the Guided banner says an administrator can turn the assistant on.

@@ -76,7 +76,7 @@ function AssumedRow({ item }: { item: FlowItem }) {
       <button type="button" data-testid="assumption-edit"
         onClick={() => openFlowTargetInPlace(item.target)}
         title={`Edit ${field ?? 'this value'} here`}
-        className="shrink-0 text-[11px] text-accent hover:underline">
+        className="shrink-0 text-[11px] text-link hover:underline">
         Edit ›
       </button>
     </li>

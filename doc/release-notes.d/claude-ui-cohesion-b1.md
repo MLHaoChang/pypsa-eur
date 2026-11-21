@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Header search keeps its width when Run shows "(N out of date)" below 1400 px, inactive Guided steps fold to their number below 1600 px, a selected canvas node is an ink ring with an accent halo on every carrier, headings use the shared type recipes, links use the link token, and "Solver settings" is one name in the sidebar.
