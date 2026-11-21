@@ -569,9 +569,15 @@ def test_the_tariff_is_shipped_only_while_it_equals_the_templates():
         assert A._tariff_is_shipped(tpl, tid, None, commercial) is False
     single = T.solver_config("eh_datacenter")
     assert single["commercial"]["import_tariff"] is None
-    assert A._tariff_is_shipped(
-        SimpleNamespace(solver_config=lambda t, plan: single), "eh_datacenter", None, own
-    ) is False
+    assert (
+        A._tariff_is_shipped(
+            SimpleNamespace(solver_config=lambda t, plan: single),
+            "eh_datacenter",
+            None,
+            own,
+        )
+        is False
+    )
     # A template that ships no tariff, or one its model refuses, marks nothing shipped.
     bare = SimpleNamespace(solver_config=lambda tid, plan: {})
     assert A._tariff_is_shipped(bare, tid, None, cfg["commercial"]) is False
