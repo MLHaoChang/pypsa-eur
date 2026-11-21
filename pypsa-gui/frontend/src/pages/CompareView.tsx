@@ -337,8 +337,8 @@ export function OverviewTab({ a, b }: { a: string; b: string }) {
   return (
     <div className="space-y-4">
       <CountsTable a={sa} b={sb} />
-      <SolverTable a={sa} b={sb} />
       <StudyTable a={sa} b={sb} />
+      <SolverTable a={sa} b={sb} />
       <OverviewCapacityTable
         a={sa} b={sb}
         newCapA={summaryA.capacity?.new_capacity_mw_by_carrier}
@@ -2992,7 +2992,10 @@ function StudyTable({ a, b }: { a: CompareState; b: CompareState }) {
   )
   const stateWord = (s: CompareStudy) => (s.state === 'current' ? 'Current' : 'Out of date')
   return (
-    <Section title="Guided study">
+    <Section
+      title="Guided study"
+      subtitle="Saved with each project. The optimisation solve below is separate and may not have run."
+    >
       <table className="w-full text-xs">
         <tbody>
           <tr className="border-b border-border/40">

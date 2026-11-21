@@ -190,7 +190,7 @@ def _scenario_parent_dir(here: pathlib.Path) -> pathlib.Path | None:
                 if meta.get("owner_base_project") == str(row.parent_project_id):
                     return None  # a study fork of its parent
                 parent = db.get(Project, row.parent_project_id)
-                if parent is None or parent.org_id != row.org_id:
+                if (parent.org_id != row.org_id):
                     return None
                 return pathlib.Path(project_registry.project_dir(parent))
     except Exception as exc:  # noqa: BLE001 - no parent rather than an error
