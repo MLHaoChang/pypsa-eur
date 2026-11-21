@@ -1552,6 +1552,31 @@ def _check_native_cells(
                         break
     _drop_unknown_types(n, report)
     _drop_dangling(n, removed, report)
+    _drop_blank_series(n, report)
+
+
+def _drop_blank_series(n: pypsa.Network, report: ImportReport) -> None:
+    """
+    Ticket 05: an asset's series in PyPSA's layout with an empty time step (a blank
+    cell, or a row cut short) is reported and dropped, so its static value applies;
+    PyPSA's reader would leave NaN there. Checked on what PyPSA read, after the
+    assets refused above are gone, so each asset gets one row; rows past the last
+    time step are not time steps. (The input workbook's own Time series sheet reads
+    a blank as the asset's fixed value, assumed.)
+    """
+    for _cls, _sheet, ln in L.SHEETS:
+        series = getattr(n, f"{ln}_t")
+        for attr in list(series):
+            frame = series[attr]
+            empty = frame.isna().sum()
+            for asset, k in empty[empty > 0].items():
+                report.unmapped.append(
+                    Unmapped(
+                        f"{ln}-{attr} · {asset}",
+                        f"{attr}: {k} empty time step(s); the series was not read",
+                    )
+                )
+            series[attr] = frame.drop(columns=empty[empty > 0].index)
 
 
 def _read_native(
