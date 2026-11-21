@@ -137,10 +137,27 @@ class _NoSecurityToken(logging.Filter):
         return True
 
 
-# The filter sits on the loggers that print request URLs (the deepgram_stt
-# precedent), so no log level or handler reaches the token.
-for _name in ("httpx", "httpcore"):
-    logging.getLogger(_name).addFilter(_NoSecurityToken())
+_FILTER = _NoSecurityToken()
+
+
+def _install_log_filter() -> None:
+    """Put the filter on httpx, httpcore and every child logger they have made
+    (the deepgram_stt precedent). A logger's filter sees only the records logged
+    on that logger, not its children's (`httpcore.http11`, `httpcore.connection`),
+    so each one gets it. Idempotent; run at import and before each request, so a
+    child created later is covered too, at any level and through any handler."""
+    names = ["httpx", "httpcore"] + [
+        n
+        for n in list(logging.Logger.manager.loggerDict)
+        if n.startswith(("httpx.", "httpcore."))
+    ]
+    for name in names:
+        lg = logging.getLogger(name)
+        if _FILTER not in lg.filters:
+            lg.addFilter(_FILTER)
+
+
+_install_log_filter()
 
 
 class MarketPriceError(Exception):
@@ -371,6 +388,7 @@ def fetch_day_ahead(
 ) -> tuple[pd.Series, list[str]]:
     """One request to ENTSO-E for `zone`'s day-ahead prices in `year` (UTC)."""
     z = check_request(zone, year)
+    _install_log_filter()
     params = {
         "securityToken": token,
         "documentType": "A44",
@@ -394,15 +412,15 @@ def fetch_day_ahead(
                         raise _bad(
                             "ENTSO-E sent more data than one year of prices can be."
                         )
-    except httpx.TimeoutException as exc:
+    except httpx.TimeoutException:
         raise MarketPriceError(
             "unavailable", "ENTSO-E did not answer in time. Try again later."
-        ) from exc
-    except httpx.HTTPError as exc:
+        ) from None  # httpx errors carry the request, URL and token included
+    except httpx.HTTPError:
         raise MarketPriceError(
             "unavailable",
             "ENTSO-E could not be reached. Check the connection and try again.",
-        ) from exc
+        ) from None  # no chained cause: a traceback would print its URL
     if status == 401 or status == 403:
         raise MarketPriceError(
             "bad_token",
