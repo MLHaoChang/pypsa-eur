@@ -278,7 +278,7 @@ def finance(planning=None) -> dict:
         "annualise": False,                          # a full hourly year
         "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
         "replacement_rule": "part_lifetimes",
-        "terminal_value": {"method": "book_value"},
+        "terminal_value": {"method": "remaining_life_annuity"},
         "wacc_nominal": 0.07, "cost_of_equity": 0.09, "inflation": 0.02,
         # German corporate tax (the DE pack): the municipality's Hebesatz and the battery's
         # depreciation class, which the BMF AfA tables do not list, are stated assumptions.

@@ -16,7 +16,6 @@
           "unit": "kW_year",
           "quantity_source": "linked:capacity.StorageUnit.bess@1",
           "escalation": "contract",
-          "indexation": 0.0,
           "note": "Battery capacity in service, in kW a year. Price per nameplate kW a year: the market's clearing price times the de-rating factor you expect, typed in the price. linked_share is only the contracted (sold) share of the capacity, never the de-rating. The PPAs, merchant export and CfD are the energy model's locked rows, never lines here.",
           "hint": {
             "low": 20.0,
@@ -33,7 +32,6 @@
           "category": "other",
           "unit": "MWh",
           "escalation": "contract",
-          "indexation": 0.0,
           "note": "Typed: the certified MWh a year you expect to sell, never above the renewable generation the results show. Typed, not linked: a line linked to the grid export is refused double_count (the export is priced by the energy model's locked rows).",
           "hint": {
             "low": 0.3,

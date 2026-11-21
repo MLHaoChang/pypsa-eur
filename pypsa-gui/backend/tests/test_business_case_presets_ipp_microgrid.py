@@ -13,7 +13,6 @@ from models.business_case import LineItem
 from services.business_case import linked_outputs as L
 from services.business_case import presets as P
 from services.finance.business_case import DoubleCount, build_business_case, pnl
-from models.finance import TerminalValueRule
 from services.finance.case import TemplateLine
 from services.finance.engine import run_case
 from tests.test_business_case_engine import PACK, _ic, _inputs, _line
@@ -295,13 +294,12 @@ def test_21_the_ipp_preset_runs_once_only_prices_are_typed():
     ic = _ic(
         lines=(ppa, TemplateLine("fom", "fom", -20.0, "opex")),
         analysis_years=8,
-        terminal_value=TerminalValueRule(method="book_value"),
     )
     rows = []
     for ln in P.preset(IPP, "ipp_hybrid", currency="USD").lines:
         d = ln.model_dump()
         if ln.kind == "revenue":
-            d.update(price=10.0)
+            d.update(price=10.0, indexation=0.0)
             if ln.quantity_source == "typed":
                 d.update(quantity=100.0)
         elif ln.kind == "capex":

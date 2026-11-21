@@ -263,7 +263,7 @@
     "tax_losses": "offset_other_income",
     "tax_pack_id": "eu_de",
     "terminal_value": {
-      "method": "book_value",
+      "method": "remaining_life_annuity",
       "value": null
     },
     "wacc_nominal": 0.07
