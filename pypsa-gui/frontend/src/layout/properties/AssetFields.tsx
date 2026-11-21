@@ -331,8 +331,10 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
         onApplied={written => set(prev => ({ ...prev, ...appliedFields(schema, written) }))} />
     )
   }
+  const costNote = schemaFields(schema).find(f => f.unit_note)?.unit_note
   return (
     <>
+      {costNote && <div className="col-span-2 text-[9px] text-muted" data-testid="asset-tonne-cost-note">{costNote}</div>}
       {schema.groups.map(g => {
         const shown = g.fields.filter(f => !hidden?.has(f.key) && isRevealed(f, fs)
           && (!f.part || f.derived || f.key === firstPart))

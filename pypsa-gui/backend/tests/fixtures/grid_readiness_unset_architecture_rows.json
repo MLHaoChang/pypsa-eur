@@ -1,0 +1,45 @@
+{
+ "frequency_support": {
+  "assumed": true,
+  "id": "frequency_support",
+  "limit": "at least one of grid forming, synthetic inertia, frequency containment, fast frequency response",
+  "note": "Control preset: none; what each unit offers follows its control mode",
+  "project_value": "grid forming, synthetic inertia, frequency containment, voltage control",
+  "requirement": "Frequency support offered by the site's converters",
+  "section": "assets",
+  "source": "Assumed: the scorecard's own expectation for a large connection; the grid code sets no limit",
+  "target": {
+   "component": null,
+   "entity": null,
+   "field": "preset",
+   "panel": null,
+   "section": "assets"
+  },
+  "unit": null,
+  "verdict": "pass"
+ },
+ "reactive_range": {
+  "assumed": true,
+  "id": "reactive_range",
+  "limit": 19.2,
+  "note": "Not sized yet: \u201cBESS new\u201d: run the plan to see the reactive range it adds.",
+  "project_value": 1.3147,
+  "requirement": "Reactive power range at the PoC",
+  "rule": {
+   "comparator": ">=",
+   "otherwise": "warn",
+   "tolerance": 1e-09
+  },
+  "section": "assets",
+  "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: DCC Art. 15(1)(a): not wider than 48 percent of the larger of the maximum import or export capacity (0,9 power factor); the relevant TSO specifies the actual range. Needed 0.48 × 40 MW import = 19.2 Mvar; offered 1.315 Mvar (rooftop_pv 1.31) as P × tan(acos rated power factor), an assumed capability at rated power from the units offering voltage control (a unit the island study does not credit counts zero)",
+  "target": {
+   "component": null,
+   "entity": null,
+   "field": "control",
+   "panel": null,
+   "section": "assets"
+  },
+  "unit": "Mvar",
+  "verdict": "unknown"
+ }
+}

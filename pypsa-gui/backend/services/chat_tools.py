@@ -48,6 +48,7 @@ lists which Phase 2 turns into Messages-API content blocks.
 from __future__ import annotations
 
 import contextlib
+import copy
 import inspect
 import json
 import logging
@@ -610,6 +611,7 @@ _RESULTS_ENUM = (
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
     "asset_economics", "billing", "cfe_score", "value_flows", "renewable_fraction",
+    "operating_reserve",
 )
 
 
@@ -647,6 +649,8 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     "billing": "get_billing",
     "cfe_score": "get_cfe_score",
     "renewable_fraction": "get_renewable_fraction",
+    # homer-parity 01d.
+    "operating_reserve": "get_operating_reserve",
     # Edge Investment Case P3 WP3.4.
     "value_flows": "get_value_flows",
 }
@@ -732,7 +736,30 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
     if result_kind == "value_flows" and isinstance(result, dict) and result.get("status") == "ok":
         result = (_value_flow_lines_page(result, offset, limit) if detail == "lines"
                   else _value_flows_summary(result))
+    if result_kind == "operating_reserve" and isinstance(result, dict) and "per_snapshot" in result:
+        result = _operating_reserve_page(result, offset, limit)
     return _with_freshness(result)
+
+
+_RESERVE_ROWS = 24     # binding hours per read (homer-parity 01d)
+_RESERVE_HOLDERS = 5   # units named per binding hour
+
+
+def _operating_reserve_page(result: dict, offset: int = 0, limit: int | None = None) -> dict:
+    """The reserve for the model: only the binding hours, one page of them, each with its largest
+    holders. Every count is the true total, so the model never reads a cut list as the whole."""
+    rows = [r for r in result["per_snapshot"] if r.get("binding")]
+    start = max(0, int(offset or 0))
+    size = _RESERVE_ROWS if limit is None else max(1, min(int(limit), _RESERVE_ROWS))
+    page = []
+    for r in rows[start:start + size]:
+        holders = r.get("holders") or []
+        page.append({**{k: v for k, v in r.items() if k != "holders"},
+                     "holders": holders[:_RESERVE_HOLDERS], "holders_total": len(holders)})
+    out = {k: v for k, v in result.items() if k not in ("per_snapshot", "binding")}
+    return {**out, "hours_total": len(result["per_snapshot"]), "binding_hours_total": len(rows),
+            "binding_hours": page, "offset": start,
+            "note": "Only binding hours are listed; page with offset/limit."}
 
 
 def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -> dict:
@@ -3548,6 +3575,7 @@ _BC_CODES = {
     "business_case_inputs_invalid": "business_case_inputs_invalid",
     "solver_config_invalid": "business_case_inputs_invalid",
     "business_case_changed": "business_case_changed",
+    "network_busy": "business_case_busy",
     "investment_case_missing": "investment_case_missing",
     "solver_in_flight": "solver_in_flight",
     "finance_inputs_missing": "finance_inputs_missing",
@@ -3683,16 +3711,56 @@ def _bc_inputs() -> dict:
     return out
 
 
+# Cut first when the options outgrow the cap, whole entries from the end (never part of a
+# unit list); the refusals go last. Each cut is named in `truncated`.
+_BC_OPTIONS_CUT_ORDER = ("offered_rows", "outputs", "refusals")
+
+
+def _bc_options_cut(out: dict) -> dict:
+    cut: dict = {}
+    for section in _BC_OPTIONS_CUT_ORDER:
+        while _json_len(out) > _BC_INPUTS_CHARS and out.get(section):
+            gone = out[section].pop()
+            if section == "outputs":
+                out["units_by_source"]["linked"].pop(gone["id"], None)
+            cut.setdefault(section, []).append(
+                str(gone.get("id") or gone.get("name") or gone.get("field") or gone.get("code"))[:80])
+    return cut
+
+
+def _bc_options() -> dict:
+    """The line table's options and the refusals of the stored lines (bc 16), as the
+    route reads them: one source, no re-derivation. A busy model is `business_case_busy`;
+    None stays None with its reason (never [])."""
+    from routers.results import get_business_case_options as _h
+
+    with _bc_errors():
+        out = copy.deepcopy(_h())
+    cut = _bc_options_cut(out)
+    if cut:
+        out["truncated"] = cut
+        out["truncated_note"] = ("cut to fit the chat, whole entries only: "
+                                 + ", ".join(cut) + "; a cut output is NOT offered here, "
+                                 "not 'has no units'; say the rest was not read")
+    out["hint"] = ("offer a unit only from units_by_source; name each refusal in plain words "
+                   "(its field and why); a part that reads None was not read, say so")
+    return out
+
+
 def get_business_case(detail: str = "summary") -> dict:
-    """The business-case run and its stored report (detail='summary'), or the
-    stored inputs with their digest and the citable turns (detail='inputs')."""
+    """The business-case run and its stored report (detail='summary'), the
+    stored inputs with their digest and the citable turns (detail='inputs'), or what
+    the line table offers and refuses (detail='options')."""
     from routers.results import get_business_case as _h
     from services.business_case.verdict import verdict as bc_verdict
 
-    if detail not in ("summary", "inputs"):
-        _ic_raise(422, "business_case_request_invalid", "detail is 'summary' or 'inputs'")
+    if detail not in ("summary", "inputs", "options"):
+        _ic_raise(422, "business_case_request_invalid",
+                  "detail is 'summary', 'inputs' or 'options'")
     if detail == "inputs":
         return _bc_inputs()
+    if detail == "options":
+        return _bc_options()
     body = _h()
     if getattr(body, "status_code", None) == 204:
         out = _no_data("business_case", _BC_NO_DATA)
@@ -3719,6 +3787,10 @@ def get_business_case(detail: str = "summary") -> dict:
                    assumed_total=(len(report["assumed"])
                                   if isinstance(report.get("assumed"), list) else _NE),
                    verdict=_bc_verdict(report, bc_verdict))
+        # BC 15: the lease-up the run applied and its basis, so an answer about the
+        # result never reads it as full volume. Absent at 100 %.
+        out.update({k: v for k, v in (report.get("pnl") or {}).items()
+                    if k in ("volume_factor", "volume_factor_note", "volume_factor_ignored")})
         cut = []
         for section in _BC_CUT_ORDER:
             if _json_len(out) <= _BC_SUMMARY_CHARS:
@@ -4088,6 +4160,60 @@ def get_supply_architectures(project: str, study_id: str) -> dict:
             "note": ("A null figure was not computed (its reason is in unavailable): "
                      "never report it as 0. An infeasible, failed or not_reached row "
                      "has no best system.")}
+
+
+def compare_system_types(project: str, study_id: str, action: str = "start",
+                         x_variable: str | None = None, y_variable: str | None = None,
+                         x_values: list[float] | None = None,
+                         y_values: list[float] | None = None,
+                         architectures: list[str] | None = None,
+                         budget_solves: int | None = None) -> dict:
+    """
+    homer-parity 03b: start (`POST .../system-type-map`) or stop (`.../abort`)
+    the optimal system type map; poll `get_system_type_map`.
+    """
+    from routers import studies as R
+
+    if action not in ("start", "abort"):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "system_type_map_action_invalid",
+            "message": f"action must be 'start' or 'abort', got '{_cut(action, 40)}'"})
+    ap = _authorized_project(project)
+    if action == "abort":
+        return {"action": action, **_route(R.abort_system_type_map, study_id, project=ap)}
+    if not x_variable or not y_variable:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "axis_missing",
+            "message": "name both variables: x_variable and y_variable"})
+    body = R.SystemTypeMapRequest(
+        x=R.SystemTypeMapAxis(variable=x_variable, values=x_values),
+        y=R.SystemTypeMapAxis(variable=y_variable, values=y_values),
+        architectures=architectures, budget_solves=budget_solves)
+    out = _route(R.start_system_type_map, study_id, body, project=ap)
+    return {"action": action, **out,
+            "next_step": ("get_system_type_map says how far it is, and reads the map "
+                          "once it has finished.")}
+
+
+def get_system_type_map(project: str, study_id: str) -> dict:
+    """`GET .../system-type-map`: progress while it runs, else each cell's winner
+    and its cost gap to the runner-up, with every architecture's status."""
+    from routers import studies as R
+
+    rec = _route(R.get_system_type_map, study_id, project=_authorized_project(project))
+    if rec.get("status") == "running":
+        return {"running": {k: rec.get(k) for k in (
+            "status", "current", "architectures", "axes", "solves_estimated",
+            "solves_charged")}}
+    return {"status": rec.get("status"), "stale": rec.get("stale"),
+            "axes": rec.get("axes"), "cells": rec.get("cells"),
+            "error": rec.get("error"), "reason": rec.get("reason"),
+            "note": ("A cell with no winner had no architecture solved there; all_solved "
+                     "false means some architecture did not solve in it. A gap is per "
+                     "year and null when fewer than two architectures solved: never "
+                     "report it as 0. A cell's clipped list names a solar or wind "
+                     "multiplier held at nameplate and the share of the resource "
+                     "energy that removed.")}
 
 
 def get_grid_extension_break_even(project: str, study_id: str, architecture_id: str,
@@ -5846,8 +5972,13 @@ def update_project_layout(name: str, layout: dict) -> dict:
 def download_project_bundle(name: str) -> dict:
     from routers.projects import _project_bundle_bytes
     proj = _authorized_project(name)
+    with _acting() as (db, user):
+        from services import project_registry
+
+        row = project_registry.find_project(db, user, proj.uuid) if user is not None else None
     return _save_agent_export(
-        _project_bundle_bytes(proj.name, proj.directory),
+        _project_bundle_bytes(proj.name, proj.directory,
+                              project_kind=getattr(row, "project_kind", None)),
         f"{proj.name}.pypsaproj.zip",
         "application/zip",
     )
@@ -10388,6 +10519,8 @@ DISPATCHERS: dict[str, Any] = {
     # supply architectures (2) — homer-parity 03a
     "compare_supply_architectures": compare_supply_architectures,
     "get_supply_architectures": get_supply_architectures,
+    "compare_system_types": compare_system_types,
+    "get_system_type_map": get_system_type_map,
     "get_grid_extension_break_even": get_grid_extension_break_even,
     # project settings and scope (5) — LV08 B1
     "get_site_template_form": get_site_template_form,

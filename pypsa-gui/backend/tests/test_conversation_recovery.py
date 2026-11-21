@@ -9,7 +9,7 @@ from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_assurance_metrics import solved  # noqa: F401
 from tests.test_workflow_tools import baseline  # noqa: F401
-from tests.test_conversation_scope import conversation, clarified  # noqa: F401
+from tests.test_conversation_scope import conversation, clarified, moved_binding  # noqa: F401
 from tests.test_harness_reliability import scope, VALUES
 
 
@@ -151,7 +151,7 @@ def restart(checked, conversation):
     return response.json()
 
 
-def test_restart_exact_window_basis_and_one_new_generation(
+def test_restart_exact_window_basis_and_later_generations(
     solved, checked, conversation
 ):
     original = scope(
@@ -170,7 +170,14 @@ def test_restart_exact_window_basis_and_one_new_generation(
     assert "7 MWh" in public_text(frames) and "17 MWh" not in public_text(frames)
     for key in ("entity_id", "project_id", "metrics", "start", "end", "cost_basis"):
         assert receipt["request_scope"][key] == original[key]
-    frames, provider = conversation("Show those results again.", binding_generation=9)
+    # AA-20: a later send carries a newer generation and keeps the resumed scope.
+    frames, provider = conversation(
+        "Show those results again.", {"dispatch_energy": 7}, binding_generation=9
+    )
+    assert approval(frames)["receipt"]["request_complete"]
+    assert "7 MWh" in public_text(frames)
+    moved_binding(conversation.sid, "project")
+    frames, provider = conversation("Show those results again.", binding_generation=10)
     clarified(frames, provider, "conversation_scope_changed")
 
 
@@ -276,7 +283,13 @@ def test_live_history_cannot_replace_context_or_binding(solved, checked, convers
     state = session.assurance_context
     checked.client.get("/api/chat/history")
     assert session.assurance_context is state
-    frames, provider = conversation("Show those results again.", binding_generation=8)
+    binding = tuple(state["binding"])
+    # AA-20: the next send's newer generation keeps the context it was given.
+    frames, _ = conversation("Show those results again.", VALUES, binding_generation=8)
+    assert approval(frames)["receipt"]["request_complete"]
+    assert tuple(session.assurance_context["binding"])[:2] == binding[:2]
+    moved_binding(conversation.sid, "project")
+    frames, provider = conversation("Show those results again.", binding_generation=9)
     clarified(frames, provider, "conversation_scope_changed")
 
 

@@ -97,7 +97,8 @@ def start_mc(
     from services.reliability_goal import active_goal, goal_sources as _sources
     goal = active_goal(solver_state)
     draws = getattr(body, "draws", None)
-    goal_sources = {"mc_draws": _sources(goal, {"mc_draws"} if draws is not None else set())["mc_draws"]}
+    goal_sources = {"mc_draws": _sources(goal, {"mc_draws"} if draws is not None else set())["mc_draws"],
+                    "target_lole_h": goal["target_lole_h"]["source"]}
     draws = goal["mc_draws"]["value"] if draws is None else int(draws)
     if draws < 1:
         raise HTTPException(422, "draws must be a positive number of samples")
@@ -137,6 +138,21 @@ def start_mc(
         # EH study keeps it; `edited_since_study` compares it.
         network_revision = dirty_state.revision()
         vre_names = [nm for kind, nm in assets if kind == "vre"]
+        # Walkthrough asset-investment 01: the goal's LOLE on this horizon,
+        # by the loops' one conversion, for the verdict the result carries.
+        # A goal nobody set is the site type's ASSUMED one: the MC judges
+        # against it and says so (`target_source`), GK A 30 A2.
+        from services.adequacy.metrics import horizon_years
+        from services.reliability_goal import assumed_lole, loop_goal
+        mc_goal = goal
+        if assumed_lole(goal) is not None:
+            mc_goal = {**goal, "target_lole_h": {
+                "value": assumed_lole(goal), "source": goal["target_lole_h"]["source"]}}
+        target_horizon = loop_goal(body, mc_goal, float(horizon_years(n)))[0]
+        # Walkthrough 07: an ELCC vre row's `nameplate_mw` is its PEAK
+        # must-take output (the bracket the bisection prices); the installed
+        # capacity rides beside the rows so the table can state both.
+        installed = {nm: _installed(n, nm) for nm in vre_names}
         # Adequacy loops 03: the study samples the loops' fleet
         # (`link_supply`): split at a trusted import Link, the hub side is
         # the fleet and the demand, the Link a sampled unit; the grid side
@@ -308,7 +324,14 @@ def start_mc(
                                          "reason": "no_process_link_outages_in_sequential_mc"}}
                        if has_process else {}),
                     "metrics": metrics,
+                    # Walkthrough 01/08: the goal this run is judged against
+                    # (the ONE LOLE-vs-goal rule) and the draws it may take.
+                    "goal": _goal_block(metrics, mc_goal["target_lole_h"],
+                                        target_horizon),
+                    "draws": {"first_batch": draws, "max": MAX_DRAWS,
+                              "cov_target": cov_target},
                     "elcc": rows,
+                    "elcc_installed": installed,
                     # Phase 12c: a SIBLING of `elcc`, never a row in it.
                     "elcc_portfolio": portfolio,
                     "warning": MC_WARNING_V1,
@@ -381,3 +404,48 @@ def start_mc(
     return {"status": "running", "draws": draws, "seed": seed, "goal_sources": goal_sources,
             "cov_target": cov_target, "elcc_assets": len(assets),
             "elcc_portfolio": want_portfolio}
+
+
+def _goal_block(metrics: dict, target: dict, target_horizon) -> dict | None:
+    """``lole_verdict`` of this run against the project's goal, with the goal
+    in h/yr and where it came from (``default`` = the site type's assumed
+    goal); None when no goal applies. Stored with the result, so a later
+    goal change never re-labels it."""
+    if target_horizon is None:
+        return None
+    from services.adequacy.lole_verdict import lole_verdict
+    from services.adequacy.mc import MAX_DRAWS
+
+    return {"target_lole_h": float(target["value"]),
+            "target_source": target["source"],
+            **lole_verdict(metrics["lole_hours"], metrics.get("lole_ci"),
+                           target_horizon, metrics.get("event_h"),
+                           metrics["n_samples"], MAX_DRAWS)}
+
+
+def _installed(n, name: str) -> dict | None:
+    """A generator's installed capacity as the MC samples it: ``mw`` is
+    ``copt.solved_capacity`` (the one capacity rule, never a second copy) and
+    ``basis`` names the figure it is (GK A 30 A6, GK B3 1):
+
+    - ``p_nom_opt``: the solved size (or PyPSA's copy of a fixed p_nom);
+    - ``not_built``: an extendable unit the solve declined, or one no solve
+      has sized (PyPSA's 0.0 default): 0 MW, never its p_nom;
+    - ``p_nom``: the nameplate, when there is no solved size.
+
+    ``mw`` is None when the unit has no finite size at all; the result is
+    None when the network has no such generator."""
+    from services.adequacy.copt import _finite_at, _is_extendable, solved_capacity
+
+    gens = n.generators
+    if name not in gens.index:
+        return None
+    row = gens.loc[name]
+    mw = solved_capacity(row)
+    if _is_extendable(row) and _finite_at(row, "p_nom_opt") is not None:
+        return {"mw": mw, "basis": "p_nom_opt" if mw > 0 else "not_built"}
+    for col in ("p_nom_opt", "p_nom"):
+        v = _finite_at(row, col)
+        if v is not None and v > 0:
+            return {"mw": mw, "basis": col}
+    return {"mw": mw if _finite_at(row, "p_nom") is not None else None, "basis": "p_nom"}

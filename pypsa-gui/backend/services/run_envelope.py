@@ -71,6 +71,10 @@ CASE_TOOLS = frozenset({"run_investment_case"})
 # defence in depth: unreachable for a read-tier tool through dispatch, it holds
 # if the tool's tier or a stage's offer ever changes.
 PPA_TOOLS = frozenset({"solve_ppa_price"})
+# Study harness 15 (owner decision SH15-PF-1): grid_only's setup switches Load flow on. The
+# one setting a grant covers, and only as the harness's own step with exactly these args: a
+# model turn never writes the solver config under a grant (`own_step_only`, `outside_entry`).
+SETTING_TOOLS = {"update_solver_config": {"partial": {"run_ac_pf_after_lopf": True}}}
 # Study harness 07 (GK B B1-b): a grant that lists the run's report covers only
 # the stage-7 card (`cross`); the runner starts that job itself, so a chat
 # `generate_report` is never admitted on it, and it never counts as a solve.
@@ -216,11 +220,11 @@ def _check_edit(entry):
 
 def _check_run(entry):
     if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind", "restore"} \
-            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS \
+            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS | set(SETTING_TOOLS) \
             or not isinstance(entry.get("kind", ""), str) \
             or ("kind" in entry and entry["tool"] in REPORT_TOOLS) \
             or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
-        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS)} and an optional "
+        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS | set(SETTING_TOOLS))} and an optional "
                             "kind (none for the report); a "
                             f"loop-driving tool may carry restore \"final\": {entry!r}")
     if entry["tool"] in NEVER_LISTED:
@@ -1474,6 +1478,12 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
             return "baseline_solve"
     if tool in PPA_TOOLS:
         return "own_step_only"
+    if tool in SETTING_TOOLS:
+        # The harness's own setup step, with exactly its frozen args (SH15-PF-1).
+        if not note.get("call_id") or note["call_id"] != getattr(session, "run_step_call", None):
+            return "own_step_only"
+        if args != SETTING_TOOLS[tool]:
+            return "outside_entry"
     if _deletes(tool, edit_card):
         return "delete"
     if tier == "destructive" and tool not in PLANNED_TOOLS:

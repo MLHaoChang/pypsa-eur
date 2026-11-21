@@ -1388,6 +1388,325 @@ def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_di
             "c": c, "vn_kv": vn}
 
 
+# --- GC-03: planning criteria and grid strength in the campus run (TRGC 15) ---
+
+PLANNING_CSV = "campus_planning.csv"
+STRENGTH_CSV = "campus_strength.csv"
+STRENGTH_GROUPS_CSV = "campus_strength_groups.csv"
+
+#: Converter-interfaced unit kinds: off for the strength fault levels and the
+#: PoCs of the SCR screen. A genset is not a converter, so not a PoC (GENSET_SK_NOTE).
+IBR_KINDS = ("pv", "wind", "fuel_cell", "bess", "ups")
+#: Per-case verdicts in ``campus_planning.csv``.
+PLANNING_CASE_FAIL, PLANNING_CASE_PASS = "fail", "pass"
+#: Summary verdicts: "not_evaluated" when nothing was screened, and
+#: "incomplete" when an imported contingency was left out; neither is a pass.
+PLANNING_VERDICTS = ("pass", "fail", "incomplete", "not_evaluated")
+NO_EMERGENCY_NOTE = "Judged on normal ratings: no emergency rating given"
+UNIT_Q_NOTE = ("converter Q held at 0 (unity power factor), as in the campus load flow: "
+               "the campus spec gives no unit Q; load Q from each load's power factor")
+_LOAD_LOST_TOL_MW = 1e-3
+
+
+def _gc03_hour_net(campus, rows, hour: int):
+    """The campus net carrying one hour, with the ``dispatch`` / ``loads`` /
+    ``registry`` tables ``apply_snapshot`` and the static screens take.
+    The hour goes on through ``apply_hour`` (the campus load flow's own
+    mapping: load Q from each load's power factor, converter Q at 0); the
+    tables are read back off that net so they agree with it."""
+    import copy
+
+    from gridspine.ingest.pandapower_source import registry_from_net
+    from gridspine.static.campus_flow import apply_hour
+    from gridspine.static.loadflow import apply_snapshot
+
+    work = copy.deepcopy(campus)
+    apply_hour(work, rows)
+    net = work.net
+    # An out-of-service load draws nothing: zero it and keep it in, so the
+    # per-bus loads table and the net agree. Same for an idle converter.
+    off = ~net.load["in_service"].astype(bool)
+    net.load.loc[off, ["p_mw", "q_mvar"]] = 0.0
+    net.load.loc[off, "in_service"] = True
+    off = ~net.sgen["in_service"].astype(bool)
+    net.sgen.loc[off, ["p_mw", "q_mvar"]] = 0.0
+    registry = registry_from_net(net)
+    sgen = net.sgen.set_index(net.sgen["name"].astype(str))
+    disp = []
+    for uid, rec in registry.iterrows():
+        if rec["kind"] == "res":
+            s = sgen.loc[uid]
+            disp.append({"unit_id": uid, "hour": hour, "p_mw": float(s["p_mw"]), "q_mvar": float(s["q_mvar"]),
+                         "status": int(bool(s["in_service"]))})
+        else:
+            disp.append({"unit_id": uid, "hour": hour, "p_mw": 0.0, "q_mvar": 0.0, "status": 1})
+    dispatch = pd.DataFrame(disp)
+    names = net.bus["name"].astype(str)
+    by_bus = net.load.assign(bus=net.load["bus"].map(names)).groupby("bus")[["p_mw", "q_mvar"]].sum()
+    loads = pd.DataFrame({"bus": by_bus.index, "hour": hour, "p_mw": by_bus["p_mw"].values,
+                          "q_mvar": by_bus["q_mvar"].values})
+    apply_snapshot(net, dispatch, loads, hour, registry)
+    return net, dispatch, loads, registry
+
+
+def _gc03_hours(run_dir, periods):
+    """Per period, the max-import and max-export intact converged hours of
+    the sized run (``LF_PCC_CSV``, ``p_mw`` > 0 imports), or the reason none.
+    A period that never exports labels its second hour "min_import"."""
+    pcc = pd.read_csv(_require(Path(run_dir), LF_PCC_CSV))
+    out = {}
+    for period in periods:
+        rows = pcc[(pcc["period"] == period) & (pcc["case"] == "intact") & pcc["converged"].astype(bool)]
+        if rows.empty:
+            out[period] = "no converged intact hour in the period"
+            continue
+        p = rows["p_mw"].astype(float)
+        imp, exp = int(rows.loc[p.idxmax(), "hour"]), int(rows.loc[p.idxmin(), "hour"])
+        # A period that never exports has no export hour: its least-import hour is named so.
+        low = "max_export" if float(p.min()) < 0 else "min_import"
+        out[period] = [("max_import", imp)] + ([] if exp == imp else [(low, exp)])
+    return out
+
+
+def _gc03_case_verdict(r) -> str:
+    """A contingency fails unless stage 2 (after remedial action) passes with
+    no load lost and the angle check does not fail. A case that does not
+    converge, or islands the load, is a violation, never a skip."""
+    if r["stage2_verdict"] != "pass" or r["angle_verdict"] == "fail":
+        return PLANNING_CASE_FAIL
+    if float(r["load_lost_mw"]) > _LOAD_LOST_TOL_MW:
+        return PLANNING_CASE_FAIL
+    return PLANNING_CASE_PASS
+
+
+def planning_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), contingencies=None) -> dict:
+    """The planning-criteria screen (``static/planning_criteria.screen_planning``)
+    of a sized run at each period's max-import and max-export hour, written
+    to ``campus_planning.csv``. Returns the summary.
+
+    ``contingencies`` is the screened set: the campus N-1 (every in-service
+    branch and converter or genset unit) when None, or the TSO's list
+    (``ingest/contingency_list.read_contingency_list``). An imported list's
+    excluded contingencies are carried into the summary, and the verdict is
+    then never "pass" (fail closed)."""
+    from gridspine.static.contingency import BaseCaseNotConverged
+    from gridspine.static.contingency_set import branch_contingencies, unit_contingencies
+    from gridspine.static.planning_criteria import screen_planning
+
+    run_dir = Path(run_dir)
+    grid_code = load_grid_code(profile, extra_dirs=profile_dirs)
+    _unchanged_project(run_dir)
+    campus = load_run_campus(run_dir)
+    hourly, _ = campus_tables(run_dir)
+    imported = contingencies is not None
+    cset = getattr(contingencies, "contingencies", contingencies)
+    excluded = list(getattr(contingencies, "excluded", []) or [])
+    periods = sorted(int(x) for x in hourly["period"].unique())
+    rows, notes, not_converged, unscreened = [], [], [], []
+    emergency = False
+    for period, hours in _gc03_hours(run_dir, periods).items():
+        if isinstance(hours, str):
+            # the intact load flow failed at every hour: a violation, never a skip
+            notes.append(f"period {period}: {hours}; not screened")
+            not_converged.append(f"period {period}")
+            continue
+        for which, hour in hours:
+            sl = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)][["unit_id", "p_mw", "status"]]
+            net, dispatch, loads, registry = _gc03_hour_net(campus, sl.reset_index(drop=True), hour)
+            emergency_h = any(
+                c in t.columns and t[c].notna().any()
+                for t, c in ((net.line, "max_i_ka_emergency"), (net.trafo, "sn_mva_emergency")))
+            emergency = emergency or emergency_h
+            if not imported:
+                parts = [p for p in (branch_contingencies(net), unit_contingencies(registry)) if len(p)]
+                cset_h = pd.concat(parts, ignore_index=True) if parts else None
+            else:
+                cset_h = cset
+            if cset_h is None or len(cset_h) == 0:
+                notes.append(f"period {period} hour {hour}: no contingency to screen")
+                unscreened.append(f"period {period} hour {hour}")
+                continue
+            try:
+                res, _report = screen_planning(net, cset_h, dispatch, loads, hour, registry, profile=grid_code)
+            except BaseCaseNotConverged as exc:
+                notes.append(f"period {period} hour {hour} ({which}): {exc}")
+                not_converged.append(f"period {period} hour {hour} ({which})")
+                continue
+            res = res.assign(period=period, hour_kind=which)
+            if not emergency_h:
+                res["note"] = ["; ".join(x for x in (t if isinstance(t, str) else "", NO_EMERGENCY_NOTE) if x)
+                               for t in res["note"]]
+            res["verdict"] = [_gc03_case_verdict(r) for r in res.to_dict("records")]
+            rows.append(res)
+    table = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(
+        columns=["period", "hour_kind", "contingency_id", "kind", "hour", "verdict"])
+    lead = ["period", "hour_kind", "contingency_id", "kind", "hour", "verdict"]
+    table = table[lead + [c for c in table.columns if c not in lead]]
+    _write_text_atomic(run_dir / PLANNING_CSV, table.to_csv(index=False))
+    cases = int(len(table))
+    failures = int((table["verdict"] == PLANNING_CASE_FAIL).sum()) if cases else 0
+    if not_converged or failures:
+        verdict = "fail"
+    elif cases == 0:
+        verdict = "not_evaluated"
+    elif excluded or unscreened:
+        verdict = "incomplete"
+    else:
+        verdict = "pass"
+    if not emergency:
+        notes.append(NO_EMERGENCY_NOTE)
+    notes.append(UNIT_Q_NOTE)
+    return {"verdict": verdict, "cases": cases, "failures": failures, "excluded": excluded,
+            "not_converged": not_converged, "unscreened": unscreened,
+            "source": "TSO list" if imported else "campus N-1 (branches and units)",
+            "profile": grid_code.get("name"), "notes": notes}
+
+
+def _gc03_source(campus, element, param) -> str:
+    """The template source tag of a value taken from the campus spec: the
+    spec's own tag when it is a template tag, "datasheet" for another entered
+    value, "assumed" when the spec does not give it."""
+    from gridspine.templates.unit_params import SOURCES
+
+    p = campus.params
+    hit = p[(p["element"].astype(str) == str(element)) & (p["param"] == param)]
+    if hit.empty:
+        return "assumed"
+    src = str(hit["source"].iloc[0])
+    return src if src in SOURCES else "datasheet"
+
+
+def _gc03_templates(campus, net):
+    """IEC 60909 unit templates that reproduce the campus spec on ``net``:
+    the grid as a source of S_k''min (mbase = S_k''min, x''d = 1, R/X =
+    rx_min) and each remaining sgen with its own k and R/X, so
+    ``set_sc_params`` writes back the values the net already has."""
+    from gridspine.templates.unit_params import UnitTemplates
+
+    units, params = [], []
+    for i in net.ext_grid.index:
+        eg = net.ext_grid.loc[i]
+        uid, sk, rx = str(eg["name"]), float(eg["s_sc_min_mva"]), float(eg["rx_min"])
+        units.append({"unit_id": uid, "model": "GENROU", "mbase_mva": sk, "include_in_inertia": False})
+        bus = str(net.bus.at[eg["bus"], "name"])
+        params += [(uid, "xd_pp", 1.0, "assumed"), (uid, "rx_sc", rx, _gc03_source(campus, bus, "rx_min")),
+                   (uid, "cos_phi", 1.0, "assumed")]
+    for i in net.sgen.index:
+        s = net.sgen.loc[i]
+        uid = str(s["name"])
+        units.append({"unit_id": uid, "model": "inverter", "mbase_mva": float(s["sn_mva"]),
+                      "include_in_inertia": False})
+        params += [(uid, "k_sc", float(s["k"]), _gc03_source(campus, uid, "k_sc")),
+                   (uid, "rx_sc", float(s["rx"]), _gc03_source(campus, uid, "rx_sc"))]
+    return UnitTemplates(
+        units=pd.DataFrame(units).set_index("unit_id"),
+        params=pd.DataFrame(params, columns=["unit_id", "param", "value", "source"]),
+    )
+
+
+#: pandapower's IEC 60909 minimum case adds no sgen current; the campus net
+#: carries a genset as an sgen, so a genset adds nothing to S_k''min.
+GENSET_SK_NOTE = ("a genset is carried as a static generator, which the IEC 60909 minimum case here "
+                  "neglects: S_k'' is the grid side alone, so SCR is low if a genset runs (conservative)")
+#: The SCR of a PoC below 1 kV: pandapower's minimum case applies c_min there.
+LV_C_NOTE = ("PoC below 1 kV: S_k'' carries the IEC 60909 voltage factor c_min = 0.95 (IEC 60909-0 Table 1), "
+             "so SCR and ESCR read 5 % low (conservative)")
+#: Full N-1 up to this many branches; above it, outage_fault_levels pre-screens.
+STRENGTH_OUTAGE_CAP = 200
+
+
+def _gc03_strength(campus, hourly):
+    """``strength_campus`` on a built campus and its hourly table: ``(per PoC,
+    groups, outage method, notes)``."""
+    import copy
+
+    from gridspine.static.strength import q_c_by_poc, strength_table
+    from gridspine.static.strength_outages import outage_fault_levels
+
+    if campus.tie_normally_open:
+        raise ContractError("the tie to the grid is normally open: no grid infeed to judge strength against")
+    units = campus.units
+    ibr = units[units["kind"].isin(IBR_KINDS)]
+    if ibr.empty:
+        raise ContractError("the campus has no converter-interfaced unit: no PoC to judge")
+    poc_buses = sorted(set(ibr["bus"].astype(str)))
+    pocs = pd.DataFrame({"poc": poc_buses, "bus": poc_buses, "group": "campus"})
+    comp = campus.compensation
+    banks = comp[comp["kind"] == "capacitor_bank"] if len(comp) else comp
+    on = banks[banks["bus"].astype(str).isin(poc_buses)] if len(banks) else banks
+    off = banks[~banks["bus"].astype(str).isin(poc_buses)] if len(banks) else banks
+    q_c = q_c_by_poc(on, {b: b for b in poc_buses}) if len(on) else None
+    notes = []
+    if len(off):
+        extra = float(off["q_mvar"].abs().sum())
+        base = q_c if q_c is not None else pd.DataFrame(
+            {"q_c_mvar": 0.0, "banks": ""}, index=pd.Index(poc_buses, name="poc"))
+        q_c = base.reindex(poc_buses).fillna({"q_c_mvar": 0.0, "banks": ""})
+        q_c["q_c_mvar"] = q_c["q_c_mvar"].astype(float) + extra
+        names = ", ".join(sorted(map(str, off.index)))
+        notes.append(f"capacitor bank(s) {names} on no PoC: {extra:g} Mvar subtracted at every PoC (worst case)")
+    gensets = set(units.index[units["kind"] == "genset"].astype(str))
+    per_poc, groups, method = [], [], ""
+    for period, block in hourly.groupby("period"):
+        period = int(period)
+        built = set(block.loc[block["status"] == 1, "unit_id"].astype(str))
+        stage_ibr = ibr[ibr.index.astype(str).isin(built)]
+        p = stage_ibr.groupby(stage_ibr["bus"].astype(str))["p_mw"].sum().reindex(poc_buses).fillna(0.0)
+        stages = pd.DataFrame({"stage": str(period), "poc": poc_buses, "p_mw": p.values})
+        # The fault state is hour-independent: IEC 60909 neglects load, and
+        # apply_fault_state energises every remaining unit whatever its
+        # dispatch, so the period's first hour only carries the tables.
+        hour = int(block["hour"].min())
+        sl = block[block["hour"] == hour][["unit_id", "p_mw", "status"]].reset_index(drop=True)
+        net, dispatch, loads, registry = _gc03_hour_net(copy.deepcopy(campus), sl, hour)
+        # every converter out of the fault level, and a genset not built in the period
+        keep = gensets & built
+        net.sgen.drop(index=[i for i in net.sgen.index if str(net.sgen.at[i, "name"]) not in keep], inplace=True)
+        registry = registry[(registry["kind"] != "res") | registry.index.isin(keep)]
+        dispatch = dispatch[dispatch["unit_id"].isin(registry.index)].reset_index(drop=True)
+        ofl = outage_fault_levels(net, dispatch, loads, hour, registry, _gc03_templates(campus, net), poc_buses,
+                                  cap=STRENGTH_OUTAGE_CAP)
+        study = strength_table(pocs, stages, ofl.intact, ofl.outages, ofl.method, q_c)
+        rows = study.pocs.assign(period=period)
+        lv = rows["bus"].map(lambda b: float(net.bus.loc[net.bus["name"].astype(str) == b, "vn_kv"].iloc[0]) < 1.0)
+        rows.loc[lv, "note"] = rows.loc[lv, "note"].fillna("").map(lambda t: "; ".join(x for x in (t, LV_C_NOTE) if x))
+        per_poc.append(rows)
+        groups.append(study.groups.assign(period=period))
+        method = ofl.method
+    if gensets:
+        notes.append(GENSET_SK_NOTE)
+    notes.append("S_k'' is the IEC 60909 minimum case with every converter off, network "
+                 "transformers with the impedance correction K_T (IEC 60909-0 6.3.3); "
+                 "P is the rated power of the converters built in the period; the fault state does not depend "
+                 "on the hour (IEC 60909 neglects load)")
+    return pd.concat(per_poc, ignore_index=True), pd.concat(groups, ignore_index=True), method, notes
+
+
+def strength_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> dict:
+    """SCR, ESCR and WSCR per PoC and stage (``static/strength.strength_table``),
+    intact and under the worst campus N-1 branch outage
+    (``static/strength_outages.outage_fault_levels``), written to
+    ``campus_strength.csv`` (per PoC) and ``campus_strength_groups.csv``
+    (WSCR). Returns the summary. A static screen: the binding answer is the
+    RMS/EMT study.
+
+    S_k'' is the IEC 60909 minimum case of the grid side alone: every
+    converter (``IBR_KINDS``) is off, a genset adds nothing (``GENSET_SK_NOTE``), and the grid is the
+    campus spec's S_k''min and rx_min. A PoC is each bus carrying a converter;
+    a stage is a period, with P the RATED power of the converters built in it.
+    Capacitor banks off every PoC are subtracted at every PoC (worst case)."""
+    del profile, profile_dirs  # the bands are strength.py's; the limits are the readiness rows'
+    run_dir = Path(run_dir)
+    _unchanged_project(run_dir)
+    campus = load_run_campus(run_dir)
+    hourly, _ = campus_tables(run_dir)
+    per_poc, groups, method, notes = _gc03_strength(campus, hourly)
+    _write_text_atomic(run_dir / STRENGTH_CSV, per_poc.to_csv(index=False))
+    _write_text_atomic(run_dir / STRENGTH_GROUPS_CSV, groups.to_csv(index=False))
+    return {"pocs": sorted(per_poc["poc"].unique().tolist()), "stages": sorted(per_poc["stage"].unique().tolist()),
+            "outage_method": method, "notes": notes, "basis": "static screen; binding answer is the RMS/EMT study"}
+
+
 # --- the PowerFactory handoff and the field background (GC-05; TRGC 13, 14, 18) ---
 
 POWERFACTORY_DIR = "powerfactory"

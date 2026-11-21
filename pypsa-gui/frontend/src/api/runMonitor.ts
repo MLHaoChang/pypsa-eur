@@ -2,6 +2,7 @@
 // `services/run_monitor.py`, `/api/chat/runs/{task_id}`). Every call is a
 // user's click or the open plan card's own refresh; none is a tool call.
 import { client } from './client'
+import type { RevisionDraft } from './reports'
 
 export interface GateRule {
   rule: string; verdict: 'pass' | 'fail' | string; fact: string
@@ -115,6 +116,11 @@ export interface RunMonitorView {
     research?: { rows: ResearchRow[]; steps: ResearchStep[] }
     /** Study harness 14 S-C: the PPA price step's card lines and the price or its state, in words. */
     ppa?: RunPpaPrice
+    /** SH-07d: the run's draft rows, oldest first. */
+    revision_drafts?: RevisionDraft[]
+    /** SH-07d: the report a draft may be asked for now, with the server's limits;
+     *  `may_act` is false for a viewer of the project. */
+    revision_report?: { report_id: string; max_requests: number; in_flight: string[]; may_act: boolean }
   }
 }
 
