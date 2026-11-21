@@ -117,20 +117,58 @@ def freeze(ctx, profile, solves_left) -> dict:
         goal = reliability_goal.effective_goal(cfg, template)
         # The Goal card's own request for this project (its template's site
         # overrides, the stored goal over them): what a user's study would send.
-        card = flow_service._request_for(template, cfg)
+        card = flow_service._template_request(template, cfg)
     except Exception as exc:  # noqa: BLE001 — an unreadable goal fixes nothing
         raise FreezeError("The project's reliability goal cannot be read.") from exc
     budget = min(int(block["budget_solves"]), int(solves_left))
     if budget < 1:
         raise FreezeError("No solve is left for the Energy Hub study.")
+    try:
+        # template-e2e 02 (GK B C2-C4): a weak-grid import cap is the
+        # network's connection limit, over the template's; one the network
+        # doesn't fix refuses, never a constant.
+        card = flow_service.with_network_import(
+            {
+                **card,
+                "pack_overrides": {
+                    **(card.get("pack_overrides") or {}),
+                    **{
+                        k: v
+                        for k, v in dict(block.get("pack_overrides") or {}).items()
+                        if k != "import_p_nom_mw"  # compared with the network's below
+                    },
+                },
+            },
+            getattr(ctx, "network", None),
+        )
+    except flow_service.ImportCapacityError as exc:
+        raise FreezeError(str(exc)) from exc
+    # GK B (64): a profile's own import cap never overrides the network's in
+    # silence; one that differs refuses with both values.
+    asked = (block.get("pack_overrides") or {}).get("import_p_nom_mw")
+    cap = (card.get("pack_overrides") or {}).get("import_p_nom_mw")
+    if (
+        card["archetype"] == "weak_flexible"
+        and asked is not None
+        and not (
+            isinstance(asked, (int, float))
+            and not isinstance(asked, bool)
+            and float(asked) == float(cap)
+        )
+    ):
+        raise FreezeError(
+            f"The run profile sets an import cap of {asked:.12g} MW but the network's "
+            f"connection limit is {cap:.12g} MW: set the limit on the grid import link, "
+            "or remove the profile's import cap."
+            if isinstance(asked, (int, float)) and not isinstance(asked, bool)
+            else f"The run profile's import cap ({asked}) is not a number; the "
+            f"network's connection limit is {cap:.12g} MW."
+        )
     body = EhStudyRequest(
         archetype=card["archetype"],
         stages=list(block.get("stages") or card.get("stages") or []) or None,
         budget_solves=budget,
-        pack_overrides={
-            **(card.get("pack_overrides") or {}),
-            **dict(block.get("pack_overrides") or {}),
-        },
+        pack_overrides=card.get("pack_overrides") or {},
         mc={**dict(block.get("mc") or {}), "draws": int(goal["mc_draws"]["value"])},
         dtc_config=block.get("dtc_config"),
         dsr_buses=block.get("dsr_buses"),
@@ -305,6 +343,34 @@ def _stop(task, reason):
         runner._stop_in(task, "needs_user", reason)
 
 
+def _connection_limit_change(ctx, args) -> str | None:
+    """template-e2e 02 (GK B C5): why a weak-grid study's frozen import cap is
+    no longer the network's connection limit (an edit to the import Links
+    after the card was drawn, or a limit the network no longer fixes), or
+    None when it still is, or the study is no weak-grid one."""
+    from services import flow_service
+
+    if args.get("archetype") != "weak_flexible":
+        return None
+    then = (args.get("pack_overrides") or {}).get("import_p_nom_mw")
+    cap = flow_service.import_capacity(
+        getattr(ctx, "network", None),
+        {"archetype": args["archetype"], "pack_overrides": args.get("pack_overrides")},
+    )
+    if (
+        cap.refusal is None
+        and isinstance(then, (int, float))
+        and cap.mw == float(then)  # exact: the frozen value is the network's own
+    ):
+        return None
+    shown = f"{float(then):.12g} MW" if isinstance(then, (int, float)) else "no limit"
+    now = f"it is now {cap.mw:.12g} MW" if cap.refusal is None else cap.refusal
+    return (
+        f"The connection limit changed since the study's card was drawn "
+        f"(it showed {shown}; {now}). Review the run again."
+    )
+
+
 def admit(path, task, step, args, ctx):
     """Every execution of the run's EH step (`assistant_tasks.begin_step`,
     under the task lock): the args equal the frozen record, the live goal
@@ -340,6 +406,10 @@ def admit(path, task, step, args, ctx):
             "The project's reliability goal changed since the study's card was drawn; "
             "review the run again."
         )
+    stale = _connection_limit_change(ctx, args)
+    if stale is not None:
+        _stop(task, ARGS_KIND)
+        return ARGS_KIND, stale
     held = frozen.get("contingencies")
     if held is not None:
         # Study harness 12c (G1): the K the card showed is the args' own, and
