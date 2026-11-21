@@ -11,6 +11,8 @@ const PROFILES = new Set(['generator-dispatch/1', 'generator-cost/1', 'network-l
 export interface OwnedCheckedAnswer extends ApprovedAnswerFrame {
   text: string
   project_id: string
+  /** The server's metric definitions changed since this answer was checked (AA-10 S7). */
+  definition_changed: boolean
 }
 
 function canonical(value: unknown, depth = 0): unknown {
@@ -59,5 +61,6 @@ export async function getOwnedCheckedAnswer(message: ChatMessage, signal: AbortS
     || !(await verifyApprovedText(message.content, approved.receipt.content_sha256)) || signal.aborted) {
     throw new Error('Checked answer contract unavailable')
   }
-  return { ...approved, text: message.content, project_id: data.project_id }
+  return { ...approved, text: message.content, project_id: data.project_id,
+    definition_changed: data.definition_changed === true }
 }

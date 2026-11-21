@@ -16,6 +16,8 @@ import io
 import json
 import zipfile
 
+from tests.bundle_util import refresh_manifest
+
 import pandas as pd
 import pytest
 
@@ -176,7 +178,7 @@ def _bundle_with(client, name, sidecar):
                 zf.writestr(m, src.read(m))
         if sidecar is not None:
             zf.writestr(P.SIDECAR_NAME, sidecar)
-    return buf.getvalue()
+    return refresh_manifest(buf.getvalue())  # the edit changes members, so the manifest is rebuilt (project-io 02)
 
 
 def _import(client, data, as_name):

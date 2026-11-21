@@ -16,7 +16,7 @@ import time
 import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
@@ -60,6 +60,9 @@ class MembersRequest(BaseModel):
     """Body for PUT /{id_or_name}/members — the desired member user-id set."""
 
     user_ids: list[str] = []
+    # Optional role per user id (project-viewer-role 01). A member with no
+    # entry keeps the stored role; a new member defaults to editor.
+    roles: dict[str, Literal["editor", "viewer"]] = {}
 
 
 # The FLAT legacy store: <root>/<display-name>/network.nc. Distinct from
@@ -1121,7 +1124,15 @@ def list_projects(
     # (Step 1) is the channel that surfaces such drift.
     project_registry.require_user(user)
     projects = project_acl.list_accessible_projects(db, user)
-    return [_project_info_db(db, p) for p in projects]
+    # One `project_role` per row, the same function the write gate uses (GK B3
+    # V4). Its few indexed lookups are small next to the bundle read
+    # `_project_info_db` already does per row.
+    return [
+        _project_info_db(db, p).model_copy(
+            update={"my_access": project_acl.project_role(db, user, p)}
+        )
+        for p in projects
+    ]
 
 
 # NOTE: `/unclaimed` and `/unclaimed/{legacy_name}/import` MUST stay ahead of
@@ -1538,9 +1549,13 @@ async def import_bundle(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
     session: SessionRow | None = Depends(current_session),
+    dry_run: bool = False,
 ):
     """
     Restore a project from a .pypsaproj.zip bundle.
+
+    ``dry_run=true`` runs every check a real import runs and answers what it
+    would create, writing nothing (project-io 02, GK B I8).
 
     Writes the bundle to ``projects/{name}/`` (defaulting to the bundle's
     metadata name or the uploaded filename) and loads it into the live network.
@@ -1554,7 +1569,17 @@ async def import_bundle(
     # route has already committed the project row and written its files. Worse, the retry the
     # refusal advises then fails FOREVER, because the committed row makes
     # every attempt 409 with "already exists" instead.
-    PyPSAService.refuse_if_study_running("import a project bundle")
+    from services import project_registry
+
+    project_registry.require_user(user)
+    # A dry run reports a running study as a warning: it swaps nothing.
+    study_warnings: list[str] = []
+    try:
+        PyPSAService.refuse_if_study_running("import a project bundle")
+    except HTTPException as exc:
+        if not dry_run:
+            raise
+        study_warnings.append(str(exc.detail))
     from services.upload_guard import read_capped
     data = await read_capped(file)
 
@@ -1578,8 +1603,13 @@ async def import_bundle(
     except zipfile.BadZipFile as exc:
         raise HTTPException(400, f"Not a valid zip bundle: {exc}") from exc
 
+    from services import bundle_manifest
+
     try:
         allowed, ignored = PC.screen_members(zf)
+        # The manifest (project-io 02, GK B I7): a damaged or newer bundle is
+        # refused here, before anything is unpacked; no manifest is a warning.
+        warnings = bundle_manifest.check(zf) + study_warnings
     except PC.BundleRefused as exc:
         raise HTTPException(400, exc.detail) from exc
     members = set(allowed)
@@ -1616,9 +1646,6 @@ async def import_bundle(
 
     # `target_name` may come from a zip's metadata.json — never trust it.
     # `_safe_project_dir` rejects path traversal and shell-metachar names.
-    from services import project_registry
-
-    project_registry.require_user(user)
     # Every refusal comes BEFORE the project row exists (project-io 01, GK B
     # I3): the bundle is unpacked into a private staging folder and checked
     # there, so a refused import leaves no row and no folder behind.
@@ -1648,6 +1675,12 @@ async def import_bundle(
 
         refuse_invalid_names(invalid_names_in_netcdf(staged_nc))
 
+        if dry_run:
+            return _import_dry_run(
+                db, user, staging, target_name, project_kind, members,
+                ignored=ignored, stripped=stripped_fields, rederived=rederived,
+                rate_source=rate_source, warnings=warnings)
+
         # Carry the bundle's scenario labels onto the ROW, not just onto the
         # files: `_project_info_db` serves the DB row. The parent link is
         # deliberately NOT restored: a bundle is a single project, and its
@@ -1668,7 +1701,7 @@ async def import_bundle(
             return _open_imported_bundle(
                 db, session, _imported_project, dest, file.filename,
                 candidate=candidate, rederived=rederived, rate_source=rate_source,
-                stripped_fields=stripped_fields, ignored=ignored)
+                stripped_fields=stripped_fields, ignored=ignored, warnings=warnings)
         except BaseException:
             _discard_import(db, _imported_project, dest,
                             session=session, prev_pointer=prev_pointer)
@@ -1677,10 +1710,58 @@ async def import_bundle(
         _force_rmtree(staging)
 
 
+def _carries_user_code(cfg_data: dict) -> bool:
+    """True when a bundle's solver settings carry `extra_functionality_code`,
+    which every import strips (see `_open_imported_bundle`)."""
+    return bool(str(cfg_data.get("extra_functionality_code") or "").strip())
+
+
+def _import_dry_run(db: DBSession, user, staging: pathlib.Path, target_name: str,
+                    project_kind: str | None, members: set[str], *, ignored: list[str],
+                    stripped: list[str], rederived: list[str], rate_source: str,
+                    warnings: list[str]) -> dict:
+    """What `import_bundle` would create from the checked, staged bundle.
+
+    Reads only: no row, no project folder; the caller removes `staging`.
+    The fields are the ones the real import reports (`stripped`, `ignored`,
+    `rederived`, `rederived_at_default_rate`, `warnings`, `dropped_goal`);
+    `would_conflict` is the 409 the real import would answer for a name
+    already taken. Checks that run only after the move (library pins,
+    hydration) are not part of the answer.
+    """
+    from services import project_registry
+
+    stripped = list(stripped)
+    dropped_goal: list[dict] = []
+    cfg_path = staging / "solver_config.json"
+    if cfg_path.is_file():
+        # `_bundle_network_owning_its_costs` has already refused (422) a
+        # solver_config.json that is not a readable JSON object.
+        cfg_data = json.loads(cfg_path.read_text())
+        if _carries_user_code(cfg_data):
+            stripped.append("extra_functionality_code")
+        dropped_goal = _dropped_goal(cfg_data)
+    clash = project_registry.find_project(db, user, target_name, name_only=True)
+    return {
+        "dry_run": True,
+        "name": target_name,
+        "project_kind": project_kind,
+        "members": sorted(members),
+        "would_conflict": clash is not None,
+        "stripped": stripped,
+        "ignored": list(ignored),
+        "rederived": list(rederived),
+        "rederived_at_default_rate": bool(rederived) and rate_source == "default",
+        "warnings": list(warnings),
+        **({"dropped_goal": dropped_goal} if dropped_goal else {}),
+    }
+
+
 def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_project,
                           dest: pathlib.Path, filename: str | None, *,
                           candidate, rederived: list[str], rate_source: str,
-                          stripped_fields: list[str], ignored: list[str]) -> dict:
+                          stripped_fields: list[str], ignored: list[str],
+                          warnings: list[str]) -> dict:
     """The import's swap and hydration, once its files are in `dest`. Any
     failure here is undone by the caller (`_discard_import`)."""
     from services import project_registry
@@ -1745,7 +1826,7 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
         # is already extracted by this point, and refusing here would leave a
         # half-imported project. The response names the field so this is never
         # a silent difference between what was uploaded and what was imported.
-        if str(cfg_data.get("extra_functionality_code") or "").strip():
+        if _carries_user_code(cfg_data):
             cfg_data.pop("extra_functionality_code", None)
             stripped_fields.append("extra_functionality_code")
             cfg_path.write_text(json.dumps(cfg_data, indent=2))
@@ -1850,6 +1931,8 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
             "stripped_note": _stripped_note(stripped_fields)} if stripped_fields else {}),
         # Archive members no table entry names: reported, never written (GK B I2).
         **({"ignored": ignored} if ignored else {}),
+        # An old bundle with no manifest, so nothing was checked for damage (project-io 02).
+        **({"warnings": warnings} if warnings else {}),
         # Likewise each reliability-goal value the bundle carried that PUT
         # would refuse: imported as "not set" (W3b-R), named here.
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
@@ -3712,7 +3795,7 @@ def activate_project(
     ``_solver_in_flight()`` (which keys on the active ctx), so switching away
     while the queue solves a DIFFERENT project is allowed — that is the payoff.
     """
-    from services import project_registry
+    from services import project_acl, project_registry
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, project_id)
@@ -3818,7 +3901,8 @@ def activate_project(
                 f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}")
         library_issues = _tariff_ref_load_issues(cfg, project.name) + library_issues
     return {"activated": project.name, "evicted": evicted, "lock": lock_info,
-            "library_issues": library_issues}
+            "library_issues": library_issues,
+            "my_access": project_acl.project_role(db, user, project)}
 
 
 @router.post("/{project_id}/lock")
@@ -3887,7 +3971,7 @@ def load_project(
     user: User | None = Depends(optional_user),
     session: SessionRow | None = Depends(current_session),
 ) -> ImportSummary | dict[str, object]:
-    from services import project_registry
+    from services import project_acl, project_registry
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, name)
@@ -4155,6 +4239,7 @@ def load_project(
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
     return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues,
+            "my_access": project_acl.project_role(db, user, project),
             **({"dropped_goal": dropped_goal} if dropped_goal else {})}
 
 
@@ -5506,7 +5591,9 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
     change_log_service.log(
         "export", "Project", name, f"Downloaded project bundle '{name}.pypsaproj.zip'",
     )
-    return buf.getvalue()
+    from services import bundle_manifest
+
+    return bundle_manifest.add_to(buf.getvalue(), project_kind=project_kind)
 
 
 @router.get("/{name}/bundle")
@@ -5576,8 +5663,14 @@ def put_project_members(
         user_ids = [_uuid.UUID(str(uid)) for uid in body.user_ids]
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, "user_ids must be valid UUID strings") from exc
+    try:
+        roles = {_uuid.UUID(str(uid)): role for uid, role in body.roles.items()}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "roles keys must be valid UUID strings") from exc
+    if len(roles) != len(body.roles):
+        raise HTTPException(400, "roles names the same user more than once")
 
-    return project_registry.set_root_members(db, user, project, user_ids)
+    return project_registry.set_root_members(db, user, project, user_ids, roles)
 
 
 @router.get("/{name}/statistics")

@@ -228,12 +228,18 @@ def _verify(root, meta, data, project_id):
             status = False
         if not status:
             raise ValueError("checked chart evidence mismatch")
-        manifest = {**manifest, "evidence_status": status}
+        # AA-10 S7: the hash recorded when it was drawn, never the current one.
+        manifest = {**manifest, "evidence_status": status,
+                    "definition_hash": manifest.get("definition_hash", NOT_RECORDED)}
         if status in ("expired", "missing"):
             note = checked_charts.EXPIRED_NOTE if status == "expired" else checked_charts.MISSING_NOTE
             manifest["evidence_note"] = note.format(
                 drawn_at=checked_charts.readable_stamp(manifest["drawn_at"]))
     return record, manifest
+
+
+#: How a checked chart drawn before AA-10 S7 reports its definition hash.
+NOT_RECORDED = "not recorded"
 
 
 def verify_chart(root, meta, data, project_id, *, provenance=False):

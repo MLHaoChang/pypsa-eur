@@ -1,0 +1,1 @@
+* Test(pypsa-gui): The template journeys now export the results workbook (.xlsx, expected failure keyed to gap 30) and check that a goal edited in Expert reads back in Guided after a reload; the journey report lists each skipped step with its reason and the seconds the new steps add.
