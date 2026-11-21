@@ -629,6 +629,10 @@ DC_SCORECARD = (
     # Acceptance (issue 18): a P-V/Q-V margin is screening, so it warns.
     ("voltage_stability_pv", "warn", "P-V margin at the PoC (screening).", _CAMPUS_RUN),
     ("voltage_stability_qv", "warn", "Q-V margin at the PoC (screening).", _CAMPUS_RUN),
+    # GC-08: SSTI / SSR / SSCI are screening; the binding answer is the EMT study, so they warn.
+    ("ssti_uif", "warn", "SSTI unit interaction factor within the threshold (screening).", _CAMPUS_RUN),
+    ("subsync_series_resonance", "warn", "Series resonance clear of torsional modes (screening).", _CAMPUS_RUN),
+    ("ssci", "warn", "SSCI needs an EMT study; it never passes here.", _CAMPUS_RUN),
     ("frequency_support", "warn", "The campus offers the frequency support the code asks.", _ISLAND),
     ("grid_former", "warn", "A unit forms the island's voltage.", _ISLAND),
     ("ride_through:", "warn", "Ride-through needs the operator's study; it never passes here.", _ISLAND),
