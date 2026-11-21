@@ -77,13 +77,11 @@ def _refuse(status: int, detail: dict) -> None:
     raise HTTPException(status, detail)
 
 
-_UNAVAILABLE = (
-    "Model import is not available in this build: its importers (gridspine) are not installed."
-)
+_UNAVAILABLE = "Model import is not available in this build: its importers (gridspine) are not installed."
 
 
 def _contract():
-    """gridspine's import contract, or a plain 503 when this build does not carry it
+    """The import contract (gridspine's), or a plain 503 when this build does not carry it
     (gridspine is optional at runtime, as in `gridspine_service`)."""
     try:
         from gridspine.ingest import import_result as IR

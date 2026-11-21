@@ -570,8 +570,12 @@ def test_a_child_without_gridspine_answers_plainly_and_writes_nothing(
     assert set(out) == {"unavailable"} and list(tmp_path.iterdir()) == []
 
 
-def test_a_child_that_answers_unavailable_is_a_plain_503(client, fake, store, monkeypatch):
-    monkeypatch.setattr(svc, "_read_in_child", lambda st: {"unavailable": "No module named 'gridspine'"})
+def test_a_child_that_answers_unavailable_is_a_plain_503(
+    client, fake, store, monkeypatch
+):
+    monkeypatch.setattr(
+        svc, "_read_in_child", lambda st: {"unavailable": "No module named 'gridspine'"}
+    )
     before = store()
     r = _preview(client, ("m.fake", b"ok"))
     assert r.status_code == 503 and _kind(r) == "import_unavailable", r.text
