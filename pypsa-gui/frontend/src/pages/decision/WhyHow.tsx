@@ -146,7 +146,7 @@ export default function WhyHow({ findings, optionCase, onExpert }: {
                   <td className="font-mono">{a ? valueText(a.option_npv, 'EUR') : '—'}</td>
                   <td>
                     {o.solve_status === 'ok' && o.project_ref && (
-                      <button type="button" className="text-accent hover:underline text-[11px]" onClick={() => onExpert(o.option_id)}>
+                      <button type="button" className="text-link hover:underline text-[11px]" onClick={() => onExpert(o.option_id)}>
                         {UI_LABELS.openInExpert}
                       </button>
                     )}

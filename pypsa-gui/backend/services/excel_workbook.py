@@ -74,20 +74,114 @@ def catalogue() -> dict:
     return out
 
 
-def custom_columns() -> dict[str, list[str]]:
-    """Per model class, the non-PyPSA columns a project may hold: investment parts, eh_* tags and the outage flag."""
+# Asset-form inputs the single edit never writes as plain values, so a workbook does not either (issue 07):
+# a Link's extra port efficiencies follow the port rule (`network_crud._link_port_extras`; its port buses are
+# bus references, left out by kind), and a transformer's winding voltages are read from its buses
+# (`update_transformer` excludes them from the write).
+_NOT_WRITTEN = {
+    "Link": frozenset({"efficiency2", "efficiency3", "efficiency4"}),
+    "Transformer": frozenset({"v_nom_0", "v_nom_1"}),
+}
+
+
+def _own_custom_columns(cls: str) -> list[str]:
+    """The custom columns with their own reading: investment parts, eh_* tags and the outage flag."""
     from services.adequacy.eh_columns import eh_columns_for
     from services.adequacy.occurrence import FLAG_COL
     from services.asset_schema.schema import part_columns
 
+    flag = [FLAG_COL] if cls == "Generator" else []
+    return list(dict.fromkeys([*part_columns(cls), *eh_columns_for(cls), *flag]))
+
+
+def form_columns() -> dict[str, list[str]]:
+    """Per model class, the asset form's inputs beyond PyPSA's attributes that a workbook carries (issue 07).
+
+    A field joins when it is not derived (`catalogue` leaves those out), not a PyPSA attribute, declared by
+    the class's Create model (so the single-edit validators exist for it, `refuse_bad_form_values`), not a
+    bus or carrier reference, not one the single edit never writes (`_NOT_WRITTEN`) and not already one of
+    the custom columns with their own reading (`_own_custom_columns`).
+    """
+    import pypsa
+
+    from services.network_crud import _declared_attributes
+
+    blank = pypsa.Network()
+    out: dict[str, list[str]] = {}
+    for cls, cols in catalogue().items():
+        skip = {*blank.components[cls].defaults.index, *_own_custom_columns(cls)}
+        skip |= _NOT_WRITTEN.get(cls, frozenset())
+        keys = [
+            c.key
+            for c in cols
+            if c.key not in skip
+            and c.key in _declared_attributes(cls)
+            and c.kind not in ("bus", "carrier")
+        ]
+        if keys:
+            out[cls] = keys
+    return out
+
+
+def custom_columns() -> dict[str, list[str]]:
+    """Per model class, the non-PyPSA columns a project may hold: the ones with their own reading and the
+    asset form's other inputs (`form_columns`), so the reader accepts what the writer emits."""
     L = _gs()[0]
+    forms = form_columns()
     out: dict[str, list[str]] = {}
     for cls, _, _ in L.SHEETS:
-        flag = [FLAG_COL] if cls == "Generator" else []
-        cols = list(dict.fromkeys([*part_columns(cls), *eh_columns_for(cls), *flag]))
+        cols = [*_own_custom_columns(cls), *forms.get(cls, [])]
         if cols:
             out[cls] = cols
     return out
+
+
+def _form_validator(cls: str, key: str):
+    """The single-edit path's validator for one Create-model field (#738: the same checks on every write)."""
+    from typing import Annotated
+
+    import models.schemas as schemas
+    from pydantic import TypeAdapter
+
+    from services.network_crud import _CREATE_MODEL_NAMES
+
+    field = getattr(schemas, _CREATE_MODEL_NAMES[cls]).model_fields[key]
+    return TypeAdapter(
+        Annotated[field.annotation, *field.metadata]
+        if field.metadata
+        else field.annotation
+    )
+
+
+def refuse_bad_form_values(n, unchanged: str = "") -> None:
+    """A form column's value the single edit would refuse refuses the whole import, before anything is written.
+
+    `unchanged`: the open-network import's ending; a new-project import says nothing was imported."""
+    import pandas as pd
+    from pydantic import ValidationError
+
+    L = _gs()[0]
+    labels = {cls: {c.key: c.label for c in cols} for cls, cols in catalogue().items()}
+    for cls, keys in form_columns().items():
+        frame = n.static(cls)
+        for key in keys:
+            if key not in frame.columns:
+                continue
+            check = _form_validator(cls, key)
+            for name, v in frame[key].items():
+                if pd.isna(v) or (isinstance(v, str) and not v.strip()):
+                    continue
+                try:
+                    check.validate_python(v.item() if hasattr(v, "item") else v)
+                except ValidationError:
+                    raise HTTPException(
+                        422,
+                        {
+                            "error_kind": "invalid_edit_value",
+                            "message": f"{L.SHEET_OF[cls]} · {labels[cls][key]}: the value for “{name}” "
+                            f"is not one the asset form accepts.{unchanged or ' Nothing was imported.'}",
+                        },
+                    ) from None
 
 
 def _write(n, sidecars: dict | None, *, template: bool) -> bytes:
@@ -222,6 +316,33 @@ def _new_project_sidecars(sidecars: dict) -> tuple[object, str, int]:
     return cfg, text, count
 
 
+def refuse_bad_fuel_curves(n, unchanged: str = "") -> list[str]:
+    """A generator fuel curve the single edit would refuse (`fuel_curve.guard`, homer-parity 02a) refuses the
+    import; otherwise each curve generator's costs are derived from its curve, as the single edit does. Returns
+    the create path's notice (`fuel_curve.replace_notice`) per generator whose costs the curve replaces."""
+    from services import fuel_curve
+
+    gens = n.generators
+    if gens.empty or not any(c in gens.columns for c in fuel_curve.INPUT_COLUMNS):
+        return []
+    notices = []
+    for name in gens.index:
+        row = gens.loc[name]
+        series = fuel_curve.cost_series(n, name)
+        if msg := fuel_curve.guard(row, cost_series=series):
+            raise HTTPException(
+                422,
+                {
+                    "error_kind": "invalid_edit_value",
+                    "message": f"Generators · “{name}”: {msg}.{unchanged or ' Nothing was imported.'}",
+                },
+            )
+        if notice := fuel_curve.replace_notice(row):
+            notices.append(f"Generators · “{name}”: {notice}")
+    fuel_curve.apply(n, stamp=False)
+    return notices
+
+
 def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared:
     """
     Read an uploaded workbook and run every check an import makes, writing nothing.
@@ -278,6 +399,8 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
         )
     _refuse_reserved_buses(n)
     _refuse_invalid_names(n)
+    refuse_bad_form_values(n, unchanged)
+    res.report.warnings.extend(refuse_bad_fuel_curves(n, unchanged))
     # A new project's sidecars are checked here, before any row exists (all or nothing).
     checked = _new_project_sidecars(res.sidecars) if new_project else (None, "", 0)
     rate = workbook_rate(res.sidecars) if new_project else None

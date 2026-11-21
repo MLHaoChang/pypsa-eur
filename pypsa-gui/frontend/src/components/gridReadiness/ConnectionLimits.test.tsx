@@ -9,7 +9,23 @@ import { ConnectionLimits, resetTarget } from './ConnectionLimits'
 vi.mock('../flowScope/useFlowScope', () => ({ useFlowScope: () => ({ registry: { preset_label: 'Data Center Energy Hub' } }) }))
 
 vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolvedValue([
-  { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]), updateBus: vi.fn() } }))
+  { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]), updateBus: vi.fn(),
+  getLinks: vi.fn().mockResolvedValue([]), updateLink: vi.fn() } }))
+const hub = vi.hoisted(() => ({ template: null as null | { energization: unknown[] },
+  // The import links as the server selects them for the connection limit (`connection_limit.links`).
+  links: ['grid_import', 'h2_import'] as string[], refusal: null as string | null }))
+vi.mock('../../api/flow', async (orig) => ({
+  ...await orig<typeof import('../../api/flow')>(),
+  getProjectFlow: async () => ({ run_ready: true, notes: [],
+    sections: [{ section: 'connection', connection_limit: { mw: null, refusal: hub.refusal, links: hub.links } }] }) }))
+vi.mock('../../pages/hubDesign/useHubData', async (orig) => ({
+  ...await orig<typeof import('../../pages/hubDesign/useHubData')>(),
+  useHubTemplate: () => ({ template: hub.template, isPending: false }) }))
+vi.mock('../../api/assetSchema', async (orig) => {
+  const actual = await orig<typeof import('../../api/assetSchema')>()
+  return { ...actual, assetSchemaApi: { ...actual.assetSchemaApi,
+    units: vi.fn(async (component: string, name: string) => ({ component, name, units: name === 'h2_import' ? { p_nom: 't/h' } : {} })) } }
+})
 vi.mock('../../api/campusElectrical', async (orig) => {
   const actual = await orig<typeof import('../../api/campusElectrical')>()
   return { ...actual, campusApi: { ...actual.campusApi, gridReadiness: vi.fn(), setGridLimit: vi.fn(), resetGridLimit: vi.fn() } }
@@ -26,7 +42,7 @@ function mount() {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <ConnectionLimits /></QueryClientProvider>)
 }
-afterEach(() => { cleanup(); useUIStore.setState({ uiMode: 'expert' }) })
+afterEach(() => { cleanup(); hub.template = null; useUIStore.setState({ uiMode: 'expert' }) })
 
 const setting = (item: string, over: Record<string, unknown> = {}) => ({
   item, user: null, default: { value: 5, source: 'assumed', origin: 'placeholder' }, ...over })
@@ -228,5 +244,96 @@ describe('ConnectionLimits', () => {
     fireEvent.change(await screen.findByLabelText('Fault level value'), { target: { value: '0' } })
     expect(screen.getByText(/must be above 0 MVA/)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Save fault level' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  // template-e2e 02: the connection limit is the import link's capacity, set here in both modes.
+  it('edits the connection limit as the import link capacity, and only the import links', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([
+      { name: 'grid_import', eh_role: 'grid_import', p_nom: 40 }, { name: 'ups', eh_role: '', p_nom: 9 }] as never)
+    vi.mocked(networkApi.updateLink).mockClear().mockResolvedValue({ name: 'grid_import' } as never)
+    useUIStore.setState({ currentProject: 'Demo' })
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ConnectionLimits only={['connection_limit']} /></QueryClientProvider>)
+    const line = await screen.findByTestId('connection-limit-connection_limit')
+    expect(line.textContent).toMatch(/Connection limit: 40 MW/)
+    expect(screen.queryByTestId('connection-limit-ramp_rate')).toBeNull()
+    expect(screen.queryByText(/No grid connection is tagged/)).toBeNull()
+    const input = screen.getByLabelText('Connection limit (MW)')
+    const save = screen.getByRole('button', { name: 'Save connection limit' })
+    expect(save).toHaveProperty('disabled', true)
+    fireEvent.change(input, { target: { value: '0' } })
+    expect(screen.getByText('Connection limit: must be above 0 MW.')).toBeTruthy()
+    expect(save).toHaveProperty('disabled', true)
+    fireEvent.change(input, { target: { value: '45' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(networkApi.updateLink).toHaveBeenCalledWith('grid_import', expect.objectContaining({ p_nom: 45 })))
+    expect(networkApi.updateLink).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows no connection limit line without an import link', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'ups', eh_role: '', p_nom: 9 }] as never)
+    mount()
+    expect(await screen.findByText(/No grid connection is tagged/)).toBeTruthy()
+    expect(screen.queryByTestId('connection-limit-connection_limit')).toBeNull()
+  })
+
+  it('takes the import links the server selects, not the eh_role label', async () => {
+    // An untagged feeder the PoC rule selects gets a line; a link only labelled grid_import does not.
+    hub.links = ['poc_feed']
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([
+      { name: 'poc_feed', eh_role: '', p_nom: 30 }, { name: 'old_tag', eh_role: 'grid_import', p_nom: 9 }] as never)
+    try {
+      mount()
+      await waitFor(() => expect(screen.getAllByTestId('connection-limit-connection_limit')).toHaveLength(1))
+      expect(screen.getByTestId('connection-limit-connection_limit').textContent).toMatch(/30/)
+    } finally { hub.links = ['grid_import', 'h2_import'] }
+  })
+
+  it("says the server's reason when the network fixes no limit", async () => {
+    hub.refusal = 'The connection limit is 0 MW: set one or choose another site type.'
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'grid_import', eh_role: 'grid_import', p_nom: 0 }] as never)
+    try {
+      mount()
+      expect((await screen.findByTestId('connection-limit-refusal')).textContent).toBe(hub.refusal)
+    } finally { hub.refusal = null }
+  })
+
+  it('shows one line per import link, named and in its own unit', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([
+      { name: 'grid_import', eh_role: 'grid_import', p_nom: 40 }, { name: 'h2_import', eh_role: 'grid_import', p_nom: 2 }] as never)
+    mount()
+    await waitFor(() => expect(screen.getAllByTestId('connection-limit-connection_limit')).toHaveLength(2))
+    const [grid, h2] = screen.getAllByTestId('connection-limit-connection_limit')
+    expect(grid.textContent).toMatch(/Connection limit · Grid import: 40 MW/)
+    await waitFor(() => expect(h2.textContent).toMatch(/Connection limit · H2 import: 2 t\/h/))
+    expect(screen.getByLabelText('Connection limit (t/h), H2 import')).toBeTruthy()
+  })
+
+  it('on a staged site shows the limit with its reason and no editor', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
+      row('energization_peak:2027', { unit: 'MW', limit: 25 }), row('energization_peak:2030', { unit: 'MW', limit: 35 })] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'grid_import', eh_role: 'grid_import', p_nom: 35 }] as never)
+    hub.template = { energization: [{ year: 2027, available_import_mw: 25 }, { year: 2030, available_import_mw: 35 }] }
+    mount()
+    expect((await screen.findByTestId('connection-limit-staged')).textContent).toMatch(/Set per period: see Energization/)
+    expect(screen.queryByTestId('limit-editor-connection_limit')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save connection limit' })).toBeNull()
+  })
+
+  it('keeps the rejected entry and opens the refusal with the label', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'grid_import', eh_role: 'grid_import', p_nom: 40 }] as never)
+    vi.mocked(networkApi.updateLink).mockClear().mockRejectedValue(new Error('refused by the server'))
+    mount()
+    const input = await screen.findByLabelText('Connection limit (MW)')
+    fireEvent.change(input, { target: { value: '55' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save connection limit' }))
+    expect((await screen.findByTestId('limit-error-connection_limit')).textContent).toMatch(/^Connection limit: /)
+    expect((screen.getByLabelText('Connection limit (MW)') as HTMLInputElement).value).toBe('55')
   })
 })

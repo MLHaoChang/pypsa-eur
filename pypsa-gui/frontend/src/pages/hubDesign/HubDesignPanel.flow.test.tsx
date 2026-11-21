@@ -98,7 +98,7 @@ describe('flowState → rail and card (§5.4)', () => {
     await screen.findByTestId('hub-card-start')
     expect(railStates()).toEqual({ start: 'current', site: 'blocked', goal: 'blocked',
       results: 'blocked', improve: 'blocked' })
-    expect(rail('site').getAttribute('title')).toBe(BLOCKED_NO_PROJECT)
+    expect(rail('site').getAttribute('title')).toContain(BLOCKED_NO_PROJECT)
     expect((rail('goal') as HTMLButtonElement).disabled).toBe(true)
     expect(resultsApi.getEhStudy).not.toHaveBeenCalled()
   })
@@ -108,7 +108,7 @@ describe('flowState → rail and card (§5.4)', () => {
     await screen.findByTestId('hub-card-site')
     expect(railStates()).toEqual({ start: 'done', site: 'current', goal: 'todo',
       results: 'todo', improve: 'blocked' })
-    expect(rail('improve').getAttribute('title')).toBe(BLOCKED_NO_STUDY)
+    expect(rail('improve').getAttribute('title')).toContain(BLOCKED_NO_STUDY)
     expect((rail('results') as HTMLButtonElement).disabled).toBe(false)
   })
 

@@ -1,6 +1,6 @@
 # A project's own workbook leaves out columns it wrote, and the reasons use engine ids
 
-Status: needs-triage
+Status: done (#1855)
 Blocked by: 02 (#1798)
 
 See `../spec.md`. Found while taking the S3 preview shots from the real app.

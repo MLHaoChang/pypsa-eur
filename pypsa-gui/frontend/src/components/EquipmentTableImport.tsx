@@ -186,7 +186,7 @@ export default function EquipmentTableImport({ componentClass = '', assetsLabel 
               <option value="">Choose an upload…</option>
               {uploads.map(u => <option key={u.file_id} value={u.file_id}>{u.filename}</option>)}
             </select>}
-            <label className="cursor-pointer text-accent hover:underline">
+            <label className="cursor-pointer text-link hover:underline">
               Upload a file…
               <input type="file" accept={commercial ? '.pdf' : '.csv,.xlsx,.xlsm,.pdf'} className="sr-only" data-testid="table-import-file"
                 disabled={busy} onChange={e => { void addUpload(e.target.files?.[0]); e.target.value = '' }} />

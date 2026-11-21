@@ -251,7 +251,7 @@ function UploadReceipt({ receipt, onDismiss, onTemplate, editorFor }: {
       {refusal && (
         <p className="text-red-600" data-testid="receipt-refusal">
           {refusal}{' '}
-          <button type="button" className="text-accent hover:underline" onClick={onTemplate}>
+          <button type="button" className="text-link hover:underline" onClick={onTemplate}>
             Download the template
           </button>{' '}for the expected columns.
         </p>
@@ -264,7 +264,7 @@ function UploadReceipt({ receipt, onDismiss, onTemplate, editorFor }: {
             {m.new
               ? <>{top} {m.old ? `${fmt(m.old.peak, 3)} → ` : ''}{fmt(m.new.peak, 3)}{unit}, mean {m.old ? `${fmt(m.old.mean, 3)} → ` : ''}{fmt(m.new.mean, 3)}{unit}</>
               : 'updated'}
-            {open && <>{' '}<button type="button" className="text-accent hover:underline" onClick={open}>Open its editor ›</button></>}
+            {open && <>{' '}<button type="button" className="text-link hover:underline" onClick={open}>Open its editor ›</button></>}
           </p>
         )
       })}
@@ -579,7 +579,7 @@ function AggregateChart({ component, attribute, names, unit, label, scaleByName 
       <div className="flex flex-col items-center justify-center h-full gap-2 text-muted">
         <AlertCircle size={20} className="text-danger" />
         <p className="text-xs text-danger">Failed to load profiles — backend may be busy</p>
-        <button onClick={() => refetch()} className="text-[11px] text-accent hover:underline">Retry</button>
+        <button onClick={() => refetch()} className="text-[11px] text-link hover:underline">Retry</button>
       </div>
     )
   }
@@ -920,13 +920,13 @@ function GenItem({ gen, meta, readiness, onGenerate, onTune, generating, hasActi
           {onGenerate && (
           <button type="button" data-testid={`generate-${gen.name}`} disabled={generating}
             onClick={e => { e.stopPropagation(); onGenerate() }}
-            className="text-[10px] text-accent hover:underline disabled:opacity-50"
+            className="text-[10px] text-link hover:underline disabled:opacity-50"
             title="Generate this generator's profile from the weather bar's source and year">
             {generating ? 'Generating…' : readiness?.profile === 'generated' ? 'Regenerate' : 'Generate'}
           </button>)}
           {onTune && (
             <button type="button" data-testid={`tune-${gen.name}`} onClick={e => { e.stopPropagation(); onTune() }}
-              className="text-[10px] text-accent hover:underline"
+              className="text-[10px] text-link hover:underline"
               title="Change this technology's settings and compare the result before applying">
               Tune…
             </button>
@@ -936,7 +936,7 @@ function GenItem({ gen, meta, readiness, onGenerate, onTune, generating, hasActi
       {uploadError && (
         <p className="px-3 py-1 text-[11px] text-red-600 border-b border-border/40" data-testid={`row-upload-error-${gen.name}`}>
           {uploadError}{' '}
-          <button type="button" className="text-accent hover:underline" onClick={onDownload}>
+          <button type="button" className="text-link hover:underline" onClick={onDownload}>
             Download the template (the model&apos;s hours, a column named {gen.name}) ›
           </button>
         </p>
@@ -1794,7 +1794,7 @@ export default function TimeSeriesManager() {
         {activeTab === 'renewable' && uiMode === 'expert' && (
           <button type="button" data-testid="ts-open-profile-studio"
             onClick={openProfileStudio}
-            className="ml-auto self-center px-3 text-[11px] text-accent hover:underline">
+            className="ml-auto self-center px-3 text-[11px] text-link hover:underline">
             Generate with Profile Studio ›
           </button>
         )}
@@ -1920,7 +1920,7 @@ export default function TimeSeriesManager() {
               <div className="flex items-center gap-1 mt-1.5">
                 <button
                   onClick={selectAllVisible}
-                  className="text-[10px] text-accent hover:underline"
+                  className="text-[10px] text-link hover:underline"
                   title="Select every item in this view"
                 >Select all</button>
                 <span className="text-[10px] text-muted">·</span>

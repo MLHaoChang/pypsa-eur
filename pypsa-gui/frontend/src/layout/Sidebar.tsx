@@ -42,6 +42,7 @@ import { STEPS, stepsForKind, type Step, type StepId } from './sidebar/steps'
 import { useOpenProjectKind, useOpenProjectKindPending } from '../hooks/useOpenProjectKind'
 import { STUDY_KIND } from '../utils/projectActions'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
+import { BrowserNotifyPref } from '../components/runStatus/NotifyOptIn'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const SIDEBAR_EXPANDED_W = 240
@@ -1253,6 +1254,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
           <span className="capitalize">{density === 'comfortable' ? 'Comfy' : 'Compact'}</span>
         </button>
       </div>
+      <BrowserNotifyPref />
     </div>
   )
 }

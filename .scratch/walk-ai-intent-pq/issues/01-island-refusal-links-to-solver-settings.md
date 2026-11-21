@@ -3,7 +3,8 @@
 
 # 01 — the intent comparison's island-limits refusal links to the setting
 
-Status: ready-for-agent
+Status: done (#1756)
+Landed in #1756.
 Type: task
 Gated: no (UI)
 

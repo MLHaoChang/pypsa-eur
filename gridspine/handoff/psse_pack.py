@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from gridspine.handoff.contingencies import write_con, write_mon, write_sub
+from gridspine.handoff.contingencies import conmap_path, write_con, write_mon, write_sub
 from gridspine.handoff.dyr_writer import (
     PIN_NOTE,
     PocBranch,
@@ -275,7 +275,13 @@ def write_psse_pack(
     write_sub(net, out / names["sub"])
     write_mon(out / names["mon"], *MON_BAND_PU)
 
-    files = [*names.values(), "README.md", "manifest.json"]
+    conmap_name = conmap_path(names["con"]).name if len(cs) > len(con_skipped) else None
+    files = [
+        *names.values(),
+        *([conmap_name] if conmap_name else []),
+        "README.md",
+        "manifest.json",
+    ]
     scripts, outputs, battery_notes = {}, {}, []
     if plant is not None:
         if cases is None:
@@ -330,6 +336,7 @@ def write_psse_pack(
         "contingencies": {
             "written": int(len(cs)) - len(con_skipped),
             "not_written": list(con_skipped),
+            "label_map": conmap_name,
         },
         "scripts_not_written": None if plant is not None else _SCRIPTS_NEED_PLANT,
         "plant_controller_not_written": None
@@ -354,6 +361,12 @@ def _readme(m) -> str:
         mark = m["not_for_submission"]
         lines += [f"**{mark[:1].upper()}{mark[1:]}.**", ""]
     lines += ["## Files", "", *(f"- `{f}`" for f in m["files"]), ""]
+    if m["contingencies"]["label_map"]:
+        lines += [
+            f"The contingencies in the .con are labelled C0001, C0002 and so on. "
+            f"`{m['contingencies']['label_map']}` turns each label back into its contingency id.",
+            "",
+        ]
     if "model_set" in m:
         ms = m["model_set"]
         lines += [
