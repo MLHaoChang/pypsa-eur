@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The grid-readiness scorecard and the asset import's preview and receipt name assets in words and curly quotes ("After UPS “UPS battery”", "No generator named “genset_9”", "Generator “genset_1”: Capacity 10 → 12 MW") instead of raw ids, Python quotes and an em dash.

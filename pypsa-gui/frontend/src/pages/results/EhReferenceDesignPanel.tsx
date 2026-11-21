@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { plainReason } from '../hubDesign/plainWords'
 import { SizedDesignTable } from './SizedDesignTable'
 import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -911,7 +912,7 @@ export function ReadinessSummary({ r }: { r: EhReadiness }) {
         </ul>
       )}
       {r.warnings.map((w, i) => (
-        <span key={i} className="text-warn">{w}</span>
+        <span key={i} className="text-warn">{plainReason(w)}</span>
       ))}
     </div>
   )
@@ -1267,7 +1268,7 @@ export function EhReferenceDesignPanel() {
                 <span className="font-mono">{template.recommended_archetype}</span>
               </span>
               {(template.study_notes ?? []).map((note, i) => (
-                <span key={i} className="text-muted">• {note}</span>
+                <span key={i} className="text-muted">• {plainReason(note)}</span>
               ))}
               {template.provenance && (
                 <span className="text-muted italic">{template.provenance}</span>
@@ -1623,7 +1624,7 @@ export function EhReferenceDesignPanel() {
                   className="flex flex-col gap-0.5 text-[10px] text-warn"
                   data-testid="eh-report-notes"
                 >
-                  {report.notes!.map((note, i) => <li key={i}>{note}</li>)}
+                  {report.notes!.map((note, i) => <li key={i}>{plainReason(note)}</li>)}
                 </ul>
               )}
 

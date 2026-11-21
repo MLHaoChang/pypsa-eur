@@ -2,6 +2,7 @@
 // (IPP ticket 07). A stored ref the Library no longer lists (an older version) stays
 // shown as such — never as "none" (WP3.7c review #3).
 import type { LibraryRef } from '../../../api/types'
+import { librarySeriesLabel } from '../../../plainNames'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 
@@ -16,8 +17,8 @@ export function SeriesSelect({ label, value, series, onChange }: {
             onChange={e => onChange(e.target.value === '' ? null
               : series.find(r => seriesKey(r) === e.target.value) ?? value)}>
       <option value="">none</option>
-      {series.map(r => <option key={seriesKey(r)} value={seriesKey(r)}>{r.id} v{r.version}</option>)}
-      {!listed && <option value={seriesKey(value!)}>{value!.id} v{value!.version} (not listed)</option>}
+      {series.map(r => <option key={seriesKey(r)} value={seriesKey(r)}>{librarySeriesLabel(r.id, r.version)}</option>)}
+      {!listed && <option value={seriesKey(value!)}>{librarySeriesLabel(value!.id, value!.version)} (not listed)</option>}
     </select>
   )
 }

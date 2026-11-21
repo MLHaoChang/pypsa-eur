@@ -452,7 +452,7 @@ def _exact_frame_json(frame):
         sort_keys=True, allow_nan=False)
 
 
-def solve_freshness(ctx=None):
+def solve_freshness(ctx=None, after_pf=False):
     """LC-12: whether results describe the current inputs, for result reads.
 
     `inputs_changed_since_solve` is the optimisation's verdict on the
@@ -461,7 +461,8 @@ def solve_freshness(ctx=None):
     cannot be read: fail closed), False when fresh, None when no solve recorded
     its inputs: no claim either way. `results_current` is Check answers' own
     guard (`calculations.solve_matches_inputs`), so every read agrees on it; a
-    stale verdict is never current."""
+    stale verdict is never current. `after_pf` (study harness 15) also accepts
+    the solve's own AC power flow as current."""
     from harness.calculations import solve_matches_inputs
     from services.provenance_graph import runs
     from services.pypsa_service import PyPSAService
@@ -471,7 +472,7 @@ def solve_freshness(ctx=None):
         return {"inputs_changed_since_solve": None, "results_current": False}
     changed = runs.results_verdicts(read)["optimisation"].state != "fresh"
     return {"inputs_changed_since_solve": changed,
-            "results_current": not changed and solve_matches_inputs(ctx)}
+            "results_current": not changed and solve_matches_inputs(ctx, after_pf=after_pf)}
 
 
 _EXTRA_PORT = re.compile(r"(bus|efficiency)(\d+)")
@@ -498,6 +499,17 @@ def _unused_extra_ports(component):
     return skip
 
 
+def _canonical_branch_carriers(n):
+    """PyPSA also gives a Line or Transformer without a carrier its sub-network's
+    ("AC") while solving. That assignment is no edit: without this a solve on a
+    project of Lines moves its own input identity (study harness 15). Only an
+    empty Line/Transformer carrier is read as "AC", on the fingerprint's private
+    copy `n`; every other carrier and component hashes as before."""
+    for branches in (n.lines, n.transformers):
+        if "carrier" in branches.columns:
+            branches.loc[branches["carrier"] == "", "carrier"] = "AC"
+
+
 def _network_input_fingerprint(ctx, *, exact=False):
     """Hash model inputs, excluding solver outputs so a solve can be reused."""
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
@@ -510,6 +522,7 @@ def _network_input_fingerprint(ctx, *, exact=False):
     n.determine_network_topology()
     for subnet in n.sub_networks.obj:
         subnet.find_bus_controls()
+    _canonical_branch_carriers(n)
     def encode(frame):
         return _exact_frame_json(frame) if exact else frame.to_json(date_format="iso")
 
@@ -622,26 +635,35 @@ def _network_input_fingerprint(ctx, *, exact=False):
 _SWEEP_LOCK = threading.Lock()
 
 
-def _refuse_cost_the_parts_own(n, change) -> None:
-    """TCU 09: a case that sets a cost a target's investment parts own would build a child identical to the
-    baseline, since the bulk write re-derives it; refused before any case exists, in the single edit's words."""
+def cost_the_parts_own_problem(n, change) -> str | None:
+    """Why a change sets a cost a target's investment parts own (the single edit's rule and words,
+    `network_crud.check_parts_own_costs`), naming the target; None when it does not. The sweep (TCU 09) and the
+    experiment preflight copy (TCU 11) share it, each refusing with its own kind."""
     from services.asset_schema.derive import split_parts
     from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
     from services.network_crud import check_parts_own_costs
 
     if change.component_class not in COMPOSITE:
-        return
+        return None
     frame = getattr(n, CLASS_ATTR[change.component_class])
     for name in change.names:
         if name not in frame.index:
-            continue  # the bulk write refuses an unknown name
+            continue  # the caller's own write refuses an unknown name
         before = frame.loc[name].to_dict()
         _, parts = split_parts(change.component_class, before)
         try:
             check_parts_own_costs(change.component_class, parts, before=before,
                                   submitted={change.attribute: change.value})
         except HTTPException as exc:
-            _refuse("invalid_sensitivity_cases", f"{change.component_class} {name}: {exc.detail}")
+            return f"{change.component_class} {name}: {exc.detail}"
+    return None
+
+
+def _refuse_cost_the_parts_own(n, change) -> None:
+    """TCU 09: a case that sets a cost a target's investment parts own would build a child identical to the
+    baseline, since the bulk write re-derives it; refused before any case exists, in the single edit's words."""
+    if problem := cost_the_parts_own_problem(n, change):
+        _refuse("invalid_sensitivity_cases", problem)
 
 
 def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
@@ -880,6 +902,10 @@ def hold_solve_inputs(network, lock):
 
 def _record_solve_inputs(network, config):
     """Called under the existing solve lock, after modelling inputs restore."""
+    # When this solve ran (UTC), saved with the project: the Results source-run line names it
+    # (control-strategy walkthrough 06). Stamped first, so a fingerprint failure after it (the caller then
+    # drops both fingerprints) never leaves the previous solve's time on this new dispatch.
+    network.meta["assistant_solve_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     # A queued solve of another project runs in `solving_context(ctx)`: its
     # own uploaded series (user_ts) belong in the fingerprint, as every later
     # read hydrates them from disk (LC-18).

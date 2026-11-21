@@ -76,6 +76,7 @@ describe('frequency cuts: the preview', () => {
   it('states the limit', async () => {
     renderSection()
     expect((await screen.findByTestId('cuts-limit')).textContent).toContain('get no cut')
+    expect(screen.getByTestId('cuts-limit').textContent).toContain('(E4, UPS-bridged)')
   })
 
   it('names the scenarios and columns in plain words', async () => {

@@ -224,23 +224,6 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
-        'id': 'business_case_table_options',
-        'title': 'Business case line options',
-        'disposition': 'unbuilt',
-        'reason': 'The units each business-case line may take and every check on its cells are not available from chat yet. Use the line table in the Business case view on the Results page.',
-        'page': 'Results (Investment tab)',
-        'panel': None,
-        'keywords': frozenset({
-            'unit',
-            'units',
-            'options',
-            'checks',
-        }),
-        'routes': frozenset({
-            ('GET', '/api/results/business_case/options'),
-        }),
-    },
-    {
         'id': 'intent_comparison',
         'title': 'Design intent comparison',
         'disposition': 'unbuilt',
@@ -330,9 +313,9 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
     },
     {
         'id': 'site_scene',
-        'title': 'Site 3D: legacy Site adoption and results overlay',
+        'title': 'Site 3D: legacy Site adoption',
         'disposition': 'unbuilt',
-        'reason': 'Chat reads and changes 3D site buildings (site_scene_read, site_scene_prepare, site_scene_apply). Adopting a Site saved before Site 3D, and the 3D results overlay, stay in Site 3D for now.',
+        'reason': 'Chat reads and changes 3D site buildings and reads the 3D results. Adopting a Site saved before Site 3D stays in Site 3D for now.',
         'page': 'Site 3D',
         'panel': 'map',
         'keywords': frozenset({
@@ -340,7 +323,6 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
         'routes': frozenset({
             ('POST', '/api/projects/{name}/sites/{site_id}/scene/adopt'),
-            ('GET', '/api/projects/{name}/sites/{site_id}/scene/results'),
         }),
     },
     {
@@ -609,11 +591,6 @@ def _asks_about_the_strip(words: set[str]) -> bool:
     return bool(words & _STRIP_NAMES and words & _STRIP_ASKS and not words & _STRIP_ELSEWHERE)
 
 
-# The business-case line table's options: "business case" plus a units word, never
-# "business as usual" (BAU), which is a scenario (GK B (54) D3).
-_BUSINESS_CASE_NOUN = frozenset({'case', 'cases'})
-_BUSINESS_AS_USUAL = frozenset({'usual', 'bau'})
-
 
 def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
     """Keyword hits, ranked by count then declaration order; return public copies.
@@ -632,10 +609,6 @@ def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
             continue
         if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
             continue
-        if (entry['id'] == 'business_case_table_options'
-                and not ('business' in words and words & _BUSINESS_CASE_NOUN
-                         and not words & _BUSINESS_AS_USUAL)):
-            continue  # "units" alone is any unit question; this is the line table's only
         hits = len(words & entry['keywords'])
         if hits:
             ranked.append((-hits, index, entry))

@@ -21,6 +21,8 @@ import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableT
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
 import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
 import NotSolved from './NotSolved'
+import { retiredSize } from './retired'
+import { totalCostWords } from './headlineWords'
 
 // ── Capacity Expansion tab ────────────────────────────────────────────────────
 // Cost summary (KPIs + CAPEX-by-class chart) sits at the top. Below it, one
@@ -501,6 +503,14 @@ export default function CapacityExpansion() {
   // — keeps the topological order of references clean.)
 
   // ── Retired assets ─────────────────────────────────────────────────────
+  // A retirement needs a solve this page can read (template-e2e 14, GK B2 (3) d): before one
+  // the network serves p_nom_opt = 0, which is no retirement. The same status query (and key)
+  // the Results page polls, so this reads its cache.
+  const { data: solveStatus } = useQuery({
+    queryKey: nk(currentProject, 'simulationStatus'), queryFn: simulationApi.getStatus,
+  })
+  const solved = solveStatus != null && !solveStatus.running && solveStatus.objective != null
+    && solveStatus.dispatch !== 'none'
   // Mirror of the sized*-arrays but filtering for delta < 0 — i.e. capacity
   // the optimiser chose to RETIRE this run. A retirement is only possible
   // when (a) the asset is extendable and (b) p_nom_min is below p_nom. PyPSA
@@ -515,10 +525,8 @@ export default function CapacityExpansion() {
       if (attr<boolean>(g, 'p_nom_extendable') !== true) return []
       const opt = attr<number>(g, 'p_nom_opt')
       const ini = g.p_nom ?? 0
-      if (opt == null || !Number.isFinite(opt)) return []
-      const delta = opt - ini
-      if (delta >= -1e-6) return []
-      const retired = -delta
+      const retired = retiredSize(solved, ini, opt, attr<number>(g, 'p_nom_min'))
+      if (retired == null || opt == null) return []
       const cc = costPerUnit('generators', g.name, g.capital_cost ?? 0)
       return [{
         name: g.name, carrier: g.carrier ?? '',
@@ -530,17 +538,15 @@ export default function CapacityExpansion() {
     })
     return out.sort((a, b) => b.savings - a.savings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [generators, assetCosts, costMode])
+  }, [generators, assetCosts, costMode, solved])
 
   const retiredLines = useMemo<RetiredLineRow[]>(() => {
     const out = (lines as LineT[]).flatMap<RetiredLineRow>(l => {
       if (attr<boolean>(l, 's_nom_extendable') !== true) return []
       const opt = attr<number>(l, 's_nom_opt')
       const ini = l.s_nom ?? 0
-      if (opt == null || !Number.isFinite(opt)) return []
-      const delta = opt - ini
-      if (delta >= -1e-6) return []
-      const retired = -delta
+      const retired = retiredSize(solved, ini, opt, attr<number>(l, 's_nom_min'))
+      if (retired == null || opt == null) return []
       const cc = costPerUnit('lines', l.name, l.capital_cost ?? 0)
       return [{
         name: l.name, carrier: l.carrier ?? '',
@@ -553,17 +559,15 @@ export default function CapacityExpansion() {
     })
     return out.sort((a, b) => b.savings - a.savings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, assetCosts, costMode])
+  }, [lines, assetCosts, costMode, solved])
 
   const retiredTransformers = useMemo<RetiredRowBase[]>(() => {
     const out = (transformers as Transformer[]).flatMap<RetiredRowBase>(t => {
       if (attr<boolean>(t, 's_nom_extendable') !== true) return []
       const opt = attr<number>(t, 's_nom_opt')
       const ini = t.s_nom ?? 0
-      if (opt == null || !Number.isFinite(opt)) return []
-      const delta = opt - ini
-      if (delta >= -1e-6) return []
-      const retired = -delta
+      const retired = retiredSize(solved, ini, opt, attr<number>(t, 's_nom_min'))
+      if (retired == null || opt == null) return []
       const cc = costPerUnit('transformers', t.name, t.capital_cost ?? 0)
       return [{
         name: t.name,
@@ -575,17 +579,15 @@ export default function CapacityExpansion() {
     })
     return out.sort((a, b) => b.savings - a.savings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transformers, assetCosts, costMode])
+  }, [transformers, assetCosts, costMode, solved])
 
   const retiredStorage = useMemo<RetiredStorageRow[]>(() => {
     const out = (storageUnits as StorageUnit[]).flatMap<RetiredStorageRow>(s => {
       if (attr<boolean>(s, 'p_nom_extendable') !== true) return []
       const opt = attr<number>(s, 'p_nom_opt')
       const ini = s.p_nom ?? 0
-      if (opt == null || !Number.isFinite(opt)) return []
-      const delta = opt - ini
-      if (delta >= -1e-6) return []
-      const retired = -delta
+      const retired = retiredSize(solved, ini, opt, attr<number>(s, 'p_nom_min'))
+      if (retired == null || opt == null) return []
       const hours = s.max_hours ?? 0
       const cc = costPerUnit('storage_units', s.name, s.capital_cost ?? 0)
       return [{
@@ -600,17 +602,15 @@ export default function CapacityExpansion() {
     })
     return out.sort((a, b) => b.savings - a.savings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageUnits, assetCosts, costMode])
+  }, [storageUnits, assetCosts, costMode, solved])
 
   const retiredStores = useMemo<RetiredRowBase[]>(() => {
     const out = (stores as Store[]).flatMap<RetiredRowBase>(s => {
       if (attr<boolean>(s, 'e_nom_extendable') !== true) return []
       const opt = attr<number>(s, 'e_nom_opt')
       const ini = (s as unknown as { e_nom?: number }).e_nom ?? 0
-      if (opt == null || !Number.isFinite(opt)) return []
-      const delta = opt - ini
-      if (delta >= -1e-6) return []
-      const retired = -delta
+      const retired = retiredSize(solved, ini, opt, attr<number>(s, 'e_nom_min'))
+      if (retired == null || opt == null) return []
       const cc = costPerUnit('stores', s.name, s.capital_cost ?? 0)
       return [{
         name: s.name, carrier: s.carrier ?? '',
@@ -622,17 +622,15 @@ export default function CapacityExpansion() {
     })
     return out.sort((a, b) => b.savings - a.savings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stores, assetCosts, costMode])
+  }, [stores, assetCosts, costMode, solved])
 
   const retiredLinks = useMemo<RetiredRowBase[]>(() => {
     const out = (links as LinkT[]).flatMap<RetiredRowBase>(l => {
       if (attr<boolean>(l, 'p_nom_extendable') !== true) return []
       const opt = attr<number>(l, 'p_nom_opt')
       const ini = l.p_nom ?? 0
-      if (opt == null || !Number.isFinite(opt)) return []
-      const delta = opt - ini
-      if (delta >= -1e-6) return []
-      const retired = -delta
+      const retired = retiredSize(solved, ini, opt, attr<number>(l, 'p_nom_min'))
+      if (retired == null || opt == null) return []
       const cc = costPerUnit('links', l.name, l.capital_cost ?? 0)
       return [{
         name: l.name, carrier: l.carrier ?? '',
@@ -644,7 +642,7 @@ export default function CapacityExpansion() {
     })
     return out.sort((a, b) => b.savings - a.savings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [links, assetCosts, costMode])
+  }, [links, assetCosts, costMode, solved])
 
   // ── Carrier filter ───────────────────────────────────────────────────
   // Union of carriers across all sized + retired rows — drives the filter
@@ -902,6 +900,9 @@ export default function CapacityExpansion() {
   // of confident nonsense, so the null is carried through explicitly.
   const displayTotalCost: number | null =
     displayCapex == null ? null : displayCapex + displayOpex
+  // The charts' € ticks put the sign before the €, as the tiles and the total do: one sign
+  // position in the view (UX 2 (5) on #1783), never "€-5.0 M".
+  const fmtAxisCurrency = (v: number) => (v < 0 ? `-${fmtCurrency(-v, 1)}` : fmtCurrency(v, 1))
   const fmtCostOrUnavailable = (v: number | null) =>
     v == null ? COST_UNAVAILABLE : fmtCurrency(v)
   const scopeLabel = periodEntry ? `period ${filter.selectedPeriod}` : 'horizon (all periods)'
@@ -1019,7 +1020,8 @@ export default function CapacityExpansion() {
               : 'LP variable OPEX over the horizon: Σ marginal_cost × dispatch (PyPSA n.statistics). Does NOT include storage charge at bus price — see Storage charge cost below. Dispatch "OPEX (total)" = this + storage charge + curtailment + lost-load.'} />
           <KPI
             label="Total system cost"
-            value={fmtCostOrUnavailable(displayTotalCost)}
+            value={displayTotalCost == null ? COST_UNAVAILABLE : totalCostWords(displayTotalCost).value}
+            sub={displayTotalCost == null ? undefined : totalCostWords(displayTotalCost).note}
             hint={costMode === 'lifetime'
               ? 'PV of upfront investment + LP OPEX. Mixed-horizon by design — toggle to Annualised for an apples-to-apples comparison.'
               : periodEntry
@@ -1061,7 +1063,7 @@ export default function CapacityExpansion() {
       {costWaterfall.length > 1 && (
         <ChartFrame
           title="System cost build-up"
-          figure={`${fmtCurrency(costWaterfall[costWaterfall.length - 1]?.abs ?? 0)} per year`}
+          figure={`${totalCostWords(costWaterfall[costWaterfall.length - 1]?.abs ?? 0).value} per year`}
           hint="horizon (all periods): how the total system cost builds up; ignores the period selector"
           right={
             <ChartActions
@@ -1100,7 +1102,7 @@ export default function CapacityExpansion() {
               <BarChart data={costWaterfall} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                <YAxis {...CHART_AXIS} width={72} tickFormatter={fmtAxisCurrency}
                   label={yAxisLabel('€ per year')} />
                 <RTooltip
                   cursor={{ fill: 'rgba(0,0,0,0.04)' }}
@@ -1171,7 +1173,7 @@ export default function CapacityExpansion() {
               <BarChart data={capexByClass} margin={{ top: 18, right: 16, left: 8, bottom: 0 }} maxBarSize={72}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                <YAxis {...CHART_AXIS} width={72} tickFormatter={fmtAxisCurrency}
                   label={yAxisLabel(costMode === 'lifetime' ? '€ (present value)' : '€ per year')} />
                 <RTooltip {...CHART_TOOLTIP} formatter={(v: number) => fmtCurrency(v)} />
                 <Bar dataKey="capex" radius={[4, 4, 0, 0]}>
@@ -1216,7 +1218,7 @@ export default function CapacityExpansion() {
           >
             <p className="text-[11px] text-muted mb-3">
               New capacity and incremental investment the optimiser placed in
-              each investment period (asset <code>build_year</code>). Capacity
+              each investment period (the asset’s build year). Capacity
               is a nameplate sum across component classes (MW · MVA · MWh);
               the cost is {costMode === 'lifetime' ? 'present-value upfront investment' : 'per year'}.
             </p>
@@ -1229,7 +1231,7 @@ export default function CapacityExpansion() {
                     tickFormatter={(v: number) => fmtPower(v, 0)}
                     label={yAxisLabel('Capacity added')} />
                   <YAxis yAxisId="capex" orientation="right" {...CHART_AXIS}
-                    tickFormatter={(v: number) => fmtCurrency(v, 1)} />
+                    tickFormatter={fmtAxisCurrency} />
                   <RTooltip {...CHART_TOOLTIP}
                     formatter={(v: number, name: string) =>
                       name === 'Total CAPEX' ? fmtCurrency(v) : fmtPower(v)} />
@@ -1279,7 +1281,7 @@ export default function CapacityExpansion() {
                 <BarChart data={perPeriod} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="period" {...CHART_AXIS} />
-                  <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
+                  <YAxis {...CHART_AXIS} width={72} tickFormatter={fmtAxisCurrency}
                     label={yAxisLabel(costMode === 'lifetime' ? '€ (present value)' : '€ per year')} />
                   <RTooltip {...CHART_TOOLTIP} formatter={(v: number) => fmtCurrency(v)} />
                   <Legend {...CHART_LEGEND} />

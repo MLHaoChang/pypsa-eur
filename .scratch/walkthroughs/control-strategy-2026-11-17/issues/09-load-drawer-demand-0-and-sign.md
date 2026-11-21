@@ -3,7 +3,7 @@
 
 # 09: Load drawer shows "Demand 0 MW" and "Sign -1" next to a 34.5 MW profile
 
-Status: ready-for-agent
+Status: done
 Impact: low
 Templates: Data Center Energy Hub (any load with a time series)
 Found by: control-strategy walkthrough, 2026-11-17 (master 9491878d). Shot: `../shots/09-load-drawer-demand-0.png`

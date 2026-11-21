@@ -1,0 +1,72 @@
+name: Guards
+
+# The small per-PR guards in one job, so a PR takes one runner slot instead of
+# three (RETRO-CI-1: the CI bottleneck is concurrent job slots). Each guard
+# keeps its exact check; every step runs even when an earlier one fails, so a
+# PR sees all findings at once.
+#
+# - Ruff: pre-commit runs ruff and ruff-format locally but nothing enforced
+#   them. Fails a PR whose new or already-clean pypsa-gui/backend Python files
+#   fail ruff at the version pinned in .pre-commit-config.yaml. Files already
+#   unformatted on master are exempt (see .github/scripts/ruff_guard.sh).
+# - Repr: user-visible text carries no Python-repr quotes
+#   (docs/agents/review-ux.md). A ratchet: fails a PR that ADDS a `!r}` line to
+#   non-test pypsa-gui/backend Python outside a logging call. Escape hatch for
+#   debug text: `# repr-ok: <reason>`. See scripts/coord/repr_guard.py.
+# - Release notes: fails a PR that edits doc/release_notes.md directly. Changes
+#   add a fragment under doc/release-notes.d/ instead; only a collate run (which
+#   deletes fragments) may touch the collated file. See
+#   doc/release-notes.d/README.md.
+
+on:
+  pull_request:
+    branches:
+    - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  guards:
+    name: Guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Install ruff at the pre-commit pin
+      run: |
+        ver=$(sed -n '/ruff-pre-commit/,/hooks:/s/^ *rev: v\(.*\)$/\1/p' .pre-commit-config.yaml)
+        pip install "ruff==$ver"
+
+    - name: Ruff guard - check new and already-clean backend files
+      run: .github/scripts/ruff_guard.sh "${{ github.event.pull_request.base.sha }}"
+
+    - name: Repr guard - fail on new !r} in added backend lines
+      if: ${{ !cancelled() }}
+      run: python scripts/coord/repr_guard.py "${{ github.event.pull_request.base.sha }}"
+
+    - name: Release notes guard - doc/release_notes.md is only changed by a collate run
+      if: ${{ !cancelled() }}
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        mb=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+        changes=$(git diff --name-status --no-renames "$mb" "$HEAD_SHA")
+        if ! grep -qP '^[AMD]\tdoc/release_notes\.md$' <<<"$changes"; then
+          echo "doc/release_notes.md unchanged."
+          exit 0
+        fi
+        if grep -qP '^D\tdoc/release-notes\.d/' <<<"$changes"; then
+          echo "doc/release_notes.md changed by a collate run (fragments deleted)."
+          exit 0
+        fi
+        echo "::error file=doc/release_notes.md::Add a fragment file under doc/release-notes.d/ instead of editing doc/release_notes.md. See doc/release-notes.d/README.md."
+        exit 1

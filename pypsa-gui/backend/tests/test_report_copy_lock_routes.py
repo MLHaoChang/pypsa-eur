@@ -13,6 +13,8 @@ import threading
 import time
 import zipfile
 
+from tests.bundle_util import refresh_manifest
+
 import pytest
 
 from services import project_registry
@@ -219,7 +221,9 @@ def _with_member(data: bytes, member: str) -> bytes:
         for item in src.namelist():
             dst.writestr(item, src.read(item))
         dst.writestr(member, b"x")
-    return out.getvalue()
+    return refresh_manifest(
+        out.getvalue()
+    )  # the edit changes members, so the manifest is rebuilt (project-io 02)
 
 
 def test_export_refuses_while_a_report_is_being_written(client, project):
@@ -281,24 +285,26 @@ def test_import_restores_the_reports_and_skips_a_bundled_lock_file(
 
 
 @pytest.mark.parametrize(
-    "member",
+    "member, kind",
     [
-        "reports/../x/meta.json",
-        "reports/.x/meta.json",
-        "reports/.x",
-        "reports/0123/meta.json",
-        f"reports/{RID_A.upper()}/meta.json",
+        # Refused earlier, by the bundle screen (project-io 01, GK B I2).
+        ("reports/../x/meta.json", "bundle_unsafe_path"),
+        ("reports/.x/meta.json", "invalid_report_id"),
+        ("reports/.x", "invalid_report_id"),
+        ("reports/0123/meta.json", "invalid_report_id"),
+        # One folder with the bundle's own report on a case-folding disk.
+        (f"reports/{RID_A.upper()}/meta.json", "bundle_name_clash"),
     ],
 )
 def test_import_refuses_a_bundle_whose_reports_name_no_report(
-    client, project, project_row, member
+    client, project, project_row, member, kind
 ):
     """The ids name lock files and directories, and the archive is untrusted
     (GK B L3)."""
     name, _pdir = project
     resp = _import(client, _with_member(_bundle(client, name), member))
     assert resp.status_code == 400, resp.text
-    assert resp.json()["detail"]["error_kind"] == "invalid_report_id"
+    assert resp.json()["detail"]["error_kind"] == kind
     assert project_row("lockme_imported") is None
 
 

@@ -32,4 +32,5 @@ Each row above is covered by a behavioural fixture written the LC-43 way (a publ
 
 - `LC-D22.rebind`: covered by `pypsa-gui/backend/tests/test_lc48c_d22_rebind_gates.py`. The switch is the real projects route (the other tab saves as `Elsewhere` with `rebind`). A write after the switch is refused `project_switched_mid_turn` and writes nothing. A delivery built across the switch is 409 `project_changed` and stores no zip. `lc43_gates.state` is unchanged on both refusals.
 - `LC-D22.viewer_role`: DROPPED by owner decision LC48C-ROLE-1 (`docs/agents/owner-decisions.md`). The manifest row is `_unavailable` and points at the decision. The role is filed as a product idea: `.scratch/project-viewer-role/issues/01-read-only-project-viewer-role.md` (needs-triage).
+- 2026-11-17 update: owner decision VIEWER-ROLE-1 built the role (project-viewer-role 01, PR 1 #1622 and PR 2a). `LC-D22.viewer_role` is `_covered` again by `tests/test_viewer_role_chat.py` (a viewer's copilot edit, undo and restore refused `project_view_only`, state unchanged); no LC-D22 variant is left pending or unavailable.
 
