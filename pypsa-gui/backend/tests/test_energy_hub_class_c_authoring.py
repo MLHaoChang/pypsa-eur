@@ -217,6 +217,10 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
     tariffs.mkdir(parents=True)
     for name in ("nl-tennet-2026-ehs.json", "nl-tennet-2026-hs.json"):
         (tariffs / name).write_text("{}")
+    # The shipped PPA contract defaults (SCU06 S2a) are probed the same way.
+    contracts = root / "services" / "library" / "common_items" / "contract"
+    contracts.mkdir(parents=True)
+    (contracts / "eu-ppa-pay-as-produced.json").write_text("{}")
     # The chat harness's Markdown (prompts, workflows, skills) is read
     # `__file__`-relative from the package too (chat harness issue 10).
     assert any("harness/prompts/base_identity.md" in m
