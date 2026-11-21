@@ -27,6 +27,7 @@ from deps import optional_user
 from models.commercial import PriceSeriesRef
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import app_secrets, library_acl, market_prices, project_write_gate
+from services.library import series_store
 
 router = APIRouter()
 project_router = APIRouter()
@@ -118,10 +119,21 @@ def _can_fetch(db: DBSession, user: User | None, project: AuthorizedProject) -> 
     except ValueError:  # not a registry project (a uuid-less legacy folder)
         pass
     try:
-        org = UUID(project.org_id) if project.org_id else library_acl.org_of(db, user)
-    except (TypeError, ValueError):
-        org = library_acl.org_of(db, user)
+        org = _project_org(db, user, project)
+    except ValueError:
+        return False
     return org is not None and library_acl.can_write(db, user, org)
+
+
+def _project_org(db: DBSession, user: User, project: AuthorizedProject) -> UUID | None:
+    """The project's org; the user's own only when the project names none. A
+    present but malformed `org_id` raises ValueError and never falls back."""
+    if not project.org_id:
+        return library_acl.org_of(db, user)
+    try:
+        return UUID(str(project.org_id))
+    except (TypeError, ValueError, AttributeError):
+        raise ValueError("malformed project org_id") from None
 
 
 @project_router.get("/{name}/market-prices")
@@ -175,14 +187,27 @@ def _library_org(db: DBSession, user: User | None, project: AuthorizedProject) -
     if user is None:
         raise HTTPException(401, "Authentication required")
     try:
-        org = UUID(project.org_id) if project.org_id else library_acl.org_of(db, user)
-    except (TypeError, ValueError):
-        org = library_acl.org_of(db, user)
+        org = _project_org(db, user, project)
+    except ValueError:
+        raise HTTPException(
+            403, "This project's organization could not be read, so nothing was added."
+        ) from None
     if org is None or not library_acl.can_write(db, user, org):
         raise HTTPException(
             403, "Not allowed to add series to this organization's Library."
         )
     return org
+
+
+def _require_project_writer(
+    db: DBSession, user: User | None, project: AuthorizedProject
+) -> None:
+    try:
+        viewer = project_write_gate.is_viewer(db, user, project.uuid)
+    except ValueError:  # not a registry project (a uuid-less legacy folder)
+        viewer = False
+    if viewer:
+        raise project_write_gate.refusal()
 
 
 @project_router.post("/{name}/market-prices/day-ahead", response_model=DayAheadOut)
@@ -200,13 +225,27 @@ def post_day_ahead(
     if lock is not None:
         _check_project_lock(db, lock, user)
     org = _library_org(db, user, project)
+    _require_project_writer(db, user, project)
     try:
         market_prices.check_request(body.zone, body.year)
         # A sync route: FastAPI runs it in the threadpool, so the fetch blocks no loop.
-        ref, fetched = market_prices.land(
-            db, org, body.zone, body.year, created_by=user.id
-        )
-        market_prices.store_zone(project.directory, body.zone)
+        series, notes, fetched = market_prices.day_ahead(body.zone, body.year)
     except market_prices.MarketPriceError as exc:
         raise _refusal(exc) from exc
+    # The fetch can take a minute: a role or lock may have changed meanwhile, so
+    # access is checked again right before each write (the fetched year stays
+    # cached either way; it is public data and carries no token).
+    org = _library_org(db, user, project)
+    ref = series_store.put_series(
+        db,
+        org,
+        market_prices.series_name(body.zone, body.year),
+        series,
+        market_prices.series_meta(body.zone, body.year, notes, fetched),
+        created_by=user.id,
+    )
+    if lock is not None:
+        _check_project_lock(db, lock, user)
+    _require_project_writer(db, user, project)
+    market_prices.store_zone(project.directory, body.zone)
     return DayAheadOut(ref=ref, zone=body.zone, year=body.year, fetched=fetched)

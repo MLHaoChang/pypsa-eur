@@ -244,3 +244,94 @@ def test_a_super_admin_sets_and_clears_the_token_and_status_says_only_set(
 
 def test_an_anonymous_caller_gets_no_status(anon_client):
     assert anon_client.get("/api/market-prices/status").status_code == 401
+
+
+# ── access re-checked after the fetch (GK B4 (2) on #1851) ─────────────────
+
+
+def _fetch_that_runs(monkeypatch, during):
+    """A replayed fetch that calls `during()` mid-request, as a role change
+    landing while ENTSO-E answers."""
+    real = M.fetch_day_ahead
+
+    def fetch(zone, year, *, token, transport=None):
+        during()
+        return real(zone, year, token=token, transport=Replay(body=_fixture()).transport)
+
+    app_secrets.set_secret(M.TOKEN_NAME, TOKEN)
+    monkeypatch.setattr(M, "fetch_day_ahead", fetch)
+
+
+def _post(R, db, seeded_identity, tmp_path):
+    return R.post_day_ahead(
+        body=R.DayAheadIn(zone="DE-LU", year=2024),
+        project=_project(tmp_path, seeded_identity["org_id"]),
+        db=db,
+        user=_user(db, seeded_identity),
+    )
+
+
+def test_library_write_access_lost_during_the_fetch_refuses_the_insert(
+    db, seeded_identity, tmp_path, monkeypatch
+):
+    import routers.market_prices as R
+    from fastapi import HTTPException
+
+    from services import library_acl
+    from services.library import series_store
+
+    puts = []
+    monkeypatch.setattr(series_store, "put_series", lambda *a, **k: puts.append(a))
+    _fetch_that_runs(
+        monkeypatch,
+        lambda: monkeypatch.setattr(library_acl, "can_write", lambda db, user, org: False),
+    )
+    with pytest.raises(HTTPException) as e:
+        _post(R, db, seeded_identity, tmp_path)
+    assert e.value.status_code == 403 and puts == []
+    assert M.chosen_zone(tmp_path) is None
+
+
+def test_becoming_a_viewer_during_the_fetch_refuses_the_zone_write(
+    db, seeded_identity, tmp_path, monkeypatch
+):
+    import routers.market_prices as R
+    from fastapi import HTTPException
+
+    from services import project_write_gate
+
+    _fetch_that_runs(
+        monkeypatch,
+        lambda: monkeypatch.setattr(
+            project_write_gate, "is_viewer", lambda db, user, uuid: True
+        ),
+    )
+    with pytest.raises(HTTPException) as e:
+        _post(R, db, seeded_identity, tmp_path)
+    assert e.value.status_code == 403
+    assert e.value.detail["error_kind"] == "project_view_only"
+    assert M.chosen_zone(tmp_path) is None
+
+
+@pytest.mark.parametrize("org_id", ["not-a-uuid", "1234", " "])
+def test_a_malformed_project_org_refuses_and_never_falls_back(
+    db, seeded_identity, tmp_path, monkeypatch, org_id
+):
+    import routers.market_prices as R
+    from fastapi import HTTPException
+
+    from routers.deps import AuthorizedProject
+
+    app_secrets.set_secret(M.TOKEN_NAME, TOKEN)
+    called = []
+    monkeypatch.setattr(M, "fetch_day_ahead", lambda *a, **k: called.append(a))
+    project = AuthorizedProject(
+        name="Demo", directory=tmp_path, uuid="not-a-uuid", org_id=org_id,
+        registry_key="k",
+    )
+    user = _user(db, seeded_identity)
+    assert R.get_project_market_prices(project=project, db=db, user=user)["can_fetch"] is False
+    with pytest.raises(HTTPException) as e:
+        R.post_day_ahead(body=R.DayAheadIn(zone="DE-LU", year=2024), project=project,
+                         db=db, user=user)
+    assert e.value.status_code == 403 and called == []
