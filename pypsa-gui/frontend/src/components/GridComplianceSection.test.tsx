@@ -433,4 +433,89 @@ describe('GridComplianceSection', () => {
     expect((await screen.findByRole('alert')).textContent).toBe(FIX.errors.project_locked.detail.message)
     expect(toast.error).not.toHaveBeenCalled()
   })
+  it('keeps both of two quick data-list edits: the fields stay off until the reread (GK B2 ask 1)', async () => {
+    const user = userEvent.setup()
+    const before = row('15')
+    const [first, second] = before.data
+    let done: () => void = () => undefined
+    api.state.mockResolvedValue(state())
+    api.setData.mockImplementationOnce((_n: string, _c: string, items: DataItem[]) => new Promise(resolve => {
+      done = () => {
+        api.state.mockResolvedValue(state(FIX.state.deliverables.map(d =>
+          d.code === '15' ? row('15', { data: items }) : row(d.code))))
+        resolve(undefined)
+      }
+    }))
+    api.setData.mockResolvedValue(undefined)
+    renderSection()
+    await openRow(user, '15')
+    const supplier = screen.getByLabelText(`Supplier of ${first.label}`) as HTMLInputElement
+    await user.clear(supplier)
+    await user.type(supplier, 'Plant OEM')
+    await user.tab()
+    await waitFor(() => expect(api.setData).toHaveBeenCalledTimes(1))
+    // the save is in flight: every field of the list is off, so no second list can be built yet
+    for (const label of [`Supplier of ${second.label}`, `Due date of ${second.label}`, `Status of ${second.label}`])
+      expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(true)
+    done()
+    const status = await waitFor(() => {
+      const el = screen.getByLabelText(`Status of ${second.label}`) as HTMLSelectElement
+      expect(el.disabled).toBe(false)
+      return el
+    })
+    await user.selectOptions(status, 'checked')
+    await waitFor(() => expect(api.setData).toHaveBeenCalledTimes(2))
+    const sent = api.setData.mock.calls[1][2] as DataItem[]
+    expect(sent[0].supplier).toBe('Plant OEM')
+    expect(sent[1].status).toBe('checked')
+  })
+
+  describe('rereads the tracker once a write settles, saved or refused (U3)', () => {
+    const outcomes = [['saved', true], ['refused', false]] as const
+
+    it.each(outcomes)('data-list save, %s', async (_, ok) => {
+      const user = userEvent.setup()
+      api.state.mockResolvedValue(state())
+      if (ok) api.setData.mockResolvedValue(undefined)
+      else api.setData.mockRejectedValue(refuse('project_locked'))
+      renderSection()
+      await openRow(user, '15')
+      const label = row('15').data[0].label
+      const reads = api.state.mock.calls.length
+      await user.selectOptions(screen.getByLabelText(`Status of ${label}`), 'checked')
+      await waitFor(() => expect(api.setData).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(api.state.mock.calls.length).toBeGreaterThan(reads))
+    })
+
+    it.each(outcomes)('TSO comment, %s', async (_, ok) => {
+      const user = userEvent.setup()
+      api.state.mockResolvedValue(state())
+      if (ok) api.addComment.mockResolvedValue(row('11').comments[0])
+      else api.addComment.mockRejectedValue(refuse('project_locked'))
+      renderSection()
+      await openRow(user, '11')
+      const reads = api.state.mock.calls.length
+      await user.type(screen.getByLabelText('TSO comment'), 'Add the PoC P–Q chart.')
+      await user.click(screen.getByRole('button', { name: 'Log comment' }))
+      await waitFor(() => expect(api.addComment).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(api.state.mock.calls.length).toBeGreaterThan(reads))
+    })
+
+    it.each(outcomes)('report pack, %s', async (_, ok) => {
+      const user = userEvent.setup()
+      api.state.mockResolvedValue(state())
+      URL.createObjectURL = vi.fn(() => 'blob:pack')
+      URL.revokeObjectURL = vi.fn()
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+      if (ok) api.pack.mockResolvedValue({ blob: new Blob(['x']), filename: 'TRGC-11-pack-v2.zip' })
+      else api.pack.mockRejectedValue(refuse('project_locked'))
+      renderSection()
+      await openRow(user, '11')
+      const reads = api.state.mock.calls.length
+      await user.click(screen.getByRole('button', { name: 'Build report pack' }))
+      await waitFor(() => expect(api.pack).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(api.state.mock.calls.length).toBeGreaterThan(reads))
+      click.mockRestore()
+    })
+  })
 })

@@ -132,8 +132,8 @@ function ChipKey() {
   return (
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1" aria-label="Chip key">
       <span>Key:</span>
-      <Tag tone="neutral">Not started</Tag><span>no work yet or collecting data</span>
-      <Tag tone="accent">Judged</Tag><span>in progress with you</span>
+      <Tag tone="neutral">Not started</Tag><span>and Data: no work yet or collecting data</span>
+      <Tag tone="accent">Judged</Tag><span>and Exported, Results in, Submitted: in progress</span>
       <Tag tone="warn">TSO comments</Tag><span>needs your answer</span>
       <Tag tone="ok">Accepted</Tag><span>done</span>
       <Tag tone="ok">Frozen</Tag><span>inputs unchanged since the freeze</span>
@@ -298,7 +298,7 @@ function Detail({ name, d, statuses, hasCampusInput }: {
           <p className="text-muted">Not in yet: {pending.map(f => f.label).join('; ')}.</p>
         )}
         {unavailable.length > 0 && (
-          <p className="text-warning">Could not be read: {unavailable.map(f => f.label).join('; ')}.</p>
+          <p className="text-warn">Could not be read: {unavailable.map(f => f.label).join('; ')}.</p>
         )}
         {d.packs.length > 0 && <p className="text-muted">Report packs built: {d.packs.length}.</p>}
       </div>
@@ -321,6 +321,10 @@ function DataList({ name, d, onError }: { name: string; d: Deliverable; onError:
   })
   const update = (i: number, patch: Partial<DataItem>) =>
     save.mutate(d.data.map((it, j) => (j === i ? { ...it, ...patch } : it)))
+  // each save sends the whole list built from the rows on screen, so the fields stay off until
+  // the reread (onSettled returns it) brings the saved list back: a second edit cannot send a
+  // list without the first
+  const locked = off || save.isPending
   return (
     <div>
       <h5 className="text-[10.5px] font-semibold text-text mb-1">Data list</h5>
@@ -334,13 +338,13 @@ function DataList({ name, d, onError }: { name: string; d: Deliverable; onError:
             {d.data.map((it, i) => (
               <tr key={`${it.item_id}-${refused}`} className="border-t border-border">
                 <td className="py-0.5 pr-2 text-text">{it.label}</td>
-                <td><input aria-label={`Supplier of ${it.label}`} className={inputCls} maxLength={80} disabled={off}
+                <td><input aria-label={`Supplier of ${it.label}`} className={inputCls} maxLength={80} disabled={locked}
                   defaultValue={it.supplier} placeholder="role, e.g. TSO"
                   onBlur={e => e.target.value !== it.supplier && update(i, { supplier: e.target.value })} /></td>
-                <td><input type="date" aria-label={`Due date of ${it.label}`} className={inputCls} disabled={off}
+                <td><input type="date" aria-label={`Due date of ${it.label}`} className={inputCls} disabled={locked}
                   defaultValue={it.due ?? ''}
                   onBlur={e => (e.target.value || null) !== it.due && update(i, { due: e.target.value || null })} /></td>
-                <td><select aria-label={`Status of ${it.label}`} className={inputCls} value={it.status} disabled={off}
+                <td><select aria-label={`Status of ${it.label}`} className={inputCls} value={it.status} disabled={locked}
                   onChange={e => update(i, { status: e.target.value as DataItem['status'] })}>
                   <option value="requested">Requested</option>
                   <option value="received">Received</option>
