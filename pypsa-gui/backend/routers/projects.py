@@ -5572,6 +5572,7 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
             d = src / dname
             if not d.is_dir():
                 continue
+            left_out = PC.skipped(dname, PC.BUNDLE)
             for root, _dirs, files in os.walk(d):
                 root_p = pathlib.Path(root)
                 for fname in files:
@@ -5579,6 +5580,10 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
                     if scene_store.is_scene_path(full.relative_to(src)):
                         continue
                     rel = full.relative_to(src)
+                    if len(rel.parts) > 1 and rel.parts[1] in left_out:
+                        # A sub-path the table leaves out of the bundle
+                        # (grid_compliance/tracker.lock).
+                        continue
                     if (dname == report_store.REPORTS_DIRNAME
                             and rel.parts[1] not in reports_held["src"]):
                         # A lock file, a report created meanwhile, or a stray
