@@ -15,6 +15,7 @@ import { nk } from '../../utils/queryKeys'
 import { EditedSinceStudyBanner } from './EditedSinceStudyBanner'
 import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, ciRange, trim } from './McPanel'
+import { signFirstEuro } from '../../utils/format'
 
 // ── The adequacy-coupled planning loop (Phase 7, plan §3 / spec §4) ──────────
 //
@@ -43,9 +44,10 @@ import { blockerMessage, ciRange, trim } from './McPanel'
  *  two different numbers on one tab. */
 export function eur(v: number): string {
   if (!isFinite(v)) return '—'
-  return v >= 1e9 ? `€${(v / 1e9).toFixed(2)}bn`
-    : v >= 1e6 ? `€${(v / 1e6).toFixed(1)}m`
-      : `€${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+  const a = Math.abs(v)
+  return a >= 1e9 ? signFirstEuro(v, `${(a / 1e9).toFixed(2)}bn`)
+    : a >= 1e6 ? signFirstEuro(v, `${(a / 1e6).toFixed(1)}m`)
+      : signFirstEuro(v, a.toLocaleString(undefined, { maximumFractionDigits: 0 }))
 }
 
 /**
