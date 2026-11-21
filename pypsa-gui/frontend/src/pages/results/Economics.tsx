@@ -1273,7 +1273,7 @@ function LcohSection() {
                hint="Cost of electrons fed into the electrolysers, priced at merit-order (curtailment-subsidy-removed) bus duals — same correction the per-asset economics use" />
         </div>
       )}
-      <div className="rounded-[10px] border border-border bg-bg overflow-hidden">
+      <div className="rounded-card border border-border bg-bg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[11.5px] min-w-[900px]">
             <thead className="bg-bg-2 border-b border-border">

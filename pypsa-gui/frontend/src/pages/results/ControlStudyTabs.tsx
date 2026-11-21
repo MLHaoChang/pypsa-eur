@@ -12,6 +12,7 @@ import { useUIStore } from '../../store/uiStore'
 import { openPanel } from './openPanel'
 import { showGridReadiness, showResultsTab } from '../../layout/flowNavigation'
 import { Btn, PageSection } from '../../components/PageKit'
+import EmptyState from '../../components/EmptyState'
 import { StatePill } from '../../components/ResultState'
 import { ScopeGate } from '../../components/flowScope/ScopeGate'
 import { useFlowScope } from '../../components/flowScope/useFlowScope'
@@ -59,9 +60,9 @@ export function IslandTab() {
   const island = useQuery({ queryKey: ISLAND_KEY(name ?? ''), queryFn: () => campusApi.island(name!), retry: false, enabled: !!name })
   const report = useQuery({ queryKey: ISLAND_REPORT_KEY(name ?? ''), queryFn: () => campusApi.islandReport(name!), retry: false, enabled: !!name })
   const campus = useQuery({ queryKey: CAMPUS_KEY(name ?? ''), queryFn: () => campusApi.state(name!), retry: false, enabled: !!name })
-  if (!name) return <div className="p-4"><Note>{NO_PROJECT}</Note></div>
+  if (!name) return <div className="p-4"><EmptyState testId="control-tab-state" title="No project open">{NO_PROJECT}</EmptyState></div>
   if (island.isError) {
-    return <div className="p-4"><Note>{isOtherKind(island.error) ? OTHER_KIND : errorText(island.error)}</Note></div>
+    return <div className="p-4">{isOtherKind(island.error) ? <EmptyState testId="control-tab-state" title="Not available for this project">{OTHER_KIND}</EmptyState> : <Note>{errorText(island.error)}</Note>}</div>
   }
   if (island.isPending || report.isPending) return <div className="p-4"><Note>Loading…</Note></div>
   // The report's `inputs` tables are the island data the project carries (a template ships it),
@@ -109,9 +110,9 @@ function NoIslandResults({ children }: { children: React.ReactNode }) {
   if (opt?.status === 'not_yet_available') {
     return (
       <div className="space-y-2" data-testid="island-tab-state">
-        <p className="text-[12px] text-muted" data-testid="island-gate-why">
-          Not yet available{opt.reason ? `: ${opt.reason}` : '.'}
-        </p>
+        <EmptyState testId="island-gate-why" title="Not yet available">
+          {opt.reason ?? 'The island checks cannot be run from here yet.'}
+        </EmptyState>
         {children}
       </div>
     )
@@ -123,9 +124,9 @@ export function GridFormingTab() {
   const name = useUIStore(s => s.currentProject)
   const gfm = useQuery({ queryKey: ['campusElectrical', 'gfmSettings', name ?? ''], queryFn: () => campusApi.gfmSettings(name!),
     retry: false, enabled: !!name })
-  if (!name) return <div className="p-4"><Note>{NO_PROJECT}</Note></div>
+  if (!name) return <div className="p-4"><EmptyState testId="control-tab-state" title="No project open">{NO_PROJECT}</EmptyState></div>
   if (gfm.isError) {
-    return <div className="p-4"><Note>{isOtherKind(gfm.error) ? OTHER_KIND : errorText(gfm.error)}</Note></div>
+    return <div className="p-4">{isOtherKind(gfm.error) ? <EmptyState testId="control-tab-state" title="Not available for this project">{OTHER_KIND}</EmptyState> : <Note>{errorText(gfm.error)}</Note>}</div>
   }
   if (gfm.isPending) return <div className="p-4"><Note>Loading…</Note></div>
   return (

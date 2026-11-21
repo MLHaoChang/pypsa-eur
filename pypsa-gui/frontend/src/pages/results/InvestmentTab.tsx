@@ -6,6 +6,7 @@
 // a zero (ADR-0001).
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import EmptyState from '../../components/EmptyState'
 import {
   commercialApi, NoCommercialConfigError, SolverInFlightError, type BillingPayload,
   type ValueFlowsPayload,
@@ -74,7 +75,7 @@ function BillSection({ billing, error }: { billing: BillingPayload | null | unde
       The bill: {loadFailure(error)}</p>
   }
   if (!billing) {
-    return <p className="text-[11px] text-muted py-2">No bill: solve with a commercial config first.</p>
+    return <EmptyState testId="ic-bill-state" title="Not run yet">Solve with a commercial config first to see the bill.</EmptyState>
   }
   const periods = Object.entries(billing.summary ?? {})
   return (
@@ -203,9 +204,8 @@ export default function InvestmentTab() {
         {section === 'participants' && (
           <div className="space-y-3">
             {flows.data?.status === 'ok' ? <ValueFlowsView payload={flows.data} /> : (
-              <p className="text-[11px] text-muted py-2" data-testid="ic-participants-state">
-                {participantsText}
-              </p>
+              <EmptyState testId="ic-participants-state"
+                title={flows.isError ? 'Not available' : flows.data == null ? 'Not run yet' : 'Not set'}>{participantsText}</EmptyState>
             )}
             <p className="text-[11px] text-muted" data-testid="ic-edit-in-economics">
               The tariff, contracts, finance inputs and participants are set in Commercial &amp; parties.{' '}
