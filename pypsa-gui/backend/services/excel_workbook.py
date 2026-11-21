@@ -197,6 +197,9 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
     filename = pathlib.PurePath(filename or "workbook.xlsx").name or "workbook.xlsx"
     digest = hashlib.sha256(data).hexdigest()
     options = {"custom_columns": custom_columns(), "columns": catalogue()}
+    # A new-project upload never touches the open network, so only the open-network
+    # import says it is unchanged.
+    unchanged = "" if new_project else " The open network is unchanged."
     with tempfile.TemporaryDirectory() as tmp:
         path = pathlib.Path(tmp) / "upload.xlsx"
         path.write_bytes(data)
@@ -209,12 +212,10 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
         except L.ImportFormatError as exc:
             # The reader names the file it opened: the user's name, not the temporary one.
             message = str(exc).replace(path.name, filename)
-            raise _unreadable(f"{message} The open network is unchanged.") from exc
+            raise _unreadable(f"{message}{unchanged}") from exc
         except Exception as exc:  # noqa: BLE001 - any reader failure is one refusal
             logger.warning("Excel workbook refused as unreadable", exc_info=True)
-            raise _unreadable(
-                "The file is not a readable Excel workbook; the open network is unchanged."
-            ) from exc
+            raise _unreadable(f"The file is not a readable Excel workbook.{unchanged}") from exc
     res.report.source_files = [filename]
     input_workbook = L.SIDECAR_SOLVER in res.sidecars
     if input_workbook and not new_project:
@@ -228,9 +229,7 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
         )
     n = res.network
     if n.buses.empty:
-        raise _unreadable(
-            "The workbook has no nodes, so there is nothing to import; the open network is unchanged."
-        )
+        raise _unreadable(f"The workbook has no nodes, so there is nothing to import.{unchanged}")
     _refuse_reserved_buses(n)
     _refuse_invalid_names(n)
     rate = workbook_rate(res.sidecars) if new_project else None

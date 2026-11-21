@@ -282,6 +282,29 @@ def test_an_unreadable_file_s_message_names_the_uploaded_file(client):
     )
 
 
+@pytest.mark.parametrize("data", [b"not a workbook", None], ids=["junk", "no-nodes"])
+def test_only_the_open_network_import_says_the_open_network_is_unchanged(
+    client, install_network, data
+):
+    import openpyxl
+
+    if data is None:
+        wb = openpyxl.Workbook()
+        wb.active.title = "Buses"
+        wb.active.append(["name", "v_nom"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        data = buf.getvalue()
+    install_network(_network(stale=False))
+    said = "open network is unchanged"
+    new = _preview(client, data)
+    assert new.status_code == 422 and _kind(new) == "import_unreadable", new.text
+    assert said not in new.json()["detail"]["message"]
+    old = client.post("/api/io/import/excel", files={"file": ("x.xlsx", data, MIME)})
+    assert old.status_code == 422, old.text
+    assert said in old.json()["detail"]["message"]
+
+
 def test_a_build_without_gridspine_answers_503(client, monkeypatch):
     import sys
 
