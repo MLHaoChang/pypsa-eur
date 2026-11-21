@@ -75,12 +75,11 @@ def catalogue() -> dict:
 
 
 # Asset-form inputs the single edit never writes as plain values, so a workbook does not either (issue 07):
-# a Link's extra ports follow the port rule (`network_crud._link_port_extras`), and a transformer's
-# winding voltages are read from its buses (`update_transformer` excludes them from the write).
+# a Link's extra port efficiencies follow the port rule (`network_crud._link_port_extras`; its port buses are
+# bus references, left out by kind), and a transformer's winding voltages are read from its buses
+# (`update_transformer` excludes them from the write).
 _NOT_WRITTEN = {
-    "Link": frozenset(
-        {"bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"}
-    ),
+    "Link": frozenset({"efficiency2", "efficiency3", "efficiency4"}),
     "Transformer": frozenset({"v_nom_0", "v_nom_1"}),
 }
 
@@ -317,6 +316,33 @@ def _new_project_sidecars(sidecars: dict) -> tuple[object, str, int]:
     return cfg, text, count
 
 
+def refuse_bad_fuel_curves(n, unchanged: str = "") -> list[str]:
+    """A generator fuel curve the single edit would refuse (`fuel_curve.guard`, homer-parity 02a) refuses the
+    import; otherwise each curve generator's costs are derived from its curve, as the single edit does. Returns
+    the create path's notice (`fuel_curve.replace_notice`) per generator whose costs the curve replaces."""
+    from services import fuel_curve
+
+    gens = n.generators
+    if gens.empty or not any(c in gens.columns for c in fuel_curve.INPUT_COLUMNS):
+        return []
+    notices = []
+    for name in gens.index:
+        row = gens.loc[name]
+        series = fuel_curve.cost_series(n, name)
+        if msg := fuel_curve.guard(row, cost_series=series):
+            raise HTTPException(
+                422,
+                {
+                    "error_kind": "invalid_edit_value",
+                    "message": f"Generators · “{name}”: {msg}.{unchanged or ' Nothing was imported.'}",
+                },
+            )
+        if notice := fuel_curve.replace_notice(row):
+            notices.append(f"Generators · “{name}”: {notice}")
+    fuel_curve.apply(n, stamp=False)
+    return notices
+
+
 def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared:
     """
     Read an uploaded workbook and run every check an import makes, writing nothing.
@@ -374,6 +400,7 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
     _refuse_reserved_buses(n)
     _refuse_invalid_names(n)
     refuse_bad_form_values(n, unchanged)
+    res.report.warnings.extend(refuse_bad_fuel_curves(n, unchanged))
     # A new project's sidecars are checked here, before any row exists (all or nothing).
     checked = _new_project_sidecars(res.sidecars) if new_project else (None, "", 0)
     rate = workbook_rate(res.sidecars) if new_project else None
