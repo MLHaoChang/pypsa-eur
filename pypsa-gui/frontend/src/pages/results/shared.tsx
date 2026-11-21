@@ -1331,7 +1331,7 @@ export const CHART_TOOLTIP = {
     borderRadius: 8,
     fontSize: 11,
     boxShadow: '0 6px 16px rgba(10,14,20,0.10), 0 2px 5px rgba(10,14,20,0.06)',
-    fontFamily: 'var(--font-family-mono)',
+    fontFamily: 'var(--font-mono)',
     padding: '6px 9px',
   } as CSSProperties,
   separator: ': ',

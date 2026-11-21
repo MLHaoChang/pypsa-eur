@@ -218,7 +218,7 @@ function CarrierBadge({ carrier, color }: { carrier: string; color: string }) {
       display: 'flex', alignItems: 'center', gap: 3,
       backgroundColor: color, color: '#fff',
       padding: '2px 7px', borderRadius: 10,
-      fontSize: 9, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)',
       border: '2px solid #fff',
       boxShadow: '0 1px 5px rgba(0,0,0,0.25)',
       whiteSpace: 'nowrap', lineHeight: 1.2, userSelect: 'none',
@@ -712,7 +712,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       </div>
 
       {/* Type label */}
-      <div style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15 }}>
+      <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15 }}>
         {(isH2 && H2_CAT_LABELS[d.category]) ?? CAT_DISPLAY_LABELS[d.category] ?? d.category}
       </div>
 
@@ -729,7 +729,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
           : undefined
         const mw = (effective != null && Number.isFinite(effective)) ? effective : d.totalMW
         return (
-          <div style={{ fontSize: 8, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>
+          <div style={{ fontSize: 9, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>
             {d.assetCount} · {mw >= 1000 ? `${(mw / 1000).toFixed(1)} GW` : `${mw.toFixed(0)} MW`}
           </div>
         )
@@ -740,7 +740,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       {dispatchMW != null && Number.isFinite(dispatchMW) && (
         <div
           style={{
-            fontSize: 8.5,
+            fontSize: 9,
             fontWeight: 600,
             color: dispatchColor,
             marginTop: 2,
@@ -765,7 +765,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       {socPct != null && Number.isFinite(socPct) && (
         <div
           style={{
-            fontSize: 8,
+            fontSize: 9,
             fontWeight: 500,
             color: socTint,
             marginTop: 1,
@@ -906,22 +906,22 @@ export function AssetNode({ id, data, selected }: NodeProps) {
       </div>
 
       {/* Name — the thing the user designs; the type is the tooltip and the legend. */}
-      <div style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {d.name}
       </div>
       {figure && (
-        <div data-testid="asset-figure" style={{ fontSize: 8, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>{figure}</div>
+        <div data-testid="asset-figure" style={{ fontSize: 9, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>{figure}</div>
       )}
 
       {dispatchMW != null && Number.isFinite(dispatchMW) && (
-        <div style={{ fontSize: 8.5, fontWeight: 600, color: dispatchColor, marginTop: 2, textAlign: 'center', lineHeight: 1.15 }} title={dispatchTitle}>
+        <div style={{ fontSize: 9, fontWeight: 600, color: dispatchColor, marginTop: 2, textAlign: 'center', lineHeight: 1.15 }} title={dispatchTitle}>
           {arrow} {fmtMW(Math.abs(dispatchMW))}
         </div>
       )}
 
       {socPct != null && Number.isFinite(socPct) && (
         <div
-          style={{ fontSize: 8, fontWeight: 500, color: socTint, marginTop: 1, textAlign: 'center', lineHeight: 1.15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}
+          style={{ fontSize: 9, fontWeight: 500, color: socTint, marginTop: 1, textAlign: 'center', lineHeight: 1.15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}
           title={`State of charge at this snapshot: ${socPct.toFixed(1)} %`}
         >
           <span aria-hidden style={{ display: 'inline-block', width: 22, height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
@@ -3379,7 +3379,7 @@ export default function TopologyCanvas() {
                           display: 'flex', alignItems: 'center', gap: 2,
                           backgroundColor: color, color: '#fff',
                           padding: '1px 5px', borderRadius: 6,
-                          fontSize: 8, fontWeight: 700, fontFamily: 'var(--font-family-mono)',
+                          fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)',
                           border: '1px solid #fff',
                           flexShrink: 0,
                         }}>
